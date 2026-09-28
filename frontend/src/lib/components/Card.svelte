@@ -1,10 +1,11 @@
 <script lang="ts">
     import type { Task } from '$lib/types';
     import { AGENT_URL_PREFIX } from '$lib/types';
+    import { subtaskOutlineGroups, type SubtaskGroup, type SubtaskRow } from '$lib/utils/subtask-outline';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { MultiSelect } from '$lib/composables/use-multi-select.svelte';
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
-    import { resolveWorker, getModelName, getProviderDisplayName, displayModelName } from '$lib/utils/providers';
+    import { resolveWorker, getModelName, getProviderDisplayName, displayModelName, effectiveModel } from '$lib/utils/providers';
     import { streamingTaskStore } from '$lib/stores/streaming-tasks.svelte';
     import { diffStatsStore } from '$lib/stores/diff-stats.svelte';
     import Card from './Card.svelte';
@@ -26,7 +27,10 @@
         uiInjector.refreshSlot(INJECTION_POINTS.TASK_CARD, { component: 'Card', taskId: task.id, projectId });
     });
 
-    let { task, columnId, projectId, childrenMap, expandedTasks, onToggleExpanded, onCreateChildTask, columnColor, inline = true, onSelect, parentSelected = false, showSubtaskBorder = false, onRefreshBoard, multiSelect }: { task: Task; columnId: string; projectId?: string; childrenMap?: Map<string, Task[]>; expandedTasks?: Set<string>; onToggleExpanded?: (taskId: string) => void; onCreateChildTask?: (parentId: string) => void; columnColor?: string; inline?: boolean; onSelect?: (task: Task) => void; parentSelected?: boolean; showSubtaskBorder?: boolean; onRefreshBoard?: () => void; multiSelect?: MultiSelect | null } = $props();
+    let { task, columnId, projectId, childrenMap, expandedTasks, onToggleExpanded, onCreateChildTask, columnColor, inline = true, onSelect, parentSelected = false, showSubtaskBorder = false, onRefreshBoard, multiSelect, outline, onRollupHover }: { task: Task; columnId: string; projectId?: string; childrenMap?: Map<string, Task[]>; expandedTasks?: Set<string>; onToggleExpanded?: (taskId: string) => void; onCreateChildTask?: (parentId: string) => void; columnColor?: string; inline?: boolean; onSelect?: (task: Task) => void; parentSelected?: boolean; showSubtaskBorder?: boolean; onRefreshBoard?: () => void; multiSelect?: MultiSelect | null; /** Set when this card is a row of another card's outline; a row lists no outline of its own. */
+    outline?: { progress: { done: number; total: number }; parentModel: { url: string; model: string } };
+    /** Reports which row's roll-up control is hovered, or null. */
+    onRollupHover?: (taskId: string | null) => void } = $props();
 
     // Track if this task has queued offline actions (for diagonal fade effect)
     let taskHasQueuedActions = $state(false);
@@ -78,6 +82,62 @@
     let children = $derived(childrenMap?.get(task.id) ?? []);
     let hasChildren = $derived(children.length > 0);
 
+    let isOutlineRow = $derived(!!outline);
+
+    let rollupHovered = $state('');
+
+    /** The groups this card lists as rows, with the band colour and each row's parent model. */
+    let outlineGroups = $derived.by(() => {
+        // A row's descendants are already in the list its card drew.
+        if (outline) return [];
+        const groups: SubtaskGroup[] = subtaskOutlineGroups(
+            task.id, childrenMap ?? new Map(), expandedTasks ?? new Set(), appStore.config?.sort_oldest_first === true);
+        const cfg = appStore.config;
+        // A row's parent is its last owner, so every row has to be in reach to resolve that model.
+        const byId = new Map<string, Task>([[task.id, task]]);
+        for (const g of groups) {
+            byId.set(g.root.id, g.root);
+            for (const r of g.rows) byId.set(r.task.id, r.task);
+        }
+        return groups.map(g => ({
+            root: g.root,
+            color: statusColorOf(g.root.status),
+            rows: g.rows.map(r => ({
+                ...r,
+                parentModel: effectiveModel(byId.get(r.owners[r.owners.length - 1] ?? task.id), cfg),
+            })),
+        }));
+    });
+
+    /** The rows one hovered roll-up control waits for. */
+    let ownedByHover = $derived.by(() => {
+        const owned = new Set<string>();
+        if (rollupHovered) {
+            for (const g of outlineGroups) {
+                for (const r of g.rows) if (r.owners.includes(rollupHovered)) owned.add(r.task.id);
+            }
+        }
+        return owned;
+    });
+
+    /** Circumference of the roll-up ring, a `<circle r="6">`. */
+    const ROLLUP_C = 2 * Math.PI * 6;
+
+    /** How many rows this row waits for, and how far they have got. */
+    let rollup = $derived.by(() => {
+        const { done, total } = outline?.progress ?? { done: 0, total: 0 };
+        return {
+            total,
+            offset: ROLLUP_C * (1 - (total > 0 ? done / total : 0)),
+            complete: total > 0 && done === total,
+            label: `${t(expanded ? 'board.card.rollupHide' : 'board.card.rollupShow', { count: total })} · ${t('board.card.rollupDone', { done, count: total })}`,
+        };
+    });
+
+    function reportRollup(hovered: boolean) {
+        onRollupHover?.(hovered ? task.id : null);
+    }
+
     /** Collect all descendant task IDs recursively from childrenMap. */
     function collectDescendantIds(taskId: string): string[] {
         const ids: string[] = [];
@@ -128,14 +188,17 @@
     // Whether this is a completed subtask (hide edit/move buttons)
     let isDoneSubtask = $derived(inline && task.parent_task_id && task.status === 'done');
 
+    /** The column colour for a status. */
+    function statusColorOf(status: string): string {
+        return status === 'backlog' ? 'var(--color-column-backlog)'
+            : status === 'in_progress' ? 'var(--color-column-in-progress)'
+            : status === 'review' ? 'var(--color-column-review)'
+            : status === 'done' ? 'var(--color-column-done)'
+            : 'var(--color-text-tertiary)';
+    }
+
     // Status color for subtask indicator
-    let statusColor = $derived(
-        task.status === 'backlog' ? 'var(--color-column-backlog)' :
-        task.status === 'in_progress' ? 'var(--color-column-in-progress)' :
-        task.status === 'review' ? 'var(--color-column-review)' :
-        task.status === 'done' ? 'var(--color-column-done)' :
-        'var(--color-text-tertiary)'
-    );
+    let statusColor = $derived(statusColorOf(task.status));
 
     // Expand/collapse state (managed by Board for stability)
     let expanded = $derived(expandedTasks?.has(task.id) ?? false);
@@ -502,20 +565,38 @@
         return MODEL_COLORS[Math.abs(hash) % MODEL_COLORS.length];
     }
     let modelBadge = $derived.by(() => {
-        const cfg = appStore.config;
+        const cfg = appStore.config ?? null;
         const providers = cfg?.providers || [];
-        if (providers.length === 0) return { text: null, provider: null, model: null, color: '' };
+        const noBadge = { text: null, provider: null, model: null, color: '', isAgent: false, forked: false };
+        if (providers.length === 0) return noBadge;
+        // A row's badge shows only where it runs elsewhere than its parent, and names both provider and model.
+        // The fork mark means the provider differs.
+        if (outline) {
+            const mine = effectiveModel(task, cfg);
+            if (mine.url === outline.parentModel.url && mine.model === outline.parentModel.model) return noBadge;
+            const isAgent = mine.url.startsWith(AGENT_URL_PREFIX);
+            const providerName = getProviderDisplayName({ url: mine.url }, providers);
+            const displayModel = displayModelName(mine.model);
+            return {
+                text: isAgent || !displayModel ? providerName : t('board.card.modelWithProvider', { provider: providerName, model: displayModel }),
+                provider: isAgent ? null : providerName,
+                model: isAgent ? null : displayModel,
+                color: isAgent ? '#A371F7' : getModelColor(mine.model),
+                isAgent,
+                forked: mine.url !== outline.parentModel.url,
+            };
+        }
         // Check if task uses an agent (e.g. Pi Coding Agent)
         if (task.llama_server_url?.startsWith(AGENT_URL_PREFIX)) {
             // Look up the agent provider's display name from the config
             const agentProvider = providers.find(p => p.url === task.llama_server_url);
             const agentText = agentProvider ? getProviderDisplayName(agentProvider, providers) : t('board.card.codingAgent');
-            return { text: agentText, provider: null, model: null, color: '#A371F7', isAgent: true };
+            return { text: agentText, provider: null, model: null, color: '#A371F7', isAgent: true, forked: false };
         }
         // Use task model if set, otherwise fall back to the configured Worker model
         const worker = resolveWorker(cfg);
         const activeModel = task.model_name || (worker.provider && worker.modelName ? worker.modelName : (providers[0]?.models?.length ?? 0) > 0 ? getModelName(providers[0].models[0]) : null);
-        if (!activeModel) return { text: null, provider: null, model: null, color: '' };
+        if (!activeModel) return noBadge;
         // Find matching provider by URL
         const provider = providers.find(p => p.url === task.llama_server_url);
         // Auto: show provider name only when 2+ providers
@@ -523,7 +604,7 @@
         const provName = showProvider && provider ? getProviderDisplayName(provider, providers) : null;
         const displayModel = displayModelName(activeModel);
         const text = provName ? t('board.card.modelWithProvider', { provider: provName, model: displayModel }) : displayModel;
-        return { text, provider: provName, model: displayModel, color: getModelColor(activeModel), isAgent: false };
+        return { text, provider: provName, model: displayModel, color: getModelColor(activeModel), isAgent: false, forked: false };
     });
 
     let diffStats = $derived(diffStatsStore.get(task.id));
@@ -581,13 +662,6 @@
         if (!s) return '';
         return s.length > max ? s.slice(0, max) + '...' : s;
     }
-
-    const statusColors: Record<string, string> = {
-        backlog: 'var(--color-column-backlog)',
-        in_progress: 'var(--color-column-in-progress)',
-        review: 'var(--color-column-review)',
-        done: 'var(--color-column-done)',
-    };
 
     function getNextStatus(): string {
         const currentIdx = statuses.indexOf(task.status as typeof statuses[number]);
@@ -748,8 +822,10 @@
     class:multi-selected={multiSelect?.isSelected(task.id) ?? false}
     class:has-children={hasChildren}
     class:is-expanded={expanded}
-    class:is-subtask={inline && !!task.parent_task_id}
-    class:is-sidebar-subtask={showSubtaskBorder && !!task.parent_task_id}
+    class:is-subtask={inline && !!task.parent_task_id && !isOutlineRow}
+    class:is-sidebar-subtask={showSubtaskBorder && !!task.parent_task_id && !isOutlineRow}
+    class:is-outline-row={isOutlineRow}
+    class:is-done-row={isOutlineRow && task.status === 'done'}
     class:queued={taskHasQueuedActions}
     class:queued-delete={taskIsQueuedDelete}
     data-task-id={task.id}
@@ -766,15 +842,89 @@
     aria-label={`Open task: ${task.title || '(untitled)'}, Status: ${statusWord(task.status)}`}
     aria-keyshortcuts="Alt+ArrowLeft, Alt+ArrowRight"
     aria-current={isSelected ? 'page' : undefined}
-    style={`--actions: ${actionCount}; --idle: ${thirdAction === 'idle' ? 1 : 0}; --column-color: ${columnColor || ""}; --status-color: ${statusColor}${parentSelected && inline && task.parent_task_id ? `; border-left: 3px solid ${statusColor}` : ""}`}
+    style={`--actions: ${actionCount}; --idle: ${thirdAction === 'idle' ? 1 : 0}; --column-color: ${columnColor || ""}; --status-color: ${statusColor}${parentSelected && inline && task.parent_task_id && !isOutlineRow ? `; border-left: 3px solid ${statusColor}` : ""}`}
 >
+    <!-- Beside the title on a row, below it on a card. -->
+    {#snippet badges()}
+        {#if statusBadge}
+            <div class="badge" style="background: {statusBadge.color}11; color: {statusBadge.color}">
+                {statusBadge.text}
+            </div>
+        {/if}
+        {#if memAlert}
+            <!-- The card is a link, so this badge only tells; dismissing happens in the task view. -->
+            <div class="badge oom-badge" title={memoryAlertSentences(memAlert.alert).join(' · ')}>
+                {t('board.badge.outOfMemory')}
+            </div>
+        {/if}
+        {#if modelBadge.text && !hideModelBadge}
+            {#if modelBadge.isAgent}
+                <div class="badge model-badge agent-badge" style="background: {modelBadge.color}11; color: {modelBadge.color}">
+                    {#if modelBadge.forked}
+                        <span class="badge-fork" role="img" aria-label={t('board.card.forkedFromParent')} title={t('board.card.forkedFromParent')}>
+                            <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="10" cy="10" r="2.5"/><line x1="7.8" y1="7.8" x2="8.2" y2="8.2"/><line x1="6" y1="3.5" x2="6" y2="2"/><line x1="10" y1="12.5" x2="10" y2="14"/></svg>
+                        </span>
+                    {/if}
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" style="margin-right: 3px">
+                        <rect x="3" y="5" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+                        <circle cx="6" cy="9" r="1" fill="currentColor"/>
+                        <circle cx="10" cy="9" r="1" fill="currentColor"/>
+                    </svg>
+                    {modelBadge.text}
+                </div>
+            {:else}
+                <div class="badge model-badge" style="background: {modelBadge.color}11; color: {modelBadge.color}">
+                    {#if modelBadge.forked}
+                        <span class="badge-fork" role="img" aria-label={t('board.card.forkedFromParent')} title={t('board.card.forkedFromParent')}>
+                            <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="10" cy="10" r="2.5"/><line x1="7.8" y1="7.8" x2="8.2" y2="8.2"/><line x1="6" y1="3.5" x2="6" y2="2"/><line x1="10" y1="12.5" x2="10" y2="14"/></svg>
+                        </span>
+                    {/if}
+                    {#if modelBadge.provider}<span class="badge-provider">{modelBadge.provider}</span><span class="badge-sep"> · </span>{/if}<span class="badge-model">{modelBadge.model}</span>
+                </div>
+            {/if}
+        {/if}
+    {/snippet}
     <div class="card-title">
+            {#if isOutlineRow}
+                <!-- The band carries the group's colour, so the row's own status is a dot. -->
+                <span class="row-dot" aria-hidden="true"></span>
+                <span class="rollup-slot">
+                    {#if hasChildren}
+                        <button
+                            type="button"
+                            class="subtask-rollup"
+                            class:is-complete={rollup.complete}
+                            onclick={toggleExpanded}
+                            onpointerenter={() => reportRollup(true)}
+                            onpointerleave={() => reportRollup(false)}
+                            onfocus={() => reportRollup(true)}
+                            onblur={() => reportRollup(false)}
+                            aria-expanded={expanded}
+                            aria-label={rollup.label}
+                            title={rollup.label}
+                        >
+                            <svg class="rollup-ring" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+                                <circle class="rollup-track" cx="8" cy="8" r="6" />
+                                {#if rollup.complete}
+                                    <circle class="rollup-disc" cx="8" cy="8" r="7" />
+                                {:else}
+                                    <circle class="rollup-arc" cx="8" cy="8" r="6" style="stroke-dasharray: {ROLLUP_C}px; stroke-dashoffset: {rollup.offset}px" />
+                                {/if}
+                            </svg>
+                            <span class="rollup-count">{rollup.total}</span>
+                        </button>
+                    {/if}
+                </span>
+            {/if}
             {#if task.title_generating}
                 <span class="title-spinner" aria-label="Generating title">
                     <svg viewBox="0 0 16 16" width="12" height="12"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="30 14" stroke-linecap="round"/></svg>
                 </span>
             {/if}
             <span class="card-title-text">{truncate(task.title, 80)}</span>
+            {#if isOutlineRow && (statusBadge || memAlert || (modelBadge.text && !hideModelBadge))}
+                <div class="badges-row is-inline">{@render badges()}</div>
+            {/if}
             <div class="card-actions">
                 {#if isMobileSubtask}
                     <!-- Overflow menu for mobile subtasks -->
@@ -857,7 +1007,7 @@
                             onclick={cycleStatus}
                             aria-label={nextStatus === 'done' ? (hasChanges ? 'Commit and move to done' : `Move to ${statusWord(nextStatus)}`) : `Move to ${statusWord(nextStatus)}`}
                             title={nextStatus === 'done' ? (hasChanges ? 'Commit and move to done' : `Move to ${statusWord(nextStatus)}`) : `Move to ${statusWord(nextStatus)}`}
-                            style="color: {nextStatus === 'done' && hasChanges ? '#EAB308' : statusColors[nextStatus]}"
+                            style="color: {nextStatus === 'done' && hasChanges ? '#EAB308' : statusColorOf(nextStatus)}"
                         >
                             {#if nextStatus === 'backlog'}
                                 <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.5"/></svg>
@@ -889,36 +1039,8 @@
             draggable="false"
         ></a>
     {/if}
-    {#if statusBadge || memAlert || modelBadge.text || subtaskProgress}
-        <div class="badges-row">
-            {#if statusBadge}
-                <div class="badge" style="background: {statusBadge.color}11; color: {statusBadge.color}">
-                    {statusBadge.text}
-                </div>
-            {/if}
-            {#if memAlert}
-                <!-- The card is a link, so this badge tells only: dismissing happens in the task view. -->
-                <div class="badge oom-badge" title={memoryAlertSentences(memAlert.alert).join(' · ')}>
-                    {t('board.badge.outOfMemory')}
-                </div>
-            {/if}
-            {#if modelBadge.text && !hideModelBadge}
-                {#if modelBadge.isAgent}
-                    <div class="badge model-badge agent-badge" style="background: {modelBadge.color}11; color: {modelBadge.color}">
-                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" style="margin-right: 3px">
-                            <rect x="3" y="5" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
-                            <circle cx="6" cy="9" r="1" fill="currentColor"/>
-                            <circle cx="10" cy="9" r="1" fill="currentColor"/>
-                        </svg>
-                        {modelBadge.text}
-                    </div>
-                {:else}
-                    <div class="badge model-badge" style="background: {modelBadge.color}11; color: {modelBadge.color}">
-                        {#if modelBadge.provider}<span class="badge-provider">{modelBadge.provider}</span><span class="badge-sep"> · </span>{/if}<span class="badge-model">{modelBadge.model}</span>
-                    </div>
-                {/if}
-            {/if}
-        </div>
+    {#if !isOutlineRow && (statusBadge || memAlert || modelBadge.text || subtaskProgress)}
+        <div class="badges-row">{@render badges()}</div>
     {/if}
     {#if diffStats}
         <div class="diff-stats-row">
@@ -930,7 +1052,7 @@
             </span>
         </div>
     {/if}
-    {#if subtaskProgress}
+    {#if subtaskProgress && !isOutlineRow}
         <button
             type="button"
             class="subtask-progress-bar"
@@ -944,11 +1066,15 @@
             <svg class="subtask-chevron" width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
     {/if}
-    {#if expanded && hasChildren}
+    {#if expanded && hasChildren && !isOutlineRow}
         <div class="subtask-list" transition:slide={{ duration: 200 }}>
-            {#each children as child}
-                <div class="subtask-wrapper" transition:fade={{ duration: 200 }}>
-                    <Card task={child} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} columnColor={columnColor} inline={true} parentSelected={showSelected} {showSubtaskBorder} {onSelect} {multiSelect} {onRefreshBoard} />
+            {#each outlineGroups as group (group.root.id)}
+                <div class="subtask-group" style={`--group-color: ${group.color}`}>
+                    {#each group.rows as row (row.task.id)}
+                        <div class="subtask-wrapper" class:is-waited={ownedByHover.has(row.task.id)} transition:fade={{ duration: 200 }}>
+                            <Card task={row.task} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} columnColor={columnColor} inline={true} parentSelected={showSelected} {showSubtaskBorder} {onSelect} {multiSelect} {onRefreshBoard} outline={{ progress: row.progress, parentModel: row.parentModel }} onRollupHover={(taskId) => { rollupHovered = taskId ?? ''; }} />
+                        </div>
+                    {/each}
                 </div>
             {/each}
         </div>
@@ -1012,7 +1138,7 @@
         pointer-events: none;
         z-index: 1;
     }
-    .card.has-children:not(.is-subtask) {
+    .card.has-children:not(.is-subtask):not(.is-outline-row) {
         border-left: 3px solid var(--column-color, var(--color-border));
     }
     .card.is-subtask {
@@ -1042,7 +1168,7 @@
     .card:hover {
         border-color: var(--color-border-bright);
     }
-    .card.has-children:not(.is-subtask):hover {
+    .card.has-children:not(.is-subtask):not(.is-outline-row):hover {
         border-left-color: var(--column-color, var(--color-border));
     }
     .card.is-subtask:hover {
@@ -1055,7 +1181,7 @@
     .card.selected.is-subtask {
         border-left-color: var(--status-color, var(--color-border));
     }
-    .card.selected.has-children:not(.is-subtask) {
+    .card.selected.has-children:not(.is-subtask):not(.is-outline-row) {
         border-left-color: var(--column-color, var(--color-border));
     }
     /* Multi-select visual state */
@@ -1066,7 +1192,7 @@
     .card.multi-selected.is-subtask {
         border-left-color: var(--status-color, var(--color-border));
     }
-    .card.multi-selected.has-children:not(.is-subtask) {
+    .card.multi-selected.has-children:not(.is-subtask):not(.is-outline-row) {
         border-left-color: var(--column-color, var(--color-border));
     }
     .card:active {
@@ -1355,6 +1481,135 @@
     }
     .subtask-list :global(.card) {
         background: var(--color-surface-1);
+    }
+
+    /* ── The subtask outline: flat rows in run order, one band per group. `docs/subtask-outline.md`. */
+    .subtask-group {
+        display: flex;
+        flex-direction: column;
+        border-left: 2px solid var(--group-color, var(--color-border));
+        background: color-mix(in srgb, var(--group-color, transparent) 7%, transparent);
+        border-radius: 2px;
+    }
+    /* The rows a hovered roll-up waits for are scattered through the list, so a tint shows them. */
+    .subtask-wrapper.is-waited :global(.card) {
+        background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+    }
+    .card.is-outline-row {
+        background: transparent;
+        border: none;
+        border-radius: 2px;
+        padding: 0 6px;
+        min-height: 30px;
+    }
+    .card.is-outline-row .card-title {
+        margin-bottom: 0;
+        min-height: 30px;
+    }
+    .card.is-outline-row:hover {
+        background: var(--color-surface-2);
+    }
+    .card.selected.is-outline-row,
+    .card.multi-selected.is-outline-row {
+        background: var(--color-surface-3);
+    }
+    .card.is-done-row > .card-title > .card-title-text {
+        text-decoration: line-through;
+        color: var(--color-text-tertiary);
+    }
+    .row-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        flex-shrink: 0;
+        margin-right: 6px;
+        background: var(--status-color, var(--color-text-tertiary));
+    }
+    .rollup-slot {
+        width: 18px;
+        flex-shrink: 0;
+        margin-right: 6px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .subtask-rollup {
+        position: relative;
+        /* Above the card's link overlay — a control under it would be unclickable. */
+        z-index: 2;
+        width: 18px;
+        height: 18px;
+        padding: 0;
+        border: none;
+        background: transparent;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .rollup-ring {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+    }
+    .rollup-track {
+        fill: none;
+        stroke: var(--color-border);
+        stroke-width: 2;
+    }
+    .rollup-arc {
+        fill: none;
+        stroke: var(--color-status-green);
+        stroke-width: 2;
+        stroke-linecap: round;
+        transform: rotate(-90deg);
+        transform-origin: 8px 8px;
+        transition: stroke-dashoffset 0.3s ease;
+    }
+    .rollup-disc {
+        fill: var(--color-status-green);
+    }
+    .rollup-count {
+        position: relative;
+        font-size: 9px;
+        font-weight: 700;
+        line-height: 1;
+        font-family: inherit;
+        font-variant-numeric: tabular-nums;
+        color: var(--color-text-primary);
+        pointer-events: none;
+    }
+    .subtask-rollup.is-complete .rollup-count {
+        color: var(--color-text-inverse);
+    }
+    /* Badges ride beside the title, clear of the action icons. */
+    .badges-row.is-inline {
+        flex-shrink: 0;
+        margin: 0;
+        padding-right: var(--actions-reserve);
+        font-weight: 400;
+    }
+    .badge-fork {
+        display: inline-flex;
+        align-items: center;
+        margin-right: 3px;
+    }
+    @media (hover: none) {
+        .card.is-outline-row {
+            min-height: 44px;
+        }
+        .subtask-rollup {
+            width: 28px;
+            height: 28px;
+        }
+        .rollup-slot {
+            width: 28px;
+        }
+        .rollup-ring {
+            width: 20px;
+            height: 20px;
+        }
     }
 
 

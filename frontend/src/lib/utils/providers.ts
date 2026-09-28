@@ -92,6 +92,19 @@ export function resolveWorker(cfg: Config | null): ResolvedPair {
     return resolvePair(cfg, cfg.worker_provider, cfg.worker_model);
 }
 
+/**
+ * The provider URL and model one task actually runs on: its own when set, otherwise the worker default.
+ * A subtask inherits from the worker configuration and never from the task above it, so any comparison
+ * between a subtask and its parent has to resolve both sides rather than diff two fields.
+ */
+export function effectiveModel(
+    task: { llama_server_url?: string; model_name?: string } | undefined,
+    cfg: Config | null,
+): { url: string; model: string } {
+    const worker = resolveWorker(cfg);
+    return { url: task?.llama_server_url || worker.url, model: task?.model_name || worker.modelName };
+}
+
 /** The subset of provider fields needed to derive a display name. */
 export interface DisplayableProvider {
     name?: string;

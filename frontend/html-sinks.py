@@ -138,8 +138,8 @@ STYLE_SINKS: dict[tuple[str, str], str] = {
     ("src/lib/components/Card.svelte", "statusBadge.color"):
         "contains:--color-status — statusBadge returns tokens or literals from this file",
     ("src/lib/components/Card.svelte",
-     "nextStatus === 'done' && hasChanges ? '#EAB308' : statusColors[nextStatus]"):
-        "contains:statusColors — a literal or a lookup in this file's fixed map",
+     "nextStatus === 'done' && hasChanges ? '#EAB308' : statusColorOf(nextStatus)"):
+        "contains:statusColorOf — a literal or a lookup in this file's fixed table",
     ("src/lib/components/CardDetail/BoardOverview.svelte", "getColumnColor(section.id)"):
         "contains:var(-- — the column colors are tokens declared in this file",
     ("src/lib/components/CardDetail/TaskHeader.svelte", "badge.color"):

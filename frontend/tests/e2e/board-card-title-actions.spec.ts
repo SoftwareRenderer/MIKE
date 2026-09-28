@@ -42,6 +42,30 @@ async function openOnBoard(page: Page, taskId: string) {
     return card;
 }
 
+/** A subtask with a title long enough to be at risk against the row's own action buttons. */
+async function longSubtask(page: Page, projectId: string, parentId: string, tag: string): Promise<string> {
+    const created = await csrfFetch(page, `/api/projects/${projectId}/tasks`, {
+        method: 'POST',
+        body: { prompt: `title overlap probe ${tag}`, parent_task_id: parentId },
+    });
+    expect(created.ok, `create subtask ${tag}: ${JSON.stringify(created.data)}`).toBe(true);
+    const id: string = created.data.id;
+    const updated = await csrfFetch(page, `/api/projects/${projectId}/tasks/${id}`, {
+        method: 'PUT',
+        body: { title: `${tag}: ${LONG_TITLE}`, execution_state: 'idle' },
+    });
+    expect(updated.ok, `set subtask title ${tag}: ${JSON.stringify(updated.data)}`).toBe(true);
+    return id;
+}
+
+async function moveToDone(page: Page, projectId: string, taskId: string) {
+    const moved = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}`, {
+        method: 'PUT',
+        body: { status: 'done' },
+    });
+    expect(moved.ok, `move to done: ${JSON.stringify(moved.data)}`).toBe(true);
+}
+
 function measureCard(page: Page, taskId: string, expectSelected: boolean) {
     return page.evaluate(({ id, selected }) => {
         const card = document.querySelector(`.column-context .card[data-task-id="${id}"]`);
@@ -101,17 +125,8 @@ test.describe('touch viewport (buttons always shown)', () => {
         // On touch a subtask draws one overflow button where the desktop card draws three.
         const projectId = ownProjectId();
         const parentId = await idleInProgressTask(page, 'parent');
-        const created = await csrfFetch(page, `/api/projects/${projectId}/tasks`, {
-            method: 'POST',
-            body: { prompt: 'title overlap probe child', parent_task_id: parentId },
-        });
-        expect(created.ok, `create subtask: ${JSON.stringify(created.data)}`).toBe(true);
-        const childId: string = created.data.id;
-        const updated = await csrfFetch(page, `/api/projects/${projectId}/tasks/${childId}`, {
-            method: 'PUT',
-            body: { title: `child: ${LONG_TITLE}`, execution_state: 'idle' },
-        });
-        expect(updated.ok, `set subtask title: ${JSON.stringify(updated.data)}`).toBe(true);
+        const childId = await longSubtask(page, projectId, parentId, 'child');
+        const grandId = await longSubtask(page, projectId, childId, 'grandchild');
 
         await openOnBoard(page, parentId);
         // The overview expands the open task's children itself, so this must not toggle blindly.
@@ -119,10 +134,21 @@ test.describe('touch viewport (buttons always shown)', () => {
         if ((await subtaskBar.getAttribute('aria-expanded')) !== 'true') {
             await subtaskBar.click();
         }
-        await expect(page.locator(`.column-context .card[data-task-id="${childId}"]`)).toBeVisible();
+        const rows = page.locator('.column-context .subtask-wrapper .card');
+        await expect(rows).toHaveCount(2);
 
-        const problems = await measureCard(page, childId, false);
-        expect(problems, 'subtask title and action buttons overlap').toEqual([]);
+        // Flat means the depth costs nothing: the grandchild's row starts where the child's does, and
+        // it is listed first because the child waits for it.
+        const ids = await rows.evaluateAll(els => els.map(el => el.getAttribute('data-task-id')));
+        expect(ids).toEqual([grandId, childId]);
+        const deep = page.locator(`.column-context .card[data-task-id="${grandId}"] .card-title-text`);
+        const shallow = page.locator(`.column-context .card[data-task-id="${childId}"] .card-title-text`);
+        expect(Math.abs((await deep.boundingBox())!.x - (await shallow.boundingBox())!.x)).toBeLessThan(1);
+
+        for (const id of ids) {
+            const problems = await measureCard(page, id, false);
+            expect(problems, `row ${id} title and action buttons overlap`).toEqual([]);
+        }
     });
 
     test('a card that is not the open one still answers a tap on its own buttons', async ({ page }) => {
@@ -192,5 +218,76 @@ test.describe('desktop viewport (buttons appear on hover)', () => {
 
         const problems = await measureCard(page, hoverId, false);
         expect(problems, 'title and action buttons overlap').toEqual([]);
+    });
+
+    test('the roll-up circle paints: a ring over what a row waits for, a disc once it can run', async ({ page }) => {
+        // The circle is drawn by CSS on an SVG: markup and geometry can both look right while nothing
+        // is painted, so assert the computed paint.
+        const GREEN = 'rgb(63, 185, 80)';
+        const projectId = ownProjectId();
+        const parentId = await idleInProgressTask(page, 'rollup');
+        const childId = await longSubtask(page, projectId, parentId, 'rollup-child');
+        const grandId = await longSubtask(page, projectId, childId, 'rollup-grandchild');
+        await openOnBoard(page, parentId);
+
+        const control = page.locator(`.column-context .card[data-task-id="${childId}"] .subtask-rollup`);
+        await expect(control).toHaveCount(1);
+        await expect(control).toHaveAttribute('aria-expanded', 'true');
+        await expect(control.locator('.rollup-count')).toHaveText('1');
+
+        // A row is one 30px line, and the band beside it carries the group's own status colour rather
+        // than the fallback — a `--group-color` that failed to resolve would still look like a band in
+        // markup, so compare it with the dot of the row that owns the group.
+        const row = page.locator(`.column-context .card[data-task-id="${childId}"]`);
+        expect(Math.round((await row.boundingBox())!.height)).toBe(30);
+        const group = page.locator(`.column-context .card[data-task-id="${parentId}"] .subtask-group`).first();
+        const band = await group.evaluate(el => getComputedStyle(el).borderLeftColor);
+        expect(await group.evaluate(el => getComputedStyle(el).borderLeftWidth)).toBe('2px');
+        expect(await group.locator('.subtask-wrapper').last().locator('.row-dot'))
+            .toHaveCSS('background-color', band);
+        expect(await group.evaluate(el => getComputedStyle(el).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
+
+        const arc = control.locator('.rollup-arc');
+        await expect(arc).toHaveCSS('stroke', GREEN);
+        await expect(arc).toHaveCSS('fill', 'none');
+        const [dasharray, dashoffset] = await arc.evaluate(el => [
+            getComputedStyle(el).strokeDasharray, getComputedStyle(el).strokeDashoffset,
+        ]);
+        expect(parseFloat(dasharray)).toBeGreaterThan(0);
+        expect(parseFloat(dashoffset)).toBeCloseTo(parseFloat(dasharray), 1); // nothing done yet
+        expect(await control.evaluate(el => getComputedStyle(el.querySelector('.rollup-track')!).stroke)).not.toBe('none');
+
+        await moveToDone(page, projectId, grandId);
+
+        await expect(control).toHaveClass(/is-complete/);
+        await expect(control.locator('.rollup-disc')).toHaveCSS('fill', GREEN);
+        const inverse = await page.evaluate(() => {
+            const probe = document.createElement('span');
+            probe.style.color = 'var(--color-text-inverse)';
+            document.body.appendChild(probe);
+            const resolved = getComputedStyle(probe).color;
+            probe.remove();
+            return resolved;
+        });
+        expect(inverse, '--color-text-inverse is not declared').not.toBe('');
+        await expect(control.locator('.rollup-count')).toHaveCSS('color', inverse);
+
+        // The span a row waits for is shown by tinting those rows, so the tint has to be paint too.
+        const at = await control.boundingBox();
+        expect(at).not.toBeNull();
+        await page.mouse.move(at!.x + at!.width / 2, at!.y + at!.height / 2);
+        const tint = await page.locator(`.column-context .card[data-task-id="${parentId}"] .card[data-task-id="${grandId}"]`)
+            .evaluate(el => getComputedStyle(el).backgroundColor);
+        expect(tint, 'the waited-for tint resolves to nothing').not.toBe('rgba(0, 0, 0, 0)');
+        expect(tint).not.toBe('transparent');
+
+        // And the control takes the click a card's own link overlay would otherwise take: it hides the
+        // rows it rolls up, then shows them again. (Scoped to the outline: a done descendant is drawn
+        // both as a row here and as a card of its own in the Done column.)
+        const deepRow = page.locator(`.column-context .card[data-task-id="${parentId}"] .card[data-task-id="${grandId}"]`);
+        await control.click();
+        await expect(deepRow).toHaveCount(0);
+        await control.click();
+        await expect(deepRow).toBeVisible();
     });
 });
