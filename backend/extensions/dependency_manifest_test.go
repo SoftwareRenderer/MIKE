@@ -42,7 +42,7 @@ func TestValidate_DependencyCache(t *testing.T) {
 		{"no container path", DependencyCache{ContainerPath: "  ", Env: "GOMODCACHE"}, "container_path is required"},
 		{"relative container path", DependencyCache{ContainerPath: "go/pkg/mod", Env: "GOMODCACHE"}, "not absolute"},
 		// "/" is refused by the charset rule (the pattern needs a segment after the slash); which
-		// of ValidateContainerPath's rules catches it does not matter, that it is refused does.
+		// of sandboxruntime.ValidateContainerPath's rules catches it does not matter, that it is refused does.
 		{"container root", DependencyCache{ContainerPath: "/", Env: "GOMODCACHE"}, "is invalid"},
 		{"dotdot", DependencyCache{ContainerPath: "/go/../etc", Env: "GOMODCACHE"}, "must not contain '..'"},
 		// A colon or comma would be read as part of the -v spec and silently change what is mounted.

@@ -79,7 +79,6 @@ func TestValidateProjectName(t *testing.T) {
 }
 
 func TestValidateImageRef(t *testing.T) {
-	r := NewRuntimeWithBoot(Boot{})
 	tests := []struct {
 		name    string
 		image   string
@@ -107,9 +106,9 @@ func TestValidateImageRef(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := r.ValidateImageRef(tt.image)
+			err := ValidateImageRef(tt.image)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("r.ValidateImageRef(%q) error = %v, wantErr %v", tt.image, err, tt.wantErr)
+				t.Errorf("ValidateImageRef(%q) error = %v, wantErr %v", tt.image, err, tt.wantErr)
 			}
 		})
 	}

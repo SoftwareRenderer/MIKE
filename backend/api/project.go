@@ -157,7 +157,7 @@ func (h *ProjectHandler) checkHostPath(path string) error {
 // target directory (<path>/<repo-name>) inside the existing parent dir
 // req.Path. Returns the target path, or an error describing what is wrong.
 func (h *ProjectHandler) prepareCloneTarget(req types.CreateProjectRequest) (string, error) {
-	if err := validateGitCloneURL(req.GitURL); err != nil {
+	if err := git.ValidateCloneURL(req.GitURL); err != nil {
 		return "", err
 	}
 	// Before any byte is fetched: a refused clone must leave no checkout behind.
@@ -788,13 +788,6 @@ func rootTaskIDs(tasks []types.Task) []string {
 		}
 	}
 	return roots
-}
-
-// validateGitCloneURL validates a clone source before it reaches `git clone`.
-// The rules live in git.ValidateCloneURL — the same answer project creation and
-// an extension install get — so this is the project-creation spelling of it.
-func validateGitCloneURL(gitURL string) error {
-	return git.ValidateCloneURL(gitURL)
 }
 
 // repoNameFromGitURL extracts the repository name from a git URL.

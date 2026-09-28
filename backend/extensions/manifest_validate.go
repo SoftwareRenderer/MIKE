@@ -14,6 +14,7 @@ import (
 
 	"mike/backend/fsutil"
 	"mike/backend/prompts"
+	"mike/pkg/sandboxruntime"
 )
 
 // Manifest validation: a malformed syntax profile or a duplicated file type is rejected at install
@@ -107,7 +108,7 @@ func (d *DependencyCache) Validate() error {
 	if strings.TrimSpace(d.ContainerPath) == "" {
 		return fmt.Errorf("container_path is required (where this server reads its dependencies from)")
 	}
-	if err := ValidateContainerPath(d.ContainerPath); err != nil {
+	if err := sandboxruntime.ValidateContainerPath(d.ContainerPath); err != nil {
 		return err
 	}
 	if !envName.MatchString(d.Env) {

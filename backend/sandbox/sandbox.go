@@ -361,7 +361,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 	if image == "" {
 		image = BaseImage
 	}
-	if err := sm.rt.ValidateImageRef(image); err != nil {
+	if err := sandboxruntime.ValidateImageRef(image); err != nil {
 		return nil, fmt.Errorf("invalid sandbox image: %w", err)
 	}
 	// Generated names are qualified already; this covers a value stored before that rule existed.
@@ -1251,7 +1251,7 @@ func (sm *SandboxManager) PullImageWithProgress(image string, onProgress func(li
 		image = BaseImage
 	}
 	// A short name cannot be pulled either: podman prompts for the registry and has no TTY.
-	if err := sm.rt.ValidateImageRef(image); err != nil {
+	if err := sandboxruntime.ValidateImageRef(image); err != nil {
 		return err
 	}
 	image = sm.rt.ResolveImageRef(image)
@@ -1378,7 +1378,7 @@ func (sm *SandboxManager) BuildImageWithOptions(projectName, dockerfilePath stri
 
 	// Validate the derived image name before passing to podman to prevent
 	// argument injection (e.g. if ProjectImagePrefix is ever emptied).
-	if err := sm.rt.ValidateImageRef(imageName); err != nil {
+	if err := sandboxruntime.ValidateImageRef(imageName); err != nil {
 		return fmt.Errorf("invalid project image name: %w", err)
 	}
 

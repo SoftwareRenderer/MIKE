@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -531,7 +532,7 @@ func ComparePromptSets(en, pack *TmplSet, f *Findings, maxList int) PromptStats 
 	// base.tmpl's mode sub-templates are the cross-file references in the set. If one goes
 	// missing, that mode renders without its instructions and nothing else complains.
 	for _, name := range []string{"plan-mode", "explore-mode"} {
-		if contains(en.Invoked["base.tmpl"], name) && !contains(pack.Invoked["base.tmpl"], name) {
+		if slices.Contains(en.Invoked["base.tmpl"], name) && !slices.Contains(pack.Invoked["base.tmpl"], name) {
 			f.Errf(`base.tmpl no longer invokes {{template %q .}}: %s instructions are prompt text the executor's behaviour depends on`, name, strings.ReplaceAll(name, "-", " "))
 		}
 	}
@@ -579,15 +580,6 @@ func CheckRegistry(path, extType, name, version, pack string, f *Findings) {
 		return
 	}
 	f.Errf("registry %s has no %s/%s entry — run python3 scripts/gen-registry.py (never hand-edit it)", filepath.Base(path), extType, name)
-}
-
-func contains(list []string, want string) bool {
-	for _, s := range list {
-		if s == want {
-			return true
-		}
-	}
-	return false
 }
 
 func toSet(names []string) map[string]bool {
