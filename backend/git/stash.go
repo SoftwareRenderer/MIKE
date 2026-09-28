@@ -8,7 +8,9 @@ import (
 // PushStash stashes the worktree changes under `message` and returns the hash of the entry it
 // created, found by diffing the stash list across the push: the stack is one per repository and
 // holds the user's own entries, so the entry on top is not necessarily ours.
-// The caller must hold the project stash mutex.
+// The caller holds the project stash mutex (LockProjectStash) — WithStash, a thread switch, whoever
+// runs the sequence — never these methods: the lock is not reentrant (PopStashByHash calls
+// DropStashByHash), and the unit of correctness is the list-then-write, not one git call.
 func (wm *WorktreeManager) PushStash(repoPath, message string) (string, error) {
 	before, err := wm.stashHashSet(repoPath)
 	if err != nil {
@@ -53,7 +55,7 @@ func (wm *WorktreeManager) PushStash(repoPath, message string) (string, error) {
 //
 // The restore keeps the pushed work's staged/unstaged split: a plain apply returns a modification
 // unstaged, and commit-and-done commits the index only.
-// The caller must hold the project stash mutex.
+// The caller holds the project stash mutex — see PushStash.
 func (wm *WorktreeManager) PopStashByHash(dir, hash string) (bool, error) {
 	if hash == "" {
 		return false, nil
@@ -146,7 +148,6 @@ func (wm *WorktreeManager) listStashEntries(repoPath string) ([]StashEntry, erro
 
 // dropMatchingStashes lists stashes in the project, filters by predicate, and drops by ref.
 // Drops in reverse order (highest index first) so refs don't shift mid-loop.
-// The caller must hold the project stash mutex.
 func (wm *WorktreeManager) dropMatchingStashes(projectID string, filter func(subject string) bool) error {
 	project, err := wm.store.GetProject(projectID)
 	if err != nil {
@@ -167,7 +168,7 @@ func (wm *WorktreeManager) dropMatchingStashes(projectID string, filter func(sub
 
 // DropStashByHash drops the stash entry with this commit hash. An entry not in the list is treated
 // as already gone and returns nil — never a fallback to stash@{0}, which when ours has vanished is
-// somebody else's state. The caller must hold the project stash mutex.
+// somebody else's state. The caller holds the project stash mutex — see PushStash.
 func (wm *WorktreeManager) DropStashByHash(repoPath, hash string) error {
 	if hash == "" {
 		return nil
@@ -188,7 +189,6 @@ func (wm *WorktreeManager) DropStashByHash(repoPath, hash string) error {
 // NewestStashHashForMessage returns the hash of the newest entry whose reflog subject carries
 // label, for restores that happen in code that never saw the push; labels embed the task ID. Weaker
 // than a hash — a caller still holding one should use PopStashByHash.
-// The caller must hold the project stash mutex.
 func (wm *WorktreeManager) NewestStashHashForMessage(dir, label string) (string, bool, error) {
 	if label == "" {
 		return "", false, nil

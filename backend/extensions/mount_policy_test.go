@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"mike/backend/types"
+	"mike/pkg/sandboxruntime"
 )
 
 // policyWith returns a policy allowing only the given roots.
@@ -22,8 +23,8 @@ func TestValidateContainerPath(t *testing.T) {
 		"/go/pkg/mod",
 	}
 	for _, p := range valid {
-		if err := ValidateContainerPath(p); err != nil {
-			t.Errorf("ValidateContainerPath(%q) = %v, want nil", p, err)
+		if err := sandboxruntime.ValidateContainerPath(p); err != nil {
+			t.Errorf("sandboxruntime.ValidateContainerPath(%q) = %v, want nil", p, err)
 		}
 	}
 
@@ -45,8 +46,8 @@ func TestValidateContainerPath(t *testing.T) {
 		"-v/etc:/host",                // leading dash = podman flag
 	}
 	for _, p := range invalid {
-		if err := ValidateContainerPath(p); err == nil {
-			t.Errorf("ValidateContainerPath(%q) = nil, want error", p)
+		if err := sandboxruntime.ValidateContainerPath(p); err == nil {
+			t.Errorf("sandboxruntime.ValidateContainerPath(%q) = nil, want error", p)
 		}
 	}
 }
@@ -56,9 +57,9 @@ func TestValidateContainerPath(t *testing.T) {
 // path — a user value can never change the mount mode.
 func TestValidateContainerPath_BlocksWithoutSpecChars(t *testing.T) {
 	for _, p := range []string{"/x:rw", "/x,rw", "/x:ro,", "/x:,ro"} {
-		err := ValidateContainerPath(p)
+		err := sandboxruntime.ValidateContainerPath(p)
 		if err == nil {
-			t.Fatalf("ValidateContainerPath(%q) = nil, want error", p)
+			t.Fatalf("sandboxruntime.ValidateContainerPath(%q) = nil, want error", p)
 		}
 		if !strings.Contains(err.Error(), p) {
 			t.Errorf("error %q does not name the offending value %q", err.Error(), p)

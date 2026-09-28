@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -85,7 +86,7 @@ func TestLoadTmplSetSeesCrossFileDefine(t *testing.T) {
 		if !set.Declared[mode] {
 			t.Fatalf("define %s not found; declared = %v", mode, set.Declared)
 		}
-		if !contains(set.Invoked["base.tmpl"], mode) {
+		if !slices.Contains(set.Invoked["base.tmpl"], mode) {
 			t.Fatalf("base.tmpl invoke of %s not recorded; invoked = %v", mode, set.Invoked["base.tmpl"])
 		}
 	}

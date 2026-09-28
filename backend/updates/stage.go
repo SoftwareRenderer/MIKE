@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"mike/backend/fsutil"
@@ -210,7 +211,7 @@ func templateSwap(release, installDir string) ([]swapFile, []string, error) {
 	var stale []string
 	if all, err := filepath.Glob(filepath.Join(installDir, "prompts", "*.tmpl")); err == nil {
 		for _, old := range all {
-			if !contains(shipped, filepath.Base(old)) {
+			if !slices.Contains(shipped, filepath.Base(old)) {
 				stale = append(stale, old)
 			}
 		}
@@ -456,13 +457,4 @@ func (c *ctxReader) Read(p []byte) (int, error) {
 		return 0, err
 	}
 	return c.r.Read(p)
-}
-
-func contains(list []string, want string) bool {
-	for _, v := range list {
-		if v == want {
-			return true
-		}
-	}
-	return false
 }

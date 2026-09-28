@@ -326,8 +326,6 @@ func (a *wasmAdapter) Init(ctx context.Context, config []byte) error {
 }
 
 // SubprocessConfig returns the agent process configuration from the adapter.
-// SubprocessConfig takes no parameters; the result is delivered via store_result.
-// ctx is used for cancellation during the store_result callback wait.
 func (a *wasmAdapter) SubprocessConfig(ctx context.Context) agent.SubprocessConfig {
 	data, err := a.callFnStrings(ctx, agent.WasmFnSubprocessConfig)
 	if err != nil || len(data) == 0 {
@@ -343,9 +341,6 @@ func (a *wasmAdapter) SubprocessConfig(ctx context.Context) agent.SubprocessConf
 }
 
 // EncodeCommand encodes a high-level command into protocol bytes.
-// cmd and data are passed as separate string parameters directly to the
-// WASM function (no JSON wrapper), matching the wazero string-passing pattern.
-// ctx is used for cancellation during the store_result callback wait.
 func (a *wasmAdapter) EncodeCommand(ctx context.Context, cmd string, data []byte) []byte {
 	result, err := a.callFnStrings(ctx, agent.WasmFnEncodeCommand, cmd, string(data))
 	if err != nil {
@@ -356,7 +351,6 @@ func (a *wasmAdapter) EncodeCommand(ctx context.Context, cmd string, data []byte
 }
 
 // ParseOutput parses raw agent stdout bytes into events.
-// ctx is used for cancellation during the store_result callback wait.
 func (a *wasmAdapter) ParseOutput(ctx context.Context, data []byte) []agent.Event {
 	result, err := a.callFnStrings(ctx, agent.WasmFnParseOutput, string(data))
 	if err != nil || len(result) == 0 {
@@ -372,9 +366,6 @@ func (a *wasmAdapter) ParseOutput(ctx context.Context, data []byte) []agent.Even
 }
 
 // HandleUIRequest generates a response for an agent UI request.
-// id and method are passed as separate string parameters directly to the
-// WASM function (no JSON wrapper), matching the wazero string-passing pattern.
-// ctx is used for cancellation during the store_result callback wait.
 func (a *wasmAdapter) HandleUIRequest(ctx context.Context, id, method string) []byte {
 	result, err := a.callFnStrings(ctx, agent.WasmFnHandleUIRequest, id, method)
 	if err != nil {

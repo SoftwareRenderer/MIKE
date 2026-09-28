@@ -2,6 +2,7 @@ package main
 
 import (
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -26,7 +27,7 @@ func TestRealRepoPromptsParse(t *testing.T) {
 		if !set.Declared[mode] {
 			t.Errorf(`prompts/%s.tmpl must declare %q; declared = %v`, mode, mode, set.Declared)
 		}
-		if !contains(set.Invoked["base.tmpl"], mode) {
+		if !slices.Contains(set.Invoked["base.tmpl"], mode) {
 			t.Errorf(`base.tmpl must invoke {{template %q}}; invoked = %v`, mode, set.Invoked["base.tmpl"])
 		}
 	}

@@ -79,21 +79,6 @@ func mountRoots(extensionsDir, workspaceDir string, projectPaths, extraRoots []s
 	return append(roots, extraRoots...)
 }
 
-// ValidateContainerPath checks a mount's in-container path: absolute, free of ".."
-// segments, and limited to the charset that cannot rewrite the podman mount spec — a
-// ":" or "," there turns "ro" into "rw". The rule is sandboxruntime's.
-func ValidateContainerPath(containerPath string) error {
-	return sandboxruntime.ValidateContainerPath(containerPath)
-}
-
-// resolvePath resolves a mount's host path with the shared fsutil rule, which —
-// unlike a bare ancestor walk — rejects a dangling symlink standing where the
-// path would be created. Binding that path would bind wherever the link points,
-// and the target does not exist yet, so it cannot be checked.
-func resolvePath(p string) (string, error) {
-	return fsutil.ResolveSymlinks(p)
-}
-
 // insideRoot reports whether the resolved path is one of the roots or below it.
 func (p *MountPolicy) insideRoot(resolved string) bool {
 	if p == nil {
@@ -114,6 +99,10 @@ func (p *MountPolicy) ForceReadOnly(resolved string) bool {
 
 // ValidateHostPath checks a mount's host path: absolute, no ".." segment, and
 // symlink-resolved INSIDE one of the policy's roots. Returns the resolved path.
+//
+// Resolution is fsutil.ResolveSymlinks rather than an ancestor walk: a symlink standing where
+// the mount source would be created has a target that does not exist, so it cannot be checked,
+// and binding that path binds wherever the link points.
 func (p *MountPolicy) ValidateHostPath(hostPath string) (string, error) {
 	if hostPath == "" {
 		return "", fmt.Errorf("mount host path is empty")
@@ -124,7 +113,7 @@ func (p *MountPolicy) ValidateHostPath(hostPath string) (string, error) {
 	if sandboxruntime.HasDotDotSegment(hostPath) {
 		return "", fmt.Errorf("mount host path %q must not contain '..'", hostPath)
 	}
-	resolved, err := resolvePath(hostPath)
+	resolved, err := fsutil.ResolveSymlinks(hostPath)
 	if err != nil {
 		return "", fmt.Errorf("mount host path %q cannot be resolved: %w", hostPath, err)
 	}
@@ -145,7 +134,7 @@ func (p *MountPolicy) withExtraRoots(roots ...string) *MountPolicy {
 
 // ValidateMount validates a single extension sandbox mount.
 func (p *MountPolicy) ValidateMount(m types.SandboxMount) error {
-	if err := ValidateContainerPath(m.ContainerPath); err != nil {
+	if err := sandboxruntime.ValidateContainerPath(m.ContainerPath); err != nil {
 		return err
 	}
 	if _, err := p.ValidateHostPath(m.HostPath); err != nil {
@@ -226,7 +215,7 @@ func ValidateDependencyGrant(hostPath string) (string, error) {
 	if sandboxruntime.HasDotDotSegment(trimmed) {
 		return "", fmt.Errorf("%q must not contain '..'", trimmed)
 	}
-	resolved, err := resolvePath(trimmed)
+	resolved, err := fsutil.ResolveSymlinks(trimmed)
 	if err != nil {
 		return "", err
 	}
@@ -263,7 +252,7 @@ func ValidateAgentMountGrant(mount types.SandboxMount) (types.SandboxMount, erro
 	if err := types.ValidateSandboxMount(candidate); err != nil {
 		return mount, err
 	}
-	resolved, err := resolvePath(expanded)
+	resolved, err := fsutil.ResolveSymlinks(expanded)
 	if err != nil {
 		return mount, err
 	}
@@ -284,7 +273,7 @@ func ValidateAgentMountGrant(mount types.SandboxMount) (types.SandboxMount, erro
 // CheckGrantedHostPath re-checks a stored approval, so one saved before today's checks existed is still
 // judged. Whether the folder exists is not asked, because the agent creates it.
 func CheckGrantedHostPath(hostPath string) error {
-	resolved, err := resolvePath(ExpandHostPath(hostPath))
+	resolved, err := fsutil.ResolveSymlinks(ExpandHostPath(hostPath))
 	if err != nil {
 		return err
 	}
