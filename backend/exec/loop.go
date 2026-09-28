@@ -1554,36 +1554,21 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 		case um := <-setup.userMsgChan:
 			if um.ContextChanged {
 				logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Infof("conversation context changed after response, re-syncing")
-				lc.detector.reset()
-				lc.detector.clearHints()
-				lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
+				te.foldQueuedUserMessage(setup, lc, um)
 				// A fresh LLM call follows - re-acquire the running-task slot.
-				if curURL, _ := lc.mc.get(); curURL != "" && !te.syncTaskSlot(setup, curURL) {
-					te.handleCancelledTask(setup.task.ID, setup.projectID)
+				if te.claimProviderSlot(setup, lc) {
 					return turnStop
 				}
 				return turnNextLLMCall
 			}
 			logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Infof("received message after response, continuing (setup.regenerate=%v)", um.Regenerate)
-			lc.detector.reset() // user input breaks any loop pattern
-			lc.detector.clearHints()
-			if um.Regenerate {
-				lc.messages = truncateForRegenerate(lc.messages)
-				lc.messages = append(lc.messages, userMessageToChatMessage(um))
-			} else {
-				// Re-sync with DB to pick up the user message (already created by HandleSend)
-				// and any deleted messages. Do NOT append — syncMessagesFromDB already includes it.
-				lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
-			}
+			te.foldQueuedUserMessage(setup, lc, um)
 			if um.ModelName != "" {
-				switched := te.applyModelSwitch(lc.mc, setup.task, setup.projectID, um.ServerURL, um.ModelName, true, false, lc.silence)
-				lc.client = switched.client
-				lc.providerName = switched.providerName
+				te.adoptMessageModel(setup, lc, um)
 			}
 			// The task went idle after the response - re-acquire the
 			// running-task slot (a provider switch rides along via lc.mc).
-			if curURL, _ := lc.mc.get(); curURL != "" && !te.syncTaskSlot(setup, curURL) {
-				te.handleCancelledTask(setup.task.ID, setup.projectID)
+			if te.claimProviderSlot(setup, lc) {
 				return turnStop
 			}
 			setup.task.ExecutionState = types.ExecStateRunning
@@ -1653,6 +1638,48 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 	return turnWaitIdle
 }
 
+// foldQueuedUserMessage rebuilds the loop context around a message taken off setup.userMsgChan. The
+// detector's state goes first: new input breaks any pattern it was counting, and a rebuilt
+// conversation leaves a stale text window behind. A regenerate truncates the assistant turns it
+// replaces and appends its own message; anything else, a bare context change included, is rebuilt
+// from the DB.
+func (te *TaskExecutor) foldQueuedUserMessage(setup *taskExecSetup, lc *loopContext, um stream.UserMessage) {
+	lc.detector.reset()
+	lc.detector.clearHints()
+	if um.Regenerate {
+		lc.messages = truncateForRegenerate(lc.messages)
+		lc.messages = append(lc.messages, userMessageToChatMessage(um))
+		return
+	}
+	// Re-sync with DB to pick up the user message (already created by HandleSend)
+	// and any deleted messages. Do NOT append — syncMessagesFromDB already includes it.
+	lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
+}
+
+// adoptMessageModel points the run at the provider and model a queued message names.
+func (te *TaskExecutor) adoptMessageModel(setup *taskExecSetup, lc *loopContext, um stream.UserMessage) {
+	switched := te.applyModelSwitch(lc.mc, setup.task, setup.projectID, um.ServerURL, um.ModelName, true, false, lc.silence)
+	lc.client = switched.client
+	lc.providerName = switched.providerName
+}
+
+// claimProviderSlot makes the run hold the running-task slot for the provider lc names, and reports
+// whether the caller must return: the wait was cancelled and handleCancelledTask has already reported
+// the stop. A run already holding that provider's slot gets a no-op out of syncTaskSlot, so a caller
+// claims the same way whether or not the message switched provider. An empty provider URL is a run
+// that holds no slot and needs none.
+func (te *TaskExecutor) claimProviderSlot(setup *taskExecSetup, lc *loopContext) bool {
+	curURL, _ := lc.mc.get()
+	if curURL == "" {
+		return false
+	}
+	if te.syncTaskSlot(setup, curURL) {
+		return false
+	}
+	te.handleCancelledTask(setup.task.ID, setup.projectID)
+	return true
+}
+
 // intakeUserMessage folds in a user message that arrived while the previous turn's tools were running.
 // The non-blocking select is what makes this cheap to call at the top of every iteration. It reports
 // whether executeTask must stop: a provider switch can queue for a running-task slot and lose.
@@ -1662,38 +1689,21 @@ func (te *TaskExecutor) intakeUserMessage(setup *taskExecSetup, lc *loopContext)
 	case um := <-setup.userMsgChan:
 		if um.ContextChanged {
 			logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Infof("conversation context changed, resetting loop detector")
-			lc.detector.reset()
-			lc.detector.clearHints()
-			lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
-		} else {
-			logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Infof("received message before LLM call (setup.regenerate=%v)", um.Regenerate)
-			lc.detector.reset() // user input breaks any loop pattern
-			lc.detector.clearHints()
-			if um.Regenerate {
-				lc.messages = truncateForRegenerate(lc.messages)
-				lc.messages = append(lc.messages, userMessageToChatMessage(um))
-			} else {
-				// Re-sync with DB to pick up the user message (already created by HandleSend)
-				// and any deleted messages. Do NOT append — syncMessagesFromDB already includes it.
-				lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
-			}
-			if um.ModelName != "" && !te.configStore.IsAgentProvider(um.ServerURL) {
-				prevURL, _ := lc.mc.get()
-				switched := te.applyModelSwitch(lc.mc, setup.task, setup.projectID, um.ServerURL, um.ModelName, true, false, lc.silence)
-				lc.client = switched.client
-				lc.providerName = switched.providerName
-				if um.ServerURL != "" && strings.TrimRight(um.ServerURL, "/") != strings.TrimRight(prevURL, "/") {
-					if !te.syncTaskSlot(setup, um.ServerURL) {
-						te.handleCancelledTask(setup.task.ID, setup.projectID)
-						return true // the slot re-acquire queued and lost; executeTask must return
-					}
-				}
-			}
+			te.foldQueuedUserMessage(setup, lc, um)
+			// The run never released its slot, so there is nothing here to re-claim.
+			return false
 		}
+		logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Infof("received message before LLM call (setup.regenerate=%v)", um.Regenerate)
+		te.foldQueuedUserMessage(setup, lc, um)
+		// A message aimed at an agent provider belongs to the agent executor, which is where
+		// ForwardUserMessage sends it rather than to this channel.
+		if um.ModelName != "" && !te.configStore.IsAgentProvider(um.ServerURL) {
+			te.adoptMessageModel(setup, lc, um)
+		}
+		return te.claimProviderSlot(setup, lc)
 	default:
 	}
-	// No message waiting (the common case), or the message was handled without a provider
-	// switch that had to queue: keep running.
+	// Nothing was waiting, which is the common case: keep running.
 	return false
 }
 
@@ -1773,30 +1783,18 @@ idleWait:
 		case um := <-setup.userMsgChan:
 			if um.ContextChanged {
 				logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Infof("conversation context changed while idle, re-syncing")
-				lc.detector.reset()
-				lc.detector.clearHints()
-				lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
+				te.foldQueuedUserMessage(setup, lc, um)
+				// A context change claims nothing: the run is idle and stays idle.
 				continue idleWait
 			}
 			logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Infof("received message while idle, continuing (setup.regenerate=%v)", um.Regenerate)
-			lc.detector.reset()
-			lc.detector.clearHints()
-			if um.Regenerate {
-				lc.messages = truncateForRegenerate(lc.messages)
-				lc.messages = append(lc.messages, userMessageToChatMessage(um))
-			} else {
-				// Re-sync with DB to pick up the user message
-				lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
-			}
+			te.foldQueuedUserMessage(setup, lc, um)
 			if um.ModelName != "" && !te.configStore.IsAgentProvider(um.ServerURL) {
-				switched := te.applyModelSwitch(lc.mc, setup.task, setup.projectID, um.ServerURL, um.ModelName, true, false, lc.silence)
-				lc.client = switched.client
-				lc.providerName = switched.providerName
+				te.adoptMessageModel(setup, lc, um)
 			}
 			// The task was idle - re-acquire the running-task slot (a
 			// provider switch rides along via lc.mc) before the LLM call.
-			if curURL, _ := lc.mc.get(); curURL != "" && !te.syncTaskSlot(setup, curURL) {
-				te.handleCancelledTask(setup.task.ID, setup.projectID)
+			if te.claimProviderSlot(setup, lc) {
 				return idleStopped
 			}
 			setup.task.ExecutionState = types.ExecStateRunning
