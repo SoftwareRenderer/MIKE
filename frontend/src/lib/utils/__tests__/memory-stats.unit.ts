@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-    memoryAlert,
-    memoryAlertAckCovers,
     memoryAlertAction,
     memoryAlertPayloadOf,
-    taskMemoryAlert,
     taskMemoryStats,
     visibleMemoryAlert,
 } from '../memory-stats';
@@ -21,29 +18,38 @@ function stats(overrides: Partial<SandboxMemoryStats> = {}): SandboxMemoryStats 
     };
 }
 
-describe('memoryAlert', () => {
+/** The shape a dismissal is stored in, so a case can name one without repeating three field names. */
+type StoredAck = { peak_mb: number; oom_kills: number; limit_mb: number };
+
+/** A row carrying the dismissal someone gave, or nothing when nobody has answered the alert. */
+const dismissedBy = (ack: StoredAck | null) => (ack ? { memory_alert_ack: ack } : {});
+
+/** The container that hit its limit twice over: the peak is at the ceiling and a process was killed. */
+const hit = stats({ memory_limit_mb: 1024, memory_peak_mb: 1024, oom_kills: 2 });
+
+describe('the alert a container earns', () => {
     it('fires when the peak reaches the limit', () => {
-        expect(memoryAlert(stats({ memory_peak_mb: 1024 }))).toEqual({ peakMB: 1024, oomKills: 0, limitMB: 1024 });
+        expect(visibleMemoryAlert({}, null, stats({ memory_peak_mb: 1024 })))
+            .toEqual({ alert: { peakMB: 1024, oomKills: 0, limitMB: 1024 }, acked: false });
     });
 
     it('stays silent while the peak is below the limit', () => {
-        expect(memoryAlert(stats({ memory_peak_mb: 1023 }))).toBeNull();
+        expect(visibleMemoryAlert({}, null, stats({ memory_peak_mb: 1023 }))).toBeNull();
     });
 
     it('fires on an OOM kill even with no enforced limit', () => {
-        expect(memoryAlert(stats({ memory_limit_mb: 0, memory_peak_mb: 0, oom_kills: 2 }))).toEqual(
-            { peakMB: 0, oomKills: 2, limitMB: 0 },
-        );
+        expect(visibleMemoryAlert({}, null, stats({ memory_limit_mb: 0, memory_peak_mb: 0, oom_kills: 2 })))
+            .toEqual({ alert: { peakMB: 0, oomKills: 2, limitMB: 0 }, acked: false });
     });
 
     it('answers null for a task with no stats at all', () => {
-        expect(memoryAlert(null)).toBeNull();
-        expect(memoryAlert(undefined)).toBeNull();
-        expect(memoryAlert(stats())).toBeNull();
+        expect(visibleMemoryAlert({}, null, null)).toBeNull();
+        expect(visibleMemoryAlert({}, null, undefined)).toBeNull();
+        expect(visibleMemoryAlert({}, null, stats())).toBeNull();
     });
 
     it('does not fire at full tilt below the limit — that is pressure, not an alert', () => {
-        expect(memoryAlert(stats({ memory_current_mb: 1000, memory_peak_mb: 1000 }))).toBeNull();
+        expect(visibleMemoryAlert({}, null, stats({ memory_current_mb: 1000, memory_peak_mb: 1000 }))).toBeNull();
     });
 });
 
@@ -62,37 +68,35 @@ describe('memoryAlertAction', () => {
     });
 });
 
-describe('memoryAlertAckCovers', () => {
-    const alert = { peakMB: 1024, oomKills: 2, limitMB: 1024 };
-
+describe('what a dismissal covers', () => {
     it('covers the alert it was taken at', () => {
-        expect(memoryAlertAckCovers({ peakMB: 1024, oomKills: 2, limitMB: 1024 }, alert)).toBe(true);
+        expect(visibleMemoryAlert(dismissedBy({ peak_mb: 1024, oom_kills: 2, limit_mb: 1024 }), null, hit)).toBeNull();
     });
 
     it('is covering only for the limit it was taken against', () => {
-        expect(memoryAlertAckCovers({ peakMB: 1024, oomKills: 2, limitMB: 2048 }, alert)).toBe(false);
+        expect(visibleMemoryAlert(dismissedBy({ peak_mb: 1024, oom_kills: 2, limit_mb: 2048 }), null, hit)).not.toBeNull();
     });
 
     it('re-arms on a fresh container that hits a smaller limit than the one dismissed', () => {
-        const ack = { peakMB: 1024, oomKills: 0, limitMB: 1024 };
-        expect(memoryAlertAckCovers(ack, { peakMB: 512, oomKills: 0, limitMB: 512 })).toBe(false);
+        const smaller = stats({ memory_limit_mb: 512, memory_peak_mb: 512 });
+        expect(visibleMemoryAlert(dismissedBy({ peak_mb: 1024, oom_kills: 0, limit_mb: 1024 }), null, smaller)).not.toBeNull();
     });
 
     it('re-arms when another process was killed', () => {
-        expect(memoryAlertAckCovers({ peakMB: 1024, oomKills: 1, limitMB: 1024 }, alert)).toBe(false);
+        expect(visibleMemoryAlert(dismissedBy({ peak_mb: 1024, oom_kills: 1, limit_mb: 1024 }), null, hit)).not.toBeNull();
     });
 
     it('re-arms when the peak climbed past the acknowledged one', () => {
-        expect(memoryAlertAckCovers({ peakMB: 900, oomKills: 2, limitMB: 1024 }, alert)).toBe(false);
+        expect(visibleMemoryAlert(dismissedBy({ peak_mb: 900, oom_kills: 2, limit_mb: 1024 }), null, hit)).not.toBeNull();
     });
 
     it('re-arms on the same peak once the limit has been changed under it', () => {
-        expect(memoryAlertAckCovers({ peakMB: 1024, oomKills: 2, limitMB: 512 }, alert)).toBe(false);
+        expect(visibleMemoryAlert(dismissedBy({ peak_mb: 1024, oom_kills: 2, limit_mb: 512 }), null, hit)).not.toBeNull();
     });
 
     it('covers nothing when there is no acknowledgement', () => {
-        expect(memoryAlertAckCovers(null, alert)).toBe(false);
-        expect(memoryAlertAckCovers(undefined, alert)).toBe(false);
+        expect(visibleMemoryAlert(dismissedBy(null), null, hit)).not.toBeNull();
+        expect(visibleMemoryAlert({ memory_alert_ack: undefined }, null, hit)).not.toBeNull();
     });
 });
 
@@ -117,27 +121,14 @@ describe('taskMemoryStats', () => {
     });
 });
 
-describe('taskMemoryAlert', () => {
-    it('reports the alert the row recorded, unacknowledged', () => {
-        expect(taskMemoryAlert({ sandbox_memory_peak_mb: 1024 }, 1024, null)).toEqual({
-            alert: { peakMB: 1024, oomKills: 0, limitMB: 1024 },
-            acked: false,
-        });
-    });
-
-    it('reports it acknowledged once the headroom on the row matches', () => {
-        const task = { sandbox_memory_peak_mb: 1024, memory_alert_ack: { peak_mb: 1024, oom_kills: 0, limit_mb: 1024 } };
-        expect(taskMemoryAlert(task, 1024, null)?.acked).toBe(true);
-    });
-
-    it('reports it unacknowledged when the ack belongs to another limit', () => {
+describe('the alert a row remembers after its container', () => {
+    it('shows it again when the ack belongs to another limit', () => {
         const task = { sandbox_memory_peak_mb: 1024, memory_alert_ack: { peak_mb: 1024, oom_kills: 0, limit_mb: 2048 } };
-        expect(taskMemoryAlert(task, 1024, null)?.acked).toBe(false);
+        expect(visibleMemoryAlert(task, 1024, null)).not.toBeNull();
     });
 
-    it('says nothing about a task that never touched its limit', () => {
-        expect(taskMemoryAlert({ sandbox_memory_peak_mb: 512 }, 1024, null)).toBeNull();
-        expect(taskMemoryAlert({}, 1024, stats())).toBeNull();
+    it('says nothing when the row never recorded a peak at the limit', () => {
+        expect(visibleMemoryAlert({}, 1024, stats())).toBeNull();
     });
 });
 

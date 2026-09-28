@@ -218,7 +218,7 @@ function lineOpensBracket(
 }
 
 /** Bracket folding from `pairs`: a line that leaves a bracket open folds its body to its closer. */
-export function specBracketFoldService(spec: SyntaxSpec) {
+function specBracketFoldService(spec: SyntaxSpec) {
   const pairs = spec.pairs || [];
   if (!pairs.length) return [];
   const opening = new Map(pairs.map((p) => [p.open, p]));
@@ -258,7 +258,7 @@ export function specBracketFoldService(spec: SyntaxSpec) {
 }
 
 /** Region folding: a comment line with the region marker folds down to the line with the end marker. */
-export function specRegionFoldService(spec: SyntaxSpec) {
+function specRegionFoldService(spec: SyntaxSpec) {
   if (!spec.region) return [];
   const { open, close } = spec.region;
 

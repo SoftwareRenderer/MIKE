@@ -100,7 +100,11 @@ export function formatShortcut(key: string): string {
     return labels.join('+');
 }
 
-/** Parse a normalized shortcut into its modifier set and key. */
+/**
+ * Parse a normalized shortcut into its modifier set and key.
+ *
+ * @knipignore The canonical spelling is parsed back into its parts; `formatShortcut` answers the other way.
+ */
 export function parseShortcut(key: string): { modifiers: Set<string>; key: string } {
     const parts = key.split('+');
     const keyPart = parts.pop() ?? key;
@@ -221,7 +225,11 @@ export function openTerminalTitle(config: Config | null | undefined): string {
         : t('app.shortcut.openTerminal');
 }
 
-/** True on Apple platforms (used to pick the platform-appropriate submit key). */
+/**
+ * True on Apple platforms (used to pick the platform-appropriate submit key).
+ *
+ * @knipignore The platform read is asserted against a mocked user agent.
+ */
 export function isMac(): boolean {
     if (typeof navigator === 'undefined') return false;
     return /Mac|iPhone|iPad|iPod/i.test(navigator.userAgent);

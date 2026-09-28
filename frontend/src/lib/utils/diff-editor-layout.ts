@@ -3,7 +3,11 @@
  * worth showing inside it. Extracted from CardDetail.svelte for unit tests.
  */
 
-/** Below this rendered diff-column width, opening a file from a diff line maximizes the editor. */
+/**
+ * Below this rendered diff-column width, opening a file from a diff line maximizes the editor.
+ *
+ * @knipignore The maximizing decision is asserted on both sides of this width.
+ */
 export const DIFF_EDITOR_FULLSCREEN_MAX_WIDTH = 900;
 
 /**

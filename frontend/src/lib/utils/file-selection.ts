@@ -66,8 +66,12 @@ export function pruneSelection(rows: RowOrder, selection: FileSelection): FileSe
     return { paths, anchor: paths.size === 0 ? -1 : selection.anchor };
 }
 
-/** The selectable paths between `from` and `to`, both ends included. With `withinGroup` a range drawn
- *  across a group boundary stops at the edge of the one it started in. */
+/**
+ * The selectable paths between `from` and `to`, both ends included. With `withinGroup` a range drawn
+ * across a group boundary stops at the edge of the one it started in.
+ *
+ * @knipignore An inclusive range and its clamping are asserted on index pairs; a click names real rows.
+ */
 export function indexPaths(rows: RowOrder, from: number, to: number, withinGroup?: string): string[] {
     const lo = Math.max(0, Math.min(from, to));
     const hi = Math.min(rows.length - 1, Math.max(from, to));
@@ -80,7 +84,11 @@ export function indexPaths(rows: RowOrder, from: number, to: number, withinGroup
     return out;
 }
 
-/** How many names a destructive confirmation lists before counting the rest. */
+/**
+ * How many names a destructive confirmation lists before counting the rest.
+ *
+ * @knipignore The list is measured at this count and one name past it.
+ */
 export const CONFIRM_LIST_MAX = 8;
 
 /** The names a confirm dialog lists: at most `CONFIRM_LIST_MAX`, then one line counting the rest, which

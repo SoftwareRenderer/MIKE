@@ -15,7 +15,11 @@ import type { GitCommit } from '$lib/types';
 
 export type HistoryDensity = 'normal' | 'compact' | 'tight' | 'tighest';
 
-/** Row-width breakpoints (px) for each density step-down. */
+/**
+ * Row-width breakpoints (px) for each density step-down.
+ *
+ * @knipignore Each density is measured at and one pixel below its own breakpoint.
+ */
 export const HISTORY_DENSITY_BREAKPOINTS = {
     /** Below this row width the origin badge becomes icon-only. */
     compact: 245,
@@ -33,7 +37,7 @@ export function getHistoryDensity(width: number): HistoryDensity {
     return 'tighest';
 }
 
-export interface CommitTooltipContext {
+interface CommitTooltipContext {
     /** Display branch for the commit (current branch preferred), if any. */
     primaryBranch: string | null;
     /** Whether the commit is the origin tip of the current branch. */

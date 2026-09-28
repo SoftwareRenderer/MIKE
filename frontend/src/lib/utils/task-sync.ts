@@ -31,6 +31,7 @@ export interface HeldRow {
     mergeConflict?: boolean;
 }
 
+/** @knipignore A case names the views this screen holds and inherits the rest of the record. */
 export interface HeldView {
     conversation?: HeldConversation;
     row?: HeldRow;
