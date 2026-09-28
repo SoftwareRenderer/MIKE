@@ -28,7 +28,7 @@
                     <span class="field-label">{field.title || field.key}</span>
                     <button
                         type="button"
-                        class="btn-secondary btn-test"
+                        class="btn btn-secondary btn-test"
                         onclick={() => ontest(field)}
                         disabled={probingKey !== ''}
                     >{probingKey === field.key ? t('settings.extensions.testingAddress') : t('settings.extensions.testAddress')}</button>
@@ -45,16 +45,18 @@
 {/if}
 
 <style>
+    @import '$lib/styles/shared.css';
+
     .field-label {
         display: block;
-        font-size: 0.8rem;
+        font-size: var(--text-sm);
         color: var(--color-text-tertiary);
         margin-bottom: 0.25rem;
     }
 
     .field-desc {
         color: var(--color-text-tertiary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         margin: 0;
     }
 
@@ -72,29 +74,21 @@
     .probe-answer {
         padding: 6px 10px;
         border-radius: var(--radius-sm);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         line-height: 1.45;
     }
 
     .probe-ok {
-        background: rgba(34, 197, 94, 0.08);
-        border: 1px solid rgba(34, 197, 94, 0.3);
+        background: rgb(from var(--color-status-green) r g b / 0.08);
+        border: 1px solid rgb(from var(--color-status-green) r g b / 0.3);
         color: var(--color-status-green);
     }
 
     .probe-fail {
-        background: rgba(248, 81, 73, 0.1);
-        border: 1px solid rgba(248, 81, 73, 0.3);
+        background: rgb(from var(--color-status-red) r g b / 0.1);
+        border: 1px solid rgb(from var(--color-status-red) r g b / 0.3);
         color: var(--color-text-secondary);
     }
 
-    .btn-secondary {
-        background: var(--color-btn-secondary-bg);
-        border-color: var(--color-border-subtle);
-        color: var(--color-text-primary);
-    }
 
-    .btn-secondary:hover:not(:disabled) {
-        background: var(--color-border-subtle);
-    }
 </style>

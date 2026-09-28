@@ -82,7 +82,7 @@
     }
     .branch-input {
         width: 160px;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--color-text-primary);
         background: var(--color-surface-2);
         border: 1px solid var(--color-border);
@@ -97,13 +97,13 @@
     }
     .branch-dropdown {
         position: absolute;
-        z-index: 100;
+        z-index: var(--z-dropdown);
         max-height: 200px;
         overflow-y: auto;
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-md);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+        box-shadow: var(--shadow-popover);
         margin: 0;
         padding: 0;
         list-style: none;
@@ -111,7 +111,7 @@
     }
     .branch-option {
         padding: 6px 10px;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-family: var(--font-mono, monospace);
         color: var(--color-text-primary);
         cursor: pointer;

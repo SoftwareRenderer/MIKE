@@ -9,6 +9,8 @@
     import ChatMessage from './ChatMessage.svelte';
     import CheckpointDivider from './CheckpointDivider.svelte';
     import QueueIndicator from './QueueIndicator.svelte';
+    import Spinner from '$lib/components/Spinner.svelte';
+    import EmptyState from '$lib/components/EmptyState.svelte';
     import { appStore } from '$lib/stores';
     import { fullscreenToggleTitle } from '$lib/utils/keyboard';
     import { t } from '$lib/i18n';
@@ -350,7 +352,7 @@
         <div class="chat-sticky-header" class:hidden-header={!computedShowHeader} bind:this={stickyHeaderEl}
              role="status" aria-live="polite" aria-busy={stickyJumping || undefined}>
             <button class="chat-sticky-bubble" onclick={handleStickyClickInternal} title={t('chat.entries.scrollToMessage')} aria-label={t('chat.entries.scrollToMessage')}>
-                {#if stickyJumping}<span class="spinner-inline"></span>{/if}
+                {#if stickyJumping}<Spinner decorative />{/if}
                 <span class="chat-sticky-text">{computedStickyMessage}</span>
             </button>
             {#if onToggleFullscreen}
@@ -384,17 +386,11 @@
         <div class="chat-messages" bind:this={chatScrollEl} role="region" aria-label={t('chat.entries.region')} tabindex="-1">
             {#if historyLoading}
                 <div class="chat-loading">
-                    <span class="spinner"></span>
+                    <Spinner size={20} decorative />
                     <p>{t('chat.entries.loading')}</p>
                 </div>
             {:else}
-                <div class="chat-empty">
-                    <svg width="32" height="32" viewBox="0 0 16 16" fill="none">
-                        <path d="M2 3h12v8H5l-3 3V3z" stroke="currentColor" stroke-width="1" stroke-linejoin="round" opacity="0.3"/>
-                    </svg>
-                    <p>{t('chat.entries.empty')}</p>
-                    <span class="hint">{t('chat.entries.emptyHint')}</span>
-                </div>
+                <EmptyState class="parent-height" title={t('chat.entries.empty')} hint={t('chat.entries.emptyHint')} />
             {/if}
         </div>
     {:else}
@@ -504,9 +500,7 @@
                                     <polyline points="22 4 12 14.01 9 11.01"/>
                                 </svg>
                             {:else}
-                                <svg class="spin build-box-icon" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                                    <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5" stroke-dasharray="20 10" stroke-linecap="round"/>
-                                </svg>
+                                <span class="build-box-icon"><Spinner decorative /></span>
                             {/if}
                             <span class="build-box-title">{entry.buildLog.title}</span>
                             {#if entry.buildLog.done}
@@ -558,7 +552,7 @@
                  this appeared or went. It floats at the opposite corner from the jump button, so a reader who
                  scrolls away while the read is out gets both. -->
             <div class="chat-pending" role="status" aria-label={t('chat.entries.loading')}>
-                <span class="chat-pending-spinner" aria-hidden="true"></span>
+                <Spinner decorative />
             </div>
         {/if}
 
@@ -579,8 +573,6 @@
 </div>
 
 <style>
-    @import '$lib/styles/shared.css';
-
     .chat-messages-wrapper {
         flex: 1;
         position: relative;
@@ -613,7 +605,7 @@
         position: absolute;
         top: 0;
         left: 0;
-        z-index: 5;
+        z-index: var(--z-sticky);
         display: flex;
         justify-content: flex-end;
         align-items: center;
@@ -621,7 +613,7 @@
         background: var(--color-surface-1);
         border-bottom: 1px solid var(--color-border);
         width: calc(100% - 14px);
-        border-bottom-right-radius: 1.125rem;
+        border-bottom-right-radius: var(--radius-bubble);
         /* Only its own controls take a click, so what lies under it stays reachable. */
         pointer-events: none;
     }
@@ -633,11 +625,11 @@
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         pointer-events: auto;
         color: var(--color-text-primary);
         background: color-mix(in srgb, var(--color-accent) 18%, transparent);
-        border-radius: 1.125rem;
+        border-radius: var(--radius-bubble);
         padding: 6px 12px;
         max-width: 80%;
         border: none;
@@ -653,10 +645,8 @@
         text-overflow: ellipsis;
         white-space: nowrap;
     }
-    .chat-sticky-bubble :global(.spinner-inline) {
-        flex-shrink: 0;
-    }
     .chat-sticky-bubble:hover {
+        opacity: 1;
         background: color-mix(in srgb, var(--color-accent) 28%, transparent);
     }
     .chat-sticky-fullscreen {
@@ -672,26 +662,14 @@
         background: transparent;
         color: var(--color-text-tertiary);
         cursor: pointer;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         flex-shrink: 0;
     }
     .chat-sticky-fullscreen:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
-    .chat-empty {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        padding: 48px 16px;
-        color: var(--color-text-tertiary);
-        text-align: center;
-        height: 100%;
-    }
-    .chat-empty p { font-size: 0.875rem; margin: 0; font-weight: 500; }
-    .chat-empty .hint { font-size: 0.75rem; }
     .chat-loading {
         display: flex;
         flex-direction: column;
@@ -703,12 +681,12 @@
         text-align: center;
         height: 100%;
     }
-    .chat-loading p { font-size: 0.875rem; margin: 0; font-weight: 500; }
+    .chat-loading p { font-size: var(--text-base); margin: 0; font-weight: 500; }
     .history-notice {
         margin: 0;
         padding: 6px 12px;
         flex-shrink: 0;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-warning);
         background: color-mix(in srgb, var(--color-warning) 12%, transparent);
     }
@@ -716,7 +694,7 @@
         margin-left: 8px;
         padding: 0 4px;
         border: none;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         background: none;
         color: inherit;
         font: inherit;
@@ -725,25 +703,10 @@
         cursor: pointer;
     }
     .history-notice-retry:hover {
+        opacity: 1;
         background: color-mix(in srgb, var(--color-warning) 18%, transparent);
     }
-    .chat-loading .spinner {
-        width: 20px;
-        height: 20px;
-        border-width: 2px;
-        border-color: var(--color-accent);
-        border-top-color: transparent;
-    }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
-    .spinner {
-        display: inline-block;
-        width: 10px;
-        height: 10px;
-        border: 1.5px solid var(--color-status-yellow);
-        border-top-color: transparent;
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
-    }
     /* Error entry styles */
     .error-entry {
         padding: 6px 0;
@@ -775,21 +738,22 @@
         border: none;
         color: var(--color-text-tertiary);
         cursor: pointer;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         transition: all 0.15s ease;
     }
     .btn-dismiss:hover {
+        opacity: 1;
         background: color-mix(in srgb, var(--color-status-red) 15%, transparent);
         color: var(--color-status-red);
     }
     .error-code {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.3px;
     }
     .error-message {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--color-text-secondary);
         line-height: 1.5;
         white-space: pre-wrap;
@@ -817,8 +781,8 @@
         flex-shrink: 0;
     }
     .summarization-label {
-        font-size: 0.75rem;
-        color: white;
+        font-size: var(--text-xs);
+        color: var(--color-text-primary);
         opacity: 0.8;
         white-space: nowrap;
     }
@@ -844,16 +808,16 @@
     }
     .advisory-error .advisory-header { color: var(--color-status-red); }
     .advisory-label {
-        font-size: 0.7rem;
+        font-size: var(--text-xs);
         text-transform: uppercase;
         letter-spacing: 0.04em;
     }
     .advisory-text {
-        font-size: 0.78rem;
+        font-size: var(--text-xs);
         line-height: 1.45;
         white-space: pre-wrap;
         word-break: break-word;
-        color: var(--color-text);
+        color: var(--color-text-primary);
     }
 
     .merge-resolution-entry {
@@ -881,24 +845,25 @@
         color: var(--color-status-green);
     }
     .merge-resolution-label {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 600;
         color: var(--color-status-green);
     }
     .merge-resolution-content {
         padding: 4px 12px 10px;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--color-text-secondary);
         line-height: 1.5;
         white-space: pre-wrap;
     }
 
-    /* Jump to latest button */
+    /* Jump to latest button. It and `.chat-pending` share the content rank and own opposite bottom
+       corners, so which one wins a tie is never visible. */
     .chat-jump-latest {
         position: absolute;
         bottom: 12px;
         right: 12px;
-        z-index: 4;
+        z-index: var(--z-content);
         display: flex;
         align-items: center;
         gap: 4px;
@@ -910,13 +875,14 @@
         border: 1px solid var(--color-border);
         color: var(--color-text-secondary);
         cursor: pointer;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 500;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
         transition: opacity 0.2s ease, transform 0.2s ease, background 0.15s ease;
         animation: chat-jump-latest-in 0.2s ease-out;
     }
     .chat-jump-latest:hover {
+        opacity: 1;
         background: color-mix(in srgb, var(--color-accent) 100%);
         color: var(--color-text-primary);
     }
@@ -936,24 +902,16 @@
         position: absolute;
         bottom: 12px;
         left: 12px;
-        z-index: 3;
+        z-index: var(--z-content);
         display: flex;
         padding: 7px 9px;
         border-radius: var(--radius-md);
         border: 1px solid var(--color-border);
         background: var(--color-surface-1);
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+        /* Nothing to click here, and it floats over the transcript: a click must reach the entry under it. */
         pointer-events: none;
         animation: chat-pending-in 0.2s ease-out;
-    }
-    .chat-pending-spinner {
-        display: block;
-        width: 14px;
-        height: 14px;
-        border: 2px solid var(--color-text-secondary);
-        border-top-color: transparent;
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
     }
     @keyframes chat-pending-in { from { opacity: 0; } to { opacity: 1; } }
 
@@ -961,9 +919,6 @@
     .build-box {
         padding: 8px 0;
         max-width: 100%;
-    }
-    .spin {
-        animation: spin 1s linear infinite;
     }
     .build-box-header {
         display: flex;
@@ -975,14 +930,14 @@
         border-bottom: none;
         border-radius: var(--radius-sm) var(--radius-sm) 0 0;
         color: var(--color-text-secondary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
     }
     .build-box-icon {
         flex-shrink: 0;
         color: var(--color-status-yellow);
     }
     .build-box-icon.build-box-ok {
-        color: var(--color-status-green, #3fb950);
+        color: var(--color-status-green);
     }
     .build-box-title {
         font-weight: 500;
@@ -993,8 +948,8 @@
     .build-box-status {
         margin-left: auto;
         flex-shrink: 0;
-        font-size: 0.6875rem;
-        color: var(--color-status-green, #3fb950);
+        font-size: var(--text-2xs);
+        color: var(--color-status-green);
         text-transform: uppercase;
         letter-spacing: 0.3px;
     }
@@ -1006,7 +961,7 @@
         border: 1px solid var(--color-border);
         border-radius: 0 0 var(--radius-sm) var(--radius-sm);
         font-family: var(--font-mono);
-        font-size: 0.7rem;
+        font-size: var(--text-xs);
         line-height: 1.5;
         color: var(--color-text-secondary);
     }

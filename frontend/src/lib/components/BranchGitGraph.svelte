@@ -1,6 +1,7 @@
 <script lang="ts">
     import type { GitCommit } from '$lib/types';
     import VirtualList from '$lib/components/VirtualList.svelte';
+    import EmptyState from '$lib/components/EmptyState.svelte';
     import { getHistoryDensity, buildCommitTooltip } from '$lib/utils/git-history';
     import type { HistoryDensity } from '$lib/utils/git-history';
     import { timeAgo, formatDateTime } from '$lib/utils/format-time';
@@ -119,11 +120,11 @@
         <span class="git-graph-label">{t('task.graph.history')}</span>
     </div>
 
-    <div class="git-graph-list" role="list" aria-label="Commit history">
+    <div class="git-graph-list" role="list" aria-label={t('task.graph.historyAria')}>
         {#if loading && commitDisplays.length === 0}
             <div class="git-graph-loading">{t('task.graph.loading')}</div>
         {:else if commitDisplays.length === 0}
-            <div class="git-graph-empty">{t('task.graph.empty')}</div>
+            <EmptyState compact title={t('task.graph.empty')} />
         {:else}
             <VirtualList items={commitDisplays} itemHeight={36} minThreshold={0} onscroll={handleListScroll} onScrollElChange={handleScrollElChange}>
                 {#snippet children({ item: d, index: idx })}
@@ -157,7 +158,7 @@
 
                                 <!-- Origin tip badge — shown before branch badge -->
                                 {#if d.isOriginTip}
-                                    <span class="git-badge origin-badge" title={d.rowTitle ? undefined : 'Pushed to origin'}>
+                                    <span class="git-badge origin-badge" title={d.rowTitle ? undefined : t('task.graph.pushedToOrigin')}>
                                         <svg width="8" height="8" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                             <circle cx="6" cy="6" r="2"/>
                                             <circle cx="10" cy="10" r="2"/>
@@ -171,7 +172,7 @@
 
                                 <!-- Branch badge -->
                                 {#if d.primaryBranch}
-                                    <span class="git-badge branch-badge" class:current={d.isCurrentBranch} title={d.rowTitle ? undefined : 'Branch'}>
+                                    <span class="git-badge branch-badge" class:current={d.isCurrentBranch} title={d.rowTitle ? undefined : t('task.graph.branchTitle')}>
                                         <svg width="8" height="8" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                             <circle cx="6" cy="6" r="2"/>
                                             <circle cx="10" cy="10" r="2"/>
@@ -220,7 +221,7 @@
     }
 
     .git-graph-label {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 600;
         color: var(--color-text-secondary);
         text-transform: uppercase;
@@ -236,14 +237,13 @@
         padding: 4px 0;
     }
 
-    .git-graph-loading,
-    .git-graph-empty {
+    .git-graph-loading {
         padding: 8px 10px;
         color: var(--color-text-tertiary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
     }
 
-.git-commit-row {
+    .git-commit-row {
         display: flex;
         align-items: flex-start;
         gap: 6px;
@@ -290,11 +290,11 @@
         transform: translateX(-50%);
         width: 1.5px;
         height: calc(100% + 6px);
-        background: rgba(163, 113, 247, 0.3);
+        background: rgb(from var(--color-status-purple) r g b / 0.3);
     }
     /* Blue timeline line for unpushed rows */
     .git-commit-row.unpushed .git-timeline::before {
-        background: rgba(76, 154, 255, 0.3);
+        background: rgb(from var(--color-status-blue) r g b / 0.3);
     }
 
     .git-dot {
@@ -303,7 +303,7 @@
         border-radius: 50%;
         background: var(--color-status-purple);
         flex-shrink: 0;
-        z-index: 1;
+        z-index: var(--z-raised);
         transition: all 0.15s ease;
     }
     .git-dot.unpushed {
@@ -335,7 +335,7 @@
     }
 
     .git-commit-subject {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-primary);
         white-space: nowrap;
         overflow: hidden;
@@ -352,8 +352,8 @@
         align-items: center;
         gap: 2px;
         padding: 1px 5px;
-        border-radius: 9999px;
-        font-size: 0.625rem;
+        border-radius: var(--radius-pill);
+        font-size: var(--text-3xs);
         font-family: var(--font-mono);
         flex-shrink: 0;
         line-height: var(--line-height-clipped);
@@ -393,7 +393,7 @@
     }
 
     .git-commit-hash {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-family: var(--font-mono);
         color: var(--color-text-tertiary);
         margin-left: auto;
@@ -401,7 +401,7 @@
     }
 
     .git-commit-author {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-tertiary);
         overflow: hidden;
         text-overflow: ellipsis;
@@ -416,7 +416,7 @@
     }
 
     .git-commit-date {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-tertiary);
         opacity: 0.7;
         /* Never wrap ("1h ago" → 2 lines breaks the fixed 36px row):

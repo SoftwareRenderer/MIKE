@@ -42,6 +42,7 @@
     import { resolveGutterClickRange, toProjectRelative } from '$lib/utils/line-selection';
     import CustomSearchPanel from './CustomSearchPanel.svelte';
     import EditorFooter from './EditorFooter.svelte';
+    import Spinner from './Spinner.svelte';
     import { mount, unmount } from 'svelte';
     import { appStore, dialogStore } from '$lib/stores';
     import { fullscreenToggleTitle } from '$lib/utils/keyboard';
@@ -457,11 +458,13 @@
         const langSupport = getLanguageSupport(filePath);
         // Use base content so delta replay starts from the saved state.
         const initialDoc = historyBase || content;
-        // Hover tooltip on the gutter rows
-        const gutterTitle = mode === 'explorer' && onLinesSelected
-            ? (taskId ? t('editor.createSubtaskFromLines') : t('editor.createTaskFromLines'))
-            : undefined;
-        const gitGutterExt = gitGutter(gutterTitle ? { title: gutterTitle } : undefined);
+        // Hover tooltip on the gutter rows. Read per row build, so an editor that outlives a
+        // language switch shows the current one.
+        const gutterTitle = () =>
+            mode === 'explorer' && onLinesSelected
+                ? (taskId ? t('editor.createSubtaskFromLines') : t('editor.createTaskFromLines'))
+                : '';
+        const gitGutterExt = gitGutter({ title: gutterTitle });
         gitGutterState = gitGutterExt.state;
         // Explorer mode uses server-precomputed gutter markers; diff mode computes
         // the gutter vs the baseline ref (initialMarkers stays null).
@@ -1536,7 +1539,7 @@
         <!-- Diff-mode header -->
         <div class="editor-header">
             <div class="header-left">
-                <button class="btn-back" class:unsaved={hasChanges} onclick={requestClose} aria-label="Close editor" title="Close editor">
+                <button class="btn-back" class:unsaved={hasChanges} onclick={requestClose} aria-label={t('editor.closeEditorAria')} title={t('editor.closeEditorAria')}>
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                         <circle class="unsaved-circle" cx="8" cy="8" r="6" fill="currentColor"/>
                         <path class="close-x" d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
@@ -1562,12 +1565,11 @@
                     class="btn-save"
                     onclick={handleSave}
                     disabled={!hasChanges || saving || fileTooLarge}
-                    title="Save (Ctrl+S)"
+                    title={t('editor.saveTitle')}
+                    aria-describedby={fileTooLarge ? 'file-editor-too-large' : undefined}
                 >
                 {#if saving}
-                    <svg class="save-spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                        <path d="M12 2a10 10 0 0 1 10 10"/>
-                    </svg>
+                    <Spinner size={14} decorative />
                     {t('editor.saving')}
                 {:else}
                     {t('editor.save')}
@@ -1586,10 +1588,10 @@
             {:else if fileNotFound}
                 <div class="editor-placeholder">
                     <p style="margin:0 0 8px">{t('editor.fileNotFound')}</p>
-                    <p style="margin:0;font-size:0.75rem;color:var(--color-text-tertiary)">{filePath}</p>
+                    <p style="margin:0;font-size:var(--text-xs);color:var(--color-text-tertiary)">{filePath}</p>
                 </div>
             {:else if fileTooLarge}
-                <div class="editor-placeholder">{t('editor.fileTooLarge')}</div>
+                <div id="file-editor-too-large" class="editor-placeholder">{t('editor.fileTooLarge')}</div>
             {:else}
                 <div class="editor-wrapper" bind:this={editorEl}></div>
                 <div class="ext-anchor" bind:this={extAnchorEl}></div>
@@ -1693,12 +1695,12 @@
         justify-content: center;
         gap: 8px;
         color: var(--color-text-tertiary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
     }
     .editor-error {
         padding: 16px;
         color: var(--color-status-red);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
     }
 
     .editor-wrapper {
@@ -1711,7 +1713,9 @@
         bottom: 0;
         left: 0;
         right: 0;
-        z-index: 100;
+        z-index: var(--z-dropdown);
+        /* Click-through by default: CustomSearchPanel re-enables its own panel, one class deeper and in
+           that component's stylesheet. */
         pointer-events: none;
     }
 
@@ -1726,7 +1730,7 @@
         left: 0;
         right: 0;
         bottom: 0;
-        z-index: 5;
+        z-index: var(--z-content);
         pointer-events: none;
         overflow: hidden;
     }
@@ -1762,7 +1766,7 @@
         opacity: 0.6;
     }
     .file-editor.diff .file-path {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 500;
         font-family: var(--font-mono);
         overflow: hidden;
@@ -1783,6 +1787,7 @@
         position: relative;
     }
     .file-editor.diff .btn-back:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
@@ -1800,7 +1805,7 @@
         display: none;
     }
     .file-editor.diff .btn-back.unsaved {
-        color: var(--color-status-yellow, #f0c000);
+        color: var(--color-status-yellow);
     }
     .file-editor.diff .btn-back.unsaved:hover .unsaved-circle {
         display: none;
@@ -1827,10 +1832,11 @@
         background: transparent;
         color: var(--color-text-tertiary);
         cursor: pointer;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         flex-shrink: 0;
     }
     .file-editor.diff .editor-icon-btn:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
@@ -1843,9 +1849,8 @@
         color: white;
         border: none;
         border-radius: var(--radius-sm);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 500;
-        cursor: pointer;
         display: flex;
         align-items: center;
         gap: 5px;
@@ -1853,26 +1858,22 @@
         flex-shrink: 0;
     }
     .file-editor.diff .btn-save:hover:not(:disabled) {
+        opacity: 1;
         background: var(--color-accent-hover);
     }
     .file-editor.diff .btn-save:disabled {
         background: var(--color-surface-3);
         color: var(--color-text-secondary);
-        cursor: not-allowed;
-    }
-    .file-editor.diff .save-spinner {
-        animation: spin 0.8s linear infinite;
-        transform-origin: center;
     }
     .file-editor.diff .confirm-overlay {
         position: absolute;
         inset: 0;
-        background: rgba(0, 0, 0, 0.3);
+        background: rgb(from var(--color-backdrop) r g b / 0.3);
         display: flex;
         align-items: center;
         justify-content: center;
-        z-index: 10;
-        border-radius: 6px;
+        z-index: var(--z-sticky);
+        border-radius: var(--radius-md);
     }
     .file-editor.diff .confirm-dialog {
         background: var(--color-surface-1);
@@ -1881,15 +1882,15 @@
         padding: 20px;
         width: 320px;
         max-width: 90%;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        box-shadow: var(--shadow-modal);
     }
     .file-editor.diff .confirm-dialog h3 {
         margin: 0 0 6px;
-        font-size: 0.9375rem;
+        font-size: var(--text-md);
     }
     .file-editor.diff .confirm-dialog p {
         margin: 0 0 16px;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--color-text-secondary);
     }
     .file-editor.diff .confirm-actions {
@@ -1903,11 +1904,12 @@
         color: var(--color-text-primary);
         border: none;
         border-radius: var(--radius-sm);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         cursor: pointer;
         font-family: inherit;
     }
     .file-editor.diff .btn-confirm-cancel:hover {
+        opacity: 1;
         background: var(--color-surface-4);
     }
     .file-editor.diff .btn-confirm-discard {
@@ -1916,7 +1918,7 @@
         color: white;
         border: none;
         border-radius: var(--radius-sm);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         cursor: pointer;
         font-family: inherit;
     }

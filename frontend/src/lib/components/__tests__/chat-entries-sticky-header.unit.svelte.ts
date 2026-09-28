@@ -233,7 +233,7 @@ function mountGeometry(container: HTMLElement, follow: ChatFollow, geometry?: Ma
 
 /** The ring the header wears while the prompt it named is being fetched. */
 function stickySpinner(container: HTMLElement) {
-    return container.querySelector('.chat-sticky-header .spinner-inline');
+    return container.querySelector('.chat-sticky-header .spinner');
 }
 
 /** Click the header, then let the component react to the scroll it caused. */

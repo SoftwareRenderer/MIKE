@@ -8,12 +8,10 @@
     import { countWithDescendants } from '$lib/utils/task-utils';
     import { t } from '$lib/i18n';
 
-    let { columnId, title, label = title, color, tasks, childrenMap, expandedTasks, onToggleExpanded, onDrop, onAddTask, projectId, onClearAll, onCreateChildTask, onSelect, canDrop, onRefreshBoard, multiSelect }: {
+    let { columnId, label, color, tasks, childrenMap, expandedTasks, onToggleExpanded, onDrop, onAddTask, projectId, onClearAll, onCreateChildTask, onSelect, canDrop, onRefreshBoard, multiSelect }: {
         columnId: string;
-        /** English a11y name — `aria-label` text is never translated, and Board finds a column by it. */
-        title: string;
-        /** Visible (translatable) column label; falls back to the English `title`. */
-        label?: string;
+        /** Visible column label; also the word in this column's accessible name. */
+        label: string;
         color: string;
         tasks: Task[];
         childrenMap: Map<string, Task[]>;
@@ -85,7 +83,7 @@
     }
 </script>
 
-<div class={`column${isOver ? ' is-over' : ''}${isDropRejected ? ' is-drop-rejected' : ''}`} ondragover={handleDragOver} ondragleave={handleDragLeave} ondrop={handleDrop} role="list" aria-label={`${title} column`}>
+<div class={`column${isOver ? ' is-over' : ''}${isDropRejected ? ' is-drop-rejected' : ''}`} ondragover={handleDragOver} ondragleave={handleDragLeave} ondrop={handleDrop} role="list" aria-label={t('board.columnAria', { name: label })} data-column-id={columnId}>
     <div class="column-header" style="--col-color: {color}">
         <h3>
             {#if columnId === 'backlog'}
@@ -102,12 +100,12 @@
         <div class="header-right">
             <span class="count">{taskCount}</span>
             {#if columnId === 'backlog' && onAddTask && !addBtnVisible}
-                <button class="add-btn" onclick={() => onAddTask()} type="button" aria-label="Create a new task" title="Create a new task">
+                <button class="add-btn" onclick={() => onAddTask()} type="button" aria-label={t('board.column.newTaskAria')} title={t('board.column.newTaskAria')}>
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                 </button>
             {/if}
             {#if onClearAll && taskCount > 0}
-                <button class="clear-btn" onclick={(e) => { e.stopPropagation(); onClearAll(); }} aria-label={`Clear all ${taskCount} done tasks`} title={`Clear all ${taskCount} done tasks`}>
+                <button class="clear-btn" onclick={(e) => { e.stopPropagation(); onClearAll(); }} aria-label={t('board.column.clearAllAria', { count: taskCount })} title={t('board.column.clearAllAria', { count: taskCount })}>
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                         <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                         <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
@@ -118,7 +116,7 @@
     </div>
     <div class="card-list" bind:this={cardListEl} onscroll={handleScroll}>
         {#if onAddTask}
-            <button class="add-task-btn" onclick={onAddTask} title={createTaskShortcutLabel ? `Create a new task (${createTaskShortcutLabel})` : 'Create a new task'}>{t('board.column.addTask')}{#if createTaskShortcutLabel && !hintsHidden}<kbd class="key-hint">{createTaskShortcutLabel}</kbd>{/if}</button>
+            <button class="add-task-btn" onclick={onAddTask} title={createTaskShortcutLabel ? t('board.column.addTaskTitle', { shortcut: createTaskShortcutLabel }) : t('board.column.newTaskAria')}>{t('board.column.addTask')}{#if createTaskShortcutLabel && !hintsHidden}<kbd class="key-hint">{createTaskShortcutLabel}</kbd>{/if}</button>
         {/if}
         {#each tasks as task (task.id)}
             <div class="task-wrapper" transition:fade={{ duration: 200 }}>
@@ -173,7 +171,7 @@
         display: flex;
         align-items: center;
         gap: 5px;
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.5px;
@@ -185,9 +183,9 @@
     }
     .count {
         background: var(--color-surface-3);
-        border-radius: 10px;
+        border-radius: var(--radius-lg);
         padding: 2px 8px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
     }
     .header-right {
@@ -212,6 +210,7 @@
         opacity: 1;
     }
     .add-btn:hover {
+        opacity: 1;
         background: var(--color-accent-dark);
         color: white;
     }
@@ -237,6 +236,7 @@
         flex-shrink: 0;
     }
     .clear-btn:hover {
+        opacity: 1;
         background: var(--color-status-red-dark);
         color: white;
     }
@@ -259,7 +259,7 @@
         padding: 8px;
         border-radius: var(--radius-md);
         background: var(--color-surface-3);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         color: var(--color-text-secondary);
         cursor: pointer;
         transition: background 0.15s ease;
@@ -268,10 +268,12 @@
         justify-content: center;
     }
     .add-task-btn:hover {
+        opacity: 1;
         background: var(--color-accent-dark);
         color: white;
     }
     .add-task-btn:hover .key-hint {
+        opacity: 1;
         color: rgba(255, 255, 255, 0.85);
         border-color: rgba(255, 255, 255, 0.3);
         background: rgba(255, 255, 255, 0.1);

@@ -10,6 +10,7 @@
     import { useFileSelection } from '$lib/composables/use-file-selection.svelte';
     import FileContextMenu, { type FileMenuItem } from '$lib/components/FileContextMenu.svelte';
     import FileDropProgress from '$lib/components/FileDropProgress.svelte';
+    import EmptyState from '$lib/components/EmptyState.svelte';
     import Icon from '$lib/components/Icon.svelte';
     import SelectionActionBar from '$lib/components/SelectionActionBar.svelte';
     import folderIcon from '$lib/assets/icons/folder.svg?raw';
@@ -723,7 +724,7 @@
         {#if loading && entries.length === 0}
             <div class="file-browser-loading">{firstLoadComplete ? t('explorer.shared.loading') : pendingMessage}</div>
         {:else if !error && entries.length === 0}
-            <div class="file-browser-empty">{emptyMessage}</div>
+            <EmptyState compact title={emptyMessage} />
         {/if}
         {#each entries as entry, i}
             {@const badge = extraEntryInfo ? extraEntryInfo(entry) : null}
@@ -733,7 +734,7 @@
                     {#if entry.isDir}
                         <Icon src={folderIcon} color="currentColor" width={14} height={14} class="file-icon folder-icon" />
                     {:else}
-                        <Icon src={fileIcon} color="#6E7681" width={14} height={14} class="file-icon" />
+                        <Icon src={fileIcon} color="var(--color-text-muted)" width={14} height={14} class="file-icon" />
                     {/if}
                     <input
                         type="text"
@@ -768,7 +769,7 @@
                     {#if entry.isDir}
                         <Icon src={folderIcon} color="currentColor" width={14} height={14} class="file-icon folder-icon" />
                     {:else}
-                        <Icon src={fileIcon} color="#6E7681" width={14} height={14} class="file-icon" />
+                        <Icon src={fileIcon} color="var(--color-text-muted)" width={14} height={14} class="file-icon" />
                     {/if}
                     <span class="file-name">{entry.name}</span>
                     {#if badge}
@@ -792,7 +793,7 @@
             {#snippet actions()}
                 <button
                     type="button"
-                    class="selection-btn"
+                    class="selection-btn btn-ghost"
                     disabled={mutating}
                     title={t('explorer.shared.menuCut')}
                     aria-label={t('explorer.shared.menuCut')}
@@ -805,7 +806,7 @@
                 </button>
                 <button
                     type="button"
-                    class="selection-btn"
+                    class="selection-btn btn-ghost"
                     disabled={mutating}
                     title={t('explorer.shared.menuCopy')}
                     aria-label={t('explorer.shared.menuCopy')}
@@ -817,7 +818,7 @@
                 </button>
                 <button
                     type="button"
-                    class="selection-btn destructive"
+                    class="selection-btn btn-ghost destructive"
                     disabled={mutating}
                     title={t('explorer.shared.menuDelete')}
                     aria-label={t('explorer.shared.menuDelete')}

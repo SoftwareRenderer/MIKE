@@ -23,14 +23,14 @@
 :global(.drop-progress) {
     position: sticky;
     top: 0;
-    z-index: 2;
+    z-index: var(--z-content);
     margin: 2px 6px 4px;
     padding: 8px 10px;
     border: 1px dashed var(--color-accent);
     border-radius: var(--radius-sm);
     background: var(--color-surface-1);
     color: var(--color-text-primary);
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
 }
 
 :global(.drop-hint) {
@@ -59,10 +59,11 @@
     border-radius: var(--radius-sm);
     background: transparent;
     color: var(--color-text-secondary);
-    font-size: 0.6875rem;
+    font-size: var(--text-2xs);
     cursor: pointer;
 }
 :global(.drop-cancel-btn:hover) {
+    opacity: 1;
     background: var(--color-surface-3);
     color: var(--color-text-primary);
 }
@@ -70,7 +71,7 @@
 :global(.drop-bar) {
     margin-top: 6px;
     height: 3px;
-    border-radius: 2px;
+    border-radius: var(--radius-xs);
     background: var(--color-surface-3);
     overflow: hidden;
 }
@@ -85,7 +86,7 @@
     display: block;
     margin-top: 4px;
     font-family: var(--font-mono);
-    font-size: 0.6875rem;
+    font-size: var(--text-2xs);
     color: var(--color-text-secondary);
     white-space: nowrap;
     overflow: hidden;
@@ -112,13 +113,13 @@
     :global(:is(.file-browser-list, .file-list) .drop-progress) {
         margin: 4px 10px 8px;
         padding: 12px;
-        font-size: 0.875rem;
+        font-size: var(--text-base);
     }
 
     :global(:is(.file-browser-list, .file-list) .drop-cancel-btn) {
         min-height: 32px;
         padding: 6px 10px;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
     }
 
     :global(:is(.file-browser-list, .file-list) .drop-bar) {
@@ -128,6 +129,6 @@
 
     :global(:is(.file-browser-list, .file-list) .drop-progress-file) {
         margin-top: 6px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
     }
 }

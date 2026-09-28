@@ -33,12 +33,12 @@
 </script>
 
 {#snippet footer()}
-    <button type="button" class="login-btn" disabled={loading || !password.trim()} onclick={handleSubmit}>
+    <button type="button" class="login-btn btn btn-primary" disabled={loading || !password.trim()} onclick={handleSubmit}>
         {loading ? t('app.login.signingIn') : t('app.login.signIn')}
     </button>
 {/snippet}
 
-<BaseModal title="" width="360px" zIndex={1000} closeOnOverlayClick={false} footer={footer} onClose={() => {}} header={header}>
+<BaseModal width="360px" closeOnOverlayClick={false} footer={footer} onClose={() => {}} header={header}>
     {#if error}
         <div class="login-error" role="alert">{error}</div>
     {/if}
@@ -48,9 +48,9 @@
         bind:this={passwordInput}
         type="password"
         bind:value={password}
-        placeholder="Password"
+        placeholder={t('app.login.passwordAria')}
         autocomplete="current-password"
-        aria-label="Password"
+        aria-label={t('app.login.passwordAria')}
         onkeydown={(e) => { if (e.key === 'Enter') handleSubmit(); }}
     />
 </BaseModal>
@@ -99,7 +99,7 @@
         color: var(--color-text-primary);
         padding: 8px 12px;
         border-radius: var(--radius-sm);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         text-align: center;
     }
 
@@ -110,7 +110,7 @@
         border-radius: var(--radius-md);
         background: var(--color-surface-2);
         color: var(--color-text-primary);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         outline: none;
         transition: border-color 0.15s;
         box-sizing: border-box;
@@ -126,25 +126,9 @@
     }
 
     .login-btn {
+        /* The footer asks for a full-width submit; the chip itself is `.btn .btn-primary`. */
         width: 100%;
         padding: 10px;
-        border: none;
-        border-radius: var(--radius-md);
-        background: var(--color-accent-dark);
-        color: white;
-        font-size: 0.875rem;
-        font-weight: 500;
-        cursor: pointer;
-        transition: background 0.15s;
-        font-family: inherit;
     }
 
-    .login-btn:hover:not(:disabled) {
-        background: var(--color-accent-hover);
-    }
-
-    .login-btn:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
 </style>

@@ -126,7 +126,7 @@
                 class="settings-btn-small"
                 onclick={loadTokens}
                 disabled={loading || creating}
-                aria-label="refresh-tokens"
+                aria-label={t('settings.tokens.reloadTitle')}
                 title={t('settings.tokens.reloadTitle')}
             >{loading ? t('settings.tokens.loading') : t('settings.tokens.refresh')}</button>
         </div>
@@ -141,16 +141,15 @@
             bind:value={label}
             maxlength={80}
             placeholder={t('settings.tokens.labelPlaceholder')}
-            aria-label="api-token-label"
+            aria-label={t('settings.tokens.labelAria')}
             disabled={creating}
             onkeydown={(e) => { if (e.key === 'Enter') void handleCreate(); }}
         />
         <button
             type="button"
-            class="settings-btn-small btn-primary"
+            class="btn btn-primary"
             onclick={handleCreate}
             disabled={creating || loading}
-            aria-label="create-api-token"
         >{creating ? t('settings.tokens.creating') : t('settings.tokens.create')}</button>
     </div>
 
@@ -159,9 +158,7 @@
             <div class="tokens-revealed-note">{t('settings.tokens.createdTitle')}</div>
             <div class="tokens-revealed-row">
                 <code class="tokens-secret" title={issued.token}>{issued.token}</code>
-                <button type="button" class="settings-btn-small" onclick={handleCopy} aria-label="copy-api-token">
-                    {copied ? t('settings.tokens.copied') : t('settings.tokens.copy')}
-                </button>
+                <button type="button" class="settings-btn-small" onclick={handleCopy}>{copied ? t('settings.tokens.copied') : t('settings.tokens.copy')}</button>
             </div>
         </div>
     {/if}
@@ -193,7 +190,7 @@
                     class="settings-btn-small settings-btn-danger token-revoke"
                     onclick={() => handleRevoke(token)}
                     disabled={revokingId === token.id}
-                    aria-label={`revoke-token-${token.id}`}
+                    aria-label={t('settings.tokens.revokeTokenAria', { id: token.id })}
                     title={t('settings.tokens.revokeHint')}
                 >{revokingId === token.id ? t('settings.tokens.revoking') : t('settings.tokens.revoke')}</button>
             </div>
@@ -217,7 +214,7 @@
     }
     .tokens-help {
         margin: 0;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         line-height: 1.5;
         color: var(--color-text-tertiary);
     }
@@ -235,7 +232,7 @@
         border-radius: var(--radius-sm);
         background: var(--color-surface-2);
         color: var(--color-text-primary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-family: inherit;
     }
 
@@ -249,7 +246,7 @@
         padding: 10px 12px;
     }
     .tokens-revealed-note {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 600;
         color: var(--color-text-secondary);
     }
@@ -267,12 +264,12 @@
         text-overflow: ellipsis;
         white-space: nowrap;
         font-family: var(--font-mono, 'SF Mono', 'Cascadia Code', 'Fira Code', monospace);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-primary);
     }
 
     .token-label {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 500;
         color: var(--color-text-primary);
         min-width: 0;
@@ -281,18 +278,12 @@
         white-space: nowrap;
     }
 
-    .btn-primary {
-        border-color: var(--color-accent);
-        background: var(--color-accent);
-        color: white;
-    }
-
     .tokens-status {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--color-text-tertiary);
     }
     .tokens-error {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 500;
         color: var(--color-status-red);
     }

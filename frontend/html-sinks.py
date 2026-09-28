@@ -101,6 +101,9 @@ URL_SINKS: dict[tuple[str, str], str] = {
     ("src/lib/components/Chat/ToolCall.svelte", "iconInfo.src"):
         "literal — the tool-icon table maps tool names to ?raw imports, and Icon.svelte "
         "refuses anything that is not a lone sanitized <svg> root",
+    ("src/lib/components/EmptyState.svelte", "icon"):
+        "literal — a prop; every caller passes an *.svg?raw import, and the value reaches the "
+        "browser through Icon.svelte, which refuses anything that is not a lone sanitized <svg> root",
     ("src/lib/components/ImageDiffModal.svelte", "url"):
         "encoded-by:lib/api/fs — rawFileURL builds the query with URLSearchParams",
     ("src/lib/components/Chat/DiagramFence.svelte", "diagram.imageSrc"):
@@ -130,22 +133,28 @@ STYLE_SINKS: dict[tuple[str, str], str] = {
     ("src/lib/components/Column.svelte", "color"):
         "literal — Board's four column colors, each a var(--color-column-…)",
     ("src/lib/components/BaseModal.svelte", "zIndex"):
-        "literal — a stack depth this app computes",
+        "contains:constants/z-layers — the overlay's depth is a tier constant, this file's default "
+        "being the modal tier and every caller in core passing one",
+    ("src/lib/components/Chat/ModelSelector.svelte", "Z.overlay"):
+        "contains:constants/z-layers — a tier constant this file imports, not text a caller supplies",
+    ("src/lib/components/FileMentionDropdown.svelte", "Z.modalStacked"):
+        "contains:constants/z-layers — a tier constant this file imports, not text a caller supplies",
     ("src/lib/components/Card.svelte", "subtaskProgress.pct * 100"):
         "literal — a ratio this file computes",
     ("src/lib/components/Card.svelte", "modelBadge.color"):
-        "contains:getModelColor — a hash into MODEL_COLORS, or a literal in this file",
+        "contains:MODEL_BADGE_COLORS — a hash into the fixed palette in $lib/constants/badge-colors, "
+        "or a literal in this file",
     ("src/lib/components/Card.svelte", "statusBadge.color"):
-        "contains:--color-status — statusBadge returns tokens or literals from this file",
+        "contains:--color-status — statusBadge returns status tokens written in this file",
     ("src/lib/components/Card.svelte",
-     "nextStatus === 'done' && hasChanges ? '#EAB308' : statusColors[nextStatus]"):
-        "contains:statusColors — a literal or a lookup in this file's fixed map",
+     "nextStatus === 'done' && hasChanges ? 'var(--color-status-amber)' : statusColors[nextStatus]"):
+        "contains:statusColors — a token or a lookup in this file's fixed map",
     ("src/lib/components/CardDetail/BoardOverview.svelte", "getColumnColor(section.id)"):
         "contains:var(-- — the column colors are tokens declared in this file",
     ("src/lib/components/CardDetail/TaskHeader.svelte", "badge.color"):
         "literal — a prop; the badge color is one of the status literals",
     ("src/lib/components/Chat/ContextDonut.svelte", "STROKE"):
-        "contains:# — STROKE is a literal in this file",
+        "literal — STROKE is size * 0.3, a number this file derives",
     ("src/lib/components/Chat/ToolCall.svelte",
      "tc.isPending ? 'var(--color-accent)' : tc.interrupted ? 'var(--color-status-yellow)' "
      ": (tc.success ? 'var(--color-status-green)' : 'var(--color-status-red)')"):
@@ -154,10 +163,11 @@ STYLE_SINKS: dict[tuple[str, str], str] = {
         "contains:var(-- — getSymbolColor maps a fixed LSP kind onto a token",
     ("src/lib/components/BranchSymbols.svelte", "getSymbolColor(symbol.kind)"):
         "contains:var(-- — getSymbolColor maps a fixed LSP kind onto a token",
-    ("src/lib/components/GitStatusPanel.svelte", "getStatusBadge(row).color"):
-        "hex-colors:self — getStatusBadge in this file returns a hex color per status",
+    ("src/lib/components/GitStatusPanel.svelte", "gitStatusColor(row.status)"):
+        "contains:gitStatusColor — the status colors are the `--color-git-*` tokens, one map in "
+        "lib/utils/git-status for all three badge surfaces",
     ("src/lib/components/DiffViewer.svelte", "badge.color"):
-        "hex-colors:lib/utils/diff-parser — getStatusBadge there returns a hex color per status",
+        "contains:getStatusBadge — the badge is diff-parser's, whose colors come from gitStatusColor",
     ("src/lib/components/BaseModal.svelte", "width"):
         "contains:'640px' — a CSS width a caller chooses; this file's default is a literal, "
         "and every caller in core passes one",

@@ -6,7 +6,8 @@ Usage (from frontend/):   python3 i18n-count_test.py
 
 Every case pins one decision the counter makes, in both directions: real copy in a
 lookalike position must still measure, and the lookalike must not. Run it after any change
-to the exclusion rules.
+to the exclusion rules — including the text-attribute rule, whose two sides are the literal
+that must be reported and the `t()` call, IDREF, flag, lookup key and `''` that must not be.
 """
 import os
 import sys
@@ -25,13 +26,31 @@ failures = []
 
 def measure(body, path):
     """Count `body` as a file at `path` — the path is part of the case, because the
-    extension-host rules key off where the file lives."""
+    extension-host rules and the text-attribute allowlist key off where the file lives."""
     with tempfile.TemporaryDirectory() as d:
         full = os.path.join(d, path)
         os.makedirs(os.path.dirname(full), exist_ok=True)
         with open(full, 'w', encoding='utf-8') as fh:
             fh.write(body)
         return counter.count_file(full)
+
+
+def check(desc, ok):
+    """A case the counter's one number cannot carry — the allowlist ratchet, a line number."""
+    global cases_run
+    cases_run += 1
+    if not ok:
+        failures.append(desc)
+
+
+def write(body, path):
+    """Write `body` where `path` says, and hand back the real path."""
+    d = tempfile.mkdtemp()
+    full = os.path.join(d, path)
+    os.makedirs(os.path.dirname(full), exist_ok=True)
+    with open(full, 'w', encoding='utf-8') as fh:
+        fh.write(body)
+    return full
 
 
 def case(desc, expected, body, path='src/lib/components/Thing.svelte'):
@@ -64,15 +83,58 @@ case('a key that merely ends in d is not SVG geometry', 1,
 case('path data quoted as copy is still copy', 1,
      "<script>const tip = 'M8 3v10M3 8h10 draws a plus sign';</script>")
 
+# --- a literal written into a text attribute is copy -------------------------
+# The accessible name and the tooltip are the only words a screen-reader user, or a
+# hovered icon, is given, so each of these is a finding whatever its shape.
+case('a literal aria-label', 1, '<button aria-label="Save the file">{icon}</button>')
+case('a literal title', 1, '<button title="Save changes">{icon}</button>')
+case('a literal placeholder', 1, '<input placeholder="Search files" />')
+case('a literal alt', 1, '<img src={icon} alt="Diagram of the board" />')
+case('a lowercase accessible name is still copy', 1, '<button aria-label="close">{icon}</button>')
+case('a quoted value in an expression', 1, "<button title={'Stage changes'}>{icon}</button>")
+case('both arms of a ternary in a title', 2,
+     "<button title={ok ? 'Stage changes' : 'Unstage changes'}>{icon}</button>")
+case('a literal glued onto a key', 1, "<button title={t('diff.collapse') + ' (draft)'}>{icon}</button>")
+case('a component prop that renders as text', 1, '<BaseModal title="Name the project" />')
+
 # --- the lookalikes that must not -------------------------------------------
-case('literal aria-label', 0, '<button aria-label="Save">{icon}</button>')
-case('title attribute', 0, '<button title="Save changes">{icon}</button>')
-case('title attribute built in an expression', 0, "<button title={ok ? 'Stage changes' : 'Unstage changes'}>{icon}</button>")
+case('a catalog key on an attribute', 0, "<button aria-label={t('task.save')}>{icon}</button>")
+case('a catalog key chosen per frame inside t()', 0,
+     "<button title={t(open ? 'task.collapse' : 'task.expand')}>{icon}</button>")
+case('a title built from a variable', 0, '<span title={fullPath}>{fullPath}</span>')
+case('an aria-label chosen between two keys', 0,
+     "<button aria-label={collapsed ? t('a.b') : t('a.c')}>{icon}</button>")
+case('a script-level ariaLabel key', 0, "<script>const b = { ariaLabel: 'Close dialog' };</script>")
 case('title assigned to an element', 0, "<script>el.title = 'Stage changes';</script>")
 case('title: beside its labelKey is the fallback, not a hole', 0,
      "<script>const cols = [{ id: 'done', title: 'Done', labelKey: 'board.column.done' }];</script>")
-case('placeholder attribute', 0, '<input placeholder="Search files" />')
-case('script-level ariaLabel key', 0, "<script>const b = { ariaLabel: 'Close dialog' };</script>")
+case('aria-hidden carries a flag', 0, '<span aria-hidden="true">{icon}</span>')
+case('aria-expanded carries a flag', 0, '<button aria-expanded={open}>{icon}</button>')
+case('aria-labelledby carries an id', 0,
+     '<div role="dialog" aria-labelledby="confirm-title">{body}</div>')
+case('aria-describedby carries an id even in an expression', 0,
+     "<div aria-describedby={tip ? 'card-tooltip' : undefined}>{body}</div>")
+case('aria-controls and role carry no text', 0,
+     '<button role="button" aria-controls="sidebar" tabindex="0">{icon}</button>')
+case('alt="" says decorative', 0, '<img src={icon} alt="" />')
+case('a comparison key inside a title', 0,
+     "<button title={mode === 'rw' ? t('sandbox.readWrite') : t('sandbox.readOnly')}>{icon}</button>")
+case('a lookup key inside a title', 0,
+     "<button title={isCollapsed('staged') ? t('diff.expand') : t('diff.collapse')}>{icon}</button>")
+case('a separator between rendered sentences', 0, '<span title={sentences.join(" · ")}>{text}</span>')
+case('a template literal of variables only', 0, '<span title={`${label} · ${lang}`}>{label}</span>')
+case('no tooltip this frame', 0, "<span title={stamp ? absolute(stamp) : ''}>{stamp}</span>")
+case('a quote inside a regex in an attribute', 0,
+     "<button title={value.replace(/'/, '')}>{icon}</button>")
+case('an allowed format example, at its own site', 0,
+     '<input placeholder="docker.io/ubuntu:latest" aria-label={t("sandbox.imageNameAria")} />',
+     path='src/lib/components/SandboxConfigModal/ImageSection.svelte')
+case('the same example in another file is not allowed', 1,
+     '<input placeholder="docker.io/ubuntu:latest" />', path='src/lib/components/Other.svelte')
+case('a comment before an attribute does not hide it', 1,
+     '<!-- the placeholder is a shape, not copy -->\n<input placeholder="Search files" />')
+case('a comment that quotes a tag does not swallow the markup after it', 1,
+     '<!-- <input title="x"> -->\n<button aria-label="Save the file">{icon}</button>')
 case('comment text', 0, '<script>// TODO: rename the cancel button\nconst x = 1;</script>')
 case('block comment with an apostrophe', 0, "<script>/* don't translate this prose */\nconst x = 1;</script>")
 case('log line', 0, '<script>console.warn("Failed to arm the channel");</script>')
@@ -95,7 +157,8 @@ case('classList.add', 0, "<script>btn.classList.add('is-active primary');</scrip
 case('string union type', 0, "<script>const k: Kind = 'Program' | 'Script' | 'Document';</script>")
 case('Go template token name', 0, "<script>return 'function variableName';</script>")
 case('svg markup in a string', 0, '<script>el.innerHTML = `<path d="M28,0 L14,0" fill="#0084FF"/>`;</script>')
-case('glyph drawn inside an icon', 0, '<button title="Sort alphabetically"><svg><text x="0" y="10">Aa</text></svg></button>')
+case('glyph drawn inside an icon', 0,
+     "<button title={t('explorer.symbols.sortAlphabetically')}><svg><text x=\"0\" y=\"10\">Aa</text></svg></button>")
 case('keycap label', 0, '<button onclick="go()">esc</button>')
 case('remote name', 0, '<span class="git-badge-label">origin</span>')
 case('svg path data as an attribute argument', 0,
@@ -145,6 +208,22 @@ case('but a label the host renders is still copy', 1,
 case('and the same throw outside the channel is copy', 1,
      "<script>if (!root) throw new Error('editor not ready');</script>",
      path='src/lib/components/FileEditor.svelte')
+
+# --- the report names the site, and the allowlist only shrinks ---------------
+rows = counter.analyze_file(write('<div\n     class="row"\n     aria-label="Save now"\n/>',
+                                 'src/lib/components/Thing.svelte'))[1]
+check('the row names the attribute line, the attribute and the text',
+      [(r[0], r[1], r[2]) for r in rows] == [(3, 'aria-label', 'Save now')])
+check('a finding in a file that names no allow entry carries none',
+      bool(rows) and rows[0][3] is None)
+mount = 'src/lib/components/SandboxConfigModal/MountsSection.svelte'
+allowed = counter.analyze_file(write('<input placeholder="/host/path" />', mount))[1]
+check('the allowed site reports no finding',
+      [r[3] for r in allowed] == [(mount, 'placeholder', '/host/path')])
+check('an entry nothing matched is stale, so the allowlist only shrinks',
+      counter.stale_allow_keys(set()) == sorted(counter.TEXT_ATTR_ALLOW))
+check('an entry every site matched is not stale',
+      counter.stale_allow_keys(set(counter.TEXT_ATTR_ALLOW)) == [])
 
 if failures:
     print(f'i18n-count_test: {len(failures)} FAILURE(S) of {cases_run} cases')

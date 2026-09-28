@@ -106,7 +106,7 @@
         flex-shrink: 0;
     }
     .diff-arrow {
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         color: var(--color-text-tertiary);
         padding: 0 2px;
         user-select: none;
@@ -122,11 +122,12 @@
         background: transparent;
         color: var(--color-text-tertiary);
         cursor: pointer;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         flex-shrink: 0;
         margin-left: auto;
     }
     .diff-fullscreen-btn:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }

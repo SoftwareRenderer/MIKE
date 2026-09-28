@@ -1,6 +1,7 @@
 <script lang="ts">
     import { reasoningEffortOptions } from '$lib/types';
     import { t } from '$lib/i18n';
+    import EmptyState from '../EmptyState.svelte';
     import type { ModelEntry } from './drafts';
 
     let { models, onAdd, onRemove, currencySymbol = '$', index = 0, onDirty }: {
@@ -137,7 +138,7 @@
                             oninput={(e) => { model.reasoning_effort = (e.target as HTMLInputElement).value; effortActive = 0; effortQuery = (e.target as HTMLInputElement).value; onDirty?.(); }}
                             onblur={closeEffortList}
                             onkeydown={(e) => handleEffortKeydown(e, mi)}
-                            placeholder="default"
+                            placeholder={t('settings.models.defaultPlaceholder')}
                             role="combobox"
                             aria-expanded={effortOpen === mi && visibleEffortOptions().length > 0}
                             aria-controls={`reasoning-effort-list-${index}-${mi}`}
@@ -188,33 +189,33 @@
                                 <label for={`model-input-price-${index}-${mi}`}>{t('settings.pricing.input')}</label>
                                 <div class="mp-input-wrap">
                                     <span class="mp-prefix">{currencySymbol}</span>
-                                    <input id={`model-input-price-${index}-${mi}`} type="number" inputmode="decimal" min="0" step="any" class="mp-input" placeholder="default" value={model.input_price ?? ''} oninput={(e) => { model.input_price = parseFloatOrNull((e.target as HTMLInputElement).value); onDirty?.(); }} />
+                                    <input id={`model-input-price-${index}-${mi}`} type="number" inputmode="decimal" min="0" step="any" class="mp-input" placeholder={t('settings.models.defaultPlaceholder')} value={model.input_price ?? ''} oninput={(e) => { model.input_price = parseFloatOrNull((e.target as HTMLInputElement).value); onDirty?.(); }} />
                                 </div>
                             </div>
                             <div class="mp-field">
                                 <label for={`model-output-price-${index}-${mi}`}>{t('settings.pricing.output')}</label>
                                 <div class="mp-input-wrap">
                                     <span class="mp-prefix">{currencySymbol}</span>
-                                    <input id={`model-output-price-${index}-${mi}`} type="number" inputmode="decimal" min="0" step="any" class="mp-input" placeholder="default" value={model.output_price ?? ''} oninput={(e) => { model.output_price = parseFloatOrNull((e.target as HTMLInputElement).value); onDirty?.(); }} />
+                                    <input id={`model-output-price-${index}-${mi}`} type="number" inputmode="decimal" min="0" step="any" class="mp-input" placeholder={t('settings.models.defaultPlaceholder')} value={model.output_price ?? ''} oninput={(e) => { model.output_price = parseFloatOrNull((e.target as HTMLInputElement).value); onDirty?.(); }} />
                                 </div>
                             </div>
                             <div class="mp-field">
                                 <label for={`model-cache-read-price-${index}-${mi}`}>{t('settings.pricing.cacheRead')}</label>
                                 <div class="mp-input-wrap">
                                     <span class="mp-prefix">{currencySymbol}</span>
-                                    <input id={`model-cache-read-price-${index}-${mi}`} type="number" inputmode="decimal" min="0" step="any" class="mp-input" placeholder="default" value={model.cache_read_price ?? ''} oninput={(e) => { model.cache_read_price = parseFloatOrNull((e.target as HTMLInputElement).value); onDirty?.(); }} />
+                                    <input id={`model-cache-read-price-${index}-${mi}`} type="number" inputmode="decimal" min="0" step="any" class="mp-input" placeholder={t('settings.models.defaultPlaceholder')} value={model.cache_read_price ?? ''} oninput={(e) => { model.cache_read_price = parseFloatOrNull((e.target as HTMLInputElement).value); onDirty?.(); }} />
                                 </div>
                             </div>
                             <div class="mp-field">
                                 <label for={`model-cache-write-price-${index}-${mi}`}>{t('settings.pricing.cacheWrite')}</label>
                                 <div class="mp-input-wrap">
                                     <span class="mp-prefix">{currencySymbol}</span>
-                                    <input id={`model-cache-write-price-${index}-${mi}`} type="number" inputmode="decimal" min="0" step="any" class="mp-input" placeholder="default" value={model.cache_write_price ?? ''} oninput={(e) => { model.cache_write_price = parseFloatOrNull((e.target as HTMLInputElement).value); onDirty?.(); }} />
+                                    <input id={`model-cache-write-price-${index}-${mi}`} type="number" inputmode="decimal" min="0" step="any" class="mp-input" placeholder={t('settings.models.defaultPlaceholder')} value={model.cache_write_price ?? ''} oninput={(e) => { model.cache_write_price = parseFloatOrNull((e.target as HTMLInputElement).value); onDirty?.(); }} />
                                 </div>
                             </div>
                             <div class="mp-field">
                                 <label for={`model-power-w-${index}-${mi}`}>{t('settings.models.power')}</label>
-                                <input id={`model-power-w-${index}-${mi}`} type="number" inputmode="decimal" min="0" step="any" class="mp-input mp-power-input" placeholder="default" value={model.power_consumption_w ?? ''} oninput={(e) => { model.power_consumption_w = parseFloatOrNull((e.target as HTMLInputElement).value); onDirty?.(); }} title={t('settings.models.powerHint')} />
+                                <input id={`model-power-w-${index}-${mi}`} type="number" inputmode="decimal" min="0" step="any" class="mp-input mp-power-input" placeholder={t('settings.models.defaultPlaceholder')} value={model.power_consumption_w ?? ''} oninput={(e) => { model.power_consumption_w = parseFloatOrNull((e.target as HTMLInputElement).value); onDirty?.(); }} title={t('settings.models.powerHint')} />
                             </div>
                             <div class="mp-field mp-note-field">
                                 <span class="mp-note">{t('settings.models.note')}</span>
@@ -226,7 +227,7 @@
         {/each}
     </div>
     {#if models.length === 0}
-        <div class="models-empty">{t('settings.models.empty')}</div>
+        <EmptyState compact title={t('settings.models.empty')} />
     {/if}
 </div>
 
@@ -241,7 +242,7 @@
         margin-bottom: 8px;
     }
     .models-label {
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.05em;
@@ -254,17 +255,17 @@
         min-width: 18px;
         height: 18px;
         padding: 0 4px;
-        border-radius: 9px;
+        border-radius: var(--radius-lg);
         background: var(--color-surface-3);
         color: var(--color-text-tertiary);
-        font-size: 0.625rem;
+        font-size: var(--text-3xs);
         font-weight: 500;
     }
     .btn-add-model {
         display: flex;
         align-items: center;
         gap: 4px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-accent);
         background: none;
         border: none;
@@ -297,7 +298,7 @@
         padding: 0 8px;
         border: 1px solid transparent;
         margin-bottom: 2px;
-        font-size: 0.625rem;
+        font-size: var(--text-3xs);
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.05em;
@@ -331,7 +332,7 @@
         min-width: 0;
     }
     .model-name-label {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 500;
         white-space: nowrap;
         overflow: hidden;
@@ -340,7 +341,7 @@
     .model-input {
         flex: 1;
         min-width: 0;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         padding: 2px 6px;
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
@@ -367,7 +368,7 @@
     .ctx-input {
         flex: 1;
         min-width: 0;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         padding: 2px 5px;
         background: transparent;
         border: none;
@@ -388,7 +389,7 @@
     }
     .reasoning-effort-input {
         width: 100%;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         padding: 2px 4px;
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
@@ -408,15 +409,15 @@
         top: calc(100% + 2px);
         left: 0;
         right: 0;
-        z-index: 30;
+        z-index: var(--z-dropdown);
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+        box-shadow: var(--shadow-popover);
         overflow: hidden;
     }
     .reasoning-effort-option {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         line-height: 1.2;
         padding: 4px 8px;
         color: var(--color-text-secondary);
@@ -444,13 +445,14 @@
         padding: 0;
     }
     .btn-expand-model:hover {
+        opacity: 1;
         background: var(--color-surface-1);
     }
     .btn-expand-model svg.expanded {
         transform: rotate(180deg);
     }
     .btn-remove-model {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
         background: none;
         border: none;
@@ -460,8 +462,9 @@
         flex-shrink: 0;
     }
     .btn-remove-model:hover {
+        opacity: 1;
         background: var(--color-status-red-dark);
-        color: white;
+        color: var(--color-btn-text);
     }
     .model-details {
         padding: 8px;
@@ -477,14 +480,14 @@
         margin-bottom: 6px;
     }
     .model-details-title {
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.05em;
         color: var(--color-text-secondary);
     }
     .model-details-hint {
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         color: var(--color-text-tertiary);
     }
     .model-price-grid {
@@ -506,7 +509,7 @@
         min-width: 0;
     }
     .mp-field label {
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         color: var(--color-text-secondary);
         white-space: nowrap;
         overflow: hidden;
@@ -525,7 +528,7 @@
     }
     .mp-prefix {
         padding: 2px 4px;
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         color: var(--color-text-secondary);
         background: var(--color-surface-3);
         border-right: 1px solid var(--color-border);
@@ -535,7 +538,7 @@
     .mp-input {
         flex: 1;
         min-width: 0;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         padding: 2px 5px;
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
@@ -555,14 +558,7 @@
         grid-column: 1 / -1;
     }
     .mp-note {
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         color: var(--color-text-tertiary);
-    }
-    .models-empty {
-        font-size: 0.8125rem;
-        color: var(--color-text-secondary);
-        text-align: center;
-        padding: 12px;
-        font-style: italic;
     }
 </style>

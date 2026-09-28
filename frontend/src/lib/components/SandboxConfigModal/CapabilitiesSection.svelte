@@ -111,12 +111,12 @@
         align-items: center;
         gap: 4px;
         padding: 2px 4px 2px 8px;
-        background: rgba(136, 192, 208, 0.12);
-        border: 1px solid rgba(136, 192, 208, 0.25);
+        background: rgb(from var(--color-accent-light) r g b / 0.12);
+        border: 1px solid rgb(from var(--color-accent-light) r g b / 0.25);
         border-radius: var(--radius-sm);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-family: var(--font-mono, monospace);
-        color: var(--color-accent-light, #88c0d0);
+        color: var(--color-accent-light);
     }
 
     .caps-tag-text {
@@ -144,7 +144,7 @@
 
     .caps-tag-remove:hover {
         opacity: 1;
-        background: rgba(136, 192, 208, 0.2);
+        background: rgb(from var(--color-accent-light) r g b / 0.2);
     }
 
     /* Input field */
@@ -159,7 +159,7 @@
         border-radius: var(--radius-sm);
         background: var(--color-surface-1);
         color: var(--color-text-primary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-family: var(--font-mono, monospace);
         outline: none;
         transition: border-color 0.15s;
@@ -173,11 +173,11 @@
 
     .caps-input:focus,
     .caps-input-field:focus .caps-input {
-        border-color: var(--color-accent, #88c0d0);
+        border-color: var(--color-accent);
     }
 
     .caps-input:disabled {
-        opacity: 0.5;
+        opacity: var(--opacity-disabled);
         cursor: not-allowed;
     }
 
@@ -193,8 +193,8 @@
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-        z-index: 100;
+        box-shadow: var(--shadow-popover);
+        z-index: var(--z-dropdown);
     }
 
     .caps-dropdown-item {
@@ -213,17 +213,18 @@
 
     .caps-dropdown-item:hover,
     .caps-dropdown-item.selected {
+        opacity: 1;
         background: var(--color-surface-2);
     }
 
     .caps-dropdown-name {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 500;
         font-family: var(--font-mono, monospace);
     }
 
     .caps-dropdown-desc {
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         color: var(--color-text-secondary);
     }
 </style>

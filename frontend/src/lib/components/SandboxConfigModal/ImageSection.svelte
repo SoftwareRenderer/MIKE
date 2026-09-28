@@ -50,6 +50,7 @@
                 <span class="config-desc">{t('sandbox.imageNameDesc')}</span>
             </div>
         </div>
+        <!-- The placeholder is an image reference to type, not copy; the name is the aria-label. -->
         <input type="text" class="image-input" bind:value={draft.image} placeholder="docker.io/ubuntu:latest" disabled={locked} aria-label={t('sandbox.imageNameAria')} />
     </div>
 {:else}

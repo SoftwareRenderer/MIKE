@@ -55,11 +55,11 @@
     .server-tool-notice {
         padding: 8px 12px;
         margin: -4px 0 12px;
-        background: rgba(210, 153, 34, 0.08);
-        border: 1px solid rgba(210, 153, 34, 0.3);
+        background: rgb(from var(--color-warning) r g b / 0.08);
+        border: 1px solid rgb(from var(--color-warning) r g b / 0.3);
         border-radius: var(--radius-md);
         color: var(--color-text-secondary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         line-height: 1.45;
     }
 </style>

@@ -1,6 +1,7 @@
 <script lang="ts">
     import type { DiffFile, DiffImageSource } from '$lib/types/diff';
     import { t } from '$lib/i18n';
+    import Spinner from '../Spinner.svelte';
     import { useLazyComponent } from '$lib/composables/use-lazy-component.svelte';
 
     // A static import here would pull DiffViewer back into this component's own chunk.
@@ -30,7 +31,7 @@
             </svg>
             <span>{t('task.checkpoint.title')}</span>
         </div>
-        <button class="btn-close-checkpoint" onclick={onClose} title="Close (Esc)" aria-label="Close">
+        <button class="btn-close-checkpoint" onclick={onClose} title={t('task.closeEscAria')} aria-label={t('app.close')}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
                 <path d="M18 6L6 18M6 6l12 12"/>
             </svg>
@@ -38,9 +39,7 @@
     </div>
     {#if loading}
         <div class="checkpoint-diff-loading checkpoint-diff-loading-root">
-            <svg class="checkpoint-spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                <path d="M12 2a10 10 0 0 1 10 10"/>
-            </svg>
+            <Spinner size={16} label={t('diff.loadingChanges')} />
         </div>
     {:else}
         <div class="checkpoint-diff-body">
@@ -49,9 +48,7 @@
                 <DiffViewer stagedFiles={[]} unstagedFiles={files} stagedUntracked={[]} unstagedUntracked={untracked} onExpandFile={onExpandFile} onExpandUntracked={onExpandFile} onLineClick={onLineClick} imageSource={imageSource} />
             {:else}
                 <div class="checkpoint-diff-loading">
-                    <svg class="checkpoint-spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                        <path d="M12 2a10 10 0 0 1 10 10"/>
-                    </svg>
+                    <Spinner size={16} label={t('diff.loadingChanges')} />
                 </div>
             {/if}
         </div>
@@ -79,7 +76,7 @@
         display: flex;
         align-items: center;
         gap: 6px;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 600;
         color: white;
     }
@@ -100,6 +97,7 @@
         transition: all 0.15s ease;
     }
     .btn-close-checkpoint:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
@@ -122,8 +120,5 @@
     }
     .checkpoint-diff-body .checkpoint-diff-loading {
         height: 100%;
-    }
-    .checkpoint-spinner {
-        animation: spin 1s linear infinite;
     }
 </style>

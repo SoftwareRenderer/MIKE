@@ -140,19 +140,19 @@
     }
     .help-tooltip {
         position: fixed;
-        z-index: 10000;
+        z-index: var(--z-overlay);
         width: max-content;
         max-width: min(320px, calc(100vw - 16px));
         visibility: hidden;
         pointer-events: none;
         padding: 6px 8px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         line-height: 1.4;
         color: var(--color-text-primary);
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+        box-shadow: var(--shadow-popover);
     }
     .help-tooltip.visible {
         visibility: visible;

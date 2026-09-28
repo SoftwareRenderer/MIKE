@@ -1,12 +1,12 @@
 <script lang="ts">
     /**
-     * The shell a promise-backed dialog draws: overlay, title, body, and a footer of one or two
-     * buttons. Which request is pending, and what answering it resolves, is `usePromiseDialog`'s;
-     * this component holds no state of its own.
+     * The shell every promise-backed dialog draws: overlay, title, body, and a footer of one or two
+     * buttons in the shared `.btn` idiom. Which request is pending, and what answering it resolves,
+     * is `usePromiseDialog`'s; this component holds no state of its own.
      *
-     * `.btn-cancel` / `.btn-confirm` stay on the buttons because the e2e specs click them by name;
-     * `modalClass` carries this shell's marker so the shared stylesheet can reach its buttons without
-     * claiming those two names for the whole app.
+     * `.btn-cancel` / `.btn-confirm` stay on the buttons because the e2e specs click them by name, and
+     * `destructive` stays because the specs and the unit test read the variant off the confirm button.
+     * Neither name carries a style: the buttons are `shared.css`'s `.btn` family like every other footer's.
      */
     import type { Snippet } from 'svelte';
     import type { DialogVariant } from '$lib/stores';
@@ -44,14 +44,21 @@
 
 {#if open}
     {#snippet header({ title }: { title: string })}
-        <h2 style="font-size: 0.9375rem;">{title}</h2>
+        <h2 style="font-size: var(--text-md);">{title}</h2>
     {/snippet}
 
     {#snippet footer()}
         {#if !dismissOnly}
-            <button type="button" class="btn-cancel" onclick={onCancel}>{cancelLabel}</button>
+            <button type="button" class="btn btn-cancel" onclick={onCancel}>{cancelLabel}</button>
         {/if}
-        <button type="button" class="btn-confirm" class:destructive={variant === 'destructive'} onclick={onConfirm}>
+        <button
+            type="button"
+            class="btn btn-confirm"
+            class:btn-primary={variant !== 'destructive'}
+            class:btn-danger={variant === 'destructive'}
+            class:destructive={variant === 'destructive'}
+            onclick={onConfirm}
+        >
             {confirmLabel}
         </button>
     {/snippet}
@@ -59,8 +66,6 @@
     <BaseModal
         {title}
         {width}
-        zIndex={1000}
-        modalClass="promise-dialog"
         {header}
         {footer}
         onClose={onCancel}

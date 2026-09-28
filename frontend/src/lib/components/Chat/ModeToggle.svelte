@@ -46,10 +46,11 @@
         border: 1px solid var(--color-border);
         background: var(--color-surface-2);
         color: var(--color-text-secondary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         transition: all 0.15s ease;
     }
     .btn-plan-toggle.bar:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
@@ -71,9 +72,10 @@
         border: none;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
     }
     .btn-plan-toggle.panel:hover {
+        opacity: 1;
         background: var(--color-surface-4);
     }
     /* The active and explore states gain a border, so they give back the padding it would steal. */

@@ -241,7 +241,7 @@
                 <input
                     class="search-input"
                     type="text"
-                    placeholder="Find"
+                    placeholder={t('editor.find')}
                     bind:this={inputEl}
                     oninput={onInput}
                     onkeydown={handleKeydown}
@@ -250,7 +250,8 @@
                     <button
                         class="toggle-btn"
                         class:active={matchCase}
-                        title="Match Case (Alt+C)"
+                        title={t('editor.matchCaseTitle')}
+                        aria-label={t('editor.matchCaseAria')}
                         aria-pressed={matchCase}
                         onclick={() => { matchCase = !matchCase; onInput(); }}
                     >
@@ -261,7 +262,8 @@
                     <button
                         class="toggle-btn"
                         class:active={wholeWord}
-                        title="Whole Word (Alt+W)"
+                        title={t('editor.wholeWordTitle')}
+                        aria-label={t('editor.wholeWordAria')}
                         aria-pressed={wholeWord}
                         onclick={() => { wholeWord = !wholeWord; onInput(); }}
                     >
@@ -273,7 +275,8 @@
                     <button
                         class="toggle-btn"
                         class:active={regex}
-                        title="Use Regex (Alt+R)"
+                        title={t('editor.useRegexTitle')}
+                        aria-label={t('editor.useRegexAria')}
                         aria-pressed={regex}
                         onclick={() => { regex = !regex; onInput(); }}
                     >
@@ -285,17 +288,17 @@
                 <span class="match-count">{matchCount}</span>
             </div>
             <div class="search-nav">
-                <button class="nav-btn" title="Previous match (Shift+F3 / Shift+Enter)" aria-label="Previous match" onclick={() => selectNext(false)}>
+                <button class="nav-btn" title={t('editor.prevMatchTitle')} aria-label={t('editor.prevMatchAria')} onclick={() => selectNext(false)}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <polyline points="18,15 12,9 6,15"/>
                     </svg>
                 </button>
-                <button class="nav-btn" title="Next match (F3 / Enter)" aria-label="Next match" onclick={() => selectNext(true)}>
+                <button class="nav-btn" title={t('editor.nextMatchTitle')} aria-label={t('editor.nextMatchAria')} onclick={() => selectNext(true)}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <polyline points="6,9 12,15 18,9"/>
                     </svg>
                 </button>
-                <button class="nav-btn" title="Close (Escape)" aria-label="Close search" onclick={onClose}>
+                <button class="nav-btn" title={t('explorer.shared.closeEscape')} aria-label={t('editor.closeSearchAria')} onclick={onClose}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <line x1="18" y1="6" x2="6" y2="18"/>
                         <line x1="6" y1="6" x2="18" y2="18"/>
@@ -311,14 +314,14 @@
                     <input
                         class="search-input replace-input"
                         type="text"
-                        placeholder="Replace"
+                        placeholder={t('editor.replace')}
                         bind:this={replaceEl}
                         onkeydown={handleKeydown}
                     />
                 </div>
                 <div class="replace-actions">
-                    <button class="action-btn" title="Replace" onclick={doReplace}>{t('editor.replace')}</button>
-                    <button class="action-btn" title="Replace All (Ctrl+Enter)" onclick={doReplaceAll}>{t('editor.replaceAll')}</button>
+                    <button class="action-btn" onclick={doReplace}>{t('editor.replace')}</button>
+                    <button class="action-btn" title={t('editor.replaceAllTitle')} onclick={doReplaceAll}>{t('editor.replaceAll')}</button>
                 </div>
             </div>
         {:else}
@@ -338,7 +341,7 @@
         bottom: 0;
         left: 0;
         right: 0;
-        z-index: 100;
+        z-index: var(--z-dropdown);
         pointer-events: none;
     }
 
@@ -385,7 +388,7 @@
         outline: none;
         color: var(--color-text-primary);
         font-family: var(--font-mono, monospace);
-        font-size: 13px;
+        font-size: var(--text-sm);
         padding: 6px 0;
         min-width: 0;
     }
@@ -413,6 +416,7 @@
         line-height: 1;
     }
     .toggle-btn:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
@@ -421,7 +425,7 @@
     }
 
     .match-count {
-        font-size: 11px;
+        font-size: var(--text-2xs);
         color: var(--color-text-tertiary);
         white-space: nowrap;
         flex-shrink: 0;
@@ -447,6 +451,7 @@
         transition: background 0.1s, color 0.1s;
     }
     .nav-btn:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
@@ -479,12 +484,13 @@
         border-radius: var(--radius-sm);
         padding: 5px 12px;
         cursor: pointer;
-        font-size: 12px;
+        font-size: var(--text-xs);
         font-weight: 500;
         font-family: inherit;
         white-space: nowrap;
     }
     .action-btn:hover {
+        opacity: 1;
         background: var(--color-surface-4);
         color: var(--color-text-primary);
     }
@@ -499,13 +505,14 @@
         display: flex;
         align-items: center;
         gap: 4px;
-        font-size: 12px;
+        font-size: var(--text-xs);
         font-family: inherit;
         margin-top: 4px;
         width: 100%;
         justify-content: center;
     }
     .toggle-replace-btn:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-secondary);
     }
@@ -524,7 +531,7 @@
             min-width: 0;
         }
         .search-input {
-            font-size: 16px;
+            font-size: var(--text-lg);
             padding: 8px 0;
         }
         .toggle-btn {

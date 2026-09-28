@@ -23,10 +23,10 @@ import BoardOverview from '$lib/components/CardDetail/BoardOverview.svelte';
 import type { Task } from '$lib/types';
 
 const SECTIONS = [
-    { id: 'backlog', title: 'Backlog' },
-    { id: 'in_progress', title: 'In Progress' },
-    { id: 'review', title: 'Review' },
-    { id: 'done', title: 'Done' },
+    { id: 'backlog', label: 'Backlog' },
+    { id: 'in_progress', label: 'In Progress' },
+    { id: 'review', label: 'Review' },
+    { id: 'done', label: 'Done' },
 ];
 
 function makeTask(id: string, overrides: Partial<Task> = {}): Task {

@@ -5,6 +5,7 @@
      * from here and is never a saved setting.
      */
     import { t } from '$lib/i18n';
+    import Spinner from '../Spinner.svelte';
     import type { Project } from '$lib/types';
     import { imageTagFor } from './drafts';
     import type { SandboxDraftOwner } from './draft.svelte';
@@ -65,9 +66,7 @@
                 {#if dockerfileChanged}
                     <button type="button" class="btn-build" onclick={() => draft.rebuild(project)} disabled={busy} title={t('sandbox.buildImage')}>
                         {#if draft.building}
-                            <svg class="spin" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                                <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5" stroke-dasharray="20 10" stroke-linecap="round"/>
-                            </svg>
+                            <Spinner decorative />
                         {:else}
                             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
                                 <path d="M7 2L2 12h10L7 2z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="none"/>
@@ -78,9 +77,7 @@
                 {:else}
                     <button type="button" class="btn-rebuild" onclick={() => draft.rebuild(project)} disabled={busy} title={draft.buildNoCache ? t('sandbox.rebuildImageNoCache') : t('sandbox.rebuildImage')}>
                         {#if draft.building}
-                            <svg class="spin" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                                <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5" stroke-dasharray="20 10" stroke-linecap="round"/>
-                            </svg>
+                            <Spinner decorative />
                         {:else}
                             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
                                 <path d="M1.5 7a5.5 5.5 0 0110.2-2.8M12.5 7a5.5 5.5 0 01-10.2 2.8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" fill="none"/>
@@ -174,7 +171,7 @@
         display: flex;
         align-items: center;
         gap: 4px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
         cursor: pointer;
         white-space: nowrap;
@@ -188,7 +185,7 @@
     }
 
     .cache-toggle.disabled {
-        opacity: 0.5;
+        opacity: var(--opacity-disabled);
         cursor: not-allowed;
     }
 
@@ -203,8 +200,7 @@
         align-items: center;
         gap: 4px;
         border-radius: var(--radius-sm);
-        font-size: 0.75rem;
-        cursor: pointer;
+        font-size: var(--text-xs);
         transition: background 0.15s, border-color 0.15s;
         white-space: nowrap;
     }
@@ -224,25 +220,20 @@
     .btn-build {
         border: 1px solid var(--color-accent);
         background: var(--color-accent-dark);
-        color: white;
+        color: var(--color-btn-text);
     }
 
     .btn-build:hover:not(:disabled),
     .btn-browse:hover:not(:disabled),
     .btn-rebuild:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         border-color: var(--color-accent);
     }
 
     .btn-build:hover:not(:disabled) {
+        opacity: 1;
         background: var(--color-accent);
-    }
-
-    .btn-build:disabled,
-    .btn-rebuild:disabled,
-    .btn-browse:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
     }
 
     .dockerfile-path-row {
@@ -263,7 +254,7 @@
         border: 1px solid var(--color-border);
         background: var(--color-surface-1);
         color: var(--color-text-primary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-family: var(--font-mono, monospace);
         overflow: hidden;
         min-width: 0;
@@ -284,7 +275,7 @@
         border: 1px dashed var(--color-border);
         background: var(--color-surface-1);
         color: var(--color-text-secondary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-style: italic;
     }
 
@@ -297,7 +288,7 @@
         display: flex;
         align-items: center;
         gap: 6px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
         padding-left: 24px;
     }
@@ -306,17 +297,17 @@
         font-family: var(--font-mono, monospace);
         background: var(--color-surface-1);
         padding: 1px 4px;
-        border-radius: 3px;
-        font-size: 0.6875rem;
+        border-radius: var(--radius-sm);
+        font-size: var(--text-2xs);
     }
 
     .build-error {
         padding: 6px 10px;
-        background: rgba(248, 81, 73, 0.1);
-        border: 1px solid rgba(248, 81, 73, 0.3);
+        background: rgb(from var(--color-status-red) r g b / 0.1);
+        border: 1px solid rgb(from var(--color-status-red) r g b / 0.3);
         border-radius: var(--radius-sm);
         color: var(--color-status-red);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
     }
 
     .build-log {
@@ -327,7 +318,7 @@
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
         font-family: var(--font-mono);
-        font-size: 0.7rem;
+        font-size: var(--text-xs);
         line-height: 1.5;
         color: var(--color-text-secondary);
         margin-bottom: 8px;
@@ -346,14 +337,11 @@
     .build-notice {
         padding: 6px 10px;
         margin-bottom: 6px;
-        background: rgba(80, 140, 255, 0.08);
-        border: 1px solid rgba(80, 140, 255, 0.2);
+        background: rgb(from var(--color-status-blue) r g b / 0.08);
+        border: 1px solid rgb(from var(--color-status-blue) r g b / 0.2);
         border-radius: var(--radius-sm);
         color: var(--color-text-secondary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
     }
 
-    .spin {
-        animation: spin 1s linear infinite;
-    }
 </style>

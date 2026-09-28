@@ -1,5 +1,6 @@
 <script lang="ts">
     import FileMentionDropdown from '../FileMentionDropdown.svelte';
+    import Spinner from '$lib/components/Spinner.svelte';
     import { useFileMention } from '$lib/composables/use-file-mention.svelte';
     import { useImageAttachments } from '$lib/composables/use-image-attachments.svelte';
     import { uploadTaskFile } from '$lib/api';
@@ -131,7 +132,8 @@
         <button class="btn-edit-cancel" onclick={onCancel} title={t('chat.edit.cancelEditing')}>{t('chat.common.cancel')}</button>
         <button class="btn-edit-submit" onclick={() => { if (canSubmit) onSubmit?.(editContent.trim(), editAttachments); }} disabled={isSubmitting || !canSubmit} title={submitLabel}>
             {#if isSubmitting}
-                <span class="spinner-inline"></span>
+                <!-- The ring replaces the button's own words, so it carries them. -->
+                <Spinner label={submitLabel} />
             {:else if submitIcon === 'check'}
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <polyline points="20 6 9 17 4 12"/>
@@ -159,8 +161,6 @@
 <FileMentionDropdown {...mention.dropdownProps} />
 
 <style>
-    @import '$lib/styles/shared.css';
-
     .edit-form {
         display: flex;
         flex-direction: column;
@@ -178,7 +178,7 @@
         flex: 1;
         min-height: 0;
         resize: none;
-        font-size: 1rem;
+        font-size: var(--text-lg);
         line-height: 1.6;
     }
     .edit-form.fill .edit-actions {
@@ -193,7 +193,7 @@
         border: 1px solid var(--color-border);
         background: var(--color-surface-2);
         color: var(--color-text-primary);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         line-height: 1.5rem;
         font-family: inherit;
         resize: vertical;
@@ -237,7 +237,7 @@
         background: rgba(0,0,0,0.7);
         color: white;
         border: none;
-        font-size: 14px;
+        font-size: var(--text-base);
         line-height: 1;
         cursor: pointer;
         display: flex;
@@ -265,12 +265,13 @@
         gap: 4px;
         padding: 4px 12px;
         border-radius: var(--radius-sm);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         background: var(--color-surface-3);
         color: var(--color-text-primary);
         cursor: pointer;
     }
     .btn-edit-cancel:hover {
+        opacity: 1;
         background: var(--color-surface-4);
     }
     .btn-edit-submit {
@@ -279,16 +280,12 @@
         gap: 4px;
         padding: 4px 12px;
         border-radius: var(--radius-sm);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         background: var(--color-accent-dark);
         color: white;
         cursor: pointer;
     }
-    .btn-edit-submit:hover {
+    .btn-edit-submit:hover:not(:disabled) {
         opacity: 0.85;
-    }
-    .btn-edit-submit:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
     }
 </style>

@@ -30,8 +30,8 @@
 
     .ext-build-bar {
         height: 6px;
-        background: rgba(88, 166, 255, 0.15);
-        border-radius: 3px;
+        background: var(--color-accent-bg);
+        border-radius: var(--radius-sm);
         overflow: hidden;
     }
 
@@ -39,7 +39,7 @@
         height: 100%;
         width: var(--pct, 0%);
         background: var(--color-accent);
-        border-radius: 3px;
+        border-radius: var(--radius-sm);
         transition: width 0.3s ease;
     }
 
@@ -50,7 +50,7 @@
     .ext-build-text {
         display: block;
         margin-top: 0.25rem;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-tertiary);
         white-space: nowrap;
         overflow: hidden;

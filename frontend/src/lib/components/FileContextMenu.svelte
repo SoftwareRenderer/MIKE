@@ -186,7 +186,7 @@
     }
     .file-context-menu {
         position: fixed;
-        z-index: 900;
+        z-index: var(--z-overlay);
         min-width: 190px;
         display: flex;
         flex-direction: column;
@@ -194,7 +194,7 @@
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-md);
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+        box-shadow: var(--shadow-popover);
     }
     .menu-item {
         display: flex;
@@ -205,19 +205,18 @@
         border-radius: var(--radius-sm);
         background: transparent;
         color: var(--color-text-primary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         text-align: left;
-        cursor: pointer;
         white-space: nowrap;
     }
     .menu-item:hover:not(:disabled),
     .menu-item:focus-visible {
+        opacity: 1;
         background: var(--color-surface-3);
         outline: none;
     }
     .menu-item:disabled {
         color: var(--color-text-tertiary);
-        cursor: default;
     }
     .menu-item.destructive {
         color: var(--color-status-red);

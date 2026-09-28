@@ -93,12 +93,12 @@ func TestRenderSystemPrompt_ShippedTemplates(t *testing.T) {
 			if got := strings.Contains(out, "Plan-First Workflow"); got != tc.planMode {
 				t.Errorf("plan-mode section present = %v, want %v", got, tc.planMode)
 			}
-			if got := strings.Contains(out, "# Explore Mode"); got != tc.exploreMode {
+			if got := strings.Contains(out, "NEVER use create_task unless"); got != tc.exploreMode {
 				t.Errorf("explore-mode section present = %v, want %v", got, tc.exploreMode)
 			}
 			if tc.exploreMode {
 				for _, want := range []string{
-					"Create a task only on an explicit request.",
+					"NEVER use create_task unless the user explicitly asked for a separate task to be created.",
 					"Run order: children run BEFORE parents.",
 				} {
 					if !strings.Contains(out, want) {

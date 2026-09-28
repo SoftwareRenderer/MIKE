@@ -182,7 +182,7 @@
     }
 </script>
 
-<BaseModal title={t('explorer.fileBrowser.title')} width="560px" zIndex={300} modalClass="path-browser" onClose={handleClose}>
+<BaseModal title={t('explorer.fileBrowser.title')} width="560px" modalClass="path-browser" onClose={handleClose}>
         {#snippet toolbar()}
             <div class="tabs">
                 <button
@@ -206,7 +206,7 @@
                 <div class="path-bar">
                 <div class="path-bar-row">
                     <button class="home-btn" onclick={goHome} aria-label={t('explorer.shared.goHome')} title={t('explorer.shared.goHome')}>
-                        <Icon src={homeIcon} color="#8B949E" width={18} height={18} />
+                        <Icon src={homeIcon} color="var(--color-text-tertiary)" width={18} height={18} />
                     </button>
                     <input
                         type="text"
@@ -281,9 +281,9 @@
                             >
                                 <span class="icon" aria-hidden="true">
                                     {#if entry.isDir}
-                                        <Icon src={folderIcon} color="#6E7681" width={16} height={16} />
+                                        <Icon src={folderIcon} color="var(--color-text-muted)" width={16} height={16} />
                                     {:else}
-                                        <Icon src={fileIcon} color="#6E7681" width={16} height={16} />
+                                        <Icon src={fileIcon} color="var(--color-text-muted)" width={16} height={16} />
                                     {/if}
                                 </span>
                                 <span class="name">{entry.name}</span>
@@ -329,19 +329,19 @@
                     <input type="checkbox" checked={sandboxEnabled} onchange={(e) => sandboxEnabled = e.currentTarget.checked} />
                     <span>{t('explorer.fileBrowser.useSandbox')}</span>
                 </label>
-                <button type="button" class="btn-secondary" onclick={handleClose} title={t('explorer.shared.cancel')}>{t('explorer.shared.cancel')}</button>
+                <button type="button" class="btn" onclick={handleClose} title={t('explorer.shared.cancel')}>{t('explorer.shared.cancel')}</button>
                 {#if activeTab === 'browse'}
                     {#if isGitRepo}
-                        <button type="button" class="btn-primary" onclick={handleSelect} title={t('explorer.fileBrowser.selectTitle')}>
+                        <button type="button" class="btn btn-primary" onclick={handleSelect} title={t('explorer.fileBrowser.selectTitle')}>
                             {t('explorer.fileBrowser.select')}
                         </button>
                     {:else}
-                        <button type="button" class="btn-primary" onclick={handleInitGit} disabled={initGitLoading} title={t('explorer.fileBrowser.initGitTitle')}>
+                        <button type="button" class="btn btn-primary" onclick={handleInitGit} disabled={initGitLoading} title={t('explorer.fileBrowser.initGitTitle')}>
                             {initGitLoading ? t('explorer.fileBrowser.initializing') : t('explorer.fileBrowser.initGit')}
                         </button>
                     {/if}
                 {:else}
-                    <button type="button" class="btn-primary" onclick={handleClone} disabled={cloneLoading || !cloneUrl.trim()} title={t('explorer.fileBrowser.cloneIntoDirTitle')}>
+                    <button type="button" class="btn btn-primary" onclick={handleClone} disabled={cloneLoading || !cloneUrl.trim()} title={t('explorer.fileBrowser.cloneIntoDirTitle')}>
                         {cloneLoading ? t('explorer.fileBrowser.cloning') : t('explorer.fileBrowser.clone')}
                     </button>
                 {/if}
@@ -388,13 +388,14 @@
         border: none;
         border-radius: var(--radius-sm);
         color: var(--color-text-secondary);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 500;
         cursor: pointer;
         white-space: nowrap;
         text-align: center;
     }
     .tab:hover {
+        opacity: 1;
         color: var(--color-text-primary);
         background: var(--color-surface-3);
     }
@@ -403,6 +404,7 @@
         color: white;
     }
     .tab.active:hover {
+        opacity: 1;
         background: var(--color-accent-hover);
         color: white;
     }
@@ -425,14 +427,14 @@
     }
     .error {
         color: var(--color-status-red);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         padding: 8px;
         background: var(--color-status-red)11;
         border-radius: var(--radius-sm);
     }
     .git-indicator {
         color: var(--color-status-green);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         padding: 8px;
         background: var(--color-status-green)11;
         border-radius: var(--radius-sm);
@@ -450,9 +452,8 @@
         border: 1px solid var(--color-accent);
         border-radius: var(--radius-md);
         color: var(--color-text-primary);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-family: var(--font-mono);
-        outline: none;
     }
     .clone-form {
         display: flex;
@@ -461,7 +462,7 @@
         padding: 8px 0;
     }
     .clone-label {
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 600;
         color: var(--color-text-primary);
     }
@@ -472,7 +473,7 @@
         border: 1px solid var(--color-surface-4);
         border-radius: var(--radius-md);
         color: var(--color-text-primary);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-family: var(--font-mono);
         outline: none;
     }
@@ -480,7 +481,7 @@
         border-color: var(--color-accent);
     }
     .clone-help {
-        font-size: 0.8rem;
+        font-size: var(--text-sm);
         color: var(--color-text-tertiary);
     }
     .clone-help code {
@@ -498,13 +499,13 @@
         border-radius: var(--radius-md);
     }
     .clone-target-label {
-        font-size: 0.8rem;
+        font-size: var(--text-sm);
         color: var(--color-text-secondary);
         white-space: nowrap;
     }
     .clone-target-path {
         flex: 1;
-        font-size: 0.8rem;
+        font-size: var(--text-sm);
         font-family: var(--font-mono);
         color: var(--color-text-primary);
         overflow: hidden;
@@ -516,22 +517,20 @@
         background: var(--color-accent-dark);
         color: white;
         border-radius: var(--radius-md);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 500;
         white-space: nowrap;
     }
     .btn-mini:hover:not(:disabled) {
+        opacity: 1;
         background: var(--color-accent-hover);
-    }
-    .btn-mini:disabled {
-        opacity: 0.4;
-        cursor: not-allowed;
     }
     .btn-mini-cancel {
         background: var(--color-surface-3);
         color: var(--color-text-secondary);
     }
     .btn-mini-cancel:hover {
+        opacity: 1;
         background: var(--color-surface-4);
     }
     .icon-btn-sm {
@@ -545,29 +544,26 @@
         flex-shrink: 0;
     }
     .icon-btn-sm:hover:not(:disabled) {
+        opacity: 1;
         background: var(--color-surface-4);
         color: var(--color-text-primary);
-    }
-    .icon-btn-sm:disabled {
-        opacity: 0.4;
-        cursor: not-allowed;
     }
     .file-entry.git-repo:hover {
         background: var(--color-status-green)11;
     }
     .git-badge {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         padding: 1px 6px;
         background: var(--color-status-green)33;
         color: var(--color-status-green);
-        border-radius: 10px;
+        border-radius: var(--radius-lg);
         font-weight: 600;
     }
     .sandbox-toggle {
         display: flex;
         align-items: center;
         gap: 6px;
-        font-size: 0.8rem;
+        font-size: var(--text-sm);
         color: var(--color-text-secondary);
         cursor: pointer;
         user-select: none;
@@ -575,6 +571,6 @@
     }
     .sandbox-toggle input[type="checkbox"] {
         cursor: pointer;
-        accent-color: var(--color-primary);
+        accent-color: var(--color-accent);
     }
 </style>

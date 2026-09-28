@@ -204,7 +204,7 @@ func TestNoCoreTemplateReadsTheLocale(t *testing.T) {
 	if err != nil {
 		t.Fatalf("explore render: %v", err)
 	}
-	if !strings.Contains(exploreOut, "# Explore Mode") {
+	if !strings.Contains(exploreOut, "NEVER use create_task unless") {
 		t.Error("core's explore-mode section must still be there for a locale-only pack")
 	}
 }
@@ -260,7 +260,7 @@ func TestPackBaseTemplateResolvesCoreSubTemplates(t *testing.T) {
 		section     string
 	}{
 		{name: "plan", planMode: true, prefix: "PACK BASE mode=plan", section: "Plan-First Workflow"},
-		{name: "explore", exploreMode: true, prefix: "PACK BASE mode=explore", section: "# Explore Mode"},
+		{name: "explore", exploreMode: true, prefix: "PACK BASE mode=explore", section: "NEVER use create_task unless"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			data := baseSample()

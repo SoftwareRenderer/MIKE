@@ -1,6 +1,7 @@
 <script lang="ts">
     import type { Thread } from '$lib/types';
     import ThreadSelector from './ThreadSelector.svelte';
+    import Spinner from '$lib/components/Spinner.svelte';
     import { t } from '$lib/i18n';
 
     interface Props {
@@ -36,9 +37,7 @@
     <div class="divider-content">
         <span class="checkpoint-label" title={commitLabel || undefined}>
             {#if isPending}
-                <svg class="checkpoint-spinner" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
-                    <path d="M12 2a10 10 0 0 1 10 10"/>
-                </svg>
+                <Spinner size={12} decorative />
             {:else}
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
@@ -88,16 +87,13 @@
         display: inline-flex;
         align-items: center;
         gap: 4px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-accent);
         opacity: 1;
         white-space: nowrap;
     }
     .checkpoint-label svg {
         opacity: 0.7;
-    }
-    .checkpoint-spinner {
-        animation: spin 1s linear infinite;
     }
     .divider-actions {
         display: flex;
@@ -112,7 +108,7 @@
         min-height: 1.375rem;
         padding: 2px 8px;
         border-radius: var(--radius-sm);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 500;
         background: var(--color-surface-3);
         color: var(--color-text-secondary);
@@ -122,6 +118,7 @@
         white-space: nowrap;
     }
     .view-changes-btn:hover {
+        opacity: 1;
         background: color-mix(in srgb, var(--color-accent) 12%, transparent);
         color: var(--color-accent);
         border-color: color-mix(in srgb, var(--color-accent) 30%, transparent);

@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import type { DiffFile } from '$lib/types/diff';
-    import { gitStatusLabel, gitStatusAbsentFromHead } from '$lib/utils/git-status';
+    import { gitStatusLabel, gitStatusAbsentFromHead, gitStatusColor } from '$lib/utils/git-status';
     import { confirmList } from '$lib/utils/file-selection';
     import { sortPathsRootLast } from '$lib/utils/sort-paths';
     import { t } from '$lib/i18n';
@@ -14,9 +14,12 @@
     import FileContextMenu, { type FileMenuItem } from './FileContextMenu.svelte';
     import SelectionActionBar from './SelectionActionBar.svelte';
     import Icon from './Icon.svelte';
+    import EmptyState from './EmptyState.svelte';
+    import Spinner from './Spinner.svelte';
     import stageIcon from '$lib/assets/icons/stage.svg?raw';
     import unstageIcon from '$lib/assets/icons/unstage.svg?raw';
     import discardIcon from '$lib/assets/icons/discard.svg?raw';
+    import fileTextIcon from '$lib/assets/icons/file-text.svg?raw';
     import ResizeHandle from './ResizeHandle.svelte';
 
     const diffViewer = useLazyComponent(() => import('./DiffViewer.svelte'));
@@ -684,19 +687,6 @@
         collapsedSections = next;
     }
 
-    function getStatusBadge(entry: StatusEntry): { letter: string; color: string } {
-        switch (entry.status) {
-            case 'M': return { letter: 'M', color: '#569cd6' };
-            case 'A': return { letter: 'A', color: '#3fb950' };
-            case 'D': return { letter: 'D', color: '#f85149' };
-            case '?': return { letter: '??', color: '#8b949e' };
-            case 'R': return { letter: 'R', color: '#d29922' };
-            case 'U': return { letter: 'U', color: '#d29922' };
-            case 'C': return { letter: 'C', color: '#58a6ff' };
-            default: return { letter: entry.status, color: '#8b949e' };
-        }
-    }
-
     /** Split path into { folder, name } — folder is the parent dirs, name is the basename. */
     function splitPath(path: string): { folder: string; name: string } {
         const idx = path.lastIndexOf('/');
@@ -911,14 +901,14 @@
 <div class="git-status-panel">
     <!-- Header -->
     <div class="panel-header">
-        <button class="close-btn" onclick={onClose} aria-label="Close changes panel" title="Close (Escape)">
+        <button class="close-btn" onclick={onClose} aria-label={t('git.closePanelAria')} title={t('explorer.shared.closeEscape')}>
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
         </button>
         <span class="panel-title">{t('git.changes')}</span>
         <!-- Commit comparison dropdowns -->
-        <div class="commit-selectors" role="group" aria-label="Compare commits">
+        <div class="commit-selectors" role="group" aria-label={t('git.compareAria')}>
             {#snippet commitList(commits: GitCommit[], selected: string, idBase: string, query: string, onPick: (commit: GitCommit) => void, onKeydown: (e: KeyboardEvent) => void, onFocusItem: (index: number) => void)}
                 {#each commits as commit, i}
                     <button
@@ -957,13 +947,13 @@
                         bind:this={fromInputEl}
                         type="text"
                         class="commit-combobox-input"
-                        placeholder="commit hash or subject"
+                        placeholder={t('git.commitQueryPlaceholder')}
                         value={fromInputValue}
                         oninput={handleFromInput}
                         onkeydown={handleFromKeydown}
                         onblur={handleFromInputBlur}
                         onfocus={handleFromInputFocus}
-                        aria-label="From commit"
+                        aria-label={t('git.fromCommitAria')}
                         aria-expanded={showFromDropdown}
                         aria-controls="compare-from-listbox"
                         aria-autocomplete="list"
@@ -974,7 +964,7 @@
                         type="button"
                         class="commit-combobox-toggle"
                         onclick={toggleFromDropdown}
-                        aria-label={showFromDropdown ? 'Hide suggestions' : 'Show suggestions'}
+                        aria-label={showFromDropdown ? t('git.hideSuggestionsAria') : t('git.showSuggestionsAria')}
                     >
                         <svg width="8" height="8" viewBox="0 0 8 8" fill="none" aria-hidden="true">
                             <polyline points="1.5,2.5 4,5.5 6.5,2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -1025,13 +1015,13 @@
                         bind:this={toInputEl}
                         type="text"
                         class="commit-combobox-input"
-                        placeholder="commit hash or subject"
+                        placeholder={t('git.commitQueryPlaceholder')}
                         value={toInputValue}
                         oninput={handleToInput}
                         onkeydown={handleToKeydown}
                         onblur={handleToInputBlur}
                         onfocus={handleToInputFocus}
-                        aria-label="To commit"
+                        aria-label={t('git.toCommitAria')}
                         aria-expanded={showToDropdown}
                         aria-controls="compare-to-listbox"
                         aria-autocomplete="list"
@@ -1042,7 +1032,7 @@
                         type="button"
                         class="commit-combobox-toggle"
                         onclick={toggleToDropdown}
-                        aria-label={showToDropdown ? 'Hide suggestions' : 'Show suggestions'}
+                        aria-label={showToDropdown ? t('git.hideSuggestionsAria') : t('git.showSuggestionsAria')}
                     >
                         <svg width="8" height="8" viewBox="0 0 8 8" fill="none" aria-hidden="true">
                             <polyline points="1.5,2.5 4,5.5 6.5,2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -1066,9 +1056,12 @@
 
         <!-- Pull / Push / Commit — pinned to the right edge of the header -->
         <div class="panel-actions">
-            <button class="panel-icon-btn" onclick={handlePull} disabled={pulling || pushing} title={pulling ? 'Pulling…' : pullLabel} aria-label={pullLabel}>
+            <!-- Each of the two sync buttons is dead because the other one is running, and a button's name
+                 says only what it would do. The wait lives here so it is read, not hovered. -->
+            <span id="git-sync-busy" class="sr-only">{pulling ? t('git.pullBusy') : pushing ? t('git.pushBusy') : ''}</span>
+            <button class="panel-icon-btn" onclick={handlePull} disabled={pulling || pushing} title={pulling ? t('git.pullBusy') : pullLabel} aria-label={pullLabel} aria-describedby={pulling || pushing ? 'git-sync-busy' : undefined}>
                 {#if pulling}
-                    <span class="mini-spinner" aria-hidden="true"></span>
+                    <Spinner size={12} decorative />
                 {:else}
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                         <path d="M8 3v7M5 7l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -1077,9 +1070,9 @@
                 {/if}
                 <span class="panel-count" aria-hidden="true">{behindCommits}</span>
             </button>
-            <button class="panel-icon-btn" onclick={handlePush} disabled={pulling || pushing} title={pushing ? 'Pushing…' : pushLabel} aria-label={pushLabel}>
+            <button class="panel-icon-btn" onclick={handlePush} disabled={pulling || pushing} title={pushing ? t('git.pushBusy') : pushLabel} aria-label={pushLabel} aria-describedby={pulling || pushing ? 'git-sync-busy' : undefined}>
                 {#if pushing}
-                    <span class="mini-spinner" aria-hidden="true"></span>
+                    <Spinner size={12} decorative />
                 {:else}
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                         <path d="M8 10V3M5 6l3-3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -1092,8 +1085,8 @@
                 class="panel-commit-btn"
                 disabled={stagedEntries.length === 0}
                 onclick={openCommitDialog}
-                title={stagedEntries.length > 0 ? 'Commit staged changes' : 'Nothing staged to commit'}
-                aria-label={stagedEntries.length > 0 ? 'Commit staged changes' : 'Nothing staged to commit'}
+                title={stagedEntries.length > 0 ? t('git.commitStagedAria') : t('git.nothingStagedAria')}
+                aria-label={stagedEntries.length > 0 ? t('git.commitStagedAria') : t('git.nothingStagedAria')}
             >
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
                     <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.2"/>
@@ -1106,17 +1099,11 @@
 
     {#if loading}
         <div class="panel-loading">
-            <span class="spinner"></span>
+            <Spinner size={20} decorative />
             <span>{t('diff.loadingChanges')}</span>
         </div>
     {:else if !hasContent}
-        <div class="panel-empty">
-            <svg width="28" height="28" viewBox="0 0 16 16" fill="none">
-                <path d="M3 2h6l4 4v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.3"/>
-                <path d="M9 2v4h4" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.3"/>
-            </svg>
-            <p>{t('diff.noChanges')}</p>
-        </div>
+        <EmptyState class="pane-fill" title={t('diff.noChanges')} icon={fileTextIcon} />
     {:else}
         <div class="panel-body">
             <!-- Left: Changes file list sidebar -->
@@ -1168,7 +1155,7 @@
                                         >
                                             <span class="changes-file-basename">{name}</span>
                                             {#if folder}<span class="changes-file-folder">{folder}</span>{/if}
-                                            <span class="changes-file-badge" style="color: {getStatusBadge(row).color}" title={gitStatusLabel(row.status)}>
+                                            <span class="changes-file-badge" style="color: {gitStatusColor(row.status)}" title={gitStatusLabel(row.status)}>
                                                 {row.status === '?' ? '??' : row.status}
                                             </span>
                                         </button>
@@ -1210,7 +1197,7 @@
                         {#snippet actions()}
                             <button
                                 type="button"
-                                class="selection-btn"
+                                class="selection-btn btn-ghost"
                                 disabled={selectedBySection.unstaged.length === 0}
                                 title={t('git.stage')}
                                 aria-label={t('git.stage')}
@@ -1220,7 +1207,7 @@
                             </button>
                             <button
                                 type="button"
-                                class="selection-btn"
+                                class="selection-btn btn-ghost"
                                 disabled={selectedBySection.staged.length === 0}
                                 title={t('git.unstage')}
                                 aria-label={t('git.unstage')}
@@ -1230,7 +1217,7 @@
                             </button>
                             <button
                                 type="button"
-                                class="selection-btn destructive"
+                                class="selection-btn btn-ghost destructive"
                                 title={t('explorer.shared.discard')}
                                 aria-label={t('explorer.shared.discard')}
                                 onclick={() => handleDiscardRows(selectedRows)}
@@ -1255,7 +1242,7 @@
             <!-- Resize handle: sidebar ↔ diff -->
             {#if !isMobile}
             <ResizeHandle
-                ariaLabel="Resize changes sidebar"
+                ariaLabel={t('git.resizeSidebarAria')}
                 onDragStart={handleDragStart}
                 onDragMove={handleDragMove}
                 onDragEnd={handleDragEnd}
@@ -1325,7 +1312,7 @@
         flex-wrap: wrap;
     }
     .panel-title {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 600;
         color: var(--color-text-secondary);
         text-transform: uppercase;
@@ -1338,13 +1325,14 @@
         background: transparent;
         color: var(--color-text-tertiary);
         cursor: pointer;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         display: flex;
         align-items: center;
         justify-content: center;
         flex-shrink: 0;
     }
     .close-btn:hover {
+        opacity: 1;
         color: var(--color-text-primary);
         background: var(--color-surface-3);
     }
@@ -1383,7 +1371,7 @@
         padding: 1px 4px;
         border: 1px solid var(--color-border);
         background: var(--color-surface-1);
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         max-width: 220px;
     }
     .commit-selector.open .commit-combobox-input {
@@ -1401,10 +1389,13 @@
         border: none;
         background: transparent;
         color: var(--color-text-secondary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-family: var(--font-mono);
-        outline: none;
         width: 100%;
+    }
+    .commit-combobox-input:focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: -1px;
     }
     .commit-combobox-input::placeholder {
         color: var(--color-text-tertiary);
@@ -1419,10 +1410,11 @@
         background: transparent;
         color: var(--color-text-tertiary);
         cursor: pointer;
-        border-radius: 3px;
+        border-radius: var(--radius-sm);
         flex-shrink: 0;
     }
     .commit-combobox-toggle:hover {
+        opacity: 1;
         color: var(--color-text-primary);
         background: var(--color-surface-3);
     }
@@ -1433,21 +1425,21 @@
     .commit-dropdown-empty {
         padding: 6px 10px;
         color: var(--color-text-tertiary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-style: italic;
     }
     .commit-dropdown-list {
         position: absolute;
         top: 100%;
         left: 0;
-        z-index: 100;
+        z-index: var(--z-dropdown);
         min-width: 260px;
         max-height: 240px;
         overflow-y: auto;
         background: var(--color-surface-2);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-md);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        box-shadow: var(--shadow-popover);
         margin-top: 2px;
     }
     .commit-dropdown-item {
@@ -1459,11 +1451,12 @@
         border: none;
         background: transparent;
         color: var(--color-text-primary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         text-align: left;
         cursor: pointer;
     }
     .commit-dropdown-item:hover {
+        opacity: 1;
         background: var(--color-surface-3);
     }
     .commit-dropdown-item:focus-visible {
@@ -1481,7 +1474,7 @@
     }
     .commit-dropdown-hash {
         font-family: var(--font-mono);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
         flex-shrink: 0;
         width: 3.5rem;
@@ -1498,8 +1491,8 @@
     .compare-error {
         padding: 8px 12px;
         color: var(--color-status-red);
-        font-size: 0.75rem;
-        background: rgba(248, 81, 73, 0.1);
+        font-size: var(--text-xs);
+        background: rgb(from var(--color-git-deleted) r g b / 0.1);
         border-top: 1px solid var(--color-border);
         display: flex;
         align-items: center;
@@ -1517,18 +1510,16 @@
         border: none;
         background: transparent;
         color: var(--color-text-secondary);
-        cursor: pointer;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         flex-shrink: 0;
     }
     .panel-icon-btn:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
     .panel-icon-btn:disabled,
     .panel-icon-btn:disabled:hover {
-        opacity: 0.5;
-        cursor: not-allowed;
         background: transparent;
         color: var(--color-text-secondary);
     }
@@ -1542,40 +1533,23 @@
         border: none;
         background: var(--color-accent-dark);
         color: white;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 500;
-        cursor: pointer;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         white-space: nowrap;
     }
-    .panel-commit-btn:hover {
+    .panel-commit-btn:hover:not(:disabled) {
         opacity: 0.9;
-    }
-    .panel-commit-btn:disabled,
-    .panel-commit-btn:disabled:hover {
-        opacity: 0.45;
-        cursor: not-allowed;
-    }
-
-    /* Busy indicator for Pull/Push */
-    .mini-spinner {
-        width: 12px;
-        height: 12px;
-        border: 2px solid currentColor;
-        border-top-color: transparent;
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
     }
 
     .panel-count {
         font-family: var(--font-mono);
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         line-height: 1;
     }
 
-    /* Loading / Empty */
-    .panel-loading,
-    .panel-empty {
+    /* Loading */
+    .panel-loading {
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -1583,19 +1557,10 @@
         gap: 12px;
         padding: 48px 24px;
         color: var(--color-text-secondary);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         flex: 1;
         min-height: 0;
     }
-    .panel-loading .spinner {
-        width: 20px;
-        height: 20px;
-        border: 2px solid var(--color-text-secondary);
-        border-top-color: transparent;
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
-    }
-
     /* Body: two-column layout */
     .panel-body {
         display: flex;
@@ -1635,7 +1600,7 @@
         border: none;
         background: transparent;
         color: var(--color-text-secondary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.04em;
@@ -1655,7 +1620,7 @@
     }
     .changes-section-count {
         margin-left: auto;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 500;
         color: var(--color-text-tertiary);
     }
@@ -1670,7 +1635,7 @@
         background: transparent;
         color: var(--color-text-tertiary);
         cursor: pointer;
-        border-radius: 3px;
+        border-radius: var(--radius-sm);
         flex-shrink: 0;
     }
     .changes-section-action:hover {
@@ -1703,12 +1668,13 @@
         border: none;
         background: transparent;
         color: var(--color-text-primary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         cursor: pointer;
         text-align: left;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
     }
     .changes-file-item:hover {
+        opacity: 1;
         background: var(--color-surface-3);
     }
     .changes-file-item.selected {
@@ -1735,7 +1701,7 @@
         padding: 0 6px;
     }
     .changes-file-badge {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 700;
         font-family: var(--font-mono);
         flex-shrink: 0;
@@ -1757,7 +1723,7 @@
         background: transparent;
         color: var(--color-text-tertiary);
         cursor: pointer;
-        border-radius: 3px;
+        border-radius: var(--radius-sm);
         flex-shrink: 0;
         opacity: 0;
         transition: opacity 0.1s ease;
@@ -1769,10 +1735,12 @@
         opacity: 1;
     }
     .changes-stage-btn:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
     .changes-discard-btn:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-status-red);
     }
@@ -1792,7 +1760,7 @@
         justify-content: center;
         padding: 48px 24px;
         color: var(--color-text-tertiary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         flex: 1;
     }
 

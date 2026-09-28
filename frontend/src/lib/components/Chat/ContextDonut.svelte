@@ -20,11 +20,13 @@
     let remainingPct = $derived(Math.max(0, Math.min(100, 100 - percentage)));
     let donutOffset = $derived(CIRCUMFERENCE * (1 - remainingPct / 100));
 
+    // A `var()` reference rather than a hex, because the browser resolves it in the SVG `stroke`
+    // attribute — which is what lets the ring follow the active theme's status tokens.
     function getBarColor(): string {
         if (isDanger) return 'var(--color-status-red)';
         if (isOrange) return 'var(--color-status-orange-dark)';
-        if (isWarning) return 'var(--color-status-amber, #f59e0b)';
-        return 'var(--color-status-green, #3fb950)';
+        if (isWarning) return 'var(--color-status-amber)';
+        return 'var(--color-status-green)';
     }
 </script>
 

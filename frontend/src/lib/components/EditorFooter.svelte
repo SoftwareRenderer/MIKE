@@ -1,6 +1,7 @@
 <script lang="ts">
     import { fetchLSPSandboxMemory } from '$lib/api/lsp';
     import { t } from '$lib/i18n';
+    import Spinner from './Spinner.svelte';
     import { formatSandboxMemory, isSandboxMemoryWarning } from '$lib/utils/memory-stats';
     import type { SandboxMemoryStats } from '$lib/types';
 
@@ -72,10 +73,10 @@
                 class="footer-btn footer-toggle"
                 class:active={lspTooltipVisible}
                 onclick={toggleLspTooltip}
-                aria-label="LSP status"
+                aria-label={t('lsp.statusAria')}
             >
                 {#if lspConnecting}
-                    <span class="lsp-spinner"></span>
+                    <Spinner size={12} decorative />
                 {/if}
                 {lspStatusLabel}
             </button>
@@ -117,7 +118,7 @@
                 {t('editor.cursorPosition', { line: cursorLine, col: cursorCol })}
             {/if}
         </button>
-        <button type="button" class="footer-btn footer-toggle" class:active={wordWrap} title="Toggle word wrap" onclick={toggleWordWrap}>
+        <button type="button" class="footer-btn footer-toggle" class:active={wordWrap} title={t('editor.wrapTitle')} onclick={toggleWordWrap}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M3 7h18"/>
                 <path d="M3 17h12"/>
@@ -128,7 +129,7 @@
         </button>
     </div>
     <div class="footer-right">
-        <button class="footer-btn" title="Find (Ctrl+F)" onclick={onFind}>
+        <button class="footer-btn" title={t('editor.findTitle')} onclick={onFind}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="11" cy="11" r="8"/>
                 <line x1="21" y1="21" x2="16.65" y2="16.65"/>
@@ -147,7 +148,7 @@
         padding: 4px 10px;
         border-top: 1px solid var(--color-border);
         flex-shrink: 0;
-        font-size: 12px;
+        font-size: var(--text-xs);
         color: var(--color-text-tertiary);
         background: var(--color-surface-2);
         position: relative;
@@ -162,27 +163,17 @@
         align-items: center;
         gap: 12px;
     }
-    .lsp-spinner {
-        display: inline-block;
-        width: 10px;
-        height: 10px;
-        border: 2px solid currentColor;
-        border-top-color: transparent;
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
-        opacity: 0.6;
-    }
     .lsp-tooltip {
         position: absolute;
         bottom: calc(100% + 4px);
         left: 0;
         background: var(--color-surface-3);
         border: 1px solid var(--color-border);
-        border-radius: 6px;
+        border-radius: var(--radius-md);
         padding: 6px 12px;
-        z-index: 100;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-        font-size: 12px;
+        z-index: var(--z-dropdown);
+        box-shadow: var(--shadow-popover);
+        font-size: var(--text-xs);
         min-width: 180px;
     }
     .lsp-tooltip-row {
@@ -214,7 +205,7 @@
         overflow-y: auto;
         text-align: left;
         font-family: var(--font-mono);
-        font-size: 11px;
+        font-size: var(--text-2xs);
         color: var(--color-text-secondary);
         white-space: pre-wrap;
         word-break: break-word;
@@ -227,16 +218,17 @@
         gap: 4px;
         padding: 2px 8px;
         border: none;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         background: var(--color-surface-3);
         color: var(--color-text-secondary);
         cursor: pointer;
-        font-size: 12px;
+        font-size: var(--text-xs);
         font-family: var(--font-mono);
         flex-shrink: 0;
     }
     .footer-btn:hover,
     :global(.ext-footer-btn:hover) {
+        opacity: 1;
         background: var(--color-surface-4);
         color: var(--color-text-primary);
     }
@@ -247,7 +239,8 @@
     }
     .footer-btn.active:hover,
     :global(.ext-footer-btn.active:hover) {
-        background: #484848;
+        opacity: 1;
+        background: var(--color-surface-5);
         color: var(--color-text-primary);
     }
     .footer-btn.footer-toggle.active,

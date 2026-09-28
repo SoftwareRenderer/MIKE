@@ -2,6 +2,7 @@
     import type { Thread } from '$lib/types';
     import { t } from '$lib/i18n';
     import { useClickOutside } from '$lib/composables/use-click-outside.svelte';
+    import Spinner from '$lib/components/Spinner.svelte';
 
     interface Props {
         threads: Thread[];
@@ -56,7 +57,8 @@
                 >
                     <span class="thread-name">{thread.name}</span>
                     {#if isSwitching}
-                        <span class="switch-spinner"></span>
+                        <!-- Every item wears the ring while a switch is out, so the ring says nothing. -->
+                        <Spinner size={12} decorative />
                     {/if}
                 </button>
             {/each}
@@ -76,7 +78,7 @@
         min-height: 1.375rem;
         padding: 2px 8px;
         border-radius: var(--radius-sm);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 500;
         background: var(--color-surface-3);
         color: var(--color-text-secondary);
@@ -86,6 +88,7 @@
         white-space: nowrap;
     }
     .thread-btn:hover {
+        opacity: 1;
         background: var(--color-surface-4);
         color: var(--color-text-primary);
     }
@@ -102,7 +105,7 @@
         border-radius: var(--radius-md);
         padding: 4px;
         min-width: 160px;
-        z-index: 100;
+        z-index: var(--z-dropdown);
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     }
     .thread-menu-item {
@@ -112,15 +115,15 @@
         width: 100%;
         padding: 6px 10px;
         border-radius: var(--radius-sm);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         background: none;
         border: none;
         color: var(--color-text-secondary);
-        cursor: pointer;
         transition: all 0.1s ease;
         text-align: left;
     }
     .thread-menu-item:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
@@ -128,20 +131,7 @@
         background: color-mix(in srgb, var(--color-accent) 18%, transparent);
         color: var(--color-accent);
     }
-    .thread-menu-item:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
     .thread-name {
         font-weight: 500;
-    }
-    .switch-spinner {
-        display: inline-block;
-        width: 12px;
-        height: 12px;
-        border: 2px solid currentColor;
-        border-top-color: transparent;
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
     }
 </style>

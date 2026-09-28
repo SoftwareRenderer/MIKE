@@ -26,8 +26,8 @@ const ABOUT_TAB = 'button.tab-btn:has-text("About")';
 const SESSIONS_SECTION = '.sessions-section';
 const SESSION_ROW = '.sessions-section .settings-row';
 const CURRENT_BADGE = '.session-badge';
-const ROW_REVOKE = 'button[aria-label^="revoke-session-"]';
-const REVOKE_ALL = 'button[aria-label="revoke-all-other-sessions"]';
+const ROW_REVOKE = 'button[aria-label^="Revoke session "]';
+const REVOKE_ALL = 'button:has-text("Revoke all other sessions")';
 // Confirm button of the app-wide ConfirmationDialog (unique class).
 const CONFIRM_BTN = '.btn-confirm';
 // Login modal that replaces the app when unauthenticated.
@@ -96,12 +96,12 @@ test.describe.serial('Settings → About sessions', () => {
     await expect(ua).toBeVisible();
     await expect(ua).toHaveAttribute('title', /.+/);
 
-    // Revoke affordance: stable, test-friendly label carrying the row's own id.
+    // Revoke affordance: a translated name that carries the row's own id.
     const label = await row.locator(ROW_REVOKE).getAttribute('aria-label');
-    expect(label).toMatch(/^revoke-session-.+$/);
-    // The row's own id is in the label (and in data-session-id).
+    expect(label).toMatch(/^Revoke session .+$/);
+    // The row's own id is in the name (and in data-session-id).
     const sessionId = await apiSessions(page).then(s => s.find(x => x.current)?.id ?? '');
-    expect(label).toBe(`revoke-session-${sessionId}`);
+    expect(label).toBe(`Revoke session ${sessionId}`);
     await expect(row).toHaveAttribute('data-session-id', sessionId);
   });
 
@@ -111,7 +111,7 @@ test.describe.serial('Settings → About sessions', () => {
 
     // Seed one "other" session (cookie discarded — the page keeps its own session).
     await addOtherSession(page);
-    await page.locator('button[aria-label="refresh-sessions"]').click();
+    await page.locator('button[aria-label="Reload the session list"]').click();
     await expect(async () => {
       expect(await page.locator(SESSION_ROW).count()).toBeGreaterThanOrEqual(2);
       expect((await apiSessions(page)).length).toBeGreaterThanOrEqual(2);

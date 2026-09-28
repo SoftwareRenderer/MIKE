@@ -1,6 +1,7 @@
 <script lang="ts">
     import type { Provider } from '$lib/types';
     import Icon from '$lib/components/Icon.svelte';
+    import Spinner from '$lib/components/Spinner.svelte';
     import commitPushIcon from '$lib/assets/icons/commit-push.svg?raw';
     import ModelSelector from './ModelSelector.svelte';
     import { isTaskPaused } from '$lib/utils/execution-state';
@@ -60,7 +61,7 @@
         {/if}
         <button class="btn-commit-done" onclick={onStartTask} disabled={isStarting} title={t('chat.review.resumePausedTip')}>
             {#if isStarting}
-                <span class="spinner-inline"></span> {t('chat.review.resuming')}
+                <Spinner decorative /> {t('chat.review.resuming')}
             {:else}
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 2l10 6-10 6V2z" fill="currentColor"/></svg>
                 {t('chat.review.resume')}
@@ -93,7 +94,7 @@
         {#if showResumeButton}
             <button class="btn-commit-done" onclick={onStartTask} disabled={isStarting} title={t('chat.review.resumeFromMessageTip')}>
                 {#if isStarting}
-                    <span class="spinner-inline"></span> {t('chat.review.resuming')}
+                    <Spinner decorative /> {t('chat.review.resuming')}
                 {:else}
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 2l10 6-10 6V2z" fill="currentColor"/></svg>
                     {t('chat.review.resume')}
@@ -102,9 +103,9 @@
         {:else if hasStagedChanges}
             <button class="btn-commit-done btn-commit-and-done" onclick={onCommitAndDone} disabled={isCommitting} title={t('chat.review.commitAndDoneTip')}>
                 {#if queueStatus === 'queued'}
-                    <span class="spinner-inline"></span> {t('chat.review.inQueue')}
+                    <Spinner decorative /> {t('chat.review.inQueue')}
                 {:else if queueStatus === 'processing' || isCommitting}
-                    <span class="spinner-inline"></span> {t('chat.review.committing')}
+                    <Spinner decorative /> {t('chat.review.committing')}
                 {:else}
                     <Icon src={commitPushIcon} color="currentColor" width={14} height={14} />
                     {t('chat.review.commitAndDone')}
@@ -113,7 +114,7 @@
         {:else}
             <button class="btn-commit-done" onclick={onMoveToDone} disabled={isCommitting} title={t('chat.review.moveToDoneTip')}>
                 {#if isCommitting}
-                    <span class="spinner-inline"></span> {t('chat.review.moving')}
+                    <Spinner decorative /> {t('chat.review.moving')}
                 {:else}
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8l3 3 5-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     {t('chat.review.moveToDoneButton')}
@@ -137,7 +138,7 @@
         {/if}
         <button class="btn-restart-task" onclick={onStartTask} disabled={isStarting || (providers.length > 0 && !selectedModel)} title={t('chat.review.restartTip')}>
             {#if isStarting}
-                <span class="spinner-inline"></span> {t('chat.review.restarting')}
+                <Spinner decorative /> {t('chat.review.restarting')}
             {:else}
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <path d="M2 8a6 6 0 0 1 10.47-4M14 8a6 6 0 0 1-10.47 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
@@ -150,8 +151,6 @@
 {/if}
 
 <style>
-    @import '$lib/styles/shared.css';
-
     .chat-review-bar {
         display: flex;
         align-items: center;
@@ -173,15 +172,18 @@
         align-items: center;
         padding: 6px 12px;
         border-radius: var(--radius-md);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 500;
         background: var(--color-surface-2);
-        color: var(--color-text);
+        color: var(--color-text-primary);
         border: 1px solid var(--color-border);
         cursor: pointer;
         transition: all 0.15s ease;
     }
     .btn-move:hover {
+        /* `opacity: 1` cancels app.css's hover dim the way `shared.css` explains: the background and
+           border shift is this control's answer, and it must not also fade. */
+        opacity: 1;
         background: var(--color-surface-1);
         border-color: var(--color-accent);
     }
@@ -191,24 +193,19 @@
         gap: 6px;
         padding: 7px 16px;
         border-radius: var(--radius-md);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 600;
         background: var(--color-surface-2);
         color: var(--color-text-primary);
         border: 1.5px solid var(--color-status-green);
-        cursor: pointer;
         transition: all 0.15s ease;
     }
     .btn-commit-and-done {
         border-color: var(--color-status-yellow);
     }
     .btn-commit-done:hover:not(:disabled) {
+        opacity: 1;
         background: var(--color-surface-3);
-        opacity: 0.9;
-    }
-    .btn-commit-done:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
     }
     .restart-model-row {
         display: flex;
@@ -221,19 +218,14 @@
         gap: 6px;
         padding: 8px 16px;
         border-radius: var(--radius-md);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 600;
         background: var(--color-accent-dark);
         color: white;
         border: none;
-        cursor: pointer;
         transition: all 0.15s ease;
     }
     .btn-restart-task:hover:not(:disabled) {
         opacity: 0.85;
-    }
-    .btn-restart-task:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
     }
 </style>

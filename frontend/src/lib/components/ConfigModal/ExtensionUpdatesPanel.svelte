@@ -93,17 +93,19 @@
 {/if}
 
 <style>
+    @import '$lib/styles/shared.css';
+
     /* Updates section */
     .updates-section {
-        background: rgba(88, 166, 255, 0.08);
-        border: 1px solid rgba(88, 166, 255, 0.2);
-        border-radius: 8px;
+        background: rgb(from var(--color-accent-light) r g b / 0.08);
+        border: 1px solid rgb(from var(--color-accent-light) r g b / 0.2);
+        border-radius: var(--radius-lg);
         padding: 1rem;
     }
 
     .updates-section h3 {
         margin: 0;
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         color: var(--color-accent);
     }
 
@@ -117,7 +119,7 @@
 
     .updates-none .updates-no-result {
         margin: 0.25rem 0 0;
-        font-size: 0.85rem;
+        font-size: var(--text-base);
         color: var(--color-text-secondary);
     }
 
@@ -131,15 +133,15 @@
     }
 
     .update-item:not(:last-child) {
-        border-bottom: 1px solid rgba(88, 166, 255, 0.15);
+        border-bottom: 1px solid var(--color-accent-bg);
     }
 
     .update-item.has-new-perms {
         padding: 0.75rem;
         margin: 0.5rem 0;
-        background: rgba(255, 166, 0, 0.1);
-        border: 1px solid rgba(255, 166, 0, 0.4);
-        border-radius: 8px;
+        background: rgb(from var(--color-warning) r g b / 0.1);
+        border: 1px solid rgb(from var(--color-warning) r g b / 0.4);
+        border-radius: var(--radius-lg);
     }
 
     .update-info {
@@ -159,7 +161,7 @@
     }
 
     .update-versions {
-        font-size: 0.8rem;
+        font-size: var(--text-sm);
         color: var(--color-text-tertiary);
         margin-left: 0.5rem;
         flex-shrink: 0;
@@ -174,15 +176,15 @@
         flex-basis: 100%;
         margin: 0.25rem 0 0.5rem;
         padding: 0.6rem 0.75rem;
-        background: rgba(255, 166, 0, 0.12);
-        border: 1px solid rgba(255, 166, 0, 0.35);
-        border-radius: 6px;
+        background: rgb(from var(--color-warning) r g b / 0.12);
+        border: 1px solid rgb(from var(--color-warning) r g b / 0.35);
+        border-radius: var(--radius-md);
     }
 
     .update-new-perms-title {
-        font-size: 0.8rem;
+        font-size: var(--text-sm);
         font-weight: 700;
-        color: var(--color-warning, #e0a030);
+        color: var(--color-warning);
         margin-bottom: 0.4rem;
     }
 
@@ -205,13 +207,13 @@
         display: inline-flex;
         align-items: center;
         gap: 4px;
-        font-size: 0.82rem;
+        font-size: var(--text-sm);
         font-weight: 600;
         color: var(--color-text-primary);
     }
 
     .update-new-perm-desc {
-        font-size: 0.78rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
         line-height: 1.4;
     }
@@ -220,13 +222,13 @@
         flex-basis: 100%;
         margin: 0.25rem 0 0.5rem;
         padding: 0.6rem 0.75rem;
-        background: rgba(88, 166, 255, 0.08);
-        border: 1px solid rgba(88, 166, 255, 0.25);
-        border-radius: 6px;
+        background: rgb(from var(--color-accent-light) r g b / 0.08);
+        border: 1px solid rgb(from var(--color-accent-light) r g b / 0.25);
+        border-radius: var(--radius-md);
     }
 
     .update-changelog-title {
-        font-size: 0.8rem;
+        font-size: var(--text-sm);
         font-weight: 700;
         color: var(--color-text-secondary);
         margin-bottom: 0.4rem;
@@ -248,45 +250,21 @@
     }
 
     .update-changelog-desc {
-        font-size: 0.82rem;
+        font-size: var(--text-sm);
         color: var(--color-text-primary);
         line-height: 1.4;
     }
 
     .update-changelog-hash {
-        font-size: 0.72rem;
+        font-size: var(--text-xs);
         color: var(--color-text-tertiary);
-        background: rgba(88, 166, 255, 0.12);
+        background: rgb(from var(--color-accent-light) r g b / 0.12);
         padding: 0.05rem 0.3rem;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         white-space: nowrap;
     }
 
-    .btn {
-        padding: 0.4rem 0.75rem;
-        border-radius: 6px;
-        font-size: 0.8rem;
-        cursor: pointer;
-        border: 1px solid transparent;
-        transition: all 0.15s;
-    }
 
-    .btn:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
 
-    .btn-primary {
-        background: var(--color-btn-primary-bg);
-        color: var(--color-btn-text);
-    }
 
-    .btn-primary:hover:not(:disabled) {
-        background: var(--color-btn-primary-hover);
-    }
-
-    .btn-small {
-        padding: 0.25rem 0.5rem;
-        font-size: 0.75rem;
-    }
 </style>

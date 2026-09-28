@@ -101,11 +101,13 @@
 </div>
 
 <style>
+    @import '$lib/styles/shared.css';
+
     /* Sticky wrapper: view-tabs + search-row + category-row, flush with modal-header */
     .sticky-header {
         position: sticky;
         top: 0;
-        z-index: 10;
+        z-index: var(--z-sticky);
         background: var(--color-surface-1);
     }
 
@@ -135,19 +137,20 @@
         border: none;
         color: var(--color-text-tertiary);
         cursor: pointer;
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         padding: 0.5rem 1rem;
-        border-radius: 6px;
+        border-radius: var(--radius-md);
         transition: all 0.15s;
     }
 
     .view-tab:hover {
-        background: rgba(139, 148, 158, 0.1);
+        opacity: 1;
+        background: rgb(from var(--color-text-tertiary) r g b / 0.1);
         color: var(--color-text-primary);
     }
 
     .view-tab.active {
-        background: rgba(88, 166, 255, 0.15);
+        background: var(--color-accent-bg);
         color: var(--color-accent);
     }
 
@@ -162,10 +165,10 @@
         flex: 1;
         background: var(--color-bg-input);
         border: 1px solid var(--color-border-subtle);
-        border-radius: 6px;
+        border-radius: var(--radius-md);
         padding: 0.5rem 0.75rem;
         color: var(--color-text-primary);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
     }
 
     .search-input:focus {
@@ -187,10 +190,10 @@
         align-items: center;
         background: var(--color-bg-input);
         border: 1px solid var(--color-border-subtle);
-        border-radius: 999px;
+        border-radius: var(--radius-pill);
         padding: 0.2rem 0.6rem;
         color: var(--color-text-secondary);
-        font-size: 0.68rem;
+        font-size: var(--text-2xs);
         font-weight: 700;
         letter-spacing: 0.04em;
         text-transform: uppercase;
@@ -204,7 +207,7 @@
     }
 
     .category-badge.active {
-        background: rgba(88, 166, 255, 0.15);
+        background: var(--color-accent-bg);
         border-color: var(--color-accent);
         color: var(--color-accent);
     }
@@ -215,7 +218,7 @@
         border: none;
         padding: 0.2rem 0.25rem;
         color: var(--color-text-tertiary);
-        font-size: 0.72rem;
+        font-size: var(--text-xs);
         text-decoration: underline;
         cursor: pointer;
     }
@@ -224,27 +227,6 @@
         color: var(--color-text-primary);
     }
 
-    .btn {
-        padding: 0.4rem 0.75rem;
-        border-radius: 6px;
-        font-size: 0.8rem;
-        cursor: pointer;
-        border: 1px solid transparent;
-        transition: all 0.15s;
-    }
 
-    .btn:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
 
-    .btn-secondary {
-        background: var(--color-btn-secondary-bg);
-        border-color: var(--color-border-subtle);
-        color: var(--color-text-primary);
-    }
-
-    .btn-secondary:hover:not(:disabled) {
-        background: var(--color-border-subtle);
-    }
 </style>

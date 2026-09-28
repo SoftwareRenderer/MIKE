@@ -19,6 +19,7 @@
     import SessionsSection from './ConfigModal/SessionsSection.svelte';
     import ApiTokensSection from './ConfigModal/ApiTokensSection.svelte';
     import UpdatesSection from './ConfigModal/UpdatesSection.svelte';
+    import EmptyState from './EmptyState.svelte';
     import mikeLogo from '$lib/assets/icons/mike.svg?raw';
     import { checkNow, type UpdateOutcome } from '$lib/services/app-update';
     import { updateCheck } from '$lib/services/update-check.svelte';
@@ -770,7 +771,7 @@
                 <div class="section-header">
                     <h3 class="settings-section-title">{t('settings.providers')}</h3>
                     <div class="settings-section-actions">
-                        <button type="button" class="btn-small" onclick={addProvider} title={t('settings.addProviderHint')}>{t('settings.addProvider')}</button>
+                        <button type="button" class="settings-btn-small" onclick={addProvider} title={t('settings.addProviderHint')}>{t('settings.addProvider')}</button>
                     </div>
                 </div>
                 <div class="providers-list">
@@ -801,17 +802,7 @@
                     </div>
                 {/if}
                 {#if providers.length === 0}
-                    <div class="providers-empty">
-                        <svg width="40" height="40" viewBox="0 0 40 40" fill="none" class="empty-icon">
-                            <rect x="4" y="8" width="32" height="24" rx="3" stroke="currentColor" stroke-width="1.5"/>
-                            <path d="M4 16h32" stroke="currentColor" stroke-width="1.5"/>
-                            <circle cx="10" cy="12" r="1" fill="currentColor"/>
-                            <circle cx="15" cy="12" r="1" fill="currentColor"/>
-                            <circle cx="20" cy="12" r="1" fill="currentColor"/>
-                        </svg>
-                        <p>{t('settings.noProviders')}</p>
-                        <span>{t('settings.providersEmptyHint')}</span>
-                    </div>
+                    <EmptyState title={t('settings.noProviders')} hint={t('settings.providersEmptyHint')} />
                 {/if}
             </div>
         {/if}
@@ -951,12 +942,13 @@
 
 {#snippet footer()}
     {#if onSignOut}
-        <button type="button" class="btn-signout" onclick={handleSignOut} title={t('settings.signOutHint')}>{t('settings.signOut')}</button>
+        <!-- `btn-signout` carries no style of its own; the e2e sign-out spec names the button. -->
+        <button type="button" class="btn btn-signout" onclick={handleSignOut} title={t('settings.signOutHint')}>{t('settings.signOut')}</button>
     {/if}
     <div class="modal-footer-right">
         {#if activeTab !== 'extensions'}
-            <button type="button" class="btn-secondary" onclick={handleClose} title={t('settings.cancelHint')}>{t('settings.cancel')}</button>
-            <button type="button" class="btn-primary" disabled={loading} onclick={handleSave} title={t('settings.saveHint')}>
+            <button type="button" class="btn" onclick={handleClose} title={t('settings.cancelHint')}>{t('settings.cancel')}</button>
+            <button type="button" class="btn btn-primary" disabled={loading} onclick={handleSave} title={t('settings.saveHint')}>
                 {loading ? t('settings.saving') : t('settings.save')}
             </button>
         {/if}
@@ -983,7 +975,7 @@
     }
     .header-wrap h2 {
         margin: 0;
-        font-size: 1.25rem;
+        font-size: var(--text-lg);
         font-weight: 600;
         white-space: nowrap;
     }
@@ -1023,7 +1015,7 @@
         border: none;
         background: none;
         color: var(--color-text-secondary);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 500;
         font-family: inherit;
         cursor: pointer;
@@ -1069,18 +1061,18 @@
         display: flex;
         flex-direction: column;
         gap: 6px;
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 500;
         color: var(--color-text-primary);
     }
     .field-help {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-tertiary);
         font-weight: 400;
     }
     .readonly-value {
         font-family: var(--font-mono, 'SF Mono', 'Cascadia Code', 'Fira Code', monospace);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         background: var(--color-surface-2);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-md);
@@ -1090,27 +1082,12 @@
         overflow-wrap: break-word;
     }
     .field-label-inline {
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 500;
         color: var(--color-text-primary);
     }
 
     /* Toggle row layout */
-
-    /* Buttons */
-    .btn-small {
-        padding: 6px 12px;
-        border-radius: var(--radius-sm);
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-        font-size: 0.875rem;
-        font-weight: 500;
-        cursor: pointer;
-        white-space: nowrap;
-    }
-    .btn-small:hover {
-        background: var(--color-surface-4);
-    }
 
     /* Primary Providers list container */
     .primary-providers-list {
@@ -1131,12 +1108,12 @@
         min-width: 0;
     }
     .primary-provider-title {
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 600;
         color: var(--color-text-primary);
     }
     .primary-provider-select {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         padding: 6px 8px;
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
@@ -1149,7 +1126,7 @@
         border-color: var(--color-accent);
     }
     .primary-provider-select:disabled {
-        opacity: 0.5;
+        opacity: var(--opacity-disabled);
         cursor: not-allowed;
     }
 
@@ -1159,39 +1136,17 @@
         flex-direction: column;
         gap: 8px;
     }
-    .providers-empty {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 8px;
-        padding: 32px 16px;
-        text-align: center;
-        color: var(--color-text-secondary);
-    }
-    .providers-empty p {
-        font-size: 0.875rem;
-        font-weight: 500;
-        color: var(--color-text-primary);
-    }
-    .providers-empty span {
-        font-size: 0.875rem;
-        max-width: 280px;
-    }
-    .empty-icon {
-        color: var(--color-text-tertiary);
-        margin-bottom: 4px;
-    }
     .no-llm-warning {
         display: flex;
         align-items: flex-start;
         gap: 6px;
         margin-top: 10px;
         padding: 8px 10px;
-        background: rgba(210, 153, 34, 0.08);
-        border: 1px solid rgba(210, 153, 34, 0.25);
+        background: rgb(from var(--color-warning) r g b / 0.08);
+        border: 1px solid rgb(from var(--color-warning) r g b / 0.25);
         border-radius: var(--radius-sm);
-        font-size: 0.8rem;
-        color: var(--color-status-orange);
+        font-size: var(--text-sm);
+        color: var(--color-warning);
         line-height: 1.4;
     }
     .no-llm-warning svg {
@@ -1204,28 +1159,13 @@
 
     .error {
         color: var(--color-status-red);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 500;
     }
     .modal-footer-right {
         display: flex;
         gap: 8px;
         margin-left: auto;
-    }
-    .btn-signout {
-        padding: 8px 16px;
-        border-radius: var(--radius-md);
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-        font-size: 0.875rem;
-        font-weight: 500;
-        font-family: inherit;
-        cursor: pointer;
-        border: none;
-        transition: background 0.15s;
-    }
-    .btn-signout:hover {
-        background: var(--color-surface-4);
     }
     .btn-pwa-install {
         display: inline-flex;
@@ -1235,15 +1175,16 @@
         border-radius: var(--radius-md);
         background: var(--color-surface-3);
         color: var(--color-accent);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 500;
         cursor: pointer;
         border: 1px solid var(--color-accent);
         transition: background 0.15s, color 0.15s;
     }
     .btn-pwa-install:hover {
+        opacity: 1;
         background: var(--color-accent-dark);
-        color: white;
+        color: var(--color-btn-text);
     }
 
     .btn-ca-download {
@@ -1255,7 +1196,7 @@
         border-radius: var(--radius-md);
         background: var(--color-surface-3);
         color: var(--color-accent);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 500;
         text-decoration: none;
         cursor: pointer;
@@ -1264,7 +1205,7 @@
     }
     .btn-ca-download:hover {
         background: var(--color-accent-dark);
-        color: white;
+        color: var(--color-btn-text);
     }
 
     .btn-check-updates {
@@ -1274,20 +1215,16 @@
         border-radius: var(--radius-md);
         background: var(--color-surface-3);
         color: var(--color-accent);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 500;
         font-family: inherit;
-        cursor: pointer;
         border: 1px solid var(--color-accent);
         transition: background 0.15s, color 0.15s;
     }
     .btn-check-updates:hover {
+        opacity: 1;
         background: var(--color-accent-dark);
-        color: white;
-    }
-    .btn-check-updates:disabled {
-        opacity: 0.6;
-        cursor: default;
+        color: var(--color-btn-text);
     }
     .about-update {
         display: flex;
@@ -1296,7 +1233,7 @@
         margin: 10px 0 0;
     }
     .about-update-outcome {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--color-text-secondary);
     }
 
@@ -1318,20 +1255,20 @@
     }
     .about-description {
         margin: 4px 0 0;
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         color: var(--color-text-secondary);
         line-height: 1.6;
     }
     .about-version {
         display: inline-block;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 500;
         font-family: var(--font-mono, 'SF Mono', 'Cascadia Code', 'Fira Code', monospace);
         text-transform: none;
         color: var(--color-text-tertiary);
         background: var(--color-surface-3);
         padding: 2px 8px;
-        border-radius: 9999px;
+        border-radius: var(--radius-pill);
         vertical-align: middle;
         margin-left: 4px;
     }
@@ -1363,6 +1300,7 @@
         flex-shrink: 0;
     }
     .icon-btn:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }

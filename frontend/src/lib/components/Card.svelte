@@ -1,4 +1,6 @@
 <script lang="ts">
+    import { Z } from '$lib/constants/z-layers';
+    import { MODEL_BADGE_COLORS, AGENT_BADGE_COLOR } from '$lib/constants/badge-colors';
     import type { Task } from '$lib/types';
     import { AGENT_URL_PREFIX } from '$lib/types';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
@@ -15,6 +17,7 @@
     import { effectiveMultiSelectClick, matchesClickBinding, isBrowserLinkClick } from '$lib/utils/keyboard';
     import commitPushIcon from '$lib/assets/icons/commit-push.svg?raw';
     import Icon from './Icon.svelte';
+    import Spinner from './Spinner.svelte';
     import { fade, slide } from 'svelte/transition';
     import { onMount, onDestroy } from 'svelte';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
@@ -385,7 +388,7 @@
         menu.className = 'card-overflow-menu';
         menu.setAttribute('role', 'menu');
         // Inline styles to escape Svelte scoping (element is on document.body)
-        menu.style.cssText = 'position:fixed;z-index:10000;background:var(--color-surface-3,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,8px);padding:4px;width:140px;box-shadow:0 8px 24px rgba(0,0,0,0.3);display:flex;flex-direction:column;gap:2px;';
+        menu.style.cssText = `position:fixed;z-index:${Z.overlay};background:var(--color-surface-3);border:1px solid var(--color-border);border-radius:var(--radius-md);padding:4px;width:140px;box-shadow:0 8px 24px rgba(0,0,0,0.3);display:flex;flex-direction:column;gap:2px;`;
 
         const items: Array<{ icon: readonly IconShape[]; label: string; action: (e: MouseEvent) => void; danger?: boolean }> = [];
 
@@ -409,7 +412,7 @@
             btn.type = 'button';
             btn.className = 'overflow-item' + (item.danger ? ' overflow-delete' : '');
             btn.setAttribute('role', 'menuitem');
-            btn.style.cssText = 'display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border:none;border-radius:var(--radius-sm,6px);background:transparent;color:var(--color-text-primary,#ccc);font-size:0.875rem;font-family:inherit;font-weight:500;cursor:pointer;text-align:left;touch-action:manipulation;-webkit-tap-highlight-color:transparent;';
+            btn.style.cssText = 'display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border:none;border-radius:var(--radius-sm);background:transparent;color:var(--color-text-primary);font-size:var(--text-base);font-family:inherit;font-weight:500;cursor:pointer;text-align:left;touch-action:manipulation;-webkit-tap-highlight-color:transparent;';
             btn.appendChild(iconSvg(item.icon));
             btn.appendChild(document.createTextNode(item.label));
             btn.addEventListener('click', (e: MouseEvent) => { closeOverflow(); item.action(e); });
@@ -489,17 +492,12 @@
 
     // Model badge: always "auto" behavior
     // Model only (1 provider) or provider+model (2+)
-    const MODEL_COLORS = [
-        '#888888', '#4C9AFF', '#3FB950', '#D29922', '#F85149',
-        '#A371F7', '#E3B341', '#79C0FF', '#7EE787', '#FF7B72',
-        '#D2A8FF', '#F0883E', '#56B6C2', '#F778BA', '#DB6D28',
-    ];
     function getModelColor(modelName: string): string {
         let hash = 0;
         for (let i = 0; i < modelName.length; i++) {
             hash = ((hash << 5) - hash + modelName.charCodeAt(i)) | 0;
         }
-        return MODEL_COLORS[Math.abs(hash) % MODEL_COLORS.length];
+        return MODEL_BADGE_COLORS[Math.abs(hash) % MODEL_BADGE_COLORS.length];
     }
     let modelBadge = $derived.by(() => {
         const cfg = appStore.config;
@@ -510,7 +508,7 @@
             // Look up the agent provider's display name from the config
             const agentProvider = providers.find(p => p.url === task.llama_server_url);
             const agentText = agentProvider ? getProviderDisplayName(agentProvider, providers) : t('board.card.codingAgent');
-            return { text: agentText, provider: null, model: null, color: '#A371F7', isAgent: true };
+            return { text: agentText, provider: null, model: null, color: AGENT_BADGE_COLOR, isAgent: true };
         }
         // Use task model if set, otherwise fall back to the configured Worker model
         const worker = resolveWorker(cfg);
@@ -596,6 +594,13 @@
     }
 
     let nextStatus = $derived(getNextStatus());
+
+    // The move control's name and tooltip: entering Done commits first when there is something to commit.
+    const cardMoveLabel = $derived(
+        nextStatus === 'done' && hasChanges
+            ? t('board.card.commitAndDone')
+            : t('board.card.moveToAria', { status: statusWord(nextStatus) })
+    );
 
     function handleCardKeydown(e: KeyboardEvent) {
         if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) {
@@ -763,16 +768,14 @@
     ontouchmove={handleTouchMove}
     role="button"
     tabindex="0"
-    aria-label={`Open task: ${task.title || '(untitled)'}, Status: ${statusWord(task.status)}`}
+    aria-label={t('board.card.openTaskAria', { title: task.title || t('board.untitled'), status: statusWord(task.status) })}
     aria-keyshortcuts="Alt+ArrowLeft, Alt+ArrowRight"
     aria-current={isSelected ? 'page' : undefined}
     style={`--actions: ${actionCount}; --idle: ${thirdAction === 'idle' ? 1 : 0}; --column-color: ${columnColor || ""}; --status-color: ${statusColor}${parentSelected && inline && task.parent_task_id ? `; border-left: 3px solid ${statusColor}` : ""}`}
 >
     <div class="card-title">
             {#if task.title_generating}
-                <span class="title-spinner" aria-label="Generating title">
-                    <svg viewBox="0 0 16 16" width="12" height="12"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="30 14" stroke-linecap="round"/></svg>
-                </span>
+                <Spinner size={12} label={t('board.card.titleGenerating')} />
             {/if}
             <span class="card-title-text">{truncate(task.title, 80)}</span>
             <div class="card-actions">
@@ -784,13 +787,13 @@
                         class:is-open={overflowOpen}
                         onclick={toggleOverflow}
                         bind:this={overflowRef}
-                        aria-label="Actions"
+                        aria-label={t('board.card.actionsAria')}
                         aria-expanded={overflowOpen}
                     >
                         <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><circle cx="4" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="12" cy="8" r="1.5"/></svg>
                     </button>
                     {#if isIdle}
-                        <span class="action-idle" aria-label="Idle" title="Idle">{t('board.card.idle')}</span>
+                        <span class="action-idle">{t('board.card.idle')}</span>
                     {/if}
                 {:else}
                     {#if canCreateSubtask}
@@ -798,8 +801,8 @@
                             type="button"
                             class="action-icon action-add"
                             onclick={handleCreateChild}
-                            aria-label="Create subtask"
-                            title="Create subtask"
+                            aria-label={t('board.card.createSubtask')}
+                            title={t('board.card.createSubtask')}
                         >
                             <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                         </button>
@@ -809,8 +812,8 @@
                         type="button"
                         class="action-icon"
                         onclick={startEdit}
-                        aria-label="Edit task"
-                        title="Edit Task"
+                        aria-label={t('board.card.editTaskAria')}
+                        title={t('board.card.editTaskAria')}
                     >
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
                     </button>
@@ -820,8 +823,8 @@
                             type="button"
                             class="action-icon"
                             onclick={handlePause}
-                            aria-label="Pause task"
-                            title="Pause task"
+                            aria-label={t('board.card.pauseTaskAria')}
+                            title={t('board.card.pauseTaskAria')}
                         >
                             <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><rect x="2.5" y="1.5" width="1.5" height="7" fill="currentColor"/><rect x="6" y="1.5" width="1.5" height="7" fill="currentColor"/></svg>
                         </button>
@@ -830,20 +833,20 @@
                             type="button"
                             class="action-icon"
                             onclick={handleResume}
-                            aria-label="Resume task"
-                            title="Resume task"
+                            aria-label={t('board.card.resumeTaskAria')}
+                            title={t('board.card.resumeTaskAria')}
                         >
                             <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
                         </button>
                     {:else if thirdAction === 'idle'}
-                        <span class="action-idle" aria-label="Idle" title="Idle">{t('board.card.idle')}</span>
+                        <span class="action-idle">{t('board.card.idle')}</span>
                     {:else if thirdAction === 'delete'}
                         <button
                             type="button"
                             class="action-icon action-delete"
                             onclick={handleDelete}
-                            aria-label="Delete task"
-                            title="Delete task"
+                            aria-label={t('board.deleteTask.aria')}
+                            title={t('board.deleteTask.aria')}
                         >
                             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                                 <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
@@ -855,9 +858,9 @@
                             type="button"
                             class="action-icon action-move"
                             onclick={cycleStatus}
-                            aria-label={nextStatus === 'done' ? (hasChanges ? 'Commit and move to done' : `Move to ${statusWord(nextStatus)}`) : `Move to ${statusWord(nextStatus)}`}
-                            title={nextStatus === 'done' ? (hasChanges ? 'Commit and move to done' : `Move to ${statusWord(nextStatus)}`) : `Move to ${statusWord(nextStatus)}`}
-                            style="color: {nextStatus === 'done' && hasChanges ? '#EAB308' : statusColors[nextStatus]}"
+                            aria-label={cardMoveLabel}
+                            title={cardMoveLabel}
+                            style="color: {nextStatus === 'done' && hasChanges ? 'var(--color-status-amber)' : statusColors[nextStatus]}"
                         >
                             {#if nextStatus === 'backlog'}
                                 <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.5"/></svg>
@@ -866,7 +869,7 @@
                             {:else if nextStatus === 'review'}
                                 <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg>
                             {:else if nextStatus === 'done' && hasChanges}
-                                <Icon src={commitPushIcon} color="#eab308" width={14} height={14} />
+                                <Icon src={commitPushIcon} color="var(--color-status-amber)" width={14} height={14} />
                             {:else if nextStatus === 'done'}
                                 <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" fill="currentColor"/></svg>
                             {/if}
@@ -892,7 +895,7 @@
     {#if statusBadge || memAlert || modelBadge.text || subtaskProgress}
         <div class="badges-row">
             {#if statusBadge}
-                <div class="badge" style="background: {statusBadge.color}11; color: {statusBadge.color}">
+                <div class="badge" style="background: rgb(from {statusBadge.color} r g b / 0.07); color: {statusBadge.color}">
                     {statusBadge.text}
                 </div>
             {/if}
@@ -904,7 +907,7 @@
             {/if}
             {#if modelBadge.text && !hideModelBadge}
                 {#if modelBadge.isAgent}
-                    <div class="badge model-badge agent-badge" style="background: {modelBadge.color}11; color: {modelBadge.color}">
+                    <div class="badge model-badge agent-badge" style="background: rgb(from {modelBadge.color} r g b / 0.07); color: {modelBadge.color}">
                         <svg width="12" height="12" viewBox="0 0 16 16" fill="none" style="margin-right: 3px">
                             <rect x="3" y="5" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
                             <circle cx="6" cy="9" r="1" fill="currentColor"/>
@@ -913,7 +916,7 @@
                         {modelBadge.text}
                     </div>
                 {:else}
-                    <div class="badge model-badge" style="background: {modelBadge.color}11; color: {modelBadge.color}">
+                    <div class="badge model-badge" style="background: rgb(from {modelBadge.color} r g b / 0.07); color: {modelBadge.color}">
                         {#if modelBadge.provider}<span class="badge-provider">{modelBadge.provider}</span><span class="badge-sep"> · </span>{/if}<span class="badge-model">{modelBadge.model}</span>
                     </div>
                 {/if}
@@ -988,13 +991,13 @@
             rgba(0, 0, 0, 0.5) 100%
         );
         pointer-events: none;
-        z-index: 1;
+        z-index: var(--z-raised);
     }
-    /* The overlay is excluded: at z-index 2 it would tie with .card-title and, being later
-       in the DOM, cover the action buttons. */
+    /* The link overlay is excluded: lifted to this rank too, it would tie with .card-title and,
+       being later in the DOM, cover the action buttons. */
     .card.queued > :not(.card-open-link) {
         position: relative;
-        z-index: 2;
+        z-index: var(--z-content);
     }
     /* Inverted diagonal fade for tasks being deleted offline */
     .card.queued-delete::after {
@@ -1010,7 +1013,7 @@
             transparent 100%
         );
         pointer-events: none;
-        z-index: 1;
+        z-index: var(--z-raised);
     }
     .card.has-children:not(.is-subtask) {
         border-left: 3px solid var(--column-color, var(--color-border));
@@ -1073,18 +1076,19 @@
         cursor: grabbing;
     }
     /* The card's link overlay: covers the card so a right-click anywhere on it opens the
-       link menu. Interactive descendants stay above it (z-index 2). */
+       link menu; interactive descendants take the rank above it. */
     .card-open-link {
         position: absolute;
         inset: 0;
-        z-index: 1;
+        z-index: var(--z-raised);
         border-radius: inherit;
         cursor: inherit;
     }
     .card-title {
         display: flex;
         align-items: center;
-        font-size: 0.875rem;
+        gap: 6px;
+        font-size: var(--text-base);
         font-weight: 500;
         margin-bottom: 6px;
         position: relative;
@@ -1097,14 +1101,6 @@
         text-overflow: ellipsis;
         padding-right: 0;
     }
-    .title-spinner {
-        display: inline-flex;
-        align-items: center;
-        color: var(--color-text-tertiary);
-        margin-right: 6px;
-        flex-shrink: 0;
-        animation: spin 1s linear infinite;
-    }
     .card:hover:not(:has(.card:hover)) > .card-title > .card-title-text,
     .card:focus-within:not(:has(.card:focus-within)) > .card-title > .card-title-text,
     .card.selected > .card-title > .card-title-text {
@@ -1116,11 +1112,13 @@
         right: 0;
         /* Above the link overlay. `.card-title` stays unlifted on purpose, so the
            overlay still covers the title text — only the buttons sit above it. */
-        z-index: 2;
+        z-index: var(--z-content);
         display: flex;
         align-items: center;
         gap: var(--action-gap);
         opacity: 0;
+        /* The card body is a link, so an unseen row takes no click; the rules below hand hit-testing back
+           with the row's own opacity, and every button's tooltip fires only once the row is reachable. */
         pointer-events: none;
         transition: opacity 0.15s ease;
     }
@@ -1145,16 +1143,19 @@
         transition: background 0.1s ease, color 0.1s ease;
     }
     .action-icon:hover {
+        opacity: 1;
         background: var(--color-accent-dark);
-        color: white;
+        color: var(--color-btn-text);
     }
     .action-icon.action-move:hover {
+        opacity: 1;
         background: var(--color-accent-dark);
-        color: white !important;
+        color: var(--color-btn-text) !important;
     }
     .action-icon.action-delete:hover {
+        opacity: 1;
         background: var(--color-status-red-dark);
-        color: white;
+        color: var(--color-btn-text);
     }
     .action-idle {
         /* width, never min-width: a longer label from a translation pack must not outgrow the
@@ -1166,11 +1167,12 @@
         text-overflow: ellipsis;
         white-space: nowrap;
         text-align: center;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 500;
         text-transform: uppercase;
         letter-spacing: 0.3px;
         color: var(--color-text-tertiary);
+        /* A status, not a target: shown with the row, but its click belongs to the card's own link. */
         pointer-events: none;
     }
     .action-overflow.is-open {
@@ -1187,7 +1189,7 @@
         display: inline-flex;
         align-items: center;
         gap: 3px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         padding: 2px 6px;
         border-radius: var(--radius-sm);
         font-weight: 500;
@@ -1195,8 +1197,8 @@
     }
     .oom-badge {
         color: var(--color-status-red);
-        background: rgba(248, 81, 73, 0.12);
-        border: 1px solid rgba(248, 81, 73, 0.3);
+        background: var(--color-status-red-bg);
+        border: 1px solid rgb(from var(--color-status-red) r g b / 0.3);
     }
     .model-badge {
         max-width: 100%;
@@ -1224,7 +1226,7 @@
         display: inline-flex;
         align-items: center;
         gap: 3px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-tertiary);
         font-variant-numeric: tabular-nums;
     }
@@ -1232,11 +1234,11 @@
         color: var(--color-text-secondary);
     }
     .diff-add {
-        color: var(--color-status-green, #3FB950);
+        color: var(--color-status-green);
         margin-left: -1px;
     }
     .diff-del {
-        color: var(--color-status-red, #F85149);
+        color: var(--color-status-red);
         margin-left: -1px;
     }
     .diff-sep {
@@ -1251,8 +1253,7 @@
             --idle-slot: 44px;
         }
         .card-actions {
-            opacity: 1;
-            transition: none;
+        transition: none;
         }
         /* The container is pointer-events:none for the card's link, and it is re-enabled only by
            :hover/:focus-within/.selected rules, which a device that cannot hover never matches. */
@@ -1289,7 +1290,7 @@
         padding: 0 6px;
         border: none;
         position: relative;
-        z-index: 2;
+        z-index: var(--z-content);
         border-radius: var(--radius-sm);
         background: var(--color-surface-3);
         cursor: pointer;
@@ -1298,6 +1299,7 @@
         transition: background 0.15s ease;
     }
     .subtask-progress-bar:hover {
+        opacity: 1;
         background: var(--color-surface-4);
     }
     .subtask-progress-bar.is-expanded {
@@ -1321,8 +1323,8 @@
         left: 50%;
         top: 50%;
         transform: translate(-50%, -50%);
-        z-index: 1;
-        font-size: 0.75rem;
+        z-index: var(--z-raised);
+        font-size: var(--text-xs);
         font-weight: 600;
         font-family: inherit;
         font-variant-numeric: tabular-nums;
@@ -1335,7 +1337,7 @@
         right: 6px;
         top: 50%;
         transform: translateY(-50%);
-        z-index: 1;
+        z-index: var(--z-raised);
         opacity: 0.5;
         transition: transform 0.15s ease;
         pointer-events: none;
@@ -1351,7 +1353,7 @@
         flex-direction: column;
         gap: 6px;
         position: relative;
-        z-index: 2;
+        z-index: var(--z-content);
     }
     .subtask-list :global(.card) {
         background: var(--color-surface-1);

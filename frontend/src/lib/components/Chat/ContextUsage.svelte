@@ -1,5 +1,6 @@
 <script lang="ts">
     import ContextDonut from './ContextDonut.svelte';
+    import Spinner from '$lib/components/Spinner.svelte';
     import { formatTokens, formatCost } from '$lib/utils/format';
     import { dialogStore } from '$lib/stores';
     import { t } from '$lib/i18n';
@@ -64,13 +65,13 @@
             class="context-usage"
             class:clickable={!!onSummarize}
             class:summarizing={isSummarizing}
-            title="{tooltip}{onSummarize ? (isSummarizing ? t('chat.context.clickToCancel') : t('chat.context.clickToSummarize')) : ''}"
+            title={tooltip + (onSummarize ? (isSummarizing ? t('chat.context.clickToCancel') : t('chat.context.clickToSummarize')) : '')}
             onclick={handleClick}
             onkeydown={handleKeyDown}
-            aria-label="{tooltip}"
+            aria-label={tooltip}
         >
             {#if isSummarizing}
-                <span class="spinner"></span>
+                <Spinner size={20} decorative />
             {:else}
                 <ContextDonut {used} {limit} />
                 <span class="usage-text">{formatTokens(used)}</span>
@@ -96,7 +97,7 @@
         box-sizing: border-box;
         height: 26px;
         padding: 0 6px;
-        border-radius: 12px;
+        border-radius: var(--radius-lg);
         background: var(--color-surface-2);
         border: 1px solid var(--color-border);
         white-space: nowrap;
@@ -108,6 +109,7 @@
         cursor: pointer;
     }
     .context-usage.clickable:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         border-color: var(--color-accent);
     }
@@ -116,7 +118,7 @@
         cursor: pointer;
     }
     .usage-text {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
         font-variant-numeric: tabular-nums;
         white-space: nowrap;
@@ -127,21 +129,12 @@
         display: inline-flex;
         align-items: center;
         padding: 3px 8px;
-        border-radius: 12px;
+        border-radius: var(--radius-lg);
         background: var(--color-surface-2);
         border: 1px solid var(--color-border);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
         white-space: nowrap;
-        flex-shrink: 0;
-    }
-    .spinner {
-        width: 22px;
-        height: 22px;
-        border: 2px solid var(--color-border);
-        border-top-color: var(--color-accent);
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
         flex-shrink: 0;
     }
 </style>

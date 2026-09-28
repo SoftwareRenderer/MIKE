@@ -11,13 +11,13 @@ input[type="number"] {
 /* Keycap hint shown on text buttons that have a keyboard shortcut */
 .key-hint {
     font-family: var(--font-mono, 'SF Mono', 'Cascadia Code', 'Fira Code', monospace);
-    font-size: 0.6875rem;
+    font-size: var(--text-2xs);
     line-height: 1.5;
     padding: 0 6px;
     margin-left: 8px;
     border: 1px solid var(--color-border);
     border-bottom-width: 2px;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     background: var(--color-surface-2);
     color: var(--color-text-tertiary);
     white-space: nowrap;
@@ -39,11 +39,16 @@ input[type="number"] {
     --color-surface-2: #262626;
     --color-surface-3: #313131;
     --color-surface-4: #3C3C3C;
+    /* The lift above `--color-surface-4`: a control that is already active and being pointed at. */
+    --color-surface-5: #484848;
 
     /* Semantic backgrounds */
     --color-bg-page: #0d1117;
     --color-bg-card: #161b22;
     --color-bg-input: #0d1117;
+    /* A panel that floats inside a panel — a build log, a chat build box. Aliased so the colour keeps one
+       home; a theme that wants the lift stronger overrides this name instead of `--color-surface-1`. */
+    --color-bg-elevated: var(--color-surface-1);
 
     /* Borders */
     --color-border: rgba(255, 255, 255, 0.1);
@@ -77,6 +82,17 @@ input[type="number"] {
     --color-status-yellow: #E3B341;
     --color-status-amber: #f0c040;
     --color-warning: #d29922;
+
+    /* Git status — the one letter a changed path carries, painted the same way in the file tree, the
+       changes panel and the diff file badge. `gitStatusColor` and the `.git-status-*` classes are the
+       two readers. Modified keeps a blue of its own: green is already the colour of an added path. */
+    --color-git-added: var(--color-status-green);
+    --color-git-modified: #569CD6;
+    --color-git-deleted: var(--color-status-red);
+    --color-git-untracked: var(--color-text-tertiary);
+    --color-git-renamed: var(--color-status-purple);
+    --color-git-unmerged: var(--color-status-orange);
+    --color-git-copied: var(--color-status-blue);
 
     /* Column colors */
     --color-column-backlog: #99AAB5;
@@ -112,6 +128,24 @@ input[type="number"] {
     --cm-tag: #7EE787;
     --cm-attr-name: #79C0FF;
 
+    /* Shadows — one black at one alpha over three blurs. Which tier a surface takes is its rank, not a
+       measurement: `--shadow-raised` is a control lifted off the panel it sits on, `--shadow-popover` a
+       menu or tooltip that floats over content, `--shadow-modal` a dialog or full-screen panel. Where
+       black is a fill rather than a shadow (a scrim behind an open panel) take
+       `rgb(from var(--color-backdrop) r g b / a)` at the use site. */
+    --color-shadow: #000000;
+    --shadow-raised: 0 1px 3px rgb(from var(--color-shadow) r g b / 0.3);
+    --shadow-popover: 0 4px 12px rgb(from var(--color-shadow) r g b / 0.3);
+    --shadow-modal: 0 8px 32px rgb(from var(--color-shadow) r g b / 0.3);
+
+    /* The checkerboard a transparent image is shown against, and the text that sits on it. Fixed
+       regardless of theme on purpose: the pattern has to sit between a light app and a dark one so the
+       transparent parts of the image read as transparent, not as black or white — and text over it is
+       legible against the pattern, not against the theme. */
+    --color-checker-base: #6a6a6a;
+    --color-checker-square: #5a5a5a;
+    --color-checker-text: #ffffff;
+
     /* Misc */
     --color-backdrop: rgba(0, 0, 0, 0.4);
     --color-alert-bg: #550000;
@@ -138,10 +172,43 @@ input[type="number"] {
     --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
     --line-height-clipped: 1.4;
 
+    /* Type scale */
+    --text-3xs: 0.625rem;
+    --text-2xs: 0.6875rem;
+    --text-xs: 0.75rem;
+    --text-sm: 0.8125rem;
+    --text-base: 0.875rem;
+    --text-md: 0.9375rem;
+    --text-lg: 1rem;
+
     /* Radii */
+    --radius-xs: 2px;
     --radius-sm: 4px;
     --radius-md: 6px;
     --radius-lg: 8px;
+    /* A chat bubble and the chips that sit beside it: wider than the panel scale, and the one
+       measurement a theme has to retint a bubble's shape. */
+    --radius-bubble: 1.125rem;
+    --radius-pill: 999px;
+
+    --opacity-disabled: 0.5;
+
+    /* Stacking tiers. These are the only numeric z-index values in the frontend: a rank, not a
+       distance, and it only means something inside its own stacking context. Owners: modal =
+       BaseModal, toast = Toast.svelte, banner = the reconnect banner in App.svelte, overlay =
+       full-screen panels and the fixed menus/tooltips that escape a pane. A tier is added when a
+       component needs it, not before it does. `lib/constants/z-layers.ts` is the twin for props and
+       imperative styles; `constants/__tests__/z-layers.unit.ts` fails when the two disagree. */
+    --z-raised: 1;
+    --z-content: 2;
+    --z-sticky: 10;
+    --z-dropdown: 100;
+    --z-overlay: 900;
+    --z-modal: 1000;
+    --z-modal-stacked: 1100;
+    --z-toast: 10000;
+    --z-banner: 10001;
+    --z-max: 99999;
 }
 
 * {
@@ -172,8 +239,34 @@ button {
     color: inherit;
 }
 
+/* The default hover answer for a control that does nothing else under the pointer: one dim. A control
+   that shifts its own background cancels this with `opacity: 1` — see the `.btn` family in
+   lib/styles/shared.css — because dimming and repainting together is two answers to one question. */
 button:hover {
     opacity: 0.85;
+}
+
+/* One home for a dead button: dim by the token, refuse the click cursor, and do not react to hover — a
+   control that changes appearance under the pointer is not claiming to be dead. A component adds only what
+   is specific to one control (a background; `cursor: wait` while that control loads its own result), and a
+   control that is not a button — input, select, textarea, a label wrapper — keeps its own `:disabled` rule
+   with the same token. `aria-disabled` is here so a control kept focusable so it can be asked why it is
+   dead looks dead too.
+
+   The `:hover` twin is load-bearing: a component's `.foo { cursor: pointer }` outranks the rule above, and a
+   cursor is only seen with the pointer over it. Same reason a component's hover rule that changes opacity on
+   a disable-able control carries `:not(:disabled)` itself, and the reason no component writes a
+   `cursor: pointer` of its own: the scoped rule would outrank this one and survive onto the dead control. */
+button:disabled,
+button[aria-disabled='true'] {
+    cursor: not-allowed;
+    opacity: var(--opacity-disabled);
+}
+
+button:disabled:hover,
+button[aria-disabled='true']:hover {
+    cursor: not-allowed;
+    opacity: var(--opacity-disabled);
 }
 
 a {
@@ -213,6 +306,19 @@ a:hover {
 }
 ::-webkit-scrollbar-corner {
     background: transparent;
+}
+
+/* Layout hooks for a component's root element, handed to it through its own `class` prop — for
+   the geometry a site needs and the component must not carry. A parent's scoped stylesheet cannot
+   style a child component's root element (the compiler drops the selector as unused), so this
+   geometry has no local home. `pane-fill` takes what is left of a flex column; `parent-height`
+   takes the height of the box the pane scrolls inside, which is not a flex parent. */
+.pane-fill {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+.parent-height {
+    height: 100%;
 }
 
 /* Screen reader only text */

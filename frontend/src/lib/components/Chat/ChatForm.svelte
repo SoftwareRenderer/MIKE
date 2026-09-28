@@ -323,7 +323,7 @@
         position: relative;
         width: 48px;
         height: 48px;
-        border-radius: 8px;
+        border-radius: var(--radius-lg);
         overflow: hidden;
         border: 1px solid var(--color-border);
         flex-shrink: 0;
@@ -369,12 +369,9 @@
         padding: 0;
     }
     .btn-attach:hover:not(:disabled) {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
-    }
-    .btn-attach:disabled {
-        opacity: 0.3;
-        cursor: not-allowed;
     }
     .file-input-hidden {
         display: none;
@@ -387,7 +384,7 @@
         border: none;
         background: transparent;
         color: var(--color-text-primary);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         line-height: 1.5rem;
         padding: 4px 0;
         font-family: inherit;
@@ -402,7 +399,6 @@
         height: 32px;
         border-radius: 50%;
         border: none;
-        cursor: pointer;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -410,14 +406,12 @@
         padding: 0;
     }
     .btn-send { background: var(--color-accent-dark); color: white; }
-    .btn-send:hover:not(:disabled) { opacity: 0.85; transform: scale(1.05); }
-    .btn-send:disabled { background: var(--color-surface-3); color: var(--color-text-tertiary); cursor: not-allowed; }
+    .btn-send:disabled { background: var(--color-surface-3); color: var(--color-text-tertiary); }
     .btn-stop {
         background: var(--color-status-red-dark);
         color: white;
         animation: pulse-stop 1.5s ease-in-out infinite;
     }
-    .btn-stop:hover { opacity: 0.85; transform: scale(1.05); }
     @keyframes pulse-stop {
         0%, 100% { opacity: 1; }
         50% { opacity: 0.7; }

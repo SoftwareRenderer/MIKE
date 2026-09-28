@@ -2,6 +2,7 @@
     import { onDestroy } from 'svelte';
     import { dialogStore } from '$lib/stores';
     import BaseModal from '../BaseModal.svelte';
+    import Spinner from '$lib/components/Spinner.svelte';
     import { t } from '$lib/i18n';
     import { streamCommitPreview } from '$lib/api/tasks';
     import { isAborted } from '$lib/api/helpers';
@@ -191,10 +192,10 @@
 
 {#if open}
     {#snippet footer()}
-        <button type="button" class="btn-secondary" onclick={handleCancel}>{cancelText}</button>
+        <button type="button" class="btn" onclick={handleCancel}>{cancelText}</button>
         <button
             type="button"
-            class="btn-primary"
+            class="btn btn-primary"
             onclick={handleConfirm}
             disabled={!editedMessage.trim() || streaming}
         >
@@ -202,7 +203,7 @@
         </button>
     {/snippet}
 
-    <BaseModal title={t('chat.commit.title')} width="560px" zIndex={1000} footer={footer} onClose={handleCancel}>
+    <BaseModal title={t('chat.commit.title')} width="560px" footer={footer} onClose={handleCancel}>
         <p id="commit-dialog-desc" class="sr-only">
             {t('chat.commit.desc')}
         </p>
@@ -219,18 +220,7 @@
 
         {#if streaming}
             <div class="commit-progress" role="status" aria-busy={streaming}>
-                <svg
-                    class="progress-spinner"
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2.5"
-                    aria-hidden="true"
-                >
-                    <path d="M12 2a10 10 0 0 1 10 10"/>
-                </svg>
+                <Spinner size={14} decorative />
                 {#if promptProgress > 0 && promptProgress < 100}
                     <span class="progress-text">{t('chat.commit.promptProgress', { percent: promptProgress })}</span>
                 {:else}
@@ -269,7 +259,7 @@
         border: 1px solid var(--color-border);
         background: var(--color-surface-0);
         color: var(--color-text-primary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-family: inherit;
         line-height: 1.5;
         resize: vertical;
@@ -293,30 +283,24 @@
         gap: 8px;
         margin-top: 10px;
         color: var(--color-text-secondary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
     }
 
     .progress-text {
         flex: 1;
     }
 
-    .progress-spinner {
-        animation: spin 0.8s linear infinite;
-        flex-shrink: 0;
-        opacity: 0.6;
-    }
-
     .commit-meta {
         margin-top: 10px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
     }
 
     .commit-meta code {
         background: var(--color-surface-2);
         padding: 1px 5px;
-        border-radius: 3px;
+        border-radius: var(--radius-sm);
         font-family: var(--font-mono);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
     }
 </style>

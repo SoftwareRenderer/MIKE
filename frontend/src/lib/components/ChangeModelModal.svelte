@@ -63,8 +63,8 @@
 </script>
 
 {#snippet footer()}
-    <button type="button" class="btn-secondary" onclick={handleClose} title={t('chat.common.cancel')}>{t('chat.common.cancel')}</button>
-    <button type="button" class="btn-primary" disabled={!selectedModel} onclick={handleChange} title={t('chat.changeModel.confirmTip')}>
+    <button type="button" class="btn" onclick={handleClose} title={t('chat.common.cancel')}>{t('chat.common.cancel')}</button>
+    <button type="button" class="btn btn-primary" disabled={!selectedModel} onclick={handleChange} title={t('chat.changeModel.confirmTip')}>
         {t('chat.changeModel.confirm')}
     </button>
 {/snippet}
@@ -97,7 +97,7 @@
         list-style-position: inside;
         margin: 8px 0 0;
         padding-left: 0;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--color-text-secondary);
         line-height: 1.6;
         max-height: 180px;
@@ -115,7 +115,7 @@
         justify-content: space-between;
         gap: 12px;
         padding: 12px 0;
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 500;
         color: var(--color-text-secondary);
     }
@@ -123,7 +123,7 @@
         margin: 0;
     }
     .no-providers {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--color-text-tertiary);
     }
 </style>

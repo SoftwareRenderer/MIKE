@@ -1,5 +1,6 @@
 <script lang="ts">
     import BaseModal from './BaseModal.svelte';
+    import Spinner from './Spinner.svelte';
     import { rawFileURL } from '$lib/api';
     import { t } from '$lib/i18n';
 
@@ -43,7 +44,7 @@
         <div class="image-pane-body">
             {#if state[which] === 'loading'}
                 <div class="image-pane-status">
-                    <span class="image-spinner" aria-hidden="true"></span>
+                    <Spinner decorative />
                     <span>{t('diff.shared.loading')}</span>
                 </div>
             {:else if state[which] === 'error'}
@@ -79,7 +80,7 @@
         gap: 6px;
     }
     .image-pane-label {
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.04em;
@@ -95,9 +96,10 @@
         overflow: hidden;
         border: 1px solid var(--color-border);
         border-radius: var(--radius-md);
-        /* Transparency needs a background that is neither the app's light nor its dark. */
-        background-color: #6a6a6a;
-        background-image: linear-gradient(45deg, #5a5a5a 25%, transparent 25%), linear-gradient(-45deg, #5a5a5a 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #5a5a5a 75%), linear-gradient(-45deg, transparent 75%, #5a5a5a 75%);
+        /* Transparency needs a background that is neither the app's light nor its dark — the checker
+           tokens are fixed values, not theme aliases, on purpose. */
+        background-color: var(--color-checker-base);
+        background-image: linear-gradient(45deg, var(--color-checker-square) 25%, transparent 25%), linear-gradient(-45deg, var(--color-checker-square) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, var(--color-checker-square) 75%), linear-gradient(-45deg, transparent 75%, var(--color-checker-square) 75%);
         background-size: 16px 16px;
         background-position: 0 0, 0 8px, 8px -8px, -8px 0;
     }
@@ -114,15 +116,7 @@
         display: flex;
         align-items: center;
         gap: 8px;
-        color: rgba(255, 255, 255, 0.85);
-        font-size: 0.75rem;
-    }
-    .image-spinner {
-        width: 14px;
-        height: 14px;
-        border: 2px solid rgba(255, 255, 255, 0.3);
-        border-top-color: rgba(255, 255, 255, 0.9);
-        border-radius: 50%;
-        animation: spin 0.8s linear infinite;
+        color: rgb(from var(--color-checker-text) r g b / 0.85);
+        font-size: var(--text-xs);
     }
 </style>

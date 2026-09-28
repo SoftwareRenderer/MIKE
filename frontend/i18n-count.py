@@ -2,13 +2,13 @@
 """Candidate-string counter — the whole-tree i18n surface gate.
 
 Usage (from frontend/):
-    python3 i18n-count.py            # every core file; exit 1 if any candidate remains
+    python3 i18n-count.py            # every core file; exit 1 if any finding remains
     python3 i18n-count.py -v         # + the offending literals with file:line
     python3 i18n-count.py src/lib/components/DiffViewer.svelte ...   # only these files
 
-This is a gate, not a report: the tree is at zero, so **any** candidate is a regression and a
-non-zero exit. `npm run check:i18n-surface` is it, and `make test-frontend` runs it beside
-the unit tests and `i18n-gate.py`.
+This is a gate, not a report: the tree is at zero, so **any** candidate or text-attribute
+literal is a regression and a non-zero exit. `npm run check:i18n-surface` is it, and
+`make test-frontend` runs it beside the unit tests and `i18n-gate.py`.
 
 Passing file **and** directory arguments measures a subset — how a change to one area checks
 itself before the whole gate is run.
@@ -17,11 +17,21 @@ Counts, per file:
   1. template text nodes      - text between tags in a .svelte template (any letters)
   2. quoted literals in <script> / .ts modules
   3. quoted literals inside a template mustache/block expression (`{ok ? 'Yes' : 'No'}`)
+  4. literals written into a **text attribute** - `aria-label`, `alt`, `placeholder`,
+     `title` on a tag. Reported with its own `file:line` and the attribute, because the
+     accessible name and the tooltip are the only copy a screen-reader user, or a
+     hovered icon, is given: `docs/i18n.md -> Attribute text is a catalog key`.
+     A site that is genuinely not copy (a `placeholder` that is a format example) sits
+     in TEXT_ATTR_ALLOW, one entry per site with its reason, and an entry whose site has
+     gone is itself a finding - so the list only ever shrinks.
 
 Excluded, by CONTEXT (never by string identity, so a real bug still measures):
-  - literal aria-label / aria-labelledby / aria-describedby / title / placeholder /
-    alt values - template attributes AND script-level `ariaLabel:` / `title=` keys
+  - script-level `ariaLabel:` / `ariaDescribedby:` / `title=` keys and an imperative
+    `el.title =` - a name built off the render path, which the module that builds it owns
     (project convention; see frontend/src/lib/i18n/README.md)
+  - attributes that carry no text: an IDREF (`aria-labelledby`, `aria-describedby`) or a
+    flag (`aria-hidden`, `aria-expanded`, `role`) - the rule is keyed on the attribute
+    NAME, so `aria-labelledby="confirm-title"` is an id, and stays
   - comments, HTML comments, <style> blocks
   - arguments of console.* / logger.* calls (log lines are never translated) — the
     whole enclosing call, so a message continued on its own line is still a log
@@ -51,14 +61,18 @@ import sys
 A11Y_KEY = (r'(?:aria-label|aria-labelledby|aria-describedby|ariaLabel|'
             r'ariaDescribedby|placeholder|alt)')
 A11Y_KEY_RE = re.compile(A11Y_KEY + r'\s*[:=]\s*$', re.IGNORECASE)
-# `title` is the one labelling name that is *ambiguous*: at a tag (`title="Stage"`) it is
-# a tooltip and stays literal, but as a script object property it is usually visible copy —
-# `showConfirm({ title })` renders an `<h2>` (see src/lib/i18n/README.md). It counts as
-# copy unless the object it belongs to carries a sibling `labelKey:`, which is the shape
-# of "this title is the English fallback of a label that already has a key".
+# Labelling names in a *script* position — an `ariaLabel:` object key, an imperative
+# `el.title =` — hold a name built off the render path, which the module that builds it owns.
+# A tag's own `aria-label`/`alt`/`placeholder`/`title` is not exempt: `template_items` steps
+# over a whole tag, so these three regexes never see it and the text-attribute rule below
+# reports it.
+# `title` is the one labelling name that is *ambiguous*: as a script object property it is
+# usually visible copy — `showConfirm({ title })` renders an `<h2>` (see
+# src/lib/i18n/README.md). It counts as copy unless the object it belongs to carries a
+# sibling `labelKey:`, which is the shape of "this title is the English fallback of a label
+# that already has a key".
 TITLE_KEY_RE = re.compile(r'\btitle\s*:\s*$', re.IGNORECASE)
-# …while the attribute/assignment form is always a tooltip: `title="Stage"`,
-# `title={'Stage'}` inside a tag, `el.title = 'Stage'`.
+# …while an assignment is the tooltip itself and not copy at all: `el.title = 'Stage'`.
 TITLE_ATTR_RE = re.compile(r'\btitle\s*=\s*$', re.IGNORECASE)
 KEYED_LABEL_RE = re.compile(r'\blabelKey\s*:', re.IGNORECASE)
 
@@ -580,9 +594,11 @@ def script_literal_items(src, start, end, channel_errors=False):
 
 
 def tag_len(text, i):
-    """Length of the markup tag starting at text[i] == '<'. Honours quotes and
-    `{...}` attribute expressions (whose `=>` and `Record<string, x>` must not
-    end the tag)."""
+    """Length of the markup tag starting at text[i] == '<'. Honours quotes, regex literals
+    and `{...}` attribute expressions (whose `=>` and `Record<string, x>` must not end the
+    tag). A quote inside a regex — `title={v.replace(/'/, '')}` — is inert for the same
+    reason it is inert in a comment: without it the quote pair leaves the tag and every
+    attribute after it goes unseen."""
     n = len(text)
     j = i + 1
     if j >= n or text[j] not in 'abcdefghijklmnopqrstuvwxyz/!ABCDEFGHIJKLMNOPQRSTUVWXYZ':
@@ -597,6 +613,13 @@ def tag_len(text, i):
                 continue
             if c == quote:
                 quote = ''
+        elif c == '/' and depth > 0:
+            # A regex inside an attribute expression. Only inside one: at depth 0 a `/` is
+            # a closing tag or a self-closing slash, and the heuristic would not know.
+            ln = regex_len(text, j) if regex_starts_here(text, j) else 0
+            if ln:
+                j += ln
+                continue
         elif c in '"\'`':
             quote = c
         elif c == '{':
@@ -610,7 +633,9 @@ def tag_len(text, i):
 
 
 def mustache_len(text, i):
-    """Length of the `{...}` expression starting at text[i] == '{'."""
+    """Length of the `{...}` expression starting at text[i] == '{'. Honours quotes and regex
+    literals, so an apostrophe inside a regex does not open a string that outlives the
+    expression."""
     n = len(text)
     depth = 0
     quote = ''
@@ -623,6 +648,11 @@ def mustache_len(text, i):
                 continue
             if c == quote:
                 quote = ''
+        elif c == '/' and depth > 0 and regex_starts_here(text, j):
+            ln = regex_len(text, j)
+            if ln:
+                j += ln
+                continue
         elif c in '"\'`':
             quote = c
         elif c == '{':
@@ -706,14 +736,198 @@ def template_items(src, start, end, scan_mustaches=True, channel_errors=False):
 CHANNEL_TREE_RE = re.compile(r'(?:^|/)src/lib/extensions/')
 
 
-def count_file(path, verbose=False):
+# --- text attributes ---------------------------------------------------------
+# `aria-label`, `alt`, `placeholder` and `title` are the attributes whose value the app
+# renders as text, so a literal written into one is copy core owns. The rule is keyed on
+# the attribute NAME: `aria-labelledby`/`aria-describedby` hold an element id and
+# `aria-hidden`/`aria-expanded` a flag, so they are not text and are not in this list.
+TEXT_ATTR_RE = re.compile(r'^(?:aria-label|alt|placeholder|title)$', re.IGNORECASE)
+# The accessor a catalog key arrives through: `t(key, params)` from `$lib/i18n`. Matched
+# against the text before an opening bracket, so `t(cond ? 'a.key' : 'b.key')` — a key
+# chosen per frame — is a key too, and no copy.
+CATALOG_CALL_RE = re.compile(r'\bt\s*$')
+# A literal is what the attribute renders when the token before it opens the expression or
+# chooses between rendered values. Anything else — `(`, `,`, `[`, an operator — is a key or
+# an operand, and a literal there is not the attribute's text.
+RENDERED_BEFORE_RE = re.compile(r'(?:\?|:|\|\||\?\?|&&|\+)\s*$')
+# `label: 'Low'` is a property of an object someone looks up; `'a' : b` is a ternary
+# branch. The glued colon is the difference, and an ambiguous `x : 'y'` reads as a branch
+# — the direction that produces a finding rather than a silence.
+PROPERTY_COLON_RE = re.compile(r"""[A-Za-z0-9_$\]}'"`]:\s*$""")
+# …and a literal that continues into a comparison, or is followed by a glued colon, is a
+# key rather than the value: `mode === 'rw'`, `{'staged': rows}`.
+NOT_RENDERED_AFTER_RE = re.compile(r"^(?:\s*(?:===|!==|==|!=|<=|>=)|:)")
+INTERP_RE = re.compile(r'\$\{[^{}]*\}')
+LETTER_RE = re.compile(r'[A-Za-z]')
+
+# Every literal still allowed in a text attribute, one entry per site, each with the
+# reason it is not copy. A `placeholder` that is a format example is the answer's shape,
+# not a sentence to translate (`frontend/src/lib/i18n/README.md`).
+TEXT_ATTR_ALLOW: dict[tuple[str, str, str], str] = {
+    ('src/lib/components/ConfigModal/ExtensionConfigFields.svelte', 'placeholder', '/host/path'):
+        'a path shape to type, not a sentence to translate',
+    ('src/lib/components/ConfigModal/ExtensionConfigFields.svelte', 'placeholder', '/container/path'):
+        'a path shape to type, not a sentence to translate',
+    ('src/lib/components/ConfigModal/ExtensionEditModal.svelte', 'placeholder', '/path/to/dependency/directory'):
+        'a path shape to type, not a sentence to translate',
+    ('src/lib/components/ConfigModal/ExtensionEditModal.svelte', 'placeholder', '/path/to/the/agent/folder'):
+        'the fallback beside an extension\'s own suggestion: a path shape, not copy',
+    ('src/lib/components/ConfigModal/ProviderCard.svelte', 'placeholder', 'http://localhost:8080/v1'):
+        'an example URL — translating it teaches the wrong shape',
+    ('src/lib/components/FileBrowser.svelte', 'placeholder', 'https://github.com/org/repo.git'):
+        'an example URL, paired with the `git@…` example beside the field',
+    ('src/lib/components/SandboxConfigModal/ImageSection.svelte', 'placeholder', 'docker.io/ubuntu:latest'):
+        'an example image reference, identical in every locale',
+    ('src/lib/components/SandboxConfigModal/MountsSection.svelte', 'placeholder', '/host/path'):
+        'a path shape to type, not a sentence to translate',
+    ('src/lib/components/SandboxConfigModal/MountsSection.svelte', 'placeholder', '/container/path'):
+        'a path shape to type, not a sentence to translate',
+}
+
+
+def stale_allow_keys(seen):
+    """TEXT_ATTR_ALLOW entries no scanned file matched. Only a whole-tree run has seen
+    every site, so only that run may call an entry stale."""
+    return sorted(set(TEXT_ATTR_ALLOW) - seen)
+
+
+def allow_key(path, attr, value):
+    """The TEXT_ATTR_ALLOW entry permitting this site, or None. Matched by path suffix so
+    a file handed to `count_file` from any working directory is still itself."""
+    norm = path.replace(os.sep, '/')
+    for key in TEXT_ATTR_ALLOW:
+        if key[1] == attr and key[2] == value and norm.endswith(key[0]):
+            return key
+    return None
+
+
+def is_rendered_literal(chunk, start, end):
+    """Is this literal one the attribute renders as text?
+
+    `title={'Staged changes'}` and `title={open ? 'Collapse' : 'Expand'}` are. A key —
+    `t('k')`, or `t(open ? 'a' : 'b')` — is not, nor is a comparison's operand
+    (`mode === 'rw'`), an object key, or an argument of another function, which is a lookup
+    key as often as it is copy. The copy belongs at the attribute itself."""
+    if enclosing_call_is(chunk, start, CATALOG_CALL_RE.pattern):
+        return False
+    if NOT_RENDERED_AFTER_RE.match(chunk[end:]):
+        return False
+    pre = chunk[:start].rstrip()
+    if not pre:
+        return True
+    if RENDERED_BEFORE_RE.search(pre):
+        return not PROPERTY_COLON_RE.search(pre)
+    return False
+
+
+def rendered_literals(chunk):
+    """(offset, value) for each literal `chunk` (an attribute's `{…}` expression, comments
+    already blanked) renders as text. `''` is how a tooltip says "none this frame", and a
+    literal with no letter outside its `${…}` holes (`' · '`) is glue, not copy."""
+    for m in LIT_RE.finditer(chunk):
+        val = next(g for g in m.groups() if g is not None)
+        if not val.strip() or not LETTER_RE.search(INTERP_RE.sub(' ', val)):
+            continue
+        if is_rendered_literal(chunk, m.start(), m.end()):
+            yield m.start(), val
+
+
+def tag_attributes(tag):
+    """Yield (name, kind, value, value_offset) for each attribute of `tag`, a tag string
+    starting at its `<`. `kind` is 'static' (`="…"`) or 'expr' (`={…}`); a `{…spread}`, a
+    bare flag and a bare word value are not text attributes and are skipped. The tag's own
+    name is skipped by position, so `<titleish>` is never read as `title`."""
+    n = len(tag)
+    i = 1
+    while i < n and not tag[i].isspace():
+        i += 1
+    while i < n:
+        while i < n and tag[i] in ' \t\n\r':
+            i += 1
+        if i >= n or tag[i] in '>/':
+            return
+        if tag[i] == '{':
+            i += max(mustache_len(tag, i), 1)
+            continue
+        j = i
+        while j < n and tag[j] not in '= \t\n\r>/':
+            j += 1
+        name = tag[i:j]
+        if j >= n or tag[j] != '=':
+            i = j if j > i else i + 1
+            continue
+        k = j + 1
+        while k < n and tag[k] in ' \t\n\r':
+            k += 1
+        if k < n and tag[k] in '"\'':
+            quote, e = tag[k], k + 1
+            while e < n and tag[e] != quote:
+                e += 2 if tag[e] == '\\' else 1
+            yield name, 'static', tag[k + 1:e], k + 1
+            i = e + 1
+            continue
+        if k < n and tag[k] == '{':
+            ln = mustache_len(tag, k)
+            yield name, 'expr', tag[k + 1:k + ln - 1], k + 1
+            i += max(ln, 1)
+            continue
+        e = k
+        while e < n and tag[e] not in ' \t\n\r>':
+            e += 1
+        i = e
+
+
+def text_attr_items(src, start, end, path):
+    """(line, attribute, literal, allow-key-or-None) for every literal written into a text
+    attribute in the template region `src[start:end]` of `path`."""
+    # An HTML comment is blanked, not skipped: `tag_len` reads `<!--` as the start of a tag
+    # and runs to the first `>`, so a comment that quotes one would swallow the markup after
+    # it — as would a comment a prose `>` ends early. Blanking keeps every offset and line.
+    text = re.sub(r'<!--.*?-->', lambda m: re.sub(r'[^\n]', ' ', m.group(0)),
+                  src[start:end], flags=re.DOTALL)
+    items = []
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if ch == '{':
+            i += max(mustache_len(text, i), 1)     # outside a tag, a mustache holds no attribute
+            continue
+        if ch != '<':
+            i += 1
+            continue
+        ln = tag_len(text, i)
+        if not ln:
+            i += 1
+            continue
+        tag = text[i:i + ln]
+        for name, kind, value, voff in tag_attributes(tag):
+            if not TEXT_ATTR_RE.match(name):
+                continue
+            at = i + voff
+            if kind == 'static':
+                found = [(0, value)] if value.strip() and LETTER_RE.search(value) else []
+            else:
+                chunk = strip_comments(value)
+                found = list(rendered_literals(chunk))
+            for off, literal in found:
+                items.append((line_of(src, start + at + off), name.strip().lower(), literal,
+                              allow_key(path, name.strip().lower(), literal)))
+        i += ln
+    return items
+
+
+def analyze_file(path):
+    """(candidate literals, text-attribute literals) for one file. A text-attribute row is
+    (line, attribute, literal, allow-key-or-None); the None rows are the findings."""
     src = open(path, encoding='utf-8').read()
     channel_errors = bool(CHANNEL_TREE_RE.search(path.replace(os.sep, '/')))
     items = []
+    attrs = []
     if path.endswith('.svelte'):
         pos = 0
         for m in re.finditer(r'<(script|style)\b[^>]*>.*?</\1>', src, flags=re.DOTALL | re.IGNORECASE):
             items += template_items(src, pos, m.start())
+            attrs += text_attr_items(src, pos, m.start(), path)
             if m.group(1).lower() == 'script':
                 open_m = re.match(r'<script[^>]*>', m.group(0), flags=re.DOTALL)
                 close_m = re.search(r'</script>\s*$', m.group(0), flags=re.DOTALL)
@@ -722,13 +936,25 @@ def count_file(path, verbose=False):
                                                   m.start() + close_m.start(), channel_errors)
             pos = m.end()
         items += template_items(src, pos, len(src), channel_errors=channel_errors)
+        attrs += text_attr_items(src, pos, len(src), path)
     else:
         items += script_literal_items(src, 0, len(src), channel_errors)
     items.sort()
+    attrs.sort()
+    return items, attrs
+
+
+def count_file(path, verbose=False):
+    """What one file owes: its candidate strings plus the text-attribute literals no
+    TEXT_ATTR_ALLOW entry covers."""
+    items, attrs = analyze_file(path)
+    bad = [a for a in attrs if a[3] is None]
     if verbose:
         for ln, val in items:
             print(f'      {path}:{ln}  {val!r}')
-    return len(items)
+        for ln, attr, val, _ in bad:
+            print(f'      {path}:{ln}  {attr}={val!r}')
+    return len(items) + len(bad)
 
 
 SKIP_DIRS = {'__tests__', 'node_modules', '.svelte-kit', 'dist'}
@@ -767,22 +993,45 @@ def main():
     listed = expand([a for a in sys.argv[1:] if not a.startswith('-')])
     files = listed or owned_files()
     grand = 0
+    attrs = 0
     nonzero = 0
+    rows = []
+    used = set()
     for f in files:
         if not os.path.exists(f):
             print(f'  MISSING  {f}')
             grand += 1  # a file a batch claims to own but does not have is a finding
             continue
-        n = count_file(f, verbose=verbose)
-        grand += n
+        items, attr_items = analyze_file(f)
+        bad = [a for a in attr_items if a[3] is None]
+        used.update(a[3] for a in attr_items if a[3])
+        n = len(items) + len(bad)
+        grand += len(items)
+        attrs += len(bad)
         nonzero += 1 if n else 0
+        if verbose:
+            for ln, val in items:
+                print(f'      {f}:{ln}  {val!r}')
+        for ln, attr, val, _ in bad:
+            rows.append(f'{f}:{ln}  {attr}={val!r}')
         if n or listed:
             print(f'{n:4d}  {f}')
+    for row in rows:
+        print(f'  ATTR  {row}')
+    # A site that moved or converted leaves its permission behind; the allowlist shrinks
+    # with the tree, so a stale row is as much a finding as a new one. Only a whole-tree
+    # run has seen every site, so a file-argument run checks none.
+    stale = [] if listed else stale_allow_keys(used)
+    for rel, attr, val in stale:
+        print(f'  STALE  {rel}: {attr}={val!r} is allowed, but nothing there reads like '
+              f'that any more — delete the entry')
     print('----')
     verb = 'is' if grand == 1 else 'are'
     print(f'{grand:4d}  candidate strings in {len(files)} files '
           f'({nonzero} file{"" if nonzero == 1 else "s"} unconverted)')
-    if grand:
+    print(f'{attrs:4d}  literal text attribute(s) outside the allowlist '
+          f'({len(TEXT_ATTR_ALLOW)} allowed, each with its reason)')
+    if grand or attrs or stale:
         print('Every one of these is user-facing text core still owns. Move it to a key '
               'in src/lib/i18n/en.ts and render it with t(); see frontend/src/lib/i18n/README.md.')
         return 1

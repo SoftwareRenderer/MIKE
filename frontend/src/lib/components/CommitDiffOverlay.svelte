@@ -291,7 +291,7 @@
     <!-- Header bar -->
     <div class="diff-header">
         <div class="diff-header-left">
-            <button class="close-btn" onclick={onClose} title="Close diff" aria-label="Close diff">
+            <button class="close-btn" onclick={onClose} title={t('diff.closeDiffAria')} aria-label={t('diff.closeDiffAria')}>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                     <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                 </svg>
@@ -304,7 +304,7 @@
                         class:expanded={showFullMessage}
                         bind:this={subjectBtnEl}
                         onclick={() => { showFullMessage = !showFullMessage; }}
-                        title="Click to view full commit message"
+                        title={t('diff.fullMessageTitle')}
                     >
                         <span class="diff-commit-subject" title={commit.subject}>{commit.subject}</span>
                         <svg class="diff-subject-caret" width="12" height="12" viewBox="0 0 16 16" fill="none">
@@ -321,7 +321,7 @@
                 {/if}
                 <span class="diff-commit-hash-wrapper">
                     <span class="diff-commit-hash" title={commit.hash}>{commit.short}</span>
-                    <button class="diff-hash-copy-btn" class:copied={copiedHash} onclick={handleCopyHash} aria-label="Copy commit hash" title="Copy full hash">
+                    <button class="diff-hash-copy-btn" class:copied={copiedHash} onclick={handleCopyHash} aria-label={t('diff.copyHashAria')} title={t('diff.copyHashTitle')}>
                         <svg class="icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
@@ -346,7 +346,7 @@
             {/if}
         </div>
         {#if !isMobile}
-            <button class="diff-mode-toggle" onclick={toggleDiffMode} title={diffMode === 'split' ? 'Switch to unified diff' : 'Switch to split diff'} aria-label={diffMode === 'split' ? 'Switch to unified diff' : 'Switch to split diff'}>
+            <button class="diff-mode-toggle" onclick={toggleDiffMode} title={diffMode === 'split' ? t('diff.toUnifiedAria') : t('diff.toSplitAria')} aria-label={diffMode === 'split' ? t('diff.toUnifiedAria') : t('diff.toSplitAria')}>
                 {#if diffMode === 'split'}
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                         <line x1="2" y1="4" x2="14" y2="4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
@@ -566,7 +566,7 @@
         gap: 4px;
         padding: 2px 4px;
         border: none;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         background: transparent;
         cursor: pointer;
         text-align: left;
@@ -575,13 +575,14 @@
         min-width: 0;
     }
     .diff-commit-subject-btn:hover {
+        opacity: 1;
         background: var(--color-surface-3);
     }
     .diff-commit-subject-btn.expanded {
         background: var(--color-surface-3);
     }
     .diff-commit-subject {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 500;
         color: var(--color-text-primary);
         white-space: nowrap;
@@ -601,14 +602,14 @@
         position: absolute;
         top: calc(100% + 6px);
         left: 0;
-        z-index: 100;
+        z-index: var(--z-dropdown);
         min-width: 280px;
         max-width: 480px;
         padding: 8px 12px;
         background: var(--color-surface-3);
         border: 1px solid var(--color-border);
-        border-radius: 6px;
-        box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-popover);
     }
     .diff-commit-body-tooltip::before {
         content: '';
@@ -624,7 +625,7 @@
     }
     .diff-commit-body-tooltip pre {
         margin: 0;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-family: var(--font-mono, monospace);
         color: var(--color-text-secondary);
         line-height: 1.5;
@@ -640,7 +641,7 @@
         flex-shrink: 0;
     }
     .diff-commit-hash {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-family: var(--font-mono, monospace);
         color: var(--color-text-tertiary);
         flex-shrink: 0;
@@ -665,7 +666,6 @@
         color: var(--color-text-primary);
     }
     .diff-hash-copy-btn .icon {
-        opacity: 1;
         transition: opacity 0.2s ease;
     }
     .diff-hash-copy-btn.copied .icon {
@@ -674,7 +674,7 @@
     .diff-hash-copy-btn .check {
         position: absolute;
         opacity: 0;
-        font-size: 10px;
+        font-size: var(--text-3xs);
         font-weight: 700;
         line-height: 1;
         transition: opacity 0.2s ease;
@@ -685,7 +685,7 @@
         opacity: 1;
     }
     .diff-commit-date {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-tertiary);
         opacity: 0.7;
         flex-shrink: 0;
@@ -695,7 +695,7 @@
         align-items: center;
         gap: 6px;
         flex-shrink: 0;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 500;
     }
     .diff-stat-added {
@@ -732,7 +732,7 @@
         justify-content: center;
         padding: 20px;
         color: var(--color-text-tertiary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
     }
 
     /* Files scroll area */
@@ -761,14 +761,14 @@
         padding: 8px 12px;
         background: var(--color-surface-2);
         border: 1px solid var(--color-border);
-        border-radius: 6px 6px 0 0;
+        border-radius: var(--radius-md) var(--radius-md) 0 0;
         cursor: pointer;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--color-text-secondary);
         text-align: left;
         position: sticky;
         top: 0;
-        z-index: 5;
+        z-index: var(--z-sticky);
         opacity: 1;
     }
 
@@ -776,9 +776,10 @@
     .diff-sbs-body {
         border: 1px solid var(--color-border);
         border-top: none;
-        border-radius: 0 0 6px 6px;
+        border-radius: 0 0 var(--radius-md) var(--radius-md);
     }
     .diff-file-header:hover {
+        opacity: 1;
         background: var(--color-surface-3);
     }
     .diff-file-header:focus-visible {
@@ -799,14 +800,14 @@
         text-overflow: ellipsis;
         white-space: nowrap;
         font-family: var(--font-mono);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-primary);
     }
     .diff-file-stats {
         display: flex;
         gap: 6px;
         flex-shrink: 0;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 500;
     }
     .diff-stat-added {
@@ -821,10 +822,10 @@
         margin-top: 2px;
         border: 1px solid var(--color-border);
         border-top: none;
-        border-radius: 0 0 6px 6px;
+        border-radius: 0 0 var(--radius-md) var(--radius-md);
         padding: 12px 12px 12px 42px;
         color: var(--color-text-tertiary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-style: italic;
     }
 
@@ -833,10 +834,10 @@
         margin-top: 2px;
         border: 1px solid var(--color-border);
         border-top: none;
-        border-radius: 0 0 6px 6px;
+        border-radius: 0 0 var(--radius-md) var(--radius-md);
         padding: 12px 16px;
         color: var(--color-status-red);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-style: italic;
         opacity: 0.8;
     }
@@ -846,10 +847,10 @@
         margin-top: 2px;
         border: 1px solid var(--color-border);
         border-top: none;
-        border-radius: 0 0 6px 6px;
+        border-radius: 0 0 var(--radius-md) var(--radius-md);
         padding: 12px 16px;
         color: var(--color-text-tertiary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-style: italic;
     }
 
@@ -862,7 +863,7 @@
     .diff-sbs-col-header {
         flex: 1;
         padding: 5px 12px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 600;
         color: var(--color-text-tertiary);
         text-transform: uppercase;
@@ -893,7 +894,7 @@
     /* Individual line within a column */
     .diff-sbs-line {
         display: flex;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-family: var(--font-mono, monospace);
         line-height: 1.75rem;
     }
@@ -924,11 +925,11 @@
     }
     /* Colored lines: background on content, expands to text width */
     .diff-sbs-line.added .diff-line-content {
-        background: rgba(63, 185, 80, 0.15);
+        background: rgb(from var(--color-git-added) r g b / 0.15);
         min-width: max-content;
     }
     .diff-sbs-line.removed .diff-line-content {
-        background: rgba(248, 81, 73, 0.15);
+        background: rgb(from var(--color-git-deleted) r g b / 0.15);
         min-width: max-content;
     }
 
@@ -939,14 +940,15 @@
         padding: 8px 12px;
         background: var(--color-surface-2);
         border: none;
-        border-radius: 0 0 6px 6px;
+        border-radius: 0 0 var(--radius-md) var(--radius-md);
         color: var(--color-accent);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 500;
         cursor: pointer;
         text-align: center;
     }
     .diff-expand-btn:hover {
+        opacity: 1;
         background: var(--color-surface-3);
     }
     .diff-expand-btn:focus-visible {
@@ -977,11 +979,12 @@
         background: transparent;
         color: var(--color-text-tertiary);
         cursor: pointer;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         flex-shrink: 0;
         transition: background 0.1s ease, color 0.1s ease;
     }
     .diff-mode-toggle:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
@@ -994,7 +997,7 @@
     .diff-unified-body {
         border: 1px solid var(--color-border);
         border-top: none;
-        border-radius: 0 0 6px 6px;
+        border-radius: 0 0 var(--radius-md) var(--radius-md);
         overflow: hidden;
     }
     .diff-unified-scroll {
@@ -1003,7 +1006,7 @@
     }
     .diff-row {
         display: flex;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-family: var(--font-mono, monospace);
         line-height: 1.75rem;
         min-width: max-content;
@@ -1041,22 +1044,22 @@
         flex: 1;
     }
     .diff-row-added {
-        background: rgba(63, 185, 80, 0.15);
+        background: rgb(from var(--color-git-added) r g b / 0.15);
     }
     .diff-row-added .diff-line-num {
-        background: rgba(63, 185, 80, 0.08);
+        background: rgb(from var(--color-git-added) r g b / 0.08);
     }
     .diff-row-added .diff-prefix {
-        color: var(--color-status-green);
+        color: var(--color-git-added);
     }
     .diff-row-removed {
-        background: rgba(248, 81, 73, 0.15);
+        background: rgb(from var(--color-git-deleted) r g b / 0.15);
     }
     .diff-row-removed .diff-line-num {
-        background: rgba(248, 81, 73, 0.08);
+        background: rgb(from var(--color-git-deleted) r g b / 0.08);
     }
     .diff-row-removed .diff-prefix {
-        color: var(--color-status-red);
+        color: var(--color-git-deleted);
     }
     .diff-row-context .diff-prefix {
         color: var(--color-text-tertiary);
@@ -1068,10 +1071,10 @@
         white-space: inherit;
     }
     .diff-segment-added {
-        background: rgba(63, 185, 80, 0.4);
+        background: rgb(from var(--color-git-added) r g b / 0.4);
     }
     .diff-segment-removed {
-        background: rgba(248, 81, 73, 0.4);
+        background: rgb(from var(--color-git-deleted) r g b / 0.4);
     }
     /* Token and bracket-pair colors: styles/token-colors.css, imported above — the same table the
        diff viewer paints from. */

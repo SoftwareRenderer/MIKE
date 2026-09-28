@@ -9,6 +9,6 @@
 <style>
     .perm-danger-icon {
         flex: none;
-        color: var(--color-warning, #e0a030);
+        color: var(--color-warning);
     }
 </style>

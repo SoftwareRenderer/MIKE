@@ -1,6 +1,8 @@
 <script lang="ts">
+    import { t } from '$lib/i18n';
+
     let {
-        ariaLabel = 'Resize panel',
+        ariaLabel: ariaLabelProp,
         axis = 'vertical',
         onDragStart,
         onDragMove,
@@ -18,6 +20,9 @@
     } = $props();
 
     let dragging = $state(false);
+
+    // Derived rather than a prop default: the fallback has to re-resolve when the catalog changes.
+    const ariaLabel = $derived(ariaLabelProp ?? t('app.resizePanelAria'));
 
     function getPointerPos(event: MouseEvent | TouchEvent): number {
         const touch = 'touches' in event
@@ -71,7 +76,7 @@
     .resize-handle {
         cursor: ew-resize;
         flex-shrink: 0;
-        z-index: 10;
+        z-index: var(--z-sticky);
         position: relative;
     }
     .resize-handle::before {

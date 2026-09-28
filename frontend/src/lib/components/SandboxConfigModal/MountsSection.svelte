@@ -43,6 +43,7 @@
     {/if}
 
     <div class="mount-add-row">
+        <!-- The two placeholders are path shapes to type, not copy; the names are the aria-labels. -->
         {#if draft.editingMountIndex !== null}
             <CancelEditButton onclick={() => draft.cancelMountEdit()} />
         {/if}
@@ -137,6 +138,6 @@
 
     .radio-group-small .radio-label {
         padding: 2px 7px;
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
     }
 </style>

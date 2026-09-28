@@ -22,6 +22,7 @@
     import ExtensionEditModal from './ExtensionEditModal.svelte';
     import ExtensionInstallConfirmModal from './ExtensionInstallConfirmModal.svelte';
     import ExtensionUpdatesPanel from './ExtensionUpdatesPanel.svelte';
+    import EmptyState from '../EmptyState.svelte';
     import type { OperationProgress } from './ExtensionBuildProgress.svelte';
     import { ExtensionDraft } from './extensions-draft.svelte';
     import { agentMountDeclaration, needsAgentMountGrant, needsDependencyGrant, requiresInstallReview } from '$lib/utils/extension-permissions';
@@ -520,13 +521,13 @@
             {#if loading}
                 <div class="loading">{t('settings.extensions.loadingExtensions')}</div>
             {:else if filteredExtensions.length === 0}
-                <div class="empty-state">
-                    <p>{t('settings.extensions.noneInstalled')}</p>
-                    <p class="help">{t('settings.extensions.noneInstalledHelp')}</p>
-                    <button class="btn btn-primary" onclick={openBrowse}>
-                        {t('settings.extensions.browse')}
-                    </button>
-                </div>
+                <EmptyState title={t('settings.extensions.noneInstalled')} hint={t('settings.extensions.noneInstalledHelp')}>
+                    {#snippet action()}
+                        <button class="btn btn-primary" onclick={openBrowse}>
+                            {t('settings.extensions.browse')}
+                        </button>
+                    {/snippet}
+                </EmptyState>
             {:else}
                 <div class="extension-list">
                     {#each filteredExtensions as ext}
@@ -584,10 +585,7 @@
             {#if loadingRegistry}
                 <div class="loading">{t('settings.extensions.loadingRegistry')}</div>
             {:else if browseList.length === 0}
-                <div class="empty-state">
-                    <p>{t('settings.extensions.registryEmpty')}</p>
-                    <p class="help">{t('settings.extensions.registryEmptyHelp')}</p>
-                </div>
+                <EmptyState title={t('settings.extensions.registryEmpty')} hint={t('settings.extensions.registryEmptyHelp')} />
             {:else}
                 <div class="extension-list">
                     {#each browseList as entry}
@@ -612,6 +610,8 @@
 </div>
 
 <style>
+    @import '$lib/styles/shared.css';
+
     @import '$lib/styles/extensions.css';
 
     .extensions-tab {
@@ -620,21 +620,23 @@
         gap: 1rem;
     }
 
+    /* Clears ExtensionsHeader's sticky bar, which shares this top edge and sits earlier in the
+       DOM; the dropdown rank is the next one up. */
     .error-banner {
         position: sticky;
         top: 0;
-        z-index: 11;
+        z-index: var(--z-dropdown);
         background: var(--color-surface-1);
-        border: 1px solid rgba(248, 81, 73, 0.4);
+        border: 1px solid rgb(from var(--color-status-red) r g b / 0.4);
         border-left: 4px solid var(--color-status-red);
-        border-radius: 6px;
+        border-radius: var(--radius-md);
         padding: 0.75rem 1rem;
         color: var(--color-status-red);
         cursor: pointer;
         display: flex;
         justify-content: space-between;
         align-items: center;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+        box-shadow: 0 2px 8px rgb(from var(--color-shadow) r g b / 0.15);
     }
 
     .dismiss {
@@ -642,7 +644,7 @@
         border: none;
         color: inherit;
         cursor: pointer;
-        font-size: 1rem;
+        font-size: var(--text-lg);
         padding: 0 0.25rem;
     }
 
@@ -654,47 +656,8 @@
         margin-top: 1rem;
     }
 
-    .btn {
-        padding: 0.4rem 0.75rem;
-        border-radius: 6px;
-        font-size: 0.8rem;
-        cursor: pointer;
-        border: 1px solid transparent;
-        transition: all 0.15s;
-    }
 
-    .btn:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
 
-    .btn-primary {
-        background: var(--color-btn-primary-bg);
-        color: var(--color-btn-text);
-    }
-
-    .btn-primary:hover:not(:disabled) {
-        background: var(--color-btn-primary-hover);
-    }
-
-    /* Empty state */
-    .empty-state {
-        text-align: center;
-        padding: 3rem 1rem;
-        color: var(--color-text-tertiary);
-    }
-
-    .empty-state p {
-        margin: 0.5rem 0;
-    }
-
-    .empty-state .help {
-        font-size: 0.85rem;
-    }
-
-    .empty-state .btn {
-        margin-top: 1rem;
-    }
 
     .loading {
         text-align: center;

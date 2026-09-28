@@ -88,7 +88,7 @@ describe('StartPanel rendering', () => {
         const { button } = renderPanel(null, { isStarting: true });
         expect(button()?.disabled).toBe(true);
         expect(button()?.textContent).toContain('Starting...');
-        expect(button()?.querySelector('.spinner-inline')).toBeTruthy();
+        expect(button()?.querySelector('.spinner')).toBeTruthy();
     });
 
     it('disables the button when a provider is configured but no model is chosen', () => {

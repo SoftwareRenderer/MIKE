@@ -1,5 +1,6 @@
 <script lang="ts">
     import BaseModal from './BaseModal.svelte';
+    import { Z } from '$lib/constants/z-layers';
     import Icon from '$lib/components/Icon.svelte';
     import homeIcon from '$lib/assets/icons/home.svg?raw';
     import folderIcon from '$lib/assets/icons/folder.svg?raw';
@@ -88,19 +89,19 @@
 {#snippet footer()}
     <span class="current-path">{formatPath(selected ?? currentPath)}</span>
     <div class="footer-actions">
-        <button type="button" class="btn-secondary" onclick={onClose} title={t('explorer.shared.cancel')}>{t('explorer.shared.cancel')}</button>
-        <button type="button" class="btn-primary" onclick={handleSelect} disabled={!selected} title={selectTitle}>
+        <button type="button" class="btn" onclick={onClose} title={t('explorer.shared.cancel')}>{t('explorer.shared.cancel')}</button>
+        <button type="button" class="btn btn-primary" onclick={handleSelect} disabled={!selected} title={selectTitle}>
             {t('explorer.pathPicker.select')}
         </button>
     </div>
 {/snippet}
 
-<BaseModal {title} width="560px" zIndex={1100} modalClass="path-browser" footer={footer} onClose={onClose}>
+<BaseModal {title} width="560px" zIndex={Z.modalStacked} modalClass="path-browser" footer={footer} onClose={onClose}>
     <!-- Path bar -->
     <div class="path-bar">
         <div class="path-bar-row">
             <button type="button" class="home-btn" onclick={() => loadDir('/home')} aria-label={t('explorer.shared.goHome')} title={t('explorer.shared.goHome')}>
-                <Icon src={homeIcon} color="#8B949E" width={18} height={18} />
+                <Icon src={homeIcon} color="var(--color-text-tertiary)" width={18} height={18} />
             </button>
             <input
                 type="text"
@@ -127,7 +128,7 @@
                     title={t('explorer.pathPicker.goParentAria')}
                 >
                     <span class="icon" aria-hidden="true">
-                        <Icon src={folderIcon} color="#6E7681" width={16} height={16} />
+                        <Icon src={folderIcon} color="var(--color-text-muted)" width={16} height={16} />
                     </span>
                     <span class="name">..</span>
                 </button>
@@ -152,9 +153,9 @@
                     >
                         <span class="icon" aria-hidden="true">
                             {#if entry.isDir}
-                                <Icon src={folderIcon} color="#6E7681" width={16} height={16} />
+                                <Icon src={folderIcon} color="var(--color-text-muted)" width={16} height={16} />
                             {:else}
-                                <Icon src={fileIcon} color="#6E7681" width={16} height={16} />
+                                <Icon src={fileIcon} color="var(--color-text-muted)" width={16} height={16} />
                             {/if}
                         </span>
                         <span class="name">{entry.name}</span>
@@ -185,7 +186,7 @@
         gap: 8px;
         position: sticky;
         top: 0;
-        z-index: 5;
+        z-index: var(--z-sticky);
         background: var(--color-surface-1);
         padding: 12px 0 8px;
     }
@@ -202,7 +203,7 @@
     }
     .error {
         color: var(--color-status-red);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         padding: 8px;
         background: color-mix(in srgb, var(--color-status-red) 10%, transparent);
         border-radius: var(--radius-sm);
@@ -211,7 +212,7 @@
         text-align: center;
         color: var(--color-text-secondary);
         padding: 24px;
-        font-size: 0.875rem;
+        font-size: var(--text-base);
     }
     .file-entry.selected {
         background: var(--color-accent-dark);

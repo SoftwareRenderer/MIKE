@@ -3,6 +3,7 @@
     import { t } from '$lib/i18n';
     import { escapeHtml } from '$lib/utils/format';
     import { searchFsPaths, type FsSearchResult } from '$lib/api';
+    import EmptyState from '$lib/components/EmptyState.svelte';
 
     let { projectId, taskId, onFileSelected, onClose }: {
         projectId: string;
@@ -193,18 +194,19 @@
             <input
                 class="search-input"
                 type="text"
-                placeholder={searchContent ? 'Search...' : 'Find filename...'}
+                placeholder={searchContent ? t('editor.searchPlaceholder') : t('editor.findFilenamePlaceholder')}
                 bind:value={query}
                 bind:this={inputEl}
                 oninput={handleInput}
                 onkeydown={handleKeydown}
-                aria-label="Search files"
+                aria-label={t('editor.searchFilesAria')}
             />
             <div class="search-toggles">
                 <button
                     class="toggle-btn"
                     class:active={matchCase}
-                    title="Match Case"
+                    title={t('editor.matchCaseAria')}
+                    aria-label={t('editor.matchCaseAria')}
                     aria-pressed={matchCase}
                     onclick={() => { matchCase = !matchCase; handleInput(); }}
                 >
@@ -215,7 +217,8 @@
                 <button
                     class="toggle-btn"
                     class:active={wholeWord}
-                    title="Whole Word"
+                    title={t('editor.wholeWordAria')}
+                    aria-label={t('editor.wholeWordAria')}
                     aria-pressed={wholeWord}
                     onclick={() => { wholeWord = !wholeWord; handleInput(); }}
                 >
@@ -227,7 +230,8 @@
                 <button
                     class="toggle-btn"
                     class:active={useRegex}
-                    title="Use Regex"
+                    title={t('editor.useRegexAria')}
+                    aria-label={t('editor.useRegexAria')}
                     aria-pressed={useRegex}
                     onclick={() => { useRegex = !useRegex; handleInput(); }}
                 >
@@ -238,7 +242,8 @@
                 <button
                     class="toggle-btn"
                     class:active={!searchContent}
-                    title="Search Filenames Only"
+                    title={t('editor.filenamesOnlyAria')}
+                    aria-label={t('editor.filenamesOnlyAria')}
                     aria-pressed={!searchContent}
                     onclick={() => { searchContent = !searchContent; handleInput(); }}
                 >
@@ -251,14 +256,14 @@
                 </button>
             </div>
             {#if query}
-                <button class="clear-btn" onclick={() => { query = ''; results = []; searched = false; error = ''; inputEl?.focus(); }} aria-label="Clear search">
+                <button class="clear-btn" onclick={() => { query = ''; results = []; searched = false; error = ''; inputEl?.focus(); }} aria-label={t('editor.clearSearchAria')}>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
                         <line x1="18" y1="6" x2="6" y2="18"/>
                         <line x1="6" y1="6" x2="18" y2="18"/>
                     </svg>
                 </button>
             {:else}
-                <button class="clear-btn" onclick={onClose} aria-label="Close search" title="Close (Escape)">
+                <button class="clear-btn" onclick={onClose} aria-label={t('editor.closeSearchAria')} title={t('explorer.shared.closeEscape')}>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
                         <line x1="18" y1="6" x2="6" y2="18"/>
                         <line x1="6" y1="6" x2="18" y2="18"/>
@@ -274,9 +279,9 @@
     {:else if loading}
         <div class="search-loading">{t('editor.searching')}</div>
     {:else if searched && results.length === 0}
-        <div class="search-empty">{t('editor.noResultsFound')}</div>
+        <EmptyState compact title={t('editor.noResultsFound')} />
     {:else if results.length > 0}
-        <div class="search-results" role="list" aria-label="Search results">
+        <div class="search-results" role="list" aria-label={t('editor.resultsAria')}>
             {#each groupedResults as group}
                 <!-- File header -->
                 <div class="result-file-header" title={group.path}>
@@ -371,7 +376,7 @@
         outline: none;
         color: var(--color-text-primary);
         font-family: var(--font-mono, monospace);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         padding: 4px 0;
         min-width: 0;
     }
@@ -398,6 +403,7 @@
         line-height: 1;
     }
     .toggle-btn:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
@@ -414,7 +420,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        border-radius: 2px;
+        border-radius: var(--radius-xs);
         flex-shrink: 0;
     }
     .clear-btn:hover {
@@ -424,20 +430,13 @@
     .search-error {
         padding: 12px;
         color: var(--color-status-red);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
     }
 
     .search-loading {
         padding: 12px;
         color: var(--color-text-secondary);
-        font-size: 0.75rem;
-        text-align: center;
-    }
-
-    .search-empty {
-        padding: 12px;
-        color: var(--color-text-tertiary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         text-align: center;
     }
 
@@ -449,7 +448,7 @@
         gap: 8px;
         padding: 24px 12px;
         color: var(--color-text-tertiary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         flex: 1;
     }
     .placeholder-icon {
@@ -476,7 +475,7 @@
         flex: 1;
         min-width: 0;
         font-family: var(--font-mono, monospace);
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         font-weight: 500;
         color: var(--color-text-primary);
         white-space: nowrap;
@@ -485,7 +484,7 @@
     }
 
     .file-match-count {
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         color: var(--color-text-tertiary);
         flex-shrink: 0;
     }
@@ -497,19 +496,20 @@
         border: none;
         background: transparent;
         color: var(--color-text-primary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         text-align: left;
         cursor: pointer;
         border-radius: 0;
     }
     .search-result-item:hover {
+        opacity: 1;
         background: var(--color-surface-2);
     }
 
     .result-path {
         color: var(--color-text-secondary);
         font-family: var(--font-mono, monospace);
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -527,7 +527,7 @@
         display: flex;
         gap: 6px;
         font-family: var(--font-mono, monospace);
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         line-height: 1.5;
         margin-top: 1px;
         padding-left: 16px;
@@ -551,7 +551,7 @@
     .line-text :global(mark) {
         background: color-mix(in srgb, var(--color-accent) 35%, transparent);
         color: inherit;
-        border-radius: 2px;
+        border-radius: var(--radius-xs);
         padding: 0 1px;
     }
 
@@ -565,7 +565,7 @@
     }
 
     .search-footer .match-count {
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         color: var(--color-text-tertiary);
         white-space: nowrap;
     }
@@ -579,7 +579,7 @@
             padding: 0 8px;
         }
         .search-input {
-            font-size: 16px; /* Prevent zoom on iOS */
+            font-size: var(--text-lg); /* Prevent zoom on iOS */
             padding: 6px 0;
         }
         .toggle-btn {
@@ -590,10 +590,10 @@
             padding: 8px 12px;
         }
         .result-path {
-            font-size: 0.8125rem;
+            font-size: var(--text-sm);
         }
         .result-line {
-            font-size: 0.8125rem;
+            font-size: var(--text-sm);
             padding-left: 20px;
         }
     }

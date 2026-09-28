@@ -39,6 +39,7 @@
     import TaskHeader from './CardDetail/TaskHeader.svelte';
     import BoardOverview from './CardDetail/BoardOverview.svelte';
     import MultiSelectBar from './MultiSelectBar.svelte';
+    import EmptyState from './EmptyState.svelte';
     import { useMultiSelectActions } from '$lib/composables/use-multi-select-actions.svelte';
 
     const diffViewer = useLazyComponent(() => import('./DiffViewer.svelte'));
@@ -56,15 +57,14 @@
     const memAlertAction = $derived(memAlert ? memoryAlertAction(memAlert.alert) : null);
 
     /**
-     * Section `id`s are status data (compared, sent to the API); `title` is the English
-     * name behind the `Expand/Collapse …` tooltip (`title` text is never translated) and
-     * `labelKey` is the visible, translatable section label.
+     * Section `id`s are status data (compared, sent to the API); `labelKey` is both the visible
+     * section label and the name in the `Expand/Collapse …` tooltip.
      */
-    const overviewSections: { id: string; title: string; labelKey: MessageKey }[] = [
-        { id: 'backlog', title: 'Backlog', labelKey: 'board.column.backlog' },
-        { id: 'in_progress', title: 'In Progress', labelKey: 'board.column.inProgress' },
-        { id: 'review', title: 'Review', labelKey: 'board.column.review' },
-        { id: 'done', title: 'Done', labelKey: 'board.column.done' },
+    const overviewSections: { id: string; labelKey: MessageKey }[] = [
+        { id: 'backlog', labelKey: 'board.column.backlog' },
+        { id: 'in_progress', labelKey: 'board.column.inProgress' },
+        { id: 'review', labelKey: 'board.column.review' },
+        { id: 'done', labelKey: 'board.column.done' },
     ];
 
     // Collapsible sections
@@ -968,7 +968,7 @@
 
 </script>
 
-    <div class="task-detail-page" class:floating={floating} class:fullscreen={editorFullscreen || diffFullscreen} class:chat-fullscreen={chatMaximize.fullscreen} bind:this={detailEl} tabindex="-1" aria-label="Task detail">
+    <div class="task-detail-page" class:floating={floating} class:fullscreen={editorFullscreen || diffFullscreen} class:chat-fullscreen={chatMaximize.fullscreen} bind:this={detailEl} tabindex="-1" aria-label={t('task.detailAria')}>
         <!-- Header -->
         <TaskHeader
             {workspaceDir}
@@ -1005,11 +1005,11 @@
         {/if}
 
         <!-- 3-Column Layout -->
-        <div bind:this={columnsRef} class="columns"  role="region" aria-label="Task detail panels">
+        <div bind:this={columnsRef} class="columns"  role="region" aria-label={t('task.detailPanelsAria')}>
             <!-- Column 1: Board Overview -->
             <div class="column column-context" tabindex="-1" class:hidden={floating || (mobile && activeTab !== 'context')} style:width={boardWidth}>
                 <BoardOverview
-                    sections={overviewSections.map(section => ({ ...section, label: t(section.labelKey) }))}
+                    sections={overviewSections.map(section => ({ id: section.id, label: t(section.labelKey) }))}
                     {allTasks}
                     consolidatedSubtaskIds={hierarchy.consolidatedSubtaskIds}
                     sectionDragState={dnd.sectionDragState}
@@ -1035,7 +1035,7 @@
             <!-- Resize handle: Board ↔ Chat -->
             {#if !mobile}
                 <ResizeHandle
-                    ariaLabel="Resize board and agent panels"
+                    ariaLabel={t('task.resizeBoardAgentAria')}
                     onDragStart={handleBoardDragStart}
                     onDragMove={handleBoardDragMove}
                     onDragEnd={handleBoardDragEnd}
@@ -1086,7 +1086,7 @@
             <!-- Resize handle: Chat ↔ Diff -->
             {#if !mobile}
                 <ResizeHandle
-                    ariaLabel="Resize agent and changes panels"
+                    ariaLabel={t('task.resizeAgentChangesAria')}
                     onDragStart={handleChatDragStart}
                     onDragMove={handleChatDragMove}
                     onDragEnd={handleChatDragEnd}
@@ -1142,7 +1142,7 @@
                                     <div class="diff-viewer-loading">{t('task.loadingDiffViewer')}</div>
                                 {/if}
                             {:else}
-                                <div class="diff-viewer-empty">{t('task.noChanges')}</div>
+                                <EmptyState class="pane-fill" title={t('task.noChanges')} />
                             {/if}
                         {/if}
 
@@ -1195,17 +1195,17 @@
     }
     .memory-alert-title {
         color: var(--color-status-red);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 600;
     }
     .memory-alert-line {
         color: var(--color-text-secondary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
     }
     .memory-alert-dismiss {
         flex-shrink: 0;
         padding: 4px 10px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-primary);
         background: var(--color-surface-3);
         border: 1px solid var(--color-border);
@@ -1225,7 +1225,7 @@
         width: 480px;
         height: 72vh;
         max-width: calc(100vw - 32px);
-        z-index: 900;
+        z-index: var(--z-overlay);
         flex: none;
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
@@ -1289,7 +1289,7 @@
     .diff-content :global(.checkpoint-diff-overlay) {
         position: absolute;
         inset: 0;
-        z-index: 5;
+        z-index: var(--z-content);
     }
     .diff-viewer-loading {
         display: flex;
@@ -1297,16 +1297,7 @@
         justify-content: center;
         padding: 48px 24px;
         color: var(--color-text-tertiary);
-        font-size: 0.8125rem;
-        flex: 1;
-    }
-    .diff-viewer-empty {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 48px 24px;
-        color: var(--color-text-tertiary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         flex: 1;
     }
     .column.hidden {
@@ -1354,7 +1345,7 @@
         left: 0;
         right: 0;
         bottom: 0;
-        z-index: 1000;
+        z-index: var(--z-modal);
         margin: 0;
     }
     .task-detail-page.fullscreen :global(.header),
@@ -1384,7 +1375,7 @@
         left: 0;
         right: 0;
         bottom: 0;
-        z-index: 1000;
+        z-index: var(--z-modal);
         margin: 0;
     }
     .task-detail-page.chat-fullscreen :global(.header),

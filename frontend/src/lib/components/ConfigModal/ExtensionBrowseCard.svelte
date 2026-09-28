@@ -1,6 +1,7 @@
 <script lang="ts">
     import type { RegistryEntry } from '$lib/types';
     import { t } from '$lib/i18n';
+    import Spinner from '../Spinner.svelte';
     import ExtensionBuildProgress from './ExtensionBuildProgress.svelte';
     import type { OperationProgress } from './ExtensionBuildProgress.svelte';
     import ExtensionLocalPath from './ExtensionLocalPath.svelte';
@@ -106,7 +107,7 @@
             {:else}
                 <button class="btn btn-primary btn-small" onclick={() => oninstall(entry, unpublished)} disabled={installing}>
                     {#if installing}
-                        <span class="spinner"></span>
+                        <Spinner size={12} decorative />
                         {t('settings.extensions.installingNow')}
                     {:else}
                         {t('settings.extensions.install')}
@@ -154,6 +155,8 @@
 </div>
 
 <style>
+    @import '$lib/styles/shared.css';
+
     .card-header {
         display: flex;
         align-items: flex-start;
@@ -167,52 +170,11 @@
         align-items: flex-start;
     }
 
-    .btn {
-        padding: 0.4rem 0.75rem;
-        border-radius: 6px;
-        font-size: 0.8rem;
-        cursor: pointer;
-        border: 1px solid transparent;
-        transition: all 0.15s;
-    }
-
-    .btn:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
-
-    .btn-primary {
-        background: var(--color-btn-primary-bg);
-        color: var(--color-btn-text);
-    }
-
-    .btn-primary:hover:not(:disabled) {
-        background: var(--color-btn-primary-hover);
-    }
-
-    .btn-small {
-        padding: 0.25rem 0.5rem;
-        font-size: 0.75rem;
-    }
-
-    /* Spinner */
-    .spinner {
-        display: inline-block;
-        width: 12px;
-        height: 12px;
-        border: 2px solid rgba(255, 255, 255, 0.3);
-        border-top-color: var(--color-btn-text);
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
-        vertical-align: middle;
-        margin-right: 0.35rem;
-    }
-
     .installed-badge {
-        font-size: 0.8rem;
+        font-size: var(--text-sm);
         color: var(--color-status-green);
         padding: 0.4rem 0.75rem;
-        background: rgba(63, 185, 80, 0.1);
-        border-radius: 6px;
+        background: rgb(from var(--color-status-green) r g b / 0.1);
+        border-radius: var(--radius-md);
     }
 </style>

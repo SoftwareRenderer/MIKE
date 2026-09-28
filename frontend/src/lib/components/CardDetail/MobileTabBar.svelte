@@ -8,16 +8,16 @@
     <button
         class="tab-btn {activeTab === 'context' ? 'active' : ''}"
         onclick={() => onTabChange('context')}
-        title="Board overview"
-        aria-label="Board overview"
+        title={t('task.tab.contextAria')}
+        aria-label={t('task.tab.contextAria')}
     >
         <svg width="20" height="20" viewBox="0 0 16 16" fill="none"><path d="M2 2h5v5H2zM9 2h5v5H9zM2 9h5v5H2zM9 9h5v5H9z" stroke="currentColor" stroke-width="1.2"/></svg>
     </button>
     <button
         class="tab-btn {activeTab === 'chat' ? 'active' : ''}"
         onclick={() => onTabChange('chat')}
-        title="Agent chat"
-        aria-label="Agent chat"
+        title={t('task.tab.chatAria')}
+        aria-label={t('task.tab.chatAria')}
     >
         <svg width="20" height="20" viewBox="0 0 16 16" fill="none"><path d="M2 3h12v8H5l-3 3V3z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
     </button>
@@ -25,7 +25,8 @@
         <button
             class="tab-btn {activeTab === 'checkpoint' ? 'active' : ''}"
             onclick={() => onTabChange('checkpoint')}
-            title="Checkpoint changes"
+            title={t('task.tab.checkpointAria')}
+            aria-label={t('task.tab.checkpointAria')}
         >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
@@ -36,8 +37,8 @@
     <button
         class="tab-btn {activeTab === 'diff' ? 'active' : ''}"
         onclick={() => onTabChange('diff')}
-        title="Working changes"
-        aria-label="Working changes"
+        title={t('task.tab.diffAria')}
+        aria-label={t('task.tab.diffAria')}
     >
         <svg width="20" height="20" viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="5" height="12" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="9" y="2" width="5" height="12" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M4 5h1M4 7h1M4 9h1" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><path d="M11 5h1M11 7l1 1M11 9l1-1" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
@@ -60,7 +61,7 @@
         background: none;
         border: none;
         color: var(--color-text-tertiary);
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         cursor: pointer;
         transition: all 0.15s ease;
         border-bottom: 2px solid transparent;
@@ -70,6 +71,7 @@
         border-bottom-color: var(--color-accent);
     }
     .tab-btn:hover:not(.active) {
+        opacity: 1;
         color: var(--color-text-secondary);
         background: var(--color-surface-1);
     }

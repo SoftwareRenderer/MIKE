@@ -2,11 +2,13 @@
     import type { Snippet } from 'svelte';
     import { onMount, onDestroy } from 'svelte';
     import { createFocusTrap } from '$lib/a11y';
+    import { Z } from '$lib/constants/z-layers';
+    import { t } from '$lib/i18n';
 
     let {
         title = '',
         width = '640px',
-        zIndex = 1000,
+        zIndex = Z.modal,
         closeOnOverlayClick = true,
         floating = false,
         onBeforeClose,
@@ -20,7 +22,7 @@
         footerStyle,
         modalClass,
     }: {
-        title: string;
+        title?: string;
         width?: string;
         zIndex?: number;
         closeOnOverlayClick?: boolean;
@@ -111,7 +113,7 @@
             {:else}
                 <h2 id="modal-title">{title}</h2>
             {/if}
-            <button class="close-btn" onclick={handleClose} aria-label="Close" title="Close">✕</button>
+            <button class="close-btn" onclick={handleClose} aria-label={t('app.close')} title={t('app.close')}>✕</button>
         </div>
         {#if toolbar}
             <div class="modal-toolbar">
@@ -139,7 +141,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        z-index: 1000;
+        z-index: var(--z-modal);
     }
     /* Floating (non-modal) variant: no dim, clicks pass through to the app. */
     .overlay-floating {
@@ -170,7 +172,7 @@
     }
     .modal-header h2 {
         margin: 0;
-        font-size: 1rem;
+        font-size: var(--text-lg);
         font-weight: 600;
     }
     .modal-body {
@@ -195,39 +197,10 @@
         flex-shrink: 0;
         position: sticky;
         bottom: 0;
-        z-index: 10;
+        z-index: var(--z-sticky);
     }
-    .modal-footer :global(.btn-secondary),
-    .modal-footer :global(.btn-primary) {
-        padding: 8px 16px;
-        border-radius: var(--radius-md);
-        font-size: 0.875rem;
-        font-weight: 500;
-        font-family: inherit;
-        cursor: pointer;
-        border: none;
-        transition: background 0.15s, opacity 0.15s;
-    }
-    .modal-footer :global(.btn-secondary) {
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-    }
-    .modal-footer :global(.btn-secondary):hover:not(:disabled) {
-        background: var(--color-surface-4);
-    }
-    .modal-footer :global(.btn-primary) {
-        background: var(--color-accent-dark);
-        color: white;
-    }
-    .modal-footer :global(.btn-primary):hover:not(:disabled) {
-        opacity: 0.85;
-    }
-    .modal-footer :global(.btn-secondary):disabled,
-    .modal-footer :global(.btn-primary):disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
-
+    /* The footer's buttons are styled by `shared.css`'s `.btn` family, which every footer passes in;
+       this shell owns the row, not the controls in it. */
     @media (max-width: 768px) {
         .modal {
             width: 100vw !important;

@@ -3,6 +3,8 @@
     import { onMount, onDestroy, tick } from 'svelte';
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard, applyResolvedTasksToBoard } from '$lib/stores';
     import { t } from '$lib/i18n';
+    import Spinner from './Spinner.svelte';
+    import EmptyState from './EmptyState.svelte';
     import { isSandboxMountPath } from '$lib/utils/path';
     import { isAnyModalOpen } from '$lib/utils/modal-state';
     import { connectionStore } from '$lib/stores/connection.svelte';
@@ -1099,12 +1101,12 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 <!-- Login gate -->
 {#if sessionBoot.isLoadingAuth}
     <div class="loading-screen">
-        <img class="loading-icon" src={mikeIcon} width="96" height="96" alt="Loading" />
+        <img class="loading-icon" src={mikeIcon} width="96" height="96" alt={t('app.alt.loading')} />
         {#if sessionBoot.bootSlow}<p class="loading-slow">{t('app.bootSlow.title')}</p>{/if}
     </div>
 {:else if sessionBoot.hasLocalCache}
     <div class="offline-screen">
-        <img class="offline-icon" src={mikeIcon} width="96" height="96" alt="Offline" />
+        <img class="offline-icon" src={mikeIcon} width="96" height="96" alt={t('app.alt.offline')} />
         <p class="offline-text">{sessionBoot.bootSlow ? t('app.bootSlow.title') : t('app.offline.title')}</p>
         <button class="offline-btn" onclick={() => void sessionBoot.useLocalCache()}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><polygon points="6,3 20,12 6,21"/></svg>
@@ -1118,10 +1120,10 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
      announces the transitions. -->
 {#if !connectionStore.connected}
     <div class="reconnecting-banner">
-        <span class="reconnecting-spinner"></span>
+        <Spinner size={12} decorative />
         {reconnectBanner.status}
         {#if reconnectBanner.staleTimeText}<span class="reconnecting-stale">{t('app.reconnect.dataFrom', { time: reconnectBanner.staleTimeText })}</span>{/if}
-        <button class="reconnecting-btn" onclick={() => reconnectBanner.reconnectNow()} type="button" aria-label="Try connecting now">{t('app.reconnect.connect')}</button>
+        <button class="reconnecting-btn" onclick={() => reconnectBanner.reconnectNow()} type="button" aria-label={t('app.reconnect.connectAria')}>{t('app.reconnect.connect')}</button>
     </div>
 {/if}
 <div class="sr-only" role="status" aria-live="polite">
@@ -1133,7 +1135,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         {t('app.cache.banner')}
         {#if connectionStore.connected}
-            <button class="reconnecting-btn" onclick={() => reconnectBanner.retryLive()} type="button" aria-label="Try connecting now">{t('app.reconnect.connect')}</button>
+            <button class="reconnecting-btn" onclick={() => reconnectBanner.retryLive()} type="button" aria-label={t('app.reconnect.connectAria')}>{t('app.reconnect.connect')}</button>
         {/if}
     </div>
 {/if}
@@ -1143,7 +1145,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 
     <!-- Mobile sidebar backdrop -->
     {#if isMobileCtx.isMobile && mobileMenuOpen}
-        <button type="button" class="sidebar-backdrop" onclick={() => mobileMenuOpen = false} aria-label="Close menu" title="Close menu"></button>
+        <button type="button" class="sidebar-backdrop" onclick={() => mobileMenuOpen = false} aria-label={t('app.sidebar.closeMenuAria')} title={t('app.sidebar.closeMenuAria')}></button>
     {/if}
 
     <!-- Sidebar -->
@@ -1187,7 +1189,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 </div>
             {:else}
                 <div class="loading-screen">
-                    <img class="loading-icon" src={mikeIcon} width="96" height="96" alt="Loading" />
+                    <img class="loading-icon" src={mikeIcon} width="96" height="96" alt={t('app.alt.loading')} />
                 </div>
             {/if}
         {:else if appStore.selectedProject}
@@ -1204,7 +1206,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 onShowConfig={openSettings}
             />
             {/if}
-            <section class="board-container" aria-label="Kanban board">
+            <section class="board-container" aria-label={t('app.boardRegionAria')}>
                 {#if urlRouter.explorerOpen && appStore.selectedProject}
                     <ExplorerView
                         projectId={appStore.selectedProject.id}
@@ -1264,8 +1266,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 {/if}
             </section>
         {:else}
-            <div class="empty-state">
-                <button class="icon-btn" onclick={openSettings} aria-label="Settings" title="Settings">
+            <div class="start-pane">
+                <button class="icon-btn" onclick={openSettings} aria-label={t('settings.title')} title={t('settings.title')}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <circle cx="12" cy="12" r="3"/>
                         <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
@@ -1273,13 +1275,17 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                     <UpdateDot />
                 </button>
                 {#if !hasProviders}
-                    <h2>{t('app.empty.welcomeTitle')}</h2>
-                    <p>{t('app.empty.welcomeBody')}</p>
-                    <button class="btn-primary" onclick={() => uiStore.openSettings()} title="Configure an LLM provider">{t('app.empty.configureProvider')}</button>
+                    <EmptyState title={t('app.empty.welcomeTitle')} hint={t('app.empty.welcomeBody')}>
+                        {#snippet action()}
+                            <button class="btn btn-primary" onclick={() => uiStore.openSettings()}>{t('app.empty.configureProvider')}</button>
+                        {/snippet}
+                    </EmptyState>
                 {:else}
-                    <h2>{t('app.empty.noProjectsTitle')}</h2>
-                    <p>{t('app.empty.noProjectsBody')}</p>
-                    <button class="btn-primary" onclick={openAddProject} title="Add a project">{t('app.empty.addProject')}</button>
+                    <EmptyState title={t('app.empty.noProjectsTitle')} hint={t('app.empty.noProjectsBody')}>
+                        {#snippet action()}
+                            <button class="btn btn-primary" onclick={openAddProject}>{t('app.empty.addProject')}</button>
+                        {/snippet}
+                    </EmptyState>
                 {/if}
             </div>
         {/if}
@@ -1407,11 +1413,13 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 </svelte:head>
 
 <style>
+    @import '$lib/styles/shared.css';
+
     /* -- Loading screen -- */
     .loading-screen {
         position: fixed;
         inset: 0;
-        z-index: 99999;
+        z-index: var(--z-max);
         background: var(--color-surface-0);
         display: flex;
         flex-direction: column;
@@ -1422,7 +1430,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 
     .loading-slow {
         color: var(--color-text-muted);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         margin: 0;
     }
     .loading-icon,
@@ -1434,7 +1442,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     .offline-screen {
         position: fixed;
         inset: 0;
-        z-index: 99999;
+        z-index: var(--z-max);
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -1445,20 +1453,20 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 
     .offline-text {
         color: var(--color-column-backlog);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-family: inherit;
         margin: 0;
     }
 
     .offline-btn {
         font-family: inherit;
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         display: flex;
         align-items: center;
         gap: 0.5rem;
         padding: 0.6rem 1.5rem;
         border: 1px solid var(--color-surface-3);
-        border-radius: 8px;
+        border-radius: var(--radius-lg);
         background: var(--color-surface-0);
         color: var(--color-text-primary);
         cursor: pointer;
@@ -1470,6 +1478,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     }
 
     .offline-btn:hover {
+        opacity: 1;
         background: var(--color-surface-2);
         border-color: var(--color-border-bright);
     }
@@ -1480,12 +1489,12 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         top: 0;
         left: 0;
         right: 0;
-        z-index: 10001;
+        z-index: var(--z-banner);
         background: var(--color-alert-bg);
         color: var(--color-alert-text);
         text-align: center;
         padding: 6px 16px;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 600;
         display: flex;
         align-items: center;
@@ -1497,31 +1506,23 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     .reconnecting-stale {
         font-weight: 400;
         opacity: 0.75;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
     }
     .reconnecting-btn {
-        background: rgba(214, 211, 209, 0.15);
-        border: 1px solid rgba(214, 211, 209, 0.3);
+        background: rgb(from var(--color-alert-text) r g b / 0.15);
+        border: 1px solid rgb(from var(--color-alert-text) r g b / 0.3);
         color: var(--color-alert-text);
         padding: 2px 10px;
         line-height: 1;
-        border-radius: 4px;
-        font-size: 0.75rem;
+        border-radius: var(--radius-sm);
+        font-size: var(--text-xs);
         font-weight: 600;
         cursor: pointer;
         transition: background 0.15s;
     }
     .reconnecting-btn:hover {
-        background: rgba(214, 211, 209, 0.25);
-    }
-    .reconnecting-spinner {
-        display: inline-block;
-        width: 12px;
-        height: 12px;
-        border: 2px solid rgba(214, 211, 209, 0.3);
-        border-top-color: var(--color-alert-text);
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
+        opacity: 1;
+        background: rgb(from var(--color-alert-text) r g b / 0.25);
     }
     @keyframes slide-down {
         from {
@@ -1542,12 +1543,12 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         top: 0;
         left: 0;
         right: 0;
-        z-index: 10001;
+        z-index: var(--z-banner);
         background: var(--color-alert-bg);
         color: var(--color-alert-text);
         text-align: center;
         padding: 5px 16px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 500;
         display: flex;
         align-items: center;
@@ -1573,7 +1574,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         :global(input),
         :global(textarea),
         :global(select) {
-            font-size: 1rem !important;
+            font-size: var(--text-lg) !important;
         }
 
         :global(*) {
@@ -1598,14 +1599,16 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         }
     }
 
+    /* Above the board it skips to; it never needs to beat a dialog, because the focus trap keeps
+       it out of the tab order while one is open. */
     .skip-link {
         position: absolute;
         top: -100%;
         left: 16px;
-        z-index: 10000;
+        z-index: var(--z-modal);
         padding: 8px 16px;
         background: var(--color-accent-dark);
-        color: white;
+        color: var(--color-btn-text);
         font-weight: 600;
         border-radius: var(--radius-md);
         text-decoration: none;
@@ -1638,49 +1641,37 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         flex: 1;
         overflow: hidden;
     }
-    .empty-state {
+    /* The pane a person lands on with no project: it fills the column, and the settings button
+       keeps the corner outside the centred column EmptyState draws. */
+    .start-pane {
+        position: relative;
+        height: 100%;
         display: flex;
-        flex-direction: column;
         align-items: center;
         justify-content: center;
-        height: 100%;
-        gap: 12px;
-        color: var(--color-text-secondary);
-        text-align: center;
-        position: relative;
     }
-    .empty-state .icon-btn {
+    .start-pane .icon-btn {
         position: absolute;
         top: 12px;
         right: 12px;
     }
-    .empty-state h2 {
-        font-size: 1.25rem;
-        color: var(--color-text-primary);
-    }
-    .btn-primary {
-        padding: 8px 20px;
-        border-radius: var(--radius-md);
-        background: var(--color-accent-dark);
-        color: white;
-        font-weight: 500;
-    }
-    .btn-primary:hover {
-        background: var(--color-accent-hover);
-    }
+    /* Same tier as Toast.svelte: a failed add/clone has to stay readable above the picker dialog
+       it came from. */
     .error-toast {
         position: fixed;
         bottom: 24px;
         left: 50%;
         transform: translateX(-50%);
         background: var(--color-status-red-dark);
-        color: white;
+        color: var(--color-btn-text);
         padding: 10px 20px;
         border-radius: var(--radius-md);
-        font-size: 0.875rem;
-        z-index: 400;
+        font-size: var(--text-base);
+        z-index: var(--z-toast);
         box-shadow: 0 4px 12px rgba(0,0,0,0.3);
     }
+    /* The drawer's scrim: one tier under the drawer so the drawer stays hittable, and under a
+       dialog so a dialog is never dimmed by a drawer left open behind it. */
     .sidebar-backdrop {
         display: none;
     }
@@ -1691,7 +1682,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             position: fixed;
             inset: 0;
             background: var(--color-backdrop);
-            z-index: 199;
+            z-index: var(--z-overlay);
         }
     }
 </style>

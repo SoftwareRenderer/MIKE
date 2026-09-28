@@ -344,14 +344,14 @@
 </script>
 
 {#snippet footer()}
-    <button type="button" class="btn-secondary" onclick={handleCancel} title="Cancel">{t('app.cancel')}</button>
+    <button type="button" class="btn" onclick={handleCancel}>{t('app.cancel')}</button>
     {#if lineTask}
-        <span class="auto-start-option" role="button" tabindex="-1" title="Start the task immediately after creating it" onclick={() => { autoStart = !autoStart; }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); autoStart = !autoStart; } }}>
+        <span class="auto-start-option" role="button" tabindex="-1" title={t('app.task.autoStartTitle')} onclick={() => { autoStart = !autoStart; }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); autoStart = !autoStart; } }}>
             <span class="auto-start-label">{t('app.task.autoStart')}</span>
-            <ToggleSwitch bind:checked={autoStart} ariaLabel="Auto start after creating" />
+            <ToggleSwitch bind:checked={autoStart} ariaLabel={t('app.task.autoStartAria')} />
         </span>
     {/if}
-    <button type="button" class="btn-primary" disabled={!canSubmit} onclick={() => handleSubmit()} title={`Create the task${submitHintLabel ? ` (${submitHintLabel})` : ''}`}>
+    <button type="button" class="btn btn-primary" disabled={!canSubmit} onclick={() => handleSubmit()} title={submitHintLabel ? t('app.task.createTitleWithShortcut', { shortcut: submitHintLabel }) : t('app.task.createTitle')}>
         {loading ? t('app.task.creating') : t('app.task.create')}{#if submitHintLabel && !hintsHidden}<kbd class="key-hint">{submitHintLabel}</kbd>{/if}
     </button>
 {/snippet}
@@ -373,13 +373,13 @@
             <div class="task-attachments">
                 {#each attachments as att, i}
                     <div class="task-attachment-chip">
-                        <img src={imageSrc(att)} alt="Attachment" />
-                        <button class="remove-attachment" onclick={() => removeAttachment(i)} title="Remove">&times;</button>
+                        <img src={imageSrc(att)} alt={t('chat.common.attachment')} />
+                        <button class="remove-attachment" onclick={() => removeAttachment(i)} aria-label={t('chat.common.remove')} title={t('chat.common.remove')}>&times;</button>
                     </div>
                 {/each}
             </div>
         {/if}
-        <textarea bind:this={promptTextarea} id="task-description" class="image-drop-target" class:is-drop-target={intake.isOver} bind:value={prompt} placeholder="Describe the task the AI should execute..." rows="5" required oninput={() => { handlePromptInput(); mention.handleInput(); }} onkeydown={handlePromptKeydown} onpaste={intake.handlePaste} ondragenter={intake.handleDragEnter} ondragover={intake.handleDragOver} ondragleave={intake.handleDragLeave} ondrop={intake.handleDrop}></textarea>
+        <textarea bind:this={promptTextarea} id="task-description" class="image-drop-target" class:is-drop-target={intake.isOver} bind:value={prompt} placeholder={t('app.task.descriptionPlaceholder')} rows="5" required oninput={() => { handlePromptInput(); mention.handleInput(); }} onkeydown={handlePromptKeydown} onpaste={intake.handlePaste} ondragenter={intake.handleDragEnter} ondragover={intake.handleDragOver} ondragleave={intake.handleDragLeave} ondrop={intake.handleDrop}></textarea>
         <!-- Anchor for sandboxed UI extensions (e.g. GitHub issue importer) -->
         <div bind:this={extAnchor} class="ext-anchor"></div>
     </label>
@@ -430,7 +430,8 @@
                         {#if parentId}
                         {t('app.task.autoMergeParentDesc')}
                         {:else}
-                        {t('app.task.autoMergeInto.before')} <span class="branch-badge" title={`Branch: ${branchDraft || targetBranch}`}><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="10" cy="10" r="2.5"/><line x1="7.8" y1="7.8" x2="8.2" y2="8.2"/><line x1="6" y1="3.5" x2="6" y2="2"/><line x1="10" y1="12.5" x2="10" y2="14"/></svg>{branchDraft || targetBranch}</span> {t('app.task.autoMergeInto.after')}
+                        <!-- The branch badge's tooltip uses Settings' wording for the same badge. -->
+                        {t('app.task.autoMergeInto.before')} <span class="branch-badge" title={t('settings.defaults.branchTitle', { branch: branchDraft || targetBranch })}><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="10" cy="10" r="2.5"/><line x1="7.8" y1="7.8" x2="8.2" y2="8.2"/><line x1="6" y1="3.5" x2="6" y2="2"/><line x1="10" y1="12.5" x2="10" y2="14"/></svg>{branchDraft || targetBranch}</span> {t('app.task.autoMergeInto.after')}
                         {/if}
                     </span>
                 </div>
@@ -465,10 +466,6 @@
         flex-direction: column;
         gap: 16px;
     }
-    .btn-primary {
-        display: inline-flex;
-        align-items: center;
-    }
     .btn-primary .key-hint {
         color: rgba(255, 255, 255, 0.85);
         border-color: rgba(255, 255, 255, 0.3);
@@ -479,7 +476,7 @@
         align-items: center;
         gap: 8px;
         margin-left: auto;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 500;
         color: var(--color-text-secondary);
         cursor: pointer;
@@ -489,7 +486,7 @@
         display: flex;
         flex-direction: column;
         gap: 6px;
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 500;
         color: var(--color-text-secondary);
     }
@@ -499,7 +496,7 @@
         border-radius: var(--radius-md);
         padding: 8px 12px;
         color: var(--color-text-primary);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         resize: vertical;
         min-height: 80px;
         font-family: inherit;
@@ -542,7 +539,7 @@
         background: rgba(0,0,0,0.7);
         color: white;
         border: none;
-        font-size: 14px;
+        font-size: var(--text-base);
         line-height: 1;
         cursor: pointer;
         display: flex;
@@ -568,7 +565,7 @@
         color: var(--color-text-primary);
     }
     .parent-label {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--color-text-tertiary);
         padding: 6px 10px;
         background: var(--color-surface-2);
@@ -592,7 +589,7 @@
         border-top: 1px solid var(--color-border);
     }
     .section-label {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.05em;
@@ -615,7 +612,7 @@
         gap: 2px;
     }
     .config-label {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 500;
         color: var(--color-text-primary);
     }
@@ -626,7 +623,7 @@
         padding: 0 5px;
         border-radius: var(--radius-sm);
         background: var(--color-surface-3);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 500;
         color: var(--color-text-secondary);
         font-family: var(--font-mono);
@@ -634,7 +631,7 @@
         line-height: 1.2;
     }
     .config-desc {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-tertiary);
     }
     .model-select-row {
@@ -642,7 +639,7 @@
         align-items: center;
         justify-content: space-between;
         gap: 12px;
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 500;
         color: var(--color-text-secondary);
     }

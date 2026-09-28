@@ -67,7 +67,7 @@
         gap: 6px;
         padding: 3px 24px 3px 8px;
         border-radius: var(--radius-sm);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 500;
         background: var(--color-surface-3);
         color: var(--color-text-secondary);
@@ -79,11 +79,11 @@
         min-height: 1.6rem;
     }
     .diff-select-btn:hover {
+        opacity: 1;
         background: var(--color-surface-4);
         color: var(--color-text-primary);
     }
-    .diff-select-btn:focus {
-        outline: none;
+    .diff-select-btn:focus-visible {
         border-color: var(--color-accent);
     }
     .sel-label {
@@ -98,7 +98,7 @@
         flex-shrink: 1;
         min-width: 0;
         color: var(--color-text-tertiary);
-        font-size: 0.7rem;
+        font-size: var(--text-xs);
         text-align: right;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -112,6 +112,8 @@
         color: var(--color-text-tertiary);
         pointer-events: none;
     }
+    /* The sticky file header it lives in is already a stacking context, so the dropdown rank is
+       all this needs — it never competed with anything outside that header. */
     .sel-dropdown {
         position: absolute;
         top: calc(100% + 2px);
@@ -122,8 +124,8 @@
         border-radius: var(--radius-sm);
         max-height: 240px;
         overflow-y: auto;
-        z-index: 1000;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        z-index: var(--z-dropdown);
+        box-shadow: var(--shadow-popover);
         padding: 2px;
     }
     .sel-option {
@@ -132,8 +134,8 @@
         gap: 6px;
         width: 100%;
         padding: 4px 8px;
-        border-radius: 3px;
-        font-size: 0.75rem;
+        border-radius: var(--radius-sm);
+        font-size: var(--text-xs);
         background: none;
         border: none;
         color: var(--color-text-secondary);
@@ -143,6 +145,7 @@
         font-family: var(--font-mono);
     }
     .sel-option:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
@@ -161,7 +164,7 @@
     .opt-meta {
         flex-shrink: 0;
         color: var(--color-text-tertiary);
-        font-size: 0.7rem;
+        font-size: var(--text-xs);
         text-align: right;
     }
 </style>

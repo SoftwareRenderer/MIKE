@@ -71,7 +71,7 @@
     .copy-btn .check {
         position: absolute;
         opacity: 0;
-        font-size: 14px;
+        font-size: var(--text-base);
         font-weight: 700;
         line-height: 1;
         pointer-events: none;

@@ -2,6 +2,7 @@
     import { fade } from 'svelte/transition';
     import { localeOffer } from '$lib/services/locale-offer.svelte';
     import { t } from '$lib/i18n/runtime.svelte';
+    import Spinner from './Spinner.svelte';
 
     /**
      * The first-run offer: "your browser speaks another language, here is the
@@ -39,7 +40,7 @@
                  server says which step it is on, so a git clone that takes a
                  moment is visibly working rather than hung. -->
             <p class="locale-offer-progress locale-offer-step-state">
-                <span class="locale-offer-spin" aria-hidden="true"></span>
+                <Spinner size={12} decorative />
                 {t('i18n.offer.installing', { language })}
                 {#if state.progress > 0}<span class="locale-offer-pct">{Math.round(state.progress)}%</span>{/if}
             </p>
@@ -73,7 +74,7 @@
         position: fixed;
         right: 16px;
         bottom: 16px;
-        z-index: 900;
+        z-index: var(--z-overlay);
         width: 340px;
         max-width: calc(100vw - 32px);
         display: flex;
@@ -88,14 +89,14 @@
 
     .locale-offer-title {
         margin: 0;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 600;
         color: var(--color-text-primary);
     }
 
     .locale-offer-detail {
         margin: 0;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         line-height: 1.45;
         color: var(--color-text-secondary);
     }
@@ -112,7 +113,7 @@
         align-items: center;
         gap: 6px;
         margin: 2px 0 0 0;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-primary);
     }
 
@@ -123,19 +124,10 @@
 
     .locale-offer-step {
         margin: 0;
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         color: var(--color-text-tertiary, var(--color-text-secondary));
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-    }
-
-    .locale-offer-spin {
-        width: 10px;
-        height: 10px;
-        border: 2px solid var(--color-border);
-        border-top-color: var(--color-text-primary);
-        border-radius: 50%;
-        animation: spin 0.8s linear infinite;
     }
 </style>

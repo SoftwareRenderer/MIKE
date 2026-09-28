@@ -1,6 +1,7 @@
 import { EditorView } from '@codemirror/view';
 import { syntaxHighlighting } from '@codemirror/language';
 import { buildHighlightStyle } from '$lib/syntax/token-style';
+import { Z } from '$lib/constants/z-layers';
 
 /** The editor's token colors, straight off the one table (`syntax/token-style.ts`). */
 const darkHighlight = buildHighlightStyle('dark');
@@ -136,7 +137,9 @@ export const darkTheme = EditorView.theme({
         position: 'absolute',
         top: '0',
         left: '0',
-        zIndex: '5',
+        // CodeMirror numbers its own layers (gutters, panels, tooltips) far above the app's tiers,
+        // so an editor overlay takes a low rank: same rule at git-gutter.ts's scrollbar annotation.
+        zIndex: Z.content,
         display: 'none',
         backgroundColor: 'rgba(30, 30, 46, 0.95)',
         borderBottom: '1px solid var(--color-border)',
@@ -296,7 +299,7 @@ export const lightTheme = EditorView.theme({
         position: 'absolute',
         top: '0',
         left: '0',
-        zIndex: '5',
+        zIndex: Z.content,
         display: 'none',
         backgroundColor: 'rgba(255, 255, 255, 0.95)',
         borderBottom: '1px solid var(--color-border)',

@@ -6,6 +6,7 @@
     import type { ProviderDraft } from './drafts';
     import AgentSection from './AgentSection.svelte';
     import HelpIcon from './HelpIcon.svelte';
+    import Spinner from '../Spinner.svelte';
     import ModelList from './ModelList.svelte';
     import PricingSection from './PricingSection.svelte';
 
@@ -23,6 +24,9 @@
         isDragging: boolean;
         onDirty: () => void;
     } = $props();
+
+    /** Both actions wait on this field, so the reason is said once, beside them, not twice in a tooltip. */
+    let needsUrl = $derived(!provider.url.trim());
 
     function handleToggle() {
         provider.expanded = !provider.expanded;
@@ -116,11 +120,9 @@
                 </div>
 
                 <div class="details-actions">
-                    <button type="button" class="btn-fetch" onclick={onFetchModels} disabled={provider.fetchingModels || !provider.url.trim()} title={t('settings.provider.fetchHint')}>
+                    <button type="button" class="btn-fetch" onclick={onFetchModels} disabled={provider.fetchingModels || needsUrl} title={t('settings.provider.fetchHint')} aria-describedby={needsUrl ? `provider-url-required-${index}` : undefined}>
                         {#if provider.fetchingModels}
-                            <svg class="spin-icon" width="14" height="14" viewBox="0 0 16 16" fill="none">
-                                <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5" stroke-dasharray="28" stroke-dashoffset="8"/>
-                            </svg>
+                            <Spinner decorative />
                             {t('settings.provider.fetching')}
                         {:else}
                             <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
@@ -129,11 +131,9 @@
                             {t('settings.provider.fetchModels')}
                         {/if}
                     </button>
-                    <button type="button" class="btn-test" onclick={onTestConnection} disabled={provider.testingConnection || !provider.url.trim()} title={t('settings.provider.testHint')}>
+                    <button type="button" class="btn-test" onclick={onTestConnection} disabled={provider.testingConnection || needsUrl} title={t('settings.provider.testHint')} aria-describedby={needsUrl ? `provider-url-required-${index}` : undefined}>
                         {#if provider.testingConnection}
-                            <svg class="spin-icon" width="14" height="14" viewBox="0 0 16 16" fill="none">
-                                <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5" stroke-dasharray="28" stroke-dashoffset="8"/>
-                            </svg>
+                            <Spinner decorative />
                             {t('settings.provider.testing')}
                         {:else}
                             <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
@@ -142,6 +142,9 @@
                             {t('settings.provider.testConnection')}
                         {/if}
                     </button>
+                    {#if needsUrl}
+                        <span id={`provider-url-required-${index}`} class="actions-hint">{t('settings.provider.urlRequiredHint')}</span>
+                    {/if}
                 </div>
                 {#if provider.fetchError}
                     <div class="fetch-error">
@@ -267,7 +270,7 @@
         flex-shrink: 0;
     }
     .provider-display-name {
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 600;
         white-space: nowrap;
         overflow: hidden;
@@ -292,8 +295,9 @@
         cursor: pointer;
     }
     .btn-remove-provider:hover {
+        opacity: 1;
         background: var(--color-status-red-dark);
-        color: white;
+        color: var(--color-btn-text);
     }
     .btn-expand {
         display: flex;
@@ -308,6 +312,7 @@
         cursor: pointer;
     }
     .btn-expand:hover {
+        opacity: 1;
         background: var(--color-surface-1);
     }
     .btn-expand svg.expanded {
@@ -337,16 +342,16 @@
     }
     .url-label,
     .api-key-label {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
     }
     .optional-text {
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         opacity: 0.6;
     }
     .url-field input,
     .api-key-field input {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         padding: 6px 8px;
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
@@ -364,31 +369,29 @@
         gap: 6px;
         margin-top: 10px;
         flex-wrap: wrap;
+        align-items: center;
+    }
+    /* The reason the two actions are dead, next to them: a tooltip there would need a hover, and a disabled
+       control is exactly what the pointer is not meant to reach. */
+    .actions-hint {
+        font-size: var(--text-xs);
+        color: var(--color-text-tertiary);
     }
     .btn-fetch,
     .btn-test {
         display: flex;
         align-items: center;
         gap: 4px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         padding: 4px 10px;
         border-radius: var(--radius-sm);
         border: 1px solid var(--color-border);
         background: var(--color-surface-1);
         color: var(--color-text-primary);
-        cursor: pointer;
     }
     .btn-fetch:hover:not(:disabled),
     .btn-test:hover:not(:disabled) {
         border-color: var(--color-text-secondary);
-    }
-    .btn-fetch:disabled,
-    .btn-test:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
-    .spin-icon {
-        animation: spin 1s linear infinite;
     }
     .fetch-error {
         display: flex;
@@ -396,9 +399,9 @@
         gap: 6px;
         margin-top: 8px;
         padding: 6px 8px;
-        font-size: 0.75rem;
-        color: var(--color-danger);
-        background: rgba(248, 81, 73, 0.1);
+        font-size: var(--text-xs);
+        color: var(--color-status-red);
+        background: rgb(from var(--color-status-red) r g b / 0.1);
         border-radius: var(--radius-sm);
     }
     .test-result {
@@ -407,16 +410,16 @@
         gap: 6px;
         margin-top: 8px;
         padding: 6px 8px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         border-radius: var(--radius-sm);
     }
     .test-result.test-success {
-        color: var(--color-success);
-        background: rgba(63, 185, 80, 0.1);
+        color: var(--color-status-green);
+        background: rgb(from var(--color-status-green) r g b / 0.1);
     }
     .test-result.test-failure {
-        color: var(--color-danger);
-        background: rgba(248, 81, 73, 0.1);
+        color: var(--color-status-red);
+        background: rgb(from var(--color-status-red) r g b / 0.1);
     }
     .provider-options {
         margin-top: 10px;
@@ -440,12 +443,12 @@
         flex: 1;
     }
     .option-label {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
     }
     .option-input {
         width: 60px;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         padding: 3px 6px;
         background: var(--color-surface-2);
         border: 1px solid var(--color-border);

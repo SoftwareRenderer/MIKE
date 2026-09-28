@@ -39,7 +39,7 @@
         align-items: center;
         gap: 4px;
         padding: 3px 10px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary, var(--color-text-tertiary));
         cursor: pointer;
         transition: background 0.15s, color 0.15s;
@@ -51,12 +51,12 @@
     }
 
     .radio-label.active {
-        background: var(--color-accent-dark, rgba(88, 166, 255, 0.25));
-        color: white;
+        background: var(--color-accent-dark);
+        color: var(--color-btn-text);
     }
 
     .radio-label:hover:not(.active) {
-        background: var(--color-surface-3, rgba(139, 148, 158, 0.1));
+        background: var(--color-surface-3);
     }
 
     .radio-label input[type="radio"] {
@@ -73,6 +73,6 @@
 
     .radio-group-small .radio-label {
         padding: 2px 7px;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
     }
 </style>

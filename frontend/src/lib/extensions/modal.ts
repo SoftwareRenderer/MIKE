@@ -7,6 +7,7 @@
  */
 
 import { t } from '$lib/i18n';
+import { Z } from '$lib/constants/z-layers';
 
 export interface ExtensionModalOptions {
     /** Dialog heading. Omitted → no header title (message only). */
@@ -18,8 +19,6 @@ export interface ExtensionModalOptions {
     /** Attributed in the footer ("Shown by <name>"). */
     extensionName?: string;
 }
-
-const OVERLAY_Z_BASE = 2000;
 
 /**
  * How many extension modals may be open at once. The dialog is blocking and
@@ -43,7 +42,8 @@ export function showExtensionModal(opts: ExtensionModalOptions): Promise<void> {
     const confirmLabel = String(opts.confirmLabel || t('host.ok'));
     const extensionName = String(opts.extensionName || '');
 
-    const z = OVERLAY_Z_BASE + ++zCounter;
+    // The stacked-dialog tier, plus one per open dialog so a nested `ui.modal` paints over its parent.
+    const z = Z.modalStacked + ++zCounter;
     const prevFocus = document.activeElement as HTMLElement | null;
 
     // ── overlay ────────────────────────────────────────────────

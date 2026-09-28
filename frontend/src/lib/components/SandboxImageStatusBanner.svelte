@@ -3,6 +3,7 @@
     import { sandboxImageStatus } from '$lib/services/sandbox-image-status.svelte';
     import { sandboxImageLabel, sandboxImageVisible } from '$lib/utils/sandbox-image-status';
     import { t } from '$lib/i18n';
+    import Spinner from './Spinner.svelte';
 
     /**
      * Progress for a project's sandbox image being built (from its Dockerfile) or pulled.
@@ -27,7 +28,7 @@
     >
         <div class="sandbox-image-status-head">
             {#if !failed}
-                <span class="sandbox-image-status-spin" aria-hidden="true"></span>
+                <Spinner size={12} decorative />
             {/if}
             <span class="sandbox-image-status-label">{label}</span>
             {#if failed}
@@ -60,7 +61,7 @@
         background: var(--color-surface-2);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-md);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
     }
 
     .sandbox-image-status.failed {
@@ -82,16 +83,6 @@
         white-space: nowrap;
     }
 
-    .sandbox-image-status-spin {
-        flex: 0 0 auto;
-        width: 10px;
-        height: 10px;
-        border: 2px solid var(--color-border-bright);
-        border-top-color: var(--color-accent-dark);
-        border-radius: 50%;
-        animation: spin 0.8s linear infinite;
-    }
-
     .sandbox-image-status-error {
         color: var(--color-status-red);
         white-space: pre-wrap;
@@ -106,7 +97,7 @@
         background: var(--color-surface-1);
         border-radius: var(--radius-sm);
         font-family: var(--font-mono, monospace);
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         line-height: 1.4;
         color: var(--color-text-secondary);
         white-space: pre-wrap;
@@ -121,7 +112,7 @@
         background: transparent;
         color: var(--color-text-secondary);
         font-family: inherit;
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         cursor: pointer;
     }
 

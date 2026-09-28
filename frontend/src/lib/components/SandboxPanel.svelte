@@ -180,7 +180,7 @@ import { formatNetworkedExtensions, serverToolExtensions } from '$lib/utils/serv
         display: flex;
         align-items: center;
         gap: 8px;
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 600;
         color: var(--color-text-primary);
     }
@@ -193,21 +193,21 @@ import { formatNetworkedExtensions, serverToolExtensions } from '$lib/utils/serv
 
     .status-notice {
         padding: 10px 14px;
-        background: rgba(80, 140, 255, 0.08);
-        border: 1px solid rgba(80, 140, 255, 0.2);
+        background: rgb(from var(--color-status-blue) r g b / 0.08);
+        border: 1px solid rgb(from var(--color-status-blue) r g b / 0.2);
         border-radius: var(--radius-md);
-        color: var(--color-primary);
-        font-size: 0.8125rem;
+        color: var(--color-accent);
+        font-size: var(--text-sm);
         line-height: 1.4;
     }
 
     .server-tool-notice {
         padding: 6px 10px;
-        background: rgba(210, 153, 34, 0.08);
-        border: 1px solid rgba(210, 153, 34, 0.3);
+        background: rgb(from var(--color-warning) r g b / 0.08);
+        border: 1px solid rgb(from var(--color-warning) r g b / 0.3);
         border-radius: var(--radius-sm);
         color: var(--color-text-secondary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         line-height: 1.4;
     }
 
@@ -228,12 +228,12 @@ import { formatNetworkedExtensions, serverToolExtensions } from '$lib/utils/serv
     }
 
     .memory-label {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--color-text-secondary);
     }
 
     .memory-value {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--color-text-primary);
         font-family: var(--font-mono, monospace);
     }
@@ -241,13 +241,13 @@ import { formatNetworkedExtensions, serverToolExtensions } from '$lib/utils/serv
     .memory-bar {
         position: relative;
         height: 6px;
-        border-radius: 3px;
+        border-radius: var(--radius-sm);
         background: var(--color-surface-3);
     }
 
     .memory-bar-fill {
         height: 100%;
-        border-radius: 3px;
+        border-radius: var(--radius-sm);
         background: var(--color-accent);
         transition: width 0.3s ease;
     }
@@ -263,13 +263,13 @@ import { formatNetworkedExtensions, serverToolExtensions } from '$lib/utils/serv
         bottom: -3px;
         width: 2px;
         margin-left: -1px;
-        border-radius: 1px;
+        border-radius: var(--radius-xs);
         background: var(--color-status-red);
         transition: left 0.3s ease;
     }
 
     .memory-peak {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-tertiary);
     }
 
@@ -279,11 +279,11 @@ import { formatNetworkedExtensions, serverToolExtensions } from '$lib/utils/serv
 
     .oom-warning {
         padding: 8px 10px;
-        background: rgba(248, 81, 73, 0.1);
-        border: 1px solid rgba(248, 81, 73, 0.3);
+        background: rgb(from var(--color-status-red) r g b / 0.1);
+        border: 1px solid rgb(from var(--color-status-red) r g b / 0.3);
         border-radius: var(--radius-md);
         color: var(--color-status-red);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
     }
 
     .oom-warning-count {
@@ -295,20 +295,20 @@ import { formatNetworkedExtensions, serverToolExtensions } from '$lib/utils/serv
         flex-direction: column;
         gap: 4px;
         padding: 10px 12px;
-        background: rgba(248, 81, 73, 0.1);
-        border: 1px solid rgba(248, 81, 73, 0.3);
+        background: rgb(from var(--color-status-red) r g b / 0.1);
+        border: 1px solid rgb(from var(--color-status-red) r g b / 0.3);
         border-radius: var(--radius-md);
     }
 
     .memory-alert-title {
         color: var(--color-status-red);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 600;
     }
 
     .memory-alert-line {
         color: var(--color-text-secondary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         line-height: 1.4;
     }
 
@@ -316,7 +316,7 @@ import { formatNetworkedExtensions, serverToolExtensions } from '$lib/utils/serv
         align-self: flex-start;
         margin-top: 4px;
         padding: 4px 10px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-primary);
         background: var(--color-surface-3);
         border: 1px solid var(--color-border);
@@ -330,17 +330,17 @@ import { formatNetworkedExtensions, serverToolExtensions } from '$lib/utils/serv
 
     .loading {
         color: var(--color-text-secondary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-style: italic;
     }
 
     .error {
         padding: 8px 12px;
-        background: rgba(248, 81, 73, 0.1);
-        border: 1px solid rgba(248, 81, 73, 0.3);
+        background: rgb(from var(--color-status-red) r g b / 0.1);
+        border: 1px solid rgb(from var(--color-status-red) r g b / 0.3);
         border-radius: var(--radius-md);
         color: var(--color-status-red);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
     }
 
     /* The list's inset; the muted italic line itself is .sandbox-note. */

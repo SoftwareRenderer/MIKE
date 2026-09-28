@@ -1,4 +1,6 @@
 <script lang="ts">
+    import { Z } from '$lib/constants/z-layers';
+    import { t } from '$lib/i18n';
     import { useClickOutside } from '$lib/composables/use-click-outside.svelte';
 
     interface Props {
@@ -80,12 +82,14 @@
 </script>
 
 {#if visible}
+    <!-- One layer above the dialog: the caller mounts this outside `BaseModal` (a fixed element cannot
+         escape its dialog's stacking context from inside), so its siblings include the overlay itself. -->
     <ul
         class="mention-dropdown"
         bind:this={dropdownEl}
-        style="position:fixed; bottom:{dropdownBottom}px; left:{dropdownLeft}px; width:{dropdownWidth}px; z-index:1000;"
+        style="position:fixed; bottom:{dropdownBottom}px; left:{dropdownLeft}px; width:{dropdownWidth}px; z-index:{Z.modalStacked};"
         role="listbox"
-        aria-label="File suggestions"
+        aria-label={t('chat.mention.suggestionsAria')}
         onclick={(e) => e.stopPropagation()}
         onkeydown={(e) => { if (e.key === 'Escape') onClose(); }}
     >
@@ -116,7 +120,7 @@
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-md);
-        box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+        box-shadow: var(--shadow-popover);
         padding: 4px;
         margin: 0;
         list-style: none;
@@ -128,7 +132,7 @@
         padding: 6px 10px;
         border-radius: var(--radius-sm);
         cursor: pointer;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-family: var(--font-mono, monospace);
         color: var(--color-text-secondary);
         transition: background 0.1s ease, color 0.1s ease;

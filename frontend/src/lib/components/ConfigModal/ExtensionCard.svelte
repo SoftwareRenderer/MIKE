@@ -1,6 +1,7 @@
 <script lang="ts">
     import type { Extension } from '$lib/types';
     import { t } from '$lib/i18n';
+    import Spinner from '../Spinner.svelte';
     import ToggleSwitch from '../ToggleSwitch.svelte';
     import ExtensionBuildProgress from './ExtensionBuildProgress.svelte';
     import ExtensionLocalPath from './ExtensionLocalPath.svelte';
@@ -119,7 +120,7 @@
             </span>
         </div>
         <div class="card-actions">
-            <button class="btn btn-icon btn-danger" title={t('settings.extensions.delete')} onclick={() => ondelete(ext.id, ext.name)}>
+            <button class="btn btn-icon btn-delete" title={t('settings.extensions.delete')} onclick={() => ondelete(ext.id, ext.name)}>
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                     <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
@@ -128,7 +129,7 @@
             {#if ext.type === 'lsp'}
             <button class="btn btn-icon" title={t('settings.extensions.updateImageTitle')} onclick={() => onupdateimage(ext.id, ext.name)} disabled={updating}>
                 {#if updating}
-                    <span class="spinner"></span>
+                    <Spinner size={12} label={t('settings.extensions.updating')} />
                 {:else}
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <path d="M21 2v6h-6"/>
@@ -175,7 +176,7 @@
                 </div>
                 <button
                     type="button"
-                    class="btn-secondary btn-small"
+                    class="btn btn-secondary btn-small"
                     title={t('settings.extensions.agentCardUnmountHint')}
                     onclick={() => onrevoke(ext)}
                 >{t('settings.extensions.agentCardUnmount')}</button>
@@ -212,6 +213,8 @@
 </div>
 
 <style>
+    @import '$lib/styles/shared.css';
+
     .card-actions .btn-icon {
         position: relative;
     }
@@ -274,61 +277,23 @@
         margin-left: auto;
     }
 
-    .btn {
-        padding: 0.4rem 0.75rem;
-        border-radius: 6px;
-        font-size: 0.8rem;
-        cursor: pointer;
-        border: 1px solid transparent;
-        transition: all 0.15s;
-    }
-
-    .btn:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
-
-    .btn-secondary {
-        background: var(--color-btn-secondary-bg);
-        border-color: var(--color-border-subtle);
-        color: var(--color-text-primary);
-    }
-
-    .btn-secondary:hover:not(:disabled) {
-        background: var(--color-border-subtle);
-    }
-
     .btn-icon {
         background: none;
         border: none;
         color: var(--color-text-tertiary);
         padding: 0.25rem;
-        font-size: 1rem;
+        font-size: var(--text-lg);
+        /* Each of these buttons holds one glyph — an icon, or a ring while its work runs. */
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
     }
 
     .btn-icon:hover {
         color: var(--color-text-primary);
     }
 
-    .btn-danger:hover {
+    .btn-delete:hover {
         color: var(--color-status-red);
-    }
-
-    .btn-small {
-        padding: 0.25rem 0.5rem;
-        font-size: 0.75rem;
-    }
-
-    /* Spinner */
-    .spinner {
-        display: inline-block;
-        width: 12px;
-        height: 12px;
-        border: 2px solid rgba(255, 255, 255, 0.3);
-        border-top-color: var(--color-btn-text);
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
-        vertical-align: middle;
-        margin-right: 0.35rem;
     }
 </style>

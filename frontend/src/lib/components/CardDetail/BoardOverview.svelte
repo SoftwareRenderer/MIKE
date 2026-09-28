@@ -32,11 +32,10 @@
         multiSelect,
     }: {
         /**
-         * Section `id`s are status data. `title` is the English name behind the
-         * `Expand/Collapse …` tooltip (never translated); `label` is the visible,
-         * translatable label and falls back to `title`.
+         * Section `id`s are status data; `label` is the translatable name shown in the header and
+         * in the `Expand/Collapse …` tooltip.
          */
-        sections: Array<{ id: string; title: string; label?: string }>;
+        sections: Array<{ id: string; label: string }>;
         allTasks: Task[];
         consolidatedSubtaskIds: Set<string>;
         sectionDragState: Map<string, { isOver: boolean; isRejected: boolean}>;
@@ -109,7 +108,7 @@
             ondragleave={() => onSectionDragLeave(section.id)}
             ondrop={(e) => onSectionDrop(e, section.id)}
         >
-            <button class="section-header" onclick={() => onToggleSection(section.id)} type="button" aria-expanded={!collapsedSections.has(section.id)} title={collapsedSections.has(section.id) ? `Expand ${section.title}` : `Collapse ${section.title}`}>
+            <button class="section-header" onclick={() => onToggleSection(section.id)} type="button" aria-expanded={!collapsedSections.has(section.id)} title={collapsedSections.has(section.id) ? t('board.section.expandTitle', { name: section.label }) : t('board.section.collapseTitle', { name: section.label })}>
                 <span class="section-title">
                     {#if section.id === 'backlog'}
                         <svg class="col-icon" width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.5"/></svg>
@@ -120,17 +119,17 @@
                     {:else if section.id === 'done'}
                         <svg class="col-icon" width="12" height="12" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" fill="currentColor"/></svg>
                     {/if}
-                    {section.label ?? section.title}
+                    {section.label}
                 </span>
                 <div class="header-right">
                     <span class="section-count">{sectionCount}</span>
                     {#if section.id === 'backlog'}
-                        <span class="add-btn" tabindex="0" role="button" onclick={(e) => { e.stopPropagation(); onShowCreateTask(); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onShowCreateTask(); } }} aria-label="Create a new task" title="Create a new task">
+                        <span class="add-btn" tabindex="0" role="button" onclick={(e) => { e.stopPropagation(); onShowCreateTask(); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onShowCreateTask(); } }} aria-label={t('board.column.newTaskAria')} title={t('board.column.newTaskAria')}>
                             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                         </span>
                     {/if}
                     {#if section.id === 'done' && sectionCount > 0}
-                        <span class="clear-btn" tabindex="0" role="button" onclick={(e) => { e.stopPropagation(); onClearDone(sectionTasks.length); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onClearDone(sectionTasks.length); } }} aria-label={`Clear all ${sectionCount} done tasks`} title={`Clear all ${sectionCount} done tasks`}>
+                        <span class="clear-btn" tabindex="0" role="button" onclick={(e) => { e.stopPropagation(); onClearDone(sectionTasks.length); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onClearDone(sectionTasks.length); } }} aria-label={t('board.column.clearAllAria', { count: sectionCount })} title={t('board.column.clearAllAria', { count: sectionCount })}>
                             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                                 <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                                 <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
@@ -163,7 +162,7 @@
                     </div>
                 {/each}
                 {#if section.id === 'backlog'}
-                    <button class="task-item-add" onclick={onShowCreateTask} type="button" title="Create a new task">{t('board.column.addTask')}</button>
+                    <button class="task-item-add" onclick={onShowCreateTask} type="button">{t('board.column.addTask')}</button>
                 {/if}
             </div>
             {/if}
@@ -187,11 +186,11 @@
     }
     .section-group.is-over {
         border-color: var(--color-accent);
-        box-shadow: 0 0 0 2px var(--color-accent)40;
+        box-shadow: 0 0 0 2px rgb(from var(--color-accent) r g b / 0.25);
     }
     .section-group.is-drop-rejected {
-        border-color: var(--color-status-red, #f85149);
-        box-shadow: 0 0 0 2px var(--color-status-red, #f85149)40;
+        border-color: var(--color-status-red);
+        box-shadow: 0 0 0 2px rgb(from var(--color-status-red) r g b / 0.25);
     }
     .section-header {
         display: flex;
@@ -202,7 +201,7 @@
         border: none;
         cursor: pointer;
         color: var(--color-text-secondary);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.5px;
@@ -210,7 +209,7 @@
         text-align: left;
         position: sticky;
         top: 0;
-        z-index: 5;
+        z-index: var(--z-sticky);
         -webkit-appearance: none;
         appearance: none;
     }
@@ -235,11 +234,11 @@
         gap: 8px;
     }
     .section-count {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
         background: var(--color-surface-3);
         padding: 1px 6px;
-        border-radius: 8px;
+        border-radius: var(--radius-lg);
         font-weight: 500;
     }
     .add-btn {
@@ -257,7 +256,7 @@
     }
     .add-btn:hover {
         background: var(--color-accent-dark);
-        color: white;
+        color: var(--color-btn-text);
     }
     .add-btn:focus-visible {
         outline: 2px solid var(--color-accent);
@@ -277,10 +276,10 @@
     }
     .clear-btn:hover {
         background: var(--color-status-red-dark);
-        color: white;
+        color: var(--color-btn-text);
     }
     .clear-btn:focus-visible {
-        outline: 2px solid var(--color-status-red, #f85149);
+        outline: 2px solid var(--color-status-red);
         outline-offset: 1px;
     }
     @media (max-width: 768px) {
@@ -322,11 +321,12 @@
         border: 1px dashed var(--color-border);
         background: none;
         color: var(--color-text-tertiary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         cursor: pointer;
         transition: all 0.15s ease;
     }
     .task-item-add:hover {
+        opacity: 1;
         border-color: var(--color-accent);
         color: var(--color-accent);
         background: var(--color-accent)10;

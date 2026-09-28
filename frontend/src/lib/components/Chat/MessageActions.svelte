@@ -104,7 +104,7 @@
     .message-timestamp {
         display: flex;
         align-items: center;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
         white-space: nowrap;
         margin: 0 4px;
@@ -134,11 +134,11 @@
         flex-shrink: 0;
     }
     .action-btn:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
     .action-btn .icon {
-        opacity: 1;
         transition: opacity 0.2s ease;
     }
     .action-btn.copied .icon {
@@ -149,7 +149,7 @@
     .action-btn .check {
         position: absolute;
         opacity: 0;
-        font-size: 14px;
+        font-size: var(--text-base);
         font-weight: 700;
         line-height: 1;
         transition: opacity 0.2s ease;

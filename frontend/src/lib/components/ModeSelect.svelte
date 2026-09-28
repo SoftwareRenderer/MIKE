@@ -74,7 +74,7 @@
         border-radius: var(--radius-sm);
         background: var(--color-surface-2);
         color: var(--color-text-primary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 500;
         cursor: pointer;
         font-family: inherit;
@@ -122,7 +122,7 @@
         border-radius: var(--radius-sm);
         box-shadow: 0 4px 12px rgba(0,0,0,0.15);
         padding: 4px;
-        z-index: 50;
+        z-index: var(--z-dropdown);
     }
     .mode-option {
         display: flex;
@@ -131,16 +131,17 @@
         width: 100%;
         padding: 6px 10px;
         border: none;
-        border-radius: 3px;
+        border-radius: var(--radius-sm);
         background: transparent;
         color: var(--color-text-primary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 500;
         cursor: pointer;
         font-family: inherit;
         text-align: left;
     }
     .mode-option:hover {
+        opacity: 1;
         background: var(--color-surface-3);
     }
     .mode-option.act.selected {

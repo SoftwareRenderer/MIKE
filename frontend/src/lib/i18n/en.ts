@@ -392,6 +392,7 @@ const catalog = {
     'settings.models.nameField': 'Model name',
     'settings.models.ctxHint': 'Context window in tokens. Pre-populated from Fetch Models; edit to override, or leave empty for auto-discovery.',
     'settings.models.auto': 'auto',
+    'settings.models.defaultPlaceholder': 'default',
     'settings.models.thisModel': 'this model',
     'settings.models.modelWord': 'model',
     'settings.models.ctxAria': 'Context window for {model}',
@@ -410,8 +411,8 @@ const catalog = {
     'settings.models.empty': 'No models added. Use "Fetch Models" or add manually.',
 
     // ── ConfigModal/SessionsSection.svelte ──
-    // refresh-sessions / revoke-* aria-labels are e2e selectors, not prose, so they
-    // stay literals. Destructive copy is one key per decision the user makes.
+    // Destructive copy is one key per decision the user makes; the row's own revoke name
+    // carries its id so a screen reader (and the spec) can tell the rows apart.
     'settings.sessions.title': 'Sessions',
     'settings.sessions.reloadTitle': 'Reload the session list',
     'settings.sessions.loading': 'Loading...',
@@ -433,6 +434,7 @@ const catalog = {
     'settings.sessions.lastSeenAt': 'Last seen at {time}',
     'settings.sessions.revokeDeviceHint': 'Revoke this device and sign out',
     'settings.sessions.revokeSessionHint': 'Sign out this session',
+    'settings.sessions.revokeSessionAria': 'Revoke session {id}',
     'settings.sessions.revokeThisDevice': 'Revoke this device?',
     'settings.sessions.revokeThisSession': 'Revoke this session?',
     'settings.sessions.revokeThisDeviceMessage': 'You are signed in on this device. Revoking it signs you out now.',
@@ -452,8 +454,8 @@ const catalog = {
     'settings.sessions.revokeAllFailed': 'Failed to revoke other sessions',
 
     // ── ConfigModal/ApiTokensSection.svelte ──
-    // revoke-token-* / refresh-tokens aria-labels are e2e selectors, not prose. The scope sentence
-    // is the one place a user learns what a leaked token would cost them, so it names the routes.
+    // The scope sentence is the one place a user learns what a leaked token would cost
+    // them, so it names the routes. The row's revoke name carries its own id.
     'settings.tokens.title': 'API tokens',
     'settings.tokens.help': 'Credentials for scripts and other headless clients, sent as "Authorization: Bearer <token>". A token can list projects, create, read, update and delete tasks, and start or stop a task — nothing else, and no other endpoint. It does not expire; revoke it to take it away.',
     'settings.tokens.reloadTitle': 'Reload the token list',
@@ -465,6 +467,8 @@ const catalog = {
     'settings.tokens.lastUsed': 'Last used',
     'settings.tokens.neverUsed': 'Never used',
     'settings.tokens.labelPlaceholder': 'What uses this token?',
+    'settings.tokens.labelAria': 'Token name',
+    'settings.tokens.revokeTokenAria': 'Revoke token {id}',
     'settings.tokens.labelRequired': 'Give the token a name first',
     'settings.tokens.create': 'Create token',
     'settings.tokens.creating': 'Creating...',
@@ -508,6 +512,7 @@ const catalog = {
     'settings.provider.testHint': 'Test connection to this provider',
     'settings.provider.testing': 'Testing...',
     'settings.provider.testConnection': 'Test Connection',
+    'settings.provider.urlRequiredHint': 'Enter a provider URL first',
     'settings.provider.concurrency': 'Concurrency',
     'settings.provider.concurrencyHelp': 'Max tasks running concurrently on this provider; also caps in-flight LLM requests to this number.',
     'settings.provider.maxRps': 'Max requests/sec',
@@ -531,6 +536,7 @@ const catalog = {
     'settings.stats.model': 'Model',
     'settings.stats.resetHint': 'Reset stats for this model',
     'settings.stats.resetAria': 'Reset stats for {model}',
+    'settings.stats.resetTitle': 'Reset token stats',
     'settings.stats.resetConfirm': 'Reset token stats for {model}?',
     'settings.stats.reset': 'Reset',
 
@@ -811,6 +817,10 @@ const catalog = {
     // ── shared button / dialog copy ──
     'app.cancel': 'Cancel',
     'app.ok': 'OK',
+    'app.close': 'Close',
+    // Shared by the top bar and the task header: the control's name, never the path it shows.
+    'app.openExplorerAria': 'Open explorer',
+    'app.resizePanelAria': 'Resize panel',
     'app.discard': 'Discard',
     'app.keepEditing': 'Keep editing',
     'app.confirm.confirm': 'Confirm',
@@ -849,19 +859,44 @@ const catalog = {
     'app.sidebar.fullScreen': 'Full Screen',
     'app.sidebar.tokenUsage': 'Token Usage',
     'app.sidebar.settings': 'Settings',
+    // Also the top bar's stats control — one phrase for the one modal it opens.
+    'app.sidebar.tokenUsageAria': 'Token usage stats',
+    'app.sidebar.navAria': 'Sidebar',
+    // Shared with the mobile backdrop in App.svelte: both act on the same menu.
+    'app.sidebar.openMenuAria': 'Open menu',
+    'app.sidebar.closeMenuAria': 'Close menu',
+    'app.sidebar.expandAria': 'Expand sidebar',
+    'app.sidebar.collapseAria': 'Collapse sidebar',
+    'app.sidebar.cloneProgressAria': 'Clone progress',
+    'app.sidebar.removeProjectAria': 'Remove project {name}',
+    // The project row's tooltip says what the row's own name cannot: a clone in flight,
+    // or a Review count waiting.
+    'app.sidebar.cloningTitle': 'Cloning repository… ({progress}%)',
+    'app.sidebar.reviewTitle': {
+        one: '{name} - {count} task available for review',
+        other: '{name} - {count} tasks available for review',
+    },
+    'app.sidebar.openProjectTitle': 'Open project: {name}',
+    'app.sidebar.openProjectSandboxedTitle': 'Open project: {name} (sandboxed)',
 
     // ── LoginModal.svelte ──
     // Pre-auth, so this comes from the bundled en catalog: no fetch, no extension load.
     'app.login.signIn': 'Sign in',
+    'app.login.passwordAria': 'Password',
     'app.login.signingIn': 'Signing in...',
     'app.login.failed': 'Login failed',
     'app.login.networkError': 'Network error',
 
     // ── CreateTaskModal.svelte ──
     'app.task.create': 'Create Task',
+    'app.task.createTitle': 'Create the task',
+    'app.task.createTitleWithShortcut': 'Create the task ({shortcut})',
     'app.task.createSubtask': 'Create Subtask',
     'app.task.creating': 'Creating...',
     'app.task.autoStart': 'Auto start',
+    'app.task.autoStartAria': 'Auto start after creating',
+    'app.task.autoStartTitle': 'Start the task immediately after creating it',
+    'app.task.descriptionPlaceholder': 'Describe the task the AI should execute...',
     'app.task.subtaskOf': 'Subtask of:',
     'app.task.parentFallback': 'Parent task',
     'app.task.description': 'Description',
@@ -896,15 +931,19 @@ const catalog = {
     'app.project.remove': 'Remove',
     'app.offline.title': 'Server unreachable',
     'app.offline.button': 'Offline Mode',
+    'app.alt.loading': 'Loading',
+    'app.alt.offline': 'Offline',
     'app.bootSlow.title': 'Taking longer than usual to reach the server ...',
     'app.reconnect.status': 'Reconnecting ...',
     'app.reconnect.back': 'Connected again',
     'app.reconnect.statusCountdown': 'Reconnecting in {seconds}s ...',
     'app.reconnect.dataFrom': 'Data from {time}',
     'app.reconnect.connect': 'Connect',
+    'app.reconnect.connectAria': 'Try connecting now',
     'app.cache.banner': 'Viewing cached data',
     'app.chunkStale': 'Part of the app could not be loaded — this page is older than the server. Reload to finish updating.',
     'app.skipToMain': 'Skip to main content',
+    'app.boardRegionAria': 'Kanban board',
     'app.empty.welcomeTitle': 'Welcome to MIKE',
     'app.empty.welcomeBody': 'Configure an LLM provider to get started.',
     'app.empty.configureProvider': 'Configure Provider',
@@ -1029,6 +1068,9 @@ const catalog = {
     'sandbox.empty': '(empty)',
     'sandbox.isolation': 'Sandbox Isolation',
     'sandbox.isolationAria': 'Sandbox isolation',
+    // The badges in the project row and the task header name this state.
+    'sandbox.enabledGVisorAria': 'Sandbox enabled (gVisor)',
+    'sandbox.disabledAria': 'Sandbox disabled',
     'sandbox.isolationDesc': 'Use gVisor to isolate all AI actions within a sandbox',
     'sandbox.networkIsolation': 'Network Isolation',
     'sandbox.networkIsolationAria': 'Network isolation',
@@ -1193,6 +1235,11 @@ const catalog = {
     'terminal.connecting': 'Connecting...',
     'terminal.title': 'Terminal',
     'terminal.close': 'Close terminal',
+    // The on-screen arrows are key names, like the `esc`/`pgup` keycaps beside them.
+    'terminal.arrowUpAria': 'Arrow up',
+    'terminal.arrowDownAria': 'Arrow down',
+    'terminal.arrowLeftAria': 'Arrow left',
+    'terminal.arrowRightAria': 'Arrow right',
     // The hint translates; the aria-label and the on-screen key names do not.
     'terminal.closeWithShortcut': 'Close terminal ({shortcut})',
     'terminal.activePortMappings': 'Active port mappings (Host : Container)',
@@ -1270,6 +1317,9 @@ const catalog = {
     'chat.common.attachment': 'Attachment',
     'chat.common.loading': 'Loading...',
     'chat.common.newThread': 'New Thread',
+
+    // ── FileMentionDropdown.svelte — the @-mention list above the composer ──
+    'chat.mention.suggestionsAria': 'File suggestions',
 
     // ── Chat/MessageStats.svelte ──
     // The stats row separates and orders its parts in the component, so only the
@@ -1513,13 +1563,23 @@ const catalog = {
     'board.confirm.start': 'Start',
     'board.confirm.move': 'Move',
     'board.untitled': '(untitled)',
+    'board.regionAria': 'Task board',
 
     // ── column labels ──
     'board.column.backlog': 'Backlog',
     'board.column.inProgress': 'In Progress',
     'board.column.review': 'Review',
     'board.column.done': 'Done',
+    // The column's accessible name; `board.column.*` supplies the word.
+    'board.columnAria': '{name} column',
+    // The task view's overview folds the same columns; the name is the section's own.
+    'board.section.expandTitle': 'Expand {name}',
+    'board.section.collapseTitle': 'Collapse {name}',
     'board.column.addTask': '+ Create Task',
+    // The backlog's icon-only add control; the task view's section headers use the same words.
+    'board.column.newTaskAria': 'Create a new task',
+    'board.column.addTaskTitle': 'Create a new task ({shortcut})',
+    'board.column.clearAllAria': { one: 'Clear all {count} done task', other: 'Clear all {count} done tasks' },
 
     // ── Board.svelte — move / start / model / clear-done feedback ──
     'board.toast.moved': 'Task moved to {status}',
@@ -1546,6 +1606,9 @@ const catalog = {
 
     // ── MultiSelectBar.svelte — the floating bar and its start dialog ──
     'board.multiSelect.model': 'Model',
+    'board.multiSelect.toolbarAria': 'Multi-select actions',
+    'board.multiSelect.modelAria': { one: 'Change model for {count} task', other: 'Change model for {count} tasks' },
+    'board.multiSelect.moveAria': { one: 'Move {count} task', other: 'Move {count} tasks' },
     'board.multiSelect.startCount': { one: 'Start {count} task', other: 'Start {count} tasks' },
     'board.multiSelect.deleteCount': { one: 'Delete {count} task', other: 'Delete {count} tasks' },
     'board.multiSelect.startTitle': 'Start Tasks',
@@ -1578,9 +1641,19 @@ const catalog = {
     'board.card.pause': 'Pause',
     'board.card.resume': 'Resume',
     'board.card.delete': 'Delete',
+    // The card's delete action and the task header's trash icon ask with the same words.
+    'board.deleteTask.aria': 'Delete task',
     'board.card.idle': 'Idle',
+    'board.card.actionsAria': 'Actions',
+    'board.card.openTaskAria': 'Open task: {title}, Status: {status}',
+    'board.card.editTaskAria': 'Edit task',
+    'board.card.pauseTaskAria': 'Pause task',
+    'board.card.resumeTaskAria': 'Resume task',
+    // The move control names the column it moves to, so the word comes from board.column.*.
+    'board.card.moveToAria': 'Move to {status}',
     'board.card.codingAgent': 'Coding Agent',
     'board.card.modelWithProvider': '{provider} · {model}',
+    'board.card.titleGenerating': 'Generating title...',
     'board.card.commitAndDone': 'Commit and move to Done',
     'board.card.fileCount': { one: '{count} file', other: '{count} files' },
     'board.card.subtaskCount': { one: '{count} subtask', other: '{count} subtasks' },
@@ -1592,6 +1665,7 @@ const catalog = {
     'board.editTask.title': 'Edit Task',
     'board.editTask.save': 'Save',
     'board.editTask.fieldTitle': 'Title',
+    'board.editTask.titlePlaceholder': 'Task title',
     'board.editTask.fieldModel': 'Model',
     'board.editTask.operatingMode': 'Operating mode',
     'board.editTask.repository': 'Repository',
@@ -1607,6 +1681,9 @@ const catalog = {
     'task.toast.moveFailed': 'Failed to move: {error}',
     'task.loadingEditor': 'Loading editor...',
     'task.loadingDiffViewer': 'Loading diff viewer...',
+    // Each handle names the two panels it splits.
+    'task.resizeBoardAgentAria': 'Resize board and agent panels',
+    'task.resizeAgentChangesAria': 'Resize agent and changes panels',
     'task.noChanges': 'No changes yet',
     'task.diff.merged': 'Merged',
     'task.diff.mergedFromSubtasks': 'Merged from Subtasks',
@@ -1616,9 +1693,26 @@ const catalog = {
     'task.diff.originMeta': '{hash} (Origin)',
     'task.checkpoint.title': 'Changes before this checkpoint',
     'task.tabs.checkpoint': 'Checkpoint',
+    'task.detailAria': 'Task detail',
+    'task.detailPanelsAria': 'Task detail panels',
+    // The mobile tab bar's icons are named by the panel they switch to.
+    'task.tab.contextAria': 'Board overview',
+    'task.tab.chatAria': 'Agent chat',
+    'task.tab.checkpointAria': 'Checkpoint changes',
+    'task.tab.diffAria': 'Working changes',
+    // The task view's own spelling of the Escape hint, shared by the back button and the
+    // checkpoint overlay's close control.
+    'task.closeEscAria': 'Close (Esc)',
     'task.header.copied': 'Copied',
+    'task.header.backAria': 'Back to board (Esc)',
+    'task.header.sandboxEnabled': 'Sandbox enabled',
+    'task.header.copyPathAria': 'Copy path',
+    'task.header.pathCopiedAria': 'Path copied',
     'task.header.copy': 'Copy',
     'task.graph.history': 'History',
+    'task.graph.historyAria': 'Commit history',
+    'task.graph.pushedToOrigin': 'Pushed to origin',
+    'task.graph.branchTitle': 'Branch',
     'task.graph.loading': 'Loading commits...',
     'task.graph.empty': 'No commits',
     // ═══ time.* — relative time and timestamps ═══
@@ -1655,8 +1749,8 @@ const catalog = {
     'i18n.offer.failed': 'Could not install the {language} language pack',
 
     // ═══ diff.* / git.* — diff and git surface ═══
-    // A title or aria-label written at the tag stays a literal there, so no e2e
-    // getByRole(name) locator can move.
+    // Several of these are what the e2e specs select as an accessible name, so a value edit is a
+    // locator edit in the same change.
 
     // ── Shared across the three diff surfaces ──
     'diff.shared.loading': 'Loading...',
@@ -1682,6 +1776,20 @@ const catalog = {
     'diff.noChanges': 'No changes since last commit',
     'diff.staged': 'Staged',
     'diff.unstaged': 'Unstaged',
+    // Staging controls: the glyph says nothing, so the tooltip is the whole sentence.
+    'diff.loadFullTitle': 'Load full diff for this file',
+    'diff.stageChangesTitle': 'Stage changes',
+    'diff.unstageChangesTitle': 'Unstage changes',
+    'diff.stageFileTitle': 'Stage file',
+    'diff.unstageFileTitle': 'Unstage file',
+    'diff.stageAllAria': 'Stage all changes',
+    'diff.unstageAllAria': 'Unstage all changes',
+    'diff.expandStagedTitle': 'Expand all staged files',
+    'diff.collapseStagedTitle': 'Collapse all staged files',
+    'diff.expandUnstagedTitle': 'Expand all unstaged files',
+    'diff.collapseUnstagedTitle': 'Collapse all unstaged files',
+    'diff.expandMergedTitle': 'Expand all merged files',
+    'diff.collapseMergedTitle': 'Collapse all merged files',
 
     // ── CommitDiffOverlay ──
     'diff.loadingDiff': 'Loading diff...',
@@ -1691,8 +1799,23 @@ const catalog = {
     'diff.showAllChanges': 'Show all changes',
     'diff.oldSide': 'Old',
     'diff.newSide': 'New',
+    'diff.closeDiffAria': 'Close diff',
+    'diff.fullMessageTitle': 'Click to view full commit message',
+    'diff.copyHashAria': 'Copy commit hash',
+    'diff.copyHashTitle': 'Copy full hash',
+    'diff.toUnifiedAria': 'Switch to unified diff',
+    'diff.toSplitAria': 'Switch to split diff',
 
     // ── GitStatusPanel ──
+    'git.closePanelAria': 'Close changes panel',
+    'git.compareAria': 'Compare commits',
+    'git.commitQueryPlaceholder': 'commit hash or subject',
+    'git.fromCommitAria': 'From commit',
+    'git.toCommitAria': 'To commit',
+    'git.showSuggestionsAria': 'Show suggestions',
+    'git.hideSuggestionsAria': 'Hide suggestions',
+    'git.commitStagedAria': 'Commit staged changes',
+    'git.nothingStagedAria': 'Nothing staged to commit',
     'git.fetchDiffFailed': 'Failed to fetch diff',
     'git.current': 'Current',
     'git.pulledFromRemote': 'Pulled from remote',
@@ -1701,6 +1824,8 @@ const catalog = {
     'git.pushFailed': 'Push failed',
     'git.pullFromRemote': 'Pull from remote',
     'git.pushToRemote': 'Push to remote',
+    'git.pullBusy': 'Pull in progress',
+    'git.pushBusy': 'Push in progress',
     'git.commitsBehind': { one: '{count} commit behind', other: '{count} commits behind' },
     'git.commitsAhead': { one: '{count} commit ahead', other: '{count} commits ahead' },
     'git.countsAsOfLastSync': 'as of the last pull or push',
@@ -1740,6 +1865,7 @@ const catalog = {
         other: '{count} files were not unstaged — {error}',
     },
     'git.changes': 'Changes',
+    'git.resizeSidebarAria': 'Resize changes sidebar',
     'git.noMatchingCommits': 'No matching commits',
     // An sr-only live region: announced text is user-facing text
     'git.loadingCommitDiff': 'Loading commit diff',
@@ -1793,9 +1919,37 @@ const catalog = {
     'editor.searchInProject': 'Search in project',
     'editor.replace': 'Replace',
     'editor.replaceAll': 'All',
+    'editor.closeEditorAria': 'Close editor',
+    'editor.saveTitle': 'Save (Ctrl+S)',
+    'editor.tabsAria': 'Open files',
+    // A tab's close control is named by the file it closes; the tooltip says what it does.
+    'editor.closeFileNamedAria': 'Close {name}',
+    'editor.closeFileAria': 'Close file',
+    'editor.wrapTitle': 'Toggle word wrap',
+    'editor.findTitle': 'Find (Ctrl+F)',
+    'editor.searchPlaceholder': 'Search...',
+    'editor.findFilenamePlaceholder': 'Find filename...',
+    'editor.searchFilesAria': 'Search files',
+    'editor.clearSearchAria': 'Clear search',
+    'editor.closeSearchAria': 'Close search',
+    'editor.resultsAria': 'Search results',
+    // The find-in-files toggles are glyphs; the editor's own search panel adds its shortcut.
+    'editor.matchCaseAria': 'Match Case',
+    'editor.wholeWordAria': 'Whole Word',
+    'editor.useRegexAria': 'Use Regex',
+    'editor.filenamesOnlyAria': 'Search Filenames Only',
+    'editor.matchCaseTitle': 'Match Case (Alt+C)',
+    'editor.wholeWordTitle': 'Whole Word (Alt+W)',
+    'editor.useRegexTitle': 'Use Regex (Alt+R)',
+    'editor.prevMatchAria': 'Previous match',
+    'editor.nextMatchAria': 'Next match',
+    'editor.prevMatchTitle': 'Previous match (Shift+F3 / Shift+Enter)',
+    'editor.nextMatchTitle': 'Next match (F3 / Enter)',
+    'editor.replaceAllTitle': 'Replace All (Ctrl+Enter)',
 
     'lsp.provider': 'LSP Provider',
     'lsp.status': 'Status',
+    'lsp.statusAria': 'LSP status',
     'lsp.connected': 'Connected',
     'lsp.connecting': 'Connecting...',
     'lsp.sandboxMemory': 'Sandbox Memory',

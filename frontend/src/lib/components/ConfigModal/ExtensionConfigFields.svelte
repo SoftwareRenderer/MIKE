@@ -37,11 +37,13 @@
                     <div class="mount-editor">
                         {#if mounts.length > 0}
                             <div class="mount-list">
+                                <!-- A placeholder here is the path shape to type, not copy to translate; the
+                                     accessible name is the aria-label. -->
                                 {#each mounts as mount, i}
                                     <div class="mount-row">
-                                        <input type="text" class="mount-input" value={mount.host_path} placeholder="/host/path" oninput={(e) => { const updated = [...mounts]; updated[i] = { ...mount, host_path: (e.target as HTMLInputElement).value }; config[field.key] = updated; }} />
+                                        <input type="text" class="mount-input" value={mount.host_path} placeholder="/host/path" aria-label={t('sandbox.hostPath')} oninput={(e) => { const updated = [...mounts]; updated[i] = { ...mount, host_path: (e.target as HTMLInputElement).value }; config[field.key] = updated; }} />
                                         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" class="mount-arrow"><path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                                        <input type="text" class="mount-input" value={mount.container_path} placeholder="/container/path" oninput={(e) => { const updated = [...mounts]; updated[i] = { ...mount, container_path: (e.target as HTMLInputElement).value }; config[field.key] = updated; }} />
+                                        <input type="text" class="mount-input" value={mount.container_path} placeholder="/container/path" aria-label={t('sandbox.containerPath')} oninput={(e) => { const updated = [...mounts]; updated[i] = { ...mount, container_path: (e.target as HTMLInputElement).value }; config[field.key] = updated; }} />
                                         <MountModeRadios name={`mount-mode-${i}`} mode={mount.mode} onselect={(mode) => { const updated = [...mounts]; updated[i] = { ...mount, mode }; config[field.key] = updated; }} />
                                         <button type="button" class="btn-remove" onclick={() => { config[field.key] = mounts.filter((_, j) => j !== i); }} title={t('settings.extensions.remove')}><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M3 3L9 9M9 3L3 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>
                                     </div>
@@ -57,9 +59,9 @@
                             <div class="env-list">
                                 {#each envs as env, i}
                                     <div class="env-row">
-                                        <input type="text" class="env-input env-input-key" value={env.key} placeholder="KEY" oninput={(e) => { const updated = [...envs]; updated[i] = { ...env, key: (e.target as HTMLInputElement).value }; config[field.key] = updated; }} />
+                                        <input type="text" class="env-input env-input-key" value={env.key} placeholder={t('sandbox.envKeyPlaceholder')} oninput={(e) => { const updated = [...envs]; updated[i] = { ...env, key: (e.target as HTMLInputElement).value }; config[field.key] = updated; }} />
                                         <span class="env-equals">=</span>
-                                        <input type="text" class="env-input" value={env.value ?? ''} placeholder="value" oninput={(e) => { const updated = [...envs]; updated[i] = { ...env, value: (e.target as HTMLInputElement).value }; config[field.key] = updated; }} />
+                                        <input type="text" class="env-input" value={env.value ?? ''} placeholder={t('sandbox.envValueInputPlaceholder')} oninput={(e) => { const updated = [...envs]; updated[i] = { ...env, value: (e.target as HTMLInputElement).value }; config[field.key] = updated; }} />
                                         <button type="button" class="btn-remove" onclick={() => { config[field.key] = envs.filter((_, j) => j !== i); }} title={t('settings.extensions.remove')}><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M3 3L9 9M9 3L3 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>
                                     </div>
                                 {/each}
@@ -109,10 +111,10 @@
     .config-input {
         background: var(--color-bg-input);
         border: 1px solid var(--color-border-subtle);
-        border-radius: 6px;
+        border-radius: var(--radius-md);
         padding: 0.5rem 0.75rem;
         color: var(--color-text-primary);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
     }
 
     .config-input:focus {
@@ -142,10 +144,10 @@
     .mount-input {
         background: var(--color-bg-input);
         border: 1px solid var(--color-border-subtle);
-        border-radius: 6px;
+        border-radius: var(--radius-md);
         padding: 0.4rem 0.5rem;
         color: var(--color-text-primary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         flex: 1;
         min-width: 0;
     }
@@ -163,10 +165,10 @@
     .env-input {
         background: var(--color-bg-input);
         border: 1px solid var(--color-border-subtle);
-        border-radius: 6px;
+        border-radius: var(--radius-md);
         padding: 0.4rem 0.5rem;
         color: var(--color-text-primary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         flex: 1;
         min-width: 0;
     }
@@ -183,7 +185,7 @@
 
     .env-equals {
         color: var(--color-text-tertiary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         flex-shrink: 0;
     }
 
@@ -198,11 +200,12 @@
         background: none;
         color: var(--color-text-tertiary);
         cursor: pointer;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         flex-shrink: 0;
     }
 
     .btn-remove:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-status-red);
     }
@@ -218,7 +221,7 @@
         background: none;
         color: var(--color-text-secondary);
         cursor: pointer;
-        border-radius: 6px;
+        border-radius: var(--radius-md);
         align-self: flex-start;
     }
 
@@ -229,7 +232,7 @@
 
     .no-schema {
         color: var(--color-text-tertiary);
-        font-size: 0.85rem;
+        font-size: var(--text-base);
         margin-bottom: 1.5rem;
     }
 </style>

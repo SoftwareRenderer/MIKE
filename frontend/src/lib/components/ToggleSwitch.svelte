@@ -28,7 +28,7 @@
         position: relative;
         width: 40px;
         height: 22px;
-        border-radius: 11px;
+        border-radius: var(--radius-lg);
         background: var(--color-surface-4);
         border: none;
         flex-shrink: 0;
@@ -52,11 +52,6 @@
 
     .toggle-switch.active .toggle-knob {
         transform: translateX(18px);
-    }
-
-    .toggle-switch:disabled {
-        cursor: not-allowed;
-        opacity: 0.5;
     }
 
     .toggle-switch:focus-visible {

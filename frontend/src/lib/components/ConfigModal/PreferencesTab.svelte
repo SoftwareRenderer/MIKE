@@ -322,12 +322,12 @@
         min-width: 0;
     }
     .shortcut-name {
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 500;
         color: var(--color-text-primary);
     }
     .shortcut-desc {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-tertiary);
     }
     .shortcut-controls {
@@ -342,18 +342,19 @@
         border-radius: var(--radius-sm);
         background: var(--color-surface-2);
         color: var(--color-text-secondary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-family: inherit;
         cursor: pointer;
         transition: background 0.15s, color 0.15s;
     }
     .shortcut-action:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
     .key-chip {
         font-family: var(--font-mono, 'SF Mono', 'Cascadia Code', 'Fira Code', monospace);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         padding: 6px 12px;
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
@@ -374,13 +375,13 @@
         animation: capture-pulse 1.2s ease-in-out infinite;
     }
     .key-chip.invalid {
-        border-color: var(--color-status-orange, #d29922);
-        color: var(--color-status-orange, #d29922);
+        border-color: var(--color-warning);
+        color: var(--color-warning);
     }
     .invalid-hint {
         margin: -6px 0 0;
-        font-size: 0.75rem;
-        color: var(--color-status-orange, #d29922);
+        font-size: var(--text-xs);
+        color: var(--color-warning);
     }
     @keyframes capture-pulse {
         0%, 100% { opacity: 1; }

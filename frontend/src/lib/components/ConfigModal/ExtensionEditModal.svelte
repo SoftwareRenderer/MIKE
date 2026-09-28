@@ -115,8 +115,8 @@
 </script>
 
 {#snippet editFooter()}
-    <button type="button" class="btn-secondary" onclick={() => onclose()}>{t('settings.cancel')}</button>
-    <button type="button" class="btn-primary" onclick={() => save()} disabled={draft.saving}>
+    <button type="button" class="btn" onclick={() => onclose()}>{t('settings.cancel')}</button>
+    <button type="button" class="btn btn-primary" onclick={() => save()} disabled={draft.saving}>
         {draft.saving ? t('settings.saving') : t('settings.save')}
     </button>
 {/snippet}
@@ -130,6 +130,7 @@
             <div class="config-fields">
                 <h4>{t('settings.extensions.dependencies')}</h4>
                 <div class="config-field">
+                    <!-- The placeholder is the directory shape to type, not copy; the name is the aria-label. -->
                     <label class="field-label" for="edit-dep-path">{t('settings.extensions.depDirLabel')}</label>
                     <p class="field-desc">
                         {t('settings.extensions.depDirDesc.before')} <code class="ext-dep-env">{dep.env}={dep.container_path}</code> {t('settings.extensions.depDirDesc.after')}
@@ -147,7 +148,7 @@
                         {#if storedDep}
                             <span class="ext-dep-state-label">{t('settings.extensions.depMounted')}</span>
                             <code class="ext-dep-path" title={t('settings.extensions.depMountedTitle', { host: storedDep, container: dep.container_path })}>{storedDep}</code>
-                            <button type="button" class="btn-secondary btn-small" onclick={() => { draft.dependency = ''; }} disabled={draft.saving}
+                            <button type="button" class="btn btn-small" onclick={() => { draft.dependency = ''; }} disabled={draft.saving}
                                 title={t('settings.extensions.depUnmountHint')}>{t('settings.extensions.depUnmount')}</button>
                         {:else}
                             <span class="ext-dep-none">{t('settings.extensions.depNone')}</span>
@@ -173,6 +174,7 @@
                         {t('settings.extensions.agentMountDesc.before')} <code>{draft.mounts[0].container_path}</code> {t('settings.extensions.agentMountDesc.after')}
                     </p>
                     {#each draft.mounts as row, i}
+                        <!-- An extension may suggest a folder; the fallback is a path shape to type, not copy. -->
                         <input
                             id={`edit-agent-mount-${i}`}
                             type="text"
@@ -183,7 +185,7 @@
                             disabled={draft.saving}
                         />
                         {#if row.suggestion && !row.host_path.trim()}
-                            <button type="button" class="btn-secondary btn-small" disabled={draft.saving}
+                            <button type="button" class="btn btn-small" disabled={draft.saving}
                                 onclick={() => { row.host_path = row.suggestion; }}
                             >{t('settings.extensions.agentMountUse', { host: row.suggestion })}</button>
                         {/if}
@@ -195,7 +197,7 @@
                             {#if savedRow}
                                 <span class="ext-dep-state-label">{t('settings.extensions.agentMounted', { mode: savedRow.mode || 'ro' })}</span>
                                 <code class="ext-dep-path" title={t('settings.extensions.agentMountedTitle', { host: savedRow.host_path, container: savedRow.container_path })}>{savedRow.host_path}</code>
-                                <button type="button" class="btn-secondary btn-small" onclick={() => { row.host_path = ''; }} disabled={draft.saving}
+                                <button type="button" class="btn btn-small" onclick={() => { row.host_path = ''; }} disabled={draft.saving}
                                     title={t('settings.extensions.agentCardUnmountHint')}>{t('settings.extensions.depUnmount')}</button>
                             {:else if !row.host_path.trim()}
                                 <span class="ext-dep-none">{t('settings.extensions.agentMountNone')}</span>
@@ -280,21 +282,23 @@
 {/if}
 
 <style>
+    @import '$lib/styles/shared.css';
+
     .ext-dep-pending {
-        font-size: 0.72rem;
+        font-size: var(--text-xs);
         color: var(--color-status-yellow);
     }
 
     .ext-dep-error {
         margin: 0.3rem 0 0;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         line-height: 1.45;
-        color: var(--color-status-red, #f85149);
+        color: var(--color-status-red);
     }
 
     .field-label {
         display: block;
-        font-size: 0.8rem;
+        font-size: var(--text-sm);
         color: var(--color-text-tertiary);
         margin-bottom: 0.25rem;
     }
@@ -308,7 +312,7 @@
 
     .config-fields h4 {
         margin: 0;
-        font-size: 0.85rem;
+        font-size: var(--text-base);
         color: var(--color-text-tertiary);
         text-transform: uppercase;
         letter-spacing: 0.05em;
@@ -323,10 +327,10 @@
     .config-input {
         background: var(--color-bg-input);
         border: 1px solid var(--color-border-subtle);
-        border-radius: 6px;
+        border-radius: var(--radius-md);
         padding: 0.5rem 0.75rem;
         color: var(--color-text-primary);
-        font-size: 0.875rem;
+        font-size: var(--text-base);
     }
 
     .config-input:focus {
@@ -336,31 +340,8 @@
 
     .field-desc {
         color: var(--color-text-tertiary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         margin: 0;
     }
 
-    .btn-primary {
-        background: var(--color-btn-primary-bg);
-        color: var(--color-btn-text);
-    }
-
-    .btn-primary:hover:not(:disabled) {
-        background: var(--color-btn-primary-hover);
-    }
-
-    .btn-secondary {
-        background: var(--color-btn-secondary-bg);
-        border-color: var(--color-border-subtle);
-        color: var(--color-text-primary);
-    }
-
-    .btn-secondary:hover:not(:disabled) {
-        background: var(--color-border-subtle);
-    }
-
-    .btn-small {
-        padding: 0.25rem 0.5rem;
-        font-size: 0.75rem;
-    }
 </style>

@@ -32,13 +32,13 @@
         margin-bottom: 16px;
     }
     .section-label {
-        font-size: 0.875rem;
+        font-size: var(--text-base);
         font-weight: 600;
         margin: 0 0 4px;
         color: var(--color-text-primary);
     }
     .section-description {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--color-text-tertiary);
         margin: 0 0 12px;
     }
@@ -57,12 +57,12 @@
         flex: 1;
     }
     .toggle-label {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 500;
         color: var(--color-text-primary);
     }
     .toggle-desc {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-tertiary);
         line-height: 1.4;
     }

@@ -111,7 +111,7 @@ describe('GitStatusPanel header actions', () => {
         expect(btn!.textContent).toContain('Commit');
 
         // After the (clean) load completes, it stays disabled.
-        await waitFor(() => expect(container.querySelector('.panel-empty')).not.toBeNull());
+        await waitFor(() => expect(container.querySelector('.empty-state')).not.toBeNull());
         expect(btn!.disabled).toBe(true);
     });
 

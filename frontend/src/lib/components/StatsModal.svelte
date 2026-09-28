@@ -3,7 +3,7 @@
     import { isAgentProvider } from '$lib/types';
     import type { ProjectStats, ModelStats, Provider } from '$lib/types';
     import { getProjectStats, resetProjectStats } from '$lib/api';
-    import { uiStore, appStore } from '$lib/stores';
+    import { uiStore, appStore, dialogStore } from '$lib/stores';
     import { getProviderDisplayName } from '$lib/utils/providers';
     import { formatCost } from '$lib/utils/format';
     import { t } from '$lib/i18n';
@@ -80,7 +80,14 @@
     });
 
     async function resetModel(model: ModelStats) {
-        if (!confirm(t('settings.stats.resetConfirm', { model: getTokenLabel(model) }))) return;
+        const confirmed = await dialogStore.showConfirm({
+            title: t('settings.stats.resetTitle'),
+            message: t('settings.stats.resetConfirm', { model: getTokenLabel(model) }),
+            confirmText: t('settings.stats.reset'),
+            cancelText: t('app.cancel'),
+            variant: 'destructive',
+        });
+        if (!confirmed) return;
         try {
             await resetProjectStats(projectId, model.model_name, model.provider_name || undefined);
             loading = true;
@@ -95,7 +102,7 @@
     }
 </script>
 
-<BaseModal title={t('settings.stats.title')} width="90vw" zIndex={300} onClose={handleClose}>
+<BaseModal title={t('settings.stats.title')} width="90vw" onClose={handleClose}>
             {#if loading}
                 <div class="loading">{t('settings.stats.loading')}</div>
             {:else if error}
@@ -242,7 +249,7 @@
         color: var(--color-text-primary);
     }
     .summary-label {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
         text-transform: uppercase;
         letter-spacing: 0.05em;
@@ -252,7 +259,7 @@
     .model-table {
         width: 100%;
         border-collapse: collapse;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
     }
     .model-table th {
         text-align: left;
@@ -260,7 +267,7 @@
         font-weight: 600;
         color: var(--color-text-secondary);
         border-bottom: 2px solid var(--color-border);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         text-transform: uppercase;
         letter-spacing: 0.04em;
     }
@@ -304,18 +311,19 @@
         display: inline-flex;
         align-items: center;
         gap: 4px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-family: var(--font-sans);
         transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
     }
     .btn-reset:hover {
+        opacity: 1;
         color: var(--color-status-red);
         background: rgba(248, 81, 73, 0.1);
         border-color: rgba(248, 81, 73, 0.3);
     }
     .model-label {
         font-family: var(--font-mono, monospace);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
     }
     @media (max-width: 768px) {
         .summary-row {
@@ -325,7 +333,7 @@
             min-width: 45%;
         }
         .model-table {
-            font-size: 0.75rem;
+            font-size: var(--text-xs);
         }
         .model-table th,
         .model-table td {

@@ -127,7 +127,7 @@
                 class="settings-btn-small"
                 onclick={loadSessions}
                 disabled={loading || revokingOthers}
-                aria-label="refresh-sessions"
+                aria-label={t('settings.sessions.reloadTitle')}
                 title={t('settings.sessions.reloadTitle')}
             >{loading ? t('settings.sessions.loading') : t('settings.sessions.refresh')}</button>
             <button
@@ -135,7 +135,6 @@
                 class="settings-btn-small settings-btn-danger"
                 onclick={handleRevokeOthers}
                 disabled={loading || revokingOthers || otherCount === 0}
-                aria-label="revoke-all-other-sessions"
                 title={t('settings.sessions.revokeAllHint')}
             >{revokingOthers ? t('settings.sessions.revoking') : t('settings.sessions.revokeAllOther')}</button>
         </div>
@@ -178,7 +177,7 @@
                     class="settings-btn-small settings-btn-danger session-revoke"
                     onclick={() => handleRevoke(session)}
                     disabled={revokingId === session.id || revokingOthers}
-                    aria-label={`revoke-session-${session.id}`}
+                    aria-label={t('settings.sessions.revokeSessionAria', { id: session.id })}
                     title={session.current ? t('settings.sessions.revokeDeviceHint') : t('settings.sessions.revokeSessionHint')}
                 >{revokingId === session.id ? t('settings.sessions.revoking') : t('settings.sessions.revoke')}</button>
             </div>
@@ -215,7 +214,7 @@
     }
     /* Ellipsize the User-Agent; the full string stays in the title tooltip. */
     .session-agent {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 500;
         color: var(--color-text-primary);
         min-width: 0;
@@ -225,21 +224,21 @@
     }
     .session-badge {
         flex-shrink: 0;
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.04em;
         padding: 2px 6px;
         border-radius: var(--radius-sm);
         background: var(--color-accent);
-        color: white;
+        color: var(--color-btn-text);
     }
     .sessions-status {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--color-text-tertiary);
     }
     .sessions-error {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         font-weight: 500;
         color: var(--color-status-red);
     }

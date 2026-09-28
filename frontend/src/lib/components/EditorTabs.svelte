@@ -126,7 +126,7 @@
 
 <div class="editor-tabs-container branch-editor">
     <!-- Tab bar -->
-    <div class="editor-tab-bar" role="tablist" aria-label="Open files">
+    <div class="editor-tab-bar" role="tablist" aria-label={t('editor.tabsAria')}>
         {#each openFiles as file (file.path)}
             <div
                 class="editor-tab"
@@ -152,8 +152,8 @@
                     class="btn-close-tab"
                     onclick={(e) => { e.stopPropagation(); onCloseTab(file.path); }}
                     ondblclick={(e) => { e.stopPropagation(); if (!pinnedFiles.has(file.path)) onPinTab(file.path); }}
-                    aria-label={`Close {getFileName(file.path)}`}
-                    title="Close file"
+                    aria-label={t('editor.closeFileNamedAria', { name: getFileName(file.path) })}
+                    title={t('editor.closeFileAria')}
                 >
                     {#if unsavedFiles.has(file.path)}
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -172,7 +172,7 @@
         {#if openFiles.length > 0}
             <div class="editor-tab-actions">
                 {#if onToggleFullscreen}
-                    <button type="button" class="editor-icon-btn" onclick={onToggleFullscreen} title={fullscreenTitle} aria-label="Toggle fullscreen">
+                    <button type="button" class="editor-icon-btn" onclick={onToggleFullscreen} title={fullscreenTitle} aria-label={t('app.shortcut.toggleFullscreen')}>
                         {#if mobileFullscreen}
                             <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2V6H14M6 14V10H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
                         {:else}
@@ -186,7 +186,7 @@
                         class="editor-save-btn"
                         disabled={!unsavedFiles.has(activeFilePath) || saving}
                         onclick={onSave}
-                        title="Save (Ctrl+S)"
+                        title={t('editor.saveTitle')}
                     >
                         {saving ? t('editor.saving') : t('editor.save')}
                     </button>
@@ -255,7 +255,7 @@
         align-items: center;
         gap: 6px;
         padding: 6px 10px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-tertiary);
         cursor: pointer;
         border-right: 1px solid var(--color-border);
@@ -313,7 +313,7 @@
         background: transparent;
         color: currentColor;
         cursor: pointer;
-        border-radius: 3px;
+        border-radius: var(--radius-sm);
         opacity: 0.5;
         transition: opacity 0.1s, background 0.1s;
     }
@@ -322,7 +322,7 @@
         background: var(--color-surface-3);
     }
     .editor-tab.unsaved .btn-close-tab {
-        color: var(--color-status-yellow, #f0c000);
+        color: var(--color-status-yellow);
     }
 
     .editor-tab-actions {
@@ -344,10 +344,11 @@
         background: transparent;
         color: var(--color-text-tertiary);
         cursor: pointer;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         flex-shrink: 0;
     }
     .editor-icon-btn:hover:not(:disabled) {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
@@ -360,8 +361,7 @@
         border-radius: var(--radius-md);
         background: var(--color-accent-dark);
         color: white;
-        cursor: pointer;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-family: inherit;
         font-weight: 500;
         flex-shrink: 0;
@@ -371,9 +371,8 @@
         opacity: 0.85;
     }
     .editor-save-btn:disabled {
+        /* Greyed, not just dimmed: the icon is the only label, so its colour is what says "nothing to save". */
         filter: grayscale(1);
-        opacity: 0.35;
-        cursor: not-allowed;
     }
 
     .editor-panels {
@@ -399,7 +398,7 @@
         justify-content: center;
         padding: 48px 24px;
         color: var(--color-text-tertiary);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         flex: 1;
     }
 </style>

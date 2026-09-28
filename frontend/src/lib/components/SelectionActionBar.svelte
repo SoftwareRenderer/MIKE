@@ -9,7 +9,7 @@
     let { count, onClear, actions }: {
         count: number;
         onClear: () => void;
-        /** The host's buttons, each a `button.selection-btn`. */
+        /** The host's buttons, each a `button.selection-btn.btn-ghost`. */
         actions: Snippet;
     } = $props();
 </script>
@@ -19,7 +19,7 @@
     {@render actions()}
     <button
         type="button"
-        class="selection-btn"
+        class="selection-btn btn-ghost"
         title={t('explorer.shared.selectionClear')}
         aria-label={t('explorer.shared.selectionClear')}
         onclick={onClear}
@@ -27,6 +27,8 @@
 </div>
 
 <style>
+    @import '$lib/styles/shared.css';
+
     /* Placed against the host's box, so the host has to be positioned. */
     .file-selection-bar {
         position: absolute;
@@ -40,20 +42,22 @@
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-md);
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+        box-shadow: 0 8px 24px rgb(from var(--color-shadow) r g b / 0.35);
     }
 
     .selection-count {
         flex: 1;
         padding-left: 4px;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
     }
 
-    /* The host's buttons come from its snippet, so only a global selector reaches them. */
+    /* The host's buttons come from its snippet, so only a global selector reaches them. This is their
+       geometry — a compact square — and nothing else: `.btn-ghost` on each one owns the colour and the
+       hover, and `.destructive` marks the one that removes something. */
     :global(.file-selection-bar .selection-btn) {
         display: flex;
         align-items: center;
@@ -61,32 +65,19 @@
         width: 26px;
         height: 26px;
         padding: 0;
-        border: none;
         border-radius: var(--radius-sm);
-        background: transparent;
-        color: var(--color-text-secondary);
-        font-size: 0.8125rem;
-        cursor: pointer;
-    }
-    :global(.file-selection-bar .selection-btn:hover:not(:disabled)) {
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
+        font-size: var(--text-sm);
     }
     :global(.file-selection-bar .selection-btn.destructive) {
-        color: var(--color-status-red, #f85149);
+        color: var(--color-status-red);
     }
-    :global(.file-selection-bar .selection-btn:disabled) {
-        opacity: 0.4;
-        cursor: default;
-    }
-
     @media (max-width: 768px) {
         :global(.file-selection-bar .selection-btn) {
             width: 36px;
             height: 36px;
         }
         .selection-count {
-            font-size: 0.8125rem;
+            font-size: var(--text-sm);
         }
     }
 </style>

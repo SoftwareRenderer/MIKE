@@ -84,18 +84,18 @@
         background: none;
         border: none;
         color: var(--color-text-tertiary);
-        font-size: 0.75rem;
-        cursor: pointer;
+        font-size: var(--text-xs);
         padding: 2px 6px;
         border-radius: var(--radius-sm);
         transition: all 0.15s ease;
     }
     .reasoning-toggle:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
+    /* Disabled while its own reasoning is loading, so the cursor says wait, not the global not-allowed. */
     .reasoning-toggle:disabled {
-        opacity: 0.5;
         cursor: wait;
     }
     .reasoning-content {
@@ -103,7 +103,7 @@
         padding: 8px 12px;
         background: var(--color-surface-0);
         border-radius: var(--radius-sm);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         line-height: 1.5rem;
         color: var(--color-text-secondary);
         white-space: pre-wrap;

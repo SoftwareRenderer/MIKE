@@ -1,5 +1,6 @@
 <script lang="ts">
     import VirtualList from '$lib/components/VirtualList.svelte';
+    import EmptyState from '$lib/components/EmptyState.svelte';
     import { t } from '$lib/i18n';
     import { loadAppSetting, saveAppSetting } from '$lib/storage';
 
@@ -77,23 +78,29 @@
         }
     }
 
+    /**
+     * A symbol glyph wears the colour the editor gives that syntax, so the two never disagree: these are
+     * the `--cm-*` tokens a theme paints syntax with, referenced rather than copied, and resolved by the
+     * `style` attribute that reads them.
+     */
     function getSymbolColor(kind: string): string {
         switch (kind) {
-            case 'function': return '#D2A8FF';
-            case 'method': return '#D2A8FF';
-            case 'class': return '#FFA657';
-            case 'struct': return '#FFA657';
-            case 'enum': return '#FFA657';
-            case 'interface': return '#FFA657';
-            case 'constant': return '#79C0FF';
-            case 'property': return '#79C0FF';
-            case 'field': return '#79C0FF';
-            case 'variable': return '#FFA657';
-            case 'module': return '#7EE787';
-            case 'namespace': return '#7EE787';
-            case 'package': return '#7EE787';
-            case 'heading': return '#7EE787';
-            default: return '#AEB2B8';
+            case 'function': return 'var(--cm-function)';
+            case 'method': return 'var(--cm-function)';
+            case 'class': return 'var(--cm-class)';
+            case 'struct': return 'var(--cm-class)';
+            case 'enum': return 'var(--cm-class)';
+            case 'interface': return 'var(--cm-class)';
+            case 'constant': return 'var(--cm-keyword-const)';
+            case 'property': return 'var(--cm-keyword-const)';
+            case 'field': return 'var(--cm-keyword-const)';
+            case 'variable': return 'var(--cm-class)';
+            case 'module': return 'var(--cm-tag)';
+            case 'namespace': return 'var(--cm-tag)';
+            case 'package': return 'var(--cm-tag)';
+            case 'heading': return 'var(--cm-tag)';
+            // A kind with no syntax of its own is ordinary text.
+            default: return 'var(--color-text-secondary)';
         }
     }
 
@@ -248,7 +255,7 @@
 
     {#if symbols.length === 0}
         <div class="symbol-list">
-            <div class="symbol-empty">{isOutlineMode ? t('explorer.symbols.noneHeadings') : t('explorer.symbols.noneSymbols')}</div>
+            <EmptyState compact title={isOutlineMode ? t('explorer.symbols.noneHeadings') : t('explorer.symbols.noneSymbols')} />
         </div>
     {:else if isOutlineMode}
         <VirtualList items={flatHeadings} itemHeight={22} minThreshold={50} role="tree" aria-label={t('explorer.symbols.outlineAria')}>
@@ -362,7 +369,7 @@
     }
 
     .symbol-label {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 600;
         color: var(--color-text-secondary);
         text-transform: uppercase;
@@ -386,9 +393,10 @@
         background: transparent;
         color: var(--color-text-tertiary);
         cursor: pointer;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
     }
     .toggle-btn:hover {
+        opacity: 1;
         background: var(--color-surface-3);
         color: var(--color-text-secondary);
     }
@@ -397,11 +405,11 @@
     }
 
     .symbol-count {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-tertiary);
         background: var(--color-surface-3);
         padding: 1px 5px;
-        border-radius: 8px;
+        border-radius: var(--radius-lg);
     }
 
     .symbol-list {
@@ -420,7 +428,7 @@
         border: none;
         background: transparent;
         color: var(--color-text-primary);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         text-align: left;
         cursor: pointer;
     }
@@ -433,7 +441,7 @@
         flex-shrink: 0;
         width: 14px;
         text-align: center;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 700;
         font-family: var(--font-mono);
         line-height: 1;
@@ -450,16 +458,10 @@
 
     .symbol-line {
         flex-shrink: 0;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         color: var(--color-text-tertiary);
         opacity: 0.5;
         font-family: var(--font-mono);
-    }
-
-    .symbol-empty {
-        padding: 8px 10px;
-        color: var(--color-text-tertiary);
-        font-size: 0.75rem;
     }
 
     /* Collapse/expand icon */
@@ -472,7 +474,7 @@
         flex-shrink: 0;
         cursor: pointer;
         color: var(--color-text-tertiary);
-        border-radius: 2px;
+        border-radius: var(--radius-xs);
     }
     .collapse-icon:hover {
         color: var(--color-text-secondary);
@@ -486,7 +488,7 @@
 
     .outline-number {
         flex-shrink: 0;
-        font-size: 0.6875rem;
+        font-size: var(--text-2xs);
         color: var(--color-text-tertiary);
         font-family: var(--font-mono);
         min-width: 14px;
