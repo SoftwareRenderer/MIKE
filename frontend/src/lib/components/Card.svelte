@@ -237,13 +237,19 @@
 
     let isMobileSubtask = $derived(isMobileCtx.isMobile && inline && !!task.parent_task_id);
 
+    /** The Idle word is the widest element in the row, so a narrow viewport leaves the slot empty. */
+    let showsIdle = $derived(thirdAction === 'idle' && !isMobileCtx.isMobile);
+
+    /** Whether the last action slot holds anything the width calc has to count. */
+    let thirdSlot = $derived(!!thirdAction && (thirdAction !== 'idle' || showsIdle));
+
     /** The script counts rendered elements; every width that count buys lives in the style block. */
     let actionCount = $derived(
         isMobileSubtask
-            ? 1 + (thirdAction === 'idle' ? 1 : 0) // ⋯ menu, plus the Idle badge
+            ? 1 // ⋯ menu
             : (canCreateSubtask ? 1 : 0) // create subtask
               + (!isDoneSubtask ? 1 : 0) // edit
-              + (thirdAction ? 1 : 0) // pause/resume/idle/delete/move
+              + (thirdSlot ? 1 : 0) // pause/resume/idle/delete/move
     );
 
     const statuses = ['backlog', 'in_progress', 'review', 'done'] as const;
@@ -842,7 +848,7 @@
     aria-label={`Open task: ${task.title || '(untitled)'}, Status: ${statusWord(task.status)}`}
     aria-keyshortcuts="Alt+ArrowLeft, Alt+ArrowRight"
     aria-current={isSelected ? 'page' : undefined}
-    style={`--actions: ${actionCount}; --idle: ${thirdAction === 'idle' ? 1 : 0}; --column-color: ${columnColor || ""}; --status-color: ${statusColor}${parentSelected && inline && task.parent_task_id && !isOutlineRow ? `; border-left: 3px solid ${statusColor}` : ""}`}
+    style={`--actions: ${actionCount}; --idle: ${showsIdle ? 1 : 0}; --column-color: ${columnColor || ""}; --status-color: ${statusColor}${parentSelected && inline && task.parent_task_id && !isOutlineRow ? `; border-left: 3px solid ${statusColor}` : ""}`}
 >
     <!-- Beside the title on a row, below it on a card. -->
     {#snippet badges()}
@@ -939,9 +945,6 @@
                     >
                         <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><circle cx="4" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="12" cy="8" r="1.5"/></svg>
                     </button>
-                    {#if isIdle}
-                        <span class="action-idle" aria-label="Idle" title="Idle">{t('board.card.idle')}</span>
-                    {/if}
                 {:else}
                     {#if canCreateSubtask}
                         <button
@@ -985,7 +988,7 @@
                         >
                             <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
                         </button>
-                    {:else if thirdAction === 'idle'}
+                    {:else if showsIdle}
                         <span class="action-idle" aria-label="Idle" title="Idle">{t('board.card.idle')}</span>
                     {:else if thirdAction === 'delete'}
                         <button
