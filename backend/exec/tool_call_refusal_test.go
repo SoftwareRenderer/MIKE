@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"mike/backend/llama"
 	"mike/backend/types"
 )
 
@@ -178,7 +177,7 @@ func TestBashToolWithoutCommandRunsNoShell(t *testing.T) {
 	te := newBareTestExecutor(t)
 	dir := t.TempDir()
 
-	result, ok := te.executeTool(context.Background(), llama.ToolBash, map[string]any{"timeout": float64(5)},
+	result, ok := te.executeTool(context.Background(), types.ToolBash, map[string]any{"timeout": float64(5)},
 		dir, &types.Task{}, &executionState{}, nil)
 
 	if ok {

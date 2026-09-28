@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"mike/backend/llama"
 	"mike/backend/types"
 
 	"github.com/google/uuid"
@@ -172,7 +171,7 @@ func (r *toolRunner) planCreatedTaskIDs(task *types.Task, state *executionState)
 		var tc struct {
 			ToolName string `json:"tool_name"`
 		}
-		if err := json.Unmarshal([]byte(m.ToolCalls), &tc); err != nil || tc.ToolName != llama.ToolCreateTask {
+		if err := json.Unmarshal([]byte(m.ToolCalls), &tc); err != nil || tc.ToolName != types.ToolCreateTask {
 			continue
 		}
 		var res struct {

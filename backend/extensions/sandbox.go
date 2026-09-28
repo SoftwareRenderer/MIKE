@@ -409,7 +409,7 @@ func buildExtensionCreateArgs(ext *Extension, containerName, image string, proje
 			logging.For(logging.Sandbox).Infof("ext=%s SKIPPED mount (host %q -> container %q): core mounts the granted dependency directory there", ext.ID, m.HostPath, m.ContainerPath)
 			continue
 		}
-		if err := ValidateContainerPath(m.ContainerPath); err != nil {
+		if err := sandboxruntime.ValidateContainerPath(m.ContainerPath); err != nil {
 			logging.For(logging.Sandbox).Infof("ext=%s SKIPPED mount (host %q): %v", ext.ID, m.HostPath, err)
 			continue
 		}
@@ -941,7 +941,7 @@ func (sm *ExtensionSandboxManager) extensionImageSource(ext *Extension) (image, 
 	}
 
 	if declared := ext.ContainerConfig.Image; declared != "" {
-		if err := sm.rt.ValidateImageRef(declared); err != nil {
+		if err := sandboxruntime.ValidateImageRef(declared); err != nil {
 			return "", "", fmt.Errorf("extension %s declares an unusable image: %w", ext.ID, err)
 		}
 		// Old records carry a short ref ("kanban-ext-gopls:1.0.0"); resolve it to the local build.

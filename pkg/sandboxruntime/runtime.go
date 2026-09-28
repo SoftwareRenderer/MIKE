@@ -74,10 +74,7 @@ func ValidateProjectName(name string) error {
 
 // ValidateImageRef rejects image references with characters that are invalid in an OCI
 // image ref, so a reference like "-v /etc:/host" or "$(rm -rf /)" never reaches podman
-// as a flag.
-//
-// Single source of truth: the sandbox Runtime method and the extensions RegistryClient
-// both delegate here, so the two cannot drift into different rules.
+// as a flag. ValidateConfiguredImageRef is the stricter rule for a reference a person typed.
 func ValidateImageRef(image string) error {
 	if image == "" {
 		return fmt.Errorf("image reference must not be empty")
@@ -86,12 +83,6 @@ func ValidateImageRef(image string) error {
 		return fmt.Errorf("invalid image reference: %q", image)
 	}
 	return nil
-}
-
-// ValidateImageRef is the Runtime-bound form of the package-level ValidateImageRef
-// — same rules, same single implementation.
-func (r *Runtime) ValidateImageRef(image string) error {
-	return ValidateImageRef(image)
 }
 
 // ValidateDockerfilePath rejects paths that start with a dash,

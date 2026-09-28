@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"mike/backend/llama"
 	"mike/backend/types"
 	"mike/pkg/logging"
 )
@@ -40,19 +39,19 @@ func formatToolAction(name, arguments string) string {
 	}
 
 	switch name {
-	case llama.ToolReadFile:
+	case types.ToolReadFile:
 		if path, ok := args["path"].(string); ok && path != "" {
 			return "read `" + path + "`"
 		}
-	case llama.ToolWriteFile:
+	case types.ToolWriteFile:
 		if path, ok := args["path"].(string); ok && path != "" {
 			return "write `" + path + "`"
 		}
-	case llama.ToolEditFile:
+	case types.ToolEditFile:
 		if path, ok := args["path"].(string); ok && path != "" {
 			return "edit `" + path + "`"
 		}
-	case llama.ToolBash:
+	case types.ToolBash:
 		if cmd, ok := args["command"].(string); ok && cmd != "" {
 			// Truncate long commands
 			cmd = strings.TrimSpace(cmd)
@@ -61,37 +60,37 @@ func formatToolAction(name, arguments string) string {
 			}
 			return "execute `" + cmd + "`"
 		}
-	case llama.ToolRequestReview:
+	case types.ToolRequestReview:
 		if summary := reviewSummary(arguments); summary != "" {
 			return "request a review: " + summary
 		}
 		return "request a review"
-	case llama.ToolCreateTask:
+	case types.ToolCreateTask:
 		return "create"
-	case llama.ToolEditTask:
+	case types.ToolEditTask:
 		return "edit"
-	case llama.ToolLSPReferences:
+	case types.ToolLSPReferences:
 		if path, ok := args["path"].(string); ok && path != "" {
 			if sym, ok2 := args["symbol"].(string); ok2 && sym != "" {
 				return "find references for `" + sym + "` in `" + path + "`"
 			}
 			return "find references in `" + path + "`"
 		}
-	case llama.ToolLSPDefinition:
+	case types.ToolLSPDefinition:
 		if path, ok := args["path"].(string); ok && path != "" {
 			if sym, ok2 := args["symbol"].(string); ok2 && sym != "" {
 				return "find definition of `" + sym + "` in `" + path + "`"
 			}
 			return "find definition in `" + path + "`"
 		}
-	case llama.ToolLSPHover:
+	case types.ToolLSPHover:
 		if path, ok := args["path"].(string); ok && path != "" {
 			if sym, ok2 := args["symbol"].(string); ok2 && sym != "" {
 				return "hover over `" + sym + "` in `" + path + "`"
 			}
 			return "get hover info in `" + path + "`"
 		}
-	case llama.ToolLSPRename:
+	case types.ToolLSPRename:
 		if path, ok := args["path"].(string); ok && path != "" {
 			if sym, ok2 := args["symbol"].(string); ok2 && sym != "" {
 				if nn, ok3 := args["new_name"].(string); ok3 && nn != "" {
@@ -159,7 +158,7 @@ func extractTaskFields(output string) (taskID, title string) {
 // "but was unsuccessful. Error: [msg]" on failure, and create_task says "a task" when the
 // result is unknown. Every other tool reports "which was [status]".
 func formatToolResult(name, toolCallID string, status string, toolResults map[string]string) string {
-	if name == llama.ToolCreateTask {
+	if name == types.ToolCreateTask {
 		if status == "successful" {
 			taskID, title := extractTaskFields(toolResults[toolCallID])
 			if isTaskID(taskID) {
@@ -175,7 +174,7 @@ func formatToolResult(name, toolCallID string, status string, toolResults map[st
 		}
 		return "a task"
 	}
-	if name == llama.ToolEditTask {
+	if name == types.ToolEditTask {
 		if status == "successful" {
 			taskID, title := extractTaskFields(toolResults[toolCallID])
 			if isTaskID(taskID) {
@@ -196,12 +195,12 @@ func formatToolResult(name, toolCallID string, status string, toolResults map[st
 
 // sandboxableTools are the tools that can run inside a sandbox.
 var sandboxableTools = map[string]struct{}{
-	llama.ToolReadFile: {}, llama.ToolWriteFile: {}, llama.ToolEditFile: {}, llama.ToolBash: {},
+	types.ToolReadFile: {}, types.ToolWriteFile: {}, types.ToolEditFile: {}, types.ToolBash: {},
 }
 
 // lspTools always run in an LSP extension sandbox, whatever the project's sandbox setting.
 var lspTools = map[string]struct{}{
-	llama.ToolLSPReferences: {}, llama.ToolLSPDefinition: {}, llama.ToolLSPHover: {}, llama.ToolLSPRename: {},
+	types.ToolLSPReferences: {}, types.ToolLSPDefinition: {}, types.ToolLSPHover: {}, types.ToolLSPRename: {},
 }
 
 func inToolSet(name string, set map[string]struct{}) bool {
@@ -546,7 +545,7 @@ func buildCommitMessageWithAssistedBy(body string, models []string) string {
 // hasRequestReview checks if an assistant message contains a request_review tool call.
 func hasRequestReview(m *types.ChatMessage) bool {
 	for _, tc := range m.ToolCalls {
-		if tc.Function.Name == llama.ToolRequestReview {
+		if tc.Function.Name == types.ToolRequestReview {
 			return true
 		}
 	}
@@ -631,7 +630,7 @@ func reviewSummaries(taskMsgs []types.TaskMessage) string {
 			continue
 		}
 		for _, tc := range messages[i].ToolCalls {
-			if tc.Function.Name != llama.ToolRequestReview {
+			if tc.Function.Name != types.ToolRequestReview {
 				continue
 			}
 			summary := reviewSummary(tc.Function.Arguments)
@@ -749,7 +748,7 @@ func formatTurns(messages []types.ChatMessage, consolidate bool) string {
 		}
 		for _, tc := range m.ToolCalls {
 			action := formatToolAction(tc.Function.Name, tc.Function.Arguments)
-			if tc.Function.Name == llama.ToolRequestReview {
+			if tc.Function.Name == types.ToolRequestReview {
 				if consolidate {
 					summary := reviewSummary(tc.Function.Arguments)
 					if summary == "" {

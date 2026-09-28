@@ -982,7 +982,7 @@ func shortHash(hash string) string {
 // RestoreStashForTask restores the stash entry pushed under `label` (a StashMessageFor* value), if
 // one is on the stack; found reports whether anything of ours was there. It exists so no caller
 // reaches for `git stash pop`, which ignores who pushed it.
-// The caller must hold the project stash mutex.
+// The caller holds the project stash mutex — see PushStash.
 func (wm *WorktreeManager) RestoreStashForTask(dir, label string) (bool, error) {
 	hash, found, err := wm.NewestStashHashForMessage(dir, label)
 	if err != nil || !found {
@@ -993,7 +993,7 @@ func (wm *WorktreeManager) RestoreStashForTask(dir, label string) (bool, error) 
 
 // DropStashForTask discards the stash entry pushed under label (a StashMessageFor* value), if
 // present: the conflict-resolution path discards stashed pre-sync edits rather than re-applying
-// them, because they are committed by then. The caller must hold the project stash mutex.
+// them, because they are committed by then. The caller holds the project stash mutex — see PushStash.
 func (wm *WorktreeManager) DropStashForTask(dir, label string) (bool, error) {
 	hash, found, err := wm.NewestStashHashForMessage(dir, label)
 	if err != nil || !found {

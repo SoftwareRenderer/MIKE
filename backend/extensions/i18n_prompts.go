@@ -25,12 +25,6 @@ type PromptOverlay struct {
 	Locale string
 }
 
-// none reports whether this overlay means plain English: no templates and no locale.
-// Unexported on purpose — the server that consumes an overlay needs its two fields
-// apart (they log different sentences), so the only caller is a test asserting the
-// zero value.
-func (o PromptOverlay) none() bool { return o.Dir == "" && o.Locale == "" }
-
 // ActivePromptOverlay reads the extension list and resolves the active pack's
 // prompt side. It is called at startup and on every extension change, so enabling
 // a pack switches the prompt language without a restart.
@@ -72,9 +66,6 @@ func PromptOverlayFor(exts []Extension, extensionsDir string) PromptOverlay {
 	return answer
 }
 
-// PromptDirInPack resolves a pack-relative prompts directory and proves the result is
-// the pack's own.
-//
 // PromptDirInPack resolves a pack-relative prompts directory and proves the result is the
 // pack's own. Contained twice, like the delete path: packFilePath is the lexical proof (which
 // is what refuses .. readably) and the symlink check is the enforcement, because filepath.Join

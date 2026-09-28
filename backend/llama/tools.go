@@ -6,19 +6,19 @@ import (
 
 // toolDisplayNames maps tool names to their UI display names.
 var toolDisplayNames = map[string]string{
-	"read_file":      "Read",
-	"write_file":     "Write",
-	"edit_file":      "Edit",
-	"bash":           "Execute",
-	"ask_question":   "Question",
-	"request_review": "Done",
-	"create_task":    "Create Task",
-	"view_tasks":     "View Tasks",
-	"edit_task":      "Edit Task",
-	"lsp_references": "LSP References",
-	"lsp_definition": "LSP Definition",
-	"lsp_hover":      "LSP Hover",
-	"lsp_rename":     "LSP Rename",
+	types.ToolReadFile:      "Read",
+	types.ToolWriteFile:     "Write",
+	types.ToolEditFile:      "Edit",
+	types.ToolBash:          "Execute",
+	types.ToolAskQuestion:   "Question",
+	types.ToolRequestReview: "Done",
+	types.ToolCreateTask:    "Create Task",
+	types.ToolViewTasks:     "View Tasks",
+	types.ToolEditTask:      "Edit Task",
+	types.ToolLSPReferences: "LSP References",
+	types.ToolLSPDefinition: "LSP Definition",
+	types.ToolLSPHover:      "LSP Hover",
+	types.ToolLSPRename:     "LSP Rename",
 }
 
 // GetToolDisplayName returns the display name for a tool, or the raw name if unknown.
@@ -97,7 +97,7 @@ type editTaskProps struct {
 var toolReadFile = types.ChatTool{
 	Type: "function",
 	Function: &types.ToolDef{
-		Name:        ToolReadFile,
+		Name:        types.ToolReadFile,
 		DisplayName: "Read",
 		Description: "Read the contents of a file. Supports offset (1-indexed start line) and limit (max lines to return) for large files. Omit both for full file.",
 		Parameters: map[string]any{
@@ -115,7 +115,7 @@ var toolReadFile = types.ChatTool{
 var toolWriteFile = types.ChatTool{
 	Type: "function",
 	Function: &types.ToolDef{
-		Name:        ToolWriteFile,
+		Name:        types.ToolWriteFile,
 		DisplayName: "Write",
 		Description: "Write content to a file (creates directories as needed)",
 		Parameters: map[string]any{
@@ -132,7 +132,7 @@ var toolWriteFile = types.ChatTool{
 var toolEditFile = types.ChatTool{
 	Type: "function",
 	Function: &types.ToolDef{
-		Name:        ToolEditFile,
+		Name:        types.ToolEditFile,
 		DisplayName: "Edit",
 		Description: "Make precise text replacements in a file. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Each oldText must match exactly (whitespace, indentation)",
 		Parameters: map[string]any{
@@ -159,7 +159,7 @@ var toolEditFile = types.ChatTool{
 var toolBash = types.ChatTool{
 	Type: "function",
 	Function: &types.ToolDef{
-		Name:        ToolBash,
+		Name:        types.ToolBash,
 		DisplayName: "Execute",
 		Description: "Execute a shell command. Always set timeout: 2s for fast commands (ls, cat, grep, git status), 10s for package installs (npm install, pip install), 30s for builds and tests (npm run build, npm test, make), 60s for long-running operations (migrations, large downloads). Max 300s.",
 		Parameters: map[string]any{
@@ -177,7 +177,7 @@ var toolBash = types.ChatTool{
 var toolBashReadOnly = types.ChatTool{
 	Type: "function",
 	Function: &types.ToolDef{
-		Name:        ToolBash,
+		Name:        types.ToolBash,
 		DisplayName: "Execute",
 		Description: "Execute a read-only shell command. Only safe, non-destructive commands are allowed: ls, cat, grep, find, head, tail, wc, diff, git log, git status, git diff, git show, git branch, git remote, env, echo, pwd, tree, file, stat, du, which, man, help. Do NOT use write commands (rm, mv, cp, chmod, chown, touch, install, build, test, etc.). Always set timeout: 2s for fast commands.",
 		Parameters: map[string]any{
@@ -194,7 +194,7 @@ var toolBashReadOnly = types.ChatTool{
 var toolAskQuestion = types.ChatTool{
 	Type: "function",
 	Function: &types.ToolDef{
-		Name:        ToolAskQuestion,
+		Name:        types.ToolAskQuestion,
 		DisplayName: "Question",
 		Description: "Ask the user a question. This must be used when clarification or approval is needed.",
 		Parameters: map[string]any{
@@ -210,7 +210,7 @@ var toolAskQuestion = types.ChatTool{
 var toolRequestReview = types.ChatTool{
 	Type: "function",
 	Function: &types.ToolDef{
-		Name:        ToolRequestReview,
+		Name:        types.ToolRequestReview,
 		DisplayName: "Done",
 		Description: "Request review of completed work. This must be used if the work has been completed.",
 		Parameters: map[string]any{
@@ -227,7 +227,7 @@ var toolRequestReview = types.ChatTool{
 var toolRequestReviewPlan = types.ChatTool{
 	Type: "function",
 	Function: &types.ToolDef{
-		Name:        ToolRequestReview,
+		Name:        types.ToolRequestReview,
 		DisplayName: "Done",
 		Description: "Request review of completed work. This must be used if the work has been completed.",
 		Parameters: map[string]any{
@@ -243,7 +243,7 @@ var toolRequestReviewPlan = types.ChatTool{
 var toolCreateTask = types.ChatTool{
 	Type: "function",
 	Function: &types.ToolDef{
-		Name:        ToolCreateTask,
+		Name:        types.ToolCreateTask,
 		DisplayName: "Create Task",
 		Description: "Create a new task on the Kanban board. Returns the created task_id, which can be used as parent_task_id for nested subtasks. Tasks are executed independently and the deepest descendent will be executed first.",
 		Parameters: map[string]any{
@@ -261,7 +261,7 @@ var toolCreateTask = types.ChatTool{
 var toolViewTasks = types.ChatTool{
 	Type: "function",
 	Function: &types.ToolDef{
-		Name:        ToolViewTasks,
+		Name:        types.ToolViewTasks,
 		DisplayName: "View Tasks",
 		Description: "List all tasks with status 'backlog' in the current project. Returns an array of tasks with id, title, prompt, and parent_task_id fields.",
 		Parameters: map[string]any{
@@ -288,7 +288,7 @@ type lspRenameProps struct {
 var toolLSPReferences = types.ChatTool{
 	Type: "function",
 	Function: &types.ToolDef{
-		Name:        ToolLSPReferences,
+		Name:        types.ToolLSPReferences,
 		DisplayName: "LSP References",
 		Description: "Find all references to a symbol in a file. Returns an array of locations with file path, line, and character. Use this to find all usages of a variable, function, or type before refactoring.",
 		Parameters: map[string]any{
@@ -305,7 +305,7 @@ var toolLSPReferences = types.ChatTool{
 var toolLSPDefinition = types.ChatTool{
 	Type: "function",
 	Function: &types.ToolDef{
-		Name:        ToolLSPDefinition,
+		Name:        types.ToolLSPDefinition,
 		DisplayName: "LSP Definition",
 		Description: "Find the definition location of a symbol in a file. Returns the file path, line, and character where the symbol is defined.",
 		Parameters: map[string]any{
@@ -322,7 +322,7 @@ var toolLSPDefinition = types.ChatTool{
 var toolLSPHover = types.ChatTool{
 	Type: "function",
 	Function: &types.ToolDef{
-		Name:        ToolLSPHover,
+		Name:        types.ToolLSPHover,
 		DisplayName: "LSP Hover",
 		Description: "Get type signature, documentation for a symbol in a file. Returns the symbol's type, signature, and any attached documentation. Use this as a quick reference before reading full source code. If more clarification or validation is needed, read the source file.",
 		Parameters: map[string]any{
@@ -339,7 +339,7 @@ var toolLSPHover = types.ChatTool{
 var toolLSPRename = types.ChatTool{
 	Type: "function",
 	Function: &types.ToolDef{
-		Name:        ToolLSPRename,
+		Name:        types.ToolLSPRename,
 		DisplayName: "LSP Rename",
 		Description: "Rename a symbol across all files using the language server's rename capability. Applies the language server's multi-file edit (e.g. a Go or TypeScript function, variable, or type rename everywhere it is used). Validates renamability first; refuses edits outside the workspace. Prefer this over manual multi-file edit_file calls for symbol renames.",
 		Parameters: map[string]any{
@@ -394,7 +394,7 @@ func ContributedToolDefinitions(specs []types.ToolSpec) []types.ChatTool {
 var toolEditTask = types.ChatTool{
 	Type: "function",
 	Function: &types.ToolDef{
-		Name:        ToolEditTask,
+		Name:        types.ToolEditTask,
 		DisplayName: "Edit Task",
 		Description: "Edit a task's title, prompt, or parent_task_id. At least one field (title, prompt, parent_task_id) must be provided.",
 		Parameters: map[string]any{

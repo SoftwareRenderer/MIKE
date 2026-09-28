@@ -101,11 +101,9 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request, proj
 		}
 	}
 
-	// Acquire per-task mutex to serialize git operations on this worktree.
 	// Delete may checkout a replacement branch and reset the worktree.
 	defer s.lockWorktree(taskID)()
 
-	// Re-fetch task after acquiring lock — state may have changed.
 	task, ok = s.taskInPath(w, projectID, taskID)
 	if !ok {
 		return
@@ -177,12 +175,9 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Acquire per-task mutex to serialize git operations on this worktree.
-	// Prevents concurrent stash/checkout/branch/reset operations that would
-	// corrupt worktree state if interleaved.
+	// Switch stashes the outgoing thread's work, then checks out the target's branch.
 	defer s.lockWorktree(taskID)()
 
-	// Re-fetch task after acquiring lock — state may have changed.
 	task, ok := s.taskInPath(w, projectID, taskID)
 	if !ok {
 		return
@@ -292,12 +287,8 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Acquire per-task mutex to serialize git operations on this worktree.
-	// Prevents concurrent stash/checkout/branch/reset operations that would
-	// corrupt worktree state if interleaved with a switch or another fork.
 	defer s.lockWorktree(taskID)()
 
-	// Re-fetch task after acquiring lock — state may have changed.
 	task, ok := s.taskInPath(w, projectID, taskID)
 	if !ok {
 		return
@@ -609,6 +600,9 @@ func (s *Server) broadcastTaskDiff(taskID string) {
 }
 
 // lockWorktree locks the per-task worktree and returns the function that releases it.
+//
+// A task has one worktree, and delete, switch and fork each checkout, stash, branch or reset it, so a
+// handler holds this across the whole operation: interleaved halves leave a state neither read.
 //
 // Release function rather than mutex: these are injected into api.GitHandler, and a mutex handed
 // across a package boundary is a value that can be stored, copied, and unlocked by whoever holds a

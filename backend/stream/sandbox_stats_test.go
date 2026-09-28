@@ -72,7 +72,8 @@ func TestSandboxStatsSampler_PushOnChangeOnly(t *testing.T) {
 	b := &fakeBroadcaster{}
 	s := newTestSampler(source, tasks, b)
 
-	s.TickOnce()
+	s.SampleOnce()
+	s.publish()
 	events := b.eventsSnapshot()
 	if len(events) != 1 {
 		t.Fatalf("first tick: got %d events, want 1", len(events))
@@ -86,14 +87,16 @@ func TestSandboxStatsSampler_PushOnChangeOnly(t *testing.T) {
 	}
 
 	// Unchanged value: no re-push.
-	s.TickOnce()
+	s.SampleOnce()
+	s.publish()
 	if got := len(b.eventsSnapshot()); got != 1 {
 		t.Fatalf("unchanged tick: got %d events, want 1 (no re-push)", got)
 	}
 
 	// Changed value: one more push with the new value.
 	source.stats["task-1"] = &types.SandboxMemoryStats{Running: true, CurrentMB: 200, LimitMB: 512}
-	s.TickOnce()
+	s.SampleOnce()
+	s.publish()
 	events = b.eventsSnapshot()
 	if len(events) != 2 {
 		t.Fatalf("changed tick: got %d events, want 2", len(events))
@@ -122,7 +125,8 @@ func TestSandboxStatsSampler_SkipsContainersWithNoTaskRow(t *testing.T) {
 	b := &fakeBroadcaster{}
 	s := newTestSampler(source, tasks, b)
 
-	s.TickOnce()
+	s.SampleOnce()
+	s.publish()
 	if got := len(b.eventsSnapshot()); got != 0 {
 		t.Fatalf("got %d events for containers with no task row, want 0", got)
 	}
@@ -147,7 +151,8 @@ func TestSandboxStatsSampler_IdleTaskWithContainerIsTracked(t *testing.T) {
 	b := &fakeBroadcaster{}
 	s := newTestSampler(source, tasks, b)
 
-	s.TickOnce()
+	s.SampleOnce()
+	s.publish()
 	events := b.eventsSnapshot()
 	if len(events) != 1 || events[0].projectID != "proj-1" {
 		t.Fatalf("got %d events for an idle task with a live container, want 1: %+v", len(events), events)
@@ -155,7 +160,8 @@ func TestSandboxStatsSampler_IdleTaskWithContainerIsTracked(t *testing.T) {
 
 	// It grows while idle: the new number is sampled and pushed.
 	source.stats["idle-task"] = &types.SandboxMemoryStats{Running: true, CurrentMB: 400, LimitMB: 512}
-	s.TickOnce()
+	s.SampleOnce()
+	s.publish()
 	events = b.eventsSnapshot()
 	if len(events) != 2 {
 		t.Fatalf("got %d events after idle growth, want 2", len(events))
@@ -178,7 +184,8 @@ func TestSandboxStatsSampler_LatestRetainedAfterIdle(t *testing.T) {
 	b := &fakeBroadcaster{}
 	s := newTestSampler(source, tasks, b)
 
-	s.TickOnce()
+	s.SampleOnce()
+	s.publish()
 	if got := len(b.eventsSnapshot()); got != 1 {
 		t.Fatalf("first tick: got %d events, want 1", got)
 	}
@@ -186,7 +193,8 @@ func TestSandboxStatsSampler_LatestRetainedAfterIdle(t *testing.T) {
 	// Task goes idle with the container's value unchanged: nothing new is pushed, and the most
 	// recent value is retained for a client that subscribes now.
 	tasks["task-1"] = &types.Task{ID: "task-1", ProjectID: "proj-1", Status: types.StatusReview}
-	s.TickOnce()
+	s.SampleOnce()
+	s.publish()
 	if got := len(b.eventsSnapshot()); got != 1 {
 		t.Fatalf("idle tick: got %d events, want 1 (no new pushes)", got)
 	}
@@ -215,7 +223,8 @@ func TestSandboxStatsSampler_NotRunningSampledOnce(t *testing.T) {
 	b := &fakeBroadcaster{}
 	s := newTestSampler(source, tasks, b)
 
-	s.TickOnce()
+	s.SampleOnce()
+	s.publish()
 	events := b.eventsSnapshot()
 	if len(events) != 1 {
 		t.Fatalf("first tick: got %d events, want 1", len(events))
@@ -224,7 +233,8 @@ func TestSandboxStatsSampler_NotRunningSampledOnce(t *testing.T) {
 		t.Fatalf("expected not-running stats, got %+v", got)
 	}
 
-	s.TickOnce()
+	s.SampleOnce()
+	s.publish()
 	if got := len(b.eventsSnapshot()); got != 1 {
 		t.Fatalf("second tick: got %d events, want 1 (unchanged)", got)
 	}

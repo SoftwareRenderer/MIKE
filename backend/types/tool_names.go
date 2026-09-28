@@ -32,8 +32,7 @@ const (
 
 // CoreToolNames are the tools the server implements itself, and an extension may not take one of these
 // names: the model would call it and never reach the core tool. This list is also every tool the server
-// can be asked to run (llama.AllToolNames is this call), so a tool added here is reserved the moment it is
-// declared.
+// can be asked to run, so a tool added here is reserved the moment it is declared.
 func CoreToolNames() []string {
 	return []string{
 		ToolReadFile, ToolWriteFile, ToolEditFile, ToolBash,

@@ -76,7 +76,7 @@ func TestMountPolicyForExtension_GrantIsARootForItsOwnExtensionOnly(t *testing.T
 		t.Errorf("a path outside every root was accepted even with a grant: %s", foreign)
 	}
 	// Inside the container-side argument of the same rule, nothing changed either.
-	if err := ValidateContainerPath("/go/pkg/mod"); err != nil {
+	if err := sandboxruntime.ValidateContainerPath("/go/pkg/mod"); err != nil {
 		t.Errorf("the container-path rule should be untouched: %v", err)
 	}
 	if resolved == "" {

@@ -92,9 +92,10 @@ refusal reason — the difference between an absent tool and one a person can fi
 - Appended in `toolDefinitionsFor` for plan, explore and act alike, through `Deps.ExtensionTools`;
   `llama.ContributedToolDefinitions` turns `types.ToolSpec` into the provider's definition. `types` is
   the floor `extensions` and `llama` meet on so neither imports the other.
-- A contributed tool never takes a core tool's name (`types.CoreToolNames`, pinned against
-  `llama.AllToolNames()` by `TestCoreToolNamesMatchAllToolNames`), and a name already contributed by
-  another enabled extension is reported, not silently dropped.
+- A contributed tool never takes a core tool's name (`types.CoreToolNames` is the only spelling of that
+  list, and `TestToolSetsUseOnlyDeclaredNames` plus `TestEveryDeclaredToolIsDispatched` pin the offered and
+  dispatched names to it), and a name already contributed by another enabled extension is reported, not
+  silently dropped.
 - Dispatch: `toolRunner.run` falls through to `runContributedTool` for a name no core handler claims. A
   tool the registry withheld answers in the existing `Unknown tool: <name>` vocabulary.
 - Display names: `types.ToolDef.DisplayName` is `json:"-"`, so the card label comes from an

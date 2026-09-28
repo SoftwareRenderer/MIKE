@@ -9,8 +9,8 @@ import (
 // TestToolSetsUseOnlyDeclaredNames: offered names and declared names must match in both directions,
 // or the provider, the dispatcher and the frontend disagree about a tool.
 func TestToolSetsUseOnlyDeclaredNames(t *testing.T) {
-	declared := make(map[string]bool, len(AllToolNames()))
-	for _, n := range AllToolNames() {
+	declared := make(map[string]bool, len(types.CoreToolNames()))
+	for _, n := range types.CoreToolNames() {
 		if declared[n] {
 			t.Errorf("%q is declared twice", n)
 		}
@@ -31,14 +31,14 @@ func TestToolSetsUseOnlyDeclaredNames(t *testing.T) {
 		}
 		for _, n := range toolNames(defs) {
 			if !declared[n] {
-				t.Errorf("%s mode offers %q, which is not in AllToolNames()", mode, n)
+				t.Errorf("%s mode offers %q, which is not in types.CoreToolNames()", mode, n)
 			}
 			offered[n] = true
 		}
 	}
 
 	// A declared name in no set is usually a definition dropped from a mode by accident.
-	for _, n := range AllToolNames() {
+	for _, n := range types.CoreToolNames() {
 		if !offered[n] {
 			t.Errorf("%q is declared but offered by no mode", n)
 		}
@@ -76,19 +76,19 @@ func TestDefinitionsCarryTheirName(t *testing.T) {
 	}
 }
 
-// TestToolNamesMatchTheirDefinitions closes the loop the constants exist for: AllToolNames and
+// TestToolNamesMatchTheirDefinitions closes the loop the constants exist for: types.CoreToolNames and
 // the definitions must be the same set, so renaming a constant without the definition (or the
 // other way round) fails here rather than at the first tool call nobody answers.
 func TestToolNamesMatchTheirDefinitions(t *testing.T) {
 	declared := map[string]bool{}
-	for _, n := range AllToolNames() {
+	for _, n := range types.CoreToolNames() {
 		declared[n] = true
 	}
 	all := append(append(append(GetToolDefinitions(), GetPlanModeToolDefinitions()...),
 		GetExploreModeToolDefinitions()...), GetLSPToolDefinitions()...)
 	for _, n := range toolNames(all) {
 		if !declared[n] {
-			t.Errorf("a tool is defined as %q but AllToolNames does not declare it", n)
+			t.Errorf("a tool is defined as %q but types.CoreToolNames does not declare it", n)
 		}
 	}
 }

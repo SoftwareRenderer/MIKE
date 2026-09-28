@@ -27,15 +27,11 @@ DEADCODE="$("$DEADCODE" path deadcode)"
 ROOTS=("." "./pkg/bridge/agent" "./scripts/archgate" "./scripts/i18nparity")
 
 # Test-only accessors: "<package-dir>:<funcName>". Scoped by directory as well as name so
-# allowing `none` in backend/extensions cannot also excuse an unrelated `none` elsewhere.
+# allowing `Write` in pkg/logging cannot also excuse an unrelated `Write` elsewhere.
 ALLOWLIST="
 backend/agent/loader.go:RegisterAdapterFactory
 backend/crypto/encryption.go:Derivations
-backend/extensions/i18n_prompts.go:none
-backend/llama/tools_names.go:AllToolNames
 backend/prompts/overlay.go:ActiveOverlay
-backend/stream/sandbox_stats.go:TickOnce
-backend/term/terminal.go:activeSessionCount
 pkg/logging/logging.go:TestSink
 pkg/logging/logging.go:setOutput
 pkg/logging/logging.go:Write
@@ -55,10 +51,13 @@ pkg/logging/logging.go:Lines
 # sandboxed task probes the binary its own adapter named. Production always loads WASM, so no
 # production path reaches it - and deleting it would put that test out of reach.
 #
-# backend/stream: TickOnce drives one sample and one broadcast in lockstep, which is how every
-# sampler test steps the ticker; production runs the same two halves on their own intervals.
-#
 # backend/crypto: Derivations is how the one-KDF-per-Box test counts without measuring wall time.
+# The same key bytes come out of every derivation, so comparing keys proves repeatability, not the
+# count; a wall-time bound is the only other measurement and no Go test here may depend on timing.
+#
+# backend/prompts: ActiveOverlay is the read side of SetOverlay. Which (dir, locale) pair the server
+# installed is the wiring a backend/server test owns, and dir has no other read-back - ActiveLocale
+# answers the locale alone.
 
 is_allowed() {
 	local file="$1" name="$2" entry

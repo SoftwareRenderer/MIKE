@@ -173,7 +173,7 @@ option (`--output=/tmp/pwn` would create/truncate a file anywhere the server use
   `::` transport (`ext::sh -c 'id'`), and a **case-sensitive** scheme check because git's own is
   (`HTTPS://` is refused as transport `HTTPS`).
 - **Every** clone of a caller-supplied source goes through both halves — project creation
-  (`api.validateGitCloneURL`) and the extension install (`extensions.CheckoutExtension`). Git's own
+  (`api.prepareCloneTarget`) and the extension install (`extensions.CheckoutExtension`). Git's own
   refusal of `ext::` is a host default, not a defence (a host with `protocol.ext.allow=always` would run
   the payload as the server user). Use `git.CloneProtocolArgs()` for a clone that needs a bespoke flag —
   never drop the fence.
