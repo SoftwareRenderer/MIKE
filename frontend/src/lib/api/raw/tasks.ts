@@ -1,5 +1,5 @@
 // One domain's plain HTTP calls: the offline queue replays these, and nothing here knows the queue exists.
-import type { MemoryAlertAckPayload, Task, TaskMessage } from '../../types';
+import type { MemoryAlertAckPayload, Task } from '../../types';
 import { API_BASE, apiFetch, apiError } from '../helpers';
 import { t } from '$lib/i18n';
 
@@ -150,16 +150,6 @@ export async function sendTaskMessageRaw(payload: SendTaskMessagePayload): Promi
         body: JSON.stringify(body),
     });
     if (!res.ok) throw await apiError(res, t('api.sendMessage'));
-    return res.json();
-}
-
-export async function createTaskMessageRaw(projectId: string, taskId: string, role: string, content: string): Promise<TaskMessage> {
-    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role, content }),
-    });
-    if (!res.ok) throw await apiError(res, t('api.createMessage'));
     return res.json();
 }
 

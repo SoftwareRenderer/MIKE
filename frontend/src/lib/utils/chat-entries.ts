@@ -346,8 +346,6 @@ export function buildEntriesFromMessages(
             const match = content.match(/^\[([^\]]+)\]\s*(.*)/);
             const code = match ? match[1] : 'error';
             const message = match ? match[2] : content;
-            // Older builds stored a stop as an error row; stopping is a normal state, not a failure.
-            if (code === 'stopped') return null;
             return {
                 ...base, id: m.id, role: 'error' as const, content: message, isStreaming: false, createdAt: m.created_at,
                 error: { code, message },

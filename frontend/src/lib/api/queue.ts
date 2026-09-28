@@ -10,7 +10,6 @@ import { createProjectRaw, deleteProjectRaw, resetProjectStatsRaw, updateProject
 import {
     clearDoneTasksRaw,
     commitAndDoneRaw,
-    createTaskMessageRaw,
     createTaskRaw,
     deleteTaskMessageRaw,
     deleteTaskMessagesAfterRaw,
@@ -51,7 +50,7 @@ export type ActionType =
     // Task execution
     | 'startTask' | 'startSubtask' | 'stopTask' | 'resumeTask'
     // Messages
-    | 'sendTaskMessage' | 'createTaskMessage' | 'deleteTaskMessagesAfter'
+    | 'sendTaskMessage' | 'deleteTaskMessagesAfter'
     | 'deleteTaskMessage' | 'updateTaskMessage'
     // Threads
     | 'switchTaskThread' | 'forkTaskThread'
@@ -230,7 +229,7 @@ export function getQueuedDeleteTaskIds(): Set<string> {
 
 // The sends the queue still owes, or the server refused. `pendingSendEntries` owns how they read.
 
-const SEND_ACTIONS: Set<string> = new Set(['sendTaskMessage', 'createTaskMessage']);
+const SEND_ACTIONS: Set<string> = new Set(['sendTaskMessage']);
 
 function isSendAction(action: QueuedAction): boolean {
     return SEND_ACTIONS.has(action.type) && !!action.params?.projectId && !!action.params?.taskId;
@@ -531,11 +530,6 @@ async function executeQueuedAction(action: QueuedAction, idMap: Map<string, stri
     switch (action.type) {
         case 'sendTaskMessage':
             await sendTaskMessageRaw({ ...p, taskId } as SendTaskMessagePayload);
-            break;
-        // No longer written — an edited message is one send carrying `replaceMessageId` — but kept so a queue
-        // an older build left on disk still lands its row.
-        case 'createTaskMessage':
-            await createTaskMessageRaw(p.projectId, taskId, p.role, p.content);
             break;
         case 'deleteTaskMessagesAfter':
             await deleteTaskMessagesAfterRaw(p.projectId, taskId, p.messageId, p.regenerate);

@@ -514,7 +514,7 @@ describe('createStreamHandler', () => {
 
     it('hint event uses the backend message id for the entry', () => {
         const { stream, handleEvent } = setup();
-        handleEvent({ type: 'hint', data: { id: 'hint-msg-1', content: 'Is the task complete?', created_at: '2026-01-01T00:00:00Z' } }, false);
+        handleEvent({ type: 'hint', data: { id: 'hint-msg-1', role: 'user', content: 'Is the task complete?', created_at: '2026-01-01T00:00:00Z' } }, false);
         expect(stream.state.entries).toHaveLength(1);
         expect(stream.state.entries[0].role).toBe('user');
         expect(stream.state.entries[0].id).toBe('hint-msg-1');
@@ -539,7 +539,7 @@ describe('createStreamHandler', () => {
 
     it('hint event without an id falls back to genId', () => {
         const { stream, handleEvent } = setup();
-        handleEvent({ type: 'hint', data: { content: 'retry hint', created_at: '2026-01-01T00:00:00Z' } }, false);
+        handleEvent({ type: 'hint', data: { role: 'user', content: 'retry hint', created_at: '2026-01-01T00:00:00Z' } }, false);
         expect(stream.state.entries).toHaveLength(1);
         expect(stream.state.entries[0].id).toMatch(/^id-/); // genId() prefix from the test callback
         expect(stream.state.entries[0].content).toBe('retry hint');
@@ -547,9 +547,9 @@ describe('createStreamHandler', () => {
 
     it('hint event with an already-present id is skipped (replay dedup)', () => {
         const { stream, handleEvent } = setup();
-        handleEvent({ type: 'hint', data: { id: 'hint-msg-1', content: 'Is the task complete?', created_at: '2026-01-01T00:00:00Z' } }, false);
+        handleEvent({ type: 'hint', data: { id: 'hint-msg-1', role: 'user', content: 'Is the task complete?', created_at: '2026-01-01T00:00:00Z' } }, false);
         // Replayed from the reconnect buffer — must not add a duplicate entry.
-        handleEvent({ type: 'hint', data: { id: 'hint-msg-1', content: 'Is the task complete?', created_at: '2026-01-01T00:00:00Z' } }, false);
+        handleEvent({ type: 'hint', data: { id: 'hint-msg-1', role: 'user', content: 'Is the task complete?', created_at: '2026-01-01T00:00:00Z' } }, false);
         expect(stream.state.entries).toHaveLength(1);
     });
 

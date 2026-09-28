@@ -508,14 +508,6 @@ describe('buildEntriesFromMessages', () => {
         expect(entries[0].error).toEqual({ code: 'api_error', message: 'Connection failed' });
     });
 
-    it('filters out stopped error messages', () => {
-        const messages = [
-            { id: 'e1', role: 'error', content: '[stopped] Task was stopped', created_at: '2025-01-01T00:00:00Z' },
-        ];
-        const { entries } = buildEntriesFromMessages(messages);
-        expect(entries).toHaveLength(0);
-    });
-
     it('collapses repeated error rows into the first one', () => {
         const messages = [
             { id: 'u1', role: 'user', content: 'hello', created_at: '2025-01-01T00:00:00Z' },
