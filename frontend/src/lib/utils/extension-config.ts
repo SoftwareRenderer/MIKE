@@ -25,7 +25,7 @@ export const HOST_OWNED_LSP_CONFIG_KEY = 'memory_limit';
  */
 const HOST_OWNED_AGENT_CONFIG_KEY = 'sandbox_mount';
 
-/** @knipignore Which extension type this is decides every other rule here, so it is asserted alone. */
+/** @knipignore The extension type decides every other rule here, so it gets its own case. */
 export function isLspExtension(ext: Extension | null | undefined): boolean {
     return ext?.type === 'lsp';
 }

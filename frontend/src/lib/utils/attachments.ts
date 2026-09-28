@@ -6,9 +6,7 @@
 import type { DraftAttachment } from '$lib/storage';
 import { t } from '$lib/i18n';
 
-/**
- * @knipignore A fixture is built one byte over this cap, so the size boundary is measured.
- */
+/** @knipignore A fixture is built one byte over this cap. */
 export const MAX_IMAGE_SIZE = 4 * 1024 * 1024;
 
 export const MAX_IMAGES = 4;

@@ -226,7 +226,7 @@ export function openTerminalTitle(config: Config | null | undefined): string {
 }
 
 /**
- * True on Apple platforms (used to pick the platform-appropriate submit key).
+ * True on Apple platforms, where the modifier is Cmd rather than Ctrl.
  *
  * @knipignore The platform read is asserted against a mocked user agent.
  */

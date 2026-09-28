@@ -420,7 +420,7 @@ export function packText(key: LocaleKey, params?: MessageParams): string | undef
 /**
  * Whether the catalog in use answers `key`, English included.
  *
- * @knipignore Which keys the installed catalog answers, probed with one it has and one it has not.
+ * @knipignore Probed with one key the installed catalog has and one it has not.
  */
 export function hasKey(key: LocaleKey): boolean {
     return i18n.hasKey(key);
@@ -434,7 +434,7 @@ export function activeLocale(): string | undefined {
 /**
  * The concrete tag `Intl` ends up using, browser language included.
  *
- * @knipignore The tag `Intl` ends up with, browser default included.
+ * @knipignore The locale tests ask what `Intl` resolved to; the app never does.
  */
 export function resolvedLocale(): string {
     return i18n.resolvedLocale();
@@ -443,7 +443,7 @@ export function resolvedLocale(): string {
 /**
  * The tag describing the rendered strings — the `<html lang>` value.
  *
- * @knipignore The tag `<html lang>` carries, which is not the tag `Intl` gets.
+ * @knipignore The locale tests check this against the tag `Intl` gets.
  */
 export function documentLanguage(): string {
     return i18n.documentLanguage();
@@ -452,16 +452,16 @@ export function documentLanguage(): string {
 /**
  * Subscribe to locale changes; returns the unsubscribe function.
  *
- * @knipignore Which locale a subscriber is told about, and that unsubscribing stops the telling.
+ * @knipignore Tests check what a subscriber hears and that unsubscribing stops it.
  */
 export function onLocaleChange(listener: LocaleListener): () => void {
     return i18n.onLocaleChange(listener);
 }
 
 /**
- * Install a catalog at runtime (T5's entry point when a pack is fetched).
+ * Install a catalog at runtime, once its pack has been fetched.
  *
- * @knipignore How the loading and formatting tests install a pack to run under.
+ * @knipignore The loading and formatting tests install their pack here.
  */
 export function registerCatalog(tag: string, catalog: Catalog): boolean {
     return i18n.registerCatalog(tag, catalog);
@@ -472,7 +472,7 @@ export function registerCatalog(tag: string, catalog: Catalog): boolean {
  * Production language always arrives through `i18n.setCatalog` from the enabled
  * pack; nothing here is persisted.
  *
- * @knipignore Picks the tag a test runs under — every formatting test installs its locale here.
+ * @knipignore Every formatting test sets its locale here.
  */
 export function setLocale(tag: string | null): void {
     i18n.setLocale(tag);

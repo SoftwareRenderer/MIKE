@@ -26,7 +26,7 @@ function makeTask(id: string, status: string, parentId?: string): Task {
     };
 }
 
-/** backlog root with a done child, plus an unrelated review task. */
+/** A backlog root with a done child, plus an unrelated review task. */
 function tasks(): Task[] {
     return [makeTask('root', 'backlog'), makeTask('child', 'done', 'root'), makeTask('solo', 'review')];
 }

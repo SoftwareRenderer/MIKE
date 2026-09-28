@@ -1,17 +1,15 @@
 /**
- * The four bulk task actions the multi-select bar offers, written once and driven by injected
- * dependencies. Each screen hands over what only it knows — the task list it can see, the project id,
- * the column table behind its labels, how it reaches the api, how a moved task lands — so the board and
- * the task view share the counting, the confirmations and the toasts without sharing a chunk.
+ * The four bulk task actions the multi-select bar offers, shared by the board and the task view.
+ * Each screen injects what only it knows: the tasks it can see, its project id, its column labels,
+ * its api calls, and how a moved task lands.
  */
 import { t } from '$lib/i18n';
 import { filterTopLevelTaskIds } from './task-utils';
 import type { Task } from '$lib/types';
 
 /**
- * The writes a bulk action performs, one function per endpoint. A lazily-loaded screen keeps its
- * `await import('$lib/api')` inside the wrapper it passes here, which is what keeps chunk membership
- * a decision each screen makes rather than one this module makes for it.
+ * The writes a bulk action performs, one function per endpoint. They are passed in rather than
+ * imported so a lazily-loaded screen keeps its `await import('$lib/api')` its own.
  */
 interface BulkTaskApis {
     deleteTask: (projectId: string, taskId: string) => Promise<unknown>;
@@ -38,6 +36,7 @@ interface BulkTaskDialog {
     showToast: (message: string, type?: 'error' | 'success') => void;
 }
 
+/** @knipignore The bulk-action tests build the whole deps object. */
 export interface BulkTaskActionDeps {
     /** Every task this screen can see — the board's list, or the task view's board overview. */
     tasks: () => Task[];
@@ -47,10 +46,8 @@ export interface BulkTaskActionDeps {
     api: BulkTaskApis;
     board: BulkTaskBoard;
     dialog: BulkTaskDialog;
-    /**
-     * Send one move and land its result; false when the move did not happen. The move stays the
-     * caller's: the two screens land the reply differently, and which of the two is right is undecided.
-     */
+    /** Send one move and land its result; false when the move did not happen. Each screen lands the
+     * reply differently, so the move stays the caller's. */
     moveTask: (task: Task, targetStatus: string) => Promise<boolean>;
     onRefreshBoard?: () => void;
 }
@@ -70,7 +67,7 @@ export interface BulkTaskActions {
 
 /**
  * Build the four bulk actions. One failure reports itself and the batch continues; the success toast
- * counts what landed and stays silent when nothing did.
+ * counts what landed, and is silent when nothing did.
  */
 export function createBulkTaskActions(deps: BulkTaskActionDeps): BulkTaskActions {
     const { tasks, projectId, statusLabel, api, board, dialog, moveTask } = deps;

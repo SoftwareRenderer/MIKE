@@ -43,8 +43,7 @@ describe('the board mirror follows what the server answered', () => {
         const { mirrorBoard, getBoardCache, boardCacheKey, MIRROR_COALESCE_MS } = await load();
 
         mirrorBoard('proj-a', board(['moved']));
-        // The window is still open: nothing has been written, and nothing will be until the
-        // timer closes it - which is the only flush this case ever asks for.
+        // The window is still open: nothing is written until the timer closes it.
         expect(await getBoardCache(boardCacheKey('proj-a'))).toBeNull();
 
         await vi.advanceTimersByTimeAsync(MIRROR_COALESCE_MS);

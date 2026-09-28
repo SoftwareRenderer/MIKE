@@ -449,7 +449,7 @@
         onRefreshBoard: () => onRefreshBoard?.(),
     }));
 
-    /** Send one move and land the result on the board overview. False when the server refused it. */
+    /** Send one move and land it on the board overview. */
     async function applyMove(selected: Task, targetStatus: string): Promise<boolean> {
         try {
             const updated = await moveTask(task.project_id, selected.id, targetStatus);

@@ -6,7 +6,7 @@ import type { CommitQueueEntry } from '$lib/types';
  * owns the task before writing; `TaskChat` clears its own project's slot when its
  * commit-and-done call returns.
  *
- * @knipignore The tests build their own instance so each case starts with an empty queue.
+ * @knipignore The tests build their own instance.
  */
 export class CommitQueueStore {
     private slots = $state<Record<string, CommitQueueEntry>>({});

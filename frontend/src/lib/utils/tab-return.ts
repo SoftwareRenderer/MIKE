@@ -17,7 +17,7 @@ export const RETURN_DEDUPE_MS = 2_000;
  * `document.hidden`. */
 export type ReturnSource = 'visible' | 'focus' | 'pageshow' | 'resume';
 
-/** @knipignore A case names the few fields that decide it and inherits the rest of the signal. */
+/** @knipignore A case names the fields that decide it and inherits the rest of the signal. */
 export interface ReturnSignal {
     hidden: boolean;
     source: ReturnSource;

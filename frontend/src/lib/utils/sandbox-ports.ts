@@ -4,7 +4,7 @@ import { t } from '$lib/i18n';
 /**
  * What the interface field shows when the port is published on every interface.
  *
- * @knipignore The field shows this spelling for a binding the server stored empty.
+ * @knipignore The spelling for an empty binding is asserted on `bindForInput`.
  */
 export const DEFAULT_BIND = '0.0.0.0';
 
@@ -37,7 +37,7 @@ export function normalizeBind(text: string): string | null {
 }
 
 /**
- * True when the port is published on every interface - the case not worth printing.
+ * True when the port is published on every interface.
  *
  * @knipignore Each spelling that means every interface is answered on its own.
  */

@@ -39,9 +39,8 @@ export interface ExplorerProps {
 }
 
 /**
- * What the branch view and the task view answer differently — the `ExplorerCore` constructor's
- * argument. The core owns everything else about an explorer screen; see the two components for
- * what each edge means in its own terms.
+ * The `ExplorerCore` constructor's argument: what the branch view and the task view answer
+ * differently. The core owns everything else about an explorer screen.
  */
 interface ExplorerEdges {
     /** IndexedDB key of this screen's tab list and unsaved set. */

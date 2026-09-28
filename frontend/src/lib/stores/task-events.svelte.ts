@@ -8,7 +8,7 @@ import type { TaskEventData } from '$lib/types';
  * The last frame stays readable, which is what lets a chat that opens mid-turn catch
  * the frame it missed; the replay buffer is what refills a turn already in flight.
  *
- * @knipignore The tests build their own instance, so one case's frame is not another's.
+ * @knipignore The tests build their own instance.
  */
 export class TaskEventStore {
     // `raw`: the payload goes to the stream handler untouched, and every publish is a

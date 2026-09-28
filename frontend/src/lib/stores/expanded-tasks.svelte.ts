@@ -10,7 +10,7 @@ import { IdSet } from './id-set.svelte';
  * Only a deliberate collapse is written — an auto-expand (the selected task's
  * parent, a parent that just gained a subtask) stays in memory.
  *
- * @knipignore The tests build their own instance, so a reload case starts from nothing expanded.
+ * @knipignore The tests build their own instance.
  */
 export class ExpandedTasksStore extends IdSet {
     toggle(taskId: string): void {

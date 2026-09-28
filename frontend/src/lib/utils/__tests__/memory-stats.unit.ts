@@ -18,13 +18,13 @@ function stats(overrides: Partial<SandboxMemoryStats> = {}): SandboxMemoryStats 
     };
 }
 
-/** The shape a dismissal is stored in, so a case can name one without repeating three field names. */
+/** The shape a dismissal is stored in. */
 type StoredAck = { peak_mb: number; oom_kills: number; limit_mb: number };
 
 /** A row carrying the dismissal someone gave, or nothing when nobody has answered the alert. */
 const dismissedBy = (ack: StoredAck | null) => (ack ? { memory_alert_ack: ack } : {});
 
-/** The container that hit its limit twice over: the peak is at the ceiling and a process was killed. */
+/** A container at its limit with a process killed. */
 const hit = stats({ memory_limit_mb: 1024, memory_peak_mb: 1024, oom_kills: 2 });
 
 describe('the alert a container earns', () => {

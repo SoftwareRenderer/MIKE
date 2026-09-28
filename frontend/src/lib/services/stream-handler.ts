@@ -27,7 +27,7 @@ function pointToolCallRef(s: typeof StreamState.prototype.state, toolId: string,
 /**
  * External callbacks the component must provide.
  *
- * @knipignore The stream tests build the whole callbacks object; the app passes a literal at its call site.
+ * @knipignore The stream tests build the whole callbacks object.
  */
 export interface StreamHandlerCallbacks {
     genId: () => string;

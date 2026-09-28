@@ -6,7 +6,7 @@ import type { SandboxMemoryStats } from '$lib/types';
  * goes idle the server stops pushing, and the UI keeps showing the most
  * recent usage. Only task deletion removes an entry.
  *
- * @knipignore The tests build their own instance, so one case's stats are not another's.
+ * @knipignore The tests build their own instance.
  */
 export class SandboxStatsStore {
     private stats = $state<Record<string, SandboxMemoryStats>>({});

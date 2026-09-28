@@ -194,12 +194,15 @@ Two measured behaviours that chat specs keep getting wrong, both worth designing
 
 ## Frontend cleanliness gates (run by `make check`)
 
-`make test-frontend` ends with four gates over `frontend/src`:
+`make test-frontend` ends with five gates over `frontend/src`:
 
 - **`npm run check:dead`** — knip over the **production view**: unused files, exports, exported types,
-  duplicate exports, unlisted imports, unused dependencies. `ignore` in the config excludes every test
-  file, so a symbol kept alive only by its own unit test is still reported — that is the property the gate
-  exists for, and it is how a test import hid an export no product code read.
+  duplicate exports, unlisted imports, unused dependencies. An ignored test file stays a *user* of what it
+  imports, so a symbol kept alive only by its own unit test is not an issue there; the seam rule below is
+  what sees it.
+- **`npm run check:dead-surface`** — `frontend/dead-surface.py` measures what knip's own exemption hides and
+  what no linter counts: an export alive only for its unit test, and a CSS declaration line copied into a
+  second stylesheet. The section below owns both rules and the ceiling's re-freeze.
 - **`npm run check:unused`** — `frontend/scripts/check-unused.sh` runs `svelte-check` on
   `tsconfig.unused.json`, which turns on `noUnusedLocals` and `noUnusedParameters`; `npm run check` does
   not. The script keeps the two `is declared but …` messages, prints `file:line name`, and fails on any.
@@ -216,6 +219,54 @@ Two measured behaviours that chat specs keep getting wrong, both worth designing
 - **`npm run check:colors`** — `frontend/scripts/check-colors.sh` fails on a hex colour literal in a
   component or a stylesheet under `src/`, because every chrome colour comes from the palette in
   `src/app.css`; its header holds the exceptions.
+
+### The dead-surface gate
+
+`frontend/dead-surface.py` is two measurements with different politics: one must read zero, the other has a
+frozen ceiling. It prints both numbers on every run, green included, so the run makes the claim and the exit
+code only repeats it.
+
+**An untagged test-only export is a finding.** A declaration is test-only when no *other* production file
+names it and at least one unit file names it. Nothing in the app reads it: the `export` exists so a test can
+reach an internal. That is a seam, and a retained seam says so on its declaration.
+
+```ts
+/** @knipignore The coalescing tests measure this window; nothing in the app reads it. */
+export const MIRROR_COALESCE_MS = 1500;
+```
+
+There is no allowlist, so the permission dies with the symbol and the seam count moves only when the code
+moves. knip cannot make this call itself. `ignore` in `knip.json` keeps an ignored test file's imports
+counting as usage, and `tags: ["-knipignore"]` exempts a tagged declaration from its report, so a tag costs
+nothing there. A tag is free to knip and binding here: an untagged seam fails the run, and the tag's one-line
+reason is what a reviewer reads.
+
+**Naming is textual, which is the safe direction.** A production file names a symbol when the identifier
+appears anywhere in it outside a comment, a quoted string or a `<style>` block — a template-literal hole and a
+Svelte mustache included. A barrel and the English catalog name what they carry without being measured, so a
+symbol the app reaches through `index.ts` is not a seam. An export no file names at all reaches its consumer
+through a signature, and `npm run check:dead` owns that question.
+
+**The CSS count is a ceiling, not a target.** Every `src/**/*.css` file and every `<style>` block is cut into
+declaration runs: the text up to the `;`, or up to the brace that closes it. Comments and whitespace are
+stripped, a string literal becomes `S`, a hex colour `I`, and a custom property keeps its name — two tokens of
+the same property are two rules, not one rule copied twice. A declaration held by more than one block
+contributes every occurrence past its first.
+
+That number cannot be zero and is not meant to be. `display: flex` alone is written in 100 blocks, because a
+scoped `<style>` cannot reach another block's rule and a shared class trades a duplicate line for an unscoped
+selector. `CSS_CEILING` in the script holds the measured count, so the gate fires on a new copy rather than on
+the old pile.
+
+**Re-freezing the ceiling.** `cd frontend && python3 dead-surface.py --update-ceiling` measures the tree and
+writes the number into `CSS_CEILING`. A consolidation lands the smaller constant beside the diff. A rise runs
+it only with the reason in the commit message, because new scoped CSS that repeats `display: flex` is a
+decision someone signs.
+
+**Checking this.** `cd frontend && npm run check:dead-surface-test` asserts each rule in both directions. The
+seam that must be reported is reported, and the barrel, the re-export and the signature that must not be are
+absent; a copied declaration raises the count and two rules that merely resemble each other do not. A gate
+that stopped measuring fails here first.
 
 **Names starting with `_` are exempt, deliberately.** `$effect(() => { const _v = uiInjector.getPointVersion(); … })`
 subscribes by *reading*; the value is never used and the read is the whole point. TypeScript exempts
@@ -236,9 +287,9 @@ Knip traps, each measured on this tree:
 **What neither gate sees.** A declaration read by something outside the JS module graph:
 `AppStreamEventType` in `src/lib/api/events.ts` is exported for the archgate `wsevents` rule, which locates
 the union by the text `export type AppStreamEventType` (`scripts/archgate/rules_routes.go`) and errors if
-that text is gone. The declaration is tagged `@knipignore` and `tags: ["-knipignore"]` in `knip.json` is the
-config's only exemption. Both gates are also blind to an object property nobody reads, a CSS class no
-template uses, and a REST route the UI stopped calling.
+that text is gone. The declaration carries the same `@knipignore` tag every retained seam carries, and
+`frontend/dead-surface.py` is what requires the tag and its reason there. Both gates are also blind to an
+object property nobody reads, a CSS class no template uses, and a REST route the UI stopped calling.
 
 ## Diagnostic scripts (ad-hoc investigation)
 

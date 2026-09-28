@@ -23,6 +23,8 @@ interface SlotRequest<Answer> {
  *
  * A request still pending when a newer one opens is answered `declined` rather than dropped, so the
  * older caller resumes as cancelled instead of hanging on a dialog now showing someone else's request.
+ *
+ * @knipignore modal-state's test empties every slot it finds by `instanceof`.
  */
 export class PromiseSlot<Request, Answer> {
     /** The pending request, or null. Only `open` and `clear` write it. */

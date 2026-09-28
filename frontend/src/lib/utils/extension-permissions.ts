@@ -23,9 +23,7 @@ export function isDangerousPermission(perm: string): boolean {
 }
 
 /**
- * True when a permission list contains at least one sandbox-escaping
- * permission. Used to decide whether an install warrants a permission
- * review before it starts.
+ * True when a permission list contains at least one sandbox-escaping permission.
  *
  * @knipignore A list's answer is asserted per list; `requiresInstallReview` ORs three conditions.
  */
@@ -37,7 +35,7 @@ export function hasDangerousPermissions(permissions: readonly string[]): boolean
  * True when a registry/local entry declares the manifest-level `network`
  * capability (server-side egress to the extension's allowed domains).
  *
- * @knipignore The capability is asserted on the record alone; `requiresInstallReview` ORs it with two others.
+ * @knipignore The capability is asserted on the record alone.
  */
 export function hasNetworkCapability(capabilities?: Record<string, any> | null): boolean {
     return !!capabilities?.network;

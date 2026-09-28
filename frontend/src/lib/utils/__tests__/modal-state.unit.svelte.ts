@@ -8,10 +8,8 @@ import { PromiseSlot } from '$lib/stores/dialogs.svelte';
 import { MODAL_FLAGS, isAnyModalOpen } from '$lib/utils/modal-state';
 
 /**
- * Modal-shaped fields that own no Escape, named as `<store>.<field>`. `isAnyModalOpen` reads
- * `MODAL_FLAGS` alone, so this decline list has no other reader — which is why it lives here rather
- * than beside the table. A field in `MODAL_FLAGS` and a field here is a contradiction the coverage
- * case fails on; an entry naming no field is stale and fails too.
+ * Modal-shaped fields that own no Escape, named as `<store>.<field>`. A field listed both here and
+ * in `MODAL_FLAGS` is a contradiction the coverage case fails on, and so is an entry naming no field.
  */
 const ESCAPE_INDIFFERENT_FIELDS: readonly string[] = [
     // The full task view is closed by Escape rather than protected from it.

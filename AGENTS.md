@@ -138,6 +138,7 @@ make check | make lint | make check-race                 # gate / static half / 
 make test-go | make test-frontend                        # Go unit / vitest + the frontend gates
 make test-diff                                           # only the touched Go packages, cache left on
 cd frontend && npx playwright test [spec|--grep name]    # e2e (mock LLM, own servers)
+cd frontend && npm run check:dead-surface                # untagged test-only exports; the CSS ceiling
 python3 scripts/gen-registry.py --check                  # registry.json matches the manifests
 ```
 

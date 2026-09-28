@@ -13,7 +13,7 @@ import {
 export { INJECTION_POINTS };
 export type { InjectionPoint, InjectionContext };
 
-/** @knipignore The pre-paint test finds the inline script in `index.html` by this key; nothing imports it. */
+/** @knipignore The pre-paint test finds the inline script in `index.html` by this key. */
 export const THEME_CSS_KEY = 'kanban-theme-css';
 const THEME_LINK_ID = 'kanban-theme-stylesheet';
 // The static prefix every extension asset is served under.
@@ -137,8 +137,7 @@ export function resolveAssetURL(ext: Extension, asset: string): string {
  * script in index.html repeats this test by hand (it runs before any module can
  * be imported) — change both.
  *
- * @knipignore The pre-paint test runs this predicate over the same URL table as the shipped
- * script, so a rule that drifts between the two copies fails.
+ * @knipignore The pre-paint test runs this predicate over the same URL table as the shipped script.
  */
 export function isPrepaintableThemeURL(url: string): boolean {
     return isInsideExtensionTree(url);

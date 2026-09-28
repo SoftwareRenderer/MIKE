@@ -17,7 +17,7 @@ const CAP_STORAGE_LIST = 'storage.list';
 /**
  * Build a namespace from the injection context; falls back to 'global'.
  *
- * @knipignore storage.unit measures the namespace rule; the handlers only put the answer in the URL.
+ * @knipignore storage.unit measures the namespace rule.
  */
 export function buildStorageNamespace(context: any): string {
     const parts: string[] = [];

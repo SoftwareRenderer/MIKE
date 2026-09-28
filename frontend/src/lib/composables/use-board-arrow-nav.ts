@@ -21,8 +21,7 @@ export interface BoardColumnRef {
 export type ArrowKey = 'ArrowDown' | 'ArrowUp' | 'ArrowLeft' | 'ArrowRight';
 
 /**
- * @knipignore The arrow-nav tests drive the ring with columns they built; `useBoardArrowNav` reads
- * the same shapes off the live DOM.
+ * @knipignore The arrow-nav tests drive the ring with columns they built.
  */
 export function resolveArrowTarget(opts: {
     columns: BoardColumnRef[];

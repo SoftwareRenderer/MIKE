@@ -163,11 +163,7 @@ function getScrollbarWidth(editor: HTMLElement): number {
     return scroller ? scroller.offsetWidth - scroller.clientWidth : 0;
 }
 
-/**
- * Find the nearest ancestor with .cm-line class.
- *
- * @knipignore The climb from a node to its line is asserted on hand-built DOM.
- */
+/** @knipignore The climb from a node to its line is asserted on hand-built DOM. */
 export function findLineElement(start: Node | null): Element | null {
     let el: Node | null = start;
     let depth = 0;

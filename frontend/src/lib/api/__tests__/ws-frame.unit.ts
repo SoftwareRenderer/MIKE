@@ -74,8 +74,8 @@ describe('parseStreamFrame', () => {
 
     it('reports a bad frame once per socket name, not on every frame', () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        // The latch is keyed by socket name and never re-arms, so each case reports on a name
-        // no earlier case used - that is what keeps both warnings observable here.
+        // The latch is keyed by socket name and never re-arms, so each case reports on a name no
+        // earlier case used.
         parseStreamFrame('nonsense', 'socket-a');
         parseStreamFrame('more nonsense', 'socket-a');
         expect(warn).toHaveBeenCalledTimes(1);

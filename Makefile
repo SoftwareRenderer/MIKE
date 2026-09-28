@@ -105,12 +105,14 @@ test-diff: ## Go tests for the packages this working tree touched (cached)
 
 # What each frontend gate enforces is in the doc that owns it: docs/markup-sanitizing.md (the HTML
 # sinks), docs/i18n.md (the surface count, the catalogue), docs/testing.md (the component fetch count,
-# the colour literals).
+# the colour literals, the test-only export seam and the duplicated-CSS ceiling).
 .PHONY: test-frontend
 test-frontend: ## Run frontend unit tests + the gates (vitest, ~10s)
 	cd frontend && npm test && npm run check:i18n && npm run check:i18n-surface-test && npm run check:i18n-surface && npm run check:sinks-test && npm run check:sinks
 	@echo "==> knip (unused files, exports, types, duplicates, dependencies)"
 	cd frontend && npm run check:dead
+	@echo "==> dead surface (an untagged test-only export; the duplicated-CSS ceiling)"
+	cd frontend && npm run check:dead-surface-test && npm run check:dead-surface
 	@echo "==> unused declarations (noUnusedLocals + noUnusedParameters)"
 	cd frontend && npm run check:unused
 	@echo "==> component fetches (the API layer owns the network)"

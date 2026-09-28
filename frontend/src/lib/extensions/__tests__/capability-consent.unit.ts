@@ -12,11 +12,9 @@ import {
 } from '$lib/utils/extension-permissions';
 
 /**
- * Capabilities the host grants itself or pairs with a declared one, so no manifest declares them and
- * the install dialog never lists them. Every catalog capability is either here or described by
- * `permissionDescriptions()`, because anything else is one the user approves with no explanation and
- * no warning. Nothing but this file reads the list — granting is `computeGrants`'s against the
- * catalog — so an entry that stops naming a real capability is caught here and nowhere else.
+ * Capabilities the host grants itself or pairs with a declared one, so the install dialog never
+ * lists them. Every catalog capability is either here or described by `permissionDescriptions()`;
+ * anything else would be approved with no explanation.
  */
 const HOST_INTERNAL_CAPABILITIES: ReadonlySet<string> = new Set([
     'config.get',

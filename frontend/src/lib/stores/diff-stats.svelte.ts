@@ -8,7 +8,7 @@ import type { DiffStatsEntry } from '$lib/types';
  * idle, so a card that stays on screen must keep the last stats it was sent. Only
  * task deletion removes an entry.
  *
- * @knipignore The tests build their own instance, so one case's entries are not another's.
+ * @knipignore The tests build their own instance.
  */
 export class DiffStatsStore {
     private entries = $state<Record<string, DiffStatsEntry>>({});

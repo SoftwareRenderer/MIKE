@@ -43,7 +43,7 @@ export interface CharRange {
 /**
  * Strip the scheme and decode a `file:` URI into a filesystem path.
  *
- * @knipignore The decoding and the refusals are asserted on URI text; `pickDefinitionTarget` answers for a whole payload.
+ * @knipignore The decoding and the refusals are asserted on URI text.
  */
 export function uriToPath(uri: string): string {
     if (!uri) return '';

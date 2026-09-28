@@ -7,7 +7,7 @@
 import { Marked, type Tokens } from 'marked';
 import { fenceTag, isRenderedFence } from './sanitize';
 
-/** @knipignore The gap walk reads each segment's own body, so it names the split's shape. */
+/** @knipignore The splitting test types the segments it compares. */
 export type MarkdownSegment =
     | { kind: 'markdown'; source: string }
     | { kind: 'code'; lang: string; text: string; open: boolean };

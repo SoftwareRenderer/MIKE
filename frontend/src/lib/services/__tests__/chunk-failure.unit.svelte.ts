@@ -32,8 +32,7 @@ describe('a lazy chunk the browser could not fetch', () => {
     });
 
     it('tells the user to reload, once, however many clicks follow', async () => {
-        // The notice is once per page life, so this case opens its own: a fresh module graph hands
-        // back the latch and the store that latch writes to, from one instantiation.
+        // The notice is once per page life, so this case opens its own page: a fresh module graph.
         vi.resetModules();
         const { reportChunkFailure } = await import('$lib/services/chunk-failure');
         const { dialogStore } = await import('$lib/stores');

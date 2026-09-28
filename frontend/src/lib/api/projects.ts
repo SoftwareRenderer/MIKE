@@ -105,12 +105,10 @@ export type CloneEvent =
     | { type: 'error'; message: string };
 
 /**
- * Parse a single SSE `data:` frame payload from the clone endpoint.
- * Returns null for non-JSON or unrecognized frames (defensive — the current
- * server only emits CloneEvent objects).
+ * Parse a single SSE `data:` frame payload from the clone endpoint. Returns null for a frame that
+ * is not one of these events.
  *
- * @knipignore projects.unit checks each frame shape; `cloneProject` drops the frames this returns
- * null for, and ignores a `status` frame whatever it holds.
+ * @knipignore projects.unit checks each frame shape; `cloneProject` drops what this returns null for.
  */
 export function parseCloneEvent(data: string): CloneEvent | null {
     if (!data.startsWith('{')) return null;

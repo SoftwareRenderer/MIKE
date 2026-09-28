@@ -20,13 +20,11 @@ const CAP_EDITOR_JUMP_TO_LINE = 'editor.jumpToLine';
 export const CAP_EDITOR_SAVE = 'editor.save';
 
 /**
- * `userEvent` marker for the transaction dispatched by `editor.setContent`
- * (below). The FileEditor's updateListener uses it to recognize an
- * extension's own push and NOT echo it back as editor.contentChange — see
- * {@link isExtensionContentSet}.
+ * The `userEvent` marker on the transaction `editor.setContent` dispatches. The FileEditor's
+ * updateListener recognizes an extension's own push by it, so it does not echo it back as
+ * `editor.contentChange`.
  *
- * @knipignore editor.unit asserts the dispatched marker is the one `isExtensionContentSet` refuses
- * to echo.
+ * @knipignore editor.unit asserts this is the marker `isExtensionContentSet` refuses to echo.
  */
 export const CONTENT_SET_USER_EVENT = 'setContent';
 

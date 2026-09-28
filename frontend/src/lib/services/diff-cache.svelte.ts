@@ -25,11 +25,7 @@ export interface DiffStats {
     staged_paths?: string[];
 }
 
-/**
- * API callbacks the `DiffCache` constructor takes. The response types are the endpoint's own — this
- * cache binds to `api/git.ts`, so a field the server adds cannot arrive here under a name the API
- * layer has never heard.
- */
+/** API callbacks the `DiffCache` constructor takes, typed with the endpoint's own response types. */
 interface DiffCacheApis {
     getTaskDiff: (projectId: string, taskId: string, options?: TaskDiffOptions) => Promise<TaskDiff>;
     getDiffFile: (projectId: string, taskId: string, path: string, options?: { signal?: AbortSignal; full?: boolean }) => Promise<DiffFileResponse>;

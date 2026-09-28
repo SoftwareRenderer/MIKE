@@ -62,7 +62,7 @@ export interface HoverDecision {
     effects: HoverEffect[];
 }
 
-/** @knipignore Whether the pointer moved to a different identifier is asserted on ranges. */
+/** @knipignore The transition tests assert a pointer move to another identifier by range. */
 export function sameToken(a: CharRange | null, b: CharRange | null): boolean {
     return !!a && !!b && a.from === b.from && a.to === b.to;
 }
@@ -98,7 +98,7 @@ function shutdown(state: HoverMachineState): HoverDecision {
  * Next state plus the timer/UI side effects the caller must carry out. `token` on a `pointermove`
  * is the identifier under the pointer, null when there is none.
  *
- * @knipignore The plugin feeds this nothing but DOM events; every transition is tested here.
+ * @knipignore The plugin feeds it only DOM events; the transitions are tested here.
  */
 export function reduceHover(state: HoverMachineState, input: HoverInput): HoverDecision {
     switch (input.type) {
@@ -180,7 +180,7 @@ const HOVER_FORBID_TAGS = ['hr'] as const;
 /**
  * `Hover.contents` (string | MarkupContent | MarkedString[]) to sanitized HTML.
  *
- * @knipignore The escaping and the `hr` refusal are asserted on the markup this returns.
+ * @knipignore The escaping and the `hr` refusal are asserted on the returned markup.
  */
 export function hoverDocsHTML(plugin: LSPPlugin, hover: RawMarkup | null | undefined): string {
     if (!hover || hover.contents == null) return '';
@@ -201,7 +201,7 @@ export function hoverDocsHTML(plugin: LSPPlugin, hover: RawMarkup | null | undef
  * The card's DOM. The action row is the bottom section: with `above: true` the card keeps its
  * bottom edge on the code line, so late documentation grows upward and the button does not move.
  *
- * @knipignore The status line and the button's position are read off the card's DOM.
+ * @knipignore The status line and the button's position are read off this DOM.
  */
 export class HoverCard {
     readonly dom = document.createElement('div');
@@ -330,24 +330,37 @@ export interface LspHoverActionOptions {
     onJump: (target: DefinitionTarget) => void;
 }
 
-// How long the pointer has to rest on an identifier before anything appears
-/** @knipignore The dwell is measured at the default it opens on. */
+/**
+ * How long the pointer has to rest on an identifier before anything appears.
+ *
+ * @knipignore This default and its fallback are asserted in the hover tests.
+ */
 export const DEFAULT_HOVER_TIME = 500;
 
-// How long the card survives after the pointer leaves it and the identifier
-/** @knipignore The close grace is measured at the default it runs on. */
+/**
+ * How long the card survives after the pointer leaves it and the identifier.
+ *
+ * @knipignore This default and its fallback are asserted in the hover tests.
+ */
 export const DEFAULT_HOVER_GRACE = 500;
 
-// How long the placeholder waits alone before it says which server it is waiting for
-/** @knipignore The placeholder must speak before the ceiling, and the ceiling before the socket's own timeout. */
+/**
+ * How long the placeholder waits alone before it says which server it is waiting for. It must speak
+ * before the round trip's ceiling.
+ *
+ * @knipignore That it stays under the ceiling is asserted here, where both are visible.
+ */
 export const DEFAULT_HOVER_WAITING = 700;
 
-// How long one hover/definition round trip may take before the card stops waiting on it. Under the
-// library's request timer and the bridge's, over the seconds a cold index needs.
-/** @knipignore The card's ceiling must stay under the socket's; only this file knows both ends. */
+/**
+ * How long one hover/definition round trip may take before the card stops waiting on it. Under the
+ * library's request timer and the bridge's, over the seconds a cold index needs.
+ *
+ * @knipignore That ordering is asserted here; only this file knows both ends.
+ */
 export const DEFAULT_HOVER_CEILING = 8000;
 
-/** @knipignore Each timing falls back to its own default; the plugin reads one resolved record. */
+/** @knipignore The plugin reads one resolved record; the fallback per timing is asserted here. */
 export function resolveHoverTimings(
     options: Pick<LspHoverActionOptions, 'hoverTime' | 'graceMs' | 'waitingMs' | 'ceilingMs'>,
 ): { hoverTime: number; graceMs: number; waitingMs: number; ceilingMs: number } {
@@ -370,7 +383,7 @@ export interface WaitStatus {
  * rejects a clock that fires for a card the pointer has left; the sentences are read when the
  * clock fires, so a server that introduces itself mid-hover is named by the name it gave.
  *
- * @knipignore The two clocks and their cancellation are driven with fake timers.
+ * @knipignore The two clocks and their cancellation run under fake timers.
  */
 export function armWaitClocks(
     card: WaitStatus,
@@ -429,7 +442,7 @@ function clearCaches(view: EditorView): void {
  * The per-token memo. A request that failed is not remembered as "no answer": one poisoned entry
  * otherwise strands that identifier for the life of the editor.
  *
- * @knipignore The retry-after-failure and the eviction are asserted on a bare Map.
+ * @knipignore Retry-after-failure and eviction are asserted on a bare Map.
  */
 export function remember<T>(cache: Map<string, Promise<T>>, key: string, make: () => Promise<T>): Promise<T> {
     const existing = cache.get(key);
@@ -883,7 +896,7 @@ function definitionAt(view: EditorView, pos: number): Promise<DefinitionTarget |
 /**
  * Modifier combination that turns a click into a jump (VS Code's gesture).
  *
- * @knipignore The combination is asserted per modifier; a test click reaches no handler.
+ * @knipignore Each modifier is asserted on this predicate; a test click reaches no handler.
  */
 export function isJumpModifier(event: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; altKey: boolean }): boolean {
     // Shift/Alt are taken by selection and multi-cursor semantics.

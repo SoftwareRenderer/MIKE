@@ -13,7 +13,7 @@
 /**
  * Must equal `workbox.runtimeCaching[0].options.cacheName` in `vite.config.ts`.
  *
- * @knipignore The drop tests assert which cache name is deleted; nothing outside this file reads it.
+ * @knipignore The drop tests assert which cache name is deleted.
  */
 export const EXTENSION_ASSET_CACHE = 'kanban-extensions';
 
