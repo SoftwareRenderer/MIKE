@@ -81,7 +81,10 @@ export function replayBufferOwed(notice: WindowReadNotice): boolean {
 }
 
 /** The fewest rows one task keeps in the cache. A window is five answers, which can be fewer rows than an
- * earlier open read, so an offline reload does not open on less than what was already shown. */
+ * earlier open read, so an offline reload does not open on less than what was already shown.
+ *
+ * @knipignore The cache is measured at the floor and one page past it.
+ */
 export const CACHED_ROWS_FLOOR = 60;
 
 /** The rows to leave in the cache after a read: the window just answered, with the rows the cache held

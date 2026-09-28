@@ -6,13 +6,18 @@
 /** How long a stream must have said nothing for silence to stand in for "this window went unread". */
 export const WAKE_FRAME_GAP_MS = 30_000;
 
-/** The browser fires several signals for one gesture. */
+/**
+ * The browser fires several signals for one gesture.
+ *
+ * @knipignore A second signal inside this window is refused.
+ */
 export const RETURN_DEDUPE_MS = 2_000;
 
 /** `visible` is a tab that was hidden and `resume` a page that was stopped; the others never set
  * `document.hidden`. */
 export type ReturnSource = 'visible' | 'focus' | 'pageshow' | 'resume';
 
+/** @knipignore A case names the few fields that decide it and inherits the rest of the signal. */
 export interface ReturnSignal {
     hidden: boolean;
     source: ReturnSource;

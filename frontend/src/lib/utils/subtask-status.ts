@@ -16,7 +16,7 @@ export function subtaskExecutionStateFor(parentStatus: string | undefined): stri
 }
 
 /** One row of a column table: the status id (data) and the key of that column's label. */
-export interface StatusColumn {
+interface StatusColumn {
     id: string;
     labelKey: MessageKey;
 }

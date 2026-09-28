@@ -37,6 +37,8 @@ function parse(url: string): URL | null {
 /**
  * What a notification wants opened, as an absolute url of this origin: `null` when it carries no target
  * or one belonging to another origin. Whether this tab has to move to reach it is the caller's question.
+ *
+ * @knipignore The same-origin rule is asserted on two urls; the posting paths need a Notification API.
  */
 export function notificationTarget(current: string, url: string | undefined): string | null {
     if (!url) return null;

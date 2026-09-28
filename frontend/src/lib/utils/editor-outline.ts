@@ -13,7 +13,7 @@
 import { fileSuffix } from './file-suffix';
 
 /** A document, read the way an extractor needs it: its text, and the line a position falls on. */
-export interface OutlineDoc {
+interface OutlineDoc {
     toString(): string;
     lineAt(pos: number): { number: number };
 }

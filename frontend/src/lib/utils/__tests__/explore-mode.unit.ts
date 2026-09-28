@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { applyExploreModeRule, type ExploreModeState } from '$lib/utils/explore-mode';
+import { applyExploreModeRule } from '$lib/utils/explore-mode';
 
-function state(mode: string, changedByUser = false, base: string | null = null): ExploreModeState {
+function state(mode: string, changedByUser = false, base: string | null = null) {
     return { mode, modeChangedByUser: changedByUser, autoExploreBase: base };
 }
 
