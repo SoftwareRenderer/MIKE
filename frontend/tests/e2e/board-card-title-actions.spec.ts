@@ -251,16 +251,17 @@ test.describe('desktop viewport (buttons appear on hover)', () => {
         await expect(control).toHaveAttribute('aria-expanded', 'true');
         await expect(control.locator('.rollup-count')).toHaveText('1');
 
-        // A row is one 30px line, and the band beside it carries the group's own status colour rather
-        // than the fallback — a `--group-color` that failed to resolve would still look like a band in
-        // markup, so compare it with the dot of the row that owns the group.
+        // A row is one 30px line, and its own rule carries its own status colour — a `--status-color`
+        // that failed to resolve would still look like a rule in markup, so read the computed paint.
+        // The band keeps only its wash.
+        const IN_PROGRESS = 'rgb(76, 154, 255)'; // --color-column-in-progress
+        const DONE = 'rgb(63, 185, 80)';         // --color-column-done
         const row = page.locator(`.column-context .card[data-task-id="${childId}"]`);
         expect(Math.round((await row.boundingBox())!.height)).toBe(30);
+        await expect(row).toHaveCSS('border-left-width', '2px');
+        await expect(row).toHaveCSS('border-left-color', IN_PROGRESS);
         const group = page.locator(`.column-context .card[data-task-id="${parentId}"] .subtask-group`).first();
-        const band = await group.evaluate(el => getComputedStyle(el).borderLeftColor);
-        expect(await group.evaluate(el => getComputedStyle(el).borderLeftWidth)).toBe('2px');
-        expect(await group.locator('.subtask-wrapper').last().locator('.row-dot'))
-            .toHaveCSS('background-color', band);
+        expect(await group.evaluate(el => getComputedStyle(el).borderLeftWidth)).toBe('0px');
         expect(await group.evaluate(el => getComputedStyle(el).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
 
         const arc = control.locator('.rollup-arc');
@@ -277,6 +278,11 @@ test.describe('desktop viewport (buttons appear on hover)', () => {
 
         await expect(control).toHaveClass(/is-complete/);
         await expect(control.locator('.rollup-disc')).toHaveCSS('fill', GREEN);
+        // The rule is per row, not per band: the grandchild that finished went done-coloured while the
+        // row waiting for it stayed in-progress blue, both inside one band.
+        await expect(page.locator(`.column-context .card[data-task-id="${parentId}"] .card[data-task-id="${grandId}"]`))
+            .toHaveCSS('border-left-color', DONE);
+        await expect(row).toHaveCSS('border-left-color', IN_PROGRESS);
         const inverse = await page.evaluate(() => {
             const probe = document.createElement('span');
             probe.style.color = 'var(--color-text-inverse)';
@@ -358,7 +364,7 @@ test.describe('desktop viewport (buttons appear on hover)', () => {
         }
     });
 
-    test('a row file line starts under its title, not under its status dot', async ({ page }) => {
+    test('a row file line starts under its title, not under its leading rule and slot', async ({ page }) => {
         // A real "N file" line needs a worktree, and a worktree only comes from an executor turn, which
         // this spec must not queue on a project its worker shares (AGENTS.md → Testing). So measure the
         // rule on the live row: a probe carrying the row's own Svelte scope class is styled by the same
@@ -371,26 +377,28 @@ test.describe('desktop viewport (buttons appear on hover)', () => {
         const measured = await page.evaluate(({ parent, child }) => {
             const row = document.querySelector(`.column-context .card[data-task-id="${parent}"] .card[data-task-id="${child}"]`) as HTMLElement | null;
             const title = row?.querySelector('.card-title-text') as HTMLElement | null;
-            const dot = row?.querySelector('.row-dot') as HTMLElement | null;
-            if (!row || !title || !dot) return { missing: `the row ${child} is not drawn`, indent: 0, titleX: 0, dotRight: 0 };
+            const slot = row?.querySelector('.rollup-slot') as HTMLElement | null;
+            if (!row || !title || !slot) return { missing: `the row ${child} is not drawn`, indent: 0, titleX: 0, slotRight: 0 };
             const scope = [...title.classList].find(c => c.startsWith('svelte-')) || '';
             const probe = document.createElement('div');
             probe.className = `diff-stats-row ${scope}`.trim();
             row.appendChild(probe);
             const indent = parseFloat(getComputedStyle(probe).paddingLeft) || 0;
             probe.remove();
-            const contentLeft = row.getBoundingClientRect().left + (parseFloat(getComputedStyle(row).paddingLeft) || 0);
+            const cs = getComputedStyle(row);
+            // The rule is outside the padding box on both lines, so it measures out of both sides.
+            const contentLeft = row.getBoundingClientRect().left + (parseFloat(cs.borderLeftWidth) || 0) + (parseFloat(cs.paddingLeft) || 0);
             return {
                 missing: '',
                 indent,
                 titleX: title.getBoundingClientRect().left - contentLeft,
-                dotRight: dot.getBoundingClientRect().right - contentLeft,
+                slotRight: slot.getBoundingClientRect().right - contentLeft,
             };
         }, { parent: parentId, child: childId });
 
         expect(measured.missing).toBe('');
-        const { indent, titleX, dotRight } = measured;
-        expect(titleX, 'the row title has no leading controls to clear').toBeGreaterThan(dotRight);
+        const { indent, titleX, slotRight } = measured;
+        expect(titleX, 'the row title has no leading controls to clear').toBeGreaterThan(slotRight);
         expect(Math.abs(indent - titleX), `the file line would start at ${indent}, the title at ${titleX}`).toBeLessThan(1);
     });
 });
