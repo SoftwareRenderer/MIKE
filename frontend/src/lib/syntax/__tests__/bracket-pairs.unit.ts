@@ -6,7 +6,7 @@ import { describe, it, expect } from 'vitest';
 import { EditorState } from '@codemirror/state';
 import type { SyntaxSpec } from '$lib/types';
 import { buildLanguageSupport } from '../spec-language';
-import { BRACKET_LEVELS, BRACKET_SCAN_LIMIT, bracketClass, bracketPairLevels } from '../bracket-pairs';
+import { BRACKET_SCAN_LIMIT, bracketPairLevels } from '../bracket-pairs';
 
 const SPEC: SyntaxSpec = {
   line_comment: '//',
@@ -61,8 +61,6 @@ describe('bracket pair levels', () => {
   it('cycles over the theme slots rather than running out of colors', () => {
     expect(levels('(((((((')).toEqual([0, 1, 2, 0, 1, 2, 0]);
     expect(levels('(((())))')).toEqual([0, 1, 2, 0, 0, 2, 1, 0]);
-    expect(BRACKET_LEVELS).toBe(3);
-    expect([0, 1, 2].map(bracketClass)).toEqual(['cm-bracket-l0', 'cm-bracket-l1', 'cm-bracket-l2']);
   });
 
   it('does not see a bracket in a comment or a string', () => {

@@ -13,10 +13,10 @@ import type { DelimiterPair, SyntaxSpec } from '$lib/types';
 import { TokenWalker, opaqueTokens } from './stream-tokens';
 
 /** How many colors the cycle holds — VS Code's `editorBracketPairColorization` uses three. */
-export const BRACKET_LEVELS = 3;
+const BRACKET_LEVELS = 3;
 
 /** The class for one level. The theme owns the color; this only says which slot of the cycle. */
-export const bracketClass = (level: number): string => `cm-bracket-l${level}`;
+const bracketClass = (level: number): string => `cm-bracket-l${level}`;
 
 /**
  * How far the level scan runs from the top of the document.
@@ -27,6 +27,8 @@ export const bracketClass = (level: number): string => `cm-bracket-l${level}`;
  * than the color is worth and nothing is colored — which is also what VS Code does with a document it
  * considers too large. Deliberately larger than the fold scan's window: a fold only needs its own line
  * and body, while a level needs the file.
+ *
+ * @knipignore Its test asks for a scan one character past this limit.
  */
 export const BRACKET_SCAN_LIMIT = 1_000_000;
 
@@ -92,6 +94,8 @@ function scanBracketLevels(
  * Brackets inside a comment or a string are not brackets and get nothing, a closer that opens nothing
  * (or closes the wrong thing) gets nothing rather than a borrowed color, and an opener never closed
  * keeps the level it opened at — that is the answer the file gave before it ran out of text.
+ *
+ * @knipignore The tests read each bracket's level; the app reads only the class it becomes.
  */
 export function bracketPairLevels(
   state: EditorState,

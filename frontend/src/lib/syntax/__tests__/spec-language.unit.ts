@@ -6,7 +6,7 @@ import { describe, it, expect } from 'vitest';
 import { EditorState } from '@codemirror/state';
 import type { SyntaxNode } from '@lezer/common';
 import { IndentContext, ensureSyntaxTree, foldService, indentService, syntaxTree } from '@codemirror/language';
-import { buildLanguageSupport, specBracketFoldService, specHasContent, specRegionFoldService } from '../spec-language';
+import { buildLanguageSupport, specHasContent } from '../spec-language';
 import type { SyntaxSpec } from '$lib/types';
 
 const SPEC: SyntaxSpec = {
@@ -252,10 +252,7 @@ describe('declared syntax: region folding', () => {
     const { region, ...noRegion } = SPEC;
     expect(region).toBeTruthy();
     expect(noRegion).toBeTruthy();
-    const state = EditorState.create({
-      doc: '//#region x\ny\n//#endregion',
-      extensions: [specRegionFoldService(noRegion), specBracketFoldService(noRegion)],
-    });
+    const state = stateWith('//#region x\ny\n//#endregion', noRegion);
     expect(state.facet(foldService).length).toBe(1); // only the bracket provider survives
   });
 });
