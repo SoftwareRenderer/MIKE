@@ -5,14 +5,14 @@ import { appStore } from './lib/stores';
 import { applyCachedCatalog } from './lib/i18n/boot';
 import { startAppUpdate } from './lib/services/app-update';
 import { watchNotificationClicks } from './lib/utils/notifications';
-import { isChunkLoadFailure, reportChunkFailure } from './lib/services/chunk-failure';
+import { handleChunkFailure, isChunkLoadFailure } from './lib/services/chunk-failure';
 
 // Centralized unhandled promise rejection handler
 // Catches errors from fire-and-forget async operations (storage init, etc.)
 window.addEventListener('unhandledrejection', (event) => {
     const err = event.reason;
     if (isChunkLoadFailure(err)) {
-        reportChunkFailure(err);
+        handleChunkFailure(err);
         return;
     }
     if (err && err.stack) {

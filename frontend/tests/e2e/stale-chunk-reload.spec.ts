@@ -1,38 +1,62 @@
 import { test, expect } from '@playwright/test';
 
-// A document left open across an update imports chunk URLs the new build deleted, so the panel the
-// user clicked never appears. The click is not broken, so only a notice can carry the news.
+// A chunk URL the open document asks for can be gone; the click that hits one reloads the page.
 
 // The precached copy would answer for the chunk and no request would reach the network.
 test.use({ serviceWorkers: 'block' });
 
 const TERMINAL_BUTTON = '[aria-label="Open terminal"]';
 const TERMINAL_PANEL = '.terminal-panel';
-const TOAST = '.toast';
 
 test.describe('A lazy part of the app the browser cannot fetch', () => {
-    test('says the page needs a reload, and the next click still reaches the panel', async ({ page }) => {
-        // One CSS chunk of the terminal's import graph is refused; everything else is normal. A
-        // refused stylesheet rejects the import without poisoning the module map, so a retry works.
+    // A reload wipes the page, so what the first document showed lives only where this wrote it.
+    const initRecorder = () => {
+        const record = (line: string) => {
+            const seen = sessionStorage.getItem('e2e-toasts');
+            sessionStorage.setItem('e2e-toasts', seen ? `${seen}\n${line}` : line);
+        };
+        sessionStorage.setItem('e2e-boots', String(Number(sessionStorage.getItem('e2e-boots') ?? 0) + 1));
+        const watch = () => {
+            new MutationObserver(() => {
+                const el = document.querySelector('.toast');
+                const text = el?.textContent?.trim();
+                if (el && text) record(`${el.className}::${text}`);
+            }).observe(document.body, { childList: true, subtree: true });
+        };
+        if (document.body) watch();
+        else document.addEventListener('DOMContentLoaded', watch);
+    };
+
+    test('reloads the page, and the click after the reload reaches the panel', async ({ page }) => {
+        // Refused once: a stylesheet failure rejects the import without poisoning the module map.
         let refuse = true;
         await page.route('**/assets/**', async route => {
             const isTerminalCss = /\/TerminalPanel-[^/]+\.css$/.test(new URL(route.request().url()).pathname);
-            if (isTerminalCss && refuse) await route.abort('failed');
-            else await route.fallback();
+            if (isTerminalCss && refuse) {
+                refuse = false;
+                await route.abort('failed');
+            } else await route.fallback();
         });
+        await page.addInitScript(initRecorder);
 
         await page.goto('/');
         await expect(page.locator('.card').first()).toBeVisible({ timeout: 15000 });
+        expect(await page.evaluate(() => Number(sessionStorage.getItem('e2e-boots')))).toBe(1);
 
         await page.locator(TERMINAL_BUTTON).click();
 
-        const toast = page.locator(TOAST);
-        await expect(toast).toBeVisible({ timeout: 15000 });
-        await expect(toast).toContainText(/reload/i);
-        await expect(page.locator(TERMINAL_PANEL)).toHaveCount(0);
+        // The page is gone: a new document booted in its place.
+        await expect
+            .poll(() => page.evaluate(() => Number(sessionStorage.getItem('e2e-boots'))), { timeout: 15000 })
+            .toBeGreaterThanOrEqual(2);
+        await expect(page.locator('.card').first()).toBeVisible({ timeout: 15000 });
 
-        // No latch: `terminalLoading` left true would make this click return before importing.
-        refuse = false;
+        // It said what it was doing, and never asked the person to reload by hand.
+        const toasts = await page.evaluate(() => sessionStorage.getItem('e2e-toasts') ?? '');
+        expect(toasts).toContain('Updating the app ...');
+        expect(toasts).not.toMatch(/\berror\b/);
+
+        // The reload is what the panel needed; nothing latched it shut.
         await page.locator(TERMINAL_BUTTON).click();
         await expect(page.locator(TERMINAL_PANEL)).toBeVisible({ timeout: 15000 });
     });

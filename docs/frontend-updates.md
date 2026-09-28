@@ -64,7 +64,8 @@ chances to reload for nothing:
 
 `vite.config.ts` sets no `autoUpdate` and no `skipWaiting`/`clientsClaim`, so the generated worker is
 prompt-mode and a new install sits in `waiting` until someone releases it. The page releases it, from
-`compareAndApply()`, at the moment it decided to update — which is when the app is opened.
+`compareAndApply()`, at the two moments it decides to update: when the app is opened, and when a chunk
+cannot be fetched.
 
 With `autoUpdate` the worker would take control whenever the browser felt like it, including in the
 middle of a sentence. The trade goes the other way too, and is the reason the reload is not deferred
@@ -74,21 +75,40 @@ a stale document that lazily imports a chunk it has not fetched yet (CodeMirror,
 safe document.
 
 A `waiting` worker that appears on the browser's own initiative (its check on navigation, its 24-hour
-one) is **left waiting**. The open-time check is the only moment anything reloads.
+one) is **left waiting**. Only two things reload this page: the open-time check, and a chunk that cannot
+be fetched.
 
 ## The chunk that is already gone
 
 The sentence above is also a promise about the click that happens *before* the reload: the panel the
 user asked for is being imported from a URL the new install deleted. Vite's preload helper and the
-engine's import both fail, `main.ts` used to suppress that class of rejection, and what was left was a
-button that did nothing twice. `$lib/services/chunk-failure.ts` is the one place that reports it — one
-toast naming a reload, per page life — and its rule for callers is that the failure must not leave a
-"loading" flag set, because that is what turns one failed fetch into a panel that can never open.
-It classifies the three engine phrasings and nothing else: a `TypeError: Failed to fetch` is a data
-request, and "reload" is the wrong instruction for it.
+engine's import both fail. The answer is to load the document the server has; nothing asks the person to
+do it. `$lib/services/chunk-failure.ts` is the one place that decides, for both callers —
+`useLazyComponent` and the `unhandledrejection` listener in `src/main.ts`. Its rule for callers: the
+failure must not leave a "loading" flag set, because that is what turns one failed fetch into a panel
+that can never open.
 
-**Tests:** e2e `stale-chunk-reload.spec.ts` (the notice, and the next click reaching the panel);
-`src/lib/services/__tests__/chunk-failure.unit.svelte.ts` (the classification, one report).
+What it does, in order:
+
+* **Classify.** Every import rejection arrives, and only the three engine phrasings act. A
+  `TypeError: Failed to fetch` is a data request, and a reload is the wrong answer for it.
+* **Do nothing while offline.** `navigator.onLine === false` is the one cause a newer build does not
+  fix, and reloading a navigation no worker has precached loses the app outright.
+* **Reload once per tab.** The guard is `sessionStorage`, not `$lib/storage`: it has to be written
+  synchronously before the reload it guards. A reload that cannot record itself is a loop on every
+  load, so a storage area that refuses the write gets no reload. A new tab is the fresh attempt.
+* **Update first, reload second.** `checkNow()` releases a `waiting` worker, and its `controlling`
+  listener is what reloads; a plain reload while the older worker still controls answers with the same
+  stale document. `applying` therefore means a reload is already coming. Every other answer —
+  `current`, `unknown`, a check that threw — still gets `location.reload()`, the only way to ask the
+  server for its document.
+* **Say one thing on the way out**: the transient `app.chunkUpdating` toast. A failure the reload does
+  not fix is logged and left alone; the next attempt is a new tab, not an instruction.
+
+**Tests:** e2e `stale-chunk-reload.spec.ts` records boots and toasts into `sessionStorage` from an
+`addInitScript`, because the document that made them is gone before anything is asserted;
+`src/lib/services/__tests__/chunk-failure.unit.svelte.ts` holds the classification, the one reload per
+tab, the offline refusal, the `applying` answer, and the guard that cannot be written.
 
 **A new worker only reaches `waiting` when the old one controls a client.** On the first session after
 install — the page loaded before any worker existed, and the worker has no `clientsClaim` — the page is
@@ -127,7 +147,8 @@ The exception is the login screen: the master password is the one thing never wr
 reload that lands after a manager autofilled it eats the only copy. `isEditingText()` is asked at the
 moment of applying — after `registration.update()`, which is the gap the typing happens in — and only
 by the automatic caller: it declines, and the update waits for the next open. `checkNow()` never asks,
-because a click is intent.
+because a click is intent. Neither does a chunk that cannot be fetched: the panel the person asked for is
+not there, so the page is already broken and waiting buys nothing.
 
 Both halves are tested (`will not reload over text somebody is typing` and `still updates when the
 focused field holds nothing`): the guard is a predicate threaded through `compareAndApply` as a
@@ -142,7 +163,7 @@ rendered inline next to the button. It is inline rather than a `Toast` because t
 and behind the modal. It writes the day stamp like any other check, so opening the app afterwards does
 not run a second one.
 
-The automatic path has no UI at all: no banner, no badge. A silent update that said nothing *and* did
+The open-time check has no UI of its own: no banner, no badge. A silent update that said nothing *and* did
 nothing would be indistinguishable from a dead feature, which is why the manual one answers in all
 three cases, including `unknown`.
 
