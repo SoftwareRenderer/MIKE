@@ -348,8 +348,8 @@ export async function saveExplorerLayout(layout: ExplorerLayout): Promise<void> 
 
 // ─── Collapsed tasks (IndexedDB: collapsed-tasks store) ─────────────────────
 
-/** Load collapsed task IDs. */
-export async function loadCollapsedTasks(): Promise<Set<string>> {
+/** Load collapsed task IDs. The app reads them only through `pruneCollapsedTasks`. */
+async function loadCollapsedTasks(): Promise<Set<string>> {
     const ids = await dbGet<string[]>(STORE_COLLAPSED_TASKS, KEY_IDS, isArray);
     return ids ? new Set(ids) : new Set();
 }

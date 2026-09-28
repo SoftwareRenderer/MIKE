@@ -5,6 +5,8 @@ import type { CommitQueueEntry } from '$lib/types';
  * it. The frame that fills it names no project, so `App.svelte` decides which board
  * owns the task before writing; `TaskChat` clears its own project's slot when its
  * commit-and-done call returns.
+ *
+ * @knipignore The tests build their own instance so each case starts with an empty queue.
  */
 export class CommitQueueStore {
     private slots = $state<Record<string, CommitQueueEntry>>({});

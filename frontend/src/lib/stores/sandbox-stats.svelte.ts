@@ -5,6 +5,8 @@ import type { SandboxMemoryStats } from '$lib/types';
  * events over the app stream. Entries persist for the session: when a task
  * goes idle the server stops pushing, and the UI keeps showing the most
  * recent usage. Only task deletion removes an entry.
+ *
+ * @knipignore The tests build their own instance, so one case's stats are not another's.
  */
 export class SandboxStatsStore {
     private stats = $state<Record<string, SandboxMemoryStats>>({});

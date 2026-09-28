@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ExplorerCore } from '$lib/services/explorer-core.svelte';
-import type { ExplorerEdges } from '$lib/services/explorer-core.svelte';
+
+type ExplorerEdges = ConstructorParameters<typeof ExplorerCore>[0];
 
 // A deleted file's tab would keep showing bytes that are gone, and its draft and undo history are
 // saved under that path.

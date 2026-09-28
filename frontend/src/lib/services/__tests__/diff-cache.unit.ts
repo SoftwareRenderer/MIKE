@@ -1,8 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
-import { DiffCache, type DiffCacheApis } from '$lib/services/diff-cache.svelte';
+import { DiffCache } from '$lib/services/diff-cache.svelte';
 import type { TaskDiff } from '$lib/api';
 import type { DiffRow } from '$lib/types/diff';
 import { ConnectionFailure, RequestAborted } from '$lib/api/helpers';
+
+type DiffCacheApis = ConstructorParameters<typeof DiffCache>[0];
 
 function makeApis(overrides: Partial<DiffCacheApis> = {}): DiffCacheApis {
     return {

@@ -3,7 +3,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // The config fetch and the cache marker are the two things refreshConfig() decides on,
 // so both are mocked at the module boundary.
 vi.mock('$lib/storage', () => ({
-    loadCollapsedTasks: vi.fn(async () => new Set<string>()),
     saveCollapsedTasks: vi.fn(async () => {}),
     loadAppSetting: vi.fn(async () => false),
     saveAppSetting: vi.fn(async () => {}),
