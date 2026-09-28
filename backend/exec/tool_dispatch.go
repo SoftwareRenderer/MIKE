@@ -14,7 +14,6 @@ import (
 	"mike/backend/extensions"
 	"mike/backend/fsutil"
 	"mike/backend/git"
-	"mike/backend/llama"
 	"mike/backend/store"
 	"mike/backend/stream"
 	"mike/backend/types"
@@ -42,7 +41,7 @@ type toolRunner struct {
 	extTools func() *extensions.ToolRegistry
 	// A func value so a test here needs no network. The policy is tested in backend/extensions.
 	egress egressFunc
-	// One entry per name in llama.AllToolNames(); TestEveryDeclaredToolIsDispatched is what fails
+	// One entry per name in types.CoreToolNames(); TestEveryDeclaredToolIsDispatched is what fails
 	// when a name is missing from it.
 	handlers map[string]toolHandler
 }
@@ -64,19 +63,19 @@ func (te *TaskExecutor) newToolRunner() *toolRunner {
 		egress:       extensions.Egress,
 	}
 	r.handlers = map[string]toolHandler{
-		llama.ToolReadFile:      r.runReadFile,
-		llama.ToolWriteFile:     r.runWriteFile,
-		llama.ToolEditFile:      r.runEditFile,
-		llama.ToolBash:          r.runBash,
-		llama.ToolAskQuestion:   r.runAskQuestion,
-		llama.ToolRequestReview: r.runRequestReview,
-		llama.ToolCreateTask:    r.runCreateTask,
-		llama.ToolViewTasks:     r.runViewTasks,
-		llama.ToolEditTask:      r.runEditTask,
-		llama.ToolLSPReferences: r.runLSPReferences,
-		llama.ToolLSPDefinition: r.runLSPDefinition,
-		llama.ToolLSPHover:      r.runLSPHover,
-		llama.ToolLSPRename:     r.runLSPRename,
+		types.ToolReadFile:      r.runReadFile,
+		types.ToolWriteFile:     r.runWriteFile,
+		types.ToolEditFile:      r.runEditFile,
+		types.ToolBash:          r.runBash,
+		types.ToolAskQuestion:   r.runAskQuestion,
+		types.ToolRequestReview: r.runRequestReview,
+		types.ToolCreateTask:    r.runCreateTask,
+		types.ToolViewTasks:     r.runViewTasks,
+		types.ToolEditTask:      r.runEditTask,
+		types.ToolLSPReferences: r.runLSPReferences,
+		types.ToolLSPDefinition: r.runLSPDefinition,
+		types.ToolLSPHover:      r.runLSPHover,
+		types.ToolLSPRename:     r.runLSPRename,
 	}
 	return r
 }

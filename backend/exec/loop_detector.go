@@ -7,7 +7,6 @@ import (
 	"slices"
 	"strings"
 
-	"mike/backend/llama"
 	"mike/backend/types"
 )
 
@@ -322,15 +321,15 @@ func shellTokens(cmd string) []string {
 // or writing in order to provide hints.
 func isReadOnlyCall(toolName, rawArgs string) bool {
 	switch toolName {
-	case llama.ToolReadFile:
+	case types.ToolReadFile:
 		return true
-	case llama.ToolLSPReferences, llama.ToolLSPDefinition, llama.ToolLSPHover:
+	case types.ToolLSPReferences, types.ToolLSPDefinition, types.ToolLSPHover:
 		return true
-	case llama.ToolWriteFile, llama.ToolEditFile, llama.ToolLSPRename:
+	case types.ToolWriteFile, types.ToolEditFile, types.ToolLSPRename:
 		return false
-	case llama.ToolAskQuestion, llama.ToolRequestReview:
+	case types.ToolAskQuestion, types.ToolRequestReview:
 		return false
-	case llama.ToolBash:
+	case types.ToolBash:
 		var args map[string]any
 		if err := json.Unmarshal([]byte(rawArgs), &args); err == nil {
 			if cmd, ok := args["command"].(string); ok {

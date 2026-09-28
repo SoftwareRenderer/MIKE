@@ -32,7 +32,6 @@ ALLOWLIST="
 backend/agent/loader.go:RegisterAdapterFactory
 backend/crypto/encryption.go:Derivations
 backend/extensions/i18n_prompts.go:none
-backend/llama/tools_names.go:AllToolNames
 backend/prompts/overlay.go:ActiveOverlay
 backend/stream/sandbox_stats.go:TickOnce
 backend/term/terminal.go:activeSessionCount

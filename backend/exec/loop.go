@@ -312,7 +312,7 @@ func (f *streamFlusher) flush() {
 				data["raw_args_delta"] = d.args[d.startArgLen:d.currentArgLen]
 			}
 			// Include edit line counts in the tool_call event so they're available immediately.
-			if d.toolName == llama.ToolEditFile {
+			if d.toolName == types.ToolEditFile {
 				added, removed := countEditLines(d.args)
 				data["lines_added"] = added
 				data["lines_removed"] = removed
@@ -383,7 +383,7 @@ func askQuestionResults(pending []types.ChatToolCall, results []toolResult) map[
 		}
 		// ri < len(results): a call can have no result row, and callers index
 		// results with the mapped value.
-		if tc.Function.Name == llama.ToolAskQuestion && ri < len(results) && results[ri].success {
+		if tc.Function.Name == types.ToolAskQuestion && ri < len(results) && results[ri].success {
 			m[i] = ri
 		}
 		ri++
@@ -738,7 +738,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 			// Throttled progress updates for write_file (1 per 2 seconds)
 			if time.Since(lastProgressSend) > 2*time.Second {
 				for _, tc := range lc.pendingToolCalls {
-					if tc.Function.Name == llama.ToolWriteFile && tc.Function.Arguments != "" {
+					if tc.Function.Name == types.ToolWriteFile && tc.Function.Arguments != "" {
 						te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolProgress, Data: map[string]any{"tool_id": tc.ID, "bytes_written": len(tc.Function.Arguments), "path": extractPathFromArgs(tc.Function.Arguments)}})
 						lastProgressSend = time.Now()
 					}
@@ -1069,7 +1069,7 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 			}
 			args := parseToolArgs(tc.Function.Arguments)
 			// Send final path update before execution (full args now available)
-			if tc.Function.Name == llama.ToolWriteFile {
+			if tc.Function.Name == types.ToolWriteFile {
 				path := extractPathFromArgs(tc.Function.Arguments)
 				if path == "" {
 					if p, ok := args["path"].(string); ok && p != "" {
@@ -1144,11 +1144,11 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 					// mutex, where a language server round trip would serialise the rest of
 					// the turn and report a state the turn's later edits may already fix.
 					switch tc.Function.Name {
-					case llama.ToolWriteFile, llama.ToolEditFile:
+					case types.ToolWriteFile, types.ToolEditFile:
 						if path, ok := args["path"].(string); ok && path != "" {
 							lc.noteTouchedFile(path)
 						}
-					case llama.ToolBash:
+					case types.ToolBash:
 						lc.noteShellMayHaveChangedFiles()
 					}
 					return result, success
@@ -1188,13 +1188,13 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 			}
 
 			// Detect git commands in bash tool calls
-			if tc.Function.Name == llama.ToolBash {
+			if tc.Function.Name == types.ToolBash {
 				if cmd, ok := args["command"].(string); ok && strings.Contains(cmd, "git ") {
 					hadGitCmd = true
 				}
 			}
 
-			if tc.Function.Name == llama.ToolRequestReview {
+			if tc.Function.Name == types.ToolRequestReview {
 				hadRequestReview = true
 			}
 		}
@@ -1247,7 +1247,7 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 							te.rowsDurable(setup.projectID, setup.task.ID)
 						}
 						// Re-broadcast so the UI shows the answer in place.
-						te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: buildToolResultEvent(tr.toolCallID, llama.ToolAskQuestion, tr.output, tr.success, false, tr.duration, tr.args, tr.rawArgs, "", false, false, tr.messageID)})
+						te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: buildToolResultEvent(tr.toolCallID, types.ToolAskQuestion, tr.output, tr.success, false, tr.duration, tr.args, tr.rawArgs, "", false, false, tr.messageID)})
 					}
 					autoAnswered = true
 					logging.For(logging.Tools).With(logging.TaskID, setup.task.ID).Infof("auto-answered %d question(s) from parent context", len(answers))
@@ -1952,7 +1952,7 @@ func buildToolResultEvent(toolID, toolName, result string, success, interrupted 
 		"sandbox":     sandbox,
 	}
 
-	if toolName == llama.ToolBash || toolName == llama.ToolReadFile {
+	if toolName == types.ToolBash || toolName == types.ToolReadFile {
 		preview, originalLines, originalBytes, truncated := toolresult.Truncate(result)
 		data["output"] = preview
 		data["result_truncated"] = truncated

@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"mike/backend/llama"
 	"mike/backend/types"
 )
 
@@ -23,7 +22,7 @@ func TestEveryDeclaredToolIsDispatched(t *testing.T) {
 	task := &types.Task{ID: "dispatch-probe", ProjectID: "dispatch-proj", Title: "probe"}
 	state := &executionState{ctx: t.Context()}
 
-	for _, name := range llama.AllToolNames() {
+	for _, name := range types.CoreToolNames() {
 		t.Run(name, func(t *testing.T) {
 			// No arguments: every tool must reject that on its own. The point is not what the
 			// tool answers but that it answers at all, so a bounded context keeps a tool that
