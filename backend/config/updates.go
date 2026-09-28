@@ -109,11 +109,5 @@ func operatingModePtr(m *types.OperatingMode) *string {
 // problem, not a type problem, so it stays a clamp: AutoSummarizeThreshold treats a stored value out
 // of range as unset anyway, and clamping keeps what the UI shows equal to what is stored.
 func clamp(v, lo, hi int) int {
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
+	return min(max(v, lo), hi)
 }

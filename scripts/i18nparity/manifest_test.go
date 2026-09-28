@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -221,7 +222,7 @@ func TestCheckPackFilesRequiresLicenseTrio(t *testing.T) {
 	f := &Findings{}
 	CheckPackFiles(dir, f)
 	for _, want := range requiredPackFiles {
-		if !contains(f.Errors, missingFileMessage(want)) {
+		if !slices.Contains(f.Errors, missingFileMessage(want)) {
 			t.Errorf("expected a finding for missing %s; got:\n%s", want, errText(f))
 		}
 	}
