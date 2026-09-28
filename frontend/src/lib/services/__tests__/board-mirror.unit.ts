@@ -40,28 +40,30 @@ describe('the board mirror follows what the server answered', () => {
     });
 
     it('closes the coalescing window by itself', async () => {
-        const { mirrorBoard, getBoardCache, boardCacheKey, pendingMirrorProjects, MIRROR_COALESCE_MS } = await load();
+        const { mirrorBoard, getBoardCache, boardCacheKey, MIRROR_COALESCE_MS } = await load();
 
         mirrorBoard('proj-a', board(['moved']));
-        expect(pendingMirrorProjects()).toEqual(['proj-a']);
+        // The window is still open: nothing has been written, and nothing will be until the
+        // timer closes it - which is the only flush this case ever asks for.
+        expect(await getBoardCache(boardCacheKey('proj-a'))).toBeNull();
 
         await vi.advanceTimersByTimeAsync(MIRROR_COALESCE_MS);
 
-        expect(pendingMirrorProjects()).toEqual([]);
         expect(await getBoardCache(boardCacheKey('proj-a'))).not.toBeNull();
     });
 
     it('keeps one key per project', async () => {
-        const { mirrorBoard, flushBoardMirror, getBoardCache, boardCacheKey, pendingMirrorProjects } = await load();
+        const { mirrorBoard, flushBoardMirror, getBoardCache, boardCacheKey } = await load();
 
         mirrorBoard('proj-a', board(['a']));
         mirrorBoard('proj-b', board(['b']));
-        expect(pendingMirrorProjects().sort()).toEqual(['proj-a', 'proj-b']);
+        expect(await getBoardCache(boardCacheKey('proj-b'))).toBeNull();
 
         await flushBoardMirror();
 
-        expect(await getBoardCache(boardCacheKey('proj-a'))).not.toBeNull();
-        expect(await getBoardCache(boardCacheKey('proj-b'))).not.toBeNull();
+        // One held snapshot per project: the second write did not take the first one's slot.
+        expect(await getBoardCache(boardCacheKey('proj-a'))).toEqual({ tasks: board(['a']).tasks });
+        expect(await getBoardCache(boardCacheKey('proj-b'))).toEqual({ tasks: board(['b']).tasks });
     });
 
     it('flush writes now and an empty flush rewrites nothing', async () => {

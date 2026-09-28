@@ -92,11 +92,6 @@ function asJsonObject(data: unknown): any | null {
     return parsed !== null && typeof parsed === 'object' ? parsed : null;
 }
 
-/** Test seam: forget the reported-already state. */
-export function resetBadFrameReports(): void {
-    reportedBadFrame.clear();
-}
-
 /** Import queue helpers lazily to avoid circular deps */
 let _setHttpReachable: ((reachable: boolean) => void) | null = null;
 

@@ -5,7 +5,18 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { appStore, dialogStore, uiStore } from '$lib/stores';
 import { PromiseSlot } from '$lib/stores/dialogs.svelte';
-import { ESCAPE_INDIFFERENT_FIELDS, MODAL_FLAGS, isAnyModalOpen } from '$lib/utils/modal-state';
+import { MODAL_FLAGS, isAnyModalOpen } from '$lib/utils/modal-state';
+
+/**
+ * Modal-shaped fields that own no Escape, named as `<store>.<field>`. `isAnyModalOpen` reads
+ * `MODAL_FLAGS` alone, so this decline list has no other reader — which is why it lives here rather
+ * than beside the table. A field in `MODAL_FLAGS` and a field here is a contradiction the coverage
+ * case fails on; an entry naming no field is stale and fails too.
+ */
+const ESCAPE_INDIFFERENT_FIELDS: readonly string[] = [
+    // The full task view is closed by Escape rather than protected from it.
+    'uiStore.showCardDetail',
+];
 
 /** The store instances the table draws on. A new store with modals belongs here too. */
 const STORES = { uiStore, appStore, dialogStore } as const;

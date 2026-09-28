@@ -25,8 +25,3 @@ export function reportChunkFailure(err: unknown): void {
     reported = true;
     dialogStore.showToast(t('app.chunkStale'), 'error', STALE_BUILD_NOTICE_MS);
 }
-
-/** Test seam: forget that the notice was shown. */
-export function resetChunkFailureReport(): void {
-    reported = false;
-}
