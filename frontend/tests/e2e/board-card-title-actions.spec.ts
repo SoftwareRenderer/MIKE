@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page, type Locator } from '@playwright/test';
 import { isolatedProject, ownProjectId, csrfFetch, navigateToTask } from './helpers';
 
 // ============================================================
@@ -43,7 +43,7 @@ async function openOnBoard(page: Page, taskId: string) {
 }
 
 /** A subtask with a title long enough to be at risk against the row's own action buttons. */
-async function longSubtask(page: Page, projectId: string, parentId: string, tag: string): Promise<string> {
+async function longSubtask(page: Page, projectId: string, parentId: string, tag: string, extra: Record<string, unknown> = {}): Promise<string> {
     const created = await csrfFetch(page, `/api/projects/${projectId}/tasks`, {
         method: 'POST',
         body: { prompt: `title overlap probe ${tag}`, parent_task_id: parentId },
@@ -52,7 +52,7 @@ async function longSubtask(page: Page, projectId: string, parentId: string, tag:
     const id: string = created.data.id;
     const updated = await csrfFetch(page, `/api/projects/${projectId}/tasks/${id}`, {
         method: 'PUT',
-        body: { title: `${tag}: ${LONG_TITLE}`, execution_state: 'idle' },
+        body: { title: `${tag}: ${LONG_TITLE}`, execution_state: 'idle', ...extra },
     });
     expect(updated.ok, `set subtask title ${tag}: ${JSON.stringify(updated.data)}`).toBe(true);
     return id;
@@ -66,8 +66,8 @@ async function moveToDone(page: Page, projectId: string, taskId: string) {
     expect(moved.ok, `move to done: ${JSON.stringify(moved.data)}`).toBe(true);
 }
 
-function measureCard(page: Page, taskId: string, expectSelected: boolean) {
-    return page.evaluate(({ id, selected }) => {
+function measureCard(page: Page, taskId: string, expectSelected: boolean, expectPainted = false) {
+    return page.evaluate(({ id, selected, painted }) => {
         const card = document.querySelector(`.column-context .card[data-task-id="${id}"]`);
         const title = card?.querySelector('.card-title-text');
         const actions = card?.querySelector('.card-actions');
@@ -78,6 +78,12 @@ function measureCard(page: Page, taskId: string, expectSelected: boolean) {
         const first = actions.children[0].getBoundingClientRect();
         const clipRight = box.right - (parseFloat(getComputedStyle(title).paddingRight) || 0);
         const problems: string[] = [];
+        // A button is faded out by its container, so a hit test on the button itself passes for a row
+        // nobody can see: the paint fact is the container's opacity.
+        if (painted) {
+            const cs = getComputedStyle(actions);
+            if (cs.opacity !== '1') problems.push(`its action row renders at opacity ${cs.opacity}`);
+        }
         // Otherwise the spec may silently measure a card that was never at risk.
         if (selected && !card.classList.contains('selected')) problems.push('the card under test is not the open one');
         // An untruncated title says nothing about where the clip is.
@@ -107,18 +113,25 @@ function measureCard(page: Page, taskId: string, expectSelected: boolean) {
             }
         }
         return problems;
-    }, { id: taskId, selected: expectSelected });
+    }, { id: taskId, selected: expectSelected, painted: expectPainted });
 }
 
 test.describe('touch viewport (buttons always shown)', () => {
     test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
+    // Everything in this block is the `hover: none` branch. Without the media query matching, the
+    // desktop rules would be measured and every assertion below would agree with the wrong device.
+    test.beforeEach(async ({ page }) => {
+        expect(await page.evaluate(() => window.matchMedia('(hover: none)').matches),
+            'this viewport is not a hover-none device').toBe(true);
+    });
+
     test('the open card truncates its title before the action buttons, and its buttons take the tap', async ({ page }) => {
         const taskId = await idleInProgressTask(page, 'open');
         await openOnBoard(page, taskId);
 
-        const problems = await measureCard(page, taskId, true);
-        expect(problems, 'title and action buttons overlap').toEqual([]);
+        const problems = await measureCard(page, taskId, true, true);
+        expect(problems, 'title and action buttons overlap or are not drawn').toEqual([]);
     });
 
     test('an expanded subtask card reserves the width of the ⋯ menu it actually draws', async ({ page }) => {
@@ -146,8 +159,11 @@ test.describe('touch viewport (buttons always shown)', () => {
         expect(Math.abs((await deep.boundingBox())!.x - (await shallow.boundingBox())!.x)).toBeLessThan(1);
 
         for (const id of ids) {
-            const problems = await measureCard(page, id, false);
-            expect(problems, `row ${id} title and action buttons overlap`).toEqual([]);
+            // The row draws the one ⋯ menu a touch subtask gets, and draws it visibly.
+            await expect(page.locator(`.column-context .card[data-task-id="${id}"] .card-actions`)
+                .locator('.action-icon')).toHaveCount(1);
+            const problems = await measureCard(page, id, false, true);
+            expect(problems, `row ${id} title and action buttons overlap or are not drawn`).toEqual([]);
         }
     });
 
@@ -202,7 +218,7 @@ test.describe('desktop viewport (buttons appear on hover)', () => {
         expect(box).not.toBeNull();
         await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
 
-        const animatesPadding = await card.locator('.card-title-text').evaluate((el) => {
+        const animatesPadding = await card.locator('.card-title').evaluate((el) => {
             const cs = getComputedStyle(el);
             const props = cs.transitionProperty.split(',').map(p => p.trim());
             const seconds = (d: string) => (parseFloat(d) || 0) * (d.trim().endsWith('ms') ? 0.001 : 1);
@@ -289,5 +305,92 @@ test.describe('desktop viewport (buttons appear on hover)', () => {
         await expect(deepRow).toHaveCount(0);
         await control.click();
         await expect(deepRow).toBeVisible();
+    });
+
+    test('a row gives up the button width only while the buttons are drawn', async ({ page }) => {
+        // A row's own badges share its title line — a model of its own draws a long `provider · model`
+        // beside the status word — and they are the other thing that can cost the title width.
+        const projectId = ownProjectId();
+        const parentId = await idleInProgressTask(page, 'reserve');
+        const plainId = await longSubtask(page, projectId, parentId, 'reserve-plain');
+        const badgeId = await longSubtask(page, projectId, parentId, 'reserve-badge', { model_name: 'reserve-probe-model' });
+        await openOnBoard(page, parentId);
+
+        // The clip is the title box's right edge and the line is what gives the buttons their width, so
+        // "the title holds the space" and "the title is clear of the buttons" are the two claims.
+        const clip = (row: Locator) => row.evaluate(card => {
+            const line = card.querySelector('.card-title')!;
+            const title = card.querySelector('.card-title-text')!;
+            const actions = card.querySelector('.card-actions')!;
+            const badges = card.querySelector('.badges-row.is-inline');
+            return {
+                clipRight: title.getBoundingClientRect().right,
+                firstButtonLeft: actions.children[0].getBoundingClientRect().left,
+                titleWidth: title.getBoundingClientRect().width,
+                badgeOverflow: badges ? badges.getBoundingClientRect().right - card.getBoundingClientRect().right : 0,
+                linePad: getComputedStyle(line).paddingRight,
+            };
+        });
+
+        for (const [tag, id] of [['plain', plainId], ['long badge', badgeId]] as const) {
+            const row = page.locator(`.column-context .card[data-task-id="${id}"]`);
+            await row.scrollIntoViewIfNeeded();
+            // Both rows carry badges: the status word always, the second one a long `provider · model` too.
+            await expect(row.locator('.badges-row.is-inline')).toHaveCount(1);
+
+            const hidden = await clip(row);
+            expect(hidden.linePad, `${tag}: an undrawn button row still costs the title line its width`).toBe('0px');
+            // A title claims space as surplus only (`flex: 1` over a zero basis), so an unsquashable badge
+            // is the shape that leaves it with nothing.
+            expect(hidden.titleWidth, `${tag}: the row title was given no width at all`).toBeGreaterThan(0);
+            expect(Math.max(0, hidden.badgeOverflow), `${tag}: the row badges hang past the row`).toBeLessThanOrEqual(1);
+
+            await row.hover();
+            const shown = await clip(row);
+            expect(parseFloat(shown.linePad), `${tag}: hovering drew no reserve`).toBeGreaterThan(0);
+            expect(hidden.clipRight - shown.clipRight, `${tag}: revealing the buttons returned the line no width`)
+                .toBeGreaterThan(0);
+            expect(shown.clipRight, `${tag}: hovering left the title under the buttons`)
+                .toBeLessThanOrEqual(shown.firstButtonLeft);
+
+            const problems = await measureCard(page, id, false);
+            expect(problems, `${tag}: title and action buttons overlap while the row is hovered`).toEqual([]);
+        }
+    });
+
+    test('a row file line starts under its title, not under its status dot', async ({ page }) => {
+        // A real "N file" line needs a worktree, and a worktree only comes from an executor turn, which
+        // this spec must not queue on a project its worker shares (AGENTS.md → Testing). So measure the
+        // rule on the live row: a probe carrying the row's own Svelte scope class is styled by the same
+        // compiled selector as the real line and inherits the row's own leading-control widths.
+        const projectId = ownProjectId();
+        const parentId = await idleInProgressTask(page, 'indent');
+        const childId = await longSubtask(page, projectId, parentId, 'indent-row');
+        await openOnBoard(page, parentId);
+
+        const measured = await page.evaluate(({ parent, child }) => {
+            const row = document.querySelector(`.column-context .card[data-task-id="${parent}"] .card[data-task-id="${child}"]`) as HTMLElement | null;
+            const title = row?.querySelector('.card-title-text') as HTMLElement | null;
+            const dot = row?.querySelector('.row-dot') as HTMLElement | null;
+            if (!row || !title || !dot) return { missing: `the row ${child} is not drawn`, indent: 0, titleX: 0, dotRight: 0 };
+            const scope = [...title.classList].find(c => c.startsWith('svelte-')) || '';
+            const probe = document.createElement('div');
+            probe.className = `diff-stats-row ${scope}`.trim();
+            row.appendChild(probe);
+            const indent = parseFloat(getComputedStyle(probe).paddingLeft) || 0;
+            probe.remove();
+            const contentLeft = row.getBoundingClientRect().left + (parseFloat(getComputedStyle(row).paddingLeft) || 0);
+            return {
+                missing: '',
+                indent,
+                titleX: title.getBoundingClientRect().left - contentLeft,
+                dotRight: dot.getBoundingClientRect().right - contentLeft,
+            };
+        }, { parent: parentId, child: childId });
+
+        expect(measured.missing).toBe('');
+        const { indent, titleX, dotRight } = measured;
+        expect(titleX, 'the row title has no leading controls to clear').toBeGreaterThan(dotRight);
+        expect(Math.abs(indent - titleX), `the file line would start at ${indent}, the title at ${titleX}`).toBeLessThan(1);
     });
 });

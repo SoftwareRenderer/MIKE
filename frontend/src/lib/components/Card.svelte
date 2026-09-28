@@ -1224,6 +1224,7 @@
         font-weight: 500;
         margin-bottom: 6px;
         position: relative;
+        padding-right: 0;
     }
     .card-title-text {
         flex: 1;
@@ -1231,11 +1232,10 @@
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        padding-right: 0;
     }
-    .card:hover:not(:has(.card:hover)) > .card-title > .card-title-text,
-    .card:focus-within:not(:has(.card:focus-within)) > .card-title > .card-title-text,
-    .card.selected > .card-title > .card-title-text {
+    .card:hover:not(:has(.card:hover)) > .card-title,
+    .card:focus-within:not(:has(.card:focus-within)) > .card-title,
+    .card.selected > .card-title {
         padding-right: var(--actions-reserve);
     }
     .card-actions {
@@ -1385,14 +1385,11 @@
             --idle-slot: 44px;
         }
         .card-actions {
+            opacity: 1;
+            pointer-events: auto;
             transition: none;
         }
-        /* The container is pointer-events:none for the card's link, and it is re-enabled only by
-           :hover/:focus-within/.selected rules, which a device that cannot hover never matches. */
-        .card-actions .action-icon {
-            pointer-events: auto;
-        }
-        .card-title-text {
+        .card-title {
             padding-right: var(--actions-reserve);
         }
         .action-icon {
@@ -1509,10 +1506,15 @@
         border-radius: 2px;
         padding: 0 6px;
         min-height: 30px;
+        --row-dot: 7px;
+        --row-slot: 18px;
+        --row-gap: 6px;
+        --title-x: calc(var(--row-dot) + var(--row-slot) + 4 * var(--row-gap));
     }
     .card.is-outline-row .card-title {
         margin-bottom: 0;
         min-height: 30px;
+        gap: var(--row-gap);
     }
     .card.is-outline-row:hover {
         background: var(--color-surface-2);
@@ -1526,17 +1528,17 @@
         color: var(--color-text-tertiary);
     }
     .row-dot {
-        width: 7px;
-        height: 7px;
+        width: var(--row-dot);
+        height: var(--row-dot);
         border-radius: 50%;
         flex-shrink: 0;
-        margin-right: 6px;
+        margin-right: var(--row-gap);
         background: var(--status-color, var(--color-text-tertiary));
     }
     .rollup-slot {
-        width: 18px;
+        width: var(--row-slot);
         flex-shrink: 0;
-        margin-right: 6px;
+        margin-right: var(--row-gap);
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -1545,8 +1547,8 @@
         position: relative;
         /* Above the card's link overlay — a control under it would be unclickable. */
         z-index: var(--z-content);
-        width: 18px;
-        height: 18px;
+        width: var(--row-slot);
+        height: var(--row-slot);
         padding: 0;
         border: none;
         background: transparent;
@@ -1591,12 +1593,15 @@
     .subtask-rollup.is-complete .rollup-count {
         color: var(--color-text-inverse);
     }
-    /* Badges ride beside the title, clear of the action icons. */
     .badges-row.is-inline {
-        flex-shrink: 0;
         margin: 0;
-        padding-right: var(--actions-reserve);
         font-weight: 400;
+        flex-shrink: 1;
+        min-width: 0;
+        max-width: 50%;
+    }
+    .card.is-outline-row .diff-stats-row {
+        padding-left: var(--title-x);
     }
     .badge-fork {
         display: inline-flex;
@@ -1605,14 +1610,8 @@
     }
     @media (hover: none) {
         .card.is-outline-row {
+            --row-slot: 28px;
             min-height: 44px;
-        }
-        .subtask-rollup {
-            width: 28px;
-            height: 28px;
-        }
-        .rollup-slot {
-            width: 28px;
         }
         .rollup-ring {
             width: 20px;

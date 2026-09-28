@@ -34,6 +34,17 @@ own subtree. These two must keep agreeing, case for case.
   alike, and focus is real DOM focus (`AGENTS.md → Frontend`). Nothing stores a "highlighted" row.
 - Every row's title starts at one x whatever its depth: nothing is indented and the roll-up slot is
   fixed-width, children or not.
+- A row's title line holds the title and its badges, and it gives up the action buttons' width only while
+  those buttons are drawn — which on touch (`hover: none`) means always, since no `:hover` will ever come
+  there. The reserve is the *line's* (`--actions-reserve` as `.card-title`'s padding-right), never the
+  title's or a badge's own, so it is paid once however many things share the line.
+- A badge never costs a row its title. A title claims space as surplus only (`flex: 1` is a zero basis),
+  so an unsquashable badge leaves the line nothing to shrink: the title falls to zero width and the badge
+  hangs out of the row. The badges shrink, capped at half the line; the badge's own ellipsis does the
+  clipping.
+- A line under a row's title — the file count — starts under the title's first glyph, not under its dot.
+  One `--title-x`, built on the row from the same widths the dot and the roll-up slot take, is the only
+  source of that x; an indent stated twice drifts.
 
 ## How it is held
 
@@ -52,9 +63,18 @@ keyboard, and the card holding the outline marks the rows whose `owners` list na
 where the rows are, not inside the row. Both hosts pass the same props they always did: `Column.svelte` via
 `Board.svelte`, and `CardDetail/BoardOverview.svelte`.
 
+The widths that line a row up live in `Card.svelte`'s style block as `--row-dot`, `--row-slot` and
+`--row-gap`, and `.card.is-outline-row` derives `--title-x` from them. `.row-dot`, `.rollup-slot` and
+`.subtask-rollup` read those same vars, so the touch block — where the slot is 28px, not 18px — widens one
+declaration and `--title-x` follows.
+
 ## Checking this
 
 `cd frontend && npm test` fails it: `frontend/src/lib/utils/__tests__/subtask-outline.unit.ts` holds the
 ordering rules and `frontend/src/lib/components/__tests__/card-subtask-outline.unit.svelte.ts` the rendered
-shape — row order, one band per branch, the roll-up circle's count, tinting, and the badge rule. The bar
-and the painted circle are measured in a browser by `npx playwright test board-card-title-actions`.
+shape — row order, one band per branch, the roll-up circle's count, tinting, the badge rule, and which line
+of the row holds its badges and its file count. The bar, the painted circle, the reserve appearing with the
+buttons (and a touch row's `⋯` being painted rather than merely tappable), the badge's cap and the file
+line's x are measured in a browser by `npx playwright test board-card-title-actions`. That spec measures the
+file line's indent with a probe rather than a real task, because a real file count needs a worktree and a
+worktree needs an executor turn, which this spec's shared project must not queue (`AGENTS.md → Testing`).

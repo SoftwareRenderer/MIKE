@@ -32,6 +32,7 @@ vi.mock('$lib/stores', () => ({
 }));
 
 import Card from '$lib/components/Card.svelte';
+import { diffStatsStore } from '$lib/stores/diff-stats.svelte';
 import type { Task } from '$lib/types';
 
 beforeAll(() => {
@@ -254,6 +255,25 @@ describe('Card subtask outline', () => {
         const row = rowWrapper(container, 'a1').querySelector('.card')!;
         expect(row.querySelector('button[aria-label="Create subtask"]')).toBeTruthy();
         expect(row.querySelector('button[aria-label="Edit task"]')).toBeTruthy();
+    });
+
+    it('holds its badges on the title line and its file count under it', () => {
+        // The reserve that keeps a row clear of its action buttons is paid by the one line the badges
+        // share with the title, and the file count is the row's second line — both belong to the row.
+        const t = tree();
+        t.tasks.a.model_name = 'beta';
+        diffStatsStore.set('a', { hash: 'deadbeef', files: 2, additions: 4, deletions: 1, staged_paths: ['x.ts', 'y.ts'] });
+        try {
+            const { container } = renderOutline(t);
+            const listing = container.querySelector('.card')!;
+            const row = rowWrapper(container, 'a').querySelector('.card')!;
+            expect(row.querySelector('.card-title .badges-row.is-inline .model-badge')).toBeTruthy();
+            expect(row.querySelector(':scope > .diff-stats-row .diff-files')?.textContent).toBe('2 files');
+            // The card that lists the rows keeps no diff line of its own under their indent.
+            expect(listing.querySelector(':scope > .diff-stats-row')).toBeNull();
+        } finally {
+            diffStatsStore.remove('a');
+        }
     });
 
     it('selects the deepest row itself, not the card that lists it', async () => {
