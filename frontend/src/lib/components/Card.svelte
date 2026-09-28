@@ -900,8 +900,6 @@
     {/snippet}
     <div class="card-title">
             {#if isOutlineRow}
-                <!-- The band carries the group's colour, so the row's own status is a dot. -->
-                <span class="row-dot" aria-hidden="true"></span>
                 <span class="rollup-slot">
                     {#if hasChildren}
                         <button
@@ -1492,7 +1490,6 @@
     .subtask-group {
         display: flex;
         flex-direction: column;
-        border-left: 2px solid var(--group-color, var(--color-border));
         background: color-mix(in srgb, var(--group-color, transparent) 7%, transparent);
         border-radius: 2px;
     }
@@ -1503,13 +1500,13 @@
     .card.is-outline-row {
         background: transparent;
         border: none;
+        border-left: 2px solid var(--status-color, var(--color-text-tertiary));
         border-radius: 2px;
         padding: 0 6px;
         min-height: 30px;
-        --row-dot: 7px;
         --row-slot: 18px;
         --row-gap: 6px;
-        --title-x: calc(var(--row-dot) + var(--row-slot) + 4 * var(--row-gap));
+        --title-x: calc(var(--row-slot) + 2 * var(--row-gap));
     }
     .card.is-outline-row .card-title {
         margin-bottom: 0;
@@ -1526,14 +1523,6 @@
     .card.is-done-row > .card-title > .card-title-text {
         text-decoration: line-through;
         color: var(--color-text-tertiary);
-    }
-    .row-dot {
-        width: var(--row-dot);
-        height: var(--row-dot);
-        border-radius: 50%;
-        flex-shrink: 0;
-        margin-right: var(--row-gap);
-        background: var(--status-color, var(--color-text-tertiary));
     }
     .rollup-slot {
         width: var(--row-slot);

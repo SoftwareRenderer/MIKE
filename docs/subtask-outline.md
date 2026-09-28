@@ -19,7 +19,9 @@ own subtree. These two must keep agreeing, case for case.
   the column orders them. `wave` is 1 for a leaf, otherwise 1 plus the deepest thing under it: the round
   that row becomes runnable. It mirrors `IsStartableNow` and `FindDeepestStartableSubtasks`.
 - A group is contiguous and holds exactly one top-level subtask's branch: that subtask and everything that
-  must finish before it. Its band carries the group's colour, so a row's own status rides on its dot.
+  must finish before it. The band carries only a wash of its root's colour; each row's own status is its
+  `border-left`, so a row still in backlog reads grey beneath the done row it waits for. One rule per band
+  would paint every row with the branch head's status.
 - A collapsed parent keeps its row — that row is the control that reopens the branch — and contributes no
   rows below it. Siblings keep their places.
 - A `parent_task_id` cycle cuts rather than hangs: each measure carries its own path set.
@@ -42,9 +44,10 @@ own subtree. These two must keep agreeing, case for case.
   so an unsquashable badge leaves the line nothing to shrink: the title falls to zero width and the badge
   hangs out of the row. The badges shrink, capped at half the line; the badge's own ellipsis does the
   clipping.
-- A line under a row's title — the file count — starts under the title's first glyph, not under its dot.
-  One `--title-x`, built on the row from the same widths the dot and the roll-up slot take, is the only
-  source of that x; an indent stated twice drifts.
+- A line under a row's title — the file count — starts under the title's first glyph, not under the row's
+  rule and roll-up slot. One `--title-x`, built on the row from the widths the rule and the slot take, is the
+  only source of that x; an indent stated twice drifts. The rule is outside the padding box of both lines, so
+  it needs no term in the formula.
 
 ## How it is held
 
@@ -63,10 +66,10 @@ keyboard, and the card holding the outline marks the rows whose `owners` list na
 where the rows are, not inside the row. Both hosts pass the same props they always did: `Column.svelte` via
 `Board.svelte`, and `CardDetail/BoardOverview.svelte`.
 
-The widths that line a row up live in `Card.svelte`'s style block as `--row-dot`, `--row-slot` and
-`--row-gap`, and `.card.is-outline-row` derives `--title-x` from them. `.row-dot`, `.rollup-slot` and
-`.subtask-rollup` read those same vars, so the touch block — where the slot is 28px, not 18px — widens one
-declaration and `--title-x` follows.
+The widths that line a row up live in `Card.svelte`'s style block as `--row-slot` and `--row-gap`, and
+`.card.is-outline-row` derives `--title-x` from them and paints its own `border-left` from the `--status-color`
+the card sets inline. `.rollup-slot` and `.subtask-rollup` read those same vars, so the touch block — where the
+slot is 28px, not 18px — widens one declaration and `--title-x` follows.
 
 ## Checking this
 
@@ -75,6 +78,7 @@ ordering rules and `frontend/src/lib/components/__tests__/card-subtask-outline.u
 shape — row order, one band per branch, the roll-up circle's count, tinting, the badge rule, and which line
 of the row holds its badges and its file count. The bar, the painted circle, the reserve appearing with the
 buttons (and a touch row's `⋯` being painted rather than merely tappable), the badge's cap and the file
-line's x are measured in a browser by `npx playwright test board-card-title-actions`. That spec measures the
+line's x are measured in a browser by `npx playwright test board-card-title-actions`. So is each row's rule:
+it carries that row's own status colour while its band-mates keep theirs. That spec measures the
 file line's indent with a probe rather than a real task, because a real file count needs a worktree and a
 worktree needs an executor turn, which this spec's shared project must not queue (`AGENTS.md → Testing`).
