@@ -518,7 +518,7 @@ deliberately omits.
 | `docs/agent-extensions.md` | adapter interface + events, WASM memory model, new-adapter recipe |
 | `docs/navigation.md` | board + task-view arrow-key resolution |
 | `docs/notifications.md` | the Review-arrival rule, the counts ledger, the permission policy |
-| `docs/subtask-outline.md` | subtask row order and shape, the wave rule, the roll-up circle, the row badge rule |
+| `docs/subtask-outline.md` | subtask row order and shape, the wave rule, the row's two lines, the row badge rule |
 | `docs/link-rows.md` | project-row/task-card markup, click routing, known limitation |
 | `docs/reconnection.md` | WS reconnect/offline queue mechanism |
 | `docs/llm-streaming.md` | provider silence and what measures it, the per-provider ceiling, retrying a quiet provider, keeping the socket honest |

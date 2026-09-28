@@ -58,14 +58,6 @@ async function longSubtask(page: Page, projectId: string, parentId: string, tag:
     return id;
 }
 
-async function moveToDone(page: Page, projectId: string, taskId: string) {
-    const moved = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}`, {
-        method: 'PUT',
-        body: { status: 'done' },
-    });
-    expect(moved.ok, `move to done: ${JSON.stringify(moved.data)}`).toBe(true);
-}
-
 function measureCard(page: Page, taskId: string, expectSelected: boolean, expectPainted = false) {
     return page.evaluate(({ id, selected, painted }) => {
         const card = document.querySelector(`.column-context .card[data-task-id="${id}"]`);
@@ -236,90 +228,14 @@ test.describe('desktop viewport (buttons appear on hover)', () => {
         expect(problems, 'title and action buttons overlap').toEqual([]);
     });
 
-    test('the roll-up circle paints: a ring over what a row waits for, a disc once it can run', async ({ page }) => {
-        // The circle is drawn by CSS on an SVG: markup and geometry can both look right while nothing
-        // is painted, so assert the computed paint.
-        const GREEN = 'rgb(63, 185, 80)';
-        const projectId = ownProjectId();
-        const parentId = await idleInProgressTask(page, 'rollup');
-        const childId = await longSubtask(page, projectId, parentId, 'rollup-child');
-        const grandId = await longSubtask(page, projectId, childId, 'rollup-grandchild');
-        await openOnBoard(page, parentId);
-
-        const control = page.locator(`.column-context .card[data-task-id="${childId}"] .subtask-rollup`);
-        await expect(control).toHaveCount(1);
-        await expect(control).toHaveAttribute('aria-expanded', 'true');
-        await expect(control.locator('.rollup-count')).toHaveText('1');
-
-        // A row is one 30px line, and its own rule carries its own status colour — a `--status-color`
-        // that failed to resolve would still look like a rule in markup, so read the computed paint.
-        // The band keeps only its wash.
-        const IN_PROGRESS = 'rgb(76, 154, 255)'; // --color-column-in-progress
-        const DONE = 'rgb(63, 185, 80)';         // --color-column-done
-        const row = page.locator(`.column-context .card[data-task-id="${childId}"]`);
-        expect(Math.round((await row.boundingBox())!.height)).toBe(30);
-        await expect(row).toHaveCSS('border-left-width', '2px');
-        await expect(row).toHaveCSS('border-left-color', IN_PROGRESS);
-        const group = page.locator(`.column-context .card[data-task-id="${parentId}"] .subtask-group`).first();
-        expect(await group.evaluate(el => getComputedStyle(el).borderLeftWidth)).toBe('0px');
-        expect(await group.evaluate(el => getComputedStyle(el).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
-
-        const arc = control.locator('.rollup-arc');
-        await expect(arc).toHaveCSS('stroke', GREEN);
-        await expect(arc).toHaveCSS('fill', 'none');
-        const [dasharray, dashoffset] = await arc.evaluate(el => [
-            getComputedStyle(el).strokeDasharray, getComputedStyle(el).strokeDashoffset,
-        ]);
-        expect(parseFloat(dasharray)).toBeGreaterThan(0);
-        expect(parseFloat(dashoffset)).toBeCloseTo(parseFloat(dasharray), 1); // nothing done yet
-        expect(await control.evaluate(el => getComputedStyle(el.querySelector('.rollup-track')!).stroke)).not.toBe('none');
-
-        await moveToDone(page, projectId, grandId);
-
-        await expect(control).toHaveClass(/is-complete/);
-        await expect(control.locator('.rollup-disc')).toHaveCSS('fill', GREEN);
-        // The rule is per row, not per band: the grandchild that finished went done-coloured while the
-        // row waiting for it stayed in-progress blue, both inside one band.
-        await expect(page.locator(`.column-context .card[data-task-id="${parentId}"] .card[data-task-id="${grandId}"]`))
-            .toHaveCSS('border-left-color', DONE);
-        await expect(row).toHaveCSS('border-left-color', IN_PROGRESS);
-        const inverse = await page.evaluate(() => {
-            const probe = document.createElement('span');
-            probe.style.color = 'var(--color-text-inverse)';
-            document.body.appendChild(probe);
-            const resolved = getComputedStyle(probe).color;
-            probe.remove();
-            return resolved;
-        });
-        expect(inverse, '--color-text-inverse is not declared').not.toBe('');
-        await expect(control.locator('.rollup-count')).toHaveCSS('color', inverse);
-
-        // The span a row waits for is shown by tinting those rows, so the tint has to be paint too.
-        const at = await control.boundingBox();
-        expect(at).not.toBeNull();
-        await page.mouse.move(at!.x + at!.width / 2, at!.y + at!.height / 2);
-        const tint = await page.locator(`.column-context .card[data-task-id="${parentId}"] .card[data-task-id="${grandId}"]`)
-            .evaluate(el => getComputedStyle(el).backgroundColor);
-        expect(tint, 'the waited-for tint resolves to nothing').not.toBe('rgba(0, 0, 0, 0)');
-        expect(tint).not.toBe('transparent');
-
-        // And the control takes the click a card's own link overlay would otherwise take: it hides the
-        // rows it rolls up, then shows them again. (Scoped to the outline: a done descendant is drawn
-        // both as a row here and as a card of its own in the Done column.)
-        const deepRow = page.locator(`.column-context .card[data-task-id="${parentId}"] .card[data-task-id="${grandId}"]`);
-        await control.click();
-        await expect(deepRow).toHaveCount(0);
-        await control.click();
-        await expect(deepRow).toBeVisible();
-    });
-
     test('a row gives up the button width only while the buttons are drawn', async ({ page }) => {
-        // A row's own badges share its title line — a model of its own draws a long `provider · model`
-        // beside the status word — and they are the other thing that can cost the title width.
+        // A row's status word shares its title line, and a status word is unsquashable — `Pulling image`
+        // is the longest one a row can be put into from the API — so it is the thing that can cost the
+        // title width. (The model badge lives on the row's second line, where it costs the title nothing.)
         const projectId = ownProjectId();
         const parentId = await idleInProgressTask(page, 'reserve');
         const plainId = await longSubtask(page, projectId, parentId, 'reserve-plain');
-        const badgeId = await longSubtask(page, projectId, parentId, 'reserve-badge', { model_name: 'reserve-probe-model' });
+        const badgeId = await longSubtask(page, projectId, parentId, 'reserve-badge', { execution_state: 'pulling_image' });
         await openOnBoard(page, parentId);
 
         // The clip is the title box's right edge and the line is what gives the buttons their width, so
@@ -364,41 +280,4 @@ test.describe('desktop viewport (buttons appear on hover)', () => {
         }
     });
 
-    test('a row file line starts under its title, not under its leading rule and slot', async ({ page }) => {
-        // A real "N file" line needs a worktree, and a worktree only comes from an executor turn, which
-        // this spec must not queue on a project its worker shares (AGENTS.md → Testing). So measure the
-        // rule on the live row: a probe carrying the row's own Svelte scope class is styled by the same
-        // compiled selector as the real line and inherits the row's own leading-control widths.
-        const projectId = ownProjectId();
-        const parentId = await idleInProgressTask(page, 'indent');
-        const childId = await longSubtask(page, projectId, parentId, 'indent-row');
-        await openOnBoard(page, parentId);
-
-        const measured = await page.evaluate(({ parent, child }) => {
-            const row = document.querySelector(`.column-context .card[data-task-id="${parent}"] .card[data-task-id="${child}"]`) as HTMLElement | null;
-            const title = row?.querySelector('.card-title-text') as HTMLElement | null;
-            const slot = row?.querySelector('.rollup-slot') as HTMLElement | null;
-            if (!row || !title || !slot) return { missing: `the row ${child} is not drawn`, indent: 0, titleX: 0, slotRight: 0 };
-            const scope = [...title.classList].find(c => c.startsWith('svelte-')) || '';
-            const probe = document.createElement('div');
-            probe.className = `diff-stats-row ${scope}`.trim();
-            row.appendChild(probe);
-            const indent = parseFloat(getComputedStyle(probe).paddingLeft) || 0;
-            probe.remove();
-            const cs = getComputedStyle(row);
-            // The rule is outside the padding box on both lines, so it measures out of both sides.
-            const contentLeft = row.getBoundingClientRect().left + (parseFloat(cs.borderLeftWidth) || 0) + (parseFloat(cs.paddingLeft) || 0);
-            return {
-                missing: '',
-                indent,
-                titleX: title.getBoundingClientRect().left - contentLeft,
-                slotRight: slot.getBoundingClientRect().right - contentLeft,
-            };
-        }, { parent: parentId, child: childId });
-
-        expect(measured.missing).toBe('');
-        const { indent, titleX, slotRight } = measured;
-        expect(titleX, 'the row title has no leading controls to clear').toBeGreaterThan(slotRight);
-        expect(Math.abs(indent - titleX), `the file line would start at ${indent}, the title at ${titleX}`).toBeLessThan(1);
-    });
 });
