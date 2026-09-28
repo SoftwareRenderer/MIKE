@@ -39,7 +39,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    color: var(--color-accent);
+    color: var(--color-text-primary);
 }
 
 :global(.sandbox-config .config-text) {
