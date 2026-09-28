@@ -6,10 +6,8 @@ export interface SubtaskRow {
     task: Task;
     /** 1 for a leaf, otherwise 1 + the wave of its deepest descendant. */
     wave: number;
-    /** Every ancestor below the card, outermost first. */
+    /** Every ancestor below the card, outermost first. Its last entry is the row's own parent. */
     owners: string[];
-    /** Every descendant, collapsed or not — hiding a branch does not finish it. */
-    progress: { done: number; total: number };
 }
 
 /** One top-level subtask and everything that has to finish before it. */
@@ -21,7 +19,7 @@ export interface SubtaskGroup {
 /**
  * The descendants of `rootId` as one group per top-level subtask, rows ordered by wave so none comes before
  * its own descendant, mirroring the schedule `backend/exec` runs (`IsStartableNow`). A collapsed parent
- * keeps its row, since it is the control that reopens the branch, and contributes none below it.
+ * keeps its row and contributes none below it; its own card is what collapses it.
  */
 export function subtaskOutlineGroups(
     rootId: string,
@@ -45,24 +43,6 @@ export function subtaskOutlineGroups(
         return deepest + 1;
     };
 
-    const progresses = new Map<string, { done: number; total: number }>();
-    const progressOf = (task: Task, path: Set<string>): { done: number; total: number } => {
-        const known = progresses.get(task.id);
-        if (known !== undefined) return known;
-        if (path.has(task.id)) return { done: 0, total: 0 };
-        path.add(task.id);
-        let done = 0;
-        let total = 0;
-        for (const child of childrenOf(task.id)) {
-            const nested = progressOf(child, path);
-            done += nested.done + (child.status === 'done' ? 1 : 0);
-            total += nested.total + 1;
-        }
-        path.delete(task.id);
-        progresses.set(task.id, { done, total });
-        return { done, total };
-    };
-
     const groups: SubtaskGroup[] = [];
     for (const branch of childrenOf(rootId)) {
         const rows: SubtaskRow[] = [];
@@ -71,7 +51,6 @@ export function subtaskOutlineGroups(
                 task,
                 wave: waveOf(task, new Set()),
                 owners,
-                progress: progressOf(task, new Set()),
             });
             if (!expanded.has(task.id)) return;
             path.add(task.id);

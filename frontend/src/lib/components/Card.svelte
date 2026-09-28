@@ -30,10 +30,8 @@
         uiInjector.refreshSlot(INJECTION_POINTS.TASK_CARD, { component: 'Card', taskId: task.id, projectId });
     });
 
-    let { task, columnId, projectId, childrenMap, expandedTasks, onToggleExpanded, onCreateChildTask, columnColor, inline = true, onSelect, parentSelected = false, showSubtaskBorder = false, onRefreshBoard, multiSelect, outline, onRollupHover }: { task: Task; columnId: string; projectId?: string; childrenMap?: Map<string, Task[]>; expandedTasks?: Set<string>; onToggleExpanded?: (taskId: string) => void; onCreateChildTask?: (parentId: string) => void; columnColor?: string; inline?: boolean; onSelect?: (task: Task) => void; parentSelected?: boolean; showSubtaskBorder?: boolean; onRefreshBoard?: () => void; multiSelect?: MultiSelect | null; /** Set when this card is a row of another card's outline; a row lists no outline of its own. */
-    outline?: { progress: { done: number; total: number }; parentModel: { url: string; model: string } };
-    /** Reports which row's roll-up control is hovered, or null. */
-    onRollupHover?: (taskId: string | null) => void } = $props();
+    let { task, columnId, projectId, childrenMap, expandedTasks, onToggleExpanded, onCreateChildTask, columnColor, inline = true, onSelect, parentSelected = false, showSubtaskBorder = false, onRefreshBoard, multiSelect, outline }: { task: Task; columnId: string; projectId?: string; childrenMap?: Map<string, Task[]>; expandedTasks?: Set<string>; onToggleExpanded?: (taskId: string) => void; onCreateChildTask?: (parentId: string) => void; columnColor?: string; inline?: boolean; onSelect?: (task: Task) => void; parentSelected?: boolean; showSubtaskBorder?: boolean; onRefreshBoard?: () => void; multiSelect?: MultiSelect | null; /** Set when this card is a row of another card's outline; a row lists no outline of its own, and carries the model its parent runs on. */
+    outline?: { parentModel: { url: string; model: string } } } = $props();
 
     // Track if this task has queued offline actions (for diagonal fade effect)
     let taskHasQueuedActions = $state(false);
@@ -87,8 +85,6 @@
 
     let isOutlineRow = $derived(!!outline);
 
-    let rollupHovered = $state('');
-
     /** An outline row plus the model its own parent runs on, which is what the row's badge compares to. */
     type OutlineRow = SubtaskRow & { parentModel: { url: string; model: string } };
 
@@ -114,35 +110,6 @@
             })),
         }));
     });
-
-    /** The rows one hovered roll-up control waits for. */
-    let ownedByHover = $derived.by(() => {
-        const owned = new Set<string>();
-        if (rollupHovered) {
-            for (const g of outlineGroups) {
-                for (const r of g.rows) if (r.owners.includes(rollupHovered)) owned.add(r.task.id);
-            }
-        }
-        return owned;
-    });
-
-    /** Circumference of the roll-up ring, a `<circle r="6">`. */
-    const ROLLUP_C = 2 * Math.PI * 6;
-
-    /** How many rows this row waits for, and how far they have got. */
-    let rollup = $derived.by(() => {
-        const { done, total } = outline?.progress ?? { done: 0, total: 0 };
-        return {
-            total,
-            offset: ROLLUP_C * (1 - (total > 0 ? done / total : 0)),
-            complete: total > 0 && done === total,
-            label: `${t(expanded ? 'board.card.rollupHide' : 'board.card.rollupShow', { count: total })} · ${t('board.card.rollupDone', { done, count: total })}`,
-        };
-    });
-
-    function reportRollup(hovered: boolean) {
-        onRollupHover?.(hovered ? task.id : null);
-    }
 
     /** Collect all descendant task IDs recursively from childrenMap. */
     function collectDescendantIds(taskId: string): string[] {
@@ -858,8 +825,7 @@
     aria-current={isSelected ? 'page' : undefined}
     style={`--actions: ${actionCount}; --idle: ${showsIdle ? 1 : 0}; --column-color: ${columnColor || ""}; --status-color: ${statusColor}${parentSelected && inline && task.parent_task_id && !isOutlineRow ? `; border-left: 3px solid ${statusColor}` : ""}`}
 >
-    <!-- Beside the title on a row, below it on a card. -->
-    {#snippet badges()}
+    {#snippet statusBadges()}
         {#if statusBadge}
             <div class="badge" style="background: rgb(from {statusBadge.color} r g b / 0.07); color: {statusBadge.color}">
                 {statusBadge.text}
@@ -871,6 +837,8 @@
                 {t('board.badge.outOfMemory')}
             </div>
         {/if}
+    {/snippet}
+    {#snippet modelBadges()}
         {#if modelBadge.text && !hideModelBadge}
             {#if modelBadge.isAgent}
                 <div class="badge model-badge agent-badge" style="background: rgb(from {modelBadge.color} r g b / 0.07); color: {modelBadge.color}">
@@ -898,42 +866,17 @@
             {/if}
         {/if}
     {/snippet}
+    {#snippet badges()}
+        {@render statusBadges()}
+        {@render modelBadges()}
+    {/snippet}
     <div class="card-title">
-            {#if isOutlineRow}
-                <span class="rollup-slot">
-                    {#if hasChildren}
-                        <button
-                            type="button"
-                            class="subtask-rollup"
-                            class:is-complete={rollup.complete}
-                            onclick={toggleExpanded}
-                            onpointerenter={() => reportRollup(true)}
-                            onpointerleave={() => reportRollup(false)}
-                            onfocus={() => reportRollup(true)}
-                            onblur={() => reportRollup(false)}
-                            aria-expanded={expanded}
-                            aria-label={rollup.label}
-                            title={rollup.label}
-                        >
-                            <svg class="rollup-ring" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-                                <circle class="rollup-track" cx="8" cy="8" r="6" />
-                                {#if rollup.complete}
-                                    <circle class="rollup-disc" cx="8" cy="8" r="7" />
-                                {:else}
-                                    <circle class="rollup-arc" cx="8" cy="8" r="6" style="stroke-dasharray: {ROLLUP_C}px; stroke-dashoffset: {rollup.offset}px" />
-                                {/if}
-                            </svg>
-                            <span class="rollup-count">{rollup.total}</span>
-                        </button>
-                    {/if}
-                </span>
-            {/if}
             {#if task.title_generating}
                 <Spinner size={12} label={t('board.card.titleGenerating')} />
             {/if}
             <span class="card-title-text">{truncate(task.title, 80)}</span>
-            {#if isOutlineRow && (statusBadge || memAlert || (modelBadge.text && !hideModelBadge))}
-                <div class="badges-row is-inline">{@render badges()}</div>
+            {#if isOutlineRow && (statusBadge || memAlert)}
+                <div class="badges-row is-inline">{@render statusBadges()}</div>
             {/if}
             <div class="card-actions">
                 {#if isMobileSubtask}
@@ -1049,14 +992,19 @@
     {#if !isOutlineRow && (statusBadge || memAlert || modelBadge.text || subtaskProgress)}
         <div class="badges-row">{@render badges()}</div>
     {/if}
-    {#if diffStats}
+    {#if diffStats || (isOutlineRow && modelBadge.text && !hideModelBadge)}
         <div class="diff-stats-row">
-            <span class="diff-stats">
-                {#if diffStats.files > 0}<span class="diff-files">{t('board.card.fileCount', { count: diffStats.files })}</span>{/if}
-                {#if diffStats.files > 0 && (diffStats.additions > 0 || diffStats.deletions > 0)}<span class="diff-sep"> · </span>{/if}
-                {#if diffStats.additions > 0}<span class="diff-add">+{diffStats.additions}</span>{/if}
-                {#if diffStats.deletions > 0}<span class="diff-del">-{diffStats.deletions}</span>{/if}
-            </span>
+            {#if diffStats}
+                <span class="diff-stats">
+                    {#if diffStats.files > 0}<span class="diff-files">{t('board.card.fileCount', { count: diffStats.files })}</span>{/if}
+                    {#if diffStats.files > 0 && (diffStats.additions > 0 || diffStats.deletions > 0)}<span class="diff-sep"> · </span>{/if}
+                    {#if diffStats.additions > 0}<span class="diff-add">+{diffStats.additions}</span>{/if}
+                    {#if diffStats.deletions > 0}<span class="diff-del">-{diffStats.deletions}</span>{/if}
+                </span>
+            {/if}
+            {#if isOutlineRow && modelBadge.text && !hideModelBadge}
+                <div class="badges-row meta-badges">{@render modelBadges()}</div>
+            {/if}
         </div>
     {/if}
     {#if subtaskProgress && !isOutlineRow}
@@ -1078,8 +1026,8 @@
             {#each outlineGroups as group (group.root.id)}
                 <div class="subtask-group" style={`--group-color: ${group.color}`}>
                     {#each group.rows as row (row.task.id)}
-                        <div class="subtask-wrapper" class:is-waited={ownedByHover.has(row.task.id)} transition:fade={{ duration: 200 }}>
-                            <Card task={row.task} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} columnColor={columnColor} inline={true} parentSelected={showSelected} {showSubtaskBorder} {onSelect} {multiSelect} {onRefreshBoard} outline={{ progress: row.progress, parentModel: row.parentModel }} onRollupHover={(taskId) => { rollupHovered = taskId ?? ''; }} />
+                        <div class="subtask-wrapper" transition:fade={{ duration: 200 }}>
+                            <Card task={row.task} {columnId} {projectId} {childrenMap} {expandedTasks} {onToggleExpanded} {onCreateChildTask} columnColor={columnColor} inline={true} parentSelected={showSelected} {showSubtaskBorder} {onSelect} {multiSelect} {onRefreshBoard} outline={{ parentModel: row.parentModel }} />
                         </div>
                     {/each}
                 </div>
@@ -1493,25 +1441,17 @@
         background: color-mix(in srgb, var(--group-color, transparent) 7%, transparent);
         border-radius: 2px;
     }
-    /* The rows a hovered roll-up waits for are scattered through the list, so a tint shows them. */
-    .subtask-wrapper.is-waited :global(.card) {
-        background: color-mix(in srgb, var(--color-accent) 14%, transparent);
-    }
     .card.is-outline-row {
         background: transparent;
         border: none;
         border-left: 2px solid var(--status-color, var(--color-text-tertiary));
         border-radius: 2px;
-        padding: 0 6px;
+        padding: 0 12px;
         min-height: 30px;
-        --row-slot: 18px;
-        --row-gap: 6px;
-        --title-x: calc(var(--row-slot) + 2 * var(--row-gap));
     }
     .card.is-outline-row .card-title {
         margin-bottom: 0;
         min-height: 30px;
-        gap: var(--row-gap);
     }
     .card.is-outline-row:hover {
         background: var(--color-surface-2);
@@ -1521,66 +1461,7 @@
         background: var(--color-surface-3);
     }
     .card.is-done-row > .card-title > .card-title-text {
-        text-decoration: line-through;
         color: var(--color-text-tertiary);
-    }
-    .rollup-slot {
-        width: var(--row-slot);
-        flex-shrink: 0;
-        margin-right: var(--row-gap);
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-    }
-    .subtask-rollup {
-        position: relative;
-        /* Above the card's link overlay — a control under it would be unclickable. */
-        z-index: var(--z-content);
-        width: var(--row-slot);
-        height: var(--row-slot);
-        padding: 0;
-        border: none;
-        background: transparent;
-        cursor: pointer;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-    }
-    .rollup-ring {
-        position: absolute;
-        left: 50%;
-        top: 50%;
-        transform: translate(-50%, -50%);
-    }
-    .rollup-track {
-        fill: none;
-        stroke: var(--color-border);
-        stroke-width: 2;
-    }
-    .rollup-arc {
-        fill: none;
-        stroke: var(--color-status-green);
-        stroke-width: 2;
-        stroke-linecap: round;
-        transform: rotate(-90deg);
-        transform-origin: 8px 8px;
-        transition: stroke-dashoffset 0.3s ease;
-    }
-    .rollup-disc {
-        fill: var(--color-status-green);
-    }
-    .rollup-count {
-        position: relative;
-        font-size: 9px;
-        font-weight: 700;
-        line-height: 1;
-        font-family: inherit;
-        font-variant-numeric: tabular-nums;
-        color: var(--color-text-primary);
-        pointer-events: none;
-    }
-    .subtask-rollup.is-complete .rollup-count {
-        color: var(--color-text-inverse);
     }
     .badges-row.is-inline {
         margin: 0;
@@ -1589,25 +1470,20 @@
         min-width: 0;
         max-width: 50%;
     }
-    .card.is-outline-row .diff-stats-row {
-        padding-left: var(--title-x);
+    .card.is-outline-row .diff-stats {
+        flex-shrink: 0;
+        white-space: nowrap;
+    }
+    .meta-badges {
+        margin: 0;
+        flex-wrap: nowrap;
+        min-width: 0;
+        max-width: 100%;
     }
     .badge-fork {
         display: inline-flex;
         align-items: center;
         margin-right: 3px;
     }
-    @media (hover: none) {
-        .card.is-outline-row {
-            --row-slot: 28px;
-            min-height: 44px;
-        }
-        .rollup-ring {
-            width: 20px;
-            height: 20px;
-        }
-    }
-
-
     /* Expanded state indicated by progress bar, not border */
 </style>

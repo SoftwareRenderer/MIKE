@@ -744,7 +744,7 @@ import { slide } from 'svelte/transition';
             </button>
             <div class="diff-section-body">
                 {#each sortedCommittedFiles as file (file.path)}
-                    {@render diffFileEntry({ ...file, rows: file.committedRows || file.rows }, false, false, 'committed')}
+                    {@render diffFileEntry({ ...file, rows: file.committedRows?.length ? file.committedRows : file.rows }, false, false, 'committed')}
                 {/each}
             </div>
         </div>

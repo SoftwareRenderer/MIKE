@@ -120,24 +120,6 @@ describe('subtaskOutlineGroups', () => {
         expect(byId.get('a')).toMatchObject({ wave: 3, owners: [] });
     });
 
-    it('counts every descendant in a row’s progress, including the rows a collapse hides', () => {
-        const { childrenMap, expanded } = plan();
-        const progress = (id: string, exp = expanded) => {
-            const row = subtaskOutlineGroups('root', childrenMap, exp).flatMap(g => g.rows).find(r => r.task.id === id);
-            return row?.progress;
-        };
-
-        expect(progress('a1')).toEqual({ done: 1, total: 1 });
-        expect(progress('a')).toEqual({ done: 3, total: 3 });
-        expect(progress('b1')).toEqual({ done: 1, total: 2 });
-        expect(progress('b')).toEqual({ done: 1, total: 4 });
-        expect(progress('c')).toEqual({ done: 0, total: 2 });
-        expect(progress('d')).toEqual({ done: 0, total: 0 });
-
-        // Hide a1's branch: its own row stays (it is the control) and still says 1 of 1.
-        expect(progress('a1', new Set(['root', 'a', 'b', 'b1', 'c']))).toEqual({ done: 1, total: 1 });
-    });
-
     it('drops a collapsed branch and leaves its siblings where they were', () => {
         const { childrenMap } = plan();
 

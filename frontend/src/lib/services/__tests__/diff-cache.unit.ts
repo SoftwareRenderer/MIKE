@@ -511,8 +511,65 @@ describe('DiffCache', () => {
             'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0, truncated: true, staged: true, committedRows: [{ lineNumber: 1, variant: 'added', text: 'old' }] },
         };
         await cache.expandFile('a.ts');
-        expect(cache.state.files['a.ts'].committedRows).toEqual([]);
+        // The response said this file has no committed half, so the stale one goes - and goes as absent.
+        // An empty array says "there is a committed half, it is empty", which is the answer the committed
+        // section renders as an empty file over the rows on hand.
+        expect(cache.state.files['a.ts'].committedRows).toBeUndefined();
         expect(cache.state.files['a.ts'].staged).toBe(true);
+    });
+
+    // A done task shows one immutable ref comparison and the board stream keeps pushing that task's
+    // working-tree stats. Reconciling them asked `/diff/file` for every path - which answers the worktree
+    // against the baseline, not the pair on screen - because the parsed load has no git hashes to compare.
+    it('leaves a head-ref diff alone when working-tree stats arrive', async () => {
+        const getDiffFile = vi.fn(async () => ({ rows: [{ lineNumber: 1, variant: 'added', text: 'worktree line' }] }));
+        const apis = makeApis({
+            getDiffFile,
+            getTaskDiff: vi.fn(async () => ({
+                diff: 'diff --git a/a.ts b/a.ts\n-removed\n',
+                parsed_files: [{ path: 'a.ts', rows: [{ lineNumber: 4, variant: 'removed', text: 'the line on screen' }], added: 0, removed: 1 }],
+            })),
+        });
+        const cache = new DiffCache(apis, () => 'proj-1', () => 'task-1');
+        await cache.loadDiff(() => {}, { headRef: 'a'.repeat(40) });
+        cache.processStats({
+            hash: 'worktree-hash', files: 1, additions: 1, deletions: 0,
+            file_hashes: { 'a.ts': 'a-worktree-hash' },
+        }, false);
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(getDiffFile).not.toHaveBeenCalled();
+        expect(cache.state.files['a.ts'].rows.map(r => r.text)).toEqual(['the line on screen']);
+    });
+
+    it('reconciles stats again once the view goes back to the working tree', async () => {
+        const getDiffFile = vi.fn(async () => ({ rows: [{ lineNumber: 1, variant: 'added', text: 'x' }] }));
+        const apis = makeApis({
+            getDiffFile,
+            getTaskDiff: vi.fn(async () => ({ files: {} })),
+        });
+        const cache = new DiffCache(apis, () => 'proj-1', () => 'task-1');
+        await cache.loadDiff(() => {}, { headRef: 'a'.repeat(40) });
+        await cache.loadDiff(() => {});
+        cache.state.files = { 'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0 } };
+        cache.fileHashes = { 'a.ts': 'h-old' };
+        cache.processStats({ hash: 'new-hash', files: 1, additions: 0, deletions: 0, file_hashes: { 'a.ts': 'h-new' } }, false);
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(getDiffFile).toHaveBeenCalledWith('proj-1', 'task-1', 'a.ts', expect.anything());
+    });
+
+    it('a delta fetch with no committed half leaves the key out instead of an empty array', async () => {
+        const getDiffFile = vi.fn(async () => ({ rows: [{ lineNumber: 1, variant: 'added', text: 'x' }] }));
+        const cache = new DiffCache(makeApis({ getDiffFile }), () => 'proj-1', () => 'task-1');
+        cache.state.files = {
+            'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0, committedRows: [{ lineNumber: 1, variant: 'added', text: 'stale' }] },
+        };
+        cache.fileHashes = { 'a.ts': 'h-old' };
+        cache.tracker.hash = 'old-hash';
+        cache.processStats({ hash: 'new-hash', files: 1, additions: 0, deletions: 0, file_hashes: { 'a.ts': 'h-new' } }, false);
+        await vi.waitFor(() => expect(getDiffFile).toHaveBeenCalled());
+        await vi.waitFor(() => expect(cache.state.files['a.ts'].committedRows).toBeUndefined());
     });
 
     it('expandFile is a no-op for an uncached path or a rowless response', async () => {

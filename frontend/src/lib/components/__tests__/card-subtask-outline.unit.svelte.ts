@@ -88,9 +88,12 @@ function makeTask(id: string, overrides: Partial<Task> = {}): Task {
         title_generating: false,
         summarizing: false,
         parent_task_id: '',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        moved_at: new Date().toISOString(),
+        // Fixed, never `new Date()`: `sortByLastMoved` has no tiebreaker, so a fixture that let the clock
+        // advance between two tasks reorders the siblings, and every expected row list would then depend on
+        // when the file ran. A case that wants an order passes its own `moved_at`.
+        created_at: '2026-01-01T00:00:00.000Z',
+        updated_at: '2026-01-01T00:00:00.000Z',
+        moved_at: '2026-01-01T00:00:00.000Z',
         ...overrides,
     } as Task;
 }
@@ -184,72 +187,6 @@ describe('Card subtask outline', () => {
         }
     });
 
-    it('counts in the roll-up circle the rows that one waits for', () => {
-        const { container } = renderOutline(tree());
-        expect(rowWrapper(container, 'a').querySelector('.rollup-count')?.textContent).toBe('2');
-        expect(rowWrapper(container, 'a1').querySelector('.rollup-count')?.textContent).toBe('1');
-        // A leaf waits for nothing, and holds no control.
-        expect(rowWrapper(container, 'a1a').querySelector('.subtask-rollup')).toBeNull();
-    });
-
-    it('toggles its own branch from the roll-up circle', async () => {
-        const { container, onToggleExpanded } = renderOutline(tree());
-        const rollup = rowWrapper(container, 'a').querySelector<HTMLButtonElement>('.subtask-rollup')!;
-        expect(rollup.getAttribute('aria-expanded')).toBe('true');
-
-        await fireEvent.click(rollup);
-
-        expect(onToggleExpanded).toHaveBeenCalledWith('a');
-    });
-
-    it('tints exactly the rows a hovered roll-up waits for', async () => {
-        const { container } = renderOutline(tree());
-        const rollup = rowWrapper(container, 'a').querySelector('.subtask-rollup')!;
-
-        await fireEvent.pointerEnter(rollup);
-
-        expect(container.querySelectorAll('.subtask-wrapper.is-waited')).toHaveLength(2);
-        expect(rowWrapper(container, 'a1a').classList.contains('is-waited')).toBe(true);
-        expect(rowWrapper(container, 'a1').classList.contains('is-waited')).toBe(true);
-        expect(rowWrapper(container, 'a').classList.contains('is-waited')).toBe(false);
-        expect(rowWrapper(container, 'b').classList.contains('is-waited')).toBe(false);
-    });
-
-    it('tints the same rows from the keyboard as from the pointer', async () => {
-        const { container } = renderOutline(tree());
-        const rollup = rowWrapper(container, 'a1').querySelector('.subtask-rollup')!;
-
-        await fireEvent.focus(rollup);
-
-        expect([...container.querySelectorAll('.subtask-wrapper.is-waited')])
-            .toEqual([rowWrapper(container, 'a1a')]);
-
-        await fireEvent.blur(rollup);
-        expect(container.querySelectorAll('.subtask-wrapper.is-waited')).toHaveLength(0);
-    });
-
-    it('rings the count with the rows done, and turns it into a disc only when all are done', () => {
-        const { container } = renderOutline(tree({ a1: 'done', a1a: 'done', a: 'done' }));
-        const done = rowWrapper(container, 'a').querySelector('.subtask-rollup')!;
-        expect(done.classList.contains('is-complete')).toBe(true);
-        expect(done.querySelector('.rollup-disc')).toBeTruthy();
-        expect(done.getAttribute('aria-label')).toBe('Hide the 2 rows this row waits for · 2 of 2 rows done');
-
-        const partial = renderOutline(tree({ a1a: 'done' }));
-        const rollup = rowWrapper(partial.container, 'a').querySelector('.subtask-rollup')!;
-        const arc = rollup.querySelector('.rollup-arc')!;
-        expect(arc).toBeTruthy();
-        expect(rollup.querySelector('.rollup-disc')).toBeNull();
-        expect(rollup.classList.contains('is-complete')).toBe(false);
-        // The ring is drawn by the dash: a third of the circumference still missing at 1 of 2 done…
-        const dashoffset = Number(/stroke-dashoffset:\s*([\d.]+)/.exec(arc.getAttribute('style') ?? '')?.[1]);
-        const circumference = Number(/stroke-dasharray:\s*([\d.]+)/.exec(arc.getAttribute('style') ?? '')?.[1]);
-        expect(circumference).toBeGreaterThan(0);
-        expect(dashoffset).toBeCloseTo(circumference / 2, 5);
-        // …and a control that says which half it waits on.
-        expect(rollup.getAttribute('aria-label')).toBe('Hide the 2 rows this row waits for · 1 of 2 rows done');
-    });
-
     it('keeps the row actions a card has', () => {
         const { container } = renderOutline(tree());
         const row = rowWrapper(container, 'a1').querySelector('.card')!;
@@ -257,19 +194,24 @@ describe('Card subtask outline', () => {
         expect(row.querySelector('button[aria-label="Edit task"]')).toBeTruthy();
     });
 
-    it('holds its badges on the title line and its file count under it', () => {
-        // The reserve that keeps a row clear of its action buttons is paid by the one line the badges
-        // share with the title, and the file count is the row's second line — both belong to the row.
+    it('holds the status word on the title line and what the row did under it', () => {
+        // The reserve that keeps a row clear of its action buttons is paid by the one line the status word
+        // shares with the title. The second line is the row's own: the file count and the model it ran on.
         const t = tree();
         t.tasks.a.model_name = 'beta';
+        t.tasks.a.execution_state = 'paused';
         diffStatsStore.set('a', { hash: 'deadbeef', files: 2, additions: 4, deletions: 1, staged_paths: ['x.ts', 'y.ts'] });
         try {
             const { container } = renderOutline(t);
             const listing = container.querySelector('.card')!;
-            const row = rowWrapper(container, 'a').querySelector('.card')!;
-            expect(row.querySelector('.card-title .badges-row.is-inline .model-badge')).toBeTruthy();
-            expect(row.querySelector(':scope > .diff-stats-row .diff-files')?.textContent).toBe('2 files');
-            // The card that lists the rows keeps no diff line of its own under their indent.
+            const row = rowWrapper(container, 'a').querySelector(':scope > .card')!;
+            const title = row.querySelector('.card-title')!;
+            const second = row.querySelector(':scope > .diff-stats-row')!;
+            expect(title.querySelector('.badges-row.is-inline')?.textContent).toContain('Paused');
+            expect(title.querySelector('.model-badge')).toBeNull();
+            expect(second.querySelector('.diff-files')?.textContent).toBe('2 files');
+            expect(second.querySelector('.model-badge')?.textContent).toContain('beta');
+            // The card that lists the rows keeps no second line of its own under their indent.
             expect(listing.querySelector(':scope > .diff-stats-row')).toBeNull();
         } finally {
             diffStatsStore.remove('a');

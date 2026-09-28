@@ -22,8 +22,8 @@ own subtree. These two must keep agreeing, case for case.
   must finish before it. The band carries only a wash of its root's colour; each row's own status is its
   `border-left`, so a row still in backlog reads grey beneath the done row it waits for. One rule per band
   would paint every row with the branch head's status.
-- A collapsed parent keeps its row — that row is the control that reopens the branch — and contributes no
-  rows below it. Siblings keep their places.
+- A collapsed parent keeps its row and contributes no rows below it; its own card collapses it, from the
+  progress bar under that card's title. Siblings keep their places.
 - A `parent_task_id` cycle cuts rather than hangs: each measure carries its own path set.
 - A task's effective provider and model are its own `llama_server_url` / `model_name`, else the worker
   default — never the parent row's. So a badge compares two resolutions: `provider · model` when either
@@ -32,53 +32,48 @@ own subtree. These two must keep agreeing, case for case.
 - A row *is* a `Card`, so drag, the link overlay, multi-select, selection and the action icons are the same
   code as the card's. A capability added to a card is on a row for free; that is the reason rows are not a
   second component.
-- The rows one control waits for are tinted from that row's `owners`, on pointer and on keyboard focus
-  alike, and focus is real DOM focus (`AGENTS.md → Frontend`). Nothing stores a "highlighted" row.
-- Every row's title starts at one x whatever its depth: nothing is indented and the roll-up slot is
-  fixed-width, children or not.
-- A row's title line holds the title and its badges, and it gives up the action buttons' width only while
-  those buttons are drawn — which on touch (`hover: none`) means always, since no `:hover` will ever come
-  there. The reserve is the *line's* (`--actions-reserve` as `.card-title`'s padding-right), never the
-  title's or a badge's own, so it is paid once however many things share the line.
+- **A row has no leading control and no indent.** Its title line, and its second line when it has one, both
+  start at the row's padding box. So the first glyph of every row sits at one x — whatever its depth, its
+  children or its status.
+- A row draws a second line only when it has something to report — the file count, or a model of its own.
+  A row with neither is one line tall, and no height is reserved for a control that is not there.
+- A row's title line holds the title, the status word and the memory alert; its second line holds the file
+  count and the model badge. The title gives up the action buttons' width only while those buttons are
+  drawn — which on touch (`hover: none`) means always, since no `:hover` will ever come there. The reserve
+  is the *line's* (`--actions-reserve` as `.card-title`'s padding-right), never the title's or a badge's
+  own, so it is paid once however many things share the line.
 - A badge never costs a row its title. A title claims space as surplus only (`flex: 1` is a zero basis),
   so an unsquashable badge leaves the line nothing to shrink: the title falls to zero width and the badge
   hangs out of the row. The badges shrink, capped at half the line; the badge's own ellipsis does the
-  clipping.
-- A line under a row's title — the file count — starts under the title's first glyph, not under the row's
-  rule and roll-up slot. One `--title-x`, built on the row from the widths the rule and the slot take, is the
-  only source of that x; an indent stated twice drifts. The rule is outside the padding box of both lines, so
-  it needs no term in the formula.
+  clipping. On the second line the file count keeps its width and `.meta-badges` is what gives way.
 
 ## How it is held
 
 `frontend/src/lib/utils/subtask-outline.ts` exports `subtaskOutlineGroups(rootId, childrenMap, expanded,
 sortOldestFirst)` and the two shapes it returns — nothing else. One `SubtaskGroup` is one top-level
-subtask — `root` plus `rows` — and each `SubtaskRow` carries `task`, `wave`, `owners` (every ancestor below
-the card, outermost first) and `progress` (done over total across every descendant). The measure memoises
-`wave` and `progress` bottom-up and sorts with `sortByLastMoved`, the comparator the columns use.
-`Card.svelte` annotates the rows it renders with `SubtaskRow`, which is why the type is exported.
+subtask — `root` plus `rows` — and each `SubtaskRow` carries `task`, `wave`, and `owners` (every ancestor
+below the card, outermost first, so its last entry is the row's own parent). The measure memoises `wave`
+bottom-up and sorts with `sortByLastMoved`, the comparator the columns use. `Card.svelte` annotates the rows
+it renders with `SubtaskRow`, which is why the type is exported.
 
 `Card.svelte` renders the groups as one `.subtask-group` band per sequence of `.subtask-wrapper` rows. The
-`outline` prop marks a card as a row and carries the two things only the card holding the outline can know:
-how far that row's descendants have got (the roll-up circle), and its parent's resolved model (what the
-badge rule compares against). `onRollupHover` names the row whose roll-up circle has the pointer or the
-keyboard, and the card holding the outline marks the rows whose `owners` list names it — the tint is decided
-where the rows are, not inside the row. Both hosts pass the same props they always did: `Column.svelte` via
-`Board.svelte`, and `CardDetail/BoardOverview.svelte`.
+`outline` prop marks a card as a row and carries the one thing only the card holding the outline can know:
+the row's parent's resolved model, which is what the badge rule compares against. Both hosts pass it the
+same way: `Column.svelte` via `Board.svelte`, and `CardDetail/BoardOverview.svelte`.
 
-The widths that line a row up live in `Card.svelte`'s style block as `--row-slot` and `--row-gap`, and
-`.card.is-outline-row` derives `--title-x` from them and paints its own `border-left` from the `--status-color`
-the card sets inline. `.rollup-slot` and `.subtask-rollup` read those same vars, so the touch block — where the
-slot is 28px, not 18px — widens one declaration and `--title-x` follows.
+A row owns no width of its own beyond its `padding: 0 12px`, the card's own padding. The title line and the second line are ordinary
+children of that padding box, so neither carries an indent, and the action buttons anchor to the title line
+as they do on a card. `.card.is-outline-row` paints its `border-left` from the `--status-color` the card
+sets inline. A row is the 30px title line, plus the shared `.diff-stats-row` when it reports something; a
+`.badge` in that line is what makes it taller than the file count's line box, and `.meta-badges` keeps the
+pair to one line.
 
 ## Checking this
 
-`cd frontend && npm test` fails it: `frontend/src/lib/utils/__tests__/subtask-outline.unit.ts` holds the
-ordering rules and `frontend/src/lib/components/__tests__/card-subtask-outline.unit.svelte.ts` the rendered
-shape — row order, one band per branch, the roll-up circle's count, tinting, the badge rule, and which line
-of the row holds its badges and its file count. The bar, the painted circle, the reserve appearing with the
-buttons (and a touch row's `⋯` being painted rather than merely tappable), the badge's cap and the file
-line's x are measured in a browser by `npx playwright test board-card-title-actions`. So is each row's rule:
-it carries that row's own status colour while its band-mates keep theirs. That spec measures the
-file line's indent with a probe rather than a real task, because a real file count needs a worktree and a
-worktree needs an executor turn, which this spec's shared project must not queue (`AGENTS.md → Testing`).
+`cd frontend && npm test` fails it. `frontend/src/lib/utils/__tests__/subtask-outline.unit.ts` holds the
+ordering rules; `frontend/src/lib/components/__tests__/card-subtask-outline.unit.svelte.ts` the rendered
+shape: row order, one band per branch, a collapsed branch contributing no rows below its own, the badge
+rule, and which line holds the status word, the file count and the model badge. The bar, the reserve
+appearing with the buttons (and a touch row's `⋯` being painted rather than merely tappable) and the badge's
+cap are measured in a browser by `npx playwright test board-card-title-actions`. So is each row's rule: it
+carries that row's own status colour while its band-mates keep theirs.

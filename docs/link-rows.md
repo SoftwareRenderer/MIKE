@@ -140,7 +140,7 @@ Sidebar project rows and task cards are real links, so the browser's own link ac
 
 - **Project row** = `<a class="project-item" href="/?project=<id>" role="button" tabindex="0">`; unmodified click `preventDefault()`s, **any modifier click is left uncancelled**. A cloning project gets **no href**. `role="button"` means Space is handled explicitly.
 - **Task card** root stays `<div class="card" role="button" tabindex="0" draggable>` with a full-cover `<a class="card-open-link" aria-hidden tabindex="-1" draggable="false">` overlay (`inset:0; z-index:1`) as last child — a root anchor is impossible (the flat subtask outline draws its rows as `Card`s → anchor-in-anchor). See `docs/subtask-outline.md → How it is held`.
-- **Stacking contract** (`Card.svelte`): `.card-title` is deliberately NOT lifted so the overlay still covers the title; instead `.card-actions`, `.subtask-progress-bar`, `.subtask-list`, `.subtask-rollup` carry the content rank (`var(--z-content)`), and `.card.queued > *` is scoped `> :not(.card-open-link)`.
+- **Stacking contract** (`Card.svelte`): `.card-title` is deliberately NOT lifted so the overlay still covers the title; instead `.card-actions`, `.subtask-progress-bar` and `.subtask-list` carry the content rank (`var(--z-content)`), and `.card.queued > *` is scoped `> :not(.card-open-link)`.
 - **Never** re-tune these rows with `<button>`/`<div>` + a faked context menu — the link menu is DOM-level and unsynthesizable. Keep selectors tag-agnostic (`.project-item`, not `button.project-item`).
 ## Checking this
 
