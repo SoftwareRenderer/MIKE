@@ -43,7 +43,7 @@ export interface AppStream {
 }
 
 /** Options for createAppStream. */
-export interface AppStreamOptions {
+interface AppStreamOptions {
     /**
      * Provider of the client's cached done-task diff stats, called on every
      * project (re)subscribe. Returns task_id -> task updated_at for done tasks

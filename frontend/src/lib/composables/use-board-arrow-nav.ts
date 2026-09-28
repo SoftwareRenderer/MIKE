@@ -8,6 +8,7 @@ import { isEditableTarget } from '$lib/utils/keyboard';
  * Focus inside `.project-list` is owned by App/Sidebar.svelte, so skipped here.
  */
 
+/** @knipignore The arrow-nav tests build the column fixtures they hand to `resolveArrowTarget`. */
 export interface BoardColumnRef {
     /** The `.column` element (project-list nav for the pseudo-column). */
     el: Element;
@@ -20,7 +21,8 @@ export interface BoardColumnRef {
 export type ArrowKey = 'ArrowDown' | 'ArrowUp' | 'ArrowLeft' | 'ArrowRight';
 
 /**
- * Arroy Key navigation
+ * @knipignore The arrow-nav tests drive the ring with columns they built; `useBoardArrowNav` reads
+ * the same shapes off the live DOM.
  */
 export function resolveArrowTarget(opts: {
     columns: BoardColumnRef[];

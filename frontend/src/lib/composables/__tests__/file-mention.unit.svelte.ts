@@ -2,10 +2,10 @@
 // Unit tests for the shared @-file-mention state machine.
 // (.svelte.ts extension: the composable under test uses $state.)
 import { describe, it, expect, vi } from 'vitest';
-import { FileMention } from '../use-file-mention.svelte';
+import { useFileMention } from '../use-file-mention.svelte';
 
 interface Harness {
-    mention: FileMention;
+    mention: ReturnType<typeof useFileMention>;
     setValue: ReturnType<typeof vi.fn>;
     text: string;
     el: any;
@@ -21,7 +21,7 @@ function makeHarness(initial = ''): Harness {
         parentElement: { getBoundingClientRect: () => ({ top: 0, bottom: 40, left: 0, width: 400 }) },
     };
     const setValue = vi.fn((v: string) => { text = v; });
-    const mention = new FileMention({
+    const mention = useFileMention({
         getProjectId: () => 'proj-1',
         getValue: () => text,
         setValue,

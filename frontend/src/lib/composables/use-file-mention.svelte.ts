@@ -27,7 +27,7 @@ export interface FileMentionOptions {
     getPositionSource?: () => HTMLElement | null | undefined;
 }
 
-export class FileMention {
+class FileMention {
     trigger = $state<{ atIndex: number; query: string } | null>(null);
     results = $state<Array<{ path: string }>>([]);
     position = $state<{ top: number; bottom: number; left: number; width: number } | null>(null);

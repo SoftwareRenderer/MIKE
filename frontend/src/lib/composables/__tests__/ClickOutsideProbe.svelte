@@ -1,6 +1,5 @@
 <script lang="ts">
     import { useClickOutside } from '../use-click-outside.svelte';
-    import type { OutsideEvent } from '../use-click-outside.svelte';
 
     /**
      * Test-only: a real component instance, because the composable under test registers its
@@ -8,7 +7,7 @@
      * destroyed. The box lives in an `{#if}` so `container()` is `null` exactly while it is closed.
      */
     let { event = 'mousedown', capture = false, portal = false, onClose }: {
-        event?: OutsideEvent;
+        event?: Parameters<typeof useClickOutside>[2]['event'];
         capture?: boolean;
         /** Render a second node that is not inside the box, as a portalled dropdown is not. */
         portal?: boolean;

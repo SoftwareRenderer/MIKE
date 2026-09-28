@@ -6,7 +6,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createFakeIndexedDB, fakeKeysByStore, installFakeIndexedDB } from './fake-indexeddb';
 import type { FakeIDBFactory } from './fake-indexeddb';
-import type { ActionType } from '$lib/api/queue';
 
 let fakeIndexedDB: FakeIDBFactory;
 let restoreIndexedDB: (() => void) | undefined;
@@ -112,7 +111,7 @@ describe('clearAll (sign-out sweep)', () => {
     it('cannot erase a queued write the queue module still holds in memory — clearQueue must run too', async () => {
         const storage = await import('$lib/storage');
         const { enqueueAction, clearQueue } = await import('$lib/api/queue');
-        const send = (content: string): { type: ActionType; params: Record<string, any> } => ({
+        const send = (content: string): Parameters<typeof enqueueAction>[0] => ({
             type: 'sendTaskMessage', params: { projectId: 'proj-a', taskId: 'task-1', content } });
 
         await enqueueAction(send('written while offline'));

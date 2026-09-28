@@ -13,6 +13,8 @@ const DRAG_THRESHOLD = 6;
 /**
  * Distance from the current scroll position to the very bottom, in px. Pass `totalHeight` only
  * where the element's own `scrollHeight` is smaller than its content, as a virtual list's is.
+ *
+ * @knipignore The follow tests measure where the viewport ended; `isAtBottom` answers yes-or-no.
  */
 export function distanceFromBottom(el: HTMLElement, totalHeight: number = el.scrollHeight): number {
     return totalHeight - el.scrollTop - el.clientHeight;

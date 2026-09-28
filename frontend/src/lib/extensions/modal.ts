@@ -24,6 +24,8 @@ export interface ExtensionModalOptions {
  * How many extension modals may be open at once. The dialog is blocking and
  * user-dismissed, so an unbounded `ui.modal` loop would lock the UI; a granted
  * capability should never be able to do that.
+ *
+ * @knipignore The budget test opens dialogs up to this cap and one past it.
  */
 export const MAX_OPEN_MODALS = 3;
 

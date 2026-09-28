@@ -141,7 +141,11 @@ export function updateExtensionImage(id: string, acknowledgeNewDomains = false):
     return streamOperation(`/extensions/${id}/update`, { acknowledge_new_domains: acknowledgeNewDomains });
 }
 
-/** Build progress event from an operation's SSE stream. */
+/**
+ * Build progress event from an operation's SSE stream.
+ *
+ * @knipignore The locale-offer test builds its faked install stream from these events.
+ */
 export interface BuildProgressEvent {
     extension: string;
     progress: number;

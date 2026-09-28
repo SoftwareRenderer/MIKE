@@ -15,7 +15,7 @@
  * again while down costing nothing at all.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createAppStream, type AppStream, type AppStreamOptions } from '../stream';
+import { createAppStream, type AppStream } from '../stream';
 
 /** A `WebSocket` that records what it was asked to write, and changes state only when told. */
 class FakeSocket {
@@ -47,7 +47,7 @@ class FakeSocket {
 let stream: AppStream | null = null;
 let realWS: any;
 
-function start(options: AppStreamOptions = {}): FakeSocket {
+function start(options: Parameters<typeof createAppStream>[1] = {}): FakeSocket {
     stream = createAppStream({}, options);
     return last();
 }

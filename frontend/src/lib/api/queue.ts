@@ -43,7 +43,7 @@ registerSetHttpReachable((reachable: boolean) => setHttpReachable(reachable));
 type QueuedAction = StoredQueuedAction;
 
 /** All recognized action types for the offline queue. */
-export type ActionType =
+type ActionType =
     // Task CRUD
     | 'createTask' | 'updateTask' | 'deleteTask' | 'moveTask'
     | 'commitAndDone' | 'clearDoneTasks' | 'dismissMemoryAlert'

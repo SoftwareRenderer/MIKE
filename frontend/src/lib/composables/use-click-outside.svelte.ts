@@ -15,7 +15,7 @@
  */
 
 /** The events that can decide "this press was outside". */
-export type OutsideEvent = 'click' | 'mousedown' | 'pointerdown';
+type OutsideEvent = 'click' | 'mousedown' | 'pointerdown';
 
 export interface ClickOutsideOptions {
     event: OutsideEvent;

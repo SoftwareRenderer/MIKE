@@ -9,13 +9,16 @@
 import type { CapabilityDef, HostContext } from '../types';
 import { apiFetch } from '$lib/api/helpers';
 
-// Exported for the capability-catalog test only; nothing in the app reads it.
-export const CAP_STORAGE_GET = 'storage.get';
+const CAP_STORAGE_GET = 'storage.get';
 export const CAP_STORAGE_SET = 'storage.set';
 const CAP_STORAGE_DELETE = 'storage.delete';
 const CAP_STORAGE_LIST = 'storage.list';
 
-/** Build a namespace from the injection context; falls back to 'global'. */
+/**
+ * Build a namespace from the injection context; falls back to 'global'.
+ *
+ * @knipignore storage.unit measures the namespace rule; the handlers only put the answer in the URL.
+ */
 export function buildStorageNamespace(context: any): string {
     const parts: string[] = [];
     if (context?.projectId) parts.push(`p:${context.projectId}`);

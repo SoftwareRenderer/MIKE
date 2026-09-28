@@ -5,7 +5,7 @@ import { watchSuspension } from '$lib/utils/page-suspension';
  * One listener set for "this window has come back", so every view that can go stale while the user is
  * elsewhere answers the same signal the same way.
  */
-export interface TabReturnOptions {
+interface TabReturnOptions {
     /** True while this screen could be showing something the server has moved past. */
     mayBeBehind?: () => boolean;
     /** Ask the server whether content changed on every return signal; the caller makes that check cheap. */
@@ -16,7 +16,7 @@ export interface TabReturnOptions {
     onReturn: (source: ReturnSource) => void;
 }
 
-export interface TabReturn {
+interface TabReturn {
     destroy(): void;
 }
 

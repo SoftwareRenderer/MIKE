@@ -4,7 +4,6 @@
      * `$effect` and registers its key listener in the component's effect scope. `slot` is the
      * pending-request slot it is bound to, so two probes can prove each one clears only its own.
      */
-    import type { DialogSlot } from '../use-promise-dialog.svelte';
     import { usePromiseDialog } from '../use-promise-dialog.svelte';
 
     interface ProbeRequest {
@@ -12,8 +11,11 @@
         _resolve?: (value: boolean) => void;
     }
 
+    /** The slot shape `usePromiseDialog` takes for this request. */
+    type ProbeSlot = Parameters<typeof usePromiseDialog<ProbeRequest>>[0]['slot'];
+
     let { slot, confirmOnEnter = true, label = '' }: {
-        slot: DialogSlot<ProbeRequest>;
+        slot: ProbeSlot;
         confirmOnEnter?: boolean;
         /** Marks the probe's own markup, so a test can tell two of them apart. */
         label?: string;

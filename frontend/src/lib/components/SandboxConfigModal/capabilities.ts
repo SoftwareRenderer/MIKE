@@ -6,6 +6,8 @@
  * What may be granted is decided by `sandboxruntime.ValidateCapabilities` on the Go side, which
  * judges each name by shape and applies the isolation posture first; this list is only what the
  * input offers, and typing a name not on it is still a name the server rules on.
+ *
+ * @knipignore The suggestion tests walk the whole list; `capSuggestionsFor` answers eight at a time.
  */
 export const KNOWN_CAPABILITIES: readonly string[] = [
     'CAP_CHOWN',

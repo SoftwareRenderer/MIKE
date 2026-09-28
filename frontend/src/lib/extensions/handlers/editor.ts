@@ -24,6 +24,9 @@ export const CAP_EDITOR_SAVE = 'editor.save';
  * (below). The FileEditor's updateListener uses it to recognize an
  * extension's own push and NOT echo it back as editor.contentChange — see
  * {@link isExtensionContentSet}.
+ *
+ * @knipignore editor.unit asserts the dispatched marker is the one `isExtensionContentSet` refuses
+ * to echo.
  */
 export const CONTENT_SET_USER_EVENT = 'setContent';
 
@@ -50,6 +53,8 @@ const footerButtons = new Map<string, Map<HTMLElement | null, () => void>>();
  * How many footer buttons one extension may own in one editor instance. The
  * footer is host UI shared with LSP status and the file's own controls, so a
  * granted `editor.addFooterButton` must not be able to flood it.
+ *
+ * @knipignore The footer-button test fills this budget and adds one more.
  */
 export const MAX_FOOTER_BUTTONS_PER_INSTANCE = 8;
 

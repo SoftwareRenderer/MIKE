@@ -109,6 +109,9 @@ export function registerSetHttpReachable(fn: (reachable: boolean) => void): void
  * because this is an `Error` that carries the name. Call `isAborted(err)` rather than either. A check that
  * misses it turns a silent cancellation into a loud error toast; a check that over-matches turns a real
  * outage into silence, so the check belongs on the cancellation and nowhere else.
+ *
+ * @knipignore fetch-failure asserts the cancellation `apiFetch` throws is this class, and diff-cache
+ * throws one.
  */
 export class RequestAborted extends Error {
     readonly name = 'AbortError';
@@ -219,7 +222,11 @@ export async function apiError(res: Response, defaultMsg: string): Promise<Error
     }
 }
 
-/** One frame of a server progress stream: the frame's `event:` name, and its `data:` text. */
+/**
+ * One frame of a server progress stream: the frame's `event:` name, and its `data:` text.
+ *
+ * @knipignore The stream tests type the frames they collect from `readEventStream`.
+ */
 export interface EventFrame {
     /** The frame's `event:` field, or `'message'` when it carries none. */
     event: string;

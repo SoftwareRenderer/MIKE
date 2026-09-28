@@ -2,12 +2,15 @@
  * `page-suspension` is the fallback. A busy-loop freeze is not a real unfreeze, so no e2e spec reaches this
  * listener. */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createTabReturn, type TabReturn, type TabReturnOptions } from '$lib/composables/use-tab-return';
+import { createTabReturn } from '$lib/composables/use-tab-return';
+
+type WatchOptions = Parameters<typeof createTabReturn>[0];
+type Watcher = ReturnType<typeof createTabReturn>;
 
 describe('createTabReturn', () => {
-    const watchers: TabReturn[] = [];
+    const watchers: Watcher[] = [];
 
-    function watch(opts: TabReturnOptions): TabReturn {
+    function watch(opts: WatchOptions): Watcher {
         const watcher = createTabReturn(opts);
         watchers.push(watcher);
         return watcher;

@@ -28,7 +28,7 @@ export interface PromiseDialogRequest {
  * The store slot the pending request lives in. `get` is read reactively, so arming follows the
  * store's own `$state`.
  */
-export interface DialogSlot<V> {
+interface DialogSlot<V> {
     get: () => V | null;
     /** Empty the slot. Called on dismiss, and on nothing else. */
     clear: () => void;
