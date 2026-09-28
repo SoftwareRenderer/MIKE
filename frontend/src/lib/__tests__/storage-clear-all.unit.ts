@@ -71,7 +71,7 @@ describe('clearAll (sign-out sweep)', () => {
         // Defaults, not the 200/400 that was saved.
         expect(await storage.loadExplorerLayout())
             .toEqual({ leftWidth: 250, rightWidth: 180, splitRatio: 0.5 });
-        expect(await storage.loadCollapsedTasks().then((s) => s.size)).toBe(0);
+        expect(keysIn('collapsed-tasks')).toEqual([]);
         expect(await storage.loadCollapsedSections().then((s) => s.size)).toBe(0);
         expect(await storage.loadCollapsedDiffFiles().then((s) => s.size)).toBe(0);
         expect(await storage.loadEditorTabs('proj-a')).toBeNull();

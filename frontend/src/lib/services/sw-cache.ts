@@ -10,7 +10,11 @@
  * gone belongs here too, never at a call site with a string literal.
  */
 
-/** Must equal `workbox.runtimeCaching[0].options.cacheName` in `vite.config.ts`. */
+/**
+ * Must equal `workbox.runtimeCaching[0].options.cacheName` in `vite.config.ts`.
+ *
+ * @knipignore The drop tests assert which cache name is deleted; nothing outside this file reads it.
+ */
 export const EXTENSION_ASSET_CACHE = 'kanban-extensions';
 
 /**

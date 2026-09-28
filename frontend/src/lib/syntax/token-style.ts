@@ -27,6 +27,7 @@ export interface TokenStyle {
   wavy?: boolean;
 }
 
+/** @knipignore The rows the stylesheet check walks; the editor and diff consumers take colors and classes. */
 export const TOKEN_STYLES: readonly TokenStyle[] = [
   { tag: tags.keyword, diffClass: 'hl-keyword', dark: '#F97583', light: '#CF222E' },
   // Constants, all three tags that mean one: a stream token named "atom" (what a declared profile

@@ -22,8 +22,10 @@ export type Catalog = Record<string, MessageValue>;
  * broken, and rendering that into every string lookup is not a thing to attempt.
  */
 const MAX_CATALOG_BYTES = 1_000_000;
+/** @knipignore Its test builds one key more than this. */
 export const MAX_CATALOG_KEYS = 20_000;
 const MAX_KEY_LEN = 200;
+/** @knipignore Its test writes one character more than this. */
 export const MAX_VALUE_LEN = 4000;
 
 export type CatalogParse =

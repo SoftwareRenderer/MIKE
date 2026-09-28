@@ -7,8 +7,9 @@
     import { sortByLastMoved } from '$lib/utils/sort-tasks';
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
     import { gc } from '$lib/storage';
-    import { mergeQueuedUpdate, filterTopLevelTaskIds, ancestorInProgress, willConsolidateIntoParent } from '$lib/utils/task-utils';
+    import { mergeQueuedUpdate, ancestorInProgress, willConsolidateIntoParent } from '$lib/utils/task-utils';
     import { createStatusLabel } from '$lib/utils/subtask-status';
+    import { createBulkTaskActions } from '$lib/utils/bulk-task-actions';
     import { columnInViewport, type Span } from '$lib/utils/review-notify';
     import { useMultiSelectActions } from '$lib/composables/use-multi-select-actions.svelte';
     import { useSubtaskHierarchy } from '$lib/composables/use-subtask-hierarchy.svelte';
@@ -22,88 +23,40 @@
 
     let { tasks, projectId, projectPath, onAddTask, onCreateChildTask, onRefreshBoard, onSelectTask, scrollToColumn, boardFocus }: { tasks: Task[]; projectId: string; projectPath?: string; onAddTask?: () => void; onCreateChildTask?: (parentId: string) => void; onRefreshBoard?: () => void; onSelectTask?: (task: Task) => void; scrollToColumn?: string | null; boardFocus?: { projectId: string; column: string } | null } = $props();
 
+    /**
+     * A column is two things at once: `id` is **data** (compared, persisted, sent to the
+     * API — never translated, and what {@link getColumnEl} finds a column by), and
+     * `labelKey` is both its visible label and the word in its accessible name.
+     */
+    const columns: { id: string; labelKey: MessageKey; color: string }[] = [
+        { id: 'backlog', labelKey: 'board.column.backlog', color: 'var(--color-column-backlog)' },
+        { id: 'in_progress', labelKey: 'board.column.inProgress', color: 'var(--color-column-in-progress)' },
+        { id: 'review', labelKey: 'board.column.review', color: 'var(--color-column-review)' },
+        { id: 'done', labelKey: 'board.column.done', color: 'var(--color-column-done)' },
+    ];
+
+    /** Visible label for a status id (ids themselves are data — see {@link columns}). */
+    const statusLabel = createStatusLabel(columns);
+
     // Multi-select actions (wires up floating bar events)
-    let multiSelectActions = useMultiSelectActions({
-        async onDelete(taskIds, titles) {
-            const confirmed = await dialogStore.showConfirm({
-                title: t('board.deleteTasks.title'),
-                message: t('board.deleteTasks.message', { count: taskIds.length }),
-                items: titles,
-                confirmText: t('board.confirm.delete'),
-                cancelText: t('board.confirm.cancel'),
-            });
-            if (!confirmed) return;
-            // Only send DELETE for top-level tasks, server recursively deletes descendants
-            const topLevelIds = filterTopLevelTaskIds(taskIds, tasks);
-            for (const id of topLevelIds) {
-                try {
-                    await deleteTask(projectId, id);
-                    removeTaskFromBoard(appStore, id);
-                } catch (err) {
-                    dialogStore.showToast(t('board.toast.deleteFailed', { error: String(err) }), 'error');
-                }
-            }
-            onRefreshBoard?.();
+    let multiSelectActions = useMultiSelectActions(createBulkTaskActions({
+        tasks: () => tasks,
+        projectId: () => projectId,
+        statusLabel,
+        api: {
+            deleteTask,
+            startTask,
+            startSubtask: async (proj, taskId) => (await import('$lib/api')).startSubtask(proj, taskId),
+            updateTask: async (proj, taskId, update) => (await import('$lib/api')).updateTask(proj, taskId, update),
         },
-        async onStart(taskIds) {
-            let started = 0;
-            for (const id of taskIds) {
-                try {
-                    const task = tasks.find(t => t.id === id);
-                    if (!task) continue;
-                    if (task.parent_task_id) {
-                        const { startSubtask } = await import('$lib/api');
-                        const updated = await startSubtask(projectId, id);
-                        updateTaskInBoard(appStore, updated.id, updated);
-                    } else {
-                        const updated = await startTask(projectId, id);
-                        updateTaskInBoard(appStore, updated.id, updated);
-                    }
-                    started++;
-                } catch (err) {
-                    dialogStore.showToast(t('board.toast.startFailed', { error: String(err) }), 'error');
-                }
-            }
-            if (started > 0) {
-                dialogStore.showToast(t('board.toast.started', { count: started }), 'success');
-            }
+        board: {
+            update: (task) => updateTaskInBoard(appStore, task.id, task),
+            remove: (taskId) => removeTaskFromBoard(appStore, taskId),
         },
-        async onMove(taskIds, status) {
-            let moved = 0;
-            for (const id of taskIds) {
-                const task = tasks.find(t => t.id === id);
-                if (!task) continue;
-                if (await applyMove(task, status)) moved++;
-            }
-            if (moved > 0) {
-                dialogStore.showToast(
-                    t('board.toast.movedCount', { count: moved, status: statusLabel(status) }),
-                    'success',
-                );
-            }
-        },
-        async onModelChange(taskIds, providerUrl, modelName, reasoningEffort) {
-            let updated = 0;
-            for (const id of taskIds) {
-                try {
-                    const { updateTask } = await import('$lib/api');
-                    const taskUpdate: Record<string, unknown> = { llama_server_url: providerUrl };
-                    if (modelName) taskUpdate.model_name = modelName;
-                    else taskUpdate.model_name = undefined;
-                    if (reasoningEffort) taskUpdate.reasoning_effort = reasoningEffort;
-                    else taskUpdate.reasoning_effort = undefined;
-                    const result = await updateTask(projectId, id, taskUpdate);
-                    updateTaskInBoard(appStore, result.id, result);
-                    updated++;
-                } catch (err) {
-                    dialogStore.showToast(t('board.toast.modelUpdateFailed', { error: String(err) }), 'error');
-                }
-            }
-            if (updated > 0) {
-                dialogStore.showToast(t('board.toast.modelUpdated', { count: updated }), 'success');
-            }
-        },
-    });
+        dialog: dialogStore,
+        moveTask: applyMove,
+        onRefreshBoard: () => onRefreshBoard?.(),
+    }));
     let multiSelect = multiSelectActions.multiSelect;
 
     onMount(() => {
@@ -139,21 +92,6 @@
         uiStore.showCardDetail = true;
     }
 
-    /**
-     * A column is two things at once: `id` is **data** (compared, persisted, sent to the
-     * API — never translated, and what {@link getColumnEl} finds a column by), and
-     * `labelKey` is both its visible label and the word in its accessible name.
-     */
-    const columns: { id: string; labelKey: MessageKey; color: string }[] = [
-        { id: 'backlog', labelKey: 'board.column.backlog', color: 'var(--color-column-backlog)' },
-        { id: 'in_progress', labelKey: 'board.column.inProgress', color: 'var(--color-column-in-progress)' },
-        { id: 'review', labelKey: 'board.column.review', color: 'var(--color-column-review)' },
-        { id: 'done', labelKey: 'board.column.done', color: 'var(--color-column-done)' },
-    ];
-
-    /** Visible label for a status id (ids themselves are data — see {@link columns}). */
-    const statusLabel = createStatusLabel(columns);
-
     /** Card direction from Settings → Preferences: true = least recently moved on top. */
     const sortOldestFirst = $derived(appStore.config?.sort_oldest_first === true);
 
@@ -182,7 +120,6 @@
     async function applyMove(task: Task, targetStatus: string): Promise<boolean> {
         try {
             const updated = await moveTask(projectId, task.id, targetStatus);
-            // The WebSocket broadcast is what lands a consolidating subtask.
             const willConsolidate = willConsolidateIntoParent(task, tasks, targetStatus);
             if (!willConsolidate) {
                 // When offline, updated is a partial optimistic result — merge with existing task

@@ -24,6 +24,8 @@ export interface ScrollbarLineLayout {
  *
  * @param boundary - place the band at the line's bottom edge instead of its center, for
  *   'removed' marks: the deleted content sits in the gap below the anchor line.
+ *
+ * @knipignore Each band's position and height are asserted against a canvas height and a line count.
  */
 export function scrollbarMarkerRect(
     ln: number,
@@ -47,7 +49,11 @@ export function scrollbarMarkerRect(
     return { y, h: Math.max(1, lineHeight - 0.5) };
 }
 
-/** Whether a vertical scrollbar is present (content overflows the viewport). */
+/**
+ * Whether a vertical scrollbar is present (content overflows the viewport).
+ *
+ * @knipignore The overflow comparison is asserted on two heights, including equal ones.
+ */
 export function hasVerticalScrollbar(scrollHeight: number, clientHeight: number): boolean {
     return scrollHeight > clientHeight;
 }

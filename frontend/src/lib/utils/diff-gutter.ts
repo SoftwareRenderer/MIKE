@@ -131,6 +131,8 @@ function splitLines(value: string): string[] {
  * - 'added': new line not in original
  * - 'removed': line was deleted (appears on the line before the gap)
  * - 'modified': line was changed (consecutive removed+added pair); includes the original text for display
+ *
+ * @knipignore The marker vocabulary is asserted on two texts; `mergeMarkers` shifts them through a line map.
  */
 export function computeDiffMarkers(
     originalContent: string,

@@ -77,7 +77,9 @@ function reportLostResponse(id: unknown, channel: unknown): void {
 /**
  * A single shared WebSocket for every editor tab, multiplexing workspaces and languages over
  * numbered channels. The backend answers each message with its `_ch`, so the answer reaches the
- * channel that asked. Exported so the routing tests can drive dispatchMessage without a socket.
+ * channel that asked.
+ *
+ * @knipignore The channel routing is driven here, without a socket in front of it.
  */
 export class SharedLSPConnection {
   private ws: WebSocket | null = null;

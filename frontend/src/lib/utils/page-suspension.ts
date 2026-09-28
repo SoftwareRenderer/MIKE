@@ -1,5 +1,6 @@
 import { SUSPENDED_GAP_MS } from '$lib/constants';
 
+/** @knipignore A gap is measured at the tick, at the tick plus the slack, and one ms past it. */
 export const SUSPENSION_TICK_MS = 5_000;
 
 /** A tick later than this was not a slow frame: the page was not running between the two. Every engine stops

@@ -5,7 +5,6 @@ import {
     HISTORY_DENSITY_BREAKPOINTS,
 } from '$lib/utils/git-history';
 import type { GitCommit } from '$lib/types';
-import type { CommitTooltipContext } from '$lib/utils/git-history';
 
 const COMMIT: GitCommit = {
     hash: 'abcdef1234567890abcdef1234567890abcdef12',
@@ -17,7 +16,7 @@ const COMMIT: GitCommit = {
     branches: ['feature/thing'],
 };
 
-const CTX: CommitTooltipContext = {
+const CTX = {
     primaryBranch: 'feature/thing',
     isOriginTip: true,
     dateFormatted: '2024-05-04 14:30:00',
@@ -77,7 +76,7 @@ describe('buildCommitTooltip', () => {
 
     it('omits the branch/origin line when the commit has neither', () => {
         const bare: GitCommit = { ...COMMIT, branches: [] };
-        const ctx: CommitTooltipContext = { primaryBranch: null, isOriginTip: false, dateFormatted: CTX.dateFormatted };
+        const ctx = { primaryBranch: null, isOriginTip: false, dateFormatted: CTX.dateFormatted };
         const tip = buildCommitTooltip(bare, 'compact', ctx);
         expect(tip!.split('\n')).toEqual([
             'Add the thing',

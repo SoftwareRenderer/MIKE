@@ -7,6 +7,8 @@ import type { DiffStatsEntry } from '$lib/types';
  * Entries survive the panel closing: the server stops pushing for a task that goes
  * idle, so a card that stays on screen must keep the last stats it was sent. Only
  * task deletion removes an entry.
+ *
+ * @knipignore The tests build their own instance, so one case's entries are not another's.
  */
 export class DiffStatsStore {
     private entries = $state<Record<string, DiffStatsEntry>>({});

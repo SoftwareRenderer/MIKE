@@ -13,6 +13,7 @@ import {
 export { INJECTION_POINTS };
 export type { InjectionPoint, InjectionContext };
 
+/** @knipignore The pre-paint test finds the inline script in `index.html` by this key; nothing imports it. */
 export const THEME_CSS_KEY = 'kanban-theme-css';
 const THEME_LINK_ID = 'kanban-theme-stylesheet';
 // The static prefix every extension asset is served under.
@@ -70,8 +71,9 @@ function servedBaseURL(served: unknown): string | null {
  * 301 to `./`, so asking for the file puts a round trip in front of the document on every mount,
  * and the per-mount `?extch=` token means that redirect is never a cache hit. The directory is not
  * a wider ask — `noListingFS` opens it only when it holds an `index.html` (`backend/server/routes.go`).
+ * Reaches the frame as `registrations[].moduleUrl`.
  */
-export function extEntryURL(ext: Extension): string {
+function extEntryURL(ext: Extension): string {
     return `${extBaseURL(ext)}/`;
 }
 
@@ -134,6 +136,9 @@ export function resolveAssetURL(ext: Extension, asset: string): string {
  * path inside the extension tree, the shape resolveAssetURL produces. The inline
  * script in index.html repeats this test by hand (it runs before any module can
  * be imported) — change both.
+ *
+ * @knipignore The pre-paint test runs this predicate over the same URL table as the shipped
+ * script, so a rule that drifts between the two copies fails.
  */
 export function isPrepaintableThemeURL(url: string): boolean {
     return isInsideExtensionTree(url);
@@ -149,6 +154,7 @@ export interface InjectionRegistration {
     granted: string[];
 }
 
+/** @knipignore The injector tests build one instance per case so no test inherits another's registrations or theme link. */
 export class UIInjector {
     registrations = $state<InjectionRegistration[]>([]);
     // Channels are scoped per anchor element. A point (e.g. `fileEditor`) can

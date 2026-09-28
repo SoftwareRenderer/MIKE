@@ -31,7 +31,11 @@ export interface SandboxImageState {
     error: string;
 }
 
-/** Phases the server reports (backend/types/ws.go). */
+/**
+ * Phases the server reports (backend/types/ws.go).
+ *
+ * @knipignore A test drives every phase by name rather than by the text the server sent.
+ */
 export const SANDBOX_IMAGE_PHASES = {
     building: 'building_image',
     pulling: 'pulling_image',
@@ -39,7 +43,11 @@ export const SANDBOX_IMAGE_PHASES = {
     failed: 'failed',
 } as const;
 
-/** Keep only the tail: a build can print thousands of lines. */
+/**
+ * Keep only the tail: a build can print thousands of lines.
+ *
+ * @knipignore The tail is measured one line past this count, oldest line dropped.
+ */
 export const MAX_SANDBOX_IMAGE_LINES = 25;
 
 export function idleSandboxImageState(): SandboxImageState {

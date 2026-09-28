@@ -43,6 +43,7 @@ export interface Span {
     end: number;
 }
 
+/** @knipignore The fraction is measured at the threshold's edges; `columnInViewport` answers only yes or no. */
 export function visibleFraction(viewport: Span, column: Span): number {
     const width = column.end - column.start;
     if (width <= 0) return 0;
@@ -62,7 +63,11 @@ export interface AttentionState {
     reviewProject: string | null;
 }
 
-/** A hidden or unfocused tab is looking at nothing, whatever is painted in it. */
+/**
+ * A hidden or unfocused tab is looking at nothing, whatever is painted in it.
+ *
+ * @knipignore Each condition is refused on its own; `planReviewNotice` answers for all three at once.
+ */
 export function isLookingAtReview(state: AttentionState): boolean {
     return state.documentVisible && state.documentFocused && state.reviewProject !== null;
 }

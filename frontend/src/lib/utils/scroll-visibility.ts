@@ -1,5 +1,5 @@
 /** A vertical span in viewport coordinates — a DOMRect, or any {top, bottom}. */
-export interface Box {
+export interface VerticalSpan {
     top: number;
     bottom: number;
 }
@@ -15,7 +15,7 @@ const VISIBILITY_SLACK = 0.5;
  * Whether `target` sits entirely within `container`. Both must be in the same
  * coordinate space — pass two `getBoundingClientRect()` results.
  */
-export function isFullyVisibleIn(container: Box, target: Box, slack = VISIBILITY_SLACK): boolean {
+export function isFullyVisibleIn(container: VerticalSpan, target: VerticalSpan, slack = VISIBILITY_SLACK): boolean {
     return target.top >= container.top - slack && target.bottom <= container.bottom + slack;
 }
 

@@ -155,7 +155,11 @@ export function pendingToolIds(entries: ChatEntry[]): Set<string> {
     return ids;
 }
 
-/** A stored conversation row, as far as the Review predicate reads it. */
+/**
+ * A stored conversation row, as far as the Review predicate reads it.
+ *
+ * @knipignore A case stores a card, then removes or rewrites one payload column of it.
+ */
 export interface WindowRow {
     role: string;
     tool_calls?: string;
@@ -212,6 +216,8 @@ export function computeLastUserMessageIds(entries: ChatEntry[]): Set<string> {
 
 /** Fold tool-call-only entries into the assistant entry before them, so a card sits under the text that called
  * it rather than in its own row.
+ *
+ * @knipignore The fold is asserted on entries; `buildEntriesFromMessages` folds and rebuilds in one pass.
  */
 export function mergeToolCallsIntoAssistant(allEntries: ChatEntry[]): ChatEntry[] {
     const merged: ChatEntry[] = [];
@@ -233,6 +239,8 @@ export function mergeToolCallsIntoAssistant(allEntries: ChatEntry[]): ChatEntry[
 
 /** The thread whose label a checkpoint shows: the nearest ancestor of the active thread forked at or before
  * the entry. With `requireOptions`, answer only when 2+ threads are relevant there.
+ *
+ * @knipignore Which threads a checkpoint can offer is asserted per entry and thread set.
  */
 export function getCheckpointThreads(
     entry: ChatEntry,
@@ -546,6 +554,8 @@ function collapseRepeatErrors(entries: ChatEntry[]): ChatEntry[] {
  * Map each user message to the checkpoint above it, which shows the repo state before that message's
  * work. Prefer the last saved assistant before it, since "view changes" needs a commit hash, and fall
  * back to the next qualifying one only when nothing precedes it (the first message, a fork point).
+ *
+ * @knipignore Which checkpoint a message shows the state before is asserted per entry order.
  */
 export function buildCheckpointStateMap(
     entries: ChatEntry[],

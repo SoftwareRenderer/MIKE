@@ -15,6 +15,8 @@ export interface ModalFlag {
  * Every modal that swallows Escape, so the app behind it does not react to one. A store that grows a
  * modal-shaped field fails `__tests__/modal-state.unit.svelte.ts`: list the field here, or decline it
  * in that file.
+ *
+ * @knipignore The completeness check enumerates the stores against the whole table.
  */
 export const MODAL_FLAGS: readonly ModalFlag[] = [
     { store: 'uiStore', field: 'showCreateTask', open: () => uiStore.showCreateTask },

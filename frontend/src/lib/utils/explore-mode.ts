@@ -1,7 +1,7 @@
 /**
  * Auto-switch to Explore mode if the user types in a question mark
  */
-export interface ExploreModeState {
+interface ExploreModeState {
     mode: string; // "act" | "plan" | "explore"
     modeChangedByUser: boolean; // user picked a mode explicitly
     autoExploreBase: string | null; // mode before auto-switch; null if not auto-set

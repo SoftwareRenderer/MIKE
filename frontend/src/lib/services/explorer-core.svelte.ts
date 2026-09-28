@@ -11,6 +11,7 @@ import { revealFileTab, toPersistedTabs, type OpenFileTab } from '$lib/utils/edi
 import { baseName, isUnderPath } from '$lib/utils/path';
 import { EDITOR_SAVE_SETTLED, SAVE_SETTLE_BACKSTOP_MS, SaveRequestGuard } from '$lib/utils/save-state';
 import type { LSPSymbol } from '$lib/utils/lsp-symbols';
+import type { FsEvent } from '$lib/utils/fs-event';
 import type { GitCommit, GitLogResponse } from '$lib/types';
 import type { DiffFile } from '$lib/types/diff';
 import { t } from '$lib/i18n';
@@ -21,8 +22,6 @@ const COMMIT_BATCH_SIZE = 30;
 const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf899d69f826635b6';
 /** Tab state is written after a quiet period: a click through several tabs is one write. */
 const TAB_SAVE_DELAY_MS = 300;
-
-export type FsEvent = { op: 'create' | 'delete'; path: string };
 
 /**
  * What App hands either explorer screen, whatever it is browsing. A screen adds its own subject
@@ -40,10 +39,11 @@ export interface ExplorerProps {
 }
 
 /**
- * What the branch view and the task view answer differently. The core owns everything else about
- * an explorer screen — see the two components for what each edge means in its own terms.
+ * What the branch view and the task view answer differently — the `ExplorerCore` constructor's
+ * argument. The core owns everything else about an explorer screen; see the two components for
+ * what each edge means in its own terms.
  */
-export interface ExplorerEdges {
+interface ExplorerEdges {
     /** IndexedDB key of this screen's tab list and unsaved set. */
     storageKey: () => string;
     /** Path prefixes a file must sit under to be openable here. */

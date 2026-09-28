@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { computeInterleavedLayout, TURN_ENDING_TOOLS, type LayoutToolCall } from '$lib/utils/chat-layout';
+import { computeInterleavedLayout, TURN_ENDING_TOOLS } from '$lib/utils/chat-layout';
 
-function tool(toolId: string, toolName: string, reasoningIndex: number, contentIndex: number): LayoutToolCall {
+function tool(toolId: string, toolName: string, reasoningIndex: number, contentIndex: number) {
     return { toolId, toolName, reasoningIndex, contentIndex };
 }
 
@@ -12,7 +12,7 @@ describe('computeInterleavedLayout', () => {
     });
 
     it('returns null when tools have no position data', () => {
-        const tcs: LayoutToolCall[] = [{ toolId: 't1', toolName: 'read_file' }];
+        const tcs = [{ toolId: 't1', toolName: 'read_file' }];
         expect(computeInterleavedLayout(tcs, 'reasoning', 'content')).toBeNull();
     });
 

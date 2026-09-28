@@ -12,7 +12,11 @@ export interface Box {
     bottom: number;
 }
 
-/** Tolerance, in px, around a box before a pointer counts as outside it. */
+/**
+ * Tolerance, in px, around a box before a pointer counts as outside it.
+ *
+ * @knipignore The tolerance is measured one pixel inside it and one pixel past it.
+ */
 export const POINTER_MARGIN = 4;
 
 /** Point-in-box test with a margin, so a 1px edge does not dismiss a tooltip. */

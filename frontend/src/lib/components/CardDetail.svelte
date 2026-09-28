@@ -12,8 +12,9 @@
     import { enrichRowsWithInlineSegments } from '$lib/utils/diff-parser';
     import { shouldAutoFullscreenDiffEditor } from '$lib/utils/diff-editor-layout';
     import { chatBlurState, chatCollapseState, chatFocusState, chatManualToggleState, chatSendState, type ChatAutoMaximizeRules, type ChatMaximizeState } from '$lib/utils/chat-auto-maximize';
-    import { filterTopLevelTaskIds, willConsolidateIntoParent } from '$lib/utils/task-utils';
+    import { willConsolidateIntoParent } from '$lib/utils/task-utils';
     import { createStatusLabel } from '$lib/utils/subtask-status';
+    import { createBulkTaskActions } from '$lib/utils/bulk-task-actions';
     import { sandboxMountPath } from '$lib/utils/path';
     import { isVimSwapFile } from '$lib/utils/file-suffix';
     import { isAnyModalOpen } from '$lib/utils/modal-state';
@@ -429,94 +430,39 @@
     let hasMergedSubtasks = $derived((hierarchy.childrenMap.get(task.id)?.length ?? 0) > 0);
 
     // Multi-select actions (wires up floating bar events)
-    let multiSelectActions = useMultiSelectActions({
-        async onDelete(taskIds, titles) {
-            const confirmed = await dialogStore.showConfirm({
-                title: t('board.deleteTasks.title'),
-                message: t('board.deleteTasks.message', { count: taskIds.length }),
-                items: titles,
-                confirmText: t('board.confirm.delete'),
-                cancelText: t('board.confirm.cancel'),
-            });
-            if (!confirmed) return;
-            // Only send DELETE for top-level tasks, the server recursively deletes descendants
-            const topLevelIds = filterTopLevelTaskIds(taskIds, allTasks);
-            for (const id of topLevelIds) {
-                try {
-                    await import('$lib/api').then(({ deleteTask }) => deleteTask(task.project_id, id));
-                    removeTaskFromBoard(appStore, id);
-                } catch (err) {
-                    dialogStore.showToast(t('board.toast.deleteFailed', { error: String(err) }), 'error');
-                }
-            }
-            onRefreshBoard?.();
+    let multiSelectActions = useMultiSelectActions(createBulkTaskActions({
+        tasks: () => allTasks,
+        projectId: () => task.project_id,
+        statusLabel,
+        api: {
+            deleteTask: async (proj, taskId) => (await import('$lib/api')).deleteTask(proj, taskId),
+            startTask: async (proj, taskId) => (await import('$lib/api')).startTask(proj, taskId),
+            startSubtask: async (proj, taskId) => (await import('$lib/api')).startSubtask(proj, taskId),
+            updateTask: async (proj, taskId, update) => (await import('$lib/api')).updateTask(proj, taskId, update),
         },
-        async onStart(taskIds) {
-            let started = 0;
-            for (const id of taskIds) {
-                try {
-                    // (named `selected`, not `t` — `t` is the i18n function here)
-                    const selected = allTasks.find(t => t.id === id);
-                    if (!selected) continue;
-                    if (selected.parent_task_id) {
-                        const { startSubtask } = await import('$lib/api');
-                        const updated = await startSubtask(task.project_id, id);
-                        updateTaskInBoard(appStore, updated.id, updated);
-                    } else {
-                        const { startTask } = await import('$lib/api');
-                        const updated = await startTask(task.project_id, id);
-                        updateTaskInBoard(appStore, updated.id, updated);
-                    }
-                    started++;
-                } catch (err) {
-                    dialogStore.showToast(t('board.toast.startFailed', { error: String(err) }), 'error');
-                }
-            }
-            if (started > 0) {
-                dialogStore.showToast(t('board.toast.started', { count: started }), 'success');
-            }
+        board: {
+            update: (updated) => updateTaskInBoard(appStore, updated.id, updated),
+            remove: (taskId) => removeTaskFromBoard(appStore, taskId),
         },
-        async onMove(taskIds, status) {
-            let moved = 0;
-            for (const id of taskIds) {
-                const selected = allTasks.find(t => t.id === id);
-                if (!selected) continue;
-                try {
-                    const updated = await moveTask(task.project_id, id, status);
-                    if (!willConsolidateIntoParent(selected, allTasks, status)) {
-                        updateTaskInBoard(appStore, id, updated);
-                    }
-                    moved++;
-                } catch (err) {
-                    dialogStore.showToast(t('board.toast.moveFailed', { error: String(err) }), 'error');
-                }
+        dialog: dialogStore,
+        moveTask: applyMove,
+        onRefreshBoard: () => onRefreshBoard?.(),
+    }));
+
+    /** Send one move and land the result on the board overview. False when the server refused it. */
+    async function applyMove(selected: Task, targetStatus: string): Promise<boolean> {
+        try {
+            const updated = await moveTask(task.project_id, selected.id, targetStatus);
+            if (!willConsolidateIntoParent(selected, allTasks, targetStatus)) {
+                updateTaskInBoard(appStore, selected.id, updated);
             }
-            if (moved > 0) {
-                dialogStore.showToast(t('board.toast.movedCount', { count: moved, status: statusLabel(status) }), 'success');
-            }
-        },
-        async onModelChange(taskIds, providerUrl, modelName, reasoningEffort) {
-            let updated = 0;
-            for (const id of taskIds) {
-                try {
-                    const { updateTask } = await import('$lib/api');
-                    const taskUpdate: Record<string, unknown> = { llama_server_url: providerUrl };
-                    if (modelName) taskUpdate.model_name = modelName;
-                    else taskUpdate.model_name = undefined;
-                    if (reasoningEffort) taskUpdate.reasoning_effort = reasoningEffort;
-                    else taskUpdate.reasoning_effort = undefined;
-                    const result = await updateTask(task.project_id, id, taskUpdate);
-                    updateTaskInBoard(appStore, result.id, result);
-                    updated++;
-                } catch (err) {
-                    dialogStore.showToast(t('board.toast.modelUpdateFailed', { error: String(err) }), 'error');
-                }
-            }
-            if (updated > 0) {
-                dialogStore.showToast(t('board.toast.modelUpdated', { count: updated }), 'success');
-            }
-        },
-    });
+            return true;
+        } catch (err) {
+            dialogStore.showToast(t('board.toast.moveFailed', { error: String(err) }), 'error');
+            return false;
+        }
+    }
+
     let multiSelect = multiSelectActions.multiSelect;
 
     // Column resize (inline — matches ExplorerView pattern)

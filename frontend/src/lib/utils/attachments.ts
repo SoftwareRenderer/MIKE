@@ -6,11 +6,18 @@
 import type { DraftAttachment } from '$lib/storage';
 import { t } from '$lib/i18n';
 
+/**
+ * @knipignore A fixture is built one byte over this cap, so the size boundary is measured.
+ */
 export const MAX_IMAGE_SIZE = 4 * 1024 * 1024;
 
 export const MAX_IMAGES = 4;
 
-/** A paste has no `accept`, so this is the only thing between a log file and the prompt. */
+/**
+ * A paste has no `accept`, so this is the only thing between a log file and the prompt.
+ *
+ * @knipignore Both readers are measured at this byte cap, including what they report as dropped.
+ */
 export const MAX_INLINE_TEXT = 64 * 1024;
 
 export interface PickedImages {
@@ -20,7 +27,7 @@ export interface PickedImages {
 }
 
 /** What a picker's selection splits into, before anything is read. */
-export interface ClassifiedImages {
+interface ClassifiedImages {
     readable: File[];
     oversize: File[];
     overflow: File[];
@@ -61,13 +68,13 @@ const TEXT_APPLICATION_TYPES = new Set([
  * Whether the model can read these bytes as text — a different question from what the browser
  * calls the file: an SVG is `image/*` and markup to everything else.
  */
-export function isTextFile(file: File): boolean {
+function isTextFile(file: File): boolean {
     if (file.type === 'image/svg+xml') return true;
     if (file.type.startsWith('text/')) return true;
     return TEXT_APPLICATION_TYPES.has(file.type);
 }
 
-export function isAttachableImage(file: File): boolean {
+function isAttachableImage(file: File): boolean {
     return ATTACHABLE_IMAGE_TYPES.has(file.type);
 }
 
@@ -90,9 +97,9 @@ export function sortTransferFiles(files: File[]): TransferBuckets {
 
 /**
  * The part of a `DataTransfer` these helpers read. Declared by shape rather than named
- * `DataTransfer` because that is what a test can hand without a browser.
+ * `DataTransfer` because a paste carries `clipboardData` and a drop carries `dataTransfer`.
  */
-export type ImageTransfer = { files: FileList | File[] } & Partial<Pick<DataTransfer, 'getData'>>;
+type ImageTransfer = { files: FileList | File[] } & Partial<Pick<DataTransfer, 'getData'>>;
 
 export interface ImageTransferEvent {
     preventDefault(): void;
@@ -105,7 +112,7 @@ export interface ImageTransferEvent {
  * name, path or `file://` URI in `text/plain`, and that is the file's label — inserting it would
  * put `screenshot.png` in front of the screenshot.
  */
-export function transferCarriesText(transfer: ImageTransfer | null | undefined, files: File[] = []): boolean {
+function transferCarriesText(transfer: ImageTransfer | null | undefined, files: File[] = []): boolean {
     if (!transfer || typeof transfer.getData !== 'function') return false;
     const text = (transfer.getData('text/plain') || transfer.getData('text') || '').trim();
     if (!text) return false;
@@ -158,7 +165,7 @@ export function readTextFile(file: File): Promise<{ content: string; droppedByte
  * Whatever is not an attachable image is not this function's business: a picker can be talked
  * past its `accept`, and those files belong to `sortTransferFiles`.
  */
-export function classifyImages(files: FileList | File[], remaining: number): ClassifiedImages {
+function classifyImages(files: FileList | File[], remaining: number): ClassifiedImages {
     const images = Array.from(files).filter(isAttachableImage);
     const oversize = images.filter(f => f.size > MAX_IMAGE_SIZE);
     const readable = images.filter(f => f.size <= MAX_IMAGE_SIZE);
@@ -166,7 +173,7 @@ export function classifyImages(files: FileList | File[], remaining: number): Cla
     return { readable: readable.slice(0, room), oversize, overflow: readable.slice(room) };
 }
 
-export function readImageDataUrl(file: File): Promise<string> {
+function readImageDataUrl(file: File): Promise<string> {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(reader.result as string);

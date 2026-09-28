@@ -67,7 +67,7 @@ export interface MemoryAlert {
 }
 
 /** The headroom an acknowledgement was taken with. */
-export interface MemoryAlertAck {
+interface MemoryAlertAck {
     peakMB: number;
     oomKills: number;
     limitMB: number;
@@ -88,7 +88,7 @@ export function memoryAlertPayloadOf(alert: MemoryAlert): MemoryAlertAckPayload 
 }
 
 /** Peak and OOM count are cumulative, so the alert outlives the usage: only a person ends it. */
-export function memoryAlert(stats: SandboxMemoryStats | null | undefined): MemoryAlert | null {
+function memoryAlert(stats: SandboxMemoryStats | null | undefined): MemoryAlert | null {
     if (!stats) return null;
     const oomKills = stats.oom_kills > 0 ? stats.oom_kills : 0;
     if (oomKills === 0 && !isMemoryLimitReached(stats)) return null;
@@ -100,7 +100,7 @@ export function memoryAlert(stats: SandboxMemoryStats | null | undefined): Memor
 }
 
 /** Same limit and no worse counters. Those counters only rise, so numbers stand in for a timestamp. */
-export function memoryAlertAckCovers(ack: MemoryAlertAck | null | undefined, alert: MemoryAlert): boolean {
+function memoryAlertAckCovers(ack: MemoryAlertAck | null | undefined, alert: MemoryAlert): boolean {
     if (!ack) return false;
     return ack.limitMB === alert.limitMB && ack.oomKills >= alert.oomKills && ack.peakMB >= alert.peakMB;
 }
@@ -140,7 +140,7 @@ export function taskMemoryStats(
 }
 
 /** Every surface reads a task's alert through here, so they cannot disagree. */
-export function taskMemoryAlert(
+function taskMemoryAlert(
     task: TaskMemoryRecord | null | undefined,
     projectLimitMB: number | null,
     liveStats: SandboxMemoryStats | null | undefined,
