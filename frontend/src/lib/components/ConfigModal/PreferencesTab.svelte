@@ -196,6 +196,54 @@
 
 <section class="settings-section">
     <div class="section-header">
+        <h3 class="settings-section-title">{t('settings.preferences.ui')}</h3>
+    </div>
+    <div class="shortcut-row">
+        <div class="shortcut-info">
+            <span class="shortcut-name">{t('settings.preferences.hideModelBadge')}</span>
+            <span id="hide-model-badge-desc" class="shortcut-desc">{t('settings.preferences.hideModelBadgeDesc')}</span>
+        </div>
+        <div class="shortcut-controls">
+            <ToggleSwitch bind:checked={hideModelBadge} ariaLabel={t('settings.preferences.hideModelBadge')} ariaDescribedby="hide-model-badge-desc" onChange={() => onDirty?.()} />
+        </div>
+    </div>
+    <div class="shortcut-row">
+        <div class="shortcut-info">
+            <span class="shortcut-name">{t('settings.preferences.oldestFirst')}</span>
+            <span id="sort-oldest-first-desc" class="shortcut-desc">{t('settings.preferences.oldestFirstDesc')}</span>
+        </div>
+        <div class="shortcut-controls">
+            <ToggleSwitch bind:checked={sortOldestFirst} ariaLabel={t('settings.preferences.oldestFirst')} ariaDescribedby="sort-oldest-first-desc" onChange={() => onDirty?.()} />
+        </div>
+    </div>
+    <div class="shortcut-row">
+        <div class="shortcut-info">
+            <span class="shortcut-name">{t('settings.preferences.autoMaximizeChat')}</span>
+            <span id="auto-maximize-chat-desc" class="shortcut-desc">{t('settings.preferences.autoMaximizeChatDesc')}</span>
+        </div>
+        <div class="shortcut-controls">
+            <ToggleSwitch bind:checked={autoMaximizeChat} ariaLabel={t('settings.preferences.autoMaximizeChat')} ariaDescribedby="auto-maximize-chat-desc" onChange={() => onDirty?.()} />
+        </div>
+    </div>
+    <div class="shortcut-row">
+        <div class="shortcut-info">
+            <span class="shortcut-name">{t('settings.preferences.notifyOnReview')}</span>
+            <span id="notify-on-review-desc" class="shortcut-desc">
+                {notifyOnReview && permission === 'unsupported'
+                    ? t('settings.preferences.notifyUnsupported')
+                    : notifyOnReview && permission !== 'granted'
+                        ? t('settings.preferences.notifyBlocked')
+                        : t('settings.preferences.notifyOnReviewDesc')}
+            </span>
+        </div>
+        <div class="shortcut-controls">
+            <ToggleSwitch bind:checked={notifyOnReview} ariaLabel={t('settings.preferences.notifyOnReview')} ariaDescribedby="notify-on-review-desc" onChange={() => void onNotifyChange()} />
+        </div>
+    </div>
+</section>
+
+<section class="settings-section">
+    <div class="section-header">
         <h3 class="settings-section-title">{t('settings.preferences.keyboard')}</h3>
     </div>
 
@@ -249,54 +297,6 @@
     {#if invalidFlash}
         <p class="invalid-hint" role="alert">{invalidKind === 'click' ? t('settings.preferences.invalidClick') : t('settings.preferences.invalidKey')}</p>
     {/if}
-</section>
-
-<section class="settings-section">
-    <div class="section-header">
-        <h3 class="settings-section-title">{t('settings.preferences.ui')}</h3>
-    </div>
-    <div class="shortcut-row">
-        <div class="shortcut-info">
-            <span class="shortcut-name">{t('settings.preferences.hideModelBadge')}</span>
-            <span id="hide-model-badge-desc" class="shortcut-desc">{t('settings.preferences.hideModelBadgeDesc')}</span>
-        </div>
-        <div class="shortcut-controls">
-            <ToggleSwitch bind:checked={hideModelBadge} ariaLabel={t('settings.preferences.hideModelBadge')} ariaDescribedby="hide-model-badge-desc" onChange={() => onDirty?.()} />
-        </div>
-    </div>
-    <div class="shortcut-row">
-        <div class="shortcut-info">
-            <span class="shortcut-name">{t('settings.preferences.oldestFirst')}</span>
-            <span id="sort-oldest-first-desc" class="shortcut-desc">{t('settings.preferences.oldestFirstDesc')}</span>
-        </div>
-        <div class="shortcut-controls">
-            <ToggleSwitch bind:checked={sortOldestFirst} ariaLabel={t('settings.preferences.oldestFirst')} ariaDescribedby="sort-oldest-first-desc" onChange={() => onDirty?.()} />
-        </div>
-    </div>
-    <div class="shortcut-row">
-        <div class="shortcut-info">
-            <span class="shortcut-name">{t('settings.preferences.autoMaximizeChat')}</span>
-            <span id="auto-maximize-chat-desc" class="shortcut-desc">{t('settings.preferences.autoMaximizeChatDesc')}</span>
-        </div>
-        <div class="shortcut-controls">
-            <ToggleSwitch bind:checked={autoMaximizeChat} ariaLabel={t('settings.preferences.autoMaximizeChat')} ariaDescribedby="auto-maximize-chat-desc" onChange={() => onDirty?.()} />
-        </div>
-    </div>
-    <div class="shortcut-row">
-        <div class="shortcut-info">
-            <span class="shortcut-name">{t('settings.preferences.notifyOnReview')}</span>
-            <span id="notify-on-review-desc" class="shortcut-desc">
-                {notifyOnReview && permission === 'unsupported'
-                    ? t('settings.preferences.notifyUnsupported')
-                    : notifyOnReview && permission !== 'granted'
-                        ? t('settings.preferences.notifyBlocked')
-                        : t('settings.preferences.notifyOnReviewDesc')}
-            </span>
-        </div>
-        <div class="shortcut-controls">
-            <ToggleSwitch bind:checked={notifyOnReview} ariaLabel={t('settings.preferences.notifyOnReview')} ariaDescribedby="notify-on-review-desc" onChange={() => void onNotifyChange()} />
-        </div>
-    </div>
 </section>
 
 <style>

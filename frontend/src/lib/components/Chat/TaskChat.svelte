@@ -18,6 +18,7 @@
         uiInjector.refreshSlot(INJECTION_POINTS.TASK_CHAT, { component: 'TaskChat', taskId, projectId });
     });
     import { DRAFT_SAVE_DEBOUNCE_MS } from '$lib/constants';
+    import { draftMayPaint, draftNeedsSave, type StoredDraft } from '$lib/utils/chat-draft';
     import { mergeQueuedUpdate, taskIsInFlight } from '$lib/utils/task-utils';
     import { effectiveStartTaskKey, matchShortcut } from '$lib/utils/keyboard';
     import { isAnyModalOpen } from '$lib/utils/modal-state';
@@ -27,7 +28,7 @@
     import { getAppStreamRef } from '$lib/stream-ref';
     import { useConnectionRestored } from '$lib/composables/use-connection-restored.svelte';
     import { useTaskEvents } from '$lib/composables/use-task-events.svelte';
-    import { getDraftText, setDraftText, clearDraftText, loadDraftAttachments, saveDraftAttachments, clearDraftAttachments, type DraftAttachment } from '$lib/storage';
+    import { getDraftText, setDraftText, loadDraftAttachments, saveDraftAttachments, clearDraftAttachments, type DraftAttachment } from '$lib/storage';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { t } from '$lib/i18n';
     import { createChatFollow } from '$lib/composables/use-chat-follow.svelte';
@@ -73,15 +74,37 @@
     let chatTurns = $state<ChatTurn[]>([]);
     let turnsCursor = '';
     let turnsHasMore = $state(false);
+    // The draft chat text: `utils/chat-draft` owns the rule, and `storedDraftText` is this tab's belief
+    // about what the store holds. Only `writeDraftText` and the opening read move it.
     let inputValue = $state('');
+    let storedDraftText: StoredDraft = null;
+    let writesSinceDraftRead = 0;
+    let draftReadSeq = 0;
+    let draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
     let draftAttachments = $state<DraftAttachment[]>([]);
 
-    // Load draft text from IndexedDB on init
+    /** The only writer, so the belief stays true. `''` removes the draft. */
+    function writeDraftText(text: string) {
+        if (draftSaveTimer) {
+            clearTimeout(draftSaveTimer);
+            draftSaveTimer = null;
+        }
+        storedDraftText = text;
+        writesSinceDraftRead++;
+        setDraftText(taskId, text).catch(() => {});
+    }
+
     $effect(() => {
-        getDraftText(taskId).then(savedDraft => {
-            if (savedDraft !== null) {
-                inputValue = savedDraft;
-            }
+        const task = taskId;
+        const seq = ++draftReadSeq;
+        storedDraftText = null;
+        writesSinceDraftRead = 0;
+        getDraftText(task).then(saved => {
+            if (destroyed || seq !== draftReadSeq) return;
+            const stored = saved ?? '';
+            if (draftMayPaint(inputValue, writesSinceDraftRead > 0)) inputValue = stored;
+            // A write of ours after the read began is the newer word about the store.
+            if (writesSinceDraftRead === 0) storedDraftText = stored;
         }).catch(() => {});
     });
 
@@ -94,21 +117,26 @@
         }).catch(() => {});
     });
 
+    function flushDraftText() {
+        if (draftNeedsSave(storedDraftText, inputValue)) writeDraftText(inputValue);
+    }
+
     // Save draft text to IndexedDB (debounced to avoid writes on every keystroke)
-    let draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
     function handleInputSave(val: string) {
-        if (draftSaveTimer) clearTimeout(draftSaveTimer);
-        if (val) {
-            draftSaveTimer = setTimeout(() => {
-                setDraftText(taskId, val).catch(() => {});
-                draftSaveTimer = null;
-            }, DRAFT_SAVE_DEBOUNCE_MS);
+        if (draftSaveTimer) {
+            clearTimeout(draftSaveTimer);
+            draftSaveTimer = null;
         }
+        if (!draftNeedsSave(storedDraftText, val)) return;
+        draftSaveTimer = setTimeout(() => {
+            draftSaveTimer = null;
+            writeDraftText(val);
+        }, DRAFT_SAVE_DEBOUNCE_MS);
     }
 
     // Clear draft on send (called synchronously from ChatForm)
     function handleClearDraft() {
-        clearDraftText(taskId).catch(() => {});
+        writeDraftText('');
         clearDraftAttachments(taskId).catch(() => {});
         draftAttachments = [];
     }
@@ -577,9 +605,9 @@
             await readTurns(true);
         } catch (e) {
             if (isStaleHistoryRead(destroyed, seq, historyReadSeq)) return 'failed';
-            // Task may have been deleted — clear stale draft
+            // Task may have been deleted — the draft it holds goes with it
             if (e instanceof Error && (e.message.includes('Not found') || e.message.includes('404'))) {
-                clearDraftText(taskId).catch(() => {});
+                writeDraftText('');
                 draftAttachments = [];
                 return 'failed';
             }
@@ -1544,27 +1572,12 @@
         unsubQueue?.();
         unsubFlushed?.();
         window.removeEventListener('beforeunload', handleBeforeUnload);
-        // Flush pending draft save on navigation/component destroy
-        if (draftSaveTimer) {
-            clearTimeout(draftSaveTimer);
-            draftSaveTimer = null;
-        }
-        if (inputValue) {
-            setDraftText(taskId, inputValue).catch(() => {});
-        }
+        flushDraftText();
     });
 
-    // Save draft on page unload (navigation, reload) as a safety net for onDestroy
+    /** The unload safety net for the destroy flush: an IndexedDB write started this late is best-effort. */
     function handleBeforeUnload() {
-        if (draftSaveTimer) {
-            clearTimeout(draftSaveTimer);
-            draftSaveTimer = null;
-        }
-        if (inputValue) {
-            // Sync write for beforeunload — use navigator.sendBeacon-style approach
-            // Since IndexedDB is async, best-effort only
-            setDraftText(taskId, inputValue).catch(() => {});
-        }
+        flushDraftText();
     }
     window.addEventListener('beforeunload', handleBeforeUnload);
 
