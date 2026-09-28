@@ -1,7 +1,11 @@
 import type { PortForward } from '$lib/types';
 import { t } from '$lib/i18n';
 
-/** What the interface field shows when the port is published on every interface. */
+/**
+ * What the interface field shows when the port is published on every interface.
+ *
+ * @knipignore The field shows this spelling for a binding the server stored empty.
+ */
 export const DEFAULT_BIND = '0.0.0.0';
 
 /**
@@ -32,7 +36,11 @@ export function normalizeBind(text: string): string | null {
     return trimmed.toLowerCase();
 }
 
-/** True when the port is published on every interface - the case not worth printing. */
+/**
+ * True when the port is published on every interface - the case not worth printing.
+ *
+ * @knipignore Each spelling that means every interface is answered on its own.
+ */
 export function isDefaultBind(hostIP?: string): boolean {
     return normalizeBind(hostIP ?? '') === '';
 }

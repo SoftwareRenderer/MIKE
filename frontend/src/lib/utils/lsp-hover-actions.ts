@@ -19,11 +19,14 @@ import { identifierRange, pickDefinitionTarget, toLspPosition, type CharRange, t
 /**
  * Where the pointer is relative to the card. `'other-token'` is an identifier other than the
  * card's, which a geometry check cannot tell from a pointer heading for the card.
+ *
+ * @knipignore The transition tests feed one input per zone.
  */
 export type HoverZone = 'token' | 'tooltip' | 'other-token' | 'outside';
 
 type HoverPhase = 'idle' | 'arming' | 'open';
 
+/** @knipignore The transition tests assert the state after each input. */
 export interface HoverMachineState {
     readonly phase: HoverPhase;
     /** Identifier the card is (or will be) about. */
@@ -32,8 +35,10 @@ export interface HoverMachineState {
     readonly gracePending: boolean;
 }
 
+/** @knipignore The state every transition sequence starts from. */
 export const HOVER_IDLE: HoverMachineState = { phase: 'idle', token: null, gracePending: false };
 
+/** @knipignore The transition tests build these; the plugin builds them from DOM events. */
 export type HoverInput =
     | { type: 'pointermove'; zone: HoverZone; token: CharRange | null }
     | { type: 'hover-elapsed' }
@@ -43,6 +48,7 @@ export type HoverInput =
     /** The card turned out to have nothing to show, or the connection went away. */
     | { type: 'dismiss' };
 
+/** @knipignore The transition tests assert the effects rather than the timers they stand for. */
 export type HoverEffect =
     | 'arm'
     | 'cancel-arm'
@@ -56,6 +62,7 @@ export interface HoverDecision {
     effects: HoverEffect[];
 }
 
+/** @knipignore Whether the pointer moved to a different identifier is asserted on ranges. */
 export function sameToken(a: CharRange | null, b: CharRange | null): boolean {
     return !!a && !!b && a.from === b.from && a.to === b.to;
 }
@@ -90,6 +97,8 @@ function shutdown(state: HoverMachineState): HoverDecision {
 /**
  * Next state plus the timer/UI side effects the caller must carry out. `token` on a `pointermove`
  * is the identifier under the pointer, null when there is none.
+ *
+ * @knipignore The plugin feeds this nothing but DOM events; every transition is tested here.
  */
 export function reduceHover(state: HoverMachineState, input: HoverInput): HoverDecision {
     switch (input.type) {
@@ -168,7 +177,11 @@ function renderMarked(plugin: LSPPlugin, item: MarkedString): string {
  */
 const HOVER_FORBID_TAGS = ['hr'] as const;
 
-/** `Hover.contents` (string | MarkupContent | MarkedString[]) to sanitized HTML. */
+/**
+ * `Hover.contents` (string | MarkupContent | MarkedString[]) to sanitized HTML.
+ *
+ * @knipignore The escaping and the `hr` refusal are asserted on the markup this returns.
+ */
 export function hoverDocsHTML(plugin: LSPPlugin, hover: RawMarkup | null | undefined): string {
     if (!hover || hover.contents == null) return '';
     const contents = hover.contents;
@@ -187,6 +200,8 @@ export function hoverDocsHTML(plugin: LSPPlugin, hover: RawMarkup | null | undef
 /**
  * The card's DOM. The action row is the bottom section: with `above: true` the card keeps its
  * bottom edge on the code line, so late documentation grows upward and the button does not move.
+ *
+ * @knipignore The status line and the button's position are read off the card's DOM.
  */
 export class HoverCard {
     readonly dom = document.createElement('div');
@@ -316,18 +331,23 @@ export interface LspHoverActionOptions {
 }
 
 // How long the pointer has to rest on an identifier before anything appears
+/** @knipignore The dwell is measured at the default it opens on. */
 export const DEFAULT_HOVER_TIME = 500;
 
 // How long the card survives after the pointer leaves it and the identifier
+/** @knipignore The close grace is measured at the default it runs on. */
 export const DEFAULT_HOVER_GRACE = 500;
 
 // How long the placeholder waits alone before it says which server it is waiting for
+/** @knipignore The placeholder must speak before the ceiling, and the ceiling before the socket's own timeout. */
 export const DEFAULT_HOVER_WAITING = 700;
 
 // How long one hover/definition round trip may take before the card stops waiting on it. Under the
 // library's request timer and the bridge's, over the seconds a cold index needs.
+/** @knipignore The card's ceiling must stay under the socket's; only this file knows both ends. */
 export const DEFAULT_HOVER_CEILING = 8000;
 
+/** @knipignore Each timing falls back to its own default; the plugin reads one resolved record. */
 export function resolveHoverTimings(
     options: Pick<LspHoverActionOptions, 'hoverTime' | 'graceMs' | 'waitingMs' | 'ceilingMs'>,
 ): { hoverTime: number; graceMs: number; waitingMs: number; ceilingMs: number } {
@@ -349,6 +369,8 @@ export interface WaitStatus {
  * Starts the two clocks a waiting card runs and returns the function that stops both. `live`
  * rejects a clock that fires for a card the pointer has left; the sentences are read when the
  * clock fires, so a server that introduces itself mid-hover is named by the name it gave.
+ *
+ * @knipignore The two clocks and their cancellation are driven with fake timers.
  */
 export function armWaitClocks(
     card: WaitStatus,
@@ -406,6 +428,8 @@ function clearCaches(view: EditorView): void {
 /**
  * The per-token memo. A request that failed is not remembered as "no answer": one poisoned entry
  * otherwise strands that identifier for the life of the editor.
+ *
+ * @knipignore The retry-after-failure and the eviction are asserted on a bare Map.
  */
 export function remember<T>(cache: Map<string, Promise<T>>, key: string, make: () => Promise<T>): Promise<T> {
     const existing = cache.get(key);
@@ -856,7 +880,11 @@ function definitionAt(view: EditorView, pos: number): Promise<DefinitionTarget |
     ).catch(() => null);
 }
 
-/** Modifier combination that turns a click into a jump (VS Code's gesture). */
+/**
+ * Modifier combination that turns a click into a jump (VS Code's gesture).
+ *
+ * @knipignore The combination is asserted per modifier; a test click reaches no handler.
+ */
 export function isJumpModifier(event: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; altKey: boolean }): boolean {
     // Shift/Alt are taken by selection and multi-cursor semantics.
     return (event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey;

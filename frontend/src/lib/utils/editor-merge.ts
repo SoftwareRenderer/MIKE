@@ -71,6 +71,8 @@ export function minimalReplace(before: string, after: string): TextReplace {
  * Line-based three-way merge of `base` with two derived texts (`ours`, `theirs`).
  * Returns the merged text, or `null` if `ours` and `theirs` edit the same region
  * of `base` differently (a conflict).
+ *
+ * @knipignore The merge is asserted on three texts; `reconcileExternalChange` adds what the editor does next.
  */
 export function mergeText(base: string, ours: string, theirs: string): string | null {
     const baseLines = base.split('\n');

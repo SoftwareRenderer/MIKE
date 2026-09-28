@@ -33,7 +33,11 @@ export interface LocaleOfferRecord {
     outcome: LocaleOfferOutcome;
 }
 
-/** Why nothing is offered. Kept in the decision so a caller can log the reason. */
+/**
+ * Why nothing is offered. Kept in the decision so a caller can log the reason.
+ *
+ * @knipignore A refusal is asserted by its reason, which the decision narrows to this set.
+ */
 export type LocaleOfferReason =
     /** A dismissed/installed/failed record exists — we already asked. */
     | 'already-asked'
@@ -46,7 +50,7 @@ export type LocaleOfferReason =
     /** The only matching pack is already installed — see `installedEntry` below. */
     | 'installed-entry';
 
-export type LocaleOfferDecision =
+type LocaleOfferDecision =
     | { offer: true; entry: RegistryEntry; locale: string; displayName: string }
     | { offer: false; reason: LocaleOfferReason };
 

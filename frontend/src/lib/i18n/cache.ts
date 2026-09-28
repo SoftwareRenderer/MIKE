@@ -23,6 +23,8 @@ const CACHE_KEY = 'i18n-catalog';
  * (localStorage for the synchronous URL, IndexedDB for everything else), and
  * what is stored here is the same size of thing — one short tag, no text. The
  * catalog itself is IndexedDB-only.
+ *
+ * @knipignore The tests read the hint back out of `localStorage` by this name.
  */
 export const LOCALE_HINT_KEY = 'kanban-i18n-locale';
 

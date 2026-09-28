@@ -67,7 +67,7 @@ export function toProjectRelative(filePath: string, projectPath: string): string
  * texts in order (length ≥ 1). A single selected line gets a `path:N`
  * header without a range.
  */
-export function formatLineSelection(relativePath: string, startLine: number, lines: string[]): string {
+function formatLineSelection(relativePath: string, startLine: number, lines: string[]): string {
     const path = relativePath || 'unknown-file';
     const header = lines.length > 1
         ? `${path}:${startLine}-${startLine + lines.length - 1}`

@@ -40,7 +40,11 @@ export interface CharRange {
     to: number;
 }
 
-/** Strip the scheme and decode a `file:` URI into a filesystem path. */
+/**
+ * Strip the scheme and decode a `file:` URI into a filesystem path.
+ *
+ * @knipignore The decoding and the refusals are asserted on URI text; `pickDefinitionTarget` answers for a whole payload.
+ */
 export function uriToPath(uri: string): string {
     if (!uri) return '';
     // Scheme is case-insensitive per the URI spec (git's transport check is

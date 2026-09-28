@@ -15,7 +15,6 @@ import {
     agentMountDraft,
     agentMountUpdate,
     grantFingerprint,
-    suggestedDependencyPath,
     dependencyDraft,
 } from '../extension-permissions';
 
@@ -430,17 +429,16 @@ describe('the dependency directory draft', () => {
     const DECLARED = { dependency_cache: { container_path: '/go/pkg/mod', env: 'GOMODCACHE' } };
 
     it('suggests the declared container path under the server home', () => {
-        expect(suggestedDependencyPath({ sandbox_config: DECLARED }, '/home/tester')).toBe('/home/tester/go/pkg/mod');
+        expect(dependencyDraft({ sandbox_config: DECLARED }, '/home/tester')).toBe('/home/tester/go/pkg/mod');
     });
 
     it('suggests nothing before the home directory is known', () => {
-        expect(suggestedDependencyPath({ sandbox_config: DECLARED }, '')).toBe('');
-        expect(suggestedDependencyPath({ sandbox_config: {} }, '/home/tester')).toBe('');
+        expect(dependencyDraft({ sandbox_config: DECLARED }, '')).toBe('');
+        expect(dependencyDraft({ sandbox_config: {} }, '/home/tester')).toBe('');
     });
 
     it('opens with the granted directory wherever the suggestion would have pointed', () => {
         const ext = { sandbox_config: { ...DECLARED, dependency_host_path: '/data/shared/gomodcache' } };
         expect(dependencyDraft(ext, '/home/tester')).toBe('/data/shared/gomodcache');
-        expect(dependencyDraft({ sandbox_config: DECLARED }, '/home/tester')).toBe('/home/tester/go/pkg/mod');
     });
 });
