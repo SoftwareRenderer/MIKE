@@ -59,7 +59,7 @@ clash.
 `ValidateContainerPath`, `ValidateCapability`/`ValidateCapabilities`, `GVisorIsolationForCaps` and the
 `GVisorCreateArgs`/`AppendCapabilities` pair live in `pkg/sandboxruntime`, next to
 `ValidateProjectName`, and every caller that builds container arguments goes through them:
-`extensions/mount_policy.go` delegates, `sandbox.Create` refuses before the container exists, and
+`extensions/mount_policy.go` calls them, `sandbox.Create` refuses before the container exists, and
 `types.ValidateSandboxMount`/`ValidateSandboxAdditions` check a project's Sandbox Configuration on
 create and `PUT` (400 naming the field).
 

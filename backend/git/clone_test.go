@@ -256,7 +256,7 @@ func TestValidateCloneURL(t *testing.T) {
 func TestValidateCloneURL_AllowlistMatchesCloneEnv(t *testing.T) {
 	for _, scheme := range CloneAllowedProtocols {
 		if err := ValidateCloneURL(scheme + "://example.com/repo.git"); err != nil {
-			t.Errorf("allowed protocol %q rejected by validateGitCloneURL: %v", scheme, err)
+			t.Errorf("allowed protocol %q rejected by ValidateCloneURL: %v", scheme, err)
 		}
 	}
 	for _, helper := range []string{"ext", "fd", "python", "rc", "internal"} {
