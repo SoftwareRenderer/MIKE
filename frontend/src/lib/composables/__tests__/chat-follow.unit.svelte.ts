@@ -101,15 +101,17 @@ describe('createChatFollow — initial attach', () => {
         follow.destroy();
     });
 
-    it('is ready even when the very first pin is not allowed (user already scrolled)', () => {
+    it('reveals the container even when the first frame finds the viewport away from the bottom', () => {
         const follow = createChatFollow();
         const { el } = makeScroller();
         follow.attach(el, null);
-        // User scrolls away before the attach frame runs.
+        // Something moved the viewport before the attach frame ran, and no reader was holding it.
         el.scrollTop = 0;
         follow.handleScroll();
         flushFrames(2);
         expect(follow.ready).toBe(true);
+        expect(follow.following).toBe(true);
+        expect(distanceFromBottom(el)).toBe(0);
         follow.destroy();
     });
 });
@@ -117,11 +119,12 @@ describe('createChatFollow — initial attach', () => {
 describe('createChatFollow — pin gating', () => {
     it('skips a non-forced pin once the user scrolled away', () => {
         const follow = createChatFollow();
-        const { el, state } = makeScroller();
+        const { el, state, fire } = makeScroller();
         follow.attach(el, null);
         flushFrames(3);
         expect(follow.atBottom).toBe(true);
 
+        fire('wheel', { deltaY: -120 } as never);
         el.scrollTop = 0;
         follow.handleScroll();
         expect(follow.atBottom).toBe(false);
@@ -135,9 +138,10 @@ describe('createChatFollow — pin gating', () => {
 
     it('applies a forced pin regardless of position', () => {
         const follow = createChatFollow();
-        const { el } = makeScroller();
+        const { el, fire } = makeScroller();
         follow.attach(el, null);
         flushFrames(3);
+        fire('wheel', { deltaY: -120 } as never);
         el.scrollTop = 0;
         follow.handleScroll();
 
@@ -193,7 +197,7 @@ describe('createChatFollow — settling (content-visibility placeholder heights)
 describe('createChatFollow — never fights the user', () => {
     it('aborts an in-flight pin sequence when the user scrolls away mid-pin', () => {
         const follow = createChatFollow();
-        const { el, state } = makeScroller(2000, 500);
+        const { el, state, fire } = makeScroller(2000, 500);
         follow.attach(el, null);
 
         // Growth is still pending, so a pin frame is queued…
@@ -201,6 +205,7 @@ describe('createChatFollow — never fights the user', () => {
         flushFrames(1);
         // …and the user scrolls to the top in the same window (scroll events are
         // dispatched before rAF callbacks).
+        fire('wheel', { deltaY: -120 } as never);
         el.scrollTop = 0;
         follow.handleScroll();
 
@@ -216,9 +221,10 @@ describe('createChatFollow — never fights the user', () => {
 
     it('resumes following as soon as the user scrolls back to the bottom', () => {
         const follow = createChatFollow();
-        const { el } = makeScroller(2000, 500);
+        const { el, fire } = makeScroller(2000, 500);
         follow.attach(el, null);
         pinFrames();
+        fire('wheel', { deltaY: -120 } as never);
         el.scrollTop = 0;
         follow.handleScroll();
         expect(follow.atBottom).toBe(false);
@@ -233,9 +239,9 @@ describe('createChatFollow — never fights the user', () => {
 });
 
 describe('createChatFollow — a takeover during an in-flight pin', () => {
-    it('stops a forced settle loop when the reader scrolls away mid-sequence', () => {
+    it('stops a forced settle loop when the reader drags the viewport away mid-sequence', () => {
         const follow = createChatFollow();
-        const { el, state } = makeScroller(2000, 500);
+        const { el, state, fire } = makeScroller(2000, 500);
         follow.attach(el, null);
         pinFrames();
 
@@ -244,6 +250,9 @@ describe('createChatFollow — a takeover during an in-flight pin', () => {
         fireResize();
         flushFrames(1);
 
+        // A dragged scrollbar sends its pointer events to the scroller itself.
+        fire('pointerdown', { clientX: 100, clientY: 400, buttons: 1 } as never);
+        fire('pointermove', { clientX: 100, clientY: 340, buttons: 1 } as never);
         el.scrollTop = 0;
         follow.handleScroll();
 
@@ -322,9 +331,10 @@ describe('createChatFollow — a takeover during an in-flight pin', () => {
 
     it('re-engages following when a person forces a pin', () => {
         const follow = createChatFollow();
-        const { el, state } = makeScroller(2000, 500);
+        const { el, state, fire } = makeScroller(2000, 500);
         follow.attach(el, null);
         pinFrames();
+        fire('wheel', { deltaY: -120 } as never);
         el.scrollTop = 0;
         follow.handleScroll();
         expect(follow.following).toBe(false);
@@ -375,9 +385,10 @@ describe('createChatFollow — layout changes with no scroll event', () => {
 
     it('leaves a scrolled-up reader alone when the layout changes', () => {
         const follow = createChatFollow();
-        const { el, state } = makeScroller(2000, 500);
+        const { el, state, fire } = makeScroller(2000, 500);
         follow.attach(el, null);
         pinFrames();
+        fire('wheel', { deltaY: -120 } as never);
         el.scrollTop = 100;
         follow.handleScroll();
 
@@ -411,13 +422,13 @@ describe('createChatFollow — who is driving the viewport', () => {
         follow.destroy();
     });
 
-    it('treats a gap after explicit user input as a takeover even if layout grew too', () => {
+    it('treats a gap the reader drove as a takeover even when the layout grew too', () => {
         const follow = createChatFollow();
         const { el, state, fire } = makeScroller(2000, 500);
         follow.attach(el, null);
         pinFrames();
 
-        fire('wheel'); // a real gesture through the tracker's own listener
+        fire('touchmove'); // a finger is driving the viewport
         state.scrollHeight += 600; // streaming content arrived in the same moment
         el.scrollTop = 0;
         follow.handleScroll();
@@ -425,6 +436,56 @@ describe('createChatFollow — who is driving the viewport', () => {
 
         expect(follow.following).toBe(false);
         expect(el.scrollTop).toBe(0);
+        follow.destroy();
+    });
+
+    it('leaves following on when nothing was driving the viewport upward', () => {
+        const follow = createChatFollow();
+        const { el, state } = makeScroller(2000, 500);
+        follow.attach(el, null);
+        pinFrames();
+
+        // The viewport moved with no reader holding it, so they are not the one who left the bottom.
+        el.scrollTop = 0;
+        follow.handleScroll();
+        flushFrames(4);
+
+        expect(follow.following).toBe(true);
+        expect(distanceFromBottom(el)).toBe(0);
+        expect(state.writes).toBeGreaterThan(0);
+        follow.destroy();
+    });
+
+    it('stops following on a fling that coasts on after the last touchmove', () => {
+        const follow = createChatFollow();
+        const { el, state, fire } = makeScroller(2000, 500);
+        follow.attach(el, null);
+        pinFrames();
+
+        fire('touchmove');
+        el.scrollTop = 600; // the coast carries the reader up; no further input events arrive
+        follow.handleScroll();
+        const writes = state.writes;
+        flushFrames(4);
+
+        expect(follow.following).toBe(false);
+        expect(el.scrollTop).toBe(600);
+        expect(state.writes).toBe(writes);
+        follow.destroy();
+    });
+
+    it('leaves a press that never travelled alone: clicking a message is not scrolling', () => {
+        const follow = createChatFollow();
+        const { el, fire } = makeScroller(2000, 500);
+        follow.attach(el, null);
+        pinFrames();
+
+        fire('pointerdown', { clientX: 100, clientY: 400, buttons: 1 } as never);
+        el.scrollTop = 1200; // what the click expanded above the viewport moved the reader
+        follow.handleScroll();
+
+        expect(follow.following).toBe(true);
+        expect(distanceFromBottom(el)).toBe(0);
         follow.destroy();
     });
 
@@ -451,10 +512,10 @@ describe('createChatFollow — who is driving the viewport', () => {
 
     it('re-engages when the user scrolls back to the bottom', () => {
         const follow = createChatFollow();
-        const { el } = makeScroller(2000, 500);
+        const { el, fire } = makeScroller(2000, 500);
         follow.attach(el, null);
         pinFrames();
-        follow.noteUserIntent();
+        fire('wheel', { deltaY: -120 } as never);
         el.scrollTop = 0;
         follow.handleScroll();
         expect(follow.following).toBe(false);

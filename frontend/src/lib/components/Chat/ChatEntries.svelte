@@ -273,7 +273,7 @@
         if (!scroller || stickyEntryId === '' || stickyJumping) return;
         // Declare the takeover before anything moves, or the follow tracker's pin loop and the settle
         // loop of a page that lands write scrollTop against us.
-        follow.noteUserIntent();
+        follow.stopFollowing();
         tapped = { entryId: stickyEntryId, intent: follow.intent };
         if (stickyNeedsRows) {
             // The prompt is older than every row held: fetch until its row is on screen.

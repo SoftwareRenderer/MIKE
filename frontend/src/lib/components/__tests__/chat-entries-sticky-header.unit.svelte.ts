@@ -196,11 +196,9 @@ function mountGeometry(container: HTMLElement, follow: ChatFollow, geometry?: Ma
     stubMessages();
 
     return {
-        /** The user scrolled. The gesture is declared because a viewport gaining a
-         *  scrollable height otherwise reads to the follow tracker as a growing
-         *  document, which it would then pin back to the bottom. */
+        /** The user scrolled, so the tracker is told the reader asked for what is above. */
         async to(scrollTop: number) {
-            follow.noteUserIntent();
+            follow.stopFollowing();
             top = scrollTop;
             el.dispatchEvent(new Event('scroll'));
             await flush();

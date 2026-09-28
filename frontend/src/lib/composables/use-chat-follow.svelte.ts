@@ -1,11 +1,14 @@
 import { SCROLL_BOTTOM_THRESHOLD } from '$lib/constants';
 
 /**
- * Entries use `content-visibility: auto`, so a freshly rendered list reports placeholder heights
- * and a one-shot pin lands far above the real bottom. A pin re-pins until the height holds steady.
+ * `content-visibility: auto` makes a freshly rendered list report placeholder heights, so a one-shot pin
+ * lands well above the real bottom. A pin keeps re-pinning until the height holds steady.
  */
 const PIN_SETTLE_FRAMES = 12;
 const PIN_STABLE_FRAMES = 2;
+
+/** How far a press travels inside the scroller before it is a drag rather than a click. */
+const DRAG_THRESHOLD = 6;
 
 /**
  * Distance from the current scroll position to the very bottom, in px. Pass `totalHeight` only
@@ -29,40 +32,39 @@ export function isAtBottom(el: HTMLElement, { threshold = SCROLL_BOTTOM_THRESHOL
 
 /** Public surface of the chat follow tracker. */
 export interface ChatFollow {
-    /** The scroll container (null until ChatEntries mounts it). */
+    /** The scroll container; null until ChatEntries mounts it. */
     readonly el: HTMLElement | null;
     /** True while the viewport is within SCROLL_BOTTOM_THRESHOLD of the bottom. */
     readonly atBottom: boolean;
     /**
-     * True while new content should keep the viewport pinned. Unlike atBottom it survives the gap
-     * that growing content opens up; only the user scrolling away clears it.
+     * True while new content should keep the viewport pinned. Only a reader gesture asking for what is
+     * above ends it; reaching the bottom, or a forced pin, restarts it.
      */
     readonly following: boolean;
     /** True once the container has been attached and laid out at least once. */
     readonly ready: boolean;
     /** Register the container and the entry wrapper; both are watched for layout changes. */
     attach(scroller: HTMLElement | null, content: HTMLElement | null): void;
-    /** Pin the viewport to the bottom, unless the user has scrolled away and this is not forced. */
+    /** Pin the viewport to the bottom, unless the reader has gone up and this is not forced. */
     pin(force?: boolean): boolean;
-    /** Feed the container's scroll event in — this is who decides who is driving. */
+    /** Feed the container's scroll event in. */
     handleScroll(): void;
-    /** Record user input whose direction is not readable (a touch drag, a wheel without a delta).
-     * A gap after this is a takeover even when the layout changed too. */
-    noteUserIntent(): void;
     /** How many times the reader has shown they want to scroll. */
     readonly intent: number;
-    /** The reader asked for what is above the viewport. Stops the pin loop so growth below does
-     * not pull them back. */
+    /** The reader asked for what is above the viewport. */
     stopFollowing(): void;
     /** Release observers and pending frames. */
     destroy(): void;
 }
 
 /**
- * Single owner of the chat's "follow the latest content" behaviour, so TaskChat and ChatEntries
- * share one notion of "the user is at the bottom" and one writer of scrollTop. Following is driven
- * by layout as well as by scroll events, because a lazy entry or a panel resize fires no scroll
- * event of its own.
+ * Owns the chat's "follow the latest content" behaviour, so TaskChat and ChatEntries share one idea of
+ * "at the bottom" and one writer of scrollTop.
+ *
+ * Following ends only on a reader gesture that asks for what is above the viewport, never on where the
+ * viewport ended up: the document opening a gap under the reader, scroll anchoring, and the app's own page
+ * of older rows all move it by themselves. A gesture whose direction is readable decides at once; the rest
+ * hold the viewport, and a later upward scroll event is theirs.
  */
 export function createChatFollow(): ChatFollow {
     // Raw: node identity must stay exact, and a node's own properties are not reactive.
@@ -75,37 +77,31 @@ export function createChatFollow(): ChatFollow {
     let observer: ResizeObserver | null = null;
     let destroyed = false;
 
-    /**
-     * Auto-scroll intent, kept apart from atBottom. A gap is not always the reader scrolling away:
-     * the document moving under the viewport opens one too, so only unexplained movement is a
-     * takeover.
-     */
     let following = true;
-    /** Document and viewport height the last judgement was based on. */
-    let knownHeight = -1;
-    let knownClient = -1;
-    /** The observer saw the layout change; the scroll event it causes may come later. */
-    let layoutDirty = false;
-    /** Explicit user input, counted rather than timed so the judgement stays deterministic. */
+    /** Counted so a caller can tell that the reader moved since it last looked. */
     let intentSeq = 0;
-    let intentAtPin = 0;
+    /** Where the viewport was when we last looked; the next move's direction is read against it. */
+    let lastTop = -1;
+    /** A touch is dragging this container. */
+    let touchDrag = false;
+    /** A pointer held down inside this container, and where it began. */
+    let press: { x: number; y: number; dragging: boolean } | null = null;
 
-    /** True when the document or the container changed since the last judgement. */
-    function layoutMoved(node: HTMLElement): boolean {
-        return layoutDirty || node.scrollHeight !== knownHeight || node.clientHeight !== knownClient;
+    /** True while a reader holds the viewport: a touch drag (a fling coasting included), or a
+     * press-drag, which is also how a scrollbar drag arrives. */
+    function readerDriving(): boolean {
+        return touchDrag || !!press?.dragging;
     }
 
-    /** Update atBottom from live layout (no intent judgements). */
+    /** With nothing above the viewport, a gesture upward asks for nothing. */
+    function hasAbove(): boolean {
+        return !!el && el.scrollTop > 0;
+    }
+
     function measure() {
         if (!el) return;
         atBottom = isAtBottom(el);
-    }
-
-    /** Remember the current layout as "explained". */
-    function noteLayout(node: HTMLElement) {
-        knownHeight = node.scrollHeight;
-        knownClient = node.clientHeight;
-        layoutDirty = false;
+        lastTop = el.scrollTop;
     }
 
     function cancelPin() {
@@ -130,14 +126,12 @@ export function createChatFollow(): ChatFollow {
 
         const step = () => {
             pinRaf = null;
-            // A takeover ends the sequence, forced or not: forcing authorises this pin, not the
-            // frames after someone else started moving the viewport.
+            // A takeover ends the sequence, forced or not: forcing authorises this pin, not later frames.
             if (!following) return;
-            intentAtPin = intentSeq;
             const height = node.scrollHeight;
             node.scrollTop = height;
-            noteLayout(node);
-            // This write's own scroll event arrives next frame, so update the state now.
+            lastTop = node.scrollTop;
+            // The scroll event for this write arrives next frame, so update the state now.
             measure();
             if (height === lastHeight) {
                 if (++stableFrames >= PIN_STABLE_FRAMES) return;
@@ -152,48 +146,37 @@ export function createChatFollow(): ChatFollow {
         return true;
     }
 
-    function handleScroll() {
+    function handleScroll(): void {
         if (!el || destroyed) return;
         const node = el;
+        const top = node.scrollTop;
         const at = isAtBottom(node);
-        const moved = layoutMoved(node);
-        const userActed = intentSeq !== intentAtPin;
         if (at) {
             following = true;
-            intentAtPin = intentSeq;
-        } else if (following && moved && !userActed) {
-            // The gap came from the layout itself, not from the reader.
-        } else {
-            following = false;
+        } else if (top < lastTop && readerDriving()) {
+            // The reader moved up while holding the viewport. Nothing else moves it up: content grows
+            // downward, and scroll anchoring holds the reader's row.
+            stopFollowing();
         }
+        lastTop = top;
         atBottom = at;
-        noteLayout(node);
         if (following && !at) pin(true);
     }
 
-    /** Content can grow with no scroll event: mark the layout moved, so the event it produces is
-     * not read as a takeover. */
-    function handleResize() {
+    /** Content can grow with no scroll event, so a following reader stays pinned — unless they hold the
+     * viewport, where a pin would speak over them. */
+    function handleResize(): void {
         if (!el || destroyed) return;
-        layoutDirty = true;
         measure();
-        if (following) pin(true);
-    }
-
-    function noteUserIntent(): void {
-        intentSeq++;
+        if (following && !readerDriving()) pin(true);
     }
 
     function stopFollowing(): void {
+        // Callers watch the `intent` count, so it moves even when `following` is already false.
+        intentSeq++;
+        if (!following) return;
         following = false;
         cancelPin();
-        noteUserIntent();
-    }
-
-    /** Whether anything sits above the viewport: with nothing there, a gesture upward asks for
-     * nothing, and a wheel that could not move anything would end following. */
-    function hasAbove(): boolean {
-        return !!el && el.scrollTop > 0;
     }
 
     /** Keys that scroll a container; anything else is not a takeover. */
@@ -201,31 +184,65 @@ export function createChatFollow(): ChatFollow {
     /** The subset that asks for what is above the viewport. */
     const ABOVE_KEYS = new Set(['ArrowUp', 'PageUp', 'Home']);
 
-    /** A gesture upward ends following where it lands: its scroll event is dispatched a frame
-     * later, by which time a pin frame has already overwritten the reader's position. */
-    function onIntentWheel(e: Event) {
-        if ((e as WheelEvent).deltaY < 0 && hasAbove()) {
-            stopFollowing();
-            return;
-        }
-        noteUserIntent();
+    /** An upward wheel ends following at once: its scroll event arrives a frame later, after a pin
+     * frame has already moved the viewport. */
+    function onWheel(e: Event): void {
+        if ((e as WheelEvent).deltaY < 0 && hasAbove()) stopFollowing();
     }
 
-    function onIntentKeydown(e: Event) {
+    function onScrollKey(e: Event): void {
         const key = (e as KeyboardEvent).key;
         if (!SCROLL_KEYS.has(key)) return;
+        intentSeq++;
         if (ABOVE_KEYS.has(key) && hasAbove()) stopFollowing();
-        else noteUserIntent();
     }
 
-    function setIntentListeners(node: HTMLElement | null, on: boolean) {
+    /** A touch drives the viewport, and keeps driving it while the fling coasts on past the last
+     * touchmove. */
+    function onTouchMove(): void {
+        touchDrag = true;
+        intentSeq++;
+    }
+
+    function onEndTouch(): void {
+        touchDrag = false;
+    }
+
+    /** A press becomes a drag once it travels; one that never travels is a click on a message. A
+     * scrollbar drag sends its pointer events to the scroller itself. */
+    function onPointerDown(e: Event): void {
+        const ev = e as PointerEvent;
+        press = { x: ev.clientX, y: ev.clientY, dragging: false };
+    }
+
+    function onPointerMove(e: Event): void {
+        if (!press) return;
+        const ev = e as PointerEvent;
+        // A press released outside the window never sends this element its pointerup, so a move with no
+        // button held is how that press ends.
+        if (!ev.buttons) { press = null; return; }
+        if (Math.abs(ev.clientY - press.y) > DRAG_THRESHOLD || Math.abs(ev.clientX - press.x) > DRAG_THRESHOLD) {
+            if (!press.dragging) intentSeq++;
+            press.dragging = true;
+        }
+    }
+
+    function onPointerEnd(): void {
+        press = null;
+    }
+
+    function setIntentListeners(node: HTMLElement | null, on: boolean): void {
         if (!node) return;
         const method = on ? 'addEventListener' : 'removeEventListener';
-        // Not pointerdown: clicking a message or selecting text is not scrolling. A scrollbar drag
-        // has no event of its own, so it is judged by the scroll event it produces.
-        node[method]('wheel', onIntentWheel, { passive: true });
-        node[method]('touchmove', noteUserIntent, { passive: true });
-        node[method]('keydown', onIntentKeydown);
+        node[method]('wheel', onWheel, { passive: true });
+        node[method]('touchmove', onTouchMove, { passive: true });
+        node[method]('touchend', onEndTouch, { passive: true });
+        node[method]('touchcancel', onEndTouch, { passive: true });
+        node[method]('pointerdown', onPointerDown, { passive: true });
+        node[method]('pointermove', onPointerMove, { passive: true });
+        node[method]('pointerup', onPointerEnd, { passive: true });
+        node[method]('pointercancel', onPointerEnd, { passive: true });
+        node[method]('keydown', onScrollKey);
     }
 
     function attach(scroller: HTMLElement | null, content: HTMLElement | null): void {
@@ -234,6 +251,9 @@ export function createChatFollow(): ChatFollow {
         el = scroller;
         contentEl = content;
         setIntentListeners(el, true);
+        touchDrag = false;
+        press = null;
+        lastTop = -1;
 
         if (observer) {
             observer.disconnect();
@@ -274,7 +294,6 @@ export function createChatFollow(): ChatFollow {
         attach,
         pin,
         handleScroll,
-        noteUserIntent,
         stopFollowing,
         destroy,
     };

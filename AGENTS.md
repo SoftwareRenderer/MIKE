@@ -208,6 +208,12 @@ python3 scripts/gen-registry.py --check                  # registry.json matches
 - **CJK typography is scoped to `:lang()`.** `docs/typography.md`.
 - Chat: never disguise a system message as a user message; streaming cursor only during an active
   response; stats are `X tokens · Ys · Z tok/s` (completion tokens).
+- **Chat autoscroll ends only on a gesture that asks for what is above the viewport** — a wheel upward, a
+  scroll key, or a scroll event that moves the viewport up while a touch or press drag holds it. A scroll
+  event that finds the viewport away from the bottom is the document moving under the reader: the app's own
+  top-edge page, scroll anchoring and a re-render all do that. The jump-latest button measures `atBottom`,
+  which is a position; only `following` decides whether new content re-pins.
+  `frontend/src/lib/composables/use-chat-follow.svelte.ts`.
 - **A Review notification is the client's decision, never the server's.** The choice is stored in the
   browser that will have to show it (`uiStore.notifyOnReview`, never `/api/config`); an arrival is
   detected from the `project_counts` rise and announced only when the Review column is not in view and

@@ -707,21 +707,25 @@
         if (earlierInFlight) return earlierInFlight;
         earlierInFlight = (async () => {
             loadingEarlier = true;
-            // Reading older rows is a takeover: growth at the bottom must not pull the reader back there.
-            follow.stopFollowing();
+            // A reader who came up here is reading older rows, so growth at the bottom must not pull them back.
+            // One still at the bottom did not ask for this page: it only fills the chat.
+            const readingAbove = !follow.following;
+            if (readingAbove) follow.stopFollowing();
             const held = historyRows.length;
             try {
                 const older = await getTaskMessages(projectId, taskId, { before: earlierCursor, from, limit });
                 const el = follow.el;
                 // Read where the reader is now, not where the request went out: they may have kept scrolling
                 // while it was in flight, and pinning them back to that is a jump.
-                const anchor = settle && el ? resolveAnchor(measuredEntries(el), el.getBoundingClientRect().top) : null;
+                const anchor = readingAbove && settle && el ? resolveAnchor(measuredEntries(el), el.getBoundingClientRect().top) : null;
                 historyRows = prependRows(historyRows, older.messages);
                 earlierCursor = older.before;
                 hasEarlier = older.hasMore;
                 renderHistory(false, knownExecutionState);
                 await tick();
-                if (el && anchor) await settleOnRow(el, anchor);
+                // A jump declines the settle and lands at its caller's hand, so it gets neither.
+                if (anchor && el) await settleOnRow(el, anchor);
+                else if (!readingAbove) follow.pin(true);
                 return historyRows.length > held;
             } catch {
                 // Nothing to undo: the rows held and the cursor are untouched.
