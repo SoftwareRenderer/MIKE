@@ -429,13 +429,6 @@ func (tm *TerminalManager) HasSession(key string) bool {
 	return ok
 }
 
-// activeSessionCount reports how many terminal sessions are registered.
-func (tm *TerminalManager) activeSessionCount() int {
-	tm.mu.RLock()
-	defer tm.mu.RUnlock()
-	return len(tm.sessions)
-}
-
 // liveConns counts the sockets attached to any session — the count the admission cap is drawn
 // against. It takes tm.mu then a session's own lock, the only nesting of the two.
 func (tm *TerminalManager) liveConns() int {

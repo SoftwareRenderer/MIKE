@@ -77,8 +77,9 @@ func (s *SandboxStatsSampler) SetBudget(measure BudgetMeasure, sink func(mikeMB,
 	s.mu.Unlock()
 }
 
-// NewSandboxStatsSampler creates a sampler. Call Start to begin periodic sampling; SampleOnce,
-// publish and TickOnce are exported for deterministic tests and for the budget's own tick.
+// NewSandboxStatsSampler creates a sampler. Call Start to begin periodic sampling; a test passes
+// zero for both intervals and steps SampleOnce and publish by hand, which is how every sampler
+// test drives it.
 func NewSandboxStatsSampler(source SandboxStatsSource, tasks TaskStatusLookup, broadcaster SandboxStatsBroadcaster, sampleInterval, sendInterval time.Duration) *SandboxStatsSampler {
 	return &SandboxStatsSampler{
 		source:         source,
@@ -160,12 +161,6 @@ func (s *SandboxStatsSampler) reportBudget() {
 	if mikeMB, heldMB, availableMB, totalMB, ok := measure.Measure(); ok {
 		sink(mikeMB, heldMB, availableMB, totalMB)
 	}
-}
-
-// TickOnce samples and then pushes what changed — the whole job of one deterministic tick.
-func (s *SandboxStatsSampler) TickOnce() {
-	s.SampleOnce()
-	s.publish()
 }
 
 // publish sends one sandbox_stats event per task whose sample differs from what was last sent.

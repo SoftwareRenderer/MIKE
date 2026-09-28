@@ -47,11 +47,13 @@ func withPrompts(root string) {
 
 func TestPromptOverlayFor(t *testing.T) {
 	// No pack enabled is English in both halves: no templates and no locale.
-	if got := PromptOverlayFor(nil, t.TempDir()); !got.none() {
-		t.Errorf("no pack = %+v, want none", got)
+	got := PromptOverlayFor(nil, t.TempDir())
+	if got.Dir != "" || got.Locale != "" {
+		t.Errorf("no pack = %+v, want no templates and no locale", got)
 	}
-	if got := PromptOverlayFor([]Extension{{Name: "theme", Enabled: true}}, t.TempDir()); !got.none() {
-		t.Errorf("a non-pack extension = %+v, want none", got)
+	got = PromptOverlayFor([]Extension{{Name: "theme", Enabled: true}}, t.TempDir())
+	if got.Dir != "" || got.Locale != "" {
+		t.Errorf("a non-pack extension = %+v, want no templates and no locale", got)
 	}
 
 	t.Run("a pack that ships no templates still sets the locale", func(t *testing.T) {

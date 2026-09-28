@@ -694,8 +694,9 @@ func TestTerminalManagerClose(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	pids := make([]int, 0, 2)
-	for _, taskID := range []string{"close-task-1", "close-task-2"} {
+	taskIDs := []string{"close-task-1", "close-task-2"}
+	pids := make([]int, 0, len(taskIDs))
+	for _, taskID := range taskIDs {
 		sess, err := tm.getOrCreate(taskID, taskID, dir, projID)
 		if err != nil {
 			t.Fatalf("getOrCreate %s: %v", taskID, err)
@@ -705,14 +706,18 @@ func TestTerminalManagerClose(t *testing.T) {
 		}
 		pids = append(pids, sess.cmd.Process.Pid)
 	}
-	if got := tm.activeSessionCount(); got != 2 {
-		t.Fatalf("sessions before Close = %d, want 2", got)
+	for _, taskID := range taskIDs {
+		if !tm.HasSession(taskID) {
+			t.Fatalf("session %s is not registered before Close", taskID)
+		}
 	}
 
 	tm.Close()
 
-	if got := tm.activeSessionCount(); got != 0 {
-		t.Errorf("sessions after Close = %d, want 0", got)
+	for _, taskID := range taskIDs {
+		if tm.HasSession(taskID) {
+			t.Errorf("session %s is still registered after Close", taskID)
+		}
 	}
 	// A killed-but-unwaited process is still a live process to anything that looks, and readLoop is
 	// what reaps it — so poll for a moment rather than asserting immediately.
