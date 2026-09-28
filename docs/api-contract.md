@@ -358,6 +358,20 @@ is gone is diffed from the project repo, and that fallback calls `git.WorktreeMa
 as well, so no path can answer with patch text alone. Tests:
 `backend/stream/done_snapshot_test.go`, `backend/api/git_diff_parsed_test.go`.
 
+**A ref comparison is not reconciled by working-tree stats.** The panel shows one comparison and the board
+stream keeps pushing the task's working-tree stats, so the view that came from `?head=` or `?base=` has to
+say so. `DiffCache.loadDiff` and `refreshManifest` record whether the view on screen compares refs
+(`DiffCache.refDiff`), and `processStats` returns while that holds. Without it a stats frame refetches every
+path from the other comparison — `/diff/file` answers the worktree against the baseline — and overwrites the
+immutable done-task diff the reader asked for. Tests:
+`frontend/src/lib/services/__tests__/diff-cache.unit.ts`.
+
+**An absent committed half stays absent.** `DiffCache.committedHalf` leaves `committedRows` out when the
+response carries none, and the committed section of `DiffViewer.svelte` tests `committedRows?.length` rather
+than truthiness. An empty array is a truthy "there is a committed half", which is what makes that section
+paint "Empty file" over the rows the file holds. Tests:
+`frontend/src/lib/components/__tests__/diff-merged-committed-half.unit.svelte.ts`.
+
 **One comparison per task in the file cache.** `GET /api/projects/{id}/tasks/{taskID}/diff/file` names a
 path and no refs, so it can answer for one comparison only: the task's worktree against HEAD at the baseline
 `git.WorktreeManager.TaskDiffBaseline` names for that task. `api.taskDiffCache` (`backend/api/git.go`) holds

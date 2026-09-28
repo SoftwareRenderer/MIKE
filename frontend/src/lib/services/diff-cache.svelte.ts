@@ -66,6 +66,11 @@ export class DiffCache {
     /** Tracker for WebSocket diff stats effect. */
     tracker = { hash: null as string | null, stagedPathsKey: '', untrackedN: 0 };
 
+    /** True while the panel shows a ref comparison — a done task's pinned `BaseCommit..BranchTip` diff. The
+     * working-tree stats the board stream pushes describe a different comparison, and `/diff/file` answers
+     * that one for these paths, so they cannot reconcile this view. See processStats. */
+    private refDiff = false;
+
     private _apis: DiffCacheApis;
     private _getProjectId: () => string;
     private _getTaskId: () => string;
@@ -104,7 +109,7 @@ export class DiffCache {
             rows,
             added: rows.filter((r: DiffRow) => r.variant === 'added').length,
             removed: rows.filter((r: DiffRow) => r.variant === 'removed').length,
-            committedRows: data.committedRows ? this._apis.enrichRows(data.committedRows) : [],
+            committedRows: this.committedHalf(data),
             truncated: !!data.truncated,
             origAdded: data.origAdded ?? existing.origAdded,
             origRemoved: data.origRemoved ?? existing.origRemoved,
@@ -133,8 +138,23 @@ export class DiffCache {
         this.state.files = updated;
     }
 
+    /** The committed half of a fetched file, absent when the response carries none.
+     *
+     * "No committed half" and "a committed half with no rows" are different answers, and only the second
+     * is an empty array: the committed section prefers `committedRows` to `rows`, and `[]` satisfies that
+     * preference. `toDiffFiles` leaves the key out for the same reason.
+     */
+    private committedHalf(data: DiffFileResponse): DiffRow[] | undefined {
+        return data.committedRows ? this._apis.enrichRows(data.committedRows) : undefined;
+    }
+
     /** Process a diff stats update from WebSocket. Called by component's $effect. */
     processStats(stat: DiffStats | undefined, diffLoading: boolean) {
+        // A ref comparison is immutable, so the only thing a working-tree stat could reconcile here is the
+        // wrong diff: the hash tracker holds path stand-ins for these files, every path would read as
+        // changed, and each `/diff/file` answer is the worktree against the baseline rather than the pair
+        // on screen. CardDetail reloads when the base moves, which is the only change this view follows.
+        if (this.refDiff) return;
         const currentHash = stat?.hash || null;
         const stagedPaths = stat?.staged_paths;
         const stagedKey = DiffCache.stagedPathsKey(stagedPaths);
@@ -210,6 +230,7 @@ export class DiffCache {
      * from/to comparison. A full `loadDiff` closes those, and a failed refresh leaves the panel as it was. */
     async refreshManifest(options?: { headRef?: string; baseRef?: string }): Promise<void> {
         if (this.state.loading) return; // a full load is already under way and answers the same question
+        this.refDiff = !!(options?.headRef || options?.baseRef);
         const gen = this.loadGen;
         const oldHashes = { ...this.fileHashes };
         this.state.loading = true;
@@ -322,6 +343,7 @@ export class DiffCache {
         this.state.files = {};
         this.state.untracked = {};
         this.fileHashes = {};
+        this.refDiff = !!(options?.headRef || options?.baseRef);
         // Bump generation
         this.loadGen++;
         // Reset tracker
@@ -386,7 +408,7 @@ export class DiffCache {
                 try {
                     const data = await this._apis.getDiffFile(this._getProjectId(), this._getTaskId(), path);
                     if (data.rows) {
-                        updatedDiff[path] = { path, rows: this._apis.enrichRows(data.rows), committedRows: data.committedRows ? this._apis.enrichRows(data.committedRows) : [], added: entry.added ?? 0, removed: entry.removed ?? 0, truncated: data.truncated, origAdded: data.origAdded, origRemoved: data.origRemoved, isNewFile: data.isNew ?? entry.isNew, isDeleted: data.isDeleted ?? entry.isDeleted, staged: entry.staged };
+                        updatedDiff[path] = { path, rows: this._apis.enrichRows(data.rows), committedRows: this.committedHalf(data), added: entry.added ?? 0, removed: entry.removed ?? 0, truncated: data.truncated, origAdded: data.origAdded, origRemoved: data.origRemoved, isNewFile: data.isNew ?? entry.isNew, isDeleted: data.isDeleted ?? entry.isDeleted, staged: entry.staged };
                     } else if (data.lines) {
                         updatedDiff[path] = { path, rows: data.lines.map((line, i) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })), added: data.lines.length, removed: 0, truncated: !!data.truncated, origAdded: data.origAdded, isNewFile: data.isNew ?? entry.isNew, staged: entry.staged ?? false };
                         updatedUntracked[path] = true;
@@ -450,7 +472,7 @@ export class DiffCache {
                     const isStaged = stagedSet?.has(path) ?? existing?.staged ?? false;
                     if (data.rows) {
                         const rows = this._apis.enrichRows(data.rows);
-                        updatedDiff[path] = { path, rows, committedRows: data.committedRows ? this._apis.enrichRows(data.committedRows) : [], added: rows.filter((r: DiffRow) => r.variant === 'added').length, removed: rows.filter((r: DiffRow) => r.variant === 'removed').length, truncated: data.truncated, origAdded: data.origAdded, origRemoved: data.origRemoved, isNewFile: data.isNew, isDeleted: data.isDeleted, staged: isStaged };
+                        updatedDiff[path] = { path, rows, committedRows: this.committedHalf(data), added: rows.filter((r: DiffRow) => r.variant === 'added').length, removed: rows.filter((r: DiffRow) => r.variant === 'removed').length, truncated: data.truncated, origAdded: data.origAdded, origRemoved: data.origRemoved, isNewFile: data.isNew, isDeleted: data.isDeleted, staged: isStaged };
                     } else if (data.lines) {
                         updatedDiff[path] = { path, rows: data.lines.map((line: string, i: number) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })), added: data.lines.length, removed: 0, truncated: !!data.truncated, origAdded: data.origAdded, isNewFile: data.isNew, staged: isStaged };
                         updatedUntracked[path] = { ...(this.state.untracked[path] || {}), loading: false };
@@ -529,7 +551,7 @@ export class DiffCache {
                         const isStaged = entry.staged ?? false;
                         if (data.rows) {
                             const rows = this._apis.enrichRows(data.rows);
-                            updatedDiff[path] = { path, rows, committedRows: data.committedRows ? this._apis.enrichRows(data.committedRows) : [], added: entry.added ?? 0, removed: entry.removed ?? 0, truncated: data.truncated, origAdded: entry.origAdded, origRemoved: entry.origRemoved, isNewFile: data.isNew ?? entry.isNew, isDeleted: data.isDeleted ?? entry.isDeleted, staged: isStaged };
+                            updatedDiff[path] = { path, rows, committedRows: this.committedHalf(data), added: entry.added ?? 0, removed: entry.removed ?? 0, truncated: data.truncated, origAdded: entry.origAdded, origRemoved: entry.origRemoved, isNewFile: data.isNew ?? entry.isNew, isDeleted: data.isDeleted ?? entry.isDeleted, staged: isStaged };
                         } else if (data.lines) {
                             updatedDiff[path] = { path, rows: data.lines.map((line: string, i: number) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })), added: data.lines.length, removed: 0, truncated: !!data.truncated, origAdded: entry.origAdded, isNewFile: data.isNew ?? entry.isNew, staged: isStaged };
                             updatedUntracked[path] = { fileSize: entry.file_size, isBinary: entry.is_binary, truncated: !!entry.truncated, origAdded: entry.origAdded ?? entry.line_count, loading: false };
@@ -632,6 +654,7 @@ export class DiffCache {
         this.state.untracked = {};
         this.state.baseRef = '';
         this.fileHashes = {};
+        this.refDiff = false;
     }
 
 }
