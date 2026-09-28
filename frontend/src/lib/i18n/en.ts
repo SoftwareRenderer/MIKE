@@ -174,6 +174,8 @@ const catalog = {
     'explorer.fileBrowser.cloneHelpAfter': ').',
     'explorer.fileBrowser.cloneInto': 'Clone into',
     'explorer.fileBrowser.useSandbox': 'Use Sandbox',
+    'explorer.fileBrowser.showHidden': 'Show hidden files',
+    'explorer.fileBrowser.showHiddenTitle': 'Include files that are typically hidden by default',
     'explorer.fileBrowser.select': 'Select',
     'explorer.fileBrowser.selectTitle': 'Select this directory as project',
     'explorer.fileBrowser.initGit': 'Initialize Git',

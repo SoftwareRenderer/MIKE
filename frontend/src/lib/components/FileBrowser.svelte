@@ -28,6 +28,7 @@
     let activeTab = $state<'browse' | 'clone'>('browse');
 
     let sandboxEnabled = $state(true);
+    let showHidden = $state(false);
 
     let currentPath = $state('');
     let entries = $state<FsEntry[]>([]);
@@ -51,6 +52,14 @@
      * indicator and the Select button) describes a directory other than `currentPath`.
      */
     let loadSeq = 0;
+
+    /**
+     * Dot-prefixed names stay out of the listing until asked for. `..` is spelled with dots but is the
+     * listing's parent row, so hiding it would trap the picker inside a subdirectory.
+     */
+    const visibleEntries = $derived(
+        showHidden ? entries : entries.filter(e => e.name === '..' || !e.name.startsWith('.'))
+    );
 
     async function loadDir(path: string) {
         const seq = ++loadSeq;
@@ -259,7 +268,7 @@
 
                     <!-- File list -->
                     <div class="file-list" role="list" aria-label={t('explorer.shared.contentsAria')}>
-                        {#each entries as entry}
+                        {#each visibleEntries as entry}
                             <button
                                 type="button"
                                 class={`file-entry${entry.isDir ? ' dir' : ''}${entry.isGitRepo ? ' git-repo' : ''}`}
@@ -329,6 +338,12 @@
                     <input type="checkbox" checked={sandboxEnabled} onchange={(e) => sandboxEnabled = e.currentTarget.checked} />
                     <span>{t('explorer.fileBrowser.useSandbox')}</span>
                 </label>
+                {#if activeTab === 'browse'}
+                    <label class="sandbox-toggle" title={t('explorer.fileBrowser.showHiddenTitle')}>
+                        <input type="checkbox" class="hidden-toggle" checked={showHidden} onchange={(e) => showHidden = e.currentTarget.checked} />
+                        <span>{t('explorer.fileBrowser.showHidden')}</span>
+                    </label>
+                {/if}
                 <button type="button" class="btn" onclick={handleClose} title={t('explorer.shared.cancel')}>{t('explorer.shared.cancel')}</button>
                 {#if activeTab === 'browse'}
                     {#if isGitRepo}
@@ -568,6 +583,10 @@
         cursor: pointer;
         user-select: none;
         white-space: nowrap;
+    }
+    /* Two toggles beside two buttons are wider than a phone-width footer. */
+    .footer-actions {
+        flex-wrap: wrap;
     }
     .sandbox-toggle input[type="checkbox"] {
         cursor: pointer;
