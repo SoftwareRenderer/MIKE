@@ -72,9 +72,6 @@ func PromptOverlayFor(exts []Extension, extensionsDir string) PromptOverlay {
 	return answer
 }
 
-// PromptDirInPack resolves a pack-relative prompts directory and proves the result is
-// the pack's own.
-//
 // PromptDirInPack resolves a pack-relative prompts directory and proves the result is the
 // pack's own. Contained twice, like the delete path: packFilePath is the lexical proof (which
 // is what refuses .. readably) and the symlink check is the enforcement, because filepath.Join
