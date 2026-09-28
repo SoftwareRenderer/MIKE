@@ -1,9 +1,8 @@
-import { reportChunkFailure } from '$lib/services/chunk-failure';
+import { handleChunkFailure } from '$lib/services/chunk-failure';
 
 /**
- * A component imported on first use instead of at module load; a failed import means a document
- * left open across an update (`docs/frontend-updates.md`), so `loading` stays clear and the next
- * click asks again.
+ * A component imported on first use instead of at module load. `loading` must end clear even when the
+ * import fails, or one failed fetch becomes a panel that can never open.
  */
 export function useLazyComponent<T>(loadChunk: () => Promise<{ default: T }>): {
     readonly component: T | null;
@@ -23,7 +22,7 @@ export function useLazyComponent<T>(loadChunk: () => Promise<{ default: T }>): {
                 component = mod.default;
                 loading = false;
             }).catch((e) => {
-                reportChunkFailure(e);
+                handleChunkFailure(e);
                 loading = false;
             });
         },

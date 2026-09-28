@@ -941,7 +941,7 @@ const catalog = {
     'app.reconnect.connect': 'Connect',
     'app.reconnect.connectAria': 'Try connecting now',
     'app.cache.banner': 'Viewing cached data',
-    'app.chunkStale': 'Part of the app could not be loaded — this page is older than the server. Reload to finish updating.',
+    'app.chunkUpdating': 'Updating the app ...',
     'app.skipToMain': 'Skip to main content',
     'app.boardRegionAria': 'Kanban board',
     'app.empty.welcomeTitle': 'Welcome to MIKE',
