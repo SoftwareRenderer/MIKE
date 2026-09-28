@@ -404,7 +404,7 @@ describe('createChatFollow — layout changes with no scroll event', () => {
     });
 });
 
-describe('createChatFollow — who is driving the viewport', () => {
+describe('createChatFollow — who moved the viewport', () => {
     it('re-pins a scroll event caused by growth the observer already handled', () => {
         const follow = createChatFollow();
         const { el, state } = makeScroller(2000, 500);
@@ -439,20 +439,64 @@ describe('createChatFollow — who is driving the viewport', () => {
         follow.destroy();
     });
 
-    it('leaves following on when nothing was driving the viewport upward', () => {
+    it('leaves following on when a shorter document moved the viewport up', () => {
         const follow = createChatFollow();
         const { el, state } = makeScroller(2000, 500);
         follow.attach(el, null);
         pinFrames();
 
-        // The viewport moved with no reader holding it, so they are not the one who left the bottom.
-        el.scrollTop = 0;
+        // A window read replaced the rows above the reader: the document is shorter, and its anchoring
+        // — or the clamp at its new end — carried the viewport up with it. Nobody asked for what is above.
+        state.scrollHeight = 1700;
+        el.scrollTop = 1200;
         follow.handleScroll();
-        flushFrames(4);
-
         expect(follow.following).toBe(true);
+
+        // Still following, so the next growth is answered with a pin rather than a widening gap.
+        state.scrollHeight = 2100;
+        fireResize();
+        flushFrames(3);
         expect(distanceFromBottom(el)).toBe(0);
-        expect(state.writes).toBeGreaterThan(0);
+        follow.destroy();
+    });
+
+    it('treats an upward move nothing explains as a takeover, with nobody holding the viewport', () => {
+        const follow = createChatFollow();
+        const { el, state } = makeScroller(2000, 500);
+        follow.attach(el, null);
+        pinFrames();
+
+        // This is all a dragged scrollbar thumb or a scroll key ever sends: the position moved up, the
+        // document is the height it was, so nothing but a reader moved it.
+        el.scrollTop = 600;
+        follow.handleScroll();
+        const writes = state.writes;
+        flushFrames(6);
+
+        expect(follow.following).toBe(false);
+        expect(el.scrollTop).toBe(600);
+        expect(state.writes).toBe(writes);
+        follow.destroy();
+    });
+
+    it('treats an upward move as a takeover while tokens grow the document too', () => {
+        const follow = createChatFollow();
+        const { el, state } = makeScroller(2000, 500);
+        follow.attach(el, null);
+        pinFrames();
+
+        state.scrollHeight += 400;
+        fireResize();
+        flushFrames(1);
+        // The reader drags the thumb in the same frame the answer adds a line.
+        el.scrollTop = 700;
+        follow.handleScroll();
+        const writes = state.writes;
+        flushFrames(6);
+
+        expect(follow.following).toBe(false);
+        expect(el.scrollTop).toBe(700);
+        expect(state.writes).toBe(writes);
         follow.destroy();
     });
 
@@ -476,16 +520,68 @@ describe('createChatFollow — who is driving the viewport', () => {
 
     it('leaves a press that never travelled alone: clicking a message is not scrolling', () => {
         const follow = createChatFollow();
-        const { el, fire } = makeScroller(2000, 500);
+        const { el, state, fire } = makeScroller(2000, 500);
         follow.attach(el, null);
         pinFrames();
 
         fire('pointerdown', { clientX: 100, clientY: 400, buttons: 1 } as never);
-        el.scrollTop = 1200; // what the click expanded above the viewport moved the reader
+        // The click collapsed a row above the viewport: the document got shorter, and its anchoring
+        // lifted the reader with it.
+        state.scrollHeight = 1700;
+        el.scrollTop = 1200;
         follow.handleScroll();
 
         expect(follow.following).toBe(true);
         expect(distanceFromBottom(el)).toBe(0);
+        follow.destroy();
+    });
+
+    it('does not re-engage following for an upward move inside the bottom band', () => {
+        const follow = createChatFollow();
+        const { el, state } = makeScroller(2000, 500);
+        follow.attach(el, null);
+        pinFrames();
+        const notch = 1500 - (SCROLL_BOTTOM_THRESHOLD - 12);
+
+        // One trackpad notch: the position still counts as at the bottom, so only the direction the move
+        // went can say the reader asked for what is above.
+        el.scrollTop = notch;
+        follow.handleScroll();
+        expect(follow.atBottom, 'the band the reader is still inside').toBe(true);
+        expect(follow.following).toBe(false);
+
+        // Growth must not answer that notch with a pin back to the latest.
+        const writes = state.writes;
+        state.scrollHeight += 400;
+        fireResize();
+        flushFrames(4);
+        expect(state.writes).toBe(writes);
+        expect(el.scrollTop).toBe(notch);
+
+        // Coming back down is what re-engages.
+        el.scrollTop = 999999;
+        follow.handleScroll();
+        expect(follow.following).toBe(true);
+        follow.destroy();
+    });
+
+    it('does not re-engage following when rows collapsing below bring the bottom to the reader', () => {
+        const follow = createChatFollow();
+        const { el, state } = makeScroller(2000, 500);
+        follow.attach(el, null);
+        pinFrames();
+
+        el.scrollTop = 1200; // the reader went up
+        follow.handleScroll();
+        expect(follow.following).toBe(false);
+
+        // The rows under them collapsed, so the bottom rose to the viewport instead of the reader
+        // travelling down to it: the position is at the bottom, but nobody asked for the latest.
+        state.scrollHeight = 1600;
+        el.scrollTop = 999999; // what the clamp does to a position past the new end
+        follow.handleScroll();
+        expect(follow.atBottom, 'the reader is inside the bottom band').toBe(true);
+        expect(follow.following, 'a bottom the reader never arrived at').toBe(false);
         follow.destroy();
     });
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { resolveDetailColumn, resolveDiffFileTarget, canSwitchDetailColumn, type DetailColumnId } from '../use-task-detail-column-nav';
+import { asChatScrollKey, canSwitchDetailColumn, chatScrollDelta, resolveDetailColumn, resolveDiffFileTarget, type DetailColumnId } from '../use-task-detail-column-nav';
 
 // Pure resolvers for task-view column nav; DOM fixtures mirror CardDetail.
 const ORDER: DetailColumnId[] = ['board', 'chat', 'diff'];
@@ -153,5 +153,33 @@ describe('resolveDiffFileTarget', () => {
 
     it('returns null when there are no headers', () => {
         expect(resolveDiffFileTarget({ sections: [], headers: [], activeElement: null, key: 'ArrowDown' })).toBeNull();
+    });
+});
+
+describe('asChatScrollKey / chatScrollDelta', () => {
+    it('names the four keys the chat column answers and no others', () => {
+        for (const key of ['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp']) {
+            expect(asChatScrollKey(key), key).toBe(key);
+        }
+        for (const key of ['ArrowLeft', 'Home', 'End', ' ', 'a', 'Tab']) {
+            expect(asChatScrollKey(key), key).toBeNull();
+        }
+    });
+
+    it('moves the transcript by the whole viewport on the arrows, as it always did', () => {
+        expect(chatScrollDelta('ArrowDown', 600)).toBe(600);
+        expect(chatScrollDelta('ArrowUp', 600)).toBe(-600);
+    });
+
+    it('leaves a band of the previous page on screen for the page keys', () => {
+        expect(chatScrollDelta('PageDown', 600)).toBe(540);
+        expect(chatScrollDelta('PageUp', 600)).toBe(-540);
+    });
+
+    it('is always inside one viewport, so a page key can never fly past what is on screen', () => {
+        for (const key of ['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp'] as const) {
+            expect(Math.abs(chatScrollDelta(key, 480))).toBeLessThanOrEqual(480);
+            expect(Math.sign(chatScrollDelta(key, 480))).toBe(key === 'ArrowDown' || key === 'PageDown' ? 1 : -1);
+        }
     });
 });

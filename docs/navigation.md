@@ -35,9 +35,15 @@ live in `CardDetail.svelte`'s window keydown listener, using pure resolvers from
 - Left/Right cycle Board→Chat→Diff→Board.
 - Plain arrows in any editable focus (incl. the chat input) keep native text behavior;
   **Ctrl+Alt+Left/Right** switches columns from any focus (except while editing a file).
-- Up/Down dispatch on the focused column (overview cards / page-scroll chat / diff file headers).
+- Up/Down and PageUp/PageDown dispatch on the focused column (overview cards / page-scroll chat /
+  diff file headers). The chat column answers all four from any focus inside it — its transcript is not a
+  tab stop, so the browser's own scroll keys would move some other scroll chain — with the distance from
+  `chatScrollDelta`. The other two columns are rings of focusable rows, so a page is not a step on them and
+  they answer arrows only.
 
-Tests: `composables/__tests__/task-detail-column-nav.unit.ts`, e2e `task-view-column-nav.spec.ts`.
+Tests: `composables/__tests__/task-detail-column-nav.unit.ts`, e2e `task-view-column-nav.spec.ts`, and the
+chat half of both by `chat-scroll-takeover.spec.ts` (which also needs the follow tracker to leave the
+reader where a key landed them — `AGENTS.md → Frontend`).
 ## Checking this
 
 `cd frontend && npm test` covers the resolvers (`board-arrow-nav.unit.ts` is one of them).

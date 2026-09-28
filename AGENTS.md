@@ -209,11 +209,16 @@ python3 scripts/gen-registry.py --check                  # registry.json matches
 - **CJK typography is scoped to `:lang()`.** `docs/typography.md`.
 - Chat: never disguise a system message as a user message; streaming cursor only during an active
   response; stats are `X tokens · Ys · Z tok/s` (completion tokens).
-- **Chat autoscroll ends only on a gesture that asks for what is above the viewport** — a wheel upward, a
-  scroll key, or a scroll event that moves the viewport up while a touch or press drag holds it. A scroll
-  event that finds the viewport away from the bottom is the document moving under the reader: the app's own
-  top-edge page, scroll anchoring and a re-render all do that. The jump-latest button measures `atBottom`,
-  which is a position; only `following` decides whether new content re-pins.
+- **Chat autoscroll ends on the scroll event that moves the viewport up *and* widens the gap under the
+  reader** — only a request for what is above produces that pair. Content arriving below the fold widens
+  the gap without moving `scrollTop`; a document that changes height above the fold moves `scrollTop`
+  with the reader's row held. Judge it from the move, never from a gesture listener — a dragged scrollbar
+  sends this element scroll events and no `pointermove`, and a scroll key `CardDetail` handles never
+  reaches the scroller's listener. A viewport that was not being followed cannot be taken over; the
+  sticky header moves it up itself. Re-engaging needs a downward arrival at the bottom. A scroll event
+  that merely finds the viewport inside the bottom band is where a growth pin left it; a small wheel notch
+  undone by the next pin is what a reader calls sticky. The jump-latest button measures `atBottom`, which
+  is a position; only `following` decides whether new content re-pins.
   `frontend/src/lib/composables/use-chat-follow.svelte.ts`.
 - **A Review notification is the client's decision, never the server's.** The choice is stored in the
   browser that will have to show it (`uiStore.notifyOnReview`, never `/api/config`); an arrival is

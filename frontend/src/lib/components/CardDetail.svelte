@@ -25,7 +25,7 @@
     import { useBoardDnd } from '$lib/composables/use-board-dnd.svelte';
     import { useSubtaskHierarchy } from '$lib/composables/use-subtask-hierarchy.svelte';
     import { resolveOverviewArrowTarget } from '$lib/composables/use-board-arrow-nav';
-    import { canSwitchDetailColumn, resolveDetailColumn, resolveDiffFileTarget, type DetailColumnId } from '$lib/composables/use-task-detail-column-nav';
+    import { asChatScrollKey, canSwitchDetailColumn, chatScrollDelta, resolveDetailColumn, resolveDiffFileTarget, type DetailColumnId } from '$lib/composables/use-task-detail-column-nav';
     import { effectiveToggleFullscreenKey, isEditableTarget, matchShortcut } from '$lib/utils/keyboard';
     import { DiffCache } from '$lib/services/diff-cache.svelte';
     import { t, type MessageKey } from '$lib/i18n';
@@ -585,10 +585,11 @@
                     return;
                 }
             }
-            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-                // Column-aware navigation: Board -> overview cards, Chat ->
-                // page-scroll the messages, Diff -> diff file headers. Focus
-                // outside all columns anchors to the board overview.
+            const scrollKey = asChatScrollKey(e.key);
+            if (scrollKey) {
+                // Column-aware navigation: Chat -> page-scroll the messages, Diff ->
+                // diff file headers, Board -> overview cards. Focus outside all columns
+                // anchors to the board overview.
                 if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
                 const active = document.activeElement;
                 if (active instanceof HTMLElement && isEditableTarget(active)) return;
@@ -600,16 +601,18 @@
                     const scroller = chatCol.querySelector<HTMLElement>('.chat-messages');
                     if (!scroller) return;
                     e.preventDefault();
-                    scroller.scrollBy({ top: e.key === 'ArrowDown' ? scroller.clientHeight : -scroller.clientHeight, behavior: 'smooth' });
+                    scroller.scrollBy({ top: chatScrollDelta(scrollKey, scroller.clientHeight), behavior: 'smooth' });
                     return;
                 }
+                // The other two columns are a ring of focusable rows: a page is not a step on it.
+                if (scrollKey === 'PageDown' || scrollKey === 'PageUp') return;
                 const diffCol = detailEl.querySelector<HTMLElement>('.column-diff');
                 if (!editingFile && active instanceof HTMLElement && diffCol?.contains(active)) {
                     const sections = Array.from(diffCol.querySelectorAll<HTMLElement>('.diff-file-section'));
                     const headers = sections
                         .map(s => s.querySelector<HTMLElement>('button.diff-file-header'))
                         .filter((h): h is HTMLElement => !!h);
-                    const target = resolveDiffFileTarget({ sections, headers, activeElement: active, key: e.key });
+                    const target = resolveDiffFileTarget({ sections, headers, activeElement: active, key: scrollKey });
                     if (!target) return;
                     e.preventDefault();
                     target.focus();
@@ -617,7 +620,7 @@
                     return;
                 }
                 const cards = Array.from(detailEl.querySelectorAll<HTMLElement>('.task-list .task-wrapper > .card'));
-                const target = resolveOverviewArrowTarget({ cards, activeElement: active, key: e.key });
+                const target = resolveOverviewArrowTarget({ cards, activeElement: active, key: scrollKey });
                 if (!target) return;
                 e.preventDefault();
                 target.focus();

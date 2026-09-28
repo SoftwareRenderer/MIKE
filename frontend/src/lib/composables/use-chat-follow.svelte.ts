@@ -9,6 +9,8 @@ const PIN_STABLE_FRAMES = 2;
 
 /** How far a press travels inside the scroller before it is a drag rather than a click. */
 const DRAG_THRESHOLD = 6;
+/** Fractional layout (zoom, scaled rows) leaves a position a hair off the one that was written. */
+const MOVE_SLACK = 2;
 
 /**
  * Distance from the current scroll position to the very bottom, in px. Pass `totalHeight` only
@@ -39,8 +41,8 @@ export interface ChatFollow {
     /** True while the viewport is within SCROLL_BOTTOM_THRESHOLD of the bottom. */
     readonly atBottom: boolean;
     /**
-     * True while new content should keep the viewport pinned. Only a reader gesture asking for what is
-     * above ends it; reaching the bottom, or a forced pin, restarts it.
+     * True while new content should keep the viewport pinned. A move up that widens the gap under the
+     * reader ends it; arriving at the bottom moving downward, or a forced pin, restarts it.
      */
     readonly following: boolean;
     /** True once the container has been attached and laid out at least once. */
@@ -49,7 +51,7 @@ export interface ChatFollow {
     attach(scroller: HTMLElement | null, content: HTMLElement | null): void;
     /** Pin the viewport to the bottom, unless the reader has gone up and this is not forced. */
     pin(force?: boolean): boolean;
-    /** Feed the container's scroll event in. */
+    /** Feed the container's scroll event in — this is where a takeover is judged. */
     handleScroll(): void;
     /** How many times the reader has shown they want to scroll. */
     readonly intent: number;
@@ -63,10 +65,16 @@ export interface ChatFollow {
  * Owns the chat's "follow the latest content" behaviour, so TaskChat and ChatEntries share one idea of
  * "at the bottom" and one writer of scrollTop.
  *
- * Following ends only on a reader gesture that asks for what is above the viewport, never on where the
- * viewport ended up: the document opening a gap under the reader, scroll anchoring, and the app's own page
- * of older rows all move it by themselves. A gesture whose direction is readable decides at once; the rest
- * hold the viewport, and a later upward scroll event is theirs.
+ * Following ends when the viewport moves up *and* the gap under the reader widens. That pair is what only
+ * a request for what is above produces: content arriving below the fold widens the gap without moving
+ * `scrollTop`, and the document getting taller or shorter above the fold moves `scrollTop` with the
+ * reader's row held, so their gap is what it was. A gesture whose direction is readable decides at once,
+ * because its scroll event arrives a frame later, after a pin frame has already moved the viewport.
+ *
+ * Only a viewport that was being followed can be taken over, because the app moves it upward itself — the
+ * sticky header's jump to an older prompt does — and that is not a reader asking for more of the same.
+ * Misreading a takeover is the cheaper direction: auto-follow stops, and the way back is one scroll down
+ * or the Latest button, whereas re-pinning a reader who did ask to go up fights them.
  */
 export function createChatFollow(): ChatFollow {
     // Raw: node identity must stay exact, and a node's own properties are not reactive.
@@ -82,15 +90,17 @@ export function createChatFollow(): ChatFollow {
     let following = true;
     /** Counted so a caller can tell that the reader moved since it last looked. */
     let intentSeq = 0;
-    /** Where the viewport was when we last looked; the next move's direction is read against it. */
+    /** Where the viewport was at the last observation, and how far it sat above the bottom then. */
     let lastTop = -1;
+    let lastGap = -1;
     /** A touch is dragging this container. */
     let touchDrag = false;
     /** A pointer held down inside this container, and where it began. */
     let press: { x: number; y: number; dragging: boolean } | null = null;
 
-    /** True while a reader holds the viewport: a touch drag (a fling coasting included), or a
-     * press-drag, which is also how a scrollbar drag arrives. */
+    /** True while a reader holds the viewport: a touch drag (a fling coasting included), or a press-drag
+     * inside the transcript. A scrollbar gesture is not in here: it reaches this element as scroll events
+     * and nothing else — no `pointermove` while the thumb is dragged, no press at all for a track click. */
     function readerDriving(): boolean {
         return touchDrag || !!press?.dragging;
     }
@@ -104,6 +114,7 @@ export function createChatFollow(): ChatFollow {
         if (!el) return;
         atBottom = isAtBottom(el);
         lastTop = el.scrollTop;
+        lastGap = distanceFromBottom(el);
     }
 
     function cancelPin() {
@@ -123,7 +134,7 @@ export function createChatFollow(): ChatFollow {
 
         cancelPin();
         let framesLeft = PIN_SETTLE_FRAMES;
-        let lastHeight = -1;
+        let stableHeight = -1;
         let stableFrames = 0;
 
         const step = () => {
@@ -135,11 +146,11 @@ export function createChatFollow(): ChatFollow {
             lastTop = node.scrollTop;
             // The scroll event for this write arrives next frame, so update the state now.
             measure();
-            if (height === lastHeight) {
+            if (height === stableHeight) {
                 if (++stableFrames >= PIN_STABLE_FRAMES) return;
             } else {
                 stableFrames = 0;
-                lastHeight = height;
+                stableHeight = height;
             }
             if (--framesLeft <= 0) return;
             pinRaf = requestAnimationFrame(step);
@@ -152,15 +163,21 @@ export function createChatFollow(): ChatFollow {
         if (!el || destroyed) return;
         const node = el;
         const top = node.scrollTop;
+        const gap = distanceFromBottom(node);
         const at = isAtBottom(node);
-        if (at) {
+        if (top < lastTop - MOVE_SLACK && gap > lastGap + MOVE_SLACK) {
+            // The reader went up and the transcript below them grew: however the move arrived — a thumb
+            // dragged with no pointer event behind it, a track click, a key the page-scroll handler
+            // pressed for them — nothing in the layout does both.
+            if (following) stopFollowing();
+        } else if (at && top >= lastTop - MOVE_SLACK) {
+            // Re-engaging needs the reader to have come down. A scroll event that merely finds the
+            // viewport inside the bottom band is where a growth pin left it, and rows collapsing below
+            // the fold move it there with no reader in sight.
             following = true;
-        } else if (top < lastTop && readerDriving()) {
-            // The reader moved up while holding the viewport. Nothing else moves it up: content grows
-            // downward, and scroll anchoring holds the reader's row.
-            stopFollowing();
         }
         lastTop = top;
+        lastGap = gap;
         atBottom = at;
         if (following && !at) pin(true);
     }
@@ -210,8 +227,8 @@ export function createChatFollow(): ChatFollow {
         touchDrag = false;
     }
 
-    /** A press becomes a drag once it travels; one that never travels is a click on a message. A
-     * scrollbar drag sends its pointer events to the scroller itself. */
+    /** A press becomes a drag once it travels; one that never travels is a click on a message. Text
+     * selected by dragging is the reader holding the viewport, so a pin keeps off it. */
     function onPointerDown(e: Event): void {
         const ev = e as PointerEvent;
         press = { x: ev.clientX, y: ev.clientY, dragging: false };
@@ -256,6 +273,7 @@ export function createChatFollow(): ChatFollow {
         touchDrag = false;
         press = null;
         lastTop = -1;
+        lastGap = -1;
 
         if (observer) {
             observer.disconnect();

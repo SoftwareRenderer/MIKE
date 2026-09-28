@@ -7,6 +7,31 @@
 
 export type DetailColumnId = 'board' | 'chat' | 'diff';
 
+/** Every key that scrolls the chat transcript, and the only ones the chat column answers. */
+const CHAT_SCROLL_KEYS = ['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp'] as const;
+export type ChatScrollKey = (typeof CHAT_SCROLL_KEYS)[number];
+
+/** The key as a chat scroll key, or null for a key the columns do not use for scrolling. */
+export function asChatScrollKey(key: string): ChatScrollKey | null {
+    return (CHAT_SCROLL_KEYS as readonly string[]).includes(key) ? key as ChatScrollKey : null;
+}
+
+/**
+ * How far a scroll key moves the chat transcript, in px, positive downward. A page leaves a band of the
+ * page it came from on screen, so the reader keeps their place; the arrows move a whole viewport, which is
+ * what they have always done here. The chat answers these keys wherever in the column the focus sits —
+ * the transcript is not a tab stop, so the browser's own scroll keys would move some other scroll chain.
+ */
+export function chatScrollDelta(key: ChatScrollKey, viewportHeight: number): number {
+    const page = Math.round(viewportHeight * 0.9);
+    switch (key) {
+        case 'ArrowDown': return viewportHeight;
+        case 'ArrowUp': return -viewportHeight;
+        case 'PageDown': return page;
+        case 'PageUp': return -page;
+    }
+}
+
 /** Gate for the Left/Right column switch. Plain arrows only switch from
  *  non-editable focus (editables keep native text-cursor movement);
  *  Ctrl+Alt+arrows switch from any focus — the keyboard way out of the chat
