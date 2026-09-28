@@ -241,16 +241,30 @@ describe('Card action count on a narrow (mobile) viewport', () => {
         expect(result.actionsVar).toBe('1');
     });
 
-    it('counts the overflow menu plus the Idle badge for an idle in-progress subtask', () => {
+    it('draws no Idle word on a narrow viewport: an idle subtask is the overflow menu alone', () => {
         const result = renderCard({
             task: makeTask({ status: 'in_progress', execution_state: 'idle' }),
             columnId: 'in_progress',
             inline: true,
         });
-        expect(result.hasIdle).toBe(true);
-        expect(result.idleVar).toBe('1');
+        expect(result.hasIdle).toBe(false);
+        expect(result.classes).toEqual(['action-icon action-overflow']);
+        expect(result.elements.length).toBe(1);
+        expect(result.actionsVar).toBe('1');
+        expect(result.idleVar).toBe('0');
+    });
+
+    it('leaves the third slot empty for an idle top-level card, rather than gaining a button', () => {
+        const result = renderCard({
+            task: makeTask({ id: 'top-1', parent_task_id: '', status: 'in_progress', execution_state: 'idle' }),
+            columnId: 'in_progress',
+            inline: false,
+        });
+        expect(result.hasIdle).toBe(false);
+        expect(result.classes).toEqual(['action-icon action-add', 'action-icon']);
         expect(result.elements.length).toBe(2);
         expect(result.actionsVar).toBe('2');
+        expect(result.idleVar).toBe('0');
     });
 
     it('still counts every button for a top-level card, which has no overflow menu', () => {

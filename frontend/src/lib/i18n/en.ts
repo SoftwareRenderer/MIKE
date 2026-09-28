@@ -1657,6 +1657,11 @@ const catalog = {
     'board.card.commitAndDone': 'Commit and move to Done',
     'board.card.fileCount': { one: '{count} file', other: '{count} files' },
     'board.card.subtaskCount': { one: '{count} subtask', other: '{count} subtasks' },
+    // The roll-up circle on a subtask row: how many rows above it it waits for, and how far they got.
+    'board.card.rollupHide': { one: 'Hide the {count} row this row waits for', other: 'Hide the {count} rows this row waits for' },
+    'board.card.rollupShow': { one: 'Show the {count} row this row waits for', other: 'Show the {count} rows this row waits for' },
+    'board.card.rollupDone': { one: '{done} of {count} row done', other: '{done} of {count} rows done' },
+    'board.card.forkedFromParent': 'Different provider than the row above',
     'board.deleteTask.title': 'Delete Task',
     'board.deleteTask.message': 'Delete this task? This cannot be undone.',
 

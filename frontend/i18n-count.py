@@ -419,6 +419,11 @@ def regex_starts_here(text, i):
     prev = text[j] if j >= 0 else ''
     if prev == '':
         return True
+    # A `/` that opens a brace group is a Svelte block closer (`{/if}`, `{/each}`), not a regex.
+    # Reading it as one swallows the group's own `}` and the brace depth then never closes, so
+    # the scan runs to the end of the region counting markup as copy.
+    if prev == '{':
+        return False
     if re.match(r'[A-Za-z0-9_$)\]}' '\'"`]', prev):
         return False
     return True

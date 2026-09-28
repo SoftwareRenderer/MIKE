@@ -126,6 +126,12 @@ case('a template literal of variables only', 0, '<span title={`${label} · ${lan
 case('no tooltip this frame', 0, "<span title={stamp ? absolute(stamp) : ''}>{stamp}</span>")
 case('a quote inside a regex in an attribute', 0,
      "<button title={value.replace(/'/, '')}>{icon}</button>")
+case('a block closer before inline markup', 0,
+     '{#if a}<span class="badge-provider">{p}</span><span class="sep"> · </span>{/if}<span class="badge-model">{m}</span>\n'
+     '<div class="subtask-group is-waited">{q}</div>')
+case('copy after a block closer is still measured', 1,
+     '{#if a}<span class="badge-provider">{p}</span>{/if}<span class="badge-model">{m}</span>\n'
+     '<button title="Open the folder">{icon}</button>')
 case('an allowed format example, at its own site', 0,
      '<input placeholder="docker.io/ubuntu:latest" aria-label={t("sandbox.imageNameAria")} />',
      path='src/lib/components/SandboxConfigModal/ImageSection.svelte')

@@ -35,10 +35,10 @@ The card root stays `<div class="card" role="button" tabindex="0" draggable>` an
 `<a class="card-open-link" aria-hidden="true" tabindex="-1" draggable="false">`
 (`position:absolute; inset:0; z-index:1`) as its last child.
 
-A root anchor is not an option: cards nest subtask `Card`s and their own buttons, which would be
-anchor-in-anchor markup and would need `preventDefault()` in every early-return branch to stop
-full-document navigations. `draggable="false"` keeps the **card** (not the URL) as the HTML5 drag
-source; `aria-hidden` keeps the card root as the only accessible name.
+A root anchor is not an option: a card's subtask outline rows are `Card`s themselves and every one holds
+its own buttons, which would be anchor-in-anchor markup and would need `preventDefault()` in every
+early-return branch to stop full-document navigations. `draggable="false"` keeps the **card** (not the URL)
+as the HTML5 drag source; `aria-hidden` keeps the card root as the only accessible name.
 
 **Click routing:** the overlay's own handler always `stopPropagation()`s (so the card root doesn't
 handle one click twice) and cancels navigation *except* when `isBrowserLinkClick()` says the browser
@@ -139,8 +139,8 @@ tab holds a terminal and nothing else), e2e
 Sidebar project rows and task cards are real links, so the browser's own link actions work on them (open in new tab, middle click, copy link address, status-bar URL) using the same deep links the app writes (`?project=`, `?project=&task=`).
 
 - **Project row** = `<a class="project-item" href="/?project=<id>" role="button" tabindex="0">`; unmodified click `preventDefault()`s, **any modifier click is left uncancelled**. A cloning project gets **no href**. `role="button"` means Space is handled explicitly.
-- **Task card** root stays `<div class="card" role="button" tabindex="0" draggable>` with a full-cover `<a class="card-open-link" aria-hidden tabindex="-1" draggable="false">` overlay (`inset:0; z-index:1`) as last child — a root anchor is impossible (nested subtask `Card`s → anchor-in-anchor).
-- **Stacking contract** (`Card.svelte`): `.card-title` is deliberately NOT lifted so the overlay still covers the title; instead `.card-actions`, `.subtask-progress-bar`, `.subtask-list` carry `z-index: 2`, and `.card.queued > *` is scoped `> :not(.card-open-link)`.
+- **Task card** root stays `<div class="card" role="button" tabindex="0" draggable>` with a full-cover `<a class="card-open-link" aria-hidden tabindex="-1" draggable="false">` overlay (`inset:0; z-index:1`) as last child — a root anchor is impossible (the flat subtask outline draws its rows as `Card`s → anchor-in-anchor). See `docs/subtask-outline.md → How it is held`.
+- **Stacking contract** (`Card.svelte`): `.card-title` is deliberately NOT lifted so the overlay still covers the title; instead `.card-actions`, `.subtask-progress-bar`, `.subtask-list`, `.subtask-rollup` carry the content rank (`var(--z-content)`), and `.card.queued > *` is scoped `> :not(.card-open-link)`.
 - **Never** re-tune these rows with `<button>`/`<div>` + a faked context menu — the link menu is DOM-level and unsynthesizable. Keep selectors tag-agnostic (`.project-item`, not `button.project-item`).
 ## Checking this
 

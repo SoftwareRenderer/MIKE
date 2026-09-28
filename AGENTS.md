@@ -212,6 +212,9 @@ python3 scripts/gen-registry.py --check                  # registry.json matches
   browser that will have to show it (`uiStore.notifyOnReview`, never `/api/config`); an arrival is
   detected from the `project_counts` rise and announced only when the Review column is not in view and
   that task is not the one open. `docs/notifications.md`.
+- **A card lists its subtasks as flat rows in run order, never as nested card boxes** — a descendant above
+  the row that waits for it, nothing indented, one band per sequence. One pure function owns the order and
+  it mirrors `exec`'s schedule. `docs/subtask-outline.md`.
 - Diff text is parsed once in `$lib/utils/diff-parser.ts` (pure, unit-tested) and the diff badges come from
   there (`getStatusBadge`); `GitStatusPanel.svelte` keeps its own for git entries. Sticky section headers
   use `position: sticky` with an opaque background.
@@ -509,6 +512,7 @@ deliberately omits.
 | `docs/agent-extensions.md` | adapter interface + events, WASM memory model, new-adapter recipe |
 | `docs/navigation.md` | board + task-view arrow-key resolution |
 | `docs/notifications.md` | the Review-arrival rule, the counts ledger, the permission policy |
+| `docs/subtask-outline.md` | subtask row order and shape, the wave rule, the roll-up circle, the row badge rule |
 | `docs/link-rows.md` | project-row/task-card markup, click routing, known limitation |
 | `docs/reconnection.md` | WS reconnect/offline queue mechanism |
 | `docs/llm-streaming.md` | provider silence and what measures it, the per-provider ceiling, retrying a quiet provider, keeping the socket honest |

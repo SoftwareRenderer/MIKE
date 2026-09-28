@@ -14,6 +14,10 @@
   "history": 0,
   "longsent": 0
  },
+ "docs/adr/0002-chat-jump-floors-its-page.md": {
+  "history": 0,
+  "longsent": 0
+ },
  "docs/adr/README.md": {
   "history": 0,
   "longsent": 0
@@ -138,6 +142,10 @@
   "history": 0,
   "longsent": 5
  },
+ "docs/subtask-outline.md": {
+  "history": 0,
+  "longsent": 0
+ },
  "docs/testing.md": {
   "history": 4,
   "longsent": 14
@@ -157,9 +165,5 @@
  "docs/ui-extensions.md": {
   "history": 0,
   "longsent": 8
- },
- "docs/adr/0002-chat-jump-floors-its-page.md": {
-  "history": 0,
-  "longsent": 0
  }
 }

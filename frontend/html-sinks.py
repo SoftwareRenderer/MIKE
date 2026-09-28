@@ -147,8 +147,9 @@ STYLE_SINKS: dict[tuple[str, str], str] = {
     ("src/lib/components/Card.svelte", "statusBadge.color"):
         "contains:--color-status — statusBadge returns status tokens written in this file",
     ("src/lib/components/Card.svelte",
-     "nextStatus === 'done' && hasChanges ? 'var(--color-status-amber)' : statusColors[nextStatus]"):
-        "contains:statusColors — a token or a lookup in this file's fixed map",
+     "nextStatus === 'done' && hasChanges ? 'var(--color-status-amber)' : statusColorOf(nextStatus)"):
+        "contains:statusColorOf — a column token from this file's own statusColorOf, or the amber "
+        "token literal written here",
     ("src/lib/components/CardDetail/BoardOverview.svelte", "getColumnColor(section.id)"):
         "contains:var(-- — the column colors are tokens declared in this file",
     ("src/lib/components/CardDetail/TaskHeader.svelte", "badge.color"):
