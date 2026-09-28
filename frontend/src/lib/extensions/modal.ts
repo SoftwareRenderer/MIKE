@@ -142,8 +142,3 @@ export function showExtensionModal(opts: ExtensionModalOptions): Promise<void> {
 
     return promise;
 }
-
-/** Test hook: number of currently open extension modals. */
-export function openExtensionModalCount(): number {
-    return openOverlays.length;
-}

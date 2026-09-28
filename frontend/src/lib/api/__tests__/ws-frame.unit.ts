@@ -8,7 +8,7 @@
  * guard that closed the socket instead would trade a lost frame for a lost session.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { parseStreamFrame, resetBadFrameReports } from '../helpers';
+import { parseStreamFrame } from '../helpers';
 import { createTerminal } from '../terminal';
 import { createAppStream } from '../stream';
 
@@ -44,7 +44,6 @@ function fakeTerminal() {
 let realWS: any;
 beforeEach(() => {
     FakeSocket.instances = [];
-    resetBadFrameReports();
     // The dropped-frame warning is the subject of its own case; keep it out of the
     // output of every other one.
     vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -73,17 +72,20 @@ describe('parseStreamFrame', () => {
         expect(parseStreamFrame(data, 'test')).toBeNull();
     });
 
-    it('reports a bad frame once, not on every frame', () => {
+    it('reports a bad frame once per socket name, not on every frame', () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        parseStreamFrame('nonsense', 'stream');
-        parseStreamFrame('more nonsense', 'stream');
+        // The latch is keyed by socket name and never re-arms, so each case reports on a name
+        // no earlier case used - that is what keeps both warnings observable here.
+        parseStreamFrame('nonsense', 'socket-a');
+        parseStreamFrame('more nonsense', 'socket-a');
         expect(warn).toHaveBeenCalledTimes(1);
-        expect(warn.mock.calls[0][0]).toContain('[stream]');
+        expect(warn.mock.calls[0][0]).toContain('[socket-a]');
     });
 
     it('never echoes the payload into the log', () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        parseStreamFrame('{"secret":"hunter2"', 'stream');
+        parseStreamFrame('{"secret":"hunter2"', 'socket-b');
+        expect(warn).toHaveBeenCalledTimes(1);
         expect(warn.mock.calls.map(c => String(c[0])).join(' ')).not.toContain('hunter2');
     });
 });

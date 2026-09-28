@@ -13,7 +13,8 @@ export interface ModalFlag {
 
 /**
  * Every modal that swallows Escape, so the app behind it does not react to one. A store that grows a
- * modal-shaped field fails `__tests__/modal-state.unit.svelte.ts`: list the field here, or decline it below.
+ * modal-shaped field fails `__tests__/modal-state.unit.svelte.ts`: list the field here, or decline it
+ * in that file.
  */
 export const MODAL_FLAGS: readonly ModalFlag[] = [
     { store: 'uiStore', field: 'showCreateTask', open: () => uiStore.showCreateTask },
@@ -25,16 +26,6 @@ export const MODAL_FLAGS: readonly ModalFlag[] = [
     { store: 'dialogStore', field: 'confirmationSlot', open: () => dialogStore.confirmationSlot.pending !== null },
     { store: 'dialogStore', field: 'commitDialogSlot', open: () => dialogStore.commitDialogSlot.pending !== null },
     { store: 'dialogStore', field: 'compressContextDialogSlot', open: () => dialogStore.compressContextDialogSlot.pending !== null },
-];
-
-/**
- * Modal-shaped fields that own no Escape, named as `<store>.<field>`. A field in `MODAL_FLAGS` and a
- * field here is a contradiction the coverage test fails on; an entry naming no field is stale and
- * fails too.
- */
-export const ESCAPE_INDIFFERENT_FIELDS: readonly string[] = [
-    // The full task view is closed by Escape rather than protected from it.
-    'uiStore.showCardDetail',
 ];
 
 /** True when any modal owns the Escape key (the app behind must not react to

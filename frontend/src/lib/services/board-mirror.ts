@@ -39,8 +39,3 @@ export async function flushBoardMirror(): Promise<void> {
         batch.map(([projectId, board]) => setBoardCache(boardCacheKey(projectId), board).catch(() => {})),
     );
 }
-
-/** @knipignore Names the unwritten snapshots, which is what the tests measure. */
-export function pendingMirrorProjects(): string[] {
-    return [...pending.keys()];
-}

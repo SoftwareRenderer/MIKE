@@ -224,25 +224,6 @@ export function sortPermissions(permissions: readonly string[]): string[] {
 }
 
 /**
- * Capabilities the host grants itself or pairs with a declared one, so no manifest declares them
- * and the install dialog never lists them. Every catalog capability is either here or described
- * below, because anything else is one the user approves with no explanation and no warning.
- */
-export const HOST_INTERNAL_CAPABILITIES: ReadonlySet<string> = new Set([
-    'config.get',
-    'log.write',
-    'ui.status',
-    'theme.get',
-    'theme.update',
-    'editor.removeFooterButton',
-    'editor.footerButtonClick',
-    'editor.contentChange',
-    'preview.serve',
-    'preview.release',
-    'preview.navState',
-]);
-
-/**
  * The label and explanation the install dialog shows for a declared permission. A function, so
  * the wording comes from the active translation pack and not from whichever one loaded first.
  */

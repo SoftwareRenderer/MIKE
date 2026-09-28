@@ -110,9 +110,9 @@ Pairs the channel grants together, which no manifest declares: `theme.update` wi
 always-granted `theme.get` (the live palette arrives as pushes), and
 `editor.removeFooterButton` + `editor.footerButtonClick` with `editor.addFooterButton`.
 `frontend/src/lib/extensions/__tests__/capability-consent.unit.ts` holds the catalog against the
-lists the install dialog reads (`permissionDescriptions`, `HOST_INTERNAL_CAPABILITIES`,
-`DANGEROUS_PERMISSIONS`), so a new capability has to be classified before it can be granted
-quietly.
+two lists the install dialog reads (`permissionDescriptions`, `DANGEROUS_PERMISSIONS`) and the
+host-internal list it keeps itself (`HOST_INTERNAL_CAPABILITIES`, which nothing else reads), so a new
+capability has to be classified before it can be granted quietly.
 
 ## Install model
 

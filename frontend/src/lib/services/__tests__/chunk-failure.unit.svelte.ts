@@ -8,8 +8,7 @@ vi.mock('$lib/stores', async () => {
     return { dialogStore: new DialogStore(), uiStore: {}, appStore: {} };
 });
 
-import { isChunkLoadFailure, reportChunkFailure, resetChunkFailureReport } from '$lib/services/chunk-failure';
-import { dialogStore } from '$lib/stores';
+import { isChunkLoadFailure } from '$lib/services/chunk-failure';
 
 const CHUNK_ERRORS = [
     'Failed to fetch dynamically imported module: https://host/assets/TerminalPanel-abc123.js',
@@ -19,8 +18,6 @@ const CHUNK_ERRORS = [
 
 describe('a lazy chunk the browser could not fetch', () => {
     beforeEach(() => {
-        resetChunkFailureReport();
-        dialogStore.toast = null;
         vi.spyOn(console, 'error').mockImplementation(() => {});
     });
 
@@ -34,7 +31,12 @@ describe('a lazy chunk the browser could not fetch', () => {
         expect(isChunkLoadFailure(undefined)).toBe(false);
     });
 
-    it('tells the user to reload, once, however many clicks follow', () => {
+    it('tells the user to reload, once, however many clicks follow', async () => {
+        // The notice is once per page life, so this case opens its own: a fresh module graph hands
+        // back the latch and the store that latch writes to, from one instantiation.
+        vi.resetModules();
+        const { reportChunkFailure } = await import('$lib/services/chunk-failure');
+        const { dialogStore } = await import('$lib/stores');
         const failure = new Error(CHUNK_ERRORS[0]);
 
         reportChunkFailure(failure);
