@@ -498,3 +498,99 @@ func TestTaskGate_TitleSurvivesExecutorWrites(t *testing.T) {
 	}
 	te.StopTask("tg-title-run")
 }
+
+// waitPrioritized polls until the task answers as a queued slot waiter: a task reaches "Pending" a moment
+// before the gate enqueues it, so the first answer of false means "not yet", not "never".
+func waitPrioritized(t *testing.T, te *TaskExecutor, taskID string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if te.PrioritizeQueuedTask(taskID) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("task %s never answered as a queued slot waiter", taskID)
+}
+
+// TestTaskGate_PrioritizeRunsTheQueuedTaskFirst: the queued task that asked to go first takes the slot
+// the running task gives up, ahead of the one that asked nothing.
+func TestTaskGate_PrioritizeRunsTheQueuedTaskFirst(t *testing.T) {
+	t.Parallel()
+	te := newSessionCostTestExecutor(t)
+	s := te.store
+	proj := createProject(t, s, "proj-tg-prio", "TG Prioritize")
+
+	mock := newHeldLLMMock()
+	server := httptest.NewServer(mock.Handler())
+	defer server.Close()
+
+	runExecTask(t, te, proj, "tg-prio-1", server.URL, "task one")
+	mock.waitForArrival(t, 1)
+	waitTaskState(t, s, "tg-prio-1", isRunning)
+
+	// Two tasks queue behind it, task 2 first.
+	runExecTask(t, te, proj, "tg-prio-2", server.URL, "task two")
+	waitTaskState(t, s, "tg-prio-2", isPending)
+	waitPrioritized(t, te, "tg-prio-2")
+	runExecTask(t, te, proj, "tg-prio-3", server.URL, "task three")
+	waitTaskState(t, s, "tg-prio-3", isPending)
+	waitPrioritized(t, te, "tg-prio-3")
+
+	if !te.PrioritizeQueuedTask("tg-prio-3") {
+		t.Fatal("a queued task did not answer as prioritizable")
+	}
+
+	// Task 1 goes idle and frees the slot: it goes to task 3, and task 2 keeps waiting for the next one.
+	mock.Release()
+	waitTaskState(t, s, "tg-prio-1", isIdle)
+	waitTaskState(t, s, "tg-prio-3", isRunning)
+
+	task2, err := s.GetTaskByID("tg-prio-2")
+	if err != nil {
+		t.Fatalf("read task 2: %v", err)
+	}
+	if task2.Status != types.StatusInProgress || task2.ExecutionState != types.ExecStateIdle {
+		t.Fatalf("the passed-over task should still be queued, got status=%s exec=%s", task2.Status, task2.ExecutionState)
+	}
+
+	mock.Release()
+	te.StopTask("tg-prio-1")
+	te.StopTask("tg-prio-2")
+	te.StopTask("tg-prio-3")
+}
+
+// TestTaskGate_PrioritizeAnswersFalseOnceTheWaitEnds: the registration is the wait's, not the run's — a
+// task holding its slot, and a task that never started, are both answered "not queued".
+func TestTaskGate_PrioritizeAnswersFalseOnceTheWaitEnds(t *testing.T) {
+	t.Parallel()
+	te := newSessionCostTestExecutor(t)
+	s := te.store
+	proj := createProject(t, s, "proj-tg-prio-off", "TG Prioritize Off")
+
+	mock := newHeldLLMMock()
+	server := httptest.NewServer(mock.Handler())
+	defer server.Close()
+
+	runExecTask(t, te, proj, "tg-off-1", server.URL, "task one")
+	mock.waitForArrival(t, 1)
+	waitTaskState(t, s, "tg-off-1", isRunning)
+
+	runExecTask(t, te, proj, "tg-off-2", server.URL, "task two")
+	waitTaskState(t, s, "tg-off-2", isPending)
+	waitPrioritized(t, te, "tg-off-2")
+
+	mock.Release()
+	waitTaskState(t, s, "tg-off-2", isRunning)
+
+	if te.PrioritizeQueuedTask("tg-off-2") {
+		t.Error("a task that holds its slot is not queued")
+	}
+	if te.PrioritizeQueuedTask("tg-off-unknown") {
+		t.Error("a task that never started is not queued")
+	}
+
+	mock.Release()
+	te.StopTask("tg-off-1")
+	te.StopTask("tg-off-2")
+}

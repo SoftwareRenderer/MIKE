@@ -68,6 +68,7 @@ export {
     startTask,
     startSubtask,
     stopTask,
+    prioritizeTask,
     resumeTask,
     summarizeTask,
     compactTask,

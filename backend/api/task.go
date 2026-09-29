@@ -1353,6 +1353,18 @@ func (h *TaskHandler) HandleStop(w http.ResponseWriter, r *http.Request) {
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
+// HandlePrioritize moves a task waiting for a provider running-task slot to the front of that queue.
+// A task that is not waiting there is not a fault — it may already hold its slot, or wait on the memory
+// budget instead — so it is answered with promoted=false, and the queue position the task's own stream
+// reports every second is what tells every open tab what the click changed.
+func (h *TaskHandler) HandlePrioritize(w http.ResponseWriter, r *http.Request) {
+	taskID := r.PathValue("taskID")
+	if _, ok := resolveTask(w, r, h.store); !ok {
+		return
+	}
+	httputil.JSONResponse(w, http.StatusOK, map[string]any{"promoted": h.executor.PrioritizeQueuedTask(taskID)})
+}
+
 // HandleDismissMemoryAlert stores the dismissal on the task row; the broadcast reaches every device.
 func (h *TaskHandler) HandleDismissMemoryAlert(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")

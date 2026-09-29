@@ -6,6 +6,7 @@
     import { scrollToLine } from '$lib/utils/settle-scroll';
     import { isAtBottom, type ChatFollow } from '$lib/composables/use-chat-follow.svelte';
     import { atTopOfList, type WindowReadNotice } from '$lib/utils/chat-window';
+    import { canPrioritize } from '$lib/utils/queue-priority';
     import ChatMessage from './ChatMessage.svelte';
     import CheckpointDivider from './CheckpointDivider.svelte';
     import QueueIndicator from './QueueIndicator.svelte';
@@ -112,6 +113,9 @@
     function isOptimisticId(id: string): boolean {
         return /^[a-z0-9]{8}$/.test(id);
     }
+
+    // Which of the waits this line can speak about is the queue a click reorders; the rule is the helper's.
+    const prioritizable = $derived(canPrioritize({ queuePosition, lockWait, taskStatus, taskExecutionState }));
 
     // Only one summary is worth editing: a rolling summarization appends a row and the model reads the
     // newest one, so anything older is history. An entry with an optimistic id is not a row at all —
@@ -567,6 +571,9 @@
                 {retryCount}
                 {retryError}
                 {isAgentSelected}
+                {projectId}
+                {taskId}
+                canPrioritize={prioritizable}
             />
         {/if}
     {/if}

@@ -28,6 +28,17 @@ func (q *waitQueue[T]) remove(e T) {
 	}
 }
 
+// moveToFront puts the entry at index i first. The entry at the front is the one the granter serves
+// next, so this is how a caller asks to be next.
+func (q *waitQueue[T]) moveToFront(i int) {
+	if i <= 0 {
+		return
+	}
+	moved := q.entries[i]
+	copy(q.entries[1:i+1], q.entries[:i])
+	q.entries[0] = moved
+}
+
 // Len returns the number of queued waiters.
 func (q *waitQueue[T]) Len() int { return len(q.entries) }
 
