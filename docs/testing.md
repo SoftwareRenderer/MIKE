@@ -433,11 +433,26 @@ rm -rf /tmp/kanban-test-data /tmp/kanban-test-data-isolated /tmp/kanban-test-wor
   top-level tests and the package went 130 s → 43 s; it is `make test-go`'s critical path, so the suite went
   131 s → 43 s. Serially, 13 tests each paid the 3 s `executorExitGrace` and three more waited out a real
   provider-silence ceiling.
+- **`backend/git` and `backend/store` run concurrently too.** `t.Parallel()` sits in 182 of `backend/git`'s
+  191 top-level tests and 170 of `backend/store`'s 174, and in five independent subtests. One binary per
+  revision, run alternately in one window at `-parallel 4`: git 104 s → 27 s, store 27 s → 9 s. The same
+  tests through `go test -count=1` answer 114 s → 28 s and 57 s → 13 s, which is what `make test-go` pays.
 - **The tests left serial are the ones touching a process global.** `t.Setenv` refuses to run in a parallel
   test, which is why `bash_stream_test.go` is one file. The other global is the CWD: template resolution reads
   it on every render (`prompts.resolvePromptDir`). So the 23 exec tests that chdir to the repo root cannot
   overlap — a concurrent restore moves the CWD mid-turn, and the failure reads
   "open prompts/summarize.tmpl: no such file or directory". The rule sits at `chdirRepoRoot`.
+  `backend/git` holds nine out: four `t.Setenv` tests in `env_test.go`, the four `TestGitAuthorFlags_*`
+  tests that write the git author identity (process-wide and accessor-only, per the Confinement rules in
+  `AGENTS.md`), and the merge-wait test that captures the log. `backend/store` holds four: the contention
+  profile's `t.Setenv` and three migration tests that capture the log. That third global is
+  `logging.TestSink` — it re-points the process-wide sink, so another test's lines land in this buffer and
+  this test's restore lands on that test's sink. One comment line at each site names its reason.
+- **A parallel subtest outlives its parent's body.** The parent's `defer` runs at return, before the
+  subtest starts; only its `t.Cleanup` functions run afterwards. So a subtest goes parallel only over a
+  fixture the parent handed to `t.Cleanup` — `testStore`, `t.TempDir` — and never over one a `defer`
+  closes. `TestIsGitIgnored`'s table stays serial for the other reason: its cases share one fixture repo and
+  every case runs `git check-ignore` inside it.
 - **`-parallel 4` in `test-go` is capacity, not a claim about the suite**, and its value is measured: see the
   `backend/stream` entry under *Tests that fail only under load*.
 

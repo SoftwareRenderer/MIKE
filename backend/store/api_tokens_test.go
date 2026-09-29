@@ -21,6 +21,7 @@ func newAPITokenRow(t *testing.T, s *Store, id, secret, label string) {
 }
 
 func TestAPITokenStoresOnlyTheDigest(t *testing.T) {
+	t.Parallel()
 	s, dbPath := newStoreAt(t)
 	const secret = "mike_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	newAPITokenRow(t, s, "tok-1", secret, "ci runner")
@@ -44,6 +45,7 @@ func TestAPITokenStoresOnlyTheDigest(t *testing.T) {
 }
 
 func TestAPITokenLookupBySecret(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	ctx := context.Background()
 	newAPITokenRow(t, s, "tok-1", "mike_secret-under-test", "ci runner")
@@ -64,6 +66,7 @@ func TestAPITokenLookupBySecret(t *testing.T) {
 		{"unknown", "mike_never-issued"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			if _, err := s.GetAPITokenByToken(ctx, tc.secret); !errors.Is(err, sql.ErrNoRows) {
 				t.Errorf("lookup of %q returned %v, want sql.ErrNoRows", tc.secret, err)
 			}
@@ -74,6 +77,7 @@ func TestAPITokenLookupBySecret(t *testing.T) {
 // A token is looked up on every request it authenticates, and the store is one serialised
 // connection, so the activity stamp must not turn each request into a write.
 func TestAPITokenLastUsedIsStampedOncePerInterval(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	ctx := context.Background()
 	newAPITokenRow(t, s, "tok-1", "mike_stamped", "ci runner")
@@ -104,6 +108,7 @@ func TestAPITokenLastUsedIsStampedOncePerInterval(t *testing.T) {
 }
 
 func TestAPITokenListAndRevoke(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	ctx := context.Background()
 	newAPITokenRow(t, s, "tok-old", "mike_old", "older")
@@ -142,6 +147,7 @@ func TestAPITokenListAndRevoke(t *testing.T) {
 // The same secret twice would be two rows authenticating identically; the UNIQUE digest is what
 // refuses it, and the caller must see the insert fail rather than a silent duplicate.
 func TestAPITokenSecretIsUnique(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	ctx := context.Background()
 	newAPITokenRow(t, s, "tok-1", "mike_shared", "first")
@@ -153,6 +159,7 @@ func TestAPITokenSecretIsUnique(t *testing.T) {
 // The table is created outside the user_version-gated probe chain, so a database written by an
 // older build still gets it on reopen.
 func TestAPITokenTableSurvivesReopen(t *testing.T) {
+	t.Parallel()
 	s, dbPath := newStoreAt(t)
 	newAPITokenRow(t, s, "tok-1", "mike_across-reopen", "kept")
 	if err := s.Close(); err != nil {

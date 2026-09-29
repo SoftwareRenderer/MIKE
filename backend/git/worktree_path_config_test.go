@@ -14,6 +14,7 @@ import (
 // Answering it from the full config makes every path lookup fail when an unrelated config row is
 // unreadable, and decrypts every provider API key to name a directory.
 func TestWorktreePathIgnoresProviderConfig(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	repoDir := filepath.Join(tmpDir, "repo")
 	worktreesDir := filepath.Join(tmpDir, "worktrees")
