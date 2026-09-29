@@ -26,6 +26,7 @@ func rowVariants(f TrackedDiffFile) string {
 }
 
 func TestParseReturnsNothingForEmptyInput(t *testing.T) {
+	t.Parallel()
 	for _, in := range []string{"", "   ", "\n"} {
 		if got := ParseUnifiedDiff(in); len(got) != 0 {
 			t.Errorf("ParseUnifiedDiff(%q) = %d files, want 0", in, len(got))
@@ -34,6 +35,7 @@ func TestParseReturnsNothingForEmptyInput(t *testing.T) {
 }
 
 func TestParseSimpleSingleFileDiff(t *testing.T) {
+	t.Parallel()
 	patch := `diff --git a/src/main.ts b/src/main.ts
 index abc1234..def5678 100644
 --- a/src/main.ts
@@ -68,6 +70,7 @@ index abc1234..def5678 100644
 }
 
 func TestParseMultiFileDiff(t *testing.T) {
+	t.Parallel()
 	patch := `diff --git a/file1.ts b/file1.ts
 index 111..222 100644
 --- a/file1.ts
@@ -100,6 +103,7 @@ index 333..444 100644
 }
 
 func TestParseDetectsNewFiles(t *testing.T) {
+	t.Parallel()
 	patch := `diff --git a/newfile.ts b/newfile.ts
 new file mode 100644
 index 0000000..abc1234
@@ -122,6 +126,7 @@ index 0000000..abc1234
 }
 
 func TestParseDetectsDeletedFiles(t *testing.T) {
+	t.Parallel()
 	patch := `diff --git a/deleted.ts b/deleted.ts
 deleted file mode 100644
 index abc1234..0000000
@@ -148,6 +153,7 @@ index abc1234..0000000
 // none), a binary file produced zero rows and no size, so the panel rendered an empty file that looks
 // like a bug rather than like a file git refuses to diff.
 func TestParseCarriesTheBinaryNotice(t *testing.T) {
+	t.Parallel()
 	patch := `diff --git a/image.png b/image.png
 Binary files a/image.png and b/image.png differ`
 
@@ -173,6 +179,7 @@ Binary files a/image.png and b/image.png differ`
 // TestParseHonoursBinaryAndLargeFileAnnotations covers the task-diff pipeline's own markers, which
 // replace the hunks of files too big or binary to ship.
 func TestParseHonoursBinaryAndLargeFileAnnotations(t *testing.T) {
+	t.Parallel()
 	bin := parseForTest(t, `diff --git a/large.bin b/large.bin
 # binary-file: 5242880
 Binary files a/large.bin and b/large.bin differ`)
@@ -200,6 +207,7 @@ Binary files a/large.bin and b/large.bin differ`)
 }
 
 func TestParseSkipsNoNewlineMarkers(t *testing.T) {
+	t.Parallel()
 	patch := `diff --git a/file.txt b/file.txt
 --- a/file.txt
 +++ b/file.txt
@@ -222,6 +230,7 @@ func TestParseSkipsNoNewlineMarkers(t *testing.T) {
 }
 
 func TestParseLineNumbersTrackThroughHunks(t *testing.T) {
+	t.Parallel()
 	patch := `diff --git a/file.ts b/file.ts
 --- a/file.ts
 +++ b/file.ts
@@ -249,6 +258,7 @@ func TestParseLineNumbersTrackThroughHunks(t *testing.T) {
 }
 
 func TestParseKeepsContextOnlyFiles(t *testing.T) {
+	t.Parallel()
 	patch := `diff --git a/nochange.ts b/nochange.ts
 index abc..abc 100644
 --- a/nochange.ts
@@ -271,6 +281,7 @@ index abc..abc 100644
 // diff collapsed into a single entry keyed by the empty string — a wrong path is bad enough, but a
 // shared key silently merges two files' rows.
 func TestParseQuotedPathIsUnquoted(t *testing.T) {
+	t.Parallel()
 	patch := "diff --git \"a/quo\\\"te.ts\" \"b/quo\\\"te.ts\"\n" +
 		"index 20a747d..c0c119b 100644\n" +
 		"--- \"a/quo\\\"te.ts\"\n" +
@@ -293,6 +304,7 @@ func TestParseQuotedPathIsUnquoted(t *testing.T) {
 // TestParseSortsByPath pins the wire contract: parseUnifiedDiffToFiles answers a map, and a handler
 // that serialised it straight out would reorder the diff panel's file list on every refresh.
 func TestParseSortsByPath(t *testing.T) {
+	t.Parallel()
 	var patch strings.Builder
 	for _, p := range []string{"zulu.ts", "alpha.ts", "mike.ts"} {
 		patch.WriteString("diff --git a/" + p + " b/" + p + "\n")
@@ -314,6 +326,7 @@ func TestParseSortsByPath(t *testing.T) {
 // when the header is abbreviated, and the frontend parser used /dev/null as a signal. A brand-new file
 // shown as modified is a badge lie, not a cosmetic miss.
 func TestParseDetectsNewFileFromDevNullOnly(t *testing.T) {
+	t.Parallel()
 	patch := `diff --git a/blank.ts b/blank.ts
 --- /dev/null
 +++ b/blank.ts

@@ -252,9 +252,8 @@ func subscribeClient(t *testing.T, url string, channelID int64, workspace, file,
 			"file":      file,
 		},
 	})
-	time.Sleep(50 * time.Millisecond)
-
-	// Drain the $server/lspReady notification sent by handleSubscription
+	// The $server/lspReady notification handleSubscription sends is the wait: the process is
+	// registered before it goes out.
 	client.receiveJSON(t)
 
 	return client
@@ -315,9 +314,7 @@ func TestIDRemapping(t *testing.T) {
 		"params":  map[string]any{"textDocument": map[string]any{"uri": "file:///main.go"}},
 	})
 
-	time.Sleep(50 * time.Millisecond)
-
-	sent := mgr.SentMessages()
+	sent := waitForSentMessages(t, mgr, 1)
 	if len(sent) != 1 {
 		t.Fatalf("expected 1 sent message, got %d", len(sent))
 	}
@@ -368,9 +365,7 @@ func TestInitializeCaching(t *testing.T) {
 		"method":  "initialize",
 	})
 
-	time.Sleep(50 * time.Millisecond)
-
-	sent := mgr.SentMessages()
+	sent := waitForSentMessages(t, mgr, 1)
 	if len(sent) != 1 {
 		t.Fatalf("expected 1 sent message (initialize), got %d", len(sent))
 	}
@@ -420,19 +415,18 @@ func TestInitializeCaching(t *testing.T) {
 		"method":  "initialize",
 	})
 
-	time.Sleep(50 * time.Millisecond)
-
-	sentAfter := mgr.SentMessages()
-	if len(sentAfter) != 1 {
-		t.Errorf("expected 1 sent message total (initialize cached), got %d", len(sentAfter))
-	}
-
 	resp2 := client2.receiveJSON(t)
 	if resp2.ID == nil || resp2.ID.String() != "2" {
 		t.Errorf("client2: expected id 2, got %v", resp2.ID)
 	}
 	if resp2.Result == nil {
 		t.Error("client2: expected result in cached initialize response")
+	}
+
+	// Reading that cached response is what proves client2's initialize was served; only then does
+	// "nothing more reached the server" mean it was served from the cache.
+	if sentAfter := mgr.SentMessages(); len(sentAfter) != 1 {
+		t.Errorf("expected 1 sent message total (initialize cached), got %d", len(sentAfter))
 	}
 
 	var result map[string]any
@@ -628,7 +622,8 @@ func TestSecondInitializeDuringFirstResponseRouting(t *testing.T) {
 			}
 
 			// A client that decided it was first forwards its own initialize only after the
-			// response cleared the pending marker, so give it that same grace.
+			// response cleared the pending marker, so this is the window in which a second
+			// initialize would arrive. Cut it and the count is 1 for the wrong reason.
 			time.Sleep(20 * time.Millisecond)
 			if got := countSentMethods(mgr.SentMessages(), "initialize"); got != 1 {
 				t.Errorf("%d initialize requests reached the language server, want exactly 1", got)
@@ -653,12 +648,7 @@ func TestDisconnectCleanup(t *testing.T) {
 
 	client.conn.Close(websocket.StatusNormalClosure, "done")
 
-	// Cleanup is asynchronous.
-	time.Sleep(100 * time.Millisecond)
-
-	if mgr.ProcessCount() != 0 {
-		t.Errorf("expected 0 processes after disconnect, got %d", mgr.ProcessCount())
-	}
+	awaitInt(t, 0, "the language server released when its last client disconnected", mgr.ProcessCount)
 }
 
 func TestMultipleRequestRemapping(t *testing.T) {
@@ -681,9 +671,7 @@ func TestMultipleRequestRemapping(t *testing.T) {
 		})
 	}
 
-	time.Sleep(50 * time.Millisecond)
-
-	sent := mgr.SentMessages()
+	sent := waitForSentMessages(t, mgr, 3)
 	if len(sent) != 3 {
 		t.Fatalf("expected 3 sent messages, got %d", len(sent))
 	}
@@ -741,9 +729,7 @@ func TestInitializedNotificationForwarded(t *testing.T) {
 		"params":  map[string]any{},
 	})
 
-	time.Sleep(50 * time.Millisecond)
-
-	sent := mgr.SentMessages()
+	sent := waitForSentMessages(t, mgr, 1)
 	if len(sent) != 1 {
 		t.Fatalf("expected 1 sent message (initialized notification), got %d", len(sent))
 	}
@@ -774,9 +760,7 @@ func TestTwoClientsDifferentWorkspaces(t *testing.T) {
 		"params":  map[string]any{},
 	})
 
-	time.Sleep(50 * time.Millisecond)
-
-	sent := mgr.SentMessages()
+	sent := waitForSentMessages(t, mgr, 1)
 	if len(sent) != 1 {
 		t.Fatalf("expected 1 sent message, got %d", len(sent))
 	}
@@ -823,9 +807,7 @@ func TestTwoClientsSameWorkspace(t *testing.T) {
 		"params":  map[string]any{},
 	})
 
-	time.Sleep(50 * time.Millisecond)
-
-	sent := mgr.SentMessages()
+	sent := waitForSentMessages(t, mgr, 1)
 	if len(sent) != 1 {
 		t.Fatalf("expected 1 sent message, got %d", len(sent))
 	}
@@ -889,14 +871,10 @@ func TestMultiWorkspaceSingleConnection(t *testing.T) {
 		},
 	})
 
-	time.Sleep(50 * time.Millisecond)
-
 	client.receiveJSON(t) // ch=1 ready
 	client.receiveJSON(t) // ch=2 ready
 
-	if mgr.ProcessCount() != 2 {
-		t.Errorf("expected 2 processes, got %d", mgr.ProcessCount())
-	}
+	awaitInt(t, 2, "one process per subscribed workspace", mgr.ProcessCount)
 
 	client.channelID = 1
 	client.workspace = "/tmp/project-a"
@@ -908,9 +886,7 @@ func TestMultiWorkspaceSingleConnection(t *testing.T) {
 		"params":  map[string]any{},
 	})
 
-	time.Sleep(50 * time.Millisecond)
-
-	sent := mgr.SentMessages()
+	sent := waitForSentMessages(t, mgr, 1)
 	if len(sent) != 1 {
 		t.Fatalf("expected 1 sent message, got %d", len(sent))
 	}
@@ -940,9 +916,7 @@ func TestMultiWorkspaceSingleConnection(t *testing.T) {
 		"params":  map[string]any{},
 	})
 
-	time.Sleep(50 * time.Millisecond)
-
-	sent2 := mgr.SentMessages()
+	sent2 := waitForSentMessages(t, mgr, 2)
 	if len(sent2) != 2 {
 		t.Fatalf("expected 2 sent messages, got %d", len(sent2))
 	}
@@ -1036,9 +1010,7 @@ func TestLSPReadyNotification(t *testing.T) {
 		},
 	})
 
-	time.Sleep(50 * time.Millisecond)
-
-	sent := mgr.SentMessages()
+	sent := waitForSentMessages(t, mgr, 1)
 	if len(sent) != 1 {
 		t.Fatalf("expected 1 sent message (initialize), got %d", len(sent))
 	}
@@ -1099,9 +1071,7 @@ func TestLSPReadyNotificationCachedResponse(t *testing.T) {
 			"capabilities": map[string]any{},
 		},
 	})
-	time.Sleep(50 * time.Millisecond)
-
-	sent := mgr.SentMessages()
+	sent := waitForSentMessages(t, mgr, 1)
 	var initReq map[string]any
 	json.Unmarshal(sent[0], &initReq)
 	backendID := initReq["id"]

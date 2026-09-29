@@ -76,7 +76,9 @@ func newThread(id, taskID, name string) *types.TaskThread {
 // readable by anyone but the owner — the file holds session token hashes and
 // encrypted provider secrets.
 func TestNewStoreFilePermissions(t *testing.T) {
+	t.Parallel()
 	t.Run("creates a private database", func(t *testing.T) {
+		t.Parallel()
 		root := t.TempDir()
 		dbPath := filepath.Join(root, "private", "kanban.db")
 		s, err := NewStore(dbPath)
@@ -102,6 +104,7 @@ func TestNewStoreFilePermissions(t *testing.T) {
 	})
 
 	t.Run("tightens a pre-existing world-readable database", func(t *testing.T) {
+		t.Parallel()
 		dir := t.TempDir()
 		dbPath := filepath.Join(dir, "kanban.db")
 		if err := os.WriteFile(dbPath, []byte{}, 0o644); err != nil {

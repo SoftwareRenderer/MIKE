@@ -7,6 +7,7 @@ import (
 )
 
 func TestGetProjectStatsEmpty(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -26,6 +27,7 @@ func TestGetProjectStatsEmpty(t *testing.T) {
 }
 
 func TestGetProjectStatsBasic(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -87,6 +89,7 @@ func TestGetProjectStatsBasic(t *testing.T) {
 }
 
 func TestGetProjectStatsMultipleModels(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -144,6 +147,7 @@ func TestGetProjectStatsMultipleModels(t *testing.T) {
 }
 
 func TestGetProjectStatsExcludesUserMessages(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -184,6 +188,7 @@ func TestGetProjectStatsExcludesUserMessages(t *testing.T) {
 }
 
 func TestGetProjectStatsThroughput(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -221,6 +226,7 @@ func TestGetProjectStatsThroughput(t *testing.T) {
 }
 
 func TestGetProjectStatsThroughputExcludesNoTimingData(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -296,6 +302,7 @@ func TestGetProjectStatsThroughputExcludesNoTimingData(t *testing.T) {
 }
 
 func TestGetProjectStatsMultipleTasks(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -338,6 +345,7 @@ func TestGetProjectStatsMultipleTasks(t *testing.T) {
 }
 
 func TestDeleteProjectStats(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -403,6 +411,7 @@ func TestDeleteProjectStats(t *testing.T) {
 }
 
 func TestDeleteProjectStatsWithProvider(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -461,6 +470,7 @@ func TestDeleteProjectStatsWithProvider(t *testing.T) {
 }
 
 func TestGetProjectStatsTitleMessages(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -491,6 +501,7 @@ func TestGetProjectStatsTitleMessages(t *testing.T) {
 }
 
 func TestGetProjectStatsIsolatedByProject(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	// Create two projects
 	for _, id := range []string{"proj-1", "proj-2"} {
@@ -534,6 +545,7 @@ func floatEquals(a, b, tol float64) bool {
 }
 
 func TestStatsSurviveTaskDeletion(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -598,6 +610,7 @@ func TestStatsSurviveTaskDeletion(t *testing.T) {
 }
 
 func TestStatsCumulativeAcrossTasks(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -655,6 +668,7 @@ func TestStatsCumulativeAcrossTasks(t *testing.T) {
 }
 
 func TestResetProjectStatsZerosCumulativeTable(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -701,6 +715,7 @@ func TestResetProjectStatsZerosCumulativeTable(t *testing.T) {
 }
 
 func TestStatsBackfill(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -772,6 +787,7 @@ func TestStatsBackfill(t *testing.T) {
 }
 
 func TestGetProjectStatsTotalTasksExcludesLLMFreeTasks(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -816,6 +832,7 @@ func TestGetProjectStatsTotalTasksExcludesLLMFreeTasks(t *testing.T) {
 }
 
 func TestAccumulateProjectStats(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -858,6 +875,7 @@ func TestAccumulateProjectStats(t *testing.T) {
 }
 
 func TestDeleteProjectStatsResetsCost(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {

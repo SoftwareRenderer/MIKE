@@ -433,33 +433,47 @@ rm -rf /tmp/kanban-test-data /tmp/kanban-test-data-isolated /tmp/kanban-test-wor
   in `backend/exec`, 438 of the 485 in `backend/server`, and 128 of the 136 in `backend/api`. Measured twice
   each at `-parallel 4` with `go test ./backend/server/ ./backend/api/ -count=1 -parallel 4`, best run:
   `backend/server` 336 s → 136 s, `backend/api` 67 s → 27 s. The whole scope
-  `go test ./backend/... ./pkg/... . -count=1 -parallel 4` went 183 s → 111 s. `backend/exec` went 130 s →
+  `go test ./backend/... ./pkg/... . -count=1 -parallel 4` went 183 s → 117 s. `backend/exec` went 130 s →
   43 s the same way, where 13 tests each paid the 3 s `executorExitGrace` and three more waited out a real
   provider-silence ceiling.
-- **The parallelized packages hold up under the detector.** `make check-race` over the two went green with no
-  data race at 218 s and 57 s; the only red was `TestTaskOperatingModeRemount`, which this host cannot pass
-  (*A machine that cannot start a container*).
-- **A test left serial names the process state it shares**, and the rule sits where that state is taken, so
-  the callers need no comment of their own.
-  - `t.Setenv` refuses to run in a parallel test. The variables are the process's own: `HOME` decides a file
-    jail (`jailedProjectHandler`, `jailedHostRootServer`), `TMPDIR` decides where an upload is staged
-    (`taskUploadProject`), `MIKE_ENCRYPTION_KEY` decides the golden capture (`setupGoldenFixture`), and
-    `MIKE_ALLOWED_HOSTS` decides Host pinning.
-  - `logging.TestSink()` re-points the process-wide logger, so a test that reads captured lines needs the
-    buffer to itself: 10 of them in `backend/server`, one in `backend/api`.
+- **`backend/git` and `backend/store` run concurrently too.** `t.Parallel()` sits in 182 of `backend/git`'s
+  191 top-level tests and 170 of `backend/store`'s 174, and in five independent subtests. One binary per
+  revision, run alternately in one window at `-parallel 4`: git 104 s → 27 s, store 27 s → 9 s. The same
+  tests through `go test -count=1` answer 114 s → 28 s and 57 s → 13 s, which is what `make test-go` pays.
+- **The parallelized packages hold up under the detector.** `make check-race` over `backend/server` and
+  `backend/api` went green with no data race at 218 s and 57 s; the only red was
+  `TestTaskOperatingModeRemount`, which this host cannot pass (*A machine that cannot start a container*).
+- **A test left serial names the process state it shares**, at its own site or at the helper that takes it,
+  so the callers need no comment of their own.
+  - `t.Setenv` refuses to run in a parallel test, which is why exec's `bash_stream_test.go` is one file. The
+    variables are the process's own: `HOME` decides a file jail (`jailedProjectHandler`,
+    `jailedHostRootServer`), `TMPDIR` decides where an upload is staged (`taskUploadProject`),
+    `MIKE_ENCRYPTION_KEY` decides the golden capture (`setupGoldenFixture`), `MIKE_ALLOWED_HOSTS` decides
+    Host pinning, and four `env_test.go` tests plus the `backend/store` contention profile pin their own.
+  - `logging.TestSink()` re-points the process-wide sink, so another test's lines land in this buffer and
+    this test's restore lands on that test's sink. Ten tests in `backend/server`, one in `backend/api`, the
+    `backend/git` merge-wait test and three `backend/store` migration tests read it.
   - The working directory is process state too. Template resolution reads it on every render
     (`prompts.resolvePromptDir`) and `/extensions/` is a CWD-relative `http.Dir`, so the exec prompt tests
     that chdir keep the rule at `chdirRepoRoot` and `TestExtensionsStatic_NoDirectoryListings` is the server
-    test that calls `t.Chdir`.
-  - A package-level seam or accessor: `previewRand`, `git.SetAuthorIdentity`.
+    test that calls `t.Chdir`. A concurrent restore moves it mid-turn, and the failure reads
+    "open prompts/summarize.tmpl: no such file or directory".
+  - A package-level seam or accessor: `previewRand`, and the four `TestGitAuthorFlags_*` tests that write the
+    commit identity, which is process-wide and accessor-only (the Confinement rule in `AGENTS.md`).
+  - A keyed global is shared by every test holding one key, so a parallel test takes a key nobody else uses:
+    `registerStubAgent` derives its adapter-factory name from `t.Name()` for that reason.
   - A reading of the process or the host is somebody else's noise: the `runtime.ReadMemStats` deltas behind
     the size-cap refusals, and the canary path under `/tmp` that a rejected `git show --output=` payload would
     create.
+  - One fixture shared by a table's cases is shared state, not process state: `TestIsGitIgnored`'s table
+    stays serial because every case runs `git check-ignore` inside the same repository.
   - `TestTaskOperatingModeRemount` starts a real container, so it is machine-bound (*A machine that cannot
     start a container*) and it queues at the memory gate behind every other start.
-- **A parallel subtest is alive after its parent's cleanup has run**, so a table row calls `t.Parallel()`
-  only where it builds its own server inside the row. Eleven rows do. Every other row runs serially against
-  the parent's fixture, which is what its `t.Cleanup` still owns.
+- **A parallel subtest outlives its parent's body.** The parent's `defer` runs at return, before the
+  subtest starts; only its `t.Cleanup` functions run afterwards. So a subtest goes parallel only over a
+  fixture the parent handed to `t.Cleanup` — `testStore`, `t.TempDir` — and never over one a `defer` closes.
+  The ten rows in `backend/server` and `backend/api` that do call it build their own server or handler
+  inside the row.
 - **`-parallel 4` in `test-go` is capacity, not a claim about the suite**, and its value is measured: see the
   `backend/stream` entry under *Tests that fail only under load*.
 
@@ -513,13 +527,10 @@ suites, with that error in the log, is a reading about the machine.
   Established: the rollback runs and logs the right path, the surviving tree carries the original
   checkout's mtimes, and `RepairMissingFiles` and the fake podman's fail-once budget are ruled out.
   Unestablished: who leaves the tree behind.
-- **A `backend/exec` turn test goes red in a whole-scope run and green alone.** Three rotated across two
-  `go test ./backend/... ./pkg/... . -count=1 -parallel 4` runs over two trees:
-  `TestPrepareAgentWithBinaryPresentStartsNothingEarly` ("adapter was closed although the task may still
-  start"), `TestManualSummarizePublishesCompressedContextUsed` ("no summarization frame was published") and
-  `TestAbortedStreamIsRetriedAndTheTurnCompletes` ("assistant answer stored 0 times"). No run showed two of
-  them, and the last two came back green alone in 3 s. Unestablished: what closes the adapter or drops the
-  frame.
+- **`backend/exec`'s `TestAbortedStreamIsRetriedAndTheTurnCompletes`** went red once in a whole-scope
+  `go test ./backend/... ./pkg/... . -count=1 -parallel 4` run with "assistant answer stored 0 times, want
+  1". Its wait ends at a second role while its assertion reads one row, which is the shape the entry above
+  refuses. Green alone and in the whole-scope runs since; re-run it alone before reading a red naming it.
 - **`backend/server`'s `TestTaskMoveUpdatesUpdatedAt`** was seen failing once, under `make check-race` over
   five packages, and not since: 10 `-count=10 -race` runs on the branch and 10 on `HEAD` came back clean.
   It asserts that two backlog tasks the test never writes come back ordered by `updated_at`, so the likeliest
@@ -529,14 +540,13 @@ suites, with that error in the log, is a reading about the machine.
   concurrently and 6/6 alone. It asserts the guest OOM-killed one process, and under host pressure the
   **host** memcg killer takes the whole runsc sandbox instead (exit 128 plus `WaitPID … EOF`, container
   gone). A red naming it is a reading about the machine, not about a memory limit that stopped working.
-- **`backend/server`'s `TestTaskOperatingModeRemount/does not remount when running`** failed once in a full
-  `make check` run with `expected sandbox to be created after start`, and passed alone and in two further
-  full runs. **Mechanism inferred, not proven — and the inference no longer holds**: it was read as the task
-  waiting in the memory gate because the suite was consuming the machine's RAM, and the gate no longer looks
-  at what the host's other users hold (`docs/sandbox-runtime.md → The memory budget`). No supervisor pause
-  was logged and the refusal path logs nothing, so the observation stands with no explanation. What remains
-  established is that a test which starts a sandboxed task and expects a container depends on the gate
-  admitting it.
+- **`backend/server`'s `TestTaskOperatingModeRemount`** does not belong on this list. It is one of the
+  container tests named in *A machine that cannot start a container*. It failed 2 of 2
+  `make check-race` runs, alone under `-race`, and alone without it, with `podman info` answering the
+  unsupported-overlayfs error every time. That error is what the assertion reports as
+  `expected sandbox to be created after start`. It was once read as the memory gate refusing the start
+  (`docs/sandbox-runtime.md → The memory budget`); that inference no longer holds. `podman images` on
+  nothing running is the check that decides a red naming it.
 - **A `t.TempDir()` cleanup failing with `unlinkat …: directory not empty`** means a subprocess is still
   writing while the removal walks. Two tests carry it here: `backend/exec`'s
   `TestToolCallWithIntactArgumentsRunsTheSameCommand`, and `backend/server`'s
@@ -548,10 +558,26 @@ suites, with that error in the log, is a reading about the machine.
   context-less local git call survives that cancel. Unestablished: which call, and why the rate moves with a
   test file that does not run. A red naming one of these while other packages run concurrently is a reading
   about the machine — re-run the package alone before believing it, and the single test if that passes.
+  Re-measured where `backend/exec`'s event-stand-in sleeps became condition waits: 0 of 10 filtered
+  single-test runs and 0 of 5 full-package runs, so the sleeps that went are not what this cleanup waits
+  for. The `backend/server` one appeared in 1 of the 2 `make check-race` runs made for the same change.
+- **A package that dies at its own 10-minute timeout with a test under `running tests:` whose worker
+  goroutine is missing from the dump** is a `t.Fatalf` inside a spawned goroutine, not a wedge. `Goexit`
+  runs the deferred `wg.Done` but never the `close(start)` the test is blocked on, so a failure nobody
+  gets to read becomes a package-wide panic. `backend/exec`'s
+  `TestCommitAndMerge_SerializesPerProject` did this in 2 of 2 full-scope `-parallel 4` runs, where
+  `runGit` failed under contention. Its staging calls are on the test goroutine now and its receives are
+  bounded (`awaitSignal` in `wait_test.go`), so the same git failure prints git's own words. Read a fresh
+  one the same way: find the goroutine that is *not* in the dump, then the receive waiting on it.
 - **`backend/stream`'s `TestAConnectionThatMissedFramesIsEndedSoTheClientResyncs`** waits up to 10 s for the
   writer goroutine to end a connection with a hole in it, and fails with "still streaming a gap" when the
-  bound passes. It went red in 2 of 2 `make check` runs and 1 of 4 full-scope `go test -parallel 8` runs, and
-  in 0 of 3 at `-parallel 4` — which is why `test-go` runs 4. Alone it is green 5 of 5, three of those under a
-  12-way spinner load, so raw CPU load is not the trigger and the other packages are. No exec test file
+  bound passes. It went red in 2 of 2 `make check` runs and 1 of 4 full-scope `go test -parallel 8` runs,
+  which is why `test-go` runs 4. `-parallel 4` does not hold: a nine-run sweep of six packages went red
+  3 times on this revision, 0 of 3 on the revision before it. **Running it alone is not a clean reading
+  either.** With `-run` selecting only it, 1 of 10 `-count=1` runs failed. The same selection on the
+  revision before this task's sleeps became condition waits failed 2 of 10. So the earlier "green 5 of 5
+  alone" is dropped: a red naming it with nothing else running is a one-in-ten starved goroutine, not the
+  change under test. Repeating it inside one process (`-count=5`) put a failure in 3 of 9 process-runs
+  here and in 0 of 3 on the earlier revision, samples too small to rank either way. No exec test file
   reaches `backend/stream`'s binary, so the reading is one goroutine starved rather than a shared fixture;
   *mechanism not established*.
