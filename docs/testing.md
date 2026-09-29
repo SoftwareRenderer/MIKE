@@ -7,9 +7,9 @@ only under load.
 ## E2E conventions
 - Descriptive spec filenames in `frontend/tests/e2e/`; shared helpers in `helpers.ts`.
 - `test.describe.serial()` when tests share state; unique identifiers (`Date.now()`) to avoid
-  interference; wait for selectors, no arbitrary delays (drag-and-drop is the known exception —
-  headless is slow). `serial` amplifies whatever coupling is left: one failure skips the rest of the
-  block as "did not run".
+  interference; wait for a condition, never for a duration. Every `waitForTimeout` is counted and gated;
+  *The sleep gate* below owns what is exempt and why. `serial` amplifies whatever coupling is left: one
+  failure skips the rest of the block as "did not run".
 - **Mock LLM is default** — tests use pre-recorded fixtures, never the real endpoint. Fail gracefully
   when the LLM is slow/unavailable.
 - **LSP specs come in two kinds, and only one may gate on the server.**
@@ -194,7 +194,7 @@ Two measured behaviours that chat specs keep getting wrong, both worth designing
 
 ## Frontend cleanliness gates (run by `make check`)
 
-`make test-frontend` ends with five gates over `frontend/src`:
+`make test-frontend` ends with five gates over `frontend/src`, and one over the e2e suite's waits:
 
 - **`npm run check:dead`** — knip over the **production view**: unused files, exports, exported types,
   duplicate exports, unlisted imports, unused dependencies. An ignored test file stays a *user* of what it
@@ -219,6 +219,8 @@ Two measured behaviours that chat specs keep getting wrong, both worth designing
 - **`npm run check:colors`** — `frontend/scripts/check-colors.sh` fails on a hex colour literal in a
   component or a stylesheet under `src/`, because every chrome colour comes from the palette in
   `src/app.css`; its header holds the exceptions.
+- **`npm run check:sleeps`** — `frontend/sleep-gate.py` counts `waitForTimeout` in `tests/`, which is the
+  wall clock the suite pays for waits it never performs. The section below owns both measurements.
 
 ### The dead-surface gate
 
@@ -291,6 +293,41 @@ that text is gone. The declaration carries the same `@knipignore` tag every reta
 `frontend/dead-surface.py` is what requires the tag and its reason there. Both gates are also blind to an
 object property nobody reads, a CSS class no template uses, and a REST route the UI stopped calling.
 
+### The sleep gate
+
+`frontend/sleep-gate.py` owns one rule: an e2e wait names the condition it waits for. A
+`page.waitForTimeout(n)` spends `n` milliseconds whether or not its subject has arrived. It is too short
+under load and forever too long when green.
+
+Behind almost every sleep there is a condition, and `tests/e2e/helpers.ts` holds the waiting for each
+kind. A locator (`toBeVisible`, `toBeHidden`, `toHaveCount`) once the DOM shows it. `expect.poll` or
+`waitForStable` once the DOM reaches it over several frames. `waitForSendButton` or `waitForTurnAnswered`
+once an executor turn answers; those carry the turn budget, because `expect.timeout` is shorter than a
+queued turn. `waitForStored` once a debounced browser write has landed, or a re-read through the API the
+spec already uses. `waitForChatStill` and `waitForChatGrowth` are the two the chat specs share, and
+`waitForReaction` is the frame-count bound a must-not-happen check has.
+
+**Measurement 1 — a sleep with no reason on its line must be 0.** The exemption is a duration that *is*
+the measurement. Drag settle and drag pacing qualify, as do an animation or debounce window the spec
+measures, a sampling cadence, and the seconds a second-precision timestamp needs to order three writes.
+
+```ts
+await page.waitForTimeout(1100); // moved_at has second precision: three moves need three distinct seconds
+```
+
+The reason sits on the sleep's own line, in at least four words. The line above is where a spec explains
+the code around a wait, which is how an arbitrary delay acquires a plausible comment.
+
+**Measurement 2 — how many sleeps the suite keeps, frozen as `SLEEP_CEILING`.** A reason makes a sleep
+legal, not free: every one of them is still paid on every run. The count only goes down; a rise is
+re-frozen with `cd frontend && python3 sleep-gate.py --update-ceiling`, and the reason belongs in the
+commit message.
+
+**Checking this.** `cd frontend && npm run check:sleeps-test`. The bare sleep is reported. The call named
+in prose, and the one inside a string, are not counted. A comment too short to be a reason fails. The
+ceiling bites, and `--update-ceiling` rewrites the constant it printed. The real tree is scanned too, so a
+walk that stopped finding specs cannot read as a clean run.
+
 ## Diagnostic scripts (ad-hoc investigation)
 
 For request-pattern/race investigation, write standalone Playwright scripts in `frontend/tests/` as
@@ -316,8 +353,8 @@ For request-pattern/race investigation, write standalone Playwright scripts in `
   else and the helper reports `not in local extensions list`.
 - **`waiting for locator('.project-item')`**: test project not created — check global-setup logs.
   **`waiting for locator('.card')`**: no tasks exist.
-- **Drag-and-drop flakes:** headless is slow — add `waitForTimeout` after the drag, increase the
-  predicate timeout.
+- **Drag-and-drop flakes:** headless is slow — the settle after the drag is one of the durations the sleep
+  gate exempts, so name it on the line and raise the predicate timeout instead of the sleep.
 - **Mock LLM routing wrong:** check keyword matching in `mock-llm.js` and the fixture files.
 
 ## Test environment

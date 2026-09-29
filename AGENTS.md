@@ -139,6 +139,7 @@ make test-go | make test-frontend                        # Go unit / vitest + th
 make test-diff                                           # only the touched Go packages, cache left on
 cd frontend && npx playwright test [spec|--grep name]    # e2e (mock LLM, own servers)
 cd frontend && npm run check:dead-surface                # untagged test-only exports; the CSS ceiling
+cd frontend && npm run check:sleeps                      # an unreasoned waitForTimeout; the sleep ceiling
 python3 scripts/gen-registry.py --check                  # registry.json matches the manifests
 ```
 
