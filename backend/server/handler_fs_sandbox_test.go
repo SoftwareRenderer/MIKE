@@ -40,6 +40,7 @@ func fsProject(t *testing.T, s *Server, projectID string) *types.Project {
 // only for sandbox-enabled projects), and rejected everywhere else — including
 // other mounts and host paths that merely live under /home/sandbox.
 func TestValidateFSPathSandboxMountScoping(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	dir := t.TempDir()
 
@@ -94,6 +95,7 @@ func TestValidateFSPathSandboxMountScoping(t *testing.T) {
 // project's file request reached every task worktree of every other project on the
 // host — reads, writes and mkdir.
 func TestValidateFSPathWorktreeRoot(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cfg, err := s.configStore.GetConfig()
 	if err != nil {
@@ -135,6 +137,7 @@ func TestValidateFSPathWorktreeRoot(t *testing.T) {
 // aimed the whole request — the worktree, and for a sandboxed project the container —
 // at someone else's task.
 func TestFSForeignTaskIsRejected(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrf := loginTestCSRF(t, s)
 
@@ -177,6 +180,7 @@ func TestFSForeignTaskIsRejected(t *testing.T) {
 // TestValidateFSPathCraftedProjectName verifies a project name containing
 // path separators cannot widen the sandbox-mount allow-set.
 func TestValidateFSPathCraftedProjectName(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	dir := t.TempDir()
 	evil := sandboxFSProject(t, s, "evil", "a/../../b", filepath.Join(dir, "repo-evil"), true)
@@ -196,6 +200,7 @@ func TestValidateFSPathCraftedProjectName(t *testing.T) {
 // TestFSMkdirProjectScoped verifies that project-scoped mkdir is validated
 // while the no-project directory-picker flow is not.
 func TestFSMkdirProjectScoped(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	dir := t.TempDir()
 	repo := filepath.Join(dir, "repo-plain")

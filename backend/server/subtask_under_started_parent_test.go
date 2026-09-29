@@ -26,6 +26,7 @@ func getTaskField(t *testing.T, s *Server, projectID, taskID, field string) any 
 // TestSubtaskUnderStartedParentLandsPending: a subtask of a started task is created
 // in_progress/idle (Pending) beneath its parent; every other parent gets a backlog child.
 func TestSubtaskUnderStartedParentLandsPending(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
@@ -64,6 +65,7 @@ func TestSubtaskUnderStartedParentLandsPending(t *testing.T) {
 // subtree, so a Done parent holding unfinished work is left behind while the rest of the
 // column clears.
 func TestClearDoneKeepsDoneParentWithUnfinishedSubtask(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 

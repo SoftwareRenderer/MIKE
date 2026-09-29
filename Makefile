@@ -108,7 +108,7 @@ test-diff: ## Go tests for the packages this working tree touched (cached)
 # the colour literals, the test-only export seam and the duplicated-CSS ceiling).
 #
 # The gates run side by side in frontend/scripts/frontend-gates.sh — vitest, the one typecheck compile, knip
-# and five scan slots, each with its own log, then one summary block. Every slot's exit code is read back from
+# and six scan slots, each with its own log, then one summary block. Every slot's exit code is read back from
 # its own file, so a slot that never ran is a named failure rather than a green row. Its self-test runs first:
 # a check that runs inside the thing that decides the build would say nothing about a runner that never
 # started.

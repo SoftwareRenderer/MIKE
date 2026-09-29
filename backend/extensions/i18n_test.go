@@ -19,6 +19,7 @@ import (
 )
 
 func TestInferExtensionType_I18N(t *testing.T) {
+	t.Parallel()
 	caps := &Capabilities{I18N: &I18NConfig{Locale: "zh", MessagesURL: "messages.json"}}
 	if got := inferExtensionType(caps); got != ExtensionTypeI18N {
 		t.Errorf("inferExtensionType(i18n) = %q, want %q", got, ExtensionTypeI18N)
@@ -43,6 +44,7 @@ func TestInferExtensionType_I18N(t *testing.T) {
 }
 
 func TestI18NManifestJSONRoundTrip(t *testing.T) {
+	t.Parallel()
 	raw := `{"display_name":"中文","author":"someone","version":"1.0.0",
 		"capabilities":{"i18n":{"locale":"zh","messages_url":"messages.json","prompts_dir":"prompts"}}}`
 	var m ExtensionManifest
@@ -62,6 +64,7 @@ func TestI18NManifestJSONRoundTrip(t *testing.T) {
 }
 
 func TestValidate_I18NConfig(t *testing.T) {
+	t.Parallel()
 	// Absent is the common case — every non-translation extension — and is not an error.
 	var none *I18NConfig
 	if err := none.Validate(); err != nil {
@@ -136,6 +139,7 @@ func i18nExt(name string, priority int, enabled bool, locale string) Extension {
 }
 
 func TestActiveI18N(t *testing.T) {
+	t.Parallel()
 	// No pack at all is English: nil, not an error and not a guess.
 	if got := ActiveI18N([]Extension{{Name: "theme", Enabled: true}}); got != nil {
 		t.Errorf("ActiveI18N with no pack = %+v, want nil", got)
@@ -179,6 +183,7 @@ func TestActiveI18N(t *testing.T) {
 // The result is a copy: a caller that re-sorts or reuses its slice must not
 // find the answer it was given changed underneath it.
 func TestActiveI18N_ReturnsCopy(t *testing.T) {
+	t.Parallel()
 	list := []Extension{i18nExt("pack-zh", 0, true, "zh")}
 	got := ActiveI18N(list)
 	if got == nil {

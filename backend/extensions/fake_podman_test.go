@@ -53,6 +53,9 @@ func fakePodmanFails(t *testing.T, code int, output string) *fakePodman {
 	return fakePodmanExit(t, code, `printf '`+strings.ReplaceAll(output, "'", `'\''`)+`\n'`)
 }
 
+// fakePodmanExit is the rule for why its callers stay serial: it installs a stand-in podman on PATH
+// with t.Setenv, and t.Setenv refuses to run in a parallel test or in any test with a parallel
+// ancestor. The stand-in is only reachable through the environment, so it cannot be per-test.
 func fakePodmanExit(t *testing.T, code int, outputCmd string) *fakePodman {
 	t.Helper()
 	dir := t.TempDir()

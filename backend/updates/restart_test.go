@@ -10,6 +10,7 @@ import (
 )
 
 func TestRestartRefusesWhenNothingIsWaiting(t *testing.T) {
+	t.Parallel()
 	var called int
 	f := stageFixtureFor(t, "1.4.2", goodArchive(t))
 	f.service.restart = func() error { called++; return nil }
@@ -26,6 +27,7 @@ func TestRestartRefusesWhenNothingIsWaiting(t *testing.T) {
 // The staged release is applied by a restart and by nothing else, and the restart is the same shutdown
 // a signal drives — so the only thing this route can do is ask for it.
 func TestRestartAsksForTheProcessItWasGiven(t *testing.T) {
+	t.Parallel()
 	var called int
 	f := stageFixtureFor(t, "1.4.2", goodArchive(t))
 	f.check(t)
@@ -43,6 +45,7 @@ func TestRestartAsksForTheProcessItWasGiven(t *testing.T) {
 }
 
 func TestRestartReportsAPathThatDoesNotExist(t *testing.T) {
+	t.Parallel()
 	f := stageFixtureFor(t, "1.4.2", goodArchive(t))
 	f.check(t)
 	if _, err := f.install(t); err != nil {
@@ -56,6 +59,7 @@ func TestRestartReportsAPathThatDoesNotExist(t *testing.T) {
 
 // A restart while an update operation is running would end the process underneath it.
 func TestRestartRefusesWhileAnUpdateOperationIsRunning(t *testing.T) {
+	t.Parallel()
 	f := stageFixtureFor(t, "1.4.2", goodArchive(t))
 	// A restart is refused while an operation runs only when there is something installed to apply:
 	// with nothing waiting, "nothing is staged" is the truer answer.
@@ -71,6 +75,7 @@ func TestRestartRefusesWhileAnUpdateOperationIsRunning(t *testing.T) {
 // The row outlives the process it was written by. A staged release the server is now running is not a
 // staged release: the About tab must stop offering a restart for the version already in the seat.
 func TestAStagedReleaseThatIsNowRunningIsNoLongerStaged(t *testing.T) {
+	t.Parallel()
 	row, err := json.Marshal(State{CurrentVersion: "1.4.0", Latest: "1.4.2", Available: false, StagedVersion: "1.4.2", BackupPath: "/mike/.update-backup"})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -109,6 +114,7 @@ func TestAStagedReleaseThatIsNowRunningIsNoLongerStaged(t *testing.T) {
 // The other half of the same staleness: the restart put the stored "newer release" in the seat, so the dot
 // would stay lit on the version this server is running.
 func TestAStoredAnswerAboutTheRunningReleaseStopsOfferingIt(t *testing.T) {
+	t.Parallel()
 	row, err := json.Marshal(State{
 		CurrentVersion: "1.0.0",
 		Latest:         "9.9.9",
@@ -151,6 +157,7 @@ func TestAStoredAnswerAboutTheRunningReleaseStopsOfferingIt(t *testing.T) {
 // A download that died with its process leaves a directory named with this package's prefix, and
 // nothing else will ever remove it.
 func TestNewReapsStaleStagingDirectories(t *testing.T) {
+	t.Parallel()
 	dir := releaseDir(t)
 	stale := filepath.Join(dir, stagingPrefix+"123456")
 	if err := os.MkdirAll(filepath.Join(stale, "unpacked"), 0o700); err != nil {

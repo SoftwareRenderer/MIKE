@@ -57,6 +57,7 @@ func fileExists(repoPath, name string) bool {
 }
 
 func TestHandleProjectDiscardFile_RevertsModifiedFile(t *testing.T) {
+	t.Parallel()
 	mux, repoPath := discardFixture(t)
 	testgit.WriteFile(t, repoPath, "tracked.txt", "edited on disk\n")
 
@@ -74,6 +75,7 @@ func TestHandleProjectDiscardFile_RevertsModifiedFile(t *testing.T) {
 
 // Discard is one click, not "unstage, then revert".
 func TestHandleProjectDiscardFile_RevertsStagedAndUnstagedEdit(t *testing.T) {
+	t.Parallel()
 	mux, repoPath := discardFixture(t)
 	testgit.WriteFile(t, repoPath, "tracked.txt", "staged half\n")
 	testgit.Git(t, repoPath, "add", "tracked.txt")
@@ -92,6 +94,7 @@ func TestHandleProjectDiscardFile_RevertsStagedAndUnstagedEdit(t *testing.T) {
 }
 
 func TestHandleProjectDiscardFile_RestoresDeletedFile(t *testing.T) {
+	t.Parallel()
 	for _, stage := range []bool{false, true} {
 		name := "unstaged delete"
 		if stage {
@@ -121,6 +124,7 @@ func TestHandleProjectDiscardFile_RestoresDeletedFile(t *testing.T) {
 }
 
 func TestHandleProjectDiscardFile_DeletesUntrackedFile(t *testing.T) {
+	t.Parallel()
 	mux, repoPath := discardFixture(t)
 	testgit.WriteFile(t, repoPath, "scratch.txt", "never committed\n")
 
@@ -139,6 +143,7 @@ func TestHandleProjectDiscardFile_DeletesUntrackedFile(t *testing.T) {
 
 // The index entry has to go before the file, or the discard leaves a staged addition behind.
 func TestHandleProjectDiscardFile_DeletesStagedNewFile(t *testing.T) {
+	t.Parallel()
 	mux, repoPath := discardFixture(t)
 	testgit.WriteFile(t, repoPath, "brand-new.txt", "staged as new\n")
 	testgit.Git(t, repoPath, "add", "brand-new.txt")
@@ -157,6 +162,7 @@ func TestHandleProjectDiscardFile_DeletesStagedNewFile(t *testing.T) {
 
 // With no commits there is nothing to revert to, so every listed entry is removed.
 func TestHandleProjectDiscardFile_NoCommitsYet(t *testing.T) {
+	t.Parallel()
 	h, s, _, _ := newTestGitHandler(t)
 	repoPath := testgit.EmptyRepo(t)
 	testgit.WriteFile(t, repoPath, "untracked.txt", "a\n")
@@ -184,6 +190,7 @@ func TestHandleProjectDiscardFile_NoCommitsYet(t *testing.T) {
 
 // The panel never lists an ignored file; a request naming one must not delete it.
 func TestHandleProjectDiscardFile_LeavesIgnoredFileAlone(t *testing.T) {
+	t.Parallel()
 	mux, repoPath := discardFixture(t)
 	testgit.WriteFile(t, repoPath, ".gitignore", "build/\n")
 	testgit.WriteFile(t, repoPath, "build/artifact.txt", "produced by the build\n")
@@ -199,6 +206,7 @@ func TestHandleProjectDiscardFile_LeavesIgnoredFileAlone(t *testing.T) {
 
 // A path starting with '-' is a filename, not an option, because every path goes after `--`.
 func TestHandleProjectDiscardFile_DashPrefixedPathIsAFile(t *testing.T) {
+	t.Parallel()
 	mux, repoPath := discardFixture(t)
 	testgit.WriteFile(t, repoPath, "-dash.txt", "never committed\n")
 
@@ -212,6 +220,7 @@ func TestHandleProjectDiscardFile_DashPrefixedPathIsAFile(t *testing.T) {
 }
 
 func TestHandleProjectDiscardFile_RejectsPathOutsideRepo(t *testing.T) {
+	t.Parallel()
 	mux, repoPath := discardFixture(t)
 	outside := filepath.Join(filepath.Dir(repoPath), "outside.txt")
 	if err := os.WriteFile(outside, []byte("not yours\n"), 0o644); err != nil {
@@ -228,6 +237,7 @@ func TestHandleProjectDiscardFile_RejectsPathOutsideRepo(t *testing.T) {
 }
 
 func TestHandleProjectDiscardFile_RejectsMissingPath(t *testing.T) {
+	t.Parallel()
 	mux, _ := discardFixture(t)
 
 	rec := httptest.NewRecorder()
@@ -240,6 +250,7 @@ func TestHandleProjectDiscardFile_RejectsMissingPath(t *testing.T) {
 
 // The panel may act on a status line a concurrent commit already cleared; that is a no-op, not a fault.
 func TestHandleProjectDiscardFile_CleanFileIsANoOp(t *testing.T) {
+	t.Parallel()
 	mux, repoPath := discardFixture(t)
 
 	rec := postDiscard(t, mux, "tracked.txt")

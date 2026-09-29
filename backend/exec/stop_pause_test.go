@@ -290,6 +290,9 @@ func TestStopDoesNotClobberMovedTask(t *testing.T) {
 	waitTaskState(t, s, "stop-clobber-1", func(st types.Status, es types.ExecutionState) bool {
 		return st == "done" && es == "completed"
 	})
+	// The window a late write from the exiting executor would land in. Its deferred cleanup runs
+	// after the row reaches this state, so there is nothing to wait *for* — only a span long enough
+	// that a clobber would already be visible.
 	time.Sleep(500 * time.Millisecond) // give a (buggy) late write a chance to clobber
 	final, err := s.GetTaskByID("stop-clobber-1")
 	if err != nil {
@@ -443,7 +446,8 @@ func TestStopWithAssignedPortsLeavesTaskPaused(t *testing.T) {
 		t.Fatalf("assigned_ports must be cleared when the run ends: %+v", final.AssignedPorts)
 	}
 
-	// Give any late writer a chance to land, then re-check.
+	// Same window as the clobber test: a writer that outlives the pause is what this re-check looks
+	// for, and it cannot announce itself.
 	time.Sleep(500 * time.Millisecond)
 	after, err := s.GetTaskByID("stop-ports-1")
 	if err != nil {

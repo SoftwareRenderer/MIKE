@@ -47,6 +47,7 @@ func worktreeWithSecretLink(t *testing.T) (wm *WorktreeManager, taskID, worktree
 }
 
 func TestUntrackedSymlinkOutsideIsNeverReadIntoTheDiff(t *testing.T) {
+	t.Parallel()
 	wm, taskID, _, secretPath := worktreeWithSecretLink(t)
 
 	diff, err := wm.GetTaskDiff(taskID, "", "")
@@ -82,6 +83,7 @@ func TestUntrackedSymlinkOutsideIsNeverReadIntoTheDiff(t *testing.T) {
 }
 
 func TestUntrackedReadTargetRefusesWhatItMustAndAllowsWhatItMust(t *testing.T) {
+	t.Parallel()
 	wm, taskID, worktreePath, secretPath := worktreeWithSecretLink(t)
 	_ = wm
 	_ = taskID
@@ -121,6 +123,7 @@ func TestUntrackedReadTargetRefusesWhatItMustAndAllowsWhatItMust(t *testing.T) {
 }
 
 func TestWalkUntrackedEntriesDoesNotDescendLinks(t *testing.T) {
+	t.Parallel()
 	wm, taskID, worktreePath, _ := worktreeWithSecretLink(t)
 	_ = wm
 	_ = taskID

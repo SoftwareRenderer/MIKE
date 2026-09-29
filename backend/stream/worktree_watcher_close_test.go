@@ -97,6 +97,8 @@ func TestCloseDoesNotWaitHoldingTheLock(t *testing.T) {
 	// Releasing the worker makes it need ww.mu for its deferred cleanup. Holding the lock across
 	// Wait deadlocks; releasing it cannot, so the failure direction is not a race.
 	go func() {
+		// The delay is Close's head start: the worker has to come back while Close is still in it,
+		// which is the interleaving that deadlocks. Release immediately and Close is simply over.
 		time.Sleep(300 * time.Millisecond)
 		close(release)
 	}()

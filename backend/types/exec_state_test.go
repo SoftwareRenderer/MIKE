@@ -7,6 +7,7 @@ import "testing"
 // WebSocket frames carry. A renamed constant is a refactor; a changed value silently
 // strands every task whose state no longer matches a branch in the UI.
 func TestExecutionStateWireFormatIsFrozen(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		got  ExecutionState
 		want string
@@ -27,6 +28,7 @@ func TestExecutionStateWireFormatIsFrozen(t *testing.T) {
 // InFlight is the set a pause, a move or a container reclaim may interrupt: working, not waiting. The SQL
 // copy is held to the same answer by store.TestInFlightStatesSQLIsTheGoSet.
 func TestInFlightIsWorkingRatherThanWaiting(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		state ExecutionState
 		want  bool
@@ -45,6 +47,7 @@ func TestInFlightIsWorkingRatherThanWaiting(t *testing.T) {
 }
 
 func TestParseExecutionState(t *testing.T) {
+	t.Parallel()
 	for _, s := range []string{"idle", "running", "pulling_image", "paused", "completed", "failed"} {
 		if _, ok := ParseExecutionState(s); !ok {
 			t.Errorf("ParseExecutionState(%q) = not-ok, want ok", s)

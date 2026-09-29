@@ -11,6 +11,8 @@
     "check:dead": "knip --no-progress --no-config-hints",
     "check:dead-surface": "python3 dead-surface.py",
     "check:dead-surface-test": "python3 dead-surface_test.py",
+    "check:sleeps": "python3 sleep-gate.py",
+    "check:sleeps-test": "python3 sleep-gate_test.py",
     "check:fetch": "bash scripts/check-fetch.sh",
     "check:colors": "bash scripts/check-colors.sh",
     "check:unused": "bash scripts/svelte-check-once.sh unused",

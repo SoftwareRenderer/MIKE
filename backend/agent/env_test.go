@@ -46,6 +46,11 @@ func lastValueFor(env []string, key string) (string, int) {
 
 // unsetAllowlisted drops an allowlisted variable for the duration of the test; the
 // preceding t.Setenv registers the cleanup that restores the original value.
+//
+// It is also why this file's tests stay serial: t.Setenv changes the environment of the whole
+// process and refuses to run in a parallel test, or in any test with a parallel ancestor. A test
+// that calls t.Setenv itself is under the same rule — the cleanup that puts the original value back
+// would fire while a parallel sibling still reads what it changed.
 func unsetAllowlisted(t *testing.T, key string) {
 	t.Helper()
 	t.Setenv(key, "original")
@@ -59,6 +64,7 @@ func unsetAllowlisted(t *testing.T, key string) {
 // TestSafeAgentEnv_StripsServerSecrets is the regression test for the credential
 // exposure: the agent subprocess must never inherit the master password or the key
 // that decrypts every provider API key in the database.
+// serial for the reason at unsetAllowlisted.
 func TestSafeAgentEnv_StripsServerSecrets(t *testing.T) {
 	secrets := map[string]string{
 		"MIKE_LOGIN_PASSWORD":   "hunter2",
@@ -87,6 +93,7 @@ func TestSafeAgentEnv_StripsServerSecrets(t *testing.T) {
 	}
 }
 
+// serial for the reason at unsetAllowlisted.
 func TestSafeAgentEnv_PreservesLoadBearingVars(t *testing.T) {
 	// PATH is what resolves the adapter's default bare binary name ("pi"); HOME is what
 	// the agent resolves its own config dir from. Both must survive verbatim.
@@ -112,6 +119,7 @@ func TestSafeAgentEnv_PreservesLoadBearingVars(t *testing.T) {
 	}
 }
 
+// serial for the reason at unsetAllowlisted.
 func TestSafeAgentEnv_OmitsUnsetVars(t *testing.T) {
 	// No "VAR=" noise for allowlisted variables the server doesn't have set — an empty
 	// and an unset variable are not the same thing to a shell or to Node.
@@ -127,6 +135,7 @@ func TestSafeAgentEnv_OmitsUnsetVars(t *testing.T) {
 	}
 }
 
+// serial for the reason at unsetAllowlisted.
 func TestSafeAgentEnv_ExtrasWin(t *testing.T) {
 	t.Setenv("HOME", "/host/home")
 	t.Setenv("PATH", "/host/bin")
@@ -153,6 +162,7 @@ func TestSafeAgentEnv_ExtrasWin(t *testing.T) {
 	}
 }
 
+// serial for the reason at unsetAllowlisted.
 func TestSafeAgentEnv_NoEnvAtAllForUnknownNames(t *testing.T) {
 	// Only the allowlist is emitted — a name that merely *looks* allowlisted is not.
 	for _, key := range []string{"PATHX", "HOME_DIR", "LCO", "LC", "TMPDIRS", "HTTPS_PROXY_FILE", "PATH_HOME"} {
@@ -168,6 +178,7 @@ func TestSafeAgentEnv_NoEnvAtAllForUnknownNames(t *testing.T) {
 
 // TestSafeAgentEnv_ChildSeesOnlyAllowlist runs a real child process and asserts what it
 // actually sees, including the "extras win" deduplication os/exec performs.
+// serial for the reason at unsetAllowlisted.
 func TestSafeAgentEnv_ChildSeesOnlyAllowlist(t *testing.T) {
 	envPath, err := exec.LookPath("env")
 	if err != nil {

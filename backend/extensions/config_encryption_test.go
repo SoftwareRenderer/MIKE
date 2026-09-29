@@ -27,6 +27,7 @@ func makeTestExtWithConfig(t *testing.T, id, name string, config map[string]any,
 }
 
 func TestConfigEncryption_RoundTrip(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 
 	// Schema marks github_token as sensitive
@@ -71,6 +72,7 @@ func TestConfigEncryption_RoundTrip(t *testing.T) {
 }
 
 func TestConfigEncryption_EncryptedInDB(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 
 	schema := &ConfigSchema{
@@ -106,6 +108,7 @@ func TestConfigEncryption_EncryptedInDB(t *testing.T) {
 }
 
 func TestConfigEncryption_NoSchema(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 
 	// No config_schema — values stored as-is
@@ -130,6 +133,7 @@ func TestConfigEncryption_NoSchema(t *testing.T) {
 }
 
 func TestConfigEncryption_NoKey(t *testing.T) {
+	t.Parallel()
 	es := testStoreNoKey(t)
 
 	schema := &ConfigSchema{
@@ -170,6 +174,7 @@ func TestConfigEncryption_NoKey(t *testing.T) {
 }
 
 func TestConfigEncryption_UpdatePreservesEncryption(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 
 	schema := &ConfigSchema{
@@ -212,6 +217,7 @@ func TestConfigEncryption_UpdatePreservesEncryption(t *testing.T) {
 }
 
 func TestConfigEncryption_ListAlsoDecrypts(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 
 	schema := &ConfigSchema{
@@ -244,6 +250,7 @@ func TestConfigEncryption_ListAlsoDecrypts(t *testing.T) {
 }
 
 func TestConfigEncryption_MultipleSensitiveFields(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 
 	schema := &ConfigSchema{
@@ -282,6 +289,7 @@ func TestConfigEncryption_MultipleSensitiveFields(t *testing.T) {
 }
 
 func TestConfigEncryption_EmptySensitiveValue(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 
 	schema := &ConfigSchema{
@@ -310,6 +318,7 @@ func TestConfigEncryption_EmptySensitiveValue(t *testing.T) {
 }
 
 func TestConfigEncryption_NonStringSensitiveValue(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 
 	schema := &ConfigSchema{
@@ -355,6 +364,7 @@ func configContains(s, substr string) bool {
 }
 
 func TestMaskConfig(t *testing.T) {
+	t.Parallel()
 	schema := &ConfigSchema{
 		Properties: []SchemaProp{
 			{Key: "token", Type: "string", Sensitive: true},
@@ -381,6 +391,7 @@ func TestMaskConfig(t *testing.T) {
 }
 
 func TestMaskConfig_NoSchema(t *testing.T) {
+	t.Parallel()
 	config := map[string]any{"token": "secret"}
 	masked := maskConfig(config, nil)
 
@@ -390,6 +401,7 @@ func TestMaskConfig_NoSchema(t *testing.T) {
 }
 
 func TestMaskConfig_EmptySensitiveValue(t *testing.T) {
+	t.Parallel()
 	schema := &ConfigSchema{
 		Properties: []SchemaProp{
 			{Key: "token", Type: "string", Sensitive: true},
@@ -406,6 +418,7 @@ func TestMaskConfig_EmptySensitiveValue(t *testing.T) {
 }
 
 func TestMaskConfig_PreservedOnUpdate(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 
 	schema := &ConfigSchema{

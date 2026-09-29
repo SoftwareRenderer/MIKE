@@ -30,6 +30,7 @@ func openRouterStyleMapping(serverURL string) llmadapter.Mapping {
 // TestChatCompletion_AdapterApplied verifies a matching mapping rewrites the
 // request body (OpenRouter-style) and adds headers, for non-streaming calls.
 func TestChatCompletion_AdapterApplied(t *testing.T) {
+	t.Parallel()
 	var gotBody map[string]any
 	var gotHeader http.Header
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -78,6 +79,7 @@ func TestChatCompletion_AdapterApplied(t *testing.T) {
 // TestChatCompletion_DefaultEffortSendsEnabled verifies effort "default" maps
 // to reasoning.enabled=true (provider decides).
 func TestChatCompletion_DefaultEffortSendsEnabled(t *testing.T) {
+	t.Parallel()
 	var gotBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		data, _ := io.ReadAll(r.Body)
@@ -107,6 +109,7 @@ func TestChatCompletion_DefaultEffortSendsEnabled(t *testing.T) {
 // TestChatCompletion_NoMappingPassthrough verifies the original
 // llama.cpp-flavored request goes out unchanged when nothing matches.
 func TestChatCompletion_NoMappingPassthrough(t *testing.T) {
+	t.Parallel()
 	var gotBody map[string]any
 	var gotHeader http.Header
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -140,6 +143,7 @@ func TestChatCompletion_NoMappingPassthrough(t *testing.T) {
 // TestChatStream_AdapterApplied verifies the same adaptation on the streaming
 // path (which additionally sends return_progress).
 func TestChatStream_AdapterApplied(t *testing.T) {
+	t.Parallel()
 	var gotBody map[string]any
 	var gotHeader http.Header
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -16,6 +16,7 @@ import (
 // TestPopStashByHashNamesThePathsItCouldNotRestore: the merge reworded the sentence the parked work
 // reworded. The error names the file and the entry, and the entry is still there to restore by hand.
 func TestPopStashByHashNamesThePathsItCouldNotRestore(t *testing.T) {
+	t.Parallel()
 	repoDir, _, _, _, _, wm := setupStashTest(t)
 	writeFile(t, repoDir, "shared.txt", "the original sentence\n")
 	runGit(t, repoDir, "add", "shared.txt")
@@ -57,6 +58,7 @@ func TestPopStashByHashNamesThePathsItCouldNotRestore(t *testing.T) {
 // there is nothing for a person to resolve. Only an unmerged index is a conflict — sniffing git's text
 // would call this one too.
 func TestPopStashByHashLeavesARefusalUnclassified(t *testing.T) {
+	t.Parallel()
 	repoDir, _, _, _, _, wm := setupStashTest(t)
 
 	untracked := filepath.Join(repoDir, "new.txt")

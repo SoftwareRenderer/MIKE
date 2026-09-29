@@ -17,6 +17,7 @@ import (
 // init-git, worktree reset — which would otherwise read a body of any size into
 // memory for anyone holding a session.
 func TestMaxBodyMiddlewareBoundsEveryReader(t *testing.T) {
+	t.Parallel()
 	const limit = 1024
 	readAll := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, err := io.ReadAll(r.Body); err != nil {
@@ -61,6 +62,7 @@ func TestMaxBodyMiddlewareBoundsEveryReader(t *testing.T) {
 // that can stop it is the bound on the reader. A test whose body is garbage proves
 // nothing: it would be refused with the cap wired up or not.
 func TestServerRefusesOversizedBody(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrf := loginTestCSRF(t, s)
 
@@ -119,6 +121,7 @@ func postThroughChain(t *testing.T, s *Server, target string, body io.Reader, co
 // switches on method: the WebSocket endpoints are GET upgrades, and a bounded reader
 // on the upgrade path is a broken stream.
 func TestMiddlewareChainKeepsGetUpgrades(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, _ := loginTestCSRF(t, s)
 

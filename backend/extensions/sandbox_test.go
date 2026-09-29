@@ -15,6 +15,7 @@ import (
 )
 
 func TestSanitizeContainerID(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input   string
 		want    string
@@ -37,6 +38,7 @@ func TestSanitizeContainerID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
 			got, err := sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{}).SanitizeID(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{}).SanitizeID(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
@@ -50,12 +52,14 @@ func TestSanitizeContainerID(t *testing.T) {
 }
 
 func TestExtensionContainerPrefix(t *testing.T) {
+	t.Parallel()
 	if ExtensionContainerPrefix != "kanban-ext" {
 		t.Errorf("ExtensionContainerPrefix = %q, want kanban-ext", ExtensionContainerPrefix)
 	}
 }
 
 func TestApplyMemoryLimit_NotRunningIsNoOp(t *testing.T) {
+	t.Parallel()
 	reg := NewRegistryClient()
 	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{}) // nil store is ok for this test
 	// No sandbox was created — applying or clearing a limit is a silent no-op:
@@ -70,6 +74,7 @@ func TestApplyMemoryLimit_NotRunningIsNoOp(t *testing.T) {
 
 // TestApplyMemoryLimit_RunningSandbox verifies against a real gVisor container that the limit
 // written at Create can be raised and cleared in place, with no container restart.
+// serial: it creates a container, so the machine and the memory budget decide how long it takes.
 func TestApplyMemoryLimit_RunningSandbox(t *testing.T) {
 	if !checkExtensionSandboxAvailable() {
 		t.Skip("gVisor (runsc) or podman not available")
@@ -138,6 +143,7 @@ func withBridge(sm *ExtensionSandboxManager, path string) {
 }
 
 func TestNewExtensionSandboxManager(t *testing.T) {
+	t.Parallel()
 	// Test that manager can be created (without actual podman, sandboxruntime.Boot{})
 	reg := NewRegistryClient()
 	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{}) // nil store is ok for this test
@@ -149,6 +155,7 @@ func TestNewExtensionSandboxManager(t *testing.T) {
 }
 
 func TestListRunning_Empty(t *testing.T) {
+	t.Parallel()
 	reg := NewRegistryClient()
 	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
 	result := sm.ListRunning()
@@ -161,6 +168,7 @@ func TestListRunning_Empty(t *testing.T) {
 }
 
 func TestIsRunning_NotCreated(t *testing.T) {
+	t.Parallel()
 	reg := NewRegistryClient()
 	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
 	if sm.IsRunning("nonexistent") {
@@ -169,6 +177,7 @@ func TestIsRunning_NotCreated(t *testing.T) {
 }
 
 func TestStop_NotCreated(t *testing.T) {
+	t.Parallel()
 	reg := NewRegistryClient()
 	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
 	err := sm.Stop("nonexistent")
@@ -178,6 +187,7 @@ func TestStop_NotCreated(t *testing.T) {
 }
 
 func TestDestroy_NotCreated(t *testing.T) {
+	t.Parallel()
 	reg := NewRegistryClient()
 	store := testStore(t)
 	sm := NewExtensionSandboxManager(reg, store, sandboxruntime.Boot{})
@@ -188,6 +198,7 @@ func TestDestroy_NotCreated(t *testing.T) {
 }
 
 func TestStartSession_UnknownSandbox(t *testing.T) {
+	t.Parallel()
 	sm := NewExtensionSandboxManager(NewRegistryClient(), nil, sandboxruntime.Boot{})
 	client, err := sm.StartSession("nonexistent")
 	if err == nil {
@@ -199,6 +210,7 @@ func TestStartSession_UnknownSandbox(t *testing.T) {
 }
 
 func TestReleaseSession_NotCreated(t *testing.T) {
+	t.Parallel()
 	sm := NewExtensionSandboxManager(NewRegistryClient(), nil, sandboxruntime.Boot{})
 	// Must not panic, and must not credit a hand-back for a sandbox that was never created.
 	if sm.ReleaseSession("nonexistent", testBridgeClient(t)) {
@@ -207,6 +219,7 @@ func TestReleaseSession_NotCreated(t *testing.T) {
 }
 
 func TestGracePeriod_TimerSetOnLastSession(t *testing.T) {
+	t.Parallel()
 	sm := NewExtensionSandboxManager(NewRegistryClient(), nil, sandboxruntime.Boot{})
 	extID := "test-grace-period"
 	sm.mu.Lock()
@@ -238,6 +251,7 @@ func TestGracePeriod_TimerSetOnLastSession(t *testing.T) {
 }
 
 func TestGracePeriod_CancelledOnReconnect(t *testing.T) {
+	t.Parallel()
 	sm := NewExtensionSandboxManager(NewRegistryClient(), nil, sandboxruntime.Boot{})
 	extID := "test-grace-reconnect"
 
@@ -263,6 +277,7 @@ func TestGracePeriod_CancelledOnReconnect(t *testing.T) {
 }
 
 func TestGracePeriod_TimerFiresAndStops(t *testing.T) {
+	t.Parallel()
 	sm := NewExtensionSandboxManager(NewRegistryClient(), nil, sandboxruntime.Boot{})
 	extID := "test-grace-fires"
 	stopped := make(chan string, 1)
@@ -304,6 +319,7 @@ func TestGracePeriod_TimerFiresAndStops(t *testing.T) {
 }
 
 func TestCreate_RejectsLeadingDashImage(t *testing.T) {
+	t.Parallel()
 	reg := NewRegistryClient()
 	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
 	sm.available = true
@@ -332,6 +348,7 @@ func TestCreate_RejectsLeadingDashImage(t *testing.T) {
 	}
 }
 
+// serial: it creates a container, so the machine and the memory budget decide how long it takes.
 func TestCreate_AcceptsValidImage(t *testing.T) {
 	reg := NewRegistryClient()
 	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
@@ -366,6 +383,7 @@ func TestCreate_AcceptsValidImage(t *testing.T) {
 // No default image: an extension that names none and ships no Dockerfile is refused by name, and no
 // container is created. It used to get ubuntu:latest - running, and holding no language server.
 func TestCreate_RefusesExtensionWithNoImageAndNoDockerfile(t *testing.T) {
+	t.Parallel()
 	reg := NewRegistryClient()
 	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
 	sm.available = true
@@ -390,6 +408,7 @@ func TestCreate_RefusesExtensionWithNoImageAndNoDockerfile(t *testing.T) {
 }
 
 func TestCreate_RejectsShellInjectionImage(t *testing.T) {
+	t.Parallel()
 	reg := NewRegistryClient()
 	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
 	sm.available = true
@@ -453,10 +472,12 @@ func hasArg(args []string, want string) bool {
 }
 
 func TestBuildExtensionCreateArgs_AlwaysNetworkIsolated(t *testing.T) {
+	t.Parallel()
 	// Extension sandboxes must NEVER have network access, regardless of the
 	// network_isolation preference in the config.
 	for _, name := range []string{"isolated", "not_isolated"} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			ext := &Extension{
 				ID:   "ext-network-test",
 				Name: name,
@@ -473,6 +494,7 @@ func TestBuildExtensionCreateArgs_AlwaysNetworkIsolated(t *testing.T) {
 }
 
 func TestBuildExtensionCreateArgs_KeepsHardeningFlags(t *testing.T) {
+	t.Parallel()
 	ext := &Extension{ID: "ext-hardening-test"}
 	args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-hardening-test", "ubuntu:latest", nil, nil)
 
@@ -490,6 +512,7 @@ func TestBuildExtensionCreateArgs_KeepsHardeningFlags(t *testing.T) {
 // An extension sandbox must never pull during `podman create`. `--pull=never` is a create flag, so
 // it comes after `create` and before the image reference.
 func TestBuildExtensionCreateArgs_NeverPullsImplicitly(t *testing.T) {
+	t.Parallel()
 	ext := &Extension{ID: "ext-pull-test"}
 	image := ExtensionImageRef("gopls", "1.0.0")
 	args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-pull-test", image, nil, nil)
@@ -522,6 +545,7 @@ func TestBuildExtensionCreateArgs_NeverPullsImplicitly(t *testing.T) {
 }
 
 func TestBuildExtensionCreateArgs_MountsProjectsReadOnly(t *testing.T) {
+	t.Parallel()
 	ext := &Extension{ID: "ext-mount-test"}
 	projectMounts := map[string]string{
 		"/host/proj-a": "/mnt/proj-a",
@@ -542,6 +566,7 @@ func TestBuildExtensionCreateArgs_MountsProjectsReadOnly(t *testing.T) {
 }
 
 func TestBuildExtensionCreateArgs_EntrypointAndImage(t *testing.T) {
+	t.Parallel()
 	ext := &Extension{ID: "ext-entry-test"}
 	args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-entry-test", "my-custom-image:v1", nil, nil)
 
@@ -554,6 +579,7 @@ func TestBuildExtensionCreateArgs_EntrypointAndImage(t *testing.T) {
 }
 
 func TestBuildExtensionCreateArgs_ClearsImageEntrypoint(t *testing.T) {
+	t.Parallel()
 	// An image with an ENTRYPOINT (e.g. alpine/git -> ["git"]) would treat the keep-alive command
 	// as a subcommand and exit, so an empty --entrypoint clears it.
 	ext := &Extension{ID: "ext-entrypoint-clear-test"}
@@ -565,7 +591,9 @@ func TestBuildExtensionCreateArgs_ClearsImageEntrypoint(t *testing.T) {
 }
 
 func TestBuildExtensionCreateArgs_MemoryLimit(t *testing.T) {
+	t.Parallel()
 	t.Run("zero limit omits the memory flag", func(t *testing.T) {
+		t.Parallel()
 		// Default (unset) sandbox config = 0 = no limit.
 		ext := &Extension{ID: "ext-mem-zero"}
 		args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-mem-zero", "ubuntu:latest", nil, nil)
@@ -575,6 +603,7 @@ func TestBuildExtensionCreateArgs_MemoryLimit(t *testing.T) {
 	})
 
 	t.Run("negative limit is clamped to no limit", func(t *testing.T) {
+		t.Parallel()
 		ext := &Extension{ID: "ext-mem-neg", SandboxConfig: SandboxConfig{MemoryLimit: -64}}
 		args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-mem-neg", "ubuntu:latest", nil, nil)
 		if hasArg(args, "--memory") {
@@ -583,6 +612,7 @@ func TestBuildExtensionCreateArgs_MemoryLimit(t *testing.T) {
 	})
 
 	t.Run("positive limit sets the memory flag", func(t *testing.T) {
+		t.Parallel()
 		ext := &Extension{ID: "ext-mem-set", SandboxConfig: SandboxConfig{MemoryLimit: 512}}
 		args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-mem-set", "ubuntu:latest", nil, nil)
 		if !hasArgPair(args, "--memory", "512M") {
@@ -592,6 +622,7 @@ func TestBuildExtensionCreateArgs_MemoryLimit(t *testing.T) {
 }
 
 func TestFindLocalDockerfile(t *testing.T) {
+	t.Parallel()
 	reg := NewRegistryClient()
 	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
 
@@ -643,6 +674,7 @@ func TestFindLocalDockerfile(t *testing.T) {
 // With --pull=never, a missing image is built, pulled, or reported — never fetched during creation.
 // A "localhost/…" ref is a local build and must never be fetched.
 func TestPullsMissingRemoteImage(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		image string
 		want  bool
@@ -665,6 +697,7 @@ func TestPullsMissingRemoteImage(t *testing.T) {
 // not pass silently: with no Dockerfile there is nothing to rebuild, so the create would fail later with
 // a worse message. It used to return nil and let Create start a default container.
 func TestEnsureExtensionImage_LocalBuildIsNeverPulled(t *testing.T) {
+	t.Parallel()
 	reg := NewRegistryClient()
 	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
 	sm.extensionsDir = filepath.Join(t.TempDir(), "extensions")
@@ -681,6 +714,7 @@ func TestEnsureExtensionImage_LocalBuildIsNeverPulled(t *testing.T) {
 }
 
 func TestCustomMountSnapshot(t *testing.T) {
+	t.Parallel()
 	// Empty mounts -> nil.
 	if got := customMountSnapshot(nil); got != nil {
 		t.Errorf("customMountSnapshot(nil) = %v, want nil", got)
@@ -707,6 +741,7 @@ func TestCustomMountSnapshot(t *testing.T) {
 }
 
 func TestMountsCompatible_CustomMounts(t *testing.T) {
+	t.Parallel()
 	reg := NewRegistryClient()
 	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
 
@@ -764,6 +799,7 @@ func TestMountsCompatible_CustomMounts(t *testing.T) {
 // sandbox when they change. What a session *detected* at runtime is not in that
 // list: one workspace's module cache must never restart another's server.
 func TestMountsCompatible_Envs(t *testing.T) {
+	t.Parallel()
 	reg := NewRegistryClient()
 	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
 
@@ -808,6 +844,7 @@ func TestMountsCompatible_Envs(t *testing.T) {
 // ─── GetMemoryStats ──────────────────────────────────────────────────────────
 
 func TestGetMemoryStats_NotCreated(t *testing.T) {
+	t.Parallel()
 	reg := NewRegistryClient()
 	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
 
@@ -824,6 +861,7 @@ func TestGetMemoryStats_NotCreated(t *testing.T) {
 }
 
 func TestGetMemoryStats_CreatedButNotRunning(t *testing.T) {
+	t.Parallel()
 	reg := NewRegistryClient()
 	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
 	// State exists but no container (never created / already stopped):
@@ -872,6 +910,7 @@ func hasElem(hay []string, needle string) bool {
 // was persisted before validation existed, or came from a manifest — must never
 // become a container argument.
 func TestBuildExtensionCreateArgs_RejectedMountsNeverReachPodman(t *testing.T) {
+	t.Parallel()
 	allowed := t.TempDir()
 	inside := filepath.Join(allowed, "node_modules")
 	if err := os.MkdirAll(inside, 0o755); err != nil {
@@ -968,6 +1007,7 @@ func TestBuildExtensionCreateArgs_RejectedMountsNeverReachPodman(t *testing.T) {
 // that runs the container under gVisor from a full --cap-drop ALL, and only a value that
 // would arrive as an *argument* is skipped.
 func TestBuildExtensionCreateArgs_CapabilityPosture(t *testing.T) {
+	t.Parallel()
 	requested := []string{
 		"CHOWN", "NET_RAW", "SYS_ADMIN", "SYS_PTRACE", "DAC_OVERRIDE",
 		"MKNOD", "SETUID", "LINUX_IMMUTABLE", "cap_sys_nice", "fowner",
@@ -1030,6 +1070,7 @@ func sharedPrefaceDiff(args []string, containerName string) string {
 // anything else, so a drifted copy here would leave every extension whose manifest asks for a
 // capability running without it.
 func TestBuildExtensionCreateArgsBeginWithTheSharedPreface(t *testing.T) {
+	t.Parallel()
 	const name = "kanban-ext-ext-preface"
 	ext := &Extension{ID: "ext-preface", SandboxConfig: SandboxConfig{Capabilities: []string{"CHOWN"}}}
 	args, _ := buildExtensionCreateArgs(ext, name, "ubuntu:latest", nil, nil)
@@ -1057,6 +1098,7 @@ func mountArgs(args []string) []string {
 // project's Sandbox Configuration is read-only even when the stored config says
 // otherwise — the extension is not the party that decided that path exists.
 func TestBuildExtensionCreateArgs_ProjectConfiguredMountIsAlwaysReadOnly(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	projectCache := filepath.Join(dir, "go-cache")
 	appDir := filepath.Join(dir, "app")
@@ -1110,6 +1152,7 @@ func writeInstalledDockerfile(t *testing.T, root, author, name string) string {
 	return path
 }
 
+// serial: ResolveImageRef asks podman, which is this machine's storage, not the test's.
 func TestExtensionImageSource(t *testing.T) {
 	extDir := t.TempDir()
 	writeInstalledDockerfile(t, extDir, "go-team", "gopls")
@@ -1178,6 +1221,7 @@ func TestExtensionImageSource(t *testing.T) {
 // A row with no image - the shape the removed default let through - is repaired at create: the ref it
 // should have had is derived, the image is built from the installed Dockerfile, and the record is
 // updated so the build happens once.
+// serial for the reason at fakePodmanExit.
 func TestCreate_DerivesAndRecordsTheImageForARowWithNoImage(t *testing.T) {
 	extStore := testStore(t)
 	installed := &Extension{

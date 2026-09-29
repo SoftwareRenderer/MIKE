@@ -12,6 +12,7 @@ import (
 
 // TestHandleProxyCapsResponse: the proxied response is buffered in full, so without a cap any
 // API on an extension's allowlist could make the server buffer a response of any size.
+// serial for the reason at allowLoopbackProxy.
 func TestHandleProxyCapsResponse(t *testing.T) {
 	allowLoopbackProxy(t)
 	// A real body just past the cap: the handler buffers whatever it is handed.
@@ -51,6 +52,7 @@ func TestHandleProxyCapsResponse(t *testing.T) {
 
 // TestHandleProxyPassesNormalResponse is the other side: the cap is a bound, not a
 // break. A response well inside it still reaches the extension unchanged.
+// serial for the reason at allowLoopbackProxy.
 func TestHandleProxyPassesNormalResponse(t *testing.T) {
 	allowLoopbackProxy(t)
 	small := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -79,6 +81,7 @@ func TestHandleProxyPassesNormalResponse(t *testing.T) {
 // TestProxyContentType: JSON keeps the shape the client branches on; everything else becomes a
 // type that cannot execute.
 func TestProxyContentType(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ upstream, want string }{
 		{"application/json", "application/json"},
 		{"application/json; charset=utf-8", "application/json"},
@@ -98,6 +101,7 @@ func TestProxyContentType(t *testing.T) {
 
 // The response is served from MIKE's own origin, so an upstream's bytes must never arrive
 // labelled as something the browser would run.
+// serial for the reason at allowLoopbackProxy.
 func TestHandleProxyDoesNotEchoUpstreamContentType(t *testing.T) {
 	allowLoopbackProxy(t)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

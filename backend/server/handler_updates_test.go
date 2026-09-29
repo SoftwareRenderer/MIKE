@@ -43,6 +43,7 @@ func fixtureManifest(t *testing.T, version string) *manifestFixture {
 }
 
 func TestUpdateStatusAnswersWithoutACheck(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	rec := testResponseAuth(t, s, testRequest(http.MethodGet, "/api/updates/status", nil))
 	if rec.Code != http.StatusOK {
@@ -77,6 +78,7 @@ func TestUpdateStatusAnswersWithoutACheck(t *testing.T) {
 // The preference is what turns the feature on, and the organization switch outranks it — visibly, because
 // a switch that does nothing needs a reason beside it.
 func TestUpdateStatusReportsWhoDecided(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name         string
 		disabled     bool
@@ -93,6 +95,7 @@ func TestUpdateStatusReportsWhoDecided(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			s := testServerWith(t, func(c *startup.Config) { c.DisableUpdates = tc.disabled })
 			if tc.preference != nil {
 				setPreference(t, s, *tc.preference)
@@ -121,6 +124,7 @@ func TestUpdateStatusReportsWhoDecided(t *testing.T) {
 // Disabled is not a UI state: the routes that check, download, install and restart refuse it themselves,
 // so neither a cached answer nor a hand-made request gets past the switch.
 func TestDisabledDeploymentRefusesEveryUpdateRoute(t *testing.T) {
+	t.Parallel()
 	manifest := fixtureManifest(t, "9.9.9")
 	s := testServerWith(t, func(c *startup.Config) {
 		c.UpdateManifestURL = manifest.URL
@@ -146,6 +150,7 @@ func TestDisabledDeploymentRefusesEveryUpdateRoute(t *testing.T) {
 
 // A check with the preference off must not touch the network, and must say which switch said no.
 func TestUpdateCheckRefusedWhileDisabled(t *testing.T) {
+	t.Parallel()
 	manifest := fixtureManifest(t, "9.9.9")
 	s := testServerWith(t, func(c *startup.Config) { c.UpdateManifestURL = manifest.URL })
 
@@ -161,6 +166,7 @@ func TestUpdateCheckRefusedWhileDisabled(t *testing.T) {
 // The loopback spelling of the manifest URL is a real path through the egress rule: a host the operator
 // named is the only way a non-public address is dialled, and a mirror or a test fixture is exactly that.
 func TestUpdateCheckAgainstAHostTheOperatorNamed(t *testing.T) {
+	t.Parallel()
 	manifest := fixtureManifest(t, "9.9.9")
 	s := testServerWith(t, func(c *startup.Config) { c.UpdateManifestURL = manifest.URL })
 	setPreference(t, s, true)
@@ -190,6 +196,7 @@ func TestUpdateCheckAgainstAHostTheOperatorNamed(t *testing.T) {
 // is answered from the fetch the first one's pass caused. The button sends no flag, because a person who
 // asked is never told the day is spent. docs/auto-update.md.
 func TestUpdateAutomaticCheckIsGatedByTheInstallDay(t *testing.T) {
+	t.Parallel()
 	manifest := fixtureManifest(t, "9.9.9")
 	s := testServerWith(t, func(c *startup.Config) { c.UpdateManifestURL = manifest.URL })
 	setPreference(t, s, true)
@@ -215,6 +222,7 @@ func TestUpdateAutomaticCheckIsGatedByTheInstallDay(t *testing.T) {
 // A manifest that will not answer is a server fault and is answered as one. The About tab shows what the
 // local status route still holds, so the failure costs nothing a re-read cannot put back.
 func TestUpdateCheckReportsAFailureWithoutLosingTheAnswer(t *testing.T) {
+	t.Parallel()
 	manifest := fixtureManifest(t, "9.9.9")
 	s := testServerWith(t, func(c *startup.Config) { c.UpdateManifestURL = manifest.URL })
 	setPreference(t, s, true)
@@ -249,6 +257,7 @@ func TestUpdateCheckReportsAFailureWithoutLosingTheAnswer(t *testing.T) {
 // Nothing is written over work that is running: the swap replaces the binary every in-flight turn is
 // driving commits and containers with.
 func TestUpdateApplyRefusesWhileATaskRuns(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	startRunningTask(t, s, "Write the changelog")
 
@@ -266,6 +275,7 @@ func TestUpdateApplyRefusesWhileATaskRuns(t *testing.T) {
 
 // Fetching a release renames nothing, so the refusal that guards the swap does not belong on it.
 func TestUpdatePrepareIsNotStoppedByRunningWork(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	startRunningTask(t, s, "Write the changelog")
 
@@ -278,6 +288,7 @@ func TestUpdatePrepareIsNotStoppedByRunningWork(t *testing.T) {
 // The install half answers a refusal as a refusal, whatever it is refusing about: this server's own
 // install is not a release directory, and a POST must not make that a server fault.
 func TestUpdateApplyRefusesAnInstallThatCannotTakeARelease(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	rec := testResponseAuth(t, s, testRequest(http.MethodPost, "/api/updates/apply", nil))
 	if rec.Code != http.StatusConflict {
@@ -290,6 +301,7 @@ func TestUpdateApplyRefusesAnInstallThatCannotTakeARelease(t *testing.T) {
 
 // A restart is only ever the second half of an install.
 func TestUpdateRestartRefusesWhenNothingIsStaged(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	rec := testResponseAuth(t, s, testRequest(http.MethodPost, "/api/updates/restart", nil))
 	if rec.Code != http.StatusConflict {
@@ -302,6 +314,7 @@ func TestUpdateRestartRefusesWhenNothingIsStaged(t *testing.T) {
 
 // The two routes that change anything are POSTs, and a verb they do not declare must never reach them.
 func TestUpdateRouteVerbs(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	for _, tc := range []struct {
 		path string
@@ -324,6 +337,7 @@ func TestUpdateRouteVerbs(t *testing.T) {
 
 // A request with no session gets nothing: these routes name a download and end a process.
 func TestUpdateRoutesAreNotPublic(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	for _, path := range []string{"/api/updates/status", "/api/updates/check"} {
 		rec := testResponse(t, s, testRequest(http.MethodGet, path, nil))

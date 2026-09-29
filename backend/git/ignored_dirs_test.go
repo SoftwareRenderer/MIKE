@@ -9,6 +9,7 @@ package git
 import "testing"
 
 func TestIgnoredDirsReturnsACopy(t *testing.T) {
+	t.Parallel()
 	first := IgnoredDirs()
 	if len(first) == 0 {
 		t.Fatal("the ignore set is empty; this test needs it populated")
@@ -33,6 +34,7 @@ func TestIgnoredDirsReturnsACopy(t *testing.T) {
 }
 
 func TestShouldIgnorePathStillSeesTheCanonicalSet(t *testing.T) {
+	t.Parallel()
 	// The copy must not have drifted from what the predicate uses.
 	for name := range IgnoredDirs() {
 		if !ShouldIgnorePath("a/" + name + "/b.js") {

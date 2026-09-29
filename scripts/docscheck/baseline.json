@@ -18,6 +18,10 @@
   "history": 0,
   "longsent": 0
  },
+ "docs/adr/0003-isolated-lane-shards.md": {
+  "history": 0,
+  "longsent": 0
+ },
  "docs/adr/README.md": {
   "history": 0,
   "longsent": 0

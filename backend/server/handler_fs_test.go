@@ -43,6 +43,8 @@ func shellEchoArgs(command string) (string, error) {
 // has (git would otherwise be told about an empty identity), and no identity at all must
 // render nothing rather than a dangling "-c".
 func TestGitAuthorFlagCmd(t *testing.T) {
+	// Serial: git.SetAuthorIdentity writes the process-wide commit identity, which every other
+	// test’s git command reads.
 	cases := []struct {
 		name  string
 		who   string
@@ -74,6 +76,7 @@ func TestGitAuthorFlagCmd(t *testing.T) {
 // into the same command-string pattern used by handleFSInitGit's sandbox path.
 // This is the core regression test for the latent command injection.
 func TestGitAuthorFlagCmd_ShellSafety(t *testing.T) {
+	// Serial for the reason at TestGitAuthorFlagCmd, and its payloads share one canary path under /tmp.
 	payloads := []string{
 		"'; touch " + canaryPath + "; '",
 		"';touch " + canaryPath + ";'",
@@ -122,6 +125,7 @@ func TestGitAuthorFlagCmd_ShellSafety(t *testing.T) {
 // TestFSMkdirNoProject verifies mkdir without a "project" param (project-picker
 // FileBrowser) creates the dir on the host fs instead of panicking on nil project.
 func TestFSMkdirNoProject(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 
@@ -143,6 +147,7 @@ func TestFSMkdirNoProject(t *testing.T) {
 // parsed back by a POSIX shell, reconstructs the original author identity value
 // as a single argument.
 func TestGitAuthorFlagCmd_RoundTrip(t *testing.T) {
+	// Serial for the reason at TestGitAuthorFlagCmd.
 	origName, origEmail := git.AuthorIdentity()
 	defer func() { git.SetAuthorIdentity(origName, origEmail) }()
 
@@ -240,6 +245,8 @@ func fsReadAt(t *testing.T, s *Server, cookie, csrfToken, projectID, file, ref s
 // write. The fix validates the ref (400 on rejection) and passes
 // --end-of-options before the rev.
 func TestFSReadRefRejectsGitOptions(t *testing.T) {
+	// Serial: the assertion is about a fixed host path (/tmp/pwn, /tmp/pwn:f.txt) that is outside
+	// every test’s temp directory.
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 	file, _, _ := fsReadRefRepo(t, s, "fs-ref-inject")
@@ -295,6 +302,7 @@ func TestFSReadRefRejectsGitOptions(t *testing.T) {
 // TestFSReadRefValidRefsStillWork keeps the feature: reading a file at HEAD, at
 // a hex SHA and at a branch name must keep returning the committed content.
 func TestFSReadRefValidRefsStillWork(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 	file, sha, branch := fsReadRefRepo(t, s, "fs-ref-valid")
@@ -336,6 +344,7 @@ func TestFSReadRefValidRefsStillWork(t *testing.T) {
 // TestValidateGitRefBlocksOptions double-checks the shared validator used by
 // /api/fs/read (the table lives in backend/types/validate_test.go).
 func TestFSReadRefTable(t *testing.T) {
+	t.Parallel()
 	for _, ref := range []string{"HEAD", "main", "refs/heads/main", "0123456789abcdef0123456789abcdef01234567", "task/frost-amber-quartz"} {
 		if err := types.ValidateGitRef(ref); err != nil {
 			t.Errorf("ValidateGitRef(%q) = %v, want nil", ref, err)
@@ -353,6 +362,7 @@ func TestFSReadRefTable(t *testing.T) {
 // ref reaches git. Same rule must hold: option-shaped refs are rejected before
 // git runs, valid refs still read from the worktree's history.
 func TestFSReadRefInTaskWorktree(t *testing.T) {
+	// Serial for the reason at TestFSReadRefRejectsGitOptions — the canary here is /tmp/pwt-pwn:f.txt.
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 
@@ -461,6 +471,7 @@ func fsSymlinkProject(t *testing.T, s *Server, id string) (repo, outside, secret
 }
 
 func TestFSReadRejectsSymlinkEscape(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrf := loginTestCSRF(t, s)
 	repo, _, secret, link := fsSymlinkProject(t, s, "fs-link-read")
@@ -484,6 +495,7 @@ func TestFSReadRejectsSymlinkEscape(t *testing.T) {
 }
 
 func TestFSListRejectsSymlinkEscape(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrf := loginTestCSRF(t, s)
 	_, _, _, link := fsSymlinkProject(t, s, "fs-link-list")
@@ -501,6 +513,7 @@ func TestFSListRejectsSymlinkEscape(t *testing.T) {
 }
 
 func TestFSWriteRejectsSymlinkEscape(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrf := loginTestCSRF(t, s)
 	repo, outside, _, link := fsSymlinkProject(t, s, "fs-link-write")
@@ -549,6 +562,7 @@ func TestFSWriteRejectsSymlinkEscape(t *testing.T) {
 }
 
 func TestFSMkdirRejectsSymlinkEscape(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrf := loginTestCSRF(t, s)
 	_, outside, _, link := fsSymlinkProject(t, s, "fs-link-mkdir")
@@ -570,6 +584,7 @@ func TestFSMkdirRejectsSymlinkEscape(t *testing.T) {
 // never open a symlinked file — its target resolves against the host and would
 // leak (or match) content from outside the search root.
 func TestFSSearchSkipsSymlinks(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrf := loginTestCSRF(t, s)
 	// The fixture itself is the point: a symlink inside the search root.
@@ -601,6 +616,8 @@ func TestFSSearchSkipsSymlinks(t *testing.T) {
 // endpoint. Before the fix the handler ran `git init` and wrote README.md at
 // any absolute path the client named.
 func TestFSInitGitRejectsPathOutsideProject(t *testing.T) {
+	// Serial: t.Setenv refuses to run in a parallel test; the GIT_* variables stand in for a
+	// machine-level git config.
 	s := testServer(t)
 	cookie, csrf := loginTestCSRF(t, s)
 	base := t.TempDir()
@@ -662,6 +679,7 @@ func TestFSInitGitRejectsPathOutsideProject(t *testing.T) {
 // repository (rev-parse walks up, so that covers every entry) or carries a .git
 // of its own — a nested repository or a linked worktree.
 func TestFSListGitBadge(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
@@ -753,6 +771,7 @@ func TestFSListGitBadge(t *testing.T) {
 // request. A valid pattern filters; an invalid one matches nothing but still
 // returns success.
 func TestFSSearchFilenameRegex(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrf := loginTestCSRF(t, s)
 	base := t.TempDir()

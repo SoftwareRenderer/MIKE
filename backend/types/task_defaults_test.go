@@ -5,6 +5,7 @@ import "testing"
 // TestSubtaskStatusFor pins the column a new subtask lands in. The task API, the agent's
 // create_task tool and frontend/src/lib/utils/subtask-status.ts all read this rule.
 func TestSubtaskStatusFor(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		parent Status
 		want   Status
@@ -30,6 +31,7 @@ func TestSubtaskStatusFor(t *testing.T) {
 
 // TestClearSubtaskBaseBranch pins where a base branch may live.
 func TestClearSubtaskBaseBranch(t *testing.T) {
+	t.Parallel()
 	pinned := "0123456789abcdef0123456789abcdef01234567"
 
 	root := &Task{BaseRef: "test", BaseCommit: pinned}

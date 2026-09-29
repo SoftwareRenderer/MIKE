@@ -14,6 +14,7 @@ import (
 // TestFSWriteAtomic: a save renames a temporary file into place, so a caller never
 // sees a half-written file — and never sees the temporary either.
 func TestFSWriteAtomic(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	tmpDir := t.TempDir()
 	const projID = "atomic-write-project"

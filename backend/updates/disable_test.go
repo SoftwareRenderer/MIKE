@@ -12,6 +12,7 @@ import (
 // release was fetched must still refuse to install it: the refusal belongs to the service, so no caller
 // and no cached answer can walk around it.
 func TestADisabledDeploymentRefusesEveryStep(t *testing.T) {
+	t.Parallel()
 	f := stageFixtureFor(t, "1.4.2", goodArchive(t))
 	f.check(t)
 	if _, err := f.prepare(t); err != nil {
@@ -76,6 +77,7 @@ func TestADisabledDeploymentRefusesEveryStep(t *testing.T) {
 // A disabled service must not touch the network at construction either — the switch decides after the
 // manifest URL is checked, so a refused boot and a disabled boot both stay quiet.
 func TestADisabledServiceStillReportsItsInstallShape(t *testing.T) {
+	t.Parallel()
 	s, err := New(Options{Version: "1.4.0", InstallDir: t.TempDir(), DisableUpdates: true})
 	if err != nil {
 		t.Fatalf("New: %v", err)

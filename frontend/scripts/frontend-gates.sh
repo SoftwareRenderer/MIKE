@@ -2,7 +2,7 @@
 # Every `make test-frontend` gate, side by side.
 #
 # The gates are independent reads over the same tree: one 1338-file svelte-check compile, one vitest run, one
-# knip pass, and five scan slots that cost under two seconds each on an idle machine. Run in series their wall
+# knip pass, and six scan slots that cost under two seconds each on an idle machine. Run in series their wall
 # clock is the sum; run here it is the slowest slot. `docs/testing.md → Measured gate cost` prices both shapes.
 #
 # Each slot is a chain of commands that must stay in order — a gate's own self-test runs before the gate,
@@ -41,6 +41,7 @@ dead	full	npm run check:dead
 i18n	full	npm run check:i18n && npm run check:i18n-surface-test && npm run check:i18n-surface
 sinks	full	npm run check:sinks-test && npm run check:sinks
 surface	full	npm run check:dead-surface-test && npm run check:dead-surface
+sleeps	full	npm run check:sleeps-test && npm run check:sleeps
 fetch	full	npm run check:fetch
 colors	full	npm run check:colors
 SLOTS

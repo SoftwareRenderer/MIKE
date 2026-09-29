@@ -26,6 +26,7 @@ func llamaSwapServer(t *testing.T, upstreamBody string) *httptest.Server {
 // TestDiscoverContextWindow covers the upstream shapes seen in practice:
 // llama.cpp (meta.n_ctx), vLLM (max_model_len), and servers reporting neither.
 func TestDiscoverContextWindow(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		upstreamBody string
@@ -80,6 +81,7 @@ func TestDiscoverContextWindow(t *testing.T) {
 // TestDiscoverContextWindow_NotLlamaSwap: non-llama-swap servers have no
 // upstream endpoint, so the probe must be skipped.
 func TestDiscoverContextWindow_NotLlamaSwap(t *testing.T) {
+	t.Parallel()
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
@@ -105,6 +107,7 @@ func TestDiscoverContextWindow_NotLlamaSwap(t *testing.T) {
 // TestDiscoverContextWindow_UnreachableServer: a dead host returns nil rather
 // than panicking or blocking.
 func TestDiscoverContextWindow_UnreachableServer(t *testing.T) {
+	t.Parallel()
 	cs := testConfigStore(t)
 	// Port 1 on localhost: connection refused.
 	if got := cs.DiscoverContextWindow("m", "http://127.0.0.1:1/v1"); got != nil {

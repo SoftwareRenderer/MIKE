@@ -87,6 +87,7 @@ func TestProjectRenameToADirectoryThatIsNotOneIsRefused(t *testing.T) {
 }
 
 func TestGenerateProjectIDNeverReturnsANameThatIsNotOne(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		path     string

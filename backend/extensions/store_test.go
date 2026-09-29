@@ -72,6 +72,7 @@ func makeTestExt(id, name, extType string) *Extension {
 }
 
 func TestGitSourceRoundTrip(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 	ext := makeTestExt("ext-1", "test-ext", ExtensionTypeUI)
 	ext.Repo = "https://github.com/author/kanban-extensions"
@@ -99,6 +100,7 @@ func TestGitSourceRoundTrip(t *testing.T) {
 }
 
 func TestCreateAndGetExtension(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 	ext := makeTestExt("ext-1", "test-ext", ExtensionTypeLSP)
 	if err := es.Create(ext); err != nil {
@@ -124,6 +126,7 @@ func TestCreateAndGetExtension(t *testing.T) {
 }
 
 func TestUIConfigSandboxPermissionsRoundTrip(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 	ext := makeTestExt("ui-ext", "importer", ExtensionTypeUI)
 	ext.Manifest.Capabilities = &Capabilities{
@@ -159,6 +162,7 @@ func TestUIConfigSandboxPermissionsRoundTrip(t *testing.T) {
 }
 
 func TestGetByIDNotFound(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 	_, err := es.GetByID("nonexistent")
 	if err == nil {
@@ -178,6 +182,7 @@ func TestGetByIDNotFound(t *testing.T) {
 }
 
 func TestGetByAuthorName(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 	// Same name from two different authors must be distinct identities.
 	if err := es.Create(makeTestExt("a-1", "markdown-preview", ExtensionTypeUI)); err != nil {
@@ -213,6 +218,7 @@ func TestGetByAuthorName(t *testing.T) {
 }
 
 func TestListExtensions(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 	// Create extensions in reverse alphabetical order
 	for _, name := range []string{"zebra", "alpha", "beta"} {
@@ -239,6 +245,7 @@ func TestListExtensions(t *testing.T) {
 }
 
 func TestGetByType(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 	// Create LSP and UI extensions
 	for _, ext := range []*Extension{
@@ -269,6 +276,7 @@ func TestGetByType(t *testing.T) {
 }
 
 func TestUpdateExtension(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 	ext := makeTestExt("ext-1", "test-ext", ExtensionTypeLSP)
 	if err := es.Create(ext); err != nil {
@@ -299,6 +307,7 @@ func TestUpdateExtension(t *testing.T) {
 }
 
 func TestUpdateNotFound(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 	ext := makeTestExt("ext-1", "test-ext", ExtensionTypeLSP)
 	err := es.Update("nonexistent", ext)
@@ -308,6 +317,7 @@ func TestUpdateNotFound(t *testing.T) {
 }
 
 func TestDeleteExtension(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 	ext := makeTestExt("ext-1", "test-ext", ExtensionTypeLSP)
 	if err := es.Create(ext); err != nil {
@@ -330,6 +340,7 @@ func TestDeleteExtension(t *testing.T) {
 }
 
 func TestDeleteNotFound(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 	err := es.Delete("nonexistent")
 	if err == nil {
@@ -338,6 +349,7 @@ func TestDeleteNotFound(t *testing.T) {
 }
 
 func TestSetEnabled(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 	ext := makeTestExt("ext-1", "test-ext", ExtensionTypeLSP)
 	if err := es.Create(ext); err != nil {
@@ -364,6 +376,7 @@ func TestSetEnabled(t *testing.T) {
 }
 
 func TestSetEnabledNotFound(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 	err := es.SetEnabled("nonexistent", true)
 	if err == nil {
@@ -372,6 +385,7 @@ func TestSetEnabledNotFound(t *testing.T) {
 }
 
 func TestExtensionWithFullConfig(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 	ext := &Extension{
 		ID:      "full-ext",
@@ -465,6 +479,7 @@ func TestExtensionWithFullConfig(t *testing.T) {
 }
 
 func TestEmptyList(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 	extensions, err := es.List()
 	if err != nil {
@@ -476,6 +491,7 @@ func TestEmptyList(t *testing.T) {
 }
 
 func TestConcurrentAccess(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 	// Create multiple extensions concurrently. The WaitGroup is what makes the reads
 	// below meaningful: without it the test raced its own writers on a sleep.
@@ -511,6 +527,7 @@ func TestConcurrentAccess(t *testing.T) {
 }
 
 func TestTempDirCleanup(t *testing.T) {
+	t.Parallel()
 	// Verify that temp DB files are cleaned up
 	dir := t.TempDir()
 	db, err := store.NewStore(filepath.Join(dir, "test.db"))
@@ -531,6 +548,7 @@ func TestTempDirCleanup(t *testing.T) {
 }
 
 func TestStorageRoundTrip(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 	if _, err := es.StorageSet("ext1", "p:proj1", "tags", json.RawMessage(`["a","b"]`)); err != nil {
 		t.Fatalf("set: %v", err)
@@ -545,6 +563,7 @@ func TestStorageRoundTrip(t *testing.T) {
 }
 
 func TestStorageGetMissingReturnsNil(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 	entry, err := es.StorageGet("ext1", "p:proj1", "nope")
 	if err != nil {
@@ -556,6 +575,7 @@ func TestStorageGetMissingReturnsNil(t *testing.T) {
 }
 
 func TestStorageOverwrite(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 	es.StorageSet("ext1", "p:proj1", "k", json.RawMessage(`1`))
 	es.StorageSet("ext1", "p:proj1", "k", json.RawMessage(`2`))
@@ -566,6 +586,7 @@ func TestStorageOverwrite(t *testing.T) {
 }
 
 func TestStorageNamespacesAreIsolated(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 	es.StorageSet("ext1", "nsA", "k", json.RawMessage(`1`))
 	es.StorageSet("ext1", "nsB", "k", json.RawMessage(`2`))
@@ -585,6 +606,7 @@ func TestStorageNamespacesAreIsolated(t *testing.T) {
 }
 
 func TestStorageListWithPrefix(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 	es.StorageSet("ext1", "ns", "b", json.RawMessage(`1`))
 	es.StorageSet("ext1", "ns", "abc", json.RawMessage(`2`))
@@ -604,6 +626,7 @@ func TestStorageListWithPrefix(t *testing.T) {
 }
 
 func TestStorageDelete(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 	es.StorageSet("ext1", "ns", "k", json.RawMessage(`1`))
 	if err := es.StorageDelete("ext1", "ns", "k"); err != nil {
@@ -616,6 +639,7 @@ func TestStorageDelete(t *testing.T) {
 }
 
 func TestStorageRejectsInvalidJSON(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 	if _, err := es.StorageSet("ext1", "ns", "k", json.RawMessage(`not-json`)); err == nil {
 		t.Fatal("expected error for invalid JSON")
@@ -623,6 +647,7 @@ func TestStorageRejectsInvalidJSON(t *testing.T) {
 }
 
 func TestStorageRejectsOversizedValue(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 	big := json.RawMessage(`"` + strings.Repeat("a", maxExtensionValueBytes+1) + `"`)
 	if _, err := es.StorageSet("ext1", "ns", "k", big); err == nil {
@@ -631,6 +656,7 @@ func TestStorageRejectsOversizedValue(t *testing.T) {
 }
 
 func TestStorageDeleteAll(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 	es.StorageSet("ext1", "nsA", "k1", json.RawMessage(`1`))
 	es.StorageSet("ext1", "nsA", "k2", json.RawMessage(`2`))

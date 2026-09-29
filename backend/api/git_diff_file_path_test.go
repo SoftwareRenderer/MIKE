@@ -25,6 +25,7 @@ const secretMarker = "DO-NOT-LEAK-0d30f2"
 // shipping `key.pem -> ../../../home/user/.ssh/id_rsa` therefore read any file the
 // server user could open, and so did the same route through a symlinked directory.
 func TestProjectDiffFilePathContainment(t *testing.T) {
+	t.Parallel()
 	h, s, _, _ := newTestGitHandler(t)
 	projPath := t.TempDir()
 	initGitRepo(t, projPath)
@@ -119,6 +120,7 @@ func TestProjectDiffFilePathContainment(t *testing.T) {
 // file would be created, a link that resolves out, and a path that only escapes
 // after cleaning.
 func TestRepoFilePathJailsSymlinks(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	repo := filepath.Join(dir, "repo")
 	if err := os.MkdirAll(repo, 0o755); err != nil {

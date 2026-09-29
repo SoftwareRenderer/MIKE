@@ -113,6 +113,7 @@ func testService(t *testing.T, o Options) (*Service, *fakeFetcher, *fakeStore) {
 
 // An operator who never opted in must not pay for a request, and the refusal has to say who said no.
 func TestCheckRefusesWhileDisabled(t *testing.T) {
+	t.Parallel()
 	s, fetcher, store := testService(t, Options{})
 
 	_, err := s.Check(context.Background(), Settings{Enabled: false, Answered: true})
@@ -139,6 +140,7 @@ func TestCheckRefusesWhileDisabled(t *testing.T) {
 }
 
 func TestCheckRecordsWhatIsNewer(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name      string
 		current   string
@@ -158,6 +160,7 @@ func TestCheckRecordsWhatIsNewer(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			s, fetcher, store := testService(t, Options{Version: tc.current})
 			fetcher.body = manifestDoc(t, map[string]any{"latest": tc.latest})
 
@@ -201,6 +204,7 @@ func TestCheckRecordsWhatIsNewer(t *testing.T) {
 // A manifest with no archive for this machine is an answer about the release, not a fault: the dot stays
 // dark and the error stays empty, because there is nothing for a person to do.
 func TestCheckWithoutAnAssetForThisMachine(t *testing.T) {
+	t.Parallel()
 	s, fetcher, _ := testService(t, Options{Version: "1.4.0"})
 	fetcher.body = manifestDoc(t, map[string]any{
 		"latest": "1.4.2",
@@ -226,6 +230,7 @@ func TestCheckWithoutAnAssetForThisMachine(t *testing.T) {
 // A failed check must not dim the dot: a server that cannot reach the manifest today is still running
 // the release yesterday's answer said was old.
 func TestFailedCheckKeepsTheLastGoodAnswer(t *testing.T) {
+	t.Parallel()
 	s, fetcher, _ := testService(t, Options{Version: "1.4.0"})
 	if _, err := s.Check(context.Background(), Settings{Enabled: true}); err != nil {
 		t.Fatalf("first Check: %v", err)
@@ -265,6 +270,7 @@ func TestFailedCheckKeepsTheLastGoodAnswer(t *testing.T) {
 // The dot is answered from the stored row, so a restart does not blank the About tab and a page load
 // costs no request.
 func TestStateSurvivesARestart(t *testing.T) {
+	t.Parallel()
 	store := &fakeStore{}
 	dir := releaseDir(t)
 
@@ -290,11 +296,23 @@ func TestStateSurvivesARestart(t *testing.T) {
 	}
 }
 
+// captureLog points this process's log at a buffer for the duration of the test.
+//
+// It is the rule for why its callers stay serial: the sink is one destination for the whole process, so a
+// parallel sibling's lines arrive in this buffer, and two captures put the original back in whichever
+// order they finish.
+func captureLog(t *testing.T) *logging.SafeBuffer {
+	t.Helper()
+	buf, restore := logging.TestSink()
+	t.Cleanup(restore)
+	return buf
+}
+
 // The row is a cache, not a record: a value that no longer decodes is reported and dropped, and never
 // takes the boot down with it.
+// serial for the reason at captureLog.
 func TestAGarbledStoredResultIsReportedAndDropped(t *testing.T) {
-	buf, restore := logging.TestSink()
-	defer restore()
+	buf := captureLog(t)
 
 	store := &fakeStore{values: map[string]string{stateKey: "not json at all"}}
 	s, err := New(Options{Version: "1.4.0", Store: store, Fetcher: &fakeFetcher{}, InstallDir: releaseDir(t)})
@@ -310,9 +328,9 @@ func TestAGarbledStoredResultIsReportedAndDropped(t *testing.T) {
 }
 
 // A store that cannot be read is the same story: the answer is "nothing known yet", not a fault.
+// serial for the reason at captureLog.
 func TestAnUnreadableStoreIsNotFatal(t *testing.T) {
-	buf, restore := logging.TestSink()
-	defer restore()
+	buf := captureLog(t)
 
 	s, err := New(Options{Version: "1.4.0", Store: &fakeStore{fail: errors.New("database is locked")}, Fetcher: &fakeFetcher{}, InstallDir: releaseDir(t)})
 	if err != nil {
@@ -329,6 +347,7 @@ func TestAnUnreadableStoreIsNotFatal(t *testing.T) {
 // The day belongs to the install, not to whichever browser asked first: the first automatic pass of the
 // day fetches and every later one is answered from what that fetch learned. docs/auto-update.md.
 func TestAutomaticCheckRunsOncePerInstallDay(t *testing.T) {
+	t.Parallel()
 	s, fetcher, _ := testService(t, Options{})
 
 	for _, who := range []string{"first browser of the day", "second browser of the day"} {
@@ -348,7 +367,9 @@ func TestAutomaticCheckRunsOncePerInstallDay(t *testing.T) {
 // What spends the day, and what does not. The day is a bound on manifest requests, so only a pass that
 // made one — or a person's own check — may spend it.
 func TestWhatSpendsTheInstallDay(t *testing.T) {
+	t.Parallel()
 	t.Run("a manual check spends it, because it fetched", func(t *testing.T) {
+		t.Parallel()
 		s, fetcher, _ := testService(t, Options{})
 		if _, err := s.Check(context.Background(), Settings{Enabled: true, Answered: true}); err != nil {
 			t.Fatalf("manual check: %v", err)
@@ -362,6 +383,7 @@ func TestWhatSpendsTheInstallDay(t *testing.T) {
 	})
 
 	t.Run("a check that failed spent it", func(t *testing.T) {
+		t.Parallel()
 		fetcher := &fakeFetcher{getErr: errors.New("no route to host")}
 		s, _, _ := testService(t, Options{Fetcher: fetcher})
 		if _, err := s.CheckAutomatic(context.Background(), Settings{Enabled: true, Answered: true}); err == nil {
@@ -382,6 +404,7 @@ func TestWhatSpendsTheInstallDay(t *testing.T) {
 	})
 
 	t.Run("checks being off spends nothing", func(t *testing.T) {
+		t.Parallel()
 		s, fetcher, _ := testService(t, Options{})
 		if _, err := s.CheckAutomatic(context.Background(), Settings{Enabled: false, Answered: true}); err == nil {
 			t.Fatalf("the pass ran with the preference off")
@@ -395,6 +418,7 @@ func TestWhatSpendsTheInstallDay(t *testing.T) {
 	})
 
 	t.Run("the next UTC day asks again", func(t *testing.T) {
+		t.Parallel()
 		day := time.Date(2026, 9, 18, 23, 30, 0, 0, time.UTC)
 		s, fetcher, _ := testService(t, Options{Now: func() time.Time { return day }})
 		if _, err := s.CheckAutomatic(context.Background(), Settings{Enabled: true, Answered: true}); err != nil {
@@ -410,6 +434,7 @@ func TestWhatSpendsTheInstallDay(t *testing.T) {
 	})
 
 	t.Run("a stored instant that will not parse is not today", func(t *testing.T) {
+		t.Parallel()
 		store := &fakeStore{values: map[string]string{stateKey: `{"checked_at":"yesterday, probably"}`}}
 		s, fetcher, _ := testService(t, Options{Store: store})
 		if _, err := s.CheckAutomatic(context.Background(), Settings{Enabled: true, Answered: true}); err != nil {

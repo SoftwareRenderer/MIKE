@@ -37,6 +37,7 @@ func writeMappings(t *testing.T, extDir, author, name, file, content string) {
 }
 
 func TestInferExtensionTypeLLM(t *testing.T) {
+	t.Parallel()
 	if got := inferExtensionType(&Capabilities{LLM: &LLMConfig{}}); got != ExtensionTypeLLM {
 		t.Errorf("inferExtensionType(llm) = %q, want %q", got, ExtensionTypeLLM)
 	}
@@ -47,6 +48,7 @@ func TestInferExtensionTypeLLM(t *testing.T) {
 }
 
 func TestCollectLLMMappings(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 	extDir := t.TempDir()
 
@@ -94,6 +96,7 @@ func TestCollectLLMMappings(t *testing.T) {
 }
 
 func TestCollectLLMMappingsNoneInstalled(t *testing.T) {
+	t.Parallel()
 	es := testStore(t)
 	ms, err := CollectLLMMappings(es, t.TempDir())
 	if err != nil {
@@ -105,6 +108,7 @@ func TestCollectLLMMappingsNoneInstalled(t *testing.T) {
 }
 
 func TestMappingsFilePath(t *testing.T) {
+	t.Parallel()
 	dir := "/tmp/exts"
 	cases := []struct {
 		author, name, file string
@@ -130,6 +134,7 @@ func TestMappingsFilePath(t *testing.T) {
 // layout (extensions/<name>) when only that directory exists, and to the
 // namespaced layout when that one exists.
 func TestMappingsFilePathFlatLayout(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	// Only flat exists.
 	if err := os.MkdirAll(filepath.Join(root, "myext"), 0o755); err != nil {

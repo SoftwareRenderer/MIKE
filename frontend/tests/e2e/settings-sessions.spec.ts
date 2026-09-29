@@ -8,7 +8,7 @@ import { test, expect, type Page } from '@playwright/test';
 // the list; revoking the CURRENT row runs the modal's existing sign-out path and
 // lands back on the login screen.
 //
-// Runs in the `isolated` project (settings UI + it mutates server session state).
+// Runs on a lane server (`ISOLATED_SPECS`) (settings UI + it mutates server session state).
 //
 // Session hygiene — the storage-state session other isolated specs rely on must
 // survive this spec:
