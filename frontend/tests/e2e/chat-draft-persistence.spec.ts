@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { getProjectId, createTaskViaApi, navigateToTask, ensureTaskStarted, waitForChatFormReady, isolatedProject, gotoProject } from './helpers';
+import { getProjectId, createTaskViaApi, navigateToTask, ensureTaskStarted, waitForChatFormReady, isolatedProject, gotoProject, waitForStored, waitForSendButtonGraceful } from './helpers';
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
 isolatedProject();
@@ -141,8 +141,8 @@ test.describe('Chat draft text persistence', () => {
     await textarea.click();
     await textarea.fill(testMessage);
     await expect(textarea).toHaveValue(testMessage);
-    // Wait for debounced save to IndexedDB (100ms debounce + DB write time)
-    await page.waitForTimeout(500);
+    // The debounced write to the `drafts` store is the state the next step acts on, and it is readable.
+    await waitForStored<string>(page, 'drafts', taskId, (v) => v === testMessage);
 
     // Send via the send button — draft is cleared synchronously by onClearDraft
     await page.locator('.btn-send').click();
@@ -153,7 +153,9 @@ test.describe('Chat draft text persistence', () => {
     await page.evaluate(async ({ pid, tid }) => {
       await fetch(`/api/projects/${pid}/tasks/${tid}/stop`, { method: 'POST' });
     }, { pid: projectId, tid: taskId }).catch(() => {});
-    await page.waitForTimeout(1000);
+    // The stop has to have reached this chat before the reload, or the reload resumes the turn it is
+    // meant to be checking the aftermath of. Idle is the app-visible form of that.
+    await waitForSendButtonGraceful(page, 30000);
 
     // Reload and verify draft stays cleared
     await page.reload();

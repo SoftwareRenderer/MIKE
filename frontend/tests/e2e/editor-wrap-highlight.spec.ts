@@ -2,7 +2,7 @@ import { test, expect, type Browser } from '@playwright/test';
 import { writeFileSync, rmSync, mkdirSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'path';
-import { csrfFetch } from './helpers';
+import { csrfFetch, waitForStable } from './helpers';
 
 // Repro for: word wrap interferes with syntax highlighting — while scrolling a
 // wrapped file, an unhighlighted (faded, low-contrast) line sits over the
@@ -245,8 +245,14 @@ test.describe.serial('Editor word wrap + syntax highlighting', () => {
     await expect(page.locator('.cm-editor')).toBeVisible({ timeout: 15000 });
     // Baseline: highlighting must work at the top of the file.
     await waitForHighlight(page);
-    // Let symbol extraction dispatch section headers (sticky scroll input).
-    await page.waitForTimeout(1500);
+    // Symbol extraction lands the section headers the sticky overlay renders. Wait for that overlay to
+    // stop changing rather than for a beat to pass: scrolling now measures the laid-out editor.
+    await waitForStable(async () => page.evaluate(() => {
+      const overlay = document.querySelector('.cm-sticky-scroll');
+      if (!overlay) return 'missing';
+      const box = overlay.getBoundingClientRect();
+      return `${overlay.querySelectorAll('.cm-sticky-scroll-row').length}|${Math.round(box.height)}|${overlay.textContent?.length ?? 0}`;
+    }), { what: 'the sticky section-header overlay', timeout: 10_000 });
   });
 
   test.afterEach(async ({}) => {

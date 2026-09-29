@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { execSync } from 'child_process';
-import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch } from './helpers';
+import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch, waitForStable } from './helpers';
 
 // ============================================================
 // TASK VIEW COLUMN NAVIGATION (Board / Chat / Diff)
@@ -45,17 +45,9 @@ let state: { projectId: string; taskId: string } | null = null;
 /** Wait until the diff file list is non-empty and stable — the 2s worktree
  *  watcher can re-fetch the manifest, clearing the list mid-test otherwise. */
 async function waitForStableHeaders(page: Page): Promise<string> {
-    const paths = () => page.evaluate(() =>
+    return waitForStable(() => page.evaluate(() =>
         Array.from(document.querySelectorAll('.column-diff button.diff-file-header .diff-file-path')).map(el => el.textContent ?? '').join('|'),
-    );
-    let prev = '';
-    for (let i = 0; i < 30; i++) {
-        const cur = await paths();
-        if (cur && cur === prev) return cur;
-        prev = cur;
-        await page.waitForTimeout(1000);
-    }
-    throw new Error('diff file list never stabilized');
+    ), { what: 'the diff file list', until: (paths) => paths !== '', timeout: 30_000 });
 }
 
 /** Full fixture: in-progress task with a worktree containing two files. */
@@ -247,16 +239,9 @@ test.describe.serial('Task view column navigation', () => {
         // against a height it has not re-measured yet. Down goes down, Up comes back.
         // Settle before zeroing too: if the list auto-scrolls while we measure, the reset loses
         // and scrollTop never reads 0 — which looks like "the chat will not scroll".
-        const settledScrollTop = async () => {
-            let prev = -1;
-            for (let i = 0; i < 25; i++) {
-                const now = await scrollTop();
-                if (now === prev) return now;
-                prev = now;
-                await page.waitForTimeout(200);
-            }
-            return prev;
-        };
+        const settledScrollTop = () => waitForStable(scrollTop, {
+            what: 'the column chat scroller', intervalMs: 100, timeout: 5_000,
+        });
         await settledScrollTop();
         await page.evaluate(() => (document.querySelector('.column-chat .chat-messages') as HTMLElement).focus());
         await page.evaluate(() => {
@@ -286,8 +271,10 @@ test.describe.serial('Task view column navigation', () => {
         await input.focus();
         const inputTop = await settledScrollTop();
         await page.keyboard.press('ArrowDown');
-        await page.waitForTimeout(400);
-        expect(await scrollTop(), 'arrows edit text in the input, they do not scroll the chat').toBe(inputTop);
+        // The list is only quiet once it has stopped moving on its own; a position read mid-settle
+        // drifts and reads as the key having scrolled it.
+        const afterTop = await settledScrollTop();
+        expect(afterTop, 'arrows edit text in the input, they do not scroll the chat').toBe(inputTop);
     });
 
     test('Alt+ArrowRight does not switch columns (modifier gate)', async ({ page }) => {

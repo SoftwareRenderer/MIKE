@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import {
   createTaskViaApi, navigateToTask, waitForChatForm, waitForTaskState,
-  isolatedProject, csrfFetch, getProjectId, gotoProject,
+  isolatedProject, csrfFetch, getProjectId, gotoProject, waitForSendButton, waitForReaction,
 } from './helpers';
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
@@ -43,8 +43,10 @@ test.describe('Stop and the tool card', () => {
     await waitForTaskState(page, projectId, taskId, (t) => t?.execution_state === 'paused');
 
     await expect(page.locator(PENDING), 'a stopped turn cannot answer its tool call').toHaveCount(0);
-    // And it does not come back when the abandoned turn's replay buffer is consulted.
-    await page.waitForTimeout(2000);
+    // Idle first (the stop's frames have all been delivered), then the app's own frames: a card the
+    // abandoned turn's replay re-adds appears in one of them.
+    await waitForSendButton(page);
+    await waitForReaction(page, 10);
     await expect(page.locator(PENDING)).toHaveCount(0);
   });
 
@@ -63,7 +65,8 @@ test.describe('Stop and the tool card', () => {
     const taskId = await startStreamingToolCall(page, projectId, 'live');
 
     // The other half of the rule: an unanswered call on a task that IS in flight is live work.
-    await page.waitForTimeout(1500);
+    await expect(page.locator(PENDING)).toHaveCount(1);
+    await waitForReaction(page); // and it keeps it: a later frame does not file the live call away
     await expect(page.locator(PENDING)).toHaveCount(1);
     await expect(page.locator('.tool-call-card').first()).toContainText('Execute');
 
