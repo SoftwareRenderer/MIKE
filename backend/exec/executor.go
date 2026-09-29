@@ -71,6 +71,7 @@ type TaskExecutor struct {
 	commitQueue   *CommitQueue
 	gate          *ConcurrencyGate // per-LLM-request in-flight limit (incl. utility calls)
 	taskGate      *ConcurrencyGate // per-provider running-task limit
+	taskSlotWaits queuedWaiters    // which task-slot queue entry each task is blocked behind; see queuedWaiters
 	memGate       *MemoryGate      // sandbox memory budget gate; capacity 0 = disabled
 	taskMu        sync.Mutex
 	llmAdapter    *llmadapter.Adapter // provider request adaptation (llm extensions); nil = none

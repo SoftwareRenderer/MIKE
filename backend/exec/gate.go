@@ -237,6 +237,24 @@ func (g *ConcurrencyGate) Release(providerURL string) {
 	}
 }
 
+// Promote moves a queued waiter to the front of the queue, so the next freed slot goes to it ahead of the
+// waiters already queued. It returns false when the entry is no longer queued: it was granted, it gave
+// up, or it was handed a slot and is waiting out the rate window — in every case the reorder would decide
+// nothing.
+//
+// The waiter is not woken. It re-reads the gate on its own backoff, and entry.done is closed by its
+// cancellation path, which a wake here would race with.
+func (g *ConcurrencyGate) Promote(entry *queueEntry) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	i := g.queue.index(entry)
+	if i == -1 {
+		return false
+	}
+	g.queue.moveToFront(i)
+	return true
+}
+
 // countAheadLocked returns the waiters ahead of currentEntry (nil = any) and whether it is queued.
 // Caller holds g.mu.
 func (g *ConcurrencyGate) countAheadLocked(providerURL string, currentEntry *queueEntry) (ahead int, found bool) {

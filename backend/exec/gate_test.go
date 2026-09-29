@@ -909,3 +909,201 @@ func TestConcurrencyGate_CapacitySurvivesCancelChurn(t *testing.T) {
 		}
 	}
 }
+
+// waitEntry hands back the queue entry a blocked waiter announced, or fails the test.
+func waitEntry(t *testing.T, enqueued chan *queueEntry) *queueEntry {
+	t.Helper()
+	select {
+	case e := <-enqueued:
+		return e
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the waiter to enqueue")
+		return nil
+	}
+}
+
+// queueWaiter starts a blocked Acquire on a provider whose only slot is held. It returns the channel the
+// waiter's entry arrives on, and the channel it names itself on once it holds the slot. A caller that
+// cares which order two waiters queued in starts them one at a time and waits for each entry.
+func queueWaiter(g *ConcurrencyGate, url, name string) (enqueued chan *queueEntry, served chan string) {
+	enqueued = make(chan *queueEntry, 1)
+	served = make(chan string, 1)
+	go func() {
+		if _, err := g.Acquire(context.Background(), url, 1, 0, func(e *queueEntry) { enqueued <- e }); err != nil {
+			return
+		}
+		served <- name
+	}()
+	return enqueued, served
+}
+
+func TestPromote_ServesThePromotedWaiterNext(t *testing.T) {
+	t.Parallel()
+	g := NewConcurrencyGate()
+	const url = "http://p"
+
+	g.Acquire(context.Background(), url, 1, 0, nil) // the only slot
+
+	// The claim is about the order the two started waiting in, so the second waiter is not started until
+	// the first is already queued.
+	queueA, servedA := queueWaiter(g, url, "a")
+	entryA := waitEntry(t, queueA)
+	queueB, servedB := queueWaiter(g, url, "b")
+	entryB := waitEntry(t, queueB)
+
+	if pos := g.Position(url, entryB); pos != 2 {
+		t.Fatalf("b should start behind a at position 2, got %d", pos)
+	}
+	if !g.Promote(entryB) {
+		t.Fatal("Promote said a queued waiter was not queued")
+	}
+	if pos := g.Position(url, entryB); pos != 1 {
+		t.Fatalf("a promoted waiter should read position 1, got %d", pos)
+	}
+	if pos := g.Position(url, entryA); pos != 2 {
+		t.Fatalf("promotion should push a back to position 2, got %d", pos)
+	}
+
+	g.Release(url) // the holder gives the slot up
+
+	var order []string
+	for len(order) < 2 {
+		select {
+		case n := <-servedA:
+			order = append(order, n)
+			g.Release(url)
+		case n := <-servedB:
+			order = append(order, n)
+			g.Release(url)
+		case <-time.After(2 * time.Second):
+			t.Fatalf("waiters never finished, served %v", order)
+		}
+	}
+	if order[0] != "b" || order[1] != "a" {
+		t.Fatalf("promotion did not reorder the queue: served %v, want [b a]", order)
+	}
+}
+
+func TestPromote_AnswersFalseForAWaiterNoLongerQueued(t *testing.T) {
+	t.Parallel()
+	g := NewConcurrencyGate()
+	const url = "http://p"
+
+	if g.Promote(nil) {
+		t.Error("Promote(nil) claimed a promotion")
+	}
+
+	// Granted: the entry left the queue together with the slot it was handed.
+	g.Acquire(context.Background(), url, 1, 0, nil)
+	enqueued, served := queueWaiter(g, url, "granted")
+	grantedEntry := waitEntry(t, enqueued)
+	g.Release(url)
+	select {
+	case <-served:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the waiter never got the slot")
+	}
+	if g.Promote(grantedEntry) {
+		t.Error("a waiter that already holds its slot is not queued — promoting it decides nothing")
+	}
+
+	// Given up: a cancelled waiter is out of the queue.
+	cancelCtx, cancel := context.WithCancel(context.Background())
+	cancelled := make(chan *queueEntry, 1)
+	returned := make(chan struct{})
+	go func() {
+		_, _ = g.Acquire(cancelCtx, url, 1, 0, func(e *queueEntry) { cancelled <- e })
+		close(returned)
+	}()
+	cancelledEntry := waitEntry(t, cancelled)
+	cancel()
+	select {
+	case <-returned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the cancelled waiter never returned")
+	}
+	if g.Promote(cancelledEntry) {
+		t.Error("a cancelled waiter is not queued")
+	}
+
+	g.Release(url) // the slot the granted waiter holds
+}
+
+func TestPromote_DoesNotJumpAnotherProviderWaiter(t *testing.T) {
+	t.Parallel()
+	g := NewConcurrencyGate()
+	const urlA, urlB = "http://a", "http://b"
+
+	g.Acquire(context.Background(), urlA, 1, 0, nil)
+	g.Acquire(context.Background(), urlB, 1, 0, nil)
+
+	queueA, servedA := queueWaiter(g, urlA, "a")
+	queueB, servedB := queueWaiter(g, urlB, "b")
+	waitEntry(t, queueA)
+	entryB := waitEntry(t, queueB)
+
+	if !g.Promote(entryB) {
+		t.Fatal("Promote said a queued waiter was not queued")
+	}
+
+	g.Release(urlA)
+	select {
+	case <-servedA:
+	case <-time.After(2 * time.Second):
+		t.Fatal("provider a's waiter was passed by a promotion on provider b")
+	}
+	select {
+	case <-servedB:
+		t.Fatal("provider b's waiter was served while b's slot was still held")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	g.Release(urlB)
+	select {
+	case <-servedB:
+	case <-time.After(2 * time.Second):
+		t.Fatal("provider b's waiter never got its own provider's slot")
+	}
+}
+
+// The bump belongs to one queue entry, not to whoever queued it: a waiter behind the promoted pair stays
+// behind both of them, which is what makes a second wait by the same caller an ordinary one.
+func TestPromote_LeavesLaterWaitersBehind(t *testing.T) {
+	t.Parallel()
+	g := NewConcurrencyGate()
+	const url = "http://p"
+
+	g.Acquire(context.Background(), url, 1, 0, nil)
+
+	queueA, servedA := queueWaiter(g, url, "a")
+	entryA := waitEntry(t, queueA)
+	queueB, servedB := queueWaiter(g, url, "b")
+	entryB := waitEntry(t, queueB)
+	if !g.Promote(entryB) {
+		t.Fatal("Promote said a queued waiter was not queued")
+	}
+
+	queueC, servedC := queueWaiter(g, url, "c")
+	entryC := waitEntry(t, queueC)
+
+	for _, want := range []struct {
+		who string
+		e   *queueEntry
+		pos int
+	}{{"b", entryB, 1}, {"a", entryA, 2}, {"c", entryC, 3}} {
+		if got := g.Position(url, want.e); got != want.pos {
+			t.Errorf("%s reads position %d, want %d", want.who, got, want.pos)
+		}
+	}
+
+	for range 3 {
+		g.Release(url)
+		select {
+		case <-servedA:
+		case <-servedB:
+		case <-servedC:
+		case <-time.After(2 * time.Second):
+			t.Fatal("a waiter never got its slot")
+		}
+	}
+}
