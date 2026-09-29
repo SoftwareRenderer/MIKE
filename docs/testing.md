@@ -23,7 +23,7 @@ only under load.
 - **Config-modifying tests** (settings, models, shortcuts, mode select, …) must run in the `isolated`
   project — add the spec name to `ISOLATED_SPECS` in `frontend/playwright.config.ts` (one array; the
   chromium lane's `testMatch` is derived from it, so the two lanes cannot drift apart).
-- **The harness serves `frontend/dist` from disk** — its server is `go run .`, a development build — and
+- **The harness serves `frontend/dist` from disk** — its server is a development build, and
   `global-setup` never builds it. So an e2e run proves what the last `npm run build` contained, never what
   is in `src/`, and a frontend change nobody built reads as green either way. Build before the run, then
   make it prove it bites: revert the changed file, rebuild, and watch the spec fail before believing the
@@ -323,7 +323,7 @@ For request-pattern/race investigation, write standalone Playwright scripts in `
 ## Test environment
 
 Two dedicated test servers with isolated databases plus one shared mock LLM, fully managed by
-`frontend/tests/global-setup.ts` (torn down and rebuilt each run):
+`frontend/tests/global-setup.ts` (the servers are rebuilt each run, the fixture artifacts are cached):
 
 | Server | Port | Data dir | Purpose |
 |--------|------|----------|---------|
@@ -344,9 +344,33 @@ is what removes it: **deleting an extension deletes its directory**. So setup se
 Otherwise the run after an uninstall reports
 `install-local failed (404): <name> not in local extensions list`, which reads as a code regression.
 
-Test servers are spawned via `go run .` and **inherit your shell environment** — export
-`MIKE_ENCRYPTION_KEY` before running e2e, or global-setup fails with "Server on port 3000 did not start
-within 15000ms".
+**One binary, two servers.** Setup runs `go build -trimpath -o /tmp/kanban-test-bin/mike .` once and
+spawns that binary for both lanes: one compile per run, not one per server. It is a development build,
+never `-tags release`, and each lane passes `--frontend-dist <repo>/frontend/dist`. That flag is the
+difference between serving the disk copy by intent and by cwd — a release build refuses it and dies at
+boot (`AGENTS.md → Workflow`). Each lane writes its own output to `/tmp/kanban-test-lane-<name>.log` (the
+mock LLM's to `/tmp/kanban-test-mock-llm.log`), truncated at each spawn, and the startup line there is the
+proof: `serving the frontend from: <repo>/frontend/dist`. That file is also the whole diagnosis when a lane
+never answers — a port that stays dark means the process exited, and its reason is nowhere else. `go build`
+runs every run because its own cache is the content key, and a lane on a stale binary would report green
+about code that never ran.
+
+**Both lanes boot together.** The two servers and the mock LLM are spawned back to back and awaited
+concurrently, then each lane's own seed work (login → config → project → two tasks) runs in parallel with
+the other's. The mock LLM is up before either lane creates a task, because title-gen dials the provider
+immediately.
+
+**The fixtures are cached on a content hash.** A marker file beside each cached artifact
+(`<artifact>.sha`) holds the hash of the source it was built from — for the two fixture repos, the i18n
+pack repo and the generated registry index. The marker counts only while the artifact still works. For
+the pack repo that means `git rev-parse HEAD` answers a 40-hex id *and* `git cat-file -e` resolves it,
+because a git-pinned install is resolved by commit. A moved source, a missing artifact or
+`MIKE_E2E_REBUILD=1` rebuilds it; nothing reads an mtime. The repo cache holds a pristine *template*
+(`/tmp/kanban-test-repo.tpl`), and the lane's repo is a fresh copy of it every run — the copy is where
+specs commit and leave worktree metadata.
+
+Test servers are spawned with **your shell environment** inherited — export `MIKE_ENCRYPTION_KEY` before
+running e2e, or global-setup fails with "Server on port 3000 did not start within 15000ms".
 
 They also start with `MIKE_DISABLE_UPDATES=1`, so no run is ever a browser that owes the release opt-in.
 The boot pass would ask the question of every fresh context, and a yes there means an outbound check to
@@ -359,17 +383,37 @@ the manifest host. `disabled` is the posture the client stops on — no dot, no 
 `globalTeardown` is `tests/global-teardown.ts`, whose default export is *only* teardown — naming
 `global-setup.ts` there re-runs setup at the end of every run and leaves a server pair, lock and database
 nothing will stop. Verify after any change to setup/teardown: `pgrep -xc mike` → 0, nothing listening on
-3000/3001/9999, no `/tmp/kanban-test-data*`. Teardown stops servers by **identity** (`--data-dir <dir>`):
-they are `setsid go run .` grandchildren, so the port owner is not the process that should stop, and
-`lsof -ti:PORT` also answers with clients.
+3000/3001/9999, no `/tmp/kanban-test-data*`.
 
-If a prior run was interrupted, clean stale state first (stale processes hold the ports — symptom
+Each lane server is spawned detached and directly, and its PID is written to
+`/tmp/kanban-test-lane-<name>.pid` (the mock LLM's to `/tmp/kanban-test-mock-llm.pid`); a `setsid`
+wrapper would leave the harness holding the wrapper's PID, not the server's. Teardown stops a lane by
+**identity**: the PID file, plus a `/proc` argv sweep matching `--data-dir <dir>` token-for-token. A PID
+read from a file counts only while its `/proc/<pid>/cmdline` still carries that pair, since PIDs get reused.
+Token equality is what keeps `/tmp/kanban-test-data` from answering for `/tmp/kanban-test-data-isolated`.
+SIGTERM, then wait for the PID to disappear — 18 s, because `server.ShutdownTimeout` is 15 s and a server
+shutting down politely is worth waiting out — then SIGKILL. The port is never the identity:
+`lsof -ti:PORT` answers with clients too, so the port check runs *after* the identity stop, to report and
+take back a port a foreign process (a `make run` dev server, a straggler) still holds.
+
+The data dirs are then removed with `fs.rmSync` retried on `ENOTEMPTY`/`EBUSY` for ~5 s. That retry is
+what the `lsof +D <dir>` poll it replaced was standing in for, and the poll walked the whole open-file
+table each time. `make stop` is not involved: `pkill -x mike` would take a developer's own server down
+with the lane's.
+
+What a clean run deliberately leaves in `/tmp` is the cache and the boot logs: `kanban-test-bin/`, the two
+repo templates and their `.sha` markers, `kanban-test-i18n-pack-repo{,.sha}`, `kanban-test-registry.json{,.sha}`
+and `/tmp/kanban-test-lane-*.log`. The cache is keyed on content, so a stale one rebuilds; `rm -rf` them to
+start from nothing. The logs are overwritten by the next spawn and survive a failed run on purpose.
+
+If a prior run was interrupted, the next run's stale-state cleanup stops the lane by identity and removes
+its data dirs on its own. To do it by hand (stale processes hold the ports — symptom
 `ERR_CONNECTION_REFUSED`, or a stale TLS server answering a `--no-tls` test — and a stale lock makes
 global-setup run teardown instead of setup):
 
 ```bash
 lsof -ti:3000,3001,9999 | xargs kill 2>/dev/null
-rm -f /tmp/kanban-test-setup.lock
+rm -f /tmp/kanban-test-setup.lock /tmp/kanban-test-lane-*.pid /tmp/kanban-test-mock-llm.pid
 rm -rf /tmp/kanban-test-data /tmp/kanban-test-data-isolated /tmp/kanban-test-worktrees
 ```
 
@@ -451,6 +495,12 @@ rm -rf /tmp/kanban-test-data /tmp/kanban-test-data-isolated /tmp/kanban-test-wor
   files: 329 tests in 8 s, against 3227 in 36 s for the suite.
 - `npx playwright test --last-failed` re-runs the previous run's failures, `--only-changed` the files git
   says moved. Neither is a gate: `make check` and a full e2e run stay the claims.
+- `make test-time` runs the full e2e suite and splits its wall clock into `setup=… tests=… teardown=…`,
+  plus the slowest spec files. Playwright's own summary prints one number for the tests, and the lane's
+  fixed cost — the binary build, the fixture cache, two servers, two databases — happens outside it, so a
+  harness change is invisible there. The split is read off the lines the harness already prints
+  (`Running N tests using W workers`, `[teardown] ENTRY`) and the `json` reporter's per-spec durations;
+  nothing in `global-setup.ts` is instrumented to be measured. `scripts/e2e-time.py`.
 
 ### Memory in a test
 
