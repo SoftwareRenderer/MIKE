@@ -46,7 +46,6 @@ func readWindow(t *testing.T, s *Server, path string) ([]types.TaskMessage, http
 }
 
 func TestMessagesRouteAnswersTheNewestWindow(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Windowed")
@@ -86,7 +85,6 @@ func TestMessagesRouteAnswersTheNewestWindow(t *testing.T) {
 
 // A thread shorter than the window is answered whole, and says there is nothing older.
 func TestMessagesRouteAnswersAShortThreadWhole(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Whole")
@@ -110,7 +108,6 @@ func TestMessagesRouteAnswersAShortThreadWhole(t *testing.T) {
 }
 
 func TestMessagesRoutePagesByCursor(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Paged")
@@ -171,7 +168,6 @@ func TestMessagesRoutePagesByCursor(t *testing.T) {
 }
 
 func TestMessagesRouteRefusesABadWindowRequest(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Refused")
@@ -191,7 +187,6 @@ func TestMessagesRouteRefusesABadWindowRequest(t *testing.T) {
 
 // A window stays a window: the rows beyond it are not sent, and the rows it does send are whole answers.
 func TestMessagesWindowHoldsOnlyItsWindow(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Bounded")
@@ -205,7 +200,6 @@ func TestMessagesWindowHoldsOnlyItsWindow(t *testing.T) {
 
 // The redaction pass runs over the window, and what it sends is still redacted.
 func TestMessagesWindowStillRedacts(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Redacted")
@@ -236,7 +230,6 @@ func TestMessagesWindowStillRedacts(t *testing.T) {
 // Opening the same task twice asks the same question, so the second answer is a 304 with no body. The
 // handler owns the lifetime and CompressMiddleware owns the digest, so this route sets no ETag of its own.
 func TestMessagesWindowIsStoredThenRevalidated(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Revalidated")
@@ -300,7 +293,6 @@ func TestMessagesWindowIsStoredThenRevalidated(t *testing.T) {
 
 // A floor bounds an older page, so the route refuses it without `before`.
 func TestMessagesRouteRefusesAFloorAloneOrUnissued(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Floored")

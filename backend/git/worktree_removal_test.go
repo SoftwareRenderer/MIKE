@@ -9,7 +9,6 @@ import (
 )
 
 func TestRemoveWorktreeClearsDirectoryRegistrationAndBranch(t *testing.T) {
-	t.Parallel()
 	repoDir, taskID, _, _, wm := setupTestRepo(t)
 	branch := "task/" + taskID
 	wtPath, _, err := wm.CreateWorktree("test-project", taskID, branch, "")
@@ -39,7 +38,6 @@ func TestRemoveWorktreeClearsDirectoryRegistrationAndBranch(t *testing.T) {
 }
 
 func TestPruneOrphanedBranchesSweepsBranchHeldByStaleRegistration(t *testing.T) {
-	t.Parallel()
 	repoDir, taskID, s, _, wm := setupTestRepo(t)
 	branch := "task/" + taskID
 	wtPath, _, err := wm.CreateWorktree("test-project", taskID, branch, "")
@@ -73,7 +71,6 @@ func TestPruneOrphanedBranchesSweepsBranchHeldByStaleRegistration(t *testing.T) 
 }
 
 func TestPruneOrphanedBranchesKeepsBranchOfLiveTask(t *testing.T) {
-	t.Parallel()
 	repoDir, taskID, _, _, wm := setupTestRepo(t)
 	branch := "task/" + taskID
 	if _, _, err := wm.CreateWorktree("test-project", taskID, branch, ""); err != nil {

@@ -13,9 +13,6 @@ import (
 
 // allowLoopbackProxy lets one test proxy to an httptest server, which listens on the loopback
 // address production refuses. The egress rule must not be exercised through it.
-//
-// It is also the rule for why its callers stay serial: egressCall is one package-level variable, so
-// two tests that swap it at once each end up running the other one's dial policy.
 func allowLoopbackProxy(t *testing.T) {
 	t.Helper()
 	prev := egressCall
@@ -28,7 +25,6 @@ func allowLoopbackProxy(t *testing.T) {
 // TestExtensionProxyRefusesLoopbackTarget (security): a name on a manifest allowlist can
 // resolve to this host, and the proxy dials from the host.
 func TestExtensionProxyRefusesLoopbackTarget(t *testing.T) {
-	t.Parallel()
 	var reached bool
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reached = true
@@ -55,7 +51,6 @@ func TestExtensionProxyRefusesLoopbackTarget(t *testing.T) {
 
 // TestExtensionProxyAllowsLoopbackWhenPolicyIsLifted is the control: the refusal is the dial
 // policy, not a broken test.
-// serial for the reason at allowLoopbackProxy.
 func TestExtensionProxyAllowsLoopbackWhenPolicyIsLifted(t *testing.T) {
 	allowLoopbackProxy(t)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -9,7 +9,6 @@ import (
 
 // TestHasGitDir pins the cheap check used for per-directory listing badges.
 func TestHasGitDir(t *testing.T) {
-	t.Parallel()
 	base := t.TempDir()
 
 	plain := filepath.Join(base, "plain")
@@ -59,7 +58,6 @@ func TestHasGitDir(t *testing.T) {
 // not. A caller that needs the walk-up answer asks IsGitRepo once for the
 // directory it is listing, and then knows every entry inside is in that repo.
 func TestHasGitDirNarrowerThanIsGitRepo(t *testing.T) {
-	t.Parallel()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}

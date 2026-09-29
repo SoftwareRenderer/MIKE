@@ -120,6 +120,7 @@ test.describe('Sidebar persistence', () => {
 
         // Collapse the sidebar
         await toggleBtn.click();
+        await page.waitForTimeout(200); // Wait for class update
         await expect(page.locator('#sidebar')).toHaveClass(/collapsed/);
 
         await page.reload();
@@ -130,6 +131,7 @@ test.describe('Sidebar persistence', () => {
 
         // Expand the sidebar
         await toggleBtn.click();
+        await page.waitForTimeout(200); // Wait for class update
         await expect(page.locator('#sidebar')).not.toHaveClass(/collapsed/);
 
         // Reload again

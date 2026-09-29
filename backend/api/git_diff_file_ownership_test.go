@@ -9,7 +9,6 @@ import (
 )
 
 func TestHandleTaskDiffFileRefusesAnotherProjectsTask(t *testing.T) {
-	t.Parallel()
 	h, mux, _ := taskDiffFileFixture(t, "diffown-b", "diffown-task")
 	cacheOneUntracked(h, "diffown-task", "notes.txt")
 

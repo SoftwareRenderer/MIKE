@@ -75,7 +75,7 @@ test.describe('Column Ordering by Last Move', () => {
     // moved_at has second precision, so pause between moves. Polling for a change instead
     // would never resolve: moving a task into its current column is a no-op.
     for (let i = 0; i < ids.length; i++) {
-      if (i > 0) await page.waitForTimeout(1100); // moved_at has second precision: three moves need three distinct seconds
+      if (i > 0) await page.waitForTimeout(1100);
       await csrfFetch(page, `/api/projects/${projectId}/tasks/${ids[i]}/move`, {
         method: 'POST',
         body: { status: 'review' },

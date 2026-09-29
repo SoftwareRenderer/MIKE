@@ -189,7 +189,6 @@ func (f *taskDiffFixture) compare(t *testing.T, base, head string) string {
 // The panel lists files from the working-tree manifest, then fetches rows by path; a comparison opened in
 // between must not change what that fetch answers.
 func TestTaskDiffFileRowsSurviveACommitComparison(t *testing.T) {
-	t.Parallel()
 	f := newTaskDiffFixture(t, "rows", "main")
 	tip := f.commitInWorktree(t, "a.txt", "COMMITTED-BY-TASK\n", "task commit")
 	f.write(t, f.wtPath, "a.txt", "COMMITTED-BY-TASK\nWORKTREE-ONLY\n")
@@ -212,7 +211,6 @@ func TestTaskDiffFileRowsSurviveACommitComparison(t *testing.T) {
 
 // A different baseline here would show commits the task did not make, since its recorded BaseRef has moved.
 func TestTaskDiffExpandKeepsTheTaskBaseline(t *testing.T) {
-	t.Parallel()
 	f := movedBranchFixture(t, "expand")
 
 	before := f.file(t, "big.txt", "")
@@ -232,7 +230,6 @@ func TestTaskDiffExpandKeepsTheTaskBaseline(t *testing.T) {
 
 // A client that learned its file list from the broadcast manifest must be able to fetch rows from the REST one.
 func TestTaskDiffBroadcastManifestMatchesThePanelManifest(t *testing.T) {
-	t.Parallel()
 	f := movedBranchFixture(t, "broadcast")
 
 	rest := f.manifest(t)

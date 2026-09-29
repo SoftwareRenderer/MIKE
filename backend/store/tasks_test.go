@@ -11,7 +11,6 @@ import (
 )
 
 func TestCreateAndGetTask(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -33,7 +32,6 @@ func TestCreateAndGetTask(t *testing.T) {
 }
 
 func TestTaskAutostartedPersistence(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-autostart", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -82,7 +80,6 @@ func TestTaskAutostartedPersistence(t *testing.T) {
 }
 
 func TestGetTaskNotFound(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	_, err := s.GetTask("proj-1", "task-1")
 	if err == nil {
@@ -91,7 +88,6 @@ func TestGetTaskNotFound(t *testing.T) {
 }
 
 func TestGetTaskByID(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -113,7 +109,6 @@ func TestGetTaskByID(t *testing.T) {
 }
 
 func TestGetTasksByProject(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -145,7 +140,6 @@ func TestGetTasksByProject(t *testing.T) {
 }
 
 func TestUpdateTask(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -174,7 +168,6 @@ func TestUpdateTask(t *testing.T) {
 }
 
 func TestUpdateTaskExecutionState(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -203,7 +196,6 @@ func TestUpdateTaskExecutionState(t *testing.T) {
 }
 
 func TestDeleteTask(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -226,7 +218,6 @@ func TestDeleteTask(t *testing.T) {
 }
 
 func TestGetAllTaskIDs(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -249,7 +240,6 @@ func TestGetAllTaskIDs(t *testing.T) {
 }
 
 func TestTaskBoolFields(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -275,7 +265,6 @@ func TestTaskBoolFields(t *testing.T) {
 }
 
 func TestTaskParentTaskID(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -303,7 +292,6 @@ func TestTaskParentTaskID(t *testing.T) {
 }
 
 func TestTaskCascadeDelete(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -335,7 +323,6 @@ func TestTaskCascadeDelete(t *testing.T) {
 }
 
 func TestTaskCreatedAtUpdatedAt(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -374,7 +361,6 @@ func TestTaskCreatedAtUpdatedAt(t *testing.T) {
 }
 
 func TestClearStaleTitleGenerating(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -413,7 +399,6 @@ func TestClearStaleTitleGenerating(t *testing.T) {
 }
 
 func TestSetTaskBranchIfEmpty(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -463,7 +448,6 @@ func TestSetTaskBranchIfEmpty(t *testing.T) {
 }
 
 func TestSetTaskBranchIfEmpty_WrongProject(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -492,7 +476,6 @@ func TestSetTaskBranchIfEmpty_WrongProject(t *testing.T) {
 }
 
 func TestSetTaskBranchIfEmpty_Concurrent(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -535,7 +518,6 @@ func TestSetTaskBranchIfEmpty_Concurrent(t *testing.T) {
 }
 
 func TestClearTaskBranch(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -576,7 +558,6 @@ func TestClearTaskBranch(t *testing.T) {
 }
 
 func TestClearTaskBranch_WrongProject(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -605,7 +586,6 @@ func TestClearTaskBranch_WrongProject(t *testing.T) {
 }
 
 func TestTaskSessionCost(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -659,7 +639,6 @@ func TestTaskSessionCost(t *testing.T) {
 // TestSetTaskSummarizing verifies the dedicated flag transition: the flag
 // round-trips and updated_at is bumped (used as the summary anchor).
 func TestSetTaskSummarizing(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-sum", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -700,7 +679,6 @@ func TestSetTaskSummarizing(t *testing.T) {
 // stuck-summarization-spinner bug: a full-row write from a task copy loaded
 // while the flag was set must not resurrect the flag after it was cleared.
 func TestUpdateTask_DoesNotTouchSummarizingFlag(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-sum-stale", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -761,7 +739,6 @@ func TestUpdateTask_DoesNotTouchSummarizingFlag(t *testing.T) {
 
 // TestCreateTaskSetsMovedAtFromCreated: a new task's position is its creation time.
 func TestCreateTaskSetsMovedAtFromCreated(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -788,7 +765,6 @@ func TestCreateTaskSetsMovedAtFromCreated(t *testing.T) {
 // TestUpdateTaskSameStatusKeepsMovedAt: writes that leave the task in its column must not
 // touch moved_at, even though updated_at keeps advancing.
 func TestUpdateTaskSameStatusKeepsMovedAt(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -833,7 +809,6 @@ func TestUpdateTaskSameStatusKeepsMovedAt(t *testing.T) {
 
 // TestUpdateTaskColumnChangeBumpsMovedAt: a real move re-ranks the card.
 func TestUpdateTaskColumnChangeBumpsMovedAt(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -899,7 +874,6 @@ func newTaskInState(t *testing.T, s *Store, id, projectID string, status types.S
 // stopped task back to "running", which is how a task ended up showing a run
 // with no executor behind it.
 func TestUpdateTaskGuardBlocksInFlightPromotion(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	if err := s.CreateProject(newProject("proj-guard", "guard", "/tmp/guard")); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -945,7 +919,6 @@ func TestUpdateTaskGuardBlocksInFlightPromotion(t *testing.T) {
 // TestUpdateTaskGuardAllowsOtherExecutionStateWrites: the guard must not get in
 // the way of a live run keeping the row in-flight, or of settling it.
 func TestUpdateTaskGuardAllowsOtherExecutionStateWrites(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	if err := s.CreateProject(newProject("proj-guard2", "guard2", "/tmp/guard2")); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -984,7 +957,6 @@ func TestUpdateTaskGuardAllowsOtherExecutionStateWrites(t *testing.T) {
 // TestUpdateTaskClaimingExecutionPromotes: whoever owns a run can start or keep
 // an in-flight state, including right after a stop.
 func TestUpdateTaskClaimingExecutionPromotes(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	if err := s.CreateProject(newProject("proj-guard3", "guard3", "/tmp/guard3")); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -1016,7 +988,6 @@ func TestUpdateTaskClaimingExecutionPromotes(t *testing.T) {
 // TestSetTaskAssignedPortsIsTargeted: ports are written while a run is live and
 // cleared when it ends, so the write must leave status and execution_state alone.
 func TestSetTaskAssignedPortsIsTargeted(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	if err := s.CreateProject(newProject("proj-ports", "ports", "/tmp/ports")); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -1079,7 +1050,6 @@ func TestSetTaskAssignedPortsIsTargeted(t *testing.T) {
 }
 
 func TestSandboxMemoryPeakSurvivesFullRowUpdate(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	if err := s.CreateProject(newProject("proj-peak", "peak", "/tmp/peak")); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -1131,7 +1101,6 @@ func TestSandboxMemoryPeakSurvivesFullRowUpdate(t *testing.T) {
 }
 
 func TestSandboxMemoryPeakPersistsAcrossReopen(t *testing.T) {
-	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "peak.db")
 	s, err := NewStore(dbPath)
 	if err != nil {
@@ -1169,7 +1138,6 @@ func TestSandboxMemoryPeakPersistsAcrossReopen(t *testing.T) {
 // The teardown path also carries the project-level container's "proj:…" key and any task
 // deleted mid-run. Neither is a teardown failure.
 func TestRecordTaskSandboxMemoryIgnoresAnUnknownTask(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	if err := s.RecordTaskSandboxMemory("proj:gone", 512, 4); err != nil {
 		t.Errorf("recording a peak for an unknown task: %v", err)
@@ -1178,7 +1146,6 @@ func TestRecordTaskSandboxMemoryIgnoresAnUnknownTask(t *testing.T) {
 
 // One dismissal must serve every device: it lands, it replaces, and a stale row write keeps it.
 func TestDismissTaskMemoryAlertLandsOnTheRow(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	if err := s.CreateProject(newProject("proj-ack", "ack", "/tmp/ack")); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -1250,7 +1217,6 @@ func TestDismissTaskMemoryAlertLandsOnTheRow(t *testing.T) {
 
 // The flag says "someone dismissed", not the numbers: zeros can be a real dismissal.
 func TestDismissTaskMemoryAlertRecordsADismissalOfNothingButKills(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	if err := s.CreateProject(newProject("proj-ack-zero", "ack zero", "/tmp/ack-zero")); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -1274,7 +1240,6 @@ func TestDismissTaskMemoryAlertRecordsADismissalOfNothingButKills(t *testing.T) 
 }
 
 func TestDismissTaskMemoryAlertIgnoresAnUnknownTask(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	if err := s.DismissTaskMemoryAlert("proj:gone", 512, 1, 1024); err != nil {
 		t.Errorf("dismissing an unknown task's alert: %v", err)
@@ -1282,7 +1247,6 @@ func TestDismissTaskMemoryAlertIgnoresAnUnknownTask(t *testing.T) {
 }
 
 func TestMemoryAlertAckPersistsAcrossReopen(t *testing.T) {
-	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "ack.db")
 	s, err := NewStore(dbPath)
 	if err != nil {
@@ -1315,7 +1279,6 @@ func TestMemoryAlertAckPersistsAcrossReopen(t *testing.T) {
 }
 
 func TestSetMemoryPressurePausedOutputGuard(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	if err := s.CreateProject(newProject("proj-out", "out", "/tmp/out")); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -1369,7 +1332,6 @@ func TestSetMemoryPressurePausedOutputGuard(t *testing.T) {
 // TestInFlightStatesSQLIsTheGoSet: the pool GetRunningSandboxedTasks hands the supervisor to pause must be
 // what types.ExecutionState.InFlight says. Both sides are derived here.
 func TestInFlightStatesSQLIsTheGoSet(t *testing.T) {
-	t.Parallel()
 	for _, state := range []types.ExecutionState{
 		types.ExecStateIdle, types.ExecStateRunning, types.ExecStatePullingImage,
 		types.ExecStatePaused, types.ExecStateCompleted, types.ExecStateFailed,

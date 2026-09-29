@@ -22,7 +22,6 @@ import (
 // timeout, returned the error and forgot the goroutine - which still won the lock later and never
 // unlocked. Every later CreateWorktree for that project hit the same timeout.
 func TestTryLockProjectWorktreeReleasesTheLateWinner(t *testing.T) {
-	t.Parallel()
 	wm := NewWorktreeManager(nil, nil)
 	const projectID = "leaky-project"
 
@@ -55,7 +54,6 @@ func TestTryLockProjectWorktreeReleasesTheLateWinner(t *testing.T) {
 // TestTryLockProjectWorktreeHappyPath pins the ordinary contract: acquired returns a release function
 // that actually releases.
 func TestTryLockProjectWorktreeHappyPath(t *testing.T) {
-	t.Parallel()
 	wm := NewWorktreeManager(nil, nil)
 
 	release, locked := wm.tryLockProjectWorktree("proj", 2*time.Second)
@@ -78,7 +76,6 @@ func TestTryLockProjectWorktreeHappyPath(t *testing.T) {
 // domains with a documented acquisition order. If they ever shared a table, taking one would block
 // the other and the ordering rule would silently become a self-deadlock.
 func TestLockProjectStashAndMergeAreDistinctTables(t *testing.T) {
-	t.Parallel()
 	wm := NewWorktreeManager(nil, nil)
 
 	// The mechanism-level half: three domains, three tables. Keys are the same kind of string in all
@@ -119,7 +116,6 @@ var exportedMutexMethod = regexp.MustCompile(`^func \([a-z_]+ \*?[A-Za-z_][A-Za-
 // Unexported methods are fine - a mutex may be handed around inside the package that owns it - as long as
 // it cannot cross a package boundary.
 func TestNoExportedMutexAccessor(t *testing.T) {
-	t.Parallel()
 	root := moduleRoot(t)
 	var offenders []string
 

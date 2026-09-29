@@ -37,7 +37,6 @@ func stashWorktree(t *testing.T, wm *WorktreeManager, repoDir, projID, taskID st
 
 // TestInterleavedMergeStashesRestoreTheirOwnWork is the regression for the crossing.
 func TestInterleavedMergeStashesRestoreTheirOwnWork(t *testing.T) {
-	t.Parallel()
 	repoDir, projID, _, _, _, wm := setupStashTest(t)
 
 	wtA := stashWorktree(t, wm, repoDir, projID, "alpha-one-quartz")
@@ -101,7 +100,6 @@ func TestInterleavedMergeStashesRestoreTheirOwnWork(t *testing.T) {
 // restore must never consume one of those. This is the same property from the other side — not
 // "another task" but "a human's work".
 func TestPopStashByHashDoesNotTakeTheUsersEntry(t *testing.T) {
-	t.Parallel()
 	repoDir, _, _, _, _, wm := setupStashTest(t)
 	userHash := seedUserStash(t, wm, repoDir)
 
@@ -132,7 +130,6 @@ func TestPopStashByHashDoesNotTakeTheUsersEntry(t *testing.T) {
 // state. Dropping what could not be applied turns a conflict the user can resolve into work that no
 // longer exists anywhere.
 func TestPopStashByHashLeavesAnEntryItCouldNotApply(t *testing.T) {
-	t.Parallel()
 	repoDir, projID, _, _, _, wm := setupStashTest(t)
 	wt := stashWorktree(t, wm, repoDir, projID, "conflict-one-opal")
 
@@ -161,7 +158,6 @@ func TestPopStashByHashLeavesAnEntryItCouldNotApply(t *testing.T) {
 // stash@{0} when the requested hash was not found. If ours is gone, the top entry is somebody
 // else's — the precise hazard the hash-identity API exists to remove.
 func TestDropStashByHashNeverFallsBackToTheTopEntry(t *testing.T) {
-	t.Parallel()
 	repoDir, _, _, _, _, wm := setupStashTest(t)
 	userHash := seedUserStash(t, wm, repoDir)
 
@@ -179,7 +175,6 @@ func TestDropStashByHashNeverFallsBackToTheTopEntry(t *testing.T) {
 // discarded stash@{0} to tidy up its own pre-sync edits. The entry on top is whichever entry is
 // newest, so when ours was already swept or another task pushed later, the tidy-up deleted that one.
 func TestDropStashForTaskSparesWhatIsOnTop(t *testing.T) {
-	t.Parallel()
 	repoDir, _, _, _, _, wm := setupStashTest(t)
 
 	// Ours, pushed under the sync-merge label, then the user pushed something newer.
@@ -221,7 +216,6 @@ func TestDropStashForTaskSparesWhatIsOnTop(t *testing.T) {
 // TestRestoreStashForTaskFindsItsOwnLabelAcrossTasks: the deferred restores never saw the push, so the
 // label is their only identity. Two tasks' entries on the stack, and each restore must take its own.
 func TestRestoreStashForTaskFindsItsOwnLabelAcrossTasks(t *testing.T) {
-	t.Parallel()
 	repoDir, projID, _, _, _, wm := setupStashTest(t)
 	wtA := stashWorktree(t, wm, repoDir, projID, "label-one-onyx")
 	wtB := stashWorktree(t, wm, repoDir, projID, "label-two-topaz")
@@ -259,7 +253,6 @@ func TestRestoreStashForTaskFindsItsOwnLabelAcrossTasks(t *testing.T) {
 // TestPopStashByHashReportsAMissingEntryAsAbsent: silently continuing is how lost work stays lost, so
 // the caller gets a distinguishable "it was not there" rather than success.
 func TestPopStashByHashReportsAMissingEntryAsAbsent(t *testing.T) {
-	t.Parallel()
 	repoDir, _, _, _, _, wm := setupStashTest(t)
 
 	ok, err := wm.PopStashByHash(repoDir, "0123456789abcdef0123456789abcdef01234567")
@@ -288,7 +281,6 @@ func mustReadFile(t *testing.T, dir, name string) string {
 // TestPopStashByHashKeepsTheStagedSplit: a plain apply returns a modification unstaged, and
 // commit-and-done commits the index only.
 func TestPopStashByHashKeepsTheStagedSplit(t *testing.T) {
-	t.Parallel()
 	repoDir, projID, _, _, _, wm := setupStashTest(t)
 	wt := stashWorktree(t, wm, repoDir, projID, "staged-split-one")
 
@@ -326,7 +318,6 @@ func TestPopStashByHashKeepsTheStagedSplit(t *testing.T) {
 // TestPopStashByHashRestoresEvenWhenTheIndexCannotBeRebuilt: git refuses --index when the tree
 // has its own claim on the file. The refusal must not cost the task its work.
 func TestPopStashByHashRestoresEvenWhenTheIndexCannotBeRebuilt(t *testing.T) {
-	t.Parallel()
 	repoDir, projID, _, _, _, wm := setupStashTest(t)
 	wt := stashWorktree(t, wm, repoDir, projID, "staged-clash-one")
 

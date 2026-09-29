@@ -62,7 +62,6 @@ func hungCloneCommand(ctx context.Context, t *testing.T) *exec.Cmd {
 // this test PASSING, because git closes the progress pipe when it dies. TestGitConstructorSetsWaitDelay
 // is the one that fails when the assignment goes.
 func TestCancelledGitReturnsPromptly(t *testing.T) {
-	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd := hungCloneCommand(ctx, t)
 
@@ -94,7 +93,6 @@ func TestCancelledGitReturnsPromptly(t *testing.T) {
 // TestGitConstructorSetsWaitDelay pins the mechanism directly on both constructors, so the test above
 // cannot be passing because of something the test itself did.
 func TestGitConstructorSetsWaitDelay(t *testing.T) {
-	t.Parallel()
 	if got := Command("").WaitDelay; got != GitWaitDelay {
 		t.Errorf("Command().WaitDelay = %v, want %v", got, GitWaitDelay)
 	}
@@ -106,7 +104,6 @@ func TestGitConstructorSetsWaitDelay(t *testing.T) {
 // TestCloneContextHonoursAnAlreadyCancelledContext pins that CloneContext passes its context to the
 // process rather than building the command and dropping the context on the floor.
 func TestCloneContextHonoursAnAlreadyCancelledContext(t *testing.T) {
-	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -121,7 +118,6 @@ func TestCloneContextHonoursAnAlreadyCancelledContext(t *testing.T) {
 
 // TestCloneContextCompletesARealClone is the happy path for the clone entry point.
 func TestCloneContextCompletesARealClone(t *testing.T) {
-	t.Parallel()
 	src := seedSourceRepo(t)
 	dst := filepath.Join(t.TempDir(), "dst")
 

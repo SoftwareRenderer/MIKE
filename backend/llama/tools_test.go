@@ -7,7 +7,6 @@ import (
 )
 
 func TestGetPlanModeToolDefinitions(t *testing.T) {
-	t.Parallel()
 	tools := GetPlanModeToolDefinitions()
 
 	// Should have exactly 7 tools: read_file, bash, create_task, view_tasks, edit_task, ask_question, request_review
@@ -38,7 +37,6 @@ func TestGetPlanModeToolDefinitions(t *testing.T) {
 }
 
 func TestGetToolDefinitions_Standard(t *testing.T) {
-	t.Parallel()
 	tools := GetToolDefinitions()
 
 	toolNames := make(map[string]bool)
@@ -56,7 +54,6 @@ func TestGetToolDefinitions_Standard(t *testing.T) {
 }
 
 func TestGetExploreModeToolDefinitions(t *testing.T) {
-	t.Parallel()
 	tools := GetExploreModeToolDefinitions()
 
 	// Should have 9 tools: standard (6) + task management (3)
@@ -79,7 +76,6 @@ func TestGetExploreModeToolDefinitions(t *testing.T) {
 }
 
 func TestToAPIMessage_ReasoningContentSeparate(t *testing.T) {
-	t.Parallel()
 	// When ReasoningContent is set, it should be sent as a separate
 	// reasoning_content field — NOT concatenated into content.
 	msg := types.ChatMessage{
@@ -102,7 +98,6 @@ func TestToAPIMessage_ReasoningContentSeparate(t *testing.T) {
 }
 
 func TestToAPIMessage_ReasoningContentOnly(t *testing.T) {
-	t.Parallel()
 	// Reasoning-only message (empty content, reasoning present)
 	msg := types.ChatMessage{
 		Role:             "assistant",
@@ -121,7 +116,6 @@ func TestToAPIMessage_ReasoningContentOnly(t *testing.T) {
 }
 
 func TestToAPIMessage_NoReasoning(t *testing.T) {
-	t.Parallel()
 	// Message without reasoning should not have reasoning_content key
 	msg := types.ChatMessage{
 		Role:    "assistant",
@@ -136,7 +130,6 @@ func TestToAPIMessage_NoReasoning(t *testing.T) {
 }
 
 func TestToAPIMessage_ToolCallWithReasoning(t *testing.T) {
-	t.Parallel()
 	// Assistant message with tool calls and reasoning
 	msg := types.ChatMessage{
 		Role:             "assistant",
@@ -163,7 +156,6 @@ func TestToAPIMessage_ToolCallWithReasoning(t *testing.T) {
 }
 
 func TestToAPIMessage_ReasoningOnlyOnAssistantRole(t *testing.T) {
-	t.Parallel()
 	// reasoning_content should only be sent for assistant role per OpenAI spec
 	// Even if ReasoningContent is set on other roles, it should be suppressed.
 
@@ -203,7 +195,6 @@ func TestToAPIMessage_ReasoningOnlyOnAssistantRole(t *testing.T) {
 }
 
 func TestToAPIMessage_AdvisoryGoesOutAsUser(t *testing.T) {
-	t.Parallel()
 	// An advisory is an environment note (LSP diagnostics, merge-conflict instructions).
 	// The chat API has no role for it, so it must leave as "user" while the transcript and
 	// the summarizer keep calling it "advisory".

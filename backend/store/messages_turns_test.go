@@ -52,7 +52,6 @@ func seedTurns(t *testing.T, s *Store, taskID, threadID string, turns, answers i
 // The case the header hits: the newest window of answers holds no prompt, and the turn's prompt is still
 // named.
 func TestGetUserTurnPageNamesThePromptTheWindowLeftOut(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	seedTurns(t, s, "task-1", "thread-1", 3, 40)
 
@@ -88,7 +87,6 @@ func TestGetUserTurnPageNamesThePromptTheWindowLeftOut(t *testing.T) {
 
 // Prompts arrive a page at a time too, and the walk hands over each one exactly once.
 func TestGetUserTurnPageWalksPromptsWithoutRepeatingOne(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	prompts := seedTurns(t, s, "task-1", "thread-1", 9, 2)
 
@@ -128,7 +126,6 @@ func TestGetUserTurnPageWalksPromptsWithoutRepeatingOne(t *testing.T) {
 // A prompt longer than the label bound is quoted up to it: the response is bounded before the bytes are
 // read, and a pasted file cannot ride along just to name the turn it opened.
 func TestGetUserTurnPageBoundsTheQuotedLine(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	seedTurns(t, s, "task-1", "thread-1", 1, 1)
 	long := newMessage("u-long", "task-1", "user", strings.Repeat("x", TurnLabelChars*5))
@@ -152,7 +149,6 @@ func TestGetUserTurnPageBoundsTheQuotedLine(t *testing.T) {
 // A conversation whose rows are all answers has no prompt to name, and answers an empty list rather than
 // no list: the route answers with this slice as the body a client iterates.
 func TestGetUserTurnPageAnswersAnEmptyPageWhenNoPromptExists(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	seedTurns(t, s, "task-1", "thread-1", 0, 0)
 	answer := newMessage("a-1", "task-1", "assistant", "an answer with no prompt above it")
@@ -175,7 +171,6 @@ func TestGetUserTurnPageAnswersAnEmptyPageWhenNoPromptExists(t *testing.T) {
 
 // A turn's prompts belong to its thread, and the task-scoped read sees the whole task.
 func TestGetUserTurnPageReadsOneThreadOrTheWholeTask(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	seedTurns(t, s, "task-1", "thread-1", 2, 1)
 	other := newMessage("u-other", "task-1", "user", "a prompt on another thread")
@@ -203,7 +198,6 @@ func TestGetUserTurnPageReadsOneThreadOrTheWholeTask(t *testing.T) {
 // The bound of this read is the number of prompts asked for, so the plan must walk the partial user-row
 // index — over the plain (scope, created_at) index the same read passes every row of the turn below it.
 func TestGetUserTurnPagesReadThroughTheUserRowIndexes(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	seedTurns(t, s, "task-1", "thread-1", 4, 40)
 
@@ -228,7 +222,6 @@ func TestGetUserTurnPagesReadThroughTheUserRowIndexes(t *testing.T) {
 }
 
 func TestGetUserTurnPageRefusesACursorItDidNotIssue(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	seedTurns(t, s, "task-1", "thread-1", 2, 1)
 

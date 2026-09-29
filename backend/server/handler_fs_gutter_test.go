@@ -16,7 +16,6 @@ index 1234567..89abcde 100644
 `
 
 func TestGutterMarkers(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name  string
 		patch string

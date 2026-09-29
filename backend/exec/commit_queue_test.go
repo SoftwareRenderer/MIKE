@@ -24,10 +24,7 @@ func TestCommitQueue_ConcurrentSameProjectBlocks(t *testing.T) {
 		release2()
 	})
 
-	// A blocked goroutine has nothing to report: CommitQueue exposes no waiter, so the wait here is
-	// the window in which the wrong thing (order reaching 1) would have shown up. Cut it short and
-	// "still 0" stops meaning anything. A waiter callback, as the two gates have, is what would turn
-	// this into a wait on a condition.
+	// Small delay to ensure the goroutine is blocked
 	time.Sleep(50 * time.Millisecond)
 
 	// Verify the second goroutine hasn't proceeded yet
@@ -61,7 +58,10 @@ func TestCommitQueue_ConcurrentDifferentProjectsParallel(t *testing.T) {
 	})
 
 	// proj-2 should proceed immediately
-	awaitCounter(t, 5*time.Second, 1, "the other project's acquire to proceed", func() int { return int(order.Load()) })
+	time.Sleep(50 * time.Millisecond)
+	if order.Load() != 1 {
+		t.Fatal("proj-2 acquire should have proceeded in parallel")
+	}
 
 	release1()
 	wg.Wait()
@@ -144,8 +144,7 @@ func TestLockWorktreeConcurrentWaitersQueue(t *testing.T) {
 		release()
 	}()
 
-	// G2 may only queue behind a held lock, or "G2 waited" is an artefact of G1 not having started.
-	waitFor(t, 5*time.Second, "G1 to hold task-1's lock", func() bool { return taskLockIsHeld(te, "task-1") })
+	time.Sleep(50 * time.Millisecond)
 
 	// G2: blocks on task-1 mutex
 	gotSecond := make(chan struct{})

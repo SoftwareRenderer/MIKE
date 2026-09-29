@@ -170,7 +170,6 @@ func getAuth(t *testing.T, s *Server, path string) []byte {
 //
 // Fixed IDs and fixed titles keep the payload deterministic; the temp root is what normalizeWire
 // collapses. Returns the temp root (for that collapse) and the server.
-// Serial for every caller: the fixture pins a variable, and t.Setenv refuses to run in a parallel test.
 func setupGoldenFixture(t *testing.T) (tmpRoots []string, s *Server) {
 	t.Helper()
 	// Set before the server is built: the config store derives its AES key at construction, and a

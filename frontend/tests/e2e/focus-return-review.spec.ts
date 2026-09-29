@@ -220,7 +220,7 @@ test.describe('A mounted chat returned to by the window focus event', () => {
 
       // Coming back to a conversation that has not moved leaves the transcript alone: a 304 has no body.
       await stopReading(page);
-      await page.waitForTimeout(2500); // measurement window: one return gesture's dedupe has to expire first
+      await page.waitForTimeout(2500); // longer than one return gesture's dedupe
       const settled = await transcript(page);
       expect(await page.evaluate(() => (window as any).__watchTranscript())).toBe(true);
       const idle = await seen(page);
@@ -231,7 +231,7 @@ test.describe('A mounted chat returned to by the window focus event', () => {
           'the second return asked the server nothing').toBeGreaterThan(0);
       }).toPass({ timeout: 20000 });
       // Wait briefly for a paint: a replaced entry list changes this DOM.
-      await page.waitForTimeout(1000); // measurement window: a re-paint of an unchanged list lands in these frames
+      await page.waitForTimeout(1000);
       const quiet = await seen(page);
       annotate(`second return: mutations in the transcript=${quiet.mutations}`);
       expect(quiet.mutations, 'an unchanged revision still re-painted the transcript').toBe(0);

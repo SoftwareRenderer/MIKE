@@ -31,7 +31,6 @@ func blockStashRef(t *testing.T, dir string) (release func()) {
 // TestWithStashDoesNotRunTheWorkWhenTheStashFails: with the push refused, the work is still in the
 // working tree and the caller never reaches the forced checkout.
 func TestWithStashDoesNotRunTheWorkWhenTheStashFails(t *testing.T) {
-	t.Parallel()
 	repoDir, projID, _, _, _, wm := setupStashTest(t)
 	release := blockStashRef(t, repoDir)
 	defer release()
@@ -64,7 +63,6 @@ func TestWithStashDoesNotRunTheWorkWhenTheStashFails(t *testing.T) {
 // so there is nothing to restore and nothing on the stack may be touched — the entry that is
 // already there belongs to somebody else.
 func TestWithStashRunsAndRestoresWithNothingToStash(t *testing.T) {
-	t.Parallel()
 	repoDir, projID, _, _, _, wm := setupStashTest(t)
 	userHash := seedUserStash(t, wm, repoDir)
 
@@ -87,7 +85,6 @@ func TestWithStashRunsAndRestoresWithNothingToStash(t *testing.T) {
 
 // TestWithStashRestoresTheEntryItCreated: ours comes back, the user's stays on the stack.
 func TestWithStashRestoresTheEntryItCreated(t *testing.T) {
-	t.Parallel()
 	repoDir, projID, _, _, _, wm := setupStashTest(t)
 	userHash := seedUserStash(t, wm, repoDir)
 	writeFile(t, repoDir, "task.txt", "in-flight work\n")
@@ -117,7 +114,6 @@ func TestWithStashRestoresTheEntryItCreated(t *testing.T) {
 // TestWithStashLeavesAnUnappliableEntry: a restore that conflicts must not also delete the saved
 // state, whatever the caller does next.
 func TestWithStashLeavesAnUnappliableEntry(t *testing.T) {
-	t.Parallel()
 	repoDir, projID, _, _, _, wm := setupStashTest(t)
 	wt := stashWorktree(t, wm, repoDir, projID, "bracket-one-opal")
 
@@ -140,7 +136,6 @@ func TestWithStashLeavesAnUnappliableEntry(t *testing.T) {
 // a conflicted sync leaves the entry stacked for the turn that runs `merge --continue`, which finds
 // it by label. Popping it here would hand that turn a clean-looking worktree missing its own edits.
 func TestWithStashKeepsTheEntryForTheResolvingTurn(t *testing.T) {
-	t.Parallel()
 	repoDir, projID, _, _, _, wm := setupStashTest(t)
 	wt := stashWorktree(t, wm, repoDir, projID, "bracket-two-topaz")
 

@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import {
     isolatedProject, gotoProject, getProjectId, csrfFetch, navigateToTask, waitForChatFormReady,
-    waitForSendButton, sendMessage, waitForChatGrowth, waitForStable,
+    waitForSendButton, sendMessage,
 } from './helpers';
 
 // A reader leaving the bottom is the follow tracker's whole job, and not every gesture that asks for what
@@ -201,15 +201,14 @@ async function openConversation(page: Page): Promise<void> {
  * that survives the settle.
  */
 async function settledPosition(page: Page) {
-    // A pin answers the scroll event within one round-trip, so the position that matters is the one that
-    // survives the settle: wait for the scroller to stop moving, then read it once.
-    await waitForStable(() => position(page), {
-        what: 'the chat scroller after the gesture',
-        stableReads: 4,
-        intervalMs: 80,
-        timeout: 3_000,
-    });
-    return position(page);
+    let prev = await position(page);
+    for (let i = 0; i < 14; i++) {
+        await page.waitForTimeout(150);
+        const now = await position(page);
+        if (now.scrollTop === prev.scrollTop && now.height === prev.height) return now;
+        prev = now;
+    }
+    return prev;
 }
 
 /** The reader left the bottom, and nothing in the app put them back. */
@@ -302,12 +301,12 @@ test.describe('Gestures that ask for what is above', () => {
         expect(before.fromBottom, 'the reader is not at the bottom, where the thumb is').toBeLessThanOrEqual(4);
 
         await page.mouse.move(g.x, g.grabY);
-        await page.waitForTimeout(150); // drag settle: headless is slow, and the press needs the thumb under it
+        await page.waitForTimeout(150);
         await beginGesture(page);
         await page.mouse.down();
         for (let i = 1; i <= 12; i++) {
             await page.mouse.move(g.x, g.grabY - i * 6);
-            await page.waitForTimeout(20); // drag pacing: one move per frame is what a thumb drag looks like
+            await page.waitForTimeout(20);
         }
         await page.mouse.up();
 
@@ -333,10 +332,10 @@ test.describe('Gestures that ask for what is above', () => {
         // Near the top of the track: the reader is at the bottom, so the thumb is at the other end.
         const y = g.trackTop + (g.trackBottom - g.trackTop) * 0.15;
         await page.mouse.move(g.x, y);
-        await page.waitForTimeout(150); // drag settle: headless is slow, and the press needs the pointer parked first
+        await page.waitForTimeout(150);
         await beginGesture(page);
         await page.mouse.down();
-        await page.waitForTimeout(300); // a track click is one animated page-up: releasing early cancels it
+        await page.waitForTimeout(300);
         await page.mouse.up();
 
         await waitForScrollEvent(page);
@@ -392,7 +391,7 @@ test.describe('Gestures that ask for what is above', () => {
         // Tokens must be arriving: the pin this measures is the one growth triggers.
         await sendMessage(page, `takeover-wheel ${Date.now()} ${STREAMING_PROMPT}`);
         await expect(page.locator('.btn-stop')).toBeVisible({ timeout: 20000 });
-        await waitForChatGrowth(page); // the pin this measures is the one growth triggers
+        await page.waitForTimeout(400);
         const box = await page.locator('.chat-messages').boundingBox();
         expect(box, 'no chat list to park the pointer on').not.toBeNull();
         await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);

@@ -113,7 +113,6 @@ var _ agent.AgentAdapter = (*mockAdapter)(nil)
 
 // TestNewAgentRunner_Host verifies runner creation in host mode.
 func TestNewAgentRunner_Host(t *testing.T) {
-	t.Parallel()
 	// Register a mock factory
 	adapter := newMockAdapter()
 	RegisterAdapterFactory("test-agent", func() agent.AgentAdapter { return adapter })
@@ -157,7 +156,6 @@ func TestNewAgentRunner_Host(t *testing.T) {
 
 // TestAgentRunner_Prompt verifies that Prompt sends encoded command to stdin.
 func TestAgentRunner_Prompt(t *testing.T) {
-	t.Parallel()
 	// Use a mock adapter that returns known bytes for prompt command
 	adapter := newMockAdapter()
 	// Set subprocess to a process that echoes stdin to stdout
@@ -191,7 +189,6 @@ func TestAgentRunner_Prompt(t *testing.T) {
 
 // TestAgentRunner_Close verifies graceful shutdown.
 func TestAgentRunner_Close(t *testing.T) {
-	t.Parallel()
 	adapter := newMockAdapter()
 	RegisterAdapterFactory("test-close", func() agent.AgentAdapter { return adapter })
 
@@ -224,7 +221,6 @@ func TestAgentRunner_Close(t *testing.T) {
 
 // TestAgentRunner_ModelName verifies model name discovery.
 func TestAgentRunner_ModelName(t *testing.T) {
-	t.Parallel()
 	adapter := newMockAdapter()
 	RegisterAdapterFactory("test-model", func() agent.AgentAdapter { return adapter })
 
@@ -250,7 +246,6 @@ func TestAgentRunner_ModelName(t *testing.T) {
 
 // TestAgentRunner_QueryStats verifies stats query.
 func TestAgentRunner_QueryStats(t *testing.T) {
-	t.Parallel()
 	adapter := newMockAdapter()
 	RegisterAdapterFactory("test-stats", func() agent.AgentAdapter { return adapter })
 
@@ -281,7 +276,6 @@ func TestAgentRunner_QueryStats(t *testing.T) {
 
 // TestRunnerConfig_Serialization verifies RunnerConfig marshals/unmarshals correctly.
 func TestRunnerConfig_Serialization(t *testing.T) {
-	t.Parallel()
 	cfg := RunnerConfig{
 		ExtensionName: "pi",
 		SessionName:   "kanban-test-task",
@@ -311,7 +305,6 @@ func TestRunnerConfig_Serialization(t *testing.T) {
 
 // TestAdapterRegistry verifies factory registration and lookup.
 func TestAdapterRegistry(t *testing.T) {
-	t.Parallel()
 	called := false
 	RegisterAdapterFactory("registry-test", func() agent.AgentAdapter {
 		called = true
@@ -340,7 +333,6 @@ func TestAdapterRegistry(t *testing.T) {
 
 // TestEventTypes verifies event type constants are non-empty and unique.
 func TestEventTypes(t *testing.T) {
-	t.Parallel()
 	types := []string{
 		agent.EventTypeToken,
 		agent.EventTypeReasoning,
@@ -366,7 +358,6 @@ func TestEventTypes(t *testing.T) {
 // TestAgentRunner_Compact verifies that compaction requests are routed and handled correctly,
 // including failure cases.
 func TestAgentRunner_Compact(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name           string
 		mockEvents     []agent.Event
@@ -482,7 +473,6 @@ func TestAgentRunner_Compact(t *testing.T) {
 
 // TestPersistEntry_Serialization verifies agent.PersistEntry marshals correctly.
 func TestPersistEntry_Serialization(t *testing.T) {
-	t.Parallel()
 	entry := agent.PersistEntry{
 		Role:             "assistant",
 		Content:          "Hello world",
@@ -550,7 +540,6 @@ var _ agent.AgentAdapter = (*brokenAdapter)(nil)
 // TestNewAgentRunner_BrokenAdapter verifies that NewAgentRunner rejects
 // adapters where Init succeeds but agent.SubprocessConfig returns empty binary.
 func TestNewAgentRunner_BrokenAdapter(t *testing.T) {
-	t.Parallel()
 	// Register a factory that returns an adapter with empty subprocess config
 	RegisterAdapterFactory("test-broken", func() agent.AgentAdapter {
 		return &brokenAdapter{}
@@ -576,7 +565,6 @@ func TestNewAgentRunner_BrokenAdapter(t *testing.T) {
 // TestAgentRunner_PromptNilEncode verifies Prompt returns error when
 // EncodeCommand returns nil (broken adapter scenario).
 func TestAgentRunner_PromptNilEncode(t *testing.T) {
-	t.Parallel()
 	adapter := &brokenAdapter{subprocessConfig: agent.SubprocessConfig{Binary: "cat"}}
 	RegisterAdapterFactory("test-nil-encode", func() agent.AgentAdapter { return adapter })
 
@@ -605,7 +593,6 @@ func TestAgentRunner_PromptNilEncode(t *testing.T) {
 
 // TestAgentRunner_CloseNilEncode verifies Close handles nil EncodeCommand gracefully.
 func TestAgentRunner_CloseNilEncode(t *testing.T) {
-	t.Parallel()
 	adapter := &brokenAdapter{subprocessConfig: agent.SubprocessConfig{Binary: "cat"}}
 	RegisterAdapterFactory("test-close-nil", func() agent.AgentAdapter { return adapter })
 
@@ -631,7 +618,6 @@ func TestAgentRunner_CloseNilEncode(t *testing.T) {
 
 // TestSubprocessConfig_Serialization verifies agent.SubprocessConfig marshals correctly.
 func TestSubprocessConfig_Serialization(t *testing.T) {
-	t.Parallel()
 	cfg := agent.SubprocessConfig{
 		Binary: "pi",
 		Args:   []string{"--mode", "rpc", "--name", "test"},
@@ -673,7 +659,6 @@ func newTeardownRunner() *AgentRunner {
 // teardowns racing through it closed the same channel twice. A panic in any of these
 // goroutines takes the test binary down, which is the failure being asserted.
 func TestCloseChannels_IdempotentUnderConcurrentTeardown(t *testing.T) {
-	t.Parallel()
 	for i := 0; i < 500; i++ {
 		r := newTeardownRunner()
 
@@ -702,7 +687,6 @@ func TestCloseChannels_IdempotentUnderConcurrentTeardown(t *testing.T) {
 // an event the reader was still holding when the channels went down is dropped rather
 // than sent.
 func TestDispatchEventAfterCloseDoesNotPanic(t *testing.T) {
-	t.Parallel()
 	r := newTeardownRunner()
 	r.closeChannels()
 
@@ -714,7 +698,6 @@ func TestDispatchEventAfterCloseDoesNotPanic(t *testing.T) {
 // has output in flight (so readOutput is parsing and dispatching) at the exact moment
 // Close() runs — the interleaving that used to panic.
 func TestAgentRunner_CloseWhileReaderActive(t *testing.T) {
-	t.Parallel()
 	for i := 0; i < 25; i++ {
 		adapter := newMockAdapter()
 		adapter.SetSubprocessConfig(agent.SubprocessConfig{Binary: "echo", Args: []string{"line"}})

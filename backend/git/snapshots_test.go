@@ -38,7 +38,6 @@ func makeSnapshot(t *testing.T, repoDir, name, content string) string {
 }
 
 func TestPinSnapshotOutlivesStashClearAndGC(t *testing.T) {
-	t.Parallel()
 	repoDir, _, taskID, _, _, wm := setupStashTest(t)
 
 	pinned := makeSnapshot(t, repoDir, "pinned.txt", "keep me\n")
@@ -88,7 +87,6 @@ func TestPinSnapshotOutlivesStashClearAndGC(t *testing.T) {
 }
 
 func TestSnapshotRefsRejectAnythingElse(t *testing.T) {
-	t.Parallel()
 	repoDir, _, taskID, _, _, wm := setupStashTest(t)
 	hash := makeSnapshot(t, repoDir, "a.txt", "content\n")
 
@@ -139,7 +137,6 @@ func TestSnapshotRefsRejectAnythingElse(t *testing.T) {
 }
 
 func TestDeleteSnapshotRefsUnderTakesOnlyThatTask(t *testing.T) {
-	t.Parallel()
 	repoDir, _, taskID, _, _, wm := setupStashTest(t)
 	other := "other-task-id"
 	hash := makeSnapshot(t, repoDir, "a.txt", "content\n")

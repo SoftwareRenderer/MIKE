@@ -76,7 +76,6 @@ func newDiffBaselineEnv(t *testing.T) *diffBaselineEnv {
 }
 
 func TestTaskDiffBaselinePinnedCommitOutlivesTheBranchItCameFrom(t *testing.T) {
-	t.Parallel()
 	f := newDiffBaselineEnv(t)
 
 	// The target branch moves forward after the task started.
@@ -93,7 +92,6 @@ func TestTaskDiffBaselinePinnedCommitOutlivesTheBranchItCameFrom(t *testing.T) {
 }
 
 func TestTaskDiffBaselineDeletedBaseRefFallsBackToDivergence(t *testing.T) {
-	t.Parallel()
 	f := newDiffBaselineEnv(t)
 
 	// The recorded base ref no longer resolves.
@@ -107,7 +105,6 @@ func TestTaskDiffBaselineDeletedBaseRefFallsBackToDivergence(t *testing.T) {
 }
 
 func TestTaskDiffBaselineForkedThreadUsesMergeBase(t *testing.T) {
-	t.Parallel()
 	f := newDiffBaselineEnv(t)
 
 	// A thread is forked off the task branch, then the task keeps committing.
@@ -126,7 +123,6 @@ func TestTaskDiffBaselineForkedThreadUsesMergeBase(t *testing.T) {
 }
 
 func TestTaskDiffBaselineThreadOnTheTaskBranchKeepsTheRecordedBase(t *testing.T) {
-	t.Parallel()
 	f := newDiffBaselineEnv(t)
 
 	// A thread whose branch is the task branch holds all of the task's changes itself.
@@ -140,7 +136,6 @@ func TestTaskDiffBaselineThreadOnTheTaskBranchKeepsTheRecordedBase(t *testing.T)
 }
 
 func TestTaskDiffBaselineUnknownTaskNamesNoBaseline(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, wm := setupTestRepo(t)
 	if got := wm.TaskDiffBaseline(nil); got != "" {
 		t.Errorf("baseline for no task = %q, want empty", got)

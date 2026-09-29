@@ -7,7 +7,6 @@ import (
 )
 
 func TestCreateAndGetTaskMessages(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -42,7 +41,6 @@ func TestCreateAndGetTaskMessages(t *testing.T) {
 }
 
 func TestGetTaskMessagesByThread(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -97,7 +95,6 @@ func TestGetTaskMessagesByThread(t *testing.T) {
 }
 
 func TestDeleteTaskMessagesAfter(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -133,7 +130,6 @@ func TestDeleteTaskMessagesAfter(t *testing.T) {
 }
 
 func TestDeleteTaskMessagesAfterByThread(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -192,7 +188,6 @@ func TestDeleteTaskMessagesAfterByThread(t *testing.T) {
 }
 
 func TestUpdateTaskMessage(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -221,7 +216,6 @@ func TestUpdateTaskMessage(t *testing.T) {
 }
 
 func TestUpdateTaskMessageToolResult(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -270,7 +264,6 @@ func TestUpdateTaskMessageToolResult(t *testing.T) {
 }
 
 func TestGetLastUserMessageInThread(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -322,7 +315,6 @@ func TestGetLastUserMessageInThread(t *testing.T) {
 }
 
 func TestGetMessageCreatedAt(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -349,7 +341,6 @@ func TestGetMessageCreatedAt(t *testing.T) {
 }
 
 func TestMessageTokenFields(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -389,7 +380,6 @@ func TestMessageTokenFields(t *testing.T) {
 }
 
 func TestMessageLoopHintRoundTrip(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -426,7 +416,6 @@ func TestMessageLoopHintRoundTrip(t *testing.T) {
 }
 
 func TestMessageSeverityRoundTrip(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -476,7 +465,6 @@ func TestMessageSeverityRoundTrip(t *testing.T) {
 // Regression: previously the query filtered by task_id = ” and returned nothing,
 // so surviving checkpoint messages were never found during delete rollback.
 func TestGetTaskMessagesByThreadEmptyTaskID(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -508,7 +496,6 @@ func TestGetTaskMessagesByThreadEmptyTaskID(t *testing.T) {
 // TestGetLastMessageInThread: the newest row whatever its role, and inside one turn (an
 // assistant row and its tool_call rows can share a created_at) the row written last wins.
 func TestGetLastMessageInThread(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	if err := s.CreateProject(newProject("proj-lm", "test", "/tmp/test")); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -584,7 +571,6 @@ func TestGetLastMessageInThread(t *testing.T) {
 // that swept it used to leave the messages the summary replaced in place, so the next
 // rebuild had neither summary nor marker and reinstated the whole history at full size.
 func TestDeleteTaskMessagesAfter_PreservesSummarization(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -634,7 +620,6 @@ func TestDeleteTaskMessagesAfter_PreservesSummarization(t *testing.T) {
 // above is only against collateral. A *later* summary is still collateral though, so it
 // survives while ordinary messages after the target go.
 func TestDeleteTaskMessagesAfter_TargetIsSummarization(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -692,7 +677,6 @@ func TestDeleteTaskMessagesAfter_TargetIsSummarization(t *testing.T) {
 // went, since summarization rows stay and rows inside a turn share a created_at. Guessing could release a
 // snapshot a surviving row still names.
 func TestDeleteTaskMessagesAfter_ReportsDeletedCheckpoints(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -750,7 +734,6 @@ func TestDeleteTaskMessagesAfter_ReportsDeletedCheckpoints(t *testing.T) {
 }
 
 func TestLastSummarizationMessageID(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	if err := s.CreateProject(newProject("proj-1", "test", "/tmp/test")); err != nil {
 		t.Fatalf("create project: %v", err)

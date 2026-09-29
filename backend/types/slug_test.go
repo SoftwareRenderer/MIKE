@@ -6,14 +6,12 @@ import (
 )
 
 func TestSlugify_NormalTitle(t *testing.T) {
-	t.Parallel()
 	if got := Slugify("Fix login bug #123", 0); got != "fix-login-bug-123" {
 		t.Errorf("Slugify = %q, want %q", got, "fix-login-bug-123")
 	}
 }
 
 func TestSlugify_CollapsesRunsAndTrims(t *testing.T) {
-	t.Parallel()
 	// Non-ASCII letters are dropped, not transliterated — they act as word
 	// separators, which is why "café" becomes "caf".
 	tests := map[string]string{
@@ -39,7 +37,6 @@ func TestSlugify_CollapsesRunsAndTrims(t *testing.T) {
 // TestSlugify_UncappedWhenMaxLenNonPositive pins the project-ID usage: maxLen
 // <= 0 must never truncate.
 func TestSlugify_UncappedWhenMaxLenNonPositive(t *testing.T) {
-	t.Parallel()
 	long := strings.Repeat("a", 300)
 	for _, maxLen := range []int{0, -1} {
 		if got := Slugify(long, maxLen); len(got) != 300 {
@@ -49,28 +46,24 @@ func TestSlugify_UncappedWhenMaxLenNonPositive(t *testing.T) {
 }
 
 func TestSlugify_CapsAtMaxLen(t *testing.T) {
-	t.Parallel()
 	if got := Slugify("aaa bbb ccc", 7); got != "aaa-bbb" {
 		t.Errorf("Slugify cap = %q, want %q", got, "aaa-bbb")
 	}
 }
 
 func TestSlugifyBranchName_AllSpecialChars(t *testing.T) {
-	t.Parallel()
 	if slug := SlugifyBranchName("###"); slug != "" {
 		t.Errorf("expected empty string, got %q", slug)
 	}
 }
 
 func TestSlugifyBranchName_AllHyphens(t *testing.T) {
-	t.Parallel()
 	if slug := SlugifyBranchName("---"); slug != "" {
 		t.Errorf("expected empty string, got %q", slug)
 	}
 }
 
 func TestSlugifyBranchName_MaxLength(t *testing.T) {
-	t.Parallel()
 	// Title that slugifies to more than BranchSlugMaxLen chars.
 	longTitle := "Fix a very long bug description that exceeds the maximum allowed branch name length limit"
 	slug := SlugifyBranchName(longTitle)
@@ -85,7 +78,6 @@ func TestSlugifyBranchName_MaxLength(t *testing.T) {
 }
 
 func TestBranchSlugMaxLen_DerivedFromMaxBranchName(t *testing.T) {
-	t.Parallel()
 	if BranchSlugMaxLen != MaxBranchName-len(TaskBranchPrefix) {
 		t.Errorf("BranchSlugMaxLen = %d, want %d", BranchSlugMaxLen, MaxBranchName-len(TaskBranchPrefix))
 	}
@@ -97,7 +89,6 @@ func TestBranchSlugMaxLen_DerivedFromMaxBranchName(t *testing.T) {
 // TestSlugifyBranchName_NeverStartsWithHyphen verifies that a slug can never
 // start with '-', preventing Git argument injection (see ValidateBranchName).
 func TestSlugifyBranchName_NeverStartsWithHyphen(t *testing.T) {
-	t.Parallel()
 	inputs := []string{
 		"-fix login", // starts with hyphen
 		"  -fix",     // whitespace then hyphen
@@ -123,7 +114,6 @@ func TestSlugifyBranchName_NeverStartsWithHyphen(t *testing.T) {
 // task's slug. It used to exist twice (exec and git), which is how the GC could
 // end up recognising a different shape than the executor writes.
 func TestTaskBranchSlugPrefix(t *testing.T) {
-	t.Parallel()
 	tests := map[string]string{
 		"task/count-hello-files-abc123":    "task/count-hello-files-",
 		"task/fix-login-bug-xyz789":        "task/fix-login-bug-",
@@ -151,7 +141,6 @@ func TestTaskBranchSlugPrefix(t *testing.T) {
 // executor builds one parses back to exactly TaskBranchPrefix+slug+"-", the same
 // string taskSlugPrefixSet records for the task.
 func TestTaskBranchSlugPrefix_RoundTripsWithSlugifier(t *testing.T) {
-	t.Parallel()
 	for _, title := range []string{
 		"Fix login bug #123", "Count lines in hello.c", "WIP", "  spaces  everywhere  ",
 		strings.Repeat("long ", 20),
@@ -171,7 +160,6 @@ func TestTaskBranchSlugPrefix_RoundTripsWithSlugifier(t *testing.T) {
 // GC depends on: a slug of arbitrary title text must always be a legal git ref,
 // otherwise the GC's `git branch --list task/<slug>-*` lookup is unsafe.
 func TestSlugifyBranchName_OutputPassesRefValidation(t *testing.T) {
-	t.Parallel()
 	for _, title := range []string{
 		"Fix login bug #123", "Merge: a/b [urgent]?", "~~~", "- leading",
 		"tab\tsep", "a^b", "a~1", "a*b", "a[b", `a\b`, "a:b", "a?b", "  ", "ok",

@@ -6,7 +6,6 @@ import (
 )
 
 func TestParseChangelog_Valid(t *testing.T) {
-	t.Parallel()
 	data := `{"hash":"aaa","version":"1.0.0","description":"Initial release"}
 {"hash":"bbb","version":"1.1.0","description":"Added feature"}`
 	entries := ParseChangelog(data)
@@ -28,7 +27,6 @@ func TestParseChangelog_Valid(t *testing.T) {
 }
 
 func TestParseChangelog_SkipsBlankLines(t *testing.T) {
-	t.Parallel()
 	data := "\n{\"hash\":\"aaa\",\"version\":\"1.0.0\",\"description\":\"x\"}\n\n   \n{\"hash\":\"bbb\",\"version\":\"1.1.0\",\"description\":\"y\"}\n"
 	entries := ParseChangelog(data)
 	if len(entries) != 2 {
@@ -40,7 +38,6 @@ func TestParseChangelog_SkipsBlankLines(t *testing.T) {
 }
 
 func TestParseChangelog_HandlesCRLF(t *testing.T) {
-	t.Parallel()
 	data := "{\"hash\":\"aaa\",\"version\":\"1.0.0\",\"description\":\"x\"}\r\n{\"hash\":\"bbb\",\"version\":\"1.1.0\",\"description\":\"y\"}\r\n"
 	entries := ParseChangelog(data)
 	if len(entries) != 2 {
@@ -49,7 +46,6 @@ func TestParseChangelog_HandlesCRLF(t *testing.T) {
 }
 
 func TestParseChangelog_SkipsMalformedLines(t *testing.T) {
-	t.Parallel()
 	data := "not json\n{\"hash\":\"aaa\",\"version\":\"1.0.0\",\"description\":\"x\"}\n{\"hash\":\n[1,2,3]"
 	entries := ParseChangelog(data)
 	if len(entries) != 1 {
@@ -61,7 +57,6 @@ func TestParseChangelog_SkipsMalformedLines(t *testing.T) {
 }
 
 func TestParseChangelog_Empty(t *testing.T) {
-	t.Parallel()
 	if got := ParseChangelog(""); got != nil {
 		t.Errorf("ParseChangelog(\"\") = %+v, want nil", got)
 	}
@@ -71,7 +66,6 @@ func TestParseChangelog_Empty(t *testing.T) {
 }
 
 func TestParseChangelog_PartialFields(t *testing.T) {
-	t.Parallel()
 	// Lines may omit optional fields; parsing must not fail.
 	data := "{\"hash\":\"aaa\",\"version\":\"1.0.0\"}"
 	entries := ParseChangelog(data)
@@ -84,7 +78,6 @@ func TestParseChangelog_PartialFields(t *testing.T) {
 }
 
 func TestChangelogSince_AfterMatch(t *testing.T) {
-	t.Parallel()
 	entries := []ChangelogEntry{
 		{Hash: "aaa", Version: "1.0.0", Description: "one"},
 		{Hash: "bbb", Version: "1.1.0", Description: "two"},
@@ -100,7 +93,6 @@ func TestChangelogSince_AfterMatch(t *testing.T) {
 }
 
 func TestChangelogSince_MatchAtStart(t *testing.T) {
-	t.Parallel()
 	entries := []ChangelogEntry{
 		{Hash: "aaa"}, {Hash: "bbb"}, {Hash: "ccc"},
 	}
@@ -111,7 +103,6 @@ func TestChangelogSince_MatchAtStart(t *testing.T) {
 }
 
 func TestChangelogSince_MatchAtEnd(t *testing.T) {
-	t.Parallel()
 	entries := []ChangelogEntry{{Hash: "aaa"}, {Hash: "bbb"}}
 	if got := ChangelogSince(entries, "bbb"); len(got) != 0 {
 		t.Errorf("got = %+v, want empty", got)
@@ -119,7 +110,6 @@ func TestChangelogSince_MatchAtEnd(t *testing.T) {
 }
 
 func TestChangelogSince_CaseInsensitive(t *testing.T) {
-	t.Parallel()
 	entries := []ChangelogEntry{
 		{Hash: "AAAA"},
 		{Hash: "bbb", Version: "1.1.0", Description: "newer"},
@@ -131,7 +121,6 @@ func TestChangelogSince_CaseInsensitive(t *testing.T) {
 }
 
 func TestChangelogSince_NoMatch(t *testing.T) {
-	t.Parallel()
 	entries := []ChangelogEntry{{Hash: "aaa"}, {Hash: "bbb"}}
 	// No matching hash → show nothing (per spec).
 	if got := ChangelogSince(entries, "zzz"); len(got) != 0 {
@@ -140,7 +129,6 @@ func TestChangelogSince_NoMatch(t *testing.T) {
 }
 
 func TestChangelogSince_EmptySinceHash(t *testing.T) {
-	t.Parallel()
 	entries := []ChangelogEntry{{Hash: "aaa"}}
 	if got := ChangelogSince(entries, ""); len(got) != 0 {
 		t.Errorf("got = %+v, want empty", got)
@@ -148,7 +136,6 @@ func TestChangelogSince_EmptySinceHash(t *testing.T) {
 }
 
 func TestChangelogSince_FirstMatchWins(t *testing.T) {
-	t.Parallel()
 	// Duplicate hashes: anchor on the FIRST (oldest) occurrence.
 	entries := []ChangelogEntry{
 		{Hash: "aaa"},
@@ -165,7 +152,6 @@ func TestChangelogSince_FirstMatchWins(t *testing.T) {
 }
 
 func TestParseChangelog_ChangelogSince_RoundTrip(t *testing.T) {
-	t.Parallel()
 	// End-to-end: parse a realistic file, then filter by installed hash.
 	lines := []string{}
 	hashes := []string{

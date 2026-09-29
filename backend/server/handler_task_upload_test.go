@@ -17,9 +17,6 @@ import (
 
 // taskUploadProject seeds an unsandboxed project whose directory is a real git repository, one task, and
 // that task's worktree — the directory an upload lands in, and the one whose git state is part of the claim.
-//
-// This is the rule for every test in this file: the calling test must not call t.Parallel(). t.Setenv
-// refuses to run in a parallel test, and TMPDIR is the process's own.
 func taskUploadProject(t *testing.T, id string) (*Server, string) {
 	t.Helper()
 	s := testServer(t)

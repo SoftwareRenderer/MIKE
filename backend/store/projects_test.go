@@ -7,7 +7,6 @@ import (
 )
 
 func TestCreateAndGetProject(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "My Project", "/tmp/repo")
 	if err := s.CreateProject(proj); err != nil {
@@ -24,7 +23,6 @@ func TestCreateAndGetProject(t *testing.T) {
 }
 
 func TestGetProjectNotFound(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	_, err := s.GetProject("nonexistent")
 	if err == nil {
@@ -33,7 +31,6 @@ func TestGetProjectNotFound(t *testing.T) {
 }
 
 func TestListProjects(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	// Create projects in non-alphabetical order
 	for _, name := range []string{"Charlie", "Alpha", "Bravo"} {
@@ -59,7 +56,6 @@ func TestListProjects(t *testing.T) {
 }
 
 func TestUpdateProject(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "Old Name", "/tmp/repo")
 	if err := s.CreateProject(proj); err != nil {
@@ -76,7 +72,6 @@ func TestUpdateProject(t *testing.T) {
 }
 
 func TestGetAllProjectCounts(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/repo")
 	if err := s.CreateProject(proj); err != nil {
@@ -119,7 +114,6 @@ func TestGetAllProjectCounts(t *testing.T) {
 }
 
 func TestGetAllProjectCountsMultipleProjects(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	for _, id := range []string{"proj-1", "proj-2"} {
 		proj := newProject(id, id, "/tmp/"+id)
@@ -149,7 +143,6 @@ func TestGetAllProjectCountsMultipleProjects(t *testing.T) {
 }
 
 func TestProjectUniquePath(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj1 := newProject("proj-1", "test", "/tmp/same-path")
 	if err := s.CreateProject(proj1); err != nil {
@@ -164,7 +157,6 @@ func TestProjectUniquePath(t *testing.T) {
 }
 
 func TestProjectCreatedAtUpdatedAt(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/repo")
 	if err := s.CreateProject(proj); err != nil {
@@ -181,7 +173,6 @@ func TestProjectCreatedAtUpdatedAt(t *testing.T) {
 }
 
 func TestDeleteProject(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 
 	// Create two projects
@@ -308,7 +299,6 @@ func TestDeleteProject(t *testing.T) {
 }
 
 func TestProjectSandboxEnabled(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 
 	// Create project with sandbox disabled (default)
@@ -361,7 +351,6 @@ func TestProjectSandboxEnabled(t *testing.T) {
 }
 
 func TestProjectSandboxNetworkIsolation(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 
 	// Create project with network isolation disabled (default)
@@ -423,7 +412,6 @@ func TestProjectSandboxNetworkIsolation(t *testing.T) {
 }
 
 func TestProjectSandboxImage(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 
 	// Create project with custom sandbox image
@@ -478,7 +466,6 @@ func TestProjectSandboxImage(t *testing.T) {
 }
 
 func TestProjectSandboxDockerfilePath(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 
 	// Create project with Dockerfile path
@@ -533,7 +520,6 @@ func TestProjectSandboxDockerfilePath(t *testing.T) {
 }
 
 func TestProjectSandboxMemoryLimit(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 
 	// Create project with default memory limit
@@ -599,7 +585,6 @@ func TestProjectSandboxMemoryLimit(t *testing.T) {
 }
 
 func TestProjectSandboxForwardPorts(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 
 	// Create project with forward ports
@@ -675,7 +660,6 @@ func TestProjectSandboxForwardPorts(t *testing.T) {
 }
 
 func TestProjectSandboxMounts(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 
 	// Create project with sandbox mounts
@@ -757,7 +741,6 @@ func TestProjectSandboxMounts(t *testing.T) {
 }
 
 func TestProjectSandboxEnvs(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 
 	// Create project with sandbox envs
@@ -840,7 +823,6 @@ func TestProjectSandboxEnvs(t *testing.T) {
 }
 
 func TestProjectSandboxCapabilities(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 
 	// Create project with sandbox capabilities
@@ -912,7 +894,6 @@ func TestProjectSandboxCapabilities(t *testing.T) {
 
 // TestProjectCommitAssistedByDefaultsOn: a row that never answered keeps the trailer.
 func TestProjectCommitAssistedByDefaultsOn(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 
 	if err := s.CreateProject(newProject("proj-new", "New", "/tmp/new")); err != nil {
@@ -935,7 +916,6 @@ func TestProjectCommitAssistedByDefaultsOn(t *testing.T) {
 
 // TestUpdateProjectCommitAssistedBy: an explicit "off" is stored as an answer, not collapsed into the default.
 func TestUpdateProjectCommitAssistedBy(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	off := false
 	proj := newProject("proj-1", "One", "/tmp/one")

@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import {
   apiGetJson, createTaskViaApi, csrfFetch, navigateToTask, waitForChatForm, waitForTaskState,
-  isolatedProject, getProjectId, gotoProject, waitForChatStill,
+  isolatedProject, getProjectId, gotoProject,
 } from './helpers';
 
 isolatedProject();
@@ -117,7 +117,7 @@ test.describe('returning to a tab whose reader had scrolled up', () => {
     const read = page.waitForResponse(r => r.url().includes('/messages') && !r.url().includes('before='));
     await page.evaluate(() => { document.dispatchEvent(new Event('visibilitychange', { bubbles: true })); });
     await read;
-    await waitForChatStill(page); // the read's rows have landed and their settle has run out
+    await page.waitForTimeout(1500);
 
     const after = await view(page);
     expect(after.last, 'the read took the newest message off the bottom of the transcript').toContain(newest);

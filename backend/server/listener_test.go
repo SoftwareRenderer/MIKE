@@ -108,7 +108,6 @@ func serveDied(served chan error) (error, bool) {
 // regression: a connection that has not sent its first byte must not delay the next
 // client.
 func TestHybridListener_SilentPeerDoesNotBlockOtherClients(t *testing.T) {
-	t.Parallel()
 	addr, served, stop := hybridTestServer(t, 5*time.Second, nil)
 	defer stop()
 
@@ -137,7 +136,6 @@ func TestHybridListener_SilentPeerDoesNotBlockOtherClients(t *testing.T) {
 // byte arrives as EOF or ECONNRESET, which net/http reads as a dead listener — Serve
 // must not end on it.
 func TestHybridListener_ZeroBytePeerDoesNotEndServe(t *testing.T) {
-	t.Parallel()
 	for _, mode := range []string{"eof", "reset"} {
 		t.Run(mode, func(t *testing.T) {
 			addr, served, stop := hybridTestServer(t, 5*time.Second, nil)
@@ -174,7 +172,6 @@ func TestHybridListener_ZeroBytePeerDoesNotEndServe(t *testing.T) {
 // TestHybridListener_SniffDeadlineDropsStalledPeer: past the timeout the stalled peer
 // is closed and the following request is served.
 func TestHybridListener_SniffDeadlineDropsStalledPeer(t *testing.T) {
-	t.Parallel()
 	addr, served, stop := hybridTestServer(t, 200*time.Millisecond, nil)
 	defer stop()
 
@@ -199,7 +196,6 @@ func TestHybridListener_SniffDeadlineDropsStalledPeer(t *testing.T) {
 // reader: net/http reads its request line from that byte, a TLS server its ClientHello
 // from the 0x16 record type.
 func TestHybridListener_ProtocolSniff(t *testing.T) {
-	t.Parallel()
 	t.Run("plain http", func(t *testing.T) {
 		addr, _, stop := hybridTestServer(t, 5*time.Second, nil)
 		defer stop()
@@ -225,7 +221,6 @@ func TestHybridListener_ProtocolSniff(t *testing.T) {
 // is the one error allowed to propagate — even with a stalled peer in flight, and
 // without waiting for that peer's sniff to expire.
 func TestHybridListener_ListenerCloseEndsServe(t *testing.T) {
-	t.Parallel()
 	addr, served, stop := hybridTestServer(t, 10*time.Second, nil)
 
 	silentPeer(t, addr) // occupy a sniff when the listener goes away
@@ -250,8 +245,6 @@ func TestHybridListener_ListenerCloseEndsServe(t *testing.T) {
 // TestSniffDropLogger_RateLimitsPerHost keeps a scan from burying the log while still
 // reporting each new host once.
 func TestSniffDropLogger_RateLimitsPerHost(t *testing.T) {
-	// Serial: logging.TestSink re-points the process-wide logger, so a concurrent test’s lines would
-	// land in this buffer.
 	buf, restore := logging.TestSink()
 	defer restore()
 

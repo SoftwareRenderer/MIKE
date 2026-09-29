@@ -9,7 +9,6 @@ import (
 // TestExtensionsTreeRefusesSymlinkEscape (security): /extensions/ is served with no session
 // (isPublicPath) and http.Dir follows symlinks, so a link makes its target world-readable.
 func TestExtensionsTreeRefusesSymlinkEscape(t *testing.T) {
-	t.Parallel()
 	root := t.TempDir()
 	outside := t.TempDir()
 	secret := filepath.Join(outside, "id_ed25519")

@@ -30,7 +30,6 @@ func issueTokenThroughAPI(t *testing.T, s *Server, label string) map[string]any 
 }
 
 func TestAPITokenCreateListRevoke(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 
 	created := issueTokenThroughAPI(t, s, "nightly importer")
@@ -67,7 +66,6 @@ func TestAPITokenCreateListRevoke(t *testing.T) {
 // The plaintext appears once, in the create response. A listing that carried it — or its digest —
 // would make Settings → About a credential dump for anyone who can open the tab.
 func TestAPITokenListingCarriesNoCredential(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	secret := issueTokenThroughAPI(t, s, "runner")["token"].(string)
 
@@ -90,7 +88,6 @@ func TestAPITokenListingCarriesNoCredential(t *testing.T) {
 }
 
 func TestAPITokenManagementNeedsTheSession(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 
 	// No cookie at all.
@@ -112,7 +109,6 @@ func TestAPITokenManagementNeedsTheSession(t *testing.T) {
 }
 
 func TestAPITokenCreateValidatesTheLabel(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 
 	cases := []struct {
@@ -143,7 +139,6 @@ func TestAPITokenCreateValidatesTheLabel(t *testing.T) {
 }
 
 func TestAPITokenRevokeReportsUnknownID(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	req := testRequest(http.MethodDelete, "/api/tokens/does-not-exist", nil)
 	if rr := testResponseAuth(t, s, req); rr.Code != http.StatusNotFound {

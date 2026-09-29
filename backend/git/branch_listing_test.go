@@ -10,7 +10,6 @@ import (
 )
 
 func TestListBranchNamesStripsGitDecoration(t *testing.T) {
-	t.Parallel()
 	repoDir, _, _, _, wm := setupTestRepo(t)
 	runGit(t, repoDir, "branch", "task/plain")
 	runGit(t, repoDir, "worktree", "add", "-b", "task/held-by-worktree", filepath.Join(t.TempDir(), "wt"))
@@ -30,7 +29,6 @@ func TestListBranchNamesStripsGitDecoration(t *testing.T) {
 }
 
 func TestListBranchNamesStripsCurrentBranchMarker(t *testing.T) {
-	t.Parallel()
 	repoDir, _, _, _, wm := setupTestRepo(t)
 	runGit(t, repoDir, "checkout", "-b", types.TaskBranchPrefix+"is-checked-out")
 
@@ -48,7 +46,6 @@ func TestListBranchNamesStripsCurrentBranchMarker(t *testing.T) {
 }
 
 func TestListBranchNamesSlugPrefixMatchesOnlyItsOwn(t *testing.T) {
-	t.Parallel()
 	repoDir, _, _, _, wm := setupTestRepo(t)
 	runGit(t, repoDir, "branch", "task/hey-zimxpq")
 	runGit(t, repoDir, "branch", "task/other-abc123")
@@ -63,7 +60,6 @@ func TestListBranchNamesSlugPrefixMatchesOnlyItsOwn(t *testing.T) {
 }
 
 func TestListBranchNamesSweepsOneSegmentOnly(t *testing.T) {
-	t.Parallel()
 	repoDir, _, _, _, wm := setupTestRepo(t)
 	runGit(t, repoDir, "branch", "task/human-made-this")
 	runGit(t, repoDir, "branch", "task/human/made-this")

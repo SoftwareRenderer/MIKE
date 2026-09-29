@@ -5,7 +5,6 @@ import (
 )
 
 func TestSanitizeURL(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name string
 		in   string
@@ -37,7 +36,6 @@ func TestSanitizeURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			got := sanitizeURL(tt.in)
 			if got != tt.want {
 				t.Errorf("sanitizeURL(%q) = %q, want %q", tt.in, got, tt.want)
@@ -47,7 +45,6 @@ func TestSanitizeURL(t *testing.T) {
 }
 
 func TestSanitizeManifestURLs(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name           string
 		homepage       string
@@ -65,7 +62,6 @@ func TestSanitizeManifestURLs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			m := &ExtensionManifest{
 				DisplayName: "Test",
 				Homepage:    tt.homepage,
@@ -83,7 +79,6 @@ func TestSanitizeManifestURLs(t *testing.T) {
 }
 
 func TestSanitizeManifestURLs_Nil(t *testing.T) {
-	t.Parallel()
 	// Should not panic on nil
 	sanitizeManifestURLs(nil)
 }

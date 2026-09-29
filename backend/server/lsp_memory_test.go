@@ -11,7 +11,6 @@ import (
 // TestHandleLSPMemory_Unauthenticated verifies the LSP sandbox memory
 // endpoint requires a session (like the rest of /api).
 func TestHandleLSPMemory_Unauthenticated(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 
 	req := testRequest(http.MethodGet, "/api/lsp/memory?workspace=/tmp/ws&file=/tmp/ws/main.go", nil)
@@ -26,7 +25,6 @@ func TestHandleLSPMemory_Unauthenticated(t *testing.T) {
 // extension is installed in the test environment, so the sandbox reports
 // not running.
 func TestHandleLSPMemory_Authenticated(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 
 	// The workspace validator restricts to project roots — create a project.
@@ -57,7 +55,6 @@ func TestHandleLSPMemory_Authenticated(t *testing.T) {
 // TestHandleLSPMemory_WorkspaceNotAProject verifies the workspace validator
 // rejects non-project paths on the authenticated route.
 func TestHandleLSPMemory_WorkspaceNotAProject(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 
 	q := url.Values{"workspace": {"/tmp/not-a-project"}, "file": {"/tmp/not-a-project/main.go"}}
@@ -70,7 +67,6 @@ func TestHandleLSPMemory_WorkspaceNotAProject(t *testing.T) {
 // TestHandleLSPMemory_MissingParams verifies parameter validation on the
 // authenticated route.
 func TestHandleLSPMemory_MissingParams(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 
 	cookie, csrfToken := loginTestCSRF(t, s)

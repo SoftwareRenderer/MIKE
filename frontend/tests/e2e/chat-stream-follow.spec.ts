@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import {
   isolatedProject, gotoProject, getProjectId, csrfFetch, navigateToTask, waitForChatFormReady,
-  waitForSendButton, sendMessage, waitForChatGrowth, waitForChatStill,
+  waitForSendButton, sendMessage,
 } from './helpers';
 
 // Whether a reader who scrolled away mid-answer is left where they stopped is a browser question: the
@@ -90,7 +90,7 @@ async function openConversation(page: Page): Promise<{ projectId: string; taskId
   await expect(page.locator('.chat-messages [data-entry-id]').first()).toBeVisible({ timeout: 15000 });
   await waitForSendButton(page);
   // Let the opening pin finish, so the gesture is not measured against it.
-  await waitForChatStill(page);
+  await page.waitForTimeout(800);
   return { projectId, taskId };
 }
 
@@ -111,7 +111,7 @@ test.describe('Following a streamed answer', () => {
     // turn starts and again after it ends, so it cannot mark the middle.
     await sendMessage(page, `stream-follow ${Date.now()} ${STREAMING_PROMPT}`);
     await expect(page.locator('.btn-stop')).toBeVisible({ timeout: 20000 });
-    await waitForChatGrowth(page); // tokens are arriving: the wheel has to land mid-stream, not before the first chunk
+    await page.waitForTimeout(400);
 
     // The reader leaves the bottom while tokens are arriving.
     const box = await page.locator('.chat-messages').boundingBox();
@@ -122,7 +122,7 @@ test.describe('Following a streamed answer', () => {
 
     // The answer finishes, with the last layout passes it draws (the stats line, the review bar).
     await waitForSendButton(page, 30000);
-    await waitForChatStill(page); // the last layout passes have landed; a pin that arrives later is still counted
+    await page.waitForTimeout(1500);
     const end = await position(page);
     const rec = await page.evaluate(() => JSON.parse(JSON.stringify((window as any).__rec))) as Rec;
     expect(rec.firstWheelUp, 'the wheel never reached the chat').toBeGreaterThan(0);

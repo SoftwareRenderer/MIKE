@@ -321,8 +321,6 @@ func TestAutoAnswer_UserStartedSubtaskStillWaitsForTheUser(t *testing.T) {
 	if row := waitForStatus(t, run, types.StatusReview); row == nil {
 		t.Fatalf("task never reached review (streaming calls = %d)", m.streamCalls.Load())
 	}
-	// The window an auto-answer would land in: it follows the review transition immediately, so the
-	// count is only evidence of restraint once that moment has passed.
 	time.Sleep(500 * time.Millisecond)
 	if got := m.streamCalls.Load(); got != 1 {
 		t.Errorf("streaming calls = %d, want 1: a user-started run must wait for the user after a text answer", got)
@@ -345,7 +343,6 @@ func TestAutoAnswer_PlanModeStopIsTheDeliverable(t *testing.T) {
 	if row := waitForStatus(t, run, types.StatusReview); row == nil {
 		t.Fatalf("task never reached review (streaming calls = %d)", m.streamCalls.Load())
 	}
-	// The window an auto-answer would land in, as in the test above.
 	time.Sleep(500 * time.Millisecond)
 	if got := m.streamCalls.Load(); got != 1 {
 		t.Errorf("streaming calls = %d, want 1", got)

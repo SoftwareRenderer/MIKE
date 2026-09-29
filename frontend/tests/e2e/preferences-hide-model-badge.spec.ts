@@ -5,7 +5,7 @@ import { apiPutConfig, apiGetConfig, waitForConfig, getProjectId, createTaskViaA
 // badge is shown on task cards by default; "Hide model badge" removes it.
 // The preference persists server-side (hide_model_badge in /api/config).
 //
-// Runs on a lane server (`ISOLATED_SPECS`): mutates server config via the UI Save flow.
+// Runs in the `isolated` project: mutates server config via the UI Save flow.
 
 const SETTINGS_BTN = '.icon-btn[aria-label="Settings"]';
 const PREFERENCES_TAB = 'button.tab-btn:has-text("Preferences")';

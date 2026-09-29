@@ -28,7 +28,6 @@ func mustOut(t *testing.T, dir string, args ...string) string {
 }
 
 func TestTaskDiffAtCheckpointShowsEveryCapturedFile(t *testing.T) {
-	t.Parallel()
 	h, s, wm, worktreesDir := newTestGitHandler(t)
 
 	projPath := t.TempDir()

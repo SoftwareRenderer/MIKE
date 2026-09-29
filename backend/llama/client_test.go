@@ -22,7 +22,6 @@ import (
 // ends with ErrStreamSilent naming the silence. It must never read as "deadline exceeded": that
 // borrowed error sent people looking for a timeout the product does not have.
 func TestChatStream_SilenceCeilingEndsStream(t *testing.T) {
-	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		flusher, ok := w.(http.Flusher)
 		if !ok {
@@ -63,7 +62,6 @@ func TestChatStream_SilenceCeilingEndsStream(t *testing.T) {
 // accepts the request and says nothing while it works. Silence is announced and the call is ended
 // by the caller's context, never by the silence itself.
 func TestChatStream_SilenceBeforeFirstTokenIsWaitedOut(t *testing.T) {
-	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
@@ -98,7 +96,6 @@ func TestChatStream_SilenceBeforeFirstTokenIsWaitedOut(t *testing.T) {
 // TestChatStream_SilenceThatResumesCompletes: a provider that goes quiet and then finishes is a
 // successful response, and the notice that fired while it was quiet is not an error.
 func TestChatStream_SilenceThatResumesCompletes(t *testing.T) {
-	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f, ok := w.(http.Flusher)
 		if !ok {
@@ -116,9 +113,8 @@ func TestChatStream_SilenceThatResumesCompletes(t *testing.T) {
 	c := NewLlamaClient(server.URL, "test-model", "off", "")
 	c.noticeMidResp = 30 * time.Millisecond
 	c.waitTick = 10 * time.Millisecond
-	// The notice fires on the stream's own goroutine, so the count is not this goroutine's to hold.
-	var notices atomic.Int64
-	c.SetSilencePolicy(0, func(time.Duration, string) { notices.Add(1) })
+	var notices int
+	c.SetSilencePolicy(0, func(time.Duration, string) { notices++ })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -126,14 +122,13 @@ func TestChatStream_SilenceThatResumesCompletes(t *testing.T) {
 	if _, err := c.ChatStream(ctx, testMessages(), nil, func(types.ChatChoice) {}, nil, nil); err != nil {
 		t.Fatalf("a resumed stream must complete, got: %v", err)
 	}
-	if notices.Load() == 0 {
+	if notices == 0 {
 		t.Error("the silent stretch was never announced")
 	}
 }
 
 // TestChatStream_TimedOutRace closes the connection as the idle timer fires.
 func TestChatStream_TimedOutRace(t *testing.T) {
-	t.Parallel()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -178,7 +173,6 @@ func handleRaceConn(t *testing.T, conn net.Conn) {
 // TestChatStream_ProductionTimedOutRace calls the real ChatStream
 // and triggers the timedOut race by closing the connection at the deadline.
 func TestChatStream_ProductionTimedOutRace(t *testing.T) {
-	t.Parallel()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -220,7 +214,6 @@ func TestChatStream_ProductionTimedOutRace(t *testing.T) {
 
 // TestHasContent verifies the hasContent helper detects meaningful token deltas.
 func TestHasContent(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name   string
 		choice types.ChatChoice
@@ -300,7 +293,6 @@ func TestHasContent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			got := hasContent(tt.choice)
 			if got != tt.want {
 				t.Errorf("hasContent() = %v, want %v", got, tt.want)
@@ -317,7 +309,6 @@ func ptrStr(s string) *string {
 // never concatenation: when both fields are set, reasoning_content wins
 // (concatenating would duplicate the text).
 func TestNormalizeReasoning(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name        string
 		choice      types.ChatChoice
@@ -370,7 +361,6 @@ func TestNormalizeReasoning(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			choice := tt.choice
 			normalizeReasoning(&choice)
 
@@ -397,7 +387,6 @@ func TestNormalizeReasoning(t *testing.T) {
 	}
 
 	t.Run("nil choice is a no-op", func(t *testing.T) {
-		t.Parallel()
 		normalizeReasoning(nil)
 	})
 }
@@ -407,7 +396,6 @@ func TestNormalizeReasoning(t *testing.T) {
 // first-token arrival — vLLM's "reasoning" previously left firstTokenTime
 // unset, deadening the wall-clock fallback.
 func TestChatStream_ReasoningFieldVariants(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name  string
 		delta string // raw delta JSON, as the server would send it
@@ -466,7 +454,6 @@ func TestChatStream_ReasoningFieldVariants(t *testing.T) {
 // TestChatStream_WallClockTimingFallback verifies that ChatStream calculates
 // prompt_ms and predicted_ms from wall-clock when the provider doesn't supply Timings.
 func TestChatStream_WallClockTimingFallback(t *testing.T) {
-	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		flusher, ok := w.(http.Flusher)
 		if !ok {
@@ -537,7 +524,6 @@ func TestChatStream_WallClockTimingFallback(t *testing.T) {
 // TestChatStream_TimingsFromProvider verifies that provider-supplied Timings
 // take precedence over wall-clock estimation.
 func TestChatStream_TimingsFromProvider(t *testing.T) {
-	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		flusher, ok := w.(http.Flusher)
 		if !ok {
@@ -585,7 +571,6 @@ func TestChatStream_TimingsFromProvider(t *testing.T) {
 // TestChatCompletion_WallClockTimingFallback verifies that ChatCompletion calculates
 // prompt_ms and predicted_ms from wall-clock when the provider doesn't supply Timings.
 func TestChatCompletion_WallClockTimingFallback(t *testing.T) {
-	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Simulate processing delay
 		time.Sleep(100 * time.Millisecond)
@@ -644,7 +629,6 @@ func TestChatCompletion_WallClockTimingFallback(t *testing.T) {
 // to reasoning returns empty text plus usage, not an error. vLLM sends
 // content:null here, which used to fail every small-max_tokens utility call.
 func TestChatCompletion_EmptyContentIsNotAnError(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name    string
 		content string // raw JSON value for message.content
@@ -691,7 +675,6 @@ func TestChatCompletion_EmptyContentIsNotAnError(t *testing.T) {
 // for both providers' frame shapes — the returned *ChatUsage only exists after
 // the stream ends, too late to drive a live counter.
 func TestChatStream_OnUsageCallback(t *testing.T) {
-	t.Parallel()
 	t.Run("llama.cpp per-frame timings produce monotonic snapshots", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/event-stream")
@@ -812,7 +795,6 @@ func TestChatStream_OnUsageCallback(t *testing.T) {
 // TestChatStream_VllmMetricsTiming verifies that vLLM's metrics block supplies
 // prompt/gen times when no timings block exists (vLLM never sends timings).
 func TestChatStream_VllmMetricsTiming(t *testing.T) {
-	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Write([]byte(`data: {"choices":[{"delta":{"content":"hi"},"finish_reason":null}]}` + "\n\n"))
@@ -844,7 +826,6 @@ func TestChatStream_VllmMetricsTiming(t *testing.T) {
 // TestChatStream_TimingsBeatVllmMetrics verifies that when a server sends both
 // a timings block and a metrics block, timings wins.
 func TestChatStream_TimingsBeatVllmMetrics(t *testing.T) {
-	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Write([]byte(`data: {"choices":[{"delta":{"content":"hi"},"finish_reason":null}],"usage":{"prompt_tokens":100,"completion_tokens":3,"total_tokens":103},"timings":{"cache_n":0,"prompt_n":100,"prompt_ms":50.0,"predicted_n":3,"predicted_ms":30.0},"metrics":{"time_to_first_token_ms":999.0,"generation_time_ms":999.0}}` + "\n\n"))
@@ -868,7 +849,6 @@ func TestChatStream_TimingsBeatVllmMetrics(t *testing.T) {
 // TestChatCompletion_VllmMetricsTiming: metrics also supply timing on the
 // non-streaming path, which all utility calls use.
 func TestChatCompletion_VllmMetricsTiming(t *testing.T) {
-	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		// vLLM non-streaming shape: usage + metrics, prompt_tokens_details null.
@@ -892,7 +872,6 @@ func TestChatCompletion_VllmMetricsTiming(t *testing.T) {
 // --- LlamaError Tests ---
 
 func TestLlamaError_ErrorText(t *testing.T) {
-	t.Parallel()
 	e := &LlamaError{StatusCode: 429, Body: `{"error":"Rate limit exceeded"}`}
 	got := e.Error()
 	want := `llama error 429: {"error":"Rate limit exceeded"}`
@@ -904,7 +883,6 @@ func TestLlamaError_ErrorText(t *testing.T) {
 // TestLlamaError_IsRequestRejected pins which refusals end the run at once. A 4xx that a later call
 // could get an answer from must stay retryable, or a rate-limited provider kills the task.
 func TestLlamaError_IsRequestRejected(t *testing.T) {
-	t.Parallel()
 	rejected := []int{400, 401, 403, 404, 413, 422}
 	retryable := []int{200, 408, 429, 500, 502, 503}
 	for _, code := range rejected {
@@ -920,7 +898,6 @@ func TestLlamaError_IsRequestRejected(t *testing.T) {
 }
 
 func TestLlamaError_IsRateLimit(t *testing.T) {
-	t.Parallel()
 	if !(&LlamaError{StatusCode: 429}).IsRateLimit() {
 		t.Error("IsRateLimit() = false for 429, want true")
 	}
@@ -933,7 +910,6 @@ func TestLlamaError_IsRateLimit(t *testing.T) {
 }
 
 func TestParseRetryAfter(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name  string
 		input string
@@ -949,7 +925,6 @@ func TestParseRetryAfter(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			got := parseRetryAfter(tc.input)
 			// Allow small tolerance for the HTTP-date case (time.Until).
 			if diff := got - tc.want; diff < -2*time.Second || diff > 2*time.Second {
@@ -960,7 +935,6 @@ func TestParseRetryAfter(t *testing.T) {
 }
 
 func TestNewLlamaError_ParsesRetryAfter(t *testing.T) {
-	t.Parallel()
 	hdr := http.Header{}
 	hdr.Set("Retry-After", "45")
 	e := newLlamaError(429, hdr, "rate limited")
@@ -976,7 +950,6 @@ func TestNewLlamaError_ParsesRetryAfter(t *testing.T) {
 }
 
 func TestChatStream_ReturnsLlamaError(t *testing.T) {
-	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Retry-After", "15")
 		w.WriteHeader(http.StatusTooManyRequests)
@@ -1082,7 +1055,6 @@ func assertReasoningParams(t *testing.T, captured map[string]any, tc reasoningPa
 
 // TestChatStream_ReasoningParams: reasoning request fields per effort level (streaming).
 func TestChatStream_ReasoningParams(t *testing.T) {
-	t.Parallel()
 	var captured map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -1121,7 +1093,6 @@ func TestChatStream_ReasoningParams(t *testing.T) {
 // stream_options.include_usage is set, which silently zeroed all token stats,
 // cost and timings for the turn.
 func TestChatStream_StreamOptionsRequestsUsage(t *testing.T) {
-	t.Parallel()
 	var captured map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -1154,7 +1125,6 @@ func TestChatStream_StreamOptionsRequestsUsage(t *testing.T) {
 // include_usage produces (vLLM sends "choices":[] alongside usage) is consumed
 // without invoking the token callback, and that its counts are returned.
 func TestChatStream_UsageFrameWithEmptyChoices(t *testing.T) {
-	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":null}]}\n\n"))
@@ -1189,7 +1159,6 @@ func TestChatStream_UsageFrameWithEmptyChoices(t *testing.T) {
 
 // TestChatCompletion_ReasoningParams: same, on the non-streaming path.
 func TestChatCompletion_ReasoningParams(t *testing.T) {
-	t.Parallel()
 	var captured map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -1228,7 +1197,6 @@ func hitCountingServer(hits *atomic.Int32) *httptest.Server {
 }
 
 func TestChatCompletion_NoUserMessage(t *testing.T) {
-	t.Parallel()
 	var hits atomic.Int32
 	server := hitCountingServer(&hits)
 	defer server.Close()
@@ -1257,7 +1225,6 @@ func TestChatCompletion_NoUserMessage(t *testing.T) {
 }
 
 func TestChatStream_NoUserMessage(t *testing.T) {
-	t.Parallel()
 	var hits atomic.Int32
 	server := hitCountingServer(&hits)
 	defer server.Close()
@@ -1286,7 +1253,6 @@ func TestChatStream_NoUserMessage(t *testing.T) {
 // A stream that ends without its terminal frame came from a provider that died, not one that
 // finished. Reported as a successful empty completion, it is retried by nobody.
 func TestChatStream_AbortVsCompletion(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name    string
 		frames  []string // SSE payload of each frame, without the "data: " prefix
@@ -1349,7 +1315,6 @@ func TestChatStream_AbortVsCompletion(t *testing.T) {
 // A connection torn down mid-response stays an error of its own: the transport said something more
 // useful than ErrStreamAborted can.
 func TestChatStream_HardAbortMidStream(t *testing.T) {
-	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hj, ok := w.(http.Hijacker)
 		if !ok {

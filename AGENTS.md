@@ -37,8 +37,8 @@ record there rather than arguing inside the rule. When you learn something, *rep
   before claiming done, and `make check-race` on whatever you touched — a package's own green tests prove
   nothing about code that only runs when a task does. `RACE_PKGS` in the Makefile names the packages,
   and `docs/testing.md` names the ones it omits. `make lint` is the static half alone.
-- **E2E runs kill your dev server** (global-setup owns the lane ports — 3000, one per `ISOLATED_SPECS`
-  shard from 3001 up, and 9999) — restart with `make run` afterwards.
+- **E2E runs kill your dev server** (global-setup owns ports 3000/3001/9999) — restart with `make run`
+  afterwards.
 - Run the dev server in **background** (`&`).
 
 ### Workflow
@@ -135,34 +135,20 @@ curl -sk https://localhost:3000/api/config   # 401 JSON = up; use http:// with -
 
 ```bash
 make check | make lint | make check-race                 # gate / static half / -race over the lock packages
-make check-fast                                          # iteration lane: touched pkgs (cache on) + touched frontend + the cheap gates
 make test-go | make test-frontend                        # Go unit / vitest + the frontend gates
 make test-diff                                           # only the touched Go packages, cache left on
-make test-time [LANES=gates check go vitest e2e]         # what each gate costs, measured
 cd frontend && npx playwright test [spec|--grep name]    # e2e (mock LLM, own servers)
-make test-time                                           # full e2e run with setup/tests/teardown timed
 cd frontend && npm run check:dead-surface                # untagged test-only exports; the CSS ceiling
-cd frontend && npm run check:sleeps                      # an unreasoned waitForTimeout; the sleep ceiling
 python3 scripts/gen-registry.py --check                  # registry.json matches the manifests
 ```
 
-- **`make check` runs two lanes at once** — Go, and docs-plus-frontend — and both run to their end, because a
-  red step stops its own lane only. `scripts/check-lanes.sh` holds the step table; its per-lane logs land in
-  `data/check-lanes/`.
-- **Iterate with `make check-fast`; `make check` stays the only claim of done.** It runs the touched Go
-  packages with the cache left on, the touched frontend files and the cheap gates — `docs/testing.md → Running less than the gate`.
-- **A cost claim in a doc is a number from `make test-time`.** An unmeasured timing is a work estimate, and
-  `make docs-check` refuses one; the record, the lanes and their filters: `docs/testing.md → Measured gate cost`.
 - **A spec exists only if it needs a browser or the real backend.** Component state belongs in vitest.
   Never write a `readFileSync('../Foo.svelte')` + `toContain(...)` "test".
-- **Config-modifying specs run on a lane server** (`ISOLATED_SPECS` in `frontend/tests/lanes.ts`; one worker
-  per lane), and **any spec that runs an executor turn owns its project** — turns are queued per project, so a
-  shared project makes you wait behind every other worker. Specs on the global view must not.
+- **Config-modifying specs run in the `isolated` project** (`ISOLATED_SPECS`), and **any spec that runs an
+  executor turn owns its project** — turns are queued per project, so a shared project makes you wait
+  behind every other worker. Specs on the global view must not.
 - **`[role="dialog"]` is never a unique locator** — filter by content.
 - Go tests are deterministic: `testServer(t)` for an isolated server, `t.TempDir()` for files, no network.
-- **A new top-level Go test opens with `t.Parallel()`** unless it takes process state — an environment
-  variable, the working directory, the log sink, a package-level seam. Those stay serial and say which.
-  The families and the timings: `docs/testing.md`.
 - A frontend test file that imports a module using Svelte compiler macros (`$state`, `$derived`, `$effect`)
   **must** be `.svelte.ts` (or `.unit.svelte.ts`); plain `.ts` does not see the macros.
 - The e2e harness must leave nothing behind — verify processes, ports and `/tmp` state after touching
@@ -471,10 +457,9 @@ Apache-2.0, and a dependency's license is not changed by ours.
 
 Logs go to server stdout or `/tmp/kanban.log` through `pkg/logging` (see below) and are greppable by
 `component=` and `task_id=`. Worktrees live under `.worktrees/`. A stale frontend is a rebuild plus a hard
-refresh. E2E connection failures are stale processes on the lane ports (3000, 3001 up, 9999) — see
-`docs/testing.md`. The flight recorder is always on, writing `data/kanban.trace` and rotating the previous
-file to `kanban.trace.old` every 30 s: `go tool trace -http=:8080 data/kanban.trace`. Ad-hoc browser probes:
-`docs/testing.md`.
+refresh. E2E connection failures are stale processes on 3000/3001/9999 — see `docs/testing.md`. The flight
+recorder is always on, writing `data/kanban.trace` and rotating the previous file to `kanban.trace.old`
+every 30 s: `go tool trace -http=:8080 data/kanban.trace`. Ad-hoc browser probes: `docs/testing.md`.
 
 ### Logging
 

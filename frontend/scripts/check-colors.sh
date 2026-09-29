@@ -40,7 +40,7 @@ allow=(
 
 # Where chrome paints: components, and the stylesheets they import. Not `*.ts` — see the data-colour note above.
 scanned="$(find src -type f \( -name '*.svelte' -o -name '*.css' \) -not -path 'src/app.css' | sort)"
-# A scan that found nothing is not a clean scan; scripts/svelte-check-once.sh refuses for the same reason.
+# A scan that found nothing is not a clean scan; check-unused.sh refuses for the same reason.
 [ -n "$scanned" ] || { echo "check-colors: no source file to scan under $PWD/src" >&2; exit 1; }
 
 matched=()

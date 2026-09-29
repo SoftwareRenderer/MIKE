@@ -10,7 +10,6 @@ import (
 // broadcasts. Tracked files matching an ignore rule are NOT ignored (matching
 // git check-ignore default behavior), so their events still get broadcast.
 func TestIsGitIgnored(t *testing.T) {
-	t.Parallel()
 	dir := t.TempDir()
 	repo := filepath.Join(dir, "repo")
 	os.MkdirAll(repo, 0o755)
@@ -45,7 +44,6 @@ func TestIsGitIgnored(t *testing.T) {
 		{"empty path", "", false},
 	}
 
-	// The subtests stay serial: they share one fixture repo, and every case runs git check-ignore inside it.
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got := IsGitIgnored(repo, tc.relPath)

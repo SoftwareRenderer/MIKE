@@ -33,7 +33,6 @@ func makeCloneSource(t *testing.T, path string, commits int) {
 }
 
 func TestClone(t *testing.T) {
-	t.Parallel()
 	tmp := t.TempDir()
 	srcDir := filepath.Join(tmp, "source")
 	makeCloneSource(t, srcDir, 20)
@@ -76,7 +75,6 @@ func TestClone(t *testing.T) {
 // (-c protocol.ext.allow=never) must come BEFORE the `clone` subcommand, so the
 // process that parses the client-supplied URL is the one that carries it.
 func TestCloneArgs(t *testing.T) {
-	t.Parallel()
 	args := CloneArgs("https://example.com/x/y.git", "/tmp/dst")
 
 	// Locate the subcommand and the config override.
@@ -114,7 +112,6 @@ func TestCloneArgs(t *testing.T) {
 // plus an explicit transport allowlist so helper transports (ext:, fd:, …) are
 // refused even on a host whose git config enables them.
 func TestCloneEnv(t *testing.T) {
-	t.Parallel()
 	env := CloneEnv()
 
 	if !slices.Contains(env, "GIT_TERMINAL_PROMPT=0") {
@@ -141,7 +138,6 @@ func TestCloneEnv(t *testing.T) {
 // `ext` helper and an earlier `-c protocol.ext.allow=always` is present, the
 // flags CloneArgs/CloneEnv add win and `ext::` never executes.
 func TestClone_HostileEnvironment(t *testing.T) {
-	t.Parallel()
 	tmp := t.TempDir()
 	canary := filepath.Join(tmp, "pwned")
 
@@ -162,7 +158,6 @@ func TestClone_HostileEnvironment(t *testing.T) {
 }
 
 func TestClone_NilCallback(t *testing.T) {
-	t.Parallel()
 	tmp := t.TempDir()
 	src := filepath.Join(tmp, "source")
 	makeCloneSource(t, src, 3)
@@ -180,7 +175,6 @@ func TestClone_NilCallback(t *testing.T) {
 }
 
 func TestClone_Error(t *testing.T) {
-	t.Parallel()
 	tmp := t.TempDir()
 	missing := filepath.Join(tmp, "does-not-exist")
 
@@ -196,7 +190,6 @@ func TestClone_Error(t *testing.T) {
 // TestValidateCloneURL is the shared gate every clone of a caller-supplied source
 // passes through — project creation and an extension checkout alike.
 func TestValidateCloneURL(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name    string
 		gitURL  string
@@ -249,7 +242,6 @@ func TestValidateCloneURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			err := ValidateCloneURL(tt.gitURL)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateCloneURL(%q) = %v, wantErr %v", tt.gitURL, err, tt.wantErr)
@@ -262,7 +254,6 @@ func TestValidateCloneURL(t *testing.T) {
 // clone restriction in sync: every scheme the validator accepts must also be one
 // git is told to allow, and no helper transport may appear in either.
 func TestValidateCloneURL_AllowlistMatchesCloneEnv(t *testing.T) {
-	t.Parallel()
 	for _, scheme := range CloneAllowedProtocols {
 		if err := ValidateCloneURL(scheme + "://example.com/repo.git"); err != nil {
 			t.Errorf("allowed protocol %q rejected by ValidateCloneURL: %v", scheme, err)

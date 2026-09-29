@@ -67,7 +67,6 @@ func sendBody(content string, extra map[string]any) map[string]any {
 }
 
 func TestSendWithReplaceTruncatesAndSendsTheEditedRow(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projectID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projectID, "edit and send")
@@ -104,7 +103,6 @@ func TestSendWithReplaceTruncatesAndSendsTheEditedRow(t *testing.T) {
 
 // A plain repeat is still refused: without this, the test above would only prove that nothing was checked.
 func TestSendWithoutReplaceStillDedupesTheLastRow(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projectID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projectID, "double submit")
@@ -129,7 +127,6 @@ func TestSendWithoutReplaceStillDedupesTheLastRow(t *testing.T) {
 // A replace may drop what the agent wrote after the named row, but not a newer user question: truncating past
 // one would delete turns the client never saw, which is what a queued edit flushed after a reconnect would do.
 func TestSendWithReplaceRefusesAThreadThatMovedOn(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projectID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projectID, "stale replace")

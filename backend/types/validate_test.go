@@ -6,7 +6,6 @@ import (
 )
 
 func TestValidateBranchName(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name    string
 		input   string
@@ -41,7 +40,6 @@ func TestValidateBranchName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			err := ValidateBranchName(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateBranchName(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
@@ -51,7 +49,6 @@ func TestValidateBranchName(t *testing.T) {
 }
 
 func TestValidateGitRef(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name    string
 		input   string
@@ -100,7 +97,6 @@ func TestValidateGitRef(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			err := ValidateGitRef(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateGitRef(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
@@ -110,7 +106,6 @@ func TestValidateGitRef(t *testing.T) {
 }
 
 func TestValidateTaskID(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name    string
 		input   string
@@ -126,7 +121,6 @@ func TestValidateTaskID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			err := ValidateTaskID(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateTaskID(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
@@ -136,7 +130,6 @@ func TestValidateTaskID(t *testing.T) {
 }
 
 func TestNormalizeSandboxHostIP(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name    string
 		input   string
@@ -162,7 +155,6 @@ func TestNormalizeSandboxHostIP(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			got, err := NormalizeSandboxHostIP(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("NormalizeSandboxHostIP(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
@@ -175,7 +167,6 @@ func TestNormalizeSandboxHostIP(t *testing.T) {
 }
 
 func TestValidateSandboxForwardPorts(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name    string
 		ports   []PortForward
@@ -195,7 +186,6 @@ func TestValidateSandboxForwardPorts(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			err := ValidateSandboxForwardPorts(tt.ports)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateSandboxForwardPorts(%+v) error = %v, wantErr %v", tt.ports, err, tt.wantErr)
@@ -207,7 +197,6 @@ func TestValidateSandboxForwardPorts(t *testing.T) {
 // The error must name the port the user configured, since the Settings table shows no
 // row numbers.
 func TestValidateSandboxForwardPortsNamesThePort(t *testing.T) {
-	t.Parallel()
 	err := ValidateSandboxForwardPorts([]PortForward{{ContainerPort: 3000}, {ContainerPort: 8080, HostIP: "nope"}})
 	if err == nil {
 		t.Fatal("expected an error for a bind address that is not an IP address")
@@ -222,7 +211,6 @@ func TestValidateSandboxForwardPortsNamesThePort(t *testing.T) {
 // one is a flag to `read-tree`, and a rev (`HEAD`, `main~1`) is a different commit than
 // the one the user clicked, which discards work rather than restoring it.
 func TestValidateCommitHash(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name    string
 		hash    string
@@ -244,7 +232,6 @@ func TestValidateCommitHash(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			err := ValidateCommitHash(tt.hash)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateCommitHash(%q) error = %v, wantErr %v", tt.hash, err, tt.wantErr)

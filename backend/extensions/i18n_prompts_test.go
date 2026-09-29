@@ -46,7 +46,6 @@ func withPrompts(root string) {
 }
 
 func TestPromptOverlayFor(t *testing.T) {
-	t.Parallel()
 	// No pack enabled is English in both halves: no templates and no locale.
 	got := PromptOverlayFor(nil, t.TempDir())
 	if got.Dir != "" || got.Locale != "" {
@@ -186,7 +185,6 @@ func TestPromptOverlayFor(t *testing.T) {
 // *directory* that is a symlink must not become a pass to the host, because the
 // resolved path is what the template reader would be handed.
 func TestPromptDirInPackSymlinkedPackDir(t *testing.T) {
-	t.Parallel()
 	realRoot := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(realRoot, "prompts"), 0o755); err != nil {
 		t.Fatal(err)

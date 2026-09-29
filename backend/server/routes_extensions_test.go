@@ -16,8 +16,6 @@ import (
 // renders a directory index for any directory lacking index.html, which
 // would disclose the installed-extension tree; such requests must 404.
 func TestExtensionsStatic_NoDirectoryListings(t *testing.T) {
-	// Serial: t.Chdir moves the process’s working directory, and /extensions/ is a CWD-relative
-	// http.Dir resolved per request.
 	s := testServer(t)
 
 	// The extensions root is CWD-relative (http.Dir("extensions")) and

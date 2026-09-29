@@ -106,30 +106,19 @@ test-diff: ## Go tests for the packages this working tree touched (cached)
 # What each frontend gate enforces is in the doc that owns it: docs/markup-sanitizing.md (the HTML
 # sinks), docs/i18n.md (the surface count, the catalogue), docs/testing.md (the component fetch count,
 # the colour literals, the test-only export seam and the duplicated-CSS ceiling).
-#
-# The gates run side by side in frontend/scripts/frontend-gates.sh — vitest, the one typecheck compile, knip
-# and six scan slots, each with its own log, then one summary block. Every slot's exit code is read back from
-# its own file, so a slot that never ran is a named failure rather than a green row. Its self-test runs first:
-# a check that runs inside the thing that decides the build would say nothing about a runner that never
-# started.
 .PHONY: test-frontend
-test-frontend: ## Frontend unit tests + the gates, in parallel (vitest is the critical path; measured cost in docs/testing.md)
-	@echo "==> frontend gate runner, self-test"
-	cd frontend && npm run check:gates-test
-	@echo "==> frontend gates: vitest, the typecheck and the scans, in parallel"
-	cd frontend && npm run check:gates
-
-# What the gates cost, measured instead of estimated. Lanes: `LANES="gates check go vitest e2e"` (all five
-# by default); a filter narrows to the lane it belongs to, so `make test-time GO_PKGS=./backend/git/` prices
-# one package and `make test-time E2E_GREP=chat-core` prices one spec. The e2e lane stops the dev server,
-# because global-setup owns ports 3000/3001/9999. Tables to stdout, raw numbers under data/test-timings/;
-# the recorded baseline is `docs/testing.md → Measured gate cost`.
-.PHONY: test-time
-test-time: ## Measure gate cost: sub-gates, Go pkgs/tests, vitest files, e2e specs (LANES=, GO_PKGS=, E2E_GREP=)
-	@LANES='$(LANES)' GO_PKGS='$(GO_PKGS)' GO_PARALLEL='$(GO_PARALLEL)' VITEST_FILTER='$(VITEST_FILTER)' \
-	  E2E_GREP='$(E2E_GREP)' E2E_TITLE='$(E2E_TITLE)' E2E_ARGS='$(E2E_ARGS)' E2E_WORKERS='$(E2E_WORKERS)' \
-	  E2E_PROBE='$(E2E_PROBE)' E2E_RESTART='$(E2E_RESTART)' TIMING_DIR='$(TIMING_DIR)' \
-	  scripts/test-timings.sh
+test-frontend: ## Run frontend unit tests + the gates (vitest, ~10s)
+	cd frontend && npm test && npm run check:i18n && npm run check:i18n-surface-test && npm run check:i18n-surface && npm run check:sinks-test && npm run check:sinks
+	@echo "==> knip (unused files, exports, types, duplicates, dependencies)"
+	cd frontend && npm run check:dead
+	@echo "==> dead surface (an untagged test-only export; the duplicated-CSS ceiling)"
+	cd frontend && npm run check:dead-surface-test && npm run check:dead-surface
+	@echo "==> unused declarations (noUnusedLocals + noUnusedParameters)"
+	cd frontend && npm run check:unused
+	@echo "==> component fetches (the API layer owns the network)"
+	cd frontend && npm run check:fetch
+	@echo "==> colour literals (the palette in src/app.css owns every colour)"
+	cd frontend && npm run check:colors
 
 # A locale pack fails silently in both directions, so neither failure shows up in the UI: a
 # missing message key falls back to English per key (a pack missing 300 keys still looks
@@ -201,14 +190,6 @@ lint: ## gofmt + scoped vet + staticcheck (all checks) + deadcode (every root)
 	@echo "==> deadcode"
 	@scripts/deadcode-check.sh
 
-# The iteration lane: the touched Go packages with `go test`'s result cache left ON, the touched frontend
-# files, and the sub-gates cheap enough to always run. It runs no dependent of a touched package and none of
-# the cleanliness gates, so it is not a claim of done — `check` is. Steps, skips and what is deliberately
-# left out: scripts/check-fast.sh; what it cannot catch: docs/testing.md → Running less than the gate.
-.PHONY: check-fast
-check-fast: ## The iteration lane: touched pkgs (cached) + touched frontend + the cheap gates (~7s clean, ~16s one Go pkg)
-	@GO_SCOPE='$(GO_SCOPE)' bash scripts/check-fast.sh
-
 .PHONY: check-release
 check-release: ## Compile and test the -tags release variant that make package ships (~5s)
 	@# Nothing else here compiles a `-tags` variant, so without this step the release build rots.
@@ -219,22 +200,28 @@ check-release: ## Compile and test the -tags release variant that make package s
 	@echo "==> go test -tags $(RELEASE_TAGS) ./backend/startup/"
 	@go test -tags $(RELEASE_TAGS) ./backend/startup/ -count=1
 
-.PHONY: test-check-lanes
-test-check-lanes: ## Test the lane runner that decides `make check` (~2s, measured)
-	@bash scripts/check-lanes_test.sh
-
-# The gate is two lanes, so its wall is the slower lane and not the sum of eleven gates. The two halves stay
-# disjoint — the Go lane writes ./mike and the Go build cache, the frontend lane writes
-# frontend/node_modules/.cache, and neither reads what the other writes — which is what makes their seconds a
-# measurement rather than a race. scripts/check-lanes.sh holds the step table (the gate's shape) and one log
-# per lane, and one lane's red stops its own remaining steps, never another lane's gates. The runner's own
-# test runs first, the way `make test-frontend` starts its slots: a runner tested from inside itself says
-# nothing about a runner that failed to start.
-# `docs/adr/0002-check-lanes-run-in-parallel.md` prices the two shapes and says why not `-j`.
 .PHONY: check
-check: ## THE GATE: two lanes in parallel — Go (lint, archgate, bridge, build, tests) + frontend (docs, typecheck, gates)
-	@$(MAKE) --no-print-directory test-check-lanes
-	@bash scripts/check-lanes.sh
+check: ## THE GATE: lint + archgate + docs-check + bridge-check + build + Go tests + frontend gates
+	@$(MAKE) --no-print-directory lint
+	@echo "==> archgate (structural debt against its baselines)"
+	@$(MAKE) --no-print-directory archgate
+	@$(MAKE) --no-print-directory test-archgate
+	@echo "==> docs-check (a dead pointer is a rule nobody can follow)"
+	@$(MAKE) --no-print-directory docs-check
+	@$(MAKE) --no-print-directory test-docs-check
+	@echo "==> bridge-check (a stale sandbox-bridge is an edit that never runs)"
+	@$(MAKE) --no-print-directory bridge-check
+	@echo "==> build"
+	@go build -trimpath -o mike .
+	@$(MAKE) --no-print-directory check-release
+	@echo "==> go test"
+	@$(MAKE) --no-print-directory test-go
+	@echo "==> svelte-check"
+	@cd frontend && npm run check
+	@echo "==> frontend unit tests + gates"
+	@$(MAKE) --no-print-directory test-frontend
+	@echo ""
+	@echo "make check: all gates green"
 
 # The packages that own the detached goroutines and the executor's lock discipline - the executor,
 # the stream manager and the sandbox/terminal layers run ~120 of them between them. A -race sweep of

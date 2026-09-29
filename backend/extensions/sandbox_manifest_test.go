@@ -13,7 +13,6 @@ import (
 // can shadow read-only, which is what made gopls report nothing at all about a file that does not
 // parse — kept running with the cache path stored when it was first installed.
 func TestMergeManifestSandboxAdditionsAppliesANewerManifestsDeclaration(t *testing.T) {
-	t.Parallel()
 	stored := SandboxConfig{NetworkIsolation: true, MemoryLimit: 512}
 	declared := &SandboxConfig{Envs: []types.SandboxEnv{
 		{Key: "XDG_CACHE_HOME", Value: "/var/cache/gopls"},
@@ -42,7 +41,6 @@ func TestMergeManifestSandboxAdditionsAppliesANewerManifestsDeclaration(t *testi
 // PUT /api/extensions/{id}, so a stored value outranks the manifest and nothing is duplicated —
 // podman would take the last -e and quietly let the manifest overrule the user.
 func TestMergeManifestSandboxAdditionsKeepsUserEdits(t *testing.T) {
-	t.Parallel()
 	stored := SandboxConfig{
 		Envs:         []types.SandboxEnv{{Key: "GOCACHE", Value: "/srv/my-gocache"}},
 		Mounts:       []types.SandboxMount{{HostPath: "/srv/mine", ContainerPath: "/data", Mode: "ro"}},
@@ -82,7 +80,6 @@ func TestMergeManifestSandboxAdditionsKeepsUserEdits(t *testing.T) {
 // manifest repeatedly (a user pressing Update again), and non-LSP extensions declare no sandbox at
 // all. Neither may grow the config or panic.
 func TestMergeManifestSandboxAdditionsIsIdempotentAndNilSafe(t *testing.T) {
-	t.Parallel()
 	declared := &SandboxConfig{
 		Envs:         []types.SandboxEnv{{Key: "GOCACHE", Value: "/var/cache/gopls/go-build"}},
 		Mounts:       []types.SandboxMount{{HostPath: "/upstream", ContainerPath: "/data", Mode: "ro"}},

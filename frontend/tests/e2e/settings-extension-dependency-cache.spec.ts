@@ -22,18 +22,9 @@ const DISPLAY = 'Dependency Cache Fixture';
  * A directory that exists, for the grant to point at: the server refuses one that does not. A directory
  * of the test's own under a temp folder, which is what the field asks for — a bare top level of the
  * machine is refused, and whatever is granted is readable only from this extension's own sandbox.
- *
- * Made in `beforeAll`, not at module scope: importing this file to collect its tests would otherwise
- * create a temp directory in the collector process, where no `afterAll` exists to remove it.
  */
-let cacheRoot = '';
-let cacheDir = '';
-
-test.beforeAll(() => {
-    cacheRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'kanban-dep-cache-'));
-    cacheDir = path.join(cacheRoot, 'mod');
-    fs.mkdirSync(cacheDir, { recursive: true });
-});
+const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kanban-dep-cache-')) + '/mod';
+fs.mkdirSync(cacheDir, { recursive: true });
 
 let installedId: string | null = null;
 
@@ -213,5 +204,5 @@ test.describe.serial('Extension dependency directory', () => {
 });
 
 test.afterAll(() => {
-    if (cacheRoot) fs.rmSync(cacheRoot, { recursive: true, force: true });
+    fs.rmSync(cacheDir, { recursive: true, force: true });
 });

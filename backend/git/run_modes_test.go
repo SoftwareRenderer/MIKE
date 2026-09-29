@@ -16,7 +16,6 @@ import (
 // one row of this table to the other.
 
 func TestGitRunModesResolveIdenticallyAtRepositoryRoots(t *testing.T) {
-	t.Parallel()
 	skipWithoutGit(t)
 	wm := &WorktreeManager{}
 	repo := initRepo(t)
@@ -73,7 +72,6 @@ func mustRun(t *testing.T, wm *WorktreeManager, dir string) string {
 // did not name. Pinned mode refuses instead. Every current call site passes a repository root; this is what
 // keeps it that way.
 func TestGitRunPinnedModeRefusesASubdirectoryThatPlainModeWouldWalkUp(t *testing.T) {
-	t.Parallel()
 	skipWithoutGit(t)
 	wm := &WorktreeManager{}
 	repo := initRepo(t)

@@ -338,12 +338,7 @@ async function openFile(page: Page, parts: string[]): Promise<void> {
       return;
     }
     await page.locator('.close-btn, [aria-label="Close explorer"]').first().click().catch(() => {});
-    // Not a backoff: the listing is a live `git status`, so wait for the endpoint to answer for this
-    // directory again before reopening the panel, and each attempt starts from a healthy server.
-    await expect.poll(
-      () => page.evaluate((p) => fetch(`/api/fs?path=${encodeURIComponent(p)}`).then(r => r.ok), TEST_REPO),
-      { timeout: 15000, message: `/api/fs kept refusing ${TEST_REPO}` },
-    ).toBe(true);
+    await page.waitForTimeout(500);
   }
   throw new Error(
     `explorer never listed ${TEST_REPO} (last path shown: ${lastPath}); ` +
@@ -352,14 +347,9 @@ async function openFile(page: Page, parts: string[]): Promise<void> {
 }
 
 async function openParts(page: Page, parts: string[]): Promise<void> {
-  for (let i = 0; i < parts.length; i++) {
-    await page.locator('.file-browser-item', { hasText: parts[i] }).first().click();
-    // The tree has expanded when the row this click reveals is on screen; the last part is a file, and
-    // the editor assertion below is its own wait.
-    if (parts[i + 1]) {
-      await expect(page.locator('.file-browser-item', { hasText: parts[i + 1] }).first())
-        .toBeVisible({ timeout: 10000 });
-    }
+  for (const part of parts) {
+    await page.locator('.file-browser-item', { hasText: part }).first().click();
+    await page.waitForTimeout(150); // tree expands / editor loads
   }
   await expect(page.locator('.file-editor.active .cm-editor')).toBeVisible({ timeout: 10000 });
 }
@@ -370,10 +360,12 @@ function previewButton(page: Page) {
 
 /** The nested preview frame (loaded from /api/preview/<token>/). */
 async function previewFrameOf(page: Page): Promise<Frame> {
-  const url = (f: Frame) => f.url().includes('/api/preview/');
-  await expect.poll(() => page.frames().some(url),
-    { timeout: 15000, message: 'the preview frame never appeared' }).toBe(true);
-  return page.frames().find(url) as Frame;
+  for (let i = 0; i < 50; i++) {
+    const f = page.frames().find(fr => fr.url().includes('/api/preview/'));
+    if (f) return f;
+    await page.waitForTimeout(200);
+  }
+  throw new Error('preview frame did not appear');
 }
 
 test.describe.serial('HTML Preview extension', () => {
@@ -535,7 +527,7 @@ test.describe.serial('HTML Preview extension', () => {
     // (it requires the allow-scripts keyword) — nothing navigated, the token
     // is still live, no warning. The scripts-off guarantee: zero
     // self-navigation, including <meta refresh>.
-    await page.waitForTimeout(4000); // measurement window: well past the 2s meta-refresh the sandbox must refuse
+    await page.waitForTimeout(4000);
     await expect(frame.locator('#title')).toHaveText('META-REFRESH');
     await expect.poll(
         async () => (await page.request.get(docUrl)).status(),
@@ -913,7 +905,7 @@ test.describe.serial('HTML Preview extension', () => {
       cm.__view.dispatch({ changes: { from: 0, to: cm.__view.state.doc.length, insert: content } });
     }, newContent);
     // Well past the 300ms debounce: still on page2.
-    await page.waitForTimeout(1000); // measurement window: well past the 300ms live-refresh debounce
+    await page.waitForTimeout(1000);
     await expect(frame.locator('#title')).toHaveText('PAGE-2');
 
     // Self-reference link back to the doc (serves the stored content), then

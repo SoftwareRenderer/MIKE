@@ -177,7 +177,7 @@ test.describe('A window that came back having missed a turn', () => {
     await waitForToolRow(page, projectId, taskId);
     const reads = countReconcileReads(page, projectId, taskId);
     await freezeRenderer(page, FREEZE_MS);
-    await page.waitForTimeout(2000); // the turn must end while the renderer is still frozen, so the window is the subject
+    await page.waitForTimeout(2000);
     await waitForTaskState(page, projectId, taskId, notInFlight, 90_000);
     await annotateAway(page, 'frozen renderer / no event');
 

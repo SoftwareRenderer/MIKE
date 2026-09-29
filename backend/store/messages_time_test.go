@@ -25,7 +25,6 @@ var nearbyTimestamps = [][2]int{
 }
 
 func TestGetTaskMessagesOrdersNearbyTimestamps(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	if err := s.CreateProject(newProject("proj-t", "proj-t", "/tmp/proj-t")); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -65,7 +64,6 @@ func TestGetTaskMessagesOrdersNearbyTimestamps(t *testing.T) {
 // The stored text and the instant have to agree for every row this build writes, because that text is
 // what the ordering, the cutoff in DeleteTaskMessagesAfter and the walk back to a checkpoint compare.
 func TestCreateTaskMessageStoresSortableTimestamps(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	if err := s.CreateProject(newProject("proj-k", "proj-k", "/tmp/proj-k")); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -99,7 +97,6 @@ func TestCreateTaskMessageStoresSortableTimestamps(t *testing.T) {
 
 // A database written before the fixed-width form holds both orders at once, so upgrading rewrites the
 // rows it has. The instants survive; a row whose text cannot be read is left as stored and named.
-// Serial for the reason at TestMigration_SilentAndErrorFreeOnCurrentDatabase.
 func TestMessageTimeMigrationRewritesLegacyTimestamps(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kanban.db")
 	legacy := []struct {
@@ -213,7 +210,6 @@ func TestMessageTimeMigrationRewritesLegacyTimestamps(t *testing.T) {
 // A fork's checkpoint is found by matching a thread's stored checkpoint_message_time against a message's
 // created_at rendered as text, so rewriting one side without the other stops an old fork from matching.
 func TestMessageTimeMigrationKeepsCheckpointLookupMatching(t *testing.T) {
-	t.Parallel()
 	path := filepath.Join(t.TempDir(), "kanban.db")
 	s, err := NewStore(path)
 	if err != nil {
@@ -272,7 +268,6 @@ func TestMessageTimeMigrationKeepsCheckpointLookupMatching(t *testing.T) {
 
 // A database at this stamp is not rewritten again on the next start: the pass belongs to the upgrade.
 func TestMessageTimeMigrationLeavesCurrentRowsAlone(t *testing.T) {
-	t.Parallel()
 	path := filepath.Join(t.TempDir(), "kanban.db")
 	s, err := NewStore(path)
 	if err != nil {

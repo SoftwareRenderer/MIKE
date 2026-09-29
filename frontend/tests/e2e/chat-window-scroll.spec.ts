@@ -2,7 +2,6 @@ import { test, expect } from '@playwright/test';
 import { atTopOfList } from '../../src/lib/utils/chat-window';
 import {
   isolatedProject, gotoProject, getProjectId, csrfFetch, navigateToTask, waitForChatFormReady,
-  waitForChatStill,
 } from './helpers';
 
 // A task opens on the newest window and older rows arrive a page at a time. Scrolling is the only
@@ -96,9 +95,9 @@ async function wheelUp(page: any, notches: number): Promise<void> {
   await parkOnList(page);
   for (let i = 0; i < notches; i++) {
     await page.mouse.wheel(0, -WHEEL_NOTCH);
-    await page.waitForTimeout(40); // notch pacing: two wheels inside one frame coalesce into one scroll event
+    await page.waitForTimeout(40);
   }
-  await waitForChatStill(page); // the scroll events behind the notches have all been reported
+  await page.waitForTimeout(250);
 }
 
 /** The edge older rows are fetched from, however many notches the realized heights take. */
@@ -107,7 +106,7 @@ async function wheelToTopEdge(page: any): Promise<void> {
   let at = await listPosition(page);
   for (let i = 0; i < 60 && !atTopOfList(at.scrollTop, at.viewportHeight); i++) {
     await page.mouse.wheel(0, -WHEEL_NOTCH);
-    await page.waitForTimeout(40); // notch pacing: two wheels inside one frame coalesce into one scroll event
+    await page.waitForTimeout(40);
     at = await listPosition(page);
   }
   expect(atTopOfList(at.scrollTop, at.viewportHeight),
@@ -181,7 +180,7 @@ test.describe('Chat history window', () => {
     await expect(async () => {
       expect((await renderedIds(page)).length).toBeGreaterThan(beforeIds.length);
     }).toPass({ timeout: 15000 });
-    await waitForChatStill(page); // the arriving rows have finished moving the reader before their offset is read
+    await page.waitForTimeout(600);
 
     const after = await entryTop(page, before!.id);
     expect(after, 'the row the reader was reading is no longer rendered').not.toBeNull();

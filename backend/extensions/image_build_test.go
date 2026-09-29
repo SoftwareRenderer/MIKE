@@ -14,7 +14,6 @@ import (
 // whether buildah can build, which the gated test below covers against a real daemon.
 
 func TestBuildExtensionImageArgs(t *testing.T) {
-	t.Parallel()
 	got := buildExtensionImageArgs("localhost/kanban-ext-gopls:0.7.0", "/tmp/ctx")
 	want := []string{"build", "-t", "localhost/kanban-ext-gopls:0.7.0", "-f", filepath.Join("/tmp/ctx", "Dockerfile"), "/tmp/ctx"}
 	if len(got) != len(want) {
@@ -30,7 +29,6 @@ func TestBuildExtensionImageArgs(t *testing.T) {
 // Reading the Dockerfile from stdin with the CWD as context is what let a .dockerignore written for
 // another build decide what an extension build could see.
 func TestBuildExtensionImageArgs_NeverReadsStdinOrTheWorkingDirectory(t *testing.T) {
-	t.Parallel()
 	args := buildExtensionImageArgs("localhost/kanban-ext-x:1.0.0", "/tmp/ctx")
 	for i, a := range args {
 		if a == "-" {
@@ -45,7 +43,6 @@ func TestBuildExtensionImageArgs_NeverReadsStdinOrTheWorkingDirectory(t *testing
 	}
 }
 
-// serial for the reason at fakePodmanExit.
 func TestBuildExtensionImage_StagesTheBridgeIntoTheContext(t *testing.T) {
 	fake := fakePodmanOK(t)
 	rc := NewRegistryClientWithBoot(bridgeBoot(t))
@@ -97,7 +94,6 @@ func TestBuildExtensionImage_StagesTheBridgeIntoTheContext(t *testing.T) {
 
 // The bug's shape: a .dockerignore in the working directory that excludes the bridge must not be able
 // to starve an extension build.
-// serial for the reason at fakePodmanExit.
 func TestBuildExtensionImage_IgnoresADockerignoreInTheWorkingDirectory(t *testing.T) {
 	cwd := t.TempDir()
 	// The ignore file from the bug, and no bridge anywhere near it: the only way the context can hold
@@ -141,7 +137,6 @@ func TestBuildExtensionImage_IgnoresADockerignoreInTheWorkingDirectory(t *testin
 
 // The same claim against real buildah: the only test here that shows the fix works rather than that the
 // assertion changed. Gated on a local base image - it never reaches the network.
-// serial: t.Chdir is process-wide, and the build it runs is podman's own.
 func TestBuildExtensionImage_RealBuildSurvivesADockerignoreBelow(t *testing.T) {
 	rt := sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{})
 	if testing.Short() || !rt.ImageExists("docker.io/library/alpine:latest") {
@@ -165,7 +160,6 @@ func TestBuildExtensionImage_RealBuildSurvivesADockerignoreBelow(t *testing.T) {
 	}
 }
 
-// serial for the reason at fakePodmanExit.
 func TestBuildExtensionImage_RefusesWithoutABridge(t *testing.T) {
 	fake := fakePodmanOK(t)
 	// The wired path names a missing file, with no bridge beside the test binary or in the CWD.
@@ -186,7 +180,6 @@ func TestBuildExtensionImage_RefusesWithoutABridge(t *testing.T) {
 	}
 }
 
-// serial for the reason at fakePodmanExit.
 func TestBuildExtensionImage_FailureCarriesPodmanOutput(t *testing.T) {
 	fake := fakePodmanFails(t, 1, `Error: building at STEP "COPY": no items matching glob`)
 	rc := NewRegistryClientWithBoot(bridgeBoot(t))
@@ -206,7 +199,6 @@ func TestBuildExtensionImage_FailureCarriesPodmanOutput(t *testing.T) {
 	}
 }
 
-// serial for the reason at fakePodmanExit.
 func TestBuildExtensionImage_RejectsAnEmptyDockerfileAndABadRef(t *testing.T) {
 	fake := fakePodmanOK(t)
 	rc := NewRegistryClientWithBoot(bridgeBoot(t))

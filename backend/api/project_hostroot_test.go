@@ -22,10 +22,6 @@ import (
 // second directory outside every root. HOME is pinned here so neither a developer's shell nor the
 // suite's environment decides the outcome, and the jail is built jailed: the widening is a
 // constructor decision in production, so a test that wants the other side says so with widenHostRoot.
-//
-// This is the rule for every project-jail test in the package — here and through
-// jailedDockerfileProject: the calling test must not call t.Parallel(). t.Setenv refuses to run in a
-// parallel test, and HOME is the process's own, so a concurrent test would read this one's home.
 func jailedProjectHandler(t *testing.T) (h *ProjectHandler, s *store.Store, home, outside string) {
 	t.Helper()
 	home = t.TempDir()

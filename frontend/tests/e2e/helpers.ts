@@ -3,7 +3,6 @@ import { execSync } from 'child_process';
 import { existsSync, writeFileSync, mkdirSync, readFileSync, cpSync, readdirSync } from 'fs';
 import { dirname, join } from 'path';
 import http from 'node:http';
-import { MAIN_LANE, laneByPort, laneByProject } from '../lanes';
 
 /**
  * Find a provider by its reference string: the stable integer ID (as a string)
@@ -104,7 +103,9 @@ export async function apiGetConfig(page: Page): Promise<any> {
  * this: the lanes are different servers, and the wrong file means every API call gets a 401.
  */
 export function storageStatePath(projectName: string): string {
-    return laneByProject(projectName)?.storageState ?? MAIN_LANE.storageState;
+    return projectName === 'isolated'
+        ? '/tmp/kanban-test-storage-state.json.isolated'
+        : '/tmp/kanban-test-storage-state.json';
 }
 
 /** GET a JSON endpoint from the page (the page must be on the server origin). */
@@ -133,17 +134,16 @@ export async function waitForConfig(page: Page, predicate: (config: any) => bool
  * This allows advancing server state (creating tasks, etc.) while the
  * browser WebSocket is down or the page is mid-reload.
  *
- * @param base  Server origin: the lane's own `baseURL`, e.g. http://localhost:3000
+ * @param base  Server origin: http://localhost:3000 or http://localhost:3001
  */
 export async function serverApi(
   base: string,
   path: string,
   options: { method?: string; body?: Record<string, any> } = {},
 ): Promise<{ ok: boolean; status: number; data: any }> {
-  const port = new URL(base).port || String(MAIN_LANE.port);
-  const lane = laneByPort(port);
-  if (!lane) throw new Error(`serverApi: port ${port} is not a lane this harness starts (see tests/lanes.ts)`);
-  const auth = JSON.parse(readFileSync(lane.authFile, 'utf-8'));
+  const port = new URL(base).port;
+  const authFile = port === '3001' ? '/tmp/kanban-test-auth.json.isolated' : '/tmp/kanban-test-auth.json';
+  const auth = JSON.parse(readFileSync(authFile, 'utf-8'));
   const cookie = auth.cookies?.[0]?.value ?? '';
   const csrfToken = auth.csrfToken ?? '';
   const method = options.method ?? 'GET';
@@ -214,7 +214,7 @@ const FIXTURE_REPO = '/tmp/kanban-test-repo';
 
 export function isolatedProject(): void {
   test.beforeEach(async ({ page }, testInfo) => {
-    // The port keeps every lane's slots disjoint — one worker per lane, and the lane is the port.
+    // The port keeps the two lanes' slots disjoint (3000 chromium, 3001 isolated).
     const base = (testInfo.project.use as { baseURL?: string })?.baseURL || 'http://localhost:3000';
     await ensureOwnProject(page, `w${testInfo.parallelIndex}-${new URL(base).port}`);
   });
@@ -321,125 +321,6 @@ export async function descenderProblems(page: Page, selector: string): Promise<s
       : '';
   }, selector);
 }
-// --- Waiting on a condition the DOM shows only over several frames ---
-
-/**
- * Wait until a measurement stops changing, and return the settled value.
- *
- * What is being waited for runs on animation frames — a scroll pin's settle, a ResizeObserver pass, a
- * virtualised list realising heights — so the condition is "this value is unchanged across consecutive
- * reads", not "enough time has passed". `until` gates the counting: a value that has not arrived yet is
- * not stable, it is missing.
- */
-export async function waitForStable<T>(
-  measure: () => Promise<T>,
-  options: { what?: string; until?: (value: T) => boolean; stableReads?: number; intervalMs?: number; timeout?: number } = {},
-): Promise<T> {
-  const { what = 'the measurement', until, stableReads = 3, intervalMs = 80, timeout = 10_000 } = options;
-  let previous: string | null = null;
-  let settled = 0;
-  let last: T | undefined;
-  await expect.poll(async () => {
-    const value = await measure();
-    last = value;
-    const signature = JSON.stringify(value);
-    settled = signature === previous && (!until || until(value)) ? settled + 1 : 0;
-    previous = signature;
-    return settled;
-  }, { timeout, intervals: [intervalMs], message: `${what} was still changing after ${timeout}ms` })
-    .toBeGreaterThanOrEqual(stableReads - 1);
-  return last as T;
-}
-
-/**
- * The window a must-not-happen check has to watch, measured in the app's own frames.
- *
- * An assertion that something did NOT appear has no positive signal to wait for, so it needs a bound;
- * frames are the bound that scales with the machine, because a loaded machine draws them further apart
- * and an idle one gets the check out of the way. Whatever an event opens is in the DOM by the next paint
- * at the latest, so a few frames is the whole window a keypress, a dispatched event or a pushed message
- * is given.
- */
-export async function waitForReaction(page: Page, frames = 3): Promise<void> {
-  await page.evaluate((count) => new Promise<void>((resolve) => {
-    let left = count;
-    const step = () => { left -= 1; if (left <= 0) resolve(); else requestAnimationFrame(step); };
-    requestAnimationFrame(step);
-  }), frames);
-}
-
-/** One signature for "where the reader is in the transcript", including how tall it is. */
-export function chatScrollSignature(page: Page): Promise<string> {
-  return page.evaluate(() => {
-    const el = document.querySelector('.chat-messages');
-    if (!el) return 'no-scroller';
-    return `${Math.round(el.scrollTop)}|${el.scrollHeight}|${el.querySelectorAll('[data-entry-id]').length}`;
-  });
-}
-
-/**
- * The chat scroller has stopped moving: the settle that answers an arrival has run out. Positions only —
- * reading the scroller does not move it, so this never becomes the thing it measures.
- */
-export async function waitForChatStill(page: Page, timeout = 15_000): Promise<void> {
-  await waitForStable(() => chatScrollSignature(page), {
-    what: 'the chat scroller',
-    until: (s) => s !== 'no-scroller',
-    timeout,
-  });
-}
-
-/**
- * Tokens are arriving: the transcript got taller. `.btn-stop` says the turn started, not that the first
- * chunk landed — a provider's warm-up sits between the two — and a write at the bottom is the pin that
- * follows the growth, so a wait on the growth itself is the one that says "mid-stream".
- */
-export async function waitForChatGrowth(page: Page, timeout = 30_000): Promise<void> {
-  const height = () => page.evaluate(() => document.querySelector('.chat-messages')?.scrollHeight ?? 0);
-  const before = await height();
-  await expect.poll(async () => (await height()) > before,
-    { timeout, message: 'no chunk arrived: the transcript never grew' }).toBe(true);
-}
-
-// --- Waiting on a write the DOM does not show: the browser's own storage ---
-
-/** One key of the app's IndexedDB (the single store `frontend/src/lib/storage.ts` owns), read from the page. */
-export async function readStored<T>(page: Page, store: string, key: string): Promise<T | null> {
-  await getOrigin(page);
-  return page.evaluate(async ({ store, key }) => {
-    try {
-      const db = await new Promise<IDBDatabase>((resolve, reject) => {
-        const opened = indexedDB.open('kanban-storage');
-        opened.onsuccess = () => resolve(opened.result);
-        opened.onerror = () => reject(opened.error);
-      });
-      try {
-        return await new Promise((resolve, reject) => {
-          const got = db.transaction(store, 'readonly').objectStore(store).get(key);
-          got.onsuccess = () => resolve(got.result ?? null);
-          got.onerror = () => reject(got.error);
-        });
-      } finally {
-        db.close();
-      }
-    } catch {
-      return null; // no database, or no such store: nothing has been written yet
-    }
-  }, { store, key }) as Promise<T | null>;
-}
-
-/** Wait until a debounced client-side write has landed in IndexedDB. */
-export async function waitForStored<T>(
-  page: Page,
-  store: string,
-  key: string,
-  predicate: (value: T | null) => boolean,
-  timeout = 15_000,
-): Promise<void> {
-  await expect.poll(() => readStored<T>(page, store, key).then((v) => predicate(v)),
-    { timeout, message: `the write to ${store}/${key} never landed` }).toBe(true);
-}
-
 /**
  * Click the sidebar row for `projectId`. With per-worker projects, `.project-item` +
  * `.first()` picks somebody else's project.

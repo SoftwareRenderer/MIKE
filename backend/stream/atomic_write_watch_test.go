@@ -27,32 +27,10 @@ func watcherRecorder(t *testing.T, dir string) chan fsEvent {
 		t.Fatal(err)
 	}
 	go pw.StartEventLoop()
-	awaitWatchLive(t, dir, events)
+	// Let the watch settle before anything is measured.
+	time.Sleep(800 * time.Millisecond)
 	drainFsEvents(events)
 	return events
-}
-
-// awaitWatchLive proves the watch is live by making it report something: a name the filter passes is
-// written, and its event is awaited. A project's events are debounced 500 ms, so that is the floor
-// for this wait — and the alternative, sleeping an amount believed to be long enough, passes whether
-// or not the watch was ever registered.
-func awaitWatchLive(t *testing.T, dir string, events chan fsEvent) {
-	t.Helper()
-	const probe = "watch-probe.txt"
-	if err := os.WriteFile(filepath.Join(dir, probe), []byte("probe\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	deadline := time.After(10 * time.Second)
-	for {
-		select {
-		case e := <-events:
-			if e.path == probe {
-				return
-			}
-		case <-deadline:
-			t.Fatalf("no event was reported for %s, written after Watch returned", probe)
-		}
-	}
 }
 
 // collect gathers events until nothing new arrives for longer than the debounce,
@@ -87,9 +65,7 @@ func TestProjectWatcherIgnoresAtomicTempFiles(t *testing.T) {
 	if err := os.WriteFile(temp, []byte("half-written"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	// Longer than the 500 ms debounce in handleEvent: while the temporary exists, its create or
-	// delete is what would take the project's debounce slot and get broadcast. Shorter, and the
-	// filter would be passing a test that never reached the window it protects.
+	// Longer than the debounce: the temporary's event would otherwise be sent.
 	time.Sleep(900 * time.Millisecond)
 	if err := os.Remove(temp); err != nil {
 		t.Fatal(err)

@@ -48,7 +48,6 @@ func sandboxManagerForTest(t *testing.T) *ExtensionSandboxManager {
 }
 
 func TestMountPolicyForExtension_GrantIsARootForItsOwnExtensionOnly(t *testing.T) {
-	t.Parallel()
 	sm := sandboxManagerForTest(t)
 	grant := grantCandidate(t)
 
@@ -86,7 +85,6 @@ func TestMountPolicyForExtension_GrantIsARootForItsOwnExtensionOnly(t *testing.T
 }
 
 func TestMountPolicyForExtension_GrantIsAlwaysPinnedReadOnly(t *testing.T) {
-	t.Parallel()
 	// The pinning is what makes "read-only" a property of the mount rather than a polite default:
 	// a mount spec asking for rw against this root still comes out ro. There is no declaration that
 	// can lift it — the containers that fill the cache mount it read-write from their own side.
@@ -115,7 +113,6 @@ func TestMountPolicyForExtension_GrantIsAlwaysPinnedReadOnly(t *testing.T) {
 }
 
 func TestMountPolicyForExtension_NarrowAtInstallAndSettings(t *testing.T) {
-	t.Parallel()
 	// The gate the plan cares about most: the validator behind install, update and
 	// PUT /api/extensions/{id} must not see anyone's grant, so a manifest cannot reach it.
 	store := testStore(t)
@@ -140,7 +137,6 @@ func TestMountPolicyForExtension_NarrowAtInstallAndSettings(t *testing.T) {
 }
 
 func TestDependencyGrantNeedsBothHalves(t *testing.T) {
-	t.Parallel()
 	// Half a configuration binds nothing: a grant with no declaration has no container path and no
 	// env to assign, and a declaration with no grant is the normal state before anyone is asked.
 	if host := (&SandboxConfig{DependencyHostPath: "/some/dir"}).DependencyGrant(); host != "" {
@@ -174,7 +170,6 @@ func TestDependencyGrantNeedsBothHalves(t *testing.T) {
 }
 
 func TestBuildExtensionCreateArgs_UsesNoGrantItself(t *testing.T) {
-	t.Parallel()
 	// The argument builder takes its policy from the caller, so the per-extension behaviour lives
 	// in one place (MountPolicyForExtension) and a test that passes nil still refuses everything.
 	ext := dependencyExtension("ext-dep-mount", grantCandidate(t))
@@ -190,7 +185,6 @@ func TestBuildExtensionCreateArgs_UsesNoGrantItself(t *testing.T) {
 // TestGrantShapeNamesADirectoryNotAMount: the rule is about what a folder is, not how deep it sits. A folder
 // such as /tank/gomodcache can be used; /tank on its own is an entire mount.
 func TestGrantShapeNamesADirectoryNotAMount(t *testing.T) {
-	t.Parallel()
 	homes := []string{"/home/dev"}
 	for _, good := range []string{"/tank/gomodcache", "/data/go/pkg/mod", "/home/dev/go/pkg/mod", "/opt/cargo/registry"} {
 		if err := checkGrantShape(good, homes, dependencyGrant); err != nil {

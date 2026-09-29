@@ -1,21 +1,13 @@
 /**
  * Global setup/teardown for e2e tests.
  * Set USE_MOCK_LLM=0 to use real LLM endpoint (default: mock).
- *
- * Everything the lane needs before its first test is built here, so this file owns the run's fixed
- * cost and keeps it flat: one `go build` for every lane server, fixture artifacts cached behind a
- * content hash of their source, and all the lane servers booting while each other's seed work runs.
- * `make test-time` (scripts/e2e-time.py) splits the wall clock at `[teardown] ENTRY`, so the phases
- * below are visible without this file measuring anything.
  */
 
 import { spawn } from 'node:child_process';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import crypto from 'node:crypto';
 import { execSync, execFileSync } from 'node:child_process';
-import { MOCK_PORT, MAIN_LANE, allLanes, isolatedLanes, ISOLATED_SPECS, type Lane } from './lanes';
 
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
@@ -23,65 +15,28 @@ const FRONTEND_DIR = path.resolve(__dirname, '..');
 
 const TEST_REPO = '/tmp/kanban-test-repo';
 const TEST_REPO_2 = '/tmp/kanban-test-repo-2';
+const TEST_DATA_DIR = '/tmp/kanban-test-data';
+const TEST_DATA_DIR_ISOLATED = '/tmp/kanban-test-data-isolated';
 const TEST_WORKTREES = '/tmp/kanban-test-worktrees';
 // Per-worker project repos created by helpers.ts isolatedProject() — scratch, like the worktrees.
 const TEST_OWN_REPOS = '/tmp/kanban-test-repos';
+const KANBAN_PORT = 3000;
+const KANBAN_PORT_ISOLATED = 3001;
+const MOCK_PORT = 9999;
+const KANBAN_BASE = `http://localhost:${KANBAN_PORT}`;
+const KANBAN_BASE_ISOLATED = `http://localhost:${KANBAN_PORT_ISOLATED}`;
 const LOCK_FILE = '/tmp/kanban-test-setup.lock';
-// Set to 1 to rebuild every cached fixture instead of trusting its marker.
-const REBUILD_ENV = 'MIKE_E2E_REBUILD';
+// Playwright storage state files — read at context creation time
+const STORAGE_STATE_FILE = '/tmp/kanban-test-storage-state.json';
+const STORAGE_STATE_FILE_ISOLATED = '/tmp/kanban-test-storage-state.json.isolated';
+const KANBAN_BIN = 'go';
+const KANBAN_RUN_ARGS = ['run', '.'];
 const TEST_PASSWORD = 'test-password-1234';
 // Release updates are switched off for the run. The boot pass (`updateCheck.start()` in App.svelte)
 // asks the opt-in question of every fresh browser and, once the answer is yes, dials the manifest
 // host — neither belongs in a hermetic suite. `disabled` is the posture the client stops on: no dot,
 // no question, no prompt (docs/auto-update.md). A spec that wants the dot stubs /api/updates/status.
 const NO_UPDATES_ENV = { MIKE_DISABLE_UPDATES: '1' };
-// The lane's own git identity: this must work on a machine with no global git config, and must not
-// depend on the one a developer exports.
-const GIT_IDENTITY = ['-c', 'user.name=MIKE e2e', '-c', 'user.email=e2e@localhost.test',
-    '-c', 'commit.gpgsign=false', '-c', 'core.autocrlf=false'];
-const REPO_USER_EMAIL = 'test@kanban.local';
-const REPO_USER_NAME = 'Test';
-
-/**
- * The lanes this run owns: the main server, then one per shard of `ISOLATED_SPECS`.
- *
- * A lane is a server of its own — its own database, storage state, PID file and boot log — and the list is
- * the same array `playwright.config.ts` builds its projects from, so a project with no server and a server
- * with no project are both impossible.
- *
- * The PID file holds the PID of the server itself, which is why the lane binary is spawned directly rather
- * than through a `setsid` wrapper: an identity-based stop cannot reach a grandchild it has no PID for, and
- * the port is not an identity (`lsof -ti:PORT` answers with clients too). The boot log is what the server
- * printed — the only record of a lane that died during setup, where `waitForServer` reports the timeout and
- * the log names the reason.
- */
-const LANES: Lane[] = allLanes();
-const LANE_PORTS: number[] = LANES.map((lane) => lane.port);
-const LANE_DATA_DIRS: string[] = LANES.map((lane) => lane.dataDir);
-
-/**
- * Every shard a run could have dealt — the maximum deal is one shard per spec — minus the ones this run
- * starts. A lane server outlives its run only when the run was interrupted, and the shard it belongs to
- * is chosen by `MIKE_E2E_ISOLATED_SHARDS`, so a run started with a lower count must still stop and delete
- * the lanes a higher one left standing.
- */
-const OTHER_SHARDS: Lane[] = isolatedLanes(ISOLATED_SPECS.length)
-    .filter((lane) => !LANES.some((mine) => mine.dataDir === lane.dataDir));
-const MOCK_PID_FILE = '/tmp/kanban-test-mock-llm.pid';
-const MOCK_LOG_FILE = '/tmp/kanban-test-mock-llm.log';
-
-// The server every lane runs. Built by setup, never `go run`: one compile serves every server, and the
-// binary is named `mike` so `pgrep -xc mike` counts the lane's own processes.
-const LANE_BIN_DIR = '/tmp/kanban-test-bin';
-const LANE_BIN = path.join(LANE_BIN_DIR, 'mike');
-
-// server.ShutdownTimeout is 15 s (backend/server/shutdown.go), so a lane server that is shutting down
-// politely is worth waiting out; the slack is for noticing that it is not shutting down at all.
-const STOP_GRACE_MS = 18000;
-const KILL_GRACE_MS = 5000;
-// A killed server can still be writing when the removal walks its data dir.
-const REMOVE_BUDGET_MS = 5000;
-
 // Point the test servers at a local registry fixture so e2e registry tests are
 // deterministic and never depend on the hosted online registry.
 //
@@ -89,7 +44,7 @@ const REMOVE_BUDGET_MS = 5000;
 // pack) is pinned to a git commit that only exists once setup has built the repo
 // it points at, so the fixture is copied to GENERATE_REGISTRY_FILE with that
 // placeholder resolved. Content is otherwise byte-identical, and a registry fetch
-// is a per-request file read (`HandleRegistryIndex` caches nothing), so every lane
+// is a per-request file read (`HandleRegistryIndex` caches nothing), so both lanes
 // see the same index.
 const REGISTRY_FIXTURE_FILE = path.join(__dirname, 'registry-fixture.json');
 const GENERATED_REGISTRY_FILE = '/tmp/kanban-test-registry.json';
@@ -97,10 +52,11 @@ const TEST_REGISTRY_URL = 'file://' + GENERATED_REGISTRY_FILE;
 // The i18n pack the registry fixture offers: sources committed under
 // tests/fixtures/i18n-pack-repo, committed into a throwaway local git repo so the
 // registry's git-pinned install path (`repo` + `commit` + `subdir`, cloned and
-// commit-verified server-side) has something real to install. The commit is built
-// from the fixture with a fixed identity and a fixed commit date, so identical content
-// always produces the same hash — which is what lets the repo be reused across runs
-// (see cacheHit) while an edited fixture still rebuilds it.
+// commit-verified server-side) has something real to install. The commit is
+// rebuilt from the fixture on every run with a fixed identity and a fixed commit
+// date, so identical content always produces the same hash — a stale generated
+// registry stays correct, and an edited fixture is picked up without a hardcoded
+// hash anyone could forget to bump.
 const I18N_PACK_REPO = '/tmp/kanban-test-i18n-pack-repo';
 const I18N_PACK_FIXTURE_DIR = path.join(__dirname, 'fixtures', 'i18n-pack-repo');
 const I18N_PACK_COMMIT_PLACEHOLDER = '__I18N_PACK_COMMIT__';
@@ -124,53 +80,35 @@ const LOCAL_EXT_PUBLISHED: { author: string; name: string; subdir: string }[] = 
     { author: 'softwarerenderer', name: 'html-preview', subdir: 'ui/html-preview' },
 ];
 
-const useMock = () => process.env.MIKE_USE_MOCK_LLM !== '0';
-const MOCK_URL = `http://localhost:${MOCK_PORT}/v1`;
-
-function forceRebuild(): boolean {
-    return process.env[REBUILD_ENV] === '1';
-}
+let mockServer: ReturnType<typeof spawn> | null = null;
+let kanbanServer: ReturnType<typeof spawn> | null = null;
+let kanbanServerIsolated: ReturnType<typeof spawn> | null = null;
 
 async function setup(): Promise<void> {
-    // Anything left by an interrupted run holds the lane's ports, data dirs and PID files, and this is
-    // also what removes the extension dirs a previous setup seeded — so it runs before the seeding.
-    await cleanupStaleState();
-
-    // Fixtures before the servers: a server reads the generated registry index on its first request.
-    ensureFixtureRepos();
+    ensureTestRepo();
     seedLocalExtensions();
     seedPublishedExtensionSources();
     prepareRegistryIndex();
+    await killKanbanServer();
 
-    buildLaneBinary();
+    console.log('[global-setup] Starting test kanban server...');
+    kanbanServer = spawn('setsid', [KANBAN_BIN, ...KANBAN_RUN_ARGS, '--data-dir', TEST_DATA_DIR], {
+        cwd: PROJECT_ROOT,
+        // The fixture repos and worktrees live under /tmp, outside the host directory jail.
+        env: { ...process.env, ...NO_UPDATES_ENV, MIKE_WORKTREES_DIR: TEST_WORKTREES, MIKE_LOGIN_PASSWORD: TEST_PASSWORD, MIKE_REGISTRY_URL: TEST_REGISTRY_URL, MIKE_TLS: '0', DANGER_ZONE: '1', MIKE_ALLOW_ROOT_FS: '1' },
+        stdio: 'ignore',
+        detached: true,
+    });
+    kanbanServer.unref();
 
-    // Boot: every lane server and the mock LLM start without waiting on each other. No lane's
-    // setup is the other's precondition, and the lane used to pay for a second compile between them.
-    const started = Date.now();
-    for (const lane of LANES) spawnLane(lane);
-    if (useMock()) spawnMockLlm();
-    await Promise.all([
-        ...LANES.map((lane) => waitForServer(lane.port, lane.logFile)),
-        ...(useMock() ? [waitForServer(MOCK_PORT, MOCK_LOG_FILE)] : []),
-    ]);
-    for (const lane of LANES) {
-        console.log(`[global-setup] Lane ${lane.name} ready on port ${lane.port} (${ms(Date.now() - started)})`);
-    }
+    await waitForServer(KANBAN_PORT, 15000);
+    console.log(`[global-setup] Test kanban server ready on port ${KANBAN_PORT}`);
 
-    // The mock LLM is up before any task is created: title-gen dials the provider immediately.
-    await Promise.all(LANES.map((lane) => seedLane(lane)));
-
-    try { fs.writeFileSync(LOCK_FILE, ''); } catch { /* ignore */ }
-}
-
-/** Log in, point the lane at the mock provider, and create its seed project and two tasks. */
-async function seedLane(lane: Lane): Promise<void> {
-    const { cookie, csrfToken } = await login(lane.base);
-    const session = (cookie.split('=')[1] || '').trim();
-    fs.writeFileSync(lane.storageState, JSON.stringify({
+    const { cookie: sessionCookie, csrfToken } = await login(KANBAN_BASE);
+    fs.writeFileSync(STORAGE_STATE_FILE, JSON.stringify({
         cookies: [{
             name: 'PHPSESSID',
-            value: session,
+            value: sessionCookie.split('=')[1],
             domain: 'localhost',
             path: '/',
             httpOnly: true,
@@ -181,20 +119,22 @@ async function seedLane(lane: Lane): Promise<void> {
         origins: [],
     }));
     // Legacy auth file for CSRF token
-    fs.writeFileSync(lane.authFile, JSON.stringify({
-        cookies: [{ name: 'PHPSESSID', value: session, domain: 'localhost', path: '/', httpOnly: true, secure: false, sameSite: 'Lax' }],
+    fs.writeFileSync('/tmp/kanban-test-auth.json', JSON.stringify({
+        cookies: [{ name: 'PHPSESSID', value: sessionCookie.split('=')[1], domain: 'localhost', path: '/', httpOnly: true, secure: false, sameSite: 'Lax' }],
         csrfToken,
     }));
-    console.log(`[global-setup] Logged in to ${lane.name} server`);
+    console.log(`[global-setup] Logged in to test server`);
 
-    if (useMock()) {
-        const config = await getJson(`${lane.base}/api/config`, cookie);
-        await putJson(`${lane.base}/api/config`, {
+    const useMock = process.env.MIKE_USE_MOCK_LLM !== '0';
+    const mockUrl = `http://localhost:${MOCK_PORT}/v1`;
+    if (useMock) {
+        const config = await getJson(`${KANBAN_BASE}/api/config`, sessionCookie);
+        await putJson(`${KANBAN_BASE}/api/config`, {
             ...config,
             providers: [{
                 name: 'mock',
                 display_name: 'Mock LLM',
-                url: MOCK_URL,
+                url: mockUrl,
                 models: [{ name: 'mock-model', reasoning_effort: 'off' }],
                 concurrency: 16,
             }],
@@ -202,36 +142,122 @@ async function seedLane(lane: Lane): Promise<void> {
             worker_model: 'mock-model',
             utility_provider: 'mock',
             utility_model: 'mock-model',
-        }, cookie, csrfToken);
-        console.log(`[global-setup] Mock provider configured on ${lane.name} at ${MOCK_URL}`);
-    } else {
-        console.log(`[global-setup] ${lane.name}: using the real LLM endpoint (MIKE_USE_MOCK_LLM=0)`);
+        }, sessionCookie, csrfToken);
+        console.log(`[global-setup] Mock provider configured at ${mockUrl}`);
     }
 
-    const project = await postJson(`${lane.base}/api/projects`, {
+    // Start mock LLM before creating tasks (title-gen calls LLM immediately)
+    if (useMock) {
+        console.log('[global-setup] Starting mock LLM server...');
+        mockServer = spawn('setsid', ['node', 'tests/mock-llm.js', MOCK_PORT.toString()], {
+            cwd: FRONTEND_DIR,
+            stdio: 'ignore',
+            detached: true,
+        });
+        mockServer.unref();
+        await waitForServer(MOCK_PORT);
+        console.log(`[global-setup] Mock LLM server ready on port ${MOCK_PORT}`);
+    } else {
+        console.log('[global-setup] Using real LLM endpoint (MIKE_USE_MOCK_LLM=0)');
+    }
+
+    // Create test project
+    const project = await postJson(`${KANBAN_BASE}/api/projects`, {
         name: 'test-project',
         path: TEST_REPO,
-    }, cookie, csrfToken);
-    console.log(`[global-setup] Test project created on ${lane.name}: ${project.id}`);
+    }, sessionCookie, csrfToken);
+    console.log(`[global-setup] Test project created: ${project.id}`);
 
-    const payload = (prompt: string) => useMock()
-        ? { prompt, llama_server_url: MOCK_URL, model_name: 'mock-model' }
-        : { prompt };
-    const task1 = await postJson(`${lane.base}/api/projects/${project.id}/tasks`, payload('Test task for e2e tests'), cookie, csrfToken);
-    const task2 = await postJson(`${lane.base}/api/projects/${project.id}/tasks`, payload('Second test task'), cookie, csrfToken);
-    console.log(`[global-setup] Test tasks created on ${lane.name}: ${task1.id}, ${task2.id}`);
+    // Create test tasks
+    const taskPayload = useMock
+        ? { prompt: 'Test task for e2e tests', llama_server_url: mockUrl, model_name: 'mock-model' }
+        : { prompt: 'Test task for e2e tests' };
+    const taskPayload2 = useMock
+        ? { prompt: 'Second test task', llama_server_url: mockUrl, model_name: 'mock-model' }
+        : { prompt: 'Second test task' };
+    const task1 = await postJson(`${KANBAN_BASE}/api/projects/${project.id}/tasks`, taskPayload, sessionCookie, csrfToken);
+    const task2 = await postJson(`${KANBAN_BASE}/api/projects/${project.id}/tasks`, taskPayload2, sessionCookie, csrfToken);
+    console.log(`[global-setup] Test tasks created: ${task1.id}, ${task2.id}`);
+
+    // Start isolated server
+    console.log('[global-setup] Starting isolated kanban server...');
+    kanbanServerIsolated = spawn('setsid', [KANBAN_BIN, ...KANBAN_RUN_ARGS, '--data-dir', TEST_DATA_DIR_ISOLATED, '--port', String(KANBAN_PORT_ISOLATED)], {
+        cwd: PROJECT_ROOT,
+        env: { ...process.env, ...NO_UPDATES_ENV, MIKE_WORKTREES_DIR: TEST_WORKTREES, MIKE_LOGIN_PASSWORD: TEST_PASSWORD, MIKE_REGISTRY_URL: TEST_REGISTRY_URL, MIKE_TLS: '0', DANGER_ZONE: '1', MIKE_ALLOW_ROOT_FS: '1' },
+        stdio: 'ignore',
+        detached: true,
+    });
+    kanbanServerIsolated.unref();
+    await waitForServer(KANBAN_PORT_ISOLATED, 15000);
+    console.log(`[global-setup] Isolated kanban server ready on port ${KANBAN_PORT_ISOLATED}`);
+
+    const { cookie: sessionCookieIso, csrfToken: csrfTokenIso } = await login(KANBAN_BASE_ISOLATED);
+    fs.writeFileSync(STORAGE_STATE_FILE_ISOLATED, JSON.stringify({
+        cookies: [{
+            name: 'PHPSESSID',
+            value: sessionCookieIso.split('=')[1],
+            domain: 'localhost',
+            path: '/',
+            httpOnly: true,
+            secure: false,
+            sameSite: 'Lax',
+            expires: Date.now() / 1000 + 86400 * 365,
+        }],
+        origins: [],
+    }));
+    // Legacy auth file for CSRF token
+    fs.writeFileSync('/tmp/kanban-test-auth.json.isolated', JSON.stringify({
+        cookies: [{ name: 'PHPSESSID', value: sessionCookieIso.split('=')[1], domain: 'localhost', path: '/', httpOnly: true, secure: false, sameSite: 'Lax' }],
+        csrfToken: csrfTokenIso,
+    }));
+    console.log(`[global-setup] Logged in to isolated server`);
+
+    // Configure mock provider on isolated server
+    if (useMock) {
+        const configIso = await getJson(`${KANBAN_BASE_ISOLATED}/api/config`, sessionCookieIso);
+        await putJson(`${KANBAN_BASE_ISOLATED}/api/config`, {
+            ...configIso,
+            providers: [{
+                name: 'mock',
+                display_name: 'Mock LLM',
+                url: mockUrl,
+                models: [{ name: 'mock-model', reasoning_effort: 'off' }],
+                concurrency: 16,
+            }],
+            worker_provider: 'mock',
+            worker_model: 'mock-model',
+            utility_provider: 'mock',
+            utility_model: 'mock-model',
+        }, sessionCookieIso, csrfTokenIso);
+        console.log(`[global-setup] Mock provider configured on isolated server`);
+    }
+
+    // Create test project on isolated server
+    const projectIso = await postJson(`${KANBAN_BASE_ISOLATED}/api/projects`, {
+        name: 'test-project',
+        path: TEST_REPO,
+    }, sessionCookieIso, csrfTokenIso);
+    console.log(`[global-setup] Test project created on isolated server: ${projectIso.id}`);
+
+    // Create test tasks on isolated server
+    const taskIso = await postJson(`${KANBAN_BASE_ISOLATED}/api/projects/${projectIso.id}/tasks`, taskPayload, sessionCookieIso, csrfTokenIso);
+    const taskIso2 = await postJson(`${KANBAN_BASE_ISOLATED}/api/projects/${projectIso.id}/tasks`, taskPayload2, sessionCookieIso, csrfTokenIso);
+    console.log(`[global-setup] Test tasks created on isolated server: ${taskIso.id}, ${taskIso2.id}`);
+
+    // Create lock file
+    try { fs.writeFileSync(LOCK_FILE, ''); } catch { /* ignore */ }
 }
 
 export async function teardown(): Promise<void> {
     console.error('[teardown] ENTRY');
-    // Stop the lane's own processes by identity, and wait for them to exit: the data dirs must not be
-    // removed while a server is still checkpointing SQLite into them.
-    for (const lane of LANES) await stopLane(lane);
-    await stopMockLlm();
-
-    // Whoever still holds a lane port is not a process this run spawned — a dev server, or a straggler
-    // from an interrupted one. Report it, take the port, and say whether the lane is clear.
-    await verifyPortsFree([MOCK_PORT, ...LANE_PORTS]);
+    // Stop servers — by identity first (the port does not reach the whole process tree), then by
+    // port for anything else (the mock LLM).
+    killTestServers();
+    for (const port of [MOCK_PORT, KANBAN_PORT_ISOLATED, KANBAN_PORT]) {
+        console.error(`[teardown] killing port ${port}...`);
+        killPort(port);
+        console.error(`[teardown] port ${port} stopped`);
+    }
 
     // Remove local extension fixtures this (or an interrupted previous) setup created.
     removeSeededLocalExtensions();
@@ -247,410 +273,45 @@ export async function teardown(): Promise<void> {
         console.log('[global-teardown] Warning: failed to clean up sandbox containers');
     }
 
-    // Delete test data, worktrees and the per-worker project repos.
-    for (const dir of [...LANE_DATA_DIRS, ...OTHER_SHARDS.map((l) => l.dataDir), TEST_WORKTREES, TEST_OWN_REPOS]) {
-        await removeTree(dir);
-    }
-
-    // Clean up lock, session and PID files. The fixture cache (the repo templates, the i18n pack repo, the
-    // registry index and their `.sha` markers) is deliberately NOT deleted — see cacheHit.
-    for (const file of [
-        LOCK_FILE, MOCK_PID_FILE,
-        ...LANES.flatMap((l) => [l.storageState, l.authFile, l.pidFile]),
-        ...OTHER_SHARDS.flatMap((l) => [l.storageState, l.authFile, l.pidFile]),
-    ]) {
-        try { fs.unlinkSync(file); } catch { /* ignore */ }
-    }
-}
-
-// --- The lane binary ---
-
-/**
- * Compile every lane server's binary, once, as a development build.
- *
- * No `-tags release`: the harness serves `frontend/dist` from disk so `npm run build` needs no Go
- * rebuild, and a release binary serves only the copy it was compiled with (AGENTS.md → Workflow).
- * Passing `--frontend-dist` is what makes that a stated requirement rather than a default the cwd
- * happens to satisfy — a release build refuses the flag and dies at boot, which is the readable
- * version of the mistake. The build is invoked every run: `go build`'s own cache is the content key,
- * and a lane that ran a stale binary would report green about code that never ran.
- */
-function buildLaneBinary(): void {
-    fs.mkdirSync(LANE_BIN_DIR, { recursive: true });
-    const started = Date.now();
+    // Delete test data — only once the server has let go of it (see waitForFilesRelease)
+    waitForFilesRelease(TEST_DATA_DIR);
     try {
-        execFileSync('go', ['build', '-trimpath', '-o', LANE_BIN, '.'], {
-            cwd: PROJECT_ROOT,
-            stdio: 'pipe',
-            timeout: 300000,
-        });
-    } catch (e) {
-        const detail = e instanceof Error ? `${e.message}\n${(e as any).stderr || ''}` : String(e);
-        throw new Error(
-            `[global-setup] could not build the lane binary (${LANE_BIN}). A missing `
-            + `frontend/dist/index.html fails here too — run \`cd frontend && npm run build\` first.\n${detail}`,
-        );
-    }
-    console.log(`[global-setup] Lane binary ${LANE_BIN} built in ${ms(Date.now() - started)}`);
-}
-
-function laneEnv(): NodeJS.ProcessEnv {
-    return {
-        ...process.env,
-        ...NO_UPDATES_ENV,
-        // The fixture repos and worktrees live under /tmp, outside the host directory jail.
-        MIKE_WORKTREES_DIR: TEST_WORKTREES,
-        MIKE_LOGIN_PASSWORD: TEST_PASSWORD,
-        MIKE_REGISTRY_URL: TEST_REGISTRY_URL,
-        MIKE_TLS: '0',
-        DANGER_ZONE: '1',
-        MIKE_ALLOW_ROOT_FS: '1',
-    };
-}
-
-/** Spawn one lane server detached, with its own process group, and record the PID it answers to. */
-function spawnLane(lane: Lane): void {
-    // cwd stays the repo root so the lane's relative paths (the worktrees default, prompts) resolve
-    // as they do for `go run .`.
-    const argv = [LANE_BIN, '--data-dir', lane.dataDir, '--port', String(lane.port),
-        '--frontend-dist', path.join(PROJECT_ROOT, 'frontend', 'dist')];
-    const pid = spawnDetached(argv, { cwd: PROJECT_ROOT, env: laneEnv(), pidFile: lane.pidFile, logFile: lane.logFile });
-    console.log(`[global-setup] Starting ${lane.name} test server (pid ${pid}) on port ${lane.port}...`);
-}
-
-function spawnMockLlm(): void {
-    const pid = spawnDetached(
-        [process.execPath, path.join(FRONTEND_DIR, 'tests', 'mock-llm.js'), String(MOCK_PORT)],
-        { cwd: FRONTEND_DIR, pidFile: MOCK_PID_FILE, logFile: MOCK_LOG_FILE },
-    );
-    console.log(`[global-setup] Starting mock LLM server (pid ${pid}) on port ${MOCK_PORT}...`);
-}
-
-function spawnDetached(argv: string[], opts: { cwd: string; env?: NodeJS.ProcessEnv; pidFile: string; logFile: string }): number {
-    // Truncated here, so what a failed run left behind is still readable when you go looking.
-    const log = fs.openSync(opts.logFile, 'w');
-    let child;
-    try {
-        child = spawn(argv[0], argv.slice(1), {
-            cwd: opts.cwd,
-            env: opts.env,
-            stdio: ['ignore', log, log],
-            detached: true,
-        });
-    } finally {
-        // The child inherited its own descriptor; ours would only keep the file open for nothing.
-        fs.closeSync(log);
-    }
-    if (!child.pid) throw new Error(`[global-setup] could not spawn ${argv[0]}`);
-    // The child is unref'd, so an async spawn failure (the binary deleted between build and spawn)
-    // would otherwise surface as an unhandled 'error' event inside Playwright's global setup.
-    child.on('error', (e) => console.error(`[global-setup] ${argv[0]}: ${e.message}`));
-    child.unref();
-    try {
-        fs.writeFileSync(opts.pidFile, JSON.stringify({ pid: child.pid, argv }));
-    } catch { /* the identity sweep is the fallback */ }
-    return child.pid;
-}
-
-// --- Stopping what setup started, by identity ---
-
-/** The argv this run's processes were started with, for matching against /proc. */
-function isLaneProcess(args: string[], lane: Lane): boolean {
-    return args[0] === LANE_BIN && hasArgPair(args, '--data-dir', lane.dataDir);
-}
-
-function isMockProcess(args: string[]): boolean {
-    return args.some((a) => a.endsWith('mock-llm.js')) && args.includes(String(MOCK_PORT));
-}
-
-function hasArgPair(args: string[], flag: string, value: string): boolean {
-    const i = args.indexOf(flag);
-    return i >= 0 && args[i + 1] === value;
-}
-
-function argvOf(pid: number): string[] {
-    try {
-        return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf-8').split('\0').filter(Boolean);
+        fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
+        console.log('[global-teardown] Test data directory deleted');
     } catch {
-        return [];
+        console.log('[global-teardown] Test data directory already gone');
     }
-}
 
-/** Every live process whose argv satisfies `matches`. Token equality, so one data dir's prefix never
- *  answers for another's. */
-function findProcesses(matches: (args: string[]) => boolean): number[] {
-    const found: number[] = [];
-    for (const entry of fs.readdirSync('/proc')) {
-        if (!/^\d+$/.test(entry)) continue;
-        const pid = Number(entry);
-        if (pid === process.pid) continue;
-        const args = argvOf(pid);
-        if (args.length && matches(args)) found.push(pid);
-    }
-    return found;
-}
-
-function isAlive(pid: number): boolean {
+    // Delete isolated test data
+    waitForFilesRelease(TEST_DATA_DIR_ISOLATED);
     try {
-        process.kill(pid, 0);
-        return true;
+        fs.rmSync(TEST_DATA_DIR_ISOLATED, { recursive: true, force: true });
+        console.log('[global-teardown] Isolated test data directory deleted');
     } catch {
-        return false;
+        console.log('[global-teardown] Isolated test data directory already gone');
     }
-}
 
-/** A PID read from a file is only this run's process while its argv still says so — PIDs get reused. */
-function liveMatching(pids: number[], matches: (args: string[]) => boolean): number[] {
-    return pids.filter((pid) => isAlive(pid) && matches(argvOf(pid)));
-}
-
-function readPidFile(file: string): number[] {
+    // Delete test worktrees
     try {
-        const parsed = JSON.parse(fs.readFileSync(file, 'utf-8')) as { pid?: number };
-        return typeof parsed.pid === 'number' ? [parsed.pid] : [];
+        fs.rmSync(TEST_WORKTREES, { recursive: true, force: true });
+        console.log('[global-teardown] Test worktrees directory deleted');
     } catch {
-        return [];
+        console.log('[global-teardown] Test worktrees already gone');
     }
-}
 
-async function stopProcesses(pids: number[], label: string): Promise<void> {
-    for (const pid of pids) {
-        try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
-    }
-    let left = pids;
-    const term = Date.now() + STOP_GRACE_MS;
-    while (Date.now() < term) {
-        left = left.filter(isAlive);
-        if (!left.length) return;
-        await sleep(100);
-    }
-    for (const pid of left) {
-        console.error(`[global-setup] ${label} pid ${pid} ignored SIGTERM — SIGKILL`);
-        try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
-    }
-    const kill = Date.now() + KILL_GRACE_MS;
-    while (Date.now() < kill && left.some(isAlive)) await sleep(100);
-    left = left.filter(isAlive);
-    if (left.length) console.error(`[global-setup] Warning: ${label} pids ${left.join(',')} still alive after SIGKILL`);
-}
+    // Delete the per-worker project repos (helpers.ts isolatedProject)
+    try { fs.rmSync(TEST_OWN_REPOS, { recursive: true, force: true }); } catch { /* ignore */ }
 
-async function stopLane(lane: Lane): Promise<void> {
-    const matches = (args: string[]) => isLaneProcess(args, lane);
-    // The PID file is the fast path; the sweep catches a lane whose PID file an interrupted run lost.
-    const pids = [...readPidFile(lane.pidFile), ...findProcesses(matches)];
-    const targets = liveMatching(pids, matches);
-    if (targets.length) {
-        const started = Date.now();
-        await stopProcesses(targets, `lane ${lane.name}`);
-        console.log(`[global-teardown] Lane ${lane.name} stopped (${ms(Date.now() - started)})`);
-    }
-    try { fs.unlinkSync(lane.pidFile); } catch { /* ignore */ }
-}
+    // Delete the generated registry index and the i18n pack repo setup built
+    try { fs.rmSync(GENERATED_REGISTRY_FILE, { force: true }); } catch { /* ignore */ }
+    try { fs.rmSync(I18N_PACK_REPO, { recursive: true, force: true }); } catch { /* ignore */ }
 
-async function stopMockLlm(): Promise<void> {
-    const pids = liveMatching([...readPidFile(MOCK_PID_FILE), ...findProcesses(isMockProcess)], isMockProcess);
-    if (pids.length) await stopProcesses(pids, 'mock LLM');
-    try { fs.unlinkSync(MOCK_PID_FILE); } catch { /* ignore */ }
-}
-
-/** PIDs holding `port`, excluding this process (killing the runner would end the suite). */
-function portPids(port: number): string[] {
-    try {
-        const output = execSync(`lsof -ti:${port}`, { encoding: 'utf-8', timeout: 3000 }).trim();
-        return output ? output.split('\n').map((p) => p.trim()).filter((p) => p && p !== String(process.pid)) : [];
-    } catch {
-        return [];
-    }
-}
-
-/**
- * The lane's own processes are stopped by identity, never by port: the port owner is a different
- * process from the one that should stop whenever a wrapper is in the way, and `lsof -ti:PORT` answers
- * with clients as well. This is the check that runs afterwards — a port still held belongs to a process
- * this run did not spawn (a `make run` dev server, a straggler of an interrupted run), and the suite
- * may not leave the lane's ports busy.
- */
-async function verifyPortsFree(ports: number[]): Promise<void> {
-    for (const port of ports) {
-        let pids = portPids(port);
-        if (!pids.length) continue;
-        console.error(`[global-teardown] port ${port} still held by ${pids.join(',')} (not this run's lane) — stopping it`);
-        for (const pid of pids) {
-            try { process.kill(parseInt(pid), 'SIGTERM'); } catch { /* ignore */ }
-        }
-        const deadline = Date.now() + 8000;
-        while (Date.now() < deadline) {
-            pids = portPids(port);
-            if (!pids.length) break;
-            await sleep(200);
-        }
-        for (const pid of pids) {
-            console.error(`[global-teardown] port ${port} pid ${pid} ignored SIGTERM — SIGKILL`);
-            try { process.kill(parseInt(pid), 'SIGKILL'); } catch { /* ignore */ }
-        }
-        const killed = Date.now() + 3000;
-        while (Date.now() < killed && portPids(port).length) await sleep(200);
-        if (portPids(port).length) console.error(`[global-teardown] Warning: port ${port} is still busy`);
-    }
-}
-
-/**
- * Remove a tree, retrying while a subprocess still writing holds it open. The lane's processes are
- * already gone by the time this runs, so ENOTEMPTY here is a straggler, not the server.
- */
-async function removeTree(dir: string): Promise<boolean> {
-    const deadline = Date.now() + REMOVE_BUDGET_MS;
-    for (;;) {
-        try {
-            fs.rmSync(dir, { recursive: true, force: true });
-            return true;
-        } catch (e: any) {
-            if (e?.code === 'ENOENT') return true;
-            if (['ENOTEMPTY', 'EBUSY', 'EAGAIN', 'EPERM'].includes(e?.code) && Date.now() < deadline) {
-                await sleep(200);
-                continue;
-            }
-            console.error(`[global-teardown] Warning: left ${dir} behind (${e?.code || e})`);
-            return false;
-        }
-    }
-}
-
-async function cleanupStaleState(): Promise<void> {
-    // Leftover seeded fixtures from an interrupted run.
-    removeSeededLocalExtensions();
+    // Clean up lock and auth files
     try { fs.unlinkSync(LOCK_FILE); } catch { /* ignore */ }
-    // A stale lane server holds the ports and its SQLite files, so the next run would boot on the
-    // previous run's database. The PID files name them; the sweep catches ones that lost theirs.
-    for (const lane of LANES) await stopLane(lane);
-    // A shard a lower `MIKE_E2E_ISOLATED_SHARDS` does not start is still this harness's process, and its
-    // port and database are still in the way.
-    for (const lane of OTHER_SHARDS) await stopLane(lane);
-    await stopMockLlm();
-    await verifyPortsFree([MOCK_PORT, ...LANE_PORTS, ...OTHER_SHARDS.map((l) => l.port)]);
-    // Data dirs come last: a process above has to have let go of them first.
-    for (const dir of [...LANE_DATA_DIRS, ...OTHER_SHARDS.map((l) => l.dataDir), TEST_WORKTREES, TEST_OWN_REPOS]) {
-        await removeTree(dir);
-    }
-}
-
-// --- Cached fixtures ---
-
-function ms(elapsed: number): string {
-    return `${(elapsed / 1000).toFixed(2)}s`;
-}
-
-function hashStrings(...parts: (string | Buffer)[]): string {
-    const h = crypto.createHash('sha256');
-    for (const p of parts) {
-        h.update(Buffer.isBuffer(p) ? p : Buffer.from(p, 'utf-8'));
-        h.update('\0');
-    }
-    return h.digest('hex');
-}
-
-/** Content hash of a source tree: relative paths and bytes, so an edit or a rename moves it. */
-function hashTree(dir: string): string {
-    const h = crypto.createHash('sha256');
-    const walk = (rel: string) => {
-        const entries = fs.readdirSync(path.join(dir, rel), { withFileTypes: true })
-            .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-        for (const entry of entries) {
-            const child = rel ? path.join(rel, entry.name) : entry.name;
-            if (entry.isDirectory()) {
-                h.update(`d ${child}\n`);
-                walk(child);
-            } else {
-                h.update(`f ${child}\n`);
-                h.update(fs.readFileSync(path.join(dir, child)));
-                h.update('\0');
-            }
-        }
-    };
-    walk('');
-    return h.digest('hex');
-}
-
-/**
- * Whether `artifact` may be reused: the marker beside it holds the hash of the source as it is NOW,
- * the artifact itself is still there, and `verify` says the artifact still works. A source that moved
- * rebuilds it; so does an artifact that exists but no longer resolves to anything (the pack repo's
- * commit is gone). Nothing here reads an mtime.
- */
-function cacheHit(artifact: string, key: string, verify: () => boolean): boolean {
-    if (forceRebuild()) return false;
-    let recorded: string | null = null;
-    try { recorded = fs.readFileSync(`${artifact}.sha`, 'utf-8').trim(); } catch { return false; }
-    return recorded === key && fs.existsSync(artifact) && verify();
-}
-
-/** Record what the artifact was just rebuilt from, so the next run has something to compare against. */
-function markCached(artifact: string, key: string): void {
-    try {
-        fs.writeFileSync(`${artifact}.sha`, `${key}\n`);
-    } catch (e) {
-        console.error(`[global-setup] could not write ${artifact}.sha: ${e}`);
-    }
-}
-
-// --- Fixture repos ---
-
-interface FixtureRepo {
-    dir: string;
-    readme: string;
-    label: string;
-}
-
-const FIXTURE_REPOS: FixtureRepo[] = [
-    { dir: TEST_REPO, readme: '# Test Repository\n', label: 'test git repo' },
-    { dir: TEST_REPO_2, readme: '# Second Test Repository\n', label: 'second test git repo' },
-];
-
-/**
- * Recreate the two fixture repos from a cached pristine template.
- *
- * The template is what the cache holds; the project's repo is a fresh copy of it every run, because
- * the project's repo is where specs commit, branch and leave worktree metadata. Reusing it in place
- * would let one run's tree be the next run's starting point, which is the coupling `isolatedProject`
- * exists to avoid (docs/testing.md → E2E conventions).
- */
-function ensureFixtureRepos(): void {
-    for (const repo of FIXTURE_REPOS) {
-        const key = hashStrings('fixture-repo-v1', repo.readme, REPO_USER_EMAIL, REPO_USER_NAME);
-        const template = `${repo.dir}.tpl`;
-        const reusable = cacheHit(template, key, () =>
-            fs.existsSync(path.join(template, '.git')) && fs.existsSync(path.join(template, 'README.md')));
-        if (!reusable) {
-            buildFixtureRepo(template, repo);
-            markCached(template, key);
-        }
-        try { fs.rmSync(repo.dir, { recursive: true, force: true }); } catch { /* ignore */ }
-        fs.cpSync(template, repo.dir, { recursive: true });
-        console.log(`[global-setup] ${repo.label} ${reusable ? 'cached' : 'built'}: ${repo.dir}`);
-    }
-}
-
-function buildFixtureRepo(dir: string, repo: FixtureRepo): void {
-    console.log(`[global-setup] Creating ${repo.label} template...`);
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'README.md'), repo.readme);
-    try {
-        git(['init', '-q', dir]);
-        // A local identity so backend commits (commit-and-done, which pass no -c flags) succeed even
-        // where no global git config exists.
-        git(['-C', dir, ...GIT_IDENTITY, 'config', 'user.email', REPO_USER_EMAIL]);
-        git(['-C', dir, ...GIT_IDENTITY, 'config', 'user.name', REPO_USER_NAME]);
-        git(['-C', dir, ...GIT_IDENTITY, 'add', 'README.md']);
-        git(['-C', dir, ...GIT_IDENTITY, 'commit', '-q', '-m', 'Initial commit']);
-    } catch (e) {
-        console.error(`[global-setup] Failed to create the ${repo.label} template:`, e);
-        throw e;
-    }
-}
-
-function git(args: string[]): string {
-    return execFileSync('git', args, { stdio: 'pipe' }).toString().trim();
+    try { fs.unlinkSync(STORAGE_STATE_FILE); } catch { /* ignore */ }
+    try { fs.unlinkSync(STORAGE_STATE_FILE_ISOLATED); } catch { /* ignore */ }
+    try { fs.unlinkSync('/tmp/kanban-test-auth.json'); } catch { /* ignore */ }
+    try { fs.unlinkSync('/tmp/kanban-test-auth.json.isolated'); } catch { /* ignore */ }
 }
 
 // --- Local extension seeding ---
@@ -737,12 +398,20 @@ function removeSeededLocalExtensions(): void {
 // --- Registry index ---
 
 /**
- * Write the registry index the servers read, reusing the previous run's while its inputs agree.
+ * Build the i18n pack repo and write the registry index the servers read.
  *
- * The key is the fixture plus the i18n pack commit it was resolved to, so a rebuilt pack repo (whose
- * content moved, therefore whose commit moved) rewrites the index. The verification is that the
- * artifact holds no unresolved placeholder: a pin of `__I18N_PACK_COMMIT__` is the one state that
- * reads as a spec failure instead of a setup failure.
+ * The registry fixture pins its translation pack to a commit, and a pin has to be
+ * a commit that exists — the server clones `repo`, checks out `commit`, and
+ * verifies `rev-parse HEAD` before it installs anything. So the hash cannot live
+ * in the fixture: it is a property of the content, and a hardcoded one goes stale
+ * the moment anyone edits the pack. Setup builds the repo and substitutes its
+ * HEAD.
+ *
+ * When the repo cannot be built (no git, no identity, a read-only /tmp) the
+ * placeholder is left in place rather than replaced with a plausible-looking fake:
+ * the one spec that installs this entry asserts its commit resolved, so a broken
+ * setup reads as "setup did not build the pack repo" instead of a checkout error
+ * naming a hash that was never a commit.
  */
 function prepareRegistryIndex(): void {
     const commit = buildI18nPackRepo();
@@ -756,94 +425,47 @@ function prepareRegistryIndex(): void {
     const index = commit
         ? fixture.split(I18N_PACK_COMMIT_PLACEHOLDER).join(commit)
         : fixture;
-    const key = hashStrings('registry-index-v1', index);
-    // No commit means no resolvable pin: write the fixture as it is and let the spec say so.
-    const reusable = !commit || cacheHit(GENERATED_REGISTRY_FILE, key, () =>
-        // An unresolved placeholder is the one state that reads as a spec failure, not a setup one.
-        !fs.readFileSync(GENERATED_REGISTRY_FILE, 'utf-8').includes(I18N_PACK_COMMIT_PLACEHOLDER));
-    if (!reusable) {
-        try {
-            fs.writeFileSync(GENERATED_REGISTRY_FILE, index);
-            markCached(GENERATED_REGISTRY_FILE, key);
-        } catch (e) {
-            console.error(`[global-setup] cannot write ${GENERATED_REGISTRY_FILE}: ${e}`);
-            return;
-        }
+    try {
+        fs.writeFileSync(GENERATED_REGISTRY_FILE, index);
+        console.log(
+            commit
+                ? `[global-setup] Registry index written with the i18n pack pinned to ${commit.slice(0, 12)}`
+                : '[global-setup] Registry index written WITHOUT a resolved i18n pack commit — '
+                  + 'e2e/i18n-first-run-offer will fail; see the git error above',
+        );
+    } catch (e) {
+        console.error(`[global-setup] cannot write ${GENERATED_REGISTRY_FILE}: ${e}`);
     }
-    console.log(
-        `[global-setup] Registry index ${reusable ? 'cached' : 'written'}`
-        + (commit ? ` — i18n pack pinned to ${commit.slice(0, 12)}`
-            : ' WITHOUT a resolved i18n pack commit — e2e/i18n-first-run-offer will fail; see the git error above'),
-    );
 }
 
 /**
- * The commit the i18n pack repo holds, building it from `tests/fixtures/i18n-pack-repo` when the cache
- * does not answer, or null when git could not do it.
+ * Commit `tests/fixtures/i18n-pack-repo` into a throwaway repo and return its
+ * HEAD, or null when git could not do it.
  *
- * The identity and both commit dates are fixed, so the commit is a function of the pack's content
- * alone: the same fixture commits to the same hash on any machine and in any run, which is what makes
- * the repo cacheable — and what keeps a stale generated registry correct rather than plausible.
- *
- * When the repo cannot be built (no git, no identity, a read-only /tmp) the placeholder is left in
- * place rather than replaced with a plausible-looking fake: the one spec that installs this entry
- * asserts its commit resolved, so a broken setup reads as "setup did not build the pack repo" instead
- * of a checkout error naming a hash that was never a commit.
+ * The identity and both commit dates are fixed, so the hash is a function of the
+ * pack's content alone: the repo is rebuilt from scratch every run (an edited
+ * fixture is picked up, never inherited from a previous run), while an untouched
+ * one yields the same commit as the last run's.
  */
 function buildI18nPackRepo(): string | null {
-    if (!fs.existsSync(I18N_PACK_FIXTURE_DIR)) {
-        console.error(`[global-setup] no i18n pack fixture at ${I18N_PACK_FIXTURE_DIR}`);
-        return null;
-    }
-    const key = hashStrings('i18n-pack-repo-v1', hashTree(I18N_PACK_FIXTURE_DIR));
-    if (cacheHit(I18N_PACK_REPO, key, () => resolveRepoHead(I18N_PACK_REPO) !== null)) {
-        const head = resolveRepoHead(I18N_PACK_REPO);
-        if (head) {
-            console.log(`[global-setup] i18n pack repo cached at ${head.slice(0, 12)}`);
-            return head;
-        }
-    }
-    const built = commitI18nPackRepo();
-    // A repo git could not build gets no marker, so the next run tries again instead of believing one.
-    if (built) markCached(I18N_PACK_REPO, key);
-    console.log(built
-        ? `[global-setup] i18n pack repo built at ${built.slice(0, 12)}`
-        : '[global-setup] i18n pack repo NOT built');
-    return built;
-}
-
-/**
- * The repo's HEAD, or null unless it is a commit the repo actually holds. A git-pinned extension
- * install is resolved by commit, so a cached repo is reusable only while this answers.
- */
-function resolveRepoHead(repo: string): string | null {
-    try {
-        const head = git(['-C', repo, 'rev-parse', 'HEAD']);
-        if (!/^[0-9a-f]{40}$/i.test(head)) return null;
-        git(['-C', repo, 'cat-file', '-e', `${head}^{commit}`]);
-        return head;
-    } catch {
-        return null;
-    }
-}
-
-function commitI18nPackRepo(): string | null {
-    // Fixed dates so the hash is the content's, not the clock's. An explicit identity: this must work
-    // on a machine with no global git config.
     const gitEnv = {
         ...process.env,
         GIT_AUTHOR_DATE: '2020-01-01T00:00:00Z',
         GIT_COMMITTER_DATE: '2020-01-01T00:00:00Z',
     };
-    const gitIn = (args: string[]) =>
+    // An explicit identity: this must work on a machine with no global git config,
+    // and must not depend on the one global-setup sets for the task repos.
+    const identity = ['-c', 'user.name=MIKE e2e', '-c', 'user.email=e2e@localhost.test',
+        '-c', 'commit.gpgsign=false', '-c', 'core.autocrlf=false'];
+    const git = (args: string[]) =>
         execFileSync('git', ['-C', I18N_PACK_REPO, ...args], { stdio: 'pipe', env: gitEnv }).toString().trim();
     try {
         fs.rmSync(I18N_PACK_REPO, { recursive: true, force: true });
         fs.cpSync(I18N_PACK_FIXTURE_DIR, I18N_PACK_REPO, { recursive: true });
         execFileSync('git', ['init', '-q', I18N_PACK_REPO], { stdio: 'pipe', env: gitEnv });
-        gitIn([...GIT_IDENTITY, 'add', '-A']);
-        gitIn([...GIT_IDENTITY, 'commit', '-q', '-m', 'fixture: i18n translation pack']);
-        const head = gitIn(['rev-parse', 'HEAD']);
+        git([...identity, 'add', '-A']);
+        git([...identity, 'commit', '-q', '-m', 'fixture: i18n translation pack']);
+        const head = git(['rev-parse', 'HEAD']);
         if (!/^[0-9a-f]{40}$/i.test(head)) throw new Error(`unexpected HEAD: ${head}`);
         return head;
     } catch (e) {
@@ -854,8 +476,177 @@ function commitI18nPackRepo(): string | null {
 
 // --- Helpers ---
 
-function sleep(msToSleep: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, msToSleep));
+function ensureTestRepo(): void {
+    // Recreate test repos for clean state
+    for (const repo of [TEST_REPO, TEST_REPO_2]) {
+        const label = repo === TEST_REPO ? 'test git repo' : 'second test git repo';
+        // Remove existing repo
+        try { fs.rmSync(repo, { recursive: true, force: true }); } catch { /* ignore */ }
+        console.log(`[global-setup] Creating ${label}...`);
+        fs.mkdirSync(repo, { recursive: true });
+        const readme = repo === TEST_REPO ? '# Test Repository\n' : '# Second Test Repository\n';
+        fs.writeFileSync(`${repo}/README.md`, readme);
+        try {
+            execSync('git init', { cwd: repo });
+            // Set a local git identity so backend commits (e.g. commit-and-done,
+            // which don't pass -c flags) succeed even when no global git config exists.
+            execSync('git config user.email "test@kanban.local"', { cwd: repo });
+            execSync('git config user.name "Test"', { cwd: repo });
+            execSync('git add README.md', { cwd: repo });
+            execSync('git commit -m "Initial commit"', { cwd: repo });
+        } catch (e) {
+            console.error(`[global-setup] Failed to create ${label}:`, e);
+            throw e;
+        }
+    }
+}
+
+/**
+ * Stop the test servers by identity (--data-dir) and wait for them to be gone. The port is not
+ * enough: the servers are grandchildren (`setsid go run . …`), so the port owner is not the process
+ * that should stop, and `lsof -ti:PORT` also lists the port's clients. A server that outlives its
+ * run keeps the ports and its SQLite files, so the next run boots on the previous run's database.
+ * The pattern is anchored because the two data dirs share a prefix.
+ */
+function killTestServers(): void {
+    // Isolated first: its pattern is the only one that cannot also match the main server.
+    for (const dir of [TEST_DATA_DIR_ISOLATED, TEST_DATA_DIR]) {
+        const pattern = `--data-dir ${dir}([[:space:]]|$)`;
+        let pids = '';
+        try {
+            pids = execSync(`pgrep -f "${pattern}" 2>/dev/null || true`, { encoding: 'utf-8', timeout: 5000 }).trim();
+        } catch { /* none */ }
+        const mine = String(process.pid);
+        let victims = pids ? pids.split('\n').map((x) => x.trim()).filter((x) => x && x !== mine) : [];
+        if (victims.length === 0) continue;
+        for (const pid of victims) { try { process.kill(parseInt(pid), 'SIGTERM'); } catch { /* ignore */ } }
+        const deadline = Date.now() + 8000;
+        while (Date.now() < deadline) {
+            const still = survivors(pattern, mine);
+            if (still.length === 0) return;
+            victims = still;
+            execSync('sleep 0.25');
+        }
+        for (const pid of victims) {
+            console.error(`[global-setup] test server pid ${pid} (${dir}) ignored SIGTERM — SIGKILL`);
+            try { process.kill(parseInt(pid), 'SIGKILL'); } catch { /* ignore */ }
+        }
+        const killed = Date.now() + 5000;
+        while (Date.now() < killed && survivors(pattern, mine).length > 0) execSync('sleep 0.2');
+    }
+}
+
+function survivors(pattern: string, selfPid: string): string[] {
+    try {
+        const out = execSync(`pgrep -f "${pattern}" 2>/dev/null || true`, { encoding: 'utf-8', timeout: 5000 }).trim();
+        return out ? out.split('\n').map((x) => x.trim()).filter((x) => x && x !== selfPid) : [];
+    } catch {
+        return [];
+    }
+}
+
+/** PIDs listening on `port`, excluding this process (killing the runner would end the suite). */
+function portPids(port: number): string[] {
+    try {
+        const output = execSync(`lsof -ti:${port}`, { encoding: 'utf-8', timeout: 3000 }).trim();
+        return output ? output.split('\n').map((p) => p.trim()).filter((p) => p && p !== String(process.pid)) : [];
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * Stop whoever owns `port` and do not return until it is free. A wedged server ignores SIGTERM and
+ * keeps the listener; a polite one stays bound for a moment while it shuts down.
+ */
+function killPort(port: number): void {
+    let pids = portPids(port);
+    if (pids.length === 0) return;
+    for (const pid of pids) {
+        try { process.kill(parseInt(pid), 'SIGTERM'); } catch { /* ignore */ }
+    }
+    const deadline = Date.now() + 8000;
+    while (Date.now() < deadline) {
+        pids = portPids(port);
+        if (pids.length === 0) return;
+        execSync('sleep 0.25');
+    }
+    for (const pid of pids) {
+        console.error(`[global-setup] port ${port} pid ${pid} ignored SIGTERM — SIGKILL`);
+        try { process.kill(parseInt(pid), 'SIGKILL'); } catch { /* ignore */ }
+    }
+    const killed = Date.now() + 3000;
+    while (Date.now() < killed && portPids(port).length > 0) execSync('sleep 0.2');
+}
+
+/**
+ * Wait until no process holds anything open inside `dir`. Deleting the data dir while the killed
+ * server is still checkpointing SQLite leaves it re-created afterwards, and the next run then
+ * recovers the PREVIOUS run's database from the leftover WAL.
+ */
+// Budget: server.ShutdownTimeout (the worst-case graceful exit) plus slack to notice.
+function waitForFilesRelease(dir: string, timeoutMs = 20000): void {
+    if (!fs.existsSync(dir)) return;
+    const holders = (): string => {
+        try {
+            return execSync(`lsof +D ${dir} -t 2>/dev/null || true`, { encoding: 'utf-8', timeout: 5000 }).trim();
+        } catch {
+            return '';
+        }
+    };
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+        const open = holders();
+        if (!open) return;
+        if (Date.now() > deadline) {
+            console.error(`[global-setup] Warning: ${dir} still held by ${open.split('\n').join(',')} — deleting anyway`);
+            return;
+        }
+        execSync('sleep 0.25');
+    }
+}
+
+function cleanupStaleState(keepLockFile: boolean): void {
+    // Leftover seeded fixtures from an interrupted run.
+    removeSeededLocalExtensions();
+    if (!keepLockFile) {
+        try { fs.unlinkSync(LOCK_FILE); } catch { /* ignore */ }
+    }
+    // Kill stale processes (no shell pipeline to avoid self-kill)
+    killTestServers();
+    for (const port of [MOCK_PORT, KANBAN_PORT, KANBAN_PORT_ISOLATED]) {
+        killPort(port);
+    }
+    // Clean stale data — after the servers above have actually released their files
+    waitForFilesRelease(TEST_DATA_DIR);
+    waitForFilesRelease(TEST_DATA_DIR_ISOLATED);
+    try { fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true }); } catch { /* ignore */ }
+    try { fs.rmSync(TEST_DATA_DIR_ISOLATED, { recursive: true, force: true }); } catch { /* ignore */ }
+    try { fs.rmSync(TEST_WORKTREES, { recursive: true, force: true }); } catch { /* ignore */ }
+    try { fs.rmSync(TEST_OWN_REPOS, { recursive: true, force: true }); } catch { /* ignore */ }
+}
+
+async function killKanbanServer(): Promise<void> {
+    let killed = false;
+    try {
+        const pids = execSync('lsof -ti:3000 2>/dev/null || true').toString().trim();
+        // Skip this process — killing it would SIGTERM the Playwright runner.
+        const toKill = pids ? pids.split('\n').map(p => p.trim()).filter(p => p && p !== String(process.pid)) : [];
+        if (toKill.length > 0) {
+            execSync(`kill ${toKill.join(' ')} 2>/dev/null || true`);
+            console.log('[global-setup] Killed existing server on port 3000');
+            killed = true;
+        }
+    } catch { /* no server running */ }
+
+    if (!killed) return;
+
+    // Wait for port to free (up to 5s)
+    for (let attempt = 0; attempt < 10; attempt++) {
+        const isFree = await isPortFree(KANBAN_PORT);
+        if (isFree) return;
+        await new Promise(r => setTimeout(r, 500));
+    }
 }
 
 /** Check if port is free. */
@@ -876,7 +667,7 @@ async function isPortFree(port: number): Promise<boolean> {
     });
 }
 
-function waitForServer(port: number, logFile?: string, timeout = 15000): Promise<void> {
+function waitForServer(port: number, timeout = 5000): Promise<void> {
     return new Promise((resolve, reject) => {
         const start = Date.now();
         const tryConnect = () => {
@@ -886,12 +677,9 @@ function waitForServer(port: number, logFile?: string, timeout = 15000): Promise
             });
             req.on('error', () => {
                 if (Date.now() - start < timeout) {
-                    setTimeout(tryConnect, 100);
+                    setTimeout(tryConnect, 200);
                 } else {
-                    // The process was spawned, so a port that never answers means it exited or refused
-                    // to start. Its own output is the only record of why.
-                    reject(new Error(`Server on port ${port} did not start within ${timeout}ms`
-                        + (logFile ? `\n--- ${logFile} ---\n${tailOf(logFile)}` : '')));
+                    reject(new Error(`Server on port ${port} did not start within ${timeout}ms`));
                 }
             });
             req.end();
@@ -900,23 +688,7 @@ function waitForServer(port: number, logFile?: string, timeout = 15000): Promise
     });
 }
 
-function tailOf(file: string, lines = 30): string {
-    try {
-        return fs.readFileSync(file, 'utf-8').trimEnd().split('\n').slice(-lines).join('\n');
-    } catch {
-        return '(unreadable)';
-    }
-}
-
 function postJson(url: string, body: any, cookie?: string, csrfToken?: string): Promise<any> {
-    return requestJson('POST', url, body, cookie, csrfToken);
-}
-
-function putJson(url: string, body: any, cookie?: string, csrfToken?: string): Promise<any> {
-    return requestJson('PUT', url, body, cookie, csrfToken);
-}
-
-function requestJson(method: string, url: string, body?: any, cookie?: string, csrfToken?: string): Promise<any> {
     return new Promise((resolve, reject) => {
         const data = JSON.stringify(body);
         const headers: Record<string, string> = {
@@ -925,9 +697,37 @@ function requestJson(method: string, url: string, body?: any, cookie?: string, c
         };
         if (cookie) headers['Cookie'] = cookie;
         if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
-        const req = http.request(url, { method, headers }, (res) => {
+        const req = http.request(url, {
+            method: 'POST',
+            headers,
+        }, (res) => {
             let responseData = '';
-            res.on('data', (chunk) => { responseData += chunk; });
+            res.on('data', chunk => responseData += chunk);
+            res.on('end', () => {
+                try { resolve(JSON.parse(responseData)); } catch { resolve(null); }
+            });
+        });
+        req.on('error', reject);
+        req.write(data);
+        req.end();
+    });
+}
+
+function putJson(url: string, body: any, cookie?: string, csrfToken?: string): Promise<any> {
+    return new Promise((resolve, reject) => {
+        const data = JSON.stringify(body);
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(data).toString(),
+        };
+        if (cookie) headers['Cookie'] = cookie;
+        if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
+        const req = http.request(url, {
+            method: 'PUT',
+            headers,
+        }, (res) => {
+            let responseData = '';
+            res.on('data', chunk => responseData += chunk);
             res.on('end', () => {
                 try { resolve(JSON.parse(responseData)); } catch { resolve(null); }
             });
@@ -944,7 +744,7 @@ function getJson(url: string, cookie?: string): Promise<any> {
         if (cookie) headers['Cookie'] = cookie;
         const req = http.get(url, { headers }, (res) => {
             let responseData = '';
-            res.on('data', (chunk) => { responseData += chunk; });
+            res.on('data', chunk => responseData += chunk);
             res.on('end', () => {
                 try { resolve(JSON.parse(responseData)); } catch { resolve(null); }
             });
@@ -965,16 +765,15 @@ async function login(base: string): Promise<{ cookie: string; csrfToken: string 
             },
         }, (res) => {
             const setCookie = res.headers['set-cookie'];
-            const csrf = res.headers['x-csrf-token'];
-            const csrfToken = Array.isArray(csrf) ? csrf[0] : csrf;
+            const csrfToken = res.headers['x-csrf-token'];
             let responseData = '';
-            res.on('data', (chunk) => { responseData += chunk; });
+            res.on('data', chunk => responseData += chunk);
             res.on('end', () => {
                 if (!setCookie || setCookie.length === 0) {
                     reject(new Error(`Login failed: ${responseData}`));
                     return;
                 }
-                const cookie = Array.isArray(setCookie) ? setCookie[0] : String(setCookie);
+                const cookie = Array.isArray(setCookie) ? setCookie[0] : setCookie;
                 resolve({ cookie: cookie.split(';')[0].trim(), csrfToken: csrfToken || '' });
             });
         });
@@ -984,14 +783,38 @@ async function login(base: string): Promise<{ cookie: string; csrfToken: string 
     });
 }
 
+function deleteRequest(url: string): Promise<any> {
+    return new Promise((resolve, reject) => {
+        const req = http.request(url, {
+            method: 'DELETE',
+        }, (res) => {
+            let responseData = '';
+            res.on('data', chunk => responseData += chunk);
+            res.on('end', () => {
+                try { resolve(JSON.parse(responseData)); } catch { resolve(null); }
+            });
+        });
+        req.on('error', reject);
+        req.end();
+    });
+}
+
 export default async function main(): Promise<void> {
-    // A lock plus a live server means a previous run left the lane standing: run teardown for it before
-    // setting up. Anything else needs no teardown — setup's own stale-state cleanup covers it.
-    if (fs.existsSync(LOCK_FILE) && !(await isPortFree(MAIN_LANE.port))) {
+    // Only teardown if lock exists AND servers are running.
+    // Stale lock + dead servers => clean up and run setup fresh.
+    const lockExists = fs.existsSync(LOCK_FILE);
+    const serversRunning = await isPortFree(KANBAN_PORT).then(free => !free);
+
+    if (lockExists && serversRunning) {
         console.log('[global-setup] Teardown phase: stopping running servers');
+        cleanupStaleState(true);
         await teardown();
-    } else if (fs.existsSync(LOCK_FILE)) {
-        console.log('[global-setup] Stale lock detected, cleaning up');
+        try { fs.unlinkSync(LOCK_FILE); } catch { /* ignore */ }
+    } else {
+        if (lockExists && !serversRunning) {
+            console.log('[global-setup] Stale lock detected, cleaning up');
+        }
+        cleanupStaleState(false);
     }
     await setup();
 }

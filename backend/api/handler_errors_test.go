@@ -21,7 +21,6 @@ func errorBody(t *testing.T, rr *httptest.ResponseRecorder) string {
 }
 
 func TestHandleLog_UnknownProjectIs404(t *testing.T) {
-	t.Parallel()
 	h, _, _, _ := newTestGitHandler(t)
 
 	rr := doRequest(t, newTestGitMux(h), http.MethodGet, "/api/projects/ghost/git/log")
@@ -35,7 +34,6 @@ func TestHandleLog_UnknownProjectIs404(t *testing.T) {
 }
 
 func TestHandleLog_ProjectLookupFaultIs500NotPhantom404(t *testing.T) {
-	t.Parallel()
 	h, s, _, _ := newTestGitHandler(t)
 
 	// Make the lookup fail for a reason that is not "absent": drop the table.
@@ -58,7 +56,6 @@ func TestHandleLog_ProjectLookupFaultIs500NotPhantom404(t *testing.T) {
 }
 
 func TestHandleTaskLog_UnknownTaskIs404(t *testing.T) {
-	t.Parallel()
 	h, _, _, _ := newTestGitHandler(t)
 
 	rr := doRequest(t, newTestGitMux(h), http.MethodGet, "/api/projects/proj-1/tasks/ghost/git/log")
@@ -72,7 +69,6 @@ func TestHandleTaskLog_UnknownTaskIs404(t *testing.T) {
 }
 
 func TestHandleTaskLog_TaskLookupFaultIs500(t *testing.T) {
-	t.Parallel()
 	h, s, _, _ := newTestGitHandler(t)
 
 	if _, err := s.Exec(`DROP TABLE tasks`); err != nil {

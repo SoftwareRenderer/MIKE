@@ -6,7 +6,6 @@ import "testing"
 // caller relies on: modified, staged, untracked, renames (destination wins) and paths git
 // chose to quote.
 func TestParseStatusPaths(t *testing.T) {
-	t.Parallel()
 	out := "M  main.go\n?? broken.go\n M touched.go\nR  old.go -> renamed.go\n?? \"quoted name.go\"\nA  dir/new.go\n"
 	got := ParseStatusPaths(out)
 	want := map[string]bool{

@@ -8,7 +8,6 @@ import (
 )
 
 func TestWriteFileAtomicNewFile(t *testing.T) {
-	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "new.go")
 
@@ -35,7 +34,6 @@ func TestWriteFileAtomicNewFile(t *testing.T) {
 }
 
 func TestWriteFileAtomicKeepsExistingMode(t *testing.T) {
-	t.Parallel()
 	// os.WriteFile never changed the mode of a file it overwrote, so a save must not
 	// quietly strip the +x from a script.
 	dir := t.TempDir()
@@ -62,7 +60,6 @@ func TestWriteFileAtomicKeepsExistingMode(t *testing.T) {
 }
 
 func TestWriteFileAtomicKeepsOriginalWhenRenameFails(t *testing.T) {
-	t.Parallel()
 	// A directory at the target fails only the rename — the shape of a late error.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "occupied")
@@ -89,7 +86,6 @@ func TestWriteFileAtomicKeepsOriginalWhenRenameFails(t *testing.T) {
 }
 
 func TestWriteFileAtomicRefusesSymlinkTarget(t *testing.T) {
-	t.Parallel()
 	dir := t.TempDir()
 	outside := filepath.Join(dir, "outside.txt")
 	if err := os.WriteFile(outside, []byte("original"), 0644); err != nil {
@@ -110,7 +106,6 @@ func TestWriteFileAtomicRefusesSymlinkTarget(t *testing.T) {
 }
 
 func TestWriteFileAtomicOverwritesInPlace(t *testing.T) {
-	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "grows.go")
 	// The old content must be gone, not left as a prefix of a longer file.
@@ -126,7 +121,6 @@ func TestWriteFileAtomicOverwritesInPlace(t *testing.T) {
 }
 
 func TestIsAtomicTemp(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		path string
 		want bool

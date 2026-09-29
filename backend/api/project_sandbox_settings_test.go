@@ -16,7 +16,6 @@ import (
 // commands inside that container and one of these two fields undoes the boundary it
 // is supposed to provide.
 func TestCreateProjectRefusesWideningSandboxSettings(t *testing.T) {
-	t.Parallel()
 	h, _ := testProjectHandler(t)
 	isolation := false
 
@@ -88,7 +87,6 @@ func TestCreateProjectRefusesWideningSandboxSettings(t *testing.T) {
 // existing project could be widened, and validation must run before anything is
 // written — and before the handler stops the project's tasks.
 func TestUpdateProjectRefusesWideningSandboxSettings(t *testing.T) {
-	t.Parallel()
 	h, projID := testProjectHandler(t)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/projects/{projectID}", h.HandleByID)
@@ -133,7 +131,6 @@ func TestUpdateProjectRefusesWideningSandboxSettings(t *testing.T) {
 // filepath.Abs at container-creation time, which is nobody's idea of where the
 // project's cache should live.
 func TestCreateProjectMountHostPathIsAbsoluteOnly(t *testing.T) {
-	t.Parallel()
 	if err := types.ValidateSandboxMount(types.SandboxMount{HostPath: filepath.Join(t.TempDir(), "x"), ContainerPath: "/x"}); err != nil {
 		t.Errorf("an absolute host path was refused: %v", err)
 	}

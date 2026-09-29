@@ -76,8 +76,8 @@ func TestBranchWatcherLifecycle(t *testing.T) {
 		t.Skipf("skip branch watcher test (inotify limit): %v", err)
 	}
 
-	// No settle is needed before the first write: Watch registers the inotify watch before it
-	// returns, and the kernel queues events until StartEventLoop starts reading them.
+	// Give the watcher a moment to settle
+	time.Sleep(100 * time.Millisecond)
 
 	// Simulate a branch switch by writing a new HEAD file
 	headPath := filepath.Join(repoDir, ".git", "HEAD")
@@ -147,8 +147,10 @@ func TestBranchWatcherHandlesNonGitDir(t *testing.T) {
 		t.Logf("watch non-git dir (expected error): %v", err)
 	}
 
-	// Watch records the branch a path starts on and never broadcasts it, so nothing has been sent
-	// here whatever the clock says.
+	// Give the watcher a moment to settle
+	time.Sleep(100 * time.Millisecond)
+
+	// No broadcasts should have been sent for a non-git dir
 	mu.Lock()
 	count := broadcastCount
 	mu.Unlock()
@@ -199,6 +201,8 @@ func TestBranchWatcherDetectsDetachedHEAD(t *testing.T) {
 	if err != nil {
 		t.Skipf("skip detached HEAD test (inotify limit): %v", err)
 	}
+
+	time.Sleep(100 * time.Millisecond)
 
 	// Switch to detached HEAD by writing the raw SHA to .git/HEAD
 	headPath := filepath.Join(repoDir, ".git", "HEAD")
@@ -262,6 +266,13 @@ func TestBranchWatcherDuplicateEvents(t *testing.T) {
 		t.Skipf("skip duplicate events test (inotify limit): %v", err)
 	}
 
+	time.Sleep(100 * time.Millisecond)
+
+	// Reset counter after initial branch detection
+	mu.Lock()
+	broadcastCount = 0
+	mu.Unlock()
+
 	// Write the same branch ref multiple times
 	headPath := filepath.Join(repoDir, ".git", "HEAD")
 	for i := 0; i < 3; i++ {
@@ -269,14 +280,9 @@ func TestBranchWatcherDuplicateEvents(t *testing.T) {
 		if err != nil {
 			t.Fatalf("write HEAD: %v", err)
 		}
-		// Far enough apart that each write is delivered as its own event. Coalesced into one, the
-		// count is still 1 — but of the duplicate writes being ignored, which is the point of the
-		// test, it would then say nothing.
 		time.Sleep(50 * time.Millisecond)
 	}
 
-	// Long enough for a second broadcast to arrive if the dedupe were broken; this is the window in
-	// which that failure is visible, not a wait for anything.
 	time.Sleep(200 * time.Millisecond)
 
 	// Should have received exactly 1 broadcast (first write) then 0 for duplicates
@@ -476,6 +482,7 @@ func TestWorktreeWatcherMultiTask(t *testing.T) {
 	for _, taskID := range taskIDs {
 		worktreePath := filepath.Join(worktreesDir, projID, taskID)
 		writeTestFile(t, worktreePath, "test.txt", "content\n")
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	// Unwatch all tasks — should not panic
@@ -626,6 +633,8 @@ func TestBranchWatcherMultiProject(t *testing.T) {
 			t.Skipf("skip multi-project test (inotify limit): %v", err)
 		}
 	}
+
+	time.Sleep(100 * time.Millisecond)
 
 	// Switch branch in repo 0 only
 	headPath := filepath.Join(repoDirs[0], ".git", "HEAD")

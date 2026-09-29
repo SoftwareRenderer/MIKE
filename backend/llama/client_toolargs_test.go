@@ -44,7 +44,6 @@ func sentArguments(t *testing.T, m types.ChatMessage) string {
 }
 
 func TestToAPIMessage_TruncatedToolCallArgumentsCannotRideTheNextRequest(t *testing.T) {
-	t.Parallel()
 	raw := assistantCall(truncatedToolCallArgs)
 
 	got := sentArguments(t, raw)
@@ -58,7 +57,6 @@ func TestToAPIMessage_TruncatedToolCallArgumentsCannotRideTheNextRequest(t *test
 }
 
 func TestToAPIMessage_EmptyToolCallArgumentsMustStillDecodeAsAnObject(t *testing.T) {
-	t.Parallel()
 	for _, args := range []string{"", "   ", "not json", `{"unterminated": `, `"{}"`, `[1,2]`} {
 		if got := sentArguments(t, assistantCall(args)); got != "{}" {
 			t.Errorf("arguments %q became %q, want {}", args, got)
@@ -67,7 +65,6 @@ func TestToAPIMessage_EmptyToolCallArgumentsMustStillDecodeAsAnObject(t *testing
 }
 
 func TestToAPIMessage_ValidToolCallArgumentsPassThroughUnchanged(t *testing.T) {
-	t.Parallel()
 	const args = `{"command": "go test ./...", "timeout": 300}`
 
 	if got := sentArguments(t, assistantCall(args)); got != args {
@@ -76,7 +73,6 @@ func TestToAPIMessage_ValidToolCallArgumentsPassThroughUnchanged(t *testing.T) {
 }
 
 func TestToAPIMessage_ToolCallWithoutIDOrNameIsNotSent(t *testing.T) {
-	t.Parallel()
 	m := assistantCall(`{"command": "true"}`)
 	m.ToolCalls[0].Function.Name = ""
 
@@ -86,7 +82,6 @@ func TestToAPIMessage_ToolCallWithoutIDOrNameIsNotSent(t *testing.T) {
 }
 
 func TestToAPIMessage_ContentPartThatIsNeitherTextNorImageIsNotSentAsNull(t *testing.T) {
-	t.Parallel()
 	m := types.ChatMessage{Role: "user", Content: "look", ContentParts: []types.ContentPart{
 		{Type: "text", Text: "look"},
 		{Type: "audio", Text: "stale shape"},
@@ -111,7 +106,6 @@ func TestToAPIMessage_ContentPartThatIsNeitherTextNorImageIsNotSentAsNull(t *tes
 // TestToAPIMessage_MessageWithNoUsableContentPartsFallsBackToText: an empty content array is refused,
 // and dropping the message would lose the user's words, which Content still holds.
 func TestToAPIMessage_MessageWithNoUsableContentPartsFallsBackToText(t *testing.T) {
-	t.Parallel()
 	m := types.ChatMessage{Role: "user", Content: "the real text", ContentParts: []types.ContentPart{
 		{Type: "audio", Text: "stale shape"},
 	}}
@@ -137,7 +131,6 @@ func hasNullEntry(t *testing.T, body []byte) bool {
 }
 
 func TestRequestMessages_UnansweredToolCallIsAnsweredWhereTheProviderLooks(t *testing.T) {
-	t.Parallel()
 	msgs := []types.ChatMessage{
 		{Role: "user", Content: "run it"},
 		assistantCall(`{"command": "true"}`),
@@ -161,7 +154,6 @@ func TestRequestMessages_UnansweredToolCallIsAnsweredWhereTheProviderLooks(t *te
 // TestRequestMessages_ToolCallAnsweredLaterIsNotAnsweredTwice: the utility prompts emit the assistants
 // first and their tool answers after, so "answered" means named somewhere in the request.
 func TestRequestMessages_ToolCallAnsweredLaterIsNotAnsweredTwice(t *testing.T) {
-	t.Parallel()
 	msgs := []types.ChatMessage{
 		{Role: "user", Content: "run it"},
 		assistantCall(`{"command": "true"}`),
@@ -181,7 +173,6 @@ func TestRequestMessages_ToolCallAnsweredLaterIsNotAnsweredTwice(t *testing.T) {
 }
 
 func TestRequestMessages_ToolAnswerNamingNoCallIsNotSent(t *testing.T) {
-	t.Parallel()
 	msgs := []types.ChatMessage{
 		{Role: "user", Content: "hi"},
 		{Role: "tool", Content: "output nobody can attribute"},
@@ -198,7 +189,6 @@ func TestRequestMessages_ToolAnswerNamingNoCallIsNotSent(t *testing.T) {
 // repairing: a conversation whose tool call carries the truncated arguments still goes out decodable,
 // so the task can run again.
 func TestChatStreamPoisonedHistoryStillLeavesTheProviderWithValidJSON(t *testing.T) {
-	t.Parallel()
 	var body []byte
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ = io.ReadAll(r.Body)

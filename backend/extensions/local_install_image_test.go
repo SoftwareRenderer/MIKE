@@ -51,7 +51,6 @@ const lspManifestFmt = `{
 
 // A declared image is stored, never pulled — the sandbox pulls on first use — so install must not
 // ask podman for anything at all.
-// serial for the reason at fakePodmanExit.
 func TestInstallLocalLanguageServerDeclaresItsOwnImage(t *testing.T) {
 	h := testHandler(t)
 	writeLocalLSP(t, h, "fixturedev", "fixture-lsp",
@@ -76,7 +75,6 @@ func TestInstallLocalLanguageServerDeclaresItsOwnImage(t *testing.T) {
 
 // The declared image takes the same qualification rule as a registry entry's: an image naming no
 // registry cannot be pulled headless, so the folder is refused rather than installed broken.
-// serial for the reason at fakePodmanExit.
 func TestInstallLocalRefusesAnUnqualifiedDeclaredImage(t *testing.T) {
 	h := testHandler(t)
 	writeLocalLSP(t, h, "fixturedev", "fixture-lsp",
@@ -95,7 +93,6 @@ func TestInstallLocalRefusesAnUnqualifiedDeclaredImage(t *testing.T) {
 
 // Neither image nor Dockerfile leaves nothing to run in a sandbox, and a row that reports healthy
 // while serving nothing is the failure to avoid.
-// serial for the reason at fakePodmanExit.
 func TestInstallLocalStillRefusesALanguageServerWithNoImageAndNoDockerfile(t *testing.T) {
 	h := testHandler(t)
 	writeLocalLSP(t, h, "fixturedev", "fixture-lsp", strings.Replace(lspManifestFmt, "%s", "", 1))
@@ -113,7 +110,6 @@ func TestInstallLocalStillRefusesALanguageServerWithNoImageAndNoDockerfile(t *te
 // The browse listing is built from the same mapping as the install, or the two disagree about what
 // a folder declared.
 func TestLocalListingCarriesTheDeclaredImage(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 	writeLocalLSP(t, h, "fixturedev", "fixture-lsp",
 		strings.Replace(lspManifestFmt, "%s", `

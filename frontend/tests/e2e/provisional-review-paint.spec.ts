@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import {
   isolatedProject, ownProjectId, createTaskViaApi, ensureTaskStarted, navigateToTask,
-  waitForTaskState, waitForReaction,
+  waitForTaskState,
 } from './helpers';
 
 isolatedProject();
@@ -248,9 +248,7 @@ test.describe('A Review result read out of the browser while the server is still
     await page.goto(`/?project=${projectId}&task=${taskId}`);
 
     // Nothing local is painted, so the screen waits the way it did before: a loading screen, no rows.
-    // A cache paint would land on the frame after the held read is handed over, and frames are the
-    // window that scales with a loaded machine.
-    await waitForReaction(page, 8);
+    await page.waitForTimeout(1500);
     const rows = await entryIds(page);
     const pending = await page.locator(PENDING).count();
     annotate(`held read on a non-Review window: ${rows.length} rows, pending indicator=${pending}`);

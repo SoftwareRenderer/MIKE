@@ -40,7 +40,6 @@ func seedMessage(t *testing.T, s *Server, projID, taskID string, msg *types.Task
 }
 
 func TestMessageCreate(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -68,7 +67,6 @@ func TestMessageCreate(t *testing.T) {
 }
 
 func TestMessageCreateMissingFields(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -93,7 +91,6 @@ func TestMessageCreateMissingFields(t *testing.T) {
 }
 
 func TestMessageList(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -121,7 +118,6 @@ func TestMessageList(t *testing.T) {
 }
 
 func TestMessageUpdate(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -151,7 +147,6 @@ func TestMessageUpdate(t *testing.T) {
 }
 
 func TestMessageDeleteAfter(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -192,7 +187,6 @@ func TestMessageDeleteAfter(t *testing.T) {
 }
 
 func TestMessageDeleteSummarizationSkipsForkCleanup(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -272,7 +266,6 @@ func TestMessageDeleteSummarizationSkipsForkCleanup(t *testing.T) {
 }
 
 func TestMessageDeleteMissingID(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -285,7 +278,6 @@ func TestMessageDeleteMissingID(t *testing.T) {
 }
 
 func TestMessageGetByID(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -313,7 +305,6 @@ func TestMessageGetByID(t *testing.T) {
 }
 
 func TestMessageListWriteFileContentSuppressed(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -381,7 +372,6 @@ func TestMessageListWriteFileContentSuppressed(t *testing.T) {
 }
 
 func TestMessageListWriteFileContentFull(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -443,7 +433,6 @@ func TestMessageListWriteFileContentFull(t *testing.T) {
 }
 
 func TestMessageListNonWriteFileNotSuppressed(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -508,7 +497,6 @@ func TestMessageListNonWriteFileNotSuppressed(t *testing.T) {
 }
 
 func TestMessageListReasoningContentSuppressed(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -550,7 +538,6 @@ func TestMessageListReasoningContentSuppressed(t *testing.T) {
 }
 
 func TestMessageListReasoningContentAutoExpanded(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -594,7 +581,6 @@ func TestMessageListReasoningContentAutoExpanded(t *testing.T) {
 }
 
 func TestMessageListReasoningContentFull(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -632,7 +618,6 @@ func TestMessageListReasoningContentFull(t *testing.T) {
 }
 
 func TestMessageListReasoningWithToolCallsNotSuppressed(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -682,7 +667,6 @@ func TestMessageListReasoningWithToolCallsNotSuppressed(t *testing.T) {
 }
 
 func TestMessageGetByIDFull(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -712,7 +696,6 @@ func TestMessageGetByIDFull(t *testing.T) {
 }
 
 func TestMessageListBashResultTruncated(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -790,7 +773,6 @@ func TestMessageListBashResultTruncated(t *testing.T) {
 }
 
 func TestMessageListBashResultFull(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -852,7 +834,6 @@ func TestMessageListBashResultFull(t *testing.T) {
 }
 
 func TestMessageListShortBashResultNotTruncated(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -913,7 +894,6 @@ func TestMessageListShortBashResultNotTruncated(t *testing.T) {
 }
 
 func TestMessageListReadFileResultTruncated(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -986,7 +966,6 @@ func TestMessageListReadFileResultTruncated(t *testing.T) {
 }
 
 func TestMessageListReadFileResultFull(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -1047,7 +1026,6 @@ func TestMessageListReadFileResultFull(t *testing.T) {
 }
 
 func TestMessageListShortReadFileResultNotTruncated(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -1113,7 +1091,6 @@ func TestMessageListShortReadFileResultNotTruncated(t *testing.T) {
 // git_commit_hash, so the last-remaining-message lookup finds nothing and the code
 // must fall back to the thread's checkpoint_commit_hash.
 func TestDeleteMessagesAfterCheckpointRollsBackFork(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 
 	// Create a project with a git repo that has an initial committed file.
@@ -1255,7 +1232,6 @@ func TestDeleteMessagesAfterCheckpointRollsBackFork(t *testing.T) {
 // remains in the thread and the code must fall back to task.BaseCommit so the
 // request's file changes are discarded.
 func TestDeleteFirstRequestRollsBackToBase(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 
 	// Create a project with a git repo that has an initial committed file.
@@ -1359,7 +1335,6 @@ func TestDeleteFirstRequestRollsBackToBase(t *testing.T) {
 // Expected: worktree rolls back to checkpoint A -> hello.cs WITHOUT counter
 // (NOT the base commit, which would remove the file entirely).
 func TestDeleteCounterRequestRollsBackToPriorCheckpoint(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 
 	tmpDir := t.TempDir()
@@ -1450,7 +1425,6 @@ func TestDeleteCounterRequestRollsBackToPriorCheckpoint(t *testing.T) {
 }
 
 func TestMessageCreateRejectsInvalidRole(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -1470,7 +1444,6 @@ func TestMessageCreateRejectsInvalidRole(t *testing.T) {
 }
 
 func TestMessageCreateRejectsOversizedContent(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -1491,7 +1464,6 @@ func TestMessageCreateRejectsOversizedContent(t *testing.T) {
 // reinstates the whole pre-summary history into the LLM context. Store-level coverage
 // lives in backend/store; this is the endpoint the UI actually calls.
 func TestDeleteBeforeSummarizationKeepsSummary(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Summary survives cascade")

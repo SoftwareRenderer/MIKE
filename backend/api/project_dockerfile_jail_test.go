@@ -15,7 +15,6 @@ import (
 	"mike/backend/types"
 )
 
-// Serial with jailedProjectHandler, whose HOME it inherits the rule from.
 func jailedDockerfileProject(t *testing.T) (h *ProjectHandler, s *store.Store, id, inside, outside string) {
 	t.Helper()
 	var home string

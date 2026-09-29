@@ -206,7 +206,6 @@ func goodArchive(t *testing.T) []byte {
 // Installing moves every file the release ships onto the path *this* server uses and keeps what it
 // replaced; the running process is untouched until it is restarted.
 func TestInstallPutsTheReleaseInPlace(t *testing.T) {
-	t.Parallel()
 	f := stageFixtureFor(t, "1.4.2", goodArchive(t))
 	f.check(t)
 
@@ -310,7 +309,6 @@ func TestInstallPutsTheReleaseInPlace(t *testing.T) {
 // One downloaded release at a time: a second download is refused while a person may be reading the
 // prompt for the one already waiting.
 func TestPrepareRefusesOverADownloadedRelease(t *testing.T) {
-	t.Parallel()
 	f := stageFixtureFor(t, "1.4.2", goodArchive(t))
 	f.check(t)
 	if _, err := f.prepare(t); err != nil {
@@ -329,7 +327,6 @@ func TestPrepareRefusesOverADownloadedRelease(t *testing.T) {
 
 // An install is one click, not two: the second has nothing left to swap and says so.
 func TestApplyRefusesWithNothingDownloaded(t *testing.T) {
-	t.Parallel()
 	f := stageFixtureFor(t, "1.4.2", goodArchive(t))
 	f.check(t)
 	if _, err := f.install(t); err != nil {
@@ -344,7 +341,6 @@ func TestApplyRefusesWithNothingDownloaded(t *testing.T) {
 // The archive on disk is re-hashed before anything is renamed: the download was verified once, and the
 // directory it waits in is an ordinary one since.
 func TestApplyRefusesADownloadedReleaseItCanNoLongerTrust(t *testing.T) {
-	t.Parallel()
 	f := stageFixtureFor(t, "1.4.2", goodArchive(t))
 	f.check(t)
 	if _, err := f.prepare(t); err != nil {
@@ -371,7 +367,6 @@ func TestApplyRefusesADownloadedReleaseItCanNoLongerTrust(t *testing.T) {
 // The digest is the whole trust story this round: a mismatch means nothing on disk changed, and the
 // reason says so in terms a person can act on.
 func TestPrepareRefusesAnArchiveThatIsNotWhatTheManifestPromised(t *testing.T) {
-	t.Parallel()
 	f := stageFixtureFor(t, "1.4.2", goodArchive(t))
 	f.check(t)
 	// The manifest promised one archive; the server is handed a different one with the same name.
@@ -407,7 +402,6 @@ func TestPrepareRefusesAnArchiveThatIsNotWhatTheManifestPromised(t *testing.T) {
 // A container is refused before a byte is fetched: the swap would be lost on the next start of the
 // image, which is the worst possible outcome of a half-applied update.
 func TestTheUpdateHalvesRefuseAnInstallThatCannotTakeThem(t *testing.T) {
-	t.Parallel()
 	dir := releaseDir(t)
 	exe := filepath.Join(dir, "mike-server")
 	write(t, exe, "OLD-BINARY", 0o755)
@@ -445,7 +439,6 @@ func TestTheUpdateHalvesRefuseAnInstallThatCannotTakeThem(t *testing.T) {
 // The check and the download are separate steps, so the download re-asks the question the check
 // answered: whatever the cache claims, an old row must not talk this server into a downgrade.
 func TestPrepareRefusesADowngradeFromAStaleRow(t *testing.T) {
-	t.Parallel()
 	stale := State{
 		CurrentVersion: "1.4.0",
 		Latest:         "1.0.0",
@@ -474,7 +467,6 @@ func TestPrepareRefusesADowngradeFromAStaleRow(t *testing.T) {
 
 // Nothing has been checked yet: the answer is "check first", and the network stays quiet.
 func TestPrepareRefusesWithoutAKnownRelease(t *testing.T) {
-	t.Parallel()
 	dir := releaseDir(t)
 	exe := filepath.Join(dir, "mike-server")
 	write(t, exe, "OLD-BINARY", 0o755)
@@ -494,7 +486,6 @@ func TestPrepareRefusesWithoutAKnownRelease(t *testing.T) {
 // A bridge named outside the install directory is a file this update does not own. The note is the
 // point: silence here would leave a new server talking to an old bridge.
 func TestAnInstallRefusesToReplaceABridgeOutsideTheInstall(t *testing.T) {
-	t.Parallel()
 	f := stageFixtureFor(t, "1.4.2", goodArchive(t))
 	f.check(t)
 	outside := filepath.Join(t.TempDir(), "sandbox-bridge")
@@ -521,7 +512,6 @@ func TestAnInstallRefusesToReplaceABridgeOutsideTheInstall(t *testing.T) {
 
 // The archive is our own file, so anything in it that is not one of ours is treated as an attack.
 func TestUnpackRefusals(t *testing.T) {
-	t.Parallel()
 	top := "mike-server-1.4.2-linux-amd64"
 	cases := []struct {
 		name    string
@@ -573,7 +563,6 @@ func TestUnpackRefusals(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			archive := hostileArchive(t, tc.entries...)
 			_, err := unpack(bytes.NewReader(archive), filepath.Join(t.TempDir(), "unpacked"), "1.4.2", "linux", "amd64")
 			if err == nil {
@@ -586,7 +575,6 @@ func TestUnpackRefusals(t *testing.T) {
 	}
 
 	t.Run("an archive with more files than a release has", func(t *testing.T) {
-		t.Parallel()
 		var entries []*tar.Header
 		for i := 0; i <= maxArchiveMembers; i++ {
 			entries = append(entries, &tar.Header{Name: fmt.Sprintf("%s/prompts/%04d.tmpl", top, i), Typeflag: tar.TypeReg})
@@ -598,7 +586,6 @@ func TestUnpackRefusals(t *testing.T) {
 	})
 
 	t.Run("a good archive lands mode-for-mode", func(t *testing.T) {
-		t.Parallel()
 		dir := filepath.Join(t.TempDir(), "unpacked")
 		release, err := unpack(bytes.NewReader(goodArchive(t)), dir, "1.4.2", "linux", "amd64")
 		if err != nil {
@@ -611,7 +598,6 @@ func TestUnpackRefusals(t *testing.T) {
 }
 
 func TestWithin(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		root, target string
 		want         bool

@@ -23,7 +23,6 @@ func rowNumbers(f TrackedDiffFile) string {
 // An unchanged empty line is sometimes written as nothing rather than " "; dropping that row shifts every
 // later line of the hunk.
 func TestParseReadsABlankContextLineAsContext(t *testing.T) {
-	t.Parallel()
 	patch := "diff --git a/x.txt b/x.txt\n" +
 		"index abc1234..def5678 100644\n" +
 		"--- a/x.txt\n+++ b/x.txt\n" +
@@ -43,7 +42,6 @@ func TestParseReadsABlankContextLineAsContext(t *testing.T) {
 
 // Carrying the previous hunk's counters forward would print rows at line numbers the file does not have.
 func TestParseStopsNumberingAtAnUnreadableHunkHeader(t *testing.T) {
-	t.Parallel()
 	patch := "diff --git a/x.txt b/x.txt\n" +
 		"index abc1234..def5678 100644\n" +
 		"--- a/x.txt\n+++ b/x.txt\n" +
@@ -64,7 +62,6 @@ func TestParseStopsNumberingAtAnUnreadableHunkHeader(t *testing.T) {
 
 // A C-quoted header must name the block the parser keys by, or no file is told it was cut.
 func TestTruncateNamesAQuotedPathAndKeepsItsCounts(t *testing.T) {
-	t.Parallel()
 	const name = `qu"ote.ts`
 	var body []string
 	body = append(body,

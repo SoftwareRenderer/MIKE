@@ -74,7 +74,6 @@ func rawQuery(projectID, path, ref, task string) url.Values {
 // TestFSRawServesAnImageFromTheWorktree: the bytes of a binary file, intact, with the Content-Type a
 // browser paints. /api/fs/read cannot answer this — its JSON string replaces invalid bytes.
 func TestFSRawServesAnImageFromTheWorktree(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	id, _ := rawImageProject(t, s, "p1", map[string][]byte{"docs/logo.png": rawPNG})
 
@@ -99,7 +98,6 @@ func TestFSRawServesAnImageFromTheWorktree(t *testing.T) {
 // TestFSRawRefusesWhatItCannotPaint: the extension table is the permission, so a format that could run
 // is refused by name. SVG is the row that matters — markup, a common repo asset, loaded by an <img>.
 func TestFSRawRefusesWhatItCannotPaint(t *testing.T) {
-	t.Parallel()
 	body := []byte("<svg xmlns='http://www.w3.org/2000/svg' onload='alert(1)'></svg>")
 	s := testServer(t)
 	id, _ := rawImageProject(t, s, "p1", map[string][]byte{
@@ -121,7 +119,6 @@ func TestFSRawRefusesWhatItCannotPaint(t *testing.T) {
 // path, and a symlink planted inside the repository — the last one because a lexical check reads right
 // through it.
 func TestFSRawRefusesAPathAboveTheProject(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	secretDir := t.TempDir()
 	secret := filepath.Join(secretDir, "key.png")
@@ -157,7 +154,6 @@ func TestFSRawRefusesAPathAboveTheProject(t *testing.T) {
 // TestFSRawServesANameCarryingAColon: the refusal above is for a drive path, not for any name with a
 // colon in it.
 func TestFSRawServesANameCarryingAColon(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	id, _ := rawImageProject(t, s, "p1", map[string][]byte{"shots/a:b.png": rawPNG})
 
@@ -169,7 +165,6 @@ func TestFSRawServesANameCarryingAColon(t *testing.T) {
 
 // TestFSRawRefusesATaskOfAnotherProject: ?project and ?task arrive uncorrelated.
 func TestFSRawRefusesATaskOfAnotherProject(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	a, _ := rawImageProject(t, s, "pa", map[string][]byte{"logo.png": rawPNG})
 	b, _ := rawImageProject(t, s, "pb", map[string][]byte{"logo.png": rawPNG})
@@ -187,7 +182,6 @@ func TestFSRawRefusesATaskOfAnotherProject(t *testing.T) {
 // opening it, so a symlink filed inside the repository still answers — the swap detector reads the
 // resolved name, not the link.
 func TestFSRawServesAnImageReachedThroughAProjectSymlink(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	id, repo := rawImageProject(t, s, "p1", map[string][]byte{"vendor/logo.png": rawPNG, "link.png": rawPNG})
 	full := filepath.Join(repo, "link.png")
@@ -211,7 +205,6 @@ func TestFSRawServesAnImageReachedThroughAProjectSymlink(t *testing.T) {
 // only meets the regular-file rule once the file is open. A FIFO would block the request on
 // whatever a task writes into it, which is the same rule.
 func TestFSRawRefusesADirectoryNamedLikeAnImage(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	id, repo := rawImageProject(t, s, "p1", map[string][]byte{"logo.png": rawPNG})
 	if err := os.Mkdir(filepath.Join(repo, "traps.png"), 0o755); err != nil {
@@ -231,7 +224,6 @@ func TestFSRawRefusesADirectoryNamedLikeAnImage(t *testing.T) {
 // the resolved target of a symlink committed into a repository must never reach that error — it
 // would let a crafted repository read the server's directory layout back out.
 func TestFSRawRefusalNamesNoHostPath(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	hidden := t.TempDir()
 	target := filepath.Join(hidden, "id_ed25519.png")
@@ -261,7 +253,6 @@ func TestFSRawRefusalNamesNoHostPath(t *testing.T) {
 // TestFSRawRefusesATaskOfAnotherProjectAtARef: the ref branch binds ?task= to ?project= on its own
 // path through the handler, so the working-tree case above does not cover it.
 func TestFSRawRefusesATaskOfAnotherProjectAtARef(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	a, _ := rawImageProject(t, s, "pa", map[string][]byte{"logo.png": rawPNG})
 	b, _ := rawImageProject(t, s, "pb", map[string][]byte{"logo.png": rawPNG})
@@ -278,8 +269,6 @@ func TestFSRawRefusesATaskOfAnotherProjectAtARef(t *testing.T) {
 // TestFSRawRefBranchRefusesAnOversizedBlob: the ref branch caps on `git cat-file -s` and again in
 // the read, so a refusal must not cost the 20MB it refused.
 func TestFSRawRefBranchRefusesAnOversizedBlob(t *testing.T) {
-	// Serial: this measures the process-wide allocator (runtime.ReadMemStats), and a
-	// concurrent test's allocations land in the same delta.
 	s := testServer(t)
 	id, repo := rawImageProject(t, s, "p1", map[string][]byte{"logo.png": rawPNG})
 	big := bytes.Repeat([]byte{0x5a}, (exec.MaxUploadBytes)+(1<<20))
@@ -307,7 +296,6 @@ func TestFSRawRefBranchRefusesAnOversizedBlob(t *testing.T) {
 // buffers every GET body to hash an ETag. For an image that costs several times the file in memory and
 // brotli-compresses bytes a codec already compressed, so the route's own cap stops being the bound.
 func TestFSRawImageIsNotBufferedOrRecompressed(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	id, repo := rawImageProject(t, s, "p1", map[string][]byte{"logo.png": rawPNG})
 	const size = 6 << 20
@@ -340,7 +328,6 @@ func TestFSRawImageIsNotBufferedOrRecompressed(t *testing.T) {
 // TestFSRawPutsNoFileNameInAHeader: the file's name comes from the repository, so echoing it into
 // Content-Disposition would make a crafted name a header writer.
 func TestFSRawPutsNoFileNameInAHeader(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	id, _ := rawImageProject(t, s, "p1", map[string][]byte{"logo.png": rawPNG})
 
@@ -353,7 +340,6 @@ func TestFSRawPutsNoFileNameInAHeader(t *testing.T) {
 // TestFSRawReadsACommittedObject: the diff panel shows two sides of a changed image, and the old side
 // is no longer on disk.
 func TestFSRawReadsACommittedObject(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	id, repo := rawImageProject(t, s, "p1", map[string][]byte{"logo.png": rawPNG})
 	head := strings.TrimSpace(mustRunGitOutput(t, repo, "rev-parse", "HEAD"))
@@ -388,7 +374,6 @@ func TestFSRawReadsACommittedObject(t *testing.T) {
 // TestFSRawRefReadsATaskWhoseWorktreeIsGone: worktrees of a project share its object database, so a
 // committed image is readable after commit-and-done deleted the worktree.
 func TestFSRawRefReadsATaskWhoseWorktreeIsGone(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	id, _ := rawImageProject(t, s, "p1", map[string][]byte{"logo.png": rawPNG})
 	if err := s.store.CreateTask(&types.Task{ID: "t1", ProjectID: id, Title: "t1", Status: types.StatusDone, Branch: "task/t1"}); err != nil {
@@ -408,7 +393,6 @@ func TestFSRawRefReadsATaskWhoseWorktreeIsGone(t *testing.T) {
 // and not the file. The sparse file is 32MB of hole, so what the request allocates is the only thing
 // that tells the two orders apart.
 func TestFSRawRefusesAnOversizedImageBeforeReadingIt(t *testing.T) {
-	// Serial for the reason at TestFSRawRefBranchRefusesAnOversizedBlob.
 	s := testServer(t)
 	repo := t.TempDir()
 	if err := s.store.CreateProject(&types.Project{ID: "p1", Name: "p1", Path: repo}); err != nil {

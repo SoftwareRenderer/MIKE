@@ -107,7 +107,6 @@ func setupTaskValidationProject(t *testing.T, h *TaskHandler, s *store.Store) {
 // The refusal is what an old client sees; converting the alias instead would let it keep winning
 // over an explicit operating_mode in the same body.
 func TestTaskHandler_POST_RefusesTheRetiredPlanMode(t *testing.T) {
-	t.Parallel()
 	h, s, _ := newTestTaskHandler(t)
 	if err := s.CreateProject(&types.Project{ID: "pm-proj", Name: "pm-proj", Path: t.TempDir()}); err != nil {
 		t.Fatal(err)
@@ -162,7 +161,6 @@ func TestTaskHandler_POST_RefusesTheRetiredPlanMode(t *testing.T) {
 // string. The accepted rows close the loop by reading the value back off the stored task,
 // which is what separates "validated" from "silently dropped".
 func TestTaskHandler_PUT_RefValidation(t *testing.T) {
-	t.Parallel()
 	// stored reads a field back off the task so an accepted row can prove it landed.
 	stored := map[string]func(task *types.Task) string{
 		"branch":     func(task *types.Task) string { return task.Branch },
@@ -205,7 +203,6 @@ func TestTaskHandler_PUT_RefValidation(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.field+"/"+slug.Replace(tc.value), func(t *testing.T) {
-			t.Parallel()
 			// A fresh store per row: rows stay independent, and the accepted write in a
 			// row cannot be masked by the row before it.
 			h, s, _ := newTestTaskHandler(t)
@@ -235,7 +232,6 @@ func TestTaskHandler_PUT_RefValidation(t *testing.T) {
 // --- Combined validation: multiple fields at once ---
 
 func TestTaskHandler_PUT_MultipleFields_Valid(t *testing.T) {
-	t.Parallel()
 	h, s, _ := newTestTaskHandler(t)
 	setupTaskValidationProject(t, h, s)
 	mux := newTaskMux(h)
@@ -266,7 +262,6 @@ func TestTaskHandler_PUT_MultipleFields_Valid(t *testing.T) {
 }
 
 func TestTaskHandler_PUT_MultipleFields_OneInvalid(t *testing.T) {
-	t.Parallel()
 	h, s, _ := newTestTaskHandler(t)
 	setupTaskValidationProject(t, h, s)
 	mux := newTaskMux(h)
@@ -285,7 +280,6 @@ func TestTaskHandler_PUT_MultipleFields_OneInvalid(t *testing.T) {
 // --- Existing tests (preserved below) ---
 
 func TestEnrichWorktreeExists(t *testing.T) {
-	t.Parallel()
 	tmpDir := t.TempDir()
 
 	// Create worktree directories: workspaceDir/projectID/taskID
@@ -312,7 +306,6 @@ func TestEnrichWorktreeExists(t *testing.T) {
 }
 
 func TestEnrichWorktreeExists_UsesProjectID(t *testing.T) {
-	t.Parallel()
 	tmpDir := t.TempDir()
 
 	// Create worktree at the CORRECT path: workspaceDir/projectID/taskID
@@ -337,7 +330,6 @@ func TestEnrichWorktreeExists_UsesProjectID(t *testing.T) {
 }
 
 func TestEnrichTaskWorktree(t *testing.T) {
-	t.Parallel()
 	tmpDir := t.TempDir()
 	projectID := "proj"
 	taskID := "task"
@@ -380,7 +372,6 @@ func gitOutput(t *testing.T, dir string, args ...string) string {
 
 // TestHandleCommitAndDone_ExcludesUnstagedFiles: untracked worktree files stay local.
 func TestHandleCommitAndDone_ExcludesUnstagedFiles(t *testing.T) {
-	t.Parallel()
 	h, s, projID := newTaskHandlerWithExecutor(t)
 	h.commitQueue = exec.NewCommitQueue()
 
@@ -465,7 +456,6 @@ func TestHandleCommitAndDone_ExcludesUnstagedFiles(t *testing.T) {
 // TestHandleCommitAndDone_ArmsClickForConflictResolution: when the click's merge conflicts, the turn
 // that resolves it has to know the conflict came from this click, or it can only stop in Review.
 func TestHandleCommitAndDone_ArmsClickForConflictResolution(t *testing.T) {
-	t.Parallel()
 	h, s, projID := newTaskHandlerWithExecutor(t)
 	h.commitQueue = exec.NewCommitQueue()
 
@@ -654,7 +644,6 @@ func createParentWithSubtask(t *testing.T, s *store.Store, projectID string) (st
 // parent task with subtasks marks the selected subtask autostarted=true, so its
 // ask_question calls are auto-answered from parent context.
 func TestHandleStart_MarksSubtaskAutostarted(t *testing.T) {
-	t.Parallel()
 	h, s, projID := newTaskHandlerWithExecutor(t)
 	parentID, childID := createParentWithSubtask(t, s, projID)
 
@@ -725,7 +714,6 @@ func postToMux(t *testing.T, mux *http.ServeMux, path string, body any) *httptes
 // backlog parent via POST /start moves the parent itself to In Progress
 // (started-but-pending) while the deepest subtask starts running.
 func TestHandleStart_MovesParentToInProgress(t *testing.T) {
-	t.Parallel()
 	h, s, projID := newTaskHandlerWithExecutor(t)
 	createChainTask(t, s, projID, "par-mip", "Parent", "backlog", "idle", "", "thread-par-mip", false)
 	createChainTask(t, s, projID, "child-mip", "Child", "backlog", "idle", "par-mip", "thread-child-mip", true)
@@ -758,7 +746,6 @@ func TestHandleStart_MovesParentToInProgress(t *testing.T) {
 // starting a parent whose subtasks are all done starts the parent's own
 // execution.
 func TestHandleStart_AllChildrenDoneStartsOwnExecution(t *testing.T) {
-	t.Parallel()
 	h, s, projID := newTaskHandlerWithExecutor(t)
 	createChainTask(t, s, projID, "par-ad", "Parent", "backlog", "idle", "", "thread-par-ad", true)
 	createChainTask(t, s, projID, "child-ad", "Child", "done", "completed", "par-ad", "", false)
@@ -783,7 +770,6 @@ func TestHandleStart_AllChildrenDoneStartsOwnExecution(t *testing.T) {
 // a parent whose subtask is in Review does not start anything — the parent
 // stays started-but-pending until the child is moved to Done.
 func TestHandleStart_BlockedChildrenStayPending(t *testing.T) {
-	t.Parallel()
 	h, s, projID := newTaskHandlerWithExecutor(t)
 	createChainTask(t, s, projID, "par-blk", "Parent", "backlog", "idle", "", "thread-par-blk", false)
 	createChainTask(t, s, projID, "child-blk", "Child", "review", "idle", "par-blk", "", false)
@@ -809,7 +795,6 @@ func TestHandleStart_BlockedChildrenStayPending(t *testing.T) {
 // starting a subtask that has children of its own starts the deepest
 // descendant — the subtask's own execution must wait for its children.
 func TestHandleStartSubtask_WithChildren_StartsDeepestSubtask(t *testing.T) {
-	t.Parallel()
 	h, s, projID := newTaskHandlerWithExecutor(t)
 	createChainTask(t, s, projID, "root-nsp", "Root", "backlog", "idle", "", "", false)
 	createChainTask(t, s, projID, "mid-nsp", "Mid", "backlog", "idle", "root-nsp", "thread-mid-nsp", false)
@@ -839,7 +824,6 @@ func TestHandleStartSubtask_WithChildren_StartsDeepestSubtask(t *testing.T) {
 // a subtask with its own children to In Progress starts the deepest
 // descendant, not the subtask's own execution.
 func TestHandleMove_SubtaskWithChildren_StartsDeepestSubtask(t *testing.T) {
-	t.Parallel()
 	h, s, projID := newTaskHandlerWithExecutor(t)
 	createChainTask(t, s, projID, "root-msc", "Root", "backlog", "idle", "", "", false)
 	createChainTask(t, s, projID, "mid-msc", "Mid", "backlog", "idle", "root-msc", "thread-mid-msc", false)
@@ -869,7 +853,6 @@ func TestHandleMove_SubtaskWithChildren_StartsDeepestSubtask(t *testing.T) {
 // a parent with all-done subtasks to In Progress starts the parent's own
 // execution.
 func TestHandleMove_ParentAllChildrenDone_StartsOwnExecution(t *testing.T) {
-	t.Parallel()
 	h, s, projID := newTaskHandlerWithExecutor(t)
 	createChainTask(t, s, projID, "par-mad", "Parent", "backlog", "idle", "", "thread-par-mad", true)
 	createChainTask(t, s, projID, "child-mad", "Child", "done", "completed", "par-mad", "", false)
@@ -891,7 +874,6 @@ func TestHandleMove_ParentAllChildrenDone_StartsOwnExecution(t *testing.T) {
 // agent asked something, dragged into In Progress, has nothing to run — so the move must
 // land it back in review, not park it as "Pending".
 func TestHandleMove_AwaitingUserLeafReturnsToReview(t *testing.T) {
-	t.Parallel()
 	h, s, projID := newTaskHandlerWithExecutor(t)
 	createChainTask(t, s, projID, "leaf-await", "Leaf", "review", "idle", "", "thread-leaf-await", true)
 
@@ -923,7 +905,6 @@ func TestHandleMove_AwaitingUserLeafReturnsToReview(t *testing.T) {
 // TestHandleMove_AwaitingUserParentKeepsDoneChildren: same for a parent whose children are
 // all Done — it lands in review, and its Done children stay Done.
 func TestHandleMove_AwaitingUserParentKeepsDoneChildren(t *testing.T) {
-	t.Parallel()
 	h, s, projID := newTaskHandlerWithExecutor(t)
 	createChainTask(t, s, projID, "par-await", "Parent", "review", "idle", "", "thread-par-await", true)
 	createChainTask(t, s, projID, "child-await-done1", "D1", "done", "completed", "par-await", "", false)
@@ -955,7 +936,6 @@ func TestHandleMove_AwaitingUserParentKeepsDoneChildren(t *testing.T) {
 // a parent to In Progress (a start) moves backlog descendants along but does
 // not drag them out of review (human gate) or done.
 func TestHandleMove_ParentWithGatedChildren_KeepsThemInPlace(t *testing.T) {
-	t.Parallel()
 	h, s, projID := newTaskHandlerWithExecutor(t)
 	createChainTask(t, s, projID, "par-gate", "Parent", "backlog", "idle", "", "thread-par-gate", true)
 	createChainTask(t, s, projID, "child-gate-review", "InReview", "review", "idle", "par-gate", "", false)
@@ -992,7 +972,6 @@ func TestHandleMove_ParentWithGatedChildren_KeepsThemInPlace(t *testing.T) {
 // leaves no turn behind — it rests like a row nobody started, the state a running task
 // lands in when it is dragged out of In Progress.
 func TestHandleMove_PausedToBacklogRestsIdle(t *testing.T) {
-	t.Parallel()
 	h, s, projID := newTaskHandlerWithExecutor(t)
 	createChainTask(t, s, projID, "move-paused", "Paused", "in_progress", "paused", "", "thread-move-paused", false)
 	task, err := s.GetTaskByID("move-paused")
@@ -1053,7 +1032,6 @@ func (m *heldTitleLLM) Server() *httptest.Server {
 // title — writing back the row as read at creation time (status backlog)
 // silently un-starts the task.
 func TestTitleGenerationDoesNotClobberTaskStatus(t *testing.T) {
-	t.Parallel()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
 	worktreesDir := filepath.Join(dir, "worktrees")
@@ -1162,7 +1140,6 @@ func TestTitleGenerationDoesNotClobberTaskStatus(t *testing.T) {
 // The peak is a reading the sandbox layer takes from a container as it is removed, so a created
 // task has none — whatever the body claimed.
 func TestTaskHandler_POST_DoesNotSeedAMeasuredPeak(t *testing.T) {
-	t.Parallel()
 	h, s, worktreesDir := newTestTaskHandler(t)
 	proj := &types.Project{ID: "peak-seed-proj", Name: "peak-seed", Path: filepath.Join(worktreesDir, "peak-seed")}
 	if err := s.CreateProject(proj); err != nil {
@@ -1250,7 +1227,6 @@ func postCommitAndDone(t *testing.T, h *TaskHandler, projID, taskID string) *htt
 // TestHandleCommitAndDone_CommitsTheParentsOwnWorkAfterASubtaskMerge: a restore that comes back
 // unstaged commits part of the task and deletes the rest with its worktree.
 func TestHandleCommitAndDone_CommitsTheParentsOwnWorkAfterASubtaskMerge(t *testing.T) {
-	t.Parallel()
 	h, s, projID := newTaskHandlerWithExecutor(t)
 	h.commitQueue = exec.NewCommitQueue()
 	proj, err := s.GetProject(projID)
@@ -1280,7 +1256,6 @@ func TestHandleCommitAndDone_CommitsTheParentsOwnWorkAfterASubtaskMerge(t *testi
 // TestHandleCommitAndDone_HandsWorktreeConflictToTheResolver: the click finds the worktree
 // conflicted by a subtask merge, so the model resolves it and the armed click completes.
 func TestHandleCommitAndDone_HandsWorktreeConflictToTheResolver(t *testing.T) {
-	t.Parallel()
 	h, s, projID := newTaskHandlerWithExecutor(t)
 	h.commitQueue = exec.NewCommitQueue()
 	proj, err := s.GetProject(projID)
@@ -1362,7 +1337,6 @@ func TestHandleCommitAndDone_HandsWorktreeConflictToTheResolver(t *testing.T) {
 // TestHandleCommitAndDone_ReportsACommitThatGitRefused: a refusal must end the request, not
 // merge, mark the task Done and delete the worktree that holds the work.
 func TestHandleCommitAndDone_ReportsACommitThatGitRefused(t *testing.T) {
-	t.Parallel()
 	h, s, projID := newTaskHandlerWithExecutor(t)
 	h.commitQueue = exec.NewCommitQueue()
 	proj, err := s.GetProject(projID)
@@ -1405,7 +1379,6 @@ func TestHandleCommitAndDone_ReportsACommitThatGitRefused(t *testing.T) {
 // so the task finishes and the leftover conflict is reported by name. It used to travel back as a merge
 // failure, which left a merged task in Review with nothing anywhere saying why.
 func TestHandleCommitAndDone_DoneWhenOnlyTheProjectOwnsTheConflict(t *testing.T) {
-	t.Parallel()
 	h, s, projID := newTaskHandlerWithExecutor(t)
 	h.commitQueue = exec.NewCommitQueue()
 
@@ -1509,7 +1482,6 @@ func TestHandleCommitAndDone_DoneWhenOnlyTheProjectOwnsTheConflict(t *testing.T)
 // --- base_ref is a root task's own: nesting a task drops it ---
 
 func TestTaskHandler_POST_DropsBaseBranchSentWithAParent(t *testing.T) {
-	t.Parallel()
 	h, s, _ := newTestTaskHandler(t)
 	if err := s.CreateProject(&types.Project{ID: "bb-proj", Name: "bb-proj", Path: t.TempDir()}); err != nil {
 		t.Fatal(err)
@@ -1546,7 +1518,6 @@ func TestTaskHandler_POST_DropsBaseBranchSentWithAParent(t *testing.T) {
 }
 
 func TestTaskHandler_PUT_NestingClearsBaseBranch(t *testing.T) {
-	t.Parallel()
 	h, s, _ := newTestTaskHandler(t)
 	setupTaskValidationProject(t, h, s)
 	if err := s.CreateTask(&types.Task{

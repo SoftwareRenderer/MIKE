@@ -10,7 +10,6 @@ import (
 // The single-row readers carry two things in one error: the 404 classification and the
 // message the API has always returned. Both are pinned; each breaks easily from the other.
 func TestSingleRowReadersClassifyMissingRows(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 
 	for _, tc := range []struct {
@@ -51,7 +50,6 @@ func TestSingleRowReadersClassifyMissingRows(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			err := tc.lookup()
 			if err == nil {
 				t.Fatal("expected an error for a missing row")
@@ -74,7 +72,6 @@ func TestSingleRowReadersClassifyMissingRows(t *testing.T) {
 
 // A database fault must never look like a missing row - that is the whole distinction.
 func TestDatabaseFaultIsNotReportedAsNotFound(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 
 	// Make every query fail: drop the table.

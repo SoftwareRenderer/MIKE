@@ -31,7 +31,6 @@ import (
 
 const profileEnv = "MIKE_STORE_PROFILE"
 
-// Serial: t.Setenv refuses to run in a test that called t.Parallel.
 func TestStoreContentionProfile(t *testing.T) {
 	if os.Getenv(profileEnv) == "" {
 		t.Skipf("profiling tool: set %s=1 to run (it contends on purpose)", profileEnv)

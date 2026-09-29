@@ -17,10 +17,6 @@ import (
 // withProjectRoot changes the working directory to the project root so
 // that resolveWasmPath can find extensions/agent/pi/pi.wasm. It restores
 // the original directory on test cleanup.
-//
-// The rule for why the tests here stay serial: os.Chdir moves the working directory of the whole
-// process, so t.Chdir and os.Chdir refuse to run in a parallel test, and a cleanup restores the
-// directory while a parallel test is still resolving paths from it.
 func withProjectRoot(t *testing.T) {
 	t.Helper()
 	oldWd, err := os.Getwd()
@@ -65,7 +61,6 @@ func loadPiWasm(t *testing.T) agent.AgentAdapter {
 // This exercises the wazero allocation pattern (Alloc → Write → Call → Free)
 // and the store_result callback (WASM → host) as described in the
 // wazero allocation/tinygo/greet.go guide.
-// serial for the reason at withProjectRoot.
 func TestWasmPiAdapter_Integration(t *testing.T) {
 	adapter := loadPiWasm(t)
 
@@ -254,7 +249,6 @@ func TestWasmPiAdapter_Integration(t *testing.T) {
 // prevents concurrent calls from corrupting the WASM module state.
 // This simulates the race between readOutput's ParseOutput and Prompt's
 // EncodeCommand that caused unsafe.Slice: len out of range crashes.
-// serial for the reason at withProjectRoot.
 func TestWasmPiAdapter_ConcurrentAccess(t *testing.T) {
 	adapter := loadPiWasm(t)
 
@@ -319,7 +313,6 @@ func TestWasmPiAdapter_ConcurrentAccess(t *testing.T) {
 // TestWasmPiAdapter_GetStateModelDiscovery verifies that the WASM module
 // correctly discovers the model name via get_state response and persists it
 // in subsequent agent_end events.
-// serial for the reason at withProjectRoot.
 func TestWasmPiAdapter_GetStateModelDiscovery(t *testing.T) {
 	adapter := loadPiWasm(t)
 
@@ -357,7 +350,6 @@ func TestWasmPiAdapter_GetStateModelDiscovery(t *testing.T) {
 
 // TestWasmPiAdapter_ToolNameMapping verifies that Pi tool names are mapped
 // to Kanban tool names through the actual WASM module.
-// serial for the reason at withProjectRoot.
 func TestWasmPiAdapter_ToolNameMapping(t *testing.T) {
 	adapter := loadPiWasm(t)
 
@@ -402,7 +394,6 @@ func TestWasmPiAdapter_ToolNameMapping(t *testing.T) {
 // TestWasmPiAdapter_AllocPattern verifies the core wazero allocation pattern
 // from the greet.go guide: Alloc returns valid linear memory offsets that
 // the host can Write to and Read back correctly via the store_result callback.
-// serial for the reason at withProjectRoot.
 func TestWasmPiAdapter_AllocPattern(t *testing.T) {
 	adapter := loadPiWasm(t)
 

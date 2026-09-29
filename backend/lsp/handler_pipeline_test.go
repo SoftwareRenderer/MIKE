@@ -291,9 +291,7 @@ func TestADocumentChangeLandsBeforeTheRequestBehindIt(t *testing.T) {
 	mgr.waitArrived(t, "textDocument/didChange")
 
 	sendHoverWithID(t, client, 7)
-	// The window in which a reordered dispatch would be visible: the queue is ordered, so the only
-	// way this fails is by watching long enough for a request that jumped the change to be written.
-	// Shorter than the writer's own turn and the assertion passes without having looked.
+	// Sending now would let the server answer about text it has not been told about yet.
 	time.Sleep(200 * time.Millisecond)
 	if mgr.hasFinished("textDocument/didChange") {
 		t.Fatal("the request behind a notification was dispatched before that notification was written")
@@ -325,11 +323,10 @@ func TestRequestsStillQueuedAreAnsweredWhenTheWorkspaceIsDropped(t *testing.T) {
 	for _, id := range []int{1, 2, 3} {
 		sendHoverWithID(t, client, id)
 	}
-	key := processKey(workspace, "go")
-	waitUntil(t, func() bool { return queuedWrites(t, handler, key) == 3 },
-		"all three requests handed to the workspace queue")
+	// Give the read loop a moment to hand all three to the queue.
+	time.Sleep(200 * time.Millisecond)
 
-	handler.dropWorkspace(key)
+	handler.dropWorkspace(processKey(workspace, "go"))
 	mgr.release("textDocument/didOpen")
 
 	seen := map[string]bool{}

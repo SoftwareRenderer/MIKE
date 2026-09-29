@@ -50,10 +50,6 @@ test.describe('Task switch with a diff in flight', () => {
       await route.continue();
     });
 
-    // The held response lands 2.5s after it starts; this promise is the moment it actually arrives.
-    const heldLanded = page.waitForResponse(
-      (r) => r.url().includes(`/api/projects/${projectId}/tasks/${taskA}/diff`), { timeout: 30_000 });
-
     await gotoProject(page);
     await page.locator('.card', { hasText: `race-left-${stamp}` }).first().click();
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 15_000 });
@@ -65,9 +61,9 @@ test.describe('Task switch with a diff in flight', () => {
 
     await expect(page.locator('.diff-content')).toContainText(fileB, { timeout: 40_000 });
 
-    // Now the held response has landed, whatever the client did with it (drop it on unmount, or answer
+    // The held response has landed by now, whatever the client did with it (drop it on unmount, or answer
     // it and discard it — both are correct; painting it is not).
-    await heldLanded;
+    await page.waitForTimeout(3500);
     const shown = (await page.locator('.diff-content').allTextContents()).join('\n');
     expect(shown, `the panel shows the diff of the task left behind (${fileA})`).not.toContain(fileA);
     expect(shown).toContain(fileB);

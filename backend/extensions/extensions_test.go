@@ -28,7 +28,6 @@ func makeTestExtension(t *testing.T, extType, installSource string) *Extension {
 }
 
 func TestExtension_IsLSP(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name string
 		ext  *Extension
@@ -40,7 +39,6 @@ func TestExtension_IsLSP(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			if got := tt.ext.IsLSP(); got != tt.want {
 				t.Errorf("IsLSP() = %v, want %v", got, tt.want)
 			}
@@ -53,7 +51,6 @@ func TestExtension_IsLSP(t *testing.T) {
 // pack beside anything else never reaches an installed row (validateI18N refuses it), so the mixed
 // cases here are what a rejected manifest is called in the log — and they still have an answer.
 func TestInferExtensionType(t *testing.T) {
-	t.Parallel()
 	pack := func() *I18NConfig { return &I18NConfig{Locale: "ja", MessagesURL: "messages.json"} }
 
 	tests := []struct {
@@ -77,7 +74,6 @@ func TestInferExtensionType(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			if got := inferExtensionType(tt.caps); got != tt.want {
 				t.Errorf("inferExtensionType() = %q, want %q", got, tt.want)
 			}
@@ -92,7 +88,6 @@ func TestInferExtensionType(t *testing.T) {
 }
 
 func TestExtension_InstallSourceChecks(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		source    string
 		wantLocal bool
@@ -103,7 +98,6 @@ func TestExtension_InstallSourceChecks(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.source, func(t *testing.T) {
-			t.Parallel()
 			ext := makeTestExtension(t, ExtensionTypeLSP, tt.source)
 			if got := ext.IsLocalInstalled(); got != tt.wantLocal {
 				t.Errorf("IsLocalInstalled() = %v, want %v", got, tt.wantLocal)
@@ -113,7 +107,6 @@ func TestExtension_InstallSourceChecks(t *testing.T) {
 }
 
 func TestLSPConfig_FullConfig(t *testing.T) {
-	t.Parallel()
 	cfg := &LSPConfig{
 		Command:   "gopls",
 		Args:      []string{"serve"},
@@ -148,7 +141,6 @@ func TestLSPConfig_FullConfig(t *testing.T) {
 }
 
 func TestLSPConfig_ToolCallsEnabled(t *testing.T) {
-	t.Parallel()
 	// Default (nil) should return true
 	cfg := &LSPConfig{Command: "gopls", Args: []string{"serve"}}
 	if !cfg.IsToolCallsEnabled() {
@@ -177,7 +169,6 @@ func TestLSPConfig_ToolCallsEnabled(t *testing.T) {
 }
 
 func TestLSPConfig_ChatDiagnosticsEnabled(t *testing.T) {
-	t.Parallel()
 	// The post-edit pass is opt-in, so the absence of the field is the off state — the
 	// opposite of the gate above, and the reason a fresh install diagnoses nothing.
 	cfg := &LSPConfig{Command: "gopls", Args: []string{"serve"}}
@@ -204,7 +195,6 @@ func TestLSPConfig_ChatDiagnosticsEnabled(t *testing.T) {
 }
 
 func TestRegistryEntry_Fields(t *testing.T) {
-	t.Parallel()
 	entry := RegistryEntry{
 		Name:          "gopls",
 		Version:       "1.0.0",
@@ -231,7 +221,6 @@ func TestRegistryEntry_Fields(t *testing.T) {
 }
 
 func TestConfigSchema_Properties(t *testing.T) {
-	t.Parallel()
 	minVal := 64.0
 	maxVal := 2048.0
 	schema := &ConfigSchema{
@@ -281,7 +270,6 @@ func TestConfigSchema_Properties(t *testing.T) {
 }
 
 func TestConfigSchema_JSON_PreservesPropertyOrder(t *testing.T) {
-	t.Parallel()
 	jsonData := `{
 		"properties": [
 			{"key": "api_key", "type": "string", "title": "API Key", "sensitive": true},
@@ -317,7 +305,6 @@ func TestConfigSchema_JSON_PreservesPropertyOrder(t *testing.T) {
 }
 
 func TestSandboxConfig_Defaults(t *testing.T) {
-	t.Parallel()
 	cfg := SandboxConfig{
 		NetworkIsolation: true,
 		MemoryLimit:      256,
@@ -338,7 +325,6 @@ func TestSandboxConfig_Defaults(t *testing.T) {
 }
 
 func TestCSSConfig_CSSURL(t *testing.T) {
-	t.Parallel()
 	cfg := &CSSConfig{
 		CSSURL: "/extensions/mike-light/styles.css",
 	}
@@ -349,7 +335,6 @@ func TestCSSConfig_CSSURL(t *testing.T) {
 }
 
 func TestCSSConfig_JSONRoundTrip(t *testing.T) {
-	t.Parallel()
 	// Verify that css_url is correctly serialized/deserialized via JSON
 	original := &CSSConfig{
 		CSSURL: "/extensions/mike-light/styles.css",
@@ -371,7 +356,6 @@ func TestCSSConfig_JSONRoundTrip(t *testing.T) {
 }
 
 func TestAgentConfig_ResolveSandboxTemplates(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name       string
 		agent      *AgentConfig
@@ -448,7 +432,6 @@ func TestAgentConfig_ResolveSandboxTemplates(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			var schema *ConfigSchema
 			if tt.agent != nil {
 				schema = tt.agent.ConfigSchema
@@ -493,7 +476,6 @@ func TestAgentConfig_ResolveSandboxTemplates(t *testing.T) {
 }
 
 func TestManifest_Priority_Default(t *testing.T) {
-	t.Parallel()
 	m := ExtensionManifest{DisplayName: "Test"}
 	if m.Priority != 0 {
 		t.Errorf("Priority = %d, want 0 (default)", m.Priority)
@@ -501,7 +483,6 @@ func TestManifest_Priority_Default(t *testing.T) {
 }
 
 func TestManifest_Priority_Set(t *testing.T) {
-	t.Parallel()
 	m := ExtensionManifest{DisplayName: "Test", Priority: 10}
 	if m.Priority != 10 {
 		t.Errorf("Priority = %d, want 10", m.Priority)
@@ -509,7 +490,6 @@ func TestManifest_Priority_Set(t *testing.T) {
 }
 
 func TestManifest_Priority_Negative(t *testing.T) {
-	t.Parallel()
 	m := ExtensionManifest{DisplayName: "Test", Priority: -5}
 	if m.Priority != -5 {
 		t.Errorf("Priority = %d, want -5", m.Priority)
@@ -517,7 +497,6 @@ func TestManifest_Priority_Negative(t *testing.T) {
 }
 
 func TestManifest_Priority_JSONRoundTrip(t *testing.T) {
-	t.Parallel()
 	m := ExtensionManifest{
 		DisplayName: "Test",
 		Description: "Desc",
@@ -542,7 +521,6 @@ func TestManifest_Priority_JSONRoundTrip(t *testing.T) {
 }
 
 func TestManifest_Priority_JSONDefault(t *testing.T) {
-	t.Parallel()
 	// When priority is omitted in JSON, it should default to 0
 	jsonStr := `{"display_name":"Test","description":"","author":"","version":"1.0.0"}`
 	var m ExtensionManifest
@@ -558,7 +536,6 @@ func TestManifest_Priority_JSONDefault(t *testing.T) {
 // that {{property}} template references in sandbox are resolved using
 // config_schema defaults end-to-end.
 func TestPiManifestTemplateResolution(t *testing.T) {
-	t.Parallel()
 	manifestPath := filepath.Join("..", "..", "extensions", "agent", "pi", "manifest.json")
 	raw, err := os.ReadFile(manifestPath)
 	if err != nil {
@@ -621,7 +598,6 @@ func TestPiManifestTemplateResolution(t *testing.T) {
 }
 
 func TestManifest_SandboxConfigUnmarshal(t *testing.T) {
-	t.Parallel()
 	raw := `{
 		"display_name": "Go Language Server",
 		"version": "1.0.0",
@@ -667,7 +643,6 @@ func TestManifest_SandboxConfigUnmarshal(t *testing.T) {
 }
 
 func TestSandboxConfigFromManifest(t *testing.T) {
-	t.Parallel()
 	// Nil manifest config -> defaults.
 	def := sandboxConfigFromManifest(nil)
 	if !def.NetworkIsolation {

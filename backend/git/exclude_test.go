@@ -52,7 +52,6 @@ func excludeFileContents(t *testing.T, repoDir string) string {
 }
 
 func TestEnsureExcludedAppendsThePatternOnce(t *testing.T) {
-	t.Parallel()
 	repoDir := t.TempDir()
 	runGit(t, repoDir, "init")
 	for _, header := range []string{"# mike uploads (kept out of task status)", "# second call, same pattern"} {
@@ -70,7 +69,6 @@ func TestEnsureExcludedAppendsThePatternOnce(t *testing.T) {
 // A project that is itself a worktree has a .git file, not a .git directory; the pattern has to land in the
 // git dir the checkouts share.
 func TestEnsureExcludedFollowsAGitdirPointerToTheSharedGitDir(t *testing.T) {
-	t.Parallel()
 	repoDir := t.TempDir()
 	runGit(t, repoDir, "init")
 	runGit(t, repoDir, "config", "user.email", "test@test.com")
@@ -106,7 +104,6 @@ func TestEnsureExcludedFollowsAGitdirPointerToTheSharedGitDir(t *testing.T) {
 // The pattern is unanchored for a reason: exclude patterns are relative to the checkout root, and a task's
 // worktree lives below it at `.worktrees/<taskID>/`. This is the fixture that reproduces that shape.
 func TestExcludedUploadsAreHiddenInAWorktreeInsideTheProject(t *testing.T) {
-	t.Parallel()
 	tmpDir := t.TempDir()
 	repoDir := filepath.Join(tmpDir, "repo")
 	if err := os.MkdirAll(repoDir, 0o755); err != nil {
@@ -168,7 +165,6 @@ func TestExcludedUploadsAreHiddenInAWorktreeInsideTheProject(t *testing.T) {
 // The four git operations that would otherwise take an uploaded file away, and the restore that runs the
 // one that deletes untracked files.
 func TestExcludedUploadsDoNotShowInTheTasksStatus(t *testing.T) {
-	t.Parallel()
 	_, wtPath, _ := excludedUploadWorktree(t, "wt-status")
 
 	if out := strings.TrimSpace(runGitOutput(t, wtPath, "status", "--porcelain")); out != "" {
@@ -177,7 +173,6 @@ func TestExcludedUploadsDoNotShowInTheTasksStatus(t *testing.T) {
 }
 
 func TestExcludedUploadsAreNotStagedByAddAll(t *testing.T) {
-	t.Parallel()
 	_, wtPath, _ := excludedUploadWorktree(t, "wt-add")
 
 	writeFile(t, wtPath, "work.txt", "the agent's own file\n")
@@ -193,7 +188,6 @@ func TestExcludedUploadsAreNotStagedByAddAll(t *testing.T) {
 }
 
 func TestExcludedUploadsAreNotSweptIntoAStash(t *testing.T) {
-	t.Parallel()
 	_, wtPath, _ := excludedUploadWorktree(t, "wt-stash")
 
 	writeFile(t, wtPath, "README.md", "# changed\n")
@@ -206,7 +200,6 @@ func TestExcludedUploadsAreNotSweptIntoAStash(t *testing.T) {
 }
 
 func TestExcludedUploadsSurviveACleanAndARestore(t *testing.T) {
-	t.Parallel()
 	_, wtPath, wm := excludedUploadWorktree(t, "wt-clean")
 
 	upload := filepath.Join(wtPath, ".mike-uploads", "report.pdf")
@@ -237,7 +230,6 @@ func TestExcludedUploadsSurviveACleanAndARestore(t *testing.T) {
 // The pattern is unanchored so it reaches worktrees below the checkout root, which means it must still be
 // narrow enough to leave a project's own directories alone.
 func TestExcludingUploadsLeavesTheProjectsOwnDirectoriesAlone(t *testing.T) {
-	t.Parallel()
 	_, wtPath, _ := excludedUploadWorktree(t, "wt-naming")
 
 	for _, dir := range []string{"uploads", ".uploads", "mike-uploads"} {

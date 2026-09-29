@@ -21,7 +21,6 @@ type taskDiffBody struct {
 // A done task's diff is served from the stored snapshot byte for byte, on the read that computes it
 // and every read after it, so the stored body is what a ?parsed=1 caller gets.
 func TestTaskDiffDoneTaskServesParsedFilesFromTheSnapshot(t *testing.T) {
-	t.Parallel()
 	h, s, _, worktreesDir := newTestGitHandler(t)
 
 	projPath := t.TempDir()
@@ -82,7 +81,6 @@ func TestTaskDiffDoneTaskServesParsedFilesFromTheSnapshot(t *testing.T) {
 // A task whose worktree is gone is diffed from the project repo, and that answer carries the parsed
 // files the panel renders.
 func TestTaskDiffWithoutAWorktreeServesParsedFiles(t *testing.T) {
-	t.Parallel()
 	h, s, _, worktreesDir := newTestGitHandler(t)
 
 	projPath := t.TempDir()

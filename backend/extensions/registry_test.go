@@ -15,7 +15,6 @@ import (
 )
 
 func TestFetchIndex(t *testing.T) {
-	t.Parallel()
 	index := RegistryIndex{
 		{
 			Name:        "gopls",
@@ -60,7 +59,6 @@ func TestFetchIndex(t *testing.T) {
 }
 
 func TestFetchIndex_HTTPError(t *testing.T) {
-	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
@@ -74,7 +72,6 @@ func TestFetchIndex_HTTPError(t *testing.T) {
 }
 
 func TestFetchIndex_InvalidJSON(t *testing.T) {
-	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte("not json"))
@@ -89,7 +86,6 @@ func TestFetchIndex_InvalidJSON(t *testing.T) {
 }
 
 func TestFetchIndex_FeaturedFlag(t *testing.T) {
-	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`[
@@ -128,7 +124,6 @@ func TestFetchIndex_FeaturedFlag(t *testing.T) {
 }
 
 func TestFetchDockerfile(t *testing.T) {
-	t.Parallel()
 	expected := `FROM ubuntu:latest
 RUN apt-get update && apt-get install -y gopls
 CMD ["/usr/bin/gopls", "serve"]
@@ -151,7 +146,6 @@ CMD ["/usr/bin/gopls", "serve"]
 }
 
 func TestNewEgressHosts(t *testing.T) {
-	t.Parallel()
 	caps := func(hosts ...string) *Capabilities {
 		return &Capabilities{Network: &NetworkConfig{AllowedDomains: hosts}}
 	}
@@ -177,7 +171,6 @@ func TestNewEgressHosts(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			if got := newEgressHosts(tc.installed, tc.remote); !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("newEgressHosts() = %v, want %v", got, tc.want)
 			}
@@ -186,7 +179,6 @@ func TestNewEgressHosts(t *testing.T) {
 }
 
 func TestCompareVersion(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		a    string
 		b    string
@@ -208,7 +200,6 @@ func TestCompareVersion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.a+"_vs_"+tt.b, func(t *testing.T) {
-			t.Parallel()
 			got := CompareVersion(tt.a, tt.b)
 			if got != tt.want {
 				t.Errorf("CompareVersion(%q, %q) = %v, want %v", tt.a, tt.b, got, tt.want)
@@ -218,7 +209,6 @@ func TestCompareVersion(t *testing.T) {
 }
 
 func TestUpdateAvailable(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		installed string
 		remote    string
@@ -233,7 +223,6 @@ func TestUpdateAvailable(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.installed+"_vs_"+tt.remote, func(t *testing.T) {
-			t.Parallel()
 			got := UpdateAvailable(tt.installed, tt.remote)
 			if got != tt.want {
 				t.Errorf("UpdateAvailable(%q, %q) = %v, want %v", tt.installed, tt.remote, got, tt.want)
@@ -243,7 +232,6 @@ func TestUpdateAvailable(t *testing.T) {
 }
 
 func TestRegistryClient_New(t *testing.T) {
-	t.Parallel()
 	rc := NewRegistryClient()
 	if rc == nil {
 		t.Fatal("NewRegistryClient() = nil")
@@ -254,7 +242,6 @@ func TestRegistryClient_New(t *testing.T) {
 }
 
 func TestFetchIndex_NetworkError(t *testing.T) {
-	t.Parallel()
 	rc := NewRegistryClient()
 	_, err := rc.FetchIndex("http://localhost:1/not-a-real-server")
 	if err == nil {
@@ -263,7 +250,6 @@ func TestFetchIndex_NetworkError(t *testing.T) {
 }
 
 func TestFetchIndex_FileURL(t *testing.T) {
-	t.Parallel()
 	rc := NewRegistryClient()
 
 	// Create a temp file with valid registry JSON
@@ -287,7 +273,6 @@ func TestFetchIndex_FileURL(t *testing.T) {
 }
 
 func TestFetchIndex_FileNotFound(t *testing.T) {
-	t.Parallel()
 	rc := NewRegistryClient()
 	_, err := rc.FetchIndex("file:///nonexistent/path/registry.json")
 	if err == nil {
@@ -296,7 +281,6 @@ func TestFetchIndex_FileNotFound(t *testing.T) {
 }
 
 func TestFetchDockerfile_FileURL(t *testing.T) {
-	t.Parallel()
 	rc := NewRegistryClient()
 
 	// Create a temp Dockerfile
@@ -320,7 +304,6 @@ func TestFetchDockerfile_FileURL(t *testing.T) {
 // a registry is a separate rule (ValidateConfiguredImageRef), which is why "golang:1.21" passes
 // here but is not acceptable as a user- or registry-declared image.
 func TestValidateImageRef(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name    string
 		image   string
@@ -340,7 +323,6 @@ func TestValidateImageRef(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			err := sandboxruntime.ValidateImageRef(tt.image)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("sandboxruntime.ValidateImageRef(%q) error = %v, wantErr %v", tt.image, err, tt.wantErr)
@@ -352,7 +334,6 @@ func TestValidateImageRef(t *testing.T) {
 // A locally built image lives under "localhost/", and only a qualified name keeps later
 // exists/pull/create out of short-name resolution.
 func TestExtensionImageRef(t *testing.T) {
-	t.Parallel()
 	ref := ExtensionImageRef("gopls", "1.0.0")
 	if ref != "localhost/kanban-ext-gopls:1.0.0" {
 		t.Fatalf("ExtensionImageRef = %q, want localhost/kanban-ext-gopls:1.0.0", ref)
@@ -367,7 +348,6 @@ func TestExtensionImageRef(t *testing.T) {
 
 // A registry entry's image must name its registry — it is pulled headless.
 func TestRegistryClientValidateImage(t *testing.T) {
-	t.Parallel()
 	rc := NewRegistryClient()
 	for _, ok := range []string{"", "docker.io/library/ubuntu:latest", "localhost/x:1", "localhost:5000/o/r"} {
 		if err := rc.ValidateImage(ok); err != nil {
@@ -429,7 +409,6 @@ func makeGitRepoFormat(t *testing.T, files map[string]string, objectFormat strin
 }
 
 func TestCheckoutExtension_Success(t *testing.T) {
-	t.Parallel()
 	repo, commit := makeGitRepo(t, map[string]string{
 		"myext/manifest.json": `{"display_name":"X","version":"1.0.0"}`,
 		"myext/Dockerfile":    "FROM ubuntu\n",
@@ -455,7 +434,6 @@ func TestCheckoutExtension_Success(t *testing.T) {
 }
 
 func TestCheckoutExtension_SubdirEmpty_WholeRepo(t *testing.T) {
-	t.Parallel()
 	repo, commit := makeGitRepo(t, map[string]string{
 		"manifest.json": `{"display_name":"X"}`,
 	})
@@ -470,7 +448,6 @@ func TestCheckoutExtension_SubdirEmpty_WholeRepo(t *testing.T) {
 }
 
 func TestCheckoutExtension_VerifyRejectsMissingCommit(t *testing.T) {
-	t.Parallel()
 	repo, _ := makeGitRepo(t, map[string]string{
 		"myext/manifest.json": `{"display_name":"X"}`,
 	})
@@ -489,7 +466,6 @@ func TestCheckoutExtension_VerifyRejectsMissingCommit(t *testing.T) {
 }
 
 func TestCheckoutExtension_SHA1Commit(t *testing.T) {
-	t.Parallel()
 	// A 40-char SHA-1 commit from a SHA-1 repo must install successfully.
 	repo, sha1 := makeGitRepoFormat(t, map[string]string{
 		"myext/manifest.json": `{"display_name":"X"}`,
@@ -511,7 +487,6 @@ func TestCheckoutExtension_SHA1Commit(t *testing.T) {
 }
 
 func TestCheckoutExtension_SHA1Repo(t *testing.T) {
-	t.Parallel()
 	// A SHA-1 object-format repo's own commit must be accepted and installed.
 	repo, sha1 := makeGitRepoFormat(t, map[string]string{
 		"myext/manifest.json": `{"display_name":"X"}`,
@@ -527,7 +502,6 @@ func TestCheckoutExtension_SHA1Repo(t *testing.T) {
 }
 
 func TestCheckoutExtension_ClearsExistingDest(t *testing.T) {
-	t.Parallel()
 	// Re-checking out a new vetted revision must clear the previous install so
 	// files removed in the new version do not linger.
 	repoOld, oldCommit := makeGitRepo(t, map[string]string{
@@ -558,7 +532,6 @@ func TestCheckoutExtension_ClearsExistingDest(t *testing.T) {
 }
 
 func TestCheckoutExtension_InvalidInput(t *testing.T) {
-	t.Parallel()
 	rc := NewRegistryClient()
 	dest := t.TempDir()
 	tests := []struct {
@@ -582,7 +555,6 @@ func TestCheckoutExtension_InvalidInput(t *testing.T) {
 }
 
 func TestCopyDirSkipsDotGit(t *testing.T) {
-	t.Parallel()
 	src := t.TempDir()
 	dst := filepath.Join(t.TempDir(), "ext")
 
@@ -615,7 +587,6 @@ func TestCopyDirSkipsDotGit(t *testing.T) {
 }
 
 func TestResolveURL(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		base   string
 		target string
@@ -644,7 +615,6 @@ func TestResolveURL(t *testing.T) {
 }
 
 func TestRegistryClient_DoesNotFollowRedirects(t *testing.T) {
-	t.Parallel()
 	// The registry client must not follow a redirect from the registry URL to
 	// an arbitrary internal host (SSRF via redirect).
 	internal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -668,7 +638,6 @@ func TestRegistryClient_DoesNotFollowRedirects(t *testing.T) {
 }
 
 func TestFetchChangelog_URLDerivation(t *testing.T) {
-	t.Parallel()
 	// The changelog is fetched from <registry-base>/<author-slug>/<name> —
 	// the same base location that serves the registry index.
 	const changelog = `{"hash":"aaa","version":"1.0.0","description":"x"}`
@@ -697,7 +666,6 @@ func TestFetchChangelog_URLDerivation(t *testing.T) {
 }
 
 func TestFetchChangelog_FileBase(t *testing.T) {
-	t.Parallel()
 	// file:// registry base (local-registry workflow): the changelog file
 	// lives next to the registry index file.
 	base := t.TempDir()
@@ -724,7 +692,6 @@ func TestFetchChangelog_FileBase(t *testing.T) {
 }
 
 func TestFetchChangelog_Missing(t *testing.T) {
-	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	}))
@@ -745,7 +712,6 @@ func TestFetchChangelog_Missing(t *testing.T) {
 // environment — and echo it back to the client.
 
 func TestValidateGitSourceRejectsHostileRepos(t *testing.T) {
-	t.Parallel()
 	const sha = "0123456789abcdef0123456789abcdef01234567"
 	tests := []struct {
 		name    string
@@ -775,7 +741,6 @@ func TestValidateGitSourceRejectsHostileRepos(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			err := validateGitSource(tt.repo, tt.commit)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("validateGitSource(%q, %q) = %v, wantErr %v", tt.repo, tt.commit, err, tt.wantErr)
@@ -788,7 +753,6 @@ func TestValidateGitSourceRejectsHostileRepos(t *testing.T) {
 // refused and its payload never runs (no canary file), whatever the host's
 // protocol.ext.allow setting says.
 func TestCheckoutExtensionHelperTransportNeverExecutes(t *testing.T) {
-	t.Parallel()
 	rc := NewRegistryClient()
 	tmp := t.TempDir()
 	canary := filepath.Join(tmp, "pwned")
@@ -813,7 +777,6 @@ func TestCheckoutExtensionHelperTransportNeverExecutes(t *testing.T) {
 // TestExtCloneArgsFencesTransports: the protocol fence must precede the `clone`
 // subcommand, so it reaches the process that parses the source URL.
 func TestExtCloneArgsFencesTransports(t *testing.T) {
-	t.Parallel()
 	repo := "https://example.com/author/ext.git"
 	args := extCloneArgs(repo, "/tmp/dst")
 
@@ -844,7 +807,6 @@ func TestExtCloneArgsFencesTransports(t *testing.T) {
 // TestGitErrorOutputBounded: git output reaches the install error, so it is
 // summarised rather than forwarded whole.
 func TestGitErrorOutputBounded(t *testing.T) {
-	t.Parallel()
 	got := gitErrorOutput([]byte("fatal: could not read\nfrom remote\n"))
 	if got != "fatal: could not read from remote" {
 		t.Errorf("gitErrorOutput() = %q, want the single-line summary", got)

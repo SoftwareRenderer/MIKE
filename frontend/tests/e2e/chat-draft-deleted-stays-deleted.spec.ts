@@ -116,7 +116,7 @@ test.describe('Chat draft text the person deleted', () => {
       const seen: string[] = [];
       for (let i = 0; i < 40; i++) {
         seen.push(await boxValue(page));
-        await page.waitForTimeout(200); // sampling cadence: the samples are the measurement, not a wait
+        await page.waitForTimeout(200);
       }
       return seen;
     })();

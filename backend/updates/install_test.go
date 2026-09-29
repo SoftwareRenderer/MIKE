@@ -23,7 +23,6 @@ func releaseDir(t *testing.T) string {
 // Only the packaged shape may replace its own files, and it is decided by two independent facts: the
 // layout beside the binary, and a version that names a release.
 func TestClassifyInstall(t *testing.T) {
-	t.Parallel()
 	dir := releaseDir(t)
 	// The machine running this test may itself be a container, so the shape is decided from an empty
 	// marker list rather than from the host's real one.
@@ -50,7 +49,6 @@ func TestClassifyInstall(t *testing.T) {
 	})
 
 	t.Run("a layout this build cannot name is refused", func(t *testing.T) {
-		t.Parallel()
 		got := classifyInstall(t.TempDir(), "1.4.2", notInContainer)
 		if got.Kind != KindUnknown || got.CanStage {
 			t.Errorf("classify = %+v, want unknown and unstageable", got)
@@ -58,7 +56,6 @@ func TestClassifyInstall(t *testing.T) {
 	})
 
 	t.Run("an empty executable path is refused rather than guessed", func(t *testing.T) {
-		t.Parallel()
 		got := classifyInstall("", "1.4.2", notInContainer)
 		if got.Kind != KindUnknown || got.CanStage {
 			t.Errorf("classify = %+v, want unknown and unstageable", got)
@@ -69,7 +66,6 @@ func TestClassifyInstall(t *testing.T) {
 // A container is refused even when it is shaped like a release: the swap survives `docker restart` and is
 // gone after `compose up`.
 func TestClassifyInstallRefusesAContainer(t *testing.T) {
-	t.Parallel()
 	dir := releaseDir(t)
 	marker := filepath.Join(t.TempDir(), ".dockerenv")
 	if err := os.WriteFile(marker, nil, 0o644); err != nil {
@@ -88,7 +84,6 @@ func TestClassifyInstallRefusesAContainer(t *testing.T) {
 }
 
 func TestIsReleaseLayout(t *testing.T) {
-	t.Parallel()
 	dir := t.TempDir()
 	if isReleaseLayout(dir) {
 		t.Fatalf("an empty directory is not a release layout")

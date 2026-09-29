@@ -35,7 +35,6 @@ func refExists(t *testing.T, repoPath, ref string) bool {
 }
 
 func TestDeleteTaskUnpinsOnlyItsSnapshots(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID, repoPath, head := pinFixtureRepo(t, s, "snapshot-lifecycle")
 	wm := s.executor.WorktreeMgr()

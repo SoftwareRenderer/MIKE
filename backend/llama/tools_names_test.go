@@ -9,7 +9,6 @@ import (
 // TestToolSetsUseOnlyDeclaredNames: offered names and declared names must match in both directions,
 // or the provider, the dispatcher and the frontend disagree about a tool.
 func TestToolSetsUseOnlyDeclaredNames(t *testing.T) {
-	t.Parallel()
 	declared := make(map[string]bool, len(types.CoreToolNames()))
 	for _, n := range types.CoreToolNames() {
 		if declared[n] {
@@ -50,7 +49,6 @@ func TestToolSetsUseOnlyDeclaredNames(t *testing.T) {
 // empty Function.Name, which exec skips when pairing calls with results - so the tool never runs and
 // the card stays on "Running".
 func TestDefinitionsCarryTheirName(t *testing.T) {
-	t.Parallel()
 	all := append(append(append(GetToolDefinitions(), GetPlanModeToolDefinitions()...),
 		GetExploreModeToolDefinitions()...), GetLSPToolDefinitions()...)
 	if len(all) == 0 {
@@ -82,7 +80,6 @@ func TestDefinitionsCarryTheirName(t *testing.T) {
 // the definitions must be the same set, so renaming a constant without the definition (or the
 // other way round) fails here rather than at the first tool call nobody answers.
 func TestToolNamesMatchTheirDefinitions(t *testing.T) {
-	t.Parallel()
 	declared := map[string]bool{}
 	for _, n := range types.CoreToolNames() {
 		declared[n] = true

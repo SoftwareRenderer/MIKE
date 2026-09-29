@@ -10,7 +10,6 @@ import (
 // fields serialize and deserialize correctly, and that nil (inherit) fields are
 // omitted from the JSON output.
 func TestModelConfigJSONRoundTrip(t *testing.T) {
-	t.Parallel()
 	inputP := 3.5
 	outputP := 7.25
 	cacheReadP := 1.0
@@ -79,7 +78,6 @@ func TestModelConfigJSONRoundTrip(t *testing.T) {
 // TestProviderUnmarshalNormalizesReasoningEffort: empty effort and legacy string
 // model lists normalize to "default".
 func TestProviderUnmarshalNormalizesReasoningEffort(t *testing.T) {
-	t.Parallel()
 	var p Provider
 	data := `{"name":"p","url":"http://x/v1","concurrency":1,"models":[{"name":"a"},{"name":"b","reasoning_effort":""},{"name":"c","reasoning_effort":"default"}]}`
 	if err := json.Unmarshal([]byte(data), &p); err != nil {
@@ -107,7 +105,6 @@ func TestProviderUnmarshalNormalizesReasoningEffort(t *testing.T) {
 // TestModelConfigNilFieldsOmitted verifies that unset (nil) override fields are
 // omitted from JSON so they round-trip as "inherit provider default".
 func TestModelConfigNilFieldsOmitted(t *testing.T) {
-	t.Parallel()
 	m := ModelConfig{Name: "model-b", ReasoningEffort: "medium"}
 
 	data, err := json.Marshal(m)

@@ -56,7 +56,6 @@ func columnsOf(t *testing.T, dbPath, table string) map[string]bool {
 }
 
 func TestHasColumn(t *testing.T) {
-	t.Parallel()
 	s, err := NewStore(filepath.Join(t.TempDir(), "kanban.db"))
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
@@ -78,7 +77,6 @@ func TestHasColumn(t *testing.T) {
 
 // A tasks table from before the columns existed must gain them, keeping its rows.
 func TestMigration_AddsColumnsMissingFromOldDatabase(t *testing.T) {
-	t.Parallel()
 	path := legacyDB(t, `
 		CREATE TABLE tasks (
 			id TEXT PRIMARY KEY,
@@ -128,7 +126,6 @@ func TestMigration_AddsColumnsMissingFromOldDatabase(t *testing.T) {
 // The two columns that were renamed must be renamed, not re-added: the value the
 // user set under the old name is the value that must survive.
 func TestMigration_RenamesLegacyColumnsKeepingValues(t *testing.T) {
-	t.Parallel()
 	path := legacyDB(t, `
 		CREATE TABLE tasks (
 			id TEXT PRIMARY KEY,
@@ -184,7 +181,6 @@ func TestMigration_RenamesLegacyColumnsKeepingValues(t *testing.T) {
 // databases that already had auto_merge (the rename right after it then failed), and plan_mode
 // had no writer and no reader - plan mode lives in operating_mode.
 func TestMigration_FreshDatabaseHasNoLegacyOrJunkColumns(t *testing.T) {
-	t.Parallel()
 	path := filepath.Join(t.TempDir(), "kanban.db")
 	s, err := NewStore(path)
 	if err != nil {
@@ -203,9 +199,6 @@ func TestMigration_FreshDatabaseHasNoLegacyOrJunkColumns(t *testing.T) {
 // Silence must mean "nothing to do". Before the probes were added, a fresh startup
 // logged nothing only because every error was discarded along with 34 ALTERs that
 // could not succeed; now a schema failure has somewhere to be reported.
-// Serial, and so is every test in this package that calls logging.TestSink: the sink re-points the
-// process-wide log, so another test's lines would land in this buffer and this test's restore would
-// land on that test's sink.
 func TestMigration_SilentAndErrorFreeOnCurrentDatabase(t *testing.T) {
 	logs, restore := logging.TestSink()
 	defer restore()
@@ -230,7 +223,6 @@ func TestMigration_SilentAndErrorFreeOnCurrentDatabase(t *testing.T) {
 
 // Reopening must not disturb rows or column set — the migrations run every start.
 func TestMigration_IdempotentAcrossRestarts(t *testing.T) {
-	t.Parallel()
 	path := filepath.Join(t.TempDir(), "kanban.db")
 	s, err := NewStore(path)
 	if err != nil {
@@ -271,7 +263,6 @@ func TestMigration_IdempotentAcrossRestarts(t *testing.T) {
 // skips the probe chain. The stamp is read from the file, not through the Store, because what is
 // under test is what the Store wrote.
 func TestSchemaVersionStamped(t *testing.T) {
-	t.Parallel()
 	path := filepath.Join(t.TempDir(), "kanban.db")
 	s, err := NewStore(path)
 	if err != nil {
@@ -310,7 +301,6 @@ func TestSchemaVersionStamped(t *testing.T) {
 // TestNewerSchemaVersionIsLeftAlone covers the guard that makes the stamp worth having: a database
 // written by a newer MIKE is not edited by this one. Dropping a column and stamping ahead of this
 // build is how a downgrade looks; running the probe chain there would ALTER a schema we do not own.
-// Serial for the reason at TestMigration_SilentAndErrorFreeOnCurrentDatabase.
 func TestNewerSchemaVersionIsLeftAlone(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kanban.db")
 	s, err := NewStore(path)
@@ -356,7 +346,6 @@ func TestNewerSchemaVersionIsLeftAlone(t *testing.T) {
 }
 
 func TestMigration_ClearsDoneTaskDiffSnapshotsWrittenBeforeParsedFiles(t *testing.T) {
-	t.Parallel()
 	path := filepath.Join(t.TempDir(), "kanban.db")
 
 	legacyBody := `{"diff":"patch text","untracked":[],"short_stat":"1 file changed"}`
@@ -446,7 +435,6 @@ func TestMigration_ClearsDoneTaskDiffSnapshotsWrittenBeforeParsedFiles(t *testin
 // The stored peaks written under the old definition counted the host's page cache and no later run
 // can lower them, so they are cleared once. A peak written by this build must survive a later start.
 func TestZeroLegacySandboxPeaks(t *testing.T) {
-	t.Parallel()
 	path := filepath.Join(t.TempDir(), "peak.db")
 
 	seed := func() {
@@ -534,7 +522,6 @@ func TestZeroLegacySandboxPeaks(t *testing.T) {
 // message above a position has nothing else to read through, and a missing index there is a walk over
 // every row of the turn below it.
 func TestMigration_AddsTheUserTurnIndexes(t *testing.T) {
-	t.Parallel()
 	path := filepath.Join(t.TempDir(), "kanban.db")
 	s, err := NewStore(path)
 	if err != nil {

@@ -22,27 +22,14 @@ const fillerWords = 3000
 
 func fillerMessage() string { return strings.Repeat("filler ", fillerWords) }
 
-// summarizationFrameOf replays the task's frame buffer and returns its summarization frame. The
-// summary row is durable before the frame reaches the buffer, so one replay can arrive early and
-// re-reading is the only wait that is honest here. Each replay already ends on 500 ms of a quiet
-// socket, which paces the retry; the deadline bounds how long an absent frame costs the suite.
+// summarizationFrameOf replays the task's frame buffer and returns its summarization frame.
 func summarizationFrameOf(t *testing.T, te *TaskExecutor, projectID, taskID string) taskStreamFrame {
 	t.Helper()
-	var events []string
-	deadline := time.Now().Add(6 * time.Second)
-	for {
-		frames := taskStreamFrames(t, te.appStreamMgr, projectID, taskID)
-		if frame, ok := findTaskStreamEvent(frames, string(types.WSTypeSummarization)); ok {
-			return frame
-		}
-		events = events[:0]
-		for _, f := range frames {
-			events = append(events, f.Event)
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("no summarization frame reached the task stream within 6s; the last replay held %v", events)
-		}
+	frame, ok := findTaskStreamEvent(taskStreamFrames(t, te.appStreamMgr, projectID, taskID), string(types.WSTypeSummarization))
+	if !ok {
+		t.Fatal("no summarization frame was published")
 	}
+	return frame
 }
 
 func contextUsedOf(t *testing.T, frame taskStreamFrame) float64 {

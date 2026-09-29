@@ -8,7 +8,6 @@ import (
 )
 
 func TestInsideLexicalOnly(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		p     string
 		roots []string
@@ -31,7 +30,6 @@ func TestInsideLexicalOnly(t *testing.T) {
 }
 
 func TestResolveSymlinks_ExistingFile(t *testing.T) {
-	t.Parallel()
 	base := t.TempDir()
 	outside := filepath.Join(base, "outside")
 	if err := os.MkdirAll(outside, 0o700); err != nil {
@@ -59,7 +57,6 @@ func TestResolveSymlinks_ExistingFile(t *testing.T) {
 }
 
 func TestResolveSymlinks_IntermediateEscapeIsVisible(t *testing.T) {
-	t.Parallel()
 	base := t.TempDir()
 	proj := filepath.Join(base, "proj")
 	outside := filepath.Join(base, "outside")
@@ -85,7 +82,6 @@ func TestResolveSymlinks_IntermediateEscapeIsVisible(t *testing.T) {
 }
 
 func TestResolveSymlinks_MissingTailUnderRealDir(t *testing.T) {
-	t.Parallel()
 	base := t.TempDir()
 	got, err := ResolveSymlinks(filepath.Join(base, "a", "b", "new.txt"))
 	if err != nil {
@@ -97,7 +93,6 @@ func TestResolveSymlinks_MissingTailUnderRealDir(t *testing.T) {
 }
 
 func TestResolveSymlinks_RejectsDanglingTail(t *testing.T) {
-	t.Parallel()
 	base := t.TempDir()
 	proj := filepath.Join(base, "proj")
 	if err := os.MkdirAll(proj, 0o700); err != nil {
@@ -117,7 +112,6 @@ func TestResolveSymlinks_RejectsDanglingTail(t *testing.T) {
 }
 
 func TestResolveSymlinks_AllMissingFallsBackToLexical(t *testing.T) {
-	t.Parallel()
 	base := t.TempDir()
 	deep := filepath.Join(base, "gone", "deeper", "file.txt")
 	got, err := ResolveSymlinks(deep)

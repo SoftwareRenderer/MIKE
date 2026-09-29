@@ -25,9 +25,6 @@ func streamsATokenThenGoesQuiet(quiet time.Duration) func(http.ResponseWriter) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Reading\"},\"finish_reason\":null}]}\n\n")
 		f.Flush()
-		// This is the silence under test, not a pause before the test: the caller's behaviour is a
-		// function of its length against the ceiling (docs/llm-streaming.md), so shortening it changes
-		// which branch of the provider the test is in.
 		time.Sleep(quiet)
 		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\" it now\"},\"finish_reason\":\"stop\"}]}\n\n")
 		fmt.Fprint(w, "data: [DONE]\n\n")
@@ -80,9 +77,6 @@ func TestQuietStreamCeilingIsReportedAsSilence(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Thinking\"},\"finish_reason\":null}]}\n\n")
 		f.Flush()
-		// Longer than the 1s StreamIdleSeconds ceiling the test configures, plus the retry the
-		// ceiling triggers (docs/llm-streaming.md): a silence that ends before the ceiling fires
-		// leaves the assertion about the error row looking at a stream that never went quiet.
 		time.Sleep(6 * time.Second)
 	})
 	te, _, projectID, initialSHA := setupExecutorWithGit(t)

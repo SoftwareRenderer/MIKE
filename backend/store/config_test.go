@@ -8,7 +8,6 @@ import (
 )
 
 func TestGetSetConfigValue(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 
 	if err := s.SetConfigValue("test_key", "test_value"); err != nil {
@@ -26,7 +25,6 @@ func TestGetSetConfigValue(t *testing.T) {
 }
 
 func TestGetConfigValueNotFound(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	_, err := s.GetConfigValue("nonexistent_key")
 	if err == nil {
@@ -35,7 +33,6 @@ func TestGetConfigValueNotFound(t *testing.T) {
 }
 
 func TestConfigOverwrite(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 
 	if err := s.SetConfigValue("key", "value1"); err != nil {
@@ -55,7 +52,6 @@ func TestConfigOverwrite(t *testing.T) {
 }
 
 func TestConfigProvidersJSON(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 
 	providers := []types.Provider{

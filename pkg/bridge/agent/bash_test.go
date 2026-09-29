@@ -207,8 +207,15 @@ func TestHandleBash_TimeoutKillsProcessGroup(t *testing.T) {
 		t.Fatalf("parse pid %q: %v", data, err)
 	}
 
-	if !awaitProcess(3*time.Second, func() bool { return processGone(pid) }) {
-		t.Fatalf("grandchild pid %d survived the timeout — only the direct child was killed", pid)
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if processGone(pid) {
+			return // grandchild is gone — the group was killed
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("grandchild pid %d survived the timeout — only the direct child was killed", pid)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 

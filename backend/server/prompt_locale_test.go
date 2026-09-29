@@ -67,7 +67,6 @@ func packWithFiles(t *testing.T, s *Server, name, locale string, enabled bool, t
 // TestRefreshPromptLocaleFollowsTheEnabledPack is the live switch: enabling a pack
 // installs its templates, disabling it returns to English, and no restart is involved.
 func TestRefreshPromptLocaleFollowsTheEnabledPack(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	s.extensionsDir = t.TempDir()
 	t.Cleanup(func() { prompts.SetOverlay("", "") })
@@ -112,7 +111,6 @@ func TestRefreshPromptLocaleFollowsTheEnabledPack(t *testing.T) {
 // TestRefreshPromptLocaleCatalogOnlyPack covers the pack that translates the UI and
 // ships no prompt templates: the locale is still recorded, the templates stay core's.
 func TestRefreshPromptLocaleCatalogOnlyPack(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	s.extensionsDir = t.TempDir()
 	t.Cleanup(func() { prompts.SetOverlay("", "") })
@@ -137,7 +135,6 @@ func TestRefreshPromptLocaleCatalogOnlyPack(t *testing.T) {
 // seam: a manifest that names a directory outside its own pack must not get the
 // server reading templates from it.
 func TestRefreshPromptLocaleRefusesAnEscapingPromptsDir(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	s.extensionsDir = t.TempDir()
 	t.Cleanup(func() { prompts.SetOverlay("", "") })
@@ -171,7 +168,6 @@ func TestRefreshPromptLocaleRefusesAnEscapingPromptsDir(t *testing.T) {
 // TestRefreshPromptLocalePicksTheWinningPack keeps the server on the same ordering
 // rule the browser uses: priority, then name — the two ends of one rule.
 func TestRefreshPromptLocalePicksTheWinningPack(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	s.extensionsDir = t.TempDir()
 	t.Cleanup(func() { prompts.SetOverlay("", "") })

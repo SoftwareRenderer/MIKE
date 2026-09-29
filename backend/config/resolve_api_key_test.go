@@ -7,7 +7,6 @@ import (
 )
 
 func TestResolveAPIKey(t *testing.T) {
-	t.Parallel()
 	cs := testConfigStore(t)
 
 	storedKey := "sk-real-secret-123"
@@ -70,7 +69,6 @@ func TestResolveAPIKey(t *testing.T) {
 }
 
 func TestResolveAPIKeyNoStoredKey(t *testing.T) {
-	t.Parallel()
 	cs := testConfigStore(t)
 
 	// Provider exists but has no stored key.

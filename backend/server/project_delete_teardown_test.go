@@ -11,7 +11,6 @@ import (
 // because CASCADE takes the rows and leaves all of that running. The uploads inside a worktree go with it:
 // that is the whole of an upload's lifecycle, an upload is deleted with its task and with nothing else.
 func TestProjectDeleteTearsDownEveryTaskEnvironment(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	parentID := createTestTask(t, s, projID, "parent")

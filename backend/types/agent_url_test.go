@@ -3,7 +3,6 @@ package types
 import "testing"
 
 func TestParseAgentURL(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		url      string
 		wantName string
@@ -35,7 +34,6 @@ func TestParseAgentURL(t *testing.T) {
 }
 
 func TestAgentProviderURLRoundTrip(t *testing.T) {
-	t.Parallel()
 	for _, name := range []string{"pi", "claude-code", "agent2", "x"} {
 		url := AgentProviderURL(name)
 		got, ok := ParseAgentURL(url)
@@ -52,7 +50,6 @@ func TestAgentProviderURLRoundTrip(t *testing.T) {
 // scheme but names no extension is still an agent provider row for persistence purposes (it must
 // never be stored), while ParseAgentURL refuses to invent a name for it.
 func TestIsAgentURLWithoutName(t *testing.T) {
-	t.Parallel()
 	if !IsAgentURL("agent://") {
 		t.Error(`IsAgentURL("agent://") = false, want true: the scheme is present even with no name`)
 	}

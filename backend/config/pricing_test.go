@@ -8,7 +8,6 @@ import (
 )
 
 func TestEstimateCallCost_NoPricingConfigured(t *testing.T) {
-	t.Parallel()
 	cs := testConfigStore(t)
 	cfg := &types.Config{
 		Providers: []types.Provider{
@@ -25,7 +24,6 @@ func TestEstimateCallCost_NoPricingConfigured(t *testing.T) {
 }
 
 func TestEstimateCallCost_ProviderPricing(t *testing.T) {
-	t.Parallel()
 	cs := testConfigStore(t)
 	cfg := &types.Config{
 		Providers: []types.Provider{
@@ -50,7 +48,6 @@ func TestEstimateCallCost_ProviderPricing(t *testing.T) {
 }
 
 func TestEstimateCallCost_ModelOverrideWins(t *testing.T) {
-	t.Parallel()
 	cs := testConfigStore(t)
 	input := 5.0
 	output := 10.0
@@ -87,7 +84,6 @@ func TestEstimateCallCost_ModelOverrideWins(t *testing.T) {
 }
 
 func TestEstimateCallCost_CacheWriteSubstitutesInput(t *testing.T) {
-	t.Parallel()
 	cs := testConfigStore(t)
 	cfg := &types.Config{
 		Providers: []types.Provider{
@@ -111,7 +107,6 @@ func TestEstimateCallCost_CacheWriteSubstitutesInput(t *testing.T) {
 }
 
 func TestEstimateCallCost_AgentProviderReturnsZero(t *testing.T) {
-	t.Parallel()
 	cs := testConfigStore(t)
 	cfg := &types.Config{
 		Providers: []types.Provider{
@@ -132,7 +127,6 @@ func TestEstimateCallCost_AgentProviderReturnsZero(t *testing.T) {
 }
 
 func TestEstimateCallCost_UnknownProviderReturnsZero(t *testing.T) {
-	t.Parallel()
 	cs := testConfigStore(t)
 	cfg := &types.Config{
 		Providers: []types.Provider{
@@ -149,7 +143,6 @@ func TestEstimateCallCost_UnknownProviderReturnsZero(t *testing.T) {
 }
 
 func TestEstimateCallCost_NilUsage(t *testing.T) {
-	t.Parallel()
 	cs := testConfigStore(t)
 	cfg := &types.Config{
 		Providers: []types.Provider{

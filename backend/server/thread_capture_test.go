@@ -84,7 +84,6 @@ func readWorktreeFile(t *testing.T, worktreePath, name string) string {
 
 // The work stays where it is and the user is told the switch did not happen — then a retry works.
 func TestThreadSwitchRefusesToDiscardWorkItCouldNotSave(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	fx := setupForkWithCheckpoint(t, s, "capture-switch")
 	if got := activeThreadID(t, s, fx.projID, fx.taskID); got != fx.forkID {
@@ -139,7 +138,6 @@ func TestThreadSwitchRefusesToDiscardWorkItCouldNotSave(t *testing.T) {
 }
 
 func TestThreadForkRefusesToDiscardWorkItCouldNotSave(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	fx := setupForkWithCheckpoint(t, s, "capture-fork")
 	msgID := postMessageIn(t, s, fx, "and then count higher")
@@ -178,7 +176,6 @@ func TestThreadForkRefusesToDiscardWorkItCouldNotSave(t *testing.T) {
 // Stopping a running task is a real change, so a refusal has to report it and record it: a card still
 // showing "running" after the switch was refused is a lie about the board.
 func TestRefusedSwitchReportsTheTaskItStopped(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	fx := setupForkWithCheckpoint(t, s, "capture-running")
 	task, err := s.store.GetTask(fx.projID, fx.taskID)

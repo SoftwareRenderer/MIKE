@@ -8,7 +8,7 @@ import { test, expect, type Page } from '@playwright/test';
 // the issued token answers the task and project routes it is scoped to with no cookie at all, and
 // answers 403 on one that is not on its list.
 //
-// Runs on a lane server (`ISOLATED_SPECS`) (settings UI + it changes server token state), and revokes every
+// Runs in the `isolated` project (settings UI + it changes server token state), and revokes every
 // token it creates so the lane server is left with none.
 
 const SETTINGS_BTN = '.icon-btn[aria-label="Settings"]';

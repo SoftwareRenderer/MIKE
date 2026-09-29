@@ -9,7 +9,6 @@ import (
 )
 
 func TestLockProjectStashWatchedQueuesOnTheSameTableAsLockProjectStash(t *testing.T) {
-	t.Parallel()
 	wm := NewWorktreeManager(nil, nil)
 	const projectID = "proj-watched-stash"
 

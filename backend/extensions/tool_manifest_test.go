@@ -53,7 +53,6 @@ func validSearchTool() *ToolConfig {
 
 // Any refusal raised for another reason shows up here as an extension nobody can install.
 func TestSearchExtensionManifestPassesValidation(t *testing.T) {
-	t.Parallel()
 	schema := searxngLikeSchema()
 	tool := validSearchTool()
 	if err := tool.Validate(schema); err != nil {
@@ -89,7 +88,6 @@ func assertDeclarationSurvivesJSON(tb testing.TB, tool *ToolConfig) {
 
 // Each malformed declaration is refused with a message naming the field.
 func TestToolValidationRefusals(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name    string
 		change  func(*ToolConfig)
@@ -152,7 +150,6 @@ func TestToolValidationRefusals(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			tool := validSearchTool()
 			tc.change(tool)
 			err := tool.Validate(searxngLikeSchema())
@@ -168,7 +165,6 @@ func TestToolValidationRefusals(t *testing.T) {
 
 // TestValidateToolsManifestRules: what a tool extension may pair with, and how many it may declare.
 func TestValidateToolsManifestRules(t *testing.T) {
-	t.Parallel()
 	schema := searxngLikeSchema()
 	tool := validSearchTool()
 
@@ -227,7 +223,6 @@ func TestValidateToolsManifestRules(t *testing.T) {
 
 // The grant is the stored value: nothing stored, nothing granted.
 func TestGrantedURLHosts(t *testing.T) {
-	t.Parallel()
 	schema := searxngLikeSchema()
 
 	if hosts := schema.GrantedURLHosts(map[string]any{}); len(hosts) != 0 {
@@ -251,7 +246,6 @@ func TestGrantedURLHosts(t *testing.T) {
 }
 
 func TestParseTargetURL(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		raw        string
 		wantHost   string
@@ -290,7 +284,6 @@ func TestParseTargetURL(t *testing.T) {
 
 // A typo in an address is answered in the dialog, not as an upstream failure inside a task.
 func TestValidateConfigValues(t *testing.T) {
-	t.Parallel()
 	schema := searxngLikeSchema()
 	if err := ValidateConfigValues(schema, map[string]any{"base_url": "https://searx.example"}); err != nil {
 		t.Fatalf("a good address was refused: %v", err)
@@ -307,7 +300,6 @@ func TestValidateConfigValues(t *testing.T) {
 
 // A stored row that no longer passes is refused by name, and the rest survive.
 func TestUsableContributedTools(t *testing.T) {
-	t.Parallel()
 	schema := searxngLikeSchema()
 	good := validSearchTool()
 	bad := validSearchTool()

@@ -84,8 +84,6 @@ func fsReadStatus(t *testing.T, s *Server, cookie, csrf, projectID, file, ref st
 // that had already been read, so one request allocated the whole file before refusing
 // it.
 func TestFSReadRefusesOversizedWorkingTreeFile(t *testing.T) {
-	// Serial for the reason at TestFSRawRefBranchRefusesAnOversizedBlob — fsReadStatus measures
-	// the same process-wide counter.
 	s := testServer(t)
 	cookie, csrf := loginTestCSRF(t, s)
 	projectID, file := fsSizeProject(t, s, "fs-size-worktree", "big.bin", oversizedMiB)
@@ -111,8 +109,6 @@ func TestFSReadRefusesOversizedWorkingTreeFile(t *testing.T) {
 // TestFSReadRefusesOversizedBlobAtRef: for `?ref=` the bytes come out of `git show`, so
 // capping the read first means asking git how big the object is before asking for it.
 func TestFSReadRefusesOversizedBlobAtRef(t *testing.T) {
-	// Serial for the reason at TestFSRawRefBranchRefusesAnOversizedBlob — fsReadStatus measures
-	// the same process-wide counter.
 	s := testServer(t)
 	cookie, csrf := loginTestCSRF(t, s)
 	projectID, file := fsSizeProject(t, s, "fs-size-ref", "big.bin", oversizedMiB)
@@ -132,7 +128,6 @@ func TestFSReadRefusesOversizedBlobAtRef(t *testing.T) {
 // cannot answer reports "unknown" rather than a size — a wrong "0, ok" would leave the
 // read uncapped.
 func TestGitBlobSize(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projectID, _ := fsSizeProject(t, s, "fs-size-probe", "sized.txt", 1234)
 	wm := s.executor.WorktreeMgr()
@@ -167,7 +162,6 @@ func projectDirOf(t *testing.T, s *Server, projectID string) string {
 // refuse a file for a size the user was told they could send. The rule is the one the
 // strings were written with — the printed figure is the cap's decimal megabytes.
 func TestTooLargeMessagesNameTheirCaps(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name    string
 		message string

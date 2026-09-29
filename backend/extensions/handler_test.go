@@ -65,7 +65,6 @@ func readSSEEvents(t *testing.T, body []byte) []sseEvent {
 }
 
 func TestHandleList_Empty(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/extensions", nil)
 	w := httptest.NewRecorder()
@@ -86,7 +85,6 @@ func TestHandleList_Empty(t *testing.T) {
 }
 
 func TestHandleList_WithExtensions(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 	// Create test extensions
 	for _, name := range []string{"gopls", "typescript"} {
@@ -124,7 +122,6 @@ func TestHandleList_WithExtensions(t *testing.T) {
 }
 
 func TestHandleList_SortedByPriority(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 	// Create extensions with different priorities (insert in random order)
 	extA := makeTestExt("ext-a", "ext-a", ExtensionTypeUI)
@@ -175,7 +172,6 @@ func TestHandleList_SortedByPriority(t *testing.T) {
 }
 
 func TestHandleList_SamePriority_SortedByName(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 	// Create extensions with same priority
 	for _, name := range []string{"zebra", "alpha", "beta"} {
@@ -213,7 +209,6 @@ func TestHandleList_SamePriority_SortedByName(t *testing.T) {
 // It is asserted at backend/server/routes_method_test.go instead.
 
 func TestHandleGet_Found(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)
 	if err := h.store.Create(ext); err != nil {
@@ -239,7 +234,6 @@ func TestHandleGet_Found(t *testing.T) {
 }
 
 func TestHandleGet_NotFound(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/extensions/nonexistent", nil)
 	w := httptest.NewRecorder()
@@ -252,7 +246,6 @@ func TestHandleGet_NotFound(t *testing.T) {
 }
 
 func TestHandleUpdate(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)
 	if err := h.store.Create(ext); err != nil {
@@ -286,7 +279,6 @@ func TestHandleUpdate(t *testing.T) {
 }
 
 func TestHandleUpdate_ConfigMemoryLimitSync(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)
 	ext.SandboxConfig.MemoryLimit = 256 // a previously-applied limit
@@ -326,7 +318,6 @@ func TestHandleUpdate_ConfigMemoryLimitSync(t *testing.T) {
 }
 
 func TestHandleUpdate_MemoryLimitZeroClearsLimit(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)
 	ext.SandboxConfig.MemoryLimit = 512 // a previously-applied limit
@@ -365,7 +356,6 @@ func TestHandleUpdate_MemoryLimitZeroClearsLimit(t *testing.T) {
 }
 
 func TestHandleUpdate_MemoryLimitNegativeClampedToZero(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)
 	if err := h.store.Create(ext); err != nil {
@@ -398,7 +388,6 @@ func TestHandleUpdate_MemoryLimitNegativeClampedToZero(t *testing.T) {
 }
 
 func TestHandleUpdate_NotFound(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 	body := map[string]any{
 		"version": "2.0.0",
@@ -416,7 +405,6 @@ func TestHandleUpdate_NotFound(t *testing.T) {
 }
 
 func TestHandleUpdate_LSPConfig(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)
 	ext.Manifest.Capabilities = &Capabilities{LSP: &LSPConfig{
@@ -477,7 +465,6 @@ func TestHandleUpdate_LSPConfig(t *testing.T) {
 }
 
 func TestHandleUpdate_LSPConfig_BoolFlags(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)
 	ext.Manifest.Capabilities = &Capabilities{LSP: &LSPConfig{
@@ -561,7 +548,6 @@ func TestHandleUpdate_LSPConfig_BoolFlags(t *testing.T) {
 }
 
 func TestHandleUpdate_LSPConfig_BoolFlags_PartialUpdate(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)
 	falseVal := false
@@ -622,7 +608,6 @@ func TestHandleUpdate_LSPConfig_BoolFlags_PartialUpdate(t *testing.T) {
 }
 
 func TestHandleUpdate_LSPConfig_CreateNilLSP(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)
 	// No LSP config initially
@@ -670,7 +655,6 @@ func TestHandleUpdate_LSPConfig_CreateNilLSP(t *testing.T) {
 }
 
 func TestHandleDelete(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)
 	if err := h.store.Create(ext); err != nil {
@@ -693,7 +677,6 @@ func TestHandleDelete(t *testing.T) {
 }
 
 func TestHandleDelete_NotFound(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 	req := httptest.NewRequest(http.MethodDelete, "/api/extensions/nonexistent", nil)
 	w := httptest.NewRecorder()
@@ -706,7 +689,6 @@ func TestHandleDelete_NotFound(t *testing.T) {
 }
 
 func TestHandleSetEnabled(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)
 	if err := h.store.Create(ext); err != nil {
@@ -735,7 +717,6 @@ func TestHandleSetEnabled(t *testing.T) {
 }
 
 func TestHandleRegistryIndex_NoURL(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/extensions/registry", nil)
 	w := httptest.NewRecorder()
@@ -748,7 +729,6 @@ func TestHandleRegistryIndex_NoURL(t *testing.T) {
 }
 
 func TestHandleLocalExtensions(t *testing.T) {
-	t.Parallel()
 	// Build a temp extensions dir with manifests for an LSP and a UI extension.
 	extDir := t.TempDir()
 	writeManifest := func(rel, content string) {
@@ -837,7 +817,6 @@ func TestHandleLocalExtensions(t *testing.T) {
 }
 
 func TestHandleLocalExtensions_EmptyDir(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 	h.config.ExtensionsDir = t.TempDir()
 
@@ -859,7 +838,6 @@ func TestHandleLocalExtensions_EmptyDir(t *testing.T) {
 }
 
 func TestHandleRegistryIndex_WithMock(t *testing.T) {
-	t.Parallel()
 	// Create mock registry server
 	index := RegistryIndex{
 		{
@@ -900,7 +878,6 @@ func TestHandleRegistryIndex_WithMock(t *testing.T) {
 }
 
 func TestHandleInstall_NotFound(t *testing.T) {
-	t.Parallel()
 	// Create mock registry server with empty index
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -927,7 +904,6 @@ func TestHandleInstall_NotFound(t *testing.T) {
 }
 
 func TestHandleInstall_Success(t *testing.T) {
-	t.Parallel()
 	// Create mock registry server
 	index := RegistryIndex{
 		{
@@ -991,7 +967,6 @@ func TestHandleInstall_Success(t *testing.T) {
 	}
 }
 
-// serial for the reason at fakePodmanExit.
 func TestHandleInstallLocal(t *testing.T) {
 	h := testHandler(t)
 	extDir := t.TempDir()
@@ -1086,7 +1061,6 @@ func TestHandleInstallLocal(t *testing.T) {
 // every asset it serves (a translation catalog among them), so the install now
 // refuses it and names the folder to rename.
 func TestHandleInstallLocal_RefusesAFolderNothingCanReadBack(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 	extDir := t.TempDir()
 	h.config.ExtensionsDir = extDir
@@ -1124,7 +1098,6 @@ func TestHandleInstallLocal_RefusesAFolderNothingCanReadBack(t *testing.T) {
 // legitimately served from `<extensions>/<name>` — the case a client-side guess
 // from the manifest author cannot know, and so must still install.
 func TestHandleInstallLocal_AcceptsAFlatPackAndReportsWhereItIsServed(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 	extDir := t.TempDir()
 	h.config.ExtensionsDir = extDir
@@ -1160,7 +1133,6 @@ func TestHandleInstallLocal_AcceptsAFlatPackAndReportsWhereItIsServed(t *testing
 }
 
 func TestHandleInstallLocal_NotFound(t *testing.T) {
-	t.Parallel()
 	// No local extension with this name => 404, regardless of registry.
 	h := testHandler(t)
 	h.config.ExtensionsDir = t.TempDir()
@@ -1179,7 +1151,6 @@ func TestHandleInstallLocal_NotFound(t *testing.T) {
 }
 
 func TestHandleInstall_GitPinned(t *testing.T) {
-	t.Parallel()
 	// A self-hosted extension: a git repo with a manifest (no Dockerfile, so no
 	// image build is attempted).
 	repo, commit := makeGitRepo(t, map[string]string{
@@ -1245,7 +1216,6 @@ func TestHandleInstall_GitPinned(t *testing.T) {
 }
 
 func TestHandleInstall_GitPinned_FailsOnBadCommit(t *testing.T) {
-	t.Parallel()
 	repo, _ := makeGitRepo(t, map[string]string{
 		"manifest.json": `{"display_name":"X"}`,
 	})
@@ -1299,7 +1269,6 @@ func TestHandleInstall_GitPinned_FailsOnBadCommit(t *testing.T) {
 }
 
 func TestHandleCheckUpdates_CommitChange(t *testing.T) {
-	t.Parallel()
 	// Curated index pins a newer commit than what is installed.
 	index := RegistryIndex{
 		{
@@ -1342,7 +1311,6 @@ func TestHandleCheckUpdates_CommitChange(t *testing.T) {
 }
 
 func TestHandleCheckUpdates_NoCommitChange(t *testing.T) {
-	t.Parallel()
 	index := RegistryIndex{
 		{
 			Name:    "gopls",
@@ -1403,7 +1371,6 @@ func setupChangelogRegistry(t *testing.T, index RegistryIndex, changelog string)
 }
 
 func TestHandleCheckUpdates_Changelog(t *testing.T) {
-	t.Parallel()
 	commitA := strings.Repeat("a", 64) // installed
 	commitB := strings.Repeat("b", 64) // available
 	index := RegistryIndex{{
@@ -1448,7 +1415,6 @@ func TestHandleCheckUpdates_Changelog(t *testing.T) {
 }
 
 func TestHandleCheckUpdates_ChangelogNoMatchingHash(t *testing.T) {
-	t.Parallel()
 	// Changelog exists but does not contain the installed hash → no changes shown.
 	index := RegistryIndex{{
 		Name:    "changelog-ext",
@@ -1488,7 +1454,6 @@ func TestHandleCheckUpdates_ChangelogNoMatchingHash(t *testing.T) {
 }
 
 func TestHandleCheckUpdates_ChangelogFetchFails(t *testing.T) {
-	t.Parallel()
 	// No changelog published → the update is still reported, non-fatal.
 	index := RegistryIndex{{
 		Name:    "changelog-ext",
@@ -1526,7 +1491,6 @@ func TestHandleCheckUpdates_ChangelogFetchFails(t *testing.T) {
 }
 
 func TestHandleCheckUpdates_NoChangelogForVersionUpdate(t *testing.T) {
-	t.Parallel()
 	// Non-git-pinned (version-only) updates have no commit to key on — no
 	// changelog is fetched or shown, even if one is published.
 	index := RegistryIndex{{
@@ -1565,7 +1529,6 @@ func TestHandleCheckUpdates_NoChangelogForVersionUpdate(t *testing.T) {
 }
 
 func TestHandleCheckUpdates_NewPermissions(t *testing.T) {
-	t.Parallel()
 	// Registry version requests more UI permissions than the installed version.
 	index := RegistryIndex{
 		{
@@ -1628,7 +1591,6 @@ func TestHandleCheckUpdates_NewPermissions(t *testing.T) {
 // Adding a host grants no new UI permission, so check-updates reports the host list on its own.
 // Dropping one is not reported.
 func TestHandleCheckUpdates_DomainsAdded(t *testing.T) {
-	t.Parallel()
 	const installedCommit = "1111111111111111111111111111111111111111"
 	const vettedCommit = "2222222222222222222222222222222222222222"
 
@@ -1708,7 +1670,6 @@ func TestHandleCheckUpdates_DomainsAdded(t *testing.T) {
 }
 
 func TestHandleInstall_FallbackCopiesLicenseURL(t *testing.T) {
-	t.Parallel()
 	// Registry entry with no git source (no repo/commit) — fallback path should copy LicenseURL
 	index := RegistryIndex{
 		{
@@ -1759,7 +1720,6 @@ func TestHandleInstall_FallbackCopiesLicenseURL(t *testing.T) {
 }
 
 func TestHandleInstall_AlreadyInstalled(t *testing.T) {
-	t.Parallel()
 	// Create mock registry server
 	index := RegistryIndex{
 		{
@@ -1798,7 +1758,6 @@ func TestHandleInstall_AlreadyInstalled(t *testing.T) {
 }
 
 func TestHandleInstall_AlreadyInstalled_TimestampedID(t *testing.T) {
-	t.Parallel()
 	// Reinstall must be rejected even though records use timestamped IDs.
 	index := RegistryIndex{
 		{
@@ -1837,7 +1796,6 @@ func TestHandleInstall_AlreadyInstalled_TimestampedID(t *testing.T) {
 }
 
 func TestHandleInstall_DuplicateInFlight(t *testing.T) {
-	t.Parallel()
 	index := RegistryIndex{
 		{Name: "gopls", Version: "1.0.0", Type: ExtensionTypeLSP, DisplayName: "Go Language Server"},
 	}
@@ -1868,7 +1826,6 @@ func TestHandleInstall_DuplicateInFlight(t *testing.T) {
 }
 
 func TestHandleInstall_CompletesAfterClientDisconnect(t *testing.T) {
-	t.Parallel()
 	index := RegistryIndex{
 		{Name: "gopls", Version: "1.0.0", Type: ExtensionTypeLSP, DisplayName: "Go Language Server", Image: "docker.io/library/gopls:1.5.0"},
 	}
@@ -1921,7 +1878,6 @@ func TestHandleInstall_CompletesAfterClientDisconnect(t *testing.T) {
 }
 
 func TestHandleUpdateImage_StreamsProgress(t *testing.T) {
-	t.Parallel()
 	// Git-pinned with no Dockerfile, so no podman build is needed.
 	repo, commit := makeGitRepo(t, map[string]string{
 		"importer/manifest.json": `{"display_name":"GitHub Importer","description":"d","author":"a","version":"1.0.0","capabilities":{"ui":{"injection_points":["createTask"]}}}`,
@@ -2035,7 +1991,6 @@ func postUpdate(t *testing.T, h *ExtensionHandler, id, body string) sseEvent {
 }
 
 func TestHandleUpdateImage_NewHostRefused(t *testing.T) {
-	t.Parallel()
 	h, ext, extDir := newHostUpdateFixture(t)
 
 	last := postUpdate(t, h, ext.ID, `{}`)
@@ -2067,7 +2022,6 @@ func TestHandleUpdateImage_NewHostRefused(t *testing.T) {
 // The 400 for a bad body comes before the update is marked in progress, so a refused request cannot
 // block every later update.
 func TestHandleUpdateImage_MalformedBody(t *testing.T) {
-	t.Parallel()
 	h, ext, _ := newHostUpdateFixture(t)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/extensions/"+ext.ID+"/update",
@@ -2087,7 +2041,6 @@ func TestHandleUpdateImage_MalformedBody(t *testing.T) {
 }
 
 func TestHandleUpdateImage_NewHostAcknowledged(t *testing.T) {
-	t.Parallel()
 	h, ext, _ := newHostUpdateFixture(t)
 
 	last := postUpdate(t, h, ext.ID, `{"acknowledge_new_domains":true}`)
@@ -2108,7 +2061,6 @@ func TestHandleUpdateImage_NewHostAcknowledged(t *testing.T) {
 }
 
 func TestHandleCheckUpdates_NoURL(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/extensions/check-updates", nil)
 	w := httptest.NewRecorder()
@@ -2121,7 +2073,6 @@ func TestHandleCheckUpdates_NoURL(t *testing.T) {
 }
 
 func TestHandleCheckUpdates_NoUpdates(t *testing.T) {
-	t.Parallel()
 	// Create mock registry server with same version
 	index := RegistryIndex{
 		{
@@ -2163,7 +2114,6 @@ func TestHandleCheckUpdates_NoUpdates(t *testing.T) {
 }
 
 func TestHandleCheckUpdates_UpdateAvailable(t *testing.T) {
-	t.Parallel()
 	// Create mock registry server with newer version
 	index := RegistryIndex{
 		{
@@ -2211,7 +2161,6 @@ func TestHandleCheckUpdates_UpdateAvailable(t *testing.T) {
 }
 
 func TestExtensionResponse_MarshalJSON(t *testing.T) {
-	t.Parallel()
 	resp := ExtensionResponse{
 		ID:            "test-ext",
 		Name:          "Test Extension",
@@ -2241,7 +2190,6 @@ func TestExtensionResponse_MarshalJSON(t *testing.T) {
 }
 
 func TestHandleStorage_CRUD(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeUI)
 	if err := h.store.Create(ext); err != nil {
@@ -2296,7 +2244,6 @@ func TestHandleStorage_CRUD(t *testing.T) {
 }
 
 func TestHandleStorage_List(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeUI)
 	if err := h.store.Create(ext); err != nil {
@@ -2322,7 +2269,6 @@ func TestHandleStorage_List(t *testing.T) {
 }
 
 func TestHandleStorage_RejectsOversizedValue(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeUI)
 	if err := h.store.Create(ext); err != nil {
@@ -2339,7 +2285,6 @@ func TestHandleStorage_RejectsOversizedValue(t *testing.T) {
 }
 
 func TestHandleStorage_UnknownExtension(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/extensions/nope/storage", nil)
 	w := httptest.NewRecorder()
@@ -2350,7 +2295,6 @@ func TestHandleStorage_UnknownExtension(t *testing.T) {
 }
 
 func TestHandleDelete_CleansStorage(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeUI)
 	if err := h.store.Create(ext); err != nil {
@@ -2393,7 +2337,6 @@ func makeProxyExt(t *testing.T, h *ExtensionHandler, domains []string) {
 }
 
 func TestHandleProxy_RejectsNonHTTPScheme(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 	makeProxyExt(t, h, []string{"example.com"})
 
@@ -2407,7 +2350,6 @@ func TestHandleProxy_RejectsNonHTTPScheme(t *testing.T) {
 	}
 }
 
-// serial for the reason at allowLoopbackProxy.
 func TestHandleProxy_DoesNotFollowRedirects(t *testing.T) {
 	allowLoopbackProxy(t)
 	// The "internal" server must never be reached via a redirect from an
@@ -2456,7 +2398,6 @@ func putUpdate(t *testing.T, h *ExtensionHandler, id string, body map[string]any
 // host roots and capabilities that reach past the container, naming the offending value and
 // persisting nothing.
 func TestHandleUpdate_RejectsSandboxWidening(t *testing.T) {
-	t.Parallel()
 	mountsBody := func(host, container, mode string) map[string]any {
 		return map[string]any{
 			"sandbox_config": map[string]any{
@@ -2488,7 +2429,6 @@ func TestHandleUpdate_RejectsSandboxWidening(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			h := testHandler(t)
 			if err := h.store.Create(makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)); err != nil {
 				t.Fatalf("Create: %v", err)
@@ -2530,7 +2470,6 @@ func TestHandleUpdate_RejectsSandboxWidening(t *testing.T) {
 	// (TestBuildExtensionCreateArgs_CapabilityPosture), which pins the runtime pairing the
 	// grant assumes.
 	t.Run("a plain capability name is accepted and stored", func(t *testing.T) {
-		t.Parallel()
 		h := testHandler(t)
 		if err := h.store.Create(makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)); err != nil {
 			t.Fatalf("Create: %v", err)
@@ -2553,7 +2492,6 @@ func TestHandleUpdate_RejectsSandboxWidening(t *testing.T) {
 // working: a mount inside the app's own roots (the temp dir is allowlisted by
 // default) and a harmless capability are stored as requested.
 func TestHandleUpdate_AcceptsAllowedSandboxAdditions(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 	if err := h.store.Create(makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)); err != nil {
 		t.Fatalf("Create: %v", err)
@@ -2590,7 +2528,6 @@ func TestHandleUpdate_AcceptsAllowedSandboxAdditions(t *testing.T) {
 // A language server with no image and no Dockerfile has nothing to run in a sandbox. This installed
 // successfully before, and the sandbox then started a default image with no server in it.
 func TestHandleInstall_RefusesALanguageServerWithNoImage(t *testing.T) {
-	t.Parallel()
 	index := RegistryIndex{
 		{Name: "gopls", Version: "1.0.0", Type: ExtensionTypeLSP, DisplayName: "Go Language Server"},
 	}
@@ -2636,8 +2573,6 @@ func TestHandleInstall_RefusesALanguageServerWithNoImage(t *testing.T) {
 
 // A failed build installs nothing: no row, and no checked-out directory left behind for
 // GET /api/extensions/local to offer as installable under the manifest it shipped with.
-// serial for the reason at fakePodmanExit, and it is the load-sensitive case in
-// docs/testing.md: it fails on a CPU-loaded machine and never alone.
 func TestHandleInstall_BuildFailureLeavesNoRowAndNoFiles(t *testing.T) {
 	repo, commit := makeGitRepo(t, map[string]string{
 		"lsp/gopls/manifest.json": `{"display_name":"Go","description":"d","author":"Go Team","version":"0.7.0",` +

@@ -523,14 +523,11 @@ func TestCommitAndMerge_SerializesPerProject(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	// First call's staged change, prepared on the test goroutine: a git failure here has to fail the
-	// test, not park it — t.Fatalf inside a spawned goroutine ends that goroutine, and the ordering
-	// below would then wait forever for a close that never comes.
-	os.WriteFile(filepath.Join(wtPath, "file-a"), []byte("content-a\n"), 0o644)
-	runGit(t, wtPath, "add", "file-a")
-
-	// First call — commits "file-a"
+	// First call — writes "file-a" content
 	wg.Go(func() {
+		// Make a change before committing
+		os.WriteFile(filepath.Join(wtPath, "file-a"), []byte("content-a\n"), 0o644)
+		runGit(t, wtPath, "add", "file-a")
 		close(startFirst)
 		te.merge.CommitAndMerge(projectID, taskID, wtPath, "commit-a", false)
 		mu.Lock()
@@ -540,16 +537,14 @@ func TestCommitAndMerge_SerializesPerProject(t *testing.T) {
 	})
 
 	// Wait for first to enter the commit (be inside CommitAndMerge)
-	awaitSignal(t, 60*time.Second, startFirst, "the first commit to start")
-	// CommitAndMerge takes the project's queue slot as its first act, and the queue reports no
-	// waiter, so this is the window in which "the second call would have blocked" is observable.
+	<-startFirst
+	// Small delay to ensure first is inside the queue
 	time.Sleep(50 * time.Millisecond)
 
-	// Second call — "file-b" staged here, its commit spawned so it queues behind the first
-	os.WriteFile(filepath.Join(wtPath, "file-b"), []byte("content-b\n"), 0o644)
-	runGit(t, wtPath, "add", "file-b")
-
+	// Second call — writes "file-b" content, should block until first releases
 	wg.Go(func() {
+		os.WriteFile(filepath.Join(wtPath, "file-b"), []byte("content-b\n"), 0o644)
+		runGit(t, wtPath, "add", "file-b")
 		close(startSecond)
 		te.merge.CommitAndMerge(projectID, taskID, wtPath, "commit-b", false)
 		mu.Lock()
@@ -557,7 +552,7 @@ func TestCommitAndMerge_SerializesPerProject(t *testing.T) {
 		mu.Unlock()
 	})
 
-	awaitSignal(t, 60*time.Second, startSecond, "the second commit to start")
+	<-startSecond
 	// Second should be blocked — verify first hasn't finished yet
 	select {
 	case <-firstDone:
@@ -566,7 +561,7 @@ func TestCommitAndMerge_SerializesPerProject(t *testing.T) {
 		// Expected: first is still running
 	}
 
-	awaitWaitGroup(t, &wg, 2*time.Minute, "both commits to finish")
+	wg.Wait()
 
 	// Verify order: first must complete before second
 	if len(order) != 2 || order[0] != "first" || order[1] != "second" {
@@ -762,8 +757,7 @@ func TestForwardUserMessage_BlocksLazyStartDuringSummarize(t *testing.T) {
 		ServerURL: "http://localhost:8080/v1",
 	})
 
-	// The window in which a lazy start would appear: the assertion below is that the executor map
-	// stayed empty, and an empty map says nothing until a goroutine has had its chance to fill it.
+	// Give a brief moment for any goroutine to start
 	time.Sleep(50 * time.Millisecond)
 
 	// Verify no executor was created (lazy-start was blocked)

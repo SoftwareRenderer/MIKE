@@ -9,7 +9,6 @@ import (
 // TestContainedRootsAreNotWidened: the widening the picker honors must not reach a project jail, and
 // no home directory creeps in as a root the caller never named.
 func TestContainedRootsAreNotWidened(t *testing.T) {
-	t.Parallel()
 	dir := t.TempDir()
 	home, err := os.UserHomeDir()
 	if err == nil && home != "" {
@@ -31,7 +30,6 @@ func TestContainedRootsAreNotWidened(t *testing.T) {
 
 // TestContainedRootsMkdirAllRefusesSymlink is the property writeContainedFile depends on.
 func TestContainedRootsMkdirAllRefusesSymlink(t *testing.T) {
-	t.Parallel()
 	dir := t.TempDir()
 	outside := t.TempDir()
 	if err := os.Symlink(outside, filepath.Join(dir, "link")); err != nil {

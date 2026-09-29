@@ -35,7 +35,6 @@ func withheld(reg *ToolRegistry) []ToolProblem {
 
 // The offer needs the extension enabled and pointed at an address.
 func TestToolRegistryOffersConfiguredExtension(t *testing.T) {
-	t.Parallel()
 	es := testStore(t)
 	reg := NewToolRegistry(es)
 	addToolExtension(t, es, "ext-search", "searxng", "https://searx.example", nil)
@@ -64,9 +63,7 @@ func TestToolRegistryOffersConfiguredExtension(t *testing.T) {
 }
 
 func TestToolRegistryWithholds(t *testing.T) {
-	t.Parallel()
 	t.Run("no address configured", func(t *testing.T) {
-		t.Parallel()
 		es := testStore(t)
 		addToolExtension(t, es, "ext-search", "searxng", "", nil)
 		reg := NewToolRegistry(es)
@@ -84,7 +81,6 @@ func TestToolRegistryWithholds(t *testing.T) {
 	})
 
 	t.Run("extension disabled", func(t *testing.T) {
-		t.Parallel()
 		es := testStore(t)
 		addToolExtension(t, es, "ext-search", "searxng", "https://searx.example", nil)
 		if err := es.SetEnabled("ext-search", false); err != nil {
@@ -96,7 +92,6 @@ func TestToolRegistryWithholds(t *testing.T) {
 	})
 
 	t.Run("address is unusable", func(t *testing.T) {
-		t.Parallel()
 		es := testStore(t)
 		addToolExtension(t, es, "ext-search", "searxng", "https://searx.example/", nil)
 		reg := NewToolRegistry(es)
@@ -109,7 +104,6 @@ func TestToolRegistryWithholds(t *testing.T) {
 	})
 
 	t.Run("name belongs to a core tool", func(t *testing.T) {
-		t.Parallel()
 		es := testStore(t)
 		addToolExtension(t, es, "ext-search", "searxng", "https://searx.example", func(tool *ToolConfig) {
 			tool.Name = "bash"
@@ -123,7 +117,6 @@ func TestToolRegistryWithholds(t *testing.T) {
 	// Dispatch resolves tools by name alone, so the second of two extensions sharing a name is reported
 	// rather than lost.
 	t.Run("two extensions contribute the same name", func(t *testing.T) {
-		t.Parallel()
 		es := testStore(t)
 		addToolExtension(t, es, "ext-a", "alpha-search", "https://a.example", nil)
 		addToolExtension(t, es, "ext-b", "beta-search", "https://b.example", nil)
@@ -140,7 +133,6 @@ func TestToolRegistryWithholds(t *testing.T) {
 	})
 
 	t.Run("no tool extensions at all", func(t *testing.T) {
-		t.Parallel()
 		es := testStore(t)
 		if offered := NewToolRegistry(es).Contributed(); offered != nil {
 			t.Errorf("offered %+v, want nothing", offered)
@@ -149,7 +141,6 @@ func TestToolRegistryWithholds(t *testing.T) {
 
 	// A registry with nothing behind it is a normal state (an executor built without one), not a crash.
 	t.Run("nil registry", func(t *testing.T) {
-		t.Parallel()
 		var reg *ToolRegistry
 		if len(reg.Contributed()) != 0 || len(withheld(reg)) != 0 {
 			t.Error("a nil registry answered with something")
@@ -162,7 +153,6 @@ func TestToolRegistryWithholds(t *testing.T) {
 
 // Pointing the extension at another address makes the tool appear on the next turn.
 func TestToolRegistrySeesAConfigurationChange(t *testing.T) {
-	t.Parallel()
 	es := testStore(t)
 	ext := addToolExtension(t, es, "ext-search", "searxng", "", nil)
 	reg := NewToolRegistry(es)

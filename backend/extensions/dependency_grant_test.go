@@ -15,7 +15,6 @@ import (
 )
 
 func TestValidateDependencyGrant(t *testing.T) {
-	t.Parallel()
 	dir := t.TempDir()
 
 	// The accepted case, in the shape a person actually types it: a trailing slash and a
@@ -55,7 +54,6 @@ func TestValidateDependencyGrant(t *testing.T) {
 }
 
 func TestValidateDependencyGrant_StoresTheSymlinkTarget(t *testing.T) {
-	t.Parallel()
 	// Storing the link's own path would let the grant widen after the fact: whoever can write the
 	// link can retarget it, and the mount would follow without anyone granting that. Resolving
 	// first means the path in the record is the path that gets bound, and is what the UI shows.
@@ -108,7 +106,6 @@ func putDependencyCache(t *testing.T, h *ExtensionHandler, id, hostPath string) 
 }
 
 func TestHandleSetDependencyCache_GrantsAndRevokes(t *testing.T) {
-	t.Parallel()
 	h, store := testHandlerWithStore(t)
 	ext := lspExtWithCache(t, store)
 	dir := t.TempDir()
@@ -153,7 +150,6 @@ func TestHandleSetDependencyCache_GrantsAndRevokes(t *testing.T) {
 }
 
 func TestHandleSetDependencyCache_RejectsWhatIsNotAGrant(t *testing.T) {
-	t.Parallel()
 	h, store := testHandlerWithStore(t)
 	ext := lspExtWithCache(t, store)
 
@@ -202,7 +198,6 @@ func TestHandleSetDependencyCache_RejectsWhatIsNotAGrant(t *testing.T) {
 }
 
 func TestHandleSetDependencyCache_SamePathTwiceWritesNothing(t *testing.T) {
-	t.Parallel()
 	// Apply is a button, and a double click must not cost a cold start of a language server
 	// someone is in the middle of using.
 	h, store := testHandlerWithStore(t)
@@ -229,7 +224,6 @@ func TestHandleSetDependencyCache_SamePathTwiceWritesNothing(t *testing.T) {
 }
 
 func TestManifestMayNotSupplyTheHostPath(t *testing.T) {
-	t.Parallel()
 	// The refusal is the security argument: an extension declares where *it* looks and never what
 	// it may read on this machine. Stripping the field would let a manifest's value reach the
 	// stored record by whichever path forgot to strip it.
@@ -256,7 +250,6 @@ func TestManifestMayNotSupplyTheHostPath(t *testing.T) {
 }
 
 func TestGrantSurvivesAnUpdateFromTheRegistry(t *testing.T) {
-	t.Parallel()
 	// An update replaces the manifest's declared fields. It must not touch the user's grant: the
 	// cache they pointed at is not the extension's to revoke, and losing it silently would put
 	// every language server back to answering from an empty image.
@@ -289,7 +282,6 @@ func TestGrantSurvivesAnUpdateFromTheRegistry(t *testing.T) {
 // sandboxed task, and a task runs code that comes from a repository, so one text field must not be able to
 // hand over the host's configuration, a whole home folder, or a place where credentials are kept.
 func TestCheckGrantShape(t *testing.T) {
-	t.Parallel()
 	homes := []string{"/home/dev", "/root"}
 
 	allowed := []string{
@@ -338,7 +330,6 @@ func TestCheckGrantShape(t *testing.T) {
 // TestValidateDependencyGrant_RefusesWholeDirectories: the same rule through the function the endpoint
 // calls, with real directories.
 func TestValidateDependencyGrant_RefusesWholeDirectories(t *testing.T) {
-	t.Parallel()
 	home, err := os.UserHomeDir()
 	if err != nil || filepath.Clean(home) == "/" {
 		t.Skipf("no usable home directory: %v", err)
@@ -364,7 +355,6 @@ func putDependencyCacheBody(t *testing.T, h *ExtensionHandler, id, body string) 
 // carry the key at all must be refused — otherwise {"path": ...} takes a working grant away and
 // answers 200.
 func TestHandleSetDependencyCache_RequiresTheKey(t *testing.T) {
-	t.Parallel()
 	h, store := testHandlerWithStore(t)
 	ext := lspExtWithCache(t, store)
 	if _, err := putDependencyCacheBody(t, h, ext.ID, `{"host_path":"`+t.TempDir()+`"}`); err != nil {

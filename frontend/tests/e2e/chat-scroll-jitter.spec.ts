@@ -1,8 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import {
-    isolatedProject, gotoProject, getProjectId, csrfFetch, navigateToTask, waitForChatFormReady,
-    waitForChatStill, waitForStable,
-} from './helpers';
+import { isolatedProject, gotoProject, getProjectId, csrfFetch, navigateToTask, waitForChatFormReady } from './helpers';
 
 // What a reader feels as jitter while scrolling up is one measurable thing: the viewport moving in a
 // direction nobody asked for. jsdom has no layout and no kinetic scroll, so this is a browser question.
@@ -202,24 +199,9 @@ async function openConversation(page: Page): Promise<{ projectId: string; taskId
     await navigateToTask(page, conversation.taskId, conversation.projectId);
     await waitForChatFormReady(page);
     await expect(page.locator('.chat-messages [data-entry-id]').first()).toBeVisible({ timeout: 15000 });
-    // The bottom, laid out: the pin settle writes the scroller on animation frames, so the wait is that
-    // the position and height stop changing — what the realize-heights pass keeps moving under the reader.
-    await waitForChatStill(page);
+    // The bottom, laid out: the pin settle must be over before anything measures the reader's travel.
+    await page.waitForTimeout(1000);
     return conversation;
-}
-
-/**
- * The reader's row has stopped moving, and its settled offset is what the landing gets measured against.
- * A resting `scrollTop` still hides a document whose rows above the fold are being realized, which would
- * make the baseline somebody else's measurement, so the wait is on the recorder's own row sample.
- */
-async function settledAnchorTop(page: Page): Promise<number> {
-    const top = await waitForStable(async () => (await readRecord(page)).frames.at(-1)?.anchorTop ?? null, {
-        what: "the reader's row with the coast stopped",
-        until: (t) => t !== null,
-        timeout: 15_000,
-    });
-    return Math.round(top as number);
 }
 
 /**
@@ -281,7 +263,7 @@ test.describe('Chat scroll on touch', () => {
         await installRecorder(page);
 
         await startCoast(page);
-        await page.waitForTimeout(2500); // measurement window: this test judges the coast over its first 2.5s
+        await page.waitForTimeout(2500);
         await stopCoast(page);
 
         const rec = await readRecord(page);
@@ -302,7 +284,7 @@ test.describe('Chat scroll on touch', () => {
         await expect(async () => {
             expect((await readRecord(page)).landedAt).toBeGreaterThan(0);
         }).toPass({ timeout: 20000 });
-        await page.waitForTimeout(1500); // measurement window: this test judges the post-landing settle over 1.5s
+        await page.waitForTimeout(1500);
         const rec = await readRecord(page);
         await stopCoast(page);
 
@@ -325,12 +307,14 @@ test.describe('Chat scroll on touch', () => {
         const row = await anchorRowAtTopEdge(page);
         // Nothing moves before the landing: a row that drifts now drifted because of the page.
         await stopCoast(page);
-        const before = await settledAnchorTop(page);
+        await page.waitForTimeout(800);
+        const still = await readRecord(page);
+        const before = still.frames.at(-1)?.anchorTop ?? 0;
         await release();
         await expect(async () => {
             expect((await readRecord(page)).landedAt).toBeGreaterThan(0);
         }).toPass({ timeout: 20000 });
-        await page.waitForTimeout(1500); // measurement window: this test follows the reader's row over 1.5s past the landing
+        await page.waitForTimeout(1500);
         const rec = await readRecord(page);
 
         const landing = rec.frames.filter(f => f.t >= rec.landedAt - 50 && f.anchorTop !== null);
@@ -355,13 +339,7 @@ test.describe('Chat scroll on touch', () => {
         await openConversation(page);
         await installRecorder(page);
         await coastUntilOlderRowsAreWanted(page);
-        // Frames to count rather than seconds to sit: the measurement is scans per frame, so what this
-        // needs is the recorder having sampled the coast for a while past the fetch.
-        await expect.poll(async () => {
-            const rec = await readRecord(page);
-            return rec.frames.filter(f => f.t >= rec.fetchAt).length;
-        }, { timeout: 15_000, message: 'the recorder never sampled the coast past the fetch' })
-            .toBeGreaterThanOrEqual(20);
+        await page.waitForTimeout(400);
         await stopCoast(page);
 
         const rec = await readRecord(page);

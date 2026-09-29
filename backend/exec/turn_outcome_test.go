@@ -159,8 +159,6 @@ func TestExecuteTask_ToolCallLoopsBackWithoutUserInput(t *testing.T) {
 	}
 
 	// And after the text answer it settles: no third call, and the task is no longer running.
-	// The window a third call would arrive in — a settled turn issues none, and "no third call yet"
-	// needs the turn's own moment to have passed.
 	time.Sleep(500 * time.Millisecond)
 	if got := streamCalls.Load(); got != 2 {
 		t.Errorf("streaming LLM calls = %d after a text answer, want 2: a settled turn must wait for the user, not loop", got)

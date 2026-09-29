@@ -162,8 +162,6 @@ func TestHandleSend_DoubleSubmit_IsDeduped_AndLeavesReview(t *testing.T) {
 	if rec := sendUserMessage(t, te, projectID, taskID, "Yes"); rec.Code != http.StatusCreated {
 		t.Fatalf("send status = %d, want 201", rec.Code)
 	}
-	// The window in which a second row would be written: the assertion is that the duplicate send
-	// persisted nothing, and "nothing yet" is only evidence once a wrong turn has had its chance.
 	time.Sleep(100 * time.Millisecond) // allow any (incorrect) executor goroutine to start
 
 	if n := countUserMessages(t, te, taskID, threadID, "Yes"); n != 1 {

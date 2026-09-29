@@ -51,7 +51,6 @@ func bundledManifests(t *testing.T) map[string]*ExtensionManifest {
 }
 
 func TestBundledLSPManifests_Validate(t *testing.T) {
-	t.Parallel()
 	manifests := bundledManifests(t)
 
 	withDependencyCache := 0
@@ -87,7 +86,6 @@ func TestBundledLSPManifests_Validate(t *testing.T) {
 // tolerates packages it cannot resolve — the check passed with an empty cache and with a full one, so
 // it could never report anything. A check that cannot fail is not a gate.
 func TestBundledLSPManifests_CanActuallyFail(t *testing.T) {
-	t.Parallel()
 	for name, m := range bundledManifests(t) {
 		sb := lspSandboxFromManifest(m)
 		if sb == nil || sb.Environment == nil {
@@ -102,7 +100,6 @@ func TestBundledLSPManifests_CanActuallyFail(t *testing.T) {
 }
 
 func TestBundledLSPManifests_GateIsActionable(t *testing.T) {
-	t.Parallel()
 	for name, m := range bundledManifests(t) {
 		sb := lspSandboxFromManifest(m)
 		if sb == nil || sb.Environment == nil {
@@ -132,7 +129,6 @@ func TestBundledLSPManifests_GateIsActionable(t *testing.T) {
 // the other half: a bundled manifest is what every install gets, and a convention nobody wrote down is a
 // convention nobody can turn off.
 func TestBundledLSPManifests_DeclareWhatTheGrammarEngineNeeds(t *testing.T) {
-	t.Parallel()
 	declared := 0
 	for name, m := range bundledManifests(t) {
 		for profile, spec := range m.Capabilities.GetLSP().Syntax {

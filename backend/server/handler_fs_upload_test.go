@@ -77,7 +77,6 @@ func uploadProject(t *testing.T, id string) (*Server, string) {
 // TestFSUploadWritesFiles covers what the drop zone needs the endpoint to be:
 // binary-safe, able to create a directory tree, and unable to escape the project.
 func TestFSUploadWritesFiles(t *testing.T) {
-	t.Parallel()
 	s, dir := uploadProject(t, "upload-basic")
 
 	t.Run("a plain file lands byte-for-byte", func(t *testing.T) {
@@ -206,7 +205,6 @@ func TestFSUploadWritesFiles(t *testing.T) {
 // client-supplied path component, and every way out of the project must be refused
 // before anything is created.
 func TestFSUploadRejectsEscapes(t *testing.T) {
-	t.Parallel()
 	s, dir := uploadProject(t, "upload-escape")
 	outside := t.TempDir()
 
@@ -258,7 +256,6 @@ func TestFSUploadRejectsEscapes(t *testing.T) {
 // TestFSUploadAsksBeforeOverwriting: replacing a file is the user's decision, so the
 // default answer is 409 and the client only sends overwrite after the dialog.
 func TestFSUploadAsksBeforeOverwriting(t *testing.T) {
-	t.Parallel()
 	s, dir := uploadProject(t, "upload-overwrite")
 	target := filepath.Join(dir, "keep.txt")
 	if err := os.WriteFile(target, []byte("original"), 0755); err != nil {
@@ -309,7 +306,6 @@ func TestFSUploadAsksBeforeOverwriting(t *testing.T) {
 // TestFSUploadRefusesDirectoryNames: a directory is not an overwrite candidate, and
 // replacing one would hide whatever is inside it.
 func TestFSUploadRefusesDirectoryNames(t *testing.T) {
-	t.Parallel()
 	s, dir := uploadProject(t, "upload-dir")
 	if err := os.Mkdir(filepath.Join(dir, "src"), 0755); err != nil {
 		t.Fatal(err)
@@ -336,7 +332,6 @@ func TestFSUploadRefusesDirectoryNames(t *testing.T) {
 // TestFSUploadCapsFileSize proves the 20 MB limit is enforced on the wire rather
 // than trusted from the client's File.size.
 func TestFSUploadCapsFileSize(t *testing.T) {
-	t.Parallel()
 	s, dir := uploadProject(t, "upload-size")
 
 	chunk := make([]byte, 1<<20)
@@ -368,7 +363,6 @@ func TestFSUploadCapsFileSize(t *testing.T) {
 // TestFSUploadNeedsCSRF: the endpoint writes inside the project, so a cross-site
 // POST must not be able to plant a file there.
 func TestFSUploadNeedsCSRF(t *testing.T) {
-	t.Parallel()
 	s, dir := uploadProject(t, "upload-csrf")
 
 	var body bytes.Buffer
@@ -395,7 +389,6 @@ func TestFSUploadNeedsCSRF(t *testing.T) {
 // TestFSUploadRejectsSymlinkEscape holds the same line /api/fs/write holds: a link
 // planted inside the project must not turn an upload into a write outside it.
 func TestFSUploadRejectsSymlinkEscape(t *testing.T) {
-	t.Parallel()
 	s, dir := uploadProject(t, "upload-symlink")
 	outside := t.TempDir()
 	victim := filepath.Join(outside, "victim.txt")
@@ -430,7 +423,6 @@ func TestFSUploadRejectsSymlinkEscape(t *testing.T) {
 // directory must stay untouched — a drop in a task's file list is not a change to
 // the branch the project is on.
 func TestFSUploadIntoTaskWorktree(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	repo := t.TempDir()
 	const projID = "upload-worktree"

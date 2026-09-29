@@ -42,7 +42,6 @@ func seedThread(t *testing.T, s *Store, taskID, threadID string, count int) []st
 }
 
 func TestGetTaskMessagePageWalksTheThreadOnce(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	ids := seedThread(t, s, "task-1", "thread-1", 20)
 
@@ -87,7 +86,6 @@ func TestGetTaskMessagePageWalksTheThreadOnce(t *testing.T) {
 
 // Every window opens on an answer, never on a tool_call row whose assistant row it does not hold.
 func TestGetTaskMessagePageNeverOpensOnAToolCall(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	seedThread(t, s, "task-1", "thread-1", 21)
 
@@ -124,7 +122,6 @@ func TestGetTaskMessagePageNeverOpensOnAToolCall(t *testing.T) {
 // An answer holding more rows than the read's ceiling cannot be cut at an answer boundary. What this pins
 // is that every row is still handed over exactly once, with the answer's opening row on the next page.
 func TestGetTaskMessagePageCutsInsideAnAnswerLongerThanTheCeiling(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	if err := s.CreateProject(newProject("proj-1", "test", "/tmp/test")); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -185,7 +182,6 @@ func TestGetTaskMessagePageCutsInsideAnAnswerLongerThanTheCeiling(t *testing.T) 
 // A page is counted in answers: the newest five assistant rows and their tool calls, however many rows
 // that is, and the answers older than the fifth are one cursor away.
 func TestGetTaskMessagePageCountsAnswersNotRows(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	if err := s.CreateProject(newProject("proj-1", "test", "/tmp/test")); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -270,7 +266,6 @@ func TestGetTaskMessagePageCountsAnswersNotRows(t *testing.T) {
 }
 
 func TestGetTaskMessagePageRefusesACursorItDidNotIssue(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	seedThread(t, s, "task-1", "thread-1", 3)
 
@@ -284,7 +279,6 @@ func TestGetTaskMessagePageRefusesACursorItDidNotIssue(t *testing.T) {
 // Rows sharing one instant still hand over exactly once, and a window of two over a four-row turn still
 // opens on a row that starts an answer.
 func TestGetTaskMessagePageCutsATurnSharedAcrossOneInstant(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	if err := s.CreateProject(newProject("proj-1", "test", "/tmp/test")); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -334,7 +328,6 @@ func TestGetTaskMessagePageCutsATurnSharedAcrossOneInstant(t *testing.T) {
 
 // The plan is the claim: an index carries the order, so SQLite never sorts the thread to answer these.
 func TestConversationReadsDoNotSortInATempBTree(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	seedThread(t, s, "task-1", "thread-1", 30)
 
@@ -388,7 +381,6 @@ func explainPlan(t *testing.T, s *Store, query string, args ...any) string {
 
 // The composite indexes replace the single-column ones they cover.
 func TestConversationIndexesReplaceTheSingleColumnOnes(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	for _, name := range []string{"idx_task_messages_thread_time", "idx_task_messages_task_time"} {
 		if !hasIndex(t, s, name) {
@@ -428,7 +420,6 @@ func cursorOfRow(t *testing.T, s *Store, taskID, threadID, id string) string {
 }
 
 func TestGetTaskMessagePageStopsAtTheFloorItWasGiven(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	ids := seedThread(t, s, "task-1", "thread-1", 20)
 
@@ -456,7 +447,6 @@ func TestGetTaskMessagePageStopsAtTheFloorItWasGiven(t *testing.T) {
 }
 
 func TestGetTaskMessagePageIgnoresAFloorItNeverReaches(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	seedThread(t, s, "task-1", "thread-1", 20)
 
@@ -480,7 +470,6 @@ func TestGetTaskMessagePageIgnoresAFloorItNeverReaches(t *testing.T) {
 }
 
 func TestGetTaskMessagePagesToAFloorHandOverEveryRowOnce(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	ids := seedThread(t, s, "task-1", "thread-1", 20)
 	floor := cursorOfRow(t, s, "task-1", "thread-1", "msg-005")
@@ -524,7 +513,6 @@ func TestGetTaskMessagePagesToAFloorHandOverEveryRowOnce(t *testing.T) {
 
 // A span past the row ceiling is cut, and the next page picks up with the floor still set.
 func TestGetTaskMessagePagesToAFloorAcrossTheRowCeiling(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	if err := s.CreateProject(newProject("proj-1", "test", "/tmp/test")); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -571,7 +559,6 @@ func TestGetTaskMessagePagesToAFloorAcrossTheRowCeiling(t *testing.T) {
 }
 
 func TestGetTaskMessagePageRefusesAFloorItDidNotIssue(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	seedThread(t, s, "task-1", "thread-1", 3)
 

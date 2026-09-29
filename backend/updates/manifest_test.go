@@ -36,7 +36,6 @@ func manifestDoc(t *testing.T, fields map[string]any) []byte {
 const hosted = "https://getmike.dev/version"
 
 func TestParseManifestAcceptsAWellFormedIndex(t *testing.T) {
-	t.Parallel()
 	m, err := ParseManifest(manifestDoc(t, map[string]any{"latest": "v1.4.2"}), hosted)
 	if err != nil {
 		t.Fatalf("ParseManifest: %v", err)
@@ -61,7 +60,6 @@ func TestParseManifestAcceptsAWellFormedIndex(t *testing.T) {
 // Every refusal here is a manifest that would otherwise offer the wrong bytes: a schema this build does
 // not understand, a version that cannot be compared, or an archive from a host nobody chose.
 func TestParseManifestRefusals(t *testing.T) {
-	t.Parallel()
 	otherHost := map[string]any{
 		"assets": map[string]any{
 			"linux/amd64": map[string]any{
@@ -98,7 +96,6 @@ func TestParseManifestRefusals(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			var body []byte
 			if tc.name == "not JSON" {
 				body = []byte("[1,2,3]")
@@ -116,7 +113,6 @@ func TestParseManifestRefusals(t *testing.T) {
 	}
 
 	t.Run("an oversized body is refused before it is parsed", func(t *testing.T) {
-		t.Parallel()
 		pad := strings.Repeat("x", maxManifestBytes+1)
 		if _, err := ParseManifest([]byte(pad), hosted); err == nil || !strings.Contains(err.Error(), "over the") {
 			t.Fatalf("oversized manifest: %v", err)
@@ -124,7 +120,6 @@ func TestParseManifestRefusals(t *testing.T) {
 	})
 
 	t.Run("loopback matches loopback", func(t *testing.T) {
-		t.Parallel()
 		body := manifestDoc(t, map[string]any{
 			"assets": map[string]any{
 				"linux/amd64": map[string]any{
@@ -140,7 +135,6 @@ func TestParseManifestRefusals(t *testing.T) {
 }
 
 func TestCompareVersions(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		a, b    string
 		want    int
@@ -161,7 +155,6 @@ func TestCompareVersions(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.a+"_vs_"+tc.b, func(t *testing.T) {
-			t.Parallel()
 			got, err := CompareVersions(tc.a, tc.b)
 			if tc.wantErr {
 				if err == nil {
@@ -182,7 +175,6 @@ func TestCompareVersions(t *testing.T) {
 // "Cannot tell" is a third answer, and the dot and the buttons read it differently from both "current"
 // and "newer available".
 func TestKnownVersion(t *testing.T) {
-	t.Parallel()
 	for _, tc := range []struct {
 		value string
 		want  bool
@@ -204,10 +196,8 @@ func TestKnownVersion(t *testing.T) {
 }
 
 func TestNewRefusesAURLItCannotFetch(t *testing.T) {
-	t.Parallel()
 	for _, raw := range []string{"http://getmike.dev/version", "not a url", "https:///no-host"} {
 		t.Run(raw, func(t *testing.T) {
-			t.Parallel()
 			if _, err := New(Options{ManifestURL: raw, Version: "1.0.0"}); err == nil {
 				t.Fatalf("New accepted %q", raw)
 			} else if !strings.Contains(err.Error(), "manifest URL") {
@@ -216,7 +206,6 @@ func TestNewRefusesAURLItCannotFetch(t *testing.T) {
 		})
 	}
 	t.Run("the hosted default is what an empty decision means", func(t *testing.T) {
-		t.Parallel()
 		s, err := New(Options{Version: "1.0.0"})
 		if err != nil {
 			t.Fatalf("New: %v", err)
@@ -228,7 +217,6 @@ func TestNewRefusesAURLItCannotFetch(t *testing.T) {
 }
 
 func TestStatusAnswersWithoutACheck(t *testing.T) {
-	t.Parallel()
 	s, err := New(Options{Version: "1.4.0", InstallDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("New: %v", err)

@@ -13,7 +13,6 @@ import (
 // GET /api/fs/read applies, and the rule is the same: check the stat, then read.
 
 func TestHandleProjectDiffFileRefusesToReadAnOversizedWorkingTreeFile(t *testing.T) {
-	t.Parallel()
 	h, s, _, _ := newTestGitHandler(t)
 	projPath := t.TempDir()
 	initGitRepo(t, projPath)
@@ -47,7 +46,6 @@ func TestHandleProjectDiffFileRefusesToReadAnOversizedWorkingTreeFile(t *testing
 }
 
 func TestHandleProjectDiffFileStillReadsAFileWithinTheCap(t *testing.T) {
-	t.Parallel()
 	h, s, _, _ := newTestGitHandler(t)
 	projPath := t.TempDir()
 	initGitRepo(t, projPath)

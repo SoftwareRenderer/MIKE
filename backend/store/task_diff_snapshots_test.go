@@ -6,7 +6,6 @@ import (
 )
 
 func TestTaskDiffSnapshot_RoundTrip(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -44,7 +43,6 @@ func TestTaskDiffSnapshot_RoundTrip(t *testing.T) {
 }
 
 func TestTaskDiffSnapshot_GetMissing(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	got, err := s.GetTaskDiffSnapshot("nope")
 	if err != nil {
@@ -56,7 +54,6 @@ func TestTaskDiffSnapshot_GetMissing(t *testing.T) {
 }
 
 func TestTaskDiffSnapshot_UpsertReplaces(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -98,7 +95,6 @@ func TestTaskDiffSnapshot_UpsertReplaces(t *testing.T) {
 }
 
 func TestTaskDiffSnapshot_Delete(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -126,7 +122,6 @@ func TestTaskDiffSnapshot_Delete(t *testing.T) {
 }
 
 func TestTaskDiffSnapshot_CascadeOnTaskDelete(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {

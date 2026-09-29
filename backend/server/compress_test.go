@@ -15,7 +15,6 @@ import (
 )
 
 func TestSelectEncoding(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name     string
 		header   string
@@ -52,7 +51,6 @@ func TestSelectEncoding(t *testing.T) {
 // round trip, and a response claiming an encoding really is encoded). SSE, websocket
 // upgrades and the stacked middleware are separate mechanisms and keep their own tests.
 func TestCompressMiddleware_EncodingNegotiation(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name string
 		// acceptEncoding is sent verbatim; "" omits the header entirely.
@@ -104,7 +102,6 @@ func TestCompressMiddleware_EncodingNegotiation(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			const path = "/test/compress"
 			s := testServer(t)
 			s.mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
@@ -174,7 +171,6 @@ func mustRoundTrip(t *testing.T, encoding string, raw []byte, want string) {
 }
 
 func TestCompressMiddleware_WebSocketSkip(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	s.mux.HandleFunc("/test/ws", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -197,7 +193,6 @@ func TestCompressMiddleware_WebSocketSkip(t *testing.T) {
 }
 
 func TestCompressMiddleware_WithJSONResponse(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	// Simulate what JSONResponse does — large payload
 	largeData := make(map[string]string)
@@ -237,7 +232,6 @@ func TestCompressMiddleware_WithJSONResponse(t *testing.T) {
 }
 
 func TestCompressMiddleware_FullStack(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	largeBody := strings.Repeat("z", 2048)
 	s.mux.HandleFunc("/test/full", func(w http.ResponseWriter, r *http.Request) {
@@ -276,7 +270,6 @@ func TestCompressMiddleware_FullStack(t *testing.T) {
 }
 
 func TestCompressMiddleware_ContentLengthRemoved(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	largeBody := strings.Repeat("a", 2048)
 	s.mux.HandleFunc("/test/cl", func(w http.ResponseWriter, r *http.Request) {
@@ -306,7 +299,6 @@ func TestCompressMiddleware_ContentLengthRemoved(t *testing.T) {
 // already-compressed bytes, so holding one costs several times the file in memory for a body that
 // cannot shrink. This is what keeps a large binary response's own size cap the real bound.
 func TestGetImageResponseIsPassedThrough(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	chunk := bytes.Repeat([]byte{0x89}, 256<<10)
 	chunks := 8
@@ -367,7 +359,6 @@ func (w *chunkRecordingWriter) Flush() {}
 // --- ETag tests ---
 
 func TestETagGenerated(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	s.mux.HandleFunc("/test/etag", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("hello etag"))
@@ -394,7 +385,6 @@ func TestETagGenerated(t *testing.T) {
 }
 
 func TestETagIfNoneMatch304(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	body := []byte("conditional test")
 	s.mux.HandleFunc("/test/cond", func(w http.ResponseWriter, r *http.Request) {
@@ -431,7 +421,6 @@ func TestETagIfNoneMatch304(t *testing.T) {
 }
 
 func TestETagIfNoneMatchNoMatch(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	body := []byte("no match test")
 	s.mux.HandleFunc("/test/nomatch", func(w http.ResponseWriter, r *http.Request) {
@@ -457,7 +446,6 @@ func TestETagIfNoneMatchNoMatch(t *testing.T) {
 }
 
 func TestETagConsistentWithCompression(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	body := strings.Repeat("consistent etag test data ", 100)
 	s.mux.HandleFunc("/test/consistent", func(w http.ResponseWriter, r *http.Request) {
@@ -486,7 +474,6 @@ func TestETagConsistentWithCompression(t *testing.T) {
 }
 
 func TestETagSkippedForNonGET(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	s.mux.HandleFunc("/test/post", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("post response"))
@@ -504,7 +491,6 @@ func TestETagSkippedForNonGET(t *testing.T) {
 }
 
 func TestETagExistingSkipped(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	s.mux.HandleFunc("/test/existing", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("ETag", `"already-set"`)
@@ -523,7 +509,6 @@ func TestETagExistingSkipped(t *testing.T) {
 }
 
 func TestETag304Passthrough(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	s.mux.HandleFunc("/test/304", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotModified)
@@ -543,7 +528,6 @@ func TestETag304Passthrough(t *testing.T) {
 }
 
 func TestETagEmptyBody(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	s.mux.HandleFunc("/test/empty", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -568,7 +552,6 @@ func TestETagEmptyBody(t *testing.T) {
 }
 
 func TestETagWildcardIfNoneMatch(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	s.mux.HandleFunc("/test/wildcard", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("wildcard test"))
@@ -587,7 +570,6 @@ func TestETagWildcardIfNoneMatch(t *testing.T) {
 }
 
 func TestETagMultipleIfNoneMatch(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	body := []byte("multi etag test")
 	s.mux.HandleFunc("/test/multi", func(w http.ResponseWriter, r *http.Request) {
@@ -625,7 +607,6 @@ func TestETagMultipleIfNoneMatch(t *testing.T) {
 }
 
 func TestETagWithCompression304(t *testing.T) {
-	t.Parallel()
 	// Verify that a 304 response is not compressed (no body to compress)
 	s := testServer(t)
 	body := strings.Repeat("compressed 304 test ", 100)
@@ -662,7 +643,6 @@ func TestETagWithCompression304(t *testing.T) {
 }
 
 func TestComputeETag(t *testing.T) {
-	t.Parallel()
 	// Deterministic: same input always produces same ETag
 	body := []byte("deterministic test")
 	etag1 := computeETag(body)
@@ -680,7 +660,6 @@ func TestComputeETag(t *testing.T) {
 }
 
 func TestEtagMatches(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name        string
 		etag        string

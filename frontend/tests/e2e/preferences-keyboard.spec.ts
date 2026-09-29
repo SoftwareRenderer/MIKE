@@ -1,11 +1,11 @@
 import { test, expect, type Page } from '@playwright/test';
-import { apiPutConfig, apiGetConfig, waitForConfig, getProjectId, createTaskViaApi, waitForReaction } from './helpers';
+import { apiPutConfig, apiGetConfig, waitForConfig, getProjectId, createTaskViaApi } from './helpers';
 
 // Keyboard shortcut preferences (Settings → Preferences). The create-task
 // shortcut defaults to "C"; can be rebound, reset, or cleared. Bindings
 // persist server-side (keyboard_shortcuts in /api/config).
 //
-// Runs on a lane server (`ISOLATED_SPECS`): mutates server config via the UI Save flow.
+// Runs in the `isolated` project: mutates server config via the UI Save flow.
 
 const SETTINGS_BTN = '.icon-btn[aria-label="Settings"]';
 const PREFERENCES_TAB = 'button.tab-btn:has-text("Preferences")';
@@ -106,7 +106,7 @@ test.describe.serial('Keyboard shortcut preferences', () => {
 
         // The old key no longer triggers; the new one does
         await page.keyboard.press('c');
-        await waitForReaction(page); // the modal a live binding opens is in the DOM by the next paint
+        await page.waitForTimeout(300);
         await expect(page.locator(CREATE_MODAL)).not.toBeVisible();
 
         await page.keyboard.press('Shift+K');
@@ -151,7 +151,7 @@ test.describe.serial('Keyboard shortcut preferences', () => {
         await expect(page.locator(BOARD_BTN).locator('.key-hint')).not.toBeAttached();
         await expect(page.locator(BOARD_BTN)).toHaveAttribute('title', 'Create a new task');
         await page.keyboard.press('c');
-        await waitForReaction(page); // the modal a live binding opens is in the DOM by the next paint
+        await page.waitForTimeout(300);
         await expect(page.locator(CREATE_MODAL)).not.toBeVisible();
 
         // Restore the default for other suites
@@ -269,7 +269,7 @@ test.describe.serial('Keyboard shortcut preferences', () => {
         await page.locator(SETTINGS_BTN).first().click();
         await page.locator(PREFERENCES_TAB).click();
         await page.keyboard.press('c');
-        await waitForReaction(page); // the modal a live binding opens is in the DOM by the next paint
+        await page.waitForTimeout(300);
         await expect(page.locator(CREATE_MODAL)).not.toBeVisible();
 
         // Close settings via Cancel (no changes)
@@ -322,7 +322,7 @@ test.describe.serial('Keyboard shortcut preferences', () => {
         await waitForConfig(page, c => c.keyboard_shortcuts?.open_terminal === 'shift+alt+t');
 
         await page.keyboard.press('Control+`');
-        await waitForReaction(page); // the panel a live binding opens is in the DOM by the next paint
+        await page.waitForTimeout(300);
         await expect(page.locator('.terminal-panel')).not.toBeVisible();
 
         await page.keyboard.press('Alt+Shift+T');
@@ -352,7 +352,7 @@ test.describe.serial('Keyboard shortcut preferences', () => {
 
         // Disabled: the default combo does nothing
         await page.keyboard.press('Control+`');
-        await waitForReaction(page); // the panel a live binding opens is in the DOM by the next paint
+        await page.waitForTimeout(300);
         await expect(page.locator('.terminal-panel')).not.toBeVisible();
 
         // Restore the default for other suites
@@ -402,7 +402,7 @@ test.describe.serial('Keyboard shortcut preferences', () => {
         await page.keyboard.press('Control+`');
         await expect(page.locator(TERMINAL_PANEL)).toBeVisible({ timeout: 10000 });
         await page.keyboard.press('Control+ArrowUp');
-        await waitForReaction(page); // a binding that left fullscreen has unstyled it by the next paint
+        await page.waitForTimeout(300);
         await expect(page.locator(TERMINAL_PANEL)).not.toHaveClass(/fullscreen/);
 
         await page.keyboard.press('Shift+Alt+F');

@@ -14,14 +14,6 @@
   "history": 0,
   "longsent": 0
  },
- "docs/adr/0002-check-lanes-run-in-parallel.md": {
-  "history": 0,
-  "longsent": 0
- },
- "docs/adr/0003-isolated-lane-shards.md": {
-  "history": 0,
-  "longsent": 0
- },
  "docs/adr/README.md": {
   "history": 0,
   "longsent": 0

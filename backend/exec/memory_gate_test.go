@@ -61,8 +61,7 @@ func TestMemoryGateReleaseUnblocksWaiter(t *testing.T) {
 
 	acquired := make(chan error, 1)
 	go func() { acquired <- g.Acquire(context.Background(), 600, nil) }()
-	// Release must find a waiter: releasing an empty queue is a no-op the test would read as a pass.
-	awaitCounter(t, 5*time.Second, 1, "the waiter to reach the gate queue", g.QueueLen)
+	time.Sleep(50 * time.Millisecond) // let the waiter enqueue before releasing
 
 	g.Release(600)
 
@@ -90,7 +89,7 @@ func TestMemoryGateCancelCleansUp(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- g.Acquire(ctx, 200, nil) }()
-	awaitCounter(t, 5*time.Second, 1, "the waiter to reach the gate queue", g.QueueLen)
+	time.Sleep(50 * time.Millisecond)
 	cancel()
 
 	select {

@@ -18,7 +18,6 @@ func gitTrim(t *testing.T, dir string, args ...string) string {
 // A file restore must not rewrite history. The old path ended in `git reset --hard <snapshot>` whenever
 // the stash patch failed to apply — and a patch is exactly what git cannot render for a binary file.
 func TestResetWorktreeTo_BinarySnapshotKeepsBranchAndBytes(t *testing.T) {
-	t.Parallel()
 	repoDir, taskID, _, _, wm := setupTestRepo(t)
 	branch := "task/" + taskID
 	if _, _, err := wm.CreateWorktree("test-project", taskID, branch, ""); err != nil {
@@ -90,7 +89,6 @@ func TestResetWorktreeTo_BinarySnapshotKeepsBranchAndBytes(t *testing.T) {
 // An unresolvable snapshot must be refused before anything is discarded: the old `reset --hard` fallback
 // failed on a bad hash after the worktree had already been cleaned.
 func TestResetWorktreeTo_UnknownSnapshotRestoresNothing(t *testing.T) {
-	t.Parallel()
 	_, taskID, _, _, wm := setupTestRepo(t)
 	branch := "task/" + taskID
 	if _, _, err := wm.CreateWorktree("test-project", taskID, branch, ""); err != nil {
@@ -126,7 +124,6 @@ func TestResetWorktreeTo_UnknownSnapshotRestoresNothing(t *testing.T) {
 // Old rows store the hash of a `git stash create` commit. That is still a commit whose tree is the working
 // state, so the tree restore reads them with no migration — and HEAD still has no reason to move.
 func TestResetWorktreeTo_LegacyStashCommitRestoresFromItsTree(t *testing.T) {
-	t.Parallel()
 	_, taskID, _, _, wm := setupTestRepo(t)
 	branch := "task/" + taskID
 	if _, _, err := wm.CreateWorktree("test-project", taskID, branch, ""); err != nil {

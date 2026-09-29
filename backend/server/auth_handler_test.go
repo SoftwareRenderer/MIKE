@@ -7,7 +7,6 @@ import (
 )
 
 func TestAuthLoginValidPassword(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 
 	req := testRequest(http.MethodPost, "/api/auth/login", map[string]string{
@@ -51,7 +50,6 @@ func TestAuthLoginValidPassword(t *testing.T) {
 // caller gets back. Each row gets its own server so the login rate-limit budget (per IP
 // per minute) can't be exhausted by an earlier row and report a 429 as a wrong verdict.
 func TestAuthRequestRejections(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name   string
 		method string
@@ -102,7 +100,6 @@ func TestAuthRequestRejections(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			s := testServer(t)
 			rr := testResponse(t, s, testRequest(tc.method, tc.path, tc.body))
 			if rr.Code != tc.want {
@@ -113,7 +110,6 @@ func TestAuthRequestRejections(t *testing.T) {
 }
 
 func TestAuthSessionNotAuthenticated(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 
 	req := testRequest(http.MethodGet, "/api/auth/session", nil)
@@ -129,7 +125,6 @@ func TestAuthSessionNotAuthenticated(t *testing.T) {
 	}
 }
 func TestAuthSessionAuthenticated(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 
 	loginReq := testRequest(http.MethodPost, "/api/auth/login", map[string]string{
@@ -167,7 +162,6 @@ func TestAuthSessionAuthenticated(t *testing.T) {
 }
 
 func TestAuthLogoutSuccess(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 
 	loginReq := testRequest(http.MethodPost, "/api/auth/login", map[string]string{

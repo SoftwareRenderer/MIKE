@@ -16,7 +16,6 @@ import (
 const probeResultText = "the agent's whole reported result, sentence after sentence"
 
 func TestBoardRowDropsResultTextAndOneTaskReadKeepsIt(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "bandwidth row")

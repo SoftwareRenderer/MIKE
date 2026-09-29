@@ -254,7 +254,6 @@ func createTestTask(t *testing.T, s *Server, projectID string, prompt string) st
 }
 
 func TestHandleFSWrite(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 
 	tmpDir := t.TempDir()
@@ -368,7 +367,6 @@ func TestHandleFSWrite(t *testing.T) {
 }
 
 func TestHandleFSPathValidation(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 
 	tmpDir := t.TempDir()
@@ -464,7 +462,6 @@ func TestHandleFSPathValidation(t *testing.T) {
 }
 
 func TestHandleFSReadGutterMarkers(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 
 	tmpDir := t.TempDir()
@@ -584,7 +581,6 @@ func TestHandleFSReadGutterMarkers(t *testing.T) {
 }
 
 func TestHandleFSSearch(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 
@@ -871,8 +867,6 @@ func TestHandleFSSearch(t *testing.T) {
 }
 
 func TestGitIdentityAvailable(t *testing.T) {
-	// Serial: os.Setenv on GIT_AUTHOR_*/GIT_COMMITTER_* is the process environment, and the fallback
-	// rows read the machine’s own git config.
 	saveEnv := func(keys ...string) map[string]string {
 		orig := make(map[string]string)
 		for _, k := range keys {
@@ -980,7 +974,6 @@ func TestGitIdentityAvailable(t *testing.T) {
 }
 
 func TestHandleFSInitGit_EnvVars(t *testing.T) {
-	// Serial for the reason at TestGitIdentityAvailable.
 	s := testServer(t)
 
 	gitEnvKeys := []string{
@@ -1084,7 +1077,6 @@ func TestHandleFSInitGit_EnvVars(t *testing.T) {
 }
 
 func TestHandleStatus_IncludesAuthorInfo(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 
 	tmpDir := t.TempDir()
@@ -1129,7 +1121,6 @@ func TestHandleStatus_IncludesAuthorInfo(t *testing.T) {
 // TestDoneTaskDiffReturnsCommittedDiff verifies that the diff API for a done task
 // returns the committed diff (BaseCommit..BranchTip) instead of a working-tree diff.
 func TestDoneTaskDiffReturnsCommittedDiff(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 
 	dir := t.TempDir()
@@ -1203,7 +1194,6 @@ func TestDoneTaskDiffReturnsCommittedDiff(t *testing.T) {
 // snapshot on subsequent fetches — even when git is no longer usable
 // (e.g. the repo or worktree is gone).
 func TestDoneTaskDiffServedFromSnapshot(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 
 	dir := t.TempDir()
@@ -1284,7 +1274,6 @@ func TestDoneTaskDiffServedFromSnapshot(t *testing.T) {
 // (untruncated) requests and custom ref comparisons still use the live git
 // path and never serve the truncated snapshot.
 func TestDoneTaskDiffSnapshotBypassedForFullAndCustomRefs(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 
 	dir := t.TempDir()
@@ -1372,7 +1361,6 @@ func TestDoneTaskDiffSnapshotBypassedForFullAndCustomRefs(t *testing.T) {
 // TestSandboxDisableBlockedWithoutDangerZone verifies that disabling sandbox
 // returns 403 Forbidden when DANGER_ZONE is not set to "1".
 func TestSandboxDisableBlockedWithoutDangerZone(t *testing.T) {
-	t.Parallel()
 	// Without the grant, switching a project to unsandboxed is refused. The grant is the resolved
 	// DANGER_ZONE decision the server was built with, so this is the process being pinned.
 	s := testServerWith(t, func(c *startup.Config) { c.DangerZone = false })
@@ -1416,7 +1404,6 @@ func TestSandboxDisableBlockedWithoutDangerZone(t *testing.T) {
 // TestSandboxDisableAllowedWithDangerZone verifies that disabling sandbox
 // succeeds when DANGER_ZONE is set to "1".
 func TestSandboxDisableAllowedWithDangerZone(t *testing.T) {
-	t.Parallel()
 	// The grant, stated as the decision the server was built with rather than as a variable this
 	// process happens to carry.
 	s := testServerWith(t, func(c *startup.Config) { c.DangerZone = true })
@@ -1459,7 +1446,6 @@ func TestSandboxDisableAllowedWithDangerZone(t *testing.T) {
 // TestSandboxCreateDisabledBlockedWithoutDangerZone verifies that creating a
 // project with sandbox disabled returns 403 when DANGER_ZONE is not set.
 func TestSandboxCreateDisabledBlockedWithoutDangerZone(t *testing.T) {
-	t.Parallel()
 	// Creating a project with sandboxing disabled is refused without the grant.
 	s := testServerWith(t, func(c *startup.Config) { c.DangerZone = false })
 
@@ -1516,7 +1502,6 @@ func join(parts ...string) string {
 }
 
 func TestRedirectHTTPSMiddleware_IgnoresXForwardedProtoByDefault(t *testing.T) {
-	t.Parallel()
 	// No proxy trust: a client-written X-Forwarded-Proto is not evidence.
 	s := &Server{tlsConfig: &tls.Config{CertFile: "cert", KeyFile: "key"}}
 	var passed bool
@@ -1541,7 +1526,6 @@ func TestRedirectHTTPSMiddleware_IgnoresXForwardedProtoByDefault(t *testing.T) {
 }
 
 func TestRedirectHTTPSMiddleware_TrustsXForwardedProtoWhenProxyEnabled(t *testing.T) {
-	t.Parallel()
 	// The resolved MIKE_TRUST_PROXY decision is a field, not an environment lookup.
 	s := &Server{tlsConfig: &tls.Config{CertFile: "cert", KeyFile: "key"}, settings: startup.Config{TrustProxy: true}}
 	var passed bool

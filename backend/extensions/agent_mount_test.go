@@ -58,7 +58,6 @@ func sendAgentMount(t *testing.T, h *ExtensionHandler, id, body string) *httptes
 }
 
 func TestValidateAgentMountGrant(t *testing.T) {
-	t.Parallel()
 	root := t.TempDir()
 	existing := filepath.Join(root, ".pi", "agent")
 	if err := os.MkdirAll(existing, 0o755); err != nil {
@@ -98,7 +97,6 @@ func TestValidateAgentMountGrant(t *testing.T) {
 	}
 	for _, tc := range accepted {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			got, err := ValidateAgentMountGrant(tc.in)
 			if err != nil {
 				t.Fatalf("refused a directory of the user's own: %v", err)
@@ -130,7 +128,6 @@ func TestValidateAgentMountGrant(t *testing.T) {
 	}
 	for _, tc := range refused {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			if got, err := ValidateAgentMountGrant(tc.in); err == nil {
 				t.Fatalf("accepted %+v", got)
 			} else if !strings.Contains(err.Error(), tc.want) {
@@ -141,7 +138,6 @@ func TestValidateAgentMountGrant(t *testing.T) {
 }
 
 func TestValidateAgentMountGrant_ExpandsHomeAndStoresTheTarget(t *testing.T) {
-	t.Parallel()
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		t.Skip("no home directory to expand against")
@@ -176,7 +172,6 @@ func TestValidateAgentMountGrant_ExpandsHomeAndStoresTheTarget(t *testing.T) {
 }
 
 func TestHandleSetAgentMount_GrantsAndRevokes(t *testing.T) {
-	t.Parallel()
 	h, store := testHandlerWithStore(t)
 	ext := agentExtWithMount(t, store)
 	dir := t.TempDir()
@@ -221,7 +216,6 @@ func TestHandleSetAgentMount_GrantsAndRevokes(t *testing.T) {
 }
 
 func TestHandleSetAgentMount_RefusesWithoutWriting(t *testing.T) {
-	t.Parallel()
 	h, store := testHandlerWithStore(t)
 	ext := agentExtWithMount(t, store)
 	dir := t.TempDir()
@@ -260,7 +254,6 @@ func TestHandleSetAgentMount_RefusesWithoutWriting(t *testing.T) {
 // TestHandleUpdate_CannotWriteTheMountGrant: a host folder accepted through the ordinary config form would
 // miss the checks above and still reach a task container.
 func TestHandleUpdate_CannotWriteTheMountGrant(t *testing.T) {
-	t.Parallel()
 	h, store := testHandlerWithStore(t)
 	ext := agentExtWithMount(t, store)
 
@@ -291,7 +284,6 @@ func TestHandleUpdate_CannotWriteTheMountGrant(t *testing.T) {
 }
 
 func TestHandleSetAgentMount_AbsentKeyIsNotARevoke(t *testing.T) {
-	t.Parallel()
 	h, store := testHandlerWithStore(t)
 	ext := agentExtWithMount(t, store)
 	dir := t.TempDir()
@@ -313,7 +305,6 @@ func TestHandleSetAgentMount_AbsentKeyIsNotARevoke(t *testing.T) {
 // placeholders, so the copy a browser sees has to name the real folder while the saved record keeps the
 // placeholder.
 func TestResolvedSandboxManifest_ServesAReadableProposal(t *testing.T) {
-	t.Parallel()
 	manifest := ExtensionManifest{ConfigSchema: &ConfigSchema{Properties: []SchemaProp{{
 		Key:     "sandbox_mount",
 		Type:    "mount",
@@ -352,7 +343,6 @@ func TestResolvedSandboxManifest_ServesAReadableProposal(t *testing.T) {
 // TestGrantShapeWording: a refusal about a folder to mount talks about mounting, not about a dependency
 // folder.
 func TestGrantShapeWording(t *testing.T) {
-	t.Parallel()
 	homes := []string{"/home/dev"}
 	err := checkGrantShape("/home/dev/.ssh", homes, agentMountKind)
 	if err == nil {

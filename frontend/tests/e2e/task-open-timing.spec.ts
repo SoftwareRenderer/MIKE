@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { isolatedProject, gotoProject, getProjectId, csrfFetch, waitForStored } from './helpers';
+import { isolatedProject, gotoProject, getProjectId, csrfFetch } from './helpers';
 
 /**
  * Measurement, not a gate: where a task open spends the time between the navigation and the first painted
@@ -428,9 +428,8 @@ test.describe('Where a task open spends its time', () => {
     expect(counts!.start, 'the counts read is behind the board it does not need')
       .toBeLessThanOrEqual(board!.start + 5);
 
-    // Second open of the same task: IndexedDB now holds the window this read wrote — so wait for the row.
-    await waitForStored<any>(page, 'board-cache', `messages:${projectId}:${taskId}`,
-      (entry) => Array.isArray(entry?.data?.messages) && entry.data.messages.length > 0);
+    // Second open of the same task: IndexedDB now holds the window this read wrote.
+    await page.waitForTimeout(500);
     await gotoProject(page);
     await page.waitForSelector('.project-item', { timeout: 10000 });
     const warm = await openTask(page, projectId, taskId);

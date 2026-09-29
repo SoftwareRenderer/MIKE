@@ -54,7 +54,6 @@ func dbBytes(t *testing.T, s *Store, dbPath string) []byte {
 }
 
 func TestSessionCreateAndGet(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	ctx := context.Background()
 
@@ -88,7 +87,6 @@ func TestSessionCreateAndGet(t *testing.T) {
 // token never reaches the file, and the stored digest is not itself a usable
 // credential (a stolen database cannot be replayed).
 func TestSessionStoresHashOnly(t *testing.T) {
-	t.Parallel()
 	s, dbPath := newStoreAt(t)
 	ctx := context.Background()
 
@@ -143,7 +141,6 @@ func TestSessionStoresHashOnly(t *testing.T) {
 }
 
 func TestSessionGetNotFound(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	ctx := context.Background()
 
@@ -157,7 +154,6 @@ func TestSessionGetNotFound(t *testing.T) {
 // older build (plaintext token, no hash) keeps working through its original
 // token, and its plaintext is wiped from the database file.
 func TestSessionLegacyBackfill(t *testing.T) {
-	t.Parallel()
 	s, dbPath := newStoreAt(t)
 	ctx := context.Background()
 
@@ -238,7 +234,6 @@ func TestSessionLegacyBackfill(t *testing.T) {
 // TestSessionLegacyBackfillKeepsUniqueness checks that neutralising the token
 // column for several legacy rows at once cannot collide on the UNIQUE index.
 func TestSessionLegacyBackfillKeepsUniqueness(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	ctx := context.Background()
 
@@ -265,7 +260,6 @@ func TestSessionLegacyBackfillKeepsUniqueness(t *testing.T) {
 }
 
 func TestSessionDelete(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	ctx := context.Background()
 
@@ -284,7 +278,6 @@ func TestSessionDelete(t *testing.T) {
 }
 
 func TestSessionDeleteExpired(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	ctx := context.Background()
 
@@ -315,7 +308,6 @@ func TestSessionDeleteExpired(t *testing.T) {
 }
 
 func TestSessionUniqueToken(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	ctx := context.Background()
 
@@ -335,7 +327,6 @@ func TestSessionUniqueToken(t *testing.T) {
 }
 
 func TestSessionLastSeenThrottle(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	ctx := context.Background()
 
@@ -378,7 +369,6 @@ func TestSessionLastSeenThrottle(t *testing.T) {
 }
 
 func TestSessionListAndDeleteByID(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	ctx := context.Background()
 

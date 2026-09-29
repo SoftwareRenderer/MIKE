@@ -29,7 +29,6 @@ func peakFixture(t *testing.T) (*store.Store, *types.Task) {
 }
 
 func TestSandboxMemoryPeakSinkRecordsTheLastRun(t *testing.T) {
-	t.Parallel()
 	st, task := peakFixture(t)
 	sink := sandboxMemoryPeakSink(st)
 
@@ -54,7 +53,6 @@ func TestSandboxMemoryPeakSinkRecordsTheLastRun(t *testing.T) {
 }
 
 func TestSandboxMemoryPeakSinkIgnoresContainersThatNameNoTask(t *testing.T) {
-	t.Parallel()
 	st, task := peakFixture(t)
 	sink := sandboxMemoryPeakSink(st)
 
@@ -70,7 +68,6 @@ func TestSandboxMemoryPeakSinkIgnoresContainersThatNameNoTask(t *testing.T) {
 }
 
 func TestTaskPayloadCarriesTheRecordedPeak(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	st := s.store
 
@@ -116,8 +113,6 @@ func TestTaskPayloadCarriesTheRecordedPeak(t *testing.T) {
 }
 
 func TestSandboxMemoryPeakSinkLogsAFailedWrite(t *testing.T) {
-	// Serial: logging.TestSink re-points the process-wide logger, so a concurrent test’s lines would
-	// land in this buffer.
 	logs, restore := logging.TestSink()
 	defer restore()
 

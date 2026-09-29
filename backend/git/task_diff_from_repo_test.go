@@ -52,7 +52,6 @@ func newBareDiffTestRepo(t *testing.T) (string, *WorktreeManager, func() string)
 }
 
 func TestTaskDiffFromRepo_NormalDiff(t *testing.T) {
-	t.Parallel()
 	repoDir, wm, head := newBareDiffTestRepo(t)
 	base := head()
 
@@ -91,7 +90,6 @@ func TestTaskDiffFromRepo_NormalDiff(t *testing.T) {
 }
 
 func TestTaskDiffFromRepo_EmptyDiff(t *testing.T) {
-	t.Parallel()
 	repoDir, wm, head := newBareDiffTestRepo(t)
 	sha := head()
 
@@ -111,7 +109,6 @@ func TestTaskDiffFromRepo_EmptyDiff(t *testing.T) {
 }
 
 func TestTaskDiffFromRepo_BinaryFile(t *testing.T) {
-	t.Parallel()
 	repoDir, wm, head := newBareDiffTestRepo(t)
 	base := head()
 
@@ -140,7 +137,6 @@ func TestTaskDiffFromRepo_BinaryFile(t *testing.T) {
 }
 
 func TestTaskDiffFromRepo_TruncatesLargeDiff(t *testing.T) {
-	t.Parallel()
 	repoDir, wm, head := newBareDiffTestRepo(t)
 	base := head()
 
@@ -182,7 +178,6 @@ func TestTaskDiffFromRepo_TruncatesLargeDiff(t *testing.T) {
 }
 
 func TestTaskDiffFromRepo_InvalidArgs(t *testing.T) {
-	t.Parallel()
 	repoDir, wm, _ := newBareDiffTestRepo(t)
 	if _, err := wm.TaskDiffFromRepo("", "abc", "def", false); err == nil {
 		t.Fatal("expected error for empty repoPath")

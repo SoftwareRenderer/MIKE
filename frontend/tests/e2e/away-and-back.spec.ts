@@ -204,9 +204,9 @@ test.describe('A call whose announcement never reaches the screen', () => {
 
     // Past the replay: a running frame reaching a screen that already read the rows used to delete the
     // entry it read, and nothing re-added it — the call ran to its end with no card at all.
-    await expect
-      .poll(() => page.evaluate(() => (window as any).__lostAnnouncements as number),
-        { timeout: 30_000, message: 'no tool_call frame was ever dropped at this screen' })
+    await page.waitForTimeout(5000);
+    expect(await page.evaluate(() => (window as any).__lostAnnouncements),
+      'no tool_call frame was lost, so this run never tested the rows as the only evidence')
       .toBeGreaterThan(0);
     await expect(page.locator(CARD).filter({ hasText: LONG_RUNNING_OUTPUT }).first()).toBeVisible({ timeout: 60_000 });
   });

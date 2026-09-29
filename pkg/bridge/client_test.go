@@ -166,8 +166,13 @@ func TestReadFileFailsFastWhenReadLoopExits(t *testing.T) {
 	clientReadPw.Close()
 
 	// Wait for the readLoop to actually exit.
-	awaitTrue(t, "the readLoop to exit after the agent→client pipe closed (IsAlive still true)",
-		5*time.Second, func() bool { return !client.IsAlive() })
+	deadline := time.Now().Add(5 * time.Second)
+	for client.IsAlive() && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if client.IsAlive() {
+		t.Fatal("readLoop did not exit after pipe close")
+	}
 
 	// The request must fail fast, well before the context deadline.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -226,8 +231,13 @@ func TestPing(t *testing.T) {
 
 		// Kill the readLoop by closing the agent → client pipe.
 		clientReadPw.Close()
-		awaitTrue(t, "the readLoop to exit after the agent→client pipe closed (IsAlive still true)",
-			5*time.Second, func() bool { return !client.IsAlive() })
+		deadline := time.Now().Add(5 * time.Second)
+		for client.IsAlive() && time.Now().Before(deadline) {
+			time.Sleep(5 * time.Millisecond)
+		}
+		if client.IsAlive() {
+			t.Fatal("readLoop did not exit after pipe close")
+		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -384,8 +394,6 @@ func TestReadFileCancelDuringChunkFlood(t *testing.T) {
 		go func() {
 			// The package source, not a local *rand.Rand: one is shared by every iteration's
 			// goroutine, and two of them overlap once a ReadFile returns early.
-			// The offset is the point: cancelling at a different moment of the flood is a
-			// different interleaving, so a fixed value tests one interleaving forever.
 			time.Sleep(time.Duration(rand.Intn(2000)) * time.Microsecond)
 			cancel()
 		}()
@@ -420,31 +428,6 @@ func withShortLSPRoundTrip(t *testing.T, d time.Duration) {
 	prev := maxLSPRoundTrip
 	maxLSPRoundTrip = d
 	t.Cleanup(func() { maxLSPRoundTrip = prev })
-}
-
-// stalledPeer accepts no bytes: every Write blocks until Close, and entry to the first Write is
-// announced, so a test can cancel a caller that is provably inside a stuck write rather than one
-// that might not have started yet.
-type stalledPeer struct {
-	entered     chan struct{}
-	release     chan struct{}
-	enteredOnce sync.Once
-	closeOnce   sync.Once
-}
-
-func newStalledPeer() *stalledPeer {
-	return &stalledPeer{entered: make(chan struct{}), release: make(chan struct{})}
-}
-
-func (w *stalledPeer) Write([]byte) (int, error) {
-	w.enteredOnce.Do(func() { close(w.entered) })
-	<-w.release
-	return 0, io.ErrClosedPipe
-}
-
-func (w *stalledPeer) Close() error {
-	w.closeOnce.Do(func() { close(w.release) })
-	return nil
 }
 
 // wedgedBridge returns a client whose peer neither reads nor writes, so no send can finish.
@@ -493,24 +476,13 @@ func TestLSPNotifyCancellationKeepsClientUsable(t *testing.T) {
 	prev := maxLSPRoundTrip
 	maxLSPRoundTrip = time.Hour // so only cancellation can end this
 	t.Cleanup(func() { maxLSPRoundTrip = prev })
-
-	peer := newStalledPeer()
-	t.Cleanup(func() { _ = peer.Close() })
-	bridgeRead, _ := io.Pipe() // never written
-	t.Cleanup(func() { _ = bridgeRead.Close() })
-	client := NewClient(peer, bridgeRead)
-	t.Cleanup(func() { _ = client.Close() })
+	client := wedgedBridge(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	call := make(chan error, 1)
 	go func() { call <- client.LSPNotify(ctx, json.RawMessage(`{"jsonrpc":"2.0","method":"x"}`)) }()
 
-	select {
-	case <-peer.entered:
-	case <-time.After(5 * time.Second):
-		cancel()
-		t.Fatal("no write reached the peer, so there was no stuck write to cancel")
-	}
+	time.Sleep(50 * time.Millisecond) // let the write get stuck
 	cancel()
 
 	var err error

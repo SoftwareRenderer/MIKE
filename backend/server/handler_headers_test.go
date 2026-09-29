@@ -17,7 +17,6 @@ import (
 // "encrypted" — so the answer comes from the request, and a boot-time answer would be wrong for
 // one of the two deployments the same binary serves.
 func TestSessionCookieSecureFlag(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name       string
 		tls        bool // the request arrived over TLS terminated here
@@ -58,7 +57,6 @@ func TestSessionCookieSecureFlag(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			// Proxy trust is the resolved decision the server was built with, so the case says which
 			// process it is pretending to have booted rather than editing this one.
 			s := testServerWith(t, func(c *startup.Config) { c.TrustProxy = tc.trustProxy })
@@ -115,7 +113,6 @@ func TestSessionCookieSecureFlag(t *testing.T) {
 // carry Cross-Origin-Resource-Policy: an opaque-origin frame cannot fetch a subresource marked
 // same-origin, so marking one of them switches that extension or preview off.
 func TestIsolationHeaders(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 
 	cases := []struct {
@@ -202,7 +199,6 @@ func TestIsolationHeaders(t *testing.T) {
 // revalidation at all. A 304 that loses either header leaves the client holding an answer whose
 // lifetime it cannot tell.
 func TestExtensionListsAreStoredThenRevalidated(t *testing.T) {
-	t.Parallel()
 	indexPath := filepath.Join(t.TempDir(), "registry.json")
 	if err := os.WriteFile(indexPath, []byte(`[{"name":"gopls","version":"1.0.0","type":"lsp","display_name":"gopls"}]`), 0o644); err != nil {
 		t.Fatalf("write registry index: %v", err)

@@ -10,7 +10,6 @@ import (
 )
 
 func TestTaskWordsCount(t *testing.T) {
-	t.Parallel()
 	expected := 256
 	if len(taskWords) != expected {
 		t.Errorf("expected %d words, got %d", expected, len(taskWords))
@@ -18,7 +17,6 @@ func TestTaskWordsCount(t *testing.T) {
 }
 
 func TestTaskWordsNoDuplicates(t *testing.T) {
-	t.Parallel()
 	seen := make(map[string]int, len(taskWords))
 	for _, w := range taskWords {
 		seen[w]++
@@ -40,7 +38,6 @@ func TestTaskWordsNoDuplicates(t *testing.T) {
 // that is empty or carries uppercase (or anything else outside [a-z]) is a bug in the
 // dictionary rather than in the generator.
 func TestTaskWordsAreUsableInIDParts(t *testing.T) {
-	t.Parallel()
 	for _, w := range taskWords {
 		if w == "" {
 			t.Error("found empty string in taskWords")
@@ -55,7 +52,6 @@ func TestTaskWordsAreUsableInIDParts(t *testing.T) {
 // surface in URLs, git branch names and worktree paths, so they must not come
 // from the clock-seeded math/rand.
 func TestIDGenerationUsesCryptoRand(t *testing.T) {
-	t.Parallel()
 	src, err := os.ReadFile("idgen.go")
 	if err != nil {
 		t.Fatalf("read idgen.go: %v", err)
@@ -72,7 +68,6 @@ func TestIDGenerationUsesCryptoRand(t *testing.T) {
 // [a-z]+-(...)+ pattern, and dictionary membership — 500 draws each rather than the
 // single draw the removed per-generator tests used, which could only ever pass.
 func TestGenerateTaskIDFormat(t *testing.T) {
-	t.Parallel()
 	taskIDPattern := regexp.MustCompile(`^[a-z]+-[a-z]+-[a-z]+$`)
 	threadIDPattern := regexp.MustCompile(`^[a-z]+-[a-z]+$`)
 
@@ -104,7 +99,6 @@ func TestGenerateTaskIDFormat(t *testing.T) {
 // (≈0.8 expected over 5000 draws), but mass duplication can only come from a
 // weak or repeatedly re-seeded source.
 func TestGenerateTaskIDUniqueness(t *testing.T) {
-	t.Parallel()
 	const draws = 5000
 	seen := make(map[string]bool, draws)
 	firstWords := make(map[string]bool, len(taskWords))
@@ -127,7 +121,6 @@ func TestGenerateTaskIDUniqueness(t *testing.T) {
 }
 
 func TestGenerateThreadIDUniqueness(t *testing.T) {
-	t.Parallel()
 	const draws = 2000
 	seen := make(map[string]bool, draws)
 	dup := 0

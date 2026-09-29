@@ -50,7 +50,6 @@ func seedTaskTree(t *testing.T, s *store.Store, projectID string) (root, child, 
 // Naming only the roots is complete only while a parent is always one of these rows. It is:
 // parent_task_id is a foreign key.
 func TestATaskCannotNameAParentThatIsAbsent(t *testing.T) {
-	t.Parallel()
 	_, projID, s := testProjectHandlerWithStore(t)
 	err := s.CreateTask(&types.Task{
 		ID: "orphan-task", ProjectID: projID, Title: "orphan",
@@ -62,7 +61,6 @@ func TestATaskCannotNameAParentThatIsAbsent(t *testing.T) {
 }
 
 func TestProjectDeleteNamesOnlyTheRootTasks(t *testing.T) {
-	t.Parallel()
 	h, projID, s := testProjectHandlerWithStore(t)
 	recorder := &recordingTaskDeleter{}
 	h.tasks = recorder
@@ -100,7 +98,6 @@ func TestProjectDeleteNamesOnlyTheRootTasks(t *testing.T) {
 // Without the task path the row still goes — refusing would strand the project — and the WARN is the
 // only signal that those tasks' containers are still running.
 func TestProjectDeleteWithoutTaskPathStillDeletesTheRow(t *testing.T) {
-	t.Parallel()
 	h, projID, s := testProjectHandlerWithStore(t)
 	seedTaskTree(t, s, projID)
 
@@ -137,7 +134,6 @@ func (r *recordingSandbox) StopProjectContainers(projectID string, _ []string) {
 // The project's own container is keyed "proj:"+projectID, and a file-browser listing starts it with no
 // task and no terminal open: a delete that skips it leaves it running on a checkout with no rows left.
 func TestProjectDeleteStopsTheProjectsOwnSandboxContainer(t *testing.T) {
-	t.Parallel()
 	h, projID, s := testProjectHandlerWithStore(t)
 	h.tasks = &recordingTaskDeleter{}
 	recorder := &recordingSandbox{}
@@ -157,7 +153,6 @@ func TestProjectDeleteStopsTheProjectsOwnSandboxContainer(t *testing.T) {
 
 // With nothing to delete there is no batch, so no closing board broadcast either.
 func TestProjectDeleteOfAnEmptyProjectAsksForNoTaskTeardown(t *testing.T) {
-	t.Parallel()
 	h, projID, _ := testProjectHandlerWithStore(t)
 	recorder := &recordingTaskDeleter{}
 	h.tasks = recorder

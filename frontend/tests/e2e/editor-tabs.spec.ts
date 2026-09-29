@@ -220,6 +220,9 @@ test.describe('Editor Tabs', () => {
       await page.keyboard.press('End');
       await page.keyboard.type(' Modified');
 
+      // Wait for the change to be detected
+      await page.waitForTimeout(300);
+
       // Tab should now have unsaved indicator
       await expect(tab.first()).toHaveClass(/unsaved/);
     } finally {
@@ -420,6 +423,7 @@ test.describe('Editor Tabs', () => {
       await page.locator('.cm-content').click();
       await page.keyboard.press('End');
       await page.keyboard.type(' Modified');
+      await page.waitForTimeout(300);
 
       // Tab should have unsaved indicator
       await expect(page.locator('.editor-tab.unsaved')).toBeVisible();

@@ -28,7 +28,6 @@ func createTestProjectWithPath(t *testing.T, s *Server) (string, string) {
 }
 
 func TestGitLog(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID, dir := createTestProjectWithPath(t, s)
 	// Add more commits
@@ -98,7 +97,6 @@ func TestGitLog(t *testing.T) {
 }
 
 func TestGitLogFullWithBranch(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID, dir := createTestProjectWithPath(t, s)
 	mustRunGit(t, dir, "commit", "--allow-empty", "-m", "On main")
@@ -133,7 +131,6 @@ func TestGitLogFullWithBranch(t *testing.T) {
 }
 
 func TestGitLogNotFound(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 
@@ -146,7 +143,6 @@ func TestGitLogNotFound(t *testing.T) {
 }
 
 func TestGitCheckout(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID, dir := createTestProjectWithPath(t, s)
 	// Create a develop branch from master
@@ -174,7 +170,6 @@ func TestGitCheckout(t *testing.T) {
 }
 
 func TestGitLogFullDecodesParents(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID, dir := createTestProjectWithPath(t, s)
 	mustRunGit(t, dir, "commit", "--allow-empty", "-m", "Commit A")
@@ -215,7 +210,6 @@ func TestGitLogFullDecodesParents(t *testing.T) {
 }
 
 func TestGitLogFullBranchesAndOrigin(t *testing.T) {
-	t.Parallel()
 	s := testServer(t)
 	projID, dir := createTestProjectWithPath(t, s)
 

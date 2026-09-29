@@ -94,7 +94,6 @@ func writeFile(t *testing.T, dir, name, content string) {
 
 // TestCreateWorktree_ExcludesWorktreesDirFromProjectStatus: in-project worktrees are excluded from git status.
 func TestCreateWorktree_ExcludesWorktreesDirFromProjectStatus(t *testing.T) {
-	t.Parallel()
 	tmpDir := t.TempDir()
 	repoDir := filepath.Join(tmpDir, "repo")
 	os.MkdirAll(repoDir, 0o755)
@@ -170,7 +169,6 @@ func TestCreateWorktree_ExcludesWorktreesDirFromProjectStatus(t *testing.T) {
 
 // TestCreateWorktree_NoExcludeWhenWorktreesOutsideProject: no exclude entry when worktrees are outside.
 func TestCreateWorktree_NoExcludeWhenWorktreesOutsideProject(t *testing.T) {
-	t.Parallel()
 	repoDir, taskID, s, _, wm := setupTestRepo(t)
 
 	proj, err := s.GetProject("test-project")
@@ -192,7 +190,6 @@ func TestCreateWorktree_NoExcludeWhenWorktreesOutsideProject(t *testing.T) {
 }
 
 func TestResolveDiffBaseline_RejectsFatalBaseRef(t *testing.T) {
-	t.Parallel()
 	_, taskID, _, _, wm := setupTestRepo(t)
 
 	// A "fatal:" baseRef should be treated as empty
@@ -203,7 +200,6 @@ func TestResolveDiffBaseline_RejectsFatalBaseRef(t *testing.T) {
 }
 
 func TestResolveDiffBaseline_ValidBaseRef(t *testing.T) {
-	t.Parallel()
 	_, taskID, _, _, wm := setupTestRepo(t)
 
 	// A valid baseRef should be returned as-is (original thread)
@@ -225,7 +221,6 @@ func revParse(t *testing.T, dir, ref string) string {
 // TestDivergenceBase_ReturnsForkPoint verifies that for a branch forked from the main
 // branch with commits on both sides, DivergenceBase returns the fork point.
 func TestDivergenceBase_ReturnsForkPoint(t *testing.T) {
-	t.Parallel()
 	repoDir, _, _, _, wm := setupTestRepo(t)
 
 	mainBranch, err := wm.gitCurrentBranch(repoDir)
@@ -261,7 +256,6 @@ func TestDivergenceBase_ReturnsForkPoint(t *testing.T) {
 // TestDivergenceBase_InvalidRefs verifies the fallback returns "" when refs cannot
 // be resolved, so callers keep their current (empty baseline) behavior.
 func TestDivergenceBase_InvalidRefs(t *testing.T) {
-	t.Parallel()
 	repoDir, _, _, _, wm := setupTestRepo(t)
 
 	if got := wm.DivergenceBase(repoDir, "main", ""); got != "" {
@@ -278,7 +272,6 @@ func TestDivergenceBase_InvalidRefs(t *testing.T) {
 // TestDivergenceBase_DetachedHead verifies that with an empty mainBranch and a
 // detached project HEAD there is no main branch to measure divergence from.
 func TestDivergenceBase_DetachedHead(t *testing.T) {
-	t.Parallel()
 	repoDir, _, _, _, wm := setupTestRepo(t)
 
 	mainBranch, err := wm.gitCurrentBranch(repoDir)
@@ -302,7 +295,6 @@ func TestDivergenceBase_DetachedHead(t *testing.T) {
 // the repo (e.g. typed into Edit Task before the branch was created) all
 // fall back to the divergence point, while valid recorded baselines are kept.
 func TestResolveTaskBaseline_Usability(t *testing.T) {
-	t.Parallel()
 	repoDir, _, _, _, wm := setupTestRepo(t)
 
 	mainBranch, err := wm.gitCurrentBranch(repoDir)
@@ -362,7 +354,6 @@ func TestResolveTaskBaseline_Usability(t *testing.T) {
 }
 
 func TestGetTaskDiff_RejectsFatalBaseRef(t *testing.T) {
-	t.Parallel()
 	_, taskID, _, _, wm := setupTestRepo(t)
 
 	// Create the worktree first
@@ -388,7 +379,6 @@ func TestGetTaskDiff_RejectsFatalBaseRef(t *testing.T) {
 }
 
 func TestCreateWorktree_EarlyReturn_SanitizesFatalBranch(t *testing.T) {
-	t.Parallel()
 	repoDir, taskID, _, _, wm := setupTestRepo(t)
 
 	// Create the worktree normally first
@@ -425,7 +415,6 @@ func TestCreateWorktree_EarlyReturn_SanitizesFatalBranch(t *testing.T) {
 // fresh-creation and early-return (worktree exists) paths return a branch
 // name, not a commit SHA. This ensures BaseRef is always a usable merge target.
 func TestCreateWorktree_BothPathsReturnBranchName(t *testing.T) {
-	t.Parallel()
 	_, taskID, _, _, wm := setupTestRepo(t)
 
 	branchName := "task/" + taskID
@@ -462,7 +451,6 @@ func TestCreateWorktree_BothPathsReturnBranchName(t *testing.T) {
 }
 
 func TestCreateWorktree_GeneratesBranchNameWhenEmpty(t *testing.T) {
-	t.Parallel()
 	_, taskID, _, _, wm := setupTestRepo(t)
 
 	wtPath, _, err := wm.CreateWorktree("test-project", taskID, "", "")
@@ -478,7 +466,6 @@ func TestCreateWorktree_GeneratesBranchNameWhenEmpty(t *testing.T) {
 }
 
 func TestCreateWorktree_GeneratesBranchNameWhen40Hex(t *testing.T) {
-	t.Parallel()
 	_, taskID, _, _, wm := setupTestRepo(t)
 
 	wtPath, _, err := wm.CreateWorktree("test-project", taskID, "abcdef1234567890abcdef1234567890abcdef12", "")
@@ -494,7 +481,6 @@ func TestCreateWorktree_GeneratesBranchNameWhen40Hex(t *testing.T) {
 }
 
 func TestTruncateDiffLines_NoTruncationNeeded(t *testing.T) {
-	t.Parallel()
 	diff := `diff --git a/file.txt b/file.txt
 index 1234567..abcdef 100644
 --- a/file.txt
@@ -515,7 +501,6 @@ index 1234567..abcdef 100644
 }
 
 func TestTruncateDiffLines_TruncatesLargeFile(t *testing.T) {
-	t.Parallel()
 	diff := `diff --git a/small.txt b/small.txt
 --- a/small.txt
 +++ b/small.txt
@@ -583,7 +568,6 @@ diff --git a/large.txt b/large.txt
 }
 
 func TestTruncateDiffLines_SingleLargeHunk(t *testing.T) {
-	t.Parallel()
 	var lines []string
 	lines = append(lines, "diff --git a/file.txt b/file.txt")
 	lines = append(lines, "--- a/file.txt")
@@ -617,7 +601,6 @@ func TestTruncateDiffLines_SingleLargeHunk(t *testing.T) {
 }
 
 func TestTruncateDiffLines_FirstFileExceedsLimit(t *testing.T) {
-	t.Parallel()
 	// Regression: early return in truncation loop dropped all files after
 	// the first file that exceeded the change-line limit.
 	var lines []string
@@ -692,7 +675,6 @@ func TestTruncateDiffLines_FirstFileExceedsLimit(t *testing.T) {
 }
 
 func TestTruncateDiffLines_EmptyDiff(t *testing.T) {
-	t.Parallel()
 	result, truncated := truncateDiffLines("", 60)
 	if result != "" {
 		t.Errorf("expected empty result, got %q", result)
@@ -703,7 +685,6 @@ func TestTruncateDiffLines_EmptyDiff(t *testing.T) {
 }
 
 func TestGetTaskDiff_TruncatesUntrackedFile(t *testing.T) {
-	t.Parallel()
 	_, taskID, _, _, wm := setupTestRepo(t)
 
 	// Create worktree
@@ -765,7 +746,6 @@ func TestGetTaskDiff_TruncatesUntrackedFile(t *testing.T) {
 }
 
 func TestGetTaskDiff_SmallUntrackedFile_NotTruncated(t *testing.T) {
-	t.Parallel()
 	_, taskID, _, _, wm := setupTestRepo(t)
 
 	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
@@ -791,7 +771,6 @@ func TestGetTaskDiff_SmallUntrackedFile_NotTruncated(t *testing.T) {
 }
 
 func TestWalkUntrackedEntries_RegularFile(t *testing.T) {
-	t.Parallel()
 	tmpDir := t.TempDir()
 	writeFile(t, tmpDir, "file.txt", "content")
 
@@ -802,7 +781,6 @@ func TestWalkUntrackedEntries_RegularFile(t *testing.T) {
 }
 
 func TestWalkUntrackedEntries_Directory(t *testing.T) {
-	t.Parallel()
 	tmpDir := t.TempDir()
 
 	// Create subdirectory with files
@@ -830,7 +808,6 @@ func TestWalkUntrackedEntries_Directory(t *testing.T) {
 }
 
 func TestGetTaskDiff_UntrackedDirectory(t *testing.T) {
-	t.Parallel()
 	_, taskID, _, _, wm := setupTestRepo(t)
 
 	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
@@ -882,7 +859,6 @@ func TestGetTaskDiff_UntrackedDirectory(t *testing.T) {
 }
 
 func TestGetTaskDiff_BinaryUntrackedFile_NoDiff(t *testing.T) {
-	t.Parallel()
 	_, taskID, _, _, wm := setupTestRepo(t)
 
 	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
@@ -922,7 +898,6 @@ func TestGetTaskDiff_BinaryUntrackedFile_NoDiff(t *testing.T) {
 }
 
 func TestGetTaskDiff_BinaryUntrackedByExtension(t *testing.T) {
-	t.Parallel()
 	_, taskID, _, _, wm := setupTestRepo(t)
 
 	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
@@ -952,7 +927,6 @@ func TestGetTaskDiff_BinaryUntrackedByExtension(t *testing.T) {
 // An untracked .svg is source the user can read and review, not an opaque blob: labeling it binary is
 // how a new icon becomes an uninspectable "Binary file — N bytes" row in the diff panel.
 func TestGetTaskDiff_UntrackedSVG_HasLines(t *testing.T) {
-	t.Parallel()
 	_, taskID, _, _, wm := setupTestRepo(t)
 
 	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
@@ -983,7 +957,6 @@ func TestGetTaskDiff_UntrackedSVG_HasLines(t *testing.T) {
 }
 
 func TestGetTaskDiff_TrackedBinaryFile(t *testing.T) {
-	t.Parallel()
 	repoDir, taskID, _, _, wm := setupTestRepo(t)
 
 	// Add a binary file to the repo
@@ -1029,7 +1002,6 @@ func TestGetTaskDiff_TrackedBinaryFile(t *testing.T) {
 }
 
 func TestGetTaskDiff_LargeTextFile(t *testing.T) {
-	t.Parallel()
 	_, taskID, _, _, wm := setupTestRepo(t)
 
 	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
@@ -1062,7 +1034,6 @@ func TestGetTaskDiff_LargeTextFile(t *testing.T) {
 }
 
 func TestIsBinaryExtension(t *testing.T) {
-	t.Parallel()
 	// Known binary extensions
 	for _, ext := range []string{"image.png", "file.jpg", "archive.zip", "font.woff2", "video.mp4", "doc.pdf"} {
 		if !isBinaryExtension(ext) {
@@ -1081,7 +1052,6 @@ func TestIsBinaryExtension(t *testing.T) {
 }
 
 func TestGetTaskDiff_DeletedBinaryFile(t *testing.T) {
-	t.Parallel()
 	repoDir, taskID, _, _, wm := setupTestRepo(t)
 
 	// Add a binary file to the repo
@@ -1120,7 +1090,6 @@ func TestGetTaskDiff_DeletedBinaryFile(t *testing.T) {
 }
 
 func TestGetTaskDiff_RenamedBinaryFile(t *testing.T) {
-	t.Parallel()
 	repoDir, taskID, _, _, wm := setupTestRepo(t)
 
 	// Add a binary file to the repo
@@ -1159,7 +1128,6 @@ func TestGetTaskDiff_RenamedBinaryFile(t *testing.T) {
 }
 
 func TestShouldIgnorePath_KnownDirs(t *testing.T) {
-	t.Parallel()
 	// Known directories at root level
 	for _, dir := range []string{"node_modules", ".next", "dist", "build", ".cache", "__pycache__", ".venv", "target", "vendor", ".gradle", ".mypy_cache", ".pytest_cache", "coverage", ".nuxt", ".output", ".svelte-kit", ".turbo", ".vercel", ".docker"} {
 		if !ShouldIgnorePath(dir) {
@@ -1172,7 +1140,6 @@ func TestShouldIgnorePath_KnownDirs(t *testing.T) {
 }
 
 func TestShouldIgnorePath_NestedPaths(t *testing.T) {
-	t.Parallel()
 	// Known directories nested deeper
 	tests := []struct {
 		path     string
@@ -1205,7 +1172,6 @@ func TestShouldIgnorePath_NestedPaths(t *testing.T) {
 }
 
 func TestComputeUntrackedHash_ContentChange(t *testing.T) {
-	t.Parallel()
 	// Verify that ComputeUntrackedHash produces different hashes when
 	// file content changes but line count stays the same.
 	// This is critical for delta detection: if the hash doesn't change,
@@ -1236,7 +1202,6 @@ func TestComputeUntrackedHash_ContentChange(t *testing.T) {
 }
 
 func TestGetTaskDiff_StagedFile(t *testing.T) {
-	t.Parallel()
 	repoDir, taskID, _, _, wm := setupTestRepo(t)
 
 	// Create and commit a file
@@ -1276,7 +1241,6 @@ func TestGetTaskDiff_StagedFile(t *testing.T) {
 }
 
 func TestGetTaskDiff_StagedNewFile(t *testing.T) {
-	t.Parallel()
 	repoDir, taskID, _, _, wm := setupTestRepo(t)
 
 	// Create initial commit
@@ -1319,7 +1283,6 @@ func TestGetTaskDiff_StagedNewFile(t *testing.T) {
 }
 
 func TestGetTaskDiff_MixedStagedAndUnstaged(t *testing.T) {
-	t.Parallel()
 	repoDir, taskID, _, _, wm := setupTestRepo(t)
 
 	// Create and commit a file
@@ -1355,7 +1318,6 @@ func TestGetTaskDiff_MixedStagedAndUnstaged(t *testing.T) {
 }
 
 func TestStageIndexedFiles_RefreshesStagedFiles(t *testing.T) {
-	t.Parallel()
 	repoDir, taskID, _, _, wm := setupTestRepo(t)
 
 	// Create and commit two tracked files
@@ -1410,7 +1372,6 @@ func TestStageIndexedFiles_RefreshesStagedFiles(t *testing.T) {
 }
 
 func TestGetTaskDiff_StagedFileWithBaseRef(t *testing.T) {
-	t.Parallel()
 	repoDir, taskID, _, _, wm := setupTestRepo(t)
 
 	// Create and commit a file on master
@@ -1454,7 +1415,6 @@ func TestGetTaskDiff_StagedFileWithBaseRef(t *testing.T) {
 }
 
 func TestResetWorktreeTo_StashHash(t *testing.T) {
-	t.Parallel()
 	_, taskID, _, _, wm := setupTestRepo(t)
 
 	// Create worktree.
@@ -1514,7 +1474,6 @@ func TestResetWorktreeTo_StashHash(t *testing.T) {
 // TestPushStash_MessageBased verifies that PushStash returns the correct hash
 // by searching the stash list by message, even when other stale entries exist.
 func TestPushStash_MessageBased(t *testing.T) {
-	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping git integration test")
 	}
@@ -1577,7 +1536,6 @@ func TestPushStash_MessageBased(t *testing.T) {
 // TestPushStash_MultipleEntries verifies correct hash selection when multiple
 // kanban stash entries exist for different tasks/threads.
 func TestPushStash_MultipleEntries(t *testing.T) {
-	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping git integration test")
 	}
@@ -1654,7 +1612,6 @@ func runGitOutput(t *testing.T, dir string, args ...string) string {
 }
 
 func TestGarbageCollect_PrunesOrphanedThreadBranches(t *testing.T) {
-	t.Parallel()
 	repoDir, taskID, s, _, wm := setupTestRepo(t)
 
 	// Create a thread in the DB with a git_branch
@@ -1700,7 +1657,6 @@ func TestGarbageCollect_PrunesOrphanedThreadBranches(t *testing.T) {
 }
 
 func TestGarbageCollect_KeepsActiveThreadBranches(t *testing.T) {
-	t.Parallel()
 	repoDir, taskID, s, _, wm := setupTestRepo(t)
 
 	// Create a thread in the DB with a git_branch
@@ -1734,7 +1690,6 @@ func TestGarbageCollect_KeepsActiveThreadBranches(t *testing.T) {
 }
 
 func TestPruneOrphanedBranches_RemovesOrphanedTaskBranches(t *testing.T) {
-	t.Parallel()
 	repoDir, taskID, s, _, wm := setupTestRepo(t)
 
 	// Create orphaned task branches (task IDs that don't exist in DB)
@@ -1781,7 +1736,6 @@ func TestPruneOrphanedBranches_RemovesOrphanedTaskBranches(t *testing.T) {
 }
 
 func TestPruneOrphanedBranches_RemovesOrphanedThreadBranches(t *testing.T) {
-	t.Parallel()
 	repoDir, taskID, s, _, wm := setupTestRepo(t)
 
 	// Create orphaned thread branches (thread IDs that don't exist in DB)
@@ -1838,7 +1792,6 @@ func TestPruneOrphanedBranches_RemovesOrphanedThreadBranches(t *testing.T) {
 }
 
 func TestPruneOrphanedBranches_RemovesBothTaskAndThreadBranches(t *testing.T) {
-	t.Parallel()
 	repoDir, _, s, _, wm := setupTestRepo(t)
 
 	// Create both orphaned task and thread branches
@@ -1877,9 +1830,6 @@ func getBranches(t *testing.T, dir string) []string {
 	return branches
 }
 
-// Serial: SetAuthorIdentity writes the process-wide identity that every other test's commits read
-// (AGENTS.md → Confinement), and there is no per-manager seam to inject it through. The three tests
-// below point here.
 func TestGitAuthorFlags_NoEnvVars(t *testing.T) {
 	// Save and restore package-level vars
 	origName, origEmail := AuthorIdentity()
@@ -1894,7 +1844,6 @@ func TestGitAuthorFlags_NoEnvVars(t *testing.T) {
 	}
 }
 
-// Serial for the reason at TestGitAuthorFlags_NoEnvVars.
 func TestGitAuthorFlags_NameOnly(t *testing.T) {
 	origName, origEmail := AuthorIdentity()
 	defer func() {
@@ -1911,7 +1860,6 @@ func TestGitAuthorFlags_NameOnly(t *testing.T) {
 	}
 }
 
-// Serial for the reason at TestGitAuthorFlags_NoEnvVars.
 func TestGitAuthorFlags_EmailOnly(t *testing.T) {
 	origName, origEmail := AuthorIdentity()
 	defer func() {
@@ -1928,7 +1876,6 @@ func TestGitAuthorFlags_EmailOnly(t *testing.T) {
 	}
 }
 
-// Serial for the reason at TestGitAuthorFlags_NoEnvVars.
 func TestGitAuthorFlags_BothSet(t *testing.T) {
 	origName, origEmail := AuthorIdentity()
 	defer func() {
@@ -1949,7 +1896,6 @@ func TestGitAuthorFlags_BothSet(t *testing.T) {
 }
 
 func TestParseUnifiedDiffToFiles_RemovedLineNumbers(t *testing.T) {
-	t.Parallel()
 	// Verify that removed lines get old-file line numbers (not new-file line numbers).
 	// Bug: all removed lines in a hunk were assigned the same newLine value.
 	diff := `diff --git a/file.go b/file.go
@@ -2041,7 +1987,6 @@ func TestParseUnifiedDiffToFiles_RemovedLineNumbers(t *testing.T) {
 }
 
 func TestParseUnifiedDiffToFiles_MultipleHunks(t *testing.T) {
-	t.Parallel()
 	// Verify line numbers are correct across multiple hunks in the same file.
 	diff := `diff --git a/file.txt b/file.txt
 --- a/file.txt
@@ -2118,7 +2063,6 @@ func TestParseUnifiedDiffToFiles_MultipleHunks(t *testing.T) {
 }
 
 func TestParseUnifiedDiffToFiles_NewBlankFile(t *testing.T) {
-	t.Parallel()
 	// A new blank file has a diff header but no hunk (no content to diff).
 	// Parser must detect "new file mode" and preserve the entry even with 0 rows.
 	diff := `diff --git a/empty.txt b/empty.txt
@@ -2146,7 +2090,6 @@ index 0000000..e69de29`
 }
 
 func TestParseUnifiedDiffToFiles_NewNonBlankFile(t *testing.T) {
-	t.Parallel()
 	// Verify existing behavior: new files with content still work correctly.
 	diff := `diff --git a/new.txt b/new.txt
 new file mode 100644
@@ -2179,7 +2122,6 @@ index 0000000..1234567
 }
 
 func TestParseUnifiedDiffToFiles_ModifiedFile_NotNew(t *testing.T) {
-	t.Parallel()
 	// Verify that modified (non-new) files do NOT get IsNew set.
 	diff := `diff --git a/existing.txt b/existing.txt
 index abc1234..def5678 100644
@@ -2209,7 +2151,6 @@ index abc1234..def5678 100644
 }
 
 func TestGetTaskDiff_StagedBlankNewFile(t *testing.T) {
-	t.Parallel()
 	repoDir, taskID, _, _, wm := setupTestRepo(t)
 
 	// Create initial commit
@@ -2249,7 +2190,6 @@ func TestGetTaskDiff_StagedBlankNewFile(t *testing.T) {
 }
 
 func TestGetTaskDiff_UnstagedBlankNewFile(t *testing.T) {
-	t.Parallel()
 	repoDir, taskID, _, _, wm := setupTestRepo(t)
 
 	// Create initial commit
@@ -2287,7 +2227,6 @@ func TestGetTaskDiff_UnstagedBlankNewFile(t *testing.T) {
 }
 
 func TestParseUnifiedDiffToFiles_BlankLinesHaveTextField(t *testing.T) {
-	t.Parallel()
 	// Verify that blank lines in a diff (empty context/added/removed lines)
 	// have the Text field serialized as an empty string, not omitted.
 	// This is critical for the frontend's enrichRowsWithInlineSegments,
@@ -2338,7 +2277,6 @@ index abc1234..def5678 100644
 }
 
 func TestDropStashEntriesForTask_RemovesMatchingStashes(t *testing.T) {
-	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping git integration test")
 	}
@@ -2390,7 +2328,6 @@ func TestDropStashEntriesForTask_RemovesMatchingStashes(t *testing.T) {
 }
 
 func TestDropStashEntriesForBranch_RemovesMatchingStashes(t *testing.T) {
-	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping git integration test")
 	}
@@ -2437,7 +2374,6 @@ func TestDropStashEntriesForBranch_RemovesMatchingStashes(t *testing.T) {
 }
 
 func TestDropStashEntriesForTask_RemovesSyncMergeAndAutoMergeStashes(t *testing.T) {
-	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping git integration test")
 	}
@@ -2492,7 +2428,6 @@ func TestDropStashEntriesForTask_RemovesSyncMergeAndAutoMergeStashes(t *testing.
 }
 
 func TestGarbageCollect_DropsStaleSyncMergeAndAutoMergeStashes(t *testing.T) {
-	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping git integration test")
 	}
@@ -2545,7 +2480,6 @@ func TestGarbageCollect_DropsStaleSyncMergeAndAutoMergeStashes(t *testing.T) {
 }
 
 func TestStashMessageHelpers_GenerateCorrectFormats(t *testing.T) {
-	t.Parallel()
 	taskID := "test-task-id"
 
 	switchMsg := StashMessageForSwitch(taskID)
@@ -2570,7 +2504,6 @@ func TestStashMessageHelpers_GenerateCorrectFormats(t *testing.T) {
 }
 
 func TestStashMessageHelpers_MaxLength(t *testing.T) {
-	t.Parallel()
 	// All stash messages must be ≤ 50 characters
 	longTaskID := "waterfall-lightning-thunder-waterfall-lightning-thunder-x"
 
@@ -2595,7 +2528,6 @@ func TestStashMessageHelpers_MaxLength(t *testing.T) {
 	}
 }
 func TestIsMergedInto(t *testing.T) {
-	t.Parallel()
 	tmpDir := t.TempDir()
 	repoDir := filepath.Join(tmpDir, "repo")
 	os.MkdirAll(repoDir, 0o755)
@@ -2647,7 +2579,6 @@ func TestIsMergedInto(t *testing.T) {
 }
 
 func TestIsMergedInto_FastForward(t *testing.T) {
-	t.Parallel()
 	tmpDir := t.TempDir()
 	repoDir := filepath.Join(tmpDir, "repo")
 	os.MkdirAll(repoDir, 0o755)
@@ -2688,7 +2619,6 @@ func TestIsMergedInto_FastForward(t *testing.T) {
 // TestGarbageCollect_KeepsTitledTaskSlugMainBranch verifies the GC keeps a titled
 // task's slug-named Main branch when a fork is the task's active branch.
 func TestGarbageCollect_KeepsTitledTaskSlugMainBranch(t *testing.T) {
-	t.Parallel()
 	repoDir, taskID, s, _, wm := setupTestRepo(t)
 
 	// Simulate a fork being the task's active branch: task.Branch points to the fork
@@ -2725,7 +2655,6 @@ func TestGarbageCollect_KeepsTitledTaskSlugMainBranch(t *testing.T) {
 // TestResolveMainBranch_RecoversSlugBranch verifies ResolveMainBranch recovers a
 // titled task's slug-named Main branch when task/<taskID> is missing.
 func TestResolveMainBranch_RecoversSlugBranch(t *testing.T) {
-	t.Parallel()
 	repoDir, taskID, s, _, wm := setupTestRepo(t)
 
 	task, err := s.GetTask("test-project", taskID)
@@ -2755,7 +2684,6 @@ func TestResolveMainBranch_RecoversSlugBranch(t *testing.T) {
 
 // TestResolveMainBranch_NoSlug returns canonical when no slug matches.
 func TestResolveMainBranch_NoSlug(t *testing.T) {
-	t.Parallel()
 	repoDir, taskID, _, _, wm := setupTestRepo(t)
 	// No task/<taskID> branch and a title that produces no matching branch.
 	runGit(t, repoDir, "branch", "task/other-zzz")

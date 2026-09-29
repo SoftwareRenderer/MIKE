@@ -76,7 +76,6 @@ func countForProject(t *testing.T, s *Store, projectID string) map[string]int {
 }
 
 func TestDeleteProjectRemovesEveryDependentRow(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	seededProject(t, s, "proj-cascade")
 
@@ -92,7 +91,6 @@ func TestDeleteProjectRemovesEveryDependentRow(t *testing.T) {
 
 // The one that pins the change: a project delete that fails must leave the tree alone.
 func TestDeleteProjectThatFailsRemovesNothing(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	seededProject(t, s, "proj-abort")
 
@@ -117,7 +115,6 @@ func TestDeleteProjectThatFailsRemovesNothing(t *testing.T) {
 }
 
 func TestSetActiveThreadThatFailsLeavesTheActiveThread(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	task := seededProject(t, s, "proj-active")
 
@@ -150,7 +147,6 @@ func TestSetActiveThreadThatFailsLeavesTheActiveThread(t *testing.T) {
 
 // A fork is the copy most likely to stop half-way: it inserts one row per copied message.
 func TestCopyMessagesThatFailsCopiesNothing(t *testing.T) {
-	t.Parallel()
 	s := testStore(t)
 	task := seededProject(t, s, "proj-fork")
 	source := "proj-fork-thread"

@@ -9,7 +9,6 @@ import (
 )
 
 func TestHandleUpdate_SanitizesManifestURLs(t *testing.T) {
-	t.Parallel()
 	h := testHandler(t)
 
 	// Create a valid extension first

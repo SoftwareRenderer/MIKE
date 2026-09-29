@@ -39,7 +39,6 @@ func getVersion(t *testing.T, s *Server) (versionResponse, *httptest.ResponseRec
 
 // The id the client compares against is the one the build wrote into the document it serves.
 func TestVersionAnswersTheBuildIdentityStampedIntoDist(t *testing.T) {
-	t.Parallel()
 	assets := docAssets(`<head><meta name="app-build" content="0a1b2c3d4e5f"><title>Board</title></head>`)
 
 	got, rr := getVersion(t, versionAtStart(t, assets))
@@ -60,7 +59,6 @@ func TestVersionAnswersTheBuildIdentityStampedIntoDist(t *testing.T) {
 
 // A missing, unstamped or oversized document answers empty assets with a 200.
 func TestVersionAnswersUnknownForEveryAssetTreeThatCannotBeNamed(t *testing.T) {
-	t.Parallel()
 	t.Run("no document in the tree", func(t *testing.T) {
 		got, rr := getVersion(t, versionAtStart(t, fstest.MapFS{}))
 		if rr.Code != http.StatusOK || got.Assets != "" {
@@ -93,7 +91,6 @@ func TestVersionAnswersUnknownForEveryAssetTreeThatCannotBeNamed(t *testing.T) {
 }
 
 func TestVersionIsSessionAuthed(t *testing.T) {
-	t.Parallel()
 	s := versionAtStart(t, docAssets(`<head><meta name="app-build" content="0a1b2c3d4e5f"></head>`))
 
 	rr := testResponse(t, s, testRequest(http.MethodGet, "/api/version", nil))

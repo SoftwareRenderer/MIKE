@@ -62,7 +62,7 @@ test.describe('Reconnecting banner and tab wake-up', () => {
         const spoken: string[] = [];
         for (let i = 0; i < 10; i++) {
             spoken.push((await page.locator(ANNOUNCEMENT).innerText()).trim());
-            await page.waitForTimeout(500); // sampling cadence: the countdown ticks per second, so the churn is measured over seconds
+            await page.waitForTimeout(500);
         }
         const announced = [...new Set(spoken.filter(text => text !== ''))];
         expect(announced, `the live region churned: ${JSON.stringify(announced)}`).toHaveLength(1);
