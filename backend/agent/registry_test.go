@@ -39,6 +39,7 @@ func (m *mockConfigStore) GetAgentProvider() *types.Provider {
 
 // TestRegistry_LookupByName tests name-based lookup.
 func TestRegistry_LookupByName(t *testing.T) {
+	t.Parallel()
 	store := &mockExtensionStore{
 		extensions: []ext.Extension{
 			{Name: "pi", Type: ext.ExtensionTypeAgent, Enabled: true},
@@ -66,6 +67,7 @@ func TestRegistry_LookupByName(t *testing.T) {
 
 // TestRegistry_ToProviders tests provider conversion.
 func TestRegistry_ToProviders(t *testing.T) {
+	t.Parallel()
 	store := &mockExtensionStore{
 		extensions: []ext.Extension{
 			{
@@ -115,6 +117,7 @@ func TestRegistry_ToProviders(t *testing.T) {
 
 // TestRegistry_Reload tests that reload picks up changes.
 func TestRegistry_Reload(t *testing.T) {
+	t.Parallel()
 	store := &mockExtensionStore{
 		extensions: []ext.Extension{
 			{Name: "pi", Type: ext.ExtensionTypeAgent, Enabled: true},
@@ -154,6 +157,7 @@ func TestRegistry_Reload(t *testing.T) {
 
 // TestRegistry_EmptyStore tests behavior with no agent extensions.
 func TestRegistry_EmptyStore(t *testing.T) {
+	t.Parallel()
 	store := &mockExtensionStore{extensions: []ext.Extension{}}
 	registry := NewAgentRegistry(store, nil)
 
@@ -169,6 +173,7 @@ func TestRegistry_EmptyStore(t *testing.T) {
 // TestRegistry_GetAgentSandboxNeedsGrant: a manifest that names a folder does not give the agent that
 // folder.
 func TestRegistry_GetAgentSandboxNeedsGrant(t *testing.T) {
+	t.Parallel()
 	declares := ext.Extension{
 		Name:    "pi",
 		Type:    ext.ExtensionTypeAgent,
@@ -225,6 +230,7 @@ func TestRegistry_GetAgentSandboxNeedsGrant(t *testing.T) {
 // TestRegistry_GetAgentSandboxRefusesUnshapelyGrant: a saved approval is checked again before podman sees
 // it. A container path containing ":" would turn a read-only mount into a read-write one.
 func TestRegistry_GetAgentSandboxRefusesUnshapelyGrant(t *testing.T) {
+	t.Parallel()
 	store := &mockExtensionStore{extensions: []ext.Extension{{
 		Name:    "pi",
 		Type:    ext.ExtensionTypeAgent,
@@ -249,6 +255,7 @@ func TestRegistry_GetAgentSandboxRefusesUnshapelyGrant(t *testing.T) {
 // TestRegistry_GetAgentSandboxRefusesADangerousHostPath: an approval saved before today's checks existed is
 // still refused.
 func TestRegistry_GetAgentSandboxRefusesADangerousHostPath(t *testing.T) {
+	t.Parallel()
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		t.Skip("no home directory to point a grant at")
@@ -281,6 +288,7 @@ func TestRegistry_GetAgentSandboxRefusesADangerousHostPath(t *testing.T) {
 
 // TestRegistry_GetAgentSandboxWithOverrides tests extension config overrides.
 func TestRegistry_GetAgentSandboxWithOverrides(t *testing.T) {
+	t.Parallel()
 	store := &mockExtensionStore{
 		extensions: []ext.Extension{
 			{
@@ -330,6 +338,7 @@ func TestRegistry_GetAgentSandboxWithOverrides(t *testing.T) {
 // TestRegistry_GetAgentSandboxProviderOverride: the provider's config folder replaces a folder the user has
 // already approved, and cannot create an approval of its own.
 func TestRegistry_GetAgentSandboxProviderOverride(t *testing.T) {
+	t.Parallel()
 	grants := map[string]any{
 		"sandbox_mount": []any{
 			map[string]any{"host_path": "~/.agent/config", "container_path": "/root/agent/config", "mode": "ro"},
@@ -365,6 +374,7 @@ func TestRegistry_GetAgentSandboxProviderOverride(t *testing.T) {
 
 // TestRegistry_GetAgentSandboxNoManifest tests when extension has no sandbox.
 func TestRegistry_GetAgentSandboxNoManifest(t *testing.T) {
+	t.Parallel()
 	store := &mockExtensionStore{
 		extensions: []ext.Extension{
 			{
@@ -389,6 +399,7 @@ func TestRegistry_GetAgentSandboxNoManifest(t *testing.T) {
 // TestRegistry_AgentSandboxForURL: a task gets the folders approved for the agent it runs, and none from
 // any other extension.
 func TestRegistry_AgentSandboxForURL(t *testing.T) {
+	t.Parallel()
 	store := &mockExtensionStore{
 		extensions: []ext.Extension{
 			{
@@ -419,6 +430,7 @@ func TestRegistry_AgentSandboxForURL(t *testing.T) {
 // TestRegistry_GetAgentSandboxTemplates: the shipped manifest writes its sandbox block with {{property}}
 // placeholders, and filling those in still gives the agent no folder.
 func TestRegistry_GetAgentSandboxTemplates(t *testing.T) {
+	t.Parallel()
 	store := &mockExtensionStore{
 		extensions: []ext.Extension{
 			{
@@ -490,6 +502,7 @@ func TestRegistry_GetAgentSandboxTemplates(t *testing.T) {
 // TestRegistry_GetAgentSandboxTemplatesWithOverride tests that runtime config
 // overrides take precedence over resolved template values.
 func TestRegistry_GetAgentSandboxTemplatesWithOverride(t *testing.T) {
+	t.Parallel()
 	store := &mockExtensionStore{
 		extensions: []ext.Extension{
 			{
@@ -548,6 +561,7 @@ func TestRegistry_GetAgentSandboxTemplatesWithOverride(t *testing.T) {
 // came from, and every enabled agent extension is emitted. A URL the parser refuses is a provider
 // the UI can select and no task can run, and a missing row is an installed agent nobody can pick.
 func TestRegistry_EmittedProviderURLsParseBack(t *testing.T) {
+	t.Parallel()
 	store := &mockExtensionStore{
 		extensions: []ext.Extension{
 			{Name: "pi", Type: ext.ExtensionTypeAgent, Enabled: true},

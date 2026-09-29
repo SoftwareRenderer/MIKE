@@ -55,6 +55,7 @@ func initRepo(t *testing.T) string {
 // fails — which makes "the commit succeeded" a second, independent assertion that the hook did not
 // run, not just a missing marker file.
 func TestPreCommitHookNeverRuns(t *testing.T) {
+	t.Parallel()
 	repo := initRepo(t)
 	marker := writeHook(t, repo, "pre-commit", "exit 1")
 
@@ -79,6 +80,7 @@ func TestPreCommitHookNeverRuns(t *testing.T) {
 // well if the fence ever silently stops being applied, or if git changes where it looks for hooks:
 // nothing would have proved the hook was capable of firing in this environment.
 func TestHookFenceIsWhatStopsTheHook(t *testing.T) {
+	t.Parallel()
 	repo := initRepo(t)
 	marker := writeHook(t, repo, "pre-commit", "exit 1")
 
@@ -128,6 +130,7 @@ func fsmonitorMarker(t *testing.T, repo string) string {
 // hook, so core.hooksPath never reached it: `git status` — which this server runs continuously in
 // every registered checkout — executes the command the repository named.
 func TestRepoFsmonitorNeverRuns(t *testing.T) {
+	t.Parallel()
 	repo := initRepo(t)
 	marker := fsmonitorMarker(t, repo)
 
@@ -142,6 +145,7 @@ func TestRepoFsmonitorNeverRuns(t *testing.T) {
 // TestUnfencedFsmonitorRuns is the control case: the config value must be capable of firing in this
 // environment, or the test above proves nothing about the fence.
 func TestUnfencedFsmonitorRuns(t *testing.T) {
+	t.Parallel()
 	repo := initRepo(t)
 	marker := fsmonitorMarker(t, repo)
 
@@ -163,6 +167,7 @@ func TestUnfencedFsmonitorRuns(t *testing.T) {
 // `git worktree add` has no --no-verify flag, and it runs post-checkout. CreateWorktree is a hot
 // path, so this is the hook a repository would most reliably get executed.
 func TestPostCheckoutHookNeverRunsOnWorktreeAdd(t *testing.T) {
+	t.Parallel()
 	repo := initRepo(t)
 	marker := writeHook(t, repo, "post-checkout", "exit 0")
 
@@ -190,6 +195,8 @@ func TestPostCheckoutHookNeverRunsOnWorktreeAdd(t *testing.T) {
 	}
 }
 
+// Serial: t.Setenv refuses to run in a test that called t.Parallel. The other three env tests in this
+// file point here for the same reason.
 func TestEnvNeverCarriesServerSecrets(t *testing.T) {
 	secrets := map[string]string{
 		"MIKE_LOGIN_PASSWORD":          "hunter2",
@@ -221,6 +228,7 @@ func TestEnvNeverCarriesServerSecrets(t *testing.T) {
 	}
 }
 
+// Serial for the reason at TestEnvNeverCarriesServerSecrets.
 func TestEnvKeepsWhatGitNeedsForItsOwnCredentials(t *testing.T) {
 	// These are the reason backend/agent/env.go once sanctioned os.Environ() for this package
 	// ("its configuration and credentials"). Dropping them would break pushing to a private
@@ -248,6 +256,7 @@ func TestEnvKeepsWhatGitNeedsForItsOwnCredentials(t *testing.T) {
 	}
 }
 
+// Serial for the reason at TestEnvNeverCarriesServerSecrets.
 func TestEnvOmitsAnAllowedNameTheServerLacks(t *testing.T) {
 	// `SSH_AUTH_SOCK=` (present but empty) is actively worse than unset: ssh-agent clients treat
 	// an empty socket path as a configured-but-broken agent instead of falling back.
@@ -262,6 +271,7 @@ func TestEnvOmitsAnAllowedNameTheServerLacks(t *testing.T) {
 }
 
 func TestEnv_PolicySurvivesAnExtra(t *testing.T) {
+	t.Parallel()
 	// os/exec keeps the LAST occurrence of a duplicated key, so policy after extras is what makes
 	// the hook fence unforgeable from a call site.
 	env := Env("GIT_CONFIG_KEY_0=core.editor", "core.hooksPath=/tmp/attacker")
@@ -286,6 +296,7 @@ func TestEnv_PolicySurvivesAnExtra(t *testing.T) {
 }
 
 func TestHookFenceShape(t *testing.T) {
+	t.Parallel()
 	got := strings.Join(HookFence(), "\n")
 	// git's env-config mechanism requires the count to match the number of KEY_n entries, or the
 	// configuration is silently ignored — which would read as "hooks are fine".
@@ -302,6 +313,7 @@ func TestHookFenceShape(t *testing.T) {
 	}
 }
 
+// Serial for the reason at TestEnvNeverCarriesServerSecrets.
 func TestCloneEnvCarriesNoServerSecrets(t *testing.T) {
 	// CloneEnv was `append(os.Environ(), …)`, and a clone is the one git operation whose arguments
 	// come straight from an HTTP request (add-project with a git URL). The transport fence is what
@@ -327,6 +339,7 @@ func TestCloneEnvCarriesNoServerSecrets(t *testing.T) {
 }
 
 func TestCommandSetsDirAndEnv(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cmd := Command(dir, "rev-parse", "--git-dir")
 	if cmd.Dir != dir {
@@ -396,6 +409,7 @@ func skipPath(rel string) bool {
 // this repo (frontend/i18n-gate.py, frontend/html-sinks.py) and, unlike a comment in AGENTS.md, it
 // fails the build.
 func TestNoGitSubprocessSpawnsOutsideGit(t *testing.T) {
+	t.Parallel()
 	root := moduleRoot(t)
 	const spawnFile = "backend/git/env.go" // compared against filepath.ToSlash(rel)
 
@@ -466,6 +480,7 @@ func isGitSpawn(line string) bool {
 // about to use must be detected, and one non-git spawn must NOT be, or the gate's silence means
 // nothing.
 func TestIsGitSpawn(t *testing.T) {
+	t.Parallel()
 	mustCatch := []string{
 		`cmd := exec.Command("git", args...)`,
 		`cmd := exec.Command("git", "init", ".")`,

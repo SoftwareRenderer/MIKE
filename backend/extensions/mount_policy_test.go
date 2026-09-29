@@ -16,6 +16,7 @@ func policyWith(roots ...string) *MountPolicy {
 }
 
 func TestValidateContainerPath(t *testing.T) {
+	t.Parallel()
 	valid := []string{
 		"/workspace",
 		"/mnt/node_modules",
@@ -56,6 +57,7 @@ func TestValidateContainerPath(t *testing.T) {
 // that can rewrite a podman `-v` spec, so they are refused anywhere in a container
 // path — a user value can never change the mount mode.
 func TestValidateContainerPath_BlocksWithoutSpecChars(t *testing.T) {
+	t.Parallel()
 	for _, p := range []string{"/x:rw", "/x,rw", "/x:ro,", "/x:,ro"} {
 		err := sandboxruntime.ValidateContainerPath(p)
 		if err == nil {
@@ -68,6 +70,7 @@ func TestValidateContainerPath_BlocksWithoutSpecChars(t *testing.T) {
 }
 
 func TestMountPolicyValidateHostPath(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	inside := filepath.Join(root, "data", "models")
 	if err := os.MkdirAll(inside, 0o755); err != nil {
@@ -173,6 +176,7 @@ func TestMountPolicyValidateHostPath(t *testing.T) {
 }
 
 func TestMountPolicySymlinkedRootIsFollowed(t *testing.T) {
+	t.Parallel()
 	// A root that is itself reached through a symlink must still contain its
 	// own files: the candidate path and the root are compared after resolution.
 	real := t.TempDir()
@@ -193,6 +197,7 @@ func TestMountPolicySymlinkedRootIsFollowed(t *testing.T) {
 }
 
 func TestValidateMount(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	policy := policyWith(root)
 
@@ -236,6 +241,7 @@ func TestValidateMount(t *testing.T) {
 // pinned by TestBuildExtensionCreateArgs_CapabilityPosture. What stays refused is a value
 // that would reach `--cap-add` as an argument rather than a name.
 func TestValidateCapability(t *testing.T) {
+	t.Parallel()
 	allowed := []string{
 		"NET_BIND_SERVICE", "CHOWN", "SETPCAP", "SYS_TIME", "fowner", "CAP_SYS_NICE",
 		"SYS_ADMIN", "SYS_PTRACE", "SYS_MODULE", "SYS_RAWIO", "DAC_OVERRIDE",
@@ -257,6 +263,7 @@ func TestValidateCapability(t *testing.T) {
 }
 
 func TestValidateCapabilities(t *testing.T) {
+	t.Parallel()
 	if err := ValidateCapabilities(nil); err != nil {
 		t.Errorf("ValidateCapabilities(nil) = %v, want nil", err)
 	}
@@ -273,6 +280,7 @@ func TestValidateCapabilities(t *testing.T) {
 }
 
 func TestValidateSandboxAdditions(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	policy := policyWith(root)
 
@@ -308,6 +316,7 @@ func TestValidateSandboxAdditions(t *testing.T) {
 // TestMountRootsIncludesTheWiredExtras: MIKE_EXT_MOUNT_ROOTS arrives as an argument (resolved by
 // startup, wired by NewServer) and lands in the allowlist beside the implicit roots.
 func TestMountRootsIncludesTheWiredExtras(t *testing.T) {
+	t.Parallel()
 	ws := t.TempDir()
 	proj := t.TempDir()
 	extDir := t.TempDir()
@@ -337,6 +346,7 @@ func TestMountRootsIncludesTheWiredExtras(t *testing.T) {
 }
 
 func TestMountRootsWithoutExtras(t *testing.T) {
+	t.Parallel()
 	policy := newMountPolicy(mountRoots("", "", nil, nil))
 	// With no explicit roots, the default extensions dir + temp dir remain.
 	if len(policy.Roots()) == 0 {
@@ -348,6 +358,7 @@ func TestMountRootsWithoutExtras(t *testing.T) {
 }
 
 func TestNewMountPolicyNormalization(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	// Empty/blank roots are dropped, duplicates collapsed, relative made absolute.
 	policy := newMountPolicy([]string{"", "   ", root, root + "/", filepath.Clean(root)})
@@ -372,6 +383,7 @@ func TestNewMountPolicyNormalization(t *testing.T) {
 // task sandbox. Borrowing is allowed; writing through them is not.
 
 func TestMountPolicyProjectRootsAreAllowedButPinnedReadOnly(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	appRoot := filepath.Join(dir, "app")
 	projectCache := filepath.Join(dir, "go-cache")
@@ -408,6 +420,7 @@ func TestMountPolicyProjectRootsAreAllowedButPinnedReadOnly(t *testing.T) {
 }
 
 func TestMountPolicyNilPolicyIsReadOnly(t *testing.T) {
+	t.Parallel()
 	var p *MountPolicy
 	if !p.ForceReadOnly("/anything") {
 		t.Error("a nil policy must fail closed to read-only")
@@ -415,6 +428,7 @@ func TestMountPolicyNilPolicyIsReadOnly(t *testing.T) {
 }
 
 func TestNewMountPolicyWithReadOnlyNormalizesBothLists(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	target := filepath.Join(dir, "cache")
 	if err := os.MkdirAll(target, 0o755); err != nil {
@@ -438,6 +452,7 @@ func TestNewMountPolicyWithReadOnlyNormalizesBothLists(t *testing.T) {
 // target that does not exist yet cannot be checked against the roots, so it is
 // refused rather than binding wherever the link later points.
 func TestValidateHostPath_RejectsDanglingSymlink(t *testing.T) {
+	t.Parallel()
 	base := t.TempDir()
 	root := filepath.Join(base, "root")
 	if err := os.MkdirAll(root, 0o700); err != nil {

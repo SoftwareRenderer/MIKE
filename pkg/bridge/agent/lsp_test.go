@@ -210,11 +210,7 @@ func TestHandlerClose_KillsItsLSPSession(t *testing.T) {
 		t.Error("the connection ended with its language server still running")
 	}
 	// close() kills the process and reaps it, so the pid is gone rather than a zombie.
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) && processAlive(pid) {
-		time.Sleep(20 * time.Millisecond)
-	}
-	if processAlive(pid) {
+	if !awaitProcess(3*time.Second, func() bool { return !processAlive(pid) }) {
 		t.Errorf("the language server process %d outlived the connection", pid)
 	}
 

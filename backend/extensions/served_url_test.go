@@ -14,6 +14,7 @@ import (
 // These go through `toResponse` rather than a helper, because the contract is the
 // API field a browser reads, and `toResponse` is the only thing that builds it.
 func TestExtensionResponseServedURL(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	manifest := manifestBody("Anyone", "0.0.1")
 
@@ -75,6 +76,7 @@ func TestExtensionResponseServedURL(t *testing.T) {
 // The directory-to-URL step on its own: escaping, and the containment that keeps a
 // stored name from producing a URL outside the installed-extension tree.
 func TestServedURLFromDirEscapesAndStaysInside(t *testing.T) {
+	t.Parallel()
 	// A name with characters that would otherwise reshape the URL is escaped, so
 	// the browser asks for the file rather than for a different path.
 	if got := servedURLFromDir("/ext", "/ext/acme/my theme"); got != "/extensions/acme/my%20theme" {

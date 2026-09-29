@@ -22,6 +22,7 @@ import (
 // later attempt answers "install already in progress"), and a row that is never written — with the progress
 // stream already closed, so nothing in the UI can ever report it.
 func TestStreamOperationKeepsDrainingAfterTheClientGoesAway(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 
 	const events = 400 // more than the 16-slot channel every operation is created with
@@ -88,6 +89,7 @@ func TestStreamOperationKeepsDrainingAfterTheClientGoesAway(t *testing.T) {
 // the tab. The extension has to be installed when they come back — the build is not the browser's to cancel,
 // and a half-installed extension is a worse answer than a slow one. Asserted on the stored row, never on the
 // page that left.
+// serial for the reason at fakePodmanExit.
 func TestInstallLocalCompletesAfterTheClientGoesAway(t *testing.T) {
 	h := testHandler(t)
 	writeLocalLSP(t, h, "fixturedev", "fixture-lsp", lspManifestNoImage)

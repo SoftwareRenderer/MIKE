@@ -33,6 +33,7 @@ func tsConfig() *LSPConfig {
 // TestSyntaxSpecValidateRealWorldShapes covers the two shapes the JavaScript fixture cannot
 // exercise: a repeated-character quote (Python's triple quote) and a second line-comment marker.
 func TestSyntaxSpecValidateRealWorldShapes(t *testing.T) {
+	t.Parallel()
 	python := SyntaxSpec{
 		LineComment: "#",
 		Strings: []StringToken{
@@ -70,6 +71,7 @@ func TestSyntaxSpecValidateRealWorldShapes(t *testing.T) {
 }
 
 func TestLSPConfigValidate(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		mutate  func(*LSPConfig)
@@ -187,6 +189,7 @@ func TestLSPConfigValidate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			cfg := tsConfig()
 			if tt.mutate != nil {
 				tt.mutate(cfg)
@@ -209,6 +212,7 @@ func TestLSPConfigValidate(t *testing.T) {
 }
 
 func TestNormalizeFileTypes(t *testing.T) {
+	t.Parallel()
 	cfg := &LSPConfig{Language: "typescript", LegacyExtensions: []string{"ts", ".tsx", "JS", "", "ts"}}
 	if !cfg.NormalizeFileTypes() {
 		t.Fatal("NormalizeFileTypes() reported no change for a legacy manifest")
@@ -236,6 +240,7 @@ func TestNormalizeFileTypes(t *testing.T) {
 }
 
 func TestNormalizeFileTypesKeepsDeclaredTypes(t *testing.T) {
+	t.Parallel()
 	cfg := tsConfig()
 	cfg.LegacyExtensions = []string{"tsx", "mjs"}
 	cfg.NormalizeFileTypes()
@@ -250,6 +255,7 @@ func TestNormalizeFileTypesKeepsDeclaredTypes(t *testing.T) {
 }
 
 func TestFileSuffix(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		want string
@@ -281,6 +287,7 @@ func i18nPack() *I18NConfig {
 }
 
 func TestI18NConfigValidate(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		mutate  func(*I18NConfig)
@@ -384,6 +391,7 @@ func TestI18NConfigValidate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			cfg := i18nPack()
 			if tt.mutate != nil {
 				tt.mutate(cfg)
@@ -421,6 +429,7 @@ func TestI18NConfigValidate(t *testing.T) {
 // files get. The field path in the message is part of the assertion: an author told the wrong
 // field is wrong leaves them editing the one that was never the problem.
 func TestCSSConfigValidate(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		css     *CSSConfig
@@ -473,6 +482,7 @@ func TestCSSConfigValidate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			err := tt.css.Validate()
 			if tt.wantErr == "" {
 				if err != nil {
@@ -493,6 +503,7 @@ func TestCSSConfigValidate(t *testing.T) {
 }
 
 func TestValidateI18NIsTheOnlyCapability(t *testing.T) {
+	t.Parallel()
 	pack := &Capabilities{I18N: i18nPack()}
 	if err := validateI18N(pack, ""); err != nil {
 		t.Fatalf("a pack declaring only i18n was refused: %v", err)
@@ -536,13 +547,16 @@ func TestValidateI18NIsTheOnlyCapability(t *testing.T) {
 func writePack(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
-	if files == nil {
-		files = map[string]string{}
-	}
-	if _, ok := files["messages.json"]; !ok {
-		files["messages.json"] = `{"app.title":"タイトル"}`
-	}
+	// The default messages.json belongs to the layout, not to the caller: a test that hands this
+	// helper a table's map must not find that map changed underneath its other cases.
+	all := make(map[string]string, len(files)+1)
 	for name, content := range files {
+		all[name] = content
+	}
+	if _, ok := all["messages.json"]; !ok {
+		all["messages.json"] = `{"app.title":"タイトル"}`
+	}
+	for name, content := range all {
 		path := filepath.Join(dir, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatalf("mkdir %s: %v", name, err)
@@ -555,6 +569,7 @@ func writePack(t *testing.T, files map[string]string) string {
 }
 
 func TestValidateI18NFiles(t *testing.T) {
+	t.Parallel()
 	goodPrompts := map[string]string{
 		"prompts/base.tmpl":                 `{{if .PlanMode}}計画モード{{end}}`,
 		"prompts/answer_question_user.tmpl": `{{range $i, $q := .Questions}}{{$i | inc}}{{end}}`,
@@ -562,6 +577,7 @@ func TestValidateI18NFiles(t *testing.T) {
 	}
 
 	t.Run("a pack whose files are all good is accepted", func(t *testing.T) {
+		t.Parallel()
 		dir := writePack(t, goodPrompts)
 		if err := validateI18N(&Capabilities{I18N: i18nPack()}, dir); err != nil {
 			t.Fatalf("refused a good pack: %v", err)
@@ -569,6 +585,7 @@ func TestValidateI18NFiles(t *testing.T) {
 	})
 
 	t.Run("an unparsable template names the file that broke", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{}
 		for k, v := range goodPrompts {
 			files[k] = v
@@ -587,6 +604,7 @@ func TestValidateI18NFiles(t *testing.T) {
 	})
 
 	t.Run("a template nested in a subdirectory is still parsed", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{"prompts/prompts/base.tmpl": `{{end}}`}
 		dir := writePack(t, files)
 		if err := validateI18N(&Capabilities{I18N: i18nPack()}, dir); err == nil {
@@ -675,6 +693,7 @@ func TestValidateI18NFiles(t *testing.T) {
 	})
 
 	t.Run("a declared catalog that is missing", func(t *testing.T) {
+		t.Parallel()
 		dir := writePack(t, map[string]string{"messages.json": ""})
 		if err := os.Remove(filepath.Join(dir, "messages.json")); err != nil {
 			t.Fatal(err)
@@ -686,6 +705,7 @@ func TestValidateI18NFiles(t *testing.T) {
 	})
 
 	t.Run("a prompts_dir the pack does not ship", func(t *testing.T) {
+		t.Parallel()
 		dir := writePack(t, nil)
 		err := validateI18N(&Capabilities{I18N: i18nPack()}, dir)
 		if err == nil || !strings.Contains(err.Error(), "is not a directory the pack ships") {
@@ -694,6 +714,7 @@ func TestValidateI18NFiles(t *testing.T) {
 	})
 
 	t.Run("a prompts_dir that overrides nothing", func(t *testing.T) {
+		t.Parallel()
 		dir := writePack(t, map[string]string{"prompts/README.md": "translated prompts land here"})
 		err := validateI18N(&Capabilities{I18N: i18nPack()}, dir)
 		if err == nil || !strings.Contains(err.Error(), "contains no .tmpl file") {
@@ -702,6 +723,7 @@ func TestValidateI18NFiles(t *testing.T) {
 	})
 
 	t.Run("an empty catalog is a catalog", func(t *testing.T) {
+		t.Parallel()
 		// The published packs ship `{}` while their strings are translated, and they parse. The gate
 		// is "is this a catalog", not "is it finished".
 		dir := writePack(t, map[string]string{"messages.json": `{}`, "prompts/base.tmpl": `ok`})
@@ -711,6 +733,7 @@ func TestValidateI18NFiles(t *testing.T) {
 	})
 
 	t.Run("no directory on disk is the shape check only", func(t *testing.T) {
+		t.Parallel()
 		// A registry entry with no git pin installs a row before any file exists, so the declaration
 		// is all there is to check — and a missing file must not fail that install.
 		missing := filepath.Join(t.TempDir(), "not-fetched-yet")
@@ -723,6 +746,7 @@ func TestValidateI18NFiles(t *testing.T) {
 	})
 
 	t.Run("a pack that declares no prompts needs no prompts directory", func(t *testing.T) {
+		t.Parallel()
 		pack := i18nPack()
 		pack.PromptsDir = ""
 		dir := writePack(t, nil)
@@ -733,6 +757,7 @@ func TestValidateI18NFiles(t *testing.T) {
 }
 
 func TestFileTypeResolution(t *testing.T) {
+	t.Parallel()
 	cfg := tsConfig()
 
 	// The whole point of file_types: two suffixes, one extension, two languageIds.
@@ -765,6 +790,7 @@ func TestFileTypeResolution(t *testing.T) {
 // being stored, and being sent back out. A plain bool with omitempty would drop a false on the way out
 // and the refusal would reach the browser as a request.
 func TestSyntaxSpecNameRulesRoundTrip(t *testing.T) {
+	t.Parallel()
 	yes, no := true, false
 
 	for _, tt := range []struct {
@@ -777,6 +803,7 @@ func TestSyntaxSpecNameRulesRoundTrip(t *testing.T) {
 		{"true stays true", `{"keywords":["go"],"capitalized_types":true}`, &yes},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			var spec SyntaxSpec
 			if err := json.Unmarshal([]byte(tt.json), &spec); err != nil {
 				t.Fatalf("decode the manifest: %v", err)

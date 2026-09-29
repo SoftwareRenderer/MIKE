@@ -46,6 +46,7 @@ func testConfigStoreWithStore(t *testing.T) (*ConfigStore, *store.Store) {
 }
 
 func TestGetConfigDefaultWorkspaceDir(t *testing.T) {
+	t.Parallel()
 	cs := testConfigStore(t)
 	// No override set — should use the compiled-in default
 	read, err := cs.GetConfig()
@@ -60,6 +61,7 @@ func TestGetConfigDefaultWorkspaceDir(t *testing.T) {
 }
 
 func TestAutoSummarizeThreshold_Default(t *testing.T) {
+	t.Parallel()
 	cs := testConfigStore(t)
 	if got := cs.AutoSummarizeThreshold(); got != 90 {
 		t.Fatalf("expected default threshold 90, got %d", got)
@@ -67,6 +69,7 @@ func TestAutoSummarizeThreshold_Default(t *testing.T) {
 }
 
 func TestAutoSummarizeThreshold_Roundtrip(t *testing.T) {
+	t.Parallel()
 	cs := testConfigStore(t)
 	v := 60
 	cfg, err := cs.GetConfig()
@@ -91,6 +94,7 @@ func TestAutoSummarizeThreshold_Roundtrip(t *testing.T) {
 //     restore the behaviour the user just switched off, which is the bug each row below
 //     is written to catch.
 func TestUIFlagPreferences(t *testing.T) {
+	t.Parallel()
 	flags := []struct {
 		name string
 		set  func(cfg *types.Config, v *bool)
@@ -138,6 +142,7 @@ func TestUIFlagPreferences(t *testing.T) {
 
 	for _, f := range flags {
 		t.Run(f.name+" is unset and omitted from the response", func(t *testing.T) {
+			t.Parallel()
 			cs := testConfigStore(t)
 			cfg, err := cs.GetConfig()
 			if err != nil {
@@ -161,6 +166,7 @@ func TestUIFlagPreferences(t *testing.T) {
 		})
 
 		t.Run(f.name+" round-trips true and an explicit false", func(t *testing.T) {
+			t.Parallel()
 			cs := testConfigStore(t)
 			// true → false → true also proves an explicit value overwrites the previous one.
 			for _, want := range []bool{true, false, true} {
@@ -201,6 +207,7 @@ func TestUIFlagPreferences(t *testing.T) {
 }
 
 func TestGetConfigRespectsWorkspaceDirOverride(t *testing.T) {
+	t.Parallel()
 	cs := testConfigStore(t)
 	overrideDir := t.TempDir()
 	cs.SetWorkspaceDirOverride(overrideDir)
@@ -215,6 +222,7 @@ func TestGetConfigRespectsWorkspaceDirOverride(t *testing.T) {
 }
 
 func TestIsAgentProvider(t *testing.T) {
+	t.Parallel()
 	cs := testConfigStore(t)
 
 	// Set up config with both LLM and agent providers
@@ -251,6 +259,7 @@ func TestIsAgentProvider(t *testing.T) {
 }
 
 func TestGetAgentProvider(t *testing.T) {
+	t.Parallel()
 	cs := testConfigStore(t)
 
 	// No agents configured
@@ -306,6 +315,7 @@ func (m *mockAgentLister) ToProviders() []types.Provider {
 }
 
 func TestFilterPersistedProviders(t *testing.T) {
+	t.Parallel()
 	providers := []types.Provider{
 		{Name: "llm", Kind: "llm", URL: "http://localhost:8080/v1", Concurrency: 1},
 		{Name: "pi", Kind: "agent", URL: "agent://pi", Concurrency: 1},
@@ -321,6 +331,7 @@ func TestFilterPersistedProviders(t *testing.T) {
 }
 
 func TestBuildConfigResponseMergesAgentProviders(t *testing.T) {
+	t.Parallel()
 	cs := testConfigStore(t)
 
 	// Store an LLM provider
@@ -405,6 +416,7 @@ func seedLegacyProviderRows(t *testing.T, cs *ConfigStore, providers []types.Pro
 }
 
 func TestGetConfigPrunesOrphanAgentProviders(t *testing.T) {
+	t.Parallel()
 	cs := testConfigStore(t)
 
 	// Legacy DB: an agent:// row persisted alongside LLM providers and a
@@ -430,6 +442,7 @@ func TestGetConfigPrunesOrphanAgentProviders(t *testing.T) {
 }
 
 func TestUpdateConfigNeverPersistsAgentProviders(t *testing.T) {
+	t.Parallel()
 	cs := testConfigStore(t)
 
 	cfg := &types.Config{
@@ -461,6 +474,7 @@ func TestUpdateConfigNeverPersistsAgentProviders(t *testing.T) {
 }
 
 func TestBuildConfigResponseExactAgentSet(t *testing.T) {
+	t.Parallel()
 	cs := testConfigStore(t)
 
 	// Legacy orphan agent row in the DB (agent extension no longer enabled).
@@ -497,6 +511,7 @@ func TestBuildConfigResponseExactAgentSet(t *testing.T) {
 }
 
 func TestHandleConfigPutDropsAgentProviders(t *testing.T) {
+	t.Parallel()
 	cs := testConfigStore(t)
 
 	body, _ := json.Marshal(map[string]any{
@@ -539,6 +554,7 @@ func TestHandleConfigPutDropsAgentProviders(t *testing.T) {
 }
 
 func TestDisplayNameNotPersistedForLLM(t *testing.T) {
+	t.Parallel()
 	cs := testConfigStore(t)
 
 	cfg := &types.Config{
@@ -572,6 +588,7 @@ func TestDisplayNameNotPersistedForLLM(t *testing.T) {
 }
 
 func TestGetProviderIDByURLReturnsID(t *testing.T) {
+	t.Parallel()
 	cs := testConfigStore(t)
 
 	cfg := &types.Config{
@@ -596,6 +613,7 @@ func TestGetProviderIDByURLReturnsID(t *testing.T) {
 }
 
 func TestUpdateConfigAssignsProviderIDs(t *testing.T) {
+	t.Parallel()
 	cs := testConfigStore(t)
 
 	cfg := &types.Config{
@@ -621,6 +639,7 @@ func TestUpdateConfigAssignsProviderIDs(t *testing.T) {
 }
 
 func TestMigrateProviderIDs(t *testing.T) {
+	t.Parallel()
 	cs, db := testConfigStoreWithStore(t)
 
 	// Seed legacy config directly (bypassing UpdateConfig, which assigns IDs):
@@ -669,6 +688,7 @@ func TestMigrateProviderIDs(t *testing.T) {
 }
 
 func TestBuildConfigResponseMasksAPIKeys(t *testing.T) {
+	t.Parallel()
 	cs, db := testConfigStoreWithStore(t)
 
 	cfg := &types.Config{
@@ -715,6 +735,7 @@ func TestBuildConfigResponseMasksAPIKeys(t *testing.T) {
 }
 
 func TestUpdateConfig_MaxRequestsPerSecond(t *testing.T) {
+	t.Parallel()
 	cs := testConfigStore(t)
 
 	cfg := &types.Config{
@@ -735,6 +756,7 @@ func TestUpdateConfig_MaxRequestsPerSecond(t *testing.T) {
 }
 
 func TestHandleConfig_MaxRequestsPerSecondRoundTrip(t *testing.T) {
+	t.Parallel()
 	cs := testConfigStore(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cs.HandleConfig(w, r)
@@ -778,6 +800,7 @@ func TestHandleConfig_MaxRequestsPerSecondRoundTrip(t *testing.T) {
 }
 
 func TestUpdateConfig_ClampsNegativeMaxRequestsPerSecond(t *testing.T) {
+	t.Parallel()
 	cs := testConfigStore(t)
 
 	cfg := &types.Config{
@@ -798,6 +821,7 @@ func TestUpdateConfig_ClampsNegativeMaxRequestsPerSecond(t *testing.T) {
 }
 
 func TestGetProviderMaxRequestsPerSecond(t *testing.T) {
+	t.Parallel()
 	cs := testConfigStore(t)
 
 	cfg := &types.Config{
@@ -832,6 +856,7 @@ func TestGetProviderMaxRequestsPerSecond(t *testing.T) {
 // stream out", and a default number of seconds here would silently reintroduce the bound that
 // fails a provider for composing a long answer.
 func TestGetProviderStreamIdleIsNoCeilingUnlessConfigured(t *testing.T) {
+	t.Parallel()
 	cs := testConfigStore(t)
 	cfg := &types.Config{
 		Providers: []types.Provider{
@@ -862,6 +887,7 @@ func TestGetProviderStreamIdleIsNoCeilingUnlessConfigured(t *testing.T) {
 }
 
 func TestKeyboardShortcuts_UnsetDefault(t *testing.T) {
+	t.Parallel()
 	cs := testConfigStore(t)
 	cfg, err := cs.GetConfig()
 	if err != nil {
@@ -879,6 +905,7 @@ func TestKeyboardShortcuts_UnsetDefault(t *testing.T) {
 // covered next; the all-nil normalization is pinned by
 // TestKeyboardShortcuts_AllNilNormalizedToNil.
 func TestKeyboardShortcuts_RoundTrip(t *testing.T) {
+	t.Parallel()
 	bindings := []struct {
 		name string
 		// custom is a binding the frontend would never generate by default, so a
@@ -915,6 +942,7 @@ func TestKeyboardShortcuts_RoundTrip(t *testing.T) {
 			value string
 		}{{"custom binding", b.custom}, {"disabled", ""}} {
 			t.Run(b.name+"/"+mode.label, func(t *testing.T) {
+				t.Parallel()
 				cs := testConfigStore(t)
 				cfg, err := cs.GetConfig()
 				if err != nil {
@@ -953,6 +981,7 @@ func TestKeyboardShortcuts_RoundTrip(t *testing.T) {
 // back present: hide_hints=false is a real preference (show the hints), so normalizing
 // the struct to nil because it carries no key binding would drop it from API responses.
 func TestKeyboardShortcutsHideHints(t *testing.T) {
+	t.Parallel()
 	cs := testConfigStore(t)
 	for _, want := range []bool{true, false} {
 		cfg, err := cs.GetConfig()
@@ -978,6 +1007,7 @@ func TestKeyboardShortcutsHideHints(t *testing.T) {
 }
 
 func TestKeyboardShortcuts_AllNilNormalizedToNil(t *testing.T) {
+	t.Parallel()
 	cs := testConfigStore(t)
 	cfg, err := cs.GetConfig()
 	if err != nil {
@@ -1033,6 +1063,7 @@ func putConfig(t *testing.T, cs *ConfigStore, bodies ...string) {
 //     always sends the full set — a partial body is a reset, not a patch;
 //   - so "c" then "" must land on disabled, not on the default.
 func TestHandleConfig_KeyboardShortcutsPut(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		bodies []string
@@ -1071,6 +1102,7 @@ func TestHandleConfig_KeyboardShortcutsPut(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			cs := testConfigStore(t)
 			putConfig(t, cs, tc.bodies...)
 
@@ -1121,6 +1153,7 @@ func requireBinding(t *testing.T, name string, ks *types.KeyboardShortcuts, want
 //   - touching keyboard_shortcuts must not clobber the rest of the config — the seeded
 //     provider and worker pair have to survive, because PUT is a partial update.
 func TestHandleConfig_KeyboardShortcutsWireFormat(t *testing.T) {
+	t.Parallel()
 	cs := testConfigStore(t)
 	putConfig(t, cs,
 		`{"providers":[{"id":1,"url":"http://neptune:8010/v1","concurrency":1,"models":[]}],"worker_provider":"1","worker_model":"m1","utility_provider":"1","utility_model":"m1"}`,
@@ -1166,6 +1199,7 @@ func TestHandleConfig_KeyboardShortcutsWireFormat(t *testing.T) {
 }
 
 func TestHandleConfig_KeyboardShortcutsResetOmittedInResponse(t *testing.T) {
+	t.Parallel()
 	cs := testConfigStore(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cs.HandleConfig(w, r)
@@ -1199,6 +1233,7 @@ func TestHandleConfig_KeyboardShortcutsResetOmittedInResponse(t *testing.T) {
 // TestGetModelReasoningEffort: explicit values pass through; empty or unknown
 // models fall back to "default".
 func TestGetModelReasoningEffort(t *testing.T) {
+	t.Parallel()
 	cs := testConfigStore(t)
 
 	cfg := &types.Config{
@@ -1234,6 +1269,7 @@ func ptrBool(b bool) *bool { return &b }
 // agree with the value GetConfig publishes, or the fs handlers would jail paths to
 // a different directory than the one the app shows and writes to.
 func TestWorkspaceDirMatchesGetConfig(t *testing.T) {
+	t.Parallel()
 	for _, override := range []string{"", t.TempDir()} {
 		cs := testConfigStore(t)
 		if override != "" {
@@ -1256,6 +1292,7 @@ func TestWorkspaceDirMatchesGetConfig(t *testing.T) {
 // TestWorkspaceDirRelativeOverrideIsAbsolute: a relative override is made
 // absolute, because callers compare it against absolute paths.
 func TestWorkspaceDirRelativeOverrideIsAbsolute(t *testing.T) {
+	t.Parallel()
 	cs := testConfigStore(t)
 	cs.SetWorkspaceDirOverride(".relative-worktrees")
 	got := cs.WorkspaceDir()
@@ -1268,6 +1305,7 @@ func TestWorkspaceDirRelativeOverrideIsAbsolute(t *testing.T) {
 // About reads the ceiling the gate was started with, so the operator can see what every sandbox MIKE
 // started has to share. A store that was never told answers 0 rather than inventing a figure.
 func TestConfigResponseReportsTheMemoryBudget(t *testing.T) {
+	t.Parallel()
 	marshal := func(t *testing.T, cs *ConfigStore) map[string]any {
 		t.Helper()
 		cfg, err := cs.GetConfig()
@@ -1286,6 +1324,7 @@ func TestConfigResponseReportsTheMemoryBudget(t *testing.T) {
 	}
 
 	t.Run("unset answers zero", func(t *testing.T) {
+		t.Parallel()
 		out := marshal(t, testConfigStore(t))
 		if out["memory_budget_mb"] != float64(0) || out["memory_total_mb"] != float64(0) || out["memory_budget_pct"] != float64(0) {
 			t.Errorf("a store never told the budget reads %v/%v/%v, want 0/0/0",
@@ -1294,6 +1333,7 @@ func TestConfigResponseReportsTheMemoryBudget(t *testing.T) {
 	})
 
 	t.Run("the startup decision is reported", func(t *testing.T) {
+		t.Parallel()
 		cs := testConfigStore(t)
 		cs.SetMemoryBudget(13624, 15138, 90)
 		out := marshal(t, cs)
@@ -1311,6 +1351,7 @@ func (s stubToolLister) NetworkedExtensions() []types.NetworkedExtension { retur
 
 // The list is derived from what is installed, so it is served and ignored on write.
 func TestConfigResponseServerNetworkExtensionsIsServedAndNeverWritten(t *testing.T) {
+	t.Parallel()
 	cs := testConfigStore(t)
 	cs.SetServerToolLister(stubToolLister{list: []types.NetworkedExtension{
 		{Name: "contrib-searxng", DisplayName: "SearXNG Search", Tools: []string{"web_search"}},
@@ -1347,6 +1388,7 @@ func TestConfigResponseServerNetworkExtensionsIsServedAndNeverWritten(t *testing
 
 // No extension tool registry means no notice to show, so the key is absent rather than empty.
 func TestConfigResponseOmitsServerNetworkExtensionsWithoutARegistry(t *testing.T) {
+	t.Parallel()
 	w := httptest.NewRecorder()
 	cs := testConfigStore(t)
 	cs.HandleConfig(w, httptest.NewRequest(http.MethodGet, "/api/config", nil))

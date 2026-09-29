@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import {
   isolatedProject, gotoProject, getProjectId, csrfFetch, navigateToTask, waitForChatFormReady,
-  waitForSendButton, sendMessage,
+  waitForSendButton, sendMessage, waitForChatStill,
 } from './helpers';
 
 // The chat opens on the newest window and asks for the page above it when that window does not fill the
@@ -71,6 +71,11 @@ async function stopSampler(page: Page): Promise<Array<{ fromBottom: number; heig
   });
 }
 
+/** How many samples the watching tab has recorded so far. */
+function sampleCount(page: Page): Promise<number> {
+  return page.evaluate(() => ((window as any).__samples as unknown[] | undefined)?.length ?? 0);
+}
+
 test.describe('An older page the app asked for', () => {
   test('does not stop the chat following what arrives while it is out', async ({ page }) => {
     test.setTimeout(180000);
@@ -96,7 +101,7 @@ test.describe('An older page the app asked for', () => {
     await waitForSendButton(page);
     // The newest window is shorter than the chat, so the app went looking for the rows above it.
     await expect.poll(() => paged, 'the app asked for a page of older rows to fill the chat').toBe(true);
-    await page.waitForTimeout(600);
+    await waitForChatStill(page); // the reader is resting where that read left them before the second tab opens
 
     // A second tab works the task; this one only watches, so nothing here pins itself.
     const worker = await page.context().newPage();
@@ -109,7 +114,12 @@ test.describe('An older page the app asked for', () => {
     await expect(page.locator('.btn-stop'), 'the watching tab saw the turn start').toBeVisible({ timeout: 30000 });
     await waitForSendButton(worker, 60000);
     await waitForSendButton(page, 60000);
-    await page.waitForTimeout(800);
+    // The sampler has to have watched for a while after the answer landed — its own sample count, because
+    // a backgrounded tab's interval is throttled and a fixed sleep would then be measuring nothing.
+    const watched = await sampleCount(page);
+    await expect.poll(async () => (await sampleCount(page)) - watched,
+      { timeout: 30_000, message: 'the watching tab recorded no samples after the answer' })
+      .toBeGreaterThanOrEqual(4);
     const samples = await stopSampler(page);
     const end = await position(page);
     const worst = samples.reduce((m, s) => Math.max(m, s.fromBottom), 0);

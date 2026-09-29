@@ -23,6 +23,7 @@ func extErrorBody(t *testing.T, rr *httptest.ResponseRecorder) string {
 }
 
 func TestHandleGet_UnknownExtensionIs404(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/extensions/nonexistent", nil)
 	rr := httptest.NewRecorder()
@@ -38,6 +39,7 @@ func TestHandleGet_UnknownExtensionIs404(t *testing.T) {
 }
 
 func TestHandleGet_StoreFaultIs500NotPhantom404(t *testing.T) {
+	t.Parallel()
 	h, extStore := testHandlerWithStore(t)
 
 	if _, err := extStore.db.Exec(`DROP TABLE extensions`); err != nil {

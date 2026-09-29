@@ -51,6 +51,7 @@ func cacheOneUntracked(h *GitHandler, taskID, path string) {
 // The link is what the listing already refuses; the re-read is a second read of the same
 // path and must not be a second, wider door.
 func TestHandleTaskDiffFileFullRefusesASymlinkOutOfTheWorktree(t *testing.T) {
+	t.Parallel()
 	const secret = "PRIVATE-KEY-BYTES-MUST-NOT-APPEAR"
 	secretFile := filepath.Join(t.TempDir(), "id_rsa")
 	if err := os.WriteFile(secretFile, []byte(secret), 0o600); err != nil {
@@ -75,6 +76,7 @@ func TestHandleTaskDiffFileFullRefusesASymlinkOutOfTheWorktree(t *testing.T) {
 // A file inside the worktree is still refused by size: past the cap the answer is the cached
 // lines with truncated=true.
 func TestHandleTaskDiffFileFullDoesNotReadAnOversizedFile(t *testing.T) {
+	t.Parallel()
 	h, mux, wtPath := taskDiffFileFixture(t, "difffull-cap-proj", "difffull-cap-task")
 	huge := strings.Repeat("y", 2<<20) // 2 MiB: over maxDiffFileBytes by definition
 	if err := os.WriteFile(filepath.Join(wtPath, "huge.txt"), []byte(huge), 0o600); err != nil {
@@ -106,6 +108,7 @@ func TestHandleTaskDiffFileFullDoesNotReadAnOversizedFile(t *testing.T) {
 
 // The control: an ordinary truncated file still comes back in full, and says so.
 func TestHandleTaskDiffFileFullStillReadsAFileWithinTheCap(t *testing.T) {
+	t.Parallel()
 	h, mux, wtPath := taskDiffFileFixture(t, "difffull-ok-proj", "difffull-ok-task")
 	body := strings.Repeat("line\n", 50)
 	if err := os.WriteFile(filepath.Join(wtPath, "small.txt"), []byte(body), 0o600); err != nil {

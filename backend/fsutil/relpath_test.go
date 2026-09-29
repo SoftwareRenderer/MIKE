@@ -9,6 +9,7 @@ import (
 // onto a directory the caller has already contained. These are the shapes that
 // must never reach that join.
 func TestValidateRelPathRejects(t *testing.T) {
+	t.Parallel()
 	rejected := map[string]string{
 		"empty":              "",
 		"absolute":           "/etc/passwd",
@@ -40,6 +41,7 @@ func TestValidateRelPathRejects(t *testing.T) {
 // A dropped file keeps its own name and its own folder — Unicode, spaces, dots and
 // leading dots included. Only the shapes above are refused.
 func TestValidateRelPathAccepts(t *testing.T) {
+	t.Parallel()
 	accepted := []string{
 		"notes.txt",
 		"my report (final).md",

@@ -22,6 +22,7 @@ import (
 // logged-in session. outside is a second directory that is outside every root. HOME is set before the
 // server is built because NewServer decides the roots once, and the widening is refused in the
 // configuration rather than in the environment, so a developer's own shell cannot decide the outcome.
+// Serial for every caller: t.Setenv refuses to run in a parallel test, and HOME is the process's own.
 func jailedHostRootServer(t *testing.T) (s *Server, home, outside, cookie, csrf string) {
 	t.Helper()
 	home = t.TempDir()

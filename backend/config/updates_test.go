@@ -24,6 +24,7 @@ func putConfigRaw(t *testing.T, cs *ConfigStore, body string) *httptest.Response
 // Four fields panicked on a wrong type and the rest were dropped with a 200; now every field answers
 // 400 and stores nothing.
 func TestPUTConfig_FieldWrongTypeIsRejectedWithoutPanicOrSilence(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		body string
@@ -55,6 +56,7 @@ func TestPUTConfig_FieldWrongTypeIsRejectedWithoutPanicOrSilence(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			cs, _ := testConfigStoreWithStore(t)
 			before, err := cs.GetConfig()
 			if err != nil {
@@ -85,6 +87,7 @@ func TestPUTConfig_FieldWrongTypeIsRejectedWithoutPanicOrSilence(t *testing.T) {
 // TestPUTConfig_NullMeansAbsent: a JSON null carries nothing to write, so it means "not sent" -
 // for every field, not just the providers list that had its own nil check.
 func TestPUTConfig_NullMeansAbsent(t *testing.T) {
+	t.Parallel()
 	cs, _ := testConfigStoreWithStore(t)
 	seed := `{"providers":[{"name":"llm","kind":"llm","url":"http://localhost:8080/v1","models":[{"name":"m"}],"concurrency":1}],"worker_provider":"llm","worker_model":"m","utility_provider":"llm","utility_model":"m","default_auto_commit":true}`
 	if w := putConfigRaw(t, cs, seed); w.Code != http.StatusOK {
@@ -112,6 +115,7 @@ func TestPUTConfig_NullMeansAbsent(t *testing.T) {
 // TestPUTConfig_PreservesStoredAPIKeysWhenNotSent: the merge rule behind mergeProviderKeys -
 // nil = preserve, "" = clear, non-empty = replace.
 func TestPUTConfig_PreservesStoredAPIKeysWhenNotSent(t *testing.T) {
+	t.Parallel()
 	cs, _ := testConfigStoreWithStore(t)
 	seed := `{"providers":[{"name":"llm","kind":"llm","url":"http://localhost:8080/v1","models":[{"name":"m"}],"concurrency":1,"api_key":"secret-key"}],"worker_provider":"llm","worker_model":"m","utility_provider":"llm","utility_model":"m"}`
 	if w := putConfigRaw(t, cs, seed); w.Code != http.StatusOK {
@@ -143,6 +147,7 @@ func TestPUTConfig_PreservesStoredAPIKeysWhenNotSent(t *testing.T) {
 // keeps what the UI displays equal to what gets stored instead of storing a value that will be
 // ignored on read.
 func TestPUTConfig_ThresholdIsClampedNotRejected(t *testing.T) {
+	t.Parallel()
 	cs, _ := testConfigStoreWithStore(t)
 	if w := putConfigRaw(t, cs, `{"default_auto_summarize_threshold":5000}`); w.Code != http.StatusOK {
 		t.Fatalf("PUT: status %d body %s", w.Code, w.Body.String())
@@ -160,6 +165,7 @@ func TestPUTConfig_ThresholdIsClampedNotRejected(t *testing.T) {
 // fail, so an unparseable stored mode falls back to act - while the PUT handler refuses the same
 // value. Different policies for different directions, on purpose.
 func TestGetConfig_CoercesStoredModeOnly(t *testing.T) {
+	t.Parallel()
 	cs, db := testConfigStoreWithStore(t)
 	if err := db.SetConfigValue("default_operating_mode", "autocomplete"); err != nil {
 		t.Fatalf("seed mode: %v", err)
@@ -177,6 +183,7 @@ func TestGetConfig_CoercesStoredModeOnly(t *testing.T) {
 // mentions one control must not reset the others, which is what a settings form with one dirty
 // field depends on.
 func TestPUTConfig_AbsentFieldsKeepStoredValues(t *testing.T) {
+	t.Parallel()
 	cs, _ := testConfigStoreWithStore(t)
 	seed := `{"worker_provider":"wp","worker_model":"wm","utility_provider":"up","utility_model":"um",
 		"default_auto_commit":true,"default_auto_merge":true,"default_subtasks_auto_merge":true,

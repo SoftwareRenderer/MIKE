@@ -36,6 +36,7 @@ func readSync(t *testing.T, s *Server, path, ifNoneMatch string) (syncDigest, ht
 // TestSyncRouteIsAnsweredWithARevalidatableDigest: the digest is asked on every return, so it must not be
 // kept, and an unchanged answer must cost no body. The ETag is CompressMiddleware's own.
 func TestSyncRouteIsAnsweredWithARevalidatableDigest(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Sync")
@@ -69,6 +70,7 @@ func TestSyncRouteIsAnsweredWithARevalidatableDigest(t *testing.T) {
 
 // TestSyncDigestMovesWithADurableWrite: a write that lands must move the revision, and with it the ETag.
 func TestSyncDigestMovesWithADurableWrite(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Sync")
@@ -91,6 +93,7 @@ func TestSyncDigestMovesWithADurableWrite(t *testing.T) {
 // TestSyncRouteIsNotTokenScope: the digest is a task read, but it is not one a headless client was ever
 // granted, and the approval test holds that list.
 func TestSyncRouteIsAnsweredWithoutSessionByNothing(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Sync")

@@ -18,6 +18,8 @@ import (
 // threshold (gitSlowWait, 2 s).
 const testMergeWaitReport = 20 * time.Millisecond
 
+// Serial: logging.TestSink re-points the process-wide log, so another test's lines would land in this
+// buffer and this test's restore would land on that test's sink.
 func TestMergeWaiterWaitsThenProceedsAndSaysWhatItWaitsOn(t *testing.T) {
 	logged, restore := logging.TestSink()
 	defer restore()
@@ -70,6 +72,7 @@ func TestMergeWaiterWaitsThenProceedsAndSaysWhatItWaitsOn(t *testing.T) {
 // against the others and every one of them runs. Nothing in this path may answer "busy" — the direction the
 // bounded-wait design would have gotten wrong.
 func TestParallelMergeWaitersAllRunAndNoneIsRefused(t *testing.T) {
+	t.Parallel()
 	wm := NewWorktreeManager(nil, nil)
 	const projectID = "siblings"
 

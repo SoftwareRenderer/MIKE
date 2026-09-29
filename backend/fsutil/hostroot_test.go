@@ -11,6 +11,11 @@ import (
 
 // jail points a jailed policy at a home directory the test owns and returns it. The widening is a
 // constructor argument, so no case here needs or touches the variable.
+//
+// The rule for why this file's tests stay serial: jail sets HOME, and t.Setenv refuses to run in a
+// parallel test or in any test with a parallel ancestor. The same holds for the cases that call
+// t.Setenv or t.Chdir themselves — both change the whole process, and a parallel test resumes after
+// the cleanup that put the original back.
 func jail(t *testing.T, declared ...string) *HostRoot {
 	t.Helper()
 	home := t.TempDir()
@@ -46,6 +51,7 @@ func assertRefused(t *testing.T, err error, what string) {
 	}
 }
 
+// serial for the reason at jail.
 func TestHostRootRefusesEverythingOutsideTheRoots(t *testing.T) {
 	h := jail(t)
 	elsewhere := t.TempDir() // a second temp dir: outside home, outside every root
@@ -68,6 +74,7 @@ func TestHostRootRefusesEverythingOutsideTheRoots(t *testing.T) {
 	}
 }
 
+// serial for the reason at jail.
 func TestHostRootAllowsInsideHome(t *testing.T) {
 	h := jail(t)
 	home := os.Getenv("HOME")
@@ -102,6 +109,7 @@ func TestHostRootAllowsInsideHome(t *testing.T) {
 	}
 }
 
+// serial for the reason at jail.
 func TestHostRootDeclaredDirectoriesAreRoots(t *testing.T) {
 	declared := t.TempDir()
 	h := jail(t, declared)
@@ -122,6 +130,7 @@ func TestHostRootDeclaredDirectoriesAreRoots(t *testing.T) {
 
 // The extensions directory defaults to the relative "extensions", so a declared directory
 // must become absolute — a request always names an absolute path.
+// serial for the reason at jail.
 func TestHostRootNormalizesARelativeDeclaredDir(t *testing.T) {
 	repo := t.TempDir()
 	t.Chdir(repo)
@@ -144,6 +153,7 @@ func TestHostRootNormalizesARelativeDeclaredDir(t *testing.T) {
 	}
 }
 
+// serial for the reason at jail.
 func TestHostRootInputMustBeAbsoluteAndCannotWalkOut(t *testing.T) {
 	h := jail(t)
 	home := os.Getenv("HOME")
@@ -160,6 +170,7 @@ func TestHostRootInputMustBeAbsoluteAndCannotWalkOut(t *testing.T) {
 	}
 }
 
+// serial for the reason at jail.
 func TestHostRootRefusesASymlinkPointingOutOfTheRoots(t *testing.T) {
 	h := jail(t)
 	home := os.Getenv("HOME")
@@ -194,6 +205,7 @@ func TestHostRootRefusesASymlinkPointingOutOfTheRoots(t *testing.T) {
 
 // os.Root refuses a final component that is a symlink even when the link stays inside the
 // root. The fallback through Contained is what keeps such a directory usable.
+// serial for the reason at jail.
 func TestHostRootReadsThroughASymlinkThatStaysInside(t *testing.T) {
 	h := jail(t)
 	home := os.Getenv("HOME")
@@ -224,6 +236,7 @@ func TestHostRootReadsThroughASymlinkThatStaysInside(t *testing.T) {
 
 // The refusal must come from the walk, not from os.Root: only ErrHostRoot becomes a 403, and it
 // names the link.
+// serial for the reason at jail.
 func TestHostRootMkdirNeverTraversesASymlink(t *testing.T) {
 	h := jail(t)
 	home := os.Getenv("HOME")
@@ -269,6 +282,7 @@ func TestHostRootMkdirNeverTraversesASymlink(t *testing.T) {
 
 // The other half of the fallback, and why it is not dead code: os.Root refuses an in-root
 // symlink on its own, while HostRoot.Stat reads it.
+// serial for the reason at jail.
 func TestStdlibRootRefusesAnInsideSymlinkAndOursReadsIt(t *testing.T) {
 	home := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(home, "storage", "go"), 0o700); err != nil {
@@ -297,6 +311,7 @@ func TestStdlibRootRefusesAnInsideSymlinkAndOursReadsIt(t *testing.T) {
 // The widening a policy has is the decision it was constructed with. The rule that only the exact
 // value "1" produces that decision is startup's (TestOptInSwitchesAreTheExactValueOne), including the
 // values someone types believing they widen it ("true", "yes", "on", " 1").
+// serial for the reason at jail.
 func TestHostRootWideningIsTheDecisionItWasBuiltWith(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -335,6 +350,7 @@ func TestHostRootWideningIsTheDecisionItWasBuiltWith(t *testing.T) {
 
 // With no usable home there is nothing to jail TO, so nothing is allowed: the policy fails
 // closed rather than falling back to the whole filesystem.
+// serial for the reason at jail.
 func TestHostRootFailsClosedWithoutAHome(t *testing.T) {
 	t.Setenv("HOME", "")
 	h := NewHostRoot(false, t.TempDir())
@@ -359,6 +375,7 @@ func TestHostRootFailsClosedWithoutAHome(t *testing.T) {
 
 // A home of "/" is a root that constrains nothing; the startup warning has to be able to say
 // so.
+// serial for the reason at jail.
 func TestHostRootReportsAUniversalRoot(t *testing.T) {
 	t.Setenv("HOME", "/")
 	h := NewHostRoot(false)
@@ -373,6 +390,7 @@ func TestHostRootReportsAUniversalRoot(t *testing.T) {
 
 // A nil policy is valid and fails closed, the way MountPolicy already is.
 func TestNilHostRootFailsClosed(t *testing.T) {
+	t.Parallel()
 	var h *HostRoot
 	if h.Unrestricted() {
 		t.Error("a nil policy must never report itself unrestricted")
@@ -390,6 +408,7 @@ func TestNilHostRootFailsClosed(t *testing.T) {
 
 // A root that disappears while the server runs must produce an error, not a success that read
 // something else.
+// serial for the reason at jail.
 func TestHostRootMissingRootDirectoryIsAnError(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -409,6 +428,7 @@ func TestHostRootMissingRootDirectoryIsAnError(t *testing.T) {
 }
 
 // The refusal must be recognisable by type as well as by text, and name the path.
+// serial for the reason at jail.
 func TestHostRootErrShape(t *testing.T) {
 	h := jail(t)
 	err := h.Err("/somewhere/else")

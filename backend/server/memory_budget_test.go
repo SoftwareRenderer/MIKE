@@ -8,6 +8,7 @@ import (
 )
 
 func TestMeminfoMB(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		contents string
@@ -35,6 +36,7 @@ func TestMeminfoMB(t *testing.T) {
 // TestBudgetSumsBothManagers adds the two managers together, which is correct because a container
 // belongs to only one of them, and adds the server's own process beside them.
 func TestMemoryBudgetSumsEveryManager(t *testing.T) {
+	t.Parallel()
 	b := &memoryBudget{
 		accountants: []memoryAccountant{
 			fixedAccountant{held: 300, charge: 512},
@@ -58,6 +60,7 @@ func TestMemoryBudgetSumsEveryManager(t *testing.T) {
 }
 
 func TestSelfRSSMB(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		contents string
@@ -84,6 +87,8 @@ func TestSelfRSSMB(t *testing.T) {
 // MIKE's own process is in the budget: it has no cgroup and no limit, so what it holds is what it
 // costs. An unreadable reading adds nothing and says so once, not once per tick.
 func TestSelfProcessAccountantChargesTheServer(t *testing.T) {
+	// Serial: logging.TestSink re-points the process-wide logger, so a concurrent test’s lines would
+	// land in this buffer.
 	held, charge := (&selfProcessAccountant{read: func() (int64, bool) { return 242, true }}).MemoryAccounting()
 	if held != 242 || charge != 242 {
 		t.Errorf("held=%d charge=%d, want 242/242", held, charge)
@@ -105,6 +110,7 @@ func TestSelfProcessAccountantChargesTheServer(t *testing.T) {
 
 // An unreadable host is reported as not measured, never as a host holding nothing.
 func TestMemoryBudgetUnreadableHostIsNotMeasured(t *testing.T) {
+	t.Parallel()
 	b := &memoryBudget{
 		accountants: []memoryAccountant{fixedAccountant{held: 300, charge: 512}},
 		meminfo:     func() (int64, int64, bool) { return 0, 0, false },

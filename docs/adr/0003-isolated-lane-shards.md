@@ -78,6 +78,11 @@ run body from 644.9 s to 532-569 s at a comparable failure count. One file is th
 it is the only change that makes a third shard worth measuring again, and it is the change that would make
 the third shard honest rather than lucky.
 
+A merge that landed after these runs replaced fixed sleeps in the lane specs with condition waits and cut two
+of the per-file entries by a third. The same 2-shard deal then measured 538.0 s with shard wall clocks of
+99.7 s and 85.7 s and still lost no test on a shard lane, so the count stands; what such a merge moves is the
+weighing in `lanes.ts`, not the decision.
+
 Each shard is a server, so a run holds `1 + N` ports and `1 + N` databases. Teardown stops each by identity —
 the PID file plus a `/proc` argv match on `--data-dir <dir>`, token for token — because with a dozen lanes on
 one `/tmp`, a prefix match would let one shard's directory answer for its neighbour's. A run started with a

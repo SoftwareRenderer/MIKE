@@ -6,6 +6,7 @@ import (
 )
 
 func TestProjectCreate(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	dir := t.TempDir()
 	initGitRepo(t, dir)
@@ -29,6 +30,7 @@ func TestProjectCreate(t *testing.T) {
 }
 
 func TestProjectCreate_RejectsInvalidName(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	dir := t.TempDir()
 	initGitRepo(t, dir)
@@ -75,6 +77,7 @@ func TestProjectCreate_RejectsInvalidName(t *testing.T) {
 }
 
 func TestProjectCreate_RejectsEmptyName(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	dir := t.TempDir()
 	initGitRepo(t, dir)
@@ -92,6 +95,7 @@ func TestProjectCreate_RejectsEmptyName(t *testing.T) {
 }
 
 func TestProjectUpdate_RejectsInvalidName(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
@@ -115,6 +119,7 @@ func TestProjectUpdate_RejectsInvalidName(t *testing.T) {
 }
 
 func TestProjectCreateSandboxEnabled(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	dir := t.TempDir()
 	initGitRepo(t, dir)
@@ -149,6 +154,7 @@ func TestProjectCreateSandboxEnabled(t *testing.T) {
 }
 
 func TestProjectCreateSandboxEnabledMissingNetworkIsolation(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	dir := t.TempDir()
 	initGitRepo(t, dir)
@@ -183,6 +189,7 @@ func TestProjectCreateSandboxEnabledMissingNetworkIsolation(t *testing.T) {
 }
 
 func TestProjectCreateDuplicatePath(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	dir := t.TempDir()
 	initGitRepo(t, dir)
@@ -206,6 +213,7 @@ func TestProjectCreateDuplicatePath(t *testing.T) {
 }
 
 func TestProjectList(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 
 	// Create 2 projects
@@ -236,6 +244,7 @@ func TestProjectList(t *testing.T) {
 }
 
 func TestProjectGetByID(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
@@ -252,6 +261,7 @@ func TestProjectGetByID(t *testing.T) {
 }
 
 func TestProjectGetByIDNotFound(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 
 	req := testRequest("GET", "/api/projects/nonexistent", nil)
@@ -262,6 +272,7 @@ func TestProjectGetByIDNotFound(t *testing.T) {
 }
 
 func TestProjectUpdate(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
@@ -280,6 +291,7 @@ func TestProjectUpdate(t *testing.T) {
 }
 
 func TestProjectUpdateSandboxNetworkIsolation(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
@@ -329,6 +341,7 @@ func TestProjectUpdateSandboxNetworkIsolation(t *testing.T) {
 }
 
 func TestProjectToggleSandboxWithTasks(t *testing.T) {
+	t.Parallel()
 	// The fixture server carries the DANGER_ZONE grant, which is what lets a project be switched to
 	// unsandboxed here; the refusal is pinned by the api suite.
 	s := testServer(t)
@@ -382,6 +395,7 @@ func TestProjectToggleSandboxWithTasks(t *testing.T) {
 
 // Test: sandbox setting change is blocked when tasks are actively running
 func TestProjectSandboxChangeBlockedWhenTasksRunning(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
@@ -408,6 +422,7 @@ func TestProjectSandboxChangeBlockedWhenTasksRunning(t *testing.T) {
 }
 
 func TestProjectDelete(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
@@ -426,6 +441,7 @@ func TestProjectDelete(t *testing.T) {
 }
 
 func TestProjectCounts(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
@@ -483,6 +499,7 @@ func TestProjectCounts(t *testing.T) {
 }
 
 func TestBoardEndpoint(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
@@ -504,6 +521,7 @@ func TestBoardEndpoint(t *testing.T) {
 }
 
 func TestClearDone(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
@@ -539,6 +557,7 @@ func TestClearDone(t *testing.T) {
 }
 
 func TestProjectCreateWithMemoryLimit(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	dir := t.TempDir()
 	initGitRepo(t, dir)
@@ -571,6 +590,7 @@ func TestProjectCreateWithMemoryLimit(t *testing.T) {
 }
 
 func TestProjectUpdateSandboxMemoryLimit(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	dir := t.TempDir()
 	initGitRepo(t, dir)
@@ -632,6 +652,7 @@ func TestProjectUpdateSandboxMemoryLimit(t *testing.T) {
 }
 
 func TestProjectUpdateSandboxForwardPorts(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 
 	projID := createTestProject(t, s)
@@ -691,6 +712,7 @@ func TestProjectUpdateSandboxForwardPorts(t *testing.T) {
 }
 
 func TestProjectUpdateSandboxMounts(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 
 	projID := createTestProject(t, s)
@@ -756,6 +778,7 @@ func TestProjectUpdateSandboxMounts(t *testing.T) {
 }
 
 func TestProjectUpdateSandboxEnvs(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 
 	projID := createTestProject(t, s)

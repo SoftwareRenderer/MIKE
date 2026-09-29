@@ -353,7 +353,6 @@ test.describe.serial('Reasoning effort setting', () => {
         // Expand a provider card
         const providerHeader = page.locator('.provider-card-header').first();
         await providerHeader.click();
-        // Wait for reasoning effort inputs to appear (replaces waitForTimeout(300))
         await expect(page.locator('.reasoning-effort-input').first()).toBeVisible({ timeout: 5000 });
 
         // Check that reasoning effort inputs exist
@@ -392,11 +391,9 @@ test.describe.serial('Reasoning effort setting', () => {
         // Expand first provider
         const providerHeader = page.locator('.provider-card-header').first();
         await providerHeader.click();
-        // Wait for details to appear (replaces waitForTimeout(200))
         await expect(page.locator('.provider-details')).toBeVisible({ timeout: 3000 });
 
         await page.click('.btn-add-model');
-        // Wait for new model input to appear (replaces waitForTimeout(200))
         const modelInputs = page.locator('.model-input');
         const inputCount = await modelInputs.count();
 
@@ -420,7 +417,6 @@ test.describe.serial('Reasoning effort setting', () => {
         if (await discardBtn.isVisible().catch(() => false)) {
             await discardBtn.click();
         }
-        // Wait for modal to close (replaces waitForTimeout(300))
         await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
     });
 
@@ -431,7 +427,6 @@ test.describe.serial('Reasoning effort setting', () => {
         // Expand first provider
         const providerHeader = page.locator('.provider-card-header').first();
         await providerHeader.click();
-        // Wait for details to appear (replaces waitForTimeout(200))
         await expect(page.locator('.provider-details')).toBeVisible({ timeout: 3000 });
 
         const reasoningInputs = page.locator('.reasoning-effort-input');
@@ -445,7 +440,6 @@ test.describe.serial('Reasoning effort setting', () => {
             await expect(effortInput).toHaveValue('high');
 
             await page.click('button:has-text("Save")');
-            // Wait for modal to close (replaces waitForTimeout(1000))
             await expect(page.locator('.modal')).not.toBeVisible({ timeout: 10000 });
 
             // Reopen settings
@@ -453,7 +447,6 @@ test.describe.serial('Reasoning effort setting', () => {
 
             // Expand first provider again
             await providerHeader.click();
-            // Wait for details to appear (replaces waitForTimeout(300))
             await expect(page.locator('.provider-details')).toBeVisible({ timeout: 3000 });
 
             // Check that the value persisted
@@ -464,7 +457,6 @@ test.describe.serial('Reasoning effort setting', () => {
             // Change to 'default' and save to verify it also round-trips
             await savedInput.fill('default');
             await page.click('button:has-text("Save")');
-            // Wait for modal to close (replaces waitForTimeout(500))
             await expect(page.locator('.modal')).not.toBeVisible({ timeout: 10000 });
 
             // Reopen settings and verify 'default' persisted

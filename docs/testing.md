@@ -7,9 +7,9 @@ only under load.
 ## E2E conventions
 - Descriptive spec filenames in `frontend/tests/e2e/`; shared helpers in `helpers.ts`.
 - `test.describe.serial()` when tests share state; unique identifiers (`Date.now()`) to avoid
-  interference; wait for selectors, no arbitrary delays (drag-and-drop is the known exception —
-  headless is slow). `serial` amplifies whatever coupling is left: one failure skips the rest of the
-  block as "did not run".
+  interference; wait for a condition, never for a duration. Every `waitForTimeout` is counted and gated;
+  *The sleep gate* below owns what is exempt and why. `serial` amplifies whatever coupling is left: one
+  failure skips the rest of the block as "did not run".
 - **Mock LLM is default** — tests use pre-recorded fixtures, never the real endpoint. Fail gracefully
   when the LLM is slow/unavailable.
 - **LSP specs come in two kinds, and only one may gate on the server.**
@@ -195,7 +195,7 @@ Two measured behaviours that chat specs keep getting wrong, both worth designing
 
 ## Frontend cleanliness gates (run by `make check`)
 
-`make test-frontend` ends with five gates over `frontend/src`:
+`make test-frontend` ends with five gates over `frontend/src`, and one over the e2e suite's waits:
 
 - **`npm run check:dead`** — knip over the **production view**: unused files, exports, exported types,
   duplicate exports, unlisted imports, unused dependencies. An ignored test file stays a *user* of what it
@@ -220,6 +220,8 @@ Two measured behaviours that chat specs keep getting wrong, both worth designing
 - **`npm run check:colors`** — `frontend/scripts/check-colors.sh` fails on a hex colour literal in a
   component or a stylesheet under `src/`, because every chrome colour comes from the palette in
   `src/app.css`; its header holds the exceptions.
+- **`npm run check:sleeps`** — `frontend/sleep-gate.py` counts `waitForTimeout` in `tests/`, which is the
+  wall clock the suite pays for waits it never performs. The section below owns both measurements.
 
 ### The dead-surface gate
 
@@ -292,6 +294,41 @@ that text is gone. The declaration carries the same `@knipignore` tag every reta
 `frontend/dead-surface.py` is what requires the tag and its reason there. Both gates are also blind to an
 object property nobody reads, a CSS class no template uses, and a REST route the UI stopped calling.
 
+### The sleep gate
+
+`frontend/sleep-gate.py` owns one rule: an e2e wait names the condition it waits for. A
+`page.waitForTimeout(n)` spends `n` milliseconds whether or not its subject has arrived. It is too short
+under load and forever too long when green.
+
+Behind almost every sleep there is a condition, and `tests/e2e/helpers.ts` holds the waiting for each
+kind. A locator (`toBeVisible`, `toBeHidden`, `toHaveCount`) once the DOM shows it. `expect.poll` or
+`waitForStable` once the DOM reaches it over several frames. `waitForSendButton` or `waitForTurnAnswered`
+once an executor turn answers; those carry the turn budget, because `expect.timeout` is shorter than a
+queued turn. `waitForStored` once a debounced browser write has landed, or a re-read through the API the
+spec already uses. `waitForChatStill` and `waitForChatGrowth` are the two the chat specs share, and
+`waitForReaction` is the frame-count bound a must-not-happen check has.
+
+**Measurement 1 — a sleep with no reason on its line must be 0.** The exemption is a duration that *is*
+the measurement. Drag settle and drag pacing qualify, as do an animation or debounce window the spec
+measures, a sampling cadence, and the seconds a second-precision timestamp needs to order three writes.
+
+```ts
+await page.waitForTimeout(1100); // moved_at has second precision: three moves need three distinct seconds
+```
+
+The reason sits on the sleep's own line, in at least four words. The line above is where a spec explains
+the code around a wait, which is how an arbitrary delay acquires a plausible comment.
+
+**Measurement 2 — how many sleeps the suite keeps, frozen as `SLEEP_CEILING`.** A reason makes a sleep
+legal, not free: every one of them is still paid on every run. The count only goes down; a rise is
+re-frozen with `cd frontend && python3 sleep-gate.py --update-ceiling`, and the reason belongs in the
+commit message.
+
+**Checking this.** `cd frontend && npm run check:sleeps-test`. The bare sleep is reported. The call named
+in prose, and the one inside a string, are not counted. A comment too short to be a reason fails. The
+ceiling bites, and `--update-ceiling` rewrites the constant it printed. The real tree is scanned too, so a
+walk that stopped finding specs cannot read as a clean run.
+
 ## Diagnostic scripts (ad-hoc investigation)
 
 For request-pattern/race investigation, write standalone Playwright scripts in `frontend/tests/` as
@@ -317,8 +354,8 @@ For request-pattern/race investigation, write standalone Playwright scripts in `
   else and the helper reports `not in local extensions list`.
 - **`waiting for locator('.project-item')`**: test project not created — check global-setup logs.
   **`waiting for locator('.card')`**: no tasks exist.
-- **Drag-and-drop flakes:** headless is slow — add `waitForTimeout` after the drag, increase the
-  predicate timeout.
+- **Drag-and-drop flakes:** headless is slow — the settle after the drag is one of the durations the sleep
+  gate exempts, so name it on the line and raise the predicate timeout instead of the sleep.
 - **Mock LLM routing wrong:** check keyword matching in `mock-llm.js` and the fixture files.
 
 ## Test environment
@@ -497,15 +534,86 @@ rm -rf /tmp/kanban-test-data* /tmp/kanban-test-worktrees
   Neither is on the load list — 10 rounds of the first and 8 of the second, run while a five-package `-race`
   sweep already loaded the machine, came back green.
 
-- **Tests inside a Go package run concurrently now.** `backend/exec` calls `t.Parallel()` in 664 of its
-  top-level tests and the package went 130 s → 43 s; it is `make test-go`'s critical path, so the suite went
-  131 s → 43 s. Serially, 13 tests each paid the 3 s `executorExitGrace` and three more waited out a real
+- **Top-level Go tests in a package run concurrently.** `t.Parallel()` opens 671 of the 706 top-level tests
+  in `backend/exec`, 438 of the 485 in `backend/server`, and 128 of the 136 in `backend/api`. Measured twice
+  each at `-parallel 4` with `go test ./backend/server/ ./backend/api/ -count=1 -parallel 4`, best run:
+  `backend/server` 336 s → 136 s, `backend/api` 67 s → 27 s. The whole scope
+  `go test ./backend/... ./pkg/... . -count=1 -parallel 4` went 183 s → 117 s. `backend/exec` went 130 s →
+  43 s the same way, where 13 tests each paid the 3 s `executorExitGrace` and three more waited out a real
   provider-silence ceiling.
-- **The tests left serial are the ones touching a process global.** `t.Setenv` refuses to run in a parallel
-  test, which is why `bash_stream_test.go` is one file. The other global is the CWD: template resolution reads
-  it on every render (`prompts.resolvePromptDir`). So the 23 exec tests that chdir to the repo root cannot
-  overlap — a concurrent restore moves the CWD mid-turn, and the failure reads
-  "open prompts/summarize.tmpl: no such file or directory". The rule sits at `chdirRepoRoot`.
+- **Seven smaller packages joined it.** 611 of their 666 top-level tests are parallel, and 87 subtests. The
+  counts: 43 of 43 in `backend/types`, 67 of 67 in `backend/config`, 56 of 56 in `backend/llama`, 40 of 42
+  in `backend/updates`, 31 of 42 in `backend/agent`, 32 of 46 in `backend/fsutil`, 342 of 370 in
+  `backend/extensions`. A package's share is one command, run per package:
+  `grep -A1 '^func Test' backend/agent/*_test.go | grep -c 't\.Parallel()'` — the 87 subtests are the
+  rest of the 698 calls.
+- **What those seven are worth.** Measured on the test binaries, best of three, `-test.parallel=1` against
+  `-test.parallel=4` on an idle machine: `backend/extensions` 29 s → 17 s, `backend/config` 7.5 s → 3.2 s,
+  `backend/agent` 0.40 s → 0.20 s, `backend/updates` 0.22 s → 0.12 s, `backend/types` 0.14 s → 0.09 s. The
+  seven together: 51 s → 31 s. The binaries are the honest instrument, because `go test` adds about 1.5 s per
+  package of its own bookkeeping, which is more than four of these packages cost to test.
+- **Two of the seven do not move, and the counts say why.** 14 of `backend/fsutil`'s 46 tests set the
+  environment, so they run in the serial phase, and that phase is the package: 0.48 s → 0.46 s.
+  `backend/llama` reads 13.1 s → 10.6 s because `TestChatStream_ProductionTimedOutRace` takes 10.6 s by
+  itself, and no schedule removes a floor.
+- **`backend/git` and `backend/store` run concurrently too.** `t.Parallel()` sits in 182 of `backend/git`'s
+  191 top-level tests and 170 of `backend/store`'s 174, and in five independent subtests. One binary per
+  revision, run alternately in one window at `-parallel 4`: git 104 s → 27 s, store 27 s → 9 s. The same
+  tests through `go test -count=1` answer 114 s → 28 s and 57 s → 13 s, which is what `make test-go` pays.
+- **The parallelized packages hold up under the detector.** `make check-race` over `backend/server` and
+  `backend/api` went green with no data race at 218 s and 57 s; the only red was
+  `TestTaskOperatingModeRemount`, which this host cannot pass (*A machine that cannot start a container*).
+  Two `-race` sweeps of the seven smaller packages at `-parallel 4` found no race either, and reported the
+  same one machine-bound red.
+- **A test left serial names the process state it shares**, at its own site or at the helper that takes it,
+  so the callers need no comment of their own.
+  - `t.Setenv` refuses to run in a parallel test, which is why exec's `bash_stream_test.go` is one file. The
+    variables are the process's own: `HOME` decides a file jail (`jailedProjectHandler`,
+    `jailedHostRootServer`), `TMPDIR` decides where an upload is staged (`taskUploadProject`),
+    `MIKE_ENCRYPTION_KEY` decides the golden capture (`setupGoldenFixture`), `MIKE_ALLOWED_HOSTS` decides
+    Host pinning, and four `env_test.go` tests plus the `backend/store` contention profile pin their own.
+    The seven smaller packages hold the same rule at `jail` (`backend/fsutil`'s `HOME`), at
+    `unsetAllowlisted` (`backend/agent`), and at `fakePodmanExit`, which is the only way a stand-in podman on
+    `PATH` is reachable.
+  - `logging.TestSink()` re-points the process-wide sink, so another test's lines land in this buffer and
+    this test's restore lands on that test's sink. Ten tests in `backend/server`, one in `backend/api`, the
+    `backend/git` merge-wait test and three `backend/store` migration tests read it. `captureLog` in
+    `backend/updates` is that rule at its two callers.
+  - The working directory is process state too. Template resolution reads it on every render
+    (`prompts.resolvePromptDir`) and `/extensions/` is a CWD-relative `http.Dir`, so the exec prompt tests
+    that chdir keep the rule at `chdirRepoRoot` and `TestExtensionsStatic_NoDirectoryListings` is the server
+    test that calls `t.Chdir`. A concurrent restore moves it mid-turn, and the failure reads
+    "open prompts/summarize.tmpl: no such file or directory". `withProjectRoot` calls `os.Chdir` to the
+    repo root for the five `backend/agent` WASM tests reached through `loadPiWasm`, and the two
+    `TestBuildExtensionImage_*` that call `t.Chdir` keep the same place.
+  - A package-level seam or accessor: `previewRand`; `egressCall`, which `allowLoopbackProxy` swaps, so two
+    callers would each run the other's dial policy; and the four `TestGitAuthorFlags_*` tests that write the
+    commit identity, which is process-wide and accessor-only (the Confinement rule in `AGENTS.md`).
+  - A keyed global is shared by every test holding one key, so a parallel test takes a key nobody else uses:
+    `registerStubAgent` derives its adapter-factory name from `t.Name()` for that reason.
+  - A reading of the process or the host is somebody else's noise: the `runtime.ReadMemStats` deltas behind
+    the size-cap refusals, and the canary path under `/tmp` that a rejected `git show --output=` payload would
+    create. `TestExtensionImageSource` asks podman what a short ref means, so what it reports is this
+    machine's storage.
+  - One fixture shared by a table's cases is shared state, not process state: `TestIsGitIgnored`'s table
+    stays serial because every case runs `git check-ignore` inside the same repository, and
+    `TestUniqueName`'s rows all write into the one `t.TempDir()` their parent made.
+  - A test that starts a container is machine-bound and queues at the memory gate behind every other start:
+    `TestTaskOperatingModeRemount`, and in `backend/extensions` `TestApplyMemoryLimit_RunningSandbox` and
+    `TestCreate_AcceptsValidImage`. `docs/sandbox-runtime.md` owns that budget.
+- **Shared is not mutable.** `sharedSecretBox` in `backend/config` and `testBox` in `backend/extensions` are
+  derivations hundreds of tests read and none replaces. Each costs hundreds of ms on purpose, so one box per
+  package is the point. Mutating one is a race with every sibling.
+- **A parallel subtest outlives its parent's body.** The parent's `defer` runs at return, before the subtest
+  starts; only its `t.Cleanup` functions run afterwards, and `t.TempDir()` rides on one. So a subtest goes
+  parallel only under a parent that does, over a fixture the parent handed to `t.Cleanup` — `testStore`,
+  `t.TempDir` — and never over one a `defer` closes. A local from a call is shared machinery: a parent's
+  `testHandler(t)` is one object its rows would argue over, while a table literal is data and reading it from
+  several rows is the point of one. The rows in `backend/server` and `backend/api` that do call it build their
+  own server or handler inside the row.
+- **A serial test that changes the environment shares a package with a parallel one.** A parallel top-level
+  test resumes only after `main` has finished the serial list. The cleanup that puts `HOME` or `PATH` back
+  has already run by then.
 - **`-parallel 4` in `test-go` is capacity, not a claim about the suite**, and its value is measured: see the
   `backend/stream` entry under *Tests that fail only under load*.
 
@@ -544,8 +652,10 @@ and leave the sandbox up; see `docs/sandbox-runtime.md`.
 host's own root is an overlayfs and podman was never given a `mount_program` — the image entrypoint makes
 that switch, a bare test host does not. Every test that creates a container then fails
 (`TestTaskOperatingModeRemount`, the `backend/sandbox` and `pkg/sandboxruntime` container suites), because
-the base image never pulls. Check it with `podman images` on nothing running: a red naming one of those
-suites, with that error in the log, is a reading about the machine.
+the base image never pulls. The image half of podman fails the same way: `backend/extensions`'
+`TestExtensionImageSource` is red in 10 of 10 package runs here, naming that same graph driver. Check it
+with `podman images` on nothing running: a red naming one of those suites, with that error in the
+log, is a reading about the machine.
 
 ## Tests that fail only under load
 
@@ -570,7 +680,14 @@ suites, with that error in the log, is a reading about the machine.
   line the failure prints (`describeTree` in `handler_test.go`) before believing either conclusion.
   Established: the rollback runs and logs the right path, the surviving tree carries the original
   checkout's mtimes, and `RepairMissingFiles` and the fake podman's fail-once budget are ruled out.
-  Unestablished: who leaves the tree behind.
+  Unestablished: who leaves the tree behind. It holds its serial place for a second reason that has nothing to
+  do with load: its fixture is `fakePodmanExit`, which calls `t.Setenv`, and that refuses a parallel test — so
+  the package's own concurrency cannot reach it either way. Rate there: 0 failures in 10 package runs at
+  `-parallel 8`, and 0 in two `-race` runs at `-parallel 4` and in a full-scope run.
+- **`backend/exec`'s `TestAbortedStreamIsRetriedAndTheTurnCompletes`** went red once in a whole-scope
+  `go test ./backend/... ./pkg/... . -count=1 -parallel 4` run with "assistant answer stored 0 times, want
+  1". Its wait ends at a second role while its assertion reads one row, which is the shape the entry above
+  refuses. Green alone and in the whole-scope runs since; re-run it alone before reading a red naming it.
 - **`backend/server`'s `TestTaskMoveUpdatesUpdatedAt`** was seen failing once, under `make check-race` over
   five packages, and not since: 10 `-count=10 -race` runs on the branch and 10 on `HEAD` came back clean.
   It asserts that two backlog tasks the test never writes come back ordered by `updated_at`, so the likeliest
@@ -580,29 +697,52 @@ suites, with that error in the log, is a reading about the machine.
   concurrently and 6/6 alone. It asserts the guest OOM-killed one process, and under host pressure the
   **host** memcg killer takes the whole runsc sandbox instead (exit 128 plus `WaitPID … EOF`, container
   gone). A red naming it is a reading about the machine, not about a memory limit that stopped working.
-- **`backend/server`'s `TestTaskOperatingModeRemount/does not remount when running`** failed once in a full
-  `make check` run with `expected sandbox to be created after start`, and passed alone and in two further
-  full runs. **Mechanism inferred, not proven — and the inference no longer holds**: it was read as the task
-  waiting in the memory gate because the suite was consuming the machine's RAM, and the gate no longer looks
-  at what the host's other users hold (`docs/sandbox-runtime.md → The memory budget`). No supervisor pause
-  was logged and the refusal path logs nothing, so the observation stands with no explanation. What remains
-  established is that a test which starts a sandboxed task and expects a container depends on the gate
-  admitting it.
+- **`backend/server`'s `TestTaskOperatingModeRemount`** does not belong on this list. It is one of the
+  container tests named in *A machine that cannot start a container*. It failed 2 of 2
+  `make check-race` runs, alone under `-race`, and alone without it, with `podman info` answering the
+  unsupported-overlayfs error every time. That error is what the assertion reports as
+  `expected sandbox to be created after start`. It was once read as the memory gate refusing the start
+  (`docs/sandbox-runtime.md → The memory budget`); that inference no longer holds. `podman images` on
+  nothing running is the check that decides a red naming it.
 - **A `t.TempDir()` cleanup failing with `unlinkat …: directory not empty`** means a subprocess is still
-  writing while the removal walks. Two tests carry it here: `backend/exec`'s
-  `TestToolCallWithIntactArgumentsRunsTheSameCommand`, and `backend/server`'s
-  `TestCommitAndDoneMergeConflictSystemMessage` under `make check-race`. The exec one showed once inside
-  `make check` at `-parallel 8` and in 4 of 61 filtered single-test runs on one branch, against 0 of 50 with
-  that branch's new `backend/exec` test file set aside and 0 of 21 at the revision before it. No
-  full-package run of either package shows it. The turn's own goroutine is waited for — the start helper
+  writing while the removal walks. Three tests carry it here: `backend/exec`'s
+  `TestToolCallWithIntactArgumentsRunsTheSameCommand`, and `backend/server`'s pair of merge-conflict tests,
+  `TestCommitAndDoneMergeConflictSystemMessage` and `TestCommitAndDoneMergeConflictPreservesAutoMerge`. The
+  exec one showed once inside `make check` at `-parallel 8` and in 4 of 61 filtered single-test runs on one
+  branch, against 0 of 50 with that branch's new `backend/exec` test file set aside and 0 of 21 at the
+  revision before it. A full-package run does show the server pair: `make check` at `-parallel 4` hit
+  `TestCommitAndDoneMergeConflictPreservesAutoMerge`, and that one failed 1 of 3 single runs on an idle
+  machine, so it is not only a load reading. The turn's own goroutine is waited for — the start helper
   cancels it and waits (`llm_crash_test.go`) — so the writer is something the harness does not join, and a
   context-less local git call survives that cancel. Unestablished: which call, and why the rate moves with a
   test file that does not run. A red naming one of these while other packages run concurrently is a reading
   about the machine — re-run the package alone before believing it, and the single test if that passes.
+  Re-measured where `backend/exec`'s event-stand-in sleeps became condition waits: 0 of 10 filtered
+  single-test runs and 0 of 5 full-package runs, so the sleeps that went are not what this cleanup waits
+  for. The `backend/server` one appeared in 1 of the 2 `make check-race` runs made for the same change.
+- **`pkg/subproc`'s `TestWatchStopsReportingOnceTheSubprocessFinished`** counts a watchdog report that
+  arrives after `stop()` returned: "a finished subprocess reported 1 time(s), want 0". Measured here: 1 of
+  12 single runs on an idle machine, 5 of 6 against a 16-way CPU spinner, once inside `make check`. It reads
+  its own counter under its own mutex and names none of the packages on the parallel list, so the reading is
+  a 20 ms tick in flight between the deadline and the stop. A busy machine widens that window; nobody has
+  made it narrow.
+- **A package that dies at its own 10-minute timeout with a test under `running tests:` whose worker
+  goroutine is missing from the dump** is a `t.Fatalf` inside a spawned goroutine, not a wedge. `Goexit`
+  runs the deferred `wg.Done` but never the `close(start)` the test is blocked on, so a failure nobody
+  gets to read becomes a package-wide panic. `backend/exec`'s
+  `TestCommitAndMerge_SerializesPerProject` did this in 2 of 2 full-scope `-parallel 4` runs, where
+  `runGit` failed under contention. Its staging calls are on the test goroutine now and its receives are
+  bounded (`awaitSignal` in `wait_test.go`), so the same git failure prints git's own words. Read a fresh
+  one the same way: find the goroutine that is *not* in the dump, then the receive waiting on it.
 - **`backend/stream`'s `TestAConnectionThatMissedFramesIsEndedSoTheClientResyncs`** waits up to 10 s for the
   writer goroutine to end a connection with a hole in it, and fails with "still streaming a gap" when the
-  bound passes. It went red in 2 of 2 `make check` runs and 1 of 4 full-scope `go test -parallel 8` runs, and
-  in 0 of 3 at `-parallel 4` — which is why `test-go` runs 4. Alone it is green 5 of 5, three of those under a
-  12-way spinner load, so raw CPU load is not the trigger and the other packages are. No exec test file
+  bound passes. It went red in 2 of 2 `make check` runs and 1 of 4 full-scope `go test -parallel 8` runs,
+  which is why `test-go` runs 4. `-parallel 4` does not hold: a nine-run sweep of six packages went red
+  3 times on this revision, 0 of 3 on the revision before it. **Running it alone is not a clean reading
+  either.** With `-run` selecting only it, 1 of 10 `-count=1` runs failed. The same selection on the
+  revision before this task's sleeps became condition waits failed 2 of 10. So the earlier "green 5 of 5
+  alone" is dropped: a red naming it with nothing else running is a one-in-ten starved goroutine, not the
+  change under test. Repeating it inside one process (`-count=5`) put a failure in 3 of 9 process-runs
+  here and in 0 of 3 on the earlier revision, samples too small to rank either way. No exec test file
   reaches `backend/stream`'s binary, so the reading is one goroutine starved rather than a shared fixture;
   *mechanism not established*.

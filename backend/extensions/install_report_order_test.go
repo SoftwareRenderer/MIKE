@@ -15,6 +15,7 @@ import (
 // `GET /api/extensions/local` offers the ghost folder the rollback has not deleted yet, under the manifest it
 // shipped with, and the retry the message invites is refused as "install already in progress".
 
+// serial for the reason at fakePodmanExit.
 func TestFailedInstallSettlesTheStateBeforeItReportsFailure(t *testing.T) {
 	repo, commit := makeGitRepo(t, map[string]string{
 		"lsp/gopls/manifest.json": `{"display_name":"Go","description":"d","author":"Go Team","version":"0.7.0",` +

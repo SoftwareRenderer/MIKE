@@ -11,6 +11,7 @@ import (
 )
 
 func TestBuildExtensionCreateArgs_ProjectMountOutsidePolicyIsSkipped(t *testing.T) {
+	t.Parallel()
 	allowed := t.TempDir()
 	outside := t.TempDir()
 	link := filepath.Join(allowed, "link")
@@ -34,6 +35,7 @@ func TestBuildExtensionCreateArgs_ProjectMountOutsidePolicyIsSkipped(t *testing.
 }
 
 func TestBuildExtensionCreateArgs_ProjectMountInsidePolicyIsMounted(t *testing.T) {
+	t.Parallel()
 	// The control case: a workspace that really is under a root still gets its mount, so the
 	// check above is a refusal and not every mount being skipped.
 	allowed := t.TempDir()

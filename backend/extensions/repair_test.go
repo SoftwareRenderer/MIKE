@@ -76,6 +76,7 @@ func classifyByID(t *testing.T, h *ExtensionHandler) map[string]missingInstall {
 // A row is reported when its directory has no manifest it can be loaded from — and only then. A
 // half-written checkout has a directory; that is not an install.
 func TestClassifyMissingInstalls(t *testing.T) {
+	t.Parallel()
 	h, store, root := handlerFixture(t)
 
 	writeManifest(t, root, "acme", "healthy", manifestBody("Acme", "1.0.0"))
@@ -168,6 +169,7 @@ func commitRepo(t *testing.T, repo string, files map[string]string) string {
 // The restore is the pinned commit, not whatever the repository says now: a repair that pulled the
 // newest revision would be an unasked-for update with unvetted bytes.
 func TestRepairMissingFiles_RestoresThePinnedCommit(t *testing.T) {
+	t.Parallel()
 	repo, pinned := makeGitRepo(t, map[string]string{
 		"ui/x/manifest.json": manifestBody("Acme", "1.0.0"),
 		"ui/x/Preview.js":    "PINNED CONTENT",
@@ -217,6 +219,7 @@ func TestRepairMissingFiles_RestoresThePinnedCommit(t *testing.T) {
 
 // A repair must not overwrite work in progress: the same in-flight guard an install or update takes.
 func TestRepairMissingFiles_SkipsInFlightExtension(t *testing.T) {
+	t.Parallel()
 	repo, commit := makeGitRepo(t, map[string]string{"ui/x/manifest.json": manifestBody("Acme", "1.0.0")})
 	h, store, root := handlerFixture(t)
 	createRow(t, store, "acme-x-1", "acme", "x", "registry", repo, commit, "ui/x")
@@ -246,6 +249,7 @@ func TestRepairMissingFiles_SkipsInFlightExtension(t *testing.T) {
 // reach a subprocess at all — that is the same clone path an install uses, run here without anyone
 // asking for it.
 func TestRepairMissingFiles_NeverFetchesWhatItCannotTrust(t *testing.T) {
+	t.Parallel()
 	sentinel := filepath.Join(t.TempDir(), "pwned")
 	repo, commit := makeGitRepo(t, map[string]string{"ui/x/manifest.json": manifestBody("Acme", "1.0.0")})
 
@@ -279,6 +283,7 @@ func TestRepairMissingFiles_NeverFetchesWhatItCannotTrust(t *testing.T) {
 // The pinned commit's subdir may move or stop being an extension. Restoring it under a name it was
 // never vetted under is the failure this refuses.
 func TestRepairMissingFiles_RefusesWhatIsNotTheRecordedExtension(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		content string
@@ -288,6 +293,7 @@ func TestRepairMissingFiles_RefusesWhatIsNotTheRecordedExtension(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			files := map[string]string{"ui/x/other.txt": "x"}
 			if tc.content != "{}" {
 				files["ui/x/manifest.json"] = tc.content
@@ -317,6 +323,7 @@ func TestRepairMissingFiles_RefusesWhatIsNotTheRecordedExtension(t *testing.T) {
 
 // A cancelled context ends the pass instead of starting fetches nobody wants any more.
 func TestRepairMissingFiles_EndsWithTheContext(t *testing.T) {
+	t.Parallel()
 	repo, commit := makeGitRepo(t, map[string]string{"ui/x/manifest.json": manifestBody("Acme", "1.0.0")})
 	h, store, root := handlerFixture(t)
 	createRow(t, store, "acme-x-1", "acme", "x", "registry", repo, commit, "ui/x")

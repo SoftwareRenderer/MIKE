@@ -84,7 +84,8 @@ test.describe('Editor External Change Reconciliation', () => {
       await page.keyboard.press('Control+Home'); // document start
       await page.keyboard.press('End');          // end of line 1
       await page.keyboard.type(' USER');
-      await page.waitForTimeout(400); // let draft/unsaved state settle
+      // The merge only runs on a dirty buffer, and the tab's unsaved mark is that state made visible.
+      await expect(page.locator('.editor-tab.unsaved')).toBeVisible();
 
       // Externally edit a different line (line 3)
       writeFileSync(absFile, 'Line 1: alpha\nLine 2: beta\nLine 3: gamma EXTERNAL\n');
@@ -122,20 +123,18 @@ test.describe('Editor External Change Reconciliation', () => {
       await page.keyboard.press('Control+Home');
       await page.keyboard.press('End');
       await page.keyboard.type(' USER');
-      await page.waitForTimeout(400);
+      // The conflict path only runs on a dirty buffer, and the tab's unsaved mark is that state made visible.
+      await expect(page.locator('.editor-tab.unsaved')).toBeVisible();
 
       // Externally edit the SAME line differently
       writeFileSync(absFile, 'Line 1: alpha EXTERNAL\nLine 2: beta\nLine 3: gamma\n');
 
-      // User edit must be preserved (not overwritten by the external change)
-      await page.waitForTimeout(1200); // allow debounce + fetch + reconcile
+      // The toast is the reconcile saying it ran, so it is the wait — and what it must have left behind
+      // is the user's buffer, not the external text.
+      await expect(page.locator('.toast')).toContainText('changed externally', { timeout: 20000 });
       const content = (await page.locator('.cm-content').textContent()) ?? '';
       expect(content).toContain('alpha USER');
       expect(content).not.toContain('alpha EXTERNAL');
-
-      // A non-blocking toast should be shown
-      await expect(page.locator('.toast')).toBeVisible({ timeout: 5000 });
-      await expect(page.locator('.toast')).toContainText('changed externally');
     } finally {
       try { rmSync(absFile, { force: true }); } catch { /* ignore */ }
     }

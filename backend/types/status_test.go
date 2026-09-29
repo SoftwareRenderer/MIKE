@@ -10,6 +10,7 @@ import (
 // them and WebSocket payloads carry them. Renaming a constant is safe; changing a value
 // orphans every card in that column, and no Go type can catch that.
 func TestStatusWireFormatIsFrozen(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		got  Status
 		want string
@@ -26,6 +27,7 @@ func TestStatusWireFormatIsFrozen(t *testing.T) {
 }
 
 func TestParseStatus(t *testing.T) {
+	t.Parallel()
 	for _, s := range []string{"backlog", "in_progress", "review", "done"} {
 		if _, ok := ParseStatus(s); !ok {
 			t.Errorf("ParseStatus(%q) = not-ok, want ok", s)
@@ -46,6 +48,7 @@ func TestParseStatus(t *testing.T) {
 
 // TestTaskStatusJSONRoundTrip: the typed field must marshal exactly as the string replaced.
 func TestTaskStatusJSONRoundTrip(t *testing.T) {
+	t.Parallel()
 	blob := `{"status":"review","execution_state":"running"}`
 	var task Task
 	if err := json.Unmarshal([]byte(blob), &task); err != nil {

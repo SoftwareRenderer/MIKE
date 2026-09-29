@@ -63,6 +63,7 @@ func exists(path string) bool {
 // TestHandleDelete_RemovesTheMaterializedDirectory: the row used to go and the files stayed, so the
 // extension kept being served from disk and came back through the local listing with its old manifest.
 func TestHandleDelete_RemovesTheMaterializedDirectory(t *testing.T) {
+	t.Parallel()
 	h, store, root := handlerFixture(t)
 	storedExtension(t, store, "go-team-gopls-1", "Go Team", "gopls", "registry")
 	storedExtension(t, store, "rust-analyzer-1", "Rust Analyzer Project", "rust-analyzer", "registry")
@@ -104,6 +105,7 @@ func TestHandleDelete_RemovesTheMaterializedDirectory(t *testing.T) {
 // TestHandleDelete_RemovesAFlatLocalExtension covers the older layout, where an extension with no
 // author folder lives directly under the root.
 func TestHandleDelete_RemovesAFlatLocalExtension(t *testing.T) {
+	t.Parallel()
 	h, _, root := handlerFixture(t)
 	storedExtension(t, h.store, "local-my-ui", "local", "my-ui", "local")
 	dir := filepath.Join(root, "my-ui")
@@ -122,7 +124,9 @@ func TestHandleDelete_RemovesAFlatLocalExtension(t *testing.T) {
 }
 
 func TestHandleDelete_NeverDeletesOutsideTheExtensionsRoot(t *testing.T) {
+	t.Parallel()
 	t.Run("a name that is not a single path segment", func(t *testing.T) {
+		t.Parallel()
 		h, _, root := handlerFixture(t)
 		storedExtension(t, h.store, "evil-1", "acme", "../../outside", "registry")
 
@@ -139,6 +143,7 @@ func TestHandleDelete_NeverDeletesOutsideTheExtensionsRoot(t *testing.T) {
 	})
 
 	t.Run("an author folder that is a symlink elsewhere", func(t *testing.T) {
+		t.Parallel()
 		h, _, root := handlerFixture(t)
 		storedExtension(t, h.store, "evil-2", "linked", "srv", "registry")
 
@@ -164,6 +169,7 @@ func TestHandleDelete_NeverDeletesOutsideTheExtensionsRoot(t *testing.T) {
 // TestHandleDelete_ReportsFilesItCouldNotRemove: the row goes either way, so an unremovable directory
 // must arrive as a named path rather than silence.
 func TestHandleDelete_ReportsFilesItCouldNotRemove(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("permissions do not bind the superuser")
 	}
@@ -194,6 +200,7 @@ func TestHandleDelete_ReportsFilesItCouldNotRemove(t *testing.T) {
 // TestHandleDelete_WithNoFilesAtAll: a record whose directory was never written (or was removed by
 // hand) is a normal delete, not a warning.
 func TestHandleDelete_WithNoFilesAtAll(t *testing.T) {
+	t.Parallel()
 	h, _, _ := handlerFixture(t)
 	storedExtension(t, h.store, "never-written", "acme", "ghost", "registry")
 

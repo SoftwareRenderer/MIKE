@@ -54,8 +54,11 @@ export const ISOLATED_SPECS: string[] = [
  * with `make test-time TIME_ARGS='--show-specs=20 --json=/tmp/pw.json'`. The lane's wall clock, not these
  * numbers, is what a run claims, so they weigh the deal rather than predict it — every file takes longer
  * once shards share the machine's tail with the chromium lane, so this table is one shard's uncontended
- * reading and only the ratio between entries is used. A name missing from this table is priced at
- * `DEFAULT_SPEC_SECONDS`, so adding a spec to `ISOLATED_SPECS` needs no edit here.
+ * reading and only the ratio between entries is used. A spec's wait style moves its entry on its own (a
+ * merge that replaced sleeps with condition waits cut two of these by a third within one day), so re-read
+ * them with the command above rather than trusting the absolute values — and check the deal it produces
+ * against the lane wall clocks, since two nearby entries can swap shards on a tie. A name missing from
+ * this table is priced at `DEFAULT_SPEC_SECONDS`, so adding a spec to `ISOLATED_SPECS` needs no edit here.
  */
 const ISOLATED_SPEC_SECONDS: Record<string, number> = {
     'html-preview': 33.1,

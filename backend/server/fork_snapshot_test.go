@@ -110,6 +110,7 @@ func forkFrom(t *testing.T, s *Server, fx forkFixture, fromThreadID, fromMessage
 // cut, in its own thread. When the copy stripped the checkpoint hash that lookup found nothing and fell
 // back to the task's starting commit, rewinding a fork's files behind its own conversation.
 func TestForkInsideForkKeepsTheCheckpointItInherited(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	fx := setupForkWithCheckpoint(t, s, "fork-of-fork")
 
@@ -183,6 +184,7 @@ func TestForkInsideForkKeepsTheCheckpointItInherited(t *testing.T) {
 // Deleting a turn rewinds the files to the last state the remaining conversation recorded — inside a
 // fork, that is the state it inherited.
 func TestDeletingMessagesInAForkRollsBackToTheSurvivingCheckpoint(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	fx := setupForkWithCheckpoint(t, s, "fork-rollback")
 
@@ -225,6 +227,7 @@ func TestDeletingMessagesInAForkRollsBackToTheSurvivingCheckpoint(t *testing.T) 
 
 // delete_single is the same case in miniature: the row and the snapshot it named leave together.
 func TestDeleteSingleMessageReleasesItsSnapshot(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	fx := setupForkWithCheckpoint(t, s, "dismiss-error")
 
@@ -246,6 +249,7 @@ func TestDeleteSingleMessageReleasesItsSnapshot(t *testing.T) {
 // replacement's branch first — for Main, a branch that has to be resolved, since Main has no git_branch.
 // Git will not delete a checked-out branch.
 func TestDeletingActiveThreadDeletesItsBranch(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	fx := setupForkWithCheckpoint(t, s, "delete-active-thread")
 

@@ -300,16 +300,16 @@ func TestBashCancel(t *testing.T) {
 	bashReq := protocol.NewRequest(1, protocol.MethodBash, bashParams)
 	sendToAgent(bashReq)
 
-	// Give the agent time to start the process
-	time.Sleep(100 * time.Millisecond)
-
-	// Verify process is tracked
-	h.mu.Lock()
-	if _, ok := h.bashProcs[1]; !ok {
-		h.mu.Unlock()
+	// A cancel sent before the process is tracked cancels nothing, so wait for the tracking
+	// rather than for a slice of wall clock.
+	if !awaitProcess(5*time.Second, func() bool {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		_, ok := h.bashProcs[1]
+		return ok
+	}) {
 		t.Fatal("bash process not tracked after start")
 	}
-	h.mu.Unlock()
 
 	// Send cancel
 	cancelFrame := protocol.NewBashCancelRequest(2, 1)

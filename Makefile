@@ -113,6 +113,8 @@ test-frontend: ## Run frontend unit tests + the gates (vitest, ~10s)
 	cd frontend && npm run check:dead
 	@echo "==> dead surface (an untagged test-only export; the duplicated-CSS ceiling)"
 	cd frontend && npm run check:dead-surface-test && npm run check:dead-surface
+	@echo "==> sleep gate (an unreasoned waitForTimeout; the frozen sleep ceiling)"
+	cd frontend && npm run check:sleeps-test && npm run check:sleeps
 	@echo "==> unused declarations (noUnusedLocals + noUnusedParameters)"
 	cd frontend && npm run check:unused
 	@echo "==> component fetches (the API layer owns the network)"

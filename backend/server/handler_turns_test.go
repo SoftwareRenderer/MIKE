@@ -37,6 +37,7 @@ func readTurns(t *testing.T, s *Server, path string) ([]turnRow, http.Header) {
 // The case the chat header hits: a task whose newest turn is long answers its window with answers only,
 // and still names the prompt that opened the turn.
 func TestTurnsRouteNamesThePromptTheWindowLeftOut(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Long turn")
@@ -66,6 +67,7 @@ func TestTurnsRouteNamesThePromptTheWindowLeftOut(t *testing.T) {
 
 // Prompts a page at a time, each one handed over once.
 func TestTurnsRoutePagesOlderPrompts(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Paged")
@@ -120,6 +122,7 @@ func TestTurnsRoutePagesOlderPrompts(t *testing.T) {
 // The bound is what keeps the response bounded: a prompt that is a pasted file is quoted up to the label
 // bound, not shipped.
 func TestTurnsRouteBoundsTheQuotedLine(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Bounded")
@@ -137,6 +140,7 @@ func TestTurnsRouteBoundsTheQuotedLine(t *testing.T) {
 }
 
 func TestTurnsRouteRefusesLimitsItDoesNotAnswer(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Refused")
@@ -154,6 +158,7 @@ func TestTurnsRouteRefusesLimitsItDoesNotAnswer(t *testing.T) {
 }
 
 func TestTurnsRouteRefusesACursorItDidNotIssue(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Cursor")
@@ -168,6 +173,7 @@ func TestTurnsRouteRefusesACursorItDidNotIssue(t *testing.T) {
 }
 
 func TestTurnsRouteAnswersForATaskThatIsGone(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
@@ -179,6 +185,7 @@ func TestTurnsRouteAnswersForATaskThatIsGone(t *testing.T) {
 
 // A prompt's cursor is the floor that stops a window at that prompt.
 func TestTurnsRouteHandsOutTheCursorThatFloorsAWindow(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Long turn")

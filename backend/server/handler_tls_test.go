@@ -37,6 +37,7 @@ func getTLSCA(t *testing.T, s *Server, cookie string) *httptest.ResponseRecorder
 }
 
 func TestTLSCADownloadServesCertificate(t *testing.T) {
+	t.Parallel()
 	s, cfg := defaultCertServer(t)
 	cookie := loginTest(t, s)
 
@@ -82,6 +83,7 @@ func TestTLSCADownloadServesCertificate(t *testing.T) {
 // The CA is a public certificate, but the route is a link inside the signed-in
 // UI, not a public endpoint.
 func TestTLSCARequiresSession(t *testing.T) {
+	t.Parallel()
 	s, _ := defaultCertServer(t)
 
 	if rr := getTLSCA(t, s, ""); rr.Code != http.StatusUnauthorized {
@@ -94,6 +96,7 @@ func TestTLSCARequiresSession(t *testing.T) {
 
 // --no-tls and a user-provided certificate both have no CA of ours.
 func TestTLSCAUnavailableWithoutLocalCA(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie := loginTest(t, s)
 
@@ -114,6 +117,7 @@ func TestTLSCAUnavailableWithoutLocalCA(t *testing.T) {
 }
 
 func TestTLSCAOnlyServesGET(t *testing.T) {
+	t.Parallel()
 	s, _ := defaultCertServer(t)
 	cookie, csrf := loginTestCSRF(t, s)
 
@@ -126,6 +130,7 @@ func TestTLSCAOnlyServesGET(t *testing.T) {
 
 // The flag drives the link, so it must follow the same condition as the 404.
 func TestConfigAdvertisesTLSCA(t *testing.T) {
+	t.Parallel()
 	s, _ := defaultCertServer(t)
 	cookie := loginTest(t, s)
 

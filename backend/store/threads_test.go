@@ -9,6 +9,7 @@ import (
 )
 
 func TestCreateAndGetThread(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -33,6 +34,7 @@ func TestCreateAndGetThread(t *testing.T) {
 }
 
 func TestGetThreadNotFound(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	_, err := s.GetThread("nonexistent")
 	if err == nil {
@@ -41,6 +43,7 @@ func TestGetThreadNotFound(t *testing.T) {
 }
 
 func TestGetThreadsByTask(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -89,6 +92,7 @@ func TestGetThreadsByTask(t *testing.T) {
 }
 
 func TestSetActiveThread(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -138,6 +142,7 @@ func TestSetActiveThread(t *testing.T) {
 }
 
 func TestDeleteThread(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -164,6 +169,7 @@ func TestDeleteThread(t *testing.T) {
 }
 
 func TestGetThreadsByCheckpointMessageID(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -197,6 +203,7 @@ func TestGetThreadsByCheckpointMessageID(t *testing.T) {
 }
 
 func TestGetThreadsByCheckpointMessageTime(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -229,6 +236,7 @@ func TestGetThreadsByCheckpointMessageTime(t *testing.T) {
 }
 
 func TestCopyMessagesToThread(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -302,6 +310,7 @@ func TestCopyMessagesToThread(t *testing.T) {
 // TestCopyMessagesToThread_EntryBoundary: an assistant row and the tool calls it issued are one entry,
 // and a fork contains whole entries — never half of one, never a row from the next.
 func TestCopyMessagesToThread_EntryBoundary(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	if err := s.CreateProject(newProject("proj-1", "test", "/tmp/test")); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -381,6 +390,7 @@ func TestCopyMessagesToThread_EntryBoundary(t *testing.T) {
 // TestCopyMessagesToThread_PayloadFidelity: every column that gives a row its meaning travels, and the
 // copied tool_call row points at the copied assistant row, not the parent's.
 func TestCopyMessagesToThread_PayloadFidelity(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	if err := s.CreateProject(newProject("proj-1", "test", "/tmp/test")); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -485,6 +495,7 @@ func roleSeq(msgs []types.TaskMessage) string {
 }
 
 func TestThreadWithParentThreadID(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -516,6 +527,7 @@ func TestThreadWithParentThreadID(t *testing.T) {
 }
 
 func TestThreadWithGitBranch(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
