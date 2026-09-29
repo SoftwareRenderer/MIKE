@@ -120,6 +120,18 @@ test-frontend: ## Run frontend unit tests + the gates (vitest, ~10s)
 	@echo "==> colour literals (the palette in src/app.css owns every colour)"
 	cd frontend && npm run check:colors
 
+# What the gates cost, measured instead of estimated. Lanes: `LANES="gates check go vitest e2e"` (all five
+# by default); a filter narrows to the lane it belongs to, so `make test-time GO_PKGS=./backend/git/` prices
+# one package and `make test-time E2E_GREP=chat-core` prices one spec. The e2e lane stops the dev server,
+# because global-setup owns ports 3000/3001/9999. Tables to stdout, raw numbers under data/test-timings/;
+# the recorded baseline is `docs/testing.md → Measured gate cost`.
+.PHONY: test-time
+test-time: ## Measure gate cost: sub-gates, Go pkgs/tests, vitest files, e2e specs (LANES=, GO_PKGS=, E2E_GREP=)
+	@LANES='$(LANES)' GO_PKGS='$(GO_PKGS)' GO_PARALLEL='$(GO_PARALLEL)' VITEST_FILTER='$(VITEST_FILTER)' \
+	  E2E_GREP='$(E2E_GREP)' E2E_TITLE='$(E2E_TITLE)' E2E_ARGS='$(E2E_ARGS)' E2E_WORKERS='$(E2E_WORKERS)' \
+	  E2E_PROBE='$(E2E_PROBE)' E2E_RESTART='$(E2E_RESTART)' TIMING_DIR='$(TIMING_DIR)' \
+	  scripts/test-timings.sh
+
 # A locale pack fails silently in both directions, so neither failure shows up in the UI: a
 # missing message key falls back to English per key (a pack missing 300 keys still looks
 # translated), and a prompt overlay that renames a placeholder or drops a {{if}} only fails when

@@ -1,8 +1,172 @@
 # Testing Conventions & Mock LLM
 
 Read this when writing or debugging e2e or unit tests. `AGENTS.md → Testing` keeps the commands and the
-short rules; this file holds the environment, the conventions, the mock-LLM fixtures and the tests that fail
-only under load.
+short rules; this file holds the measured cost of each gate, the environment, the conventions, the mock-LLM
+fixtures and the tests that fail only under load.
+
+## Measured gate cost
+
+`make test-time` measures what the test gates cost; `scripts/test-timings.sh` is the instrument. This section
+is the record: one dated block per measurement, wall-clock seconds, ranked slowest-first as the tool prints
+them. An unmeasured cost is a work estimate, and `make docs-check` refuses one in a rules document
+(`docs/documentation.md → The gate`). The help lines reading `~10s` and `~5min` were exactly that. The
+instrument is not a gate: it times a red unit and a green one the same way, prints an exit code beside every
+row, and exits non-zero when a unit exits other than expected.
+
+- **A cost claim with no measured number behind it is not a rule here.** Quote a row below, or measure it and
+  add the row.
+
+Re-price one row without paying for a suite:
+
+| the row to re-measure | command |
+|---|---|
+| each `make check` sub-gate | `make test-time LANES=gates` |
+| one whole `make check` | `make test-time LANES=check` |
+| one Go package, or the whole Go scope | `make test-time GO_PKGS=./backend/git/` |
+| vitest, or one vitest path | `make test-time LANES=vitest`, with `VITEST_FILTER=src/lib/utils` |
+| one Playwright spec file | `make test-time E2E_GREP=chat-core` |
+
+Every run writes one `<utc>.json` plus its reporter artifacts under `data/test-timings/`. That directory is
+gitignored, so a number worth keeping belongs in a dated block here. The e2e lane stops a running dev
+server, because `frontend/tests/global-setup.ts` owns ports 3000/3001/9999; it restarts one if it stopped
+one, and prints the leftover check either way.
+
+### 2026-09-29 — 8 CPUs, go1.27.0, node v22.23.2, Playwright 1.62.1, warm build cache
+
+Run `2026-09-29T031753Z` measured four lanes serially in 2941 s; run `2026-09-29T105721Z` measured the
+whole-check lane on its own. Three reds on this host are host facts, listed at the end of this block, and
+every red unit is still timed.
+
+#### The `make check` sub-gates, one at a time
+
+| seconds | sub-gate | what its help line claimed |
+|---|---|---|
+| 485.41 | `test-go`, exit 2 — see the host facts below | nothing |
+| 434.93 | `test-frontend` (vitest plus ten gates) | "vitest, ~10s" |
+| 28.38 | `lint` (gofmt, vet, staticcheck, deadcode) | nothing |
+| 28.11 | `npm run check` (svelte-check) | nothing |
+| 22.88 | `docs-check` | "~0.2s" |
+| 12.56 | `check-release` | "~5s" |
+| 11.38 | `test-archgate` | "~0.2s" |
+| 8.29 | `archgate` | "~0.2s" |
+| 6.13 | `test-docs-check` | "~0.2s" |
+| 5.54 | `bridge-check` | nothing |
+| 4.63 | `go build -trimpath -o mike .`, which is `check`'s build step | nothing |
+
+The eleven rows sum to 1048.24 s. One whole `make check` measured **374.77 s**: the same steps, serially,
+inside one make, priced second, on the caches the first pass had filled. The gap is cache and not
+make. Inside that same pass vitest reported 190.47 s, against the 365.83 s it had taken on its own minutes
+earlier. One number on this host is therefore soft. Price a change by running the same lane twice in the
+same order, and read each new row beside the row it came from.
+
+Plain `make check` cannot be timed on a tree that is red anywhere. It is one target whose recipe is every
+step, and make abandons a recipe at its first failing line: `-k` continues *other* targets, not the rest of
+that recipe. The lane therefore times `make check -i`, which runs every line and whose exit code means
+nothing. Its own closing echo still prints all gates green on a red tree, so the lane greps that log's `FAIL`
+lines instead of trusting that line. The exit column above is the verdict, and inside this pass
+the red steps were `backend/extensions`, `backend/git`, `backend/sandbox` and `backend/server` — the host
+facts at the end of this block.
+
+Two readings of this table matter more than either total. The four rows whose help line said `~0.2s` are
+48.7 s together. And `test-frontend` is one gate over eleven commands, and vitest alone took 365.83 s of its
+434.93 s, so pricing that gate cannot say which command moved.
+
+#### Go: `go test -json -count=1 -parallel 4 ./backend/... ./pkg/... .`
+
+387.93 s for 36 packages and 4787 tests: 4741 pass, 30 fail, 16 skip. The same scope through `make test-go`
+measured 485.41 s above — the -json pass ran second, on a build cache the first pass had filled. Package
+seconds overlap, because packages run side by side.
+
+| seconds | package | | seconds | package |
+|---|---|---|---|---|
+| 371.18 | `mike/backend/server` (fail) | | 16.71 | `mike/backend/config` |
+| 148.00 | `mike/backend/git` (fail) | | 13.38 | `mike/backend/llama` |
+| 109.43 | `mike/backend/exec` | | 11.32 | `mike/backend/sandbox` (fail) |
+| 108.61 | `mike/backend/api` | | 10.38 | `mike/backend/lsp` |
+| 79.74 | `mike/backend/extensions` (fail) | | 8.14 | `mike/pkg/keylock` |
+| 76.30 | `mike/backend/stream` | | 3.01 | `mike/backend/term` |
+| 44.17 | `mike/backend/store` | | 2.85 | `mike/backend/auth` |
+| | | | … | 21 packages under 2 s |
+
+| seconds | slowest test | package |
+|---|---|---|
+| 18.60 | `TestThreadForkFromInactiveThread` | `mike/backend/server` |
+| 17.28 | `TestQuietStreamCeilingIsReportedAsSilence` | `mike/backend/exec` |
+| 15.57 | `TestFailedInstallSettlesTheStateBeforeItReportsFailure` | `mike/backend/extensions` |
+| 15.16 | `TestLLMCrashMidTurnWithToolCallLeavesNoPartialTurn` | `mike/backend/exec` |
+| 15.11 | `TestLLMProviderDiesBeforeFirstFrameRetriesThenFailsIntoReview` | `mike/backend/exec` |
+| 11.25 | `TestTaskOperatingModeRemount`, fail | `mike/backend/server` |
+| 10.59 | `TestChatStream_ProductionTimedOutRace` | `mike/backend/llama` |
+| 9.44 | `TestSubtaskMergeFullFlow` | `mike/backend/exec` |
+
+No single test is long: the ceiling is 18.6 s, and 6 of these 8 sit in `backend/exec` and `backend/server`,
+which is the suite's critical path — the same reading as the `t.Parallel()` note in
+`docs/testing.md → Go unit test environment`. `mike`, the root package, is 0.09 s, and that is what the
+trailing `.` in the scope buys — `./backend/... ./pkg/...` does not reach that package at all.
+
+#### vitest: `npx vitest run`
+
+365.83 s of wall clock for 289 files and 3711 tests, no failures. vitest's own split is the row to read:
+
+```
+Duration 359.18s (transform 47.52s, setup 120.78s, import 195.39s, tests 83.37s, environment 1886.96s)
+```
+
+The tests are 83 s of it. The 289 per-file durations add up to 67.6 s of the 365.83 s, because a file's own
+duration excludes its worker's transform, setup and jsdom environment. The slowest file is 6.77 s
+(`file-browser-multi-select.unit.svelte.ts`), the fifth is 2.04 s and the thirtieth is 0.46 s, so no
+file-level edit reaches the 276 s that is not tests. `npm run test:related` is the answer to a small change
+for exactly that reason.
+
+#### Playwright: `npx playwright test --reporter=list,json`
+
+The harness is measured around the tests, because its fixed cost is what a one-spec run pays:
+
+| seconds | the harness around the tests |
+|---|---|
+| 6.40 | globalSetup — two servers, two databases, seed projects and fixture repos, worker startup |
+| 1.21 | globalTeardown — both servers stopped by identity, data directories deleted |
+| 4.93 | harness fixed cost alone: setup plus teardown with zero tests, via a `--grep` matching nothing |
+| 10.66 | `npm run build` — global-setup serves `frontend/dist` and never builds it |
+| 828.54 | the whole lane: 482 tests, 400 passed, 29 failed, 8 skipped, 45 did not run |
+
+| seconds of test time | tests | project | not passing |
+|---|---|---|---|
+| 2559.5 | 397 | chromium (4 workers) | 28 |
+| 156.8 | 85 | isolated (1 worker, serialized) | 1 |
+
+chromium's test time is summed over 4 workers, so the wall clock is near a quarter of it. Per-spec cost is
+dominated by specs that wait on an executor turn or on a return-to-chat repaint, not by specs with many
+tests:
+
+| seconds | tests | spec | | seconds | tests | spec |
+|---|---|---|---|---|---|---|
+| 188.51 | 3 | provisional-review-paint | | 92.00 | 1 | return-transcript-order |
+| 124.63 | 9 | task-open-timing | | 89.35 | 14 | task-view-multi-select |
+| 108.61 | 1 | return-after-review | | 79.84 | 6 | away-and-back |
+| 105.14 | 21 | diff-viewer | | 78.26 | 22 | task-lifecycle |
+| 95.99 | 25 | chat-core | | 67.41 | 11 | file-editor |
+| 92.74 | 1 | focus-return-review | | 66.22 | 2 | reconnect-refresh |
+
+The isolated lane's own worst rows are `settings-provider` (39.76 s over 18 tests), `html-preview` (36.07 s
+over 13) and `preferences-keyboard` (22.10 s over 14).
+
+#### Three host facts behind these numbers
+
+- `podman info` answers `'overlay' is not supported over overlayfs`, so every suite that creates a container
+  fails here — 29 of the 30 failing Go tests, counting `backend/server` and `backend/extensions` asking
+  podman a question it cannot answer, and the sandbox specs too. The `mount_program` switch that answers it:
+  `docs/testing.md → A machine that cannot start a container`.
+- `git --version` is 2.43.0, whose `git stash push` answers exit 1 with no output while `index.lock` is
+  held. `backend/git`'s `TestPushStashCarriesGitReason` asserts git's own text reaches the error, so this
+  host refuses it. The probe is in `docs/testing.md → Go unit test environment`.
+- 29 e2e failures arrived as 45 s and 90 s timeouts, and 45 tests then "did not run" behind them in `serial`
+  blocks. One lane server answers 4 workers and queues every worker's turn —
+  `docs/testing.md → Tests that fail only under load`.
+
+A machine that answers those three checks clean prints different totals for the Go and e2e rows. The shape
+will not: `test-go` and `test-frontend` decide what "done" costs, `backend/exec` and `backend/server` are
+the Go critical path, and vitest's wall clock is not its tests.
 
 ## E2E conventions
 - Descriptive spec filenames in `frontend/tests/e2e/`; shared helpers in `helpers.ts`.

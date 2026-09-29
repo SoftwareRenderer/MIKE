@@ -137,11 +137,14 @@ curl -sk https://localhost:3000/api/config   # 401 JSON = up; use http:// with -
 make check | make lint | make check-race                 # gate / static half / -race over the lock packages
 make test-go | make test-frontend                        # Go unit / vitest + the frontend gates
 make test-diff                                           # only the touched Go packages, cache left on
+make test-time [LANES=gates check go vitest e2e]         # what each gate costs, measured
 cd frontend && npx playwright test [spec|--grep name]    # e2e (mock LLM, own servers)
 cd frontend && npm run check:dead-surface                # untagged test-only exports; the CSS ceiling
 python3 scripts/gen-registry.py --check                  # registry.json matches the manifests
 ```
 
+- **A cost claim in a doc is a number from `make test-time`.** An unmeasured timing is a work estimate, and
+  `make docs-check` refuses one; the record, the lanes and their filters: `docs/testing.md → Measured gate cost`.
 - **A spec exists only if it needs a browser or the real backend.** Component state belongs in vitest.
   Never write a `readFileSync('../Foo.svelte')` + `toContain(...)` "test".
 - **Config-modifying specs run in the `isolated` project** (`ISOLATED_SPECS`), and **any spec that runs an
