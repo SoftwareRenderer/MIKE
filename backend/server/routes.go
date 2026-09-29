@@ -69,13 +69,13 @@ func (s *Server) setupRoutes() {
 	// Each registration names the one handler it reaches: the mux answers the 405, so no closure here
 	// inspects r.Method.
 	s.mux.HandleFunc("GET /api/extensions/{id}", func(w http.ResponseWriter, r *http.Request) {
-		s.extHandler.HandleGet(w, r, r.PathValue("id"))
+		s.extHandler.HandleGet(w, r.PathValue("id"))
 	})
 	s.mux.HandleFunc("PUT /api/extensions/{id}", func(w http.ResponseWriter, r *http.Request) {
 		s.extHandler.HandleUpdate(w, r, r.PathValue("id"))
 	})
 	s.mux.HandleFunc("DELETE /api/extensions/{id}", func(w http.ResponseWriter, r *http.Request) {
-		s.extHandler.HandleDelete(w, r, r.PathValue("id"))
+		s.extHandler.HandleDelete(w, r.PathValue("id"))
 	})
 	s.mux.HandleFunc("PATCH /api/extensions/{id}/enabled", func(w http.ResponseWriter, r *http.Request) {
 		s.extHandler.HandleSetEnabled(w, r, r.PathValue("id"))

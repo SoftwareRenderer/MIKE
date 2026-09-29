@@ -8,6 +8,7 @@ package sandboxruntime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -295,34 +296,39 @@ func staleContainerNames(names []string, isRunning func(string) (bool, error)) [
 // nameFilter (a regex, so a bare prefix matches the whole family), best-effort and time-bounded.
 // Both sandbox managers need it on startup, so the loop exists once here; running containers stay,
 // per staleContainerNames.
-func (r *Runtime) CleanupStaleContainers(logTag, nameFilter string) []string {
+func (r *Runtime) CleanupStaleContainers(logTag, nameFilter string) {
 	ctx, cancel := context.WithTimeout(context.Background(), staleCleanupTimeout)
 	defer cancel()
 
 	out, err := r.PodmanExecContext(ctx, "ps", "-a", "--filter", "name="+nameFilter, "--format", "{{.Names}}")
 	if err != nil {
 		logging.For(logging.Runtime).Warnf("startup: failed to list stale containers (probe %s): %v", logTag, err)
-		return nil
+		return
 	}
-	var removed []string
 	for _, name := range staleContainerNames(strings.Fields(strings.TrimSpace(string(out))), r.IsRunning) {
 		if rmErr := r.RemoveContainer(name); rmErr != nil {
 			logging.For(logging.Runtime).Warnf("startup: failed to remove stale container %s (probe %s): %v", name, logTag, rmErr)
 			continue
 		}
 		logging.For(logging.Runtime).Infof("startup: removed stale container %s (probe %s)", name, logTag)
-		removed = append(removed, name)
 	}
-	return removed
 }
 
-// ContainerExists checks if a container with the given name exists.
+// ContainerExists reports whether podman knows a container with this name.
+//
+// `container exists` separates the two answers `inspect` gives identically: exit 1 is "nothing of that
+// name", exit 125 is podman failing to answer. A caller creates its container when told there is
+// nothing; treating the fault as that answer names one over a container nobody saw.
 func (r *Runtime) ContainerExists(name string) (bool, error) {
-	_, err := r.PodmanExec("inspect", "-t", "container", name)
-	if err != nil {
+	out, err := r.PodmanExec("container", "exists", name)
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
 		return false, nil
 	}
-	return true, nil
+	return false, fmt.Errorf("podman container exists %s: %w (%s)", name, err, strings.TrimSpace(string(out)))
 }
 
 // IsRunning checks if a container is actually running in podman.

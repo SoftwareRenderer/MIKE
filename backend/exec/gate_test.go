@@ -10,14 +10,10 @@ func TestAcquireRelease_SlotAvailable(t *testing.T) {
 	t.Parallel()
 	g := NewConcurrencyGate()
 
-	// First acquire should succeed immediately (no queue entry)
+	// A slot and an open window grant without queueing.
 	ctx := context.Background()
-	entry, err := g.Acquire(ctx, "http://provider-a", 2, 0, nil)
-	if err != nil {
+	if err := g.Acquire(ctx, "http://provider-a", 2, 0, nil); err != nil {
 		t.Fatalf("Acquire failed: %v", err)
-	}
-	if entry != nil {
-		t.Fatalf("immediate grant should return a nil queue entry, got %v", entry)
 	}
 
 	// Release should succeed (no-op if no waiters)
@@ -30,10 +26,10 @@ func TestAcquireRelease_ConcurrencyLimit(t *testing.T) {
 	ctx := context.Background()
 
 	// Acquire both slots
-	if _, err := g.Acquire(ctx, "http://p", 2, 0, nil); err != nil {
+	if err := g.Acquire(ctx, "http://p", 2, 0, nil); err != nil {
 		t.Fatalf("Acquire 1 failed: %v", err)
 	}
-	if _, err := g.Acquire(ctx, "http://p", 2, 0, nil); err != nil {
+	if err := g.Acquire(ctx, "http://p", 2, 0, nil); err != nil {
 		t.Fatalf("Acquire 2 failed: %v", err)
 	}
 
@@ -42,7 +38,7 @@ func TestAcquireRelease_ConcurrencyLimit(t *testing.T) {
 	done := make(chan struct{})
 	enqueued := make(chan *queueEntry, 1)
 	go func() {
-		if _, err := g.Acquire(ctx, "http://p", 2, 0, func(e *queueEntry) { enqueued <- e }); err != nil {
+		if err := g.Acquire(ctx, "http://p", 2, 0, func(e *queueEntry) { enqueued <- e }); err != nil {
 			t.Errorf("Acquire failed: %v", err)
 			return
 		}
@@ -85,7 +81,7 @@ func TestAcquireRelease_PerProviderIsolation(t *testing.T) {
 	g.Acquire(ctx, "http://a", 1, 0, nil)
 
 	// Provider B should still have its slot available
-	if _, err := g.Acquire(ctx, "http://b", 1, 0, nil); err != nil {
+	if err := g.Acquire(ctx, "http://b", 1, 0, nil); err != nil {
 		t.Fatalf("Acquire for provider B failed: %v", err)
 	}
 
@@ -106,7 +102,7 @@ func TestAcquireRelease_FIFOOrdering(t *testing.T) {
 
 	for i := range 2 {
 		go func(idx int) {
-			if _, err := g.Acquire(ctx, "http://p", 1, 0, nil); err != nil {
+			if err := g.Acquire(ctx, "http://p", 1, 0, nil); err != nil {
 				return
 			}
 			serveOrder <- idx
@@ -156,7 +152,7 @@ func TestAcquireRelease_ContextCancellation(t *testing.T) {
 	cancelCtx, cancel := context.WithCancel(ctx)
 	errCh := make(chan error, 1)
 	go func() {
-		_, err := g.Acquire(cancelCtx, "http://p", 1, 0, nil)
+		err := g.Acquire(cancelCtx, "http://p", 1, 0, nil)
 		errCh <- err
 	}()
 
@@ -209,7 +205,7 @@ func TestAcquireRelease_CancelledEntrySkipped(t *testing.T) {
 	done2 := make(chan struct{})
 	secondEnqueued := make(chan *queueEntry, 1)
 	go func() {
-		if _, err := g.Acquire(ctx, "http://p", 1, 0, func(e *queueEntry) { secondEnqueued <- e }); err != nil {
+		if err := g.Acquire(ctx, "http://p", 1, 0, func(e *queueEntry) { secondEnqueued <- e }); err != nil {
 			t.Errorf("second acquire: %v", err)
 			return
 		}
@@ -379,7 +375,7 @@ func TestAcquireRelease_TrailingSlashNormalization(t *testing.T) {
 	ctx := context.Background()
 
 	// Fill the only slot using a URL WITHOUT a trailing slash...
-	if _, err := g.Acquire(ctx, "http://p", 1, 0, nil); err != nil {
+	if err := g.Acquire(ctx, "http://p", 1, 0, nil); err != nil {
 		t.Fatalf("Acquire failed: %v", err)
 	}
 
@@ -388,7 +384,7 @@ func TestAcquireRelease_TrailingSlashNormalization(t *testing.T) {
 	enqueued := make(chan *queueEntry, 1)
 	done := make(chan struct{})
 	go func() {
-		if _, err := g.Acquire(ctx, "http://p/", 1, 0, func(e *queueEntry) { enqueued <- e }); err != nil {
+		if err := g.Acquire(ctx, "http://p/", 1, 0, func(e *queueEntry) { enqueued <- e }); err != nil {
 			t.Errorf("Acquire with trailing slash failed: %v", err)
 			return
 		}
@@ -419,7 +415,7 @@ func TestMinConcurrency_One(t *testing.T) {
 	ctx := context.Background()
 
 	// concurrency=0 should be treated as 1
-	if _, err := g.Acquire(ctx, "http://p", 0, 0, nil); err != nil {
+	if err := g.Acquire(ctx, "http://p", 0, 0, nil); err != nil {
 		t.Fatalf("Acquire with concurrency=0 failed: %v", err)
 	}
 
@@ -452,7 +448,7 @@ func TestAcquire_RateLimit_Spacing(t *testing.T) {
 
 	starts := make([]time.Time, 0, 3)
 	for i := range 3 {
-		if _, err := g.Acquire(ctx, "http://p", 5, 4, nil); err != nil {
+		if err := g.Acquire(ctx, "http://p", 5, 4, nil); err != nil {
 			t.Fatalf("acquire %d: %v", i, err)
 		}
 		starts = append(starts, time.Now()) // Acquire returning == request start
@@ -479,7 +475,7 @@ func TestAcquire_RateLimit_ZeroUnlimited(t *testing.T) {
 
 	start := time.Now()
 	for i := range 10 {
-		if _, err := g.Acquire(ctx, "http://p", 2, 0, nil); err != nil {
+		if err := g.Acquire(ctx, "http://p", 2, 0, nil); err != nil {
 			t.Fatalf("acquire %d: %v", i, err)
 		}
 		g.Release("http://p")
@@ -497,12 +493,12 @@ func TestAcquire_RateLimit_PerProviderIsolation(t *testing.T) {
 	ctx := context.Background()
 
 	// Provider A: in-flight request with maxRPS=1 → its next start is ~1s away
-	if _, err := g.Acquire(ctx, "http://a", 5, 1, nil); err != nil {
+	if err := g.Acquire(ctx, "http://a", 5, 1, nil); err != nil {
 		t.Fatalf("acquire A: %v", err)
 	}
 
 	start := time.Now()
-	if _, err := g.Acquire(ctx, "http://b", 5, 1, nil); err != nil {
+	if err := g.Acquire(ctx, "http://b", 5, 1, nil); err != nil {
 		t.Fatalf("acquire B: %v", err)
 	}
 	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
@@ -521,14 +517,14 @@ func TestAcquire_RateLimit_Cancellation(t *testing.T) {
 	ctx := context.Background()
 
 	// Fill the rate window: maxRPS=1, one request in flight → next start ~1s away
-	if _, err := g.Acquire(ctx, "http://p", 5, 1, nil); err != nil {
+	if err := g.Acquire(ctx, "http://p", 5, 1, nil); err != nil {
 		t.Fatalf("acquire 1: %v", err)
 	}
 
 	cancelCtx, cancel := context.WithCancel(ctx)
 	errCh := make(chan error, 1)
 	go func() {
-		_, err := g.Acquire(cancelCtx, "http://p", 5, 1, nil)
+		err := g.Acquire(cancelCtx, "http://p", 5, 1, nil)
 		errCh <- err
 	}()
 
@@ -554,7 +550,7 @@ func TestAcquire_RateLimit_Cancellation(t *testing.T) {
 	// State consistent: release the in-flight request, then a fresh acquire
 	// succeeds (it still honors the rate window, so it may block briefly).
 	g.Release("http://p")
-	if _, err := g.Acquire(ctx, "http://p", 5, 1, nil); err != nil {
+	if err := g.Acquire(ctx, "http://p", 5, 1, nil); err != nil {
 		t.Fatalf("acquire after cancellation: %v", err)
 	}
 	g.Release("http://p")
@@ -571,14 +567,14 @@ func TestAcquire_RateLimit_WithSlotWait(t *testing.T) {
 	t0 := time.Now()
 
 	// Request 1 holds the only slot; its grant sets the rate window to t0+1s
-	if _, err := g.Acquire(ctx, "http://p", 1, 1, nil); err != nil {
+	if err := g.Acquire(ctx, "http://p", 1, 1, nil); err != nil {
 		t.Fatalf("acquire 1: %v", err)
 	}
 
 	// Request 2 acquires while blocked on the slot
 	done := make(chan struct{})
 	go func() {
-		if _, err := g.Acquire(ctx, "http://p", 1, 1, nil); err != nil {
+		if err := g.Acquire(ctx, "http://p", 1, 1, nil); err != nil {
 			t.Errorf("acquire 2: %v", err)
 			return
 		}
@@ -610,7 +606,7 @@ func TestAcquire_RateLimit_FIFO(t *testing.T) {
 	ctx := context.Background()
 
 	// Hold the only slot (maxRPS=1 → also blocks rate for ~1s)
-	if _, err := g.Acquire(ctx, "http://p", 1, 1, nil); err != nil {
+	if err := g.Acquire(ctx, "http://p", 1, 1, nil); err != nil {
 		t.Fatalf("acquire holder: %v", err)
 	}
 
@@ -618,7 +614,7 @@ func TestAcquire_RateLimit_FIFO(t *testing.T) {
 	// behind it — queue order [0, 1] is deterministic.
 	serveOrder := make(chan int, 2)
 	go func() {
-		if _, err := g.Acquire(ctx, "http://p", 1, 1, nil); err != nil {
+		if err := g.Acquire(ctx, "http://p", 1, 1, nil); err != nil {
 			t.Errorf("acquire 0: %v", err)
 			return
 		}
@@ -628,7 +624,7 @@ func TestAcquire_RateLimit_FIFO(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	go func() {
-		if _, err := g.Acquire(ctx, "http://p", 1, 1, nil); err != nil {
+		if err := g.Acquire(ctx, "http://p", 1, 1, nil); err != nil {
 			t.Errorf("acquire 1: %v", err)
 			return
 		}
@@ -668,13 +664,13 @@ func TestAcquire_RateLimit_ReleaseServeSpacing(t *testing.T) {
 	ctx := context.Background()
 
 	// concurrency=1, maxRPS=10 (100ms interval). A holds the only slot.
-	if _, err := g.Acquire(ctx, "http://p", 1, 10, nil); err != nil {
+	if err := g.Acquire(ctx, "http://p", 1, 10, nil); err != nil {
 		t.Fatalf("acquire A: %v", err)
 	}
 	// B queues (slot full); Release — not B's own timer — grants it.
 	bStart := make(chan time.Time, 1)
 	go func() {
-		if _, err := g.Acquire(ctx, "http://p", 1, 10, nil); err != nil {
+		if err := g.Acquire(ctx, "http://p", 1, 10, nil); err != nil {
 			t.Errorf("acquire B: %v", err)
 			return
 		}
@@ -684,7 +680,7 @@ func TestAcquire_RateLimit_ReleaseServeSpacing(t *testing.T) {
 	// C queues behind B.
 	cStart := make(chan time.Time, 1)
 	go func() {
-		if _, err := g.Acquire(ctx, "http://p", 1, 10, nil); err != nil {
+		if err := g.Acquire(ctx, "http://p", 1, 10, nil); err != nil {
 			t.Errorf("acquire C: %v", err)
 			return
 		}
@@ -742,7 +738,7 @@ func TestAcquireRelease_CancelledAfterServeReturnsSlot(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if _, err := g.Acquire(ctx, url, 2, 1, nil); err != nil { // A
+	if err := g.Acquire(ctx, url, 2, 1, nil); err != nil { // A
 		t.Fatalf("A acquire: %v", err)
 	}
 
@@ -751,7 +747,7 @@ func TestAcquireRelease_CancelledAfterServeReturnsSlot(t *testing.T) {
 	dCtx, dCancel := context.WithCancel(context.Background())
 	dResult := make(chan error, 1)
 	go func() {
-		_, err := g.Acquire(dCtx, url, 2, 1, func(*queueEntry) {
+		err := g.Acquire(dCtx, url, 2, 1, func(*queueEntry) {
 			close(started)
 			<-releaseD // hold D at the moment it joins the queue
 		})
@@ -765,7 +761,7 @@ func TestAcquireRelease_CancelledAfterServeReturnsSlot(t *testing.T) {
 	go func() { g.Release(url); close(releaseDone) }()
 	time.Sleep(100 * time.Millisecond) // Release reaches the handoff
 
-	if _, err := g.Acquire(ctx, url, 2, 1, nil); err != nil { // E
+	if err := g.Acquire(ctx, url, 2, 1, nil); err != nil { // E
 		t.Fatalf("E acquire: %v", err)
 	}
 
@@ -807,7 +803,7 @@ func TestAcquireRelease_CancelDuringHandoffDoesNotWedge(t *testing.T) {
 	for i := 0; i < 60; i++ {
 		g := NewConcurrencyGate()
 		ctx, cancel := context.WithCancel(context.Background())
-		if _, err := g.Acquire(ctx, url, 1, 0, nil); err != nil {
+		if err := g.Acquire(ctx, url, 1, 0, nil); err != nil {
 			t.Fatalf("iter %d: holder acquire: %v", i, err)
 		}
 
@@ -815,7 +811,7 @@ func TestAcquireRelease_CancelDuringHandoffDoesNotWedge(t *testing.T) {
 		waiterCtx, waitCancel := context.WithCancel(context.Background())
 		result := make(chan error, 1)
 		go func() {
-			_, err := g.Acquire(waiterCtx, url, 1, 0, func(*queueEntry) { enqueued <- struct{}{} })
+			err := g.Acquire(waiterCtx, url, 1, 0, func(*queueEntry) { enqueued <- struct{}{} })
 			result <- err
 		}()
 		<-enqueued
@@ -855,14 +851,14 @@ func TestConcurrencyGate_CapacitySurvivesCancelChurn(t *testing.T) {
 	// waiter cancelled in the same instant. Every cycle must end with the
 	// provider holding no slots.
 	for cycle := 0; cycle < 60; cycle++ {
-		if _, err := g.Acquire(ctx, url, 1, 0, nil); err != nil {
+		if err := g.Acquire(ctx, url, 1, 0, nil); err != nil {
 			t.Fatalf("cycle %d: holder acquire: %v", cycle, err)
 		}
 		wCtx, wCancel := context.WithCancel(ctx)
 		enqueued := make(chan struct{}, 1)
 		result := make(chan error, 1)
 		go func() {
-			_, err := g.Acquire(wCtx, url, 1, 0, func(*queueEntry) { enqueued <- struct{}{} })
+			err := g.Acquire(wCtx, url, 1, 0, func(*queueEntry) { enqueued <- struct{}{} })
 			result <- err
 		}()
 		<-enqueued
@@ -896,7 +892,7 @@ func TestConcurrencyGate_CapacitySurvivesCancelChurn(t *testing.T) {
 	start := make(chan struct{}, 3)
 	for k := 0; k < 3; k++ {
 		go func() {
-			if _, err := g.Acquire(ctx, url, 3, 0, nil); err == nil {
+			if err := g.Acquire(ctx, url, 3, 0, nil); err == nil {
 				start <- struct{}{}
 			}
 		}()

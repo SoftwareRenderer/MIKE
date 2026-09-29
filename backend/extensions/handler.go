@@ -225,7 +225,7 @@ func findRegistryEntry(index RegistryIndex, name string) *RegistryEntry {
 }
 
 // HandleGet returns a single extension by ID.
-func (h *ExtensionHandler) HandleGet(w http.ResponseWriter, r *http.Request, id string) {
+func (h *ExtensionHandler) HandleGet(w http.ResponseWriter, id string) {
 
 	ext, ok := h.extensionOr404(w, id)
 	if !ok {
@@ -461,7 +461,7 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 }
 
 // HandleDelete removes an extension.
-func (h *ExtensionHandler) HandleDelete(w http.ResponseWriter, r *http.Request, id string) {
+func (h *ExtensionHandler) HandleDelete(w http.ResponseWriter, id string) {
 
 	// Read the record first: the files to delete are derived from its author and name.
 	ext, _ := h.store.GetByID(id)

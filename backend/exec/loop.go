@@ -644,7 +644,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 		// the call's own position (its queue entry is handed to the poller via
 		// the onEnqueued callback as soon as it is enqueued).
 		onEnqueued, queueDone := te.startGateQueuePoller(te.gate, gateURL, setup.projectID, setup.task.ID, setup.ctx)
-		if _, err := te.gate.Acquire(setup.ctx, gateURL, concurrency, maxRPS, onEnqueued); err != nil {
+		if err := te.gate.Acquire(setup.ctx, gateURL, concurrency, maxRPS, onEnqueued); err != nil {
 			close(queueDone) // cleanup polling goroutine
 			te.handleCancelledTask(setup.task.ID, setup.projectID)
 			return

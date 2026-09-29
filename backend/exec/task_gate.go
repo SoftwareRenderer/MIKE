@@ -45,7 +45,7 @@ func (te *TaskExecutor) acquireTaskSlot(setup *taskExecSetup, providerURL string
 
 	// A task start is not an LLM request start — RPS is enforced at request
 	// time by the per-request gate, so maxRPS = 0 here.
-	if _, err := te.taskGate.Acquire(setup.ctx, providerURL, concurrency, 0, onEnqueued); err != nil {
+	if err := te.taskGate.Acquire(setup.ctx, providerURL, concurrency, 0, onEnqueued); err != nil {
 		return false
 	}
 

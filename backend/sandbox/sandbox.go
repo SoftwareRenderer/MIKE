@@ -406,18 +406,6 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 	}
 	containerName := fmt.Sprintf("%s-%s", ContainerNamePrefix, safeID)
 
-	exists, err := sm.rt.ContainerExists(containerName)
-	if err != nil {
-		return nil, fmt.Errorf("check container: %w", err)
-	}
-	if exists {
-		// Clean up stale container from a previous server run
-		logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("removing stale container %s", containerName)
-		if rmErr := sm.rt.RemoveContainer(containerName); rmErr != nil {
-			return nil, fmt.Errorf("remove stale container %s: %w", containerName, rmErr)
-		}
-	}
-
 	absWorktree, err := filepath.Abs(worktreePath)
 	if err != nil {
 		return nil, fmt.Errorf("resolve worktree path: %w", err)
@@ -576,6 +564,19 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 		"/bin/sh", "-c",
 		"chmod +x /sandbox-bridge && sleep infinity",
 	)
+
+	// The stale-container bracket sits here, not at the top. `docs/sandbox-runtime.md`.
+	exists, err := sm.rt.ContainerExists(containerName)
+	if err != nil {
+		return nil, fmt.Errorf("check container: %w", err)
+	}
+	if exists {
+		// Clean up stale container from a previous server run
+		logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("removing stale container %s", containerName)
+		if rmErr := sm.rt.RemoveContainer(containerName); rmErr != nil {
+			return nil, fmt.Errorf("remove stale container %s: %w", containerName, rmErr)
+		}
+	}
 
 	out, err := sm.podmanExec(createArgs...)
 	if err != nil {
@@ -894,7 +895,7 @@ func (sm *SandboxManager) startShell(taskID, worktreePath string, project *types
 }
 
 // Close terminates the process handle and cleans up pipes.
-func (ph *ProcessHandle) Close() error {
+func (ph *ProcessHandle) Close() {
 	if ph.Stdin != nil {
 		_ = ph.Stdin.Close()
 	}
@@ -905,11 +906,10 @@ func (ph *ProcessHandle) Close() error {
 		_ = ph.Cmd.Process.Kill()
 		_ = ph.Cmd.Wait()
 	}
-	return nil
 }
 
 // Close terminates the shell process and cleans up the PTY.
-func (sp *ShellProcess) Close() error {
+func (sp *ShellProcess) Close() {
 	if sp.Ptmx != nil {
 		_ = sp.Ptmx.Close()
 	}
@@ -917,7 +917,6 @@ func (sp *ShellProcess) Close() error {
 		_ = sp.Cmd.Process.Kill()
 		_ = sp.Cmd.Wait()
 	}
-	return nil
 }
 
 // StartProcess starts a non-interactive process inside the task's sandbox container.

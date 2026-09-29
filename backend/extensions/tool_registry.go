@@ -87,6 +87,8 @@ func (r *ToolRegistry) NetworkedExtensions() []types.NetworkedExtension {
 }
 
 // A name already taken is skipped, not offered twice: dispatch resolves tools by name alone.
+// The withheld half of the answer is logged as each problem is found, and read whole only by
+// `withheld` in tool_registry_test.go.
 func (r *ToolRegistry) survey() ([]ContributedTool, []ToolProblem) {
 	rows, err := r.toolExtensions()
 	if err != nil {

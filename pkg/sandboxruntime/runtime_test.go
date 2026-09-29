@@ -446,14 +446,39 @@ func TestGVisorAvailable_FalseWithoutPodman(t *testing.T) {
 }
 
 // TestCleanupStaleContainers_UnreachablePodmanIsBestEffort: the startup sweep
-// must swallow a broken podman (returns nothing, does not panic) rather than
-// block or crash server startup.
+// must swallow a broken podman (does not panic) rather than block or crash
+// server startup.
 func TestCleanupStaleContainers_UnreachablePodmanIsBestEffort(t *testing.T) {
 	t.Setenv("PATH", t.TempDir()) // no podman on PATH
 
 	rt := NewRuntimeWithBoot(Boot{})
-	if got := rt.CleanupStaleContainers("test", "kanban-sandbox-"); got != nil {
-		t.Errorf("CleanupStaleContainers = %v with no podman, want nil", got)
+	rt.CleanupStaleContainers("test", "kanban-sandbox-")
+}
+
+// TestContainerExistsSeparatesAbsenceFromSilence: `container exists` exits 1 for a name podman does not
+// know and 125 when it cannot answer. A caller creates a container when this says absent, so reading a
+// podman that never answered as absence is how two containers get the same name.
+func TestContainerExistsSeparatesAbsenceFromSilence(t *testing.T) {
+	for _, tc := range []struct {
+		code    int
+		exists  bool
+		wantErr bool
+	}{
+		{code: 0, exists: true},
+		{code: 1},
+		{code: 125, wantErr: true},
+	} {
+		bin := t.TempDir()
+		writeStub(t, filepath.Join(bin, "podman"), "#!/bin/sh\nexit "+strconv.Itoa(tc.code)+"\n")
+		t.Setenv("PATH", bin)
+
+		exists, err := NewRuntimeWithBoot(Boot{}).ContainerExists("kanban-sandbox-gone")
+		if exists != tc.exists {
+			t.Errorf("podman exit %d: ContainerExists = %v, want %v", tc.code, exists, tc.exists)
+		}
+		if gotErr := err != nil; gotErr != tc.wantErr {
+			t.Errorf("podman exit %d: ContainerExists err = %v, want error: %v", tc.code, err, tc.wantErr)
+		}
 	}
 }
 
