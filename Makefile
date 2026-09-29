@@ -219,28 +219,22 @@ check-release: ## Compile and test the -tags release variant that make package s
 	@echo "==> go test -tags $(RELEASE_TAGS) ./backend/startup/"
 	@go test -tags $(RELEASE_TAGS) ./backend/startup/ -count=1
 
+.PHONY: test-check-lanes
+test-check-lanes: ## Test the lane runner that decides `make check` (~2s, measured)
+	@bash scripts/check-lanes_test.sh
+
+# The gate is two lanes, so its wall is the slower lane and not the sum of eleven gates. The two halves stay
+# disjoint — the Go lane writes ./mike and the Go build cache, the frontend lane writes
+# frontend/node_modules/.cache, and neither reads what the other writes — which is what makes their seconds a
+# measurement rather than a race. scripts/check-lanes.sh holds the step table (the gate's shape) and one log
+# per lane, and one lane's red stops its own remaining steps, never another lane's gates. The runner's own
+# test runs first, the way `make test-frontend` starts its slots: a runner tested from inside itself says
+# nothing about a runner that failed to start.
+# `docs/adr/0002-check-lanes-run-in-parallel.md` prices the two shapes and says why not `-j`.
 .PHONY: check
-check: ## THE GATE: lint + archgate + docs-check + bridge-check + build + Go tests + frontend gates
-	@$(MAKE) --no-print-directory lint
-	@echo "==> archgate (structural debt against its baselines)"
-	@$(MAKE) --no-print-directory archgate
-	@$(MAKE) --no-print-directory test-archgate
-	@echo "==> docs-check (a dead pointer is a rule nobody can follow)"
-	@$(MAKE) --no-print-directory docs-check
-	@$(MAKE) --no-print-directory test-docs-check
-	@echo "==> bridge-check (a stale sandbox-bridge is an edit that never runs)"
-	@$(MAKE) --no-print-directory bridge-check
-	@echo "==> build"
-	@go build -trimpath -o mike .
-	@$(MAKE) --no-print-directory check-release
-	@echo "==> go test"
-	@$(MAKE) --no-print-directory test-go
-	@echo "==> svelte-check"
-	@cd frontend && npm run check
-	@echo "==> frontend unit tests + gates"
-	@$(MAKE) --no-print-directory test-frontend
-	@echo ""
-	@echo "make check: all gates green"
+check: ## THE GATE: two lanes in parallel — Go (lint, archgate, bridge, build, tests) + frontend (docs, typecheck, gates)
+	@$(MAKE) --no-print-directory test-check-lanes
+	@bash scripts/check-lanes.sh
 
 # The packages that own the detached goroutines and the executor's lock discipline - the executor,
 # the stream manager and the sandbox/terminal layers run ~120 of them between them. A -race sweep of

@@ -166,14 +166,13 @@ lane_gates() {
 lane_check() {
     echo
     echo "==> lane check: one whole make check (-i, so a red step does not cut the measurement short)"
-    # `check` is one target whose recipe is every step, and make abandons a recipe at its first failing line
-    # (-k continues *other targets*, not the rest of this one). So on a tree that is red anywhere, plain
-    # `make check` is a lower bound and not a cost. -i runs every line, and its own closing echo then prints
-    # "all gates green" whatever happened — the grep below is what turns that back into a verdict.
+    # `check` is two lanes and every lane runs to its own end, so a red tree costs the same wall as a green
+    # one. -i stays on the command because the exit column is then never a verdict: the gate's own verdict is
+    # the runner's FAILED line, which names the lane, the step and the code. The lane logs are indented by the
+    # runner, so nothing else in this log starts a line with FAIL.
     run_unit check 'make check (whole, -i)' '' make -i --no-print-directory check
-    # -i swallows the failures, so say which steps failed inside the pass rather than leave a bare exit 0.
     local failed
-    failed=$(grep -hE '^(FAIL|make(\[[0-9]+\])?: \*\*\*)' "$WORK"/check--make_check*.log 2>/dev/null | head -6)
+    failed=$(grep -hE '^(FAIL|check-lanes: FAILED|make(\[[0-9]+\])?: \*\*\*)' "$WORK"/check--make_check*.log 2>/dev/null | head -6)
     if [[ -n "$failed" ]]; then
         echo '     steps that failed inside the pass (the exit column cannot show them):'
         printf '%s\n' "$failed" | sed 's/^/        /'
@@ -383,8 +382,8 @@ if section in ('gates', 'check'):
            for u in sorted(sub, key=lambda u: -u['seconds'])])
     msg = f"sum of the {len(sub)} sub-gates {sum(u['seconds'] for u in sub):.2f} s"
     if whole:
-        msg += (f"; one whole make check {whole['seconds']:.2f} s — the same steps serially inside one make "
-                '(-i, so no step is skipped). The gap is make\'s own overhead plus whatever each step found '
+        msg += (f"; one whole make check {whole['seconds']:.2f} s — the same steps, in check's two lanes, "
+                'inside one make (-i, so no step is skipped). The gap is make\'s own overhead plus whatever each step found '
                 'cached from the earlier pass; that pass also carries the verdict, because -i ignores a '
                 'failing step and its exit code says nothing about the tree.')
     print('\n' + msg)

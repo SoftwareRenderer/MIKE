@@ -144,6 +144,9 @@ cd frontend && npm run check:dead-surface                # untagged test-only ex
 python3 scripts/gen-registry.py --check                  # registry.json matches the manifests
 ```
 
+- **`make check` runs two lanes at once** — Go, and docs-plus-frontend — and both run to their end, because a
+  red step stops its own lane only. `scripts/check-lanes.sh` holds the step table; its per-lane logs land in
+  `data/check-lanes/`.
 - **Iterate with `make check-fast`; `make check` stays the only claim of done.** It runs the touched Go
   packages with the cache left on, the touched frontend files and the cheap gates — `docs/testing.md → Running less than the gate`.
 - **A cost claim in a doc is a number from `make test-time`.** An unmeasured timing is a work estimate, and

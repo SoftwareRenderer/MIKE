@@ -62,3 +62,4 @@ What this makes cheap, what it makes impossible, and what would reopen it.
 | # | Decision | Status |
 |---|---|---|
 | [0001](0001-key-decisions-are-recorded.md) | Key decisions get a numbered file, written when the choice is made and never backfilled | accepted |
+| [0002](0002-check-lanes-run-in-parallel.md) | `make check` runs its Go half and its docs-plus-frontend half as two concurrent lanes | accepted |

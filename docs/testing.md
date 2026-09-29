@@ -247,6 +247,41 @@ The floor under all five rows is `docs-check` + `archgate` + `bridge-check` + th
 escapes it. `npx vitest related --run src/lib/utils/task-utils.ts` measured 16.64 s for 15 files and 146
 tests, of which the tests are 1.91 s: the frontend lane's cost is vitest's start-up.
 
+### 2026-09-29 — the gate as two lanes
+
+`make check` runs its eleven sub-gates as two lanes (`scripts/check-lanes.sh`), so its wall is the slower
+lane and not the sum. Both shapes below ran the same eleven commands on the same warm tree, with staticcheck
+and deadcode installed: `scripts/lint-tools.sh` prints the install command for either, and the Go lane stops
+at `lint` without them. `make check` prints the lane table. The serial rows are the same runner with all
+eleven steps in one lane, through its `MIKE_CHECK_LANES` hook.
+
+| wall (s) | the shape |
+|---|---|
+| 339.00 | eleven gates in one lane, run 1 |
+| 345.58 | eleven gates in one lane, run 2 |
+| 281.06 | two lanes, run 1 |
+| 282.43 | two lanes, run 2 |
+
+A lane beside another lane is slower, not free. `go test`'s default package parallelism (GOMAXPROCS) fills
+the 8 cores, and so do vitest's 8 fork workers: 7 `.test` binaries and 8 forks were alive at once mid-run.
+The saving is the part of the gate that waits on files rather than on a core.
+
+| lane | alone (s) | its steps, alone (s) | its slow step, in a two-lane run (s) |
+|---|---|---|---|
+| `go` | 147.34 | `test-go` 133.31, `lint` 6.15, `check-release` 2.47, `test-archgate` 2.43, `archgate` 1.53, `bridge-check` 0.85, `build` 0.60 | `test-go` 263.67 |
+| `frontend` | 191.33 | `test-frontend` 185.52, `docs-check` 4.55, `test-docs-check` 0.97, `svelte-check` 0.29 | `test-frontend` 248.60 |
+
+Six runs of the two shapes here printed the same 30 host-fact reds, plus between none and two that rotate: the
+two serial runs added none and one, the four two-lane runs added one, one, one and two. Every rotating name is
+a load-list mechanism — the `t.TempDir()` cleanup race, or a frame its test stopped waiting for — and
+`TestManualSummarizePublishesCompressedContextUsed` joins that list here. The extra lane is real pressure, so
+that rate is what to watch; `docs/testing.md → Tests that fail only under load` names the run-alone re-check
+that clears any of them.
+
+The critical path is the frontend lane now, so the row to attack on this gate is vitest's start-up
+(`docs/testing.md → vitest`), not `backend/server`. Re-price the whole gate with `make test-time LANES=check`
+and one step with `make test-time LANES=gates`; `make check` itself prints both lanes' steps and seconds.
+
 ## E2E conventions
 - Descriptive spec filenames in `frontend/tests/e2e/`; shared helpers in `helpers.ts`.
 - `test.describe.serial()` when tests share state; unique identifiers (`Date.now()`) to avoid
@@ -821,6 +856,11 @@ suites, with that error in the log, is a reading about the machine.
   context-less local git call survives that cancel. Unestablished: which call, and why the rate moves with a
   test file that does not run. A red naming one of these while other packages run concurrently is a reading
   about the machine — re-run the package alone before believing it, and the single test if that passes.
+- **`backend/exec`'s `TestManualSummarizePublishesCompressedContextUsed`** failed inside a two-lane
+  `make check` with `no summarization frame was published`, while the log line carrying the same `task_id`
+  says `manual summarization complete`. Green 4 of 4 alone. The work finished and the wait for its frame did
+  not, which is the starved-goroutine shape of the `backend/stream` row below; the box held 7 `.test` binaries
+  and 8 vitest forks on its 8 cores.
 - **`backend/stream`'s `TestAConnectionThatMissedFramesIsEndedSoTheClientResyncs`** waits up to 10 s for the
   writer goroutine to end a connection with a hole in it, and fails with "still streaming a gap" when the
   bound passes. It went red in 2 of 2 `make check` runs and 1 of 4 full-scope `go test -parallel 8` runs, and
