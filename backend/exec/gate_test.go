@@ -2,6 +2,7 @@ package exec
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 )
@@ -114,14 +115,8 @@ func TestAcquireRelease_FIFOOrdering(t *testing.T) {
 		}(i)
 	}
 
-	// Let both goroutines enqueue
-	time.Sleep(50 * time.Millisecond)
-
 	// Verify 2 entries in queue (Position with nil counts total)
-	pos := g.Position("http://p", nil)
-	if pos != 2 {
-		t.Fatalf("expected 2 queue entries, got %d", pos)
-	}
+	awaitQueuePosition(t, g, "http://p", nil, 2)
 
 	// Release the held slot — first waiter should get it, then release, then second gets it
 	g.Release("http://p")
@@ -160,8 +155,9 @@ func TestAcquireRelease_ContextCancellation(t *testing.T) {
 		errCh <- err
 	}()
 
-	// Let it enqueue
-	time.Sleep(50 * time.Millisecond)
+	// The cancel has to land on a waiter that is queued; a cancelled Acquire that never queued
+	// would return the same error without exercising the queue.
+	awaitQueuePosition(t, g, "http://p", nil, 1)
 
 	// Cancel — should unblock with error
 	cancel()
@@ -202,7 +198,7 @@ func TestAcquireRelease_CancelledEntrySkipped(t *testing.T) {
 		g.Acquire(cancelCtx, "http://p", 1, 0, nil)
 		close(done1)
 	}()
-	time.Sleep(50 * time.Millisecond)
+	awaitQueuePosition(t, g, "http://p", nil, 1)
 
 	// Enqueue a second waiter (will be behind the cancelled one); the
 	// onEnqueued callback exposes its entry while blocked.
@@ -224,13 +220,9 @@ func TestAcquireRelease_CancelledEntrySkipped(t *testing.T) {
 
 	// Cancel the first waiter
 	cancel()
-	time.Sleep(50 * time.Millisecond)
 
 	// Second waiter should be at position 1 (cancelled entry is skipped)
-	pos := g.Position("http://p", secondEntry)
-	if pos != 1 {
-		t.Fatalf("expected queue position 1 for second waiter, got %d", pos)
-	}
+	awaitQueuePosition(t, g, "http://p", secondEntry, 1)
 
 	// Release the held slot — second waiter should be served (first is cancelled)
 	g.Release("http://p")
@@ -283,7 +275,9 @@ func TestEstimateWait_WithHistory(t *testing.T) {
 	g := NewConcurrencyGate()
 	ctx := context.Background()
 
-	// Build some history: acquire, hold for 100ms, release (repeat 3x)
+	// Build some history: acquire, hold for 100ms, release (repeat 3x). The hold durations are the
+	// input EstimateWait averages, so this is the measurement's own data, not slack; holds short
+	// enough to skip the clock would hand the estimator a zero average.
 	for range 3 {
 		g.Acquire(ctx, "http://p", 5, 0, nil)
 		time.Sleep(100 * time.Millisecond)
@@ -330,44 +324,43 @@ func TestAcquireRelease_MultipleWaitersPositions(t *testing.T) {
 
 	// Enqueue 3 waiters, each blocked on a shared barrier after acquiring.
 	barrier := make(chan struct{})
+	var served sync.WaitGroup
 
 	for range 3 {
+		served.Add(1)
 		go func() {
+			defer served.Done()
 			g.Acquire(ctx, "http://p", 1, 0, nil)
 			<-barrier // block until test unblocks us
 			g.Release("http://p")
 		}()
 	}
 
-	// Let all goroutines enqueue
-	time.Sleep(100 * time.Millisecond)
-
 	// Verify 3 entries in queue (Position with nil counts total)
-	pos := g.Position("http://p", nil)
-	if pos != 3 {
-		t.Fatalf("expected 3 queue entries, got %d", pos)
-	}
+	awaitQueuePosition(t, g, "http://p", nil, 3)
 
 	// Release the held slot — first waiter gets it and blocks on barrier
 	g.Release("http://p")
 
-	// Wait for first waiter to be served
-	time.Sleep(50 * time.Millisecond)
-
 	// 2 should remain in queue (first got slot but is blocked on barrier)
-	pos = g.Position("http://p", nil)
-	if pos != 2 {
-		t.Fatalf("expected 2 queue entries after first served, got %d", pos)
-	}
+	awaitQueuePosition(t, g, "http://p", nil, 2)
 
 	// Unblock all — they'll cascade: first releases → second served → releases → third served
 	close(barrier)
 
-	// Wait for all to complete
-	time.Sleep(200 * time.Millisecond)
+	cascaded := make(chan struct{})
+	go func() {
+		served.Wait()
+		close(cascaded)
+	}()
+	select {
+	case <-cascaded:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the cascade stopped: a waiter never reached its Release")
+	}
 
 	// Queue should be empty
-	pos = g.Position("http://p", nil)
+	pos := g.Position("http://p", nil)
 	if pos != 0 {
 		t.Fatalf("expected 0 queue entries at end, got %d", pos)
 	}
@@ -532,8 +525,9 @@ func TestAcquire_RateLimit_Cancellation(t *testing.T) {
 		errCh <- err
 	}()
 
-	// Let it enter the rate wait
-	time.Sleep(50 * time.Millisecond)
+	// Cancel has to land on a waiter the window is holding. A queued entry is what that looks like
+	// from outside the gate; the window is closed by the acquire above (maxRPS=1).
+	awaitQueuePosition(t, g, "http://p", nil, 1)
 	cancel()
 
 	select {
@@ -586,7 +580,8 @@ func TestAcquire_RateLimit_WithSlotWait(t *testing.T) {
 	}()
 
 	// Release the slot at ~0.3s — request 2 gets the slot but must still wait
-	// for the rate window (until ~1.0s from t0).
+	// for the rate window (until ~1.0s from t0). The point of the 300ms is that it is *inside* the
+	// 1s window: release after the window opens and the composed wait this test measures is gone.
 	time.Sleep(300 * time.Millisecond)
 	g.Release("http://p")
 
@@ -625,7 +620,7 @@ func TestAcquire_RateLimit_FIFO(t *testing.T) {
 		serveOrder <- 0
 		g.Release("http://p")
 	}()
-	time.Sleep(50 * time.Millisecond)
+	awaitQueuePosition(t, g, "http://p", nil, 1)
 
 	go func() {
 		if _, err := g.Acquire(ctx, "http://p", 1, 1, nil); err != nil {
@@ -635,12 +630,9 @@ func TestAcquire_RateLimit_FIFO(t *testing.T) {
 		serveOrder <- 1
 		g.Release("http://p")
 	}()
-	time.Sleep(50 * time.Millisecond)
 
-	pos := g.Position("http://p", nil)
-	if pos != 2 {
-		t.Fatalf("expected 2 queue entries, got %d", pos)
-	}
+	// Queue order [0, 1] is only the queue's if 1 was enqueued after 0 reached it.
+	awaitQueuePosition(t, g, "http://p", nil, 2)
 
 	// Release the held slot; waiters are also rate-blocked (~1s window from holder grant)
 	g.Release("http://p")
@@ -680,7 +672,7 @@ func TestAcquire_RateLimit_ReleaseServeSpacing(t *testing.T) {
 		}
 		bStart <- time.Now()
 	}()
-	time.Sleep(30 * time.Millisecond)
+	awaitQueuePosition(t, g, "http://p", nil, 1)
 	// C queues behind B.
 	cStart := make(chan time.Time, 1)
 	go func() {
@@ -690,7 +682,9 @@ func TestAcquire_RateLimit_ReleaseServeSpacing(t *testing.T) {
 		}
 		cStart <- time.Now()
 	}()
-	time.Sleep(100 * time.Millisecond) // A's window (100ms) has now opened
+	// A's 100ms rate window has to have opened before Release can serve B directly; this is the
+	// wait for that window, and a shorter one measures a gate that is still rate-blocked.
+	time.Sleep(100 * time.Millisecond)
 
 	// Release A's slot: window open, so Release serves B directly.
 	g.Release("http://p")
@@ -759,18 +753,24 @@ func TestAcquireRelease_CancelledAfterServeReturnsSlot(t *testing.T) {
 	}()
 	<-started
 
-	// Let the rate window open, then hand A's slot to D.
+	// Let the rate window open, then hand A's slot to D. The window is a second of production
+	// timing; shortening this wait leaves the window shut and Release serves nobody.
 	time.Sleep(1100 * time.Millisecond)
 	releaseDone := make(chan struct{})
 	go func() { g.Release(url); close(releaseDone) }()
-	time.Sleep(100 * time.Millisecond) // Release reaches the handoff
+	// The handoff is a race this test deliberately keeps: E must issue its acquire while Release is
+	// handing D the slot, so nothing may join before the handoff is under way. Waiting for
+	// releaseDone here would serialise the two and test nothing.
+	time.Sleep(100 * time.Millisecond)
 
 	if _, err := g.Acquire(ctx, url, 2, 1, nil); err != nil { // E
 		t.Fatalf("E acquire: %v", err)
 	}
 
 	close(releaseD)
-	time.Sleep(100 * time.Millisecond) // D enters its rate wait
+	// D's wake-up: cancelled before it reaches its rate wait, it leaves through the queue's cancel
+	// path instead, which is the other test's job.
+	time.Sleep(100 * time.Millisecond)
 	dCancel()
 
 	select {
@@ -822,6 +822,8 @@ func TestAcquireRelease_CancelDuringHandoffDoesNotWedge(t *testing.T) {
 
 		releaseDone := make(chan struct{})
 		go func() { g.Release(url); close(releaseDone) }()
+		// Offsets across a few scheduler turns: cancelling at one fixed moment would test one
+		// interleaving forever, and which of the two ready select cases wins is not controllable.
 		time.Sleep(time.Duration(i%5) * time.Millisecond) // land the cancel in the handoff
 		waitCancel()
 
@@ -869,6 +871,7 @@ func TestConcurrencyGate_CapacitySurvivesCancelChurn(t *testing.T) {
 
 		releaseDone := make(chan struct{})
 		go func() { g.Release(url); close(releaseDone) }()
+		// Offsets across a few scheduler turns; a fixed value would test one interleaving forever.
 		time.Sleep(time.Duration(cycle%3) * time.Millisecond) // cancel inside the handoff
 		wCancel()
 
