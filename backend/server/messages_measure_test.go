@@ -71,6 +71,7 @@ func readRaw(t *testing.T, s *Server, path string) (rows int, bytes int) {
 }
 
 func TestTaskOpenReadsAFractionOfItsThread(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Sixty iterations")
@@ -148,6 +149,7 @@ func jumpToPages(t *testing.T, s *Server, path, cursor, want, floor string) jump
 // The cost of one sticky-header jump, both shapes. `go test ./backend/server -run TestStickyJump -v`
 // re-measures them.
 func TestStickyJumpReadsOneFlooredWindow(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Long session")

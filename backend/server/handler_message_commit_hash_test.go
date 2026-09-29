@@ -27,6 +27,7 @@ import (
 // sees it — a forged hash that reached the database would be re-read by a path that does
 // not re-check it.
 func TestMessageCommitHashRequiresObjectID(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")

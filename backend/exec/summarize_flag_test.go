@@ -185,6 +185,10 @@ func TestHandleSummarize_DBPath_ClearsFlagBeforeLazyStart(t *testing.T) {
 		got, err := te.store.GetTaskByID(taskID)
 		return err == nil && got != nil && !got.Summarizing
 	})
+	// A stale write is not announced, so this is the span it would appear within: the executor has
+	// persisted its task copy by the time the assistant row lands, and every later persist is what
+	// this loop is watching. It costs 3 s of serial time; a seam that joins the summarizing
+	// goroutine's last write would make it a check instead of a watch.
 	for i := 0; i < 60; i++ {
 		got, err := te.store.GetTaskByID(taskID)
 		if err == nil && got != nil && got.Summarizing {

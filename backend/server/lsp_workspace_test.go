@@ -12,6 +12,7 @@ import (
 )
 
 func TestLSPWorkspaceAllowed(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projectDir := t.TempDir()
 	if err := s.store.CreateProject(&types.Project{ID: "lsp-ws-proj", Name: "WS", Path: projectDir}); err != nil {

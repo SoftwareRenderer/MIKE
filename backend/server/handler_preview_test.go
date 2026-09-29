@@ -26,6 +26,7 @@ import (
 var previewTokenPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 func TestPreviewToken_Minting(t *testing.T) {
+	t.Parallel()
 	seen := map[string]bool{}
 	for i := 0; i < 8; i++ {
 		token, err := newPreviewToken()
@@ -59,6 +60,8 @@ func (failingReader) Read([]byte) (int, error) { return 0, errors.New("entropy s
 // L2: when the entropy source fails, minting fails the request — a weak
 // (time-derived) token must never be minted, stored, or served.
 func TestPreviewToken_MintFailureIsFatal(t *testing.T) {
+	// Serial: previewRand is a package-level seam; swapping it changes minting for every concurrent
+	// test, not just this one.
 	oldRand := previewRand
 	previewRand = failingReader{}
 	t.Cleanup(func() { previewRand = oldRand })
@@ -168,6 +171,7 @@ func getPreviewFollowing(t *testing.T, s *Server, target string) *httptest.Respo
 // --- auth -------------------------------------------------------------------
 
 func TestPreviewServe_RequiresSession(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	req := testRequest("POST", "/api/preview", map[string]any{"content": "<html></html>"})
 	rr := testResponse(t, s, req)
@@ -177,6 +181,7 @@ func TestPreviewServe_RequiresSession(t *testing.T) {
 }
 
 func TestPreviewServe_RequiresCSRF(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, _ := loginTestCSRF(t, s)
 	req := testRequest("POST", "/api/preview", map[string]any{"content": "<html></html>"})
@@ -188,6 +193,7 @@ func TestPreviewServe_RequiresCSRF(t *testing.T) {
 }
 
 func TestPreviewServe_RejectsNonPOST(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 	req := testRequest("PUT", "/api/preview", map[string]any{"content": "<html></html>"})
@@ -201,6 +207,7 @@ func TestPreviewServe_RejectsNonPOST(t *testing.T) {
 // --- serve + doc -------------------------------------------------------------
 
 func TestPreviewServesDocWithoutSession(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 	html := "<!DOCTYPE html><html><body><h1>hi</h1></body></html>"
@@ -238,6 +245,7 @@ func TestPreviewServesDocWithoutSession(t *testing.T) {
 
 // allow_network opts the doc into the legacy permissive policy.
 func TestPreviewServesPermissiveCSPWhenAllowNetwork(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 	html := "<!DOCTYPE html><html><body><h1>hi</h1></body></html>"
@@ -260,6 +268,7 @@ func TestPreviewServesPermissiveCSPWhenAllowNetwork(t *testing.T) {
 // wildcard there is a live exfil channel (the load request itself delivers the
 // URL to the remote server). connect-src must be fully closed.
 func TestPreviewDocCSPStrict_NoWildcardInLoadDirectives(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"default-src", "script-src", "style-src", "img-src", "font-src", "media-src", "frame-src", "worker-src", "object-src"} {
 		if got := cspDirectiveValue(previewDocCSPStrict, name); strings.Contains(got, "*") {
 			t.Errorf("strict CSP: %q must not contain a wildcard, got %q", name, got)
@@ -281,6 +290,7 @@ func TestPreviewDocCSPStrict_NoWildcardInLoadDirectives(t *testing.T) {
 // restrictions, so the token costs nothing, while a bare `sandbox` would silently
 // break the scripts-on preview mode html-preview offers as a setting.
 func TestPreviewDocCSP_SandboxsWithoutSameOrigin(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		csp  string
@@ -307,6 +317,7 @@ func TestPreviewDocCSP_SandboxsWithoutSameOrigin(t *testing.T) {
 // The directive must reach the browser, not just the constant: both postures answer
 // with it on the document response.
 func TestPreviewResponsesCarrySandbox(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 
@@ -338,6 +349,7 @@ func cspDirectiveValue(csp, name string) string {
 
 // Doc Content-Type follows the previewed file's extension (host-derived).
 func TestPreviewDocContentType_FollowsFileExtension(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		path string
 		want string
@@ -350,6 +362,7 @@ func TestPreviewDocContentType_FollowsFileExtension(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.path, func(t *testing.T) {
+			t.Parallel()
 			s := testServer(t)
 			cookie, csrfToken := loginTestCSRF(t, s)
 			projectID, _ := previewTestProject(t, s)
@@ -381,6 +394,7 @@ func TestPreviewDocContentType_FollowsFileExtension(t *testing.T) {
 }
 
 func TestPreviewDoc_NoTrailingSlashRedirects(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 	token, _ := servePreview(t, s, cookie, csrfToken, map[string]any{"content": "<html></html>"})
@@ -399,6 +413,7 @@ func TestPreviewDoc_NoTrailingSlashRedirects(t *testing.T) {
 }
 
 func TestPreviewDoc_UnknownToken(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	rr := getPreview(t, s, "/api/preview/nonexistent-token/")
 	if rr.Code != http.StatusNotFound {
@@ -409,6 +424,7 @@ func TestPreviewDoc_UnknownToken(t *testing.T) {
 // --- sibling assets -----------------------------------------------------------
 
 func TestPreviewServesSiblingAsset(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 	projectID, dir := previewTestProject(t, s)
@@ -436,6 +452,7 @@ func TestPreviewServesSiblingAsset(t *testing.T) {
 }
 
 func TestPreviewAsset_Subdirectory(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 	projectID, dir := previewTestProject(t, s)
@@ -460,6 +477,7 @@ func TestPreviewAsset_Subdirectory(t *testing.T) {
 }
 
 func TestPreviewAsset_TraversalRejected(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 	projectID, dir := previewTestProject(t, s)
@@ -487,6 +505,7 @@ func TestPreviewAsset_TraversalRejected(t *testing.T) {
 }
 
 func TestPreviewAsset_SymlinkEscapeRejected(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 	projectID, dir := previewTestProject(t, s)
@@ -512,6 +531,7 @@ func TestPreviewAsset_SymlinkEscapeRejected(t *testing.T) {
 }
 
 func TestPreviewAsset_DirectoryRejected(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 	projectID, dir := previewTestProject(t, s)
@@ -534,6 +554,7 @@ func TestPreviewAsset_DirectoryRejected(t *testing.T) {
 }
 
 func TestPreviewAsset_SelfContainedDocHasNoAssets(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 	// No project/path — a generically served doc has no base directory.
@@ -545,6 +566,7 @@ func TestPreviewAsset_SelfContainedDocHasNoAssets(t *testing.T) {
 }
 
 func TestPreviewServe_PathOutsideProjectRejected(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 	projectID, _ := previewTestProject(t, s)
@@ -563,6 +585,7 @@ func TestPreviewServe_PathOutsideProjectRejected(t *testing.T) {
 // --- lifecycle ----------------------------------------------------------------
 
 func TestPreviewTTL_SweepExpiresIdleDocs(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 	token, _ := servePreview(t, s, cookie, csrfToken, map[string]any{"content": "<html></html>"})
@@ -584,6 +607,7 @@ func TestPreviewTTL_SweepExpiresIdleDocs(t *testing.T) {
 }
 
 func TestPreviewCap_EvictsOldest(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 	first := ""
@@ -600,6 +624,7 @@ func TestPreviewCap_EvictsOldest(t *testing.T) {
 }
 
 func TestPreviewDelete(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 	token, _ := servePreview(t, s, cookie, csrfToken, map[string]any{"content": "<html></html>"})
@@ -617,6 +642,7 @@ func TestPreviewDelete(t *testing.T) {
 }
 
 func TestPreviewDelete_RequiresSession(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	req := testRequest("DELETE", "/api/preview/some-token", nil)
 	rr := testResponse(t, s, req)
@@ -628,6 +654,7 @@ func TestPreviewDelete_RequiresSession(t *testing.T) {
 // --- size limits ---------------------------------------------------------------
 
 func TestPreviewServe_ContentTooLarge(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 	big := strings.Repeat("a", previewMaxContent+1)
@@ -642,6 +669,7 @@ func TestPreviewServe_ContentTooLarge(t *testing.T) {
 // --- path resolution -------------------------------------------------------------
 
 func TestResolveFSFilePath_ProjectRoot(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	dir := t.TempDir()
 	initGitRepo(t, dir)
@@ -664,6 +692,7 @@ func TestResolveFSFilePath_ProjectRoot(t *testing.T) {
 }
 
 func TestResolveFSFilePath_AbsolutePath(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	dir := t.TempDir()
 	initGitRepo(t, dir)
@@ -682,6 +711,7 @@ func TestResolveFSFilePath_AbsolutePath(t *testing.T) {
 }
 
 func TestResolveFSFilePath_OutsideProject(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projectID, _ := previewTestProject(t, s)
 	if _, _, _, err := s.resolveFSFilePath(projectID, "", "../elsewhere/page.html"); err == nil {
@@ -693,6 +723,7 @@ func TestResolveFSFilePath_OutsideProject(t *testing.T) {
 }
 
 func TestResolveFSFilePath_MissingInputs(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	if _, _, _, err := s.resolveFSFilePath("", "", "page.html"); err == nil {
 		t.Fatal("expected error for empty project")
@@ -706,6 +737,7 @@ func TestResolveFSFilePath_MissingInputs(t *testing.T) {
 // → token root; subdirectory file → the dir (so relative links resolve
 // against the file's siblings and ../ walks to the worktree root).
 func TestPreviewServe_URLReflectsDocDirectory(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 	projectID, _ := previewTestProject(t, s)
@@ -742,6 +774,7 @@ func TestPreviewServe_URLReflectsDocDirectory(t *testing.T) {
 // the whole reach of the token. The project checkout plus the request's own worktree
 // is the jail now.
 func TestPreviewServe_WorkspaceOnlyPathIsRefused(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 	projectID, _ := previewTestProject(t, s)
@@ -782,6 +815,7 @@ func TestPreviewServe_WorkspaceOnlyPathIsRefused(t *testing.T) {
 
 // Self-reference by file name → served content (possibly unsaved), not disk.
 func TestPreviewSelfReference_ServesServedContent(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projectID, dir := previewTestProject(t, s)
 	os.WriteFile(filepath.Join(dir, "index.html"), []byte("ON-DISK"), 0o644)
@@ -828,6 +862,7 @@ func randHex(n int) string {
 // without slash), the bare-token redirect, and the token root (a 404, not a
 // listing).
 func TestPreviewDoc_SubdirDirectoryRouting(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 	projectID, _ := previewTestProject(t, s)
@@ -876,6 +911,7 @@ func TestPreviewDoc_SubdirDirectoryRouting(t *testing.T) {
 // Self-reference from a subdir doc's dir: /token/docs/page.html → served
 // content, not the disk file.
 func TestPreviewSelfReference_SubdirDoc(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 	projectID, dir := previewTestProject(t, s)
@@ -901,6 +937,7 @@ func TestPreviewSelfReference_SubdirDoc(t *testing.T) {
 // Widened root: a subdir doc reaches BOTH its own dir's files and files at
 // the worktree root.
 func TestPreviewSubdirDoc_SiblingsResolveFromWorktreeRoot(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 	projectID, dir := previewTestProject(t, s)
@@ -930,6 +967,7 @@ func TestPreviewSubdirDoc_SiblingsResolveFromWorktreeRoot(t *testing.T) {
 // Sibling DOCUMENTS carry the doc CSP (strict by default, permissive with
 // allow_network) — a navigated page must keep the doc's egress posture.
 func TestPreviewSiblingDoc_CarriesDocCSP(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 	projectID, dir := previewTestProject(t, s)
@@ -964,6 +1002,7 @@ func TestPreviewSiblingDoc_CarriesDocCSP(t *testing.T) {
 }
 
 func TestPreviewSiblingDoc_PermitsCSPWithAllowNetwork(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 	projectID, dir := previewTestProject(t, s)
@@ -988,6 +1027,7 @@ func TestPreviewSiblingDoc_PermitsCSPWithAllowNetwork(t *testing.T) {
 var rewriteTestRoot = "/api/preview/" + strings.Repeat("a", 32) + "/"
 
 func TestRewriteRootRelative_Attributes(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		in   string
@@ -1018,6 +1058,7 @@ func TestRewriteRootRelative_Attributes(t *testing.T) {
 }
 
 func TestRewriteRootRelative_CSSUrl(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		in   string
@@ -1044,6 +1085,7 @@ func TestRewriteRootRelative_CSSUrl(t *testing.T) {
 // Serve applies the rewrite to HTML-family files only (the content type is
 // host-derived from the file name).
 func TestPreviewServe_RewriteAppliesToHTMLFamilyOnly(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 	projectID, _ := previewTestProject(t, s)
@@ -1079,6 +1121,7 @@ func TestPreviewServe_RewriteAppliesToHTMLFamilyOnly(t *testing.T) {
 // The size cap is enforced on the STORED (post-rewrite) content: dense
 // root-refs can push content over the cap after substitution.
 func TestPreviewStorePut_RewriteGrowthExceedsCap(t *testing.T) {
+	t.Parallel()
 	ps := newPreviewStore()
 	unit := `a href="/x">` // 10 chars → ~55 after rewrite
 	n := previewMaxContent / len(unit)
@@ -1097,6 +1140,7 @@ func TestPreviewStorePut_RewriteGrowthExceedsCap(t *testing.T) {
 // --- nav record + /nav endpoint ------------------------------------------------
 
 func TestPreviewNavRecord_CommittedDocumentsBumpSequence(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 	projectID, dir := previewTestProject(t, s)
@@ -1188,6 +1232,7 @@ func TestPreviewNavRecord_CommittedDocumentsBumpSequence(t *testing.T) {
 }
 
 func TestPreviewNav_RequiresSession(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	req := testRequest("GET", "/api/preview/some-token/nav", nil)
 	rr := testResponse(t, s, req)
@@ -1197,6 +1242,7 @@ func TestPreviewNav_RequiresSession(t *testing.T) {
 }
 
 func TestPreviewNav_UnknownToken(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, _ := loginTestCSRF(t, s)
 	req := testRequest("GET", "/api/preview/nonexistent-token/nav", nil)
@@ -1209,6 +1255,7 @@ func TestPreviewNav_UnknownToken(t *testing.T) {
 
 // sanity: the JSON body decodes into the expected request shape
 func TestPreviewServeRequestShape(t *testing.T) {
+	t.Parallel()
 	var req previewServeRequest
 	body := []byte(`{"content":"<i>hi</i>","project":"p1","path":"a/b.html","task":"t1"}`)
 	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&req); err != nil {

@@ -13,6 +13,7 @@ import (
 )
 
 func TestThreadList(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -40,6 +41,7 @@ func TestThreadList(t *testing.T) {
 }
 
 func TestThreadFork(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -94,6 +96,7 @@ func TestThreadFork(t *testing.T) {
 }
 
 func TestThreadSwitch(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -164,6 +167,7 @@ func TestThreadSwitch(t *testing.T) {
 }
 
 func TestThreadSwitchNotFound(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -178,6 +182,7 @@ func TestThreadSwitchNotFound(t *testing.T) {
 }
 
 func TestMessageScopedToThread(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -240,6 +245,7 @@ func TestMessageScopedToThread(t *testing.T) {
 }
 
 func TestThreadSwitchConcurrent(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -347,6 +353,7 @@ func TestThreadSwitchConcurrent(t *testing.T) {
 // This tests the exact user-reported scenario: fork a thread, modify files differently,
 // then switch back and forth — the worktree should reflect the active thread's state.
 func TestThreadSwitchWorktreeContent(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 
 	// Create a project with a git repo that has an initial file
@@ -512,6 +519,7 @@ func verifyWorktreeContent(t *testing.T, worktreePath, filePath, expectedContent
 // FromThreadID, even when FromThreadID != CurrentThreadID. This overwrites
 // the inactive thread's stash with the current (wrong) worktree state.
 func TestThreadForkFromInactiveThread(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 
 	// Create a project with a git repo that has an initial committed file
@@ -695,6 +703,7 @@ func TestThreadForkFromInactiveThread(t *testing.T) {
 // fell through to `reset --hard baseRef` for any thread without a stash hash, which
 // discarded the fork's committed file state and left an empty diff.
 func TestThreadSwitchRestoresForkCheckpoint(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -789,6 +798,7 @@ func TestThreadSwitchRestoresForkCheckpoint(t *testing.T) {
 // thread (which has no dedicated git branch) after a fork restores the task's
 // original branch rather than leaving the worktree on the fork's branch.
 func TestSwitchToMainRestoresTaskBranch(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -856,6 +866,7 @@ func TestSwitchToMainRestoresTaskBranch(t *testing.T) {
 // TestSwitchToAdvancedForkPreservesCommittedWork verifies switching to a fork that
 // committed work past its checkpoint does not roll it back to the checkpoint.
 func TestSwitchToAdvancedForkPreservesCommittedWork(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -943,6 +954,7 @@ func TestSwitchToAdvancedForkPreservesCommittedWork(t *testing.T) {
 // TestSwitchToMainRecoversSlugBranchPreservesFork verifies switching to Main on a
 // titled task (slug-named Main branch) and back to the fork preserves committed work.
 func TestSwitchToMainRecoversSlugBranchPreservesFork(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Hey")
@@ -1109,6 +1121,7 @@ func setupForkWithCheckpointStash(t *testing.T, s *Server, projID, taskID string
 // TestSameThreadSwitchDoesNotWipeUncommittedWork verifies a same-thread switch (page
 // load with a thread URL param) does not wipe the thread's uncommitted work.
 func TestSameThreadSwitchDoesNotWipeUncommittedWork(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -1130,6 +1143,7 @@ func TestSameThreadSwitchDoesNotWipeUncommittedWork(t *testing.T) {
 // TestSwitchRestoresForkCheckpointStash verifies a fork with an empty worktree stash
 // gets its last checkpoint stash re-applied on switch, restoring its real content.
 func TestSwitchRestoresForkCheckpointStash(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")

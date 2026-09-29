@@ -4,7 +4,7 @@ import { createServer, type Server as HttpServer } from 'node:http';
 import { execSync } from 'node:child_process';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
-import { csrfFetch } from './helpers';
+import { csrfFetch, waitForReaction } from './helpers';
 
 // Extension-frame channel security — end-to-end.
 //
@@ -259,34 +259,46 @@ async function mountToken(page: Page): Promise<string> {
   return (src as string).slice((src as string).lastIndexOf('extch=') + 6);
 }
 
+/** The log of whichever frame matches `url`, polled until it says `marker` — the frame exists before its
+ * document has run, so the marker is the thing that arrived, not the frame. */
+async function frameReached(page: Page, url: (f: Frame) => boolean, marker: string, what: string): Promise<Frame> {
+  let found: Frame | undefined;
+  await expect.poll(async () => {
+    found = page.frames().find(url);
+    return found ? ((await found.locator('#log').textContent().catch(() => '')) ?? '') : '';
+  }, { timeout: 15000, message: what }).toContain(marker);
+  return found as Frame;
+}
+
 /** The frame holding the document the host mounted (matched by its mount token). */
-async function mountedFrame(page: Page, token: string): Promise<Frame> {
-  for (let i = 0; i < 100; i++) {
-    const f = page.frames().find(fr => fr.url().includes(`extch=${token}`));
-    if (f && (await f.locator('#log').textContent().catch(() => ''))?.includes('ARMED')) return f;
-    await page.waitForTimeout(100);
-  }
-  throw new Error('the mounted extension document never armed its channel');
+function mountedFrame(page: Page, token: string): Promise<Frame> {
+  return frameReached(page, (f) => f.url().includes(`extch=${token}`), 'ARMED',
+    'the mounted extension document never armed its channel');
 }
 
 /** The same-origin sibling document that took over the frame. */
-async function siblingFrame(page: Page): Promise<Frame> {
-  for (let i = 0; i < 150; i++) {
-    const f = page.frames().find(fr => fr.url().endsWith('/other.html'));
-    if (f && (await f.locator('#log').textContent().catch(() => ''))?.includes('AT-SIBLING')) return f;
-    await page.waitForTimeout(100);
-  }
-  throw new Error('the frame never reached the same-origin sibling document');
+function siblingFrame(page: Page): Promise<Frame> {
+  return frameReached(page, (f) => f.url().endsWith('/other.html'), 'AT-SIBLING',
+    'the frame never reached the same-origin sibling document');
 }
 
 const frameLog = (frame: Frame) => frame.locator('#log').textContent() as Promise<string>;
 
-/** Type into the open file — while armed, every keystroke pushes editor.contentChange. */
-async function typeInEditor(page: Page, text: string): Promise<void> {
+/**
+ * Type into the open file and wait for the push the keystrokes cause, so a spec never reads the frame's
+ * log before the host has had the chance to send it. `armed` is the frame that should receive it; when the
+ * channel is not supposed to be live there is nothing to wait for, and the window a must-not-arrive check
+ * has is the host's own paint.
+ */
+async function typeInEditor(page: Page, text: string, armed?: Frame): Promise<void> {
   await page.locator('.file-editor .cm-content').click();
   await page.keyboard.press('End');
   await page.keyboard.type(text);
-  await page.waitForTimeout(600);
+  if (armed) {
+    await expect(armed.locator('#log')).toContainText('editor.contentChange', { timeout: 15000 });
+  } else {
+    await waitForReaction(page);
+  }
 }
 
 test.describe.serial('Extension frame channel (document identity)', () => {
@@ -374,7 +386,7 @@ test.describe.serial('Extension frame channel (document identity)', () => {
 
     // And the channel really is live: typing pushes the open file into the
     // frame. This is precisely the payload the next two tests must not deliver.
-    await typeInEditor(page, ' typed-more');
+    await typeInEditor(page, ' typed-more', await mountedFrame(page, token));
     const live = await frameLog(await mountedFrame(page, token));
     expect(live).toContain('editor.contentChange');
     expect(live).toContain(SECRET);
@@ -465,7 +477,7 @@ test.describe.serial('Extension frame channel (document identity)', () => {
     expect(consoleLines.join('\n')).not.toMatch(/extension frame reloaded/);
     expect(consoleLines.join('\n')).not.toMatch(/channel handshake rejected/);
     // …and the channel is still live: a keystroke still pushes the file in.
-    await typeInEditor(page, ' still-live');
+    await typeInEditor(page, ' still-live', await mountedFrame(page, token));
     const after = await frameLog(await mountedFrame(page, token));
     expect(after).toContain('editor.contentChange');
     expect(after).toContain('still-live');

@@ -70,6 +70,7 @@ func syncMux(h *TaskHandler) *http.ServeMux {
 }
 
 func TestSyncDigestNamesEveryPartAReturningScreenCompares(t *testing.T) {
+	t.Parallel()
 	h, s, _ := newTestTaskHandler(t)
 	projID, taskID := seedSyncProject(t, h, s)
 	seedSyncRows(t, s, taskID, 3)
@@ -95,6 +96,7 @@ func TestSyncDigestNamesEveryPartAReturningScreenCompares(t *testing.T) {
 }
 
 func TestSyncDigestConversationMovesWithWhatTheRowsHold(t *testing.T) {
+	t.Parallel()
 	h, s, _ := newTestTaskHandler(t)
 	projID, taskID := seedSyncProject(t, h, s)
 	path := "/api/projects/" + projID + "/tasks/" + taskID + "/sync"
@@ -114,6 +116,7 @@ func TestSyncDigestConversationMovesWithWhatTheRowsHold(t *testing.T) {
 }
 
 func TestSyncDigestRefusesATaskIDGitCouldReadAsAnOption(t *testing.T) {
+	t.Parallel()
 	h, s, _ := newTestTaskHandler(t)
 	projID, _ := seedSyncProject(t, h, s)
 
@@ -124,6 +127,7 @@ func TestSyncDigestRefusesATaskIDGitCouldReadAsAnOption(t *testing.T) {
 }
 
 func TestSyncDigestAnswersNotFoundForAnotherProjectsTask(t *testing.T) {
+	t.Parallel()
 	h, s, _ := newTestTaskHandler(t)
 	_, taskID := seedSyncProject(t, h, s)
 

@@ -114,6 +114,7 @@ func createStash(t *testing.T, repoDir, content, msg string) {
 // uses hash-based drops. It creates kanban stashes interleaved with unrelated
 // stashes, then verifies only the kanban entries are dropped.
 func TestDropStashEntriesForTask_ByHash(t *testing.T) {
+	t.Parallel()
 	repoDir, projID, taskID, _, _, wm := setupStashTest(t)
 
 	// Create some kanban-labeled stashes for this task
@@ -161,6 +162,7 @@ func TestDropStashEntriesForTask_ByHash(t *testing.T) {
 // for one task does not affect stashes for a different task, even if the task
 // IDs share a substring.
 func TestDropStashEntriesForTask_NoFalsePositives(t *testing.T) {
+	t.Parallel()
 	repoDir, projID, taskID, s, _, wm := setupStashTest(t)
 
 	// Create a second task in the DB
@@ -211,6 +213,7 @@ func TestDropStashEntriesForTask_NoFalsePositives(t *testing.T) {
 // TestDropStashEntriesForTask_InterleavedStashes verifies correct behavior
 // when kanban and non-kanban stashes are interleaved at various indices.
 func TestDropStashEntriesForTask_InterleavedStashes(t *testing.T) {
+	t.Parallel()
 	repoDir, projID, taskID, _, _, wm := setupStashTest(t)
 
 	// Create an interleaved pattern: unrelated, kanban, unrelated, kanban, unrelated
@@ -254,6 +257,7 @@ func TestDropStashEntriesForTask_InterleavedStashes(t *testing.T) {
 // uses hash-based drops. It creates stashes on a specific branch and verifies
 // only those are dropped.
 func TestDropStashEntriesForBranch_ByHash(t *testing.T) {
+	t.Parallel()
 	repoDir, projID, taskID, _, _, wm := setupStashTest(t)
 
 	branchName := "task/" + taskID
@@ -299,6 +303,7 @@ func TestDropStashEntriesForBranch_ByHash(t *testing.T) {
 // TestDropStashEntriesForBranch_NoFalsePositives verifies that dropping stashes
 // for one branch does not affect stashes on a different branch with a similar name.
 func TestDropStashEntriesForBranch_NoFalsePositives(t *testing.T) {
+	t.Parallel()
 	repoDir, projID, _, _, _, wm := setupStashTest(t)
 
 	// Create stashes on two different branches
@@ -343,6 +348,7 @@ func TestDropStashEntriesForBranch_NoFalsePositives(t *testing.T) {
 
 // TestDropStashEntriesForTask_EmptyStashList verifies no error when there are no stashes.
 func TestDropStashEntriesForTask_EmptyStashList(t *testing.T) {
+	t.Parallel()
 	_, projID, taskID, _, _, wm := setupStashTest(t)
 
 	err := wm.DropStashEntriesForTask(projID, taskID)
@@ -353,6 +359,7 @@ func TestDropStashEntriesForTask_EmptyStashList(t *testing.T) {
 
 // TestDropStashEntriesForBranch_EmptyStashList verifies no error when there are no stashes.
 func TestDropStashEntriesForBranch_EmptyStashList(t *testing.T) {
+	t.Parallel()
 	_, projID, _, _, _, wm := setupStashTest(t)
 
 	err := wm.DropStashEntriesForBranch(projID, "task/some-task")
@@ -364,6 +371,7 @@ func TestDropStashEntriesForBranch_EmptyStashList(t *testing.T) {
 // TestDropStashEntriesForTask_AllKanbanLabels verifies all kanban label types
 // are matched and dropped: switch, fork, checkpoint, sync-merge, auto-merge.
 func TestDropStashEntriesForTask_AllKanbanLabels(t *testing.T) {
+	t.Parallel()
 	repoDir, projID, taskID, _, _, wm := setupStashTest(t)
 
 	labels := []string{

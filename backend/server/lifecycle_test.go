@@ -13,6 +13,8 @@ import (
 // cannot express this sequence (the LSP handler is built after the sandbox manager but must close before
 // it), so the order is a declaration and this test is what keeps it one.
 func TestShutdownOrderIsWhatWeDeclared(t *testing.T) {
+	// Serial: logging.TestSink re-points the process-wide logger, so a concurrent test’s lines would
+	// land in this buffer.
 	var ran []string
 	record := func(name string) func() { return func() { ran = append(ran, name) } }
 	logged, restore := logging.TestSink()
@@ -55,6 +57,7 @@ func TestShutdownOrderIsWhatWeDeclared(t *testing.T) {
 // The sequence is only declared if every stage has a name: an unlisted stage would render as the empty
 // string and a wedged shutdown would log "shutdown: " with nothing to name.
 func TestShutdownStagesAreDeclaredEntirely(t *testing.T) {
+	t.Parallel()
 	for st := stage(0); st < stageCount; st++ {
 		if stageNames[st] == "" {
 			t.Errorf("stage %d has no name; add it to stageNames", int(st))
@@ -74,6 +77,7 @@ func TestShutdownStagesAreDeclaredEntirely(t *testing.T) {
 // A component a test never built has no step, so the sequence must skip it rather than fail — this is the
 // property that replaced eleven nil checks.
 func TestShutdownRunsOnlyWhatWasRegistered(t *testing.T) {
+	t.Parallel()
 	var ran []string
 	s := &Server{}
 	if err := s.reg(stageTerminalSessions, "terminal sessions", func() { ran = append(ran, "terminal sessions") })(); err != nil {
@@ -90,6 +94,7 @@ func TestShutdownRunsOnlyWhatWasRegistered(t *testing.T) {
 // A second registration of one stage would silently drop a step, which is a leaked goroutine discovered
 // later as a shutdown that never returns.
 func TestRegistrationRefusesToOverwriteAStage(t *testing.T) {
+	t.Parallel()
 	s := &Server{}
 	if err := s.reg(stageDatabase, "database", func() {})(); err != nil {
 		t.Fatalf("first registration: %v", err)
@@ -106,6 +111,7 @@ func TestRegistrationRefusesToOverwriteAStage(t *testing.T) {
 // NewServer registers the real steps; a server built by the production constructor must walk the whole
 // declared sequence. This is the check that a component cannot be added without its step.
 func TestNewServerRegistersEveryStage(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	var missing []string
 	for st := stage(0); st < stageCount; st++ {
@@ -125,6 +131,7 @@ func TestNewServerRegistersEveryStage(t *testing.T) {
 // cancelling one operation must not cancel another (they share the base only for the shutdown signal), and
 // the base has no deadline, because the bound on a merge is the work finishing, not a timer.
 func TestDetachedContextsShareTheBaseAndNothingElse(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 
 	a, cancelA := s.Detached()
@@ -147,6 +154,7 @@ func TestDetachedContextsShareTheBaseAndNothingElse(t *testing.T) {
 // written to. A task that unwinds into a closed database is how a shutdown starts reporting phantom
 // failures the operator cannot reproduce.
 func TestShutdownCancelsTheBaseForEverythingStillRunning(t *testing.T) {
+	t.Parallel()
 	s := &Server{}
 	base, cancel := context.WithCancel(context.Background())
 	s.base, s.baseCancel = base, cancel
@@ -167,6 +175,7 @@ func TestShutdownCancelsTheBaseForEverythingStillRunning(t *testing.T) {
 // A step registered as nil — the method value of a component that is not assigned yet — is a nil-func call
 // inside Shutdown, discovered as a panic during an exit. It is a boot failure instead.
 func TestRegistrationRefusesANilStep(t *testing.T) {
+	t.Parallel()
 	s := &Server{}
 	err := s.reg(stageTerminalSessions, "terminal sessions", nil)()
 	if err == nil {

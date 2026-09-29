@@ -57,6 +57,7 @@ func giveTaskWorktree(t *testing.T, s *Server, projID, taskID string) {
 }
 
 func TestSingleTaskDeleteRemovesItsBranchAndWorktreeRegistration(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID, projDir := createTestProjectWithPath(t, s)
 	taskID := createTestTask(t, s, projID, "delete-branch-probe")
@@ -76,6 +77,7 @@ func TestSingleTaskDeleteRemovesItsBranchAndWorktreeRegistration(t *testing.T) {
 }
 
 func TestClearDoneRemovesEveryBranchAndRegistration(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID, projDir := createTestProjectWithPath(t, s)
 	const done = 3
@@ -105,6 +107,7 @@ func TestClearDoneRemovesEveryBranchAndRegistration(t *testing.T) {
 // A fork leaves the worktree on thread/<id> and stores that branch in task.branch, so the delete hits
 // a branch the registration still holds.
 func TestTaskDeleteRemovesForkThreadBranch(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID, projDir := createTestProjectWithPath(t, s)
 	taskID := createTestTask(t, s, projID, "fork-branch-probe")

@@ -2,7 +2,7 @@ import { test, expect, type Browser, type Page } from '@playwright/test';
 import { writeFileSync, appendFileSync, existsSync, rmSync, mkdirSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'path';
-import { csrfFetch, apiGetConfig, createTaskViaApi } from './helpers';
+import { csrfFetch, apiGetConfig, createTaskViaApi, waitForReaction } from './helpers';
 
 /**
  * The editor's go-to-definition UX.
@@ -533,8 +533,7 @@ test.describe.serial('Editor go-to-definition hover + Ctrl/Cmd+Click', () => {
         // `package` resolves to nothing in the fake's routing table.
         const spot = await coordsOf(page, 'package');
         await page.mouse.move(spot.x, spot.y);
-        // Comfortably past the 500 ms hover delay plus a round trip to the fake.
-        await page.waitForTimeout(1600);
+        await page.waitForTimeout(1600); // measurement window: the 500 ms hover delay plus a round trip to the fake
         await expect(page.locator(CARD)).toHaveCount(0);
     });
 
@@ -663,7 +662,8 @@ test.describe.serial('Editor go-to-definition hover + Ctrl/Cmd+Click', () => {
                 window.dispatchEvent(new CustomEvent('open-file', { detail: { path, line: 3, taskId } })),
             { path: join(HOVER_REPO, TARGET), taskId: 'not-the-open-task' },
         );
-        await page.waitForTimeout(750);
+        // The open-file handler mounts a tab on the event itself, so a paint is the whole window it gets.
+        await waitForReaction(page);
         expect(await page.locator('.editor-tab-name').count(), 'task-scoped jump opened a project tab').toBe(tabsBefore);
 
         // The same event without a task scope is the project's to open.

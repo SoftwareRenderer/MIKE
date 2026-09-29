@@ -19,6 +19,7 @@ func memoryAlertMux(h *TaskHandler) *http.ServeMux {
 const memoryAlertPath = "/api/projects/task-val-proj/tasks/task-val-task/memory-alert-ack"
 
 func TestDismissMemoryAlertWritesTheAckTheClientDismissed(t *testing.T) {
+	t.Parallel()
 	h, s, _ := newTestTaskHandler(t)
 	setupTaskValidationProject(t, h, s)
 	if err := s.RecordTaskSandboxMemory("task-val-task", 1024, 2); err != nil {
@@ -68,6 +69,7 @@ func TestDismissMemoryAlertWritesTheAckTheClientDismissed(t *testing.T) {
 
 // The path's project and task are honoured as a pair.
 func TestDismissMemoryAlertRefusesATaskOutsideTheProject(t *testing.T) {
+	t.Parallel()
 	h, s, _ := newTestTaskHandler(t)
 	setupTaskValidationProject(t, h, s)
 	if err := s.CreateProject(&types.Project{ID: "other-proj", Name: "other", Path: t.TempDir()}); err != nil {
@@ -101,6 +103,7 @@ func TestDismissMemoryAlertRefusesATaskOutsideTheProject(t *testing.T) {
 
 // A missing or bad number would make the ack cover the wrong alert. Each rejection writes nothing.
 func TestDismissMemoryAlertRejectsAnIncompleteBody(t *testing.T) {
+	t.Parallel()
 	h, s, _ := newTestTaskHandler(t)
 	setupTaskValidationProject(t, h, s)
 	mux := memoryAlertMux(h)
@@ -139,6 +142,7 @@ func TestDismissMemoryAlertRejectsAnIncompleteBody(t *testing.T) {
 
 // Whether an alert exists is the client's rule over the numbers, not this write's.
 func TestDismissMemoryAlertOnATaskWithNoRun(t *testing.T) {
+	t.Parallel()
 	h, s, _ := newTestTaskHandler(t)
 	setupTaskValidationProject(t, h, s)
 	rr := doTaskRequest(t, memoryAlertMux(h), http.MethodPost, memoryAlertPath,

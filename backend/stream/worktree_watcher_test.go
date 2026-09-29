@@ -94,7 +94,9 @@ func TestWorktreeWatcherRetriesWhileInFlight(t *testing.T) {
 	worktreePath := filepath.Join(worktreesDir, projID, taskID)
 	writeTestFile(t, worktreePath, "new.txt", "hello\n")
 
-	// Wait long enough for the 1s throttle to fire (while still in flight).
+	// The wait is the 1 s per-task throttle in handleEvent firing while the compute is still in
+	// flight. Anything under it never reaches the branch that re-arms the timer, so the assertion
+	// below would read a nil that had simply not been replaced yet.
 	time.Sleep(1400 * time.Millisecond)
 
 	// A retry timer must have been re-armed, proving the pending change was

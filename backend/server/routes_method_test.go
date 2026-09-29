@@ -53,6 +53,7 @@ var methodContract = []struct {
 // TestRoutesRefuseUnregisteredMethodsThroughTheMux is the whole point of the method patterns: the
 // refusal happens in the mux, so a handler cannot be reached by a verb it was never meant to serve.
 func TestRoutesRefuseUnregisteredMethodsThroughTheMux(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrf := loginTestCSRF(t, s)
 
@@ -89,6 +90,7 @@ func TestRoutesRefuseUnregisteredMethodsThroughTheMux(t *testing.T) {
 // check on a route that writes. (Exploiting it needed a JSON body, which a cross-site <form> cannot
 // carry; the hole was in the story, not provably in the door.)
 func TestGETCheckoutNoLongerReachesTheCheckoutHandler(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, _ := loginTestCSRF(t, s)
 
@@ -112,6 +114,7 @@ func TestGETCheckoutNoLongerReachesTheCheckoutHandler(t *testing.T) {
 // pinned because "a wrong verb always gets 405" is therefore not universally true, and a reader who
 // assumes it will be surprised.
 func TestStaticPathFallsThroughToTheParameterisedSibling(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrf := loginTestCSRF(t, s)
 
@@ -132,6 +135,7 @@ func TestStaticPathFallsThroughToTheParameterisedSibling(t *testing.T) {
 // that switch on r.Method decide HEAD for themselves: /api/config refuses it, exactly as it did
 // before method patterns existed.
 func TestGETPatternAlsoAnswersHEAD(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrf := loginTestCSRF(t, s)
 	req := testRequest(http.MethodHead, "/api/health", nil)
@@ -149,6 +153,7 @@ func TestGETPatternAlsoAnswersHEAD(t *testing.T) {
 // verb itself, to show the mux now decides. Called directly with a bad method a handler no longer
 // refuses — that is the point, and it is why the per-handler 405 assertions moved here.
 func TestCheckoutHandlerIsNotGuardedAnymoreBecauseTheMuxDecides(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrf := loginTestCSRF(t, s)
 

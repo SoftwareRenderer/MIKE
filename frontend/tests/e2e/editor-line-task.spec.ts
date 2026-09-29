@@ -2,7 +2,7 @@ import { test, expect, type Browser, type Page } from '@playwright/test';
 import { writeFileSync, rmSync, mkdirSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'path';
-import { csrfFetch, createTaskViaApi, navigateToTask } from './helpers';
+import { csrfFetch, createTaskViaApi, navigateToTask, readStored, waitForStored, waitForStable } from './helpers';
 
 // Gutter line selection in the Explorer code editor: a click opens the Create
 // Task modal as an INTERACTIVE FLOATING WINDOW (no dim, app behind stays
@@ -130,17 +130,10 @@ test.describe('Editor gutter line selection → Create Task', () => {
   /** Wait until the editor's box stops moving (split-pane/ResizeObserver settle).
    *  Gutter clicks are pixel-precise, so a shifting layout would mis-target lines. */
   async function waitEditorStable(page: Page) {
-    const get = async () => {
+    await waitForStable(async () => {
       const b = await page.locator('.cm-editor').boundingBox();
       return b ? `${Math.round(b.x)}:${Math.round(b.y)}:${Math.round(b.width)}:${Math.round(b.height)}` : '';
-    };
-    let prev = await get();
-    for (let i = 0; i < 20 && prev !== ''; i++) {
-      await page.waitForTimeout(100);
-      const cur = await get();
-      if (cur === prev) return;
-      prev = cur;
-    }
+    }, { what: 'the editor box', until: (box) => box !== '', timeout: 10_000 });
   }
 
   async function openLinesFile(page: Page) {
@@ -480,8 +473,10 @@ test.describe('Editor gutter line selection → Create Task', () => {
       scroller!.scrollTop = 2000;
       return scroller!.scrollTop;
     });
-    // Let the throttled scroll pipeline (200ms editor → 300ms tab save) flush
-    await page.waitForTimeout(600);
+    // The restore below can only restore what was saved: wait for the throttled editor→tab pipeline to
+    // have written this scroll offset into the project's stored tab state.
+    await waitForStored<any>(page, 'editor-tabs', projectId,
+      (state) => Object.values(state?.scrollTops ?? {}).some((v: any) => Number(v) >= 1900));
     // Create a task from a line in the MIDDLE of the viewport. The gutter is
     // virtualized (rendered buffer extends past the viewport), so pick the
     // line at the viewport center via the CM6 view — clicking an off-screen
@@ -508,7 +503,12 @@ test.describe('Editor gutter line selection → Create Task', () => {
     await page.locator('.task-detail-page:not(.floating) .header')
       .getByRole('button', { name: 'Open explorer' }).click();
     await expect(page.locator('.explorer-view')).toBeVisible({ timeout: 10000 });
-    await page.waitForTimeout(500);
+    // The task explorer's mount flushes its own tab save; wait for that write to settle, then check the
+    // project's stored scroll fields are the ones still on disk.
+    await waitForStable(() => readStored(page, 'editor-tabs', projectId),
+      { what: 'the persisted tab state after the mount', timeout: 10_000 });
+    await expect.poll(() => readStored<any>(page, 'editor-tabs', projectId).then(s => Object.keys(s?.scrollTops ?? {}).length))
+      .toBeGreaterThan(0);
     // Browser back → full task view → the previous URL entry
     // (view=explorer&file=long.txt)
     await page.goBack();

@@ -35,6 +35,7 @@ func login(t *testing.T, s *Server) (cookie, csrf string) {
 // preview-path tests below stay separate because they are public for a reason and are
 // judged on "not 401" rather than on an exact status.
 func TestMiddlewareAuthenticationGating(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		method string
@@ -63,6 +64,7 @@ func TestMiddlewareAuthenticationGating(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			s := testServer(t)
 
 			req := testRequest(tc.method, tc.path, tc.body)
@@ -85,6 +87,7 @@ func TestMiddlewareAuthenticationGating(t *testing.T) {
 // it shows, and a worker fetches its own scripts with no session to present, so that script is answered
 // like the worker itself.
 func TestWorkerScriptNeedsNoSession(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/sw-notifications.js", nil)
@@ -106,6 +109,7 @@ func TestWorkerScriptNeedsNoSession(t *testing.T) {
 // the middleware publishes the validated session id on the context, which is how every
 // handler downstream identifies the caller.
 func TestMiddlewareSessionIDInContext(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, _ := login(t, s)
 
@@ -133,12 +137,14 @@ func TestMiddlewareSessionIDInContext(t *testing.T) {
 // with and without an Origin header. The app is served from its own origin, so
 // reflecting the caller would only widen what the SPA can be read by.
 func TestMiddlewareCORSIsSameOriginOnly(t *testing.T) {
+	t.Parallel()
 	for _, origin := range []string{"", "http://localhost:3000"} {
 		name := "same-origin request (no Origin header)"
 		if origin != "" {
 			name = "cross-origin request from " + origin
 		}
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			s := testServer(t)
 
 			req := testRequest(http.MethodGet, "/api/health", nil)
@@ -162,6 +168,7 @@ func TestMiddlewareCORSIsSameOriginOnly(t *testing.T) {
 // because there is no session to ride. The 201 row is the positive control — proof the
 // accepted token came from a path that reaches the handler.
 func TestCSRFMiddleware(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		method string
@@ -238,6 +245,7 @@ func staticBody(v any) func(t *testing.T) any {
 }
 
 func TestPanicRecovery_DoesNotLeakPanicValue(t *testing.T) {
+	t.Parallel()
 	panicValue := "SENSITIVE-INTERNAL-DETAIL"
 	h := PanicRecoveryMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		panic(panicValue)
@@ -267,6 +275,7 @@ func okHostHandler() http.Handler {
 }
 
 func TestHostPinMiddleware(t *testing.T) {
+	t.Parallel()
 	s := testServer(t) // addr ":0" — no listen host contributes to the allowlist
 
 	tests := []struct {
@@ -306,6 +315,8 @@ func TestHostPinMiddleware(t *testing.T) {
 }
 
 func TestHostPinMiddlewareAllowedHostsEnv(t *testing.T) {
+	// Serial: t.Setenv refuses to run in a parallel test, and MIKE_ALLOWED_HOSTS is the process's own.
+	//
 	// The reverse-proxy opt-out: a proxy forwards the public domain in Host. The variable alone, with
 	// no flag, must reach the allowlist — and it reaches it through the one ladder that resolves it,
 	// so what is pinned here is the whole chain (variable -> startup.Config -> middleware) rather than
@@ -356,6 +367,7 @@ func TestHostPinMiddlewareAllowedHostsEnv(t *testing.T) {
 // flag, which is the reason the ladder resolves once (startup.Resolve) and the flag replaces rather
 // than extends.
 func TestHostPinMiddlewareUsesTheWiredAllowedHosts(t *testing.T) {
+	// Serial for the reason at TestHostPinMiddlewareAllowedHostsEnv.
 	t.Setenv("MIKE_ALLOWED_HOSTS", "env.example.com")
 
 	s := &Server{addr: ":0", settings: startup.Config{AllowedHosts: []string{"flag.example.com", "other.lan"}}}
@@ -388,6 +400,7 @@ func TestHostPinMiddlewareUsesTheWiredAllowedHosts(t *testing.T) {
 // else: the joining of entries is the middleware's, the choosing between flag and variable is
 // startup's (startup.TestResolveAllowedHosts).
 func TestEffectiveAllowedHosts(t *testing.T) {
+	// Serial for the reason at TestHostPinMiddlewareAllowedHostsEnv.
 	t.Setenv(startup.EnvAllowedHosts, "env.example.com")
 
 	tests := []struct {
@@ -410,6 +423,7 @@ func TestEffectiveAllowedHosts(t *testing.T) {
 }
 
 func TestHostPinMiddlewareListenHostAllowed(t *testing.T) {
+	t.Parallel()
 	// Listening on an explicit address (the container/reverse-proxy escape hatch)
 	// pins that address as an accepted Host value too.
 	s := &Server{addr: "192.168.1.50:3000"}
@@ -439,6 +453,7 @@ func TestHostPinMiddlewareListenHostAllowed(t *testing.T) {
 // early" requirement: the check runs before routing, so it also guards the
 // WebSocket upgrades and paths that are exempt from authentication.
 func TestHostPinMiddlewareCoversUpgradesAndPublicPaths(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 
 	// Public path (no session needed) is still Host-checked.

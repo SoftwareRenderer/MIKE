@@ -29,6 +29,7 @@ func plantMessage(t *testing.T, s *Server, taskID, id string) {
 }
 
 func TestPatchMessageRefusesAnotherTasksMessage(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projA, taskA, projB, taskB := twoProjectFixture(t, s)
 	plantMessage(t, s, taskA, "msg-patch-cross-project")
@@ -57,6 +58,7 @@ func TestPatchMessageRefusesAnotherTasksMessage(t *testing.T) {
 }
 
 func TestGetMessageByIDRefusesAnotherTasksMessage(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	_, taskA, projB, taskB := twoProjectFixture(t, s)
 	plantMessage(t, s, taskA, "msg-read-cross-project")
@@ -70,6 +72,7 @@ func TestGetMessageByIDRefusesAnotherTasksMessage(t *testing.T) {
 }
 
 func TestDeleteSingleMessageRefusesAnotherTasksMessage(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	_, taskA, projB, taskB := twoProjectFixture(t, s)
 	plantMessage(t, s, taskA, "msg-delete-cross-project")
@@ -95,6 +98,7 @@ func TestDeleteSingleMessageRefusesAnotherTasksMessage(t *testing.T) {
 }
 
 func TestListThreadsRefusesAnotherProjectsTask(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projA, taskA, projB, _ := twoProjectFixture(t, s)
 

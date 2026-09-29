@@ -6,6 +6,7 @@ import (
 )
 
 func TestShellQuote(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		input    string
@@ -67,6 +68,9 @@ func TestShellQuote(t *testing.T) {
 // command injection by actually executing the constructed command through a
 // POSIX shell and confirming the payload does not break out of quoting.
 func TestShellQuoteSafety(t *testing.T) {
+	// Serial: the payload rows share one canary path under /tmp, and its removal is what makes the
+	// next row meaningful.
+	//
 	// This test uses a canary file. If the payload breaks out of quoting,
 	// the canary file will be created, indicating a vulnerability.
 	payloads := []string{
@@ -114,6 +118,7 @@ func TestShellQuoteSafety(t *testing.T) {
 // parsed by a POSIX shell, yields exactly the original input as a single
 // argument.
 func TestShellQuoteRoundTrip(t *testing.T) {
+	t.Parallel()
 	payloads := []string{
 		"simple_path",
 		"path with spaces",

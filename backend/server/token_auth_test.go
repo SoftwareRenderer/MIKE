@@ -36,6 +36,7 @@ func newProjectAndTask(t *testing.T, s *Server) (string, string) {
 }
 
 func TestBearerTokenReachesItsScopedRoutes(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projectID, taskID := newProjectAndTask(t, s)
 	secret := issueTokenThroughAPI(t, s, "ci")["token"].(string)
@@ -98,6 +99,7 @@ func TestBearerTokenReachesItsScopedRoutes(t *testing.T) {
 }
 
 func TestBearerTokenRefusedOutsideItsScope(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projectID, taskID := newProjectAndTask(t, s)
 	issued := issueTokenThroughAPI(t, s, "ci")
@@ -141,6 +143,7 @@ func TestBearerTokenRefusedOutsideItsScope(t *testing.T) {
 // session cookie it happens to travel with: a revoked credential must not degrade into "still
 // signed in as whoever's cookie this is".
 func TestBearerTokenMustBeLive(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrf := loginTestCSRF(t, s)
 
@@ -209,6 +212,7 @@ func TestBearerTokenMustBeLive(t *testing.T) {
 // currentSessionID to decide who is asking; a token caller has no answer to that question, and
 // reporting one would let a scoped credential be treated as a session identity.
 func TestBearerTokenRequestCarriesNoSessionID(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	secret := issueTokenThroughAPI(t, s, "ci")["token"].(string)
 
@@ -232,6 +236,7 @@ func TestBearerTokenRequestCarriesNoSessionID(t *testing.T) {
 
 // The scheme token is case-insensitive (RFC 7235); the secret is not.
 func TestBearerSchemeIsCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	secret := issueTokenThroughAPI(t, s, "ci")["token"].(string)
 
@@ -248,6 +253,7 @@ func TestBearerSchemeIsCaseInsensitive(t *testing.T) {
 // A token on a path the mux has no route for is the mux's answer, not the scope check's: 404 says
 // what is wrong, where 403 would claim the caller lacks a permission it was never asking about.
 func TestBearerTokenOnAnUnregisteredPath(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	secret := issueTokenThroughAPI(t, s, "ci")["token"].(string)
 
@@ -259,6 +265,7 @@ func TestBearerTokenOnAnUnregisteredPath(t *testing.T) {
 // The allowlist is the product's security boundary, so widening it is a deliberate edit to this
 // list rather than a line added to a map somewhere.
 func TestTokenScopeIsTheApprovedSet(t *testing.T) {
+	t.Parallel()
 	approved := []string{
 		"DELETE /api/projects/{projectID}/tasks/{taskID}",
 		"GET /api/projects",

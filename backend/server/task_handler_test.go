@@ -17,6 +17,7 @@ import (
 )
 
 func TestTaskCreate(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
@@ -46,6 +47,7 @@ func TestTaskCreate(t *testing.T) {
 }
 
 func TestTaskCreateWithTitle(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
@@ -69,6 +71,7 @@ func TestTaskCreateWithTitle(t *testing.T) {
 // refused with a status the SPA can branch on — in particular, a create that silently
 // accepts a dangling parent_task_id would produce a subtask no one can reach.
 func TestTaskRequestErrors(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		method string
@@ -97,6 +100,7 @@ func TestTaskRequestErrors(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			s := testServer(t)
 			projID := createTestProject(t, s)
 
@@ -109,6 +113,7 @@ func TestTaskRequestErrors(t *testing.T) {
 }
 
 func TestTaskList(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
@@ -130,6 +135,7 @@ func TestTaskList(t *testing.T) {
 }
 
 func TestTaskGetByID(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Get me")
@@ -147,6 +153,7 @@ func TestTaskGetByID(t *testing.T) {
 }
 
 func TestTaskUpdate(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Update me")
@@ -172,6 +179,7 @@ func TestTaskUpdate(t *testing.T) {
 // api.TestTaskHandler_PUT_RefValidation — the row set here is deliberately small and
 // adds the response-shape check that layer cannot make.
 func TestTaskUpdateRefValidation(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		field string
 		value string
@@ -218,6 +226,7 @@ func TestTaskUpdateRefValidation(t *testing.T) {
 }
 
 func TestTaskDelete(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Delete me")
@@ -237,6 +246,7 @@ func TestTaskDelete(t *testing.T) {
 }
 
 func TestTaskMove(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTaskWithLLM(t, s, projID, "Move me")
@@ -258,6 +268,7 @@ func TestTaskMove(t *testing.T) {
 
 // Test: move to in_progress reverts to backlog when auto-start fails
 func TestTaskMoveAutoStartFailReverts(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	// Task WITHOUT LLM config — auto-start will fail
@@ -282,6 +293,7 @@ func TestTaskMoveAutoStartFailReverts(t *testing.T) {
 }
 
 func TestTaskParentValidation(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
@@ -406,6 +418,7 @@ func updateTask(t *testing.T, s *Server, projectID string, taskID string, update
 
 // Test: subtask move from review to done
 func TestSubtaskMoveReviewToDone(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	parentID := createTestTask(t, s, projID, "parent-task")
@@ -428,6 +441,7 @@ func TestSubtaskMoveReviewToDone(t *testing.T) {
 
 // Test: subtask move from review to backlog
 func TestSubtaskMoveReviewToBacklog(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	parentID := createTestTask(t, s, projID, "parent-task")
@@ -446,6 +460,7 @@ func TestSubtaskMoveReviewToBacklog(t *testing.T) {
 
 // Test: block subtask from moving to backlog when parent is in_progress
 func TestSubtaskBlockBacklogWhenParentInProgress(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	parentID := createTestTask(t, s, projID, "parent-task")
@@ -481,6 +496,7 @@ func TestSubtaskBlockBacklogWhenParentInProgress(t *testing.T) {
 
 // Test: allow subtask to move to review/done when parent is in_progress
 func TestSubtaskAllowReviewDoneWhenParentInProgress(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	parentID := createTestTask(t, s, projID, "parent-task")
@@ -506,6 +522,7 @@ func TestSubtaskAllowReviewDoneWhenParentInProgress(t *testing.T) {
 
 // Test: moving a subtask to in_progress does not move siblings in review/done
 func TestSubtaskSiblingIsolation(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	parentID := createTestTask(t, s, projID, "parent-sibling")
@@ -545,6 +562,7 @@ func TestSubtaskSiblingIsolation(t *testing.T) {
 
 // Test: task start changes status to in_progress
 func TestTaskStartChangesStatus(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTaskWithLLM(t, s, projID, "start-test-task")
@@ -571,6 +589,7 @@ func TestTaskStartChangesStatus(t *testing.T) {
 
 // Test: task delete cascades to subtasks
 func TestTaskDeleteCascadesToSubtasks(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	parentID := createTestTask(t, s, projID, "parent-delete")
@@ -606,6 +625,7 @@ func TestTaskDeleteCascadesToSubtasks(t *testing.T) {
 
 // Test: deleting a parent with subtasks in different states cascades to all of them
 func TestTaskDeleteCascadesToSubtasksInDifferentStates(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	parentID := createTestTask(t, s, projID, "parent-multi-state")
@@ -648,6 +668,7 @@ func TestTaskDeleteCascadesToSubtasksInDifferentStates(t *testing.T) {
 
 // Test: clear done cascades to subtasks of done tasks
 func TestClearDoneCascadesToSubtasks(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	parentID := createTestTask(t, s, projID, "parent-clear-done")
@@ -686,6 +707,7 @@ func TestClearDoneCascadesToSubtasks(t *testing.T) {
 
 // Test: subtask consolidation — move subtask to same column as parent
 func TestSubtaskConsolidation(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	parentID := createTestTask(t, s, projID, "parent-consolidate")
@@ -712,6 +734,7 @@ func TestSubtaskConsolidation(t *testing.T) {
 
 // Test: task move to done sets execution_state to completed
 func TestTaskMoveDoneSetsCompleted(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "done-state")
@@ -725,6 +748,7 @@ func TestTaskMoveDoneSetsCompleted(t *testing.T) {
 
 // Test: task moved away from done resets execution_state
 func TestTaskMoveAwayFromDoneResetsState(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "reset-state")
@@ -745,6 +769,7 @@ func TestTaskMoveAwayFromDoneResetsState(t *testing.T) {
 
 // Test: project sandbox toggle
 func TestProjectSandboxToggle(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
@@ -774,6 +799,7 @@ func TestProjectSandboxToggle(t *testing.T) {
 
 // Test: clear done tasks removes all done tasks
 func TestClearDoneTasks(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
@@ -814,6 +840,7 @@ func TestClearDoneTasks(t *testing.T) {
 
 // Test: create subtask with LLM config
 func TestCreateSubtaskWithLLM(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	parentID := createTestTask(t, s, projID, "parent-llm")
@@ -840,6 +867,7 @@ func TestCreateSubtaskWithLLM(t *testing.T) {
 
 // Test: board endpoint returns tasks grouped by status
 func TestBoardEndpointSubtasks(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	parentID := createTestTask(t, s, projID, "board-parent")
@@ -863,6 +891,7 @@ func TestBoardEndpointSubtasks(t *testing.T) {
 
 // Test: commit-and-done endpoint moves task to done and stops sandbox
 func TestCommitAndDone(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "commit-done")
@@ -887,6 +916,7 @@ func TestCommitAndDone(t *testing.T) {
 // the author and merge target, then the generated message. The Commit dialog opens on the metadata
 // and fills the message as it streams, so a stream that never names them is an empty dialog.
 func TestCommitPreviewStream(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "preview-test")
@@ -975,6 +1005,7 @@ func readNamedSSE(t *testing.T, body io.Reader) []sseFrame {
 
 // Test: commit-and-done accepts custom commit message from request body
 func TestCommitAndDoneCustomMessage(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "custom-msg")
@@ -1018,6 +1049,7 @@ func taskWorktreePath(t *testing.T, s *Server, projID, taskID string) string {
 }
 
 func TestCommitAndDoneIncludesManualEditsAfterStaging(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 
 	// Create a project with a real git repo
@@ -1107,6 +1139,7 @@ func TestCommitAndDoneIncludesManualEditsAfterStaging(t *testing.T) {
 
 // Test: agent provider blocked when network isolation is enabled
 func TestAgentBlockedWithNetworkIsolation(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
@@ -1155,6 +1188,7 @@ func TestAgentBlockedWithNetworkIsolation(t *testing.T) {
 
 // Test: agent provider allowed when network isolation is disabled
 func TestAgentAllowedWithoutNetworkIsolation(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
@@ -1196,6 +1230,7 @@ func TestAgentAllowedWithoutNetworkIsolation(t *testing.T) {
 
 // Test: LLM provider allowed even with network isolation
 func TestLLMAllowedWithNetworkIsolation(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
@@ -1237,6 +1272,7 @@ func TestLLMAllowedWithNetworkIsolation(t *testing.T) {
 
 // Test: moving a parent task moves all subtasks recursively to the same column
 func TestMoveParentMovesAllSubtasks(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	parentID := createTestTask(t, s, projID, "parent-cascade")
@@ -1270,6 +1306,7 @@ func TestMoveParentMovesAllSubtasks(t *testing.T) {
 
 // Test: moving a parent task moves nested subtasks (grandchildren) recursively
 func TestMoveParentMovesNestedSubtasks(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	grandparentID := createTestTask(t, s, projID, "grandparent")
@@ -1302,6 +1339,7 @@ func TestMoveParentMovesNestedSubtasks(t *testing.T) {
 
 // Test: moving a parent task moves subtasks that are in different columns
 func TestMoveParentMovesSubtasksInDifferentColumns(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	parentID := createTestTask(t, s, projID, "parent-mixed")
@@ -1343,6 +1381,7 @@ func TestMoveParentMovesSubtasksInDifferentColumns(t *testing.T) {
 
 // Test: moving a subtask does NOT move its siblings or parent
 func TestMoveSubtaskDoesNotMoveSiblingsOrParent(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	parentID := createTestTask(t, s, projID, "parent-isolated")
@@ -1382,6 +1421,7 @@ func createTestTaskWithAgent(t *testing.T, s *Server, projectID string, prompt s
 
 // Test: task delete cleans up fork thread branches
 func TestTaskDeleteCleansThreadBranches(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "thread-branch-cleanup")
@@ -1434,6 +1474,7 @@ func TestTaskDeleteCleansThreadBranches(t *testing.T) {
 
 // Test: task delete prunes orphaned task/* branches that are not tracked by task.Branch
 func TestTaskDeletePrunesOrphanedTaskBranches(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "orphan-branch-cleanup")
@@ -1489,6 +1530,7 @@ func TestTaskDeletePrunesOrphanedTaskBranches(t *testing.T) {
 
 // Test: task delete keeps branches for other active tasks in the same project
 func TestTaskDeleteKeepsActiveTaskBranches(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskToDelete := createTestTask(t, s, projID, "task-to-delete")
@@ -1537,6 +1579,7 @@ func TestTaskDeleteKeepsActiveTaskBranches(t *testing.T) {
 // TestTaskDeleteCleansStashes verifies that deleting a task removes all
 // kanban-labeled stash entries from the project's git repo.
 func TestTaskDeleteCleansStashes(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 
 	// Create a project with a real git repo
@@ -1615,6 +1658,7 @@ func TestTaskDeleteCleansStashes(t *testing.T) {
 // TestTaskDeleteCleansStashes_NoBranch verifies stash cleanup runs even when
 // the task has no branch (created but never started).
 func TestTaskDeleteCleansStashes_NoBranch(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 
 	tmpDir := t.TempDir()
@@ -1671,6 +1715,7 @@ func TestTaskDeleteCleansStashes_NoBranch(t *testing.T) {
 // TestTaskDeleteCleansCheckpointStashes verifies that checkpoint-style stashes
 // (created via git stash create + stash store) are also cleaned up on task deletion.
 func TestTaskDeleteCleansCheckpointStashes(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 
 	tmpDir := t.TempDir()
@@ -1776,6 +1821,11 @@ func getTask(t *testing.T, s *Server, projectID string, taskID string) map[strin
 // settings are preserved (the executor loop's HasMergeConflict path handles
 // the post-resolution merge).
 func TestCommitAndDoneMergeConflictTriggersResolution(t *testing.T) {
+	t.Parallel()
+	// Parallel and provider-less: commit-and-done queues a resolution turn for the conflict, and a task
+	// with no llama_server_url declines it at prepareTaskExecution, before any worktree is created. A
+	// turn that ran would still be writing when this test's temp directory is removed — the failure
+	// reads "TempDir RemoveAll cleanup: unlinkat …: directory not empty" (docs/testing.md).
 	s := testServer(t)
 
 	// Create a project with a real git repo
@@ -1793,11 +1843,12 @@ func TestCommitAndDoneMergeConflictTriggersResolution(t *testing.T) {
 	projID := mustJSON[map[string]any](t, rr.Body)["id"].(string)
 
 	// Create a task with auto_merge=false
+	// No provider: the resolution turn the conflict path queues declines at
+	// prepareTaskExecution ("llama server URL not configured"), which is before any worktree is
+	// created, so the test leaves nothing writing in its temp directory.
 	taskReq := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{
-		"prompt":           "test merge conflict auto merge",
-		"llama_server_url": "http://localhost:9999/v1",
-		"model_name":       "mock-model",
-		"auto_merge":       false,
+		"prompt":     "test merge conflict auto merge",
+		"auto_merge": false,
 	})
 	withAuthCSRF(taskReq, cookie, csrfToken)
 	taskRR := testResponse(t, s, taskReq)
@@ -1879,6 +1930,8 @@ func TestCommitAndDoneMergeConflictTriggersResolution(t *testing.T) {
 // TestCommitAndDoneMergeConflictPreservesAutoMerge verifies that when auto_merge
 // is already enabled, commit-and-done with a merge conflict preserves the setting.
 func TestCommitAndDoneMergeConflictPreservesAutoMerge(t *testing.T) {
+	t.Parallel()
+	// Parallel for the reason at TestCommitAndDoneMergeConflictTriggersResolution: no provider, so no turn.
 	s := testServer(t)
 
 	tmpDir := t.TempDir()
@@ -1895,11 +1948,10 @@ func TestCommitAndDoneMergeConflictPreservesAutoMerge(t *testing.T) {
 	projID := mustJSON[map[string]any](t, rr.Body)["id"].(string)
 
 	// Create a task with auto_merge=true
+	// No provider, for the reason at TestCommitAndDoneMergeConflictTriggersResolution.
 	taskReq := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{
-		"prompt":           "test merge conflict auto merge already enabled",
-		"llama_server_url": "http://localhost:9999/v1",
-		"model_name":       "mock-model",
-		"auto_merge":       true,
+		"prompt":     "test merge conflict auto merge already enabled",
+		"auto_merge": true,
 	})
 	withAuthCSRF(taskReq, cookie, csrfToken)
 	taskRR := testResponse(t, s, taskReq)
@@ -1972,6 +2024,8 @@ func TestCommitAndDoneMergeConflictPreservesAutoMerge(t *testing.T) {
 // TestCommitAndDoneMergeConflictSystemMessage verifies that the system message
 // in the chat notes the merge conflict and agent resolution.
 func TestCommitAndDoneMergeConflictSystemMessage(t *testing.T) {
+	t.Parallel()
+	// Parallel for the reason at TestCommitAndDoneMergeConflictTriggersResolution: no provider, so no turn.
 	s := testServer(t)
 
 	tmpDir := t.TempDir()
@@ -1988,11 +2042,10 @@ func TestCommitAndDoneMergeConflictSystemMessage(t *testing.T) {
 	projID := mustJSON[map[string]any](t, rr.Body)["id"].(string)
 
 	// Create a task with auto_merge=false
+	// No provider, for the reason at TestCommitAndDoneMergeConflictTriggersResolution.
 	taskReq := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{
-		"prompt":           "test system message",
-		"llama_server_url": "http://localhost:9999/v1",
-		"model_name":       "mock-model",
-		"auto_merge":       false,
+		"prompt":     "test system message",
+		"auto_merge": false,
 	})
 	withAuthCSRF(taskReq, cookie, csrfToken)
 	taskRR := testResponse(t, s, taskReq)
@@ -2065,6 +2118,7 @@ func TestCommitAndDoneMergeConflictSystemMessage(t *testing.T) {
 // TestTaskMoveUpdatesUpdatedAt verifies that moving a task between columns
 // updates the updated_at timestamp, enabling chronological sorting by activity.
 func TestTaskMoveUpdatesUpdatedAt(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
@@ -2147,6 +2201,7 @@ func getTaskAutoMerge(t *testing.T, s *Server, projectID string, taskID string) 
 
 // Test: enabling subtasks_auto_merge recursively enables auto_merge on all descendants
 func TestSubtasksAutoMergePropagatesToDescendants(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
@@ -2198,6 +2253,7 @@ func TestSubtasksAutoMergePropagatesToDescendants(t *testing.T) {
 
 // Test: disabling subtasks_auto_merge cascades auto_merge=false to descendants
 func TestSubtasksAutoMergeDisablePropagates(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
@@ -2227,6 +2283,7 @@ func TestSubtasksAutoMergeDisablePropagates(t *testing.T) {
 
 // Test: enabling subtasks_auto_merge on a task with no subtasks is a no-op
 func TestSubtasksAutoMergeNoSubtasks(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
@@ -2253,6 +2310,7 @@ func TestSubtasksAutoMergeNoSubtasks(t *testing.T) {
 // Test: enabling subtasks_auto_merge also sets auto_commit=true on descendants
 // (since auto_merge requires auto_commit)
 func TestSubtasksAutoMergeSetsAutoCommitOnDescendants(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
@@ -2285,6 +2343,9 @@ func TestSubtasksAutoMergeSetsAutoCommitOnDescendants(t *testing.T) {
 }
 
 func TestTaskOperatingModeRemount(t *testing.T) {
+	// Serial: this starts a real container, so it is machine-bound (docs/testing.md — a host whose
+	// podman root is overlayfs fails here) and it waits on the memory budget, which is one gate for
+	// the whole process.
 	s := testServer(t)
 	if !s.sandboxMgr.IsAvailable() {
 		t.Skip("gVisor not available, skipping sandbox test")
@@ -2427,6 +2488,7 @@ func createTaskDirect(t *testing.T, s *Server, projID, taskID string, autoCommit
 // PUT re-derives auto_merge from the parent's "allow subtask to auto merge"
 // preference while preserving the task's own subtasks_auto_merge.
 func TestTaskUpdateParentRespectsSubtasksAutoMerge(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
@@ -2457,6 +2519,7 @@ func TestTaskUpdateParentRespectsSubtasksAutoMerge(t *testing.T) {
 // TestTaskUpdateParentExplicitAutoMergeWins verifies that an explicit auto_merge
 // sent alongside a parent change takes priority over the parent inheritance.
 func TestTaskUpdateParentExplicitAutoMergeWins(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
@@ -2481,6 +2544,7 @@ func TestTaskUpdateParentExplicitAutoMergeWins(t *testing.T) {
 // resets auto_merge to the server config default while preserving the task's
 // own subtasks_auto_merge.
 func TestTaskUpdateUnnestResetsToConfigDefaults(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
@@ -2515,6 +2579,7 @@ func TestTaskUpdateUnnestResetsToConfigDefaults(t *testing.T) {
 // TestTaskUpdateUnchangedParentKeepsAutoMerge verifies that re-sending the same
 // parent leaves an explicit auto_merge override untouched.
 func TestTaskUpdateUnchangedParentKeepsAutoMerge(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
@@ -2538,6 +2603,7 @@ func TestTaskUpdateUnchangedParentKeepsAutoMerge(t *testing.T) {
 // TestTaskUpdateParentNotFound verifies that setting a nonexistent parent via
 // PUT returns 400.
 func TestTaskUpdateParentNotFound(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	createTaskDirect(t, s, projID, "target-put-5", true, true, true, "")
@@ -2554,6 +2620,7 @@ func TestTaskUpdateParentNotFound(t *testing.T) {
 // TestTaskMovedAtOnlyChangesOnMove pins the board's sort contract: moved_at advances only
 // when the task changes column, never on an ordinary edit.
 func TestTaskMovedAtOnlyChangesOnMove(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Move me later")

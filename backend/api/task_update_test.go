@@ -13,6 +13,7 @@ import (
 // update is a 400 and changes nothing. It used to be a 500 (single-value type assertion panics) or
 // a 200 that dropped the value and let the UI believe its own save.
 func TestPUTTask_FieldWrongTypeIsRejectedWithoutPanicOrSilence(t *testing.T) {
+	t.Parallel()
 	h, s, _ := newTestTaskHandler(t)
 	setupTaskValidationProject(t, h, s)
 	mux := newTaskMux(h)
@@ -67,6 +68,7 @@ func TestPUTTask_FieldWrongTypeIsRejectedWithoutPanicOrSilence(t *testing.T) {
 // and a field the body mentions is written - including the values a naive "is it the zero
 // value" check would mistake for absence.
 func TestPUTTask_PartialUpdateLeavesAbsentFieldsAlone(t *testing.T) {
+	t.Parallel()
 	h, s, _ := newTestTaskHandler(t)
 	setupTaskValidationProject(t, h, s)
 	mux := newTaskMux(h)
@@ -140,6 +142,7 @@ func TestPUTTask_PartialUpdateLeavesAbsentFieldsAlone(t *testing.T) {
 // owns beyond copying fields: switching operating mode stops a sandbox that is not running so
 // the next start remounts with the new mode, and auto_merge implies auto_commit.
 func TestPUTTask_ModeChangeAndPrerequisiteRules(t *testing.T) {
+	t.Parallel()
 	h, s, _ := newTestTaskHandler(t)
 	setupTaskValidationProject(t, h, s)
 	mux := newTaskMux(h)
@@ -182,6 +185,7 @@ func TestPUTTask_ModeChangeAndPrerequisiteRules(t *testing.T) {
 // json.Unmarshal and discard the error, so a truncated or non-object body applied no fields and
 // answered 200. The client could not tell a save from a typo.
 func TestPUTTask_MalformedBodyIsRejectedNotIgnored(t *testing.T) {
+	t.Parallel()
 	h, s, _ := newTestTaskHandler(t)
 	setupTaskValidationProject(t, h, s)
 	mux := newTaskMux(h)
@@ -208,6 +212,7 @@ func TestPUTTask_MalformedBodyIsRejectedNotIgnored(t *testing.T) {
 // directly and so never had the assertion problem - except for attachments, the one value read out
 // of the raw fields, and operating_mode which no path validated at all before this.
 func TestPOSTTask_FieldWrongTypeIsRejected(t *testing.T) {
+	t.Parallel()
 	h, s, _ := newTestTaskHandler(t)
 	setupTaskValidationProject(t, h, s)
 	mux := newTaskMux(h)

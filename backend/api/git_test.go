@@ -180,6 +180,7 @@ func setupHandleLogProject(t *testing.T) (*GitHandler, *http.ServeMux) {
 // TestHandleDiff_ValidRefs, TestHandleTaskLog_ValidBranch, TestHandleTaskDiff_ValidRefs),
 // which also proves the 400s above come from validation and not from a broken route.
 func TestGitRefValidation(t *testing.T) {
+	t.Parallel()
 	targets := []struct {
 		name string
 		// setup builds the fixture and returns the mux plus a URL builder for one ref
@@ -307,6 +308,7 @@ func TestGitRefValidation(t *testing.T) {
 }
 
 func TestHandleLog_ValidBranch(t *testing.T) {
+	t.Parallel()
 	h, s, _, _ := newTestGitHandler(t)
 
 	projPath := t.TempDir()
@@ -325,6 +327,7 @@ func TestHandleLog_ValidBranch(t *testing.T) {
 }
 
 func TestHandleLog_NoBranchDefaultsToHEAD(t *testing.T) {
+	t.Parallel()
 	h, s, _, _ := newTestGitHandler(t)
 
 	projPath := t.TempDir()
@@ -344,6 +347,7 @@ func TestHandleLog_NoBranchDefaultsToHEAD(t *testing.T) {
 }
 
 func TestHandleDiff_ValidRefs(t *testing.T) {
+	t.Parallel()
 	h, s, _, _ := newTestGitHandler(t)
 
 	projPath := t.TempDir()
@@ -367,6 +371,7 @@ func TestHandleDiff_ValidRefs(t *testing.T) {
 // TestHandleDiffParsed is the wire contract for the single diff grammar: ?parsed=1 carries the
 // parser's structure so the browser stops re-parsing the same patch with a second implementation.
 func TestHandleDiffParsed(t *testing.T) {
+	t.Parallel()
 	h, s, _, _ := newTestGitHandler(t)
 
 	projPath := t.TempDir()
@@ -417,6 +422,7 @@ func TestHandleDiffParsed(t *testing.T) {
 // TestHandleDiffParsedEmptyIsArrayNotNull: `null` would make `files.length` throw in the client, and
 // an unchanged working tree is the ordinary case rather than an error.
 func TestHandleDiffParsedEmptyIsArrayNotNull(t *testing.T) {
+	t.Parallel()
 	h, s, _, _ := newTestGitHandler(t)
 
 	projPath := t.TempDir()
@@ -440,6 +446,7 @@ func TestHandleDiffParsedEmptyIsArrayNotNull(t *testing.T) {
 // must not be read as a failure; the answer is the parser's output, because the panel never re-parses
 // patch text.
 func TestHandleDiffDefaultAnswersParsedDiff(t *testing.T) {
+	t.Parallel()
 	h, s, _, _ := newTestGitHandler(t)
 
 	projPath := t.TempDir()
@@ -476,6 +483,7 @@ func TestHandleDiffDefaultAnswersParsedDiff(t *testing.T) {
 }
 
 func TestHandleProjectDiffFile_Meta_Untracked(t *testing.T) {
+	t.Parallel()
 	h, s, _, _ := newTestGitHandler(t)
 	projPath := t.TempDir()
 	initGitRepo(t, projPath)
@@ -515,6 +523,7 @@ func TestHandleProjectDiffFile_Meta_Untracked(t *testing.T) {
 }
 
 func TestHandleProjectDiffFile_Meta_LargeUntracked(t *testing.T) {
+	t.Parallel()
 	h, s, _, _ := newTestGitHandler(t)
 	projPath := t.TempDir()
 	initGitRepo(t, projPath)
@@ -550,6 +559,7 @@ func TestHandleProjectDiffFile_Meta_LargeUntracked(t *testing.T) {
 }
 
 func TestHandleProjectDiffFile_Content_Untracked(t *testing.T) {
+	t.Parallel()
 	h, s, _, _ := newTestGitHandler(t)
 	projPath := t.TempDir()
 	initGitRepo(t, projPath)
@@ -581,6 +591,7 @@ func TestHandleProjectDiffFile_Content_Untracked(t *testing.T) {
 }
 
 func TestHandleTaskLog_ValidBranch(t *testing.T) {
+	t.Parallel()
 	h, s, wm, worktreesDir := newTestGitHandler(t)
 
 	projPath := t.TempDir()
@@ -620,6 +631,7 @@ func TestHandleTaskLog_ValidBranch(t *testing.T) {
 // coverage before, so this is what proves the shared implementation still
 // serves a worktree exactly like a project checkout.
 func TestHandleTaskLog_FullSharesProjectResponse(t *testing.T) {
+	t.Parallel()
 	h, s, _, worktreesDir := newTestGitHandler(t)
 
 	projPath := t.TempDir()
@@ -696,6 +708,7 @@ func TestHandleTaskLog_FullSharesProjectResponse(t *testing.T) {
 }
 
 func TestHandleTaskDiff_ValidRefs(t *testing.T) {
+	t.Parallel()
 	h, s, wm, worktreesDir := newTestGitHandler(t)
 
 	projPath := t.TempDir()
@@ -748,6 +761,7 @@ var invalidBranchChars = []string{"~", "^", ":", "?", "*", "[", "\\", " ", "feat
 // `git add -d -a -s -h ...` (short options) and fail with an "unknown switch"
 // error, leaving the file unstaged.
 func TestHandleProjectStageFile_PathStartingWithDash(t *testing.T) {
+	t.Parallel()
 	repoPath := initGitRepoTemp(t)
 	s := gitTestStore(t)
 
@@ -786,6 +800,7 @@ func TestHandleProjectStageFile_PathStartingWithDash(t *testing.T) {
 // protection for the task-level staging handler, which operates against a
 // git worktree rather than the project repo.
 func TestHandleStageFile_PathStartingWithDash(t *testing.T) {
+	t.Parallel()
 	worktreesDir := t.TempDir()
 
 	repoPath := initGitRepoTemp(t)
@@ -842,6 +857,7 @@ func TestHandleStageFile_PathStartingWithDash(t *testing.T) {
 }
 
 func TestHandleTaskLog_BranchDefaultsToTaskBranch(t *testing.T) {
+	t.Parallel()
 	h, s, wm, worktreesDir := newTestGitHandler(t)
 
 	projPath := t.TempDir()
@@ -878,6 +894,7 @@ func TestHandleTaskLog_BranchDefaultsToTaskBranch(t *testing.T) {
 // --- HandleCheckout tests ---
 
 func TestHandleCheckout_DashPrefix(t *testing.T) {
+	t.Parallel()
 	h, s, _, _ := newTestGitHandler(t)
 
 	projPath := t.TempDir()
@@ -903,6 +920,7 @@ func TestHandleCheckout_DashPrefix(t *testing.T) {
 }
 
 func TestHandleCheckout_ValidBranch(t *testing.T) {
+	t.Parallel()
 	h, s, _, _ := newTestGitHandler(t)
 
 	projPath := t.TempDir()
@@ -960,6 +978,7 @@ func newPullPushMux(h *GitHandler) *http.ServeMux {
 }
 
 func TestHandlePull_RequiresPOST(t *testing.T) {
+	t.Parallel()
 	h, s, _, _ := newTestGitHandler(t)
 	projPath := t.TempDir()
 	initGitRepo(t, projPath)
@@ -988,6 +1007,7 @@ func TestHandlePull_RequiresPOST(t *testing.T) {
 }
 
 func TestHandlePush_Success(t *testing.T) {
+	t.Parallel()
 	h, s, _, _ := newTestGitHandler(t)
 	projPath := t.TempDir()
 	initGitRepo(t, projPath)
@@ -1030,6 +1050,7 @@ func TestHandlePush_Success(t *testing.T) {
 }
 
 func TestHandlePull_Success(t *testing.T) {
+	t.Parallel()
 	h, s, _, _ := newTestGitHandler(t)
 	projPath := t.TempDir()
 	initGitRepo(t, projPath)
@@ -1064,6 +1085,7 @@ func TestHandlePull_Success(t *testing.T) {
 }
 
 func TestHandlePull_NotAGitRepo_ErrorIncludesGitOutput(t *testing.T) {
+	t.Parallel()
 	h, s, _, _ := newTestGitHandler(t)
 	// A plain directory (not a git repo) gives a deterministic git error
 	// whose wording is stable across git versions.
@@ -1088,6 +1110,7 @@ func TestHandlePull_NotAGitRepo_ErrorIncludesGitOutput(t *testing.T) {
 }
 
 func TestHandlePush_NotAGitRepo_ErrorIncludesGitOutput(t *testing.T) {
+	t.Parallel()
 	h, s, _, _ := newTestGitHandler(t)
 	projPath := t.TempDir()
 	proj := &types.Project{ID: "push-err-proj", Name: "push-err-proj", Path: projPath}
@@ -1141,6 +1164,7 @@ func statusAheadBehind(t *testing.T, s *store.Store, h *GitHandler, id, projPath
 }
 
 func TestHandleStatus_CountsCommitsAheadOfUpstream(t *testing.T) {
+	t.Parallel()
 	h, s, _, _ := newTestGitHandler(t)
 	projPath := t.TempDir()
 	initGitRepo(t, projPath)
@@ -1156,6 +1180,7 @@ func TestHandleStatus_CountsCommitsAheadOfUpstream(t *testing.T) {
 }
 
 func TestHandleStatus_CountsCommitsBehindUpstream(t *testing.T) {
+	t.Parallel()
 	h, s, _, _ := newTestGitHandler(t)
 	projPath := t.TempDir()
 	initGitRepo(t, projPath)
@@ -1176,6 +1201,7 @@ func TestHandleStatus_CountsCommitsBehindUpstream(t *testing.T) {
 }
 
 func TestHandleStatus_WithoutUpstreamAnswersZeroCounts(t *testing.T) {
+	t.Parallel()
 	h, s, _, _ := newTestGitHandler(t)
 	projPath := t.TempDir()
 	initGitRepo(t, projPath)
@@ -1193,6 +1219,7 @@ func TestHandleStatus_WithoutUpstreamAnswersZeroCounts(t *testing.T) {
 // Since no file named "-f" exists, git add -- -f fails (500) rather than
 // silently force-adding unrelated tracked files.
 func TestHandleProjectStageFile_DashFPathNotForceAdd(t *testing.T) {
+	t.Parallel()
 	repoPath := initGitRepoTemp(t)
 	s := gitTestStore(t)
 

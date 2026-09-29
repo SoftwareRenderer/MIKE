@@ -52,6 +52,7 @@ func entries(sets ...[]sideEffectEntry) []sideEffectEntry {
 }
 
 func TestSideEffectClassificationIsDisjointAndExplained(t *testing.T) {
+	t.Parallel()
 	seen := map[string]string{}
 	for _, e := range entries(detachedOperations, requestScopedReads, idempotentWritesOnReads) {
 		if e.Path == "" {
@@ -86,6 +87,7 @@ func TestSideEffectClassificationIsDisjointAndExplained(t *testing.T) {
 }
 
 func TestSideEffectClassificationNamesRoutesThatExist(t *testing.T) {
+	t.Parallel()
 	registered := map[string]bool{}
 	for _, r := range registeredRoutes(t) {
 		registered[r] = true
@@ -106,6 +108,7 @@ func TestSideEffectClassificationNamesRoutesThatExist(t *testing.T) {
 // The coverage rule: inside the covered families, every mutating route is classified. A new one that skips
 // this file is a route whose cancellation behaviour nobody decided.
 func TestSideEffectClassificationCoversItsFamilies(t *testing.T) {
+	t.Parallel()
 	classified := map[string]bool{}
 	for _, e := range entries(detachedOperations, requestScopedReads, idempotentWritesOnReads) {
 		classified[e.Path] = true
@@ -140,6 +143,7 @@ func TestSideEffectClassificationCoversItsFamilies(t *testing.T) {
 // The one read that writes stays exactly one statement. This assertion is here so that adding a second
 // write to that handler is a decision made twice — here and in the handler — rather than once.
 func TestIdempotentWritesOnReadsIsStillJustTheSnapshot(t *testing.T) {
+	t.Parallel()
 	if len(idempotentWritesOnReads) != 2 {
 		t.Errorf("idempotentWritesOnReads has %d entries; the route set was %v",
 			len(idempotentWritesOnReads), idempotentWritesOnReads)
