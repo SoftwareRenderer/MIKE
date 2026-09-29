@@ -419,7 +419,7 @@ func (te *TaskExecutor) WorktreeMgr() *git.WorktreeManager {
 func (te *TaskExecutor) RunWithGate(ctx context.Context, serverURL string, fn func() error) error {
 	concurrency := te.configStore.GetProviderConcurrency(serverURL)
 	maxRPS := te.configStore.GetProviderMaxRequestsPerSecond(serverURL)
-	if err := te.gate.Acquire(ctx, serverURL, concurrency, maxRPS, nil); err != nil {
+	if _, err := te.gate.Acquire(ctx, serverURL, concurrency, maxRPS, nil); err != nil {
 		return err
 	}
 	defer te.gate.Release(serverURL)

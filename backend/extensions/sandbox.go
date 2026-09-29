@@ -455,6 +455,18 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 	}
 	containerName := fmt.Sprintf("%s-%s", ExtensionContainerPrefix, safeID)
 
+	// Check if container already exists
+	exists, err := sm.rt.ContainerExists(containerName)
+	if err != nil {
+		return nil, fmt.Errorf("check container: %w", err)
+	}
+	if exists {
+		logging.For(logging.Sandbox).Infof("ext=%s removing stale container %s", ext.ID, containerName)
+		if rmErr := sm.rt.RemoveContainer(containerName); rmErr != nil {
+			return nil, fmt.Errorf("remove stale container %s: %w", containerName, rmErr)
+		}
+	}
+
 	// Resolve agent binary path
 	agentPath, err := sm.rt.GetAgentBinaryPath()
 	if err != nil {
@@ -481,19 +493,6 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 	// Per-extension on purpose: this is the one place a granted dependency directory becomes a root,
 	// and it is a root for this container only.
 	createArgs, mountedProjects := buildExtensionCreateArgs(ext, containerName, image, projectMounts, sm.MountPolicyForExtension(ext))
-
-	// The stale-container bracket sits here, not at the top: a manifest that was never runnable is
-	// refused without asking podman anything. `docs/sandbox-runtime.md`.
-	exists, err := sm.rt.ContainerExists(containerName)
-	if err != nil {
-		return nil, fmt.Errorf("check container: %w", err)
-	}
-	if exists {
-		logging.For(logging.Sandbox).Infof("ext=%s removing stale container %s", ext.ID, containerName)
-		if rmErr := sm.rt.RemoveContainer(containerName); rmErr != nil {
-			return nil, fmt.Errorf("remove stale container %s: %w", containerName, rmErr)
-		}
-	}
 
 	// Create container
 	out, err := sm.rt.PodmanExec(createArgs...)

@@ -24,9 +24,10 @@ func extErrorBody(t *testing.T, rr *httptest.ResponseRecorder) string {
 
 func TestHandleGet_UnknownExtensionIs404(t *testing.T) {
 	h := testHandler(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/extensions/nonexistent", nil)
 	rr := httptest.NewRecorder()
 
-	h.HandleGet(rr, "nonexistent")
+	h.HandleGet(rr, req, "nonexistent")
 
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404 (body: %s)", rr.Code, rr.Body.String())
@@ -43,8 +44,9 @@ func TestHandleGet_StoreFaultIs500NotPhantom404(t *testing.T) {
 		t.Fatalf("drop table: %v", err)
 	}
 
+	req := httptest.NewRequest(http.MethodGet, "/api/extensions/any-id", nil)
 	rr := httptest.NewRecorder()
-	h.HandleGet(rr, "any-id")
+	h.HandleGet(rr, req, "any-id")
 
 	if rr.Code != http.StatusInternalServerError {
 		t.Fatalf("a database fault answered %d (body %q); want 500 — the bug this test exists for",

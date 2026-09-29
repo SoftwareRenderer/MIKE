@@ -880,7 +880,7 @@ func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSess
 			session.stop(websocket.StatusInternalError, fmt.Sprintf("spawn failed: %v", err))
 			return
 		}
-		if !h.registerWorkspace(workspaceKey, process, cfg) {
+		if _, won := h.registerWorkspace(workspaceKey, process, cfg); !won {
 			// Another session won the entry, so this call's own reference goes back.
 			h.manager.Release(sub.Params.Workspace, cfg.Language)
 		}
@@ -953,15 +953,15 @@ func (h *LSPHandler) lookupWorkspace(workspaceKey string) (*workspaceState, bool
 	return ws, ok
 }
 
-// registerWorkspace publishes a spawned server under its key and gives it its writer. It reports
+// registerWorkspace publishes a spawned server under its key and gives it its writer. won is
 // false when another spawn took the key first, leaving this caller's process to hand back.
-func (h *LSPHandler) registerWorkspace(workspaceKey string, process *LSPProcess, cfg *ServerConfig) bool {
+func (h *LSPHandler) registerWorkspace(workspaceKey string, process *LSPProcess, cfg *ServerConfig) (ws *workspaceState, won bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if _, ok := h.workspaces[workspaceKey]; ok {
-		return false
+	if existing, ok := h.workspaces[workspaceKey]; ok {
+		return existing, false
 	}
-	ws := &workspaceState{
+	ws = &workspaceState{
 		process: process,
 		cfg:     cfg,
 		writes:  make(chan *writeJob, DefaultMaxQueuedMessages),
@@ -970,25 +970,26 @@ func (h *LSPHandler) registerWorkspace(workspaceKey string, process *LSPProcess,
 	h.workspaces[workspaceKey] = ws
 	h.wg.Add(1)
 	go h.serveWorkspaceWrites(ws)
-	return true
+	return ws, true
 }
 
 // dropWorkspace removes an entry and ends its writer. Every removal goes through here, so a
 // dropped entry's queue is answered rather than left.
-func (h *LSPHandler) dropWorkspace(workspaceKey string) {
+func (h *LSPHandler) dropWorkspace(workspaceKey string) *workspaceState {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.dropWorkspaceLocked(workspaceKey)
+	return h.dropWorkspaceLocked(workspaceKey)
 }
 
 // dropWorkspaceLocked is dropWorkspace with h.mu held, which the declared lock order allows.
-func (h *LSPHandler) dropWorkspaceLocked(workspaceKey string) {
+func (h *LSPHandler) dropWorkspaceLocked(workspaceKey string) *workspaceState {
 	ws, ok := h.workspaces[workspaceKey]
 	if !ok {
-		return
+		return nil
 	}
 	delete(h.workspaces, workspaceKey)
 	ws.closeWrites()
+	return ws
 }
 
 // lazyCreateWorkspace registers a workspace no workspace/subscribe brought. It spawns outside
@@ -1012,7 +1013,7 @@ func (h *LSPHandler) lazyCreateWorkspace(ctx context.Context, session *ClientSes
 		h.answerError(session, clientReqID, channelID, fmt.Sprintf("failed to start language server: %v", err))
 		return false
 	}
-	if h.registerWorkspace(workspaceKey, process, cfg) {
+	if _, won := h.registerWorkspace(workspaceKey, process, cfg); won {
 		session.uses(workspaceKey)
 		logging.For(logging.LSP).Debugf("client %d: lazy-created workspace=%s lang=%s", session.clientID, workspacePath, cfg.Language)
 		return true

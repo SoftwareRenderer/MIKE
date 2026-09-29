@@ -89,9 +89,9 @@ func (g *ConcurrencyGate) frontUnservedIdxLocked(providerURL string) int {
 }
 
 // Acquire blocks until the provider has a slot and its rate window is open (concurrency min 1, maxRPS
-// 0 = unlimited). It errors when the waiter leaves the queue without one: ctx cancelled, or removed
-// unserved. The waiter's own queue entry reaches it through onEnqueued, which is what Position needs.
-func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concurrency, maxRPS int, onEnqueued func(*queueEntry)) error {
+// 0 = unlimited). It returns the waiter's queue entry, nil when granted immediately, or an error if ctx
+// is cancelled.
+func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concurrency, maxRPS int, onEnqueued func(*queueEntry)) (*queueEntry, error) {
 	providerURL = gateKey(providerURL)
 	if concurrency < 1 {
 		concurrency = 1
@@ -111,7 +111,7 @@ func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concu
 	if ps.active < concurrency && !ps.nextAllowed.After(time.Now()) {
 		g.grantLocked(ps, maxRPS)
 		g.mu.Unlock()
-		return nil
+		return nil, nil
 	}
 
 	entry := newQueueEntry(providerURL)
@@ -133,9 +133,9 @@ func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concu
 				// Removed without being served: cancelled. Report an error rather than a grant we do not
 				// hold, even when ctx has no error yet.
 				if err := ctx.Err(); err != nil {
-					return err
+					return entry, err
 				}
-				return errGateAbandoned
+				return entry, errGateAbandoned
 			}
 			// Release already took the slot for us. Wait out the rate window, or hand the slot back if
 			// ctx ends first.
@@ -144,7 +144,7 @@ func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concu
 				if !ps.nextAllowed.After(time.Now()) {
 					g.advanceWindowLocked(ps, maxRPS, time.Now())
 					g.mu.Unlock()
-					return nil
+					return entry, nil
 				}
 				wait := time.Until(ps.nextAllowed)
 				g.mu.Unlock()
@@ -154,7 +154,7 @@ func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concu
 					// A slot we will never use: give it back, or the provider loses that capacity for the
 					// process lifetime.
 					g.abandonServedSlot(entry)
-					return ctx.Err()
+					return entry, ctx.Err()
 				case <-time.After(wait):
 				}
 			}
@@ -165,7 +165,7 @@ func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concu
 			g.queue.remove(entry)
 			g.grantLocked(ps, maxRPS)
 			g.mu.Unlock()
-			return nil
+			return entry, nil
 		}
 
 		// Nothing else wakes this loop except the window opening, so a slot freeing early is seen on the
@@ -187,7 +187,7 @@ func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concu
 			g.cleanupEntry(entry)
 			// Release may have taken a slot for us already; return it.
 			g.abandonServedSlot(entry)
-			return ctx.Err()
+			return entry, ctx.Err()
 		case <-timer.C:
 		}
 		timer.Stop()

@@ -24,13 +24,6 @@ measured on a real host.
 - `Runtime.CleanupStaleContainers(tag, nameFilter)` is the shared best-effort, 15 s-bounded startup sweep
   (prefixes `kanban-sandbox-` / `kanban-ext-`); neither manager may re-implement the list/parse/remove
   loop.
-- `Runtime.ContainerExists(name)` keeps absence and silence apart: `container exists` exits 1 for a name
-  podman does not know and 125 when podman does not answer, and only the second reaches the caller as an
-  error. A caller creates its container on the first; on the second it must not, or two containers take
-  one name. `TestContainerExistsSeparatesAbsenceFromSilence`.
-- Both `Create` paths run that check immediately before `podman create`, so a manifest that was never
-  runnable is refused without asking podman anything — `TestCreate_RejectsLeadingDashImage` is one test
-  that asserts the refusal.
 - `staleContainerNames` skips containers that are **running**: the sweep removes leftovers, never a live
   sandbox. That is why a container that outlives its task row survives a restart, and why task and
   project deletion are the things that must stop containers (`docs/storage.md`,

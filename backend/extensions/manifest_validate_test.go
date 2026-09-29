@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -211,7 +210,9 @@ func TestLSPConfigValidate(t *testing.T) {
 
 func TestNormalizeFileTypes(t *testing.T) {
 	cfg := &LSPConfig{Language: "typescript", LegacyExtensions: []string{"ts", ".tsx", "JS", "", "ts"}}
-	cfg.NormalizeFileTypes()
+	if !cfg.NormalizeFileTypes() {
+		t.Fatal("NormalizeFileTypes() reported no change for a legacy manifest")
+	}
 	if len(cfg.FileTypes) != 3 {
 		t.Fatalf("got %d file types %v, want 3 (deduplicated, empty dropped)", len(cfg.FileTypes), cfg.FileTypes)
 	}
@@ -229,12 +230,8 @@ func TestNormalizeFileTypes(t *testing.T) {
 	if cfg.LegacyExtensions != nil {
 		t.Errorf("LegacyExtensions = %v, want cleared so nothing reads it twice", cfg.LegacyExtensions)
 	}
-	// Normalizing an already-normalized manifest changes nothing: the cleared legacy key is what
-	// makes it so, and normalize runs on every load.
-	before := append([]LSPFileType(nil), cfg.FileTypes...)
-	cfg.NormalizeFileTypes()
-	if !reflect.DeepEqual(cfg.FileTypes, before) {
-		t.Errorf("NormalizeFileTypes() ran again on a normalized manifest: %v became %v", before, cfg.FileTypes)
+	if cfg.NormalizeFileTypes() {
+		t.Error("NormalizeFileTypes() is not idempotent — it ran again on a normalized manifest")
 	}
 }
 

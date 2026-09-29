@@ -42,8 +42,9 @@ func writeExtensionFiles(t *testing.T, dir string) {
 
 func deleteExtensionRequest(t *testing.T, h *ExtensionHandler, id string) map[string]any {
 	t.Helper()
+	req := httptest.NewRequest(http.MethodDelete, "/api/extensions/"+id, nil)
 	rec := httptest.NewRecorder()
-	h.HandleDelete(rec, id)
+	h.HandleDelete(rec, req, id)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("delete %s = %d: %s", id, rec.Code, rec.Body.String())
 	}
@@ -92,8 +93,9 @@ func TestHandleDelete_RemovesTheMaterializedDirectory(t *testing.T) {
 	}
 
 	// A second delete of the same id is a 404, not a panic over files that are already gone.
+	req := httptest.NewRequest(http.MethodDelete, "/api/extensions/go-team-gopls-1", nil)
 	rec := httptest.NewRecorder()
-	h.HandleDelete(rec, "go-team-gopls-1")
+	h.HandleDelete(rec, req, "go-team-gopls-1")
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("deleting twice = %d, want 404", rec.Code)
 	}

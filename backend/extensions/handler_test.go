@@ -215,9 +215,10 @@ func TestHandleGet_Found(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
+	req := httptest.NewRequest(http.MethodGet, "/api/extensions/test-ext", nil)
 	w := httptest.NewRecorder()
 
-	h.HandleGet(w, "test-ext")
+	h.HandleGet(w, req, "test-ext")
 
 	if w.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", w.Code)
@@ -234,9 +235,10 @@ func TestHandleGet_Found(t *testing.T) {
 
 func TestHandleGet_NotFound(t *testing.T) {
 	h := testHandler(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/extensions/nonexistent", nil)
 	w := httptest.NewRecorder()
 
-	h.HandleGet(w, "nonexistent")
+	h.HandleGet(w, req, "nonexistent")
 
 	if w.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", w.Code)
@@ -659,9 +661,10 @@ func TestHandleDelete(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
+	req := httptest.NewRequest(http.MethodDelete, "/api/extensions/test-ext", nil)
 	w := httptest.NewRecorder()
 
-	h.HandleDelete(w, "test-ext")
+	h.HandleDelete(w, req, "test-ext")
 
 	if w.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", w.Code)
@@ -675,9 +678,10 @@ func TestHandleDelete(t *testing.T) {
 
 func TestHandleDelete_NotFound(t *testing.T) {
 	h := testHandler(t)
+	req := httptest.NewRequest(http.MethodDelete, "/api/extensions/nonexistent", nil)
 	w := httptest.NewRecorder()
 
-	h.HandleDelete(w, "nonexistent")
+	h.HandleDelete(w, req, "nonexistent")
 
 	if w.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", w.Code)
@@ -2299,8 +2303,9 @@ func TestHandleDelete_CleansStorage(t *testing.T) {
 	h.store.StorageSet("test-ext", "p:proj1", "tags", json.RawMessage(`["a"]`))
 	h.store.StorageSet("test-ext", "global", "prefs", json.RawMessage(`{"x":1}`))
 
+	req := httptest.NewRequest(http.MethodDelete, "/api/extensions/test-ext", nil)
 	w := httptest.NewRecorder()
-	h.HandleDelete(w, "test-ext")
+	h.HandleDelete(w, req, "test-ext")
 	if w.Code != http.StatusOK {
 		t.Fatalf("delete status = %d, want 200 (%s)", w.Code, w.Body.String())
 	}

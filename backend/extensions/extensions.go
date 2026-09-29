@@ -338,25 +338,30 @@ func (c *LSPConfig) LanguageIDFor(name string) string {
 
 // NormalizeFileTypes turns a pre-file_types manifest's legacy list into FileTypes and clears the
 // legacy key. Synthesized entries can only carry the manifest language, which is why such an
-// extension needs updating to serve .tsx correctly. The cleared legacy key is what makes a second call
-// do nothing, so it runs at load rather than as a migration.
-func (c *LSPConfig) NormalizeFileTypes() {
-	if c == nil || len(c.LegacyExtensions) == 0 {
-		return
+// extension needs updating to serve .tsx correctly. Idempotent, so it runs at load, not as a migration.
+func (c *LSPConfig) NormalizeFileTypes() bool {
+	if c == nil {
+		return false
 	}
-	seen := map[string]bool{}
-	for _, ft := range c.FileTypes {
-		seen[ft.Extension] = true
-	}
-	for _, raw := range c.LegacyExtensions {
-		ext := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(raw), "."))
-		if ext == "" || seen[ext] {
-			continue
+	changed := false
+	if len(c.LegacyExtensions) > 0 {
+		seen := map[string]bool{}
+		for _, ft := range c.FileTypes {
+			seen[ft.Extension] = true
 		}
-		seen[ext] = true
-		c.FileTypes = append(c.FileTypes, LSPFileType{Extension: ext, LanguageID: c.Language})
+		for _, raw := range c.LegacyExtensions {
+			ext := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(raw), "."))
+			if ext == "" || seen[ext] {
+				continue
+			}
+			seen[ext] = true
+			c.FileTypes = append(c.FileTypes, LSPFileType{Extension: ext, LanguageID: c.Language})
+			changed = true
+		}
+		c.LegacyExtensions = nil
+		changed = true
 	}
-	c.LegacyExtensions = nil
+	return changed
 }
 
 func baseName(name string) string {

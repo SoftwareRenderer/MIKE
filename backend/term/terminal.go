@@ -551,7 +551,7 @@ func (t *taskTerminal) close() {
 	t.mu.Unlock()
 
 	if t.shell != nil {
-		t.shell.Close()
+		_ = t.shell.Close()
 	} else {
 		t.cmd.Process.Kill()
 		t.cmd.Wait()

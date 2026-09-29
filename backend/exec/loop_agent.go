@@ -192,15 +192,13 @@ func (te *TaskExecutor) executeTaskWithAgent(setup *taskExecSetup) {
 			cost = runner.SessionCost()
 		}
 		te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStats, Data: map[string]any{
-			"model_name":         runner.ModelName(),
-			"prompt_tokens":      stats.TotalInput,
-			"predicted_tokens":   stats.TotalOutput,
-			"context_used":       stats.ContextTokens,
-			"context_limit":      stats.ContextWindow,
-			"context_percent":    stats.ContextPercent,
-			"cost":               cost,
-			"cache_read_tokens":  stats.TotalCacheRead,
-			"cache_write_tokens": stats.TotalCacheWrite,
+			"model_name":       runner.ModelName(),
+			"prompt_tokens":    stats.TotalInput,
+			"predicted_tokens": stats.TotalOutput,
+			"context_used":     stats.ContextTokens,
+			"context_limit":    stats.ContextWindow,
+			"context_percent":  stats.ContextPercent,
+			"cost":             cost,
 		}})
 	}
 
