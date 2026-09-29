@@ -106,19 +106,18 @@ test-diff: ## Go tests for the packages this working tree touched (cached)
 # What each frontend gate enforces is in the doc that owns it: docs/markup-sanitizing.md (the HTML
 # sinks), docs/i18n.md (the surface count, the catalogue), docs/testing.md (the component fetch count,
 # the colour literals, the test-only export seam and the duplicated-CSS ceiling).
+#
+# The gates run side by side in frontend/scripts/frontend-gates.sh — vitest, the one typecheck compile, knip
+# and five scan slots, each with its own log, then one summary block. Every slot's exit code is read back from
+# its own file, so a slot that never ran is a named failure rather than a green row. Its self-test runs first:
+# a check that runs inside the thing that decides the build would say nothing about a runner that never
+# started.
 .PHONY: test-frontend
-test-frontend: ## Run frontend unit tests + the gates (vitest, ~10s)
-	cd frontend && npm test && npm run check:i18n && npm run check:i18n-surface-test && npm run check:i18n-surface && npm run check:sinks-test && npm run check:sinks
-	@echo "==> knip (unused files, exports, types, duplicates, dependencies)"
-	cd frontend && npm run check:dead
-	@echo "==> dead surface (an untagged test-only export; the duplicated-CSS ceiling)"
-	cd frontend && npm run check:dead-surface-test && npm run check:dead-surface
-	@echo "==> unused declarations (noUnusedLocals + noUnusedParameters)"
-	cd frontend && npm run check:unused
-	@echo "==> component fetches (the API layer owns the network)"
-	cd frontend && npm run check:fetch
-	@echo "==> colour literals (the palette in src/app.css owns every colour)"
-	cd frontend && npm run check:colors
+test-frontend: ## Frontend unit tests + the gates, in parallel (vitest is the critical path; measured cost in docs/testing.md)
+	@echo "==> frontend gate runner, self-test"
+	cd frontend && npm run check:gates-test
+	@echo "==> frontend gates: vitest, the typecheck and the scans, in parallel"
+	cd frontend && npm run check:gates
 
 # What the gates cost, measured instead of estimated. Lanes: `LANES="gates check go vitest e2e"` (all five
 # by default); a filter narrows to the lane it belongs to, so `make test-time GO_PKGS=./backend/git/` prices

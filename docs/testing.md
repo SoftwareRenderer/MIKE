@@ -168,6 +168,63 @@ A machine that answers those three checks clean prints different totals for the 
 will not: `test-go` and `test-frontend` decide what "done" costs, `backend/exec` and `backend/server` are
 the Go critical path, and vitest's wall clock is not its tests.
 
+### 2026-09-29 — one typecheck compile, the frontend gates side by side
+
+Same host, same instrument (`make test-time LANES=gates`, run `2026-09-29T114934Z`). Two shapes changed. The
+two typecheck passes became one compile (`frontend/scripts/svelte-check-once.sh`), and `make test-frontend`
+became one runner whose slots start together (`frontend/scripts/frontend-gates.sh`). The reported vitest
+duration moved from 187 s to 174 s across these runs, so read every total beside the vitest row of its own
+run.
+
+#### One compile, two verdicts
+
+| step | two compiles (s) | one compile (s) |
+|---|---|---|
+| `npm run check`, nothing compiled yet | 11.50 | 10.45 |
+| `npm run check:unused` after it | 10.63 | 0.25 |
+| the pair, as `make check` runs it | 22.13 | 10.70 |
+
+The cache key is a hash of the typechecked file contents, the three configs and
+`frontend/package-lock.json`. mtimes are not in it: a checkout moves them without moving a byte, and a stale
+report read as clean is the failure the gate cannot have. A cached report still has to carry its `COMPLETED …
+FILES` summary. svelte-check's own exit code is never the verdict either — 18 exempt `_`-prefixed
+declarations make the strict run exit 1 while both answers are green.
+
+#### `make test-frontend`, in series and in parallel
+
+| `make test-frontend` | total (s) | its own vitest (s) | everything else (s) |
+|---|---|---|---|
+| ten commands in series, the old recipe | 208.19 | 187.01 | 21.18 |
+| the runner, cold typecheck cache | 188.71 | 180.60 | 8.11 |
+| the runner, warm typecheck cache | 182.36 | 174.30 | 8.06 |
+
+The runner's wall is its slowest slot. Its own printout, from the cold run, is the record of what runs
+beside vitest:
+
+| slot | seconds | what it is |
+|---|---|---|
+| `vitest` | 183.67 | 289 files, 3711 tests |
+| `types` | 19.20 | the one compile, beside vitest (10.45 s alone) |
+| `fetch` | 8.69 | `npm run check:fetch` (1.82 s alone) |
+| `dead` | 6.97 | knip (2.89 s alone) |
+| `types-test` | 5.93 | `npm run check:typecheck-test`, 36 cases |
+| `colors` | 4.54 | `npm run check:colors` (1.02 s alone) |
+| `i18n` | 4.10 | gate, counter and the counter's test (2.16 s alone) |
+| `surface` | 2.61 | dead-surface count and its test (1.10 s alone) |
+| `sinks` | 2.34 | sink audit and its test (0.88 s alone) |
+
+Eight cores are the binding, so every slot but vitest is slower here than alone. The parallel shape is
+measured rather than assumed: beside the compile, vitest measured 203.26 s against 202.14 s alone, so 1.1 s
+buys a compile that costs 10.45 s on an idle machine.
+
+#### The same lane, as the instrument prints it
+
+`make test-time LANES=gates` prices `npm run check` at 12.38 s and `npm run check:unused` at 0.30 s: the
+second row is the first one's report, read again. `make test-frontend` in that lane measured 259.17 s with
+vitest at 252.89 s, and its `types` slot cost 1.15 s — the compile had already happened earlier in the lane,
+which is what `make check` looks like. That lane's `test-go` row (145.38 s, exit 2) is the host facts above:
+`backend/extensions`, `backend/git` and the suites that create a container.
+
 ## E2E conventions
 - Descriptive spec filenames in `frontend/tests/e2e/`; shared helpers in `helpers.ts`.
 - `test.describe.serial()` when tests share state; unique identifiers (`Date.now()`) to avoid
@@ -358,19 +415,30 @@ Two measured behaviours that chat specs keep getting wrong, both worth designing
 
 ## Frontend cleanliness gates (run by `make check`)
 
-`make test-frontend` ends with five gates over `frontend/src`:
+`make test-frontend` runs these gates as parallel slots. Each bullet names a gate, and a gate's self-test runs
+in front of it inside the same slot.
 
 - **`npm run check:dead`** — knip over the **production view**: unused files, exports, exported types,
   duplicate exports, unlisted imports, unused dependencies. An ignored test file stays a *user* of what it
   imports, so a symbol kept alive only by its own unit test is not an issue there; the seam rule below is
-  what sees it.
+  what sees it. `svelte-check` is one of the names in knip's `ignoreDependencies`: knip counts a
+  devDependency as used when a `package.json` script names it, and the typecheck compile runs inside
+  `frontend/scripts/svelte-check-once.sh` now, with the typecheck gate as the proof the tool is used.
 - **`npm run check:dead-surface`** — `frontend/dead-surface.py` measures what knip's own exemption hides and
   what no linter counts: an export alive only for its unit test, and a CSS declaration line copied into a
   second stylesheet. The section below owns both rules and the ceiling's re-freeze.
-- **`npm run check:unused`** — `frontend/scripts/check-unused.sh` runs `svelte-check` on
-  `tsconfig.unused.json`, which turns on `noUnusedLocals` and `noUnusedParameters`; `npm run check` does
-  not. The script keeps the two `is declared but …` messages, prints `file:line name`, and fails on any.
-  It covers test files too, because `tsconfig.json` includes `src/**/*.ts`.
+- **`npm run check:unused`** and **`npm run check`** are two verdicts out of one compile.
+  `frontend/scripts/svelte-check-once.sh` runs `svelte-check` once on `tsconfig.unused.json` — the `check`
+  config plus `noUnusedLocals` and `noUnusedParameters` — and both answers come out of that one machine
+  report. The stricter config reports every diagnostic the looser one reports, plus
+  `'x' is declared but (its value is never read|never used)`, so `check` takes every error except that class
+  and `check:unused` takes that class minus the `_`-prefixed names. The exemption covers `$effect`
+  subscription reads and `_` destructuring placeholders, where the read is the purpose. It covers test files
+  too, because `tsconfig.json` includes `src/**/*.ts`. `npm run check:relation` re-measures the set relation
+  on a tree that is red on purpose; it writes one scratch file under `src/`, so it runs alone. The report is
+  cached, keyed by the contents of the typechecked files plus the configs and `frontend/package-lock.json` —
+  mtimes prove nothing — and a cached report still has to carry its `COMPLETED … FILES` summary.
+  `frontend/scripts/svelte-check-once_test.py` holds both derivations and the cache rule, in both directions.
 - **`npm run check:fetch`** — `frontend/scripts/check-fetch.sh` fails on a `fetch(` in any `*.svelte` or
   `*.ts` file under `src/` outside `src/lib/api/`. The API layer owns credentials, the CSRF token and the
   reading of a failed request, so a second caller answers one outage in its own words: a bare `TypeError`,
@@ -383,6 +451,23 @@ Two measured behaviours that chat specs keep getting wrong, both worth designing
 - **`npm run check:colors`** — `frontend/scripts/check-colors.sh` fails on a hex colour literal in a
   component or a stylesheet under `src/`, because every chrome colour comes from the palette in
   `src/app.css`; its header holds the exceptions.
+
+### How the gates run
+
+`make test-frontend` runs `npm run check:gates-test`, then `npm run check:gates` —
+`frontend/scripts/frontend-gates.sh`. Its table is one slot per row: vitest, the typecheck compile, knip, and
+the scans. A slot is a command chain, so a gate follows its own self-test in one slot. Each slot writes its
+stdout and its exit code under `node_modules/.cache/frontend-gates`; the run prints a summary block (seconds,
+exit code, log path per slot) and then each slot's log. A green slot's numbers stay on stdout, because these
+gates make their claim there. The vitest slot prints its summary lines and names the log: its per-file lines
+are hundreds.
+
+Nothing here may read green that did not run. A slot that exits non-zero, exits 127, leaves no exit-code
+file, or is missing from the count of slots fails the run and is named. The runner's own test asserts each of
+those both ways, and that the table still names every `check:*` script in `frontend/package.json` except the
+exemptions it carries with a reason. Vitest runs beside the typecheck: on 8 CPUs the pair costs what vitest
+alone costs, and the compile disappears into it. The dated block under "Measured gate cost" prices both
+shapes.
 
 ### The dead-surface gate
 

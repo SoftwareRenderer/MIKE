@@ -152,6 +152,9 @@ lane_gates() {
     run_unit gates check-release   '' make check-release
     run_unit gates test-go         '' make test-go
     run_unit gates svelte-check    frontend npm run check
+    # The same compile's other verdict. It is its own row because that is what it costs when nothing earlier
+    # in the lane has compiled the tree — which is exactly what the row after it reads as when it has.
+    run_unit gates check-unused    frontend npm run check:unused
     run_unit gates test-frontend   '' make test-frontend
     render gates
 }
