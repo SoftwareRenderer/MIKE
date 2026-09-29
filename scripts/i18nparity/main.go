@@ -185,7 +185,7 @@ func Run(o Options, f *Findings) (inputsMissing bool, cs CatalogStats, ps Prompt
 	}
 
 	if o.Registry != "" && manifest != nil {
-		CheckRegistry(o.Registry, extType, packName, manifest.Version, o.Pack, f)
+		CheckRegistry(o.Registry, extType, packName, manifest.Version, f)
 	}
 	return false, cs, ps
 }
@@ -550,7 +550,7 @@ func ComparePromptSets(en, pack *TmplSet, f *Findings, maxList int) PromptStats 
 
 // CheckRegistry confirms the pack is published through the generated registry instead of being
 // hand-inserted into it, which is the rule scripts/gen-registry.py exists to enforce.
-func CheckRegistry(path, extType, name, version, pack string, f *Findings) {
+func CheckRegistry(path, extType, name, version string, f *Findings) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		f.Warnf("registry: %v", err)
