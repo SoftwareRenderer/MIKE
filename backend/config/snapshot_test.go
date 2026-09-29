@@ -37,6 +37,7 @@ func newCountingStore(t *testing.T) (*ConfigStore, *countingStore) {
 
 // One query for the rows a config read wants, and none once the snapshot is warm.
 func TestConfigReadIsOneQueryAndCached(t *testing.T) {
+	t.Parallel()
 	cs, counter := newCountingStore(t)
 
 	if _, err := cs.GetConfig(); err != nil {
@@ -58,6 +59,7 @@ func TestConfigReadIsOneQueryAndCached(t *testing.T) {
 
 // The cache is dropped by the write counter, not a clock: a save is visible to the next read.
 func TestSnapshotSeesAWriteImmediately(t *testing.T) {
+	t.Parallel()
 	cs, counter := newCountingStore(t)
 	if _, err := cs.GetConfig(); err != nil {
 		t.Fatalf("get config: %v", err)
@@ -88,6 +90,7 @@ func TestSnapshotSeesAWriteImmediately(t *testing.T) {
 // A row written by anything outside this package still invalidates, because the counter lives with the
 // write.
 func TestSnapshotSeesAWriteFromElsewhere(t *testing.T) {
+	t.Parallel()
 	cs, counter := newCountingStore(t)
 	if _, err := cs.GetConfig(); err != nil {
 		t.Fatalf("get config: %v", err)
@@ -111,6 +114,7 @@ func TestSnapshotSeesAWriteFromElsewhere(t *testing.T) {
 
 // A cached provider list is not writable through: a caller changes its own copy only.
 func TestCachedProvidersAreNotSharedMutable(t *testing.T) {
+	t.Parallel()
 	cs, db := newCountingStore(t)
 	plain := "sk-real-secret-123"
 	if err := cs.UpdateConfig(providerConfig(&plain)); err != nil {

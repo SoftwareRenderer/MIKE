@@ -19,6 +19,7 @@ func writeTestFile(t *testing.T, path, content string) {
 }
 
 func TestRemoveTreeDeletesDirectory(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	tree := filepath.Join(dir, "pkg")
 	writeTestFile(t, filepath.Join(tree, "a.go"), "package a")
@@ -33,6 +34,7 @@ func TestRemoveTreeDeletesDirectory(t *testing.T) {
 }
 
 func TestRemoveTreeRefusesTreeRoots(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	worktree := filepath.Join(dir, "wt", "task-1")
 	writeTestFile(t, filepath.Join(worktree, "main.go"), "package main")
@@ -49,6 +51,7 @@ func TestRemoveTreeRefusesTreeRoots(t *testing.T) {
 }
 
 func TestRemoveTreeRefusesGitPaths(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	// A worktree's .git is a file rather than a folder; both are refused.
 	writeTestFile(t, filepath.Join(dir, "wt", ".git"), "gitdir: /somewhere/worktrees/wt\n")
@@ -66,6 +69,7 @@ func TestRemoveTreeRefusesGitPaths(t *testing.T) {
 }
 
 func TestRemoveTreeUnlinksSymlinkWithoutTouchingTarget(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	outside := filepath.Join(dir, "keepme")
 	writeTestFile(t, outside, "stays")
@@ -86,6 +90,7 @@ func TestRemoveTreeUnlinksSymlinkWithoutTouchingTarget(t *testing.T) {
 }
 
 func TestUniqueName(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "report.txt"), "one")
 	writeTestFile(t, filepath.Join(dir, ".gitignore"), "x")
@@ -139,6 +144,7 @@ func TestUniqueName(t *testing.T) {
 }
 
 func TestHasGitSegment(t *testing.T) {
+	t.Parallel()
 	for path, want := range map[string]bool{
 		"/p/.git":                true,
 		"/p/.git/config":         true,
@@ -153,6 +159,7 @@ func TestHasGitSegment(t *testing.T) {
 }
 
 func TestGuardCopyTarget(t *testing.T) {
+	t.Parallel()
 	if err := guardCopyTarget("/p/src", "/p/src/deep/x"); !errors.Is(err, ErrCopyIntoItself) {
 		t.Errorf("destination inside the source: got %v", err)
 	}
@@ -165,6 +172,7 @@ func TestGuardCopyTarget(t *testing.T) {
 }
 
 func TestCopyTreeCopiesFilesDirsAndLinks(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src")
 	writeTestFile(t, filepath.Join(src, "a.txt"), "alpha")
@@ -197,6 +205,7 @@ func TestCopyTreeCopiesFilesDirsAndLinks(t *testing.T) {
 }
 
 func TestCopyTreeSkipsNestedGitDir(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src")
 	writeTestFile(t, filepath.Join(src, "main.go"), "package main")
@@ -215,6 +224,7 @@ func TestCopyTreeSkipsNestedGitDir(t *testing.T) {
 }
 
 func TestCopyTreeRefusesOversizedFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "big.bin")
 	f, err := os.Create(src)
@@ -237,6 +247,7 @@ func TestCopyTreeRefusesOversizedFile(t *testing.T) {
 }
 
 func TestCopyTreeRefusesTooDeepTree(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	deep := filepath.Join(dir, "src")
 	tail := deep
@@ -251,6 +262,7 @@ func TestCopyTreeRefusesTooDeepTree(t *testing.T) {
 }
 
 func TestCopyTreeRefusesTooManyEntries(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src")
 	if err := os.MkdirAll(src, 0o755); err != nil {
@@ -270,6 +282,7 @@ func TestCopyTreeRefusesTooManyEntries(t *testing.T) {
 }
 
 func TestCopyTreeRefusesDestinationInsideSource(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src")
 	writeTestFile(t, filepath.Join(src, "a.txt"), "a")
@@ -280,6 +293,7 @@ func TestCopyTreeRefusesDestinationInsideSource(t *testing.T) {
 }
 
 func TestMovePathAcrossOneFilesystem(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src.txt")
 	writeTestFile(t, src, "moved")
@@ -297,6 +311,7 @@ func TestMovePathAcrossOneFilesystem(t *testing.T) {
 }
 
 func TestMovePathRefusesDirectoryIntoItself(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src")
 	writeTestFile(t, filepath.Join(src, "a.txt"), "a")

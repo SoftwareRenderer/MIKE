@@ -31,6 +31,7 @@ func findExtensionsDir(t *testing.T) string {
 }
 
 func TestExtensionPackage_TypescriptLanguageServer_Manifest(t *testing.T) {
+	t.Parallel()
 	extDir := findExtensionsDir(t)
 	manifestPath := filepath.Join(extDir, "lsp", "typescript-language-server", "manifest.json")
 
@@ -95,6 +96,7 @@ func TestExtensionPackage_TypescriptLanguageServer_Manifest(t *testing.T) {
 }
 
 func TestExtensionPackage_TypescriptLanguageServer_Dockerfile(t *testing.T) {
+	t.Parallel()
 	extDir := findExtensionsDir(t)
 	dockerfilePath := filepath.Join(extDir, "lsp", "typescript-language-server", "Dockerfile")
 
@@ -124,6 +126,7 @@ func TestExtensionPackage_TypescriptLanguageServer_Dockerfile(t *testing.T) {
 }
 
 func TestExtensionPackage_TypescriptLanguageServer_RegistryEntry(t *testing.T) {
+	t.Parallel()
 	extDir := findExtensionsDir(t)
 	registryPath := filepath.Join(extDir, "registry.json")
 

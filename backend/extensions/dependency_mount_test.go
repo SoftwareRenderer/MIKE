@@ -36,6 +36,7 @@ func grantedExtension(hostPath string) *Extension {
 }
 
 func TestBuildExtensionCreateArgs_MountsTheGrantedDependencyDirectory(t *testing.T) {
+	t.Parallel()
 	grant := t.TempDir()
 	policy := newMountPolicyWithReadOnly([]string{grant}, []string{grant})
 
@@ -56,6 +57,7 @@ func TestBuildExtensionCreateArgs_MountsTheGrantedDependencyDirectory(t *testing
 }
 
 func TestBuildExtensionCreateArgs_GrantIsReadOnlyEvenWhereTheAppWouldAllowWrite(t *testing.T) {
+	t.Parallel()
 	// The extension's own bind is read-only because dependencyBind says so, not because the policy
 	// happens to pin the root: a policy with no read-only roots at all still gets a read-only cache.
 	// Warming it is the task container's job (lsp.DependencySandboxArgs), and one writer per cache is
@@ -73,6 +75,7 @@ func TestBuildExtensionCreateArgs_GrantIsReadOnlyEvenWhereTheAppWouldAllowWrite(
 }
 
 func TestBuildExtensionCreateArgs_UnmountableGrantIsReportedAndSkipped(t *testing.T) {
+	t.Parallel()
 	grant := t.TempDir()
 	missing := filepath.Join(grant, "removed-after-granting")
 
@@ -106,6 +109,7 @@ func TestBuildExtensionCreateArgs_UnmountableGrantIsReportedAndSkipped(t *testin
 }
 
 func TestDependencyMountIsTheSameDerivationBothWays(t *testing.T) {
+	t.Parallel()
 	// The drift this guard exists for: the create appends a mount and an env to the snapshots a later
 	// MountsCompatible compares against. If the two ever disagree, a running sandbox is judged
 	// compatible with a grant it does not have — and the user's grant does nothing, silently, forever.
@@ -145,6 +149,7 @@ func TestDependencyMountIsTheSameDerivationBothWays(t *testing.T) {
 }
 
 func TestBuildExtensionCreateArgs_BorrowedMountCollidingWithTheCacheIsDropped(t *testing.T) {
+	t.Parallel()
 	// Two -v specs on one container path make podman refuse the whole create, which would read as a
 	// broken extension rather than as two claims on one path. The borrowed mount gives way because
 	// the dependency path is declared and cannot be moved.
@@ -177,6 +182,7 @@ func countPrefix(hay []string, needle string) int {
 }
 
 func TestDesiredDependencyMountNeedsTheManager(t *testing.T) {
+	t.Parallel()
 	// The exported derivation is what the LSP manager asks for, and it must answer for a nil
 	// extension or an ungranted one without touching the store.
 	sm := sandboxManagerForTest(t)

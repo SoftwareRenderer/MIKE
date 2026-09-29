@@ -16,6 +16,7 @@ func (f fixedMemory) Forget(string)                                  {}
 // The shared language-server and agent sandboxes are real memory and are counted like any other
 // container.
 func TestExtensionMemoryAccounting(t *testing.T) {
+	t.Parallel()
 	sm := &ExtensionSandboxManager{
 		states: map[string]*extensionSandboxState{
 			"ext-capped":   {containerName: "c-capped", memLimitMB: 2048},

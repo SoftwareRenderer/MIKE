@@ -29,6 +29,7 @@ func adapterForTests(serverURL string) *llmadapter.Adapter {
 // out in the provider's expected format (body rules + headers) when a mapping
 // matches the provider URL.
 func TestTestConnection_AdapterApplied(t *testing.T) {
+	t.Parallel()
 	var gotBody map[string]any
 	var gotHeader http.Header
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -65,6 +66,7 @@ func TestTestConnection_AdapterApplied(t *testing.T) {
 // TestTestConnection_NoAdapterUnchanged verifies the default request is
 // unchanged when no adapter is wired.
 func TestTestConnection_NoAdapterUnchanged(t *testing.T) {
+	t.Parallel()
 	var gotBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		data, _ := io.ReadAll(r.Body)
@@ -91,6 +93,7 @@ func TestTestConnection_NoAdapterUnchanged(t *testing.T) {
 // TestFetchModels_AdapterHeaders verifies /models requests carry the
 // mapping's headers.
 func TestFetchModels_AdapterHeaders(t *testing.T) {
+	t.Parallel()
 	var gotHeader http.Header
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotHeader = r.Header.Clone()

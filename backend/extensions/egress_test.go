@@ -31,6 +31,7 @@ func hostOf(t *testing.T, raw string) string {
 }
 
 // The extension's configuration, not the manifest, says where it may go.
+// serial for the reason at allowLoopbackProxy.
 func TestEgressAllowsAConfiguredHostWithNoAllowlist(t *testing.T) {
 	allowLoopbackProxy(t)
 	var got string
@@ -58,6 +59,7 @@ func TestEgressAllowsAConfiguredHostWithNoAllowlist(t *testing.T) {
 }
 
 // An empty allowed_domains declares no peer; it does not permit every host.
+// serial for the reason at allowLoopbackProxy.
 func TestEgressRefusesAHostNobodyAllowed(t *testing.T) {
 	allowLoopbackProxy(t)
 	reached := false
@@ -80,6 +82,7 @@ func TestEgressRefusesAHostNobodyAllowed(t *testing.T) {
 }
 
 // Unchanged for an extension that declares its peers and configures none.
+// serial for the reason at allowLoopbackProxy.
 func TestEgressStillHonoursTheManifestAllowlist(t *testing.T) {
 	allowLoopbackProxy(t)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -99,6 +102,7 @@ func TestEgressStillHonoursTheManifestAllowlist(t *testing.T) {
 }
 
 // Templates are filled from the extension's configuration; one with no property behind it is left off.
+// serial for the reason at allowLoopbackProxy.
 func TestEgressSendsTheDeclaredHeaders(t *testing.T) {
 	allowLoopbackProxy(t)
 	var auth, missing, contentType, accept string
@@ -133,6 +137,7 @@ func TestEgressSendsTheDeclaredHeaders(t *testing.T) {
 }
 
 // A contributed POST sends the declared parameters as a form: the declaration names parameters, not bytes.
+// serial for the reason at allowLoopbackProxy.
 func TestEgressSendsAFormNotAJSONBody(t *testing.T) {
 	allowLoopbackProxy(t)
 	var contentType, body string
@@ -167,6 +172,7 @@ func TestEgressSendsAFormNotAJSONBody(t *testing.T) {
 }
 
 func TestEgressRefusesUpFront(t *testing.T) {
+	t.Parallel()
 	ext := egressExt(&NetworkConfig{AllowedDomains: []string{"x.test"}}, nil)
 
 	if _, err := Egress(context.Background(), ext, EgressRequest{URL: "gopher://x.test:9/x"}); !errors.Is(err, ErrEgressUnusable) {
@@ -182,6 +188,7 @@ func TestEgressRefusesUpFront(t *testing.T) {
 }
 
 // A redirect to another host would carry the request, and its token, somewhere nothing approved.
+// serial for the reason at allowLoopbackProxy.
 func TestEgressDoesNotFollowRedirects(t *testing.T) {
 	allowLoopbackProxy(t)
 	var redirected bool

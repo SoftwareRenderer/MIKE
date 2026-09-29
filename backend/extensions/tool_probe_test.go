@@ -62,6 +62,7 @@ func answerProbe(t *testing.T, h *ExtensionHandler, payload string) (int, testUR
 // The probe reaches the typed address: that is the only way a pre-save test can say anything about an
 // unsaved value. It uses the production client, which admits loopback only for a granted hostname.
 func TestProbeDialsTheTypedAddress(t *testing.T) {
+	t.Parallel()
 	var seen http.Request
 	upstream := searchUpstream(t, &seen, `{"number_of_results":412,"results":[{"title":"A","url":"https://a","content":"txt"}]}`,
 		http.StatusOK, "application/json")
@@ -87,6 +88,7 @@ func TestProbeDialsTheTypedAddress(t *testing.T) {
 
 // Otherwise the person saves an address, tests it later, and gets a 401 they could have seen first.
 func TestProbeSendsTheUnsavedToken(t *testing.T) {
+	t.Parallel()
 	var seen http.Request
 	upstream := searchUpstream(t, &seen, `{"results":[{"title":"A"}]}`, http.StatusOK, "application/json")
 	defer upstream.Close()
@@ -104,6 +106,7 @@ func TestProbeSendsTheUnsavedToken(t *testing.T) {
 
 // A test button must not change the stored row.
 func TestProbeStoresNothing(t *testing.T) {
+	t.Parallel()
 	var seen http.Request
 	upstream := searchUpstream(t, &seen, `{"results":[{"title":"A"}]}`, http.StatusOK, "application/json")
 	defer upstream.Close()
@@ -131,6 +134,7 @@ func TestProbeStoresNothing(t *testing.T) {
 
 // Each class sends the person to a different fix.
 func TestProbeNamesEachFailure(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		status      int
@@ -173,6 +177,7 @@ func TestProbeNamesEachFailure(t *testing.T) {
 
 // Nothing listening and no route are one class: the next step is the same.
 func TestProbeReportsAnAddressThatNeverAnswers(t *testing.T) {
+	t.Parallel()
 	h := addProbeExtension(t, "https://stored.example", nil)
 	_, answer := answerProbe(t, h, probeBody("base_url", "http://127.0.0.1:1", nil))
 
@@ -186,6 +191,7 @@ func TestProbeReportsAnAddressThatNeverAnswers(t *testing.T) {
 
 // The probe may dial only an address one of this extension's own tools would send to.
 func TestProbeRefusesAKeyNothingSendsTo(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		payload string
@@ -197,6 +203,7 @@ func TestProbeRefusesAKeyNothingSendsTo(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			h := addProbeExtension(t, "https://stored.example", nil)
 			w := postProbe(t, h, tc.payload)
 			if w.Code != http.StatusBadRequest {
@@ -211,6 +218,7 @@ func TestProbeRefusesAKeyNothingSendsTo(t *testing.T) {
 
 // A broken address is answered in the body, where the dialog already shows answers.
 func TestProbeAnswersAboutABadAddress(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		url  string
@@ -221,6 +229,7 @@ func TestProbeAnswersAboutABadAddress(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			h := addProbeExtension(t, "https://stored.example", nil)
 			code, answer := answerProbe(t, h, probeBody("base_url", tc.url, nil))
 			if code != http.StatusOK {
@@ -238,6 +247,7 @@ func TestProbeAnswersAboutABadAddress(t *testing.T) {
 
 // TestProbeNeedsNetworkCapability: the network capability is what says this extension talks at all.
 func TestProbeNeedsNetworkCapability(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	ext := addToolExtension(t, h.store, "silent-ext", "quiet", "https://searx.example", nil)
 	ext.Manifest.Capabilities.Network = nil
@@ -256,6 +266,7 @@ func TestProbeNeedsNetworkCapability(t *testing.T) {
 
 // A missing row answers like every other extension route.
 func TestProbeMissingExtension(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	req := httptest.NewRequest(http.MethodPost, "/api/extensions/nope/test-url",
 		strings.NewReader(probeBody("base_url", "https://searx.example", nil)))
@@ -268,6 +279,7 @@ func TestProbeMissingExtension(t *testing.T) {
 
 // The probe's view is a copy: a shared map would put an unsaved token into the stored row.
 func TestWithOverlayConfigLeavesTheRowAlone(t *testing.T) {
+	t.Parallel()
 	row := makeTestExt("row-ext", "row", ExtensionTypeTool)
 	row.Manifest.ConfigSchema = searxngLikeSchema()
 	row.Config = map[string]any{"base_url": "https://stored.example", "categories": "general"}

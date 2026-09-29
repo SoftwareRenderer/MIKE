@@ -58,6 +58,7 @@ func installEntry(t *testing.T, h *ExtensionHandler, entry *RegistryEntry) strin
 // TestInstallRefusesRegistryNameOutsideExtensionsDir (security): a registry `name` derives
 // the directory the checkout is RemoveAll'd into, so a separator reaches outside it.
 func TestInstallRefusesRegistryNameOutsideExtensionsDir(t *testing.T) {
+	t.Parallel()
 	repo, commit := sourceRepo(t)
 	root := t.TempDir()
 	extRoot := filepath.Join(root, "extensions")
@@ -98,6 +99,7 @@ func TestInstallRefusesRegistryNameOutsideExtensionsDir(t *testing.T) {
 // TestInstallRefusesLocalDockerfileURL (security): dockerfile_url is built by podman build,
 // which runs RUN steps on the host runtime, so a local URL there is a host file read.
 func TestInstallRefusesLocalDockerfileURL(t *testing.T) {
+	t.Parallel()
 	file := filepath.Join(t.TempDir(), "Dockerfile")
 	if err := os.WriteFile(file, []byte("FROM scratch\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -132,6 +134,7 @@ func TestInstallRefusesLocalDockerfileURL(t *testing.T) {
 
 // TestInstallAcceptsOrdinaryEntry is the control: the guard is a rule, not a broken install.
 func TestInstallAcceptsOrdinaryEntry(t *testing.T) {
+	t.Parallel()
 	repo, commit := sourceRepo(t)
 	root := t.TempDir()
 	extRoot := filepath.Join(root, "extensions")

@@ -55,6 +55,7 @@ func threeDirs(t *testing.T) (workspace, projectPath, extDir string) {
 }
 
 func TestMountPolicy_WorkspaceAndProjectsAreReadOnly(t *testing.T) {
+	t.Parallel()
 	workspace, projectPath, extDir := threeDirs(t)
 	policy := jailManager(t, workspace, projectPath, extDir).MountPolicy()
 
@@ -92,6 +93,7 @@ func TestMountPolicy_WorkspaceAndProjectsAreReadOnly(t *testing.T) {
 }
 
 func TestBuildExtensionCreateArgs_SelfGrantedWorkspaceWriteIsRefused(t *testing.T) {
+	t.Parallel()
 	workspace, projectPath, extDir := threeDirs(t)
 	sm := jailManager(t, workspace, projectPath, extDir)
 
@@ -124,6 +126,7 @@ func TestBuildExtensionCreateArgs_SelfGrantedWorkspaceWriteIsRefused(t *testing.
 }
 
 func TestWithExtraRootsKeepsReadOnlyPins(t *testing.T) {
+	t.Parallel()
 	workspace, _, extDir := threeDirs(t)
 	policy := jailManager(t, workspace, filepath.Join(filepath.Dir(workspace), "unused"), extDir).MountPolicy()
 

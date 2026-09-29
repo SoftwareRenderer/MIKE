@@ -22,6 +22,7 @@ func lspManifest(sandbox *SandboxConfig) *LSPConfig {
 }
 
 func TestValidate_DependencyCache(t *testing.T) {
+	t.Parallel()
 	// The path a real gopls manifest declares: where the Go toolchain already looks.
 	valid := &DependencyCache{ContainerPath: "/go/pkg/mod", Env: "GOMODCACHE"}
 	if err := valid.Validate(); err != nil {
@@ -64,6 +65,7 @@ func TestValidate_DependencyCache(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			err := lspManifest(&SandboxConfig{Dependency: &tc.dep}).Validate()
 			if tc.want == "" {
 				// The accepted case exists so the refusal above cannot be widened into "refuse
@@ -87,6 +89,7 @@ func TestValidate_DependencyCache(t *testing.T) {
 }
 
 func TestValidate_ReloadFiles(t *testing.T) {
+	t.Parallel()
 	// A reload recycles a language server, which is a cold start: a path that matches everything
 	// would pay that on every turn of every project.
 	for _, files := range [][]string{{"go.mod"}, {"internal/foo/Cargo.toml"}, {"composer.json", "composer.lock"}} {
@@ -107,6 +110,7 @@ func TestValidate_ReloadFiles(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			err := lspManifest(&SandboxConfig{ReloadFiles: tc.files}).Validate()
 			if err == nil {
 				t.Fatalf("accepted %v, want refusal", tc.files)
@@ -119,6 +123,7 @@ func TestValidate_ReloadFiles(t *testing.T) {
 }
 
 func TestValidate_EnvironmentGate(t *testing.T) {
+	t.Parallel()
 	// A gate whose check is empty would be stored, run as nothing, and read as "the workspace
 	// resolves" forever — the exact silence this field exists to prevent.
 	if err := lspManifest(&SandboxConfig{Environment: &EnvironmentGate{}}).Validate(); err == nil {
@@ -140,6 +145,7 @@ func TestValidate_EnvironmentGate(t *testing.T) {
 }
 
 func TestDependencyCache_IgnoresTheRemovedReadOnlyKey(t *testing.T) {
+	t.Parallel()
 	// `read_only` is gone: this container always reads, and the containers that fill the cache write
 	// it from their own side. A manifest or a stored record that still carries the key must decode,
 	// validate and behave exactly like one that never mentioned it — the published registry pins point
@@ -183,6 +189,7 @@ func TestDependencyCache_IgnoresTheRemovedReadOnlyKey(t *testing.T) {
 }
 
 func TestSandboxConfigFromManifest_CarriesTheDeclaredFields(t *testing.T) {
+	t.Parallel()
 	// The runtime acts on these three off the stored record; if install drops them, the feature is
 	// silently off for every installed extension.
 	declared := &SandboxConfig{
@@ -203,6 +210,7 @@ func TestSandboxConfigFromManifest_CarriesTheDeclaredFields(t *testing.T) {
 }
 
 func TestMergeManifestSandboxAdditions_ReplacesDeclaredFields(t *testing.T) {
+	t.Parallel()
 	// These are declarations, not user-additive lists. An update that kept merging the old values
 	// would keep acting on a manifest that no longer exists — and a manifest that dropped its gate
 	// would keep suppressing codes forever.

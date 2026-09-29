@@ -39,6 +39,7 @@ func providerConfig(key *string) *types.Config {
 // GetConfig is what the board, the task list and every provider lookup call, and none of them may
 // receive a key.
 func TestGetConfigHandsOutNoKey(t *testing.T) {
+	t.Parallel()
 	cs, db := testConfigStoreWithStore(t)
 	plain := "sk-real-secret-123"
 	if err := cs.UpdateConfig(providerConfig(&plain)); err != nil {
@@ -61,6 +62,7 @@ func TestGetConfigHandsOutNoKey(t *testing.T) {
 }
 
 func TestProviderAPIKeyOpensExactlyTheOneItIsAskedFor(t *testing.T) {
+	t.Parallel()
 	cs, _ := testConfigStoreWithStore(t)
 	plain := "sk-real-secret-123"
 	if err := cs.UpdateConfig(providerConfig(&plain)); err != nil {
@@ -80,6 +82,7 @@ func TestProviderAPIKeyOpensExactlyTheOneItIsAskedFor(t *testing.T) {
 
 // A key the process cannot open reads as no key, not as a key.
 func TestUnopenableKeyReadsAsNoKey(t *testing.T) {
+	t.Parallel()
 	otherSalt, err := crypto.New("test-passphrase", []byte("a-different-salt"))
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -104,6 +107,7 @@ func TestUnopenableKeyReadsAsNoKey(t *testing.T) {
 // A secret this build cannot open is named at startup: a plain value, one too short to be a record, or one
 // sealed for another installation. What opens is not named.
 func TestProvidersWithUnreadableKeys(t *testing.T) {
+	t.Parallel()
 	elsewhere, err := crypto.New("test-passphrase", []byte("a-different-salt"))
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -135,7 +139,9 @@ func TestProvidersWithUnreadableKeys(t *testing.T) {
 // Omitted keeps the stored key, empty clears it, a value replaces it — confusing them is how a settings
 // save eats a key.
 func TestUpdateConfigKeyMeanings(t *testing.T) {
+	t.Parallel()
 	t.Run("omitted keeps what is stored", func(t *testing.T) {
+		t.Parallel()
 		cs, db := testConfigStoreWithStore(t)
 		plain := "sk-real-secret-123"
 		if err := cs.UpdateConfig(providerConfig(&plain)); err != nil {
@@ -155,6 +161,7 @@ func TestUpdateConfigKeyMeanings(t *testing.T) {
 
 	// A client that echoes the placeholder back must not overwrite the stored key with bullets.
 	t.Run("masked placeholder keeps what is stored", func(t *testing.T) {
+		t.Parallel()
 		cs, db := testConfigStoreWithStore(t)
 		plain := "sk-real-secret-123"
 		if err := cs.UpdateConfig(providerConfig(&plain)); err != nil {
@@ -174,6 +181,7 @@ func TestUpdateConfigKeyMeanings(t *testing.T) {
 	})
 
 	t.Run("empty string clears it", func(t *testing.T) {
+		t.Parallel()
 		cs, db := testConfigStoreWithStore(t)
 		plain := "sk-real-secret-123"
 		if err := cs.UpdateConfig(providerConfig(&plain)); err != nil {
@@ -192,6 +200,7 @@ func TestUpdateConfigKeyMeanings(t *testing.T) {
 	})
 
 	t.Run("without a key to derive there is no plaintext storage", func(t *testing.T) {
+		t.Parallel()
 		db, err := store.NewStore(t.TempDir() + "/test.db")
 		if err != nil {
 			t.Fatalf("create store: %v", err)
@@ -210,6 +219,7 @@ func TestUpdateConfigKeyMeanings(t *testing.T) {
 // A read-modify-write of the providers row must go through the stored row: the config view carries no
 // keys to write back.
 func TestSaveModelContextWindowKeepsTheSealedKey(t *testing.T) {
+	t.Parallel()
 	cs, db := testConfigStoreWithStore(t)
 	plain := "sk-real-secret-123"
 	if err := cs.UpdateConfig(providerConfig(&plain)); err != nil {

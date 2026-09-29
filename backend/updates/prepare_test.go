@@ -31,6 +31,7 @@ func reopen(t *testing.T, f *stageFixture) *Service {
 // A 20 MB download is not thrown away because the server restarted: the answer names the release and the
 // archive is still its bytes, so the next process can install it.
 func TestAPreparedReleaseSurvivesTheProcessThatDownloadedIt(t *testing.T) {
+	t.Parallel()
 	f := stageFixtureFor(t, "1.4.2", goodArchive(t))
 	f.check(t)
 	if _, err := f.prepare(t); err != nil {
@@ -60,6 +61,7 @@ func TestAPreparedReleaseSurvivesTheProcessThatDownloadedIt(t *testing.T) {
 
 // An archive in that directory that the answer does not name is a stranger's file.
 func TestNewDropsADownloadedReleaseTheAnswerDoesNotName(t *testing.T) {
+	t.Parallel()
 	f := stageFixtureFor(t, "1.4.2", goodArchive(t))
 	f.check(t)
 	if _, err := f.prepare(t); err != nil {
@@ -89,6 +91,7 @@ func TestNewDropsADownloadedReleaseTheAnswerDoesNotName(t *testing.T) {
 
 // A download interrupted by a shutdown is a partial file; nothing may mistake it for a release.
 func TestNewReapsAHalfWrittenDownload(t *testing.T) {
+	t.Parallel()
 	dir := releaseDir(t)
 	part := filepath.Join(dir, preparedDirName, preparedArchive+partSuffix)
 	write(t, part, "HALF AN ARCHIVE", 0o600)
@@ -104,6 +107,7 @@ func TestNewReapsAHalfWrittenDownload(t *testing.T) {
 // The other half of the boot settle: a release that was downloaded and has since become the running one
 // is not still waiting to be installed.
 func TestADownloadedReleaseThatIsNowRunningIsNotOffered(t *testing.T) {
+	t.Parallel()
 	f := stageFixtureFor(t, "1.4.2", goodArchive(t))
 	f.check(t)
 	if _, err := f.prepare(t); err != nil {

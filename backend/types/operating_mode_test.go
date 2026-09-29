@@ -5,6 +5,7 @@ import "testing"
 // TestParseOperatingMode walks the whole input space. An unknown mode is not cosmetic: the tool-set
 // switch defaults to act, so accepting one would hand write tools to a task that looks read-only.
 func TestParseOperatingMode(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		in     string
 		want   OperatingMode
@@ -36,6 +37,7 @@ func TestParseOperatingMode(t *testing.T) {
 			}
 			return tc.in
 		}(), func(t *testing.T) {
+			t.Parallel()
 			got, ok := ParseOperatingMode(tc.in)
 			if ok != tc.wantOK || got != tc.want {
 				t.Errorf("ParseOperatingMode(%q) = (%q, %v), want (%q, %v)", tc.in, got, ok, tc.want, tc.wantOK)
@@ -48,6 +50,7 @@ func TestParseOperatingMode(t *testing.T) {
 // cross SQLite, JSON and the WebSocket layer. Renaming a constant is fine; changing its value is
 // a migration.
 func TestOperatingModeRoundTrip(t *testing.T) {
+	t.Parallel()
 	for _, m := range []OperatingMode{ModeAct, ModePlan, ModeExplore} {
 		if _, ok := ParseOperatingMode(string(m)); !ok {
 			t.Errorf("%q does not parse: a constant must always be a valid wire value", m)
@@ -62,6 +65,7 @@ func TestOperatingModeRoundTrip(t *testing.T) {
 // "what may this turn do". Which of them mounts the worktree read-only is decided where the
 // container arguments are built, not here.
 func TestTaskModeHelpers(t *testing.T) {
+	t.Parallel()
 	for _, m := range []OperatingMode{ModeAct, ModePlan, ModeExplore, ""} {
 		task := &Task{OperatingMode: m}
 		if got, want := task.IsPlanMode(), m == ModePlan; got != want {
