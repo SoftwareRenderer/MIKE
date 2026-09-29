@@ -4,7 +4,8 @@ import { createServer, type Server as HttpServer } from 'node:http';
 import { execSync } from 'node:child_process';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
-import { csrfFetch } from './helpers';
+import { csrfFetch, storageStatePath } from './helpers';
+import { MAIN_LANE } from '../lanes';
 
 // Extension-frame channel security — end-to-end.
 //
@@ -51,7 +52,7 @@ import { csrfFetch } from './helpers';
 //
 // Isolation: installs a fixture UI extension from <repo>/extensions/<author>/
 // <name> and opens a file in a DEDICATED repo/project (so nothing races other
-// specs' file editors). Serialized `isolated` project — installing an extension
+// specs' file editors). A lane server (`ISOLATED_SPECS`) — installing an extension
 // is server state. Fixture dir, project and extension removed in afterAll.
 
 const TS = Date.now();
@@ -193,12 +194,17 @@ function writeFixtureExtension(mode: 'stay' | 'sibling' | 'cross-origin' | 'nest
 }
 
 // ── helpers ──────────────────────────────────────────────────────────
-/** `browser.newContext()` does not reliably inherit the project's baseURL. */
-const BASE_URL = 'http://localhost:3001';
-const STORAGE_STATE = '/tmp/kanban-test-storage-state.json.isolated';
-
+/**
+ * A context of the lane this spec was dealt to. `browser.newContext()` does not reliably inherit the
+ * project's baseURL, and the lane is whichever shard `tests/lanes.ts` dealt the file onto — not a port.
+ */
 async function setupPage(browser: Browser): Promise<{ context: BrowserContext; page: Page }> {
-  const context = await browser.newContext({ storageState: STORAGE_STATE, baseURL: BASE_URL });
+  const info = test.info();
+  const base = (info.project.use as { baseURL?: string }).baseURL ?? MAIN_LANE.base;
+  const context = await browser.newContext({
+    storageState: storageStatePath(info.project.name),
+    baseURL: base,
+  });
   const page = await context.newPage();
   await page.goto('/');
   return { context, page };

@@ -20,9 +20,10 @@ only under load.
   hidden. `lsp-integration.spec.ts` keeps the gate because it really does talk to a language server, but
   a wall of `skipped` is not coverage: before believing an LSP change is tested, run it against a server
   that has the language server installed (they never run by default).
-- **Config-modifying tests** (settings, models, shortcuts, mode select, …) must run in the `isolated`
-  project — add the spec name to `ISOLATED_SPECS` in `frontend/playwright.config.ts` (one array; the
-  chromium lane's `testMatch` is derived from it, so the two lanes cannot drift apart).
+- **Config-modifying tests** (settings, models, shortcuts, mode select, …) must run on a lane server, never
+  on the shared one — add the spec name to `ISOLATED_SPECS` in `frontend/tests/lanes.ts`. That one array is
+  the whole rule: the chromium lane's `testMatch` excludes all of it and the shard projects are dealt out of
+  it, so a new entry needs no other edit and the lanes cannot drift apart.
 - **The harness serves `frontend/dist` from disk** — its server is a development build, and
   `global-setup` never builds it. So an e2e run proves what the last `npm run build` contained, never what
   is in `src/`, and a frontend change nobody built reads as green either way. Build before the run, then
@@ -322,14 +323,31 @@ For request-pattern/race investigation, write standalone Playwright scripts in `
 
 ## Test environment
 
-Two dedicated test servers with isolated databases plus one shared mock LLM, fully managed by
-`frontend/tests/global-setup.ts` (the servers are rebuilt each run, the fixture artifacts are cached):
+One server per lane plus one shared mock LLM, fully managed by `frontend/tests/global-setup.ts` (the
+servers are rebuilt each run, the fixture artifacts are cached). `frontend/tests/lanes.ts` is the table's
+source: it holds `ISOLATED_SPECS`, deals that set onto its shard count (2 today — ADR-0003), and names the
+port, data dir and session files of every lane that deal produces.
 
-| Server | Port | Data dir | Purpose |
-|--------|------|----------|---------|
-| Main | 3000 | `/tmp/kanban-test-data` | `chromium` Playwright project (default tests) |
-| Isolated | 3001 | `/tmp/kanban-test-data-isolated` | `isolated` project (serialized, 1 worker) — config-modifying suites; see `ISOLATED_SPECS` in `frontend/playwright.config.ts` |
-| Mock LLM | 9999 | — | shared; `frontend/tests/mock-llm.js` |
+| Lane (= Playwright project) | Port | Data dir | Holds |
+|---|---|---|---|
+| `chromium` | 3000 | `/tmp/kanban-test-data` | every spec `ISOLATED_SPECS` does not name; 4 workers |
+| `isolated-1` | 3001 | `/tmp/kanban-test-data-isolated-1` | shard 1 of the config-modifying suites; 1 worker |
+| `isolated-2` | 3002 | `/tmp/kanban-test-data-isolated-2` | shard 2 of the same set; 1 worker |
+| Mock LLM | 9999 | — | shared by every lane; `frontend/tests/mock-llm.js` |
+
+A lane exists only because `lanes.ts` declares it: the projects, the servers, the ports teardown verifies
+and the data dirs teardown removes are all read from that one list. Port 3001 is shard 1, so "3001" still
+names a lane server, and `MIKE_E2E_ISOLATED_SHARDS` re-deals the set (and re-opens that many ports) on a
+machine measuring its own ceiling.
+
+Playwright's `workers` is the cap across **every** project, so it is the number of browsers the machine runs
+at once — 4, the chromium lane's measured ceiling — and not `4 + shards`. A lane worker takes a slot when the
+chromium lane stops using one, so the shards start at the tail of the run and run beside each other. Giving
+them their own workers measures faster and is not available: the lane specs lose their timing slack first.
+
+Every lane's seed project is a copy of the same fixture repo, so every lane's project id is the same and
+their worktrees share `/tmp/kanban-test-worktrees/<projectId>/<taskId>`. That is safe because task ids
+differ per lane and `GarbageCollect` runs at server startup only — while no lane has a task to lose.
 
 Test repos live at `/tmp/kanban-test-repo` (+ `-2`), worktrees at `/tmp/kanban-test-worktrees/`.
 
@@ -344,20 +362,20 @@ is what removes it: **deleting an extension deletes its directory**. So setup se
 Otherwise the run after an uninstall reports
 `install-local failed (404): <name> not in local extensions list`, which reads as a code regression.
 
-**One binary, two servers.** Setup runs `go build -trimpath -o /tmp/kanban-test-bin/mike .` once and
-spawns that binary for both lanes: one compile per run, not one per server. It is a development build,
+**One binary, one server per lane.** Setup runs `go build -trimpath -o /tmp/kanban-test-bin/mike .` once and
+spawns that binary for every lane: one compile per run, not one per server. It is a development build,
 never `-tags release`, and each lane passes `--frontend-dist <repo>/frontend/dist`. That flag is the
 difference between serving the disk copy by intent and by cwd — a release build refuses it and dies at
-boot (`AGENTS.md → Workflow`). Each lane writes its own output to `/tmp/kanban-test-lane-<name>.log` (the
+boot (`AGENTS.md → Workflow`). Each lane writes its own output to `/tmp/kanban-test-lane-<lane>.log` (the
 mock LLM's to `/tmp/kanban-test-mock-llm.log`), truncated at each spawn, and the startup line there is the
 proof: `serving the frontend from: <repo>/frontend/dist`. That file is also the whole diagnosis when a lane
 never answers — a port that stays dark means the process exited, and its reason is nowhere else. `go build`
 runs every run because its own cache is the content key, and a lane on a stale binary would report green
 about code that never ran.
 
-**Both lanes boot together.** The two servers and the mock LLM are spawned back to back and awaited
+**Every lane boots together.** The lane servers and the mock LLM are spawned back to back and awaited
 concurrently, then each lane's own seed work (login → config → project → two tasks) runs in parallel with
-the other's. The mock LLM is up before either lane creates a task, because title-gen dials the provider
+every other lane's. The mock LLM is up before any lane creates a task, because title-gen dials the provider
 immediately.
 
 **The fixtures are cached on a content hash.** A marker file beside each cached artifact
@@ -383,18 +401,24 @@ the manifest host. `disabled` is the posture the client stops on — no dot, no 
 `globalTeardown` is `tests/global-teardown.ts`, whose default export is *only* teardown — naming
 `global-setup.ts` there re-runs setup at the end of every run and leaves a server pair, lock and database
 nothing will stop. Verify after any change to setup/teardown: `pgrep -xc mike` → 0, nothing listening on
-3000/3001/9999, no `/tmp/kanban-test-data*`.
+3000, 3001..3000+shards and 9999, no `/tmp/kanban-test-data*`, no `/tmp/kanban-test-lane-*.pid`.
 
 Each lane server is spawned detached and directly, and its PID is written to
-`/tmp/kanban-test-lane-<name>.pid` (the mock LLM's to `/tmp/kanban-test-mock-llm.pid`); a `setsid`
+`/tmp/kanban-test-lane-<lane>.pid` (the mock LLM's to `/tmp/kanban-test-mock-llm.pid`); a `setsid`
 wrapper would leave the harness holding the wrapper's PID, not the server's. Teardown stops a lane by
 **identity**: the PID file, plus a `/proc` argv sweep matching `--data-dir <dir>` token-for-token. A PID
 read from a file counts only while its `/proc/<pid>/cmdline` still carries that pair, since PIDs get reused.
-Token equality is what keeps `/tmp/kanban-test-data` from answering for `/tmp/kanban-test-data-isolated`.
+Token equality is what keeps `/tmp/kanban-test-data` from answering for `/tmp/kanban-test-data-isolated-1`,
+and one shard's dir from answering for its neighbour's — with a dozen lanes on one `/tmp`, that is the whole
+difference between stopping your own lane and stopping someone else's.
 SIGTERM, then wait for the PID to disappear — 18 s, because `server.ShutdownTimeout` is 15 s and a server
 shutting down politely is worth waiting out — then SIGKILL. The port is never the identity:
 `lsof -ti:PORT` answers with clients too, so the port check runs *after* the identity stop, to report and
 take back a port a foreign process (a `make run` dev server, a straggler) still holds.
+
+A lane whose shard a lower `MIKE_E2E_ISOLATED_SHARDS` does not deal with is still this harness's lane: the
+maximum deal (one shard per spec) is swept too, so lowering the count does not strand a server, a port or a
+database.
 
 The data dirs are then removed with `fs.rmSync` retried on `ENOTEMPTY`/`EBUSY` for ~5 s. That retry is
 what the `lsof +D <dir>` poll it replaced was standing in for, and the poll walked the whole open-file
@@ -412,9 +436,9 @@ its data dirs on its own. To do it by hand (stale processes hold the ports — s
 global-setup run teardown instead of setup):
 
 ```bash
-lsof -ti:3000,3001,9999 | xargs kill 2>/dev/null
+lsof -ti:3000,3001,3002,9999 | xargs kill 2>/dev/null
 rm -f /tmp/kanban-test-setup.lock /tmp/kanban-test-lane-*.pid /tmp/kanban-test-mock-llm.pid
-rm -rf /tmp/kanban-test-data /tmp/kanban-test-data-isolated /tmp/kanban-test-worktrees
+rm -rf /tmp/kanban-test-data* /tmp/kanban-test-worktrees
 ```
 
 ## Go unit test environment
@@ -533,6 +557,12 @@ suites, with that error in the log, is a reading about the machine.
   believing a red that names a spec on this list. Measured on the starved machine: `workers: 4` failed 5,
   `--workers=3` failed 8, and raising the popup wait from 20 s to 30 s changed nothing. The worker count
   is not the variable; the free memory is.
+
+- **`html-preview` is the spec that pays for the shards.** Its own summed test time measured 36.6 s when one
+  lane server ran the config-modifying set, 39-40 s with two shards and 49-60 s with three. Its slowest test
+  ran 18.8 s at three shards, against the 15 s `expect` ceiling inside it. A red naming it while a third shard
+  is dealt (`MIKE_E2E_ISOLATED_SHARDS=3`) is a reading about the shard count, not about the preview; the
+  shipped deal is two shards, which holds it at ~40 s.
 
 - **`backend/extensions`' `TestHandleInstall_BuildFailureLeavesNoRowAndNoFiles`** fails on roughly 1 in 3
   `make check` / `-parallel 8` runs **on a CPU-loaded machine** and never alone or unloaded, so a red

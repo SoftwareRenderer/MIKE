@@ -20,7 +20,7 @@ import {
 // Utility calls (title generation) keep going through the per-request gate:
 // they queue behind an in-flight stream and must not deadlock.
 //
-// Runs in the `isolated` project (port 3001): it changes the mock provider's
+// Runs on a lane server (`ISOLATED_SPECS`): it changes the mock provider's
 // concurrency, which is a config modification.
 //
 // Timing: task prompts route the mock LLM to `text_response_slow` (16 chunks

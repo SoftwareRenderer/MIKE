@@ -633,7 +633,7 @@ test.describe.serial('Provider max requests per second', () => {
     const seedModel = 'rps-model-a';
 
     /**
-     * Seed the isolated server with a single LLM provider carrying the given
+     * Seed the lane server with a single LLM provider carrying the given
      * max_requests_per_second. The server assigns a stable integer ID on the
      * first PUT, so references are set in a second PUT keyed by that ID (the
      * Settings modal resolves worker/utility selections by provider ID).

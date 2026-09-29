@@ -3,8 +3,8 @@
  * Set USE_MOCK_LLM=0 to use real LLM endpoint (default: mock).
  *
  * Everything the lane needs before its first test is built here, so this file owns the run's fixed
- * cost and keeps it flat: one `go build` for both lane servers, fixture artifacts cached behind a
- * content hash of their source, and both lane servers booting while each other's seed work runs.
+ * cost and keeps it flat: one `go build` for every lane server, fixture artifacts cached behind a
+ * content hash of their source, and all the lane servers booting while each other's seed work runs.
  * `make test-time` (scripts/e2e-time.py) splits the wall clock at `[teardown] ENTRY`, so the phases
  * below are visible without this file measuring anything.
  */
@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { execSync, execFileSync } from 'node:child_process';
+import { MOCK_PORT, MAIN_LANE, allLanes, isolatedLanes, ISOLATED_SPECS, type Lane } from './lanes';
 
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
@@ -22,20 +23,10 @@ const FRONTEND_DIR = path.resolve(__dirname, '..');
 
 const TEST_REPO = '/tmp/kanban-test-repo';
 const TEST_REPO_2 = '/tmp/kanban-test-repo-2';
-const TEST_DATA_DIR = '/tmp/kanban-test-data';
-const TEST_DATA_DIR_ISOLATED = '/tmp/kanban-test-data-isolated';
 const TEST_WORKTREES = '/tmp/kanban-test-worktrees';
 // Per-worker project repos created by helpers.ts isolatedProject() — scratch, like the worktrees.
 const TEST_OWN_REPOS = '/tmp/kanban-test-repos';
-const KANBAN_PORT = 3000;
-const KANBAN_PORT_ISOLATED = 3001;
-const MOCK_PORT = 9999;
-const KANBAN_BASE = `http://localhost:${KANBAN_PORT}`;
-const KANBAN_BASE_ISOLATED = `http://localhost:${KANBAN_PORT_ISOLATED}`;
 const LOCK_FILE = '/tmp/kanban-test-setup.lock';
-// Playwright storage state files — read at context creation time
-const STORAGE_STATE_FILE = '/tmp/kanban-test-storage-state.json';
-const STORAGE_STATE_FILE_ISOLATED = '/tmp/kanban-test-storage-state.json.isolated';
 // Set to 1 to rebuild every cached fixture instead of trusting its marker.
 const REBUILD_ENV = 'MIKE_E2E_REBUILD';
 const TEST_PASSWORD = 'test-password-1234';
@@ -52,42 +43,34 @@ const REPO_USER_EMAIL = 'test@kanban.local';
 const REPO_USER_NAME = 'Test';
 
 /**
- * One lane: a server of its own, with its own database, storage state, PID file and boot log.
+ * The lanes this run owns: the main server, then one per shard of `ISOLATED_SPECS`.
  *
- * The PID file holds the PID of the server itself, which is why the lane binary is spawned directly
- * rather than through a `setsid` wrapper: an identity-based stop cannot reach a grandchild it has no
- * PID for, and the port is not an identity (`lsof -ti:PORT` answers with clients too).
+ * A lane is a server of its own — its own database, storage state, PID file and boot log — and the list is
+ * the same array `playwright.config.ts` builds its projects from, so a project with no server and a server
+ * with no project are both impossible.
  *
- * The boot log is what the server printed, which is the only record of a lane that died during setup:
- * `waitForServer` reports the timeout, the log names the reason.
+ * The PID file holds the PID of the server itself, which is why the lane binary is spawned directly rather
+ * than through a `setsid` wrapper: an identity-based stop cannot reach a grandchild it has no PID for, and
+ * the port is not an identity (`lsof -ti:PORT` answers with clients too). The boot log is what the server
+ * printed — the only record of a lane that died during setup, where `waitForServer` reports the timeout and
+ * the log names the reason.
  */
-interface Lane {
-    name: string;
-    base: string;
-    port: number;
-    dataDir: string;
-    storageState: string;
-    authFile: string;
-    pidFile: string;
-    logFile: string;
-}
+const LANES: Lane[] = allLanes();
+const LANE_PORTS: number[] = LANES.map((lane) => lane.port);
+const LANE_DATA_DIRS: string[] = LANES.map((lane) => lane.dataDir);
 
-const LANES: Lane[] = [
-    {
-        name: 'main', base: KANBAN_BASE, port: KANBAN_PORT, dataDir: TEST_DATA_DIR,
-        storageState: STORAGE_STATE_FILE, authFile: '/tmp/kanban-test-auth.json',
-        pidFile: '/tmp/kanban-test-lane-main.pid', logFile: '/tmp/kanban-test-lane-main.log',
-    },
-    {
-        name: 'isolated', base: KANBAN_BASE_ISOLATED, port: KANBAN_PORT_ISOLATED, dataDir: TEST_DATA_DIR_ISOLATED,
-        storageState: STORAGE_STATE_FILE_ISOLATED, authFile: '/tmp/kanban-test-auth.json.isolated',
-        pidFile: '/tmp/kanban-test-lane-isolated.pid', logFile: '/tmp/kanban-test-lane-isolated.log',
-    },
-];
+/**
+ * Every shard a run could have dealt — the maximum deal is one shard per spec — minus the ones this run
+ * starts. A lane server outlives its run only when the run was interrupted, and the shard it belongs to
+ * is chosen by `MIKE_E2E_ISOLATED_SHARDS`, so a run started with a lower count must still stop and delete
+ * the lanes a higher one left standing.
+ */
+const OTHER_SHARDS: Lane[] = isolatedLanes(ISOLATED_SPECS.length)
+    .filter((lane) => !LANES.some((mine) => mine.dataDir === lane.dataDir));
 const MOCK_PID_FILE = '/tmp/kanban-test-mock-llm.pid';
 const MOCK_LOG_FILE = '/tmp/kanban-test-mock-llm.log';
 
-// The server both lanes run. Built by setup, never `go run`: one compile serves both servers, and the
+// The server every lane runs. Built by setup, never `go run`: one compile serves every server, and the
 // binary is named `mike` so `pgrep -xc mike` counts the lane's own processes.
 const LANE_BIN_DIR = '/tmp/kanban-test-bin';
 const LANE_BIN = path.join(LANE_BIN_DIR, 'mike');
@@ -106,7 +89,7 @@ const REMOVE_BUDGET_MS = 5000;
 // pack) is pinned to a git commit that only exists once setup has built the repo
 // it points at, so the fixture is copied to GENERATE_REGISTRY_FILE with that
 // placeholder resolved. Content is otherwise byte-identical, and a registry fetch
-// is a per-request file read (`HandleRegistryIndex` caches nothing), so both lanes
+// is a per-request file read (`HandleRegistryIndex` caches nothing), so every lane
 // see the same index.
 const REGISTRY_FIXTURE_FILE = path.join(__dirname, 'registry-fixture.json');
 const GENERATED_REGISTRY_FILE = '/tmp/kanban-test-registry.json';
@@ -161,7 +144,7 @@ async function setup(): Promise<void> {
 
     buildLaneBinary();
 
-    // Boot: both lane servers and the mock LLM start without waiting on each other. Neither lane's
+    // Boot: every lane server and the mock LLM start without waiting on each other. No lane's
     // setup is the other's precondition, and the lane used to pay for a second compile between them.
     const started = Date.now();
     for (const lane of LANES) spawnLane(lane);
@@ -248,7 +231,7 @@ export async function teardown(): Promise<void> {
 
     // Whoever still holds a lane port is not a process this run spawned — a dev server, or a straggler
     // from an interrupted one. Report it, take the port, and say whether the lane is clear.
-    await verifyPortsFree([MOCK_PORT, KANBAN_PORT_ISOLATED, KANBAN_PORT]);
+    await verifyPortsFree([MOCK_PORT, ...LANE_PORTS]);
 
     // Remove local extension fixtures this (or an interrupted previous) setup created.
     removeSeededLocalExtensions();
@@ -265,16 +248,16 @@ export async function teardown(): Promise<void> {
     }
 
     // Delete test data, worktrees and the per-worker project repos.
-    for (const dir of [TEST_DATA_DIR, TEST_DATA_DIR_ISOLATED, TEST_WORKTREES, TEST_OWN_REPOS]) {
+    for (const dir of [...LANE_DATA_DIRS, ...OTHER_SHARDS.map((l) => l.dataDir), TEST_WORKTREES, TEST_OWN_REPOS]) {
         await removeTree(dir);
     }
 
-    // Clean up lock, auth and PID files. The fixture cache (the repo templates, the i18n pack repo, the
+    // Clean up lock, session and PID files. The fixture cache (the repo templates, the i18n pack repo, the
     // registry index and their `.sha` markers) is deliberately NOT deleted — see cacheHit.
     for (const file of [
         LOCK_FILE, MOCK_PID_FILE,
-        STORAGE_STATE_FILE, STORAGE_STATE_FILE_ISOLATED,
-        ...LANES.flatMap((l) => [l.authFile, l.pidFile]),
+        ...LANES.flatMap((l) => [l.storageState, l.authFile, l.pidFile]),
+        ...OTHER_SHARDS.flatMap((l) => [l.storageState, l.authFile, l.pidFile]),
     ]) {
         try { fs.unlinkSync(file); } catch { /* ignore */ }
     }
@@ -283,7 +266,7 @@ export async function teardown(): Promise<void> {
 // --- The lane binary ---
 
 /**
- * Compile both lane servers' binary, once, as a development build.
+ * Compile every lane server's binary, once, as a development build.
  *
  * No `-tags release`: the harness serves `frontend/dist` from disk so `npm run build` needs no Go
  * rebuild, and a release binary serves only the copy it was compiled with (AGENTS.md → Workflow).
@@ -540,10 +523,13 @@ async function cleanupStaleState(): Promise<void> {
     // A stale lane server holds the ports and its SQLite files, so the next run would boot on the
     // previous run's database. The PID files name them; the sweep catches ones that lost theirs.
     for (const lane of LANES) await stopLane(lane);
+    // A shard a lower `MIKE_E2E_ISOLATED_SHARDS` does not start is still this harness's process, and its
+    // port and database are still in the way.
+    for (const lane of OTHER_SHARDS) await stopLane(lane);
     await stopMockLlm();
-    await verifyPortsFree([MOCK_PORT, KANBAN_PORT, KANBAN_PORT_ISOLATED]);
+    await verifyPortsFree([MOCK_PORT, ...LANE_PORTS, ...OTHER_SHARDS.map((l) => l.port)]);
     // Data dirs come last: a process above has to have let go of them first.
-    for (const dir of [TEST_DATA_DIR, TEST_DATA_DIR_ISOLATED, TEST_WORKTREES, TEST_OWN_REPOS]) {
+    for (const dir of [...LANE_DATA_DIRS, ...OTHER_SHARDS.map((l) => l.dataDir), TEST_WORKTREES, TEST_OWN_REPOS]) {
         await removeTree(dir);
     }
 }
@@ -1001,7 +987,7 @@ async function login(base: string): Promise<{ cookie: string; csrfToken: string 
 export default async function main(): Promise<void> {
     // A lock plus a live server means a previous run left the lane standing: run teardown for it before
     // setting up. Anything else needs no teardown — setup's own stale-state cleanup covers it.
-    if (fs.existsSync(LOCK_FILE) && !(await isPortFree(KANBAN_PORT))) {
+    if (fs.existsSync(LOCK_FILE) && !(await isPortFree(MAIN_LANE.port))) {
         console.log('[global-setup] Teardown phase: stopping running servers');
         await teardown();
     } else if (fs.existsSync(LOCK_FILE)) {

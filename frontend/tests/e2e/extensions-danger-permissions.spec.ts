@@ -10,7 +10,7 @@ import { test, expect } from '@playwright/test';
  * permissions (`preview.serveScripts`, `preview.serveNetwork`) alongside safe
  * editor ones.
  *
- * Runs in the `isolated` project: installing an extension modifies server
+ * Runs on a lane server (`ISOLATED_SPECS`): installing an extension modifies server
  * state, and the main-project html-preview spec installs the same extension
  * concurrently (cross-spec race on the shared DB).
  */

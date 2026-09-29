@@ -3,6 +3,7 @@ import { execSync } from 'child_process';
 import { existsSync, writeFileSync, mkdirSync, readFileSync, cpSync, readdirSync } from 'fs';
 import { dirname, join } from 'path';
 import http from 'node:http';
+import { MAIN_LANE, laneByPort, laneByProject } from '../lanes';
 
 /**
  * Find a provider by its reference string: the stable integer ID (as a string)
@@ -103,9 +104,7 @@ export async function apiGetConfig(page: Page): Promise<any> {
  * this: the lanes are different servers, and the wrong file means every API call gets a 401.
  */
 export function storageStatePath(projectName: string): string {
-    return projectName === 'isolated'
-        ? '/tmp/kanban-test-storage-state.json.isolated'
-        : '/tmp/kanban-test-storage-state.json';
+    return laneByProject(projectName)?.storageState ?? MAIN_LANE.storageState;
 }
 
 /** GET a JSON endpoint from the page (the page must be on the server origin). */
@@ -134,16 +133,17 @@ export async function waitForConfig(page: Page, predicate: (config: any) => bool
  * This allows advancing server state (creating tasks, etc.) while the
  * browser WebSocket is down or the page is mid-reload.
  *
- * @param base  Server origin: http://localhost:3000 or http://localhost:3001
+ * @param base  Server origin: the lane's own `baseURL`, e.g. http://localhost:3000
  */
 export async function serverApi(
   base: string,
   path: string,
   options: { method?: string; body?: Record<string, any> } = {},
 ): Promise<{ ok: boolean; status: number; data: any }> {
-  const port = new URL(base).port;
-  const authFile = port === '3001' ? '/tmp/kanban-test-auth.json.isolated' : '/tmp/kanban-test-auth.json';
-  const auth = JSON.parse(readFileSync(authFile, 'utf-8'));
+  const port = new URL(base).port || String(MAIN_LANE.port);
+  const lane = laneByPort(port);
+  if (!lane) throw new Error(`serverApi: port ${port} is not a lane this harness starts (see tests/lanes.ts)`);
+  const auth = JSON.parse(readFileSync(lane.authFile, 'utf-8'));
   const cookie = auth.cookies?.[0]?.value ?? '';
   const csrfToken = auth.csrfToken ?? '';
   const method = options.method ?? 'GET';
@@ -214,7 +214,7 @@ const FIXTURE_REPO = '/tmp/kanban-test-repo';
 
 export function isolatedProject(): void {
   test.beforeEach(async ({ page }, testInfo) => {
-    // The port keeps the two lanes' slots disjoint (3000 chromium, 3001 isolated).
+    // The port keeps every lane's slots disjoint — one worker per lane, and the lane is the port.
     const base = (testInfo.project.use as { baseURL?: string })?.baseURL || 'http://localhost:3000';
     await ensureOwnProject(page, `w${testInfo.parallelIndex}-${new URL(base).port}`);
   });

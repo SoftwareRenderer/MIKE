@@ -13,7 +13,7 @@ import { apiGetJson, csrfFetch } from './helpers';
 // is the `extension_change` broadcast + `loadI18NFromExtensions` that the app
 // already runs. Nothing is stubbed, so what fails is the wiring, not a mock.
 //
-// Runs in the `isolated` project (see ISOLATED_SPECS): installing an extension
+// Runs on a lane server (`ISOLATED_SPECS`) (see ISOLATED_SPECS): installing an extension
 // mutates server state.
 //
 // The observable proof of the live switch is `document.documentElement.lang` —

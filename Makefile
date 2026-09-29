@@ -121,12 +121,13 @@ test-frontend: ## Run frontend unit tests + the gates (vitest, ~10s)
 	cd frontend && npm run check:colors
 
 # The e2e suite measured: the lane's fixed cost (global setup, global teardown) split out from the
-# tests, plus the slowest spec files. Playwright's own summary prints one number for the tests, and the
-# lane servers, fixture repos and data dirs live outside it. Wraps the `list` and `json` reporters —
-# nothing in the harness is instrumented to be measured. `make test-time PW_ARGS=--workers=2`.
+# tests, plus each lane's own wall total and its slowest spec files. Playwright's own summary prints one
+# number for the tests, and the lane servers, fixture repos and data dirs live outside it. Wraps the
+# `list` and `json` reporters — nothing in the harness is instrumented to be measured.
+# `make test-time PW_ARGS=--workers=2`, `make test-time TIME_ARGS=--show-specs=20`.
 .PHONY: test-time
 test-time: ## Full e2e run, split into setup / tests / teardown (~one suite length)
-	@python3 scripts/e2e-time.py -- $(PW_ARGS)
+	@python3 scripts/e2e-time.py $(TIME_ARGS) -- $(PW_ARGS)
 
 # A locale pack fails silently in both directions, so neither failure shows up in the UI: a
 # missing message key falls back to English per key (a pack missing 300 keys still looks

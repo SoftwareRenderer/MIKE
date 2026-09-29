@@ -37,8 +37,8 @@ record there rather than arguing inside the rule. When you learn something, *rep
   before claiming done, and `make check-race` on whatever you touched — a package's own green tests prove
   nothing about code that only runs when a task does. `RACE_PKGS` in the Makefile names the packages,
   and `docs/testing.md` names the ones it omits. `make lint` is the static half alone.
-- **E2E runs kill your dev server** (global-setup owns ports 3000/3001/9999) — restart with `make run`
-  afterwards.
+- **E2E runs kill your dev server** (global-setup owns the lane ports — 3000, one per `ISOLATED_SPECS`
+  shard from 3001 up, and 9999) — restart with `make run` afterwards.
 - Run the dev server in **background** (`&`).
 
 ### Workflow
@@ -145,9 +145,9 @@ python3 scripts/gen-registry.py --check                  # registry.json matches
 
 - **A spec exists only if it needs a browser or the real backend.** Component state belongs in vitest.
   Never write a `readFileSync('../Foo.svelte')` + `toContain(...)` "test".
-- **Config-modifying specs run in the `isolated` project** (`ISOLATED_SPECS`), and **any spec that runs an
-  executor turn owns its project** — turns are queued per project, so a shared project makes you wait
-  behind every other worker. Specs on the global view must not.
+- **Config-modifying specs run on a lane server** (`ISOLATED_SPECS` in `frontend/tests/lanes.ts`; one worker
+  per lane), and **any spec that runs an executor turn owns its project** — turns are queued per project, so a
+  shared project makes you wait behind every other worker. Specs on the global view must not.
 - **`[role="dialog"]` is never a unique locator** — filter by content.
 - Go tests are deterministic: `testServer(t)` for an isolated server, `t.TempDir()` for files, no network.
 - A frontend test file that imports a module using Svelte compiler macros (`$state`, `$derived`, `$effect`)
@@ -458,9 +458,10 @@ Apache-2.0, and a dependency's license is not changed by ours.
 
 Logs go to server stdout or `/tmp/kanban.log` through `pkg/logging` (see below) and are greppable by
 `component=` and `task_id=`. Worktrees live under `.worktrees/`. A stale frontend is a rebuild plus a hard
-refresh. E2E connection failures are stale processes on 3000/3001/9999 — see `docs/testing.md`. The flight
-recorder is always on, writing `data/kanban.trace` and rotating the previous file to `kanban.trace.old`
-every 30 s: `go tool trace -http=:8080 data/kanban.trace`. Ad-hoc browser probes: `docs/testing.md`.
+refresh. E2E connection failures are stale processes on the lane ports (3000, 3001 up, 9999) — see
+`docs/testing.md`. The flight recorder is always on, writing `data/kanban.trace` and rotating the previous
+file to `kanban.trace.old` every 30 s: `go tool trace -http=:8080 data/kanban.trace`. Ad-hoc browser probes:
+`docs/testing.md`.
 
 ### Logging
 

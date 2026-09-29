@@ -5,7 +5,7 @@ import { apiPutConfig, apiGetConfig, waitForConfig, getProjectId, createTaskViaA
 // shortcut defaults to "C"; can be rebound, reset, or cleared. Bindings
 // persist server-side (keyboard_shortcuts in /api/config).
 //
-// Runs in the `isolated` project: mutates server config via the UI Save flow.
+// Runs on a lane server (`ISOLATED_SPECS`): mutates server config via the UI Save flow.
 
 const SETTINGS_BTN = '.icon-btn[aria-label="Settings"]';
 const PREFERENCES_TAB = 'button.tab-btn:has-text("Preferences")';
