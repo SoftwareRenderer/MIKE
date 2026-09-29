@@ -142,7 +142,7 @@ func TestSupervisorPausesSmallestLiveChargeFirst(t *testing.T) {
 	}
 	// Queue a waiter so QueueLen > 0.
 	go func() { _ = gate.Acquire(context.Background(), 300, nil) }()
-	time.Sleep(50 * time.Millisecond)
+	awaitCounter(t, 5*time.Second, 1, "the waiter to reach the gate queue", gate.QueueLen)
 
 	actions := &recordingSupervisorActions{}
 	NewMemorySupervisor(s, gate, charges, actions, time.Second, SandboxReclaim{}).TickOnce()
@@ -183,7 +183,7 @@ func TestSupervisorFallsBackToReserveWithoutContainerCharges(t *testing.T) {
 		t.Fatal(err)
 	}
 	go func() { _ = gate.Acquire(context.Background(), 300, nil) }()
-	time.Sleep(50 * time.Millisecond)
+	awaitCounter(t, 5*time.Second, 1, "the waiter to reach the gate queue", gate.QueueLen)
 
 	actions := &recordingSupervisorActions{}
 	NewMemorySupervisor(s, gate, nil, actions, time.Second, SandboxReclaim{}).TickOnce()
@@ -672,12 +672,7 @@ func memSupQueuedGate(t *testing.T, capacity, held int64) *MemoryGate {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go func() { _ = gate.Acquire(ctx, capacity, nil) }()
-	for deadline := time.Now().Add(time.Second); gate.QueueLen() == 0; {
-		if time.Now().After(deadline) {
-			t.Fatal("the queued waiter never reached the gate")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	awaitCounter(t, time.Second, 1, "the queued waiter to reach the gate", gate.QueueLen)
 	return gate
 }
 
