@@ -25,6 +25,8 @@ import (
 // there, and one without a row is a directory no request can name; both look like success from the board.
 
 func TestCloneCancelledByClientLeavesNoProjectAndNoCheckout(t *testing.T) {
+	// Serial: logging.TestSink re-points the process-wide logger, so a concurrent test's lines would
+	// land in this buffer and this test's lines in whichever buffer was installed.
 	h, _, st := testProjectHandlerWithStore(t)
 
 	buf, restore := logging.TestSink()

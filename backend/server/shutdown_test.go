@@ -9,6 +9,7 @@ import (
 // SIGTERM must end the process. A wedged step would otherwise leave a zombie that still holds the
 // data directory open.
 func TestRunShutdownWithDeadlineReturnsAtDeadline(t *testing.T) {
+	t.Parallel()
 	released := make(chan struct{})
 	defer close(released) // unblock the wedged step when the test ends
 
@@ -27,6 +28,7 @@ func TestRunShutdownWithDeadlineReturnsAtDeadline(t *testing.T) {
 }
 
 func TestRunShutdownWithDeadlinePropagatesCleanResult(t *testing.T) {
+	t.Parallel()
 	cleanupErr := errors.New("database close failed")
 	calls := 0
 	err := runShutdownWithDeadline(5*time.Second, func() error {

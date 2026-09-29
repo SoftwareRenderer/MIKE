@@ -17,6 +17,7 @@ import (
 // from the model's context rather than restore it, and a PATCH is not the way to ask for that.
 
 func TestSummaryEditStoresNewText(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
@@ -38,6 +39,7 @@ func TestSummaryEditStoresNewText(t *testing.T) {
 }
 
 func TestSummaryEditRefusesBlankContent(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")

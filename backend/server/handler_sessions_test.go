@@ -61,6 +61,7 @@ func currentSessionOf(t *testing.T, s *Server, cookie string) sessionInfoRespons
 }
 
 func TestSessionsListShowsCurrentSessionAndNoSecrets(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 
 	cookieA, _ := loginSession(t, s, "Agent-A/1.0")
@@ -122,6 +123,7 @@ func TestSessionsListShowsCurrentSessionAndNoSecrets(t *testing.T) {
 }
 
 func TestSessionsListRequiresAuth(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 
 	req := testRequest(http.MethodGet, "/api/sessions", nil)
@@ -132,6 +134,7 @@ func TestSessionsListRequiresAuth(t *testing.T) {
 }
 
 func TestSessionRevokeDeletesOneSession(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 
 	cookieA, csrfA := loginSession(t, s, "Agent-A/1.0")
@@ -170,6 +173,7 @@ func TestSessionRevokeDeletesOneSession(t *testing.T) {
 }
 
 func TestSessionRevokeUnknownID(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrfToken := loginSession(t, s, "Agent-A/1.0")
 
@@ -185,6 +189,7 @@ func TestSessionRevokeUnknownID(t *testing.T) {
 // prevent the user from killing the device they are on — the SPA then 401s on
 // its next request and falls back to the login modal.
 func TestSessionRevokeCurrentSessionIsAllowed(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrfToken := loginSession(t, s, "Agent-A/1.0")
 
@@ -205,6 +210,7 @@ func TestSessionRevokeCurrentSessionIsAllowed(t *testing.T) {
 }
 
 func TestSessionsRevokeOthers(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookieA, _ := loginSession(t, s, "Agent-A/1.0")
 	cookieB, csrfB := loginSession(t, s, "Agent-B/2.0")
@@ -248,6 +254,7 @@ func TestSessionsRevokeOthers(t *testing.T) {
 // TestSessionMutationsRequireCSRF: the CSRF middleware covers the new routes
 // automatically because they are not public paths.
 func TestSessionMutationsRequireCSRF(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, _ := loginSession(t, s, "Agent-A/1.0")
 	id := currentSessionOf(t, s, cookie).ID
@@ -274,6 +281,7 @@ func TestSessionMutationsRequireCSRF(t *testing.T) {
 // TestSessionRoutesUnauthenticated: mutations without any session are rejected
 // by SessionMiddleware before CSRF handling.
 func TestSessionRoutesUnauthenticated(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 
 	req := testRequest(http.MethodDelete, "/api/sessions/whatever", nil)
@@ -289,6 +297,7 @@ func TestSessionRoutesUnauthenticated(t *testing.T) {
 // TestSessionsRecordLoginIPAndUserAgent: the metadata comes from the login
 // request itself, so the Sessions UI can describe each device.
 func TestSessionsRecordLoginIPAndUserAgent(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 
 	req := testRequest(http.MethodPost, "/api/auth/login", map[string]string{"password": testPassword})

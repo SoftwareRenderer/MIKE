@@ -429,15 +429,37 @@ rm -rf /tmp/kanban-test-data /tmp/kanban-test-data-isolated /tmp/kanban-test-wor
   Neither is on the load list — 10 rounds of the first and 8 of the second, run while a five-package `-race`
   sweep already loaded the machine, came back green.
 
-- **Tests inside a Go package run concurrently now.** `backend/exec` calls `t.Parallel()` in 664 of its
-  top-level tests and the package went 130 s → 43 s; it is `make test-go`'s critical path, so the suite went
-  131 s → 43 s. Serially, 13 tests each paid the 3 s `executorExitGrace` and three more waited out a real
+- **Top-level Go tests in a package run concurrently.** `t.Parallel()` opens 671 of the 706 top-level tests
+  in `backend/exec`, 438 of the 485 in `backend/server`, and 128 of the 136 in `backend/api`. Measured twice
+  each at `-parallel 4` with `go test ./backend/server/ ./backend/api/ -count=1 -parallel 4`, best run:
+  `backend/server` 336 s → 136 s, `backend/api` 67 s → 27 s. The whole scope
+  `go test ./backend/... ./pkg/... . -count=1 -parallel 4` went 183 s → 111 s. `backend/exec` went 130 s →
+  43 s the same way, where 13 tests each paid the 3 s `executorExitGrace` and three more waited out a real
   provider-silence ceiling.
-- **The tests left serial are the ones touching a process global.** `t.Setenv` refuses to run in a parallel
-  test, which is why `bash_stream_test.go` is one file. The other global is the CWD: template resolution reads
-  it on every render (`prompts.resolvePromptDir`). So the 23 exec tests that chdir to the repo root cannot
-  overlap — a concurrent restore moves the CWD mid-turn, and the failure reads
-  "open prompts/summarize.tmpl: no such file or directory". The rule sits at `chdirRepoRoot`.
+- **The parallelized packages hold up under the detector.** `make check-race` over the two went green with no
+  data race at 218 s and 57 s; the only red was `TestTaskOperatingModeRemount`, which this host cannot pass
+  (*A machine that cannot start a container*).
+- **A test left serial names the process state it shares**, and the rule sits where that state is taken, so
+  the callers need no comment of their own.
+  - `t.Setenv` refuses to run in a parallel test. The variables are the process's own: `HOME` decides a file
+    jail (`jailedProjectHandler`, `jailedHostRootServer`), `TMPDIR` decides where an upload is staged
+    (`taskUploadProject`), `MIKE_ENCRYPTION_KEY` decides the golden capture (`setupGoldenFixture`), and
+    `MIKE_ALLOWED_HOSTS` decides Host pinning.
+  - `logging.TestSink()` re-points the process-wide logger, so a test that reads captured lines needs the
+    buffer to itself: 10 of them in `backend/server`, one in `backend/api`.
+  - The working directory is process state too. Template resolution reads it on every render
+    (`prompts.resolvePromptDir`) and `/extensions/` is a CWD-relative `http.Dir`, so the exec prompt tests
+    that chdir keep the rule at `chdirRepoRoot` and `TestExtensionsStatic_NoDirectoryListings` is the server
+    test that calls `t.Chdir`.
+  - A package-level seam or accessor: `previewRand`, `git.SetAuthorIdentity`.
+  - A reading of the process or the host is somebody else's noise: the `runtime.ReadMemStats` deltas behind
+    the size-cap refusals, and the canary path under `/tmp` that a rejected `git show --output=` payload would
+    create.
+  - `TestTaskOperatingModeRemount` starts a real container, so it is machine-bound (*A machine that cannot
+    start a container*) and it queues at the memory gate behind every other start.
+- **A parallel subtest is alive after its parent's cleanup has run**, so a table row calls `t.Parallel()`
+  only where it builds its own server inside the row. Eleven rows do. Every other row runs serially against
+  the parent's fixture, which is what its `t.Cleanup` still owns.
 - **`-parallel 4` in `test-go` is capacity, not a claim about the suite**, and its value is measured: see the
   `backend/stream` entry under *Tests that fail only under load*.
 
@@ -491,6 +513,13 @@ suites, with that error in the log, is a reading about the machine.
   Established: the rollback runs and logs the right path, the surviving tree carries the original
   checkout's mtimes, and `RepairMissingFiles` and the fake podman's fail-once budget are ruled out.
   Unestablished: who leaves the tree behind.
+- **A `backend/exec` turn test goes red in a whole-scope run and green alone.** Three rotated across two
+  `go test ./backend/... ./pkg/... . -count=1 -parallel 4` runs over two trees:
+  `TestPrepareAgentWithBinaryPresentStartsNothingEarly` ("adapter was closed although the task may still
+  start"), `TestManualSummarizePublishesCompressedContextUsed` ("no summarization frame was published") and
+  `TestAbortedStreamIsRetriedAndTheTurnCompletes` ("assistant answer stored 0 times"). No run showed two of
+  them, and the last two came back green alone in 3 s. Unestablished: what closes the adapter or drops the
+  frame.
 - **`backend/server`'s `TestTaskMoveUpdatesUpdatedAt`** was seen failing once, under `make check-race` over
   five packages, and not since: 10 `-count=10 -race` runs on the branch and 10 on `HEAD` came back clean.
   It asserts that two backlog tasks the test never writes come back ordered by `updated_at`, so the likeliest

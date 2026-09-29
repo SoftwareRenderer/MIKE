@@ -13,6 +13,7 @@ import (
 // directory for a link before the parent chain is created, so the write lands where the link
 // points unless parent creation is contained the same way the path was.
 func TestFSWriteRefusesSymlinkedParent(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projectDir := t.TempDir()
 	outside := t.TempDir()
@@ -45,6 +46,7 @@ func TestFSWriteRefusesSymlinkedParent(t *testing.T) {
 // TestFSWriteCreatesNewDirectoriesInsideProject is the control: the walk refuses a link, not a
 // save.
 func TestFSWriteCreatesNewDirectoriesInsideProject(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projectDir := t.TempDir()
 
@@ -66,6 +68,7 @@ func TestFSWriteCreatesNewDirectoriesInsideProject(t *testing.T) {
 // project-scoped write — the server below was built widened, and the write is still jailed to the
 // roots the request resolution named.
 func TestFSWriteIsNotWidenedByAllowRootFS(t *testing.T) {
+	t.Parallel()
 	s := testServerWith(t, func(c *startup.Config) { c.AllowRootFS = true })
 	projectDir := t.TempDir()
 	outside := t.TempDir()

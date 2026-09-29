@@ -36,6 +36,7 @@ func createBareRepo(t *testing.T, path string) {
 // TestRepoNameFromGitURL verifies repository name extraction for both SSH and
 // HTTPS git URLs, plus local paths.
 func TestRepoNameFromGitURL(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		url  string
 		want string
@@ -79,6 +80,7 @@ func testProjectHandlerGranted(t *testing.T) (*ProjectHandler, string) {
 // TestHandleCreateClone verifies that HandleCreate clones a repo into a
 // subdirectory of the target parent and creates the project from it.
 func TestHandleCreateClone(t *testing.T) {
+	t.Parallel()
 	h, _ := testProjectHandlerGranted(t)
 	tmp := t.TempDir()
 	remote := filepath.Join(tmp, "my-remote-repo")
@@ -171,6 +173,7 @@ func readSSEEvents(t *testing.T, body io.Reader) []map[string]any {
 // TestHandleCloneStreamsProgress verifies that HandleClone streams clone
 // progress events and finishes with a done event carrying the new project.
 func TestHandleCloneStreamsProgress(t *testing.T) {
+	t.Parallel()
 	h, _ := testProjectHandlerGranted(t)
 	tmp := t.TempDir()
 	src := makeCommittedRepo(t, filepath.Join(tmp, "my-remote-repo"), 20)
@@ -250,6 +253,7 @@ func TestHandleCloneStreamsProgress(t *testing.T) {
 // TestHandleCloneTargetExists verifies the failure path: a pre-existing
 // target dir yields a terminal error event and no project.
 func TestHandleCloneTargetExists(t *testing.T) {
+	t.Parallel()
 	h, _ := testProjectHandlerGranted(t)
 	tmp := t.TempDir()
 	src := makeCommittedRepo(t, filepath.Join(tmp, "my-remote-repo"), 3)
@@ -284,6 +288,7 @@ func TestHandleCloneTargetExists(t *testing.T) {
 // TestHandleCloneBadURL verifies that an invalid git URL fails fast with an
 // error event (no clone attempted).
 func TestHandleCloneBadURL(t *testing.T) {
+	t.Parallel()
 	h, _ := testProjectHandlerGranted(t)
 	tmp := t.TempDir()
 
@@ -403,6 +408,7 @@ func doSandboxBuildRequest(t *testing.T, mux *http.ServeMux, projectID string) *
 // selected Dockerfile path before triggering a build; otherwise the user sees
 // this exact error.
 func TestHandleSandboxBuildNoDockerfilePath(t *testing.T) {
+	t.Parallel()
 	h, projID := testProjectHandler(t)
 
 	mux := http.NewServeMux()
@@ -420,6 +426,7 @@ func TestHandleSandboxBuildNoDockerfilePath(t *testing.T) {
 // TestBuildWantsNoCache checks that only an explicit truthy ?no_cache value
 // disables the build layer cache; anything else keeps the default cached build.
 func TestBuildWantsNoCache(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		query string
 		want  bool
@@ -451,6 +458,7 @@ func TestBuildWantsNoCache(t *testing.T) {
 // A sandbox image that names no registry ("ubuntu:24.04") breaks every later sandbox start, so it
 // must be refused where it is entered.
 func TestCreateProjectRejectsUnqualifiedSandboxImage(t *testing.T) {
+	t.Parallel()
 	h, _ := testProjectHandler(t)
 	repo := t.TempDir()
 	createBareRepo(t, repo)
@@ -490,6 +498,7 @@ func TestCreateProjectRejectsUnqualifiedSandboxImage(t *testing.T) {
 
 // The update path validates before writing, so a rejected image can't half-update the project.
 func TestUpdateProjectRejectsUnqualifiedSandboxImage(t *testing.T) {
+	t.Parallel()
 	h, projID := testProjectHandler(t)
 	const seeded = "docker.io/library/ubuntu:24.04"
 	if err := h.store.UpdateProjectSandboxImage(projID, seeded); err != nil {
@@ -531,6 +540,7 @@ func TestUpdateProjectRejectsUnqualifiedSandboxImage(t *testing.T) {
 // A forwarded port's bind address is checked only for shape and stored canonicalized:
 // 0.0.0.0 is stored as "", because that is what "every interface" means everywhere else.
 func TestCreateProjectNormalizesForwardPorts(t *testing.T) {
+	t.Parallel()
 	h, _ := testProjectHandler(t)
 	isolation := false
 
@@ -570,6 +580,7 @@ func TestCreateProjectNormalizesForwardPorts(t *testing.T) {
 // A bind address that is not an IP address, or a container port out of range, is refused
 // before anything is written - a rejected PUT must not half-update the settings.
 func TestUpdateProjectValidatesForwardPorts(t *testing.T) {
+	t.Parallel()
 	h, projID := testProjectHandler(t)
 	seeded := []types.PortForward{{ContainerPort: 3000}}
 	if err := h.store.UpdateProjectSandboxForwardPorts(projID, seeded); err != nil {
@@ -616,6 +627,7 @@ func TestUpdateProjectValidatesForwardPorts(t *testing.T) {
 }
 
 func TestApplyPricingBasic(t *testing.T) {
+	t.Parallel()
 	h, projID, s := testProjectHandlerWithStore(t)
 
 	// Create a task with messages
@@ -656,6 +668,7 @@ func TestApplyPricingBasic(t *testing.T) {
 }
 
 func TestApplyPricingWithPower(t *testing.T) {
+	t.Parallel()
 	h, projID := testProjectHandler(t)
 
 	// Create a task with messages (5000ms predicted time)
@@ -704,6 +717,7 @@ func TestApplyPricingWithPower(t *testing.T) {
 }
 
 func TestApplyPricingPowerOnlyNoElectricity(t *testing.T) {
+	t.Parallel()
 	h, projID := testProjectHandler(t)
 
 	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "1",
@@ -748,6 +762,7 @@ func TestApplyPricingPowerOnlyNoElectricity(t *testing.T) {
 }
 
 func TestApplyPricingAgentProviderSkipped(t *testing.T) {
+	t.Parallel()
 	h, projID := testProjectHandler(t)
 
 	createTestTaskWithMessages(t, h.store, projID, "task-1", "agent-model", "my-agent",
@@ -788,6 +803,7 @@ func TestApplyPricingAgentProviderSkipped(t *testing.T) {
 }
 
 func TestApplyPricingMultipleProviders(t *testing.T) {
+	t.Parallel()
 	h, projID := testProjectHandler(t)
 
 	// Task 1: model-a from prov-x (with power)
@@ -866,6 +882,7 @@ func TestApplyPricingMultipleProviders(t *testing.T) {
 // TestApplyPricingModelPricingOverride verifies per-model pricing overrides
 // provider-level defaults when computing API cost.
 func TestApplyPricingModelPricingOverride(t *testing.T) {
+	t.Parallel()
 	h, projID := testProjectHandler(t)
 
 	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "1",
@@ -912,6 +929,7 @@ func TestApplyPricingModelPricingOverride(t *testing.T) {
 // TestApplyPricingModelPowerOverride verifies a per-model power override
 // replaces the provider-level power when computing kWh and electricity cost.
 func TestApplyPricingModelPowerOverride(t *testing.T) {
+	t.Parallel()
 	h, projID := testProjectHandler(t)
 
 	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "1",
@@ -963,6 +981,7 @@ func TestApplyPricingModelPowerOverride(t *testing.T) {
 // fields are set, the remaining fields inherit provider-level defaults, and that
 // a model-level cache_write_price overrides the input rate.
 func TestApplyPricingModelPartialFallback(t *testing.T) {
+	t.Parallel()
 	h, projID := testProjectHandler(t)
 
 	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "1",
@@ -1006,6 +1025,7 @@ func TestApplyPricingModelPartialFallback(t *testing.T) {
 }
 
 func TestApplyPricingJSONSerialization(t *testing.T) {
+	t.Parallel()
 	h, projID := testProjectHandler(t)
 
 	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "1",
@@ -1074,6 +1094,7 @@ func TestApplyPricingJSONSerialization(t *testing.T) {
 // file), even though git itself would honour it on a host that enables
 // protocol.ext.allow.
 func TestHandleCreateCloneRejectsHelperTransport(t *testing.T) {
+	t.Parallel()
 	h, _ := testProjectHandlerGranted(t)
 	tmp := t.TempDir()
 	canary := filepath.Join(tmp, "pwned")
@@ -1101,6 +1122,7 @@ func TestHandleCreateCloneRejectsHelperTransport(t *testing.T) {
 // TestUpdateProjectCommitTrailer: commit_assisted_by is written both ways, and a request that does not
 // mention it leaves the stored answer alone.
 func TestUpdateProjectCommitTrailer(t *testing.T) {
+	t.Parallel()
 	h, projID := testProjectHandler(t)
 	mux := http.NewServeMux()
 	mux.HandleFunc("PUT /api/projects/{projectID}", h.HandleByID)

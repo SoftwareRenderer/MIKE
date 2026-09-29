@@ -26,6 +26,7 @@ func widenHostRoot(s *Server) { s.hostRoot = fsutil.NewHostRoot(true) }
 // The rule that only the exact value "1" produces the widened decision is startup's, and its table of
 // truthy-looking values lives there (startup.TestOptInSwitchesAreTheExactValueOne).
 func TestJailFollowsTheDecisionNotTheEnvironment(t *testing.T) {
+	// Serial: t.Setenv refuses to run in a parallel test, and the variable names the jail decision.
 	s, _, _, _, _ := jailedHostRootServer(t)
 	if s.hostRoot.Unrestricted() {
 		t.Fatal("precondition: this server was built jailed")
@@ -42,6 +43,8 @@ func TestJailFollowsTheDecisionNotTheEnvironment(t *testing.T) {
 // TestStartupIsQuietWhenTheJailIsClosed: a closed jail is the normal state and says nothing about the
 // widening variable.
 func TestStartupIsQuietWhenTheJailIsClosed(t *testing.T) {
+	// Serial: t.Setenv refuses to run in a parallel test, and logging.TestSink re-points the
+	// process-wide logger.
 	s, _, _, _, _ := jailedHostRootServer(t)
 	buf, restore := logging.TestSink()
 	defer restore()
@@ -56,6 +59,8 @@ func TestStartupIsQuietWhenTheJailIsClosed(t *testing.T) {
 // has to be visible in the log rather than discovered when something was reachable that should not
 // have been.
 func TestStartupAnnouncesAWidenedJail(t *testing.T) {
+	// Serial: logging.TestSink re-points the process-wide logger, so a concurrent test’s lines would
+	// land in this buffer.
 	s := testServer(t) // the suite's fixture is widened; its roots are every fixture's temp dir
 	if !s.hostRoot.Unrestricted() {
 		t.Fatal("precondition: the fixture server runs widened")
@@ -73,6 +78,7 @@ func TestStartupAnnouncesAWidenedJail(t *testing.T) {
 // nothing, and the operator hears it once, at boot, from the resolution that made the decision — not
 // from a handler that noticed on the request that happened to look.
 func TestMistypedWideningIsReportedByResolution(t *testing.T) {
+	// Serial for the reason at TestJailFollowsTheDecisionNotTheEnvironment.
 	t.Setenv(startup.EnvEncryptionKey, "a-long-enough-test-key")
 	for _, v := range []string{"true", "yes", "on", "0"} {
 		t.Setenv(fsutil.AllowRootFSEnv, v)
@@ -94,6 +100,7 @@ func TestMistypedWideningIsReportedByResolution(t *testing.T) {
 
 // TestStartupWarnsWhenTheJailResolvesToTheRoot: a home of "/" is a jail that lets everything through.
 func TestStartupWarnsWhenTheJailResolvesToTheRoot(t *testing.T) {
+	// Serial for the reason at TestStartupIsQuietWhenTheJailIsClosed.
 	t.Setenv("HOME", "/")
 	s := testServerWith(t, func(c *startup.Config) { c.AllowRootFS = false })
 	if !s.hostRoot.HasUniversalRoot() {

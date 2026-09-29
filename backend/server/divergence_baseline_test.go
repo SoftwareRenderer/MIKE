@@ -12,6 +12,7 @@ import (
 // merging) gets its diff and commits resolved against the commit where the branch
 // diverged from the main branch — so changes merged into the branch are visible.
 func TestTaskDiffFallbackDivergenceBaseline(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID, dir := createTestProjectWithPath(t, s)
 
@@ -111,6 +112,7 @@ func TestTaskDiffFallbackDivergenceBaseline(t *testing.T) {
 // Edit Task for a separate exploration branch) — falls back to the divergence
 // point, so merged changes stay visible.
 func TestTaskDiffUnusableBaselineFallsBack(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		baseRef string
@@ -120,6 +122,7 @@ func TestTaskDiffUnusableBaselineFallsBack(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			s := testServer(t)
 			projID, dir := createTestProjectWithPath(t, s)
 

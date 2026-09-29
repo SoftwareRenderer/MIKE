@@ -19,6 +19,7 @@ func captureLog(t *testing.T) *logging.SafeBuffer {
 }
 
 func TestClassifyTrustFailure(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		msg       string
@@ -101,6 +102,8 @@ func TestClassifyTrustFailure(t *testing.T) {
 // A device without the CA retries every request; only the first failure per
 // host may be logged, and it must carry the hint (the CA path).
 func TestTLSTrustNoiseFilterReportsOncePerHost(t *testing.T) {
+	// Serial: logging.TestSink re-points the process-wide logger, so a concurrent test’s lines would
+	// land in this buffer.
 	buf := captureLog(t)
 	f := &tlsTrustNoiseFilter{caFile: "/data/tls/mike-ca.crt", seen: map[string]bool{}}
 
@@ -140,6 +143,7 @@ func TestTLSTrustNoiseFilterReportsOncePerHost(t *testing.T) {
 // exactly, which is where "byte-for-byte" still means something. Multi-line panic traces matter
 // here: the handler quotes them, so an unquoted Contains would pass on mangled text.
 func TestTLSTrustNoiseFilterPassesThrough(t *testing.T) {
+	// Serial for the reason at TestTLSTrustNoiseFilterReportsOncePerHost.
 	buf := captureLog(t)
 	f := &tlsTrustNoiseFilter{caFile: "/data/tls/mike-ca.crt", seen: map[string]bool{}}
 
@@ -168,6 +172,7 @@ func TestTLSTrustNoiseFilterPassesThrough(t *testing.T) {
 // The remembered-host set is bounded; past the cap noise is still suppressed,
 // it just stops producing hints for new hosts.
 func TestTLSTrustNoiseFilterCapsReports(t *testing.T) {
+	// Serial for the reason at TestTLSTrustNoiseFilterReportsOncePerHost.
 	buf := captureLog(t)
 	f := &tlsTrustNoiseFilter{seen: map[string]bool{}}
 

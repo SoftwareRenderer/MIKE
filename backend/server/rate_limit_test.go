@@ -11,6 +11,7 @@ import (
 )
 
 func TestRateLimitMiddleware_AllowsUnderLimit(t *testing.T) {
+	t.Parallel()
 	// Create a rate limiter that allows 3 requests per 100ms
 	limiter := NewRateLimiter(3, 100*time.Millisecond)
 
@@ -31,6 +32,7 @@ func TestRateLimitMiddleware_AllowsUnderLimit(t *testing.T) {
 }
 
 func TestRateLimitMiddleware_BlocksOverLimit(t *testing.T) {
+	t.Parallel()
 	// Create a rate limiter that allows only 1 request per 50ms
 	limiter := NewRateLimiter(1, 50*time.Millisecond)
 
@@ -61,6 +63,7 @@ func TestRateLimitMiddleware_BlocksOverLimit(t *testing.T) {
 }
 
 func TestRateLimitMiddleware_IPBased(t *testing.T) {
+	t.Parallel()
 	// Each IP gets its own bucket
 	limiter := NewRateLimiter(2, 50*time.Millisecond)
 
@@ -99,6 +102,7 @@ func TestRateLimitMiddleware_IPBased(t *testing.T) {
 }
 
 func TestRateLimitMiddleware_WaitsAfterWindow(t *testing.T) {
+	t.Parallel()
 	// Create a rate limiter that allows 1 request per 20ms
 	limiter := NewRateLimiter(1, 20*time.Millisecond)
 
@@ -135,6 +139,7 @@ func TestRateLimitMiddleware_WaitsAfterWindow(t *testing.T) {
 }
 
 func TestRateLimitMiddleware_LoginEndpoint(t *testing.T) {
+	t.Parallel()
 	// A tight budget for this test alone: the suite runs with an effectively unlimited one so that
 	// unrelated tests can log in repeatedly.
 	s := testServerWith(t, func(c *startup.Config) { c.LoginRateLimit = 5 })
@@ -168,6 +173,7 @@ func TestRateLimitMiddleware_LoginEndpoint(t *testing.T) {
 const trustProxyForTest = false
 
 func TestClientIP_IgnoresXFFByDefault(t *testing.T) {
+	t.Parallel()
 	// By default the client-supplied X-Forwarded-For header must NOT be trusted,
 	// otherwise an attacker can spoof it to bypass IP-based rate limiting.
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
@@ -179,6 +185,7 @@ func TestClientIP_IgnoresXFFByDefault(t *testing.T) {
 }
 
 func TestClientIP_UsesTheAddressTheTrustedProxyAppended(t *testing.T) {
+	t.Parallel()
 	// A proxy appends, so everything left of the last entry is what the client wrote. Keying the
 	// limit on the first entry let a caller buy a fresh login budget per attempt.
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
@@ -190,6 +197,7 @@ func TestClientIP_UsesTheAddressTheTrustedProxyAppended(t *testing.T) {
 }
 
 func TestClientIP_CanonicalisesTheForwardedAddress(t *testing.T) {
+	t.Parallel()
 	// One client must not buy two budgets by spelling its address differently.
 	for _, written := range []string{"FE80::1", "fe80:0:0:0:0:0:0:1", " fe80::1 "} {
 		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
@@ -202,6 +210,7 @@ func TestClientIP_CanonicalisesTheForwardedAddress(t *testing.T) {
 }
 
 func TestClientIP_ChainThatDoesNotEndInAnAddressUsesThePeer(t *testing.T) {
+	t.Parallel()
 	// Scanning left for a parseable entry would be the bypass again.
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
 	req.RemoteAddr = "10.0.0.1:54321"
@@ -212,6 +221,7 @@ func TestClientIP_ChainThatDoesNotEndInAnAddressUsesThePeer(t *testing.T) {
 }
 
 func TestRateLimitMiddleware_XFFCannotBypassATrustedProxyLimit(t *testing.T) {
+	t.Parallel()
 	// The brute-force shape behind a proxy: rotate the entry the client writes, keep the one the
 	// proxy appends. All attempts share one budget.
 	limiter := NewRateLimiter(2, time.Minute)
@@ -238,6 +248,7 @@ func TestRateLimitMiddleware_XFFCannotBypassATrustedProxyLimit(t *testing.T) {
 }
 
 func TestClientIP_FallsBackToRemoteAddr(t *testing.T) {
+	t.Parallel()
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
 	req.RemoteAddr = "192.0.2.55:4444"
 	if got := clientIP(req, trustProxyForTest); got != "192.0.2.55" {
@@ -246,6 +257,7 @@ func TestClientIP_FallsBackToRemoteAddr(t *testing.T) {
 }
 
 func TestRateLimitMiddleware_XFFCannotBypassByDefault(t *testing.T) {
+	t.Parallel()
 	// A client rotating X-Forwarded-For must not be able to bypass the limit
 	// when proxy trust is disabled.
 	limiter := NewRateLimiter(2, time.Minute)
@@ -275,6 +287,7 @@ func TestRateLimitMiddleware_XFFCannotBypassByDefault(t *testing.T) {
 // refuses such a value at resolution (startup.TestLoginRateLimitCannotBeDisabled); the constructor
 // falling back too is what keeps a hand-built limiter from being an unlimited one.
 func TestNewLoginRateLimiterCannotBeDisabled(t *testing.T) {
+	t.Parallel()
 	for _, budget := range []int{0, -1, -100} {
 		rl := newLoginRateLimiter(budget)
 		if rl == nil {
@@ -291,6 +304,7 @@ func TestNewLoginRateLimiterCannotBeDisabled(t *testing.T) {
 }
 
 func TestNewLoginRateLimiterHonoursValidValue(t *testing.T) {
+	t.Parallel()
 	rl := newLoginRateLimiter(17)
 	defer rl.Stop()
 	if rl.limit != 17 {
@@ -301,6 +315,7 @@ func TestNewLoginRateLimiterHonoursValidValue(t *testing.T) {
 // TestLoginRouteRateLimitedWithZeroBudget is the end-to-end regression for the
 // "0 disables it" behaviour: the login route must still answer 429.
 func TestLoginRouteRateLimitedWithZeroBudget(t *testing.T) {
+	t.Parallel()
 	s := testServerWith(t, func(c *startup.Config) { c.LoginRateLimit = 0 })
 
 	limited := false

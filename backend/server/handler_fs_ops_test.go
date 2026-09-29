@@ -88,6 +88,7 @@ func fsOpsGitRepo(t *testing.T, s *Server, id string, files map[string]string) s
 }
 
 func TestFSDeleteRemovesFilesAndDirectories(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	repo := fsOpsProject(t, s, "fs-ops-del", map[string]string{
 		"a.txt":          "a",
@@ -116,6 +117,7 @@ func TestFSDeleteRemovesFilesAndDirectories(t *testing.T) {
 }
 
 func TestFSDeleteRefusesTreeRootsAndGitPaths(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	repo := fsOpsProject(t, s, "fs-ops-del-root", map[string]string{
 		"a.txt":       "a",
@@ -147,6 +149,7 @@ func TestFSDeleteRefusesTreeRootsAndGitPaths(t *testing.T) {
 }
 
 func TestFSDeleteStaysInsideTheProject(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	repo := fsOpsProject(t, s, "fs-ops-del-escape", map[string]string{"a.txt": "a"})
 	outside := t.TempDir()
@@ -178,6 +181,7 @@ func TestFSDeleteStaysInsideTheProject(t *testing.T) {
 // TestFSDeleteRefusesWorktreeGitPointer: a worktree's .git is a pointer file, and deleting it
 // breaks every worktree of the repository.
 func TestFSDeleteRefusesWorktreeGitPointer(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := "fs-ops-del-pointer"
 	fsOpsGitRepo(t, s, projID, map[string]string{"f.txt": "base"})
@@ -200,6 +204,7 @@ func TestFSDeleteRefusesWorktreeGitPointer(t *testing.T) {
 }
 
 func TestFSCopyAutoRenamesAndReportsIt(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	repo := fsOpsProject(t, s, "fs-ops-copy", map[string]string{
 		"report.txt":      "one",
@@ -229,6 +234,7 @@ func TestFSCopyAutoRenamesAndReportsIt(t *testing.T) {
 }
 
 func TestFSCopyIntoAnotherFolder(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	repo := fsOpsProject(t, s, "fs-ops-copy-dir", map[string]string{
 		"note.md":   "note",
@@ -251,6 +257,7 @@ func TestFSCopyIntoAnotherFolder(t *testing.T) {
 }
 
 func TestFSMoveStaysInsideTheProject(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	repo := fsOpsProject(t, s, "fs-ops-move-escape", map[string]string{"a.txt": "a"})
 	outside := t.TempDir()
@@ -276,6 +283,7 @@ func TestFSMoveStaysInsideTheProject(t *testing.T) {
 // TestFSMoveRefusesBeforeTouchingAnything: one path outside the project refuses the whole request,
 // so a move never lands half-done.
 func TestFSMoveRefusesBeforeTouchingAnything(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	repo := fsOpsProject(t, s, "fs-ops-atomic", map[string]string{"one.txt": "1", "two.txt": "2"})
 	other := t.TempDir()
@@ -296,6 +304,7 @@ func TestFSMoveRefusesBeforeTouchingAnything(t *testing.T) {
 }
 
 func TestFSMoveIntoItsOwnFolderChangesNothing(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	repo := fsOpsProject(t, s, "fs-ops-move-here", map[string]string{"a.txt": "a"})
 
@@ -317,6 +326,7 @@ func TestFSMoveIntoItsOwnFolderChangesNothing(t *testing.T) {
 // TestFSMoveBetweenCheckoutAndWorktree: a request naming a task may touch the project checkout and
 // that task's worktree, so moving a file between them is allowed.
 func TestFSMoveBetweenCheckoutAndWorktree(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	projID := "fs-ops-wt-move"
 	repo := fsOpsGitRepo(t, s, projID, map[string]string{"seed.txt": "seed", "notes.md": "notes"})
@@ -344,6 +354,7 @@ func TestFSMoveBetweenCheckoutAndWorktree(t *testing.T) {
 // TestFSMoveNeedsItsOwnTask: a task belonging to another project cannot point this request at its
 // worktree.
 func TestFSMoveNeedsItsOwnTask(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	repo := fsOpsProject(t, s, "fs-ops-foreign", map[string]string{"a.txt": "a"})
 	fsOpsProject(t, s, "fs-ops-other", map[string]string{"b.txt": "b"})
@@ -359,6 +370,7 @@ func TestFSMoveNeedsItsOwnTask(t *testing.T) {
 }
 
 func TestFSRename(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	repo := fsOpsProject(t, s, "fs-ops-rename", map[string]string{"old.txt": "body", "taken.txt": "t"})
 
@@ -393,6 +405,7 @@ func TestFSRename(t *testing.T) {
 }
 
 func TestFSRenameStaysInsideTheProject(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	repo := fsOpsProject(t, s, "fs-ops-rename-escape", map[string]string{"a.txt": "a"})
 	outside := t.TempDir()
@@ -411,6 +424,7 @@ func TestFSRenameStaysInsideTheProject(t *testing.T) {
 }
 
 func TestFSCopyRefusesOversizedFile(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	repo := fsOpsProject(t, s, "fs-ops-big", map[string]string{"small.txt": "small"})
 	big := filepath.Join(repo, "big.bin")
@@ -436,6 +450,7 @@ func TestFSCopyRefusesOversizedFile(t *testing.T) {
 }
 
 func TestFSOpsRequestShape(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	repo := fsOpsProject(t, s, "fs-ops-shape", map[string]string{"a.txt": "a"})
 	repoFile := filepath.Join(repo, "a.txt")

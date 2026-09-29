@@ -23,6 +23,7 @@ var noncePattern = regexp.MustCompile(`nonce="([^"]+)"`)
 
 // A constant nonce is a published CSP bypass, so "/" carries a fresh one per request.
 func TestRootServesTheInjectedDocumentWithItsOwnNonce(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 
 	first := staticGet(t, s, "/")
@@ -51,6 +52,7 @@ func TestRootServesTheInjectedDocumentWithItsOwnNonce(t *testing.T) {
 }
 
 func TestAssetServedFromTheInjectedTree(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 
 	rr := staticGet(t, s, "/assets/app-12345678.js")
@@ -67,6 +69,7 @@ func TestAssetServedFromTheInjectedTree(t *testing.T) {
 
 // An index of the asset directory hands an unauthenticated caller every chunk the build made.
 func TestAssetDirectoryIsNotListed(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 
 	rr := staticGet(t, s, "/assets/")
@@ -80,6 +83,7 @@ func TestAssetDirectoryIsNotListed(t *testing.T) {
 
 // An empty 200 would boot a blank page the client then caches.
 func TestRootRefusesWhenTheDocumentIsAbsent(t *testing.T) {
+	t.Parallel()
 	s := testServerWithAssets(t, fstest.MapFS{}, nil)
 
 	rr := staticGet(t, s, "/")
@@ -93,6 +97,7 @@ func TestRootRefusesWhenTheDocumentIsAbsent(t *testing.T) {
 
 // A wrong verb on an API path is the mux's refusal, not the application document.
 func TestSPAServesNothingToAWrongVerbOnAnAPIPath(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 
 	rr := staticGet(t, s, "/api/projects/p1/tasks/t1/start")
@@ -114,6 +119,7 @@ func routerResponse(t *testing.T, s *Server, req *http.Request) *httptest.Respon
 
 // The 405 and its Allow header stay the mux's answer with the frontend behind it.
 func TestMuxRefusesAnUnregisteredVerbWhileTheSPAServes(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	cookie, csrf := loginTestCSRF(t, s)
 
@@ -130,6 +136,7 @@ func TestMuxRefusesAnUnregisteredVerbWhileTheSPAServes(t *testing.T) {
 
 // The SPA is a construction requirement, not a route that may be missing.
 func TestServerRefusesNoAssetsAtAll(t *testing.T) {
+	t.Parallel()
 	if _, err := NewServer(startup.Config{}, nil, nil); err == nil {
 		t.Fatal("NewServer with no assets: got a server, want an error")
 	}

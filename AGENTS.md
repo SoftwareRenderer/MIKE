@@ -149,6 +149,9 @@ python3 scripts/gen-registry.py --check                  # registry.json matches
   behind every other worker. Specs on the global view must not.
 - **`[role="dialog"]` is never a unique locator** — filter by content.
 - Go tests are deterministic: `testServer(t)` for an isolated server, `t.TempDir()` for files, no network.
+- **A new top-level Go test opens with `t.Parallel()`** unless it takes process state — an environment
+  variable, the working directory, the log sink, a package-level seam. Those stay serial and say which.
+  The families and the timings: `docs/testing.md`.
 - A frontend test file that imports a module using Svelte compiler macros (`$state`, `$derived`, `$effect`)
   **must** be `.svelte.ts` (or `.unit.svelte.ts`); plain `.ts` does not see the macros.
 - The e2e harness must leave nothing behind — verify processes, ports and `/tmp` state after touching
