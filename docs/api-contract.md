@@ -167,6 +167,20 @@ does: `POST /api/projects/{projectID}/tasks/{taskID}/memory-alert-ack`. All thre
 an ack covering less than the alert dismissed would leave it standing on the device that did not click —
 and each is a 400 naming itself when absent, wrongly typed, or negative.
 
+## Prioritizing a task that waits for a slot
+
+`POST /api/projects/{projectID}/tasks/{taskID}/prioritize` moves that task to the front of the provider
+queue it is waiting in for a running-task slot, and answers `{"promoted": true|false}`. The false is the
+queue's answer, not a fault: the task may already hold its slot, or wait on the memory budget, which no
+click reorders. `backend/api/task.go:HandlePrioritize` reads the queue through
+`exec.TaskExecutor.PrioritizeQueuedTask`, which knows a task's waiter only while that wait lasts — the
+queue lives in memory, so a restart returns it to arrival order and no column records the request.
+Nothing is broadcast: the queue position the task's own stream reports every second is what tells every
+open tab what changed, which is also why the client offers the button only for the wait this route can
+answer. Tests: `TestTaskGate_PrioritizeRunsTheQueuedTaskFirst`, `TestPromote_ServesThePromotedWaiterNext`,
+`TestPrioritizeAnswersWhetherTheTaskIsQueued`, and the client's rule for which wait may ask in
+`frontend/src/lib/utils/queue-priority.ts`.
+
 ## Route verbs
 
 Every `/api` route declares its verb in the pattern (`s.mux.HandleFunc("POST /api/…")`), so the mux

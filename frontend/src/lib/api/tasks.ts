@@ -428,3 +428,15 @@ export async function compactTask(projectId: string, taskId: string): Promise<{ 
     if (!res.ok) throw await apiError(res, t('api.compactTask'));
     return res.json();
 }
+
+/**
+ * Put this task first in the provider queue it is waiting for a running-task slot in. False means it is
+ * not waiting there — it holds its slot already, or waits on a queue no click reorders. Not queued for
+ * replay: a reorder of a queue this server keeps in memory is worth nothing after a restart.
+ */
+export async function prioritizeTask(projectId: string, taskId: string): Promise<boolean> {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/prioritize`, { method: 'POST' });
+    if (!res.ok) throw await apiError(res, t('api.prioritizeTask'));
+    const body = (await res.json()) as { promoted?: boolean };
+    return body.promoted === true;
+}

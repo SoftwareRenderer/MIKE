@@ -1,6 +1,20 @@
-import { describe, it, expect } from 'vitest';
-import { render } from '@testing-library/svelte';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, cleanup, fireEvent, waitFor } from '@testing-library/svelte';
 import QueueIndicator from '$lib/components/Chat/QueueIndicator.svelte';
+import { prioritizeTask } from '$lib/api';
+
+vi.mock('$lib/api', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('$lib/api')>()),
+    prioritizeTask: vi.fn(async () => false),
+}));
+
+// Each render lands in document.body, and the queries a render hands back search that whole element.
+afterEach(cleanup);
+
+beforeEach(() => {
+    vi.mocked(prioritizeTask).mockReset();
+    vi.mocked(prioritizeTask).mockResolvedValue(false);
+});
 
 // One line, several possible reasons, most specific wins — and {seconds} comes out filled in.
 
@@ -66,5 +80,75 @@ describe('QueueIndicator lock wait', () => {
         const shown = text();
         expect(shown).toContain('Awaiting');
         expect(shown).not.toContain('busy');
+    });
+});
+
+// The button that asks to go first. Whether the wait is the one this offers is decided upstream
+// (`$lib/utils/queue-priority.ts`); what lives here is that it shows only when told to, and what its
+// answer looks like while the request is out, after a yes, and after a no.
+describe('QueueIndicator prioritize button', () => {
+    const queued = { queuePosition: 3, queueEstimatedWait: 20, canPrioritize: true, projectId: 'p1', taskId: 't1' };
+    const LABEL = 'Prioritize this task';
+
+    it('sits beside the position when the wait is a slot wait', () => {
+        const { getByRole } = render(QueueIndicator, { ...base, ...queued });
+        expect(getByRole('button', { name: LABEL })).toBeTruthy();
+    });
+
+    it('is not there when the wait is not a slot wait', () => {
+        const { queryByRole } = render(QueueIndicator, { ...base, ...queued, canPrioritize: false });
+        expect(queryByRole('button')).toBeNull();
+    });
+
+    it('needs the task it would speak for', () => {
+        const noIds = render(QueueIndicator, { ...base, ...queued, projectId: '', taskId: '' });
+        expect(noIds.queryByRole('button')).toBeNull();
+    });
+
+    it('says what the server answered and keeps saying the position it moved', async () => {
+        vi.mocked(prioritizeTask).mockResolvedValueOnce(true);
+        const { container, getByRole } = render(QueueIndicator, { ...base, ...queued });
+
+        fireEvent.click(getByRole('button', { name: LABEL }));
+
+        await waitFor(() => expect(container.textContent).toContain('Moved to the front of the queue'));
+        expect(container.textContent).toContain('position 3');
+        expect(container.querySelector('button')).toBeNull();
+    });
+
+    it('leaves the button standing when the server says the task is not waiting for a slot', async () => {
+        vi.mocked(prioritizeTask).mockResolvedValueOnce(false);
+        const { container, getByRole } = render(QueueIndicator, { ...base, ...queued });
+
+        fireEvent.click(getByRole('button', { name: LABEL }));
+        await waitFor(() => expect(prioritizeTask).toHaveBeenCalledWith('p1', 't1'));
+
+        expect(container.textContent).not.toContain('Moved to the front');
+        expect(getByRole('button', { name: LABEL })).toBeTruthy();
+    });
+
+    it('leaves the button standing when the call itself fails', async () => {
+        vi.mocked(prioritizeTask).mockRejectedValueOnce(new Error('offline'));
+        const { container, getByRole } = render(QueueIndicator, { ...base, ...queued });
+
+        fireEvent.click(getByRole('button', { name: LABEL }));
+        await waitFor(() => expect(prioritizeTask).toHaveBeenCalled());
+
+        expect(container.textContent).not.toContain('Moved to the front');
+        expect(getByRole('button', { name: LABEL })).toBeTruthy();
+    });
+
+    it('is offered again for the next wait, because the answer belongs to one wait', async () => {
+        vi.mocked(prioritizeTask).mockResolvedValueOnce(true);
+        const { container, getByRole, rerender } = render(QueueIndicator, { ...base, ...queued });
+
+        fireEvent.click(getByRole('button', { name: LABEL }));
+        await waitFor(() => expect(container.textContent).toContain('Moved to the front of the queue'));
+
+        // The slot arrived, then a later turn queued this task again.
+        await rerender({ ...base, ...queued, queuePosition: 0 });
+        await rerender({ ...base, ...queued, queuePosition: 2 });
+
+        expect(getByRole('button', { name: LABEL })).toBeTruthy();
     });
 });

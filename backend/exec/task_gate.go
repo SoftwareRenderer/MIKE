@@ -1,6 +1,8 @@
 package exec
 
 import (
+	"sync"
+
 	"mike/backend/store"
 	"strings"
 
@@ -20,6 +22,41 @@ import (
 // on unfinished subtasks (MoveTask), or a subtask under a started parent that the user has not
 // started (types.SubtaskStatusFor). Nothing may rest in in_progress+idle — check those four cases
 // before adding a writer.
+
+// queuedWaiters records which provider task-slot queue entry each task is blocked behind, so a request
+// can reach the waiter a task is sitting on. An entry is recorded when the gate enqueues it and dropped
+// when that wait ends, so "queued" here and "queued" in the gate are the same fact, read a moment apart.
+type queuedWaiters struct {
+	mu    sync.Mutex
+	entry map[string]*queueEntry
+}
+
+// set records e as the waiter taskID is blocked behind.
+func (w *queuedWaiters) set(taskID string, e *queueEntry) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.entry == nil {
+		w.entry = make(map[string]*queueEntry)
+	}
+	w.entry[taskID] = e
+}
+
+// clear drops taskID's registration, but only while e is what is recorded there. A superseded run whose
+// wait ends late must not unregister the run that replaced it.
+func (w *queuedWaiters) clear(taskID string, e *queueEntry) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.entry[taskID] == e {
+		delete(w.entry, taskID)
+	}
+}
+
+// get returns the waiter taskID is blocked behind, or nil when it is not waiting for a slot.
+func (w *queuedWaiters) get(taskID string) *queueEntry {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.entry[taskID]
+}
 
 // acquireTaskSlot blocks until a running-task slot for providerURL is granted or the
 // execution context is cancelled (which returns false). While waiting the task reads as
@@ -43,9 +80,16 @@ func (te *TaskExecutor) acquireTaskSlot(setup *taskExecSetup, providerURL string
 	onEnqueued, queueDone := te.startGateQueuePoller(te.taskGate, providerURL, setup.projectID, setup.task.ID, setup.ctx)
 	defer close(queueDone)
 
+	// The same hand-off also records where a prioritize request can find this task's waiter.
+	entry, err := te.taskGate.Acquire(setup.ctx, providerURL, concurrency, 0, func(e *queueEntry) {
+		te.taskSlotWaits.set(setup.task.ID, e)
+		onEnqueued(e)
+	})
+	defer te.taskSlotWaits.clear(setup.task.ID, entry)
+
 	// A task start is not an LLM request start — RPS is enforced at request
 	// time by the per-request gate, so maxRPS = 0 here.
-	if _, err := te.taskGate.Acquire(setup.ctx, providerURL, concurrency, 0, onEnqueued); err != nil {
+	if err != nil {
 		return false
 	}
 
@@ -66,6 +110,15 @@ func (te *TaskExecutor) releaseTaskSlot(setup *taskExecSetup) {
 	}
 	te.taskGate.Release(setup.taskSlotURL)
 	setup.taskSlotURL = ""
+}
+
+// PrioritizeQueuedTask moves a task waiting for a provider running-task slot to the front of that queue,
+// so the next slot the provider frees is its caller's. One shot: the reorder covers the wait it lands
+// during, and a later wait by the same task queues normally. It returns false when the task is not
+// waiting for a slot — running, waiting on the memory budget, or not started — which is an answer about
+// the queue, not a fault.
+func (te *TaskExecutor) PrioritizeQueuedTask(taskID string) bool {
+	return te.taskGate.Promote(te.taskSlotWaits.get(taskID))
 }
 
 // memoryReserveMB is what the memory budget reserves for one sandboxed task: the limit its project

@@ -33,6 +33,7 @@ var detachedOperations = []sideEffectEntry{
 	{"POST /api/projects/{projectID}/tasks/{taskID}/start-subtask", "same, and the parent's started-but-pending state depends on the child finishing"},
 	{"POST /api/projects/{projectID}/tasks/{taskID}/resume", "restarts a turn on the existing conversation tree; a half-applied restart is a task stuck in running with no executor"},
 	{"POST /api/projects/{projectID}/tasks/{taskID}/stop", "the transition itself is the result: a stopped task must not be left reading as running"},
+	{"POST /api/projects/{projectID}/tasks/{taskID}/prioritize", "reorders the in-memory provider task-slot queue; the reorder stands whatever the tab does, and it writes nothing"},
 	{"POST /api/projects/{projectID}/tasks/{taskID}/commit", "commits, merges and marks done; nothing may be half-merged"},
 	{"POST /api/projects/{projectID}/tasks/{taskID}/threads/fork", "creates a branch and a checkpoint set"},
 	{"POST /api/projects/{projectID}/tasks/{taskID}/threads/switch", "restores the target thread's checkpoint into the worktree"},
