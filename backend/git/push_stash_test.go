@@ -27,6 +27,7 @@ func seedUserStash(t *testing.T, wm *WorktreeManager, repoDir string) string {
 }
 
 func TestPushStashReturnsTheEntryItCreated(t *testing.T) {
+	t.Parallel()
 	repoDir, _, _, _, _, wm := setupStashTest(t)
 	userHash := seedUserStash(t, wm, repoDir)
 
@@ -55,6 +56,7 @@ func TestPushStashReturnsTheEntryItCreated(t *testing.T) {
 // A clean worktree makes `git stash push` exit successfully without creating anything. That is not a saved
 // state, and the entry already in the list is not ours.
 func TestPushStashWithNothingToStashNamesNoEntry(t *testing.T) {
+	t.Parallel()
 	repoDir, _, _, _, _, wm := setupStashTest(t)
 	userHash := seedUserStash(t, wm, repoDir)
 
@@ -73,6 +75,7 @@ func TestPushStashWithNothingToStashNamesNoEntry(t *testing.T) {
 // Why git refused has to survive into the error: it is what the user is shown when a switch or a fork is
 // refused. A lock held by another git process is the ordinary way this happens.
 func TestPushStashCarriesGitReason(t *testing.T) {
+	t.Parallel()
 	repoDir, _, _, _, _, wm := setupStashTest(t)
 	writeFile(t, repoDir, "task.txt", "in-flight work\n")
 

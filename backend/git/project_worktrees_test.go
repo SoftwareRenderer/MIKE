@@ -10,6 +10,7 @@ import (
 // its directory, so only this removal takes the project's directory itself.
 
 func TestRemoveProjectWorktreesTakesTheWholeProjectDirectory(t *testing.T) {
+	t.Parallel()
 	_, taskID, _, _, wm := setupTestRepo(t)
 
 	worktreePath, _, err := wm.CreateWorktree("test-project", taskID, "task/"+taskID, "")

@@ -35,6 +35,7 @@ func conflictedWorktree(t *testing.T, wm *WorktreeManager, repoDir, projID, task
 }
 
 func TestStageIndexedFilesLeavesAnUnmergedFileUnmerged(t *testing.T) {
+	t.Parallel()
 	repoDir, projID, _, s, _, wm := setupStashTest(t)
 	const taskID = "unmerged-stage-one"
 	// StageIndexedFiles takes a task, so the row must exist.
