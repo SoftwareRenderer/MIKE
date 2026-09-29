@@ -225,6 +225,28 @@ vitest at 252.89 s, and its `types` slot cost 1.15 s — the compile had already
 which is what `make check` looks like. That lane's `test-go` row (145.38 s, exit 2) is the host facts above:
 `backend/extensions`, `backend/git` and the suites that create a container.
 
+### 2026-09-29 — the iteration lane, three edit shapes
+
+Run `2026-09-29T122749Z` priced one whole `make check` (`-i`, so every step ran) at **347.73 s**, and the
+twelve sub-gates at 369.34 s when each runs alone: `test-frontend` 194.66, `test-go` 147.47 (exit 2, the host
+facts), `lint` 12.36, `docs-check` 4.58, `check-release` 2.50, `test-archgate` 2.41, `archgate` 1.52, `build`
+1.24, `test-docs-check` 0.93, `bridge-check` 0.74, `svelte-check` 0.62, `check-unused` 0.31.
+
+`make check-fast` has no lane in the instrument, because what it costs is a function of what the tree
+touched. These rows are its own summary wall clock — the same script prints it — on that warm tree.
+
+| seconds | the tree | what ran |
+|---|---|---|
+| 15.82 | one `.go` file in `backend/store` | gofmt, the full-scope build, `go vet` and `go test` of `./backend/store/`, the three gates |
+| 7.85 | that file again, second run | the same steps, with `go test` answered from the result cache in 0.27 s against 7.98 s |
+| 33.51 | one file under `frontend/src` | the build, `test:related` (16.07 s), the typecheck compile (10.34 s), the three gates |
+| 23.38 | that file again, second run | the same steps, with the typecheck compile read from its cache in 0.25 s |
+| 7.31 | nothing | the build and the three gates; every other step printed its skip reason |
+
+The floor under all five rows is `docs-check` + `archgate` + `bridge-check` + the build, and no edit shape
+escapes it. `npx vitest related --run src/lib/utils/task-utils.ts` measured 16.64 s for 15 files and 146
+tests, of which the tests are 1.91 s: the frontend lane's cost is vitest's start-up.
+
 ## E2E conventions
 - Descriptive spec filenames in `frontend/tests/e2e/`; shared helpers in `helpers.ts`.
 - `test.describe.serial()` when tests share state; unique identifiers (`Date.now()`) to avoid
@@ -692,6 +714,10 @@ rm -rf /tmp/kanban-test-data /tmp/kanban-test-data-isolated /tmp/kanban-test-wor
 
 ### Running less than the gate
 
+- **`make check-fast` is the lane between edits**, and `scripts/check-fast.sh` is the mechanism. It is
+  `make test-diff` and `npm run test:related` composed with the `make check` sub-gates that cost seconds.
+  Every step runs whatever an earlier one decided, then one table prints step, seconds and exit. A step with
+  nothing to check prints its reason there rather than reading green.
 - `make test-diff` runs the Go packages holding a changed `.go` file — staged, unstaged or untracked — and
   leaves `go test`'s result cache **on**, which is the saving. It builds `GO_SCOPE` first: it runs no
   dependent of a changed package, so a signature change is caught by that build and not by a test. The list
@@ -700,6 +726,33 @@ rm -rf /tmp/kanban-test-data /tmp/kanban-test-data-isolated /tmp/kanban-test-wor
   files: 329 tests in 8 s, against 3227 in 36 s for the suite.
 - `npx playwright test --last-failed` re-runs the previous run's failures, `--only-changed` the files git
   says moved. Neither is a gate: `make check` and a full e2e run stay the claims.
+
+What the lane runs, in the order it runs it:
+
+| step | what it asks about |
+|---|---|
+| `gofmt` | `gofmt -l` over the changed `.go` files, listed by `scripts/touched-packages.sh files` |
+| `build` | `go build` over `GO_SCOPE`, always: this lane tests no dependent of a changed package |
+| `vet`, `go test` | the packages holding a change, listed by `scripts/touched-packages.sh`, cache left on |
+| `vitest related` | `npm run test:related -- <changed files>`, listed by `scripts/touched-frontend-files.sh` |
+| `typecheck` | one `npm run check` compile — whole-tree and content-cached, since svelte-check has no per-file mode |
+| three gates | `archgate`, `docs-check`, `bridge-check` |
+
+What it cannot catch, widest first:
+
+- **the tests of a package that merely imports a changed one.** The full-scope build reports its compile
+  errors; only `make test-go` reports its behaviour.
+- **a lane that skipped itself.** No file under `frontend/` changed means no typecheck, and that compile is
+  whole-tree, so a type error in an untouched frontend file survives a Go-only edit. One changed file
+  anywhere under `frontend/`, other than the `tests/` and `dist/` the script excludes, runs it over
+  everything.
+- **`make lint` past gofmt** — staticcheck and deadcode — plus gofmt over a file nobody edited; the frontend
+  cleanliness gates and knip (`make test-frontend`); the `-tags release` variant (`make check-release`);
+  the e2e suite; and every race (`make check-race`).
+- **the gates' own self-tests**, `make test-archgate` and `make test-docs-check`.
+
+**`make check` stays the only claim of done.** A green lane is a statement about the files its summary table
+names, and nothing else.
 
 ### Memory in a test
 

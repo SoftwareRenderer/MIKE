@@ -201,6 +201,14 @@ lint: ## gofmt + scoped vet + staticcheck (all checks) + deadcode (every root)
 	@echo "==> deadcode"
 	@scripts/deadcode-check.sh
 
+# The iteration lane: the touched Go packages with `go test`'s result cache left ON, the touched frontend
+# files, and the sub-gates cheap enough to always run. It runs no dependent of a touched package and none of
+# the cleanliness gates, so it is not a claim of done — `check` is. Steps, skips and what is deliberately
+# left out: scripts/check-fast.sh; what it cannot catch: docs/testing.md → Running less than the gate.
+.PHONY: check-fast
+check-fast: ## The iteration lane: touched pkgs (cached) + touched frontend + the cheap gates (~7s clean, ~16s one Go pkg)
+	@GO_SCOPE='$(GO_SCOPE)' bash scripts/check-fast.sh
+
 .PHONY: check-release
 check-release: ## Compile and test the -tags release variant that make package ships (~5s)
 	@# Nothing else here compiles a `-tags` variant, so without this step the release build rots.

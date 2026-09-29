@@ -135,6 +135,7 @@ curl -sk https://localhost:3000/api/config   # 401 JSON = up; use http:// with -
 
 ```bash
 make check | make lint | make check-race                 # gate / static half / -race over the lock packages
+make check-fast                                          # iteration lane: touched pkgs (cache on) + touched frontend + the cheap gates
 make test-go | make test-frontend                        # Go unit / vitest + the frontend gates
 make test-diff                                           # only the touched Go packages, cache left on
 make test-time [LANES=gates check go vitest e2e]         # what each gate costs, measured
@@ -143,6 +144,8 @@ cd frontend && npm run check:dead-surface                # untagged test-only ex
 python3 scripts/gen-registry.py --check                  # registry.json matches the manifests
 ```
 
+- **Iterate with `make check-fast`; `make check` stays the only claim of done.** It runs the touched Go
+  packages with the cache left on, the touched frontend files and the cheap gates — `docs/testing.md → Running less than the gate`.
 - **A cost claim in a doc is a number from `make test-time`.** An unmeasured timing is a work estimate, and
   `make docs-check` refuses one; the record, the lanes and their filters: `docs/testing.md → Measured gate cost`.
 - **A spec exists only if it needs a browser or the real backend.** Component state belongs in vitest.
