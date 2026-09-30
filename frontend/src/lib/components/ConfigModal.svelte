@@ -667,10 +667,10 @@
         <h2 id="modal-title">{title}</h2>
         <div class="header-tabs">
             <button type="button" class="tab-btn" class:active={activeTab === 'providers'} onclick={() => activeTab = 'providers'}>{t('settings.tab.providers')}</button>
-            <button type="button" class="tab-btn" class:active={activeTab === 'task-defaults'} onclick={() => activeTab = 'task-defaults'}>{t('settings.tab.taskDefaults')}</button>
             {#if appStore.selectedProject}
-                <button type="button" class="tab-btn" class:active={activeTab === 'project-defaults'} onclick={() => activeTab = 'project-defaults'}>{t('settings.tab.projectDefaults')}</button>
+                <button type="button" class="tab-btn tab-btn-project" class:active={activeTab === 'project-defaults'} onclick={() => activeTab = 'project-defaults'} title={appStore.selectedProject.name}>{appStore.selectedProject.name}</button>
             {/if}
+            <button type="button" class="tab-btn" class:active={activeTab === 'task-defaults'} onclick={() => activeTab = 'task-defaults'}>{t('settings.tab.taskDefaults')}</button>
             <button type="button" class="tab-btn" class:active={activeTab === 'preferences'} onclick={() => activeTab = 'preferences'}>{t('settings.tab.preferences')}</button>
             <button type="button" class="tab-btn" class:active={activeTab === 'extensions'} onclick={() => activeTab = 'extensions'}>{t('settings.tab.extensions')}</button>
             <button type="button" class="tab-btn" class:active={activeTab === 'about'} onclick={() => activeTab = 'about'}>{t('settings.tab.about')}</button>
@@ -980,13 +980,6 @@
         white-space: nowrap;
     }
 
-    /* Tabs row.
-       `flex-wrap` is measured, not decorative: a translation pack's labels are longer
-       than English's, and at 1440px the French set needed 626px of a 473px box, so
-       "Extensions" and "À propos" ran under the close button. Wrapping keeps every tab
-       readable; the alternative (ellipsis on a tab) hides which tab is which, and
-       `overflow-x: auto` hides it until you think to scroll. English still fits on one
-       row, so nothing moves for the language most users see. */
     .header-tabs {
         display: flex;
         gap: 0;
@@ -1026,6 +1019,12 @@
     }
     .tab-btn:hover {
         color: var(--color-text-primary);
+    }
+    .tab-btn-project {
+        /* border-box, so the 16ch ceiling holds ~12 characters of name beside the tab's padding. */
+        max-width: 16ch;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
     .tab-btn.active {
         color: var(--color-accent);

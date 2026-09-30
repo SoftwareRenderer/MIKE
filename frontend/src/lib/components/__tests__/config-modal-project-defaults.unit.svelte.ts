@@ -12,7 +12,9 @@ vi.mock('$lib/api', async (importOriginal) => {
 });
 
 const TRAILER_TOGGLE = 'button[aria-label="Assisted-by line in commit messages"]';
-const PROJECT_TAB = 'Project Defaults';
+// The project's tab is named after the open project, so this is both the fixture name and the
+// text the tab shows.
+const PROJECT_TAB = 'Atlas';
 
 beforeEach(() => {
     // Polyfill matchMedia (useIsMobile) for jsdom — desktop: never matches.
@@ -70,13 +72,26 @@ async function openProjectTab(container: HTMLElement) {
     await waitFor(() => expect(container.querySelector(TRAILER_TOGGLE)).toBeTruthy(), { timeout: 1000 });
 }
 
-describe('Settings Project Defaults tab', () => {
-    it('names no Project Defaults tab while no project is open', async () => {
+describe('Settings project tab', () => {
+    it('names no project tab while no project is open', async () => {
         vi.mocked(updateConfig).mockResolvedValue(makeConfig());
         appStore.selectedProject = null;
         const { container } = render(ConfigModal, { props: { config: makeConfig(), onClose: vi.fn(), onSaved: vi.fn() } });
 
         expect(await renderSettings(container)).not.toContain(PROJECT_TAB);
+    });
+
+    it('puts the project tab ahead of Task Defaults and keeps the whole name on the element', async () => {
+        vi.mocked(updateConfig).mockResolvedValue(makeConfig());
+        openProject({ name: 'atlas-platform-services' });
+        const { container } = render(ConfigModal, { props: { config: makeConfig(), onClose: vi.fn(), onSaved: vi.fn() } });
+
+        const tabs = await renderSettings(container);
+        expect(tabs.indexOf('atlas-platform-services')).toBeLessThan(tabs.indexOf('Task Defaults'));
+        // The tab truncates in CSS, so the full name has to stay on the element for the hover card.
+        const projectTab = [...container.querySelectorAll<HTMLButtonElement>('button.tab-btn')]
+            .find(b => b.textContent === 'atlas-platform-services')!;
+        expect(projectTab.getAttribute('title')).toBe('atlas-platform-services');
     });
 
     it('reads a project row that never answered as on', async () => {
