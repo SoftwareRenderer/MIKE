@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { csrfFetch, getProjectId, gotoProject, isolatedProject } from './helpers';
+import { csrfFetch, editTaskTitle, getProjectId, goOnline, gotoProject, isolatedProject, queuedActionCount } from './helpers';
 
 /**
  * The app holds one task list, and it is `appStore.board`'s own list (`appStore.tasks` reads it, never a
@@ -37,15 +37,6 @@ async function taskIdsIn(page: Page, columnTitle: string): Promise<string[]> {
 }
 
 /** The edit dialog's answer for one card: the title field names the dialog, its footer names the action. */
-async function editTaskTitle(page: Page, taskId: string, title: string) {
-  const card = board(page).locator(`.card[data-task-id="${taskId}"]`);
-  await card.hover();
-  await card.locator('[aria-label="Edit task"]').click();
-  await page.fill('#edit-task-title-input', title);
-  await page.locator('.modal-footer .btn-primary').click();
-  await expect(page.locator('#edit-task-title-input')).toHaveCount(0);
-}
-
 async function openBoard(page: Page): Promise<string> {
   await gotoProject(page);
   await expect(board(page).locator('.card').first()).toBeVisible({ timeout: 15000 });
@@ -89,9 +80,12 @@ test.describe('One task list', () => {
     await page.context().setOffline(true);
     await editTaskTitle(page, taskId, title);
     await expect(column(page, 'Backlog').locator(`.card[data-task-id="${taskId}"]`)).toContainText(title, { timeout: 15000 });
+    // Read from the store the queue lives in, before the page is thrown away: the value on the card proves only
+    // that the app drew it, and a reload kills a request still running.
+    await expect.poll(() => queuedActionCount(page), { timeout: 15000 }).toBe(1);
 
     // The connection returns: the queue flushes at boot, and one card carries the new title.
-    await page.context().setOffline(false);
+    await goOnline(page);
     await page.reload();
     await expect(board(page).locator(`.card[data-task-id="${taskId}"]`)).toContainText(title, { timeout: 30000 });
     expect(await board(page).locator(`.card[data-task-id="${taskId}"]`).count(), 'the queued write landed twice').toBe(1);

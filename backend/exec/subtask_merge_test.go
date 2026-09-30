@@ -153,8 +153,7 @@ func TestPrepareTaskExecution_SubtaskCreatesParentBranch(t *testing.T) {
 		t.Fatal("prepareTaskExecution returned nil")
 	}
 	defer func() {
-		setup.cancel()
-		te.StopTask(subtaskID)
+		te.releasePrepared(setup)
 	}()
 
 	// Verify parent's branch was created
@@ -762,8 +761,7 @@ func TestAutoStartNextSibling_ParentBranchExists(t *testing.T) {
 		t.Fatal("prepareTaskExecution returned nil")
 	}
 	defer func() {
-		setup.cancel()
-		te.StopTask(subtaskID)
+		te.releasePrepared(setup)
 	}()
 
 	// Verify parent branch exists
@@ -869,8 +867,7 @@ func TestSubtaskMergeFullFlow(t *testing.T) {
 		t.Fatal("prepareTaskExecution returned nil")
 	}
 	defer func() {
-		setup.cancel()
-		te.StopTask(subtaskID)
+		te.releasePrepared(setup)
 	}()
 
 	parentFromDB, _ := te.store.GetTaskByID(parentID)
@@ -1001,8 +998,7 @@ func TestMergeBranch_ConflictDetection(t *testing.T) {
 		t.Fatal("prepareTaskExecution returned nil")
 	}
 	defer func() {
-		setup.cancel()
-		te.StopTask(subtaskID)
+		te.releasePrepared(setup)
 	}()
 
 	parentFromDB, _ := te.store.GetTaskByID(parentID)
@@ -1099,8 +1095,7 @@ func TestAutoStartNextSibling_ParentInBacklog(t *testing.T) {
 		t.Fatal("prepareTaskExecution returned nil")
 	}
 	defer func() {
-		setup.cancel()
-		te.StopTask(subtask1ID)
+		te.releasePrepared(setup)
 	}()
 
 	// Verify parent is still in backlog
@@ -1205,8 +1200,7 @@ func TestAutoStartNextSibling_ParentInProgress(t *testing.T) {
 		t.Fatal("prepareTaskExecution returned nil")
 	}
 	defer func() {
-		setup.cancel()
-		te.StopTask(subtask1ID)
+		te.releasePrepared(setup)
 	}()
 
 	// Verify parent is in in_progress
@@ -1421,8 +1415,7 @@ func TestAutoStartNextSibling_AllDoneParentStaysInBacklog(t *testing.T) {
 		t.Fatal("prepareTaskExecution returned nil")
 	}
 	defer func() {
-		setup.cancel()
-		te.StopTask(subtaskID)
+		te.releasePrepared(setup)
 	}()
 
 	// Simulate subtask completing (move to done — last and only subtask)
@@ -1884,8 +1877,7 @@ func TestSubtaskManualStart_MergeDiagnostic(t *testing.T) {
 		t.Fatalf("prepareTaskExecution failed: %v", err)
 	}
 	defer func() {
-		setup.cancel()
-		te.StopTask(subtaskID)
+		te.releasePrepared(setup)
 	}()
 
 	// Step 2: Verify parent branch was created
@@ -2025,8 +2017,7 @@ func TestPrepareTaskExecution_BranchPersists(t *testing.T) {
 		t.Fatalf("prepareTaskExecution failed: %v", err)
 	}
 	defer func() {
-		setup.cancel()
-		te.StopTask(subtaskID)
+		te.releasePrepared(setup)
 	}()
 
 	// 4. Verify branch is set in DB (not just in memory)

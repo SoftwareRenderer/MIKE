@@ -115,8 +115,7 @@ test.describe.serial('Multi-select parent/subtask recursion', () => {
     }).toPass({ timeout: 10000 });
   });
 
-  test('should select all subtasks when Ctrl+clicking a parent', async ({ browserName, page }) => {
-    if (browserName === 'webkit') test.skip();
+  test('should select all subtasks when Ctrl+clicking a parent', async ({ page }) => {
 
     // Click on the title text to avoid hitting nested child cards
     const parentTitle = page.locator(`.column-context [data-task-id="${parentTaskId}"] .card-title-text`).first();
@@ -137,8 +136,7 @@ test.describe.serial('Multi-select parent/subtask recursion', () => {
     await expect(page.locator(`.column-context [data-task-id="${grandchildTaskId}"]`).first()).toHaveClass(/multi-selected/);
   });
 
-  test('should deselect all subtasks when Ctrl+clicking a selected parent', async ({ browserName, page }) => {
-    if (browserName === 'webkit') test.skip();
+  test('should deselect all subtasks when Ctrl+clicking a selected parent', async ({ page }) => {
 
     const parentTitle = page.locator(`.column-context [data-task-id="${parentTaskId}"] .card-title-text`).first();
     await expect(parentTitle).toBeVisible();
@@ -157,8 +155,7 @@ test.describe.serial('Multi-select parent/subtask recursion', () => {
     await expect(page.locator(`.column-context [data-task-id="${childTaskId2}"]`).first()).not.toHaveClass(/multi-selected/);
   });
 
-  test('should delete a parent with nested subtasks without an error toast', async ({ browserName, page }) => {
-    if (browserName === 'webkit') test.skip();
+  test('should delete a parent with nested subtasks without an error toast', async ({ page }) => {
 
     // Ctrl+Click the parent title to select it and all its descendants
     const parentTitle = page.locator(`.column-context [data-task-id="${parentTaskId}"] .card-title-text`).first();
@@ -225,8 +222,7 @@ test.describe.serial('Multi-select parent/subtask recursion', () => {
     }).toPass({ timeout: 10000 });
   });
 
-  test('should select tasks with Ctrl+Click in board overview', async ({ browserName, page }) => {
-    if (browserName === 'webkit') test.skip();
+  test('should select tasks with Ctrl+Click in board overview', async ({ page }) => {
 
     // Ctrl+Click on taskId2 and taskId3 in the board overview
     const card2 = page.locator(`.column-context [data-task-id="${taskId2}"]`);
@@ -243,8 +239,7 @@ test.describe.serial('Multi-select parent/subtask recursion', () => {
     await expect(bar).toContainText('2');
   });
 
-  test('should show Delete button in action bar', async ({ browserName, page }) => {
-    if (browserName === 'webkit') test.skip();
+  test('should show Delete button in action bar', async ({ page }) => {
 
     const card2 = page.locator(`.column-context [data-task-id="${taskId2}"]`);
     const card3 = page.locator(`.column-context [data-task-id="${taskId3}"]`);
@@ -257,8 +252,7 @@ test.describe.serial('Multi-select parent/subtask recursion', () => {
     await expect(deleteBtn).toContainText('Delete 2 tasks');
   });
 
-  test('should show Start button when all selected are in Backlog', async ({ browserName, page }) => {
-    if (browserName === 'webkit') test.skip();
+  test('should show Start button when all selected are in Backlog', async ({ page }) => {
 
     const card2 = page.locator(`.column-context [data-task-id="${taskId2}"]`);
     const card3 = page.locator(`.column-context [data-task-id="${taskId3}"]`);
@@ -271,8 +265,7 @@ test.describe.serial('Multi-select parent/subtask recursion', () => {
     await expect(startBtn).toContainText('Start 2 tasks');
   });
 
-  test('should confirm before deleting selected tasks', async ({ browserName, page }) => {
-    if (browserName === 'webkit') test.skip();
+  test('should confirm before deleting selected tasks', async ({ page }) => {
 
     const card2 = page.locator(`.column-context [data-task-id="${taskId2}"]`);
     const card3 = page.locator(`.column-context [data-task-id="${taskId3}"]`);
@@ -298,8 +291,7 @@ test.describe.serial('Multi-select parent/subtask recursion', () => {
     await expect(card3).toBeVisible();
   });
 
-  test('should move the selection only after asking', async ({ browserName, page }) => {
-    if (browserName === 'webkit') test.skip();
+  test('should move the selection only after asking', async ({ page }) => {
 
     const card2 = page.locator(`.column-context [data-task-id="${taskId2}"]`);
     const card3 = page.locator(`.column-context [data-task-id="${taskId3}"]`);
@@ -321,8 +313,7 @@ test.describe.serial('Multi-select parent/subtask recursion', () => {
     expect((await getTaskData(page, projectId, taskId3)).status).toBe('backlog');
   });
 
-  test('should say that moving to In Progress starts the tasks', async ({ browserName, page }) => {
-    if (browserName === 'webkit') test.skip();
+  test('should say that moving to In Progress starts the tasks', async ({ page }) => {
 
     const card2 = page.locator(`.column-context [data-task-id="${taskId2}"]`);
     const card3 = page.locator(`.column-context [data-task-id="${taskId3}"]`);
@@ -345,8 +336,7 @@ test.describe.serial('Multi-select parent/subtask recursion', () => {
     }
   });
 
-  test('should move the selected tasks to the chosen column on confirm', async ({ browserName, page }) => {
-    if (browserName === 'webkit') test.skip();
+  test('should move the selected tasks to the chosen column on confirm', async ({ page }) => {
 
     const card2 = page.locator(`.column-context [data-task-id="${taskId2}"]`);
     const card3 = page.locator(`.column-context [data-task-id="${taskId3}"]`);
@@ -364,8 +354,7 @@ test.describe.serial('Multi-select parent/subtask recursion', () => {
     await expect(page.locator('.multi-select-bar')).not.toBeVisible();
   });
 
-  test('should delete selected tasks on confirmation', async ({ browserName, page }) => {
-    if (browserName === 'webkit') test.skip();
+  test('should delete selected tasks on confirmation', async ({ page }) => {
 
     const card2 = page.locator(`.column-context [data-task-id="${taskId2}"]`);
     const card3 = page.locator(`.column-context [data-task-id="${taskId3}"]`);
@@ -389,8 +378,7 @@ test.describe.serial('Multi-select parent/subtask recursion', () => {
     await expect(bar).not.toBeVisible();
   });
 
-  test('should not show Start button when selected tasks are in different columns', async ({ browserName, page }) => {
-    if (browserName === 'webkit') test.skip();
+  test('should not show Start button when selected tasks are in different columns', async ({ page }) => {
 
     // Move taskId3 to in_progress. Note: with the mock LLM the auto-start may
     // immediately complete the task and move it to Review — either way it leaves
@@ -436,8 +424,7 @@ test.describe.serial('Multi-select parent/subtask recursion', () => {
     await expect(deleteBtn).toBeVisible();
   });
 
-  test('should clear selection when clicking clear button', async ({ browserName, page }) => {
-    if (browserName === 'webkit') test.skip();
+  test('should clear selection when clicking clear button', async ({ page }) => {
 
     const card2 = page.locator(`.column-context [data-task-id="${taskId2}"]`);
     const card3 = page.locator(`.column-context [data-task-id="${taskId3}"]`);
@@ -461,8 +448,7 @@ test.describe.serial('Multi-select parent/subtask recursion', () => {
     await expect(card3).not.toHaveClass(/multi-selected/);
   });
 
-  test('should clear selection on Escape without closing task detail', async ({ browserName, page }) => {
-    if (browserName === 'webkit') test.skip();
+  test('should clear selection on Escape without closing task detail', async ({ page }) => {
 
     const card2 = page.locator(`.column-context [data-task-id="${taskId2}"]`);
     const card3 = page.locator(`.column-context [data-task-id="${taskId3}"]`);

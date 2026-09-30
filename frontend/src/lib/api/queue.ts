@@ -609,3 +609,28 @@ export async function queueWrite<T>(type: ActionType, params: Record<string, any
     const queued = await enqueueAction({ type, params });
     return { ...optimistic, queued: true, actionId: queued.id } as T;
 }
+
+/**
+ * The offline promise for one write: a request the server answered is answered by the server, and a request
+ * nobody answered is kept and sent when the connection returns. A refusal of any status *is* an answer and goes
+ * back to the caller, because a write the server refused must not come back out of IndexedDB behind the
+ * person's back; a cancellation is not a failure, which is what `isTransientError` separates. Queuing from the
+ * catch is safe because `apiFetch` has already opened the queue by the time the request fails.
+ */
+export async function writeOrQueue<T>(
+    action: { type: ActionType; params: Record<string, any> },
+    live: () => Promise<T>,
+    optimistic?: () => T,
+): Promise<T> {
+    const keep = async (): Promise<T> =>
+        optimistic === undefined
+            ? await enqueueAction(action).then(() => undefined as T)
+            : await queueWrite(action.type, action.params, optimistic());
+    if (getOfflineStatus()) return keep();
+    try {
+        return await live();
+    } catch (e) {
+        if (!isTransientError(e)) throw e;
+        return keep();
+    }
+}

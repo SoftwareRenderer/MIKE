@@ -535,6 +535,9 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
             }
             case 'merge_resolution': {
                 const data = event.data as { id: string; conflicted_files?: string[]; summary?: string; content: string; created_at: string; label?: string; is_error?: boolean };
+                // The history read a merge triggers can answer after this frame, so the row may already be
+                // drawn. A second entry with the row's id is a duplicate `each` key, not a second resolution.
+                if (data.id && s.entries.some(e => e.id === data.id)) break;
                 const content = data.content || t('chat.merge.merged');
                 // `includes('conflict')` reads the server's row text, so it stays English.
                 const label = data.label || (content.includes('conflict') ? t('chat.merge.conflictsResolved') : t('chat.merge.merged'));

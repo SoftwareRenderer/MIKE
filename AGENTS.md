@@ -33,7 +33,7 @@ record there rather than arguing inside the rule. When you learn something, *rep
 - **`make check` is the gate** and there is no CI file, so it is the only thing that catches a
   regression: `lint` (gofmt → vet → staticcheck → deadcode, every root) → `archgate` + `test-archgate`
   (structural debt against its frozen baselines) → `docs-check` + `test-docs-check` (the same, for docs) →
-  `bridge-check` → build → `check-release` → the Go suite → `svelte-check` → the frontend gates. Run it
+  `bridge-check` → build → `check-release` → the Go suite → the frontend gates, type-check included. Run it
   before claiming done, and `make check-race` on whatever you touched — a package's own green tests prove
   nothing about code that only runs when a task does. `RACE_PKGS` in the Makefile names the packages,
   and `docs/testing.md` names the ones it omits. `make lint` is the static half alone.
@@ -43,7 +43,8 @@ record there rather than arguing inside the rule. When you learn something, *rep
 
 ### Workflow
 
-- **Frontend:** edit `frontend/src/` → `npm run check` (svelte-check; stay TS-clean) → `npm run build` →
+- **Frontend:** edit `frontend/src/` → `npm run check` (svelte-check; stay TS-clean; the gate runs the same
+  pass stricter as `check:types`) → `npm run build` →
   hard refresh. No server restart: a developer's build serves `frontend/dist` from disk (`MIKE_FRONTEND_DIST`
   moves it, and the startup log names which copy is being served). A `-tags release` binary cannot be shown
   a build it was not compiled from — prove a packaged artifact by unpacking it, never by refreshing a tab.
@@ -137,16 +138,29 @@ curl -sk https://localhost:3000/api/config   # 401 JSON = up; use http:// with -
 make check | make lint | make check-race                 # gate / static half / -race over the lock packages
 make test-go | make test-frontend                        # Go unit / vitest + the frontend gates
 make test-diff                                           # only the touched Go packages, cache left on
-cd frontend && npx playwright test [spec|--grep name]    # e2e (mock LLM, own servers)
+make test-frontend-diff                                  # only the vitest files importing a touched frontend file
+make test-e2e [SPECS=chat-messages]                      # e2e lane (mock LLM): builds the frontend, needs MIKE_ENCRYPTION_KEY
+make test-e2e-diff                                       # only the e2e spec files this working tree touched
 cd frontend && npm run check:dead-surface                # untagged test-only exports; the CSS ceiling
+cd frontend && npm run check:e2e-ownership                # a spec that starts a turn owns its project
 python3 scripts/gen-registry.py --check                  # registry.json matches the manifests
 ```
 
 - **A spec exists only if it needs a browser or the real backend.** Component state belongs in vitest.
   Never write a `readFileSync('../Foo.svelte')` + `toContain(...)` "test".
+- **A spec skips only for a prerequisite global setup cannot provide** (gVisor is the one left) and says
+  which in the skip reason; "no worktree appeared" and "the registry did not answer" are failures, not skips.
+  A spec that can only run in a mode this suite never runs is deleted, not left green-but-skipped.
 - **Config-modifying specs run in the `isolated` project** (`ISOLATED_SPECS`), and **any spec that runs an
-  executor turn owns its project** — turns are queued per project, so a shared project makes you wait
-  behind every other worker. Specs on the global view must not.
+  executor turn owns its project**. One lane server answers every worker, and a turn waits for a provider
+  slot, so a shared project adds board-level interference to an already-queued turn. Specs on the global
+  view must not. `npm run check:e2e-ownership` holds the line
+  against a frozen register of the specs that predate it.
+- **Read a turn from the store by row id, never by a length or a status.** `…/messages` answers a bounded
+  window — 5 units by default — and answers an error with a null body. A finished run is `review` + `idle`;
+  `failed` means failed, and `in_progress` survives a Stop. A `/send` that lands mid-turn is absorbed with a
+  200. `tests/e2e/helpers.ts` owns the four rules as `messageRows`, `sendTurn`, `notInFlight`, `runHasEnded`;
+  `docs/testing.md → Reading a turn from the store, not from the screen` owns why.
 - **`[role="dialog"]` is never a unique locator** — filter by content.
 - Go tests are deterministic: `testServer(t)` for an isolated server, `t.TempDir()` for files, no network.
 - A frontend test file that imports a module using Svelte compiler macros (`$state`, `$derived`, `$effect`)
@@ -421,9 +435,10 @@ Types: `lsp`, `ui`, `css`, `i18n`, `agent`, `llm`, `tool`.
 
 The client distinguishes a cancellation from a lost connection and treats neither as a deadline: an abort
 never marks the app offline, and a long wait gets a report naming what it waits on rather than a timeout.
-Nothing in the product puts a deadline on a wait for this server. Writes queue while offline **except** a
-request carrying a plaintext secret, which is refused rather than queued — the queue is persisted, so a
-queued value outlives the tab and the session. A connection's **subscriptions** are not queued frames:
+Nothing in the product puts a deadline on a wait for this server. A write queues while offline, **and so does a
+write whose request got no answer**: `writeOrQueue` decides that once, at the api layer, and a refusal of any
+status is an answer that reaches the caller. The exception is a request carrying a plaintext secret, which is
+refused rather than queued — the queue is persisted, so a queued value outlives the tab and the session. A connection's **subscriptions** are not queued frames:
 what it owes the server is its current state per project or task key, coalesced and bounded by what the app
 has open, because two holds of one key are undone by one release. **A task's status is never the answer to
 "is it still running"** — a stopped task keeps `status = in_progress` and only moves `execution_state` to

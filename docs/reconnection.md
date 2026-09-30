@@ -784,6 +784,26 @@ finishing normally, so silence is never reported as a lost connection and the no
 
 Tests: `backend/exec/quiet_stream_test.go` (the frame pair, and that a resumed stream is not retried).
 
+## A write nobody answered is kept by the write itself
+
+**A write that got no answer is kept by the write itself.** The rule has one home, `writeOrQueue` in
+`api/queue.ts`: ask the queue, then send, and if nobody answered, enqueue the same action and hand back the
+optimistic row. The failure raises the HTTP reason as it happens, so the queue is already open by the time the
+catch runs and the replay takes the action on its own. A refusal of any status is an answer and reaches the
+caller, because a write the server refused must not come back out of IndexedDB behind the person's back. A
+cancellation is not a failure at all, and `isTransientError` is what says so.
+
+Before that, every write asked `getOfflineStatus()` before setting out. So the edit made between the connection
+dying and the app noticing went out live, failed, and was lost. The queue existed one moment later — too late
+for the write that raised it.
+
+A create is the exception, and the id is why. The card on screen and the action in the queue must name one task.
+So `createTask` keeps its own branch, and `CreateTaskModal` — which drew the card and knows its id — sorts a
+queueable failure from a refusal it must not queue.
+
+Tests: `api/__tests__/write-or-queue.unit.ts` (answered, unanswered, refused, cancelled, already-offline);
+e2e `one-task-list.spec.ts` drives the edit that is queued by a request nobody answered and lands once.
+
 ## What refuses the queue rather than joining it
 
 The queue is persisted to IndexedDB, so a queued value outlives the tab and the session. Two requests are

@@ -1,5 +1,10 @@
 import { test, expect, type Page } from '@playwright/test';
-import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch } from './helpers';
+import {
+  getProjectId, createTaskViaApi, navigateToTask, csrfFetch, isolatedProject, gotoProject,
+} from './helpers';
+// Each test file gets its own project, because it starts a turn: see isolatedProject() in helpers.ts.
+isolatedProject();
+
 
 /**
  * Message send failure due to a network issue:
@@ -31,7 +36,7 @@ async function queuedActionCount(page: Page): Promise<number> {
 
 test.describe.serial('Offline send queue', () => {
     test.beforeEach(async ({ page }) => {
-        await page.goto('/');
+        await gotoProject(page);
         await page.waitForSelector('.card', { timeout: 10000 });
     });
 
@@ -95,7 +100,7 @@ test.describe.serial('Offline send queue', () => {
         await page.route(`**/api/projects/*/tasks/*/send`, async (route) => {
             await route.continue();
         });
-        await page.goto('/');
+        await gotoProject(page);
         await page.waitForSelector('.card', { timeout: 10000 });
         await navigateToTask(page, taskId, projectId);
 

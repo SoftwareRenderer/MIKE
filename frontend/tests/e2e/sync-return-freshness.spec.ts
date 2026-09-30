@@ -3,7 +3,7 @@ import { execSync } from 'child_process';
 import { writeFileSync } from 'fs';
 import {
   isolatedProject, createTaskViaApi, navigateToTask, csrfFetch, waitForWorktree,
-  getWorktreePath, ownProjectId, apiGetJson,
+  getWorktreePath, ownProjectId, apiGetJson, stopReading, comeBack,
 } from './helpers';
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
@@ -55,17 +55,6 @@ async function watchTheReturn(page: Page): Promise<void> {
   });
 }
 
-const stopReading = (page: Page) =>
-  page.evaluate(() => { (window as any).__unfocused = true; (window as any).__away = true; });
-
-/** The window comes back. Only `focus` is dispatched — it was never hidden. */
-const comeBack = (page: Page) => page.evaluate(() => {
-  const w = window as any;
-  w.__away = false;
-  w.__unfocused = false;
-  window.dispatchEvent(new Event('focus'));
-});
-
 /** The digest the server holds, read out of band so the test knows the server noticed before the return. */
 async function digest(page: Page, projectId: string, taskId: string) {
   return apiGetJson<{ diff: { known: boolean; hash?: string } }>(
@@ -84,13 +73,9 @@ test.describe('the window that comes back', () => {
     await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/move`, {
       method: 'POST', body: { status: 'in_progress' },
     });
-    let worktree = '';
-    try {
-      worktree = await waitForWorktree(projectId, taskId);
-    } catch {
-      test.skip(); // no worktree in this environment: there is no diff to be stale about
-      return;
-    }
+    // A worktree that will not appear is the failure, not an environment to work around: the task was
+    // moved to in_progress immediately above, and every later line of this test depends on that directory.
+    const worktree = await waitForWorktree(projectId, taskId);
     // A tracked file: the case whose rows the refresh must keep. An untracked file's preview is fetched on
     // demand.
     writeFileSync(`${getWorktreePath(projectId, taskId)}/${openName}`, `open before leaving ${unique}\n`);

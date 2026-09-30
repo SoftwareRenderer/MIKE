@@ -5,19 +5,15 @@ import {
 } from './helpers';
 
 // A reader leaving the bottom is the follow tracker's whole job, and not every gesture that asks for what
-// is above is a gesture a listener can see. Measured in Chromium with a scrollbar it paints, in one window:
-// `xvfb-run -a npx playwright test chat-scroll-takeover --headed --workers=1` — several headed windows on
-// one X display make a real thumb drag move nothing, so those two cases need the single window.
+// is above is a gesture a listener can see. Measured in Chromium with a scrollbar it paints:
 //
 //   thumb drag    pointerdown, ten mouse moves, ZERO pointermove, twelve scroll events
 //   track click   pointerdown, no pointermove, ~30 scroll events of one animated page-up
 //
 // So a scrollbar gesture reaches the app as a position change with no travel behind it, and the takeover is
 // judged from the position alone — the two numbers every browser reports for one (`scrollTop`,
-// `scrollHeight`), which is what keeps the rule browser-independent. Headless Chromium reserves no pixels
-// for a scrollbar, so those two cases skip there and the first test drives the position directly.
-// `chat-window-scroll.spec.ts` had to say of its own `wheelUp` that writing `scrollTop` is not a gesture:
-// that write is precisely what a reader's scrollbar looks like to the app.
+// `scrollHeight`), which is what keeps the rule browser-independent. Headless Chromium paints no scrollbar, so
+// the first test *writes* the position, which is what a thumb drag looks like to the app.
 //
 // The keyboard cases come from a control in the chat column that is not the scroller: the jump-latest
 // button is a sibling of `.chat-messages`, so the tracker's own keydown listener never hears the key while
@@ -229,35 +225,6 @@ async function expectLeftAlone(page: Page, note: string): Promise<void> {
     ).toBeGreaterThan(BOTTOM_BAND);
 }
 
-/**
- * Where this browser paints the chat scroller's scrollbar, or null when it paints none to aim at —
- * headless Chromium reserves no pixels for one, so a drag there would drag the text instead. The reader
- * is at the bottom of the transcript, which is also where the thumb is, so the grab point is the bottom of
- * the track and does not depend on estimating where the thumb slid to.
- */
-function scrollbarGeometry(page: Page): Promise<{ grabY: number; trackTop: number; trackBottom: number; x: number } | null> {
-    return page.evaluate(() => {
-        const el = document.querySelector('.chat-messages') as HTMLElement;
-        const width = el.offsetWidth - el.clientWidth;
-        if (width <= 0) return null;
-        const cs = getComputedStyle(el);
-        const box = el.getBoundingClientRect();
-        // A horizontal scrollbar eats the bottom of the vertical track — the corner belongs to neither.
-        const gutter = el.offsetHeight - el.clientHeight;
-        const top = box.top + parseFloat(cs.borderTopWidth);
-        const bottom = box.bottom - parseFloat(cs.borderBottomWidth) - gutter;
-        // A reader at the bottom has the thumb flush with the track's end; press its middle, since a press
-        // a few pixels off that end lands on the track below it, where a page-down is already clamped.
-        const thumb = Math.max(30, (bottom - top) * el.clientHeight / el.scrollHeight);
-        return {
-            x: box.right - parseFloat(cs.borderRightWidth) - width / 2,
-            trackTop: top,
-            trackBottom: bottom,
-            grabY: bottom - Math.max(20, thumb / 2),
-        };
-    });
-}
-
 /** Move the viewport the way the scrollbar does: the position changes, no gesture listener hears it. */
 async function moveViewport(page: Page, delta: number): Promise<void> {
     await page.evaluate((d) => {
@@ -290,64 +257,6 @@ test.describe('Gestures that ask for what is above', () => {
         // reader's.
         const end = await settledPosition(page);
         expect(end.scrollTop, 'the reader drifted back down toward the bottom').toBeLessThan(before.scrollTop);
-    });
-
-    test('dragging the scrollbar thumb up leaves the reader there', async ({ page }) => {
-        await openConversation(page);
-        const geometry = await scrollbarGeometry(page);
-        test.skip(geometry === null, 'this browser paints no scrollbar to drag — run it headed');
-        const g = geometry!;
-        const before = await position(page);
-        expect(before.fromBottom, 'the reader is not at the bottom, where the thumb is').toBeLessThanOrEqual(4);
-
-        await page.mouse.move(g.x, g.grabY);
-        await page.waitForTimeout(150);
-        await beginGesture(page);
-        await page.mouse.down();
-        for (let i = 1; i <= 12; i++) {
-            await page.mouse.move(g.x, g.grabY - i * 6);
-            await page.waitForTimeout(20);
-        }
-        await page.mouse.up();
-
-        await waitForScrollEvent(page);
-        const dragged = await sinceGesture(page);
-        expect(
-            dragged.scrolls,
-            `the drag moved nothing (${JSON.stringify(g)}); the app wrote `
-            + `${JSON.stringify(dragged.pins)} in reply`,
-        ).toBeGreaterThan(0);
-        expect((await position(page)).scrollTop, 'the drag left the viewport where it started')
-            .toBeLessThan(before.scrollTop);
-        await expectLeftAlone(page, 'a scrollbar thumb drag');
-    });
-
-    test('clicking the scrollbar track above the thumb leaves the reader there', async ({ page }) => {
-        await openConversation(page);
-        const geometry = await scrollbarGeometry(page);
-        test.skip(geometry === null, 'this browser paints no scrollbar to click — run it headed');
-        const g = geometry!;
-        const before = await position(page);
-
-        // Near the top of the track: the reader is at the bottom, so the thumb is at the other end.
-        const y = g.trackTop + (g.trackBottom - g.trackTop) * 0.15;
-        await page.mouse.move(g.x, y);
-        await page.waitForTimeout(150);
-        await beginGesture(page);
-        await page.mouse.down();
-        await page.waitForTimeout(300);
-        await page.mouse.up();
-
-        await waitForScrollEvent(page);
-        const clicked = await sinceGesture(page);
-        expect(
-            clicked.scrolls,
-            `the track click moved nothing (${JSON.stringify(g)}); the app wrote `
-            + `${JSON.stringify(clicked.pins)} in reply`,
-        ).toBeGreaterThan(0);
-        expect((await position(page)).scrollTop, 'the track click left the viewport where it started')
-            .toBeLessThan(before.scrollTop);
-        await expectLeftAlone(page, 'a scrollbar track click');
     });
 
     test('the scroll keys move the transcript from anywhere in the chat column', async ({ page }) => {

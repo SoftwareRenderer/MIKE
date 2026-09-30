@@ -1,7 +1,8 @@
 
 <script lang="ts">
-    import { onMount, onDestroy, tick } from 'svelte';
+    import { onMount, onDestroy, tick, untrack } from 'svelte';
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard, applyResolvedTasksToBoard } from '$lib/stores';
+    import { errorText } from '$lib/utils/error-text';
     import { t } from '$lib/i18n';
     import Spinner from './Spinner.svelte';
     import EmptyState from './EmptyState.svelte';
@@ -837,10 +838,10 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 
     /** Land the edit dialog's answer on the board, then tell the server. The dialog's own record names
      * the task it was opened for; a task the board does not hold is not edited anywhere. */
-    function saveTaskEdit(
+    async function saveTaskEdit(
         title: string, model: string, url: string, reasoningEffort: string,
         operatingMode: string, autoMerge: boolean, subtasksAutoMerge: boolean, baseRef: string,
-    ): void {
+    ): Promise<void> {
         const edit = appStore.editTaskData;
         appStore.showEditTask = false;
         appStore.editTaskData = null;
@@ -859,9 +860,17 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         const task = appStore.tasks.find(t => t.id === edit.taskId);
         if (!task) return;
         updateTaskInBoard(appStore, edit.taskId, { ...task, ...patch });
-        import('$lib/api').then(({ updateTask }) => updateTask(edit.projectId, edit.taskId, patch)).catch(err => {
-            console.error('Failed to update task:', err);
-        });
+        // Awaited and its failure reported: a call left running dies with the page when the person reloads
+        // straight after saving, taking the queue entry it was about to write with it. The card has already
+        // moved, so a refusal puts it back and says why; a write the queue accepted needs no toast, because the
+        // offline banner already names what is unreachable.
+        try {
+            const { updateTask } = await import('$lib/api');
+            await updateTask(edit.projectId, edit.taskId, patch);
+        } catch (err) {
+            updateTaskInBoard(appStore, edit.taskId, task);
+            dialogStore.showToast(errorText(err, t('api.updateTask')), 'error');
+        }
     }
 
     async function landingProject(): Promise<Project | null> {
@@ -1092,9 +1101,16 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         }
     }
 
-    // Opening a FULL task view replaces the floating task view (if any).
+    // Opening a FULL task view replaces the floating task view (if any) — on the opening, not as a standing
+    // ban. The board stream replaces `selectedTask` on every frame, so a standing ban destroys the window the
+    // Create-Subtask flow opens on purpose above the parent it is talking about.
+    let fullViewWasOpen = false;
     $effect(() => {
-        if (uiStore.showCardDetail && appStore.selectedTask) uiStore.floatingTask = null;
+        const openId = uiStore.showCardDetail ? appStore.selectedTask?.id ?? '' : '';
+        if (openId && (!fullViewWasOpen || openId === untrack(() => uiStore.floatingTask?.taskId))) {
+            uiStore.floatingTask = null;
+        }
+        fullViewWasOpen = !!openId;
     });
 </script>
 
@@ -1317,6 +1333,9 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                     appStore.selectedTask = task;
                     uiStore.showCardDetail = true;
                     urlRouter.write({ project: ft.projectId, task: ft.taskId, view: null, file: null }, false, true);
+                    // `write` leaves the screen flags alone, so an explorer opened from the top bar would keep
+                    // the screen: the URL now names the task and the render still asks for the explorer.
+                    urlRouter.applyView();
                 }}
             />
         {/if}

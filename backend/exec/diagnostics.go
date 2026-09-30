@@ -251,6 +251,17 @@ type diagnosticsPass struct {
 	worktree string
 	passCtx  context.Context
 	taskCtx  context.Context
+	// 0 means lspLoaderSettleGrace. A pass that wants a shorter one sets this, because several passes
+	// run at once and the package default is shared by all of them.
+	loaderSettleGrace time.Duration
+}
+
+// settleGrace is this pass's loader-state grace, read once per pass for the same reason.
+func (p *diagnosticsPass) settleGrace() time.Duration {
+	if p.loaderSettleGrace > 0 {
+		return p.loaderSettleGrace
+	}
+	return lspLoaderSettleGrace
 }
 
 // stopped reports whether the task itself is over.
@@ -438,7 +449,7 @@ func (p *diagnosticsPass) awaitPublishDiagnostics(ctx context.Context, srv *turn
 			}
 			if sawLoaderState {
 				if grace == nil {
-					grace = time.NewTimer(lspLoaderSettleGrace)
+					grace = time.NewTimer(p.settleGrace())
 					graceC = grace.C
 				}
 				continue

@@ -1,13 +1,11 @@
 import { test, expect, type Page } from '@playwright/test';
 import {
   isolatedProject, getProjectId, createTaskViaApi, navigateToTask, waitForChatForm,
-  waitForTaskState, getTaskData, apiGetJson, gotoProject,
+  waitForTaskState, getTaskData, apiGetJson, gotoProject, notInFlight,
+  PENDING_TOOL_STATUS as PENDING,
 } from './helpers';
 
 isolatedProject();
-
-/** `taskIsInFlight`, spelled for a raw task row. */
-const notInFlight = (t: any) => t?.execution_state !== 'running' && t?.execution_state !== 'pulling_image';
 
 /**
  * Returning to a task that ran to Review while the tab was away: the frames a frozen page was sent reach
@@ -16,8 +14,6 @@ const notInFlight = (t: any) => t?.execution_state !== 'running' && t?.execution
  * detector ends the run in Review.
  * `docs/reconnection.md → The reload meets the replay buffer`
  */
-
-const PENDING = '.tool-status.pending';
 
 /**
  * While `__away` every frame naming this task is taken off the socket and kept; `__thaw` fires the return

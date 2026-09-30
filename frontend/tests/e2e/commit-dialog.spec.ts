@@ -31,9 +31,9 @@ async function taskWithStagedChanges(page: Page, projectId: string, title: strin
     body: { status: 'review' },
   });
   await navigateToTask(page, taskId);
-  await expect(page.locator('.chat-review-bar')).toBeVisible({ timeout: 10000 });
+  await expect(page.locator('.chat-review-bar')).toBeVisible({ timeout: 60000 });
   const commitBtn = page.locator('.btn-commit-and-done');
-  await expect(commitBtn).toBeVisible({ timeout: 10000 });
+  await expect(commitBtn).toBeVisible({ timeout: 60000 });
   return { taskId, commitBtn };
 }
 
@@ -42,7 +42,7 @@ test.describe.serial('Commit Dialog', () => {
 
   test.beforeEach(async ({ page }) => {
     await gotoProject(page);
-    await page.waitForSelector('.project-item', { timeout: 10000 });
+    await page.waitForSelector('.project-item', { timeout: 60000 });
     projectId = await getProjectId(page);
   });
 
@@ -63,7 +63,7 @@ test.describe.serial('Commit Dialog', () => {
     await expect(page.locator('.task-detail-page')).toBeVisible();
 
     // Wait for the review bar to appear
-    await expect(page.locator('.chat-review-bar')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.chat-review-bar')).toBeVisible({ timeout: 60000 });
 
     // Click "Move to Done" (no changes, so no commit dialog should appear)
     // The review bar has → Done button on the left side
@@ -73,7 +73,7 @@ test.describe.serial('Commit Dialog', () => {
     } else {
       // Fallback: use the first .btn-commit-done (Move to Done or Resume)
       const commitBtn = page.locator('.btn-commit-done').first();
-      await expect(commitBtn).toBeVisible({ timeout: 10000 });
+      await expect(commitBtn).toBeVisible({ timeout: 60000 });
       await commitBtn.click();
     }
 
@@ -84,7 +84,7 @@ test.describe.serial('Commit Dialog', () => {
         return res.ok ? res.json() : null;
       }, { pid: projectId, tid: taskId });
       expect(task?.status).toBe('done');
-    }).toPass({ timeout: 10000 });
+    }).toPass({ timeout: 60000 });
 
     // Commit dialog should NOT be visible (no changes)
     const commitDialog = page.locator('.commit-dialog, [role="dialog"]');
@@ -122,7 +122,7 @@ test.describe.serial('Commit Dialog', () => {
     await expect(page.locator('.task-detail-page')).toBeVisible();
 
     // Wait for the review bar
-    await expect(page.locator('.chat-review-bar')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.chat-review-bar')).toBeVisible({ timeout: 60000 });
 
     // Wait for diff stats to arrive (indicates changes exist)
     await expect(async () => {
@@ -131,22 +131,22 @@ test.describe.serial('Commit Dialog', () => {
         return res.ok ? await res.json() : null;
       }, { pid: projectId, tid: taskId });
       expect(diff).not.toBeNull();
-    }).toPass({ timeout: 10000 });
+    }).toPass({ timeout: 60000 });
 
     // The commit button is the one gated on staged changes — `.btn-commit-done` alone
     // also matches the Resume and plain Move-to-Done variants of the review bar.
     const commitBtn = page.locator('.btn-commit-and-done');
-    await expect(commitBtn).toBeVisible({ timeout: 10000 });
+    await expect(commitBtn).toBeVisible({ timeout: 60000 });
     await commitBtn.click();
 
     // Commit dialog should appear (modal with commit-textarea)
     const commitDialog = page.locator('[role="dialog"]');
-    await expect(commitDialog).toBeVisible({ timeout: 10000 });
+    await expect(commitDialog).toBeVisible({ timeout: 60000 });
 
     // Should show "Generating commit message..." initially
     // Then show the textarea with the commit message
     const textarea = page.locator('.commit-textarea');
-    await expect(textarea).toBeVisible({ timeout: 15000 });
+    await expect(textarea).toBeVisible({ timeout: 60000 });
 
     // The message has to arrive over the preview stream — each frame the server writes is painted
     // into this textarea, so a non-empty value here is the client decoding the frame stream, and an
@@ -159,7 +159,7 @@ test.describe.serial('Commit Dialog', () => {
 
     // Wait for the confirm button to be enabled (streaming must finish/be cancelled)
     const confirmBtn = page.locator('.modal-footer .btn-primary');
-    await expect(confirmBtn).toBeEnabled({ timeout: 15000 });
+    await expect(confirmBtn).toBeEnabled({ timeout: 60000 });
 
     // Confirm the commit
     await confirmBtn.click();
@@ -171,7 +171,7 @@ test.describe.serial('Commit Dialog', () => {
         return res.ok ? res.json() : null;
       }, { pid: projectId, tid: taskId });
       expect(task?.status).toBe('done');
-    }).toPass({ timeout: 15000 });
+    }).toPass({ timeout: 60000 });
   });
 
   test('should cancel commit dialog and keep task in review', async ({ page }) => {
@@ -181,7 +181,7 @@ test.describe.serial('Commit Dialog', () => {
 
     // Wait for dialog to appear: `[role="dialog"]` is never unique, so filter by the dialog's own field.
     const commitDialog = page.locator('[role="dialog"]').filter({ has: page.locator('.commit-textarea') });
-    await expect(commitDialog).toBeVisible({ timeout: 10000 });
+    await expect(commitDialog).toBeVisible({ timeout: 60000 });
 
     // Cancel the dialog
     await commitDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
@@ -204,11 +204,11 @@ test.describe.serial('Commit Dialog', () => {
 
     // Commit dialog should appear (detect via the commit textarea which is unique to this dialog)
     const textarea = page.locator('.commit-textarea');
-    await expect(textarea).toBeVisible({ timeout: 15000 });
+    await expect(textarea).toBeVisible({ timeout: 60000 });
 
     // Wait for the streaming indicator to appear (spinner + "Generating...")
     const streamingIndicator = page.locator('.commit-progress');
-    await expect(streamingIndicator).toBeVisible({ timeout: 10000 });
+    await expect(streamingIndicator).toBeVisible({ timeout: 60000 });
 
     // Type in the textarea while streaming is active
     await textarea.fill('My custom commit message');

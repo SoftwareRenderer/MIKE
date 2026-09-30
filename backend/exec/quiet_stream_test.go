@@ -77,9 +77,12 @@ func TestQuietStreamCeilingIsReportedAsSilence(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Thinking\"},\"finish_reason\":null}]}\n\n")
 		f.Flush()
-		time.Sleep(6 * time.Second)
+		// Longer than the ceiling plus the clock's tick, which is the worst case before the client
+		// calls it silent: shorter and the handler's own EOF, not the silence, would end the call.
+		time.Sleep(3 * time.Second)
 	})
 	te, _, projectID, initialSHA := setupExecutorWithGit(t)
+	fastRetryLadder(te)
 	const taskID = "quiet-ceiling"
 	worktreePath := crashTask(t, te, projectID, initialSHA, taskID, srv.URL)
 

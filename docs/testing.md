@@ -12,14 +12,17 @@ only under load.
   block as "did not run".
 - **Mock LLM is default** — tests use pre-recorded fixtures, never the real endpoint. Fail gracefully
   when the LLM is slow/unavailable.
-- **LSP specs come in two kinds, and only one may gate on the server.**
-  `editor-hover-definition.spec.ts` answers `/api/extensions` itself and fakes the `/api/lsp` socket, so
-  it needs nothing installed — gating it on `hasInstalledLspExtension()` measures a list the suite
-  replaces, and since `global-setup` wipes the per-run database it always answered "skip": all nine
-  tests silently stopped covering anything, which is also how a stale stub and a wrong assertion stayed
-  hidden. `lsp-integration.spec.ts` keeps the gate because it really does talk to a language server, but
-  a wall of `skipped` is not coverage: before believing an LSP change is tested, run it against a server
-  that has the language server installed (they never run by default).
+- **No LSP spec may gate on a language server being installed.** `editor-hover-definition.spec.ts`
+  answers `/api/extensions` itself and fakes the `/api/lsp` socket, so it needs nothing installed. Gating
+  it on `hasInstalledLspExtension()` measures a list the suite replaces, and `global-setup` wipes the
+  per-run database, so the gate always answered "skip": nine tests silently stopped covering anything,
+  which is also how a stale stub and a wrong assertion stayed hidden.
+- **The gopls-gated spec is deleted and the remaining gap is named.** `lsp-integration.spec.ts` needed
+  `gopls` on the host plus the gopls extension installed, so every clean machine got five skips. One of
+  those five skipped itself when no completion list appeared, so it could not fail even where gopls was
+  present. Its multi-project connection claim is unit-tested in
+  `$lib/utils/__tests__/lsp-connection-manager.unit.ts` (multi-workspace routing) and its transport in
+  `backend/lsp`. What has no automated check now is the editor's completion list.
 - **Config-modifying tests** (settings, models, shortcuts, mode select, …) must run in the `isolated`
   project — add the spec name to `ISOLATED_SPECS` in `frontend/playwright.config.ts` (one array; the
   chromium lane's `testMatch` is derived from it, so the two lanes cannot drift apart).
@@ -127,6 +130,66 @@ and in pairs). One lane server answers all the workers and queues executor turns
 the task to go idle" is a race against everyone else's turns. Any new turn-bound wait must say so in its budget (use the
 `waitForSendButton(page, timeout)` turn budgets in `helpers.ts`, not the 10s `expect.timeout`).
 
+- **A spec that starts a turn owns its project.** A `createTaskViaApi()` call auto-starts a turn, so a spec
+  that names it — or `/send`, `/start`, `sendMessage` — without `isolatedProject()` queues behind every
+  other worker's turn. That queue is the rotation named above, and the gate is
+  `frontend/e2e-ownership.py` (`npm run check:e2e-ownership`, run by `make test-frontend`). It measures against a frozen register: a new offender fails the run, and so
+  does a register entry whose spec has since been converted. A spec that POSTs a project of its own, and
+  never names `getProjectId(`, counts as owning one. The register holds 7 specs today. Six of them
+  sit on the isolated lane, one worker with its own server; the seventh asserts the sidebar's project list,
+  which must not gain a project. A spec that asserts the **global** view stays out of the register for that
+  reason.
+- **`make test-e2e` is the lane, `make test-e2e SPECS=chat-messages` is the loop** (setup and teardown are
+  ~4 s beside the spec). Both build the frontend first and refuse to run without `MIKE_ENCRYPTION_KEY`, and
+  `global-setup` refuses a `frontend/dist` older than `frontend/src` — the servers serve the build from disk,
+  so a forgotten `npm run build` otherwise runs every spec against the previous frontend. `make test-e2e-diff`
+  is Playwright's `--only-changed`, which selects touched **spec** files only: a spec has no import edge to
+  the `src/` file it drives, so a source change selects nothing and the full run stays the claim for it.
+- **A full run's failure count is a property of the machine.** The box that froze `workers: 4` sees 0-1
+  failures in ~3 min. An 8-CPU box sees 12-20 in ~7.5 min, and every one of them is green under
+  `--last-failed --workers=1`. So read a red full run as "which waits are too tight", never as "which specs
+  are broken". Every remaining failure is a turn-bound wait, and the run holds 11-18 rootless containers
+  alive while it runs; whether that capacity is what a turn waits behind is the next measurement.
+- **A run leaves the machine as it found it.** Teardown deletes the fixture repos with the rest of what it
+  owns, then prints `leftovers: paths=… containers=…` so a survivor is named rather than assumed. It removes the
+  sandbox containers of this harness too, judged by what a container mounts and never by its name: a name filter
+  would reach the developer's own project containers. A spec that makes a path of its own under `/tmp` removes it
+  in that spec's own `afterAll`.
+- **A parallel-mode file runs its own `afterAll` between groups of its tests, not once at the end.** Teardown
+  that empties shared state therefore needs a matching readiness gate. `isolatedProject()` re-seeds its project
+  before every test for that reason, and a spec that wants a sparse board empties it inside the test.
+- **A test may not skip itself out of a failed expectation.** "No worktree appeared", "the registry did
+  not answer", "no completion list showed up" are the regressions a spec exists to catch, and a `test.skip()`
+  there turns them green. Skip only for a prerequisite global setup cannot provide — gVisor for a sandboxed
+  task is the one left — and say which in the skip reason. The quieter version of the same trap is a helper
+  that hands back `null` and a test that `return`s on it: one file carried seventeen of those, so seventeen
+  tests had not run in weeks, and their locators went stale behind them unread. A helper succeeds or throws.
+- **The browser's own link action is pressed up to three times.** A middle click whose `mousedown`,
+  `mouseup` and `auxclick` all reach a connected `<a>`, with nothing prevented, still produced no tab in 6
+  of 120 measured clicks. The renderer answered an `evaluate` in 3 ms, and no tab arrived even 40 s later.
+  `middleClickTab` (`link-like-rows.spec.ts`) re-presses: one dropped press is Chromium's, three dropped
+  presses are this app's. Everything else about those anchors is asserted without a gesture — the `href`,
+  and the same URL loaded directly.
+- **A temp path a spec creates is named for the worker that created it** (`process.env.TEST_PARALLEL_INDEX`).
+  Two workers that re-create one fixed directory are two workers deleting what the other is browsing. That is how
+  `file-editor` lost its File @ Mention cards and its folder-exists error at 2 workers.
+- **Nothing a spec creates may live at module scope.** A worker that only loads a file to collect its tests
+  runs the module and runs no hook. One leftover directory per run was the dependency-cache spec's own grant
+  target, made by a top-level `mkdtempSync`.
+- **A conversation a spec measures inside is built by global setup, not by the test.** `chatFixture()`
+  (`tests/e2e/helpers.ts`) reads `/tmp/kanban-test-chat-fixture.json`, which setup writes after seeding its own
+  project with `CHAT_ROWS` messages. Seeding belongs there because the wait belongs there: 200 sequential POSTs
+  inside the first test of a file is a fixture that times out on a server every worker queues turns on. A
+  fixture setup builds is read by specs and never deleted by them.
+- **Row count is not what buys scroll height.** Opening a chat renders 20 rows and 2436 px whatever the task
+  holds behind them, and the server answers five rows per older page, so `CHAT_ROWS` of 60 is eight pages of
+  reader. The spec asserts the ratio before it measures, rather than assuming it.
+- **A condition over a recording is anchored at the moment it is called.** "Nothing was written in the last three
+  frames" is already true the instant you ask. A wait that counts from the start of the recording therefore
+  returns at once, and its caller reads a sample taken before whatever it just set up.
+- **A measurement window is counted in frames.** A frame is one opportunity for the app to move the viewport, so
+  contention costs seconds and not claim. `chat-scroll-jitter.spec.ts` fails with `only 6 frames were sampled`
+  when it had too few, rather than reporting a quiet number.
 - **A spec that opens Settings names the tab it works in.** The Settings control opens the tab the update
   dot points at (`docs/auto-update.md`). The dot comes from the pass that runs at boot:
   `updateCheck.start()` sits in `loadAppData`, which both boot paths reach. So it can be lit before a
@@ -191,6 +254,64 @@ Two measured behaviours that chat specs keep getting wrong, both worth designing
   message: wait for `.btn-send` (idle) before sending, and assert on the entry that appeared
   *after* the send (`.last()`, or a count you captured before), never on `.first()`.
 
+### Reading a turn from the store, not from the screen
+
+Four facts about the read model decide whether a turn assertion can pass, and a spec that guesses them waits
+out its budget on a predicate that was never true. They live in `tests/e2e/helpers.ts`; call the helpers
+instead of re-deriving them.
+
+- **`…/messages` answers a bounded window.** Five units by default, 25 at most (`store.MessageWindowDefault`,
+  `MessageWindowMax`), oldest trimmed, and the `X-Messages-More` header says a row was cut. So a length is
+  not progress: it sits at 5 whatever you send. A body read off a non-2xx or an empty 200 is `null`, and
+  `?? 0` reads that as zero, which fails at the top of a loop that waits to fall. Compare row ids instead —
+  `messageRows()` reads that route. And match the posted row by id, not by position: the window slides, and
+  a fast answer is the newest row before the first read after the send, so a wait that demands the newest row
+  be the reader's own never clears. `sendTurn` remembers the ids from before the POST and looks for a new
+  `user` row among them.
+- **A finished run is `review` plus `idle`.** `failed` means failed, not finished. `in_progress` survives a
+  Stop, where only `execution_state` moves to `paused`, so neither column alone answers "is it still
+  running". `notInFlight` and `runHasEnded` are those two questions, and `terminalTurnStates` in
+  `backend/stream/app_stream.go` is their server-side mirror.
+- **A send that arrives mid-turn is absorbed, not rejected.** HTTP 200, and the answer the spec waits for
+  belongs to the previous turn. `sendTurn` waits for idle, asserts the send was accepted, waits for its own
+  user row, then for a newest row that is not one. A turn that ends waiting on `ask_question` has no answer
+  row, and the helper says so.
+- **A worktree write while the turn still runs is lost** — the agent's commit does not stage it. Write files
+  after `notInFlight`, and pin the auto-started turn with `llm-fixture:text` when a prompt must not reach the
+  plan route; `docs/auto-answer.md` is what answers an `ask_question` stop from the parent's context.
+
+- **A reload that flushes the offline queue waits for `navigator.onLine` first.** The flag clears
+  asynchronously. A page that boots while it still reads offline holds the persisted queue for an `online`
+  event that fired before the app was listening to anything, so the wait never ends and no budget fixes it.
+  `goOnline(page)` in `helpers.ts` is the two lines; a spec that reloaded after `setOffline(false)` without
+  them failed 2 of 3 runs at 1 worker and passes every run with them.
+
+`stopReading` and `comeBack` are the same argument about the visibility harness: emulating a vision
+deficiency does not restore visibility, so a return test that ends with it proves nothing about what came
+back.
+
+
+## The frontend unit suite
+
+`frontend/vitest.config.ts` runs every `*.unit.*` file under jsdom, on a worker thread, one fresh module
+registry per file. `make test-frontend` runs the suite and then the gates below. The suite is the bulk of its time: the
+slowest gate is `check:types` at ~8 s, and it is one `svelte-check` pass shared with the type-check.
+
+### Which environment a unit file runs in
+
+- **Every unit file gets a browser.** A file may name a different one in a comment above its imports
+  (`// @vitest-environment node`); no file does. Naming `jsdom` beside the config default restates the
+  default and decides nothing.
+- **What makes the claim hard is a guard, not a use.** A module that tests `typeof indexedDB` takes its
+  empty branch where no browser exists: `storage.ts` declines IndexedDB, `utils/diagram.ts` returns `''`,
+  `i18n/runtime.svelte.ts` returns early. Such a test stays green and pins a path no browser ever takes, so
+  the claim has to hold for every module the file reaches, at any depth — including `.svelte` modules and
+  packages whose constructor touches `document`. Two tests passed this way when a file opted out: one with
+  `showModal` throwing into an unhandled rejection, one asserting `-1` where the browser answers `1`.
+- **`pool: 'threads'` is what shortened the run**, and `isolate` staying on is what makes it safe: no two
+  files share a module registry, so `storage` and the i18n runtime cannot leak between them. Re-measure
+  from `frontend/` with `npx vitest run --pool=forks` beside `npx vitest run`, paired in one run, because
+  this box runs other people's jobs and an unpaired figure is worth nothing.
 
 ## Frontend cleanliness gates (run by `make check`)
 
@@ -203,10 +324,12 @@ Two measured behaviours that chat specs keep getting wrong, both worth designing
 - **`npm run check:dead-surface`** — `frontend/dead-surface.py` measures what knip's own exemption hides and
   what no linter counts: an export alive only for its unit test, and a CSS declaration line copied into a
   second stylesheet. The section below owns both rules and the ceiling's re-freeze.
-- **`npm run check:unused`** — `frontend/scripts/check-unused.sh` runs `svelte-check` on
-  `tsconfig.unused.json`, which turns on `noUnusedLocals` and `noUnusedParameters`; `npm run check` does
-  not. The script keeps the two `is declared but …` messages, prints `file:line name`, and fails on any.
-  It covers test files too, because `tsconfig.json` includes `src/**/*.ts`.
+- **`npm run check:types`** — `frontend/scripts/typecheck.sh` runs `svelte-check` on
+  `tsconfig.unused.json`, which adds `noUnusedLocals` and `noUnusedParameters` to everything
+  `tsconfig.json` says. That file extends it and changes no `include`, so this one pass sees every error
+  `npm run check` would see and `make check` runs this instead of both. The script fails on any `ERROR`
+  from svelte-check except the two `is declared but …` messages naming a `_`-prefixed name, which are
+  `$effect` subscription reads, and it refuses a run that analyzed no files.
 - **`npm run check:fetch`** — `frontend/scripts/check-fetch.sh` fails on a `fetch(` in any `*.svelte` or
   `*.ts` file under `src/` outside `src/lib/api/`. The API layer owns credentials, the CSRF token and the
   reading of a failed request, so a second caller answers one outage in its own words: a bare `TypeError`,
@@ -429,10 +552,18 @@ rm -rf /tmp/kanban-test-data /tmp/kanban-test-data-isolated /tmp/kanban-test-wor
   Neither is on the load list — 10 rounds of the first and 8 of the second, run while a five-package `-race`
   sweep already loaded the machine, came back green.
 
-- **Tests inside a Go package run concurrently now.** `backend/exec` calls `t.Parallel()` in 664 of its
-  top-level tests and the package went 130 s → 43 s; it is `make test-go`'s critical path, so the suite went
-  131 s → 43 s. Serially, 13 tests each paid the 3 s `executorExitGrace` and three more waited out a real
-  provider-silence ceiling.
+- **Tests inside one Go package run concurrently, but only `backend/exec` asks to.** `t.Parallel()` is
+  called in 671 of exec's top-level tests. It is called nowhere in `server`, `stream`, `sandbox`, `api`,
+  `extensions` or `git`, so each of those packages' wall time is the sum of its tests, and `exec` stays
+  `make test-go`'s critical path.
+- **Parallel tests are one batch, released after every serial test in the package has finished** — the
+  barrier behind `T.Parallel`. A serial test never overlaps a parallel one, so only the slow tests are
+  worth making parallel, and a serial one is safe beside a batch.
+- **A test does not wait out a production duration it never asserts.** The LLM retry ladder waits two,
+  four and eight seconds, and arrives as `Deps.LLMBackoff` (`fastRetryLadder` in tests), because
+  `backoffFor`'s own tests hold those numbers. A task prepared and never started is given back with
+  `releasePrepared` rather than stopped, because `executorExitGrace` waits for writes only a running loop
+  makes. Seconds spent on a constant assert that constant by accident — see `docs/locking.md`.
 - **The tests left serial are the ones touching a process global.** `t.Setenv` refuses to run in a parallel
   test, which is why `bash_stream_test.go` is one file. The other global is the CWD: template resolution reads
   it on every render (`prompts.resolvePromptDir`). So the 23 exec tests that chdir to the repo root cannot
@@ -448,7 +579,11 @@ rm -rf /tmp/kanban-test-data /tmp/kanban-test-data-isolated /tmp/kanban-test-wor
   dependent of a changed package, so a signature change is caught by that build and not by a test. The list
   is `scripts/touched-packages.sh`.
 - `npm run test:related -- <changed files>` runs the vitest files that import them. Measured on two library
-  files: 329 tests in 8 s, against 3227 in 36 s for the suite.
+  files: 329 tests in 8 s, against 3227 in 36 s for the suite. `make test-frontend-diff` is the same thing
+  with the file list taken from git (`frontend/scripts/touched-files.sh`), so the lane needs no arguments.
+  It lists only what a unit test can import: `vitest related` answers an empty run for a config or a shell
+  script and the whole suite for a `package.json`. It is a smaller suite rather than a cached one — vitest
+  reuses no result — and a change to a module many files import widens back toward the whole run.
 - `npx playwright test --last-failed` re-runs the previous run's failures, `--only-changed` the files git
   says moved. Neither is a gate: `make check` and a full e2e run stay the claims.
 
@@ -464,7 +599,13 @@ runs and can hold another task's start in the gate queue. The gVisor tests that 
 `TestMemoryLimitEnforced` keeps a 128 MB cap because that is the smallest cap measured to kill the process
 and leave the sandbox up; see `docs/sandbox-runtime.md`.
 
-## A machine that cannot start a container
+## A machine that cannot run a container
+
+Two host faults turn a green tree red, and neither is a fault in the code. The second starts its
+containers anyway, so it arrives as a memory limit and a build that broke together, not as a container
+that will not start.
+
+### The graph driver refuses
 
 `podman info` answering `'overlay' is not supported over overlayfs, a mount_program is required` means the
 host's own root is an overlayfs and podman was never given a `mount_program` — the image entrypoint makes
@@ -473,16 +614,45 @@ that switch, a bare test host does not. Every test that creates a container then
 the base image never pulls. Check it with `podman images` on nothing running: a red naming one of those
 suites, with that error in the log, is a reading about the machine.
 
+### The cgroup is not delegated
+
+`systemctl is-active user@$UID.service` answering `inactive` says there is no systemd user manager. Rootless
+podman then has no delegated cgroup subtree: it falls back to the login session scope, which the user
+cannot write. Two signatures follow, and both are readings about the machine.
+
+- **A memory cap is never applied.** The log carries `memory limit 512MB not enforced (cgroup write
+  failed)`, and every test that reads a container's `memory.max` answers `max`:
+  `TestCreateWithMemoryLimit`, `TestGetMemoryStats`, `TestApplyMemoryLimit_RunningSandbox`,
+  `TestMemoryLimitEnforced`, `TestStopRecordsHighWaterNotLastSample`.
+- **A build step gets no cgroup.** crun refuses the `RUN` of a `podman build` with
+  `create directory /sys/fs/cgroup/system.slice/…: Permission denied`, which takes `TestBuildImage` and
+  every extension image build with it.
+
+`sudo systemctl start user@$UID.service` clears the class, and `sudo loginctl enable-linger` keeps the
+manager up past the last login. Nothing in this tree reaches the fault: `PodmanEnv` already passes the
+rootless trio the CLI needs, and a host service is not an argument a call site can add. Until it runs, a
+sandbox's memory cap is decorative — `backend/sandbox` warns and continues, and the memory budget still
+admits the task (`docs/sandbox-runtime.md`).
+
 ## Tests that fail only under load
 
 - **What runs short is memory, and it is usually already gone before the run starts.** `/tmp` is tmpfs
   on this machine, so anything large under it is RAM. A project's `rw` sandbox mount at
   `/tmp/kanban-mount` — 11 GB of Go build cache — left 4 GB available at idle, and `free -m` read 0
   partway through a run. Under that shortage the failures rotate: turn-bound chat waits report neither
-  send nor stop, and a middle-click tab opens but its navigation stalls. Check `df -h /tmp` before
+  send nor stop, and a middle-click tab never opens (see the `middleClickTab` rule above — the gesture, not
+  the wait, is what fails). Check `df -h /tmp` before
   believing a red that names a spec on this list. Measured on the starved machine: `workers: 4` failed 5,
   `--workers=3` failed 8, and raising the popup wait from 20 s to 30 s changed nothing. The worker count
   is not the variable; the free memory is.
+
+- **A turn's own wait rotates in a full run and passes alone**: `chat-core`'s streaming tool-argument
+  accumulation is the one left. Which spec fails moves between runs, and raising an individual wait does not
+  move the red — a 20 s wait raised to 60 s simply arrived at a sibling later. A wait built on wall-clock
+  windows, or on a fixture the test itself seeds, is a wait that rotates; both are fixed in
+  `chat-scroll-jitter.spec.ts`, which now passes inside a full-parallel run.
+  None has been caught failing at 1 worker, and each of them waits 20-60 s on its own, so the red arrives slowly
+  and looks like a hang.
 
 - **`backend/extensions`' `TestHandleInstall_BuildFailureLeavesNoRowAndNoFiles`** fails on roughly 1 in 3
   `make check` / `-parallel 8` runs **on a CPU-loaded machine** and never alone or unloaded, so a red

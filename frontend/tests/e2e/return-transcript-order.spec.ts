@@ -1,16 +1,13 @@
 import { test, expect, type Page } from '@playwright/test';
 import {
   isolatedProject, createTaskViaApi, navigateToTask, waitForChatForm,
-  waitForTaskState, getProjectId, gotoProject, csrfFetch,
+  waitForTaskState, getProjectId, gotoProject, runHasEnded, stopReading, comeBack, sendTurn,
+  PENDING_TOOL_STATUS as PENDING,
 } from './helpers';
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
 isolatedProject();
 
-const PENDING = '.tool-status.pending';
-const TRANSCRIPT = '.chat-content';
-/** The state a run ends on: nothing more is written to the conversation after it. */
-const runIsOver = (t: any) => t?.status === 'review' && t?.execution_state === 'failed';
 /** The widest page the messages route allows. */
 const ROW_LIMIT = 25;
 /** A `tool_call` row draws inside the entry above it, so it names no entry of its own. */
@@ -48,17 +45,6 @@ async function watchTheReturn(page: Page): Promise<void> {
   });
 }
 
-const stopReading = (page: Page) =>
-  page.evaluate(() => { (window as any).__unfocused = true; (window as any).__away = true; });
-
-/** The window comes back. Only `focus` is dispatched — the page was never hidden. */
-const comeBack = (page: Page) => page.evaluate(() => {
-  const w = window as any;
-  w.__away = false;
-  w.__unfocused = false;
-  window.dispatchEvent(new Event('focus'));
-});
-
 const swallowed = (page: Page) => page.evaluate(() => (window as any).__swallowed as number);
 
 /** The entry ids on screen, top to bottom. */
@@ -89,6 +75,16 @@ async function storedIds(page: Page, projectId: string, taskId: string): Promise
   }, { pid: projectId, tid: taskId, limit: ROW_LIMIT });
   // Each page answers oldest first; the pages arrive newest window first.
   return pages.reverse().flat().filter(r => isEntryRow(r.role)).map(r => r.id);
+}
+
+/** Does the conversation overflow one window as the app asks for it — no `limit`, so the server's own
+ *  default (`store.MessageWindowDefault`)? False means the ordering this spec measures would hold by
+ *  accident, because nothing sat outside the newest page. */
+async function newestWindowIsPartial(page: Page, projectId: string, taskId: string): Promise<boolean> {
+  return page.evaluate(async ({ pid, tid }) => {
+    const res = await fetch(`/api/projects/${pid}/tasks/${tid}/messages`);
+    return res.headers.get('X-Messages-More') === 'true';
+  }, { pid: projectId, tid: taskId });
 }
 
 /** The conversation has stopped moving: nothing streams, and the stored rows no longer grow. */
@@ -125,7 +121,7 @@ async function assertRowOrder(page: Page, projectId: string, taskId: string): Pr
 // A conversation longer than one window comes back as the stored rows in the order they were written: a window
 // may hold no more than the newest tail, and never an answer out of its place.
 // `docs/reconnection.md → The tab that comes back`
-test.describe('A mounted chat that missed a turn longer than one window', () => {
+test.describe('A mounted chat that missed a conversation longer than one window', () => {
   test('comes back to the stored rows in order, with nothing older below them', async ({ page }) => {
     test.setTimeout(180000);
     await gotoProject(page);
@@ -135,21 +131,22 @@ test.describe('A mounted chat that missed a turn longer than one window', () => 
     await navigateToTask(page, taskId, projectId);
     await waitForChatForm(page);
     await expect(page.locator(PENDING)).toBeVisible({ timeout: 90000 });
-    await waitForTaskState(page, projectId, taskId, runIsOver, 120000);
+    await waitForTaskState(page, projectId, taskId, runHasEnded, 120000);
 
-    // A second turn runs unread, long enough that the newest window stops covering the first one.
+    // Six more turns run unread. One prompt is one unit and the messages route answers five units by
+    // default, so this is the case the ordering has to survive: the window the chat holds when it comes
+    // back no longer covers what it drew before the window closed.
     await stopReading(page);
-    const sent = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/send`, {
-      method: 'POST', body: { content: 'slow-tool-probe second turn' },
-    });
-    expect(sent.ok, `the second turn never started: ${JSON.stringify(sent.data)}`).toBe(true);
-    await waitForTaskState(page, projectId, taskId, runIsOver, 120000);
+    for (let turn = 1; turn <= 6; turn++) {
+      await sendTurn(page, projectId, taskId, `unread turn ${turn} llm-fixture:text`);
+      await waitForTaskState(page, projectId, taskId, runHasEnded, 120000);
+    }
     expect(await swallowed(page), 'no frame was dropped, so this run proved nothing').toBeGreaterThan(0);
 
     await comeBack(page);
-    // The run's last row ends the conversation, so it belongs at the bottom of the transcript.
-    await expect(page.locator(TRANSCRIPT), 'the run missed whole never came back')
-      .toContainText('Model stuck in loop', { timeout: 20000 });
+    // The premise, asserted: without this the ordering would hold of itself.
+    expect(await newestWindowIsPartial(page, projectId, taskId),
+      'the whole conversation fits in one window, so ordering had nothing to cross').toBe(true);
     await conversationSettles(page, projectId, taskId);
     await assertRowOrder(page, projectId, taskId);
 

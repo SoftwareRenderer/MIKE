@@ -64,6 +64,10 @@ GO_SCOPE := ./backend/... ./pkg/... .
 # in a script because make ends `$(shell` at the first parenthesis and reads `$|` as a variable.
 GO_TOUCHED := $(shell bash scripts/touched-packages.sh)
 
+# The frontend files this working tree changed, as `vitest related` takes them — relative to frontend/,
+# which is where the command runs. `make test-frontend-diff` is the same idea as `make test-diff`.
+FRONTEND_TOUCHED := $(shell bash frontend/scripts/touched-files.sh)
+
 # The static half's scope: GO_SCOPE plus the two script mains. `scripts/` is Go this repo owns and
 # nobody else checks — it is outside GO_SCOPE, so a dead declaration there survived every gate until
 # one run over ./scripts/... reported three of them. Tests are not run over it, because archgate and
@@ -103,22 +107,56 @@ test-diff: ## Go tests for the packages this working tree touched (cached)
 	if [ -z "$$pkgs" ]; then echo "test-diff: no changed .go files under $(GO_SCOPE)"; \
 	else echo "==> go test $$pkgs"; go test -parallel 4 $$pkgs; fi
 
+# The same lane on the frontend: `vitest related` runs the unit files that import a touched file, which
+# is the whole saving — vitest keeps no result cache to reuse, so this is a smaller suite, not a cached
+# one. It follows imports, not the other way round: a touched *test* file runs itself and nothing else,
+# and a change to something many files import widens back toward the suite. `test-frontend` stays the
+# gate, and `make check` remains the only claim.
+.PHONY: test-frontend-diff
+test-frontend-diff: ## vitest files that import a frontend file this working tree touched
+	@files='$(FRONTEND_TOUCHED)'; \
+	if [ -z "$$files" ]; then echo "test-frontend-diff: no changed source under frontend/src/"; \
+	else echo "==> vitest related, from $(words $(FRONTEND_TOUCHED)) touched file(s)"; \
+		cd frontend && npx vitest related --run --passWithNoTests $$files; fi
+
 # What each frontend gate enforces is in the doc that owns it: docs/markup-sanitizing.md (the HTML
-# sinks), docs/i18n.md (the surface count, the catalogue), docs/testing.md (the component fetch count,
-# the colour literals, the test-only export seam and the duplicated-CSS ceiling).
+# sinks), docs/i18n.md (the surface count, the catalogue), docs/testing.md (the component fetch count, the
+# colour literals, the test-only export seam, the duplicated-CSS ceiling and the turn-ownership register).
 .PHONY: test-frontend
-test-frontend: ## Run frontend unit tests + the gates (vitest, ~10s)
+test-frontend: ## Run frontend unit tests + the gates (~53s: vitest 40, one type-check 8, the rest 5)
 	cd frontend && npm test && npm run check:i18n && npm run check:i18n-surface-test && npm run check:i18n-surface && npm run check:sinks-test && npm run check:sinks
 	@echo "==> knip (unused files, exports, types, duplicates, dependencies)"
 	cd frontend && npm run check:dead
 	@echo "==> dead surface (an untagged test-only export; the duplicated-CSS ceiling)"
 	cd frontend && npm run check:dead-surface-test && npm run check:dead-surface
-	@echo "==> unused declarations (noUnusedLocals + noUnusedParameters)"
-	cd frontend && npm run check:unused
+	@echo "==> type-check (svelte-check with noUnusedLocals + noUnusedParameters)"
+	cd frontend && npm run check:types
 	@echo "==> component fetches (the API layer owns the network)"
 	cd frontend && npm run check:fetch
 	@echo "==> colour literals (the palette in src/app.css owns every colour)"
 	cd frontend && npm run check:colors
+	@echo "==> e2e turn ownership (a spec that starts a turn owns the project it starts it on)"
+	cd frontend && npm run check:e2e-ownership-test && npm run check:e2e-ownership
+
+# The browser lane needs three things global-setup cannot supply: a BUILT frontend (setup serves
+# frontend/dist from disk and never builds it, so an unbuilt change reads green), an encryption key (the
+# test servers inherit this shell), and free ports 3000/3001/9999. A run kills any dev server and leaves
+# nothing behind: restart the dev server with `make run` afterwards. `SPECS=` narrows the run
+# (`make test-e2e SPECS=chat-messages`), which is the loop worth having — setup plus teardown is ~4 s.
+.PHONY: test-e2e
+test-e2e: ## Playwright suite against the mock LLM (builds the frontend first)
+	@test -n "$$MIKE_ENCRYPTION_KEY" || { echo 'test-e2e: export MIKE_ENCRYPTION_KEY first — the test servers inherit it'; exit 1; }
+	@$(MAKE) --no-print-directory frontend
+	cd frontend && npx playwright test $(SPECS)
+
+# Playwright's own `--only-changed` selects the spec files git says moved, which for this suite means
+# `frontend/tests/e2e/*`: a spec has no import edge to the `src/` file it drives, so a source change
+# selects nothing and the full run is the claim for it.
+.PHONY: test-e2e-diff
+test-e2e-diff: ## Playwright specs this working tree touched (--only-changed)
+	@test -n "$$MIKE_ENCRYPTION_KEY" || { echo 'test-e2e-diff: export MIKE_ENCRYPTION_KEY first — the test servers inherit it'; exit 1; }
+	@$(MAKE) --no-print-directory frontend
+	cd frontend && npx playwright test --only-changed
 
 # A locale pack fails silently in both directions, so neither failure shows up in the UI: a
 # missing message key falls back to English per key (a pack missing 300 keys still looks
@@ -216,9 +254,7 @@ check: ## THE GATE: lint + archgate + docs-check + bridge-check + build + Go tes
 	@$(MAKE) --no-print-directory check-release
 	@echo "==> go test"
 	@$(MAKE) --no-print-directory test-go
-	@echo "==> svelte-check"
-	@cd frontend && npm run check
-	@echo "==> frontend unit tests + gates"
+	@echo "==> frontend unit tests + gates (the type-check runs there, once, strict)"
 	@$(MAKE) --no-print-directory test-frontend
 	@echo ""
 	@echo "make check: all gates green"
@@ -228,8 +264,10 @@ check: ## THE GATE: lint + archgate + docs-check + bridge-check + build + Go tes
 # every package is ~4min and would not get run, so this is where races have actually hidden. AGENTS.md:
 # "A green ./backend/exec/ is not proof" - the executor's locking bugs surface only under -race in
 # ./backend/server/, so both are here. `-parallel 4` because the race detector multiplies the work per
-# test, and the sandbox packages need a working podman + runsc on top of it.
-RACE_PKGS := ./backend/git/ ./backend/exec/ ./backend/server/ ./backend/stream/ ./backend/api/ ./pkg/logging/
+# test, and the sandbox packages need a working podman + runsc on top of it. `./backend/llama/` is here
+# because its silence-deadline test is a race test: repetition in the gate proves nothing the detector
+# does not prove in one pass.
+RACE_PKGS := ./backend/git/ ./backend/exec/ ./backend/server/ ./backend/stream/ ./backend/api/ ./backend/llama/ ./pkg/logging/
 
 .PHONY: check-race
 check-race: ## -race over the executor/stream/terminal layers (~5min) — required for any concurrency change

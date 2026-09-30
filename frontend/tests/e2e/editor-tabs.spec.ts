@@ -10,6 +10,9 @@ isolatedProject();
 
 test.describe.configure({ mode: 'parallel' });
 
+// `ownProjectPath()` and `getProjectId()` name this worker's own project, from global setup. An empty one is
+// the harness failing, not a condition a tab test can proceed without.
+
 test.describe('Editor Tabs', () => {
   test.beforeEach(async ({ page }) => {
     test.setTimeout(30000);
@@ -22,10 +25,8 @@ test.describe('Editor Tabs', () => {
     // The project explorer lists the project directory, so that is where the fixture
     // files have to be written — not a task worktree.
     const projectDir = ownProjectPath();
-    if (!projectDir || !projectId) {
-      await expect(page.locator('.board')).toBeVisible();
-      return;
-    }
+    expect(projectDir, 'this worker has no own project path').toBeTruthy();
+    expect(projectId, 'this worker has no own project id').toBeTruthy();
 
     const uniqueId = Date.now();
     const file1 = `tab-test-file1-${uniqueId}.txt`;
@@ -88,10 +89,8 @@ test.describe('Editor Tabs', () => {
     // The project explorer lists the project directory, so that is where the fixture
     // files have to be written — not a task worktree.
     const projectDir = ownProjectPath();
-    if (!projectDir || !projectId) {
-      await expect(page.locator('.board')).toBeVisible();
-      return;
-    }
+    expect(projectDir, 'this worker has no own project path').toBeTruthy();
+    expect(projectId, 'this worker has no own project id').toBeTruthy();
 
     const uniqueId = Date.now();
     const file1 = `tab-close-file1-${uniqueId}.txt`;
@@ -150,10 +149,8 @@ test.describe('Editor Tabs', () => {
     // The project explorer lists the project directory, so that is where the fixture
     // files have to be written — not a task worktree.
     const projectDir = ownProjectPath();
-    if (!projectDir || !projectId) {
-      await expect(page.locator('.board')).toBeVisible();
-      return;
-    }
+    expect(projectDir, 'this worker has no own project path').toBeTruthy();
+    expect(projectId, 'this worker has no own project id').toBeTruthy();
 
     const uniqueId = Date.now();
     const file1 = `tab-last-${uniqueId}.txt`;
@@ -190,10 +187,8 @@ test.describe('Editor Tabs', () => {
     // The project explorer lists the project directory, so that is where the fixture
     // files have to be written — not a task worktree.
     const projectDir = ownProjectPath();
-    if (!projectDir || !projectId) {
-      await expect(page.locator('.board')).toBeVisible();
-      return;
-    }
+    expect(projectDir, 'this worker has no own project path').toBeTruthy();
+    expect(projectId, 'this worker has no own project id').toBeTruthy();
 
     const uniqueId = Date.now();
     const file1 = `tab-unsaved-${uniqueId}.txt`;
@@ -237,10 +232,8 @@ test.describe('Editor Tabs', () => {
     // The project explorer lists the project directory, so that is where the fixture
     // files have to be written — not a task worktree.
     const projectDir = ownProjectPath();
-    if (!projectDir || !projectId) {
-      await expect(page.locator('.board')).toBeVisible();
-      return;
-    }
+    expect(projectDir, 'this worker has no own project path').toBeTruthy();
+    expect(projectId, 'this worker has no own project id').toBeTruthy();
 
     const uniqueId = Date.now();
     const file1 = `tab-reopen-${uniqueId}a.txt`;
@@ -289,10 +282,8 @@ test.describe('Editor Tabs', () => {
     // The project explorer lists the project directory, so that is where the fixture
     // files have to be written — not a task worktree.
     const projectDir = ownProjectPath();
-    if (!projectDir || !projectId) {
-      await expect(page.locator('.board')).toBeVisible();
-      return;
-    }
+    expect(projectDir, 'this worker has no own project path').toBeTruthy();
+    expect(projectId, 'this worker has no own project id').toBeTruthy();
 
     const uniqueId = Date.now();
     const file1 = `tab-preview-${uniqueId}a.txt`;
@@ -341,10 +332,8 @@ test.describe('Editor Tabs', () => {
     // The project explorer lists the project directory, so that is where the fixture
     // files have to be written — not a task worktree.
     const projectDir = ownProjectPath();
-    if (!projectDir || !projectId) {
-      await expect(page.locator('.board')).toBeVisible();
-      return;
-    }
+    expect(projectDir, 'this worker has no own project path').toBeTruthy();
+    expect(projectId, 'this worker has no own project id').toBeTruthy();
 
     const uniqueId = Date.now();
     const file1 = `tab-pin-${uniqueId}a.txt`;
@@ -398,10 +387,8 @@ test.describe('Editor Tabs', () => {
     // The project explorer lists the project directory, so that is where the fixture
     // files have to be written — not a task worktree.
     const projectDir = ownProjectPath();
-    if (!projectDir || !projectId) {
-      await expect(page.locator('.board')).toBeVisible();
-      return;
-    }
+    expect(projectDir, 'this worker has no own project path').toBeTruthy();
+    expect(projectId, 'this worker has no own project id').toBeTruthy();
 
     const uniqueId = Date.now();
     const file1 = `tab-unsaved-close-${uniqueId}.txt`;

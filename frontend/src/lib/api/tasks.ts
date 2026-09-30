@@ -5,12 +5,7 @@ import { mergeCachedRows } from '../utils/chat-window';
 import { markCached } from './cache';
 import { REVIEW_STATUS } from '../utils/review-notify';
 import { reviewNotifier } from '../services/review-notifications.svelte';
-import {
-    getOfflineStatus,
-    enqueueAction,
-    queueWrite,
-    isTransientError,
-} from './queue';
+import { getOfflineStatus, queueWrite, writeOrQueue } from './queue';
 import {
     createTaskRaw,
     updateTaskRaw,
@@ -35,7 +30,14 @@ import { t } from '$lib/i18n';
 
 // -- Task CRUD endpoints --
 
-/** Create a new task in a project. Queued when offline. */
+// A write that got no answer is queued and replayed: that is `writeOrQueue` ($lib/api/queue.ts), and a function
+// below that calls it does not say so again.
+
+/**
+ * Create a new task in a project, queued when offline. Deliberately not `writeOrQueue`, and the reason is the
+ * id: a create fixes its id before it sets out, so the card drawn on the board and the action held in the queue
+ * are the same task — a decision `CreateTaskModal` owns (docs/reconnection.md).
+ */
 export async function createTask(projectId: string, task: Partial<Task>): Promise<Task> {
     if (getOfflineStatus()) {
         const id = generateId();
@@ -61,40 +63,39 @@ export async function getTaskSync(projectId: string, taskId: string): Promise<Ta
     return res.json();
 }
 
-/** Update task metadata (title, model, settings). Queued when offline. */
+/** Update task metadata (title, model, settings). */
 export async function updateTask(projectId: string, taskId: string, task: Partial<Task>): Promise<Task> {
-    if (getOfflineStatus()) {
-        return await queueWrite('updateTask', { projectId, taskId, taskData: task }, { id: taskId, ...task } as Task);
-    }
-    return updateTaskRaw(projectId, taskId, task);
+    return writeOrQueue(
+        { type: 'updateTask', params: { projectId, taskId, taskData: task } },
+        () => updateTaskRaw(projectId, taskId, task),
+        () => ({ id: taskId, ...task } as Task),
+    );
 }
 
-/** Delete a task and its worktree. Queued when offline. */
+/** Delete a task and its worktree. */
 export async function deleteTask(projectId: string, taskId: string): Promise<void> {
-    if (getOfflineStatus()) {
-        await enqueueAction({ type: 'deleteTask', params: { projectId, taskId } });
-        return;
-    }
-    return deleteTaskRaw(projectId, taskId);
+    await writeOrQueue({ type: 'deleteTask', params: { projectId, taskId } }, () => deleteTaskRaw(projectId, taskId));
 }
 
-/** Move a task to a different column (status). Queued when offline. */
+/** Move a task to a different column (status). */
 export async function moveTask(projectId: string, taskId: string, status: string): Promise<Task> {
     // Every client-side move comes through here, so this is where a self-inflicted arrival is marked.
     if (status === REVIEW_STATUS) reviewNotifier.noteSelfMove(taskId);
-    if (getOfflineStatus()) {
-        // Carry moved_at so a queued move still lands on top of its column offline
-        return await queueWrite('moveTask', { projectId, taskId, status }, { id: taskId, status, moved_at: new Date().toISOString() } as Task);
-    }
-    return moveTaskRaw(projectId, taskId, status);
+    // moved_at is carried so a queued move still lands on top of its column offline
+    return writeOrQueue(
+        { type: 'moveTask', params: { projectId, taskId, status } },
+        () => moveTaskRaw(projectId, taskId, status),
+        () => ({ id: taskId, status, moved_at: new Date().toISOString() } as Task),
+    );
 }
 
-/** Commit changes and mark a task as done. Queued when offline. */
+/** Commit changes and mark a task as done. */
 export async function commitAndDone(projectId: string, taskId: string, commitMessage?: string): Promise<Task> {
-    if (getOfflineStatus()) {
-        return await queueWrite('commitAndDone', { projectId, taskId }, { id: taskId, status: 'done', moved_at: new Date().toISOString() } as Task);
-    }
-    return commitAndDoneRaw(projectId, taskId, commitMessage);
+    return writeOrQueue(
+        { type: 'commitAndDone', params: { projectId, taskId } },
+        () => commitAndDoneRaw(projectId, taskId, commitMessage),
+        () => ({ id: taskId, status: 'done', moved_at: new Date().toISOString() } as Task),
+    );
 }
 
 /** One frame of the commit-message preview stream, with the fields that event carries. */
@@ -162,20 +163,18 @@ export async function* streamCommitPreview(
     }
 }
 
-/** Dismiss this task's memory alert. Queued when offline, like any other write. */
+/** Dismiss this task's memory alert. */
 export async function dismissMemoryAlert(projectId: string, taskId: string, ack: MemoryAlertAckPayload): Promise<Task> {
-    if (getOfflineStatus()) {
-        return await queueWrite('dismissMemoryAlert', { projectId, taskId, ack }, { id: taskId, memory_alert_ack: ack } as Task);
-    }
-    return dismissMemoryAlertRaw(projectId, taskId, ack);
+    return writeOrQueue(
+        { type: 'dismissMemoryAlert', params: { projectId, taskId, ack } },
+        () => dismissMemoryAlertRaw(projectId, taskId, ack),
+        () => ({ id: taskId, memory_alert_ack: ack } as Task),
+    );
 }
 
-/** Delete all done tasks in a project. Queued when offline. */
+/** Delete all done tasks in a project. */
 export async function clearDoneTasks(projectId: string): Promise<{ deleted: number }> {
-    if (getOfflineStatus()) {
-        return await queueWrite('clearDoneTasks', { projectId }, { deleted: 0 });
-    }
-    return clearDoneTasksRaw(projectId);
+    return writeOrQueue({ type: 'clearDoneTasks', params: { projectId } }, () => clearDoneTasksRaw(projectId), () => ({ deleted: 0 }));
 }
 
 // -- Task execution endpoints --
@@ -186,61 +185,52 @@ export async function initTask(projectId: string, taskId: string): Promise<Task>
     return initTaskRaw(projectId, taskId);
 }
 
-/** Start task execution. Creates a worktree and begins the LLM loop. Queued when offline. */
+/** Start task execution. Creates a worktree and begins the LLM loop. */
 export async function startTask(projectId: string, taskId: string): Promise<Task> {
-    if (getOfflineStatus()) {
-        return await queueWrite('startTask', { projectId, taskId }, { id: taskId, status: 'in_progress' } as Task);
-    }
-    return startTaskRaw(projectId, taskId);
+    return writeOrQueue(
+        { type: 'startTask', params: { projectId, taskId } },
+        () => startTaskRaw(projectId, taskId),
+        () => ({ id: taskId, status: 'in_progress' } as Task),
+    );
 }
 
-/** Start a subtask (child task) execution. Queued when offline. */
+/** Start a subtask (child task) execution. */
 export async function startSubtask(projectId: string, taskId: string): Promise<Task> {
-    if (getOfflineStatus()) {
-        return await queueWrite('startSubtask', { projectId, taskId }, { id: taskId, status: 'in_progress' } as Task);
-    }
-    return startSubtaskRaw(projectId, taskId);
+    return writeOrQueue(
+        { type: 'startSubtask', params: { projectId, taskId } },
+        () => startSubtaskRaw(projectId, taskId),
+        () => ({ id: taskId, status: 'in_progress' } as Task),
+    );
 }
 
-/** Stop (pause) a running task. Queued when offline. */
+/** Stop (pause) a running task. */
 export async function stopTask(projectId: string, taskId: string): Promise<Task> {
-    if (getOfflineStatus()) {
-        return await queueWrite('stopTask', { projectId, taskId }, { id: taskId, execution_state: 'paused' } as Task);
-    }
-    return stopTaskRaw(projectId, taskId);
+    return writeOrQueue(
+        { type: 'stopTask', params: { projectId, taskId } },
+        () => stopTaskRaw(projectId, taskId),
+        () => ({ id: taskId, execution_state: 'paused' } as Task),
+    );
 }
 
-/** Resume a stopped task. Queued when offline. */
+/** Resume a stopped task. */
 export async function resumeTask(projectId: string, taskId: string): Promise<Task> {
-    if (getOfflineStatus()) {
-        return await queueWrite('resumeTask', { projectId, taskId }, { id: taskId, status: 'in_progress' } as Task);
-    }
-    return resumeTaskRaw(projectId, taskId);
+    return writeOrQueue(
+        { type: 'resumeTask', params: { projectId, taskId } },
+        () => resumeTaskRaw(projectId, taskId),
+        () => ({ id: taskId, status: 'in_progress' } as Task),
+    );
 }
 
 // -- Message endpoints --
 
-/** Send a user message, which starts a turn and returns its row. Queued when offline or on a network failure.
+/** Send a user message, which starts a turn and returns its row.
  * The payload is what the queue persists and the wire carries, so a field cannot be queued without being sent. */
 export async function sendTaskMessage(payload: SendTaskMessagePayload): Promise<SendResult> {
-    const queueMessage = () => {
-        const id = generateId();
-        return queueWrite('sendTaskMessage', { ...payload }, { id, role: 'user', content: payload.content });
-    };
-    if (getOfflineStatus()) {
-        return await queueMessage();
-    }
-    try {
-        return await sendTaskMessageRaw(payload);
-    } catch (e) {
-        // Network failure — the request never reached the server — so queue the message instead of
-        // losing it. A cancellation is not transient (isTransientError says so): the user stopped this
-        // send, and a queued copy would replay it after they left. Server refusals still propagate.
-        if (isTransientError(e)) {
-            return await queueMessage();
-        }
-        throw e;
-    }
+    return writeOrQueue(
+        { type: 'sendTaskMessage', params: { ...payload } },
+        () => sendTaskMessageRaw(payload),
+        () => ({ id: generateId(), role: 'user', content: payload.content }),
+    );
 }
 
 /** One window of a task's conversation, plus how to ask for the older rows. */
@@ -381,22 +371,20 @@ export async function getTaskMessageFull(projectId: string, taskId: string, mess
     }
 }
 
-/** Delete a message and all messages after it. Set regenerate=true to trigger LLM regeneration. Queued when offline. */
+/** Delete a message and all messages after it. Set regenerate=true to trigger LLM regeneration. */
 export async function deleteTaskMessagesAfter(projectId: string, taskId: string, messageId: string, regenerate = false): Promise<void> {
-    if (getOfflineStatus()) {
-        await enqueueAction({ type: 'deleteTaskMessagesAfter', params: { projectId, taskId, messageId, regenerate } });
-        return;
-    }
-    return deleteTaskMessagesAfterRaw(projectId, taskId, messageId, regenerate);
+    await writeOrQueue(
+        { type: 'deleteTaskMessagesAfter', params: { projectId, taskId, messageId, regenerate } },
+        () => deleteTaskMessagesAfterRaw(projectId, taskId, messageId, regenerate),
+    );
 }
 
-/** Delete a single message by ID (e.g., dismissing an error). Does not delete messages after it. Queued when offline. */
+/** Delete a single message by ID (e.g., dismissing an error). Does not delete messages after it. */
 export async function deleteTaskMessage(projectId: string, taskId: string, messageId: string): Promise<void> {
-    if (getOfflineStatus()) {
-        await enqueueAction({ type: 'deleteTaskMessage', params: { projectId, taskId, messageId } });
-        return;
-    }
-    return deleteTaskMessageRaw(projectId, taskId, messageId);
+    await writeOrQueue(
+        { type: 'deleteTaskMessage', params: { projectId, taskId, messageId } },
+        () => deleteTaskMessageRaw(projectId, taskId, messageId),
+    );
 }
 
 /** Check if deleting a message would also delete a fork branch. */
@@ -406,13 +394,12 @@ export async function checkMessageDelete(projectId: string, taskId: string, mess
     return res.json();
 }
 
-/** Edit a message's content. Queued when offline. */
+/** Edit a message's content. */
 export async function updateTaskMessage(projectId: string, taskId: string, messageId: string, content: string): Promise<void> {
-    if (getOfflineStatus()) {
-        await enqueueAction({ type: 'updateTaskMessage', params: { projectId, taskId, messageId, content } });
-        return;
-    }
-    return updateTaskMessageRaw(projectId, taskId, messageId, content);
+    await writeOrQueue(
+        { type: 'updateTaskMessage', params: { projectId, taskId, messageId, content } },
+        () => updateTaskMessageRaw(projectId, taskId, messageId, content),
+    );
 }
 
 /** Manually trigger context summarization for a task. Pass an AbortSignal to allow cancellation. */

@@ -1,7 +1,8 @@
 import { test, expect, type Page } from '@playwright/test';
 import {
   isolatedProject, createTaskViaApi, navigateToTask, waitForChatForm,
-  waitForTaskState, getProjectId, gotoProject,
+  waitForTaskState, getProjectId, gotoProject, runHasEnded, stopReading, comeBack,
+  PENDING_TOOL_STATUS as PENDING, TOOL_CALL_CARD as CARD, SLOW_PROBE_OUTPUT as OUTPUT,
 } from './helpers';
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
@@ -14,13 +15,8 @@ isolatedProject();
  * `docs/reconnection.md → The tab that comes back`
  */
 
-const PENDING = '.tool-status.pending';
-const CARD = '.tool-call-card';
 const TRANSCRIPT = '.chat-content';
-const OUTPUT = 'SLOW-TOOL-PROBE-DONE';
 const ANSWER = 'The command completed successfully';
-/** The end of the run: the state after which nothing more is written to the conversation. */
-const runIsOver = (t: any) => t?.status === 'review' && t?.execution_state === 'failed';
 
 /**
  * While `window.__unfocused` the page reports no focus; while `window.__away` every frame but the keepalive
@@ -83,18 +79,6 @@ async function watchTheReturn(page: Page): Promise<void> {
     };
   });
 }
-
-/** The window stops being read: it reports no focus, and no frame reaches JavaScript. */
-const stopReading = (page: Page) =>
-  page.evaluate(() => { (window as any).__unfocused = true; (window as any).__away = true; });
-
-/** The window comes back. Only `focus` is dispatched — the page was never hidden. */
-const comeBack = (page: Page) => page.evaluate(() => {
-  const w = window as any;
-  w.__away = false;
-  w.__unfocused = false;
-  window.dispatchEvent(new Event('focus'));
-});
 
 const seen = (page: Page) => page.evaluate(() => ({
   swallowed: (window as any).__swallowed as number,
@@ -172,7 +156,7 @@ test.describe('A mounted chat returned to by the window focus event', () => {
 
       // The window stops being read for the rest of the run.
       await stopReading(page);
-      await waitForTaskState(page, projectId, taskId, runIsOver, 120000);
+      await waitForTaskState(page, projectId, taskId, runHasEnded, 120000);
       annotate(`unfocused: frames dropped=${(await seen(page)).swallowed} signals=${JSON.stringify(
         (await seen(page)).signals)}`);
       expect((await seen(page)).swallowed, 'no frame was dropped, so this run proved nothing')

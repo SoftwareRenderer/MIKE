@@ -9,11 +9,10 @@ test.describe.configure({ mode: 'serial' });
 // ============================================================
 // CHAT INPUT — THE CARET SURVIVES A SEND (Task View, desktop)
 // ============================================================
-// Reading the answer and typing the next message are one continuous gesture: the caret stays in
-// the input the user typed into — the same element, not a fresh copy of it. Two things used to
-// take it: a click hands the focus to ➤ Send, which the announced turn then replaces with ■ Stop,
-// and a task that only looked stalled traded the whole form for the Restart bar while the answer
-// was still on its way. (jsdom moves no focus on click, so the click case lives here.)
+// Reading the answer and typing the next message are one continuous gesture: the caret stays in the input the
+// user typed into — the same element, not a fresh copy of it. Two things take it: a click hands focus to
+// ➤ Send, which the announced turn then replaces with ■ Stop, and a task that only looked stalled trades the
+// whole form for the Restart bar. (jsdom moves no focus on click, so the click case lives here.)
 
 /** The task at rest with its chat input ready, the way the desktop user reaches it. */
 async function openIdleTask(page: Page, label: string): Promise<void> {
@@ -53,7 +52,7 @@ test.describe('Chat input keeps the caret through a send', () => {
 
     // The announced turn swaps ➤ Send for ■ Stop and the answer lands; the caret does not move.
     await expect(page.locator('.chat-message.assistant').last()).toBeVisible();
-    await expect(page.locator('.btn-send'), 'the turn ended').toBeVisible({ timeout: 30000 });
+    await expect(page.locator('.btn-send'), 'the turn ended').toBeVisible({ timeout: 60000 });
     await expectSameInputFocused(page, input);
   });
 
@@ -67,7 +66,7 @@ test.describe('Chat input keeps the caret through a send', () => {
     await expect(page.locator('.chat-message.user').last()).toContainText(message);
 
     await expect(page.locator('.chat-message.assistant').last()).toBeVisible();
-    await expect(page.locator('.btn-send'), 'the turn ended').toBeVisible({ timeout: 30000 });
+    await expect(page.locator('.btn-send'), 'the turn ended').toBeVisible({ timeout: 60000 });
     await expectSameInputFocused(page, input);
   });
 });

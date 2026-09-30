@@ -542,9 +542,6 @@ func TestDiagnosticsPass_LoaderStateYieldsToTheSettledPublish(t *testing.T) {
 // workspace loses its diagnostics and looks healthy.
 func TestDiagnosticsPass_LoaderStateOnlyIsUnknownNotClean(t *testing.T) {
 	t.Parallel()
-	restore := lspLoaderSettleGrace
-	lspLoaderSettleGrace = 80 * time.Millisecond
-	defer func() { lspLoaderSettleGrace = restore }()
 
 	s := testStore(t)
 	setup := passSetup(t, s, "diag-proj", "diag-task")
@@ -555,7 +552,7 @@ func TestDiagnosticsPass_LoaderStateOnlyIsUnknownNotClean(t *testing.T) {
 	}
 	te := passExecutor(t, s, fake)
 
-	pass := &diagnosticsPass{te: te, mgr: fake, taskID: setup.task.ID, worktree: "/work/tree", passCtx: setup.ctx, taskCtx: setup.ctx}
+	pass := &diagnosticsPass{te: te, mgr: fake, taskID: setup.task.ID, worktree: "/work/tree", passCtx: setup.ctx, taskCtx: setup.ctx, loaderSettleGrace: 80 * time.Millisecond}
 	blocks, report := pass.run(registry, []string{"a.go"})
 
 	if len(blocks) != 0 {

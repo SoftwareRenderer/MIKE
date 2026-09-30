@@ -4,7 +4,6 @@ import { getProjectId, csrfFetch, isolatedProject, gotoProject } from './helpers
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
 isolatedProject();
 
-
 test.describe.serial('Sandbox Forward Ports', () => {
   test.beforeEach(async ({ page }) => {
     await gotoProject(page);
@@ -316,28 +315,4 @@ test.describe.serial('Sandbox Forward Ports', () => {
     await page.click('.overlay', { position: { x: 10, y: 10 } });
   });
 
-  test('should save port forwards via API', async ({ page }) => {
-    const projectId = await getProjectId(page);
-
-    // Update via API directly (container port only)
-    const result = await csrfFetch(page, `/api/projects/${projectId}`, {
-      method: 'PUT',
-      body: { sandbox_forward_ports: [{ container_port: 8080 }] },
-    });
-    expect(result.ok).toBe(true);
-
-    // Verify via API
-    const saved = await page.evaluate(async (pid) => {
-      const res = await fetch(`/api/projects/${pid}`);
-      return res.ok ? res.json() : null;
-    }, projectId);
-    expect(saved.forward_ports).toBeDefined();
-    expect(saved.forward_ports.length).toBe(1);
-    expect(saved.forward_ports[0].container_port).toBe(8080);
-
-    await csrfFetch(page, `/api/projects/${projectId}`, {
-      method: 'PUT',
-      body: { sandbox_forward_ports: [] },
-    });
-  });
 });

@@ -31,7 +31,7 @@ exempt=(
 
 scanned="$(find src -type f \( -name '*.svelte' -o -name '*.ts' \) \
     -not -path 'src/lib/api/*' -not -path '*/__tests__/*' | sort)"
-# A scan that found nothing is not a clean scan; check-unused.sh refuses for the same reason.
+# A scan that found nothing is not a clean scan; typecheck.sh refuses for the same reason.
 [ -n "$scanned" ] || { echo "check-fetch: no source file to scan under $PWD/src" >&2; exit 1; }
 
 is_exempt() {

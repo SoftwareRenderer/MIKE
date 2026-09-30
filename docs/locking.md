@@ -46,6 +46,11 @@ returned `*sync.Mutex` can be stored, copied and passed on, and a caller holding
   usually legitimate. Wedged sections are surfaced by the per-domain slow-wait report instead:
   `gitSlowWait` 2 s, `requestLockSlowWait` 5 s, `taskLockSlowWait` 60 s. The one bounded git wait is
   `worktreeLockTimeout` (30 s) on worktree creation, which waits on nothing else.
+- **A prepared execution is owned until its loop is launched or it is given back.**
+  `prepareTaskExecution` registers the executor entry and the `finished` channel that `StopTask` waits on
+  before it transitions the row. A caller that returns without launching the loop owes `releasePrepared`,
+  which cancels, unregisters and closes that channel. Cancelling alone leaves the task reading as running.
+  It also makes the next stop wait out `executorExitGrace` for a write that can never arrive.
 
 ## A wait a person is watching announces itself
 

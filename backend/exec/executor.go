@@ -69,6 +69,10 @@ type TaskExecutor struct {
 	lspMgr        lspManager
 	extTools      *extensions.ToolRegistry
 	commitQueue   *CommitQueue
+	// How long to wait before re-issuing a failed stream. Production is backoffFor; the retry loop
+	// reads this, so a test that only needs "retried, then failed" is not held to the production
+	// ladder. Its shape belongs to TestBackoffFor_* and TestQuietStreamBackoffWaitsAtLeastTheSilenceItSaw.
+	llmBackoff    func(attempt int, err error) time.Duration
 	gate          *ConcurrencyGate // per-LLM-request in-flight limit (incl. utility calls)
 	taskGate      *ConcurrencyGate // per-provider running-task limit
 	taskSlotWaits queuedWaiters    // which task-slot queue entry each task is blocked behind; see queuedWaiters
@@ -197,6 +201,25 @@ type executionState struct {
 	done chan struct{}
 	// Closed last by the executor defer
 	finished chan struct{}
+	// Ends the exit wait exactly once, whoever owns the state. See releasePrepared.
+	finish func()
+}
+
+// releasePrepared gives back a task that was prepared for execution but will never run: the context
+// is cancelled, the executor entry goes, and the exit channel closes. Cancelling alone leaves the task
+// reading as running (an entry is what a run is) and leaves anyone already waiting on finished to sleep
+// the whole exit grace for a write that will never arrive.
+func (te *TaskExecutor) releasePrepared(setup *taskExecSetup) {
+	if setup == nil {
+		return
+	}
+	setup.cancel()
+	te.taskMu.Lock()
+	if state, ok := te.tasks[setup.task.ID]; ok && state.ctx == setup.ctx {
+		delete(te.tasks, setup.task.ID)
+	}
+	te.taskMu.Unlock()
+	setup.finish()
 }
 
 // sandboxState is a consistent snapshot of the sandbox fields of an executionState. Setup,
@@ -327,11 +350,18 @@ type Deps struct {
 	LSPMgr         *lsp.ExtensionLSPManager
 	CommitQueue    *CommitQueue
 	ExtensionTools *extensions.ToolRegistry
+	// LLMBackoff decides how long a failed stream waits before its next attempt. Nil is the
+	// production ladder.
+	LLMBackoff func(attempt int, err error) time.Duration
 }
 
 // NewTaskExecutor wires an executor and the collaborators split out of it. Every TaskExecutor in
 // the repo, tests included, is built here: the worktree lock's slow-wait report is configured here.
 func NewTaskExecutor(deps Deps) *TaskExecutor {
+	llmBackoff := deps.LLMBackoff
+	if llmBackoff == nil {
+		llmBackoff = backoffFor
+	}
 	// Normalize nil concrete to a nil interface so te.lspMgr == nil guards hold.
 	var lspMgrI lspManager
 	if deps.LSPMgr != nil {
@@ -354,6 +384,7 @@ func NewTaskExecutor(deps Deps) *TaskExecutor {
 		lspMgr:        lspMgrI,
 		extTools:      deps.ExtensionTools,
 		commitQueue:   deps.CommitQueue,
+		llmBackoff:    llmBackoff,
 		gate:          NewConcurrencyGate(),
 		taskGate:      NewConcurrencyGate(),
 		memGate:       &MemoryGate{},
@@ -1142,6 +1173,7 @@ type taskExecSetup struct {
 	sandboxOpts    sandbox.SandboxOpts
 	done           chan struct{} // closed by executor defer; see executionState.done
 	finished       chan struct{} // closed after the executor's last DB write
+	finish         func()        // closes finished once, from whichever owner ends the ownership
 	// taskSlotURL is the provider URL whose running-task slot this execution
 	// currently holds ("" = not held). LLM providers only; agent providers
 	// manage their own concurrency.
@@ -1314,7 +1346,11 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	}
 	doneCh := make(chan struct{})
 	finishedCh := make(chan struct{})
-	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan, msgWake: msgWake, summarizeCh: summarizeCh, projectName: project.Name, sandboxEnabled: project.SandboxEnabled, executorType: execType, done: doneCh, finished: finishedCh}
+	// One closure beside the channel, handed to every owner of it: the loop that ran and a caller that
+	// gives the preparation back both end the wait, and neither may do it twice.
+	var finishOnce sync.Once
+	finish := func() { finishOnce.Do(func() { close(finishedCh) }) }
+	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan, msgWake: msgWake, summarizeCh: summarizeCh, projectName: project.Name, sandboxEnabled: project.SandboxEnabled, executorType: execType, done: doneCh, finished: finishedCh, finish: finish}
 	te.taskMu.Unlock()
 
 	return &taskExecSetup{
@@ -1333,6 +1369,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 		sandboxOpts:    sandbox.ProjectOpts(project),
 		done:           doneCh,
 		finished:       finishedCh,
+		finish:         finish,
 	}, nil
 }
 
@@ -1381,6 +1418,7 @@ func (te *TaskExecutor) getAgentRunner(projectID, taskID string) (*agent.AgentRu
 	if setup.sandboxEnabled {
 		if !te.sandboxMgr.ContainerIsRunning(task.ID) {
 			if _, _, err := te.setupSandbox(setup); err != nil {
+				te.releasePrepared(setup)
 				return nil, fmt.Errorf("create sandbox for compaction: %w", err)
 			}
 		}
@@ -1396,6 +1434,7 @@ func (te *TaskExecutor) getAgentRunner(projectID, taskID string) (*agent.AgentRu
 		SandboxEnabled: setup.sandboxEnabled,
 	})
 	if runnerErr != nil {
+		te.releasePrepared(setup)
 		return nil, fmt.Errorf("new agent runner: %w", runnerErr)
 	}
 
@@ -1420,6 +1459,7 @@ func (te *TaskExecutor) getAgentRunner(projectID, taskID string) (*agent.AgentRu
 		executorType:   "agent",
 		done:           setup.done,
 		finished:       setup.finished,
+		finish:         setup.finish,
 	}
 	te.tasks[taskID] = state
 	te.taskMu.Unlock()
@@ -1440,10 +1480,7 @@ func (te *TaskExecutor) StartTask(projectID, taskID string, autostarted bool) er
 	// Persist how this execution was started (backend-only provenance flag).
 	task.Autostarted = autostarted
 	if err := te.storeTask(task, projectID); err != nil {
-		execSetup.cancel()
-		te.taskMu.Lock()
-		delete(te.tasks, taskID)
-		te.taskMu.Unlock()
+		te.releasePrepared(execSetup)
 		return fmt.Errorf("persist autostarted flag: %w", err)
 	}
 
@@ -1464,10 +1501,7 @@ func (te *TaskExecutor) StartTask(projectID, taskID string, autostarted bool) er
 	// pending: this start has no work to do.
 	if len(existingMsgs) > 0 && existingMsgs[len(existingMsgs)-1].Role == "assistant" {
 		logging.For(logging.Startup).With(logging.TaskID, taskID).Infof("last message is from assistant, skipping LLM call -> review (awaiting user)")
-		execSetup.cancel()
-		te.taskMu.Lock()
-		delete(te.tasks, taskID)
-		te.taskMu.Unlock()
+		te.releasePrepared(execSetup)
 		if fresh, err := te.store.GetTask(projectID, taskID); err == nil {
 			fresh.Status = types.StatusReview
 			fresh.ExecutionState = types.ExecStateIdle

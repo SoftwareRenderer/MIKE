@@ -54,7 +54,8 @@ const (
 	llmRetryWindow   = 3 * time.Minute
 )
 
-// backoffFor returns the duration to wait before the next LLM retry attempt
+// backoffFor returns the duration to wait before the next LLM retry attempt. It is the ladder
+// production runs; the retry loop reads TaskExecutor.llmBackoff, which defaults to this.
 func backoffFor(attempt int, err error) time.Duration {
 	var le *llama.LlamaError
 	if errors.As(err, &le) && le.IsRateLimit() && le.RetryAfter > 0 {
@@ -406,7 +407,11 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 		// Signal exit last, even if the cleanup below panics: callers waiting on it
 		// (StopTask) then know every write of this defer has landed.
 		defer func() {
-			if setup.finished != nil {
+			// A prepared setup carries the closure that ends the wait; a setup built without one (a test's)
+			// owns its channel outright.
+			if setup.finish != nil {
+				setup.finish()
+			} else if setup.finished != nil {
 				close(setup.finished)
 			}
 		}()
@@ -792,7 +797,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 						flusher.flush()
 						close(streamDone)
 						return
-					case <-time.After(backoffFor(i, streamErr)):
+					case <-time.After(te.llmBackoff(i, streamErr)):
 					}
 					if time.Since(retryStarted) > llmRetryWindow {
 						break // the provider is ill and four requests in a row will not cure it

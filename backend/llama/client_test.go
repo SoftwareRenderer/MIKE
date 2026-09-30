@@ -113,8 +113,8 @@ func TestChatStream_SilenceThatResumesCompletes(t *testing.T) {
 	c := NewLlamaClient(server.URL, "test-model", "off", "")
 	c.noticeMidResp = 30 * time.Millisecond
 	c.waitTick = 10 * time.Millisecond
-	var notices int
-	c.SetSilencePolicy(0, func(time.Duration, string) { notices++ })
+	var notices atomic.Int32 // the notice hears on the watcher goroutine, not on this one
+	c.SetSilencePolicy(0, func(time.Duration, string) { notices.Add(1) })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -122,12 +122,14 @@ func TestChatStream_SilenceThatResumesCompletes(t *testing.T) {
 	if _, err := c.ChatStream(ctx, testMessages(), nil, func(types.ChatChoice) {}, nil, nil); err != nil {
 		t.Fatalf("a resumed stream must complete, got: %v", err)
 	}
-	if notices == 0 {
+	if notices.Load() == 0 {
 		t.Error("the silent stretch was never announced")
 	}
 }
 
-// TestChatStream_TimedOutRace closes the connection as the idle timer fires.
+// TestChatStream_TimedOutRace closes the connection as the idle timer fires. This is the whole
+// concurrency surface of `backend/llama` that the gate sees: the repetition here is not what proves the
+// race, the detector is, so the package belongs in RACE_PKGS and a small count is enough here.
 func TestChatStream_TimedOutRace(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -165,51 +167,9 @@ func handleRaceConn(t *testing.T, conn net.Conn) {
 	defer conn.Close()
 	buf := make([]byte, 4096)
 	_, _ = conn.Read(buf)
-	conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n"))
+	conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\n\r\n"))
 	conn.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"x\"},\"finish_reason\":null}]}\n\n"))
 	time.Sleep(55 * time.Millisecond)
-}
-
-// TestChatStream_ProductionTimedOutRace calls the real ChatStream
-// and triggers the timedOut race by closing the connection at the deadline.
-func TestChatStream_ProductionTimedOutRace(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer listener.Close()
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 200; i++ {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			go func(c net.Conn) {
-				defer c.Close()
-				buf := make([]byte, 8192)
-				_, _ = c.Read(buf)
-				c.Write([]byte("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\n\r\n"))
-				c.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"x\"},\"finish_reason\":null}]}\n\n"))
-				time.Sleep(50 * time.Millisecond)
-			}(conn)
-		}
-	}()
-
-	c := NewLlamaClient("http://"+listener.Addr().String(), "test-model", "off", "")
-	c.SetSilencePolicy(50*time.Millisecond, nil)
-
-	for range 200 {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		_, _ = c.ChatStream(ctx, testMessages(), nil, func(choice types.ChatChoice) {}, nil, nil)
-		cancel()
-	}
-
-	listener.Close()
-	wg.Wait()
 }
 
 // TestHasContent verifies the hasContent helper detects meaningful token deltas.

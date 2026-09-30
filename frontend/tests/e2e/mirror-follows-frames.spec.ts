@@ -1,5 +1,10 @@
 import { test, expect, type Page } from '@playwright/test';
-import { getProjectId, createTaskViaApi, csrfFetch } from './helpers';
+import {
+  getProjectId, createTaskViaApi, csrfFetch, isolatedProject, gotoProject,
+} from './helpers';
+// Each test file gets its own project, because it starts a turn: see isolatedProject() in helpers.ts.
+isolatedProject();
+
 
 /**
  * The mirror tracks the frames the page was sent, not just the boards it fetched, so a card moved by a
@@ -28,7 +33,7 @@ const column = (page: Page, title: string) => page.getByRole('list', { name: `${
 test.describe('The offline mirror follows the frames', () => {
     test('a card moved by a frame is in its new column after a mirror reload', async ({ page }) => {
         test.setTimeout(120000);
-        await page.goto('/');
+        await gotoProject(page);
         await expect(page.locator('.card').first()).toBeVisible({ timeout: 15000 });
 
         const projectId = await getProjectId(page);

@@ -1,7 +1,8 @@
 import { test, expect, type Page } from '@playwright/test';
 import {
   createTaskViaApi, navigateToTask, waitForChatForm, waitForTaskState,
-  isolatedProject, getProjectId, gotoProject,
+  isolatedProject, getProjectId, gotoProject, notInFlight,
+  PENDING_TOOL_STATUS as PENDING, TOOL_CALL_CARD as CARD, SLOW_PROBE_OUTPUT as OUTPUT,
 } from './helpers';
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
@@ -9,12 +10,6 @@ isolatedProject();
 
 // `slow-tool-probe` streams one bash call, runs it, then answers in plain text — the shape a
 // backgrounded tab lands in when the tool's result frame goes missing.
-
-const PENDING = '.tool-status.pending';
-const CARD = '.tool-call-card';
-const OUTPUT = 'SLOW-TOOL-PROBE-DONE';
-/** `taskIsInFlight`, spelled for a raw task row. */
-const notInFlight = (t: any) => t?.execution_state !== 'running' && t?.execution_state !== 'pulling_image';
 
 /**
  * Drops every `tool_result` task event before the app sees it: the socket stays up, the frames simply

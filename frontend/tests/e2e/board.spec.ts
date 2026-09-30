@@ -595,8 +595,7 @@ test.describe('Multi-Select', () => {
     await expect(card).toBeVisible();
   });
 
-  test('should confirm before starting selected tasks with task titles listed', async ({ browserName, page }) => {
-    if (browserName === 'webkit') test.skip();
+  test('should confirm before starting selected tasks with task titles listed', async ({ page }) => {
 
     const card1 = page.locator(`[data-task-id="${taskId1}"]`);
     const card2 = page.locator(`[data-task-id="${taskId2}"]`);
@@ -625,8 +624,7 @@ test.describe('Multi-Select', () => {
     await expect(card1).toBeVisible();
   });
 
-  test('should show Delete button in action bar', async ({ browserName, page }) => {
-    if (browserName === 'webkit') test.skip();
+  test('should show Delete button in action bar', async ({ page }) => {
 
     const card1 = page.locator(`[data-task-id="${taskId1}"]`);
     const card2 = page.locator(`[data-task-id="${taskId2}"]`);
@@ -639,8 +637,7 @@ test.describe('Multi-Select', () => {
     await expect(deleteBtn).toContainText('Delete 2 tasks');
   });
 
-  test('should confirm before deleting selected tasks with task titles listed', async ({ browserName, page }) => {
-    if (browserName === 'webkit') test.skip();
+  test('should confirm before deleting selected tasks with task titles listed', async ({ page }) => {
 
     const card1 = page.locator(`[data-task-id="${taskId1}"]`);
     const card2 = page.locator(`[data-task-id="${taskId2}"]`);
@@ -668,8 +665,7 @@ test.describe('Multi-Select', () => {
     await expect(card2).toBeVisible();
   });
 
-  test('should delete selected tasks on confirmation', async ({ browserName, page }) => {
-    if (browserName === 'webkit') test.skip();
+  test('should delete selected tasks on confirmation', async ({ page }) => {
 
     const card1 = page.locator(`[data-task-id="${taskId1}"]`);
     const card2 = page.locator(`[data-task-id="${taskId2}"]`);
@@ -690,8 +686,7 @@ test.describe('Multi-Select', () => {
     await expect(bar).not.toBeVisible();
   });
 
-  test('should clear selection on Escape', async ({ browserName, page }) => {
-    if (browserName === 'webkit') test.skip();
+  test('should clear selection on Escape', async ({ page }) => {
 
     const card1 = page.locator(`[data-task-id="${taskId1}"]`);
     const card2 = page.locator(`[data-task-id="${taskId2}"]`);
@@ -710,8 +705,7 @@ test.describe('Multi-Select', () => {
     await expect(card2).not.toHaveClass(/multi-selected/);
   });
 
-  test('should not show Start button when selected tasks are in different columns', async ({ browserName, page }) => {
-    if (browserName === 'webkit') test.skip();
+  test('should not show Start button when selected tasks are in different columns', async ({ page }) => {
 
     await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId2}/move`, {
       method: 'POST',

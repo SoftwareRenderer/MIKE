@@ -4,14 +4,11 @@ import os from 'os';
 import path from 'path';
 
 /**
- * Granting a language server its dependency directory, end to end: what the field shows is what lands
- * in the database, a missing directory comes back as a sentence, an empty value revokes, and the
- * running sandbox is stopped so the next use recreates it. Component states are in vitest.
+ * Granting a language server its dependency directory, end to end: what the field shows is what lands in the
+ * database, a missing directory comes back as a sentence, an empty value revokes, and the running sandbox is
+ * stopped so the next use recreates it. Component states are in vitest.
  *
- * Subject: the local fixture `tests/fixtures/local-extensions/testdev/dep-cache-lsp`, which declares
- * `capabilities.lsp.sandbox.dependency_cache` and the image it runs in (an LSP with neither is
- * refused at install). It is deleted at the end. The first test is the pre-install story: the Browse
- * card badges it and says setup follows installation.
+ * The subject is the local fixture `tests/fixtures/local-extensions/testdev/dep-cache-lsp`, deleted at the end.
  */
 
 const FIXTURE_AUTHOR = 'testdev';
@@ -19,12 +16,23 @@ const FIXTURE_NAME = 'dep-cache-lsp';
 const DISPLAY = 'Dependency Cache Fixture';
 
 /**
- * A directory that exists, for the grant to point at: the server refuses one that does not. A directory
- * of the test's own under a temp folder, which is what the field asks for — a bare top level of the
- * machine is refused, and whatever is granted is readable only from this extension's own sandbox.
+ * A directory that exists, for the grant to point at: the server refuses one that does not, and refuses a bare
+ * top level of the machine, so this is a directory of the test's own under a temp folder.
  */
-const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kanban-dep-cache-')) + '/mod';
-fs.mkdirSync(cacheDir, { recursive: true });
+// The grant points at a directory that has to exist, so this file makes one under /tmp — in a hook, because a
+// worker that only loads this file to collect its tests runs the module and no hook.
+let cacheRoot = '';
+let cacheDir = '';
+
+test.beforeAll(() => {
+    cacheRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'kanban-dep-cache-'));
+    cacheDir = path.join(cacheRoot, 'mod');
+    fs.mkdirSync(cacheDir, { recursive: true });
+});
+
+test.afterAll(() => {
+    try { fs.rmSync(cacheRoot, { recursive: true, force: true }); } catch { /* named by the teardown report */ }
+});
 
 let installedId: string | null = null;
 

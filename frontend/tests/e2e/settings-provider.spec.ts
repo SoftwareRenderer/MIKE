@@ -866,6 +866,9 @@ test.describe.serial('Test connection with empty model list', () => {
 });
 
 // ─── Add Provider Scroll Tests ─────────────────────────────────────────────
+// Only the positive half runs here: the negative half is a call to `scrollIntoView`, recorded in
+// `src/lib/components/__tests__/config-modal-provider-scroll.unit.svelte.ts`. The browser version measured
+// layout rounding, where a fit 4 px from the edge failed the spec rather than the rule.
 
 test.describe.serial('Add provider scroll', () => {
     test.beforeEach(async ({ page }) => {
@@ -914,42 +917,6 @@ test.describe.serial('Add provider scroll', () => {
         const urlInput = newCard.getByLabel('Provider URL');
         await expect(urlInput).toBeInViewport({ timeout: 5000 });
         await expect(urlInput).toBeFocused();
-
-        // Discard the unsaved provider
-        await page.click('button:has-text("Cancel")');
-        const discardBtn = page.getByRole('button', { name: 'Discard' });
-        if (await discardBtn.isVisible().catch(() => false)) {
-            await discardBtn.click();
-        }
-        await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
-    });
-
-    test('should not scroll when the new provider input area is already visible', async ({ page }) => {
-        // A single collapsed provider: the primary providers section + the two
-        // card headers + the new card's input area fit in the (fixed 600px)
-        // modal body, so the input area is already visible and nothing needs
-        // to move.
-        const idByName = await seedProvidersByIds(page, [
-            { name: 'scroll-compact', url: 'http://scroll-compact:9999/v1', models: [{ name: 'model-c' }], concurrency: 1 },
-        ], { worker: 'scroll-compact', workerModel: 'model-c', utility: 'scroll-compact', utilityModel: 'model-c' });
-        await waitForConfig(page, c => c.providers && c.providers.length === 1 && c.worker_provider === idByName['scroll-compact']);
-        await page.goto('/');
-        await page.waitForSelector('.card', { timeout: 10000 });
-
-        await openProviders(page);
-        const scrollTopBefore = await page.$eval('.modal-body', el => el.scrollTop);
-
-        await page.getByRole('button', { name: '+ Add Provider' }).click();
-        const newCard = page.locator('.provider-card').last();
-        await expect(newCard.locator('.provider-details')).toBeVisible({ timeout: 5000 });
-
-        const urlInput = newCard.getByLabel('Provider URL');
-        await expect(urlInput).toBeInViewport({ timeout: 5000 });
-        // Focusing is the final step of the reveal — once it lands, the reveal
-        // (including any scroll) has fully completed.
-        await expect(urlInput).toBeFocused();
-        // The input area was already visible — the modal body must not have scrolled.
-        expect(await page.$eval('.modal-body', el => el.scrollTop)).toBe(scrollTopBefore);
 
         // Discard the unsaved provider
         await page.click('button:has-text("Cancel")');

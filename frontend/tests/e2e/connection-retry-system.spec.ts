@@ -1,10 +1,15 @@
 import { test, expect } from '@playwright/test';
-import { getProjectId, createTaskViaApi, navigateToTask, ensureTaskStarted, waitForSendButton } from './helpers';
+import {
+  getProjectId, createTaskViaApi, navigateToTask, ensureTaskStarted, waitForSendButton, isolatedProject, gotoProject,
+} from './helpers';
+// Each test file gets its own project, because it starts a turn: see isolatedProject() in helpers.ts.
+isolatedProject();
+
 
 test.describe.serial('Connection retry renders as system message', () => {
   test('retry notification shows as a system card, not a user bubble', async ({ page }) => {
     test.setTimeout(90000);
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.card', { timeout: 10000 });
 
     const projectId = await getProjectId(page);
