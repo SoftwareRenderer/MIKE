@@ -63,7 +63,7 @@
         color: var(--color-text-tertiary);
         font-size: var(--text-2xs);
         cursor: pointer;
-        transition: all 0.15s ease;
+        transition: all var(--dur-base) ease;
         border-bottom: 2px solid transparent;
     }
     .tab-btn.active {

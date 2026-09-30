@@ -135,7 +135,7 @@
         display: flex;
         flex-direction: column;
         overflow: hidden;
-        transition: background 0.15s ease;
+        transition: background var(--dur-base) ease;
     }
     .column.is-over {
         background: var(--color-surface-2);
@@ -204,7 +204,7 @@
         background: none;
         color: var(--color-text-tertiary);
         cursor: pointer;
-        transition: background 0.15s ease, color 0.15s ease;
+        transition: background var(--dur-base) ease, color var(--dur-base) ease;
         padding: 0;
         flex-shrink: 0;
         opacity: 1;
@@ -212,7 +212,7 @@
     .add-btn:hover {
         opacity: 1;
         background: var(--color-accent-dark);
-        color: white;
+        color: var(--color-btn-text);
     }
     @media (max-width: 768px) {
         .add-btn {
@@ -231,14 +231,14 @@
         background: transparent;
         color: var(--color-text-tertiary);
         cursor: pointer;
-        transition: background 0.15s ease, color 0.15s ease;
+        transition: background var(--dur-base) ease, color var(--dur-base) ease;
         padding: 0;
         flex-shrink: 0;
     }
     .clear-btn:hover {
         opacity: 1;
         background: var(--color-status-red-dark);
-        color: white;
+        color: var(--color-btn-text);
     }
     @media (max-width: 768px) {
         .clear-btn {
@@ -262,7 +262,7 @@
         font-size: var(--text-base);
         color: var(--color-text-secondary);
         cursor: pointer;
-        transition: background 0.15s ease;
+        transition: background var(--dur-base) ease;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -270,12 +270,13 @@
     .add-task-btn:hover {
         opacity: 1;
         background: var(--color-accent-dark);
-        color: white;
+        color: var(--color-btn-text);
     }
+    /* The fill arrives only under the pointer, so the family rule in app.css cannot carry this one. */
     .add-task-btn:hover .key-hint {
         opacity: 1;
-        color: rgba(255, 255, 255, 0.85);
-        border-color: rgba(255, 255, 255, 0.3);
-        background: rgba(255, 255, 255, 0.1);
+        color: rgb(from var(--color-btn-text) r g b / 0.85);
+        border-color: rgb(from var(--color-btn-text) r g b / 0.3);
+        background: rgb(from var(--color-btn-text) r g b / 0.1);
     }
 </style>

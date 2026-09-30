@@ -40,7 +40,7 @@
         width: var(--pct, 0%);
         background: var(--color-accent);
         border-radius: var(--radius-sm);
-        transition: width 0.3s ease;
+        transition: width var(--dur-slow) ease;
     }
 
     .ext-build-error .ext-build-fill {

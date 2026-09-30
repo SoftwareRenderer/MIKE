@@ -83,7 +83,7 @@
         content: '';
         position: absolute;
         background: var(--color-border);
-        transition: background 0.15s ease;
+        transition: background var(--dur-base) ease;
     }
     .resize-handle:hover::before,
     .resize-handle.dragging::before {

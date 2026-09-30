@@ -20,13 +20,13 @@
         bottom: 24px;
         left: 50%;
         transform: translateX(-50%);
-        color: white;
+        color: var(--color-text-primary);
         padding: 10px 20px;
         border-radius: var(--radius-md);
         font-size: var(--text-base);
         z-index: var(--z-toast);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-        animation: slide-up 0.2s ease-out;
+        box-shadow: var(--shadow-popover);
+        animation: slide-up var(--dur-md) ease-out;
         max-width: 90vw;
         text-align: center;
     }

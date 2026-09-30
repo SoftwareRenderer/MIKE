@@ -695,7 +695,7 @@
         padding: 2px 4px;
         margin: 0 0 4px;
         font-family: var(--font-mono);
-        transition: color 0.15s ease;
+        transition: color var(--dur-base) ease;
     }
     .tool-result-expand:hover {
         color: var(--color-text-primary);
@@ -948,7 +948,7 @@
         border: 1px solid var(--color-border);
         border-left: 3px solid var(--color-column-backlog);
         cursor: pointer;
-        transition: all 0.15s ease;
+        transition: all var(--dur-base) ease;
         max-width: 100%;
         overflow: hidden;
         font-family: inherit;
@@ -995,11 +995,11 @@
         word-break: break-word;
     }
     .edit-removed {
-        background: rgba(248,81,73,0.12);
+        background: rgb(from var(--color-status-red) r g b / 0.12);
         color: var(--color-text-secondary);
     }
     .edit-added {
-        background: rgba(63,185,80,0.12);
+        background: rgb(from var(--color-status-green) r g b / 0.12);
         color: var(--color-text-secondary);
     }
     .edit-context {
@@ -1011,8 +1011,8 @@
         user-select: none;
         font-weight: 600;
     }
-    .edit-removed .edit-diff-sign { color: rgba(248,81,73,0.8); }
-    .edit-added .edit-diff-sign { color: rgba(63,185,80,0.8); }
+    .edit-removed .edit-diff-sign { color: rgb(from var(--color-status-red) r g b / 0.8); }
+    .edit-added .edit-diff-sign { color: rgb(from var(--color-status-green) r g b / 0.8); }
     .edit-diff-text {
         flex: 1;
         min-width: 0;
@@ -1024,11 +1024,11 @@
         white-space: inherit;
     }
     .edit-segment-added {
-        background: rgba(63,185,80,0.4);
+        background: rgb(from var(--color-status-green) r g b / 0.4);
         border-radius: var(--radius-xs);
     }
     .edit-segment-removed {
-        background: rgba(248,81,73,0.4);
+        background: rgb(from var(--color-status-red) r g b / 0.4);
         border-radius: var(--radius-xs);
     }
     .edit-separator {
@@ -1049,7 +1049,7 @@
         font-size: var(--text-xs);
         font-weight: 600;
         color: var(--color-text-secondary);
-        transition: all 0.15s ease;
+        transition: all var(--dur-base) ease;
     }
     .edit-diff-toggle:hover {
         opacity: 1;

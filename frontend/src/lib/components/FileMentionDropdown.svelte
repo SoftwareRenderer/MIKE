@@ -135,7 +135,7 @@
         font-size: var(--text-sm);
         font-family: var(--font-mono, monospace);
         color: var(--color-text-secondary);
-        transition: background 0.1s ease, color 0.1s ease;
+        transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -146,7 +146,7 @@
         color: var(--color-text-primary);
     }
     .mention-item.active {
-        outline: 1px solid var(--color-accent)44;
+        outline: 1px solid rgb(from var(--color-accent) r g b / 0.27);
     }
     .mention-item svg {
         flex-shrink: 0;

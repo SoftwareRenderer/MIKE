@@ -1021,7 +1021,7 @@
         cursor: pointer;
         border-bottom: 1px solid var(--color-border);
         margin-bottom: -1px;
-        transition: color 0.15s, border-color 0.15s;
+        transition: color var(--dur-base), border-color var(--dur-base);
         white-space: nowrap;
     }
     .tab-btn:hover {
@@ -1043,11 +1043,6 @@
         flex-direction: column;
         gap: 16px;
         padding-bottom: 8px;
-    }
-
-    /* When modal-body padding-top is 0 (extensions tab), restore spacing for other tabs */
-    :global(.modal-body[style*="padding-top: 0"]) .tab-content > :not(.extensions-tab) {
-        padding-top: 8px;
     }
 
     /* The panel box comes from settings-section.css; only the header row is here. */
@@ -1179,7 +1174,7 @@
         font-weight: 500;
         cursor: pointer;
         border: 1px solid var(--color-accent);
-        transition: background 0.15s, color 0.15s;
+        transition: background var(--dur-base), color var(--dur-base);
     }
     .btn-pwa-install:hover {
         opacity: 1;
@@ -1201,7 +1196,7 @@
         text-decoration: none;
         cursor: pointer;
         border: 1px solid var(--color-accent);
-        transition: background 0.15s, color 0.15s;
+        transition: background var(--dur-base), color var(--dur-base);
     }
     .btn-ca-download:hover {
         background: var(--color-accent-dark);
@@ -1219,7 +1214,7 @@
         font-weight: 500;
         font-family: inherit;
         border: 1px solid var(--color-accent);
-        transition: background 0.15s, color 0.15s;
+        transition: background var(--dur-base), color var(--dur-base);
     }
     .btn-check-updates:hover {
         opacity: 1;
@@ -1296,7 +1291,7 @@
         color: var(--color-text-tertiary);
         cursor: pointer;
         border-radius: var(--radius-sm);
-        transition: background 0.15s, color 0.15s;
+        transition: background var(--dur-base), color var(--dur-base);
         flex-shrink: 0;
     }
     .icon-btn:hover {

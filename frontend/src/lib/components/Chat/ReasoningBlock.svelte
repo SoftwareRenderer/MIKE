@@ -87,7 +87,7 @@
         font-size: var(--text-xs);
         padding: 2px 6px;
         border-radius: var(--radius-sm);
-        transition: all 0.15s ease;
+        transition: all var(--dur-base) ease;
     }
     .reasoning-toggle:hover {
         opacity: 1;

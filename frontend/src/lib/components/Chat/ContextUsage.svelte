@@ -103,7 +103,7 @@
         white-space: nowrap;
         flex-shrink: 0;
         cursor: default;
-        transition: background 0.15s ease, border-color 0.15s ease;
+        transition: background var(--dur-base) ease, border-color var(--dur-base) ease;
     }
     .context-usage.clickable {
         cursor: pointer;

@@ -429,7 +429,7 @@
         border: 1px solid var(--color-border);
         border-radius: var(--radius-md);
         background: var(--color-surface-3);
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+        box-shadow: var(--shadow-popover);
         font-family: var(--font-mono);
         font-size: var(--text-xs);
         line-height: 1.4;
@@ -460,7 +460,7 @@
         line-height: 1.5;
         cursor: pointer;
         white-space: nowrap;
-        transition: background 0.1s ease, color 0.1s ease;
+        transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
     }
     .path-tooltip-copy:hover {
         border-color: var(--color-text-tertiary);

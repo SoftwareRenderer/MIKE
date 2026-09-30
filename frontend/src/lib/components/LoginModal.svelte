@@ -38,7 +38,7 @@
     </button>
 {/snippet}
 
-<BaseModal width="360px" closeOnOverlayClick={false} footer={footer} onClose={() => {}} header={header}>
+<BaseModal width="360px" modalClass="login-modal" overlayClass="login-modal-overlay" closeOnOverlayClick={false} footer={footer} onClose={() => {}} header={header}>
     {#if error}
         <div class="login-error" role="alert">{error}</div>
     {/if}
@@ -62,28 +62,16 @@
 {/snippet}
 
 <style>
-    :global(.overlay) {
+    :global(.overlay.login-modal-overlay) {
         backdrop-filter: blur(4px);
     }
-    :global(.modal) {
+    :global(.modal.login-modal) {
         padding: 4px;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
     }
-    :global(.modal-header) {
-        padding: 0 0 16px;
-        border-bottom: none;
-    }
-    :global(.modal-body) {
+    :global(.login-modal .modal-body) {
         display: flex;
         flex-direction: column;
         gap: 16px;
-        padding: 0;
-    }
-    :global(.modal-footer) {
-        border-top: none;
-        padding-top: 0;
-        padding: 16px 0 0;
-        justify-content: stretch;
     }
 
     .login-header {
@@ -95,7 +83,7 @@
     }
 
     .login-error {
-        background: rgba(248, 81, 73, 0.15);
+        background: var(--color-status-red-bg);
         color: var(--color-text-primary);
         padding: 8px 12px;
         border-radius: var(--radius-sm);
@@ -112,7 +100,7 @@
         color: var(--color-text-primary);
         font-size: var(--text-base);
         outline: none;
-        transition: border-color 0.15s;
+        transition: border-color var(--dur-base);
         box-sizing: border-box;
         font-family: inherit;
     }

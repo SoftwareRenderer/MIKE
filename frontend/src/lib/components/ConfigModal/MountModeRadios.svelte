@@ -29,7 +29,7 @@
         display: flex;
         gap: 0;
         border: 1px solid var(--color-border-subtle);
-        border-radius: var(--radius-sm, 4px);
+        border-radius: var(--radius-sm);
         overflow: hidden;
         flex-shrink: 0;
     }
@@ -42,7 +42,7 @@
         font-size: var(--text-xs);
         color: var(--color-text-secondary, var(--color-text-tertiary));
         cursor: pointer;
-        transition: background 0.15s, color 0.15s;
+        transition: background var(--dur-base), color var(--dur-base);
         user-select: none;
     }
 
@@ -68,7 +68,7 @@
     }
 
     .radio-group-small {
-        border-radius: var(--radius-sm, 4px);
+        border-radius: var(--radius-sm);
     }
 
     .radio-group-small .radio-label {

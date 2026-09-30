@@ -265,7 +265,7 @@
         outline-offset: -2px;
     }
     .git-commit-row.selected {
-        background: var(--color-accent)15;
+        background: rgb(from var(--color-accent) r g b / 0.08);
     }
     .git-commit-row.selected .git-commit-subject {
         color: var(--color-accent);
@@ -304,7 +304,7 @@
         background: var(--color-status-purple);
         flex-shrink: 0;
         z-index: var(--z-raised);
-        transition: all 0.15s ease;
+        transition: all var(--dur-base) ease;
     }
     .git-dot.unpushed {
         background: var(--color-status-blue);

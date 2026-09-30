@@ -52,7 +52,7 @@
     font-weight: 500;
     line-height: 1.5;
     white-space: nowrap;
-    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    transition: background var(--dur-base), border-color var(--dur-base), color var(--dur-base);
 }
 :global(.btn:hover:not(:disabled)) {
     opacity: 1;

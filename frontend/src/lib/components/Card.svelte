@@ -427,7 +427,7 @@
         menu.className = 'card-overflow-menu';
         menu.setAttribute('role', 'menu');
         // Inline styles to escape Svelte scoping (element is on document.body)
-        menu.style.cssText = `position:fixed;z-index:${Z.overlay};background:var(--color-surface-3);border:1px solid var(--color-border);border-radius:var(--radius-md);padding:4px;width:140px;box-shadow:0 8px 24px rgba(0,0,0,0.3);display:flex;flex-direction:column;gap:2px;`;
+        menu.style.cssText = `position:fixed;z-index:${Z.overlay};background:var(--color-surface-3);border:1px solid var(--color-border);border-radius:var(--radius-md);padding:4px;width:140px;box-shadow:var(--shadow-popover);display:flex;flex-direction:column;gap:2px;`;
 
         const items: Array<{ icon: readonly IconShape[]; label: string; action: (e: MouseEvent) => void; danger?: boolean }> = [];
 
@@ -1044,7 +1044,7 @@
         padding: 12px;
         cursor: grab;
         position: relative;
-        transition: border-color 0.15s ease;
+        transition: border-color var(--dur-base) ease;
         user-select: none;
         -webkit-user-select: none;
         -webkit-user-drag: element;
@@ -1065,8 +1065,8 @@
             135deg,
             transparent 0%,
             transparent 35%,
-            rgba(0, 0, 0, 0.25) 65%,
-            rgba(0, 0, 0, 0.5) 100%
+            rgb(from var(--color-backdrop) r g b / 0.25) 65%,
+            rgb(from var(--color-backdrop) r g b / 0.5) 100%
         );
         pointer-events: none;
         z-index: var(--z-raised);
@@ -1085,8 +1085,8 @@
         border-radius: inherit;
         background: linear-gradient(
             135deg,
-            rgba(0, 0, 0, 0.5) 0%,
-            rgba(0, 0, 0, 0.25) 35%,
+            rgb(from var(--color-backdrop) r g b / 0.5) 0%,
+            rgb(from var(--color-backdrop) r g b / 0.25) 35%,
             transparent 65%,
             transparent 100%
         );
@@ -1198,7 +1198,7 @@
         /* The card body is a link, so an unseen row takes no click; the rules below hand hit-testing back
            with the row's own opacity, and every button's tooltip fires only once the row is reachable. */
         pointer-events: none;
-        transition: opacity 0.15s ease;
+        transition: opacity var(--dur-base) ease;
     }
     .card:hover:not(:has(.card:hover)) > .card-title > .card-actions,
     .card:focus-within:not(:has(.card:focus-within)) > .card-title > .card-actions,
@@ -1218,7 +1218,7 @@
         padding: 0;
         border: none;
         cursor: pointer;
-        transition: background 0.1s ease, color 0.1s ease;
+        transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
     }
     .action-icon:hover {
         opacity: 1;
@@ -1371,7 +1371,7 @@
         cursor: pointer;
         position: relative;
         overflow: hidden;
-        transition: background 0.15s ease;
+        transition: background var(--dur-base) ease;
     }
     .subtask-progress-bar:hover {
         opacity: 1;
@@ -1386,7 +1386,7 @@
         left: 0;
         height: 100%;
         opacity: 0.35;
-        transition: width 0.3s ease, opacity 0.15s ease;
+        transition: width var(--dur-slow) ease, opacity var(--dur-base) ease;
         pointer-events: none;
         background: var(--color-status-green);
     }
@@ -1414,7 +1414,7 @@
         transform: translateY(-50%);
         z-index: var(--z-raised);
         opacity: 0.5;
-        transition: transform 0.15s ease;
+        transition: transform var(--dur-base) ease;
         pointer-events: none;
     }
     .subtask-progress-bar.is-expanded .subtask-chevron {

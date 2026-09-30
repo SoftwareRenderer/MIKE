@@ -143,7 +143,7 @@
         outline: none;
     }
     .virtual-scroll:focus-visible {
-        box-shadow: inset 0 0 0 1px var(--color-accent);
+        box-shadow: var(--focus-ring);
     }
 
     .virtual-spacer {

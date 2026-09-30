@@ -102,7 +102,7 @@
     }
 </script>
 
-<BaseModal title={t('settings.stats.title')} width="90vw" onClose={handleClose}>
+<BaseModal title={t('settings.stats.title')} width="90vw" maxWidth="860px" maxHeight="80dvh" onClose={handleClose}>
             {#if loading}
                 <div class="loading">{t('settings.stats.loading')}</div>
             {:else if error}
@@ -199,14 +199,6 @@
 </BaseModal>
 
 <style>
-    :global(.overlay) {
-        background: rgba(0, 0, 0, 0.5);
-    }
-    :global(.modal) {
-        max-width: 860px;
-        max-height: 80dvh;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-    }
     .loading, .empty {
         text-align: center;
         color: var(--color-text-secondary);
@@ -243,7 +235,7 @@
         gap: 4px;
     }
     .summary-value {
-        font-size: 1.25rem;
+        font-size: var(--text-xl);
         font-weight: 700;
         font-variant-numeric: tabular-nums;
         color: var(--color-text-primary);
@@ -313,13 +305,13 @@
         gap: 4px;
         font-size: var(--text-xs);
         font-family: var(--font-sans);
-        transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+        transition: color var(--dur-base) ease, background var(--dur-base) ease, border-color var(--dur-base) ease;
     }
     .btn-reset:hover {
         opacity: 1;
         color: var(--color-status-red);
-        background: rgba(248, 81, 73, 0.1);
-        border-color: rgba(248, 81, 73, 0.3);
+        background: rgb(from var(--color-status-red) r g b / 0.1);
+        border-color: rgb(from var(--color-status-red) r g b / 0.3);
     }
     .model-label {
         font-family: var(--font-mono, monospace);

@@ -21,6 +21,9 @@
         headerStyle,
         footerStyle,
         modalClass,
+        maxWidth,
+        maxHeight,
+        overlayClass,
     }: {
         title?: string;
         width?: string;
@@ -38,6 +41,10 @@
         headerStyle?: string;
         footerStyle?: string;
         modalClass?: string;
+        maxWidth?: string;
+        maxHeight?: string;
+        /** Name for this dialog's overlay, so a `:global()` rule can name the dialog it means. */
+        overlayClass?: string;
     } = $props();
 
     let modalEl: HTMLDivElement | null = null;
@@ -45,6 +52,7 @@
     let triggerEl: HTMLElement | null = null;
     let closed = $state(false);
     let modalClasses = $derived(modalClass ? `modal ${modalClass}` : 'modal');
+    let overlayClasses = $derived(['overlay', floating ? 'overlay-floating' : '', overlayClass ?? ''].filter(Boolean).join(' '));
 
     onMount(() => {
         triggerEl = document.activeElement as HTMLElement;
@@ -95,11 +103,11 @@
     }
 </script>
 
-<div class="overlay" class:overlay-floating={floating} style="z-index: {zIndex}" onclick={handleOverlayClick} role="presentation">
+<div class={overlayClasses} style="z-index: {zIndex}" onclick={handleOverlayClick} role="presentation">
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions — modal container stops click propagation, not an activation target -->
     <div
         class={modalClasses}
-        style="width: {width}"
+        style="width: {width}{maxWidth ? `; max-width: ${maxWidth}` : ''}{maxHeight ? `; max-height: ${maxHeight}` : ''}"
         onclick={(e) => e.stopPropagation()}
         bind:this={modalEl}
         role="dialog"
@@ -137,7 +145,7 @@
     .overlay {
         position: fixed;
         inset: 0;
-        background: rgba(0, 0, 0, 0.6);
+        background: var(--color-backdrop-modal);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -150,11 +158,12 @@
     }
     .overlay-floating .modal {
         pointer-events: auto;
-        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+        box-shadow: var(--shadow-float);
     }
     .modal {
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
+        box-shadow: var(--shadow-modal);
         border-radius: var(--radius-lg);
         max-width: 90vw;
         max-height: 90vh;

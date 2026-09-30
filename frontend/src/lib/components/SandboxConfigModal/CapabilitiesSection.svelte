@@ -139,7 +139,7 @@
         cursor: pointer;
         border-radius: 50%;
         opacity: 0.6;
-        transition: opacity 0.15s, background 0.15s;
+        transition: opacity var(--dur-base), background var(--dur-base);
     }
 
     .caps-tag-remove:hover {
@@ -162,7 +162,7 @@
         font-size: var(--text-sm);
         font-family: var(--font-mono, monospace);
         outline: none;
-        transition: border-color 0.15s;
+        transition: border-color var(--dur-base);
         box-sizing: border-box;
     }
 
@@ -208,7 +208,7 @@
         color: var(--color-text-primary);
         cursor: pointer;
         text-align: left;
-        transition: background 0.1s;
+        transition: background var(--dur-fast);
     }
 
     .caps-dropdown-item:hover,

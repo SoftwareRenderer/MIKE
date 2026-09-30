@@ -56,13 +56,13 @@
         background: var(--color-surface-2);
         color: var(--color-text-secondary);
         cursor: pointer;
-        transition: opacity 0.15s ease, color 0.15s ease;
+        transition: opacity var(--dur-base) ease, color var(--dur-base) ease;
     }
     .copy-btn:hover {
         color: var(--color-text-primary);
     }
     .copy-btn .icon {
-        transition: opacity 0.2s ease;
+        transition: opacity var(--dur-md) ease;
     }
     .copy-btn.copied .icon {
         opacity: 0;
@@ -75,7 +75,7 @@
         font-weight: 700;
         line-height: 1;
         pointer-events: none;
-        transition: opacity 0.2s ease;
+        transition: opacity var(--dur-md) ease;
     }
     .copy-btn.copied .check {
         opacity: 1;

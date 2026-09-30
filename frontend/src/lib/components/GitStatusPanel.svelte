@@ -1532,16 +1532,12 @@
         padding: 3px 8px;
         border: none;
         background: var(--color-accent-dark);
-        color: white;
+        color: var(--color-btn-text);
         font-size: var(--text-xs);
         font-weight: 500;
         border-radius: var(--radius-sm);
         white-space: nowrap;
     }
-    .panel-commit-btn:hover:not(:disabled) {
-        opacity: 0.9;
-    }
-
     .panel-count {
         font-family: var(--font-mono);
         font-size: var(--text-2xs);
@@ -1613,7 +1609,7 @@
     .changes-chevron {
         flex-shrink: 0;
         color: var(--color-text-tertiary);
-        transition: transform 0.15s ease;
+        transition: transform var(--dur-base) ease;
     }
     .changes-chevron.expanded {
         transform: rotate(90deg);
@@ -1726,7 +1722,7 @@
         border-radius: var(--radius-sm);
         flex-shrink: 0;
         opacity: 0;
-        transition: opacity 0.1s ease;
+        transition: opacity var(--dur-fast) ease;
     }
     .changes-file-row:hover .changes-stage-btn,
     .changes-file-row:hover .changes-discard-btn,

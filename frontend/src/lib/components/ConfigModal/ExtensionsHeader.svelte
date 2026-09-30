@@ -140,7 +140,7 @@
         font-size: var(--text-base);
         padding: 0.5rem 1rem;
         border-radius: var(--radius-md);
-        transition: all 0.15s;
+        transition: all var(--dur-base);
     }
 
     .view-tab:hover {
@@ -198,7 +198,7 @@
         letter-spacing: 0.04em;
         text-transform: uppercase;
         cursor: pointer;
-        transition: all 0.15s;
+        transition: all var(--dur-base);
     }
 
     .category-badge:hover {

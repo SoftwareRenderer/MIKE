@@ -182,7 +182,7 @@
         border-top: 1px solid var(--color-border);
         border-left: 3px solid var(--col-color);
         border-radius: var(--radius-md);
-        transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        transition: border-color var(--dur-base) ease, box-shadow var(--dur-base) ease;
     }
     .section-group.is-over {
         border-color: var(--color-accent);
@@ -251,7 +251,7 @@
         border-radius: var(--radius-sm);
         color: var(--color-text-tertiary);
         cursor: pointer;
-        transition: color 0.15s ease, background 0.15s ease;
+        transition: color var(--dur-base) ease, background var(--dur-base) ease;
         opacity: 1;
     }
     .add-btn:hover {
@@ -272,7 +272,7 @@
         border-radius: var(--radius-sm);
         color: var(--color-text-tertiary);
         cursor: pointer;
-        transition: color 0.15s ease, background 0.15s ease;
+        transition: color var(--dur-base) ease, background var(--dur-base) ease;
     }
     .clear-btn:hover {
         background: var(--color-status-red-dark);
@@ -291,7 +291,7 @@
     }
     .section-chevron {
         flex-shrink: 0;
-        transition: transform 0.15s ease;
+        transition: transform var(--dur-base) ease;
         color: var(--color-text-tertiary);
     }
     .section-header[aria-expanded="false"] .section-chevron {
@@ -306,7 +306,7 @@
         border-radius: 0 0 var(--radius-md) var(--radius-md);
     }
     .task-wrapper {
-        animation: fadeIn 0.2s ease;
+        animation: fadeIn var(--dur-md) ease;
     }
     @keyframes fadeIn {
         from { opacity: 0; transform: translateY(-4px); }
@@ -323,12 +323,12 @@
         color: var(--color-text-tertiary);
         font-size: var(--text-sm);
         cursor: pointer;
-        transition: all 0.15s ease;
+        transition: all var(--dur-base) ease;
     }
     .task-item-add:hover {
         opacity: 1;
         border-color: var(--color-accent);
         color: var(--color-accent);
-        background: var(--color-accent)10;
+        background: rgb(from var(--color-accent) r g b / 0.06);
     }
 </style>

@@ -154,7 +154,7 @@
             <button type="button" class="btn btn-primary" onclick={handleSave} disabled={!titleDraft.trim()}>{t('board.editTask.save')}</button>
         {/snippet}
 
-        <BaseModal title={t('board.editTask.title')} width="440px" footer={footer} onClose={handleClose} closeOnOverlayClick={false}>
+        <BaseModal title={t('board.editTask.title')} width="440px" modalClass="edit-task-modal" footer={footer} onClose={handleClose} closeOnOverlayClick={false}>
             <label for="edit-task-title-input">
                 <span class="field-label">{t('board.editTask.fieldTitle')}</span>
                 <input
@@ -220,14 +220,8 @@
 </BaseModal>
 
 <style>
-    :global(.modal) {
-        box-shadow: 0 12px 40px rgba(0,0,0,0.3);
-    }
-    :global(.modal-header) {
-        padding: 14px 18px;
-    }
-    :global(.modal-body) {
-        padding: 16px 18px 18px;
+    /* BaseModal's `.modal-body` owns the padding; this sets only the layout it leaves free. */
+    :global(.edit-task-modal .modal-body) {
         display: flex;
         flex-direction: column;
         gap: 14px;
@@ -301,10 +295,5 @@
     .config-desc {
         font-size: var(--text-2xs);
         color: var(--color-text-tertiary);
-    }
-    @media (max-width: 768px) {
-        :global(.modal-body) {
-            padding: 16px;
-        }
     }
 </style>

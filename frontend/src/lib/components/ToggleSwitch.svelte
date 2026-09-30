@@ -32,7 +32,7 @@
         background: var(--color-surface-4);
         border: none;
         flex-shrink: 0;
-        transition: background 0.2s ease;
+        transition: background var(--dur-md) ease;
     }
 
     .toggle-switch.active {
@@ -47,7 +47,7 @@
         height: 16px;
         border-radius: 50%;
         background: var(--color-toggle-knob);
-        transition: transform 0.2s ease;
+        transition: transform var(--dur-md) ease;
     }
 
     .toggle-switch.active .toggle-knob {

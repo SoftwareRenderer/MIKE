@@ -307,11 +307,11 @@
         border: 1px solid var(--color-border);
         border-radius: var(--radius-lg);
         padding: 6px 8px;
-        transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        transition: border-color var(--dur-base) ease, box-shadow var(--dur-base) ease;
     }
     .chat-form-inner:focus-within {
         border-color: var(--color-accent);
-        box-shadow: 0 0 0 2px var(--color-accent)22;
+        box-shadow: var(--focus-halo);
     }
     .attachment-preview {
         display: flex;
@@ -341,7 +341,7 @@
         height: 16px;
         border-radius: 50%;
         background: var(--color-status-red-dark);
-        color: white;
+        color: var(--color-btn-text);
         border: none;
         cursor: pointer;
         display: flex;
@@ -365,7 +365,7 @@
         justify-content: center;
         background: transparent;
         color: var(--color-text-tertiary);
-        transition: all 0.15s ease;
+        transition: all var(--dur-base) ease;
         padding: 0;
     }
     .btn-attach:hover:not(:disabled) {
@@ -402,14 +402,14 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        transition: all 0.15s ease;
+        transition: all var(--dur-base) ease;
         padding: 0;
     }
-    .btn-send { background: var(--color-accent-dark); color: white; }
+    .btn-send { background: var(--color-accent-dark); color: var(--color-btn-text); }
     .btn-send:disabled { background: var(--color-surface-3); color: var(--color-text-tertiary); }
     .btn-stop {
         background: var(--color-status-red-dark);
-        color: white;
+        color: var(--color-btn-text);
         animation: pulse-stop 1.5s ease-in-out infinite;
     }
     @keyframes pulse-stop {

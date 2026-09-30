@@ -489,7 +489,7 @@
                     svg.setAttribute('fill', 'none');
                     const transform = open ? 'translateY(2px)' : 'translateY(2px) rotate(-90deg)';
                     svg.style.cssText =
-                        'cursor:pointer;opacity:0.8;transition:transform 0.15s ease;transform:' + transform;
+                        'cursor:pointer;opacity:0.8;transition:transform var(--dur-base) ease;transform:' + transform;
                     svg.style.transformOrigin = 'center';
                     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
                     path.setAttribute('d', 'M4 6l4 4 4-4');
@@ -1846,7 +1846,7 @@
     .file-editor.diff .btn-save {
         padding: 4px 12px;
         background: var(--color-accent-dark);
-        color: white;
+        color: var(--color-btn-text);
         border: none;
         border-radius: var(--radius-sm);
         font-size: var(--text-xs);
@@ -1915,7 +1915,7 @@
     .file-editor.diff .btn-confirm-discard {
         padding: 5px 14px;
         background: var(--color-status-red-dark);
-        color: white;
+        color: var(--color-btn-text);
         border: none;
         border-radius: var(--radius-sm);
         font-size: var(--text-xs);

@@ -10,9 +10,9 @@
  * `.btn-confirm` / `.destructive` on them are names the specs select by, not style hooks. */
 
 :global(.overlay) {
-    animation: fade-in 0.15s ease-out;
+    animation: fade-in var(--dur-base) ease-out;
 }
 :global(.modal) {
-    animation: scale-in 0.15s ease-out;
+    animation: scale-in var(--dur-base) ease-out;
     padding: 4px;
 }

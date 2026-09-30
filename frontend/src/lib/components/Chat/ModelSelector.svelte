@@ -385,7 +385,7 @@
 
 <!-- Provider dropdown (rendered in shadow DOM to escape overflow clipping) -->
 {#if providerDropdownOpen && providerRect}
-    <svelte:element this={"div"} class="portal-provider-dropdown" role="listbox" aria-label={t('chat.model.selectProvider')} style="position:fixed;top:{providerRect.top}px;left:{providerRect.left}px;z-index:{Z.overlay};min-width:180px;max-height:320px;overflow-y:auto;background:var(--color-surface-1);border:1px solid var(--color-border);border-radius:var(--radius-md);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
+    <svelte:element this={"div"} class="portal-provider-dropdown" role="listbox" aria-label={t('chat.model.selectProvider')} style="position:fixed;top:{providerRect.top}px;left:{providerRect.left}px;z-index:{Z.overlay};min-width:180px;max-height:320px;overflow-y:auto;background:var(--color-surface-1);border:1px solid var(--color-border);border-radius:var(--radius-md);box-shadow:var(--shadow-popover);padding:4px;">
         {#if hasAgentProvider}
             <button type="button" class="provider-option provider-option-agent" class:active={isAgentSelected} onclick={selectAgent} role="option" aria-selected={isAgentSelected}>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -413,7 +413,7 @@
 
 <!-- Model dropdown -->
 {#if modelDropdownOpen && modelRect}
-    <svelte:element this={"div"} class="portal-model-dropdown" role="listbox" aria-label={t('chat.model.selectModel')} style="position:fixed;top:{modelRect.top}px;left:{modelRect.left}px;z-index:{Z.overlay};min-width:180px;max-height:320px;overflow-y:auto;background:var(--color-surface-1);border:1px solid var(--color-border);border-radius:var(--radius-md);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
+    <svelte:element this={"div"} class="portal-model-dropdown" role="listbox" aria-label={t('chat.model.selectModel')} style="position:fixed;top:{modelRect.top}px;left:{modelRect.left}px;z-index:{Z.overlay};min-width:180px;max-height:320px;overflow-y:auto;background:var(--color-surface-1);border:1px solid var(--color-border);border-radius:var(--radius-md);box-shadow:var(--shadow-popover);padding:4px;">
         {#if isAgentSelected}
             {#if agentModelsLoading}
                 <div class="empty">{t('chat.model.loadingModels')}</div>
@@ -469,7 +469,7 @@
         font-size: var(--text-xs);
         font-family: inherit;
         cursor: pointer;
-        transition: all 0.15s ease;
+        transition: all var(--dur-base) ease;
         white-space: nowrap;
     }
     .selector-trigger:hover {
@@ -497,7 +497,7 @@
     }
 
     .chevron {
-        transition: transform 0.15s ease;
+        transition: transform var(--dur-base) ease;
         flex-shrink: 0;
     }
     .selector-trigger.open .chevron {
@@ -525,7 +525,7 @@
         font-family: inherit;
         cursor: pointer;
         text-align: left;
-        transition: background 0.1s ease;
+        transition: background var(--dur-fast) ease;
     }
     .provider-option:hover {
         opacity: 1;
@@ -573,7 +573,7 @@
         font-family: inherit;
         cursor: pointer;
         text-align: left;
-        transition: background 0.1s ease;
+        transition: background var(--dur-fast) ease;
     }
     .model-option:hover {
         opacity: 1;

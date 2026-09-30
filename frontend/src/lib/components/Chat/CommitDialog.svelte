@@ -203,7 +203,7 @@
         </button>
     {/snippet}
 
-    <BaseModal title={t('chat.commit.title')} width="560px" footer={footer} onClose={handleCancel}>
+    <BaseModal title={t('chat.commit.title')} width="560px" modalClass="commit-dialog" overlayClass="commit-dialog-overlay" footer={footer} onClose={handleCancel}>
         <p id="commit-dialog-desc" class="sr-only">
             {t('chat.commit.desc')}
         </p>
@@ -245,11 +245,11 @@
 <style>
     /* Screen-reader only utility */
 
-    :global(.overlay) {
-        animation: fade-in 0.15s ease-out;
+    :global(.overlay.commit-dialog-overlay) {
+        animation: fade-in var(--dur-base) ease-out;
     }
-    :global(.modal) {
-        animation: scale-in 0.15s ease-out;
+    :global(.modal.commit-dialog) {
+        animation: scale-in var(--dur-base) ease-out;
     }
 
     .commit-textarea {
@@ -264,13 +264,13 @@
         line-height: 1.5;
         resize: vertical;
         outline: none;
-        transition: border-color 0.15s;
+        transition: border-color var(--dur-base);
         box-sizing: border-box;
     }
 
     .commit-textarea:focus {
         border-color: var(--color-accent);
-        box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 30%, transparent);
+        box-shadow: var(--focus-halo);
     }
 
     .commit-textarea::placeholder {

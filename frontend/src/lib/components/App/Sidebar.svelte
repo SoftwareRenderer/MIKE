@@ -242,7 +242,7 @@
         min-width: 240px;
         background: var(--color-surface-0);
         border-right: 1px solid var(--color-border);
-        transition: all 0.2s ease;
+        transition: all var(--dur-md) ease;
         overflow: hidden;
         z-index: var(--z-dropdown);
     }
@@ -285,7 +285,7 @@
         justify-content: center;
     }
     .toggle-btn svg {
-        transition: transform 0.15s ease;
+        transition: transform var(--dur-base) ease;
         transform: rotate(180deg);
     }
     .toggle-btn.collapsed svg {
@@ -353,7 +353,7 @@
         /* The row is an anchor now, so drop the UA link styling. */
         text-decoration: none;
         text-align: left;
-        transition: all 0.15s ease;
+        transition: all var(--dur-base) ease;
         min-width: 0;
     }
     .project-item:hover {
@@ -376,7 +376,7 @@
         height: 100%;
         border-radius: inherit;
         background: var(--color-accent);
-        transition: width 0.2s ease;
+        transition: width var(--dur-md) ease;
     }
     /* Collapsed sidebar has no room for the bar — pulse the abbreviation instead */
     .project-abbr.cloning {
@@ -389,7 +389,7 @@
     /* Focused-project ring: must stay an INSET box-shadow — ancestor overflow:hidden
        (collapse transition) clips any outline drawn outside the button box. */
     .project-item:focus {
-        box-shadow: inset 0 0 0 2px var(--color-accent);
+        box-shadow: var(--focus-ring);
     }
     .sandbox-badge {
         flex-shrink: 0;
@@ -455,7 +455,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        transition: all 0.15s ease;
+        transition: all var(--dur-base) ease;
     }
     .project-remove-btn:hover {
         opacity: 1;
@@ -478,7 +478,7 @@
         color: var(--color-text-secondary);
         cursor: pointer;
         font-size: var(--text-md);
-        transition: all 0.15s ease;
+        transition: all var(--dur-base) ease;
         position: relative;
     }
     .sidebar-menu-item:hover {
@@ -499,7 +499,7 @@
         color: var(--color-text-tertiary);
         cursor: pointer;
         font-size: var(--text-sm);
-        transition: all 0.15s ease;
+        transition: all var(--dur-base) ease;
     }
     .add-project-btn:hover {
         opacity: 1;
@@ -523,7 +523,7 @@
             width: 260px;
             min-width: 260px;
             transform: translateX(-100%);
-            transition: transform 0.2s ease;
+            transition: transform var(--dur-md) ease;
         }
         .sidebar.mobile-open {
             transform: translateX(0);

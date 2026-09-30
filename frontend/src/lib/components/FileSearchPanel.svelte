@@ -360,7 +360,7 @@
     }
     .search-input-wrap:focus-within {
         border-color: var(--color-accent);
-        box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 27%, transparent);
+        box-shadow: var(--focus-halo);
     }
 
     .search-icon {

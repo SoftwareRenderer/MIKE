@@ -178,7 +178,7 @@
         color: var(--color-text-primary);
         border: 1px solid var(--color-border);
         cursor: pointer;
-        transition: all 0.15s ease;
+        transition: all var(--dur-base) ease;
     }
     .btn-move:hover {
         /* `opacity: 1` cancels app.css's hover dim the way `shared.css` explains: the background and
@@ -198,7 +198,7 @@
         background: var(--color-surface-2);
         color: var(--color-text-primary);
         border: 1.5px solid var(--color-status-green);
-        transition: all 0.15s ease;
+        transition: all var(--dur-base) ease;
     }
     .btn-commit-and-done {
         border-color: var(--color-status-yellow);
@@ -221,9 +221,9 @@
         font-size: var(--text-sm);
         font-weight: 600;
         background: var(--color-accent-dark);
-        color: white;
+        color: var(--color-btn-text);
         border: none;
-        transition: all 0.15s ease;
+        transition: all var(--dur-base) ease;
     }
     .btn-restart-task:hover:not(:disabled) {
         opacity: 0.85;

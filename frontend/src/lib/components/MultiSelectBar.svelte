@@ -259,7 +259,7 @@
         background: var(--color-surface-3);
         border: 1px solid var(--color-border-bright);
         border-radius: var(--radius-lg);
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+        box-shadow: var(--shadow-float);
         z-index: var(--z-dropdown);
         user-select: none;
     }
@@ -275,7 +275,7 @@
         font-weight: 500;
         font-family: inherit;
         cursor: pointer;
-        transition: background 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+        transition: background var(--dur-base) ease, color var(--dur-base) ease, opacity var(--dur-base) ease;
         white-space: nowrap;
         color: var(--color-text-primary);
         background: var(--color-surface-4);
@@ -287,7 +287,7 @@
 
     .bar-btn-start {
         background: var(--color-accent-dark);
-        color: white;
+        color: var(--color-btn-text);
     }
     .bar-btn-start:hover {
         background: var(--color-accent-hover);
@@ -325,7 +325,7 @@
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+        box-shadow: var(--shadow-popover);
     }
 
     .move-item {
@@ -348,7 +348,7 @@
 
     .bar-btn-delete {
         background: var(--color-status-red-dark);
-        color: white;
+        color: var(--color-btn-text);
     }
 
     .bar-btn-clear {

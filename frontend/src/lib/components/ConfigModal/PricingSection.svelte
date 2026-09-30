@@ -156,7 +156,7 @@
     }
     .chevron {
         margin-left: auto;
-        transition: transform 0.15s ease;
+        transition: transform var(--dur-base) ease;
         color: var(--color-text-secondary);
         flex-shrink: 0;
     }

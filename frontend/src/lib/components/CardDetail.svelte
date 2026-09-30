@@ -1133,8 +1133,8 @@
         justify-content: space-between;
         gap: 12px;
         padding: 8px 14px;
-        background: rgba(248, 81, 73, 0.1);
-        border-bottom: 1px solid rgba(248, 81, 73, 0.3);
+        background: rgb(from var(--color-status-red) r g b / 0.1);
+        border-bottom: 1px solid rgb(from var(--color-status-red) r g b / 0.3);
     }
     .memory-alert-text {
         display: flex;
@@ -1179,7 +1179,7 @@
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-lg);
-        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+        box-shadow: var(--shadow-float);
     }
     @media (max-width: 768px) {
         .task-detail-page.floating {

@@ -23,6 +23,16 @@ input[type="number"] {
     white-space: nowrap;
 }
 
+/* The same chip on a filled control reads against the fill, so its three values follow the control's own
+   text colour. `.key-hint-on-fill` is for a filled control outside the `.btn` family. */
+.btn-primary .key-hint,
+.btn-danger .key-hint,
+.key-hint-on-fill {
+    border-color: rgb(from var(--color-btn-text) r g b / 0.3);
+    background: rgb(from var(--color-btn-text) r g b / 0.1);
+    color: rgb(from var(--color-btn-text) r g b / 0.85);
+}
+
 /* No keycaps on mobile (matches the 768px isMobile breakpoint) */
 @media (max-width: 768px) {
     .key-hint {
@@ -128,15 +138,15 @@ input[type="number"] {
     --cm-tag: #7EE787;
     --cm-attr-name: #79C0FF;
 
-    /* Shadows — one black at one alpha over three blurs. Which tier a surface takes is its rank, not a
-       measurement: `--shadow-raised` is a control lifted off the panel it sits on, `--shadow-popover` a
-       menu or tooltip that floats over content, `--shadow-modal` a dialog or full-screen panel. Where
-       black is a fill rather than a shadow (a scrim behind an open panel) take
-       `rgb(from var(--color-backdrop) r g b / a)` at the use site. */
+    /* Shadows — black over a named rank, never a measurement written at the use site: raised for a control
+       lifted off its panel, popover for a menu or tooltip over content, modal for a dialog over its own
+       scrim, float for a panel over undimmed content. Where black is a fill rather than a shadow (a scrim
+       behind an open panel) take `rgb(from var(--color-backdrop) r g b / a)` at the use site. */
     --color-shadow: #000000;
     --shadow-raised: 0 1px 3px rgb(from var(--color-shadow) r g b / 0.3);
     --shadow-popover: 0 4px 12px rgb(from var(--color-shadow) r g b / 0.3);
     --shadow-modal: 0 8px 32px rgb(from var(--color-shadow) r g b / 0.3);
+    --shadow-float: 0 12px 40px rgb(from var(--color-shadow) r g b / 0.35);
 
     /* The checkerboard a transparent image is shown against, and the text that sits on it. Fixed
        regardless of theme on purpose: the pattern has to sit between a light app and a dark one so the
@@ -147,7 +157,9 @@ input[type="number"] {
     --color-checker-text: #ffffff;
 
     /* Misc */
+    /* Two scrims: one over the app itself (the mobile sidebar drawer), one behind a dialog. */
     --color-backdrop: rgba(0, 0, 0, 0.4);
+    --color-backdrop-modal: rgba(0, 0, 0, 0.6);
     --color-alert-bg: #550000;
     --color-alert-text: #d6d3d1;
 
@@ -180,6 +192,19 @@ input[type="number"] {
     --text-base: 0.875rem;
     --text-md: 0.9375rem;
     --text-lg: 1rem;
+    --text-xl: 1.25rem;
+
+    /* The ring for the controls the global `:focus-visible` outline cannot serve: a composite control (a
+       row, a virtual list) takes it inset because its pane would clip an outline, a field group a halo. */
+    --focus-ring: inset 0 0 0 2px var(--color-accent);
+    --focus-halo: 0 0 0 2px rgb(from var(--color-accent) r g b / 0.27);
+
+    /* How fast a control replies to the pointer. A one-off animation cycle (a spinner, a pulse) is not a
+       tier and stays a literal where it is defined. */
+    --dur-fast: 0.1s;
+    --dur-base: 0.15s;
+    --dur-md: 0.2s;
+    --dur-slow: 0.3s;
 
     /* Radii */
     --radius-xs: 2px;

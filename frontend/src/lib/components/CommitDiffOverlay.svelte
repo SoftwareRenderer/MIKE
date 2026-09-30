@@ -591,7 +591,7 @@
     }
     .diff-subject-caret {
         flex-shrink: 0;
-        transition: transform 0.15s ease;
+        transition: transform var(--dur-base) ease;
         color: var(--color-text-tertiary);
     }
     .diff-commit-subject-btn.expanded .diff-subject-caret {
@@ -660,13 +660,13 @@
         height: 16px;
         flex-shrink: 0;
         position: relative;
-        transition: color 0.15s ease;
+        transition: color var(--dur-base) ease;
     }
     .diff-hash-copy-btn:hover {
         color: var(--color-text-primary);
     }
     .diff-hash-copy-btn .icon {
-        transition: opacity 0.2s ease;
+        transition: opacity var(--dur-md) ease;
     }
     .diff-hash-copy-btn.copied .icon {
         opacity: 0;
@@ -677,7 +677,7 @@
         font-size: var(--text-3xs);
         font-weight: 700;
         line-height: 1;
-        transition: opacity 0.2s ease;
+        transition: opacity var(--dur-md) ease;
         pointer-events: none;
         color: var(--color-status-green);
     }
@@ -708,12 +708,12 @@
         color: var(--color-text-tertiary);
         font-weight: 400;
     }
-    :global(.close-btn) {
+    .close-btn {
         width: 24px;
         height: 24px;
         padding: 0;
     }
-    :global(.close-btn:focus-visible) {
+    .close-btn:focus-visible {
         outline: 2px solid var(--color-accent);
         outline-offset: 1px;
     }
@@ -789,7 +789,7 @@
     .diff-chevron {
         flex-shrink: 0;
         color: var(--color-text-tertiary);
-        transition: transform 0.15s ease;
+        transition: transform var(--dur-base) ease;
     }
     .diff-chevron.expanded {
         transform: rotate(90deg);
@@ -981,7 +981,7 @@
         cursor: pointer;
         border-radius: var(--radius-sm);
         flex-shrink: 0;
-        transition: background 0.1s ease, color 0.1s ease;
+        transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
     }
     .diff-mode-toggle:hover {
         opacity: 1;

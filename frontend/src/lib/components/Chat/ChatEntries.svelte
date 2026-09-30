@@ -643,7 +643,7 @@
         cursor: pointer;
         font: inherit;
         text-align: left;
-        transition: background 0.15s ease;
+        transition: background var(--dur-base) ease;
     }
     /* A flex item ellipsizes only with a 0 floor of its own. */
     .chat-sticky-text {
@@ -746,7 +746,7 @@
         color: var(--color-text-tertiary);
         cursor: pointer;
         border-radius: var(--radius-sm);
-        transition: all 0.15s ease;
+        transition: all var(--dur-base) ease;
     }
     .btn-dismiss:hover {
         opacity: 1;
@@ -884,9 +884,9 @@
         cursor: pointer;
         font-size: var(--text-xs);
         font-weight: 500;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
-        transition: opacity 0.2s ease, transform 0.2s ease, background 0.15s ease;
-        animation: chat-jump-latest-in 0.2s ease-out;
+        box-shadow: var(--shadow-raised);
+        transition: opacity var(--dur-md) ease, transform var(--dur-md) ease, background var(--dur-base) ease;
+        animation: chat-jump-latest-in var(--dur-md) ease-out;
     }
     .chat-jump-latest:hover {
         opacity: 1;
@@ -915,10 +915,10 @@
         border-radius: var(--radius-md);
         border: 1px solid var(--color-border);
         background: var(--color-surface-1);
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+        box-shadow: var(--shadow-raised);
         /* Nothing to click here, and it floats over the transcript: a click must reach the entry under it. */
         pointer-events: none;
-        animation: chat-pending-in 0.2s ease-out;
+        animation: chat-pending-in var(--dur-md) ease-out;
     }
     @keyframes chat-pending-in { from { opacity: 0; } to { opacity: 1; } }
 

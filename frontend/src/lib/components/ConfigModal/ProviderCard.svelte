@@ -216,7 +216,7 @@
         border: 1px solid var(--color-border);
         border-radius: var(--radius-md);
         overflow: hidden;
-        transition: border-color 0.15s, opacity 0.15s;
+        transition: border-color var(--dur-base), opacity var(--dur-base);
     }
     .provider-card.dragging {
         opacity: 0.4;

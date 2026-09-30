@@ -112,7 +112,7 @@
 :global(.explorer-view .git-status-btn.active) {
     opacity: 1;
     background: var(--color-accent-dark);
-    color: white;
+    color: var(--color-btn-text);
 }
 
 /* Branch badge (shown when the changes panel is open, and always in the task view) */
@@ -341,7 +341,7 @@
         font-weight: 500;
         cursor: pointer;
         border-bottom: 2px solid transparent;
-        transition: all 0.15s ease;
+        transition: all var(--dur-base) ease;
     }
     :global(.explorer-view .mobile-tab-bar .tab-btn.active) {
         color: var(--color-accent);

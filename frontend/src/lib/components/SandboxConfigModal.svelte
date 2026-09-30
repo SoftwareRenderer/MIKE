@@ -113,7 +113,7 @@
     }
 </script>
 
-<BaseModal title={t('sandbox.title')} width={isLocked ? '480px' : '560px'} footer={isLocked ? undefined : footer} onClose={onClose}>
+<BaseModal title={t('sandbox.title')} width={isLocked ? '480px' : '560px'} modalClass="sandbox-config-modal" footer={isLocked ? undefined : footer} onClose={onClose}>
     {#if isLocked}
         <LockedView {draft} />
     {:else}
@@ -165,7 +165,7 @@
 <style>
     @import '$lib/styles/shared.css';
 
-    :global(.close-btn) {
+    :global(.sandbox-config-modal .close-btn) {
         width: 28px;
         height: 28px;
         font-size: var(--text-lg);
@@ -183,8 +183,8 @@
 
     .save-warning-message {
         padding: 8px 12px;
-        background: rgba(34, 197, 94, 0.08);
-        border: 1px solid rgba(34, 197, 94, 0.3);
+        background: rgb(from var(--color-status-green) r g b / 0.08);
+        border: 1px solid rgb(from var(--color-status-green) r g b / 0.3);
         border-radius: var(--radius-md);
         color: var(--color-status-green);
         font-size: var(--text-sm);
@@ -193,8 +193,8 @@
 
     .error-message {
         padding: 8px 12px;
-        background: rgba(248, 81, 73, 0.1);
-        border: 1px solid rgba(248, 81, 73, 0.3);
+        background: rgb(from var(--color-status-red) r g b / 0.1);
+        border: 1px solid rgb(from var(--color-status-red) r g b / 0.3);
         border-radius: var(--radius-md);
         color: var(--color-status-red);
         font-size: var(--text-sm);

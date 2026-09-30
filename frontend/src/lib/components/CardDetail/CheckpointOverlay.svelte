@@ -78,7 +78,7 @@
         gap: 6px;
         font-size: var(--text-sm);
         font-weight: 600;
-        color: white;
+        color: var(--color-text-primary);
     }
     .checkpoint-diff-title svg {
         opacity: 0.7;
@@ -94,7 +94,7 @@
         border: none;
         color: var(--color-text-secondary);
         cursor: pointer;
-        transition: all 0.15s ease;
+        transition: all var(--dur-base) ease;
     }
     .btn-close-checkpoint:hover {
         opacity: 1;

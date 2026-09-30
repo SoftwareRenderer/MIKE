@@ -345,7 +345,7 @@
         font-size: var(--text-sm);
         font-family: inherit;
         cursor: pointer;
-        transition: background 0.15s, color 0.15s;
+        transition: background var(--dur-base), color var(--dur-base);
     }
     .shortcut-action:hover {
         opacity: 1;
@@ -363,7 +363,7 @@
         cursor: pointer;
         min-width: 84px;
         text-align: center;
-        transition: border-color 0.15s, background 0.15s;
+        transition: border-color var(--dur-base), background var(--dur-base);
     }
     .key-chip:hover {
         border-color: var(--color-accent);

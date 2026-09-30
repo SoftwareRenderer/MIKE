@@ -84,7 +84,7 @@
         color: var(--color-text-secondary);
         border: 1px solid var(--color-border);
         cursor: pointer;
-        transition: all 0.15s ease;
+        transition: all var(--dur-base) ease;
         white-space: nowrap;
     }
     .thread-btn:hover {
@@ -93,7 +93,7 @@
         color: var(--color-text-primary);
     }
     .chevron {
-        transition: transform 0.15s ease;
+        transition: transform var(--dur-base) ease;
     }
     .thread-menu {
         position: absolute;
@@ -106,7 +106,7 @@
         padding: 4px;
         min-width: 160px;
         z-index: var(--z-dropdown);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        box-shadow: var(--shadow-popover);
     }
     .thread-menu-item {
         display: flex;
@@ -119,7 +119,7 @@
         background: none;
         border: none;
         color: var(--color-text-secondary);
-        transition: all 0.1s ease;
+        transition: all var(--dur-fast) ease;
         text-align: left;
     }
     .thread-menu-item:hover {

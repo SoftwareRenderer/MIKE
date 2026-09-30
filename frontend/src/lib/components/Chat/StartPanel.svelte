@@ -61,7 +61,7 @@
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                 <path d="M4 2l10 6-10 6V2z" fill="currentColor"/>
             </svg>
-            {t('chat.start.button')}{#if startShortcutLabel && !hintsHidden}<kbd class="key-hint">{startShortcutLabel}</kbd>{/if}
+            {t('chat.start.button')}{#if startShortcutLabel && !hintsHidden}<kbd class="key-hint key-hint-on-fill">{startShortcutLabel}</kbd>{/if}
         {/if}
     </button>
 </div>
@@ -99,10 +99,5 @@
     .btn-start-task:hover:not(:disabled) {
         opacity: 1;
         background: var(--color-accent-hover);
-    }
-    .btn-start-task .key-hint {
-        color: rgba(255, 255, 255, 0.85);
-        border-color: rgba(255, 255, 255, 0.3);
-        background: rgba(255, 255, 255, 0.1);
     }
 </style>

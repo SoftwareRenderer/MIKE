@@ -172,6 +172,16 @@ STYLE_SINKS: dict[tuple[str, str], str] = {
     ("src/lib/components/BaseModal.svelte", "width"):
         "contains:'640px' — a CSS width a caller chooses; this file's default is a literal, "
         "and every caller in core passes one",
+    ("src/lib/components/BaseModal.svelte", "maxWidth"):
+        "literal — a CSS max-width a caller chooses, and the prop has no default",
+    ("src/lib/components/BaseModal.svelte",
+     "maxWidth ? `; max-width: ${maxWidth}` : ''"):
+        "literal — the declaration around that prop, or nothing when it is unset",
+    ("src/lib/components/BaseModal.svelte", "maxHeight"):
+        "literal — a CSS max-height a caller chooses, and the prop has no default",
+    ("src/lib/components/BaseModal.svelte",
+     "maxHeight ? `; max-height: ${maxHeight}` : ''"):
+        "literal — the declaration around that prop, or nothing when it is unset",
     ("src/lib/components/CardDetail.svelte", "boardWidth"):
         "contains:.toFixed(1)}% — a percentage string this file builds",
     ("src/lib/components/CardDetail.svelte", "chatWidth"):

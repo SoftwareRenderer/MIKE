@@ -493,7 +493,7 @@
         color: var(--color-text-tertiary);
         cursor: pointer;
         border-radius: var(--radius-sm);
-        transition: all 0.15s ease;
+        transition: all var(--dur-base) ease;
     }
     .system-header .btn-dismiss:hover {
         opacity: 1;
@@ -674,7 +674,7 @@
         justify-content: center;
     }
     .edit-dialog::backdrop {
-        background: rgba(0, 0, 0, 0.6);
+        background: var(--color-backdrop-modal);
     }
     .edit-modal {
         background: var(--color-surface-1);

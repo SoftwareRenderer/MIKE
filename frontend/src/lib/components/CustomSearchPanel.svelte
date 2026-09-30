@@ -351,7 +351,7 @@
         border-top: 1px solid var(--color-border);
         padding: 6px 12px;
         opacity: 0;
-        transition: opacity 0.15s ease;
+        transition: opacity var(--dur-base) ease;
         pointer-events: auto;
     }
     .search-panel.visible {
@@ -378,7 +378,7 @@
     .search-input-wrap:focus-within {
         border-color: var(--color-accent);
         outline: none;
-        box-shadow: 0 0 0 1px var(--color-accent)44;
+        box-shadow: var(--focus-halo);
     }
 
     .search-input {
@@ -412,7 +412,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        transition: background 0.1s, color 0.1s;
+        transition: background var(--dur-fast), color var(--dur-fast);
         line-height: 1;
     }
     .toggle-btn:hover {
@@ -448,7 +448,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        transition: background 0.1s, color 0.1s;
+        transition: background var(--dur-fast), color var(--dur-fast);
     }
     .nav-btn:hover {
         opacity: 1;

@@ -249,7 +249,7 @@ import { formatNetworkedExtensions, serverToolExtensions } from '$lib/utils/serv
         height: 100%;
         border-radius: var(--radius-sm);
         background: var(--color-accent);
-        transition: width 0.3s ease;
+        transition: width var(--dur-slow) ease;
     }
 
     .memory-bar-fill.warn {
@@ -265,7 +265,7 @@ import { formatNetworkedExtensions, serverToolExtensions } from '$lib/utils/serv
         margin-left: -1px;
         border-radius: var(--radius-xs);
         background: var(--color-status-red);
-        transition: left 0.3s ease;
+        transition: left var(--dur-slow) ease;
     }
 
     .memory-peak {

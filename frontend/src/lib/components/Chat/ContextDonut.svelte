@@ -68,6 +68,6 @@
         fill: none;
         stroke-width: var(--stroke);
         stroke-linecap: butt;
-        transition: stroke 0.3s ease, stroke-dashoffset 0.3s ease;
+        transition: stroke var(--dur-slow) ease, stroke-dashoffset var(--dur-slow) ease;
     }
 </style>

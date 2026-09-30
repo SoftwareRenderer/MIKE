@@ -216,9 +216,12 @@ Two measured behaviours that chat specs keep getting wrong, both worth designing
   path that has stopped fetching fails too, so the exemption list cannot rot. The pattern wants a call
   position, so prose naming `fetch()` — one capability description does — is not a request. A scan that
   finds no file to scan is a failure, not a clean run.
-- **`npm run check:colors`** — `frontend/scripts/check-colors.sh` fails on a hex colour literal in a
-  component or a stylesheet under `src/`, because every chrome colour comes from the palette in
-  `src/app.css`; its header holds the exceptions.
+- **`npm run check:colors`** — `frontend/scripts/check-colors.sh` fails on a colour a theme cannot reach, in a
+  component or a stylesheet under `src/`. Four spellings count: a hex literal, an `rgb()`/`rgba()`/`hsl()`
+  literal, a colour keyword (`color: white`), and a `var(--token)` glued to a hex alpha pair — that last one
+  stops working the moment a theme answers the name with `rgb(…)`. Alpha over a token is
+  `rgb(from var(--token) r g b / a)`. `src/app.css` holds the palette, a colour that is *data* for JS lives in
+  the `*.ts` modules that mirror it, and the script's header holds the reasoning and the one exception.
 
 ### The dead-surface gate
 

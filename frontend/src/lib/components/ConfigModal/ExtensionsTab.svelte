@@ -636,7 +636,7 @@
         display: flex;
         justify-content: space-between;
         align-items: center;
-        box-shadow: 0 2px 8px rgb(from var(--color-shadow) r g b / 0.15);
+        box-shadow: var(--shadow-raised);
     }
 
     .dismiss {

@@ -127,7 +127,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        transition: all 0.15s ease;
+        transition: all var(--dur-base) ease;
         position: relative;
         width: 22px;
         height: 22px;
@@ -139,7 +139,7 @@
         color: var(--color-text-primary);
     }
     .action-btn .icon {
-        transition: opacity 0.2s ease;
+        transition: opacity var(--dur-md) ease;
     }
     .action-btn.copied .icon {
         opacity: 0;
@@ -152,7 +152,7 @@
         font-size: var(--text-base);
         font-weight: 700;
         line-height: 1;
-        transition: opacity 0.2s ease;
+        transition: opacity var(--dur-md) ease;
         pointer-events: none;
     }
     .action-btn.copied .check {

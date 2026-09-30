@@ -356,7 +356,7 @@
     </button>
 {/snippet}
 
-<BaseModal title={parentId ? t('app.task.createSubtask') : t('app.task.create')} width="480px" footer={footer} onClose={closeModal} onBeforeClose={requestClose} closeOnOverlayClick={false} floating={lineTask}>
+<BaseModal title={parentId ? t('app.task.createSubtask') : t('app.task.create')} width="480px" modalClass="create-task-modal" footer={footer} onClose={closeModal} onBeforeClose={requestClose} closeOnOverlayClick={false} floating={lineTask}>
     {#if parentId}
         <div class="parent-label">{t('app.task.subtaskOf')} <strong>{parentTitle || t('app.task.parentFallback')}</strong></div>
     {/if}
@@ -458,18 +458,10 @@
 <style>
     @import '$lib/styles/shared.css';
 
-    :global(.modal) {
-        box-shadow: 0 12px 40px rgba(0,0,0,0.3);
-    }
-    :global(.modal-body) {
+    :global(.create-task-modal .modal-body) {
         display: flex;
         flex-direction: column;
         gap: 16px;
-    }
-    .btn-primary .key-hint {
-        color: rgba(255, 255, 255, 0.85);
-        border-color: rgba(255, 255, 255, 0.3);
-        background: rgba(255, 255, 255, 0.1);
     }
     .auto-start-option {
         display: inline-flex;
@@ -536,8 +528,8 @@
         width: 18px;
         height: 18px;
         border-radius: 50%;
-        background: rgba(0,0,0,0.7);
-        color: white;
+        background: rgb(from var(--color-backdrop) r g b / 0.7);
+        color: var(--color-btn-text);
         border: none;
         font-size: var(--text-base);
         line-height: 1;
@@ -642,10 +634,5 @@
         font-size: var(--text-base);
         font-weight: 500;
         color: var(--color-text-secondary);
-    }
-    @media (max-width: 768px) {
-        :global(.modal-body) {
-            padding: 16px;
-        }
     }
 </style>

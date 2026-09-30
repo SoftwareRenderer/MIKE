@@ -1013,11 +1013,11 @@
         background: var(--color-surface-3);
     }
 
-    :global(.close-btn) {
+    .close-btn {
         font-size: var(--text-lg);
         padding: 2px 6px;
     }
-    :global(.close-btn:hover) {
+    .close-btn:hover {
         color: var(--color-text-primary);
     }
     .terminal-container {
@@ -1071,7 +1071,7 @@
             text-transform: uppercase;
             letter-spacing: 0.03em;
             cursor: pointer;
-            transition: background 0.1s, border-color 0.1s, color 0.1s;
+            transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast);
             -webkit-tap-highlight-color: transparent;
         }
         .kb-btn:active {

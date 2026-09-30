@@ -264,7 +264,7 @@
         max-width: 200px;
         position: relative;
         user-select: none;
-        transition: background 0.1s, color 0.1s;
+        transition: background var(--dur-fast), color var(--dur-fast);
     }
     .editor-tab:hover {
         background: var(--color-surface-1);
@@ -315,7 +315,7 @@
         cursor: pointer;
         border-radius: var(--radius-sm);
         opacity: 0.5;
-        transition: opacity 0.1s, background 0.1s;
+        transition: opacity var(--dur-fast), background var(--dur-fast);
     }
     .btn-close-tab:hover {
         opacity: 1;
@@ -360,12 +360,12 @@
         border: none;
         border-radius: var(--radius-md);
         background: var(--color-accent-dark);
-        color: white;
+        color: var(--color-btn-text);
         font-size: var(--text-xs);
         font-family: inherit;
         font-weight: 500;
         flex-shrink: 0;
-        transition: opacity 0.15s;
+        transition: opacity var(--dur-base);
     }
     .editor-save-btn:hover:not(:disabled) {
         opacity: 0.85;

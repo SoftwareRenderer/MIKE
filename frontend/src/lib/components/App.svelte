@@ -1470,7 +1470,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         background: var(--color-surface-0);
         color: var(--color-text-primary);
         cursor: pointer;
-        transition: background 0.15s, border-color 0.15s;
+        transition: background var(--dur-base), border-color var(--dur-base);
     }
 
     .offline-btn svg {
@@ -1500,8 +1500,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         align-items: center;
         justify-content: center;
         gap: 8px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-        animation: slide-down 0.2s ease-out;
+        box-shadow: var(--shadow-popover);
+        animation: slide-down var(--dur-md) ease-out;
     }
     .reconnecting-stale {
         font-weight: 400;
@@ -1518,7 +1518,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         font-size: var(--text-xs);
         font-weight: 600;
         cursor: pointer;
-        transition: background 0.15s;
+        transition: background var(--dur-base);
     }
     .reconnecting-btn:hover {
         opacity: 1;
@@ -1554,8 +1554,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         align-items: center;
         justify-content: center;
         gap: 6px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-        animation: slide-down 0.2s ease-out;
+        box-shadow: var(--shadow-popover);
+        animation: slide-down var(--dur-md) ease-out;
     }
     .cache-banner svg {
         opacity: 0.6;
@@ -1668,7 +1668,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         border-radius: var(--radius-md);
         font-size: var(--text-base);
         z-index: var(--z-toast);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        box-shadow: var(--shadow-popover);
     }
     /* The drawer's scrim: one tier under the drawer so the drawer stays hittable, and under a
        dialog so a dialog is never dimmed by a drawer left open behind it. */

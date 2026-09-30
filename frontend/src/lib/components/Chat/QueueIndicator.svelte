@@ -132,7 +132,7 @@
     }
     .prioritize:disabled {
         cursor: default;
-        opacity: 0.6;
+        opacity: var(--opacity-disabled);
     }
     .prioritized {
         color: var(--color-text-tertiary);

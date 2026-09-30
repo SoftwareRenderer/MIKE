@@ -96,7 +96,7 @@
     </div>
 {/snippet}
 
-<BaseModal {title} width="560px" zIndex={Z.modalStacked} modalClass="path-browser" footer={footer} onClose={onClose}>
+<BaseModal {title} width="560px" zIndex={Z.modalStacked} modalClass="path-browser" maxHeight="80vh" footer={footer} onClose={onClose}>
     <!-- Path bar -->
     <div class="path-bar">
         <div class="path-bar-row">
@@ -170,11 +170,7 @@
     @import '$lib/styles/shared.css';
     @import '$lib/styles/path-browser.css';
 
-    :global(.modal) {
-        max-height: 80vh;
-    }
-    :global(.modal-body) {
-        padding: 0 20px 16px;
+    :global(.path-browser .modal-body) {
         display: flex;
         flex-direction: column;
         gap: 8px;
@@ -216,7 +212,7 @@
     }
     .file-entry.selected {
         background: var(--color-accent-dark);
-        color: white;
+        color: var(--color-btn-text);
     }
     .file-entry.parent-entry {
         color: var(--color-text-secondary);

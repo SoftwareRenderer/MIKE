@@ -84,7 +84,7 @@
         background: var(--color-surface-2);
         border: 1px solid var(--color-border-bright);
         border-radius: var(--radius-lg);
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+        box-shadow: var(--shadow-float);
     }
 
     .locale-offer-title {

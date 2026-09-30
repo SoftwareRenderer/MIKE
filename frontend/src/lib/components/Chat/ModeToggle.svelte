@@ -47,7 +47,7 @@
         background: var(--color-surface-2);
         color: var(--color-text-secondary);
         font-size: var(--text-xs);
-        transition: all 0.15s ease;
+        transition: all var(--dur-base) ease;
     }
     .btn-plan-toggle.bar:hover {
         opacity: 1;

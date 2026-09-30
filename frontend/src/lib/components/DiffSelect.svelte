@@ -73,7 +73,7 @@
         color: var(--color-text-secondary);
         border: 1px solid var(--color-border);
         cursor: pointer;
-        transition: all 0.15s ease;
+        transition: all var(--dur-base) ease;
         font-family: var(--font-mono);
         text-align: left;
         min-height: 1.6rem;
@@ -140,7 +140,7 @@
         border: none;
         color: var(--color-text-secondary);
         cursor: pointer;
-        transition: all 0.1s ease;
+        transition: all var(--dur-fast) ease;
         text-align: left;
         font-family: var(--font-mono);
     }

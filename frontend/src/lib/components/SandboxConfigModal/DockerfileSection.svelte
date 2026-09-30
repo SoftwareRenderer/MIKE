@@ -201,7 +201,7 @@
         gap: 4px;
         border-radius: var(--radius-sm);
         font-size: var(--text-xs);
-        transition: background 0.15s, border-color 0.15s;
+        transition: background var(--dur-base), border-color var(--dur-base);
         white-space: nowrap;
     }
 

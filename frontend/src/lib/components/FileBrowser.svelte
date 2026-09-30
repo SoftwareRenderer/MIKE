@@ -368,21 +368,10 @@
 <style>
     @import '$lib/styles/path-browser.css';
 
-    :global(.modal) {
-        display: flex;
-        flex-direction: column;
-        max-height: 80vh;
-    }
-    :global(.modal-body) {
-        flex: 1;
-        overflow-y: auto;
-        padding: 0 16px 16px;
+    :global(.path-browser .modal-body) {
         display: flex;
         flex-direction: column;
         gap: 8px;
-    }
-    :global(.modal-footer) {
-        gap: 12px;
     }
     .body-wrapper,
     .footer-wrapper {
@@ -416,12 +405,12 @@
     }
     .tab.active {
         background: var(--color-accent-dark);
-        color: white;
+        color: var(--color-btn-text);
     }
     .tab.active:hover {
         opacity: 1;
         background: var(--color-accent-hover);
-        color: white;
+        color: var(--color-btn-text);
     }
     .path-bar {
         display: flex;
@@ -444,14 +433,14 @@
         color: var(--color-status-red);
         font-size: var(--text-base);
         padding: 8px;
-        background: var(--color-status-red)11;
+        background: rgb(from var(--color-status-red) r g b / 0.07);
         border-radius: var(--radius-sm);
     }
     .git-indicator {
         color: var(--color-status-green);
         font-size: var(--text-base);
         padding: 8px;
-        background: var(--color-status-green)11;
+        background: rgb(from var(--color-status-green) r g b / 0.07);
         border-radius: var(--radius-sm);
         text-align: center;
     }
@@ -530,7 +519,7 @@
     .btn-mini {
         padding: 8px 12px;
         background: var(--color-accent-dark);
-        color: white;
+        color: var(--color-btn-text);
         border-radius: var(--radius-md);
         font-size: var(--text-base);
         font-weight: 500;
@@ -564,12 +553,12 @@
         color: var(--color-text-primary);
     }
     .file-entry.git-repo:hover {
-        background: var(--color-status-green)11;
+        background: rgb(from var(--color-status-green) r g b / 0.07);
     }
     .git-badge {
         font-size: var(--text-xs);
         padding: 1px 6px;
-        background: var(--color-status-green)33;
+        background: rgb(from var(--color-status-green) r g b / 0.2);
         color: var(--color-status-green);
         border-radius: var(--radius-lg);
         font-weight: 600;

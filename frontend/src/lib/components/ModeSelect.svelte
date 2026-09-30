@@ -79,7 +79,7 @@
         cursor: pointer;
         font-family: inherit;
         white-space: nowrap;
-        transition: border-color 0.15s;
+        transition: border-color var(--dur-base);
     }
     .mode-btn:hover {
         border-color: var(--color-accent);
@@ -92,7 +92,7 @@
     }
     .chevron {
         margin-left: 2px;
-        transition: transform 0.15s;
+        transition: transform var(--dur-base);
     }
     .mode-btn.open .chevron {
         transform: rotate(180deg);
@@ -120,7 +120,7 @@
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        box-shadow: var(--shadow-popover);
         padding: 4px;
         z-index: var(--z-dropdown);
     }

@@ -114,7 +114,7 @@
         color: var(--color-text-secondary);
         border: 1px solid var(--color-border);
         cursor: pointer;
-        transition: all 0.15s ease;
+        transition: all var(--dur-base) ease;
         white-space: nowrap;
     }
     .view-changes-btn:hover {

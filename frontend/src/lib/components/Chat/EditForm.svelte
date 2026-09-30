@@ -200,7 +200,7 @@
     }
     .edit-form textarea:focus-visible {
         border-color: var(--color-accent);
-        box-shadow: 0 0 0 2px var(--color-accent)22;
+        box-shadow: var(--focus-halo);
         outline: none;
     }
     .edit-actions {
@@ -234,8 +234,8 @@
         width: 18px;
         height: 18px;
         border-radius: 50%;
-        background: rgba(0,0,0,0.7);
-        color: white;
+        background: rgb(from var(--color-backdrop) r g b / 0.7);
+        color: var(--color-btn-text);
         border: none;
         font-size: var(--text-base);
         line-height: 1;
@@ -282,7 +282,7 @@
         border-radius: var(--radius-sm);
         font-size: var(--text-sm);
         background: var(--color-accent-dark);
-        color: white;
+        color: var(--color-btn-text);
         cursor: pointer;
     }
     .btn-edit-submit:hover:not(:disabled) {
