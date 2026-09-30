@@ -108,6 +108,13 @@ func crashLLM(t *testing.T, answers ...func(http.ResponseWriter)) (*httptest.Ser
 	return srv, &calls
 }
 
+// fastRetryLadder replaces the production backoff ladder for a test whose subject is what the retry
+// loop does, not how long it waits between attempts. backoffFor's durations have their own tests, and
+// the production ladder costs 2s + 4s + 8s per exhausted run.
+func fastRetryLadder(te *TaskExecutor) {
+	te.llmBackoff = func(int, error) time.Duration { return 10 * time.Millisecond }
+}
+
 // startExecRun runs an executor for a task that already has one user message. The caller waits for
 // whatever it asserts on; cleanup cancels the run.
 func startExecRun(t *testing.T, te *TaskExecutor, projectID, taskID, serverURL, worktreePath string) *taskExecSetup {
@@ -210,6 +217,7 @@ func TestLLMCrashMidTurnWithToolCallLeavesNoPartialTurn(t *testing.T) {
 		func(w http.ResponseWriter) { sseStreamedThenAbort(w, "Let me explain what I found so") },
 	)
 	te, _, projectID, initialSHA := setupExecutorWithGit(t)
+	fastRetryLadder(te)
 	const taskID = "crash-mid-turn"
 	worktreePath := crashTask(t, te, projectID, initialSHA, taskID, srv.URL)
 
@@ -289,6 +297,7 @@ func TestLLMProviderDiesBeforeFirstFrameRetriesThenFailsIntoReview(t *testing.T)
 	t.Parallel()
 	srv, calls := crashLLM(t, sseAbortedBeforeFirstFrame)
 	te, _, projectID, initialSHA := setupExecutorWithGit(t)
+	fastRetryLadder(te)
 	const taskID = "crash-no-frames"
 	worktreePath := crashTask(t, te, projectID, initialSHA, taskID, srv.URL)
 
@@ -376,6 +385,7 @@ func TestAbortedStreamIsRetriedAndTheTurnCompletes(t *testing.T) {
 		func(w http.ResponseWriter) { sseText(w, "The file is not there. Should I create it?") },
 	)
 	te, _, projectID, initialSHA := setupExecutorWithGit(t)
+	fastRetryLadder(te)
 	const taskID = "crash-then-answered"
 	worktreePath := crashTask(t, te, projectID, initialSHA, taskID, srv.URL)
 

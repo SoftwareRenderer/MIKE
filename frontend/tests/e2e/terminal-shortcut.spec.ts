@@ -1,5 +1,10 @@
 import { test, expect, type Page } from '@playwright/test';
-import { getProjectId, createTaskViaApi, ensureTaskStarted, navigateToTask } from './helpers';
+import {
+  getProjectId, createTaskViaApi, ensureTaskStarted, navigateToTask, isolatedProject, gotoProject,
+} from './helpers';
+// Each test file gets its own project, because it starts a turn: see isolatedProject() in helpers.ts.
+isolatedProject();
+
 
 // Open/close-terminal keyboard shortcut (default Ctrl+backtick, Settings →
 // Preferences). Toggles the panel on every page with a terminal button: board
@@ -27,7 +32,7 @@ async function closeTerminal(page: Page) {
 
 test.describe.serial('Open-terminal keyboard shortcut', () => {
     test('board: Ctrl+` opens the terminal panel, pressing again closes it', async ({ page }) => {
-        await page.goto('/');
+        await gotoProject(page);
         await page.waitForSelector('.card', { timeout: 10000 });
 
         const terminalButton = page.locator('[aria-label="Open terminal"]');
@@ -46,7 +51,7 @@ test.describe.serial('Open-terminal keyboard shortcut', () => {
     });
 
     test('task detail: Ctrl+` opens the terminal panel', async ({ page }) => {
-        await page.goto('/');
+        await gotoProject(page);
         await page.waitForSelector('.card', { timeout: 10000 });
         const projectId = await getProjectId(page);
         const taskId = await createTaskViaApi(page, projectId, `terminal-shortcut-${Date.now()}`);
@@ -64,10 +69,10 @@ test.describe.serial('Open-terminal keyboard shortcut', () => {
     });
 
     test('project explorer: Ctrl+` opens the terminal panel', async ({ page }) => {
-        await page.goto('/');
+        await gotoProject(page);
         await page.waitForSelector('.card', { timeout: 10000 });
         const projectId = await getProjectId(page);
-        await page.goto(`/?project=${projectId}&view=explorer`);
+        await gotoProject(page, `/?project=${projectId}&view=explorer`);
 
         const terminalButton = page.locator('.terminal-btn[aria-label="Open terminal"]');
         await expect(terminalButton).toBeVisible();
@@ -80,7 +85,7 @@ test.describe.serial('Open-terminal keyboard shortcut', () => {
     });
 
     test('task explorer: Ctrl+` opens the terminal panel', async ({ page }) => {
-        await page.goto('/');
+        await gotoProject(page);
         await page.waitForSelector('.card', { timeout: 10000 });
         const projectId = await getProjectId(page);
         const taskId = await createTaskViaApi(page, projectId, `terminal-shortcut-explorer-${Date.now()}`);
@@ -90,7 +95,7 @@ test.describe.serial('Open-terminal keyboard shortcut', () => {
         await navigateToTask(page, taskId, projectId);
         await expect(page.locator('.task-detail-page')).toBeVisible();
         // Switch to the task explorer view (same URL param as the in-app button).
-        await page.goto(`/?project=${projectId}&task=${taskId}&view=task-explorer`);
+        await gotoProject(page, `/?project=${projectId}&task=${taskId}&view=task-explorer`);
         await page.waitForSelector('.terminal-btn[aria-label="Open terminal"]', { timeout: 10000 });
 
         await expect(page.locator(TERMINAL_PANEL)).not.toBeVisible();
@@ -101,7 +106,7 @@ test.describe.serial('Open-terminal keyboard shortcut', () => {
     });
 
     test('does not fire while a modal is open', async ({ page }) => {
-        await page.goto('/');
+        await gotoProject(page);
         await page.waitForSelector('.card', { timeout: 10000 });
 
         await page.locator(SETTINGS_BTN).first().click();

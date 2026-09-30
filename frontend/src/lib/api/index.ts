@@ -111,7 +111,7 @@ export {
     getTaskDiff,
     getTaskCommits,
     getDiffFile,
-    stageFile,
+    stageTaskPaths,
     getGitLogFull,
     getCommitDiffFiles,
     getProjectDiffFiles,
@@ -121,15 +121,15 @@ export {
     getLocalBranches,
     checkoutBranch,
     getGitStatus,
-    stageProjectFile,
+    stageProjectPaths,
     commitProject,
-    discardProjectFile,
+    discardProjectPaths,
     pullProject,
     pushProject,
     getTaskGitLog,
     getTaskCommitDiffFiles,
 } from './git';
-export type { ParsedDiffFile, TaskDiff, TaskDiffOptions } from './git';
+export type { ParsedDiffFile, TaskDiff, TaskDiffOptions, GitBatchResult } from './git';
 
 // -- Stream --
 export { createAppStream } from './stream';

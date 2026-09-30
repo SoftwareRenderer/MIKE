@@ -130,8 +130,7 @@ func TestPrepareTaskExecution_PreservesBaseRefOnRestart(t *testing.T) {
 		t.Errorf("BaseRef should be a 40-char SHA, got %q (len=%d)", setup.task.BaseRef, len(setup.task.BaseRef))
 	}
 
-	setup.cancel()
-	te.StopTask(taskID)
+	te.releasePrepared(setup)
 }
 
 // TestPrepareTaskExecution_SetsBaseRefOnFirstRun verifies that on first run
@@ -173,8 +172,7 @@ func TestPrepareTaskExecution_SetsBaseRefOnFirstRun(t *testing.T) {
 		t.Errorf("BaseRef should be a branch name, not a 40-char SHA, got %q", setup.task.BaseRef)
 	}
 
-	setup.cancel()
-	te.StopTask(taskID)
+	te.releasePrepared(setup)
 }
 
 // TestInitTask_CreatesWorktree verifies that InitTask creates the worktree
@@ -316,8 +314,7 @@ func TestInitTask_ThenPrepareTaskExecution(t *testing.T) {
 		t.Errorf("BaseCommit should be preserved: expected %q, got %q", initialSHA, setup.task.BaseCommit)
 	}
 
-	setup.cancel()
-	te.StopTask(taskID)
+	te.releasePrepared(setup)
 }
 
 func TestHasRunningTasks_InProgress(t *testing.T) {

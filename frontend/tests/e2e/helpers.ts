@@ -16,12 +16,11 @@ export function findProviderByRef(providers: any[], ref: string): any | undefine
   );
 }
 
-// --- Shared API helpers (replaces duplicate code in individual test files) ---
+// --- Shared API helpers ---
 
 /** Get the server origin from the page, navigating first if needed. */
 async function getOrigin(page: Page): Promise<string> {
   const url = page.url();
-  // If page hasn't been navigated yet (about:blank), navigate to get the origin
   if (!url || url === 'about:blank') {
     await page.goto('/');
   }
@@ -44,9 +43,7 @@ async function getCsrfToken(page: Page): Promise<string> {
 }
 
 /**
- * CSRF-aware fetch wrapper for use in page.evaluate.
- * Use this instead of raw fetch for POST/PUT/DELETE requests.
- * Returns { ok, status, data } from the response.
+ * CSRF-aware fetch for use inside page.evaluate. A raw fetch on a write method is refused.
  */
 export async function csrfFetch(
   page: Page,
@@ -117,7 +114,7 @@ export async function apiGetJson<T>(page: Page, path: string): Promise<T> {
   }, path) as T;
 }
 
-/** Wait for config to match expected state (replaces blind waitForSettle after PUT). */
+/** Wait until the server's config matches `predicate`. */
 export async function waitForConfig(page: Page, predicate: (config: any) => boolean, timeout = 2000): Promise<void> {
   await expect(async () => {
     const config = await apiGetConfig(page);
@@ -128,13 +125,8 @@ export async function waitForConfig(page: Page, predicate: (config: any) => bool
 // --- Node-side server API helper (works while the browser context is offline) ---
 
 /**
- * Make a server API request from the Node test process.
- *
- * Uses the session cookie + CSRF token from /tmp/kanban-test-auth.json.
- * This allows advancing server state (creating tasks, etc.) while the
- * browser WebSocket is down or the page is mid-reload.
- *
- * @param base  Server origin: http://localhost:3000 or http://localhost:3001
+ * A server API request from the Node test process, authenticated from the lane's session file, so it works
+ * while the browser context is offline or mid-reload. `base` is the lane's origin.
  */
 export async function serverApi(
   base: string,
@@ -195,19 +187,67 @@ export async function getProjectId(page: Page): Promise<string> {
   return (projects || []).find((p: any) => p.path === FIXTURE_REPO)?.id || projects?.[0]?.id || '';
 }
 
+/**
+ * The run's long transcript, built once by global setup. A spec that measures a reader's scroll reads it
+ * rather than POSTing rows of its own.
+ */
+export function chatFixture(): { projectId: string; taskId: string; rows: number } {
+  const file = '/tmp/kanban-test-chat-fixture.json';
+  if (!existsSync(file)) {
+    throw new Error(`chatFixture: ${file} is missing — global setup builds the transcript with the run's projects`);
+  }
+  return JSON.parse(readFileSync(file, 'utf-8'));
+}
+
+/**
+ * Change a card's title through the edit dialog and wait for the dialog to close. The board moves when it
+ * closes; whether the server took the edit is a separate fact.
+ */
+export async function editTaskTitle(page: Page, taskId: string, title: string): Promise<void> {
+  const card = page.locator(`section[aria-label="Kanban board"] .card[data-task-id="${taskId}"]`);
+  await card.hover();
+  await card.locator('[aria-label="Edit task"]').click();
+  await page.fill('#edit-task-title-input', title);
+  await page.locator('.modal-footer .btn-primary').click();
+  await expect(page.locator('#edit-task-title-input')).toHaveCount(0);
+}
+
+/**
+ * How many writes the persisted queue holds. A value drawn on screen proves nothing about the queue, and a
+ * request still running when the page went away never became an entry.
+ */
+export async function queuedActionCount(page: Page): Promise<number> {
+  return page.evaluate(async () => {
+    const db = await new Promise<any>((resolve, reject) => {
+      const rq = indexedDB.open('kanban-storage');
+      rq.onsuccess = () => resolve(rq.result);
+      rq.onerror = () => reject(rq.error);
+    });
+    return new Promise<number>(resolve => {
+      const req = db.transaction('offline-queue', 'readonly').objectStore('offline-queue').get('actions');
+      req.onsuccess = () => resolve(Array.isArray(req.result) ? req.result.length : 0);
+      req.onerror = () => resolve(0);
+    });
+  });
+}
+
+/**
+ * End an offline stretch and wait for the browser's offline flag to clear. A page that boots while it still
+ * reads offline holds the queue for an `online` event that already fired.
+ */
+export async function goOnline(page: Page): Promise<void> {
+  await page.context().setOffline(false);
+  await expect.poll(() => page.evaluate(() => navigator.onLine), { timeout: 10000 }).toBe(true);
+}
+
 // --- Isolated project per worker ---
 //
-// Specs used to share global-setup's one project, so ~9 specs changed one board at once and
-// assertions on counts, "the first card" or an absent class failed at random: identical code
-// differed by 15 failures, and each one passed alone. isolatedProject() gives the current
-// worker its own copy of the fixture repo, plus the same two seed tasks global-setup creates.
+// isolatedProject() gives the current worker its own copy of the fixture repo, so specs do not change one
+// board at once. Keyed by worker, not file: fullyParallel splits one file across workers, and two workers
+// would then claim the same path.
 //
-// Keyed by worker, not file: fullyParallel splits one file across workers, and two workers
-// would then claim the same path. A worker runs one file at a time, so files never contend.
-//
-// Usage: isolatedProject() once at file top level, then gotoProject(page) to open it;
-// getProjectId(page) returns it too. Specs that assert on the shared project list (sidebar,
-// add-project flow) must not use it — the shared view is what they test.
+// Call it once at file top level, then gotoProject(page). A spec that tests the shared project list (sidebar,
+// add-project flow) must not use it.
 
 const OWN_REPOS_DIR = '/tmp/kanban-test-repos';
 const FIXTURE_REPO = '/tmp/kanban-test-repo';
@@ -216,31 +256,59 @@ export function isolatedProject(): void {
   test.beforeEach(async ({ page }, testInfo) => {
     // The port keeps the two lanes' slots disjoint (3000 chromium, 3001 isolated).
     const base = (testInfo.project.use as { baseURL?: string })?.baseURL || 'http://localhost:3000';
-    await ensureOwnProject(page, `w${testInfo.parallelIndex}-${new URL(base).port}`);
+    const own = await ensureOwnProject(page, `w${testInfo.parallelIndex}-${new URL(base).port}`);
+    // Re-seeded per test, not once per file: a file in parallel mode runs its `afterAll` between groups of
+    // its own tests, so the teardown below can empty this project while the file still has tests left.
+    await seedIfEmpty(page, own.id);
   });
+
+  // A file that owns a project leaves it empty: the project outlives the file, so a leftover card is one the
+  // next file finds in a column it did not put it in. Deleting a task is also what stops its container.
+  test.afterAll(async ({ browser }, testInfo) => {
+    if (!ownProject) return;
+    const storageState = (testInfo.project.use as { storageState?: string }).storageState;
+    const context = await browser.newContext(storageState ? { storageState } : {});
+    const page = await context.newPage();
+    try {
+      await clearAllTasks(page, ownProject.id);
+    } finally {
+      await context.close();
+    }
+  });
+}
+
+/**
+ * Delete every task on a project. A refusal is logged rather than thrown, because a silent leftover is what
+ * the next file inherits.
+ */
+export async function clearAllTasks(page: Page, projectId: string): Promise<void> {
+  const board = await apiGetJson<{ tasks?: any[] }>(page, `/api/projects/${projectId}/board`);
+  const refused: string[] = [];
+  for (const t of board?.tasks || []) {
+    const res = await csrfFetch(page, `/api/projects/${projectId}/tasks/${t.id}`, { method: 'DELETE' });
+    if (!res.ok) refused.push(`${t.id} (${res.status})`);
+  }
+  if (refused.length > 0) {
+    console.log(`[helpers] left ${refused.length} task(s) on project ${projectId}: ${refused.join(', ')}`);
+  }
 }
 
 async function ensureOwnProject(page: Page, slot: string): Promise<{ id: string; path: string }> {
   if (ownProject) return ownProject;
 
   const path = `${OWN_REPOS_DIR}/${slot}`;
-  // Idempotent: a re-import in the same worker must reuse, not re-POST.
-  // apiGetJson, not csrfFetch: csrfFetch sends a JSON content-type with no body, which the
-  // server rejects on a GET.
+  // A re-import in the same worker must reuse the row, not re-POST. apiGetJson, not csrfFetch: that one sends
+  // a JSON content-type with no body, which a GET-only route rejects.
   const projects = await apiGetJson<any[]>(page, '/api/projects');
   const existing = (projects || []).find((p: any) => p.path === path)?.id || '';
   if (existing) {
     ownProject = { id: existing, path };
-    // A previous spec on this worker may have deleted the seed tasks — re-seed so the
-    // `waitForSelector('.card')` readiness gate holds for the next file too.
-    await seedIfEmpty(page, existing);
     return ownProject;
   }
 
   if (!existsSync(`${path}/.git`)) {
     mkdirSync(OWN_REPOS_DIR, { recursive: true });
-    // cpSync keeps the fixture repo's .git (incl. the local identity global-setup set,
-    // which backend commit-and-done commits need).
+    // cpSync keeps the fixture repo's .git, including the git identity global setup set for commit-and-done.
     cpSync(FIXTURE_REPO, path, { recursive: true });
   }
 
@@ -250,11 +318,13 @@ async function ensureOwnProject(page: Page, slot: string): Promise<{ id: string;
     throw new Error(`isolatedProject: could not create project at ${path}: ${created.status} ${JSON.stringify(created.data)}`);
   }
   ownProject = { id, path };
-  await seedIfEmpty(page, id);
   return ownProject;
 }
 
-/** Give the project global-setup's two seed tasks, unless it already has tasks. */
+/**
+ * Give the project global-setup's two seed tasks, unless it already has tasks. Specs wait for `.card` as the
+ * sign the app is up, and a card belongs to whichever spec created one last.
+ */
 async function seedIfEmpty(page: Page, id: string): Promise<void> {
   const board = await apiGetJson<{ tasks?: any[] }>(page, `/api/projects/${id}/board`);
   if (Array.isArray(board?.tasks) && board.tasks.length > 0) return;
@@ -291,18 +361,14 @@ export async function clearBoardExcept(page: Page, projectId: string, keep: stri
 }
 
 /** `page.goto` for the project this file owns. */
-export async function gotoProject(page: Page, path = '/'): Promise<void> {
-  await page.goto(projectUrl(path));
+export async function gotoProject(page: Page, path = '/', options?: Parameters<Page['goto']>[1]): Promise<void> {
+  await page.goto(projectUrl(path), options);
 }
 
 /**
- * Does a text box that clips itself keep the ink of its own glyphs?
- *
- * `overflow: hidden` stops painting at the element's line box, and a line box shorter than the font's
- * box removes the bottom of every descender — a path drawn as `~/code/dependenc-graph-engin`. The room
- * below the baseline inside one line box is (line-height − ascent + descent) / 2; compare it with what
- * "g" actually paints. jsdom has neither text metrics nor layout, so this is a browser measurement.
- * Answers '' when the text fits, and a sentence naming the shortfall when it does not.
+ * Does a text box that clips itself keep the ink of its own glyphs? `overflow: hidden` paints only inside the
+ * line box, so a line box shorter than the font's box cuts every descender, and only a browser can measure
+ * that. Answers '' when the text fits, a sentence naming the shortfall when it does not.
  */
 export async function descenderProblems(page: Page, selector: string): Promise<string> {
   return page.evaluate((sel) => {
@@ -322,8 +388,7 @@ export async function descenderProblems(page: Page, selector: string): Promise<s
   }, selector);
 }
 /**
- * Click the sidebar row for `projectId`. With per-worker projects, `.project-item` +
- * `.first()` picks somebody else's project.
+ * Click the sidebar row for `projectId`. `.project-item` + `.first()` picks somebody else's project.
  */
 export async function selectProject(page: Page, projectId: string): Promise<void> {
   // Suffix match, not substring: `project=kanban-test-repo` is a prefix of
@@ -366,13 +431,92 @@ export async function waitForTaskState(
   projectId: string,
   taskId: string,
   predicate: (t: any) => boolean,
-  timeout = 15000,
+  timeout = 60000,
 ): Promise<void> {
   await expect(async () => {
     const task = await getTaskData(page, projectId, taskId);
     expect(predicate(task)).toBe(true);
   }).toPass({ timeout });
 }
+// --- The turn: sending one, telling whether it is still running, telling when it ended ---
+
+/** `taskIsInFlight` ($lib/utils/task-utils.ts) for a raw task row. A stopped task keeps `status = in_progress`
+ *  and only moves `execution_state`, so the status is never this answer. */
+export const notInFlight = (t: any): boolean =>
+  t?.execution_state !== 'running' && t?.execution_state !== 'pulling_image';
+
+/**
+ * The run is over: the turn left the task in Review and nothing is running. A turn that stopped on its own ends
+ * `review` + `idle`, so `execution_state === 'failed'` is not part of this.
+ */
+export const runHasEnded = (t: any): boolean => t?.status === 'review' && notInFlight(t);
+
+/** The pending tool-call band: a call announced and not yet answered. */
+export const PENDING_TOOL_STATUS = '.tool-status.pending';
+/** The tool card a pending band belongs to. */
+export const TOOL_CALL_CARD = '.tool-call-card';
+/** What the `slow-tool-probe` turn prints from inside its bash call. */
+export const SLOW_PROBE_OUTPUT = 'SLOW-TOOL-PROBE-DONE';
+
+/** The window stops being read: it reports no focus, and no frame reaches JavaScript. The spec's own
+ *  `addInitScript` installs the hooks this flips; the hooks differ per spec, the flip does not. */
+export const stopReading = (page: Page): Promise<void> =>
+  page.evaluate(() => { (window as any).__unfocused = true; (window as any).__away = true; });
+
+/** The window comes back. Only `focus` is dispatched — the page was never hidden. */
+export const comeBack = (page: Page): Promise<void> => page.evaluate(() => {
+  const w = window as any;
+  w.__away = false;
+  w.__unfocused = false;
+  window.dispatchEvent(new Event('focus'));
+});
+
+/** A row of a conversation, as the messages route answers it. */
+type MessageRow = { id: string; role: string };
+
+/**
+ * The rows this task's current thread shows, oldest first. `/messages` answers a bounded window (5 units by
+ * default, 25 at most), so a length is not a growth signal and a wait names rows by `id`.
+ */
+export async function messageRows(page: Page, projectId: string, taskId: string): Promise<MessageRow[]> {
+  return (await apiGetJson<MessageRow[]>(
+    page, `/api/projects/${projectId}/tasks/${taskId}/messages?limit=25`,
+  )) ?? [];
+}
+
+/**
+ * Send a turn and wait for its answer. The executor answers one turn at a time, so a running turn absorbs the
+ * message; `/send` reports a refusal as a status instead of throwing; and rows are matched by id because the
+ * window slides. `docs/testing.md → Reading a turn from the store, not from the screen` owns these rules.
+ */
+export async function sendTurn(
+  page: Page, projectId: string, taskId: string, content: string, turnBudget = 60_000,
+): Promise<void> {
+  const rows = () => messageRows(page, projectId, taskId);
+  // The baseline is row identity, not row order: the window slides, so a fast answer can be the newest row
+  // before the first read after the send. An unseen `user` row is this send's; a second unseen row is the answer.
+  const beforeIds = new Set((await rows()).map(r => r.id));
+  await waitForTaskState(page, projectId, taskId, notInFlight, turnBudget);
+  const sent = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/send`, {
+    method: 'POST', body: { content },
+  });
+  if (!sent.ok) {
+    throw new Error(`sendTurn: /send refused with ${sent.status}: ${JSON.stringify(sent.data)}`);
+  }
+  let userRowId = '';
+  await expect.poll(async () => {
+    const mine = (await rows()).find(r => r.role === 'user' && !beforeIds.has(r.id));
+    if (mine) userRowId = mine.id;
+    return mine !== undefined;
+  }, { timeout: turnBudget, message: 'the sent message never got its own row' }).toBe(true);
+  // Something was written after the sent row. Which of an assistant row, a tool call or an error row it was
+  // is the spec's question, not this wait's.
+  await expect.poll(async () => {
+    return (await rows()).some(r => r.role !== 'user' && !beforeIds.has(r.id) && r.id !== userRowId);
+  }, { timeout: turnBudget, message: 'the turn wrote nothing' }).toBe(true);
+  await waitForTaskState(page, projectId, taskId, notInFlight, turnBudget);
+}
+
 /**
  * Idle: the send button is up. Budget for a whole LLM turn, not for a DOM wait — the default
  * 10s expect.timeout is shorter than one queued turn.
@@ -428,7 +572,7 @@ export async function sendMessage(page: Page, message: string): Promise<void> {
 async function clickStartTaskIfNew(page: Page): Promise<void> {
   const startButton = page.locator('.btn-start-task');
   if (!(await startButton.isVisible().catch(() => false))) {
-    return; // Button not visible, task is not new
+    return;
   }
   await startButton.click().catch(() => {});
 }
@@ -439,24 +583,21 @@ async function clickStartTaskIfNew(page: Page): Promise<void> {
  * Returns true if the task is now in_progress.
  */
 export async function ensureTaskStarted(page: Page, projectId: string, taskId: string): Promise<boolean> {
-  // Check if task is already not in backlog
   const taskData = await page.evaluate(async ({ pid, tid }) => {
     const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
     return res.ok ? res.json() : null;
   }, { pid: projectId, tid: taskId });
 
   if (taskData?.status !== 'backlog') {
-    return true; // Already started
+    return true;
   }
 
-  // Move to in_progress via API (bypasses executor)
   const result = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/move`, {
     method: 'POST',
     body: { status: 'in_progress' },
   });
   if (!result.ok) return false;
 
-  // Verify the status change took effect
   const updated = await page.evaluate(async ({ pid, tid }) => {
     const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
     return res.ok ? res.json() : null;
@@ -471,7 +612,6 @@ export async function ensureTaskStarted(page: Page, projectId: string, taskId: s
  */
 export async function waitForChatForm(page: Page): Promise<boolean> {
   await clickStartTaskIfNew(page);
-  // Wait for either the chat form or the restart button
   const hasFormOrRestart = await page.waitForFunction(() => {
     return document.querySelector('.chat-form') || document.querySelector('.btn-restart-task');
   }).catch(() => false);
@@ -508,15 +648,14 @@ export async function ensureChatForm(page: Page, requireSendBtn = true): Promise
  */
 export async function navigateToTask(page: Page, taskId: string, projectId?: string): Promise<void> {
   if (!taskId) {
-    throw new Error(`navigateToTask called with undefined/empty taskId`);
+    throw new Error(`navigateToTask called with undefined/empty taskId (taskId=${JSON.stringify(taskId)} projectId=${JSON.stringify(projectId)})`);
   }
-  // Without an explicit project the app resolves `?task=` against its own default
-  // project, which is not this file's project once a spec is isolated — so pass ours.
+  // Without an explicit project the app resolves `?task=` against its own default project, which is not this
+  // file's project once a spec is isolated.
   const pid = projectId || ownProject?.id;
   const path = pid ? `/?project=${pid}&task=${taskId}` : `/?task=${taskId}`;
-  // A page that has not navigated yet is `about:blank`, where a relative href resolves to nothing. The first
-  // test of a file navigates through the board, so only a test that shares its worker with another of the
-  // same file lands here directly.
+  // A page still at `about:blank` resolves no relative href; that happens when a test shares its worker with
+  // another test of the same file.
   if (page.url() === 'about:blank') await page.goto(path);
   else await page.evaluate((u) => { window.location.href = u; }, path);
   await expect(page.locator('.task-detail-page')).toBeVisible();
@@ -525,11 +664,9 @@ export async function navigateToTask(page: Page, taskId: string, projectId?: str
 // --- Task creation helpers ---
 
 /**
- * Create a task via the API and return its ID.
- * Uses csrfFetch for CSRF-aware API calls. Direct API creation is faster and more reliable than UI modal.
+ * Create a task via the API and return its ID. Creation through the UI modal is slower and less reliable.
  */
 export async function createTaskViaApi(page: Page, projectId: string, prompt: string): Promise<string> {
-  // Create task via API (CSRF-aware)
   const config = await apiGetConfig(page);
   const worker = findProviderByRef(config?.providers || [], config?.worker_provider);
   const result = await csrfFetch(page, `/api/projects/${projectId}/tasks`, {
@@ -547,7 +684,7 @@ export async function createTaskViaApi(page: Page, projectId: string, prompt: st
   if (!taskId) {
     throw new Error('createTaskViaApi: no task ID in API response');
   }
-  // Wait for the board to pick up the new task (WebSocket push or next poll)
+  // The board learns of the task by push or by poll, so the read is waited for.
   await expect(async () => {
     const tasks = await page.evaluate(async (pid) => {
       const res = await fetch(`/api/projects/${pid}/board`);
@@ -607,7 +744,6 @@ export async function waitForTurnAnswered(page: Page, projectId: string, taskId:
 
 export function worktreeExists(projectId: string, taskId: string): boolean {
   const path = getWorktreePath(projectId, taskId);
-  // Check for a proper git worktree (has .git file pointing to the main repo)
   return existsSync(path) && existsSync(`${path}/.git`);
 }
 
@@ -618,11 +754,10 @@ export function writeFileInWorktree(projectId: string, taskId: string, filePath:
   // path (`src/lib/utils/format.ts`) would otherwise fail with ENOENT on the write.
   mkdirSync(dirname(target), { recursive: true });
   writeFileSync(target, content);
-  // Stage the file so git detects it
   try {
     execSync(`cd ${worktreePath} && git add ${filePath}`);
   } catch {
-    // git add might fail if worktree isn't fully initialized; untracked files are still detected
+    // An untracked file is still detected by the diff
   }
 }
 
@@ -633,9 +768,8 @@ export function writeFileInWorktree(projectId: string, taskId: string, filePath:
  * language-server test has — without the installed extension there is no server to talk to.
  */
 export async function hasInstalledLspExtension(page: Page, suffix: string): Promise<boolean> {
-  // GET, not csrfFetch: that one always sends a JSON content-type with no body, which
-  // `/api/extensions` (a GET-only route) rejects — the helper then read "no extensions"
-  // and every LSP spec quietly skipped itself.
+  // GET, not csrfFetch: that one always sends a JSON content-type with no body, which a GET-only route
+  // rejects, and the caller cannot tell a refusal from an empty list.
   const list = (await apiGetJson<any[]>(page, '/api/extensions')) || [];
   return list.some((e) => {
     if (e?.type !== 'lsp' || !e?.enabled) return false;

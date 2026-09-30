@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import {
   isolatedProject, ownProjectId, createTaskViaApi, ensureTaskStarted,
   gotoProject, waitForChatForm, csrfFetch,
+  PENDING_TOOL_STATUS as PENDING, TOOL_CALL_CARD as CARD, SLOW_PROBE_OUTPUT as OUTPUT,
 } from './helpers';
 
 // A reopened chat has to ask for the server's replay: a call that started while its chat was closed is
@@ -13,11 +14,8 @@ import {
 
 isolatedProject();
 
-const CARD = '.tool-call-card';
-const PENDING = '.tool-status.pending';
 const NOTICE = '.history-notice';
 const RETRY = '.history-notice-retry';
-const OUTPUT = 'SLOW-TOOL-PROBE-DONE';
 const LONG_RUNNING_OUTPUT = 'LONG-RUNNING-PROBE-DONE';
 
 /** Delay the task's rows by `ms`: what the chat draws in that window came from the stream. */

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { DiffCache } from '$lib/services/diff-cache.svelte';
-import type { TaskDiff } from '$lib/api';
+import type { GitBatchResult, TaskDiff } from '$lib/api';
 import type { DiffRow } from '$lib/types/diff';
 import { ConnectionFailure, RequestAborted } from '$lib/api/helpers';
 
@@ -10,7 +10,7 @@ function makeApis(overrides: Partial<DiffCacheApis> = {}): DiffCacheApis {
     return {
         getTaskDiff: vi.fn(async () => ({ files: {} })),
         getDiffFile: vi.fn(async () => ({ rows: [] })),
-        stageFile: vi.fn(async () => {}),
+        stageTaskPaths: vi.fn(async () => ({ status: 'ok', action: 'staged', applied: [] as string[], failed: [] as { path: string; error: string }[] })),
         enrichRows: (rows) => rows as DiffRow[],
         ...overrides,
     };
@@ -146,30 +146,53 @@ describe('DiffCache', () => {
         expect(cache.state.files['a.ts'].added).toBe(1);
     });
 
-    it('stageFile does optimistic update', async () => {
-        const apis = makeApis();
-        const cache = new DiffCache(apis, () => 'proj-1', () => 'task-1');
-        cache.state.files = {
-            'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0, staged: false },
-        };
-        let revertCalled = false;
-        await cache.stageFile('a.ts', true, () => { revertCalled = true; });
-        expect(cache.state.files['a.ts'].staged).toBe(true);
-        expect(apis.stageFile).toHaveBeenCalledWith('proj-1', 'task-1', 'a.ts', true);
-        expect(revertCalled).toBe(false);
-    });
-
-    it('stageFile calls onRevert on failure', async () => {
+    it('a path moves section only when the answer says it did', async () => {
+        let resolveStage: (value: GitBatchResult) => void = () => {};
         const apis = makeApis({
-            stageFile: vi.fn(async () => { throw new Error('fail'); }),
+            stageTaskPaths: vi.fn(() => new Promise<GitBatchResult>(resolve => { resolveStage = resolve; })),
         });
         const cache = new DiffCache(apis, () => 'proj-1', () => 'task-1');
         cache.state.files = {
             'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0, staged: false },
         };
-        const revertPaths: string[] = [];
-        await expect(cache.stageFile('a.ts', true, (path) => { revertPaths.push(path); })).rejects.toThrow('fail');
-        expect(revertPaths).toContain('a.ts');
+
+        const running = cache.stagePaths(['a.ts'], true);
+        // The wait is what shows; the file stays where git says it is.
+        expect(cache.state.pending).toEqual(['a.ts']);
+        expect(cache.state.files['a.ts'].staged).toBe(false);
+        expect(apis.stageTaskPaths).toHaveBeenCalledWith('proj-1', 'task-1', ['a.ts'], true);
+
+        resolveStage({ status: 'ok', action: 'staged', applied: ['a.ts'], failed: [] });
+        await running;
+        expect(cache.state.files['a.ts'].staged).toBe(true);
+        expect(cache.state.pending).toEqual([]);
+    });
+
+    it('a refused path stays pending-free and unstaged', async () => {
+        const apis = makeApis({
+            stageTaskPaths: vi.fn(async () => ({
+                status: 'ok', action: 'staged', applied: [] as string[], failed: [{ path: 'a.ts', error: 'git add failed' }],
+            })),
+        });
+        const cache = new DiffCache(apis, () => 'proj-1', () => 'task-1');
+        cache.state.files = { 'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0, staged: false } };
+
+        const answer = await cache.stagePaths(['a.ts'], true);
+        expect(answer?.failed).toEqual([{ path: 'a.ts', error: 'git add failed' }]);
+        expect(cache.state.files['a.ts'].staged).toBe(false);
+        expect(cache.state.pending).toEqual([]);
+    });
+
+    it('a refused request leaves every path unstaged and unpended', async () => {
+        const apis = makeApis({
+            stageTaskPaths: vi.fn(async () => { throw new Error('fail'); }),
+        });
+        const cache = new DiffCache(apis, () => 'proj-1', () => 'task-1');
+        cache.state.files = { 'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0, staged: false } };
+
+        await expect(cache.stagePaths(['a.ts'], true)).rejects.toThrow('fail');
+        expect(cache.state.files['a.ts'].staged).toBe(false);
+        expect(cache.state.pending).toEqual([]);
     });
 
     it('stagedPathsKey produces sorted key', () => {
@@ -179,7 +202,7 @@ describe('DiffCache', () => {
         expect(DiffCache.stagedPathsKey([])).toBe('');
     });
 
-    it('getters provide live projectId and taskId for API calls', () => {
+    it('getters provide live projectId and taskId for API calls', async () => {
         const apis = makeApis();
         let currentProject = 'proj-1';
         let currentTask = 'task-1';
@@ -187,24 +210,15 @@ describe('DiffCache', () => {
         // Verify initial IDs are used
         cache.state.files = {
             'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0, staged: false },
+            'b.ts': { path: 'b.ts', rows: [], added: 0, removed: 0, staged: false },
         };
-        cache.stageFile('a.ts', true, () => {});
-        expect(apis.stageFile).toHaveBeenCalledWith('proj-1', 'task-1', 'a.ts', true);
+        await cache.stagePaths(['a.ts'], true);
+        expect(apis.stageTaskPaths).toHaveBeenCalledWith('proj-1', 'task-1', ['a.ts'], true);
         // Change the values the getters close over
         currentProject = 'proj-2';
         currentTask = 'task-2';
-        // Verify subsequent stageFile uses new IDs
-        cache.stageFile('a.ts', false, () => {});
-        expect(apis.stageFile).toHaveBeenCalledWith('proj-2', 'task-2', 'a.ts', false);
-    });
-
-    it('revertStageFile replaces file via spread for Svelte reactivity', () => {
-        const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
-        cache.state.files = {
-            'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0, staged: true },
-        };
-        cache.revertStageFile('a.ts', true);
-        expect(cache.state.files['a.ts'].staged).toBe(false);
+        await cache.stagePaths(['b.ts'], false);
+        expect(apis.stageTaskPaths).toHaveBeenCalledWith('proj-2', 'task-2', ['b.ts'], false);
     });
 
     it('setFile replaces files record via spread for Svelte reactivity', () => {
@@ -366,8 +380,12 @@ describe('DiffCache', () => {
         expect(cache.state.files['has-content.txt'].rows.length).toBe(3);
     });
 
-    it('stageAll iteratively stages each unstaged file', async () => {
-        const apis = makeApis();
+    it('stageAll names every unstaged tracked file in one request', async () => {
+        const apis = makeApis({
+            stageTaskPaths: vi.fn(async (_p, _t, paths: string[]) => ({
+                status: 'ok', action: 'staged', applied: paths, failed: [],
+            })),
+        });
         const cache = new DiffCache(apis, () => 'proj-1', () => 'task-1');
         cache.state.files = {
             'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0, staged: false },
@@ -375,16 +393,19 @@ describe('DiffCache', () => {
             'c.ts': { path: 'c.ts', rows: [], added: 0, removed: 0, staged: true }, // already staged
         };
         await cache.stageAll();
+        expect(apis.stageTaskPaths).toHaveBeenCalledTimes(1);
+        expect(apis.stageTaskPaths).toHaveBeenCalledWith('proj-1', 'task-1', ['a.ts', 'b.ts'], true);
         expect(cache.state.files['a.ts'].staged).toBe(true);
         expect(cache.state.files['b.ts'].staged).toBe(true);
         expect(cache.state.files['c.ts'].staged).toBe(true);
-        expect(apis.stageFile).toHaveBeenCalledWith('proj-1', 'task-1', 'a.ts', true);
-        expect(apis.stageFile).toHaveBeenCalledWith('proj-1', 'task-1', 'b.ts', true);
-        expect(apis.stageFile).not.toHaveBeenCalledWith('proj-1', 'task-1', 'c.ts', true);
     });
 
-    it('unstageAll iteratively unstages each staged file', async () => {
-        const apis = makeApis();
+    it('unstageAll names every staged tracked file in one request', async () => {
+        const apis = makeApis({
+            stageTaskPaths: vi.fn(async (_p, _t, paths: string[]) => ({
+                status: 'ok', action: 'unstaged', applied: paths, failed: [],
+            })),
+        });
         const cache = new DiffCache(apis, () => 'proj-1', () => 'task-1');
         cache.state.files = {
             'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0, staged: true },
@@ -392,46 +413,50 @@ describe('DiffCache', () => {
             'c.ts': { path: 'c.ts', rows: [], added: 0, removed: 0, staged: false },
         };
         await cache.unstageAll();
+        expect(apis.stageTaskPaths).toHaveBeenCalledTimes(1);
+        expect(apis.stageTaskPaths).toHaveBeenCalledWith('proj-1', 'task-1', ['a.ts', 'b.ts'], false);
         expect(cache.state.files['a.ts'].staged).toBe(false);
         expect(cache.state.files['b.ts'].staged).toBe(false);
         expect(cache.state.files['c.ts'].staged).toBe(false);
-        expect(apis.stageFile).toHaveBeenCalledWith('proj-1', 'task-1', 'a.ts', false);
-        expect(apis.stageFile).toHaveBeenCalledWith('proj-1', 'task-1', 'b.ts', false);
-        expect(apis.stageFile).not.toHaveBeenCalledWith('proj-1', 'task-1', 'c.ts', false);
     });
 
-    it('stageAll skips individual failures without breaking others', async () => {
-        const stageFn = vi.fn(async (_projectId, _taskId, path, _stage) => {
-            if (path === 'b.ts') throw new Error('fail');
+    it('a refused path inside a batch stays where git left it', async () => {
+        const apis = makeApis({
+            stageTaskPaths: vi.fn(async (_p, _t, paths: string[]) => ({
+                status: 'ok', action: 'staged', applied: paths.filter(path => path !== 'b.ts'), failed: [{ path: 'b.ts', error: 'git add failed' }],
+            })),
         });
-        const apis = makeApis({ stageFile: stageFn });
         const cache = new DiffCache(apis, () => 'proj-1', () => 'task-1');
         cache.state.files = {
             'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0, staged: false },
             'b.ts': { path: 'b.ts', rows: [], added: 0, removed: 0, staged: false },
-            'c.ts': { path: 'c.ts', rows: [], added: 0, removed: 0, staged: false },
         };
-        await cache.stageAll();
+        const answer = await cache.stageAll();
         expect(cache.state.files['a.ts'].staged).toBe(true);
-        expect(cache.state.files['b.ts'].staged).toBe(false); // reverted
-        expect(cache.state.files['c.ts'].staged).toBe(true);
+        expect(cache.state.files['b.ts'].staged).toBe(false);
+        expect(answer?.failed.map(f => f.path)).toEqual(['b.ts']);
+        expect(cache.state.pending).toEqual([]);
     });
 
-    it('unstageAll skips individual failures without breaking others', async () => {
-        const stageFn = vi.fn(async (_projectId, _taskId, path, _stage) => {
-            if (path === 'b.ts') throw new Error('fail');
+    it('nothing is pending while a second write runs on other paths', async () => {
+        let resolveFirst: (value: unknown) => void = () => {};
+        const apis = makeApis({
+            stageTaskPaths: vi.fn()
+                .mockImplementationOnce(() => new Promise(resolve => { resolveFirst = resolve; }))
+                .mockResolvedValue({ status: 'ok', action: 'staged', applied: ['b.ts'], failed: [] }),
         });
-        const apis = makeApis({ stageFile: stageFn });
         const cache = new DiffCache(apis, () => 'proj-1', () => 'task-1');
         cache.state.files = {
-            'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0, staged: true },
-            'b.ts': { path: 'b.ts', rows: [], added: 0, removed: 0, staged: true },
-            'c.ts': { path: 'c.ts', rows: [], added: 0, removed: 0, staged: true },
+            'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0, staged: false },
+            'b.ts': { path: 'b.ts', rows: [], added: 0, removed: 0, staged: false },
         };
-        await cache.unstageAll();
-        expect(cache.state.files['a.ts'].staged).toBe(false);
-        expect(cache.state.files['b.ts'].staged).toBe(true); // reverted
-        expect(cache.state.files['c.ts'].staged).toBe(false);
+        const first = cache.stagePaths(['a.ts'], true);
+        await cache.stagePaths(['b.ts'], true);
+        expect(cache.state.pending).toEqual(['a.ts']);
+        expect(cache.state.files['b.ts'].staged).toBe(true);
+        resolveFirst({ status: 'ok', action: 'staged', applied: ['a.ts'], failed: [] });
+        await first;
+        expect(cache.state.pending).toEqual([]);
     });
 
     it('getters reflect changes mid-flight for subsequent calls', async () => {
@@ -456,8 +481,8 @@ describe('DiffCache', () => {
         cache.state.files = {
             'b.ts': { path: 'b.ts', rows: [], added: 0, removed: 0, staged: false },
         };
-        cache.stageFile('b.ts', true, () => {});
-        expect(apis.stageFile).toHaveBeenCalledWith('proj-2', 'task-2', 'b.ts', true);
+        void cache.stagePaths(['b.ts'], true);
+        expect(apis.stageTaskPaths).toHaveBeenCalledWith('proj-2', 'task-2', ['b.ts'], true);
     });
 
     // --- "Show full diff" must not re-derive what the per-file endpoint never answered ---

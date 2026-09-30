@@ -235,7 +235,10 @@ test.describe.serial('Board arrow-key navigation', () => {
   });
 
   test('Right from a project focuses the board\'s first card', async ({ page }) => {
-    const mainItem = page.locator('nav.project-list .project-item', { hasText: 'test-project' });
+    // The row of this worker's own project, by id like the other resolution here: matching the fixture project
+    // by name would switch projects.
+    const projectId = await getProjectId(page);
+    const mainItem = page.locator(`nav.project-list a.project-item[href*="project=${projectId}"]`);
     await mainItem.click();
     await expect(page.locator('.board .card').first()).toBeVisible({ timeout: 10000 });
     await mainItem.focus();

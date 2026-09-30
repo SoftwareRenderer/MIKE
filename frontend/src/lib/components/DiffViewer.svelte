@@ -17,7 +17,33 @@ import { slide } from 'svelte/transition';
     import '$lib/styles/token-colors.css';
 
 
-    let { committedFiles = [], stagedFiles = [], unstagedFiles = [], stagedUntracked = [], unstagedUntracked = [], loading = false, onExpandFile, onExpandUntracked, onLineClick, onStageFile, onStageAll, onUnstageAll, selectedPath, mergedLabel = t('task.diff.mergedFromSubtasks'), imageSource }: { committedFiles?: DiffFile[]; stagedFiles: DiffFile[]; unstagedFiles: DiffFile[]; stagedUntracked?: Array<{ path: string; fileSize?: number; isBinary?: boolean; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>; unstagedUntracked?: Array<{ path: string; fileSize?: number; isBinary?: boolean; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>; loading?: boolean; onExpandFile?: (path: string) => void; onExpandUntracked?: (path: string) => void; onLineClick?: (filePath: string, lineNumber: number) => void; onStageFile?: (path: string, stage: boolean) => void; onStageAll?: () => void; onUnstageAll?: () => void; selectedPath?: string; mergedLabel?: string; imageSource?: DiffImageSource } = $props();
+    interface Props {
+        committedFiles?: DiffFile[];
+        stagedFiles: DiffFile[];
+        unstagedFiles: DiffFile[];
+        stagedUntracked?: UntrackedEntry[];
+        unstagedUntracked?: UntrackedEntry[];
+        loading?: boolean;
+        /** Paths whose stage write has not been answered. Their button shows a spinner and does nothing. */
+        pendingPaths?: Set<string>;
+        /** Which section's whole-section action is running — 'staged' is the Staged section's Unstage All —
+         *  so only that header shows a spinner. */
+        busySection?: 'staged' | 'unstaged' | null;
+        /** Translated text naming the wait, read out by the controls a spinner has replaced. */
+        busyLabel?: string;
+        onExpandFile?: (path: string) => void;
+        onExpandUntracked?: (path: string) => void;
+        onLineClick?: (filePath: string, lineNumber: number) => void;
+        onStageFile?: (path: string, stage: boolean) => void;
+        onStageAll?: () => void;
+        onUnstageAll?: () => void;
+        selectedPath?: string;
+        mergedLabel?: string;
+        imageSource?: DiffImageSource;
+    }
+
+    let { committedFiles = [], stagedFiles = [], unstagedFiles = [], stagedUntracked = [], unstagedUntracked = [], loading = false, pendingPaths = new Set<string>(), busySection = null, busyLabel = '', onExpandFile, onExpandUntracked, onLineClick, onStageFile, onStageAll, onUnstageAll, selectedPath, mergedLabel = t('task.diff.mergedFromSubtasks'), imageSource }: Props = $props();
+    const busyId = 'diff-stage-busy';
     let hasContent = $derived(committedFiles.length > 0 || stagedFiles.length > 0 || unstagedFiles.length > 0 || stagedUntracked.length > 0 || unstagedUntracked.length > 0);
 
     // Tracked files rank by change status first, untracked ones by path alone; both end at the
@@ -293,6 +319,14 @@ import { slide } from 'svelte/transition';
         }
     }
 
+    /** A whole-section action. None runs while a write is in flight here: a second batch would be judged
+     *  against an index the first is still moving. */
+    function runSectionAction(section: 'staged' | 'unstaged') {
+        if (busySection || pendingPaths.size > 0) return;
+        if (section === 'staged') onUnstageAll?.();
+        else onStageAll?.();
+    }
+
     /**
      * What one binary file's "View image" button asks for, or null when there is nothing to ask: no
      * project named by the host, a format no browser paints, or a file this change removed.
@@ -485,8 +519,13 @@ import { slide } from 'svelte/transition';
             </button>
             <span class="diff-status-badge" style="color: {badge.color}" title={badge.letter === 'M' ? t('git.status.modified') : badge.letter === 'R' ? t('git.status.renamed') : badge.letter === 'D' ? t('git.status.deleted') : badge.letter === 'A' ? t('git.status.added') : t('git.status.modified')}>{badge.letter}</span>
             {#if onStageFile && showStageBtn}
-                <button type="button" class="diff-stage-btn" onclick={() => onStageFile(file.path, !isStaged)} title={isStaged ? t('diff.unstageChangesTitle') : t('diff.stageChangesTitle')}>
-                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d={isStaged ? "M4 8h8" : "M8 4v8M4 8h8"} stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                {@const pending = pendingPaths.has(file.path)}
+                <button type="button" class="diff-stage-btn" disabled={pending} aria-busy={pending || undefined} aria-describedby={pending ? busyId : undefined} onclick={() => onStageFile(file.path, !isStaged)} title={isStaged ? t('diff.unstageChangesTitle') : t('diff.stageChangesTitle')}>
+                    {#if pending}
+                        <Spinner size={12} decorative />
+                    {:else}
+                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d={isStaged ? "M4 8h8" : "M8 4v8M4 8h8"} stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                    {/if}
                 </button>
             {/if}
         </div>
@@ -567,8 +606,13 @@ import { slide } from 'svelte/transition';
             <span class="diff-untracked-badge">{t('diff.untracked')}</span>
             <span class="diff-status-badge diff-status-added" title={t('git.status.added')}>{t('diff.badgeAdded')}</span>
             {#if onStageFile}
-                <button type="button" class="diff-stage-btn" onclick={() => onStageFile(entry.path, !isStaged)} title={isStaged ? t('diff.unstageFileTitle') : t('diff.stageFileTitle')}>
-                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d={isStaged ? "M4 8h8" : "M8 4v8M4 8h8"} stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                {@const pending = pendingPaths.has(entry.path)}
+                <button type="button" class="diff-stage-btn" disabled={pending} aria-busy={pending || undefined} aria-describedby={pending ? busyId : undefined} onclick={() => onStageFile(entry.path, !isStaged)} title={isStaged ? t('diff.unstageFileTitle') : t('diff.stageFileTitle')}>
+                    {#if pending}
+                        <Spinner size={12} decorative />
+                    {:else}
+                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d={isStaged ? "M4 8h8" : "M8 4v8M4 8h8"} stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                    {/if}
                 </button>
             {/if}
         </div>
@@ -667,6 +711,11 @@ import { slide } from 'svelte/transition';
         </div>
         {/if}
 
+        <!-- Names the wait for the controls a spinner has replaced. -->
+        {#if busyLabel}
+            <span id={busyId} class="sr-only">{busyLabel}</span>
+        {/if}
+
         <!-- Staged section -->
         {#if stagedCount > 0}
         <div class="diff-section">
@@ -681,8 +730,12 @@ import { slide } from 'svelte/transition';
                 </span>
                 <span class="diff-section-count">{t('diff.shared.file', { count: stagedCount })}</span>
                 {#if onUnstageAll}
-                <span class="diff-section-action" role="button" tabindex="0" onclick={(e) => { e.stopPropagation(); onUnstageAll(); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onUnstageAll(); } }} title={t('diff.unstageAllAria')} aria-label={t('diff.unstageAllAria')}>
-                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                <span class="diff-section-action" role="button" tabindex="0" aria-busy={busySection === 'staged' || undefined} aria-describedby={busySection === 'staged' ? busyId : undefined} onclick={(e) => { e.stopPropagation(); runSectionAction('staged'); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); runSectionAction('staged'); } }} title={t('diff.unstageAllAria')} aria-label={t('diff.unstageAllAria')}>
+                    {#if busySection === 'staged'}
+                        <Spinner size={12} decorative />
+                    {:else}
+                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                    {/if}
                 </span>
                 {/if}
             </button>
@@ -709,8 +762,12 @@ import { slide } from 'svelte/transition';
                 </span>
                 <span class="diff-section-count">{t('diff.shared.file', { count: unstagedCount })}</span>
                 {#if onStageAll}
-                <span class="diff-section-action" role="button" tabindex="0" onclick={(e) => { e.stopPropagation(); onStageAll(); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onStageAll(); } }} title={t('diff.stageAllAria')} aria-label={t('diff.stageAllAria')}>
-                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                <span class="diff-section-action" role="button" tabindex="0" aria-busy={busySection === 'unstaged' || undefined} aria-describedby={busySection === 'unstaged' ? busyId : undefined} onclick={(e) => { e.stopPropagation(); runSectionAction('unstaged'); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); runSectionAction('unstaged'); } }} title={t('diff.stageAllAria')} aria-label={t('diff.stageAllAria')}>
+                    {#if busySection === 'unstaged'}
+                        <Spinner size={12} decorative />
+                    {:else}
+                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                    {/if}
                 </span>
                 {/if}
             </button>

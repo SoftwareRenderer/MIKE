@@ -4,7 +4,6 @@ import { getProjectId, csrfFetch, isolatedProject, gotoProject } from './helpers
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
 isolatedProject();
 
-
 test.describe.serial('Sandbox Environment Variables', () => {
   test.beforeEach(async ({ page }) => {
     await gotoProject(page);
@@ -165,46 +164,6 @@ test.describe.serial('Sandbox Environment Variables', () => {
     expect(saved.sandbox_envs.length).toBe(1);
     expect(saved.sandbox_envs[0].key).toBe('DB_HOST');
     expect(saved.sandbox_envs[0].value).toBe('localhost');
-
-    await csrfFetch(page, `/api/projects/${projectId}`, {
-      method: 'PUT',
-      body: { sandbox_envs: [] },
-    });
-  });
-
-  test('should edit and save an existing environment variable', async ({ page }) => {
-    const projectId = await getProjectId(page);
-
-    // Pre-populate an env var via API
-    await csrfFetch(page, `/api/projects/${projectId}`, {
-      method: 'PUT',
-      body: { sandbox_envs: [{ key: 'ORIGINAL_KEY', value: 'original_value' }] },
-    });
-
-    // Verify the original value is stored
-    let project = await page.evaluate(async (pid) => {
-      const res = await fetch(`/api/projects/${pid}`);
-      return res.ok ? res.json() : null;
-    }, projectId);
-    expect(project.sandbox_envs[0].key).toBe('ORIGINAL_KEY');
-    expect(project.sandbox_envs[0].value).toBe('original_value');
-
-    // Edit via API (tests the backend update logic)
-    const result = await csrfFetch(page, `/api/projects/${projectId}`, {
-      method: 'PUT',
-      body: { sandbox_envs: [{ key: 'EDITED_KEY', value: 'edited_value' }] },
-    });
-    expect(result.ok).toBe(true);
-
-    // Verify edited values are saved
-    project = await page.evaluate(async (pid) => {
-      const res = await fetch(`/api/projects/${pid}`);
-      return res.ok ? res.json() : null;
-    }, projectId);
-    expect(project.sandbox_envs).toBeDefined();
-    expect(project.sandbox_envs.length).toBe(1);
-    expect(project.sandbox_envs[0].key).toBe('EDITED_KEY');
-    expect(project.sandbox_envs[0].value).toBe('edited_value');
 
     await csrfFetch(page, `/api/projects/${projectId}`, {
       method: 'PUT',

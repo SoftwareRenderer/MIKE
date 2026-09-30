@@ -1,5 +1,10 @@
 import { test, expect } from '@playwright/test';
-import { getProjectId, createTaskViaApi, navigateToTask } from './helpers';
+import {
+  getProjectId, createTaskViaApi, navigateToTask, isolatedProject, gotoProject,
+} from './helpers';
+// Each test file gets its own project, because it starts a turn: see isolatedProject() in helpers.ts.
+isolatedProject();
+
 
 // ============================================================
 // CREATE TASK MODAL — ESCAPE BEHAVIOR
@@ -10,7 +15,7 @@ import { getProjectId, createTaskViaApi, navigateToTask } from './helpers';
 
 test.describe.serial('Create Task modal Escape behavior', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 

@@ -1441,3 +1441,45 @@ describe('summarization frame', () => {
         expect(stream.state.lastPromptTokens).toBe(4000);
     });
 });
+
+describe('merge_resolution frame', () => {
+    function setup() {
+        const stream = new StreamState();
+        const handleEvent = createStreamHandler(stream, makeCallbacks());
+        return { stream, handleEvent };
+    }
+
+    it('draws a resolution row once when the frame is redelivered', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'merge_resolution', data: { id: 'row-1', content: 'Merged into main', created_at: '2026-01-01T00:00:00Z' } }, false);
+        expect(stream.state.entries.map(e => e.id)).toEqual(['row-1']);
+
+        // A replay after a resubscribe is the same row of the conversation, not a second resolution.
+        handleEvent({ type: 'merge_resolution', data: { id: 'row-1', content: 'Merged into main' } }, false);
+        expect(stream.state.entries.map(e => e.id)).toEqual(['row-1']);
+    });
+
+    it('adds nothing when the history read drew the row before the frame arrived', () => {
+        const { stream, handleEvent } = setup();
+        const rows = [{ id: 'row-1', role: 'merge_resolution', content: 'Merged into main', created_at: '2026-01-01T00:00:00Z' }];
+        const built = buildEntriesFromMessages(rows);
+        stream.state.entries = mergeLoadedHistory(built.entries, rows.map(r => r.id), stream.state.entries, false);
+        expect(stream.state.entries.map(e => e.id)).toEqual(['row-1']);
+
+        // The merge's own frame is what a commit-and-done click answers with, so it can land after the read
+        // it triggered. Appending it would put one row's id at two indexes, and the keyed each refuses.
+        handleEvent({ type: 'merge_resolution', data: { id: 'row-1', content: 'Merged into main' } }, false);
+        expect(stream.state.entries.map(e => e.id)).toEqual(['row-1']);
+    });
+
+    it('appends a resolution no read has drawn', () => {
+        const { stream, handleEvent } = setup();
+        const rows = [{ id: 'row-1', role: 'assistant', content: 'the answer', created_at: '2026-01-01T00:00:00Z' }];
+        const built = buildEntriesFromMessages(rows);
+        stream.state.entries = mergeLoadedHistory(built.entries, rows.map(r => r.id), stream.state.entries, false);
+
+        handleEvent({ type: 'merge_resolution', data: { id: 'row-2', content: 'Merge failed: conflict in a.ts', is_error: true, created_at: '2026-01-01T00:01:00Z' } }, false);
+        expect(stream.state.entries.map(e => [e.id, e.role])).toEqual([['row-1', 'assistant'], ['row-2', 'merge_resolution']]);
+        expect(stream.state.entries[1].isError).toBe(true);
+    });
+});

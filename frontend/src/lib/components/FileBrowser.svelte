@@ -334,7 +334,7 @@
             <div class="footer-wrapper">
             <span class="current-path">{formatPath(currentPath)}</span>
             <div class="footer-actions">
-                <label class="sandbox-toggle">
+                <label class="sandbox-toggle use-sandbox-toggle">
                     <input type="checkbox" checked={sandboxEnabled} onchange={(e) => sandboxEnabled = e.currentTarget.checked} />
                     <span>{t('explorer.fileBrowser.useSandbox')}</span>
                 </label>

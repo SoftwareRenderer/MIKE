@@ -218,7 +218,8 @@ func (te *TaskExecutor) cancelExistingExecutor(taskID string) *executionState {
 // waitForExecutorExit blocks until the executor has closed its finished channel
 // (every exit-path write has landed) or the timeout expires. The transition is
 // applied either way: a wedged executor must not keep a task stuck, and losing
-// the ordering is the lesser evil.
+// the ordering is the lesser evil. A run that will never happen closes the channel
+// at once instead — see releasePrepared.
 func waitForExecutorExit(taskID string, state *executionState, timeout time.Duration) {
 	if state == nil || state.finished == nil {
 		return

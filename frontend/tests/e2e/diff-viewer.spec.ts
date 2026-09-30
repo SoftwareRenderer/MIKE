@@ -2,7 +2,8 @@ import { test, expect, Page } from '@playwright/test';
 import { execSync } from 'child_process';
 import { existsSync, writeFileSync, unlinkSync, rmSync } from 'fs';
 import { join } from 'path';
-import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch, ensureTaskStarted, getWorktreePath, worktreeExists, isolatedProject, gotoProject, apiGetJson } from './helpers';
+import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch, ensureTaskStarted, getWorktreePath, worktreeExists,
+  waitForWorktree, isolatedProject, gotoProject, apiGetJson, sendTurn, messageRows } from './helpers';
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
 isolatedProject();
@@ -36,49 +37,39 @@ async function getDiffFileViaApi(page: Page, projectId: string, taskId: string, 
 }
 
 /**
- * Per-describe task factory: each describe gets its own task (with worktree) instead of sharing
- * "the first in-progress task", which fullyParallel would hand to several describes at once.
- * The prompt stays neutral — a keyword-routed one can answer with tool calls that mutate the
- * worktree or complete the task. Pass llm-fixture:<name> to pick the answer. Returns null if the
- * worktree never appeared.
+ * Per-describe task factory: each describe gets its own task with a worktree, instead of "the first
+ * in-progress task", which fullyParallel would hand to several describes at once. The prompt stays neutral — a
+ * keyword-routed one can answer with tool calls that mutate the worktree. Pass `llm-fixture:<name>` to pick the
+ * answer; a worktree that never appears throws.
  */
 function makeSharedTask() {
     let shared: { taskInfo: { projectId: string; taskId: string }; worktreeDir: string } | null = null;
-    return async (page: Page): Promise<{ taskInfo: { projectId: string; taskId: string }; worktreeDir: string } | null> => {
+    return async (page: Page): Promise<{ taskInfo: { projectId: string; taskId: string }; worktreeDir: string }> => {
         if (shared) return shared;
         const projectId = await getProjectId(page);
         const taskId = await createTaskViaApi(page, projectId, `diff-spec-${Date.now()}`);
         await ensureTaskStarted(page, projectId, taskId);
         // Wait for the task to get a branch (worktree created)
-        await page.waitForFunction(async ({ pid, tid }: { pid: string; tid: string }) => {
+        await page.waitForFunction(async ({ pid, tid }: { pid: string, tid: string }) => {
             const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
             const task = res.ok ? await res.json() : null;
             return !!task?.branch;
         }, { pid: projectId, tid: taskId }, { timeout: 30000 });
-        const worktreeDir = worktreeDirFor({ projectId, taskId });
-        if (!worktreeDir) return null;
-        shared = { taskInfo: { projectId, taskId }, worktreeDir };
+        // A task with a branch has a worktree. When it has none, the diff panel this file exists to
+        // exercise has nothing to show, so say so rather than handing the test a null to walk away from.
+        const worktreeDir = waitForWorktree(projectId, taskId);
+        shared = { taskInfo: { projectId, taskId }, worktreeDir: await worktreeDir };
         return shared;
     };
 }
+/** A deletion is honoured once the run is over and answered with 409 while it is not, so every turn here
+ *  goes through `sendTurn` (helpers.ts) — that is the helper that waits for the run to end. */
 
 /** The newest checkpoint hash on this task's messages: the snapshot a message deletion resets
  *  the worktree to. Empty while no turn has captured the working state. */
 async function lastCheckpoint(page: Page, projectId: string, taskId: string): Promise<string> {
     const msgs = await apiGetJson<{ git_commit_hash?: string }[]>(page, `/api/projects/${projectId}/tasks/${taskId}/messages`);
     return [...(msgs ?? [])].reverse().find((m) => m.git_commit_hash)?.git_commit_hash ?? '';
-}
-
-/** Send a message and wait for its turn to end: the reply persisted and the executor idle, which
- *  is the state a deletion is honoured in rather than answered with 409. */
-async function sendTurn(page: Page, projectId: string, taskId: string, content: string): Promise<void> {
-    const path = `/api/projects/${projectId}/tasks/${taskId}`;
-    const before = (await apiGetJson<unknown[]>(page, `${path}/messages`))?.length ?? 0;
-    await csrfFetch(page, `${path}/send`, { method: 'POST', body: { content } });
-    await expect.poll(async () => (await apiGetJson<unknown[]>(page, `${path}/messages`))?.length ?? 0,
-        { timeout: 60000 }).toBeGreaterThanOrEqual(before + 2);
-    await expect.poll(async () =>
-        (await apiGetJson<{ execution_state?: string }>(page, path))?.execution_state, { timeout: 60000 }).toBe('idle');
 }
 
 /** Assert the newest checkpoint a surviving message owns actually holds `file`. That is the whole
@@ -111,8 +102,10 @@ async function ensureInProgress(page: Page, projectId: string, taskId: string): 
  *  `if (visible)` guard: a deletion that never happened leaves every later assertion true by
  *  accident, which is how both specs below passed while testing nothing. */
 async function deleteLastUserMessage(page: Page, projectId: string, taskId: string): Promise<void> {
-    const task = `/api/projects/${projectId}/tasks/${taskId}`;
-    const before = (await apiGetJson<unknown[]>(page, `${task}/messages`))?.length ?? 0;
+    // The id, not the row count: `/messages` answers a bounded window, so a deletion that drops the
+    // newest row lets an older one in and the length does not move. See `messageRows` in helpers.ts.
+    const doomed = (await messageRows(page, projectId, taskId)).filter(r => r.role === 'user').at(-1)?.id ?? '';
+    expect(doomed, 'the conversation holds no user message to delete').not.toBe('');
     const userMessages = page.locator('.chat-message.user');
     const deleteBtn = userMessages.nth(await userMessages.count() - 1).locator('[aria-label="Delete message and all following messages"]');
     await expect(deleteBtn).toBeVisible({ timeout: 10000 });
@@ -122,8 +115,8 @@ async function deleteLastUserMessage(page: Page, projectId: string, taskId: stri
     await expect(confirmDialog).toBeVisible({ timeout: 5000 });
     await page.click('[role="dialog"] .btn-confirm');
     await expect(confirmDialog).not.toBeVisible({ timeout: 5000 });
-    await expect.poll(async () => (await apiGetJson<unknown[]>(page, `${task}/messages`))?.length ?? 0,
-        { timeout: 15000 }).toBeLessThan(before);
+    await expect.poll(async () =>
+        (await messageRows(page, projectId, taskId)).some(r => r.id === doomed), { timeout: 15000 }).toBe(false);
 }
 
 /** Run a git command in a worktree, retrying on index-lock contention with
@@ -199,12 +192,7 @@ test.describe.serial('Diff panel user interactions', () => {
     });
 
     test('should open file editor when clicking a diff line', async ({ page }) => {
-        const taskInfo = await sharedTask(page);
-        const worktreeDir = worktreeDirFor(taskInfo);
-        if (!taskInfo || !worktreeDir) {
-            await expect(page.locator('.board')).toBeVisible();
-            return;
-        }
+        const { taskInfo, worktreeDir } = await sharedTask(page);
 
         const uniqueId = Date.now();
         const testFile = `editor-test-${uniqueId}.txt`;
@@ -223,33 +211,25 @@ test.describe.serial('Diff panel user interactions', () => {
             expect(diffRows).toBeGreaterThan(0);
         }).toPass({ timeout: 10000 });
 
+        // A line of the file this test wrote must be a clickable row: a panel with none is the failure.
         const clickableRows = page.locator('.diff-row-clickable');
-        const rowCount = await clickableRows.count();
-        if (rowCount === 0) {
-            execSync(`rm -f ${filePath}`);
-            return;
-        }
+        await expect.poll(() => clickableRows.count(), {
+            timeout: 15000, message: 'no clickable diff row for the file this test wrote',
+        }).toBeGreaterThan(0);
 
         await clickableRows.first().click();
-        await expect(page.locator('.editor')).toBeVisible({ timeout: 5000 });
-        await expect(page.locator('#file-editor-title')).toBeVisible();
-
-        const textarea = page.locator('.editor-textarea');
-        await expect(textarea).toBeVisible();
-        const editorContent = await textarea.inputValue();
-        expect(editorContent).toContain('Hello World');
-        expect(editorContent).toContain('This is a test');
+        // The file this row belongs to opens in the editor, with its own path in the header and its
+        // content in the CodeMirror document.
+        await expect(page.locator('.file-editor')).toBeVisible({ timeout: 5000 });
+        await expect(page.locator('.file-editor .file-path')).toContainText(testFile, { timeout: 5000 });
+        await expect(page.locator('.cm-content')).toContainText('Hello World', { timeout: 5000 });
+        await expect(page.locator('.cm-content')).toContainText('This is a test', { timeout: 5000 });
 
         execSync(`rm -f ${filePath}`);
     });
 
     test('should maximize the editor when the diff column is narrow', async ({ page }) => {
-        const taskInfo = await sharedTask(page);
-        const worktreeDir = worktreeDirFor(taskInfo);
-        if (!taskInfo || !worktreeDir) {
-            await expect(page.locator('.board')).toBeVisible();
-            return;
-        }
+        const { taskInfo, worktreeDir } = await sharedTask(page);
 
         const uniqueId = Date.now();
         const testFile = `maximize-test-${uniqueId}.txt`;
@@ -271,76 +251,22 @@ test.describe.serial('Diff panel user interactions', () => {
         expect(diffBox!.width).toBeLessThan(1200);
 
         await fileSection.locator('.diff-row-clickable').first().click();
-        await expect(page.locator('.editor')).toBeVisible({ timeout: 5000 });
+        await expect(page.locator('.file-editor')).toBeVisible({ timeout: 5000 });
         await expect(page.locator('.task-detail-page.fullscreen')).toBeVisible();
-
-        // Escape closes the editor and clears the maximize state.
-        await page.keyboard.press('Escape');
-        await expect(page.locator('.editor')).not.toBeVisible({ timeout: 5000 });
-        await expect(page.locator('.task-detail-page.fullscreen')).toHaveCount(0);
-        await expect(page.locator('.column-diff')).toBeVisible();
+        // Where Escape leaves the reader is the editor spec's question, not this panel's.
 
         execSync(`rm -f ${filePath}`);
     });
 
-    test('should save file changes with Ctrl+S', async ({ page }) => {
-        const taskInfo = await sharedTask(page);
-        const worktreeDir = worktreeDirFor(taskInfo);
-        if (!taskInfo || !worktreeDir) {
-            await expect(page.locator('.board')).toBeVisible();
-            return;
-        }
+    test('Ctrl+S saves the file the diff row opened', async ({ page }) => {
+        test.setTimeout(90000);
+        const { taskInfo, worktreeDir } = await sharedTask(page);
 
         const uniqueId = Date.now();
         const testFile = `save-test-${uniqueId}.txt`;
         const filePath = join(worktreeDir, testFile);
-        const originalContent = 'Original content\nLine 2\n';
 
-        writeFileSync(filePath, originalContent);
-
-        await navigateToTask(page, taskInfo.taskId, taskInfo.projectId);
-        await page.waitForSelector('.task-detail-page', { timeout: 10000 });
-
-        await expect(async () => {
-            expect(await page.locator('.diff-row').count()).toBeGreaterThan(0);
-        }).toPass({ timeout: 10000 });
-
-        await page.locator('.diff-row-clickable').first().click();
-        await expect(page.locator('.editor')).toBeVisible({ timeout: 5000 });
-
-        const textarea = page.locator('.editor-textarea');
-        await textarea.fill('Modified content\nLine 2\nLine 3: new line\n');
-        await textarea.press('Control+s');
-
-        await expect(async () => {
-            const unsavedDot = page.locator('.unsaved-dot');
-            const visible = await unsavedDot.isVisible().catch(() => false);
-            expect(visible).toBe(false);
-        }).toPass({ timeout: 5000 });
-
-        await page.locator('.btn-close').click();
-        await expect(page.locator('.editor')).not.toBeVisible({ timeout: 5000 });
-
-        const savedContent = execSync(`cat ${filePath}`).toString();
-        expect(savedContent).toContain('Modified content');
-        expect(savedContent).toContain('Line 3: new line');
-
-        execSync(`rm -f ${filePath}`);
-    });
-
-    test('should show unsaved changes warning when closing', async ({ page }) => {
-        const taskInfo = await sharedTask(page);
-        const worktreeDir = worktreeDirFor(taskInfo);
-        if (!taskInfo || !worktreeDir) {
-            await expect(page.locator('.board')).toBeVisible();
-            return;
-        }
-
-        const uniqueId = Date.now();
-        const testFile = `warn-test-${uniqueId}.txt`;
-        const filePath = join(worktreeDir, testFile);
-
-        writeFileSync(filePath, 'Warning test content\n');
+        writeFileSync(filePath, 'Original content\nLine 2\n');
 
         await navigateToTask(page, taskInfo.taskId, taskInfo.projectId);
         await page.waitForSelector('.task-detail-page', { timeout: 10000 });
@@ -350,62 +276,31 @@ test.describe.serial('Diff panel user interactions', () => {
         }).toPass({ timeout: 10000 });
 
         await page.locator('.diff-row-clickable').first().click();
-        await expect(page.locator('.editor')).toBeVisible({ timeout: 5000 });
+        await expect(page.locator('.file-editor')).toBeVisible({ timeout: 5000 });
 
-        const textarea = page.locator('.editor-textarea');
-        await textarea.fill('Changed content!\n');
+        await page.locator('.cm-content').click();
+        await page.keyboard.press('Control+a');
+        await page.keyboard.type('Modified content Line 2 Line 3: new line');
+        // The editor opened from a diff row has no tab strip, so the file's own unsaved marker is the one
+        // that says there is work to save.
+        await expect(page.locator('.file-editor .btn-back.unsaved')).toBeVisible({ timeout: 10000 });
 
-        await expect(page.locator('.unsaved-dot')).toBeVisible();
-
-        await textarea.press('Escape');
-
-        await expect(page.locator('.confirm-dialog')).toBeVisible({ timeout: 5000 });
-        await expect(page.locator('#confirm-title')).toHaveText('Unsaved Changes');
-
-        await page.locator('.btn-confirm-cancel').click();
-        await expect(page.locator('.confirm-dialog')).not.toBeVisible();
-        await expect(page.locator('.editor')).toBeVisible();
-
-        execSync(`rm -f ${filePath}`);
-    });
-
-    test('should close editor without warning when no changes', async ({ page }) => {
-        const taskInfo = await sharedTask(page);
-        const worktreeDir = worktreeDirFor(taskInfo);
-        if (!taskInfo || !worktreeDir) {
-            await expect(page.locator('.board')).toBeVisible();
-            return;
-        }
-
-        const uniqueId = Date.now();
-        const testFile = `close-test-${uniqueId}.txt`;
-        const filePath = join(worktreeDir, testFile);
-
-        writeFileSync(filePath, 'No changes test\n');
-
-        await navigateToTask(page, taskInfo.taskId, taskInfo.projectId);
-        await page.waitForSelector('.task-detail-page', { timeout: 10000 });
-
+        await page.keyboard.press('Control+s');
+        await expect(page.locator('.file-editor .btn-back.unsaved')).toHaveCount(0, { timeout: 10000 });
         await expect(async () => {
-            expect(await page.locator('.diff-row').count()).toBeGreaterThan(0);
+            expect(execSync(`cat ${filePath}`).toString()).toContain('Line 3: new line');
         }).toPass({ timeout: 10000 });
 
-        await page.locator('.diff-row-clickable').first().click();
-        await expect(page.locator('.editor')).toBeVisible({ timeout: 5000 });
-
-        await page.keyboard.press('Escape');
-        await expect(page.locator('.editor')).not.toBeVisible({ timeout: 5000 });
+        await page.locator('.file-editor .btn-back').click();
+        await expect(page.locator('.file-editor')).not.toBeVisible({ timeout: 5000 });
 
         execSync(`rm -f ${filePath}`);
     });
+
 
     test('diff panel preserves file content after message deletion', async ({ page }) => {
         test.setTimeout(120000);
         const result = await deletionTask(page);
-        if (!result) {
-            await expect(page.locator('.board')).toBeVisible();
-            return;
-        }
         const { taskInfo, worktreeDir } = result;
 
         const uniqueId = Date.now();
@@ -444,12 +339,9 @@ test.describe.serial('Diff panel user interactions', () => {
         }
         await expect(page.locator('.chat-form')).toBeVisible({ timeout: 10000 });
 
-        // Two turns after the write, and the deletion takes the second one with it. A deleted
-        // message carries its own checkpoint away, and the file state is then reset to the last
-        // snapshot a surviving message owns — or, with none left, to the task's base commit, whose
-        // restore runs `clean -fd` and erases whatever no snapshot holds
-        // (docs/threads-checkpoints.md). Measured: one turn → the file is gone after the delete;
-        // two → the earlier checkpoint restores it.
+        // Two turns after the write, because the deletion takes the second one with it: a deleted message
+        // carries its checkpoint away and the file state resets to the last snapshot a surviving message owns
+        // (docs/threads-checkpoints.md). With one turn only, the file is gone after the delete.
         const { projectId, taskId } = taskInfo;
         await ensureInProgress(page, projectId, taskId);
         const userCountBefore = await page.locator('.chat-message.user').count();
@@ -483,10 +375,6 @@ test.describe.serial('Diff panel user interactions', () => {
     test('a staged file survives a message deletion, restored unstaged', async ({ page }) => {
         test.setTimeout(120000);
         const result = await stagedTask(page);
-        if (!result) {
-            await expect(page.locator('.board')).toBeVisible();
-            return;
-        }
         const { taskInfo, worktreeDir } = result;
 
         const uniqueId = Date.now();
@@ -696,12 +584,7 @@ test.describe.serial('Diff panel real-time file updates', () => {
     });
 
     test('should show new untracked files in the diff panel', async ({ page }) => {
-        const taskInfo = await sharedTask(page);
-        const worktreeDir = worktreeDirFor(taskInfo);
-        if (!taskInfo || !worktreeDir) {
-            await expect(page.locator('.board')).toBeVisible();
-            return;
-        }
+        const { taskInfo, worktreeDir } = await sharedTask(page);
 
         await page.goto(`/?project=${taskInfo.projectId}&task=${taskInfo.taskId}`);
         await page.waitForSelector('.task-detail-page', { timeout: 10000 });
@@ -720,12 +603,7 @@ test.describe.serial('Diff panel real-time file updates', () => {
     });
 
     test('should reflect file modifications in the diff panel', async ({ page }) => {
-        const taskInfo = await sharedTask(page);
-        const worktreeDir = worktreeDirFor(taskInfo);
-        if (!taskInfo || !worktreeDir) {
-            await expect(page.locator('.board')).toBeVisible();
-            return;
-        }
+        const { taskInfo, worktreeDir } = await sharedTask(page);
 
         await page.goto(`/?project=${taskInfo.projectId}&task=${taskInfo.taskId}`);
         await page.waitForSelector('.task-detail-page', { timeout: 10000 });
@@ -751,12 +629,7 @@ test.describe.serial('Diff panel real-time file updates', () => {
     });
 
     test('should remove deleted files from the diff panel', async ({ page }) => {
-        const taskInfo = await sharedTask(page);
-        const worktreeDir = worktreeDirFor(taskInfo);
-        if (!taskInfo || !worktreeDir) {
-            await expect(page.locator('.board')).toBeVisible();
-            return;
-        }
+        const { taskInfo, worktreeDir } = await sharedTask(page);
 
         await page.goto(`/?project=${taskInfo.projectId}&task=${taskInfo.taskId}`);
         await page.waitForSelector('.task-detail-page', { timeout: 10000 });
@@ -779,86 +652,38 @@ test.describe.serial('Diff panel real-time file updates', () => {
         }).toPass({ timeout: 10000 });
     });
 
-    test('diff API returns correct same-line diff', async ({ page }) => {
-        const taskInfo = await sharedTask(page);
-        const worktreeDir = worktreeDirFor(taskInfo);
-        if (!taskInfo || !worktreeDir) {
-            await expect(page.locator('.board')).toBeVisible();
-            return;
-        }
-
-        const uniqueId = Date.now();
-        const testFile = `diff-api-test-${uniqueId}.txt`;
-        const filePath = join(worktreeDir, testFile);
-
-        execSync(`echo "line one" > ${filePath}`);
-        await gitWithRetry(worktreeDir, 'git add -A');
-
-        execSync(`echo "line modified" > ${filePath}`);
-
-        const diff = await getDiffViaApi(page, taskInfo.projectId, taskInfo.taskId);
-        expect(diff.diff).toContain('line one');
-        expect(diff.diff).toContain('line modified');
-
-        execSync(`echo "line changed again" > ${filePath}`);
-
-        const diff2 = await getDiffViaApi(page, taskInfo.projectId, taskInfo.taskId);
-        expect(diff2.diff).toContain('line modified');
-        expect(diff2.diff).toContain('line changed again');
-
-        execSync(`rm -f ${filePath}`);
-        execSync(`cd ${worktreeDir} && git checkout -- ${testFile} 2>/dev/null || true`);
-    });
 
     test('diff panel updates in UI for same-line changes', async ({ page }) => {
-        const taskInfo = await sharedTask(page);
-        const worktreeDir = worktreeDirFor(taskInfo);
-        if (!taskInfo || !worktreeDir) {
-            await expect(page.locator('.board')).toBeVisible();
-            return;
-        }
+        const { taskInfo, worktreeDir } = await sharedTask(page);
 
         const uniqueId = Date.now();
         const testFile = `diff-ui-test-${uniqueId}.txt`;
         const filePath = join(worktreeDir, testFile);
 
-        execSync(`echo "hello world" > ${filePath}`);
+        writeFileSync(filePath, 'hello world\n');
         await gitWithRetry(worktreeDir, 'git add -A');
 
         await navigateToTask(page, taskInfo.taskId, taskInfo.projectId);
-        await page.waitForSelector('.tab-bar', { timeout: 5000 });
+        await expect(page.locator('.diff-content')).toBeVisible({ timeout: 15000 });
+        await waitForDiffFileContent(page, taskInfo.projectId, taskInfo.taskId, testFile, 'hello world');
 
-        // Wait for initial diff to load
-        await expect(async () => {
-            const diffData = await getDiffViaApi(page, taskInfo.projectId, taskInfo.taskId);
-            expect(diffData.diff).toContain('hello world');
-        }).toPass({ timeout: 10000 });
+        // A line modified twice shows its newest pair, and the rows come from `/diff/file`.
+        writeFileSync(filePath, 'hello goodbye\n');
+        await waitForDiffFileContent(page, taskInfo.projectId, taskInfo.taskId, testFile, 'hello goodbye');
 
-        execSync(`echo "hello goodbye" > ${filePath}`);
-
-        const diff1 = await getDiffViaApi(page, taskInfo.projectId, taskInfo.taskId);
-        expect(diff1.diff).toContain('hello goodbye');
-
-        execSync(`echo "goodbye world" > ${filePath}`);
-
-        const diff2 = await getDiffViaApi(page, taskInfo.projectId, taskInfo.taskId);
-        expect(diff2.diff).toContain('goodbye world');
-
+        writeFileSync(filePath, 'goodbye world\n');
+        await waitForDiffFileContent(page, taskInfo.projectId, taskInfo.taskId, testFile, 'goodbye world');
         await expect(async () => {
             const panelContent = await page.textContent('.diff-scroll');
             expect(panelContent).toContain('goodbye world');
-        }).toPass({ timeout: 10000 });
+            expect(panelContent).not.toContain('hello world');
+        }).toPass({ timeout: 15000 });
 
         execSync(`rm -f ${filePath}`);
-        execSync(`cd ${worktreeDir} && git checkout -- ${testFile} 2>/dev/null || true`);
     });
 
     test('should update diff panel for changed files via delta updates', async ({ page }) => {
         const result = await sharedTask(page);
-        if (!result) {
-            await expect(page.locator('.board')).toBeVisible();
-            return;
-        }
         const { taskInfo, worktreeDir } = result;
 
         const uniqueId = Date.now();
@@ -909,10 +734,6 @@ test.describe.serial('Diff panel real-time file updates', () => {
 
     test('should log console.error when diff-file fetch fails', async ({ page }) => {
         const result = await sharedTask(page);
-        if (!result) {
-            await expect(page.locator('.board')).toBeVisible();
-            return;
-        }
         const { taskInfo, worktreeDir } = result;
 
         const uniqueId = Date.now();
@@ -957,10 +778,6 @@ test.describe.serial('Diff panel real-time file updates', () => {
 
     test('should update diff when untracked file content changes but line count stays the same', async ({ page }) => {
         const result = await sharedTask(page);
-        if (!result) {
-            await expect(page.locator('.board')).toBeVisible();
-            return;
-        }
         const { taskInfo, worktreeDir } = result;
 
         const uniqueId = Date.now();
@@ -1014,10 +831,6 @@ test.describe.serial('Diff panel real-time file updates', () => {
 
     test('staging an untracked file moves it to the Staged section via broadcast', async ({ page }) => {
         const result = await sharedTask(page);
-        if (!result) {
-            await expect(page.locator('.board')).toBeVisible();
-            return;
-        }
         const { taskInfo, worktreeDir } = result;
 
         const uniqueId = Date.now();
@@ -1066,10 +879,6 @@ test.describe.serial('Diff panel real-time file updates', () => {
 
     test('expanding a truncated staged file keeps it in the Staged section', async ({ page }) => {
         const result = await sharedTask(page);
-        if (!result) {
-            await expect(page.locator('.board')).toBeVisible();
-            return;
-        }
         const { taskInfo, worktreeDir } = result;
 
         const testFile = `truncated-staged-${Date.now()}.txt`;

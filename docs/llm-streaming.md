@@ -57,6 +57,10 @@ identical requests inside two and a half minutes, each re-uploading a 74k-token 
 looks to the provider like a client that will not stop. Failures still land in Review through `failTask` (a person
 decides what to do with a half-done turn), so the sentence has to carry the guidance.
 
+The retry loop reads the ladder through `Deps.LLMBackoff`, whose default is `backoffFor`. A test whose subject is
+what the loop *does* — retried, then failed into Review — injects a short one (`fastRetryLadder`); these numbers are
+held by `TestBackoffFor_*` and `TestQuietStreamBackoffWaitsAtLeastTheSilenceItSaw`, by no integration test.
+
 ## Keeping the socket honest
 
 `httputil.NewStreamClient()` is the LLM client's transport and no one else's, because its keepalive config is

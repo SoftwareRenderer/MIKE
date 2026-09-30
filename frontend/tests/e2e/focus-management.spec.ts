@@ -1,5 +1,10 @@
 import { test, expect, Page, Locator } from '@playwright/test';
-import { getProjectId, createTaskViaApi, navigateToTask } from './helpers';
+import {
+  getProjectId, createTaskViaApi, navigateToTask, isolatedProject, gotoProject,
+} from './helpers';
+// Each test file gets its own project, because it starts a turn: see isolatedProject() in helpers.ts.
+isolatedProject();
+
 
 // ============================================================
 // FOCUS MANAGEMENT — inputs that appear on user interaction
@@ -40,14 +45,14 @@ async function expectToggleFocusesInput(
 
 test.describe('Focus management for conditionally rendered inputs', () => {
     test.beforeEach(async ({ page }) => {
-        await page.goto('/');
+        await gotoProject(page);
         await page.waitForSelector('.project-item', { timeout: 10000 });
     });
 
     test('login modal focuses the password field', async ({ page }) => {
         const context = page.context();
         await context.clearCookies();
-        await page.goto('/');
+        await gotoProject(page);
         await expect(page.locator('#login-password')).toBeVisible({ timeout: 10000 });
         await expectFocused(page, '#login-password');
     });

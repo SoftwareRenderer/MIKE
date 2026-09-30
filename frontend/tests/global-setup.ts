@@ -32,49 +32,39 @@ const STORAGE_STATE_FILE_ISOLATED = '/tmp/kanban-test-storage-state.json.isolate
 const KANBAN_BIN = 'go';
 const KANBAN_RUN_ARGS = ['run', '.'];
 const TEST_PASSWORD = 'test-password-1234';
-// Release updates are switched off for the run. The boot pass (`updateCheck.start()` in App.svelte)
-// asks the opt-in question of every fresh browser and, once the answer is yes, dials the manifest
-// host — neither belongs in a hermetic suite. `disabled` is the posture the client stops on: no dot,
-// no question, no prompt (docs/auto-update.md). A spec that wants the dot stubs /api/updates/status.
+// Release updates are switched off for the run: the boot pass (`updateCheck.start()` in App.svelte) asks the
+// opt-in question of every fresh browser and then dials the manifest host. A spec that wants the dot stubs
+// /api/updates/status.
 const NO_UPDATES_ENV = { MIKE_DISABLE_UPDATES: '1' };
-// Point the test servers at a local registry fixture so e2e registry tests are
-// deterministic and never depend on the hosted online registry.
-//
-// The servers do not read `registry-fixture.json` directly: one entry (the i18n
-// pack) is pinned to a git commit that only exists once setup has built the repo
-// it points at, so the fixture is copied to GENERATE_REGISTRY_FILE with that
-// placeholder resolved. Content is otherwise byte-identical, and a registry fetch
-// is a per-request file read (`HandleRegistryIndex` caches nothing), so both lanes
-// see the same index.
+// Point the test servers at a local registry fixture, so a registry fetch never depends on the hosted one.
+// One entry is pinned to a git commit that only exists once setup has built the repo it points at, so the
+// fixture is copied to GENERATE_REGISTRY_FILE with that placeholder resolved rather than served directly.
 const REGISTRY_FIXTURE_FILE = path.join(__dirname, 'registry-fixture.json');
 const GENERATED_REGISTRY_FILE = '/tmp/kanban-test-registry.json';
 const TEST_REGISTRY_URL = 'file://' + GENERATED_REGISTRY_FILE;
-// The i18n pack the registry fixture offers: sources committed under
-// tests/fixtures/i18n-pack-repo, committed into a throwaway local git repo so the
-// registry's git-pinned install path (`repo` + `commit` + `subdir`, cloned and
-// commit-verified server-side) has something real to install. The commit is
-// rebuilt from the fixture on every run with a fixed identity and a fixed commit
-// date, so identical content always produces the same hash — a stale generated
-// registry stays correct, and an edited fixture is picked up without a hardcoded
-// hash anyone could forget to bump.
+// The i18n pack the registry fixture offers: committed sources under tests/fixtures/i18n-pack-repo, committed
+// into a throwaway local git repo so the registry's git-pinned install path has something real to install.
+// The commit is rebuilt every run with a fixed identity and date, so identical content gives the same hash.
+/** The scroll specs' transcript: one project, one task, one long conversation, built once per run. */
+const CHAT_REPO = '/tmp/kanban-test-chat';
+const CHAT_FIXTURE_FILE = '/tmp/kanban-test-chat-fixture.json';
+/**
+ * Rows the transcript holds. Scroll height comes from the rows the app has loaded and the server answers five
+ * rows per older page, so this is several pages beyond what opening the chat pulls in.
+ */
+const CHAT_ROWS = 60;
+
 const I18N_PACK_REPO = '/tmp/kanban-test-i18n-pack-repo';
 const I18N_PACK_FIXTURE_DIR = path.join(__dirname, 'fixtures', 'i18n-pack-repo');
 const I18N_PACK_COMMIT_PLACEHOLDER = '__I18N_PACK_COMMIT__';
-// Local (unpublished) extension fixtures seeded into the repo extensions dir
-// for the Browse e2e specs. In a fresh checkout `extensions/` is empty, so
-// specs that need local extensions would fail; seeding from committed fixtures
-// keeps the suite hermetic. Only MISSING entries are created — pre-existing
-// dev installs are never touched — and teardown removes exactly what setup
-// created (tracked in SEEDED_EXTENSIONS_FILE so an interrupted run's leftovers
-// are cleaned by the next run's stale-state cleanup).
+// Local extension fixtures seeded into the repo extensions dir for the Browse specs: a fresh checkout has an
+// empty `extensions/`. Only missing entries are created and teardown removes exactly what setup created, so a
+// developer's own installs are never touched; SEEDED_EXTENSIONS_FILE is what an interrupted run leaves behind.
 const LOCAL_EXT_FIXTURES_DIR = path.join(__dirname, 'fixtures', 'local-extensions');
 const SEEDED_EXTENSIONS_FILE = '/tmp/kanban-test-seeded-extensions.json';
-// Published extensions the specs install with `install-local` have no committed fixture here — their source
-// is the sibling extensions repo. `install-local` reads only what is on disk, and **deleting an extension
-// deletes its directory**, so a run that uninstalls one consumes the source the next run needs: the spec
-// then says "html-preview not in local extensions list", which reads as a regression in the code under
-// test rather than a missing directory. Setup seeds from the sibling repo where the entry is absent, and
-// refuses the run naming the path when it cannot, so the cause is stated once instead of fourteen times.
+// Published extensions the specs install with `install-local` have no fixture here — their source is the
+// sibling extensions repo, and **deleting an extension deletes its directory**, so a run that uninstalls one
+// consumes the source the next run needs. Setup seeds it where absent, and refuses the run naming the path.
 const PUBLISHED_EXT_SOURCE = path.resolve(PROJECT_ROOT, '..', 'MIKE-extensions');
 const LOCAL_EXT_PUBLISHED: { author: string; name: string; subdir: string }[] = [
     { author: 'softwarerenderer', name: 'html-preview', subdir: 'ui/html-preview' },
@@ -84,7 +74,67 @@ let mockServer: ReturnType<typeof spawn> | null = null;
 let kanbanServer: ReturnType<typeof spawn> | null = null;
 let kanbanServerIsolated: ReturnType<typeof spawn> | null = null;
 
+/**
+ * The servers serve `frontend/dist` from disk and this setup never builds it, so a stale build answers every
+ * spec with code the run did not change. The newest file a build reads is compared with the newest artifact.
+ */
+function newestMtime(target: string): number {
+    if (!fs.existsSync(target)) return 0;
+    const stat = fs.statSync(target);
+    if (!stat.isDirectory()) return stat.mtimeMs;
+    let newest = stat.mtimeMs;
+    for (const entry of fs.readdirSync(target, { withFileTypes: true })) {
+        if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+        newest = Math.max(newest, newestMtime(path.join(target, entry.name)));
+    }
+    return newest;
+}
+
+function assertFrontendBuilt(): void {
+    const dist = path.join(FRONTEND_DIR, 'dist');
+    if (!fs.existsSync(path.join(dist, 'index.html'))) {
+        throw new Error('[global-setup] frontend/dist/index.html is missing — run `cd frontend && npm run build` first');
+    }
+    const built = newestMtime(dist);
+    const sources = ['src', 'vite.config.ts', 'svelte.config.ts', 'tsconfig.json']
+        .map(rel => newestMtime(path.join(FRONTEND_DIR, rel)));
+    const source = Math.max(...sources);
+    if (source > built) {
+        throw new Error('[global-setup] frontend/dist is older than frontend/src — every spec would run against the '
+            + 'previous build. Run `cd frontend && npm run build` (or `make test-e2e`, which builds first).');
+    }
+}
+
+/**
+ * Build the long conversation the scroll specs measure a reader inside, once for the run. A transcript built
+ * inside a test puts the fixture inside that test's own timeout.
+ */
+async function seedChatConversation(cookie: string, csrfToken: string): Promise<void> {
+    if (!fs.existsSync(CHAT_REPO)) fs.cpSync(TEST_REPO, CHAT_REPO, { recursive: true });
+    const project = await postJson(`${KANBAN_BASE}/api/projects`, { name: 'chat-fixture', path: CHAT_REPO }, cookie, csrfToken);
+    if (!project?.id) throw new Error(`[global-setup] chat fixture project could not be created: ${JSON.stringify(project)}`);
+    const task = await postJson(`${KANBAN_BASE}/api/projects/${project.id}/tasks`,
+        { title: 'chat-transcript', prompt: 'scroll fixture', status: 'in_progress' }, cookie, csrfToken);
+    if (!task?.id) throw new Error(`[global-setup] chat fixture task could not be created: ${JSON.stringify(task)}`);
+
+    let made = 0;
+    for (let i = 0; i < CHAT_ROWS; i++) {
+        const row = await postJson(`${KANBAN_BASE}/api/projects/${project.id}/tasks/${task.id}/messages`, {
+            role: 'user',
+            content: `seed row ${i}\n${'filler text that gives the entry some height '.repeat(3)}`,
+        }, cookie, csrfToken);
+        if (!row?.id) break;
+        made++;
+    }
+    if (made < CHAT_ROWS) {
+        throw new Error(`[global-setup] chat fixture stopped at row ${made} of ${CHAT_ROWS} — the scroll specs need the whole transcript`);
+    }
+    fs.writeFileSync(CHAT_FIXTURE_FILE, JSON.stringify({ projectId: project.id, taskId: task.id, rows: made }));
+    console.log(`[global-setup] Chat fixture: project ${project.id}, task ${task.id}, ${made} rows`);
+}
+
 async function setup(): Promise<void> {
+    assertFrontendBuilt();
     ensureTestRepo();
     seedLocalExtensions();
     seedPublishedExtensionSources();
@@ -161,14 +211,12 @@ async function setup(): Promise<void> {
         console.log('[global-setup] Using real LLM endpoint (MIKE_USE_MOCK_LLM=0)');
     }
 
-    // Create test project
     const project = await postJson(`${KANBAN_BASE}/api/projects`, {
         name: 'test-project',
         path: TEST_REPO,
     }, sessionCookie, csrfToken);
     console.log(`[global-setup] Test project created: ${project.id}`);
 
-    // Create test tasks
     const taskPayload = useMock
         ? { prompt: 'Test task for e2e tests', llama_server_url: mockUrl, model_name: 'mock-model' }
         : { prompt: 'Test task for e2e tests' };
@@ -179,7 +227,8 @@ async function setup(): Promise<void> {
     const task2 = await postJson(`${KANBAN_BASE}/api/projects/${project.id}/tasks`, taskPayload2, sessionCookie, csrfToken);
     console.log(`[global-setup] Test tasks created: ${task1.id}, ${task2.id}`);
 
-    // Start isolated server
+    await seedChatConversation(sessionCookie, csrfToken);
+
     console.log('[global-setup] Starting isolated kanban server...');
     kanbanServerIsolated = spawn('setsid', [KANBAN_BIN, ...KANBAN_RUN_ARGS, '--data-dir', TEST_DATA_DIR_ISOLATED, '--port', String(KANBAN_PORT_ISOLATED)], {
         cwd: PROJECT_ROOT,
@@ -248,6 +297,54 @@ async function setup(): Promise<void> {
     try { fs.writeFileSync(LOCK_FILE, ''); } catch { /* ignore */ }
 }
 
+/**
+ * Remove the sandbox containers this run created. Ownership is read from what a container mounts, never from
+ * its name, so a removal cannot reach the developer's own project containers. Both podman stores are tried:
+ * inspecting the rootful store for a rootless container answers an empty list.
+ */
+function removeHarnessContainers(): void {
+    const roots = [TEST_REPO, TEST_REPO_2, TEST_OWN_REPOS, TEST_WORKTREES, TEST_DATA_DIR];
+    for (const podman of ['podman', 'sudo podman']) {
+        let ids: string[];
+        try {
+            const out = execSync(`${podman} ps -aq --filter name=kanban-sandbox 2>/dev/null`).toString().trim();
+            ids = out ? out.split('\n') : [];
+        } catch {
+            continue; // that podman flavour is not available here
+        }
+        const doomed: string[] = [];
+        for (const id of ids) {
+            try {
+                const mounts = execSync(`${podman} inspect -f '{{range .Mounts}}{{.Source}} {{end}}' ${id}`).toString();
+                if (roots.some(root => mounts.split(' ').some(src => src === root || src.startsWith(`${root}/`)))) doomed.push(id);
+            } catch { /* unreadable container: not ours to guess about */ }
+        }
+        if (doomed.length) {
+            try {
+                execSync(`${podman} rm -f ${doomed.join(' ')}`, { stdio: 'ignore' });
+                console.log(`[global-teardown] Removed ${doomed.length} sandbox container(s) of this harness`);
+            } catch {
+                console.log('[global-teardown] Warning: sandbox containers of this harness survived');
+            }
+        }
+        return; // one flavour is the host's; the other has nothing of ours
+    }
+}
+
+/**
+ * Print what survived the run: a path the harness owns that still exists, and the containers the sandbox left
+ * up. Reported rather than removed here, because a leftover may belong to another run.
+ */
+function reportLeftovers(): void {
+    const roots = [TEST_REPO, TEST_REPO_2, CHAT_REPO, CHAT_FIXTURE_FILE, TEST_DATA_DIR, TEST_DATA_DIR_ISOLATED, TEST_WORKTREES, TEST_OWN_REPOS];
+    const survivors = roots.filter(root => fs.existsSync(root));
+    let containers = '?';
+    try {
+        containers = execSync('podman ps -aq 2>/dev/null | wc -l').toString().trim();
+    } catch { /* no podman on this host */ }
+    console.log(`[global-teardown] leftovers: paths=${survivors.length ? survivors.join(' ') : 'none'} containers=${containers}`);
+}
+
 export async function teardown(): Promise<void> {
     console.error('[teardown] ENTRY');
     // Stop servers — by identity first (the port does not reach the whole process tree), then by
@@ -262,16 +359,7 @@ export async function teardown(): Promise<void> {
     // Remove local extension fixtures this (or an interrupted previous) setup created.
     removeSeededLocalExtensions();
 
-    // Clean up orphaned sandbox containers
-    try {
-        const containers = execSync('sudo podman --runtime runsc ps --filter name=kanban-sandbox -q 2>/dev/null || true').toString().trim();
-        if (containers) {
-            execSync('sudo podman --runtime runsc rm -f ' + containers, { stdio: 'inherit' });
-            console.log('[global-teardown] Orphaned sandbox containers cleaned up');
-        }
-    } catch {
-        console.log('[global-teardown] Warning: failed to clean up sandbox containers');
-    }
+    removeHarnessContainers();
 
     // Delete test data — only once the server has let go of it (see waitForFilesRelease)
     waitForFilesRelease(TEST_DATA_DIR);
@@ -302,9 +390,18 @@ export async function teardown(): Promise<void> {
     // Delete the per-worker project repos (helpers.ts isolatedProject)
     try { fs.rmSync(TEST_OWN_REPOS, { recursive: true, force: true }); } catch { /* ignore */ }
 
+    // The fixture repos are inputs this setup builds from `tests/test-repo`, so a stale checkout must not be
+    // the next run's starting point.
+    for (const repo of [TEST_REPO, TEST_REPO_2, CHAT_REPO]) {
+        try { fs.rmSync(repo, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+    try { fs.rmSync(CHAT_FIXTURE_FILE, { force: true }); } catch { /* ignore */ }
+
     // Delete the generated registry index and the i18n pack repo setup built
     try { fs.rmSync(GENERATED_REGISTRY_FILE, { force: true }); } catch { /* ignore */ }
     try { fs.rmSync(I18N_PACK_REPO, { recursive: true, force: true }); } catch { /* ignore */ }
+
+    reportLeftovers();
 
     // Clean up lock and auth files
     try { fs.unlinkSync(LOCK_FILE); } catch { /* ignore */ }
@@ -398,20 +495,10 @@ function removeSeededLocalExtensions(): void {
 // --- Registry index ---
 
 /**
- * Build the i18n pack repo and write the registry index the servers read.
- *
- * The registry fixture pins its translation pack to a commit, and a pin has to be
- * a commit that exists — the server clones `repo`, checks out `commit`, and
- * verifies `rev-parse HEAD` before it installs anything. So the hash cannot live
- * in the fixture: it is a property of the content, and a hardcoded one goes stale
- * the moment anyone edits the pack. Setup builds the repo and substitutes its
- * HEAD.
- *
- * When the repo cannot be built (no git, no identity, a read-only /tmp) the
- * placeholder is left in place rather than replaced with a plausible-looking fake:
- * the one spec that installs this entry asserts its commit resolved, so a broken
- * setup reads as "setup did not build the pack repo" instead of a checkout error
- * naming a hash that was never a commit.
+ * Build the i18n pack repo and write the registry index the servers read. The fixture pins its translation pack
+ * to a commit, and that hash cannot live in the fixture because it is a property of the content: setup builds
+ * the repo and substitutes its HEAD. When the repo cannot be built the placeholder stays in place, so the spec
+ * that installs this entry reports that setup did not build it instead of naming a hash that was never a commit.
  */
 function prepareRegistryIndex(): void {
     const commit = buildI18nPackRepo();
@@ -439,13 +526,8 @@ function prepareRegistryIndex(): void {
 }
 
 /**
- * Commit `tests/fixtures/i18n-pack-repo` into a throwaway repo and return its
- * HEAD, or null when git could not do it.
- *
- * The identity and both commit dates are fixed, so the hash is a function of the
- * pack's content alone: the repo is rebuilt from scratch every run (an edited
- * fixture is picked up, never inherited from a previous run), while an untouched
- * one yields the same commit as the last run's.
+ * Commit `tests/fixtures/i18n-pack-repo` into a throwaway repo and return its HEAD, or null when git could not
+ * do it. The identity and both commit dates are fixed, so the hash is a function of the pack's content alone.
  */
 function buildI18nPackRepo(): string | null {
     const gitEnv = {
@@ -453,8 +535,7 @@ function buildI18nPackRepo(): string | null {
         GIT_AUTHOR_DATE: '2020-01-01T00:00:00Z',
         GIT_COMMITTER_DATE: '2020-01-01T00:00:00Z',
     };
-    // An explicit identity: this must work on a machine with no global git config,
-    // and must not depend on the one global-setup sets for the task repos.
+    // An explicit identity: this must work on a machine with no global git config.
     const identity = ['-c', 'user.name=MIKE e2e', '-c', 'user.email=e2e@localhost.test',
         '-c', 'commit.gpgsign=false', '-c', 'core.autocrlf=false'];
     const git = (args: string[]) =>

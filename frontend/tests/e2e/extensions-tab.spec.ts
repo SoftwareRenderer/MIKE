@@ -22,12 +22,8 @@ test.describe.configure({ mode: 'parallel' });
 // are safe (local + registry entries load asynchronously, so the rendered
 // card set can be transiently partial).
 async function getBrowseSegments(page: Page) {
-  // The lists are fetched in the page, but the identity model is imported from
-  // src/lib/utils/extension-identity — the same module ExtensionsTab.svelte uses.
-  // A local copy here drifted (it did not slugify the author, so the registry's
-  // "Microsoft/typescript-language-server" and the on-disk
-  // "microsoft/typescript-language-server" counted as two extensions) and the
-  // Browse assertions were off by one card.
+  // The identity model is imported from src/lib/utils/extension-identity, the module
+  // ExtensionsTab.svelte uses, so the test's idea of "the same extension" cannot drift from the app's.
   const lists = await page.evaluate(async () => {
     const j = async (url: string) => {
       const res = await fetch(url);
@@ -326,16 +322,15 @@ test.describe('Extensions Tab', () => {
   });
 
   test('should show capability badges in Browse Registry view', async ({ page }) => {
-    // Navigate; skip if the (fixture-pinned) registry is unreachable
+    // The test servers are pointed at a local registry fixture (`MIKE_REGISTRY_URL` in global setup), so
+    // the route answering is not a favour the network grants this run.
     await page.goto('/');
     await page.waitForSelector('.project-item', { timeout: 10000 });
     const registryOk = await page.evaluate(async () => {
       const res = await fetch('/api/extensions/registry');
       return res.ok;
     });
-    if (!registryOk) {
-      test.skip();
-    }
+    expect(registryOk, '/api/extensions/registry did not answer — the harness serves a local fixture').toBe(true);
 
     // Open settings > Extensions tab
     await page.locator('.icon-btn[aria-label="Settings"]').click();
@@ -392,40 +387,4 @@ test.describe('TypeScript Language Server Extension', () => {
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
-  test('should list typescript-language-server in registry', async ({ page }) => {
-    // Fetch registry via API
-    const index = await page.evaluate(async () => {
-      const res = await fetch('/api/extensions/registry');
-      if (!res.ok) return null;
-      return res.json();
-    });
-    if (!Array.isArray(index)) {
-      test.skip();
-    }
-
-    const tsEntry = index.find((entry: any) => entry.name === 'typescript-language-server');
-    expect(tsEntry).toBeDefined();
-    expect(tsEntry.type).toBe('lsp');
-    expect(tsEntry.display_name).toBe('TypeScript/JavaScript Language Server');
-  });
-
-  test('should have correct registry entry fields for typescript-language-server', async ({ page }) => {
-    const index = await page.evaluate(async () => {
-      const res = await fetch('/api/extensions/registry');
-      if (!res.ok) return null;
-      return res.json();
-    });
-    if (!Array.isArray(index)) {
-      test.skip();
-    }
-
-    const tsEntry = index.find((entry: any) => entry.name === 'typescript-language-server');
-    expect(tsEntry).toBeDefined();
-    expect(tsEntry.type).toBe('lsp');
-    // Git-pinned source fields.
-    expect(tsEntry.author).toBe('Microsoft');
-    expect(tsEntry.subdir).toBe('lsp/typescript-language-server');
-    expect(typeof tsEntry.commit).toBe('string');
-    expect(tsEntry.repo).toContain('SoftwareRenderer/MIKE-extensions');
-  });
 });

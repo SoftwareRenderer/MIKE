@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import {
   createTaskViaApi, navigateToTask, waitForChatForm, waitForTaskState,
   isolatedProject, csrfFetch, getProjectId, gotoProject,
+  PENDING_TOOL_STATUS as PENDING,
 } from './helpers';
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
@@ -12,8 +13,6 @@ isolatedProject();
 // turn will never execute it, persist it or answer it.
 
 test.describe.configure({ mode: 'serial' });
-
-const PENDING = '.tool-status.pending';
 
 async function startStreamingToolCall(page: any, projectId: string, label: string): Promise<string> {
   const taskId = await createTaskViaApi(page, projectId, `slow-tool-probe ${label} ${Date.now()}`);

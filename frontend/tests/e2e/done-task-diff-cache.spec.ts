@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
-import { getProjectId, createTaskViaApi, csrfFetch, navigateToTask, getTaskData, worktreeExists, writeFileInWorktree, isolatedProject, gotoProject } from './helpers';
+import { getProjectId, createTaskViaApi, csrfFetch, navigateToTask, getTaskData, worktreeExists, writeFileInWorktree, isolatedProject, gotoProject, waitForTaskState, notInFlight, getWorktreePath } from './helpers';
+import { execSync } from 'child_process';
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
 isolatedProject();
@@ -108,8 +109,9 @@ test.describe.serial('Done-task diff stats caching', () => {
   });
 
   test('done task card keeps diff stats across reloads, and the server skips the re-send', async ({ page }) => {
-    // 1. Create + start the task, then add a file that will be committed.
-    taskTitle = `done-cache-${Date.now()}`;
+    // 1. Create + start the task, then add a file that will be committed. The turn its own prompt starts is
+    // pinned to a terminating fixture: nothing below may read the worktree while a turn is running.
+    taskTitle = `done-cache-${Date.now()} llm-fixture:text`;
     taskId = await createTaskViaApi(page, projectId, taskTitle);
     expect(taskId).not.toBe('');
     await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/move`, {
@@ -117,7 +119,20 @@ test.describe.serial('Done-task diff stats caching', () => {
       body: { status: 'in_progress' },
     });
     await expect.poll(() => worktreeExists(projectId, taskId), { timeout: 20000 }).toBe(true);
+    // A fixture written under a running turn is rewritten by it: the turn's own worktree writes land
+    // after this one, and the card then has no staged change to offer a commit for.
+    await waitForTaskState(page, projectId, taskId, notInFlight, 60000);
+    await expect.poll(() => worktreeExists(projectId, taskId), { timeout: 20000 }).toBe(true);
     writeFileInWorktree(projectId, taskId, 'cache-probe.txt', 'line one\nline two\n');
+    // The card offers "Commit and move to Done" for STAGED changes only, and `writeFileInWorktree` does
+    // not insist the `git add` landed. Say which of the two failed instead of letting the card answer.
+    await expect.poll(async () => {
+      const worktree = getWorktreePath(projectId, taskId);
+      const staged = execSync(`git -C ${worktree} diff --cached --name-only`, { encoding: 'utf-8' });
+      if (staged.includes('cache-probe.txt')) return true;
+      execSync(`git -C ${worktree} add cache-probe.txt`);
+      return false;
+    }, { timeout: 20000, message: 'cache-probe.txt is not staged in the task worktree' }).toBe(true);
     await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/move`, {
       method: 'POST',
       body: { status: 'review' },
@@ -127,7 +142,10 @@ test.describe.serial('Done-task diff stats caching', () => {
     // — the chat review bar can show Resume instead of Commit when the task
     // has an unanswered user turn).
     await gotoProject(page);
-    const commitAction = page.locator('.card', { hasText: taskTitle }).locator('.action-move[aria-label="Commit and move to done"]');
+    // Role + name, not `[aria-label="…"]`: the label is the catalog's `board.card.commitAndDone`, which
+    // capitalises the status word, and an attribute selector is case-sensitive where a name match is not.
+    const commitAction = page.locator('.card', { hasText: taskTitle })
+      .getByRole('button', { name: 'Commit and move to done' });
     await expect(commitAction).toBeVisible({ timeout: 20000 });
     // Hover-revealed action icon under the card title area — force the click.
     await commitAction.click({ force: true });
@@ -196,6 +214,9 @@ test.describe.serial('Done-task diff stats caching', () => {
     await expect
       .poll(() => diffRequests.filter(u => u.includes('head=')).length, { timeout: 20000 })
       .toBeGreaterThanOrEqual(1);
+    // The premise of everything below: the pinned done diff holds the file. Asserting it HERE, on the
+    // network path, is what tells an empty diff apart from a cache that never served anything.
+    await expect(page.locator('.diff-file-path', { hasText: 'cache-probe.txt' })).toBeVisible({ timeout: 20000 });
     // Wait for the response to actually persist in IndexedDB — an in-flight
     // IDB write would be rolled back by the navigation below.
     await waitForDoneDiffPersisted(page, projectId, taskId);

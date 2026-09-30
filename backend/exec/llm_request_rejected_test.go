@@ -72,6 +72,7 @@ func TestRateLimitedRequestIsStillRetried(t *testing.T) {
 	t.Parallel()
 	srv, calls := crashLLM(t, refusedByProvider(http.StatusTooManyRequests, "rate limit"))
 	te, _, projectID, initialSHA := setupExecutorWithGit(t)
+	fastRetryLadder(te) // the Retry-After arithmetic is TestBackoffFor_RateLimited*; this one asks whether it retried
 	const taskID = "rate-limited"
 	worktreePath := crashTask(t, te, projectID, initialSHA, taskID, srv.URL)
 

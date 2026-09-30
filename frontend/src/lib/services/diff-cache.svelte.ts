@@ -1,5 +1,5 @@
 import type { ApiDiffRow, DiffFile, DiffRow } from '$lib/types/diff';
-import { toDiffFiles, type TaskDiff, type TaskDiffOptions } from '$lib/api';
+import { toDiffFiles, type GitBatchResult, type TaskDiff, type TaskDiffOptions } from '$lib/api';
 import { isVimSwapFile } from '$lib/utils/file-suffix';
 import type { DiffFileResponse } from '$lib/types/diff';
 import { isAborted } from '$lib/api/helpers';
@@ -29,7 +29,7 @@ export interface DiffStats {
 interface DiffCacheApis {
     getTaskDiff: (projectId: string, taskId: string, options?: TaskDiffOptions) => Promise<TaskDiff>;
     getDiffFile: (projectId: string, taskId: string, path: string, options?: { signal?: AbortSignal; full?: boolean }) => Promise<DiffFileResponse>;
-    stageFile: (projectId: string, taskId: string, path: string, stage: boolean) => Promise<unknown>;
+    stageTaskPaths: (projectId: string, taskId: string, paths: string[], stage: boolean) => Promise<GitBatchResult>;
     enrichRows: (rows: ApiDiffRow[]) => DiffRow[];
 }
 
@@ -49,6 +49,8 @@ export class DiffCache {
         untracked: {} as Record<string, UntrackedMeta>,
         loading: false,
         baseRef: '' as string,
+        /** Paths whose stage write has not been answered yet. */
+        pending: [] as string[],
     });
 
     /** Per-file hash tracker for incremental updates. */
@@ -76,13 +78,6 @@ export class DiffCache {
         this._apis = apis;
         this._getProjectId = getProjectId;
         this._getTaskId = getTaskId;
-    }
-
-    /** Revert a stage/unstage operation after server failure. */
-    revertStageFile(path: string, stage: boolean) {
-        if (this.state.files[path]) {
-            this.state.files = { ...this.state.files, [path]: { ...this.state.files[path], staged: !stage } };
-        }
     }
 
     /** Update a single file in the cache (e.g. expand truncated). */
@@ -610,37 +605,36 @@ export class DiffCache {
         }
     }
 
-    /** Stage or unstage a single file. Optimistic update + server call. */
-    async stageFile(path: string, stage: boolean, onRevert: (path: string, stage: boolean) => void) {
-        if (this.state.files[path]) {
-            this.state.files = { ...this.state.files, [path]: { ...this.state.files[path], staged: stage } };
-        }
+    /**
+     * Stage or unstage every path given in one request, and report what git answered. A path moves section
+     * only when the answer says it did, so `state.pending` is what the caller shows meanwhile; an untracked
+     * path has no cached entry, so it arrives with the diff reload that follows.
+     */
+    async stagePaths(paths: string[], stage: boolean): Promise<GitBatchResult | null> {
+        const wanted = paths.filter(path => !this.state.pending.includes(path));
+        if (wanted.length === 0) return null;
+        this.state.pending = [...this.state.pending, ...wanted];
         try {
-            await this._apis.stageFile(this._getProjectId(), this._getTaskId(), path, stage);
-        } catch (e) {
-            onRevert(path, stage);
-            throw e;
+            const answer = await this._apis.stageTaskPaths(this._getProjectId(), this._getTaskId(), wanted, stage);
+            for (const path of answer.applied) {
+                if (this.state.files[path]) {
+                    this.patchFile(path, { staged: stage });
+                }
+            }
+            return answer;
+        } finally {
+            this.state.pending = this.state.pending.filter(path => !wanted.includes(path));
         }
     }
 
-    /** Stage all unstaged tracked and untracked files. Iteratively applies per-file stage. */
-    async stageAll() {
-        for (const path of Object.keys(this.state.files)) {
-            if (this.state.files[path].staged) continue;
-            try {
-                await this.stageFile(path, true, () => { this.revertStageFile(path, true); });
-            } catch { /* skip */ }
-        }
+    /** Stage every tracked file the index does not hold yet. */
+    stageAll(): Promise<GitBatchResult | null> {
+        return this.stagePaths(Object.keys(this.state.files).filter(path => !this.state.files[path].staged), true);
     }
 
-    /** Unstage all staged files. Iteratively applies per-file unstage. */
-    async unstageAll() {
-        for (const path of Object.keys(this.state.files)) {
-            if (!this.state.files[path].staged) continue;
-            try {
-                await this.stageFile(path, false, () => { this.revertStageFile(path, false); });
-            } catch { /* skip */ }
-        }
+    /** Unstage every tracked file the index holds. */
+    unstageAll(): Promise<GitBatchResult | null> {
+        return this.stagePaths(Object.keys(this.state.files).filter(path => this.state.files[path].staged), false);
     }
 
     /** Full reset — called when task changes. */
@@ -649,6 +643,7 @@ export class DiffCache {
         this.tracker.stagedPathsKey = '';
         this.state.files = {};
         this.state.untracked = {};
+        this.state.pending = [];
         this.state.baseRef = '';
         this.fileHashes = {};
         this.refDiff = false;

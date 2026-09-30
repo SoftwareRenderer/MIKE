@@ -1,6 +1,11 @@
 import { test, expect, type Page } from '@playwright/test';
 import { execSync } from 'child_process';
-import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch } from './helpers';
+import {
+  getProjectId, createTaskViaApi, navigateToTask, csrfFetch, isolatedProject, gotoProject,
+} from './helpers';
+// Each test file gets its own project, because it starts a turn: see isolatedProject() in helpers.ts.
+isolatedProject();
+
 
 // ============================================================
 // TASK VIEW COLUMN NAVIGATION (Board / Chat / Diff)
@@ -108,11 +113,11 @@ test.describe.serial('Task view column navigation', () => {
     test.beforeEach(async ({ page }) => {
         test.setTimeout(60000);
         if (!state) {
-            await page.goto('/');
+            await gotoProject(page);
             await page.waitForSelector('.board .column', { timeout: 10000 });
             state! = await setupFixture(page);
         } else {
-            await page.goto('/');
+            await gotoProject(page);
         }
         await navigateToTask(page, state.taskId);
         await waitForStableHeaders(page);

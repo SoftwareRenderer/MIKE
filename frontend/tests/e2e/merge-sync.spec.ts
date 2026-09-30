@@ -1,11 +1,16 @@
 import { test, expect } from '@playwright/test';
-import { getProjectId, createTaskViaApi, csrfFetch, navigateToTask } from './helpers';
+import {
+  getProjectId, createTaskViaApi, csrfFetch, navigateToTask, isolatedProject, gotoProject,
+} from './helpers';
+// Each test file gets its own project, because it starts a turn: see isolatedProject() in helpers.ts.
+isolatedProject();
+
 
 test.describe.serial('Merge Sync', () => {
   let projectId: string;
 
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.project-item', { timeout: 10000 });
     projectId = await getProjectId(page);
   });
@@ -95,40 +100,27 @@ test.describe.serial('Merge Sync', () => {
 
     // Click commit and done
     const commitBtn = page.locator('.btn-commit-done');
-    await expect(commitBtn).toBeVisible({ timeout: 10000 });
+    await expect(commitBtn).toBeVisible({ timeout: 60000 });
     await commitBtn.click();
 
-    // Wait for the commit dialog to appear (if there are changes)
-    // The commit dialog may or may not appear depending on whether there are changes
+    // Whether a commit dialog appears is the server's answer: there is one only when the turn left something
+    // staged. Both questions are asked in one poll, because a fast probe takes the no-commit branch and then
+    // waits for a Done nobody confirmed.
     const commitDialog = page.locator('[role="dialog"] .commit-textarea');
-    const dialogVisible = await commitDialog.waitFor({ state: 'visible', timeout: 10000 }).then(() => true).catch(() => false);
-
-    if (dialogVisible) {
-      // Confirm the commit
-      const confirmBtn = page.locator('.modal-footer .btn-primary');
-      await expect(confirmBtn).toBeVisible();
-      await confirmBtn.click();
-    } else {
-      // No commit dialog — task may have moved to done directly
-      // Check if task is already done
-      await expect(async () => {
-        const task = await page.evaluate(async ({ pid, tid }) => {
-          const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
-          return res.ok ? res.json() : null;
-        }, { pid: projectId, tid: taskId });
-        expect(task?.status).toBe('done');
-      }).toPass({ timeout: 15000 });
-      return; // Test passed, task is done
-    }
-
-    // Wait for the merge to complete
-    await expect(async () => {
+    let confirmedCommit = false;
+    await expect.poll(async () => {
+      if (!confirmedCommit && await commitDialog.isVisible().catch(() => false)) {
+        const confirmBtn = page.locator('.modal-footer .btn-primary');
+        await expect(confirmBtn).toBeVisible();
+        await confirmBtn.click();
+        confirmedCommit = true;
+      }
       const task = await page.evaluate(async ({ pid, tid }) => {
         const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
         return res.ok ? res.json() : null;
       }, { pid: projectId, tid: taskId });
-      expect(task?.status).toBe('done');
-    }).toPass({ timeout: 30000 });
+      return task?.status;
+    }, { timeout: 120000, intervals: [250, 1000] }).toBe('done');
 
     // Verify the task is done
     const finalTask = await page.evaluate(async ({ pid, tid }) => {

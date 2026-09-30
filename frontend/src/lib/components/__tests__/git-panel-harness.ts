@@ -15,8 +15,8 @@ export const api = {
     getGitStatus: mock(gitApi.getGitStatus),
     getProjectDiffFiles: mock(gitApi.getProjectDiffFiles),
     getProjectDiffFile: mock(gitApi.getProjectDiffFile),
-    stageProjectFile: mock(gitApi.stageProjectFile),
-    discardProjectFile: mock(gitApi.discardProjectFile),
+    stageProjectPaths: mock(gitApi.stageProjectPaths),
+    discardProjectPaths: mock(gitApi.discardProjectPaths),
     getGitLogFull: mock(gitApi.getGitLogFull),
     getCommitDiffFiles: mock(gitApi.getCommitDiffFiles),
     showConfirm: mock(dialogStore.showConfirm),
@@ -44,8 +44,11 @@ export function seedPanel(status = STATUS): void {
     api.getProjectDiffFile.mockRejectedValue(new Error('no untracked files'));
     api.getGitLogFull.mockResolvedValue({ commits: [COMMIT], current_branch: 'main' });
     api.getCommitDiffFiles.mockResolvedValue([]);
-    api.stageProjectFile.mockResolvedValue({ status: 'ok', action: 'staged' });
-    api.discardProjectFile.mockResolvedValue({ status: 'ok' });
+    // The endpoints answer with the paths they landed on; every seeded path is answered as applied.
+    api.stageProjectPaths.mockImplementation(async (_p: string, paths: string[], stage: boolean) =>
+        ({ status: 'ok', action: stage ? 'staged' : 'unstaged', applied: [...paths], failed: [] }));
+    api.discardProjectPaths.mockImplementation(async (_p: string, paths: string[]) =>
+        ({ status: 'ok', action: 'discarded', applied: [...paths], failed: [] }));
     api.showConfirm.mockResolvedValue(true);
 }
 
@@ -59,6 +62,16 @@ export const selectedPaths = (container: HTMLElement) =>
     rowEls(container).filter(r => r.getAttribute('aria-selected') === 'true').map(r => r.title);
 export const bar = (container: HTMLElement) => container.querySelector<HTMLElement>('.file-selection-bar');
 export const list = (container: HTMLElement) => container.querySelector<HTMLElement>('.changes-scroll')!;
+/** A row's own write buttons: only the one that was pressed shows a spinner. */
+export const stageBtn = (container: HTMLElement, path: string) =>
+    rowEl(container, path)?.parentElement?.querySelector<HTMLElement>('.changes-stage-btn') ?? null;
+export const discardRowBtn = (container: HTMLElement, path: string) =>
+    rowEl(container, path)?.parentElement?.querySelector<HTMLElement>('.changes-discard-btn') ?? null;
+/** A group header's whole-section action, named by what it does. */
+export const sectionAction = (container: HTMLElement, label: string) =>
+    container.querySelector<HTMLElement>(`.changes-section-action[aria-label="${label}"]`);
+/** Every spinner a running write leaves behind, wherever it sits. */
+export const rings = (container: HTMLElement) => [...container.querySelectorAll('.spinner')];
 export const menu = (container: HTMLElement) => container.querySelector<HTMLElement>('.file-context-menu');
 export const menuLabels = (container: HTMLElement) =>
     [...menu(container)!.querySelectorAll('.menu-label')].map(s => s.textContent);

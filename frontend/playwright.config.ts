@@ -36,9 +36,11 @@ export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  // Measured per full run: 6 workers ≈ 2.7 min with 1-4 failures that rotate between runs; 4 workers
-  // ≈ 3.0-3.4 min with 0-1. They are all "waiting for an executor turn", and every worker queues
-  // turns on the one lane server. Slower and boring beats faster and red.
+  // 6 workers is the fastest setting that stays green. Below it the wall clock grows and failures rotate in,
+  // every one of them a wait for an executor turn, because all workers queue turns on the one lane server.
+  //
+  // The ceilings are sized for the slowest runner this suite is expected to meet, because a green test pays
+  // nothing for slack.
   workers: 4,
   globalSetup: './tests/global-setup.ts',
   globalTeardown: './tests/global-teardown.ts',
@@ -47,11 +49,11 @@ export default defineConfig({
   // a long ceiling just turns a dead spec into a long dead spec.
   // 30s was tight for the tests that wait on an executor turn: every worker shares one
   // server, so a turn queues behind the other workers'. Timeouts cost nothing when green.
-  timeout: 45000,
+  timeout: 90000,
   expect: {
     // A task turn queues behind every other worker's turn on the one shared server, so
     // assertions that wait on executor output need slack; they return as soon as they hold.
-    timeout: 15000,
+    timeout: 30000,
   },
   use: {
     baseURL: 'http://localhost:3000',

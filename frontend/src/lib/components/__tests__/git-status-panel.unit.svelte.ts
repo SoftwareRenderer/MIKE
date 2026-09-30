@@ -18,8 +18,8 @@ vi.mock('$lib/api/git', () => ({
     getGitStatus: vi.fn(),
     getProjectDiffFiles: vi.fn(),
     getProjectDiffFile: vi.fn(),
-    stageProjectFile: vi.fn(),
-    discardProjectFile: vi.fn(),
+    stageProjectPaths: vi.fn(),
+    discardProjectPaths: vi.fn(),
     commitProject: vi.fn(),
     pullProject: vi.fn(),
     pushProject: vi.fn(),
@@ -52,7 +52,7 @@ const getProjectDiffFiles = gitApi.getProjectDiffFiles as ReturnType<typeof vi.f
 const getProjectDiffFile = gitApi.getProjectDiffFile as ReturnType<typeof vi.fn>;
 const pullProject = gitApi.pullProject as ReturnType<typeof vi.fn>;
 const pushProject = gitApi.pushProject as ReturnType<typeof vi.fn>;
-const discardProjectFile = gitApi.discardProjectFile as ReturnType<typeof vi.fn>;
+const discardProjectPaths = gitApi.discardProjectPaths as ReturnType<typeof vi.fn>;
 const getGitLogFull = gitApi.getGitLogFull as ReturnType<typeof vi.fn>;
 const getCommitDiffFiles = gitApi.getCommitDiffFiles as ReturnType<typeof vi.fn>;
 
@@ -83,7 +83,8 @@ beforeEach(() => {
     getCommitDiffFiles.mockResolvedValue([]);
     pullProject.mockResolvedValue({ status: 'pulled' });
     pushProject.mockResolvedValue({ status: 'pushed' });
-    discardProjectFile.mockResolvedValue({ status: 'ok' });
+    discardProjectPaths.mockImplementation(async (_p: string, paths: string[]) =>
+        ({ status: 'ok', action: 'discarded', applied: [...paths], failed: [] }));
 });
 
 afterEach(() => {
@@ -221,7 +222,7 @@ describe('GitStatusPanel discard', () => {
         // pass even if the panel sent it.
         await new Promise((resolve) => setTimeout(resolve, 0));
 
-        expect(discardProjectFile).not.toHaveBeenCalled();
+        expect(discardProjectPaths).not.toHaveBeenCalled();
         expect(dialogStore.showToast).not.toHaveBeenCalled();
     });
 
@@ -261,14 +262,14 @@ describe('GitStatusPanel discard', () => {
 
         discardBtn(container, 'staged.txt').click();
 
-        await waitFor(() => expect(discardProjectFile).toHaveBeenCalledWith('p1', 'staged.txt'));
-        expect(discardProjectFile).toHaveBeenCalledTimes(1);
+        await waitFor(() => expect(discardProjectPaths).toHaveBeenCalledWith('p1', ['staged.txt']));
+        expect(discardProjectPaths).toHaveBeenCalledTimes(1);
         await waitFor(() => expect(dialogStore.showToast).toHaveBeenCalledWith('Changes discarded', 'success'));
         await waitFor(() => expect(getGitStatus.mock.calls.length).toBeGreaterThan(loadsBefore));
     });
 
     it('reports a failed discard and leaves the diff pane alone', async () => {
-        discardProjectFile.mockRejectedValue(new Error('git discard failed: index.lock exists'));
+        discardProjectPaths.mockRejectedValue(new Error('git discard failed: index.lock exists'));
         const { container } = render(GitStatusPanel, { props: baseProps() });
         await waitFor(() => expect(container.querySelector('.changes-file-row')).not.toBeNull());
         const loadsBefore = getGitStatus.mock.calls.length;

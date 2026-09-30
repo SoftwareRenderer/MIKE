@@ -143,17 +143,31 @@ func doRequest(t *testing.T, mux *http.ServeMux, method, path string) *httptest.
 	return rr
 }
 
-// newStageRequest builds an HTTP POST request with a JSON body for staging.
-func newStageRequest(t *testing.T, target, path string, stage bool) *http.Request {
+// newStageRequest builds one stage request naming every path given, as the panel does.
+func newStageRequest(t *testing.T, target string, stage bool, paths ...string) *http.Request {
 	t.Helper()
 	stageStr := "true"
 	if !stage {
 		stageStr = "false"
 	}
-	body := strings.NewReader(`{"path": "` + path + `", "stage": ` + stageStr + `}`)
+	quoted := make([]string, 0, len(paths))
+	for _, path := range paths {
+		quoted = append(quoted, `"`+path+`"`)
+	}
+	body := strings.NewReader(`{"paths": [` + strings.Join(quoted, ", ") + `], "stage": ` + stageStr + `}`)
 	req := httptest.NewRequest("POST", target, body)
 	req.Header.Set("Content-Type", "application/json")
 	return req
+}
+
+// decodeBatchAnswer reads what a batch git write answered.
+func decodeBatchAnswer(t *testing.T, rec *httptest.ResponseRecorder) gitBatchAnswer {
+	t.Helper()
+	var answer gitBatchAnswer
+	if err := json.Unmarshal(rec.Body.Bytes(), &answer); err != nil {
+		t.Fatalf("decode answer: %v (body %s)", err, rec.Body.String())
+	}
+	return answer
 }
 
 // setupHandleLogProject creates a project with a git repo and returns (handler, mux).
@@ -740,14 +754,9 @@ var invalidBranchChars = []string{"~", "^", ":", "?", "*", "[", "\\", " ", "feat
 // (treated as filenames, not git flags) thanks to the '--' separator
 // before the path argument in `git add`.
 
-// TestHandleProjectStageFile_PathStartingWithDash verifies that a path
-// starting with '-' is safely staged (treated as a filename, not a git flag)
-// thanks to the '--' separator before the path argument in `git add`.
-//
-// Without the '--', `git add -dash-file.txt` would be interpreted as
-// `git add -d -a -s -h ...` (short options) and fail with an "unknown switch"
-// error, leaving the file unstaged.
-func TestHandleProjectStageFile_PathStartingWithDash(t *testing.T) {
+// TestHandleProjectStagePaths_PathStartingWithDash stages a path that starts with '-'. Without the '--'
+// separator git reads "-dash-file.txt" as short options and the file stays unstaged.
+func TestHandleProjectStagePaths_PathStartingWithDash(t *testing.T) {
 	repoPath := initGitRepoTemp(t)
 	s := gitTestStore(t)
 
@@ -762,9 +771,9 @@ func TestHandleProjectStageFile_PathStartingWithDash(t *testing.T) {
 	createFile(t, repoPath, filename, "content\n")
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/projects/{projectID}/git/stage", h.HandleProjectStageFile)
+	mux.HandleFunc("POST /api/projects/{projectID}/git/stage", h.HandleProjectStagePaths)
 
-	req := newStageRequest(t, "/api/projects/test-proj/git/stage", filename, true)
+	req := newStageRequest(t, "/api/projects/test-proj/git/stage", true, filename)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -782,10 +791,8 @@ func TestHandleProjectStageFile_PathStartingWithDash(t *testing.T) {
 	t.Fatalf("expected %q to be staged, got: %v", filename, files)
 }
 
-// TestHandleStageFile_PathStartingWithDash verifies the same '--' separator
-// protection for the task-level staging handler, which operates against a
-// git worktree rather than the project repo.
-func TestHandleStageFile_PathStartingWithDash(t *testing.T) {
+// The task handler fences its paths the same way, in the task's worktree.
+func TestHandleStagePaths_PathStartingWithDash(t *testing.T) {
 	worktreesDir := t.TempDir()
 
 	repoPath := initGitRepoTemp(t)
@@ -822,9 +829,9 @@ func TestHandleStageFile_PathStartingWithDash(t *testing.T) {
 	createFile(t, worktreePath, filename, "content\n")
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/diff/stage", h.HandleStageFile)
+	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/diff/stage", h.HandleStagePaths)
 
-	req := newStageRequest(t, "/api/projects/test-proj/tasks/test-task/diff/stage", filename, true)
+	req := newStageRequest(t, "/api/projects/test-proj/tasks/test-task/diff/stage", true, filename)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -1187,12 +1194,9 @@ func TestHandleStatus_WithoutUpstreamAnswersZeroCounts(t *testing.T) {
 	}
 }
 
-// --- HandleProjectStageFile_DashFPathNotForceAdd ---
-// TestHandleProjectStageFile_DashFPathNotForceAdd verifies that a path of
-// exactly "-f" is treated as a filename (via '--'), not as the --force flag.
-// Since no file named "-f" exists, git add -- -f fails (500) rather than
-// silently force-adding unrelated tracked files.
-func TestHandleProjectStageFile_DashFPathNotForceAdd(t *testing.T) {
+// A path of exactly "-f" is a filename, not the --force flag, because every path rides behind `--`. The
+// proof is the ignored file: only a force-add would have staged it.
+func TestHandleProjectStagePaths_DashFPathNotForceAdd(t *testing.T) {
 	repoPath := initGitRepoTemp(t)
 	s := gitTestStore(t)
 
@@ -1201,25 +1205,29 @@ func TestHandleProjectStageFile_DashFPathNotForceAdd(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	// Create a tracked file so there is content, but do NOT create a file named "-f".
-	createFile(t, repoPath, "real-file.txt", "tracked\n")
-	if out, err := exec.Command("git", "-C", repoPath, "add", "--", "real-file.txt").CombinedOutput(); err != nil {
-		t.Fatalf("initial git add: %v: %s", err, out)
-	}
-
+	createFile(t, repoPath, ".gitignore", "ignored.txt\n")
+	createFile(t, repoPath, "ignored.txt", "only a force-add would stage this\n")
 	h := &GitHandler{store: s}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/projects/{projectID}/git/stage", h.HandleProjectStageFile)
+	mux.HandleFunc("POST /api/projects/{projectID}/git/stage", h.HandleProjectStagePaths)
 
-	// With "--" before the path, "-f" is treated as a filename, not --force.
-	req := newStageRequest(t, "/api/projects/test-proj/git/stage", "-f", true)
+	// No file named "-f" exists, so the path is refused — as a path, not as a switch.
+	req := newStageRequest(t, "/api/projects/test-proj/git/stage", true, "-f")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
-	// git add -- -f fails because no file named "-f" exists, so we expect 500.
-	// Critically, this is NOT 200 (which would indicate -f was treated as --force).
-	if rec.Code == http.StatusOK {
-		t.Fatalf("path '-f' should be treated as a filename and fail, not as --force (got 200)")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 with the path refused, got %d: %s", rec.Code, rec.Body.String())
+	}
+	answer := decodeBatchAnswer(t, rec)
+	if len(answer.Applied) != 0 {
+		t.Errorf("applied = %v, want none", answer.Applied)
+	}
+	if len(answer.Failed) != 1 || answer.Failed[0].Path != "-f" {
+		t.Errorf("failed = %v, want just -f", answer.Failed)
+	}
+	if staged := stagedFiles(t, repoPath); len(staged) != 0 {
+		t.Errorf("-f reached git as a flag: the index holds %v", staged)
 	}
 }

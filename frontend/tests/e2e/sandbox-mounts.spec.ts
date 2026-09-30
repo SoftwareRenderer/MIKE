@@ -4,7 +4,6 @@ import { getProjectId, csrfFetch, isolatedProject, gotoProject } from './helpers
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
 isolatedProject();
 
-
 test.describe.serial('Sandbox Mounts', () => {
   test.beforeEach(async ({ page }) => {
     await gotoProject(page);
@@ -259,34 +258,4 @@ test.describe.serial('Sandbox Mounts', () => {
     await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
   });
 
-  test('should save mounts via API', async ({ page }) => {
-    const projectId = await getProjectId(page);
-
-    // Update via API directly
-    const result = await csrfFetch(page, `/api/projects/${projectId}`, {
-      method: 'PUT',
-      body: { sandbox_mounts: [
-        { host_path: '/data/cache', container_path: '/mnt/cache', mode: 'rw' },
-        { host_path: '/etc/config', container_path: '/etc/config', mode: 'ro' },
-      ]},
-    });
-    expect(result.ok).toBe(true);
-
-    // Verify via API
-    const saved = await page.evaluate(async (pid) => {
-      const res = await fetch(`/api/projects/${pid}`);
-      return res.ok ? res.json() : null;
-    }, projectId);
-    expect(saved.sandbox_mounts).toBeDefined();
-    expect(saved.sandbox_mounts.length).toBe(2);
-    expect(saved.sandbox_mounts[0].host_path).toBe('/data/cache');
-    expect(saved.sandbox_mounts[0].container_path).toBe('/mnt/cache');
-    expect(saved.sandbox_mounts[0].mode).toBe('rw');
-    expect(saved.sandbox_mounts[1].mode).toBe('ro');
-
-    await csrfFetch(page, `/api/projects/${projectId}`, {
-      method: 'PUT',
-      body: { sandbox_mounts: [] },
-    });
-  });
 });

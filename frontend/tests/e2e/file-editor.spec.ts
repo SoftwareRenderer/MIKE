@@ -2,22 +2,31 @@ import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, writeFileSync, rmSync, readdirSync, statSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'path';
-import { createTaskViaApi, csrfFetch, getProjectId, navigateToTask, projectDirPath, selectProject, waitForChatForm, waitForSendButton, waitForSendButtonGraceful, waitForWorktree, writeFileInWorktree } from './helpers';
+import {
+  createTaskViaApi, csrfFetch, getProjectId, navigateToTask, projectDirPath, selectProject, waitForChatForm, waitForSendButton, waitForSendButtonGraceful, waitForWorktree, writeFileInWorktree, isolatedProject, gotoProject,
+} from './helpers';
+// Each test file gets its own project, because it starts a turn: see isolatedProject() in helpers.ts.
+isolatedProject();
+
 
 
 test.describe.configure({ mode: 'parallel' });
 
 // --- File Browser Actions (serial: share test directories, modify projects) ---
 
-const TEST_NON_GIT = '/tmp/kanban-test-nongit';
-const TEST_NEW_FOLDER_PARENT = '/tmp/kanban-test-mkdir-parent';
+// Per-worker roots: this file runs in parallel mode, and the beforeEach below re-creates both directories
+// from scratch — a fixed name is one worker deleting the directory another worker is browsing.
+const WORKER = process.env.TEST_PARALLEL_INDEX || '0';
+const TEST_NON_GIT = `/tmp/kanban-test-nongit-${WORKER}`;
+const TEST_NEW_FOLDER_PARENT = `/tmp/kanban-test-mkdir-parent-${WORKER}`;
 
 // The project-picker test makes a directory named for the clock, so each run leaves a NEW one behind
 // rather than reusing a fixed name. /tmp is tmpfs on this machine, so a leftover is RAM until reboot.
 const createdDirs: string[] = [];
 
 test.afterAll(() => {
-  for (const dir of createdDirs) {
+  // `createdDirs` are the clock-named ones; the two fixed roots are re-created by the next run's setup.
+  for (const dir of [...createdDirs, TEST_NON_GIT, TEST_NEW_FOLDER_PARENT]) {
     try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
   }
 });
@@ -52,7 +61,7 @@ test.describe('File Browser Actions', () => {
     execSync('git init', { cwd: TEST_NEW_FOLDER_PARENT });
     execSync('git -c user.email="test@kanban.local" -c user.name="Test" commit --allow-empty -m "init"', { cwd: TEST_NEW_FOLDER_PARENT });
 
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.project-item, .empty-state', { timeout: 10000 });
   });
 
@@ -147,7 +156,9 @@ test.describe('File Browser Actions', () => {
     await expect(page.locator('[role="dialog"]:has-text("Add Project")')).toBeVisible({ timeout: 5000 });
 
     // Uncheck "Use Sandbox"
-    const sandboxCheckbox = page.locator('.sandbox-toggle input[type="checkbox"]');
+    // `.sandbox-toggle` is the shared style of BOTH footer toggles (Use Sandbox, Show hidden
+    // files), so the bare class is a strict-mode violation whenever the browse tab is open.
+    const sandboxCheckbox = page.locator('.use-sandbox-toggle input[type="checkbox"]');
     await sandboxCheckbox.click();
     await expect(sandboxCheckbox).not.toBeChecked();
 
@@ -202,7 +213,7 @@ async function typeAtSign(page: test['project']['use'], textarea: any) {
 test.describe('File @ Mention', () => {
   test.beforeEach(async ({ page }) => {
     test.setTimeout(120000);
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.card');
 
     // Mock the fetch to return file results for the @ mention search
@@ -382,7 +393,7 @@ test.describe('File @ Mention', () => {
 
 test.describe('Edit Diff Expand Persistence', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
@@ -442,7 +453,7 @@ test.describe('Edit Diff Expand Persistence', () => {
     // The remount the test is named for: leaving the task and coming back rebuilds the
     // virtualised message list from scratch. Toggling a diff must not be state that only
     // survives as long as the row does, or scrolling a long chat collapses diffs on the user.
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.project-item', { timeout: 10000 });
     await navigateToTask(page, taskId, projectId);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
@@ -461,7 +472,7 @@ test.describe('Explorer', () => {
 
   test.beforeEach(async ({ page }) => {
     test.setTimeout(30000);
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 

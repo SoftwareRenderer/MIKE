@@ -123,13 +123,42 @@ live branches kept), `backend/git/branch_listing_test.go` (both markers, slug pr
   used instead of an index lock because a locked index blocks the forced checkout too, so the loss never
   happens and the test passes vacuously).
 
-## Discard: one file back to HEAD, or off disk
+## A git write names every path it moved
 
-`POST /api/projects/{projectID}/git/discard` (`discardFile`) reverts one path in `project.Path` — the
-checkout every other Review Changes button writes to.
+Staging and discarding take a **list**: `POST …/git/stage` and `POST …/tasks/{taskID}/diff/stage` answer
+`{"paths": […], "stage": bool}`, `POST …/git/discard` `{"paths": […]}`. One click is one request whatever
+the size of the selection, and one acquisition of the project's index lock.
 
-- **HEAD decides revert from delete** (`ls-tree --name-only HEAD -- p`): the index cannot answer it, a
-  staged deletion holds no entry either.
+- **Every path is validated before any is written**, so a refused request leaves the index alone
+  (`HandleProjectDiscardPaths` runs `repoFilePath` over the whole list; `batchPaths` refuses an empty list
+  and an empty entry as a 400 naming `paths`).
+- **The answer names the outcome per path**: `applied` holds the paths the write landed on, `failed` the
+  ones it refused, each with MIKE's own sentence — git's words go to the log (`docs/api-contract.md →
+  error vocabulary`). The batch ran, so partial refusal is a 200, not a 5xx: the caller reports counts and
+  rereads git's own state rather than guessing from a status code.
+- **A grouped git call is refused whole**, and git does not say which path it objected to — `git add` even
+  stages nothing on the way out. So a refused group is retried one path at a time: a file deleted since the
+  panel last read git costs only itself (`stagePaths`, `discardPaths`).
+- **The panel reads the answer, not its own hope.** `DiffCache.stagePaths` marks the paths pending and
+  moves a file between the Staged and Unstaged lists only from `applied` — never before the request is
+  answered. `GitStatusPanel` does the same with its one reload.
+- **The control that was pressed carries a `Spinner` until the answer lands.** The panel's own staging and
+  discard controls are dead meanwhile: `gitWrite` in `GitStatusPanel`, `state.pending` in `DiffCache`. No
+  whole-section action starts while a write is in flight either — a second batch would be judged against an
+  index the first is still moving. The wait is named in words once per panel (`git.stageBusy`,
+  `git.unstageBusy`, `git.discardBusy`, `diff.stagingBusy`), because a disabled control's own name still
+  says only what the click would have done.
+- Tests: `backend/api/git_stage_test.go`, `git_discard_test.go`, `changes-sidebar-write-busy.unit.svelte.ts`,
+  `diff-viewer-stage-busy.unit.svelte.ts`, `diff-cache.unit.ts`.
+
+## Discard: each path back to HEAD, or off disk
+
+`POST /api/projects/{projectID}/git/discard` (`discardPaths`) reverts paths in `project.Path` — the checkout
+every other Review Changes button writes to.
+
+- **HEAD decides revert from delete** (`ls-tree -z --name-only HEAD -- <paths…>`): the index cannot answer
+  it, a staged deletion holds no entry either. `-z` is what makes the names comparable — ls-tree quotes a
+  path outside ASCII, and a quoted name never equals the path that was asked for.
 - **Revert is `checkout HEAD -- p` alone** — it writes the index along with the worktree, so the staged half
   of an edit and a staged deletion both go.
 - **Delete is `reset -q HEAD -- p`, then `clean -f -q -- p`, never `os.Remove`:** the reset unstages a file

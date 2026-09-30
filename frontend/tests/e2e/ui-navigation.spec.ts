@@ -1,6 +1,10 @@
 import { test, expect } from '@playwright/test';
-import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch, ensureTaskStarted, findProviderByRef,
-  apiGetJson } from './helpers';
+import {
+  getProjectId, createTaskViaApi, navigateToTask, csrfFetch, ensureTaskStarted, findProviderByRef, apiGetJson, isolatedProject, gotoProject,
+} from './helpers';
+// Each test file gets its own project, because it starts a turn: see isolatedProject() in helpers.ts.
+isolatedProject();
+
 
 // Helper: create a subtask via API (CSRF-aware)
 async function createSubtaskViaApi(page: test.Page, projectId: string, parentTaskId: string, prompt: string): Promise<string> {
@@ -25,7 +29,7 @@ async function createSubtaskViaApi(page: test.Page, projectId: string, parentTas
 
 test.describe.serial('Browser Navigation (Back/Forward)', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
@@ -34,7 +38,7 @@ test.describe.serial('Browser Navigation (Back/Forward)', () => {
     const taskId = await createTaskViaApi(page, projectId, `nav-direct-${Date.now()}`);
 
     // Navigate to project first, then click the card (creates history entry via pushState)
-    await page.goto(`/?project=${projectId}`);
+    await gotoProject(page, `/?project=${projectId}`);
     await expect(page.locator('.board')).toBeVisible();
 
     // Wait for card and click it
@@ -90,7 +94,7 @@ test.describe.serial('Browser Navigation (Back/Forward)', () => {
     const projectId = await getProjectId(page);
 
     // Navigate to project view
-    await page.goto(`/?project=${projectId}`);
+    await gotoProject(page, `/?project=${projectId}`);
     await expect(page.locator('.board')).toBeVisible({ timeout: 10000 });
 
     // Verify top-bar and Token usage button are visible in project view
@@ -127,7 +131,7 @@ test.describe.serial('Browser Navigation (Back/Forward)', () => {
     const projectId = await getProjectId(page);
 
     // Navigate to project view first
-    await page.goto(`/?project=${projectId}`);
+    await gotoProject(page, `/?project=${projectId}`);
     await expect(page.locator('.board')).toBeVisible({ timeout: 10000 });
 
     const taskTitle = `nav-card-${Date.now()}`;
@@ -173,7 +177,7 @@ test.describe.serial('Browser Navigation (Back/Forward)', () => {
     expect(projectName).toBeTruthy();
 
     // Navigate to project view
-    await page.goto(`/?project=${projectId}`);
+    await gotoProject(page, `/?project=${projectId}`);
     await expect(page.locator('.board')).toBeVisible({ timeout: 10000 });
 
     // Verify sidebar shows this project as active
@@ -210,7 +214,7 @@ test.describe.serial('Browser Navigation (Back/Forward)', () => {
     const subtaskId = await createSubtaskViaApi(page, projectId, parentId, `nav-sub-${Date.now()}`);
 
     // Navigate to project view
-    await page.goto(`/?project=${projectId}`);
+    await gotoProject(page, `/?project=${projectId}`);
     await expect(page.locator('.board')).toBeVisible({ timeout: 10000 });
 
     // Navigate directly to subtask URL (simulates what pushState would set)
@@ -224,7 +228,7 @@ test.describe.serial('Browser Navigation (Back/Forward)', () => {
       await backBtn.click();
     } else {
       // Fallback: navigate to project board directly
-      await page.goto(`/?project=${projectId}`);
+      await gotoProject(page, `/?project=${projectId}`);
     }
 
     // Wait for board to appear and task detail to disappear
@@ -245,7 +249,7 @@ test.describe.serial('Browser Navigation (Back/Forward)', () => {
     const taskId = await createTaskViaApi(page, projectId, taskTitle);
 
     // Navigate to project view
-    await page.goto(`/?project=${projectId}`);
+    await gotoProject(page, `/?project=${projectId}`);
     await expect(page.locator('.board')).toBeVisible({ timeout: 10000 });
 
     // Wait for our specific card and click it
@@ -276,11 +280,16 @@ test.describe.serial('Browser Navigation (Back/Forward)', () => {
   // entry is the one a back press leaves the app on: landing on a project must rewrite that entry,
   // never add one, or the entry underneath is a board-less URL.
   test('launch at the bare root rewrites its own history entry', async ({ page }) => {
-    await expect(page.locator('.board')).toBeVisible({ timeout: 10000 });
-    expect(new URL(page.url()).searchParams.get('project')).toBeTruthy();
+    // A fresh tab: this test measures the app's FIRST navigation, and the file's beforeEach has already put
+    // one on this page's history. A tab that landed on `?project=` is not the launch the PWA performs.
+    const launch = await page.context().newPage();
+    await launch.goto('/');
+    await expect(launch.locator('.board')).toBeVisible({ timeout: 10000 });
+    expect(new URL(launch.url()).searchParams.get('project')).toBeTruthy();
     // A Playwright page starts on about:blank, so one goto is already entry 2; the app must have
     // added nothing on top of it. Landing with a push made this 3.
-    expect(await page.evaluate(() => history.length)).toBe(2);
+    expect(await launch.evaluate(() => history.length)).toBe(2);
+    await launch.close();
   });
 
   test('back twice from a task keeps the project board', async ({ page }) => {
@@ -317,10 +326,10 @@ test.describe.serial('Browser Navigation (Back/Forward)', () => {
 test.describe.serial('Offline Cache', () => {
   test('board renders from cache when the API is unreachable', async ({ page }) => {
     // 1. Load the board normally, which is what populates the client-side cache.
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.project-item', { timeout: 10000 });
     const projectId = await getProjectId(page);
-    await page.goto(`/?project=${projectId}`);
+    await gotoProject(page, `/?project=${projectId}`);
     await page.waitForSelector('.card', { timeout: 10000 });
     expect(await page.locator('.card').count()).toBeGreaterThan(0);
 
@@ -328,7 +337,7 @@ test.describe.serial('Offline Cache', () => {
     // offline screen exists for. context.setOffline(true) would take the document down too, and the
     // service worker does not serve the shell here, leaving only Chrome's error page to assert on.
     await page.route('**/api/**', (route) => route.abort());
-    await page.goto(`/?project=${projectId}`, { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await gotoProject(page, `/?project=${projectId}`, { waitUntil: 'domcontentloaded' }).catch(() => {});
 
     // 3. The offline screen, then the cached board behind it.
     await expect(page.locator('.offline-screen')).toBeVisible({ timeout: 15000 });
@@ -348,7 +357,7 @@ test.describe.serial('Offline Cache', () => {
       await context.setOffline(false);
 
       // 1. Navigate to the board and let it load (populates cache)
-      await page.goto('/');
+      await gotoProject(page);
       await page.waitForSelector('.card', { timeout: 10000 });
 
       const cardsBefore = await page.locator('.card').count();
@@ -397,7 +406,7 @@ test.describe.serial('Offline Cache', () => {
       });
 
       // 5. Reload — queue flushes, task is created on server
-      await page.goto('/');
+      await gotoProject(page);
       await page.waitForSelector('.card', { timeout: 10000 });
 
       // 6. Verify the task now exists on the server
@@ -412,7 +421,7 @@ test.describe.serial('Offline Cache', () => {
       await context.setOffline(false);
 
       // 1. Navigate to the board and let it load
-      await page.goto('/');
+      await gotoProject(page);
       await page.waitForSelector('.card', { timeout: 10000 });
 
       const cardsBefore = await page.locator('.card').count();
@@ -453,7 +462,7 @@ test.describe.serial('Offline Cache', () => {
 
       // 4. Reload WHILE STILL OFFLINE — flushQueueNow() fails, actions must stay in queue
       // Auth fails → offline screen appears → click "Offline Mode" to load from cache
-      await page.goto('/', { waitUntil: 'domcontentloaded' });
+      await gotoProject(page, '/', { waitUntil: 'domcontentloaded' });
       await expect(page.locator('.offline-screen')).toBeVisible({ timeout: 10000 });
       await page.click('.offline-btn');
       await page.waitForSelector('.card', { timeout: 15000 });
@@ -481,7 +490,7 @@ test.describe.serial('Offline Cache', () => {
       });
 
       // 6. Reload — auth succeeds, flushQueueNow() flushes the queue via HTTP
-      await page.goto('/');
+      await gotoProject(page);
       await page.waitForSelector('.card', { timeout: 10000 });
 
       // 7. Verify queue is now empty (actions were flushed)
@@ -514,7 +523,7 @@ test.describe.serial('Offline Cache', () => {
 test.describe.parallel('Terminal', () => {
   test('terminal panel opens when clicking terminal button in task header', async ({ page }) => {
       // 1. Navigate to the board and let it load
-      await page.goto('/');
+      await gotoProject(page);
       await page.waitForSelector('.card', { timeout: 10000 });
 
       // 2. Create a task and start it (needs a branch for terminal button to be enabled)

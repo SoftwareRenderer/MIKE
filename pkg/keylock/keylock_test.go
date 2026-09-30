@@ -128,7 +128,8 @@ func TestTableDoesNotGrowForever(t *testing.T) {
 	for i := 0; i < 5000; i++ {
 		key := fmt.Sprintf("key-%d", i)
 		release := tbl.Lock(key)
-		if _, ok := tbl.TryLock(key, time.Millisecond); ok {
+		// A zero timeout answers this: the key is held, so there is nothing to wait for.
+		if _, ok := tbl.TryLock(key, 0); ok {
 			t.Fatal("reentrant acquisition succeeded; the lock is not exclusive")
 		}
 		release()

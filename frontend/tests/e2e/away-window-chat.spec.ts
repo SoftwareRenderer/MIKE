@@ -1,18 +1,14 @@
 import { test, expect, type Page } from '@playwright/test';
 import {
   isolatedProject, ownProjectId, createTaskViaApi, ensureTaskStarted, navigateToTask,
-  waitForChatForm, waitForTaskState,
+  waitForChatForm, waitForTaskState, notInFlight,
+  TOOL_CALL_CARD as CARD, SLOW_PROBE_OUTPUT as OUTPUT,
 } from './helpers';
 
 isolatedProject();
 
 // Three ways a window comes back having missed a whole turn: two arrive with a browser event, one is a page
 // that was stopped and is thawed in silence. `docs/reconnection.md → The tab that comes back`.
-
-const CARD = '.tool-call-card';
-const OUTPUT = 'SLOW-TOOL-PROBE-DONE';
-/** `taskIsInFlight`, spelled for a raw task row. */
-const notInFlight = (t: any) => t?.execution_state !== 'running' && t?.execution_state !== 'pulling_image';
 
 /** Longer than the probe's turn, and longer than any tick the app could blame on a slow frame. */
 const FREEZE_MS = 25_000;
