@@ -228,6 +228,7 @@ const catalog = {
     'settings.close': 'Close',
     'settings.toggleFullscreen': 'Toggle fullscreen',
     'settings.tab.providers': 'Providers',
+    'settings.tab.task': 'Task',
     'settings.tab.taskDefaults': 'Task Defaults',
     'settings.tab.projectDefaults': 'Project Defaults',
     'settings.tab.preferences': 'Preferences',

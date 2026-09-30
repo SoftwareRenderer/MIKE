@@ -54,9 +54,8 @@ describe('ConfigModal run-siblings-in-parallel save payload', () => {
         });
         await waitFor(() => expect(container.querySelector('button.tab-btn')).toBeTruthy(), { timeout: 1000 });
 
-        // Open the Task Defaults tab.
         const tabs = Array.from(container.querySelectorAll('button.tab-btn'));
-        fireEvent.click(tabs.find((b) => b.textContent?.trim() === 'Task Defaults')!);
+        fireEvent.click(tabs.find((b) => b.textContent?.trim() === TASK_TAB)!);
         await waitFor(() => expect(container.querySelector('button[aria-label="Run subtasks in parallel"]')).toBeTruthy(), { timeout: 1000 });
 
         // Flip the toggle on, and save.
@@ -75,7 +74,7 @@ describe('ConfigModal run-siblings-in-parallel save payload', () => {
         await waitFor(() => expect(container.querySelector('button.tab-btn')).toBeTruthy(), { timeout: 1000 });
 
         const tabs = Array.from(container.querySelectorAll('button.tab-btn'));
-        fireEvent.click(tabs.find((b) => b.textContent?.trim() === 'Task Defaults')!);
+        fireEvent.click(tabs.find((b) => b.textContent?.trim() === TASK_TAB)!);
         await waitFor(() => expect(container.querySelector('button[aria-label="Run subtasks in parallel"]')).toBeTruthy(), { timeout: 1000 });
 
         // Leave the toggle off and save.
@@ -87,14 +86,14 @@ describe('ConfigModal run-siblings-in-parallel save payload', () => {
 });
 
 const RECLAIM = 'button[aria-label="Release a waiting task sandbox container"]';
-const TASK_DEFAULTS_TAB = 'Task Defaults';
+const TASK_TAB = 'Task';
 
 // The payload is what makes the row real: an omitted field keeps whatever was stored.
 describe('ConfigModal release-idle-sandboxes save payload', () => {
     async function openDefaults(container: HTMLElement) {
         await waitFor(() => expect(container.querySelector('button.tab-btn')).toBeTruthy(), { timeout: 1000 });
         const tabs = Array.from(container.querySelectorAll('button.tab-btn'));
-        fireEvent.click(tabs.find((b) => b.textContent?.trim() === TASK_DEFAULTS_TAB)!);
+        fireEvent.click(tabs.find((b) => b.textContent?.trim() === TASK_TAB)!);
         await waitFor(() => expect(container.querySelector(RECLAIM)).toBeTruthy(), { timeout: 1000 });
     }
 

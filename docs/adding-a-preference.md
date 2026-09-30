@@ -69,7 +69,7 @@ its regression is the explicit-false one, not the unset one.
 
 **Tests to add/update:** `backend/config/config_test.go` (round-trip + omitted-when-nil),
 `preferences-tab.unit.svelte.ts`, a component test for the gated widget (e.g.
-`card-model-badge.unit.svelte.ts`), e2e `preferences-hide-model-badge.spec.ts` (isolated). A Task Defaults
+`card-model-badge.unit.svelte.ts`), e2e `preferences-hide-model-badge.spec.ts` (isolated). A Task-tab
 row instead extends `task-defaults.unit.svelte.ts` and the save-payload rows in
 `config-modal-run-parallel-save.unit.svelte.ts`; a preference a browser never acts on needs no spec — the
 Go round trip and the payload assertion are the round trip.

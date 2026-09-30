@@ -20,7 +20,9 @@
     import ApiTokensSection from './ConfigModal/ApiTokensSection.svelte';
     import UpdatesSection from './ConfigModal/UpdatesSection.svelte';
     import EmptyState from './EmptyState.svelte';
+    import Icon from './Icon.svelte';
     import mikeLogo from '$lib/assets/icons/mike.svg?raw';
+    import folderIcon from '$lib/assets/icons/folder.svg?raw';
     import { checkNow, type UpdateOutcome } from '$lib/services/app-update';
     import { updateCheck } from '$lib/services/update-check.svelte';
 
@@ -668,9 +670,9 @@
         <div class="header-tabs">
             <button type="button" class="tab-btn" class:active={activeTab === 'providers'} onclick={() => activeTab = 'providers'}>{t('settings.tab.providers')}</button>
             {#if appStore.selectedProject}
-                <button type="button" class="tab-btn tab-btn-project" class:active={activeTab === 'project-defaults'} onclick={() => activeTab = 'project-defaults'} title={appStore.selectedProject.name}>{appStore.selectedProject.name}</button>
+                <button type="button" class="tab-btn tab-btn-project" class:active={activeTab === 'project-defaults'} onclick={() => activeTab = 'project-defaults'} title={appStore.selectedProject.name}><Icon src={folderIcon} width={12} height={12} class="tab-icon" />{appStore.selectedProject.name}</button>
             {/if}
-            <button type="button" class="tab-btn" class:active={activeTab === 'task-defaults'} onclick={() => activeTab = 'task-defaults'}>{t('settings.tab.taskDefaults')}</button>
+            <button type="button" class="tab-btn" class:active={activeTab === 'task-defaults'} onclick={() => activeTab = 'task-defaults'}>{t('settings.tab.task')}</button>
             <button type="button" class="tab-btn" class:active={activeTab === 'preferences'} onclick={() => activeTab = 'preferences'}>{t('settings.tab.preferences')}</button>
             <button type="button" class="tab-btn" class:active={activeTab === 'extensions'} onclick={() => activeTab = 'extensions'}>{t('settings.tab.extensions')}</button>
             <button type="button" class="tab-btn" class:active={activeTab === 'about'} onclick={() => activeTab = 'about'}>{t('settings.tab.about')}</button>
@@ -1021,10 +1023,14 @@
         color: var(--color-text-primary);
     }
     .tab-btn-project {
-        /* border-box, so the 16ch ceiling holds ~12 characters of name beside the tab's padding. */
-        max-width: 16ch;
+        max-width: 19ch;
         overflow: hidden;
         text-overflow: ellipsis;
+    }
+    .tab-btn-project :global(.tab-icon) {
+        display: inline-flex;
+        vertical-align: middle;
+        margin-right: 5px;
     }
     .tab-btn.active {
         color: var(--color-accent);

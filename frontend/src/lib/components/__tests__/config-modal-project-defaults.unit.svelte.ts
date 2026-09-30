@@ -81,17 +81,19 @@ describe('Settings project tab', () => {
         expect(await renderSettings(container)).not.toContain(PROJECT_TAB);
     });
 
-    it('puts the project tab ahead of Task Defaults and keeps the whole name on the element', async () => {
+    it('puts the project tab ahead of Task and keeps the whole name on the element', async () => {
         vi.mocked(updateConfig).mockResolvedValue(makeConfig());
         openProject({ name: 'atlas-platform-services' });
         const { container } = render(ConfigModal, { props: { config: makeConfig(), onClose: vi.fn(), onSaved: vi.fn() } });
 
         const tabs = await renderSettings(container);
-        expect(tabs.indexOf('atlas-platform-services')).toBeLessThan(tabs.indexOf('Task Defaults'));
-        // The tab truncates in CSS, so the full name has to stay on the element for the hover card.
-        const projectTab = [...container.querySelectorAll<HTMLButtonElement>('button.tab-btn')]
-            .find(b => b.textContent === 'atlas-platform-services')!;
+        expect(tabs.indexOf('atlas-platform-services')).toBeLessThan(tabs.indexOf('Task'));
+        // The tab truncates in CSS, so the full name stays on the element; the icon adds only the
+        // whitespace inside its own `<svg>`.
+        const projectTab = container.querySelector<HTMLButtonElement>('button.tab-btn-project')!;
+        expect(projectTab.textContent?.trim()).toBe('atlas-platform-services');
         expect(projectTab.getAttribute('title')).toBe('atlas-platform-services');
+        expect(projectTab.querySelector('.tab-icon svg')).toBeTruthy();
     });
 
     it('reads a project row that never answered as on', async () => {

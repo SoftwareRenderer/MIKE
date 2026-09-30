@@ -203,7 +203,7 @@ create and `PUT` (400 naming the field).
   container of a task waiting on a person. Their reservations went back when they went idle, no user action
   is coming, and the pause pool (`inFlightStates`) has no victim.
 - **The supervisor can take such a container back, and `reclaim_idle_sandbox` decides whether it may.**
-  The preference lives in Settings → Task Defaults and is off unless stored true.
+  The preference lives in Settings → Task and is off unless stored true.
   `ConfigStore.GetReclaimIdleSandbox` is read on the tick that decides, so the setting needs no restart.
 - **It runs only after the in-flight pause branch declined for want of a victim**, one container per tick,
   the idle-longest first. A candidate comes off the supervisor's clock alone: idle past

@@ -27,7 +27,7 @@ describe('Settings shell renders translated copy', () => {
         const { container } = render(ConfigModal, { props: { config: null, onClose: () => {}, onSaved: () => {} } });
         await waitFor(() => expect(container.querySelector('.tab-btn')).toBeTruthy());
         const tabs = [...container.querySelectorAll('.tab-btn')].map(b => b.textContent?.trim());
-        expect(tabs).toEqual(['Providers', 'Task Defaults', 'Preferences', 'Extensions', 'About']);
+        expect(tabs).toEqual(['Providers', 'Task', 'Preferences', 'Extensions', 'About']);
         expect(container.querySelector('#modal-title')?.textContent).toBe('Settings');
         const titles = [...container.querySelectorAll('.primary-provider-select')].map(s => s.getAttribute('aria-label'));
         expect(titles).toEqual(['Worker provider', 'Worker model', 'Utility provider', 'Utility model']);
