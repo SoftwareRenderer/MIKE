@@ -338,7 +338,7 @@ describe('diff panel load through DiffCache (the caller that owns the cache)', (
             {
                 getTaskDiff,
                 getDiffFile: async () => ({ rows: [] }),
-                stageFile: async () => ({ status: 'ok', action: 'stage' }),
+                stageTaskPaths: async (_p: string, _t: string, paths: string[]) => ({ status: 'ok', action: 'staged', applied: paths, failed: [] }),
                 enrichRows: rows => rows as never,
             },
             () => 'p1',

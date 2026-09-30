@@ -28,14 +28,19 @@ func discardFixture(t *testing.T) (*http.ServeMux, string) {
 		t.Fatalf("create project: %v", err)
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/projects/{projectID}/git/discard", h.HandleProjectDiscardFile)
+	mux.HandleFunc("POST /api/projects/{projectID}/git/discard", h.HandleProjectDiscardPaths)
 	return mux, repoPath
 }
 
-func postDiscard(t *testing.T, mux *http.ServeMux, path string) *httptest.ResponseRecorder {
+// postDiscard names every path in one request, as the panel does.
+func postDiscard(t *testing.T, mux *http.ServeMux, paths ...string) *httptest.ResponseRecorder {
 	t.Helper()
+	quoted := make([]string, 0, len(paths))
+	for _, path := range paths {
+		quoted = append(quoted, `"`+path+`"`)
+	}
 	req := httptest.NewRequest("POST", "/api/projects/discard-proj/git/discard",
-		strings.NewReader(`{"path": "`+path+`"}`))
+		strings.NewReader(`{"paths": [`+strings.Join(quoted, ", ")+`]}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -56,7 +61,7 @@ func fileExists(repoPath, name string) bool {
 	return err == nil
 }
 
-func TestHandleProjectDiscardFile_RevertsModifiedFile(t *testing.T) {
+func TestHandleProjectDiscardPaths_RevertsModifiedFile(t *testing.T) {
 	mux, repoPath := discardFixture(t)
 	testgit.WriteFile(t, repoPath, "tracked.txt", "edited on disk\n")
 
@@ -73,7 +78,7 @@ func TestHandleProjectDiscardFile_RevertsModifiedFile(t *testing.T) {
 }
 
 // Discard is one click, not "unstage, then revert".
-func TestHandleProjectDiscardFile_RevertsStagedAndUnstagedEdit(t *testing.T) {
+func TestHandleProjectDiscardPaths_RevertsStagedAndUnstagedEdit(t *testing.T) {
 	mux, repoPath := discardFixture(t)
 	testgit.WriteFile(t, repoPath, "tracked.txt", "staged half\n")
 	testgit.Git(t, repoPath, "add", "tracked.txt")
@@ -91,7 +96,7 @@ func TestHandleProjectDiscardFile_RevertsStagedAndUnstagedEdit(t *testing.T) {
 	}
 }
 
-func TestHandleProjectDiscardFile_RestoresDeletedFile(t *testing.T) {
+func TestHandleProjectDiscardPaths_RestoresDeletedFile(t *testing.T) {
 	for _, stage := range []bool{false, true} {
 		name := "unstaged delete"
 		if stage {
@@ -120,7 +125,7 @@ func TestHandleProjectDiscardFile_RestoresDeletedFile(t *testing.T) {
 	}
 }
 
-func TestHandleProjectDiscardFile_DeletesUntrackedFile(t *testing.T) {
+func TestHandleProjectDiscardPaths_DeletesUntrackedFile(t *testing.T) {
 	mux, repoPath := discardFixture(t)
 	testgit.WriteFile(t, repoPath, "scratch.txt", "never committed\n")
 
@@ -138,7 +143,7 @@ func TestHandleProjectDiscardFile_DeletesUntrackedFile(t *testing.T) {
 }
 
 // The index entry has to go before the file, or the discard leaves a staged addition behind.
-func TestHandleProjectDiscardFile_DeletesStagedNewFile(t *testing.T) {
+func TestHandleProjectDiscardPaths_DeletesStagedNewFile(t *testing.T) {
 	mux, repoPath := discardFixture(t)
 	testgit.WriteFile(t, repoPath, "brand-new.txt", "staged as new\n")
 	testgit.Git(t, repoPath, "add", "brand-new.txt")
@@ -156,7 +161,7 @@ func TestHandleProjectDiscardFile_DeletesStagedNewFile(t *testing.T) {
 }
 
 // With no commits there is nothing to revert to, so every listed entry is removed.
-func TestHandleProjectDiscardFile_NoCommitsYet(t *testing.T) {
+func TestHandleProjectDiscardPaths_NoCommitsYet(t *testing.T) {
 	h, s, _, _ := newTestGitHandler(t)
 	repoPath := testgit.EmptyRepo(t)
 	testgit.WriteFile(t, repoPath, "untracked.txt", "a\n")
@@ -166,7 +171,7 @@ func TestHandleProjectDiscardFile_NoCommitsYet(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/projects/{projectID}/git/discard", h.HandleProjectDiscardFile)
+	mux.HandleFunc("POST /api/projects/{projectID}/git/discard", h.HandleProjectDiscardPaths)
 
 	for _, name := range []string{"untracked.txt", "staged.txt"} {
 		rec := postDiscard(t, mux, name)
@@ -183,7 +188,7 @@ func TestHandleProjectDiscardFile_NoCommitsYet(t *testing.T) {
 }
 
 // The panel never lists an ignored file; a request naming one must not delete it.
-func TestHandleProjectDiscardFile_LeavesIgnoredFileAlone(t *testing.T) {
+func TestHandleProjectDiscardPaths_LeavesIgnoredFileAlone(t *testing.T) {
 	mux, repoPath := discardFixture(t)
 	testgit.WriteFile(t, repoPath, ".gitignore", "build/\n")
 	testgit.WriteFile(t, repoPath, "build/artifact.txt", "produced by the build\n")
@@ -198,7 +203,7 @@ func TestHandleProjectDiscardFile_LeavesIgnoredFileAlone(t *testing.T) {
 }
 
 // A path starting with '-' is a filename, not an option, because every path goes after `--`.
-func TestHandleProjectDiscardFile_DashPrefixedPathIsAFile(t *testing.T) {
+func TestHandleProjectDiscardPaths_DashPrefixedPathIsAFile(t *testing.T) {
 	mux, repoPath := discardFixture(t)
 	testgit.WriteFile(t, repoPath, "-dash.txt", "never committed\n")
 
@@ -211,7 +216,7 @@ func TestHandleProjectDiscardFile_DashPrefixedPathIsAFile(t *testing.T) {
 	}
 }
 
-func TestHandleProjectDiscardFile_RejectsPathOutsideRepo(t *testing.T) {
+func TestHandleProjectDiscardPaths_RejectsPathOutsideRepo(t *testing.T) {
 	mux, repoPath := discardFixture(t)
 	outside := filepath.Join(filepath.Dir(repoPath), "outside.txt")
 	if err := os.WriteFile(outside, []byte("not yours\n"), 0o644); err != nil {
@@ -227,7 +232,7 @@ func TestHandleProjectDiscardFile_RejectsPathOutsideRepo(t *testing.T) {
 	}
 }
 
-func TestHandleProjectDiscardFile_RejectsMissingPath(t *testing.T) {
+func TestHandleProjectDiscardPaths_RejectsMissingPath(t *testing.T) {
 	mux, _ := discardFixture(t)
 
 	rec := httptest.NewRecorder()
@@ -239,7 +244,7 @@ func TestHandleProjectDiscardFile_RejectsMissingPath(t *testing.T) {
 }
 
 // The panel may act on a status line a concurrent commit already cleared; that is a no-op, not a fault.
-func TestHandleProjectDiscardFile_CleanFileIsANoOp(t *testing.T) {
+func TestHandleProjectDiscardPaths_CleanFileIsANoOp(t *testing.T) {
 	mux, repoPath := discardFixture(t)
 
 	rec := postDiscard(t, mux, "tracked.txt")
@@ -248,5 +253,63 @@ func TestHandleProjectDiscardFile_CleanFileIsANoOp(t *testing.T) {
 	}
 	if got := readFileOrFail(t, repoPath, "tracked.txt"); got != "committed\n" {
 		t.Errorf("an unmodified file changed: %q", got)
+	}
+}
+
+// One request carries the whole selection, and HEAD still decides revert from delete per path.
+func TestHandleProjectDiscardPaths_RevertsAndDeletesTogether(t *testing.T) {
+	mux, repoPath := discardFixture(t)
+	testgit.WriteFile(t, repoPath, "tracked.txt", "edited on disk\n")
+	testgit.WriteFile(t, repoPath, "scratch.txt", "never committed\n")
+
+	rec := postDiscard(t, mux, "tracked.txt", "scratch.txt")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	answer := decodeBatchAnswer(t, rec)
+	if answer.Action != "discarded" {
+		t.Errorf("action = %q, want discarded", answer.Action)
+	}
+	if strings.Join(answer.Applied, " ") != "tracked.txt scratch.txt" {
+		t.Errorf("applied = %v", answer.Applied)
+	}
+	if len(answer.Failed) != 0 {
+		t.Errorf("failed = %v", answer.Failed)
+	}
+	if got := readFileOrFail(t, repoPath, "tracked.txt"); got != "committed\n" {
+		t.Errorf("worktree kept the edit: %q", got)
+	}
+	if fileExists(repoPath, "scratch.txt") {
+		t.Error("the untracked file is still on disk")
+	}
+}
+
+// Every path is validated before any is written, so a selection holding an escape writes nothing at all.
+func TestHandleProjectDiscardPaths_RejectsTheBatchWhenOnePathEscapes(t *testing.T) {
+	mux, repoPath := discardFixture(t)
+	outside := filepath.Join(filepath.Dir(repoPath), "outside.txt")
+	if err := os.WriteFile(outside, []byte("not yours\n"), 0o644); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+	testgit.WriteFile(t, repoPath, "tracked.txt", "edited on disk\n")
+
+	rec := postDiscard(t, mux, "tracked.txt", "../"+filepath.Base(outside))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := readFileOrFail(t, repoPath, "tracked.txt"); got != "edited on disk\n" {
+		t.Errorf("a refused batch still wrote: %q", got)
+	}
+}
+
+// An empty list is a caller error naming its field, not a write of nothing.
+func TestHandleProjectDiscardPaths_RejectsEmptyPathList(t *testing.T) {
+	mux, _ := discardFixture(t)
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest("POST", "/api/projects/discard-proj/git/discard",
+		strings.NewReader(`{"paths": []}`)))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
 	}
 }

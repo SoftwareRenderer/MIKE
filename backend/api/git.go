@@ -1033,33 +1033,98 @@ func (h *GitHandler) getTaskDiffFromProject(projectID string, task *types.Task, 
 	return h.worktreeMgr.TaskDiffFromRepo(project.Path, baseRef, target, fullDiff)
 }
 
-// stageOrUnstage applies one file's staged state in dir, with every path after `--` so a path like "-f"
-// is never an option. On failure the response is written and false is returned, so callers just return.
-func (h *GitHandler) stageOrUnstage(w http.ResponseWriter, dir, path string, stage bool) bool {
-	if stage {
-		// git add records a deletion too, so a staged delete survives the round trip.
-		out, err := git.Command("", "-C", dir, "add", "--", path).CombinedOutput()
-		if err != nil {
-			logging.For(logging.Managers).Errorf("git add failed: %v: %s", err, out)
-			httputil.JSONError(w, http.StatusInternalServerError, "git add failed")
-			return false
-		}
-		return true
-	}
+// gitBatchFailure is one path a batch write did not land on. Error is MIKE's own sentence; git's words go to
+// the log.
+type gitBatchFailure struct {
+	Path  string `json:"path"`
+	Error string `json:"error"`
+}
 
-	// git reset HEAD -- <path> makes the index match HEAD again.
-	out, err := git.Command("", "-C", dir, "reset", "HEAD", "--", path).CombinedOutput()
+// gitBatchAnswer is what a batch write answers. A refusal on some paths is still a 200, because the panel
+// reports the counts and rereads git's own state; Applied and Failed are never null.
+type gitBatchAnswer struct {
+	Status  string            `json:"status"`
+	Action  string            `json:"action"`
+	Applied []string          `json:"applied"`
+	Failed  []gitBatchFailure `json:"failed"`
+}
+
+func answerBatch(w http.ResponseWriter, action string, applied []string, failed []gitBatchFailure) {
+	if applied == nil {
+		applied = []string{}
+	}
+	if failed == nil {
+		failed = []gitBatchFailure{}
+	}
+	httputil.JSONResponse(w, http.StatusOK, gitBatchAnswer{Status: "ok", Action: action, Applied: applied, Failed: failed})
+}
+
+// batchPaths is a request's path list as this package uses it: at least one entry, none empty, duplicates
+// collapsed so a repeated path is one write and one entry in the answer.
+func batchPaths(raw []string) ([]string, error) {
+	seen := make(map[string]struct{}, len(raw))
+	paths := make([]string, 0, len(raw))
+	for _, path := range raw {
+		if path == "" {
+			return nil, fmt.Errorf("paths must not contain an empty path")
+		}
+		if _, dup := seen[path]; dup {
+			continue
+		}
+		seen[path] = struct{}{}
+		paths = append(paths, path)
+	}
+	if len(paths) == 0 {
+		return nil, fmt.Errorf("paths required")
+	}
+	return paths, nil
+}
+
+// stageOnce moves the paths between the index and HEAD in one git call. On failure the string is the sentence
+// for the response and the error carries git's words for the log.
+func stageOnce(dir string, paths []string, stage bool) (string, error) {
+	step, argv := "add", []string{"-C", dir, "add", "--"}
+	if !stage {
+		step, argv = "reset", []string{"-C", dir, "reset", "HEAD", "--"}
+	}
+	out, err := git.Command("", append(argv, paths...)...).CombinedOutput()
 	if err != nil {
-		logging.For(logging.Managers).Errorf("git reset failed: %v: %s", err, out)
-		httputil.JSONError(w, http.StatusInternalServerError, "git reset failed")
-		return false
+		return "git " + step + " failed", gitStepError("git "+step, err, out)
 	}
-	// A tracked file missing from disk comes back from HEAD. One staged as new then deleted is in no
+	return "", nil
+}
+
+// stagePaths applies one stage decision to every path in dir and says which ones landed. git refuses `add`
+// outright when any pathspec matches nothing, so a refused group is retried path by path.
+func stagePaths(dir string, paths []string, stage bool) ([]string, []gitBatchFailure) {
+	log := logging.For(logging.Managers)
+	var applied []string
+	var failed []gitBatchFailure
+	if _, err := stageOnce(dir, paths, stage); err != nil {
+		log.Warnf("git stage refused the group, retrying each path: %v", err)
+		for _, path := range paths {
+			msg, err := stageOnce(dir, []string{path}, stage)
+			if err != nil {
+				log.Errorf("git stage failed: %v", err)
+				failed = append(failed, gitBatchFailure{Path: path, Error: msg})
+				continue
+			}
+			applied = append(applied, path)
+		}
+	} else {
+		applied = append(applied, paths...)
+	}
+	// Unstaging a tracked file that is gone from disk brings it back from HEAD. A path staged as new is in no
 	// commit, so git fails there and that error is ignored.
-	if _, statErr := os.Stat(filepath.Join(dir, path)); os.IsNotExist(statErr) {
-		_, _ = git.Command("", "-C", dir, "checkout", "HEAD", "--", path).CombinedOutput()
+	if !stage {
+		for _, path := range applied {
+			if _, statErr := os.Stat(filepath.Join(dir, path)); !os.IsNotExist(statErr) {
+				continue
+			}
+			_, _ = git.Command("", "-C", dir, "checkout", "HEAD", "--", path).CombinedOutput()
+		}
 	}
-	return true
+	return applied, failed
 }
 
 // stageActionName is the "action" field both stage endpoints report.
@@ -1070,17 +1135,36 @@ func stageActionName(stage bool) string {
 	return "unstaged"
 }
 
-// HandleStageFile stages or unstages a single file in the task's worktree.
-// POST /api/projects/{projectID}/tasks/{taskID}/diff/stage
-// Body: {"path": "file.c", "stage": true}
-func (h *GitHandler) HandleStageFile(w http.ResponseWriter, r *http.Request) {
-	taskID := r.PathValue("taskID")
+// stageBody reads the body both stage endpoints answer. A false ok means the refusal is already written.
+func stageBody(w http.ResponseWriter, r *http.Request) (paths []string, stage bool, ok bool) {
 	var req struct {
-		Path  string `json:"path"`
-		Stage bool   `json:"stage"`
+		Paths []string `json:"paths"`
+		Stage bool     `json:"stage"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Path == "" {
-		httputil.JSONError(w, http.StatusBadRequest, "path required")
+	if !httputil.DecodeJSON(w, r, &req) {
+		return nil, false, false
+	}
+	paths, err := batchPaths(req.Paths)
+	if err != nil {
+		httputil.JSONError(w, http.StatusBadRequest, err.Error())
+		return nil, false, false
+	}
+	return paths, req.Stage, true
+}
+
+// answerStage moves the paths in dir and writes the outcome. The caller holds the lock for that directory.
+func answerStage(w http.ResponseWriter, dir string, paths []string, stage bool) {
+	applied, failed := stagePaths(dir, paths, stage)
+	answerBatch(w, stageActionName(stage), applied, failed)
+}
+
+// HandleStagePaths stages or unstages every named file in the task's worktree.
+// POST /api/projects/{projectID}/tasks/{taskID}/diff/stage
+// Body: {"paths": ["file.c", "other.c"], "stage": true}
+func (h *GitHandler) HandleStagePaths(w http.ResponseWriter, r *http.Request) {
+	taskID := r.PathValue("taskID")
+	paths, stage, ok := stageBody(w, r)
+	if !ok {
 		return
 	}
 	task, ok := resolveTaskWithWorktree(w, r, h.store, h.worktreeMgr)
@@ -1098,79 +1182,126 @@ func (h *GitHandler) HandleStageFile(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !h.stageOrUnstage(w, worktreePath, req.Path, req.Stage) {
-		return
-	}
-	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "ok", "action": stageActionName(req.Stage)})
+	answerStage(w, worktreePath, paths, stage)
 }
 
-// HandleProjectStageFile stages or unstages a single file in the project repo.
+// HandleProjectStagePaths stages or unstages every named file in the project repo.
 // POST /api/projects/{projectID}/git/stage
-// Body: {"path": "file.c", "stage": true}
-func (h *GitHandler) HandleProjectStageFile(w http.ResponseWriter, r *http.Request) {
+// Body: {"paths": ["file.c", "other.c"], "stage": true}
+func (h *GitHandler) HandleProjectStagePaths(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
 		httputil.Fail(w, err, "get project", "project not found")
 		return
 	}
-	var req struct {
-		Path  string `json:"path"`
-		Stage bool   `json:"stage"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Path == "" {
-		httputil.JSONError(w, http.StatusBadRequest, "path required")
+	paths, stage, ok := stageBody(w, r)
+	if !ok {
 		return
 	}
 	if h.getProjectMutex != nil {
 		defer h.getProjectMutex(projectID)()
 	}
-	if !h.stageOrUnstage(w, project.Path, req.Path, req.Stage) {
-		return
-	}
-	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "ok", "action": stageActionName(req.Stage)})
+	answerStage(w, project.Path, paths, stage)
 }
 
-// discardFile reverts one file in dir to HEAD, or removes it when HEAD holds no such path.
-//
-// Removal is `git clean` rather than deleting the path: clean leaves ignored files alone, and a folder
-// another repository owns is not this one's to delete.
-func discardFile(dir, path string) error {
-	inHead, err := headHasPath(dir, path)
+// discardFault is what every refused discard answers with; git's own words stay in the log.
+const discardFault = "git discard failed"
+
+// discardPaths reverts each path to HEAD, or removes the ones HEAD never held (docs/git-operations.md →
+// Discard). A git call fails the whole group without naming the path that caused it, so a refused group is
+// retried path by path.
+func discardPaths(dir string, paths []string) ([]string, []gitBatchFailure) {
+	log := logging.For(logging.Managers)
+	inHead, err := headPaths(dir, paths)
 	if err != nil {
-		return err
+		log.Errorf("git discard could not read HEAD: %v", err)
+		// With HEAD unreadable nothing can be told a revert from a removal, so no path is touched.
+		failed := make([]gitBatchFailure, 0, len(paths))
+		for _, path := range paths {
+			failed = append(failed, gitBatchFailure{Path: path, Error: discardFault})
+		}
+		return nil, failed
 	}
+	var revert, remove []string
+	for _, path := range paths {
+		if inHead[path] {
+			revert = append(revert, path)
+		} else {
+			remove = append(remove, path)
+		}
+	}
+	err = discardGrouped(dir, revert, remove)
+	if err == nil {
+		return paths, nil
+	}
+	log.Warnf("git discard refused the group, retrying each path: %v", err)
+	var applied []string
+	var failed []gitBatchFailure
+	for _, path := range paths {
+		if err := discardOne(dir, path, inHead[path]); err != nil {
+			log.Errorf("git discard failed: %v", err)
+			failed = append(failed, gitBatchFailure{Path: path, Error: discardFault})
+			continue
+		}
+		applied = append(applied, path)
+	}
+	return applied, failed
+}
+
+// discardOne is a group of one: the per-path retry of whatever discardGrouped refused.
+func discardOne(dir, path string, inHead bool) error {
 	if inHead {
-		// checkout writes the index along with the worktree, so it drops the staged half too.
-		if out, err := git.Command("", "-C", dir, "checkout", "HEAD", "--", path).CombinedOutput(); err != nil {
+		return discardGrouped(dir, []string{path}, nil)
+	}
+	return discardGrouped(dir, nil, []string{path})
+}
+
+// discardGrouped reverts the inHead paths with `checkout HEAD`, which writes the index along with the
+// worktree, so the staged half of an edit goes too. The rest are removed by `reset -q HEAD` (a file staged as
+// new leaves the index here) and then `clean -f -q`.
+func discardGrouped(dir string, inHead, notInHead []string) error {
+	if len(inHead) > 0 {
+		if out, err := git.Command("", append([]string{"-C", dir, "checkout", "HEAD", "--"}, inHead...)...).CombinedOutput(); err != nil {
 			return gitStepError("git checkout", err, out)
 		}
+	}
+	if len(notInHead) == 0 {
 		return nil
 	}
-	// A file staged as new leaves the index here; an untracked path is not in the index at all.
-	if out, err := git.Command("", "-C", dir, "reset", "-q", "HEAD", "--", path).CombinedOutput(); err != nil {
-		return gitStepError("git reset", err, out)
-	}
-	if out, err := git.Command("", "-C", dir, "clean", "-f", "-q", "--", path).CombinedOutput(); err != nil {
-		return gitStepError("git clean", err, out)
+	// clean rather than deleting the path: it leaves ignored files alone, and a folder another repository
+	// owns is not this one's to delete.
+	for _, step := range [][]string{{"reset", "-q", "HEAD", "--"}, {"clean", "-f", "-q", "--"}} {
+		argv := append([]string{"-C", dir}, step...)
+		if out, err := git.Command("", append(argv, notInHead...)...).CombinedOutput(); err != nil {
+			return gitStepError("git "+step[0], err, out)
+		}
 	}
 	return nil
 }
 
-// headHasPath reports whether HEAD holds path, which is what decides a revert from a removal.
-func headHasPath(dir, path string) (bool, error) {
+// headPaths reports which of the paths HEAD holds, which is what decides a revert from a removal; the index
+// cannot answer it, because a staged deletion holds no entry there. `-z` keeps the names comparable: ls-tree
+// quotes a path outside ASCII, and a quoted name never equals the path that was asked for.
+func headPaths(dir string, paths []string) (map[string]bool, error) {
 	// An unborn HEAD fails this with exit 1, which is an answer rather than a fault.
 	if _, err := git.Command("", "-C", dir, "rev-parse", "--verify", "--quiet", "HEAD").Output(); err != nil {
 		if code, ok := git.GitExitCode(err); ok && code == 1 {
-			return false, nil
+			return map[string]bool{}, nil
 		}
-		return false, gitStepError("git rev-parse", err, nil)
+		return nil, gitStepError("git rev-parse", err, nil)
 	}
-	out, err := git.Command("", "-C", dir, "ls-tree", "--name-only", "HEAD", "--", path).Output()
+	out, err := git.Command("", append([]string{"-C", dir, "ls-tree", "-z", "--name-only", "HEAD", "--"}, paths...)...).Output()
 	if err != nil {
-		return false, gitStepError("git ls-tree", err, nil)
+		return nil, gitStepError("git ls-tree", err, nil)
 	}
-	return strings.TrimSpace(string(out)) != "", nil
+	inHead := make(map[string]bool, len(paths))
+	for _, name := range strings.Split(string(out), "\x00") {
+		if name != "" {
+			inHead[name] = true
+		}
+	}
+	return inHead, nil
 }
 
 // gitStepError names the failed git step and carries git's own words for the log; the response never
@@ -1182,11 +1313,11 @@ func gitStepError(step string, err error, out []byte) error {
 	return fmt.Errorf("%s: %w: %s", step, err, strings.TrimSpace(string(out)))
 }
 
-// HandleProjectDiscardFile reverts one file in the project repo to HEAD, removing it when HEAD holds no
-// path of that name.
+// HandleProjectDiscardPaths reverts every named file in the project repo to HEAD, removing the ones HEAD
+// does not hold.
 // POST /api/projects/{projectID}/git/discard
-// Body: {"path": "file.c"}
-func (h *GitHandler) HandleProjectDiscardFile(w http.ResponseWriter, r *http.Request) {
+// Body: {"paths": ["file.c", "other.c"]}
+func (h *GitHandler) HandleProjectDiscardPaths(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
@@ -1194,26 +1325,29 @@ func (h *GitHandler) HandleProjectDiscardFile(w http.ResponseWriter, r *http.Req
 		return
 	}
 	var req struct {
-		Path string `json:"path"`
+		Paths []string `json:"paths"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Path == "" {
-		httputil.JSONError(w, http.StatusBadRequest, "path required")
+	if !httputil.DecodeJSON(w, r, &req) {
 		return
 	}
-	// A path outside the repository is refused here, as a 400 naming the field.
-	if _, err := repoFilePath(project.Path, req.Path); err != nil {
+	paths, err := batchPaths(req.Paths)
+	if err != nil {
 		httputil.JSONError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	// A path outside the repository is refused here, as a 400 naming the field, before any path is written.
+	for _, path := range paths {
+		if _, err := repoFilePath(project.Path, path); err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 	// A discard writes the index and worktree that stage and commit use, so it shares their lock.
 	if h.getProjectMutex != nil {
 		defer h.getProjectMutex(projectID)()
 	}
-	if err := discardFile(project.Path, req.Path); err != nil {
-		httputil.Fault(w, "git discard", err)
-		return
-	}
-	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "ok"})
+	applied, failed := discardPaths(project.Path, paths)
+	answerBatch(w, "discarded", applied, failed)
 }
 
 // HandleProjectCommit commits staged changes in the project repo.

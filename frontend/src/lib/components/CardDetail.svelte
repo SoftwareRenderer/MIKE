@@ -5,7 +5,8 @@
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
     import { streamingTaskStore } from '$lib/stores/streaming-tasks.svelte';
     import { diffStatsStore } from '$lib/stores/diff-stats.svelte';
-    import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, clearDoneTasks, stageFile, toDiffFiles, getTask } from '$lib/api';
+    import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, clearDoneTasks, stageTaskPaths, toDiffFiles, getTask } from '$lib/api';
+    import type { GitBatchResult } from '$lib/api';
     import { fetchTaskSync } from '$lib/services/task-sync';
     import { resyncPlan, type HeldRow } from '$lib/utils/task-sync';
     import { diffBaseMoved, diffHeadRef } from '$lib/utils/diff-base';
@@ -122,7 +123,7 @@
     let diffCache = new DiffCache({
         getTaskDiff,
         getDiffFile,
-        stageFile,
+        stageTaskPaths,
         enrichRows: enrichRowsWithInlineSegments,
     }, () => task.project_id, () => task.id);
     // Derived arrays for DiffViewer (sorted, split by staged status)
@@ -135,7 +136,7 @@
         : Object.values(diffCache.state.files).filter(f => f.committedRows && f.committedRows.length > 0));
     // Authoritative staged-changes count from DiffCache (source of truth).
     // Passed to TaskChat so the ReviewBar button stays in sync with the diff panel
-    // when the user stages/unstages files (optimistic update before WS catch-up).
+    // when the user stages/unstages files.
     // Includes both staged index changes and committed-but-unmerged changes.
     // When commits are already merged into the target branch, committed files
     // don't count — only staged (index) changes matter.
@@ -251,26 +252,49 @@
         editingFile = { path: fullPath, lineNumber, displayPath: relativePath };
     }
 
-    /** Stage or unstage a single file. */
-    async function handleStageFile(path: string, stage: boolean) {
-        if (!task) return;
+    /** The section whose whole-section action is running, so only that header spins. */
+    let busySection = $state<'staged' | 'unstaged' | null>(null);
+    let pendingPaths = $derived(new Set(diffCache.state.pending));
+    let stageBusyLabel = $derived(diffCache.state.pending.length > 0 || busySection ? t('diff.stagingBusy') : '');
+
+    /** Reports what git refused. A batch that moved some paths is a result, not an exception. */
+    async function reportStageBatch(run: () => Promise<GitBatchResult | null>, stage: boolean) {
         try {
-            await diffCache.stageFile(path, stage, () => { diffCache.revertStageFile(path, stage); });
+            const answer = await run();
+            if (answer && answer.failed.length > 0) {
+                dialogStore.showToast(t(stage ? 'git.stageFailed' : 'git.unstageFailed', { count: answer.failed.length, error: answer.failed[0].error }), 'error');
+            }
         } catch (e) {
             dialogStore.showToast(String(e), 'error');
         }
     }
 
-    /** Stage all unstaged tracked and untracked files. */
-    async function handleStageAll() {
+    /** Stage or unstage a single file. */
+    async function handleStageFile(path: string, stage: boolean) {
         if (!task) return;
-        await diffCache.stageAll();
+        await reportStageBatch(() => diffCache.stagePaths([path], stage), stage);
     }
 
-    /** Unstage all staged files. */
+    /** Stage every tracked file the index does not hold. */
+    async function handleStageAll() {
+        if (!task || busySection) return;
+        busySection = 'unstaged';
+        try {
+            await reportStageBatch(() => diffCache.stageAll(), true);
+        } finally {
+            busySection = null;
+        }
+    }
+
+    /** Unstage every tracked file the index holds. */
     async function handleUnstageAll() {
-        if (!task) return;
-        await diffCache.unstageAll();
+        if (!task || busySection) return;
+        busySection = 'staged';
+        try {
+            await reportStageBatch(() => diffCache.unstageAll(), false);
+        } finally {
+            busySection = null;
+        }
     }
 
     function closeDiffEditor(_saved: boolean) {
@@ -1086,7 +1110,7 @@
                                 />
                                 {#if diffViewer.component}
                                     {@const DiffViewer = diffViewer.component}
-                                    <DiffViewer committedFiles={committedFiles} stagedFiles={stagedFiles} unstagedFiles={unstagedFiles} stagedUntracked={stagedUntracked} unstagedUntracked={unstagedUntracked} loading={diffLoading} mergedLabel={isDoneTask ? t('task.diff.merged') : hasMergedSubtasks ? t('task.diff.mergedFromSubtasks') : t('task.diff.committedInTask')} onExpandFile={handleExpandDiff} onExpandUntracked={loadUntrackedFile} onLineClick={handleDiffLineClick} onStageFile={handleStageFile} onStageAll={handleStageAll} onUnstageAll={handleUnstageAll} imageSource={diffImageSource} />
+                                    <DiffViewer committedFiles={committedFiles} stagedFiles={stagedFiles} unstagedFiles={unstagedFiles} stagedUntracked={stagedUntracked} unstagedUntracked={unstagedUntracked} loading={diffLoading} pendingPaths={pendingPaths} busySection={busySection} busyLabel={stageBusyLabel} mergedLabel={isDoneTask ? t('task.diff.merged') : hasMergedSubtasks ? t('task.diff.mergedFromSubtasks') : t('task.diff.committedInTask')} onExpandFile={handleExpandDiff} onExpandUntracked={loadUntrackedFile} onLineClick={handleDiffLineClick} onStageFile={handleStageFile} onStageAll={handleStageAll} onUnstageAll={handleUnstageAll} imageSource={diffImageSource} />
                                 {:else}
                                     <div class="diff-viewer-loading">{t('task.loadingDiffViewer')}</div>
                                 {/if}

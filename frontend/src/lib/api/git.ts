@@ -143,23 +143,35 @@ export async function getProjectDiffFile(projectId: string, path: string, option
     return res.json();
 }
 
-/** Stage or unstage a single file in the project repo. */
-export async function stageProjectFile(projectId: string, path: string, stage: boolean): Promise<{ status: string; action: string }> {
+/**
+ * What a batch git write answers: the paths that landed, and the ones it refused, each with MIKE's own
+ * sentence. A batch that refused some paths is still an HTTP success — docs/git-operations.md → A git write
+ * names every path it moved.
+ */
+export interface GitBatchResult {
+    status: string;
+    action: string;
+    applied: string[];
+    failed: { path: string; error: string }[];
+}
+
+/** Stage or unstage every named file in the project repo. */
+export async function stageProjectPaths(projectId: string, paths: string[], stage: boolean): Promise<GitBatchResult> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/stage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path, stage }),
+        body: JSON.stringify({ paths, stage }),
     });
     if (!res.ok) throw await apiError(res, stage ? t('api.stageFile') : t('api.unstageFile'));
     return res.json();
 }
 
-/** Discard one file's changes in the project repo: back to HEAD, or removed when HEAD never held it. */
-export async function discardProjectFile(projectId: string, path: string): Promise<{ status: string }> {
+/** Discard every named file's changes in the project repo: back to HEAD, or removed when HEAD never held it. */
+export async function discardProjectPaths(projectId: string, paths: string[]): Promise<GitBatchResult> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/discard`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path }),
+        body: JSON.stringify({ paths }),
     });
     if (!res.ok) throw await apiError(res, t('api.discardFile'));
     return res.json();
@@ -287,12 +299,12 @@ export async function getDiffFile(projectId: string, taskId: string, path: strin
     return res.json();
 }
 
-/** Stage or unstage a single file in the task's worktree. */
-export async function stageFile(projectId: string, taskId: string, path: string, stage: boolean): Promise<{ status: string; action: string }> {
+/** Stage or unstage every named file in the task's worktree. */
+export async function stageTaskPaths(projectId: string, taskId: string, paths: string[], stage: boolean): Promise<GitBatchResult> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/diff/stage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path, stage }),
+        body: JSON.stringify({ paths, stage }),
     });
     if (!res.ok) throw await apiError(res, stage ? t('api.stageFile') : t('api.unstageFile'));
     return res.json();

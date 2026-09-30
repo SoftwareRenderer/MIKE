@@ -16,8 +16,8 @@ vi.mock('$lib/api/git', () => ({
     getGitStatus: vi.fn(),
     getProjectDiffFiles: vi.fn(),
     getProjectDiffFile: vi.fn(),
-    stageProjectFile: vi.fn(),
-    discardProjectFile: vi.fn(),
+    stageProjectPaths: vi.fn(),
+    discardProjectPaths: vi.fn(),
     commitProject: vi.fn(),
     pullProject: vi.fn(),
     pushProject: vi.fn(),
@@ -114,13 +114,12 @@ describe('the changes list context menu', () => {
         expect(menuLabels(container)).toEqual(['Unstage all', 'Stage all']);
 
         fireEvent.click(menuItem(container, 'Stage all'));
-        await waitFor(() => expect(api.stageProjectFile).toHaveBeenCalledWith('p1', 'modified.ts', true));
-        expect(api.stageProjectFile).toHaveBeenCalledWith('p1', 'scratch.ts', true);
+        await waitFor(() => expect(api.stageProjectPaths).toHaveBeenCalledWith('p1', ['modified.ts', 'scratch.ts'], true));
     });
 });
 
 describe('the changes list batch actions', () => {
-    it('sends one request per held file and reloads once', async () => {
+    it('sends the held files in one request and reloads once', async () => {
         const { container } = await openPanel();
         await holdUnstaged(container);
         await openMenuOn(container, 'modified.ts');
@@ -128,9 +127,8 @@ describe('the changes list batch actions', () => {
 
         fireEvent.click(menuItem(container, 'Stage'));
 
-        await waitFor(() => expect(api.stageProjectFile).toHaveBeenCalledWith('p1', 'modified.ts', true));
-        expect(api.stageProjectFile).toHaveBeenCalledWith('p1', 'scratch.ts', true);
-        expect(api.stageProjectFile).toHaveBeenCalledTimes(2);
+        await waitFor(() => expect(api.stageProjectPaths).toHaveBeenCalledWith('p1', ['modified.ts', 'scratch.ts'], true));
+        expect(api.stageProjectPaths).toHaveBeenCalledTimes(1);
         await waitFor(() => expect(api.getGitStatus.mock.calls.length).toBe(loadsBefore + 1));
     });
 
@@ -143,16 +141,19 @@ describe('the changes list batch actions', () => {
         fireEvent.click(menuItem(container, 'Stage'));
 
         // staged-a.ts is held too, but its change is already in the index.
-        await waitFor(() => expect(api.stageProjectFile).toHaveBeenCalledTimes(2));
-        expect(api.stageProjectFile.mock.calls.map(c => c[1]).sort())
+        await waitFor(() => expect(api.stageProjectPaths).toHaveBeenCalledTimes(1));
+        expect(api.stageProjectPaths.mock.calls[0][1].slice().sort())
             .toEqual(['modified.ts', 'scratch.ts']);
-        expect(api.stageProjectFile.mock.calls.every(c => c[2] === true)).toBe(true);
+        expect(api.stageProjectPaths.mock.calls[0][2]).toBe(true);
     });
 
     it('reports what git refused beside what it took', async () => {
         const { container } = await openPanel();
         await holdUnstaged(container);
-        api.stageProjectFile.mockRejectedValueOnce(new Error('git stage failed: index.lock exists'));
+        api.stageProjectPaths.mockImplementationOnce(async () => ({
+            status: 'ok', action: 'staged', applied: ['modified.ts'],
+            failed: [{ path: 'scratch.ts', error: 'git stage failed: index.lock exists' }],
+        }));
         await openMenuOn(container, 'modified.ts');
 
         fireEvent.click(menuItem(container, 'Stage'));
@@ -176,8 +177,7 @@ describe('the changes list batch actions', () => {
             items: ['modified.ts', 'scratch.ts'],
             variant: 'destructive',
         });
-        await waitFor(() => expect(api.discardProjectFile).toHaveBeenCalledWith('p1', 'modified.ts'));
-        expect(api.discardProjectFile).toHaveBeenCalledWith('p1', 'scratch.ts');
+        await waitFor(() => expect(api.discardProjectPaths).toHaveBeenCalledWith('p1', ['modified.ts', 'scratch.ts']));
         await waitFor(() => expect(api.showToast).toHaveBeenCalledWith('2 files discarded', 'success'));
     });
 
@@ -193,7 +193,7 @@ describe('the changes list batch actions', () => {
         // A macrotask: the requests are queued behind the dialog's promise.
         await new Promise((resolve) => setTimeout(resolve, 0));
 
-        expect(api.discardProjectFile).not.toHaveBeenCalled();
+        expect(api.discardProjectPaths).not.toHaveBeenCalled();
         expect(api.showToast).not.toHaveBeenCalled();
     });
 
@@ -202,7 +202,9 @@ describe('the changes list batch actions', () => {
         await holdUnstaged(container);
         // What the reload will find: scratch.ts is gone, modified.ts refused.
         seedPanel('M  staged-a.ts\nA  staged-b.ts\n M modified.ts');
-        api.discardProjectFile.mockRejectedValueOnce(new Error('git discard failed: index.lock exists'));
+        api.discardProjectPaths.mockImplementationOnce(async () => ({
+            status: 'ok', action: 'discarded', applied: ['scratch.ts'], failed: [{ path: 'modified.ts', error: 'git discard failed: index.lock exists' }],
+        }));
         await openMenuOn(container, 'modified.ts');
 
         fireEvent.click(menuItem(container, 'Discard'));

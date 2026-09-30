@@ -5,7 +5,8 @@
     import { confirmList } from '$lib/utils/file-selection';
     import { sortPathsRootLast } from '$lib/utils/sort-paths';
     import { t } from '$lib/i18n';
-    import { getGitStatus, getProjectDiffFiles, getCommitDiffFiles, getProjectDiffFile, stageProjectFile, commitProject, discardProjectFile, pullProject, pushProject, getGitLogFull } from '$lib/api';
+    import { getGitStatus, getProjectDiffFiles, getCommitDiffFiles, getProjectDiffFile, stageProjectPaths, commitProject, discardProjectPaths, pullProject, pushProject, getGitLogFull } from '$lib/api';
+    import type { GitBatchResult } from '$lib/api';
     import type { GitCommit } from '$lib/types';
     import { dialogStore } from '$lib/stores';
     import { loadAppSetting, saveAppSetting } from '$lib/storage';
@@ -469,7 +470,7 @@
                 id,
                 label: t(id === 'staged' ? 'diff.staged' : 'diff.unstaged'),
                 allLabel: t(id === 'staged' ? 'git.unstageAll' : 'git.stageAll'),
-                run: () => handleStagePaths(list.map(row => row.path), id !== 'staged'),
+                run: () => handleStagePaths(list.map(row => row.path), id !== 'staged', 'section', id),
                 rows: list,
             };
         });
@@ -707,36 +708,71 @@
         await updateCompareMode(hasChanges);
     }
 
-    /** One request per path; the git endpoints take a single file. A refusal stops nothing, since the
-     *  paths are independent and the reload reads git's own state. */
-    async function writeEach(
-        paths: string[],
-        write: (path: string) => Promise<unknown>,
-    ): Promise<{ landed: number; failed: number; reason: string }> {
-        let landed = 0;
-        let failed = 0;
-        let reason = '';
-        for (const path of paths) {
-            try {
-                await write(path);
-                landed++;
-            } catch (e) {
-                failed++;
-                if (e instanceof Error) reason = e.message;
-            }
-        }
-        return { landed, failed, reason };
+    /** Where a batch git write was pressed from, and what kind of write it was. */
+    type WriteOrigin = 'row' | 'section' | 'bar';
+    type WriteKind = 'stage' | 'unstage' | 'discard';
+
+    /**
+     * The write currently running: the control that was pressed and carries the spinner, the paths it named,
+     * and the group header it was pressed in. Every staging and discard control is dead while this is set — a
+     * later click would be judged against an index the first write is still moving.
+     */
+    let gitWrite = $state<{ origin: WriteOrigin; kind: WriteKind; paths: string[]; section: ChangesSection | null } | null>(null);
+    let writeBusy = $derived(!!gitWrite);
+    /** Words that say what the spinner is waiting for. */
+    let writeBusyLabel = $derived.by(() => {
+        if (!gitWrite) return '';
+        return t(gitWrite.kind === 'stage' ? 'git.stageBusy' : gitWrite.kind === 'unstage' ? 'git.unstageBusy' : 'git.discardBusy');
+    });
+    const writeBusyId = 'git-write-busy';
+
+    /** What the embedded diff viewer spins for: its rows are the same paths and sections. */
+    let writePaths = $derived(new Set<string>(gitWrite?.paths ?? []));
+    let writeSection = $derived(gitWrite?.origin === 'section' ? gitWrite.section : null);
+
+    // Whether the running write is the one this row button, group-header action, or selection-bar button
+    // started, so only that control shows a spinner.
+    function rowRings(path: string, kind: 'stage' | 'discard'): boolean {
+        if (!gitWrite || gitWrite.origin !== 'row' || !gitWrite.paths.includes(path)) return false;
+        return (gitWrite.kind === 'discard') === (kind === 'discard');
     }
 
-    /** Stage or unstage every path given, then reload once. Refusals are reported by count and git's
-     *  first reason. */
-    function handleStagePaths(paths: string[], stage: boolean): void {
+    function sectionRings(section: ChangesSection): boolean {
+        return gitWrite?.origin === 'section' && gitWrite.section === section;
+    }
+
+    function barRings(kind: WriteKind): boolean {
+        return gitWrite?.origin === 'bar' && gitWrite.kind === kind;
+    }
+
+    /** Runs one batch git write with its spinner in place. A request that got no answer is reported as a
+     *  refusal on every path it named, so the caller always has counts to work from. */
+    async function withWriteRing(
+        origin: WriteOrigin,
+        kind: WriteKind,
+        paths: string[],
+        section: ChangesSection | null,
+        write: () => Promise<GitBatchResult>,
+    ): Promise<GitBatchResult> {
+        gitWrite = { origin, kind, paths, section };
+        try {
+            return await write();
+        } catch (e) {
+            return { status: 'error', action: kind, applied: [], failed: paths.map(path => ({ path, error: e instanceof Error ? e.message : '' })) };
+        } finally {
+            gitWrite = null;
+        }
+    }
+
+    /** Stage or unstage every path given in one request, then reload once. Refusals are reported by count
+     *  and git's first reason. */
+    function handleStagePaths(paths: string[], stage: boolean, origin: WriteOrigin = 'row', section: ChangesSection | null = null): void {
         if (paths.length === 0) return;
         enqueueGitWrite(async () => {
-            const { landed, failed, reason } = await writeEach(paths, path => stageProjectFile(projectId, path, stage));
-            if (landed > 0) await refreshAfterWrite();
-            if (failed > 0) {
-                dialogStore.showToast(t(stage ? 'git.stageFailed' : 'git.unstageFailed', { count: failed, error: reason }), 'error');
+            const answer = await withWriteRing(origin, stage ? 'stage' : 'unstage', paths, section, () => stageProjectPaths(projectId, paths, stage));
+            if (answer.applied.length > 0) await refreshAfterWrite();
+            if (answer.failed.length > 0) {
+                dialogStore.showToast(t(stage ? 'git.stageFailed' : 'git.unstageFailed', { count: answer.failed.length, error: answer.failed[0].error }), 'error');
             }
         });
     }
@@ -747,7 +783,7 @@
 
     /** Revert every row to HEAD, or delete the ones HEAD never held. A discard cannot be undone, so the
      * confirm dialog is the only guard. */
-    async function handleDiscardRows(targets: ChangesRow[]): Promise<void> {
+    async function handleDiscardRows(targets: ChangesRow[], origin: WriteOrigin = 'row'): Promise<void> {
         if (targets.length === 0) return;
         const paths = targets.map(row => row.path);
         const message = targets.length > 1
@@ -765,23 +801,24 @@
         });
         if (!proceed) return;
         enqueueGitWrite(async () => {
-            const { landed, failed, reason } = await writeEach(paths, path => discardProjectFile(projectId, path));
-            if (landed === 0) {
+            const answer = await withWriteRing(origin, 'discard', paths, null, () => discardProjectPaths(projectId, paths));
+            const reason = answer.failed[0]?.error ?? '';
+            if (answer.applied.length === 0) {
                 // Nothing moved, so there is nothing to reread.
                 dialogStore.showToast(paths.length === 1
                     // One refusal: git's own words are the whole report.
                     ? reason || t('git.discardFailed')
-                    : t('git.discardFailedCount', { count: failed, error: reason }), 'error');
+                    : t('git.discardFailedCount', { count: answer.failed.length, error: reason }), 'error');
                 return;
             }
             // The diff being shown may be one of these.
             if (paths.includes(selectedPath)) selectedPath = '';
             await refreshAfterWrite();
             dialogStore.showToast(
-                failed === 0
-                    ? t(paths.length === 1 ? 'git.discarded' : 'git.discardedCount', { count: paths.length })
-                    : t('git.discardFailedCount', { count: failed, error: reason }),
-                failed === 0 ? 'success' : 'error',
+                answer.failed.length === 0
+                    ? t(paths.length === 1 ? 'git.discarded' : 'git.discardedCount', { count: answer.applied.length })
+                    : t('git.discardFailedCount', { count: answer.failed.length, error: reason }),
+                answer.failed.length === 0 ? 'success' : 'error',
             );
         });
     }
@@ -1108,6 +1145,10 @@
         <div class="panel-body">
             <!-- Left: Changes file list sidebar -->
             <div class="changes-sidebar" class:hidden={isMobile} style="width: {sidebarWidth}px">
+                <!-- Names the wait; each disabled control points here. -->
+                {#if writeBusy}
+                    <span id={writeBusyId} class="sr-only">{writeBusyLabel}</span>
+                {/if}
                 <!-- svelte-ignore a11y_interactive_supports_focus — its rows are what a keyboard reaches. -->
                 <div
                     class="changes-scroll"
@@ -1125,8 +1166,10 @@
                                 </svg>
                                 <span>{group.label}</span>
                                 <span class="changes-section-count">{group.rows.length}</span>
-                                <span class="changes-section-action" onclick={(e) => { e.stopPropagation(); group.run(); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); group.run(); } }} title={group.allLabel} role="button" tabindex="0" aria-label={group.allLabel}>
-                                    {#if group.id === 'staged'}
+                                <span class="changes-section-action" role="button" tabindex="0" aria-busy={sectionRings(group.id) || undefined} aria-describedby={writeBusy ? writeBusyId : undefined} onclick={(e) => { e.stopPropagation(); if (!writeBusy) group.run(); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); if (!writeBusy) group.run(); } }} title={group.allLabel} aria-label={group.allLabel}>
+                                    {#if sectionRings(group.id)}
+                                        <Spinner size={12} decorative />
+                                    {:else if group.id === 'staged'}
                                         <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                                     {:else}
                                         <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
@@ -1162,26 +1205,40 @@
                                         <button
                                             class="changes-stage-btn"
                                             type="button"
+                                            disabled={writeBusy}
+                                            aria-busy={rowRings(row.path, 'stage') || undefined}
+                                            aria-describedby={writeBusy ? writeBusyId : undefined}
                                             onclick={() => handleStagePaths([row.path], !indexed)}
                                             title={t(indexed ? 'git.unstageFile' : 'git.stageFile', { path: row.path })}
                                             aria-label={t(indexed ? 'git.unstageFile' : 'git.stageFile', { path: row.path })}
                                         >
-                                            <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
-                                                {#if indexed}
-                                                    <path d="M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                                                {:else}
-                                                    <path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                                                {/if}
-                                            </svg>
+                                            {#if rowRings(row.path, 'stage')}
+                                                <Spinner size={12} decorative />
+                                            {:else}
+                                                <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+                                                    {#if indexed}
+                                                        <path d="M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                                                    {:else}
+                                                        <path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                                                    {/if}
+                                                </svg>
+                                            {/if}
                                         </button>
                                         <button
                                             class="changes-discard-btn"
                                             type="button"
+                                            disabled={writeBusy}
+                                            aria-busy={rowRings(row.path, 'discard') || undefined}
+                                            aria-describedby={writeBusy ? writeBusyId : undefined}
                                             onclick={() => handleDiscardRows([row])}
                                             title={t('git.discardFile', { path: row.path })}
                                             aria-label={t('git.discardFile', { path: row.path })}
                                         >
-                                            <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                            {#if rowRings(row.path, 'discard')}
+                                                <Spinner size={12} decorative />
+                                            {:else}
+                                                <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                            {/if}
                                         </button>
                                     </div>
                                 {/each}
@@ -1198,31 +1255,50 @@
                             <button
                                 type="button"
                                 class="selection-btn btn-ghost"
-                                disabled={selectedBySection.unstaged.length === 0}
+                                disabled={writeBusy || selectedBySection.unstaged.length === 0}
+                                aria-busy={barRings('stage') || undefined}
+                                aria-describedby={writeBusy ? writeBusyId : undefined}
                                 title={t('git.stage')}
                                 aria-label={t('git.stage')}
-                                onclick={() => handleStagePaths(selectedBySection.unstaged, true)}
+                                onclick={() => handleStagePaths(selectedBySection.unstaged, true, 'bar')}
                             >
-                                <Icon src={stageIcon} width={14} height={14} />
+                                {#if barRings('stage')}
+                                    <Spinner size={14} decorative />
+                                {:else}
+                                    <Icon src={stageIcon} width={14} height={14} />
+                                {/if}
                             </button>
                             <button
                                 type="button"
                                 class="selection-btn btn-ghost"
-                                disabled={selectedBySection.staged.length === 0}
+                                disabled={writeBusy || selectedBySection.staged.length === 0}
+                                aria-busy={barRings('unstage') || undefined}
+                                aria-describedby={writeBusy ? writeBusyId : undefined}
                                 title={t('git.unstage')}
                                 aria-label={t('git.unstage')}
-                                onclick={() => handleStagePaths(selectedBySection.staged, false)}
+                                onclick={() => handleStagePaths(selectedBySection.staged, false, 'bar')}
                             >
-                                <Icon src={unstageIcon} width={14} height={14} />
+                                {#if barRings('unstage')}
+                                    <Spinner size={14} decorative />
+                                {:else}
+                                    <Icon src={unstageIcon} width={14} height={14} />
+                                {/if}
                             </button>
                             <button
                                 type="button"
                                 class="selection-btn btn-ghost destructive"
+                                disabled={writeBusy}
+                                aria-busy={barRings('discard') || undefined}
+                                aria-describedby={writeBusy ? writeBusyId : undefined}
                                 title={t('explorer.shared.discard')}
                                 aria-label={t('explorer.shared.discard')}
-                                onclick={() => handleDiscardRows(selectedRows)}
+                                onclick={() => handleDiscardRows(selectedRows, 'bar')}
                             >
-                                <Icon src={discardIcon} width={14} height={14} />
+                                {#if barRings('discard')}
+                                    <Spinner size={14} decorative />
+                                {:else}
+                                    <Icon src={discardIcon} width={14} height={14} />
+                                {/if}
                             </button>
                         {/snippet}
                     </SelectionActionBar>
@@ -1276,8 +1352,11 @@
                             unstagedUntracked={unstagedUntracked}
                             selectedPath={selectedPath}
                             onStageFile={(path, stage) => handleStagePaths([path], stage)}
-                            onStageAll={() => handleStagePaths(pathsOf('unstaged'), true)}
-                            onUnstageAll={() => handleStagePaths(pathsOf('staged'), false)}
+                            onStageAll={() => handleStagePaths(pathsOf('unstaged'), true, 'section', 'unstaged')}
+                            onUnstageAll={() => handleStagePaths(pathsOf('staged'), false, 'section', 'staged')}
+                            pendingPaths={writePaths}
+                            busySection={writeSection}
+                            busyLabel={writeBusyLabel}
                             onExpandUntracked={loadUntrackedFile}
                             onLineClick={handleLineClick}
                         />
