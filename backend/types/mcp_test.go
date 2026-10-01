@@ -7,8 +7,8 @@ import (
 )
 
 // A timeout of 0 is the value that means "no deadline", not an unset one: a long-running remote tool is
-// the reason it exists. The ceiling still holds whatever else is set, because the save refused a row past
-// it and a hand-written one must not buy an unbounded clock by overrunning the scale.
+// the reason it exists. There is no ceiling above it — a long-but-finite deadline is a choice, not a
+// mistake to correct.
 func TestMCPTimeoutZeroIsNoDeadline(t *testing.T) {
 	for _, tc := range []struct {
 		seconds int
@@ -17,8 +17,7 @@ func TestMCPTimeoutZeroIsNoDeadline(t *testing.T) {
 		{seconds: 0, want: 0},
 		{seconds: -1, want: 0},
 		{seconds: 5, want: 5 * time.Second},
-		{seconds: MaxMCPTimeoutSeconds, want: MaxMCPTimeoutSeconds * time.Second},
-		{seconds: MaxMCPTimeoutSeconds + 1, want: MaxMCPTimeoutSeconds * time.Second},
+		{seconds: 30 * 60, want: 30 * 60 * time.Second},
 	} {
 		s := MCPServer{TimeoutSeconds: tc.seconds}
 		if got := s.Timeout(); got != tc.want {
@@ -27,20 +26,19 @@ func TestMCPTimeoutZeroIsNoDeadline(t *testing.T) {
 	}
 }
 
-// The refusal is read by the person who has to fix the field, so it names the value that means no
-// deadline rather than pointing at a default that no longer exists.
+// The refusal is read by the person who has to fix the field: a negative is all it refuses, and it says
+// what 0 means rather than pointing at a default or a ceiling.
 func TestMCPTimeoutRefusalNamesTheNoDeadlineValue(t *testing.T) {
-	err := ValidateMCPServer("slow", "https://a.example.com", MaxMCPTimeoutSeconds+1, nil)
+	err := ValidateMCPServer("negative", "https://a.example.com", -1, nil)
 	if err == nil {
-		t.Fatal("a timeout past the ceiling was accepted")
+		t.Fatal("a negative timeout was accepted")
 	}
-	if !strings.Contains(err.Error(), "no deadline") {
+	if !strings.Contains(err.Error(), "0") {
 		t.Errorf("refusal %q does not say what 0 means", err)
 	}
-	if err := ValidateMCPServer("forever", "https://a.example.com", 0, nil); err != nil {
-		t.Errorf("0 is a valid timeout (no deadline), refused with: %v", err)
-	}
-	if err := ValidateMCPServer("negative", "https://a.example.com", -1, nil); err == nil {
-		t.Error("a negative timeout was accepted")
+	for _, seconds := range []int{0, 1, 30 * 60} {
+		if err := ValidateMCPServer("row", "https://a.example.com", seconds, nil); err != nil {
+			t.Errorf("%d seconds was refused: %v", seconds, err)
+		}
 	}
 }

@@ -8,10 +8,9 @@ import type { MessageKey } from '$lib/i18n';
  */
 
 /** The bounds the server refuses past (`backend/types/mcp.go`), mirrored so the form refuses what the
- *  save refuses. */
+ *  save refuses. A timeout is not bounded: 0 is unlimited and any larger number is the wait asked for. */
 export const MAX_MCP_SERVERS = 16;
 export const MAX_MCP_HEADERS = 8;
-export const MAX_MCP_TIMEOUT_SECONDS = 300;
 
 /**
  * A new row's deadline, and what a cleared field reads as. Zero is a timeout a person types on purpose —
@@ -134,10 +133,10 @@ export function validateMCPServers(drafts: MCPServerDraft[]): MCPValidationProbl
         if (!/^[Hh][Tt][Tt][Pp][Ss]?:\/\//.test(url)) {
             return { key: 'settings.mcp.validate.transport', params: { name } };
         }
-        if (draft.timeoutSeconds < 0 || draft.timeoutSeconds > MAX_MCP_TIMEOUT_SECONDS) {
+        if (draft.timeoutSeconds < 0) {
             return {
                 key: 'settings.mcp.validate.timeout',
-                params: { name, seconds: draft.timeoutSeconds, max: MAX_MCP_TIMEOUT_SECONDS },
+                params: { name, seconds: draft.timeoutSeconds },
             };
         }
         const headers = usableHeaders(draft);

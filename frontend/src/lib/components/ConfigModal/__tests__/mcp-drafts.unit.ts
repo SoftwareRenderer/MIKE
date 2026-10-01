@@ -119,11 +119,16 @@ describe('validateMCPServers', () => {
         expect(validateMCPServers(buildMCPServers({ mcp_servers: [stored] }))).toBeNull();
     });
 
+    it('accepts any timeout a person asked for, including no deadline', () => {
+        expect(validateMCPServers([named({ timeoutSeconds: 0 })])).toBeNull();
+        expect(validateMCPServers([named({ timeoutSeconds: 24 * 60 * 60 })])).toBeNull();
+    });
+
     it('refuses the shapes the save refuses, naming each field', () => {
         expect(key([{ ...named(), name: '  ' }])).toBe('settings.mcp.validate.noName');
         expect(key([{ ...named(), url: '' }])).toBe('settings.mcp.validate.noUrl');
         expect(key([{ ...named(), url: 'stdio://nothing' }])).toBe('settings.mcp.validate.transport');
-        expect(key([{ ...named(), timeoutSeconds: 9999 }])).toBe('settings.mcp.validate.timeout');
+        expect(key([{ ...named(), timeoutSeconds: -1 }])).toBe('settings.mcp.validate.timeout');
         expect(key([{ ...named(), headers: [{ name: 'X Bad', value: 'v', stored: false }] }])).toBe(
             'settings.mcp.validate.headerName'
         );

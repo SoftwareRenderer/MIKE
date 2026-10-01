@@ -40,7 +40,6 @@
 
     <div class="mcp-block">
         <span class="toggle-label">{t('settings.project.mcp')}</span>
-        <span class="toggle-desc">{t('settings.project.mcpDesc')}</span>
         {#if mcpOptions.length === 0}
             <span class="toggle-desc">{t('settings.project.mcpNone')}</span>
         {:else}

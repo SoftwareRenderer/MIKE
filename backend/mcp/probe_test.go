@@ -89,7 +89,7 @@ func TestProbeFormRefusesAnUndialableURLWithoutDialling(t *testing.T) {
 	} {
 		body := TestRequest{Name: "Bad", URL: tc.url}
 		if tc.wants == "timeout" {
-			body.TimeoutSeconds = types.MaxMCPTimeoutSeconds + 1
+			body.TimeoutSeconds = -1
 		}
 		_, err := probeForm(t, reg, body)
 		if err == nil {

@@ -24,10 +24,6 @@ const MaxToolsPerServer = 32
 // MaxMCPHeaders bounds one server's request headers.
 const MaxMCPHeaders = 8
 
-// MaxMCPTimeoutSeconds is the longest deadline a person may set. It bounds one tool call, not the turn.
-// Zero is not on this scale: it means no deadline at all.
-const MaxMCPTimeoutSeconds = 300
-
 // MCPServerIDBytes is the entropy behind a server's ID.
 const MCPServerIDBytes = 8
 
@@ -45,8 +41,8 @@ type MCPServer struct {
 	URL     string      `json:"url"`
 	Enabled bool        `json:"enabled"`
 	Headers []MCPHeader `json:"headers,omitempty"`
-	// TimeoutSeconds is this server's deadline for one session. Zero means no deadline: the wait ends
-	// when the caller's context does, which is what a long-running remote tool needs.
+	// TimeoutSeconds is this server's deadline for one session, with no ceiling. Zero means no deadline:
+	// the wait ends when the caller's context does, which is what a long-running remote tool needs.
 	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
 }
 
@@ -59,14 +55,10 @@ type MCPHeader struct {
 }
 
 // Timeout is this server's deadline for one session. Zero is no deadline — the wait is bounded by the
-// caller's context, which ends when a task is stopped or this process shuts down — and a value above
-// MaxMCPTimeoutSeconds is held to it because the save refused such a row anyway.
+// caller's context, which ends when a task is stopped or this process shuts down.
 func (m *MCPServer) Timeout() time.Duration {
 	if m.TimeoutSeconds <= 0 {
 		return 0
-	}
-	if m.TimeoutSeconds > MaxMCPTimeoutSeconds {
-		return MaxMCPTimeoutSeconds * time.Second
 	}
 	return time.Duration(m.TimeoutSeconds) * time.Second
 }
@@ -97,9 +89,8 @@ func ValidateMCPServer(name, rawURL string, timeoutSeconds int, headers []MCPHea
 	if err := validateMCPServerURL(name, rawURL); err != nil {
 		return err
 	}
-	if timeoutSeconds < 0 || timeoutSeconds > MaxMCPTimeoutSeconds {
-		return fmt.Errorf("MCP server %q has a timeout of %d seconds; the most is %d (0 waits with no deadline)",
-			name, timeoutSeconds, MaxMCPTimeoutSeconds)
+	if timeoutSeconds < 0 {
+		return fmt.Errorf("MCP server %q has a timeout of %d seconds; it must be 0 (no deadline) or more", name, timeoutSeconds)
 	}
 	if len(headers) > MaxMCPHeaders {
 		return fmt.Errorf("MCP server %q declares %d headers; the most is %d", name, len(headers), MaxMCPHeaders)

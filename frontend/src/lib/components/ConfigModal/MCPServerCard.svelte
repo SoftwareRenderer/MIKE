@@ -4,7 +4,7 @@
     import ToggleSwitch from '../ToggleSwitch.svelte';
     import Spinner from '../Spinner.svelte';
     import type { MCPServerDraft } from './mcp-drafts';
-    import { MAX_MCP_HEADERS, MAX_MCP_TIMEOUT_SECONDS } from './mcp-drafts';
+    import { MAX_MCP_HEADERS } from './mcp-drafts';
 
     /**
      * One registered MCP server, edited in place. A card rather than a modal: the Test answer belongs
@@ -105,10 +105,9 @@
                 oninput={onDirty}
                 disabled={locked}
                 min="0"
-                max={MAX_MCP_TIMEOUT_SECONDS}
                 aria-label={t('settings.mcp.timeoutAria')}
             />
-            <span class="mcp-help">{t('settings.mcp.timeoutHelp', { max: MAX_MCP_TIMEOUT_SECONDS })}</span>
+            <span class="mcp-help">{t('settings.mcp.timeoutHelp')}</span>
         </label>
 
         <button
@@ -129,8 +128,6 @@
         <p class="mcp-answer" class:mcp-answer-ok={server.result.ok} class:mcp-answer-fail={!server.result.ok} role="status">
             {server.result.message}
         </p>
-    {:else if !locked && server.url.trim()}
-        <p class="mcp-help">{t('settings.mcp.testUnknown')}</p>
     {/if}
 
     <div class="mcp-headers">

@@ -202,7 +202,7 @@ func TestMCPSaveRefusesByNamingTheField(t *testing.T) {
 		{"nameless", []types.MCPServer{{Name: "  ", URL: "https://mcp.example.com"}}, "needs a name"},
 		{"two of a name", []types.MCPServer{{Name: "same", URL: "https://a.example.com"}, {Name: "Same", URL: "https://b.example.com"}}, "named"},
 		{"two names one slug", []types.MCPServer{{Name: "my server", URL: "https://a.example.com"}, {Name: "My-Server", URL: "https://b.example.com"}}, "would both name their tools"},
-		{"timeout past the ceiling", []types.MCPServer{{Name: "slow", URL: "https://a.example.com", TimeoutSeconds: types.MaxMCPTimeoutSeconds + 1}}, "timeout"},
+		{"negative timeout", []types.MCPServer{{Name: "slow", URL: "https://a.example.com", TimeoutSeconds: -1}}, "timeout"},
 		{"header name with a space", []types.MCPServer{{Name: "smuggled", URL: "https://a.example.com", Headers: []types.MCPHeader{header(t, "X Bad", "v")}}}, "not a header field name"},
 		{"header name with a break", []types.MCPServer{{Name: "smuggled", URL: "https://a.example.com", Headers: []types.MCPHeader{header(t, "X-Bad\r\nX-Other", "v")}}}, "not a header field name"},
 		{"same header twice", []types.MCPServer{{Name: "twice", URL: "https://a.example.com", Headers: []types.MCPHeader{header(t, "Authorization", "a"), header(t, "authorization", "b")}}}, "declares the header"},

@@ -33,10 +33,7 @@
 
 <div class="settings-section">
     <div class="mcp-head">
-        <div>
-            <h3 class="settings-section-title">{t('settings.mcp.title')}</h3>
-            <p class="mcp-intro">{t('settings.mcp.intro')}</p>
-        </div>
+        <h3 class="settings-section-title">{t('settings.mcp.title')}</h3>
         <div class="settings-section-actions">
             <button type="button" class="settings-btn-small" onclick={onAdd}
                 disabled={locked || servers.length >= MAX_MCP_SERVERS}
@@ -47,7 +44,7 @@
     </div>
 
     {#if locked}
-        <p class="mcp-footnote" id={lockedNoticeId} role="note" data-testid="mcp-locked">
+        <p class="mcp-locked" id={lockedNoticeId} role="note" data-testid="mcp-locked">
             {t('settings.mcp.restricted')}
         </p>
     {/if}
@@ -64,11 +61,8 @@
     {/each}
 
     {#if servers.length === 0}
-        <EmptyState compact title={t('settings.mcp.empty')}
-            hint={locked ? undefined : t('settings.mcp.emptyHint')} />
+        <EmptyState compact title={t('settings.mcp.empty')} />
     {/if}
-
-    <p class="mcp-footnote">{t('settings.mcp.projectHint')}</p>
 </div>
 
 <style>
@@ -79,17 +73,10 @@
         justify-content: space-between;
         gap: 12px;
     }
-    .mcp-intro,
-    .mcp-footnote {
+    .mcp-locked {
         margin: 0;
         color: var(--color-text-tertiary);
         line-height: 1.45;
-    }
-    .mcp-intro {
-        margin-top: 6px;
-        font-size: var(--text-sm);
-    }
-    .mcp-footnote {
         font-size: var(--text-xs);
     }
 </style>
