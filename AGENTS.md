@@ -371,6 +371,17 @@ Enforced by the server process, so it holds for non-sandboxed projects too.
   parses a different shape than the executor writes deletes live branches.
 - Fences, the stash bracket, and the accepted user-visible consequences: **`docs/git-operations.md`**.
 
+## Subtask schedule
+
+- **A paused row is a stop, not a schedule decision.** The scheduler starts nothing inside a paused branch,
+  and it never restarts a paused row on its own. Whichever of its two writers stopped the row answers it: a
+  person's start for a pause, the supervisor's own resume for a memory pause. A pause writes `paused` to the
+  task and to every descendant that could still run, for the branch it names. `backend/exec/pause.go`
+  writes the pause and marks the branch before it cancels anything, because a cancelled run hands its exit
+  to `AutoStartNextSibling`, which reads those rows.
+- **A task with unfinished children never runs its own turn.** Start, resume and dragging to In Progress
+  start what the schedule picks under it; the row rests started-but-pending.
+
 ## Commit and Done
 
 - **Only staged changes are committed.** Untracked files stay in the worktree and are discarded when the

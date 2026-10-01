@@ -767,14 +767,18 @@ func (te *TaskExecutor) FindDeepestStartableSubtasks(tasks []types.Task) []types
 	return deepest
 }
 
-// isIncompleteForStart reports whether a task is in a startable board state:
-// backlog, or in_progress and not running/failed. Board state only —
-// IsStartableNow additionally requires all children done.
+// isIncompleteForStart reports whether a task is in a startable board state: backlog, or in_progress and
+// not running, failed or paused — a paused row waits for the start that answers it (pause.go). Board state
+// only, and since an unstartable row contributes no descendants, a paused branch never enters the set.
 func isIncompleteForStart(t types.Task) bool {
 	if t.Status == types.StatusBacklog {
 		return true
 	}
-	if t.Status == types.StatusInProgress && t.ExecutionState != types.ExecStateRunning && t.ExecutionState != types.ExecStateFailed {
+	if t.Status == types.StatusInProgress {
+		switch t.ExecutionState {
+		case types.ExecStateRunning, types.ExecStateFailed, types.ExecStatePaused:
+			return false
+		}
 		return true
 	}
 	return false
@@ -924,7 +928,7 @@ func (te *TaskExecutor) StartSubtask(projectID, subtaskID string, autostarted bo
 // AutoStartNextSibling continues the autostart chain after a task finishes: start the subtasks
 // subtasksToStart picks under the parent, or the parent itself once all its children are done and it
 // was already in_progress. A child in review or failed halts that branch while the scheduler bubbles
-// up to an ancestor's other branches.
+// up to an ancestor's other branches, and so does a paused parent.
 func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTaskID string) error {
 	parent, err := te.store.GetTaskByID(parentTaskID)
 	if err != nil {
@@ -936,6 +940,11 @@ func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTa
 	}
 	if parent.ExecutionState == types.ExecStateCompleted {
 		return nil
+	}
+	// A paused parent is a branch someone stopped: nothing starts under it, and it is not autostarted once
+	// its children are done. Bubble up, because its siblings belong to another branch.
+	if parent.ExecutionState == types.ExecStatePaused {
+		return te.autoStartAncestorSiblings(projectID, parent, finishedTaskID)
 	}
 
 	children, err := te.store.GetChildren(parent.ID)
@@ -1022,8 +1031,9 @@ func (te *TaskExecutor) subtasksToStart(parent *types.Task, subtasks []types.Tas
 
 // StartReadySubtasks starts the subtasks ready under a parent and reports which ones started. No
 // result and no error means nothing is ready, which is not a failure: the caller decides whether the
-// parent then runs.
+// parent then runs. Every caller asks for this branch to run, so a pause on it is cleared here first.
 func (te *TaskExecutor) StartReadySubtasks(projectID, parentID string) (started []string, firstErr error) {
+	te.resumeBranch(parentID)
 	parent, err := te.store.GetTaskByID(parentID)
 	if err != nil {
 		return nil, fmt.Errorf("get parent task: %w", err)
@@ -1086,7 +1096,7 @@ func (te *TaskExecutor) autoStartAncestorSiblings(projectID string, parent *type
 		logging.For(logging.Startup).Infof("ancestor %s is in backlog, skipping auto-start", grandparent.ID)
 		return nil
 	}
-	logging.For(logging.Startup).With(logging.TaskID, finishedTaskID).Infof("parent %s waiting on children, recursing up to %s", parent.ID, parent.ParentTaskID)
+	logging.For(logging.Startup).With(logging.TaskID, finishedTaskID).Infof("parent %s starts nothing now, recursing up to %s", parent.ID, parent.ParentTaskID)
 	return te.AutoStartNextSibling(projectID, parent.ID, parent.ParentTaskID)
 }
 
@@ -1832,10 +1842,22 @@ func (te *TaskExecutor) reclaimSandboxFrom(mgr bridgeSandboxManager, taskID stri
 	return true
 }
 
-// RetryTask retries a failed task.
+// RetryTask is the resume behind `POST …/resume`: one task's branch, on a person's say-so. A parent with
+// unfinished subtasks waits on them rather than running its own turn, so its branch resumes and the
+// schedule picks what runs.
 func (te *TaskExecutor) RetryTask(projectID, taskID string) error {
 	task, err := te.store.GetTask(projectID, taskID)
 	if err != nil {
+		return err
+	}
+	children, err := te.store.GetChildren(taskID)
+	if err != nil {
+		// An unreadable child list is not "no children": starting here could run a parent beside its own
+		// subtasks.
+		return err
+	}
+	if len(children) > 0 && !ChildrenAllDone(children) {
+		_, err := te.StartReadySubtasks(projectID, taskID)
 		return err
 	}
 	task.ExecutionState = types.ExecStateIdle

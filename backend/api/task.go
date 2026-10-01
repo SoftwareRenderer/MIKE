@@ -1324,27 +1324,15 @@ func (h *TaskHandler) HandleStart(w http.ResponseWriter, r *http.Request) {
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
-// HandleStop stops a task and every running descendant.
+// HandleStop pauses a task and every descendant that could still run.
 func (h *TaskHandler) HandleStop(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
 
-	// Check if task has descendants
-	descendants, _ := h.store.GetAllDescendants(taskID)
-	hasDescendants := len(descendants) > 0
-
-	if hasDescendants {
-		if err := h.StopTaskAndDescendants(taskID); err != nil {
-			// A stop of a task that no longer exists is a 404 because the store says so; before this it
-			// was a 404 because this line said so, which reported a database fault as a missing row.
-			httputil.Fail(w, err, "stop task and descendants", "task not found")
-			return
-		}
-	} else {
-		if err := h.executor.StopTask(taskID); err != nil {
-			httputil.Fail(w, err, "stop task", "task not found")
-			return
-		}
+	if err := h.executor.PauseTaskAndDescendants(taskID); err != nil {
+		// The store's missing-row error is the 404; a database fault answers 500.
+		httputil.Fail(w, err, "stop task", "task not found")
+		return
 	}
 
 	task, _ := h.store.GetTask(projectID, taskID)
@@ -1472,31 +1460,6 @@ func (h *TaskHandler) respondWithStartedTask(w http.ResponseWriter, projectID, t
 		h.boardStreamMgr.BroadcastTaskUpdated(projectID, startedTask)
 	}
 	httputil.JSONResponse(w, http.StatusOK, startedTask)
-}
-
-// StopTaskAndDescendants stops a task and all its in-flight descendants.
-// Each in-flight descendant (leaf-first) and the task itself are transitioned
-// via executor.StopTask (in_progress → paused, done → completed, other
-// columns → idle). Descendants that are not in-flight (pending subtasks) are
-// left untouched.
-func (h *TaskHandler) StopTaskAndDescendants(taskID string) error {
-	descendants, err := h.store.GetAllDescendants(taskID)
-	if err != nil {
-		logging.For(logging.Exec).Warnf("failed to get descendants of %s: %v", taskID, err)
-	}
-
-	// Stop all in-flight descendants (leaf-first order: reverse the list)
-	for i := len(descendants) - 1; i >= 0; i-- {
-		d := descendants[i]
-		if d.ExecutionState.InFlight() {
-			if err := h.executor.StopTask(d.ID); err != nil {
-				logging.For(logging.Exec).Warnf("failed to stop descendant %s: %v", d.ID, err)
-			}
-		}
-	}
-
-	// Stop the task itself (StopTask works with or without a live executor).
-	return h.executor.StopTask(taskID)
 }
 
 func autoGenerateTitle(prompt string) string {

@@ -65,7 +65,7 @@ grantable to it. `tokenScope` in `backend/server/token_auth.go` is the same tabl
 | `DELETE` | `/api/projects/{projectID}/tasks/{taskID}` | delete a task and its subtree |
 | `POST` | `/api/projects/{projectID}/tasks/{taskID}/start` | start a task |
 | `POST` | `/api/projects/{projectID}/tasks/{taskID}/start-subtask` | start a task whose parent is already running |
-| `POST` | `/api/projects/{projectID}/tasks/{taskID}/stop` | stop a task and every running descendant |
+| `POST` | `/api/projects/{projectID}/tasks/{taskID}/stop` | pause a task and every descendant that could still run |
 
 Not on it, among others: `/api/config`, `/api/sessions`, `/api/tokens`, the file routes
 (`/api/fs…`), the git and diff routes, task messages, threads, uploads, `/send`, `/commit`,
@@ -174,7 +174,9 @@ parent lands `in_progress` / `idle` — waiting, not running — and this is the
 
 ### `POST …/stop`
 
-Stops the task and every running descendant, and answers the task. Stopping is the result, so it
+Pauses the task and every descendant that could still run: a run in the branch is cancelled, and a row
+that was waiting to run reads `paused`, so nothing under it starts again until a person starts it. Rows
+in Backlog, Review or Done are left where they are. Answers the task. Stopping is the result, so it
 completes whatever the client does afterwards.
 
 ## Watching a run

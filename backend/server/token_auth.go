@@ -30,7 +30,7 @@ var tokenScope = map[string]string{
 	"PUT /api/projects/{projectID}/tasks/{taskID}":                "update a task (status included, so no /move grant is needed)",
 	"DELETE /api/projects/{projectID}/tasks/{taskID}":             "delete a task and its subtree",
 	"POST /api/projects/{projectID}/tasks/{taskID}/start":         "start a task; creates its worktree if there is none",
-	"POST /api/projects/{projectID}/tasks/{taskID}/stop":          "stop a task and every running descendant",
+	"POST /api/projects/{projectID}/tasks/{taskID}/stop":          "pause a task and every descendant that could still run",
 	"POST /api/projects/{projectID}/tasks/{taskID}/start-subtask": "start a task whose parent is already in progress",
 }
 

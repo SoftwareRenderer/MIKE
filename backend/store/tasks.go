@@ -342,6 +342,21 @@ func (s *Store) TransitionInFlightTask(taskID, projectID string, executionState 
 	return n > 0, nil
 }
 
+// TransitionTaskExecution moves a task from one execution_state to another, reporting whether the row
+// moved: a run that claimed the row in between owns it, so the write is skipped rather than forced. Only
+// execution_state is written, since a pause or a resume makes no other claim about the row.
+func (s *Store) TransitionTaskExecution(taskID, projectID string, from, to types.ExecutionState) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	res, err := s.db.Exec(`UPDATE tasks SET execution_state = ?, updated_at = ? WHERE id = ? AND project_id = ? AND execution_state = ?`,
+		to, time.Now().UTC().Format(time.RFC3339), taskID, projectID, from)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
 // SetTaskTitle updates the task title and clears the title_generating flag
 // in a single targeted statement — the async title-generation goroutine must
 // not write the full row (it read the row at task creation, so a full-row

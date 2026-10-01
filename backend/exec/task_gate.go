@@ -22,6 +22,9 @@ import (
 // on unfinished subtasks (MoveTask), or a subtask under a started parent that the user has not
 // started (types.SubtaskStatusFor). Nothing may rest in in_progress+idle — check those four cases
 // before adding a writer.
+//
+// A branch someone paused rests in in_progress+paused instead: the scheduler starts nothing in it, and a
+// start clears it (pause.go).
 
 // queuedWaiters records which provider task-slot queue entry each task is blocked behind, so a request
 // can reach the waiter a task is sitting on. An entry is recorded when the gate enqueues it and dropped
