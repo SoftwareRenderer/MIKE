@@ -70,7 +70,7 @@ func (te *TaskExecutor) recreateTaskSandbox(setup *taskExecSetup, state *executi
 	// Callbacks and the caller's change go in one write: new callbacks beside a stale operating mode
 	// would mean writing through a container mounted for the old mode.
 	state.setSandbox(func(sb *sandboxState) {
-		sb.exec, sb.execStream, sb.read, sb.write, sb.edit = makeSandboxCallbacks(newAgentClient)
+		sb.exec, sb.execStream, sb.read, sb.write, sb.edit = makeSandboxCallbacks(setup.task.ID, newAgentClient)
 		if r.underLock != nil {
 			r.underLock(sb)
 		}

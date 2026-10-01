@@ -86,8 +86,8 @@ code, the change is arguing with itself.
   bugs only surface under `-race` in `./backend/server/`.
 - **`deadcode` needs every main as a root** — `. `, `./pkg/bridge/agent`, and the two `scripts/` mains. A
   missing root calls live bridge code dead. A method whose type satisfies some used interface counts
-  as live even when nothing selects it, so an exported method no caller calls is the ALLOWLIST's
-  question, not this tool's.
+  as live even when nothing selects it. Such a method never appears in the ALLOWLIST, which holds only
+  what the tool reports, so nothing here measures an exported method no caller calls.
 - **Some tests fail only under load.** Read `docs/testing.md → Tests that fail only under load` before
   believing a red that names them.
 - **A `WaitDelay` bounds a subprocess's output pipes, not the child; only a cancelled context bounds the

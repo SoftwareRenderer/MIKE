@@ -462,7 +462,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 			return
 		}
 		sb := sandboxState{operatingMode: setup.task.OperatingMode, agentConfigHash: te.agentGrantHash(setup.providerURL())}
-		sb.exec, sb.execStream, sb.read, sb.write, sb.edit = makeSandboxCallbacks(agentClient)
+		sb.exec, sb.execStream, sb.read, sb.write, sb.edit = makeSandboxCallbacks(setup.task.ID, agentClient)
 		// Wire up bridge recovery — reconnects client or (re)creates sandbox.
 		sb.recoverBridge = func() bool {
 			return te.recoverBridgeForTask(te.sandboxMgr, setup, state, imageToUse, func() {

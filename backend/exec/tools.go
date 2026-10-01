@@ -38,9 +38,20 @@ type editFunc func(ctx context.Context, path string, edits []protocol.Edit) erro
 
 // captureOutput reads a command's whole output stream up to toolresult.MaxCaptureBytes: the
 // bridge hands over everything a command printed, and the host bash path stops at the same limit.
-func captureOutput(r io.Reader) string {
+func captureOutput(taskID string, r io.Reader) string {
 	sink := toolresult.NewCapture()
 	_, _ = io.Copy(sink, r)
+	return capturedText(taskID, sink)
+}
+
+// capturedText is what the capture hands to the model, plus one report to the operator when bytes
+// were dropped: the marker in the text is read by the model, the log line by whoever is asked why a
+// command's output stops mid-stream.
+func capturedText(taskID string, sink *toolresult.Capture) string {
+	if truncated, dropped := sink.Truncated(); truncated {
+		logging.For(logging.Tools).With(logging.TaskID, taskID).Warnf(
+			"dropped %d bytes of tool output beyond the %d byte cap", dropped, toolresult.MaxCaptureBytes)
+	}
 	return sink.String()
 }
 
@@ -73,14 +84,15 @@ func readFileCapped(path string) ([]byte, error) {
 }
 
 // makeSandboxCallbacks creates exec/read/write/edit callbacks that route through
-// the sandbox agent client inside a container.
-func makeSandboxCallbacks(client *bridge.Client) (execFunc, execStreamFunc, readFunc, writeFunc, editFunc) {
+// the sandbox agent client inside a container. taskID reaches no decision here: it is
+// the attribute every report from these callbacks carries.
+func makeSandboxCallbacks(taskID string, client *bridge.Client) (execFunc, execStreamFunc, readFunc, writeFunc, editFunc) {
 	execCb := func(ctx context.Context, command string, timeout int64) (string, error) {
 		holder, err := client.Bash(ctx, command, timeout)
 		if err != nil {
 			return "", fmt.Errorf("bash: %w", err)
 		}
-		out := captureOutput(holder.Output())
+		out := captureOutput(taskID, holder.Output())
 		exitCode := <-holder.ExitCode()
 		if exitCode != 0 {
 			return out, fmt.Errorf("exit code %d", exitCode)
@@ -104,9 +116,9 @@ func makeSandboxCallbacks(client *bridge.Client) (execFunc, execStreamFunc, read
 		}
 		exitCode := <-holder.ExitCode()
 		if exitCode != 0 {
-			return sink.String(), fmt.Errorf("exit code %d", exitCode)
+			return capturedText(taskID, sink), fmt.Errorf("exit code %d", exitCode)
 		}
-		return sink.String(), nil
+		return capturedText(taskID, sink), nil
 	}
 	readCb := func(ctx context.Context, path string) ([]byte, error) {
 		content, _, err := client.ReadFile(ctx, path)

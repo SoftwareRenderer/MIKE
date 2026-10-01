@@ -23,6 +23,13 @@ Event types: `token`, `reasoning`, `tool_call`, `tool_result`, `status`, `stats`
 tool calls). It is the **only** path to DB persistence — the executor iterates entries generically,
 with zero agent-specific persistence in the backend.
 
+**Stats:** `EventTypeStats` carries `SessionStatsData`; its `context_*`, `total_input`, `total_output`
+and `cost` reach the card through `sendAgentStats` (`backend/exec/loop_agent.go`).
+`TotalCacheRead` and `TotalCacheWrite` reach no one — `grep -rn "TotalCacheRead" --include='*.go'
+backend pkg` names the declaration and nothing else — so an agent turn contributes no cache figure
+and the turn-complete frame sends `cache_tokens: 0`. Wiring them needs a frontend follow-up, so the
+field and its reader arrive together or not at all.
+
 ## WASM memory model (zero buffers)
 
 - **Input** = `string` params; the runtime maps them to ptr+len in linear memory.

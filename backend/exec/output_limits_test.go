@@ -11,6 +11,7 @@ import (
 
 	"mike/backend/toolresult"
 	"mike/pkg/bridge/protocol"
+	"mike/pkg/logging"
 )
 
 // A sandboxed command writes whatever it likes and the bridge hands over the whole stream, while
@@ -18,7 +19,7 @@ import (
 func TestCaptureOutputStopsAtTheCaptureLimit(t *testing.T) {
 	t.Parallel()
 	const produced = 4 * toolresult.MaxCaptureBytes
-	out := captureOutput(io.LimitReader(strings.NewReader(strings.Repeat("x", produced)), produced))
+	out := captureOutput("task-cap", io.LimitReader(strings.NewReader(strings.Repeat("x", produced)), produced))
 
 	if len(out) > toolresult.MaxCaptureBytes+len(toolresult.CaptureMarker(produced)) {
 		t.Errorf("captured %d bytes, want at most the %d-byte limit plus a marker", len(out), toolresult.MaxCaptureBytes)
@@ -29,6 +30,36 @@ func TestCaptureOutputStopsAtTheCaptureLimit(t *testing.T) {
 	// The marker must report how much was dropped, or a cut reads as the whole log.
 	if !strings.Contains(out, strconv.Itoa(produced-toolresult.MaxCaptureBytes)) {
 		t.Errorf("the marker should report the dropped byte count, got tail %q", out[len(out)-80:])
+	}
+}
+
+// The operator's half of the same cut: the marker goes to the model, the count goes to the log with
+// the task it belongs to. Not t.Parallel — TestSink redirects the process's log for its duration.
+func TestCaptureOutputReportsDroppedBytesToTheLog(t *testing.T) {
+	buf, restore := logging.TestSink()
+	defer restore()
+
+	const produced = 2 * toolresult.MaxCaptureBytes
+	captureOutput("task-report", io.LimitReader(strings.NewReader(strings.Repeat("y", produced)), produced))
+
+	got := buf.String()
+	if !strings.Contains(got, "component=tools") || !strings.Contains(got, "task_id=task-report") {
+		t.Errorf("a dropped-output report must be attributable, got %q", got)
+	}
+	if !strings.Contains(got, strconv.Itoa(produced-toolresult.MaxCaptureBytes)) {
+		t.Errorf("the report should name the dropped count, got %q", got)
+	}
+}
+
+func TestCaptureOutputStaysSilentUnderTheLimit(t *testing.T) {
+	buf, restore := logging.TestSink()
+	defer restore()
+
+	captureOutput("task-uncut", strings.NewReader("all of it fits"))
+
+	// Only this task's silence is asserted: other tests' goroutines write to the same sink.
+	if strings.Contains(buf.String(), "task-uncut") {
+		t.Errorf("a command that fit must not be reported: %q", buf.String())
 	}
 }
 

@@ -50,7 +50,7 @@ func (te *TaskExecutor) recoverBridgeForTask(mgr bridgeSandboxManager, setup *ta
 		if probeErr == nil {
 			logging.For(logging.Bridge).With(logging.TaskID, setup.task.ID).Infof("client reconnect successful")
 			state.setSandbox(func(sb *sandboxState) {
-				sb.exec, sb.execStream, sb.read, sb.write, sb.edit = makeSandboxCallbacks(newClient)
+				sb.exec, sb.execStream, sb.read, sb.write, sb.edit = makeSandboxCallbacks(setup.task.ID, newClient)
 			})
 			te.resetBridgeRecoveryAttempts(state)
 			return true
@@ -84,7 +84,7 @@ func (te *TaskExecutor) recoverBridgeForTask(mgr bridgeSandboxManager, setup *ta
 
 	logging.For(logging.Bridge).With(logging.TaskID, setup.task.ID).Infof("sandbox recreated successfully")
 	state.setSandbox(func(sb *sandboxState) {
-		sb.exec, sb.execStream, sb.read, sb.write, sb.edit = makeSandboxCallbacks(newClient)
+		sb.exec, sb.execStream, sb.read, sb.write, sb.edit = makeSandboxCallbacks(setup.task.ID, newClient)
 	})
 	te.resetBridgeRecoveryAttempts(state)
 	if onRecovered != nil {

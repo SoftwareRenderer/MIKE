@@ -11,8 +11,9 @@
 # function reported here always fails the gate and must be deleted or justified here.
 #
 # What is reported is not everything unreachable. RTA counts a method live once its type satisfies
-# any used interface, so a method no call site selects can still look reachable: the allowlist is
-# not the complete list of production-unreachable functions.
+# any used interface, so a method no call site selects can still look reachable. Such a function
+# escapes this gate in both directions: it is never reported, and an ALLOWLIST entry naming it is
+# refused as stale. Only a stricter analysis, or a reader, sees that class.
 #
 # Usage: scripts/deadcode-check.sh
 set -euo pipefail

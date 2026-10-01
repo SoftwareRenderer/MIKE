@@ -193,7 +193,7 @@ func TestRecoverBridgeForTask_Tier1ClientReconnect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetClient: %v", err)
 	}
-	state.sandboxExec, state.sandboxExecStream, state.sandboxRead, state.sandboxWrite, state.sandboxEdit = makeSandboxCallbacks(client0)
+	state.sandboxExec, state.sandboxExecStream, state.sandboxRead, state.sandboxWrite, state.sandboxEdit = makeSandboxCallbacks(setup.task.ID, client0)
 
 	// Bridge failure: the captured client is closed (agent process still alive).
 	if err := client0.Close(); err != nil {
@@ -247,7 +247,7 @@ func TestRecoverBridgeForTask_Tier2RecreateRunningContainer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetClient: %v", err)
 	}
-	state.sandboxExec, state.sandboxExecStream, state.sandboxRead, state.sandboxWrite, state.sandboxEdit = makeSandboxCallbacks(client0)
+	state.sandboxExec, state.sandboxExecStream, state.sandboxRead, state.sandboxWrite, state.sandboxEdit = makeSandboxCallbacks(setup.task.ID, client0)
 
 	// Agent dies inside a live container: client closed, agent gone, container
 	// still tracked as running.
@@ -299,7 +299,7 @@ func TestRecoverBridgeForTask_CreatesSandboxFromScratchWhenStopped(t *testing.T)
 	if err != nil {
 		t.Fatalf("GetClient: %v", err)
 	}
-	state.sandboxExec, state.sandboxExecStream, state.sandboxRead, state.sandboxWrite, state.sandboxEdit = makeSandboxCallbacks(client0)
+	state.sandboxExec, state.sandboxExecStream, state.sandboxRead, state.sandboxWrite, state.sandboxEdit = makeSandboxCallbacks(setup.task.ID, client0)
 
 	// Image rebuild (or stale-container cleanup / container crash): the whole
 	// sandbox is stopped while the task keeps executing.

@@ -783,8 +783,6 @@ func TestStartProcess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start process: %v", err)
 	}
-	defer ph.Close()
-
 	testInput := []byte("hello from process")
 	n, err := ph.Stdin.Write(testInput)
 	if err != nil {

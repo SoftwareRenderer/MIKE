@@ -893,21 +893,6 @@ func (sm *SandboxManager) startShell(taskID, worktreePath string, project *types
 	return sp, assignedPorts, nil
 }
 
-// Close terminates the process handle and cleans up pipes.
-func (ph *ProcessHandle) Close() error {
-	if ph.Stdin != nil {
-		_ = ph.Stdin.Close()
-	}
-	if ph.Stdout != nil {
-		_ = ph.Stdout.Close()
-	}
-	if ph.Cmd != nil && ph.Cmd.Process != nil {
-		_ = ph.Cmd.Process.Kill()
-		_ = ph.Cmd.Wait()
-	}
-	return nil
-}
-
 // Close terminates the shell process and cleans up the PTY.
 func (sp *ShellProcess) Close() error {
 	if sp.Ptmx != nil {
@@ -923,7 +908,8 @@ func (sp *ShellProcess) Close() error {
 // StartProcess starts a non-interactive process inside the task's sandbox container.
 // Unlike StartShell, this does not allocate a PTY — it uses plain stdin/stdout pipes.
 // This is suitable for JSONL-based protocols like coding agent RPC mode.
-// The caller is responsible for calling Close() on the returned ProcessHandle when done.
+// Stdin and Stdout are os/exec pipes, so the returned command's Wait is what closes them:
+// the caller owns the process until it Waits, and reading Stdout to EOF does not release it.
 func (sm *SandboxManager) StartProcess(taskID, command string, args []string) (*ProcessHandle, error) {
 	sm.mu.Lock()
 	containerName, ok := sm.active[taskID]
