@@ -707,6 +707,19 @@ func countPlaceholders(tokens []placeholder) map[string]int {
 	return m
 }
 
+// unionPlaceholders counts each distinct token once across a counted message's forms. A folded
+// message is one string, so which form carried a token, and how often, is not owed — only that the
+// answer can name it.
+func unionPlaceholders(forms map[string]string) map[string]int {
+	m := map[string]int{}
+	for _, text := range forms {
+		for _, t := range ExtractPlaceholders(text) {
+			m[t.Text] = 1
+		}
+	}
+	return m
+}
+
 // diffCounts names the counts that moved. `locale` labels the pack side so a German pack is
 // reported as "de×1", not as "zh×1" — the finding is read by a person deciding what to fix.
 func diffCounts(en, pack map[string]int, locale string) (missing, extra []string) {

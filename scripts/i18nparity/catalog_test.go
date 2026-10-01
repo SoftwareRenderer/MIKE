@@ -229,6 +229,53 @@ func TestCompareCatalogsFoldedFormStillOwesItsPlaceholders(t *testing.T) {
 	requireErrorContaining(t, f, "{count}")
 }
 
+func TestCompareCatalogsFoldedFormCarriesEveryFormsPlaceholders(t *testing.T) {
+	// English names the file in `one` and counts the items in `other`. Turkish answers both counts
+	// from `other`, so that one string carries both tokens — and no form-by-form rule can accept any
+	// text here, since `{count}` alone loses `{name}` and `{name}` alone loses `{count}`.
+	en := counted(cat(), "explorer.shared.deleteMessage", map[string]string{
+		"one": `Delete "{name}" from disk?`, "other": "Delete these {count} items from disk?",
+	})
+	tr := counted(cat(), "explorer.shared.deleteMessage", map[string]string{
+		"other": `"{name}" dahil {count} öğe diskten silinsin mi?`,
+	})
+	f := &Findings{}
+	stats := CompareCatalogs(en, tr, "tr", f, 40)
+	requireNoErrors(t, f)
+	if stats.Counted != 1 || stats.Collapsed != 1 {
+		t.Fatalf("the folded form must still be counted: %+v", stats)
+	}
+}
+
+func TestCompareCatalogsFoldedFormCannotInventAPlaceholder(t *testing.T) {
+	// The union is equality, not a floor: a token the contract never declares renders as nothing,
+	// because the caller only passes what English names.
+	en := counted(cat(), "explorer.shared.deleteMessage", map[string]string{
+		"one": `Delete "{name}" from disk?`, "other": "Delete these {count} items from disk?",
+	})
+	tr := counted(cat(), "explorer.shared.deleteMessage", map[string]string{
+		"other": `"{name}" und {count} öğe ({path}) silinsin mi?`,
+	})
+	f := &Findings{}
+	CompareCatalogs(en, tr, "tr", f, 40)
+	requireErrorContaining(t, f, "folded forms added {path}")
+}
+
+func TestCompareCatalogsUnfoldedFormIsStillComparedFormByForm(t *testing.T) {
+	// German does select `one`, so it cannot fold a token swap into `other`: the union rule is for
+	// the forms this language has no name for, not for the ones it declined to ship.
+	en := counted(cat(), "explorer.shared.deleteMessage", map[string]string{
+		"one": `Delete "{name}" from disk?`, "other": "Delete these {count} items from disk?",
+	})
+	de := counted(cat(), "explorer.shared.deleteMessage", map[string]string{
+		"one": "Löschen {count}?", "other": "Diese {count} Einträge von der Festplatte löschen?",
+	})
+	f := &Findings{}
+	CompareCatalogs(en, de, "de", f, 40)
+	requireErrorContaining(t, f, "explorer.shared.deleteMessage.one: lost {name}")
+	requireErrorContaining(t, f, "explorer.shared.deleteMessage.one: added {count}")
+}
+
 func TestCompareCatalogsMoreFormsThanEnglishAreNotExtra(t *testing.T) {
 	// Russian counts what English does not; `few`/`many` are not invented keys.
 	en := counted(cat(), "board.card.fileCount", map[string]string{
