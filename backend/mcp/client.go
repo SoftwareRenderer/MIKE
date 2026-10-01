@@ -13,7 +13,6 @@ import (
 	"net"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -108,9 +107,9 @@ type Tool struct {
 	Parameters map[string]any
 }
 
-// session is one connection to one server, alive for one listing or call and bounded by the deadline
-// the registered server carries. The SDK's wait ends when that context ends; an http.Client timeout
-// does not bound it.
+// session is one connection to one server, alive for one listing or call. The server's own deadline is
+// on it when it set one; with no deadline the caller's context is the only bound. The SDK's wait ends
+// when that context ends; an http.Client timeout does not bound it.
 type session struct {
 	server types.MCPServer
 	sess   *mcp.ClientSession
@@ -125,9 +124,14 @@ func connect(ctx context.Context, server types.MCPServer, id Identity) (*session
 	if err != nil || u.Host == "" {
 		return nil, &Error{Server: server.Name, Kind: FailureNotMCP, Cause: err}
 	}
-	timeout := time.Duration(server.TimeoutSecondsOrDefault()) * time.Second
-	// The deadline covers the whole session, which is the wait the person agreed to.
-	callCtx, cancel := context.WithTimeout(ctx, timeout)
+	timeout := server.Timeout()
+	// The deadline covers the whole session, which is the wait the person agreed to. No deadline is a
+	// choice rather than an oversight: the caller's context — a stopped task, a shutting-down server —
+	// is then the only thing that ends the wait.
+	callCtx, cancel := context.WithCancel(ctx)
+	if timeout > 0 {
+		callCtx, cancel = context.WithTimeout(ctx, timeout)
+	}
 
 	// The address a person typed is the only host granted at loopback, and the grant is per server.
 	// The server's own headers ride the same client because the SDK's transport has no per-request hook.

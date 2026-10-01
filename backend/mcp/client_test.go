@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -327,10 +328,7 @@ func TestNotAnMCPServer(t *testing.T) {
 // A server answering with some other request's id leaves the client waiting for a response that will never
 // arrive. Only the deadline ends it: an http.Client timeout stops a request, not a wait.
 func TestServerThatAnswersTheWrongIdIsWaitedOut(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"Method not found"}}`)
-	}))
+	ts := httptest.NewServer(http.HandlerFunc(wrongIDHandler))
 	t.Cleanup(ts.Close)
 
 	start := time.Now()
@@ -344,6 +342,32 @@ func TestServerThatAnswersTheWrongIdIsWaitedOut(t *testing.T) {
 	}
 	if took > 4*time.Second {
 		t.Errorf("waited %v past a 1s deadline — the deadline is the only bound on this wait", took)
+	}
+}
+
+// wrongIDHandler answers every request with a response to no request MIKE sent, which leaves the client
+// waiting for an answer that is never coming.
+func wrongIDHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"Method not found"}}`)
+}
+
+// A timeout of 0 is no deadline of MIKE's: the wait ends when the caller gives up, and a caller that never
+// gives up is what a long-running remote tool needs. A deadline of our own would have reported a timeout
+// here instead of the caller's cancellation.
+func TestNoDeadlineWaitsForTheCaller(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(wrongIDHandler))
+	t.Cleanup(ts.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		cancel()
+	}()
+	_, err := connect(ctx, registered(ts.URL, 0), testID)
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want the caller's cancellation", err)
 	}
 }
 

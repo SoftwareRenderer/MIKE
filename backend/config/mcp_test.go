@@ -251,8 +251,8 @@ func TestMCPRegistrySurvivesARestart(t *testing.T) {
 	if len(opened) != 1 || mcpHeaderOf(opened[0], "Authorization") != token {
 		t.Errorf("after restart = %+v, want the server and its token", opened)
 	}
-	if opened[0].TimeoutSecondsOrDefault() != 5 {
-		t.Errorf("timeout = %d, want the stored 5", opened[0].TimeoutSecondsOrDefault())
+	if opened[0].TimeoutSeconds != 5 {
+		t.Errorf("timeout = %d, want the stored 5", opened[0].TimeoutSeconds)
 	}
 }
 

@@ -38,6 +38,8 @@ describe('buildMCPServerDraft', () => {
         expect(draft.id).toBe('');
         expect(draft.uid).toBe('mcp-new-1');
         expect(draft.enabled).toBe(true);
+        // A new row starts with a deadline: 0 is the no-deadline choice, which is never a blank's meaning.
+        expect(draft.timeoutSeconds).toBe(30);
     });
 });
 
@@ -61,14 +63,22 @@ describe('mcpServerPayload', () => {
         expect(mcpServerPayload(draft).headers).toBeUndefined();
     });
 
-    it('sends the id and the deadline only when the row has them', () => {
+    it('sends the id only when the row has one, and the deadline always', () => {
         const fresh = mcpServerPayload(newMCPServerDraft('mcp-new-2'));
         expect(fresh.id).toBeUndefined();
-        expect(fresh.timeout_seconds).toBeUndefined();
+        expect(fresh.timeout_seconds).toBe(30);
 
         const saved = mcpServerPayload(draftOf(stored));
         expect(saved.id).toBe(stored.id);
         expect(saved.timeout_seconds).toBe(20);
+    });
+
+    it('sends a typed 0 as the no-deadline value and a cleared field as what a new row starts with', () => {
+        expect(mcpServerPayload(draftOf({ ...stored, timeout_seconds: 0 })).timeout_seconds).toBe(0);
+        const cleared = draftOf(stored);
+        // What Svelte's number binding holds when the field is emptied.
+        cleared.timeoutSeconds = null as unknown as number;
+        expect(mcpServerPayload(cleared).timeout_seconds).toBe(newMCPServerDraft('mcp-cleared').timeoutSeconds);
     });
 
     it('trims the address and drops the trailing slash the browser likes to add', () => {

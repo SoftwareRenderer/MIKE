@@ -315,6 +315,6 @@ func shapeOf(server types.MCPServer) string {
 	b.WriteByte(0)
 	b.WriteString(strconv.FormatBool(server.Enabled))
 	b.WriteByte(0)
-	b.WriteString(strconv.Itoa(server.TimeoutSecondsOrDefault()))
+	b.WriteString(strconv.FormatInt(int64(server.Timeout()), 10))
 	return b.String()
 }

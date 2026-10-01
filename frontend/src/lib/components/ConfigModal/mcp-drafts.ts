@@ -13,6 +13,13 @@ export const MAX_MCP_SERVERS = 16;
 export const MAX_MCP_HEADERS = 8;
 export const MAX_MCP_TIMEOUT_SECONDS = 300;
 
+/**
+ * A new row's deadline, and what a cleared field reads as. Zero is a timeout a person types on purpose —
+ * it means the call waits with no deadline — so the default has to be a number the form starts with, not an
+ * absent field.
+ */
+const DEFAULT_MCP_TIMEOUT_SECONDS = 30;
+
 interface MCPHeaderDraft {
     name: string;
     /** Only what this browser typed: "" for nothing typed, never the masked placeholder. */
@@ -58,9 +65,13 @@ export function buildMCPServers(config: Pick<Config, 'mcp_servers'> | null | und
     return (config?.mcp_servers || []).map(buildMCPServerDraft);
 }
 
-/** An empty draft, appended by the Add button. Enabled by default; the row's own checkbox says otherwise. */
+/** An empty draft, appended by the Add button. Enabled, and carrying the default deadline; the row's own
+ *  checkbox and timeout field say otherwise. */
 export function newMCPServerDraft(uid: string): MCPServerDraft {
-    return { uid, id: '', name: '', url: '', enabled: true, timeoutSeconds: 0, headers: [], testing: false, result: null };
+    return {
+        uid, id: '', name: '', url: '', enabled: true, timeoutSeconds: DEFAULT_MCP_TIMEOUT_SECONDS,
+        headers: [], testing: false, result: null,
+    };
 }
 
 /** A draft with no name and no address is a row someone opened by accident, and it costs the payload
@@ -83,9 +94,13 @@ export function mcpServerPayload(draft: MCPServerDraft): MCPServer {
         name: draft.name.trim(),
         url: draft.url.trim().replace(/\/+$/, ''),
         enabled: draft.enabled,
+        // Always sent: 0 means "no deadline", so an absent field cannot be allowed to mean it too. A
+        // field cleared on screen is the default, because "forever" is something a person types.
+        timeout_seconds: Number.isFinite(draft.timeoutSeconds)
+            ? draft.timeoutSeconds
+            : DEFAULT_MCP_TIMEOUT_SECONDS,
     };
     if (draft.id) server.id = draft.id;
-    if (draft.timeoutSeconds) server.timeout_seconds = draft.timeoutSeconds;
     const headers = usableHeaders(draft);
     if (headers.length) server.headers = headers;
     return server;

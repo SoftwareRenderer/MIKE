@@ -446,7 +446,8 @@ Types: `lsp`, `ui`, `css`, `i18n`, `agent`, `llm`, `tool`.
   withheld is `Unknown tool` at dispatch and never a call. `mcp_` is a reserved prefix: an extension
   manifest that names a tool with it is refused.
 - **One attempt, and only the session's context bounds a wait.** No retries — a tool is not idempotent. The
-  server's deadline is on the session, and the answer is capped where it is captured.
+  server's deadline is on the session, and the answer is capped where it is captured. A timeout of 0 sets no
+  deadline, and the call then runs until it answers or the task calling it is stopped.
 - **The address a person typed is the only widening.** It goes through the egress client, which still
   refuses the metadata address and follows no redirect; the server's own headers ride that same client,
   because the SDK's transport has no per-request hook.

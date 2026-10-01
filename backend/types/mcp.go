@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // MaskedSecret stands in for a stored secret in a response, and reads as "unchanged" on the way back.
@@ -23,10 +24,8 @@ const MaxToolsPerServer = 32
 // MaxMCPHeaders bounds one server's request headers.
 const MaxMCPHeaders = 8
 
-// DefaultMCPTimeoutSeconds applies when a server declares no deadline of its own.
-const DefaultMCPTimeoutSeconds = 30
-
 // MaxMCPTimeoutSeconds is the longest deadline a person may set. It bounds one tool call, not the turn.
+// Zero is not on this scale: it means no deadline at all.
 const MaxMCPTimeoutSeconds = 300
 
 // MCPServerIDBytes is the entropy behind a server's ID.
@@ -46,7 +45,8 @@ type MCPServer struct {
 	URL     string      `json:"url"`
 	Enabled bool        `json:"enabled"`
 	Headers []MCPHeader `json:"headers,omitempty"`
-	// TimeoutSeconds is this server's deadline. Zero means DefaultMCPTimeoutSeconds.
+	// TimeoutSeconds is this server's deadline for one session. Zero means no deadline: the wait ends
+	// when the caller's context does, which is what a long-running remote tool needs.
 	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
 }
 
@@ -58,15 +58,17 @@ type MCPHeader struct {
 	Value *string `json:"value,omitempty"`
 }
 
-// TimeoutSecondsOrDefault reads the deadline, applying the default to an unset value.
-func (m *MCPServer) TimeoutSecondsOrDefault() int {
+// Timeout is this server's deadline for one session. Zero is no deadline — the wait is bounded by the
+// caller's context, which ends when a task is stopped or this process shuts down — and a value above
+// MaxMCPTimeoutSeconds is held to it because the save refused such a row anyway.
+func (m *MCPServer) Timeout() time.Duration {
 	if m.TimeoutSeconds <= 0 {
-		return DefaultMCPTimeoutSeconds
+		return 0
 	}
 	if m.TimeoutSeconds > MaxMCPTimeoutSeconds {
-		return MaxMCPTimeoutSeconds
+		return MaxMCPTimeoutSeconds * time.Second
 	}
-	return m.TimeoutSeconds
+	return time.Duration(m.TimeoutSeconds) * time.Second
 }
 
 // NormalizeMCPServerIDs cleans a project's opt-in list: trimmed, de-duplicated, empty entries gone.
@@ -96,7 +98,7 @@ func ValidateMCPServer(name, rawURL string, timeoutSeconds int, headers []MCPHea
 		return err
 	}
 	if timeoutSeconds < 0 || timeoutSeconds > MaxMCPTimeoutSeconds {
-		return fmt.Errorf("MCP server %q has a timeout of %d seconds; the most is %d (0 takes the default)",
+		return fmt.Errorf("MCP server %q has a timeout of %d seconds; the most is %d (0 waits with no deadline)",
 			name, timeoutSeconds, MaxMCPTimeoutSeconds)
 	}
 	if len(headers) > MaxMCPHeaders {

@@ -46,8 +46,11 @@ button that produces a fresh one is two answers to one question.
 
 **Only a context deadline bounds a wait.** The SDK's `AsyncCall.Await` waits on the context, so a server
 answering with some other request's JSON-RPC id is waited out by nothing else — an `http.Client` timeout
-stops a request, not a wait. The `session` owns one `context.WithTimeout` for its whole life, released by
-`close`. A turn's listing gets its own shorter budget, because a slow listing is no reason to hold a turn.
+stops a request, not a wait. The `session` owns one context for its whole life, released by `close`: the
+server's deadline when the row set one, the caller's cancellation always. A timeout of 0 sets no deadline, so
+a call runs until it answers or the task that called it is stopped — which is what a long-running remote tool
+needs. A turn's listing gets its own shorter budget either way, because a slow listing is no reason to hold a
+turn.
 
 **Every byte is bounded before it is read.** One server-sent event is capped at the
 `httputil.MaxUpstreamBodyBytes` number and past that is its own kind; a tool's answer is capped at
