@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"mike/backend/config"
 	"mike/backend/fsutil"
 	"mike/backend/updates"
 	"mike/pkg/logging"
@@ -218,7 +219,7 @@ var resolverEnv = []string{
 	EnvLogLevel, EnvLoginPassword, EnvEncryptionKey, EnvRegistryURL, EnvExtMountRoots,
 	EnvAgentPath, EnvSkipSandboxSweep, EnvTrustProxy, EnvLoginRateLimit, EnvAllowRootFS,
 	EnvDangerZone, EnvGCDryRun, EnvPProf, EnvMemoryBudgetPct, EnvUpdateURL, EnvDisableUpdates,
-	EnvUpdateCheckDeprecated,
+	EnvUpdateCheckDeprecated, EnvRestrictMCP,
 }
 
 func clearResolverEnv(t testing.TB) {
@@ -257,7 +258,7 @@ func TestOptInSwitchesAreTheExactValueOne(t *testing.T) {
 		{value: " 1 ", want: false}, // not trimmed: the value is the literal, not a sentence
 	}
 	for _, tc := range cases {
-		for _, name := range []string{EnvAllowRootFS, EnvDangerZone, EnvTrustProxy, EnvGCDryRun, EnvPProf} {
+		for _, name := range []string{EnvAllowRootFS, EnvDangerZone, EnvTrustProxy, EnvGCDryRun, EnvPProf, EnvRestrictMCP} {
 			t.Run(name+"="+tc.value, func(t *testing.T) {
 				t.Setenv(name, tc.value)
 				c := mustResolve(t, Flags{})
@@ -273,6 +274,8 @@ func TestOptInSwitchesAreTheExactValueOne(t *testing.T) {
 					got = c.GCDryRun
 				case EnvPProf:
 					got = c.PProf
+				case EnvRestrictMCP:
+					got = c.RestrictMCP
 				}
 				if got != tc.want {
 					t.Errorf("%s=%q resolved to %v, want %v", name, tc.value, got, tc.want)
@@ -377,8 +380,8 @@ func TestResolveDefaults(t *testing.T) {
 	if c.MemoryBudgetPct != DefaultMemoryBudgetPct {
 		t.Errorf("MemoryBudgetPct = %d, want %d", c.MemoryBudgetPct, DefaultMemoryBudgetPct)
 	}
-	if c.DangerZone || c.AllowRootFS || c.TrustProxy || c.PProf || c.GCDryRun {
-		t.Error("every widening switch must default to closed")
+	if c.DangerZone || c.AllowRootFS || c.TrustProxy || c.PProf || c.GCDryRun || c.RestrictMCP {
+		t.Error("every switch must default to off")
 	}
 	if len(c.Warnings) != 0 {
 		t.Errorf("a clean environment produces no warnings, got %v", c.Warnings)
@@ -510,6 +513,9 @@ func TestEnvNamesMatchTheirOwners(t *testing.T) {
 	}
 	if updates.EnvDisableUpdates != EnvDisableUpdates {
 		t.Errorf("updates.EnvDisableUpdates = %q, startup says %q", updates.EnvDisableUpdates, EnvDisableUpdates)
+	}
+	if config.EnvRestrictMCP != EnvRestrictMCP {
+		t.Errorf("config.EnvRestrictMCP = %q, startup says %q", config.EnvRestrictMCP, EnvRestrictMCP)
 	}
 }
 

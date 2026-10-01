@@ -5,6 +5,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -96,6 +97,10 @@ type ConfigStore struct {
 	// box opens stored provider keys. Built once at startup: a derivation costs hundreds of
 	// milliseconds, so no read path may pay one.
 	box *crypto.Box
+	// mcpLocked is the resolved MIKE_RESTRICT_MCP decision: the registry is frozen and
+	// refuseMCPChange is what says so. A store that never received it would be an unlocked store, so it
+	// arrives here rather than through a setter.
+	mcpLocked bool
 
 	snapMu sync.Mutex
 	snap   *configSnapshot
@@ -107,6 +112,7 @@ type configSnapshot struct {
 	generation uint64
 	rows       map[string]string
 	providers  []types.Provider
+	mcpServers []types.MCPServer
 }
 
 // SetLLMAdapter helps map outgoing LLM API requests to the provider's expected format
@@ -267,10 +273,11 @@ func (cs *ConfigStore) MigrateProviderIDs() error {
 	return cs.db.SetConfigValue("providers", string(providersJSON))
 }
 
-// NewConfigStore creates a new ConfigStore. box comes from crypto.New at startup.
-func NewConfigStore(s configDB, dbPath, version string, box *crypto.Box) *ConfigStore {
+// NewConfigStore creates a new ConfigStore. box comes from crypto.New at startup, and mcpLocked is the
+// resolved MIKE_RESTRICT_MCP decision.
+func NewConfigStore(s configDB, dbPath, version string, box *crypto.Box, mcpLocked bool) *ConfigStore {
 	abs, _ := filepath.Abs(dbPath)
-	return &ConfigStore{db: s, dbPath: abs, version: version, box: box}
+	return &ConfigStore{db: s, dbPath: abs, version: version, box: box, mcpLocked: mcpLocked}
 }
 
 // configRowKeys are the rows a full config read wants, in one query.
@@ -289,7 +296,7 @@ func (cs *ConfigStore) snapshot() (*configSnapshot, error) {
 	if cs.snap != nil && cs.snap.generation == generation {
 		return cs.snap, nil
 	}
-	rows, err := cs.db.GetConfigValues(append(append([]string{}, configRowKeys...), "providers")...)
+	rows, err := cs.db.GetConfigValues(append(append([]string{}, configRowKeys...), "providers", mcpServersRow)...)
 	if err != nil {
 		return nil, err
 	}
@@ -299,7 +306,7 @@ func (cs *ConfigStore) snapshot() (*configSnapshot, error) {
 			return nil, err
 		}
 	}
-	cs.snap = &configSnapshot{generation: generation, rows: rows, providers: providers}
+	cs.snap = &configSnapshot{generation: generation, rows: rows, providers: providers, mcpServers: parseMCPServers(rows[mcpServersRow])}
 	return cs.snap, nil
 }
 
@@ -345,6 +352,10 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 		}
 		providers[i].APIKey = nil
 	}
+	// The MCP registry goes out masked rather than emptied: Settings shows which servers exist and
+	// which of them hold a token, and never the token.
+	mcpServers := copyMCPServers(snap.mcpServers)
+	maskMCPServerSecrets(mcpServers, snap.mcpServers)
 	rows := snap.rows
 
 	workerProvider := rows["worker_provider"]
@@ -371,6 +382,7 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 		DatabasePath:    cs.dbPath,
 		RegistryURL:     registryURL,
 		Providers:       providers,
+		MCPServers:      mcpServers,
 		WorkerProvider:  workerProvider,
 		WorkerModel:     workerModel,
 		UtilityProvider: utilityProvider,
@@ -450,6 +462,14 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 	if err != nil {
 		return err
 	}
+	// The MCP registry validates and seals in one pass, before any row is written.
+	mcpServers, err := cs.prepareMCPServers(c.MCPServers)
+	if err != nil {
+		return err
+	}
+	if err := cs.refuseMCPChange(mcpServers); err != nil {
+		return err
+	}
 	// Enforce minimum concurrency of 1, non-negative rate limit, and encrypt API keys
 	for i := range c.Providers {
 		if c.Providers[i].Concurrency < 1 {
@@ -489,7 +509,15 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 	if err != nil {
 		return err
 	}
+	mcpJSON, err := json.Marshal(mcpServers)
+	if err != nil {
+		return err
+	}
 	if err := cs.db.SetConfigValue("providers", string(providersJSON)); err != nil {
+		return err
+	}
+	// The whole list, every time: an MCP server absent from this write is a server that was deleted.
+	if err := cs.db.SetConfigValue(mcpServersRow, string(mcpJSON)); err != nil {
 		return err
 	}
 	if err := cs.db.SetConfigValue("worker_provider", c.WorkerProvider); err != nil {
@@ -599,7 +627,13 @@ type configResponse struct {
 	AutoMaximizeChatMobile        *bool                    `json:"auto_maximize_chat_mobile,omitempty"`
 	ReclaimIdleSandbox            *bool                    `json:"reclaim_idle_sandbox,omitempty"`
 	KeyboardShortcuts             *types.KeyboardShortcuts `json:"keyboard_shortcuts,omitempty"`
-	EncryptionEnabled             bool                     `json:"encryption_enabled"`
+	// MCPServers is the registry with every header value masked. A project's own selection is on the
+	// project row, not here.
+	MCPServers []types.MCPServer `json:"mcp_servers,omitempty"`
+	// MCPRestricted is MIKE_RESTRICT_MCP: the registry is listed and offered but frozen, so Settings
+	// shows it read-only. It is a fact about the process, never a stored preference.
+	MCPRestricted     bool `json:"mcp_restricted"`
+	EncryptionEnabled bool `json:"encryption_enabled"`
 	// TLSCAAvailable tells the UI to offer the CA download (GET /api/tls/ca). The
 	// CA's path is not published: the route already knows where it lives.
 	TLSCAAvailable bool `json:"tls_ca_available"`
@@ -631,7 +665,7 @@ func storedAPIKey(providers []types.Provider, serverURL string) (sealed, record 
 
 // maskedAPIKey stands in for a stored key in a response. The browser omits it from what it sends back,
 // and one that comes back reads as "unchanged".
-const maskedAPIKey = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" // 10 bullets
+const maskedAPIKey = types.MaskedSecret
 
 // providerKeyPurpose is the record kind a provider API key is sealed under, so a value from an
 // extension or another provider cannot open here.
@@ -693,11 +727,18 @@ func (cs *ConfigStore) buildConfigResponse(cfg *types.Config) configResponse {
 	// shown empty.
 	stored, _ := cs.storedKeysByProviderID()
 	maskAPIKeys(providers, stored)
+	// The MCP registry is masked here as well as in GetConfig, because a PUT responds from the list it
+	// just received, which held plaintext headers on its way in.
+	mcpServers := copyMCPServers(cfg.MCPServers)
+	storedServers, _ := cs.storedMCPServers()
+	maskMCPServerSecrets(mcpServers, storedServers)
 	return configResponse{
 		WorkspaceDir:                  cfg.WorkspaceDir,
 		DatabasePath:                  cfg.DatabasePath,
 		Version:                       cs.version,
 		Providers:                     providers,
+		MCPServers:                    mcpServers,
+		MCPRestricted:                 cs.mcpLocked,
 		WorkerProvider:                cfg.WorkerProvider,
 		WorkerModel:                   cfg.WorkerModel,
 		UtilityProvider:               cfg.UtilityProvider,
@@ -766,6 +807,12 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 			// are registry-derived); registry agents are merged in buildConfigResponse.
 			current.Providers = incoming
 		}
+		var incomingServers []types.MCPServer
+		if updates.field("mcp_servers", &incomingServers) {
+			// Whole-list replacement, like providers: a server this payload omits is a server that
+			// was deleted. A header carrying the masked placeholder is a token the form never saw.
+			current.MCPServers = incomingServers
+		}
 		current.WorkerProvider = updates.strOr("worker_provider", current.WorkerProvider)
 		current.WorkerModel = updates.strOr("worker_model", current.WorkerModel)
 		current.UtilityProvider = updates.strOr("utility_provider", current.UtilityProvider)
@@ -795,6 +842,12 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := cs.UpdateConfig(current); err != nil {
+			// A frozen registry is a person asking for something the operator forbade, so it is a refusal
+			// that reads as one and not a fault.
+			if errors.Is(err, ErrMCPLocked) {
+				httputil.JSONError(w, http.StatusForbidden, err.Error())
+				return
+			}
 			httputil.JSONError(w, http.StatusInternalServerError, "failed to update config")
 			return
 		}

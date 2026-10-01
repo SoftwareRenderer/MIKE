@@ -36,7 +36,7 @@ func setupDoneSnapshotTest(t *testing.T) (string, *store.Store, *config.ConfigSt
 		t.Fatalf("create store: %v", err)
 	}
 	t.Cleanup(func() { s.Close() })
-	cfgStore := config.NewConfigStore(s, filepath.Join(tmpDir, "cfg.db"), "test", nil)
+	cfgStore := config.NewConfigStore(s, filepath.Join(tmpDir, "cfg.db"), "test", nil, false)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 	cfg, err := cfgStore.GetConfig()
 	if err != nil {

@@ -22,7 +22,7 @@ import (
 // steps in place. A database stamped N has been through 1..N; an older one reads 0 and runs the
 // whole chain. So the steps must stay idempotent, and one that must run exactly once needs its own
 // marker (see the config-row guard on the backfill) rather than trusting this number.
-const schemaVersion = doneProjectCommitTrailerStamp
+const schemaVersion = doneMCPServersStamp
 
 // doneDiffParsedStamp is the stamp from which a stored done-task diff body carries parsed_files.
 // Older bodies are served byte for byte and cannot grow the key, so initSchema drops those rows.
@@ -57,6 +57,9 @@ const doneUserTurnIndexesStamp = doneMessageOrderIndexesStamp + 1
 // doneProjectCommitTrailerStamp is the version from which a project carries its answer to the
 // "Assisted-by" commit trailer.
 const doneProjectCommitTrailerStamp = doneUserTurnIndexesStamp + 1
+
+// doneMCPServersStamp is the version from which a project carries its MCP opt-in list.
+const doneMCPServersStamp = doneProjectCommitTrailerStamp + 1
 
 // userVersion reads PRAGMA user_version. A read failure answers 0, which reruns the probe chain:
 // slow, but it cannot leave a column missing. The caller holds s.mu.
@@ -369,6 +372,8 @@ func (s *Store) addMissingColumns() {
 		s.addColumn("tasks", "moved_at", "TEXT NOT NULL DEFAULT ''")
 		_, _ = s.db.Exec(`UPDATE tasks SET moved_at = created_at WHERE moved_at = ''`)
 	}
+	// A project's MCP opt-in list; NULL is the list of a row predating the column.
+	s.addColumn("projects", "mcp_server_ids", "TEXT DEFAULT NULL")
 }
 
 // migrateTokenStats builds the cumulative token tables and backfills them once, guarded by its own config

@@ -114,6 +114,11 @@ func (t *ToolConfig) Validate(schema *ConfigSchema) error {
 	if types.IsCoreToolName(t.Name) {
 		return fmt.Errorf("name %q belongs to a core tool — a contributed tool with a core name shadows the one the model would expect to reach", t.Name)
 	}
+	// The mcp_ prefix belongs to registered servers and dispatch routes on it, so a contributed tool
+	// taking it would never be reached.
+	if strings.HasPrefix(t.Name, types.MCPToolNamePrefix) {
+		return fmt.Errorf("name %q starts with %q, which is reserved for tools from a registered MCP server", t.Name, types.MCPToolNamePrefix)
+	}
 	if len(t.DisplayName) > maxToolDisplayNameLen {
 		return fmt.Errorf("display_name is longer than %d characters", maxToolDisplayNameLen)
 	}

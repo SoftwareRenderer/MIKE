@@ -26,8 +26,7 @@ func (r *toolRunner) runContributedTool(ctx context.Context, name string, args m
 	}
 	contrib, ok := reg.Lookup(name)
 	if !ok {
-		// The same wording a core tool uses for an unknown name.
-		return fmt.Sprintf("Unknown tool: %s", name), false
+		return unknownTool(name), false
 	}
 	ext, tool := contrib.Extension, contrib.Tool
 

@@ -779,6 +779,10 @@ TEXT_ATTR_ALLOW: dict[tuple[str, str, str], str] = {
         'the fallback beside an extension\'s own suggestion: a path shape, not copy',
     ('src/lib/components/ConfigModal/ProviderCard.svelte', 'placeholder', 'http://localhost:8080/v1'):
         'an example URL — translating it teaches the wrong shape',
+    ('src/lib/components/ConfigModal/MCPServerCard.svelte', 'placeholder', 'https://mcp.example.com/mcp'):
+        'an example URL — translating it teaches the wrong shape',
+    ('src/lib/components/ConfigModal/MCPServerCard.svelte', 'placeholder', 'Authorization'):
+        'an HTTP field name, the same token in every locale',
     ('src/lib/components/FileBrowser.svelte', 'placeholder', 'https://github.com/org/repo.git'):
         'an example URL, paired with the `git@…` example beside the field',
     ('src/lib/components/SandboxConfigModal/ImageSection.svelte', 'placeholder', 'docker.io/ubuntu:latest'):

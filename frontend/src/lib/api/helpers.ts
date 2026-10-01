@@ -296,4 +296,12 @@ function parseEventFrame(raw: string): EventFrame | null {
     return data.length ? { event, data: data.join('\n') } : null;
 }
 
+/**
+ * The placeholder the server answers in place of a stored secret — `types.MaskedSecret` in Go, written
+ * there as `maskedAPIKey` for a provider key and reused for an MCP header. Sending it back means "keep
+ * what is stored", so it is the only header value that is not a secret. Escapes, not bullets: it is
+ * compared, never displayed.
+ */
+export const MASKED_SECRET = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022';
+
 export { API_BASE };

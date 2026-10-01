@@ -45,7 +45,7 @@ vi.mock('$lib/storage', () => ({
 }));
 
 import {
-    api, openPanel, seedPanel, rowEl, stageBtn, discardRowBtn, sectionAction, rings,
+    api, openPanel, seedPanel, stageBtn, discardRowBtn, sectionAction, rings,
 } from './git-panel-harness';
 
 /** A write the test decides when to answer. */

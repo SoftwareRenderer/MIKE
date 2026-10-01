@@ -121,6 +121,9 @@ type Config struct {
 	// reclaim grace. Nil = off. docs/sandbox-runtime.md.
 	ReclaimIdleSandbox *bool              `json:"reclaim_idle_sandbox,omitempty"`
 	KeyboardShortcuts  *KeyboardShortcuts `json:"keyboard_shortcuts,omitempty"`
+	// MCPServers is the registered MCP registry with every header value masked: GetConfig hands out no
+	// plaintext secret. The code that dials a server asks for OpenMCPServers instead.
+	MCPServers []MCPServer `json:"mcp_servers,omitempty"`
 }
 
 // KeyboardShortcuts holds user-customizable keyboard shortcut bindings.
@@ -290,7 +293,11 @@ type Project struct {
 	SandboxMounts           []SandboxMount `json:"sandbox_mounts,omitempty"`
 	SandboxEnvs             []SandboxEnv   `json:"sandbox_envs,omitempty"`
 	SandboxCapabilities     []string       `json:"sandbox_capabilities,omitempty"`
-	ActiveTerminalPorts     []AssignedPort `json:"active_terminal_ports,omitempty"` // transient: assigned ports from project-level terminal
+	// MCPServerIDs is this project's opt-in list: the registered servers whose tools it may offer.
+	// An ID with no registered server behind it is inert, not an error — a server a person deleted
+	// must not fail every project that had it enabled.
+	MCPServerIDs        []string       `json:"mcp_server_ids,omitempty"`
+	ActiveTerminalPorts []AssignedPort `json:"active_terminal_ports,omitempty"` // transient: assigned ports from project-level terminal
 	// CommitAssistedBy is this project's answer to the "Assisted-by" commit trailer, read through
 	// AssistedByEnabled.
 	CommitAssistedBy *bool     `json:"commit_assisted_by,omitempty"`

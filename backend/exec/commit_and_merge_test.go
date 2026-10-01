@@ -39,7 +39,7 @@ func setupCommitAndMergeTest(t *testing.T) (*TaskExecutor, string, string, strin
 	}
 	t.Cleanup(func() { s.Close() })
 
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil)
+	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 
 	projectID := "test-project"

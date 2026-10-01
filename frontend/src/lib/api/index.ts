@@ -192,3 +192,7 @@ export {
 } from './extensions';
 
 export type { ExtensionUrlProbe } from './extensions';
+
+// -- MCP --
+export { testMCPServer } from './mcp';
+export type { MCPServerProbe, MCPServerProbeRequest } from './mcp';

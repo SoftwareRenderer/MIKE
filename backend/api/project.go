@@ -620,6 +620,17 @@ func (h *ProjectHandler) handleUpdateProject(w http.ResponseWriter, r *http.Requ
 			return
 		}
 	}
+	// The MCP opt-in list is validated here rather than at its write, so a list over the bound leaves
+	// the project exactly as it was.
+	var mcpIDs []string
+	if req.MCPServerIDs != nil {
+		ids, err := types.NormalizeMCPServerIDs(*req.MCPServerIDs)
+		if err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, "mcp_server_ids: "+err.Error())
+			return
+		}
+		mcpIDs = ids
+	}
 	// Block sandbox setting changes while tasks are running in the project.
 	// Modifying sandbox settings during execution would kill bridge processes
 	// mid-tool-call, causing "broken pipe" errors.
@@ -656,6 +667,14 @@ func (h *ProjectHandler) handleUpdateProject(w http.ResponseWriter, r *http.Requ
 	if req.CommitAssistedBy != nil {
 		if err := h.store.UpdateProjectCommitAssistedBy(id, *req.CommitAssistedBy); err != nil {
 			httputil.Fail(w, errs.Operation("update commit trailer setting", err), "update project", "project not found")
+			return
+		}
+	}
+	// Nor is the MCP opt-in: which servers a project may offer changes what the next turn's tools are,
+	// and nothing about the container it runs in.
+	if req.MCPServerIDs != nil {
+		if err := h.store.UpdateProjectMCPServerIDs(id, mcpIDs); err != nil {
+			httputil.Fail(w, errs.Operation("update MCP server list", err), "update project", "project not found")
 			return
 		}
 	}

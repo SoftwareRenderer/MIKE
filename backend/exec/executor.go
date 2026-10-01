@@ -26,6 +26,7 @@ import (
 	"mike/backend/llama"
 	"mike/backend/llmadapter"
 	"mike/backend/lsp"
+	"mike/backend/mcp"
 	"mike/backend/prompts"
 	"mike/backend/sandbox"
 	"mike/backend/store"
@@ -68,7 +69,9 @@ type TaskExecutor struct {
 	agentBinaries agentBinaries
 	lspMgr        lspManager
 	extTools      *extensions.ToolRegistry
-	commitQueue   *CommitQueue
+	// mcpReg offers the tools of the servers a project enabled. Read per turn, never cached here.
+	mcpReg      *mcp.Registry
+	commitQueue *CommitQueue
 	// How long to wait before re-issuing a failed stream. Production is backoffFor; the retry loop
 	// reads this, so a test that only needs "retried, then failed" is not held to the production
 	// ladder. Its shape belongs to TestBackoffFor_* and TestQuietStreamBackoffWaitsAtLeastTheSilenceItSaw.
@@ -95,10 +98,16 @@ func (te *TaskExecutor) AgentRegistry() *agent.AgentRegistry {
 	return te.agentRegistry
 }
 
-// A contributed tool brings its own label; other tools use the core table.
+// A contributed tool brings its own label, as does one from a registered MCP server; other tools use
+// the core table. The MCP lookup reads the listing cache only, so a display name never costs a dial.
 func (te *TaskExecutor) toolDisplayName(toolName string) string {
 	if spec, ok := te.extTools.Spec(toolName); ok && spec.DisplayName != "" {
 		return spec.DisplayName
+	}
+	if te.mcpReg != nil {
+		if shown, ok := te.mcpReg.DisplayName(toolName); ok && shown != "" {
+			return shown
+		}
 	}
 	return llama.GetToolDisplayName(toolName)
 }
@@ -350,6 +359,9 @@ type Deps struct {
 	LSPMgr         *lsp.ExtensionLSPManager
 	CommitQueue    *CommitQueue
 	ExtensionTools *extensions.ToolRegistry
+	// MCP is the registered-server registry: what a project may offer, and which server runs a name.
+	// Nil means no MCP support was wired, which offers nothing and dispatches nothing.
+	MCP *mcp.Registry
 	// LLMBackoff decides how long a failed stream waits before its next attempt. Nil is the
 	// production ladder.
 	LLMBackoff func(attempt int, err error) time.Duration
@@ -383,6 +395,7 @@ func NewTaskExecutor(deps Deps) *TaskExecutor {
 		agentBinaries: binaries,
 		lspMgr:        lspMgrI,
 		extTools:      deps.ExtensionTools,
+		mcpReg:        deps.MCP,
 		commitQueue:   deps.CommitQueue,
 		llmBackoff:    llmBackoff,
 		gate:          NewConcurrencyGate(),

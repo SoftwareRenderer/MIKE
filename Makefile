@@ -267,7 +267,7 @@ check: ## THE GATE: lint + archgate + docs-check + bridge-check + build + Go tes
 # test, and the sandbox packages need a working podman + runsc on top of it. `./backend/llama/` is here
 # because its silence-deadline test is a race test: repetition in the gate proves nothing the detector
 # does not prove in one pass.
-RACE_PKGS := ./backend/git/ ./backend/exec/ ./backend/server/ ./backend/stream/ ./backend/api/ ./backend/llama/ ./pkg/logging/
+RACE_PKGS := ./backend/git/ ./backend/exec/ ./backend/server/ ./backend/stream/ ./backend/api/ ./backend/llama/ ./backend/mcp/ ./pkg/logging/
 
 .PHONY: check-race
 check-race: ## -race over the executor/stream/terminal layers (~5min) — required for any concurrency change

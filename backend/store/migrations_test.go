@@ -15,9 +15,9 @@ import (
 // two things that matter: an old database arrives at the current shape with its rows, and a
 // current database is left alone in silence.
 
-// legacyDB writes a database whose tasks table has a given older shape. The rest of the
-// schema is left to NewStore: only tasks pre-exists, as in an upgrade in place.
-func legacyDB(t *testing.T, tasksDDL string) string {
+// legacyDB writes a database whose one named table has a given older shape. The rest of the
+// schema is left to NewStore: only that table pre-exists, as in an upgrade in place.
+func legacyDB(t *testing.T, tableDDL string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "kanban.db")
 	db, err := sql.Open("sqlite", path)
@@ -25,7 +25,7 @@ func legacyDB(t *testing.T, tasksDDL string) string {
 		t.Fatalf("open legacy db: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	if _, err := db.Exec(tasksDDL); err != nil {
+	if _, err := db.Exec(tableDDL); err != nil {
 		t.Fatalf("create legacy schema: %v", err)
 	}
 	return path

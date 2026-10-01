@@ -433,7 +433,7 @@ For request-pattern/race investigation, write standalone Playwright scripts in `
   panel still reads "Loading commits…", so counting `.git-commit-row` right after it answers 0 for a
   repo that has commits — wait for the first row, not for the container.
 - **A spec that is green alone and red in a full run is sharing a repository.** Two specs `git add`
-  in the same checkout and one loses with `index.lock: File exists` or an ENOENT worktree; give the
+  in the same checkout and one loses with `index.lock: File exists` or an ENOENT worktree. Give the
   spec its own repo (`isolatedProject()` / a dedicated fixture repo) instead of adding a retry.
 - **Chat/board assertions that depend on the plan-first skill cannot run on a fresh clone:**
   `prompts/skills/` is gitignored, so with no skill installed the mock's `isPlanMode` branch never
@@ -520,6 +520,10 @@ rm -rf /tmp/kanban-test-data /tmp/kanban-test-data-isolated /tmp/kanban-test-wor
   host while the product is fine: `PushStash` cannot carry a reason the subprocess never printed.
   Confirm with `git init && echo x > f && git add f && git commit -qm one && : > .git/index.lock &&
   git stash push -m x; echo $?` before reading anything into the red.
+- **The MCP server in the tests is the SDK's own.** `backend/mcp` serves `mcp.NewStreamableHTTPHandler`
+  over `httptest` and pins it to `mcp.Era`, so the suite proves the pinned era, the declined capabilities
+  and the address rule with no socket outside localhost. One test answers the handshake era instead, and
+  the refusal it produces is the product's, not the SDK's (`docs/mcp.md`).
 - Sandbox tests need `runsc` **and** a working podman storage: under a nested/overlayfs root they all fail
   with `'overlay' is not supported over overlayfs, a mount_program is required` (podman exit status 125).
   That is environmental, not a regression — verify with `podman info` before reading anything into it.

@@ -196,7 +196,7 @@ func TestUpdateConfigKeyMeanings(t *testing.T) {
 		if err != nil {
 			t.Fatalf("create store: %v", err)
 		}
-		cs := NewConfigStore(db, t.TempDir()+"/test.db", "test", nil)
+		cs := NewConfigStore(db, t.TempDir()+"/test.db", "test", nil, false)
 		plain := "sk-must-not-be-stored-plain"
 		if err := cs.UpdateConfig(providerConfig(&plain)); err == nil {
 			t.Fatal("a key was accepted with no key to derive")

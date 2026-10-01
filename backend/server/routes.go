@@ -49,6 +49,10 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/config", s.configStore.HandleConfig)
 	s.mux.HandleFunc("PUT /api/config", s.configStore.HandleConfig)
 
+	// Registered MCP servers (docs/mcp.md): the registry itself is config, so it saves with it; this is
+	// the one action that dials a server. Cookie + CSRF like the config routes, and out of tokenScope.
+	s.mux.HandleFunc("POST /api/mcp/test", s.handleMCPTest)
+
 	// WebSocket stream
 	s.mux.HandleFunc("GET /api/stream", s.appStreamMgr.HandleStream)
 

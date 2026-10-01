@@ -11,7 +11,7 @@ import BaseModal from './BaseModal.svelte';
 import SandboxSettingLists from './SandboxSettingLists.svelte';
 import { t } from '$lib/i18n';
 import { appStore } from '$lib/stores';
-import { formatNetworkedExtensions, serverToolExtensions } from '$lib/utils/server-tool-network';
+import { formatNetworkedExtensions, serverToolExtensions, serverToolMCPServers } from '$lib/utils/server-tool-network';
 
     let { task, stats, onClose }: {
         task: Task;
@@ -33,6 +33,9 @@ import { formatNetworkedExtensions, serverToolExtensions } from '$lib/utils/serv
     let project = $state<Project | null>(null);
     const serverToolNotice = $derived(
         serverToolExtensions(appStore.config, project?.sandbox_enabled ?? false, project?.sandbox_network_isolation ?? false)
+    );
+    const mcpNotice = $derived(
+        serverToolMCPServers(appStore.config, project, project?.sandbox_enabled ?? false, project?.sandbox_network_isolation ?? false)
     );
     let loading = $state(true);
     let error = $state('');
@@ -124,6 +127,10 @@ import { formatNetworkedExtensions, serverToolExtensions } from '$lib/utils/serv
 
                     {#if serverToolNotice.length > 0}
                         <div class="server-tool-notice">{t('sandbox.networkIsolationServerToolsShort', { extensions: formatNetworkedExtensions(serverToolNotice) })}</div>
+                    {/if}
+
+                    {#if mcpNotice.length > 0}
+                        <div class="server-tool-notice">{t('sandbox.networkIsolationMCPServersShort', { servers: mcpNotice.join(', ') })}</div>
                     {/if}
 
                     <!-- Memory limit -->

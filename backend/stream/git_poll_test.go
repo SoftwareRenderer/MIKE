@@ -40,7 +40,7 @@ func TestBranchWatcherLifecycle(t *testing.T) {
 	}
 	defer s.Close()
 
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil)
+	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 	cfg, err := cfgStore.GetConfig()
 	if err != nil {
@@ -319,7 +319,7 @@ func TestGitPollerDetectsChanges(t *testing.T) {
 	}
 	defer s.Close()
 
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil)
+	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 	cfg, err := cfgStore.GetConfig()
 	if err != nil {
@@ -407,7 +407,7 @@ func TestWorktreeWatcherMultiTask(t *testing.T) {
 	}
 	defer s.Close()
 
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil)
+	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 	cfg, err := cfgStore.GetConfig()
 	if err != nil {
@@ -522,7 +522,7 @@ func TestWorktreeWatcherWorkerPoolBounds(t *testing.T) {
 	}
 	defer s.Close()
 
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil)
+	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 	cfg, err := cfgStore.GetConfig()
 	if err != nil {

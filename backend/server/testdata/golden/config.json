@@ -9,6 +9,7 @@
   "keyboard_shortcuts": {
     "create_task": ""
   },
+  "mcp_restricted": false,
   "memory_budget_mb": 0,
   "memory_budget_pct": 0,
   "memory_total_mb": 0,

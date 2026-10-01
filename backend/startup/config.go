@@ -30,6 +30,7 @@ const (
 	EnvRegistryURL    = "MIKE_REGISTRY_URL"
 	EnvUpdateURL      = "MIKE_UPDATE_URL"
 	EnvDisableUpdates = "MIKE_DISABLE_UPDATES"
+	EnvRestrictMCP    = "MIKE_RESTRICT_MCP"
 	// EnvUpdateCheckDeprecated is read by nothing: it is the tri-state this variable replaced, named
 	// only so an operator whose .env still sets it is told at boot.
 	EnvUpdateCheckDeprecated = "MIKE_UPDATE_CHECK"
@@ -127,6 +128,10 @@ type Config struct {
 	// check, no download, no install, no restart, and no prompt about any of them. It outranks the
 	// stored preference and cannot be answered from a browser.
 	DisableUpdates bool
+	// RestrictMCP freezes the MCP server registry: no add, edit, removal or Test from a browser. It
+	// says nothing about the offer — a stored server is still listed, offered and called, and a
+	// project still opts into it.
+	RestrictMCP bool
 
 	// ExtMountRoots are the extra host roots an extension sandbox may bind-mount, beyond the
 	// implicit ones. Still an allowlist.
@@ -225,6 +230,7 @@ func Resolve(f Flags) (Config, error) {
 		return Config{}, err
 	}
 	c.DisableUpdates = resolveDisable(EnvDisableUpdates, &c.Warnings)
+	c.RestrictMCP = isOne(EnvRestrictMCP)
 	if stale := os.Getenv(EnvUpdateCheckDeprecated); stale != "" {
 		c.Warnings = append(c.Warnings, fmt.Sprintf("%s=%q is no longer read: release updates are turned off with %s=1, and are otherwise decided in Settings → About",
 			EnvUpdateCheckDeprecated, stale, EnvDisableUpdates))
@@ -250,7 +256,7 @@ func Resolve(f Flags) (Config, error) {
 
 	// A switch set to anything but "1" stays closed, and says so: an operator who typed
 	// MIKE_ALLOW_ROOT_FS=true and got the jail would otherwise discover it by being refused.
-	for _, name := range []string{EnvAllowRootFS, EnvDangerZone, EnvTrustProxy, EnvGCDryRun, EnvPProf} {
+	for _, name := range []string{EnvAllowRootFS, EnvDangerZone, EnvTrustProxy, EnvGCDryRun, EnvPProf, EnvRestrictMCP} {
 		if v := os.Getenv(name); v != "" && v != "1" {
 			c.Warnings = append(c.Warnings, fmt.Sprintf("%s=%q is not the exact value 1, so it does nothing; set %s=1 to enable it or unset it to keep the current behaviour", name, v, name))
 		}

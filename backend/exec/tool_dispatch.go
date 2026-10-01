@@ -14,6 +14,7 @@ import (
 	"mike/backend/extensions"
 	"mike/backend/fsutil"
 	"mike/backend/git"
+	"mike/backend/mcp"
 	"mike/backend/store"
 	"mike/backend/stream"
 	"mike/backend/types"
@@ -39,6 +40,8 @@ type toolRunner struct {
 	storeTask func(*types.Task, string) error
 	// A func value: the executor owns the registry, so a copy here could fall behind it.
 	extTools func() *extensions.ToolRegistry
+	// A func value for the same reason: the tool call must see the registry the offer sees.
+	mcpTools func() *mcp.Registry
 	// A func value so a test here needs no network. The policy is tested in backend/extensions.
 	egress egressFunc
 	// One entry per name in types.CoreToolNames(); TestEveryDeclaredToolIsDispatched is what fails
@@ -60,6 +63,7 @@ func (te *TaskExecutor) newToolRunner() *toolRunner {
 		lspMgr:       func() lspManager { return te.lspMgr },
 		storeTask:    te.storeTask,
 		extTools:     func() *extensions.ToolRegistry { return te.extTools },
+		mcpTools:     func() *mcp.Registry { return te.mcpReg },
 		egress:       extensions.Egress,
 	}
 	r.handlers = map[string]toolHandler{
@@ -88,6 +92,11 @@ func (r *toolRunner) run(ctx context.Context, name string, args map[string]any, 
 	env := newToolEnv(state, worktreePath, task, outputCallback)
 	handler, ok := r.handlers[name]
 	if !ok {
+		// The reserved prefix decides which owner a name belongs to, so a name that reads as MCP never
+		// reaches the contributed registry.
+		if strings.HasPrefix(name, types.MCPToolNamePrefix) {
+			return r.runMCPTool(ctx, name, args, env)
+		}
 		// Not a core tool; it may be one an extension contributes.
 		return r.runContributedTool(ctx, name, args, env)
 	}

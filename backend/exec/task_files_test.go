@@ -41,7 +41,7 @@ func uploadFixture(t *testing.T, sandboxed bool) (*TaskExecutor, string, string)
 	}
 	t.Cleanup(func() { s.Close() })
 
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil)
+	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 
 	now := time.Now().UTC()

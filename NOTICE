@@ -33,3 +33,16 @@ without limitation the rights to use, copy, modify, merge, publish, distribute, 
 sell copies of the Software, conditioned on the copyright and this permission notice appearing in
 all copies or substantial portions; the Software is provided without warranty of any kind.
 --------------------------------------------------------------------
+MCP Go SDK
+Copyright (c) 2024-2025 Model Context Protocol a Series of LF Projects, LLC.
+(https://github.com/modelcontextprotocol/go-sdk — Apache License 2.0 and MIT License)
+
+The module is mid-relicensing from MIT to Apache-2.0 and its LICENSE says the contributions whose
+authors have not consented to the move stay MIT, so both permission notices are carried. The
+Apache-2.0 text and its attribution are the first part of the module's LICENSE file. The MIT
+permission notice for the portions that remain MIT is the one in that same file: permission to
+deal in the Software without restriction, including without limitation the rights to use, copy,
+modify, merge, publish, distribute, sublicense and/or sell copies of the Software, conditioned on
+the copyright notice and this permission notice appearing in all copies or substantial portions;
+the Software is provided without warranty of any kind.
+--------------------------------------------------------------------

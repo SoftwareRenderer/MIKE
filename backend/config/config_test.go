@@ -42,7 +42,7 @@ func testConfigStoreWithStore(t *testing.T) (*ConfigStore, *store.Store) {
 	if err != nil {
 		t.Fatalf("create test store: %v", err)
 	}
-	return NewConfigStore(db, dir+"/test.db", "test", sharedSecretBox()), db
+	return NewConfigStore(db, dir+"/test.db", "test", sharedSecretBox(), false), db
 }
 
 func TestGetConfigDefaultWorkspaceDir(t *testing.T) {

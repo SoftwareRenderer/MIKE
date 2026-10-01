@@ -1,13 +1,12 @@
 <script lang="ts">
     /**
-     * Whether the sandbox container may reach the network. It bounds the container only: a
-     * contributed extension tool runs in the MIKE server process, so its requests leave while
-     * isolation is on, and that is what the notice below says out loud
-     * (`frontend/src/lib/utils/server-tool-network.ts` is the rule).
+     * Whether the sandbox container may reach the network. It bounds the container only: contributed
+     * tools and MCP tools are called in the MIKE server process, so their requests leave while isolation
+     * is on (`frontend/src/lib/utils/server-tool-network.ts` is the rule).
      */
     import { t } from '$lib/i18n';
     import { appStore } from '$lib/stores';
-    import { formatNetworkedExtensions, serverToolExtensions } from '$lib/utils/server-tool-network';
+    import { formatNetworkedExtensions, serverToolExtensions, serverToolMCPServers } from '$lib/utils/server-tool-network';
     import ToggleSwitch from '../ToggleSwitch.svelte';
     import type { SandboxDraftOwner } from './draft.svelte';
 
@@ -16,6 +15,11 @@
     // See $lib/utils/server-tool-network for the rule.
     const serverToolNotice = $derived(
         serverToolExtensions(appStore.config, draft.sandboxEnabled, draft.networkIsolation)
+    );
+    // The same sentence for the MCP servers this project enabled; the opt-in lives on the selected
+    // project row.
+    const mcpNotice = $derived(
+        serverToolMCPServers(appStore.config, appStore.selectedProject, draft.sandboxEnabled, draft.networkIsolation)
     );
 </script>
 
@@ -46,6 +50,12 @@
 {#if serverToolNotice.length > 0}
     <div class="server-tool-notice">
         {t('sandbox.networkIsolationServerTools', { extensions: formatNetworkedExtensions(serverToolNotice) })}
+    </div>
+{/if}
+
+{#if mcpNotice.length > 0}
+    <div class="server-tool-notice">
+        {t('sandbox.networkIsolationMCPServers', { servers: mcpNotice.join(', ') })}
     </div>
 {/if}
 

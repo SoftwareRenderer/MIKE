@@ -113,7 +113,7 @@ curl -sk https://localhost:3000/api/config   # 401 JSON = up; use http:// with -
 - **Never `log.Fatalf` on a `Serve()` error** — run the signal cleanup path, then exit 1.
 - **Shutdown is a declared stage list.** A component registers its stop step with `s.reg(stage, name, step)`
   *where it is constructed* (the stages are declared in `backend/server/lifecycle.go`), so construction order
-  is shutdown order; duplicate or nil steps are refused at registration, and the first stage cancels the
+  is shutdown order. Duplicate or nil steps are refused at registration, and the first stage cancels the
   server's base context. SIGTERM must end the process: a wedged shutdown keeps the data directory open, so
   the next run boots on the previous run's database. **`docs/lifecycle.md`**.
 - **Every base context in the tree is registered with a reason** (`root`, `detached`, `legacy`) by the
@@ -202,7 +202,7 @@ python3 scripts/gen-registry.py --check                  # registry.json matches
   binding the browser interprets on its own, each with the mechanism it relies on, and it fails if its own list
   misses a sink; what the sanitizer refuses and why is in `docs/markup-sanitizing.md`.
 - **Formatting follows the active locale; sorting never does.** Pass `activeLocale()` to every `Intl.*`
-  call and never a literal tag or `undefined`; never cache a locale-derived value at module scope;
+  call and never a literal tag or `undefined`. Never cache a locale-derived value at module scope;
   `document.documentElement.lang` has exactly one writer (the i18n runtime); `localeCompare` keeps its
   current arguments so file, branch, symbol, session and model lists stay stable whatever the UI language.
   Phrases are catalog keys in `$lib/i18n/en.ts`, never literals in components — `i18n-gate.py` and
@@ -235,7 +235,7 @@ python3 scripts/gen-registry.py --check                  # registry.json matches
   is a position; only `following` decides whether new content re-pins.
   `frontend/src/lib/composables/use-chat-follow.svelte.ts`.
 - **A Review notification is the client's decision, never the server's.** The choice is stored in the
-  browser that will have to show it (`uiStore.notifyOnReview`, never `/api/config`); an arrival is
+  browser that will have to show it (`uiStore.notifyOnReview`, never `/api/config`). An arrival is
   detected from the `project_counts` rise and announced only when the Review column is not in view and
   that task is not the one open. `docs/notifications.md`.
 - **A card lists its subtasks as flat rows in run order, never as nested card boxes** — a descendant above
@@ -300,7 +300,7 @@ via podman. Without it, sandboxed projects refuse to start tasks — hard error,
   posture is already there). Extensions delegate to it; a project's own Sandbox Configuration is checked by
   the same rules, and again at container creation because a row can predate them.
 - **Extension sandbox mounts are an allowlist, and borrowed roots are read-only** however the manifest
-  asks: a manifest is text that came from the registry, not from a person, and an agent extension's
+  asks. A manifest is text that came from the registry, not from a person, and an agent extension's
   `sandbox.mount` is a request rather than a grant — only a person's answer under Settings → Extensions reaches
   a container. A capability is judged by its shape, never its name; `--privileged` is an argument and is refused.
 - **The bridge is stdio-only**: one `podman exec` per connection, no listener and no port. Interactive
@@ -334,7 +334,7 @@ Enforced by the server process, so it holds for non-sandboxed projects too.
   sanctioned place: the operator's own host terminal under `DANGER_ZONE=1`.
 - **The git author identity is accessor-only** and process-wide.
 - **The release check is the only place where something downloaded from the network becomes running code**, so
-  it is opt-in and never self-applying: the preference turns it on (`MIKE_DISABLE_UPDATES=1` forbids it for every
+  it is opt-in and never self-applying. The preference turns it on (`MIKE_DISABLE_UPDATES=1` forbids it for every
   browser), a newer release is downloaded and verified without touching the install directory, and *Install* — which
   swaps the files and restarts — is the one click that changes anything. An install that is not an unpacked release
   directory — a container, a source tree, anything unnamed — refuses, and gets nothing downloaded either. No auto-apply, ever.
@@ -412,9 +412,10 @@ Types: `lsp`, `ui`, `css`, `i18n`, `agent`, `llm`, `tool`.
   a human configures the host path — reaches one extension's sandbox, and is always read-only. Never
   discover where a toolchain's cache lives. `docs/extension-dependency-cache.md`.
 - **A contributed tool is data, and its address is a grant.** The manifest declares the tool and core runs
-  it; the only origin it may contact is the origin stored in a `config_schema` property of type `"url"`, so
+  it. The only origin it may contact is the origin stored in a `config_schema` property of type `"url"`, so
   every peer is one a person typed. These tools execute in the server process, so a project's network
-  isolation does not cover them and the Sandbox Configuration says so. `docs/extension-tools.md`.
+  isolation does not cover them and the Sandbox Configuration says so — as it does for an MCP tool, which
+  is the other family that runs there. `docs/extension-tools.md`.
 - **Language knowledge lives in extensions.** The core holds no language names, keyword lists, comment
   markers or bracket tables, in either language; both sides read the manifest through one helper each, and
   a syntax is data, never code. `docs/languages.md`.
@@ -430,6 +431,32 @@ Types: `lsp`, `ui`, `css`, `i18n`, `agent`, `llm`, `tool`.
   is the jail: `docs/preview.md`.
 - Install/build/delete/repair mechanics, REST surface, capability gates, changelogs:
   **`docs/extension-lifecycle.md`**.
+
+## MCP
+
+- **Speak one era: protocol `2026-07-28`, over Streamable HTTP.** A server that answers another version is
+  refused by name, never negotiated down to, and no stdio means no subprocess family to sandbox or to leak
+  an environment through.
+- **Decline every capability out loud.** Pass an explicitly empty `ClientCapabilities`: the SDK declares
+  `roots` for every client unless the options say otherwise, so setting no handler is not a decline.
+- **Never bridge `elicitation/create` to `ask_question`.** The pinned era forbids a server eliciting while a
+  call is open, and the question ends the turn while its answer returns as a new one. Register no handler and
+  never park a turn on a person waiting for a socket.
+- **A project opts in per server, and the offer and the lookup read one path**, so a name the offer
+  withheld is `Unknown tool` at dispatch and never a call. `mcp_` is a reserved prefix: an extension
+  manifest that names a tool with it is refused.
+- **One attempt, and only the session's context bounds a wait.** No retries — a tool is not idempotent. The
+  server's deadline is on the session, and the answer is capped where it is captured.
+- **The address a person typed is the only widening.** It goes through the egress client, which still
+  refuses the metadata address and follows no redirect; the server's own headers ride that same client,
+  because the SDK's transport has no per-request hook.
+- **The registry is configuration, and the operator can freeze it.** `MIKE_RESTRICT_MCP=1` means no add, edit,
+  removal or Test from a browser, and a config save whose registry differs from the stored one is refused by
+  name. A stored server is still listed, offered and called, and a project still opts in per server.
+- **A stored header never leaves the process that stores it.** The config view answers the masked
+  placeholder, `POST /api/mcp/test` resolves a placeholder back to what is stored rather than trusting the
+  browser, and that route writes nothing and is out of `tokenScope`.
+- MCP mechanics, the caps, and the elicitation argument: **`docs/mcp.md`**.
 
 ## Reconnection & Offline
 
@@ -523,6 +550,7 @@ deliberately omits.
 | `docs/markup-sanitizing.md` | sanitizer deltas from DOMPurify's defaults, the sink audit, `Icon.svelte` |
 | `docs/extension-lifecycle.md` | install/build/delete/repair, SSE ordering, egress, capability gates, changelogs |
 | `docs/extension-tools.md` | contributed-tool grammar, the `url` grant and its loopback exception, the pre-save probe |
+| `docs/mcp.md` | the pinned era and who enforces it, the caps, the declined capabilities, the elicitation rule, the Test action |
 | `docs/extension-dependency-cache.md` | the `dependency_cache` grant, `ro` mounts, `environment` check |
 | `docs/typography.md` | CJK font chains and how to verify them with pixels |
 | `docs/testing.md` | test environment, teardown, e2e conventions, mock-LLM fixtures, load-sensitive tests |

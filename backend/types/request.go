@@ -34,6 +34,9 @@ type UpdateProjectRequest struct {
 	SandboxEnvs             []SandboxEnv   `json:"sandbox_envs,omitempty"`
 	SandboxCapabilities     []string       `json:"sandbox_capabilities,omitempty"`
 	CommitAssistedBy        *bool          `json:"commit_assisted_by,omitempty"`
+	// MCPServerIDs is this project's MCP opt-in list. A pointer because a partial update must tell
+	// "leave it alone" from "enable nothing"; the list is written whole either way.
+	MCPServerIDs *[]string `json:"mcp_server_ids,omitempty"`
 }
 
 // GitCheckoutRequest is the request body for git checkout.

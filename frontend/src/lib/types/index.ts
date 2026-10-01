@@ -78,6 +78,9 @@ export interface Project {
     sandbox_capabilities?: string[];
     /** The project's answer to the "Assisted-by" commit trailer; default on. */
     commit_assisted_by?: boolean;
+    /** The registered MCP servers this project may offer tools from. A whole list on write: an absent
+     *  key leaves it alone, an empty one enables nothing. */
+    mcp_server_ids?: string[];
     active_terminal_ports?: AssignedPort[];
     created_at: string;
     updated_at: string;
@@ -97,6 +100,7 @@ export interface ProjectUpdates {
     sandbox_envs?: SandboxEnv[];
     sandbox_capabilities?: string[];
     commit_assisted_by?: boolean;
+    mcp_server_ids?: string[];
 }
 
 /** A dismissed memory alert and the numbers it showed, as the task row carries them. */
@@ -283,6 +287,11 @@ export interface Config {
 /** The extensions whose contributed tools reach the network from the server process. Read-only: a PUT
      *  naming this key writes nothing. */
     server_network_extensions?: NetworkedExtension[];
+    /** The registered MCP servers, every header value masked. A project's own selection is on its row. */
+    mcp_servers?: MCPServer[];
+    /** MIKE_RESTRICT_MCP: the registry is listed and offered but frozen, so this tab is read-only and
+     *  the only MCP write left is a project's own enable list. */
+    mcp_restricted?: boolean;
 }
 
 /**
@@ -544,6 +553,27 @@ export interface NetworkedExtension {
     name: string;
     display_name: string;
     tools: string[];
+}
+
+// ─── MCP types (backend/types/mcp.go) ───
+
+/** One registered Streamable-HTTP MCP server. `value` is the masked placeholder when it comes from the
+ *  server, an actual token only while the form holds one the person just typed. */
+export interface MCPServer {
+    /** Survives a rename: a project's enable list holds these. Absent on a server never saved. */
+    id?: string;
+    name: string;
+    url: string;
+    enabled: boolean;
+    headers?: MCPHeader[];
+    /** 0 or absent takes the server's default deadline. */
+    timeout_seconds?: number;
+}
+
+export interface MCPHeader {
+    name: string;
+    /** Absent or the masked placeholder keeps what is stored; "" clears it. */
+    value?: string;
 }
 
 export interface ExtensionManifest {

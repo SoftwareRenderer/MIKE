@@ -190,6 +190,46 @@ func NewExtensionEgressClientGranting(timeout time.Duration, grantedHosts []stri
 	}
 }
 
+// Header is one request header to put on every request a client makes. A pair rather than a map so the
+// caller's order survives and so a caller outside the transport need not name a net/http type.
+type Header struct {
+	Name  string
+	Value string
+}
+
+// WithHeaders returns a client that adds these headers to every request, on top of whatever address rule
+// the injected client enforces. A protocol client that exposes no per-request hook can be handed a
+// credential no other way. The wrapper sits above the injected transport, so a redirect that client
+// refuses is never dialled and carries nothing.
+func WithHeaders(base *http.Client, headers []Header) *http.Client {
+	if len(headers) == 0 {
+		return base
+	}
+	withHeaders := *base
+	if withHeaders.Transport == nil {
+		withHeaders.Transport = http.DefaultTransport
+	}
+	withHeaders.Transport = headerTransport{base: withHeaders.Transport, headers: headers}
+	return &withHeaders
+}
+
+// headerTransport adds its headers to a clone of each request: a RoundTripper may not modify the request
+// it was handed, and a retrying client hands the same object to it twice.
+type headerTransport struct {
+	base    http.RoundTripper
+	headers []Header
+}
+
+func (t headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	clone := req.Clone(req.Context())
+	for _, h := range t.headers {
+		if h.Name != "" {
+			clone.Header.Set(h.Name, h.Value)
+		}
+	}
+	return t.base.RoundTrip(clone)
+}
+
 // MaxUpstreamBodyBytes bounds an upstream body read into memory: it is somebody else's server.
 const MaxUpstreamBodyBytes int64 = 8 << 20
 

@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -96,7 +97,7 @@ func TestContributedToolOfferedInEveryMode(t *testing.T) {
 	te := newTestExecutorWith(t, Deps{ExtensionTools: toolRegistryWith(t, searchToolExtension("https://searx.example"))})
 
 	for _, mode := range []types.OperatingMode{types.ModeAct, types.ModePlan, types.ModeExplore} {
-		names := definitionNames(te.toolDefinitionsFor(&types.Task{ID: "t", OperatingMode: mode}))
+		names := definitionNames(te.toolDefinitionsFor(context.Background(), &types.Task{ID: "t", OperatingMode: mode}))
 		if !names["web_search"] {
 			t.Errorf("%s mode does not offer the contributed tool: %v", mode, names)
 		}
@@ -106,7 +107,7 @@ func TestContributedToolOfferedInEveryMode(t *testing.T) {
 	}
 
 	// The model is told what the extension declared, not what the core guessed.
-	defs := te.toolDefinitionsFor(&types.Task{ID: "t"})
+	defs := te.toolDefinitionsFor(context.Background(), &types.Task{ID: "t"})
 	for i := range defs {
 		fn := defs[i].Function
 		if fn == nil || fn.Name != "web_search" {
@@ -127,18 +128,18 @@ func TestContributedToolOfferedInEveryMode(t *testing.T) {
 // With no registry, or one that offers nothing, the tools offered are exactly the core set.
 func TestNoContributedToolsWithoutAnExtension(t *testing.T) {
 	t.Parallel()
-	core := definitionNames(newBareTestExecutor(t).toolDefinitionsFor(&types.Task{ID: "t"}))
+	core := definitionNames(newBareTestExecutor(t).toolDefinitionsFor(context.Background(), &types.Task{ID: "t"}))
 	if core["web_search"] {
 		t.Error("a bare executor offered a contributed tool")
 	}
 
 	empty := newTestExecutorWith(t, Deps{ExtensionTools: toolRegistryWith(t)})
-	if names := definitionNames(empty.toolDefinitionsFor(&types.Task{ID: "t"})); names["web_search"] {
+	if names := definitionNames(empty.toolDefinitionsFor(context.Background(), &types.Task{ID: "t"})); names["web_search"] {
 		t.Error("an empty registry offered a contributed tool")
 	}
 	// Installed but unconfigured offers nothing.
 	unconfigured := newTestExecutorWith(t, Deps{ExtensionTools: toolRegistryWith(t, searchToolExtension(""))})
-	if names := definitionNames(unconfigured.toolDefinitionsFor(&types.Task{ID: "t"})); names["web_search"] {
+	if names := definitionNames(unconfigured.toolDefinitionsFor(context.Background(), &types.Task{ID: "t"})); names["web_search"] {
 		t.Error("an extension with no address offered its tool")
 	}
 }

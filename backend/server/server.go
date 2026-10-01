@@ -31,6 +31,7 @@ import (
 	"mike/backend/httputil"
 	"mike/backend/llmadapter"
 	"mike/backend/lsp"
+	"mike/backend/mcp"
 	"mike/backend/prompts"
 	"mike/backend/sandbox"
 	"mike/backend/store"
@@ -83,10 +84,12 @@ type Server struct {
 	extLSPMgr           *lsp.ExtensionLSPManager
 	// Read per turn and per config request, so it holds nothing that can fall behind the store.
 	extToolRegistry *extensions.ToolRegistry
-	lspHandler      *lsp.LSPHandler
-	loginLimiter    *RateLimiter
-	previewStore    *previewStore
-	mux             *http.ServeMux
+	// mcpRegistry is the per-project MCP offer; see backend/mcp.
+	mcpRegistry  *mcp.Registry
+	lspHandler   *lsp.LSPHandler
+	loginLimiter *RateLimiter
+	previewStore *previewStore
+	mux          *http.ServeMux
 	// router is what every request enters: the mux, then the SPA behind it.
 	router http.Handler
 	addr   string
@@ -325,7 +328,7 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 		return nil, fmt.Errorf("derive secret key: %w", err)
 	}
 
-	cfgStore := config.NewConfigStore(store, dbPath, Version, secretBox)
+	cfgStore := config.NewConfigStore(store, dbPath, Version, secretBox, settings.RestrictMCP)
 	cfgStore.SetRegistryURL(settings.RegistryURL)
 	if err := cfgStore.MigrateProviderIDs(); err != nil {
 		return nil, fmt.Errorf("migrate provider IDs: %w", err)
@@ -490,6 +493,14 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 	s.extLSPMgr = lsp.NewExtensionLSPManager(s.extStore, s.extSandboxMgr, store)
 	s.extToolRegistry = extensions.NewToolRegistry(s.extStore)
 	cfgStore.SetServerToolLister(s.extToolRegistry)
+	// The MCP registry joins the config's server list to each project's opt-in list. It holds no
+	// connection: a listing is taken per server and reused, and a call dials when the model asks.
+	s.mcpRegistry = mcp.NewRegistry(cfgStore, store, mcp.Identity{Name: "mike", Version: Version})
+	// The posture is announced once per boot, the way the release-update switch is: the log, not the UI,
+	// is the record of which switch this process booted on.
+	if settings.RestrictMCP {
+		logging.For(logging.MCP).Infof("the MCP registry is frozen by %s: no server can be added, edited, removed or tested from Settings, and a project still opts in per server", config.EnvRestrictMCP)
+	}
 	defer s.reg(stageExtensionLSPManager, "extension lsp manager", s.extLSPMgr.Close)()
 
 	// Enabled `llm` extensions rewrite MIKE's provider requests; their mappings files are
@@ -525,6 +536,7 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 		LSPMgr:         s.extLSPMgr,
 		CommitQueue:    commitQueue,
 		ExtensionTools: s.extToolRegistry,
+		MCP:            s.mcpRegistry,
 	})
 	s.executor.SetLLMAdapter(s.llmAdapter)
 	// The budget is measured on the same tick that samples the containers it counts, and reports

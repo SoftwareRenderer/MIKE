@@ -497,7 +497,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 	// leaving the last notice standing.
 	silence := te.newStreamSilenceWatcher(setup.projectID, setup.task.ID)
 	client := te.newLlamaClient(setup.serverURL, setup.modelName, reasoningEffort, apiKey, silence)
-	tools := te.toolDefinitionsFor(setup.task)
+	tools := te.toolDefinitionsFor(setup.ctx, setup.task)
 	taskMsgs, _ := te.store.GetTaskMessages(setup.task.ID, setup.task.CurrentThreadID)
 	messages := buildMessagesFromDB(setup.task, taskMsgs, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
 
@@ -602,7 +602,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 					}
 					// Update setup.task reference with latest mode
 					setup.task.OperatingMode = updatedTask.OperatingMode
-					tools = te.toolDefinitionsFor(updatedTask)
+					tools = te.toolDefinitionsFor(setup.ctx, updatedTask)
 					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.TurnStatusEvent("running", fmt.Sprintf("Sandbox recreated for mode change (%s)", newOperatingMode)))
 				}
 			}
@@ -989,9 +989,9 @@ const (
 	turnStop
 )
 
-// Which tools a task exposes. The operating mode chooses the acting set (plan and explore replace it), and
-// contributed and LSP tools are appended to whatever the mode chose.
-func (te *TaskExecutor) toolDefinitionsFor(task *types.Task) []types.ChatTool {
+// Which tools a task exposes. The operating mode chooses the acting set (plan and explore replace it),
+// and contributed and MCP tools are appended to whatever the mode chose.
+func (te *TaskExecutor) toolDefinitionsFor(ctx context.Context, task *types.Task) []types.ChatTool {
 	var tools []types.ChatTool
 	switch {
 	case task.IsPlanMode():
@@ -1004,7 +1004,17 @@ func (te *TaskExecutor) toolDefinitionsFor(task *types.Task) []types.ChatTool {
 	if te.lspMgr != nil && te.lspMgr.GetRegistry().HasAnyLSPToolCallsExtension() {
 		tools = append(tools, llama.GetLSPToolDefinitions()...)
 	}
-	return append(tools, llama.ContributedToolDefinitions(te.contributedSpecs())...)
+	tools = append(tools, llama.ContributedToolDefinitions(te.contributedSpecs())...)
+	return append(tools, llama.ContributedToolDefinitions(te.mcpSpecs(ctx, task.ProjectID))...)
+}
+
+// mcpSpecs reads the offer per turn, so saving a server or enabling one for the project takes effect on
+// the next turn. A project that enabled nothing costs no dial.
+func (te *TaskExecutor) mcpSpecs(ctx context.Context, projectID string) []types.ToolSpec {
+	if te.mcpReg == nil {
+		return nil
+	}
+	return te.mcpReg.SpecsForProject(ctx, projectID)
 }
 
 // Read per turn, so installing or configuring an extension takes effect on the next turn.

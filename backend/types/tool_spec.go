@@ -8,6 +8,10 @@ type NetworkedExtension struct {
 	Tools       []string `json:"tools"`
 }
 
+// MCPToolNamePrefix marks a tool from a registered MCP server. Dispatch routes on it and a contributed
+// tool may not take it, so neither owner shadows the other.
+const MCPToolNamePrefix = "mcp_"
+
 // ToolSpec is a tool as an extension declares it. types is the floor backend/extensions and backend/llama
 // stand on, so neither imports the other to describe a contributed tool.
 type ToolSpec struct {

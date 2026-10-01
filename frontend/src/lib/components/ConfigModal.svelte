@@ -1,12 +1,12 @@
 <script lang="ts">
     
     import { tick } from 'svelte';
-    import type { Config, Provider } from '$lib/types';
+    import type { Config, ProjectUpdates, Provider } from '$lib/types';
     import { isAgentProvider } from '$lib/types';
     import { getModelName, getProviderDisplayName } from '$lib/utils/providers';
     import { t } from '$lib/i18n';
     import { formatMB, usdSymbol } from '$lib/utils/format';
-    import { updateConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi, updateProject } from '$lib/api';
+    import { updateConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi, testMCPServer, updateProject } from '$lib/api';
     import { appStore, dialogStore, uiStore } from '$lib/stores';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import BaseModal from './BaseModal.svelte';
@@ -16,6 +16,16 @@
     import PreferencesTab from './ConfigModal/PreferencesTab.svelte';
     import ProviderCard from './ConfigModal/ProviderCard.svelte';
     import ExtensionsTab from './ConfigModal/ExtensionsTab.svelte';
+    import MCPTab from './ConfigModal/MCPTab.svelte';
+    import type { MCPServerDraft } from './ConfigModal/mcp-drafts';
+    import {
+        buildMCPServers,
+        newMCPServerDraft,
+        mcpServerPayload,
+        mcpServersPayload,
+        validateMCPServers,
+    } from './ConfigModal/mcp-drafts';
+    import { projectMCPServerIDs, selectableMCPServers } from '$lib/utils/mcp-project';
     import SessionsSection from './ConfigModal/SessionsSection.svelte';
     import ApiTokensSection from './ConfigModal/ApiTokensSection.svelte';
     import UpdatesSection from './ConfigModal/UpdatesSection.svelte';
@@ -63,6 +73,14 @@
     let notifyOnReview = $state(false);
     // The open project's answer to the "Assisted-by" commit trailer; absent means on.
     let commitAssistedBy = $state(true);
+    // The MCP registry and this project's opt-in list. Both are edited here rather than in the tab: the
+    // first rides the config payload, the second the project PUT.
+    let mcpServers = $state<MCPServerDraft[]>([]);
+    let projectMCPOpts = $state<string[]>([]);
+    let _mcpUidCounter = 0;
+    // MIKE_RESTRICT_MCP: the registry is shown read-only and leaves the save payload entirely, because
+    // the server refuses any write that would change it. A project's own enable list is untouched.
+    const mcpLocked = $derived(config?.mcp_restricted === true);
     let loading = $state(false);
     let error = $state('');
 
@@ -210,6 +228,8 @@
             autoMaximizeChat = config.auto_maximize_chat_mobile !== false;
             notifyOnReview = uiStore.notifyOnReview;
             commitAssistedBy = appStore.selectedProject?.commit_assisted_by !== false;
+            mcpServers = buildMCPServers(config);
+            projectMCPOpts = [...(appStore.selectedProject?.mcp_server_ids || [])];
             providers = buildProviders(config);
             hasChanges = false;
             agentRows = agentRowSignature(config);
@@ -498,20 +518,88 @@
 
     // Project Defaults writes to the open project's row, not to the config payload. A Save that did not
     // touch the row sends nothing.
-    async function saveProjectCommitDefaults() {
+    async function saveProjectDefaults() {
         const row = appStore.selectedProject;
-        if (!row || commitAssistedBy === (row.commit_assisted_by !== false)) return;
-        await updateProject(row.id, { commit_assisted_by: commitAssistedBy });
+        if (!row) return;
+        const assistedBy = commitAssistedBy !== (row.commit_assisted_by !== false);
+        const chosen = projectMCPServerIDs(config, projectMCPOpts);
+        const mcpChanged = !sameIds(chosen, row.mcp_server_ids || []);
+        if (!assistedBy && !mcpChanged) return;
+        const updates: ProjectUpdates = {};
+        if (assistedBy) updates.commit_assisted_by = commitAssistedBy;
+        if (mcpChanged) updates.mcp_server_ids = chosen;
+        await updateProject(row.id, updates);
         // The offline queue answers with a partial row, so the stored row is patched rather than replaced.
-        const patched = { ...row, commit_assisted_by: commitAssistedBy };
+        const patched = { ...row };
+        if (assistedBy) patched.commit_assisted_by = commitAssistedBy;
+        if (mcpChanged) patched.mcp_server_ids = chosen;
         appStore.projects = appStore.projects.map(p => (p.id === row.id ? patched : p));
         if (appStore.selectedProject?.id === row.id) appStore.selectedProject = patched;
+    }
+
+    /** Order-insensitive equality: two saves of one selection must read as unchanged. */
+    function sameIds(left: string[], right: string[]): boolean {
+        if (left.length !== right.length) return false;
+        const seen = new Set(right);
+        return left.every((id) => seen.has(id));
+    }
+
+    // -- MCP servers --
+
+    function addMCPServer() {
+        mcpServers.push(newMCPServerDraft(`mcp-new-${++_mcpUidCounter}-${Date.now()}`));
+        markDirty();
+    }
+
+    function removeMCPServer(uid: string) {
+        mcpServers = mcpServers.filter((s) => s.uid !== uid);
+        markDirty();
+    }
+
+    /**
+     * The Test action sends the card's current values, so an address typed and never saved is the address
+     * that gets dialled. A header still holding the placeholder is resolved server-side.
+     */
+    async function testMCPServerDraft(uid: string) {
+        const draft = mcpServers.find((s) => s.uid === uid);
+        if (!draft || draft.testing) return;
+        draft.testing = true;
+        draft.result = null;
+        try {
+            const payload = mcpServerPayload(draft);
+            const answer = await testMCPServer({
+                id: draft.id || undefined,
+                name: payload.name,
+                url: payload.url,
+                timeout_seconds: payload.timeout_seconds,
+                headers: payload.headers,
+            });
+            draft.result = {
+                ok: answer.ok,
+                message: !answer.ok
+                    ? answer.message
+                    : answer.tools === 0
+                        ? t('settings.mcp.testNone')
+                        : (answer.dropped ?? 0) > 0
+                            ? t('settings.mcp.testOkDropped', { tools: answer.tools, dropped: answer.dropped ?? 0 })
+                            : t('settings.mcp.testOk', { tools: answer.tools }),
+            };
+        } catch (e) {
+            draft.result = { ok: false, message: String(e) };
+        } finally {
+            draft.testing = false;
+        }
     }
 
     async function handleSave() {
         const validationError = validatePrimaryProviders();
         if (validationError) {
             error = validationError;
+            return;
+        }
+        const mcpError = mcpLocked ? null : validateMCPServers(mcpServers);
+        if (mcpError) {
+            error = t(mcpError.key, mcpError.params);
             return;
         }
         loading = true;
@@ -580,9 +668,12 @@
                 sort_oldest_first: sortOldestFirst,
                 auto_maximize_chat_mobile: autoMaximizeChat,
                 keyboard_shortcuts: { create_task: keyboardCreateTask, create_task_submit: keyboardCreateTaskSubmit, open_terminal: keyboardOpenTerminal, start_task: keyboardStartTask, toggle_fullscreen: keyboardToggleFullscreen, multi_select_click: keyboardMultiSelectClick, hide_hints: keyboardHideHints },
+                // The whole registry every save: a server missing from this body is a deleted one. Under
+                // the operator's lock nothing is sent, so nothing is claimed.
+                ...(mcpLocked ? {} : { mcp_servers: mcpServersPayload(mcpServers) }),
             } as Config));
             appStore.config = cfg;
-            await saveProjectCommitDefaults();
+            await saveProjectDefaults();
             uiStore.notifyOnReview = notifyOnReview;
             uiStore.persistNotifyOnReview();
             // The switch may have just answered the question the dot is waiting on.
@@ -675,6 +766,7 @@
             <button type="button" class="tab-btn" class:active={activeTab === 'task-defaults'} onclick={() => activeTab = 'task-defaults'}>{t('settings.tab.task')}</button>
             <button type="button" class="tab-btn" class:active={activeTab === 'preferences'} onclick={() => activeTab = 'preferences'}>{t('settings.tab.preferences')}</button>
             <button type="button" class="tab-btn" class:active={activeTab === 'extensions'} onclick={() => activeTab = 'extensions'}>{t('settings.tab.extensions')}</button>
+            <button type="button" class="tab-btn" class:active={activeTab === 'mcp'} onclick={() => activeTab = 'mcp'}>{t('settings.tab.mcp')}</button>
             <button type="button" class="tab-btn" class:active={activeTab === 'about'} onclick={() => activeTab = 'about'}>{t('settings.tab.about')}</button>
         </div>
         <div class="header-actions">
@@ -826,7 +918,13 @@
 
         <!-- Project Defaults Tab -->
         {#if activeTab === 'project-defaults' && appStore.selectedProject}
-            <ProjectDefaults bind:commitAssistedBy projectName={appStore.selectedProject.name} onDirty={markDirty} />
+            <ProjectDefaults
+                bind:commitAssistedBy
+                bind:mcpServerIDs={projectMCPOpts}
+                mcpOptions={selectableMCPServers(config)}
+                projectName={appStore.selectedProject.name}
+                onDirty={markDirty}
+            />
         {/if}
 
         <!-- Preferences Tab -->
@@ -837,6 +935,18 @@
         <!-- Extensions Tab -->
         {#if activeTab === 'extensions'}
             <ExtensionsTab />
+        {/if}
+
+        <!-- MCP Tab -->
+        {#if activeTab === 'mcp'}
+            <MCPTab
+                servers={mcpServers}
+                locked={mcpLocked}
+                onAdd={addMCPServer}
+                onRemove={removeMCPServer}
+                onTest={testMCPServerDraft}
+                onDirty={markDirty}
+            />
         {/if}
 
         <!-- About Tab -->

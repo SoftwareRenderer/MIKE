@@ -7,7 +7,7 @@ projects too because the server process enforces them.
 
 - `project.sandbox_enabled` is the whole answer: **on** means every LLM-initiated action
   (`read_file`/`write_file`/`edit_file`/`bash`, the LSP tools, the agent adapter) runs in the container
-  and a missing bridge is an error rather than a host fallback; **off** means those actions run on the
+  and a missing bridge is an error rather than a host fallback. The **off** case runs those actions on the
   host, because turning a project's sandbox off *is* the operator's decision about that project.
 - `DANGER_ZONE=1` is the permission to make that decision — creating a project with sandboxing disabled,
   or switching one to unsandboxed, is 403 without it (`cannot create project with sandbox disabled — set
@@ -15,7 +15,7 @@ projects too because the server process enforces them.
   `sandbox.DangerZone` — never a `Getenv` at the gate). It never gates execution.
 - The flag has a second, deliberate meaning: it decides what a host terminal is *given*
   (`term.hostShellEnv`) — `os.Environ()` with it, because that terminal is the operator's own shell and a
-  scrubbed one cannot run their ssh-agent/registry logins; `agent.SafeAgentEnv` without it, because a
+  scrubbed one cannot run their ssh-agent/registry logins. `agent.SafeAgentEnv` without it, because a
   project row is not a grant of `MIKE_LOGIN_PASSWORD` and `MIKE_ENCRYPTION_KEY` to a shell.
 - `toolEnv.hostGuard` (`backend/exec/tool_dispatch.go`) refuses `read_file`/`write_file`/`edit_file`/`bash`
   when a sandboxed task's sandbox callback is missing: a missing bridge is an outage, not a licence to
@@ -48,7 +48,7 @@ projects too because the server process enforces them.
   for the next, so a handler that drops one — or passes `""` where the worktree root belongs — writes
   outside the project and still compiles.
 - **`GET /api/fs/raw` takes a repository-relative path, so it jails the join.** The diff surfaces hold
-  paths relative to the repository root and pass those; the handler refuses an absolute or `..`-stepping
+  paths relative to the repository root and pass those. The handler refuses an absolute or `..`-stepping
   path, joins what is left to `fsWorktreeRoot`'s tree, and hands the result to the same `validateFSPath`.
   Its own rule is what a response may *be* — one map of image extensions, which is the permission and the
   `Content-Type` at once — so a request cannot aim the route at a file that would run in the browser.
@@ -78,7 +78,7 @@ projects too because the server process enforces them.
   and a tree root or its ancestor (`fsutil.ErrProtectedPath`: the project's checkout and the task's own
   worktree, directories this server created and tears down elsewhere — `docs/commit-and-done.md`). Both are
   answered **per item**, beside the path they happened to, because a batch is a person's selection and one
-  wrong row should not cost the rest of it; only a containment failure, which is the jail rather than one
+  wrong row should not cost the rest of it. Only a containment failure, which is the jail rather than one
   row's bad luck, fails the whole request. A nested `.git` directory is skipped by both the size walk and the
   copy itself, so a folder that happens to hold a repository does not drag it along.
 - **Every bound runs before the bytes** (`backend/fsutil/ops.go`): a copy walks its tree and refuses past
@@ -151,7 +151,9 @@ Tests: `backend/api/git_diff_file_path_test.go`, `git_diff_file_full_test.go`,
   `httputil.DoOutbound`) buffers a bounded response and answers it with a type of MIKE's own
   (`proxyContentType`), never the upstream's. A contributed tool's answer is bounded twice over — the
   manifest's own `max_results` / `max_snippet_chars`, then `toolresult.MaxCaptureBytes` on the rendered
-  text, the same number a command's output is held to (`docs/extension-tools.md`).
+  text, the same number a command's output is held to (`docs/extension-tools.md`). An MCP tool's answer is
+  bounded the same way, and one server-sent event is refused past `httputil.MaxUpstreamBodyBytes` rather
+  than buffered (`docs/mcp.md`).
 - A subprocess's output is bounded where it is captured, not where it is shown: `toolresult.Capture`
   (`backend/toolresult/capture.go`) is the writer a sandboxed `Exec` hands its command and
   `streamLineWriter` does the same for the host bash path, both at `MaxCaptureBytes` with a trailing
@@ -197,6 +199,28 @@ occurrence).
 accessor-only: there are deliberately no exported `GitAuthorName`/`GitAuthorEmail` variables, because the
 add-project flow writes the identity while tasks are committing. Making it per-`WorktreeManager` is still
 open.
+## The address a person typed is a network grant
+
+Two origins of an outbound address exist, and they are not equally trusted. An address this server chose —
+an update manifest, a configured provider — goes out through the ordinary client. An address a **person
+typed** is the permission to reach it, and it is also a risk: a typo is a dial into this host.
+
+- An extension contributed tool may contact only the origin stored in the `config_schema` property of type
+  `"url"` its `request.url` names (`docs/extension-tools.md`).
+- An MCP server may be dialled only at the URL its row stores (`MCPServer.URL`), which
+  `types.ValidateMCPServer` has already reduced to an http or https origin with no credentials in it.
+- Both go out through `httputil.NewExtensionEgressClientGranting`, whose widening is the same for both and
+  narrower than it looks: **loopback only**, for the typed host alone, with the link-local metadata address
+  and every other non-public range still refused even when named. Redirects are refused outright, so one
+  registered address cannot become a proxy into the local network. The grant is per client, which is why a
+  granted call gets its own transport with keep-alives off.
+- Neither runs in a task container, so a project's Network Isolation says nothing about either. The Sandbox
+  Configuration states that, naming the extensions and the MCP servers the project enabled
+  (`frontend/src/lib/utils/server-tool-network.ts`).
+- Tests: `backend/httputil/client_test.go` and `egress_test.go` (the grant, the refusal, the metadata
+  address refused while named), `backend/mcp/era_test.go` (the same rule through an MCP dial),
+  `backend/mcp/probe_test.go` (the Test action dials what the form holds and nothing else).
+
 ## Checking this
 
 `go test ./backend/api/ ./backend/fsutil/ ./backend/server/` covers the jails and the caps.
