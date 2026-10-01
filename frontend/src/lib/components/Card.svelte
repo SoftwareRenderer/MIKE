@@ -12,7 +12,7 @@
     import { diffStatsStore } from '$lib/stores/diff-stats.svelte';
     import Card from './Card.svelte';
     import { moveTask, stopTask, resumeTask, deleteTask, commitAndDone, getQueuedTaskIds, getQueuedDeleteTaskIds, onQueueChanged } from '$lib/api';
-    import { mergeQueuedUpdate } from '$lib/utils/task-utils';
+    import { ancestorsOf, mergeQueuedUpdate } from '$lib/utils/task-utils';
     import { useMemoryAlert } from '$lib/composables/use-memory-alert.svelte';
     import { memoryAlertSentences, projectMemoryLimitMB } from '$lib/utils/memory-stats';
     import { effectiveMultiSelectClick, matchesClickBinding, isBrowserLinkClick } from '$lib/utils/keyboard';
@@ -590,19 +590,9 @@
         if (!isSelected) return false;
         const sel = appStore.selectedTask;
         if (!sel || !sel.parent_task_id) return true;
-        // Walk up the ancestor chain to see if this task is an ancestor of the selected task
-        let ancestor: Task | null = sel;
-        let found = false;
-        while (ancestor) {
-            if (ancestor.parent_task_id === task.id) {
-                found = true;
-                break;
-            }
-            const nextId: string | undefined = ancestor.parent_task_id;
-            ancestor = nextId ? (appStore.board?.tasks.find(t => t.id === nextId) ?? null) : null;
-        }
-        if (found) return false;
-        return true;
+        // A parent's card loses the highlight while one of its descendants holds the selection.
+        const tasks = appStore.board?.tasks ?? [];
+        return !ancestorsOf(sel, id => tasks.find(t => t.id === id)).some(a => a.id === task.id);
     });
 
     $effect(() => {

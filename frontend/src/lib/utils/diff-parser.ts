@@ -15,13 +15,24 @@ export function getStatusBadge(file: DiffFile): { letter: string; color: string 
 }
 
 /**
+ * A line at least this long is not word-diffed. `diffWordsWithSpace` costs far more than its input's
+ * length — a pair of 2 000-char lines is ~26 ms, 20 000 is 1.6 s and 170 MB of RSS — and it runs on the
+ * main thread as the diff renders. `git` bounds a diff by change-line *count* (`defaultMaxChangeLines`),
+ * never by line length, so a minified bundle or a one-line JSON file arrives whole.
+ */
+const MAX_WORD_DIFF_CHARS = 2000;
+
+/**
  * Build inline word-level diff segments for a pair of removed/added lines.
  * Uses diffWordsWithSpace to find the exact changed portions within the line.
+ *
+ * `null` when the pair is too large to diff inline; the caller then draws both rows as whole lines.
  */
 export function buildModifiedSegments(oldText: string, newText: string): {
     oldSegments: InlineDiffSegment[];
     newSegments: InlineDiffSegment[];
-} {
+} | null {
+    if (oldText.length > MAX_WORD_DIFF_CHARS || newText.length > MAX_WORD_DIFF_CHARS) return null;
     const oldSegments: InlineDiffSegment[] = [];
     const newSegments: InlineDiffSegment[] = [];
     const parts = diffWordsWithSpace(oldText, newText);
@@ -83,9 +94,11 @@ export function enrichRowsWithInlineSegments(rows: ApiDiffRow[]): DiffRow[] {
             const removedRow = removedBlock[pi];
             const addedRow = addedBlock[pi];
             if (removedRow && addedRow && !removedRow.segments && !addedRow.segments) {
-                const { oldSegments, newSegments } = buildModifiedSegments(removedRow.text ?? '', addedRow.text ?? '');
-                removedBlock[pi] = { ...removedRow, segments: oldSegments };
-                addedBlock[pi] = { ...addedRow, segments: newSegments };
+                const segments = buildModifiedSegments(removedRow.text ?? '', addedRow.text ?? '');
+                if (segments) {
+                    removedBlock[pi] = { ...removedRow, segments: segments.oldSegments };
+                    addedBlock[pi] = { ...addedRow, segments: segments.newSegments };
+                }
             }
         }
 

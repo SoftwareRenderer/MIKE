@@ -17,32 +17,50 @@ export function taskIsInFlight(executionState: string): boolean {
     return executionState === 'running' || executionState === 'pulling_image';
 }
 
-/** Recursively count a task and all its descendants that match the given status. */
+/**
+ * A task plus the descendants that match `status`, counted only through a matching task: a parent in
+ * another column hides its matching child, which is what a column's count means. Every task counts once,
+ * however the `parent_task_id` graph is knotted.
+ */
 export function countWithDescendants(taskId: string, status: string, childrenMap: Map<string, Task[]>): number {
-    const children = childrenMap.get(taskId) ?? [];
+    const seen = new Set<string>([taskId]);
     let count = 1;
-    for (const child of children) {
-        if (child.status === status) {
-            count += countWithDescendants(child.id, status, childrenMap);
-        }
+    const queue = [...(childrenMap.get(taskId) ?? [])];
+    while (queue.length > 0) {
+        const task = queue.pop()!;
+        if (task.status !== status || seen.has(task.id)) continue;
+        seen.add(task.id);
+        count++;
+        queue.push(...(childrenMap.get(task.id) ?? []));
     }
     return count;
+}
+
+/**
+ * Every ancestor of `task`, nearest first, never the task itself. The chain ends at an id `find` cannot
+ * resolve — a task outside the list on screen — and at the first id already seen: `parent_task_id` is
+ * written by a person or an agent, and a cycle must end rather than hang the render that walked it.
+ */
+export function ancestorsOf(task: Task, find: (id: string) => Task | undefined): Task[] {
+    const chain: Task[] = [];
+    const seen = new Set<string>([task.id]);
+    let currentId = task.parent_task_id ?? '';
+    while (currentId && !seen.has(currentId)) {
+        seen.add(currentId);
+        const ancestor = find(currentId);
+        if (!ancestor) break;
+        chain.push(ancestor);
+        currentId = ancestor.parent_task_id ?? '';
+    }
+    return chain;
 }
 
 /** True while some ancestor of this task sits in In Progress. The server refuses the same shape
  * per request (`checkAncestorInProgress` in `backend/api/task.go`). */
 export function ancestorInProgress(tasks: Task[], taskId: string): boolean {
     const byId = new Map(tasks.map(t => [t.id, t]));
-    const seen = new Set<string>([taskId]);
-    let currentId = byId.get(taskId)?.parent_task_id ?? '';
-    while (currentId && !seen.has(currentId)) {
-        seen.add(currentId);
-        const ancestor = byId.get(currentId);
-        if (!ancestor) break;
-        if (ancestor.status === 'in_progress') return true;
-        currentId = ancestor.parent_task_id ?? '';
-    }
-    return false;
+    const task = byId.get(taskId);
+    return !!task && ancestorsOf(task, id => byId.get(id)).some(a => a.status === 'in_progress');
 }
 
 /** True when a subtask moved to `targetStatus` joins the column its parent is already in, and is
@@ -83,15 +101,8 @@ export function planBulkMove(tasks: Task[], taskIds: string[], targetStatus: str
     const movable: string[] = [];
     const blocked: string[] = [];
     const depth = (id: string): number => {
-        const seen = new Set<string>([id]);
-        let current = byId.get(id);
-        let d = 0;
-        while (current?.parent_task_id && !seen.has(current.parent_task_id) && byId.has(current.parent_task_id)) {
-            seen.add(current.parent_task_id);
-            current = byId.get(current.parent_task_id);
-            d++;
-        }
-        return d;
+        const task = byId.get(id);
+        return task ? ancestorsOf(task, other => byId.get(other)).length : 0;
     };
 
     // Ordering by depth puts every ancestor before its descendants.
@@ -113,16 +124,8 @@ function heldByInProgressAncestor(
     byId: Map<string, Task>,
     decided: Map<string, boolean>,
 ): boolean {
-    const seen = new Set<string>([task.id]);
-    let currentId = task.parent_task_id ?? '';
-    while (currentId && !seen.has(currentId)) {
-        seen.add(currentId);
-        const ancestor = byId.get(currentId);
-        if (!ancestor) break;
-        if (ancestor.status === 'in_progress' && !decided.get(currentId)) return true;
-        currentId = ancestor.parent_task_id ?? '';
-    }
-    return false;
+    return ancestorsOf(task, id => byId.get(id))
+        .some(a => a.status === 'in_progress' && !decided.get(a.id));
 }
 
 /** Column the mobile board shows after switching projects: the one with the most urgent

@@ -1,14 +1,24 @@
 import { describe, it, expect } from 'vitest';
-import { filterTopLevelTaskIds, mergeTaskUpdateIntoBoard, resolveBoardLandingColumn, resolveClosedTaskColumn, taskIsInFlight } from '$lib/utils/task-utils';
+import {
+    ancestorsOf,
+    ancestorInProgress,
+    countWithDescendants,
+    filterTopLevelTaskIds,
+    mergeTaskUpdateIntoBoard,
+    planBulkMove,
+    resolveBoardLandingColumn,
+    resolveClosedTaskColumn,
+    taskIsInFlight,
+} from '$lib/utils/task-utils';
 import type { Task } from '$lib/types';
 
-function makeTask(id: string, parentId?: string): Task {
+function makeTask(id: string, parentId?: string, status = 'backlog'): Task {
     return {
         id,
         project_id: 'proj-1',
         title: id,
         prompt: '',
-        status: 'backlog',
+        status,
         execution_state: 'idle',
         has_merge_conflict: false,
         max_consecutive_failed_turns: 5,
@@ -203,5 +213,122 @@ describe('mergeTaskUpdateIntoBoard', () => {
         const row = makeTask('mine');
 
         expect(mergeTaskUpdateIntoBoard([row], row, 'proj-1')).toBeNull();
+    });
+});
+
+// `parent_task_id` is data a person or an agent writes — `PUT` checks only that the parent exists and is
+// not the task itself — so a task can be pointed at its own descendant. The board reads that graph inside
+// a `$derived`, where a walk that never ends is a tab that never paints again.
+describe('a parent_task_id cycle', () => {
+    const byIdOf = (tasks: Task[]) => new Map(tasks.map(t => [t.id, t]));
+    const childrenByParent = (tasks: Task[]): Map<string, Task[]> => {
+        const map = new Map<string, Task[]>();
+        for (const t of tasks) {
+            if (!t.parent_task_id) continue;
+            map.set(t.parent_task_id, [...(map.get(t.parent_task_id) ?? []), t]);
+        }
+        return map;
+    };
+
+    const twoCycle = () => [makeTask('a', 'b', 'backlog'), makeTask('b', 'a', 'review')];
+    const threeCycle = () => [
+        makeTask('a', 'b', 'backlog'),
+        makeTask('b', 'c', 'in_progress'),
+        makeTask('c', 'a', 'review'),
+    ];
+
+    it('ends ancestorsOf at the repeat instead of hanging', () => {
+        const two = twoCycle();
+        const three = threeCycle();
+        const findTwo = (id: string) => byIdOf(two).get(id);
+        const findThree = (id: string) => byIdOf(three).get(id);
+
+        expect(ancestorsOf(two[0], findTwo).map(t => t.id)).toEqual(['b']);
+        expect(ancestorsOf(three[0], findThree).map(t => t.id)).toEqual(['b', 'c']);
+    });
+
+    // The shape that never ended: the row itself is outside the cycle, so no ancestor ever repeats its own
+    // id, and its status matches none of the cycle's, so the old walk had nothing else to stop on.
+    it('ends ancestorsOf on a cycle the row stands outside', () => {
+        const tasks = [makeTask('x', 'a', 'backlog'), makeTask('a', 'b', 'review'), makeTask('b', 'a', 'in_progress')];
+        const find = (id: string) => byIdOf(tasks).get(id);
+
+        expect(ancestorsOf(tasks[0], find).map(t => t.id)).toEqual(['a', 'b']);
+    });
+
+    it('answers ancestorInProgress for a cycle', () => {
+        const tasks = threeCycle();
+
+        expect(ancestorInProgress(tasks, 'a')).toBe(true);
+        expect(ancestorInProgress(twoCycle(), 'a')).toBe(false);
+    });
+
+    it('counts each task once in countWithDescendants', () => {
+        const tasks = twoCycle();
+        const children = childrenByParent(tasks);
+
+        expect(countWithDescendants('a', 'review', children)).toBe(2);
+        expect(countWithDescendants('a', 'backlog', children)).toBe(1);
+    });
+
+    it('plans a bulk move over a cycle', () => {
+        const tasks = threeCycle();
+
+        const plan = planBulkMove(tasks, ['a', 'b', 'c'], 'backlog');
+
+        // 'a' is already in Backlog; the other two are not held by a decided ancestor.
+        expect(plan.movable).toEqual(['b', 'c']);
+        expect(plan.blocked).toEqual([]);
+        expect(plan.alreadyThere).toBe(1);
+    });
+});
+
+describe('ancestorInProgress', () => {
+    it('holds for an in-progress ancestor however far up the chain', () => {
+        const tasks = [
+            makeTask('root', undefined, 'in_progress'),
+            makeTask('child', 'root'),
+            makeTask('grandchild', 'child'),
+        ];
+
+        expect(ancestorInProgress(tasks, 'grandchild')).toBe(true);
+        expect(ancestorInProgress(tasks, 'root')).toBe(false);
+    });
+
+    it('ends at a parent the board does not hold', () => {
+        expect(ancestorInProgress([makeTask('child', 'aboard-gone', 'in_progress')], 'child')).toBe(false);
+    });
+});
+
+describe('countWithDescendants', () => {
+    it('counts a task plus the matching descendants below a matching parent', () => {
+        const tasks = [
+            makeTask('root', undefined, 'review'),
+            makeTask('child', 'root', 'review'),
+            makeTask('grandchild', 'child', 'review'),
+            makeTask('hidden', 'child', 'backlog'),
+            makeTask('hidden-child', 'hidden', 'review'),
+        ];
+        const children = new Map<string, Task[]>();
+        for (const t of tasks) {
+            if (t.parent_task_id) children.set(t.parent_task_id, [...(children.get(t.parent_task_id) ?? []), t]);
+        }
+
+        // `hidden` is not in Review, so its Review child is not counted through it.
+        expect(countWithDescendants('root', 'review', children)).toBe(3);
+    });
+});
+
+describe('planBulkMove', () => {
+    it('sends an ancestor before its descendants', () => {
+        const tasks = [
+            makeTask('root'),
+            makeTask('child', 'root'),
+            makeTask('grandchild', 'child'),
+        ];
+
+        const plan = planBulkMove(tasks, ['grandchild', 'root', 'child'], 'review');
+
+        expect(plan.movable).toEqual(['root', 'child', 'grandchild']);
     });
 });

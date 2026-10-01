@@ -879,7 +879,7 @@
         min-height: 32px;
         border-radius: var(--radius-md);
         background: var(--color-surface-1);
-        border: 1px solid var(--color-border);
+        border: 1px solid var(--color-accent);
         color: var(--color-text-secondary);
         cursor: pointer;
         font-size: var(--text-xs);
@@ -891,6 +891,7 @@
     .chat-jump-latest:hover {
         opacity: 1;
         background: color-mix(in srgb, var(--color-accent) 100%);
+        border-color: var(--color-accent-hover);
         color: var(--color-text-primary);
     }
     .chat-jump-latest-label {

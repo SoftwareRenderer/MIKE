@@ -2,6 +2,7 @@ import type { Task } from '$lib/types';
 import { appStore } from '$lib/stores';
 import { expandedTasksStore } from '$lib/stores/expanded-tasks.svelte';
 import { sortByLastMoved } from '$lib/utils/sort-tasks';
+import { ancestorsOf } from '$lib/utils/task-utils';
 
 /** Composable for subtask hierarchy management.
  * Tracks expanded/collapsed state, consolidation of subtasks under same-column ancestors,
@@ -38,15 +39,8 @@ export function useSubtaskHierarchy(getAllTasks: () => Task[], getCurrentParentI
 
         for (const t of tasks) {
             if (!t.parent_task_id) continue;
-            let parentId: string | undefined = t.parent_task_id;
-            while (parentId) {
-                const ancestor = taskMap.get(parentId);
-                if (!ancestor) break;
-                if (ancestor.status === t.status) {
-                    consolidated.add(t.id);
-                    break;
-                }
-                parentId = ancestor.parent_task_id ?? undefined;
+            if (ancestorsOf(t, id => taskMap.get(id)).some(a => a.status === t.status)) {
+                consolidated.add(t.id);
             }
         }
         return consolidated;
