@@ -65,11 +65,26 @@ describe('enrichRowsWithInlineSegments', () => {
         // Should not overwrite existing segments
         expect(result[0].segments).toBe(rows[0].segments);
     });
+
+    it('leaves a pair too long to word-diff as whole removed/added rows', () => {
+        const long = 'x'.repeat(5000);
+        const result = enrichRowsWithInlineSegments([row('removed', long), row('added', `${long}y`)]);
+        expect(result[0].segments).toBeUndefined();
+        expect(result[1].segments).toBeUndefined();
+        expect(result[0].text).toBe(long);
+    });
 });
 
 describe('buildModifiedSegments', () => {
+    /** The pair's segments, failing the test when the parser declined to word-diff a pair this small. */
+    function wordDiff(oldText: string, newText: string) {
+        const segments = buildModifiedSegments(oldText, newText);
+        if (!segments) throw new Error(`no segments for a ${oldText.length}/${newText.length}-char pair`);
+        return segments;
+    }
+
     it('identifies unchanged prefix, removed word, and added word', () => {
-        const { oldSegments, newSegments } = buildModifiedSegments('hello world', 'hello there');
+        const { oldSegments, newSegments } = wordDiff('hello world', 'hello there');
         // Old: "hello " (context) + "world" (removed)
         expect(oldSegments).toHaveLength(2);
         expect(oldSegments[0].tone).toBe('context');
@@ -85,7 +100,7 @@ describe('buildModifiedSegments', () => {
     });
 
     it('handles completely different lines', () => {
-        const { oldSegments, newSegments } = buildModifiedSegments('abc', 'xyz');
+        const { oldSegments, newSegments } = wordDiff('abc', 'xyz');
         expect(oldSegments).toHaveLength(1);
         expect(oldSegments[0].tone).toBe('removed');
         expect(oldSegments[0].text).toBe('abc');
@@ -95,7 +110,7 @@ describe('buildModifiedSegments', () => {
     });
 
     it('handles identical lines as all context', () => {
-        const { oldSegments, newSegments } = buildModifiedSegments('same line', 'same line');
+        const { oldSegments, newSegments } = wordDiff('same line', 'same line');
         expect(oldSegments).toHaveLength(1);
         expect(oldSegments[0].tone).toBe('context');
         expect(oldSegments[0].text).toBe('same line');
@@ -109,19 +124,19 @@ describe('buildModifiedSegments', () => {
         // should be detected as unchanged and rendered as a single context line.
         // buildModifiedSegments returns all-context segments for identical input,
         // but the caller (formatEditDiff) should check oldLine === newLine first.
-        const { oldSegments } = buildModifiedSegments('### 3. Verification', '### 3. Verification');
+        const { oldSegments } = wordDiff('### 3. Verification', '### 3. Verification');
         const allContext = oldSegments.every(s => s.tone === 'context');
         expect(allContext).toBe(true);
     });
 
     it('handles empty strings', () => {
-        const { oldSegments, newSegments } = buildModifiedSegments('', '');
+        const { oldSegments, newSegments } = wordDiff('', '');
         expect(oldSegments).toHaveLength(0);
         expect(newSegments).toHaveLength(0);
     });
 
     it('handles change in middle of line', () => {
-        const { oldSegments, newSegments } = buildModifiedSegments('const x = 1', 'const x = 2');
+        const { oldSegments, newSegments } = wordDiff('const x = 1', 'const x = 2');
         // "const x = " (context) + "1" (removed/added) + "" (context)
         const oldTones = oldSegments.map(s => s.tone);
         const newTones = newSegments.map(s => s.tone);
@@ -132,7 +147,7 @@ describe('buildModifiedSegments', () => {
     });
 
     it('handles multi-word changes', () => {
-        const { oldSegments, newSegments } = buildModifiedSegments('foo bar baz', 'foo qux baz');
+        const { oldSegments, newSegments } = wordDiff('foo bar baz', 'foo qux baz');
         const oldTones = oldSegments.map(s => s.tone);
         const newTones = newSegments.map(s => s.tone);
         // foo (context) + bar (removed) + baz (context)
@@ -143,6 +158,20 @@ describe('buildModifiedSegments', () => {
         expect(newTones[0]).toBe('context');
         expect(newTones[newTones.length - 1]).toBe('context');
         expect(newTones).toContain('added');
+    });
+
+    // The word-diff is superlinear: a 40 000-char pair never finished, and the diff panel and every edit
+    // card call this on the main thread while rendering. See MAX_WORD_DIFF_CHARS.
+    it('declines a pair whose length the word-diff cannot afford', () => {
+        const long = 'word '.repeat(2000); // 10 000 chars
+        expect(buildModifiedSegments(long, long + 'changed')).toBeNull();
+        expect(buildModifiedSegments('short', long)).toBeNull();
+    });
+
+    it('word-diffs a pair a reader can wait for', () => {
+        const a = 'word '.repeat(100); // 500 chars
+        const { oldSegments } = wordDiff(a, a + 'changed');
+        expect(oldSegments.some(s => s.tone === 'context')).toBe(true);
     });
 });
 

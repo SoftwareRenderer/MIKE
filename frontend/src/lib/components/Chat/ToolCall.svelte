@@ -331,10 +331,10 @@
                     // Identical — show as single context line
                     lines.push({ type: 'context', text: oldLine });
                 } else {
-                    // Different — show removed+added with inline segments
-                    const { oldSegments, newSegments } = buildModifiedSegments(oldLine, newLine);
-                    lines.push({ type: 'removed', text: oldLine, segments: oldSegments });
-                    lines.push({ type: 'added', text: newLine, segments: newSegments });
+                    // Different — removed+added, word-diffed when the pair is small enough to afford.
+                    const segments = buildModifiedSegments(oldLine, newLine);
+                    lines.push({ type: 'removed', text: oldLine, segments: segments?.oldSegments });
+                    lines.push({ type: 'added', text: newLine, segments: segments?.newSegments });
                 }
             }
 
