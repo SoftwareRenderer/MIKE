@@ -298,10 +298,14 @@ func CompareCatalogs(en, pack *Catalog, locale string, f *Findings, maxList int)
 
 	stats := CatalogStats{Locale: locale, ENKeys: len(owed) + heldEnglish, PackKeys: len(pack.baseKeys())}
 	shapeBad, noOther, deadForm := []string{}, []string{}, []string{}
-	// Placeholder findings are collected by two comparisons — form-by-form below, and the folded
-	// forms above — and reported as one list, because a pack with three lost tokens should say so
-	// once.
+	// Placeholder findings are collected by two comparisons — the whole message where the language
+	// folds English's forms together, and form-by-form below where it keeps them apart — and
+	// reported as one list, because a pack with three lost tokens should say so once.
 	var placeholderBad, untranslatedBad []string
+	// foldedKeys holds the counted messages some of whose English forms this language cannot select,
+	// so they are answered by one string: their flattened `key.form` values are compared as the
+	// message, not as forms, below.
+	foldedKeys := map[string]bool{}
 	reachable, known := reachableForms(locale)
 	for _, key := range owed {
 		if !packBase[key] {
@@ -326,26 +330,28 @@ func CompareCatalogs(en, pack *Catalog, locale string, f *Findings, maxList int)
 					deadForm = append(deadForm, fmt.Sprintf("%s.%s", key, form))
 				}
 			}
-			for form, text := range enForms {
-				if _, shipped := packForms[form]; shipped {
-					continue
+			folded := false
+			for form := range enForms {
+				if _, shipped := packForms[form]; !shipped {
+					// The form was folded into `other`, which every language has. That is the correct
+					// shape for a language with fewer forms than English, so it is counted, not failed.
+					stats.Collapsed++
+					folded = true
 				}
-				// The form was folded into `other`. That is legal, but it is invisible to the
-				// form-by-form placeholder comparison below, so its placeholders are checked here
-				// against everything the pack does ship for this message.
-				stats.Collapsed++
-				for _, tok := range ExtractPlaceholders(text) {
-					found := false
-					for _, shipped := range packForms {
-						for _, have := range ExtractPlaceholders(shipped) {
-							if have.Text == tok.Text {
-								found = true
-							}
-						}
-					}
-					if !found {
-						placeholderBad = append(placeholderBad, fmt.Sprintf("%s: folded form %q lost %s", key, form, tok.Text))
-					}
+			}
+			if folded {
+				// One string now answers every count English splits between forms, so it owes the
+				// tokens of all of them. No form-by-form comparison can say that: the folded form has
+				// no text of its own to check, and `other` alone can never equal both of English's
+				// forms when they ask for different things. Repetition is not owed across a fold —
+				// English repeating a token in two forms is one token in the answer.
+				foldedKeys[key] = true
+				missing, extra := diffCounts(unionPlaceholders(enForms), unionPlaceholders(packForms), locale)
+				for _, m := range missing {
+					placeholderBad = append(placeholderBad, fmt.Sprintf("%s: folded forms lost %s", key, m))
+				}
+				for _, e := range extra {
+					placeholderBad = append(placeholderBad, fmt.Sprintf("%s: folded forms added %s", key, e))
 				}
 			}
 		}
@@ -373,12 +379,16 @@ func CompareCatalogs(en, pack *Catalog, locale string, f *Findings, maxList int)
 			}
 		}
 
-		missing, extra := diffCounts(countPlaceholders(enTok), countPlaceholders(packTok), locale)
-		for _, m := range missing {
-			placeholderBad = append(placeholderBad, fmt.Sprintf("%s: lost %s", key, m))
-		}
-		for _, e := range extra {
-			placeholderBad = append(placeholderBad, fmt.Sprintf("%s: added %s", key, e))
+		// A flattened `key.form` of a folded message was compared as its whole message above; a
+		// per-form diff here would owe this language the tokens of a form it cannot select.
+		if !foldedKeys[en.baseOf(key)] {
+			missing, extra := diffCounts(countPlaceholders(enTok), countPlaceholders(packTok), locale)
+			for _, m := range missing {
+				placeholderBad = append(placeholderBad, fmt.Sprintf("%s: lost %s", key, m))
+			}
+			for _, e := range extra {
+				placeholderBad = append(placeholderBad, fmt.Sprintf("%s: added %s", key, e))
+			}
 		}
 
 		if packText == enText && looksLikeUntranslated(enText) {
