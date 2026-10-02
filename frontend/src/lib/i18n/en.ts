@@ -464,7 +464,7 @@ const catalog = {
     // ── ConfigModal/ModelList.svelte (the expanded row's sampler fields) ──
     // Each hint carries the range the save refuses a value outside (backend/config/sampling.go).
     'settings.sampling.title': 'Sampling Parameters',
-    'settings.sampling.hint': 'Leave a field empty to send nothing for it — the provider then samples its own way. A 0 is a value and is sent.',
+    'settings.sampling.hint': 'Leave a field empty use server detaults',
     'settings.sampling.temperature': 'Temperature',
     'settings.sampling.temperatureHint': 'Sampling temperature, 0 to 2. Empty = not sent.',
     'settings.sampling.topP': 'Top P',
