@@ -76,6 +76,20 @@ func (b *Box) Opens(purpose, record, value string) bool {
 	return err == nil
 }
 
+// gcm opens the AEAD for this box's key. New derives the key at a length both aes and cipher accept,
+// so the two errors below cannot fire.
+func (b *Box) gcm() (cipher.AEAD, error) {
+	block, err := aes.NewCipher(b.key)
+	if err != nil {
+		return nil, fmt.Errorf("crypto: %w", err)
+	}
+	aesGCM, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("crypto: %w", err)
+	}
+	return aesGCM, nil
+}
+
 // Encrypt seals value as the secret of type purpose belonging to record — "provider" and a provider id,
 // "extension-config" and an extension id plus its config key. A value lifted into another row, or another
 // kind of secret, will not open.
@@ -83,13 +97,9 @@ func (b *Box) Encrypt(purpose, record, value string) (string, error) {
 	if value == "" {
 		return "", nil
 	}
-	block, err := aes.NewCipher(b.key)
+	aesGCM, err := b.gcm()
 	if err != nil {
-		return "", fmt.Errorf("crypto: %w", err)
-	}
-	aesGCM, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", fmt.Errorf("crypto: %w", err)
+		return "", err
 	}
 	nonce := make([]byte, aesGCM.NonceSize())
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
@@ -109,13 +119,9 @@ func (b *Box) Decrypt(purpose, record, sealed string) (string, error) {
 	if err != nil {
 		return "", ErrNotRecord
 	}
-	block, err := aes.NewCipher(b.key)
+	aesGCM, err := b.gcm()
 	if err != nil {
-		return "", fmt.Errorf("crypto: %w", err)
-	}
-	aesGCM, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", fmt.Errorf("crypto: %w", err)
+		return "", err
 	}
 	// A record is a nonce and a tag at minimum; anything shorter was never one.
 	if len(data) < aesGCM.NonceSize()+aesGCM.Overhead() {

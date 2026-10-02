@@ -54,11 +54,8 @@ func unsetAllowlisted(t *testing.T, key string) {
 	}
 }
 
-// --- tests ---
-
-// TestSafeAgentEnv_StripsServerSecrets is the regression test for the credential
-// exposure: the agent subprocess must never inherit the master password or the key
-// that decrypts every provider API key in the database.
+// TestSafeAgentEnv_StripsServerSecrets: the agent subprocess must never inherit the master
+// password or the key that decrypts every provider API key in the database.
 func TestSafeAgentEnv_StripsServerSecrets(t *testing.T) {
 	secrets := map[string]string{
 		"MIKE_LOGIN_PASSWORD":   "hunter2",

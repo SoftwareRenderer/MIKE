@@ -601,8 +601,7 @@ func TestTruncateDiffLines_SingleLargeHunk(t *testing.T) {
 }
 
 func TestTruncateDiffLines_FirstFileExceedsLimit(t *testing.T) {
-	// Regression: early return in truncation loop dropped all files after
-	// the first file that exceeded the change-line limit.
+	// A file that exceeds the change-line limit must not drop the files listed after it.
 	var lines []string
 	// First file: 10 added lines (exceeds limit of 6)
 	lines = append(lines, "diff --git a/large.txt b/large.txt")

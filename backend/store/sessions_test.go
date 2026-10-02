@@ -42,9 +42,8 @@ func dbBytesRaw(t *testing.T, dbPath string) []byte {
 	return buf.Bytes()
 }
 
-// dbBytes checkpoints the WAL into the main file and returns the bytes of the
-// database plus any sidecars. Used to prove a secret is not merely invisible to
-// SQL but absent from the file an attacker would actually steal.
+// dbBytes checkpoints the WAL into the main file and returns the bytes of the database plus any
+// sidecars, so a test can prove a secret is absent from the file an attacker would steal.
 func dbBytes(t *testing.T, s *Store, dbPath string) []byte {
 	t.Helper()
 	if _, err := s.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
@@ -147,115 +146,6 @@ func TestSessionGetNotFound(t *testing.T) {
 	_, _, _, err := s.GetSessionByToken(ctx, "nonexistent")
 	if err == nil {
 		t.Fatal("expected error for nonexistent token")
-	}
-}
-
-// TestSessionLegacyBackfill covers the one-time migration: a row written by an
-// older build (plaintext token, no hash) keeps working through its original
-// token, and its plaintext is wiped from the database file.
-func TestSessionLegacyBackfill(t *testing.T) {
-	s, dbPath := newStoreAt(t)
-	ctx := context.Background()
-
-	const legacyToken = "deadbeefcafebabe0123456789abcdef00112233445566778899aabbccddeeff"
-	now := time.Now()
-	// Seed exactly the pre-migration shape: token in plaintext, token_hash NULL.
-	if _, err := s.Exec(
-		`INSERT INTO sessions (id, token, csrf_token, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`,
-		"legacy-1", legacyToken, "csrf-legacy", now.Unix(), now.Add(24*time.Hour).Unix(),
-	); err != nil {
-		t.Fatalf("seed legacy row: %v", err)
-	}
-
-	// Before the migration nothing resolves it (hash-only lookups).
-	if _, _, _, err := s.GetSessionByToken(ctx, legacyToken); err == nil {
-		t.Fatal("legacy row resolved before the backfill")
-	}
-
-	n, err := s.BackfillSessionTokens(ctx)
-	if err != nil {
-		t.Fatalf("backfill: %v", err)
-	}
-	if n != 1 {
-		t.Fatalf("backfilled = %d; want 1", n)
-	}
-
-	// The hash is present; the plaintext column is neutralised but unique.
-	sum := sha256.Sum256([]byte(legacyToken))
-	wantHash := hex.EncodeToString(sum[:])
-	var storedToken, storedHash string
-	if err := s.QueryRow(`SELECT token, token_hash FROM sessions WHERE id = ?`, "legacy-1").
-		Scan(&storedToken, &storedHash); err != nil {
-		t.Fatalf("read row: %v", err)
-	}
-	if storedHash != wantHash {
-		t.Errorf("token_hash = %q; want %q", storedHash, wantHash)
-	}
-	if storedToken == legacyToken {
-		t.Error("plaintext token survived the backfill")
-	}
-	if storedToken != "revoked-legacy-1" {
-		t.Errorf("token = %q; want %q", storedToken, "revoked-legacy-1")
-	}
-
-	// The existing session is NOT invalidated: the original token still works.
-	gotID, gotCsrf, gotExpires, err := s.GetSessionByToken(ctx, legacyToken)
-	if err != nil {
-		t.Fatalf("the pre-existing session stopped validating after the backfill: %v", err)
-	}
-	if gotID != "legacy-1" || gotCsrf != "csrf-legacy" {
-		t.Errorf("got (%q, %q); want (legacy-1, csrf-legacy)", gotID, gotCsrf)
-	}
-	if gotExpires.Before(now.Add(23 * time.Hour)) {
-		t.Errorf("expiry changed during the backfill: %v", gotExpires)
-	}
-
-	// The store rebuilt the file and truncated the WAL itself: no copy of the
-	// plaintext survives on disk, checked before this test touches the WAL.
-	if raw := dbBytesRaw(t, dbPath); bytes.Contains(raw, []byte(legacyToken)) {
-		t.Error("the legacy plaintext token survived on disk immediately after the backfill")
-	}
-
-	// The plaintext is gone from the file itself (VACUUM reclaims the page
-	// space the old value lived in).
-	if raw := dbBytes(t, s, dbPath); bytes.Contains(raw, []byte(legacyToken)) {
-		t.Error("the legacy plaintext token is still readable in the database file")
-	}
-
-	// Idempotent: a second startup migrates nothing and changes nothing.
-	if n, err := s.BackfillSessionTokens(ctx); err != nil || n != 0 {
-		t.Fatalf("second backfill = (%d, %v); want (0, nil)", n, err)
-	}
-	if _, _, _, err := s.GetSessionByToken(ctx, legacyToken); err != nil {
-		t.Fatalf("session invalid after a repeated backfill: %v", err)
-	}
-}
-
-// TestSessionLegacyBackfillKeepsUniqueness checks that neutralising the token
-// column for several legacy rows at once cannot collide on the UNIQUE index.
-func TestSessionLegacyBackfillKeepsUniqueness(t *testing.T) {
-	s := testStore(t)
-	ctx := context.Background()
-
-	for _, id := range []string{"legacy-a", "legacy-b", "legacy-c"} {
-		if _, err := s.Exec(
-			`INSERT INTO sessions (id, token, csrf_token, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`,
-			id, "plain-"+id, "csrf", time.Now().Unix(), time.Now().Add(time.Hour).Unix(),
-		); err != nil {
-			t.Fatalf("seed %s: %v", id, err)
-		}
-	}
-	n, err := s.BackfillSessionTokens(ctx)
-	if err != nil {
-		t.Fatalf("backfill: %v", err)
-	}
-	if n != 3 {
-		t.Fatalf("backfilled = %d; want 3", n)
-	}
-	for _, id := range []string{"legacy-a", "legacy-b", "legacy-c"} {
-		if _, _, _, err := s.GetSessionByToken(ctx, "plain-"+id); err != nil {
-			t.Errorf("session %s no longer validates: %v", id, err)
-		}
 	}
 }
 

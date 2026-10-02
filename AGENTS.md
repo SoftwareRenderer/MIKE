@@ -252,13 +252,12 @@ python3 scripts/gen-registry.py --check                  # registry.json matches
   Anything outside `tx` states its reason at its definition.
 - **`ON DELETE CASCADE` deletes rows, nothing else.** One `DELETE FROM projects` removes the rows; a task's
   container, worktree, branches and uploads are stopped by the deletion path, not by the schema. See *Deletion*.
-- **`PRAGMA user_version` gates the schema.** Adding a migration extends the probe chain *and* raises the
-  version, leaving the earlier idempotent steps in place; a step that must run exactly once needs its own
-  marker.
+- **The schema is created whole.** A new column is added to the DDL — `baseSchemaSQL`, or a credential
+  table's own statement beside its accessors. There is no probe chain and no `PRAGMA user_version`, because
+  nothing older has shipped.
 - **An instant that SQL compares is stored as fixed-width UTC text.** `RFC3339Nano` trims the zeros off the
   fraction and `Z` sorts above every digit, so trimmed text orders two nearby instants backwards; a zone
-  offset repeats an hour at a fall-back. The columns, the rewrite of the older rows, the tie rule:
-  **`docs/storage.md`**.
+  offset repeats an hour at a fall-back. The columns and the tie rule: **`docs/storage.md`**.
 - A test that needs a write to fail half way through installs a SQLite `RAISE(ABORT)` trigger, never a hook
   in production code.
 - Permissions, ID generation, what is in and out of `tx`: **`docs/storage.md`**.
@@ -299,6 +298,10 @@ via podman. Without it, sandboxed projects refuse to start tasks — hard error,
   create-argument preface, and the only way to add a capability (which refuses unless the isolation
   posture is already there). Extensions delegate to it; a project's own Sandbox Configuration is checked by
   the same rules, and again at container creation because a row can predate them.
+- **A task container's git pointer is pinned read-only, and a task container that cannot pin it is
+  refused.** The pointer is a plain file inside the writable worktree, and the gitdir it names decides
+  which configuration the host's next `git status` reads. A project terminal keeps its writable one.
+  `docs/sandbox-runtime.md → A task worktree's git pointer is pinned read-only`
 - **Extension sandbox mounts are an allowlist, and borrowed roots are read-only** however the manifest
   asks. A manifest is text that came from the registry, not from a person, and an agent extension's
   `sandbox.mount` is a request rather than a grant — only a person's answer under Settings → Extensions reaches
@@ -359,8 +362,11 @@ Enforced by the server process, so it holds for non-sandboxed projects too.
 ## Git
 
 - **`git.Command`/`git.CommandContext` are the only way this repo starts git**; they set directory,
-  environment and `WaitDelay` together, and the hook fence that stops repo content executing cannot be
-  forged from a call site.
+  environment and `WaitDelay` together, and the execution fence that stops repo content executing cannot
+  be forged from a call site.
+- **The execution fence pins every setting that names a program by key** (`core.hooksPath`, `core.editor`,
+  `core.askPass`). A program the repository picks *by name* — `filter.<name>.clean` — has no key to pin, and
+  the read-only git pointer is what stops it.
 - **A stash entry is identified by hash, never by position** — the stack is shared by every worktree of the
   project and holds the user's own entries. Work needing a temporarily clean tree goes through `WithStash`,
   which refuses to run when the push failed.
@@ -550,12 +556,12 @@ deliberately omits.
 |---|---|
 | `docs/adr/README.md` | what belongs in a decision record, its shape, and the index of the records that exist |
 | `docs/configuration.md` | every env var, the flag twins, startup resolution, the archgate exceptions, the release packages |
-| `docs/sandbox-runtime.md` | boot injection, the stale sweep, container environment, podman args, capabilities, mount policy, memory caps and admission, podman subprocesses |
+| `docs/sandbox-runtime.md` | boot injection, the stale sweep, container environment, podman args, capabilities, mount policy, the git pointer pin, memory caps and admission, podman subprocesses |
 | `docs/sandbox-bridge.md` | bridge connections, LSP session binding, wire IDs, payload limits, upload lifetime |
 | `docs/confinement.md` | path jails, the no-project host jail, size and output caps, subprocess environments |
 | `docs/locking.md` | keylock domains, accessor shape, lock order, watched waits, `sandboxMu` |
-| `docs/storage.md` | what is in `tx`, migrations and `user_version`, stored timestamps, file permissions, ID generation |
-| `docs/git-operations.md` | command construction and hook fence, worktree layout, stash identity, ref/clone/hash fences, slugify |
+| `docs/storage.md` | what is in `tx`, the schema and its DDL, stored timestamps, file permissions, ID generation |
+| `docs/git-operations.md` | command construction and execution fence, worktree layout, stash identity, ref/clone/hash fences, slugify |
 | `docs/lifecycle.md` | construction order = shutdown order, the base-context registry, the TLS listener |
 | `docs/api-contract.md` | frame shapes, route verbs, partial updates, diff contract, error vocabulary, headers, endpoint ownership |
 | `docs/lsp-transport.md` | the `/api/lsp` socket's bounds, one ordered writer per workspace, exactly-once answering, the browser's wait ceilings |

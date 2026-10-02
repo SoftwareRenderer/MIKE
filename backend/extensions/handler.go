@@ -193,25 +193,20 @@ func (h *ExtensionHandler) extensionOr404(w http.ResponseWriter, id string) (*Ex
 	return ext, true
 }
 
-// registrySource returns the configured registry URL, answering 400 when there is none.
-func (h *ExtensionHandler) registrySource(w http.ResponseWriter) (string, bool) {
+// openRegistry reads the configured registry's index, answering 400 when no URL is configured and a
+// fault when the registry will not answer. It returns the URL too, because installing fetches again.
+func (h *ExtensionHandler) openRegistry(w http.ResponseWriter) (string, RegistryIndex, bool) {
 	url := h.config.RegistryURL
 	if url == "" {
 		httputil.JSONError(w, http.StatusBadRequest, "registry URL not configured")
-		return "", false
+		return "", nil, false
 	}
-	return url, true
-}
-
-// fetchRegistryIndex reads the registry index, answering 500 with the fetch error when the
-// registry cannot be reached.
-func (h *ExtensionHandler) fetchRegistryIndex(w http.ResponseWriter, url string) (RegistryIndex, bool) {
 	index, err := h.registry.FetchIndex(url)
 	if err != nil {
 		httputil.Fault(w, "fetch registry", err)
-		return nil, false
+		return "", nil, false
 	}
-	return index, true
+	return url, index, true
 }
 
 // findRegistryEntry returns the entry with this name, or nil.
@@ -868,11 +863,7 @@ func (h *ExtensionHandler) HandleLocalExtensions(w http.ResponseWriter, r *http.
 // HandleRegistryIndex fetches the registry index.
 func (h *ExtensionHandler) HandleRegistryIndex(w http.ResponseWriter, r *http.Request) {
 
-	url, ok := h.registrySource(w)
-	if !ok {
-		return
-	}
-	index, ok := h.fetchRegistryIndex(w, url)
+	_, index, ok := h.openRegistry(w)
 	if !ok {
 		return
 	}
@@ -895,11 +886,7 @@ func (h *ExtensionHandler) HandleInstall(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	url, ok := h.registrySource(w)
-	if !ok {
-		return
-	}
-	index, ok := h.fetchRegistryIndex(w, url)
+	url, index, ok := h.openRegistry(w)
 	if !ok {
 		return
 	}
@@ -1076,9 +1063,6 @@ func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry
 		fail(fmt.Errorf("extension %s declares an unusable sandbox configuration: %w", entry.Name, err))
 		return
 	}
-	// A manifest published before file_types existed still installs: normalize first, then
-	// validate — a bad file type or profile would otherwise be stored and degrade silently.
-	manifest.Capabilities.GetLSP().NormalizeFileTypes()
 	if err := manifest.Capabilities.GetLSP().Validate(); err != nil {
 		fail(fmt.Errorf("extension %s declares an unusable language configuration: %w", entry.Name, err))
 		return
@@ -1275,11 +1259,7 @@ func (h *ExtensionHandler) streamOperation(w http.ResponseWriter, r *http.Reques
 // HandleCheckUpdates checks for available updates.
 func (h *ExtensionHandler) HandleCheckUpdates(w http.ResponseWriter, r *http.Request) {
 
-	url, ok := h.registrySource(w)
-	if !ok {
-		return
-	}
-	index, ok := h.fetchRegistryIndex(w, url)
+	_, index, ok := h.openRegistry(w)
 	if !ok {
 		return
 	}
@@ -1480,7 +1460,6 @@ func (h *ExtensionHandler) updateImageInBackground(id, name, url string, ackNewD
 					return
 				}
 				// Check the new commit's language declarations before they replace the stored manifest.
-				m.Capabilities.GetLSP().NormalizeFileTypes()
 				if err := m.Capabilities.GetLSP().Validate(); err != nil {
 					fail(fmt.Errorf("extension %s declares an unusable language configuration: %w", entry.Name, err))
 					return

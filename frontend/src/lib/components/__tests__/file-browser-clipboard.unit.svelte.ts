@@ -6,11 +6,25 @@ import { dialogStore } from '$lib/stores';
 const ROOT = '/srv/proj';
 const PROJECT = 'proj-7';
 
-const LISTING: Record<string, { name: string; isDir: boolean; path: string }[]> = {
+type ListedEntry = { name: string; isDir: boolean; path: string };
+
+let LISTING: Record<string, ListedEntry[]> = {
     [ROOT]: [
         { name: 'a.txt', isDir: false, path: `${ROOT}/a.txt` },
         { name: 'b.txt', isDir: false, path: `${ROOT}/b.txt` },
     ],
+};
+
+/** A listing with a folder whose own listing is empty, so navigating into it removes the focused row. */
+const NAV_LISTING: Record<string, ListedEntry[]> = {
+    [ROOT]: [
+        { name: 'docs', isDir: true, path: `${ROOT}/docs` },
+        { name: 'empty', isDir: true, path: `${ROOT}/empty` },
+        { name: 'a.txt', isDir: false, path: `${ROOT}/a.txt` },
+        { name: 'b.txt', isDir: false, path: `${ROOT}/b.txt` },
+    ],
+    [`${ROOT}/docs`]: [{ name: 'c.md', isDir: false, path: `${ROOT}/docs/c.md` }],
+    [`${ROOT}/empty`]: [],
 };
 
 let posts: { pathname: string; body: any }[] = [];
@@ -76,11 +90,12 @@ function openBrowser() {
 
 /** Load the root listing. onMount is stubbed in the vitest setup, and a typed path lands on the root. */
 async function loadRoot(container: HTMLElement) {
+    const rows = LISTING[ROOT].length;
     const input = container.querySelector('.file-browser-path-input') as HTMLInputElement;
     input.value = ROOT;
     input.dispatchEvent(new Event('input', { bubbles: true }));
     await fireEvent.keyDown(input, { key: 'Enter' });
-    await waitFor(() => expect(container.querySelectorAll('.file-browser-item').length).toBe(2));
+    await waitFor(() => expect(container.querySelectorAll('.file-browser-item').length).toBe(rows));
 }
 
 const rowEl = (container: HTMLElement, path: string) =>
@@ -213,5 +228,157 @@ describe('the file list clipboard and rename', () => {
         expect(dialogStore.toast?.message).toBe('1 item was not changed: the server could not do it');
         // The renamed notice still shows behind the failure.
         await waitFor(() => expect(dialogStore.confirmationSlot.pending?.items).toEqual(['a.txt → a copy.txt']));
+    });
+});
+
+/** Press a key where the browser would: on the element holding focus. */
+async function pressKey(key: string, mods: { ctrl?: boolean } = {}) {
+    return fireEvent.keyDown(document.activeElement as HTMLElement, { key, ctrlKey: mods.ctrl === true });
+}
+
+describe('the file list keyboard, wherever the panel holds focus', () => {
+    beforeEach(() => {
+        LISTING = NAV_LISTING;
+    });
+
+    /** Press a row, having focused it first the way a mouse press does. */
+    async function clickRow(container: HTMLElement, path: string) {
+        const row = rowEl(container, path)!;
+        row.focus();
+        await fireEvent.click(row);
+    }
+
+    it('cuts and pastes while the panel header holds focus', async () => {
+        const { container } = openBrowser();
+        await loadRoot(container);
+
+        await clickRow(container, `${ROOT}/a.txt`);
+        const upload = container.querySelector<HTMLElement>('.file-actions .new-file-btn')!;
+        upload.focus();
+        expect(document.activeElement).toBe(upload);
+
+        await pressKey('x', { ctrl: true });
+        expect(rowEl(container, `${ROOT}/a.txt`)?.className).toContain('is-cut');
+
+        await pressKey('v', { ctrl: true });
+        await waitFor(() => expect(postedTo('/api/fs/move').length).toBe(1));
+        expect(postedTo('/api/fs/move')[0]).toEqual({ paths: [`${ROOT}/a.txt`], dest: ROOT });
+    });
+
+    it('keeps the clipboard keys when navigating into a folder removes the focused row', async () => {
+        const { container } = openBrowser();
+        await loadRoot(container);
+
+        await clickRow(container, `${ROOT}/a.txt`);
+        await pressKey('x', { ctrl: true });
+        expect(rowEl(container, `${ROOT}/a.txt`)?.className).toContain('is-cut');
+
+        // Directories are listed first, so this row is inside a folder that will hold nothing but the
+        // folder above: the focused row is gone.
+        await clickRow(container, `${ROOT}/empty`);
+        await waitFor(() => expect(container.querySelectorAll('.file-browser-item').length).toBe(1));
+        expect(document.activeElement).toBe(listEl(container));
+
+        await pressKey('v', { ctrl: true });
+        await waitFor(() => expect(postedTo('/api/fs/move').length).toBe(1));
+        expect(postedTo('/api/fs/move')[0]).toEqual({ paths: [`${ROOT}/a.txt`], dest: `${ROOT}/empty` });
+    });
+
+    it('cuts the row the key arrived on when nothing is selected', async () => {
+        const { container } = openBrowser();
+        await loadRoot(container);
+
+        rowEl(container, `${ROOT}/a.txt`)!.focus();
+        await pressKey('x', { ctrl: true });
+        expect(rowEl(container, `${ROOT}/a.txt`)?.className).toContain('is-cut');
+
+        await pressKey('v', { ctrl: true });
+        await waitFor(() => expect(postedTo('/api/fs/move').length).toBe(1));
+        expect(postedTo('/api/fs/move')[0]).toEqual({ paths: [`${ROOT}/a.txt`], dest: ROOT });
+    });
+
+    it('copies the row the key arrived on when nothing is selected', async () => {
+        const { container } = openBrowser();
+        await loadRoot(container);
+
+        rowEl(container, `${ROOT}/b.txt`)!.focus();
+        await pressKey('c', { ctrl: true });
+        expect(rowEl(container, `${ROOT}/b.txt`)?.className).not.toContain('is-cut');
+
+        await pressKey('v', { ctrl: true });
+        await waitFor(() => expect(postedTo('/api/fs/copy').length).toBe(1));
+        expect(postedTo('/api/fs/copy')[0]).toEqual({ paths: [`${ROOT}/b.txt`], dest: ROOT });
+    });
+
+    it('renames the row the key arrived on when nothing is selected', async () => {
+        const { container } = openBrowser();
+        await loadRoot(container);
+
+        rowEl(container, `${ROOT}/a.txt`)!.focus();
+        await pressKey('F2');
+
+        const input = container.querySelector<HTMLInputElement>('.file-rename-input');
+        expect(input?.value).toBe('a.txt');
+        expect(posts).toEqual([]);
+    });
+
+    it('ignores a clipboard key aimed at the folder above', async () => {
+        const { container } = openBrowser();
+        await loadRoot(container);
+
+        await clickRow(container, `${ROOT}/docs`);
+        await waitFor(() => expect(container.querySelectorAll('.file-browser-item').length).toBe(2));
+
+        // The folder above is titled with the folder it leads to.
+        rowEl(container, ROOT)!.focus();
+        await pressKey('x', { ctrl: true });
+        await pressKey('v', { ctrl: true });
+
+        expect(container.querySelector('.is-cut')).toBeNull();
+        expect(postedTo('/api/fs/move')).toEqual([]);
+    });
+
+    it('leaves the clipboard keys to the browser while the path field holds focus', async () => {
+        const { container } = openBrowser();
+        await loadRoot(container);
+
+        await clickRow(container, `${ROOT}/a.txt`);
+        const pathField = container.querySelector<HTMLElement>('.file-browser-path-input')!;
+        pathField.focus();
+        await pressKey('x', { ctrl: true });
+        await pressKey('v', { ctrl: true });
+
+        expect(rowEl(container, `${ROOT}/a.txt`)?.className).not.toContain('is-cut');
+        expect(posts).toEqual([]);
+    });
+
+    it('leaves the clipboard keys to the browser while a name is being typed', async () => {
+        const { container } = openBrowser();
+        await loadRoot(container);
+
+        rowEl(container, `${ROOT}/a.txt`)!.focus();
+        await pressKey('F2');
+        const input = container.querySelector<HTMLInputElement>('.file-rename-input')!;
+        expect(input.value).toBe('a.txt');
+        await pressKey('x', { ctrl: true });
+        await pressKey('v', { ctrl: true });
+
+        expect(input.isConnected).toBe(true);
+        expect(container.querySelector('.is-cut')).toBeNull();
+        expect(posts).toEqual([]);
+    });
+
+    it('leaves the keys to the context menu while it is open', async () => {
+        const { container } = openBrowser();
+        await loadRoot(container);
+
+        const row = rowEl(container, `${ROOT}/a.txt`)!;
+        await fireEvent.contextMenu(row, { clientX: 60, clientY: 120 });
+        const item = container.querySelector<HTMLElement>('.file-context-menu .menu-item')!;
+        item.focus();
+        await pressKey('Delete');
+
+        expect(dialogStore.confirmationSlot.pending).toBeNull();
+        expect(posts).toEqual([]);
     });
 });

@@ -69,10 +69,8 @@ func TestGitAuthorFlagCmd(t *testing.T) {
 	}
 }
 
-// TestGitAuthorFlagCmd_ShellSafety verifies that malicious author identity
-// values cannot break out of shell quoting when the flagCmd is interpolated
-// into the same command-string pattern used by handleFSInitGit's sandbox path.
-// This is the core regression test for the latent command injection.
+// TestGitAuthorFlagCmd_ShellSafety verifies that malicious author identity values cannot break
+// out of shell quoting when the flagCmd is interpolated into handleFSInitGit's command string.
 func TestGitAuthorFlagCmd_ShellSafety(t *testing.T) {
 	payloads := []string{
 		"'; touch " + canaryPath + "; '",
@@ -228,17 +226,9 @@ func fsReadAt(t *testing.T, s *Server, cookie, csrfToken, projectID, file, ref s
 	return testResponse(t, s, req)
 }
 
-// TestFSReadRefRejectsGitOptions is the regression test for the `?ref=` argument
-// injection: the handler used to hand the raw query parameter to
-// `git show <ref>:<path>`, and git happily parses an option-shaped ref as an
-// option. Reproduced with git 2.43 before the fix:
-//
-//	$ git show "--output=/tmp/pwn:f.txt"   # exit 0
-//	$ ls -l /tmp/pwn:f.txt                 # created
-//
-// i.e. arbitrary empty-file creation/truncation anywhere the server user can
-// write. The fix validates the ref (400 on rejection) and passes
-// --end-of-options before the rev.
+// TestFSReadRefRejectsGitOptions: a `?ref=` shaped like a git option is refused with 400, and the
+// rev is passed after --end-of-options. An option-shaped ref handed to `git show "--output=X:p"`
+// would create or truncate a file anywhere the server user can write.
 func TestFSReadRefRejectsGitOptions(t *testing.T) {
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
@@ -596,10 +586,8 @@ func TestFSSearchSkipsSymlinks(t *testing.T) {
 	}
 }
 
-// TestFSInitGitRejectsPathOutsideProject (security): POST /api/fs/init-git with
-// a project context must stay inside the project/workspace like every other fs
-// endpoint. Before the fix the handler ran `git init` and wrote README.md at
-// any absolute path the client named.
+// TestFSInitGitRejectsPathOutsideProject (security): POST /api/fs/init-git stays inside the
+// project/workspace like every other fs endpoint.
 func TestFSInitGitRejectsPathOutsideProject(t *testing.T) {
 	s := testServer(t)
 	cookie, csrf := loginTestCSRF(t, s)

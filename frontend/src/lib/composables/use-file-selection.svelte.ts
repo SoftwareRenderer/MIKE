@@ -163,13 +163,30 @@ export function useFileSelection({ rows }: FileSelectionOptions) {
 
     onDestroy(cancelLongPress);
 
+    function rowFromEvent(e: KeyboardEvent): { el: HTMLElement; index: number } | null {
+        const el = e.target instanceof HTMLElement ? e.target.closest<HTMLElement>('[data-index]') : null;
+        if (!el) return null;
+        const index = Number(el.dataset.index);
+        return Number.isInteger(index) ? { el, index } : null;
+    }
+
+    /**
+     * The row a key arrived on when nothing is selected — a key aimed at a row is about that row. Null for
+     * the folder above, and for a key aimed at anything but a row.
+     */
+    function focusedRowPath(e: KeyboardEvent): string | null {
+        const at = rowFromEvent(e);
+        if (!at) return null;
+        const row = rows()[at.index];
+        return row?.selectable ? row.path : null;
+    }
+
     function handleKeydown(e: KeyboardEvent): SelectionKey | null {
         if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
-            const row = e.target instanceof HTMLElement ? e.target.closest<HTMLElement>('[data-index]') : null;
-            const index = Number(row?.dataset.index);
-            if (!row || !Number.isInteger(index) || !rows()[index]?.selectable) return null;
-            const rect = row.getBoundingClientRect();
-            return { kind: 'menu', index, at: { x: rect.left + 16, y: rect.bottom } };
+            const at = rowFromEvent(e);
+            if (!at || !rows()[at.index]?.selectable) return null;
+            const rect = at.el.getBoundingClientRect();
+            return { kind: 'menu', index: at.index, at: { x: rect.left + 16, y: rect.bottom } };
         }
         if ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A')) {
             e.preventDefault();
@@ -196,6 +213,7 @@ export function useFileSelection({ rows }: FileSelectionOptions) {
         handleContextmenu,
         cancelLongPress,
         handleKeydown,
+        focusedRowPath,
         selectRow,
         releaseSelection,
         clear,

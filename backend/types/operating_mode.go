@@ -22,12 +22,9 @@ const (
 )
 
 // ParseOperatingMode maps a client-supplied string onto an OperatingMode, reporting whether it is
-// one of the three.
-//
-// This is the only place an unvalidated mode enters the program. Four places used to re-implement
-// the valid set with their own policy for a bad value; getting it wrong is worse than rejecting the
-// request, because the tool-set switch falls through to act and a task the user believes is
-// read-only gets write tools.
+// one of the three. It is the only place an unvalidated mode enters the program: the tool-set switch
+// falls through to act, so a mode accepted here and misunderstood there hands a read-only task
+// write tools.
 func ParseOperatingMode(s string) (OperatingMode, bool) {
 	switch OperatingMode(s) {
 	case ModeAct, ModePlan, ModeExplore:

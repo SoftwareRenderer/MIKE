@@ -53,7 +53,7 @@ func validSnapshotPart(name string) bool {
 	if strings.Contains(name, "..") || strings.Contains(name, "@{") {
 		return false
 	}
-	for i := 0; i < len(name); i++ {
+	for i := range len(name) {
 		c := name[i]
 		// ids MIKE generates are ASCII letters, digits, "-" and "_"; anything else is refused
 		// rather than sanitised.

@@ -2,12 +2,13 @@ package extensions
 
 import (
 	"fmt"
+	"maps"
+	"mike/backend/types"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
-
-	"mike/backend/types"
 )
 
 // A tool declaration is checked where the manifest is stored, so nothing downstream re-checks it. The
@@ -541,12 +542,7 @@ func (e *Extension) GrantedHosts() []string {
 }
 
 func sortedToolKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
+	return slices.Sorted(maps.Keys(m))
 }
 
 func checkProse(where, value string, maxLen int) error {

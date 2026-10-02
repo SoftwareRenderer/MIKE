@@ -903,9 +903,9 @@ func ComputeUntrackedHash(u UntrackedFile) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(u.Path+strings.Join(u.Lines, "\n"))))
 }
 
-// ParseUnifiedDiff parses raw git diff output into per-file entries, sorted by path. This is the one
-// diff grammar in the product - the frontend used to carry a second one over the same text, and they
-// drifted. backend/git/diff_parse_parity_test.go holds the cases the old browser parser had.
+// ParseUnifiedDiff parses raw git diff output into per-file entries, sorted by path. It is the only
+// diff grammar in the product: ?parsed=1 ships its output and the panel never re-parses patch text.
+// backend/git/diff_parse_parity_test.go holds the parity cases.
 func ParseUnifiedDiff(patch string) []TrackedDiffFile {
 	return SortedParsedFiles(parseUnifiedDiffToFiles(patch, nil, nil, nil))
 }

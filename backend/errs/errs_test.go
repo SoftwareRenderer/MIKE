@@ -34,8 +34,7 @@ func TestIsNotFoundClassifiesAtAnyWrapDepth(t *testing.T) {
 }
 
 func TestNotFoundMessageComposes(t *testing.T) {
-	// The wrapping pattern documented on ErrNotFound must produce a message that
-	// reads the same as the plain string handlers used to send.
+	// The wrapping pattern documented on ErrNotFound must compose into a readable sentence.
 	got := fmt.Errorf("task %w", ErrNotFound).Error()
 	if got != "task not found" {
 		t.Errorf("composed message = %q, want %q", got, "task not found")

@@ -1,7 +1,7 @@
-// Package store is the persistence layer: one SQLite database, its schema and migrations,
-// and the typed accessors for tasks, messages, threads, projects, sessions, stats, config.
-// The pool is pinned to one connection so the PRAGMAs apply everywhere; s.mu is the
-// serialisation point. Migrations probe before they ALTER (migrations.go).
+// Package store is the persistence layer: one SQLite database, its schema, and typed accessors for
+// tasks, messages, threads, projects, sessions, stats and config. One connection, so the PRAGMAs apply
+// everywhere, and s.mu is the serialisation point. The schema is created whole from its DDL
+// (migrations.go); nothing upgrades an older database.
 package store
 
 import (
@@ -66,23 +66,20 @@ func NewStore(dbPath string) (*Store, error) {
 	// Use a single connection so PRAGMA settings (foreign_keys, journal_mode) apply to all operations.
 	// The store already serializes access via s.mu, so pooling provides no benefit.
 	db.SetMaxOpenConns(1)
-	// Enable WAL mode for better concurrent read/write performance
-	_, err = db.Exec("PRAGMA journal_mode = WAL")
-	if err != nil {
-		return nil, fmt.Errorf("set journal mode: %w", err)
+	// WAL mode is what lets a reader keep going while a writer holds the lock.
+	if err := pragma(db, "PRAGMA journal_mode = WAL", "set journal mode"); err != nil {
+		return nil, err
 	}
 	// The WAL sidecars (-wal/-shm) are written by the driver under the umask and can
 	// hold the same rows as the main file until checkpointed.
 	restrictSidecarModes(dbPath)
 	// Set busy timeout to handle concurrent access (e.g., during parallel test runs)
-	_, err = db.Exec("PRAGMA busy_timeout = 10000")
-	if err != nil {
-		return nil, fmt.Errorf("set busy timeout: %w", err)
+	if err := pragma(db, "PRAGMA busy_timeout = 10000", "set busy timeout"); err != nil {
+		return nil, err
 	}
 	// Enable foreign key enforcement (disabled by default in SQLite)
-	_, err = db.Exec("PRAGMA foreign_keys = ON")
-	if err != nil {
-		return nil, fmt.Errorf("enable foreign keys: %w", err)
+	if err := pragma(db, "PRAGMA foreign_keys = ON", "enable foreign keys"); err != nil {
+		return nil, err
 	}
 	s := &Store{db: db}
 	if err := s.initSchema(); err != nil {
@@ -100,6 +97,14 @@ func NewStore(dbPath string) (*Store, error) {
 	// Schema creation above is the first write — the WAL sidecar exists by now.
 	restrictSidecarModes(dbPath)
 	return s, nil
+}
+
+// pragma runs one of the startup PRAGMAs, naming in the error which setting was refused.
+func pragma(db *sql.DB, stmt, setting string) error {
+	if _, err := db.Exec(stmt); err != nil {
+		return fmt.Errorf("%s: %w", setting, err)
+	}
+	return nil
 }
 
 // restrictSidecarModes tightens the WAL sidecar files (-wal/-shm) to 0600.
@@ -159,33 +164,13 @@ func (s *Store) QueryRow(query string, args ...any) *sql.Row {
 	return s.db.QueryRow(query, args...)
 }
 
+// initSchema runs the DDL. The lock covers it because schema work must not interleave with anything
+// else this store does.
 func (s *Store) initSchema() error {
-	// Held across the whole chain, as it was before the chain was split: schema work is the one thing that
-	// must not interleave with anything else this store does.
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	// Three layers, each idempotent for a different reason, and the whole chain gated by user_version
-	// rather than run once per process: a database already at this build's schema version does not need
-	// 53 column probes, and one stamped newer than this build must not be edited by it.
-	if err := s.createBaseTables(); err != nil {
-		return err
-	}
-	stored := s.userVersion()
-	if stored >= schemaVersion {
-		if stored > schemaVersion {
-			logging.For(logging.Store).Infof("database schema version %d is newer than this build's %d — leaving the schema alone", stored, schemaVersion)
-		}
-		return nil
-	}
-
-	s.addMissingColumns()
-	s.migrateTokenStats()
-	s.zeroLegacySandboxPeaks()
-	s.normalizeTimeText()
-	s.clearDoneDiffSnapshotsIfOlderThan(stored)
-	s.setUserVersion(schemaVersion)
-	return nil
+	_, err := s.db.Exec(baseSchemaSQL)
+	return err
 }
 
 func (s *Store) initConfigDefaults() error {
@@ -249,7 +234,7 @@ func ptrTime(t *time.Time) *string {
 func scanTime(s string) time.Time {
 	t, err := time.Parse(time.RFC3339Nano, s)
 	if err != nil {
-		t, err = time.Parse(time.RFC3339, s) // fallback for legacy data
+		t, err = time.Parse(time.RFC3339, s)
 		if err != nil {
 			return time.Time{}
 		}
@@ -289,7 +274,7 @@ func scanTask(s scanner, t *types.Task) error {
 	t.BranchTip = branchTip.String
 	t.CreatedAt = scanTime(createdAt)
 	t.UpdatedAt = scanTime(updatedAt)
-	// Rows predating the migration have an empty moved_at; created_at keeps their order stable.
+	// A row with no moved_at keeps created_at as its board position, so it never sorts as the epoch.
 	if movedAt == "" {
 		movedAt = createdAt
 	}
@@ -373,3 +358,13 @@ var (
 	_ execer = (*sql.DB)(nil)
 	_ execer = (*sql.Tx)(nil)
 )
+
+// newID mints an identifier no row holds yet. IDs come from a small word list, so a collision is
+// possible; `taken` says whether the candidate is already someone's primary key.
+func newID(mint func() string, taken func(string) bool) string {
+	for {
+		if id := mint(); !taken(id) {
+			return id
+		}
+	}
+}

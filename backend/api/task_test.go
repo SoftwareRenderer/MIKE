@@ -1375,9 +1375,8 @@ func TestHandleCommitAndDone_ReportsACommitThatGitRefused(t *testing.T) {
 
 // TestHandleCommitAndDone_DoneWhenOnlyTheProjectOwnsTheConflict: the task's branch reached the target
 // branch and the only thing that came back conflicted was the project checkout's own uncommitted edit,
-// which the merge bracket had parked to run. The click asked for commit + merge + done and got all three,
-// so the task finishes and the leftover conflict is reported by name. It used to travel back as a merge
-// failure, which left a merged task in Review with nothing anywhere saying why.
+// which the merge bracket had parked to run. The click asked for commit + merge + done and got all
+// three, so the task finishes and the leftover conflict is reported by name.
 func TestHandleCommitAndDone_DoneWhenOnlyTheProjectOwnsTheConflict(t *testing.T) {
 	h, s, projID := newTaskHandlerWithExecutor(t)
 	h.commitQueue = exec.NewCommitQueue()

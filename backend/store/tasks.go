@@ -22,7 +22,6 @@ func marshalAssignedPorts(ports []types.AssignedPort) string {
 	return ""
 }
 
-// CreateTask inserts a new task.
 // taskColumns lists the tasks table columns in the exact order scanTask reads
 // them, and is the single source of truth for every query that returns a task
 // (and for CreateTask's INSERT). The mapping is positional, so a column added to
@@ -30,9 +29,17 @@ func marshalAssignedPorts(ports []types.AssignedPort) string {
 // expects — breaks at scan time rather than at compile time.
 const taskColumns = `id, project_id, title, prompt, status, session_id, branch, base_ref, base_commit, branch_tip, output, execution_state, has_merge_conflict, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_merge, subtasks_auto_merge, operating_mode, parent_task_id, autostarted, title_generating, summarizing, current_thread_id, created_at, updated_at, moved_at, assigned_ports, session_cost, sandbox_memory_peak_mb, sandbox_oom_kills, memory_supervisor_paused, memory_alert_acked, memory_alert_ack_peak_mb, memory_alert_ack_oom_kills, memory_alert_ack_limit_mb`
 
+// CreateTask inserts a new task. With no ID it mints one here, beside the insert that claims it, so
+// no other writer can take it first; callers read the ID back from the struct.
 func (s *Store) CreateTask(t *types.Task) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if t.ID == "" {
+		t.ID = newID(types.GenerateTaskID, func(id string) bool {
+			_, err := s.queryTask("id = ?", id)
+			return err == nil
+		})
+	}
 	assignedPortsJSON := marshalAssignedPorts(t.AssignedPorts)
 	// A new task has never been moved, so its position is its creation time.
 	movedAt := t.MovedAt
@@ -387,8 +394,8 @@ func (s *Store) SetTaskBranchIfEmpty(taskID, projectID, branch string) (bool, er
 	return rows > 0, nil
 }
 
-// ClearTaskBranch clears the branch field of a task. Used to roll back an
-// orphaned branch name when worktree creation fails after SetTaskBranchIfEmpty.
+// ClearTaskBranch clears the branch field of a task, to roll back an orphaned branch name when
+// worktree creation fails after SetTaskBranchIfEmpty.
 func (s *Store) ClearTaskBranch(taskID, projectID string) error {
 	return s.updateTaskColumn(taskID, projectID, "branch", "")
 }

@@ -11,10 +11,9 @@ with `subtle.ConstantTimeCompare` — the plaintext never outlives the login req
 are always 32 bytes (a length mismatch would make the constant-time compare short-circuit and leak).
 
 **Tokens:** 32 bytes from `crypto/rand`, hex-encoded, 30-day TTL. The raw token exists only in the
-response/cookie; the DB stores `hex(sha256(token))` (indexed, in both `token_hash` and the legacy
-`token` column), so a copy of `kanban.db` cannot be replayed as a live session.
-`BackfillSessionTokens` migrates pre-hash rows once at startup (their legacy column gets a
-`revoked-<id>` placeholder).
+response/cookie; the DB stores `hex(sha256(token))` and looks a session up by that digest alone, so a copy
+of `kanban.db` cannot be replayed as a live session. The same digest is written to `token_hash` (the index
+the lookup walks) and to `token`, whose `NOT NULL UNIQUE` constraint it therefore guards.
 
 **Session id:** 8 bytes, drawn from the same `crypto/rand` call as the token and the CSRF token but from
 bytes neither carries. `GET /api/sessions` lists ids and `DELETE /api/sessions/{id}` revokes by id, so an

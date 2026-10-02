@@ -39,8 +39,6 @@ type sandboxRecreate struct {
 // the reason in its Output and the browser gets a persisted error — and callers end the turn
 // when an error comes back. Changed assigned ports are persisted.
 func (te *TaskExecutor) recreateTaskSandbox(setup *taskExecSetup, state *executionState, r sandboxRecreate) error {
-	// The old code built "[%s] setup.task=%s " as TEXT here and concatenated it onto every
-	// message; subsystem and task id are attributes now, so the message is just the message.
 	lg := logging.For(logging.Sandbox).With(logging.TaskID, setup.task.ID)
 
 	if err := te.sandboxMgr.Stop(setup.task.ID); err != nil {

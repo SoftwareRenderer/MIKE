@@ -21,7 +21,13 @@ CREATE TABLE IF NOT EXISTS sessions (
     created_at INTEGER NOT NULL,
     expires_at INTEGER NOT NULL
 );
+-- A presented token is matched on its digest and on nothing else.
+CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash);
 `
+
+// sessionColumns lists the sessions columns in the order CreateSession writes them, and is every
+// column the table has.
+const sessionColumns = `id, token, csrf_token, token_hash, ip, user_agent, last_seen, created_at, expires_at`
 
 // lastSeenInterval is the minimum seconds between two last_seen writes for one
 // session. The store serialises on a single connection, so an unconditional
@@ -37,30 +43,13 @@ func hashToken(token string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// initSessions creates the sessions table if it does not exist, and migrates
-// existing tables with the columns added after the first release.
+// initSessions creates the sessions table and its lookup index. It lives with the session accessors
+// rather than in baseSchemaSQL, which holds no credential table.
 func (s *Store) initSessions() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(sessionTable)
-	if err != nil {
-		return err
-	}
-	// Migrate existing DBs. SQLite has no "ADD COLUMN IF NOT EXISTS", so the
-	// error from re-adding a column is ignored. The token column keeps its NOT
-	// NULL UNIQUE constraint and now holds the digest, or the 'revoked-<id>'
-	// placeholder written by BackfillSessionTokens.
-	for _, stmt := range []string{
-		`ALTER TABLE sessions ADD COLUMN csrf_token TEXT`,
-		`ALTER TABLE sessions ADD COLUMN token_hash TEXT`,
-		`ALTER TABLE sessions ADD COLUMN ip TEXT`,
-		`ALTER TABLE sessions ADD COLUMN user_agent TEXT`,
-		`ALTER TABLE sessions ADD COLUMN last_seen INTEGER`,
-		`CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash)`,
-	} {
-		_, _ = s.db.Exec(stmt)
-	}
-	return nil
+	return err
 }
 
 // NewSession carries the fields of a session row.
@@ -74,8 +63,8 @@ type NewSession struct {
 }
 
 // CreateSession inserts a new session row. The raw token is stored only as
-// hex(sha256(token)); the legacy `token` column gets the same digest, so its
-// UNIQUE constraint still guards distinct sessions with no plaintext on disk.
+// hex(sha256(token)), in `token_hash` (the index a lookup walks) and in `token`, whose
+// NOT NULL UNIQUE constraint that digest therefore guards. No plaintext reaches the file.
 func (s *Store) CreateSession(ctx context.Context, ses NewSession) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -83,7 +72,7 @@ func (s *Store) CreateSession(ctx context.Context, ses NewSession) error {
 	now := time.Now().Unix()
 	_, err := s.db.ExecContext(
 		ctx,
-		`INSERT INTO sessions (id, token, csrf_token, token_hash, ip, user_agent, last_seen, created_at, expires_at)
+		`INSERT INTO sessions (`+sessionColumns+`)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		ses.ID, hash, ses.CSRFToken, hash, ses.IP, ses.UserAgent, now, now, ses.ExpiresAt.Unix(),
 	)
@@ -149,62 +138,6 @@ func (s *Store) DeleteExpiredSessions(ctx context.Context) (int, error) {
 	}
 	n, _ := result.RowsAffected()
 	return int(n), nil
-}
-
-// BackfillSessionTokens migrates sessions created before tokens were hashed:
-// for each row without a token_hash it derives hex(sha256(token)) in Go (SQLite
-// has no sha256) and overwrites the legacy plaintext with the non-secret
-// placeholder 'revoked-' || id, which keeps the NOT NULL UNIQUE constraint
-// instead of colliding on an empty string. No session is invalidated — lookups
-// use the digest of the token the client already holds. Idempotent: rows with a
-// token_hash are skipped. Returns the number of rows migrated.
-func (s *Store) BackfillSessionTokens(ctx context.Context) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	type legacyRow struct{ id, token string }
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, token FROM sessions WHERE token_hash IS NULL OR token_hash = ''`)
-	if err != nil {
-		return 0, fmt.Errorf("scan legacy sessions: %w", err)
-	}
-	var pending []legacyRow
-	// Read fully before any UPDATE: the pool is one connection, and scanRows closes the
-	// result before the first write.
-	all, err := scanRows(rows, func(r *sql.Rows) (legacyRow, error) {
-		var row legacyRow
-		err := r.Scan(&row.id, &row.token)
-		return row, err
-	})
-	if err != nil {
-		return 0, fmt.Errorf("scan legacy sessions: %w", err)
-	}
-	for _, r := range all {
-		if r.token == "" {
-			continue // nothing to derive a digest from; already unusable
-		}
-		pending = append(pending, r)
-	}
-
-	n := 0
-	for _, r := range pending {
-		if _, err := s.db.ExecContext(ctx,
-			`UPDATE sessions SET token_hash = ?, token = 'revoked-' || id WHERE id = ?`,
-			hashToken(r.token), r.id); err != nil {
-			return n, fmt.Errorf("backfill session %s: %w", r.id, err)
-		}
-		n++
-	}
-	if n > 0 {
-		// The overwritten plaintext still sits in freed page space, so VACUUM
-		// rewrites the file. In WAL mode the new image lands in the -wal first,
-		// so checkpoint and truncate it too — otherwise the pre-migration pages
-		// (plaintext token included) survive in the main file and the sidecar.
-		// Best-effort: a busy database keeps the slack until the next startup.
-		_, _ = s.db.ExecContext(ctx, `VACUUM`)
-		_, _ = s.db.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`)
-	}
-	return n, nil
 }
 
 // SessionInfo is one session row for the session-management API. It has no

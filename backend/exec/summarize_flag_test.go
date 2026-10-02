@@ -57,13 +57,10 @@ func mockSummarizeFlagLLM(release chan struct{}, summarizeStarted chan struct{})
 	}))
 }
 
-// TestHandleSummarize_DBPath_ClearsFlagBeforeLazyStart is the regression test
-// for the stuck context-summarization spinner: when a user message is sent
-// while a DB-based summarization is in flight, the message is blocked and the
-// task is lazy-started after the summarization completes. The flag must be
-// cleared BEFORE that lazy start — the fresh executor loads the task from the
-// DB, and if it observed summarizing=true it would re-assert the stale flag on
-// its first persist, leaving the UI spinner spinning forever.
+// TestHandleSummarize_DBPath_ClearsFlagBeforeLazyStart: when a user message is sent while a DB-based
+// summarization is in flight, the message is blocked and the task is lazy-started afterwards. The flag
+// must be cleared BEFORE that lazy start: the fresh executor loads the task from the DB and would
+// re-assert a stale summarizing=true on its first persist, leaving the UI spinner spinning forever.
 func TestHandleSummarize_DBPath_ClearsFlagBeforeLazyStart(t *testing.T) {
 	// Summarization renders prompts/summarize.tmpl from the CWD — chdir to
 	// the repo root so the template is found (mirrors summarize_idle_test.go).
@@ -178,9 +175,8 @@ func TestHandleSummarize_DBPath_ClearsFlagBeforeLazyStart(t *testing.T) {
 		return false
 	})
 
-	// The regression: once the executor is running (it has already persisted
-	// its task copy at slot acquisition), the DB flag must be false — and it
-	// must NOT flip back to true from a stale in-memory copy.
+	// Once the executor is running it has already persisted its task copy at slot acquisition, so the
+	// DB flag must be false here and must not flip back from a stale in-memory copy.
 	waitFor(t, 5*time.Second, "flag to be cleared after summarization completes", func() bool {
 		got, err := te.store.GetTaskByID(taskID)
 		return err == nil && got != nil && !got.Summarizing

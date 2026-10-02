@@ -135,7 +135,7 @@ func TestResolvePort(t *testing.T) {
 		{name: "nothing set falls back", envValue: "", port: 3000},
 		{name: "flag wins", flagValue: 8080, envValue: "9090", port: 8080},
 		{name: "env is parsed", envValue: "9090", port: 9090},
-		// The bug this exists for: fmt.Sscanf accepted this and left the port at 3000.
+		// A non-numeric port is refused rather than replaced by the fallback.
 		{name: "non-numeric env is refused", envValue: "tcp3000", port: 0},
 		{name: "zero env is refused", envValue: "0", port: 0},
 		{name: "negative env is refused", envValue: "-1", port: 0},
@@ -219,7 +219,7 @@ var resolverEnv = []string{
 	EnvLogLevel, EnvLoginPassword, EnvEncryptionKey, EnvRegistryURL, EnvExtMountRoots,
 	EnvAgentPath, EnvSkipSandboxSweep, EnvTrustProxy, EnvLoginRateLimit, EnvAllowRootFS,
 	EnvDangerZone, EnvGCDryRun, EnvPProf, EnvMemoryBudgetPct, EnvUpdateURL, EnvDisableUpdates,
-	EnvUpdateCheckDeprecated, EnvRestrictMCP,
+	EnvRestrictMCP,
 }
 
 func clearResolverEnv(t testing.TB) {
@@ -596,26 +596,6 @@ func TestDisableUpdatesIsTheExactValue(t *testing.T) {
 			}
 		})
 	}
-
-	// The variable this replaced is read by nothing, but an .env still carrying it must not go quiet.
-	t.Run("the name it replaced is reported and ignored", func(t *testing.T) {
-		clearResolverEnv(t)
-		t.Setenv(EnvUpdateCheckDeprecated, "1")
-		c := mustResolve(t, Flags{})
-		if c.DisableUpdates {
-			t.Errorf("%s disabled updates; it is no longer read", EnvUpdateCheckDeprecated)
-		}
-		joined := strings.Join(c.Warnings, "\n")
-		if !strings.Contains(joined, EnvUpdateCheckDeprecated) || !strings.Contains(joined, EnvDisableUpdates) {
-			t.Errorf("the warning %q does not name both the stale name and its replacement", joined)
-		}
-
-		// A variable set but empty means unset, and an unset one warns nobody.
-		clearResolverEnv(t)
-		if c := mustResolve(t, Flags{}); strings.Contains(strings.Join(c.Warnings, "\n"), EnvUpdateCheckDeprecated) {
-			t.Errorf("an absent %s warned: %v", EnvUpdateCheckDeprecated, c.Warnings)
-		}
-	})
 }
 
 // A development build serves the directory its developer names, the flag over the environment; a

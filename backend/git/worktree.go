@@ -187,7 +187,7 @@ type WorktreeManager struct {
 
 	// Three lock domains, all keyed by project. Distinct named types, and each one its own table: with
 	// one shared table, fusing two domains would compile, and the keys cannot be trusted to tell them
-	// apart because a task ID and a project ID are drawn from the same alphabet (F16). With a type per
+	// apart because a task ID and a project ID are drawn from the same alphabet. With a type per
 	// domain, that mistake does not compile.
 	worktree worktreeLocks // worktree creation
 	stash    stashLocks    // the one stash stack, shared by every worktree and by the user's own entries
@@ -571,8 +571,8 @@ var hunkRe = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))?(.*)@@`
 const (
 	stashLabelSwitch = "mike-switch-"
 	stashLabelFork   = "mike-fork-"
-	// No longer written: checkpoints are snapshots pinned under a ref (see snapshots.go). Kept so the
-	// sweep still cleans up repos whose checkpoints were stash entries.
+	// Never written now — checkpoints are snapshots pinned under a ref (see snapshots.go). Kept so
+	// the sweep cleans up repos whose checkpoints were stash entries.
 	stashLabelCheckpoint = "mike-checkpoint-"
 	stashLabelSyncMerge  = "mike-sync-merge-"
 	stashLabelAutoMerge  = "mike-auto-merge-"

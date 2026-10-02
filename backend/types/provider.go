@@ -8,9 +8,8 @@ import (
 // DefaultReasoningEffort applies to models without an explicit setting: server decides.
 const DefaultReasoningEffort = "default"
 
-// UnmarshalJSON implements backward-compatible JSON unmarshaling for Provider.
-// Accepts both the new format (models as []ModelConfig) and the old format (models as []string).
-// Normalizes Kind to "llm" when empty (backward compatibility).
+// UnmarshalJSON decodes a Provider, accepting models either as []ModelConfig or as []string, and
+// normalizes an empty Kind to "llm".
 func (p *Provider) UnmarshalJSON(data []byte) error {
 	type providerAlias Provider
 	var raw struct {

@@ -110,9 +110,8 @@ func TestSlugifyBranchName_NeverStartsWithHyphen(t *testing.T) {
 	}
 }
 
-// TestTaskBranchSlugPrefix pins the parser that matches a live branch back to its
-// task's slug. It used to exist twice (exec and git), which is how the GC could
-// end up recognising a different shape than the executor writes.
+// TestTaskBranchSlugPrefix pins the parser that matches a live branch back to its task's slug. It must
+// be the shape the executor writes, or a GC that parses a different shape deletes live branches.
 func TestTaskBranchSlugPrefix(t *testing.T) {
 	tests := map[string]string{
 		"task/count-hello-files-abc123":    "task/count-hello-files-",

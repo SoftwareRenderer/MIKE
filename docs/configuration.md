@@ -41,8 +41,7 @@ A switch that widens a permission or points at a host path has one spelling only
 arrive by a route the operator did not read about.
 
 **Names this table does not carry are not live.** A name an older `.env` still carries either appears here
-or does nothing at all — except `MIKE_UPDATE_CHECK`, which is read only to warn an `.env` carrying it that it
-disabled nothing. The live switch is `MIKE_DISABLE_UPDATES`.
+or does nothing at all.
 
 `--worktrees-dir` (`MIKE_WORKTREES_DIR`) is a runtime override that is **not** persisted to the DB
 `workspace_dir`.

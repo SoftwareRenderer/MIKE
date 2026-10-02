@@ -44,7 +44,7 @@ func TestSandboxContainerSeesNoHostEnv(t *testing.T) {
 	// `-e MIKE_TEST_UNDECLARED` does not.
 	t.Setenv("CONTAINERS_UNRELATED_PROBE", "in-the-client-on-purpose")
 
-	dir := t.TempDir()
+	dir := taskWorktreeDir(t)
 	taskID := "test-hostenv-task"
 
 	const declaredName = "MIKE_LOGIN_PASSWORD"
@@ -104,10 +104,8 @@ func guestEcho(name string) string {
 	return fmt.Sprintf(`printf '%%s\n' "${%s-unset}"`, name)
 }
 
-// TestExecRejectsAVariableNameNotAValue is the signature's guarantee in test form. Exec used to take
-// env []string, for which []string{"MIKE_LOGIN_PASSWORD"} is the natural way to say "pass this
-// through" — and podman obliges. It now takes declared variables, so the request cannot be written;
-// what CAN be written is a malformed name, and that is refused rather than quietly dropped.
+// TestExecRejectsAVariableNameNotAValue: Exec takes declared variables, so "pass this name
+// through" cannot be written at all, and a malformed name is refused rather than dropped.
 func TestExecRejectsAVariableNameNotAValue(t *testing.T) {
 	sm := NewSandboxManager(bootWithBridge(t))
 

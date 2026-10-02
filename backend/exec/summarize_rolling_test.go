@@ -128,9 +128,8 @@ func mustContain(t *testing.T, body, label string, probes ...string) {
 	}
 }
 
-// TestSummarizeContext_UsesCompressedHistoryOnly is the core regression: with a
-// summarization marker in the middle of the list, the input must be the previous
-// summary plus the messages after the marker — nothing older.
+// TestSummarizeContext_UsesCompressedHistoryOnly: with a summarization marker in the middle of the
+// list, the input is the previous summary plus the messages after the marker — nothing older.
 func TestSummarizeContext_UsesCompressedHistoryOnly(t *testing.T) {
 	chdirRepoRoot(t)
 	llm := newSummaryLLM()

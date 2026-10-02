@@ -1,10 +1,9 @@
 package git
 
 // IgnoredDirs hands out what the watcher treats as the ignorable set. The invariant is not the
-// contents, it is that a caller cannot change them for everybody: the map used to be the package's own,
-// so a single `delete(git.IgnoredDirs(), "node_modules")` in one feature would silently make every
-// other caller — including the worktree watcher, on a repository with a big dependency tree — start
-// walking and diffing what the whole product agrees to skip.
+// contents, it is that a caller cannot change them for everybody: a returned map must be a copy, or
+// one caller's delete would have every other caller — the worktree watcher included — walk what the
+// product agrees to skip.
 
 import "testing"
 

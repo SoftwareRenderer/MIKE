@@ -176,9 +176,8 @@ func TestWatcherKeepsADoneTaskDiffOutOfTheFileCache(t *testing.T) {
 	}
 }
 
-// The client's "+N" is TrackedAdd + UntrackedLines, so the watcher must report an untracked file's lines
-// only in UntrackedLines. Its own counters used to fold them into TrackedAdd as well, which counted every
-// untracked line twice on a frame the executor would have counted once.
+// The client's "+N" is TrackedAdd + UntrackedLines, so the watcher must report an untracked file's
+// lines only in UntrackedLines, or every untracked line is counted twice.
 func TestWatcherReportsUntrackedLinesApartFromTrackedAdditions(t *testing.T) {
 	e := newWatcherBaselineEnv(t)
 

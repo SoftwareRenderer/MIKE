@@ -1,15 +1,11 @@
 package exec
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
-	"sort"
-	"strings"
-
 	"mike/backend/config"
 	"mike/backend/extensions"
 	"mike/backend/fsutil"
@@ -18,9 +14,12 @@ import (
 	"mike/backend/store"
 	"mike/backend/stream"
 	"mike/backend/types"
-
 	"mike/pkg/bridge/protocol"
 	"mike/pkg/logging"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 )
 
 // toolRunner dispatches a tool call to the handler registered under its name.
@@ -393,10 +392,8 @@ func applyEditReplacements(content string, edits []textEdit) (string, string) {
 		}
 		positions = append(positions, editPos{index: i, start: idx, end: idx + len(e.OldText), newText: e.NewText})
 	}
-	sort.Slice(positions, func(i, j int) bool {
-		return positions[i].start < positions[j].start
-	})
-	for i := 0; i < len(positions)-1; i++ {
+	slices.SortFunc(positions, func(a, b editPos) int { return cmp.Compare(a.start, b.start) })
+	for i := range len(positions) - 1 {
 		if positions[i].end > positions[i+1].start {
 			return "", fmt.Sprintf("Error: edits[%d] and edits[%d] overlap. Merge them into a single edit or ensure they don't overlap.", positions[i].index, positions[i+1].index)
 		}

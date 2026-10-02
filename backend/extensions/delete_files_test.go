@@ -60,8 +60,8 @@ func exists(path string) bool {
 	return err == nil
 }
 
-// TestHandleDelete_RemovesTheMaterializedDirectory: the row used to go and the files stayed, so the
-// extension kept being served from disk and came back through the local listing with its old manifest.
+// TestHandleDelete_RemovesTheMaterializedDirectory: the row and its directory go together, or the
+// files keep being served and come back through the local listing with the old manifest.
 func TestHandleDelete_RemovesTheMaterializedDirectory(t *testing.T) {
 	h, store, root := handlerFixture(t)
 	storedExtension(t, store, "go-team-gopls-1", "Go Team", "gopls", "registry")

@@ -4,7 +4,7 @@
 // `type stashLocks struct{ *keylock.Table }` — and both halves of that matter. The distinct type makes
 // passing one domain's lock where another belongs a compile error; the distinct table makes it
 // unrepresentable at runtime too, because a task ID and a project ID are drawn from the same alphabet
-// (F16: task IDs are three words from the same word list a project ID is a path slug over), so a
+// (task IDs are three words from the same word list a project ID is a path slug over), so a
 // shared table behind several aliases would fuse two domains in silence.
 //
 // Two acquisition forms, because they answer different questions:
@@ -64,10 +64,8 @@ func (t *Table) Lock(key string) func() {
 }
 
 // TryLock takes the key's lock if it becomes free within timeout, and reports whether it did. On the
-// false return nothing is held and nothing is left behind: the old per-mutex form of this spawned a
-// goroutine that acquired the lock whenever it eventually could and then released it, so a timed-out
-// wait could later steal a turn and hand the key back — a spurious hold that delayed an unrelated
-// waiter. A timed-out TryLock here cannot acquire anything at all.
+// false return nothing is held and no waiter is left behind, so a timed-out wait cannot later steal a
+// turn and hand the key back to someone else.
 //
 // A negative timeout means wait indefinitely, which is what Lock asks for.
 func (t *Table) TryLock(key string, timeout time.Duration) (func(), bool) {
@@ -129,10 +127,9 @@ func (t *Table) acquire(key string) *entry {
 	return e
 }
 
-// held is the release function handed to the caller. Double release is refused loudly, which is what
-// sync.Mutex did before this package existed: the alternative — a sync.Once that made the second call
-// a no-op — would hide a caller that does not know who owns the lock, and an empty-receive fallback
-// would turn the bug into a hang.
+// held is the release function handed to the caller. A double release panics instead of becoming a
+// no-op, so a caller that does not know who owns the lock is reported at the release rather than
+// turning into a hang later.
 func (e *entry) held() {
 	select {
 	case <-e.sem:

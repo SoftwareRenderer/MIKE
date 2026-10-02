@@ -3,10 +3,8 @@
 //	logging.For(logging.Merge).With(logging.TaskID, task.ID).Infof("merged into %s", branch)
 //	time=... level=INFO component=merge task_id=frost-amber-quartz msg="merged into main"
 //
-// Call sites used to type their own [bracket] prefix - 91 distinct tags - and put ids in the
-// message, so one subsystem answered to several names and "everything about this task" was a
-// grep. Subsystem and ids are fields now; the message is only the message. Output is a text
-// handler on stderr, so the log stays greppable.
+// Subsystem and ids are fields, never message text, so one subsystem has one name and "everything
+// about this task" is a grep on task_id=. Output is a text handler on stderr.
 //
 // Levels, in order of how much they should be noticed:
 //

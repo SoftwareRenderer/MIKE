@@ -55,14 +55,6 @@ func NewSessionManager(ctx context.Context, s *store.Store, password string) (*S
 	} else if n > 0 {
 		logging.For(logging.Auth).Infof("cleaned up %d expired session(s)", n)
 	}
-	// One-time migration for sessions created before tokens were hashed. Safe to run
-	// every startup: rows that already carry a hash are skipped and no live session
-	// is invalidated.
-	if n, err := s.BackfillSessionTokens(ctx); err != nil {
-		return nil, fmt.Errorf("backfill session token hashes: %w", err)
-	} else if n > 0 {
-		logging.For(logging.Auth).Infof("hashed %d legacy session token(s); plaintext tokens removed from the database", n)
-	}
 	return &SessionManager{store: s, passwordHash: sha256.Sum256([]byte(password))}, nil
 }
 

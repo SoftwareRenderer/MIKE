@@ -2,21 +2,18 @@ package server
 
 // Golden wire JSON: the byte-identity anchor for the responses the browser parses.
 //
-// These four payloads are what the frontend decodes field by field, and the simplification plan
-// touches every path that produces one of them (service-locator teardown, context propagation, the
-// wire-type split, the diff snapshot). A handler that drops a field, renames one, or answers a
-// nested shape differently compiles, passes every existing test, and renders a blank panel — which
-// is the failure mode this file exists to make loud.
+// These four payloads are what the frontend decodes field by field. A handler that drops a field,
+// renames one, or answers a nested shape differently compiles and passes every other test, then
+// renders a blank panel.
 //
 // Volatile content is normalized rather than excluded: a temp-directory path and a wall-clock
 // timestamp are the only two things that change between runs, and both are rewritten (see
-// normalizeWire). That is verified, not assumed — TestGoldenWire_IsStableAcrossRuns runs the whole
-// capture again under a *different* temp directory, so any unnormalized path or timestamp fails
-// there. A golden that only passes in the run that generated it is not an anchor.
+// normalizeWire). TestGoldenWire_IsStableAcrossRuns captures everything again under a *different*
+// temp directory, so an unnormalized path or timestamp fails there. A golden that only passes in the
+// run that generated it is not an anchor.
 //
 // Regenerate deliberately: go test ./backend/server/ -run TestGoldenWire -update
-// and read the diff. A golden update that is not explained by the change that needed it is the
-// regression this gate is for.
+// and read the diff. A golden update that no change asked for is a wire change nobody approved.
 
 import (
 	"encoding/json"

@@ -675,9 +675,8 @@ func TestSetTaskSummarizing(t *testing.T) {
 	}
 }
 
-// TestUpdateTask_DoesNotTouchSummarizingFlag is the regression test for the
-// stuck-summarization-spinner bug: a full-row write from a task copy loaded
-// while the flag was set must not resurrect the flag after it was cleared.
+// TestUpdateTask_DoesNotTouchSummarizingFlag: a full-row write from a task copy loaded while the flag
+// was set must not resurrect the flag after it was cleared.
 func TestUpdateTask_DoesNotTouchSummarizingFlag(t *testing.T) {
 	s := testStore(t)
 	proj := newProject("proj-sum-stale", "test", "/tmp/test")

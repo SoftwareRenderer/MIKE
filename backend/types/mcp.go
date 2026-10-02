@@ -117,7 +117,7 @@ func ValidateMCPServer(name, rawURL string, timeoutSeconds int, headers []MCPHea
 // space, a colon or a line break would put more than one header on the wire.
 func isHeaderFieldName(s string) bool {
 	const tchars = "!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		if !strings.ContainsRune(tchars, rune(s[i])) {
 			return false
 		}

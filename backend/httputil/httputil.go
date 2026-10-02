@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"mike/backend/errs"
+	"mike/backend/types"
 	"mike/pkg/logging"
 )
 
@@ -128,4 +129,21 @@ func Fail(w http.ResponseWriter, err error, operation, notFoundMessage string) {
 // Use Fail when the error may classify as a missing thing or a conflict; Fault when it cannot.
 func Fault(w http.ResponseWriter, operation string, err error) {
 	Fail(w, errs.Operation(operation, err), operation, operation+" failed")
+}
+
+// ProjectGetter is the store call the project preamble needs.
+type ProjectGetter interface {
+	GetProject(id string) (*types.Project, error)
+}
+
+// ResolveProjectID answers the failure of a project lookup a handler cannot do without, returning
+// false so the handler stops. Callers do the lookup: the id comes from a path segment, a query
+// parameter, or a row already in hand.
+func ResolveProjectID(w http.ResponseWriter, store ProjectGetter, id string) (*types.Project, bool) {
+	project, err := store.GetProject(id)
+	if err != nil {
+		Fail(w, err, "get project", "project not found")
+		return nil, false
+	}
+	return project, true
 }

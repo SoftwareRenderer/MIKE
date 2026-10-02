@@ -176,9 +176,8 @@ func summarizeIdleSetup(t *testing.T, projID, projName, taskID string, serverURL
 	return te, setup
 }
 
-// TestExecuteTask_ManualSummarize_StaysIdleWithoutQueuedMessage is the regression
-// test for: a task in review that gets manually summarized with NO queued user
-// message must NOT start a fresh LLM call. It must remain review/idle.
+// TestExecuteTask_ManualSummarize_StaysIdleWithoutQueuedMessage: a task in review that is manually
+// summarized with no queued user message must not start a fresh LLM call; it stays review/idle.
 func TestExecuteTask_ManualSummarize_StaysIdleWithoutQueuedMessage(t *testing.T) {
 	// Summarization renders prompts/summarize.tmpl from the CWD — chdir to the
 	// repo root so the template is found (mirrors how the running server resolves it).

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os/exec"
@@ -20,6 +21,19 @@ type handler struct {
 	writeMu   sync.Mutex           // serializes all writes to the connection's write end (bash streaming + dispatch + read loop)
 	closed    atomic.Bool          // set true when connection is torn down (atomic: accessed from readLoop + close)
 	fileLocks sync.Map             // path → *sync.Mutex, prevents concurrent read-modify-write on same file
+}
+
+// toolParams decodes a file tool's params and refuses an empty path. pathOf points at the decoded
+// params' path, because a generic cannot name a struct field.
+func toolParams[T any](req *protocol.Request, name string, pathOf func(*T) string) (T, error) {
+	var p T
+	if err := json.Unmarshal(req.Params, &p); err != nil {
+		return p, fmt.Errorf("parse %s params: %w", name, err)
+	}
+	if pathOf(&p) == "" {
+		return p, fmt.Errorf("path is required")
+	}
+	return p, nil
 }
 
 // lockFile returns a lock for a file path and its unlock function, so only one

@@ -621,7 +621,7 @@ func (s *Store) GetMessageCreatedAt(messageID string) (*time.Time, error) {
 	}
 	t, err := time.Parse(time.RFC3339Nano, createdAt)
 	if err != nil {
-		t, err = time.Parse(time.RFC3339, createdAt) // fallback for legacy data
+		t, err = time.Parse(time.RFC3339, createdAt)
 		if err != nil {
 			return nil, err
 		}

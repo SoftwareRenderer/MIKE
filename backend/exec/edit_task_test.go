@@ -22,9 +22,8 @@ func editTaskTarget(t *testing.T, s *store.Store, projectID, taskID string, auto
 	return task
 }
 
-// TestHandleEditTask_NestingRespectsParentSubtasksAutoMerge_False verifies that
-// nesting a task under a parent whose "allow subtask to auto merge" preference
-// is off disables the task's auto_merge (it previously was true from config).
+// TestHandleEditTask_NestingRespectsParentSubtasksAutoMerge_False: nesting a task under a parent whose
+// "allow subtask to auto merge" preference is off disables the task's auto_merge, whatever config says.
 func TestHandleEditTask_NestingRespectsParentSubtasksAutoMerge_False(t *testing.T) {
 	t.Parallel()
 	// Config defaults: auto_merge=true — but the parent explicitly disallows

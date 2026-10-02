@@ -159,7 +159,7 @@ CREATE TABLE IF NOT EXISTS extension_storage (
 		return err
 	}
 
-	// Idempotent migrations: an already-applied statement erroring is the expected outcome.
+	// These ALTERs are repeatable: a statement already applied errors, and that error is expected.
 	_, _ = es.db.Exec(`ALTER TABLE extensions RENAME COLUMN updated_at TO built_at`)
 
 	for _, stmt := range []string{
@@ -365,6 +365,19 @@ func (es *ExtensionStore) Create(ext *Extension) error {
 	return nil
 }
 
+// execOne runs a statement that must reach the extension named by id, and returns the store's own
+// "not found" when it reached nothing.
+func (es *ExtensionStore) execOne(op, id, query string, args ...any) error {
+	result, err := es.db.Exec(query, args...)
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+	if rows, _ := result.RowsAffected(); rows == 0 {
+		return fmt.Errorf("extension not found: %s", id)
+	}
+	return nil
+}
+
 // Update updates an existing extension.
 func (es *ExtensionStore) Update(id string, ext *Extension) error {
 	columns, err := es.rowJSON(id, ext)
@@ -372,47 +385,20 @@ func (es *ExtensionStore) Update(id string, ext *Extension) error {
 		return err
 	}
 
-	result, err := es.db.Exec(
+	return es.execOne("update extension", id,
 		`UPDATE extensions SET version = ?, manifest = ?, config = ?, container_config = ?, sandbox_config = ?, image_ref = ?, repo = ?, commit_sha = ?, subdir = ? WHERE id = ?`,
 		ext.Version, columns.manifest, columns.config, columns.container, columns.sandbox, ext.ImageRef, ext.Repo, ext.Commit, ext.Subdir, id,
 	)
-	if err != nil {
-		return fmt.Errorf("update extension: %w", err)
-	}
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("extension not found: %s", id)
-	}
-	return nil
 }
 
 // Delete removes an extension.
 func (es *ExtensionStore) Delete(id string) error {
-	result, err := es.db.Exec(`DELETE FROM extensions WHERE id = ?`, id)
-	if err != nil {
-		return fmt.Errorf("delete extension: %w", err)
-	}
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("extension not found: %s", id)
-	}
-	return nil
+	return es.execOne("delete extension", id, `DELETE FROM extensions WHERE id = ?`, id)
 }
 
 // SetEnabled toggles the enabled state of an extension.
 func (es *ExtensionStore) SetEnabled(id string, enabled bool) error {
-	result, err := es.db.Exec(
-		`UPDATE extensions SET enabled = ? WHERE id = ?`,
-		store.B2I(enabled), id,
-	)
-	if err != nil {
-		return fmt.Errorf("set enabled: %w", err)
-	}
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("extension not found: %s", id)
-	}
-	return nil
+	return es.execOne("set enabled", id, `UPDATE extensions SET enabled = ? WHERE id = ?`, store.B2I(enabled), id)
 }
 
 // SetImageRef records the image an extension's sandbox runs in both places it is kept: image_ref (the UI
@@ -426,35 +412,14 @@ func (es *ExtensionStore) SetImageRef(id, imageRef string, containerConfig Conta
 	if containerConfigJSON == nil {
 		containerConfigJSON = []byte("{}")
 	}
-	result, err := es.db.Exec(
-		`UPDATE extensions SET image_ref = ?, container_config = ? WHERE id = ?`,
-		imageRef, string(containerConfigJSON), id,
-	)
-	if err != nil {
-		return fmt.Errorf("set image_ref: %w", err)
-	}
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("extension not found: %s", id)
-	}
-	return nil
+	return es.execOne("set image_ref", id, `UPDATE extensions SET image_ref = ?, container_config = ? WHERE id = ?`,
+		imageRef, string(containerConfigJSON), id)
 }
 
 // SetBuiltAt updates the built_at timestamp for an extension.
 func (es *ExtensionStore) SetBuiltAt(id string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	result, err := es.db.Exec(
-		`UPDATE extensions SET built_at = ? WHERE id = ?`,
-		now, id,
-	)
-	if err != nil {
-		return fmt.Errorf("set built_at: %w", err)
-	}
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("extension not found: %s", id)
-	}
-	return nil
+	return es.execOne("set built_at", id, `UPDATE extensions SET built_at = ? WHERE id = ?`, now, id)
 }
 
 // StorageGet returns the value for one key in an extension's namespace, or (nil, nil) when the key does
@@ -578,8 +543,6 @@ func (es *ExtensionStore) scanExtension(s scanner) (*Extension, error) {
 		if err := json.Unmarshal([]byte(manifestJSON.String), &ext.Manifest); err != nil {
 			return nil, fmt.Errorf("unmarshal manifest: %w", err)
 		}
-		// Normalized here rather than migrated, so every reader sees one shape.
-		ext.Manifest.Capabilities.GetLSP().NormalizeFileTypes()
 	}
 	if configJSON.Valid {
 		if err := json.Unmarshal([]byte(configJSON.String), &ext.Config); err != nil {

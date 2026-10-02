@@ -1,7 +1,7 @@
 package lsp
 
 // What ensureSandbox hands to a container create, and what it later asks a running container about,
-// are two different lists — and the bug this pins is what happens when they are treated as one.
+// are two different lists.
 
 import (
 	"os"

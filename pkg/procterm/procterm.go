@@ -23,8 +23,8 @@ const (
 
 // KillGroup SIGKILLs the command's process group (commands run with Setpgid, so the pgid
 // equals the pid), falling back to the direct child if the group is gone or the signal is
-// refused. Killing only the child is the bug this exists for: grandchildren survive with
-// stdout still open, so the output never ends.
+// refused. Killing only the child leaves grandchildren alive with stdout still open, so the
+// output never ends.
 //
 // Stop using this once the leader has been reaped — its pid, which is the pgid, can then
 // be recycled onto an unrelated process.

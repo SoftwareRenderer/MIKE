@@ -104,16 +104,6 @@ func TestBashContextCancellation(t *testing.T) {
 	client.Close()
 }
 
-// TestConcurrentWritesNoCorruption verifies that concurrent writes from multiple
-// goroutines to the same Client do not corrupt the protocol stream.
-//
-// Previously writes to the underlying pipe were unsynchronized. protocol.WriteFrame
-// issues two separate Write calls (a 9-byte header, then the payload), so when
-// several goroutines wrote concurrently, bytes from different frames could
-// interleave. The bridge reads frames with a single goroutine and treats any
-// non-EOF read error as fatal — it exits, becoming unreachable, and every
-// subsequent tool call fails with "send bash request: write header: write |1:
-// broken pipe". This test reproduces that scenario and asserts no corruption.
 // TestIsAliveFalseAfterClose verifies that IsAlive() returns false as soon as
 // Close() marks the client closed — not only after the readLoop goroutine
 // notices the closed pipe and exits.
@@ -442,8 +432,8 @@ func wedgedBridge(t *testing.T) *Client {
 	return NewClient(clientWrite, bridgeRead)
 }
 
-// TestLSPNotifyAbandonsWedgedWrite is the regression test: LSPNotify used to ignore its
-// context, so a bridge that stopped reading parked the task's executor goroutine forever.
+// TestLSPNotifyAbandonsWedgedWrite: LSPNotify honours its context, so a bridge that stops
+// reading cannot park the task's executor goroutine.
 func TestLSPNotifyAbandonsWedgedWrite(t *testing.T) {
 	withShortLSPRoundTrip(t, 50*time.Millisecond)
 	client := wedgedBridge(t)
@@ -503,9 +493,8 @@ func TestLSPNotifyCancellationKeepsClientUsable(t *testing.T) {
 	}
 }
 
-// TestLSPStartBoundedWithoutCallerDeadline: LSPStart used to take context.Background()
-// from GetOrCreate, so a bridge that accepted the request and never answered was waited
-// on forever. The client imposes its own floor now.
+// TestLSPStartBoundedWithoutCallerDeadline: the client imposes its own round-trip floor, so a
+// bridge that never answers is bounded even when the caller passed no deadline.
 func TestLSPStartBoundedWithoutCallerDeadline(t *testing.T) {
 	withShortLSPRoundTrip(t, 100*time.Millisecond)
 

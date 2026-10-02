@@ -9,10 +9,9 @@ import (
 
 // configUpdates is the body of PUT /api/config: the fields still encoded, so both "was this key
 // sent" and "what type did the client send" stay answerable, and a type mismatch becomes a 400
-// naming the field. It used to be a `map[string]any` read behind assertions, where four fields
-// panicked on a wrong type and the rest were dropped silently.
+// naming the field.
 //
-// A JSON null reads as absent, which is what kept "providers": null from wiping the provider list.
+// A JSON null reads as absent, so a client sending "providers": null keeps the provider list.
 type configUpdates struct {
 	fields map[string]json.RawMessage
 	// err is the first field whose type did not match; the handler answers 400 with it. Recording it
@@ -103,11 +102,4 @@ func operatingModePtr(m *types.OperatingMode) *string {
 	}
 	s := string(*m)
 	return &s
-}
-
-// clamp constrains a client-supplied count to the range the reader accepts. Out of range is a range
-// problem, not a type problem, so it stays a clamp: AutoSummarizeThreshold treats a stored value out
-// of range as unset anyway, and clamping keeps what the UI shows equal to what is stored.
-func clamp(v, lo, hi int) int {
-	return min(max(v, lo), hi)
 }

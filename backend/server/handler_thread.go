@@ -294,15 +294,8 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate new thread ID and branch name
-	newThreadID := types.GenerateThreadID()
-	// Ensure uniqueness
-	for {
-		if _, err := s.store.GetThread(newThreadID); err != nil {
-			break // unique
-		}
-		newThreadID = types.GenerateThreadID()
-	}
+	// A fork's git branch is named by the thread ID, so the ID is minted before the row exists.
+	newThreadID := s.store.NewThreadID()
 	newBranchName := fmt.Sprintf("thread/%s", newThreadID)
 	// Find the file state at the checkpoint: last commit BEFORE the checkpoint message.
 	// This is the state before its tool calls ran, so the fork starts from a clean slate.

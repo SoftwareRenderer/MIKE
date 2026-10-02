@@ -1730,9 +1730,9 @@ func (te *TaskExecutor) hasLiveExecutor(taskID string) bool {
 	return ok
 }
 
-// ForwardUserMessage forwards a user message to the running executor or lazy-starts one.
-// If the requested executor type (llm vs pi) differs from the currently running executor,
-// it stops the old executor and lazy-starts a new one with the correct type.
+// ForwardUserMessage forwards a user message to the running executor or lazy-starts one. When the
+// requested type (llm vs agent) differs from the executor running, that one is stopped and the correct
+// one is started.
 func (te *TaskExecutor) ForwardUserMessage(projectID, taskID string, um stream.UserMessage) {
 	requestedType := "llm"
 	if te.configStore.IsAgentProvider(um.ServerURL) {

@@ -35,7 +35,8 @@ func stashWorktree(t *testing.T, wm *WorktreeManager, repoDir, projID, taskID st
 	return wtPath
 }
 
-// TestInterleavedMergeStashesRestoreTheirOwnWork is the regression for the crossing.
+// TestInterleavedMergeStashesRestoreTheirOwnWork: merges on one project push to one shared stash
+// stack, so each must restore its own entry by hash.
 func TestInterleavedMergeStashesRestoreTheirOwnWork(t *testing.T) {
 	repoDir, projID, _, _, _, wm := setupStashTest(t)
 
@@ -171,9 +172,8 @@ func TestDropStashByHashNeverFallsBackToTheTopEntry(t *testing.T) {
 	}
 }
 
-// TestDropStashForTaskSparesWhatIsOnTop is the regression for the conflict-resolution path, which
-// discarded stash@{0} to tidy up its own pre-sync edits. The entry on top is whichever entry is
-// newest, so when ours was already swept or another task pushed later, the tidy-up deleted that one.
+// TestDropStashForTaskSparesWhatIsOnTop: dropping a task's entry must not consume stash@{0}, which is
+// whichever entry is newest — often the user's own.
 func TestDropStashForTaskSparesWhatIsOnTop(t *testing.T) {
 	repoDir, _, _, _, _, wm := setupStashTest(t)
 

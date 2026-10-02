@@ -55,9 +55,6 @@ func TestBundledLSPManifests_Validate(t *testing.T) {
 
 	withDependencyCache := 0
 	for name, m := range manifests {
-		// Normalized first, exactly as the install path does: what gets stored is the normalized
-		// shape, so that is the shape that has to be legal.
-		m.Capabilities.GetLSP().NormalizeFileTypes()
 		if err := m.Capabilities.GetLSP().Validate(); err != nil {
 			t.Errorf("%s: %v", name, err)
 			continue

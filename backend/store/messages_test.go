@@ -459,11 +459,9 @@ func TestMessageSeverityRoundTrip(t *testing.T) {
 	}
 }
 
-// TestGetTaskMessagesByThreadEmptyTaskID verifies that a thread-scoped lookup with
-// an empty taskID still returns the thread's messages. This is required by
-// getLastCommitHashInThread, which looks up remaining commit hashes by thread alone.
-// Regression: previously the query filtered by task_id = ” and returned nothing,
-// so surviving checkpoint messages were never found during delete rollback.
+// TestGetTaskMessagesByThreadEmptyTaskID: a thread-scoped lookup with an empty taskID still
+// returns the thread's messages, which is what getLastCommitHashInThread needs to find the
+// remaining commit hashes by thread alone.
 func TestGetTaskMessagesByThreadEmptyTaskID(t *testing.T) {
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
@@ -567,9 +565,8 @@ func TestGetLastMessageInThread(t *testing.T) {
 }
 
 // A summary row is not a turn of the conversation: it is what the turns before it are
-// remembered by, and it is the cut point the LLM context is built around. A cascade
-// that swept it used to leave the messages the summary replaced in place, so the next
-// rebuild had neither summary nor marker and reinstated the whole history at full size.
+// remembered by, and it is the cut point the LLM context is built around, so a cascade that
+// deletes messages must leave it and the rows it replaced consistent.
 func TestDeleteTaskMessagesAfter_PreservesSummarization(t *testing.T) {
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")

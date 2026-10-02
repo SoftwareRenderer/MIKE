@@ -262,10 +262,10 @@ func TestSyncTargetIntoTask_SubtaskChain(t *testing.T) {
 	}
 }
 
-// TestSyncTargetIntoTask_KeepsUnstagedWorkWhenTheStashFails is the lost-work regression. The sync
-// begins with `git checkout -f`, which reverts tracked modifications to HEAD with exit 0 and no
-// warning, so the stash taken before it is the only thing protecting the task's unstaged work. When
-// that stash cannot be taken, the sync has to refuse.
+// TestSyncTargetIntoTask_KeepsUnstagedWorkWhenTheStashFails: the sync begins with
+// `git checkout -f`, which reverts tracked modifications to HEAD with exit 0 and no warning, so the
+// stash taken before it is the only thing protecting the task's unstaged work. When that stash cannot
+// be taken, the sync has to refuse.
 func TestSyncTargetIntoTask_KeepsUnstagedWorkWhenTheStashFails(t *testing.T) {
 	t.Parallel()
 	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)

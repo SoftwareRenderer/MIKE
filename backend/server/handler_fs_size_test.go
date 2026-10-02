@@ -80,9 +80,8 @@ func fsReadStatus(t *testing.T, s *Server, cookie, csrf, projectID, file, ref st
 	return rr.Code
 }
 
-// TestFSReadRefusesOversizedWorkingTreeFile: the cap used to be applied to the string
-// that had already been read, so one request allocated the whole file before refusing
-// it.
+// TestFSReadRefusesOversizedWorkingTreeFile: the cap is applied before the bytes are read, so one
+// request never allocates a whole oversized file.
 func TestFSReadRefusesOversizedWorkingTreeFile(t *testing.T) {
 	s := testServer(t)
 	cookie, csrf := loginTestCSRF(t, s)

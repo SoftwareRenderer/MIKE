@@ -13,14 +13,14 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
+	"mike/pkg/logging"
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
-
-	"mike/pkg/logging"
 )
 
 // Config holds TLS certificate paths for the server.
@@ -322,7 +322,7 @@ func collectLeafNames() (dnsNames []string, ips []net.IP) {
 	for _, ip := range ipSet {
 		ips = append(ips, ip)
 	}
-	sort.Slice(ips, func(i, j int) bool { return ips[i].String() < ips[j].String() })
+	slices.SortFunc(ips, func(a, b net.IP) int { return strings.Compare(a.String(), b.String()) })
 
 	return dnsNames, ips
 }

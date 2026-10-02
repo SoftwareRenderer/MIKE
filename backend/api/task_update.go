@@ -11,9 +11,8 @@ import (
 //
 // Every field is a pointer because the endpoint is a partial update: an absent key means "leave
 // that column alone", a present one means "write this value" — including "" and false. A JSON
-// null decodes to nil and reads as absent. Pointers are also what makes a wrong-typed value a
-// 400: reading a map[string]any and asserting each value panicked on {"title":123} and silently
-// dropped {"auto_commit":"yes"} while the UI believed its own save.
+// null decodes to nil and reads as absent. A wrong-typed value is a 400 naming that field, and
+// nothing is written until every field validates.
 type taskUpdateRequest struct {
 	Title                     *string `json:"title"`
 	Prompt                    *string `json:"prompt"`

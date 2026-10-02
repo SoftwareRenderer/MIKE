@@ -264,10 +264,8 @@ func (c *Client) waitForCtx(ctx context.Context, frame *protocol.Frame, timeout 
 	var chunks []*protocol.Frame
 	chunkBytes := 0
 
-	// timeout == 0 means block indefinitely, and a receive from a nil channel blocks
-	// forever, so one select answers both cases. It used to be two copies of every branch
-	// per phase, kept in step by hand — which is exactly how a new case ends up added to
-	// one copy and not the other.
+	// timeout == 0 means block indefinitely, and a receive from a nil channel blocks forever, so
+	// one select answers both cases.
 	var timeoutC <-chan time.Time
 	if timeout > 0 {
 		timer := time.NewTimer(timeout)

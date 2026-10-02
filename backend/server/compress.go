@@ -210,6 +210,15 @@ func (c *compressWriter) Write(p []byte) (int, error) {
 // included — and sends every later write straight to the socket.
 func (c *compressWriter) passThrough() {
 	c.committed = true
+	c.flushHeaders()
+	if c.body.Len() > 0 {
+		_, _ = c.ResponseWriter.Write(c.body.Bytes())
+		c.body.Reset()
+	}
+}
+
+// flushHeaders writes the buffered headers, the status, and the Vary a compressed response carries.
+func (c *compressWriter) flushHeaders() {
 	for k, vv := range c.headers {
 		for _, v := range vv {
 			c.ResponseWriter.Header().Add(k, v)
@@ -217,10 +226,6 @@ func (c *compressWriter) passThrough() {
 	}
 	c.ResponseWriter.Header().Set("Vary", "Accept-Encoding")
 	c.ResponseWriter.WriteHeader(c.code)
-	if c.body.Len() > 0 {
-		_, _ = c.ResponseWriter.Write(c.body.Bytes())
-		c.body.Reset()
-	}
 }
 
 func (c *compressWriter) commit() {
@@ -228,13 +233,7 @@ func (c *compressWriter) commit() {
 	c.headers.Set("Content-Encoding", c.encoding)
 	c.headers.Del("Content-Length")
 
-	for k, vv := range c.headers {
-		for _, v := range vv {
-			c.ResponseWriter.Header().Add(k, v)
-		}
-	}
-	c.ResponseWriter.Header().Set("Vary", "Accept-Encoding")
-	c.ResponseWriter.WriteHeader(c.code)
+	c.flushHeaders()
 
 	switch c.encoding {
 	case "br":
@@ -254,14 +253,7 @@ func (c *compressWriter) finish() {
 	}
 
 	if !c.committed {
-		// Flush headers and write body uncompressed.
-		for k, vv := range c.headers {
-			for _, v := range vv {
-				c.ResponseWriter.Header().Add(k, v)
-			}
-		}
-		c.ResponseWriter.Header().Set("Vary", "Accept-Encoding")
-		c.ResponseWriter.WriteHeader(c.code)
+		c.flushHeaders()
 		c.ResponseWriter.Write(c.body.Bytes())
 		return
 	}
@@ -316,13 +308,7 @@ func (c *compressWriter) writeBody(body []byte) {
 		c.headers.Set("Content-Encoding", c.encoding)
 	}
 
-	for k, vv := range c.headers {
-		for _, v := range vv {
-			c.ResponseWriter.Header().Add(k, v)
-		}
-	}
-	c.ResponseWriter.Header().Set("Vary", "Accept-Encoding")
-	c.ResponseWriter.WriteHeader(c.code)
+	c.flushHeaders()
 
 	if c.encoding != "" && int64(len(body)) >= minCompressSize {
 		switch c.encoding {

@@ -503,8 +503,7 @@ func TestPersistEntry_Serialization(t *testing.T) {
 	}
 }
 
-// brokenAdapter implements agent.AgentAdapter that returns nil/empty for everything.
-// Used to test nil-safety of the runner.
+// brokenAdapter implements agent.AgentAdapter returning nil/empty for everything.
 type brokenAdapter struct {
 	subprocessConfig agent.SubprocessConfig
 }
@@ -642,7 +641,7 @@ func TestSubprocessConfig_Serialization(t *testing.T) {
 	}
 }
 
-// --- Channel teardown regression (panic: close of closed channel) ---
+// --- Channel teardown and late dispatch ---
 
 // newTeardownRunner builds a runner with just the channels wired up: these tests are
 // about channel teardown and late dispatch, not the subprocess.
@@ -653,11 +652,9 @@ func newTeardownRunner() *AgentRunner {
 	}
 }
 
-// TestCloseChannels_IdempotentUnderConcurrentTeardown pins the fix for a panic that
-// killed the whole process: Close() and readOutput's defer each tested r.done and then
-// closed both channels themselves, and that test-then-close is not atomic — two
-// teardowns racing through it closed the same channel twice. A panic in any of these
-// goroutines takes the test binary down, which is the failure being asserted.
+// TestCloseChannels_IdempotentUnderConcurrentTeardown: two teardowns closing the same channel
+// must not double-close it. A panic in any of these goroutines takes the whole process down,
+// which is the failure asserted here.
 func TestCloseChannels_IdempotentUnderConcurrentTeardown(t *testing.T) {
 	for i := 0; i < 500; i++ {
 		r := newTeardownRunner()
@@ -694,9 +691,8 @@ func TestDispatchEventAfterCloseDoesNotPanic(t *testing.T) {
 	r.dispatchEvent(context.Background(), agent.Event{Type: agent.EventTypeToken, Text: "late"})
 }
 
-// TestAgentRunner_CloseWhileReaderActive exercises the real lifecycle: the subprocess
-// has output in flight (so readOutput is parsing and dispatching) at the exact moment
-// Close() runs — the interleaving that used to panic.
+// TestAgentRunner_CloseWhileReaderActive exercises the real lifecycle: the subprocess has output
+// in flight (so readOutput is parsing and dispatching) at the exact moment Close() runs.
 func TestAgentRunner_CloseWhileReaderActive(t *testing.T) {
 	for i := 0; i < 25; i++ {
 		adapter := newMockAdapter()

@@ -92,7 +92,7 @@ func uploadStemExt(name string) (stem, ext string) {
 // conflict is settled against the directory the bytes land in. name must have come from UploadName.
 func firstFreeUploadPath(dir, name string) (string, error) {
 	stem, ext := uploadStemExt(name)
-	for try := 0; try < maxUploadSuffixTries; try++ {
+	for try := range maxUploadSuffixTries {
 		candidate := name
 		if try > 0 {
 			candidate = stem + "-" + strconv.Itoa(try) + ext

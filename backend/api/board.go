@@ -30,9 +30,7 @@ func NewBoardHandler(store *store.Store, configStore *config.ConfigStore, sandbo
 // HandleBoard returns the board (all tasks) for a project.
 func (h *BoardHandler) HandleBoard(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
-
-	if _, err := h.store.GetProject(projectID); err != nil {
-		httputil.Fail(w, err, "get project", "project not found")
+	if _, ok := resolveProject(w, r, h.store); !ok {
 		return
 	}
 

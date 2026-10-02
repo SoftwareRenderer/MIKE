@@ -1,10 +1,10 @@
 # Storage: transactions, schema, files
 
 The rules are in `AGENTS.md → Storage`. This is the list of what is inside `tx`, what is deliberately
-outside it, and how the schema gate works.
+outside it, and how the schema is created.
 
 SQLite, one connection (`SetMaxOpenConns(1)`) so the `PRAGMA`s apply everywhere; `store.Store.mu` is the
-serialisation point. Tests: `backend/store/` (`store_test.go`, `migrations_test.go`, `sessions_test.go`).
+serialisation point. Tests: `backend/store/` (`store_test.go`, `schema_test.go`, `sessions_test.go`).
 
 ## One transaction per section that must land entirely
 
@@ -23,7 +23,8 @@ What stays outside `tx` states its reason at its definition:
 - `GetSessionByToken`'s second statement is a throttled `last_seen` touch (60 s, `lastSeenInterval`) —
   the store serialises on one connection, so an unthrottled write makes every authenticated request a DB
   write.
-- The schema probe chain *is* the recovery mechanism for a half-applied migration.
+- `initSchema` is one `Exec` of the DDL and it returns the error: a database whose tables cannot be
+  created refuses the boot instead of being repaired underneath a request.
 
 Mid-section faults are induced with SQLite `RAISE(ABORT)` triggers — never a production seam for tests.
 Test: `backend/store/atomic_writes_test.go`.
@@ -40,15 +41,20 @@ CASCADE is the **row** story only. `api.handleDeleteProject` deletes the project
 upload directories that keep running with no row left to name them, and `staleContainerNames` skips
 running containers — nothing else would ever remove them.
 
-## The schema is gated by `PRAGMA user_version`
+## The schema is created whole
 
-- SQLite has no `ADD COLUMN IF NOT EXISTS`, so each added column is probed before its `ALTER`
-  (`hasColumn`/`addColumn`/`renameColumn`, `backend/store/migrations.go`).
-- `initSchema` returns early when the database is already at `schemaVersion`, and refuses to touch one
-  stamped **newer** than this build.
-- Adding a migration means extending the probe chain *and* raising `schemaVersion`, leaving the earlier
-  steps in place — they must stay idempotent, and a step that must run exactly once needs its own marker
-  (the config-row guard on the backfill) rather than trusting the number.
+- `baseSchemaSQL` (`backend/store/migrations.go`) declares every table, column and index the task, project,
+  message, thread and stats reads use, and `initSchema` runs it on every start. The two credential tables
+  are declared beside their own accessors (`sessionTable`, `apiTokenTable`) under the same rule. Every
+  statement is `IF NOT EXISTS`.
+- Nothing upgrades an older database, because nothing has shipped. `CREATE TABLE IF NOT EXISTS` leaves a
+  table it finds exactly as it is, so a file whose tables predate this DDL boots and then fails every read
+  that names a column the file lacks. That file is deleted, never upgraded — which is why no
+  `PRAGMA user_version` stamp and no probe before an `ALTER` exists to maintain.
+- A new column goes into `baseSchemaSQL`, in the order its scanner reads it. `backend/store/schema_test.go`
+  compares each table's `PRAGMA table_info` against the column list its scan path selects. It also walks
+  each surviving read's query plan, so an index dropped from the DDL fails a test rather than turning a
+  lookup into a scan.
 - Two task columns have exactly one writer each and are absent from `UpdateTask`: `memory_supervisor_paused`
   (`SetMemorySupervisorPaused`) and the pair `sandbox_memory_peak_mb` / `sandbox_oom_kills`
   (`RecordTaskSandboxMemory`), which the sandbox layer writes as a container is removed. A task copy read
@@ -71,29 +77,27 @@ which is how a chat could read its own turns the wrong way round — and a zone 
 wall-clock time at a fall-back. `task_messages.created_at` is stored through `formatMessageTime`
 (`messageTimeLayout`); `task_threads.checkpoint_message_time` through `ptrTime`, because
 `GetThreadsByCheckpointMessageTime` matches that column against a message's `created_at` rendered by its
-caller. Both columns were stored the other way before `doneMessageTimeKeysStamp`, so `normalizeTimeText`
-rewrites the rows it finds — one table holding both shapes has no order at all — and a row whose text does
-not parse is named in the log and left as stored. `rowid` breaks an exact tie, as `GetLastMessageInThread`
-already did; the listing queries do the same. Tests: `backend/store/messages_time_test.go`.
+caller. `rowid` breaks an exact tie, as `GetLastMessageInThread` already did; the listing queries do the
+same. Tests: `backend/store/messages_time_test.go`.
 
 ## A conversation is read in the order it was written
 
 `idx_task_messages_thread_time(thread_id, created_at)` and `idx_task_messages_task_time(task_id, created_at)`
-(`doneMessageOrderIndexesStamp`) are what every `ORDER BY created_at, rowid` on `task_messages` reads
-through. A single-column index on `thread_id` or `task_id` satisfies the `WHERE` and leaves SQLite to sort
+are what every `ORDER BY created_at, rowid` on `task_messages` reads through. A single-column index on
+`thread_id` or `task_id` satisfies the `WHERE` and leaves SQLite to sort
 the whole thread — every content column of it — in a temp B-tree, so the read costs the thread before it
 returns a row; the windowed read (`GetTaskMessagePage`, `docs/api-contract.md → The conversation is a
-window`) is bounded by its window only because these two carry the order. The composite index covers what
-the single-column one did, so those are dropped rather than left to cost every insert for nothing.
+window`) is bounded by its window only because these two carry the order. A composite index covers what a
+single-column one covers, so the DDL declares the composite alone and no insert pays for a second copy.
 `EXPLAIN QUERY PLAN` is asserted, not assumed: `backend/store/messages_window_test.go`.
 
-`idx_task_messages_user_thread(thread_id, created_at) WHERE role = 'user'` and its `task_id` twin
-(`doneUserTurnIndexesStamp`) are that order cut to prompts, and `GetUserTurnPage` reads through them
+`idx_task_messages_user_thread(thread_id, created_at) WHERE role = 'user'` and its `task_id` twin are that
+order cut to prompts, and `GetUserTurnPage` reads through them
 (`docs/api-contract.md → The conversation is a window, not the thread`). Over the shared index the same read passes
 every row of the turn below the prompt it is looking for, so its cost is the turn's length. A partial index
 keeps `rowid` as its last key column, which is what lets the role filter keep the tie rule; putting `role`
 in the shared index instead pushes `rowid` back and puts a temp B-tree in every conversation read. Tests:
-`backend/store/messages_turns_test.go`, `TestMigration_AddsTheUserTurnIndexes`.
+`backend/store/messages_turns_test.go`.
 
 ## File permissions
 
@@ -109,5 +113,5 @@ A failing system source panics rather than issuing a guessable ID. Shape: `word-
 `/?task=frost-amber-quartz`. Test: `backend/types/idgen_test.go`.
 ## Checking this
 
-`go test ./backend/store/` covers the transaction boundary, the migration probe chain, the stored instants
-and the ID shapes.
+`go test ./backend/store/` covers the transaction boundary, the schema against its scanners, the stored
+instants and the ID shapes.

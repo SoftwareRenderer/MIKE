@@ -3,7 +3,6 @@ package auth
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/hex"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -353,47 +352,5 @@ func TestValidateThrottlesLastSeen(t *testing.T) {
 	}
 	if got := lastSeenOf(t, db, id); time.Now().Unix()-got > 5 {
 		t.Fatalf("last_seen was not restamped after the throttle window: %d (now %d)", got, time.Now().Unix())
-	}
-}
-
-// TestStartupBackfillsLegacySessions: NewSessionManager runs the token-hash
-// migration, so a session created by an older build keeps working after an
-// upgrade while its plaintext token leaves the database.
-func TestStartupBackfillsLegacySessions(t *testing.T) {
-	dir := t.TempDir()
-	s, err := store.NewStore(filepath.Join(dir, "test.db"))
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
-
-	const legacyToken = "0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9"
-	if _, err := s.Exec(
-		`INSERT INTO sessions (id, token, csrf_token, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`,
-		"legacy-1", legacyToken, "csrf-legacy", time.Now().Unix(), time.Now().Add(24*time.Hour).Unix(),
-	); err != nil {
-		t.Fatalf("seed legacy row: %v", err)
-	}
-
-	if _, err := NewSessionManager(t.Context(), s, testPassword); err != nil {
-		t.Fatalf("NewSessionManager: %v", err)
-	}
-
-	var storedToken, storedHash string
-	if err := s.QueryRow(`SELECT token, COALESCE(token_hash, '') FROM sessions WHERE id = ?`, "legacy-1").
-		Scan(&storedToken, &storedHash); err != nil {
-		t.Fatalf("read row: %v", err)
-	}
-	sum := sha256.Sum256([]byte(legacyToken))
-	if want := hex.EncodeToString(sum[:]); storedHash != want {
-		t.Errorf("token_hash = %q; want %q", storedHash, want)
-	}
-	if storedToken == legacyToken {
-		t.Error("startup left the plaintext session token in the database")
-	}
-
-	m := &SessionManager{store: s, passwordHash: sha256.Sum256([]byte("test-password"))}
-	if gotID, _, err := m.Validate(t.Context(), legacyToken); err != nil || gotID != "legacy-1" {
-		t.Fatalf("the upgraded session must still validate: id=%q err=%v", gotID, err)
 	}
 }

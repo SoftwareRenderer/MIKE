@@ -1,9 +1,9 @@
 package git
 
-// The user-visible contract of the project merge lock, written because the alternative — bounding the wait
-// and answering "project is busy" — was considered and rejected (F22/F23, 2b): a merge is a legitimate
-// multi-second operation, and refusing someone who arrived second would turn a normal race into a click they
-// have to repeat. What they get instead is the wait, and a log line naming what it is still waiting on.
+// The user-visible contract of the project merge lock: bounding the wait and answering "project is
+// busy" is refused, because a merge is a legitimate multi-second operation and refusing the second
+// arrival would turn a normal race into a click they have to repeat. What they get is the wait, and a
+// log line naming what it is still waiting on.
 
 import (
 	"strings"
@@ -97,7 +97,7 @@ func TestParallelMergeWaitersAllRunAndNoneIsRefused(t *testing.T) {
 		t.Errorf("%d of %d merges ran, want all of them", len(order), n)
 	}
 
-	// The other project is untouched by any of this: one table, per-key waits (F16 keeps the domains apart).
+	// The other project is untouched by any of this: one table, per-key waits, one named type per domain.
 	other := wm.LockProjectMerge("another-project")
 	other()
 }

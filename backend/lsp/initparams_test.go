@@ -144,10 +144,8 @@ func TestInitializeParamsAreOnlyWhatWeIntendToSend(t *testing.T) {
 	}
 }
 
-// TestInitializeReportsAServerRefusal covers the other half of the same decision: sending fewer
-// parameters is only safe if a server that minds says so where someone can read it. The reply body
-// used to be discarded, so a JSON-RPC error to initialize looked exactly like acceptance, and every
-// request after it failed with nothing in the log to explain why.
+// TestInitializeReportsAServerRefusal: sending fewer parameters is only safe if a server that minds
+// says so where someone can read it. A JSON-RPC error to initialize must not look like acceptance.
 func TestInitializeReportsAServerRefusal(t *testing.T) {
 	captured := &captureBridge{}
 	cl := capturingClient(t, captured, `{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"missing required parameter"}}`)

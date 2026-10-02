@@ -115,11 +115,12 @@ its routing key from the same `resolveFile` call that chooses the grammar.
 Fold, indent and bracket matching all ask the same question — "is this range code?" — and share one reader for the
 answer (`syntax/stream-tokens.ts`). Splitting it is how a `"{"` becomes a bracket in one place and not another.
 
-## An old manifest is normalized, not migrated
+## A manifest is validated before it is stored
 
 `backend/extensions/manifest_validate.go` refuses a bad manifest on install, on update and on
-`PUT /api/extensions/{id}`; it is never stored. `LSPConfig.NormalizeFileTypes()` in `scanExtension` fills in what
-an older manifest lacks, so runtime code reads one shape and there is no migration step.
+`PUT /api/extensions/{id}`; what reaches the database is one that passed, so runtime code reads one shape and
+there is no migration step. `file_types` is the only way a manifest names the files it owns: an omitted
+declaration is refused, never filled in.
 
 ## A grammar is never gated by the LSP switch
 

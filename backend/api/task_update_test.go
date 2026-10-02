@@ -9,9 +9,8 @@ import (
 	"mike/backend/types"
 )
 
-// TestPUTTask_FieldWrongTypeIsRejectedWithoutPanicOrSilence: a wrong-typed field in a partial task
-// update is a 400 and changes nothing. It used to be a 500 (single-value type assertion panics) or
-// a 200 that dropped the value and let the UI believe its own save.
+// TestPUTTask_FieldWrongTypeIsRejectedWithoutPanicOrSilence: a wrong-typed field in a partial
+// task update is a 400 naming the field, and nothing is written.
 func TestPUTTask_FieldWrongTypeIsRejectedWithoutPanicOrSilence(t *testing.T) {
 	h, s, _ := newTestTaskHandler(t)
 	setupTaskValidationProject(t, h, s)
@@ -178,9 +177,8 @@ func TestPUTTask_ModeChangeAndPrerequisiteRules(t *testing.T) {
 	}
 }
 
-// TestPUTTask_MalformedBodyIsRejectedNotIgnored: the handler used to read the body, hand it to
-// json.Unmarshal and discard the error, so a truncated or non-object body applied no fields and
-// answered 200. The client could not tell a save from a typo.
+// TestPUTTask_MalformedBodyIsRejectedNotIgnored: a truncated or non-object body is a 400, never a
+// 200 that applied no fields.
 func TestPUTTask_MalformedBodyIsRejectedNotIgnored(t *testing.T) {
 	h, s, _ := newTestTaskHandler(t)
 	setupTaskValidationProject(t, h, s)
@@ -204,9 +202,8 @@ func TestPUTTask_MalformedBodyIsRejectedNotIgnored(t *testing.T) {
 	}
 }
 
-// TestPOSTTask_FieldWrongTypeIsRejected covers the create path, which decodes into types.Task
-// directly and so never had the assertion problem - except for attachments, the one value read out
-// of the raw fields, and operating_mode which no path validated at all before this.
+// TestPOSTTask_FieldWrongTypeIsRejected covers the create path, including attachments and
+// operating_mode, the two fields read out of the raw body.
 func TestPOSTTask_FieldWrongTypeIsRejected(t *testing.T) {
 	h, s, _ := newTestTaskHandler(t)
 	setupTaskValidationProject(t, h, s)

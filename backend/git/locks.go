@@ -7,9 +7,8 @@ import (
 )
 
 // tryLockProjectWorktree waits up to timeout for the project's worktree lock and returns its release
-// function. On timeout it returns (nil, false) without leaving the lock held and without leaving a
-// waiter behind: the goroutine this used to abandon kept waiting on the mutex and unlocked whenever it
-// eventually won, which made every later CreateWorktree for that project hit the same timeout.
+// function. On timeout it returns (nil, false): nothing is held and no waiter is left behind, so the
+// next caller is not queued behind a run that already gave up.
 func (wm *WorktreeManager) tryLockProjectWorktree(projectID string, timeout time.Duration) (func(), bool) {
 	return wm.worktree.TryLock(projectID, timeout)
 }

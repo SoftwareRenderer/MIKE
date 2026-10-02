@@ -576,11 +576,8 @@ func (sm *ExtensionSandboxManager) StartSession(extID string) (*bridge.Client, e
 // startBridgeLocked spawns `podman exec -i <container> /sandbox-bridge` and wraps its pipes in a
 // bridge client, recording nothing: the caller owns the process and must reap it.
 func startBridgeLocked(containerName string) (*exec.Cmd, *bridge.Client, error) {
-	// PodmanCommand, not exec.Command. This process lives as long as the container, and used to
-	// inherit the whole server environment — it carries no -e, so none of it reached the container,
-	// but MIKE_LOGIN_PASSWORD and MIKE_ENCRYPTION_KEY sat readable in /proc/<pid>/environ for the
-	// life of the sandbox — and it set no WaitDelay, so a container that stopped answering could
-	// hold cmd.Wait open past shutdown.
+	// PodmanCommand, not exec.Command: the environment allowlist and a WaitDelay come with it, so a
+	// container that stops answering cannot hold cmd.Wait open past shutdown.
 	agentCmd := sandboxruntime.PodmanCommand(
 		"--runtime-flag=overlay2=root:self", "--runtime-flag=ignore-cgroups",
 		"exec", "-i", containerName,
@@ -927,10 +924,9 @@ func pullsMissingRemoteImage(image string) bool {
 // extensionImageSource answers two questions together because they must agree: which image an
 // extension's sandbox runs, and what builds it when the host lacks it.
 //
-// There is no default image. The old one (ubuntu:latest for an empty record) failed in the worst
-// way for a language server: the container started, reported running, and held no server. Now an
-// extension that cannot name an image is an error and no container is created. A record with no
-// image but a Dockerfile on disk is repaired here, so it heals on its next start.
+// There is no default image: an extension that cannot name one is an error and no container is
+// created. A record with no image but a Dockerfile on disk is repaired here, so it heals on its next
+// start.
 func (sm *ExtensionSandboxManager) extensionImageSource(ext *Extension) (image, dockerfilePath string, err error) {
 	dockerfilePath, dfErr := sm.findLocalDockerfile(ext.Name)
 	if dfErr != nil {

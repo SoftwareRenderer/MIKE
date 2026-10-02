@@ -7,13 +7,10 @@ import (
 	"mike/backend/types"
 )
 
-// These tests hold the two properties the multi-statement sections exist to provide, and each was written
-// against the code *before* the change it defends, so its failure is on the record:
+// These tests hold the two properties a multi-statement write section must provide:
 //
-//   - a delete that fails deletes nothing (DeleteProject used to delete every dependent row, then fail on
-//     the project itself and report an error — children gone, project still listed);
-//   - a write sequence that fails part-way leaves the previous state (SetActiveThread used to deactivate
-//     every thread, then fail to activate the target — the task was left with no active thread).
+//   - a delete that fails deletes nothing — no dependent row goes while the project stays listed;
+//   - a write sequence that fails part-way leaves the previous state, never a half-applied one.
 //
 // Faults are induced with SQLite triggers, not with a production seam: the trigger fires on the statement
 // that must fail and on nothing else.

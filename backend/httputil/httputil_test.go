@@ -184,9 +184,8 @@ func TestFailAnswersAWrappedServerFaultWithTheSameSentence(t *testing.T) {
 	}
 }
 
-// Fault is the shape 30 handlers used to write by hand, so its contract is the same one stated once:
-// 500, the operation's sentence in the body, the cause in the log. A handler that reaches for a status
-// code re-opens the question of how much of the cause to show.
+// Fault's contract, stated once: 500, the operation's sentence in the body, the cause in the log. A
+// handler that reaches for a status code re-opens the question of how much of the cause to show.
 func TestFaultAnswersWithTheOperationAndLogsTheCause(t *testing.T) {
 	logged, restore := logging.TestSink()
 	defer restore()

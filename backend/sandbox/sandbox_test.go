@@ -97,7 +97,7 @@ func TestCreateAndStop(t *testing.T) {
 	}
 
 	// Create a temp directory to use as worktree
-	dir := t.TempDir()
+	dir := taskWorktreeDir(t)
 	taskID := "test-sandbox-task"
 
 	_, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{})
@@ -125,7 +125,7 @@ func TestExec(t *testing.T) {
 		t.Skip("gVisor not available, skipping integration test")
 	}
 
-	dir := t.TempDir()
+	dir := taskWorktreeDir(t)
 	taskID := "test-exec-task"
 
 	_, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{})
@@ -175,7 +175,7 @@ func TestExecWithInput(t *testing.T) {
 		t.Skip("gVisor not available, skipping integration test")
 	}
 
-	dir := t.TempDir()
+	dir := taskWorktreeDir(t)
 	taskID := "test-exec-input-task"
 
 	_, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{})
@@ -287,7 +287,7 @@ func TestCreate_OverridesImageEntrypoint(t *testing.T) {
 	// alpine/git ships ENTRYPOINT ["git"]; without clearing it in the create
 	// args, PID 1 would be `git /bin/sh -c ...` and exit within milliseconds
 	// ("git: '/bin/sh' is not a git command"), taking any exec'd shell with it.
-	dir := t.TempDir()
+	dir := taskWorktreeDir(t)
 	taskID := "test-entrypoint-task"
 
 	_, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{
@@ -320,7 +320,7 @@ func TestCreateWithoutGVisor(t *testing.T) {
 		available: false,
 	}
 
-	_, err := sm.Create("task-1", t.TempDir(), &types.Project{Name: "test-proj"}, SandboxOpts{})
+	_, err := sm.Create("task-1", taskWorktreeDir(t), &types.Project{Name: "test-proj"}, SandboxOpts{})
 	if err == nil {
 		t.Fatal("expected error when gVisor is unavailable")
 	}
@@ -343,7 +343,7 @@ func TestCreate_RejectsInvalidImageRef(t *testing.T) {
 	}
 
 	for _, img := range invalidImages {
-		_, err := sm.Create("test-invalid-image", t.TempDir(), &types.Project{Name: "test-proj"}, SandboxOpts{
+		_, err := sm.Create("test-invalid-image", taskWorktreeDir(t), &types.Project{Name: "test-proj"}, SandboxOpts{
 			BaseImage: img,
 		})
 		if err == nil {
@@ -363,7 +363,7 @@ func TestCreate_ValidImageRefPassesValidation(t *testing.T) {
 	}
 
 	// A valid image ref should pass validation and reach the gVisor check.
-	_, err := sm.Create("test-valid-image", t.TempDir(), &types.Project{Name: "test-proj"}, SandboxOpts{
+	_, err := sm.Create("test-valid-image", taskWorktreeDir(t), &types.Project{Name: "test-proj"}, SandboxOpts{
 		BaseImage: "docker.io/library/ubuntu:latest",
 	})
 	if err == nil {
@@ -374,9 +374,8 @@ func TestCreate_ValidImageRefPassesValidation(t *testing.T) {
 	}
 }
 
-// A missing sandbox image used to reach the user as "exit status 125 (short-name resolution
-// enforced but cannot prompt without a TTY)". With qualified refs and --pull=never it must be
-// named plainly, and fast — no retries against a guessed registry.
+// A missing sandbox image is named plainly and fast: qualified refs plus --pull=never mean no retries
+// against a guessed registry.
 // TestCreateContainerArgs pins the argument order: podman-global flags before `create`, `--pull
 // never` after it. Container creation must not fetch an image; the caller does that, visibly.
 func TestCreateContainerArgs(t *testing.T) {
@@ -432,7 +431,7 @@ func TestCreate_MissingImageIsActionable(t *testing.T) {
 	}
 
 	started := time.Now()
-	_, err := sm.Create(taskID, t.TempDir(), &types.Project{Name: "test-proj"}, SandboxOpts{BaseImage: missing})
+	_, err := sm.Create(taskID, taskWorktreeDir(t), &types.Project{Name: "test-proj"}, SandboxOpts{BaseImage: missing})
 	elapsed := time.Since(started)
 	if err == nil {
 		_ = sm.Stop(taskID)
@@ -734,7 +733,7 @@ func TestBinaryAvailable(t *testing.T) {
 		t.Skip("gVisor not available, skipping integration test")
 	}
 
-	dir := t.TempDir()
+	dir := taskWorktreeDir(t)
 	taskID := "test-binary-available-task"
 
 	_, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{})
@@ -767,7 +766,7 @@ func TestStartProcess(t *testing.T) {
 		t.Skip("gVisor not available, skipping integration test")
 	}
 
-	dir := t.TempDir()
+	dir := taskWorktreeDir(t)
 	taskID := "test-startprocess-task"
 
 	_, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{})
@@ -830,7 +829,7 @@ func TestCreateWithMemoryLimit(t *testing.T) {
 		t.Skip("gVisor not available, skipping integration test")
 	}
 
-	dir := t.TempDir()
+	dir := taskWorktreeDir(t)
 	taskID := "test-memory-task"
 
 	// Create with 512MB memory limit
@@ -887,7 +886,7 @@ func TestMemoryLimitEnforced(t *testing.T) {
 		t.Skip("gVisor not available, skipping integration test")
 	}
 
-	dir := t.TempDir()
+	dir := taskWorktreeDir(t)
 	taskID := "test-mem-enforced"
 
 	// The smallest cap that kills the process and not the sandbox. The sandbox holds ~23MB idle, and at
@@ -934,7 +933,7 @@ func TestGetMemoryStats(t *testing.T) {
 		t.Skip("gVisor not available, skipping integration test")
 	}
 
-	dir := t.TempDir()
+	dir := taskWorktreeDir(t)
 	taskID := "test-memstats-task"
 
 	// A cap above the 64MB the test holds plus the sandbox's own ~23MB, so the allocation is never
@@ -1002,7 +1001,7 @@ func TestCreateWithCapabilities(t *testing.T) {
 		t.Skip("gVisor not available, skipping integration test")
 	}
 
-	dir := t.TempDir()
+	dir := taskWorktreeDir(t)
 	taskID := "test-capabilities-task"
 
 	// Create with custom capabilities
@@ -1116,7 +1115,7 @@ func TestExecTask_FullConfig(t *testing.T) {
 		t.Skip("gVisor not available, skipping integration test")
 	}
 
-	dir := t.TempDir()
+	dir := taskWorktreeDir(t)
 	taskID := "test-exectask-fullcfg"
 	project := &types.Project{Name: "test-exectask"}
 
@@ -1240,7 +1239,7 @@ func TestCreate_CustomMountCreatesHostDir(t *testing.T) {
 		t.Skip("gVisor not available, skipping integration test")
 	}
 
-	baseDir := t.TempDir()
+	baseDir := taskWorktreeDir(t)
 	// Use a nested path that does NOT exist yet
 	hostPath := filepath.Join(baseDir, "a", "b", "c")
 	taskID := "test-mount-createdir-task"
@@ -1280,7 +1279,7 @@ func TestCreate_PlanModeReadonlyMount(t *testing.T) {
 	}
 
 	// Create a temp directory to use as worktree
-	dir := t.TempDir()
+	dir := taskWorktreeDir(t)
 	taskID := "test-plan-task"
 
 	// Create with plan mode (read-only mount)
@@ -1373,7 +1372,7 @@ func TestCreate_PublishesOnConfiguredInterface(t *testing.T) {
 	hostIP := firstGlobalIPv4(t)
 
 	taskID := "test-sandbox-iface"
-	dir := t.TempDir()
+	dir := taskWorktreeDir(t)
 	assigned, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{
 		ForwardPorts: []types.PortForward{
 			{ContainerPort: 8080},
@@ -1479,7 +1478,7 @@ func TestCreate_RejectsAgentSandboxMount(t *testing.T) {
 		{"a container path that walks up", types.SandboxMount{HostPath: host, ContainerPath: "/mnt/../etc", Mode: "ro"}},
 		{"a mode that is neither ro nor rw", types.SandboxMount{HostPath: host, ContainerPath: "/mnt/x", Mode: "write"}},
 	} {
-		_, err := sm.Create("task-1", t.TempDir(), &types.Project{Name: "test-proj"}, SandboxOpts{
+		_, err := sm.Create("task-1", taskWorktreeDir(t), &types.Project{Name: "test-proj"}, SandboxOpts{
 			AgentSandbox: &types.AgentSandbox{Mounts: []types.SandboxMount{tc.m}},
 		})
 		if err == nil || !strings.Contains(err.Error(), "agent sandbox mount") {
@@ -1495,7 +1494,7 @@ func TestCreate_AcceptsAgentSandboxMount(t *testing.T) {
 		rt:        sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{}),
 		available: false,
 	}
-	_, err := sm.Create("task-1", t.TempDir(), &types.Project{Name: "test-proj"}, SandboxOpts{
+	_, err := sm.Create("task-1", taskWorktreeDir(t), &types.Project{Name: "test-proj"}, SandboxOpts{
 		AgentSandbox: &types.AgentSandbox{Mounts: []types.SandboxMount{
 			{HostPath: t.TempDir(), ContainerPath: "/mnt/agent", Mode: "ro"},
 			{},

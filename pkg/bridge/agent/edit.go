@@ -1,24 +1,20 @@
 package main
 
 import (
-	"encoding/json"
+	"cmp"
 	"fmt"
 	"io"
-	"os"
-	"sort"
-	"strings"
-
 	"mike/pkg/bridge/protocol"
+	"os"
+	"slices"
+	"strings"
 )
 
 // handleEdit reads a file, applies text replacements, and writes atomically.
 func handleEdit(h *handler, out io.Writer, req *protocol.Request) error {
-	var p protocol.EditParams
-	if err := json.Unmarshal(req.Params, &p); err != nil {
-		return fmt.Errorf("parse edit params: %w", err)
-	}
-	if p.Path == "" {
-		return fmt.Errorf("path is required")
+	p, err := toolParams(req, "edit", func(p *protocol.EditParams) string { return p.Path })
+	if err != nil {
+		return err
 	}
 	if len(p.Edits) == 0 {
 		return fmt.Errorf("no edits provided")
@@ -62,12 +58,10 @@ func handleEdit(h *handler, out io.Writer, req *protocol.Request) error {
 	}
 
 	// Sort by start index for overlap check
-	sort.Slice(positions, func(i, j int) bool {
-		return positions[i].start < positions[j].start
-	})
+	slices.SortFunc(positions, func(a, b editPos) int { return cmp.Compare(a.start, b.start) })
 
 	// Check for overlapping edits
-	for i := 0; i < len(positions)-1; i++ {
+	for i := range len(positions) - 1 {
 		if positions[i].end > positions[i+1].start {
 			return fmt.Errorf("edits[%d] and edits[%d] overlap", positions[i].index, positions[i+1].index)
 		}

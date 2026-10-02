@@ -208,47 +208,6 @@ func TestLSPConfigValidate(t *testing.T) {
 	}
 }
 
-func TestNormalizeFileTypes(t *testing.T) {
-	cfg := &LSPConfig{Language: "typescript", LegacyExtensions: []string{"ts", ".tsx", "JS", "", "ts"}}
-	if !cfg.NormalizeFileTypes() {
-		t.Fatal("NormalizeFileTypes() reported no change for a legacy manifest")
-	}
-	if len(cfg.FileTypes) != 3 {
-		t.Fatalf("got %d file types %v, want 3 (deduplicated, empty dropped)", len(cfg.FileTypes), cfg.FileTypes)
-	}
-	if cfg.FileTypes[0].Extension != "ts" || cfg.FileTypes[1].Extension != "tsx" || cfg.FileTypes[2].Extension != "js" {
-		t.Errorf("got extensions %v %v %v, want [ts tsx js] — dots stripped, lowercased, in declaration order",
-			cfg.FileTypes[0].Extension, cfg.FileTypes[1].Extension, cfg.FileTypes[2].Extension)
-	}
-	// What the legacy shape cannot say stays unsaid: every synthesized entry gets the manifest
-	// language, which is why such an extension needs an update to open .tsx correctly.
-	for _, ft := range cfg.FileTypes {
-		if ft.LanguageID != "typescript" {
-			t.Errorf("file type %q got languageId %q, want the manifest language", ft.Extension, ft.LanguageID)
-		}
-	}
-	if cfg.LegacyExtensions != nil {
-		t.Errorf("LegacyExtensions = %v, want cleared so nothing reads it twice", cfg.LegacyExtensions)
-	}
-	if cfg.NormalizeFileTypes() {
-		t.Error("NormalizeFileTypes() is not idempotent — it ran again on a normalized manifest")
-	}
-}
-
-func TestNormalizeFileTypesKeepsDeclaredTypes(t *testing.T) {
-	cfg := tsConfig()
-	cfg.LegacyExtensions = []string{"tsx", "mjs"}
-	cfg.NormalizeFileTypes()
-	if len(cfg.FileTypes) != 3 {
-		t.Fatalf("got %d file types %v, want the two declared types plus only the one legacy type that is new",
-			len(cfg.FileTypes), cfg.FileTypes)
-	}
-	// The declared per-file id survives; the synthesized one borrows the language.
-	if cfg.FileTypes[1].LanguageID != "typescriptreact" {
-		t.Errorf("declared file type was overwritten: %v", cfg.FileTypes[1])
-	}
-}
-
 func TestFileSuffix(t *testing.T) {
 	tests := []struct {
 		name string

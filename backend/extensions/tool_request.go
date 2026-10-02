@@ -3,8 +3,9 @@ package extensions
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/url"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -292,11 +293,7 @@ func flattenText(v any) string {
 		}
 		return strings.Join(parts, " · ")
 	case map[string]any:
-		keys := make([]string, 0, len(typed))
-		for k := range typed {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
+		keys := slices.Sorted(maps.Keys(typed))
 		parts := make([]string, 0, len(keys))
 		for _, k := range keys {
 			if text := flattenText(typed[k]); text != "" {

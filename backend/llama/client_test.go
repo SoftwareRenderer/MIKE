@@ -351,10 +351,8 @@ func TestNormalizeReasoning(t *testing.T) {
 	})
 }
 
-// TestChatStream_ReasoningFieldVariants checks reasoning reaches the callback
-// in Delta.ReasoningContent for both field names, and that either one marks
-// first-token arrival — vLLM's "reasoning" previously left firstTokenTime
-// unset, deadening the wall-clock fallback.
+// TestChatStream_ReasoningFieldVariants checks reasoning reaches the callback in
+// Delta.ReasoningContent under either field name, and that either one marks first-token arrival.
 func TestChatStream_ReasoningFieldVariants(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -585,9 +583,8 @@ func TestChatCompletion_WallClockTimingFallback(t *testing.T) {
 
 // --- empty-content Tests ---
 
-// TestChatCompletion_EmptyContentIsNotAnError: a completion whose budget all went
-// to reasoning returns empty text plus usage, not an error. vLLM sends
-// content:null here, which used to fail every small-max_tokens utility call.
+// TestChatCompletion_EmptyContentIsNotAnError: a completion whose budget all went to reasoning
+// returns empty text plus usage, not an error. vLLM sends content:null here.
 func TestChatCompletion_EmptyContentIsNotAnError(t *testing.T) {
 	tests := []struct {
 		name    string

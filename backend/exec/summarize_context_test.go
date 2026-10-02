@@ -108,11 +108,9 @@ func summarizeSetup(t *testing.T, summaries ...string) (*TaskExecutor, *taskExec
 	return te, setup, lc, proj
 }
 
-// TestMaybeAutoSummarize_SummaryReachesLLMContext is the regression test for the
-// mid-run summarization hole: after auto-summarization feeds the compressed context
-// back to the LLM, the request must carry the summary (in the system prompt) next to
-// the injected "Proceed". Before the fix it carried only the pre-summary prompt plus
-// "Proceed" — the summary was persisted to the DB but never reached the model.
+// TestMaybeAutoSummarize_SummaryReachesLLMContext: after auto-summarization feeds the compressed
+// context back to the LLM, the request must carry the summary (in the system prompt) next to the
+// injected "Proceed".
 func TestMaybeAutoSummarize_SummaryReachesLLMContext(t *testing.T) {
 	chdirRepoRoot(t)
 	te, setup, lc, _ := summarizeSetup(t, "SUMMARY-ONE: build the widget")

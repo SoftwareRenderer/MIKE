@@ -10,9 +10,8 @@ import (
 // API tokens are the bearer credentials a headless client presents in
 // `Authorization: Bearer`. A row keeps only hex(sha256(token)) — the same rule as a login
 // session — so a copied kanban.db cannot be replayed as a live credential, and the plaintext
-// exists only in the response that creates the row. The table is created on every start like the
-// sessions table, not by the probe chain: CREATE TABLE IF NOT EXISTS cannot disturb the rows an
-// existing database already has.
+// exists only in the response that creates the row. Like the sessions table this one is created by
+// the package that reads it, and its DDL names every column a query does.
 const apiTokenTable = `
 CREATE TABLE IF NOT EXISTS api_tokens (
     id           TEXT PRIMARY KEY,

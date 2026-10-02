@@ -330,9 +330,6 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 
 	cfgStore := config.NewConfigStore(store, dbPath, Version, secretBox, settings.RestrictMCP)
 	cfgStore.SetRegistryURL(settings.RegistryURL)
-	if err := cfgStore.MigrateProviderIDs(); err != nil {
-		return nil, fmt.Errorf("migrate provider IDs: %w", err)
-	}
 	cfg, err := cfgStore.GetConfig()
 	if err != nil {
 		return nil, fmt.Errorf("get config: %w", err)

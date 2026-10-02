@@ -17,10 +17,8 @@ import (
 	"time"
 )
 
-// TestTryLockProjectWorktreeReleasesTheLateWinner is the regression for a lock leak that made a project
-// unusable for the life of the process: CreateWorktree waited for the lock in a goroutine and, on
-// timeout, returned the error and forgot the goroutine - which still won the lock later and never
-// unlocked. Every later CreateWorktree for that project hit the same timeout.
+// TestTryLockProjectWorktreeReleasesTheLateWinner: a waiter that times out must not stay on the
+// lock, or every later CreateWorktree for that project times out behind it.
 func TestTryLockProjectWorktreeReleasesTheLateWinner(t *testing.T) {
 	wm := NewWorktreeManager(nil, nil)
 	const projectID = "leaky-project"
@@ -42,8 +40,7 @@ func TestTryLockProjectWorktreeReleasesTheLateWinner(t *testing.T) {
 	holder()
 	time.Sleep(200 * time.Millisecond)
 
-	// The bug's signature: this second attempt blocks for its whole timeout and fails, because the
-	// abandoned waiter is sitting on an unlock nobody will ever call.
+	// An abandoned waiter would leave this second attempt blocking for its whole timeout.
 	release2, locked2 := wm.tryLockProjectWorktree(projectID, 2*time.Second)
 	if !locked2 {
 		t.Fatal("the project stayed locked after a single timeout — an abandoned waiter is holding it")
@@ -85,7 +82,7 @@ func TestLockProjectStashAndMergeAreDistinctTables(t *testing.T) {
 		t.Fatal("two git lock domains share one table")
 	}
 	// Types, not just addresses: two domains sharing a type would make `wm.stash = wm.merge` compile,
-	// which is the fusion F16 says the keys cannot be trusted to reveal. Pointers are compared because
+	// which is the fusion the keys cannot be trusted to reveal. Pointers are compared because
 	// passing the value to reflect.TypeOf would itself copy the lock.
 	if reflect.TypeOf(&wm.stash) == reflect.TypeOf(&wm.merge) {
 		t.Fatal("stash and merge are the same type; assigning one to the other would compile")

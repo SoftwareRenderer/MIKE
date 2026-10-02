@@ -4,17 +4,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
-	"os"
-	"path/filepath"
-	"regexp"
-	"sort"
-	"strings"
-	"text/template"
-	"unicode/utf8"
-
+	"maps"
 	"mike/backend/fsutil"
 	"mike/backend/prompts"
 	"mike/pkg/sandboxruntime"
+	"os"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strings"
+	"text/template"
+	"unicode/utf8"
 )
 
 // Manifest validation: a malformed syntax profile or a duplicated file type is rejected at install
@@ -466,11 +466,7 @@ func validateCatalogValue(messagesURL, key string, value json.RawMessage) error 
 // is a typo that would never be read, a non-string form is the null problem again, and a
 // table without `other` has no answer for the counts its own language has no name for.
 func validatePluralForms(messagesURL, key string, forms map[string]any) error {
-	names := make([]string, 0, len(forms))
-	for name := range forms {
-		names = append(names, name)
-	}
-	sort.Strings(names)
+	names := slices.Sorted(maps.Keys(forms))
 	for _, name := range names {
 		if !pluralCategories[name] {
 			return fmt.Errorf("capabilities.i18n.messages_url %q: %s is not a translated string — %q is not a plural category Intl can answer with (zero, one, two, few, many, other)", messagesURL, key, name)
@@ -504,11 +500,7 @@ func validateI18NFiles(c *I18NConfig, packDir string) error {
 	// Decoded as raw values rather than straight into map[string]string, which would take a JSON
 	// null as the empty string. A null is not a translation: it is the loader being handed nothing
 	// where a label belongs, and it is a mistake a translator makes with a find-and-replace.
-	keys := make([]string, 0, len(catalog))
-	for key := range catalog {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(catalog))
 	for _, key := range keys {
 		if err := validateCatalogValue(c.MessagesURL, key, catalog[key]); err != nil {
 			return err
