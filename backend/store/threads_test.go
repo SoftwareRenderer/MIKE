@@ -540,3 +540,75 @@ func TestThreadWithGitBranch(t *testing.T) {
 		t.Fatalf("unexpected git_branch: %s", got.GitBranch)
 	}
 }
+
+// TestCopyMessagesToThread_CutRowNotInSourceThread: the cutoff fallback reads through the handle the copy
+// was given — the store has one connection, so a second handle there waits for the transaction running it.
+// The timeout only catches a hang; a copy that works takes milliseconds.
+func TestCopyMessagesToThread_CutRowNotInSourceThread(t *testing.T) {
+	const watchdog = 30 * time.Second
+	s := testStore(t)
+	if err := s.CreateProject(newProject("proj-1", "test", "/tmp/test")); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := s.CreateTask(newTask("task-1", "proj-1")); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	for _, th := range []*types.TaskThread{
+		newThread("src-thread", "task-1", "Main"),
+		newThread("other-thread", "task-1", "Fork #1"),
+		newThread("tgt-thread", "task-1", "Fork #2"),
+	} {
+		if err := s.CreateThread(th); err != nil {
+			t.Fatalf("create %s: %v", th.ID, err)
+		}
+	}
+
+	base := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
+	seed := func(id, thread, role string, offset time.Duration) {
+		m := newMessage(id, "task-1", role, id)
+		m.ThreadID = thread
+		m.CreatedAt = base.Add(offset)
+		if err := s.CreateTaskMessage(m); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
+	}
+	seed("u1", "src-thread", "user", 0)
+	seed("a1", "src-thread", "assistant", 1*time.Second)
+	seed("o1", "other-thread", "user", 10*time.Second)
+
+	copyInto := func(cutRow string) error {
+		done := make(chan error, 1)
+		go func() {
+			_, err := s.CopyMessagesToThread("src-thread", "tgt-thread", cutRow)
+			done <- err
+		}()
+		select {
+		case err := <-done:
+			return err
+		case <-time.After(watchdog):
+			t.Fatalf("copy cut at %s never returned", cutRow)
+		}
+		return nil
+	}
+
+	// A row of another thread falls back to that row's own timestamp, so the copy holds the source's
+	// rows up to that moment.
+	if err := copyInto("o1"); err != nil {
+		t.Fatalf("copy cut at a row of another thread: %v", err)
+	}
+	msgs, err := s.GetTaskMessages("task-1", "tgt-thread")
+	if err != nil {
+		t.Fatalf("read the copy: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("expected the source's two rows, got %d", len(msgs))
+	}
+
+	// A row that does not exist fails the copy where it is read, and the store still answers.
+	if err := copyInto("no-such-row"); err == nil {
+		t.Fatal("a copy cut at a row that does not exist should answer an error")
+	}
+	if _, err := s.GetTaskMessages("task-1", "src-thread"); err != nil {
+		t.Fatalf("the store stopped answering after a refused copy: %v", err)
+	}
+}

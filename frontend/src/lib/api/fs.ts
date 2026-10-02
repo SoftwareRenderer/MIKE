@@ -184,3 +184,19 @@ export async function getHomeDirectory(): Promise<string> {
     const data = await res.json();
     return typeof data?.home === 'string' ? data.home : '';
 }
+
+/** The directory a host browser opens on when the server's home cannot be read. */
+const HOST_HOME_FALLBACK = '/home';
+
+/**
+ * The directory a host browser opens on: the server's home, which is also the root the no-project
+ * file endpoints are jailed to, so a picker that opened anywhere else would open on a refusal.
+ * Never rejects — a browser that cannot ask the server still has to open somewhere.
+ */
+export async function resolveHomeDirectory(): Promise<string> {
+    try {
+        return (await getHomeDirectory()) || HOST_HOME_FALLBACK;
+    } catch {
+        return HOST_HOME_FALLBACK;
+    }
+}

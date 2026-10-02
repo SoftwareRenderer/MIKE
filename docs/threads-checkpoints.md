@@ -81,6 +81,26 @@ becomes a dangling reference the day the parent is tidied.
 
 ## "New Thread" is a fork plus a regenerate
 
+**A fork's fork point is a row of the thread it is named against.**
+
+- A fork naming anything else — a row of another thread, or one summarization has since dropped — is
+  answered 400, before it stops a run or touches git.
+- The copy cuts the conversation at that row's entry, so a foreign row names a conversation that does not
+  end where the fork claims it does. Asking late would mean finding out after the stash, the branch and
+  the rewind.
+
+**The fork's response spends no provider request.**
+
+- Both of its labels are cosmetic, and a provider call is the response time: 2.6 s measured against a
+  provider that answers in 1.2 s, where the git and store work is 0.2 s.
+- A provider call also queues for a slot ahead of the turn this same click goes on to start, and the
+  handler holds the task's worktree lock throughout.
+- So the tab is named from the question's first 35 runes, and the checkpoint label is generated after the
+  response under `Server.Detached()`. It arrives over `git_checkpoint_complete`, the frame that carries
+  every other checkpoint label.
+- The diff and the conversation it summarises are read before the response: they describe the worktree at
+  the fork point, and the next switch moves it.
+
 Editing a non-last user message offers **New Thread**: the fork copies the conversation up to that
 message, replaces the copied user row with the edited text, stops the executor, and then the client *sends
 the same text* to start the new thread. That send would look like a double submit to
@@ -153,6 +173,12 @@ shape is here because building it the other way means paying twice:
 - `backend/exec/fork_context_test.go` — parent and fork rebuild to the same LLM conversation.
 - `backend/server/fork_snapshot_test.go` — fork of a fork keeps the checkpoint it inherited; deleting a
   turn inside a fork rolls back to the surviving checkpoint.
+- `backend/server/thread_handler_test.go` — `TestForkRefusesAForkPointFromAnotherThread`: a fork naming a
+  row of another thread, or a row that is gone, is refused, and no thread, branch or worktree moved.
+- `backend/store/threads_test.go` — `TestCopyMessagesToThread_CutRowNotInSourceThread`: the cutoff fallback
+  reads through the copy's own handle, so the copy returns instead of waiting for itself.
+- `backend/server/fork_response_test.go` — a fork whose provider never answers still answers, naming the
+  thread from its question; the checkpoint label is generated after the response.
 - `backend/server/snapshot_lifecycle_test.go` — task deletion unpins its snapshots, nobody else's, and no
   user ref.
 - `backend/store/messages_test.go` — `TestDeleteTaskMessagesAfter_ReportsDeletedCheckpoints`: an earlier

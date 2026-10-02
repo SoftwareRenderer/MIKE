@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1157,4 +1158,45 @@ func TestSwitchRestoresForkCheckpointStash(t *testing.T) {
 		t.Fatalf("after switch back, expected branch thread/%s, got %s", forkThreadID, got)
 	}
 	verifyWorktreeContent(t, worktreePath, "hello.cs", counterContent, "after switching back to fork (checkpoint stash re-applied)")
+}
+
+// TestForkRefusesAForkPointFromAnotherThread: the copy cuts the conversation at the named row's entry, so
+// a row of another thread names a conversation that does not end where the fork claims. The fork rewinds
+// the shared worktree on the way, so the refusal arrives before anything is stopped, stashed or moved.
+func TestForkRefusesAForkPointFromAnotherThread(t *testing.T) {
+	s := testServer(t)
+	fx := setupForkWithCheckpoint(t, s, "fork-refused")
+
+	// The setup fork is the active thread, so this row lives there and nowhere else.
+	foreign := postMessageIn(t, s, fx, "a row of the active fork")
+	before := threadCount(t, s, fx.projID, fx.taskID)
+	activeBefore := activeThreadID(t, s, fx.projID, fx.taskID)
+	branchesBefore := mustRunGitOutput(t, fx.worktreePath, "branch", "--list", "thread/*")
+
+	fork := func(messageID string) *httptest.ResponseRecorder {
+		return testResponseAuth(t, s, testRequest("POST",
+			"/api/projects/"+fx.projID+"/tasks/"+fx.taskID+"/threads/fork",
+			map[string]any{"from_thread_id": fx.mainThreadID, "from_message_id": messageID, "new_content": "edited"}))
+	}
+
+	for name, messageID := range map[string]string{"another thread's row": foreign, "no such row": "no-such-message"} {
+		rr := fork(messageID)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("%s: expected 400, got %d: %s", name, rr.Code, rr.Body.String())
+		}
+		if !strings.Contains(rr.Body.String(), "from_message_id") {
+			t.Errorf("%s: the refusal should name the field, got %s", name, rr.Body.String())
+		}
+	}
+
+	if got := threadCount(t, s, fx.projID, fx.taskID); got != before {
+		t.Errorf("a refused fork created a thread: %d, want %d", got, before)
+	}
+	if got := activeThreadID(t, s, fx.projID, fx.taskID); got != activeBefore {
+		t.Errorf("a refused fork moved the active thread to %s", got)
+	}
+	if got := mustRunGitOutput(t, fx.worktreePath, "branch", "--list", "thread/*"); got != branchesBefore {
+		t.Errorf("a refused fork left a branch:\n%s\nwant\n%s", got, branchesBefore)
+	}
+	verifyWorktreeContent(t, fx.worktreePath, "file.txt", fx.fileContent, "after a refused fork")
 }

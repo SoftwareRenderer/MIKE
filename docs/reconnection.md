@@ -618,9 +618,14 @@ socket is down, because the reconnecting banner already offers it. The button it
 
 A message queued while offline has no row: nothing reached `finalizeTurn`, and the mirrored window holds rows
 the server answered. So the transcript derives its pending rows from `offline-queue` on every rebuild
-(`pendingSendEntries`, `$lib/utils/pending-sends.ts`) — the clock, the one notice beside them, and the
-ReviewBar's *Resume*, which reads the last non-error entry. Deriving rather than remembering keeps the
-mirror's claim true and survives a reload. A row is named for the queue action, so a rebuild draws the same row
+(`pendingSendEntries`, `$lib/utils/pending-sends.ts`) — the clock and the one notice beside them. Deriving
+rather than remembering keeps the mirror's claim true and survives a reload.
+
+The ReviewBar's *Resume* beside those rows answers two questions, and `offersResume`
+(`src/lib/utils/review-bar.ts`) asks both: is the last non-error entry a question, and is nobody already on
+their way to answer it. A send on the wire holds the button off, and so does a "New Thread" click whose fork
+has landed but whose send has not gone out. A send the queue is holding does not: nothing is in flight
+there, and Resume is the recovery. A row is named for the queue action, so a rebuild draws the same row
 instead of a second one; an entry this session already drew is skipped by the action id it carries
 (`ChatEntry.actionId`).
 
@@ -636,8 +641,10 @@ One use of the same clock stays session-local: the message the executor will tak
 row that exists, and nothing on it says it waited, so a reload cannot badge it.
 
 **Tests:** `src/lib/utils/__tests__/pending-sends.unit.ts` holds the clock for what waits, none for what was
-refused, the order, and the skip. `src/lib/api/__tests__/queue-refused-send.unit.ts` holds the verdict
-outliving the queue entry, and a fresh send retiring it. E2E `offline-send-queue.spec.ts` shows the pending
+refused, the order, and the skip. `src/lib/utils/__tests__/review-bar.unit.ts` holds the four answers
+`offersResume` gives: on the wire, in handoff, queued, and none of the above.
+`src/lib/api/__tests__/queue-refused-send.unit.ts` holds the verdict outliving the queue entry, and a fresh
+send retiring it. E2E `offline-send-queue.spec.ts` shows the pending
 message after a reload while still offline, and the applied row reaching the screen.
 
 ## The behaviour, in full

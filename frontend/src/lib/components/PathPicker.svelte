@@ -6,12 +6,13 @@
     import folderIcon from '$lib/assets/icons/folder.svg?raw';
     import fileIcon from '$lib/assets/icons/file.svg?raw';
     import { t } from '$lib/i18n';
-    import { listFsDirectory, type FsEntry as Entry } from '$lib/api';
+    import { listFsDirectory, resolveHomeDirectory, type FsEntry as Entry } from '$lib/api';
     import { parentDir } from '$lib/utils/path';
 
-    let { title, initialPath, emptyLabel, selectTitle, fileFilter, onClose, onSelect }: {
+    let { title, initialPath = '', emptyLabel, selectTitle, fileFilter, onClose, onSelect }: {
         title: string;
-        initialPath: string;
+        /** The directory to open on. Empty opens on the server's home, the root a host browse is jailed to. */
+        initialPath?: string;
         /** Shown when a directory lists nothing selectable. */
         emptyLabel: string;
         /** Tooltip on the footer Select button. */
@@ -76,13 +77,24 @@
         }
     }
 
+    let homePath = '';
+
+    async function goHome() {
+        homePath ||= await resolveHomeDirectory();
+        await loadDir(homePath);
+    }
+
     function formatPath(p: string): string {
         return p || '/';
     }
 
-    // Load initial path on mount
+    // Open on the path the caller named, or on home when it named none.
     $effect(() => {
-        loadDir(initialPath);
+        if (initialPath) {
+            loadDir(initialPath);
+        } else {
+            void goHome();
+        }
     });
 </script>
 
@@ -100,7 +112,7 @@
     <!-- Path bar -->
     <div class="path-bar">
         <div class="path-bar-row">
-            <button type="button" class="home-btn" onclick={() => loadDir('/home')} aria-label={t('explorer.shared.goHome')} title={t('explorer.shared.goHome')}>
+            <button type="button" class="home-btn" onclick={() => { void goHome(); }} aria-label={t('explorer.shared.goHome')} title={t('explorer.shared.goHome')}>
                 <Icon src={homeIcon} color="var(--color-text-tertiary)" width={18} height={18} />
             </button>
             <input

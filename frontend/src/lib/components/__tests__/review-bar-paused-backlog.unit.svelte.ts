@@ -67,6 +67,11 @@ describe('ReviewBar paused bar', () => {
         expect(bars()).toHaveLength(0);
     });
 
+    // A fork stops the run it branches from, so mid-handoff that stop is not a question waiting to start.
+    it('says nothing while the click that asked the question is still working', () => {
+        expect(renderBar({ startingTurn: true }).bars()).toHaveLength(0);
+    });
+
     // The panel asks a state question, so it reads the value handed in — which is the task's own
     // `execution_state` by the time it arrives (docs/reconnection.md → The row decides, not the board's
     // copy). A column is not this question: a stopped task stays In Progress and moves only its state.

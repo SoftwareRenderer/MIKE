@@ -23,6 +23,7 @@
     import { effectiveStartTaskKey, matchShortcut } from '$lib/utils/keyboard';
     import { isAnyModalOpen } from '$lib/utils/modal-state';
     import { trustedExecutionState, isTaskPaused } from '$lib/utils/execution-state';
+    import { offersResume } from '$lib/utils/review-bar';
     import { reselectProvider, getProviderDisplayName } from '$lib/utils/providers';
     import { buildEntriesFromMessages, mergeLoadedHistory, buildEntryMetas, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, pendingToolIds, endsOnReviewResult, entriesAwaitingRows, takeEchoMatch, removeFailedSend, removeDismissedError } from '$lib/utils/chat-entries';
     import { getAppStreamRef } from '$lib/stream-ref';
@@ -197,6 +198,9 @@
     let isCommitting = $state(false);
 
     let threadSwitching = $state(false); // true while a thread switch is in-flight
+    /** True from a "New Thread" click until its fork lands and its send goes out: the transcript holds a
+     * question that is on its way to being answered. */
+    let startingTurn = $state(false);
     // Replay the buffer only while the task is in flight, so a stale buffer cannot flicker entries that are
     // not coming. `isLoading` counts because the board's status lags the turn that frame announces.
     let suppressEvents = $state(true);
@@ -262,15 +266,14 @@
         entries.some(e => e.role === 'assistant')
     );
 
-    // "Resume" in the review bar when the last message is the user's — including one a network failure queued,
-    // since Resume is the recovery once the connection is back.
-    let showResumeButton = $derived(
-        taskStatus === 'review' &&
-        !isLoading &&
-        !isSummarizing &&
-        lastNonErrorEntry !== undefined &&
-        lastNonErrorEntry.role === 'user'
-    );
+    let showResumeButton = $derived(offersResume({
+        taskStatus,
+        loading: isLoading,
+        summarizing: isSummarizing,
+        awaitingResponse,
+        startingTurn,
+        lastEntry: lastNonErrorEntry,
+    }));
 
     // Set of user message IDs with no assistant response after them. Window-safe: the window always
     // ends on the newest row.
@@ -1277,7 +1280,8 @@
             updateTask(projectId, taskId, { prompt: newContent }).catch(e => dialogStore.showToast(String(e)));
             return;
         }
-        if (isLoading) return;
+        if (isLoading || startingTurn) return;
+        startingTurn = true;
         try {
             const fromThreadId = entry.threadId || activeThreadId;
             const forked = await forkTaskThread(projectId, taskId, fromThreadId, entryId, newContent);
@@ -1285,6 +1289,8 @@
             activeThreadId = forked.id;
             // Clear streaming state before loading new thread's messages.
             resetStreamState();
+            // The question is stored and its answer has not started, which is what the wait line means.
+            stream.state.awaitingResponse = true;
             // Load messages for the new thread
             await loadHistory(true);
             updateThreadUrl(forked.id);
@@ -1294,7 +1300,10 @@
             const result = await sendWithTracking(newContent, { attachments, regenerate: true });
             if (result?.queued) handleQueuedSend(newContent, undefined, result.actionId);
         } catch (e) {
+            stream.state.awaitingResponse = false;
             dialogStore.showToast(String(e));
+        } finally {
+            startingTurn = false;
         }
     }
 
@@ -1689,6 +1698,7 @@
         {taskStatus}
         taskExecutionState={knownExecutionState}
         turnInFlight={isLoading}
+        {startingTurn}
         {projectId}
         {taskId}
         {follow}
@@ -1733,6 +1743,7 @@
             {taskStatus}
             taskExecutionState={knownExecutionState}
             {showResumeButton}
+            {startingTurn}
             {showRestartButton}
             {isStarting}
             {isCommitting}

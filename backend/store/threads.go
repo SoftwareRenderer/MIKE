@@ -209,7 +209,9 @@ type entryRow struct {
 // rows that both readers show as one entry, so a fork cuts between entries, never through one.
 //
 // A tool_call row belongs to its assistant_msg_id owner, or, when that is empty (legacy rows), to
-// the nearest preceding assistant row; every other role is its own entry. Callers hold s.mu.
+// the nearest preceding assistant row; every other role is its own entry. Callers hold s.mu and read
+// through `db`: the store has one connection, so a second handle would wait for the transaction running
+// this. See docs/storage.md.
 func (s *Store) entryCutoffLocked(db execer, sourceThreadID, upToMessageID string) (string, error) {
 	rows, err := db.Query(`
 		SELECT id, role, created_at, COALESCE(assistant_msg_id, '')
@@ -241,7 +243,7 @@ func (s *Store) entryCutoffLocked(db execer, sourceThreadID, upToMessageID strin
 		// The row is not in this thread (deleted, or the wrong source thread was passed).
 		// Fall back to its own timestamp rather than inventing a boundary.
 		var own string
-		if err := s.db.QueryRow(`SELECT created_at FROM task_messages WHERE id = ?`, upToMessageID).Scan(&own); err != nil {
+		if err := db.QueryRow(`SELECT created_at FROM task_messages WHERE id = ?`, upToMessageID).Scan(&own); err != nil {
 			return "", fmt.Errorf("get cutoff message time: %w", err)
 		}
 		return own, nil

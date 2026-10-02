@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +11,7 @@ import (
 
 	"mike/backend/exec"
 	"mike/backend/git"
+	"mike/backend/store"
 	"mike/backend/stream"
 	"mike/backend/types"
 	"mike/pkg/logging"
@@ -272,11 +272,6 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, "from_thread_id and from_message_id required")
 		return
 	}
-	// If new_content is provided, stop the current executor so the next run
-	// loads the forked context instead of the stale original thread.
-	if req.NewContent != "" {
-		_ = s.executor.StopTask(taskID)
-	}
 	if _, ok := s.taskInPath(w, projectID, taskID); !ok {
 		return
 	}
@@ -285,6 +280,25 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 	if err != nil || sourceThread.TaskID != taskID {
 		JSONError(w, http.StatusBadRequest, "source thread not found")
 		return
+	}
+	// The fork point must be a row of the thread it is named against: the copy cuts the conversation at
+	// that row's entry. Asked before anything is stopped or moved, because a fork rewinds the shared
+	// worktree and a refused one must have changed nothing.
+	forkPoint, err := s.store.GetTaskMessageByID(req.FromMessageID)
+	switch {
+	case err != nil && !errors.Is(err, store.ErrMessageNotFound):
+		Fail(w, err, "read fork point", "fork point not found")
+		return
+	case err != nil || forkPoint.ThreadID != req.FromThreadID:
+		JSONError(w, http.StatusBadRequest, "from_message_id is not a message of from_thread_id")
+		return
+	}
+
+	// If new_content is provided, stop the current executor so the next run loads the forked context
+	// instead of the stale original thread. Asked outside the worktree lock below: a stop waits for the run
+	// to finish writing.
+	if req.NewContent != "" {
+		_ = s.executor.StopTask(taskID)
 	}
 
 	defer s.lockWorktree(taskID)()
@@ -341,11 +355,6 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "clean", "-fd")
 		}
 	}
-	// Look up the checkpoint message's created_at for frontend filtering
-	var checkpointMsgTime *time.Time
-	if ct, err := s.store.GetMessageCreatedAt(req.FromMessageID); err == nil && ct != nil {
-		checkpointMsgTime = ct
-	}
 	// Create new thread
 	now := time.Now().UTC()
 	newThread := &types.TaskThread{
@@ -356,15 +365,15 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 		IsActive:              true,
 		GitBranch:             newBranchName,
 		CheckpointMessageID:   req.FromMessageID,
-		CheckpointMessageTime: checkpointMsgTime,
+		CheckpointMessageTime: &forkPoint.CreatedAt,
 		CheckpointCommitHash:  branchPoint,
 		CreatedAt:             now,
 	}
-	// Generate thread name from new_content if provided, otherwise use "Fork #N"
-	threads, _ := s.store.GetThreadsByTask(taskID)
+	// Name the thread from the question it opens, otherwise count the forks.
 	if req.NewContent != "" {
-		newThread.Name = s.generateThreadName(r.Context(), task, req.NewContent)
+		newThread.Name = threadNameFromQuestion(req.NewContent)
 	} else {
+		threads, _ := s.store.GetThreadsByTask(taskID)
 		newThread.Name = fmt.Sprintf("Fork #%d", len(threads)+1)
 	}
 	if err := s.store.CreateThread(newThread); err != nil {
@@ -394,8 +403,6 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 		if copiedMsgID, err := s.store.GetLastUserMessageInThread(newThreadID); err == nil && copiedMsgID != "" {
 			_ = s.store.UpdateTaskMessage(copiedMsgID, req.NewContent)
 		}
-		// Stop the current executor so the next run loads the forked context.
-		_ = s.executor.StopTask(taskID)
 	}
 	if err := s.store.SetActiveThread(newThreadID); err != nil {
 		Fail(w, err, "set active thread", "thread not found")
@@ -413,38 +420,19 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 	s.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeThreadSwitch, Data: map[string]string{"thread_id": newThreadID, "task_id": taskID}})
 	// Send fresh diff so the Changes panel reflects the forked branch
 	s.broadcastTaskDiff(taskID)
-	s.generateCheckpointLabelForFork(r.Context(), taskID, projectID, req.FromMessageID)
+	s.generateCheckpointLabelForFork(taskID, projectID, req.FromMessageID)
 	JSONResponse(w, http.StatusCreated, newThread)
 }
 
-// generateThreadName generates a short thread label via LLM, or truncates the text.
-func (s *Server) generateThreadName(ctx context.Context, task *types.Task, content string) string {
+// threadNameFromQuestion labels a fork with the question it opens. It asks no provider: the click waits
+// on the fork's response, and its own turn needs the next provider slot.
+func threadNameFromQuestion(content string) string {
 	trimmed := strings.TrimSpace(content)
-	if len(trimmed) == 0 {
+	if trimmed == "" {
 		return "Fork"
 	}
-
-	// Try LLM generation if config is available
-	if task.LlamaServerURL != "" && task.ModelName != "" {
-		messages := []types.ChatMessage{
-			{Role: "system", Content: "You are a thread name generator. Given a user message, generate a very short, descriptive thread label (max 30 characters, no quotes). Return only the label, nothing else."},
-			{Role: "user", Content: trimmed},
-		}
-
-		_, name, err := s.executor.ChatCompletion(ctx, task.LlamaServerURL, task.ModelName, messages, nil)
-		if err == nil && strings.TrimSpace(name) != "" {
-			name = strings.TrimSpace(name)
-			if len(name) > 35 {
-				name = name[:35]
-			}
-			logging.For(logging.Thread).With(logging.TaskID, task.ID).Infof("generated: %q", name)
-			return name
-		}
-	}
-
-	// Fallback: truncate the text
-	if len(trimmed) > 35 {
-		return trimmed[:35]
+	if runes := []rune(trimmed); len(runes) > 35 {
+		return string(runes[:35])
 	}
 	return trimmed
 }
@@ -610,9 +598,11 @@ func (s *Server) lockProject(projectID string) func() {
 	return s.gitProject.Lock(projectID)
 }
 
-// generateCheckpointLabelForFork generates a short label for the checkpoint message
-// at the fork point and sends it to the frontend via WebSocket.
-func (s *Server) generateCheckpointLabelForFork(ctx context.Context, taskID, projectID, fromMessageID string) {
+// generateCheckpointLabelForFork labels the checkpoint a fork cut at, arriving over the same
+// checkpoint-complete frame a turn's own checkpoint uses. The diff and the conversation are read here
+// because the next worktree switch moves what they describe; only the provider call waits, so it runs
+// detached and the fork answers without it. See docs/threads-checkpoints.md.
+func (s *Server) generateCheckpointLabelForFork(taskID, projectID, fromMessageID string) {
 	task, err := s.store.GetTaskByID(taskID)
 	if err != nil {
 		return
@@ -626,11 +616,16 @@ func (s *Server) generateCheckpointLabelForFork(ctx context.Context, taskID, pro
 	taskMsgs, _ := s.store.GetTaskMessages(taskID, task.CurrentThreadID)
 	conversation := exec.BuildConversationFromTaskMessages(taskMsgs)
 	turnText := exec.FormatConversationTurns(exec.ExtractLastTurns(conversation, 3))
-	label := s.executor.GenerateCheckpointLabel(ctx, taskID, diffStat, turnText)
-	if label != "" && label != "file changes" {
-		s.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeCheckpointComplete, Data: map[string]string{
-			"message_id": fromMessageID,
-			"label":      label,
-		}})
-	}
+
+	ctx, cancel := s.Detached()
+	go func() {
+		defer cancel()
+		label := s.executor.GenerateCheckpointLabel(ctx, taskID, diffStat, turnText)
+		if label != "" && label != "file changes" {
+			s.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeCheckpointComplete, Data: map[string]string{
+				"message_id": fromMessageID,
+				"label":      label,
+			}})
+		}
+	}()
 }
