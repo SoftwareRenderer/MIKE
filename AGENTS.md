@@ -252,13 +252,12 @@ python3 scripts/gen-registry.py --check                  # registry.json matches
   Anything outside `tx` states its reason at its definition.
 - **`ON DELETE CASCADE` deletes rows, nothing else.** One `DELETE FROM projects` removes the rows; a task's
   container, worktree, branches and uploads are stopped by the deletion path, not by the schema. See *Deletion*.
-- **`PRAGMA user_version` gates the schema.** Adding a migration extends the probe chain *and* raises the
-  version, leaving the earlier idempotent steps in place; a step that must run exactly once needs its own
-  marker.
+- **The schema is created whole.** A new column is added to the DDL — `baseSchemaSQL`, or a credential
+  table's own statement beside its accessors. There is no probe chain and no `PRAGMA user_version`, because
+  nothing older has shipped.
 - **An instant that SQL compares is stored as fixed-width UTC text.** `RFC3339Nano` trims the zeros off the
   fraction and `Z` sorts above every digit, so trimmed text orders two nearby instants backwards; a zone
-  offset repeats an hour at a fall-back. The columns, the rewrite of the older rows, the tie rule:
-  **`docs/storage.md`**.
+  offset repeats an hour at a fall-back. The columns and the tie rule: **`docs/storage.md`**.
 - A test that needs a write to fail half way through installs a SQLite `RAISE(ABORT)` trigger, never a hook
   in production code.
 - Permissions, ID generation, what is in and out of `tx`: **`docs/storage.md`**.
@@ -554,7 +553,7 @@ deliberately omits.
 | `docs/sandbox-bridge.md` | bridge connections, LSP session binding, wire IDs, payload limits, upload lifetime |
 | `docs/confinement.md` | path jails, the no-project host jail, size and output caps, subprocess environments |
 | `docs/locking.md` | keylock domains, accessor shape, lock order, watched waits, `sandboxMu` |
-| `docs/storage.md` | what is in `tx`, migrations and `user_version`, stored timestamps, file permissions, ID generation |
+| `docs/storage.md` | what is in `tx`, the schema and its DDL, stored timestamps, file permissions, ID generation |
 | `docs/git-operations.md` | command construction and hook fence, worktree layout, stash identity, ref/clone/hash fences, slugify |
 | `docs/lifecycle.md` | construction order = shutdown order, the base-context registry, the TLS listener |
 | `docs/api-contract.md` | frame shapes, route verbs, partial updates, diff contract, error vocabulary, headers, endpoint ownership |

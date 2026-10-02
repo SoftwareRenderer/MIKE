@@ -1076,9 +1076,7 @@ func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry
 		fail(fmt.Errorf("extension %s declares an unusable sandbox configuration: %w", entry.Name, err))
 		return
 	}
-	// A manifest published before file_types existed still installs: normalize first, then
-	// validate — a bad file type or profile would otherwise be stored and degrade silently.
-	manifest.Capabilities.GetLSP().NormalizeFileTypes()
+	// A bad file type or profile is refused here rather than stored and degraded silently.
 	if err := manifest.Capabilities.GetLSP().Validate(); err != nil {
 		fail(fmt.Errorf("extension %s declares an unusable language configuration: %w", entry.Name, err))
 		return
@@ -1480,7 +1478,6 @@ func (h *ExtensionHandler) updateImageInBackground(id, name, url string, ackNewD
 					return
 				}
 				// Check the new commit's language declarations before they replace the stored manifest.
-				m.Capabilities.GetLSP().NormalizeFileTypes()
 				if err := m.Capabilities.GetLSP().Validate(); err != nil {
 					fail(fmt.Errorf("extension %s declares an unusable language configuration: %w", entry.Name, err))
 					return

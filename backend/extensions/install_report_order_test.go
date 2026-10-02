@@ -18,7 +18,7 @@ import (
 func TestFailedInstallSettlesTheStateBeforeItReportsFailure(t *testing.T) {
 	repo, commit := makeGitRepo(t, map[string]string{
 		"lsp/gopls/manifest.json": `{"display_name":"Go","description":"d","author":"Go Team","version":"0.7.0",` +
-			`"capabilities":{"lsp":{"command":"gopls","args":["serve"],"extensions":["go"],"language":"go"}}}`,
+			`"capabilities":{"lsp":{"command":"gopls","args":["serve"],"language":"go","file_types":[{"extension":"go","language_id":"go"}]}}}`,
 		"lsp/gopls/Dockerfile": "FROM golang:1-alpine\nCOPY sandbox/sandbox-bridge /usr/local/bin/sandbox-bridge\n",
 	})
 	entry := &RegistryEntry{

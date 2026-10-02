@@ -148,7 +148,7 @@ create and `PUT` (400 naming the field).
   before the removal: the one writer of `tasks.sandbox_memory_peak_mb` and `tasks.sandbox_oom_kills`. An ID
   naming no row is a no-op, and a reading that produced neither number reports nothing rather than erasing a
   previous run. `UpdateTask` owns neither column but reads both back, so broadcasting the row it just wrote
-  cannot clear a measurement taken during it (`docs/storage.md → The schema is gated by PRAGMA user_version`).
+  cannot clear a measurement taken during it (`docs/storage.md → The schema is created whole`).
 - **A stored peak means *the last run*.** It estimates nothing and is used by no admission decision.
 - **What needs a person's attention is decided once**, in `frontend/src/lib/utils/memory-stats.ts`: an OOM
   kill, or a peak that reached the limit. Running near the limit is pressure, not an alert — it colours the
@@ -265,7 +265,7 @@ create and `PUT` (400 naming the field).
   (`ExtensionStopGracePeriod`) and a terminal container is released by its holders, so attributing them to a
   task would charge one run for another's.
 - Tests: `backend/exec/memory_gate_test.go`, `backend/exec/memory_supervisor_test.go`,
-  `backend/server/memory_budget_test.go`, `backend/store/tasks_test.go`, `backend/store/migrations_test.go`.
+  `backend/server/memory_budget_test.go`, `backend/store/tasks_test.go`, `backend/store/schema_test.go`.
 
 ## The cap is the enforcement point, and it has a floor
 

@@ -62,13 +62,11 @@ func (cs *ConfigStore) RegistryURL() string {
 	return cs.registryURL
 }
 
-// configDB is config's whole persistence need: its own key/value table, plus the typed
-// remap that rewrites provider attribution in tables the store owns.
+// configDB is config's whole persistence need: its own key/value table.
 type configDB interface {
 	GetConfigValue(key string) (string, error)
 	GetConfigValues(keys ...string) (map[string]string, error)
 	SetConfigValue(key, value string) error
-	RemapProviderNames(oldSlugToID map[string]string) error
 	// ConfigGeneration counts config-table writes, so a cached config can tell stale from current
 	// without re-reading.
 	ConfigGeneration() uint64
@@ -210,67 +208,6 @@ func assignProviderIDs(providers []types.Provider) {
 			next++
 		}
 	}
-}
-
-// MigrateProviderIDs migrates legacy provider configs that stored the provider
-// identity as a URL-derived slug name into the new stable integer ID scheme.
-// It assigns IDs, remaps the worker/utility provider references and the
-// provider_name rows in the message/token tables, and persists the new format.
-// It is idempotent: once every persisted provider has an ID it does nothing.
-func (cs *ConfigStore) MigrateProviderIDs() error {
-	providersRaw, err := cs.db.GetConfigValue("providers")
-	if err != nil {
-		return err
-	}
-	providers := make([]types.Provider, 0)
-	if providersRaw != "" {
-		if err := json.Unmarshal([]byte(providersRaw), &providers); err != nil {
-			return err
-		}
-	}
-	needsMigration := false
-	for _, p := range providers {
-		if !types.IsAgentURL(p.URL) && p.ID == 0 {
-			needsMigration = true
-			break
-		}
-	}
-	if !needsMigration {
-		return nil
-	}
-
-	// Build a slug-name -> new-ID map from legacy providers that carry a name.
-	slugToID := make(map[string]string)
-	assignProviderIDs(providers)
-	for i := range providers {
-		p := &providers[i]
-		if p.Name != "" && p.ID != 0 {
-			slugToID[p.Name] = strconv.Itoa(p.ID)
-		}
-		p.Name = "" // slug is no longer persisted; identity is now the ID
-	}
-
-	// Remap worker/utility provider references (which stored the old slug).
-	for _, key := range []string{"worker_provider", "utility_provider"} {
-		raw, _ := cs.db.GetConfigValue(key)
-		if id, ok := slugToID[raw]; ok {
-			if err := cs.db.SetConfigValue(key, id); err != nil {
-				return err
-			}
-		}
-	}
-
-	// Remap provider_name rows in the message/token tables from slug to ID. The rows are
-	// the store's; config only says which slug means which ID.
-	if err := cs.db.RemapProviderNames(slugToID); err != nil {
-		return err
-	}
-
-	providersJSON, err := json.Marshal(providers)
-	if err != nil {
-		return err
-	}
-	return cs.db.SetConfigValue("providers", string(providersJSON))
 }
 
 // NewConfigStore creates a new ConfigStore. box comes from crypto.New at startup, and mcpLocked is the

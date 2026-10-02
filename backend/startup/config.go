@@ -17,33 +17,30 @@ import (
 // because two spellings of one variable drift in exactly the way that ends with a documented flag
 // doing nothing.
 const (
-	EnvPort           = "MIKE_PORT"
-	EnvListen         = "MIKE_LISTEN"
-	EnvDataDir        = "MIKE_DATA_DIR"
-	EnvWorktreesDir   = "MIKE_WORKTREES_DIR"
-	EnvFrontendDist   = "MIKE_FRONTEND_DIST"
-	EnvTLS            = "MIKE_TLS"
-	EnvAllowedHosts   = "MIKE_ALLOWED_HOSTS"
-	EnvLogLevel       = "MIKE_LOG_LEVEL"
-	EnvLoginPassword  = "MIKE_LOGIN_PASSWORD"
-	EnvEncryptionKey  = "MIKE_ENCRYPTION_KEY"
-	EnvRegistryURL    = "MIKE_REGISTRY_URL"
-	EnvUpdateURL      = "MIKE_UPDATE_URL"
-	EnvDisableUpdates = "MIKE_DISABLE_UPDATES"
-	EnvRestrictMCP    = "MIKE_RESTRICT_MCP"
-	// EnvUpdateCheckDeprecated is read by nothing: it is the tri-state this variable replaced, named
-	// only so an operator whose .env still sets it is told at boot.
-	EnvUpdateCheckDeprecated = "MIKE_UPDATE_CHECK"
-	EnvExtMountRoots         = "MIKE_EXT_MOUNT_ROOTS"
-	EnvAgentPath             = "MIKE_AGENT_PATH"
-	EnvSkipSandboxSweep      = "MIKE_SANDBOX_SKIP_STARTUP_CLEANUP"
-	EnvTrustProxy            = "MIKE_TRUST_PROXY"
-	EnvLoginRateLimit        = "MIKE_LOGIN_RATE_LIMIT"
-	EnvAllowRootFS           = "MIKE_ALLOW_ROOT_FS"
-	EnvDangerZone            = "DANGER_ZONE"
-	EnvGCDryRun              = "MIKE_GC_DRY_RUN"
-	EnvPProf                 = "MIKE_PPROF"
-	EnvMemoryBudgetPct       = "MIKE_MEMORY_BUDGET_PCT"
+	EnvPort             = "MIKE_PORT"
+	EnvListen           = "MIKE_LISTEN"
+	EnvDataDir          = "MIKE_DATA_DIR"
+	EnvWorktreesDir     = "MIKE_WORKTREES_DIR"
+	EnvFrontendDist     = "MIKE_FRONTEND_DIST"
+	EnvTLS              = "MIKE_TLS"
+	EnvAllowedHosts     = "MIKE_ALLOWED_HOSTS"
+	EnvLogLevel         = "MIKE_LOG_LEVEL"
+	EnvLoginPassword    = "MIKE_LOGIN_PASSWORD"
+	EnvEncryptionKey    = "MIKE_ENCRYPTION_KEY"
+	EnvRegistryURL      = "MIKE_REGISTRY_URL"
+	EnvUpdateURL        = "MIKE_UPDATE_URL"
+	EnvDisableUpdates   = "MIKE_DISABLE_UPDATES"
+	EnvRestrictMCP      = "MIKE_RESTRICT_MCP"
+	EnvExtMountRoots    = "MIKE_EXT_MOUNT_ROOTS"
+	EnvAgentPath        = "MIKE_AGENT_PATH"
+	EnvSkipSandboxSweep = "MIKE_SANDBOX_SKIP_STARTUP_CLEANUP"
+	EnvTrustProxy       = "MIKE_TRUST_PROXY"
+	EnvLoginRateLimit   = "MIKE_LOGIN_RATE_LIMIT"
+	EnvAllowRootFS      = "MIKE_ALLOW_ROOT_FS"
+	EnvDangerZone       = "DANGER_ZONE"
+	EnvGCDryRun         = "MIKE_GC_DRY_RUN"
+	EnvPProf            = "MIKE_PPROF"
+	EnvMemoryBudgetPct  = "MIKE_MEMORY_BUDGET_PCT"
 )
 
 // DefaultPort and DefaultListenAddr are the built-in defaults of the ladder. Loopback by default
@@ -231,10 +228,6 @@ func Resolve(f Flags) (Config, error) {
 	}
 	c.DisableUpdates = resolveDisable(EnvDisableUpdates, &c.Warnings)
 	c.RestrictMCP = isOne(EnvRestrictMCP)
-	if stale := os.Getenv(EnvUpdateCheckDeprecated); stale != "" {
-		c.Warnings = append(c.Warnings, fmt.Sprintf("%s=%q is no longer read: release updates are turned off with %s=1, and are otherwise decided in Settings → About",
-			EnvUpdateCheckDeprecated, stale, EnvDisableUpdates))
-	}
 	c.ExtMountRoots = splitPathList(os.Getenv(EnvExtMountRoots))
 	c.AgentPath = resolveString("", EnvAgentPath, "")
 	c.SweepStaleContainersAtBoot = os.Getenv(EnvSkipSandboxSweep) == ""

@@ -578,8 +578,6 @@ func (es *ExtensionStore) scanExtension(s scanner) (*Extension, error) {
 		if err := json.Unmarshal([]byte(manifestJSON.String), &ext.Manifest); err != nil {
 			return nil, fmt.Errorf("unmarshal manifest: %w", err)
 		}
-		// Normalized here rather than migrated, so every reader sees one shape.
-		ext.Manifest.Capabilities.GetLSP().NormalizeFileTypes()
 	}
 	if configJSON.Valid {
 		if err := json.Unmarshal([]byte(configJSON.String), &ext.Config); err != nil {

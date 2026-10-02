@@ -620,54 +620,6 @@ func TestUpdateConfigAssignsProviderIDs(t *testing.T) {
 	}
 }
 
-func TestMigrateProviderIDs(t *testing.T) {
-	cs, db := testConfigStoreWithStore(t)
-
-	// Seed legacy config directly (bypassing UpdateConfig, which assigns IDs):
-	// providers carry slug names and no IDs, worker/utility reference the slugs.
-	legacyJSON := `[{"name":"neptune-8010","kind":"llm","url":"http://neptune:8010/v1","concurrency":1,"models":[]},{"name":"other-9000","kind":"llm","url":"http://other:9000/v1","concurrency":1,"models":[]}]`
-	if err := cs.db.SetConfigValue("providers", legacyJSON); err != nil {
-		t.Fatalf("seed legacy providers: %v", err)
-	}
-	if err := cs.db.SetConfigValue("worker_provider", "neptune-8010"); err != nil {
-		t.Fatalf("seed worker_provider: %v", err)
-	}
-	if err := cs.db.SetConfigValue("utility_provider", "other-9000"); err != nil {
-		t.Fatalf("seed utility_provider: %v", err)
-	}
-	// Simulate existing message/token rows attributed to the legacy slugs.
-	db.Exec(`INSERT INTO projects (id, name, path, created_at, updated_at) VALUES ('p1', 'proj', '/tmp/proj', '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')`)
-	db.Exec(`INSERT INTO tasks (id, project_id, title, prompt, llama_server_url, model_name, created_at, updated_at) VALUES ('t1', 'p1', 'task', 'prompt', '', '', '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')`)
-	db.Exec(`INSERT INTO task_messages (id, task_id, role, content, provider_name, created_at) VALUES ('m1', 't1', 'user', 'hi', 'neptune-8010', '2024-01-01T00:00:00Z')`)
-
-	if err := cs.MigrateProviderIDs(); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-
-	got, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	// IDs assigned, slugs cleared.
-	if got.Providers[0].ID == 0 || got.Providers[0].Name != "" {
-		t.Errorf("provider not migrated: got ID=%d Name=%q", got.Providers[0].ID, got.Providers[0].Name)
-	}
-	id := strconv.Itoa(got.Providers[0].ID)
-	// worker/utility references remapped to IDs.
-	if got.WorkerProvider != id {
-		t.Errorf("worker_provider not remapped: got %q want %q", got.WorkerProvider, id)
-	}
-	// DB rows remapped to the ID.
-	var stored string
-	err = db.QueryRow(`SELECT provider_name FROM task_messages WHERE id = 'm1'`).Scan(&stored)
-	if err != nil {
-		t.Fatalf("query row: %v", err)
-	}
-	if stored != id {
-		t.Errorf("task_messages provider_name not remapped: got %q want %q", stored, id)
-	}
-}
-
 func TestBuildConfigResponseMasksAPIKeys(t *testing.T) {
 	cs, db := testConfigStoreWithStore(t)
 

@@ -6,38 +6,8 @@ import (
 	"testing"
 )
 
-// A project's opt-in list decides whether a server's tools reach a turn, so an upgraded row opts into
-// nothing and the list survives every read shape the board uses.
-
-func TestMigration_ProjectWithoutMCPServerIDsOptsIntoNothing(t *testing.T) {
-	path := legacyDB(t, `
-		CREATE TABLE projects (
-			id TEXT PRIMARY KEY,
-			name TEXT NOT NULL,
-			path TEXT NOT NULL UNIQUE,
-			created_at TEXT NOT NULL,
-			updated_at TEXT NOT NULL
-		);
-		INSERT INTO projects (id, name, path, created_at, updated_at)
-			VALUES ('p1', 'Legacy', '/tmp/legacy', '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z');`)
-
-	s, err := NewStore(path)
-	if err != nil {
-		t.Fatalf("NewStore on legacy db: %v", err)
-	}
-	got, err := s.GetProject("p1")
-	if err != nil {
-		t.Fatalf("read migrated project: %v", err)
-	}
-	s.Close()
-
-	if len(got.MCPServerIDs) != 0 {
-		t.Errorf("migrated project enables %v, want nothing", got.MCPServerIDs)
-	}
-	if !columnsOf(t, path, "projects")["mcp_server_ids"] {
-		t.Error("migration did not add projects.mcp_server_ids")
-	}
-}
+// A project's opt-in list decides whether a server's tools reach a turn, so the list has to survive
+// every read shape the board uses.
 
 func TestProjectMCPServerIDsRoundTrip(t *testing.T) {
 	s := testStore(t)

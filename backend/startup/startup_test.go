@@ -219,7 +219,7 @@ var resolverEnv = []string{
 	EnvLogLevel, EnvLoginPassword, EnvEncryptionKey, EnvRegistryURL, EnvExtMountRoots,
 	EnvAgentPath, EnvSkipSandboxSweep, EnvTrustProxy, EnvLoginRateLimit, EnvAllowRootFS,
 	EnvDangerZone, EnvGCDryRun, EnvPProf, EnvMemoryBudgetPct, EnvUpdateURL, EnvDisableUpdates,
-	EnvUpdateCheckDeprecated, EnvRestrictMCP,
+	EnvRestrictMCP,
 }
 
 func clearResolverEnv(t testing.TB) {
@@ -596,26 +596,6 @@ func TestDisableUpdatesIsTheExactValue(t *testing.T) {
 			}
 		})
 	}
-
-	// The variable this replaced is read by nothing, but an .env still carrying it must not go quiet.
-	t.Run("the name it replaced is reported and ignored", func(t *testing.T) {
-		clearResolverEnv(t)
-		t.Setenv(EnvUpdateCheckDeprecated, "1")
-		c := mustResolve(t, Flags{})
-		if c.DisableUpdates {
-			t.Errorf("%s disabled updates; it is no longer read", EnvUpdateCheckDeprecated)
-		}
-		joined := strings.Join(c.Warnings, "\n")
-		if !strings.Contains(joined, EnvUpdateCheckDeprecated) || !strings.Contains(joined, EnvDisableUpdates) {
-			t.Errorf("the warning %q does not name both the stale name and its replacement", joined)
-		}
-
-		// A variable set but empty means unset, and an unset one warns nobody.
-		clearResolverEnv(t)
-		if c := mustResolve(t, Flags{}); strings.Contains(strings.Join(c.Warnings, "\n"), EnvUpdateCheckDeprecated) {
-			t.Errorf("an absent %s warned: %v", EnvUpdateCheckDeprecated, c.Warnings)
-		}
-	})
 }
 
 // A development build serves the directory its developer names, the flag over the environment; a

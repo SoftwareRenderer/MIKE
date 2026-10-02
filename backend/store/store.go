@@ -1,7 +1,8 @@
-// Package store is the persistence layer: one SQLite database, its schema and migrations,
-// and the typed accessors for tasks, messages, threads, projects, sessions, stats, config.
-// The pool is pinned to one connection so the PRAGMAs apply everywhere; s.mu is the
-// serialisation point. Migrations probe before they ALTER (migrations.go).
+// Package store is the persistence layer: one SQLite database, its schema, and the typed accessors
+// for tasks, messages, threads, projects, sessions, stats, config. The pool is pinned to one
+// connection so the PRAGMAs apply everywhere; s.mu is the serialisation point. The schema is created
+// whole from its DDL (migrations.go) and a new column is added there; nothing upgrades an older
+// database.
 package store
 
 import (
@@ -159,33 +160,15 @@ func (s *Store) QueryRow(query string, args ...any) *sql.Row {
 	return s.db.QueryRow(query, args...)
 }
 
+// initSchema writes the schema. baseSchemaSQL is the whole of it, and it runs on every start: there is
+// no probe chain and no version stamp, because no older database is upgraded (see migrations.go).
+// The lock covers the statement because schema work is the one thing that must not interleave with
+// anything else this store does.
 func (s *Store) initSchema() error {
-	// Held across the whole chain, as it was before the chain was split: schema work is the one thing that
-	// must not interleave with anything else this store does.
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	// Three layers, each idempotent for a different reason, and the whole chain gated by user_version
-	// rather than run once per process: a database already at this build's schema version does not need
-	// 53 column probes, and one stamped newer than this build must not be edited by it.
-	if err := s.createBaseTables(); err != nil {
-		return err
-	}
-	stored := s.userVersion()
-	if stored >= schemaVersion {
-		if stored > schemaVersion {
-			logging.For(logging.Store).Infof("database schema version %d is newer than this build's %d — leaving the schema alone", stored, schemaVersion)
-		}
-		return nil
-	}
-
-	s.addMissingColumns()
-	s.migrateTokenStats()
-	s.zeroLegacySandboxPeaks()
-	s.normalizeTimeText()
-	s.clearDoneDiffSnapshotsIfOlderThan(stored)
-	s.setUserVersion(schemaVersion)
-	return nil
+	_, err := s.db.Exec(baseSchemaSQL)
+	return err
 }
 
 func (s *Store) initConfigDefaults() error {
@@ -249,7 +232,7 @@ func ptrTime(t *time.Time) *string {
 func scanTime(s string) time.Time {
 	t, err := time.Parse(time.RFC3339Nano, s)
 	if err != nil {
-		t, err = time.Parse(time.RFC3339, s) // fallback for legacy data
+		t, err = time.Parse(time.RFC3339, s)
 		if err != nil {
 			return time.Time{}
 		}
@@ -289,7 +272,7 @@ func scanTask(s scanner, t *types.Task) error {
 	t.BranchTip = branchTip.String
 	t.CreatedAt = scanTime(createdAt)
 	t.UpdatedAt = scanTime(updatedAt)
-	// Rows predating the migration have an empty moved_at; created_at keeps their order stable.
+	// A row with no moved_at keeps created_at as its board position, so it never sorts as the epoch.
 	if movedAt == "" {
 		movedAt = createdAt
 	}

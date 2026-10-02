@@ -193,15 +193,13 @@ type LSPConfig struct {
 	Command string   `json:"command,omitempty"`
 	Args    []string `json:"args,omitempty"`
 	// FileTypes says which files this extension owns and what its server calls each one. A
-	// per-file language id is why the flat `extensions` list is gone: tsserver parses .tsx
-	// differently from .ts and mis-parses the file for good when handed the coarse id.
+	// per-file language id is what the shape is for: tsserver parses .tsx differently from .ts
+	// and mis-parses the file for good when handed the coarse id.
 	FileTypes []LSPFileType `json:"file_types,omitempty"`
 	// Syntax holds the named highlighting profiles the file types refer to — data, never code.
-	Syntax map[string]SyntaxSpec `json:"syntax,omitempty"`
-	// LegacyExtensions decodes the pre-file_types `extensions` key; only NormalizeFileTypes reads it.
-	LegacyExtensions   []string       `json:"extensions,omitempty"`
-	Language           string         `json:"language,omitempty"`
-	InitParamsOverride map[string]any `json:"initParamsOverride,omitempty"`
+	Syntax             map[string]SyntaxSpec `json:"syntax,omitempty"`
+	Language           string                `json:"language,omitempty"`
+	InitParamsOverride map[string]any        `json:"initParamsOverride,omitempty"`
 	// EditorEnabled gates the editor's LSP features (diagnostics, completions,
 	// go-to-definition). Nil or true = enabled. The gate is applied client-side
 	// (extension-manager.getEditorLSPExtensions feeds the editor's LSP
@@ -334,34 +332,6 @@ func (c *LSPConfig) LanguageIDFor(name string) string {
 		return ft.LanguageID
 	}
 	return c.Language
-}
-
-// NormalizeFileTypes turns a pre-file_types manifest's legacy list into FileTypes and clears the
-// legacy key. Synthesized entries can only carry the manifest language, which is why such an
-// extension needs updating to serve .tsx correctly. Idempotent, so it runs at load, not as a migration.
-func (c *LSPConfig) NormalizeFileTypes() bool {
-	if c == nil {
-		return false
-	}
-	changed := false
-	if len(c.LegacyExtensions) > 0 {
-		seen := map[string]bool{}
-		for _, ft := range c.FileTypes {
-			seen[ft.Extension] = true
-		}
-		for _, raw := range c.LegacyExtensions {
-			ext := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(raw), "."))
-			if ext == "" || seen[ext] {
-				continue
-			}
-			seen[ext] = true
-			c.FileTypes = append(c.FileTypes, LSPFileType{Extension: ext, LanguageID: c.Language})
-			changed = true
-		}
-		c.LegacyExtensions = nil
-		changed = true
-	}
-	return changed
 }
 
 func baseName(name string) string {

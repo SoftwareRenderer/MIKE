@@ -746,7 +746,7 @@ func TestHandleLocalExtensions(t *testing.T) {
 		"description": "Svelte language server",
 		"author": "Svelte",
 		"version": "1.0.0",
-		"capabilities": {"lsp": {"command": "svelte-language-server", "args": ["--stdio"], "extensions": ["svelte"], "language": "svelte"}}
+		"capabilities": {"lsp": {"command": "svelte-language-server", "args": ["--stdio"], "language": "svelte", "file_types": [{"extension": "svelte", "language_id": "svelte"}]}}
 	}`)
 	writeManifest("softwarerenderer/markdown-preview/manifest.json", `{
 		"display_name": "Markdown Preview",
@@ -983,7 +983,7 @@ func TestHandleInstallLocal(t *testing.T) {
 		"description": "Svelte language server",
 		"author": "Svelte",
 		"version": "1.0.0",
-		"capabilities": {"lsp": {"command": "svelte-language-server", "args": ["--stdio"], "extensions": ["svelte"], "language": "svelte"}}
+		"capabilities": {"lsp": {"command": "svelte-language-server", "args": ["--stdio"], "language": "svelte", "file_types": [{"extension": "svelte", "language_id": "svelte"}]}}
 	}`
 	if err := os.WriteFile(filepath.Join(extPath, "manifest.json"), []byte(manifest), 0o644); err != nil {
 		t.Fatalf("WriteFile manifest: %v", err)
@@ -2576,7 +2576,7 @@ func TestHandleInstall_RefusesALanguageServerWithNoImage(t *testing.T) {
 func TestHandleInstall_BuildFailureLeavesNoRowAndNoFiles(t *testing.T) {
 	repo, commit := makeGitRepo(t, map[string]string{
 		"lsp/gopls/manifest.json": `{"display_name":"Go","description":"d","author":"Go Team","version":"0.7.0",` +
-			`"capabilities":{"lsp":{"command":"gopls","args":["serve"],"extensions":["go"],"language":"go"}}}`,
+			`"capabilities":{"lsp":{"command":"gopls","args":["serve"],"language":"go","file_types":[{"extension":"go","language_id":"go"}]}}}`,
 		"lsp/gopls/Dockerfile": "FROM golang:1-alpine\nCOPY sandbox/sandbox-bridge /usr/local/bin/sandbox-bridge\n",
 	})
 	index := RegistryIndex{{
