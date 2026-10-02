@@ -44,6 +44,28 @@ live in `CardDetail.svelte`'s window keydown listener, using pure resolvers from
 Tests: `composables/__tests__/task-detail-column-nav.unit.ts`, e2e `task-view-column-nav.spec.ts`, and the
 chat half of both by `chat-scroll-takeover.spec.ts` (which also needs the follow tracker to leave the
 reader where a key landed them — `AGENTS.md → Frontend`).
+## File list (`FileBrowserView.svelte`)
+
+The listing owns its clipboard keys and the panel that wraps it carries them. Ctrl+X, Ctrl+C, Ctrl+V, F2
+and Delete reach the file selection wherever focus sits inside that panel, and nowhere outside it — the
+editor's Ctrl+C stays the editor's. `keyIsOurs` hands the keys back to the browser while focus sits in a
+field being typed (the path field, a name being retyped, the new-file row) and while the context menu is
+open.
+
+**A folder change must not strand the keyboard.** A new listing can remove the row that holds focus, and a
+keystroke arriving on `<body>` afterwards reaches no handler at all. `loadDir` records whether this panel
+holds focus, and when the panel ends up holding none once the new rows are rendered it focuses the listing,
+which is a focus target through `tabindex="-1"`. A panel that holds no focus keeps it that way, so a
+listing refreshed by the watcher never pulls the keyboard out of the editor.
+
+A key aimed at one row with an empty selection is about that row: `focusedRowPath` reads the
+`[data-index]` of the event target, the same read the menu key makes. Ctrl+V pastes into the folder being
+listed, while the menu's Paste takes the folder the menu names (`pasteTarget`). No selection and no row
+under focus is a silent no-op.
+
+Tests: `components/__tests__/file-browser-clipboard.unit.svelte.ts` delivers every key to the focused
+element as a browser does, including a cut in one folder and a paste in another.
+
 ## Checking this
 
 `cd frontend && npm test` covers the resolvers (`board-arrow-nav.unit.ts` is one of them).

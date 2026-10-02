@@ -96,6 +96,8 @@
     let firstLoadComplete = $state(false);
     let error = $state('');
     let missingDirRetries = 0;
+    let rootEl = $state<HTMLDivElement | null>(null);
+    let listEl = $state<HTMLDivElement | null>(null);
 
     // New file and new folder: one row under the header each, one failure each.
     let showNewFile = $state(false);
@@ -144,6 +146,7 @@
         const target = path.startsWith(rootPath) ? path : rootPath;
         // Reloading the current directory keeps the selection; opening a different one clears it.
         const sameDir = target === currentPath;
+        const heldKeyboard = rootEl?.contains(document.activeElement) ?? false;
         menu = null;
         loading = true;
         error = '';
@@ -185,6 +188,17 @@
         } finally {
             if (!retrying) loading = false;
         }
+        if (!retrying && heldKeyboard) await reclaimKeyboard();
+    }
+
+    /**
+     * A folder change can remove the row that holds focus, and a keystroke then reaches no handler at all.
+     * Once the new listing has rendered and this panel holds no focus, the listing takes it.
+     */
+    async function reclaimKeyboard(): Promise<void> {
+        await tick();
+        if (!rootEl || rootEl.contains(document.activeElement)) return;
+        listEl?.focus({ preventScroll: true });
     }
 
     async function toggleNewFile() {
@@ -467,6 +481,7 @@
         onMutated?.();
     }
 
+    /** The keyboard names the folder being listed; the menu's Paste names the folder it was opened on (`pasteTarget`). */
     async function pasteInto(dest: string): Promise<void> {
         const clip = clipboard;
         if (!clip || mutating) return;
@@ -560,12 +575,17 @@
         }
     }
 
-    // Bound to the list element, not the window, so Ctrl+C means the file selection here and the
-    // editor's text there.
-    function handleListKeydown(e: KeyboardEvent): void {
-        if (renaming) return;
+    // The panel carries these keys rather than the listing, because a key bound to the listing only
+    // arrives while one of its rows holds DOM focus.
+    function keyIsOurs(e: KeyboardEvent): boolean {
+        if (menu) return false;
+        const target = e.target;
+        return target instanceof HTMLElement && !target.closest('input, textarea, [contenteditable]');
+    }
+
+    function handleKeydown(e: KeyboardEvent): void {
+        if (renaming || !keyIsOurs(e)) return;
         const mod = e.ctrlKey || e.metaKey;
-        const paths = selectedPaths;
 
         const key = selection.handleKeydown(e);
         if (key?.kind === 'handled') return;
@@ -573,6 +593,9 @@
             openMenuAt(e, key.at.x, key.at.y, entries[key.index], key.index);
             return;
         }
+        const focused = selection.focusedRowPath(e);
+        const paths = selectedPaths.length > 0 ? selectedPaths : focused ? [focused] : [];
+
         if (mod && (e.key === 'x' || e.key === 'X')) {
             e.preventDefault();
             setClipboard('cut', paths);
@@ -602,7 +625,8 @@
     }
 </script>
 
-<div class="file-browser">
+<!-- svelte-ignore a11y_no_static_element_interactions — the panel carries the listing's clipboard keys -->
+<div class="file-browser" bind:this={rootEl} onkeydown={handleKeydown}>
     <div class="file-browser-header">
         <span class="file-browser-label">{t('explorer.shared.filesLabel')}</span>
         {#if !showNewFile && !showNewFolder}
@@ -705,20 +729,20 @@
         </div>
     {/if}
 
-    <!-- The listing is the drop zone, so it renders whatever the directory answered. -->
-    <!-- svelte-ignore a11y_interactive_supports_focus — the listing is a drop target, not an
-         activation target: its treeitems are what a keyboard reaches. -->
+    <!-- The listing is the drop zone, so it renders whatever the directory answered. Its `tabindex` makes
+         it the focus target `reclaimKeyboard` falls back to. -->
     <div
         class="file-browser-list {listingClass}"
         class:is-drop-target={dropUpload.isOver}
         role="tree"
+        tabindex="-1"
         aria-label={treeAriaLabel}
+        bind:this={listEl}
         ondragenter={dropUpload.handleDragEnter}
         ondragover={dropUpload.handleDragOver}
         ondragleave={dropUpload.handleDragLeave}
         ondrop={dropUpload.handleDrop}
         oncontextmenu={handleListContextmenu}
-        onkeydown={handleListKeydown}
     >
         <FileDropProgress drop={dropUpload} />
         {#if loading && entries.length === 0}
