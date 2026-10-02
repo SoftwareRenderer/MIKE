@@ -13,6 +13,7 @@
     import TaskDefaults from './ConfigModal/TaskDefaults.svelte';
     import ProjectDefaults from './ConfigModal/ProjectDefaults.svelte';
     import type { ProviderDraft } from './ConfigModal/drafts';
+    import { emptySampling, samplingFromConfig, samplingPayload } from './ConfigModal/drafts';
     import PreferencesTab from './ConfigModal/PreferencesTab.svelte';
     import ProviderCard from './ConfigModal/ProviderCard.svelte';
     import ExtensionsTab from './ConfigModal/ExtensionsTab.svelte';
@@ -149,7 +150,7 @@
             models: isAgent ? [] : (p.models || []).map(m => {
                 // Handle both old format (string) and new format ({name, reasoning_effort, ...})
                 if (typeof m === 'string') {
-                    return { name: m, readonly: false, reasoning_effort: 'default' as const, context_window: null, input_price: null, output_price: null, cache_read_price: null, cache_write_price: null, power_consumption_w: null };
+                    return { name: m, readonly: false, reasoning_effort: 'default' as const, context_window: null, input_price: null, output_price: null, cache_read_price: null, cache_write_price: null, power_consumption_w: null, sampling: emptySampling() };
                 }
                 return {
                     name: m.name,
@@ -161,6 +162,7 @@
                     cache_read_price: m.cache_read_price ?? null,
                     cache_write_price: m.cache_write_price ?? null,
                     power_consumption_w: m.power_consumption_w ?? null,
+                    sampling: samplingFromConfig(m.sampling),
                 };
             }).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })),
         };
@@ -419,6 +421,7 @@
                         cache_read_price: prior?.cache_read_price ?? null,
                         cache_write_price: prior?.cache_write_price ?? null,
                         power_consumption_w: prior?.power_consumption_w ?? null,
+                        sampling: prior?.sampling ?? emptySampling(),
                     };
                 });
                 p.models.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
@@ -483,7 +486,7 @@
     });
 
     function addModelToProvider(idx: number) {
-        providers[idx].models.push({ name: '', readonly: false, reasoning_effort: 'default', context_window: null, input_price: null, output_price: null, cache_read_price: null, cache_write_price: null, power_consumption_w: null });
+        providers[idx].models.push({ name: '', readonly: false, reasoning_effort: 'default', context_window: null, input_price: null, output_price: null, cache_read_price: null, cache_write_price: null, power_consumption_w: null, sampling: emptySampling() });
         providers[idx].models.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
     }
 
@@ -627,6 +630,8 @@
                             cache_read_price: m.cache_read_price ?? undefined,
                             cache_write_price: m.cache_write_price ?? undefined,
                             power_consumption_w: m.power_consumption_w ?? undefined,
+                            // undefined = omitted: an untouched row sends no sampler override at all
+                            sampling: samplingPayload(m.sampling),
                         })),
                         concurrency: Math.max(1, p.concurrency || 1),
                         max_requests_per_second: Math.max(0, Math.floor(p.max_requests_per_second || 0)),

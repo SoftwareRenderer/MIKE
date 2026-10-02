@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// TestModelConfigJSONRoundTrip verifies the per-model pricing/power override
+// TestModelConfigJSONRoundTrip verifies the per-model pricing/power and sampler override
 // fields serialize and deserialize correctly, and that nil (inherit) fields are
 // omitted from the JSON output.
 func TestModelConfigJSONRoundTrip(t *testing.T) {
@@ -16,6 +16,14 @@ func TestModelConfigJSONRoundTrip(t *testing.T) {
 	cacheWriteP := 2.5
 	powerW := 420.0
 	ctx := 32768
+	temp := 0.7
+	topP := 0.9
+	topK := 40
+	minP := 0.05
+	freqPenalty := -1.5
+	presPenalty := 0.25
+	repPenalty := 1.1
+	seed := 1234
 
 	m := ModelConfig{
 		Name:              "model-a",
@@ -26,6 +34,16 @@ func TestModelConfigJSONRoundTrip(t *testing.T) {
 		CacheReadPrice:    &cacheReadP,
 		CacheWritePrice:   &cacheWriteP,
 		PowerConsumptionW: &powerW,
+		Sampling: &ModelSampling{
+			Temperature:       &temp,
+			TopP:              &topP,
+			TopK:              &topK,
+			MinP:              &minP,
+			FrequencyPenalty:  &freqPenalty,
+			PresencePenalty:   &presPenalty,
+			RepetitionPenalty: &repPenalty,
+			Seed:              &seed,
+		},
 	}
 
 	data, err := json.Marshal(m)
@@ -42,6 +60,15 @@ func TestModelConfigJSONRoundTrip(t *testing.T) {
 		`"cache_read_price":1`,
 		`"cache_write_price":2.5`,
 		`"power_consumption_w":420`,
+		`"sampling":{`,
+		`"temperature":0.7`,
+		`"top_p":0.9`,
+		`"top_k":40`,
+		`"min_p":0.05`,
+		`"frequency_penalty":-1.5`,
+		`"presence_penalty":0.25`,
+		`"repetition_penalty":1.1`,
+		`"seed":1234`,
 	} {
 		if !strings.Contains(jsonStr, key) {
 			t.Fatalf("expected %s in JSON, got: %s", key, jsonStr)
@@ -72,6 +99,37 @@ func TestModelConfigJSONRoundTrip(t *testing.T) {
 	}
 	if out.PowerConsumptionW == nil || *out.PowerConsumptionW != powerW {
 		t.Fatalf("power_consumption_w mismatch: %v", out.PowerConsumptionW)
+	}
+	if out.Sampling == nil {
+		t.Fatalf("sampling was dropped: %s", jsonStr)
+	}
+	for _, f := range []struct {
+		name string
+		got  *float64
+		want float64
+	}{
+		{"temperature", out.Sampling.Temperature, temp},
+		{"top_p", out.Sampling.TopP, topP},
+		{"min_p", out.Sampling.MinP, minP},
+		{"frequency_penalty", out.Sampling.FrequencyPenalty, freqPenalty},
+		{"presence_penalty", out.Sampling.PresencePenalty, presPenalty},
+		{"repetition_penalty", out.Sampling.RepetitionPenalty, repPenalty},
+	} {
+		if f.got == nil || *f.got != f.want {
+			t.Errorf("sampling.%s mismatch: %v", f.name, f.got)
+		}
+	}
+	for _, f := range []struct {
+		name string
+		got  *int
+		want int
+	}{
+		{"top_k", out.Sampling.TopK, topK},
+		{"seed", out.Sampling.Seed, seed},
+	} {
+		if f.got == nil || *f.got != f.want {
+			t.Errorf("sampling.%s mismatch: %v", f.name, f.got)
+		}
 	}
 }
 
@@ -115,7 +173,7 @@ func TestModelConfigNilFieldsOmitted(t *testing.T) {
 
 	for _, key := range []string{
 		"input_price", "output_price", "cache_read_price", "cache_write_price",
-		"power_consumption_w", "context_window",
+		"power_consumption_w", "context_window", "sampling",
 	} {
 		if strings.Contains(jsonStr, key) {
 			t.Fatalf("expected %s to be omitted, got: %s", key, jsonStr)
@@ -127,7 +185,8 @@ func TestModelConfigNilFieldsOmitted(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	if out.InputPrice != nil || out.OutputPrice != nil || out.CacheReadPrice != nil ||
-		out.CacheWritePrice != nil || out.PowerConsumptionW != nil || out.ContextWindow != nil {
+		out.CacheWritePrice != nil || out.PowerConsumptionW != nil || out.ContextWindow != nil ||
+		out.Sampling != nil {
 		t.Fatalf("expected all override fields nil, got: %+v", out)
 	}
 }

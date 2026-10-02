@@ -155,6 +155,12 @@ reaches the browser as a 500; the `, ok` form silently drops the value and answe
 its own save. Wrong types are a 400 naming the field, and validation runs before anything is written.
 Tests: `backend/api/task_update_test.go`, `backend/config/updates_test.go`.
 
+A `providers` payload is judged by value as well as by shape: a sampler override outside its range
+(`validateModelSampling` in `backend/config/sampling.go`) is a 400 naming the provider, the model and
+the field, and the stored configuration is untouched. Test: `backend/config/sampling_test.go`.
+`docs/llm-streaming.md → Sampler overrides: a blank field sends nothing` owns what each field means
+on the wire.
+
 ## The acknowledged memory alert
 
 `tasks.memory_alert_ack` is on every task payload: `null` when nobody dismissed the alert, an object

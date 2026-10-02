@@ -4,6 +4,61 @@
  * edits one row.
  */
 
+import type { ProviderSampling } from '$lib/types';
+
+/** One model's sampler overrides as Settings edits them: a blank field is null and is never sent. */
+interface ModelSamplingDraft {
+    temperature: number | null;
+    top_p: number | null;
+    top_k: number | null;
+    min_p: number | null;
+    frequency_penalty: number | null;
+    presence_penalty: number | null;
+    repetition_penalty: number | null;
+    seed: number | null;
+}
+
+const SAMPLING_FIELDS = [
+    'temperature', 'top_p', 'top_k', 'min_p',
+    'frequency_penalty', 'presence_penalty', 'repetition_penalty', 'seed',
+] as const;
+
+export type SamplingKey = (typeof SAMPLING_FIELDS)[number];
+
+/** A blank sampler draft: every field is the provider's to decide. */
+export function emptySampling(): ModelSamplingDraft {
+    const draft = {} as ModelSamplingDraft;
+    for (const field of SAMPLING_FIELDS) draft[field] = null;
+    return draft;
+}
+
+/** The stored overrides as a draft, so an expanded row always has something to bind. */
+export function samplingFromConfig(sampling: ProviderSampling | undefined): ModelSamplingDraft {
+    const draft = emptySampling();
+    for (const field of SAMPLING_FIELDS) {
+        const v = sampling?.[field];
+        if (typeof v === 'number' && Number.isFinite(v)) draft[field] = v;
+    }
+    return draft;
+}
+
+/**
+ * The draft as the saved payload: a blank field is left out, and an all-blank row has no `sampling`
+ * object at all. A 0 is a value somebody typed, and is sent.
+ */
+export function samplingPayload(draft: ModelSamplingDraft): ProviderSampling | undefined {
+    const out: ProviderSampling = {};
+    let any = false;
+    for (const field of SAMPLING_FIELDS) {
+        const v = draft[field];
+        if (typeof v === 'number' && Number.isFinite(v)) {
+            out[field] = v;
+            any = true;
+        }
+    }
+    return any ? out : undefined;
+}
+
 /** A model row of a provider draft. */
 export interface ModelEntry {
     name: string;
@@ -16,6 +71,8 @@ export interface ModelEntry {
     cache_read_price?: number | null;
     cache_write_price?: number | null;
     power_consumption_w?: number | null;
+    // Sampler overrides — null = send nothing for that parameter
+    sampling: ModelSamplingDraft;
 }
 
 /** A provider row of the Settings draft list. */

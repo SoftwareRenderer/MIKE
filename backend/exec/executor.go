@@ -141,13 +141,14 @@ func (te *TaskExecutor) resumeProvenance(taskID string) bool {
 	return err == nil && task.Autostarted
 }
 
-// newLlamaClient creates a LlamaClient with the provider request adapter attached and that
-// provider's ceiling for a quiet stream. silence may be nil: a utility call has nobody watching it,
-// but it reaches the same endpoint, so the same ceiling applies to it.
+// newLlamaClient creates a LlamaClient with the provider request adapter attached, that provider's
+// ceiling for a quiet stream, and that model's sampler overrides. Resolving the overrides here, and
+// not at a call site, is what makes a utility call sample the way the turn that asked for it does.
 func (te *TaskExecutor) newLlamaClient(serverURL, modelName, reasoningEffort, apiKey string, silence *streamSilenceWatcher) *llama.LlamaClient {
 	client := llama.NewLlamaClient(serverURL, modelName, reasoningEffort, apiKey)
 	client.SetAdapter(te.llmAdapter)
 	client.SetSilencePolicy(te.configStore.GetProviderStreamIdle(serverURL), silence.onWait())
+	client.SetSampling(te.configStore.GetModelSampling(modelName, serverURL))
 	return client
 }
 

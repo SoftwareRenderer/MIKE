@@ -317,6 +317,21 @@ export interface KeyboardShortcuts {
     hide_hints?: boolean;
 }
 
+/**
+ * Sampler overrides a model row carries. A blank field is absent here and on the wire, so the
+ * provider keeps its own value; a 0 is a value somebody typed, and is sent.
+ */
+export interface ProviderSampling {
+    temperature?: number;
+    top_p?: number;
+    top_k?: number;
+    min_p?: number;
+    frequency_penalty?: number;
+    presence_penalty?: number;
+    repetition_penalty?: number;
+    seed?: number;
+}
+
 export interface ProviderModel {
     name: string;
     reasoning_effort?: string; // known level or a custom value passed through verbatim to the server
@@ -326,6 +341,7 @@ export interface ProviderModel {
     cache_read_price?: number;
     cache_write_price?: number;
     power_consumption_w?: number;
+    sampling?: ProviderSampling;
 }
 
 /**

@@ -150,16 +150,30 @@ type KeyboardShortcuts struct {
 	HideHints *bool `json:"hide_hints,omitempty"`
 }
 
+// ModelSampling holds a model's sampler overrides. A nil field is left out of the request body, so
+// the provider samples its own way; the bounds on a typed value are judged where the row is saved.
+type ModelSampling struct {
+	Temperature       *float64 `json:"temperature,omitempty"`
+	TopP              *float64 `json:"top_p,omitempty"`
+	TopK              *int     `json:"top_k,omitempty"`
+	MinP              *float64 `json:"min_p,omitempty"`
+	FrequencyPenalty  *float64 `json:"frequency_penalty,omitempty"`
+	PresencePenalty   *float64 `json:"presence_penalty,omitempty"`
+	RepetitionPenalty *float64 `json:"repetition_penalty,omitempty"`
+	Seed              *int     `json:"seed,omitempty"`
+}
+
 // ModelConfig represents a model with its per-model settings.
 type ModelConfig struct {
-	Name              string   `json:"name"`
-	ReasoningEffort   string   `json:"reasoning_effort"`
-	ContextWindow     *int     `json:"context_window,omitempty"`      // nil if not reported by LLM
-	InputPrice        *float64 `json:"input_price,omitempty"`         // USD per 1M input (non-cached) tokens; nil = inherit provider default
-	OutputPrice       *float64 `json:"output_price,omitempty"`        // USD per 1M output tokens; nil = inherit provider default
-	CacheReadPrice    *float64 `json:"cache_read_price,omitempty"`    // USD per 1M cache-read tokens; nil = inherit provider default
-	CacheWritePrice   *float64 `json:"cache_write_price,omitempty"`   // USD per 1M cache-write tokens; nil = inherit provider default
-	PowerConsumptionW *float64 `json:"power_consumption_w,omitempty"` // Watts override; nil = inherit provider default
+	Name              string         `json:"name"`
+	ReasoningEffort   string         `json:"reasoning_effort"`
+	ContextWindow     *int           `json:"context_window,omitempty"`      // nil if not reported by LLM
+	InputPrice        *float64       `json:"input_price,omitempty"`         // USD per 1M input (non-cached) tokens; nil = inherit provider default
+	OutputPrice       *float64       `json:"output_price,omitempty"`        // USD per 1M output tokens; nil = inherit provider default
+	CacheReadPrice    *float64       `json:"cache_read_price,omitempty"`    // USD per 1M cache-read tokens; nil = inherit provider default
+	CacheWritePrice   *float64       `json:"cache_write_price,omitempty"`   // USD per 1M cache-write tokens; nil = inherit provider default
+	PowerConsumptionW *float64       `json:"power_consumption_w,omitempty"` // Watts override; nil = inherit provider default
+	Sampling          *ModelSampling `json:"sampling,omitempty"`            // nil = the model sends no sampler override at all
 }
 
 // ProviderKind distinguishes between standard LLM providers and coding agents.

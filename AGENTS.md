@@ -591,7 +591,7 @@ deliberately omits.
 | `docs/subtask-outline.md` | subtask row order and shape, the wave rule, the row's two lines, the row badge rule |
 | `docs/link-rows.md` | project-row/task-card markup, click routing, known limitation |
 | `docs/reconnection.md` | WS reconnect/offline queue mechanism |
-| `docs/llm-streaming.md` | provider silence and what measures it, the per-provider ceiling, retrying a quiet provider, keeping the socket honest |
+| `docs/llm-streaming.md` | provider silence and what measures it, the per-provider ceiling, retrying a quiet provider, keeping the socket honest, the model's sampler overrides and what a blank one sends |
 | `docs/frontend-updates.md` | stale-asset detection, the build-id tag contract, prompt-mode worker, the day gate |
 | `docs/auto-update.md` | the release manifest, the opt-in ladder, the install shapes that refuse, staging and restart |
 | `docs/adding-a-preference.md` | the recipes for a shortcut or a `*bool` preference |

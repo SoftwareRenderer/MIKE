@@ -2,7 +2,7 @@
     import { reasoningEffortOptions } from '$lib/types';
     import { t } from '$lib/i18n';
     import EmptyState from '../EmptyState.svelte';
-    import type { ModelEntry } from './drafts';
+    import type { ModelEntry, SamplingKey } from './drafts';
 
     let { models, onAdd, onRemove, currencySymbol = '$', index = 0, onDirty }: {
         models: ModelEntry[];
@@ -83,6 +83,25 @@
         if (v.trim() === '') return null;
         const n = parseInt(v, 10);
         return Number.isNaN(n) ? null : n;
+    }
+
+    // The sampler rows, in the order Settings shows them: the bounds the browser steps within, and
+    // the same range the save refuses a value outside (backend/config/sampling.go). Built per call so
+    // the labels follow the active locale.
+    function samplerFields(): Array<{
+        key: SamplingKey; label: string; hint: string;
+        min: string; max: string; step: string; whole: boolean;
+    }> {
+        return [
+            { key: 'temperature', label: t('settings.sampling.temperature'), hint: t('settings.sampling.temperatureHint'), min: '0', max: '2', step: 'any', whole: false },
+            { key: 'top_p', label: t('settings.sampling.topP'), hint: t('settings.sampling.topPHint'), min: '0', max: '1', step: 'any', whole: false },
+            { key: 'top_k', label: t('settings.sampling.topK'), hint: t('settings.sampling.topKHint'), min: '0', max: '', step: '1', whole: true },
+            { key: 'min_p', label: t('settings.sampling.minP'), hint: t('settings.sampling.minPHint'), min: '0', max: '1', step: 'any', whole: false },
+            { key: 'frequency_penalty', label: t('settings.sampling.frequencyPenalty'), hint: t('settings.sampling.frequencyPenaltyHint'), min: '-2', max: '2', step: 'any', whole: false },
+            { key: 'presence_penalty', label: t('settings.sampling.presencePenalty'), hint: t('settings.sampling.presencePenaltyHint'), min: '-2', max: '2', step: 'any', whole: false },
+            { key: 'repetition_penalty', label: t('settings.sampling.repetitionPenalty'), hint: t('settings.sampling.repetitionPenaltyHint'), min: '0', max: '2', step: 'any', whole: false },
+            { key: 'seed', label: t('settings.sampling.seed'), hint: t('settings.sampling.seedHint'), min: '0', max: '', step: '1', whole: true },
+        ];
     }
 </script>
 
@@ -220,6 +239,18 @@
                             <div class="mp-field mp-note-field">
                                 <span class="mp-note">{t('settings.models.note')}</span>
                             </div>
+                        </div>
+                        <div class="model-details-header sampling-header">
+                            <span class="model-details-title">{t('settings.sampling.title')}</span>
+                            <span class="model-details-hint">{t('settings.sampling.hint')}</span>
+                        </div>
+                        <div class="model-sampling-grid">
+                            {#each samplerFields() as field}
+                                <div class="mp-field">
+                                    <label for={`model-sampler-${field.key}-${index}-${mi}`}>{field.label}</label>
+                                    <input id={`model-sampler-${field.key}-${index}-${mi}`} type="number" inputmode={field.whole ? 'numeric' : 'decimal'} min={field.min} max={field.max || undefined} step={field.step} class="mp-input" placeholder={t('settings.models.defaultPlaceholder')} value={model.sampling[field.key] ?? ''} oninput={(e) => { model.sampling[field.key] = field.whole ? parseIntOrNull((e.target as HTMLInputElement).value) : parseFloatOrNull((e.target as HTMLInputElement).value); onDirty?.(); }} title={field.hint} />
+                                </div>
+                            {/each}
                         </div>
                     </div>
                 {/if}
@@ -490,15 +521,25 @@
         font-size: var(--text-2xs);
         color: var(--color-text-tertiary);
     }
-    .model-price-grid {
+    .model-price-grid,
+    .model-sampling-grid {
         display: grid;
-        grid-template-columns: repeat(5, 1fr);
         gap: 6px;
         align-items: end;
     }
+    .model-price-grid {
+        grid-template-columns: repeat(5, 1fr);
+    }
+    .model-sampling-grid {
+        grid-template-columns: repeat(4, 1fr);
+    }
+    .sampling-header {
+        margin-top: 10px;
+    }
 
     @media (max-width: 600px) {
-        .model-price-grid {
+        .model-price-grid,
+        .model-sampling-grid {
             grid-template-columns: repeat(2, 1fr);
         }
     }

@@ -111,6 +111,28 @@ func applyReasoningParams(reqBody map[string]any, effort string) {
 	}
 }
 
+// applySamplingParams writes a model's sampler overrides into the request body, and only those: a
+// nil field is left out so the provider keeps its own value, and a zero (temperature 0) is typed.
+func applySamplingParams(reqBody map[string]any, s *types.ModelSampling) {
+	if s == nil {
+		return
+	}
+	putNumber(reqBody, "temperature", s.Temperature)
+	putNumber(reqBody, "top_p", s.TopP)
+	putNumber(reqBody, "top_k", s.TopK)
+	putNumber(reqBody, "min_p", s.MinP)
+	putNumber(reqBody, "frequency_penalty", s.FrequencyPenalty)
+	putNumber(reqBody, "presence_penalty", s.PresencePenalty)
+	putNumber(reqBody, "repetition_penalty", s.RepetitionPenalty)
+	putNumber(reqBody, "seed", s.Seed)
+}
+
+func putNumber[T float64 | int](reqBody map[string]any, key string, v *T) {
+	if v != nil {
+		reqBody[key] = *v
+	}
+}
+
 // Silence phases of an open stream. A provider that answered without sending a token is in a
 // different state from one that streamed tokens and stopped: the first is usually prompt
 // processing, the second is usually output the provider is holding back.
@@ -154,12 +176,19 @@ type LlamaClient struct {
 	reasoningEffort string
 	apiKey          string
 	httpClient      *http.Client
-	ceiling         time.Duration   // 0: silence alone never ends a stream
-	onWait          SilenceCallback // nil: silence is not reported
-	noticeFirstTok  time.Duration   // 0 means streamNoticeFirstToken
-	noticeMidResp   time.Duration   // 0 means streamNoticeMidResponse
-	waitTick        time.Duration   // 0 means streamWaitTick
+	sampling        *types.ModelSampling // the model's sampler overrides; nil sends none of them
+	ceiling         time.Duration        // 0: silence alone never ends a stream
+	onWait          SilenceCallback      // nil: silence is not reported
+	noticeFirstTok  time.Duration        // 0 means streamNoticeFirstToken
+	noticeMidResp   time.Duration        // 0 means streamNoticeMidResponse
+	waitTick        time.Duration        // 0 means streamWaitTick
 	adapter         *llmadapter.Adapter
+}
+
+// SetSampling attaches a model's sampler overrides. Nil keeps every one of them out of the request
+// body, so a model whose fields were left blank is sampled the provider's way.
+func (c *LlamaClient) SetSampling(s *types.ModelSampling) {
+	c.sampling = s
 }
 
 // SetSilencePolicy decides what a quiet stream costs. onWait hears every second of silence past
@@ -370,6 +399,7 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 		reqBody["tool_choice"] = "none"
 	}
 	applyReasoningParams(reqBody, c.reasoningEffort)
+	applySamplingParams(reqBody, c.sampling)
 	adapterHeaders := c.applyAdapter(reqBody)
 
 	data, err := json.Marshal(reqBody)
@@ -596,6 +626,7 @@ func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatM
 		reqBody["max_tokens"] = maxTokens
 	}
 	applyReasoningParams(reqBody, c.reasoningEffort)
+	applySamplingParams(reqBody, c.sampling)
 	adapterHeaders := c.applyAdapter(reqBody)
 
 	data, err := json.Marshal(reqBody)

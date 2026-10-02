@@ -1,4 +1,4 @@
-# Talking to the model: silence, waits and ceilings
+# Talking to the model: what is sent, what is waited for
 
 One rule owns everything here: **a long wait is not a fault.** A completion is finished by its last token and not
 by the clock, so nothing in the LLM path ends a call because the provider took a while. What the path does instead
@@ -77,6 +77,27 @@ unusual: `KeepAliveConfig{Enable: true, Idle: 30s, Interval: 15s, Count: 3}` not
 `DialContext` — which is why this transport is built, not cloned-and-tweaked, and why `sharedTransport` (extension
 egress, update checks) keeps its own defaults.
 
+## Sampler overrides: a blank field sends nothing
+
+**A model row's `sampling` object (`types.ModelSampling` in `backend/types/domain.go`) is the only source
+of a sampler field in a request body, and a field that is nil is absent from it.**
+
+Settings → Providers → a model row holds `temperature`, `top_p`, `top_k`, `min_p`, `frequency_penalty`,
+`presence_penalty`, `repetition_penalty` and `seed`. `applySamplingParams` in `backend/llama/client.go`
+writes the fields that are set and touches nothing else, so an empty field leaves the provider's own
+sampling in charge. A `0` is a typed value and is sent: greedy decoding is a decision, not a blank.
+
+The row is read once, in `newLlamaClient` through `GetModelSampling` in `backend/config/sampling.go`,
+beside the adapter and the silence ceiling. A utility call — a title, a summary, a commit label —
+samples the way the model it asks for was configured, and no call site carries the lookup. The
+overrides go in before `applyAdapter`, so an `llm` extension mapping can still rename or drop one.
+
+The range is judged where the row is saved: `validateModelSampling` refuses a value outside it before
+any config row is written. The status and sentence that answer such a refusal are
+`docs/api-contract.md → Partial updates decode into pointer fields`. Those bounds and the field hints
+in `frontend/src/lib/i18n/en.ts` (`settings.sampling.*Hint`) are the same numbers, and a change to one
+is a change to the other.
+
 ## Tests
 
 - `backend/llama/client_test.go` — ceiling ends the stream; silence before the first token is waited out; a stream
@@ -86,6 +107,11 @@ egress, update checks) keeps its own defaults.
 - `backend/exec/llm_crash_test.go`, `llm_request_rejected_test.go` — a dead transport is still `llm_connection_failed`,
   a refusal is still one call.
 - `backend/config/config_test.go` — an unset or negative `stream_idle_seconds` means no ceiling.
+- `backend/config/sampling_test.go` — a sampler bound at its edge and just outside it; a refused save
+  writes nothing.
+- `backend/llama/client_sampling_test.go` — the eight keys arrive, a blank sends none, and a mapping
+  still sees them.
+- `backend/exec/sampling_override_test.go` — a call that is not a task turn carries them too.
 - `backend/httputil/client_test.go` — the streaming client has no timeout and does not share `sharedTransport`.
 ## Checking this
 

@@ -449,10 +449,10 @@ const catalog = {
     'settings.models.ctxAria': 'Context window for {model}',
     'settings.models.effortAria': 'Reasoning effort for {model}',
     'settings.models.effortHint': 'Reasoning effort (thinking budget). Pick a known level or type a custom value; custom values are sent to the server as-is.',
-    'settings.models.collapsePricingAria': 'Collapse pricing for {model}',
-    'settings.models.expandPricingAria': 'Expand pricing for {model}',
-    'settings.models.collapsePricingTitle': 'Collapse model pricing & power',
-    'settings.models.expandPricingTitle': 'Model pricing & power',
+    'settings.models.collapsePricingAria': 'Collapse pricing & sampling for {model}',
+    'settings.models.expandPricingAria': 'Expand pricing & sampling for {model}',
+    'settings.models.collapsePricingTitle': 'Collapse model pricing, power & sampling',
+    'settings.models.expandPricingTitle': 'Model pricing, power & sampling',
     'settings.models.removeAria': 'Remove {model}',
     'settings.models.detailsTitle': 'Model Pricing & Power',
     'settings.models.detailsHint': 'Leave empty to use the provider defaults below.',
@@ -460,6 +460,27 @@ const catalog = {
     'settings.models.powerHint': 'Power draw override in watts. Empty = use provider default. Used for electricity cost estimates.',
     'settings.models.note': 'Prices are USD per 1M tokens. Cache Write replaces Input for non-cached tokens when set.',
     'settings.models.empty': 'No models added. Use "Fetch Models" or add manually.',
+
+    // ── ConfigModal/ModelList.svelte (the expanded row's sampler fields) ──
+    // Each hint carries the range the save refuses a value outside (backend/config/sampling.go).
+    'settings.sampling.title': 'Sampling Parameters',
+    'settings.sampling.hint': 'Leave a field empty to send nothing for it — the provider then samples its own way. A 0 is a value and is sent.',
+    'settings.sampling.temperature': 'Temperature',
+    'settings.sampling.temperatureHint': 'Sampling temperature, 0 to 2. Empty = not sent.',
+    'settings.sampling.topP': 'Top P',
+    'settings.sampling.topPHint': 'Nucleus sampling: greater than 0 and at most 1. Empty = not sent.',
+    'settings.sampling.topK': 'Top K',
+    'settings.sampling.topKHint': 'Candidate pool size, a whole number of 0 or more. Empty = not sent.',
+    'settings.sampling.minP': 'Min P',
+    'settings.sampling.minPHint': 'Minimum probability next to the top token, 0 to 1. Empty = not sent.',
+    'settings.sampling.frequencyPenalty': 'Freq. Penalty',
+    'settings.sampling.frequencyPenaltyHint': 'Penalty scaled by how often a token has appeared, -2 to 2. Empty = not sent.',
+    'settings.sampling.presencePenalty': 'Pres. Penalty',
+    'settings.sampling.presencePenaltyHint': 'Penalty for any token already seen, -2 to 2. Empty = not sent.',
+    'settings.sampling.repetitionPenalty': 'Repetition',
+    'settings.sampling.repetitionPenaltyHint': 'Multiplier penalising repeated tokens: greater than 0 and at most 2. Empty = not sent.',
+    'settings.sampling.seed': 'Seed',
+    'settings.sampling.seedHint': 'A whole number of 0 or more, for reproducible sampling. Empty = not sent.',
 
     // ── ConfigModal/SessionsSection.svelte ──
     // Destructive copy is one key per decision the user makes; the row's own revoke name

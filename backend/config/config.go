@@ -395,6 +395,10 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 	c.Providers = filterPersistedProviders(c.Providers)
 	// Assign stable IDs to providers that don't have one yet (new providers).
 	assignProviderIDs(c.Providers)
+	// Refused before any row is written, so a rejected save leaves the config as it was.
+	if err := validateModelSampling(c.Providers); err != nil {
+		return err
+	}
 	storedKeys, err := cs.storedKeysByProviderID()
 	if err != nil {
 		return err
@@ -777,6 +781,11 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 			// that reads as one and not a fault.
 			if errors.Is(err, ErrMCPLocked) {
 				httputil.JSONError(w, http.StatusForbidden, err.Error())
+				return
+			}
+			// Whoever typed the value can correct it, so name the field rather than log a fault.
+			if errors.Is(err, ErrInvalidConfig) {
+				httputil.JSONError(w, http.StatusBadRequest, err.Error())
 				return
 			}
 			httputil.JSONError(w, http.StatusInternalServerError, "failed to update config")
