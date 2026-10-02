@@ -465,8 +465,11 @@ type TrackedDiffFile struct {
 // legacy monolithic unified diff string.
 type TaskDiff struct {
 	Diff          string                      `json:"diff"`
-	CommittedDiff string                      `json:"-"` // raw diff of committed changes since baseRef (for hash computation)
+	CommittedDiff string                      `json:"-"` // committed half of a working-tree comparison: baseRef..HEAD
 	Tracked       map[string]*TrackedDiffFile `json:"-"` // per-file parsed diffs (not JSON-serialized in legacy format)
+	// Set when the diff compares two named refs rather than the working tree. Such a diff's patch is
+	// already the committed work.
+	ComparesRefs bool `json:"-"`
 	// ParsedFiles is the diff as an ordered array, present only when the caller asked for ?parsed=1, so
 	// the browser does not run a second grammar over the same patch text. Not named `files`: this route's
 	// manifest response already uses that key for a keyed map of hashes.
@@ -477,6 +480,25 @@ type TaskDiff struct {
 	OriginalFileStats map[string]FileChangeStats `json:"original_file_stats,omitempty"`
 	StagedHash        string                     `json:"-"` // SHA-256 of staged state; changes diff hash when files are staged/unstaged
 	StagedPaths       []string                   `json:"-"` // paths currently staged in the index
+}
+
+// CommittedHalf is the patch that counts as committed work: the baseRef..HEAD overlay for a working-tree
+// diff, and the comparison itself for a ref comparison. One answer keeps every task_diff_stats producer on
+// one hash for one diff.
+func (d *TaskDiff) CommittedHalf() string {
+	if d.ComparesRefs {
+		return d.Diff
+	}
+	return d.CommittedDiff
+}
+
+// HasCommittedWork is the work past the baseline that is already committed — what the stats frame reports
+// as has_committed_changes.
+func (d *TaskDiff) HasCommittedWork() bool { return d.CommittedHalf() != "" }
+
+// HasChanges reports that the comparison holds anything to show.
+func (d *TaskDiff) HasChanges() bool {
+	return d.Diff != "" || d.CommittedHalf() != "" || len(d.Untracked) > 0
 }
 
 // FileChangeStats holds the original added/removed line counts for a file.

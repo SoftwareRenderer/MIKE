@@ -239,7 +239,6 @@ export async function getTaskDiff(projectId: string, taskId: string, options?: T
     if (options?.headRef) params.set('head', options.headRef);
     if (options?.baseRef) params.set('base', options.baseRef);
     if (options?.full) params.set('full', '1');
-    if (options?.checkpointIndex != null) params.set('checkpointIdx', String(options.checkpointIndex));
     if (options?.parsed) params.set('parsed', '1');
     const url = params.toString() ? `${API_BASE}/projects/${projectId}/tasks/${taskId}/diff?${params}` : `${API_BASE}/projects/${projectId}/tasks/${taskId}/diff`;
     // Cacheability is the ref shape, never the parsed flag: the diff panel sends parsed=1 on every load.

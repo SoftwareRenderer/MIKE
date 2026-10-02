@@ -70,17 +70,12 @@ func MaterializeDoneTaskDiff(st *store.Store, wm *git.WorktreeManager, projectID
 	if err != nil {
 		return nil, err
 	}
-	if diffResult.Diff == "" && len(diffResult.Untracked) == 0 && diffResult.CommittedDiff == "" {
+	if !diffResult.HasChanges() {
 		// Nothing to cache — mirrors the legacy "no frame for empty diff" behavior.
 		return &DoneTaskDiff{HasChanges: false}, nil
 	}
 
-	hash := ComputeDiffHash(diffResult.Diff, diffResult.CommittedDiff, diffResult.Untracked, diffResult.StagedHash)
-	if diffResult.CommittedDiff == "" && diffResult.Diff != "" {
-		// Repo-fallback path has no worktree HEAD overlay; the whole canonical
-		// diff is committed work, so use it for both diff and committedDiff.
-		hash = ComputeDiffHash(diffResult.Diff, diffResult.Diff, nil, "")
-	}
+	hash := DiffHash(diffResult)
 	stats := ComputeDiffStats(diffResult)
 	filesN := stats.VisibleTracked + stats.VisibleUntracked
 
@@ -94,7 +89,7 @@ func MaterializeDoneTaskDiff(st *store.Store, wm *git.WorktreeManager, projectID
 		"tracked_del":           stats.TrackedDel,
 		"file_hashes":           filterInternalPathsFromHashes(diffResult.GetPerFileHashes()),
 		"staged_paths":          filterInternalPathsFromList(diffResult.StagedPaths),
-		"has_committed_changes": diffResult.CommittedDiff != "" || diffResult.Diff != "",
+		"has_committed_changes": diffResult.HasCommittedWork(),
 	}
 	statsJSON, err := json.Marshal(statsObj)
 	if err != nil {

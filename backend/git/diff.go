@@ -38,7 +38,8 @@ func (wm *WorktreeManager) commitToCommitDiff(dir, baseRef, headRef string) (dif
 // GetTaskDiff returns the git diff for a task's worktree.
 // baseRef is the branch/ref to diff against (e.g., "master"). If empty, uses HEAD.
 // headRef is an optional second ref for comparing two commits (git diff baseRef..headRef).
-// When headRef is set, untracked files are omitted (commit-to-commit diff).
+// When headRef is set the answer is those two trees and nothing else: no untracked files, and no
+// committed half taken from HEAD.
 // If skipTruncate is true, the diff is not truncated (used for ?full=1 API requests).
 func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTruncate ...bool) (*TaskDiff, error) {
 	worktreePath, err := wm.taskWorktree(taskID)
@@ -184,8 +185,10 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 	if tracked == nil {
 		tracked = make(map[string]*TrackedDiffFile)
 	}
+	// The committed half belongs to the working-tree comparison, where HEAD is one of the two trees. A ref
+	// comparison already names both trees, so merging HEAD in lists work done after the head ref.
 	var committedDiff string
-	if baseRef != "" {
+	if baseRef != "" && headRef == "" {
 		committedOut, err := Run(worktreePath, "diff", fmt.Sprintf("%s..HEAD", baseRef))
 		if err == nil && committedOut != "" {
 			committedDiff = committedOut
@@ -224,6 +227,7 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 	return &TaskDiff{
 		Diff:              diffOut,
 		CommittedDiff:     committedDiff,
+		ComparesRefs:      headRef != "",
 		Tracked:           tracked,
 		Untracked:         untracked,
 		ShortStat:         shortStat,
@@ -726,6 +730,7 @@ func (wm *WorktreeManager) TaskDiffFromRepo(repoPath, baseRef, headRef string, s
 	}
 	return &TaskDiff{
 		Diff:              diffOut,
+		ComparesRefs:      true,
 		Tracked:           tracked,
 		Untracked:         []UntrackedFile{},
 		ShortStat:         shortStat,

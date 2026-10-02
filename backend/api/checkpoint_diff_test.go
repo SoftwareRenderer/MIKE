@@ -13,6 +13,119 @@ import (
 	"mike/backend/types"
 )
 
+// A checkpoint taken before a commit must not show what that commit brought in: the panel compares two
+// trees, and HEAD is not one of them.
+func TestTaskDiffAtCheckpointExcludesWorkCommittedLater(t *testing.T) {
+	h, s, wm, worktreesDir := newTestGitHandler(t)
+
+	projPath := t.TempDir()
+	initGitRepo(t, projPath)
+	proj := &types.Project{ID: "ckpt-later-proj", Name: "ckpt-later-proj", Path: projPath}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatal(err)
+	}
+	task := &types.Task{ID: "ckpt-later-task", ProjectID: proj.ID, Title: "checkpoint order",
+		Status: types.StatusInProgress, Branch: "main"}
+	if err := s.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
+	wtPath := filepath.Join(worktreesDir, proj.ID, task.ID)
+	createWorktreeAt(t, projPath, wtPath, "main")
+	base := strings.TrimSpace(mustOut(t, projPath, "git", "rev-parse", "HEAD"))
+	task.BaseCommit = base
+	if err := s.UpdateTask(task); err != nil {
+		t.Fatal(err)
+	}
+
+	mustRun(t, wtPath, "bash", "-c", "echo early > early.txt")
+	mustRun(t, wtPath, "git", "add", "-A")
+	snapshot := strings.TrimSpace(mustOut(t, wtPath, "git", "stash", "create"))
+	if snapshot == "" {
+		t.Fatal("stash create returned empty")
+	}
+	if err := wm.PinTaskSnapshot(task.ID, "asst-1", snapshot); err != nil {
+		t.Fatalf("pin snapshot: %v", err)
+	}
+
+	// Work the checkpoint never saw, then committed: HEAD now holds it.
+	mustRun(t, wtPath, "bash", "-c", "echo late > late.txt")
+	mustRun(t, wtPath, "git", "add", "-A")
+	mustRun(t, wtPath, "git", "commit", "-m", "later work")
+
+	mux := newTestGitMux(h)
+	rr := doRequest(t, mux, "GET", "/api/projects/"+proj.ID+"/tasks/"+task.ID+"/diff?head="+snapshot+"&parsed=1")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "early.txt") {
+		t.Errorf("checkpoint diff lost the file it captured\n%s", body)
+	}
+	if strings.Contains(body, "late.txt") {
+		t.Errorf("checkpoint diff lists a file committed after it\n%s", body)
+	}
+}
+
+// A checkpoint belongs to the thread that took it: its diff measures from the fork point, the baseline the
+// Changes panel, the commit list and the card stats use.
+func TestTaskDiffAtCheckpointUsesTheForkBaseline(t *testing.T) {
+	h, s, wm, worktreesDir := newTestGitHandler(t)
+
+	projPath := t.TempDir()
+	initGitRepo(t, projPath)
+	proj := &types.Project{ID: "ckpt-fork-proj", Name: "ckpt-fork-proj", Path: projPath}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatal(err)
+	}
+	task := &types.Task{ID: "ckpt-fork-task", ProjectID: proj.ID, Title: "fork checkpoint",
+		Status: types.StatusInProgress, Branch: "main"}
+	if err := s.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
+	wtPath := filepath.Join(worktreesDir, proj.ID, task.ID)
+	createWorktreeAt(t, projPath, wtPath, "main")
+	task.BaseCommit = strings.TrimSpace(mustOut(t, projPath, "git", "rev-parse", "HEAD"))
+
+	// Work the parent thread committed, then a thread forked off that state.
+	mustRun(t, wtPath, "bash", "-c", "echo parent > parent.txt")
+	mustRun(t, wtPath, "git", "add", "-A")
+	mustRun(t, wtPath, "git", "commit", "-m", "parent thread work")
+	// The thread forks at where the task branch stands now: main lives in the task worktree, so name the
+	// branch rather than the project checkout's HEAD.
+	mustRun(t, projPath, "git", "branch", "thread/forked", "main")
+	if err := s.CreateThread(&types.TaskThread{ID: "ckpt-fork-thread", TaskID: task.ID,
+		Name: "forked", IsActive: true, GitBranch: "thread/forked"}); err != nil {
+		t.Fatal(err)
+	}
+	task.CurrentThreadID = "ckpt-fork-thread"
+	if err := s.UpdateTask(task); err != nil {
+		t.Fatal(err)
+	}
+
+	mustRun(t, wtPath, "bash", "-c", "echo mine > mine.txt")
+	mustRun(t, wtPath, "git", "add", "-A")
+	snapshot := strings.TrimSpace(mustOut(t, wtPath, "git", "stash", "create"))
+	if snapshot == "" {
+		t.Fatal("stash create returned empty")
+	}
+	if err := wm.PinTaskSnapshot(task.ID, "asst-1", snapshot); err != nil {
+		t.Fatalf("pin snapshot: %v", err)
+	}
+
+	mux := newTestGitMux(h)
+	rr := doRequest(t, mux, "GET", "/api/projects/"+proj.ID+"/tasks/"+task.ID+"/diff?head="+snapshot+"&parsed=1")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "mine.txt") {
+		t.Errorf("the checkpoint's own work is missing\n%s", body)
+	}
+	if strings.Contains(body, "parent.txt") {
+		t.Errorf("a forked thread's checkpoint lists the parent thread's pre-fork work\n%s", body)
+	}
+}
+
 // mustOut runs a command and returns its stdout.
 func mustOut(t *testing.T, dir string, args ...string) string {
 	t.Helper()
@@ -63,7 +176,7 @@ func TestTaskDiffAtCheckpointShowsEveryCapturedFile(t *testing.T) {
 	}
 
 	mux := newTestGitMux(h)
-	rr := doRequest(t, mux, "GET", "/api/projects/"+proj.ID+"/tasks/"+task.ID+"/diff?head="+snapshot+"&checkpointIdx=0")
+	rr := doRequest(t, mux, "GET", "/api/projects/"+proj.ID+"/tasks/"+task.ID+"/diff?head="+snapshot)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}

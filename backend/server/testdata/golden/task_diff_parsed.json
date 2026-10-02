@@ -13,23 +13,6 @@
   "parsed_files": [
     {
       "added": 2,
-      "committedRows": [
-        {
-          "lineNumber": 1,
-          "text": "# base",
-          "variant": "context"
-        },
-        {
-          "lineNumber": 2,
-          "text": "",
-          "variant": "added"
-        },
-        {
-          "lineNumber": 3,
-          "text": "changed by the golden task",
-          "variant": "added"
-        }
-      ],
       "path": "README.md",
       "removed": 0,
       "rows": [
@@ -52,28 +35,6 @@
     },
     {
       "added": 4,
-      "committedRows": [
-        {
-          "lineNumber": 1,
-          "text": "package feature",
-          "variant": "added"
-        },
-        {
-          "lineNumber": 2,
-          "text": "",
-          "variant": "added"
-        },
-        {
-          "lineNumber": 3,
-          "text": "// Answer is the change the golden diff pins.",
-          "variant": "added"
-        },
-        {
-          "lineNumber": 4,
-          "text": "const Answer = 42",
-          "variant": "added"
-        }
-      ],
       "isNew": true,
       "path": "feature.go",
       "removed": 0,

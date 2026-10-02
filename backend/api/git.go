@@ -704,14 +704,11 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fullDiff := r.URL.Query().Get("full") == "1"
-	checkpointIdxStr := r.URL.Query().Get("checkpointIdx")
-	// checkpointIdx is read as a flag only: a checkpoint diff must never come from the cached done-task
-	// snapshot.
 
 	// The canonical done-task diff (BaseCommit..BranchTip) is immutable, so it is served from the
-	// persistent snapshot instead of re-running git on every open. Custom refs, checkpoint diffs and full
-	// requests go through the live computation.
-	if task.Status == types.StatusDone && task.BranchTip != "" && customBase == "" && checkpointIdxStr == "" && !fullDiff &&
+	// persistent snapshot instead of re-running git on every open. A custom base, a head that is not the
+	// tip, and full requests go through the live computation.
+	if task.Status == types.StatusDone && task.BranchTip != "" && customBase == "" && !fullDiff &&
 		(headRef == "" || headRef == task.BranchTip) {
 		if d, err := stream.MaterializeDoneTaskDiff(h.store, h.worktreeMgr, projectID, task); err == nil && d != nil && d.HasChanges {
 			w.Header().Set("Content-Type", "application/json")
@@ -730,14 +727,11 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var baseRef string
-	if customBase != "" {
-		baseRef = customBase
-	} else if headRef != "" && task.BaseCommit != "" {
-		// BaseCommit, not the branch name: after a fast-forward merge the pointer has moved forward and
-		// the diff would come back empty. This is why the commit was captured at task start.
-		baseRef = task.BaseCommit
-	} else {
+	// Every comparison here asks TaskDiffBaseline, so a checkpoint's diff measures from the same commit as
+	// the Changes panel, the commit list and the card stats — the fork point in a forked thread. It names
+	// the pinned BaseCommit first, so a branch moved forward by a merge cannot empty the diff.
+	baseRef := customBase
+	if baseRef == "" {
 		baseRef = h.worktreeMgr.TaskDiffBaseline(task)
 	}
 
@@ -755,7 +749,7 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 		taskDiff.Untracked = []git.UntrackedFile{}
 	}
 	// Only the working-tree comparison belongs in diffCache; a ref comparison answers with its own content.
-	if headRef == "" && customBase == "" && checkpointIdxStr == "" {
+	if headRef == "" && customBase == "" {
 		h.diffCache.put(taskID, taskDiff)
 	}
 
@@ -1001,7 +995,9 @@ func (h *GitHandler) getTaskDiffFromProject(projectID string, task *types.Task, 
 		return nil, err
 	}
 
-	// A done task is diffed from the commit captured at task start; see HandleTaskDiff.
+	// A done task's canonical diff is the pinned BaseCommit..BranchTip — the body the stored snapshot
+	// serves too (stream.resolveDoneTaskBaseRef). Pinning keeps this fallback answering the same
+	// comparison the board's stats count.
 	if task.Status == types.StatusDone && task.BaseCommit != "" {
 		baseRef = task.BaseCommit
 	}

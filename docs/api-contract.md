@@ -380,6 +380,22 @@ path from the other comparison — `/diff/file` answers the worktree against the
 immutable done-task diff the reader asked for. Tests:
 `frontend/src/lib/services/__tests__/diff-cache.unit.ts`.
 
+**A ref comparison carries no committed half.** `GetTaskDiff` (`backend/git/diff.go`) attaches the
+`baseRef..HEAD` patch as each file's committed rows to the working-tree comparison only, where HEAD is one
+of the two trees being compared. A request that names a head ref already names both trees, and HEAD is a
+third thing: attaching it lists files the head ref never saw. `git.WorktreeManager.TaskDiffFromRepo`, the
+worktree-gone path, has the same rule, so a task with no worktree answers the same question. Tests:
+`backend/git/diff_committed_half_test.go`, `backend/api/checkpoint_diff_test.go`.
+
+**One diff answers one hash.** `stream.DiffHash` takes the whole `git.TaskDiff` rather than four strings, so
+no producer picks its own answer to "what counts as committed work": `git.TaskDiff.CommittedHalf` is the
+overlay for a working-tree comparison and the comparison itself for a ref comparison, and
+`has_committed_changes` comes from the same method (`HasCommittedWork`). The stored done-task snapshot
+(`backend/stream/done_snapshot.go`), the worktree watcher and the executor all build `task_diff_stats` that
+way. Two producers describing one diff with two hashes is what makes every client refetch a diff that never
+changed; a false `has_committed_changes` drops a card's mark for work that is committed but unmerged.
+Tests: `backend/stream/diff_stats_producers_test.go`.
+
 **An absent committed half stays absent.** `DiffCache.committedHalf` leaves `committedRows` out when the
 response carries none, and the committed section of `DiffViewer.svelte` tests `committedRows?.length` rather
 than truthiness. An empty array is a truthy "there is a committed half", which is what makes that section
@@ -389,11 +405,12 @@ paint "Empty file" over the rows the file holds. Tests:
 **One comparison per task in the file cache.** `GET /api/projects/{id}/tasks/{taskID}/diff/file` names a
 path and no refs, so it can answer for one comparison only: the task's worktree against HEAD at the baseline
 `git.WorktreeManager.TaskDiffBaseline` names for that task. `api.taskDiffCache` (`backend/api/git.go`) holds
-exactly that, one entry per task. A request that compares two refs — `?base=`, `?head=`, `?checkpointIdx=` —
-carries its own content and never enters the cache, and the worktree watcher's cache update skips a done task
-because for a done task it computes `BaseCommit..BranchTip`. The panel lists files from one diff and then
-fetches their rows by path, so a second comparison stored under the same task id arrives labelled with the
-stats above it: the reader sees lines the task never touched, and no request failed. Tests:
+exactly that, one entry per task. A request that compares two refs — `?base=` or `?head=`, which is how a
+checkpoint comparison arrives — carries its own content and never enters the cache. The worktree watcher's
+cache update skips a done task, because for a done task it computes `BaseCommit..BranchTip`. The
+panel lists files from one diff and then fetches their rows by path, so a second comparison stored under the
+same task id arrives labelled with the stats above it: the reader sees lines the task never touched, and no
+request failed. Tests:
 `backend/api/git_diff_identity_test.go`, `backend/stream/worktree_watcher_baseline_test.go`.
 
 ## Raw file bytes

@@ -112,7 +112,8 @@ one exception is a failed pin, which leaves the entry on purpose: it is then the
    `(*Server).checkoutThreadBranch` and the inline `thread.GitBranch` tests in `api/task.go` and
    `handler_message.go` — each with different fallbacks. The diff baseline is the one branch of the chain
    with a single home: `(*git.WorktreeManager).TaskDiffBaseline` answers it for the panel, the commit list,
-   the card stats and the watcher (`docs/git-operations.md → A task's diff has one baseline`).
+   the card stats, the watcher and a checkpoint's diff
+   (`docs/git-operations.md → A task's diff has one baseline`).
 3. **Checkpoint identity is positional.** "The checkpoint at index N" means "the Nth message with a hash"
    in message order; the durable `threads.checkpoint_commit_hash` is written at fork time and ignored by
    the readers that matter.
@@ -163,7 +164,8 @@ shape is here because building it the other way means paying twice:
 - `backend/server/fork_snapshot_test.go` also asserts that deleting a fork releases the pins its own rows
   held and leaves the parent's and Main's intact.
 - `backend/api/checkpoint_diff_test.go` — the diff at a checkpoint lists the files it captured,
-  including the binary one.
+  including the binary one, none that a later commit brought in, and none another thread committed
+  before this one forked.
 - `backend/server/thread_capture_test.go` — with git unable to write, a switch and a fork are refused and
   the work (tracked edit *and* new file) is still there, no thread changed, no stash entry appeared, no
   snapshot pinned — and once git can write again the same click works and the work comes back; a refusal

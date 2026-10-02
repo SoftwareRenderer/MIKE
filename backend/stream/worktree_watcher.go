@@ -446,11 +446,11 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID string) {
 	untrackedN := stats.VisibleUntracked
 	filesN := stats.VisibleTracked + untrackedN
 
-	hash := ComputeDiffHash(diffResult.Diff, diffResult.CommittedDiff, diffResult.Untracked, diffResult.StagedHash)
+	hash := DiffHash(diffResult)
 	if hash != "" {
 		if prevRaw, ok := ww.diffCache.Load(taskID); ok {
 			prevDiff := prevRaw.(*git.TaskDiff)
-			prevHash := ComputeDiffHash(prevDiff.Diff, prevDiff.CommittedDiff, prevDiff.Untracked, prevDiff.StagedHash)
+			prevHash := DiffHash(prevDiff)
 			if hash == prevHash {
 				return
 			}
@@ -476,7 +476,7 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID string) {
 		}
 	}
 
-	if diffResult.Diff != "" || untrackedN > 0 || diffResult.CommittedDiff != "" {
+	if diffResult.Diff != "" || untrackedN > 0 || diffResult.HasCommittedWork() {
 		ww.broadcast(DiffStatsEvent{
 			ProjectID:           projectID,
 			TaskID:              taskID,
@@ -490,7 +490,7 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID string) {
 			ChangedHashes:       changedHashes,
 			RemovedFiles:        removedFiles,
 			StagedPaths:         diffResult.StagedPaths,
-			HasCommittedChanges: diffResult.CommittedDiff != "",
+			HasCommittedChanges: diffResult.HasCommittedWork(),
 			AlreadyMerged:       stats.AlreadyMerged,
 		})
 		logging.For(logging.Watcher).With(logging.TaskID, taskID).Infof("diff changed: %s (untracked: %d files)", diffResult.ShortStat, untrackedN)
@@ -501,7 +501,7 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID string) {
 			ChangedHashes:       changedHashes,
 			RemovedFiles:        removedFiles,
 			StagedPaths:         diffResult.StagedPaths,
-			HasCommittedChanges: diffResult.CommittedDiff != "",
+			HasCommittedChanges: diffResult.HasCommittedWork(),
 			AlreadyMerged:       stats.AlreadyMerged,
 		})
 	}
@@ -518,7 +518,7 @@ func (ww *WorktreeWatcher) DiffDigest(taskID string) (hash string, staged int, o
 	if !isDiff {
 		return "", 0, false
 	}
-	return ComputeDiffHash(d.Diff, d.CommittedDiff, d.Untracked, d.StagedHash), len(d.StagedPaths), true
+	return DiffHash(d), len(d.StagedPaths), true
 }
 
 // computeDiffDelta compares new file hashes with cached previous state.

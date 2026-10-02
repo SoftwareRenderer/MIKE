@@ -666,8 +666,8 @@ func (asm *AppStreamManager) SetDiffCacheUpdate(fn func(taskID string, taskDiff 
 // BroadcastDiffStats sends compact diff stats to all clients of a project.
 //
 // Three producers write these keys: here, the per-connection initial load below, and the stored snapshot
-// in done_snapshot.go. has_committed_changes means committed-but-unmerged work in a worktree, and "this
-// diff is committed work" in a stored snapshot.
+// in done_snapshot.go. All three build them from a git.TaskDiff, so one diff answers one hash
+// (DiffHash) and one has_committed_changes (git.TaskDiff.HasCommittedWork) whichever of them spoke.
 func (asm *AppStreamManager) BroadcastDiffStats(event DiffStatsEvent) {
 	asm.sendBoardPayload(event.ProjectID, appFrame(types.WSTypeTaskDiffStats, map[string]any{
 		"task_id":               event.TaskID,
@@ -686,16 +686,18 @@ func (asm *AppStreamManager) BroadcastDiffStats(event DiffStatsEvent) {
 	}))
 }
 
-// ComputeDiffHash computes a SHA-256 hash of the diff, committed diff, untracked files, and staged state.
-func ComputeDiffHash(diff string, committedDiff string, untracked []git.UntrackedFile, stagedHash string) string {
+// DiffHash is the hash a task_diff_stats frame carries for a computed diff: the diff, its committed half,
+// the untracked files and the staged state. It takes the whole TaskDiff so no producer picks its own answer
+// to what counts as committed.
+func DiffHash(d *git.TaskDiff) string {
 	var hashInput strings.Builder
-	hashInput.WriteString(diff)
-	hashInput.WriteString("\x00committed:" + committedDiff)
-	for _, u := range untracked {
+	hashInput.WriteString(d.Diff)
+	hashInput.WriteString("\x00committed:" + d.CommittedHalf())
+	for _, u := range d.Untracked {
 		hashInput.WriteString(u.Path + strings.Join(u.Lines, "\n"))
 	}
-	if stagedHash != "" {
-		hashInput.WriteString("\x00staged:" + stagedHash)
+	if d.StagedHash != "" {
+		hashInput.WriteString("\x00staged:" + d.StagedHash)
 	}
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(hashInput.String())))
 }
@@ -1276,8 +1278,8 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 		if task.Status == types.StatusInProgress || task.Status == types.StatusReview || task.Branch != "" {
 			asm.WatchWorktree(task.ID, projectID)
 		}
-		if diffResult, err := asm.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil && (diffResult.Diff != "" || len(diffResult.Untracked) > 0 || diffResult.CommittedDiff != "") {
-			hash := ComputeDiffHash(diffResult.Diff, diffResult.CommittedDiff, diffResult.Untracked, diffResult.StagedHash)
+		if diffResult, err := asm.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil && diffResult.HasChanges() {
+			hash := DiffHash(diffResult)
 			stats := ComputeDiffStats(diffResult)
 			filesN := stats.VisibleTracked + stats.VisibleUntracked
 			// Check if task branch commits are already merged into the target branch.
@@ -1293,7 +1295,7 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 				"tracked_del":           stats.TrackedDel,
 				"file_hashes":           filterInternalPathsFromHashes(diffResult.GetPerFileHashes()),
 				"staged_paths":          filterInternalPathsFromList(diffResult.StagedPaths),
-				"has_committed_changes": diffResult.CommittedDiff != "",
+				"has_committed_changes": diffResult.HasCommittedWork(),
 				"already_merged":        stats.AlreadyMerged,
 			})
 			statsMsg, _ := json.Marshal(statsFrame)

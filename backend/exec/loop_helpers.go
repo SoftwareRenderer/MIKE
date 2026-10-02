@@ -339,7 +339,7 @@ func (te *TaskExecutor) checkAndBroadcastDiff(projectID, taskID string, task *ty
 	if err != nil || (diffResult.Diff == "" && len(diffResult.Untracked) == 0) {
 		return
 	}
-	hash := stream.ComputeDiffHash(diffResult.Diff, diffResult.CommittedDiff, diffResult.Untracked, diffResult.StagedHash)
+	hash := stream.DiffHash(diffResult)
 	// Skip if hash unchanged — fsnotify already broadcast this state
 	if hash == state.lastDiffHash {
 		return
@@ -366,7 +366,7 @@ func (te *TaskExecutor) checkAndBroadcastDiff(projectID, taskID string, task *ty
 		TrackedDel:          stats.TrackedDel,
 		ChangedHashes:       fileHashes,
 		StagedPaths:         diffResult.StagedPaths,
-		HasCommittedChanges: diffResult.CommittedDiff != "",
+		HasCommittedChanges: diffResult.HasCommittedWork(),
 		AlreadyMerged:       stats.AlreadyMerged,
 	})
 }
@@ -396,7 +396,7 @@ func (te *TaskExecutor) computeTaskDiffStats(projectID, taskID string) *stream.D
 	if err != nil {
 		return nil
 	}
-	if diffResult.Diff == "" && len(diffResult.Untracked) == 0 && diffResult.CommittedDiff == "" {
+	if !diffResult.HasChanges() {
 		return nil
 	}
 	stats := stream.ComputeDiffStats(diffResult)
@@ -407,7 +407,7 @@ func (te *TaskExecutor) computeTaskDiffStats(projectID, taskID string) *stream.D
 	return &stream.DiffStatsEvent{
 		ProjectID:           projectID,
 		TaskID:              taskID,
-		DiffHash:            stream.ComputeDiffHash(diffResult.Diff, diffResult.CommittedDiff, diffResult.Untracked, diffResult.StagedHash),
+		DiffHash:            stream.DiffHash(diffResult),
 		ShortStat:           diffResult.ShortStat,
 		FilesN:              stats.VisibleTracked + stats.VisibleUntracked,
 		UntrackedN:          stats.VisibleUntracked,
@@ -416,7 +416,7 @@ func (te *TaskExecutor) computeTaskDiffStats(projectID, taskID string) *stream.D
 		TrackedDel:          stats.TrackedDel,
 		ChangedHashes:       diffResult.GetPerFileHashes(),
 		StagedPaths:         diffResult.StagedPaths,
-		HasCommittedChanges: diffResult.CommittedDiff != "",
+		HasCommittedChanges: diffResult.HasCommittedWork(),
 		AlreadyMerged:       stats.AlreadyMerged,
 	}
 }

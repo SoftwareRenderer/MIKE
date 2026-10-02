@@ -185,15 +185,22 @@ thread, and returns one string. The chain is the commit pinned in `BaseCommit` a
 the divergence point when that ref resolves to nothing; then the merge-base with the thread's branch when the
 thread was forked off the task branch. No caller composes those steps, and none takes a `baseRef` argument
 for a task diff — `GetDiffManifest(task)` and `WorktreeWatcher.Watch(taskID, projectID)` resolve it at
-compute time, because both outlive the moment they were told about the task.
+compute time, because both outlive the moment they were told about the task. A request naming a head ref — a
+checkpoint's diff — asks the same method; only a caller's own `?base=` overrides it.
 
 A baseline chosen somewhere else is not an error anywhere: it is a diff that shows commits the task never
 made, under the stats of the comparison the panel actually ran. Two facts make that easy to reach. `BaseRef`
 is a branch, and merges move it. A fork moves the baseline again, mid-session, while a watch is live.
 
+The one exception is a done task's canonical diff, which `stream.resolveDoneTaskBaseRef` pins to `BaseCommit`
+by contract. That comparison is immutable and backs the stored snapshot and the board's stats, so it does not
+follow the current thread; a checkpoint in the same forked task does, because it answers a different question
+— what this thread had changed by then.
+
 Tests: `backend/git/task_diff_baseline_test.go` — pinned commit against a moved branch, a deleted base ref,
-a forked thread, a thread that *is* the task branch. `backend/api/git_diff_identity_test.go` and
-`backend/stream/worktree_watcher_baseline_test.go` hold the two routes that once got it wrong.
+a forked thread, a thread that *is* the task branch. `backend/api/git_diff_identity_test.go`,
+`backend/stream/worktree_watcher_baseline_test.go` and `backend/api/checkpoint_diff_test.go` hold the routes
+that once got it wrong.
 
 ## Client-supplied refs are validated, then fenced
 
