@@ -14,7 +14,7 @@ func TestAgentClient(t *testing.T) {
 		t.Skip("gVisor not available, skipping integration test")
 	}
 
-	dir := t.TempDir()
+	dir := taskWorktreeDir(t)
 	taskID := "test-agent-client"
 
 	_, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{})

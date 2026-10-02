@@ -80,6 +80,33 @@ create and `PUT` (400 naming the field).
   `TestTaskSandboxIsolatesWhatACapabilityGrantAssumes`, `TestBuildExtensionCreateArgs_CapabilityPosture`,
   and each builder's `…BeginWithTheSharedPreface` test, which fails the day one re-inlines the posture.
 
+### A task worktree's git pointer is pinned read-only
+
+- **No task container starts without the pin.** `sandboxruntime.WorktreeGitPointerMount` returns the
+  `-v` pair that mounts `<worktree>/.git` read-only at `<mountPath>/.git`, and `sandbox.Create` appends
+  it after the worktree's own mount. A container that cannot establish it is refused.
+- The worktree is bind-mounted `rw` and a linked worktree's `.git` is a plain file inside it, so the
+  guest can rewrite it. That file names the gitdir every later **host** git command reads, and git
+  executes configuration: `filter.<name>.clean` runs when git compares a file to the index, which is
+  what the editor's gutter marks and the diff panel ask for. No configuration key closes that hole,
+  because the config that executes is the one the pointer names — `git.ExecutionFence` holds what the
+  environment can pin instead (`docs/git-operations.md → One command constructor`).
+- **A missing pointer, or one that is not a regular file, is a refusal** rather than a mount skipped:
+  a task worktree is always a linked worktree, so a directory with no pointer is not the shape `Create`
+  was asked to sandbox.
+- **A project container gets no pin.** Its mount is the checkout itself and the terminal around it is a
+  person's own, where `git commit` writes into the repository's `.git` directory by design. `IsProjectKey`
+  is the switch.
+- `sandboxruntime.VerifyWorktreeGitPointer` is the pre-flight companion to the mount: the pointer's
+  `gitdir:` must name a directory **under** `<projectGitDir>/worktrees/` once cleaned. Text that keeps
+  the admin prefix and walks out of it with `..` names a directory git reaches after its own cleaning.
+  The check is skipped when `<projectPath>/.git` is not a directory — a project that is itself a
+  worktree or submodule names its gitdir in a file, so the expectation does not exist for it — and the
+  pin still applies there.
+- Tests: `backend/sandbox/git_pointer_test.go`, and `TestWorktreeGitPointerMountIsReadOnly`,
+  `TestWorktreeGitPointerMountRefusesWithoutAPointer`, `TestVerifyWorktreeGitPointer` in
+  `pkg/sandboxruntime/podman_args_test.go`.
+
 ### Capabilities are judged by shape, not name
 
 ## Extension sandbox mounts

@@ -134,7 +134,7 @@ func validateScpLikeCloneURL(s string, colon int) error {
 
 // CloneEnv returns the complete environment for a clone. It is Env plus the transport fence, not
 // a base to be appended to: GIT_ALLOW_PROTOCOL is enforced by git itself whatever the user's git
-// config says, and GIT_TERMINAL_PROMPT=0 plus the hook fence already come from Env.
+// config says, and GIT_TERMINAL_PROMPT=0 plus the execution fence already come from Env.
 //
 // It returns a whole environment because that is how its three callers use it (`cmd.Env =
 // git.CloneEnv()`), and a caller that assigned a bare extra list to cmd.Env would silently discard

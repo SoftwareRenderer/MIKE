@@ -20,7 +20,7 @@ import (
 func TestCreateRefusesUnsafeSandboxAdditions(t *testing.T) {
 	sm := NewSandboxManager(sandboxruntime.Boot{})
 	project := &types.Project{ID: "p-args", Name: "args-proj", Path: t.TempDir()}
-	worktree := t.TempDir()
+	worktree := taskWorktreeDir(t)
 
 	tests := []struct {
 		name    string
@@ -89,7 +89,7 @@ func TestCreateSkipsAHalfDeclaredAgentMount(t *testing.T) {
 	opts := SandboxOpts{AgentSandbox: &types.AgentSandbox{
 		Mounts: []types.SandboxMount{{HostPath: "", ContainerPath: "/root/.pi", Mode: "rw"}},
 	}}
-	if _, err := sm.Create("task-half", t.TempDir(), project, opts); err != nil &&
+	if _, err := sm.Create("task-half", taskWorktreeDir(t), project, opts); err != nil &&
 		strings.Contains(err.Error(), "agent sandbox mount") {
 		t.Errorf("an unfinished agent mount was refused as a bad mount: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestTaskSandboxIsolatesWhatACapabilityGrantAssumes(t *testing.T) {
 	// "gVisor not available".
 	sm := NewSandboxManager(sandboxruntime.Boot{})
 	project := &types.Project{ID: "p-caps", Name: "caps-proj", Path: t.TempDir()}
-	_, err := sm.Create("task-caps", t.TempDir(), project, SandboxOpts{Capabilities: []string{"--privileged"}})
+	_, err := sm.Create("task-caps", taskWorktreeDir(t), project, SandboxOpts{Capabilities: []string{"--privileged"}})
 	if err == nil {
 		t.Fatal("Create accepted an option-shaped capability")
 	}

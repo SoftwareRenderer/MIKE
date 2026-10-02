@@ -183,7 +183,7 @@ func TestStopRecordsHighWaterNotLastSample(t *testing.T) {
 	// The smallest cap that leaves room for the 64 MB below plus the sandbox's own ~23 MB and the copy
 	// the shell makes while building the string. A container is charged its cap by the memory budget, so
 	// asking for 2 GB here would cost the budget 2 GB that is never used.
-	if _, err := sm.Create(taskID, t.TempDir(), &types.Project{Name: "test-proj"}, SandboxOpts{MemoryLimit: 192}); err != nil {
+	if _, err := sm.Create(taskID, taskWorktreeDir(t), &types.Project{Name: "test-proj"}, SandboxOpts{MemoryLimit: 192}); err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
 	t.Cleanup(func() { _ = sm.Stop(taskID) })
