@@ -133,16 +133,15 @@ func TestExtensionRegistry_Lookup_ExtensionlessPath(t *testing.T) {
 	}
 
 	reg := NewExtensionRegistry(store)
-	// Extensionless paths (workspace directories, Makefile-style files) must
-	// not panic (previously panicked slicing the empty extension) and must
-	// simply not match.
+	// Extensionless paths (workspace directories, Makefile-style files) must not panic and
+	// must simply not match.
 	if cfg := reg.Lookup("/tmp/workspace"); cfg != nil {
 		t.Errorf("Lookup(\"/tmp/workspace\") = %+v, want nil", cfg)
 	}
 	if cfg := reg.Lookup("/tmp/workspace/Makefile"); cfg != nil {
 		t.Errorf("Lookup(\"/tmp/workspace/Makefile\") = %+v, want nil", cfg)
 	}
-	// Extension matching still works after the fix.
+	// Extension matching still works.
 	if cfg := reg.Lookup("/tmp/workspace/main.go"); cfg == nil || cfg.Language != "go" {
 		t.Errorf("Lookup(main.go) = %+v, want go config", cfg)
 	}

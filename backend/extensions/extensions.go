@@ -6,12 +6,12 @@
 package extensions
 
 import (
+	"cmp"
 	"encoding/json"
-	"net/url"
-	"sort"
-	"strings"
-
 	"mike/backend/types"
+	"net/url"
+	"slices"
+	"strings"
 )
 
 // ExtensionType distinguishes between different kinds of extensions.
@@ -308,7 +308,7 @@ func (c *LSPConfig) fileTypeFor(name string) *LSPFileType {
 			return &c.FileTypes[i]
 		}
 	}
-	// A file named after the language ("go") reaches its server, as under the old flat list.
+	// A file named after the language ("go") reaches its server.
 	if c.Language != "" && strings.EqualFold(baseName(name), c.Language) {
 		for i := range c.FileTypes {
 			if c.FileTypes[i].LanguageID == c.Language {
@@ -540,9 +540,7 @@ func (s *ConfigSchema) UnmarshalJSON(data []byte) error {
 			s.Properties = append(s.Properties, prop)
 		}
 		// Sort by key for deterministic order
-		sort.Slice(s.Properties, func(i, j int) bool {
-			return s.Properties[i].Key < s.Properties[j].Key
-		})
+		slices.SortFunc(s.Properties, func(a, b SchemaProp) int { return cmp.Compare(a.Key, b.Key) })
 		return nil
 	}
 

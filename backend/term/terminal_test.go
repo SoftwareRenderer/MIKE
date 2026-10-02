@@ -510,9 +510,8 @@ func TestHandleTerminal_RejectsUnknownOrTraversalTask(t *testing.T) {
 	mock := newMockSandbox(t)
 	tm := NewTerminalManager(s, cs, mock, nil, dangerZoneForTest)
 
-	// A non-existent task (including path-traversal strings) must return 404
-	// before any shell/websocket is created, so a traversal taskID cannot be
-	// used to open a shell with a cwd outside the workspace.
+	// A non-existent task (including path-traversal strings) must return 404 before any shell or
+	// websocket is created, so a traversal taskID cannot open a shell with a cwd outside the workspace.
 	for _, taskID := range []string{"../../../../etc", "no-such-task", "../other"} {
 		req := httptest.NewRequest(http.MethodGet, "/api/projects/p1/tasks/"+taskID+"/terminal", nil)
 		req.SetPathValue("projectID", "p1")
@@ -683,8 +682,8 @@ func TestTerminalShellOptsCarryTheProjectConfiguration(t *testing.T) {
 	}
 }
 
-// TestTerminalManagerClose is the regression for "shutdown leaves shells running": two real host
-// PTY sessions, and after Close both the registry and the child processes must be gone.
+// TestTerminalManagerClose: after Close both the session registry and the child processes are gone —
+// shutdown must not leave host shells running.
 func TestTerminalManagerClose(t *testing.T) {
 	dir := t.TempDir()
 	s, cs := newTestConfigStore(t)

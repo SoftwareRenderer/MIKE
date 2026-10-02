@@ -15,9 +15,8 @@ import (
 	"mike/backend/types"
 )
 
-// TestHandleEventMapsGitIndexEventToTask verifies index-dir events (which live
-// outside the worktree) map back to their task — a regression where they were
-// dropped, so stage/unstage never triggered a diff broadcast.
+// TestHandleEventMapsGitIndexEventToTask: index-dir events live outside the worktree and must still
+// map back to their task, or stage/unstage never triggers a diff broadcast.
 func TestHandleEventMapsGitIndexEventToTask(t *testing.T) {
 	gitDir := "/home/user/repo/.git/worktrees/task-abc"
 	ww := &WorktreeWatcher{
@@ -63,8 +62,7 @@ func TestHandleEventMapsGitIndexEventToTask(t *testing.T) {
 	}
 }
 
-// TestWorktreeWatcherStageBroadcast verifies stage/unstage trigger a diff
-// broadcast (index events were previously dropped, so no broadcast was sent).
+// TestWorktreeWatcherStageBroadcast: stage/unstage trigger a diff broadcast.
 func TestWorktreeWatcherStageBroadcast(t *testing.T) {
 	tmpDir := t.TempDir()
 	repoDir := filepath.Join(tmpDir, "repo")

@@ -179,8 +179,8 @@ func TestEnsureImageForProjectUnreadableDockerfile(t *testing.T) {
 	}
 }
 
-// TestEnsureImageForProjectBuildsProjectImage is the reported bug end to end: a Dockerfile-backed
-// project touched by a caller that used to assume the image existed.
+// TestEnsureImageForProjectBuildsProjectImage: a Dockerfile-backed project gets its image built before
+// anything runs in it.
 func TestEnsureImageForProjectBuildsProjectImage(t *testing.T) {
 	sm := NewSandboxManager(sandboxruntime.Boot{})
 	if !sm.IsAvailable() {

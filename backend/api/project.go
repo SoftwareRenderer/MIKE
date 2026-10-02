@@ -491,9 +491,8 @@ func (h *ProjectHandler) HandleSandboxBuild(w http.ResponseWriter, r *http.Reque
 	noCache := buildWantsNoCache(r)
 
 	// Get the project to find the Dockerfile path
-	project, err := h.store.GetProject(id)
-	if err != nil {
-		httputil.Fail(w, err, "get project", "project not found")
+	project, ok := resolveProject(w, r, h.store)
+	if !ok {
 		return
 	}
 	if project.SandboxDockerfilePath == "" {
@@ -515,7 +514,7 @@ func (h *ProjectHandler) HandleSandboxBuild(w http.ResponseWriter, r *http.Reque
 		sendLine("Building sandbox image from Dockerfile...")
 	}
 
-	err = h.sandboxMgr.BuildImageWithOptions(project.Name, project.SandboxDockerfilePath, sandbox.BuildOptions{NoCache: noCache}, func(line string) {
+	err := h.sandboxMgr.BuildImageWithOptions(project.Name, project.SandboxDockerfilePath, sandbox.BuildOptions{NoCache: noCache}, func(line string) {
 		sendLine(line)
 	})
 
@@ -543,7 +542,7 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("projectID")
 	switch r.Method {
 	case http.MethodGet:
-		h.handleGetProject(w, id)
+		h.handleGetProject(w, r)
 
 	case http.MethodPut:
 		h.handleUpdateProject(w, r, id)
@@ -558,15 +557,14 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 
 // handleGetProject answers the project row plus the ports its terminal sessions are holding open, which is
 // live state the row does not own.
-func (h *ProjectHandler) handleGetProject(w http.ResponseWriter, id string) {
-	p, err := h.store.GetProject(id)
-	if err != nil {
-		httputil.Fail(w, err, "get project", "project not found")
+func (h *ProjectHandler) handleGetProject(w http.ResponseWriter, r *http.Request) {
+	p, ok := resolveProject(w, r, h.store)
+	if !ok {
 		return
 	}
 	// Add active terminal ports from project-level terminal
 	if h.terminalMgr != nil {
-		p.ActiveTerminalPorts = h.terminalMgr.GetProjectPorts(id)
+		p.ActiveTerminalPorts = h.terminalMgr.GetProjectPorts(p.ID)
 	}
 	httputil.JSONResponse(w, http.StatusOK, p)
 }
@@ -684,9 +682,8 @@ func (h *ProjectHandler) handleUpdateProject(w http.ResponseWriter, r *http.Requ
 		h.stopProjectSandbox(id)
 	}
 	// Fetch latest state
-	p, err := h.store.GetProject(id)
-	if err != nil {
-		httputil.Fail(w, err, "get project", "project not found")
+	p, ok := resolveProject(w, r, h.store)
+	if !ok {
 		return
 	}
 	httputil.JSONResponse(w, http.StatusOK, p)

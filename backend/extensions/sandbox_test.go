@@ -364,7 +364,7 @@ func TestCreate_AcceptsValidImage(t *testing.T) {
 }
 
 // No default image: an extension that names none and ships no Dockerfile is refused by name, and no
-// container is created. It used to get ubuntu:latest - running, and holding no language server.
+// container is created.
 func TestCreate_RefusesExtensionWithNoImageAndNoDockerfile(t *testing.T) {
 	reg := NewRegistryClient()
 	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
@@ -663,7 +663,7 @@ func TestPullsMissingRemoteImage(t *testing.T) {
 
 // A missing local-build ref must not be pulled (podman would retry a registry on this machine) and must
 // not pass silently: with no Dockerfile there is nothing to rebuild, so the create would fail later with
-// a worse message. It used to return nil and let Create start a default container.
+// a worse message.
 func TestEnsureExtensionImage_LocalBuildIsNeverPulled(t *testing.T) {
 	reg := NewRegistryClient()
 	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
@@ -867,10 +867,8 @@ func hasElem(hay []string, needle string) bool {
 	return false
 }
 
-// TestBuildExtensionCreateArgs_RejectedMountsNeverReachPodman is the defence in
-// depth half of the fix: a mount that the write paths would refuse — because it
-// was persisted before validation existed, or came from a manifest — must never
-// become a container argument.
+// TestBuildExtensionCreateArgs_RejectedMountsNeverReachPodman: a mount the write paths would refuse —
+// persisted before validation existed, or from a manifest — must never become a container argument.
 func TestBuildExtensionCreateArgs_RejectedMountsNeverReachPodman(t *testing.T) {
 	allowed := t.TempDir()
 	inside := filepath.Join(allowed, "node_modules")
@@ -962,11 +960,10 @@ func TestBuildExtensionCreateArgs_RejectedMountsNeverReachPodman(t *testing.T) {
 	})
 }
 
-// TestBuildExtensionCreateArgs_CapabilityPosture is the test that stands where the
-// capability denylist used to be. Names are no longer refused, so what this pins is the
-// pairing the removal rests on: whatever a manifest asks for is added to a command line
-// that runs the container under gVisor from a full --cap-drop ALL, and only a value that
-// would arrive as an *argument* is skipped.
+// TestBuildExtensionCreateArgs_CapabilityPosture: capability names are not refused, so what this pins
+// is the pairing every grant relies on — a manifest's request lands on a command line that runs the
+// container under gVisor from a full --cap-drop ALL, and only a value that would arrive as an
+// *argument* is skipped.
 func TestBuildExtensionCreateArgs_CapabilityPosture(t *testing.T) {
 	requested := []string{
 		"CHOWN", "NET_RAW", "SYS_ADMIN", "SYS_PTRACE", "DAC_OVERRIDE",

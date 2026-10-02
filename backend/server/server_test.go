@@ -26,12 +26,9 @@ import (
 // testPassword is the password used in tests (matches LOGIN_PASSWORD env var).
 const testPassword = "test-password-1234"
 
-// testServer creates a Server with a temporary database for testing.
-// The temp directory is cleaned up by t.Cleanup.
-// testServer is the one place the suite builds a server. It receives a resolved configuration, never
-// an environment: the decisions below used to be os.Setenv calls, which meant a test could change what
-// another test's server did, and a parallel run raced on them. mutate is the way a test asks for a
-// different decision (see testServerWith).
+// testServer is the one place the suite builds a server, on a temporary database that t.Cleanup
+// removes. It receives a resolved configuration, never an environment, so one test cannot change what
+// another test's server does. mutate is how a test asks for a different decision (see testServerWith).
 func testServer(t *testing.T) *Server {
 	t.Helper()
 	return testServerWith(t, nil)

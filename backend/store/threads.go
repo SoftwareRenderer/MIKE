@@ -9,10 +9,13 @@ import (
 	"mike/backend/types"
 )
 
-// CreateThread inserts a new thread for a task.
+// CreateThread inserts a new thread for a task, minting its ID the way CreateTask does.
 func (s *Store) CreateThread(th *types.TaskThread) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if th.ID == "" {
+		th.ID = s.newThreadID()
+	}
 	_, err := s.db.Exec(
 		`INSERT INTO task_threads (`+threadColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		th.ID, th.TaskID, ptrStr(th.ParentThreadID), th.Name, B2I(th.IsActive), ptrStr(th.GitBranch), ptrStr(th.CheckpointMessageID), ptrTime(th.CheckpointMessageTime), ptrStr(th.CheckpointCommitHash), ptrStr(th.WorktreeStashHash), th.CreatedAt.Format(time.RFC3339),
@@ -39,6 +42,22 @@ func (s *Store) GetThreadsByTask(taskID string) ([]types.TaskThread, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.queryThreads(`task_id = ? ORDER BY created_at ASC`, taskID)
+}
+
+// NewThreadID mints a thread ID for a caller that must name a git branch by it before the row exists.
+func (s *Store) NewThreadID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.newThreadID()
+}
+
+// newThreadID returns a thread ID no row holds. The caller holds s.mu, which keeps another writer
+// from claiming the ID before its insert.
+func (s *Store) newThreadID() string {
+	return newID(types.GenerateThreadID, func(id string) bool {
+		_, err := s.getThreadLocked(s.db, id)
+		return err == nil
+	})
 }
 
 // GetThread retrieves a single thread by ID.
@@ -94,9 +113,7 @@ func (s *Store) deleteThreadWithMessagesLocked(db execer, threadID string) (*typ
 }
 
 // SetActiveThread makes one thread the active one for its task. Exactly one row is active when this
-// returns, and none of it lands when it fails: the middle of the old sequence — every thread deactivated,
-// the target not yet activated — was reachable by a failed second statement, and a task with no active
-// thread has no board to show.
+// returns, and none of it lands when it fails — a task with no active thread has no board to show.
 func (s *Store) SetActiveThread(threadID string) error {
 	return s.tx(func(tx *sql.Tx) error {
 		var taskID string

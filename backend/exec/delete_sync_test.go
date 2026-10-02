@@ -7,10 +7,8 @@ import (
 	"mike/backend/types"
 )
 
-// TestDeletedMessagesNotSentToLLM verifies that when messages are deleted
-// from the DB, the in-memory conversation is re-synced before the next LLM call.
-// This is a regression test for: "When chat messages are deleted, why are they
-// still being sent to the LLM?"
+// TestDeletedMessagesNotSentToLLM verifies that messages deleted from the DB leave the
+// in-memory conversation before the next LLM call.
 func TestDeletedMessagesNotSentToLLM(t *testing.T) {
 	t.Parallel()
 	te := newTestExecutor(t)
@@ -78,14 +76,10 @@ func TestDeletedMessagesNotSentToLLM(t *testing.T) {
 		t.Fatalf("expected stale in-memory to have 5 messages, got %d", len(messages))
 	}
 
-	// Simulate a new user message arriving (non-regenerate)
-	// WITHOUT the fix: the new message is appended to stale in-memory,
-	// so the LLM sees deleted messages.
-	//
-	// WITH the fix: in-memory is re-synced from DB before appending,
-	// so deleted messages are excluded.
+	// A new user message arriving (non-regenerate) is appended to a conversation re-synced
+	// from the DB, so deleted rows are already gone from it.
 
-	// Simulate the fix: re-sync from DB
+	// Re-sync from the DB
 	taskMsgs, _ = te.store.GetTaskMessages(taskID, threadID)
 	messages = buildMessagesFromDB(task, taskMsgs, "/worktree", "Delete Test", false)
 
@@ -243,7 +237,7 @@ func TestDeletedSingleMessageNotSentToLLM(t *testing.T) {
 		t.Fatalf("delete single message: %v", err)
 	}
 
-	// Re-sync from DB (the fix)
+	// Re-sync from DB
 	taskMsgs, _ := te.store.GetTaskMessages(taskID, threadID)
 	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", "Single Delete Test", false)
 

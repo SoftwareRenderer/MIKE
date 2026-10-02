@@ -10,11 +10,9 @@ import (
 	"mike/backend/types"
 )
 
-// HandleSend dedups a double submit: the same send landing twice with nothing in
-// between. It used to match the last user message however old, so answering a second
-// question with the same words dropped the answer — and flipped the task out of
-// review first, stranding it as "Pending". It now needs that message to still be the
-// thread's last row, and only flips status for a message that will run.
+// HandleSend dedups a double submit: the same send landing twice with nothing in between. The
+// match requires that message to still be the thread's last row, and only a message that will run
+// flips the status.
 
 // seedReviewTask creates an awaiting-user task (review/idle) with the given message
 // tail. Timestamps are spaced a second apart so "newest row" is unambiguous.

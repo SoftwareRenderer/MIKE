@@ -42,9 +42,8 @@ func dbBytesRaw(t *testing.T, dbPath string) []byte {
 	return buf.Bytes()
 }
 
-// dbBytes checkpoints the WAL into the main file and returns the bytes of the
-// database plus any sidecars. Used to prove a secret is not merely invisible to
-// SQL but absent from the file an attacker would actually steal.
+// dbBytes checkpoints the WAL into the main file and returns the bytes of the database plus any
+// sidecars, so a test can prove a secret is absent from the file an attacker would steal.
 func dbBytes(t *testing.T, s *Store, dbPath string) []byte {
 	t.Helper()
 	if _, err := s.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {

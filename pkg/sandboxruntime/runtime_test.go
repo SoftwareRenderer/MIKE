@@ -407,9 +407,8 @@ func TestGVisorAvailable_FalseWithoutRunsc(t *testing.T) {
 	}
 }
 
-// TestGVisorAvailable_FalseWhenVersionCheckFails covers the second gate: runsc
-// present but unusable. This is the check the extension sandbox manager used to
-// skip, so the two managers could disagree about a broken install.
+// TestGVisorAvailable_FalseWhenVersionCheckFails covers the second gate: runsc present but unusable.
+// Both sandbox managers read this one probe, so they cannot disagree about a broken install.
 func TestGVisorAvailable_FalseWhenVersionCheckFails(t *testing.T) {
 	bin := t.TempDir()
 	// A runsc that exists but always fails its --version call.

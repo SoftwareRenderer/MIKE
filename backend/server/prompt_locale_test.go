@@ -4,10 +4,8 @@ package server
 //
 // The two halves are tested where they live — extensions/i18n_prompts_test.go proves the
 // resolver, prompts/overlay_test.go proves that an installed overlay changes what renders.
-// What is left, and what this file is about, is the wiring: that the server actually
-// calls one with the answer to the other, and does it again when an extension changes.
-// A derived language that nothing installs is exactly the bug `prompts_dir` had before
-// this existed — declared, validated, projected into the registry, and read by nobody.
+// What is left, and what this file is about, is the wiring: that the server actually calls one with
+// the answer to the other, and does it again when an extension changes.
 
 import (
 	"os"

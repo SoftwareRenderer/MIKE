@@ -478,25 +478,22 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Resolve the search root.
+	// The project bounds the walk whichever root is used, so one lookup covers both branches.
+	project, ok := ResolveProjectID(w, s.store, projectID)
+	if !ok {
+		return
+	}
 	var searchRoot string
-	var project *types.Project
-	var err error
 
 	if taskID != "" {
 		// The task must exist and belong to this project.
-		project, err = s.store.GetProject(projectID)
-		if err != nil {
-			Fail(w, err, "get project", "project not found")
-			return
-		}
 		task, taskErr := s.store.GetTask(projectID, taskID)
 		if taskErr != nil {
 			Fail(w, taskErr, "get task", "task not found")
 			return
 		}
 		_ = task // task exists and belongs to project
-		searchRoot, err = s.executor.WorktreeMgr().WorktreePath(taskID)
+		searchRoot, err := s.executor.WorktreeMgr().WorktreePath(taskID)
 		if err != nil {
 			logging.For(logging.HTTP).Warnf("fs resolve worktree failed: %v", err)
 			Fail(w, err, "resolve worktree", "failed to resolve worktree path")
@@ -511,11 +508,6 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	} else {
-		project, err = s.store.GetProject(projectID)
-		if err != nil {
-			Fail(w, err, "get project", "project not found")
-			return
-		}
 		searchRoot = project.Path
 		searchRoot = filepath.Clean(searchRoot)
 		resolved, err := s.validateFSPath(project, "", searchRoot)

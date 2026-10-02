@@ -47,7 +47,7 @@ func ValidateBranchName(name string) error {
 	if name[0] == '-' {
 		return fmt.Errorf("branch name must not start with a hyphen")
 	}
-	for i := 0; i < len(name); i++ {
+	for i := range len(name) {
 		if !allowedBranchChars[name[i]] {
 			return fmt.Errorf("branch name contains invalid character %q", name[i])
 		}
@@ -86,7 +86,7 @@ func ValidateGitRef(ref string) error {
 	if strings.Contains(ref, "..") {
 		return fmt.Errorf("ref must not contain '..'")
 	}
-	for i := 0; i < len(ref); i++ {
+	for i := range len(ref) {
 		if !allowedRefChars[ref[i]] {
 			return fmt.Errorf("ref contains invalid character %q", ref[i])
 		}
@@ -108,7 +108,7 @@ func ValidateCommitHash(hash string) error {
 	if len(hash) < 4 || len(hash) > 64 {
 		return fmt.Errorf("commit hash %q must be 4 to 64 hexadecimal characters", hash)
 	}
-	for i := 0; i < len(hash); i++ {
+	for i := range len(hash) {
 		c := hash[i]
 		switch {
 		case c >= '0' && c <= '9':

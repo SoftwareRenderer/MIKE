@@ -44,9 +44,8 @@ func TestEmptyPolicyIsStatedNotDiscovered(t *testing.T) {
 	}
 }
 
-// TestBindSetsBothFields is the pairing rule. They are not independent: the wait delay is what stops a
-// killed child's still-open output pipes from parking cmd.Wait forever, so a helper that set only the
-// environment would leave the bug this package exists to prevent.
+// TestBindSetsBothFields: the environment and the wait delay are not independent — the delay is what
+// stops a killed child's still-open output pipes from parking cmd.Wait forever.
 func TestBindSetsBothFields(t *testing.T) {
 	env := []string{"PATH=/usr/bin"}
 	cmd := Bind(exec.Command("true"), env, 7*time.Second)
@@ -59,10 +58,9 @@ func TestBindSetsBothFields(t *testing.T) {
 	}
 }
 
-// The delay must survive the real spawn path, not just the field assignment. This is the property
-// AGENTS.md records as F21: a cancelled context kills the child but does **not** close its output
-// pipes, so cmd.Wait — and the request goroutine inside it — waits for whoever still holds them. Here
-// the child hands its stdout to a grandchild and dies, which is the shape that used to wedge callers.
+// The delay must survive the real spawn path, not just the field assignment. A cancelled context
+// kills the child but does not close its output pipes, so cmd.Wait — and the request goroutine inside
+// it — waits for whoever still holds them. Here the child hands its stdout to a grandchild and dies.
 func TestBoundCommandReturnsAfterACancelEvenThoughThePipeStaysOpen(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -50,10 +50,9 @@ func summarizeRebuild(msgs []types.ChatMessage) (roles []string, toolCallIDs, to
 	return
 }
 
-// TestBuildMessagesFromDB_AdvisoryRowKeepsToolRows is the regression test for the turn
-// that lost its tail: a row written between two tool_call rows used to end the assistant
-// row's look-ahead, so the second call and BOTH results vanished from the rebuilt
-// conversation (and the assistant was rebuilt claiming it had only called A).
+// TestBuildMessagesFromDB_AdvisoryRowKeepsToolRows: a row written between two tool_call rows must
+// not end the assistant row's look-ahead, or the later calls and their results vanish from the
+// rebuilt conversation.
 func TestBuildMessagesFromDB_AdvisoryRowKeepsToolRows(t *testing.T) {
 	t.Parallel()
 	const owner = "asst-1"

@@ -2,6 +2,7 @@ package git
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -62,18 +63,11 @@ func (wm *WorktreeManager) PopStashByHash(dir, hash string) (bool, error) {
 	}
 	hash = strings.TrimSpace(hash)
 
-	found := false
 	entries, err := wm.listStashEntries(dir)
 	if err != nil {
 		return false, fmt.Errorf("stash list: %w", err)
 	}
-	for _, e := range entries {
-		if e.Hash == hash || strings.HasPrefix(e.Hash, hash) {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !slices.ContainsFunc(entries, func(e StashEntry) bool { return e.Hash == hash || strings.HasPrefix(e.Hash, hash) }) {
 		// Not an error: the entry was already dropped or swept. Callers use the result to decide
 		// whether to say so, because silently continuing is how lost work stays lost.
 		return false, nil

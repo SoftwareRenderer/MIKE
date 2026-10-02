@@ -50,9 +50,8 @@ func TestParseExecutionState(t *testing.T) {
 			t.Errorf("ParseExecutionState(%q) = not-ok, want ok", s)
 		}
 	}
-	// "merge_conflict" is the interesting rejection: it used to be an execution state
-	// and now lives in Task.HasMergeConflict, so a client still sending it must not be
-	// able to write a state nothing reads.
+	// "merge_conflict" is the interesting rejection: that flag lives in Task.HasMergeConflict, so a
+	// client still sending it must not write a state nothing reads.
 	for _, s := range []string{"merge_conflict", "runing", "Stopped", "stopped", "", " complete"} {
 		if got, ok := ParseExecutionState(s); ok {
 			t.Errorf("ParseExecutionState(%q) = %q,ok — must reject", s, got)

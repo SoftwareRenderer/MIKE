@@ -867,15 +867,10 @@ func (sm *SandboxManager) startShell(taskID, worktreePath string, project *types
 		shell = "bash"
 	}
 
-	// Start podman exec with PTY
-	// -i: keep STDIN open
-	// -t: allocate a pseudo-TTY
-	// cmd.Env comes from podmanCommand → sandboxruntime.PodmanEnv: the rootless-podman essentials
-	// (HOME, XDG_RUNTIME_DIR, the D-Bus address) and nothing else — notably not
-	// MIKE_LOGIN_PASSWORD or MIKE_ENCRYPTION_KEY, which os.Environ() used to hand this process.
-	// The claim that none of it reaches the container is still true and still the reason the
-	// terminal's own environment is the container's: podman exec inherits the container's
-	// environment unless an -e says otherwise.
+	// Start podman exec with PTY: -i keeps STDIN open, -t allocates the pseudo-TTY.
+	// cmd.Env comes from podmanCommand → sandboxruntime.PodmanEnv, so the CLI gets only the
+	// rootless-podman essentials and none of the server's secrets. The shell gets the container's
+	// own environment: podman exec inherits it unless an -e says otherwise.
 	cmd := podmanCommand(shellExecArgs(containerName, mountPath, shell)...)
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 40, Cols: 120})
 	if err != nil {

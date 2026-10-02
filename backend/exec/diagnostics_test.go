@@ -18,8 +18,7 @@ import (
 
 // The advisory channel: environment notes the model must see but the user never said.
 // They must never be persisted as role "user" (a fake user bubble, and a summarizer that
-// credits the user with them), and they must never land between a turn's tool_call rows
-// (which used to cost the rebuild that turn's remaining tool results).
+// credits the user with them), and never between a turn's tool_call rows.
 
 func diagTestSetup(t *testing.T, s *store.Store, projectID, taskID string) *taskExecSetup {
 	t.Helper()
@@ -140,10 +139,9 @@ func TestFlushAdvisories_EmptyAndBlank(t *testing.T) {
 	}
 }
 
-// TestPrepareMergeConflictTurn_DeliversBeforeTheNextCall is the ordering regression: both
-// merge-conflict sites sit before the turn-boundary flush and continue straight into the
-// next LLM call, so a note left in the queue would reach the model one call late — it
-// would start resolving the conflict before ever being told which files conflict.
+// TestPrepareMergeConflictTurn_DeliversBeforeTheNextCall: both merge-conflict sites sit before
+// the turn-boundary flush and continue into the next LLM call, so a note left in the queue would
+// reach the model one call late.
 func TestPrepareMergeConflictTurn_DeliversBeforeTheNextCall(t *testing.T) {
 	s := testStore(t)
 	te := newTestExecutorWith(t, Deps{Store: s})
@@ -420,9 +418,9 @@ func TestCollectTurnDiagnostics_QueuesOneAdvisoryAndSuppressesRepeats(t *testing
 
 func TestAdvisoriesWrittenAfterToolRowsSurviveTheRebuild(t *testing.T) {
 	t.Parallel()
-	// The regression this change rests on: a note written from inside tool execution landed
-	// between the turn's tool_call rows. The turn boundary is now the only writer, so the
-	// rows a turn produces read tool_call*, advisory — and the rebuild stays complete.
+	// A note written from inside tool execution must not land between the turn's tool_call rows:
+	// the turn boundary is the only writer, so the rows read tool_call*, advisory and the rebuild
+	// stays complete.
 	s := testStore(t)
 	te := newTestExecutorWith(t, Deps{Store: s})
 	setup := diagTestSetup(t, s, "boundary-proj", "boundary-task")

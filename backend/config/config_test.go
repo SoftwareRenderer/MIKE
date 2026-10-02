@@ -87,9 +87,8 @@ func TestAutoSummarizeThreshold_Roundtrip(t *testing.T) {
 //
 //   - unset must stay nil, so /api/config OMITS the key and the client default applies;
 //   - true must round-trip;
-//   - an explicit false must come back PRESENT. Collapsing it to nil would quietly
-//     restore the behaviour the user just switched off, which is the bug each row below
-//     is written to catch.
+//   - an explicit false must come back PRESENT: collapsing it to nil would quietly restore the
+//     behaviour the user just switched off.
 func TestUIFlagPreferences(t *testing.T) {
 	flags := []struct {
 		name string

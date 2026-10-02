@@ -135,7 +135,7 @@ func TestResolvePort(t *testing.T) {
 		{name: "nothing set falls back", envValue: "", port: 3000},
 		{name: "flag wins", flagValue: 8080, envValue: "9090", port: 8080},
 		{name: "env is parsed", envValue: "9090", port: 9090},
-		// The bug this exists for: fmt.Sscanf accepted this and left the port at 3000.
+		// A non-numeric port is refused rather than replaced by the fallback.
 		{name: "non-numeric env is refused", envValue: "tcp3000", port: 0},
 		{name: "zero env is refused", envValue: "0", port: 0},
 		{name: "negative env is refused", envValue: "-1", port: 0},

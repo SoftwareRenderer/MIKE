@@ -47,9 +47,10 @@ running containers — nothing else would ever remove them.
   message, thread and stats reads use, and `initSchema` runs it on every start. The two credential tables
   are declared beside their own accessors (`sessionTable`, `apiTokenTable`) under the same rule. Every
   statement is `IF NOT EXISTS`.
-- Nothing upgrades an older database, because nothing has shipped. A database whose tables predate this DDL
-  fails the boot naming itself, which is why no `PRAGMA user_version` stamp and no probe before an `ALTER`
-  exists to maintain.
+- Nothing upgrades an older database, because nothing has shipped. `CREATE TABLE IF NOT EXISTS` leaves a
+  table it finds exactly as it is, so a file whose tables predate this DDL boots and then fails every read
+  that names a column the file lacks. That file is deleted, never upgraded — which is why no
+  `PRAGMA user_version` stamp and no probe before an `ALTER` exists to maintain.
 - A new column goes into `baseSchemaSQL`, in the order its scanner reads it. `backend/store/schema_test.go`
   compares each table's `PRAGMA table_info` against the column list its scan path selects. It also walks
   each surviving read's query plan, so an index dropped from the DDL fails a test rather than turning a

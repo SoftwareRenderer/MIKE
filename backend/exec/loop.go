@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math/rand/v2"
 	"path/filepath"
 	"slices"
@@ -660,6 +661,17 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 		callCtx, callCancel := context.WithCancel(setup.ctx)
 
 		streamDone := make(chan struct{})
+		// releaseAfterStreamEnd waits for the streaming goroutine to stop writing, then returns the
+		// provider slot. The two seconds bounds this wait, not the goroutine: a slow abort is logged
+		// and the turn moves on.
+		releaseAfterStreamEnd := func() {
+			select {
+			case <-streamDone:
+			case <-time.After(2 * time.Second):
+				logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Warnf("streamDone timeout, forcing continue")
+			}
+			te.gate.Release(gateURL)
+		}
 		var streamErr error
 		var lastProgressSend time.Time // throttle progress updates to ~1/2s
 		var lastPredictedN int         // track predicted tokens for real-time stats events
@@ -719,7 +731,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 			if len(choice.Delta.ToolCalls) > 0 {
 				priorLen := len(lc.pendingToolCalls)
 				lc.pendingToolCalls = llama.MergeToolCalls(lc.pendingToolCalls, choice.Delta.ToolCalls)
-				for i := 0; i < len(lc.pendingToolCalls); i++ {
+				for i := range len(lc.pendingToolCalls) {
 					tc := lc.pendingToolCalls[i]
 					if tc.ID == "" || tc.Function.Name == "" {
 						continue
@@ -858,12 +870,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 				lc.detector.reset()
 				lc.detector.clearHints()
 				callCancel()
-				select {
-				case <-streamDone:
-				case <-time.After(2 * time.Second):
-					logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Warnf("streamDone timeout, forcing continue")
-				}
-				te.gate.Release(gateURL)
+				releaseAfterStreamEnd()
 				lc.assistantContent.Reset()
 				lc.reasoningContent.Reset()
 				lc.pendingToolCalls = nil
@@ -876,13 +883,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 			lc.detector.reset() // user input breaks any loop pattern
 			lc.detector.clearHints()
 			callCancel()
-			// Wait for goroutine to finish (with timeout in case HTTP stream is slow to abort).
-			select {
-			case <-streamDone:
-			case <-time.After(2 * time.Second):
-				logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Warnf("streamDone timeout, forcing continue")
-			}
-			te.gate.Release(gateURL)
+			releaseAfterStreamEnd()
 
 			// Drain all queued messages from channel (non-blocking).
 			var queuedMsgs []stream.UserMessage
@@ -1324,14 +1325,9 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 						_ = te.sandboxMgr.Stop(setup.task.ID)
 					}
 					te.persistTask(setup)
-					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
-						"state":                setup.task.ExecutionState,
-						"assistant_message_id": assistantMsgID,
-						"prompt_tokens":        promptTokens, "predicted_tokens": predictedTokens,
-						"cache_tokens": cacheTokens,
-						"prompt_ms":    promptMs, "predicted_ms": predictedMs,
-						"model_name": activeModel, "duration": time.Since(lc.callStartTime).Milliseconds(),
-					}})
+					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: turnStatsFrame(
+						setup.task.ExecutionState, assistantMsgID, promptTokens, predictedTokens, cacheTokens,
+						promptMs, predictedMs, activeModel, time.Since(lc.callStartTime).Milliseconds(), nil)})
 					te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
 					if setup.task.ParentTaskID != "" {
 						_ = te.AutoStartNextSibling(setup.projectID, setup.task.ID, setup.task.ParentTaskID)
@@ -1399,14 +1395,9 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 				setup.task.Status = types.StatusReview
 			}
 			te.persistTask(setup)
-			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
-				"state":                setup.task.ExecutionState,
-				"assistant_message_id": assistantMsgID,
-				"prompt_tokens":        promptTokens, "predicted_tokens": predictedTokens,
-				"cache_tokens": cacheTokens,
-				"prompt_ms":    promptMs, "predicted_ms": predictedMs,
-				"model_name": activeModel, "duration": time.Since(lc.callStartTime).Milliseconds(),
-			}})
+			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: turnStatsFrame(
+				setup.task.ExecutionState, assistantMsgID, promptTokens, predictedTokens, cacheTokens,
+				promptMs, predictedMs, activeModel, time.Since(lc.callStartTime).Milliseconds(), nil)})
 			te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
 			if hadGitCmd {
 				te.broadcastDiffIfGitCmd(setup.projectID, setup.task.ID, setup.task)
@@ -1549,14 +1540,9 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 		setup.task.ExecutionState = types.ExecStateIdle
 		te.persistTask(setup)
 		te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
-		te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
-			"state": "idle", "summary": "Agent finished responding",
-			"assistant_message_id": assistantMsgID,
-			"prompt_tokens":        promptTokens, "predicted_tokens": predictedTokens,
-			"cache_tokens": cacheTokens,
-			"prompt_ms":    promptMs, "predicted_ms": predictedMs,
-			"model_name": activeModel, "duration": duration,
-		}})
+		te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: turnStatsFrame(
+			"idle", assistantMsgID, promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs,
+			activeModel, duration, map[string]any{"summary": "Agent finished responding"})})
 
 		// Auto-summarize if context is approaching the window limit. Runs right
 		// after the message completes, without waiting for the task transition.
@@ -1926,6 +1912,19 @@ func (te *TaskExecutor) failTask(task *types.Task, projectID, output, code strin
 	te.storeTask(task, projectID)
 	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 	te.sendAndPersistError(task.ID, output, code)
+}
+
+// turnStatsFrame builds the WSTypeComplete payload a turn ends with. The frame is a flat map of these
+// keys (docs/api-contract.md); extra carries any sentence an outcome adds.
+func turnStatsFrame(state any, msgID string, promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs int, model string, durationMs int64, extra map[string]any) map[string]any {
+	frame := map[string]any{
+		"state": state, "assistant_message_id": msgID,
+		"prompt_tokens": promptTokens, "predicted_tokens": predictedTokens,
+		"cache_tokens": cacheTokens, "prompt_ms": promptMs, "predicted_ms": predictedMs,
+		"model_name": model, "duration": durationMs,
+	}
+	maps.Copy(frame, extra)
+	return frame
 }
 
 func computeStats(usage *types.ChatUsage) (promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs int) {

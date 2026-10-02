@@ -140,7 +140,7 @@ func DiscoverSkills(containerMount string) []Skill {
 	}
 
 	// Sort by name for deterministic output
-	for i := 0; i < len(skills); i++ {
+	for i := range len(skills) {
 		for j := i + 1; j < len(skills); j++ {
 			if skills[i].Name > skills[j].Name {
 				skills[i], skills[j] = skills[j], skills[i]

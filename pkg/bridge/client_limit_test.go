@@ -34,8 +34,8 @@ func TestReadFileRefusesAStreamPastTheLimit(t *testing.T) {
 	}
 }
 
-// A faster peer outruns the queue instead, and the readLoop used to log the loss and carry on —
-// which answered a short file as a success, and a task edits a file it believes it read whole.
+// A faster peer outruns the queue instead, and losing a frame must be an error: a short file answered
+// as a success would have a task edit a file it believes it read whole.
 func TestReadFileNeverReturnsAShortBodyWhenTheClientFallsBehind(t *testing.T) {
 	const chunkSize = 64 * 1024
 	const chunks = protocol.MaxReadBytes/chunkSize + 8

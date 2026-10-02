@@ -7,10 +7,8 @@ import (
 	"mike/backend/types"
 )
 
-// A failed task used to announce itself again on every page view: the error frame
-// stayed in the task's replay buffer, and each replay was rendered and stored as
-// if it were a new failure. One failure now means one stored error and one frame,
-// and nothing is handed to later subscribers of the task.
+// One failure means one stored error and one frame: an error frame must not stay in the task's
+// replay buffer, where each later subscriber would render it as a new failure.
 func TestFailTask_PersistsOneErrorAndStopsReplayingIt(t *testing.T) {
 	t.Parallel()
 	e := newTestExecutor(t)

@@ -46,17 +46,7 @@ func (r *toolRunner) handleCreateTask(args map[string]any, parent *types.Task, s
 	if parentTask != nil {
 		newTaskStatus = types.SubtaskStatusFor(parentTask.Status)
 	}
-	newTaskID := types.GenerateTaskID()
-	// Ensure uniqueness (unlikely collision, but guard against it)
-	for {
-		if _, err := r.store.GetTaskByID(newTaskID); err != nil {
-			break // unique
-		}
-		newTaskID = types.GenerateTaskID()
-	}
-
 	newTask := &types.Task{
-		ID:                        newTaskID,
 		ProjectID:                 parent.ProjectID,
 		Title:                     title,
 		Prompt:                    prompt,
@@ -89,38 +79,31 @@ func (r *toolRunner) handleCreateTask(args map[string]any, parent *types.Task, s
 	if err := r.store.CreateTask(newTask); err != nil {
 		return "", fmt.Errorf("failed to create task: %w", err)
 	}
+	newTaskID := newTask.ID
 
 	// Track the created task ID for plan mode validation
 	if state != nil {
 		state.createdIDs = append(state.createdIDs, newTaskID)
 	}
 
-	// Create default "Main" thread for the new task
-	defaultThreadID := types.GenerateThreadID()
-	// Ensure uniqueness
-	for {
-		if _, err := r.store.GetThread(defaultThreadID); err != nil {
-			break // unique
-		}
-		defaultThreadID = types.GenerateThreadID()
-	}
-	if err := r.store.CreateThread(&types.TaskThread{
-		ID:        defaultThreadID,
+	// CreateThread mints the new thread's ID.
+	mainThread := &types.TaskThread{
 		TaskID:    newTaskID,
 		Name:      "Main",
 		IsActive:  true,
 		CreatedAt: now,
-	}); err != nil {
+	}
+	if err := r.store.CreateThread(mainThread); err != nil {
 		return "", fmt.Errorf("failed to create thread: %w", err)
 	}
-	newTask.CurrentThreadID = defaultThreadID
+	newTask.CurrentThreadID = mainThread.ID
 	_ = r.storeTask(newTask, newTask.ProjectID)
 
 	// Store the prompt as the first user message
 	if err := r.store.CreateTaskMessage(&types.TaskMessage{
 		ID:        uuid.New().String(),
 		TaskID:    newTaskID,
-		ThreadID:  defaultThreadID,
+		ThreadID:  mainThread.ID,
 		Role:      "user",
 		Content:   prompt,
 		CreatedAt: now,

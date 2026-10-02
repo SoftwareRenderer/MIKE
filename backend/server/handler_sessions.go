@@ -39,12 +39,21 @@ func currentSessionID(r *http.Request) string {
 	return id
 }
 
-// handleSessionsList handles GET /api/sessions.
-// Returns every live session, newest first, with `current` marking the caller's.
-func (s *Server) handleSessionsList(w http.ResponseWriter, r *http.Request) {
+// requireSession returns the caller's session id, or answers 401 and returns false.
+func requireSession(w http.ResponseWriter, r *http.Request) (string, bool) {
 	current := currentSessionID(r)
 	if current == "" {
 		JSONError(w, http.StatusUnauthorized, "not authenticated")
+		return "", false
+	}
+	return current, true
+}
+
+// handleSessionsList handles GET /api/sessions.
+// Returns every live session, newest first, with `current` marking the caller's.
+func (s *Server) handleSessionsList(w http.ResponseWriter, r *http.Request) {
+	current, ok := requireSession(w, r)
+	if !ok {
 		return
 	}
 
@@ -73,8 +82,7 @@ func (s *Server) handleSessionsList(w http.ResponseWriter, r *http.Request) {
 // session is allowed — their next request 401s and the SPA falls back to the login
 // modal.
 func (s *Server) handleSessionRevoke(w http.ResponseWriter, r *http.Request) {
-	if currentSessionID(r) == "" {
-		JSONError(w, http.StatusUnauthorized, "not authenticated")
+	if _, ok := requireSession(w, r); !ok {
 		return
 	}
 
@@ -99,9 +107,8 @@ func (s *Server) handleSessionRevoke(w http.ResponseWriter, r *http.Request) {
 // handleSessionsRevokeOthers handles POST /api/sessions/revoke-others: deletes
 // every session except the caller's and reports {"revoked": n}.
 func (s *Server) handleSessionsRevokeOthers(w http.ResponseWriter, r *http.Request) {
-	current := currentSessionID(r)
-	if current == "" {
-		JSONError(w, http.StatusUnauthorized, "not authenticated")
+	current, ok := requireSession(w, r)
+	if !ok {
 		return
 	}
 

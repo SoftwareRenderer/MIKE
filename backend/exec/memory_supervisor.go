@@ -1,15 +1,14 @@
 package exec
 
 import (
-	"sort"
-	"sync"
-	"sync/atomic"
-	"time"
+	"slices"
 
 	"mike/backend/store"
 	"mike/backend/types"
-
 	"mike/pkg/logging"
+	"sync"
+	"sync/atomic"
+	"time"
 )
 
 // DefaultMemSupervisorInterval is how often MemorySupervisor.TickOnce runs in production.
@@ -330,7 +329,7 @@ func (s *MemorySupervisor) reclaimIdleSandbox(charges map[string]int64, availabl
 		}
 		idle = append(idle, idleContainer{id: id, since: since, cost: cost})
 	}
-	sort.Slice(idle, func(i, j int) bool { return idle[i].since.Before(idle[j].since) })
+	slices.SortFunc(idle, func(a, b idleContainer) int { return a.since.Compare(b.since) })
 
 	for _, cand := range idle {
 		if !s.actions.reclaimSandbox(cand.id) {

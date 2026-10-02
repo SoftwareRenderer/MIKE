@@ -1,18 +1,11 @@
 package store
 
-// baseSchemaSQL is the schema of everything the task, project, message, thread and stats accessors
-// read; the two credential tables are declared beside their own accessors under the same rule. Every
-// column and index a scanner uses is declared here, and nothing repairs an older database: no release
-// has shipped, so there is no older database to upgrade. A column a row struct carries is added here,
-// and the schema tests fail if a scanner reads a column or an index this statement does not declare.
+// baseSchemaSQL is the whole schema: every table, column and index the task, project, message, thread
+// and stats accessors read. The two credential tables sit beside their own accessors.
 //
-// Every statement is IF NOT EXISTS because this runs on every start. An existing database is left
-// exactly as it is, so a statement that cannot be satisfied — a pre-existing table whose shape
-// predates this DDL — is a startup failure naming itself rather than a silent repair.
-//
-// A table lists its columns in the order its scanner reads them (`taskColumns`, `projectColumns`,
-// `taskMessageCols`, `threadColumns`, `taskDiffSnapshotColumns`): the scan is positional, so a
-// reorder there is a reorder here.
+// Every statement is IF NOT EXISTS, so this changes no table it finds. A file whose tables predate
+// this DDL boots and then fails each read naming a column it lacks: delete the file, it is not
+// upgraded. A new column goes here, in the order its scanner reads it, because the scan is positional.
 const baseSchemaSQL = `
 
 CREATE TABLE IF NOT EXISTS projects (

@@ -612,7 +612,7 @@ func TestThreadForkFromInactiveThread(t *testing.T) {
 	verifyWorktreeContent(t, worktreePath, "file.txt", choomContent, "on fork B")
 
 	// --- Fork Thread C from Message 2 on Main (while worktree is on B!) ---
-	// This is the bug: fork handler should NOT overwrite Main's stash hash
+	// A fork must not rewrite Main's stash hash.
 	forkReq2 := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/fork", map[string]any{
 		"from_thread_id":  mainThreadID,
 		"from_message_id": msg2ID,

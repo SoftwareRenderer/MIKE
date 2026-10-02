@@ -92,12 +92,11 @@ func TestBuildExtensionImage_StagesTheBridgeIntoTheContext(t *testing.T) {
 	}
 }
 
-// The bug's shape: a .dockerignore in the working directory that excludes the bridge must not be able
-// to starve an extension build.
+// A .dockerignore in the working directory must not be able to starve an extension build.
 func TestBuildExtensionImage_IgnoresADockerignoreInTheWorkingDirectory(t *testing.T) {
 	cwd := t.TempDir()
-	// The ignore file from the bug, and no bridge anywhere near it: the only way the context can hold
-	// sandbox/sandbox-bridge is by being staged.
+	// No bridge anywhere near the ignore file, so the context can only hold
+	// sandbox/sandbox-bridge by being staged.
 	if err := os.WriteFile(filepath.Join(cwd, ".dockerignore"), []byte("sandbox/\nsandbox/sandbox-bridge\n*"), 0o644); err != nil {
 		t.Fatalf("write .dockerignore: %v", err)
 	}
@@ -135,8 +134,7 @@ func TestBuildExtensionImage_IgnoresADockerignoreInTheWorkingDirectory(t *testin
 	}
 }
 
-// The same claim against real buildah: the only test here that shows the fix works rather than that the
-// assertion changed. Gated on a local base image - it never reaches the network.
+// The same claim against real buildah. Gated on a local base image — it never reaches the network.
 func TestBuildExtensionImage_RealBuildSurvivesADockerignoreBelow(t *testing.T) {
 	rt := sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{})
 	if testing.Short() || !rt.ImageExists("docker.io/library/alpine:latest") {

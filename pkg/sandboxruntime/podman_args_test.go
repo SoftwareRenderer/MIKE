@@ -57,8 +57,8 @@ func TestHasDotDotSegment(t *testing.T) {
 func TestValidateCapabilityRule(t *testing.T) {
 	for _, ok := range []string{
 		"NET_RAW", "CHOWN", "SETFCAP", "cap_net_raw", "SYS_TIME", "fowner",
-		// Every name the denylist used to refuse: allowed now, because the container
-		// they land in is a gVisor guest that started from --cap-drop ALL.
+		// Names a denylist would refuse: allowed, because the container they land in is a gVisor
+		// guest that started from --cap-drop ALL.
 		"SYS_ADMIN", "SYS_PTRACE", "SYS_MODULE", "SYS_RAWIO", "DAC_OVERRIDE",
 		"DAC_READ_SEARCH", "NET_ADMIN", "MKNOD", "SETUID", "SETGID", "SYS_BOOT",
 		"LINUX_IMMUTABLE",
@@ -86,11 +86,9 @@ func TestValidateCapabilityRule(t *testing.T) {
 	}
 }
 
-// TestGVisorIsolationForCaps pins the pairing a capability grant now relies on. The
-// denylist used to be the defence; it is gone, and what is left is the fact that the
-// container is runsc-isolated and started with every capability dropped. A command line
-// missing either turns `--cap-add SYS_ADMIN` into a host-kernel privilege, which is
-// exactly the regression this refuses.
+// TestGVisorIsolationForCaps pins the pairing a capability grant relies on: the container is
+// runsc-isolated and started with every capability dropped. A command line missing either turns
+// `--cap-add SYS_ADMIN` into a host-kernel privilege.
 func TestGVisorIsolationForCaps(t *testing.T) {
 	isolated := []string{"create", "--runtime", "runsc", "--cap-drop", "ALL"}
 	if err := GVisorIsolationForCaps(isolated); err != nil {

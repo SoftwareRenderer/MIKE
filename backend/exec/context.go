@@ -728,9 +728,9 @@ func formatTurns(messages []types.ChatMessage, consolidate bool) string {
 		if !consolidate {
 			sb.WriteString("Assistant: ")
 		}
-		// Reasoning rides in its own field after the rebuild (groupTaskMessages keeps it
-		// there so toAPIMessage can send it as reasoning_content); this renderer only reads
-		// Content, so the text it used to get pre-merged is folded in here.
+		// Reasoning rides in its own field after the rebuild (groupTaskMessages keeps it there
+		// so toAPIMessage can send it as reasoning_content), and this renderer reads only
+		// Content, so fold the reasoning text in here.
 		text := m.Content
 		if m.ReasoningContent != "" {
 			text = m.ReasoningContent + "\n" + m.Content

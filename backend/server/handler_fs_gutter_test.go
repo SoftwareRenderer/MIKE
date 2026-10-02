@@ -1,8 +1,8 @@
 package server
 
 // The editor's gutter asks one question per working-tree line: did `git diff HEAD` touch it? The answer
-// arrives as GET /api/fs/read's gutter_markers, and it is derived from git.ParseUnifiedDiff rather than a
-// parser of this package's own. These cases are the shapes that parser used to get wrong on its own.
+// arrives as GET /api/fs/read's gutter_markers, derived from git.ParseUnifiedDiff — the product's only
+// diff grammar. These are the shapes that grammar has to answer.
 
 import (
 	"testing"

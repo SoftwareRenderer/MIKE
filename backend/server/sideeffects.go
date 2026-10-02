@@ -1,7 +1,5 @@
 package server
 
-// Decision 6, written down as data instead of prose in three places.
-//
 // Cancellation is decided by **side effect, not entry point**. The question is "does this leave server
 // state behind?", not "who called it?" — because the answer that matters when a browser tab closes is
 // whether the next person to open the board sees a whole result or half of one.
@@ -13,8 +11,8 @@ package server
 //   - detachedOperations persist a result. They run on Server.Detached() and finish, whatever the browser
 //     does. An abort mid-way is the intermittent wrong-screen bug this repo already documents.
 //   - requestScopedReads serve a response and nothing else. Their context is the request's; a cancel
-//     leaves no trace, which is why it is silent (Decision 8: silent only when the user actually left).
-//   - idempotentWritesOnReads is the third clause F19 forced: a read that writes is safe on a cancellable
+//     leaves no trace, which is why it is silent — silent only when the user actually left.
+//   - idempotentWritesOnReads is the third clause: a read that writes is safe on a cancellable
 //     path only while **every** write on it is one idempotent statement. Add a second write to one of
 //     these handlers — a summary row beside the snapshot — and cancellation starts producing half-written
 //     state again. That is what archgate's writeselect rule watches for; this list is the reason it
@@ -179,8 +177,8 @@ var requestScopedReads = []sideEffectEntry{
 	},
 }
 
-// idempotentWritesOnReads is the exception F19 found, and the reason it is an exception rather than a
-// contradiction. Every entry is one statement that SQLite commits whole or not at all.
+// idempotentWritesOnReads is the exception rather than a contradiction: every entry is one statement
+// that SQLite commits whole or not at all.
 var idempotentWritesOnReads = []sideEffectEntry{
 	{
 		Path: "GET /api/projects/{projectID}/tasks/{taskID}/diff",

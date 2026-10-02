@@ -83,16 +83,14 @@ func TestRoutesRefuseUnregisteredMethodsThroughTheMux(t *testing.T) {
 	}
 }
 
-// TestGETCheckoutNoLongerReachesTheCheckoutHandler is the reason 2a is not cosmetic. The route used to
-// be registered without a method, so a GET arrived at a handler that decodes a JSON body and performs
-// a checkout — and CSRFMiddleware guards non-GET requests only, so a cross-site GET faced no CSRF
-// check on a route that writes. (Exploiting it needed a JSON body, which a cross-site <form> cannot
-// carry; the hole was in the story, not provably in the door.)
+// TestGETCheckoutNoLongerReachesTheCheckoutHandler: a write route registered without a method takes a
+// cross-site GET straight into a handler that checks out a branch, because CSRFMiddleware guards
+// non-GET requests only.
 func TestGETCheckoutNoLongerReachesTheCheckoutHandler(t *testing.T) {
 	s := testServer(t)
 	cookie, _ := loginTestCSRF(t, s)
 
-	// A GET with no CSRF token: the request that used to be dispatched to the handler at all.
+	// A GET with no CSRF token: the request a methodless route would dispatch to the handler.
 	req := testRequest(http.MethodGet, "/api/projects/p1/git/checkout", nil)
 	withAuth(req, cookie)
 	rr := testResponse(t, s, req)
@@ -104,13 +102,10 @@ func TestGETCheckoutNoLongerReachesTheCheckoutHandler(t *testing.T) {
 	}
 }
 
-// TestStaticPathFallsThroughToTheParameterisedSibling records a consequence of method patterns that
-// is easy to miss: net/http chooses the **most specific path** first and only then checks the method.
-// With `DELETE /api/projects/{p}/tasks/done` registered and no GET on that path, a GET no longer
-// reaches HandleClearDone (which used to answer 405) — it matches `GET .../tasks/{taskID}` with
-// taskID="done" and answers 404 "task not found". Nothing in the product sends it; the shape is
-// pinned because "a wrong verb always gets 405" is therefore not universally true, and a reader who
-// assumes it will be surprised.
+// TestStaticPathFallsThroughToTheParameterisedSibling: net/http chooses the **most specific path**
+// first and only then checks the method. With `DELETE /api/projects/{p}/tasks/done` registered and no
+// GET on that path, a GET matches `GET .../tasks/{taskID}` with taskID="done" and answers 404, so "a
+// wrong verb always gets 405" is not universally true.
 func TestStaticPathFallsThroughToTheParameterisedSibling(t *testing.T) {
 	s := testServer(t)
 	cookie, csrf := loginTestCSRF(t, s)
@@ -145,9 +140,9 @@ func TestGETPatternAlsoAnswersHEAD(t *testing.T) {
 	}
 }
 
-// TestDeletedGuardsLeaveNoHandlerReachableByTheWrongVerb walks one handler that used to refuse the
-// verb itself, to show the mux now decides. Called directly with a bad method a handler no longer
-// refuses — that is the point, and it is why the per-handler 405 assertions moved here.
+// TestDeletedGuardsLeaveNoHandlerReachableByTheWrongVerb: called directly with a bad method, a
+// handler does not refuse it — the mux decides, which is why the per-handler 405 assertions moved
+// here.
 func TestCheckoutHandlerIsNotGuardedAnymoreBecauseTheMuxDecides(t *testing.T) {
 	s := testServer(t)
 	cookie, csrf := loginTestCSRF(t, s)

@@ -374,9 +374,8 @@ func TestCreate_ValidImageRefPassesValidation(t *testing.T) {
 	}
 }
 
-// A missing sandbox image used to reach the user as "exit status 125 (short-name resolution
-// enforced but cannot prompt without a TTY)". With qualified refs and --pull=never it must be
-// named plainly, and fast — no retries against a guessed registry.
+// A missing sandbox image is named plainly and fast: qualified refs plus --pull=never mean no retries
+// against a guessed registry.
 // TestCreateContainerArgs pins the argument order: podman-global flags before `create`, `--pull
 // never` after it. Container creation must not fetch an image; the caller does that, visibly.
 func TestCreateContainerArgs(t *testing.T) {

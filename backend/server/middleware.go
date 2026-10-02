@@ -27,6 +27,8 @@ var (
 	// Fault is the same mapper for the one outcome with nothing richer to declare: the operation
 	// failed and the cause is MIKE's to read, not the browser's.
 	Fault = httputil.Fault
+	// ResolveProjectID is httputil's, for a project a query parameter names.
+	ResolveProjectID = httputil.ResolveProjectID
 )
 
 // Paths that don't require authentication.

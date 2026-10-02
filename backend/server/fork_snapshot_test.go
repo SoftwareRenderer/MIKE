@@ -252,8 +252,8 @@ func TestDeletingActiveThreadDeletesItsBranch(t *testing.T) {
 	if got := gitCurrentBranch(t, fx.worktreePath); got != "thread/"+fx.forkID {
 		t.Fatalf("setup: expected the worktree on thread/%s, got %q", fx.forkID, got)
 	}
-	// Dirty on purpose: a plain checkout refuses uncommitted changes, which is how a delete used to
-	// leave its branch behind.
+	// Dirty on purpose: a plain checkout refuses uncommitted changes, which is how a delete can leave
+	// its branch behind.
 	if err := os.WriteFile(filepath.Join(fx.worktreePath, "file.txt"), []byte("discarded work\n"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}

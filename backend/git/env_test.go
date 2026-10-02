@@ -50,9 +50,8 @@ func initRepo(t *testing.T) string {
 	return repo
 }
 
-// TestPreCommitHookNeverRuns is the regression for the execution surface: a repository's own
-// pre-commit hook runs arbitrary code as the server user. The hook exits 1, so an unfenced commit
-// fails — which makes "the commit succeeded" a second, independent assertion that the hook did not
+// TestPreCommitHookNeverRuns: a repository's own pre-commit hook runs arbitrary code as the server
+// user. The hook exits 1, so "the commit succeeded" is an independent assertion that the hook did not
 // run, not just a missing marker file.
 func TestPreCommitHookNeverRuns(t *testing.T) {
 	repo := initRepo(t)

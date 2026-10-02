@@ -178,9 +178,10 @@ func TestDoubleReleaseIsRefused(t *testing.T) {
 	release()
 }
 
-// TestTablesAreIndependentDomains is the mechanism-level half of F16. The named-type wrappers are what
-// stop a wrong-domain call at compile time; independence is what makes a runtime alias impossible: a
-// task ID and a project ID can be the same string, and two domains must still not see each other.
+// TestTablesAreIndependentDomains is the mechanism-level half of the domain rule. The named-type wrappers
+// are what stop a wrong-domain call at compile time; independence is what makes a runtime alias
+// impossible: a task ID and a project ID can be the same string, and two domains must still not see each
+// other.
 func TestTablesAreIndependentDomains(t *testing.T) {
 	stash := newTable(0, nil)
 	merge := newTable(0, nil)
@@ -350,9 +351,8 @@ func TestReportDisabledTakesNoClock(t *testing.T) {
 	}
 }
 
-// A zero Table must work: every struct literal in this repo used to get a usable sync.Map for free, and
-// a keyed lock that panics when its owner was built as `&T{}` trades a nil-map bug for a crash in
-// production code paths that no test touched.
+// A zero Table must work: a keyed lock that panics when its owner was built as `&T{}` puts a crash in
+// production paths no test touched.
 func TestZeroTableIsUsable(t *testing.T) {
 	var tbl Table
 	release := tbl.Lock("from-a-struct-literal")

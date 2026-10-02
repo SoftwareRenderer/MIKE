@@ -18,6 +18,11 @@ type taskGetter interface {
 	GetTask(projectID, taskID string) (*types.Task, error)
 }
 
+// resolveProject returns the project the {projectID} path segment names.
+func resolveProject(w http.ResponseWriter, r *http.Request, store httputil.ProjectGetter) (*types.Project, bool) {
+	return httputil.ResolveProjectID(w, store, r.PathValue("projectID"))
+}
+
 // resolveTask returns the task the path names, or answers 404 (500, logged, for any other
 // store failure) and returns false.
 func resolveTask(w http.ResponseWriter, r *http.Request, store taskGetter) (*types.Task, bool) {

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -14,12 +13,9 @@ const readChunkSize = 64 * 1024 // 64KB
 
 // handleRead reads a file and sends content as Chunk frames + Result(size).
 func handleRead(h *handler, out io.Writer, req *protocol.Request) error {
-	var p protocol.ReadParams
-	if err := json.Unmarshal(req.Params, &p); err != nil {
-		return fmt.Errorf("parse read params: %w", err)
-	}
-	if p.Path == "" {
-		return fmt.Errorf("path is required")
+	p, err := toolParams(req, "read", func(p *protocol.ReadParams) string { return p.Path })
+	if err != nil {
+		return err
 	}
 
 	f, err := os.Open(p.Path)

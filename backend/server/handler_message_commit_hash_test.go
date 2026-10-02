@@ -20,12 +20,9 @@ import (
 // commit. Every hash the product writes is `git stash create` output, so requiring an
 // object id costs no legitimate request.
 //
-// This rule used to be asserted at POST /tasks/{taskID}/reset-worktree, a route no client
-// ever called; the value's destination is the same, so the assertion lives where the value
-// is actually accepted. The shape itself is unit-tested in backend/types
-// (TestValidateCommitHash); what this adds is that the handler refuses before the store
-// sees it — a forged hash that reached the database would be re-read by a path that does
-// not re-check it.
+// The shape itself is unit-tested in backend/types (TestValidateCommitHash); what this adds is that
+// the handler refuses before the store sees it — a forged hash that reached the database would be
+// re-read by a path that does not re-check it.
 func TestMessageCommitHashRequiresObjectID(t *testing.T) {
 	s := testServer(t)
 	projID := createTestProject(t, s)

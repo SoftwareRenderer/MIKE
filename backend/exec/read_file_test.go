@@ -128,9 +128,7 @@ func TestReadFile_Offset_AppliedBeforeTruncation(t *testing.T) {
 		t.Fatalf("write test file: %v", err)
 	}
 
-	// Read starting from line 6001 (past the 50KB truncation point)
-	// With the fix, offset is applied BEFORE truncation, so this should work.
-	// Without the fix, the file would be truncated at 50KB first, and offset=6001 would return empty.
+	// Read from line 6001, past the 50KB truncation point: offset is applied before truncation.
 	result, ok := te.executeTool(context.Background(), "read_file", map[string]any{
 		"path":   filePath,
 		"offset": float64(6001),
@@ -257,9 +255,8 @@ func TestReadFile_OffsetPastEnd(t *testing.T) {
 	}
 }
 
-// TestReadFile_OffsetPastEnd_NoPanic is a regression test for the production panic
-// `slice bounds out of range [217:194]` (read_file with offset beyond the file's
-// line count must surface an error, never panic).
+// TestReadFile_OffsetPastEnd_NoPanic: read_file with an offset past the file's last line
+// surfaces an error and never panics.
 func TestReadFile_OffsetPastEnd_NoPanic(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -372,9 +369,7 @@ func TestReadFile_OffsetAndLimit_AfterTruncationBoundary(t *testing.T) {
 		t.Fatalf("write test file: %v", err)
 	}
 
-	// Read lines 7001-7010 (past the 50KB truncation point)
-	// With the fix: offset applied first, then limit, then truncation (result is small, no truncation)
-	// Without the fix: truncation first, then offset=7001 returns empty
+	// Read lines 7001-7010 past the truncation point: offset, then limit, then truncation.
 	result, ok := te.executeTool(context.Background(), "read_file", map[string]any{
 		"path":   filePath,
 		"offset": float64(7001),

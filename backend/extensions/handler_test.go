@@ -1055,11 +1055,9 @@ func TestHandleInstallLocal(t *testing.T) {
 	}
 }
 
-// A local install is materialized in place, so the folder the human chose *is* the
-// install — while every later reader derives the path from the slugged author. A
-// folder whose name is not that slug used to install "successfully" and then 404
-// every asset it serves (a translation catalog among them), so the install now
-// refuses it and names the folder to rename.
+// A local install is materialized in place, so the folder the human chose *is* the install, while
+// every later reader derives the path from the slugged author. A folder whose name is not that slug
+// is refused, and the message names the folder to rename.
 func TestHandleInstallLocal_RefusesAFolderNothingCanReadBack(t *testing.T) {
 	h := testHandler(t)
 	extDir := t.TempDir()

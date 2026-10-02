@@ -86,13 +86,9 @@ func TestValidateFSPathSandboxMountScoping(t *testing.T) {
 	}
 }
 
-// TestValidateFSPathWorktreeRoot is the other half of the jail: the worktree of the
-// task the request named is allowed, and the workspace directory that holds it is
-// not.
-//
-// The workspace dir used to be a root of every project-scoped request, so one
-// project's file request reached every task worktree of every other project on the
-// host — reads, writes and mkdir.
+// TestValidateFSPathWorktreeRoot is the other half of the jail: the worktree of the task the request
+// named is allowed, and the workspace directory that holds it is not — a project-scoped request must
+// not reach another project's worktrees.
 func TestValidateFSPathWorktreeRoot(t *testing.T) {
 	s := testServer(t)
 	cfg, err := s.configStore.GetConfig()
@@ -130,10 +126,9 @@ func TestValidateFSPathWorktreeRoot(t *testing.T) {
 	}
 }
 
-// TestFSForeignTaskIsRejected is the ownership rule: ?project and ?task are separate
-// query parameters, and a task of another project used to be honoured silently, which
-// aimed the whole request — the worktree, and for a sandboxed project the container —
-// at someone else's task.
+// TestFSForeignTaskIsRejected is the ownership rule: ?project and ?task are separate query
+// parameters and must be correlated, or a task of another project aims the whole request — the
+// worktree, and for a sandboxed project the container — at someone else's task.
 func TestFSForeignTaskIsRejected(t *testing.T) {
 	s := testServer(t)
 	cookie, csrf := loginTestCSRF(t, s)

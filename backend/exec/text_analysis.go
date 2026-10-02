@@ -110,7 +110,7 @@ func (d *phraseDetector) check(newText string) bool {
 		}
 	}
 
-	for i := 0; i < completeCount; i++ {
+	for i := range completeCount {
 		phrase := normalizePhrase(segments[i])
 		if phrase == "" || len(strings.Fields(phrase)) < minPhraseWords {
 			continue

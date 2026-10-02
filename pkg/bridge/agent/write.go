@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -12,12 +11,9 @@ import (
 
 // handleWrite writes content to a file atomically (temp file + rename).
 func handleWrite(h *handler, out io.Writer, req *protocol.Request) error {
-	var p protocol.WriteParams
-	if err := json.Unmarshal(req.Params, &p); err != nil {
-		return fmt.Errorf("parse write params: %w", err)
-	}
-	if p.Path == "" {
-		return fmt.Errorf("path is required")
+	p, err := toolParams(req, "write", func(p *protocol.WriteParams) string { return p.Path })
+	if err != nil {
+		return err
 	}
 
 	// Create parent directories

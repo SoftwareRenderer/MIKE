@@ -1,8 +1,7 @@
-// Package store is the persistence layer: one SQLite database, its schema, and the typed accessors
-// for tasks, messages, threads, projects, sessions, stats, config. The pool is pinned to one
-// connection so the PRAGMAs apply everywhere; s.mu is the serialisation point. The schema is created
-// whole from its DDL (migrations.go) and a new column is added there; nothing upgrades an older
-// database.
+// Package store is the persistence layer: one SQLite database, its schema, and typed accessors for
+// tasks, messages, threads, projects, sessions, stats and config. One connection, so the PRAGMAs apply
+// everywhere, and s.mu is the serialisation point. The schema is created whole from its DDL
+// (migrations.go); nothing upgrades an older database.
 package store
 
 import (
@@ -67,23 +66,20 @@ func NewStore(dbPath string) (*Store, error) {
 	// Use a single connection so PRAGMA settings (foreign_keys, journal_mode) apply to all operations.
 	// The store already serializes access via s.mu, so pooling provides no benefit.
 	db.SetMaxOpenConns(1)
-	// Enable WAL mode for better concurrent read/write performance
-	_, err = db.Exec("PRAGMA journal_mode = WAL")
-	if err != nil {
-		return nil, fmt.Errorf("set journal mode: %w", err)
+	// WAL mode is what lets a reader keep going while a writer holds the lock.
+	if err := pragma(db, "PRAGMA journal_mode = WAL", "set journal mode"); err != nil {
+		return nil, err
 	}
 	// The WAL sidecars (-wal/-shm) are written by the driver under the umask and can
 	// hold the same rows as the main file until checkpointed.
 	restrictSidecarModes(dbPath)
 	// Set busy timeout to handle concurrent access (e.g., during parallel test runs)
-	_, err = db.Exec("PRAGMA busy_timeout = 10000")
-	if err != nil {
-		return nil, fmt.Errorf("set busy timeout: %w", err)
+	if err := pragma(db, "PRAGMA busy_timeout = 10000", "set busy timeout"); err != nil {
+		return nil, err
 	}
 	// Enable foreign key enforcement (disabled by default in SQLite)
-	_, err = db.Exec("PRAGMA foreign_keys = ON")
-	if err != nil {
-		return nil, fmt.Errorf("enable foreign keys: %w", err)
+	if err := pragma(db, "PRAGMA foreign_keys = ON", "enable foreign keys"); err != nil {
+		return nil, err
 	}
 	s := &Store{db: db}
 	if err := s.initSchema(); err != nil {
@@ -101,6 +97,14 @@ func NewStore(dbPath string) (*Store, error) {
 	// Schema creation above is the first write — the WAL sidecar exists by now.
 	restrictSidecarModes(dbPath)
 	return s, nil
+}
+
+// pragma runs one of the startup PRAGMAs, naming in the error which setting was refused.
+func pragma(db *sql.DB, stmt, setting string) error {
+	if _, err := db.Exec(stmt); err != nil {
+		return fmt.Errorf("%s: %w", setting, err)
+	}
+	return nil
 }
 
 // restrictSidecarModes tightens the WAL sidecar files (-wal/-shm) to 0600.
@@ -160,10 +164,8 @@ func (s *Store) QueryRow(query string, args ...any) *sql.Row {
 	return s.db.QueryRow(query, args...)
 }
 
-// initSchema writes the schema. baseSchemaSQL is the whole of it, and it runs on every start: there is
-// no probe chain and no version stamp, because no older database is upgraded (see migrations.go).
-// The lock covers the statement because schema work is the one thing that must not interleave with
-// anything else this store does.
+// initSchema runs the DDL. The lock covers it because schema work must not interleave with anything
+// else this store does.
 func (s *Store) initSchema() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -356,3 +358,13 @@ var (
 	_ execer = (*sql.DB)(nil)
 	_ execer = (*sql.Tx)(nil)
 )
+
+// newID mints an identifier no row holds yet. IDs come from a small word list, so a collision is
+// possible; `taken` says whether the candidate is already someone's primary key.
+func newID(mint func() string, taken func(string) bool) string {
+	for {
+		if id := mint(); !taken(id) {
+			return id
+		}
+	}
+}

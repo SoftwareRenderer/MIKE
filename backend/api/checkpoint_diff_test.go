@@ -1,8 +1,6 @@
 package api
 
-// A checkpoint's diff is an ordinary commit-to-commit diff against the snapshot commit. It used to be
-// taken against a stash entry, and when that resolved to the baseline the handler searched the stash list
-// by label and then by position — which could return another thread's work.
+// A checkpoint's diff is an ordinary commit-to-commit diff against the snapshot commit.
 
 import (
 	"net/http"
@@ -49,8 +47,8 @@ func TestTaskDiffAtCheckpointShowsEveryCapturedFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A text edit, a new file and a binary, all untracked or unstaged. The binary matters because a
-	// checkpoint used to be replayed as a text patch, which cannot carry one.
+	// A text edit, a new file and a binary, all untracked or unstaged: the snapshot must carry a
+	// binary, which a text patch cannot.
 	mustRun(t, wtPath, "bash", "-c", "echo 'count to 10' > count.bas")
 	if err := os.WriteFile(filepath.Join(wtPath, "img.png"), []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01}, 0o644); err != nil {
 		t.Fatalf("write binary: %v", err)

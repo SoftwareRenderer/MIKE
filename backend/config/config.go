@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -53,8 +54,7 @@ func (cs *ConfigStore) SetRegistryURL(url string) {
 	cs.registryURL = url
 }
 
-// RegistryURL returns the extension registry index URL this store was wired with. It is no longer
-// persisted to the database.
+// RegistryURL returns the extension registry index URL this store was wired with.
 func (cs *ConfigStore) RegistryURL() string {
 	if cs.registryURL == "" {
 		return DefaultRegistryURL
@@ -641,14 +641,7 @@ func (cs *ConfigStore) storedKeysByProviderID() (map[int]string, error) {
 func (cs *ConfigStore) buildConfigResponse(cfg *types.Config) configResponse {
 	providers := cfg.Providers
 	for _, ap := range cs.agentProviders() {
-		found := false
-		for _, ep := range providers {
-			if ep.URL == ap.URL {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.ContainsFunc(providers, func(ep types.Provider) bool { return ep.URL == ap.URL }) {
 			providers = append(providers, ap)
 		}
 	}
@@ -766,7 +759,8 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		current.DefaultMaxFailedTurns = updates.intPtrOr("default_max_failed_turns", current.DefaultMaxFailedTurns)
 		current.DefaultAutoSummarizeThreshold = updates.intPtrOr("default_auto_summarize_threshold", current.DefaultAutoSummarizeThreshold)
 		if threshold := current.DefaultAutoSummarizeThreshold; threshold != nil {
-			clamped := clamp(*threshold, 1, 100)
+			// The reader treats a value outside 1..100 as unset, so clamping keeps the UI showing what is stored.
+			clamped := min(max(*threshold, 1), 100)
 			current.DefaultAutoSummarizeThreshold = &clamped
 		}
 		current.DefaultOperatingMode = updates.modeOr("default_operating_mode", current.DefaultOperatingMode)

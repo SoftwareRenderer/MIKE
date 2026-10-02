@@ -119,9 +119,8 @@ func resultOf(t *testing.T, frames []*protocol.Frame) *protocol.Frame {
 	return last
 }
 
-// Regression: output must be completely flushed before the Result frame.
-// cmd.StdoutPipe + cmd.Wait closed the pipes under the readers, so trailing
-// output was lost and the card showed a command as done with output missing.
+// All output is flushed before the Result frame: a StdoutPipe that cmd.Wait closes under its readers
+// loses the trailing chunk, and the card shows a command as done with output missing.
 func TestHandleBash_AllOutputFlushedBeforeResult(t *testing.T) {
 	bh := newBashHarness(t)
 	// ~110 KB: many 32 KB chunk reads, so a truncated tail is impossible to miss.

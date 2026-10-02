@@ -75,10 +75,8 @@ func createTaskRow(t *testing.T, s *store.Store, id, projectID string, status ty
 	return task
 }
 
-// TestStopStaleRunningTask verifies the core reliability fix: stopping a task
-// whose executor no longer exists (server restarted / crashed while the task
-// was running) must succeed and clear the stale running state — before this
-// fix StopTask returned "task not running" and the task was stuck "Running".
+// TestStopStaleRunningTask: stopping a task whose executor no longer exists must succeed
+// and clear the stale running state.
 func TestStopStaleRunningTask(t *testing.T) {
 	t.Parallel()
 	te := newSessionCostTestExecutor(t)
@@ -254,10 +252,8 @@ func TestPauseResumeCycle(t *testing.T) {
 	te.StopTask("pause-resume-1")
 }
 
-// TestStopDoesNotClobberMovedTask verifies a delayed executor exit can no
-// longer clobber a concurrent column move: a running task moved to Done stays
-// done+completed after its executor is cancelled (previously the loop's
-// handleStopped reverted it to review+idle).
+// TestStopDoesNotClobberMovedTask: a delayed executor exit must not clobber a concurrent column move —
+// a running task moved to Done stays done+completed after its executor is cancelled.
 func TestStopDoesNotClobberMovedTask(t *testing.T) {
 	t.Parallel()
 	te := newSessionCostTestExecutor(t)
@@ -384,10 +380,8 @@ func TestStartTaskAssistantLastSettleIdle(t *testing.T) {
 
 // --- the stop must be the last write to the row ---
 
-// TestStopWithAssignedPortsLeavesTaskPaused: stopping a task that holds
-// forwarded ports must leave it paused with the ports cleared. Clearing them
-// used to be a full-row write, which put "running" back after the stop and left
-// the task stuck until a second Stop.
+// TestStopWithAssignedPortsLeavesTaskPaused: stopping a task that holds forwarded ports
+// leaves it paused with the ports cleared, and the stop stays the last write to the row.
 func TestStopWithAssignedPortsLeavesTaskPaused(t *testing.T) {
 	t.Parallel()
 	te := newSessionCostTestExecutor(t)
@@ -402,10 +396,8 @@ func TestStopWithAssignedPortsLeavesTaskPaused(t *testing.T) {
 	mock.waitForArrival(t, 1)
 	waitTaskState(t, s, "stop-ports-1", isRunning)
 
-	// A terminal session forwarded a port. Terminals write the column directly, which
-	// is precisely the case the exit path must catch: the executor's own copy of the
-	// task never learns about it. (It used to be staged onto setup.task as well —
-	// that only worked because the test and the loop shared one struct.)
+	// A terminal session forwarded a port. Terminals write the column directly, so the
+	// executor's own copy of the task never learns about it and the exit path must catch it.
 	ports := []types.AssignedPort{{HostPort: 32145, ContainerPort: 3000}}
 	if err := s.SetTaskAssignedPorts("stop-ports-1", proj.ID, ports); err != nil {
 		t.Fatalf("assign ports: %v", err)

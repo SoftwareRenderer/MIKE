@@ -104,7 +104,7 @@ func NewWorktreeWatcher(worktreeMgr *git.WorktreeManager, broadcast diffBroadcas
 		fsDebounces:    make(map[string]*time.Timer),
 		fsEventQueue:   make(map[string]string),
 	}
-	for i := 0; i < poolSize; i++ {
+	for range poolSize {
 		ww.workerWg.Add(1)
 		go ww.worker()
 	}

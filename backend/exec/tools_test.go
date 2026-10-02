@@ -725,10 +725,9 @@ func TestExecuteTool_EditFile_SandboxDelegation_Recovery(t *testing.T) {
 	}
 }
 
-// BenchmarkExecuteTool_EditFile measures the cost of applying many edits to a
-// large file. The apply path is O(file size) regardless of edit count; a
-// regression to the old quadratic (per-edit full-string rebuild) shows up as a
-// dramatic per-op time increase here.
+// BenchmarkExecuteTool_EditFile measures the cost of applying many edits to a large file. The apply
+// path is O(file size) regardless of edit count; a per-edit full-string rebuild would show up here as a
+// dramatic per-op time increase.
 func BenchmarkExecuteTool_EditFile(b *testing.B) {
 	const nEdits = 2000
 	var content strings.Builder

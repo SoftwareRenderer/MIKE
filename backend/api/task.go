@@ -154,14 +154,8 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 			httputil.JSONError(w, http.StatusBadRequest, "plan_mode is not a task field: send operating_mode (act, plan or explore)")
 			return
 		}
-		task.ID = types.GenerateTaskID()
-		// Ensure uniqueness
-		for {
-			if _, err := h.store.GetTaskByID(task.ID); err != nil {
-				break // unique
-			}
-			task.ID = types.GenerateTaskID()
-		}
+		// The id in the body is dropped: CreateTask mints the row's id.
+		task.ID = ""
 		task.ProjectID = projectID
 		// The sandbox layer records these as a container is removed; a body cannot produce them.
 		task.SandboxMemoryPeakMB = 0
@@ -238,27 +232,19 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 			httputil.Fail(w, err, "create task", "project not found")
 			return
 		}
-		// Create default thread for the task
-		defaultThreadID := types.GenerateThreadID()
-		// Ensure uniqueness
-		for {
-			if _, err := h.store.GetThread(defaultThreadID); err != nil {
-				break // unique
-			}
-			defaultThreadID = types.GenerateThreadID()
-		}
-		if err := h.store.CreateThread(&types.TaskThread{
-			ID:        defaultThreadID,
+		// CreateThread mints the thread's ID into mainThread.
+		mainThread := &types.TaskThread{
 			TaskID:    task.ID,
 			Name:      "Main",
 			IsActive:  true,
 			GitBranch: task.Branch,
 			CreatedAt: now,
-		}); err != nil {
+		}
+		if err := h.store.CreateThread(mainThread); err != nil {
 			httputil.Fail(w, err, "create default thread", "task not found")
 			return
 		}
-		task.CurrentThreadID = defaultThreadID
+		task.CurrentThreadID = mainThread.ID
 		if err := h.store.UpdateTask(&task); err != nil {
 			httputil.Fail(w, err, "update task", "task not found")
 			return
@@ -268,7 +254,7 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 			tm := &types.TaskMessage{
 				ID:        uuid.New().String(),
 				TaskID:    task.ID,
-				ThreadID:  defaultThreadID,
+				ThreadID:  mainThread.ID,
 				Role:      "user",
 				Content:   task.Prompt,
 				CreatedAt: now,
@@ -1310,10 +1296,8 @@ func (h *TaskHandler) HandleStart(w http.ResponseWriter, r *http.Request) {
 
 	// No subtasks — start normally
 	if err := h.executor.StartTask(projectID, taskID, false); err != nil {
-		// Already-running arrives as errs.ErrConflict and answers 409 with its own sentence; a genuine
-		// fault answers 500 without echoing its text. The branch that used to live here tested
-		// errors.Is(err, exec.ErrTaskAlreadyRunning) and could never match — the executor returned a
-		// fresh error with the same words — so a double-click was reported as a server fault.
+		// Already-running arrives as errs.ErrConflict and answers 409 with its own sentence;
+		// a genuine fault answers 500 without echoing its text.
 		httputil.Fail(w, err, "start task", "task not found")
 		return
 	}

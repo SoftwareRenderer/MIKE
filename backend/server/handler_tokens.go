@@ -50,8 +50,7 @@ func newAPITokenResponse(t store.APITokenInfo) apiTokenResponse {
 
 // handleAPITokensList handles GET /api/tokens — every token, newest first.
 func (s *Server) handleAPITokensList(w http.ResponseWriter, r *http.Request) {
-	if currentSessionID(r) == "" {
-		JSONError(w, http.StatusUnauthorized, "not authenticated")
+	if _, ok := requireSession(w, r); !ok {
 		return
 	}
 
@@ -69,8 +68,7 @@ func (s *Server) handleAPITokensList(w http.ResponseWriter, r *http.Request) {
 
 // handleAPITokenCreate handles POST /api/tokens: {"label": "..."} and the new secret, once.
 func (s *Server) handleAPITokenCreate(w http.ResponseWriter, r *http.Request) {
-	if currentSessionID(r) == "" {
-		JSONError(w, http.StatusUnauthorized, "not authenticated")
+	if _, ok := requireSession(w, r); !ok {
 		return
 	}
 
@@ -106,8 +104,7 @@ func (s *Server) handleAPITokenCreate(w http.ResponseWriter, r *http.Request) {
 // handleAPITokenRevoke handles DELETE /api/tokens/{id}. The row is gone, so the next request that
 // presents that secret authenticates as nothing.
 func (s *Server) handleAPITokenRevoke(w http.ResponseWriter, r *http.Request) {
-	if currentSessionID(r) == "" {
-		JSONError(w, http.StatusUnauthorized, "not authenticated")
+	if _, ok := requireSession(w, r); !ok {
 		return
 	}
 

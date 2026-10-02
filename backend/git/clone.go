@@ -99,7 +99,7 @@ func cloneURLScheme(s string) (string, bool) {
 		return "", false
 	}
 	scheme := s[:i]
-	for j := 0; j < len(scheme); j++ {
+	for j := range len(scheme) {
 		c := scheme[j]
 		alnum := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
 		if !alnum && (j == 0 || (c != '+' && c != '-' && c != '.')) {
@@ -118,7 +118,7 @@ func validateScpLikeCloneURL(s string, colon int) error {
 	if host == "" || path == "" {
 		return fmt.Errorf("clone source is not a valid repository URL or path")
 	}
-	for i := 0; i < len(host); i++ {
+	for i := range len(host) {
 		c := host[i]
 		ok := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
 			c == '.' || c == '-' || c == '_' || c == '@'

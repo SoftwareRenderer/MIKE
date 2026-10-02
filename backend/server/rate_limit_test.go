@@ -298,8 +298,8 @@ func TestNewLoginRateLimiterHonoursValidValue(t *testing.T) {
 	}
 }
 
-// TestLoginRouteRateLimitedWithZeroBudget is the end-to-end regression for the
-// "0 disables it" behaviour: the login route must still answer 429.
+// TestLoginRouteRateLimitedWithZeroBudget: a zero budget does not disable the limiter — the login
+// route must still answer 429.
 func TestLoginRouteRateLimitedWithZeroBudget(t *testing.T) {
 	s := testServerWith(t, func(c *startup.Config) { c.LoginRateLimit = 0 })
 

@@ -26,7 +26,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash);
 `
 
 // sessionColumns lists the sessions columns in the order CreateSession writes them, and is every
-// column the table has — the schema test compares this list against the DDL above.
+// column the table has.
 const sessionColumns = `id, token, csrf_token, token_hash, ip, user_agent, last_seen, created_at, expires_at`
 
 // lastSeenInterval is the minimum seconds between two last_seen writes for one

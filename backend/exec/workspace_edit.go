@@ -57,7 +57,7 @@ type lspTextEdit struct {
 // lineStartOffsets returns the byte offset of each line start in content.
 func lineStartOffsets(content string) []int {
 	offsets := []int{0}
-	for i := 0; i < len(content); i++ {
+	for i := range len(content) {
 		if content[i] == '\n' {
 			offsets = append(offsets, i+1)
 		}

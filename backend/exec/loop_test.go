@@ -1724,9 +1724,8 @@ func TestBuildCommitConversation_OrphanToolRowsIgnored(t *testing.T) {
 
 func TestBuildCommitConversation_AdvisoryRowKeepsToolRows(t *testing.T) {
 	t.Parallel()
-	// The same regression the LLM rebuild was fixed for, on the utility entry point: a note
-	// written between an assistant row and its tool_call rows must not cost the commit
-	// message that turn's calls and results.
+	// A note written between an assistant row and its tool_call rows must not cost the commit message
+	// that turn's calls and results.
 	taskMsgs := []types.TaskMessage{
 		{ID: "a1", Role: "user", Content: "Fix it"},
 		{ID: "as-1", Role: "assistant", Content: "editing"},
@@ -1792,13 +1791,11 @@ func TestFormatConversationTurns_FullPipeline(t *testing.T) {
 	}
 }
 
-// --- UTF-8 Tests (regression for CPU spike bug) ---
+// --- UTF-8 streaming ---
 
 func TestPhraseDetector_UTF8Streaming(t *testing.T) {
 	t.Parallel()
-	// Simulate streaming chunks containing multi-byte UTF-8 characters.
-	// This is the exact scenario that caused the CPU spike:
-	// small chunks with UTF-8 chars that get split across calls.
+	// Streaming chunks of multi-byte UTF-8 characters split across call boundaries.
 	d := newPhraseDetector()
 
 	// Feed chunks that contain UTF-8 characters
@@ -1849,9 +1846,7 @@ func TestPhraseDetector_PendingBufferBound(t *testing.T) {
 
 func TestPhraseDetector_UTF8NoBufferBloat(t *testing.T) {
 	t.Parallel()
-	// Regression test: ensure UTF-8 text doesn't cause exponential pending growth.
-	// Before the fix, multi-byte chars were split into bytes, re-encoded as longer
-	// sequences, and the pending buffer grew exponentially with each call.
+	// Multi-byte UTF-8 with no sentence boundary must not grow the pending buffer with each call.
 	d := newPhraseDetector()
 
 	// UTF-8 text with multi-byte characters, no sentence boundaries
@@ -1862,9 +1857,7 @@ func TestPhraseDetector_UTF8NoBufferBloat(t *testing.T) {
 		d.check(utf8Text)
 	}
 
-	// The pending buffer should not grow exponentially.
-	// With the fix, pending is bounded to maxPendingSize.
-	// Without the fix, it would be ~utf8Text * 10 * corruption_factor.
+	// However many calls accumulate, pending is bounded by maxPendingSize.
 	if len(d.pending) > maxPendingSize {
 		t.Errorf("pending buffer %d bytes exceeds maxPendingSize %d (UTF-8 bloat?)", len(d.pending), maxPendingSize)
 	}

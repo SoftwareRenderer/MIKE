@@ -104,9 +104,8 @@ func serveDied(served chan error) (error, bool) {
 	}
 }
 
-// TestHybridListener_SilentPeerDoesNotBlockOtherClients is the WebSocket-latency
-// regression: a connection that has not sent its first byte must not delay the next
-// client.
+// TestHybridListener_SilentPeerDoesNotBlockOtherClients: a connection that has not sent its first
+// byte must not delay the next client.
 func TestHybridListener_SilentPeerDoesNotBlockOtherClients(t *testing.T) {
 	addr, served, stop := hybridTestServer(t, 5*time.Second, nil)
 	defer stop()

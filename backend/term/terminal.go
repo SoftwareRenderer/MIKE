@@ -104,13 +104,7 @@ func (t *taskTerminal) minSize() (rows, cols uint16) {
 // clampDim bounds a client-reported dimension to 1..1000, preventing
 // malformed values from wrapping through uint16.
 func clampDim(v int) uint16 {
-	if v < 1 {
-		return 1
-	}
-	if v > 1000 {
-		return 1000
-	}
-	return uint16(v)
+	return uint16(min(max(v, 1), 1000))
 }
 
 // applySize sets the PTY to the given rows/cols if it differs from current size. The lock is held
@@ -286,7 +280,6 @@ func (tm *TerminalManager) GetProjectPorts(projectID string) []types.AssignedPor
 }
 
 // getOrCreate returns an existing session or creates a new one for the task.
-// projectID is used to check if sandbox is enabled for the project.
 func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktreePath string, projectID string) (*taskTerminal, error) {
 	tm.mu.RLock()
 	session, ok := tm.sessions[sessionKey]
@@ -589,9 +582,8 @@ func (tm *TerminalManager) HandleTerminal(w http.ResponseWriter, r *http.Request
 func (tm *TerminalManager) HandleProjectTerminal(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 
-	project, err := tm.store.GetProject(projectID)
-	if err != nil {
-		httputil.Fail(w, err, "get project", "project not found")
+	project, ok := httputil.ResolveProjectID(w, tm.store, projectID)
+	if !ok {
 		return
 	}
 

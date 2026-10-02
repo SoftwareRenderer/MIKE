@@ -732,15 +732,12 @@ func TestPreviewServe_URLReflectsDocDirectory(t *testing.T) {
 	}
 }
 
-// A path that is inside the workspace dir but inside neither the project nor the
-// named task's worktree is refused — it used to be served with the file's own
-// directory as the asset root.
+// TestPreviewServe_WorkspaceOnlyPathIsRefused: a path inside the workspace dir but inside neither the
+// project nor the named task's worktree is refused.
 //
-// The workspace dir holds every project's task worktrees, so that fallback made one
-// preview token read the siblings of any task on the host: the document itself is
-// unauthenticated by design (an iframe cannot carry a session), so the asset root is
-// the whole reach of the token. The project checkout plus the request's own worktree
-// is the jail now.
+// The workspace dir holds every project's task worktrees, so the asset root is the whole reach of a
+// preview token — the document itself is unauthenticated by design (an iframe cannot carry a session).
+// The project checkout plus the request's own worktree is the jail.
 func TestPreviewServe_WorkspaceOnlyPathIsRefused(t *testing.T) {
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)

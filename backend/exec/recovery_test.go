@@ -279,9 +279,8 @@ func TestRecoverBridgeForTask_Tier2RecreateRunningContainer(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// THE BUG: container stopped/removed while the task is still running
-// (e.g. an image rebuild calls StopProjectContainers). Previously this made
-// recovery give up, leaving the task stuck at "Failed: bash: client closed".
+// A container stopped or removed while its task still runs (an image rebuild calls
+// StopProjectContainers) is recovered by creating a new sandbox, not given up on.
 // ---------------------------------------------------------------------------
 
 func TestRecoverBridgeForTask_CreatesSandboxFromScratchWhenStopped(t *testing.T) {
