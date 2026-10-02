@@ -740,11 +740,11 @@ func (s *Server) RedirectHTTPSMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// withNonce serves index.html for "/" with a request-specific CSP nonce; everything else
+// withNonce serves the application document with a request-specific CSP nonce; everything else
 // passes through to the file server.
 func (s *Server) withNonce(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" {
+		if isDocumentPath(r.URL.Path) {
 			content, err := fs.ReadFile(s.assets, "index.html")
 			if err != nil {
 				http.Error(w, "failed to read index.html", http.StatusInternalServerError)

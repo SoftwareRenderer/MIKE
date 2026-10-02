@@ -6,8 +6,17 @@ import type { Plugin } from 'vite';
  * precaches every built file, so this decides whether the renderer lands in every install.
  */
 
-/** mermaid's own modules, including the chunks it imports lazily per diagram type. */
-const MERMAID = '/node_modules/mermaid/';
+/** The renderer's own modules, including the ones it imports per diagram type. */
+export const MERMAID_MODULES = /\/node_modules\/mermaid\//;
+
+/** The libraries that reach the application only through the renderer. */
+export const DIAGRAM_NEIGHBOUR_MODULES = /\/node_modules\/(d3|dayjs)/;
+
+/** Everything vendored under mermaid itself. */
+export const MERMAID_VENDORED_MODULES = /\/node_modules\/mermaid\/node_modules\//;
+
+/** The chunk `vite.config.ts` groups those modules into. */
+export const MERMAID_VENDOR_CHUNK = 'mermaid-vendor';
 
 /** Names the renderer's chunks, which is how the deny list below can refuse them. */
 export const MERMAID_CHUNK_PREFIX = 'mmd-';
@@ -37,7 +46,7 @@ export function mermaidChunksPlugin(): Plugin {
         apply: 'build',
         moduleParsed(info) {
             if (!info.id) return;
-            if (info.id.includes(MERMAID)) mermaidInGraph = true;
+            if (MERMAID_MODULES.test(info.id)) mermaidInGraph = true;
             edges.set(info.id, edgeIds(info));
             if (info.isEntry) entries.add(info.id);
         },
@@ -46,7 +55,7 @@ export function mermaidChunksPlugin(): Plugin {
             const queue = [...entries];
             while (queue.length) {
                 const id = queue.pop()!;
-                if (reached.has(id) || id.includes(MERMAID)) continue;
+                if (reached.has(id) || MERMAID_MODULES.test(id)) continue;
                 reached.add(id);
                 for (const next of edges.get(id) ?? []) queue.push(next);
             }

@@ -41,11 +41,18 @@ var publicPaths = map[string]map[string]struct{}{
 // and the CORP exemption in isOpaqueOriginAsset.
 const hostClientPath = "/host-client.js"
 
+// isDocumentPath reports the URLs the application document answers. The service worker precaches
+// "/index.html" by name and abandons its install on a non-200, so that URL is public beside "/" and
+// must carry a nonce like every other document.
+func isDocumentPath(path string) bool {
+	return path == "/" || path == "/index.html"
+}
+
 // isPublicPath returns true if the given path+method combination is publicly accessible.
 // Static assets (frontend) are always public.
 func isPublicPath(path, method string) bool {
 	// Frontend static assets are always public
-	if path == "/" || path == hostClientPath || strings.HasPrefix(path, "/assets/") || strings.HasPrefix(path, "/favicon") {
+	if isDocumentPath(path) || path == hostClientPath || strings.HasPrefix(path, "/assets/") || strings.HasPrefix(path, "/favicon") {
 		return true
 	}
 	// Extension static assets (extension code, UI entrypoints) are always

@@ -4,12 +4,13 @@
     import type { ExplorerLayout } from '$lib/services/explorer-layout.svelte';
     import BranchGitGraph from './BranchGitGraph.svelte';
     import BranchSymbols from './BranchSymbols.svelte';
-    import CommitDiffOverlay from './CommitDiffOverlay.svelte';
     import EditorTabs from './EditorTabs.svelte';
+    import EmptyState from './EmptyState.svelte';
     import FileSearchPanel from './FileSearchPanel.svelte';
     import GitStatusPanel from './GitStatusPanel.svelte';
     import ResizeHandle from './ResizeHandle.svelte';
     import SandboxImageStatusBanner from './SandboxImageStatusBanner.svelte';
+    import { useLazyComponent } from '$lib/composables/use-lazy-component.svelte';
     import { t } from '$lib/i18n';
     import { baseName, folderName } from '$lib/utils/path';
 
@@ -35,6 +36,12 @@
         onScrollTop?: (path: string, top: number) => void;
         browser: Snippet;
     } = $props();
+
+    const commitDiff = useLazyComponent(() => import('./CommitDiffOverlay.svelte'));
+
+    $effect(() => {
+        if (core.diffCommit) commitDiff.load();
+    });
 
 </script>
 
@@ -142,19 +149,24 @@
         <!-- Column 2: Commit diff or file editor -->
         <div class="explorer-center-column" class:hidden={isMobile && core.activeTab !== 'editor'}>
             {#if core.diffCommit}
-                <CommitDiffOverlay
-                    commit={core.diffCommit}
-                    files={core.diffCommitFiles}
-                    loading={core.diffLoading}
-                    projectId={projectId}
-                    taskId={taskId}
-                    onClose={core.closeCommitDiff}
-                    onNavigate={core.handleDiffNavigate}
-                    onFileSelected={core.handleFileSelected}
-                    hasPrev={core.diffCommitIndex < core.commits.length - 1}
-                    hasNext={core.diffCommitIndex > 0}
-                    isMobile={isMobile}
-                />
+                {#if commitDiff.component}
+                    {@const CommitDiffOverlay = commitDiff.component}
+                    <CommitDiffOverlay
+                        commit={core.diffCommit}
+                        files={core.diffCommitFiles}
+                        loading={core.diffLoading}
+                        projectId={projectId}
+                        taskId={taskId}
+                        onClose={core.closeCommitDiff}
+                        onNavigate={core.handleDiffNavigate}
+                        onFileSelected={core.handleFileSelected}
+                        hasPrev={core.diffCommitIndex < core.commits.length - 1}
+                        hasNext={core.diffCommitIndex > 0}
+                        isMobile={isMobile}
+                    />
+                {:else}
+                    <EmptyState class="pane-fill" title={t('git.loadingDiffViewer')} />
+                {/if}
             {:else}
                 {#if core.openFiles.length > 0}
                     <EditorTabs

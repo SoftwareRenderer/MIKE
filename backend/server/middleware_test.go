@@ -102,6 +102,43 @@ func TestWorkerScriptNeedsNoSession(t *testing.T) {
 	}
 }
 
+// TestPrecachedDocumentNeedsNoSession: the worker precaches `/index.html` by name and abandons its
+// install on a non-200, so the document answers with a nonce before anyone has signed in.
+func TestPrecachedDocumentNeedsNoSession(t *testing.T) {
+	s := testServer(t)
+
+	get := func(path string) string {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Host = "localhost"
+		rr := httptest.NewRecorder()
+		s.middlewareChain(s.router).ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("GET %s with no session: got %d %q, want 200", path, rr.Code, rr.Body.String())
+		}
+		return rr.Body.String()
+	}
+
+	// The nonce is per response, so it is what the two documents are allowed to differ in.
+	stripNonce := func(doc string) string {
+		match := noncePattern.FindStringSubmatch(doc)
+		if match == nil {
+			return doc
+		}
+		return strings.Replace(doc, match[0], `nonce=""`, 1)
+	}
+
+	indexed := get("/index.html")
+	if strings.Contains(indexed, "{{.Nonce}}") {
+		t.Errorf("GET /index.html served the unreplaced placeholder: %q", indexed)
+	}
+	if noncePattern.FindStringSubmatch(indexed) == nil {
+		t.Errorf("GET /index.html carries no nonce, so its one inline script is refused: %q", indexed)
+	}
+	if got, want := stripNonce(indexed), stripNonce(get("/")); got != want {
+		t.Errorf("GET /index.html is a different document than GET /:\n got %q\nwant %q", got, want)
+	}
+}
+
 // TestMiddlewareSessionIDInContext checks what the status-code rows above cannot: that
 // the middleware publishes the validated session id on the context, which is how every
 // handler downstream identifies the caller.

@@ -1,6 +1,6 @@
 <script lang="ts">
-    import FileEditor from './FileEditor.svelte';
     import type { OpenFileTab } from '$lib/utils/editor-tabs';
+    import { useLazyComponent } from '$lib/composables/use-lazy-component.svelte';
     import { t } from '$lib/i18n';
     import { baseName } from '$lib/utils/path';
     import type { LSPSymbol } from '$lib/utils/lsp-symbols';
@@ -40,22 +40,11 @@
 
     const fullscreenTitle = $derived(fullscreenToggleTitle(appStore.config));
 
-    // Lazy-loaded on first file edit
-    let FileEditorComponent: typeof FileEditor | null = $state(null);
-    let fileEditorLoading = $state(false);
-
-    function loadFileEditor(): void {
-        if (FileEditorComponent || fileEditorLoading) return;
-        fileEditorLoading = true;
-        import('./FileEditor.svelte').then((mod) => {
-            FileEditorComponent = mod.default;
-            fileEditorLoading = false;
-        }).catch(() => { fileEditorLoading = false; });
-    }
+    const fileEditor = useLazyComponent(() => import('./FileEditor.svelte'));
 
     $effect(() => {
         if (openFiles.length > 0) {
-            loadFileEditor();
+            fileEditor.load();
         }
     });
 
@@ -197,10 +186,10 @@
 
     <!-- Editor panels -->
     <div class="editor-panels">
-        {#if fileEditorLoading}
+        {#if fileEditor.loading}
             <div class="file-editor-loading">{t('editor.loadingEditor')}</div>
-        {:else if FileEditorComponent}
-            {@const FileEditor = FileEditorComponent}
+        {:else if fileEditor.component}
+            {@const FileEditor = fileEditor.component}
             {#each openFiles as file (file.path)}
                 <FileEditor
                     projectId={projectId}

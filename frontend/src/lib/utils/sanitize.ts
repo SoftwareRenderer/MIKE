@@ -57,6 +57,7 @@
  */
 import { Marked } from 'marked';
 import DOMPurify from 'dompurify';
+import { storeBounded } from '$lib/utils/bounded-map';
 
 /** Attributes no untrusted fragment may carry, whatever their value. A mutable
  * array only because that is what DOMPurify's config type accepts; nothing here
@@ -125,6 +126,20 @@ const embeddingMarkdown = new Marked({ async: false }).use({
 });
 
 /**
+ * How many rendered runs are remembered.
+ *
+ * @knipignore The cache-bound test measures this; nothing else in the app reads the number.
+ */
+export const MARKDOWN_RENDER_CACHE_MAX = 200;
+
+/**
+ * Rendered runs keyed by their source: a streaming answer asks for its finished paragraphs again on
+ * every token flush. The source is all the render reads, so anything the output starts to depend on
+ * has to join the key.
+ */
+const renderedMarkdown = new Map<string, string>();
+
+/**
  * Markdown authored outside this app, rendered and sanitized in one step — the shape
  * every chat-side sink needs. `async: false` is not a style choice: without it
  * `marked` returns a promise and the sink would stringify a `[object Promise]`.
@@ -135,7 +150,11 @@ const embeddingMarkdown = new Marked({ async: false }).use({
  * directly).
  */
 export function markdownToSafeHTML(markdown: string): string {
-    return sanitizeHTML(embeddingMarkdown.parse(markdown, { async: false }));
+    const cached = renderedMarkdown.get(markdown);
+    if (cached !== undefined) return cached;
+    const html = sanitizeHTML(embeddingMarkdown.parse(markdown, { async: false }));
+    storeBounded(renderedMarkdown, markdown, html, MARKDOWN_RENDER_CACHE_MAX);
+    return html;
 }
 
 /** An SVG parsed as a standalone document must declare this. */

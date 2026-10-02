@@ -43,6 +43,14 @@ covers both. `__tests__/sanitize.unit.ts` re-runs the payload list through a fen
 reason. `__tests__/chat-markdown-fence.unit.svelte.ts` proves the chat bubble and the tool card go
 through the same helper.
 
+### A rendered run is remembered
+
+`markdownToSafeHTML` keeps its last `MARKDOWN_RENDER_CACHE_MAX` results, keyed by the whole source run.
+A streaming answer asks for its finished paragraphs again on every token flush, and the memo is what
+stops those from being parsed and sanitized a second time. The key holds all the render reads, so an
+entry is that source's own sanitized output and two sources never share one. The bound and that
+separation are in `src/lib/utils/__tests__/markdown-render-cache.unit.ts`.
+
 ### The chat bubble splits its fences out
 
 `Chat/MarkdownBody.svelte` renders an assistant message as segments rather than as one HTML string.

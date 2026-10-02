@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { clearHighlightCache, highlightLinesAsync } from '$lib/highlighter';
+import { highlightLinesAsync } from '$lib/highlighter';
+import { clearHighlightCache } from '$lib/utils/highlight-cache';
 import { extensionManager } from '$lib/services/extension-manager.svelte';
 import type { Extension, SyntaxSpec } from '$lib/types';
 

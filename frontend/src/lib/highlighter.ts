@@ -1,6 +1,6 @@
 import { highlightTree } from '@lezer/highlight';
 import type { Language } from '@codemirror/language';
-import { HIGHLIGHT_CACHE_MAX } from '$lib/constants';
+import { cachedGrammar, cachedHighlights, clearHighlightCache, storeGrammar, storeHighlights } from '$lib/utils/highlight-cache';
 import { escapeHtml } from '$lib/utils/format';
 import { getLanguageSupport, resolveFile } from '$lib/utils/editor-language';
 import { bracketLevelsForTree } from '$lib/syntax/bracket-pairs';
@@ -8,33 +8,26 @@ import { diffHighlighter } from '$lib/syntax/token-style';
 import { fileBase, fileSuffix } from '$lib/utils/file-suffix';
 import { extensionManager } from '$lib/services/extension-manager.svelte';
 
-/** Grammar cache, keyed by file suffix (or by basename when the file has no suffix). */
-const languageCache = new Map<string, Language | null>();
-
-/** The extension list the cache was built against; a new list means the cache is stale. */
+/** The extension list the caches were built against; a new list means both are stale. */
 let grammarOwner: readonly unknown[] | null = null;
 
-/** Grammar for a path, or null for plain text; the cache resets with the extension list, since a grammar comes from a manifest. */
+/** Grammar for a path, or null for plain text; resolved grammars are cached by suffix. */
 async function loadLanguage(path: string): Promise<Language | null> {
     const extensions = extensionManager.state.extensions;
     if (grammarOwner !== extensions) {
-        languageCache.clear();
+        clearHighlightCache();
         grammarOwner = extensions;
     }
 
     const key = fileSuffix(path) || fileBase(path);
 
-    const cached = languageCache.get(key);
+    const cached = cachedGrammar(key);
     if (cached !== undefined) return cached;
 
     const lang = getLanguageSupport(path)?.language ?? null;
-    languageCache.set(key, lang);
+    storeGrammar(key, lang);
     return lang;
 }
-
-/** Simple LRU cache for highlight results (keyed by path + content hash). */
-const highlightCache = new Map<string, string[]>();
-
 
 /** Compute a simple hash for cache key. */
 function contentHash(lines: string[]): string {
@@ -68,14 +61,10 @@ function mergeSpans(
     return out;
 }
 
-/**
- * Core highlighting logic — given a loaded Language object, parse and highlight.
- * Results are cached per file path + content hash to avoid redundant parsing.
- */
+/** Highlight with an already-loaded grammar. */
 function _highlightWithLang(lines: string[], path: string, lang: Language): string[] {
-    // Check cache
     const cacheKey = `${path}\x00${contentHash(lines)}`;
-    const cached = highlightCache.get(cacheKey);
+    const cached = cachedHighlights(cacheKey);
     if (cached) return cached;
 
     try {
@@ -183,12 +172,7 @@ function _highlightWithLang(lines: string[], path: string, lang: Language): stri
             }
         }
 
-        // Store in cache (evict oldest if full)
-        if (highlightCache.size >= HIGHLIGHT_CACHE_MAX) {
-            const firstKey = highlightCache.keys().next().value as string;
-            highlightCache.delete(firstKey);
-        }
-        highlightCache.set(cacheKey, result);
+        storeHighlights(cacheKey, result);
         return result;
     } catch {
         return lines.map(() => '');
@@ -209,13 +193,4 @@ export async function highlightLinesAsync(lines: string[], path: string): Promis
     if (!lang) return lines.map(() => '');
 
     return _highlightWithLang(lines, path, lang);
-}
-
-/**
- * Clear the module-level LRU highlight cache.
- * Call when switching tasks to avoid stale highlights.
- */
-export function clearHighlightCache(): void {
-    highlightCache.clear();
-    languageCache.clear();
 }

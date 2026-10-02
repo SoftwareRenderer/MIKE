@@ -48,11 +48,6 @@ export const SAVE_RETRY_BASE_DELAY_MS = 2_000;
 /** The longest that wait gets. It is a pace, not a deadline. */
 export const SAVE_RETRY_MAX_DELAY_MS = 15_000;
 
-// ─── Cache Sizes ───
-
-/** Max entries in the syntax highlighter cache before eviction. */
-export const HIGHLIGHT_CACHE_MAX = 50;
-
 // ─── UI Defaults ───
 
 /** Default toast auto-dismiss duration (ms). */

@@ -3,7 +3,8 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { VitePWA } from 'vite-plugin-pwa';
 // The extension is load-bearing: `configLoader: 'native'` resolves specifiers verbatim.
 import { buildIdPlugin } from './scripts/build-id.ts';
-import { isMermaidChunk, mermaidChunksPlugin, MERMAID_CHUNK_PREFIX, MERMAID_PRECACHE_DENY } from './scripts/mermaid-chunks.ts';
+import { bootGraphPlugin } from './scripts/boot-graph.ts';
+import { isMermaidChunk, mermaidChunksPlugin, MERMAID_CHUNK_PREFIX, MERMAID_PRECACHE_DENY, DIAGRAM_NEIGHBOUR_MODULES, MERMAID_VENDORED_MODULES, MERMAID_VENDOR_CHUNK } from './scripts/mermaid-chunks.ts';
 import { alias } from './scripts/aliases.js';
 import { isAppShellAsset, isExtensionAsset } from './scripts/sw-routes.ts';
 
@@ -11,6 +12,7 @@ export default defineConfig({
     plugins: [
         svelte(),
         buildIdPlugin(),
+        bootGraphPlugin(),
         mermaidChunksPlugin(),
         VitePWA({
             // No `autoUpdate`: that would set skipWaiting/clientsClaim and let the browser pick when a
@@ -114,6 +116,12 @@ export default defineConfig({
                         : 'assets/[name]-[hash].js';
                 },
                 manualChunks(id) {
+                    // The renderer's vendor code gets one chunk: left ungrouped the bundler parks it
+                    // beside the shared runtime, so a board load evaluates it. mermaid's own `dist/`
+                    // stays out — its per-diagram chunks are already lazy.
+                    if (DIAGRAM_NEIGHBOUR_MODULES.test(id) || MERMAID_VENDORED_MODULES.test(id)) {
+                        return MERMAID_VENDOR_CHUNK;
+                    }
                     // Split CodeMirror language packages into separate chunks
                     // so they're only loaded when a diff of that language is viewed.
                     if (id.includes('/@codemirror/lang-') || id.includes('/@replit/codemirror-lang-svelte')) {

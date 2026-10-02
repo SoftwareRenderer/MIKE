@@ -19,7 +19,7 @@
     import { sandboxMountPath } from '$lib/utils/path';
     import { isVimSwapFile } from '$lib/utils/file-suffix';
     import { isAnyModalOpen } from '$lib/utils/modal-state';
-    import { clearHighlightCache } from '$lib/highlighter';
+    import { clearHighlightCache } from '$lib/utils/highlight-cache';
     import { createTabReturn } from '$lib/composables/use-tab-return';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { loadAppSetting, saveAppSetting, loadCollapsedSections, saveCollapsedSections } from '$lib/storage';
