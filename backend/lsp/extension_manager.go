@@ -1084,29 +1084,44 @@ func (m *ExtensionLSPManager) lspNotify(ctx context.Context, sc *sandboxClient, 
 	return sc.bridgeClient.LSPNotify(ctx, translated)
 }
 
-// lookupExtensionByFile finds the matching LSP extension for a given file path.
-func (m *ExtensionLSPManager) lookupExtensionByFile(filePath string) (*extensions.Extension, error) {
-	extensions, err := m.extStore.GetByType(extensions.ExtensionTypeLSP)
+// firstEnabledLSP walks the enabled LSP extensions in store order and returns the first one pick
+// answers true for, or nil when none does. It is the only place that reads the store to find a
+// language server, so "enabled" and "declares an LSP capability" are decided once for every caller.
+func firstEnabledLSP(extStore *extensions.ExtensionStore, pick func(*extensions.Extension, *extensions.LSPConfig) bool) (*extensions.Extension, error) {
+	items, err := extStore.GetByType(extensions.ExtensionTypeLSP)
 	if err != nil {
 		return nil, err
 	}
-
-	for _, extItem := range extensions {
-		if !extItem.Enabled {
+	for i := range items {
+		ext := &items[i]
+		if !ext.Enabled {
 			continue
 		}
-		lspCfg := extItem.Manifest.Capabilities.GetLSP()
+		lspCfg := ext.Manifest.Capabilities.GetLSP()
 		if lspCfg == nil {
 			continue
 		}
-		// One matcher for every caller: the extension's own file-type declaration decides, and
-		// it also answers the case of an extensionless file named after its language.
-		if lspCfg.MatchesFile(filePath) {
-			return &extItem, nil
+		if pick(ext, lspCfg) {
+			return ext, nil
 		}
 	}
+	return nil, nil
+}
 
-	return nil, fmt.Errorf("no enabled LSP extension found for file %q", filePath)
+// lookupExtensionByFile finds the matching LSP extension for a given file path.
+func (m *ExtensionLSPManager) lookupExtensionByFile(filePath string) (*extensions.Extension, error) {
+	ext, err := firstEnabledLSP(m.extStore, func(_ *extensions.Extension, lspCfg *extensions.LSPConfig) bool {
+		// One matcher for every caller: the extension's own file-type declaration decides, and
+		// it also answers the case of an extensionless file named after its language.
+		return lspCfg.MatchesFile(filePath)
+	})
+	if err != nil {
+		return nil, err
+	}
+	if ext == nil {
+		return nil, fmt.Errorf("no enabled LSP extension found for file %q", filePath)
+	}
+	return ext, nil
 }
 
 // IsToolCallsEnabledForFile reports whether the LSP extension handling the given file has tool
@@ -1125,32 +1140,26 @@ func (m *ExtensionLSPManager) IsToolCallsEnabledForFile(filePath string) bool {
 
 // lookupExtension finds the LSP extension that answers for a language name.
 func (m *ExtensionLSPManager) lookupExtension(language string) (*extensions.Extension, error) {
-	extensions, err := m.extStore.GetByType(extensions.ExtensionTypeLSP)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, ext := range extensions {
-		if !ext.Enabled {
-			continue
-		}
-		lspCfg := ext.Manifest.Capabilities.GetLSP()
-		if lspCfg == nil {
-			continue
-		}
+	ext, err := firstEnabledLSP(m.extStore, func(_ *extensions.Extension, lspCfg *extensions.LSPConfig) bool {
 		if lspCfg.Language == language {
-			return &ext, nil
+			return true
 		}
 		// A caller may name a file type instead ("ts", "javascriptreact"); both are answers the
 		// extension declared, not strings this function knows.
 		for _, ft := range lspCfg.FileTypes {
 			if ft.LanguageID == language || ft.Extension == language {
-				return &ext, nil
+				return true
 			}
 		}
+		return false
+	})
+	if err != nil {
+		return nil, err
 	}
-
-	return nil, fmt.Errorf("no enabled LSP extension found for language %q", language)
+	if ext == nil {
+		return nil, fmt.Errorf("no enabled LSP extension found for language %q", language)
+	}
+	return ext, nil
 }
 
 // ExtensionRegistry provides language server configuration from installed extensions.
@@ -1166,45 +1175,24 @@ func NewExtensionRegistry(extStore *extensions.ExtensionStore) *ExtensionRegistr
 // Lookup finds the ServerConfig for a file path or workspace, by the extension's own
 // declared file pattern.
 func (r *ExtensionRegistry) Lookup(fileOrPath string) *ServerConfig {
-	extensions, err := r.extStore.GetByType(extensions.ExtensionTypeLSP)
-	if err != nil {
+	ext, err := firstEnabledLSP(r.extStore, func(_ *extensions.Extension, lspCfg *extensions.LSPConfig) bool {
+		// A workspace path with no suffix still resolves when its directory name names the
+		// language; extensions.LSPConfig.fileTypeFor owns that rule and MatchesFile answers it.
+		return lspCfg.MatchesFile(fileOrPath)
+	})
+	if err != nil || ext == nil {
 		return nil
 	}
-
-	for _, extItem := range extensions {
-		if !extItem.Enabled {
-			continue
-		}
-		lspCfg := extItem.Manifest.Capabilities.GetLSP()
-		if lspCfg == nil {
-			continue
-		}
-		if lspCfg.MatchesFile(fileOrPath) {
-			return r.toServerConfig(&extItem)
-		}
-		// A workspace path (no suffix) still resolves by its directory name, as when the name
-		// names the language — the declared language, not a table here.
-		if lspCfg.Language != "" && strings.EqualFold(filepath.Base(fileOrPath), lspCfg.Language) {
-			return r.toServerConfig(&extItem)
-		}
-	}
-
-	return nil
+	return r.toServerConfig(ext)
 }
 
 // HasAnyLSPToolCallsExtension reports whether any enabled LSP extension has tool calls
 // enabled, which decides whether the agent gets LSP tools at all.
 func (r *ExtensionRegistry) HasAnyLSPToolCallsExtension() bool {
-	extensions, err := r.extStore.GetByType(extensions.ExtensionTypeLSP)
-	if err != nil {
-		return false
-	}
-	for _, ext := range extensions {
-		if ext.Enabled && ext.Manifest.Capabilities.GetLSP() != nil && ext.Manifest.Capabilities.LSP.IsToolCallsEnabled() {
-			return true
-		}
-	}
-	return false
+	ext, err := firstEnabledLSP(r.extStore, func(_ *extensions.Extension, lspCfg *extensions.LSPConfig) bool {
+		return lspCfg.IsToolCallsEnabled()
+	})
+	return err == nil && ext != nil
 }
 
 func (r *ExtensionRegistry) toServerConfig(ext *extensions.Extension) *ServerConfig {

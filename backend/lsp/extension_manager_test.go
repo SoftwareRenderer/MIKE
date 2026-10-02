@@ -148,6 +148,27 @@ func TestExtensionRegistry_Lookup_ExtensionlessPath(t *testing.T) {
 	}
 }
 
+// A workspace directory named after the language is the other way a server is found when no file
+// suffix answers for it. The rule lives in extensions.LSPConfig.fileTypeFor; a Lookup that stops
+// answering it here loses the language server for a workspace opened by directory.
+func TestExtensionRegistry_Lookup_WorkspaceNamedAfterLanguage(t *testing.T) {
+	store := testExtensionStore(t)
+	if err := store.InitSchema(); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+	if err := store.Create(makeTestLSPExt("gopls", "go")); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	reg := NewExtensionRegistry(store)
+	if cfg := reg.Lookup("/home/dev/go"); cfg == nil || cfg.Language != "go" {
+		t.Errorf("Lookup(\"/home/dev/go\") = %+v, want the go config", cfg)
+	}
+	if cfg := reg.Lookup("/home/dev/GO"); cfg == nil || cfg.Language != "go" {
+		t.Errorf("Lookup(\"/home/dev/GO\") = %+v, want the go config (the name is matched case-insensitively)", cfg)
+	}
+}
+
 func TestLookupExtensionByFile_Extensionless(t *testing.T) {
 	store := testExtensionStore(t)
 	if err := store.InitSchema(); err != nil {

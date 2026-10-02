@@ -46,6 +46,7 @@ field and its reader arrive together or not at all.
 | `adapter.go` | Core protocol logic — **zero `backend/` imports**, so its unit tests run natively there |
 | `wasm/main.go` | WASI reactor via `//go:wasmexport`, wrapping the adapter. `string` is allowed as a **param only**, never a return |
 | `build.sh` | `GOOS=wasip1 GOARCH=wasm go build -trimpath -buildmode=c-shared` |
+| `go.mod` | The adapter is its own module with `replace mike => ../../../MIKE`, because it reads `pkg/agent` for the event and config types and `build.sh` builds from inside `wasm/` — the module root beside it is what makes that a build |
 | `manifest.json` | Declares `agent.wasm_module` |
 | `LICENSE` / `NOTICE` / `THIRD_PARTY_NOTICES.md` | Required — extensions are independently licensed projects |
 

@@ -181,13 +181,20 @@ func (es *ExtensionStore) List() ([]Extension, error) {
 	return es.GetByType("")
 }
 
-// ListProjectPaths returns the host path of every registered project. These paths are the
-// extension-sandbox mount allowlist: an extension may mount what the app already mounts, nothing more.
-func (es *ExtensionStore) ListProjectPaths() ([]string, error) {
+// allProjects is the one place these listings reach the project table. The nil answers are the
+// store's own state, not a read failure: an ExtensionStore built without the project accessor has no
+// paths to lend, and a nil-receiver call is what a zero-value store answers.
+func (es *ExtensionStore) allProjects() ([]types.Project, error) {
 	if es == nil || es.projects == nil {
 		return nil, nil
 	}
-	projects, err := es.projects.ListProjects()
+	return es.projects.ListProjects()
+}
+
+// ListProjectPaths returns the host path of every registered project. These paths are the
+// extension-sandbox mount allowlist: an extension may mount what the app already mounts, nothing more.
+func (es *ExtensionStore) ListProjectPaths() ([]string, error) {
+	projects, err := es.allProjects()
 	if err != nil {
 		return nil, err
 	}
@@ -204,10 +211,7 @@ func (es *ExtensionStore) ListProjectPaths() ([]string, error) {
 // Configuration. The task sandbox already bind-mounts them, so the LSP sandbox may borrow them,
 // read-only (MountPolicy.ForceReadOnly).
 func (es *ExtensionStore) ListProjectSandboxMountPaths() ([]string, error) {
-	if es == nil || es.projects == nil {
-		return nil, nil
-	}
-	projects, err := es.projects.ListProjects()
+	projects, err := es.allProjects()
 	if err != nil {
 		return nil, err
 	}
