@@ -152,6 +152,7 @@ export {
     initGitRepository,
     searchFsPaths,
     getHomeDirectory,
+    resolveHomeDirectory,
 } from './fs';
 export type { FsEntry, FsFileRead, FsSearchResult, FsSearchAnswer } from './fs';
 export { deleteFsPaths, copyFsPaths, moveFsPaths, renameFsPath } from './fs-ops';

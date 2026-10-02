@@ -159,7 +159,7 @@
 {/if}
 
 {#if showDirectoryPicker}
-    <PathPicker title={t('sandbox.selectDirectory')} initialPath="/home" emptyLabel={t('sandbox.noSubdirectories')} selectTitle={t('sandbox.selectDirectoryTitle')} onClose={() => showDirectoryPicker = false} onSelect={(path: string) => { draft.newMountHostPath = path; showDirectoryPicker = false; }} />
+    <PathPicker title={t('sandbox.selectDirectory')} emptyLabel={t('sandbox.noSubdirectories')} selectTitle={t('sandbox.selectDirectoryTitle')} onClose={() => showDirectoryPicker = false} onSelect={(path: string) => { draft.newMountHostPath = path; showDirectoryPicker = false; }} />
 {/if}
 
 <style>
