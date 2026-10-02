@@ -6,18 +6,27 @@ The rules are in `AGENTS.md → Git`. This is the mechanism behind each fence.
 
 - `git.Command(dir, args…)` / `git.CommandContext(ctx, dir, args…)` are the only way this repo starts
   git, and `TestNoGitSubprocessSpawnsOutsideGit` walks `backend/`, `pkg/` and `scripts/` to keep that
-  true. Both set `Dir`, `Env: Env()` and `WaitDelay` in one place, so the allowlist and the hook fence
+  true. Both set `Dir`, `Env: Env()` and `WaitDelay` in one place, so the allowlist and the execution fence
   cannot be forgotten at a call site. `_test.go` is exempt for a stated reason, not for churn: the
   control-case test must be able to spawn an **unfenced** git.
-- `git.HookFence()` pins `core.hooksPath=/dev/null` and `core.fsmonitor=false` via
-  `GIT_CONFIG_COUNT`/`KEY_n`/`VALUE_n`, appended *after* the extras so `os/exec`'s last-wins makes it
-  unforgeable. `--no-verify` is not equivalent — it has no effect on `post-checkout`, which
-  `git worktree add` runs. Accepted user-visible consequence: a `pre-push` hook no longer runs when
-  someone clicks Push.
-- The fence pins those two keys only. Repo-readable settings that name a program otherwise
-  (`credential.helper`, `core.askPass`, `diff.<name>.textconv`) are deliberately left alone: a helper in
-  the operator's own configuration is how a private HTTPS remote authenticates here.
-  `GIT_TERMINAL_PROMPT=0` is what keeps a remote that cannot authenticate from hanging the request.
+- `git.ExecutionFence()` pins `core.hooksPath=/dev/null`, `core.fsmonitor=false`, `core.editor=true`,
+  `core.pager=cat` and `core.askPass=` via `GIT_CONFIG_COUNT`/`KEY_n`/`VALUE_n`, appended *after* the
+  extras so `os/exec`'s last-wins makes it unforgeable. `--no-verify` is not equivalent — it has no
+  effect on `post-checkout`, which `git worktree add` runs. `core.editor` is pinned to `true` and not to
+  something that refuses, because `git merge --continue` takes its message from an editor and a refusing
+  value would stop a person finishing a merge (`TestMergeContinueSurvivesTheEditorFence`). Accepted
+  user-visible consequence: a `pre-push` hook does not run when someone clicks Push.
+- The fence can only pin a key that has one name, so it does not reach a program a repository *selects*
+  by name: `filter.<name>.clean` and `diff.<name>.textconv` come from the repository's `.gitattributes`
+  plus its config, and run whenever git compares a working file to the index — which is what `git status`
+  and `git diff` do. No key disables them. The control against a repository the task itself can write is
+  the read-only git-pointer mount, `sandboxruntime.WorktreeGitPointerMount`
+  (`docs/sandbox-runtime.md → Podman argument construction`).
+- `credential.helper` and `core.sshCommand` are left alone on purpose: a helper or transport in the
+  operator's own configuration is how a private HTTPS remote authenticates here, and a command-line pin
+  would silence it for every project. A task container cannot reach them once the pointer is pinned,
+  because the config that defines them is chosen by the pointer. `GIT_TERMINAL_PROMPT=0` is what keeps a
+  remote that cannot authenticate from hanging the request.
 - Bounds: a **cancelled context** bounds the child, a **WaitDelay** bounds the output pipes after the
   kill, and neither substitutes for the other. `WithStash`'s bracket and the worktree watcher both
   involve processes that can outlive their caller (see `docs/locking.md`).
@@ -257,5 +266,5 @@ still answer. The pair is exact only for the moment the panel last spoke to the 
 Tests: `backend/api/git_test.go` — ahead, behind, and no-upstream.
 ## Checking this
 
-`go test ./backend/git/` covers the command constructor, the hook fence, the stash bracket, the clone
+`go test ./backend/git/` covers the command constructor, the execution fence, the stash bracket, the clone
 transports and the diff baseline. `make check-race` runs it again with the worktree locks watched.

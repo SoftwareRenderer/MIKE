@@ -44,7 +44,7 @@ func TestSandboxContainerSeesNoHostEnv(t *testing.T) {
 	// `-e MIKE_TEST_UNDECLARED` does not.
 	t.Setenv("CONTAINERS_UNRELATED_PROBE", "in-the-client-on-purpose")
 
-	dir := t.TempDir()
+	dir := taskWorktreeDir(t)
 	taskID := "test-hostenv-task"
 
 	const declaredName = "MIKE_LOGIN_PASSWORD"

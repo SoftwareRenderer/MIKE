@@ -1,6 +1,8 @@
 package sandboxruntime
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -192,5 +194,115 @@ func TestAppendCapabilitiesRefusesAnUnisolatedGrant(t *testing.T) {
 	}
 	if got := out[len(isolated):]; !reflect.DeepEqual(got, []string{"--cap-add", "CHOWN", "--cap-add", "SYS_ADMIN"}) {
 		t.Errorf("appended %v", got)
+	}
+}
+
+// TestWorktreeGitPointerMountIsReadOnly asserts the whole spec because `ro` in the wrong field of
+// this string is the bug: the file the rw worktree mount exposes is mounted again, read-only, over the
+// guest's view of it.
+func TestWorktreeGitPointerMountIsReadOnly(t *testing.T) {
+	worktree := t.TempDir()
+	if err := os.WriteFile(filepath.Join(worktree, GitPointerFile), []byte("gitdir: /project/.git/worktrees/t1\n"), 0o644); err != nil {
+		t.Fatalf("seed pointer: %v", err)
+	}
+
+	got, err := WorktreeGitPointerMount(worktree, "/home/sandbox/proj")
+	if err != nil {
+		t.Fatalf("WorktreeGitPointerMount: %v", err)
+	}
+	want := []string{"-v", filepath.Join(worktree, GitPointerFile) + ":/home/sandbox/proj/.git:rprivate,ro"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("WorktreeGitPointerMount() = %q, want %q", got, want)
+	}
+}
+
+// TestWorktreeGitPointerMountRefusesWithoutAPointer is the fail-closed half: no call returns mount
+// arguments unless a real pin exists, so `podman create` can never run without one.
+func TestWorktreeGitPointerMountRefusesWithoutAPointer(t *testing.T) {
+	empty := t.TempDir()
+
+	notAFile := t.TempDir()
+	if err := os.Mkdir(filepath.Join(notAFile, GitPointerFile), 0o755); err != nil {
+		t.Fatalf("seed .git directory: %v", err)
+	}
+
+	for name, dir := range map[string]string{"no pointer": empty, ".git is a directory": notAFile} {
+		if got, err := WorktreeGitPointerMount(dir, "/home/sandbox/proj"); err == nil {
+			t.Errorf("%s: expected refusal, got %q", name, got)
+		}
+	}
+	if got, err := WorktreeGitPointerMount(empty, "/home/sandbox/../etc"); err == nil {
+		t.Errorf("a container path that is not valid should refuse the mount, got %q", got)
+	}
+}
+
+// mustRel is the `..` walk from one directory to another, uncleaned on purpose: filepath.Join of it
+// with its own start would resolve it.
+func mustRel(t *testing.T, from, to string) string {
+	t.Helper()
+	rel, err := filepath.Rel(from, to)
+	if err != nil {
+		t.Fatalf("rel %s → %s: %v", from, to, err)
+	}
+	return rel
+}
+
+// TestVerifyWorktreeGitPointer requires the pointer to name this project's admin tree. The refused
+// shapes are the attack: a gitdir the guest can write, reached directly or by walking out of the admin
+// tree with `..`.
+func TestVerifyWorktreeGitPointer(t *testing.T) {
+	worktree := t.TempDir()
+	projectGit := t.TempDir()
+	sep := string(filepath.Separator)
+	admin := filepath.Join(projectGit, "worktrees", "t1")
+	if err := os.MkdirAll(admin, 0o755); err != nil {
+		t.Fatalf("seed admin dir: %v", err)
+	}
+	pointer := filepath.Join(worktree, GitPointerFile)
+
+	write := func(content string) {
+		t.Helper()
+		if err := os.WriteFile(pointer, []byte(content), 0o644); err != nil {
+			t.Fatalf("seed pointer: %v", err)
+		}
+	}
+
+	for _, ok := range []string{
+		"gitdir: " + admin + "\n",   // what `git worktree add` writes
+		"gitdir: " + admin,          // no trailing newline
+		"gitdir: " + admin + "\r\n", // a CRLF checkout
+		"gitdir: " + admin + "/\n",  // a trailing separator
+	} {
+		write(ok)
+		if err := VerifyWorktreeGitPointer(worktree, projectGit); err != nil {
+			t.Errorf("VerifyWorktreeGitPointer(%q) = %v, want nil", ok, err)
+		}
+	}
+
+	for _, refused := range []string{
+		"gitdir: " + filepath.Join(worktree, ".git-evil"),
+		"gitdir: " + filepath.Join(projectGit, "worktrees-alongside"),
+		"gitdir: /tmp/someone-elses-repo/.git",
+		"gitdir: ../outside",
+		// The admin root holds worktrees; it is not one.
+		"gitdir: " + filepath.Join(projectGit, "worktrees"),
+		// Keeps the admin prefix in the text, walks out of it after cleaning.
+		"gitdir: " + admin + sep + mustRel(t, admin, filepath.Join(worktree, ".git-evil")),
+		// git writes one line.
+		"gitdir: " + admin + "\ngitdir: " + filepath.Join(worktree, ".git-evil"),
+		"/dev/null",
+		"",
+	} {
+		write(refused)
+		if err := VerifyWorktreeGitPointer(worktree, projectGit); err == nil {
+			t.Errorf("pointer %q must be refused: it names a gitdir the guest can influence", refused)
+		}
+	}
+
+	if err := os.Remove(pointer); err != nil {
+		t.Fatalf("remove pointer: %v", err)
+	}
+	if err := VerifyWorktreeGitPointer(worktree, projectGit); err == nil {
+		t.Error("a worktree with no pointer at all must be refused")
 	}
 }

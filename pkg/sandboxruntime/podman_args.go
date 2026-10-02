@@ -14,6 +14,8 @@ package sandboxruntime
 
 import (
 	"fmt"
+	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -69,6 +71,74 @@ func ValidateContainerPath(containerPath string) error {
 // or ',' would move it.
 func BindMountSpec(hostPath, containerPath, mode string) string {
 	return hostPath + ":" + containerPath + ":rprivate," + mode
+}
+
+// GitPointerFile is the entry a linked worktree leaves where its git data would otherwise
+// be: a plain file naming the directory that holds it.
+const GitPointerFile = ".git"
+
+// gitDirPrefix is how git names the directory that holds a linked worktree's data.
+const gitDirPrefix = "gitdir: "
+
+// WorktreeGitPointerMount returns the `-v` pair that pins a task worktree's git pointer read-only,
+// or an error when there is no pointer to pin. The worktree is mounted read-write and the pointer is
+// a file inside it, so without this the guest chooses which gitdir — and so which configuration — the
+// host's git commands read.
+//
+// Append the pair after the worktree's own mount. A missing or non-regular pointer is an error rather
+// than a skipped mount: a container started without the pin has no boundary.
+func WorktreeGitPointerMount(worktreePath, mountPath string) ([]string, error) {
+	if err := ValidateContainerPath(mountPath); err != nil {
+		return nil, err
+	}
+	destination := path.Join(mountPath, GitPointerFile)
+
+	pointer := filepath.Join(worktreePath, GitPointerFile)
+	info, err := os.Lstat(pointer)
+	switch {
+	case err != nil:
+		return nil, fmt.Errorf("worktree %s has no git pointer to pin (%v): a task worktree is a linked worktree, so its %s file must exist before a container is created around it",
+			worktreePath, err, GitPointerFile)
+	case !info.Mode().IsRegular():
+		return nil, fmt.Errorf("worktree %s has a %s where its git pointer should be; only a regular file can be pinned read-only",
+			worktreePath, info.Mode().Type())
+	}
+
+	return []string{"-v", BindMountSpec(pointer, destination, "ro")}, nil
+}
+
+// VerifyWorktreeGitPointer requires a worktree's git pointer to name a gitdir under
+// <projectGitDir>/worktrees/ — the tree only the host writes. It ignores the admin directory's name,
+// which git derives and may disambiguate, and judges the cleaned path, because `..` in the text names
+// a directory git reaches outside that tree.
+//
+// The mount holds the pointer's bytes; this says whether they were already wrong.
+func VerifyWorktreeGitPointer(worktreePath, projectGitDir string) error {
+	raw, err := os.ReadFile(filepath.Join(worktreePath, GitPointerFile))
+	if err != nil {
+		return fmt.Errorf("read the git pointer of %s: %w", worktreePath, err)
+	}
+	// git writes one line.
+	line := strings.TrimSpace(string(raw))
+	if strings.Contains(line, "\n") {
+		return fmt.Errorf("the git pointer of %s is not a single %q line", worktreePath, gitDirPrefix)
+	}
+	if !strings.HasPrefix(line, gitDirPrefix) {
+		return fmt.Errorf("the git pointer of %s is not a %q line", worktreePath, gitDirPrefix)
+	}
+	target := strings.TrimSpace(strings.TrimPrefix(line, gitDirPrefix))
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(worktreePath, target)
+	} else {
+		target = filepath.Clean(target)
+	}
+
+	adminRoot := filepath.Join(projectGitDir, "worktrees")
+	if !strings.HasPrefix(target, adminRoot+string(filepath.Separator)) {
+		return fmt.Errorf("the git pointer of %s names %q, which is outside %s: the task's git metadata must belong to this project",
+			worktreePath, target, adminRoot)
+	}
+	return nil
 }
 
 // ValidateCapability rejects a capability string that is not a plain capability name.

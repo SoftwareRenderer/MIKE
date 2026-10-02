@@ -62,7 +62,7 @@ var gitEnvNames = map[string]bool{
 
 // gitEnvPrefixes are families allowed in bulk. LC_* is the family SafeAgentEnv allows too. GIT_* is
 // in bulk because git reads its behaviour out of its own ~500 variables and a hand-picked list would
-// be wrong; nothing secret is named GIT_*, and the hook fence below — which an inherited GIT_*
+// be wrong; nothing secret is named GIT_*, and the execution fence below — which an inherited GIT_*
 // cannot override — is what closes the execution surface.
 var gitEnvPrefixes = []string{"LC_", "GIT_"}
 
@@ -89,14 +89,27 @@ func isGitSafeEnv(name string) bool {
 	return false
 }
 
-// HookFence pins core.hooksPath to /dev/null and core.fsmonitor to false
-func HookFence() []string {
+// ExecutionFence stops a repository naming a program for git to run. Every entry is command-line
+// configuration, which outranks the repository's own `.git/config` but not an environment variable the
+// operator set themselves. `core.editor` is pinned to `true` rather than to a program that refuses,
+// because `git merge --continue` still has to finish.
+//
+// No key disables `filter.<name>.clean`, which a repository selects by name in its own
+// `.gitattributes`; the read-only git pointer is what stops it
+// (sandboxruntime.WorktreeGitPointerMount).
+func ExecutionFence() []string {
 	return []string{
-		"GIT_CONFIG_COUNT=2",
+		"GIT_CONFIG_COUNT=5",
 		"GIT_CONFIG_KEY_0=core.hooksPath",
 		"GIT_CONFIG_VALUE_0=/dev/null",
 		"GIT_CONFIG_KEY_1=core.fsmonitor",
 		"GIT_CONFIG_VALUE_1=false",
+		"GIT_CONFIG_KEY_2=core.editor",
+		"GIT_CONFIG_VALUE_2=true",
+		"GIT_CONFIG_KEY_3=core.pager",
+		"GIT_CONFIG_VALUE_3=cat",
+		"GIT_CONFIG_KEY_4=core.askPass",
+		"GIT_CONFIG_VALUE_4=",
 	}
 }
 
@@ -106,7 +119,7 @@ func Env(extra ...string) []string {
 	env = append(env, extra...)
 	// Policy last. GIT_TERMINAL_PROMPT=0 goes with the fence: an unattended server that hits a
 	// credential prompt hangs the request forever.
-	return append(env, append(HookFence(), "GIT_TERMINAL_PROMPT=0")...)
+	return append(env, append(ExecutionFence(), "GIT_TERMINAL_PROMPT=0")...)
 }
 
 // Command builds the *exec.Cmd for one git invocation. It is the only place in this repository that
