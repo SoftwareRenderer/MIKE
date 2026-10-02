@@ -11,6 +11,7 @@
         taskStatus,
         taskExecutionState,
         showResumeButton,
+        startingTurn = false,
         showRestartButton,
         isStarting,
         isCommitting,
@@ -29,6 +30,8 @@
         taskStatus: string;
         taskExecutionState: string;
         showResumeButton: boolean;
+        /** The click that asked the last question is still working. */
+        startingTurn?: boolean;
         showRestartButton: boolean;
         isStarting: boolean;
         isCommitting: boolean;
@@ -46,8 +49,9 @@
     } = $props();
 
     // Stopped mid-run: the task stays in the In Progress column, Resume continues the conversation from
-    // where it left off, and Backlog sends it back with its branch and worktree intact.
-    let isPaused = $derived(isTaskPaused(taskExecutionState));
+    // where it left off, and Backlog sends it back with its branch and worktree intact. A fork stops the
+    // run it branches from, so mid-handoff that stop is not a question waiting for a second start.
+    let isPaused = $derived(isTaskPaused(taskExecutionState) && !startingTurn);
 </script>
 
 {#if isPaused}

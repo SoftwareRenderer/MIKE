@@ -16,6 +16,11 @@ Because the pool is one connection and `s.mu` is held across the section, a tran
 atomicity, not isolation** — without it a `SetActiveThread` whose second statement failed leaves a task
 with **no active thread at all**.
 
+A `*Locked` helper reads and writes through the `execer` it is handed, never through `s.db`. The pool is one
+connection, so a second handle inside the section waits for the transaction that is running it — and `s.mu`
+waits behind it, which stops every query in the process, not just this one.
+Test: `TestCopyMessagesToThread_CutRowNotInSourceThread`.
+
 What stays outside `tx` states its reason at its definition:
 
 - `TransitionInFlightTask` is one statement.

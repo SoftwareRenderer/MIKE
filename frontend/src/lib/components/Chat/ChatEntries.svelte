@@ -32,6 +32,7 @@
         taskStatus,
         taskExecutionState,
         turnInFlight = false,
+        startingTurn = false,
         projectId,
         taskId,
         onDismissError,
@@ -73,6 +74,8 @@
         taskExecutionState: string;
         /** A turn of this task is running, so no row may be edited into it. */
         turnInFlight?: boolean;
+        /** The "New Thread" click that asked the last question is still working. */
+        startingTurn?: boolean;
         projectId: string;
         taskId: string;
         onDismissError: (messageId: string) => Promise<void>;
@@ -561,8 +564,9 @@
         {/if}
 
         <!-- The wait line. Without a lock wait it shows on the provider's request/task slots, which is what
-             awaitingResponse means; a lock wait shows on its own, since nothing of ours is in flight. -->
-        {#if lockWait || (awaitingResponse && (taskExecutionState === 'running' || (taskStatus === 'in_progress' && taskExecutionState === 'idle')))}
+             awaitingResponse means; a lock wait shows on its own, since nothing of ours is in flight. A
+             starting turn counts too: the row still reads review, but an answer is on its way. -->
+        {#if lockWait || (awaitingResponse && (startingTurn || taskExecutionState === 'running' || (taskStatus === 'in_progress' && taskExecutionState === 'idle')))}
             <QueueIndicator
                 {lockWait}
                 {queuePosition}
