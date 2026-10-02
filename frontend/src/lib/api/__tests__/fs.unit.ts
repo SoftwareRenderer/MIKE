@@ -105,6 +105,25 @@ describe('createFsDirectory', () => {
     });
 });
 
+describe('resolveHomeDirectory', () => {
+    it('answers the home the server reports', async () => {
+        const { resolveHomeDirectory } = await import('$lib/api/fs');
+        mockFetch.mockResolvedValue(res(200, { home: '/root' }));
+
+        expect(await resolveHomeDirectory()).toBe('/root');
+    });
+
+    it('answers /home rather than rejecting when the lookup fails or says nothing', async () => {
+        const { resolveHomeDirectory } = await import('$lib/api/fs');
+        mockFetch.mockResolvedValueOnce(res(500, { error: 'internal error' }));
+
+        expect(await resolveHomeDirectory()).toBe('/home');
+
+        mockFetch.mockResolvedValueOnce(res(200, {}));
+        expect(await resolveHomeDirectory()).toBe('/home');
+    });
+});
+
 describe('searchFsPaths', () => {
     it('sends the one query shape both callers share', async () => {
         const { searchFsPaths } = await import('$lib/api/fs');

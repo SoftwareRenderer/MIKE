@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, tick } from 'svelte';
     import BaseModal from './BaseModal.svelte';
-    import { listFsDirectory, createFsDirectory, initGitRepository, getHomeDirectory, type FsEntry } from '$lib/api';
+    import { listFsDirectory, createFsDirectory, initGitRepository, resolveHomeDirectory, type FsEntry } from '$lib/api';
     import { errorText } from '$lib/utils/error-text';
     import Icon from '$lib/components/Icon.svelte';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
@@ -175,11 +175,7 @@
 
     /** The home button and the mount share this, so both land on the same directory. */
     async function goHome() {
-        try {
-            await loadDir(await getHomeDirectory() || '/home');
-        } catch {
-            await loadDir('/home');
-        }
+        await loadDir(await resolveHomeDirectory());
     }
 
     function formatPath(p: string): string {
