@@ -152,10 +152,13 @@ python3 scripts/gen-registry.py --check                  # registry.json matches
   which in the skip reason; "no worktree appeared" and "the registry did not answer" are failures, not skips.
   A spec that can only run in a mode this suite never runs is deleted, not left green-but-skipped.
 - **Config-modifying specs run in the `isolated` project** (`ISOLATED_SPECS`), and **any spec that runs an
-  executor turn owns its project**. One lane server answers every worker, and a turn waits for a provider
-  slot, so a shared project adds board-level interference to an already-queued turn. Specs on the global
-  view must not. `npm run check:e2e-ownership` holds the line
-  against a frozen register of the specs that predate it.
+  executor turn owns its project and releases its tasks when the test ends**. One lane server answers every
+  worker, and a turn waits for a provider slot, so a shared project adds board-level interference to an
+  already-queued turn; specs on the global view must not. A live task is charged its container's memory cap
+  against the executor's admission gate for as long as it exists, so an unreleased task closes that gate on
+  the tests after it: `clearTasksAfterEach()` in `tests/e2e/helpers.ts`. `npm run check:e2e-ownership` holds
+  the ownership line against a frozen register of the specs that predate it,
+  and `docs/testing.md → E2E conventions` carries both measurements.
 - **Read a turn from the store by row id, never by a length or a status.** `…/messages` answers a bounded
   window — 5 units by default — and answers an error with a null body. A finished run is `review` + `idle`;
   `failed` means failed, and `in_progress` survives a Stop. A `/send` that lands mid-turn is absorbed with a

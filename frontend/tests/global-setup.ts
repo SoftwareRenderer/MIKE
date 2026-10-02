@@ -18,6 +18,13 @@ const TEST_REPO_2 = '/tmp/kanban-test-repo-2';
 const TEST_DATA_DIR = '/tmp/kanban-test-data';
 const TEST_DATA_DIR_ISOLATED = '/tmp/kanban-test-data-isolated';
 const TEST_WORKTREES = '/tmp/kanban-test-worktrees';
+// Where the three children's own output goes. A turn-bound failure used to leave no server-side trace at all,
+// because every spawn ran with `stdio: 'ignore'` and the only evidence was Playwright's DOM snapshot. The
+// servers inherit MIKE_LOG_LEVEL from the shell, so a diagnosis can ask for `debug` without a code change.
+const SERVER_LOG = '/tmp/kanban-test-server.log';
+const SERVER_LOG_ISOLATED = '/tmp/kanban-test-server-isolated.log';
+const MOCK_LLM_LOG = '/tmp/kanban-test-mock-llm.log';
+const HARNESS_LOGS = [SERVER_LOG, SERVER_LOG_ISOLATED, MOCK_LLM_LOG];
 // Per-worker project repos created by helpers.ts isolatedProject() — scratch, like the worktrees.
 const TEST_OWN_REPOS = '/tmp/kanban-test-repos';
 const KANBAN_PORT = 3000;
@@ -142,11 +149,12 @@ async function setup(): Promise<void> {
     await killKanbanServer();
 
     console.log('[global-setup] Starting test kanban server...');
+    const serverLog = fs.openSync(SERVER_LOG, 'w');
     kanbanServer = spawn('setsid', [KANBAN_BIN, ...KANBAN_RUN_ARGS, '--data-dir', TEST_DATA_DIR], {
         cwd: PROJECT_ROOT,
         // The fixture repos and worktrees live under /tmp, outside the host directory jail.
         env: { ...process.env, ...NO_UPDATES_ENV, MIKE_WORKTREES_DIR: TEST_WORKTREES, MIKE_LOGIN_PASSWORD: TEST_PASSWORD, MIKE_REGISTRY_URL: TEST_REGISTRY_URL, MIKE_TLS: '0', DANGER_ZONE: '1', MIKE_ALLOW_ROOT_FS: '1' },
-        stdio: 'ignore',
+        stdio: ['ignore', serverLog, serverLog],
         detached: true,
     });
     kanbanServer.unref();
@@ -199,9 +207,10 @@ async function setup(): Promise<void> {
     // Start mock LLM before creating tasks (title-gen calls LLM immediately)
     if (useMock) {
         console.log('[global-setup] Starting mock LLM server...');
+        const mockLog = fs.openSync(MOCK_LLM_LOG, 'w');
         mockServer = spawn('setsid', ['node', 'tests/mock-llm.js', MOCK_PORT.toString()], {
             cwd: FRONTEND_DIR,
-            stdio: 'ignore',
+            stdio: ['ignore', mockLog, mockLog],
             detached: true,
         });
         mockServer.unref();
@@ -230,10 +239,11 @@ async function setup(): Promise<void> {
     await seedChatConversation(sessionCookie, csrfToken);
 
     console.log('[global-setup] Starting isolated kanban server...');
+    const isolatedLog = fs.openSync(SERVER_LOG_ISOLATED, 'w');
     kanbanServerIsolated = spawn('setsid', [KANBAN_BIN, ...KANBAN_RUN_ARGS, '--data-dir', TEST_DATA_DIR_ISOLATED, '--port', String(KANBAN_PORT_ISOLATED)], {
         cwd: PROJECT_ROOT,
         env: { ...process.env, ...NO_UPDATES_ENV, MIKE_WORKTREES_DIR: TEST_WORKTREES, MIKE_LOGIN_PASSWORD: TEST_PASSWORD, MIKE_REGISTRY_URL: TEST_REGISTRY_URL, MIKE_TLS: '0', DANGER_ZONE: '1', MIKE_ALLOW_ROOT_FS: '1' },
-        stdio: 'ignore',
+        stdio: ['ignore', isolatedLog, isolatedLog],
         detached: true,
     });
     kanbanServerIsolated.unref();
@@ -336,7 +346,7 @@ function removeHarnessContainers(): void {
  * up. Reported rather than removed here, because a leftover may belong to another run.
  */
 function reportLeftovers(): void {
-    const roots = [TEST_REPO, TEST_REPO_2, CHAT_REPO, CHAT_FIXTURE_FILE, TEST_DATA_DIR, TEST_DATA_DIR_ISOLATED, TEST_WORKTREES, TEST_OWN_REPOS];
+    const roots = [TEST_REPO, TEST_REPO_2, CHAT_REPO, CHAT_FIXTURE_FILE, TEST_DATA_DIR, TEST_DATA_DIR_ISOLATED, TEST_WORKTREES, TEST_OWN_REPOS, ...HARNESS_LOGS];
     const survivors = roots.filter(root => fs.existsSync(root));
     let containers = '?';
     try {
@@ -385,6 +395,11 @@ export async function teardown(): Promise<void> {
         console.log('[global-teardown] Test worktrees directory deleted');
     } catch {
         console.log('[global-teardown] Test worktrees already gone');
+    }
+
+    // The run's evidence, gone with the run. An interrupted run's log is truncated by the next setup's open.
+    for (const log of HARNESS_LOGS) {
+        try { fs.rmSync(log, { force: true }); } catch { /* ignore */ }
     }
 
     // Delete the per-worker project repos (helpers.ts isolatedProject)

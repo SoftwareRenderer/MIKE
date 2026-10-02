@@ -161,6 +161,20 @@ const FIXTURES_BY_NAME = {
     text_response_reasoning: [textResponseReasoning, 1],
 };
 
+/**
+ * Tool results written after the last user message: how many tool calls the turn now running has already
+ * made. Tool results earlier in the conversation belong to turns that are over.
+ */
+function toolResultsThisTurn(messages) {
+    const lastUser = messages.map(m => m.role).lastIndexOf('user');
+    return messages.slice(lastUser + 1).filter(m => m.role === 'tool').length;
+}
+
+/** Whether a fixture streams a tool call, which is what makes the turn that received it ask again. */
+function streamsToolCall(chunks) {
+    return chunks.some(c => (c.choices || []).some(ch => ch.delta?.tool_calls || ch.message?.tool_calls));
+}
+
 function selectResponse(parsed) {
     const hasTools = parsed.tools && parsed.tools.length > 0;
     const messages = parsed.messages || [];
@@ -180,7 +194,18 @@ function selectResponse(parsed) {
     const pin = lastUserMsg.match(/llm-fixture:([a-z0-9_-]+)/);
     if (pin) {
         const pinned = FIXTURES_BY_NAME[pin[1]];
-        if (pinned) return { chunks: pinned[0], chunkDelay: pinned[1] };
+        if (pinned) {
+            // Served only while this turn holds no tool result, which is the rule every keyword probe encodes as
+            // `hasToolResults ? toolCallComplete : probe`. The pin test outranks every termination rule below, so
+            // an unbounded pin repeats until a supervisor or the spec's teardown stops the task: measured at 156
+            // calls for one prompt, one every ~60 ms, each rewriting the worktree and each holding the task's
+            // container — and its 1024 MB admission charge — open.
+            if (streamsToolCall(pinned[0]) && toolResultsThisTurn(messages) > 0) {
+                console.error(`[mock-llm] pin "${pin[1]}" served once, its tool result is back: ending the turn`);
+                return { chunks: toolCallComplete, chunkDelay: pinned[1] };
+            }
+            return { chunks: pinned[0], chunkDelay: pinned[1] };
+        }
         console.error(`[mock-llm] unknown llm-fixture:"${pin[1]}" — falling through to keyword routing`);
     }
 

@@ -147,9 +147,16 @@ the task to go idle" is a race against everyone else's turns. Any new turn-bound
   the `src/` file it drives, so a source change selects nothing and the full run stays the claim for it.
 - **A full run's failure count is a property of the machine.** The box that froze `workers: 4` sees 0-1
   failures in ~3 min. An 8-CPU box sees 12-20 in ~7.5 min, and every one of them is green under
-  `--last-failed --workers=1`. So read a red full run as "which waits are too tight", never as "which specs
-  are broken". Every remaining failure is a turn-bound wait, and the run holds 11-18 rootless containers
-  alive while it runs; whether that capacity is what a turn waits behind is the next measurement.
+  `--last-failed --workers=1`. So read a red full run as "which turn was not admitted, and by what", and only
+  then as "which wait is too tight". Every remaining failure is a turn-bound wait.
+- **A turn-bound wait can be waiting at the memory gate, and an unreleased task is what closes it.** A live
+  task is charged against `exec.MemoryGate` while it exists: every container it owns costs `max(held, cap)`,
+  and the cap is `types.DefaultSandboxMemoryLimitMB` (1024 MB) for every project this harness creates. One
+  capacity covers every worker on the lane server, so a file that starts one turn per test and releases
+  nothing closes the gate against its own later tests. At 13 live containers against a 14379 MB capacity the
+  log reads `running 0, queued 3`. A queued turn issues no LLM call and renders nothing, so no budget in the
+  waiting spec outlasts it. `clearTasksAfterEach()` releases them per test.
+  `docs/sandbox-runtime.md → The memory budget` owns the rule.
 - **A run leaves the machine as it found it.** Teardown deletes the fixture repos with the rest of what it
   owns, then prints `leftovers: paths=… containers=…` so a survivor is named rather than assumed. It removes the
   sandbox containers of this harness too, judged by what a container mounts and never by its name: a name filter
@@ -251,8 +258,11 @@ Two measured behaviours that chat specs keep getting wrong, both worth designing
   sent during the warm-up leaves no indicator window at all, and a send that interrupts a live
   stream never re-enters it. "Streaming" is observable as *stop button up, indicator gone*.
 - **A task auto-starts**, so its own initial prompt/turn is in the chat before the test's first
-  message: wait for `.btn-send` (idle) before sending, and assert on the entry that appeared
-  *after* the send (`.last()`, or a count you captured before), never on `.first()`.
+  message. Pin that turn with `llm-fixture:text` when the send's own turn must be the one holding the tool
+  calls, and wait for `waitForTaskState(page, projectId, taskId, notInFlight)` rather than for `.btn-send`.
+  Name the entry the send produced by what it carries — its tool, its arguments — not by `.last()` or by a
+  count. A count rises for any card, including one this send caused nothing, and the turn answers with a card
+  of its own after the one the test is looking at.
 
 ### Reading a turn from the store, not from the screen
 
@@ -474,6 +484,13 @@ Test servers are spawned via `go run .` and **inherit your shell environment** �
 `MIKE_ENCRYPTION_KEY` before running e2e, or global-setup fails with "Server on port 3000 did not start
 within 15000ms".
 
+Each child writes its own output to a file rather than to the terminal: `/tmp/kanban-test-server.log`,
+`/tmp/kanban-test-server-isolated.log` and `/tmp/kanban-test-mock-llm.log`, removed by teardown with the data
+directories. They are what a turn-bound failure is read from, because Playwright keeps only the browser's own
+snapshot: the servers print `memory budget:` every supervisor tick along with every pause and resume, and the
+mock prints the fixture every request was routed to. `MIKE_LOG_LEVEL` reaches them from the shell, so a
+diagnosis can ask for `debug` without a code change.
+
 They also start with `MIKE_DISABLE_UPDATES=1`, so no run is ever a browser that owes the release opt-in.
 The boot pass would ask the question of every fresh context, and a yes there means an outbound check to
 the manifest host. `disabled` is the posture the client stops on — no dot, no question
@@ -653,13 +670,13 @@ admits the task (`docs/sandbox-runtime.md`).
   `--workers=3` failed 8, and raising the popup wait from 20 s to 30 s changed nothing. The worker count
   is not the variable; the free memory is.
 
-- **A turn's own wait rotates in a full run and passes alone**: `chat-core`'s streaming tool-argument
-  accumulation is the one left. Which spec fails moves between runs, and raising an individual wait does not
-  move the red — a 20 s wait raised to 60 s simply arrived at a sibling later. A wait built on wall-clock
-  windows, or on a fixture the test itself seeds, is a wait that rotates; both are fixed in
-  `chat-scroll-jitter.spec.ts`, which now passes inside a full-parallel run.
-  None has been caught failing at 1 worker, and each of them waits 20-60 s on its own, so the red arrives slowly
-  and looks like a hang.
+- **A turn's own wait rotates in a full run and passes alone** when the memory gate has stopped admitting it.
+  Read `memory budget:` and the `running …, queued …` pair in `/tmp/kanban-test-server.log` before touching
+  the wait: a turn that is never admitted issues no LLM call, so the rotation says *who waits next*, not how
+  long to wait. `clearTasksAfterEach()` and the pinned-tool-call bound in `mock-llm.js` are the two things
+  that keep the gate open, and *Concurrency is part of the environment* carries the measurement. A wait built
+  on wall-clock windows, or on a fixture the test itself seeds, is a second kind of rotating wait: the fix for
+  that kind is a wait on a state the harness can observe, as `chat-scroll-jitter.spec.ts` does.
 
 - **`backend/extensions`' `TestHandleInstall_BuildFailureLeavesNoRowAndNoFiles`** fails on roughly 1 in 3
   `make check` / `-parallel 8` runs **on a CPU-loaded machine** and never alone or unloaded, so a red

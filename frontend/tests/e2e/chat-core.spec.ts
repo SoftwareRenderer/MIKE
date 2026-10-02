@@ -1,8 +1,12 @@
-import { test, expect } from '@playwright/test';
-import { getProjectId, createTaskViaApi, navigateToTask, waitForChatForm, waitForSendButton, sendMessage, csrfFetch, ensureChatForm, findProviderByRef, isolatedProject, gotoProject, waitForWorktree, writeFileInWorktree } from './helpers';
+import { test, expect, type Page } from '@playwright/test';
+import { getProjectId, createTaskViaApi, navigateToTask, waitForChatForm, waitForSendButton, sendMessage, csrfFetch, ensureChatForm, findProviderByRef, isolatedProject, clearTasksAfterEach, gotoProject, waitForWorktree, writeFileInWorktree, waitForTaskState, getTaskData, messageRows, notInFlight } from './helpers';
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
 isolatedProject();
+
+// Twenty-five tasks a file, none released until the file ends, is thirteen live containers and thirteen
+// charges of 1024 MB against one server's memory budget. See clearTasksAfterEach() in helpers.ts.
+clearTasksAfterEach();
 
 
 test.describe.configure({ mode: 'serial' });
@@ -12,6 +16,25 @@ test.describe.configure({ mode: 'serial' });
 /** Wait for the send button to be visible; returns false instead of throwing. */
 async function requireSendButton(page: any): Promise<boolean> {
   return await page.locator('.btn-send').waitFor({ state: 'visible', timeout: 15000 }).then(() => true).catch(() => false);
+}
+
+/** The ids this task's message window holds, for a later read that asks what arrived since. */
+async function rowIds(page: Page, projectId: string, taskId: string): Promise<Set<string>> {
+  return new Set((await messageRows(page, projectId, taskId)).map(r => r.id));
+}
+
+/**
+ * What the store holds of a send that has not finished, as the value a failing poll reports: the task's own
+ * `execution_state` and the roles newer than `before`. Rows are matched by id because the window slides. A turn
+ * parked at the memory gate, a send absorbed by the turn before it and a turn that answered with the wrong kind
+ * of row then read as three different things, which a card count reports as one.
+ */
+function storeSinceSend(page: Page, projectId: string, taskId: string, before: Set<string>) {
+  return async () => {
+    const task = await getTaskData(page, projectId, taskId);
+    const fresh = (await messageRows(page, projectId, taskId)).filter(r => !before.has(r.id));
+    return `execution_state=${String(task?.execution_state)} new_rows=${fresh.map(r => r.role).join(',') || 'none'}`;
+  };
 }
 
 // ─── Shared setup ───────────────────────────────────────────────────────────
@@ -290,18 +313,18 @@ test.describe('Chat Core', () => {
   // ─── Streaming Features ───────────────────────────────────────────────────
 
   test('should show Editing label and +X/-Y toggle for edit_file tool calls', async ({ page }) => {
-    test.setTimeout(90000);
-    // A keyword-free task prompt: "edit-file" matches the mock's `\bedit\b` route, so the
+    test.setTimeout(120000);
+    // Pinned to text, not merely keyword-free: "edit-file" matches the mock's `\bedit\b` route, so the
     // initial turn would answer with this very fixture — same tool-call id, and the second
     // card then replaces the first instead of adding to it.
-    const taskId = await createTaskViaApi(page, projectId, `seed-turn-${Date.now()}`);
+    const taskId = await createTaskViaApi(page, projectId, `seed-turn-${Date.now()} llm-fixture:text`);
     await navigateToTask(page, taskId);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
     await waitForChatForm(page);
 
-    // Not an early return: a skipped check is a green test that checks nothing. Wait for
-    // the task to be idle (its own initial turn may still be running) and fail if it never is.
-    await expect(page.locator('.btn-send'), 'the task is idle before sending').toBeVisible({ timeout: 60000 });
+    // Idle by the store's answer, not by the send button: docs/testing.md → Reading a turn from the store.
+    await waitForTaskState(page, projectId, taskId, notInFlight);
+    await waitForSendButton(page);
 
     // Seed the file the fixture edits. The e2e repo is a README only, so an unseeded
     // edit_file fails with "no such file or directory" and the card never appears.
@@ -312,18 +335,21 @@ test.describe('Chat Core', () => {
     // Pinned, not keyworded: this needs the edit_file fixture specifically (the edit label
     // and the +X/-Y toggle only exist for it), and a bare "edit" prompt is answered by plan
     // routing with create_task — see llm-fixture: in mock-llm.js.
+    const before = await rowIds(page, projectId, taskId);
     await chatTextarea.fill(`test edit file llm-fixture:tool_call_edit_file ${Date.now()}`);
     await chatTextarea.press('Enter');
     await expect(chatTextarea).toHaveValue('');
 
-    // Assert on the card that appears after the send (the last), not on any earlier entry's.
-    const cards = page.locator('.tool-call-card');
-    const cardsBefore = await cards.count();
-
     await expect
-      .poll(() => cards.count(), { timeout: 20000, message: 'a new tool-call card appears' })
-      .toBeGreaterThan(cardsBefore);
-    const card = cards.last();
+      .poll(storeSinceSend(page, projectId, taskId, before), {
+        timeout: 60000,
+        message: 'the send wrote no tool_call row of its own',
+      })
+      .toContain('tool_call');
+
+    // Named by its tool rather than by its position: the turn answers with a card of its own after this one,
+    // and a positional locator follows that. The initial turn is pinned to text, so this card is this send's.
+    const card = page.locator('.tool-call-card', { has: page.locator('.tool-name', { hasText: /edit/i }) }).last();
 
     await expect(card.locator('.tool-name')).toContainText(/edit/i);
 
@@ -446,34 +472,38 @@ test.describe('Chat Core', () => {
   });
 
   test('should accumulate raw_args_delta for streaming tool calls', async ({ page }) => {
-    test.setTimeout(90000);
-    const taskId = await createTaskViaApi(page, projectId, `raw-args-delta-${Date.now()}`);
+    test.setTimeout(120000);
+    // Pinned to text: unpinned, the auto-started turn takes the plan route and answers with create_task cards
+    // of its own, which is what made "a card appeared" answerable by counting with no new turn behind it.
+    const taskId = await createTaskViaApi(page, projectId, `raw-args-delta-${Date.now()} llm-fixture:text`);
     await navigateToTask(page, taskId);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
     await waitForChatForm(page);
 
-    // Not an early return: a skipped check is a green test that checks nothing. Wait for
-    // the task to be idle (its own initial turn may still be running) and fail if it never is.
-    await expect(page.locator('.btn-send'), 'the task is idle before sending').toBeVisible({ timeout: 60000 });
+    // Idle by the store's answer, not by the send button: docs/testing.md → Reading a turn from the store.
+    await waitForTaskState(page, projectId, taskId, notInFlight);
+    await waitForSendButton(page);
 
     const chatTextarea = page.locator('textarea[placeholder*="message"]');
+    const before = await rowIds(page, projectId, taskId);
     // Pinned: this fixture streams the tool NAME and the args across several deltas, which
     // is the raw_args_delta path under test. A keyword prompt gets plan routing instead.
     await chatTextarea.fill(`streaming tool call ${Date.now()} llm-fixture:tool_call_streaming`);
     await chatTextarea.press('Enter');
     await expect(chatTextarea).toHaveValue('');
 
-    // Same "the card this message produced, not the task's initial turn" scoping as the
-    // edit_file test above.
-    const cards = page.locator('.tool-call-card');
-    const cardsBefore = await cards.count();
     await expect
-      .poll(() => cards.count(), { timeout: 20000, message: 'a new tool-call card appears' })
-      .toBeGreaterThan(cardsBefore);
+      .poll(storeSinceSend(page, projectId, taskId, before), {
+        timeout: 60000,
+        message: 'the send wrote no tool_call row of its own',
+      })
+      .toContain('tool_call');
 
-    // The args are only complete once every delta landed; the accumulated raw args must
-    // still carry the command the fixture streamed in pieces.
-    await expect(cards.last().locator('.tool-args')).toContainText('ls', { timeout: 15000 });
+    // The args are only complete once every delta landed, so the card must still carry the command the fixture
+    // streamed in pieces — `{"command":"ls ` then ` -la"}`. Only the browser that streamed them can be asked,
+    // which is why this one assertion stays in the DOM.
+    const card = page.locator('.tool-call-card', { has: page.locator('.tool-args', { hasText: 'ls' }) }).last();
+    await expect(card.locator('.tool-args')).toContainText('ls -la', { timeout: 15000 });
   });
 
   // ─── Tab Visibility ───────────────────────────────────────────────────────

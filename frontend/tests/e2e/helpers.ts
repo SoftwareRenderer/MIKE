@@ -1,4 +1,4 @@
-import { expect, test, Page, Locator } from '@playwright/test';
+import { expect, test, Page, Locator, Browser, TestInfo } from '@playwright/test';
 import { execSync } from 'child_process';
 import { existsSync, writeFileSync, mkdirSync, readFileSync, cpSync, readdirSync } from 'fs';
 import { dirname, join } from 'path';
@@ -264,17 +264,40 @@ export function isolatedProject(): void {
 
   // A file that owns a project leaves it empty: the project outlives the file, so a leftover card is one the
   // next file finds in a column it did not put it in. Deleting a task is also what stops its container.
-  test.afterAll(async ({ browser }, testInfo) => {
-    if (!ownProject) return;
-    const storageState = (testInfo.project.use as { storageState?: string }).storageState;
-    const context = await browser.newContext(storageState ? { storageState } : {});
-    const page = await context.newPage();
-    try {
-      await clearAllTasks(page, ownProject.id);
-    } finally {
-      await context.close();
-    }
-  });
+  test.afterAll(({ browser }, testInfo) => emptyOwnProject(browser, ownStorageState(testInfo)));
+}
+
+/**
+ * Release this worker's project between tests rather than only at the end of the file.
+ *
+ * A live task is charged against the executor's memory budget for as long as it exists — every container it
+ * owns at `max(held, cap)`, its cap `types.DefaultSandboxMemoryLimitMB` (1024 MB) for every project this
+ * harness creates — and one capacity covers every worker on the lane server. Measured consequence: a file that
+ * starts one turn per test and releases nothing had 13 of its own containers alive against a 14379 MB capacity,
+ * and the log from that moment reads `running 0, queued 3` until the file ends. A turn parked in that queue
+ * issues no LLM call and renders nothing, so no wait in the spec that sent it outlasts the leak: whichever
+ * turn-bound wait burns its budget next reports the leak, in whichever spec it happens to live in.
+ * `docs/sandbox-runtime.md → The memory budget` owns the rule; `docs/testing.md → E2E conventions` the rest.
+ */
+export function clearTasksAfterEach(): void {
+  test.afterEach(({ browser }, testInfo) => emptyOwnProject(browser, ownStorageState(testInfo)));
+}
+
+/** The storage state this test's project was opened with, so a cleanup page is authed like the test. */
+function ownStorageState(testInfo: TestInfo): string | undefined {
+  return (testInfo.project.use as { storageState?: string }).storageState;
+}
+
+/** Delete every task of this worker's own project, from a page of its own. */
+async function emptyOwnProject(browser: Browser, storageState?: string): Promise<void> {
+  if (!ownProject) return;
+  const context = await browser.newContext(storageState ? { storageState } : {});
+  const page = await context.newPage();
+  try {
+    await clearAllTasks(page, ownProject.id);
+  } finally {
+    await context.close();
+  }
 }
 
 /**

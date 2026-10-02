@@ -2,9 +2,10 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, cleanup } from '@testing-library/svelte';
 import { buildMCPServers } from '../mcp-drafts';
 
-// MIKE_RESTRICT_MCP freezes the registry, not the offer: the tab still lists what is registered and names
-// the variable that froze it. Add and Test stay on screen and refuse; Remove has no read-only meaning, so
-// it is simply not offered.
+// MIKE_RESTRICT_MCP freezes the registry, not the offer: the tab still lists what is registered and says
+// the registry is frozen, and a frozen control points at that notice. Add and Test stay on screen and
+// refuse; Remove has no read-only meaning, so it is simply not offered. The variable itself is named by
+// the 403 a write gets, not by this copy.
 
 vi.mock('$lib/storage', () => ({
     loadAppSetting: vi.fn(async (_key: string, dflt: unknown) => dflt),
@@ -34,10 +35,13 @@ const disabled = (el: Element | null) => el !== null && (el as HTMLInputElement)
 afterEach(cleanup);
 
 describe('a restricted registry', () => {
-    it('names the variable and keeps the server listed', () => {
+    it('announces the freeze and keeps the server listed', () => {
         const { container } = open(true);
-        expect(container.querySelector('[data-testid="mcp-locked"]')?.textContent)
-            .toContain('MIKE_RESTRICT_MCP');
+        const notice = container.querySelector('[data-testid="mcp-locked"]');
+        expect(notice?.getAttribute('role')).toBe('note');
+        expect(notice?.textContent?.trim()).toBeTruthy();
+        expect(container.querySelector('[role="switch"]')?.getAttribute('aria-describedby'))
+            .toBe('mcp-registry-locked');
         expect((container.querySelector('.mcp-name') as HTMLInputElement).value).toBe('Search');
         expect((container.querySelector('.mcp-url') as HTMLInputElement).value).toBe('https://mcp.example.com/mcp');
     });
