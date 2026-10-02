@@ -31,7 +31,7 @@ func newBareDiffTestRepo(t *testing.T) (string, *WorktreeManager, func() string)
 		t.Fatalf("create store: %v", err)
 	}
 	t.Cleanup(func() { s.Close() })
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false)
+	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false, false)
 	cfg, err := cfgStore.GetConfig()
 	if err != nil {
 		t.Fatalf("get config: %v", err)

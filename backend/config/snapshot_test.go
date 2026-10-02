@@ -32,7 +32,7 @@ func newCountingStore(t *testing.T) (*ConfigStore, *countingStore) {
 		t.Fatalf("create store: %v", err)
 	}
 	counter := &countingStore{Store: db}
-	return NewConfigStore(counter, dir+"/test.db", "test", sharedSecretBox(), false), counter
+	return NewConfigStore(counter, dir+"/test.db", "test", sharedSecretBox(), false, false), counter
 }
 
 // One query for the rows a config read wants, and none once the snapshot is warm.

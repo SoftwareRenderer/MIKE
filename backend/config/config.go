@@ -99,6 +99,9 @@ type ConfigStore struct {
 	// refuseMCPChange is what says so. A store that never received it would be an unlocked store, so it
 	// arrives here rather than through a setter.
 	mcpLocked bool
+	// statResetLocked is the resolved MIKE_RESTRICT_STAT_RESET decision. One field feeds both the route
+	// that refuses the reset and the config view that hides it, so the two cannot disagree.
+	statResetLocked bool
 
 	snapMu sync.Mutex
 	snap   *configSnapshot
@@ -210,11 +213,11 @@ func assignProviderIDs(providers []types.Provider) {
 	}
 }
 
-// NewConfigStore creates a new ConfigStore. box comes from crypto.New at startup, and mcpLocked is the
-// resolved MIKE_RESTRICT_MCP decision.
-func NewConfigStore(s configDB, dbPath, version string, box *crypto.Box, mcpLocked bool) *ConfigStore {
+// NewConfigStore creates a new ConfigStore. box comes from crypto.New at startup, and the two locks are
+// the resolved MIKE_RESTRICT_MCP and MIKE_RESTRICT_STAT_RESET decisions.
+func NewConfigStore(s configDB, dbPath, version string, box *crypto.Box, mcpLocked, statResetLocked bool) *ConfigStore {
 	abs, _ := filepath.Abs(dbPath)
-	return &ConfigStore{db: s, dbPath: abs, version: version, box: box, mcpLocked: mcpLocked}
+	return &ConfigStore{db: s, dbPath: abs, version: version, box: box, mcpLocked: mcpLocked, statResetLocked: statResetLocked}
 }
 
 // configRowKeys are the rows a full config read wants, in one query.
@@ -573,8 +576,11 @@ type configResponse struct {
 	MCPServers []types.MCPServer `json:"mcp_servers,omitempty"`
 	// MCPRestricted is MIKE_RESTRICT_MCP: the registry is listed and offered but frozen, so Settings
 	// shows it read-only. It is a fact about the process, never a stored preference.
-	MCPRestricted     bool `json:"mcp_restricted"`
-	EncryptionEnabled bool `json:"encryption_enabled"`
+	MCPRestricted bool `json:"mcp_restricted"`
+	// StatsResetRestricted is MIKE_RESTRICT_STAT_RESET: Settings hides the reset because the server
+	// refuses it. A fact about the process, never a stored preference.
+	StatsResetRestricted bool `json:"stats_reset_restricted"`
+	EncryptionEnabled    bool `json:"encryption_enabled"`
 	// TLSCAAvailable tells the UI to offer the CA download (GET /api/tls/ca). The
 	// CA's path is not published: the route already knows where it lives.
 	TLSCAAvailable bool `json:"tls_ca_available"`
@@ -673,6 +679,7 @@ func (cs *ConfigStore) buildConfigResponse(cfg *types.Config) configResponse {
 		Providers:                     providers,
 		MCPServers:                    mcpServers,
 		MCPRestricted:                 cs.mcpLocked,
+		StatsResetRestricted:          cs.statResetLocked,
 		WorkerProvider:                cfg.WorkerProvider,
 		WorkerModel:                   cfg.WorkerModel,
 		UtilityProvider:               cfg.UtilityProvider,

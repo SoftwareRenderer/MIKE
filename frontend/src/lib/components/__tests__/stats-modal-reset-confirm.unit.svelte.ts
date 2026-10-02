@@ -8,7 +8,7 @@ import { render, cleanup, fireEvent, waitFor } from '@testing-library/svelte';
 import StatsModal from '$lib/components/StatsModal.svelte';
 import ConfirmationDialog from '$lib/components/ConfirmationDialog.svelte';
 import { dialogStore } from '$lib/stores';
-import type { ProjectStats } from '$lib/types';
+import { STATS } from './stats-fixture';
 
 const api = vi.hoisted(() => ({ getProjectStats: vi.fn(), resetProjectStats: vi.fn() }));
 vi.mock('$lib/api', async (importOriginal) => ({
@@ -16,23 +16,6 @@ vi.mock('$lib/api', async (importOriginal) => ({
     getProjectStats: (...args: unknown[]) => api.getProjectStats(...args),
     resetProjectStats: (...args: unknown[]) => api.resetProjectStats(...args),
 }));
-
-const STATS: ProjectStats = {
-    total_tasks: 1,
-    total_prompt_tokens: 10,
-    total_cache_tokens: 0,
-    total_processed_tokens: 10,
-    total_generated_tokens: 5,
-    avg_prompt_tps: 0,
-    avg_generation_tps: 0,
-    total_power_kwh: 0,
-    total_cost: 0,
-    by_model: [{
-        model_name: 'gpt-test', provider_name: 'prov-a',
-        prompt_tokens: 10, cache_tokens: 0, processed_tokens: 10, generated_tokens: 5,
-        avg_prompt_tps: 0, avg_generation_tps: 0, power_kwh: 0, task_count: 1, cost: 0,
-    }],
-};
 
 function footerButton(container: HTMLElement, label: string): HTMLElement {
     const found = Array.from(container.querySelectorAll('.modal-footer button'))

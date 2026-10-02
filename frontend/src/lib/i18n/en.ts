@@ -611,6 +611,7 @@ const catalog = {
     'settings.stats.resetTitle': 'Reset token stats',
     'settings.stats.resetConfirm': 'Reset token stats for {model}?',
     'settings.stats.reset': 'Reset',
+    'settings.stats.resetRestricted': 'Resetting token usage has been disabled by your administrator.',
 
     // ── ConfigModal/ExtensionsTab.svelte — the three label dictionaries ──
     // Injection points, capabilities and permissions. The ids (lsp, ui.modal) are what

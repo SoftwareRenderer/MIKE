@@ -44,7 +44,7 @@ func newTestTaskHandler(t *testing.T) (*TaskHandler, *store.Store, string) {
 	s.SetConfigValue("utility_provider", "")
 	s.SetConfigValue("utility_model", "")
 
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false)
+	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false, false)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 	wm := git.NewWorktreeManager(s, cfgStore)
 	boardMgr := stream.NewAppStreamManager(s, wm)
@@ -559,7 +559,7 @@ func newTaskHandlerWithExecutor(t *testing.T) (*TaskHandler, *store.Store, strin
 	s.SetConfigValue("utility_provider", "")
 	s.SetConfigValue("utility_model", "")
 
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false)
+	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false, false)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 
 	projID := "proj-auto-start"
@@ -1055,7 +1055,7 @@ func TestTitleGenerationDoesNotClobberTaskStatus(t *testing.T) {
 	s.SetConfigValue("utility_provider", "held")
 	s.SetConfigValue("utility_model", "m1")
 
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false)
+	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false, false)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 	wm := git.NewWorktreeManager(s, cfgStore)
 	boardMgr := stream.NewAppStreamManager(s, wm)

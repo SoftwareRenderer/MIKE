@@ -534,7 +534,7 @@ func TestCollectTurnDiagnostics_BoundedAndCancellable(t *testing.T) {
 	reg := installTSLSPExtension(t, s)
 
 	// WorktreePath looks the task up in the store, so everything here shares s.
-	cs := config.NewConfigStore(s, "", "test", nil, false)
+	cs := config.NewConfigStore(s, "", "test", nil, false, false)
 	cs.SetWorkspaceDirOverride(t.TempDir())
 	fake := &wedgedLSPManager{registry: reg, gotCtx: make(chan context.Context, 4)}
 	te := newTestExecutorWith(t, Deps{

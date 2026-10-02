@@ -16,6 +16,10 @@
     let loading = $state(true);
     let error = $state('');
 
+    // MIKE_RESTRICT_STAT_RESET: the server refuses the reset, so the column is not rendered
+    // instead of shown disabled.
+    const resetLocked = $derived(appStore.config?.stats_reset_restricted === true);
+
     $effect(() => {
         async function load() {
             try {
@@ -150,6 +154,10 @@
                     </div>
                 </div>
 
+                {#if resetLocked}
+                    <p class="settings-note" role="note" data-testid="stats-reset-locked">{t('settings.stats.resetRestricted')}</p>
+                {/if}
+
                 <!-- Per-model breakdown -->
                 <table class="model-table">
                     <thead>
@@ -163,7 +171,9 @@
                             <th class="col-num">{t('settings.stats.genSpeed')}</th>
                             <th class="col-num">{t('settings.stats.power')}</th>
                             <th class="col-num" title={t('settings.stats.costHint')}>{t('settings.stats.estCost')}</th>
-                            <th class="col-action"></th>
+                            {#if !resetLocked}
+                                <th class="col-action"></th>
+                            {/if}
                         </tr>
                     </thead>
                     <tbody>
@@ -180,17 +190,19 @@
                                 <td class="col-num">{formatTps(model.avg_generation_tps)}</td>
                                 <td class="col-num">{formatKwh(model.power_kwh)}</td>
                                 <td class="col-num">{formatCost(model.cost, '-')}</td>
-                                <td class="col-action">
-                                    <button class="btn-reset" onclick={() => resetModel(model)} title={t('settings.stats.resetHint')} aria-label={t('settings.stats.resetAria', { model: getTokenLabel(model) })}>
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                            <path d="M21 2v6h-6"/>
-                                            <path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
-                                            <path d="M3 22v-6h6"/>
-                                            <path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
-                                        </svg>
-                                        {t('settings.stats.reset')}
-                                    </button>
-                                </td>
+                                {#if !resetLocked}
+                                    <td class="col-action">
+                                        <button class="btn-reset" onclick={() => resetModel(model)} title={t('settings.stats.resetHint')} aria-label={t('settings.stats.resetAria', { model: getTokenLabel(model) })}>
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                                <path d="M21 2v6h-6"/>
+                                                <path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
+                                                <path d="M3 22v-6h6"/>
+                                                <path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
+                                            </svg>
+                                            {t('settings.stats.reset')}
+                                        </button>
+                                    </td>
+                                {/if}
                             </tr>
                         {/each}
                     </tbody>
@@ -199,6 +211,8 @@
 </BaseModal>
 
 <style>
+    @import '$lib/styles/settings-section.css';
+
     .loading, .empty {
         text-align: center;
         color: var(--color-text-secondary);

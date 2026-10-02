@@ -44,7 +44,7 @@
     </div>
 
     {#if locked}
-        <p class="mcp-locked" id={lockedNoticeId} role="note" data-testid="mcp-locked">
+        <p class="settings-note" id={lockedNoticeId} role="note" data-testid="mcp-locked">
             {t('settings.mcp.restricted')}
         </p>
     {/if}
@@ -72,11 +72,5 @@
         display: flex;
         justify-content: space-between;
         gap: 12px;
-    }
-    .mcp-locked {
-        margin: 0;
-        color: var(--color-text-tertiary);
-        line-height: 1.45;
-        font-size: var(--text-xs);
     }
 </style>

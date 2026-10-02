@@ -328,7 +328,7 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 		return nil, fmt.Errorf("derive secret key: %w", err)
 	}
 
-	cfgStore := config.NewConfigStore(store, dbPath, Version, secretBox, settings.RestrictMCP)
+	cfgStore := config.NewConfigStore(store, dbPath, Version, secretBox, settings.RestrictMCP, settings.RestrictStatReset)
 	cfgStore.SetRegistryURL(settings.RegistryURL)
 	cfg, err := cfgStore.GetConfig()
 	if err != nil {
@@ -497,6 +497,9 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 	// is the record of which switch this process booted on.
 	if settings.RestrictMCP {
 		logging.For(logging.MCP).Infof("the MCP registry is frozen by %s: no server can be added, edited, removed or tested from Settings, and a project still opts in per server", config.EnvRestrictMCP)
+	}
+	if settings.RestrictStatReset {
+		logging.For(logging.Startup).Infof("token stats cannot be reset because of %s: usage keeps being recorded, and deleting a task or project still removes its own rows", config.EnvRestrictStatReset)
 	}
 	defer s.reg(stageExtensionLSPManager, "extension lsp manager", s.extLSPMgr.Close)()
 

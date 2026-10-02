@@ -243,7 +243,7 @@ func TestMCPRegistrySurvivesARestart(t *testing.T) {
 	}
 
 	// A new store over the same database is the restart; the same box opens what was sealed.
-	restarted := NewConfigStore(db, cs.dbPath, "test", sharedSecretBox(), false)
+	restarted := NewConfigStore(db, cs.dbPath, "test", sharedSecretBox(), false, false)
 	opened, err := restarted.OpenMCPServers()
 	if err != nil {
 		t.Fatalf("open after restart: %v", err)
@@ -343,7 +343,7 @@ func TestConfigViewSurvivesASaveRoundTrip(t *testing.T) {
 // setting a variable.
 func restrictedOver(t *testing.T, db *store.Store, dbPath string) *ConfigStore {
 	t.Helper()
-	return NewConfigStore(db, dbPath, "test", sharedSecretBox(), true)
+	return NewConfigStore(db, dbPath, "test", sharedSecretBox(), true, false)
 }
 
 func registerMCPServer(t *testing.T, cs *ConfigStore) string {

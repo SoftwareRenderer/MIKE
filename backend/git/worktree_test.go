@@ -42,7 +42,7 @@ func setupTestRepo(t *testing.T) (string, string, *store.Store, *config.ConfigSt
 	}
 	t.Cleanup(func() { s.Close() })
 
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false)
+	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false, false)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 	cfg, err := cfgStore.GetConfig()
 	if err != nil {
@@ -114,7 +114,7 @@ func TestCreateWorktree_ExcludesWorktreesDirFromProjectStatus(t *testing.T) {
 	// Worktrees dir INSIDE the project directory.
 	worktreesDir := filepath.Join(repoDir, ".worktrees")
 	os.MkdirAll(worktreesDir, 0o755)
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false)
+	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false, false)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 
 	projID := "proj-in-repo"

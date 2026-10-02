@@ -17,30 +17,31 @@ import (
 // because two spellings of one variable drift in exactly the way that ends with a documented flag
 // doing nothing.
 const (
-	EnvPort             = "MIKE_PORT"
-	EnvListen           = "MIKE_LISTEN"
-	EnvDataDir          = "MIKE_DATA_DIR"
-	EnvWorktreesDir     = "MIKE_WORKTREES_DIR"
-	EnvFrontendDist     = "MIKE_FRONTEND_DIST"
-	EnvTLS              = "MIKE_TLS"
-	EnvAllowedHosts     = "MIKE_ALLOWED_HOSTS"
-	EnvLogLevel         = "MIKE_LOG_LEVEL"
-	EnvLoginPassword    = "MIKE_LOGIN_PASSWORD"
-	EnvEncryptionKey    = "MIKE_ENCRYPTION_KEY"
-	EnvRegistryURL      = "MIKE_REGISTRY_URL"
-	EnvUpdateURL        = "MIKE_UPDATE_URL"
-	EnvDisableUpdates   = "MIKE_DISABLE_UPDATES"
-	EnvRestrictMCP      = "MIKE_RESTRICT_MCP"
-	EnvExtMountRoots    = "MIKE_EXT_MOUNT_ROOTS"
-	EnvAgentPath        = "MIKE_AGENT_PATH"
-	EnvSkipSandboxSweep = "MIKE_SANDBOX_SKIP_STARTUP_CLEANUP"
-	EnvTrustProxy       = "MIKE_TRUST_PROXY"
-	EnvLoginRateLimit   = "MIKE_LOGIN_RATE_LIMIT"
-	EnvAllowRootFS      = "MIKE_ALLOW_ROOT_FS"
-	EnvDangerZone       = "DANGER_ZONE"
-	EnvGCDryRun         = "MIKE_GC_DRY_RUN"
-	EnvPProf            = "MIKE_PPROF"
-	EnvMemoryBudgetPct  = "MIKE_MEMORY_BUDGET_PCT"
+	EnvPort              = "MIKE_PORT"
+	EnvListen            = "MIKE_LISTEN"
+	EnvDataDir           = "MIKE_DATA_DIR"
+	EnvWorktreesDir      = "MIKE_WORKTREES_DIR"
+	EnvFrontendDist      = "MIKE_FRONTEND_DIST"
+	EnvTLS               = "MIKE_TLS"
+	EnvAllowedHosts      = "MIKE_ALLOWED_HOSTS"
+	EnvLogLevel          = "MIKE_LOG_LEVEL"
+	EnvLoginPassword     = "MIKE_LOGIN_PASSWORD"
+	EnvEncryptionKey     = "MIKE_ENCRYPTION_KEY"
+	EnvRegistryURL       = "MIKE_REGISTRY_URL"
+	EnvUpdateURL         = "MIKE_UPDATE_URL"
+	EnvDisableUpdates    = "MIKE_DISABLE_UPDATES"
+	EnvRestrictMCP       = "MIKE_RESTRICT_MCP"
+	EnvRestrictStatReset = "MIKE_RESTRICT_STAT_RESET"
+	EnvExtMountRoots     = "MIKE_EXT_MOUNT_ROOTS"
+	EnvAgentPath         = "MIKE_AGENT_PATH"
+	EnvSkipSandboxSweep  = "MIKE_SANDBOX_SKIP_STARTUP_CLEANUP"
+	EnvTrustProxy        = "MIKE_TRUST_PROXY"
+	EnvLoginRateLimit    = "MIKE_LOGIN_RATE_LIMIT"
+	EnvAllowRootFS       = "MIKE_ALLOW_ROOT_FS"
+	EnvDangerZone        = "DANGER_ZONE"
+	EnvGCDryRun          = "MIKE_GC_DRY_RUN"
+	EnvPProf             = "MIKE_PPROF"
+	EnvMemoryBudgetPct   = "MIKE_MEMORY_BUDGET_PCT"
 )
 
 // DefaultPort and DefaultListenAddr are the built-in defaults of the ladder. Loopback by default
@@ -129,6 +130,9 @@ type Config struct {
 	// says nothing about the offer — a stored server is still listed, offered and called, and a
 	// project still opts into it.
 	RestrictMCP bool
+	// RestrictStatReset refuses an explicit reset of a project's token counters. Deleting a task or
+	// project still removes the rows it owns.
+	RestrictStatReset bool
 
 	// ExtMountRoots are the extra host roots an extension sandbox may bind-mount, beyond the
 	// implicit ones. Still an allowlist.
@@ -228,6 +232,7 @@ func Resolve(f Flags) (Config, error) {
 	}
 	c.DisableUpdates = resolveDisable(EnvDisableUpdates, &c.Warnings)
 	c.RestrictMCP = isOne(EnvRestrictMCP)
+	c.RestrictStatReset = isOne(EnvRestrictStatReset)
 	c.ExtMountRoots = splitPathList(os.Getenv(EnvExtMountRoots))
 	c.AgentPath = resolveString("", EnvAgentPath, "")
 	c.SweepStaleContainersAtBoot = os.Getenv(EnvSkipSandboxSweep) == ""
@@ -249,7 +254,7 @@ func Resolve(f Flags) (Config, error) {
 
 	// A switch set to anything but "1" stays closed, and says so: an operator who typed
 	// MIKE_ALLOW_ROOT_FS=true and got the jail would otherwise discover it by being refused.
-	for _, name := range []string{EnvAllowRootFS, EnvDangerZone, EnvTrustProxy, EnvGCDryRun, EnvPProf, EnvRestrictMCP} {
+	for _, name := range []string{EnvAllowRootFS, EnvDangerZone, EnvTrustProxy, EnvGCDryRun, EnvPProf, EnvRestrictMCP, EnvRestrictStatReset} {
 		if v := os.Getenv(name); v != "" && v != "1" {
 			c.Warnings = append(c.Warnings, fmt.Sprintf("%s=%q is not the exact value 1, so it does nothing; set %s=1 to enable it or unset it to keep the current behaviour", name, v, name))
 		}

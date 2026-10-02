@@ -292,6 +292,8 @@ export interface Config {
     /** MIKE_RESTRICT_MCP: the registry is listed and offered but frozen, so this tab is read-only and
      *  the only MCP write left is a project's own enable list. */
     mcp_restricted?: boolean;
+    /** MIKE_RESTRICT_STAT_RESET: Token Usage hides the reset because the server refuses it. */
+    stats_reset_restricted?: boolean;
 }
 
 /**

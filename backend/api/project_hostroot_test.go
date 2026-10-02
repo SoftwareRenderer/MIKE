@@ -38,7 +38,7 @@ func jailedProjectHandler(t *testing.T) (h *ProjectHandler, s *store.Store, home
 
 	h = &ProjectHandler{
 		store:       st,
-		configStore: config.NewConfigStore(st, dbPath, "test", nil, false),
+		configStore: config.NewConfigStore(st, dbPath, "test", nil, false, false),
 		// Home only: no declared directory, so "inside home" is the whole jail.
 		hostRoot: fsutil.NewHostRoot(false),
 	}

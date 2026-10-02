@@ -50,7 +50,7 @@ func newTestStreamMgr(t testing.TB, s *store.Store, worktreeMgr *git.WorktreeMan
 // provider lookup resolves nowhere unless the test seeds one.
 func newTestConfigStore(t testing.TB, s *store.Store) *config.ConfigStore {
 	t.Helper()
-	cs := config.NewConfigStore(s, "", "test", nil, false)
+	cs := config.NewConfigStore(s, "", "test", nil, false, false)
 	cs.SetWorkspaceDirOverride(t.TempDir())
 	if err := s.SetConfigValue("providers", "[]"); err != nil {
 		t.Fatalf("set config providers: %v", err)

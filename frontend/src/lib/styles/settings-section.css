@@ -25,6 +25,14 @@
     gap: 8px;
 }
 
+/* The one dim sentence under a Settings heading: why a control is absent, or who removed it. */
+:global(.settings-note) {
+    margin: 0;
+    color: var(--color-text-tertiary);
+    line-height: 1.45;
+    font-size: var(--text-xs);
+}
+
 /* One row of a Settings list — the bordered box, the column it holds, the mono meta line and the dim
  * word that names each part of it. Sessions and API tokens render the same row; what only one list
  * shows (the current-session badge, the secret, the revoke button's own width) stays in that list. */

@@ -50,7 +50,7 @@ func newWatcherBaselineEnv(t *testing.T) *watcherBaselineEnv {
 	}
 	t.Cleanup(func() { s.Close() })
 
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false)
+	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false, false)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 	cfg, err := cfgStore.GetConfig()
 	if err != nil {

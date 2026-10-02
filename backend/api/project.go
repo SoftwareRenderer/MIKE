@@ -379,6 +379,11 @@ func (h *ProjectHandler) HandleStats(w http.ResponseWriter, r *http.Request) {
 		httputil.JSONResponse(w, http.StatusOK, stats)
 
 	case http.MethodDelete:
+		// The lock is a boot-time decision, so it is asked before anything in the request is read.
+		if h.configStore.StatResetLocked() {
+			httputil.JSONError(w, http.StatusForbidden, config.ErrStatsResetLocked.Error())
+			return
+		}
 		modelName := r.URL.Query().Get("model_name")
 		if modelName == "" {
 			httputil.JSONError(w, http.StatusBadRequest, "model_name query parameter is required")
