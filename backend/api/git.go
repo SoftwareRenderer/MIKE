@@ -614,7 +614,7 @@ func (h *GitHandler) handleGitRemote(w http.ResponseWriter, r *http.Request, op 
 	// server-side git process, for the full ssh/TCP timeout.
 	c := git.CommandContext(r.Context(), "", "-C", project.Path, op)
 	// No c.Env: an extra list would replace the environment git.Command sets, which carries the prompt
-	// refusal and the hook fence — that fence is why a pre-push hook does not run on Push.
+	// refusal and the execution fence — that fence is why a pre-push hook does not run on Push.
 	if out, err := c.CombinedOutput(); err != nil {
 		logging.For(logging.Managers).Errorf("git %s failed: %v: %s", op, err, out)
 		httputil.JSONError(w, http.StatusInternalServerError, "git "+op+" failed: "+gitErrorSummary(out))

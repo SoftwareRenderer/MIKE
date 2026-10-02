@@ -338,9 +338,32 @@ func createContainerArgs(containerName, mountPath string) []string {
 	return append(sandboxruntime.GVisorCreateArgs(containerName), "--workdir", mountPath)
 }
 
+// gitPointerMountArgs pins a task worktree's git pointer read-only, and refuses the container when
+// the pin cannot be established or the pointer already names a gitdir outside this project.
+//
+// A project container gets no pin: its worktree is the checkout itself, and the shell around it is a
+// person's own.
+func gitPointerMountArgs(taskID, worktreePath, mountPath, projectPath string) ([]string, error) {
+	if IsProjectKey(taskID) {
+		return nil, nil
+	}
+	// The expectation only exists for a project that keeps its git data in a directory; the pin
+	// applies either way.
+	if projectPath != "" {
+		gitDir := filepath.Join(projectPath, sandboxruntime.GitPointerFile)
+		if info, err := os.Stat(gitDir); err == nil && info.IsDir() {
+			if err := sandboxruntime.VerifyWorktreeGitPointer(worktreePath, gitDir); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return sandboxruntime.WorktreeGitPointerMount(worktreePath, mountPath)
+}
+
 // Create creates a gVisor sandbox container for a task.
 //
-// Mounts: the worktree at /home/sandbox/<project.Name> (read-only in plan mode);
+// Mounts: the worktree at /home/sandbox/<project.Name> (read-only in plan mode) with its git
+// pointer pinned read-only over it for a task container (see gitPointerMountArgs);
 // project.Path/.git read-only at its own absolute path, so git can resolve refs and
 // worktree metadata; opts.AgentSandbox mounts and envs; skillsDir read-only at SkillsMount
 // when non-empty; opts.SandboxMounts appended last.
@@ -448,6 +471,13 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 	createArgs = append(createArgs,
 		"-v", sandboxruntime.BindMountSpec(absWorktree, mountPath, worktreeMode),
 	)
+	// The pin is appended after the worktree mount its destination sits inside, and a task container
+	// is never created without it.
+	gitPointerArgs, err := gitPointerMountArgs(taskID, absWorktree, mountPath, projectPath)
+	if err != nil {
+		return nil, fmt.Errorf("cannot pin the git pointer for %s: %w", taskID, err)
+	}
+	createArgs = append(createArgs, gitPointerArgs...)
 	if opts.NetworkIsolation {
 		createArgs = append(createArgs, "--network", "none")
 	}

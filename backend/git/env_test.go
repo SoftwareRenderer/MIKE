@@ -70,14 +70,14 @@ func TestPreCommitHookNeverRuns(t *testing.T) {
 		t.Fatalf("commit failed — the pre-commit hook is NOT fenced: %v\n%s", err, out)
 	}
 	if _, err := os.Stat(marker); err == nil {
-		t.Fatal("pre-commit hook ran (marker exists) despite the hook fence")
+		t.Fatal("pre-commit hook ran (marker exists) despite the execution fence")
 	}
 }
 
-// TestHookFenceIsWhatStopsTheHook is the control case. Without it the test above passes just as
+// TestExecutionFenceIsWhatStopsTheHook is the control case. Without it the test above passes just as
 // well if the fence ever silently stops being applied, or if git changes where it looks for hooks:
 // nothing would have proved the hook was capable of firing in this environment.
-func TestHookFenceIsWhatStopsTheHook(t *testing.T) {
+func TestExecutionFenceIsWhatStopsTheHook(t *testing.T) {
 	repo := initRepo(t)
 	marker := writeHook(t, repo, "pre-commit", "exit 1")
 
@@ -182,7 +182,7 @@ func TestPostCheckoutHookNeverRunsOnWorktreeAdd(t *testing.T) {
 	}
 
 	if ran := addWorktree(t, true); ran {
-		t.Fatal("post-checkout ran on `git worktree add` despite the hook fence")
+		t.Fatal("post-checkout ran on `git worktree add` despite the execution fence")
 	}
 	if ran := addWorktree(t, false); !ran {
 		t.Fatal("control case: post-checkout did not run unfenced — the assertion above is vacuous")
@@ -262,7 +262,7 @@ func TestEnvOmitsAnAllowedNameTheServerLacks(t *testing.T) {
 
 func TestEnv_PolicySurvivesAnExtra(t *testing.T) {
 	// os/exec keeps the LAST occurrence of a duplicated key, so policy after extras is what makes
-	// the hook fence unforgeable from a call site.
+	// the execution fence unforgeable from a call site.
 	env := Env("GIT_CONFIG_KEY_0=core.editor", "core.hooksPath=/tmp/attacker")
 
 	lastHooksPath := ""
@@ -274,30 +274,146 @@ func TestEnv_PolicySurvivesAnExtra(t *testing.T) {
 		}
 	}
 	if lastHooksPath != "/dev/null" {
-		t.Errorf("hook fence overridable: last GIT_CONFIG_VALUE_0 = %q, want /dev/null", lastHooksPath)
+		t.Errorf("execution fence overridable: last GIT_CONFIG_VALUE_0 = %q, want /dev/null", lastHooksPath)
 	}
 	if count == 0 {
-		t.Error("hook fence absent from Env() entirely")
+		t.Error("execution fence absent from Env() entirely")
 	}
 	if !strings.Contains(strings.Join(env, "\n"), "GIT_TERMINAL_PROMPT=0") {
 		t.Error("GIT_TERMINAL_PROMPT=0 missing: an unattended commit would hang on a prompt")
 	}
 }
 
-func TestHookFenceShape(t *testing.T) {
-	got := strings.Join(HookFence(), "\n")
-	// git's env-config mechanism requires the count to match the number of KEY_n entries, or the
-	// configuration is silently ignored — which would read as "hooks are fine".
+func TestExecutionFenceShape(t *testing.T) {
+	fence := ExecutionFence()
+	got := strings.Join(fence, "\n")
+
+	// Every program git would run on a repository's say-so is pinned here. A new key must be
+	// added to the count too, or git ignores the whole set in silence — which would read as
+	// "the fence is fine".
 	for _, want := range []string{
-		"GIT_CONFIG_COUNT=2",
 		"GIT_CONFIG_KEY_0=core.hooksPath",
 		"GIT_CONFIG_VALUE_0=/dev/null",
 		"GIT_CONFIG_KEY_1=core.fsmonitor",
 		"GIT_CONFIG_VALUE_1=false",
+		"GIT_CONFIG_KEY_2=core.editor",
+		"GIT_CONFIG_VALUE_2=true",
+		"GIT_CONFIG_KEY_3=core.pager",
+		"GIT_CONFIG_VALUE_3=cat",
+		"GIT_CONFIG_KEY_4=core.askPass",
+		"GIT_CONFIG_VALUE_4=",
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("HookFence() missing %q; full value:\n%s", want, got)
+			t.Errorf("ExecutionFence() missing %q; full value:\n%s", want, got)
 		}
+	}
+
+	// The count is the one thing about this mechanism that fails silently, so it is derived here
+	// rather than repeated.
+	keys := 0
+	for _, entry := range fence {
+		if strings.HasPrefix(entry, "GIT_CONFIG_KEY_") {
+			keys++
+		}
+	}
+	if want := fmt.Sprintf("GIT_CONFIG_COUNT=%d", keys); !strings.Contains(got, want) {
+		t.Errorf("ExecutionFence() declares %d KEY_n entries but not %q; git would ignore every one:\n%s", keys, want, got)
+	}
+}
+
+// editorMarker points the repository's own editor at a file outside the repo, so "the marker
+// exists" is the whole assertion.
+func editorMarker(t *testing.T, repo string) string {
+	t.Helper()
+	marker := filepath.Join(t.TempDir(), "editor-ran")
+	setRepoConfig(t, repo, "core.editor", "touch "+marker)
+	return marker
+}
+
+// stageOneChange leaves one staged change, so a commit with no message must reach for an editor.
+func stageOneChange(t *testing.T, repo string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("changed\n"), 0o644); err != nil {
+		t.Fatalf("modify file: %v", err)
+	}
+	if out, err := Command(repo, "add", "a.txt").CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+}
+
+// TestRepoEditorNeverRuns covers the program git runs when a commit arrives with no message. Conflict
+// resolution ends in `git merge --continue`, which takes its message from an editor, so a repository
+// that supplies `core.editor` would have that program run by the server.
+func TestRepoEditorNeverRuns(t *testing.T) {
+	repo := initRepo(t)
+	marker := editorMarker(t, repo)
+	stageOneChange(t, repo)
+
+	// The commit is expected to fail: GIT_EDITOR accepts an empty message, which git refuses.
+	out, _ := Command(repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit").CombinedOutput()
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatalf("core.editor from the repository's own config ran despite the fence; git said: %s", out)
+	}
+}
+
+// TestUnfencedRepoEditorRuns is the control case: without GIT_EDITOR the repository's editor must
+// really run here, or the fenced assertion above proves nothing.
+func TestUnfencedRepoEditorRuns(t *testing.T) {
+	repo := initRepo(t)
+	marker := editorMarker(t, repo)
+	stageOneChange(t, repo)
+
+	cmd := exec.Command(gitBinary, "-C", repo,
+		"-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit")
+	cmd.Env = os.Environ()
+	out, _ := cmd.CombinedOutput()
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("control case: an unfenced commit did NOT run the repository's core.editor, so the "+
+			"editor assertions here are vacuous (git said: %s)", out)
+	}
+}
+
+// TestMergeContinueSurvivesTheEditorFence is why the editor is pinned to `true` and not to something
+// that refuses: conflict resolution ends in `git merge --continue`, which commits the prepared merge
+// message through an editor.
+func TestMergeContinueSurvivesTheEditorFence(t *testing.T) {
+	repo := initRepo(t)
+	run := func(expectFail bool, args ...string) string {
+		t.Helper()
+		identity := []string{"-c", "user.name=Test", "-c", "user.email=test@example.invalid"}
+		out, err := Command(repo, append(append([]string{}, identity...), args...)...).CombinedOutput()
+		if expectFail && err == nil {
+			t.Fatalf("expected %v to report conflicts: %s", args, out)
+		}
+		if !expectFail && err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return string(out)
+	}
+
+	base := strings.TrimSpace(run(false, "symbolic-ref", "--short", "HEAD"))
+	run(false, "checkout", "-qb", "side")
+	if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("from side\n"), 0o644); err != nil {
+		t.Fatalf("side edit: %v", err)
+	}
+	run(false, "commit", "-qam", "side")
+	run(false, "checkout", "-q", base)
+	if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("from base\n"), 0o644); err != nil {
+		t.Fatalf("base edit: %v", err)
+	}
+	run(false, "commit", "-qam", "base moved")
+	run(false, "checkout", "-q", "side")
+	run(true, "merge", "--no-edit", base)
+
+	if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("resolved\n"), 0o644); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	run(false, "add", "a.txt")
+	run(false, "merge", "--continue")
+
+	// A merge commit has two parents; that it exists is the proof the flow completed.
+	if out, err := Command(repo, "rev-parse", "--verify", "HEAD^2").CombinedOutput(); err != nil {
+		t.Fatalf("merge --continue left no merge commit: %v\n%s", err, out)
 	}
 }
 
@@ -321,7 +437,7 @@ func TestCloneEnvCarriesNoServerSecrets(t *testing.T) {
 		t.Error("CloneEnv() lost the transport fence")
 	}
 	if !strings.Contains(env, "core.hooksPath") {
-		t.Error("CloneEnv() lost the hook fence: a cloned repo's post-checkout hook would run")
+		t.Error("CloneEnv() lost the execution fence: a cloned repo's post-checkout hook would run")
 	}
 }
 
@@ -340,7 +456,7 @@ func TestCommandSetsDirAndEnv(t *testing.T) {
 		}
 	}
 	if !strings.Contains(strings.Join(cmd.Env, "\n"), "core.hooksPath") {
-		t.Error("cmd.Env lacks the hook fence")
+		t.Error("cmd.Env lacks the execution fence")
 	}
 }
 
@@ -389,7 +505,7 @@ func skipPath(rel string) bool {
 }
 
 // TestNoGitSubprocessSpawnsOutsideGit is the structural gate. The environment allowlist and the
-// hook fence are only real if there is one place that starts git: every additional
+// execution fence are only real if there is one place that starts git: every additional
 // exec.Command("git") is a spawn point that would have to remember both, and there were 71 of them
 // across 12 files before env.go existed. A source-walking test is the established shape for this in
 // this repo (frontend/i18n-gate.py, frontend/html-sinks.py) and, unlike a comment in AGENTS.md, it
@@ -445,7 +561,7 @@ func TestNoGitSubprocessSpawnsOutsideGit(t *testing.T) {
 
 	if len(offenders) > 0 {
 		t.Errorf("%d git subprocess(es) constructed outside %s. Use git.Command(dir, args...) so "+
-			"the environment allowlist and the hook fence cannot be forgotten:\n\n%s\n",
+			"the environment allowlist and the execution fence cannot be forgotten:\n\n%s\n",
 			len(offenders), spawnFile, strings.Join(offenders, "\n"))
 	}
 }
