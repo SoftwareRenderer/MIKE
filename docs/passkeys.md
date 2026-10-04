@@ -18,9 +18,9 @@ there is nothing left to steal.
   on any other condition has turned the pairing code into a password.
 - **One code spends once, and it is spent at register-begin** — before any options exist. A code that
   could begin twice could pair twice.
-- **A code never becomes a log line, a query string, or a child process's environment.** It is printed
-  once (the only place it is written), reaches a browser through the URL fragment, and lives in memory.
-  A secret with no on-disk copy cannot leak from a backup.
+- **A code never becomes a log record, a query string, or a child process's environment.** The boot banner
+  writes it once, with no record prefix on any row. A browser gets it through the URL fragment, and it lives
+  in memory. A secret with no on-disk copy cannot leak from a backup.
 - **The relying-party id and origin are the request's**, and each credential stores the rpID it was minted
   for. An assertion offers only that rpID's credentials, so a key minted at `localhost` is never offered
   at a proxy domain.
@@ -70,12 +70,19 @@ two requests: HMAC-SHA256 over purpose + payload, keyed by HKDF over `MIKE_ENCRY
 an abandoned ceremony is the normal outcome — and the purpose inside the MAC, rather than inside the
 payload, is what stops one ceremony's ticket being presented to the other.
 
-**Presentation** (`backend/auth/pairing_qr.go`, `backend/server/boot_pairing.go`). `PairingURL` puts the
-code in the fragment. `PairingQRPNG` is the Settings picture, `PairingQRTerminal` the boot picture
-(ANSI half-blocks, two module rows per text line). `pairAtBoot` mints and prints only while
-`PasskeyCount()` is zero, so an unattended restart never announces a live code into a log nobody is
-reading, and warns when the listen address is not loopback or the printed host cannot hold a passkey.
-`logging.Banner` writes the QR to the same sink as the log lines without prefixing each of its rows.
+**Presentation** (`backend/auth/pairing_banner.go`, `backend/auth/pairing_qr.go`,
+`backend/server/boot_pairing.go`). `PairingURL` puts the code in the fragment. The boot printout is
+`PairingBanner`: the code on a row of its own, padded inside a frame, with the link and the expiry beside it.
+It is padding and rule characters rather than a picture, because a terminal's cell is not a known shape. A
+block-drawn QR is square only while the reader's line height happens to be twice the font's advance width, and
+no terminal may be assumed to be that. The row the code sits on is a contract across languages: the browser
+lane mirrors it to pair its test device from the server's log (`PAIRING_CODE_ROW` in
+`frontend/tests/helpers-auth.mjs`), and `TestPairingBannerShowsTheCodeOnItsOwnRow` holds the shape. A
+scannable picture exists in one place only: `PairingQRPNG`, the PNG the Settings mint returns, where the pixel
+grid is ours. `pairAtBoot` mints and prints only while `PasskeyCount()` is zero, so an unattended restart never
+announces a live code into a log nobody is reading, and warns when the listen address is not loopback or the
+printed host cannot hold a passkey. `logging.Banner` writes the box to the same sink as the log lines, with no
+prefix on any row — `TestBootPairingPrintsTheCodeRowWithNoPrefix` holds that.
 
 **Storage** (`backend/store/passkeys.go`). Its own DDL beside its accessors, one row per device, `record`
 a blob. `DeletePasskey` returns `ErrLastPasskey` for the final row; `ResetPasskeys` deletes passkeys and

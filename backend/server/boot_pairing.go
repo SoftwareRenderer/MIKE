@@ -35,16 +35,9 @@ func (s *Server) pairAtBoot(ctx context.Context) {
 	}
 	origin := s.bootPairingOrigin()
 	url := auth.PairingURL(origin, code.Code)
-	// One line carries both the code and the URL, so an operator who cannot scan a QR from their terminal
-	// (and the e2e lane, which reads the code out of this line) have one thing to read.
-	logging.For(logging.Auth).Infof("no passkey is registered: pairing code %s is live at %s", auth.FormatPairingCode(code.Code), url)
-	if qr, err := auth.PairingQRTerminal(url); err != nil {
-		logging.For(logging.Auth).Warnf("could not draw the pairing QR: %v", err)
-	} else {
-		logging.Banner(qr)
-	}
-	logging.For(logging.Auth).Infof("this pairing code expires at %s and works once; restart MIKE to print a new one",
-		code.ExpiresAt.UTC().Format("2006-01-02 15:04:05 MST"))
+	// The code is written here and nowhere else, and the browser lane reads it back out of this text
+	// (docs/testing.md → Passkeys in the e2e lane).
+	logging.Banner(auth.PairingBanner(auth.FormatPairingCode(code.Code), url, code.ExpiresAt))
 
 	if !startup.IsLoopbackAddr(s.settings.Listen) {
 		logging.For(logging.Auth).Warnf("this server listens on %s, which other machines can reach: anyone who can reach that "+

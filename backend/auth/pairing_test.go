@@ -27,6 +27,35 @@ func TestMintedCodeIsTypable(t *testing.T) {
 	}
 }
 
+// Nothing counts attempts against a code, so the size of the space is the whole answer to a guesser. The
+// budget is the route's default allowance spent over the whole boot TTL.
+func TestPairingCodeSpaceOutrunsTheGuessingBudget(t *testing.T) {
+	t.Parallel()
+	const attemptsPerMinutePerAddress = 5
+	budget := uint64(attemptsPerMinutePerAddress) * uint64(BootPairingTTL/time.Minute)
+
+	space := uint64(1)
+	for i := 0; i < pairingCodeLength; i++ {
+		space *= uint64(len(pairingAlphabet))
+	}
+	if odds := space / budget; odds < 1_000_000_000 {
+		t.Fatalf("%d guesses in the boot window are only %.0f-to-one against a code of %d characters from %d "+
+			"symbols", budget, float64(odds), pairingCodeLength, len(pairingAlphabet))
+	}
+}
+
+// A symbol written twice keeps the printed length and shortens the space, and nothing else notices.
+func TestPairingAlphabetHasNoRepeatedSymbol(t *testing.T) {
+	t.Parallel()
+	seen := map[rune]bool{}
+	for _, r := range pairingAlphabet {
+		if seen[r] {
+			t.Fatalf("pairingAlphabet holds %q twice", r)
+		}
+		seen[r] = true
+	}
+}
+
 func TestCodeIsSpentByOneConsume(t *testing.T) {
 	codes := NewPairingCodes()
 	minted, err := codes.Mint(DevicePairingTTL)

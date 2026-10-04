@@ -215,9 +215,10 @@ WebAuthn ceremony**: `frontend/tests/helpers-auth.mjs` launches Chromium, attach
 authenticator** (`WebAuthn.addVirtualAuthenticator` with resident keys and user verification, which is what
 the server's ceremony asks for), walks the login form, and hands back the session cookie and CSRF token.
 `global-setup.ts` pairs both lane servers this way and writes the result to the storage-state files the
-projects read; the pairing code comes out of `/tmp/kanban-test-server.log`, from the same boot line an
-operator reads on a fresh install. A data directory that already holds a passkey prints no such line, and
-that is what a `readPairingCode` failure means.
+projects read. The pairing code comes out of `/tmp/kanban-test-server.log`, from the same boxed boot banner an
+operator reads on a fresh install: `pairingCodeFromLog` matches its `PAIRING CODE` row, and that row is owned
+by `auth.PairingBanner`. A data directory that already holds a passkey prints no such banner, and that is
+what a `readPairingCode` failure means.
 
 - **`browser.newContext()` is not a signed-out browser.** Playwright applies the project's `use` options to
   every context a test creates from the `browser` fixture — `storageState` and `baseURL` included — so a

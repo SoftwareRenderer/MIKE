@@ -203,9 +203,8 @@ func setOutput(w io.Writer) (restore func()) {
 	}
 }
 
-// Banner writes text straight to the log's sink with no record prefix on any line, for output that is a
-// picture rather than a sentence: a QR code with a timestamp stamped on every row of it is not scanable.
-// It shares the sink with the handler, so a test capturing with TestSink captures the banner too.
+// Banner writes text straight to the log's sink with no record prefix on any line, for output whose shape
+// matters. It shares the sink with the handler, so a test capturing with TestSink captures the banner too.
 func Banner(text string) {
 	if text == "" {
 		return

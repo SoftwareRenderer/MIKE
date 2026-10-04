@@ -84,7 +84,7 @@ fi
 # Nothing here signs a person in: a browser pairs a passkey, and the first boot of an empty
 # data directory prints the one-time code that buys that registration. Say where to read it,
 # because "how do I get in" is the first question an operator of a fresh container asks.
-echo "mike-entrypoint: no password is set or needed. On a data directory with no passkey yet, this service's log prints a pairing code and QR — read them with: docker compose logs mike"
+echo "mike-entrypoint: no password is set or needed. On a data directory with no passkey yet, this service's log prints a boxed pairing code — read it with: docker compose logs mike"
 
 # The default sandbox image is pulled by the first task that needs it, silently, from inside
 # the gVisor-isolated create path. Opt in to paying for it at boot instead.

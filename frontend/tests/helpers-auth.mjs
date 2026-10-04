@@ -4,7 +4,7 @@
  * MIKE has no test password and no test-only credential: a session is what a finished WebAuthn ceremony
  * earns, so anything that needs one drives a ceremony. Chromium lets a test do that without a hardware
  * key — the DevTools protocol attaches a **virtual authenticator** to the page — and the pairing code
- * comes out of the server's own log, which is the same line an operator reads on a fresh install.
+ * comes out of the server's own log, from the same boxed banner an operator reads on a fresh install.
  *
  * This is the honest path, and it is also the slow one: a browser, a ceremony and the login form are all
  * in the way, which is exactly what a harness that skipped them would stop testing.
@@ -39,14 +39,17 @@ export function signedOutContext(browser) {
     return browser.newContext({ storageState: { cookies: [], origins: [] } });
 }
 
-/** The boot line `pairAtBoot` prints. It carries the code and the pairing URL in one greppable line. */
-const PAIRING_CODE_LINE = /pairing code ([0-9A-Z-]+) is live at (\S+)/;
+/**
+ * The row `auth.PairingBanner` prints; backend/auth/pairing_banner.go owns the shape. The banner carries no
+ * record prefix, so nothing may follow the code but the box's own padding and right rule.
+ */
+const PAIRING_CODE_ROW = /PAIRING CODE\s+([0-9A-Z]{4}-[0-9A-Z]{4})[ │]*$/;
 
-/** The code in a server log's most recent boot line, or '' when the log holds none. */
+/** The code in a server log's most recent boot banner, or '' when the log holds none. */
 export function pairingCodeFromLog(text) {
     let code = '';
     for (const line of String(text ?? '').split('\n')) {
-        const match = PAIRING_CODE_LINE.exec(line);
+        const match = PAIRING_CODE_ROW.exec(line);
         if (match) code = match[1];
     }
     return code;
@@ -177,8 +180,8 @@ export function pairingCodeFromEnv() {
     const code = (process.env.MIKE_PAIR_CODE || '').trim();
     if (!code) {
         throw new Error('MIKE_PAIR_CODE is not set. Mint one in Settings → Devices & passkeys on a browser '
-            + 'that is already signed in, or read it off an unpaired server\'s log — the line that says '
-            + '"pairing code XXXX-XXXX is live at …". A code works once, so mint one per probe run.');
+            + 'that is already signed in, or read it off an unpaired server\'s boot banner — the boxed row that '
+            + 'says "PAIRING CODE  XXXX-XXXX". A code works once, so mint one per probe run.');
     }
     return code;
 }

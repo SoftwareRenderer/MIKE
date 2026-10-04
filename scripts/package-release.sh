@@ -131,8 +131,8 @@ public domain, also set `MIKE_ALLOWED_HOSTS`. `./mike-server --help` lists the f
 environment twins.
 
 There is no password to set. A browser signs in with a **passkey**, and the first boot of an empty
-`data/` prints the one-time pairing code (and a QR) that buys that first registration — read it from
-the terminal MIKE started in. Every device after that is paired from Settings → Devices & passkeys on
+`data/` prints the one-time pairing code that buys that first registration, boxed so it stands out
+in the terminal MIKE started in. Every device after that is paired from Settings → Devices & passkeys on
 a browser that is already signed in. Lost every passkey? Stop the server and run
 `./mike-server --reset-passkeys`; it deletes the passkeys and every live session, then exits.
 

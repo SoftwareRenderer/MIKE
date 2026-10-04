@@ -29,10 +29,9 @@ const (
 	// into a second device, short enough that a code left on screen stops being an invitation.
 	DevicePairingTTL = 5 * time.Minute
 
-	// pairingCodeLength is 8 characters drawn from pairingAlphabet: 40 bits. Guessing one is bounded by
-	// the login rate limiter on the route (five requests per client IP per minute, by default), which is
-	// the machinery that already stands in front of a wrong secret; a per-code attempt counter would
-	// count nothing, since a wrong code has no entry to count against.
+	// pairingCodeLength gives a space of 29^8 — 2^38.9, since pairingAlphabet holds 29 symbols rather than 32.
+	// Guessing is bounded by the login rate limiter, not by a per-code counter: a wrong code has no entry to
+	// count against.
 	pairingCodeLength = 8
 
 	// pairingMaxLive caps how many codes are outstanding at once, so a minted code cannot be hoarded.

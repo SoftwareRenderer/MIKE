@@ -12,6 +12,7 @@ import (
 	"mike/backend/auth"
 	"mike/backend/startup"
 	"mike/backend/testutil/testwebauthn"
+	"mike/pkg/logging"
 
 	"github.com/go-webauthn/webauthn/protocol"
 )
@@ -570,8 +571,31 @@ func TestBootPairingCodeIsMintedOnlyForAnUnpairedInstall(t *testing.T) {
 	}
 }
 
-// TestBootPairingURLNamesAHostThatCanCarryACredential: the printed URL is where an operator without a
-// scannable terminal looks, so it must not point at an address the ceremony will refuse.
+// A record prefix on the code row would leave the code in the log and out of the browser lane's match.
+func TestBootPairingPrintsTheCodeRowWithNoPrefix(t *testing.T) {
+	s := testServer(t)
+	buf, restore := logging.TestSink()
+	defer restore()
+
+	s.pairAtBoot(t.Context())
+
+	found := false
+	for _, line := range strings.Split(buf.String(), "\n") {
+		if !strings.Contains(line, "PAIRING CODE") {
+			continue
+		}
+		found = true
+		if strings.Contains(line, "component=") || strings.Contains(line, "level=") {
+			t.Errorf("the code row arrived as a log record, which the browser lane cannot match through: %q", line)
+		}
+	}
+	if !found {
+		t.Fatalf("the boot printout wrote no pairing code row:\n%s", buf.String())
+	}
+}
+
+// TestBootPairingURLNamesAHostThatCanCarryACredential: the printed URL is what the device holding the new
+// passkey opens, so it must not point at an address the ceremony will refuse.
 func TestBootPairingURLNamesAHostThatCanCarryACredential(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
