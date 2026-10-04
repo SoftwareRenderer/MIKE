@@ -26,19 +26,34 @@ func newTestPasskeys(t *testing.T) (*Passkeys, *store.Store, *Tickets) {
 	if err != nil {
 		t.Fatalf("build tickets: %v", err)
 	}
-	return NewPasskeys(s, tickets), s, tickets
+	return NewPasskeys(s, tickets, NewPairingCodes()), s, tickets
 }
 
 var localHost = RelyingHost{RPID: "localhost", Origin: "http://localhost:3000"}
 
-// register runs both halves of a registration and returns the credential the browser minted.
+// claimCode mints a pairing code and returns the key a begin seals with it.
+func claimCode(t *testing.T, p *Passkeys) string {
+	t.Helper()
+	minted, err := p.codes.Mint(DevicePairingTTL)
+	if err != nil {
+		t.Fatalf("mint a pairing code: %v", err)
+	}
+	key, err := p.codes.Claim(minted.Code)
+	if err != nil {
+		t.Fatalf("claim a pairing code: %v", err)
+	}
+	return key
+}
+
+// register runs both halves of a registration and returns the credential the browser minted. Each one pays
+// with a code of its own, because a registration is what spends a code.
 func register(t *testing.T, p *Passkeys, tickets *Tickets, host RelyingHost, name string, flags protocol.AuthenticatorFlags) *testwebauthn.Credential {
 	t.Helper()
-	options, ticket, err := p.BeginRegistration(context.Background(), host)
+	options, ticket, err := p.BeginRegistration(context.Background(), host, claimCode(t, p))
 	if err != nil {
 		t.Fatalf("begin registration: %v", err)
 	}
-	session, err := tickets.Open(ticketPurposeRegister, ticket)
+	session, _, err := tickets.Open(ticketPurposeRegister, ticket)
 	if err != nil {
 		t.Fatalf("the issued ticket does not open: %v", err)
 	}
@@ -73,7 +88,7 @@ func assertCredential(t *testing.T, p *Passkeys, tickets *Tickets, host RelyingH
 	if len(options.Response.AllowedCredentials) != 1 {
 		t.Errorf("the sign-in offered %d credentials, want the one this host has", len(options.Response.AllowedCredentials))
 	}
-	session, err := tickets.Open(ticketPurposeAssert, ticket)
+	session, _, err := tickets.Open(ticketPurposeAssert, ticket)
 	if err != nil {
 		return err
 	}
@@ -176,7 +191,7 @@ func TestAssertionRefusesAnotherOrigin(t *testing.T) {
 		t.Fatalf("begin: %v", err)
 	}
 	_ = options
-	session, err := tickets.Open(ticketPurposeAssert, ticket)
+	session, _, err := tickets.Open(ticketPurposeAssert, ticket)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

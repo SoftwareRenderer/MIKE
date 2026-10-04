@@ -101,13 +101,14 @@ describe('checkSession', () => {
         let sessionAnswers = 0;
         mockFetch.mockImplementation(async () => {
             sessionAnswers++;
-            return res(200, { authenticated: true, has_passkey: true, csrf_token: 'session-token' });
+            return res(200, { authenticated: true, has_passkey: true, tls_ca_available: true, csrf_token: 'session-token' });
         });
 
         const { checkSession } = await import('$lib/api/auth');
         const { ensureCsrfToken } = await import('$lib/api/helpers');
 
-        await expect(checkSession()).resolves.toEqual({ authenticated: true, hasPasskey: true });
+        // `tls_ca_available` is the pairing notice's other branch: whether the CA download would answer.
+        await expect(checkSession()).resolves.toEqual({ authenticated: true, hasPasskey: true, caDownload: true });
         // One GET for the probe. A safe method asks for no token, so nothing probes ahead of it.
         expect(sessionAnswers).toBe(1);
         // The token came from that answer, so reading it back spends no further request.
@@ -121,7 +122,7 @@ describe('checkSession', () => {
         const { checkSession } = await import('$lib/api/auth');
         const { ensureCsrfToken } = await import('$lib/api/helpers');
 
-        await expect(checkSession()).resolves.toEqual({ authenticated: false, hasPasskey: false });
+        await expect(checkSession()).resolves.toEqual({ authenticated: false, hasPasskey: false, caDownload: false });
         await expect(ensureCsrfToken()).resolves.toBe('');
         // The answer is the evidence: a signed-out browser is a server that replied.
         expect(reachabilityCalls).toEqual([true]);
@@ -134,7 +135,7 @@ describe('checkSession', () => {
 
         const { checkSession } = await import('$lib/api/auth');
 
-        await expect(checkSession()).resolves.toEqual({ authenticated: false, hasPasskey: null });
+        await expect(checkSession()).resolves.toEqual({ authenticated: false, hasPasskey: null, caDownload: false });
         expect(reachabilityCalls).toEqual([true]);
     });
 
@@ -145,7 +146,9 @@ describe('checkSession', () => {
 
         const { checkSession } = await import('$lib/api/auth');
 
-        await expect(checkSession()).resolves.toEqual({ authenticated: false, hasPasskey: null });
+        // No flag is "this server offers no CA download", which is the safe reading: the notice then
+        // says nothing rather than linking at a file that would not be served.
+        await expect(checkSession()).resolves.toEqual({ authenticated: false, hasPasskey: null, caDownload: false });
     });
 
     it('throws on a body that is not the answer, the boot path\'s outage branch', async () => {
@@ -215,6 +218,23 @@ describe('registerPasskeyWithCode', () => {
         expect(err.message).toBe('The passkey prompt was dismissed');
     });
 
+    it('says what to do when the browser will not run the prompt, without quoting the browser', async () => {
+        const refused = Object.assign(new Error('The operation is insecure.'), { name: 'NotSupportedError' });
+        createCall.mockRejectedValue(refused);
+        mockFetch.mockResolvedValueOnce(res(200, { ticket: 'ticket-1', options: { publicKey: creationJSON } }));
+        const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        const { isPasskeyCancelled, registerPasskeyWithCode } = await import('$lib/api/auth');
+
+        const err = await registerPasskeyWithCode('ABCD-2345').then(() => null, (e: any) => e);
+        expect(isPasskeyCancelled(err)).toBe(false);
+        expect(err.message).toContain('refused to run the passkey prompt');
+        expect(err.message).not.toContain('insecure');
+        expect(err.cause).toBe(refused);
+        expect(logged).toHaveBeenCalled();
+        logged.mockRestore();
+    });
+
     it('asks nothing of a browser that cannot run a ceremony', async () => {
         // Plain HTTP on a LAN address has no prompt to show, and a pairing code spent there is a code
         // that has to be minted again once the person reaches https.
@@ -222,7 +242,7 @@ describe('registerPasskeyWithCode', () => {
 
         const { registerPasskeyWithCode } = await import('$lib/api/auth');
 
-        await expect(registerPasskeyWithCode('ABCD-2345')).rejects.toThrow('A passkey needs a secure connection');
+        await expect(registerPasskeyWithCode('ABCD-2345')).rejects.toThrow('does not treat this connection as secure');
         expect(mockFetch).not.toHaveBeenCalled();
     });
 });

@@ -87,7 +87,7 @@ test.describe.serial('Terminal WebSocket origin verification', () => {
     test('a cross-site origin is refused before any shell is created', async ({ page, context }) => {
         await page.goto('/');
         const projectId = await getProjectId(page);
-        const baseURL = test.info().project.use.baseURL ?? 'http://localhost:3000';
+        const baseURL = test.info().project.use.baseURL ?? 'https://localhost:3000';
         const path = `/api/projects/${projectId}/terminal`;
         const host = new URL(baseURL).host;
         // The session cookie rides along, so Origin is the only variable here.

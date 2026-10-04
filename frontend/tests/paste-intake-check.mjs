@@ -14,13 +14,15 @@
 import { chromium } from 'playwright';
 import { attachVirtualAuthenticator, pairBrowser, pairingCodeFromEnv } from './helpers-auth.mjs';
 
-const BASE = process.env.BASE || 'http://localhost:3000';
+const BASE = process.env.BASE || 'https://localhost:3000';
 const PROJECT = process.env.PROJECT || 'kanban-upload-probe';
 const TASK = process.env.TASK || 'wander-oath-violet';
 const CODE = pairingCodeFromEnv();
 
 const browser = await chromium.launch();
-const ctx = await browser.newContext();
+// The lane's certificate comes from the CA the server made in its own data dir; this probe measures
+// the paste, not the certificate.
+const ctx = await browser.newContext({ ignoreHTTPSErrors: true });
 const page = await ctx.newPage();
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
 page.on('response', (r) => {

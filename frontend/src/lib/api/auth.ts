@@ -21,7 +21,17 @@ export interface SessionAnswer {
     /** `null` when the server could not read it — the form then shows the sign-in branch, and the
      *  ceremony it starts answers for itself. */
     hasPasskey: boolean | null;
+    /** Whether `CA_DOWNLOAD` below will answer a certificate. A server that does not sign its own
+     *  address has nothing to hand out, and the pairing notice says so by staying quiet. */
+    caDownload: boolean;
 }
+
+/**
+ * The local CA certificate, offered to a device that has to trust this address before its browser will
+ * run a passkey prompt. Named once: Settings → About and the login gate both link here, and the file
+ * name is the one the server sets on the download.
+ */
+export const CA_DOWNLOAD = { path: `${API_BASE}/tls/ca`, fileName: 'mike-ca.crt' };
 
 /** A ceremony the person stopped (they closed the prompt, or let it time out). Not a fault. */
 class PasskeyCancelled extends Error {
@@ -58,7 +68,11 @@ export async function checkSession(): Promise<SessionAnswer> {
     const data = await res.json();
     const authenticated = data?.authenticated === true;
     if (authenticated && data.csrf_token) setCsrfToken(data.csrf_token);
-    return { authenticated, hasPasskey: typeof data?.has_passkey === 'boolean' ? data.has_passkey : null };
+    return {
+        authenticated,
+        hasPasskey: typeof data?.has_passkey === 'boolean' ? data.has_passkey : null,
+        caDownload: data?.tls_ca_available === true,
+    };
 }
 
 /** One ceremony's first half: the browser's options, and the ticket the second half must carry back. */
@@ -118,7 +132,6 @@ export async function registerPasskeyWithCode(code: string, name = ''): Promise<
     }
     const created = await runCeremony(
         navigator.credentials.create({ publicKey: creationOptions(publicKeyOf(begun, t('app.login.registerFailed')) as CredentialCreationJSON) }),
-        t('app.login.registerFailed'),
     );
     await finishCeremony('/auth/passkey/register/finish', begun.ticket, created, name);
 }
@@ -132,17 +145,16 @@ export async function signInWithPasskey(): Promise<void> {
     const begun = await beginCeremony('/auth/passkey/assert/begin', {});
     const asserted = await runCeremony(
         navigator.credentials.get({ publicKey: requestOptions(publicKeyOf(begun, t('app.login.signInFailed')) as CredentialRequestJSON) }),
-        t('app.login.signInFailed'),
     );
     await finishCeremony('/auth/passkey/assert/finish', begun.ticket, asserted);
 }
 
 /**
  * Hand the browser's options to the authenticator and wait. A prompt the person dismissed is
- * `PasskeyCancelled`, which the caller shows as a sentence rather than a fault; anything else is the
- * server's or the platform's own words, because both describe something the person can act on.
+ * `PasskeyCancelled`, which the caller shows as a sentence rather than a fault. Any other refusal is the
+ * browser's to explain, so the reader gets what to do next and the browser's own words go to the console.
  */
-async function runCeremony(pending: Promise<Credential | null>, failure: string): Promise<PublicKeyCredential> {
+async function runCeremony(pending: Promise<Credential | null>): Promise<PublicKeyCredential> {
     try {
         const credential = await pending;
         if (!credential) throw new PasskeyCancelled();
@@ -150,7 +162,8 @@ async function runCeremony(pending: Promise<Credential | null>, failure: string)
     } catch (e) {
         if (e instanceof PasskeyCancelled || isAborted(e)) throw e;
         if ((e as any)?.name === 'NotAllowedError' || (e as any)?.name === 'AbortError') throw new PasskeyCancelled({ cause: e });
-        throw new Error((e as Error)?.message || failure, { cause: e });
+        console.error('[login] the browser refused the passkey prompt:', (e as Error)?.name, e);
+        throw new Error(t('app.login.browserRefused'), { cause: e });
     }
 }
 

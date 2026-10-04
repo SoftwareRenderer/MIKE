@@ -7,17 +7,19 @@ bearer token that reaches a narrower set of routes (`docs/api.md`), or the Host 
 hostname a credential may be bound to (`docs/tls.md`).
 
 **A pairing code authorizes one registration and authenticates nothing.** No session, no cookie and no
-CSRF token exists on the strength of a code: the code is spent before the ceremony's options are issued.
-The session is opened only as the answer to a credential response the device's own authenticator signed. That is what makes the code safe to print on a terminal and put in a log — once it is spent,
-there is nothing left to steal.
+CSRF token exists on the strength of a code. The code buys the ceremony's options, and the session is opened
+only as the answer to a credential response the device's own authenticator signed. It works once and dies
+with its TTL, which is what makes it safe to print on a terminal.
 
 ## What must stay true
 
 - **A session opens only as the answer to a finished ceremony.** Both ceremony finishes end at
   `openSession`, and nothing else on these routes writes the session cookie. A route that opens a session
   on any other condition has turned the pairing code into a password.
-- **One code spends once, and it is spent at register-begin** — before any options exist. A code that
-  could begin twice could pair twice.
+- **One code writes one passkey, and it is spent when that passkey row is written.** A ceremony that never
+  finished has spent nothing, so the same code pairs on the next try. Two tickets may be open at once and
+  the second to reach the write is refused: the spend is one delete of the code's entry. A write that failed
+  puts its code back, and a revoke in between outranks that — a revoked code stays revoked.
 - **A code never becomes a log record, a query string, or a child process's environment.** The boot banner
   writes it once, with no record prefix on any row. A browser gets it through the URL fragment, and it lives
   in memory. A secret with no on-disk copy cannot leak from a backup.
@@ -55,18 +57,23 @@ credential id — column, listing, and path parameter.
 
 **Pairing codes** (`backend/auth/pairing.go`). `PairingCodes.Mint` draws eight characters
 (`crypto/rand`, redrawn above the alphabet's largest multiple so no character is likelier than another)
-from a look-alike-free alphabet and keeps only `hex(sha256(code))`. `Consume` deletes the entry before it
-checks the expiry, so a spend is a spend. Unknown, expired and spent are one error —
+from a look-alike-free alphabet and keeps only `hex(sha256(code))`. `Claim` checks a presented code and
+returns the key its entry is spent by. The registration it pays for then calls `spend`, which deletes that
+entry, or `undo`, which returns it when the row could not be written. A `RevokeAll` in between outranks the
+undo, which is why a spend carries the revoke count with it. Unknown, expired and spent are one error —
 `ErrInvalidPairingCode` — because telling them apart tells a guesser how close they came.
 `NormalizePairingCode` is the one shape a typed code takes, mirrored by `normalizePairingCode`
 (`frontend/src/lib/utils/login-flow.ts`) so the form's own button agrees with what the server accepts.
+`FormatPairingCode`'s two groups are mirrored by `pairingCodeInput`, which groups the field as it is typed:
+what a person sees is the shape they are reading off the terminal.
 TTLs: `BootPairingTTL` for the printed code, `DevicePairingTTL` for one minted from Settings, at most
 `pairingMaxLive` live at once. There is no per-code attempt counter on purpose: a wrong code has no entry
 to count against, so the login rate limiter on the route (`MIKE_LOGIN_RATE_LIMIT`) is the bound.
 
-**Tickets** (`backend/auth/ticket.go`). `Tickets.Seal`/`Open` carry the library's `SessionData` across the
-two requests: HMAC-SHA256 over purpose + payload, keyed by HKDF over `MIKE_ENCRYPTION_KEY`, bounded by
-`TicketTTL` and `ticketMaxPayloadBytes`. A table would be state held for a client that closed the tab —
+**Tickets** (`backend/auth/ticket.go`). `Tickets.Seal`/`Open` carry the library's `SessionData`, and the
+caller's own bytes beside it, across the two requests: HMAC-SHA256 over purpose + payload, keyed by HKDF over
+`MIKE_ENCRYPTION_KEY`, bounded by `TicketTTL` and `ticketMaxPayloadBytes`. A registration seals the claimed
+code's key there, which is how its finish knows what to spend. A table would be state held for a client that closed the tab —
 an abandoned ceremony is the normal outcome — and the purpose inside the MAC, rather than inside the
 payload, is what stops one ceremony's ticket being presented to the other.
 
@@ -100,8 +107,12 @@ container sweep exists. `--reset-passkeys` has no environment spelling on purpos
 command that a stale environment variable selects runs at every restart.
 
 **The browser side.** `$lib/utils/webauthn.ts` converts between the ceremony's JSON and the `ArrayBuffer`s
-`navigator.credentials` insists on, and `passkeySupport()` names why a ceremony cannot run here
-(`insecure-context` is the one the person can act on). `$lib/utils/login-flow.ts` owns every branch:
+`navigator.credentials` insists on, and `passkeySupport()` names why a ceremony cannot run here.
+`insecure-context` is the one the person can act on, and on that one the gate refuses a prompt it knows the
+browser will not run and says the connection is not secure. `GET /api/auth/session` answers
+`tls_ca_available`, and where it says yes the notice also links the local CA and the steps to install it —
+that device has no session to download the certificate with. See `docs/tls.md → Certificates on disk`.
+`$lib/utils/login-flow.ts` owns every branch:
 no passkey means the code field, a passkey means the assertion, and a cancelled prompt is a note rather
 than a fault. `LoginModal.svelte` paints the stage it is given and takes a `#pair=CODE` fragment out of
 the address bar as soon as the field holds it. `ConfigModal/PasskeysSection.svelte` is the management
@@ -115,7 +126,9 @@ virtual authenticator instead (`docs/testing.md → Passkeys in the e2e lane`).
 ## Checking this
 
 `go test ./backend/auth/ ./backend/store/ ./backend/server/` runs the ceremonies (real signatures), the
-rpID scoping, the single-use code, the ticket's purpose and expiry, the last-passkey refusal, the atomic
-reset, and every route refusal above. `make test-e2e SPECS=login` walks a browser through pairing,
-registration and assertion; `make test-e2e SPECS=settings-passkeys` drives the Settings surface, including
-the minted code a second device pairs with.
+rpID scoping, and the code spent by its own registration — including one code paid against two concurrent
+registrations, and a revoke outranking a claim still in flight. The ticket's purpose, expiry and sealed
+claim, the last-passkey refusal, the atomic reset and every route refusal above are in the same run. Run it under `make check-race` for
+the concurrent case. `make test-e2e SPECS=login` walks a
+browser through pairing, registration and assertion; `make test-e2e SPECS=settings-passkeys` drives the
+Settings surface, including the minted code a second device pairs with.

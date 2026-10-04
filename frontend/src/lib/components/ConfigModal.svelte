@@ -6,7 +6,7 @@
     import { getModelName, getProviderDisplayName } from '$lib/utils/providers';
     import { t } from '$lib/i18n';
     import { formatMB, usdSymbol } from '$lib/utils/format';
-    import { updateConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi, testMCPServer, updateProject } from '$lib/api';
+    import { CA_DOWNLOAD, updateConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi, testMCPServer, updateProject } from '$lib/api';
     import { appStore, dialogStore, uiStore } from '$lib/stores';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import BaseModal from './BaseModal.svelte';
@@ -1026,12 +1026,12 @@
                 {/if}
                 {#if config?.tls_ca_available}
                     <!-- Only when the server signed its own certificate. A plain link,
-                         not apiFetch: the route is a session-authed GET, so the
-                         browser's own download UI handles the file. -->
+                         not apiFetch: a certificate is a file, and the browser's own download
+                         UI handles it. One path for this and the login gate's notice. -->
                     <div class="field-label">
                         <span class="field-label-inline">{t('settings.caCert')}</span>
                         <div>
-                            <a class="btn-ca-download" href="/api/tls/ca" download="mike-ca.crt"
+                            <a class="btn-ca-download" href={CA_DOWNLOAD.path} download={CA_DOWNLOAD.fileName}
                                title={t('settings.caCertHint')}>
                                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                                     <path d="M8 2v9M5 8l3 3 3-3M3 12v2h10v-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>

@@ -1012,14 +1012,20 @@ const catalog = {
     'app.login.failed': 'Login failed',
     'app.login.signInFailed': 'Sign-in failed',
     'app.login.registerFailed': 'The passkey could not be created',
+    'app.login.browserRefused': 'This browser refused to run the passkey prompt, so no passkey was created. Its own reason is in the browser console.',
     'app.login.codeRejected': 'That pairing code was not accepted',
     // A browser that hands back something it cannot serialize is a broken browser, but the sentence
     // still lands on this screen, so it says what to try rather than quoting the failure.
     'app.login.unusableCredential': 'This browser returned a passkey it could not send. Try signing in again.',
     // Not a fault: the person closed the prompt or let it sit, and the form is still where they left it.
     'app.login.cancelled': 'The passkey prompt was dismissed',
-    'app.login.insecureContext': 'A passkey needs a secure connection, and this page is not one. Plain HTTP only works on the machine MIKE runs on.',
+    'app.login.insecureContext': 'Your browser does not treat this connection as secure, so it will not run a passkey prompt. A passkey needs https, or plain http on the machine MIKE runs on.',
     'app.login.insecureHelp': 'Open MIKE at its https address, or at http://localhost on that machine, and reload.',
+    // Only when the server signs its own address: the certificate is what turns that address into one
+    // the browser calls secure, and the device being paired is the one that does not have it yet.
+    'app.login.caHelp': 'MIKE signs its address with a certificate authority of its own. Trust that certificate on this device and the browser will run the prompt.',
+    'app.login.caDownload': 'Download the certificate authority (mike-ca.crt)',
+    'app.login.caSteps': 'Open the file on this device and install it as a trusted root certificate, then reopen MIKE at its https address and reload this page.',
     'app.login.notSupported': 'This browser cannot create a passkey. Try another browser, or the browser that came with the device.',
     'app.login.unsupportedHint': 'Nothing here signs you in until this browser can run a passkey.',
 

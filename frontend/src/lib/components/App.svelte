@@ -1130,7 +1130,11 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         </button>
     </div>
 {:else if !sessionBoot.isAuthenticated}
-    <LoginModal hasPasskey={sessionBoot.hasPasskey} onClose={() => sessionBoot.startAfterLogin()} />
+    <LoginModal
+        hasPasskey={sessionBoot.hasPasskey}
+        caDownload={sessionBoot.caDownload}
+        onClose={() => sessionBoot.startAfterLogin()}
+    />
 {:else}
 <!-- Not a live region: the countdown and the age change every second. The region under it
      announces the transitions. -->

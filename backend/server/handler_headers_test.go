@@ -26,9 +26,10 @@ func TestSessionCookieSecureFlag(t *testing.T) {
 	}{
 		{name: "TLS terminated here", tls: true, wantSecure: true},
 		{
-			// The only case that stays unencrypted: --no-tls with no proxy, which is how
-			// development and the e2e harness run. Secure here would mean a cookie the
-			// browser never stores, so an app nobody can log into.
+			// Cleartext that reached a handler at all: the chain's HTTPS redirect answers
+			// this request in a real deployment, and it is pinned here because the flag and
+			// that redirect read one function, and because logout must clear with the flag
+			// login set whatever the answer is.
 			name:       "cleartext with no proxy",
 			wantSecure: false,
 		},
@@ -85,6 +86,9 @@ func TestSessionCookieSecureFlag(t *testing.T) {
 			logout := testRequest(http.MethodPost, "/api/auth/logout", nil)
 			logout.Host = "localhost"
 			withAuthCSRF(logout, set, finished.Header().Get("X-CSRF-Token"))
+			// The clearing request has to arrive on the connection the ceremony did, or the flag it
+			// clears with is not the flag login set.
+			logout.TLS = nil
 			if tc.tls {
 				logout.TLS = &tls.ConnectionState{}
 			}
@@ -147,7 +151,7 @@ func TestIsolationHeaders(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.path, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			req := secureRequest(httptest.NewRequest(http.MethodGet, tc.path, nil))
 			req.Host = "localhost"
 			rr := httptest.NewRecorder()
 			// The chain Serve installs, not the bare mux: a header set by a middleware

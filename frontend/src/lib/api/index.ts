@@ -170,6 +170,8 @@ export {
     revokePasskey,
     mintPairingCode,
     revokePairingCodes,
+    // The certificate a device installs to trust this address: a link target, not a fetch.
+    CA_DOWNLOAD,
 } from './auth';
 export type { SessionAnswer } from './auth';
 

@@ -56,6 +56,8 @@ func refuseCeremony(w http.ResponseWriter, operation string, err error) {
 		JSONError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, auth.ErrCeremonyRefused):
 		JSONError(w, http.StatusUnauthorized, "the passkey did not verify")
+	case errors.Is(err, auth.ErrInvalidPairingCode):
+		JSONError(w, http.StatusUnauthorized, err.Error())
 	default:
 		httputil.Fault(w, operation, err)
 	}
@@ -87,8 +89,9 @@ func decodeCeremonyRequest(w http.ResponseWriter, r *http.Request) (ceremonyRequ
 
 // handlePasskeyRegisterBegin handles POST /api/auth/passkey/register/begin.
 //
-// The pairing code is spent here, before any options are issued: one code begins one registration, and a
-// code that could begin twice could pair two devices.
+// The pairing code is claimed here, not spent: the ticket carries the claim, and the code is spent by the
+// registration that lands. A browser that cannot run the ceremony — no prompt to show, no authenticator
+// behind it — has therefore bought nothing and can pair again with the same code.
 func (s *Server) handlePasskeyRegisterBegin(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Code string `json:"code"`
@@ -97,18 +100,19 @@ func (s *Server) handlePasskeyRegisterBegin(w http.ResponseWriter, r *http.Reque
 	if !httputil.DecodeJSON(w, r, &req) {
 		return
 	}
-	// The host is checked before the code is spent: a code burned by an address that cannot carry
+	// The host is checked before the code is claimed: a code burned by an address that cannot carry
 	// passkeys would have to be minted again for nothing.
 	host, err := s.relyingHost(r)
 	if err != nil {
 		refuseCeremony(w, "passkey registration", err)
 		return
 	}
-	if err := s.pairing.Consume(req.Code); err != nil {
-		JSONError(w, http.StatusUnauthorized, "pairing code is not valid")
+	spendKey, err := s.pairing.Claim(req.Code)
+	if err != nil {
+		refuseCeremony(w, "passkey registration", err)
 		return
 	}
-	options, ticket, err := s.passkeys.BeginRegistration(r.Context(), host)
+	options, ticket, err := s.passkeys.BeginRegistration(r.Context(), host, spendKey)
 	if err != nil {
 		refuseCeremony(w, "begin passkey registration", err)
 		return
@@ -119,8 +123,8 @@ func (s *Server) handlePasskeyRegisterBegin(w http.ResponseWriter, r *http.Reque
 // handlePasskeyRegisterFinish handles POST /api/auth/passkey/register/finish.
 //
 // A finished registration is proof that this browser holds a new key and that the person verified
-// themselves to it, which is why the session is opened here — the pairing code bought the ceremony, not
-// the session.
+// themselves to it, which is why the session is opened here — and it is where the pairing code is spent,
+// so a ceremony that never reached this call has cost the install nothing.
 func (s *Server) handlePasskeyRegisterFinish(w http.ResponseWriter, r *http.Request) {
 	req, ok := decodeCeremonyRequest(w, r)
 	if !ok {

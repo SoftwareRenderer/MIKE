@@ -7,7 +7,7 @@ import { getProjectId, createTaskViaApi, navigateToTask, ensureTaskStarted, wait
 isolatedProject();
 
 
-const BASE = 'http://localhost:3000';
+const BASE = 'https://localhost:3000';
 
 /**
  * The UI updates itself after the WebSocket reconnects. page.route cannot intercept WebSockets,

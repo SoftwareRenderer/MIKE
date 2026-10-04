@@ -26,7 +26,7 @@ async function waitForWorktree(projectId: string, taskId: string): Promise<strin
 test.describe('Task switch with a diff in flight', () => {
   test('the task you left never paints the task you are on', async ({ page, baseURL }) => {
     test.setTimeout(150_000);
-    const base = baseURL || 'http://localhost:3000';
+    const base = baseURL || 'https://localhost:3000';
     const projectId = ownProjectId();
     const stamp = Date.now();
 

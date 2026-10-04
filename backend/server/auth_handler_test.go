@@ -109,6 +109,11 @@ func TestAuthSessionAnswersWhetherTheInstallIsPaired(t *testing.T) {
 	if body["has_passkey"] != false {
 		t.Errorf("has_passkey = %v; want false on an unpaired install", body["has_passkey"])
 	}
+	// The pairing notice offers the CA download only when this server would answer one, and this is the
+	// only answer an unauthenticated browser can get.
+	if body["tls_ca_available"] != true {
+		t.Errorf("tls_ca_available = %v; want true with the local CA this test server runs", body["tls_ca_available"])
+	}
 
 	registerTestPasskey(t, s)
 

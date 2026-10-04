@@ -53,6 +53,37 @@ describe('app shell copy', () => {
             expect(code?.getAttribute('placeholder')).toBe('XXXX-XXXX');
         });
 
+        // A phone on the LAN address reaches this body: WebAuthn is a secure-context API, so the form
+        // has no prompt to run and the explanation is the whole screen (docs/tls.md).
+        describe('a connection the browser will not run a prompt on', () => {
+            beforeEach(() => {
+                Object.defineProperty(window, 'isSecureContext', { value: false, configurable: true });
+            });
+
+            it('says the browser does not trust this network, and hands over the certificate it has', () => {
+                const { container } = render(LoginModal, { hasPasskey: false, caDownload: true, onClose: () => { } });
+
+                expect(container.querySelector('.login-copy')?.textContent)
+                    .toContain('does not treat this connection as secure');
+                const link = container.querySelector('a[download]');
+                expect(link?.getAttribute('href')).toBe('/api/tls/ca');
+                expect(link?.getAttribute('download')).toBe('mike-ca.crt');
+                expect(link?.textContent).toBe('Download the certificate authority (mike-ca.crt)');
+                expect(container.textContent).toContain('install it as a trusted root certificate');
+                // The steps already end at the https address, so the same instruction is not printed twice.
+                expect(container.textContent?.match(/reload/g)).toHaveLength(1);
+            });
+
+            it('offers no link to a certificate this server does not have', () => {
+                const { container } = render(LoginModal, { hasPasskey: false, caDownload: false, onClose: () => { } });
+
+                expect(container.querySelector('a[download]')).toBeNull();
+                expect(container.textContent).not.toContain('trusted root certificate');
+                // The way out that needs no certificate is still on the screen.
+                expect(container.textContent).toContain('http://localhost');
+            });
+        });
+
         it('names the three things the form can report', () => {
             expect(t('app.login.failed')).toBe('Login failed');
             // A dismissed prompt and a refused passkey are different sentences in different colours.

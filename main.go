@@ -30,8 +30,7 @@ func main() {
 	dataDir := flag.String("data-dir", "", "Data directory for DB, TLS certs, trace files (default: $MIKE_DATA_DIR or ./data)")
 	worktreesDir := flag.String("worktrees-dir", "", "Runtime override for the git worktrees dir (default: $MIKE_WORKTREES_DIR or ./.worktrees)")
 	frontendDist := flag.String("frontend-dist", "", "Development only: serve the SPA built in this directory instead of the one compiled in (default: $MIKE_FRONTEND_DIST or ./frontend/dist). A release build refuses it.")
-	noTLS := flag.Bool("no-tls", false, "Disable TLS (plain HTTP); overrides $MIKE_TLS")
-	tlsCert := flag.String("tls-cert", "", "Path to TLS certificate file (default: auto-generated self-signed)")
+	tlsCert := flag.String("tls-cert", "", "Path to TLS certificate file (default: the local CA's signed leaf)")
 	tlsKey := flag.String("tls-key", "", "Path to TLS private key file")
 	allowedHosts := flag.String("allowed-hosts", "", "Hostnames accepted in the Host header, comma-separated (default: $MIKE_ALLOWED_HOSTS; required behind a reverse proxy that forwards a public domain)")
 	logLevel := flag.String("log-level", "", "Log verbosity: debug, info, warn or error (default: $MIKE_LOG_LEVEL or info)")
@@ -44,7 +43,6 @@ func main() {
 		DataDir:       *dataDir,
 		WorktreesDir:  *worktreesDir,
 		FrontendDist:  *frontendDist,
-		NoTLS:         *noTLS,
 		TLSCertPath:   *tlsCert,
 		TLSKeyPath:    *tlsKey,
 		AllowedHosts:  *allowedHosts,
@@ -129,14 +127,9 @@ func main() {
 		}
 	}()
 
-	var tlsCfg *tls.Config
-	if cfg.TLSDisabled {
-		tlsCfg = tls.LoadDisabled()
-	} else {
-		tlsCfg, err = tls.LoadWithCert(cfg.DataDir, cfg.TLSCertPath, cfg.TLSKeyPath)
-		if err != nil {
-			log.Fatalf("Failed to load TLS config: %v", err)
-		}
+	tlsCfg, err := tls.LoadWithCert(cfg.DataDir, cfg.TLSCertPath, cfg.TLSKeyPath)
+	if err != nil {
+		log.Fatalf("Failed to load TLS config: %v", err)
 	}
 
 	srv, err := server.NewServer(cfg, tlsCfg, assets)

@@ -194,7 +194,7 @@ function writeFixtureExtension(mode: 'stay' | 'sibling' | 'cross-origin' | 'nest
 
 // ── helpers ──────────────────────────────────────────────────────────
 /** `browser.newContext()` does not reliably inherit the project's baseURL. */
-const BASE_URL = 'http://localhost:3001';
+const BASE_URL = 'https://localhost:3001';
 const STORAGE_STATE = '/tmp/kanban-test-storage-state.json.isolated';
 
 async function setupPage(browser: Browser): Promise<{ context: BrowserContext; page: Page }> {

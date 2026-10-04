@@ -8,8 +8,9 @@ isolatedProject();
 
 // --- Shared utilities ---
 
+// `-k`: the lane server signs its address with a CA of its own — docs/testing.md → Test environment.
 function getConfig() {
-  return JSON.parse(execSync('curl -s http://localhost:3000/api/config', { encoding: 'utf-8' }));
+  return JSON.parse(execSync('curl -sk https://localhost:3000/api/config', { encoding: 'utf-8' }));
 }
 
 /**

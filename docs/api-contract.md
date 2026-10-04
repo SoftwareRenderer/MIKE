@@ -204,8 +204,9 @@ Exemptions, each with a reason: the extensions file-server subtree (`/extensions
 upgrades (`/api/stream`, `/api/lsp`), which upgrade on GET and never inspect the verb.
 The four passkey ceremony routes are public for the reason the ceremony exists: no session exists when
 they are called, so there is no cookie for CSRF to protect and nothing for a token to reach. They are the
-only public `/api` paths besides `/api/health` and `GET /api/auth/session`, each declares its verb, and
-each runs behind the login rate limiter — `docs/passkeys.md` owns what the pairing code inside one of them
+only public `/api` paths besides `/api/health`, `GET /api/auth/session` and `GET /api/tls/ca` — the last
+public for the reason `docs/tls.md → Certificates on disk` gives. Each ceremony route declares its verb and
+runs behind the login rate limiter — `docs/passkeys.md` owns what the pairing code inside one of them
 is and is not allowed to buy.
 `handler_preview.go`'s two `r.Method != http.MethodHead` checks suppress a HEAD *body*, not a
 request, and `handleTaskMessages` takes three verbs through one function.

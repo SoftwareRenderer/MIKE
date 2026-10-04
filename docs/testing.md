@@ -461,7 +461,9 @@ object property nobody reads, a CSS class no template uses, and a REST route the
 ## Diagnostic scripts (ad-hoc investigation)
 
 For request-pattern/race investigation, write standalone Playwright scripts in `frontend/tests/` as
-`.mjs` files run against a live dev server: `make run` then `node frontend/tests/<script>.mjs`. Use
+`.mjs` files run against a live dev server: `make run` then `node frontend/tests/<script>.mjs`. The dev
+server serves https on the local CA, so a script defaults its `BASE` to `https://localhost:3000` and
+launches the browser ignoring certificate errors, as the existing scripts do. Use
 `page.evaluate()` for API calls (CSRF token from `/api/auth/session` for POST/PUT/DELETE),
 `route.fetch()` + `route.fulfill()` for interception, `Date.now()` offsets for timing, and
 `page.screenshot({ path: '/tmp/debug.png' })`.
@@ -497,6 +499,14 @@ Two dedicated test servers with isolated databases plus one shared mock LLM, ful
 | Main | 3000 | `/tmp/kanban-test-data` | `chromium` Playwright project (default tests) |
 | Isolated | 3001 | `/tmp/kanban-test-data-isolated` | `isolated` project (serialized, 1 worker) — config-modifying suites; see `ISOLATED_SPECS` in `frontend/playwright.config.ts` |
 | Mock LLM | 9999 | — | shared; `frontend/tests/mock-llm.js` |
+
+**Both lane servers serve TLS** — the server has no plain-HTTP mode to run. Each boots its own local CA into
+the data directory named on its command line (`docs/tls.md → Certificates on disk`), so both projects'
+`baseURL` is https and the browsers get `ignoreHTTPSErrors`: a spec measures the ceremony, not the
+certificate chain of a machine that trusts nothing. The node side of the harness does verify.
+`trustLaneCertificates` in `frontend/tests/global-setup.ts` reads each server's `tls/mike-ca.crt` and hands
+both to the one `https.Agent` every node request uses, so the lane exercises the same file the pairing
+dialog offers a device.
 
 Test repos live at `/tmp/kanban-test-repo` (+ `-2`), worktrees at `/tmp/kanban-test-worktrees/`.
 
@@ -538,7 +548,8 @@ they are `setsid go run .` grandchildren, so the port owner is not the process t
 `lsof -ti:PORT` also answers with clients.
 
 If a prior run was interrupted, clean stale state first (stale processes hold the ports — symptom
-`ERR_CONNECTION_REFUSED`, or a stale TLS server answering a `--no-tls` test — and a stale lock makes
+`ERR_CONNECTION_REFUSED`, or last run's server answering where this run's was meant to boot — and a stale
+lock makes
 global-setup run teardown instead of setup):
 
 ```bash

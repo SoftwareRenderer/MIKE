@@ -27,7 +27,7 @@ need "${MIKE_ENCRYPTION_KEY:-}" MIKE_ENCRYPTION_KEY
 need "${MIKE_ALLOWED_HOSTS:-}" MIKE_ALLOWED_HOSTS
 
 # The server listens where the published port can reach it, which is never the container's
-# own loopback. TLS is on unless the operator turned it off deliberately.
+# own loopback. TLS has no switch: the CA and its leaf land in the data volume prepared below.
 : "${MIKE_LISTEN:=0.0.0.0}"
 : "${MIKE_PORT:=3000}"
 export MIKE_LISTEN MIKE_PORT
@@ -75,11 +75,7 @@ esac
 
 echo "mike-entrypoint: podman $(podman --version | awk '{print $3}'), storage driver: $driver"
 echo "mike-entrypoint: gVisor: $(runsc --version 2>&1 | head -n1)"
-echo "mike-entrypoint: listening on ${MIKE_LISTEN}:${MIKE_PORT} (TLS $([ "${MIKE_TLS:-1}" = "0" ] && echo 'DISABLED' || echo 'on')), Host allowlist: ${MIKE_ALLOWED_HOSTS}"
-
-if [ "${MIKE_TLS:-1}" = "0" ]; then
-    echo "mike-entrypoint: WARNING — plain HTTP. Only acceptable behind a TLS-terminating proxy that sets X-Forwarded-Proto; the API hands out shells." >&2
-fi
+echo "mike-entrypoint: listening on ${MIKE_LISTEN}:${MIKE_PORT} over TLS, Host allowlist: ${MIKE_ALLOWED_HOSTS}"
 
 # Nothing here signs a person in: a browser pairs a passkey, and the first boot of an empty
 # data directory prints the one-time code that buys that registration. Say where to read it,

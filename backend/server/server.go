@@ -316,6 +316,10 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 	if assets == nil {
 		return nil, fmt.Errorf("create server: no frontend assets")
 	}
+	// A nil config is not "serve plainly": this server always serves TLS.
+	if tlsCfg == nil {
+		return nil, fmt.Errorf("create server: no TLS configuration")
+	}
 	dbPath, addr := settings.DBPath, settings.Addr
 	worktreesDir := settings.WorktreesOverride
 	store, err := store.NewStore(dbPath)
@@ -350,10 +354,6 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 	cfg.WorkspaceDir = worktreesDir
 
-	// The CA download is offered only when a local CA exists: a user-supplied cert
-	// (CAFile empty) or plain HTTP has nothing to advertise.
-	cfgStore.SetTLSCAAvailable(tlsCfg != nil && tlsCfg.CAFile != "")
-
 	if err := os.MkdirAll(cfg.WorkspaceDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create worktrees dir: %w", err)
 	}
@@ -367,6 +367,8 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 		tlsConfig:    tlsCfg,
 		loginLimiter: newLoginRateLimiter(settings.LoginRateLimit),
 	}
+	// One answer for the whole process, so an advertised link can never point at a 404.
+	cfgStore.SetTLSCAAvailable(s.localCAvailable())
 	// Built before any step can reference it: a registration reads the method value now, so a component
 	// assigned later would register a nil step, which reg refuses.
 	s.base, s.baseCancel = context.WithCancel(context.Background())
@@ -395,7 +397,7 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 		return nil, fmt.Errorf("ceremony tickets: %w", err)
 	}
 	s.pairing = auth.NewPairingCodes()
-	s.passkeys = auth.NewPasskeys(store, tickets)
+	s.passkeys = auth.NewPasskeys(store, tickets, s.pairing)
 	sessionMgr, err := auth.NewSessionManager(s.base, store)
 	if err != nil {
 		return nil, fmt.Errorf("create session manager: %w", err)
@@ -737,11 +739,6 @@ func (s *Server) handleFetchModels(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) RedirectHTTPSMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.tlsConfig == nil {
-			next.ServeHTTP(w, r)
-			return
-		}
-
 		// Only trust X-Forwarded-Proto when explicitly behind a trusted proxy.
 		// Otherwise an attacker can set it to "https" to bypass the redirect.
 		if requestIsHTTPS(r, s.settings.TrustProxy) {
@@ -1014,6 +1011,13 @@ func (s *Server) middlewareChain(h http.Handler) http.Handler {
 	)
 }
 
+// localCAvailable answers "does this server have its own CA to hand out?" — the one question behind the
+// download route and the login gate's pairing notice. The `/api/config` row is set from it once, when the
+// server is built, because a certificate the operator brought has no CA of ours to advertise.
+func (s *Server) localCAvailable() bool {
+	return s.tlsConfig.CAFile != ""
+}
+
 func (s *Server) tlsConfigToStd() *stdtls.Config {
 	cert, err := stdtls.LoadX509KeyPair(s.tlsConfig.CertFile, s.tlsConfig.KeyFile)
 	if err != nil {
@@ -1033,16 +1037,11 @@ func (s *Server) RepairExtensionFiles(ctx context.Context) {
 }
 
 func (s *Server) Serve() error {
-	caFile := ""
-	if s.tlsConfig != nil {
-		caFile = s.tlsConfig.CAFile
-	}
-
 	srv := &http.Server{
 		Addr: s.addr,
 		// Silences repeated "client does not trust the local CA" handshake noise;
 		// see tls_error_log.go.
-		ErrorLog:          httpErrorLog(caFile),
+		ErrorLog:          httpErrorLog(s.tlsConfig.CAFile),
 		Handler:           s.middlewareChain(s.router),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
@@ -1055,23 +1054,17 @@ func (s *Server) Serve() error {
 	}
 	s.logHostRootPolicy()
 
-	if s.tlsConfig != nil {
-		logging.For(logging.HTTP).Infof("Server starting on https://%s (TLS: %s, %s)", s.addr, s.tlsConfig.CertFile, s.tlsConfig.KeyFile)
-		if s.tlsConfig.CAFile != "" {
-			logging.For(logging.HTTP).Infof("TLS: import %s into a device's trust store to trust this certificate", s.tlsConfig.CAFile)
-		}
-		// Printed once the address the pairing URL names is the address this process is about to bind.
-		s.pairAtBoot(s.base)
-		l, err := net.Listen("tcp", s.addr)
-		if err != nil {
-			return fmt.Errorf("listen: %w", err)
-		}
-		return srv.Serve(newHybridListener(l, s.tlsConfigToStd(), 0))
+	logging.For(logging.HTTP).Infof("Server starting on https://%s (TLS: %s, %s)", s.addr, s.tlsConfig.CertFile, s.tlsConfig.KeyFile)
+	if s.tlsConfig.CAFile != "" {
+		logging.For(logging.HTTP).Infof("TLS: import %s into a device's trust store to trust this certificate", s.tlsConfig.CAFile)
 	}
-
-	logging.For(logging.HTTP).Infof("Server starting on http://%s", s.addr)
+	// Printed once the address the pairing URL names is the address this process is about to bind.
 	s.pairAtBoot(s.base)
-	return srv.ListenAndServe()
+	l, err := net.Listen("tcp", s.addr)
+	if err != nil {
+		return fmt.Errorf("listen: %w", err)
+	}
+	return srv.Serve(newHybridListener(l, s.tlsConfigToStd(), 0))
 }
 
 // logHostRootPolicy echoes the host-directory jail, otherwise invisible until it refuses something.

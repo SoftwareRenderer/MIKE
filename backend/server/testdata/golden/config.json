@@ -43,7 +43,7 @@
   "run_siblings_parallel": true,
   "sort_oldest_first": true,
   "stats_reset_restricted": false,
-  "tls_ca_available": false,
+  "tls_ca_available": true,
   "utility_model": "golden-model",
   "utility_provider": "Golden Provider",
   "version": "dev",

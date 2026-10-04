@@ -10,7 +10,7 @@ import { chromium } from '@playwright/test';
 import { attachVirtualAuthenticator, pairBrowser, pairingCodeFromEnv } from './helpers-auth.mjs';
 import { writeFileSync, rmSync } from 'node:fs';
 
-const BASE = process.env.MIKE_BASE || 'http://localhost:3000';
+const BASE = process.env.MIKE_BASE || 'https://localhost:3000';
 const CODE = pairingCodeFromEnv();
 const PROJECT = process.env.MIKE_CHECK_PROJECT;
 

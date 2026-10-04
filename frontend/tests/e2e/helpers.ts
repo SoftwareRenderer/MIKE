@@ -2,7 +2,8 @@ import { expect, test, Page, Locator, Browser, TestInfo } from '@playwright/test
 import { execSync } from 'child_process';
 import { existsSync, writeFileSync, mkdirSync, readFileSync, cpSync, readdirSync } from 'fs';
 import { dirname, join } from 'path';
-import http from 'node:http';
+import https from 'node:https';
+import { laneRequestOptions } from '../lane-tls';
 
 /**
  * Find a provider by its reference string: the stable integer ID (as a string)
@@ -128,6 +129,10 @@ export async function waitForConfig(page: Page, predicate: (config: any) => bool
  * A server API request from the Node test process, authenticated from the lane's session file, so it works
  * while the browser context is offline or mid-reload. `base` is the lane's origin.
  */
+/**
+ * A server API request from the Node test process, authenticated from the lane's session file, so it works
+ * while the browser context is offline or mid-reload. `base` is the lane's origin.
+ */
 export async function serverApi(
   base: string,
   path: string,
@@ -141,12 +146,13 @@ export async function serverApi(
   const method = options.method ?? 'GET';
   const body = options.body ? JSON.stringify(options.body) : undefined;
   return new Promise((resolve, reject) => {
-    const req = http.request(
+    const req = https.request(
       {
         host: 'localhost',
         port: Number(port),
         path,
         method,
+        ...laneRequestOptions(port),
         headers: {
           'Content-Type': 'application/json',
           Cookie: `PHPSESSID=${cookie}`,
@@ -255,7 +261,7 @@ const FIXTURE_REPO = '/tmp/kanban-test-repo';
 export function isolatedProject(): void {
   test.beforeEach(async ({ page }, testInfo) => {
     // The port keeps the two lanes' slots disjoint (3000 chromium, 3001 isolated).
-    const base = (testInfo.project.use as { baseURL?: string })?.baseURL || 'http://localhost:3000';
+    const base = (testInfo.project.use as { baseURL?: string })?.baseURL || 'https://localhost:3000';
     const own = await ensureOwnProject(page, `w${testInfo.parallelIndex}-${new URL(base).port}`);
     // Re-seeded per test, not once per file: a file in parallel mode runs its `afterAll` between groups of
     // its own tests, so the teardown below can empty this project while the file still has tests left.

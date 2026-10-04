@@ -3,6 +3,7 @@ package auth
 import (
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -56,38 +57,145 @@ func TestPairingAlphabetHasNoRepeatedSymbol(t *testing.T) {
 	}
 }
 
-func TestCodeIsSpentByOneConsume(t *testing.T) {
+// A code that has only begun a ceremony is still live: the spend belongs to the registration, so a browser
+// with no prompt to show can pair again with the code it already has.
+func TestCodeIsLiveUntilItsRegistrationLands(t *testing.T) {
 	codes := NewPairingCodes()
 	minted, err := codes.Mint(DevicePairingTTL)
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	if err := codes.Consume(minted.Code); err != nil {
-		t.Fatalf("the code this mint returned was refused: %v", err)
+
+	key, err := codes.Claim(minted.Code)
+	if err != nil {
+		t.Fatalf("a live code was refused: %v", err)
 	}
-	if err := codes.Consume(minted.Code); !errors.Is(err, ErrInvalidPairingCode) {
-		t.Errorf("a spent code was accepted a second time: %v", err)
+	if n := codes.Live(); n != 1 {
+		t.Fatalf("%d codes live after a begin, want 1", n)
+	}
+	again, err := codes.Claim(minted.Code)
+	if err != nil || again != key {
+		t.Fatalf("a second begin claimed %q (%v); want the same key %q", again, err, key)
+	}
+
+	if _, err := codes.spend(key); err != nil {
+		t.Fatalf("spend: %v", err)
+	}
+	if _, err := codes.spend(key); !errors.Is(err, ErrInvalidPairingCode) {
+		t.Errorf("a spent code paid for a second registration: %v", err)
 	}
 	if n := codes.Live(); n != 0 {
 		t.Errorf("%d codes still live after the only one was spent", n)
 	}
 }
 
+// A registration whose own write failed has not associated a passkey, so the code that paid for it comes
+// back rather than dying with the attempt.
+func TestSpentCodeComesBackWhenTheRegistrationFails(t *testing.T) {
+	codes := NewPairingCodes()
+	minted, err := codes.Mint(DevicePairingTTL)
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	key, err := codes.Claim(minted.Code)
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+
+	claim, err := codes.spend(key)
+	if err != nil {
+		t.Fatalf("spend: %v", err)
+	}
+	codes.undo(claim)
+	if _, err := codes.spend(key); err != nil {
+		t.Errorf("a returned code could not pay for the retry: %v", err)
+	}
+}
+
+// Revoking is the operator's answer to "someone might be about to use that code", so it outranks a claim
+// still in flight: a code the slow spender failed to pay with stays gone.
+func TestRevokeOutranksAClaimStillInFlight(t *testing.T) {
+	codes := NewPairingCodes()
+	minted, err := codes.Mint(DevicePairingTTL)
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	key, err := codes.Claim(minted.Code)
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	claim, err := codes.spend(key)
+	if err != nil {
+		t.Fatalf("spend: %v", err)
+	}
+
+	codes.RevokeAll()
+	codes.undo(claim)
+
+	if n := codes.Live(); n != 0 {
+		t.Fatalf("%d codes live after a revoke; a slow spender resurrected one", n)
+	}
+	if _, err := codes.spend(key); !errors.Is(err, ErrInvalidPairingCode) {
+		t.Errorf("a revoked code paid for a registration: %v", err)
+	}
+}
+
+// Two browsers may reach the write with tickets from one code at the same moment, and the code is one
+// delete of one entry: exactly one of them pays.
+func TestOneCodePaysOnceWhenRegistrationsRace(t *testing.T) {
+	codes := NewPairingCodes()
+	minted, err := codes.Mint(DevicePairingTTL)
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	key, err := codes.Claim(minted.Code)
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+
+	const attempts = 8
+	paid := make(chan bool, attempts)
+	var wg sync.WaitGroup
+	for range attempts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := codes.spend(key)
+			paid <- err == nil
+		}()
+	}
+	wg.Wait()
+	close(paid)
+
+	var winners int
+	for ok := range paid {
+		if ok {
+			winners++
+		}
+	}
+	if winners != 1 {
+		t.Errorf("%d registrations paid with one code; want 1", winners)
+	}
+	if n := codes.Live(); n != 0 {
+		t.Errorf("%d codes live after the only one was spent", n)
+	}
+}
+
 // A code is read off one screen and typed into another, so the shape it is typed in is not the answer to
 // whether it is the right code.
-func TestConsumeIgnoresHowTheCodeWasTyped(t *testing.T) {
+func TestClaimIgnoresHowTheCodeWasTyped(t *testing.T) {
 	codes := NewPairingCodes()
 	minted, err := codes.Mint(DevicePairingTTL)
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
 	lowered := strings.ToLower(minted.Code)
-	if err := codes.Consume(" " + lowered[:4] + "-" + lowered[4:] + " "); err != nil {
+	if _, err := codes.Claim(" " + lowered[:4] + "-" + lowered[4:] + " "); err != nil {
 		t.Errorf("a lower-cased code with a dash and spaces was refused: %v", err)
 	}
 }
 
-func TestConsumeRefuses(t *testing.T) {
+func TestClaimRefuses(t *testing.T) {
 	codes := NewPairingCodes()
 	minted, err := codes.Mint(DevicePairingTTL)
 	if err != nil {
@@ -99,8 +207,8 @@ func TestConsumeRefuses(t *testing.T) {
 		minted.Code[:7] + otherLetter(minted.Code[7:]),
 		minted.Code + "X",
 	} {
-		if err := codes.Consume(presented); !errors.Is(err, ErrInvalidPairingCode) {
-			t.Errorf("Consume(%q) = %v; want ErrInvalidPairingCode", presented, err)
+		if _, err := codes.Claim(presented); !errors.Is(err, ErrInvalidPairingCode) {
+			t.Errorf("Claim(%q) = %v; want ErrInvalidPairingCode", presented, err)
 		}
 	}
 }
@@ -114,9 +222,17 @@ func TestCodeExpires(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
+	key, err := codes.Claim(minted.Code)
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
 	now = now.Add(2 * time.Minute)
-	if err := codes.Consume(minted.Code); !errors.Is(err, ErrInvalidPairingCode) {
-		t.Errorf("an expired code was accepted: %v", err)
+	if _, err := codes.Claim(minted.Code); !errors.Is(err, ErrInvalidPairingCode) {
+		t.Errorf("an expired code was claimed: %v", err)
+	}
+	// A ceremony already under way cannot pay with a code that ran out mid-ceremony.
+	if _, err := codes.spend(key); !errors.Is(err, ErrInvalidPairingCode) {
+		t.Errorf("an expired code paid for a registration: %v", err)
 	}
 	if n := codes.Live(); n != 0 {
 		t.Errorf("%d codes live; an expired one is not live", n)
@@ -138,8 +254,12 @@ func TestLiveCodesAreCapped(t *testing.T) {
 	if _, err := codes.Mint(DevicePairingTTL); !errors.Is(err, ErrTooManyPairingCodes) {
 		t.Fatalf("a fourth live code was minted: %v", err)
 	}
-	if err := codes.Consume(minted[0].Code); err != nil {
-		t.Fatalf("consume: %v", err)
+	key, err := codes.Claim(minted[0].Code)
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if _, err := codes.spend(key); err != nil {
+		t.Fatalf("spend: %v", err)
 	}
 	if _, err := codes.Mint(DevicePairingTTL); err != nil {
 		t.Errorf("no code could be minted after one was spent: %v", err)
@@ -156,7 +276,7 @@ func TestRevokeAllDropsEveryCode(t *testing.T) {
 	if n := codes.Live(); n != 0 {
 		t.Errorf("%d codes live after RevokeAll", n)
 	}
-	if err := codes.Consume(minted.Code); !errors.Is(err, ErrInvalidPairingCode) {
+	if _, err := codes.Claim(minted.Code); !errors.Is(err, ErrInvalidPairingCode) {
 		t.Errorf("a revoked code was accepted: %v", err)
 	}
 }
@@ -174,8 +294,12 @@ func TestCodesDoNotRepeat(t *testing.T) {
 			t.Fatalf("code %q was minted twice", minted.Code)
 		}
 		seen[minted.Code] = true
-		if err := codes.Consume(minted.Code); err != nil {
-			t.Fatalf("consume: %v", err)
+		key, err := codes.Claim(minted.Code)
+		if err != nil {
+			t.Fatalf("claim: %v", err)
+		}
+		if _, err := codes.spend(key); err != nil {
+			t.Fatalf("spend: %v", err)
 		}
 	}
 }

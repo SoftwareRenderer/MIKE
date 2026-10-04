@@ -66,8 +66,9 @@ func NewTickets(secret string) (*Tickets, error) {
 }
 
 // Seal encodes the ceremony state and appends its MAC. The result is what the browser holds between the
-// two halves of the ceremony.
-func (t *Tickets) Seal(purpose string, session *webauthn.SessionData) (string, error) {
+// two halves of the ceremony. `extra` is the caller's own state to carry along — the pairing code a
+// registration is paid with — sealed by the same MAC; a ceremony that has none passes "".
+func (t *Tickets) Seal(purpose string, session *webauthn.SessionData, extra string) (string, error) {
 	payload, err := session.MarshalMsg(nil)
 	if err != nil {
 		return "", fmt.Errorf("encode ceremony state: %w", err)
@@ -75,34 +76,48 @@ func (t *Tickets) Seal(purpose string, session *webauthn.SessionData) (string, e
 	if len(payload) > ticketMaxPayloadBytes {
 		return "", fmt.Errorf("ceremony state is %d bytes, over the %d byte bound", len(payload), ticketMaxPayloadBytes)
 	}
-	body := base64.RawURLEncoding.EncodeToString(payload)
+	body := base64.RawURLEncoding.EncodeToString([]byte(extra)) + "." + base64.RawURLEncoding.EncodeToString(payload)
 	return body + "." + t.mac(purpose, body), nil
 }
 
-// Open returns the ceremony state a previous Begin call issued for this purpose on this install.
+// Open returns the ceremony state a previous Begin call issued for this purpose on this install, and the
+// extra state sealed beside it.
 //
 // The expiry check is here rather than left to the library: a ticket is held by a browser that can hold
 // it for as long as it likes, and the seal says who issued it, not when it stopped being current.
-func (t *Tickets) Open(purpose, ticket string) (*webauthn.SessionData, error) {
-	body, mac, ok := strings.Cut(ticket, ".")
-	if !ok || body == "" || len(body) > base64.RawURLEncoding.EncodedLen(ticketMaxPayloadBytes) {
-		return nil, ErrTicket
+func (t *Tickets) Open(purpose, ticket string) (*webauthn.SessionData, string, error) {
+	// base64url contains no '.', so the body's own dot and the MAC's separator cannot be confused.
+	macAt := strings.LastIndex(ticket, ".")
+	if macAt <= 0 {
+		return nil, "", ErrTicket
+	}
+	body, mac := ticket[:macAt], ticket[macAt+1:]
+	if body == "" || len(body) > 2*base64.RawURLEncoding.EncodedLen(ticketMaxPayloadBytes)+1 {
+		return nil, "", ErrTicket
 	}
 	if !hmac.Equal([]byte(mac), []byte(t.mac(purpose, body))) {
-		return nil, ErrTicket
+		return nil, "", ErrTicket
 	}
-	payload, err := base64.RawURLEncoding.DecodeString(body)
+	extraAt := strings.Index(body, ".")
+	if extraAt < 0 {
+		return nil, "", ErrTicket
+	}
+	extra, err := base64.RawURLEncoding.DecodeString(body[:extraAt])
+	if err != nil {
+		return nil, "", ErrTicket
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(body[extraAt+1:])
 	if err != nil || len(payload) > ticketMaxPayloadBytes {
-		return nil, ErrTicket
+		return nil, "", ErrTicket
 	}
 	session := &webauthn.SessionData{}
 	if _, err := session.UnmarshalMsg(payload); err != nil {
-		return nil, ErrTicket
+		return nil, "", ErrTicket
 	}
 	if time.Now().After(session.Expires) {
-		return nil, ErrTicket
+		return nil, "", ErrTicket
 	}
-	return session, nil
+	return session, string(extra), nil
 }
 
 // mac is the seal over one purpose and one payload. The separator keeps a purpose that ends in the

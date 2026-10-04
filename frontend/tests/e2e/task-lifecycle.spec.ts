@@ -374,8 +374,9 @@ test.describe.serial('Subtask Progress Tracking', () => {
 
 // --- Task Stash/Unstash ---
 
+// `-k`: the lane server signs its address with a CA of its own — docs/testing.md → Test environment.
 function getConfig() {
-  return JSON.parse(execSync('curl -s http://localhost:3000/api/config', { encoding: 'utf-8' }));
+  return JSON.parse(execSync('curl -sk https://localhost:3000/api/config', { encoding: 'utf-8' }));
 }
 
 function findWorktreeDir(): string | null {
@@ -397,11 +398,11 @@ function findWorktreeDir(): string | null {
 
 function getTaskInfo(): { projectId: string; taskId: string; worktreeDir: string } | null {
   try {
-    const projects = JSON.parse(execSync('curl -s http://localhost:3000/api/projects', { encoding: 'utf-8' }));
+    const projects = JSON.parse(execSync('curl -sk https://localhost:3000/api/projects', { encoding: 'utf-8' }));
     if (!projects.length) return null;
     const projectId = projects[0].id;
     const tasks = JSON.parse(
-      execSync(`curl -s http://localhost:3000/api/projects/${projectId}/tasks`, { encoding: 'utf-8' })
+      execSync(`curl -sk https://localhost:3000/api/projects/${projectId}/tasks`, { encoding: 'utf-8' })
     );
     const task = tasks.find((t: any) => t.status === 'in_progress' && t.branch);
     if (!task) return null;
@@ -449,7 +450,7 @@ test.describe.serial('Task Stash/Unstash', () => {
 
     // First checkpoint: shows changes AT checkpoint 1 (includes check1)
     const diff1 = JSON.parse(execSync(
-      `curl -s "http://localhost:3000/api/projects/${projectId}/tasks/${taskId}/diff?head=${stash1Hash}"`,
+      `curl -sk "https://localhost:3000/api/projects/${projectId}/tasks/${taskId}/diff?head=${stash1Hash}"`,
       { encoding: 'utf-8' }
     ));
     expect(diff1.diff).toContain('real-file');
@@ -457,7 +458,7 @@ test.describe.serial('Task Stash/Unstash', () => {
 
     // Second checkpoint: shows changes AT checkpoint 2 (includes check1 + check2)
     const diff2 = JSON.parse(execSync(
-      `curl -s "http://localhost:3000/api/projects/${projectId}/tasks/${taskId}/diff?head=${stash2Hash}"`,
+      `curl -sk "https://localhost:3000/api/projects/${projectId}/tasks/${taskId}/diff?head=${stash2Hash}"`,
       { encoding: 'utf-8' }
     ));
     expect(diff2.diff).toContain('real-file');
@@ -483,7 +484,7 @@ test.describe.serial('Task Stash/Unstash', () => {
     const stashHash = execSync(`cd ${worktreeDir} && git rev-parse stash@{0}`, { encoding: 'utf-8' }).trim();
 
     const diff = JSON.parse(execSync(
-      `curl -s "http://localhost:3000/api/projects/${projectId}/tasks/${taskId}/diff?head=${stashHash}"`,
+      `curl -sk "https://localhost:3000/api/projects/${projectId}/tasks/${taskId}/diff?head=${stashHash}"`,
       { encoding: 'utf-8' }
     ));
     expect(diff.diff).toContain('only-check');
@@ -522,7 +523,7 @@ test.describe.serial('Task Stash/Unstash', () => {
 
     // Checkpoint 1: includes user-file (committed) + check1 (at this checkpoint)
     const diff1 = JSON.parse(execSync(
-      `curl -s "http://localhost:3000/api/projects/${projectId}/tasks/${taskId}/diff?head=${stash1}"`,
+      `curl -sk "https://localhost:3000/api/projects/${projectId}/tasks/${taskId}/diff?head=${stash1}"`,
       { encoding: 'utf-8' }
     ));
     expect(diff1.diff).toContain('user-file');
@@ -531,7 +532,7 @@ test.describe.serial('Task Stash/Unstash', () => {
 
     // Checkpoint 2: includes user-file + check1 + check2 (all accumulated)
     const diff2 = JSON.parse(execSync(
-      `curl -s "http://localhost:3000/api/projects/${projectId}/tasks/${taskId}/diff?head=${stash2}"`,
+      `curl -sk "https://localhost:3000/api/projects/${projectId}/tasks/${taskId}/diff?head=${stash2}"`,
       { encoding: 'utf-8' }
     ));
     expect(diff2.diff).toContain('user-file');

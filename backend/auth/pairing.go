@@ -14,11 +14,12 @@ import (
 // A pairing code is the one credential a person can type, and it buys exactly one thing: the right to
 // register a passkey on the browser that presented it. It never authenticates anything — no session
 // exists on the strength of a code, and the ceremony it unlocks still needs a signature only that
-// device's authenticator can make. That is what makes the printed code safe to leave on a terminal: when
-// it is spent there is nothing left to steal.
+// device's authenticator can make. That is what makes the printed code safe to leave on a terminal: what
+// it can buy is one registration, for a bounded time, and nothing either side of that.
 //
-// Codes live in memory. They are single-use and short-lived, so a restart drops them and the next boot
-// mints a new one if the install is still unpaired; a table would outlive the ceremony it exists for.
+// Codes live in memory. One registration spends one code, so a ceremony abandoned mid-way leaves its code
+// live until it is spent or its TTL passes; a restart drops every code and the next boot mints a new one if
+// the install is still unpaired, because a table would outlive the ceremony it exists for.
 
 const (
 	// BootPairingTTL is how long the code printed at startup stays live. It is longer than the code a
@@ -65,8 +66,18 @@ type pairingCode struct {
 type PairingCodes struct {
 	mu    sync.Mutex
 	codes map[string]*pairingCode // keyed by hex(sha256(code)), so a presented code is one lookup
+	// epoch counts the revokes. A spend a caller wants back is only ever back while the revoke count has
+	// not moved, so a code this set was told to drop cannot be re-created by a slow spender.
+	epoch uint64
 	// now is the clock, replaced only by a test that needs to watch a code expire.
 	now func() time.Time
+}
+
+// pairingClaim is a spent code put aside until the registration it pays for is written.
+type pairingClaim struct {
+	key       string
+	expiresAt time.Time
+	epoch     uint64
 }
 
 // NewPairingCodes returns an empty code set.
@@ -92,26 +103,49 @@ func (c *PairingCodes) Mint(ttl time.Duration) (PairingCode, error) {
 	return PairingCode{Code: code, ExpiresAt: expires}, nil
 }
 
-// Consume redeems a presented code. A redeemed code is gone, so one code pairs exactly one device; an
-// unknown, expired or already-spent code is the same refusal, so the answer never says how close a guess
-// was.
-func (c *PairingCodes) Consume(presented string) error {
+// Claim checks a presented code and returns the key its entry is spent by. Nothing is deleted: a code buys
+// one registration and is spent when that registration is written, so a browser that cannot run the
+// ceremony is left holding a code that still works.
+func (c *PairingCodes) Claim(presented string) (string, error) {
 	code := NormalizePairingCode(presented)
 	if len(code) != pairingCodeLength {
-		return ErrInvalidPairingCode
+		return "", ErrInvalidPairingCode
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.dropExpired()
 	key := codeKey(code)
 	entry, ok := c.codes[key]
-	if !ok {
-		return ErrInvalidPairingCode
+	if !ok || !c.now().Before(entry.expiresAt) {
+		return "", ErrInvalidPairingCode
+	}
+	return key, nil
+}
+
+// spend takes a claimed entry out of the set and returns what `undo` needs to put it back. A key whose
+// entry is gone or expired is the refusal a wrong code gets.
+func (c *PairingCodes) spend(key string) (pairingClaim, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.codes[key]
+	if !ok || !c.now().Before(entry.expiresAt) {
+		return pairingClaim{}, ErrInvalidPairingCode
 	}
 	delete(c.codes, key)
-	if !c.now().Before(entry.expiresAt) {
-		return ErrInvalidPairingCode
+	return pairingClaim{key: key, expiresAt: entry.expiresAt, epoch: c.epoch}, nil
+}
+
+// undo returns a spent code to the set because the registration it paid for was never written. A revoke
+// in between outranks the claim: the codes this set was told to drop stay dropped.
+func (c *PairingCodes) undo(claim pairingClaim) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if claim.epoch != c.epoch {
+		return
 	}
-	return nil
+	if _, live := c.codes[claim.key]; !live {
+		c.codes[claim.key] = &pairingCode{expiresAt: claim.expiresAt}
+	}
 }
 
 // Live reports how many codes are still outstanding, after dropping the expired ones.
@@ -128,6 +162,7 @@ func (c *PairingCodes) RevokeAll() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	clear(c.codes)
+	c.epoch++
 }
 
 // dropExpired removes codes whose window has passed. Callers hold c.mu.

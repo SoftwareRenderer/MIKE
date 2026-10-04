@@ -182,7 +182,7 @@ func TestLogLevelResolution(t *testing.T) {
 // when nothing is set, so it must not inherit the operator's own environment; clearing a variable is the
 // documented spelling of unset.
 var resolverEnv = []string{
-	EnvPort, EnvListen, EnvDataDir, EnvWorktreesDir, EnvFrontendDist, EnvTLS, EnvAllowedHosts,
+	EnvPort, EnvListen, EnvDataDir, EnvWorktreesDir, EnvFrontendDist, EnvAllowedHosts,
 	EnvLogLevel, EnvEncryptionKey, EnvRegistryURL, EnvExtMountRoots,
 	EnvAgentPath, EnvSkipSandboxSweep, EnvTrustProxy, EnvLoginRateLimit, EnvAllowRootFS,
 	EnvDangerZone, EnvGCDryRun, EnvPProf, EnvMemoryBudgetPct, EnvUpdateURL, EnvDisableUpdates,
@@ -380,6 +380,26 @@ func TestResolveRefusesAnUnparsableListenAddress(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), EnvListen) {
 		t.Errorf("error %q must name %s", err, EnvListen)
+	}
+}
+
+// Half a certificate pair is a flag that was typed and then forgotten, so it refuses the boot by name
+// rather than silently serving the generated leaf and telling nobody.
+func TestResolveRefusesHalfACertificatePair(t *testing.T) {
+	for _, f := range []Flags{{TLSCertPath: "/srv/mike.crt"}, {TLSKeyPath: "/srv/mike.key"}} {
+		_, err := resolveWithKey(t, f)
+		if err == nil {
+			t.Fatalf("Resolve accepted half a certificate pair: %+v", f)
+		}
+		for _, want := range []string{"--tls-cert", "--tls-key"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("refusal %q does not name %s", err, want)
+			}
+		}
+	}
+	c := mustResolve(t, Flags{TLSCertPath: "/srv/mike.crt", TLSKeyPath: "/srv/mike.key"})
+	if c.TLSCertPath == "" || c.TLSKeyPath == "" {
+		t.Errorf("a whole pair did not reach the resolved config: %+v", c)
 	}
 }
 

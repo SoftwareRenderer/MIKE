@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	stdtls "crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -87,7 +88,7 @@ func testServerWithAssets(t *testing.T, assets fs.FS, mutate func(*startup.Confi
 		mutate(&cfg)
 	}
 
-	s, err := NewServer(cfg, nil, assets)
+	s, err := NewServer(cfg, testTLSConfig(t, dir), assets)
 	if err != nil {
 		t.Fatalf("create test server: %v", err)
 	}
@@ -95,8 +96,36 @@ func testServerWithAssets(t *testing.T, assets fs.FS, mutate func(*startup.Confi
 	return s
 }
 
-// testRequest creates an http.Request for testing.
+// testTLSConfig is the certificate pair main.go builds, generated into the test's own data directory.
+// A server is never wired without one, so no test can read a nil config as "serve plainly".
+func testTLSConfig(t *testing.T, dataDir string) *tls.Config {
+	t.Helper()
+	cfg, err := tls.LoadWithCert(dataDir, "", "")
+	if err != nil {
+		t.Fatalf("test TLS material: %v", err)
+	}
+	return cfg
+}
+
+// secureRequest marks a request as arrived over TLS, which is how a browser reaches this server. The
+// chain redirects a request that did not, so a test that wants the redirect says so with plainRequest.
+func secureRequest(req *http.Request) *http.Request {
+	req.TLS = &stdtls.ConnectionState{}
+	return req
+}
+
+// plainRequest is the one request the chain is asked to answer without TLS: the redirect is what it gets.
+func plainRequest(method, target string, body any) *http.Request {
+	return rawRequest(method, target, body)
+}
+
+// testRequest creates an http.Request for testing, on the connection a browser uses — the suite's
+// default, because this server has no plain-HTTP answer to give.
 func testRequest(method, path string, body any) *http.Request {
+	return secureRequest(rawRequest(method, path, body))
+}
+
+func rawRequest(method, path string, body any) *http.Request {
 	var reader io.Reader
 	if body != nil {
 		data, _ := json.Marshal(body)

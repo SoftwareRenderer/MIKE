@@ -137,7 +137,7 @@ a browser that is already signed in. Lost every passkey? Stop the server and run
 `./mike-server --reset-passkeys`; it deletes the passkeys and every live session, then exits.
 
 It listens on `127.0.0.1:3000` over TLS, with a certificate generated into `data/tls/` on first
-boot — import `data/tls/mike-ca.crt` into a browser's trust store, or use `--no-tls` for plain HTTP.
+boot — import `data/tls/mike-ca.crt` into a browser's trust store to make its certificate trusted.
 `--listen 0.0.0.0` answers other machines; open MIKE there by a hostname, never a bare address,
 because a passkey belongs to a name.
 

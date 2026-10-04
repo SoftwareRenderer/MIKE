@@ -55,10 +55,13 @@ func (tp ceremonyTransport) origin() string {
 	return "http://" + testCeremonyHost
 }
 
-// decorate puts the transport back the way the browser reached it.
+// decorate puts the transport back the way the browser reached it. The connection is said exactly: a
+// transport that is not TLS clears the mark `testRequest` puts on every request.
 func (tp ceremonyTransport) decorate(req *http.Request) *http.Request {
 	if tp.TLS {
 		req.TLS = &tls.ConnectionState{}
+	} else {
+		req.TLS = nil
 	}
 	if tp.Forwarded != "" {
 		req.Header.Set("X-Forwarded-Proto", tp.Forwarded)
@@ -232,20 +235,56 @@ func TestPasskeySignInAfterRegistration(t *testing.T) {
 	}
 }
 
-// A pairing code is spent by the begin half, so one code cannot pair two devices — and a wrong, expired
-// or already-used code is one refusal, so the answer never tells a guesser how close they got.
-func TestPairingCodeIsSingleUseAndRefusesIdentically(t *testing.T) {
+// finishRegistrationWith completes one begun registration with a credential minted for that ceremony's
+// challenge, so a test can drive the two halves separately.
+func finishRegistrationWith(t *testing.T, s *Server, ticket, challenge, name string) *httptest.ResponseRecorder {
+	t.Helper()
+	credential, err := testwebauthn.NewCredential()
+	if err != nil {
+		t.Fatalf("mint credential: %v", err)
+	}
+	response, err := credential.RegistrationBody(testCeremonyRPID, plainCeremony.origin(), challenge, registerFlags)
+	if err != nil {
+		t.Fatalf("build registration response: %v", err)
+	}
+	return testResponse(t, s, ceremonyPost(t, "/api/auth/passkey/register/finish", map[string]any{
+		"ticket":   ticket,
+		"name":     name,
+		"response": json.RawMessage(response),
+	}, plainCeremony))
+}
+
+// A pairing code is spent by the registration rather than by the attempt: a begin that never finished has
+// cost nothing, one code still writes one passkey, and every way a code fails to pay is one answer.
+func TestPairingCodeIsSpentByTheRegistrationNotTheAttempt(t *testing.T) {
 	s := testServer(t)
 	code := mintPairingCode(t, s)
 
-	if _, _, rr := beginCeremony(t, s, "/api/auth/passkey/register/begin", map[string]string{"code": code}, plainCeremony); rr.Code != http.StatusOK {
+	staleTicket, staleChallenge, rr := beginCeremony(t, s, "/api/auth/passkey/register/begin", map[string]string{"code": code}, plainCeremony)
+	if rr.Code != http.StatusOK {
 		t.Fatalf("a live code did not begin a registration: %d %s", rr.Code, rr.Body.String())
 	}
+	// A browser with no prompt to show never finishes, so the person presses the button with the same code.
+	ticket, challenge, retry := beginCeremony(t, s, "/api/auth/passkey/register/begin", map[string]string{"code": code}, plainCeremony)
+	if retry.Code != http.StatusOK {
+		t.Fatalf("an abandoned ceremony left the code unpairable: %d %s", retry.Code, retry.Body.String())
+	}
+
+	if finished := finishRegistrationWith(t, s, ticket, challenge, "laptop"); finished.Code != http.StatusOK {
+		t.Fatalf("register/finish: %d %s", finished.Code, finished.Body.String())
+	}
+	if stale := finishRegistrationWith(t, s, staleTicket, staleChallenge, "second device"); stale.Code != http.StatusUnauthorized {
+		t.Errorf("the ticket of the abandoned attempt paired a second device: %d %s", stale.Code, stale.Body.String())
+	}
+	if rows, err := s.store.ListPasskeys(t.Context()); err != nil || len(rows) != 1 {
+		t.Fatalf("passkeys = %v, %v; one code writes one row", rows, err)
+	}
+
 	_, _, spent := beginCeremony(t, s, "/api/auth/passkey/register/begin", map[string]string{"code": code}, plainCeremony)
 	if spent.Code != http.StatusUnauthorized {
 		t.Fatalf("a spent code = %d; want 401", spent.Code)
 	}
-	unknown := testResponse(t, s, ceremonyPost(t, "/api/auth/passkey/register/begin", map[string]string{"code": "NOSUCHCODE"}, plainCeremony))
+	_, _, unknown := beginCeremony(t, s, "/api/auth/passkey/register/begin", map[string]string{"code": "NOSUCHCODE"}, plainCeremony)
 	if spent.Body.String() != unknown.Body.String() {
 		t.Errorf("a spent code answered %q and an unknown one %q; one refusal, or a guesser learns how close they got",
 			spent.Body.String(), unknown.Body.String())
@@ -601,23 +640,22 @@ func TestBootPairingURLNamesAHostThatCanCarryACredential(t *testing.T) {
 		name       string
 		listen     string
 		allowed    []string
-		tlsOff     bool
 		port       int
 		wantOrigin string
 	}{
-		{name: "loopback address becomes localhost", listen: "127.0.0.1", tlsOff: true, port: 3000, wantOrigin: "http://localhost:3000"},
-		{name: "ipv6 any", listen: "::", tlsOff: true, port: 3000, wantOrigin: "http://localhost:3000"},
-		{name: "wildcard with tls", listen: "0.0.0.0", port: 3000, wantOrigin: "https://localhost:3000"},
+		{name: "loopback address becomes localhost", listen: "127.0.0.1", port: 3000, wantOrigin: "https://localhost:3000"},
+		{name: "ipv6 any", listen: "::", port: 3000, wantOrigin: "https://localhost:3000"},
+		{name: "wildcard", listen: "0.0.0.0", port: 3000, wantOrigin: "https://localhost:3000"},
 		{name: "a pinned host wins", listen: "0.0.0.0", allowed: []string{"mike.example.com"}, port: 8443, wantOrigin: "https://mike.example.com:8443"},
 		{name: "the default port is not spelled", listen: "localhost", port: 443, wantOrigin: "https://localhost"},
 	} {
 		s := testServerWith(t, func(c *startup.Config) {
-			c.Listen, c.AllowedHosts, c.TLSDisabled, c.Port = tc.listen, tc.allowed, tc.tlsOff, tc.port
+			c.Listen, c.AllowedHosts, c.Port = tc.listen, tc.allowed, tc.port
 		})
 		if got := s.bootPairingOrigin(); got != tc.wantOrigin {
 			t.Errorf("%s: origin = %q; want %q", tc.name, got, tc.wantOrigin)
 		}
-		if _, err := auth.NewRelyingHost(s.bootPairingAuthority(), !tc.tlsOff); err != nil {
+		if _, err := auth.NewRelyingHost(s.bootPairingAuthority(), true); err != nil {
 			t.Errorf("%s: the printed URL points at a host that cannot carry a passkey: %v", tc.name, err)
 		}
 	}

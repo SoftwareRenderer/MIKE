@@ -9,20 +9,27 @@
      * shown as a sentence rather than in red.
      */
     import { onMount } from 'svelte';
-    import { isPasskeyCancelled, registerPasskeyWithCode, signInWithPasskey } from '$lib/api';
+    import { CA_DOWNLOAD, isPasskeyCancelled, registerPasskeyWithCode, signInWithPasskey } from '$lib/api';
     import { t } from '$lib/i18n';
     import {
         initialState,
         next,
         normalizePairingCode,
         pairingCodeFromHash,
+        pairingCodeInput,
         pairingCodeReady,
     } from '$lib/utils/login-flow';
     import type { LoginEvent, LoginState, LoginTone } from '$lib/utils/login-flow';
     import { passkeySupport } from '$lib/utils/webauthn';
     import BaseModal from './BaseModal.svelte';
 
-    let { hasPasskey = null, onClose }: { hasPasskey?: boolean | null; onClose: () => void | Promise<void> } = $props();
+    /** `caDownload` is the server's own answer that it has a certificate authority to hand out, so the
+     *  notice below never links at a file that would not be served. */
+    let { hasPasskey = null, caDownload = false, onClose }: {
+        hasPasskey?: boolean | null;
+        caDownload?: boolean;
+        onClose: () => void | Promise<void>;
+    } = $props();
 
     // svelte-ignore state_referenced_locally — the body this form opens on is decided once, when it is
     // created. The boot answer that feeds it is settled before the gate renders, and every later change
@@ -128,7 +135,17 @@
     {#if body === 'unsupported'}
         <p class="login-copy">{form.support === 'insecure-context' ? t('app.login.insecureContext') : t('app.login.notSupported')}</p>
         {#if form.support === 'insecure-context'}
-            <p class="login-hint">{t('app.login.insecureHelp')}</p>
+            {#if caDownload}
+                <p class="login-copy">{t('app.login.caHelp')}</p>
+                <!-- A plain link, not apiFetch: a certificate is a file the device's own installer opens,
+                     and the browser's download UI is the only thing that can hand it over. -->
+                <a class="login-link" href={CA_DOWNLOAD.path} download={CA_DOWNLOAD.fileName}>{t('app.login.caDownload')}</a>
+                <!-- The steps end at the https address, so the plain-localhost way out is said only when
+                     there is no certificate to install — one instruction on the screen, not two. -->
+                <p class="login-hint">{t('app.login.caSteps')}</p>
+            {:else}
+                <p class="login-hint">{t('app.login.insecureHelp')}</p>
+            {/if}
         {/if}
     {:else if body === 'code'}
         <p class="login-copy">{t('app.login.codeHelp')}</p>
@@ -138,7 +155,7 @@
             type="text"
             class="login-code"
             value={form.code}
-            maxlength={11}
+            maxlength={9}
             spellcheck="false"
             autocomplete="one-time-code"
             autocapitalize="characters"
@@ -146,7 +163,17 @@
             aria-label={t('app.login.codeAria')}
             disabled={busy}
             onkeydown={(e) => { if (e.key === 'Enter') void createPasskey(); }}
-            oninput={(e) => send({ type: 'code', value: e.currentTarget.value })}
+            oninput={(e) => {
+                // Written to the field here rather than from the store's copy, so the caret goes back in
+                // the same turn the browser moved it.
+                const el = e.currentTarget;
+                // Svelte types this event as a plain `Event`, and `inputType` is what says which key it was.
+                const backward = (e as Event & { inputType?: string }).inputType === 'deleteContentBackward';
+                const edit = pairingCodeInput(el.value, el.selectionStart ?? el.value.length, backward);
+                if (edit.value !== el.value) el.value = edit.value;
+                el.setSelectionRange(edit.caret, edit.caret);
+                send({ type: 'code', value: edit.value });
+            }}
         />
     {:else}
         <p class="login-copy">{t('app.login.signInHelp')}</p>
@@ -223,7 +250,9 @@
         font-family: var(--font-mono, 'SF Mono', 'Cascadia Code', 'Fira Code', monospace);
         font-size: var(--text-lg);
         letter-spacing: 0.08em;
-        text-align: center;
+        /* Centered, the caret of an empty field lands in the middle of the ghost text and every keystroke
+           slides the characters before it: this is a field someone types into. */
+        text-align: left;
         text-transform: uppercase;
         outline: none;
         transition: border-color var(--dur-base);

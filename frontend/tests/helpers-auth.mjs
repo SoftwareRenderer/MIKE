@@ -102,7 +102,10 @@ export async function attachVirtualAuthenticator(context, page) {
 
 export async function openPairingBrowser({ headless = true } = {}) {
     const browser = await chromium.launch({ headless, chromiumSandbox: false });
-    const context = await browser.newContext();
+    // The lane server signs its leaf with a CA created in its own data directory, which no browser on
+    // this machine trusts. The ceremony itself is what is under test, so the certificate is accepted;
+    // the pairing dialog's CA download is the artifact that makes it trustworthy for real.
+    const context = await browser.newContext({ ignoreHTTPSErrors: true });
     const page = await context.newPage();
     const { cdp, authenticatorId } = await attachVirtualAuthenticator(context, page);
     return { browser, context, page, cdp, authenticatorId };

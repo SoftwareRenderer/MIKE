@@ -11,7 +11,7 @@ import { chromium } from '@playwright/test';
 import { attachVirtualAuthenticator, pairBrowser, pairingCodeFromEnv } from './helpers-auth.mjs';
 import { writeFileSync, rmSync } from 'node:fs';
 
-const BASE = 'http://localhost:3000';
+const BASE = 'https://localhost:3000';
 const CODE = pairingCodeFromEnv();
 const PROJECT = process.env.MIKE_CHECK_PROJECT;
 const FOLD_KEY = 'Control+Shift+BracketLeft';    // foldKeymap: foldCode (toggle at cursor)
@@ -61,7 +61,9 @@ function check(name, ok, detail = '') {
 }
 
 const browser = await chromium.launch();
-const ctx = await browser.newContext({ baseURL: BASE });
+// The lane's certificate comes from the CA the server made in its own data dir; this probe measures
+// the editor, not the certificate.
+const ctx = await browser.newContext({ baseURL: BASE, ignoreHTTPSErrors: true });
 
 // Record every didOpen that crosses a WebSocket, installed before any app code runs.
 await ctx.addInitScript(() => {

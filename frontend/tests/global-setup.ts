@@ -4,11 +4,13 @@
  */
 
 import { spawn } from 'node:child_process';
-import http from 'node:http';
+import https from 'node:https';
+import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execSync, execFileSync } from 'node:child_process';
 import { pairAndReadSession, readPairingCode } from './helpers-auth.mjs';
+import { laneRequestOptions } from './lane-tls';
 
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
@@ -31,8 +33,8 @@ const TEST_OWN_REPOS = '/tmp/kanban-test-repos';
 const KANBAN_PORT = 3000;
 const KANBAN_PORT_ISOLATED = 3001;
 const MOCK_PORT = 9999;
-const KANBAN_BASE = `http://localhost:${KANBAN_PORT}`;
-const KANBAN_BASE_ISOLATED = `http://localhost:${KANBAN_PORT_ISOLATED}`;
+const KANBAN_BASE = `https://localhost:${KANBAN_PORT}`;
+const KANBAN_BASE_ISOLATED = `https://localhost:${KANBAN_PORT_ISOLATED}`;
 const LOCK_FILE = '/tmp/kanban-test-setup.lock';
 // Playwright storage state files — read at context creation time
 const STORAGE_STATE_FILE = '/tmp/kanban-test-storage-state.json';
@@ -157,7 +159,7 @@ async function setup(): Promise<void> {
     kanbanServer = spawn('setsid', [KANBAN_BIN, ...KANBAN_RUN_ARGS, '--data-dir', TEST_DATA_DIR], {
         cwd: PROJECT_ROOT,
         // The fixture repos and worktrees live under /tmp, outside the host directory jail.
-        env: { ...process.env, ...NO_UPDATES_ENV, MIKE_LOGIN_RATE_LIMIT: '120', MIKE_WORKTREES_DIR: TEST_WORKTREES, MIKE_REGISTRY_URL: TEST_REGISTRY_URL, MIKE_TLS: '0', DANGER_ZONE: '1', MIKE_ALLOW_ROOT_FS: '1' },
+        env: { ...process.env, ...NO_UPDATES_ENV, MIKE_LOGIN_RATE_LIMIT: '120', MIKE_WORKTREES_DIR: TEST_WORKTREES, MIKE_REGISTRY_URL: TEST_REGISTRY_URL, DANGER_ZONE: '1', MIKE_ALLOW_ROOT_FS: '1' },
         stdio: ['ignore', serverLog, serverLog],
         detached: true,
     });
@@ -176,7 +178,7 @@ async function setup(): Promise<void> {
             domain: 'localhost',
             path: '/',
             httpOnly: true,
-            secure: false,
+            secure: true,
             sameSite: 'Lax',
             expires: Date.now() / 1000 + 86400 * 365,
         }],
@@ -184,7 +186,7 @@ async function setup(): Promise<void> {
     }));
     // Legacy auth file for CSRF token
     fs.writeFileSync('/tmp/kanban-test-auth.json', JSON.stringify({
-        cookies: [{ name: 'PHPSESSID', value: sessionCookie.split('=')[1], domain: 'localhost', path: '/', httpOnly: true, secure: false, sameSite: 'Lax' }],
+        cookies: [{ name: 'PHPSESSID', value: sessionCookie.split('=')[1], domain: 'localhost', path: '/', httpOnly: true, secure: true, sameSite: 'Lax' }],
         csrfToken,
     }));
     console.log(`[global-setup] Paired a passkey with the test server`);
@@ -248,7 +250,7 @@ async function setup(): Promise<void> {
     const isolatedLog = fs.openSync(SERVER_LOG_ISOLATED, 'w');
     kanbanServerIsolated = spawn('setsid', [KANBAN_BIN, ...KANBAN_RUN_ARGS, '--data-dir', TEST_DATA_DIR_ISOLATED, '--port', String(KANBAN_PORT_ISOLATED)], {
         cwd: PROJECT_ROOT,
-        env: { ...process.env, ...NO_UPDATES_ENV, MIKE_LOGIN_RATE_LIMIT: '120', MIKE_WORKTREES_DIR: TEST_WORKTREES, MIKE_REGISTRY_URL: TEST_REGISTRY_URL, MIKE_TLS: '0', DANGER_ZONE: '1', MIKE_ALLOW_ROOT_FS: '1' },
+        env: { ...process.env, ...NO_UPDATES_ENV, MIKE_LOGIN_RATE_LIMIT: '120', MIKE_WORKTREES_DIR: TEST_WORKTREES, MIKE_REGISTRY_URL: TEST_REGISTRY_URL, DANGER_ZONE: '1', MIKE_ALLOW_ROOT_FS: '1' },
         stdio: ['ignore', isolatedLog, isolatedLog],
         detached: true,
     });
@@ -265,7 +267,7 @@ async function setup(): Promise<void> {
             domain: 'localhost',
             path: '/',
             httpOnly: true,
-            secure: false,
+            secure: true,
             sameSite: 'Lax',
             expires: Date.now() / 1000 + 86400 * 365,
         }],
@@ -273,7 +275,7 @@ async function setup(): Promise<void> {
     }));
     // Legacy auth file for CSRF token
     fs.writeFileSync('/tmp/kanban-test-auth.json.isolated', JSON.stringify({
-        cookies: [{ name: 'PHPSESSID', value: sessionCookieIso.split('=')[1], domain: 'localhost', path: '/', httpOnly: true, secure: false, sameSite: 'Lax' }],
+        cookies: [{ name: 'PHPSESSID', value: sessionCookieIso.split('=')[1], domain: 'localhost', path: '/', httpOnly: true, secure: true, sameSite: 'Lax' }],
         csrfToken: csrfTokenIso,
     }));
     console.log(`[global-setup] Paired a passkey with the isolated server`);
@@ -746,49 +748,35 @@ async function killKanbanServer(): Promise<void> {
 
     // Wait for port to free (up to 5s)
     for (let attempt = 0; attempt < 10; attempt++) {
-        const isFree = await isPortFree(KANBAN_PORT);
-        if (isFree) return;
+        if (!(await portAnswering(KANBAN_PORT))) return;
         await new Promise(r => setTimeout(r, 500));
     }
 }
 
-/** Check if port is free. */
-async function isPortFree(port: number): Promise<boolean> {
+/** Whether something answers on the port. A TCP connection is the whole question: the lane servers serve
+ *  TLS, and a probe that spoke HTTP would have to trust a certificate it is only checking for. */
+function portAnswering(port: number, timeout = 500): Promise<boolean> {
     return new Promise((resolve) => {
-        const req = http.get(`http://localhost:${port}/`, () => {
-            req.destroy();
-            resolve(false);
-        });
-        req.on('error', () => {
-            resolve(true);
-        });
-        req.setTimeout(500, () => {
-            req.destroy();
-            resolve(false);
-        });
-        req.end();
+        const socket = net.connect({ host: 'localhost', port });
+        const done = (answer: boolean) => {
+            socket.destroy();
+            resolve(answer);
+        };
+        socket.once('connect', () => done(true));
+        socket.once('error', () => done(false));
+        socket.setTimeout(timeout, () => done(false));
     });
 }
 
-function waitForServer(port: number, timeout = 5000): Promise<void> {
-    return new Promise((resolve, reject) => {
-        const start = Date.now();
-        const tryConnect = () => {
-            const req = http.get(`http://localhost:${port}/`, () => {
-                req.destroy(); // release the port socket
-                resolve();
-            });
-            req.on('error', () => {
-                if (Date.now() - start < timeout) {
-                    setTimeout(tryConnect, 200);
-                } else {
-                    reject(new Error(`Server on port ${port} did not start within ${timeout}ms`));
-                }
-            });
-            req.end();
-        };
-        tryConnect();
-    });
+async function waitForServer(port: number, timeout = 5000): Promise<void> {
+    const start = Date.now();
+    for (;;) {
+        if (await portAnswering(port)) return;
+        if (Date.now() - start >= timeout) {
+            throw new Error(`Server on port ${port} did not start within ${timeout}ms`);
+        }
+        await new Promise(r => setTimeout(r, 200));
+    }
 }
 
 function postJson(url: string, body: any, cookie?: string, csrfToken?: string): Promise<any> {
@@ -800,7 +788,8 @@ function postJson(url: string, body: any, cookie?: string, csrfToken?: string): 
         };
         if (cookie) headers['Cookie'] = cookie;
         if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
-        const req = http.request(url, {
+        const req = https.request(url, {
+            ...laneRequestOptions(url),
             method: 'POST',
             headers,
         }, (res) => {
@@ -825,7 +814,8 @@ function putJson(url: string, body: any, cookie?: string, csrfToken?: string): P
         };
         if (cookie) headers['Cookie'] = cookie;
         if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
-        const req = http.request(url, {
+        const req = https.request(url, {
+            ...laneRequestOptions(url),
             method: 'PUT',
             headers,
         }, (res) => {
@@ -845,23 +835,7 @@ function getJson(url: string, cookie?: string): Promise<any> {
     return new Promise((resolve, reject) => {
         const headers: Record<string, string> = {};
         if (cookie) headers['Cookie'] = cookie;
-        const req = http.get(url, { headers }, (res) => {
-            let responseData = '';
-            res.on('data', chunk => responseData += chunk);
-            res.on('end', () => {
-                try { resolve(JSON.parse(responseData)); } catch { resolve(null); }
-            });
-        });
-        req.on('error', reject);
-        req.end();
-    });
-}
-
-function deleteRequest(url: string): Promise<any> {
-    return new Promise((resolve, reject) => {
-        const req = http.request(url, {
-            method: 'DELETE',
-        }, (res) => {
+        const req = https.get(url, { ...laneRequestOptions(url), headers }, (res) => {
             let responseData = '';
             res.on('data', chunk => responseData += chunk);
             res.on('end', () => {
@@ -877,7 +851,7 @@ export default async function main(): Promise<void> {
     // Only teardown if lock exists AND servers are running.
     // Stale lock + dead servers => clean up and run setup fresh.
     const lockExists = fs.existsSync(LOCK_FILE);
-    const serversRunning = await isPortFree(KANBAN_PORT).then(free => !free);
+    const serversRunning = await portAnswering(KANBAN_PORT);
 
     if (lockExists && serversRunning) {
         console.log('[global-setup] Teardown phase: stopping running servers');

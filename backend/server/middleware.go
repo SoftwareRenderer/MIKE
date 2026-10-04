@@ -43,6 +43,9 @@ var publicPaths = map[string]map[string]struct{}{
 	"/api/auth/passkey/assert/begin":    {http.MethodPost: {}},
 	"/api/auth/passkey/assert/finish":   {http.MethodPost: {}},
 	"/api/auth/session":                 {http.MethodGet: {}},
+	// The CA another device must import to trust this address. Public because the browser that is told to
+	// install it is the one with no session — HandleTLSCA and docs/tls.md say why that is safe.
+	"/api/tls/ca": {http.MethodGet: {}},
 }
 
 // hostClientPath is the extension bridge (frontend/public/host-client.js), which every UI

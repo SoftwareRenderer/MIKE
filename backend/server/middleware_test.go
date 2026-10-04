@@ -45,6 +45,8 @@ func TestMiddlewareAuthenticationGating(t *testing.T) {
 		{name: "a ceremony route is public", method: http.MethodPost, path: "/api/auth/passkey/assert/begin",
 			want: http.StatusNotFound},
 		{name: "session check is public", method: http.MethodGet, path: "/api/auth/session", want: http.StatusOK},
+		// The device being paired has no session, and the certificate is public data. docs/tls.md.
+		{name: "the CA download is public", method: http.MethodGet, path: "/api/tls/ca", want: http.StatusOK},
 		{
 			// publicPaths matches path AND method, so a POST to a public GET path is gated.
 			name:   "public path with the wrong method requires auth",
@@ -78,13 +80,44 @@ func TestMiddlewareAuthenticationGating(t *testing.T) {
 	}
 }
 
+// TestCleartextIsRedirectedToHTTPS: this server has no plain-HTTP answer. The hybrid listener still
+// accepts a cleartext connection so that the `http://host:3000` a person typed gets this redirect instead
+// of a TLS error, and a proxy that says it terminated TLS is answered rather than pointed at itself.
+func TestCleartextIsRedirectedToHTTPS(t *testing.T) {
+	s := testServer(t)
+
+	req := plainRequest(http.MethodGet, "/api/config", nil)
+	req.Host = "localhost"
+	rr := httptest.NewRecorder()
+	s.middlewareChain(s.mux).ServeHTTP(rr, req)
+	if rr.Code != http.StatusMovedPermanently {
+		t.Fatalf("cleartext GET = %d %q; want 301", rr.Code, rr.Body.String())
+	}
+	if got, want := rr.Header().Get("Location"), "https://localhost/api/config"; got != want {
+		t.Errorf("Location = %q; want %q", got, want)
+	}
+
+	trusted := testServerWith(t, func(c *startup.Config) { c.TrustProxy = true })
+	forwarded := plainRequest(http.MethodGet, "/api/config", nil)
+	forwarded.Host = "localhost"
+	forwarded.Header.Set("X-Forwarded-Proto", "https")
+	rr = httptest.NewRecorder()
+	trusted.middlewareChain(trusted.mux).ServeHTTP(rr, forwarded)
+	if code := rr.Header().Get("Location"); code != "" {
+		t.Errorf("a proxy that said https was redirected again to %q", code)
+	}
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("forwarded https with no session = %d; want the route's own 401", rr.Code)
+	}
+}
+
 // TestWorkerScriptNeedsNoSession: the generated worker imports the click handler for every notification
 // it shows, and a worker fetches its own scripts with no session to present, so that script is answered
 // like the worker itself.
 func TestWorkerScriptNeedsNoSession(t *testing.T) {
 	s := testServer(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/sw-notifications.js", nil)
+	req := secureRequest(httptest.NewRequest(http.MethodGet, "/sw-notifications.js", nil))
 	req.Host = "localhost"
 	rr := httptest.NewRecorder()
 	// The chain Serve installs over the router, which is what serves the frontend — the bare mux answers
@@ -105,7 +138,7 @@ func TestPrecachedDocumentNeedsNoSession(t *testing.T) {
 	s := testServer(t)
 
 	get := func(path string) string {
-		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req := secureRequest(httptest.NewRequest(http.MethodGet, path, nil))
 		req.Host = "localhost"
 		rr := httptest.NewRecorder()
 		s.middlewareChain(s.router).ServeHTTP(rr, req)

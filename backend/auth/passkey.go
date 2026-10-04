@@ -151,11 +151,13 @@ func (o operator) WebAuthnCredentials() []webauthn.Credential { return o.credent
 type Passkeys struct {
 	store   *store.Store
 	tickets *Tickets
+	codes   *PairingCodes
 }
 
-// NewPasskeys wires the ceremonies to the credential table and the ticket seal.
-func NewPasskeys(s *store.Store, tickets *Tickets) *Passkeys {
-	return &Passkeys{store: s, tickets: tickets}
+// NewPasskeys wires the ceremonies to the credential table, the ticket seal and the outstanding pairing
+// codes. A registration spends its code, so the three have to be reachable from one call.
+func NewPasskeys(s *store.Store, tickets *Tickets, codes *PairingCodes) *Passkeys {
+	return &Passkeys{store: s, tickets: tickets, codes: codes}
 }
 
 // HasPasskeys reports whether this install has any credential — the unpaired/paired distinction the
@@ -165,12 +167,13 @@ func (p *Passkeys) HasPasskeys(ctx context.Context) (bool, error) {
 	return n > 0, err
 }
 
-// BeginRegistration starts the ceremony a pairing code has just spent. The response is the browser's
-// creation options; the ticket is what the finish request must carry back.
+// BeginRegistration starts the ceremony one pairing code pays for. The response is the browser's creation
+// options; the ticket is what the finish request must carry back, and it carries `spendKey` — the claimed
+// code's key — inside its seal, so the code is spent by the registration rather than by this call.
 //
 // The already-registered credentials are excluded: a device that has a passkey here gets "you already
 // have one" from its own browser instead of a second row for the same key.
-func (p *Passkeys) BeginRegistration(ctx context.Context, host RelyingHost) (*protocol.CredentialCreation, string, error) {
+func (p *Passkeys) BeginRegistration(ctx context.Context, host RelyingHost, spendKey string) (*protocol.CredentialCreation, string, error) {
 	credentials, err := p.credentials(ctx, host.RPID)
 	if err != nil {
 		return nil, "", err
@@ -186,7 +189,7 @@ func (p *Passkeys) BeginRegistration(ctx context.Context, host RelyingHost) (*pr
 	if err != nil {
 		return nil, "", fmt.Errorf("begin passkey registration: %w", err)
 	}
-	ticket, err := p.tickets.Seal(ticketPurposeRegister, session)
+	ticket, err := p.tickets.Seal(ticketPurposeRegister, session, spendKey)
 	if err != nil {
 		return nil, "", err
 	}
@@ -197,10 +200,15 @@ func (p *Passkeys) BeginRegistration(ctx context.Context, host RelyingHost) (*pr
 // host. The response is the parsed credential the route read off the wire: the verifier works on that
 // form, so the HTTP boundary stays in backend/server and this package answers with typed results.
 //
+// The pairing code the ticket was sealed with is spent here, beside the row it pays for: one code writes
+// one passkey, and a browser that never reached this call has spent nothing. The spend runs before the
+// write and is undone if the write fails, because the row and the spent code have to agree about one
+// credential.
+//
 // A completed registration is itself proof of key possession with user verification, which is why it
 // opens the session on the browser that made it — the pairing code bought the ceremony, not the session.
 func (p *Passkeys) FinishRegistration(ctx context.Context, host RelyingHost, ticket string, response *protocol.ParsedCredentialCreationData, name string) (string, error) {
-	session, err := p.tickets.Open(ticketPurposeRegister, ticket)
+	session, spendKey, err := p.tickets.Open(ticketPurposeRegister, ticket)
 	if err != nil {
 		return "", err
 	}
@@ -221,12 +229,18 @@ func (p *Passkeys) FinishRegistration(ctx context.Context, host RelyingHost, tic
 		return "", err
 	}
 	id := EncodeCredentialID(credential.ID)
+	claim, err := p.codes.spend(spendKey)
+	if err != nil {
+		// The code ran out during the ceremony: it buys nothing, and no row is written.
+		return "", err
+	}
 	if err := p.store.CreatePasskey(ctx, store.NewPasskey{
 		CredentialID: id,
 		RPID:         host.RPID,
 		Name:         name,
 		Record:       record,
 	}); err != nil {
+		p.codes.undo(claim)
 		return "", fmt.Errorf("register passkey: %w", err)
 	}
 	logging.For(logging.Auth).Infof("registered a passkey for %s (credential %s)", host.RPID, id)
@@ -254,7 +268,7 @@ func (p *Passkeys) BeginAssertion(ctx context.Context, host RelyingHost) (*proto
 	if err != nil {
 		return nil, "", fmt.Errorf("begin passkey sign-in: %w", err)
 	}
-	ticket, err := p.tickets.Seal(ticketPurposeAssert, session)
+	ticket, err := p.tickets.Seal(ticketPurposeAssert, session, "")
 	if err != nil {
 		return nil, "", err
 	}
@@ -267,7 +281,7 @@ func (p *Passkeys) BeginAssertion(ctx context.Context, host RelyingHost) (*proto
 // The credential is written back because both the signature counter and the latched user-verification bit
 // moved: the record on disk is the verifier's state, not a copy of what registration produced.
 func (p *Passkeys) FinishAssertion(ctx context.Context, host RelyingHost, ticket string, response *protocol.ParsedCredentialAssertionData) (string, error) {
-	session, err := p.tickets.Open(ticketPurposeAssert, ticket)
+	session, _, err := p.tickets.Open(ticketPurposeAssert, ticket)
 	if err != nil {
 		return "", err
 	}

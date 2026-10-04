@@ -113,6 +113,12 @@ URL_SINKS: dict[tuple[str, str], str] = {
         "literal — the server drew it: auth.PairingQRPNG encodes the pairing URL as a PNG data URL, and "
         "the row renders that picture rather than following a link. The URL beside it is shown as text "
         "and only ever copied, never fetched",
+    # The CA download is one module constant named in both places that offer it, so the gate reads it
+    # once per file and both entries say the same thing about the same value.
+    ("src/lib/components/ConfigModal.svelte", "CA_DOWNLOAD.path"):
+        "literal — api/auth.ts writes it from the module's own '/api' prefix and a fixed path",
+    ("src/lib/components/LoginModal.svelte", "CA_DOWNLOAD.path"):
+        "literal — api/auth.ts writes it from the module's own '/api' prefix and a fixed path",
     ("src/lib/services/ui-injector.svelte.ts", "setAttribute(src)"):
         "encoded-by:lib/services/ui-injector.svelte — extBaseURL re-encodes every segment of "
         "the served path and refuses one that leaves /extensions/",

@@ -102,14 +102,16 @@ code, the change is arguing with itself.
 ## Server Management
 
 ```bash
-make run    # background dev server, no TLS (dev defaults: password=test, dev-only key)
+make run    # background dev server, https on the local CA (dev-only encryption key; the boot prints a pairing code)
 make stop   # pkill the server
-curl -sk https://localhost:3000/api/config   # 401 JSON = up; use http:// with --no-tls
+curl -sk https://localhost:3000/api/config   # 401 JSON = up; -k because the CA is not in the trust store
 ```
 
-- TLS is on by default; a local CA in `data/tls/` signs a server leaf. The CA never rotates and there is
-  no expiry-based renewal — refresh an expired leaf by deleting the leaf and restarting. **A certificate
-  is not the gate**: reachability is the listen address plus Host pinning. `docs/tls.md`.
+- **TLS is the only mode**: a local CA in `data/tls/` signs a server leaf, and a plain connection to the port
+  gets a 301. The CA never rotates and there is no expiry-based renewal — refresh an expired leaf by deleting
+  the leaf and restarting. **A certificate is not the gate**: reachability is the listen address plus Host
+  pinning. The CA downloads without a session, because the browser that needs it is the one that has not
+  paired. `docs/tls.md`.
 - **Never `log.Fatalf` on a `Serve()` error** — run the signal cleanup path, then exit 1.
 - **Shutdown is a declared stage list.** A component registers its stop step with `s.reg(stage, name, step)`
   *where it is constructed* (the stages are declared in `backend/server/lifecycle.go`), so construction order

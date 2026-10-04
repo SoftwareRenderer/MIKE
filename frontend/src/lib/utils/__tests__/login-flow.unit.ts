@@ -10,6 +10,7 @@ import {
     next,
     normalizePairingCode,
     pairingCodeFromHash,
+    pairingCodeInput,
     pairingCodeReady,
 } from '$lib/utils/login-flow';
 import type { LoginState } from '$lib/utils/login-flow';
@@ -110,5 +111,42 @@ describe('the code field', () => {
         expect(pairingCodeReady('abcd2345')).toBe(true);
         expect(pairingCodeReady('ABCD-234')).toBe(false);
         expect(pairingCodeReady('ABCD-2345-6')).toBe(false);
+    });
+
+    it('holds the two groups the code is printed in, whoever filled the field', () => {
+        // The reducer answers for every path, so a fragment typed into the address bar by hand and a
+        // keystroke end up in one shape.
+        expect(next(ready, { type: 'code', value: 'abcd2345' }).code).toBe('ABCD-2345');
+        expect(next(ready, { type: 'code', value: 'ABCD 2345' }).code).toBe('ABCD-2345');
+    });
+});
+
+describe('typing into the code field', () => {
+    it('breaks the code after four characters without moving what was typed', () => {
+        expect(pairingCodeInput('ABCD', 4)).toEqual({ value: 'ABCD', caret: 4 });
+        expect(pairingCodeInput('ABCDE', 5)).toEqual({ value: 'ABCD-E', caret: 6 });
+    });
+
+    it('keeps the caret after the character being typed, not after the break', () => {
+        // A person mid-code: the next keystroke has to land where they are looking.
+        expect(pairingCodeInput('ABXCD-EF', 3)).toEqual({ value: 'ABXC-DEF', caret: 3 });
+        expect(pairingCodeInput('ABCD-EX', 7)).toEqual({ value: 'ABCD-EX', caret: 7 });
+    });
+
+    it('takes what was pasted in whatever shape it came, and drops what is beyond the code', () => {
+        expect(pairingCodeInput(' abcd-2345 ', 10)).toEqual({ value: 'ABCD-2345', caret: 9 });
+        expect(pairingCodeInput('ABCDEFGHJK', 10)).toEqual({ value: 'ABCD-EFGH', caret: 9 });
+    });
+
+    it('deletes a character when a backspace would only have removed the break', () => {
+        // `ABCD-E` with the caret after the break: the browser removes the break, and putting it back
+        // would leave the keystroke with nothing to show for it.
+        expect(pairingCodeInput('ABCDE', 4, true)).toEqual({ value: 'ABCE', caret: 3 });
+    });
+
+    it('leaves a backspace alone when it removed a character', () => {
+        expect(pairingCodeInput('ABCD-EF', 6, true)).toEqual({ value: 'ABCD-EF', caret: 6 });
+        // A break the person typed themselves is theirs to delete.
+        expect(pairingCodeInput('ABCD', 2, true)).toEqual({ value: 'ABCD', caret: 2 });
     });
 });

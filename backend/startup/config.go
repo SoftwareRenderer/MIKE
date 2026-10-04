@@ -22,7 +22,6 @@ const (
 	EnvDataDir           = "MIKE_DATA_DIR"
 	EnvWorktreesDir      = "MIKE_WORKTREES_DIR"
 	EnvFrontendDist      = "MIKE_FRONTEND_DIST"
-	EnvTLS               = "MIKE_TLS"
 	EnvAllowedHosts      = "MIKE_ALLOWED_HOSTS"
 	EnvLogLevel          = "MIKE_LOG_LEVEL"
 	EnvEncryptionKey     = "MIKE_ENCRYPTION_KEY"
@@ -79,7 +78,7 @@ type Flags struct {
 	DataDir      string
 	WorktreesDir string
 	FrontendDist string
-	NoTLS        bool
+	// TLSCertPath and TLSKeyPath name an operator's own certificate pair. TLS itself has no switch.
 	TLSCertPath  string
 	TLSKeyPath   string
 	AllowedHosts string
@@ -105,7 +104,8 @@ type Config struct {
 	// copy compiled into this binary, which is what every `-tags release` build resolves to.
 	FrontendDist string
 
-	TLSDisabled bool
+	// TLSCertPath and TLSKeyPath are whose certificate this server serves; empty means the local CA
+	// signs the leaf. There is no switch for TLS — a plain HTTP deployment is not one of the answers.
 	TLSCertPath string
 	TLSKeyPath  string
 
@@ -208,9 +208,11 @@ func Resolve(f Flags) (Config, error) {
 		c.FrontendDist = resolveString(f.FrontendDist, EnvFrontendDist, DefaultFrontend)
 	}
 
-	// --no-tls and MIKE_TLS=0 both disable TLS; MIKE_TLS is the env spelling of the same switch, so
-	// only the exact "0" means off (an unset or garbage value keeps TLS on).
-	c.TLSDisabled = f.NoTLS || os.Getenv(EnvTLS) == "0"
+	// Only whose certificate is served is decided here; TLS has no switch. Half a pair is refused the
+	// way a present-but-invalid flag value is, rather than falling through to the generated leaf.
+	if (f.TLSCertPath == "") != (f.TLSKeyPath == "") {
+		return Config{}, fmt.Errorf("--tls-cert and --tls-key must both be given or both omitted")
+	}
 	c.TLSCertPath = f.TLSCertPath
 	c.TLSKeyPath = f.TLSKeyPath
 

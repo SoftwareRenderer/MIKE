@@ -96,11 +96,6 @@ func LoadWithCert(dataDir, certFile, keyFile string) (*Config, error) {
 	return &Config{CertFile: certPath, KeyFile: keyPath, CAFile: ca.certPath}, nil
 }
 
-// LoadDisabled returns nil to signal TLS should be disabled (plain HTTP).
-func LoadDisabled() *Config {
-	return nil
-}
-
 // CertPEM returns the PEM encoding of a file's first CERTIFICATE block.
 // Re-encoding rather than returning the file is the point: only the certificate
 // goes out, and a file that is not a certificate is an error, never key material.

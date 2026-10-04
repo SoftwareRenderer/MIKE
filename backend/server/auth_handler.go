@@ -51,6 +51,9 @@ func (s *Server) handleAuthSession(w http.ResponseWriter, r *http.Request) {
 	} else {
 		logging.For(logging.Auth).Warnf("cannot tell the login form whether this install has a passkey: %v", err)
 	}
+	// The login gate offers the CA download only when this route would answer one — the same answer the
+	// download itself and the /api/config row read.
+	body["tls_ca_available"] = s.localCAvailable()
 
 	cookie, err := r.Cookie(sessionCookieName)
 	if err == nil && s.sessionMgr != nil {

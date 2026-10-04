@@ -82,7 +82,9 @@ export function next(state: LoginState, event: LoginEvent): LoginState {
                 code: '',
             };
         case 'code':
-            return { ...state, code: event.value, error: '' };
+            // One shape in the state however the field was filled; a keystroke arrives grouped from
+            // `pairingCodeInput`, and a pairing link carries the server's grouping already.
+            return { ...state, code: formatPairingCode(event.value), error: '' };
         case 'start':
             return { ...state, stage: 'ceremony', entry: state.stage === 'code' ? 'code' : state.entry, error: '' };
         case 'error': {
@@ -95,6 +97,10 @@ export function next(state: LoginState, event: LoginEvent): LoginState {
 
 /** How long a pairing code is once it is normalized. The server's `pairingCodeLength` is the source. */
 const PAIRING_CODE_LENGTH = 8;
+
+/** Where its two groups split. `FormatPairingCode` (`backend/auth/pairing.go`) prints the code the same
+ *  way, so the field groups what the person is reading off the terminal. */
+const PAIRING_CODE_GROUP = 4;
 
 /**
  * What a typed code becomes before it is sent: upper case, spaces and dashes gone.
@@ -111,6 +117,42 @@ export function normalizePairingCode(value: string): string {
 /** Whether the code field holds something worth spending a ceremony on. */
 export function pairingCodeReady(value: string): boolean {
     return normalizePairingCode(value).length === PAIRING_CODE_LENGTH;
+}
+
+/** The one place the group break is written. */
+function groupPairingCode(chars: string): string {
+    return chars.length > PAIRING_CODE_GROUP
+        ? `${chars.slice(0, PAIRING_CODE_GROUP)}-${chars.slice(PAIRING_CODE_GROUP)}`
+        : chars;
+}
+
+/** What the code field holds for any text it was given. Display only: `normalizePairingCode` still
+ *  decides what counts as a code, and the server applies its own rule again on the way in. */
+function formatPairingCode(value: string): string {
+    return groupPairingCode(normalizePairingCode(value).slice(0, PAIRING_CODE_LENGTH));
+}
+
+/**
+ * The field's answer to a keystroke: the text it ends up holding, and where the caret sits in it.
+ *
+ * `value` and `caret` are the DOM's own, after the browser applied the edit. The caret is counted in code
+ * characters rather than in positions, so the break the field inserts never sits under it. `backward` says
+ * the keystroke was a backspace.
+ */
+export function pairingCodeInput(value: string, caret: number, backward = false): { value: string; caret: number } {
+    const text = value ?? '';
+    const at = Math.max(0, Math.min(caret ?? text.length, text.length));
+    let chars = normalizePairingCode(text);
+    let kept = Math.min(normalizePairingCode(text.slice(0, at)).length, chars.length);
+    // A backspace whose only casualty is the break the field itself inserted: the break comes straight
+    // back, so that keystroke takes the character before it instead of appearing to do nothing.
+    if (backward && kept === PAIRING_CODE_GROUP && chars.length > PAIRING_CODE_GROUP) {
+        chars = chars.slice(0, kept - 1) + chars.slice(kept);
+        kept -= 1;
+    }
+    chars = chars.slice(0, PAIRING_CODE_LENGTH);
+    kept = Math.min(kept, chars.length);
+    return { value: groupPairingCode(chars), caret: kept + (kept > PAIRING_CODE_GROUP ? 1 : 0) };
 }
 
 /**

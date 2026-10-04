@@ -273,13 +273,6 @@ func TestLoadWithCert_RegeneratesUnusableCA(t *testing.T) {
 	}
 }
 
-func TestLoadDisabled(t *testing.T) {
-	cfg := LoadDisabled()
-	if cfg != nil {
-		t.Fatalf("expected nil config, got %+v", cfg)
-	}
-}
-
 // --- CA --------------------------------------------------------------------
 
 func TestEnsureCA_CreatesUsableCA(t *testing.T) {

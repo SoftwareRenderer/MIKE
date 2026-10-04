@@ -44,7 +44,7 @@ func (s *Server) pairAtBoot(ctx context.Context) {
 			"port can spend %.0f minutes trying this code, at %d attempts per minute per address",
 			s.settings.Listen, auth.BootPairingTTL.Minutes(), s.settings.LoginRateLimit)
 	}
-	if _, err := auth.NewRelyingHost(s.bootPairingAuthority(), !s.settings.TLSDisabled); err != nil {
+	if _, err := auth.NewRelyingHost(s.bootPairingAuthority(), true); err != nil {
 		logging.For(logging.Auth).Warnf("the URL above points at %q, which cannot hold a passkey: %v. Open MIKE by a hostname — "+
 			"a name in MIKE_ALLOWED_HOSTS — and type the code there", s.bootPairingHost(), err)
 	}
@@ -78,15 +78,11 @@ func (s *Server) bootPairingAuthority() string {
 	return net.JoinHostPort(s.bootPairingHost(), strconv.Itoa(s.settings.Port))
 }
 
-// bootPairingOrigin is the scheme-and-host half of the pairing URL.
+// bootPairingOrigin is the scheme-and-host half of the pairing URL. TLS has no switch, so the printed
+// address is always https; port 443 is the scheme's own and is left off.
 func (s *Server) bootPairingOrigin() string {
-	scheme := "https"
-	if s.settings.TLSDisabled {
-		scheme = "http"
+	if s.settings.Port == 0 || s.settings.Port == 443 {
+		return fmt.Sprintf("https://%s", s.bootPairingHost())
 	}
-	port := s.settings.Port
-	if port == 0 || port == 80 && scheme == "http" || port == 443 && scheme == "https" {
-		return fmt.Sprintf("%s://%s", scheme, s.bootPairingHost())
-	}
-	return fmt.Sprintf("%s://%s:%d", scheme, s.bootPairingHost(), port)
+	return fmt.Sprintf("https://%s:%d", s.bootPairingHost(), s.settings.Port)
 }
