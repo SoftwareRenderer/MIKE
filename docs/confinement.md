@@ -190,6 +190,10 @@ occurrence).
   extension-supplied binary, so never `cmd.Env = os.Environ()` here; add a variable only if an agent
   genuinely needs it. The pairing code is no exception in the other direction: it is memory-only, so it
   is never in this process's environment to inherit.
+- The six proxy variables every family needs are one set — `subproc.IsProxyEnv` — because the reason is the
+  same for all three: a private remote or registry behind an egress proxy stops resolving without them.
+  A proxy variable one family reads and the others do not (`NO_PROXY_HOSTS`, podman) belongs in that
+  family's own list, not in the shared one.
 - `os.Environ()` survives in exactly one sanctioned place: `term.hostShellEnv` under `DANGER_ZONE=1`,
   because there the shell is the operator's own.
 - Tests: `backend/agent/env_test.go`, `backend/git/env_test.go`, `pkg/sandboxruntime/podmanenv_test.go`.

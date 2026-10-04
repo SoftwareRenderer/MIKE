@@ -104,20 +104,9 @@ func trimNum(v float64) string {
 // GetModelSampling returns the overrides stored for a model, or nil for a model, provider or config
 // the store does not know — the same answer as "send nothing".
 func (cs *ConfigStore) GetModelSampling(modelName, providerURL string) *types.ModelSampling {
-	cfg, err := cs.GetConfig()
-	if err != nil {
+	m, ok := cs.providerModel(modelName, providerURL)
+	if !ok {
 		return nil
 	}
-	providerURL = strings.TrimRight(providerURL, "/")
-	for _, provider := range cfg.Providers {
-		if strings.TrimRight(provider.URL, "/") != providerURL {
-			continue
-		}
-		for _, m := range provider.Models {
-			if m.Name == modelName {
-				return m.Sampling
-			}
-		}
-	}
-	return nil
+	return m.Sampling
 }

@@ -2,8 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -121,7 +123,7 @@ func (f *fixture) setManifest(t *testing.T, mutate func(map[string]any)) {
 func tsCatalog(m map[string]string) string {
 	var b strings.Builder
 	b.WriteString("export const en = {\n")
-	for _, k := range sortedStringKeys(m) {
+	for _, k := range slices.Sorted(maps.Keys(m)) {
 		b.WriteString("  " + strconv.Quote(k) + ": " + strconv.Quote(m[k]) + ",\n")
 	}
 	b.WriteString("} satisfies Messages;\n")

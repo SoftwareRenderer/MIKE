@@ -66,19 +66,9 @@ var gitEnvNames = map[string]bool{
 // cannot override — is what closes the execution surface.
 var gitEnvPrefixes = []string{"LC_", "GIT_"}
 
-// proxyEnvNames: a private remote behind an egress proxy stops resolving without them.
-var proxyEnvNames = map[string]bool{
-	"HTTP_PROXY":  true,
-	"HTTPS_PROXY": true,
-	"NO_PROXY":    true,
-	"http_proxy":  true,
-	"https_proxy": true,
-	"no_proxy":    true,
-}
-
 // isGitSafeEnv reports whether an environment variable name may reach a git subprocess.
 func isGitSafeEnv(name string) bool {
-	if gitEnvNames[name] || proxyEnvNames[name] {
+	if gitEnvNames[name] || subproc.IsProxyEnv(name) {
 		return true
 	}
 	for _, p := range gitEnvPrefixes {

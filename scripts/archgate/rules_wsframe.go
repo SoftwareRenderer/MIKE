@@ -17,7 +17,9 @@ package main
 
 import (
 	"fmt"
+	"maps"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -160,7 +162,7 @@ func scanWSFrameLiterals(root string) ([]Finding, int, error) {
 	}
 
 	if checked == 0 {
-		return nil, 0, fmt.Errorf("no frame built in %v — the matcher is blind, not the tree", sortedHomes())
+		return nil, 0, fmt.Errorf("no frame built in %v — the matcher is blind, not the tree", slices.Sorted(maps.Keys(frameHomes)))
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].File != out[j].File {
@@ -190,13 +192,4 @@ func sseEvents(root string) (map[string]bool, error) {
 		return nil, fmt.Errorf("only %d SSEType* constants found — the matcher is wrong, not the tree", len(out))
 	}
 	return out, nil
-}
-
-func sortedHomes() []string {
-	out := make([]string, 0, len(frameHomes))
-	for home := range frameHomes {
-		out = append(out, home)
-	}
-	sort.Strings(out)
-	return out
 }

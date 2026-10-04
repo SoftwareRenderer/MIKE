@@ -7,9 +7,11 @@ package main
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -389,7 +391,7 @@ func scanCancellableWrites(root string) ([]Finding, int, error) {
 		if !branchOK {
 			out = append(out, Finding{
 				File: orDefault(firstOf(byType[receiverOf(types, r)]), routesFile),
-				Detail: "GET " + r.pattern + " serves " + strings.Join(sortedKeys(methods), ",") +
+				Detail: "GET " + r.pattern + " serves " + strings.Join(slices.Sorted(maps.Keys(methods)), ",") +
 					" with no identifiable GET branch",
 				Why: "the rule cannot say which path a GET takes, so it cannot say the path is write-free — read it by hand",
 			})
@@ -401,7 +403,7 @@ func scanCancellableWrites(root string) ([]Finding, int, error) {
 				hits[m] = true
 			}
 		}
-		for _, call := range sortedKeys(hits) {
+		for _, call := range slices.Sorted(maps.Keys(hits)) {
 			out = append(out, Finding{
 				File: findingFile(r, types, byType), Detail: "GET " + r.pattern + " writes: " + call,
 				Why: "a write on a cancellable GET must be a single idempotent statement, or a cancelled request can persist a partial result (F19)",
@@ -774,15 +776,6 @@ func frontendTypeStrings(root string) (map[string]bool, error) {
 		return nil, fmt.Errorf("frontend/src yielded no strings — the matcher is wrong")
 	}
 	return out, nil
-}
-
-func sortedKeys(m map[string]bool) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }
 
 // firstOf returns the first file of a type's file list, for naming a finding.

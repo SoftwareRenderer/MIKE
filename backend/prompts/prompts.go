@@ -248,15 +248,7 @@ type SummarizeData struct {
 // system prompt (summarization instructions) and the user message (previous
 // summary + chat history).
 func RenderSummarizePrompt(data SummarizeData) (string, string, error) {
-	system, err := render(coreFile("summarize.tmpl"), "summarize.tmpl", data)
-	if err != nil {
-		return "", "", err
-	}
-	user, err := render(coreFile("summarize_user.tmpl"), "summarize_user.tmpl", data)
-	if err != nil {
-		return "", "", err
-	}
-	return system, user, nil
+	return renderPair("summarize.tmpl", "summarize_user.tmpl", data)
 }
 
 // AnswerQuestionData is the input for the automated answer prompt.
@@ -271,11 +263,17 @@ type AnswerQuestionData struct {
 // numbered questions). The questions live in the user message because some
 // chat templates reject system-only requests.
 func RenderAnswerQuestionPrompt(data AnswerQuestionData) (string, string, error) {
-	system, err := render(coreFile("answer_question.tmpl"), "answer_question.tmpl", data)
+	return renderPair("answer_question.tmpl", "answer_question_user.tmpl", data)
+}
+
+// renderPair renders a prompt's two halves: the system template, and the user message that carries
+// what the system message may not hold on its own.
+func renderPair(systemFile, userFile string, data any) (string, string, error) {
+	system, err := render(coreFile(systemFile), systemFile, data)
 	if err != nil {
 		return "", "", err
 	}
-	user, err := render(coreFile("answer_question_user.tmpl"), "answer_question_user.tmpl", data)
+	user, err := render(coreFile(userFile), userFile, data)
 	if err != nil {
 		return "", "", err
 	}

@@ -244,19 +244,14 @@ func findWordIndex(line, word string) int {
 	for i := 0; i <= len(line)-len(word); i++ {
 		if line[i:i+len(word)] == word {
 			// Check word boundaries
-			beforeOK := i == 0 || !isIdentChar(line[i-1])
-			afterOK := i+len(word) >= len(line) || !isIdentChar(line[i+len(word)])
+			beforeOK := i == 0 || !types.IsWordByte(line[i-1])
+			afterOK := i+len(word) >= len(line) || !types.IsWordByte(line[i+len(word)])
 			if beforeOK && afterOK {
 				return i
 			}
 		}
 	}
 	return -1
-}
-
-// isIdentChar checks if a character is valid in an identifier (letter, digit, underscore).
-func isIdentChar(c byte) bool {
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'
 }
 
 // formatLSPResponse formats a raw LSP JSON response into a human-readable string.

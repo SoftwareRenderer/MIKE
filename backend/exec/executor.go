@@ -211,8 +211,6 @@ type executionState struct {
 	done chan struct{}
 	// Closed last by the executor defer
 	finished chan struct{}
-	// Ends the exit wait exactly once, whoever owns the state. See releasePrepared.
-	finish func()
 }
 
 // releasePrepared gives back a task that was prepared for execution but will never run: the context
@@ -1374,7 +1372,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	// gives the preparation back both end the wait, and neither may do it twice.
 	var finishOnce sync.Once
 	finish := func() { finishOnce.Do(func() { close(finishedCh) }) }
-	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan, msgWake: msgWake, summarizeCh: summarizeCh, projectName: project.Name, sandboxEnabled: project.SandboxEnabled, executorType: execType, done: doneCh, finished: finishedCh, finish: finish}
+	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan, msgWake: msgWake, summarizeCh: summarizeCh, projectName: project.Name, sandboxEnabled: project.SandboxEnabled, executorType: execType, done: doneCh, finished: finishedCh}
 	te.taskMu.Unlock()
 
 	return &taskExecSetup{
@@ -1483,7 +1481,6 @@ func (te *TaskExecutor) getAgentRunner(projectID, taskID string) (*agent.AgentRu
 		executorType:   "agent",
 		done:           setup.done,
 		finished:       setup.finished,
-		finish:         setup.finish,
 	}
 	te.tasks[taskID] = state
 	te.taskMu.Unlock()

@@ -121,26 +121,26 @@ func TestDependencyMountIsTheSameDerivationBothWays(t *testing.T) {
 		t.Errorf("bind = %+v, want the declared container path on both halves", bind)
 	}
 
-	mounts := withDependencyMount(ext.SandboxConfig.Mounts, bind)
+	mounts := withDependency(ext.SandboxConfig.Mounts, bind, bind.Mount)
 	if len(mounts) != 1 || mounts[0].ContainerPath != "/go/pkg/mod" {
-		t.Fatalf("withDependencyMount = %v", mounts)
+		t.Fatalf("the mount list = %v", mounts)
 	}
 	snap := customMountSnapshot(mounts)
 	if !hasElem(snap, bind.Mount.HostPath+":/go/pkg/mod:"+bind.Mount.Mode) {
 		t.Errorf("the mount snapshot does not record the dependency bind: %v", snap)
 	}
-	envSnap := envSnapshot(withDependencyEnv(ext.SandboxConfig.Envs, bind))
+	envSnap := envSnapshot(withDependency(ext.SandboxConfig.Envs, bind, bind.Env))
 	if !hasElem(envSnap, "GOMODCACHE=/go/pkg/mod") {
 		t.Errorf("the env snapshot does not record the assignment: %v", envSnap)
 	}
 
-	// Both helpers are no-ops when nothing is bound, and never mutate the caller's list.
+	// The addition is a no-op when nothing is bound, and never mutates the caller's list.
 	none := dependencyBind(grantedExtension(""), policy)
-	if len(withDependencyMount(ext.SandboxConfig.Mounts, none)) != 0 || len(withDependencyEnv(ext.SandboxConfig.Envs, none)) != 1 {
+	if len(withDependency(ext.SandboxConfig.Mounts, none, none.Mount)) != 0 || len(withDependency(ext.SandboxConfig.Envs, none, none.Env)) != 1 {
 		t.Error("an empty bind must not add anything to either list")
 	}
 	if len(ext.SandboxConfig.Envs) != 1 {
-		t.Error("withDependencyEnv mutated the caller's env list")
+		t.Error("the dependency bind mutated the caller's env list")
 	}
 }
 

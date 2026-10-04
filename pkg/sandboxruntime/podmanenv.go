@@ -59,19 +59,8 @@ var podmanEnvNames = map[string]bool{
 	"NODE_EXTRA_CA_CERTS":  true,
 	"SSL_CERT_FILE_PODMAN": true,
 
-	"IN_container": true, // podman's own "am I inside a container" marker, read on nested runs
-}
-
-// proxyEnvNames are needed for the same reason SafeAgentEnv passes them: a registry reached through
-// an egress proxy stops resolving without them.
-var proxyEnvNames = map[string]bool{
-	"HTTP_PROXY":     true,
-	"HTTPS_PROXY":    true,
-	"NO_PROXY":       true,
-	"NO_PROXY_HOSTS": true,
-	"http_proxy":     true,
-	"https_proxy":    true,
-	"no_proxy":       true,
+	"IN_container":   true, // podman's own "am I inside a container" marker, read on nested runs
+	"NO_PROXY_HOSTS": true, // how podman reaches a registry the proxy should not intercept
 }
 
 // podmanEnvPrefixes are families allowed in bulk: podman reads its behaviour out of CONTAINERS_*,
@@ -81,7 +70,7 @@ var podmanEnvPrefixes = []string{"CONTAINERS_", "PODMAN_", "DOCKER_", "LC_"}
 
 // isPodmanSafeEnv reports whether an environment variable name may reach the podman CLI.
 func isPodmanSafeEnv(name string) bool {
-	if podmanEnvNames[name] || proxyEnvNames[name] {
+	if podmanEnvNames[name] || subproc.IsProxyEnv(name) {
 		return true
 	}
 	for _, p := range podmanEnvPrefixes {

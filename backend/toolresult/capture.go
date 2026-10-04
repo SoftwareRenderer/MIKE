@@ -11,6 +11,16 @@ import (
 // whatever it likes, so the capture itself has to stop somewhere.
 const MaxCaptureBytes = 1 << 20
 
+// CapText bounds text that arrived whole — a tool answer rather than a stream being written into a
+// Capture. It keeps the same number of bytes and appends the same marker, so a reader cannot tell
+// a capped answer from a capped command by its tail.
+func CapText(text string) string {
+	if len(text) <= MaxCaptureBytes {
+		return text
+	}
+	return text[:MaxCaptureBytes] + CaptureMarker(len(text)-MaxCaptureBytes)
+}
+
 // CaptureMarker is appended once when output was dropped; a silent cut reads as "that was
 // all the command printed".
 func CaptureMarker(dropped int) string {
