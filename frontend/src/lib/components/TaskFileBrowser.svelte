@@ -44,7 +44,6 @@
     {rootPath}
     {initialPath}
     navMode="breadcrumb"
-    showDotFiles={false}
     retryMissingDir
     listingClass="file-list"
     rowClass="file-entry"

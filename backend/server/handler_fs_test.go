@@ -797,3 +797,75 @@ func TestFSSearchFilenameRegex(t *testing.T) {
 		t.Errorf("invalid pattern matched %v, want no results", paths)
 	}
 }
+
+// TestFSSearchFindsDotFiles: find-in-files reaches dot-prefixed files and never reads .git or
+// node_modules. One token sits in every file of the fixture, so a single content query answers both.
+func TestFSSearchFindsDotFiles(t *testing.T) {
+	s := testServer(t)
+	cookie, csrf := loginTestCSRF(t, s)
+	base := t.TempDir()
+	for rel, content := range map[string]string{
+		".env":                      "token = dot-search-token\n",
+		".gitignore":                "build/\n",
+		".github/workflows/ci.yml":  "name: dot-search-token\n",
+		"main.go":                   "package main // dot-search-token\n",
+		".git/config":               "dot-search-token from the git directory\n",
+		"node_modules/pkg/leak.txt": "dot-search-token from node_modules\n",
+	} {
+		full := filepath.Join(base, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.store.CreateProject(&types.Project{ID: "fs-dots", Name: "FS Dots Project", Path: base}); err != nil {
+		t.Fatal(err)
+	}
+
+	type searchResp struct {
+		Results []struct {
+			Path string `json:"path"`
+		} `json:"results"`
+	}
+
+	search := func(q string, content bool) map[string]bool {
+		t.Helper()
+		v := url.Values{"project": {"fs-dots"}, "q": {q}}
+		if content {
+			v.Set("content", "1")
+		}
+		req := testRequest(http.MethodGet, "/api/fs/search?"+v.Encode(), nil)
+		withAuthCSRF(req, cookie, csrf)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("search %q: %d %s", q, rr.Code, rr.Body.String())
+		}
+		var resp searchResp
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode search response: %v", err)
+		}
+		got := map[string]bool{}
+		for _, r := range resp.Results {
+			got[r.Path] = true
+		}
+		return got
+	}
+
+	if names := search("ci.yml", false); !names[filepath.Join(".github", "workflows", "ci.yml")] {
+		t.Errorf("a file under a dot directory was not found by name: %v", names)
+	}
+
+	contents := search("dot-search-token", true)
+	for _, want := range []string{".env", filepath.Join(".github", "workflows", "ci.yml"), "main.go"} {
+		if !contents[want] {
+			t.Errorf("content search missed %s: %v", want, contents)
+		}
+	}
+	for _, skip := range []string{filepath.Join(".git", "config"), filepath.Join("node_modules", "pkg", "leak.txt")} {
+		if contents[skip] {
+			t.Errorf("content search read into %s, which the listing hides as well", skip)
+		}
+	}
+}

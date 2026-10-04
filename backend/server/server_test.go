@@ -630,9 +630,8 @@ func TestHandleFSSearch(t *testing.T) {
 		}
 		result := mustJSON[map[string]any](t, rr.Body)
 		results := result["results"].([]any)
-		// Should have README.md, src/app.ts, src/utils.ts, src/components/Button.svelte (4 files)
-		// Excludes: node_modules/*, .hidden
-		if len(results) != 4 {
+		// Every file under the root except those under node_modules, .hidden included
+		if len(results) != 5 {
 			paths := make([]string, len(results))
 			for i, r := range results {
 				paths[i] = r.(map[string]any)["path"].(string)
@@ -655,7 +654,7 @@ func TestHandleFSSearch(t *testing.T) {
 		}
 	})
 
-	t.Run("excludes hidden files", func(t *testing.T) {
+	t.Run("finds dot-prefixed files", func(t *testing.T) {
 		req := testRequest(http.MethodGet, "/api/fs/search?q=hidden&project="+projectID, nil)
 		withAuthCSRF(req, cookie, csrfToken)
 		rr := testResponse(t, s, req)
@@ -664,8 +663,11 @@ func TestHandleFSSearch(t *testing.T) {
 		}
 		result := mustJSON[map[string]any](t, rr.Body)
 		results := toAnySlice(result["results"])
-		if len(results) != 0 {
-			t.Fatalf("expected 0 results (.hidden excluded), got %d", len(results))
+		if len(results) != 1 {
+			t.Fatalf("expected 1 result (.hidden is searchable), got %d", len(results))
+		}
+		if first := results[0].(map[string]any); first["path"] != ".hidden" {
+			t.Fatalf("expected .hidden, got %v", first["path"])
 		}
 	})
 
