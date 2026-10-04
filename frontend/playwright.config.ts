@@ -28,6 +28,9 @@ const ISOLATED_SPECS = [
   // cannot share the lane every other chromium spec reads.
   'settings-update-dot',
   'settings-sessions',
+  // Registers and revokes passkeys on the lane server — the credentials every other spec's
+  // session is made of, so it cannot share the lane that hands them out.
+  'settings-passkeys',
   // Issues and revokes API tokens on the lane server, and asserts what a token can reach.
   'settings-api-tokens',
 ];

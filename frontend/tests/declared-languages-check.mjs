@@ -1,5 +1,5 @@
 // Live check of the extension-declared language layer against a running dev server:
-//   MIKE_CHECK_PROJECT=<scratch project> MIKE_LOGIN_PASSWORD=test node tests/declared-languages-check.mjs
+//   MIKE_CHECK_PROJECT=<scratch project> MIKE_PAIR_CODE=<pairing code> node tests/declared-languages-check.mjs
 //
 // The probe WRITES fixture files into the named project's directory — the name is required because
 // there is no safe guess — and removes them again. Like the other checks in this folder it assumes
@@ -8,10 +8,11 @@
 // Covers, in the order the layers fail: per-file didOpen languageId, highlighting from the declared
 // profile, block and region folding, Ctrl-/, and the visible symptoms of a wrong languageId.
 import { chromium } from '@playwright/test';
+import { attachVirtualAuthenticator, pairBrowser, pairingCodeFromEnv } from './helpers-auth.mjs';
 import { writeFileSync, rmSync } from 'node:fs';
 
 const BASE = 'http://localhost:3000';
-const PASSWORD = process.env.MIKE_LOGIN_PASSWORD || 'test';
+const CODE = pairingCodeFromEnv();
 const PROJECT = process.env.MIKE_CHECK_PROJECT;
 const FOLD_KEY = 'Control+Shift+BracketLeft';    // foldKeymap: foldCode (toggle at cursor)
 const UNFOLD_KEY = 'Control+Shift+BracketRight'; // foldKeymap: unfoldCode
@@ -83,7 +84,9 @@ await ctx.addInitScript(() => {
 });
 const page = await ctx.newPage();
 
-await page.request.post('/api/auth/login', { data: { password: PASSWORD } });
+// Sign in the way a person does: a virtual passkey, spent from a pairing code.
+await attachVirtualAuthenticator(ctx, page);
+await pairBrowser(page, BASE, CODE);
 if (!PROJECT) {
   console.log('FAIL  set MIKE_CHECK_PROJECT to the name of a scratch project — fixtures are written into it');
   await browser.close();

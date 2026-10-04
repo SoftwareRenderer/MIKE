@@ -296,7 +296,7 @@ func scanLockTables(root string) ([]Finding, int, error) {
 //
 // Assigning to cmd.Env *replaces* the child's environment, so the mistake is not "an extra variable"
 // but "the allowlist is gone". This repo has the scar: `os.Environ()` on an agent subprocess leaked
-// MIKE_LOGIN_PASSWORD and MIKE_ENCRYPTION_KEY through /proc/self/environ to a binary an extension
+// MIKE_ENCRYPTION_KEY through /proc/self/environ to a binary an extension
 // supplied. Three allowlists exist (git.Env/CloneEnv, sandboxruntime.PodmanEnv, agent.SafeAgentEnv)
 // plus one sanctioned widening (term.hostShellEnv, under DANGER_ZONE=1); an assignment that names
 // none of them is the leak pattern, whatever it was written for.

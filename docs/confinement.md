@@ -16,7 +16,7 @@ projects too because the server process enforces them.
 - The flag has a second, deliberate meaning: it decides what a host terminal is *given*
   (`term.hostShellEnv`) — `os.Environ()` with it, because that terminal is the operator's own shell and a
   scrubbed one cannot run their ssh-agent/registry logins. `agent.SafeAgentEnv` without it, because a
-  project row is not a grant of `MIKE_LOGIN_PASSWORD` and `MIKE_ENCRYPTION_KEY` to a shell.
+  project row is not a grant of `MIKE_ENCRYPTION_KEY` to a shell.
 - `toolEnv.hostGuard` (`backend/exec/tool_dispatch.go`) refuses `read_file`/`write_file`/`edit_file`/`bash`
   when a sandboxed task's sandbox callback is missing: a missing bridge is an outage, not a licence to
   work on the host behind the container. The LSP tools resolve their symbol through the same reader
@@ -186,9 +186,10 @@ occurrence).
 - `agent.SafeAgentEnv` (`backend/agent/env.go`) — the only source of `cmd.Env` for an adapter's
   subprocess (`runner.go`) and its `--list-models` probe (`loader.go`):
   `PATH`/`HOME`/user/term/locale/proxy/trust-store (+ `LC_*`) plus the adapter's own extras.
-  `os.Environ()` leaked `MIKE_LOGIN_PASSWORD` and `MIKE_ENCRYPTION_KEY` via `/proc/self/environ` to an
+  `os.Environ()` leaked `MIKE_ENCRYPTION_KEY` via `/proc/self/environ` to an
   extension-supplied binary, so never `cmd.Env = os.Environ()` here; add a variable only if an agent
-  genuinely needs it.
+  genuinely needs it. The pairing code is no exception in the other direction: it is memory-only, so it
+  is never in this process's environment to inherit.
 - `os.Environ()` survives in exactly one sanctioned place: `term.hostShellEnv` under `DANGER_ZONE=1`,
   because there the shell is the operator's own.
 - Tests: `backend/agent/env_test.go`, `backend/git/env_test.go`, `pkg/sandboxruntime/podmanenv_test.go`.

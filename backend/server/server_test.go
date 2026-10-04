@@ -23,9 +23,6 @@ import (
 	"mike/backend/startup"
 )
 
-// testPassword is the password used in tests (matches LOGIN_PASSWORD env var).
-const testPassword = "test-password-1234"
-
 // testServer is the one place the suite builds a server, on a temporary database that t.Cleanup
 // removes. It receives a resolved configuration, never an environment, so one test cannot change what
 // another test's server does. mutate is how a test asks for a different decision (see testServerWith).
@@ -76,7 +73,6 @@ func testServerWithAssets(t *testing.T, assets fs.FS, mutate func(*startup.Confi
 		AllowRootFS:       true,
 		DangerZone:        true,
 		WorktreesOverride: worktreesDir,
-		MasterPassword:    testPassword,
 		EncryptionKey:     "test-encryption-key",
 		AgentPath:         agentPath,
 		// Left false on purpose, and named rather than omitted: the boot sweep deletes every stale
@@ -124,42 +120,39 @@ func testResponse(t *testing.T, s *Server, req *http.Request) *httptest.Response
 	return rr
 }
 
-// loginTest logs in via the API and returns the session cookie string.
+// loginTest opens a session and returns the cookie string. It goes through the session manager rather
+// than the HTTP ceremony: a passkey is a browser's credential, and a test about some other route has no
+// business driving one. The ceremony itself is what handler_passkey_test.go exercises.
 func loginTest(t *testing.T, s *Server) string {
 	t.Helper()
-	req := testRequest(http.MethodPost, "/api/auth/login", map[string]string{
-		"password": testPassword,
-	})
-	rr := testResponse(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("login: %d %s", rr.Code, rr.Body.String())
-	}
-	return rr.Header().Get("Set-Cookie")
+	cookie, _ := loginTestCSRF(t, s)
+	return cookie
 }
 
-// loginTestCSRF logs in and returns the session cookie and CSRF token.
+// loginTestCSRF opens a session and returns the session cookie and the CSRF token that was stored
+// beside it — the two things a browser is handed when a ceremony finishes.
 func loginTestCSRF(t *testing.T, s *Server) (cookie, csrfToken string) {
 	t.Helper()
-	req := testRequest(http.MethodPost, "/api/auth/login", map[string]string{
-		"password": testPassword,
-	})
-	rr := testResponse(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("login: %d %s", rr.Code, rr.Body.String())
+	_, token, csrfToken, err := s.sessionMgr.StartSession(t.Context(), "10.0.0.1", "test harness")
+	if err != nil {
+		t.Fatalf("start session: %v", err)
 	}
-	return rr.Header().Get("Set-Cookie"), rr.Header().Get("X-CSRF-Token")
+	return sessionCookieName + "=" + token, csrfToken
 }
 
-// withAuth adds the session cookie to a request.
-func withAuth(req *http.Request, cookie string) {
+// withAuth adds the session cookie to a request and hands it back, so a request can be built inside the
+// expression that runs it.
+func withAuth(req *http.Request, cookie string) *http.Request {
 	parts := strings.Split(cookie, ";")[0]
 	req.Header.Set("Cookie", strings.TrimSpace(parts))
+	return req
 }
 
-// withAuthCSRF adds the session cookie and CSRF token to a request.
-func withAuthCSRF(req *http.Request, cookie, csrfToken string) {
+// withAuthCSRF adds the session cookie and CSRF token to a request and hands it back.
+func withAuthCSRF(req *http.Request, cookie, csrfToken string) *http.Request {
 	withAuth(req, cookie)
 	req.Header.Set("X-CSRF-Token", csrfToken)
+	return req
 }
 
 // testResponseAuth logs in and runs a request against the server with auth.

@@ -1,14 +1,12 @@
-// Package auth holds the master password digest and the session tokens that authenticate
-// API and WebSocket requests. The password itself is never retained - only its SHA-256
-// digest, compared in constant time - and tokens are stored hashed, so a copied kanban.db
-// cannot be replayed as a live session.
+// Package auth holds the session tokens that authenticate API and WebSocket requests, the passkey
+// ceremonies that open one, and the pairing codes that authorize a passkey. Session tokens are stored
+// hashed, so a copied kanban.db cannot be replayed as a live session, and a pairing code is spent on the
+// registration it authorizes, so nothing outlives the ceremony it was typed for.
 package auth
 
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -23,53 +21,39 @@ const (
 	csrfTokenBytes    = 16
 	sessionIDBytes    = 8
 	sessionDuration   = 30 * 24 * time.Hour // 30 days
-	passwordEnv       = "MIKE_LOGIN_PASSWORD"
 )
 
 var (
-	ErrInvalidPassword = errors.New("invalid password")
-	ErrInvalidToken    = errors.New("invalid session token")
-	ErrExpiredToken    = errors.New("session token expired")
+	ErrInvalidToken = errors.New("invalid session token")
+	ErrExpiredToken = errors.New("session token expired")
 )
 
-// SessionManager handles session lifecycle: login, validation, and logout.
+// SessionManager handles session lifecycle: the start a verified ceremony leads to, validation, and
+// logout. It holds no credential of its own. Nothing here can be compared against a password, because the
+// ceremony that gets a person here already proved the signature.
 type SessionManager struct {
 	store *store.Store
-	// passwordHash is sha256(MIKE_LOGIN_PASSWORD); the plaintext is not retained.
-	// Logins compare digests, so both sides are always 32 bytes and the
-	// constant-time comparison can neither short-circuit on length nor leak the
-	// password's length.
-	passwordHash [sha256.Size]byte
 }
 
-// NewSessionManager creates a new SessionManager from the resolved master password (the value
-// startup.Config.MasterPassword holds). Returns an error if it is empty: an empty password would make
-// every session a share of nothing. The ctx is the caller's, and the startup sweep below runs on it.
-func NewSessionManager(ctx context.Context, s *store.Store, password string) (*SessionManager, error) {
-	if password == "" {
-		return nil, fmt.Errorf("%s environment variable is not set", passwordEnv)
-	}
+// NewSessionManager creates a new SessionManager. The ctx is the caller's, and the startup sweep below
+// runs on it.
+func NewSessionManager(ctx context.Context, s *store.Store) (*SessionManager, error) {
 	// Clean up expired sessions on startup
 	if n, err := s.DeleteExpiredSessions(ctx); err != nil {
 		return nil, fmt.Errorf("cleanup expired sessions: %w", err)
 	} else if n > 0 {
 		logging.For(logging.Auth).Infof("cleaned up %d expired session(s)", n)
 	}
-	return &SessionManager{store: s, passwordHash: sha256.Sum256([]byte(password))}, nil
+	return &SessionManager{store: s}, nil
 }
 
-// Login validates the password and creates a session, recording the caller's IP
-// and User-Agent on it. Returns the session id, session token and CSRF token. The
-// token reaches the caller only here — the store keeps just its hash.
+// StartSession opens a session for a browser whose passkey ceremony has verified, recording the caller's
+// IP and User-Agent on it. Returns the session id, session token and CSRF token. The token reaches the
+// caller only here, since the store keeps just its hash.
 //
-// The ctx belongs to the caller: a session is state this leaves behind, so the login route passes a
+// The ctx belongs to the caller: a session is state this leaves behind, so the routes that open one pass a
 // detached one and a tab closing does not decide whether the user is signed in.
-func (m *SessionManager) Login(ctx context.Context, password, ip, userAgent string) (id, token, csrfToken string, err error) {
-	presented := sha256.Sum256([]byte(password))
-	if subtle.ConstantTimeCompare(presented[:], m.passwordHash[:]) != 1 {
-		return "", "", "", ErrInvalidPassword
-	}
-
+func (m *SessionManager) StartSession(ctx context.Context, ip, userAgent string) (id, token, csrfToken string, err error) {
 	draw := make([]byte, sessionTokenBytes+csrfTokenBytes+sessionIDBytes)
 	if _, err := rand.Read(draw); err != nil {
 		return "", "", "", fmt.Errorf("generate session credentials: %w", err)

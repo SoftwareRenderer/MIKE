@@ -65,39 +65,6 @@ func TestIsLoopbackAddr(t *testing.T) {
 	}
 }
 
-func TestRefusesWeakSecret(t *testing.T) {
-	tests := []struct {
-		name     string
-		listen   string
-		password string
-		want     bool
-	}{
-		// Loopback keeps the dev flow working, weak secret or not.
-		{name: "loopback default + weak", listen: "", password: "test", want: false},
-		{name: "loopback explicit + weak", listen: "127.0.0.1", password: "dev", want: false},
-		{name: "loopback + empty", listen: "localhost", password: "", want: false},
-		// Exposed listen addresses refuse weak secrets.
-		{name: "all interfaces + short", listen: "0.0.0.0", password: "abc", want: true},
-		{name: "all interfaces + empty", listen: "0.0.0.0", password: "", want: true},
-		{name: "all interfaces + known default", listen: "0.0.0.0", password: "test", want: true},
-		{name: "IPv6 any + known default", listen: "::", password: "Password", want: true},
-		{name: "LAN ip + known default", listen: "192.168.1.50", password: "changeme", want: true},
-		{name: "LAN ip + known default uppercase", listen: "192.168.1.50", password: "ADMIN", want: true},
-		{name: "LAN ip + known default padded", listen: "192.168.1.50", password: "  pass  ", want: true},
-		// Long enough and not a known default → accepted.
-		{name: "all interfaces + strong", listen: "0.0.0.0", password: "correct horse battery", want: false},
-		{name: "all interfaces + long default-ish", listen: "0.0.0.0", password: "test-password-1234", want: false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			c := Config{Listen: tt.listen, MasterPassword: tt.password}
-			if got := c.RefusesWeakSecret(); got != tt.want {
-				t.Errorf("RefusesWeakSecret(listen=%q, password=%q) = %v, want %v", tt.listen, tt.password, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestResolveStringPrecedence(t *testing.T) {
 	t.Setenv(probeEnv, "")
 
@@ -216,7 +183,7 @@ func TestLogLevelResolution(t *testing.T) {
 // documented spelling of unset.
 var resolverEnv = []string{
 	EnvPort, EnvListen, EnvDataDir, EnvWorktreesDir, EnvFrontendDist, EnvTLS, EnvAllowedHosts,
-	EnvLogLevel, EnvLoginPassword, EnvEncryptionKey, EnvRegistryURL, EnvExtMountRoots,
+	EnvLogLevel, EnvEncryptionKey, EnvRegistryURL, EnvExtMountRoots,
 	EnvAgentPath, EnvSkipSandboxSweep, EnvTrustProxy, EnvLoginRateLimit, EnvAllowRootFS,
 	EnvDangerZone, EnvGCDryRun, EnvPProf, EnvMemoryBudgetPct, EnvUpdateURL, EnvDisableUpdates,
 	EnvRestrictMCP, EnvRestrictStatReset,
@@ -447,31 +414,43 @@ func TestResolveAllowedHosts(t *testing.T) {
 // WeakSecrets is the boot's "this secret is shorter than we would like" line. It reports in a fixed
 // order (the warning is one block the operator reads, and map order is not a thing to print in), it
 // ignores an unset secret (resolution refuses the ones that must be present), and the threshold is
-// the same MinSecretLength the exposed-listen refusal uses.
+// MinSecretLength.
 func TestWeakSecrets(t *testing.T) {
 	tests := []struct {
-		name          string
-		encKey        string
-		loginPassword string
-		wantWeak      []string
+		name     string
+		encKey   string
+		wantWeak []string
 	}{
-		{name: "both strong", encKey: "strong-enough-key", loginPassword: "strong-password", wantWeak: nil},
-		{name: "both weak", encKey: "short", loginPassword: "weak", wantWeak: []string{EnvEncryptionKey, EnvLoginPassword}},
-		{name: "encryption key weak", encKey: "1234567", loginPassword: "strong-enough-password", wantWeak: []string{EnvEncryptionKey}},
-		{name: "login password weak", encKey: "strong-enough-key-value", loginPassword: "abc", wantWeak: []string{EnvLoginPassword}},
-		{name: "exactly 8 chars is ok", encKey: "12345678", loginPassword: "password", wantWeak: nil},
-		{name: "exactly 7 chars is weak", encKey: "1234567", loginPassword: "passwor", wantWeak: []string{EnvEncryptionKey, EnvLoginPassword}},
-		{name: "empty secrets are ignored", wantWeak: nil},
-		{name: "one set one empty", encKey: "weak", wantWeak: []string{EnvEncryptionKey}},
+		{name: "strong", encKey: "strong-enough-key", wantWeak: nil},
+		{name: "encryption key weak", encKey: "1234567", wantWeak: []string{EnvEncryptionKey}},
+		{name: "exactly 8 chars is ok", encKey: "12345678", wantWeak: nil},
+		{name: "exactly 7 chars is weak", encKey: "1234567", wantWeak: []string{EnvEncryptionKey}},
+		{name: "empty secret is ignored", wantWeak: nil},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			c := Config{EncryptionKey: tc.encKey, MasterPassword: tc.loginPassword}
+			c := Config{EncryptionKey: tc.encKey}
 			got := c.WeakSecrets()
 			if strings.Join(got, ",") != strings.Join(tc.wantWeak, ",") {
 				t.Errorf("WeakSecrets = %v, want %v", got, tc.wantWeak)
 			}
 		})
+	}
+}
+
+// --reset-passkeys has no environment spelling: a credential-destroying command a stale variable can
+// select is one that runs at every restart.
+func TestResetPasskeysIsFlagOnly(t *testing.T) {
+	if c := mustResolve(t, Flags{ResetPasskeys: true}); !c.ResetPasskeys {
+		t.Error("Flags.ResetPasskeys did not reach the resolved config")
+	}
+	if c := mustResolve(t, Flags{}); c.ResetPasskeys {
+		t.Error("the default is a server, not a wipe")
+	}
+	for _, name := range resolverEnv {
+		if strings.Contains(name, "PASSKEY") {
+			t.Errorf("%s exists: --reset-passkeys is deliberately flag-only", name)
+		}
 	}
 }
 

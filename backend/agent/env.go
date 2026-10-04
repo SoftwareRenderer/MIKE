@@ -9,7 +9,7 @@ import (
 // Agent adapters spawn a subprocess (e.g. the `pi` binary) from an extension, and
 // that process can spawn further children on the host. Handing it os.Environ()
 // leaked the whole server environment through /proc/self/environ — above all
-// MIKE_LOGIN_PASSWORD (log in as the operator) and MIKE_ENCRYPTION_KEY (decrypt
+// MIKE_ENCRYPTION_KEY (decrypt
 // every stored provider key). Agent processes get an allowlist instead.
 //
 // agentEnvNames are the variables an agent, and the tooling it shells out to,

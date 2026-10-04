@@ -8,6 +8,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execSync, execFileSync } from 'node:child_process';
+import { pairAndReadSession, readPairingCode } from './helpers-auth.mjs';
 
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
@@ -38,11 +39,14 @@ const STORAGE_STATE_FILE = '/tmp/kanban-test-storage-state.json';
 const STORAGE_STATE_FILE_ISOLATED = '/tmp/kanban-test-storage-state.json.isolated';
 const KANBAN_BIN = 'go';
 const KANBAN_RUN_ARGS = ['run', '.'];
-const TEST_PASSWORD = 'test-password-1234';
 // Release updates are switched off for the run: the boot pass (`updateCheck.start()` in App.svelte) asks the
 // opt-in question of every fresh browser and then dials the manifest host. A spec that wants the dot stubs
 // /api/updates/status.
 const NO_UPDATES_ENV = { MIKE_DISABLE_UPDATES: '1' };
+// Sign-in is a WebAuthn ceremony, and a browser lane runs a dozen of them a minute through one address
+// (every pairing, every assertion, from the setup walk and from the specs in parallel). The budget that
+// governs a real install is held by `backend/server/rate_limit_test.go`, which pins it at 5/IP/minute;
+// the lane raises it so the limit cannot be what a ceremony spec fails on.
 // Point the test servers at a local registry fixture, so a registry fetch never depends on the hosted one.
 // One entry is pinned to a git commit that only exists once setup has built the repo it points at, so the
 // fixture is copied to GENERATE_REGISTRY_FILE with that placeholder resolved rather than served directly.
@@ -153,7 +157,7 @@ async function setup(): Promise<void> {
     kanbanServer = spawn('setsid', [KANBAN_BIN, ...KANBAN_RUN_ARGS, '--data-dir', TEST_DATA_DIR], {
         cwd: PROJECT_ROOT,
         // The fixture repos and worktrees live under /tmp, outside the host directory jail.
-        env: { ...process.env, ...NO_UPDATES_ENV, MIKE_WORKTREES_DIR: TEST_WORKTREES, MIKE_LOGIN_PASSWORD: TEST_PASSWORD, MIKE_REGISTRY_URL: TEST_REGISTRY_URL, MIKE_TLS: '0', DANGER_ZONE: '1', MIKE_ALLOW_ROOT_FS: '1' },
+        env: { ...process.env, ...NO_UPDATES_ENV, MIKE_LOGIN_RATE_LIMIT: '120', MIKE_WORKTREES_DIR: TEST_WORKTREES, MIKE_REGISTRY_URL: TEST_REGISTRY_URL, MIKE_TLS: '0', DANGER_ZONE: '1', MIKE_ALLOW_ROOT_FS: '1' },
         stdio: ['ignore', serverLog, serverLog],
         detached: true,
     });
@@ -162,7 +166,9 @@ async function setup(): Promise<void> {
     await waitForServer(KANBAN_PORT, 15000);
     console.log(`[global-setup] Test kanban server ready on port ${KANBAN_PORT}`);
 
-    const { cookie: sessionCookie, csrfToken } = await login(KANBAN_BASE);
+    // The lane server booted into an empty data directory, so it printed the one pairing code it minted
+    // for itself; a browser with a virtual authenticator spends it the way a person would.
+    const { cookie: sessionCookie, csrfToken } = await pairAndReadSession(KANBAN_BASE, await readPairingCode(SERVER_LOG));
     fs.writeFileSync(STORAGE_STATE_FILE, JSON.stringify({
         cookies: [{
             name: 'PHPSESSID',
@@ -181,7 +187,7 @@ async function setup(): Promise<void> {
         cookies: [{ name: 'PHPSESSID', value: sessionCookie.split('=')[1], domain: 'localhost', path: '/', httpOnly: true, secure: false, sameSite: 'Lax' }],
         csrfToken,
     }));
-    console.log(`[global-setup] Logged in to test server`);
+    console.log(`[global-setup] Paired a passkey with the test server`);
 
     const useMock = process.env.MIKE_USE_MOCK_LLM !== '0';
     const mockUrl = `http://localhost:${MOCK_PORT}/v1`;
@@ -242,7 +248,7 @@ async function setup(): Promise<void> {
     const isolatedLog = fs.openSync(SERVER_LOG_ISOLATED, 'w');
     kanbanServerIsolated = spawn('setsid', [KANBAN_BIN, ...KANBAN_RUN_ARGS, '--data-dir', TEST_DATA_DIR_ISOLATED, '--port', String(KANBAN_PORT_ISOLATED)], {
         cwd: PROJECT_ROOT,
-        env: { ...process.env, ...NO_UPDATES_ENV, MIKE_WORKTREES_DIR: TEST_WORKTREES, MIKE_LOGIN_PASSWORD: TEST_PASSWORD, MIKE_REGISTRY_URL: TEST_REGISTRY_URL, MIKE_TLS: '0', DANGER_ZONE: '1', MIKE_ALLOW_ROOT_FS: '1' },
+        env: { ...process.env, ...NO_UPDATES_ENV, MIKE_LOGIN_RATE_LIMIT: '120', MIKE_WORKTREES_DIR: TEST_WORKTREES, MIKE_REGISTRY_URL: TEST_REGISTRY_URL, MIKE_TLS: '0', DANGER_ZONE: '1', MIKE_ALLOW_ROOT_FS: '1' },
         stdio: ['ignore', isolatedLog, isolatedLog],
         detached: true,
     });
@@ -250,7 +256,8 @@ async function setup(): Promise<void> {
     await waitForServer(KANBAN_PORT_ISOLATED, 15000);
     console.log(`[global-setup] Isolated kanban server ready on port ${KANBAN_PORT_ISOLATED}`);
 
-    const { cookie: sessionCookieIso, csrfToken: csrfTokenIso } = await login(KANBAN_BASE_ISOLATED);
+    const { cookie: sessionCookieIso, csrfToken: csrfTokenIso } = await pairAndReadSession(
+        KANBAN_BASE_ISOLATED, await readPairingCode(SERVER_LOG_ISOLATED));
     fs.writeFileSync(STORAGE_STATE_FILE_ISOLATED, JSON.stringify({
         cookies: [{
             name: 'PHPSESSID',
@@ -269,7 +276,7 @@ async function setup(): Promise<void> {
         cookies: [{ name: 'PHPSESSID', value: sessionCookieIso.split('=')[1], domain: 'localhost', path: '/', httpOnly: true, secure: false, sameSite: 'Lax' }],
         csrfToken: csrfTokenIso,
     }));
-    console.log(`[global-setup] Logged in to isolated server`);
+    console.log(`[global-setup] Paired a passkey with the isolated server`);
 
     // Configure mock provider on isolated server
     if (useMock) {
@@ -846,35 +853,6 @@ function getJson(url: string, cookie?: string): Promise<any> {
             });
         });
         req.on('error', reject);
-        req.end();
-    });
-}
-
-async function login(base: string): Promise<{ cookie: string; csrfToken: string }> {
-    return new Promise((resolve, reject) => {
-        const data = JSON.stringify({ password: TEST_PASSWORD });
-        const req = http.request(`${base}/api/auth/login`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Content-Length': Buffer.byteLength(data).toString(),
-            },
-        }, (res) => {
-            const setCookie = res.headers['set-cookie'];
-            const csrfToken = res.headers['x-csrf-token'];
-            let responseData = '';
-            res.on('data', chunk => responseData += chunk);
-            res.on('end', () => {
-                if (!setCookie || setCookie.length === 0) {
-                    reject(new Error(`Login failed: ${responseData}`));
-                    return;
-                }
-                const cookie = Array.isArray(setCookie) ? setCookie[0] : setCookie;
-                resolve({ cookie: cookie.split(';')[0].trim(), csrfToken: csrfToken || '' });
-            });
-        });
-        req.on('error', reject);
-        req.write(data);
         req.end();
     });
 }

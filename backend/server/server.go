@@ -88,6 +88,11 @@ type Server struct {
 	mcpRegistry  *mcp.Registry
 	lspHandler   *lsp.LSPHandler
 	loginLimiter *RateLimiter
+	// pairing holds the outstanding pairing codes — in memory, because a code exists for the length of
+	// one ceremony and a restart dropping it is the correct expiry (docs/passkeys.md).
+	pairing *auth.PairingCodes
+	// passkeys runs the two WebAuthn ceremonies against the credential table.
+	passkeys     *auth.Passkeys
 	previewStore *previewStore
 	mux          *http.ServeMux
 	// router is what every request enters: the mux, then the SPA behind it.
@@ -383,9 +388,17 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 	s.previewStore.startSweeper()
 	defer s.reg(stagePreviewSweeper, "preview sweeper", s.previewStore.stopSweeper)()
 
-	sessionMgr, err := auth.NewSessionManager(s.base, store, settings.MasterPassword)
+	// The ceremony ticket seal is one use of this install's secret rather than the secret itself, so a
+	// ticket copied out of a database is unreadable by another install.
+	tickets, err := auth.NewTickets(settings.EncryptionKey)
 	if err != nil {
-		return nil, fmt.Errorf("create session manager: %w\nSet MIKE_LOGIN_PASSWORD environment variable to enable authentication", err)
+		return nil, fmt.Errorf("ceremony tickets: %w", err)
+	}
+	s.pairing = auth.NewPairingCodes()
+	s.passkeys = auth.NewPasskeys(store, tickets)
+	sessionMgr, err := auth.NewSessionManager(s.base, store)
+	if err != nil {
+		return nil, fmt.Errorf("create session manager: %w", err)
 	}
 	s.sessionMgr = sessionMgr
 	// Bearer tokens for headless clients. Issuance and revocation live behind the session-authed
@@ -1047,6 +1060,8 @@ func (s *Server) Serve() error {
 		if s.tlsConfig.CAFile != "" {
 			logging.For(logging.HTTP).Infof("TLS: import %s into a device's trust store to trust this certificate", s.tlsConfig.CAFile)
 		}
+		// Printed once the address the pairing URL names is the address this process is about to bind.
+		s.pairAtBoot(s.base)
 		l, err := net.Listen("tcp", s.addr)
 		if err != nil {
 			return fmt.Errorf("listen: %w", err)
@@ -1055,6 +1070,7 @@ func (s *Server) Serve() error {
 	}
 
 	logging.For(logging.HTTP).Infof("Server starting on http://%s", s.addr)
+	s.pairAtBoot(s.base)
 	return srv.ListenAndServe()
 }
 

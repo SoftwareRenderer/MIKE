@@ -191,7 +191,6 @@ func TestPostCheckoutHookNeverRunsOnWorktreeAdd(t *testing.T) {
 
 func TestEnvNeverCarriesServerSecrets(t *testing.T) {
 	secrets := map[string]string{
-		"MIKE_LOGIN_PASSWORD":          "hunter2",
 		"MIKE_ENCRYPTION_KEY":          "the-key-that-decrypts-every-provider",
 		"DANGER_ZONE":                  "1",
 		"MIKE_LISTEN":                  "0.0.0.0",
@@ -422,11 +421,10 @@ func TestCloneEnvCarriesNoServerSecrets(t *testing.T) {
 	// come straight from an HTTP request (add-project with a git URL). The transport fence is what
 	// this function was written for; the leak is what it also had to stop carrying.
 	t.Setenv("MIKE_ENCRYPTION_KEY", "the-key")
-	t.Setenv("MIKE_LOGIN_PASSWORD", "hunter2")
 	t.Setenv("DANGER_ZONE", "1")
 
 	env := strings.Join(CloneEnv(), "\n")
-	for _, want := range []string{"MIKE_ENCRYPTION_KEY", "MIKE_LOGIN_PASSWORD", "DANGER_ZONE"} {
+	for _, want := range []string{"MIKE_ENCRYPTION_KEY", "DANGER_ZONE"} {
 		if strings.Contains(env, want+"=") {
 			t.Errorf("CloneEnv() carries %s into the clone subprocess", want)
 		}

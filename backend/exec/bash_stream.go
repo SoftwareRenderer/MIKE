@@ -106,7 +106,7 @@ func (w *streamLineWriter) emitLocked(chunk string) {
 // is killed when it expires, while a child the command detached keeps running, on purpose.
 //
 // Only the allowlisted environment reaches the command: these are LLM-written commands on the
-// host, so MIKE_LOGIN_PASSWORD and MIKE_ENCRYPTION_KEY must never be in their environment, and
+// host, so MIKE_ENCRYPTION_KEY must never be in their environment, and
 // GIT_TERMINAL_PROMPT=0 keeps an injected git transfer off a credential prompt.
 func execCommandStream(ctx context.Context, dir, command string, timeout int64, onLine func(text string)) (string, error) {
 	secs := normalizeBashTimeout(timeout)

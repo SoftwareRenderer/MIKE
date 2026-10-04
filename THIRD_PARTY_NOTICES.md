@@ -10,7 +10,7 @@ Full license texts are available inside each dependency's package.
 binaries and `frontend/dist`. An extension's own dependencies (its language server, WASM adapter or
 bundled JS) are covered by that extension's `LICENSE`, `NOTICE` and `THIRD_PARTY_NOTICES.md`.
 
-**Last updated:** 2026-10-01
+**Last updated:** 2026-10-03
 
 ---
 
@@ -31,13 +31,23 @@ go list -deps -f '{{if .Module}}{{.Module.Path}}{{end}}' ./backend/... ./pkg/...
 | github.com/coder/websocket | ISC | Coder |
 | github.com/creack/pty | MIT | Keith Rarick |
 | github.com/fsnotify/fsnotify | BSD-3-Clause | The Go Authors / fsnotify Authors |
+| github.com/go-webauthn/webauthn | BSD-3-Clause | the go-webauthn authors |
 | github.com/google/uuid | BSD-3-Clause | Google Inc. |
 | github.com/modelcontextprotocol/go-sdk | Apache-2.0 and MIT | Model Context Protocol (see the note below) |
+| github.com/skip2/go-qrcode | MIT | Tom Harwood |
 | github.com/tetratelabs/wazero | Apache-2.0 | wazero authors (see NOTICE) |
 | golang.org/x/crypto | BSD-3-Clause | The Go Authors |
 | modernc.org/sqlite | BSD-3-Clause | The Sqlite Authors |
 | github.com/dustin/go-humanize (indirect) | MIT | Dustin Sallings |
+| github.com/fxamacker/cbor/v2 (indirect) | MIT | Faye Amacker |
+| github.com/go-viper/mapstructure/v2 (indirect) | MIT | Mitchell Hashimoto |
+| github.com/go-webauthn/x (indirect) | BSD-3-Clause | the go-webauthn authors |
+| github.com/golang-jwt/jwt/v5 (indirect) | MIT | Dave Grijalva and the golang-jwt maintainers |
+| github.com/google/go-tpm (indirect) | Apache-2.0 | Google LLC (see the note below) |
 | github.com/google/jsonschema-go (indirect) | MIT | JSON Schema Go Project Authors |
+| github.com/philhofer/fwd (indirect) | MIT | Philip Hofer |
+| github.com/tinylib/msgp (indirect) | MIT | Philip Hofer, portions The Go Authors |
+| github.com/x448/float16 (indirect) | MIT | Montgomery Edwards and Faye Amacker |
 | github.com/remyoudompheng/bigfft (indirect) | BSD-3-Clause | The Go Authors |
 | github.com/segmentio/asm (indirect) | MIT | Segment |
 | github.com/segmentio/encoding (indirect) | MIT | Segment.io, Inc. |
@@ -49,6 +59,11 @@ go list -deps -f '{{if .Module}}{{.Module.Path}}{{end}}' ./backend/... ./pkg/...
 | modernc.org/libc (indirect) | BSD-3-Clause | The Libc Authors |
 | modernc.org/mathutil (indirect) | BSD-3-Clause | The mathutil Authors |
 | modernc.org/memory (indirect) | BSD-3-Clause | The Memory Authors |
+
+`github.com/google/go-tpm` is reached through `github.com/go-webauthn/webauthn`, which uses it to verify a
+TPM attestation statement. `github.com/tinylib/msgp` is that package's own MsgPack codec for its credential
+and option types. `go-tpm` ships no `NOTICE` file of its own, so — as with the MCP SDK below — there is no
+NOTICE content to reproduce on its behalf, and `NOTICE` gains no entry for it.
 
 `github.com/modelcontextprotocol/go-sdk` is mid-relicensing: its `LICENSE` says the project moves from
 MIT to Apache-2.0, that new contributions are Apache-2.0, and that contributions whose authors have not

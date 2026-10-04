@@ -1,23 +1,46 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 /**
- * The three auth routes are the only places the CSRF token is handed out, and the session check is the
- * one request in the app that gates first paint. Two readings are held here and nowhere else: an answer
- * this app did not expect is still an answer (an outage at boot offers the offline mirror, and a signed-out
- * browser gets the login form), and a logout whose session is already gone is a success.
+ * The auth routes: the session check that gates first paint, the two ceremonies that open a session, and
+ * the settings calls that manage the credentials behind them. Three readings are held here and nowhere
+ * else:
  *
- * `fetch` is stubbed — no network. The module graph is reset per test, so each one starts with no token in
- * hand, exactly like a cold page.
+ *  - an answer this app did not expect is still an answer (an outage at boot offers the offline mirror, and
+ *    a signed-out browser gets the login form);
+ *  - a pairing code reaches the server exactly once, on the request that begins the registration — the
+ *    ticket replaces it, so a browser that kept sending the code would be a browser that could pair twice;
+ *  - a finished ceremony is the only thing that hands out the CSRF token outside the session check.
+ *
+ * `fetch` and the browser's own WebAuthn surface are stubbed — no network, no authenticator. The module
+ * graph is reset per test, so each one starts with no token in hand, exactly like a cold page.
  */
 
 let mockFetch: ReturnType<typeof vi.fn>;
 let reachabilityCalls: boolean[];
+let createCall: ReturnType<typeof vi.fn>;
+let getCall: ReturnType<typeof vi.fn>;
+
+/**
+ * What this browser's passkey surface looks like.
+ *
+ * `passkeySupport` reads three browser facts, and each is a different branch of the login form, so they
+ * are named here rather than inherited from whatever the test environment happens to provide.
+ */
+function setBrowser(options: { secure?: boolean; api?: boolean } = {}): void {
+    const { secure = true, api = true } = options;
+    Object.defineProperty(window, 'isSecureContext', { value: secure, configurable: true });
+    Object.defineProperty(window, 'PublicKeyCredential', { value: api ? function () { } : undefined, configurable: true });
+    Object.defineProperty(navigator, 'credentials', { value: api ? { create: createCall, get: getCall } : undefined, configurable: true });
+}
 
 beforeEach(async () => {
     vi.resetModules();
     mockFetch = vi.fn();
     (globalThis as any).fetch = mockFetch;
     reachabilityCalls = [];
+    createCall = vi.fn();
+    getCall = vi.fn();
+    setBrowser();
     const helpers = await import('$lib/api/helpers');
     helpers.registerSetHttpReachable((v: boolean) => reachabilityCalls.push(v));
 });
@@ -41,18 +64,50 @@ function headerOf(call: any[], name: string): string | null {
     return new Headers(call[1]?.headers).get(name);
 }
 
+function bodyOf(call: any[]): any {
+    return JSON.parse(call[1]?.body);
+}
+
+/** The call that went to one path, whatever else was asked for in between. */
+function callTo(path: string): any[] {
+    const found = mockFetch.mock.calls.find((c: any[]) => String(c[0]).endsWith(path));
+    if (!found) throw new Error(`no request was made to ${path}`);
+    return found;
+}
+
+/** The creation options the server sends, in the JSON form the ceremony routes answer with. */
+const creationJSON = {
+    challenge: 'AQID',
+    rp: { id: 'localhost', name: 'MIKE' },
+    user: { id: 'BAQFBg', name: 'mike', displayName: 'mike' },
+    pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+    authenticatorSelection: { userVerification: 'required', residentKey: 'required' },
+};
+
+const requestJSON = {
+    challenge: 'BAUG',
+    rpId: 'localhost',
+    userVerification: 'required',
+    allowCredentials: [{ type: 'public-key', id: 'Zm9v' }],
+};
+
+/** What the browser hands back after a ceremony: the wire form, which is what gets POSTed verbatim. */
+function credential(json: unknown) {
+    return { toJSON: () => json } as unknown as Credential;
+}
+
 describe('checkSession', () => {
     it('answers from the body and records the CSRF token behind it', async () => {
         let sessionAnswers = 0;
         mockFetch.mockImplementation(async () => {
             sessionAnswers++;
-            return res(200, { authenticated: true, csrf_token: 'session-token' });
+            return res(200, { authenticated: true, has_passkey: true, csrf_token: 'session-token' });
         });
 
         const { checkSession } = await import('$lib/api/auth');
         const { ensureCsrfToken } = await import('$lib/api/helpers');
 
-        await expect(checkSession()).resolves.toBe(true);
+        await expect(checkSession()).resolves.toEqual({ authenticated: true, hasPasskey: true });
         // One GET for the probe. A safe method asks for no token, so nothing probes ahead of it.
         expect(sessionAnswers).toBe(1);
         // The token came from that answer, so reading it back spends no further request.
@@ -61,12 +116,12 @@ describe('checkSession', () => {
     });
 
     it('answers false for a signed-out browser without calling the server unreachable', async () => {
-        mockFetch.mockResolvedValue(res(200, { authenticated: false }));
+        mockFetch.mockResolvedValue(res(200, { authenticated: false, has_passkey: false }));
 
         const { checkSession } = await import('$lib/api/auth');
         const { ensureCsrfToken } = await import('$lib/api/helpers');
 
-        await expect(checkSession()).resolves.toBe(false);
+        await expect(checkSession()).resolves.toEqual({ authenticated: false, hasPasskey: false });
         await expect(ensureCsrfToken()).resolves.toBe('');
         // The answer is the evidence: a signed-out browser is a server that replied.
         expect(reachabilityCalls).toEqual([true]);
@@ -79,8 +134,18 @@ describe('checkSession', () => {
 
         const { checkSession } = await import('$lib/api/auth');
 
-        await expect(checkSession()).resolves.toBe(false);
+        await expect(checkSession()).resolves.toEqual({ authenticated: false, hasPasskey: null });
         expect(reachabilityCalls).toEqual([true]);
+    });
+
+    it('says nothing about passkeys when the answer says nothing', async () => {
+        // `has_passkey` decides whether the form asks for a passkey or for a pairing code. A body without
+        // it is not "no passkeys" — the form takes the branch a failed ceremony corrects.
+        mockFetch.mockResolvedValue(res(200, { authenticated: false }));
+
+        const { checkSession } = await import('$lib/api/auth');
+
+        await expect(checkSession()).resolves.toEqual({ authenticated: false, hasPasskey: null });
     });
 
     it('throws on a body that is not the answer, the boot path\'s outage branch', async () => {
@@ -96,44 +161,175 @@ describe('checkSession', () => {
     });
 });
 
-describe('login', () => {
-    it('POSTs the password without a CSRF token and stores the one the response hands back', async () => {
-        mockFetch.mockResolvedValue(res(200, { status: 'ok' }, { 'X-CSRF-Token': 'login-token' }));
+describe('registerPasskeyWithCode', () => {
+    it('spends the code on the registration, then hands the browser\'s credential back verbatim', async () => {
+        createCall.mockResolvedValue(credential({ id: 'X', rawId: 'X' }));
+        mockFetch
+            .mockResolvedValueOnce(res(200, { ticket: 'ticket-1', options: { publicKey: creationJSON } }))
+            .mockResolvedValueOnce(res(200, { status: 'ok' }, { 'X-CSRF-Token': 'ceremony-token' }));
 
-        const { login } = await import('$lib/api/auth');
+        const { registerPasskeyWithCode } = await import('$lib/api/auth');
         const { ensureCsrfToken } = await import('$lib/api/helpers');
 
-        await expect(login('hunter2')).resolves.toBeUndefined();
-        expect(mockFetch).toHaveBeenCalledTimes(1);
-        const [url, init] = mockFetch.mock.calls[0];
-        expect(url).toBe('/api/auth/login');
-        expect(init.method).toBe('POST');
-        expect(init.credentials).toBe('include');
-        expect(JSON.parse(init.body)).toEqual({ password: 'hunter2' });
-        expect(headerOf(mockFetch.mock.calls[0], 'X-CSRF-Token')).toBeNull();
-        await expect(ensureCsrfToken()).resolves.toBe('login-token');
+        await expect(registerPasskeyWithCode('ABCD-2345')).resolves.toBeUndefined();
+
+        const begin = callTo('/auth/passkey/register/begin');
+        expect(begin[1].method).toBe('POST');
+        expect(bodyOf(begin)).toEqual({ code: 'ABCD-2345' });
+        // Public routes with no session yet: no token, and no round trip asking for one.
+        expect(headerOf(begin, 'X-CSRF-Token')).toBeNull();
+        expect(mockFetch.mock.calls.filter((c: any[]) => String(c[0]).endsWith('/auth/session'))).toHaveLength(0);
+
+        // The options are handed to the browser as bytes, not as the base64url text the server sent.
+        const asked = createCall.mock.calls[0][0].publicKey;
+        expect(new Uint8Array(asked.challenge)).toEqual(new Uint8Array([1, 2, 3]));
+        expect(new Uint8Array(asked.user.id)).toEqual(new Uint8Array([4, 4, 5, 6]));
+        expect(asked.authenticatorSelection.userVerification).toBe('required');
+
+        const finish = callTo('/auth/passkey/register/finish');
+        expect(bodyOf(finish)).toEqual({ ticket: 'ticket-1', name: '', response: { id: 'X', rawId: 'X' } });
+        // The code is spent: the second half carries the ticket and never the code.
+        expect(JSON.stringify(bodyOf(finish))).not.toContain('ABCD-2345');
+        // A finished registration is the session, and the session's token rides the same response.
+        await expect(ensureCsrfToken()).resolves.toBe('ceremony-token');
     });
 
-    it('throws the server\'s own words for a refused password', async () => {
-        mockFetch.mockResolvedValue(res(401, { error: 'invalid password' }));
+    it('refuses a code the server refused without waking the authenticator', async () => {
+        mockFetch.mockResolvedValueOnce(res(401, { error: 'pairing code is not valid' }));
 
-        const { login } = await import('$lib/api/auth');
-        await expect(login('wrong')).rejects.toThrow('invalid password');
+        const { registerPasskeyWithCode } = await import('$lib/api/auth');
+
+        await expect(registerPasskeyWithCode('XXXX-XXXX')).rejects.toThrow('pairing code is not valid');
+        expect(createCall).not.toHaveBeenCalled();
+        expect(mockFetch.mock.calls).toHaveLength(1);
     });
 
-    it('falls back to the form\'s own copy when a failure names nothing', async () => {
-        mockFetch.mockResolvedValue(res(500, {}));
+    it('reports a prompt the person dismissed as a dismissal, not as a failure', async () => {
+        createCall.mockRejectedValue(Object.assign(new Error('The operation timed out.'), { name: 'NotAllowedError' }));
+        mockFetch.mockResolvedValueOnce(res(200, { ticket: 'ticket-1', options: { publicKey: creationJSON } }));
 
-        const { login } = await import('$lib/api/auth');
-        await expect(login('hunter2')).rejects.toThrow('Login failed');
+        const { isPasskeyCancelled, registerPasskeyWithCode } = await import('$lib/api/auth');
+
+        const err = await registerPasskeyWithCode('ABCD-2345').then(() => null, (e: any) => e);
+        expect(isPasskeyCancelled(err)).toBe(true);
+        expect(err.message).toBe('The passkey prompt was dismissed');
     });
 
-    it('answers a request that got no reply with the form\'s network copy, and reports the server unreachable', async () => {
+    it('asks nothing of a browser that cannot run a ceremony', async () => {
+        // Plain HTTP on a LAN address has no prompt to show, and a pairing code spent there is a code
+        // that has to be minted again once the person reaches https.
+        setBrowser({ secure: false });
+
+        const { registerPasskeyWithCode } = await import('$lib/api/auth');
+
+        await expect(registerPasskeyWithCode('ABCD-2345')).rejects.toThrow('A passkey needs a secure connection');
+        expect(mockFetch).not.toHaveBeenCalled();
+    });
+});
+
+describe('signInWithPasskey', () => {
+    it('asserts against the options the server offered and opens the session it verified', async () => {
+        getCall.mockResolvedValue(credential({ id: 'Y', rawId: 'Y' }));
+        mockFetch
+            .mockResolvedValueOnce(res(200, { ticket: 'ticket-2', options: { publicKey: requestJSON } }))
+            .mockResolvedValueOnce(res(200, { status: 'ok' }, { 'X-CSRF-Token': 'assert-token' }));
+
+        const { signInWithPasskey } = await import('$lib/api/auth');
+
+        await expect(signInWithPasskey()).resolves.toBeUndefined();
+        expect(callTo('/auth/passkey/assert/begin')[1].method).toBe('POST');
+
+        const asked = getCall.mock.calls[0][0].publicKey;
+        expect(new Uint8Array(asked.challenge)).toEqual(new Uint8Array([4, 5, 6]));
+        expect(asked.rpId).toBe('localhost');
+        expect(new Uint8Array(asked.allowCredentials[0].id)).toEqual(new Uint8Array([102, 111, 111]));
+
+        expect(bodyOf(callTo('/auth/passkey/assert/finish'))).toEqual({
+            ticket: 'ticket-2', name: '', response: { id: 'Y', rawId: 'Y' },
+        });
+    });
+
+    it('throws the server\'s own words when the credential does not verify', async () => {
+        getCall.mockResolvedValue(credential({ id: 'Y', rawId: 'Y' }));
+        mockFetch
+            .mockResolvedValueOnce(res(200, { ticket: 'ticket-2', options: { publicKey: requestJSON } }))
+            .mockResolvedValueOnce(res(401, { error: 'the passkey did not verify' }));
+
+        const { signInWithPasskey } = await import('$lib/api/auth');
+
+        await expect(signInWithPasskey()).rejects.toThrow('the passkey did not verify');
+    });
+
+    it('says so when this browser has no passkey API at all', async () => {
+        setBrowser({ api: false });
+
+        const { signInWithPasskey } = await import('$lib/api/auth');
+
+        await expect(signInWithPasskey()).rejects.toThrow('This browser cannot create a passkey');
+        expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('answers a request that got no reply as a connection failure', async () => {
         rejectConnection();
 
-        const { login } = await import('$lib/api/auth');
-        await expect(login('hunter2')).rejects.toThrow('Network error');
+        const { signInWithPasskey } = await import('$lib/api/auth');
+
+        await expect(signInWithPasskey()).rejects.toThrow('Connection issue');
         expect(reachabilityCalls).toEqual([false]);
+    });
+});
+
+describe('the device list', () => {
+    it('reads the rows the settings section paints', async () => {
+        const rows = [{ id: 'cred-1', name: 'Chrome · macOS', created_at: '2026-10-01T10:00:00Z', last_used: '' }];
+        mockFetch.mockResolvedValue(res(200, rows));
+
+        const { listPasskeys } = await import('$lib/api/auth');
+
+        await expect(listPasskeys()).resolves.toEqual(rows);
+    });
+
+    it('sends the label and the token on a rename, and shows the server\'s reason when it is refused', async () => {
+        mockFetch.mockResolvedValue(res(400, { error: 'name must be 1 to 64 characters' }));
+
+        const { renamePasskey } = await import('$lib/api/auth');
+        const { setCsrfToken } = await import('$lib/api/helpers');
+        setCsrfToken('seed-token');
+
+        await expect(renamePasskey('cred/1', 'My laptop')).rejects.toThrow('name must be 1 to 64 characters');
+        const call = callTo('/auth/passkeys/cred%2F1');
+        expect(call[1].method).toBe('PATCH');
+        expect(bodyOf(call)).toEqual({ name: 'My laptop' });
+        expect(headerOf(call, 'X-CSRF-Token')).toBe('seed-token');
+    });
+
+    it('surfaces the last-passkey refusal instead of hiding it', async () => {
+        // The one refusal the person cannot act on by trying again, so it must reach the screen.
+        mockFetch.mockResolvedValue(res(409, { error: 'this is the last passkey; pair another device first' }));
+
+        const { revokePasskey } = await import('$lib/api/auth');
+
+        await expect(revokePasskey('cred-1')).rejects.toThrow('pair another device first');
+        expect(callTo('/auth/passkeys/cred-1')[1].method).toBe('DELETE');
+    });
+
+    it('hands back the minted code with everything a second device needs', async () => {
+        const code = { code: 'ABCD-2345', url: 'https://mike.local:3000/#pair=ABCD-2345', qr_png: 'data:image/png;base64,AA', expires_at: '2026-10-03T10:05:00Z' };
+        mockFetch.mockResolvedValue(res(200, code));
+
+        const { mintPairingCode } = await import('$lib/api/auth');
+
+        await expect(mintPairingCode()).resolves.toEqual(code);
+        expect(callTo('/auth/pairing')[1].method).toBe('POST');
+    });
+
+    it('cancels every outstanding code on the verb the route declares', async () => {
+        mockFetch.mockResolvedValue(res(200, { revoked: true }));
+
+        const { revokePairingCodes } = await import('$lib/api/auth');
+
+        await expect(revokePairingCodes()).resolves.toBeUndefined();
+        expect(callTo('/auth/pairing')[1].method).toBe('DELETE');
     });
 });
 

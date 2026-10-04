@@ -886,6 +886,37 @@ export interface SessionInfo {
 }
 
 /**
+ * One registered passkey (GET /api/auth/passkeys). A row is a device, not an account: one install has one
+ * operator. There is no credential field — the key and the bytes that verify it never leave the server.
+ */
+export interface PasskeyInfo {
+    /** The credential id, in the base64url form a path parameter can carry. It identifies the row back to
+     *  the server and means nothing to anyone else. */
+    id: string;
+    /** The label the device was paired with, or what the browser said it was. */
+    name: string;
+    /** RFC3339 UTC registration time. */
+    created_at: string;
+    /** RFC3339 UTC last verified sign-in. "" when the device has never signed in. */
+    last_used: string;
+}
+
+/**
+ * A pairing code minted from Settings (POST /api/auth/pairing). It authorizes one passkey registration on
+ * one browser and expires; it is not a credential and never signs anyone in.
+ */
+export interface PairingCode {
+    /** The code as it should be shown: eight characters in two groups. */
+    code: string;
+    /** The link a second device opens, with the code in the **fragment** so it reaches no access log. */
+    url: string;
+    /** The same URL as a PNG data URL, for a QR the second device can scan. */
+    qr_png: string;
+    /** RFC3339 UTC expiry, for the countdown. */
+    expires_at: string;
+}
+
+/**
  * One API token (GET /api/tokens). There is no token field: the plaintext is handed out once, by
  * the request that created it, so a listing cannot leak a credential.
  */

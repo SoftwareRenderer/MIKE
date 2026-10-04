@@ -118,7 +118,7 @@
 </script>
 
 <section class="settings-section tokens-section">
-    <div class="section-header">
+    <div class="settings-section-header">
         <h3 class="settings-section-title">{t('settings.tokens.title')}</h3>
         <div class="settings-section-actions">
             <button
@@ -132,7 +132,7 @@
         </div>
     </div>
 
-    <p class="tokens-help">{t('settings.tokens.help')}</p>
+    <p class="settings-note">{t('settings.tokens.help')}</p>
 
     <div class="tokens-create">
         <input
@@ -154,28 +154,28 @@
     </div>
 
     {#if issued}
-        <div class="tokens-revealed" role="status">
-            <div class="tokens-revealed-note">{t('settings.tokens.createdTitle')}</div>
-            <div class="tokens-revealed-row">
-                <code class="tokens-secret" title={issued.token}>{issued.token}</code>
+        <div class="settings-revealed" role="status">
+            <div class="settings-revealed-note">{t('settings.tokens.createdTitle')}</div>
+            <div class="settings-revealed-row">
+                <code class="settings-row-value tokens-secret" title={issued.token}>{issued.token}</code>
                 <button type="button" class="settings-btn-small" onclick={handleCopy}>{copied ? t('settings.tokens.copied') : t('settings.tokens.copy')}</button>
             </div>
         </div>
     {/if}
 
     {#if error}
-        <div class="tokens-error" role="alert">{error}</div>
+        <div class="settings-list-error" role="alert">{error}</div>
     {/if}
 
     {#if loading && tokens.length === 0}
-        <div class="tokens-status" role="status">{t('settings.tokens.loadingList')}</div>
+        <div class="settings-list-status" role="status">{t('settings.tokens.loadingList')}</div>
     {:else if tokens.length === 0 && !error}
-        <div class="tokens-status" role="status">{t('settings.tokens.none')}</div>
+        <div class="settings-list-status" role="status">{t('settings.tokens.none')}</div>
     {:else}
         {#each rows as token (token.id)}
             <div class="settings-row" data-token-id={token.id}>
                 <div class="settings-row-info">
-                    <div class="token-label" title={token.label}>{token.label}</div>
+                    <div class="settings-row-label" title={token.label}>{token.label}</div>
                     <div class="settings-row-meta">
                         <span class="token-meta-item" title={absolute(token.created_at)}>
                             <span class="settings-row-meta-key">{t('settings.tokens.created')}</span> {relative(token.created_at)}
@@ -201,24 +201,9 @@
 <style>
     @import '$lib/styles/settings-section.css';
 
-    .section-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-        flex-wrap: wrap;
-    }
-
     .tokens-section {
         gap: 10px;
     }
-    .tokens-help {
-        margin: 0;
-        font-size: var(--text-xs);
-        line-height: 1.5;
-        color: var(--color-text-tertiary);
-    }
-
     .tokens-create {
         display: flex;
         gap: 8px;
@@ -236,55 +221,10 @@
         font-family: inherit;
     }
 
-    .tokens-revealed {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        border: 1px solid var(--color-accent);
-        border-radius: var(--radius-md);
-        background: var(--color-surface-2);
-        padding: 10px 12px;
-    }
-    .tokens-revealed-note {
-        font-size: var(--text-xs);
-        font-weight: 600;
-        color: var(--color-text-secondary);
-    }
-    .tokens-revealed-row {
-        display: flex;
-        gap: 8px;
-        align-items: center;
-    }
-    /* The secret is selectable but truncated: the whole value is short enough to copy, and a wrapped
-       token pasted from a line break is a broken credential. */
+    /* The secret is selectable but truncated by `.settings-row-value`: a wrapped token pasted from a
+       line break is a broken credential. */
     .tokens-secret {
-        flex: 1;
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        font-family: var(--font-mono, 'SF Mono', 'Cascadia Code', 'Fira Code', monospace);
-        font-size: var(--text-xs);
         color: var(--color-text-primary);
     }
 
-    .token-label {
-        font-size: var(--text-sm);
-        font-weight: 500;
-        color: var(--color-text-primary);
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-    .tokens-status {
-        font-size: var(--text-sm);
-        color: var(--color-text-tertiary);
-    }
-    .tokens-error {
-        font-size: var(--text-sm);
-        font-weight: 500;
-        color: var(--color-status-red);
-    }
 </style>

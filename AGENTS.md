@@ -267,12 +267,19 @@ python3 scripts/gen-registry.py --check                  # registry.json matches
 
 ## Sessions & Auth
 
-One master password. `SessionManager` keeps only its `sha256` digest and compares in constant time;
-session tokens come from `crypto/rand` and are stored hashed, so a copied database can't be replayed.
-The session cookie's `Secure` flag is decided **per request** (TLS terminated here, or the forwarding
-header under `MIKE_TRUST_PROXY`) and there is deliberately no variable for it; logout clears with the
-flag it set. `/api/sessions*` are session-authed, CSRF-guarded, never public, and their responses carry
-no token of any kind. Storage shape, endpoint shapes and the Settings UI: `docs/sessions.md`.
+Passkeys, not a password: a pairing code authorizes **one registration** and authenticates nothing, and a
+session exists only as the answer to a finished ceremony. There is no login password anywhere — a route
+that opens a session on any other proof is a regression. The rpID and origin are the *request's*, so one
+install holds a different credential set per hostname, and a bare IP address is refused as a relying
+party rather than failing inside the browser's prompt. `--reset-passkeys` is a one-shot command that
+deletes passkeys **and sessions** and refuses a data directory a running server holds; the GUI cannot
+revoke the last passkey, so that command is the only way out of a lost device. Session tokens come from
+`crypto/rand` and are stored hashed, so a copied database can't be replayed. The session cookie's `Secure`
+flag is decided **per request** (TLS terminated here, or the forwarding header under
+`MIKE_TRUST_PROXY`) and there is deliberately no variable for it; logout clears with the flag it set.
+`/api/sessions*` are session-authed, CSRF-guarded, never public, and their responses carry no token of any
+kind. Ceremonies, pairing codes, tickets and the reset: `docs/passkeys.md`; storage shape, endpoint shapes
+and the Settings UI: `docs/sessions.md`.
 
 - **A bearer token is a second credential with a narrower scope.** Issued, labelled and revoked in
   Settings → About; stored as `hex(sha256(token))` like a session and shown once. It authenticates
@@ -577,6 +584,7 @@ deliberately omits.
 | `docs/testing.md` | test environment, teardown, e2e conventions, mock-LLM fixtures, load-sensitive tests |
 | `docs/tls.md` | certs/SANs, distribution, proxy + `Host`, weak-password and cookie rules |
 | `docs/sessions.md` | session storage shape, `/api/sessions*` responses, Settings → About UI |
+| `docs/passkeys.md` | the two ceremonies, pairing codes, ceremony tickets, `--reset-passkeys`, the boot pairing banner |
 | `docs/api.md` | the bearer-token surface: provisioning, the route allowlist, what each route does |
 | `docs/threads-checkpoints.md` | branch vs snapshot layers, checkpoint pinning/restore, fork inheritance |
 | `docs/commit-and-done.md` | what the click does, conflict arming, which files never get committed |

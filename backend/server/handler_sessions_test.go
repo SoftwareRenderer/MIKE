@@ -8,21 +8,13 @@ import (
 	"time"
 )
 
-// loginSession logs in through the API with an explicit User-Agent and returns
-// the session cookie and CSRF token.
+// loginSession signs a device in through a passkey ceremony with an explicit User-Agent and returns the
+// session cookie and CSRF token. Every session this suite has was opened by a ceremony, because that is
+// the only thing that opens one.
 func loginSession(t *testing.T, s *Server, userAgent string) (cookie, csrfToken string) {
 	t.Helper()
-	req := testRequest(http.MethodPost, "/api/auth/login", map[string]string{
-		"password": testPassword,
-	})
-	if userAgent != "" {
-		req.Header.Set("User-Agent", userAgent)
-	}
-	rr := testResponse(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("login: %d %s", rr.Code, rr.Body.String())
-	}
-	return rr.Header().Get("Set-Cookie"), rr.Header().Get("X-CSRF-Token")
+	_, finished := registerPasskeyOver(t, s, "test device", ceremonyTransport{UserAgent: userAgent})
+	return finished.Header().Get("Set-Cookie"), finished.Header().Get("X-CSRF-Token")
 }
 
 // getSessionList calls GET /api/sessions with the given session cookie and
@@ -286,19 +278,16 @@ func TestSessionRoutesUnauthenticated(t *testing.T) {
 	}
 }
 
-// TestSessionsRecordLoginIPAndUserAgent: the metadata comes from the login
-// request itself, so the Sessions UI can describe each device.
-func TestSessionsRecordLoginIPAndUserAgent(t *testing.T) {
+// TestSessionsRecordSignInIPAndUserAgent: the metadata comes from the ceremony that opened the session,
+// so the Sessions UI can describe each device.
+func TestSessionsRecordSignInIPAndUserAgent(t *testing.T) {
 	s := testServer(t)
 
-	req := testRequest(http.MethodPost, "/api/auth/login", map[string]string{"password": testPassword})
-	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) MIKE-Test")
-	req.RemoteAddr = "198.51.100.23:41234"
-	rr := testResponse(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("login: %d %s", rr.Code, rr.Body.String())
-	}
-	cookie := rr.Header().Get("Set-Cookie")
+	_, finished := registerPasskeyOver(t, s, "work laptop", ceremonyTransport{
+		UserAgent:  "Mozilla/5.0 (X11; Linux x86_64) MIKE-Test",
+		RemoteAddr: "198.51.100.23:41234",
+	})
+	cookie := finished.Header().Get("Set-Cookie")
 
 	cur := currentSessionOf(t, s, cookie)
 	if cur.UserAgent != "Mozilla/5.0 (X11; Linux x86_64) MIKE-Test" {

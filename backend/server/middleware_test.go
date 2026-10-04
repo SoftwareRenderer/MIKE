@@ -10,23 +10,18 @@ import (
 	"mike/backend/startup"
 )
 
-// login returns the session cookie and CSRF token of a fresh login on s. Several
-// scenarios below are only interesting for an authenticated caller, so the login dance
-// is spelled out once here instead of at the top of every test in this file.
+// login returns the session cookie and CSRF token of a freshly paired device on s. Several
+// scenarios below are only interesting for an authenticated caller, so the ceremony that
+// opens a session is spelled out once here instead of at the top of every test in this file.
 func login(t *testing.T, s *Server) (cookie, csrf string) {
 	t.Helper()
 
-	rr := testResponse(t, s, testRequest(http.MethodPost, "/api/auth/login", map[string]string{
-		"password": testPassword,
-	}))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("login: status = %d; want 200; body: %s", rr.Code, rr.Body.String())
-	}
-	raw := rr.Header().Get("Set-Cookie")
+	_, finished := registerPasskeyOver(t, s, "test device", plainCeremony)
+	raw := finished.Header().Get("Set-Cookie")
 	if raw == "" {
-		t.Fatal("login response set no session cookie")
+		t.Fatal("a finished ceremony set no session cookie")
 	}
-	return strings.TrimSpace(strings.Split(raw, ";")[0]), rr.Header().Get("X-CSRF-Token")
+	return strings.TrimSpace(strings.Split(raw, ";")[0]), finished.Header().Get("X-CSRF-Token")
 }
 
 // TestMiddlewareAuthenticationGating is the auth gate as one matrix: which paths and
@@ -45,8 +40,10 @@ func TestMiddlewareAuthenticationGating(t *testing.T) {
 		want   int
 	}{
 		{name: "health is public", method: http.MethodGet, path: "/api/health", want: http.StatusOK},
-		{name: "login is public", method: http.MethodPost, path: "/api/auth/login",
-			body: map[string]string{"password": testPassword}, want: http.StatusOK},
+		// The ceremony answered 404 because nothing is registered here, which is the point: the
+		// middleware let a POST through with no session because there is no session to have yet.
+		{name: "a ceremony route is public", method: http.MethodPost, path: "/api/auth/passkey/assert/begin",
+			want: http.StatusNotFound},
 		{name: "session check is public", method: http.MethodGet, path: "/api/auth/session", want: http.StatusOK},
 		{
 			// publicPaths matches path AND method, so a POST to a public GET path is gated.
@@ -236,8 +233,8 @@ func TestCSRFMiddleware(t *testing.T) {
 			login: true, token: "valid", want: http.StatusCreated,
 		},
 		{
-			name: "public endpoint needs no token", method: http.MethodPost, path: "/api/auth/login",
-			body: staticBody(map[string]string{"password": testPassword}), want: http.StatusOK,
+			name: "public endpoint needs no token", method: http.MethodPost, path: "/api/auth/passkey/assert/begin",
+			want: http.StatusNotFound,
 		},
 	}
 

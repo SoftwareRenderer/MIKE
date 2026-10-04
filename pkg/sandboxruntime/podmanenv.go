@@ -3,7 +3,7 @@ package sandboxruntime
 // The environment handed to the podman CLI. Rootless podman really does read it: storage is
 // keyed off the user, temporary volumes live under an XDG directory, and the systemd cgroup
 // manager is reached over D-Bus. cmd.Env is never left nil — that would hand the server's own
-// MIKE_LOGIN_PASSWORD and MIKE_ENCRYPTION_KEY to every podman call.
+// MIKE_ENCRYPTION_KEY to every podman call.
 //
 // This is the podman CLIENT's environment: nothing here reaches a container (that is
 // containerEnvArgs in backend/sandbox), and deleting an entry can break sandboxing in a way

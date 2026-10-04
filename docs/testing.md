@@ -55,7 +55,7 @@ only under load.
   `/api/fs` refuses it (`path outside allowed project directory`) and the panel never recovers.
   That is why `agent-network-isolation` and the sandbox specs each run against their own project.
 - **Assert the directory, not just that a list exists.** `/api/fs` resolves the project *from the
-  path*, so an explorer holding a stale folder asks for a path outside the current project and gets
+  path*. An explorer holding a stale folder therefore asks for a path outside the current project and gets
   400 `path outside allowed project directory` — the panel then shows an error and never retries.
   `ExplorerView` reseeds its folder when `projectPath` changes; a spec that clicks into the tree
   should pin the directory it means (`.file-browser-path-input` value) before clicking.
@@ -79,13 +79,13 @@ only under load.
   `toHaveCount(0)` for a node the code never creates.
 - **`[role="dialog"]` is not a selector here.** BaseModal, `CommitDiffOverlay`,
   `TerminalPanel` and BOTH explorer views carry `role="dialog"`, and every ChatMessage's
-  edit `<dialog>` has it implicitly — so the bare locator is a strict-mode violation
+  edit `<dialog>` has it implicitly. So the bare locator is a strict-mode violation
   whenever a chat or the explorer is mounted, and `expect(x).not.toBeVisible()` then
   proves nothing. Scope by content: `[role="dialog"]`.filter({ has: page.locator('.commit-textarea') }),
-  or the login modal by its `input[type="password"]`.
+  or the login gate by its own `.login-modal` class.
 - **Which control you actually need** (each of these was a silently-wrong assertion):
   the Changes panel lists `.changes-file-row`s and the `.diff-row-clickable`s only render
-  for the *selected* file — and an UNTRACKED file has no line diff until staged, so a
+  for the *selected* file. And an UNTRACKED file has no line diff until staged, so a
   "click diff line" test must `git add` first. `FileBrowserView` (the listing both explorers render)
   uses class `.new-file-input` for BOTH its new-file and new-folder rows (disambiguate with
   `[aria-label="New folder name"]`; the folder button is `.new-file-btn[aria-label="Create new folder"]`,
@@ -208,6 +208,34 @@ the task to go idle" is a race against everyone else's turns. Any new turn-bound
   gitignored. A developer's own install can therefore display a fixture's name while being a different
   extension: two cards, one name, and a `hasText` locator that breaks on that machine only.
 
+## Passkeys in the e2e lane
+
+There is no test password and no test-only credential, so anything that needs a session **drives a real
+WebAuthn ceremony**: `frontend/tests/helpers-auth.mjs` launches Chromium, attaches a CDP **virtual
+authenticator** (`WebAuthn.addVirtualAuthenticator` with resident keys and user verification, which is what
+the server's ceremony asks for), walks the login form, and hands back the session cookie and CSRF token.
+`global-setup.ts` pairs both lane servers this way and writes the result to the storage-state files the
+projects read; the pairing code comes out of `/tmp/kanban-test-server.log`, from the same boot line an
+operator reads on a fresh install. A data directory that already holds a passkey prints no such line, and
+that is what a `readPairingCode` failure means.
+
+- **`browser.newContext()` is not a signed-out browser.** Playwright applies the project's `use` options to
+  every context a test creates from the `browser` fixture — `storageState` and `baseURL` included — so a
+  bare `newContext()` starts **signed in** and the login gate never appears. A spec that needs a device
+  which has never paired uses `signedOutContext(browser)` from `helpers-auth.mjs`.
+- **Name the lane by its project, not by the address bar.** `page.url()` is `about:blank` before the first
+  navigation, and `helpers-auth.mjs` takes an absolute base because it mixes navigation with raw API calls.
+  `laneOrigin()` reads the project's `baseURL`, which is the difference between the chromium lane's 3000
+  and the isolated lane's 3001.
+- **A mint is not free.** A lane server holds three live pairing codes (`pairingMaxLive`,
+  `docs/passkeys.md`), so a file that mints in every test runs serially, and `mintPairingCode` waits out a
+  full cap rather than raising it. The product rule stays whole; the harness waits.
+- **The ceremony routes are rate limited like any login route**, so the lane servers start with a raised
+  `MIKE_LOGIN_RATE_LIMIT` — a dozen ceremonies a minute through one address is the lane, not an attack.
+  The budget a real install gets is pinned by `backend/server/rate_limit_test.go`.
+- The ceremony spec is `login.spec.ts`; the Settings surface is `settings-passkeys.spec.ts` (isolated, since
+  it registers and revokes the credentials other specs' sessions are made of).
+
 ## Mock LLM server
 
 `frontend/tests/mock-llm.js` (Node, port 9999). Selects a fixture by request body (tools present +
@@ -237,7 +265,9 @@ That reachability is a machine condition: `prompts/skills/` is gitignored, so a 
 has no plan route at all — `isPlanMode` answers false and the keyword table decides. Such a checkout
 sees `editor-line-task`'s real-time-streaming test wait 30 s for a `.tool-call-entry` that never
 arrives, because the mock answered that turn with plain text. Measured both ways on that one spec: red
-without the directory, green with one `plan-first/SKILL.md` inside it.
+without the directory, green with one `plan-first/SKILL.md` inside it. Installing it costs no Go gate:
+the prompt test in `backend/exec` refuses the project's own container mount, never the mount root, so a
+checkout whose home *is* `/home/sandbox` still passes `go test ./backend/exec/` with a skill installed.
 **A pinned tool-call fixture also needs its operand**: the tool runs in the task's worktree, and the
 e2e repos hold only a README, so a fixture that edits `src/lib/utils/format.ts` fails on a missing
 file unless the spec writes it first (`writeFileInWorktree`, task-scoped). And the task's **creation**

@@ -20,6 +20,7 @@ backend/server/shutdown.go|runShutdownWithDeadline|root|x1
 backend/stream/app_stream.go|AppStreamManager.HandleStream|root|x1
 backend/term/terminal.go|TerminalManager.handleTerminalWSWithSetup|root|x2
 backend/term/terminal.go|taskTerminal.readLoop|root|x2
+main.go|resetPasskeys|root|x1
 pkg/bridge/agent/lsp.go|handler.handleLSPNotify|root|x1
 pkg/bridge/agent/lsp.go|handler.handleLSP|root|x1
 pkg/logging/logging.go|Logger.logf|root|x2

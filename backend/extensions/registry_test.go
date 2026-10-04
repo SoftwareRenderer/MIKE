@@ -708,7 +708,7 @@ func TestFetchChangelog_Missing(t *testing.T) {
 // The extension checkout clones registry content with the host's git, and the
 // clone's output goes into the install error. Without the shared clone gate, a
 // hostile index entry (`repo: "ext::sh -c 'env >&2'"`) would run a shell as the
-// server user — with MIKE_LOGIN_PASSWORD and MIKE_ENCRYPTION_KEY in its
+// server user — with MIKE_ENCRYPTION_KEY in its
 // environment — and echo it back to the client.
 
 func TestValidateGitSourceRejectsHostileRepos(t *testing.T) {

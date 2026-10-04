@@ -607,4 +607,24 @@ describe('DiffCache', () => {
         expect(await cache.expandFile('a.ts')).toBe(false);
         expect(cache.state.files['a.ts'].staged).toBe(true);
     });
+
+    it('a delete fs_event for a held row re-reads the manifest; any other event is not this panel\'s business', async () => {
+        // The worktree watcher can collapse a create and its delete into one compute that sees no change,
+        // and a watcher that sees no change sends no task_diff_stats. The fs_event is then the only frame
+        // that says the file is gone, and the row on screen has to go with it.
+        const getTaskDiff = vi.fn(async () => ({ files: {} }));
+        const cache = new DiffCache(makeApis({ getTaskDiff }), () => 'proj-1', () => 'task-1');
+        cache.updateDiff({
+            files: { 'gone.txt': { hash: 'h', type: 'untracked', line_count: 1 } },
+        });
+
+        await cache.reconcileDeletion({ op: 'create', path: 'gone.txt' });
+        await cache.reconcileDeletion({ op: 'delete', path: 'other.txt' });
+        await cache.reconcileDeletion(null);
+        expect(getTaskDiff).not.toHaveBeenCalled();
+
+        await cache.reconcileDeletion({ op: 'delete', path: 'gone.txt' });
+        expect(getTaskDiff).toHaveBeenCalledTimes(1);
+        expect(cache.state.files).toEqual({});
+    });
 });

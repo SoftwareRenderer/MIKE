@@ -22,7 +22,10 @@ test.describe('New Thread from an edited message', () => {
     await gotoProject(page);
 
     const projectId = await getProjectId(page);
-    const taskId = await createTaskViaApi(page, projectId, `new-thread-${Date.now()}`);
+    // The creation prompt is pinned like the two below: a task auto-starts, and with the plan-first skill
+    // installed an unpinned prompt is a plan that keeps starting work, so no wait for the first idle is
+    // big enough.
+    const taskId = await createTaskViaApi(page, projectId, `new-thread-${Date.now()} llm-fixture:text`);
     await ensureTaskStarted(page, projectId, taskId);
     await navigateToTask(page, taskId, projectId);
     await waitForSendButton(page, 75_000);

@@ -125,7 +125,7 @@ test.describe.serial('Settings → About API tokens', () => {
 
     await page.locator(TOKEN_LABEL_INPUT).fill('');
     await page.locator(CREATE_BTN).click();
-    await expect(page.locator('.tokens-error')).toBeVisible();
+    await expect(page.locator('.settings-list-error')).toBeVisible();
 
     // A refused request issued nothing.
     expect(await apiTokens(page)).toHaveLength(before.length);

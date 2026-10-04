@@ -3,7 +3,7 @@ package git
 // Environment and process construction for every git subprocess this server starts. Two rules:
 //
 //  1. A git subprocess is never handed the server's environment — that included
-//     MIKE_LOGIN_PASSWORD and MIKE_ENCRYPTION_KEY.
+//     MIKE_ENCRYPTION_KEY.
 //  2. A git subprocess never runs repository-supplied code: hooks are repo content, and projects
 //     are routinely added from a path the operator already has.
 //

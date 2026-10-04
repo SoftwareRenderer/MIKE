@@ -61,20 +61,14 @@ func TestSessionCookieSecureFlag(t *testing.T) {
 			// process it is pretending to have booted rather than editing this one.
 			s := testServerWith(t, func(c *startup.Config) { c.TrustProxy = tc.trustProxy })
 
-			req := testRequest(http.MethodPost, "/api/auth/login", map[string]string{"password": testPassword})
-			req.Host = "localhost"
-			if tc.tls {
-				req.TLS = &tls.ConnectionState{}
-			}
-			if tc.forwarded != "" {
-				req.Header.Set("X-Forwarded-Proto", tc.forwarded)
-			}
-			rr := testResponse(t, s, req)
-			if rr.Code != http.StatusOK {
-				t.Fatalf("login: %d %s", rr.Code, rr.Body.String())
-			}
-
-			set := rr.Header().Get("Set-Cookie")
+			// The ceremony is the one path that mints a session cookie, and its expected origin comes
+			// from the same answer as the cookie's Secure flag — so the transport is said once here.
+			_, finished := registerPasskeyOver(t, s, "test laptop", ceremonyTransport{
+				TLS:       tc.tls,
+				Forwarded: tc.forwarded,
+				Secure:    tc.wantSecure,
+			})
+			set := finished.Header().Get("Set-Cookie")
 			if !strings.Contains(set, "HttpOnly") || !strings.Contains(set, "SameSite=Lax") {
 				t.Fatalf("the other flags drifted, so this test proves nothing: %q", set)
 			}
@@ -86,11 +80,11 @@ func TestSessionCookieSecureFlag(t *testing.T) {
 			// keeps a session the user believes they ended.
 			value := strings.SplitN(strings.TrimPrefix(set, "PHPSESSID="), ";", 2)[0]
 			if value == "" {
-				t.Fatalf("login set no session token: %q", set)
+				t.Fatalf("the ceremony set no session token: %q", set)
 			}
 			logout := testRequest(http.MethodPost, "/api/auth/logout", nil)
 			logout.Host = "localhost"
-			withAuthCSRF(logout, set, rr.Header().Get("X-CSRF-Token"))
+			withAuthCSRF(logout, set, finished.Header().Get("X-CSRF-Token"))
 			if tc.tls {
 				logout.TLS = &tls.ConnectionState{}
 			}

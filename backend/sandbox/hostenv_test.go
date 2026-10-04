@@ -13,8 +13,8 @@ import (
 // the server's.
 //
 // A real container, not an argument assertion, because the failure is a podman feature rather than a Go
-// bug: `--env-host` and a bare `-e NAME` both read fine in a diff and both put MIKE_LOGIN_PASSWORD and
-// MIKE_ENCRYPTION_KEY inside the guest running untrusted repo content.
+// bug: `--env-host` and a bare `-e NAME` both read fine in a diff and both put MIKE_ENCRYPTION_KEY
+// inside the guest running untrusted repo content.
 //
 // Gated like every other integration test here. A skip prints why; it is never a pass.
 func TestSandboxContainerSeesNoHostEnv(t *testing.T) {
@@ -26,7 +26,6 @@ func TestSandboxContainerSeesNoHostEnv(t *testing.T) {
 
 	// Secrets the running server genuinely holds. t.Setenv restores them on cleanup, so the
 	// surrounding suite is unaffected.
-	t.Setenv("MIKE_LOGIN_PASSWORD", "hunter2-from-the-host")
 	t.Setenv("MIKE_ENCRYPTION_KEY", "host-key-that-decrypts-provider-keys")
 	t.Setenv("DANGER_ZONE", "1")
 	// An innocuous name, to prove the rule is not "MIKE_* is filtered at the container" but "nothing
@@ -47,7 +46,7 @@ func TestSandboxContainerSeesNoHostEnv(t *testing.T) {
 	dir := taskWorktreeDir(t)
 	taskID := "test-hostenv-task"
 
-	const declaredName = "MIKE_LOGIN_PASSWORD"
+	const declaredName = "MIKE_ENCRYPTION_KEY"
 	const declaredValue = "declared-by-the-project"
 
 	// A declared variable deliberately named like the host's secret: the guest must get the declared
@@ -66,7 +65,6 @@ func TestSandboxContainerSeesNoHostEnv(t *testing.T) {
 	// variable, and only the declared one may have a value at all.
 	query := strings.Join([]string{
 		guestEcho(declaredName),
-		guestEcho("MIKE_ENCRYPTION_KEY"),
 		guestEcho("MIKE_TEST_UNDECLARED"),
 		guestEcho("CONTAINERS_UNRELATED_PROBE"),
 	}, "; ")
@@ -76,8 +74,8 @@ func TestSandboxContainerSeesNoHostEnv(t *testing.T) {
 		t.Fatalf("exec in sandbox: %v\noutput: %s", err, out)
 	}
 
-	lines := strings.SplitN(strings.TrimSpace(out), "\n", 4)
-	if len(lines) != 4 {
+	lines := strings.SplitN(strings.TrimSpace(out), "\n", 3)
+	if len(lines) != 3 {
 		t.Fatalf("expected 4 lines from the guest, got %d from %q", len(lines), out)
 	}
 
@@ -85,7 +83,7 @@ func TestSandboxContainerSeesNoHostEnv(t *testing.T) {
 		t.Errorf("declared %s = %q in the guest, want %q — the declaration must be what arrives",
 			declaredName, lines[0], declaredValue)
 	}
-	for i, name := range []string{"MIKE_ENCRYPTION_KEY", "MIKE_TEST_UNDECLARED", "CONTAINERS_UNRELATED_PROBE"} {
+	for i, name := range []string{"MIKE_TEST_UNDECLARED", "CONTAINERS_UNRELATED_PROBE"} {
 		if lines[i+1] != "unset" {
 			t.Errorf("%s reached the sandbox container as %q — a container must receive only what "+
 				"was configured for it. Check for --env-host, or a bare `-e NAME` (which tells podman "+

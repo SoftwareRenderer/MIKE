@@ -29,7 +29,7 @@ Resolved **once**: a consumer receives the decision and never re-reads a variabl
 
 ## Variables with a `--flag` twin
 
-Eight of the ten flags have an environment twin and **flags win**: `--port`/`MIKE_PORT`,
+Eight of the eleven flags have an environment twin and **flags win**: `--port`/`MIKE_PORT`,
 `--listen`/`MIKE_LISTEN`, `--data-dir`/`MIKE_DATA_DIR`, `--worktrees-dir`/`MIKE_WORKTREES_DIR`,
 `--frontend-dist`/`MIKE_FRONTEND_DIST` (dev-only, below), `--no-tls`/`MIKE_TLS`,
 `--allowed-hosts`/`MIKE_ALLOWED_HOSTS`, `--log-level`/`MIKE_LOG_LEVEL`. `--tls-cert` and `--tls-key` have
@@ -38,7 +38,10 @@ the twins are not name-matched (`--no-tls` ↔ `MIKE_TLS`), so the list is the a
 `MIKE_`".
 
 A switch that widens a permission or points at a host path has one spelling only, so it cannot
-arrive by a route the operator did not read about.
+arrive by a route the operator did not read about. `--reset-passkeys` is the same rule pointed the other
+way: it deletes credentials, so it has no environment spelling either — a variable could put a wipe in a
+unit file, and the install would lose its passkeys at every restart. It is one-shot (clear, report, exit
+before any listener exists) and refuses a data directory a running server holds: `docs/passkeys.md`.
 
 **Names this table does not carry are not live.** A name an older `.env` still carries either appears here
 or does nothing at all.
@@ -51,7 +54,7 @@ or does nothing at all.
 | Env Var | Description |
 |---------|-------------|
 | `MIKE_ENCRYPTION_KEY` | Non-blank; with this installation's salt (the `installation_salt` config row, written on first boot) it derives the AES-256-GCM data key — **once per process**, argon2id, never per value or per request. Server refuses to start without it. A secret stored by an older build does not open; startup names the providers whose key must be typed again. The stored form carries **no version marker** (`base64(nonce‖ciphertext‖tag)`, GCM AAD = purpose + record key): nothing older is readable, so a label would only promise a reader that does not exist, and a row is told apart from a secret by whether it opens rather than by what it is prefixed with. |
-| `MIKE_LOGIN_PASSWORD` | Master password for auth/sessions. Server refuses to start without it. Only its `sha256` digest is kept in memory; a weak one (< 8 chars, or a known default) additionally refuses a non-loopback listen address. |
+| `MIKE_LOGIN_RATE_LIMIT` | Ceremony and pairing-code budget per client IP per minute (default `5`). **Cannot be disabled:** `0`, negative or unparsable values fall back to `5` with a startup warning, so a typo can't silently drop brute-force protection. |
 | `MIKE_REGISTRY_URL` | Extension registry index URL. Sourced **exclusively** from this env var (not DB-backed); falls back to `https://registry.getmike.dev/registry.json`. A bare path (no `http(s)://`/`file://` scheme) is a local file resolved against the CWD. |
 | `MIKE_UPDATE_URL` | Release manifest the update check reads. Falls back to `updates.DefaultManifestURL` (`https://getmike.dev/version`); a mirror or a local fixture names itself here. Read **once** at startup and handed to the service as a value. Must be `https` (loopback may be `http`) with a host; anything else **refuses the boot** naming the variable. An archive the manifest names is fetched only from this same host. **`docs/auto-update.md`**. |
 | `MIKE_DISABLE_UPDATES` | The organization-level kill switch for the server's own release updates: exactly `1` and this process will not check for, download, install or restart onto a release, and no browser is asked to opt in (About reads "Updates are managed by your organization"). `0` or unset leaves the decision to the `update_check_enabled` preference; any other value warns at boot that it **disabled nothing**. It outranks the stored preference; the ladder is in `docs/auto-update.md → Who decided: the ladder`. Applies to server releases only — the extension registry is untouched. **`docs/auto-update.md`**. |
@@ -75,8 +78,9 @@ or does nothing at all.
 
 ## Reachability is not the certificate
 
-Reachability is `MIKE_LISTEN` + Host pinning (`MIKE_ALLOWED_HOSTS`), not the SAN set. Weak-password and
-non-loopback startup rules, certs and distribution: `docs/tls.md`.
+Reachability is `MIKE_LISTEN` + Host pinning (`MIKE_ALLOWED_HOSTS`), not the SAN set. Certs and
+distribution: `docs/tls.md`; the credential that gets a browser past the gate and the hostname it is bound
+to: `docs/passkeys.md`.
 
 ## Distribution
 

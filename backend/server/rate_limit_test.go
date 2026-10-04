@@ -21,7 +21,7 @@ func TestRateLimitMiddleware_AllowsUnderLimit(t *testing.T) {
 	}))
 
 	for i := 0; i < 3; i++ {
-		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/passkey/register/begin", nil)
 		rr := httptest.NewRecorder()
 		handler.ServeHTTP(rr, req)
 		if rr.Code != http.StatusOK {
@@ -39,7 +39,7 @@ func TestRateLimitMiddleware_BlocksOverLimit(t *testing.T) {
 	}))
 
 	// First request should succeed
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/passkey/register/begin", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -47,7 +47,7 @@ func TestRateLimitMiddleware_BlocksOverLimit(t *testing.T) {
 	}
 
 	// Second request should be rate limited
-	req2 := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+	req2 := httptest.NewRequest(http.MethodPost, "/api/auth/passkey/register/begin", nil)
 	rr2 := httptest.NewRecorder()
 	handler.ServeHTTP(rr2, req2)
 	if rr2.Code != http.StatusTooManyRequests {
@@ -70,7 +70,7 @@ func TestRateLimitMiddleware_IPBased(t *testing.T) {
 
 	// IP 1 makes 2 requests
 	for i := 0; i < 2; i++ {
-		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/passkey/register/begin", nil)
 		req.RemoteAddr = "192.168.1.1:12345"
 		rr := httptest.NewRecorder()
 		handler.ServeHTTP(rr, req)
@@ -80,7 +80,7 @@ func TestRateLimitMiddleware_IPBased(t *testing.T) {
 	}
 
 	// IP 1's 3rd request should be blocked
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/passkey/register/begin", nil)
 	req.RemoteAddr = "192.168.1.1:12345"
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -89,7 +89,7 @@ func TestRateLimitMiddleware_IPBased(t *testing.T) {
 	}
 
 	// IP 2 should still be allowed (different bucket)
-	req2 := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+	req2 := httptest.NewRequest(http.MethodPost, "/api/auth/passkey/register/begin", nil)
 	req2.RemoteAddr = "192.168.1.2:12345"
 	rr2 := httptest.NewRecorder()
 	handler.ServeHTTP(rr2, req2)
@@ -107,7 +107,7 @@ func TestRateLimitMiddleware_WaitsAfterWindow(t *testing.T) {
 	}))
 
 	// First request should succeed
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/passkey/register/begin", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -115,7 +115,7 @@ func TestRateLimitMiddleware_WaitsAfterWindow(t *testing.T) {
 	}
 
 	// Second request should be blocked
-	req2 := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+	req2 := httptest.NewRequest(http.MethodPost, "/api/auth/passkey/register/begin", nil)
 	rr2 := httptest.NewRecorder()
 	handler.ServeHTTP(rr2, req2)
 	if rr2.Code != http.StatusTooManyRequests {
@@ -126,7 +126,7 @@ func TestRateLimitMiddleware_WaitsAfterWindow(t *testing.T) {
 	time.Sleep(30 * time.Millisecond)
 
 	// Third request should succeed again
-	req3 := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+	req3 := httptest.NewRequest(http.MethodPost, "/api/auth/passkey/register/begin", nil)
 	rr3 := httptest.NewRecorder()
 	handler.ServeHTTP(rr3, req3)
 	if rr3.Code != http.StatusOK {
@@ -134,19 +134,21 @@ func TestRateLimitMiddleware_WaitsAfterWindow(t *testing.T) {
 	}
 }
 
-func TestRateLimitMiddleware_LoginEndpoint(t *testing.T) {
+// TestRateLimitMiddleware_CeremonyRoute: the pairing code is the one secret here a person types, so the
+// route that consumes it is the one a script brute-forces, and that route is rate limited.
+func TestRateLimitMiddleware_CeremonyRoute(t *testing.T) {
 	// A tight budget for this test alone: the suite runs with an effectively unlimited one so that
-	// unrelated tests can log in repeatedly.
+	// unrelated tests can pair devices repeatedly.
 	s := testServerWith(t, func(c *startup.Config) { c.LoginRateLimit = 5 })
 
-	// The login endpoint should be rate limited.
+	// The ceremony endpoint should be rate limited.
 	// Make several rapid requests and verify at least one gets 429.
 	successCount := 0
 	rateLimitedCount := 0
 
 	for i := 0; i < 10; i++ {
-		req := testRequest(http.MethodPost, "/api/auth/login", map[string]string{
-			"password": "wrong-password",
+		req := testRequest(http.MethodPost, "/api/auth/passkey/register/begin", map[string]string{
+			"code": "NOSUCHCODE",
 		})
 		rr := testResponse(t, s, req)
 		switch rr.Code {
@@ -170,7 +172,7 @@ const trustProxyForTest = false
 func TestClientIP_IgnoresXFFByDefault(t *testing.T) {
 	// By default the client-supplied X-Forwarded-For header must NOT be trusted,
 	// otherwise an attacker can spoof it to bypass IP-based rate limiting.
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/passkey/register/begin", nil)
 	req.RemoteAddr = "203.0.113.9:54321"
 	req.Header.Set("X-Forwarded-For", "1.2.3.4")
 	if got := clientIP(req, false); got != "203.0.113.9" {
@@ -181,7 +183,7 @@ func TestClientIP_IgnoresXFFByDefault(t *testing.T) {
 func TestClientIP_UsesTheAddressTheTrustedProxyAppended(t *testing.T) {
 	// A proxy appends, so everything left of the last entry is what the client wrote. Keying the
 	// limit on the first entry let a caller buy a fresh login budget per attempt.
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/passkey/register/begin", nil)
 	req.RemoteAddr = "10.0.0.1:54321"
 	req.Header.Set("X-Forwarded-For", "1.2.3.4, 198.51.100.7")
 	if got := clientIP(req, true); got != "198.51.100.7" {
@@ -192,7 +194,7 @@ func TestClientIP_UsesTheAddressTheTrustedProxyAppended(t *testing.T) {
 func TestClientIP_CanonicalisesTheForwardedAddress(t *testing.T) {
 	// One client must not buy two budgets by spelling its address differently.
 	for _, written := range []string{"FE80::1", "fe80:0:0:0:0:0:0:1", " fe80::1 "} {
-		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/passkey/register/begin", nil)
 		req.RemoteAddr = "10.0.0.1:54321"
 		req.Header.Set("X-Forwarded-For", "1.2.3.4, "+written)
 		if got := clientIP(req, true); got != "fe80::1" {
@@ -203,7 +205,7 @@ func TestClientIP_CanonicalisesTheForwardedAddress(t *testing.T) {
 
 func TestClientIP_ChainThatDoesNotEndInAnAddressUsesThePeer(t *testing.T) {
 	// Scanning left for a parseable entry would be the bypass again.
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/passkey/register/begin", nil)
 	req.RemoteAddr = "10.0.0.1:54321"
 	req.Header.Set("X-Forwarded-For", "198.51.100.7, evil")
 	if got := clientIP(req, true); got != "10.0.0.1" {
@@ -222,7 +224,7 @@ func TestRateLimitMiddleware_XFFCannotBypassATrustedProxyLimit(t *testing.T) {
 
 	limited := false
 	for i := 0; i < 5; i++ {
-		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/passkey/register/begin", nil)
 		req.RemoteAddr = "10.0.0.1:54321"
 		req.Header.Set("X-Forwarded-For", "1.2.3."+strconv.Itoa(i)+", 203.0.113.9")
 		rr := httptest.NewRecorder()
@@ -238,7 +240,7 @@ func TestRateLimitMiddleware_XFFCannotBypassATrustedProxyLimit(t *testing.T) {
 }
 
 func TestClientIP_FallsBackToRemoteAddr(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/passkey/register/begin", nil)
 	req.RemoteAddr = "192.0.2.55:4444"
 	if got := clientIP(req, trustProxyForTest); got != "192.0.2.55" {
 		t.Fatalf("clientIP no XFF: got %q, want %q", got, "192.0.2.55")
@@ -255,7 +257,7 @@ func TestRateLimitMiddleware_XFFCannotBypassByDefault(t *testing.T) {
 
 	limited := false
 	for i := 0; i < 5; i++ {
-		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/passkey/register/begin", nil)
 		req.RemoteAddr = "203.0.113.9:54321"
 		// Rotate the spoofed header each attempt.
 		req.Header.Set("X-Forwarded-For", "1.2.3."+strconv.Itoa(i))
@@ -305,7 +307,7 @@ func TestLoginRouteRateLimitedWithZeroBudget(t *testing.T) {
 
 	limited := false
 	for i := 0; i < 12; i++ {
-		req := testRequest(http.MethodPost, "/api/auth/login", map[string]string{
+		req := testRequest(http.MethodPost, "/api/auth/passkey/register/begin", map[string]string{
 			"password": "wrong-password",
 		})
 		rr := testResponse(t, s, req)

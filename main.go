@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"mike/backend/server"
+	"mike/backend/store"
 	"mike/backend/tls"
 
 	"mike/pkg/logging"
@@ -32,25 +35,33 @@ func main() {
 	tlsKey := flag.String("tls-key", "", "Path to TLS private key file")
 	allowedHosts := flag.String("allowed-hosts", "", "Hostnames accepted in the Host header, comma-separated (default: $MIKE_ALLOWED_HOSTS; required behind a reverse proxy that forwards a public domain)")
 	logLevel := flag.String("log-level", "", "Log verbosity: debug, info, warn or error (default: $MIKE_LOG_LEVEL or info)")
+	resetFlag := flag.Bool("reset-passkeys", false, "Delete every registered passkey and every active session, then exit. For a device that is lost or a passkey that is gone; the server does not start.")
 	flag.Parse()
 
 	cfg, err := startup.Resolve(startup.Flags{
-		Port:         *port,
-		Listen:       *listen,
-		DataDir:      *dataDir,
-		WorktreesDir: *worktreesDir,
-		FrontendDist: *frontendDist,
-		NoTLS:        *noTLS,
-		TLSCertPath:  *tlsCert,
-		TLSKeyPath:   *tlsKey,
-		AllowedHosts: *allowedHosts,
-		LogLevel:     *logLevel,
+		Port:          *port,
+		Listen:        *listen,
+		DataDir:       *dataDir,
+		WorktreesDir:  *worktreesDir,
+		FrontendDist:  *frontendDist,
+		NoTLS:         *noTLS,
+		TLSCertPath:   *tlsCert,
+		TLSKeyPath:    *tlsKey,
+		AllowedHosts:  *allowedHosts,
+		LogLevel:      *logLevel,
+		ResetPasskeys: *resetFlag,
 	})
 	if err != nil {
 		log.Fatalf("Configuration error: %v", err)
 	}
 
 	logging.SetLevel(cfg.LogLevel)
+
+	// The one-shot command, answered before anything a reset must not disturb exists: no trace file, no
+	// listener, no sweep, no server (docs/passkeys.md).
+	if cfg.ResetPasskeys {
+		os.Exit(resetPasskeys(cfg))
+	}
 
 	for _, warning := range cfg.Warnings {
 		logging.For(logging.Main).Warn(warning)
@@ -77,13 +88,6 @@ func main() {
 
 	for _, name := range cfg.WeakSecrets() {
 		logging.For(logging.Main).Warnf("⚠ WARNING: %s is less than %d characters. A stronger secret is recommended for production use.", name, startup.MinSecretLength)
-	}
-
-	// Checked before any startup side effect: a refused boot leaves nothing behind.
-	if cfg.RefusesWeakSecret() {
-		log.Fatalf("Refusing to start: MIKE_LOGIN_PASSWORD is weak (fewer than 8 characters, or a well-known default) while the server listens on %q, which is reachable from other machines. "+
-			"Listen on loopback instead (--listen 127.0.0.1 or MIKE_LISTEN=127.0.0.1), or set a strong MIKE_LOGIN_PASSWORD of at least 8 characters.",
-			cfg.Listen)
 	}
 
 	tracePath := filepath.Join(cfg.DataDir, "kanban.trace")
@@ -205,4 +209,42 @@ func main() {
 // The trace holds ~30s of runtime internals, so the file is 0600.
 func openTraceFile(path string) (*os.File, error) {
 	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+}
+
+// resetPasskeys answers `mike --reset-passkeys`: clear every credential and every session, report the
+// counts, and return the exit code. It is a command rather than a server mode so it can never sit in a
+// unit file and wipe credentials at every restart, and it refuses to run against a database another
+// server has open, because a session that server opens after the wipe would outlive the passkeys it was
+// signed with.
+func resetPasskeys(cfg startup.Config) int {
+	if _, err := os.Stat(cfg.DBPath); err != nil {
+		logging.For(logging.Main).Errorf("--reset-passkeys: no database at %s, so nothing was reset. Point --data-dir (or %s) at the data directory of the install you mean.",
+			cfg.DBPath, startup.EnvDataDir)
+		return 1
+	}
+	if conn, err := net.DialTimeout("tcp", cfg.Addr, time.Second); err == nil {
+		conn.Close()
+		logging.For(logging.Main).Errorf("--reset-passkeys: a server is answering on %s. Stop it first — a passkey it registers after this reset would be paired by a session this reset already deleted.", cfg.Addr)
+		return 1
+	}
+
+	db, err := store.NewStore(cfg.DBPath)
+	if err != nil {
+		logging.For(logging.Main).Errorf("--reset-passkeys: cannot open %s: %v", cfg.DBPath, err)
+		return 1
+	}
+	defer db.Close()
+
+	// This process is the entry point and nothing above it can cancel the wipe; the bound is only
+	// against a database held by a process this probe could not see.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	passkeys, sessions, err := db.ResetPasskeys(ctx)
+	if err != nil {
+		logging.For(logging.Main).Errorf("--reset-passkeys: nothing was deleted: %v", err)
+		return 1
+	}
+	logging.For(logging.Main).Infof("deleted %d passkey(s) and %d session(s); the next start prints a pairing code", passkeys, sessions)
+	return 0
 }

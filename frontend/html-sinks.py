@@ -109,6 +109,10 @@ URL_SINKS: dict[tuple[str, str], str] = {
     ("src/lib/components/Chat/DiagramFence.svelte", "diagram.imageSrc"):
         "literal — lib/utils/diagram.ts prefixes the markup that svgImageMarkup accepted, so it is never "
         "text a message wrote. __tests__/diagram.unit.ts pins that the bytes it decodes to are that markup",
+    ("src/lib/components/ConfigModal/PasskeysSection.svelte", "pairing.qr_png"):
+        "literal — the server drew it: auth.PairingQRPNG encodes the pairing URL as a PNG data URL, and "
+        "the row renders that picture rather than following a link. The URL beside it is shown as text "
+        "and only ever copied, never fetched",
     ("src/lib/services/ui-injector.svelte.ts", "setAttribute(src)"):
         "encoded-by:lib/services/ui-injector.svelte — extBaseURL re-encodes every segment of "
         "the served path and refuses one that leaves /extensions/",

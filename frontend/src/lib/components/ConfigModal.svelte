@@ -27,6 +27,7 @@
         validateMCPServers,
     } from './ConfigModal/mcp-drafts';
     import { projectMCPServerIDs, selectableMCPServers } from '$lib/utils/mcp-project';
+    import PasskeysSection from './ConfigModal/PasskeysSection.svelte';
     import SessionsSection from './ConfigModal/SessionsSection.svelte';
     import ApiTokensSection from './ConfigModal/ApiTokensSection.svelte';
     import UpdatesSection from './ConfigModal/UpdatesSection.svelte';
@@ -1042,6 +1043,10 @@
                     </div>
                 {/if}
             </div>
+
+            <!-- The credentials that sign a browser in: mutates immediately, same rule as the
+                 sessions and tokens under it. -->
+            <PasskeysSection />
 
             <!-- Login sessions: mutates immediately (like the PWA button above),
                  so it is deliberately outside the dirty/Save flow. -->

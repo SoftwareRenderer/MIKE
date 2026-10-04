@@ -1,0 +1,163 @@
+package auth
+
+import (
+	"errors"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestMintedCodeIsTypable(t *testing.T) {
+	codes := NewPairingCodes()
+	got, err := codes.Mint(DevicePairingTTL)
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	if len(got.Code) != pairingCodeLength {
+		t.Errorf("code %q is %d characters; want %d", got.Code, len(got.Code), pairingCodeLength)
+	}
+	if strings.ContainsAny(got.Code, "01OILUV") {
+		t.Errorf("code %q uses a character that is hard to read off a terminal", got.Code)
+	}
+	if want := got.Code[:4] + "-" + got.Code[4:]; FormatPairingCode(got.Code) != want {
+		t.Errorf("FormatPairingCode(%q) = %q; want %q", got.Code, FormatPairingCode(got.Code), want)
+	}
+	if got.ExpiresAt.Before(time.Now().Add(DevicePairingTTL - time.Minute)) {
+		t.Errorf("expiry %v is sooner than the TTL the mint was asked for", got.ExpiresAt)
+	}
+}
+
+func TestCodeIsSpentByOneConsume(t *testing.T) {
+	codes := NewPairingCodes()
+	minted, err := codes.Mint(DevicePairingTTL)
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	if err := codes.Consume(minted.Code); err != nil {
+		t.Fatalf("the code this mint returned was refused: %v", err)
+	}
+	if err := codes.Consume(minted.Code); !errors.Is(err, ErrInvalidPairingCode) {
+		t.Errorf("a spent code was accepted a second time: %v", err)
+	}
+	if n := codes.Live(); n != 0 {
+		t.Errorf("%d codes still live after the only one was spent", n)
+	}
+}
+
+// A code is read off one screen and typed into another, so the shape it is typed in is not the answer to
+// whether it is the right code.
+func TestConsumeIgnoresHowTheCodeWasTyped(t *testing.T) {
+	codes := NewPairingCodes()
+	minted, err := codes.Mint(DevicePairingTTL)
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	lowered := strings.ToLower(minted.Code)
+	if err := codes.Consume(" " + lowered[:4] + "-" + lowered[4:] + " "); err != nil {
+		t.Errorf("a lower-cased code with a dash and spaces was refused: %v", err)
+	}
+}
+
+func TestConsumeRefuses(t *testing.T) {
+	codes := NewPairingCodes()
+	minted, err := codes.Mint(DevicePairingTTL)
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	for _, presented := range []string{
+		"",
+		"ZZZZZZZZ",
+		minted.Code[:7] + otherLetter(minted.Code[7:]),
+		minted.Code + "X",
+	} {
+		if err := codes.Consume(presented); !errors.Is(err, ErrInvalidPairingCode) {
+			t.Errorf("Consume(%q) = %v; want ErrInvalidPairingCode", presented, err)
+		}
+	}
+}
+
+func TestCodeExpires(t *testing.T) {
+	codes := NewPairingCodes()
+	now := time.Now()
+	codes.now = func() time.Time { return now }
+
+	minted, err := codes.Mint(time.Minute)
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	now = now.Add(2 * time.Minute)
+	if err := codes.Consume(minted.Code); !errors.Is(err, ErrInvalidPairingCode) {
+		t.Errorf("an expired code was accepted: %v", err)
+	}
+	if n := codes.Live(); n != 0 {
+		t.Errorf("%d codes live; an expired one is not live", n)
+	}
+}
+
+// A code is minted from an authenticated browser, so the number outstanding is a thing an attacker with
+// one stolen session cannot grow without limit.
+func TestLiveCodesAreCapped(t *testing.T) {
+	codes := NewPairingCodes()
+	var minted []PairingCode
+	for i := 0; i < pairingMaxLive; i++ {
+		code, err := codes.Mint(DevicePairingTTL)
+		if err != nil {
+			t.Fatalf("mint %d: %v", i, err)
+		}
+		minted = append(minted, code)
+	}
+	if _, err := codes.Mint(DevicePairingTTL); !errors.Is(err, ErrTooManyPairingCodes) {
+		t.Fatalf("a fourth live code was minted: %v", err)
+	}
+	if err := codes.Consume(minted[0].Code); err != nil {
+		t.Fatalf("consume: %v", err)
+	}
+	if _, err := codes.Mint(DevicePairingTTL); err != nil {
+		t.Errorf("no code could be minted after one was spent: %v", err)
+	}
+}
+
+func TestRevokeAllDropsEveryCode(t *testing.T) {
+	codes := NewPairingCodes()
+	minted, err := codes.Mint(DevicePairingTTL)
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	codes.RevokeAll()
+	if n := codes.Live(); n != 0 {
+		t.Errorf("%d codes live after RevokeAll", n)
+	}
+	if err := codes.Consume(minted.Code); !errors.Is(err, ErrInvalidPairingCode) {
+		t.Errorf("a revoked code was accepted: %v", err)
+	}
+}
+
+func TestCodesDoNotRepeat(t *testing.T) {
+	codes := NewPairingCodes()
+	seen := map[string]bool{}
+	for range 200 {
+		// The cap is on *live* codes, so each one is spent to make room for the next.
+		minted, err := codes.Mint(DevicePairingTTL)
+		if err != nil {
+			t.Fatalf("mint: %v", err)
+		}
+		if seen[minted.Code] {
+			t.Fatalf("code %q was minted twice", minted.Code)
+		}
+		seen[minted.Code] = true
+		if err := codes.Consume(minted.Code); err != nil {
+			t.Fatalf("consume: %v", err)
+		}
+	}
+}
+
+// otherLetter returns a character that is not the one handed in, so a near-miss code differs in exactly
+// one place and stays in the alphabet.
+func otherLetter(one string) string {
+	for _, candidate := range pairingAlphabet {
+		if string(candidate) != one {
+			return string(candidate)
+		}
+	}
+	return ""
+}

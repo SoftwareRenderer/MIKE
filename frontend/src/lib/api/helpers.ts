@@ -180,8 +180,9 @@ function needsCsrf(method: string | undefined): boolean {
  */
 export async function apiFetch(url: string, init?: RequestInit & { signal?: AbortSignal }): Promise<Response> {
     const headers = new Headers(init?.headers);
-    // The login endpoint is public and has no token to send yet.
-    if (needsCsrf(init?.method) && !url.includes('/api/auth/login')) {
+    // The ceremony routes are public and have no token to send yet: the ceremony is what produces the
+    // session the token belongs to. Asking would spend a round trip to /auth/session on every attempt.
+    if (needsCsrf(init?.method) && !url.includes('/api/auth/passkey/')) {
         const token = await ensureCsrfToken();
         if (token) headers.set('X-CSRF-Token', token);
     }

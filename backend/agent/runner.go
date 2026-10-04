@@ -189,7 +189,7 @@ func (p *Prepared) Start(sandboxMgr *sandbox.SandboxManager, taskID string) (*Ag
 		cmd := exec.Command(p.spCfg.Binary, p.spCfg.Args...)
 		cmd.Dir = p.worktreePath
 		// Never hand the agent the server's own environment: it would expose
-		// MIKE_LOGIN_PASSWORD / MIKE_ENCRYPTION_KEY to an extension-supplied binary.
+		// MIKE_ENCRYPTION_KEY to an extension-supplied binary.
 		cmd.Env = SafeAgentEnv(p.spCfg.Env...)
 
 		stdin, err := cmd.StdinPipe()

@@ -1,113 +1,180 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Browser, type Page } from '@playwright/test';
+import {
+    attachVirtualAuthenticator,
+    laneOrigin,
+    mintPairingCode,
+    pairBrowser,
+    signInBrowser,
+    signedOutContext,
+} from '../helpers-auth.mjs';
 
 /**
- * The auth modal, addressed precisely. `[role="dialog"]` is not a login-modal selector here:
- * BaseModal, CommitDiffOverlay, TerminalPanel, both explorer views and every ChatMessage edit
- * `<dialog>` carry it. The login modal has no #modal-title, so it is identified by the one thing
- * only it contains: its password field.
+ * Getting in: the passkey assertion, and the pairing code that buys the first one.
+ *
+ * `[role="dialog"]` is not a login-modal selector here — BaseModal, CommitDiffOverlay, TerminalPanel and
+ * every ChatMessage edit `<dialog>` carry it — so the gate is named by its own class, `.login-modal`.
+ *
+ * A ceremony needs a browser, so these tests drive Chromium with a virtual authenticator
+ * (`helpers-auth.mjs`) and mint their codes through the API the way Settings does. Nothing here is a
+ * test-only credential: a code is spent on a registration, and the session belongs to whichever browser
+ * finished that registration. A ceremony also cannot be repeated with the same code, so every test that
+ * pairs mints its own.
  */
-const loginDialog = (page: Page) =>
-    page.locator('[role="dialog"]').filter({ has: page.locator('input[type="password"]') });
+const loginDialog = (page: Page) => page.locator('.login-modal');
 
-test.describe.configure({ mode: 'parallel' });
-test.describe('Login', () => {
-    test.beforeEach(async ({ page }) => {
-        // Clear cookies to simulate fresh session
-        const context = page.context();
-        await context.clearCookies();
+/**
+ * The lane's own origin — the helper talks to the API with absolute URLs, and `page.url()` is
+ * `about:blank` before the test's first navigation.
+ */
+const baseOf = () => laneOrigin();
+
+/** A signed-out browser that can answer a passkey prompt — no cookies, its own authenticator. */
+async function signedOutBrowser(browser: Browser) {
+    const context = await signedOutContext(browser);
+    const page = await context.newPage();
+    await attachVirtualAuthenticator(context, page);
+    return { context, page };
+}
+
+// One test at a time: a lane server holds three live pairing codes, and this file is the only thing on
+// that server that mints them, so running the file serially is what keeps a mint from meeting a full cap.
+// (`mintPairingCode` still waits out the cap, because another worker's ceremony can be the one holding it.)
+test.describe.configure({ mode: 'serial' });
+test.describe('Passkey login', () => {
+    /** Sign this page out and show its gate. Minting a code needs the session this fixture starts with,
+     *  so signing out is a step a test takes rather than something the fixture does to all of them. */
+    const signOut = async (page: Page) => {
+        await page.context().clearCookies();
         await page.goto('/');
-    });
+    };
 
-    test('should show login modal when not authenticated', async ({ page }) => {
+    test('a signed-out browser is asked for a passkey', async ({ page }) => {
+        await signOut(page);
         await expect(loginDialog(page)).toBeVisible({ timeout: 10000 });
         await expect(loginDialog(page).locator('h2')).toHaveText('Sign in');
-    });
-
-    test('should hide app content when not authenticated', async ({ page }) => {
-        // The sidebar and main content should not be visible
+        await expect(loginDialog(page).locator('.login-btn')).toHaveText('Sign in with a passkey');
+        await expect(loginDialog(page).getByText('I have a pairing code')).toBeVisible();
         await expect(page.locator('.sidebar')).not.toBeVisible();
-        await expect(page.locator('.project-item')).not.toBeVisible();
     });
 
-    test('should login with correct password', async ({ page }) => {
+    test('the login modal is not dismissed by a click outside it', async ({ page }) => {
+        await signOut(page);
         await expect(loginDialog(page)).toBeVisible({ timeout: 10000 });
-
-        // Login via API directly (bypass UI for reliability)
-        const context = page.context();
-        const response = await context.request.post('/api/auth/login', {
-            data: { password: 'test-password-1234' },
-        });
-        expect(response.status()).toBe(200);
-
-        // Verify CSRF token is present in response headers
-        const csrfToken = response.headers()['x-csrf-token'];
-        expect(csrfToken).toBeTruthy();
-        expect(csrfToken!.length).toBe(32);
-
-        // Reload page to reflect authenticated state
-        await page.reload();
-        await page.waitForURL('/', { timeout: 10000 });
-
-        // Login modal should not be visible
-        await expect(loginDialog(page)).not.toBeVisible({ timeout: 10000 });
-
-        // App content should be visible
-        await expect(page.locator('.project-item').first()).toBeVisible({ timeout: 10000 });
-    });
-
-    test('should not dismiss login modal when clicking outside', async ({ page }) => {
-        await expect(loginDialog(page)).toBeVisible({ timeout: 10000 });
-
-        // Click on the overlay (outside the modal)
         await page.locator('.overlay').click();
-
-        // Login modal should still be visible (overlay click is blocked)
         await expect(loginDialog(page)).toBeVisible();
-        // App content should still be hidden
         await expect(page.locator('.sidebar')).not.toBeVisible();
     });
 
-    test('should show error on wrong password', async ({ page }) => {
-        await expect(loginDialog(page)).toBeVisible({ timeout: 10000 });
+    test('a pairing link fills the code field and leaves the address bar', async ({ page }) => {
+        // The code rides in the URL fragment because that is how the server writes its pairing link —
+        // a query string would reach a proxy's access log, and a code is a credential until it is spent.
+        const pairing = await mintPairingCode(page, baseOf());
+        await page.context().clearCookies();
+        await page.goto(`/#pair=${pairing.code}`);
 
-        // Try wrong password via API
-        const response = await page.context().request.post('/api/auth/login', {
-            data: { password: 'wrong-password' },
-        });
-        expect(response.status()).toBe(401);
-
-        // Login modal should still be visible (no valid session)
-        await expect(loginDialog(page)).toBeVisible();
+        const field = page.locator('#login-code');
+        await expect(field).toBeVisible({ timeout: 10000 });
+        await expect(field).toHaveValue(pairing.code);
+        expect(page.url()).not.toContain('#pair=');
+        await expect(loginDialog(page).locator('h2')).toHaveText('Pair this device');
     });
-        test('should logout and show login modal again', async ({ page }) => {
-        await expect(loginDialog(page)).toBeVisible({ timeout: 10000 });
-        await page.context().request.post('/api/auth/login', {
-            data: { password: 'test-password-1234' },
-        });
-        await page.reload();
-        await expect(loginDialog(page)).not.toBeVisible({ timeout: 10000 });
-        await expect(page.locator('.project-item').first()).toBeVisible({ timeout: 10000 });
 
-        // Navigate to a project to see the top bar with settings button
-        // `[href]` — the row of a project that is still cloning has no href and is not
-        // clickable, and clicking it waits out the whole test timeout.
-        await page.locator('a.project-item[href]').first().click();
-        await page.waitForSelector('.card, .top-bar', { timeout: 10000 });
+    test('a pairing code creates a passkey and opens the session on that browser', async ({ page, browser }) => {
+        const base = baseOf();
+        const pairing = await mintPairingCode(page, base);
 
-        // Click settings icon button in the top bar (not the sidebar one)
-        const settingsBtn = page.locator('.top-bar .icon-btn[aria-label="Settings"]');
-        await expect(settingsBtn).toBeVisible({ timeout: 10000 });
-        await settingsBtn.click();
+        const device = await signedOutBrowser(browser);
+        try {
+            await pairBrowser(device.page, base, pairing.code);
+            await expect(device.page.locator('.project-item').first()).toBeVisible({ timeout: 10000 });
 
-        // Click "Sign out" button in settings modal footer
-        const signOutBtn = page.locator('.btn-signout');
-        await expect(signOutBtn).toBeVisible({ timeout: 10000 });
-        await signOutBtn.click();
+            // The registration left a device on the list, named by what the browser said it was.
+            const rows = await (await device.page.request.get(`${base}/api/auth/passkeys`)).json();
+            expect(Array.isArray(rows) && rows.length).toBeTruthy();
+            expect(rows.some((row: { name: string }) => row.name?.length > 0)).toBe(true);
+        } finally {
+            await device.context.close();
+        }
+    });
 
-        // Confirm the sign out in the confirmation dialog
-        await page.click('.btn-confirm.destructive');
+    test('the passkey signs the same browser back in', async ({ page, browser }) => {
+        const base = baseOf();
+        const pairing = await mintPairingCode(page, base);
 
-        // Login modal should reappear
-        await expect(loginDialog(page).locator('h2')).toHaveText('Sign in', { timeout: 10000 });
+        const device = await signedOutBrowser(browser);
+        try {
+            await pairBrowser(device.page, base, pairing.code);
+            const csrf = (await (await device.page.request.get(`${base}/api/auth/session`)).json()).csrf_token;
+            expect(await (await device.page.request.post(`${base}/api/auth/logout`, {
+                headers: { 'X-CSRF-Token': csrf },
+            })).status()).toBe(200);
+
+            // Back at the gate, and this time there is a credential to ask for: the code field is gone.
+            await device.page.goto(`${base}/`, { waitUntil: 'commit' });
+            await expect(loginDialog(device.page)).toBeVisible({ timeout: 10000 });
+            await expect(device.page.locator('#login-code')).toHaveCount(0);
+
+            await signInBrowser(device.page, base);
+            await expect(device.page.locator('.project-item').first()).toBeVisible({ timeout: 10000 });
+        } finally {
+            await device.context.close();
+        }
+    });
+
+    test('a browser whose authenticator holds nothing stays signed out', async ({ page, browser }) => {
+        // A ctap2 authenticator with no resident credential has nothing to answer with. That is a
+        // dismissal, not a fault, and it must not open a session either way.
+        const device = await signedOutBrowser(browser);
+        try {
+            await device.page.goto(`${baseOf()}/`, { waitUntil: 'commit' });
+            await device.page.click('.login-btn');
+            await expect(device.page.locator('.login-message')).toBeVisible({ timeout: 20000 });
+            await expect(loginDialog(device.page)).toBeVisible();
+            await expect(device.page.locator('.sidebar')).toHaveCount(0);
+        } finally {
+            await device.context.close();
+        }
+    });
+
+    test('a spent pairing code is refused, and the code field stays put', async ({ page, browser }) => {
+        const base = baseOf();
+        const pairing = await mintPairingCode(page, base);
+
+        const first = await signedOutBrowser(browser);
+        try {
+            await pairBrowser(first.page, base, pairing.code);
+        } finally {
+            await first.context.close();
+        }
+
+        const second = await signedOutBrowser(browser);
+        try {
+            await second.page.goto(`${base}/#pair=${pairing.code}`, { waitUntil: 'commit' });
+            await second.page.waitForSelector('#login-code', { timeout: 20000 });
+            await second.page.click('.login-btn');
+            await expect(second.page.locator('.login-message')).toHaveText('pairing code is not valid', { timeout: 20000 });
+            await expect(loginDialog(second.page)).toBeVisible();
+            await expect(second.page.locator('#login-code')).toBeVisible();
+        } finally {
+            await second.context.close();
+        }
+    });
+
+    test('a code typed by hand pairs a device too', async ({ page, browser }) => {
+        // The path a phone takes when nobody can scan a QR: type the eight characters.
+        const base = baseOf();
+        const pairing = await mintPairingCode(page, base);
+
+        const device = await signedOutBrowser(browser);
+        try {
+            await device.page.goto(base + '/', { waitUntil: 'commit' });
+            await device.page.getByText('I have a pairing code').click();
+            await device.page.fill('#login-code', pairing.code.toLowerCase());
+            await expect(device.page.locator('.login-btn')).toBeEnabled();
+            await device.page.click('.login-btn');
+            await expect(device.page.locator('.project-item').first()).toBeVisible({ timeout: 20000 });
+        } finally {
+            await device.context.close();
+        }
     });
 });

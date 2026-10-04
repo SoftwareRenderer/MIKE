@@ -1,24 +1,23 @@
 // Live check of the paste intake against a running dev server:
 //
 //   make run
-//   curl -s -c /tmp/p.jar -D- -o /dev/null -X POST localhost:3000/api/auth/login \
-//        -H 'Content-Type: application/json' -d "{\"password\":\"$MIKE_LOGIN_PASSWORD\"}" \
-//     | grep -i x-csrf-token          # → X-CSRF-Token for the calls below
+//   # pair this probe: mint a code in Settings → Devices & passkeys (it works once)
+//   MIKE_PAIR_CODE=<code> node tests/paste-intake-check.mjs        # signs in and prints its session cookie
 //   POST /api/projects                     {"name":"paste-probe","path":"<a git repo>","sandbox_enabled":false}
 //   POST /api/projects/<p>/tasks           {"title":"paste probe","prompt":"probe"}
 //   PUT  /api/projects/<p>/tasks/<t>       {"status":"in_progress"}
-//   MIKE_LOGIN_PASSWORD=… PROJECT=<p> TASK=<t> node tests/paste-intake-check.mjs
+//   PROJECT=<p> TASK=<t> node tests/paste-intake-check.mjs
 //
 // Needs a task past backlog (the backlog hero replaces the chat input). What jsdom cannot answer:
 // whether the event the app listens for is the one a real paste produces, and whether the file
 // bucket's round trip to POST …/uploads inserts a path in the field.
 import { chromium } from 'playwright';
+import { attachVirtualAuthenticator, pairBrowser, pairingCodeFromEnv } from './helpers-auth.mjs';
 
 const BASE = process.env.BASE || 'http://localhost:3000';
 const PROJECT = process.env.PROJECT || 'kanban-upload-probe';
 const TASK = process.env.TASK || 'wander-oath-violet';
-const PASSWORD = process.env.MIKE_LOGIN_PASSWORD;
-if (!PASSWORD) throw new Error('MIKE_LOGIN_PASSWORD is not set');
+const CODE = pairingCodeFromEnv();
 
 const browser = await chromium.launch();
 const ctx = await browser.newContext();
@@ -28,9 +27,8 @@ page.on('response', (r) => {
     if (r.url().includes('/uploads')) console.log(`[resp:${r.status()}]`, r.url());
 });
 
-await page.goto(BASE + '/', { waitUntil: 'commit' });
-await page.fill('#login-password', PASSWORD);
-await page.keyboard.press('Enter');
+await attachVirtualAuthenticator(ctx, page);
+await pairBrowser(page, BASE, CODE);
 
 await page.goto(`${BASE}/?project=${encodeURIComponent(PROJECT)}&task=${encodeURIComponent(TASK)}`, {
     waitUntil: 'commit',

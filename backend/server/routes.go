@@ -23,11 +23,24 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("POST /api/updates/prepare", s.handleUpdatePrepare)
 	s.mux.HandleFunc("POST /api/updates/apply", s.handleUpdateApply)
 	s.mux.HandleFunc("POST /api/updates/restart", s.handleUpdateRestart)
-	// Rate limit login attempts (5/min per IP by default; MIKE_LOGIN_RATE_LIMIT can
-	// raise or lower it, but no longer turn it off).
-	s.mux.Handle("POST /api/auth/login", RateLimitMiddleware(s.loginLimiter, s.settings.TrustProxy, http.HandlerFunc(s.handleAuthLogin)))
+	// Rate limit every ceremony route (5/min per IP by default; MIKE_LOGIN_RATE_LIMIT can raise or lower
+	// it, but no longer turn it off). A pairing code is the one secret here a person types, so it is the
+	// one a script brute-forces, and these posts are where it would be typed.
+	s.mux.Handle("POST /api/auth/passkey/register/begin", RateLimitMiddleware(s.loginLimiter, s.settings.TrustProxy, http.HandlerFunc(s.handlePasskeyRegisterBegin)))
+	s.mux.Handle("POST /api/auth/passkey/register/finish", RateLimitMiddleware(s.loginLimiter, s.settings.TrustProxy, http.HandlerFunc(s.handlePasskeyRegisterFinish)))
+	s.mux.Handle("POST /api/auth/passkey/assert/begin", RateLimitMiddleware(s.loginLimiter, s.settings.TrustProxy, http.HandlerFunc(s.handlePasskeyAssertBegin)))
+	s.mux.Handle("POST /api/auth/passkey/assert/finish", RateLimitMiddleware(s.loginLimiter, s.settings.TrustProxy, http.HandlerFunc(s.handlePasskeyAssertFinish)))
 	s.mux.HandleFunc("POST /api/auth/logout", s.handleAuthLogout)
 	s.mux.HandleFunc("GET /api/auth/session", s.handleAuthSession)
+
+	// Onboarding a second device from a browser that is already signed in: the code minted here is what
+	// the new device types. Session-authed, CSRF-guarded and out of tokenScope, like /api/sessions — a
+	// bearer token must not be able to hand out the right to register a passkey.
+	s.mux.HandleFunc("POST /api/auth/pairing", s.handlePairingMint)
+	s.mux.HandleFunc("DELETE /api/auth/pairing", s.handlePairingRevoke)
+	s.mux.HandleFunc("GET /api/auth/passkeys", s.handlePasskeysList)
+	s.mux.HandleFunc("PATCH /api/auth/passkeys/{id}", s.handlePasskeyRename)
+	s.mux.HandleFunc("DELETE /api/auth/passkeys/{id}", s.handlePasskeyRevoke)
 
 	// Session management (signed-in user only — no public path, so
 	// SessionMiddleware auths these and CSRFMiddleware guards the non-GET ones).

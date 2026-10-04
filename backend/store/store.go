@@ -91,6 +91,9 @@ func NewStore(dbPath string) (*Store, error) {
 	if err := s.initAPITokens(); err != nil {
 		return nil, fmt.Errorf("init api tokens: %w", err)
 	}
+	if err := s.initPasskeys(); err != nil {
+		return nil, fmt.Errorf("init passkeys: %w", err)
+	}
 	if err := s.initConfigDefaults(); err != nil {
 		return nil, fmt.Errorf("init config defaults: %w", err)
 	}

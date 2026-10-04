@@ -9,8 +9,10 @@ serialisation point. Tests: `backend/store/` (`store_test.go`, `schema_test.go`,
 ## One transaction per section that must land entirely
 
 `Store.tx` (`backend/store/store.go`) is the only way such a section runs — `SetActiveThread`,
-`DeleteThreadWithMessages`, `CopyMessagesToThread`, `DeleteTaskMessagesAfter`, `DeleteProjectStats` —
-with `execer` (same file, satisfied by both `*sql.DB` and `*sql.Tx`) so a helper's query text exists once.
+`DeleteThreadWithMessages`, `CopyMessagesToThread`, `DeleteTaskMessagesAfter`, `DeleteProjectStats`,
+`ResetPasskeys` — with `execer` (same file, satisfied by both `*sql.DB` and `*sql.Tx`) so a helper's query
+text exists once. `ResetPasskeys` belongs on that list because a reset that left a session alive would not
+have revoked the device it claims to.
 
 Because the pool is one connection and `s.mu` is held across the section, a transaction buys **failure
 atomicity, not isolation** — without it a `SetActiveThread` whose second statement failed leaves a task
@@ -49,9 +51,9 @@ running containers — nothing else would ever remove them.
 ## The schema is created whole
 
 - `baseSchemaSQL` (`backend/store/migrations.go`) declares every table, column and index the task, project,
-  message, thread and stats reads use, and `initSchema` runs it on every start. The two credential tables
-  are declared beside their own accessors (`sessionTable`, `apiTokenTable`) under the same rule. Every
-  statement is `IF NOT EXISTS`.
+  message, thread and stats reads use, and `initSchema` runs it on every start. The three credential
+  tables are declared beside their own accessors (`sessionTable`, `apiTokenTable`, `passkeyTable`) under
+  the same rule. Every statement is `IF NOT EXISTS`.
 - Nothing upgrades an older database, because nothing has shipped. `CREATE TABLE IF NOT EXISTS` leaves a
   table it finds exactly as it is, so a file whose tables predate this DDL boots and then fails every read
   that names a column the file lacks. That file is deleted, never upgraded — which is why no
@@ -63,7 +65,7 @@ running containers — nothing else would ever remove them.
 - Two task columns have exactly one writer each and are absent from `UpdateTask`: `memory_supervisor_paused`
   (`SetMemorySupervisorPaused`) and the pair `sandbox_memory_peak_mb` / `sandbox_oom_kills`
   (`RecordTaskSandboxMemory`), which the sandbox layer writes as a container is removed. A task copy read
-  before that write is alive during most runs, so `UpdateTask` returns those columns and puts them back
+  before that write is alive during most runs. So `UpdateTask` returns those columns and puts them back
   into the struct it hands to the broadcast — otherwise the write would erase a measurement, and a card
   would lose the alert the user has not seen yet.
 - `memory_alert_acked` and its three numbers have one writer too, `DismissTaskMemoryAlert`, and the same
@@ -76,10 +78,10 @@ running containers — nothing else would ever remove them.
 ## An instant that SQL compares is fixed-width UTC
 
 `ORDER BY`, `>=` and `<` on a stored timestamp compare **text**, so the text must be one fixed width and
-one zone. `time.RFC3339Nano` is neither: it trims the zeros off the end of the fraction, and `Z` (0x5A)
+one zone. `time.RFC3339Nano` is neither: it trims the zeros off the end of the fraction. And `Z` (0x5A)
 sorts above every digit, so the earlier `…:07.3892121Z` came back **after** the later `…:07.38921216Z` —
-which is how a chat could read its own turns the wrong way round — and a zone offset repeats an hour of
-wall-clock time at a fall-back. `task_messages.created_at` is stored through `formatMessageTime`
+which is how a chat could read its own turns the wrong way round. A zone offset is the other half of the
+same fault: it repeats an hour of wall-clock time at a fall-back. `task_messages.created_at` is stored through `formatMessageTime`
 (`messageTimeLayout`); `task_threads.checkpoint_message_time` through `ptrTime`, because
 `GetThreadsByCheckpointMessageTime` matches that column against a message's `created_at` rendered by its
 caller. `rowid` breaks an exact tie, as `GetLastMessageInThread` already did; the listing queries do the

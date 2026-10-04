@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"crypto/sha256"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -29,14 +28,14 @@ func testManagerWithStore(t *testing.T) (*SessionManager, *store.Store) {
 	}
 	t.Cleanup(func() { s.Close() })
 
-	m, err := NewSessionManager(t.Context(), s, testPassword)
+	m, err := NewSessionManager(t.Context(), s)
 	if err != nil {
 		t.Fatalf("create manager: %v", err)
 	}
 	return m, s
 }
 
-// testIP / testUA are the client metadata Login records on a new session.
+// testIP / testUA are the client metadata StartSession records on a new session.
 const (
 	testIP = "203.0.113.9"
 	testUA = "MIKE-test-agent/1.0"
@@ -52,30 +51,12 @@ func lastSeenOf(t *testing.T, db *store.Store, id string) int64 {
 	return v
 }
 
-// An empty master password is refused rather than accepted as a shared secret of nothing.
-// testPassword is the master password the fixture manager is built with.
-const testPassword = "test-password"
-
-func TestNewSessionManagerNoPassword(t *testing.T) {
-	dir := t.TempDir()
-	s, err := store.NewStore(filepath.Join(dir, "test.db"))
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
-
-	_, err = NewSessionManager(t.Context(), s, "")
-	if err == nil {
-		t.Fatal("NewSessionManager accepted an empty master password")
-	}
-}
-
-func TestLoginValidPassword(t *testing.T) {
+func TestStartSessionIssuesCredentials(t *testing.T) {
 	m := testManager(t)
 
-	id, token, csrfToken, err := m.Login(t.Context(), "test-password", testIP, testUA)
+	id, token, csrfToken, err := m.StartSession(t.Context(), testIP, testUA)
 	if err != nil {
-		t.Fatalf("login: %v", err)
+		t.Fatalf("start session: %v", err)
 	}
 	if id == "" {
 		t.Error("expected non-empty session id")
@@ -95,14 +76,14 @@ func TestLoginValidPassword(t *testing.T) {
 }
 
 // The id is listed by GET /api/sessions, so it must not share bytes with the token.
-func TestLoginCredentialsShareNoBytes(t *testing.T) {
+func TestSessionCredentialsShareNoBytes(t *testing.T) {
 	m := testManager(t)
 
 	seen := map[string]bool{}
 	for i := 0; i < 20; i++ {
-		id, token, csrfToken, err := m.Login(t.Context(), testPassword, testIP, testUA)
+		id, token, csrfToken, err := m.StartSession(t.Context(), testIP, testUA)
 		if err != nil {
-			t.Fatalf("login: %v", err)
+			t.Fatalf("start session: %v", err)
 		}
 		if len(id) != 16 { // 8 bytes of hex, the shape stored ids already have
 			t.Fatalf("session id %q: want 16 characters", id)
@@ -120,21 +101,12 @@ func TestLoginCredentialsShareNoBytes(t *testing.T) {
 	}
 }
 
-func TestLoginInvalidPassword(t *testing.T) {
-	m := testManager(t)
-
-	_, _, _, err := m.Login(t.Context(), "wrong-password", testIP, testUA)
-	if err != ErrInvalidPassword {
-		t.Fatalf("expected ErrInvalidPassword, got: %v", err)
-	}
-}
-
 func TestValidateValidToken(t *testing.T) {
 	m := testManager(t)
 
-	_, token, _, err := m.Login(t.Context(), "test-password", testIP, testUA)
+	_, token, _, err := m.StartSession(t.Context(), testIP, testUA)
 	if err != nil {
-		t.Fatalf("login: %v", err)
+		t.Fatalf("start session: %v", err)
 	}
 
 	id, csrfToken, err := m.Validate(t.Context(), token)
@@ -170,9 +142,9 @@ func TestValidateEmptyToken(t *testing.T) {
 func TestLogout(t *testing.T) {
 	m := testManager(t)
 
-	_, token, _, err := m.Login(t.Context(), "test-password", testIP, testUA)
+	_, token, _, err := m.StartSession(t.Context(), testIP, testUA)
 	if err != nil {
-		t.Fatalf("login: %v", err)
+		t.Fatalf("start session: %v", err)
 	}
 
 	if err := m.Logout(t.Context(), token); err != nil {
@@ -198,11 +170,11 @@ func TestLogoutEmptyToken(t *testing.T) {
 func TestMultipleSessions(t *testing.T) {
 	m := testManager(t)
 
-	_, token1, _, err := m.Login(t.Context(), "test-password", testIP, testUA)
+	_, token1, _, err := m.StartSession(t.Context(), testIP, testUA)
 	if err != nil {
 		t.Fatalf("login 1: %v", err)
 	}
-	_, token2, _, err := m.Login(t.Context(), "test-password", testIP, testUA)
+	_, token2, _, err := m.StartSession(t.Context(), testIP, testUA)
 	if err != nil {
 		t.Fatalf("login 2: %v", err)
 	}
@@ -229,61 +201,13 @@ func TestMultipleSessions(t *testing.T) {
 	}
 }
 
-func TestLoginNearMissPassword(t *testing.T) {
-	// A same-length password differing in a single byte must be rejected
-	// (exercises the constant-time comparison path where lengths match).
-	m := testManager(t)
-	if _, _, _, err := m.Login(t.Context(), "test-password", testIP, testUA); err != nil {
-		t.Fatalf("valid password login: %v", err)
-	}
-	if _, _, _, err := m.Login(t.Context(), "test-passwordX", testIP, testUA); err == nil {
-		t.Fatal("near-miss password accepted; expected ErrInvalidPassword")
-	} else if err != ErrInvalidPassword {
-		t.Fatalf("expected ErrInvalidPassword, got %v", err)
-	}
-}
-
-// TestLoginComparesPasswordDigests pins the credential-comparison hardening:
-// the manager keeps only sha256(MIKE_LOGIN_PASSWORD) and compares digests, so
-// the constant-time comparison never sees two operands of different length
-// (subtle.ConstantTimeCompare short-circuits on a length mismatch, which leaks
-// the configured password's length).
-func TestLoginComparesPasswordDigests(t *testing.T) {
-	m := testManager(t)
-
-	want := sha256.Sum256([]byte("test-password"))
-	if m.passwordHash != want {
-		t.Fatal("SessionManager must retain only the sha256 digest of MIKE_LOGIN_PASSWORD")
-	}
-
-	// Wrong passwords of every shape — including lengths shorter and longer
-	// than the real one — are rejected identically.
-	for _, bad := range []string{
-		"",
-		"t",
-		"test-passwor",   // one char short
-		"test-passwordX", // one char longer
-		"TEST-PASSWORD",  // same length, different bytes
-		strings.Repeat("p", 4096),
-	} {
-		if _, _, _, err := m.Login(t.Context(), bad, testIP, testUA); err != ErrInvalidPassword {
-			t.Errorf("Login(%q) error = %v; want ErrInvalidPassword", bad, err)
-		}
-	}
-
-	// The real password still authenticates.
-	if _, _, _, err := m.Login(t.Context(), "test-password", testIP, testUA); err != nil {
-		t.Errorf("correct password rejected: %v", err)
-	}
-}
-
-// TestLoginRecordsIPAndUserAgent checks the metadata the Sessions UI shows.
-func TestLoginRecordsIPAndUserAgent(t *testing.T) {
+// TestStartSessionRecordsIPAndUserAgent checks the metadata the Sessions UI shows.
+func TestStartSessionRecordsIPAndUserAgent(t *testing.T) {
 	m, db := testManagerWithStore(t)
 
-	id, _, _, err := m.Login(t.Context(), "test-password", "198.51.100.7", "Mozilla/5.0 (Test Browser)")
+	id, _, _, err := m.StartSession(t.Context(), "198.51.100.7", "Mozilla/5.0 (Test Browser)")
 	if err != nil {
-		t.Fatalf("login: %v", err)
+		t.Fatalf("start session: %v", err)
 	}
 
 	list, err := db.ListSessions(context.Background())
@@ -309,9 +233,9 @@ func TestLoginRecordsIPAndUserAgent(t *testing.T) {
 // would be a write per page render.
 func TestValidateThrottlesLastSeen(t *testing.T) {
 	m, db := testManagerWithStore(t)
-	id, token, _, err := m.Login(t.Context(), "test-password", testIP, testUA)
+	id, token, _, err := m.StartSession(t.Context(), testIP, testUA)
 	if err != nil {
-		t.Fatalf("login: %v", err)
+		t.Fatalf("start session: %v", err)
 	}
 
 	backdate := func(secs int64) {

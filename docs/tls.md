@@ -17,7 +17,7 @@ While that default certificate is in use the CA is also downloadable: `GET /api/
 Settings → About → System Info links to it (`tls_ca_available` in `GET /api/config` is what makes the
 link appear, and it is derived from the same `tls.Config` the route checks, so a link can never point
 at a 404). The route is session-authed like every other `/api` path, pinned to GET, and the only file
-it can name is `Config.CAFile` — no request field is ever a path — and `tls.CertPEM` answers with a
+it can name is `Config.CAFile` — no request field is ever a path. And `tls.CertPEM` answers with a
 certificate block or an error, so the download cannot be turned into a key dump even if that path
 were swapped for a key file. The CA *key* is never served and never leaves the data dir (keys are
 `0600`). `--no-tls` and a `--tls-cert`/`--tls-key` pair offer no download: neither has a CA of ours,
@@ -61,11 +61,18 @@ rejected too.
 Which bytes reach this decision is the listener's own rule — the TLS/plain first-byte sniff, the queue it
 feeds, and what may end `Serve`: `docs/lifecycle.md → The TLS/plain listener`.
 
-## Weak master password + exposed listen address is fatal
+## Login needs a secure context, and a hostname
 
-A `MIKE_LOGIN_PASSWORD` shorter than 8 characters, or one of the known defaults (`test`, `dev`,
-`admin`, `password`, `pass`, `changeme`), refuses to start on any non-loopback listen address.
-Loopback + weak stays allowed so `make run` (password `test`) keeps working.
+A passkey is minted for a hostname and only ever released over a connection the browser calls secure:
+`https://…` or `http://localhost`. Plain HTTP on a LAN address therefore has **no login at all** — the
+gate says the connection cannot carry a passkey instead of offering a button that can only fail. Serve TLS
+(here or at the proxy, with `MIKE_TRUST_PROXY=1` so `X-Forwarded-Proto` decides the cookie's `Secure` flag
+and the origin a signature is checked against) or reach the install at `localhost`.
+
+The name is the credential's audience, not a cosmetic detail: an address is not a relying-party id, so
+`https://192.168.1.20:3000` has no passkey to offer even over TLS. Pin the hostname in
+`MIKE_ALLOWED_HOSTS` and pair through that name. A fresh install prints its pairing code and says so when
+the address it printed cannot hold the credential it is inviting — `docs/passkeys.md → How it is held`.
 
 ## Tests
 
@@ -73,3 +80,8 @@ Loopback + weak stays allowed so `make run` (password `test`) keeps working.
 CA/leaf reuse, `CertPEM` serves a certificate and nothing else), `backend/server/handler_tls_test.go`
 (the download: needs a session, 404 without a local CA, GET-only, and `tls_ca_available` tracks it).
 The listener's test is listed in `docs/lifecycle.md`.
+
+## Checking this
+
+`go test ./backend/tls/ ./backend/server/` covers the CA and its leaf, the download's guards, the Host
+pinning that decides reachability, and the per-request `Secure` flag a forwarded `X-Forwarded-Proto` sets.
