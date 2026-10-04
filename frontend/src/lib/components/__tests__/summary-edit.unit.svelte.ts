@@ -64,7 +64,7 @@ const entriesBaseProps = {
 };
 
 function renderEntries(entries: ReturnType<typeof entry>[], onSummaryEdit?: (id: string, content: string) => Promise<void>) {
-    const metas = entries.map(() => ({ cpState: null, cpThread: null, checkpointIndex: -1, isLastUserMessage: false, isFirstUserMessage: false }));
+    const metas = entries.map(() => ({ cpState: null, cpThread: null, isLastUserMessage: false, isFirstUserMessage: false }));
     return render(ChatEntries, {
         props: {
             ...entriesBaseProps,

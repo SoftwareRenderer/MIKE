@@ -37,7 +37,7 @@ function makeEntry(id: string, role: 'user' | 'assistant') {
 }
 
 function makeMeta() {
-    return { cpState: null, cpThread: null, checkpointIndex: -1, isLastUserMessage: false, isFirstUserMessage: false };
+    return { cpState: null, cpThread: null, isLastUserMessage: false, isFirstUserMessage: false };
 }
 
 const baseProps = {

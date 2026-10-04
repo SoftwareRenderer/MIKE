@@ -82,7 +82,7 @@ async function mount(count = 3) {
     const { container, ...rest } = render(ChatEntries, {
         ...baseProps,
         entries,
-        entryMetas: entries.map(() => ({ cpState: null, cpThread: null, checkpointIndex: -1, isLastUserMessage: false, isFirstUserMessage: false })),
+        entryMetas: entries.map(() => ({ cpState: null, cpThread: null, isLastUserMessage: false, isFirstUserMessage: false })),
         lastEntryIdx: entries.length - 1,
         follow,
     });

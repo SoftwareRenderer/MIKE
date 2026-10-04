@@ -1627,7 +1627,10 @@ const catalog = {
     'chat.task.sendFailed': 'Failed to send message',
     'chat.task.compressFailed': 'Failed to compress context',
     'chat.task.regenerateFailed': 'Failed to regenerate',
-    'chat.task.deleteConfirm': { one: 'This will delete {count} message. This action cannot be undone.', other: 'This will delete {count} messages. This action cannot be undone.' },
+    // No row count: what goes is every row after this one in the thread, which the loaded window neither
+    // counts nor bounds, and an entry on screen folds its tool-call rows into one.
+    'chat.task.deleteConfirm': 'This deletes this message and every message after it in this thread. This action cannot be undone.',
+    'chat.task.deleteAlsoFiles': 'The files go back to the state the remaining conversation describes, so anything only the deleted turns produced is removed.',
     'chat.task.deleteAlsoBranch': 'This will also delete the git branch "{branch}".',
     'chat.task.deleteTitle': 'Delete Message',
 
@@ -1770,7 +1773,11 @@ const catalog = {
     'task.diff.originalBranch': 'Original branch',
     'task.diff.workingTree': 'Working tree',
     'task.diff.originMeta': '{hash} (Origin)',
-    'task.checkpoint.title': 'Changes before this checkpoint',
+    // One wording for one comparison, shared with the chat band's button: the thread's baseline up to the
+    // state that checkpoint captured, nothing that came after.
+    'task.checkpoint.title': 'Changes up to this checkpoint',
+    'task.checkpoint.filesSection': 'Changed files',
+    'task.checkpoint.noChanges': 'Nothing changed up to this checkpoint',
     'task.tabs.checkpoint': 'Checkpoint',
     'task.detailAria': 'Task detail',
     'task.detailPanelsAria': 'Task detail panels',
@@ -1864,12 +1871,10 @@ const catalog = {
     'diff.unstageFileTitle': 'Unstage file',
     'diff.stageAllAria': 'Stage all changes',
     'diff.unstageAllAria': 'Unstage all changes',
-    'diff.expandStagedTitle': 'Expand all staged files',
-    'diff.collapseStagedTitle': 'Collapse all staged files',
-    'diff.expandUnstagedTitle': 'Expand all unstaged files',
-    'diff.collapseUnstagedTitle': 'Collapse all unstaged files',
-    'diff.expandMergedTitle': 'Expand all merged files',
-    'diff.collapseMergedTitle': 'Collapse all merged files',
+    // A section's collapse control is named by the section, so a panel that is not a working tree can rename
+    // its section without the tooltip disagreeing with the heading.
+    'diff.expandSection': 'Expand all {name} files',
+    'diff.collapseSection': 'Collapse all {name} files',
 
     // ── CommitDiffOverlay ──
     'diff.loadingDiff': 'Loading diff...',

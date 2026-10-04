@@ -1493,3 +1493,52 @@ func TestDeleteBeforeSummarizationKeepsSummary(t *testing.T) {
 		t.Fatal("message after the target should have been deleted")
 	}
 }
+
+// deleteCheck asks the endpoint that answers "what does deleting this take with it".
+func deleteCheck(t *testing.T, s *Server, projID, taskID, msgID string) map[string]any {
+	t.Helper()
+	rr := testResponseAuth(t, s, testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages/"+msgID, nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("check: %d %s", rr.Code, rr.Body.String())
+	}
+	return mustJSON[map[string]any](t, rr.Body)
+}
+
+// The delete confirmation names the files, and that verdict is the server's: it is the side that rewinds the
+// worktree to the state the remaining conversation describes. A summarized row owns no files, and a task with
+// no worktree has nothing to go back to.
+func TestMessageDeleteCheckReportsFileRewind(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	taskID := createTestTask(t, s, projID, "Test task")
+
+	createdRR := testResponseAuth(t, s, testRequest("POST",
+		"/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{"role": "user", "content": "do it"}))
+	created := mustJSON[map[string]any](t, createdRR.Body)
+	msgID, _ := created["id"].(string)
+
+	if got := deleteCheck(t, s, projID, taskID, msgID)["resets_files"]; got == true {
+		t.Error("a task with no worktree has no state to rewind")
+	}
+
+	task, err := s.store.GetTaskByID(taskID)
+	if err != nil {
+		t.Fatalf("read task: %v", err)
+	}
+	task.Branch, task.BaseCommit = "task/"+taskID, "0123456789abcdef0123456789abcdef01234567"
+	if err := s.store.UpdateTask(task); err != nil {
+		t.Fatalf("update task: %v", err)
+	}
+	if got := deleteCheck(t, s, projID, taskID, msgID)["resets_files"]; got != true {
+		t.Error("deleting a turn of a started task rewinds the worktree; the dialog has to say so")
+	}
+
+	summary := &types.TaskMessage{ID: "summ-resets-check", TaskID: taskID, Role: "summarization",
+		Content: "what happened so far"}
+	if err := s.store.CreateTaskMessage(summary); err != nil {
+		t.Fatalf("create summary row: %v", err)
+	}
+	if got := deleteCheck(t, s, projID, taskID, summary.ID)["resets_files"]; got == true {
+		t.Error("a summarized row owns no files, so deleting it moves nothing")
+	}
+}

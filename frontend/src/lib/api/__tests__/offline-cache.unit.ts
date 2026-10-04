@@ -253,14 +253,15 @@ describe('offline diff cache', () => {
         expect(cached).toEqual(diff);
     });
 
-    it('does NOT fall back to cache for non-current (checkpoint) diff requests', async () => {
+    it('does NOT fall back to cache for a ref comparison (a checkpoint diff)', async () => {
         const storage = await import('$lib/storage');
         mockRejectedFetch();
         await storage.setBoardCache(storage.diffCacheKey('p1', 't1'), diff);
 
         const { getTaskDiff } = await import('$lib/api/git');
-        // checkpoint diff request must reject even though a current-diff cache exists
-        await expect(getTaskDiff('p1', 't1', { checkpointIndex: 0 })).rejects.toBeTruthy();
+        // A snapshot comparison must reject even though a current-diff cache exists: the cached body
+        // describes the working tree, which is a different pair of trees.
+        await expect(getTaskDiff('p1', 't1', { headRef: 'sha-snap' })).rejects.toBeTruthy();
     });
 });
 
@@ -318,7 +319,8 @@ describe('done-task diff cache (immutable head-ref diff)', () => {
         // even though the done cache exists.
         await expect(getTaskDiff('p1', 't1', { headRef: 'sha-tip', full: true })).rejects.toBeTruthy();
         await expect(getTaskDiff('p1', 't1', { headRef: 'sha-tip', baseRef: 'sha-base' })).rejects.toBeTruthy();
-        await expect(getTaskDiff('p1', 't1', { headRef: 'sha-tip', checkpointIndex: 0 })).rejects.toBeTruthy();
+        // A checkpoint's head is not the tip, so the pinned done body does not answer for it.
+        await expect(getTaskDiff('p1', 't1', { headRef: 'sha-snap' })).rejects.toBeTruthy();
     });
 });
 

@@ -25,7 +25,7 @@
     import { trustedExecutionState, isTaskPaused } from '$lib/utils/execution-state';
     import { offersResume } from '$lib/utils/review-bar';
     import { reselectProvider, getProviderDisplayName } from '$lib/utils/providers';
-    import { buildEntriesFromMessages, mergeLoadedHistory, buildEntryMetas, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, pendingToolIds, endsOnReviewResult, entriesAwaitingRows, takeEchoMatch, removeFailedSend, removeDismissedError } from '$lib/utils/chat-entries';
+    import { buildEntriesFromMessages, mergeLoadedHistory, buildEntryMetas, trailingCheckpoint, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, pendingToolIds, endsOnReviewResult, entriesAwaitingRows, takeEchoMatch, removeFailedSend, removeDismissedError } from '$lib/utils/chat-entries';
     import { getAppStreamRef } from '$lib/stream-ref';
     import { useConnectionRestored } from '$lib/composables/use-connection-restored.svelte';
     import { useTaskEvents } from '$lib/composables/use-task-events.svelte';
@@ -42,7 +42,7 @@
     import ReviewBar from './ReviewBar.svelte';
     import StartPanel from './StartPanel.svelte';
 
-    let { projectId, taskId, taskPrompt = '', taskStatus = 'backlog', taskExecutionState = '', taskSummarizing = false, hasStagedChanges: hasStagedChangesProp, onRefreshDiff, onMoveTask, onThreadSwitch, onViewChanges, onInvalidateDiff, onToggleFullscreen, isChatFullscreen, onChatInputFocus, onChatInputBlur, onMessageSent, onTaskDone }: { projectId: string; taskId: string; taskPrompt?: string; taskStatus?: string; taskExecutionState?: string; taskSummarizing?: boolean; hasStagedChanges?: boolean; onRefreshDiff?: (data: DiffManifest) => void; onMoveTask?: (status: string) => void; onThreadSwitch?: () => void; onViewChanges?: (commitHash: string) => void; onInvalidateDiff?: () => void; onToggleFullscreen?: () => void; isChatFullscreen?: boolean; /** Focus entered / left the chat input — the owner of the maximize decides what that means. */ onChatInputFocus?: () => void; onChatInputBlur?: () => void; /** A message was sent — the auto maximize ends with the send, whatever the request did next. */ onMessageSent?: () => void; /** A Done click in the review bar succeeded — the view that owns navigation decides what happens next. Fires on a commit deferred to a conflict-resolution turn too, where the task stays in progress: the click still meant "I'm finished with it". */ onTaskDone?: () => void } = $props();
+    let { projectId, taskId, taskPrompt = '', taskStatus = 'backlog', taskExecutionState = '', taskSummarizing = false, hasStagedChanges: hasStagedChangesProp, onRefreshDiff, onMoveTask, onViewChanges, onReloadDiff, openCheckpointHash = '', onToggleFullscreen, isChatFullscreen, onChatInputFocus, onChatInputBlur, onMessageSent, onTaskDone }: { projectId: string; taskId: string; taskPrompt?: string; taskStatus?: string; taskExecutionState?: string; taskSummarizing?: boolean; hasStagedChanges?: boolean; onRefreshDiff?: (data: DiffManifest) => void; onMoveTask?: (status: string) => void; /** The chat moved the files under the Changes panel — a thread switch, a rewind that followed a deletion, a fork an edit retired — so reload it, never just clear it. */ onReloadDiff?: () => void; onViewChanges?: (commitHash: string, commitLabel?: string) => void; /** Which checkpoint the Changes panel is showing, so its band reads as the open one. */ openCheckpointHash?: string; onToggleFullscreen?: () => void; isChatFullscreen?: boolean; /** Focus entered / left the chat input — the owner of the maximize decides what that means. */ onChatInputFocus?: () => void; onChatInputBlur?: () => void; /** A message was sent — the auto maximize ends with the send, whatever the request did next. */ onMessageSent?: () => void; /** A Done click in the review bar succeeded — the view that owns navigation decides what happens next. Fires on a commit deferred to a conflict-resolution turn too, where the task stays in progress: the click still meant "I'm finished with it". */ onTaskDone?: () => void } = $props();
 
     // Owns everything about "follow the latest message" (scroll container,
     // atBottom, pinning). Shared with ChatEntries, which renders both.
@@ -294,6 +294,13 @@
         });
     });
 
+    /** The newest turn's band. Its own because the turn that just finished has no later user message to
+     * carry one, and that is the state a reader most often wants to open. */
+    let trailingCp = $derived.by(() => {
+        void checkpointHashesVersion;
+        return trailingCheckpoint({ entries, pendingCheckpoints, checkpointLabels, checkpointCommitHashes });
+    });
+
     function genId(): string {
         return Math.random().toString(36).slice(2, 10);
     }
@@ -302,7 +309,7 @@
     function handleMsgDelete(entry: ChatEntry) {
         const idx = entries.findIndex(e => e.id === entry.id);
         if (idx === 0) return; // first message cannot be deleted
-        handleDeleteRequest(entry.id, entries.length - idx);
+        handleDeleteRequest(entry.id);
     }
     async function handleMsgFork(msgId: string, origContent: string, newContent: string, atts?: Array<{ mimeType: string; data: string }>) {
         await handleEditFork(msgId, origContent, newContent, atts);
@@ -455,7 +462,7 @@
         markStreaming,
         markNotStreaming,
         onRefreshDiff: (data) => onRefreshDiff?.(data),
-        onThreadSwitch: () => onThreadSwitch?.(),
+        onThreadSwitch: () => onReloadDiff?.(),
         loadHistory,
         updateActiveThread,
         updateThreadUrl,
@@ -852,8 +859,8 @@
             resetStreamState();
             // Load messages for the new thread immediately (don't wait for WS event)
             await loadHistory(true);
-            // Notify parent to refresh the diff panel for the new thread
-            onThreadSwitch?.();
+            // The new thread's files are a different comparison.
+            onReloadDiff?.();
             // Update URL with new thread param
             updateThreadUrl(threadId);
             // No need to reconnect WebSocket — broadcaster is per-task, not per-thread.
@@ -1212,25 +1219,27 @@
     }
 
 
-    /** Ask whether deleting this message would delete a fork branch too, then show the dialog. */
-    async function handleDeleteRequest(entryId: string, count: number) {
+    /** Ask what this deletion takes with it — a fork branch, and always the files the deleted turns
+     *  produced — then show the dialog. No row count is claimed: what goes is every row after this one in the
+     *  thread, which the loaded window neither counts nor bounds. */
+    async function handleDeleteRequest(entryId: string) {
         let willDeleteBranch = false;
         let branchName = '';
+        let resetsFiles = false;
         try {
             const info = await checkMessageDelete(projectId, taskId, entryId);
             willDeleteBranch = info.will_delete_branch;
             branchName = info.branch_name || '';
+            resetsFiles = info.resets_files;
         } catch {
-            // If check fails, proceed without branch warning
+            // A check that did not answer promises nothing extra; the deletion itself still runs.
         }
 
-        // Two messages joined by a blank line: the branch warning is optional, so it stays separate rather
-        // than a placeholder inside the first.
-        const base = t('chat.task.deleteConfirm', { count });
-        let message = base;
-        if (willDeleteBranch && branchName) {
-            message = `${base}\n\n${t('chat.task.deleteAlsoBranch', { branch: branchName })}`;
-        }
+        // One sentence per consequence the reader cannot undo, joined by a blank line so each stays whole.
+        const lines = [t('chat.task.deleteConfirm')];
+        if (resetsFiles) lines.push(t('chat.task.deleteAlsoFiles'));
+        if (willDeleteBranch && branchName) lines.push(t('chat.task.deleteAlsoBranch', { branch: branchName }));
+        const message = lines.join('\n\n');
 
         const confirmed = await dialogStore.showConfirm({
             title: t('chat.task.deleteTitle'),
@@ -1263,7 +1272,7 @@
             // changing the diff baseline. The worktree watcher doesn't detect soft resets
             // (working tree/index unchanged), so staged status in cache becomes stale.
             // Force a full HTTP reload to get fresh staged status.
-            onInvalidateDiff?.();
+            onReloadDiff?.();
         } catch (e) {
             dialogStore.showToast(String(e));
         }
@@ -1294,7 +1303,7 @@
             // Load messages for the new thread
             await loadHistory(true);
             updateThreadUrl(forked.id);
-            onThreadSwitch?.();
+            onReloadDiff?.();
             // regenerate: the fork already wrote the edited question into the new thread, so this send is
             // "answer what the thread holds", not a second copy of the same message.
             const result = await sendWithTracking(newContent, { attachments, regenerate: true });
@@ -1350,7 +1359,7 @@
                 updateThreadUrl(active.id);
             }
         } catch { /* the transcript on screen is still the one the send produced */ }
-        onInvalidateDiff?.();
+        onReloadDiff?.();
         if (!result.queued && result.id) {
             const entry = stream.state.entries.find(e => e.id === optimisticId);
             if (entry) {
@@ -1712,6 +1721,8 @@
         onSummaryEdit={handleSummaryEdit}
         onNavigateTask={handleMsgNavigateTask}
         {onViewChanges}
+        trailingCheckpoint={trailingCp}
+        {openCheckpointHash}
         {onToggleFullscreen}
         {isChatFullscreen}
         {historyLoading}

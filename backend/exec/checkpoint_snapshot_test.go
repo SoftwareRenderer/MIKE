@@ -120,3 +120,58 @@ func TestCheckpointPinsItsSnapshot(t *testing.T) {
 		t.Error("a pinned snapshot was garbage-collected")
 	}
 }
+
+// A new non-image binary is unstaged after the capture so it never joins the commit index — but the capture
+// has to happen first. `git stash create` has no -u, so anything untracked at capture time is absent from the
+// snapshot's tree, and the restore that reads that tree ends in `clean -fd`, which deletes the file.
+func TestCheckpointCapturesANewBinaryFile(t *testing.T) {
+	t.Parallel()
+	te, repoDir, projectID, _ := setupExecutorWithGit(t)
+	s := te.store
+	const (
+		taskID = "amber-checkpoint-bin"
+		msgID  = "asst-snapshot-bin"
+		thread = "th-bin"
+	)
+	branch := "task/" + taskID
+	if err := s.CreateTask(&types.Task{
+		ID: taskID, ProjectID: projectID, Title: "bin", Prompt: "p", Status: types.StatusInProgress,
+		ExecutionState: types.ExecStateIdle, Branch: branch, CurrentThreadID: thread,
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	wtPath, _, err := te.worktreeMgr.CreateWorktree(projectID, taskID, branch, "")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+	if err := s.CreateThread(&types.TaskThread{ID: thread, TaskID: taskID, Name: "Main", IsActive: true, CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	if err := s.CreateTaskMessage(&types.TaskMessage{
+		ID: msgID, TaskID: taskID, ThreadID: thread, Role: "assistant", Content: "built it", CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("create message: %v", err)
+	}
+
+	blob := []byte{0x00, 0x01, 0x02, 'o', 'f', 0x00}
+	if err := os.WriteFile(filepath.Join(wtPath, "artifact.bin"), blob, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	te.createCheckpoint(context.Background(), projectID, taskID, msgID)
+
+	ref := git.SnapshotRef(taskID, msgID)
+	waitForSnapshot(t, "the snapshot ref "+ref, func() bool {
+		return exec.Command("git", "-C", repoDir, "show-ref", "--verify", "--quiet", ref).Run() == nil
+	})
+	pinned := gitOut(t, repoDir, "rev-parse", ref)
+	if out := gitOut(t, repoDir, "show", pinned+":artifact.bin"); out != string(blob) {
+		t.Errorf("the snapshot does not hold the new binary file it captured")
+	}
+
+	// The index still ends as it was: an agent's new binary is not silently staged for the commit.
+	if staged := gitOut(t, wtPath, "diff", "--staged", "--name-only"); strings.Contains(staged, "artifact.bin") {
+		t.Errorf("the capture left a new binary file staged: %q", staged)
+	}
+}

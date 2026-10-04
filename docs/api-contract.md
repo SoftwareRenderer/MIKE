@@ -408,16 +408,21 @@ than truthiness. An empty array is a truthy "there is a committed half", which i
 paint "Empty file" over the rows the file holds. Tests:
 `frontend/src/lib/components/__tests__/diff-merged-committed-half.unit.svelte.ts`.
 
-**One comparison per task in the file cache.** `GET /api/projects/{id}/tasks/{taskID}/diff/file` names a
-path and no refs, so it can answer for one comparison only: the task's worktree against HEAD at the baseline
-`git.WorktreeManager.TaskDiffBaseline` names for that task. `api.taskDiffCache` (`backend/api/git.go`) holds
-exactly that, one entry per task. A request that compares two refs — `?base=` or `?head=`, which is how a
-checkpoint comparison arrives — carries its own content and never enters the cache. The worktree watcher's
+**A ref comparison never reads the file cache.** `GET /api/projects/{id}/tasks/{taskID}/diff/file` answers one
+of two questions, and which one the request says. Without refs it answers the task's worktree against HEAD at
+the baseline `git.WorktreeManager.TaskDiffBaseline` names for that task, which is all `api.taskDiffCache`
+(`backend/api/git.go`) may hold — one entry per task, that comparison only. With `?head=` (and optionally
+`?base=`, defaulting to that same baseline) it recomputes that path between the two named trees and never
+consults the cache. A checkpoint panel whose "show full diff" fetched the worktree would print later work
+under the checkpoint's heading, and write those rows into the panel behind it. A ref comparison names the base
+it measured from in `base_ref`, the key the manifest already uses, so the panel prints both sides of what it
+shows. The worktree watcher's
 cache update skips a done task, because for a done task it computes `BaseCommit..BranchTip`. The
 panel lists files from one diff and then fetches their rows by path, so a second comparison stored under the
 same task id arrives labelled with the stats above it: the reader sees lines the task never touched, and no
 request failed. Tests:
-`backend/api/git_diff_identity_test.go`, `backend/stream/worktree_watcher_baseline_test.go`.
+`backend/api/git_diff_identity_test.go`, `backend/stream/worktree_watcher_baseline_test.go`,
+`backend/api/checkpoint_diff_test.go`.
 
 ## Raw file bytes
 

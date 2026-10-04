@@ -1336,6 +1336,7 @@
                             stagedFiles={[]}
                             unstagedFiles={[]}
                             loading={compareLoading}
+                            collapseScope="compare"
                         />
                     {:else}
                         <div class="diff-viewer-loading">{t('git.loadingDiffViewer')}</div>
@@ -1351,6 +1352,7 @@
                             unstagedFiles={sortedUnstagedFiles}
                             unstagedUntracked={unstagedUntracked}
                             selectedPath={selectedPath}
+                            collapseScope="project"
                             onStageFile={(path, stage) => handleStagePaths([path], stage)}
                             onStageAll={() => handleStagePaths(pathsOf('unstaged'), true, 'section', 'unstaged')}
                             onUnstageAll={() => handleStagePaths(pathsOf('staged'), false, 'section', 'staged')}

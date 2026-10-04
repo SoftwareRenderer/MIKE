@@ -36,7 +36,8 @@ type GitHandler struct {
 
 // taskDiffCache holds, per task, its worktree diff against HEAD at the baseline
 // git.WorktreeManager.TaskDiffBaseline names. Nothing else may be stored here: GET /tasks/{id}/diff/file
-// names a path and no refs, so it can only answer for that one comparison.
+// answers from it only when the request names no refs, so a request that does name them computes its own
+// comparison instead.
 type taskDiffCache struct {
 	byTask sync.Map // taskID -> *git.TaskDiff
 }
@@ -728,20 +729,11 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Every comparison here asks TaskDiffBaseline, so a checkpoint's diff measures from the same commit as
-	// the Changes panel, the commit list and the card stats — the fork point in a forked thread. It names
-	// the pinned BaseCommit first, so a branch moved forward by a merge cannot empty the diff.
-	baseRef := customBase
-	if baseRef == "" {
-		baseRef = h.worktreeMgr.TaskDiffBaseline(task)
-	}
-
-	// A checkpoint headRef is a commit whose tree holds the whole working state, so baseRef..headRef is
-	// the change up to and including it. A checkpoint that resolves to the baseline has no changes of its
-	// own, and the honest diff for that is empty.
-	taskDiff, err := h.worktreeMgr.GetTaskDiff(taskID, baseRef, headRef, fullDiff)
-	if err != nil && task.Branch != "" && errors.Is(err, git.ErrWorktreeNotFound) {
-		taskDiff, err = h.getTaskDiffFromProject(projectID, task, baseRef, headRef, fullDiff)
-	}
+	// the Changes panel, the commit list and the card stats — the fork point in a forked thread. A checkpoint
+	// headRef is a commit whose tree holds the whole working state, so the answer is the change up to and
+	// including it; a checkpoint that resolves to the baseline has no changes of its own, and the honest diff
+	// for that is empty.
+	taskDiff, baseRef, err := h.taskDiffBetween(task, customBase, headRef, fullDiff)
 	if answerTaskGitFault(w, err, "git diff") {
 		return
 	}
@@ -894,8 +886,79 @@ func buildDiffManifest(d *git.TaskDiff, stagedPaths map[string]struct{}, baseRef
 	return manifest
 }
 
-// HandleTaskDiffFile returns one file from the cached diff, tracked or untracked. Query param path is
-// relative to the worktree; a task with no cached diff, or a path outside it, is an error.
+// trackedFileResponse is one tracked file as /diff/file answers it. Both of that route's paths — the cached
+// working-tree diff and a request naming two refs — answer with it, so a caller cannot tell which it got
+// from the shape and must read the refs it asked for back out of its own request.
+func trackedFileResponse(f *git.TrackedDiffFile) map[string]any {
+	resp := map[string]any{
+		"rows":      f.Rows,
+		"truncated": f.Truncated,
+	}
+	if len(f.CommittedRows) > 0 {
+		resp["committedRows"] = f.CommittedRows
+	}
+	if f.OrigAdded > 0 {
+		resp["origAdded"] = f.OrigAdded
+	}
+	if f.OrigRemoved > 0 {
+		resp["origRemoved"] = f.OrigRemoved
+	}
+	if f.IsBinary {
+		resp["isBinary"] = true
+	}
+	if f.FileSize != nil {
+		resp["fileSize"] = *f.FileSize
+	}
+	return resp
+}
+
+// diffBaseline names the commit every comparison for this task measures from — the task's pinned base on a
+// forked thread, where a branch moved forward by a merge cannot empty the diff. An empty customBase asks for
+// it; a caller that names one is running its own comparison.
+func (h *GitHandler) diffBaseline(task *types.Task, customBase string) string {
+	if customBase != "" {
+		return customBase
+	}
+	return h.worktreeMgr.TaskDiffBaseline(task)
+}
+
+// taskDiffBetween answers one comparison of a task's files: the two named trees, with the task's diff baseline
+// standing in for an empty base, and the project's own repository answering when this task's worktree is gone.
+// It reports the base it measured from, and writes it into the diff, so the panel can name both sides.
+// Every diff the panel reads for one task goes through here, so a checkpoint's view and the live panel measure
+// from the same commit.
+func (h *GitHandler) taskDiffBetween(task *types.Task, baseRef, headRef string, full bool) (*git.TaskDiff, string, error) {
+	base := h.diffBaseline(task, baseRef)
+	taskDiff, err := h.worktreeMgr.GetTaskDiff(task.ID, base, headRef, full)
+	if err != nil && task.Branch != "" && errors.Is(err, git.ErrWorktreeNotFound) {
+		taskDiff, err = h.getTaskDiffFromProject(task, base, headRef, full)
+	}
+	if taskDiff != nil {
+		taskDiff.BaseRef = base
+	}
+	return taskDiff, base, err
+}
+
+// writeRefFileDiff answers one file's diff between two refs. The panel's checkpoint view compares a
+// snapshot tree against the baseline, and a truncated row there must expand from those two trees: the
+// cached working-tree diff is a different comparison, and rows read from it would show work done after the
+// checkpoint while claiming to be the checkpoint's own.
+func (h *GitHandler) writeRefFileDiff(w http.ResponseWriter, task *types.Task, filePath, baseRef, headRef string, full bool) {
+	taskDiff, _, err := h.taskDiffBetween(task, baseRef, headRef, full)
+	if answerTaskGitFault(w, err, "git diff") {
+		return
+	}
+	f, ok := taskDiff.Tracked[filePath]
+	if !ok {
+		httputil.JSONError(w, http.StatusNotFound, "file not found in diff")
+		return
+	}
+	httputil.JSONResponse(w, http.StatusOK, trackedFileResponse(f))
+}
+
+// HandleTaskDiffFile returns one file's diff, tracked or untracked. Query param path is relative to the
+// worktree; a task with no cached diff, or a path outside it, is an error. With ?head= the answer is that
+// file between ?base= (default: the task's diff baseline) and that ref, computed for the request.
 func (h *GitHandler) HandleTaskDiffFile(w http.ResponseWriter, r *http.Request) {
 	taskID := r.PathValue("taskID")
 	// The cache holds only that task's working-tree diff (see taskDiffCache), so the pair in the path is
@@ -908,6 +971,18 @@ func (h *GitHandler) HandleTaskDiffFile(w http.ResponseWriter, r *http.Request) 
 	fullFile := r.URL.Query().Get("full") == "1"
 	if filePath == "" {
 		httputil.JSONError(w, http.StatusBadRequest, "path is required")
+		return
+	}
+	headRef, ok := refParam(w, r, "head", "")
+	if !ok {
+		return
+	}
+	customBase, ok := refParam(w, r, "base", "")
+	if !ok {
+		return
+	}
+	if headRef != "" {
+		h.writeRefFileDiff(w, task, filePath, customBase, headRef, fullFile)
 		return
 	}
 	taskDiff, ok := h.diffCache.get(taskID)
@@ -924,26 +999,7 @@ func (h *GitHandler) HandleTaskDiffFile(w http.ResponseWriter, r *http.Request) 
 				}
 			}
 		}
-		resp := map[string]any{
-			"rows":      f.Rows,
-			"truncated": f.Truncated,
-		}
-		if len(f.CommittedRows) > 0 {
-			resp["committedRows"] = f.CommittedRows
-		}
-		if f.OrigAdded > 0 {
-			resp["origAdded"] = f.OrigAdded
-		}
-		if f.OrigRemoved > 0 {
-			resp["origRemoved"] = f.OrigRemoved
-		}
-		if f.IsBinary {
-			resp["isBinary"] = true
-		}
-		if f.FileSize != nil {
-			resp["fileSize"] = *f.FileSize
-		}
-		httputil.JSONResponse(w, http.StatusOK, resp)
+		httputil.JSONResponse(w, http.StatusOK, trackedFileResponse(f))
 		return
 	}
 	for _, u := range taskDiff.Untracked {
@@ -989,8 +1045,8 @@ func (h *GitHandler) HandleTaskDiffFile(w http.ResponseWriter, r *http.Request) 
 }
 
 // getTaskDiffFromProject answers the diff of a task whose worktree is gone.
-func (h *GitHandler) getTaskDiffFromProject(projectID string, task *types.Task, baseRef, headRef string, fullDiff bool) (*git.TaskDiff, error) {
-	project, err := h.store.GetProject(projectID)
+func (h *GitHandler) getTaskDiffFromProject(task *types.Task, baseRef, headRef string, fullDiff bool) (*git.TaskDiff, error) {
+	project, err := h.store.GetProject(task.ProjectID)
 	if err != nil {
 		return nil, err
 	}

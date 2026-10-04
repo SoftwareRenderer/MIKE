@@ -49,7 +49,7 @@ describe('clearAll (sign-out sweep)', () => {
         await storage.saveExplorerLayout({ leftWidth: 200, rightWidth: 400 } as any);
         await storage.saveCollapsedTasks(new Set(['task-1']));
         await storage.saveCollapsedSections(new Set(['sec']));
-        await storage.saveCollapsedDiffFiles(new Set(['a.go']));
+        await storage.saveCollapsedDiffFiles('working', new Set(['a.go']));
         await storage.saveEditorTabs('proj-a', { openFiles: [], activeFilePath: '', pinnedFiles: [] });
 
         // The two hints index.html pre-paints from.
@@ -73,7 +73,7 @@ describe('clearAll (sign-out sweep)', () => {
             .toEqual({ leftWidth: 250, rightWidth: 180, splitRatio: 0.5 });
         expect(keysIn('collapsed-tasks')).toEqual([]);
         expect(await storage.loadCollapsedSections().then((s) => s.size)).toBe(0);
-        expect(await storage.loadCollapsedDiffFiles().then((s) => s.size)).toBe(0);
+        expect(await storage.loadCollapsedDiffFiles('working').then((s) => s.size)).toBe(0);
         expect(await storage.loadEditorTabs('proj-a')).toBeNull();
 
         expect(localStorage.getItem('kanban-theme-css')).toBeNull();
