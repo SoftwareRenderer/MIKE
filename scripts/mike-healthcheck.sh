@@ -18,8 +18,9 @@
 set -u
 
 port="${MIKE_PORT:-3000}"
-scheme=https
-[ "${MIKE_TLS:-1}" = "0" ] && scheme=http
+# The certificate is signed by this server's own local CA, which the health check has no reason to
+# trust and no reason to verify twice — it is testing liveness, and `-k` says so on every call.
+base="https://127.0.0.1:${port}"
 
 if ! runsc --version >/dev/null 2>&1; then
     echo "runsc --version failed (gVisor missing or not executable)"
@@ -31,10 +32,7 @@ if ! podman info --format '{{.Store.GraphDriverName}}' >/dev/null 2>&1; then
     exit 1
 fi
 
-# -k on purpose: the certificate is signed by this server's own local CA, which the health
-# check has no reason to trust and no reason to verify twice — it is testing liveness.
-base="${scheme}://127.0.0.1:${port}"
-
+# -k on purpose: see the base URL above — the local CA is not in this container's trust store.
 code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 "${base}/api/health" 2>/dev/null || true)"
 case "$code" in
     200) ;;

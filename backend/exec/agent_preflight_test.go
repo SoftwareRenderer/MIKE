@@ -3,6 +3,7 @@ package exec
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"mike/backend/agent"
@@ -12,10 +13,7 @@ import (
 
 // Neither the extension nor its binary is named "pi": an agent whose binary has some other name is
 // the only case that tells the two names apart.
-const (
-	otherAgentName   = "codelint"
-	otherAgentBinary = "codelint-cli"
-)
+const otherAgentBinary = "codelint-cli"
 
 // stubAdapter is the adapter an agent extension ships. The field that matters is the binary its
 // SubprocessConfig names — the only place in the product that name exists.
@@ -47,23 +45,27 @@ func (p *recordingProber) BinaryAvailable(taskID, binary string) bool {
 	return p.available
 }
 
-// registerStubAgent wires the extension name to an adapter naming its own binary, and hands the
-// adapter back so a test can see whether it was released.
-func registerStubAgent(t *testing.T) *stubAdapter {
+// registerStubAgent wires an extension name to an adapter naming its own binary, and hands both back so a
+// test can address that extension and see whether its adapter was released.
+//
+// The name belongs to the caller because backend/agent's adapter registry is process-wide and these tests
+// run in parallel: two of them under one name receive one adapter and close each other's.
+func registerStubAgent(t *testing.T) (string, *stubAdapter) {
 	t.Helper()
+	name := "codelint-" + strings.ToLower(t.Name())
 	adapter := &stubAdapter{binary: otherAgentBinary}
-	agent.RegisterAdapterFactory(otherAgentName, func() pkgagent.AgentAdapter { return adapter })
-	return adapter
+	agent.RegisterAdapterFactory(name, func() pkgagent.AgentAdapter { return adapter })
+	return name, adapter
 }
 
 func TestPrepareAgentProbesTheAdaptersOwnBinary(t *testing.T) {
 	t.Parallel()
-	registerStubAgent(t)
+	extName, _ := registerStubAgent(t)
 	prober := &recordingProber{available: false}
 	te := newBareTestExecutor(t)
 	te.agentBinaries = prober
 
-	prepared, err := te.prepareAgent(context.Background(), &extensions.Extension{Name: otherAgentName},
+	prepared, err := te.prepareAgent(context.Background(), &extensions.Extension{Name: extName},
 		"task-1", t.TempDir(), "kanban-task-1", true)
 
 	if prepared != nil {
@@ -83,17 +85,17 @@ func TestPrepareAgentProbesTheAdaptersOwnBinary(t *testing.T) {
 // operator guessing what the container lacked.
 func TestPrepareAgentRefusalNamesTheBinaryItMissed(t *testing.T) {
 	t.Parallel()
-	registerStubAgent(t)
+	extName, _ := registerStubAgent(t)
 	te := newBareTestExecutor(t)
 	te.agentBinaries = &recordingProber{available: false}
 
-	_, err := te.prepareAgent(context.Background(), &extensions.Extension{Name: otherAgentName},
+	_, err := te.prepareAgent(context.Background(), &extensions.Extension{Name: extName},
 		"task-1", t.TempDir(), "kanban-task-1", true)
 
 	if err == nil {
 		t.Fatal("expected a refusal")
 	}
-	for _, want := range []string{otherAgentName, otherAgentBinary} {
+	for _, want := range []string{extName, otherAgentBinary} {
 		if !containsString(err.Error(), want) {
 			t.Errorf("err = %q, want it to name %q", err, want)
 		}
@@ -102,12 +104,12 @@ func TestPrepareAgentRefusalNamesTheBinaryItMissed(t *testing.T) {
 
 func TestPrepareAgentWithBinaryPresentStartsNothingEarly(t *testing.T) {
 	t.Parallel()
-	adapter := registerStubAgent(t)
+	extName, adapter := registerStubAgent(t)
 	prober := &recordingProber{available: true}
 	te := newBareTestExecutor(t)
 	te.agentBinaries = prober
 
-	prepared, err := te.prepareAgent(context.Background(), &extensions.Extension{Name: otherAgentName},
+	prepared, err := te.prepareAgent(context.Background(), &extensions.Extension{Name: extName},
 		"task-1", t.TempDir(), "kanban-task-1", true)
 	if err != nil {
 		t.Fatalf("prepareAgent: %v", err)
@@ -129,12 +131,12 @@ func TestPrepareAgentWithBinaryPresentStartsNothingEarly(t *testing.T) {
 // unsandboxed project has no container to ask.
 func TestPrepareAgentHostModeAsksTheContainerNothing(t *testing.T) {
 	t.Parallel()
-	registerStubAgent(t)
+	extName, _ := registerStubAgent(t)
 	prober := &recordingProber{available: false}
 	te := newBareTestExecutor(t)
 	te.agentBinaries = prober
 
-	prepared, err := te.prepareAgent(context.Background(), &extensions.Extension{Name: otherAgentName},
+	prepared, err := te.prepareAgent(context.Background(), &extensions.Extension{Name: extName},
 		"task-1", t.TempDir(), "kanban-task-1", false)
 	if err != nil {
 		t.Fatalf("prepareAgent: %v", err)
@@ -150,10 +152,10 @@ func TestPrepareAgentHostModeAsksTheContainerNothing(t *testing.T) {
 // never a silent pass and never a nil dereference.
 func TestPrepareAgentWithoutContainerRefuses(t *testing.T) {
 	t.Parallel()
-	registerStubAgent(t)
+	extName, _ := registerStubAgent(t)
 	te := newBareTestExecutor(t)
 
-	prepared, err := te.prepareAgent(context.Background(), &extensions.Extension{Name: otherAgentName},
+	prepared, err := te.prepareAgent(context.Background(), &extensions.Extension{Name: extName},
 		"task-1", t.TempDir(), "kanban-task-1", true)
 	if prepared != nil {
 		prepared.Close()

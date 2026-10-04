@@ -143,8 +143,9 @@ answering early.
   dialog. **If a handler ever starts vetoing unload, this page stops being silently reloadable** —
   that is the assumption to re-check, not a detail.
 
-The exception is the login screen: the master password is the one thing never written anywhere, so a
-reload that lands after a manager autofilled it eats the only copy. `isEditingText()` is asked at the
+The exception is the login screen: a pairing code is typed once, lives only in memory on the server, and
+has no second copy anywhere, so a reload that lands after a password manager autofilled the field eats the
+only copy. `isEditingText()` is asked at the
 moment of applying — after `registration.update()`, which is the gap the typing happens in — and only
 by the automatic caller: it declines, and the update waits for the next open. `checkNow()` never asks,
 because a click is intent. Neither does a chunk that cannot be fetched: the panel the person asked for is

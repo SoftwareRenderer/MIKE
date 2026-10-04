@@ -101,7 +101,7 @@ func TestAPITokenAndSessionTokensAreNotInterchangeable(t *testing.T) {
 	sessions, s := testManagerWithStore(t)
 	ctx := context.Background()
 
-	_, sessionToken, _, err := sessions.Login(ctx, testPassword, testIP, testUA)
+	_, sessionToken, _, err := sessions.StartSession(ctx, testIP, testUA)
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}

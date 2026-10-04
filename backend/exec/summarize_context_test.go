@@ -241,7 +241,10 @@ func TestComposeSystemPrompt_SandboxCwd(t *testing.T) {
 	if !strings.Contains(host, "/host/worktree") {
 		t.Fatalf("host prompt lost the worktree path:\n%s", host)
 	}
-	if strings.Contains(host, "/home/sandbox/") {
+	// The refusal is this project's mount, not the mount root: a skill listing writes the checkout's own
+	// absolute path into the prompt, so on a host whose home *is* the mount root a bare-root refusal
+	// rejects a true path rather than an advertised mount.
+	if strings.Contains(host, "/home/sandbox/proj") {
 		t.Fatalf("non-sandboxed prompt mentions the sandbox mount:\n%s", host)
 	}
 

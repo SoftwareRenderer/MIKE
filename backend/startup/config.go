@@ -22,10 +22,8 @@ const (
 	EnvDataDir           = "MIKE_DATA_DIR"
 	EnvWorktreesDir      = "MIKE_WORKTREES_DIR"
 	EnvFrontendDist      = "MIKE_FRONTEND_DIST"
-	EnvTLS               = "MIKE_TLS"
 	EnvAllowedHosts      = "MIKE_ALLOWED_HOSTS"
 	EnvLogLevel          = "MIKE_LOG_LEVEL"
-	EnvLoginPassword     = "MIKE_LOGIN_PASSWORD"
 	EnvEncryptionKey     = "MIKE_ENCRYPTION_KEY"
 	EnvRegistryURL       = "MIKE_REGISTRY_URL"
 	EnvUpdateURL         = "MIKE_UPDATE_URL"
@@ -59,8 +57,9 @@ const (
 	// cannot silently drop brute-force protection.
 	DefaultLoginRateLimit = 5
 
-	// MinSecretLength is both the minimum master password length accepted on an exposed
-	// (non-loopback) listen address and the length below which a secret is reported as weak at boot.
+	// MinSecretLength is the length below which a secret is reported as weak at boot. The credential
+	// that used to sit beside it is gone: login is a passkey ceremony, so the only secret this ladder
+	// resolves is the encryption key.
 	MinSecretLength = 8
 
 	// DefaultMemoryBudgetPct is the share of installed RAM the memory budget admits against. The
@@ -68,11 +67,6 @@ const (
 	// of the machine rather than a margin kept over everyone else's usage.
 	DefaultMemoryBudgetPct = 90
 )
-
-// weakPasswords are master passwords that must never guard a non-loopback listen address.
-var weakPasswords = map[string]struct{}{
-	"test": {}, "dev": {}, "admin": {}, "password": {}, "pass": {}, "changeme": {},
-}
 
 // Flags carries what the command line provided. The zero value means "not given", which is what makes
 // flag > environment > default expressible: an empty string and a 0 int are the absences, not values.
@@ -84,11 +78,15 @@ type Flags struct {
 	DataDir      string
 	WorktreesDir string
 	FrontendDist string
-	NoTLS        bool
+	// TLSCertPath and TLSKeyPath name an operator's own certificate pair. TLS itself has no switch.
 	TLSCertPath  string
 	TLSKeyPath   string
 	AllowedHosts string
 	LogLevel     string
+	// ResetPasskeys is --reset-passkeys: wipe every registered passkey and every session, then exit.
+	// It has no environment spelling on purpose — a credential-destroying command a stale environment
+	// variable can select is one that runs at every restart.
+	ResetPasskeys bool
 }
 
 // Config is written once at resolution and never again: the answer a request gets does not depend on
@@ -106,19 +104,24 @@ type Config struct {
 	// copy compiled into this binary, which is what every `-tags release` build resolves to.
 	FrontendDist string
 
-	TLSDisabled bool
+	// TLSCertPath and TLSKeyPath are whose certificate this server serves; empty means the local CA
+	// signs the leaf. There is no switch for TLS — a plain HTTP deployment is not one of the answers.
 	TLSCertPath string
 	TLSKeyPath  string
 
 	LogLevel string
 
+	// ResetPasskeys is the resolved --reset-passkeys: this process is the one-shot wipe, not a server.
+	ResetPasskeys bool
+
 	// AllowedHosts are the *extra* Host values accepted beyond localhost and the listen host; the
 	// rest of the pinning rule lives in the middleware that reads this.
 	AllowedHosts []string
 
-	MasterPassword string
-	EncryptionKey  string
-	RegistryURL    string
+	// EncryptionKey is the secret every credential at rest is sealed with, and the only secret this
+	// ladder resolves.
+	EncryptionKey string
+	RegistryURL   string
 
 	// UpdateManifestURL is where the release manifest is read from. Empty means the hosted default.
 	UpdateManifestURL string
@@ -205,19 +208,21 @@ func Resolve(f Flags) (Config, error) {
 		c.FrontendDist = resolveString(f.FrontendDist, EnvFrontendDist, DefaultFrontend)
 	}
 
-	// --no-tls and MIKE_TLS=0 both disable TLS; MIKE_TLS is the env spelling of the same switch, so
-	// only the exact "0" means off (an unset or garbage value keeps TLS on).
-	c.TLSDisabled = f.NoTLS || os.Getenv(EnvTLS) == "0"
+	// Only whose certificate is served is decided here; TLS has no switch. Half a pair is refused the
+	// way a present-but-invalid flag value is, rather than falling through to the generated leaf.
+	if (f.TLSCertPath == "") != (f.TLSKeyPath == "") {
+		return Config{}, fmt.Errorf("--tls-cert and --tls-key must both be given or both omitted")
+	}
 	c.TLSCertPath = f.TLSCertPath
 	c.TLSKeyPath = f.TLSKeyPath
 
 	c.LogLevel = resolveString(f.LogLevel, EnvLogLevel, defaultLogLevel)
+	c.ResetPasskeys = f.ResetPasskeys
 
 	// The flag replaces the environment rather than extending it: a stale variable must not widen the
 	// allowlist of a deployment that switched to the flag.
 	c.AllowedHosts = splitCSV(resolveString(f.AllowedHosts, EnvAllowedHosts, ""))
 
-	c.MasterPassword = os.Getenv(EnvLoginPassword)
 	c.EncryptionKey = os.Getenv(EnvEncryptionKey)
 	if c.EncryptionKey == "" {
 		return Config{}, fmt.Errorf("%s environment variable is not set", EnvEncryptionKey)
@@ -263,20 +268,6 @@ func Resolve(f Flags) (Config, error) {
 	return c, nil
 }
 
-// RefusesWeakSecret reports whether startup must abort: a weak MIKE_LOGIN_PASSWORD
-// (shorter than MinSecretLength, or a well-known default) is fatal unless the
-// server listens on loopback only. Loopback + weak stays allowed so the dev flow works.
-func (c Config) RefusesWeakSecret() bool {
-	if IsLoopbackAddr(c.Listen) {
-		return false
-	}
-	pw := strings.TrimSpace(c.MasterPassword)
-	if len(pw) < MinSecretLength {
-		return true
-	}
-	return isKnownWeak(strings.ToLower(pw))
-}
-
 // WeakSecrets lists the secret variables that are set but shorter than the recommended length, so the
 // operator hears about it at boot rather than in an incident. An unset secret is not "weak" — the boot
 // already refused the ones that must be present. The result is sorted because it is printed as one
@@ -286,7 +277,7 @@ func (c Config) WeakSecrets() []string {
 	for _, s := range []struct {
 		name  string
 		value string
-	}{{EnvEncryptionKey, c.EncryptionKey}, {EnvLoginPassword, c.MasterPassword}} {
+	}{{EnvEncryptionKey, c.EncryptionKey}} {
 		if s.value != "" && len(s.value) < MinSecretLength {
 			weak = append(weak, s.name)
 		}
@@ -438,11 +429,6 @@ func IsLoopbackAddr(listen string) bool {
 	}
 	ip := net.ParseIP(strings.Trim(b, "[]"))
 	return ip != nil && ip.IsLoopback()
-}
-
-func isKnownWeak(password string) bool {
-	_, known := weakPasswords[password]
-	return known
 }
 
 // splitList drops blanks and padding from a separated list. Which separator a variable uses differs

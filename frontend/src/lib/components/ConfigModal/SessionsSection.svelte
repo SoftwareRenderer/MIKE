@@ -119,7 +119,7 @@
 </script>
 
 <section class="settings-section sessions-section">
-    <div class="section-header">
+    <div class="settings-section-header">
         <h3 class="settings-section-title">{t('settings.sessions.title')}</h3>
         <div class="settings-section-actions">
             <button
@@ -141,19 +141,19 @@
     </div>
 
     {#if error}
-        <div class="sessions-error" role="alert">{error}</div>
+        <div class="settings-list-error" role="alert">{error}</div>
     {/if}
 
     {#if loading && sessions.length === 0}
-        <div class="sessions-status" role="status">{t('settings.sessions.loadingList')}</div>
+        <div class="settings-list-status" role="status">{t('settings.sessions.loadingList')}</div>
     {:else if sessions.length === 0 && !error}
-        <div class="sessions-status" role="status">{t('settings.sessions.none')}</div>
+        <div class="settings-list-status" role="status">{t('settings.sessions.none')}</div>
     {:else}
         {#each rows as session (session.id)}
             <div class="settings-row" class:session-current={session.current} data-session-id={session.id}>
                 <div class="settings-row-info">
                     <div class="session-headline">
-                        <span class="session-agent" title={session.user_agent || t('settings.sessions.unknownDevice')}>
+                        <span class="settings-row-label" title={session.user_agent || t('settings.sessions.unknownDevice')}>
                             {session.user_agent || t('settings.sessions.unknownDevice')}
                         </span>
                         {#if session.current}
@@ -183,21 +183,13 @@
             </div>
         {/each}
         {#if otherCount === 0}
-            <div class="sessions-status" role="status">{t('settings.sessions.none')}</div>
+            <div class="settings-list-status" role="status">{t('settings.sessions.none')}</div>
         {/if}
     {/if}
 </section>
 
 <style>
     @import '$lib/styles/settings-section.css';
-
-    .section-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-        flex-wrap: wrap;
-    }
 
     .sessions-section {
         gap: 10px;
@@ -212,16 +204,6 @@
         gap: 8px;
         min-width: 0;
     }
-    /* Ellipsize the User-Agent; the full string stays in the title tooltip. */
-    .session-agent {
-        font-size: var(--text-sm);
-        font-weight: 500;
-        color: var(--color-text-primary);
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
     .session-badge {
         flex-shrink: 0;
         font-size: var(--text-2xs);
@@ -232,14 +214,5 @@
         border-radius: var(--radius-sm);
         background: var(--color-accent);
         color: var(--color-btn-text);
-    }
-    .sessions-status {
-        font-size: var(--text-sm);
-        color: var(--color-text-tertiary);
-    }
-    .sessions-error {
-        font-size: var(--text-sm);
-        font-weight: 500;
-        color: var(--color-status-red);
     }
 </style>

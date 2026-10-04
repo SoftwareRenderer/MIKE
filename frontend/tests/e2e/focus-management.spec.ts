@@ -49,12 +49,17 @@ test.describe('Focus management for conditionally rendered inputs', () => {
         await page.waitForSelector('.project-item', { timeout: 10000 });
     });
 
-    test('login modal focuses the password field', async ({ page }) => {
+    test('login modal focuses the pairing-code field it inserts', async ({ page }) => {
         const context = page.context();
         await context.clearCookies();
         await gotoProject(page);
-        await expect(page.locator('#login-password')).toBeVisible({ timeout: 10000 });
-        await expectFocused(page, '#login-password');
+        const modal = page.locator('.login-modal');
+        await expect(modal).toBeVisible({ timeout: 10000 });
+        // This install is paired, so the gate opens asking for a passkey and holds no input. The code
+        // body is the one part of the form that inserts a field, and the stage change must focus it.
+        await modal.getByText('I have a pairing code').click();
+        await expect(page.locator('#login-code')).toBeVisible({ timeout: 5000 });
+        await expectFocused(page, '#login-code');
     });
 
     test('Add Project modal focuses new-folder input and clone URL', async ({ page }) => {

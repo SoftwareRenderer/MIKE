@@ -39,6 +39,7 @@ pkg/logging/logging.go:Write
 pkg/logging/logging.go:String
 pkg/logging/logging.go:Reset
 pkg/logging/logging.go:Lines
+backend/auth/pairing.go:Live
 "
 
 # pkg/logging, one reason each. deadcode walks a call graph, so it cannot see three legitimate shapes:
@@ -55,6 +56,10 @@ pkg/logging/logging.go:Lines
 # backend/crypto: Derivations is how the one-KDF-per-Box test counts without measuring wall time.
 # The same key bytes come out of every derivation, so comparing keys proves repeatability, not the
 # count; a wall-time bound is the only other measurement and no Go test here may depend on timing.
+#
+# backend/auth: Live is how many pairing codes are outstanding. No route answers a count - a mint
+# answers one code and a full set answers a refusal - so the boot decision a backend/server test owns
+# ("an unpaired install prints a code, a paired one prints nothing") has no other read-back.
 #
 # backend/prompts: ActiveOverlay is the read side of SetOverlay. Which (dir, locale) pair the server
 # installed is the wiring a backend/server test owns, and dir has no other read-back - ActiveLocale

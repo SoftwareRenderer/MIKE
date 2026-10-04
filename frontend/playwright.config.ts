@@ -28,6 +28,9 @@ const ISOLATED_SPECS = [
   // cannot share the lane every other chromium spec reads.
   'settings-update-dot',
   'settings-sessions',
+  // Registers and revokes passkeys on the lane server — the credentials every other spec's
+  // session is made of, so it cannot share the lane that hands them out.
+  'settings-passkeys',
   // Issues and revokes API tokens on the lane server, and asserts what a token can reach.
   'settings-api-tokens',
 ];
@@ -56,8 +59,13 @@ export default defineConfig({
     timeout: 30000,
   },
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL: 'https://localhost:3000',
     trace: 'off',
+    // The lane servers sign their leaves with a CA each created in its own data directory, which no
+    // browser here trusts. Their certificates are not what a spec measures — the ceremony is — so the
+    // certificate is accepted. `helpers-auth.mjs` opens its own browser for the pairing walk and says
+    // the same thing there.
+    ignoreHTTPSErrors: true,
   },
   projects: [
     {
@@ -73,7 +81,7 @@ export default defineConfig({
       name: 'isolated',
       use: {
           ...devices['Desktop Chrome'],
-          baseURL: 'http://localhost:3001',
+          baseURL: 'https://localhost:3001',
           storageState: STORAGE_STATE_ISOLATED,
       },
       // Config/state-modifying suites on isolated server; serialized to avoid races

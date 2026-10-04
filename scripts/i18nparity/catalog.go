@@ -12,8 +12,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -723,26 +725,17 @@ func unionPlaceholders(forms map[string]string) map[string]int {
 // diffCounts names the counts that moved. `locale` labels the pack side so a German pack is
 // reported as "de×1", not as "zh×1" — the finding is read by a person deciding what to fix.
 func diffCounts(en, pack map[string]int, locale string) (missing, extra []string) {
-	for _, tok := range sortedKeys(en) {
+	for _, tok := range slices.Sorted(maps.Keys(en)) {
 		if pack[tok] < en[tok] {
 			missing = append(missing, fmt.Sprintf("%s (en×%d, %s×%d)", tok, en[tok], locale, pack[tok]))
 		}
 	}
-	for _, tok := range sortedKeys(pack) {
+	for _, tok := range slices.Sorted(maps.Keys(pack)) {
 		if pack[tok] > en[tok] {
 			extra = append(extra, fmt.Sprintf("%s (en×%d, %s×%d)", tok, en[tok], locale, pack[tok]))
 		}
 	}
 	return missing, extra
-}
-
-func sortedKeys(m map[string]int) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }
 
 // hasCJK reports whether a value contains any CJK ideograph. Only used to flag a value that was

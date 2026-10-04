@@ -33,9 +33,19 @@ var (
 
 // Paths that don't require authentication.
 var publicPaths = map[string]map[string]struct{}{
-	"/api/health":       {http.MethodGet: {}},
-	"/api/auth/login":   {http.MethodPost: {}},
-	"/api/auth/session": {http.MethodGet: {}},
+	"/api/health": {http.MethodGet: {}},
+	// The four ceremony routes are public because the ceremony is what produces the session: no session
+	// exists when they are called, so there is nothing to authenticate and nothing for CSRF to guard.
+	// They are rate limited, and the one typed secret (the pairing code) buys a registration, never a
+	// session — docs/passkeys.md.
+	"/api/auth/passkey/register/begin":  {http.MethodPost: {}},
+	"/api/auth/passkey/register/finish": {http.MethodPost: {}},
+	"/api/auth/passkey/assert/begin":    {http.MethodPost: {}},
+	"/api/auth/passkey/assert/finish":   {http.MethodPost: {}},
+	"/api/auth/session":                 {http.MethodGet: {}},
+	// The CA another device must import to trust this address. Public because the browser that is told to
+	// install it is the one with no session — HandleTLSCA and docs/tls.md say why that is safe.
+	"/api/tls/ca": {http.MethodGet: {}},
 }
 
 // hostClientPath is the extension bridge (frontend/public/host-client.js), which every UI

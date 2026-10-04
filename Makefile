@@ -266,8 +266,10 @@ check: ## THE GATE: lint + archgate + docs-check + bridge-check + build + Go tes
 # ./backend/server/, so both are here. `-parallel 4` because the race detector multiplies the work per
 # test, and the sandbox packages need a working podman + runsc on top of it. `./backend/llama/` is here
 # because its silence-deadline test is a race test: repetition in the gate proves nothing the detector
-# does not prove in one pass.
-RACE_PKGS := ./backend/git/ ./backend/exec/ ./backend/server/ ./backend/stream/ ./backend/api/ ./backend/llama/ ./backend/mcp/ ./pkg/logging/
+# does not prove in one pass. `./backend/auth/` is here because one pairing code paying for exactly one
+# registration is an invariant across ceremonies that run at the same moment, and its suite is a third of
+# a second.
+RACE_PKGS := ./backend/git/ ./backend/exec/ ./backend/server/ ./backend/stream/ ./backend/api/ ./backend/llama/ ./backend/mcp/ ./backend/auth/ ./pkg/logging/
 
 .PHONY: check-race
 check-race: ## -race over the executor/stream/terminal layers (~5min) — required for any concurrency change
@@ -282,12 +284,16 @@ check-race: ## -race over the executor/stream/terminal layers (~5min) — requir
 # (MIKE_ENCRYPTION_KEY must match the key that encrypted values in
 # data/kanban.db if you need stored secrets to decrypt.)
 MIKE_ENCRYPTION_KEY ?= dev-local-key
-MIKE_LOGIN_PASSWORD ?= test
-MIKE_TLS ?= 0
 
 .PHONY: run
-run: ## Start dev server (background, no TLS, dev defaults)
-	MIKE_ENCRYPTION_KEY=$(MIKE_ENCRYPTION_KEY) MIKE_LOGIN_PASSWORD=$(MIKE_LOGIN_PASSWORD) MIKE_TLS=$(MIKE_TLS) ./mike &
+run: ## Start dev server (background, https on the local CA, dev defaults; the first boot prints a pairing code)
+	MIKE_ENCRYPTION_KEY=$(MIKE_ENCRYPTION_KEY) ./mike &
+
+.PHONY: reset-passkeys
+reset-passkeys: ## Delete every registered passkey and every session in ./data (stop the server first)
+	@test -n "$(wildcard data/kanban.db)" || { echo 'reset-passkeys: no data/kanban.db here — run it from the install directory, or set MIKE_DATA_DIR'; exit 1; }
+	@$(MAKE) --no-print-directory build
+	MIKE_ENCRYPTION_KEY=$(MIKE_ENCRYPTION_KEY) ./mike --reset-passkeys
 
 .PHONY: stop
 stop: ## Stop dev server (exact process name; -f would match any path containing */mike)

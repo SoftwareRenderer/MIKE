@@ -274,7 +274,7 @@ func (s *session) call(ctx context.Context, name string, args map[string]any) (s
 	if res != nil && res.IsError {
 		return "", &Error{Server: s.server.Name, Kind: FailureToolError, Cause: errors.New(firstLine(text))}
 	}
-	return capAnswer(text), nil
+	return toolresult.CapText(text), nil
 }
 
 // renderContent flattens the answer's content blocks to text. A non-text block is named and skipped
@@ -305,14 +305,6 @@ func renderContent(res *mcp.CallToolResult) string {
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")
-}
-
-func capAnswer(text string) string {
-	if len(text) <= toolresult.MaxCaptureBytes {
-		return text
-	}
-	dropped := len(text) - toolresult.MaxCaptureBytes
-	return text[:toolresult.MaxCaptureBytes] + toolresult.CaptureMarker(dropped)
 }
 
 // classify turns a transport or protocol error into the kind a person can act on. The upstream text

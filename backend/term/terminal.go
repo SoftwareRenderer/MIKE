@@ -132,7 +132,7 @@ func (t *taskTerminal) applySize(rows, cols uint16) {
 // hostShellEnv is the environment of a host terminal — the one terminal outside a container, for
 // a project with sandboxing disabled. DANGER_ZONE=1 also means "this is the operator's own shell",
 // so it gets the operator's environment, credentials included; without the flag it gets
-// SafeAgentEnv, because a project row is not a grant of MIKE_LOGIN_PASSWORD or
+// SafeAgentEnv, because a project row is not a grant of
 // MIKE_ENCRYPTION_KEY to a shell.
 func hostShellEnv(dz sandbox.DangerZone) []string {
 	if dz.Allows() {

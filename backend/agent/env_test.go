@@ -54,11 +54,10 @@ func unsetAllowlisted(t *testing.T, key string) {
 	}
 }
 
-// TestSafeAgentEnv_StripsServerSecrets: the agent subprocess must never inherit the master
-// password or the key that decrypts every provider API key in the database.
+// TestSafeAgentEnv_StripsServerSecrets: the agent subprocess must never inherit the key that
+// decrypts every provider API key in the database.
 func TestSafeAgentEnv_StripsServerSecrets(t *testing.T) {
 	secrets := map[string]string{
-		"MIKE_LOGIN_PASSWORD":   "hunter2",
 		"MIKE_ENCRYPTION_KEY":   "super-secret-key",
 		"MIKE_REGISTRY_URL":     "https://example.invalid/registry.json",
 		"DANGER_ZONE":           "1",
@@ -170,7 +169,6 @@ func TestSafeAgentEnv_ChildSeesOnlyAllowlist(t *testing.T) {
 	if err != nil {
 		t.Skipf("env binary not available: %v", err)
 	}
-	t.Setenv("MIKE_LOGIN_PASSWORD", "hunter2")
 	t.Setenv("MIKE_ENCRYPTION_KEY", "super-secret-key")
 	t.Setenv("HOME", "/host/home")
 
@@ -183,9 +181,6 @@ func TestSafeAgentEnv_ChildSeesOnlyAllowlist(t *testing.T) {
 	}
 	child := strings.Split(strings.TrimSpace(string(out)), "\n")
 
-	if hasKV(child, "MIKE_LOGIN_PASSWORD=hunter2") {
-		t.Error("child process inherited MIKE_LOGIN_PASSWORD")
-	}
 	if hasKV(child, "MIKE_ENCRYPTION_KEY=super-secret-key") {
 		t.Error("child process inherited MIKE_ENCRYPTION_KEY")
 	}

@@ -48,6 +48,13 @@ const NOTHING_TO_DO: BootActions = {
 class SessionBoot {
     /** The login gate. True means the app is on screen. */
     isAuthenticated = $state(false);
+    /** Whether this install has any passkey, from the same answer that decided `isAuthenticated`. It is
+     *  the login form's branch — a fresh install has no credential to ask for, so it asks for the pairing
+     *  code instead. `null` is the server's "could not read it", which shows the sign-in branch. */
+    hasPasskey = $state<boolean | null>(null);
+    /** Whether this server has its own CA to hand out, from the same answer. It decides whether the
+     *  login gate can offer a browser the certificate that would make this connection secure. */
+    caDownload = $state(false);
     /** First paint is this module's, not the board's: the session check decides what to paint. */
     isLoadingAuth = $state(true);
     /** The session check has not answered, so the wait is what the loading screen says. */
@@ -81,7 +88,10 @@ class SessionBoot {
             }
         }, BOOT_OFFER_MS);
         try {
-            this.isAuthenticated = await checkSession();
+            const session = await checkSession();
+            this.hasPasskey = session.hasPasskey;
+            this.caDownload = session.caDownload;
+            this.isAuthenticated = session.authenticated;
             authResolved = true;
             clearTimeout(offlineTimer);
             this.bootSlow = false;
@@ -115,6 +125,9 @@ class SessionBoot {
     /** The login form's answer: there is a session now, so the app replaces the form. */
     async startAfterLogin(): Promise<void> {
         this.isAuthenticated = true;
+        // A session exists only behind a finished ceremony, so this browser holds a passkey whatever the
+        // boot answer said — and after a sign-out the form must ask for that passkey, not for a code.
+        this.hasPasskey = true;
         await this.startSession();
     }
 
@@ -146,6 +159,8 @@ class SessionBoot {
     /** Forget every flag. For tests, which boot the module more than once per instance. */
     reset(): void {
         this.isAuthenticated = false;
+        this.hasPasskey = null;
+        this.caDownload = false;
         this.isLoadingAuth = true;
         this.bootSlow = false;
         this.hasLocalCache = false;

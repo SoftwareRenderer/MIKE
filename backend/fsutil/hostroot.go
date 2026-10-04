@@ -210,12 +210,22 @@ func (h *HostRoot) Stat(p string) (fs.FileInfo, error) {
 	return fi, serr
 }
 
-// statResolved is the read fallback for a link os.Root refused. Contained requires the resolved
-// path to be inside the same roots, so the fallback cannot widen the jail.
-func (h *HostRoot) statResolved(p string, cause error) (fs.FileInfo, error) {
+// resolvedFallback resolves a path os.Root refused. Contained requires the resolved path to be inside
+// the same roots, so the fallback cannot widen the jail, and the refusal's cause stays in the message
+// because an escape and a broken symlink otherwise read the same to whoever is debugging one.
+func (h *HostRoot) resolvedFallback(p string, cause error) (string, error) {
 	resolved, err := h.resolveInside(p)
 	if err != nil {
-		return nil, fmt.Errorf("%w (a symlink in the path is the reason: %v)", h.Err(p), cause)
+		return "", fmt.Errorf("%w (a symlink in the path is the reason: %v)", h.Err(p), cause)
+	}
+	return resolved, nil
+}
+
+// statResolved is the read fallback for a link os.Root refused.
+func (h *HostRoot) statResolved(p string, cause error) (fs.FileInfo, error) {
+	resolved, err := h.resolvedFallback(p, cause)
+	if err != nil {
+		return nil, err
 	}
 	return os.Stat(resolved)
 }
@@ -242,9 +252,9 @@ func (h *HostRoot) ReadDir(p string) ([]fs.DirEntry, error) {
 }
 
 func (h *HostRoot) readDirResolved(p string, cause error) ([]fs.DirEntry, error) {
-	resolved, err := h.resolveInside(p)
+	resolved, err := h.resolvedFallback(p, cause)
 	if err != nil {
-		return nil, fmt.Errorf("%w (a symlink in the path is the reason: %v)", h.Err(p), cause)
+		return nil, err
 	}
 	return os.ReadDir(resolved)
 }

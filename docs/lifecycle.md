@@ -56,6 +56,8 @@ peer that connects and sends nothing stalls every later handshake, and returning
 dead listener, ends `Serve` and kills the process. `Accept()` waits on a queue a per-connection goroutine
 fills — not a worker pool, since N workers still block everyone at N silent peers. Silent peers are closed
 and logged per host, never handed to `net/http`, and only the listener's own accept error may end `Serve`.
+The plain half exists to send `RedirectHTTPSMiddleware`'s 301 and nothing else: the server has no
+plain-HTTP mode, so a cleartext request is one click on a wrong address, not a deployment.
 Test: `backend/server/listener_test.go`.
 ## Checking this
 

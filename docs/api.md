@@ -24,6 +24,10 @@ appears.
   listing holds labels and timestamps only, never a credential.
 - Everything on this screen is session-cookie work. **A token cannot list, create or revoke
   tokens** — that is deliberate, so a leaked token cannot promote itself.
+- Neither can it pair a device: the routes that mint a pairing code and manage the registered passkeys
+  (`POST`/`DELETE /api/auth/pairing`, `GET`/`PATCH`/`DELETE /api/auth/passkeys`) are cookie-and-CSRF work,
+  out of the route allowlist below. A token that could register a passkey could sign in as the whole
+  application.
 
 The mechanism is `backend/auth/api_tokens.go` (issue and validate), `backend/server/token_auth.go`
 (the route allowlist), `backend/server/handler_tokens.go` (the three management routes).
@@ -42,9 +46,9 @@ Authorization: Bearer mike_1f4c…
   rather than quietly acting as whoever's cookie arrived.
 - TLS is on by default and the server signs its own certificate; a client that is not on the
   machine needs the local CA from Settings → About (**Download CA Certificate**).
-- Two guards still apply to every call, cookie or not: the **Host** must name the server (loopback,
-  the address it listens on, or an entry of `MIKE_ALLOWED_HOSTS`) or the request is refused **421**;
-  and a request body over 32 MB is refused **413** before it is read.
+- Two guards still apply to every call, cookie or not. The **Host** must name the server (loopback,
+  the address it listens on, or an entry of `MIKE_ALLOWED_HOSTS`) or the request is refused **421**.
+  And a request body over 32 MB is refused **413** before it is read.
 - No CSRF header is needed or consulted with a token. CSRF exists because a browser attaches a
   session cookie by itself; a token reaches the server only because your code put it in the header.
 
@@ -69,8 +73,8 @@ grantable to it. `tokenScope` in `backend/server/token_auth.go` is the same tabl
 
 Not on it, among others: `/api/config`, `/api/sessions`, `/api/tokens`, the file routes
 (`/api/fs…`), the git and diff routes, task messages, threads, uploads, `/send`, `/commit`,
-`/resume`, `/summarize`, `/compact`, `…/move`, `DELETE …/tasks/done`, creating or deleting a
-project, extensions, previews, terminals, and both WebSocket upgrades (`/api/stream`, `/api/lsp`).
+`/resume`, `/summarize`, `/compact`, `…/move`, `DELETE …/tasks/done`, and creating or deleting a project.
+Extensions, previews, terminals and both WebSocket upgrades (`/api/stream`, `/api/lsp`) are outside it too.
 
 `…/move` is absent because it is not needed: `PUT …/tasks/{id}` writes `status`, which is what
 moving a card between columns is. The WebSockets are absent because a browser is the only thing that
@@ -199,7 +203,7 @@ for it, and treat a lost connection as "keep asking" rather than "it failed".
 | `409` | the action conflicts with reality: a task already running, a sandbox the user must reconfigure |
 | `413` | request body over 32 MB |
 | `421` | the `Host` header names a different authority than this server (`MIKE_ALLOWED_HOSTS`) |
-| `429` | too many login attempts — the password endpoint only; token calls are not rate-limited, because a 256-bit secret is not guessable |
+| `429` | too many login attempts — the passkey ceremony and pairing-code routes only; token calls are not rate-limited, because a 256-bit secret is not guessable |
 | `500` | this server's fault. The body is MIKE's own sentence and the cause is in its log, not in your response |
 
 A server fault is reported as MIKE's sentence on purpose: the cause would be git's stderr, a driver

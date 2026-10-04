@@ -97,7 +97,7 @@ func TestPlaceholdersAreByteIdenticalNotNormalised(t *testing.T) {
 	// literally. That is only caught if the token is compared as written.
 	// keyDiff works on key sets — a plural table is one key, not one key per form — so both sides
 	// come from a catalog, the way CompareCatalogs builds them.
-	_, extra := keyDiff(keySet(catalogKeys(cat("a", "{count}"))), keySet(catalogKeys(cat("a", "{count}"))))
+	_, extra := keyDiff(toSet(catalogKeys(cat("a", "{count}"))), toSet(catalogKeys(cat("a", "{count}"))))
 	if len(extra) != 0 {
 		t.Fatalf("unexpected key diff %v", extra)
 	}

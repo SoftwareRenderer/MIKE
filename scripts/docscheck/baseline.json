@@ -1,10 +1,10 @@
 {
  "AGENTS.md": {
   "history": 4,
-  "longsent": 8
+  "longsent": 2
  },
  "_global": {
-  "longsent": 193
+  "longsent": 182
  },
  "docs/adding-a-preference.md": {
   "history": 0,
@@ -48,7 +48,7 @@
  },
  "docs/confinement.md": {
   "history": 0,
-  "longsent": 13
+  "longsent": 9
  },
  "docs/documentation.md": {
   "history": 0,
@@ -71,7 +71,7 @@
   "longsent": 6
  },
  "docs/git-operations.md": {
-  "history": 2,
+  "history": 1,
   "longsent": 4
  },
  "docs/i18n.md": {
@@ -118,6 +118,10 @@
   "history": 1,
   "longsent": 2
  },
+ "docs/passkeys.md": {
+  "history": 0,
+  "longsent": 0
+ },
  "docs/preview.md": {
   "history": 0,
   "longsent": 6
@@ -140,7 +144,7 @@
  },
  "docs/storage.md": {
   "history": 0,
-  "longsent": 5
+  "longsent": 4
  },
  "docs/subtask-outline.md": {
   "history": 0,
@@ -148,7 +152,7 @@
  },
  "docs/testing.md": {
   "history": 4,
-  "longsent": 13
+  "longsent": 12
  },
  "docs/threads-checkpoints.md": {
   "history": 2,

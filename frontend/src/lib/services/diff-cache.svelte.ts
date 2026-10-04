@@ -114,6 +114,25 @@ export class DiffCache {
         this.state.untracked = { ...this.state.untracked, [path]: meta };
     }
 
+    /**
+     * Answer an fs_event about one path: a delete naming a row this panel holds means the manifest on
+     * screen is one file behind, so re-read it. Any other event, or one about a path with no row here,
+     * is not this panel's business.
+     *
+     * A deleted file can arrive with no `task_diff_stats` behind it: a create and its delete inside one
+     * worktree-watcher throttle compute as no change against the watcher's last compute, and a watcher
+     * that sees no change sends nothing. The row on screen came from a manifest read, so the fs_event is
+     * the only frame that says the file went away.
+     */
+    async reconcileDeletion(
+        event: { op: 'create' | 'delete'; path: string } | null,
+        options?: { headRef?: string; baseRef?: string },
+    ): Promise<void> {
+        if (!event || event.op !== 'delete') return;
+        if (!(event.path in this.state.files || event.path in this.state.untracked)) return;
+        await this.refreshManifest(options);
+    }
+
     /** Serialize staged_paths for deterministic change detection. */
     static stagedPathsKey(paths: string[] | null | undefined): string {
         return paths ? [...paths].sort().join('\n') : '';

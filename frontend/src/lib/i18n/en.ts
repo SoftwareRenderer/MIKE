@@ -557,6 +557,47 @@ const catalog = {
     'settings.tokens.createFailed': 'Failed to create token',
     'settings.tokens.revokeFailed': 'Failed to revoke token',
 
+    // ── ConfigModal/PasskeysSection.svelte ──
+    // The device list, and the code that adds one. A passkey is what signs a browser in, so the copy
+    // never offers a password as the alternative.
+    'settings.passkeys.title': 'Devices & passkeys',
+    'settings.passkeys.help': 'Every device that can sign in to this install. Signing in proves the browser holds that device’s key, so there is no password to send, lose or reuse. A device you no longer have is revoked here; when the last one is gone, start MIKE with --reset-passkeys.',
+    'settings.passkeys.reloadTitle': 'Reload the device list',
+    'settings.passkeys.refresh': 'Refresh',
+    'settings.passkeys.loading': 'Loading...',
+    'settings.passkeys.loadingList': 'Loading devices...',
+    'settings.passkeys.none': 'No devices paired yet',
+    'settings.passkeys.created': 'Added',
+    'settings.passkeys.lastUsed': 'Last used',
+    'settings.passkeys.neverUsed': 'Never used',
+    'settings.passkeys.unknownTime': 'Unknown',
+    'settings.passkeys.renameHint': 'Rename this device',
+    'settings.passkeys.nameAria': 'Device name',
+    'settings.passkeys.revoke': 'Revoke',
+    'settings.passkeys.revoking': 'Revoking...',
+    'settings.passkeys.revokeHint': 'Revoke this device',
+    'settings.passkeys.revokeTitle': 'Revoke this device?',
+    'settings.passkeys.revokeMessage': 'That browser will be signed out and can only come back with a pairing code from a device that is still signed in.',
+    'settings.passkeys.revokePasskeyAria': 'Revoke the passkey named {name}',
+    'settings.passkeys.revokedToast': 'Device revoked',
+    'settings.passkeys.loadFailed': 'Failed to load devices',
+    'settings.passkeys.pair': 'Pair a new device',
+    'settings.passkeys.pairHint': 'Create a code that lets one more device register a passkey',
+    'settings.passkeys.minting': 'Creating a code...',
+    'settings.passkeys.pairTitle': 'Open this link on the other device, or type the code into it.',
+    'settings.passkeys.qrAlt': 'QR code for the pairing link',
+    'settings.passkeys.copy': 'Copy link',
+    'settings.passkeys.copied': 'Copied',
+    'settings.passkeys.copyFailed': 'Could not copy the link — select it and copy it by hand',
+    'settings.passkeys.expiresIn': 'Works once, and expires in {time}',
+    'settings.passkeys.expired': 'This code has expired. Create a new one.',
+    'settings.passkeys.revokeCodes': 'Cancel the code',
+    'settings.passkeys.revokingCodes': 'Cancelling...',
+    'settings.passkeys.revokeCodesHint': 'Stop every pairing code that is still waiting',
+    'settings.passkeys.revokeCodesTitle': 'Cancel every waiting code?',
+    'settings.passkeys.revokeCodesMessage': 'A device still trying to pair will need a new code. Devices that are already paired are not touched.',
+    'settings.passkeys.codesRevokedToast': 'Pairing codes cancelled',
+
     // ── ConfigModal/ProviderCard.svelte (+ the display fallbacks in utils/providers.ts) ──
     // fetchError and testResult.message are server answers: not translated.
     'settings.provider.removeTitle': 'Remove Provider',
@@ -955,10 +996,38 @@ const catalog = {
     // ── LoginModal.svelte ──
     // Pre-auth, so this comes from the bundled en catalog: no fetch, no extension load.
     'app.login.signIn': 'Sign in',
-    'app.login.passwordAria': 'Password',
-    'app.login.signingIn': 'Signing in...',
+    'app.login.signInPasskey': 'Sign in with a passkey',
+    'app.login.signInHelp': 'MIKE signs this browser in with a passkey - the fingerprint, face or security key already set up on it.',
+    'app.login.haveCode': 'I have a pairing code',
+    'app.login.pairTitle': 'Pair this device',
+    // The two places a code comes from, because both are common: a fresh install's terminal, and the
+    // Settings page on a device that is already signed in.
+    'app.login.codeHelp': 'Type the pairing code MIKE printed when it started, or one from Settings > Devices & passkeys on a device that is already signed in. It works once.',
+    'app.login.codeAria': 'Pairing code',
+    'app.login.codePlaceholder': 'XXXX-XXXX',
+    'app.login.createPasskey': 'Create a passkey',
+    'app.login.back': 'Back',
+    // The prompt is the browser's, so the wait is described from the browser's side.
+    'app.login.waiting': 'Waiting for your device...',
     'app.login.failed': 'Login failed',
-    'app.login.networkError': 'Network error',
+    'app.login.signInFailed': 'Sign-in failed',
+    'app.login.registerFailed': 'The passkey could not be created',
+    'app.login.browserRefused': 'This browser refused to run the passkey prompt, so no passkey was created. Its own reason is in the browser console.',
+    'app.login.codeRejected': 'That pairing code was not accepted',
+    // A browser that hands back something it cannot serialize is a broken browser, but the sentence
+    // still lands on this screen, so it says what to try rather than quoting the failure.
+    'app.login.unusableCredential': 'This browser returned a passkey it could not send. Try signing in again.',
+    // Not a fault: the person closed the prompt or let it sit, and the form is still where they left it.
+    'app.login.cancelled': 'The passkey prompt was dismissed',
+    'app.login.insecureContext': 'Your browser does not treat this connection as secure, so it will not run a passkey prompt. A passkey needs https, or plain http on the machine MIKE runs on.',
+    'app.login.insecureHelp': 'Open MIKE at its https address, or at http://localhost on that machine, and reload.',
+    // Only when the server signs its own address: the certificate is what turns that address into one
+    // the browser calls secure, and the device being paired is the one that does not have it yet.
+    'app.login.caHelp': 'MIKE signs its address with a certificate authority of its own. Trust that certificate on this device and the browser will run the prompt.',
+    'app.login.caDownload': 'Download the certificate authority (mike-ca.crt)',
+    'app.login.caSteps': 'Open the file on this device and install it as a trusted root certificate, then reopen MIKE at its https address and reload this page.',
+    'app.login.notSupported': 'This browser cannot create a passkey. Try another browser, or the browser that came with the device.',
+    'app.login.unsupportedHint': 'Nothing here signs you in until this browser can run a passkey.',
 
     // ── CreateTaskModal.svelte ──
     'app.task.create': 'Create Task',
@@ -1048,6 +1117,11 @@ const catalog = {
     'api.fetchLocalExtensions': 'Failed to fetch local extensions',
     'api.fetchRegistry': 'Failed to fetch registry',
     'api.checkForUpdates': 'Failed to check for updates',
+    'api.fetchPasskeys': 'Failed to fetch devices',
+    'api.renamePasskey': 'Failed to rename the device',
+    'api.revokePasskey': 'Failed to revoke the device',
+    'api.mintPairingCode': 'Failed to create a pairing code',
+    'api.revokePairingCodes': 'Failed to revoke the pairing codes',
     'api.operationFailed': 'Operation failed',
     'api.unexpectedResponse': 'Unexpected response from {path} ({contentType}): {body}',
     'api.emptyBody': 'empty body',

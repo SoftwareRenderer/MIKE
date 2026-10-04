@@ -90,7 +90,9 @@ var (
 	mu       sync.RWMutex
 	levelVar slog.LevelVar
 	base     = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: &levelVar}))
-	cache    = map[string]*Logger{}
+	// sink is where base writes. Banner needs the writer behind the handler, and it is swapped with it.
+	sink  io.Writer = os.Stderr
+	cache           = map[string]*Logger{}
 )
 
 // Logger is bound to one component and a set of attributes. The f-methods format eagerly, as
@@ -185,19 +187,34 @@ func SetLevel(name string) {
 func setOutput(w io.Writer) (restore func()) {
 	mu.Lock()
 	defer mu.Unlock()
-	prev := base
+	prev, prevSink := base, sink
 	base = slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: &levelVar}))
+	sink = w
 	for k := range cache {
 		delete(cache, k)
 	}
 	return func() {
 		mu.Lock()
 		defer mu.Unlock()
-		base = prev
+		base, sink = prev, prevSink
 		for k := range cache {
 			delete(cache, k)
 		}
 	}
+}
+
+// Banner writes text straight to the log's sink with no record prefix on any line, for output whose shape
+// matters. It shares the sink with the handler, so a test capturing with TestSink captures the banner too.
+func Banner(text string) {
+	if text == "" {
+		return
+	}
+	if !strings.HasSuffix(text, "\n") {
+		text += "\n"
+	}
+	mu.RLock()
+	defer mu.RUnlock()
+	_, _ = io.WriteString(sink, text)
 }
 
 // TestSink captures the log for the duration of a test. It replaces log.SetOutput(&buf), which no

@@ -9,7 +9,7 @@ import (
 // Agent adapters spawn a subprocess (e.g. the `pi` binary) from an extension, and
 // that process can spawn further children on the host. Handing it os.Environ()
 // leaked the whole server environment through /proc/self/environ — above all
-// MIKE_LOGIN_PASSWORD (log in as the operator) and MIKE_ENCRYPTION_KEY (decrypt
+// MIKE_ENCRYPTION_KEY (decrypt
 // every stored provider key). Agent processes get an allowlist instead.
 //
 // agentEnvNames are the variables an agent, and the tooling it shells out to,
@@ -31,13 +31,6 @@ var agentEnvNames = map[string]bool{
 	"SSL_CERT_FILE":       true,
 	"SSL_CERT_DIR":        true,
 	"NODE_EXTRA_CA_CERTS": true,
-	// An agent reaching its own LLM endpoint still needs the proxy settings.
-	"HTTP_PROXY":  true,
-	"HTTPS_PROXY": true,
-	"NO_PROXY":    true,
-	"http_proxy":  true,
-	"https_proxy": true,
-	"no_proxy":    true,
 }
 
 // agentEnvPrefixes are families that are safe to allow in bulk (locale tuning,
@@ -46,7 +39,7 @@ var agentEnvPrefixes = []string{"LC_"}
 
 // isAgentSafeEnv reports whether an environment variable name is on the allowlist.
 func isAgentSafeEnv(name string) bool {
-	if agentEnvNames[name] {
+	if agentEnvNames[name] || subproc.IsProxyEnv(name) {
 		return true
 	}
 	for _, p := range agentEnvPrefixes {

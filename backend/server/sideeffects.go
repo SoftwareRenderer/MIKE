@@ -126,9 +126,23 @@ var detachedOperations = []sideEffectEntry{
 			"believes is gone",
 	},
 	{
-		"POST /api/auth/login",
-		"creates the session row. A tab closing halfway through a login must not decide whether the user is " +
-			"signed in, and the answer the response gives has to match the row that exists",
+		"POST /api/auth/passkey/register/finish",
+		"creates the session row a verified ceremony opens. A tab closing halfway through must not decide " +
+			"whether the user is signed in, and the answer the response gives has to match the row that exists",
+	},
+	{
+		"POST /api/auth/passkey/assert/finish",
+		"the same session row, plus the credential's signature counter and last-used stamp: half a run leaves " +
+			"a person who just proved they hold the key looking at a sign-in form",
+	},
+	{
+		"PATCH /api/auth/passkeys/{id}",
+		"rewrites a device label the operator has to read back to find the row they meant to revoke",
+	},
+	{
+		"DELETE /api/auth/passkeys/{id}",
+		"revocation is the row's absence: a cancel that left it standing leaves a device live that the " +
+			"operator believes is gone",
 	},
 	{
 		"POST /api/auth/logout",
@@ -141,6 +155,7 @@ var detachedOperations = []sideEffectEntry{
 // navigated-away panel, a closed editor — and must never be reported as a fault.
 var requestScopedReads = []sideEffectEntry{
 	{"GET /api/auth/session", "reads one session row; a cancel leaves nothing"},
+	{"GET /api/auth/passkeys", "a device list; the panel refetches"},
 	{"GET /api/fs", "a directory listing; the panel refetches"},
 	{"GET /api/fs/read", "one file's content, capped before it is read"},
 	{"GET /api/fs/search", "a search result set"},
@@ -176,6 +191,10 @@ var requestScopedReads = []sideEffectEntry{
 			"the same as no answer",
 	},
 }
+
+// Two mutating auth routes are in no set: POST and DELETE /api/auth/pairing mint and drop in-memory
+// pairing codes (auth.PairingCodes), and their handlers have nothing to await, so no cancel can leave
+// half of one. They write no row.
 
 // idempotentWritesOnReads is the exception rather than a contradiction: every entry is one statement
 // that SQLite commits whole or not at all.

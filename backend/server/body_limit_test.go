@@ -80,11 +80,11 @@ func TestServerRefusesOversizedBody(t *testing.T) {
 	// The other sender: no declared length at all (chunked), so nothing to refuse up
 	// front and the bound has to come from the reader. The body is still one the
 	// handler would otherwise act on.
-	chunked := httptest.NewRequest(http.MethodPost, "/api/fs/mkdir", io.MultiReader(
+	chunked := secureRequest(httptest.NewRequest(http.MethodPost, "/api/fs/mkdir", io.MultiReader(
 		strings.NewReader(`{"path":"`+made+`","pad":"`),
 		&fillerReader{remaining: httputil.MaxRequestBodyBytes},
 		strings.NewReader(`"}`),
-	))
+	)))
 	chunked.Host = "localhost"
 	chunked.Header.Set("Content-Type", "application/json")
 	chunked.Header.Set("Cookie", cookie)
@@ -103,7 +103,7 @@ func TestServerRefusesOversizedBody(t *testing.T) {
 // which is a different composition and would let an unwired middleware pass.
 func postThroughChain(t *testing.T, s *Server, target string, body io.Reader, cookie, csrf string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, target, body)
+	req := secureRequest(httptest.NewRequest(http.MethodPost, target, body))
 	// The chain is Host-pinned before anything else, and httptest's default Host is
 	// not one this server accepts.
 	req.Host = "localhost"
@@ -122,7 +122,7 @@ func TestMiddlewareChainKeepsGetUpgrades(t *testing.T) {
 	s := testServer(t)
 	cookie, _ := loginTestCSRF(t, s)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/fs", nil)
+	req := secureRequest(httptest.NewRequest(http.MethodGet, "/api/fs", nil))
 	req.Host = "localhost"
 	req.Header.Set("Cookie", cookie)
 	rr := httptest.NewRecorder()

@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Browser, type Page } from '@playwright/test';
+import { attachVirtualAuthenticator, laneOrigin, mintPairingCode, pairBrowser, signedOutContext } from '../helpers-auth.mjs';
 
 // Sessions manager in Settings → About (GET /api/sessions, DELETE /api/sessions/{id},
 // POST /api/sessions/revoke-others).
@@ -12,14 +13,17 @@ import { test, expect, type Page } from '@playwright/test';
 //
 // Session hygiene — the storage-state session other isolated specs rely on must
 // survive this spec:
-//   * extra ("other") sessions are created with `credentials: 'omit'`, so the
-//     browser context never adopts the resulting cookie;
-//   * the "revoke the current session" test first adopts a THROWAWAY session
-//     (login through the browser context, which does store the cookie), so the
-//     revoked row is that throwaway session and not the shared storage-state one.
+//   * an extra ("other") session is made by pairing a SECOND device — its own browser,
+//     its own passkey, opened with a pairing code this page mints — and closing that
+//     browser leaves the session alive server-side, which is exactly the row under test;
+//   * the "revoke the current session" test pairs that second device first and revokes
+//     ITS row, so the revoked row is never the shared storage-state one.
 //
-// Login rate limiting on the test server is 5 logins/IP/minute — this spec does
-// exactly two, in two different tests.
+// Sign-in is a passkey ceremony, so a device cannot be conjured with a request: the
+// helper attaches Chromium's virtual authenticator and walks the login form.
+//
+// Ceremonies are rate limited per address; the lane server raises that budget for the browser
+// suite (tests/global-setup.ts), and the limit a real install gets is held by the Go tests.
 
 const SETTINGS_BTN = '.icon-btn[aria-label="Settings"]';
 const ABOUT_TAB = 'button.tab-btn:has-text("About")';
@@ -32,10 +36,7 @@ const REVOKE_ALL = 'button:has-text("Revoke all other sessions")';
 const CONFIRM_BTN = '.btn-confirm';
 // Login modal that replaces the app when unauthenticated.
 const LOGIN_HEADING = '.login-header h2';
-const LOGIN_PASSWORD_INPUT = '#login-password';
-
-// Matches TEST_PASSWORD in tests/global-setup.ts (same value login.spec.ts uses).
-const TEST_PASSWORD = 'test-password-1234';
+const LOGIN_BUTTON = '.login-btn';
 
 /** Open Settings, switch to the About tab and wait for the session list to render. */
 async function openSessionsSection(page: Page) {
@@ -53,21 +54,37 @@ function currentRow(page: Page) {
 }
 
 /**
- * Create an additional login session server-side WITHOUT the browser adopting it
- * (credentials: 'omit' → the response Set-Cookie is discarded), so it shows up as
- * an "other" row for the caller's own session.
+ * Pair a second device with this install and leave its session behind.
+ *
+ * The new browser is signed out when it opens, spends a pairing code this page mints, and is closed once
+ * it is in. Closing it revokes nothing: the session it opened is the "other" row this spec is about.
  */
-async function addOtherSession(page: Page): Promise<void> {
-  const res = await page.evaluate(async (password) => {
-    const r = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'omit',
-      body: JSON.stringify({ password }),
-    });
-    return { status: r.status };
-  }, TEST_PASSWORD);
-  expect(res.status, 'extra session should be created by logging in').toBe(200);
+async function addOtherSession(page: Page, browser: Browser): Promise<void> {
+  const base = laneOrigin();
+  const pairing = await mintPairingCode(page, base);
+  const context = await signedOutContext(browser);
+  try {
+    const device = await context.newPage();
+    await attachVirtualAuthenticator(context, device);
+    await pairBrowser(device, base, pairing.code);
+  } finally {
+    await context.close();
+  }
+}
+
+/**
+ * Sign THIS page into a session of its own, so the row it goes on to revoke is not the shared one.
+ *
+ * The pairing code is minted while the page still holds the shared session, the cookies are then dropped,
+ * and the page walks the login gate with its own fresh passkey. What the context keeps afterwards is a
+ * second session, and the shared one is left alone for the next spec.
+ */
+async function signInWithFreshPasskey(page: Page): Promise<void> {
+  const base = laneOrigin();
+  const pairing = await mintPairingCode(page, base);
+  await attachVirtualAuthenticator(page.context(), page);
+  await page.context().clearCookies();
+  await pairBrowser(page, base, pairing.code);
 }
 
 /** Re-read the session list straight from the API (browser's own session). */
@@ -92,7 +109,7 @@ test.describe.serial('Settings → About sessions', () => {
     await expect(row.locator('.session-meta-item', { hasText: 'Created' })).toBeVisible();
     await expect(row.locator('.session-meta-item', { hasText: 'Last seen' })).toBeVisible();
     await expect(row.locator('.session-meta-item', { hasText: 'IP' })).toBeVisible();
-    const ua = row.locator('.session-agent');
+    const ua = row.locator('.settings-row-label');
     await expect(ua).toBeVisible();
     await expect(ua).toHaveAttribute('title', /.+/);
 
@@ -105,12 +122,12 @@ test.describe.serial('Settings → About sessions', () => {
     await expect(row).toHaveAttribute('data-session-id', sessionId);
   });
 
-  test('revoke all other sessions leaves this device', async ({ page }) => {
+  test('revoke all other sessions leaves this device', async ({ page, browser }) => {
     await openSessionsSection(page);
     const sessionId = await apiSessions(page).then(s => s.find(x => x.current)?.id ?? '');
 
     // Seed one "other" session (cookie discarded — the page keeps its own session).
-    await addOtherSession(page);
+    await addOtherSession(page, browser);
     await page.locator('button[aria-label="Reload the session list"]').click();
     await expect(async () => {
       expect(await page.locator(SESSION_ROW).count()).toBeGreaterThanOrEqual(2);
@@ -133,16 +150,14 @@ test.describe.serial('Settings → About sessions', () => {
     expect(remaining[0].id).toBe(sessionId);
 
     // With no other rows left, the empty state is shown and the bulk action idles.
-    await expect(page.locator(`${SESSIONS_SECTION} .sessions-status`)).toHaveText('No other active sessions');
+    await expect(page.locator(`${SESSIONS_SECTION} .settings-list-status`)).toHaveText('No other active sessions');
   });
 
   test('revoking the current session returns to the login screen', async ({ page }) => {
-    // Adopt a throwaway session first: revoking it must not delete the shared
-    // storage-state session other isolated specs sign in with.
-    const login = await page.context().request.post('/api/auth/login', {
-      data: { password: TEST_PASSWORD },
-    });
-    expect(login.status()).toBe(200);
+    // Sign this page into a session of its own first: the row it is about to revoke is
+    // the row this page holds, and the shared storage-state session other isolated
+    // specs sign in with has to survive it.
+    await signInWithFreshPasskey(page);
 
     await openSessionsSection(page);
     await expect(currentRow(page)).toHaveCount(1);
@@ -151,8 +166,8 @@ test.describe.serial('Settings → About sessions', () => {
     await currentRow(page).locator(ROW_REVOKE).click();
     await page.locator(CONFIRM_BTN).click();
 
-    // The app is back at the login modal.
-    await expect(page.locator(LOGIN_PASSWORD_INPUT)).toBeVisible({ timeout: 10000 });
+    // The app is back at the login modal, and it offers a passkey — this install has one.
+    await expect(page.locator(LOGIN_BUTTON)).toBeVisible({ timeout: 10000 });
     await expect(page.locator(LOGIN_HEADING)).toHaveText('Sign in');
     await expect(page.locator('.sidebar')).toHaveCount(0);
   });

@@ -134,7 +134,7 @@ func TestEnvArgsNeverEmitABareFlag(t *testing.T) {
 	}{
 		{"configured", []types.SandboxEnv{{Key: "A", Value: "1"}}},
 		{"empty value", []types.SandboxEnv{{Key: "A", Value: ""}}},
-		{"value that looks like a flag", []types.SandboxEnv{{Key: "A", Value: "-e MIKE_LOGIN_PASSWORD"}}},
+		{"value that looks like a flag", []types.SandboxEnv{{Key: "A", Value: "-e MIKE_ENCRYPTION_KEY"}}},
 		{"many", []types.SandboxEnv{{Key: "A", Value: "1"}, {Key: "B", Value: "2"}}},
 	}
 	for _, tc := range cases {

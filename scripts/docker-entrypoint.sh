@@ -24,11 +24,10 @@ need() {
 }
 
 need "${MIKE_ENCRYPTION_KEY:-}" MIKE_ENCRYPTION_KEY
-need "${MIKE_LOGIN_PASSWORD:-}" MIKE_LOGIN_PASSWORD
 need "${MIKE_ALLOWED_HOSTS:-}" MIKE_ALLOWED_HOSTS
 
 # The server listens where the published port can reach it, which is never the container's
-# own loopback. TLS is on unless the operator turned it off deliberately.
+# own loopback. TLS has no switch: the CA and its leaf land in the data volume prepared below.
 : "${MIKE_LISTEN:=0.0.0.0}"
 : "${MIKE_PORT:=3000}"
 export MIKE_LISTEN MIKE_PORT
@@ -76,18 +75,12 @@ esac
 
 echo "mike-entrypoint: podman $(podman --version | awk '{print $3}'), storage driver: $driver"
 echo "mike-entrypoint: gVisor: $(runsc --version 2>&1 | head -n1)"
-echo "mike-entrypoint: listening on ${MIKE_LISTEN}:${MIKE_PORT} (TLS $([ "${MIKE_TLS:-1}" = "0" ] && echo 'DISABLED' || echo 'on')), Host allowlist: ${MIKE_ALLOWED_HOSTS}"
+echo "mike-entrypoint: listening on ${MIKE_LISTEN}:${MIKE_PORT} over TLS, Host allowlist: ${MIKE_ALLOWED_HOSTS}"
 
-if [ "${MIKE_TLS:-1}" = "0" ]; then
-    echo "mike-entrypoint: WARNING — plain HTTP. Only acceptable behind a TLS-terminating proxy that sets X-Forwarded-Proto; the API hands out shells." >&2
-fi
-
-# The server refuses a weak master password on a non-loopback listen address (main.go,
-# refusesWeakSecret); say what it will say first, because it also says it in one line
-# between two log timestamps.
-if [ "${#MIKE_LOGIN_PASSWORD}" -lt 8 ]; then
-    echo "mike-entrypoint: WARNING — MIKE_LOGIN_PASSWORD is shorter than 8 characters, which the server rejects on a non-loopback listen address. Set a longer one: openssl rand -base64 24" >&2
-fi
+# Nothing here signs a person in: a browser pairs a passkey, and the first boot of an empty
+# data directory prints the one-time code that buys that registration. Say where to read it,
+# because "how do I get in" is the first question an operator of a fresh container asks.
+echo "mike-entrypoint: no password is set or needed. On a data directory with no passkey yet, this service's log prints a boxed pairing code — read it with: docker compose logs mike"
 
 # The default sandbox image is pulled by the first task that needs it, silently, from inside
 # the gVisor-isolated create path. Opt in to paying for it at boot instead.

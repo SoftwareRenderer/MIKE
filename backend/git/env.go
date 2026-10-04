@@ -3,7 +3,7 @@ package git
 // Environment and process construction for every git subprocess this server starts. Two rules:
 //
 //  1. A git subprocess is never handed the server's environment — that included
-//     MIKE_LOGIN_PASSWORD and MIKE_ENCRYPTION_KEY.
+//     MIKE_ENCRYPTION_KEY.
 //  2. A git subprocess never runs repository-supplied code: hooks are repo content, and projects
 //     are routinely added from a path the operator already has.
 //
@@ -66,19 +66,9 @@ var gitEnvNames = map[string]bool{
 // cannot override — is what closes the execution surface.
 var gitEnvPrefixes = []string{"LC_", "GIT_"}
 
-// proxyEnvNames: a private remote behind an egress proxy stops resolving without them.
-var proxyEnvNames = map[string]bool{
-	"HTTP_PROXY":  true,
-	"HTTPS_PROXY": true,
-	"NO_PROXY":    true,
-	"http_proxy":  true,
-	"https_proxy": true,
-	"no_proxy":    true,
-}
-
 // isGitSafeEnv reports whether an environment variable name may reach a git subprocess.
 func isGitSafeEnv(name string) bool {
-	if gitEnvNames[name] || proxyEnvNames[name] {
+	if gitEnvNames[name] || subproc.IsProxyEnv(name) {
 		return true
 	}
 	for _, p := range gitEnvPrefixes {

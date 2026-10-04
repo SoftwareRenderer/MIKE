@@ -13,34 +13,17 @@ import (
 	"mike/backend/tls"
 )
 
-// defaultCertServer wires a test server the way main.go wires a real one without
-// --tls-cert: a real CA and leaf in a data dir, plus the flag derived from them.
-func defaultCertServer(t *testing.T) (*Server, *tls.Config) {
+// getTLSCA asks for the download the way an unpaired device does, with no credential: the route needs
+// none, which is what TestTLSCAIsPublicBeforeAnySession holds.
+func getTLSCA(t *testing.T, s *Server) *httptest.ResponseRecorder {
 	t.Helper()
-	s := testServer(t)
-	cfg, err := tls.LoadWithCert(t.TempDir(), "", "")
-	if err != nil {
-		t.Fatalf("generate default certificates: %v", err)
-	}
-	s.tlsConfig = cfg
-	s.configStore.SetTLSCAAvailable(cfg.CAFile != "")
-	return s, cfg
-}
-
-func getTLSCA(t *testing.T, s *Server, cookie string) *httptest.ResponseRecorder {
-	t.Helper()
-	req := testRequest(http.MethodGet, "/api/tls/ca", nil)
-	if cookie != "" {
-		withAuth(req, cookie)
-	}
-	return testResponse(t, s, req)
+	return testResponse(t, s, testRequest(http.MethodGet, "/api/tls/ca", nil))
 }
 
 func TestTLSCADownloadServesCertificate(t *testing.T) {
-	s, cfg := defaultCertServer(t)
-	cookie := loginTest(t, s)
+	s := testServer(t)
 
-	rr := getTLSCA(t, s, cookie)
+	rr := getTLSCA(t, s)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -66,7 +49,7 @@ func TestTLSCADownloadServesCertificate(t *testing.T) {
 	}
 
 	// Must be the CA that signed the leaf, not something else from the data dir.
-	onDisk, err := os.ReadFile(cfg.CAFile)
+	onDisk, err := os.ReadFile(s.tlsConfig.CAFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,42 +62,54 @@ func TestTLSCADownloadServesCertificate(t *testing.T) {
 	}
 }
 
-// The CA is a public certificate, but the route is a link inside the signed-in
-// UI, not a public endpoint.
-func TestTLSCARequiresSession(t *testing.T) {
-	s, _ := defaultCertServer(t)
+// The device that needs the certificate is the one that has no session: a browser the connection will
+// not run a passkey prompt in is sent this certificate before it can pair. A bogus cookie changes
+// nothing, because a public path has no credential to check.
+func TestTLSCAIsPublicBeforeAnySession(t *testing.T) {
+	s := testServer(t)
 
-	if rr := getTLSCA(t, s, ""); rr.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401 without a session, got %d: %s", rr.Code, rr.Body.String())
+	if rr := getTLSCA(t, s); rr.Code != http.StatusOK {
+		t.Errorf("no session: got %d %s; want the certificate", rr.Code, rr.Body.String())
 	}
-	if rr := getTLSCA(t, s, "PHPSESSID=not-a-session"); rr.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401 with a bad session, got %d: %s", rr.Code, rr.Body.String())
+	bogus := testRequest(http.MethodGet, "/api/tls/ca", nil)
+	withAuth(bogus, "PHPSESSID=not-a-session")
+	if rr := testResponse(t, s, bogus); rr.Code != http.StatusOK {
+		t.Errorf("a bogus session: got %d %s; want the certificate", rr.Code, rr.Body.String())
 	}
 }
 
-// --no-tls and a user-provided certificate both have no CA of ours.
+// Public is one path, not one server: the Host pin still applies in front of it, so the download cannot
+// be pointed at another deployment's certificate.
+func TestTLSCAStillPinsTheHost(t *testing.T) {
+	s := testServer(t)
+
+	req := testRequest(http.MethodGet, "/api/tls/ca", nil)
+	req.Host = "elsewhere.example"
+	rr := httptest.NewRecorder()
+	s.middlewareChain(s.mux).ServeHTTP(rr, req)
+	if rr.Code != http.StatusMisdirectedRequest {
+		t.Errorf("a foreign Host = %d %s; want 421", rr.Code, rr.Body.String())
+	}
+}
+
+// A certificate the operator brought has no CA of ours behind it, so the download refuses and the
+// advertised flag stays down rather than linking at a 404.
 func TestTLSCAUnavailableWithoutLocalCA(t *testing.T) {
 	s := testServer(t)
 	cookie := loginTest(t, s)
 
-	cases := map[string]*tls.Config{
-		"tls disabled":       nil,
-		"custom certificate": {CertFile: "user.crt", KeyFile: "user.key"},
+	s.tlsConfig = &tls.Config{CertFile: "user.crt", KeyFile: "user.key"}
+	if rr := getTLSCA(t, s); rr.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d: %s", rr.Code, rr.Body.String())
 	}
-	for name, cfg := range cases {
-		s.tlsConfig = cfg
-		if rr := getTLSCA(t, s, cookie); rr.Code != http.StatusNotFound {
-			t.Errorf("%s: expected 404, got %d: %s", name, rr.Code, rr.Body.String())
-		}
-		s.configStore.SetTLSCAAvailable(cfg != nil && cfg.CAFile != "")
-		if raw := getConfigBody(t, s, cookie); raw["tls_ca_available"] == true {
-			t.Errorf("%s: /api/config still advertises a CA download", name)
-		}
+	s.configStore.SetTLSCAAvailable(false)
+	if raw := getConfigBody(t, s, cookie); raw["tls_ca_available"] == true {
+		t.Errorf("/api/config still advertises a CA download")
 	}
 }
 
 func TestTLSCAOnlyServesGET(t *testing.T) {
-	s, _ := defaultCertServer(t)
+	s := testServer(t)
 	cookie, csrf := loginTestCSRF(t, s)
 
 	req := testRequest(http.MethodPost, "/api/tls/ca", nil)
@@ -126,7 +121,7 @@ func TestTLSCAOnlyServesGET(t *testing.T) {
 
 // The flag drives the link, so it must follow the same condition as the 404.
 func TestConfigAdvertisesTLSCA(t *testing.T) {
-	s, _ := defaultCertServer(t)
+	s := testServer(t)
 	cookie := loginTest(t, s)
 
 	if raw := getConfigBody(t, s, cookie); raw["tls_ca_available"] != true {

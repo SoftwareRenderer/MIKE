@@ -30,6 +30,21 @@ const (
 	KeepEmpty
 )
 
+// IsProxyEnv reports whether a name is one of the proxy variables every subprocess family needs: a
+// private remote or registry behind an egress proxy stops resolving without them. The reason is the
+// same for every family, so the set has one home; a proxy variable only one family reads belongs in
+// that family's own allowlist.
+func IsProxyEnv(name string) bool { return proxyEnvNames[name] }
+
+var proxyEnvNames = map[string]bool{
+	"HTTP_PROXY":  true,
+	"HTTPS_PROXY": true,
+	"NO_PROXY":    true,
+	"http_proxy":  true,
+	"https_proxy": true,
+	"no_proxy":    true,
+}
+
 // Inherit returns the part of this process's environment that keep accepts, in os.Environ's order.
 // The allowlist belongs to the family that needs it; the rules shared by every family - matching a
 // prefix case-insensitively, dropping anything not claimed - are here so there is one copy of them.

@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -266,7 +267,7 @@ func CompareCatalogs(en, pack *Catalog, locale string, f *Findings, maxList int)
 			heldEnglish, strings.Join(englishOnlyNamespaces, ", "), englishOnlyExpected)
 	}
 
-	packBase := keySet(pack.baseKeys())
+	packBase := toSet(pack.baseKeys())
 	var missing, carried []string
 	for _, k := range owed {
 		if !packBase[k] {
@@ -278,7 +279,7 @@ func CompareCatalogs(en, pack *Catalog, locale string, f *Findings, maxList int)
 			carried = append(carried, k)
 		}
 	}
-	_, extra := keyDiff(keySet(owed), packBase)
+	_, extra := keyDiff(toSet(owed), packBase)
 
 	if len(missing) > 0 {
 		// The finding that matters most: fallback is per key, so this pack still looks translated.
@@ -357,7 +358,7 @@ func CompareCatalogs(en, pack *Catalog, locale string, f *Findings, maxList int)
 		}
 	}
 
-	for _, key := range sortedStringKeys(en.Values) {
+	for _, key := range slices.Sorted(maps.Keys(en.Values)) {
 		packText, ok := pack.Values[key]
 		if !ok {
 			continue
@@ -435,15 +436,6 @@ func looksLikeUntranslated(s string) bool {
 		return false
 	}
 	return len(strings.Fields(s)) >= 2 && len(s) >= 8
-}
-
-// keySet turns a sorted key list into a membership set.
-func keySet(keys []string) map[string]bool {
-	set := make(map[string]bool, len(keys))
-	for _, k := range keys {
-		set[k] = true
-	}
-	return set
 }
 
 // keyDiff returns keys only in a and keys only in b.
@@ -531,7 +523,7 @@ func ComparePromptSets(en, pack *TmplSet, f *Findings, maxList int) PromptStats 
 
 	// Name resolution is deferred to execution, so every invoked name must resolve inside the
 	// overlay's own set: a renamed define leaves a template that parses and then fails to render.
-	for _, name := range sortedMapKeys(pack.Skeletons) {
+	for _, name := range slices.Sorted(maps.Keys(pack.Skeletons)) {
 		for _, invoked := range pack.Invoked[name] {
 			if !pack.Declared[invoked] {
 				f.Errf("%s calls {{template %q}}, which the overlay never declares — this parses and fails when the prompt renders", name, invoked)
@@ -547,7 +539,7 @@ func ComparePromptSets(en, pack *TmplSet, f *Findings, maxList int) PromptStats 
 		}
 	}
 
-	for _, name := range sortedMapKeys(pack.Skeletons) {
+	for _, name := range slices.Sorted(maps.Keys(pack.Skeletons)) {
 		for _, entry := range pack.Skeletons[name] {
 			if strings.HasPrefix(entry, "unsupported:") {
 				f.Warnf("%s contains %s — this checker does not model that node kind", name, entry)
@@ -592,6 +584,7 @@ func CheckRegistry(path, extType, name, version, pack string, f *Findings) {
 	f.Errf("registry %s has no %s/%s entry — run python3 scripts/gen-registry.py (never hand-edit it)", filepath.Base(path), extType, name)
 }
 
+// toSet turns a name list into a membership set.
 func toSet(names []string) map[string]bool {
 	m := make(map[string]bool, len(names))
 	for _, n := range names {
@@ -662,24 +655,6 @@ func capList(items []string, max int) []string {
 	}
 	out := append([]string{}, items[:max]...)
 	return append(out, fmt.Sprintf("… and %d more", len(items)-max))
-}
-
-func sortedStringKeys(m map[string]string) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
-
-func sortedMapKeys[T any](m map[string]T) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }
 
 func exists(p string) bool {

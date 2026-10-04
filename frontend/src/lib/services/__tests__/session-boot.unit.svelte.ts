@@ -9,6 +9,7 @@
  * is the fact the banner shows.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import type { SessionAnswer } from '$lib/api';
 import type { Project } from '$lib/types';
 
 const api = vi.hoisted(() => ({
@@ -69,13 +70,20 @@ function recordingApp() {
 
 /** A session check that answers only when the test says so. */
 function deferredSession() {
-    let resolve!: (authenticated: boolean) => void;
-    const promise = new Promise<boolean>((res) => {
+    let resolve!: (session: SessionAnswer) => void;
+    const promise = new Promise<SessionAnswer>((res) => {
         resolve = res;
     });
     api.checkSession.mockReturnValue(promise);
     return { promise, resolve };
 }
+
+/**
+ * The two bodies `/api/auth/session` answers with. `has_passkey` is the login form's branch, so the boot
+ * hands it on whatever the answer said — the tests that do not care about it still have to answer it.
+ */
+const SIGNED_IN: SessionAnswer = { authenticated: true, hasPasskey: true, caDownload: false };
+const SIGNED_OUT: SessionAnswer = { authenticated: false, hasPasskey: true, caDownload: false };
 
 function cachedProject() {
     store.projects = [{ id: 'p1', name: 'repo', path: '/repo' } as Project];
@@ -107,7 +115,7 @@ describe('the boot offer', () => {
         expect(sessionBoot.bootSlow).toBe(false);
         expect(sessionBoot.isLoadingAuth).toBe(true);
 
-        resolve(true);
+        resolve(SIGNED_IN);
         await booting;
     });
 
@@ -118,7 +126,7 @@ describe('the boot offer', () => {
         await vi.advanceTimersByTimeAsync(2000);
         expect(sessionBoot.hasLocalCache).toBe(false);
         expect(sessionBoot.isLoadingAuth).toBe(true);
-        emptyMirror.resolve(true);
+        emptyMirror.resolve(SIGNED_IN);
         await booting;
         expect(calls).toEqual(['close', 'open:live', 'load']);
     });
@@ -135,12 +143,21 @@ describe('the boot offer', () => {
         // The mirror screen is on screen, so the loading screen has stepped aside.
         expect(sessionBoot.isLoadingAuth).toBe(false);
 
-        resolve(true);
+        resolve(SIGNED_IN);
         await booting;
         expect(sessionBoot.hasLocalCache).toBe(false);
         expect(sessionBoot.bootSlow).toBe(false);
         expect(sessionBoot.isAuthenticated).toBe(true);
         expect(sessionBoot.isLoadingAuth).toBe(false);
+    });
+
+    it('hands the login form the pairing answer it opens on', async () => {
+        // A fresh install has no credential to ask for, and the form decides which of its two bodies to
+        // paint from this one flag. Reading a body without it is the api layer's job.
+        api.checkSession.mockResolvedValue({ authenticated: false, hasPasskey: false });
+        recordingApp();
+        await sessionBoot.boot();
+        expect(sessionBoot.hasPasskey).toBe(false);
     });
 
     it('treats a check that will not answer as offline, and reads the mirror', async () => {
@@ -157,7 +174,7 @@ describe('the boot offer', () => {
 
 describe('the two boot paths', () => {
     it('closes the stream it found before opening the next one', async () => {
-        api.checkSession.mockResolvedValue(false);
+        api.checkSession.mockResolvedValue(SIGNED_OUT);
         const calls = recordingApp();
         await sessionBoot.boot();
         expect(calls).toEqual([]); // signed out: no stream, just the login form
@@ -165,6 +182,8 @@ describe('the two boot paths', () => {
         await sessionBoot.startAfterLogin();
         expect(calls).toEqual(['close', 'open:live', 'load']);
         expect(sessionBoot.isAuthenticated).toBe(true);
+        // A session exists only behind a passkey, so the form after a sign-out asks for one.
+        expect(sessionBoot.hasPasskey).toBe(true);
     });
 
     it('reads the mirror behind the offline button, and counts the age from its own arrival', async () => {
@@ -183,7 +202,7 @@ describe('the two boot paths', () => {
     });
 
     it('asks for a translation pack only after the extension list resolved', async () => {
-        api.checkSession.mockResolvedValue(true);
+        api.checkSession.mockResolvedValue(SIGNED_IN);
         recordingApp();
         await sessionBoot.boot();
         await vi.runOnlyPendingTimersAsync();

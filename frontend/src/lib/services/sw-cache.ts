@@ -21,7 +21,7 @@ export const EXTENSION_ASSET_CACHE = 'kanban-extensions';
  * Drop every cached extension asset. Best-effort and never throws: no cached
  * body is worth a failed extension load, and the next fetch repopulates it.
  * A browser with no Cache Storage (or no service worker registered, which is the
- * case in tests and in `--no-tls` development before the worker takes control)
+ * case in tests and before the worker takes control)
  * has nothing to drop and says so by doing nothing.
  */
 export async function dropExtensionAssetCache(): Promise<void> {

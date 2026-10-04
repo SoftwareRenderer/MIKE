@@ -1,5 +1,5 @@
 // Live check that an LSP tooltip paints its signature block with syntax colours:
-//   MIKE_CHECK_PROJECT=<project with go + ts servers> MIKE_LOGIN_PASSWORD=<pw> node tests/lsp-hover-highlight-check.mjs
+//   MIKE_CHECK_PROJECT=<project with go + ts servers> MIKE_PAIR_CODE=<pairing code> node tests/lsp-hover-highlight-check.mjs
 //   # optional: MIKE_BASE=https://localhost:3000 (TLS server; certificate errors are ignored)
 //
 // Writes fixture files into the named project and removes them — the name is required because there is
@@ -7,10 +7,11 @@
 // and do they follow the open file rather than the one the server connected for. Markup-level coverage
 // is in src/lib/utils/__tests__/lsp-doc-highlight.unit.svelte.ts.
 import { chromium } from '@playwright/test';
+import { attachVirtualAuthenticator, pairBrowser, pairingCodeFromEnv } from './helpers-auth.mjs';
 import { writeFileSync, rmSync } from 'node:fs';
 
-const BASE = process.env.MIKE_BASE || 'http://localhost:3000';
-const PASSWORD = process.env.MIKE_LOGIN_PASSWORD || 'test';
+const BASE = process.env.MIKE_BASE || 'https://localhost:3000';
+const CODE = pairingCodeFromEnv();
 const PROJECT = process.env.MIKE_CHECK_PROJECT;
 
 // Hover targets per fixture. `func` is a keyword in the declared Go profile and not in TypeScript's,
@@ -41,9 +42,12 @@ const browser = await chromium.launch();
 const ctx = await browser.newContext({ baseURL: BASE, ignoreHTTPSErrors: true });
 const page = await ctx.newPage();
 
-const login = await page.request.post('/api/auth/login', { data: { password: PASSWORD } });
-if (!login.ok()) {
-  console.log(`FAIL  login to ${BASE} → ${login.status()}: set MIKE_LOGIN_PASSWORD to this server's password`);
+// Sign in the way a person does: a virtual passkey, spent from a pairing code.
+try {
+  await attachVirtualAuthenticator(ctx, page);
+  await pairBrowser(page, BASE, CODE);
+} catch (e) {
+  console.log(`FAIL  pairing with ${BASE} — ${String(e).split('\n')[0]}`);
   await browser.close();
   process.exit(1);
 }

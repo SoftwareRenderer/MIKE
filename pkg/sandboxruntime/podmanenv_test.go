@@ -12,7 +12,6 @@ import (
 
 func TestPodmanEnvNeverCarriesServerSecrets(t *testing.T) {
 	secrets := map[string]string{
-		"MIKE_LOGIN_PASSWORD":   "hunter2",
 		"MIKE_ENCRYPTION_KEY":   "the-key-that-decrypts-every-provider",
 		"DANGER_ZONE":           "1",
 		"MIKE_LISTEN":           "0.0.0.0",
@@ -20,7 +19,7 @@ func TestPodmanEnvNeverCarriesServerSecrets(t *testing.T) {
 		"MIKE_REGISTRY_URL":     "https://attacker.example/registry.json",
 		"MIKE_EXT_MOUNT_ROOTS":  "/etc",
 		"MIKE_TRUST_PROXY":      "1",
-		"MIKE_TLS":              "1",
+		"MIKE_DATA_DIR":         "/var/lib/mike",
 		"AWS_SECRET_ACCESS_KEY": "shhh",
 		"OPENAI_API_KEY":        "sk-shhh",
 	}

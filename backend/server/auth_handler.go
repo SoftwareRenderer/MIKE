@@ -1,11 +1,9 @@
 package server
 
 import (
-	"encoding/json"
-	"errors"
 	"net/http"
 
-	"mike/backend/auth"
+	"mike/pkg/logging"
 )
 
 const (
@@ -16,38 +14,6 @@ const (
 // The SESSION cookie's Secure flag comes from requestIsHTTPS: TLS terminated here, or a
 // TLS-terminating proxy that said so under MIKE_TRUST_PROXY. There is deliberately no variable for
 // it — a flag an operator has to know about is a flag that is off during the deployment it is for.
-
-// handleAuthLogin handles POST /api/auth/login.
-// Accepts {"password": "..."}, validates against MIKE_LOGIN_PASSWORD,
-// sets SESSION cookie on success.
-func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
-
-	var req struct {
-		Password string `json:"password"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Password == "" {
-		JSONError(w, http.StatusBadRequest, "password required")
-		return
-	}
-
-	// A session is state this leaves behind, so the write runs detached: closing the tab halfway
-	// through a login must not decide whether the user ends up signed in (sideeffects.go).
-	ctx, cancel := s.Detached()
-	defer cancel()
-	_, token, csrfToken, err := s.sessionMgr.Login(ctx, req.Password, clientIP(r, s.settings.TrustProxy), r.UserAgent())
-	if err != nil {
-		if errors.Is(err, auth.ErrInvalidPassword) {
-			JSONError(w, http.StatusUnauthorized, "invalid password")
-		} else {
-			JSONError(w, http.StatusInternalServerError, "internal error")
-		}
-		return
-	}
-
-	s.setSessionCookie(w, r, token, sessionMaxAge)
-	w.Header().Set("X-CSRF-Token", csrfToken)
-	JSONResponse(w, http.StatusOK, map[string]string{"status": "ok"})
-}
 
 // handleAuthLogout handles POST /api/auth/logout.
 // Requires a valid session. Deletes the session and clears the cookie.
@@ -73,18 +39,34 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleAuthSession handles GET /api/auth/session.
-// Returns the current authentication status.
+// Returns the current authentication status, and whether this install has any passkey at all — the
+// boolean is the login form's branch between "sign in" and "type the code", and nothing else about a
+// credential is ever answered here.
 func (s *Server) handleAuthSession(w http.ResponseWriter, r *http.Request) {
+	body := map[string]any{}
+	// A store fault leaves the field out rather than guessing: a form that does not know shows the
+	// sign-in branch, and the ceremony it starts answers for itself.
+	if has, err := s.passkeys.HasPasskeys(r.Context()); err == nil {
+		body["has_passkey"] = has
+	} else {
+		logging.For(logging.Auth).Warnf("cannot tell the login form whether this install has a passkey: %v", err)
+	}
+	// The login gate offers the CA download only when this route would answer one — the same answer the
+	// download itself and the /api/config row read.
+	body["tls_ca_available"] = s.localCAvailable()
 
 	cookie, err := r.Cookie(sessionCookieName)
 	if err == nil && s.sessionMgr != nil {
 		if _, csrfToken, err := s.sessionMgr.Validate(r.Context(), cookie.Value); err == nil {
-			JSONResponse(w, http.StatusOK, map[string]any{"authenticated": true, "csrf_token": csrfToken})
+			body["authenticated"] = true
+			body["csrf_token"] = csrfToken
+			JSONResponse(w, http.StatusOK, body)
 			return
 		}
 	}
 
-	JSONResponse(w, http.StatusOK, map[string]bool{"authenticated": false})
+	body["authenticated"] = false
+	JSONResponse(w, http.StatusOK, body)
 }
 
 // sessionCookie is the SESSION cookie with its secure flags. The Secure flag is decided per request

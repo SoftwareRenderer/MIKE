@@ -158,8 +158,22 @@ export type { FsEntry, FsFileRead, FsSearchResult, FsSearchAnswer } from './fs';
 export { deleteFsPaths, copyFsPaths, moveFsPaths, renameFsPath } from './fs-ops';
 export type { FsOpsResult } from './fs-ops';
 
-// -- Auth (the session check, the login and the logout that gate the whole app) --
-export { checkSession, login, logout } from './auth';
+// -- Auth (the session check, the passkey ceremonies and the logout that gate the whole app) --
+export {
+    checkSession,
+    logout,
+    registerPasskeyWithCode,
+    signInWithPasskey,
+    isPasskeyCancelled,
+    listPasskeys,
+    renamePasskey,
+    revokePasskey,
+    mintPairingCode,
+    revokePairingCodes,
+    // The certificate a device installs to trust this address: a link target, not a fetch.
+    CA_DOWNLOAD,
+} from './auth';
+export type { SessionAnswer } from './auth';
 
 // -- Sessions (login sessions, Settings → About) --
 export {

@@ -102,14 +102,16 @@ code, the change is arguing with itself.
 ## Server Management
 
 ```bash
-make run    # background dev server, no TLS (dev defaults: password=test, dev-only key)
+make run    # background dev server, https on the local CA (dev-only encryption key; the boot prints a pairing code)
 make stop   # pkill the server
-curl -sk https://localhost:3000/api/config   # 401 JSON = up; use http:// with --no-tls
+curl -sk https://localhost:3000/api/config   # 401 JSON = up; -k because the CA is not in the trust store
 ```
 
-- TLS is on by default; a local CA in `data/tls/` signs a server leaf. The CA never rotates and there is
-  no expiry-based renewal — refresh an expired leaf by deleting the leaf and restarting. **A certificate
-  is not the gate**: reachability is the listen address plus Host pinning. `docs/tls.md`.
+- **TLS is the only mode**: a local CA in `data/tls/` signs a server leaf, and a plain connection to the port
+  gets a 301. The CA never rotates and there is no expiry-based renewal — refresh an expired leaf by deleting
+  the leaf and restarting. **A certificate is not the gate**: reachability is the listen address plus Host
+  pinning. The CA downloads without a session, because the browser that needs it is the one that has not
+  paired. `docs/tls.md`.
 - **Never `log.Fatalf` on a `Serve()` error** — run the signal cleanup path, then exit 1.
 - **Shutdown is a declared stage list.** A component registers its stop step with `s.reg(stage, name, step)`
   *where it is constructed* (the stages are declared in `backend/server/lifecycle.go`), so construction order
@@ -267,12 +269,19 @@ python3 scripts/gen-registry.py --check                  # registry.json matches
 
 ## Sessions & Auth
 
-One master password. `SessionManager` keeps only its `sha256` digest and compares in constant time;
-session tokens come from `crypto/rand` and are stored hashed, so a copied database can't be replayed.
-The session cookie's `Secure` flag is decided **per request** (TLS terminated here, or the forwarding
-header under `MIKE_TRUST_PROXY`) and there is deliberately no variable for it; logout clears with the
-flag it set. `/api/sessions*` are session-authed, CSRF-guarded, never public, and their responses carry
-no token of any kind. Storage shape, endpoint shapes and the Settings UI: `docs/sessions.md`.
+Passkeys, not a password: a pairing code authorizes **one registration** and authenticates nothing, and a
+session exists only as the answer to a finished ceremony. There is no login password anywhere — a route
+that opens a session on any other proof is a regression. The rpID and origin are the *request's*, so one
+install holds a different credential set per hostname, and a bare IP address is refused as a relying
+party rather than failing inside the browser's prompt. `--reset-passkeys` is a one-shot command that
+deletes passkeys **and sessions** and refuses a data directory a running server holds; the GUI cannot
+revoke the last passkey, so that command is the only way out of a lost device. Session tokens come from
+`crypto/rand` and are stored hashed, so a copied database can't be replayed. The session cookie's `Secure`
+flag is decided **per request** (TLS terminated here, or the forwarding header under
+`MIKE_TRUST_PROXY`) and there is deliberately no variable for it; logout clears with the flag it set.
+`/api/sessions*` are session-authed, CSRF-guarded, never public, and their responses carry no token of any
+kind. Ceremonies, pairing codes, tickets and the reset: `docs/passkeys.md`; storage shape, endpoint shapes
+and the Settings UI: `docs/sessions.md`.
 
 - **A bearer token is a second credential with a narrower scope.** Issued, labelled and revoked in
   Settings → About; stored as `hex(sha256(token))` like a session and shown once. It authenticates
@@ -577,6 +586,7 @@ deliberately omits.
 | `docs/testing.md` | test environment, teardown, e2e conventions, mock-LLM fixtures, load-sensitive tests |
 | `docs/tls.md` | certs/SANs, distribution, proxy + `Host`, weak-password and cookie rules |
 | `docs/sessions.md` | session storage shape, `/api/sessions*` responses, Settings → About UI |
+| `docs/passkeys.md` | the two ceremonies, pairing codes, ceremony tickets, `--reset-passkeys`, the boot pairing banner |
 | `docs/api.md` | the bearer-token surface: provisioning, the route allowlist, what each route does |
 | `docs/threads-checkpoints.md` | branch vs snapshot layers, checkpoint pinning/restore, fork inheritance |
 | `docs/commit-and-done.md` | what the click does, conflict arming, which files never get committed |

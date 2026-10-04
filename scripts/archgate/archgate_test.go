@@ -934,7 +934,7 @@ func TestMeasuredNumbersAgreeWithTheReview(t *testing.T) {
 	// What `grep -c 's\.mux\.Handle' backend/server/routes.go` answers: the verb-carrying routes plus
 	// the extensions file subtree. The frontend is served behind this mux, so it is no longer a subtree.
 	// A new registration moves this number and nothing else here.
-	const routeRegistrations = 122
+	const routeRegistrations = 130
 	if routes, checked, err := scanRoutes(root); err != nil {
 		t.Fatalf("scanRoutes: %v", err)
 	} else if checked != routeRegistrations {
@@ -1221,7 +1221,7 @@ func (s *Server) registerRoutes() {
 // --- envassign ---------------------------------------------------------------
 //
 // The scar behind this rule is real: `cmd.Env = os.Environ()` on an agent subprocess leaked
-// MIKE_LOGIN_PASSWORD and MIKE_ENCRYPTION_KEY to an extension-supplied binary. The rule is a hard
+// MIKE_ENCRYPTION_KEY to an extension-supplied binary. The rule is a hard
 // gate with an empty baseline, so both directions have to be proven.
 
 func TestEnvAssign_CatchesAWholeEnvironment(t *testing.T) {

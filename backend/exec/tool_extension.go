@@ -72,7 +72,8 @@ func (r *toolRunner) runContributedTool(ctx context.Context, name string, args m
 	}
 	logging.For(logging.Tools).With(logging.TaskID, env.task.ID).Infof(
 		"%s via extension=%s ok bytes=%d", name, ext.Name, len(answer))
-	return capContributedAnswer(answer), true
+	// The backstop after the declaration's own caps.
+	return toolresult.CapText(answer), true
 }
 
 func (r *toolRunner) egressOrReal() egressFunc {
@@ -80,13 +81,4 @@ func (r *toolRunner) egressOrReal() egressFunc {
 		return r.egress
 	}
 	return extensions.Egress
-}
-
-// The backstop after the declaration's own caps, capped like a command's output.
-func capContributedAnswer(answer string) string {
-	if len(answer) <= toolresult.MaxCaptureBytes {
-		return answer
-	}
-	dropped := len(answer) - toolresult.MaxCaptureBytes
-	return answer[:toolresult.MaxCaptureBytes] + toolresult.CaptureMarker(dropped)
 }

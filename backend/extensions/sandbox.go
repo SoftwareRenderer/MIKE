@@ -283,22 +283,14 @@ func (sm *ExtensionSandboxManager) DesiredDependencyMount(ext *Extension) Depend
 	return dependencyBind(ext, sm.MountPolicyForExtension(ext))
 }
 
-// withDependencyMount appends the bind to a mount list for the snapshot a compatibility check
-// compares against. No-op when nothing is bound.
-func withDependencyMount(mounts []types.SandboxMount, bind DependencyMount) []types.SandboxMount {
+// withDependency appends a bound dependency's addition to one half of the snapshot a compatibility
+// check compares against, copying first so the stored list it compares to is left alone. Both halves
+// carry it, or every check asks for a recreate. No-op when nothing is bound.
+func withDependency[T any](items []T, bind DependencyMount, add T) []T {
 	if !bind.OK {
-		return mounts
+		return items
 	}
-	return append(append([]types.SandboxMount(nil), mounts...), bind.Mount)
-}
-
-// withDependencyEnv is withDependencyMount for the env list, and for the same reason: both sides of
-// the comparison have to include it, or every check asks for a recreate.
-func withDependencyEnv(envs []types.SandboxEnv, bind DependencyMount) []types.SandboxEnv {
-	if !bind.OK {
-		return envs
-	}
-	return append(append([]types.SandboxEnv(nil), envs...), bind.Env)
+	return append(append([]T(nil), items...), add)
 }
 
 // buildExtensionCreateArgs assembles the `podman create` args for an extension sandbox (always
@@ -531,7 +523,7 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 	// The same derivation the create used, so a later compatibility check wants what this container
 	// actually got — including the dependency directory, if it was bound.
 	bind := dependencyBind(ext, sm.MountPolicyForExtension(ext))
-	customMounts := customMountSnapshot(withDependencyMount(ext.SandboxConfig.Mounts, bind))
+	customMounts := customMountSnapshot(withDependency(ext.SandboxConfig.Mounts, bind, bind.Mount))
 
 	// Store state
 	sm.states[ext.ID] = &extensionSandboxState{
@@ -541,7 +533,7 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 		isAlive:         true,
 		mountedProjects: mountedProjects,
 		customMounts:    customMounts,
-		envs:            envSnapshot(withDependencyEnv(ext.SandboxConfig.Envs, bind)),
+		envs:            envSnapshot(withDependency(ext.SandboxConfig.Envs, bind, bind.Env)),
 	}
 
 	return nil, nil

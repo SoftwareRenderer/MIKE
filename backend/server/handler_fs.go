@@ -594,8 +594,8 @@ func matchLine(line, q string, matchCase, wholeWord, useRegex bool, contentRe *r
 			// contentRe is already compiled, so check word boundaries around each match.
 			matches := contentRe.FindAllStringIndex(line, -1)
 			for _, m := range matches {
-				beforeOK := m[0] == 0 || !isWordChar(line[m[0]-1])
-				afterOK := m[1] >= len(line) || !isWordChar(line[m[1]])
+				beforeOK := m[0] == 0 || !types.IsWordByte(line[m[0]-1])
+				afterOK := m[1] >= len(line) || !types.IsWordByte(line[m[1]])
 				if beforeOK && afterOK {
 					return true
 				}
@@ -631,9 +631,9 @@ func matchLine(line, q string, matchCase, wholeWord, useRegex bool, contentRe *r
 				break
 			}
 			absPos := idx + pos
-			beforeOK := absPos == 0 || !isWordChar(checkLine[absPos-1])
+			beforeOK := absPos == 0 || !types.IsWordByte(checkLine[absPos-1])
 			afterPos := absPos + len(searchStr)
-			afterOK := afterPos >= len(checkLine) || !isWordChar(checkLine[afterPos])
+			afterOK := afterPos >= len(checkLine) || !types.IsWordByte(checkLine[afterPos])
 			if beforeOK && afterOK {
 				return true
 			}
@@ -642,11 +642,6 @@ func matchLine(line, q string, matchCase, wholeWord, useRegex bool, contentRe *r
 		return false
 	}
 	return strings.Contains(checkLine, searchStr)
-}
-
-// isWordChar checks if a byte is a word character (alphanumeric or underscore).
-func isWordChar(b byte) bool {
-	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_'
 }
 
 // errStopWalk is a sentinel error to stop filepath.WalkDir early.

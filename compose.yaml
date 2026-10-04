@@ -10,7 +10,7 @@
 # WHAT --PRIVILEGED BUYS AND COSTS. The nested runtime needs netlink, cgroup and device
 # access that no capability subset reliably covers, so this service is privileged: it can
 # reach host devices. That is why the published port defaults to 127.0.0.1 below, why TLS is
-# never disabled here, and why MIKE_ALLOWED_HOSTS is mandatory rather than defaulted. Run it
+# the only mode the server has, and why MIKE_ALLOWED_HOSTS is mandatory rather than defaulted. Run it
 # on a machine you control. Task work does NOT run in this container — it runs in the gVisor
 # container per task, with --cap-drop ALL and --security-opt no-new-privileges.
 #
@@ -65,11 +65,10 @@ services:
       MIKE_WORKTREES_DIR: /mike/worktrees
 
       # Required, no defaults, and the refusal happens at `compose up` rather than as a
-      # half-booted server: an empty encryption key would still boot (it does not), an empty
-      # Host allowlist would silently 421 every request, and a defaulted master password is
-      # the one thing this file must not do.
+      # half-booted server: an empty encryption key would still boot (it does not), and an empty
+      # Host allowlist would silently 421 every request. There is no password to set here any
+      # more: the first boot prints a pairing code into this service's log.
       MIKE_ENCRYPTION_KEY: '${MIKE_ENCRYPTION_KEY:?MIKE_ENCRYPTION_KEY is required - generate one with: openssl rand -hex 32}'
-      MIKE_LOGIN_PASSWORD: '${MIKE_LOGIN_PASSWORD:?MIKE_LOGIN_PASSWORD is required - at least 8 characters, e.g. openssl rand -base64 24}'
       MIKE_ALLOWED_HOSTS: '${MIKE_ALLOWED_HOSTS:?MIKE_ALLOWED_HOSTS is required - comma-separated Host values to accept, e.g. localhost,kanban.example.com}'
 
       # Optional passthroughs; the server treats an empty value as unset.

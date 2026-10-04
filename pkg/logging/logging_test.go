@@ -111,6 +111,30 @@ func TestSetOutputRestores(t *testing.T) {
 	}
 }
 
+// The banner is matched row by row by something outside Go, so a prefix on any row of it breaks a match.
+func TestBannerWritesEveryRowWithNoPrefix(t *testing.T) {
+	buf, restore := TestSink()
+	defer restore()
+
+	For(Merge).Infof("a record beside the banner")
+	Banner("first row\nsecond row")
+	Banner("")
+
+	rows := 0
+	for _, line := range strings.Split(strings.TrimRight(buf.String(), "\n"), "\n") {
+		if line == "first row" || line == "second row" {
+			rows++
+			continue
+		}
+		if !strings.Contains(line, "component=merge") {
+			t.Fatalf("a line is neither an unprefixed banner row nor a prefixed record: %q", line)
+		}
+	}
+	if rows != 2 {
+		t.Fatalf("the banner wrote %d rows, want 2 (an empty banner writes nothing):\n%s", rows, buf.String())
+	}
+}
+
 func TestSafeBufferToleratesConcurrentWriters(t *testing.T) {
 	// The log is written from the exec loop, websocket goroutines and shutdown steps; at shutdown
 	// the last two overlap. Run this under -race.

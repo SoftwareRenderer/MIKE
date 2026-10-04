@@ -474,6 +474,28 @@ func (cs *ConfigStore) providerInt(serverURL string, get func(p types.Provider) 
 	return def
 }
 
+// providerModel returns the stored configuration of one model of one provider, matched by server URL
+// the same way providerInt matches a provider. It is the model-level twin of that helper: every
+// per-model setting is one field of the result rather than one more copy of this walk.
+func (cs *ConfigStore) providerModel(modelName, providerURL string) (types.ModelConfig, bool) {
+	cfg, err := cs.GetConfig()
+	if err != nil {
+		return types.ModelConfig{}, false
+	}
+	providerURL = strings.TrimRight(providerURL, "/")
+	for _, provider := range cfg.Providers {
+		if strings.TrimRight(provider.URL, "/") != providerURL {
+			continue
+		}
+		for _, m := range provider.Models {
+			if m.Name == modelName {
+				return m, true
+			}
+		}
+	}
+	return types.ModelConfig{}, false
+}
+
 // GetProviderConcurrency returns the concurrency limit for the provider matching the given server URL.
 // Returns 1 (default minimum) if no matching provider is found or concurrency is not set.
 func (cs *ConfigStore) GetProviderConcurrency(serverURL string) int {
@@ -519,20 +541,9 @@ func (cs *ConfigStore) IsAgentProvider(serverURL string) bool {
 // GetModelContextWindow looks up the context window for a model by name and provider URL.
 // Returns nil if the context window is not known (not reported by the LLM).
 func (cs *ConfigStore) GetModelContextWindow(modelName, providerURL string) *int {
-	cfg, err := cs.GetConfig()
-	if err != nil {
+	m, ok := cs.providerModel(modelName, providerURL)
+	if !ok {
 		return nil
 	}
-	providerURL = strings.TrimRight(providerURL, "/")
-	for _, provider := range cfg.Providers {
-		if strings.TrimRight(provider.URL, "/") != providerURL {
-			continue
-		}
-		for _, m := range provider.Models {
-			if m.Name == modelName {
-				return m.ContextWindow
-			}
-		}
-	}
-	return nil
+	return m.ContextWindow
 }

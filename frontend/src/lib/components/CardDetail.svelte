@@ -753,6 +753,18 @@
         diffCache.processStats(diffStatsStore.get(task.id) ?? undefined, diffLoading);
     });
 
+    // A file the person deletes outside a turn is a diff change the stream may never announce: the
+    // worktree watcher throttles, and a create with its delete inside one window computes as no change
+    // against what the watcher last computed, so it broadcasts nothing. The fs_event names the path, and
+    // a row this panel holds for it came from a manifest read, so this is where the panel can learn the
+    // file is gone.
+    $effect(() => {
+        const event = pendingFsEvent;
+        if (!event) return;
+        const headRef = diffHeadRef(task);
+        void diffCache.reconcileDeletion(event, headRef ? { headRef } : {});
+    });
+
     async function handleMove(status: string) {
         if (!task) return;
         try {

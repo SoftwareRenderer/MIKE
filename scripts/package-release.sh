@@ -121,19 +121,25 @@ its terminal inside gVisor containers and refuses to start at all when `runsc` i
 ```sh
 cd @NAME@
 export MIKE_ENCRYPTION_KEY=$(openssl rand -hex 32)
-export MIKE_LOGIN_PASSWORD=something-long-you-keep
 ./mike-server
 ```
 
-Both variables are required: one encrypts what you save in Settings, the other is what the
-browser asks for at the door. Generate the encryption key once and keep it somewhere as durable as
-`data/` — a new key cannot read what an older one encrypted, and a saved provider key that will not
-decrypt is sent upstream unchanged. Behind a reverse proxy that forwards a public domain, also set
-`MIKE_ALLOWED_HOSTS`. `./mike-server --help` lists the flags and their environment twins.
+`MIKE_ENCRYPTION_KEY` is required: it encrypts what you save in Settings. Generate it once and keep
+it somewhere as durable as `data/` — a new key cannot read what an older one encrypted, and a saved
+provider key that will not decrypt is sent upstream unchanged. Behind a reverse proxy that forwards a
+public domain, also set `MIKE_ALLOWED_HOSTS`. `./mike-server --help` lists the flags and their
+environment twins.
+
+There is no password to set. A browser signs in with a **passkey**, and the first boot of an empty
+`data/` prints the one-time pairing code that buys that first registration, boxed so it stands out
+in the terminal MIKE started in. Every device after that is paired from Settings → Devices & passkeys on
+a browser that is already signed in. Lost every passkey? Stop the server and run
+`./mike-server --reset-passkeys`; it deletes the passkeys and every live session, then exits.
 
 It listens on `127.0.0.1:3000` over TLS, with a certificate generated into `data/tls/` on first
-boot — import `data/tls/mike-ca.crt` into a browser's trust store, or use `--no-tls` for plain HTTP.
-`--listen 0.0.0.0` answers other machines, which refuses a weak password.
+boot — import `data/tls/mike-ca.crt` into a browser's trust store to make its certificate trusted.
+`--listen 0.0.0.0` answers other machines; open MIKE there by a hostname, never a bare address,
+because a passkey belongs to a name.
 
 ## Where state goes
 
