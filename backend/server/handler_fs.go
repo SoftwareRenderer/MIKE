@@ -1284,6 +1284,11 @@ func (f fsSearch) matchesFile(rel string) bool {
 	return strings.Contains(checkStr, searchStr)
 }
 
+// searchSkippedDirs names the directories a search never walks, because the file listing hides them
+// too (FileBrowserView.svelte). They stay out of git.ignoredDirs, which the worktree watchers and the
+// diff broadcasts also read, where a person's editor settings must stay reviewable.
+var searchSkippedDirs = map[string]struct{}{".git": {}, ".vscode": {}, ".idea": {}}
+
 // walk collects the matches under the root, in a stable order, stopping at the limit or when ctx ends.
 // It reads the host filesystem even for a sandboxed task, because the worktree is bind-mounted into the
 // sandbox and both sides see the same files.
@@ -1317,7 +1322,7 @@ func (f fsSearch) walk(ctx context.Context) []searchResult {
 			return nil
 		}
 
-		if strings.HasPrefix(d.Name(), ".") {
+		if _, skip := searchSkippedDirs[d.Name()]; skip {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}

@@ -35,7 +35,6 @@
         rootPath,
         initialPath = '',
         navMode = 'breadcrumb',
-        showDotFiles = true,
         retryMissingDir = false,
         pinOnDblclick = false,
         unsavedFiles,
@@ -63,7 +62,6 @@
         initialPath?: string;
         /** A path the user types, or the trail of folders under the root. */
         navMode?: 'path' | 'breadcrumb';
-        showDotFiles?: boolean;
         /** A task worktree appears only once the task starts, so its listing asks again. */
         retryMissingDir?: boolean;
         /** Double-click pins the file in the project explorer; the task explorer has no pins. */
@@ -126,8 +124,9 @@
     });
     let entryPaths = $derived(new Set(entries.map(e => e.path)));
 
-    // Directories never shown: build output, caches, tool state. Dot files are otherwise visible,
-    // unless the host asks for the task tree, which hides them all.
+    // Never listed: build output, caches and tool state — a dot prefix is not what puts a name here.
+    // The add-project picker (`FileBrowser.svelte`) is the only listing that hides dot names, and it
+    // has its own option for showing them.
     const ignoredDirs = new Set([
         'node_modules', '.next', 'dist', 'build', '.cache', '__pycache__',
         '.venv', 'target', 'vendor', '.gradle', '.mypy_cache', '.pytest_cache',
@@ -158,7 +157,6 @@
             entries = listing.entries
                 .filter(e => {
                     if (e.name === '..') return false; // the listing prepends its own
-                    if (!showDotFiles && e.name.startsWith('.')) return false;
                     if (e.isDir && ignoredDirs.has(e.name)) return false;
                     return true;
                 })
