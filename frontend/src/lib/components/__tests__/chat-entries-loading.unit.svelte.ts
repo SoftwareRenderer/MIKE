@@ -96,7 +96,7 @@ describe('ChatEntries — history loading indicator', () => {
                     createdAt: new Date().toISOString(),
                 },
             ],
-            entryMetas: [{ cpState: null, cpThread: null, checkpointIndex: -1, isLastUserMessage: false, isFirstUserMessage: false }],
+            entryMetas: [{ cpState: null, cpThread: null, isLastUserMessage: false, isFirstUserMessage: false }],
             lastEntryIdx: 0,
             historyLoading: true,
             follow: createChatFollow(),

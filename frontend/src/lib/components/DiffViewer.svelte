@@ -40,9 +40,17 @@ import { slide } from 'svelte/transition';
         selectedPath?: string;
         mergedLabel?: string;
         imageSource?: DiffImageSource;
+        /** What the unstaged section is called where this panel is not a working tree. A historical
+         * comparison has no index, so it must not borrow the staging vocabulary. */
+        unstagedTitle?: string;
+        /** The empty state's sentence, which for a ref comparison is not "since last commit". */
+        emptyTitle?: string;
+        /** Which view owns this panel's collapsed files. Two panels open at once — the working diff and a
+         * checkpoint's — hold different comparisons, and one shared record makes each prune the other's. */
+        collapseScope?: string;
     }
 
-    let { committedFiles = [], stagedFiles = [], unstagedFiles = [], stagedUntracked = [], unstagedUntracked = [], loading = false, pendingPaths = new Set<string>(), busySection = null, busyLabel = '', onExpandFile, onExpandUntracked, onLineClick, onStageFile, onStageAll, onUnstageAll, selectedPath, mergedLabel = t('task.diff.mergedFromSubtasks'), imageSource }: Props = $props();
+    let { committedFiles = [], stagedFiles = [], unstagedFiles = [], stagedUntracked = [], unstagedUntracked = [], loading = false, pendingPaths = new Set<string>(), busySection = null, busyLabel = '', onExpandFile, onExpandUntracked, onLineClick, onStageFile, onStageAll, onUnstageAll, selectedPath, mergedLabel = t('task.diff.mergedFromSubtasks'), imageSource, unstagedTitle = t('diff.unstaged'), emptyTitle = t('diff.noChanges'), collapseScope = 'working' }: Props = $props();
     const busyId = 'diff-stage-busy';
     let hasContent = $derived(committedFiles.length > 0 || stagedFiles.length > 0 || unstagedFiles.length > 0 || stagedUntracked.length > 0 || unstagedUntracked.length > 0);
 
@@ -167,12 +175,16 @@ import { slide } from 'svelte/transition';
     let unstagedAdditions = $derived(sortedUnstagedFiles.reduce((s: number, f: DiffFile) => s + (f.origAdded ?? f.added ?? 0), 0) + sortedUnstagedUntracked.reduce((s: number, e: UntrackedEntry) => s + (e.file.origAdded ?? e.file.added ?? 0), 0));
     let unstagedDeletions = $derived(sortedUnstagedFiles.reduce((s: number, f: DiffFile) => s + (f.origRemoved ?? f.removed ?? 0), 0));
 
-    // Load collapsed files from IndexedDB on init
-    loadCollapsedDiffFiles().then(ids => { collapsedFiles = ids; }).catch(() => {});
+    // Read this view's collapsed files back. The scope is a literal at every call site, but reading it in an
+    // effect is what keeps the record and the view that owns it in step.
+    $effect(() => {
+        const scope = collapseScope;
+        loadCollapsedDiffFiles(scope).then(ids => { collapsedFiles = ids; }).catch(() => {});
+    });
 
     /** Save collapsed files to IndexedDB. */
     async function saveCollapsedFiles(collapsed: Set<string>): Promise<void> {
-        await saveCollapsedDiffFiles(collapsed);
+        await saveCollapsedDiffFiles(collapseScope, collapsed);
     }
 
     $effect(() => {
@@ -696,7 +708,7 @@ import { slide } from 'svelte/transition';
                 <path d="M3 2h6l4 4v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.3"/>
                 <path d="M9 2v4h4" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.3"/>
             </svg>
-            <p>{t('diff.noChanges')}</p>
+            <p>{emptyTitle}</p>
         {/if}
     </div>
 {:else}
@@ -719,7 +731,7 @@ import { slide } from 'svelte/transition';
         <!-- Staged section -->
         {#if stagedCount > 0}
         <div class="diff-section">
-            <button class="diff-section-header diff-section-staged" type="button" aria-expanded={!isSectionCollapsed('staged')} onclick={() => toggleSection('staged')} title={isSectionCollapsed('staged') ? t('diff.expandStagedTitle') : t('diff.collapseStagedTitle')}>
+            <button class="diff-section-header diff-section-staged" type="button" aria-expanded={!isSectionCollapsed('staged')} onclick={() => toggleSection('staged')} title={isSectionCollapsed('staged') ? t('diff.expandSection', { name: t('diff.staged') }) : t('diff.collapseSection', { name: t('diff.staged') })}>
                 <svg class="diff-section-chevron" class:expanded={!isSectionCollapsed('staged')} width="12" height="12" viewBox="0 0 16 16" fill="none">
                     <path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
@@ -751,11 +763,11 @@ import { slide } from 'svelte/transition';
         <!-- Unstaged section -->
         {#if unstagedCount > 0}
         <div class="diff-section">
-            <button class="diff-section-header diff-section-unstaged" type="button" aria-expanded={!isSectionCollapsed('unstaged')} onclick={() => toggleSection('unstaged')} title={isSectionCollapsed('unstaged') ? t('diff.expandUnstagedTitle') : t('diff.collapseUnstagedTitle')}>
+            <button class="diff-section-header diff-section-unstaged" type="button" aria-expanded={!isSectionCollapsed('unstaged')} onclick={() => toggleSection('unstaged')} title={isSectionCollapsed('unstaged') ? t('diff.expandSection', { name: unstagedTitle }) : t('diff.collapseSection', { name: unstagedTitle })}>
                 <svg class="diff-section-chevron" class:expanded={!isSectionCollapsed('unstaged')} width="12" height="12" viewBox="0 0 16 16" fill="none">
                     <path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
-                <span class="diff-section-title">{t('diff.unstaged')}</span>
+                <span class="diff-section-title">{unstagedTitle}</span>
                 <span class="diff-section-stats">
                     <span class="diff-added">+{unstagedAdditions}</span>
                     <span class="diff-removed">-{unstagedDeletions}</span>
@@ -788,7 +800,7 @@ import { slide } from 'svelte/transition';
         <!-- Merged from Subtasks section -->
         {#if sortedCommittedFiles.length > 0}
         <div class="diff-section">
-            <button class="diff-section-header diff-section-merged" type="button" aria-expanded={!isSectionCollapsed('committed')} onclick={() => toggleSection('committed')} title={isSectionCollapsed('committed') ? t('diff.expandMergedTitle') : t('diff.collapseMergedTitle')}>
+            <button class="diff-section-header diff-section-merged" type="button" aria-expanded={!isSectionCollapsed('committed')} onclick={() => toggleSection('committed')} title={isSectionCollapsed('committed') ? t('diff.expandSection', { name: mergedLabel }) : t('diff.collapseSection', { name: mergedLabel })}>
                 <svg class="diff-section-chevron" class:expanded={!isSectionCollapsed('committed')} width="12" height="12" viewBox="0 0 16 16" fill="none">
                     <path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>

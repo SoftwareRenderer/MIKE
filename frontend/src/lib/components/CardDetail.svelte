@@ -163,9 +163,14 @@
     let checkpointDiffOpen = $state(false);
     let checkpointDiffHash = $state(''); // which checkpoint hash is currently shown
     let checkpointDiffBaseRef = $state(''); // what that checkpoint was compared against
+    let checkpointDiffLabel = $state(''); // the checkpoint's own words, from the chat band that opened it
     let checkpointDiffFiles: DiffFile[] = $state([]);
-    let checkpointDiffUntracked: { path: string; fileSize?: number; file: DiffFile; truncated?: boolean; origAdded?: number }[] = $state([]);
     let checkpointDiffLoading = $state(false);
+    let checkpointDiffError = $state('');
+    /** The overlay's header names both sides, so the panel never shows a comparison it cannot identify. */
+    let checkpointDiffRefs = $derived(
+        `${shortRef(checkpointDiffBaseRef)} → ${shortRef(checkpointDiffHash)}`,
+    );
     // Two-dropdown diff: '' means base ref (original branch), 'working' means working tree
     let diffFrom = $state('');
     let diffTo = $state('working');
@@ -302,19 +307,10 @@
         editingFile = null;
     }
 
-    /** Build a DiffFile from raw file lines (untracked/new files, all additions).
-     * When lines is null, uses lineCount to show a placeholder (content loaded on-demand). */
-    function buildUntrackedDiffFile(path: string, lines: string[] | null | undefined, lineCount?: number): DiffFile {
-        if (!lines || lines.length === 0) {
-            const count = lineCount || 0;
-            return { path, added: count, removed: 0, rows: [] };
-        }
-        const rows = lines.map((text, i) => ({
-            lineNumber: i + 1,
-            variant: 'added' as const,
-            text,
-        }));
-        return { path, added: lines.length, removed: 0, rows };
+    /** A ref as the panel names it: the words the reader can compare, not a 40-character object id. */
+    function shortRef(ref: string): string {
+        if (!ref) return t('task.diff.originalBranch');
+        return ref.length > 12 ? ref.slice(0, 12) : ref;
     }
 
     function onDiffFromChange(value: string) {
@@ -325,26 +321,21 @@
         diffTo = value;
     }
 
-    /** Handle "View Changes" from a checkpoint divider — opens its own panel.
-     * Shows changes between origin and the state AT the checkpoint
-     * (all accumulated changes up to and including this checkpoint).
-     * Toggles closed if the same checkpoint is clicked again. */
-    async function handleViewChanges(commitHash: string, checkpointIndex?: number) {
-        if (mobile) { activeTab = 'checkpoint'; onActiveTabChange?.('checkpoint'); }
-        // Toggle: if same checkpoint is already open, close it
-        if (checkpointDiffOpen && checkpointDiffHash === commitHash) {
-            closeCheckpointDiff();
-            return;
-        }
+    /**
+     * "View changes" from a checkpoint band: what this thread had changed by that point, measured from the
+     * baseline the Changes panel uses. Cumulative by contract — the snapshot is a tree, so it answers the
+     * state as of the band and never the work that came after it. Clicking the same band again closes it.
+     */
+    async function loadCheckpointDiff(commitHash: string, commitLabel: string) {
         checkpointDiffOpen = true;
         checkpointDiffHash = commitHash;
+        checkpointDiffLabel = commitLabel;
         checkpointDiffLoading = true;
+        checkpointDiffError = '';
         checkpointDiffBaseRef = '';
         checkpointDiffFiles = [];
-        checkpointDiffUntracked = [];
         try {
-            const headRef = commitHash || undefined;
-            const result = await getTaskDiff(task.project_id, task.id, { headRef, checkpointIndex, parsed: true });
+            const result = await getTaskDiff(task.project_id, task.id, { headRef: commitHash || undefined, parsed: true });
             checkpointDiffBaseRef = result.base_ref || '';
             const truncatedSet = new Set(result.truncated_files || []);
             const origStats = result.original_file_stats || {};
@@ -354,24 +345,64 @@
                 origAdded: origStats[f.path]?.added,
                 origRemoved: origStats[f.path]?.removed,
             }));
-            checkpointDiffUntracked = (result.untracked || []).filter(u => !isVimSwapFile(u.path)).map(u => ({
-                path: u.path,
-                fileSize: u.file_size,
-                truncated: u.truncated,
-                origAdded: u.orig_added,
-                file: buildUntrackedDiffFile(u.path, u.lines, u.line_count),
-            }));
         } catch (e) {
+            // A snapshot that will not read is not a checkpoint with no changes: say which of the two this is.
+            checkpointDiffError = String(e);
             checkpointDiffFiles = [];
-            checkpointDiffUntracked = [];
         }
         checkpointDiffLoading = false;
     }
 
-    function closeCheckpointDiff() {
+    async function handleViewChanges(commitHash: string, commitLabel?: string) {
+        if (mobile) { activeTab = 'checkpoint'; onActiveTabChange?.('checkpoint'); }
+        if (checkpointDiffOpen && checkpointDiffHash === commitHash) {
+            closeCheckpointDiff();
+            return;
+        }
+        await loadCheckpointDiff(commitHash, commitLabel || '');
+    }
+
+    /**
+     * Expand one truncated file inside the checkpoint overlay. The answer comes from the two trees that
+     * comparison names — `/diff/file` without refs answers the working tree, and writing those rows here
+     * would show later work under the checkpoint's own heading.
+     */
+    async function expandCheckpointFile(path: string) {
+        if (!checkpointDiffHash) return;
+        try {
+            const data = await getDiffFile(task.project_id, task.id, path, {
+                full: true,
+                headRef: checkpointDiffHash,
+                baseRef: checkpointDiffBaseRef || undefined,
+            });
+            const rows = data.rows ? enrichRowsWithInlineSegments(data.rows) : [];
+            checkpointDiffFiles = checkpointDiffFiles.map(f => f.path === path ? {
+                ...f,
+                rows,
+                added: rows.filter(r => r.variant === 'added').length,
+                removed: rows.filter(r => r.variant === 'removed').length,
+                truncated: !!data.truncated,
+                origAdded: data.origAdded ?? f.origAdded,
+                origRemoved: data.origRemoved ?? f.origRemoved,
+            } : f);
+        } catch {
+            // The truncated rows stay on screen; they already say they are partial.
+        }
+    }
+
+    /** Every piece of the checkpoint view's state. The overlay renders only while `checkpointDiffOpen` is
+     * set, and a half-cleared view would keep naming the comparison it no longer shows. */
+    function resetCheckpointDiff() {
         checkpointDiffOpen = false;
         checkpointDiffHash = '';
+        checkpointDiffLabel = '';
+        checkpointDiffError = '';
         checkpointDiffBaseRef = '';
+        checkpointDiffFiles = [];
+    }
+
+    function closeCheckpointDiff() {
+        resetCheckpointDiff();
         if (mobile && activeTab === 'checkpoint') {
             activeTab = 'diff';
             onActiveTabChange?.('diff');
@@ -792,8 +823,7 @@
             return;
         }
         // Reset overlay and comparison state
-        checkpointDiffOpen = false;
-        checkpointDiffHash = '';
+        resetCheckpointDiff();
         editingFile = null;
         diffFrom = '';
         diffTo = 'working';
@@ -1052,16 +1082,16 @@
                             }}
                             onMoveTask={handleMove}
                             onTaskDone={closeOnDone}
-                            onThreadSwitch={() => {
-                                // Reset the diff cache synchronously so stale rows from
-                                // the previous thread can't leak into the new thread's view
-                                diffCache.reset();
-                                loadDiff();
-                            }}
                             onViewChanges={handleViewChanges}
-                            onInvalidateDiff={() => {
-                                // Clear cache so next WS event triggers a full reload.
+                            openCheckpointHash={checkpointDiffOpen ? checkpointDiffHash : ''}
+                            onReloadDiff={() => {
+                                // The chat moved the files under this panel: a thread switch is a different
+                                // comparison, a deletion rewinds the worktree, an edit-and-send retires a
+                                // fork, and a rewind is not what the worktree watcher reports. Reload it — the
+                                // rows held describe a state that no comparison answers, and a cleared panel
+                                // stays empty until some unrelated frame arrives.
                                 diffCache.reset();
+                                void loadDiff();
                             }}
                         />
                     {/key}
@@ -1135,12 +1165,14 @@
                         {#if checkpointDiffOpen}
                             <CheckpointOverlay
                                 files={checkpointDiffFiles}
-                                untracked={checkpointDiffUntracked}
                                 loading={checkpointDiffLoading}
+                                error={checkpointDiffError}
+                                label={checkpointDiffLabel}
+                                refs={checkpointDiffRefs}
                                 imageSource={checkpointImageSource}
                                 onClose={closeCheckpointDiff}
-                                onExpandFile={handleExpandDiff}
-                                onLineClick={handleDiffLineClick}
+                                onExpandFile={expandCheckpointFile}
+                                onRetry={() => { void loadCheckpointDiff(checkpointDiffHash, checkpointDiffLabel); }}
                             />
                         {/if}
                     {/if}

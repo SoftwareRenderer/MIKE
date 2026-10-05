@@ -244,11 +244,14 @@ func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID,
 			projectID = task.ProjectID
 		}
 
-		// Stage the turn's work, then capture it: no stash entry, no reset.
+		// Stage the turn's work, capture it, then put the index back: no stash entry, no reset. The capture
+		// runs before the unstage because `git stash create` has no -u — a new non-image binary left
+		// untracked is absent from the snapshot's tree, and the restore that reads that tree ends in
+		// `clean -fd`, which would delete the file the turn produced.
 		capture := func() (string, error) {
 			_ = te.worktreeMgr.GitRunInWorktree(taskID, "add", "-A")
-			unstageNewBinaryFiles(te.worktreeMgr, taskID)
 			out, err := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "stash", "create")
+			unstageNewBinaryFiles(te.worktreeMgr, taskID)
 			return strings.TrimSpace(out), err
 		}
 

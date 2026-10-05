@@ -478,8 +478,11 @@ type TaskDiff struct {
 	ShortStat         string                     `json:"short_stat"`
 	TruncatedFiles    []string                   `json:"truncated_files,omitempty"`
 	OriginalFileStats map[string]FileChangeStats `json:"original_file_stats,omitempty"`
-	StagedHash        string                     `json:"-"` // SHA-256 of staged state; changes diff hash when files are staged/unstaged
-	StagedPaths       []string                   `json:"-"` // paths currently staged in the index
+	// BaseRef names the commit this comparison measured from. The panel shows it beside the head so a
+	// historical view says what it compared instead of leaving the reader to guess which baseline it got.
+	BaseRef     string   `json:"base_ref,omitempty"`
+	StagedHash  string   `json:"-"` // SHA-256 of staged state; changes diff hash when files are staged/unstaged
+	StagedPaths []string `json:"-"` // paths currently staged in the index
 }
 
 // CommittedHalf is the patch that counts as committed work: the baseRef..HEAD overlay for a working-tree

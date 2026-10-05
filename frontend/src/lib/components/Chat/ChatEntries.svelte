@@ -1,7 +1,7 @@
 <script lang="ts">
     import { tick } from 'svelte';
     import type { Thread, ChatEntry, LockWait, ChatTurn } from '$lib/types';
-    import { advisoryLabel, type EntryMeta } from '$lib/utils/chat-entries';
+    import { advisoryLabel, type EntryMeta, type CheckpointState } from '$lib/utils/chat-entries';
     import { computeStickyHeader, turnLabel, type StickyTurn } from '$lib/utils/chat-sticky-header';
     import { scrollToLine } from '$lib/utils/settle-scroll';
     import { isAtBottom, type ChatFollow } from '$lib/composables/use-chat-follow.svelte';
@@ -47,6 +47,8 @@
         onViewChanges,
         onToggleFullscreen,
         isChatFullscreen,
+        trailingCheckpoint = null,
+        openCheckpointHash = '',
         follow,
         historyLoading = false,
         historyNotice = null,
@@ -88,9 +90,13 @@
         onSummaryEdit?: (msgId: string, newContent: string) => Promise<void>;
         onRegenerate: (entryId: string) => Promise<void>;
         onNavigateTask: (targetTaskId: string) => void;
-        onViewChanges?: (commitHash: string) => void;
+        onViewChanges?: (commitHash: string, commitLabel?: string) => void;
         onToggleFullscreen?: () => void;
         isChatFullscreen?: boolean;
+        /** The newest turn's band: the conversation's last checkpoint, which no later user message carries. */
+        trailingCheckpoint?: CheckpointState | null;
+        /** The checkpoint the Changes panel is showing, so its band reads as the open one. */
+        openCheckpointHash?: string;
         /** Shared follow-the-bottom tracker (created by TaskChat). */
         follow: ChatFollow;
         historyLoading?: boolean;
@@ -112,6 +118,11 @@
         /** Fetch until the prompt the header names is on screen. True once it is. */
         onJumpToTurn?: (entryId: string) => Promise<boolean>;
     } = $props();
+
+    /** Whether the Changes panel is showing this checkpoint, so its band reads as the open one. */
+    function changesOpen(commitHash?: string): boolean {
+        return !!commitHash && commitHash === openCheckpointHash;
+    }
 
     function isOptimisticId(id: string): boolean {
         return /^[a-z0-9]{8}$/.test(id);
@@ -419,7 +430,7 @@
                                 isPending={meta.cpState?.isPending || false}
                                 commitLabel={meta.cpState?.commitLabel || undefined}
                                 commitHash={meta.cpState?.commitHash || meta.cpThread?.checkpoint_commit_hash || undefined}
-                                checkpointIndex={meta.checkpointIndex}
+                                showChanges={changesOpen(meta.cpState?.commitHash)}
                                 onViewChanges={onViewChanges}
                             />
                         </div>
@@ -536,6 +547,22 @@
                 {/if}
                 </div>
             {/each}
+            {#if trailingCheckpoint}
+                {@const cp = trailingCheckpoint}
+                <!-- The newest turn's state: no later user message exists to carry this band, so without it
+                     the checkpoint a reader most wants to open has no way to be opened. -->
+                <CheckpointDivider
+                    threads={threads}
+                    activeThreadId={threads.find(th => th.is_active)?.id || ''}
+                    onSwitch={onThreadSwitch}
+                    isSwitching={isSwitching}
+                    isPending={cp.isPending}
+                    commitLabel={cp.commitLabel}
+                    commitHash={cp.commitHash}
+                    showChanges={changesOpen(cp.commitHash)}
+                    onViewChanges={onViewChanges}
+                />
+            {/if}
           </div>
         </div>
 

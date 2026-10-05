@@ -446,15 +446,25 @@ export async function deleteAppSetting(key: string): Promise<void> {
 
 // ─── Collapsed diff files (IndexedDB: collapsed-diff-files store) ────────────
 
-/** Load collapsed diff file paths. */
-export async function loadCollapsedDiffFiles(): Promise<Set<string>> {
-    const ids = await dbGet<string[]>(STORE_COLLAPSED_DIFF_FILES, KEY_IDS, isArray);
+/**
+ * One record per diff view, not one for the whole app: the working panel and a checkpoint's overlay can be
+ * open at the same time over different comparisons, and each one prunes its record to the paths it shows —
+ * shared, they erase each other. `working` takes the bare `ids` key, which is the record a browser already
+ * holds, so a reader's collapsed files survive the split.
+ */
+function collapsedDiffKey(scope: string): string {
+    return scope === 'working' ? KEY_IDS : `${KEY_IDS}:${scope}`;
+}
+
+/** Load collapsed diff file paths for one diff view. */
+export async function loadCollapsedDiffFiles(scope: string): Promise<Set<string>> {
+    const ids = await dbGet<string[]>(STORE_COLLAPSED_DIFF_FILES, collapsedDiffKey(scope), isArray);
     return ids ? new Set(ids) : new Set();
 }
 
-/** Save collapsed diff file paths. */
-export async function saveCollapsedDiffFiles(ids: Set<string>): Promise<void> {
-    return dbPut(STORE_COLLAPSED_DIFF_FILES, KEY_IDS, [...ids]);
+/** Save collapsed diff file paths for one diff view. */
+export async function saveCollapsedDiffFiles(scope: string, ids: Set<string>): Promise<void> {
+    return dbPut(STORE_COLLAPSED_DIFF_FILES, collapsedDiffKey(scope), [...ids]);
 }
 
 // ─── Garbage collection ─────────────────────────────────────────────────────

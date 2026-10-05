@@ -3,11 +3,19 @@ import { t } from '$lib/i18n';
 import { PENDING_SEND_ID_PREFIX } from './pending-sends';
 
 /** Checkpoint state for a single entry. */
-interface CheckpointState {
+export interface CheckpointState {
     isPending: boolean;
     commitLabel?: string;
     commitHash?: string;
 }
+
+/** The three per-message facts a checkpoint band reads. They always travel together, and two of them are the
+ * same `Map<string, string>` type, so naming them one by one invites a swap no type check would catch. */
+type CheckpointSources = {
+    pendingCheckpoints: Set<string>;
+    checkpointLabels: Map<string, string>;
+    checkpointCommitHashes: Map<string, string>;
+};
 
 /** Index of the last user message before `beforeIndex`, or -1 when there is none. */
 export function findLastUserMessageBefore(entries: ChatEntry[], beforeIndex: number): number {
@@ -96,16 +104,14 @@ export function removeDismissedError(
 export interface EntryMeta {
     cpState: CheckpointState | null;
     cpThread: Thread | null;
-    checkpointIndex: number; // 0-based index among checkpoints (oldest first)
     isLastUserMessage: boolean;
     /** The thread's first row: editing it forks, and deleting it takes the thread. Only true while nothing
      * older is unloaded — the oldest loaded row of a mid-thread window is not it. */
     isFirstUserMessage: boolean;
 }
 
-/** The per-entry metadata the chat list renders, in one pass. `hasEarlier` is what makes `isFirstUserMessage`
- * mean the thread's first row rather than the window's. Checkpoint indices count every checkpoint oldest
- * first, hashless ones included, because the backend resolves a stash by index. */
+/** The per-entry metadata the chat list renders, in one pass. `hasEarlier` is what makes
+ * `isFirstUserMessage` mean the thread's first row rather than the window's. */
 export function buildEntryMetas(args: {
     entries: ChatEntry[];
     pendingCheckpoints: Set<string>;
@@ -117,16 +123,13 @@ export function buildEntryMetas(args: {
     streaming: boolean;
 }): EntryMeta[] {
     const { entries, threads } = args;
-    const cpStateMap = buildCheckpointStateMap(
-        entries, args.pendingCheckpoints, args.checkpointLabels, args.checkpointCommitHashes,
-    );
+    const cpStateMap = buildCheckpointStateMap(entries, args);
     const activeThread = threads.find(t => t.is_active);
     const metas: EntryMeta[] = new Array(entries.length);
-    let cpIdx = 0;
     for (let i = 0; i < entries.length; i++) {
         const entry = entries[i]!;
         if (entry.role !== 'user') {
-            metas[i] = { cpState: null, cpThread: null, checkpointIndex: -1, isLastUserMessage: false, isFirstUserMessage: false };
+            metas[i] = { cpState: null, cpThread: null, isLastUserMessage: false, isFirstUserMessage: false };
             continue;
         }
         const cpState = cpStateMap.get(i) ?? null;
@@ -134,7 +137,6 @@ export function buildEntryMetas(args: {
         metas[i] = {
             cpState,
             cpThread: threads.length > 0 ? getCheckpointThreads(entry, threads, activeThread, isFirstUserMessage) : null,
-            checkpointIndex: cpState ? cpIdx++ : -1,
             isLastUserMessage: args.lastUserMessageIds.has(entry.id) && !args.streaming,
             isFirstUserMessage,
         };
@@ -550,76 +552,67 @@ function collapseRepeatErrors(entries: ChatEntry[]): ChatEntry[] {
     });
 }
 
+/** The state one turn left behind. A band is drawn for a turn only once its state was saved, or while it is
+ * being saved: a bookmark over nothing to show is a lie about what the panel can answer. */
+function checkpointStateFor(entry: ChatEntry, sources: CheckpointSources): CheckpointState | null {
+    const commitHash = sources.checkpointCommitHashes.get(entry.id) || '';
+    const isPending = sources.pendingCheckpoints.has(entry.id);
+    if (!commitHash && !isPending) return null;
+    return {
+        isPending,
+        commitLabel: sources.checkpointLabels.get(entry.id),
+        commitHash: commitHash || undefined,
+    };
+}
+
 /**
- * Map each user message to the checkpoint above it, which shows the repo state before that message's
- * work. Prefer the last saved assistant before it, since "view changes" needs a commit hash, and fall
- * back to the next qualifying one only when nothing precedes it (the first message, a fork point).
+ * Map each user message to the checkpoint band drawn above it: the newest turn *before* it, which is the
+ * state of the work when that message arrived. A band never points forward — a checkpoint belongs to the turn
+ * that captured it, and pointing forward puts one above the question that caused it and again above the next
+ * message. The newest turn has no later user message to carry its band; `trailingCheckpoint` answers for it.
  *
  * @knipignore Which checkpoint a message shows the state before is asserted per entry order.
  */
 export function buildCheckpointStateMap(
     entries: ChatEntry[],
-    pendingCheckpoints: Set<string>,
-    checkpointLabels: Map<string, string>,
-    checkpointCommitHashes: Map<string, string>,
+    sources: CheckpointSources,
 ): Map<number, CheckpointState | null> {
     const result = new Map<number, CheckpointState | null>();
-    const n = entries.length;
+    let lastAssistant: number | null = null;
 
-    // Index of the next assistant at or after each position: where a forward scan would stop.
-    const nextAssistant = new Int32Array(n).fill(-1);
-    for (let i = n - 2; i >= 0; i--) {
-        if (entries[i + 1].role === 'assistant') {
-            nextAssistant[i] = i + 1;
-        } else {
-            nextAssistant[i] = nextAssistant[i + 1];
-        }
-    }
-
-    // One forward pass, tracking the candidate checkpoints seen since the previous user message.
-    let lastQualifyingAssistant: number | null = null;
-    let lastHashAssistant: number | null = null;
-
-    for (let i = 0; i < n; i++) {
-        const entry = entries[i];
-
+    for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i]!;
         if (entry.role === 'assistant') {
-            const hasToolCalls = entry.toolCalls && entry.toolCalls.length > 0;
-            const hasHash = checkpointCommitHashes.has(entry.id);
-            if (hasToolCalls || hasHash) {
-                lastQualifyingAssistant = i;
-            }
-            if (hasHash) {
-                lastHashAssistant = i;
-            }
+            lastAssistant = i;
+            continue;
         }
-
-        if (entry.role === 'user') {
-            // Only a committed assistant can show the changes link, so it wins over a tool-only one.
-            const bwdIdx = lastHashAssistant ?? lastQualifyingAssistant;
-            const bwd = bwdIdx !== null ? entries[bwdIdx] : null;
-            const fwdIdx = nextAssistant[i];
-            const fwd = fwdIdx >= 0 ? entries[fwdIdx] : null;
-            const fwdQualifying = fwd !== null && ((fwd.toolCalls && fwd.toolCalls.length > 0) || checkpointCommitHashes.has(fwd.id));
-
-            const target = bwd ?? (fwdQualifying ? fwd : null);
-            if (target !== null) {
-                result.set(i, {
-                    isPending: pendingCheckpoints.has(target.id),
-                    commitLabel: checkpointLabels.get(target.id),
-                    commitHash: checkpointCommitHashes.get(target.id) || undefined,
-                });
-            } else {
-                result.set(i, null);
-            }
-
-            // Reset backward scan targets — bounded by this user entry.
-            lastQualifyingAssistant = null;
-            lastHashAssistant = null;
-        }
+        if (entry.role !== 'user') continue;
+        result.set(i, lastAssistant === null
+            ? null
+            : checkpointStateFor(entries[lastAssistant]!, sources));
+        // One band per turn: what this message's own turn leaves behind belongs to the next band, not here.
+        lastAssistant = null;
     }
 
     return result;
+}
+
+/**
+ * The band after the last message: the newest turn of the conversation, which no later user message carries.
+ * The turn a reader most wants to inspect is the one that just finished, and without this it has no band.
+ * `null` when the conversation ends on a user message, or that turn saved nothing.
+ */
+export function trailingCheckpoint(args: { entries: ChatEntry[] } & CheckpointSources): CheckpointState | null {
+    const { entries } = args;
+    for (let i = entries.length - 1; i >= 0; i--) {
+        const entry = entries[i]!;
+        // The tail past the last question is the newest turn; anything before it already has a band.
+        if (entry.role === 'user') return null;
+        if (entry.role === 'assistant') {
+            return checkpointStateFor(entry, args);
+        }
+    }
+    return null;
 }
 
 /**

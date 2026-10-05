@@ -13,11 +13,13 @@
         isPending?: boolean;
         commitLabel?: string;
         commitHash?: string;
-        checkpointIndex?: number;
-        onViewChanges?: (commitHash: string, checkpointIndex?: number) => void;
+        /** True while this band's checkpoint is the one the Changes panel is showing. The button toggles it,
+         * so without this the second click looks like a control that stopped working. */
+        showChanges?: boolean;
+        onViewChanges?: (commitHash: string, commitLabel?: string) => void;
     }
 
-    let { timestamp, threads, activeThreadId, onSwitch, isSwitching = false, isPending = false, commitLabel, commitHash, checkpointIndex, onViewChanges }: Props = $props();
+    let { timestamp, threads, activeThreadId, onSwitch, isSwitching = false, isPending = false, commitLabel, commitHash, showChanges = false, onViewChanges }: Props = $props();
 
     // Filter threads to only show those relevant at this checkpoint.
     // Compare as Date values (not strings): checkpoint_message_time is stored at
@@ -47,7 +49,7 @@
         </span>
         <div class="divider-actions">
             {#if onViewChanges && commitHash}
-                <button class="view-changes-btn" onclick={() => onViewChanges(commitHash || '', checkpointIndex)} title={t('chat.checkpoint.viewChanges')}>
+                <button class="view-changes-btn" class:active={showChanges} aria-expanded={showChanges} onclick={() => onViewChanges(commitHash || '', commitLabel)} title={t('chat.checkpoint.viewChanges')}>
                     <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="5" height="12" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="9" y="2" width="5" height="12" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M4 5h1M4 7h1M4 9h1" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><path d="M11 5h1M11 7l1 1M11 9l1-1" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 </button>
             {/if}
@@ -122,5 +124,10 @@
         background: color-mix(in srgb, var(--color-accent) 12%, transparent);
         color: var(--color-accent);
         border-color: color-mix(in srgb, var(--color-accent) 30%, transparent);
+    }
+    .view-changes-btn.active {
+        background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+        color: var(--color-accent);
+        border-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
     }
 </style>
