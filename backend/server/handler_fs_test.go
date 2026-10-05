@@ -798,9 +798,10 @@ func TestFSSearchFilenameRegex(t *testing.T) {
 	}
 }
 
-// TestFSSearchFindsDotFiles: find-in-files reaches dot-prefixed files and never reads .git or
-// node_modules. One token sits in every file of the fixture, so a single content query answers both.
-func TestFSSearchFindsDotFiles(t *testing.T) {
+// TestFSSearchSkipsDotNames: neither half of a search reaches a dot-prefixed file or directory, and the
+// non-dot caches stay out as well. One token sits in most files of the fixture, so a single content query
+// answers both halves.
+func TestFSSearchSkipsDotNames(t *testing.T) {
 	s := testServer(t)
 	cookie, csrf := loginTestCSRF(t, s)
 	base := t.TempDir()
@@ -808,6 +809,7 @@ func TestFSSearchFindsDotFiles(t *testing.T) {
 		".env":                      "token = dot-search-token\n",
 		".gitignore":                "build/\n",
 		".github/workflows/ci.yml":  "name: dot-search-token\n",
+		".vscode/settings.json":     "dot-search-token in the editor settings\n",
 		"main.go":                   "package main // dot-search-token\n",
 		".git/config":               "dot-search-token from the git directory\n",
 		"node_modules/pkg/leak.txt": "dot-search-token from node_modules\n",
@@ -853,19 +855,26 @@ func TestFSSearchFindsDotFiles(t *testing.T) {
 		return got
 	}
 
-	if names := search("ci.yml", false); !names[filepath.Join(".github", "workflows", "ci.yml")] {
-		t.Errorf("a file under a dot directory was not found by name: %v", names)
+	for _, q := range []string{"ci.yml", "env", "gitignore", "settings"} {
+		if names := search(q, false); len(names) != 0 {
+			t.Errorf("filename search for %q reached a dot-prefixed name: %v", q, names)
+		}
+	}
+	if names := search("main", false); !names["main.go"] {
+		t.Errorf("filename search lost the ordinary file: %v", names)
 	}
 
 	contents := search("dot-search-token", true)
-	for _, want := range []string{".env", filepath.Join(".github", "workflows", "ci.yml"), "main.go"} {
-		if !contents[want] {
-			t.Errorf("content search missed %s: %v", want, contents)
-		}
+	if !contents["main.go"] {
+		t.Errorf("content search missed the ordinary file: %v", contents)
 	}
-	for _, skip := range []string{filepath.Join(".git", "config"), filepath.Join("node_modules", "pkg", "leak.txt")} {
+	for _, skip := range []string{".env",
+		filepath.Join(".github", "workflows", "ci.yml"),
+		filepath.Join(".vscode", "settings.json"),
+		filepath.Join(".git", "config"),
+		filepath.Join("node_modules", "pkg", "leak.txt")} {
 		if contents[skip] {
-			t.Errorf("content search read into %s, which the listing hides as well", skip)
+			t.Errorf("content search read into %s, which no search walks", skip)
 		}
 	}
 }

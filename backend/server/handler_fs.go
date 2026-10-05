@@ -448,7 +448,8 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 //   - content: "1" to search file contents in addition to filenames
 //   - case, word, regex: "1" to match case-sensitively, whole words, or a regular expression
 //
-// Filename search returns up to 10 results, content search up to 50, skipping binary files.
+// Filename search returns up to 10 results, content search up to 50, skipping binary files. A
+// dot-prefixed file or directory is never searched; see searchSkipsName.
 func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 
 	projectID := r.URL.Query().Get("project")
@@ -1279,10 +1280,13 @@ func (f fsSearch) matchesFile(rel string) bool {
 	return strings.Contains(checkStr, searchStr)
 }
 
-// searchSkippedDirs names the directories a search never walks, because the file listing hides them
-// too (FileBrowserView.svelte). They stay out of git.ignoredDirs, which the worktree watchers and the
-// diff broadcasts also read, where a person's editor settings must stay reviewable.
-var searchSkippedDirs = map[string]struct{}{".git": {}, ".vscode": {}, ".idea": {}}
+// searchSkipsName reports whether a search stops at an entry: a dot-prefixed name is tool or editor
+// state, and the file picker hides those behind its own option (FileBrowser.svelte). The rule covers
+// .git, .vscode and .idea, which stay out of git.ignoredDirs because the watchers and the diff
+// broadcasts also read that set, where a person's editor settings must remain reviewable.
+func searchSkipsName(name string) bool {
+	return strings.HasPrefix(name, ".")
+}
 
 // walk collects the matches under the root, in a stable order, stopping at the limit or when ctx ends.
 // It reads the host filesystem even for a sandboxed task, because the worktree is bind-mounted into the
@@ -1317,7 +1321,7 @@ func (f fsSearch) walk(ctx context.Context) []searchResult {
 			return nil
 		}
 
-		if _, skip := searchSkippedDirs[d.Name()]; skip {
+		if searchSkipsName(d.Name()) {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
