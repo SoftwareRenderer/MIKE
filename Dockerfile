@@ -15,7 +15,7 @@
 
 # syntax=docker/dockerfile:1
 
-ARG GO_IMAGE=golang:1.26-alpine
+ARG GO_IMAGE=golang:1.27-alpine
 ARG NODE_IMAGE=node:22-slim
 # Debian stable: its podman is 5.x, which is what this app's `podman --runtime-flag
 # ignore-cgroups=true <cmd>` global option needs. Ubuntu 24.04 ships podman 4.9, which is
