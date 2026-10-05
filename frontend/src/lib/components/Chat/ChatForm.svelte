@@ -13,6 +13,8 @@
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { tick } from 'svelte';
     import { t } from '$lib/i18n';
+    import Icon from '../Icon.svelte';
+    import closeIcon from '$lib/assets/icons/close.svg?raw';
 
     interface Props {
         value?: string;
@@ -227,7 +229,7 @@
                 <div class="attachment-thumb">
                     <img src={imageSrc(att)} alt="" />
                     <button type="button" class="attachment-remove" onclick={() => removeAttachment(i)} aria-label={t('chat.form.removeImage')} title={t('chat.common.remove')}>
-                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                        <Icon src={closeIcon} width={12} height={12} />
                     </button>
                 </div>
             {/each}

@@ -35,6 +35,7 @@
     import Icon from './Icon.svelte';
     import mikeLogo from '$lib/assets/icons/mike.svg?raw';
     import folderIcon from '$lib/assets/icons/folder.svg?raw';
+    import closeIcon from '$lib/assets/icons/close.svg?raw';
     import { checkNow, type UpdateOutcome } from '$lib/services/app-update';
     import { updateCheck } from '$lib/services/update-check.svelte';
 
@@ -785,7 +786,7 @@
                     {/if}
                 </button>
             {/if}
-            <button class="close-btn" onclick={handleClose} aria-label={t('settings.close')} title={t('settings.close')}>✕</button>
+            <button class="close-btn" onclick={handleClose} aria-label={t('settings.close')} title={t('settings.close')}><Icon src={closeIcon} width={16} height={16} /></button>
         </div>
     </div>
 {/snippet}

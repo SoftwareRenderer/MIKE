@@ -13,6 +13,8 @@
     import { escapeHtml } from '$lib/utils/format';
     import { formatDateTime, formatDate } from '$lib/utils/format-time';
     import { t } from '$lib/i18n';
+    import Icon from './Icon.svelte';
+    import closeIcon from '$lib/assets/icons/close.svg?raw';
     import { slide } from 'svelte/transition';
     import { useClickOutside } from '$lib/composables/use-click-outside.svelte';
 
@@ -292,9 +294,7 @@
     <div class="diff-header">
         <div class="diff-header-left">
             <button class="close-btn" onclick={onClose} title={t('diff.closeDiffAria')} aria-label={t('diff.closeDiffAria')}>
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                    <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                </svg>
+                <Icon src={closeIcon} width={14} height={14} />
             </button>
             <div class="diff-commit-info">
                 {#if hasBody}

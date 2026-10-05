@@ -7,6 +7,8 @@
     import { planBulkMove } from '$lib/utils/task-utils';
     import { createStatusLabel } from '$lib/utils/subtask-status';
     import { t, type MessageKey } from '$lib/i18n';
+    import Icon from './Icon.svelte';
+    import closeIcon from '$lib/assets/icons/close.svg?raw';
     import { useClickOutside } from '$lib/composables/use-click-outside.svelte';
 
     let { multiSelect, tasks, onClear }: {
@@ -224,9 +226,7 @@
             aria-label={t('explorer.shared.selectionClear')}
             title={t('explorer.shared.selectionClear')}
         >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-            </svg>
+            <Icon src={closeIcon} width={14} height={14} />
         </button>
     </div>
 {/if}

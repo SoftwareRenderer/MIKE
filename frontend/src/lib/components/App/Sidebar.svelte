@@ -5,6 +5,7 @@
     import { t } from '$lib/i18n';
     import shieldIcon from '$lib/assets/icons/shield.svg?raw';
     import shieldOffIcon from '$lib/assets/icons/shield-off.svg?raw';
+    import closeIcon from '$lib/assets/icons/close.svg?raw';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
     import { boardEdgeCard } from '$lib/composables/use-board-arrow-nav';
     import { projectBoardHref } from '$lib/utils/app-link';
@@ -121,7 +122,7 @@
     <div class="sidebar-header">
         <h2 class:collapsed={!isMobile && collapsed}>{t('app.sidebar.projects')}</h2>
         <!-- Mobile close button (hidden on desktop via CSS) -->
-        <button class="toggle-btn mobile-close-btn" onclick={() => mobileMenuOpen = false} aria-label={t('app.sidebar.closeMenuAria')} title={t('app.sidebar.closeMenuAria')}>✕</button>
+        <button class="toggle-btn mobile-close-btn" onclick={() => mobileMenuOpen = false} aria-label={t('app.sidebar.closeMenuAria')} title={t('app.sidebar.closeMenuAria')}><Icon src={closeIcon} width={14} height={14} /></button>
         <!-- Desktop collapse toggle (hidden on mobile via CSS) -->
         <button class="toggle-btn desktop-collapse-btn" class:collapsed={collapsed} onclick={onToggleSidebar} aria-expanded={collapsed ? 'false' : 'true'} aria-controls="sidebar" aria-label={collapsed ? t('app.sidebar.expandAria') : t('app.sidebar.collapseAria')} title={collapsed ? t('app.sidebar.expandAria') : t('app.sidebar.collapseAria')}>
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -284,11 +285,11 @@
         align-items: center;
         justify-content: center;
     }
-    .toggle-btn svg {
+    .desktop-collapse-btn svg {
         transition: transform var(--dur-base) ease;
         transform: rotate(180deg);
     }
-    .toggle-btn.collapsed svg {
+    .desktop-collapse-btn.collapsed svg {
         transform: rotate(0deg);
     }
     .toggle-btn:hover {

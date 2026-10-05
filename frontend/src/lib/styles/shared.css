@@ -2,7 +2,8 @@
    :global() rules stay unscoped so they match elements across all components */
 
 
-/* Close button — used in modals, dialogs, overlays */
+/* Close button — used in modals, dialogs, overlays. Its content is always the `close.svg` mark, and
+   the call site passes the size to `Icon`, so nothing here sizes text. */
 :global(.close-btn) {
     display: flex;
     align-items: center;
@@ -10,7 +11,6 @@
     background: none;
     border: none;
     color: var(--color-text-secondary);
-    font-size: var(--text-lg);
     cursor: pointer;
     padding: 4px;
     border-radius: var(--radius-sm);

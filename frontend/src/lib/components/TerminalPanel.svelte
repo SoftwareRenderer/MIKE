@@ -13,6 +13,8 @@
     import { createFocusTrap } from '$lib/a11y';
     import { effectiveOpenTerminalKey, effectiveToggleFullscreenKey, fullscreenToggleTitle, formatShortcut, matchShortcut } from '$lib/utils/keyboard';
     import ResizeHandle from './ResizeHandle.svelte';
+    import Icon from './Icon.svelte';
+    import closeIcon from '$lib/assets/icons/close.svg?raw';
     import { t } from '$lib/i18n';
     import '@xterm/xterm/css/xterm.css';
 
@@ -859,7 +861,7 @@
                 {/if}
             </button>
             {/if}
-            <button class="close-btn" onclick={close} aria-label={t('terminal.close')} title={closeButtonTitle}>✕</button>
+            <button class="close-btn" onclick={close} aria-label={t('terminal.close')} title={closeButtonTitle}><Icon src={closeIcon} width={16} height={16} /></button>
         </div>
         {/if}
     </div>
@@ -1014,7 +1016,6 @@
     }
 
     .close-btn {
-        font-size: var(--text-lg);
         padding: 2px 6px;
     }
     .close-btn:hover {

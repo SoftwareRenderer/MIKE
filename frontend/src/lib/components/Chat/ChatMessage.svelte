@@ -15,6 +15,8 @@
     import { systemNoteText, editSubmitAction } from '$lib/utils/chat-entries';
     import type { ToolCallInfo } from '$lib/types';
     import { t } from '$lib/i18n';
+    import Icon from '../Icon.svelte';
+    import closeIcon from '$lib/assets/icons/close.svg?raw';
 
     interface Props {
         role: string;
@@ -144,7 +146,7 @@
         <div class="edit-modal">
             <div class="edit-modal-header">
                 <h3>{t('chat.message.editTitle')}</h3>
-                <button class="close-btn" onclick={cancelEdit} aria-label={t('chat.common.close')}>✕</button>
+                <button class="close-btn" onclick={cancelEdit} aria-label={t('chat.common.close')}><Icon src={closeIcon} width={16} height={16} /></button>
             </div>
             <!-- The one edit form: Ctrl/⌘+Enter saves, Escape cancels, attachments ride along. -->
             {@render editForm('save', true)}
@@ -701,7 +703,6 @@
         background: none;
         border: none;
         color: var(--color-text-secondary);
-        font-size: var(--text-lg);
         cursor: pointer;
         padding: 4px;
     }

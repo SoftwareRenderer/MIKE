@@ -18,6 +18,7 @@
     import EmptyState from './EmptyState.svelte';
     import Spinner from './Spinner.svelte';
     import stageIcon from '$lib/assets/icons/stage.svg?raw';
+    import closeIcon from '$lib/assets/icons/close.svg?raw';
     import unstageIcon from '$lib/assets/icons/unstage.svg?raw';
     import discardIcon from '$lib/assets/icons/discard.svg?raw';
     import fileTextIcon from '$lib/assets/icons/file-text.svg?raw';
@@ -939,9 +940,7 @@
     <!-- Header -->
     <div class="panel-header">
         <button class="close-btn" onclick={onClose} aria-label={t('git.closePanelAria')} title={t('explorer.shared.closeEscape')}>
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-            </svg>
+            <Icon src={closeIcon} width={12} height={12} />
         </button>
         <span class="panel-title">{t('git.changes')}</span>
         <!-- Commit comparison dropdowns -->

@@ -4,6 +4,8 @@
     import { createFocusTrap } from '$lib/a11y';
     import { Z } from '$lib/constants/z-layers';
     import { t } from '$lib/i18n';
+    import Icon from './Icon.svelte';
+    import closeIcon from '$lib/assets/icons/close.svg?raw';
 
     let {
         title = '',
@@ -121,7 +123,7 @@
             {:else}
                 <h2 id="modal-title">{title}</h2>
             {/if}
-            <button class="close-btn" onclick={handleClose} aria-label={t('app.close')} title={t('app.close')}>✕</button>
+            <button class="close-btn" onclick={handleClose} aria-label={t('app.close')} title={t('app.close')}><Icon src={closeIcon} width={16} height={16} /></button>
         </div>
         {#if toolbar}
             <div class="modal-toolbar">

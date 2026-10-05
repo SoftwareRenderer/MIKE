@@ -2,6 +2,8 @@
     import { reasoningEffortOptions } from '$lib/types';
     import { t } from '$lib/i18n';
     import EmptyState from '../EmptyState.svelte';
+    import Icon from '../Icon.svelte';
+    import closeIcon from '$lib/assets/icons/close.svg?raw';
     import type { ModelEntry, SamplingKey } from './drafts';
 
     let { models, onAdd, onRemove, currencySymbol = '$', index = 0, onDirty }: {
@@ -194,7 +196,7 @@
                         </svg>
                     </button>
                     <button type="button" class="btn-remove-model" onclick={() => onRemove(mi)} aria-label={t('settings.models.removeAria', { model: model.name || t('settings.models.modelWord') })} title={t('settings.models.removeAria', { model: model.name || t('settings.models.modelWord') })}>
-                        ✕
+                        <Icon src={closeIcon} width={12} height={12} />
                     </button>
                 </div>
                 {#if expandedRows.has(mi)}
@@ -483,7 +485,6 @@
         transform: rotate(180deg);
     }
     .btn-remove-model {
-        font-size: var(--text-xs);
         color: var(--color-text-secondary);
         background: none;
         border: none;

@@ -4,6 +4,7 @@
     import { t } from '$lib/i18n';
     import Icon from './Icon.svelte';
     import commitPushIcon from '$lib/assets/icons/commit-push.svg?raw';
+    import closeIcon from '$lib/assets/icons/close.svg?raw';
 
     /**
      * The explorer header both screens draw: close, path, the branch, and the terminal.
@@ -61,9 +62,7 @@
 
 <div class="explorer-header">
     <button class="close-btn" onclick={() => { if (changesOpen) { onChangesOpen(false); } else { onCloseRequest(); } }} aria-label={closeAria} title={t('explorer.shared.closeEscape')}>
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-        </svg>
+        <Icon src={closeIcon} width={16} height={16} />
     </button>
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="explorer-view-icon">
         <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>

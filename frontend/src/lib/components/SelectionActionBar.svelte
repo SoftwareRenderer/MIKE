@@ -1,6 +1,8 @@
 <script lang="ts">
     import type { Snippet } from 'svelte';
     import { t } from '$lib/i18n';
+    import Icon from './Icon.svelte';
+    import closeIcon from '$lib/assets/icons/close.svg?raw';
 
     /**
      * The touch equivalent of a context menu: how many rows are held, and the way out of the selection.
@@ -23,7 +25,7 @@
         title={t('explorer.shared.selectionClear')}
         aria-label={t('explorer.shared.selectionClear')}
         onclick={onClear}
-    >✕</button>
+    ><Icon src={closeIcon} width={14} height={14} /></button>
 </div>
 
 <style>

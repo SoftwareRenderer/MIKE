@@ -3,6 +3,8 @@
     import { dialogStore } from '$lib/stores';
     import ToggleSwitch from '../ToggleSwitch.svelte';
     import Spinner from '../Spinner.svelte';
+    import Icon from '../Icon.svelte';
+    import closeIcon from '$lib/assets/icons/close.svg?raw';
     import type { MCPServerDraft } from './mcp-drafts';
     import { MAX_MCP_HEADERS } from './mcp-drafts';
 
@@ -167,7 +169,7 @@
                 {#if !locked}
                     <button type="button" class="btn btn-secondary mcp-action" onclick={() => removeHeader(i)}
                         title={t('settings.mcp.removeHeaderHint')} aria-label={t('settings.mcp.removeHeaderAria')}>
-                        ✕
+                        <Icon src={closeIcon} width={14} height={14} />
                     </button>
                 {/if}
             </div>

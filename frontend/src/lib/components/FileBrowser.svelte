@@ -11,6 +11,7 @@
         uiInjector.refreshSlot(INJECTION_POINTS.FILE_BROWSER, { component: 'FileBrowser' });
     });
     import homeIcon from '$lib/assets/icons/home.svg?raw';
+    import closeIcon from '$lib/assets/icons/close.svg?raw';
     import { t } from '$lib/i18n';
     import folderIcon from '$lib/assets/icons/folder.svg?raw';
     import fileIcon from '$lib/assets/icons/file.svg?raw';
@@ -241,7 +242,7 @@
                             aria-label={t('explorer.shared.newFolderNameAria')}
                         />
                         <button class="btn-mini" onclick={handleCreateFolder} disabled={mkdirLoading || !newFolderName.trim()} title={t('explorer.fileBrowser.create')}>{mkdirLoading ? '...' : t('explorer.fileBrowser.create')}</button>
-                        <button class="btn-mini btn-mini-cancel" onclick={() => { showNewFolder = false; newFolderName = ''; }} title={t('explorer.shared.cancel')}>✕</button>
+                        <button class="btn-mini btn-mini-cancel" onclick={() => { showNewFolder = false; newFolderName = ''; }} title={t('explorer.shared.cancel')}><Icon src={closeIcon} width={14} height={14} /></button>
                     </div>
                 {/if}
                 </div>

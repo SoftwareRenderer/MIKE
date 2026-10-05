@@ -10,9 +10,9 @@
     let safeHeight = $derived(Number(height) || 16);
 
     // `src` is rendered as markup, so only the shape this component is for is
-    // accepted: a lone, sanitized `<svg>` root. Everything real passes — the 26
-    // call sites each pass an `*.svg?raw` import — and anything else renders
-    // nothing rather than whatever it was.
+    // accepted: a lone, sanitized `<svg>` root. A call site passes an
+    // `$lib/assets/icons/*.svg?raw` import or a prop documented as holding one,
+    // and anything else renders nothing rather than whatever it was.
     let safeSrc = $derived(singleSvgMarkup(src));
 
     // A dropped icon must not be silent for the developer who asked for one. In an

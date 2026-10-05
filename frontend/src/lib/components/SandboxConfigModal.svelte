@@ -168,7 +168,6 @@
     :global(.sandbox-config-modal .close-btn) {
         width: 28px;
         height: 28px;
-        font-size: var(--text-lg);
     }
 
     .config-options {
