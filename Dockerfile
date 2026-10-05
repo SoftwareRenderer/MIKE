@@ -22,10 +22,13 @@ ARG NODE_IMAGE=node:22-slim
 # unverified against that call — and the RUN below that asserts it fails the build rather
 # than the first task.
 ARG RUNTIME_IMAGE=debian:trixie-slim
-# "release/latest" or a pinned gVisor release channel/date, e.g. release-20250801.
-ARG GVISOR_RELEASE=latest
-# Recorded into the binary the same way the Makefile does it.
-ARG VERSION=docker
+# A gVisor release channel, or a pinned release spelled as its bare date (`20260928`). The bucket
+# path already carries the word `release`, so `release-20260928` is a 404. No default is spelled
+# here: a global ARG's default reaches a stage in some builders and not in others (measured on
+# podman/buildah, which hands over an empty one), so the stage that reads it holds the default.
+ARG GVISOR_RELEASE
+# Recorded into the binary the same way the Makefile does it; its default sits in that stage too.
+ARG VERSION
 
 # ── Stage 1: frontend (Vite → /build/dist) ───────────────────────────────────
 FROM ${NODE_IMAGE} AS web
@@ -51,7 +54,8 @@ COPY --from=web /build/dist ./frontend/dist
 ENV CGO_ENABLED=0
 ARG VERSION
 # The image ships no frontend directory, so this is the release build; the bridge takes no tag.
-RUN go build -tags release -trimpath -buildvcs=false -ldflags "-s -w -X mike/backend/server.Version=${VERSION}" \
+RUN : "${VERSION:=docker}" && \
+    go build -tags release -trimpath -buildvcs=false -ldflags "-s -w -X mike/backend/server.Version=${VERSION}" \
       -o /out/mike . && \
     go build -trimpath -buildvcs=false -ldflags "-s -w" \
       -o /out/sandbox-bridge ./pkg/bridge/agent
@@ -68,6 +72,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
 #   rootless path. uidmap + fuse-overlayfs: alternate userns / storage driver (the
 #   entrypoint falls back to fuse-overlayfs or vfs when overlay lands on overlayfs).
 # curl: the healthcheck only.
+# zstd: the gVisor bundle below is a `.tar.zstd` and `tar --zstd` runs the `zstd` binary; a slim
+#   Debian image ships neither zstd nor bzip2.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
       curl \
@@ -85,10 +91,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       fuse-overlayfs \
       slirp4netns \
       passt \
+      zstd \
     && rm -rf /var/lib/apt/lists/*
 
-# gVisor. Same recipe as scripts/install-gvisor.sh, runsc only (no containerd shim — this
-# image has no containerd), and the published sha512 is checked before anything is run.
+# gVisor: the release bundle, whose published sha512 is checked before anything is run. Since
+# release/20260831 the bucket carries only the bundle — the bare `runsc` object is gone, and with it
+# the recipe `scripts/install-gvisor.sh` still uses, which 404s until it asks for this file too.
+# The bundle is also what runsc now needs: it executes the binaries under `gvisor-bin/` at runtime
+# and looks for that directory beside its own, so the tree is extracted whole and left whole. Only
+# the containerd shim is dropped, this image having no containerd.
 ARG GVISOR_RELEASE
 RUN arch="$(dpkg --print-architecture)" && \
     case "$arch" in \
@@ -96,11 +107,13 @@ RUN arch="$(dpkg --print-architecture)" && \
       arm64) garch=aarch64 ;; \
       *) echo "gVisor: unsupported architecture $arch" >&2; exit 1 ;; \
     esac && \
+    : "${GVISOR_RELEASE:=latest}" && \
     url="https://storage.googleapis.com/gvisor/releases/release/${GVISOR_RELEASE}/${garch}" && \
     tmp="$(mktemp -d)" && cd "$tmp" && \
-    curl -fsSL -O "${url}/runsc" -O "${url}/runsc.sha512" && \
-    sha512sum -c runsc.sha512 && \
-    install -m 0755 runsc /usr/local/bin/runsc && \
+    curl -fsSL -O "${url}/gvisor.tar.zstd" -O "${url}/gvisor.tar.zstd.sha512" && \
+    sha512sum -c gvisor.tar.zstd.sha512 && \
+    tar --zstd -xf gvisor.tar.zstd -C /usr/local/bin && \
+    rm -f /usr/local/bin/containerd-shim-runsc-v1 && \
     cd / && rm -rf "$tmp" && \
     runsc --version
 
@@ -136,6 +149,8 @@ RUN mkdir -p /etc/containers/registries.conf.d && \
 WORKDIR /mike
 COPY --from=go  /out/mike             /mike/mike
 COPY --from=go  /out/sandbox-bridge   /mike/sandbox-bridge
+# The templates only: `.dockerignore` keeps `prompts/skills/` out of the context, so a deployed
+# image ships no skills — `prompts.SkillsDir()` returns empty and the sandbox skips that mount.
 COPY prompts/*.tmpl /mike/prompts/
 COPY scripts/docker-entrypoint.sh /usr/local/bin/mike-entrypoint.sh
 COPY scripts/mike-healthcheck.sh  /usr/local/bin/mike-healthcheck
@@ -144,13 +159,16 @@ RUN chmod 0755 /mike/mike /mike/sandbox-bridge /usr/local/bin/mike-entrypoint.sh
     chmod 0700 /mike/data
 
 # Fails the BUILD, not the first task, if the distro's podman rejects the global flag this
-# app passes (`podman --runtime-flag ignore-cgroups=true start|exec`) or runsc is not on
-# PATH under the name the sandbox asks for. `podman info` is NOT checked here: it needs the
+# app passes (`podman --runtime-flag ignore-cgroups=true start|exec`), if runsc is not on
+# PATH under the name the sandbox asks for, or if the extracted tree has no sidecars — runsc
+# answers `--version` happily with `gvisor-bin/` missing and fails only on a `create`.
+# `podman info` is NOT checked here: it needs the
 # privileges the container gets at run time, and a swallowed failure would make this line
 # a lie. The entrypoint probes it and says what it found.
 RUN podman --runtime-flag ignore-cgroups=true --version && \
     runsc --version && \
-    [ "$(command -v runsc)" = /usr/local/bin/runsc ]
+    [ "$(command -v runsc)" = /usr/local/bin/runsc ] && \
+    [ -x /usr/local/bin/gvisor-bin/gvisor_sentry ]
 
 # Agent adapters (backend/agent/runner.go) start their binaries as children of the server,
 # so an adapter that needs a host CLI — e.g. the Pi agent adapter, which runs `pi` — needs
