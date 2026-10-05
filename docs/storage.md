@@ -109,7 +109,8 @@ in the shared index instead pushes `rowid` back and puts a temp B-tree in every 
 ## File permissions
 
 Data dir `0700`; `kanban.db` plus `-wal`/`-shm` `0600` (`backend/store/store.go`); `kanban.trace` `0600`
-(`main.go`).
+(`main.go`). `data/tls` is `0700`, its `*.crt` `0644` and its `*.key` `0600` — written owner-only even when
+replacing a file that was not, by `writePrivateFile` in `backend/tls/tls.go`.
 
 ## IDs
 

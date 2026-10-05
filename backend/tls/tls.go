@@ -1,6 +1,7 @@
 // Package tls provisions HTTPS material: a self-signed local CA created once in the data
 // directory, and a server certificate it signs whose SANs cover localhost, the hostname and
-// the host's addresses. The CA key never leaves the data dir and is never rotated.
+// the host's addresses. The CA key never leaves the data dir, and the CA is replaced only when
+// it cannot be used.
 package tls
 
 import (
@@ -11,6 +12,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"math/big"
 	"mike/pkg/logging"
@@ -38,6 +40,10 @@ const (
 	caValidFor   = 10 * 365 * 24 * time.Hour // the CA is imported once; make it last
 	leafValidFor = 365 * 24 * time.Hour      // the leaf is cheap to replace
 
+	// leafRenewalWindow is how early a restart replaces a leaf that is about to expire, so a server
+	// restarted at least this often never serves an expired certificate.
+	leafRenewalWindow = 30 * 24 * time.Hour
+
 	caCertName   = "mike-ca.crt"
 	caKeyName    = "mike-ca.key"
 	leafCertName = "mike.crt"
@@ -51,10 +57,10 @@ type certificateAuthority struct {
 	certPath string
 }
 
-// LoadWithCert creates a TLS config from explicit certificate paths, or, when either is empty,
-// from a local CA (dataDir/tls/mike-ca.crt) that signs the server leaf. The leaf's SANs cover
-// localhost, the hostname and the LAN addresses, and it is re-issued only when those names
-// change; the CA is reused across restarts. Returns a *Config (never nil).
+// LoadWithCert creates a TLS config from the operator's certificate paths, or from a local CA in
+// dataDir/tls that signs a leaf covering localhost, the hostname and the LAN addresses. The leaf is
+// re-issued when those names change or when little of its life is left, and an operator's pair that
+// will not load is an error naming the flags. Returns a *Config (never nil).
 func LoadWithCert(dataDir, certFile, keyFile string) (*Config, error) {
 	if certFile != "" && keyFile != "" {
 		// User-provided cert and key files
@@ -63,6 +69,9 @@ func LoadWithCert(dataDir, certFile, keyFile string) (*Config, error) {
 		}
 		if _, err := os.Stat(keyFile); err != nil {
 			return nil, fmt.Errorf("tls: key file not found: %s: %w", keyFile, err)
+		}
+		if _, err := cryptotls.LoadX509KeyPair(certFile, keyFile); err != nil {
+			return nil, fmt.Errorf("tls: --tls-cert/--tls-key do not form a usable pair (%s, %s): %w", certFile, keyFile, err)
 		}
 		logging.For(logging.TLS).Infof("TLS enabled using provided certificates (%s, %s)", certFile, keyFile)
 		return &Config{CertFile: certFile, KeyFile: keyFile}, nil
@@ -114,18 +123,18 @@ func CertPEM(path string) ([]byte, error) {
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: block.Bytes}), nil
 }
 
-// ensureCA loads the local CA from tlsDir, creating and persisting it on first
-// use. An existing, usable CA is never replaced: devices that already imported
-// it would stop trusting the server otherwise.
+// ensureCA loads the local CA from tlsDir, creating and persisting it on first use. A usable CA is
+// never replaced, because devices that imported it would stop trusting the server; an unusable one is,
+// and that is logged at Error.
 func ensureCA(tlsDir string) (*certificateAuthority, error) {
 	certPath := filepath.Join(tlsDir, caCertName)
 	keyPath := filepath.Join(tlsDir, caKeyName)
 
 	if ca, err := loadCA(certPath, keyPath); err == nil {
 		return ca, nil
-	} else if !os.IsNotExist(err) {
-		// Files exist but are unusable (corrupt, rotated key, …) — regenerate.
-		logging.For(logging.TLS).Infof("TLS: regenerating local CA (%v)", err)
+	} else if leftBehind(certPath, keyPath) {
+		logging.For(logging.TLS).Errorf("TLS: replacing the local CA (%s, %s): %v — devices that imported %s must import the new one",
+			certPath, keyPath, err, certPath)
 	}
 
 	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -146,9 +155,13 @@ func ensureCA(tlsDir string) (*certificateAuthority, error) {
 		},
 		NotBefore:             time.Now(),
 		NotAfter:              time.Now().Add(caValidFor),
-		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
 		BasicConstraintsValid: true,
 		IsCA:                  true,
+		// MaxPathLenZero is what encodes the limit: MaxPathLen alone leaves the field out of the
+		// certificate, and a missing pathLenConstraint means unlimited.
+		MaxPathLen:     0,
+		MaxPathLenZero: true,
 	}
 
 	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &caKey.PublicKey, caKey)
@@ -156,10 +169,11 @@ func ensureCA(tlsDir string) (*certificateAuthority, error) {
 		return nil, fmt.Errorf("failed to create CA certificate: %w", err)
 	}
 
-	if err := writeCertPEM(certPath, certDER); err != nil {
+	// Key first: the certificate is the file someone could import, so it is written last.
+	if err := writeKeyPEM(keyPath, caKey); err != nil {
 		return nil, err
 	}
-	if err := writeKeyPEM(keyPath, caKey); err != nil {
+	if err := writeCertPEM(certPath, certDER); err != nil {
 		return nil, err
 	}
 
@@ -171,8 +185,18 @@ func ensureCA(tlsDir string) (*certificateAuthority, error) {
 	return &certificateAuthority{cert: caCert, key: caKey, certPath: certPath}, nil
 }
 
+// leftBehind reports whether either path exists, which tells a first install from replacing a root.
+// A path that will not stat counts as occupied.
+func leftBehind(paths ...string) bool {
+	for _, path := range paths {
+		if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+			return true
+		}
+	}
+	return false
+}
+
 // loadCA reads and validates a persisted CA certificate/key pair.
-// Returns an os.IsNotExist-compatible error when the files are absent.
 func loadCA(certPath, keyPath string) (*certificateAuthority, error) {
 	certPEM, err := os.ReadFile(certPath)
 	if err != nil {
@@ -186,6 +210,13 @@ func loadCA(certPath, keyPath string) (*certificateAuthority, error) {
 	caCert, err := parseCertificatePEM(certPEM)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse CA certificate: %w", err)
+	}
+	if !caCert.IsCA || caCert.KeyUsage&x509.KeyUsageCertSign == 0 {
+		return nil, errors.New("not a certificate-issuing CA")
+	}
+	if now := time.Now(); now.Before(caCert.NotBefore) || now.After(caCert.NotAfter) {
+		return nil, fmt.Errorf("CA certificate is outside its validity %s..%s at %s",
+			caCert.NotBefore.UTC().Format(time.RFC3339), caCert.NotAfter.UTC().Format(time.RFC3339), now.UTC().Format(time.RFC3339))
 	}
 	caKey, err := parseKeyPEM(keyPEM)
 	if err != nil {
@@ -220,7 +251,8 @@ func generateLeaf(certPath, keyPath string, ca *certificateAuthority, dnsNames [
 		NotBefore: time.Now(),
 		NotAfter:  time.Now().Add(leafValidFor),
 
-		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		// digitalSignature only: this is a P-256 leaf, and keyEncipherment names RSA key transport.
+		KeyUsage:              x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
 		IsCA:                  false,
@@ -242,9 +274,8 @@ func generateLeaf(certPath, keyPath string, ca *certificateAuthority, dnsNames [
 
 // leafIsValid reports whether the certificate/key pair at certPath/keyPath is
 // still the right one to serve: it must parse, its key must match, it must be
-// signed by ca, and its alternative names must match the ones we would issue
-// today. Expiry is deliberately not part of this check — a leaf is only
-// replaced when the host's names change, never silently on rotation.
+// signed by ca, still inside its validity window by leafRenewalWindow, and carrying the names
+// we would issue today.
 func leafIsValid(certPath, keyPath string, ca *certificateAuthority, dnsNames []string, ips []net.IP) bool {
 	pair, err := cryptotls.LoadX509KeyPair(certPath, keyPath)
 	if err != nil {
@@ -255,6 +286,9 @@ func leafIsValid(certPath, keyPath string, ca *certificateAuthority, dnsNames []
 		return false
 	}
 	if err := leaf.CheckSignatureFrom(ca.cert); err != nil {
+		return false
+	}
+	if now := time.Now(); now.Before(leaf.NotBefore) || now.Add(leafRenewalWindow).After(leaf.NotAfter) {
 		return false
 	}
 	return sanNamesMatch(leaf, dnsNames, ips)
@@ -340,6 +374,42 @@ func writeCertPEM(path string, der []byte) error {
 	return nil
 }
 
+// writePrivateFile writes key material so that only this user can read it, whether or not the file
+// existed before — os.WriteFile applies its mode only when creating. A target that is not a regular
+// file is refused rather than written through.
+func writePrivateFile(path string, content []byte) error {
+	if fi, err := os.Lstat(path); err == nil {
+		if !fi.Mode().IsRegular() {
+			return fmt.Errorf("failed to write key %s: not a regular file (mode %s)", path, fi.Mode())
+		} else if fi.Mode().Perm()&0o077 != 0 {
+			logging.For(logging.TLS).Warnf("TLS: tightening permissions on %s from %o to 600", path, fi.Mode().Perm())
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("failed to write key %s: %w", path, err)
+	}
+
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return fmt.Errorf("failed to write key %s: %w", path, err)
+	}
+	if err := f.Chmod(0o600); err != nil {
+		f.Close()
+		return fmt.Errorf("failed to set permissions on key %s: %w", path, err)
+	}
+	if _, err := f.Write(content); err != nil {
+		f.Close()
+		return fmt.Errorf("failed to write key %s: %w", path, err)
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return fmt.Errorf("failed to write key %s: %w", path, err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("failed to write key %s: %w", path, err)
+	}
+	return nil
+}
+
 // writeKeyPEM writes an ECDSA key as PEM to path with owner-only permissions.
 func writeKeyPEM(path string, key *ecdsa.PrivateKey) error {
 	keyBytes, err := x509.MarshalECPrivateKey(key)
@@ -347,10 +417,7 @@ func writeKeyPEM(path string, key *ecdsa.PrivateKey) error {
 		return fmt.Errorf("failed to marshal private key: %w", err)
 	}
 	block := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyBytes})
-	if err := os.WriteFile(path, block, 0o600); err != nil {
-		return fmt.Errorf("failed to write key %s: %w", path, err)
-	}
-	return nil
+	return writePrivateFile(path, block)
 }
 
 // parseCertificatePEM decodes the first CERTIFICATE block in pemBytes.
