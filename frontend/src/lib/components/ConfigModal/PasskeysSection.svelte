@@ -5,13 +5,15 @@
      * one more device register (`POST /api/auth/pairing`).
      *
      * Mutates immediately, so it sits outside the modal's Save/Cancel flow like the two sections under it,
-     * and it fetches when the About tab mounts. Two things are only ever held here: the code, which the
-     * server keeps in memory until it is spent, and the pairing URL, whose fragment holds that same code —
+     * and it fetches when the About tab mounts. While a minted code is live the list is re-read, and the row
+     * that spends the code takes the code's panel with it. Two things are only ever held here: the code, which
+     * the server keeps in memory until it is spent, and the pairing URL, whose fragment holds that same code —
      * which is why the URL is copyable and never fetched from here.
      */
     import type { PairingCode, PasskeyInfo } from '$lib/types';
     import { listPasskeys, mintPairingCode, renamePasskey, revokePairingCodes, revokePasskey } from '$lib/api';
     import { dialogStore } from '$lib/stores';
+    import { newlyPairedPasskey } from '$lib/utils/passkeys';
     import { formatDateTime, formatElapsed, formatRelativeTime } from '$lib/utils/format-time';
     import { DEVICE_NAME_LIMIT } from '$lib/utils/login-flow';
     import { t } from '$lib/i18n';
@@ -35,6 +37,8 @@
     let revokingCodes = $state(false);
     let copied = $state(false);
     let now = $state(Date.now());
+    /** How often the list is re-read while a code waits. The window it can run in is the code's own TTL. */
+    const pairingPollMs = 2000;
 
     /** Oldest first: the first passkey paired is the one a person recognises as "my laptop". */
     const rows = $derived.by(() =>
@@ -162,6 +166,33 @@
         }
     }
 
+    /**
+     * Re-read the list while a code is outstanding, and announce the device when one lands.
+     *
+     * Silent by design: it never touches `loading`, so the rows and the buttons are not swapped for
+     * "Loading devices…" under a person watching the countdown, and a failed read leaves both the list and
+     * the code as they were — **Cancel the code** and **Refresh** stay the visible actions.
+     */
+    async function checkForPairing() {
+        // A write of ours owns the list meanwhile: a read that began before it must not put the old label,
+        // or a row that was just revoked, back on screen.
+        if (savingId || revokingId || revokingCodes) return;
+        const before = passkeys;
+        let latest: PasskeyInfo[];
+        try {
+            latest = await listPasskeys();
+        } catch {
+            return;
+        }
+        if (savingId || revokingId || revokingCodes) return;
+        const arrived = newlyPairedPasskey(before, latest);
+        passkeys = latest;
+        if (!arrived) return;
+        // That row is the code's spend, so its panel leaves with the announcement.
+        pairing = null;
+        dialogStore.showToast(t('settings.passkeys.pairedToast', { name: arrived.name }), 'success');
+    }
+
     /** Copy the pairing link, code included: scanning the picture is the quick path, typing the code is
      *  the one that works when the two machines are on different networks. */
     async function handleCopy() {
@@ -187,6 +218,25 @@
         if (!pairing) return;
         const tick = setInterval(() => { now = Date.now(); }, 1000);
         return () => clearInterval(tick);
+    });
+
+    /** The pairing watch, for as long as the code could still be spent and this section is on screen.
+     *  It depends on `pairing` alone and times itself off `Date.now()`: an effect that read the derived
+     *  `expired` would be rebuilt on every countdown tick, and a timer reset once a second never reaches
+     *  two. A code with no readable expiry is a code nobody watches. */
+    $effect(() => {
+        const code = pairing;
+        if (!code) return;
+        const expiresAt = Date.parse(code.expires_at);
+        if (!Number.isFinite(expiresAt)) return;
+        const watch = setInterval(() => {
+            if (Date.now() >= expiresAt) {
+                clearInterval(watch);
+                return;
+            }
+            void checkForPairing();
+        }, pairingPollMs);
+        return () => clearInterval(watch);
     });
 </script>
 

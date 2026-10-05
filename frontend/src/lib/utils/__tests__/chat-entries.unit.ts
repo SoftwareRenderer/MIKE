@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { findLastUserMessageBefore, trimEntriesForRegenerate, buildCheckpointStateMap, mergeToolCallsIntoAssistant, computeLastUserMessageIds, getCheckpointThreads, buildEntriesFromMessages, advisoryLabel, systemNoteText, pendingToolIds, endsOnReviewResult, editSubmitAction, takeEchoMatch, buildEntryMetas, removeFailedSend, removeDismissedError } from '$lib/utils/chat-entries';
+import { findLastUserMessageBefore, trimEntriesForRegenerate, buildCheckpointStateMap, trailingCheckpoint, mergeToolCallsIntoAssistant, computeLastUserMessageIds, getCheckpointThreads, buildEntriesFromMessages, advisoryLabel, systemNoteText, pendingToolIds, endsOnReviewResult, editSubmitAction, takeEchoMatch, buildEntryMetas, removeFailedSend, removeDismissedError } from '$lib/utils/chat-entries';
 import type { WindowRow } from '$lib/utils/chat-entries';
 import type { ChatEntry, Thread } from '$lib/types';
 import { PENDING_SEND_ID_PREFIX } from '$lib/utils/pending-sends';
@@ -101,8 +101,8 @@ describe('trimEntriesForRegenerate', () => {
     });
 });
 
-describe('buildCheckpointStateMap', () => {
-    function assistant(id: string, toolCalls?: any[], _hash?: string): ChatEntry {
+describe('the checkpoint band', () => {
+    function assistant(id: string, toolCalls?: any[]): ChatEntry {
         const base: ChatEntry = { id, role: 'assistant', content: '', isStreaming: false, createdAt: new Date().toISOString() };
         if (toolCalls) base.toolCalls = toolCalls;
         return base;
@@ -112,195 +112,74 @@ describe('buildCheckpointStateMap', () => {
         return { id, role: 'user', content: 'hello', isStreaming: false, createdAt: new Date().toISOString() };
     }
 
-    it('returns empty map for entries with no user messages', () => {
-        const entries = [assistant('a1')];
-        const map = buildCheckpointStateMap(entries, new Set(), new Map(), new Map());
-        expect(map.size).toBe(0);
+    const hash = (...pairs: [string, string][]) => new Map<string, string>(pairs);
+    /** The three maps a band reads, with the two empty ones spelled once. */
+    const sources = (over: { pending?: string[]; labels?: [string, string][]; hashes?: [string, string][] } = {}) => ({
+        pendingCheckpoints: new Set(over.pending ?? []),
+        checkpointLabels: new Map(over.labels ?? []),
+        checkpointCommitHashes: new Map(over.hashes ?? []),
     });
 
-    it('returns null when no assistant with tool calls exists', () => {
+    it('names the newest saved turn before the message, never the one after it', () => {
+        // A band says "this was the state when the message arrived". Pointing it forward drew a checkpoint
+        // above the question that caused it, and drew that same band twice in a two-turn thread.
+        const entries = [user('u1'), assistant('a1'), user('u2'), assistant('a2')];
+        const map = buildCheckpointStateMap(entries, sources({ hashes: [['a1', 'c1'], ['a2', 'c2']] }));
+        expect(map.get(0)).toBeNull(); // the first message has no state before it
+        expect(map.get(2)).toEqual({ isPending: false, commitHash: 'c1' });
+    });
+
+    it('draws no band for a turn that captured nothing', () => {
+        // No hash and nothing pending means there is no state to show: a bookmark over nothing is a lie
+        // about what the Changes panel can answer.
+        const entries = [user('u1'), assistant('a1', [{ toolId: 't1' }]), user('u2')];
+        expect(buildCheckpointStateMap(entries, sources()).get(2)).toBeNull();
+    });
+
+    it('reports the band being written, so the spinner means the snapshot is on its way', () => {
+        const entries = [user('u1'), assistant('a1'), user('u2')];
+        const map = buildCheckpointStateMap(entries, sources({ pending: ['a1'], hashes: [['a1', 'c1']] }));
+        expect(map.get(2)).toEqual({ isPending: true, commitLabel: undefined, commitHash: 'c1' });
+    });
+
+    it('carries the checkpoint label to the band', () => {
+        const entries = [user('u1'), assistant('a1'), user('u2')];
+        const map = buildCheckpointStateMap(entries, sources({ labels: [['a1', 'fix the gate']], hashes: [['a1', 'c1']] }));
+        expect(map.get(2)).toEqual({ isPending: false, commitLabel: 'fix the gate', commitHash: 'c1' });
+    });
+
+    it('answers for the newest turn, which no later message carries', () => {
+        // A band sits above a user message, so the newest turn has nothing above it: this is the only way to
+        // reach the state the last turn left behind.
         const entries = [user('u1'), assistant('a1')];
-        const map = buildCheckpointStateMap(entries, new Set(), new Map(), new Map());
-        expect(map.get(0)).toBeNull();
+        expect(trailingCheckpoint({
+            entries, pendingCheckpoints: new Set(), checkpointLabels: new Map(), checkpointCommitHashes: hash(['a1', 'c1']),
+        })).toEqual({ isPending: false, commitLabel: undefined, commitHash: 'c1' });
     });
 
-    it('finds forward assistant with tool calls', () => {
-        const entries = [user('u1'), assistant('a1', [{ toolId: 't1' }])];
-        const pending = new Set<string>();
-        const labels = new Map<string, string>();
-        const hashes = new Map<string, string>();
-        const map = buildCheckpointStateMap(entries, pending, labels, hashes);
-        expect(map.get(0)).toEqual({ isPending: false, commitHash: undefined });
+    it('names the last assistant of a trailing turn, and nothing when the conversation ends on a question', () => {
+        const tail = [user('u1'), assistant('a1'), assistant('a2')];
+        expect(trailingCheckpoint({
+            entries: tail, pendingCheckpoints: new Set(), checkpointLabels: new Map(), checkpointCommitHashes: hash(['a1', 'c1'], ['a2', 'c2']),
+        })?.commitHash).toBe('c2');
+        expect(trailingCheckpoint({
+            entries: [user('u1'), assistant('a1'), user('u2')],
+            pendingCheckpoints: new Set(), checkpointLabels: new Map(), checkpointCommitHashes: hash(['a1', 'c1']),
+        })).toBeNull();
     });
 
-    it('finds forward assistant with checkpoint hash', () => {
-        const entries = [user('u1'), assistant('a1')];
-        const hashes = new Map<string, string>();
-        hashes.set('a1', 'abc123');
-        const map = buildCheckpointStateMap(entries, new Set(), new Map(), hashes);
-        expect(map.get(0)).toEqual({ isPending: false, commitHash: 'abc123' });
+    it('stays quiet for a trailing turn that saved nothing, and on an empty transcript', () => {
+        expect(trailingCheckpoint({
+            entries: [user('u1'), assistant('a1')],
+            pendingCheckpoints: new Set(), checkpointLabels: new Map(), checkpointCommitHashes: new Map(),
+        })).toBeNull();
+        expect(trailingCheckpoint({
+            entries: [], pendingCheckpoints: new Set(), checkpointLabels: new Map(), checkpointCommitHashes: new Map(),
+        })).toBeNull();
     });
 
-    it('forward scan stops at first assistant even without tool calls', () => {
-        const entries = [
-            user('u1'),
-            assistant('a1'),          // no tool calls — forward scan stops here
-            assistant('a2', [{ toolId: 't1' }]), // has tool calls but forward already stopped
-        ];
-        const map = buildCheckpointStateMap(entries, new Set(), new Map(), new Map());
-        expect(map.get(0)).toBeNull();
-    });
-
-    it('backward scan finds previous assistant with tool calls', () => {
-        const entries = [
-            user('u1'),
-            assistant('a1', [{ toolId: 't1' }]),
-            user('u2'),
-            assistant('a2'),          // no tool calls — forward stops here for u2
-        ];
-        const map = buildCheckpointStateMap(entries, new Set(), new Map(), new Map());
-        // u2: forward stops at a2 (no tool calls), backward finds a1
-        expect(map.get(2)).toEqual({ isPending: false, commitHash: undefined });
-    });
-
-    it('backward scan finds assistant before the user when forward scan fails', () => {
-        const entries = [
-            assistant('a0', [{ toolId: 't0' }]),
-            user('u1'),
-            assistant('a1'),          // no tool calls — forward stops here for u1
-        ];
-        const map = buildCheckpointStateMap(entries, new Set(), new Map(), new Map());
-        // u1: forward stops at a1 (no tool calls), backward scan finds a0 (has tool calls)
-        // No previous user entry to bound backward scan, so a0 is visible.
-        expect(map.get(1)).toEqual({ isPending: false, commitHash: undefined });
-    });
-
-    it('backward scan is bounded by previous user entry', () => {
-        const entries = [
-            assistant('a0', [{ toolId: 't0' }]),
-            user('u1'),
-            assistant('a1'),          // no tool calls — forward stops here for u1
-            user('u2'),
-            assistant('a2'),          // no tool calls — forward stops here for u2
-        ];
-        const map = buildCheckpointStateMap(entries, new Set(), new Map(), new Map());
-        // u1: forward stops at a1, backward finds a0
-        expect(map.get(1)).toEqual({ isPending: false, commitHash: undefined });
-        // u2: forward stops at a2, backward bounded by u1 — a1 has no tool calls, a0 is before u1
-        // so backward scan finds nothing
-        expect(map.get(3)).toBeNull();
-    });
-
-    it('handles pending checkpoints correctly', () => {
-        const entries = [user('u1'), assistant('a1', [{ toolId: 't1' }])];
-        const pending = new Set<string>();
-        pending.add('a1');
-        const map = buildCheckpointStateMap(entries, pending, new Map(), new Map());
-        expect(map.get(0)).toEqual({ isPending: true, commitHash: undefined });
-    });
-
-    it('handles commit labels', () => {
-        const entries = [user('u1'), assistant('a1', [{ toolId: 't1' }])];
-        const labels = new Map<string, string>();
-        labels.set('a1', 'fix: bug');
-        const map = buildCheckpointStateMap(entries, new Set(), labels, new Map());
-        expect(map.get(0)).toEqual({ isPending: false, commitLabel: 'fix: bug', commitHash: undefined });
-    });
-
-    it('handles empty entries array', () => {
-        const map = buildCheckpointStateMap([], new Set(), new Map(), new Map());
-        expect(map.size).toBe(0);
-    });
-
-    it('handles single user entry with no assistants', () => {
-        const entries = [user('u1')];
-        const map = buildCheckpointStateMap(entries, new Set(), new Map(), new Map());
-        expect(map.get(0)).toBeNull();
-    });
-
-    it('forward scan for second user does not use assistant consumed by first user', () => {
-        const entries = [
-            user('u1'),
-            assistant('a1', [{ toolId: 't1' }]),
-            user('u2'),
-        ];
-        const map = buildCheckpointStateMap(entries, new Set(), new Map(), new Map());
-        // u1: forward finds a1 (has tool calls) → uses it
-        expect(map.get(0)).toEqual({ isPending: false, commitHash: undefined });
-        // u2: no forward assistant, backward bounded by u1 finds a1 (has tool calls, between u1 and u2)
-        expect(map.get(2)).toEqual({ isPending: false, commitHash: undefined });
-    });
-
-    it('backward scan returns null when no qualifying assistant between users', () => {
-        const entries = [
-            user('u1'),
-            assistant('a1'),          // no tool calls
-            user('u2'),
-        ];
-        const map = buildCheckpointStateMap(entries, new Set(), new Map(), new Map());
-        // u1: no forward qualifying assistant, no backward qualifying assistant
-        expect(map.get(0)).toBeNull();
-        // u2: no forward assistant, backward bounded by u1 — a1 has no tool calls
-        expect(map.get(2)).toBeNull();
-    });
-
-    it('checkpoint above a message uses the PRIOR assistant commit (state before the message)', () => {
-        // Mirror the reported bug: "add a counter to 5" follows a create-hello.cs turn.
-        // The checkpoint above the counter message must reference the create commit
-        // (state before the counter), not the counter's own commit.
-        const entries = [
-            user('u_create'),
-            assistant('a_create', [{ toolId: 't1' }], 'create-hash'),
-            assistant('a_done'),          // non-qualifying, ignored
-            user('u_counter'),
-            assistant('a_counter', [{ toolId: 't2' }], 'counter-hash'),
-        ];
-        const hashes = new Map<string, string>();
-        hashes.set('a_create', 'create-hash');
-        hashes.set('a_counter', 'counter-hash');
-        const map = buildCheckpointStateMap(entries, new Set(), new Map(), hashes);
-        expect(map.get(0)).toEqual({ isPending: false, commitHash: 'create-hash' });
-        // The checkpoint above the counter message points to the PRIOR create commit.
-        expect(map.get(3)).toEqual({ isPending: false, commitHash: 'create-hash' });
-    });
-
-    it('prefers a hashed assistant over a tool-call-only one in backward scan', () => {
-        // A "Done!" assistant with tool calls but NO commit hash sits between two hashed
-        // assistants. The checkpoint above the later message must still reference the
-        // earlier hashed assistant (so the "view changes" button has a commit), not the
-        // tool-call-only one.
-        const entries = [
-            user('u_create'),
-            assistant('a_create', [{ toolId: 't1' }], 'create-hash'),
-            assistant('a_done', [{ toolId: 't2' }]),   // tool calls, NO hash
-            user('u_counter'),
-            assistant('a_counter', [{ toolId: 't3' }], 'counter-hash'),
-        ];
-        const hashes = new Map<string, string>();
-        hashes.set('a_create', 'create-hash');
-        hashes.set('a_counter', 'counter-hash');
-        const map = buildCheckpointStateMap(entries, new Set(), new Map(), hashes);
-        expect(map.get(0)).toEqual({ isPending: false, commitHash: 'create-hash' });
-        // Backward scan skips the tool-call-only a_done and uses a_create's hash.
-        expect(map.get(3)).toEqual({ isPending: false, commitHash: 'create-hash' });
-    });
-
-    it('non-qualifying forward assistant does not block next user from backward scanning', () => {
-        const entries = [
-            user('u1'),
-            assistant('a1', [{ toolId: 't1' }]),
-            user('u2'),
-            assistant('a2'),          // no tool calls — forward stops for u2
-            user('u3'),
-            assistant('a3', [{ toolId: 't3' }]),
-        ];
-        const map = buildCheckpointStateMap(entries, new Set(), new Map(), new Map());
-        // u1: forward finds a1 → uses it
-        expect(map.get(0)).toEqual({ isPending: false, commitHash: undefined });
-        // u2: forward stops at a2 (no tool calls), backward bounded by u1 finds a1
-        expect(map.get(2)).toEqual({ isPending: false, commitHash: undefined });
-        // u3: forward finds a3 → uses it
-        expect(map.get(4)).toEqual({ isPending: false, commitHash: undefined });
+    it('reports nothing on an empty transcript', () => {
+        expect(buildCheckpointStateMap([], sources()).size).toBe(0);
     });
 });
 
@@ -897,8 +776,16 @@ describe('buildEntryMetas', () => {
         expect(metas({ streaming: true }).every(m => !m.isLastUserMessage)).toBe(true);
     });
 
-    it('numbers checkpoints oldest first among the rows that carry one', () => {
-        expect(metas().map(m => m.checkpointIndex)).toEqual([0, -1, 1, -1]);
+    it('puts each checkpoint on one band, at the message that follows the turn that captured it', () => {
+        // A band points back, never forward: a1 belongs above u2 (the message its work preceded), a2 is the
+        // trailing band, so no checkpoint is drawn twice and none above the question that caused it.
+        expect(metas().map(m => m.cpState?.commitHash ?? null)).toEqual([null, null, 'c1', null]);
+        expect(trailingCheckpoint({
+            entries: twoTurns,
+            pendingCheckpoints: base.pendingCheckpoints,
+            checkpointLabels: base.checkpointLabels,
+            checkpointCommitHashes: hashes,
+        })).toEqual({ isPending: false, commitLabel: undefined, commitHash: 'c2' });
     });
 });
 

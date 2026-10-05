@@ -318,9 +318,18 @@ func (s *Server) handleTaskMessageByID(w http.ResponseWriter, r *http.Request) {
 				branchName = checkpointThreads[0].GitBranch
 			}
 		}
+		// Deleting the conversation also moves files: the worktree is rewound to the state the remaining
+		// conversation describes (cleanupDeletedMessageForks), and a summarized row owns no files. A branch
+		// and a pinned base commit together are what say there is a worktree and a state to rewind to.
+		resetsFiles := msg.Role != "summarization"
+		if resetsFiles {
+			task, taskErr := s.store.GetTask(projectID, taskID)
+			resetsFiles = taskErr == nil && task != nil && task.Branch != "" && task.BaseCommit != ""
+		}
 		JSONResponse(w, http.StatusOK, map[string]any{
 			"will_delete_branch": willDeleteBranch,
 			"branch_name":        branchName,
+			"resets_files":       resetsFiles,
 		})
 		return
 	}

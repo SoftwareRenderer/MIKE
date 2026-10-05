@@ -33,10 +33,24 @@ describe('the body this browser starts on', () => {
     });
 
     it('shows the reason instead of a button when the ceremony cannot run', () => {
-        // Even on an install with a passkey: the prompt would not appear, so the code field would only
-        // spend a pairing code on a prompt that never opens.
+        // Even on an install with a passkey: the prompt would not appear, so the form offers no code field
+        // of its own — a code typed here could only be spent on a prompt that never opens.
         expect(initialState(true, 'insecure-context').stage).toBe('unsupported');
         expect(initialState(false, 'no-api').stage).toBe('unsupported');
+    });
+
+    it('opens the code body for a pairing link whatever else is true', () => {
+        // A link is the only way a second device gets a code nobody read out to it, and the reader means to
+        // spend it on the body they landed on — so the body stays, and the notice about this connection
+        // (and the certificate that fixes it) is painted on it. `LoginModal` holds that half.
+        const paired = initialState(true, 'insecure-context', { code: 'ABCD2345' });
+        expect(paired.stage).toBe('code');
+        expect(paired.entry).toBe('code');
+        expect(paired.code).toBe('ABCD-2345');
+        // Grouped and upper-cased the same way a typed code is, whatever shape the link carried.
+        expect(initialState(false, 'available', { code: 'abcd-2345' }).code).toBe('ABCD-2345');
+        // With no link the answer is the plain first body, code empty.
+        expect(initialState(true, 'available').code).toBe('');
     });
 });
 
@@ -128,12 +142,18 @@ describe('the code from a pairing link', () => {
 
 describe('the device name the form opens with', () => {
     it('starts from the name the server read off this browser', () => {
-        expect(initialState(false, 'available', 'Chrome 120 · Macintosh').name).toBe('Chrome 120 · Macintosh');
+        expect(initialState(false, 'available', {}, 'Chrome 120 · Macintosh').name).toBe('Chrome 120 · Macintosh');
     });
 
     it('starts blank when the server read nothing', () => {
         // Blank asks the server to name the device.
         expect(initialState(false, 'available').name).toBe('');
+    });
+
+    it('takes the name the link carried over the guess from the server', () => {
+        // Someone typed that one for this device, on the screen that minted the code.
+        const arrived = initialState(true, 'available', { code: 'ABCD2345', name: 'Kitchen tablet' }, 'Chrome 120 · Macintosh');
+        expect(arrived.name).toBe('Kitchen tablet');
     });
 });
 

@@ -58,7 +58,6 @@ function makeMeta(withCheckpoint = false) {
     return {
         cpState: withCheckpoint ? { isPending: false, commitLabel: 'checkpoint', commitHash: 'abc' } : null,
         cpThread: null,
-        checkpointIndex: withCheckpoint ? 1 : -1,
         isLastUserMessage: false,
         isFirstUserMessage: false,
     };

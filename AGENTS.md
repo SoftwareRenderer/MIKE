@@ -108,8 +108,11 @@ curl -sk https://localhost:3000/api/config   # 401 JSON = up; -k because the CA 
 ```
 
 - **TLS is the only mode**: a local CA in `data/tls/` signs a server leaf, and a plain connection to the port
-  gets a 301. The CA never rotates and there is no expiry-based renewal — refresh an expired leaf by deleting
-  the leaf and restarting. **A certificate is not the gate**: reachability is the listen address plus Host
+  gets a 301. The leaf is re-issued when the host's names change or within a month of its expiry. The CA is
+  reused while usable and replaced only when it is not — corrupt, expired, not a CA, key gone — and that
+  replacement logs an `Error`, because every device that imported the old root stops trusting the server.
+  A certificate/key pair that cannot be loaded stops startup naming the flag; it is never discovered mid-handshake.
+  **A certificate is not the gate**: reachability is the listen address plus Host
   pinning. The CA downloads without a session, because the browser that needs it is the one that has not
   paired. `docs/tls.md`.
 - **Never `log.Fatalf` on a `Serve()` error** — run the signal cleanup path, then exit 1.

@@ -57,16 +57,42 @@ export type LoginEvent =
 /** How long a device label is. `maxPasskeyNameLen` (`backend/server/handler_passkey.go`) is the source. */
 export const DEVICE_NAME_LIMIT = 64;
 
-/** The body this browser starts on. `signin` is never the answer when there is no credential to offer. */
-function initialStage(hasPasskey: boolean | null, support: PasskeySupport): LoginStage {
+/**
+ * The body this browser starts on. `signin` is never the answer when there is no credential to offer, and
+ * a pairing link is never answered by a sign-in: the code it carries can only buy a registration. A link is
+ * the one arrival at the code body on a browser that cannot run the ceremony, so that body carries the
+ * notice about the connection.
+ */
+function initialStage(hasPasskey: boolean | null, support: PasskeySupport, codeFromLink = ''): LoginStage {
+    if (codeFromLink) return 'code';
     if (support !== 'available') return 'unsupported';
     return hasPasskey === false ? 'code' : 'signin';
 }
 
-export function initialState(hasPasskey: boolean | null, support: PasskeySupport, deviceName = ''): LoginState {
-    const stage = initialStage(hasPasskey, support);
+/**
+ * The form as it opens. `fromLink` is what a pairing link carried, already read out of the address
+ * (`pairingLinkFromHash`), empty when nobody arrived from a link. `guessedName` is the server's reading of
+ * this browser, which the link's own name outranks: someone typed that one for this device.
+ */
+export function initialState(
+    hasPasskey: boolean | null,
+    support: PasskeySupport,
+    fromLink: { code?: string; name?: string } = {},
+    guessedName = '',
+): LoginState {
+    const code = fromLink.code ?? '';
+    const stage = initialStage(hasPasskey, support, code);
     const entry: LoginEntry = stage === 'code' ? 'code' : 'signin';
-    return { stage, hasPasskey, support, entry, error: '', tone: 'error', code: '', name: deviceName };
+    return {
+        stage,
+        hasPasskey,
+        support,
+        entry,
+        error: '',
+        tone: 'error',
+        code: formatPairingCode(code),
+        name: fromLink.name || guessedName,
+    };
 }
 
 /**

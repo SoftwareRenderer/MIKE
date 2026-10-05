@@ -6,11 +6,11 @@ package server
 // renames one, or answers a nested shape differently compiles and passes every other test, then
 // renders a blank panel.
 //
-// Volatile content is normalized rather than excluded: a temp-directory path and a wall-clock
-// timestamp are the only two things that change between runs, and both are rewritten (see
+// Volatile content is normalized rather than excluded: a temp-directory path, a wall-clock timestamp
+// and a commit object id are what change between runs, and all three are rewritten (see
 // normalizeWire). TestGoldenWire_IsStableAcrossRuns captures everything again under a *different*
-// temp directory, so an unnormalized path or timestamp fails there. A golden that only passes in the
-// run that generated it is not an anchor.
+// temp directory, so an unnormalized path, timestamp or object id fails there. A golden that only
+// passes in the run that generated it is not an anchor.
 //
 // Regenerate deliberately: go test ./backend/server/ -run TestGoldenWire -update
 // and read the diff. A golden update that no change asked for is a wire change nobody approved.
@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -79,8 +80,8 @@ func tmpPrefixes(s *Server, fixtureRepo string) []string {
 	return prefixes
 }
 
-// normalizeWire makes a response comparable across runs: volatile keys collapse to a marker, and
-// every absolute path under a run temp root collapses to <TMP>.
+// normalizeWire makes a response comparable across runs: volatile keys collapse to a marker, every
+// absolute path under a run temp root collapses to <TMP>, and a commit object id collapses to <SHA>.
 func normalizeWire(v any, tmpRoots []string) any {
 	switch node := v.(type) {
 	case map[string]any:
@@ -98,6 +99,9 @@ func normalizeWire(v any, tmpRoots []string) any {
 		}
 		return node
 	case string:
+		if isObjectID(node) {
+			return "<SHA>"
+		}
 		for _, root := range tmpRoots {
 			if root != "" && strings.Contains(node, root) {
 				node = strings.ReplaceAll(node, root, "<TMP>")
@@ -107,6 +111,20 @@ func normalizeWire(v any, tmpRoots []string) any {
 	default:
 		return v
 	}
+}
+
+// isObjectID reports a full git object id. Only a whole string of 40 hex collapses, so an
+// abbreviated hash stays pinned.
+func isObjectID(s string) bool {
+	if len(s) != 40 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // checkGolden compares a response body against its golden file, or rewrites it under -update.
@@ -325,5 +343,26 @@ func TestGoldenWire_IsStableAcrossRuns(t *testing.T) {
 			}
 			checkGolden(t, name, body, tmpRoots)
 		})
+	}
+}
+
+// TestNormalizeWire_ObjectIDRule pins both directions of the object-id rule. An over-broad rule
+// passes every cross-run comparison: two runs that drop the same value still agree.
+func TestNormalizeWire_ObjectIDRule(t *testing.T) {
+	id := strings.Repeat("ab", 20)
+	got := normalizeWire(map[string]any{
+		"base_ref": id,
+		"abbrev":   "62a0161",
+		"patch":    "index 62a0161..33536b4",
+		"longer":   id + "0",
+	}, nil)
+	want := map[string]any{
+		"base_ref": "<SHA>",
+		"abbrev":   "62a0161",
+		"patch":    "index 62a0161..33536b4",
+		"longer":   id + "0",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("normalizeWire = %v, want %v", got, want)
 	}
 }

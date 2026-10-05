@@ -76,7 +76,7 @@ describe('board + task view catalog', () => {
         expect(t('task.diff.workingTree')).toBe('Working tree');
         expect(t('task.diff.originalBranch')).toBe('Original branch');
         expect(t('task.diff.originMeta', { hash: 'a1b2c3d' })).toBe('a1b2c3d (Origin)');
-        expect(t('task.checkpoint.title')).toBe('Changes before this checkpoint');
+        expect(t('task.checkpoint.title')).toBe('Changes up to this checkpoint');
         expect(t('task.graph.history')).toBe('History');
         expect(t('task.graph.empty')).toBe('No commits');
     });

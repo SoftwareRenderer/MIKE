@@ -64,7 +64,7 @@ function heldRows(n = 2) {
     return {
         entries,
         entryMetas: entries.map(() => ({
-            cpState: null, cpThread: null, checkpointIndex: -1,
+            cpState: null, cpThread: null,
             isLastUserMessage: false, isFirstUserMessage: false,
         })),
         lastEntryIdx: n - 1,

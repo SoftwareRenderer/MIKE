@@ -1,4 +1,5 @@
 {
+  "base_ref": "\u003cSHA\u003e",
   "diff": "diff --git a/README.md b/README.md\nindex 62a0161..33536b4 100644\n--- a/README.md\n+++ b/README.md\n@@ -1 +1,3 @@\n # base\n+\n+changed by the golden task\ndiff --git a/feature.go b/feature.go\nnew file mode 100644\nindex 0000000..3f3782e\n--- /dev/null\n+++ b/feature.go\n@@ -0,0 +1,4 @@\n+package feature\n+\n+// Answer is the change the golden diff pins.\n+const Answer = 42",
   "original_file_stats": {
     "README.md": {

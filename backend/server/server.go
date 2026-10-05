@@ -1018,13 +1018,14 @@ func (s *Server) localCAvailable() bool {
 	return s.tlsConfig.CAFile != ""
 }
 
-func (s *Server) tlsConfigToStd() *stdtls.Config {
+// tlsConfigToStd is the one place the served pair becomes a listener configuration, and it fails
+// closed: a pair that will not load ends Serve.
+func (s *Server) tlsConfigToStd() (*stdtls.Config, error) {
 	cert, err := stdtls.LoadX509KeyPair(s.tlsConfig.CertFile, s.tlsConfig.KeyFile)
 	if err != nil {
-		logging.For(logging.HTTP).Warnf("failed to load key pair: %v", err)
-		return nil
+		return nil, fmt.Errorf("tls: %s and %s cannot serve: %w", s.tlsConfig.CertFile, s.tlsConfig.KeyFile, err)
 	}
-	return &stdtls.Config{Certificates: []stdtls.Certificate{cert}}
+	return &stdtls.Config{Certificates: []stdtls.Certificate{cert}}, nil
 }
 
 // RepairExtensionFiles restores installed extensions whose files are gone, each from the commit its own
@@ -1037,6 +1038,13 @@ func (s *Server) RepairExtensionFiles(ctx context.Context) {
 }
 
 func (s *Server) Serve() error {
+	// Before the port is bound and the pairing banner printed: a server that cannot complete a
+	// handshake must not announce itself.
+	stdTLS, err := s.tlsConfigToStd()
+	if err != nil {
+		return err
+	}
+
 	srv := &http.Server{
 		Addr: s.addr,
 		// Silences repeated "client does not trust the local CA" handshake noise;
@@ -1064,7 +1072,7 @@ func (s *Server) Serve() error {
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
-	return srv.Serve(newHybridListener(l, s.tlsConfigToStd(), 0))
+	return srv.Serve(newHybridListener(l, stdTLS, 0))
 }
 
 // logHostRootPolicy echoes the host-directory jail, otherwise invisible until it refuses something.

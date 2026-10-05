@@ -79,9 +79,8 @@ describe('typing a pairing code', () => {
 });
 
 /**
- * The name the pairing body opens with when the page was not opened from a pairing link: what the server
- * read off this browser, and a blank is an answer, so the field invents no placeholder. The link's own
- * name belongs to the login spec, because this harness stubs `onMount`.
+ * The name the pairing body opens with: the pairing link's when there was one, otherwise what the server
+ * read off this browser. A blank is an answer, so the field invents no placeholder.
  */
 describe('the name the pairing body opens with', () => {
     /** The device-name field of a gate opened on a fresh install, whose first body is the pairing form. */
@@ -101,5 +100,18 @@ describe('the name the pairing body opens with', () => {
     it('is capped at the length a device label is', () => {
         // The same 64 the server refuses.
         expect(nameField().maxLength).toBe(64);
+    });
+
+    it('opens with the name the pairing link carried, beside its code', () => {
+        // The link is read while the form is built, so the code body — and both of its fields — are what
+        // this document arrives holding.
+        history.replaceState(null, '', '#pair=ABCD2345&name=Kitchen+tablet');
+        try {
+            const { container } = render(LoginModal, { hasPasskey: false, deviceName: 'Chrome 120 · Macintosh', onClose: () => { } });
+            expect(container.querySelector<HTMLInputElement>('#login-code')?.value).toBe('ABCD-2345');
+            expect(container.querySelector<HTMLInputElement>('#login-device-name')?.value).toBe('Kitchen tablet');
+        } finally {
+            history.replaceState(null, '', window.location.pathname);
+        }
     });
 });

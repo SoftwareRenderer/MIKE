@@ -24,16 +24,35 @@ the one `localCAvailable()` decision made when the server is built, so a link ca
 The route is **public for GET**, listed in `publicPaths` beside the ceremony routes and the session check. The
 device that needs the certificate is the one with no session yet: a browser that will not run a passkey prompt
 is being told to trust this address before it can sign in. That costs nothing secret. A root certificate is
-public data by design; the CA *key* is never served and never leaves the data dir (keys are `0600`). The only
+public data by design; the CA *key* is never served and never leaves the data dir. A key is written
+owner-only whether it is new or replacing a file that was not, and a target that is not a regular file is
+refused rather than written through. The only
 file the route can name is `Config.CAFile` — no request field is ever a path — and Host pinning still applies.
 `tls.CertPEM` answers with a certificate block or an error, so the download cannot be turned into a key dump
 even if that path were swapped for a key file. A `--tls-cert`/`--tls-key` install has no CA of
 ours, so the route answers 404 and both links are absent rather than explained.
 
-The CA is reused across restarts and never rotated automatically; the leaf is re-issued only
-when the host's names change (network or hostname change). There is **no expiry-based renewal** —
-refresh an expired leaf by deleting `mike.crt`/`mike.key` and restarting (keep the CA). The server
-sends the leaf alone: the CA is a root, so an importing client needs no intermediate.
+The leaf is re-issued when the host's names change (network or hostname change), and whenever it expires
+inside `leafRenewalWindow` (30 days). A server restarted at least that often never serves an expired
+certificate. Replacing a leaf costs nothing: no device remembers it, and the CA behind it is untouched.
+
+The CA is reused while it is usable, and usable is a check on load — it parses, the key matches the
+certificate, it is a CA with `KeyUsageCertSign`, and it sits inside its own validity. Anything else is
+replaced. That replacement is an `Error` naming both files and the reason. Every device that imported the
+old root stops trusting this server at that moment, and the log line is the only place that says so. A
+first install has no root behind it and says nothing about one.
+
+The root signs leaves and nothing else: `pathlen:0` with `KeyUsageCertSign|CRLSign`. A key that walks out
+of the data directory therefore cannot mint a CA that chains (`TestLocalCARejectsAChain`). A healthy root
+is never rotated, so a CA created before this pin keeps the shape it was issued with.
+
+The pair to be served is loaded before anything is announced: `LoadWithCert` loads an operator's
+`--tls-cert`/`--tls-key` and names the flags when they do not form a pair, and `Serve` loads the leaf
+this package wrote. A pair that cannot be served stops the boot. Otherwise the listener holds a nil
+config: every ClientHello panics inside `crypto/tls`, net/http recovers it per connection, and the port
+answers while serving nothing.
+
+The server sends the leaf alone: the CA is a root, so an importing client needs no intermediate.
 
 A plain-HTTP connection reaching the TLS port is redirected, not served: the listener's first-byte sniff
 hands it to the plain half, which answers 301 → https (`docs/lifecycle.md → The TLS/plain listener`).
@@ -72,7 +91,10 @@ feeds, and what may end `Serve`: `docs/lifecycle.md → The TLS/plain listener`.
 A passkey is minted for a hostname and only ever released over a connection the browser calls secure:
 `https://…` or `http://localhost`. Plain HTTP on a LAN address therefore has **no login at all**. The gate
 says the connection cannot carry a passkey, hands out the local CA where there is one to hand out, and
-explains how to install it — instead of offering a button that can only fail. Serve TLS (here or
+explains how to install it — instead of offering a button that can only fail. The pairing body offers the CA
+whatever this connection looks like: the secure-context rule that matters belongs to the browser being
+paired, and the other way to satisfy it is to put MIKE behind a certificate that browser already trusts.
+Serve TLS (here or
 at the proxy, with `MIKE_TRUST_PROXY=1` so `X-Forwarded-Proto` decides the cookie's `Secure` flag
 and the origin a signature is checked against) or reach the install at `localhost`.
 
@@ -84,13 +106,21 @@ the address it printed cannot hold the credential it is inviting — `docs/passk
 ## Tests
 
 `backend/tls/tls_test.go` holds the CA and its leaf: a real CA, the leaf verifying against it, the SAN set
-and re-issue rules, CA/leaf reuse, and `CertPEM` answering with a certificate and nothing else.
+and re-issue rules, CA/leaf reuse, and `CertPEM` answering with a certificate and nothing else. The root's
+`pathlen:0` is held by `TestLocalCARejectsAChain`, which also proves one link still chains. An expiring
+leaf is replaced from an untouched CA, and a replaced root is announced at `Error`
+(`TestEnsureCA_AnnouncesAReplacedRoot`, whose `checkReplacement` also holds that the replacement is a CA
+and signs the served leaf). Keys are owner-only both created and replacing
+(`TestKeyFilesAreOwnerOnly`), and an unloadable pair is refused by `--tls-cert`/`--tls-key` and by `Serve`
+before anything is served.
 `backend/server/handler_tls_test.go` holds the download: it answers with no session, 404s without a local
 CA, takes only GET, still pins the `Host`, and reports `tls_ca_available` in `/api/config` and
-`/api/auth/session`.
+`/api/auth/session`. `backend/server/server_tls_test.go` holds what `Serve` does with a pair it cannot
+load: it returns the error instead of binding a port or printing a pairing code.
 The listener's test is listed in `docs/lifecycle.md`.
 
 ## Checking this
 
 `go test ./backend/tls/ ./backend/server/` covers the CA and its leaf, the download's guards, the Host
 pinning that decides reachability, and the per-request `Secure` flag a forwarded `X-Forwarded-Proto` sets.
+`backend/tls` is not in `RACE_PKGS`, so `go test -race ./backend/tls/` is its own command.

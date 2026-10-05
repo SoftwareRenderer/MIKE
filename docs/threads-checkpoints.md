@@ -42,6 +42,12 @@ the worktree moves on.** Switch and fork capture in that order (`stashWorktreeSt
 `DropStashByHash` on the previous hash runs right after; the pin-before-drop ordering is load-bearing — a
 snapshot must never be unpinned while a thread still names it.
 
+**A turn's capture runs while its work is staged.** `createCheckpoint` (`backend/exec/context.go`) stages with
+`git add -A`, captures with `git stash create`, and only then unstages new binaries so they never join a
+commit index. The capture cannot sit below that unstage: `git stash create` has no `-u`, so a file still
+untracked is absent from the snapshot's tree, and a restore reading that tree ends in `clean -fd` and deletes
+the file the turn produced. `TestCheckpointCapturesANewBinaryFile` holds the ordering.
+
 **Capture is all-or-nothing, and a capture that fails stops the operation.** `stashWorktreeState` returns
 an error for a state it could NOT save (index locked by another git process, unresolved conflict, `.git`
 unwritable or full, no commit yet, worktree gone), and switch/fork answer 409 with git's own reason —
@@ -113,6 +119,45 @@ do not start the run). A regenerate is never the latter. A plain repeated submit
 `TestHandleSend_DoubleSubmit_IsDeduped_AndLeavesReview` holds that, and the client swallows send errors, so
 a wrong answer here is a silent dead end rather than an error message.
 
+## What a checkpoint looks like in the task view
+
+These rules keep the chat's checkpoint band and the Changes panel describing one thing.
+
+**A band belongs to the turn that captured it.** `buildCheckpointStateMap`
+(`frontend/src/lib/utils/chat-entries.ts`) puts a band above the next user message, which is where the reader
+sees the state that message arrived on. The newest turn has no later message, so `trailingCheckpoint` answers
+for it and `ChatEntries.svelte` draws that band after the list. A band that points forward draws a checkpoint
+above the question that caused it, and draws the same checkpoint twice in a two-turn thread. Tests:
+`frontend/src/lib/utils/__tests__/chat-entries.unit.ts`.
+
+**A checkpoint's diff is baseline..snapshot and both of its reads name both refs.** The band's *view changes*
+asks `GET /api/projects/{id}/tasks/{taskID}/diff?head=` and lists files from that comparison. Expanding a
+truncated file inside it asks the file route with the same `head` and `base`. A file read with no refs answers
+the working tree. An expansion that took that answer would print later work under the checkpoint's heading, and
+write those rows into the live panel behind it — `docs/api-contract.md → Diffs`. Test:
+`backend/api/checkpoint_diff_test.go`.
+
+**A historical view offers nothing that reads the live worktree.** `CheckpointOverlay.svelte` names the two
+refs it compared in its header and wires no line click. The editor opens a path out of the worktree, so a click
+on a snapshot row lands on a different file than the row it came from. Its section header is the
+checkpoint's own, its empty state names the comparison it holds nothing for, and a read that failed is a
+fault with a retry.
+
+**Collapsed files are stored per view.** `DiffViewer.svelte` takes `collapseScope` (`working` or `checkpoint`)
+and `frontend/src/lib/storage.ts` keeps one record each. Every panel prunes its record to the paths it lists, so
+one shared record makes each panel erase the other's state.
+
+**Deleting a message rewinds the files, and the dialog says so first.** The delete path resets the worktree to
+`resolveRollbackCommit` (`backend/server/handler_message.go`), so the check endpoint answers `resets_files`
+beside `will_delete_branch` and the confirmation names the rewind. A summarization row owns no files, and a
+task with no branch or no base commit has no state to go back to; both answer false.
+`TestMessageDeleteCheckReportsFileRewind`.
+
+**When the chat moves files the panel re-reads instead of clearing.** `onReloadDiff`
+(`frontend/src/lib/components/CardDetail.svelte`) drops the client's diff cache and fetches again after a
+deletion and after an edit-and-send truncation. A cleared panel is not a stale panel made honest: it stays
+empty until some unrelated frame arrives, and a rewind of the worktree is not what the watcher reports.
+
 ## Legacy rows
 
 `git_commit_hash` values written before snapshots were refs are `git stash create` commits. Those are
@@ -134,9 +179,9 @@ one exception is a failed pin, which leaves the entry on purpose: it is then the
    with a single home: `(*git.WorktreeManager).TaskDiffBaseline` answers it for the panel, the commit list,
    the card stats, the watcher and a checkpoint's diff
    (`docs/git-operations.md → A task's diff has one baseline`).
-3. **Checkpoint identity is positional.** "The checkpoint at index N" means "the Nth message with a hash"
-   in message order; the durable `threads.checkpoint_commit_hash` is written at fork time and ignored by
-   the readers that matter.
+3. **A checkpoint is named by two writers.** A turn writes `task_messages.git_commit_hash` and a fork writes
+   `threads.checkpoint_commit_hash`; every reader takes a hash — the panel, the diff, the rewind fallback in
+   `resolveRollbackCommit`. What is left open is one writer owning that fact rather than two keeping it in step.
 4. **Two writers, one working tree.** An executor running in thread A while the user opens thread B
    switches the files underneath it mid-turn.
 
@@ -154,8 +199,8 @@ shape is here because building it the other way means paying twice:
 - **Identity resolution in one place (gaps 2 and 3).** One `ThreadContextResolver` returning
   `{branch, base, diffBaseline, snapshotHash}` per `(task, thread)`, built once from
   `task.BaseCommit`/`BaseRef`/`Branch` plus `thread.GitBranch`/`CheckpointCommitHash`, is
-  the five chains above collapsed into one. A checkpoint is then addressed by its owning assistant
-  message's id — `checkpoint_seq` on `task_messages` beside the hash — instead of by counting positions.
+  the five chains above collapsed into one. A checkpoint then carries the id of the assistant row that owns
+  its snapshot — what its ref is already named after — and the fork's copy stops being a second writer.
 
 ## Tests
 
@@ -168,7 +213,7 @@ shape is here because building it the other way means paying twice:
   above it) and drops only its own; nothing to stash is `ErrNothingToStash`, never a hash; git's reason
   survives into the error.
 - `backend/exec/checkpoint_snapshot_test.go` — a turn's checkpoint pins its snapshot; `git stash list`
-  stays empty.
+  stays empty; a new binary a turn wrote is in the snapshot's tree, so restoring that checkpoint keeps it.
 - `backend/store/threads_test.go` — entry boundary and payload fidelity across a fork copy.
 - `backend/exec/fork_context_test.go` — parent and fork rebuild to the same LLM conversation.
 - `backend/server/fork_snapshot_test.go` — fork of a fork keeps the checkpoint it inherited; deleting a
@@ -190,8 +235,10 @@ shape is here because building it the other way means paying twice:
 - `backend/server/fork_snapshot_test.go` also asserts that deleting a fork releases the pins its own rows
   held and leaves the parent's and Main's intact.
 - `backend/api/checkpoint_diff_test.go` — the diff at a checkpoint lists the files it captured,
-  including the binary one, none that a later commit brought in, and none another thread committed
-  before this one forked.
+  including the binary one, none that a later commit brought in, and none another thread committed before
+  this one forked. A truncated file read at that ref answers the snapshot, not the worktree.
+- `backend/server/message_handler_test.go` — `TestMessageDeleteCheckReportsFileRewind`: the delete check says
+  the worktree will be rewound, and answers false for a summarization row and for a task with no worktree.
 - `backend/server/thread_capture_test.go` — with git unable to write, a switch and a fork are refused and
   the work (tracked edit *and* new file) is still there, no thread changed, no stash entry appeared, no
   snapshot pinned — and once git can write again the same click works and the work comes back; a refusal

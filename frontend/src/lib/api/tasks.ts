@@ -387,8 +387,9 @@ export async function deleteTaskMessage(projectId: string, taskId: string, messa
     );
 }
 
-/** Check if deleting a message would also delete a fork branch. */
-export async function checkMessageDelete(projectId: string, taskId: string, messageId: string): Promise<{ will_delete_branch: boolean; branch_name: string }> {
+/** What a deletion takes with it: a fork branch, and the files the deleted turns produced (the worktree is
+ * rewound to the state the remaining conversation describes). */
+export async function checkMessageDelete(projectId: string, taskId: string, messageId: string): Promise<{ will_delete_branch: boolean; branch_name: string; resets_files: boolean }> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages/${messageId}`);
     if (!res.ok) throw await apiError(res, t('api.checkMessageDelete'));
     return res.json();

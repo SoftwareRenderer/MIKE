@@ -2,13 +2,22 @@ package tls
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/pem"
+	"math/big"
 	"net"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
+	"time"
+
+	"mike/pkg/logging"
 )
 
 // --- helpers ---------------------------------------------------------------
@@ -95,15 +104,21 @@ func TestLoadWithCert_DefaultAutoGenerate(t *testing.T) {
 
 func TestLoadWithCert_UserProvided(t *testing.T) {
 	dir := t.TempDir()
+	// A real pair: LoadWithCert has to be able to serve what it accepts.
+	auto, err := LoadWithCert(t.TempDir(), "", "")
+	if err != nil {
+		t.Fatalf("generate a pair to serve: %v", err)
+	}
 	certPath := filepath.Join(dir, "cert.pem")
 	keyPath := filepath.Join(dir, "key.pem")
-
-	// Write dummy content (not valid certs, but LoadWithCert just checks existence)
-	if err := os.WriteFile(certPath, []byte("dummy-cert"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(keyPath, []byte("dummy-key"), 0o600); err != nil {
-		t.Fatal(err)
+	for _, pair := range [][2]string{{auto.CertFile, certPath}, {auto.KeyFile, keyPath}} {
+		content, err := os.ReadFile(pair[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(pair[1], content, 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	cfg, err := LoadWithCert(t.TempDir(), certPath, keyPath)
@@ -122,6 +137,26 @@ func TestLoadWithCert_UserProvided(t *testing.T) {
 	// A user-supplied certificate has no CA of ours attached.
 	if cfg.CAFile != "" {
 		t.Errorf("expected empty CAFile for user-provided cert, got %s", cfg.CAFile)
+	}
+}
+
+// A certificate and key that were never issued together pass os.Stat and only fail mid-handshake.
+func TestLoadWithCert_UserProvided_MismatchedPair(t *testing.T) {
+	one, err := LoadWithCert(t.TempDir(), "", "")
+	if err != nil {
+		t.Fatalf("first pair: %v", err)
+	}
+	two, err := LoadWithCert(t.TempDir(), "", "")
+	if err != nil {
+		t.Fatalf("second pair: %v", err)
+	}
+
+	_, err = LoadWithCert(t.TempDir(), one.CertFile, two.KeyFile)
+	if err == nil {
+		t.Fatal("expected an error for a certificate and key that do not belong together")
+	}
+	if !strings.Contains(err.Error(), "--tls-cert") || !strings.Contains(err.Error(), "--tls-key") {
+		t.Errorf("the error must name the flags the operator set, got: %v", err)
 	}
 }
 
@@ -246,31 +281,245 @@ func TestLoadWithCert_RegeneratesLeafWhenNamesChange(t *testing.T) {
 	}
 }
 
-func TestLoadWithCert_RegeneratesUnusableCA(t *testing.T) {
-	dataDir := t.TempDir()
-
-	if _, err := LoadWithCert(dataDir, "", ""); err != nil {
-		t.Fatalf("first load: %v", err)
-	}
-
-	caPath := filepath.Join(dataDir, "tls", caCertName)
-	if err := os.WriteFile(caPath, []byte("not a certificate"), 0o644); err != nil {
+// signTestCA writes a self-signed CA pair with the given dates, which is how an expired root reaches
+// the loader.
+func signTestCA(t *testing.T, tlsDir string, notBefore, notAfter time.Time) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
 		t.Fatal(err)
 	}
+	template := &x509.Certificate{
+		SerialNumber:          big.NewInt(0x1111),
+		Subject:               pkix.Name{Organization: []string{certOrganization}, CommonName: caCommonName},
+		NotBefore:             notBefore,
+		NotAfter:              notAfter,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+		MaxPathLen:            0,
+		MaxPathLenZero:        true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tlsDir, caCertName), pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeKeyPEM(filepath.Join(tlsDir, caKeyName), key); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeTestLeaf replaces the served leaf with one signed by the same CA, carrying today's names and
+// the given dates, so only its dates can make the server replace it.
+func writeTestLeaf(t *testing.T, dataDir string, notBefore, notAfter time.Time) {
+	t.Helper()
+	tlsDir := filepath.Join(dataDir, "tls")
+	ca, err := loadCA(filepath.Join(tlsDir, caCertName), filepath.Join(tlsDir, caKeyName))
+	if err != nil {
+		t.Fatalf("load the CA to sign with: %v", err)
+	}
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dnsNames, ips := collectLeafNames()
+	template := &x509.Certificate{
+		SerialNumber:          big.NewInt(testLeafSerial),
+		Subject:               pkix.Name{Organization: []string{certOrganization}, CommonName: leafCommonName},
+		NotBefore:             notBefore,
+		NotAfter:              notAfter,
+		KeyUsage:              x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		DNSNames:              dnsNames,
+		IPAddresses:           ips,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, ca.cert, &key.PublicKey, ca.key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tlsDir, leafCertName), pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeKeyPEM(filepath.Join(tlsDir, leafKeyName), key); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// testLeafSerial marks a leaf a test wrote, so "was it replaced?" is a serial comparison.
+const testLeafSerial = 4242
+
+// A leaf costs nothing to replace and no device remembers it, so expiry is settled quietly: the CA
+// behind it comes through untouched and nothing is logged.
+func TestLoadWithCert_ReplacesAnExpiringLeaf(t *testing.T) {
+	cases := []struct {
+		name     string
+		notAfter time.Time
+		replaced bool
+	}{
+		{"expired", time.Now().Add(-time.Hour), true},
+		{"inside_the_renewal_window", time.Now().Add(leafRenewalWindow / 3), true},
+		{"beyond_the_renewal_window", time.Now().Add(leafRenewalWindow * 2), false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dataDir := t.TempDir()
+			if _, err := LoadWithCert(dataDir, "", ""); err != nil {
+				t.Fatal(err)
+			}
+			caBefore := mustParseCert(t, filepath.Join(dataDir, "tls", caCertName))
+
+			writeTestLeaf(t, dataDir, time.Now().Add(-2*time.Hour), tc.notAfter)
+
+			buf, restore := logging.TestSink()
+			defer restore()
+			cfg, err := LoadWithCert(dataDir, "", "")
+			if err != nil {
+				t.Fatalf("reload: %v", err)
+			}
+
+			leaf := mustParseCert(t, cfg.CertFile)
+			replaced := leaf.SerialNumber.Int64() != testLeafSerial
+			if replaced != tc.replaced {
+				t.Errorf("a leaf ending %s: replaced=%v, want %v", tc.notAfter.Format(time.RFC3339), replaced, tc.replaced)
+			}
+			if err := leaf.VerifyHostname("localhost"); err != nil {
+				t.Errorf("the served leaf no longer covers localhost: %v", err)
+			}
+			if caAfter := mustParseCert(t, filepath.Join(dataDir, "tls", caCertName)); caAfter.SerialNumber.Cmp(caBefore.SerialNumber) != 0 {
+				t.Error("the CA was replaced while re-issuing its leaf")
+			}
+			if _, logged := rotationLine(buf.String()); logged {
+				t.Errorf("replacing a leaf announced a root rotation: %s", buf.String())
+			}
+		})
+	}
+}
+
+// Every road to a replaced root is announced, because no device can see it coming.
+func TestEnsureCA_AnnouncesAReplacedRoot(t *testing.T) {
+	newRoot := func(t *testing.T, dataDir string) *x509.Certificate {
+		t.Helper()
+		cfg, err := LoadWithCert(dataDir, "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return mustParseCert(t, cfg.CAFile)
+	}
+
+	t.Run("unparseable_certificate", func(t *testing.T) {
+		dataDir := t.TempDir()
+		before := newRoot(t, dataDir)
+		if err := os.WriteFile(filepath.Join(dataDir, "tls", caCertName), []byte("not a certificate"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		checkReplacement(t, dataDir, before)
+	})
+
+	t.Run("certificate_without_its_key", func(t *testing.T) {
+		dataDir := t.TempDir()
+		before := newRoot(t, dataDir)
+		if err := os.Remove(filepath.Join(dataDir, "tls", caKeyName)); err != nil {
+			t.Fatal(err)
+		}
+		checkReplacement(t, dataDir, before)
+	})
+
+	t.Run("expired_root", func(t *testing.T) {
+		dataDir := t.TempDir()
+		tlsDir := filepath.Join(dataDir, "tls")
+		if err := os.MkdirAll(tlsDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		signTestCA(t, tlsDir, time.Now().Add(-48*time.Hour), time.Now().Add(-time.Hour))
+		before := mustParseCert(t, filepath.Join(tlsDir, caCertName))
+		checkReplacement(t, dataDir, before)
+	})
+
+	t.Run("certificate_that_is_not_a_CA", func(t *testing.T) {
+		dataDir := t.TempDir()
+		tlsDir := filepath.Join(dataDir, "tls")
+		if err := os.MkdirAll(tlsDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		// A server leaf and its own key: a matching pair that may not sign anything.
+		other, err := LoadWithCert(t.TempDir(), "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for src, dst := range map[string]string{
+			other.CertFile: filepath.Join(tlsDir, caCertName),
+			other.KeyFile:  filepath.Join(tlsDir, caKeyName),
+		} {
+			content, err := os.ReadFile(src)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(dst, content, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		before := mustParseCert(t, filepath.Join(tlsDir, caCertName))
+		checkReplacement(t, dataDir, before)
+	})
+
+	t.Run("a_first_install_says_nothing_about_a_root", func(t *testing.T) {
+		buf, restore := logging.TestSink()
+		defer restore()
+		if _, err := LoadWithCert(t.TempDir(), "", ""); err != nil {
+			t.Fatal(err)
+		}
+		if _, logged := rotationLine(buf.String()); logged {
+			t.Errorf("a fresh install announced replacing a root it never had: %s", buf.String())
+		}
+	})
+}
+
+// checkReplacement reloads dataDir expecting a new root, reported once at Error and naming the
+// certificate to re-import.
+func checkReplacement(t *testing.T, dataDir string, before *x509.Certificate) {
+	t.Helper()
+	buf, restore := logging.TestSink()
+	defer restore()
 
 	cfg, err := LoadWithCert(dataDir, "", "")
 	if err != nil {
-		t.Fatalf("load after corrupting the CA: %v", err)
+		t.Fatalf("reload: %v", err)
 	}
+	after := mustParseCert(t, cfg.CAFile)
+	if after.SerialNumber.Cmp(before.SerialNumber) == 0 {
+		t.Fatal("the unusable root was kept")
+	}
+	if !after.IsCA {
+		t.Error("the replacement is not a CA certificate")
+	}
+	if leaf := mustParseCert(t, cfg.CertFile); leaf.CheckSignatureFrom(after) != nil {
+		t.Error("the served leaf is not signed by the replacement root")
+	}
+	line, logged := rotationLine(buf.String())
+	if !logged {
+		t.Fatalf("no line announced the replaced root; logged: %s", buf.String())
+	}
+	if !strings.Contains(line, "level=ERROR") {
+		t.Errorf("a root replacement must reach the operator, logged at: %s", line)
+	}
+	if !strings.Contains(line, caCertName) || !strings.Contains(line, "import") {
+		t.Errorf("the line must name the certificate to re-import: %s", line)
+	}
+}
 
-	ca := mustParseCert(t, caPath)
-	if !ca.IsCA {
-		t.Error("recovered CA is not a CA certificate")
+// rotationLine finds the line that reports a replaced root and reports whether it is there.
+func rotationLine(logged string) (string, bool) {
+	for _, line := range strings.Split(logged, "\n") {
+		if strings.Contains(line, "replacing the local CA") {
+			return line, true
+		}
 	}
-	leaf := mustParseCert(t, cfg.CertFile)
-	if err := leaf.CheckSignatureFrom(ca); err != nil {
-		t.Errorf("served leaf is not signed by the recovered CA: %v", err)
-	}
+	return "", false
 }
 
 // --- CA --------------------------------------------------------------------
@@ -298,6 +547,13 @@ func TestEnsureCA_CreatesUsableCA(t *testing.T) {
 	}
 	if cert.KeyUsage&x509.KeyUsageCRLSign == 0 {
 		t.Error("CA certificate is missing the CRLSign key usage")
+	}
+	if cert.KeyUsage&x509.KeyUsageDigitalSignature != 0 {
+		t.Error("CA certificate may sign things other than certificates")
+	}
+	// MaxPathLen 0 encodes nothing unless MaxPathLenZero is set too.
+	if cert.MaxPathLen != 0 || !cert.MaxPathLenZero {
+		t.Errorf("CA certificate is not pinned to pathlen:0 (MaxPathLen=%d, MaxPathLenZero=%v)", cert.MaxPathLen, cert.MaxPathLenZero)
 	}
 	if got := cert.Subject.Organization; len(got) != 1 || got[0] != "MIKE" {
 		t.Errorf("expected subject organization [MIKE], got %v", got)
@@ -336,23 +592,84 @@ func TestEnsureCA_ReusesExistingCA(t *testing.T) {
 	}
 }
 
+// A key must end up owner-only whether it is being created or replacing a file that was not.
 func TestKeyFilesAreOwnerOnly(t *testing.T) {
-	dataDir := t.TempDir()
-	cfg, err := LoadWithCert(dataDir, "", "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	keys := []string{cfg.KeyFile, filepath.Join(dataDir, "tls", caKeyName)}
-	for _, path := range keys {
-		info, err := os.Stat(path)
+	t.Run("created", func(t *testing.T) {
+		dataDir := t.TempDir()
+		cfg, err := LoadWithCert(dataDir, "", "")
 		if err != nil {
-			t.Fatalf("failed to stat %s: %v", path, err)
+			t.Fatalf("unexpected error: %v", err)
 		}
-		if info.Mode().Perm() != 0o600 {
-			t.Errorf("%s: expected permissions 0600, got %o", path, info.Mode().Perm())
+
+		for _, path := range []string{cfg.KeyFile, filepath.Join(dataDir, "tls", caKeyName)} {
+			if perm := mustPerm(t, path); perm != 0o600 {
+				t.Errorf("%s: expected permissions 0600, got %o", path, perm)
+			}
 		}
+	})
+
+	t.Run("replacing_a_file_that_was_not_owner_only", func(t *testing.T) {
+		dataDir := t.TempDir()
+		if _, err := LoadWithCert(dataDir, "", ""); err != nil {
+			t.Fatalf("first load: %v", err)
+		}
+
+		keyPath := filepath.Join(dataDir, "tls", caKeyName)
+		if err := os.Chmod(keyPath, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		// Replacing the certificate is what makes the key get written again, over a file
+		// this package did not create.
+		if err := os.WriteFile(filepath.Join(dataDir, "tls", caCertName), []byte("not a certificate"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadWithCert(dataDir, "", ""); err != nil {
+			t.Fatalf("load after corrupting the CA: %v", err)
+		}
+
+		if perm := mustPerm(t, keyPath); perm != 0o600 {
+			t.Errorf("a regenerated CA key kept the mode of the file it replaced: %o", perm)
+		}
+	})
+
+	t.Run("a_link_is_not_a_target", func(t *testing.T) {
+		dataDir := t.TempDir()
+		if _, err := LoadWithCert(dataDir, "", ""); err != nil {
+			t.Fatalf("first load: %v", err)
+		}
+
+		victim := filepath.Join(t.TempDir(), "someone-elses-file")
+		if err := os.WriteFile(victim, []byte("do not clobber"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		keyPath := filepath.Join(dataDir, "tls", caKeyName)
+		if err := os.Remove(keyPath); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(victim, keyPath); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dataDir, "tls", caCertName), []byte("not a certificate"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := LoadWithCert(dataDir, "", ""); err == nil {
+			t.Error("writing a key through a symlink must be refused")
+		}
+		content, err := os.ReadFile(victim)
+		if err != nil || string(content) != "do not clobber" {
+			t.Errorf("the link target was written to: %q (err %v)", content, err)
+		}
+	})
+}
+
+func mustPerm(t *testing.T, path string) os.FileMode {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("failed to stat %s: %v", path, err)
 	}
+	return info.Mode().Perm()
 }
 
 // --- leaf ------------------------------------------------------------------
@@ -445,6 +762,82 @@ func TestGenerateLeaf(t *testing.T) {
 	}
 	if err := leaf.CheckSignatureFrom(ca.cert); err != nil {
 		t.Errorf("leaf is not signed by the CA: %v", err)
+	}
+	if leaf.KeyUsage&x509.KeyUsageDigitalSignature == 0 {
+		t.Error("leaf is missing the digitalSignature key usage, which TLS needs from an ECDSA server certificate")
+	}
+	if leaf.KeyUsage&x509.KeyUsageKeyEncipherment != 0 {
+		t.Error("leaf carries keyEncipherment, which only an RSA key transport uses")
+	}
+}
+
+// The root ends up in device trust stores, so it must not be able to authorise anything but a leaf.
+// Signing an intermediate is never refused; the constraint holds where the chain is checked.
+func TestLocalCARejectsAChain(t *testing.T) {
+	ca, err := ensureCA(t.TempDir())
+	if err != nil {
+		t.Fatalf("ensureCA: %v", err)
+	}
+
+	interKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	interDER, err := x509.CreateCertificate(rand.Reader, &x509.Certificate{
+		SerialNumber:          big.NewInt(0x1234),
+		Subject:               pkix.Name{CommonName: "an intermediate"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}, ca.cert, &interKey.PublicKey, ca.key)
+	if err != nil {
+		t.Fatalf("the root refused to sign an intermediate at all: %v", err)
+	}
+	intermediate, err := x509.ParseCertificate(interDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forgedDER, err := x509.CreateCertificate(rand.Reader, &x509.Certificate{
+		SerialNumber:          big.NewInt(0x9999),
+		Subject:               pkix.Name{CommonName: "a forged server"},
+		DNSNames:              []string{"localhost"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+	}, intermediate, &leafKey.PublicKey, interKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forged, err := x509.ParseCertificate(forgedDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	roots := x509.NewCertPool()
+	roots.AddCert(ca.cert)
+	intermediates := x509.NewCertPool()
+	intermediates.AddCert(intermediate)
+
+	if _, err := forged.Verify(x509.VerifyOptions{Roots: roots, Intermediates: intermediates, DNSName: "localhost"}); err == nil {
+		t.Fatal("a certificate two links under the local CA chains to it: the root carries no pathLenConstraint")
+	}
+
+	// The control: one link under the same root still chains, so the rejection above is the constraint.
+	dir := t.TempDir()
+	if err := generateLeaf(filepath.Join(dir, "mike.crt"), filepath.Join(dir, "mike.key"), ca, []string{"localhost"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mustParseCert(t, filepath.Join(dir, "mike.crt")).Verify(x509.VerifyOptions{Roots: roots, DNSName: "localhost"}); err != nil {
+		t.Errorf("the leaf this package issues does not chain to its own root: %v", err)
 	}
 }
 

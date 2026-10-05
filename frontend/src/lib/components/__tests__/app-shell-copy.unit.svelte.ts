@@ -53,6 +53,47 @@ describe('app shell copy', () => {
             expect(code?.getAttribute('placeholder')).toBe('XXXX-XXXX');
         });
 
+        it('lists the three places a pairing code comes from', () => {
+            const { container } = render(LoginModal, { hasPasskey: false, onClose: () => { } });
+
+            const items = [...container.querySelectorAll('.login-list li')].map((li) => li.textContent);
+            expect(items).toEqual([
+                t('app.login.codeSourceAdmin'),
+                t('app.login.codeSourceBoot'),
+                t('app.login.codeSourceSettings'),
+            ]);
+            // The stem only introduces the list: the routes are said once, in the list, and the list is part
+            // of the field's group rather than a paragraph of its own.
+            expect(container.querySelector('.login-field .login-copy')?.textContent).toBe(t('app.login.codeHelp'));
+        });
+
+        // The browser that has to treat this address as secure is the one being paired, and its rule is a
+        // prerequisite of the ceremony rather than something this page can measure, so the certificate is
+        // offered wherever there is one — not only where this connection already looks wrong.
+        describe('the certificate a pairing needs the device to trust', () => {
+            it('is offered on the pairing body over a connection this browser already trusts', () => {
+                const { container } = render(LoginModal, { hasPasskey: false, caDownload: true, onClose: () => { } });
+
+                expect(container.textContent).toContain(t('app.login.caPrerequisite'));
+                expect(container.textContent).toContain('certificate authority');
+                const link = container.querySelector('a[download]');
+                expect(link?.getAttribute('href')).toBe('/api/tls/ca');
+                expect(link?.getAttribute('download')).toBe('mike-ca.crt');
+                expect(container.textContent).toContain('install it as a trusted root certificate');
+                // Nothing here says this connection is the problem, because it is not.
+                expect(container.textContent).not.toContain('does not treat this connection as secure');
+                // And the ceremony is still the point of the screen: the offer must not eat the button.
+                expect(container.querySelector('.login-btn')?.textContent).toBe('Create a passkey');
+            });
+
+            it('is not offered where the server has no certificate to hand out', () => {
+                const { container } = render(LoginModal, { hasPasskey: false, caDownload: false, onClose: () => { } });
+
+                expect(container.querySelector('a[download]')).toBeNull();
+                expect(container.textContent).not.toContain('certificate');
+            });
+        });
+
         // A phone on the LAN address reaches this body: WebAuthn is a secure-context API, so the form
         // has no prompt to run and the explanation is the whole screen (docs/tls.md).
         describe('a connection the browser will not run a prompt on', () => {
@@ -70,8 +111,8 @@ describe('app shell copy', () => {
                 expect(link?.getAttribute('download')).toBe('mike-ca.crt');
                 expect(link?.textContent).toBe('Download the certificate authority (mike-ca.crt)');
                 expect(container.textContent).toContain('install it as a trusted root certificate');
-                // The steps already end at the https address, so the same instruction is not printed twice.
-                expect(container.textContent?.match(/reload/g)).toHaveLength(1);
+                // The steps stop at "revisit this page", so this body repeats no reload instruction.
+                expect(container.textContent).not.toMatch(/reload/);
             });
 
             it('offers no link to a certificate this server does not have', () => {
@@ -82,6 +123,48 @@ describe('app shell copy', () => {
                 // The way out that needs no certificate is still on the screen.
                 expect(container.textContent).toContain('http://localhost');
             });
+
+            // A pairing link is the only way a second device gets a code nobody read out to it, and it opens
+            // the code body whatever the connection turns out to be — so the certificate belongs on that
+            // body too, not only on the explanation the first paint shows.
+            describe('the code body a pairing link opens', () => {
+                // The link is a fragment on this document, and the modal strips it as it reads it.
+                beforeEach(() => history.replaceState(null, '', window.location.pathname));
+                afterEach(() => history.replaceState(null, '', window.location.pathname));
+
+                it('keeps the code and hands over the certificate', () => {
+                    history.replaceState(null, '', '#pair=ABCD2345');
+                    const { container } = render(LoginModal, { hasPasskey: true, caDownload: true, onClose: () => { } });
+
+                    // The code field is still the body: spending the code is what they arrived to do.
+                    expect(container.querySelector('h2')?.textContent).toBe('Pair this device');
+                    expect(container.querySelector<HTMLInputElement>('input[type="text"]')?.value).toBe('ABCD-2345');
+                    expect(container.textContent).toContain('does not treat this connection as secure');
+                    const link = container.querySelector('a[download]');
+                    expect(link?.getAttribute('href')).toBe('/api/tls/ca');
+                    expect(link?.getAttribute('download')).toBe('mike-ca.crt');
+                    // Same rule as the body above: the certificate's steps print no reload instruction.
+                    expect(container.textContent).not.toMatch(/reload/);
+                });
+
+                it('names the localhost way out when there is no certificate to hand over', () => {
+                    history.replaceState(null, '', '#pair=ABCD2345');
+                    const { container } = render(LoginModal, { hasPasskey: true, caDownload: false, onClose: () => { } });
+
+                    expect(container.querySelector('a[download]')).toBeNull();
+                    expect(container.querySelector<HTMLInputElement>('input[type="text"]')?.value).toBe('ABCD-2345');
+                    expect(container.textContent).toContain('http://localhost');
+                });
+            });
+        });
+
+        // `no-api` is a different fault with a different fix, so the certificate is not on this screen.
+        it('offers no certificate to a browser that has no passkey API on a connection it trusts', () => {
+            Object.defineProperty(window, 'PublicKeyCredential', { value: undefined, configurable: true });
+            const { container } = render(LoginModal, { hasPasskey: true, caDownload: true, onClose: () => { } });
+
+            expect(container.textContent).toContain('cannot create a passkey');
+            expect(container.querySelector('a[download]')).toBeNull();
         });
 
         it('names the three things the form can report', () => {

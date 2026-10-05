@@ -225,13 +225,12 @@ export interface TaskDiffOptions {
     headRef?: string;
     baseRef?: string;
     full?: boolean;
-    checkpointIndex?: number;
     parsed?: boolean;
 }
 
 /**
  * Fetch the unified diff for a task's worktree. Supports optional head/base refs and full file content.
- * The current worktree diff (no head/base/checkpoint) is cached so it stays viewable when the server
+ * The current worktree diff (no head/base) is cached so it stays viewable when the server
  * cannot be reached; non-current diffs are not cached.
  */
 export async function getTaskDiff(projectId: string, taskId: string, options?: TaskDiffOptions): Promise<TaskDiff> {
@@ -242,13 +241,13 @@ export async function getTaskDiff(projectId: string, taskId: string, options?: T
     if (options?.parsed) params.set('parsed', '1');
     const url = params.toString() ? `${API_BASE}/projects/${projectId}/tasks/${taskId}/diff?${params}` : `${API_BASE}/projects/${projectId}/tasks/${taskId}/diff`;
     // Cacheability is the ref shape, never the parsed flag: the diff panel sends parsed=1 on every load.
-    const isCurrentDiff = !options?.headRef && !options?.baseRef && options?.checkpointIndex == null;
+    const isCurrentDiff = !options?.headRef && !options?.baseRef;
     // The canonical done-task diff (pinned BaseCommit..BranchTip, requested by
     // head ref only) is immutable — serve it straight from IndexedDB when we
     // have it (zero network), and persist it after the first fetch. Checkpoint
     // diffs and custom-base comparisons share the headRef param but are NOT
     // the canonical done diff, so they must bypass this cache.
-    const isDoneDiff = !!options?.headRef && !options?.baseRef && options?.checkpointIndex == null && !options?.full;
+    const isDoneDiff = !!options?.headRef && !options?.baseRef && !options?.full;
     // A stored body that carries only patch text is a miss for a parsed request: it renders empty.
     const usableCached = (cached: TaskDiff | null): cached is TaskDiff =>
         !!cached && (!options?.parsed || !!cached.parsed_files);
@@ -289,10 +288,14 @@ export async function getTaskCommits(projectId: string, taskId: string): Promise
     return res.json();
 }
 
-/** Fetch the content of a single file (tracked or untracked) from the cached diff. */
-export async function getDiffFile(projectId: string, taskId: string, path: string, options?: { full?: boolean; signal?: AbortSignal }): Promise<DiffFileResponse> {
+/** Fetch the content of a single file (tracked or untracked) from the cached diff. With `headRef` the answer
+ * is that file between `headRef` and `baseRef` (default: the task's diff baseline) — the comparison a
+ * checkpoint panel shows, not the working tree. */
+export async function getDiffFile(projectId: string, taskId: string, path: string, options?: { full?: boolean; signal?: AbortSignal; headRef?: string; baseRef?: string }): Promise<DiffFileResponse> {
     const params = new URLSearchParams({ path });
     if (options?.full) params.set('full', '1');
+    if (options?.headRef) params.set('head', options.headRef);
+    if (options?.baseRef) params.set('base', options.baseRef);
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/diff/file?${params}`, { signal: options?.signal });
     if (!res.ok) throw await apiError(res, t('api.fetchFileContent'));
     return res.json();
