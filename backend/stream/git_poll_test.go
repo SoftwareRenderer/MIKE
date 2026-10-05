@@ -14,6 +14,7 @@ import (
 	"mike/backend/config"
 	"mike/backend/git"
 	"mike/backend/store"
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
 
@@ -26,12 +27,12 @@ func TestBranchWatcherLifecycle(t *testing.T) {
 	os.MkdirAll(repoDir, 0o755)
 	os.MkdirAll(worktreesDir, 0o755)
 
-	runGit(t, repoDir, "init")
-	runGit(t, repoDir, "config", "user.email", "test@test.com")
-	runGit(t, repoDir, "config", "user.name", "Test")
-	writeTestFile(t, repoDir, "README.md", "# Test\n")
-	runGit(t, repoDir, "add", "README.md")
-	runGit(t, repoDir, "commit", "-m", "Initial")
+	testgit.Git(t, repoDir, "init")
+	testgit.Git(t, repoDir, "config", "user.email", "test@test.com")
+	testgit.Git(t, repoDir, "config", "user.name", "Test")
+	testgit.WriteFile(t, repoDir, "README.md", "# Test\n")
+	testgit.Git(t, repoDir, "add", "README.md")
+	testgit.Git(t, repoDir, "commit", "-m", "Initial")
 
 	dbPath := filepath.Join(tmpDir, "test.db")
 	s, err := store.NewStore(dbPath)
@@ -169,12 +170,12 @@ func TestBranchWatcherDetectsDetachedHEAD(t *testing.T) {
 	repoDir := filepath.Join(tmpDir, "repo")
 	os.MkdirAll(repoDir, 0o755)
 
-	runGit(t, repoDir, "init")
-	runGit(t, repoDir, "config", "user.email", "test@test.com")
-	runGit(t, repoDir, "config", "user.name", "Test")
-	writeTestFile(t, repoDir, "README.md", "# Test\n")
-	runGit(t, repoDir, "add", "README.md")
-	runGit(t, repoDir, "commit", "-m", "Initial")
+	testgit.Git(t, repoDir, "init")
+	testgit.Git(t, repoDir, "config", "user.email", "test@test.com")
+	testgit.Git(t, repoDir, "config", "user.name", "Test")
+	testgit.WriteFile(t, repoDir, "README.md", "# Test\n")
+	testgit.Git(t, repoDir, "add", "README.md")
+	testgit.Git(t, repoDir, "commit", "-m", "Initial")
 
 	// Get the current commit SHA
 	out, err := exec.Command("git", "-C", repoDir, "rev-parse", "HEAD").Output()
@@ -241,12 +242,12 @@ func TestBranchWatcherDuplicateEvents(t *testing.T) {
 	repoDir := filepath.Join(tmpDir, "repo")
 	os.MkdirAll(repoDir, 0o755)
 
-	runGit(t, repoDir, "init")
-	runGit(t, repoDir, "config", "user.email", "test@test.com")
-	runGit(t, repoDir, "config", "user.name", "Test")
-	writeTestFile(t, repoDir, "README.md", "# Test\n")
-	runGit(t, repoDir, "add", "README.md")
-	runGit(t, repoDir, "commit", "-m", "Initial")
+	testgit.Git(t, repoDir, "init")
+	testgit.Git(t, repoDir, "config", "user.email", "test@test.com")
+	testgit.Git(t, repoDir, "config", "user.name", "Test")
+	testgit.WriteFile(t, repoDir, "README.md", "# Test\n")
+	testgit.Git(t, repoDir, "add", "README.md")
+	testgit.Git(t, repoDir, "commit", "-m", "Initial")
 
 	var mu sync.Mutex
 	var broadcastCount int
@@ -305,12 +306,12 @@ func TestGitPollerDetectsChanges(t *testing.T) {
 	os.MkdirAll(repoDir, 0o755)
 	os.MkdirAll(worktreesDir, 0o755)
 
-	runGit(t, repoDir, "init")
-	runGit(t, repoDir, "config", "user.email", "test@test.com")
-	runGit(t, repoDir, "config", "user.name", "Test")
-	writeTestFile(t, repoDir, "README.md", "# Test\n")
-	runGit(t, repoDir, "add", "README.md")
-	runGit(t, repoDir, "commit", "-m", "Initial")
+	testgit.Git(t, repoDir, "init")
+	testgit.Git(t, repoDir, "config", "user.email", "test@test.com")
+	testgit.Git(t, repoDir, "config", "user.name", "Test")
+	testgit.WriteFile(t, repoDir, "README.md", "# Test\n")
+	testgit.Git(t, repoDir, "add", "README.md")
+	testgit.Git(t, repoDir, "commit", "-m", "Initial")
 
 	dbPath := filepath.Join(tmpDir, "test.db")
 	s, err := store.NewStore(dbPath)
@@ -366,7 +367,7 @@ func TestGitPollerDetectsChanges(t *testing.T) {
 	}
 
 	// Make a change
-	writeTestFile(t, worktreePath, "new_file.txt", "Hello, world!\n")
+	testgit.WriteFile(t, worktreePath, "new_file.txt", "Hello, world!\n")
 
 	// After change — the worktree manager should detect the new file
 	if out, err := wm.GitStatus(taskID); err != nil || strings.TrimSpace(out) == "" {
@@ -393,12 +394,12 @@ func TestWorktreeWatcherMultiTask(t *testing.T) {
 	os.MkdirAll(repoDir, 0o755)
 	os.MkdirAll(worktreesDir, 0o755)
 
-	runGit(t, repoDir, "init")
-	runGit(t, repoDir, "config", "user.email", "test@test.com")
-	runGit(t, repoDir, "config", "user.name", "Test")
-	writeTestFile(t, repoDir, "README.md", "# Test\n")
-	runGit(t, repoDir, "add", "README.md")
-	runGit(t, repoDir, "commit", "-m", "Initial")
+	testgit.Git(t, repoDir, "init")
+	testgit.Git(t, repoDir, "config", "user.email", "test@test.com")
+	testgit.Git(t, repoDir, "config", "user.name", "Test")
+	testgit.WriteFile(t, repoDir, "README.md", "# Test\n")
+	testgit.Git(t, repoDir, "add", "README.md")
+	testgit.Git(t, repoDir, "commit", "-m", "Initial")
 
 	dbPath := filepath.Join(tmpDir, "test.db")
 	s, err := store.NewStore(dbPath)
@@ -481,7 +482,7 @@ func TestWorktreeWatcherMultiTask(t *testing.T) {
 	// Write a file in each worktree and verify events are routed correctly
 	for _, taskID := range taskIDs {
 		worktreePath := filepath.Join(worktreesDir, projID, taskID)
-		writeTestFile(t, worktreePath, "test.txt", "content\n")
+		testgit.WriteFile(t, worktreePath, "test.txt", "content\n")
 		time.Sleep(10 * time.Millisecond)
 	}
 
@@ -508,12 +509,12 @@ func TestWorktreeWatcherWorkerPoolBounds(t *testing.T) {
 	os.MkdirAll(repoDir, 0o755)
 	os.MkdirAll(worktreesDir, 0o755)
 
-	runGit(t, repoDir, "init")
-	runGit(t, repoDir, "config", "user.email", "test@test.com")
-	runGit(t, repoDir, "config", "user.name", "Test")
-	writeTestFile(t, repoDir, "README.md", "# Test\n")
-	runGit(t, repoDir, "add", "README.md")
-	runGit(t, repoDir, "commit", "-m", "Initial")
+	testgit.Git(t, repoDir, "init")
+	testgit.Git(t, repoDir, "config", "user.email", "test@test.com")
+	testgit.Git(t, repoDir, "config", "user.name", "Test")
+	testgit.WriteFile(t, repoDir, "README.md", "# Test\n")
+	testgit.Git(t, repoDir, "add", "README.md")
+	testgit.Git(t, repoDir, "commit", "-m", "Initial")
 
 	dbPath := filepath.Join(tmpDir, "test.db")
 	s, err := store.NewStore(dbPath)
@@ -597,12 +598,12 @@ func TestBranchWatcherMultiProject(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		repoDir := filepath.Join(tmpDir, fmt.Sprintf("repo-%d", i))
 		os.MkdirAll(repoDir, 0o755)
-		runGit(t, repoDir, "init")
-		runGit(t, repoDir, "config", "user.email", "test@test.com")
-		runGit(t, repoDir, "config", "user.name", "Test")
-		writeTestFile(t, repoDir, "README.md", "# Test\n")
-		runGit(t, repoDir, "add", "README.md")
-		runGit(t, repoDir, "commit", "-m", "Initial")
+		testgit.Git(t, repoDir, "init")
+		testgit.Git(t, repoDir, "config", "user.email", "test@test.com")
+		testgit.Git(t, repoDir, "config", "user.name", "Test")
+		testgit.WriteFile(t, repoDir, "README.md", "# Test\n")
+		testgit.Git(t, repoDir, "add", "README.md")
+		testgit.Git(t, repoDir, "commit", "-m", "Initial")
 		repoDirs = append(repoDirs, repoDir)
 	}
 
@@ -678,15 +679,4 @@ func TestBranchWatcherMultiProject(t *testing.T) {
 		}
 	}
 	mu.Unlock()
-}
-
-// runGit runs a git command in the specified directory.
-func runGit(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %s: %v: %s", args, err, out)
-	}
 }

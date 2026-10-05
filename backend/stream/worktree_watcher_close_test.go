@@ -11,6 +11,7 @@ import (
 	"mike/backend/config"
 	"mike/backend/git"
 	"mike/backend/store"
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
 
@@ -27,12 +28,12 @@ func TestCloseDoesNotWaitHoldingTheLock(t *testing.T) {
 	if err := os.MkdirAll(worktreesDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, repoDir, "init")
-	runGit(t, repoDir, "config", "user.email", "test@test.com")
-	runGit(t, repoDir, "config", "user.name", "Test")
-	writeTestFile(t, repoDir, "README.md", "# Test\n")
-	runGit(t, repoDir, "add", "README.md")
-	runGit(t, repoDir, "commit", "-m", "Initial")
+	testgit.Git(t, repoDir, "init")
+	testgit.Git(t, repoDir, "config", "user.email", "test@test.com")
+	testgit.Git(t, repoDir, "config", "user.name", "Test")
+	testgit.WriteFile(t, repoDir, "README.md", "# Test\n")
+	testgit.Git(t, repoDir, "add", "README.md")
+	testgit.Git(t, repoDir, "commit", "-m", "Initial")
 
 	dbPath := filepath.Join(tmpDir, "test.db")
 	s, err := store.NewStore(dbPath)
@@ -79,7 +80,7 @@ func TestCloseDoesNotWaitHoldingTheLock(t *testing.T) {
 		t.Fatalf("watch task: %v", err)
 	}
 
-	writeTestFile(t, worktreePath, "README.md", "# Test\nchanged\n")
+	testgit.WriteFile(t, worktreePath, "README.md", "# Test\nchanged\n")
 	ww.handleEvent(fsnotify.Event{Op: fsnotify.Write, Name: filepath.Join(worktreePath, "README.md")})
 
 	select {

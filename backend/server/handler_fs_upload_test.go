@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"mike/backend/testutil/testgit"
 )
 
 // uploadArgs describes one /api/fs/upload request the way the browser's drop zone
@@ -427,14 +429,14 @@ func TestFSUploadIntoTaskWorktree(t *testing.T) {
 	repo := t.TempDir()
 	const projID = "upload-worktree"
 	sandboxFSProject(t, s, projID, "Upload Worktree", repo, false)
-	mustRunGit(t, repo, "init")
-	mustRunGit(t, repo, "config", "user.email", "test@test.com")
-	mustRunGit(t, repo, "config", "user.name", "Test")
+	testgit.Git(t, repo, "init")
+	testgit.Git(t, repo, "config", "user.email", "test@test.com")
+	testgit.Git(t, repo, "config", "user.name", "Test")
 	if err := os.WriteFile(filepath.Join(repo, "seed.txt"), []byte("seed\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	mustRunGit(t, repo, "add", "seed.txt")
-	mustRunGit(t, repo, "commit", "-m", "seed")
+	testgit.Git(t, repo, "add", "seed.txt")
+	testgit.Git(t, repo, "commit", "-m", "seed")
 
 	taskID := createTestTask(t, s, projID, "upload task")
 	worktreePath, _, err := s.executor.WorktreeMgr().CreateWorktree(projID, taskID, "task/"+taskID, "HEAD")

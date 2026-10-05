@@ -73,6 +73,17 @@ func WriteFile(t *testing.T, dir, name, content string) {
 	}
 }
 
+// ReadFile is WriteFile's other direction: the content of name inside dir, failing the test when
+// the file is not there. A test that asserts on a file's absence asserts with os.Stat.
+func ReadFile(t *testing.T, dir, name string) string {
+	t.Helper()
+	content, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		t.Fatalf("read %s: %v", name, err)
+	}
+	return string(content)
+}
+
 // Init turns dir into a git repository with no commits.
 func Init(t *testing.T, dir string) {
 	t.Helper()

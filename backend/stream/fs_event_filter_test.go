@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"mike/backend/testutil/testgit"
 )
 
 // TestShouldSkipFsEvent verifies fs_event filtering: internal files (.git,
@@ -13,14 +15,14 @@ func TestShouldSkipFsEvent(t *testing.T) {
 	dir := t.TempDir()
 	repo := filepath.Join(dir, "repo")
 	os.MkdirAll(repo, 0o755)
-	runGit(t, repo, "init")
-	runGit(t, repo, "config", "user.email", "test@test.com")
-	runGit(t, repo, "config", "user.name", "Test")
+	testgit.Git(t, repo, "init")
+	testgit.Git(t, repo, "config", "user.email", "test@test.com")
+	testgit.Git(t, repo, "config", "user.name", "Test")
 
-	writeTestFile(t, repo, ".gitignore", "*.log\nnode_modules/\n")
-	writeTestFile(t, repo, "README.md", "# readme\n")
-	runGit(t, repo, "add", ".gitignore", "README.md")
-	runGit(t, repo, "commit", "-m", "init")
+	testgit.WriteFile(t, repo, ".gitignore", "*.log\nnode_modules/\n")
+	testgit.WriteFile(t, repo, "README.md", "# readme\n")
+	testgit.Git(t, repo, "add", ".gitignore", "README.md")
+	testgit.Git(t, repo, "commit", "-m", "init")
 
 	tests := []struct {
 		name     string

@@ -10,6 +10,7 @@ import (
 	"mike/backend/config"
 	"mike/backend/git"
 	"mike/backend/store"
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
 
@@ -24,12 +25,12 @@ func setupCommitAndMergeTest(t *testing.T) (*TaskExecutor, string, string, strin
 	os.MkdirAll(worktreesDir, 0o755)
 
 	// Initialize git repo
-	runGit(t, repoDir, "init")
-	runGit(t, repoDir, "config", "user.email", "test@test.com")
-	runGit(t, repoDir, "config", "user.name", "Test")
+	testgit.Git(t, repoDir, "init")
+	testgit.Git(t, repoDir, "config", "user.email", "test@test.com")
+	testgit.Git(t, repoDir, "config", "user.name", "Test")
 	os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Test\n"), 0o644)
-	runGit(t, repoDir, "add", "README.md")
-	runGit(t, repoDir, "commit", "-m", "Initial")
+	testgit.Git(t, repoDir, "add", "README.md")
+	testgit.Git(t, repoDir, "commit", "-m", "Initial")
 
 	// Create store and config
 	dbPath := filepath.Join(tmpDir, "test.db")
@@ -59,17 +60,17 @@ func setupCommitAndMergeTest(t *testing.T) (*TaskExecutor, string, string, strin
 	s.CreateTask(task)
 
 	// Create task branch
-	runGit(t, repoDir, "checkout", "-b", "task/test-task")
-	runGit(t, repoDir, "checkout", "master")
+	testgit.Git(t, repoDir, "checkout", "-b", "task/test-task")
+	testgit.Git(t, repoDir, "checkout", "master")
 
 	// Create worktree
 	wtPath := filepath.Join(worktreesDir, projectID, taskID)
 	os.MkdirAll(wtPath, 0o755)
-	runGit(t, repoDir, "worktree", "add", wtPath, "task/test-task")
+	testgit.Git(t, repoDir, "worktree", "add", wtPath, "task/test-task")
 
 	// Create an unstaged change in the worktree (simulating LLM edits)
 	os.WriteFile(filepath.Join(wtPath, "feature.txt"), []byte("feature content\n"), 0o644)
-	runGitInDir(t, wtPath, "add", "feature.txt")
+	testgit.Git(t, wtPath, "add", "feature.txt")
 
 	worktreeMgr := git.NewWorktreeManager(s, cfgStore)
 	appStreamMgr := newTestStreamMgr(t, s, worktreeMgr)

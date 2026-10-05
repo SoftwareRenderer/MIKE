@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"mike/backend/exec"
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
 
@@ -24,14 +25,14 @@ func taskUploadProject(t *testing.T, id string) (*Server, string) {
 
 	repo := t.TempDir()
 	sandboxFSProject(t, s, id, "Uploads "+id, repo, false)
-	mustRunGit(t, repo, "init")
-	mustRunGit(t, repo, "config", "user.email", "test@test.com")
-	mustRunGit(t, repo, "config", "user.name", "Test")
+	testgit.Git(t, repo, "init")
+	testgit.Git(t, repo, "config", "user.email", "test@test.com")
+	testgit.Git(t, repo, "config", "user.name", "Test")
 	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("# up\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	mustRunGit(t, repo, "add", "README.md")
-	mustRunGit(t, repo, "commit", "-m", "Initial")
+	testgit.Git(t, repo, "add", "README.md")
+	testgit.Git(t, repo, "commit", "-m", "Initial")
 
 	now := time.Now().UTC()
 	// The branch is set because the deletion path takes the worktree only when the row names a branch.
@@ -98,7 +99,7 @@ func TestTaskUploadAnswersThePathItWrote(t *testing.T) {
 		t.Errorf("bytes changed on the way through the form: %q", written)
 	}
 	// The upload is git's to discard if it shows in the task's status, so it must not.
-	if out := strings.TrimSpace(mustRunGitOutput(t, wtPath, "status", "--porcelain")); out != "" {
+	if out := strings.TrimSpace(testgit.GitOutput(t, wtPath, "status", "--porcelain")); out != "" {
 		t.Errorf("the upload shows in the task's git status:\n%s", out)
 	}
 }

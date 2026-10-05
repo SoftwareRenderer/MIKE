@@ -665,6 +665,21 @@ runs and can hold another task's start in the gate queue. The gVisor tests that 
 `TestMemoryLimitEnforced` keeps a 128 MB cap because that is the smallest cap measured to kill the process
 and leave the sandbox up; see `docs/sandbox-runtime.md`.
 
+### Test fixtures that stay local
+
+`testgit` owns a throwaway git repository and the file and command helpers on top of it, and every
+package that can reach it uses it instead of a local copy. `go test ./backend/testutil/testgit` checks
+the fixture itself. Two walls decide what stays a copy:
+
+- `testgit` depends on `backend/git`, so a test inside `backend/git`, `backend/store` or
+  `backend/fsutil` reaches it only by closing an import cycle. `backend/git` keeps `runGit`,
+  `runGitOutput`, `moduleRoot` and `skipPath`; `backend/fsutil` keeps `writeTestFile`; `backend/store`
+  keeps its row seeders and `mustPerm`.
+- A fixture with no git in it has no home in `testgit`: `mustPerm` lives in `backend/store` and
+  `backend/tls`, `processGone` in `pkg/procterm`, `pkg/bridge/agent` and `backend/exec`, and
+  `moduleRoot` again in `pkg/sandboxruntime`. A shared copy would mean a production package exporting
+  a test helper, which no package here does.
+
 ## A machine that cannot run a container
 
 Two host faults turn a green tree red, and neither is a fault in the code. The second starts its

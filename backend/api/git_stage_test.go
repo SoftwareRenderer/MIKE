@@ -83,7 +83,7 @@ func TestHandleProjectStagePaths_UnstagesEveryPathInOneRequest(t *testing.T) {
 	}
 	// Unstaging leaves the worktree alone: both files are still on disk, edited or not.
 	for _, name := range []string{"a.txt", "b.txt"} {
-		if readFileOrFail(t, repoPath, name) == "" {
+		if testgit.ReadFile(t, repoPath, name) == "" {
 			t.Errorf("%s was emptied", name)
 		}
 	}
@@ -127,7 +127,7 @@ func TestHandleProjectStagePaths_UnstageRestoresADeletedFile(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if got := readFileOrFail(t, repoPath, "README.md"); got != "# Test\n" {
+	if got := testgit.ReadFile(t, repoPath, "README.md"); got != "# Test\n" {
 		t.Errorf("README.md came back as %q", got)
 	}
 }

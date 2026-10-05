@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"mike/backend/testutil/testgit"
 )
 
 // createTestProjectWithPath creates a project and returns its ID and filesystem path.
@@ -31,8 +33,8 @@ func TestGitLog(t *testing.T) {
 	s := testServer(t)
 	projID, dir := createTestProjectWithPath(t, s)
 	// Add more commits
-	mustRunGit(t, dir, "commit", "--allow-empty", "-m", "Second commit")
-	mustRunGit(t, dir, "commit", "--allow-empty", "-m", "Third commit")
+	testgit.Git(t, dir, "commit", "--allow-empty", "-m", "Second commit")
+	testgit.Git(t, dir, "commit", "--allow-empty", "-m", "Third commit")
 
 	cookie, csrfToken := loginTestCSRF(t, s)
 	req := testRequest("GET", "/api/projects/"+projID+"/git/log?full=1", nil)
@@ -99,10 +101,10 @@ func TestGitLog(t *testing.T) {
 func TestGitLogFullWithBranch(t *testing.T) {
 	s := testServer(t)
 	projID, dir := createTestProjectWithPath(t, s)
-	mustRunGit(t, dir, "commit", "--allow-empty", "-m", "On main")
+	testgit.Git(t, dir, "commit", "--allow-empty", "-m", "On main")
 	// Create a feature branch
-	mustRunGit(t, dir, "checkout", "-b", "feature")
-	mustRunGit(t, dir, "commit", "--allow-empty", "-m", "On feature")
+	testgit.Git(t, dir, "checkout", "-b", "feature")
+	testgit.Git(t, dir, "commit", "--allow-empty", "-m", "On feature")
 
 	cookie, csrfToken := loginTestCSRF(t, s)
 	req := testRequest("GET", "/api/projects/"+projID+"/git/log?full=1&branch=feature", nil)
@@ -146,7 +148,7 @@ func TestGitCheckout(t *testing.T) {
 	s := testServer(t)
 	projID, dir := createTestProjectWithPath(t, s)
 	// Create a develop branch from master
-	mustRunGit(t, dir, "checkout", "-b", "develop")
+	testgit.Git(t, dir, "checkout", "-b", "develop")
 
 	cookie, csrfToken := loginTestCSRF(t, s)
 	req := testRequest("POST", "/api/projects/"+projID+"/git/checkout", map[string]any{
@@ -172,8 +174,8 @@ func TestGitCheckout(t *testing.T) {
 func TestGitLogFullDecodesParents(t *testing.T) {
 	s := testServer(t)
 	projID, dir := createTestProjectWithPath(t, s)
-	mustRunGit(t, dir, "commit", "--allow-empty", "-m", "Commit A")
-	mustRunGit(t, dir, "commit", "--allow-empty", "-m", "Commit B")
+	testgit.Git(t, dir, "commit", "--allow-empty", "-m", "Commit A")
+	testgit.Git(t, dir, "commit", "--allow-empty", "-m", "Commit B")
 
 	cookie, csrfToken := loginTestCSRF(t, s)
 	req := testRequest("GET", "/api/projects/"+projID+"/git/log?full=1", nil)
@@ -214,8 +216,8 @@ func TestGitLogFullBranchesAndOrigin(t *testing.T) {
 	projID, dir := createTestProjectWithPath(t, s)
 
 	// Add commits on master
-	mustRunGit(t, dir, "commit", "--allow-empty", "-m", "Commit A")
-	mustRunGit(t, dir, "commit", "--allow-empty", "-m", "Commit B")
+	testgit.Git(t, dir, "commit", "--allow-empty", "-m", "Commit A")
+	testgit.Git(t, dir, "commit", "--allow-empty", "-m", "Commit B")
 
 	// Create a branch pointing at Commit A
 	cmd := exec.Command("git", "rev-parse", "HEAD~1")
@@ -224,7 +226,7 @@ func TestGitLogFullBranchesAndOrigin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("git rev-parse: %s: %v", string(aHashOut), err)
 	}
-	mustRunGit(t, dir, "branch", "release", strings.TrimSpace(string(aHashOut)))
+	testgit.Git(t, dir, "branch", "release", strings.TrimSpace(string(aHashOut)))
 
 	cookie, csrfToken := loginTestCSRF(t, s)
 	req := testRequest("GET", "/api/projects/"+projID+"/git/log?full=1", nil)

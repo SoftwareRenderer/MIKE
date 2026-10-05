@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"mike/backend/git"
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
 
@@ -201,17 +202,17 @@ func fsReadRefRepo(t *testing.T, s *Server, projectID string) (string, string, s
 	}); err != nil {
 		t.Fatal(err)
 	}
-	mustRunGit(t, repo, "init")
-	mustRunGit(t, repo, "config", "user.email", "test@test.com")
-	mustRunGit(t, repo, "config", "user.name", "Test")
+	testgit.Git(t, repo, "init")
+	testgit.Git(t, repo, "config", "user.email", "test@test.com")
+	testgit.Git(t, repo, "config", "user.name", "Test")
 	file := filepath.Join(repo, "f.txt")
 	if err := os.WriteFile(file, []byte(fsReadRefContent), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	mustRunGit(t, repo, "add", "f.txt")
-	mustRunGit(t, repo, "commit", "-m", "init")
-	sha := mustRunGitOutput(t, repo, "rev-parse", "HEAD")
-	mustRunGit(t, repo, "branch", "feature/ref-check")
+	testgit.Git(t, repo, "add", "f.txt")
+	testgit.Git(t, repo, "commit", "-m", "init")
+	sha := testgit.GitOutput(t, repo, "rev-parse", "HEAD")
+	testgit.Git(t, repo, "branch", "feature/ref-check")
 	return file, sha, "feature/ref-check"
 }
 
@@ -354,16 +355,16 @@ func TestFSReadRefInTaskWorktree(t *testing.T) {
 	if err := s.store.CreateProject(&types.Project{ID: projID, Name: "FS Ref Task Project", Path: repo}); err != nil {
 		t.Fatal(err)
 	}
-	mustRunGit(t, repo, "init")
-	mustRunGit(t, repo, "config", "user.email", "test@test.com")
-	mustRunGit(t, repo, "config", "user.name", "Test")
+	testgit.Git(t, repo, "init")
+	testgit.Git(t, repo, "config", "user.email", "test@test.com")
+	testgit.Git(t, repo, "config", "user.name", "Test")
 	writeAndCommit := func(dir, content string) {
 		t.Helper()
 		if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		mustRunGit(t, dir, "add", "f.txt")
-		mustRunGit(t, dir, "commit", "-m", "commit")
+		testgit.Git(t, dir, "add", "f.txt")
+		testgit.Git(t, dir, "commit", "-m", "commit")
 	}
 	writeAndCommit(repo, "base commit\n")
 
@@ -400,7 +401,7 @@ func TestFSReadRefInTaskWorktree(t *testing.T) {
 	}
 
 	// A valid ref still resolves inside the worktree's history.
-	sha := mustRunGitOutput(t, worktreePath, "rev-parse", "HEAD")
+	sha := testgit.GitOutput(t, worktreePath, "rev-parse", "HEAD")
 	for _, ref := range []string{"HEAD", sha, "task/" + taskID} {
 		rr := read(ref)
 		if rr.Code != http.StatusOK {

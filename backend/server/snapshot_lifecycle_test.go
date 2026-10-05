@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"mike/backend/git"
+	"mike/backend/testutil/testgit"
 )
 
 func pinFixtureRepo(t *testing.T, s *Server, name string) (projID, repoPath, head string) {
@@ -22,7 +23,7 @@ func pinFixtureRepo(t *testing.T, s *Server, name string) (projID, repoPath, hea
 	initGitRepo(t, tmpDir)
 	projID = mustJSON[map[string]any](t, testResponseAuth(t, s, testRequest("POST", "/api/projects",
 		map[string]any{"name": name, "path": tmpDir})).Body)["id"].(string)
-	return projID, tmpDir, strings.TrimSpace(mustRunGitOutput(t, tmpDir, "rev-parse", "HEAD"))
+	return projID, tmpDir, strings.TrimSpace(testgit.GitOutput(t, tmpDir, "rev-parse", "HEAD"))
 }
 
 // refExists reports any ref, including ones MIKE does not own — a user branch has to survive cleanup, and

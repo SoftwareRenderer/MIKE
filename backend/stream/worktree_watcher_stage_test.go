@@ -12,6 +12,7 @@ import (
 	"mike/backend/config"
 	"mike/backend/git"
 	"mike/backend/store"
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
 
@@ -70,12 +71,12 @@ func TestWorktreeWatcherStageBroadcast(t *testing.T) {
 	os.MkdirAll(repoDir, 0o755)
 	os.MkdirAll(worktreesDir, 0o755)
 
-	runGit(t, repoDir, "init")
-	runGit(t, repoDir, "config", "user.email", "test@test.com")
-	runGit(t, repoDir, "config", "user.name", "Test")
-	writeTestFile(t, repoDir, "README.md", "# Test\n")
-	runGit(t, repoDir, "add", "README.md")
-	runGit(t, repoDir, "commit", "-m", "Initial")
+	testgit.Git(t, repoDir, "init")
+	testgit.Git(t, repoDir, "config", "user.email", "test@test.com")
+	testgit.Git(t, repoDir, "config", "user.name", "Test")
+	testgit.WriteFile(t, repoDir, "README.md", "# Test\n")
+	testgit.Git(t, repoDir, "add", "README.md")
+	testgit.Git(t, repoDir, "commit", "-m", "Initial")
 
 	dbPath := filepath.Join(tmpDir, "test.db")
 	s, err := store.NewStore(dbPath)
@@ -139,7 +140,7 @@ func TestWorktreeWatcherStageBroadcast(t *testing.T) {
 	drainBroadcasts(broadcasts)
 
 	// Modify a tracked file in the worktree.
-	writeTestFile(t, worktreePath, "README.md", "# Test\nchanged\n")
+	testgit.WriteFile(t, worktreePath, "README.md", "# Test\nchanged\n")
 	waitForBroadcast(t, broadcasts, "file modification")
 
 	// Stage the file: git add. Expect a broadcast with README.md in StagedPaths.

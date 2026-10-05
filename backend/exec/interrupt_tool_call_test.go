@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"mike/backend/stream"
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 
 	"github.com/google/uuid"
@@ -437,14 +438,14 @@ func TestInterruptedTurnDoesNotCommitOrFinish(t *testing.T) {
 		),
 		textScript("Stopping. Shall I try the other approach?"),
 	)
-	before := gitOut(t, run.repoDir, "rev-list", "--count", "HEAD")
+	before := testgit.GitOutput(t, run.repoDir, "rev-list", "--count", "HEAD")
 
 	run.awaitStreamCalls(t, 1)
 	run.awaitFile(t, "started.txt")
 	run.send(t, "Wait, not that")
 	run.awaitStreamCalls(t, 2)
 
-	if after := gitOut(t, run.repoDir, "rev-list", "--count", "HEAD"); after != before {
+	if after := testgit.GitOutput(t, run.repoDir, "rev-list", "--count", "HEAD"); after != before {
 		t.Errorf("the repository went from %s to %s commits: an interrupted turn committed", before, after)
 	}
 	row, err := run.te.store.GetTaskByID(run.taskID)

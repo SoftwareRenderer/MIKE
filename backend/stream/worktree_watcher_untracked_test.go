@@ -11,6 +11,7 @@ import (
 	"mike/backend/config"
 	"mike/backend/git"
 	"mike/backend/store"
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
 
@@ -28,12 +29,12 @@ func newUntrackedWatcherEnv(t *testing.T) (*WorktreeWatcher, chan DiffStatsEvent
 	if err := os.MkdirAll(worktreesDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, repoDir, "init")
-	runGit(t, repoDir, "config", "user.email", "test@test.com")
-	runGit(t, repoDir, "config", "user.name", "Test")
-	writeTestFile(t, repoDir, "README.md", "# Test\n")
-	runGit(t, repoDir, "add", "README.md")
-	runGit(t, repoDir, "commit", "-m", "Initial")
+	testgit.Git(t, repoDir, "init")
+	testgit.Git(t, repoDir, "config", "user.email", "test@test.com")
+	testgit.Git(t, repoDir, "config", "user.name", "Test")
+	testgit.WriteFile(t, repoDir, "README.md", "# Test\n")
+	testgit.Git(t, repoDir, "add", "README.md")
+	testgit.Git(t, repoDir, "commit", "-m", "Initial")
 
 	dbPath := filepath.Join(tmpDir, "test.db")
 	s, err := store.NewStore(dbPath)
@@ -89,7 +90,7 @@ func TestWatcherReportsADeletedUntrackedFile(t *testing.T) {
 	name := "delete-me.txt"
 	path := filepath.Join(worktreePath, name)
 
-	writeTestFile(t, worktreePath, name, "content to delete\n")
+	testgit.WriteFile(t, worktreePath, name, "content to delete\n")
 	appeared := waitForBroadcast(t, broadcasts, "creating an untracked file")
 	if appeared.UntrackedN != 1 {
 		t.Fatalf("after create: untracked_n = %d, want 1 (task %s)", appeared.UntrackedN, taskID)

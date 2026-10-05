@@ -12,7 +12,6 @@ package git
 import (
 	"context"
 	"os/exec"
-	"strings"
 	"time"
 
 	"mike/pkg/subproc"
@@ -67,17 +66,7 @@ var gitEnvNames = map[string]bool{
 var gitEnvPrefixes = []string{"LC_", "GIT_"}
 
 // isGitSafeEnv reports whether an environment variable name may reach a git subprocess.
-func isGitSafeEnv(name string) bool {
-	if gitEnvNames[name] || subproc.IsProxyEnv(name) {
-		return true
-	}
-	for _, p := range gitEnvPrefixes {
-		if strings.HasPrefix(name, p) {
-			return true
-		}
-	}
-	return false
-}
+var isGitSafeEnv = subproc.Allows(gitEnvNames, gitEnvPrefixes)
 
 // ExecutionFence stops a repository naming a program for git to run. Every entry is command-line
 // configuration, which outranks the repository's own `.git/config` but not an environment variable the

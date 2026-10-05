@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"mike/backend/stream"
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 
 	"github.com/google/uuid"
@@ -137,7 +138,7 @@ func startTextStopRun(t *testing.T, m *textStopMock, mutate func(*types.Task)) *
 	te, repoDir, projectID, initialSHA := setupExecutorWithGit(t)
 	srvURL := m.srv.URL
 	const parentBranch = "refs/heads/task/parent-review-target"
-	runGit(t, repoDir, "branch", strings.TrimPrefix(parentBranch, "refs/heads/"), initialSHA)
+	testgit.Git(t, repoDir, "branch", strings.TrimPrefix(parentBranch, "refs/heads/"), initialSHA)
 
 	parent := &types.Task{
 		ID:              "parent-text-stop",
@@ -261,7 +262,7 @@ func (r *textStopRun) autoAnswerRows(t *testing.T) []string {
 
 func gitRevParse(t *testing.T, dir, ref string) string {
 	t.Helper()
-	return gitOut(t, dir, "rev-parse", ref)
+	return testgit.GitOutput(t, dir, "rev-parse", ref)
 }
 
 // TestAutoAnswer_TextStopContinuesFromParentContext is the feature itself: a subtask run that no

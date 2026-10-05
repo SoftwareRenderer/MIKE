@@ -2,7 +2,6 @@ package exec
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,6 +12,7 @@ import (
 	"mike/backend/git"
 	"mike/backend/sandbox"
 	"mike/backend/store"
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
 
@@ -27,12 +27,12 @@ func uploadFixture(t *testing.T, sandboxed bool) (*TaskExecutor, string, string)
 	os.MkdirAll(repoDir, 0o755)
 	os.MkdirAll(worktreesDir, 0o755)
 
-	runGit(t, repoDir, "init")
-	runGit(t, repoDir, "config", "user.email", "test@test.com")
-	runGit(t, repoDir, "config", "user.name", "Test")
+	testgit.Git(t, repoDir, "init")
+	testgit.Git(t, repoDir, "config", "user.email", "test@test.com")
+	testgit.Git(t, repoDir, "config", "user.name", "Test")
 	os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Test\n"), 0o644)
-	runGit(t, repoDir, "add", "README.md")
-	runGit(t, repoDir, "commit", "-m", "Initial")
+	testgit.Git(t, repoDir, "add", "README.md")
+	testgit.Git(t, repoDir, "commit", "-m", "Initial")
 
 	dbPath := filepath.Join(tmpDir, "uploads.db")
 	s, err := store.NewStore(dbPath)
@@ -73,21 +73,7 @@ func hostUpload(t *testing.T, wtPath, name string) string {
 
 func gitStatus(t *testing.T, dir string) string {
 	t.Helper()
-	cmd := exCmd(t, dir, "status", "--porcelain")
-	return strings.TrimSpace(cmd)
-}
-
-// exCmd runs git and hands back what it printed. The package's runGit fails on a non-zero exit, which is not
-// what a status check wants.
-func exCmd(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %s: %s: %v", args, string(out), err)
-	}
-	return string(out)
+	return testgit.GitOutput(t, dir, "status", "--porcelain")
 }
 
 func TestWriteTaskFilePutsTheBytesWhereTheTasksActionsRun(t *testing.T) {

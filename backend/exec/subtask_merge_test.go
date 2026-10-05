@@ -13,6 +13,7 @@ import (
 	"mike/backend/config"
 	"mike/backend/git"
 	"mike/backend/store"
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
 
@@ -204,7 +205,7 @@ func TestMergeBranch_SubtaskMergesIntoParentBranch(t *testing.T) {
 	te.store.CreateTask(parent)
 
 	// Create parent branch in git
-	runGit(t, repoDir, "branch", parent.Branch)
+	testgit.Git(t, repoDir, "branch", parent.Branch)
 
 	// Create subtask
 	subtaskID := "subtask-merge-test"
@@ -222,14 +223,14 @@ func TestMergeBranch_SubtaskMergesIntoParentBranch(t *testing.T) {
 	te.store.CreateTask(subtask)
 
 	// Create subtask branch from parent branch
-	runGit(t, repoDir, "branch", subtask.Branch, parent.Branch)
+	testgit.Git(t, repoDir, "branch", subtask.Branch, parent.Branch)
 
 	// Make a commit on the subtask branch
-	runGit(t, repoDir, "checkout", subtask.Branch)
+	testgit.Git(t, repoDir, "checkout", subtask.Branch)
 	subtaskFile := filepath.Join(repoDir, "subtask_file.txt")
 	os.WriteFile(subtaskFile, []byte("subtask changes\n"), 0o644)
-	runGit(t, repoDir, "add", "subtask_file.txt")
-	runGit(t, repoDir, "commit", "-m", "subtask work")
+	testgit.Git(t, repoDir, "add", "subtask_file.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "subtask work")
 
 	// Get parent branch tip before merge
 	cmd := exec.Command("git", "-C", repoDir, "rev-parse", parent.Branch)
@@ -269,7 +270,7 @@ func TestMergeBranch_SubtaskMergesIntoParentBranch(t *testing.T) {
 	}
 
 	// Verify the commit is NOT on the origin branch (main)
-	runGit(t, repoDir, "checkout", "master")
+	testgit.Git(t, repoDir, "checkout", "master")
 	if _, err := os.Stat(subtaskFile); err == nil {
 		t.Error("subtask file should NOT exist on master (origin) branch — merge should target parent, not origin")
 	}
@@ -309,13 +310,13 @@ func TestMergeBranch_CreatesMissingBaseBranch(t *testing.T) {
 	te.store.CreateTask(task)
 
 	// Task branch with a commit on it; the project checkout stays on main.
-	runGit(t, repoDir, "branch", task.Branch)
-	runGit(t, repoDir, "checkout", task.Branch)
+	testgit.Git(t, repoDir, "branch", task.Branch)
+	testgit.Git(t, repoDir, "checkout", task.Branch)
 	taskFile := filepath.Join(repoDir, "idea_file.txt")
 	os.WriteFile(taskFile, []byte("idea work\n"), 0o644)
-	runGit(t, repoDir, "add", "idea_file.txt")
-	runGit(t, repoDir, "commit", "-m", "idea work")
-	runGit(t, repoDir, "checkout", mainBranch)
+	testgit.Git(t, repoDir, "add", "idea_file.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "idea work")
+	testgit.Git(t, repoDir, "checkout", mainBranch)
 
 	if out, err := exec.Command("git", "-C", repoDir, "rev-parse", "--verify", "explore/idea").CombinedOutput(); err == nil {
 		t.Fatalf("precondition failed: explore/idea should not exist yet: %s", out)
@@ -371,7 +372,7 @@ func TestMergeInto_RestoresProjectCheckout(t *testing.T) {
 	}
 
 	// The user is working on their own branch with uncommitted changes.
-	runGit(t, repoDir, "checkout", "-b", "user-feature")
+	testgit.Git(t, repoDir, "checkout", "-b", "user-feature")
 	localFile := filepath.Join(repoDir, "local_edit.txt")
 	os.WriteFile(localFile, []byte("user's in-progress work\n"), 0o644)
 
@@ -380,12 +381,12 @@ func TestMergeInto_RestoresProjectCheckout(t *testing.T) {
 	// directory and must restore the checkout afterwards.
 	taskID := "restore-checkout"
 	taskBranch := "task/" + taskID
-	runGit(t, repoDir, "checkout", "-b", taskBranch, mainBranch)
+	testgit.Git(t, repoDir, "checkout", "-b", taskBranch, mainBranch)
 	taskFile := filepath.Join(repoDir, "task_file.txt")
 	os.WriteFile(taskFile, []byte("task work\n"), 0o644)
-	runGit(t, repoDir, "add", "task_file.txt")
-	runGit(t, repoDir, "commit", "-m", "task work")
-	runGit(t, repoDir, "checkout", "user-feature")
+	testgit.Git(t, repoDir, "add", "task_file.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "task work")
+	testgit.Git(t, repoDir, "checkout", "user-feature")
 
 	task := &types.Task{
 		ID:             taskID,
@@ -462,11 +463,11 @@ func TestMergeBranch_ConcurrentProjectMerges(t *testing.T) {
 	// create-branch race and the main-checkout race in one.
 	mkTask := func(taskID, file, content string) *types.Task {
 		taskBranch := "task/" + taskID
-		runGit(t, repoDir, "checkout", "-b", taskBranch, mainBranch)
+		testgit.Git(t, repoDir, "checkout", "-b", taskBranch, mainBranch)
 		os.WriteFile(filepath.Join(repoDir, file), []byte(content+"\n"), 0o644)
-		runGit(t, repoDir, "add", file)
-		runGit(t, repoDir, "commit", "-m", file)
-		runGit(t, repoDir, "checkout", mainBranch)
+		testgit.Git(t, repoDir, "add", file)
+		testgit.Git(t, repoDir, "commit", "-m", file)
+		testgit.Git(t, repoDir, "checkout", mainBranch)
 		task := &types.Task{
 			ID:             taskID,
 			ProjectID:      projectID,
@@ -553,11 +554,11 @@ func TestMergeBranch_ConcurrentDifferentTargets(t *testing.T) {
 
 	mkTask := func(taskID, base, file, content string) *types.Task {
 		taskBranch := "task/" + taskID
-		runGit(t, repoDir, "checkout", "-b", taskBranch, mainBranch)
+		testgit.Git(t, repoDir, "checkout", "-b", taskBranch, mainBranch)
 		os.WriteFile(filepath.Join(repoDir, file), []byte(content+"\n"), 0o644)
-		runGit(t, repoDir, "add", file)
-		runGit(t, repoDir, "commit", "-m", file)
-		runGit(t, repoDir, "checkout", mainBranch)
+		testgit.Git(t, repoDir, "add", file)
+		testgit.Git(t, repoDir, "commit", "-m", file)
+		testgit.Git(t, repoDir, "checkout", mainBranch)
 		task := &types.Task{
 			ID:             taskID,
 			ProjectID:      projectID,
@@ -669,14 +670,14 @@ func TestMergeBranch_SubtaskNeverMergesIntoOrigin(t *testing.T) {
 	te.store.CreateTask(subtask)
 
 	// Create subtask branch from master
-	runGit(t, repoDir, "branch", subtask.Branch, "master")
+	testgit.Git(t, repoDir, "branch", subtask.Branch, "master")
 
 	// Make a commit on the subtask branch
-	runGit(t, repoDir, "checkout", subtask.Branch)
+	testgit.Git(t, repoDir, "checkout", subtask.Branch)
 	subtaskFile := filepath.Join(repoDir, "no_fallback_file.txt")
 	os.WriteFile(subtaskFile, []byte("no fallback changes\n"), 0o644)
-	runGit(t, repoDir, "add", "no_fallback_file.txt")
-	runGit(t, repoDir, "commit", "-m", "no fallback work")
+	testgit.Git(t, repoDir, "add", "no_fallback_file.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "no fallback work")
 
 	// Verify parent has no branch before merge
 	parentFromDB, _ := te.store.GetTaskByID(parentID)
@@ -787,12 +788,12 @@ func setupExecutorWithGitForSubtask(t *testing.T) (*TaskExecutor, string, string
 	os.MkdirAll(repoDir, 0o755)
 	os.MkdirAll(worktreesDir, 0o755)
 
-	runGit(t, repoDir, "init")
-	runGit(t, repoDir, "config", "user.email", "test@test.com")
-	runGit(t, repoDir, "config", "user.name", "Test")
+	testgit.Git(t, repoDir, "init")
+	testgit.Git(t, repoDir, "config", "user.email", "test@test.com")
+	testgit.Git(t, repoDir, "config", "user.name", "Test")
 	os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Test\n"), 0o644)
-	runGit(t, repoDir, "add", "README.md")
-	runGit(t, repoDir, "commit", "-m", "Initial")
+	testgit.Git(t, repoDir, "add", "README.md")
+	testgit.Git(t, repoDir, "commit", "-m", "Initial")
 
 	dbPath := filepath.Join(tmpDir, "test.db")
 	s, err := store.NewStore(dbPath)
@@ -878,8 +879,8 @@ func TestSubtaskMergeFullFlow(t *testing.T) {
 	// Step 2: Simulate subtask making changes and committing
 	subtaskFile := filepath.Join(setup.worktreePath, "subtask_work.txt")
 	os.WriteFile(subtaskFile, []byte("subtask implementation\n"), 0o644)
-	runGitInDir(t, setup.worktreePath, "add", "-A")
-	runGitInDir(t, setup.worktreePath, "commit", "-m", "subtask work")
+	testgit.Git(t, setup.worktreePath, "add", "-A")
+	testgit.Git(t, setup.worktreePath, "commit", "-m", "subtask work")
 
 	// Step 3: Merge subtask into parent branch
 	subtaskFromDB, _ := te.store.GetTaskByID(subtaskID)
@@ -922,8 +923,8 @@ func TestSubtaskMergeFullFlow(t *testing.T) {
 	// Step 5: Simulate parent making changes and committing
 	parentFile := filepath.Join(parentSetup.worktreePath, "parent_work.txt")
 	os.WriteFile(parentFile, []byte("parent implementation\n"), 0o644)
-	runGitInDir(t, parentSetup.worktreePath, "add", "-A")
-	runGitInDir(t, parentSetup.worktreePath, "commit", "-m", "parent work")
+	testgit.Git(t, parentSetup.worktreePath, "add", "-A")
+	testgit.Git(t, parentSetup.worktreePath, "commit", "-m", "parent work")
 
 	// Step 6: Merge parent into origin (master)
 	parentFromDB, _ = te.store.GetTaskByID(parentID)
@@ -933,7 +934,7 @@ func TestSubtaskMergeFullFlow(t *testing.T) {
 	}
 
 	// Verify BOTH subtask and parent changes are on master
-	runGit(t, repoDir, "checkout", "master")
+	testgit.Git(t, repoDir, "checkout", "master")
 	masterSubtaskFile := filepath.Join(repoDir, "subtask_work.txt")
 	masterParentFile := filepath.Join(repoDir, "parent_work.txt")
 	if _, err := os.Stat(masterSubtaskFile); err != nil {
@@ -941,15 +942,6 @@ func TestSubtaskMergeFullFlow(t *testing.T) {
 	}
 	if _, err := os.Stat(masterParentFile); err != nil {
 		t.Fatalf("parent file should be on master after parent merge: %v", err)
-	}
-}
-
-func runGitInDir(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %s in %s: %s: %v", args, dir, string(out), err)
 	}
 }
 
@@ -1010,14 +1002,14 @@ func TestMergeBranch_ConflictDetection(t *testing.T) {
 	parentWorktreePath, _ := te.worktreeMgr.WorktreePath(parentID)
 	sharedFile := filepath.Join(parentWorktreePath, "shared.txt")
 	os.WriteFile(sharedFile, []byte("parent version of the file\n"), 0o644)
-	runGitInDir(t, parentWorktreePath, "add", "-A")
-	runGitInDir(t, parentWorktreePath, "commit", "-m", "parent edits shared file")
+	testgit.Git(t, parentWorktreePath, "add", "-A")
+	testgit.Git(t, parentWorktreePath, "commit", "-m", "parent edits shared file")
 
 	// Create the same file with different content on the subtask branch
 	subtaskFile := filepath.Join(setup.worktreePath, "shared.txt")
 	os.WriteFile(subtaskFile, []byte("subtask version of the file\n"), 0o644)
-	runGitInDir(t, setup.worktreePath, "add", "-A")
-	runGitInDir(t, setup.worktreePath, "commit", "-m", "subtask edits shared file")
+	testgit.Git(t, setup.worktreePath, "add", "-A")
+	testgit.Git(t, setup.worktreePath, "commit", "-m", "subtask edits shared file")
 
 	// Try to merge — the sync-merge (target→task) will conflict.
 	// With the new sync-merge feature, LLM resolution failure enters
@@ -1465,7 +1457,7 @@ func TestMergeBranch_CommitAndDonePath(t *testing.T) {
 	te.store.CreateTask(parent)
 
 	// Create parent branch in git
-	runGit(t, repoDir, "branch", parent.Branch)
+	testgit.Git(t, repoDir, "branch", parent.Branch)
 
 	// Create subtask
 	subtaskID := "subtask-commit-done"
@@ -1483,14 +1475,14 @@ func TestMergeBranch_CommitAndDonePath(t *testing.T) {
 	te.store.CreateTask(subtask)
 
 	// Create subtask branch from parent branch
-	runGit(t, repoDir, "branch", subtask.Branch, parent.Branch)
+	testgit.Git(t, repoDir, "branch", subtask.Branch, parent.Branch)
 
 	// Make a commit on the subtask branch
-	runGit(t, repoDir, "checkout", subtask.Branch)
+	testgit.Git(t, repoDir, "checkout", subtask.Branch)
 	subtaskFile := filepath.Join(repoDir, "commit_done_file.txt")
 	os.WriteFile(subtaskFile, []byte("subtask work from commit-and-done\n"), 0o644)
-	runGit(t, repoDir, "add", "commit_done_file.txt")
-	runGit(t, repoDir, "commit", "-m", "subtask work")
+	testgit.Git(t, repoDir, "add", "commit_done_file.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "subtask work")
 
 	// Merge subtask
 	subtaskFromDB, _ := te.store.GetTaskByID(subtaskID)
@@ -1516,7 +1508,7 @@ func TestMergeBranch_CommitAndDonePath(t *testing.T) {
 	}
 
 	// Verify the commit is NOT on master (origin) — it should only be on parent
-	runGit(t, repoDir, "checkout", "master")
+	testgit.Git(t, repoDir, "checkout", "master")
 	if _, err := os.Stat(subtaskFile); err == nil {
 		t.Error("subtask file should NOT exist on master — MergeBranch must target parent branch, not origin")
 	}
@@ -1560,14 +1552,14 @@ func TestMergeBranch_ParentBranchCreatedOnDemand(t *testing.T) {
 	te.store.CreateTask(subtask)
 
 	// Create subtask branch from master
-	runGit(t, repoDir, "branch", subtask.Branch, "master")
+	testgit.Git(t, repoDir, "branch", subtask.Branch, "master")
 
 	// Make a commit on the subtask branch
-	runGit(t, repoDir, "checkout", subtask.Branch)
+	testgit.Git(t, repoDir, "checkout", subtask.Branch)
 	subtaskFile := filepath.Join(repoDir, "on_demand_file.txt")
 	os.WriteFile(subtaskFile, []byte("on demand changes\n"), 0o644)
-	runGit(t, repoDir, "add", "on_demand_file.txt")
-	runGit(t, repoDir, "commit", "-m", "on demand work")
+	testgit.Git(t, repoDir, "add", "on_demand_file.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "on demand work")
 
 	// Verify parent has no branch
 	parentFromDB, _ := te.store.GetTaskByID(parentID)
@@ -1643,13 +1635,13 @@ func TestMergeBranch_ParentDiffStatsAfterSubtaskMerge(t *testing.T) {
 	te.store.CreateTask(subtask)
 
 	// Subtask branch with its own commit (branched from master).
-	runGit(t, repoDir, "branch", subtask.Branch, "master")
-	runGit(t, repoDir, "checkout", subtask.Branch)
+	testgit.Git(t, repoDir, "branch", subtask.Branch, "master")
+	testgit.Git(t, repoDir, "checkout", subtask.Branch)
 	os.WriteFile(filepath.Join(repoDir, "subtask_merged.txt"), []byte("subtask work\n"), 0o644)
-	runGit(t, repoDir, "add", "subtask_merged.txt")
-	runGit(t, repoDir, "commit", "-m", "subtask work")
+	testgit.Git(t, repoDir, "add", "subtask_merged.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "subtask work")
 	// The project's main checkout is on master when the parent branch is created.
-	runGit(t, repoDir, "checkout", "master")
+	testgit.Git(t, repoDir, "checkout", "master")
 
 	// Parent branch + worktree are auto-created (parent never started — no
 	// base_ref/base_commit recorded).
@@ -1714,8 +1706,8 @@ func TestMergeBranch_RootTaskMergesIntoOriginBranch(t *testing.T) {
 
 	// Make a commit on master so we have something to merge against
 	os.WriteFile(filepath.Join(repoDir, "master_update.txt"), []byte("master update\n"), 0o644)
-	runGit(t, repoDir, "add", "master_update.txt")
-	runGit(t, repoDir, "commit", "-m", "master update")
+	testgit.Git(t, repoDir, "add", "master_update.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "master update")
 
 	taskID := "root-origin-merge"
 	task := &types.Task{
@@ -1732,14 +1724,14 @@ func TestMergeBranch_RootTaskMergesIntoOriginBranch(t *testing.T) {
 	te.store.CreateTask(task)
 
 	// Create the task branch from master
-	runGit(t, repoDir, "branch", task.Branch, "master")
+	testgit.Git(t, repoDir, "branch", task.Branch, "master")
 
 	// Make a commit on the task branch
-	runGit(t, repoDir, "checkout", task.Branch)
+	testgit.Git(t, repoDir, "checkout", task.Branch)
 	taskFile := filepath.Join(repoDir, "task_file.txt")
 	os.WriteFile(taskFile, []byte("task changes\n"), 0o644)
-	runGit(t, repoDir, "add", "task_file.txt")
-	runGit(t, repoDir, "commit", "-m", "task work")
+	testgit.Git(t, repoDir, "add", "task_file.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "task work")
 	taskCommitSHA := getGitRevParse(t, repoDir, "HEAD")
 
 	// Merge task branch
@@ -1773,7 +1765,7 @@ func TestMergeBranch_RootTaskWithBranchName_BaseRefUsesBranchName(t *testing.T) 
 	te, repoDir, projectID, _ := setupExecutorWithGit(t)
 
 	// Create a "develop" branch
-	runGit(t, repoDir, "branch", "develop", "master")
+	testgit.Git(t, repoDir, "branch", "develop", "master")
 
 	taskID := "branch-baseref-task"
 	task := &types.Task{
@@ -1790,14 +1782,14 @@ func TestMergeBranch_RootTaskWithBranchName_BaseRefUsesBranchName(t *testing.T) 
 	te.store.CreateTask(task)
 
 	// Create the task branch from develop
-	runGit(t, repoDir, "branch", task.Branch, "develop")
+	testgit.Git(t, repoDir, "branch", task.Branch, "develop")
 
 	// Make a commit on the task branch
-	runGit(t, repoDir, "checkout", task.Branch)
+	testgit.Git(t, repoDir, "checkout", task.Branch)
 	taskFile := filepath.Join(repoDir, "task_file.txt")
 	os.WriteFile(taskFile, []byte("task changes\n"), 0o644)
-	runGit(t, repoDir, "add", "task_file.txt")
-	runGit(t, repoDir, "commit", "-m", "task work")
+	testgit.Git(t, repoDir, "add", "task_file.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "task work")
 	taskCommitSHA := getGitRevParse(t, repoDir, "HEAD")
 
 	// Merge task branch
@@ -1926,8 +1918,8 @@ func TestSubtaskManualStart_MergeDiagnostic(t *testing.T) {
 	// Step 5: Simulate subtask work (make a commit)
 	subtaskFile := filepath.Join(subtaskWtPath, "subtask_file.txt")
 	os.WriteFile(subtaskFile, []byte("subtask work\n"), 0o644)
-	runGitInDir(t, subtaskWtPath, "add", "-A")
-	runGitInDir(t, subtaskWtPath, "commit", "-m", "subtask work")
+	testgit.Git(t, subtaskWtPath, "add", "-A")
+	testgit.Git(t, subtaskWtPath, "commit", "-m", "subtask work")
 
 	// Get parent branch tip before merge
 	parentTipBefore := getGitRevParse(t, repoDir, parentAfter.Branch)
@@ -2122,13 +2114,13 @@ func TestMergeBranch_RecoverMissingBranch(t *testing.T) {
 	newBranch := "task/count-files-xyz789" // in DB but missing in git
 
 	// Create the old branch in git (with some work).
-	runGit(t, repoDir, "branch", oldBranch, "HEAD")
+	testgit.Git(t, repoDir, "branch", oldBranch, "HEAD")
 	// Add a commit to the old branch to simulate child merge work.
-	runGit(t, repoDir, "checkout", oldBranch)
+	testgit.Git(t, repoDir, "checkout", oldBranch)
 	os.WriteFile(filepath.Join(repoDir, "child-work.txt"), []byte("child work\n"), 0o644)
-	runGit(t, repoDir, "add", "child-work.txt")
-	runGit(t, repoDir, "commit", "-m", "Child merge work")
-	runGit(t, repoDir, "checkout", "master")
+	testgit.Git(t, repoDir, "add", "child-work.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "Child merge work")
+	testgit.Git(t, repoDir, "checkout", "master")
 
 	// Create task with the NEW (missing) branch name.
 	parent := &types.Task{

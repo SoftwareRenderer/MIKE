@@ -13,18 +13,9 @@ import (
 	"time"
 
 	"mike/backend/git"
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
-
-// gitOut runs git for assertions, failing the test on error.
-func gitOut(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %v: %s: %v", args, out, err)
-	}
-	return strings.TrimSpace(string(out))
-}
 
 // waitForSnapshot polls until f reports success.
 func waitForSnapshot(t *testing.T, what string, f func() bool) {
@@ -84,7 +75,7 @@ func TestCheckpointPinsItsSnapshot(t *testing.T) {
 	waitForSnapshot(t, "the snapshot ref "+ref, func() bool {
 		return exec.Command("git", "-C", repoDir, "show-ref", "--verify", "--quiet", ref).Run() == nil
 	})
-	pinned := gitOut(t, repoDir, "rev-parse", ref)
+	pinned := testgit.GitOutput(t, repoDir, "rev-parse", ref)
 
 	// The database holds the hash, the ref is what keeps it alive; they must name the same object.
 	waitForSnapshot(t, "the checkpoint hash on the assistant message", func() bool {
@@ -100,22 +91,22 @@ func TestCheckpointPinsItsSnapshot(t *testing.T) {
 	}
 
 	// A checkpoint must never appear in the user's stash list — that list is theirs.
-	if out := gitOut(t, repoDir, "stash", "list"); out != "" {
+	if out := testgit.GitOutput(t, repoDir, "stash", "list"); out != "" {
 		t.Errorf("a checkpoint must not create a stash entry, got: %q", out)
 	}
 
 	// Restoring the snapshot must land the worktree back on the turn's files.
-	if out := gitOut(t, repoDir, "show", pinned+":new.txt"); out != "created this turn" {
+	if out := testgit.GitOutput(t, repoDir, "show", pinned+":new.txt"); out != "created this turn" {
 		t.Errorf("snapshot does not hold the new file: %q", out)
 	}
-	if out := gitOut(t, repoDir, "show", pinned+":README.md"); out != "# Changed" {
+	if out := testgit.GitOutput(t, repoDir, "show", pinned+":README.md"); out != "# Changed" {
 		t.Errorf("snapshot does not hold the tracked edit: %q", out)
 	}
 
 	// GC cannot take a pinned snapshot. (The unpinned equivalent is shown to be collectable in
 	// backend/git/snapshots_test.go.)
-	gitOut(t, repoDir, "reflog", "expire", "--expire=now", "--all")
-	gitOut(t, repoDir, "gc", "--prune=now", "--quiet")
+	testgit.GitOutput(t, repoDir, "reflog", "expire", "--expire=now", "--all")
+	testgit.GitOutput(t, repoDir, "gc", "--prune=now", "--quiet")
 	if exec.Command("git", "-C", repoDir, "cat-file", "-e", pinned+"^{commit}").Run() != nil {
 		t.Error("a pinned snapshot was garbage-collected")
 	}
@@ -165,13 +156,13 @@ func TestCheckpointCapturesANewBinaryFile(t *testing.T) {
 	waitForSnapshot(t, "the snapshot ref "+ref, func() bool {
 		return exec.Command("git", "-C", repoDir, "show-ref", "--verify", "--quiet", ref).Run() == nil
 	})
-	pinned := gitOut(t, repoDir, "rev-parse", ref)
-	if out := gitOut(t, repoDir, "show", pinned+":artifact.bin"); out != string(blob) {
+	pinned := testgit.GitOutput(t, repoDir, "rev-parse", ref)
+	if out := testgit.GitOutput(t, repoDir, "show", pinned+":artifact.bin"); out != string(blob) {
 		t.Errorf("the snapshot does not hold the new binary file it captured")
 	}
 
 	// The index still ends as it was: an agent's new binary is not silently staged for the commit.
-	if staged := gitOut(t, wtPath, "diff", "--staged", "--name-only"); strings.Contains(staged, "artifact.bin") {
+	if staged := testgit.GitOutput(t, wtPath, "diff", "--staged", "--name-only"); strings.Contains(staged, "artifact.bin") {
 		t.Errorf("the capture left a new binary file staged: %q", staged)
 	}
 }

@@ -496,56 +496,27 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 			// An unreadable child list is not "no children". Starting here could run this
 			// task next to its own subtasks, so the move stands and the auto-start does
 			// not — the user starts it once the read works again.
-			logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("children unreadable — not auto-starting: %v", childErr)
-		} else if len(children) > 0 {
-			// This task stays started-but-pending until all its children are done.
-			h.moveAllDescendantsToInProgress(taskID)
-			startedIDs, startErr := h.executor.StartReadySubtasks(projectID, taskID)
-			if len(startedIDs) > 0 {
-				logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("started %d subtask(s): %v", len(startedIDs), startedIDs)
+			logging.For(logging.Startup).With(logging.TaskID, taskID).Infof("children unreadable — not auto-starting: %v", childErr)
+		} else {
+			out := h.startUnderSchedule(projectID, task, children)
+			switch {
+			case len(out.startedChildren) > 0:
 				started = true
-			} else if startErr != nil {
+			case out.childStartErr != nil:
 				// All subtask starts failed — keep task in_progress (user's
 				// explicit action); record error for visibility.
 				task.ExecutionState = types.ExecStateIdle
-				task.Output = startErr.Error()
-			} else if exec.ChildrenAllDone(children) {
-				// All subtasks done — start this task's own execution.
-				var err error
-				if task.ParentTaskID != "" {
-					err = h.executor.StartSubtask(projectID, taskID, false)
-				} else {
-					err = h.executor.StartTask(projectID, taskID, false)
-				}
-				if err != nil {
-					logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("start failed: %v", err)
-					task.ExecutionState = types.ExecStateIdle
-					task.Status = originalStatus
-					task.Output = err.Error()
-				} else {
-					started = true
-				}
-			}
-			// else: subtasks still finishing (review/failed) — stay started-but-pending
-			// (allowed Pending: waiting on the children).
-		} else if task.ParentTaskID != "" {
-			// Leaf subtask: subtask-aware start (branch from parent, inherit model config)
-			if err := h.executor.StartSubtask(projectID, taskID, false); err != nil {
-				logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("subtask start failed: %v", err)
+				task.Output = out.childStartErr.Error()
+			case out.selfStartErr != nil:
+				logging.For(logging.Startup).With(logging.TaskID, taskID).Warnf("start failed: %v", out.selfStartErr)
 				task.ExecutionState = types.ExecStateIdle
 				task.Status = originalStatus
-				task.Output = err.Error()
-			} else {
-				started = true
-			}
-		} else {
-			if err := h.executor.StartTask(projectID, taskID, false); err != nil {
-				logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("auto-start failed: %v", err)
-				task.ExecutionState = types.ExecStateIdle
-				task.Status = originalStatus
-				task.Output = err.Error()
-			} else {
-				started = true
+				task.Output = out.selfStartErr.Error()
+			default:
+				// Nothing failed: either this row's own turn started, or its children are
+				// still finishing (review/failed) and it rests started-but-pending
+				// (allowed Pending: waiting on the children).
+				started = out.startedSelf
 			}
 		}
 	}
@@ -1238,7 +1209,8 @@ func (h *TaskHandler) HandleInit(w http.ResponseWriter, r *http.Request) {
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
-// HandleStart starts a task; with incomplete subtasks it uses the LLM to pick one and starts that.
+// HandleStart starts a task: the descendants the schedule picks under it run first, and the row
+// starts its own turn once nothing under it is left to run.
 func (h *TaskHandler) HandleStart(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
@@ -1247,61 +1219,40 @@ func (h *TaskHandler) HandleStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if task has children
 	children, err := h.store.GetChildren(taskID)
 	if err != nil {
 		httputil.Fail(w, err, "list subtasks", "task not found")
 		return
 	}
-
-	if len(children) > 0 {
-		// User explicitly started this task: move it to In Progress
-		// (started-but-pending) until its subtasks are done.
-		if task.Status == types.StatusBacklog {
-			task.Status = types.StatusInProgress
-			task.ExecutionState = types.ExecStateIdle
-			task.UpdatedAt = time.Now().UTC()
-			if err := h.store.UpdateTask(task); err != nil {
-				httputil.Fail(w, err, "update task", "task not found")
-				return
-			}
-			h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-		}
-		// Move all incomplete descendants (children, grandchildren, etc.) to in_progress.
-		h.moveAllDescendantsToInProgress(taskID)
-		startedIDs, startErr := h.executor.StartReadySubtasks(projectID, taskID)
-		if len(startedIDs) > 0 {
-			logging.For(logging.Startup).With(logging.TaskID, taskID).Infof("started %d subtask(s): %v", len(startedIDs), startedIDs)
-			h.respondWithStartedTask(w, projectID, startedIDs[len(startedIDs)-1])
+	// User explicitly started this task: it goes to In Progress (started-but-pending) before
+	// anything under it runs, so the board shows the row the click named.
+	if len(children) > 0 && task.Status == types.StatusBacklog {
+		task.Status = types.StatusInProgress
+		task.ExecutionState = types.ExecStateIdle
+		task.UpdatedAt = time.Now().UTC()
+		if err := h.store.UpdateTask(task); err != nil {
+			httputil.Fail(w, err, "update task", "task not found")
 			return
 		}
-		if startErr != nil {
-			httputil.Fail(w, startErr, "start subtask", "subtask not found")
-			return
-		}
-		// No startable subtask: start its own execution only if all children
-		// are done, else stay started-but-pending.
-		if exec.ChildrenAllDone(children) {
-			if err := h.executor.StartTask(projectID, taskID, false); err != nil {
-				httputil.Fail(w, err, "start task", "task not found")
-				return
-			}
-		}
-		task, _ = h.store.GetTask(projectID, taskID)
-		h.refreshTaskPorts(task)
 		h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-		httputil.JSONResponse(w, http.StatusOK, task)
-		return
 	}
 
-	// No subtasks — start normally
-	if err := h.executor.StartTask(projectID, taskID, false); err != nil {
+	out := h.startUnderSchedule(projectID, task, children)
+	if len(out.startedChildren) > 0 {
+		h.respondWithStartedTask(w, projectID, out.startedChildren[len(out.startedChildren)-1])
+		return
+	}
+	if out.childStartErr != nil {
+		httputil.Fail(w, out.childStartErr, "start subtask", "subtask not found")
+		return
+	}
+	if out.selfStartErr != nil {
 		// Already-running arrives as errs.ErrConflict and answers 409 with its own sentence;
 		// a genuine fault answers 500 without echoing its text.
-		httputil.Fail(w, err, "start task", "task not found")
+		httputil.Fail(w, out.selfStartErr, "start task", "task not found")
 		return
 	}
-	logging.For(logging.Startup).With(logging.TaskID, taskID).Infof("started")
+	// Nothing started and nothing failed: the row rests on children that are still finishing.
 	task, _ = h.store.GetTask(projectID, taskID)
 	h.refreshTaskPorts(task)
 	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
@@ -1377,8 +1328,65 @@ func (h *TaskHandler) HandleDismissMemoryAlert(w http.ResponseWriter, r *http.Re
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
-// HandleStartSubtask starts a subtask. If it has children, its ready descendants run instead and it
-// waits started-but-pending until they are done.
+// startOutcome is what startUnderSchedule decided, so each entry point renders its own answer.
+type startOutcome struct {
+	// startedChildren are the descendants that started, deepest last; startedSelf is this row's own
+	// turn running. No fault and neither set means the row rests on children still finishing, which
+	// is a state, not a failure.
+	startedChildren []string
+	startedSelf     bool
+	// A descendant that would not start and this row's own turn that would not start are two
+	// faults, because the routes answer them with different sentences.
+	childStartErr error
+	selfStartErr  error
+}
+
+// startUnderSchedule starts what the schedule picks under a row: the descendants that are ready to
+// run, or the row's own turn once nothing under it is left to run. Starting a row, retrying it and
+// dragging it to In Progress all ask for this one thing, so the choice has one home; what each of
+// them answers, and what a fault costs the row, stays with the entry point. The caller reads the
+// child list, because it decides what an unreadable one means before anything starts.
+//
+// A row with a parent starts through StartSubtask, the starter that takes the parent's model config
+// with it: a child written by plan-mode decomposition arrives without one, so which route the click
+// arrived through would decide whether the row can run at all. backend/api/task_test.go holds that.
+func (h *TaskHandler) startUnderSchedule(projectID string, task *types.Task, children []types.Task) startOutcome {
+	var out startOutcome
+	if len(children) > 0 {
+		// The work is in these children, so they go first and this row waits for them.
+		h.moveAllDescendantsToInProgress(task.ID)
+		started, err := h.executor.StartReadySubtasks(projectID, task.ID)
+		if len(started) > 0 {
+			logging.For(logging.Startup).With(logging.TaskID, task.ID).Infof("started %d subtask(s): %v", len(started), started)
+			out.startedChildren = started
+			return out
+		}
+		if err != nil {
+			out.childStartErr = err
+			return out
+		}
+		if !exec.ChildrenAllDone(children) {
+			return out
+		}
+	}
+
+	var err error
+	if task.ParentTaskID != "" {
+		err = h.executor.StartSubtask(projectID, task.ID, false)
+	} else {
+		err = h.executor.StartTask(projectID, task.ID, false)
+	}
+	if err != nil {
+		out.selfStartErr = err
+		return out
+	}
+	out.startedSelf = true
+	logging.For(logging.Startup).With(logging.TaskID, task.ID).Infof("started")
+	return out
+}
+
+// HandleStartSubtask starts a subtask: the descendants the schedule picks under it run first, and
+// the row starts its own turn once nothing under it is left to run.
 func (h *TaskHandler) HandleStartSubtask(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
@@ -1402,33 +1410,20 @@ func (h *TaskHandler) HandleStartSubtask(w http.ResponseWriter, r *http.Request)
 		httputil.Fail(w, err, "list subtasks", "task not found")
 		return
 	}
-	if len(children) > 0 {
-		h.moveAllDescendantsToInProgress(taskID)
-		startedIDs, startErr := h.executor.StartReadySubtasks(projectID, taskID)
-		if len(startedIDs) > 0 {
-			logging.For(logging.Startup).With(logging.TaskID, taskID).Infof("has subtasks, started %d: %v", len(startedIDs), startedIDs)
-			h.respondWithStartedTask(w, projectID, startedIDs[len(startedIDs)-1])
-			return
-		}
-		if startErr != nil {
-			httputil.Fail(w, startErr, "start subtask", "subtask not found")
-			return
-		}
-		if !exec.ChildrenAllDone(children) {
-			// Subtasks still finishing (review/failed) — stay started-but-pending.
-			task, _ = h.store.GetTask(projectID, taskID)
-			h.refreshTaskPorts(task)
-			h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-			httputil.JSONResponse(w, http.StatusOK, task)
-			return
-		}
-		// All children done — fall through and start the subtask's own execution.
-	}
-
-	if err := h.executor.StartTask(projectID, taskID, false); err != nil {
-		httputil.Fail(w, err, "start subtask", "task not found")
+	out := h.startUnderSchedule(projectID, task, children)
+	if len(out.startedChildren) > 0 {
+		h.respondWithStartedTask(w, projectID, out.startedChildren[len(out.startedChildren)-1])
 		return
 	}
+	if out.childStartErr != nil {
+		httputil.Fail(w, out.childStartErr, "start subtask", "task not found")
+		return
+	}
+	if out.selfStartErr != nil {
+		httputil.Fail(w, out.selfStartErr, "start subtask", "task not found")
+		return
+	}
+	// Nothing started and nothing failed: the row rests on children that are still finishing.
 	task, _ = h.store.GetTask(projectID, taskID)
 	h.refreshTaskPorts(task)
 	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)

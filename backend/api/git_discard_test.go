@@ -47,15 +47,6 @@ func postDiscard(t *testing.T, mux *http.ServeMux, paths ...string) *httptest.Re
 	return rec
 }
 
-func readFileOrFail(t *testing.T, repoPath, name string) string {
-	t.Helper()
-	b, err := os.ReadFile(filepath.Join(repoPath, name))
-	if err != nil {
-		t.Fatalf("read %s: %v", name, err)
-	}
-	return string(b)
-}
-
 func fileExists(repoPath, name string) bool {
 	_, err := os.Lstat(filepath.Join(repoPath, name))
 	return err == nil
@@ -69,7 +60,7 @@ func TestHandleProjectDiscardPaths_RevertsModifiedFile(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if got := readFileOrFail(t, repoPath, "tracked.txt"); got != "committed\n" {
+	if got := testgit.ReadFile(t, repoPath, "tracked.txt"); got != "committed\n" {
 		t.Errorf("worktree kept the edit: %q", got)
 	}
 	if out := testgit.GitOutput(t, repoPath, "status", "--porcelain"); out != "" {
@@ -88,7 +79,7 @@ func TestHandleProjectDiscardPaths_RevertsStagedAndUnstagedEdit(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if got := readFileOrFail(t, repoPath, "tracked.txt"); got != "committed\n" {
+	if got := testgit.ReadFile(t, repoPath, "tracked.txt"); got != "committed\n" {
 		t.Errorf("worktree kept the edit: %q", got)
 	}
 	if out := testgit.GitOutput(t, repoPath, "status", "--porcelain"); out != "" {
@@ -137,7 +128,7 @@ func TestHandleProjectDiscardPaths_DeletesUntrackedFile(t *testing.T) {
 		t.Error("the untracked file is still on disk")
 	}
 	// A discard that reset the whole tree would show up here.
-	if got := readFileOrFail(t, repoPath, "tracked.txt"); got != "committed\n" {
+	if got := testgit.ReadFile(t, repoPath, "tracked.txt"); got != "committed\n" {
 		t.Errorf("an untouched file changed: %q", got)
 	}
 }
@@ -251,7 +242,7 @@ func TestHandleProjectDiscardPaths_CleanFileIsANoOp(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if got := readFileOrFail(t, repoPath, "tracked.txt"); got != "committed\n" {
+	if got := testgit.ReadFile(t, repoPath, "tracked.txt"); got != "committed\n" {
 		t.Errorf("an unmodified file changed: %q", got)
 	}
 }
@@ -276,7 +267,7 @@ func TestHandleProjectDiscardPaths_RevertsAndDeletesTogether(t *testing.T) {
 	if len(answer.Failed) != 0 {
 		t.Errorf("failed = %v", answer.Failed)
 	}
-	if got := readFileOrFail(t, repoPath, "tracked.txt"); got != "committed\n" {
+	if got := testgit.ReadFile(t, repoPath, "tracked.txt"); got != "committed\n" {
 		t.Errorf("worktree kept the edit: %q", got)
 	}
 	if fileExists(repoPath, "scratch.txt") {
@@ -297,7 +288,7 @@ func TestHandleProjectDiscardPaths_RejectsTheBatchWhenOnePathEscapes(t *testing.
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if got := readFileOrFail(t, repoPath, "tracked.txt"); got != "edited on disk\n" {
+	if got := testgit.ReadFile(t, repoPath, "tracked.txt"); got != "edited on disk\n" {
 		t.Errorf("a refused batch still wrote: %q", got)
 	}
 }

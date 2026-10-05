@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"mike/backend/git"
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
 
@@ -1046,9 +1047,9 @@ func TestCommitAndDoneIncludesManualEditsAfterStaging(t *testing.T) {
 
 	// Create a branch and worktree for the task
 	branchName := "task/" + taskID
-	mustRunGit(t, tmpDir, "branch", branchName)
+	testgit.Git(t, tmpDir, "branch", branchName)
 	wtPath := taskWorktreePath(t, s, projID, taskID)
-	mustRunGit(t, tmpDir, "worktree", "add", wtPath, branchName)
+	testgit.Git(t, tmpDir, "worktree", "add", wtPath, branchName)
 
 	taskDB, _ := s.store.GetTask(projID, taskID)
 	taskDB.Branch = branchName
@@ -1059,19 +1060,19 @@ func TestCommitAndDoneIncludesManualEditsAfterStaging(t *testing.T) {
 
 	// Commit a base version of the file on the task branch
 	os.WriteFile(filepath.Join(wtPath, "feature.txt"), []byte("line1\n"), 0o644)
-	mustRunGit(t, wtPath, "add", "feature.txt")
-	mustRunGit(t, wtPath, "commit", "-m", "base version")
+	testgit.Git(t, wtPath, "add", "feature.txt")
+	testgit.Git(t, wtPath, "commit", "-m", "base version")
 
 	// "System staged" line2; user then adds line3 (unstaged) after staging.
 	os.WriteFile(filepath.Join(wtPath, "feature.txt"), []byte("line1\nline2\n"), 0o644)
-	mustRunGit(t, wtPath, "add", "feature.txt")
+	testgit.Git(t, wtPath, "add", "feature.txt")
 	os.WriteFile(filepath.Join(wtPath, "feature.txt"), []byte("line1\nline2\nline3\n"), 0o644)
 
 	// Unstaged-only file — must stay out of the commit.
 	os.WriteFile(filepath.Join(wtPath, "scratch.txt"), []byte("scratch\n"), 0o644)
 
 	// Verify the staged-then-edited state before commit.
-	status := mustRunGitOutput(t, wtPath, "status", "--porcelain")
+	status := testgit.GitOutput(t, wtPath, "status", "--porcelain")
 	if !strings.Contains(status, "MM feature.txt") {
 		t.Fatalf("expected feature.txt in MM state, got:\n%s", status)
 	}
@@ -1093,13 +1094,13 @@ func TestCommitAndDoneIncludesManualEditsAfterStaging(t *testing.T) {
 	}
 
 	// The task branch commit must include the manual edit (line3).
-	commitContent := mustRunGitOutput(t, tmpDir, "show", branchName+":feature.txt")
+	commitContent := testgit.GitOutput(t, tmpDir, "show", branchName+":feature.txt")
 	if !strings.Contains(commitContent, "line3") {
 		t.Fatalf("expected committed feature.txt to include manual edit line3, got:\n%s", commitContent)
 	}
 
 	// scratch.txt (only unstaged) must NOT be in the commit.
-	branchFiles := mustRunGitOutput(t, tmpDir, "ls-tree", "-r", "--name-only", branchName)
+	branchFiles := testgit.GitOutput(t, tmpDir, "ls-tree", "-r", "--name-only", branchName)
 	if strings.Contains(branchFiles, "scratch.txt") {
 		t.Fatalf("expected scratch.txt to NOT be committed, got:\n%s", branchFiles)
 	}
@@ -1568,18 +1569,18 @@ func TestTaskDeleteCleansStashes(t *testing.T) {
 	// Create kanban-labeled stash entries (simulating stale stashes from crashes)
 	// Need working tree changes for git stash push to work
 	os.WriteFile(filepath.Join(tmpDir, "change.txt"), []byte("a\n"), 0o644)
-	mustRunGit(t, tmpDir, "add", "change.txt")
-	mustRunGit(t, tmpDir, "stash", "push", "-u", "-m", git.StashMessageForSwitch(taskID))
+	testgit.Git(t, tmpDir, "add", "change.txt")
+	testgit.Git(t, tmpDir, "stash", "push", "-u", "-m", git.StashMessageForSwitch(taskID))
 
 	os.WriteFile(filepath.Join(tmpDir, "change.txt"), []byte("b\n"), 0o644)
-	mustRunGit(t, tmpDir, "add", "change.txt")
-	mustRunGit(t, tmpDir, "stash", "push", "-u", "-m", git.StashMessageForFork(taskID))
+	testgit.Git(t, tmpDir, "add", "change.txt")
+	testgit.Git(t, tmpDir, "stash", "push", "-u", "-m", git.StashMessageForFork(taskID))
 
 	// Also create a stash for a different task — should NOT be removed
 	otherTaskID := "other-task-xyz"
 	os.WriteFile(filepath.Join(tmpDir, "change.txt"), []byte("c\n"), 0o644)
-	mustRunGit(t, tmpDir, "add", "change.txt")
-	mustRunGit(t, tmpDir, "stash", "push", "-u", "-m", git.StashMessageForSwitch(otherTaskID))
+	testgit.Git(t, tmpDir, "add", "change.txt")
+	testgit.Git(t, tmpDir, "stash", "push", "-u", "-m", git.StashMessageForSwitch(otherTaskID))
 
 	// Verify stashes exist
 	stashList := gitListStashes(t, tmpDir)
@@ -1645,8 +1646,8 @@ func TestTaskDeleteCleansStashes_NoBranch(t *testing.T) {
 
 	// Create kanban-labeled stash entries (simulating stale stashes)
 	os.WriteFile(filepath.Join(tmpDir, "change.txt"), []byte("a\n"), 0o644)
-	mustRunGit(t, tmpDir, "add", "change.txt")
-	mustRunGit(t, tmpDir, "stash", "push", "-u", "-m", git.StashMessageForSwitch(taskID))
+	testgit.Git(t, tmpDir, "add", "change.txt")
+	testgit.Git(t, tmpDir, "stash", "push", "-u", "-m", git.StashMessageForSwitch(taskID))
 
 	// Verify stash exists
 	stashList := gitListStashes(t, tmpDir)
@@ -1701,7 +1702,7 @@ func TestTaskDeleteCleansCheckpointStashes(t *testing.T) {
 
 	// Create a branch and update the task (simulating task start)
 	branchName := "task/" + taskID
-	mustRunGit(t, tmpDir, "branch", branchName)
+	testgit.Git(t, tmpDir, "branch", branchName)
 	task, _ := s.store.GetTask(projID, taskID)
 	task.Branch = branchName
 	s.store.UpdateTask(task)
@@ -1711,14 +1712,14 @@ func TestTaskDeleteCleansCheckpointStashes(t *testing.T) {
 	// helper on purpose: this data exists in real repos and the sweep must keep matching it no matter
 	// what the current code calls its labels.
 	os.WriteFile(filepath.Join(tmpDir, "change.txt"), []byte("checkpoint1\n"), 0o644)
-	mustRunGit(t, tmpDir, "add", "change.txt")
-	hash1 := mustRunGitOutput(t, tmpDir, "stash", "create")
-	mustRunGit(t, tmpDir, "stash", "store", "-m", "On "+branchName+": mike-checkpoint-"+taskID, hash1)
+	testgit.Git(t, tmpDir, "add", "change.txt")
+	hash1 := testgit.GitOutput(t, tmpDir, "stash", "create")
+	testgit.Git(t, tmpDir, "stash", "store", "-m", "On "+branchName+": mike-checkpoint-"+taskID, hash1)
 
 	os.WriteFile(filepath.Join(tmpDir, "change.txt"), []byte("checkpoint2\n"), 0o644)
-	mustRunGit(t, tmpDir, "add", "change.txt")
-	hash2 := mustRunGitOutput(t, tmpDir, "stash", "create")
-	mustRunGit(t, tmpDir, "stash", "store", "-m", "On "+branchName+": mike-checkpoint-"+taskID, hash2)
+	testgit.Git(t, tmpDir, "add", "change.txt")
+	hash2 := testgit.GitOutput(t, tmpDir, "stash", "create")
+	testgit.Git(t, tmpDir, "stash", "store", "-m", "On "+branchName+": mike-checkpoint-"+taskID, hash2)
 
 	// Verify stashes exist
 	stashList := gitListStashes(t, tmpDir)
@@ -1815,24 +1816,24 @@ func TestCommitAndDoneMergeConflictTriggersResolution(t *testing.T) {
 
 	// Create a branch for the task
 	branchName := "task/" + taskID
-	mustRunGit(t, tmpDir, "branch", branchName)
+	testgit.Git(t, tmpDir, "branch", branchName)
 
 	// Create a file on the task branch
-	mustRunGit(t, tmpDir, "checkout", branchName)
+	testgit.Git(t, tmpDir, "checkout", branchName)
 	os.WriteFile(filepath.Join(tmpDir, "shared.txt"), []byte("task version\n"), 0o644)
-	mustRunGit(t, tmpDir, "add", "shared.txt")
-	mustRunGit(t, tmpDir, "commit", "-m", "task edit shared")
-	mustRunGit(t, tmpDir, "checkout", "master")
+	testgit.Git(t, tmpDir, "add", "shared.txt")
+	testgit.Git(t, tmpDir, "commit", "-m", "task edit shared")
+	testgit.Git(t, tmpDir, "checkout", "master")
 
 	// Create a conflicting change on master
 	os.WriteFile(filepath.Join(tmpDir, "shared.txt"), []byte("master version\n"), 0o644)
-	mustRunGit(t, tmpDir, "add", "shared.txt")
-	mustRunGit(t, tmpDir, "commit", "-m", "master edit shared")
+	testgit.Git(t, tmpDir, "add", "shared.txt")
+	testgit.Git(t, tmpDir, "commit", "-m", "master edit shared")
 
 	// Create a worktree for the task at the path the worktree manager expects.
 	// The task worktree path is read back from the server's own configuration.
 	wtPath := taskWorktreePath(t, s, projID, taskID)
-	mustRunGit(t, tmpDir, "worktree", "add", wtPath, branchName)
+	testgit.Git(t, tmpDir, "worktree", "add", wtPath, branchName)
 
 	// Verify worktree exists at the expected path
 	if _, err := os.Stat(wtPath); err != nil {
@@ -1917,23 +1918,23 @@ func TestCommitAndDoneMergeConflictPreservesAutoMerge(t *testing.T) {
 
 	// Create a branch for the task
 	branchName := "task/" + taskID
-	mustRunGit(t, tmpDir, "branch", branchName)
+	testgit.Git(t, tmpDir, "branch", branchName)
 
 	// Create a file on the task branch
-	mustRunGit(t, tmpDir, "checkout", branchName)
+	testgit.Git(t, tmpDir, "checkout", branchName)
 	os.WriteFile(filepath.Join(tmpDir, "shared.txt"), []byte("task version\n"), 0o644)
-	mustRunGit(t, tmpDir, "add", "shared.txt")
-	mustRunGit(t, tmpDir, "commit", "-m", "task edit shared")
-	mustRunGit(t, tmpDir, "checkout", "master")
+	testgit.Git(t, tmpDir, "add", "shared.txt")
+	testgit.Git(t, tmpDir, "commit", "-m", "task edit shared")
+	testgit.Git(t, tmpDir, "checkout", "master")
 
 	// Create a conflicting change on master
 	os.WriteFile(filepath.Join(tmpDir, "shared.txt"), []byte("master version\n"), 0o644)
-	mustRunGit(t, tmpDir, "add", "shared.txt")
-	mustRunGit(t, tmpDir, "commit", "-m", "master edit shared")
+	testgit.Git(t, tmpDir, "add", "shared.txt")
+	testgit.Git(t, tmpDir, "commit", "-m", "master edit shared")
 
 	// Create a worktree for the task
 	wtPath := taskWorktreePath(t, s, projID, taskID)
-	mustRunGit(t, tmpDir, "worktree", "add", wtPath, branchName)
+	testgit.Git(t, tmpDir, "worktree", "add", wtPath, branchName)
 
 	// Update task with branch info
 	taskDB, _ := s.store.GetTask(projID, taskID)
@@ -2004,23 +2005,23 @@ func TestCommitAndDoneMergeConflictSystemMessage(t *testing.T) {
 
 	// Create a branch for the task
 	branchName := "task/" + taskID
-	mustRunGit(t, tmpDir, "branch", branchName)
+	testgit.Git(t, tmpDir, "branch", branchName)
 
 	// Create a file on the task branch
-	mustRunGit(t, tmpDir, "checkout", branchName)
+	testgit.Git(t, tmpDir, "checkout", branchName)
 	os.WriteFile(filepath.Join(tmpDir, "shared.txt"), []byte("task version\n"), 0o644)
-	mustRunGit(t, tmpDir, "add", "shared.txt")
-	mustRunGit(t, tmpDir, "commit", "-m", "task edit shared")
-	mustRunGit(t, tmpDir, "checkout", "master")
+	testgit.Git(t, tmpDir, "add", "shared.txt")
+	testgit.Git(t, tmpDir, "commit", "-m", "task edit shared")
+	testgit.Git(t, tmpDir, "checkout", "master")
 
 	// Create a conflicting change on master
 	os.WriteFile(filepath.Join(tmpDir, "shared.txt"), []byte("master version\n"), 0o644)
-	mustRunGit(t, tmpDir, "add", "shared.txt")
-	mustRunGit(t, tmpDir, "commit", "-m", "master edit shared")
+	testgit.Git(t, tmpDir, "add", "shared.txt")
+	testgit.Git(t, tmpDir, "commit", "-m", "master edit shared")
 
 	// Create a worktree for the task
 	wtPath := taskWorktreePath(t, s, projID, taskID)
-	mustRunGit(t, tmpDir, "worktree", "add", wtPath, branchName)
+	testgit.Git(t, tmpDir, "worktree", "add", wtPath, branchName)
 
 	// Update task with branch info
 	taskDB, _ := s.store.GetTask(projID, taskID)
