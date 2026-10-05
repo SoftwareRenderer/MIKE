@@ -134,10 +134,10 @@
 
     <p class="settings-note">{t('settings.tokens.help')}</p>
 
-    <div class="tokens-create">
+    <div class="settings-create">
         <input
             type="text"
-            class="tokens-label"
+            class="settings-create-input"
             bind:value={label}
             maxlength={80}
             placeholder={t('settings.tokens.labelPlaceholder')}
@@ -204,23 +204,6 @@
     .tokens-section {
         gap: 10px;
     }
-    .tokens-create {
-        display: flex;
-        gap: 8px;
-        align-items: center;
-    }
-    .tokens-label {
-        flex: 1;
-        min-width: 0;
-        padding: 6px 10px;
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-sm);
-        background: var(--color-surface-2);
-        color: var(--color-text-primary);
-        font-size: var(--text-sm);
-        font-family: inherit;
-    }
-
     /* The secret is selectable but truncated by `.settings-row-value`: a wrapped token pasted from a
        line break is a broken credential. */
     .tokens-secret {

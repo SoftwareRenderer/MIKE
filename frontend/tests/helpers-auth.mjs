@@ -128,9 +128,12 @@ async function waitForApp(page) {
  *
  * The code rides in the URL fragment because that is how the server writes its pairing link, and the
  * form is expected to take it from there and strip it out of the address bar again.
+ *
+ * `link` is the minted link rather than the code inside it, for a spec that checks what the link carries.
+ * `name` is what gets typed into the device-name field; omitted, the form keeps what it opened with.
  */
-export async function pairBrowser(page, base, code) {
-    await page.goto(`${base}/#pair=${code}`, { waitUntil: 'commit' });
+export async function pairBrowser(page, base, code, { link = '', name } = {}) {
+    await page.goto(link || `${base}/#pair=${code}`, { waitUntil: 'commit' });
     await page.waitForSelector('#login-code', { state: 'visible', timeout: 30000 });
     const typed = await page.inputValue('#login-code');
     // Compare in one shape: the log's code carries the dash the form also accepts.
@@ -141,6 +144,7 @@ export async function pairBrowser(page, base, code) {
     if (page.url().includes('#pair=')) {
         throw new Error('the pairing link left the code in the address bar; it belongs to the form alone');
     }
+    if (name !== undefined) await page.fill('#login-device-name', name);
     await clickPrimary(page);
     await waitForApp(page);
 }
@@ -200,13 +204,14 @@ export function pairingCodeFromEnv() {
  * its slot as soon as the ceremony that spent it finishes, which is about a second, so the wait is bounded
  * and short; the cap itself is a product rule and stays unraised.
  */
-export async function mintPairingCode(page, base, { timeoutMs = 20000 } = {}) {
+export async function mintPairingCode(page, base, { timeoutMs = 20000, name = '' } = {}) {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
         const session = await (await page.request.get(`${base}/api/auth/session`)).json();
         if (!session?.authenticated) throw new Error(`no session at ${base}, so no pairing code can be minted`);
         const res = await page.request.post(`${base}/api/auth/pairing`, {
             headers: { 'X-CSRF-Token': session.csrf_token || '' },
+            data: { name },
         });
         const answer = await res.json();
         if (answer?.code) return answer;

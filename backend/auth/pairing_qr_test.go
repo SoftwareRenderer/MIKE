@@ -18,11 +18,23 @@ func TestPairingQRRefusesContentBeyondItsLimit(t *testing.T) {
 // The code rides in the fragment because a query string reaches a proxy's access log and a Referer header.
 func TestPairingURLCarriesTheCodeInTheFragment(t *testing.T) {
 	t.Parallel()
-	url := PairingURL("https://mike.lan:3000", "ABCD2345")
+	url := PairingURL("https://mike.lan:3000", "ABCD2345", "")
 	if want := "https://mike.lan:3000/#pair=ABCD2345"; url != want {
 		t.Fatalf("PairingURL = %q, want %q", url, want)
 	}
 	if strings.Contains(strings.SplitN(url, "#", 2)[0], "ABCD") {
 		t.Fatalf("the code reached the part of the URL a server logs: %s", url)
+	}
+}
+
+// A name given while minting rides the same fragment, escaped, and never moves the code out of it.
+func TestPairingURLCarriesTheLabelBesideTheCode(t *testing.T) {
+	t.Parallel()
+	url := PairingURL("https://mike.lan:3000", "ABCD2345", "Kitchen #2 & table")
+	if want := "https://mike.lan:3000/#pair=ABCD2345&name=Kitchen+%232+%26+table"; url != want {
+		t.Fatalf("PairingURL = %q, want %q", url, want)
+	}
+	if strings.Contains(strings.SplitN(url, "#", 2)[0], "ABCD") {
+		t.Fatalf("the named link leaked the code: %s", url)
 	}
 }

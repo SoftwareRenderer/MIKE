@@ -12,29 +12,32 @@
     import { CA_DOWNLOAD, isPasskeyCancelled, registerPasskeyWithCode, signInWithPasskey } from '$lib/api';
     import { t } from '$lib/i18n';
     import {
+        DEVICE_NAME_LIMIT,
         initialState,
         next,
         normalizePairingCode,
-        pairingCodeFromHash,
         pairingCodeInput,
         pairingCodeReady,
+        pairingLinkFromHash,
     } from '$lib/utils/login-flow';
     import type { LoginEvent, LoginState, LoginTone } from '$lib/utils/login-flow';
     import { passkeySupport } from '$lib/utils/webauthn';
     import BaseModal from './BaseModal.svelte';
 
     /** `caDownload` is the server's own answer that it has a certificate authority to hand out, so the
-     *  notice below never links at a file that would not be served. */
-    let { hasPasskey = null, caDownload = false, onClose }: {
+     *  notice below never links at a file that would not be served. `deviceName` is its reading of this
+     *  browser, which the device-name field opens with. */
+    let { hasPasskey = null, caDownload = false, deviceName = '', onClose }: {
         hasPasskey?: boolean | null;
         caDownload?: boolean;
+        deviceName?: string;
         onClose: () => void | Promise<void>;
     } = $props();
 
     // svelte-ignore state_referenced_locally — the body this form opens on is decided once, when it is
     // created. The boot answer that feeds it is settled before the gate renders, and every later change
     // to it is a different screen.
-    let form = $state<LoginState>(initialState(hasPasskey, passkeySupport()));
+    let form = $state<LoginState>(initialState(hasPasskey, passkeySupport(), deviceName));
     let codeInput: HTMLInputElement | null = $state(null);
 
     /** A ceremony runs, so nothing else is clickable. */
@@ -73,7 +76,7 @@
         if (!codeAccepted) return;
         send({ type: 'start' });
         try {
-            await registerPasskeyWithCode(normalizePairingCode(form.code));
+            await registerPasskeyWithCode(normalizePairingCode(form.code), form.name.trim());
             await onClose();
         } catch (e) {
             report(e);
@@ -83,11 +86,12 @@
     onMount(() => {
         // A pairing link opens the code field with the code already in it. The link is the only way a
         // second device gets a code it can type without someone reading it out, so this runs before
-        // anything is asked of the person.
-        const fromLink = pairingCodeFromHash(window.location.hash);
-        if (fromLink) {
+        // anything is asked of the person. A name beside the code outranks the server's guess.
+        const fromLink = pairingLinkFromHash(window.location.hash);
+        if (fromLink.code) {
             send({ type: 'pair' });
-            send({ type: 'code', value: fromLink });
+            send({ type: 'code', value: fromLink.code });
+            if (fromLink.name) send({ type: 'name', value: fromLink.name });
             // The code is a credential until the ceremony spends it. Out of the address bar goes the
             // copy a bookmark, a screenshot or a later reload would keep showing.
             window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search);
@@ -175,6 +179,21 @@
                 send({ type: 'code', value: edit.value });
             }}
         />
+        <input
+            id="login-device-name"
+            class="login-device-name"
+            type="text"
+            value={form.name}
+            maxlength={DEVICE_NAME_LIMIT}
+            spellcheck="false"
+            autocomplete="off"
+            placeholder={t('app.login.namePlaceholder')}
+            aria-label={t('app.login.nameAria')}
+            disabled={busy}
+            onkeydown={(e) => { if (e.key === 'Enter') void createPasskey(); }}
+            oninput={(e) => send({ type: 'name', value: e.currentTarget.value })}
+        />
+        <p class="login-hint">{t('app.login.nameHelp')}</p>
     {:else}
         <p class="login-copy">{t('app.login.signInHelp')}</p>
         {#if canPair}
@@ -238,13 +257,31 @@
         color: var(--color-text-secondary);
     }
 
-    input.login-code {
+    /* Both fields of the pairing body share one chrome; what makes the code a code comes after. */
+    input.login-code,
+    input.login-device-name {
         width: 100%;
         padding: 10px 14px;
         border: 1px solid var(--color-border);
         border-radius: var(--radius-md);
         background: var(--color-surface-2);
         color: var(--color-text-primary);
+        box-sizing: border-box;
+        outline: none;
+        transition: border-color var(--dur-base);
+    }
+
+    input.login-code:focus,
+    input.login-device-name:focus {
+        border-color: var(--color-accent);
+    }
+
+    input.login-code::placeholder,
+    input.login-device-name::placeholder {
+        color: var(--color-text-tertiary);
+    }
+
+    input.login-code {
         /* The code is two groups of four: proportional glyphs make a 2 look like a 7 and the person
            retypes a code they read off their own screen. */
         font-family: var(--font-mono, 'SF Mono', 'Cascadia Code', 'Fira Code', monospace);
@@ -254,17 +291,9 @@
            slides the characters before it: this is a field someone types into. */
         text-align: left;
         text-transform: uppercase;
-        outline: none;
-        transition: border-color var(--dur-base);
-        box-sizing: border-box;
-    }
-
-    input.login-code:focus {
-        border-color: var(--color-accent);
     }
 
     input.login-code::placeholder {
-        color: var(--color-text-tertiary);
         letter-spacing: 0.08em;
     }
 

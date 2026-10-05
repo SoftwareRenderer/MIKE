@@ -6,13 +6,14 @@
      *
      * Mutates immediately, so it sits outside the modal's Save/Cancel flow like the two sections under it,
      * and it fetches when the About tab mounts. Two things are only ever held here: the code, which the
-     * server keeps in memory until it is spent, and the pairing URL, whose fragment is that same code —
+     * server keeps in memory until it is spent, and the pairing URL, whose fragment holds that same code —
      * which is why the URL is copyable and never fetched from here.
      */
     import type { PairingCode, PasskeyInfo } from '$lib/types';
     import { listPasskeys, mintPairingCode, renamePasskey, revokePairingCodes, revokePasskey } from '$lib/api';
     import { dialogStore } from '$lib/stores';
     import { formatDateTime, formatElapsed, formatRelativeTime } from '$lib/utils/format-time';
+    import { DEVICE_NAME_LIMIT } from '$lib/utils/login-flow';
     import { t } from '$lib/i18n';
 
     let passkeys = $state<PasskeyInfo[]>([]);
@@ -28,6 +29,9 @@
     /** The outstanding code, and the instant the countdown counts against. */
     let pairing = $state<PairingCode | null>(null);
     let minting = $state(false);
+    /** What to call the device being paired; it travels in the pairing link, so a code typed by hand
+     *  arrives unnamed. */
+    let mintName = $state('');
     let revokingCodes = $state(false);
     let copied = $state(false);
     let now = $state(Date.now());
@@ -125,7 +129,7 @@
         minting = true;
         error = '';
         try {
-            pairing = await mintPairingCode();
+            pairing = await mintPairingCode(mintName.trim());
             copied = false;
             now = Date.now();
         } catch (e: any) {
@@ -205,17 +209,31 @@
                 disabled={revokingCodes || !pairing}
                 title={t('settings.passkeys.revokeCodesHint')}
             >{revokingCodes ? t('settings.passkeys.revokingCodes') : t('settings.passkeys.revokeCodes')}</button>
-            <button
-                type="button"
-                class="settings-btn-small"
-                onclick={handleMint}
-                disabled={loading || minting || revokingCodes}
-                title={t('settings.passkeys.pairHint')}
-            >{minting ? t('settings.passkeys.minting') : t('settings.passkeys.pair')}</button>
         </div>
     </div>
 
     <p class="settings-note">{t('settings.passkeys.help')}</p>
+
+    <div class="settings-create">
+        <input
+            type="text"
+            class="settings-create-input"
+            bind:value={mintName}
+            maxlength={DEVICE_NAME_LIMIT}
+            placeholder={t('settings.passkeys.mintNamePlaceholder')}
+            aria-label={t('settings.passkeys.mintNameAria')}
+            disabled={minting || revokingCodes}
+            onkeydown={(e) => { if (e.key === 'Enter') void handleMint(); }}
+        />
+        <button
+            type="button"
+            class="btn btn-primary"
+            onclick={handleMint}
+            disabled={loading || minting || revokingCodes}
+            title={t('settings.passkeys.pairHint')}
+        >{minting ? t('settings.passkeys.minting') : t('settings.passkeys.pair')}</button>
+    </div>
+    <p class="settings-note">{t('settings.passkeys.mintNameHelp')}</p>
 
     {#if pairing}
         <div class="settings-revealed passkeys-pairing" class:passkeys-pairing-expired={expired} role="status">

@@ -432,6 +432,54 @@ func TestPairingMintAndRevoke(t *testing.T) {
 	}
 }
 
+// TestPairingMintNamesTheDeviceBeingPaired: the name typed while minting reaches the other device through
+// the link and nothing else.
+func TestPairingMintNamesTheDeviceBeingPaired(t *testing.T) {
+	s := testServer(t)
+	cookie, csrf := loginTestCSRF(t, s)
+
+	mint := func(body any) map[string]any {
+		t.Helper()
+		rr := testResponse(t, s, withAuthCSRF(testRequest(http.MethodPost, "/api/auth/pairing", body), cookie, csrf))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("POST /api/auth/pairing with %v: %d %s", body, rr.Code, rr.Body.String())
+		}
+		return mustJSON[map[string]any](t, rr.Body)
+	}
+
+	named := mint(map[string]string{"name": "  Kitchen   tablet "})
+	link, _ := named["url"].(string)
+	code := strings.ReplaceAll(named["code"].(string), "-", "")
+	if !strings.Contains(link, "/#pair="+code) {
+		t.Errorf("the named link lost the code from its fragment: %q", link)
+	}
+	if want := "&name=Kitchen+tablet"; !strings.HasSuffix(link, want) {
+		t.Errorf("named link = %q; want it to end in %q (collapsed, escaped)", link, want)
+	}
+
+	// A mint with no body is a mint for no name.
+	if plain, _ := mint(nil)["url"].(string); strings.Contains(plain, "name=") {
+		t.Errorf("a name-less mint put a name in its link: %q", plain)
+	}
+
+	// The longest name the rule accepts is also the worst case for the picture: 64 runes that escape to
+	// nine bytes each.
+	wide := mint(map[string]string{"name": strings.Repeat("\u76d8", maxPasskeyNameLen)})
+	if qr, _ := wide["qr_png"].(string); !strings.HasPrefix(qr, "data:image/png;base64,") {
+		t.Errorf("qr_png = %.24q; want a picture for the longest name the rule accepts", qr)
+	}
+
+	refused := testResponse(t, s, withAuthCSRF(testRequest(http.MethodPost, "/api/auth/pairing",
+		map[string]string{"name": strings.Repeat("n", maxPasskeyNameLen+1)}), cookie, csrf))
+	if refused.Code != http.StatusBadRequest || !strings.Contains(refused.Body.String(), "name") {
+		t.Errorf("an over-long name = %d %s; want 400 naming that field", refused.Code, refused.Body.String())
+	}
+	// Three mints minted a code; the refused one minted none.
+	if live := s.pairing.Live(); live != 3 {
+		t.Errorf("live codes = %d; want the refused mint to have spent nothing", live)
+	}
+}
+
 // TestPairingMintRefusesHoardOfCodes: the cap is what the 409 is for, and the refusal says what to do.
 func TestPairingMintRefusesHoardOfCodes(t *testing.T) {
 	s := testServer(t)

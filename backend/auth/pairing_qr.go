@@ -3,6 +3,7 @@ package auth
 import (
 	"encoding/base64"
 	"fmt"
+	"net/url"
 
 	qrcode "github.com/skip2/go-qrcode"
 )
@@ -10,8 +11,16 @@ import (
 // PairingURL is the link a pairing code is presented as. The code rides in the fragment rather than the
 // query: a query string reaches a proxy's access log and a Referer header, and this code is a credential
 // until the ceremony spends it.
-func PairingURL(origin, code string) string {
-	return origin + "/#pair=" + code
+//
+// `label` is the name the minting device gave the device being paired. It rides the same fragment, and an
+// empty one adds nothing.
+func PairingURL(origin, code, label string) string {
+	if label == "" {
+		return origin + "/#pair=" + code
+	}
+	// QueryEscape is the fragment's own grammar — `+` for a space, `&`/`=`/`#` escaped — and the frontend
+	// reads the value back with URLSearchParams.
+	return origin + "/#pair=" + code + "&name=" + url.QueryEscape(label)
 }
 
 const (
@@ -19,8 +28,10 @@ const (
 	// screen without being a poster.
 	pairingQRPixels = 256
 	// pairingQRMaxBytes bounds the encoded content, so a QR is never asked to hold an arbitrary string —
-	// the failure that matters is a picture that decodes to something else.
-	pairingQRMaxBytes = 512
+	// the failure that matters is a picture that decodes to something else. It also has to hold the longest
+	// link PairingURL can build: a 253-character host, a port, and a 64-rune label escaped byte by byte is
+	// 1056 bytes.
+	pairingQRMaxBytes = 1536
 )
 
 // PairingQRPNG is the content as a `data:image/png` URL, so the browser that minted a code can show it to

@@ -62,3 +62,4 @@ What this makes cheap, what it makes impossible, and what would reopen it.
 | # | Decision | Status |
 |---|---|---|
 | [0001](0001-key-decisions-are-recorded.md) | Key decisions get a numbered file, written when the choice is made and never backfilled | accepted |
+| [0002](0002-device-name-is-typed-on-the-device-being-paired.md) | A device names itself on the pairing form; the server guesses the name and the mint's name rides the link | accepted |

@@ -9,13 +9,13 @@ import {
     initialState,
     next,
     normalizePairingCode,
-    pairingCodeFromHash,
     pairingCodeInput,
     pairingCodeReady,
+    pairingLinkFromHash,
 } from '$lib/utils/login-flow';
 import type { LoginState } from '$lib/utils/login-flow';
 
-const ready = { stage: 'signin', hasPasskey: true, support: 'available', entry: 'signin', error: '', tone: 'error', code: '' } as LoginState;
+const ready = { stage: 'signin', hasPasskey: true, support: 'available', entry: 'signin', error: '', tone: 'error', code: '', name: '' } as LoginState;
 
 describe('the body this browser starts on', () => {
     it('asks for a pairing code when there is no passkey to ask for', () => {
@@ -61,6 +61,18 @@ describe('the machine', () => {
         expect(state).toMatchObject({ code: 'A', error: '' });
     });
 
+    it('edits the device name without losing the code next to it', () => {
+        const typed = next({ ...ready, stage: 'code', code: 'ABCD-2345' }, { type: 'name', value: 'Kitchen tablet' });
+        expect(typed).toMatchObject({ name: 'Kitchen tablet', code: 'ABCD-2345', error: '' });
+    });
+
+    it('keeps the device name across a change of body', () => {
+        // The name belongs to this device, not to the code, so a fresh code asks for no new name.
+        const named = next({ ...ready, stage: 'code', code: 'ABCD-2345', name: 'Kitchen tablet' }, { type: 'back' });
+        expect(named.name).toBe('Kitchen tablet');
+        expect(next(named, { type: 'pair' })).toMatchObject({ code: '', name: 'Kitchen tablet' });
+    });
+
     it('returns a failed ceremony to the body it started from', () => {
         const fromCode = next(next(ready, { type: 'pair' }), { type: 'start' });
         expect(fromCode.stage).toBe('ceremony');
@@ -86,16 +98,42 @@ describe('the machine', () => {
 
 describe('the code from a pairing link', () => {
     it('reads the fragment the server writes', () => {
-        expect(pairingCodeFromHash('#pair=ABCD-2345')).toBe('ABCD-2345');
+        expect(pairingLinkFromHash('#pair=ABCD-2345')).toEqual({ code: 'ABCD-2345', name: '' });
+    });
+
+    it('reads the name the minting device gave this one', () => {
+        expect(pairingLinkFromHash('#pair=ABCD2345&name=Kitchen+tablet').name).toBe('Kitchen tablet');
+    });
+
+    it('keeps a name to the length a device label is', () => {
+        // Text out of a URL has not met the rule the server applies at registration.
+        expect(pairingLinkFromHash('#pair=ABCD2345&name=' + 'n'.repeat(200)).name).toHaveLength(64);
+    });
+
+    it('hands the code to the field whatever shape the link left it in', () => {
+        // The field owns the shape of a code.
+        const { code } = pairingLinkFromHash('#pair=ABCD 2345');
+        expect(normalizePairingCode(code)).toBe('ABCD2345');
     });
 
     it('reads nothing else, including anything that is not a code', () => {
-        expect(pairingCodeFromHash('')).toBe('');
-        expect(pairingCodeFromHash('#pair=')).toBe('');
-        expect(pairingCodeFromHash('#pair=ABCD 2345')).toBe('');
-        expect(pairingCodeFromHash('?pair=ABCD2345')).toBe('');
-        expect(pairingCodeFromHash('#token=ABCD2345')).toBe('');
-        expect(pairingCodeFromHash(undefined as unknown as string)).toBe('');
+        expect(pairingLinkFromHash('').code).toBe('');
+        expect(pairingLinkFromHash('#pair=').code).toBe('');
+        expect(pairingLinkFromHash('?pair=ABCD2345').code).toBe('');
+        expect(pairingLinkFromHash('#token=ABCD2345').code).toBe('');
+        expect(pairingLinkFromHash('#name=Kitchen+tablet').code).toBe('');
+        expect(pairingLinkFromHash(undefined as unknown as string).code).toBe('');
+    });
+});
+
+describe('the device name the form opens with', () => {
+    it('starts from the name the server read off this browser', () => {
+        expect(initialState(false, 'available', 'Chrome 120 · Macintosh').name).toBe('Chrome 120 · Macintosh');
+    });
+
+    it('starts blank when the server read nothing', () => {
+        // Blank asks the server to name the device.
+        expect(initialState(false, 'available').name).toBe('');
     });
 });
 

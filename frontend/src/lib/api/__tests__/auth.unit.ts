@@ -108,7 +108,7 @@ describe('checkSession', () => {
         const { ensureCsrfToken } = await import('$lib/api/helpers');
 
         // `tls_ca_available` is the pairing notice's other branch: whether the CA download would answer.
-        await expect(checkSession()).resolves.toEqual({ authenticated: true, hasPasskey: true, caDownload: true });
+        await expect(checkSession()).resolves.toEqual({ authenticated: true, hasPasskey: true, caDownload: true, deviceName: '' });
         // One GET for the probe. A safe method asks for no token, so nothing probes ahead of it.
         expect(sessionAnswers).toBe(1);
         // The token came from that answer, so reading it back spends no further request.
@@ -122,7 +122,7 @@ describe('checkSession', () => {
         const { checkSession } = await import('$lib/api/auth');
         const { ensureCsrfToken } = await import('$lib/api/helpers');
 
-        await expect(checkSession()).resolves.toEqual({ authenticated: false, hasPasskey: false, caDownload: false });
+        await expect(checkSession()).resolves.toEqual({ authenticated: false, hasPasskey: false, caDownload: false, deviceName: '' });
         await expect(ensureCsrfToken()).resolves.toBe('');
         // The answer is the evidence: a signed-out browser is a server that replied.
         expect(reachabilityCalls).toEqual([true]);
@@ -135,8 +135,18 @@ describe('checkSession', () => {
 
         const { checkSession } = await import('$lib/api/auth');
 
-        await expect(checkSession()).resolves.toEqual({ authenticated: false, hasPasskey: null, caDownload: false });
+        await expect(checkSession()).resolves.toEqual({ authenticated: false, hasPasskey: null, caDownload: false, deviceName: '' });
         expect(reachabilityCalls).toEqual([true]);
+    });
+
+    it('carries the name this browser reads as, which the pairing form opens with', async () => {
+        // The server reads the User-Agent of this very request, so the form's guess and its fallback are
+        // one reading.
+        mockFetch.mockResolvedValue(res(200, { authenticated: false, device_name: 'Chrome 120 · Macintosh' }));
+
+        const { checkSession } = await import('$lib/api/auth');
+
+        await expect(checkSession()).resolves.toMatchObject({ deviceName: 'Chrome 120 · Macintosh' });
     });
 
     it('says nothing about passkeys when the answer says nothing', async () => {
@@ -148,7 +158,7 @@ describe('checkSession', () => {
 
         // No flag is "this server offers no CA download", which is the safe reading: the notice then
         // says nothing rather than linking at a file that would not be served.
-        await expect(checkSession()).resolves.toEqual({ authenticated: false, hasPasskey: null, caDownload: false });
+        await expect(checkSession()).resolves.toEqual({ authenticated: false, hasPasskey: null, caDownload: false, deviceName: '' });
     });
 
     it('throws on a body that is not the answer, the boot path\'s outage branch', async () => {
@@ -195,6 +205,23 @@ describe('registerPasskeyWithCode', () => {
         expect(JSON.stringify(bodyOf(finish))).not.toContain('ABCD-2345');
         // A finished registration is the session, and the session's token rides the same response.
         await expect(ensureCsrfToken()).resolves.toBe('ceremony-token');
+    });
+
+    it('sends the name the person gave this device, and only to the registration', async () => {
+        createCall.mockResolvedValue(credential({ id: 'X', rawId: 'X' }));
+        mockFetch
+            .mockResolvedValueOnce(res(200, { ticket: 'ticket-1', options: { publicKey: creationJSON } }))
+            .mockResolvedValueOnce(res(200, { status: 'ok' }, { 'X-CSRF-Token': 'ceremony-token' }));
+
+        const { registerPasskeyWithCode } = await import('$lib/api/auth');
+
+        await registerPasskeyWithCode('ABCD-2345', 'Kitchen tablet');
+
+        // The code half of the ceremony still carries only the code.
+        expect(bodyOf(callTo('/auth/passkey/register/begin'))).toEqual({ code: 'ABCD-2345' });
+        expect(bodyOf(callTo('/auth/passkey/register/finish'))).toEqual({
+            ticket: 'ticket-1', name: 'Kitchen tablet', response: { id: 'X', rawId: 'X' },
+        });
     });
 
     it('refuses a code the server refused without waking the authenticator', async () => {
@@ -341,6 +368,17 @@ describe('the device list', () => {
 
         await expect(mintPairingCode()).resolves.toEqual(code);
         expect(callTo('/auth/pairing')[1].method).toBe('POST');
+        // A mint with nothing typed sends an empty name.
+        expect(bodyOf(callTo('/auth/pairing'))).toEqual({ name: '' });
+    });
+
+    it('sends the name for the device being paired, which rides the link it answers with', async () => {
+        mockFetch.mockResolvedValue(res(200, { code: 'ABCD-2345', url: 'https://mike.local:3000/#pair=ABCD2345&name=Kitchen+tablet' }));
+
+        const { mintPairingCode } = await import('$lib/api/auth');
+
+        await mintPairingCode('Kitchen tablet');
+        expect(bodyOf(callTo('/auth/pairing'))).toEqual({ name: 'Kitchen tablet' });
     });
 
     it('cancels every outstanding code on the verb the route declares', async () => {

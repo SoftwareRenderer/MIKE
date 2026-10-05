@@ -60,7 +60,7 @@ func TestPairingBannerFrameIsEven(t *testing.T) {
 func TestPairingBannerDropsTheFrameRatherThanWrapping(t *testing.T) {
 	t.Parallel()
 	host := strings.Repeat("a", 60) + ".example.internal"
-	banner := PairingBanner("ABCD-2345", PairingURL("https://"+host, "ABCD2345"), bannerWhen)
+	banner := PairingBanner("ABCD-2345", PairingURL("https://"+host, "ABCD2345", ""), bannerWhen)
 
 	if strings.Contains(banner, "│") || strings.Contains(banner, "┌") {
 		t.Fatalf("a %d-column host was framed anyway:\n%s", len(host), banner)

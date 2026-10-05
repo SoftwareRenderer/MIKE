@@ -33,6 +33,12 @@ with its TTL, which is what makes it safe to print on a terminal.
   presence alone does not open a session.
 - **The last remaining passkey cannot be revoked from the browser.** The GUI's refusal (409, naming
   `mike --reset-passkeys`) is what keeps a one-device install reachable.
+- **A device's name is what the pairing form said, and one function reads a browser.** `deviceLabel` is the
+  only reader of a User-Agent. The pairing form's guess comes from it over `GET /api/auth/session`, and the
+  row of a device nobody named is written from it. A browser that re-read its own `navigator.userAgent` would
+  be a second reader, and the two would disagree about what the person was shown. A name typed while minting
+  rides the pairing link's fragment: the link is what reaches the other device, and the code stays eight
+  characters a person can read off a terminal.
 - **`--reset-passkeys` is one-shot, deletes sessions too, and refuses a live server.** A session can mint
   a pairing code, so a reset that left sessions alive would not revoke the device it claims to.
 - **Ceremony state crosses the gap between `begin` and `finish` only inside a sealed ticket** carrying the
@@ -78,7 +84,11 @@ an abandoned ceremony is the normal outcome — and the purpose inside the MAC, 
 payload, is what stops one ceremony's ticket being presented to the other.
 
 **Presentation** (`backend/auth/pairing_banner.go`, `backend/auth/pairing_qr.go`,
-`backend/server/boot_pairing.go`). `PairingURL` puts the code in the fragment. The boot printout is
+`backend/server/boot_pairing.go`). `PairingURL` puts the code in the fragment, and beside it the name the
+minting device gave the one being paired — escaped in the fragment's own grammar, and left out entirely for
+a name-less mint, whose link is the code alone. `pairingQRMaxBytes` bounds the picture's content, sized for
+the longest link this package can build (a 253-character host and a 64-rune label escaped byte by byte) so a
+mint never fails on the picture it is being shown with. The boot printout is
 `PairingBanner`: the code on a row of its own, padded inside a frame, with the link and the expiry beside it.
 It is padding and rule characters rather than a picture, because a terminal's cell is not a known shape. A
 block-drawn QR is square only while the reader's line height happens to be twice the font's advance width, and
@@ -99,7 +109,12 @@ sessions inside `Store.tx`.
 routes are public and rate-limited; `POST`/`DELETE /api/auth/pairing`, `GET`/`PATCH`/`DELETE
 /api/auth/passkeys` are not. `refuseCeremony` is where a ceremony refusal chooses its status, and every
 other error goes through `httputil.Fault` with the cause left in the log. `cleanPasskeyName` is the one
-rule for a device label; `deviceLabel` is what an unnamed device is called, read off the User-Agent.
+rule for a device label, and `passkeyNameRefusal` the one sentence for a name outside it — the rename route,
+the registration's field and the mint's field all read them. `deviceLabel` is what an unnamed device is
+called, and `guessedDeviceLabel` is the same reading that can say it read nothing, which is what
+`handleAuthSession` answers as `device_name` — an unreadable browser gets no name rather than a placeholder.
+`handlePairingMint` decodes an optional `{name}` and validates it before it mints, so a name that is refused
+mints no code; an absent body is a mint for no name, because a code typed by hand carries none.
 
 **The one-shot reset** (`main.go`). `resetPasskeys` resolves config, refuses a database that is not
 there, refuses an address that answers, then wipes and exits — before any listener, trace file or
@@ -114,9 +129,14 @@ browser will not run and says the connection is not secure. `GET /api/auth/sessi
 that device has no session to download the certificate with. See `docs/tls.md → Certificates on disk`.
 `$lib/utils/login-flow.ts` owns every branch:
 no passkey means the code field, a passkey means the assertion, and a cancelled prompt is a note rather
-than a fault. `LoginModal.svelte` paints the stage it is given and takes a `#pair=CODE` fragment out of
+than a fault. `pairingLinkFromHash` reads the fragment's two keys, and caps the name it returns to
+`DEVICE_NAME_LIMIT`, because text out of a URL has not met `cleanPasskeyName` yet. The pairing body's name
+field opens with the link's name when it carried one and the server's `device_name` otherwise, and what it
+holds when the person submits is what the row is written with — blank included, which is the fallback.
+`LoginModal.svelte` paints the stage it is given and takes the `#pair=CODE` fragment out of
 the address bar as soon as the field holds it. `ConfigModal/PasskeysSection.svelte` is the management
-surface: list, rename, revoke, mint, and cancel the outstanding codes.
+surface: list, rename, revoke, mint — naming the device being paired, on the row the code is created from —
+and cancel the outstanding codes.
 
 **The test seam.** `backend/testutil/testwebauthn` builds a real ES256 credential and both ceremony
 bodies, so registration, assertion, wrong origin, missing user verification, counter regression and a
@@ -129,6 +149,9 @@ virtual authenticator instead (`docs/testing.md → Passkeys in the e2e lane`).
 rpID scoping, and the code spent by its own registration — including one code paid against two concurrent
 registrations, and a revoke outranking a claim still in flight. The ticket's purpose, expiry and sealed
 claim, the last-passkey refusal, the atomic reset and every route refusal above are in the same run. Run it under `make check-race` for
-the concurrent case. `make test-e2e SPECS=login` walks a
-browser through pairing, registration and assertion; `make test-e2e SPECS=settings-passkeys` drives the
-Settings surface, including the minted code a second device pairs with.
+the concurrent case. `TestPairingMintNamesTheDeviceBeingPaired` holds the mint's name — in the link, not in
+the code, and refused before a code exists when it is too long. `TestAuthSessionNamesTheBrowserThatAsked`
+holds the one reading of a User-Agent the login form is allowed to be given. `make test-e2e SPECS=login` walks a
+browser through pairing, registration and assertion; one spec names a device as it pairs, and checks the list
+says that name. `make test-e2e SPECS=settings-passkeys` drives the
+Settings surface, including the minted code a second device pairs with and the name a minted link carries.

@@ -6,6 +6,7 @@ package httputil
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	"mike/backend/errs"
@@ -51,14 +52,24 @@ const MaxRequestBodyBytes int64 = 32 << 20
 //
 // It checks nothing else: method and required fields stay with the handler.
 func DecodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
-	return decodeJSON(w, r, v, MaxRequestBodyBytes)
+	return decodeJSON(w, r, v, MaxRequestBodyBytes, false)
+}
+
+// DecodeJSONOrEmpty is DecodeJSON for a route whose fields are all optional: a request with no body
+// carries no fields, so `v` is left as the handler built it. A body that is present and is not JSON is
+// still the 400 DecodeJSON gives.
+func DecodeJSONOrEmpty(w http.ResponseWriter, r *http.Request, v any) bool {
+	return decodeJSON(w, r, v, MaxRequestBodyBytes, true)
 }
 
 // decodeJSON is DecodeJSON with the limit injected, so the 413 path is testable
 // without building a 32 MB body.
-func decodeJSON(w http.ResponseWriter, r *http.Request, v any, limit int64) bool {
+func decodeJSON(w http.ResponseWriter, r *http.Request, v any, limit int64, emptyOK bool) bool {
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
 	if err := dec.Decode(v); err != nil {
+		if emptyOK && errors.Is(err, io.EOF) {
+			return true
+		}
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
 			JSONError(w, http.StatusRequestEntityTooLarge, "request body too large")

@@ -20,7 +20,7 @@ func TestDecodeJSONBoundsTheBody(t *testing.T) {
 		r := httptest.NewRequest(http.MethodPost, "/api/anything", strings.NewReader(body))
 		w := httptest.NewRecorder()
 		var v map[string]any
-		return decodeJSON(w, r, &v, limit), w
+		return decodeJSON(w, r, &v, limit, false), w
 	}
 
 	if ok, w := post(`{"a":1}`); !ok || w.Body.Len() != 0 {
@@ -54,5 +54,27 @@ func TestMaxRequestBodyBytesCoversTheLargestRealPayload(t *testing.T) {
 	}
 	if MaxRequestBodyBytes > 64<<20 {
 		t.Errorf("MaxRequestBodyBytes = %d is looser than any flow needs; the cap is the point", MaxRequestBodyBytes)
+	}
+}
+
+// TestDecodeJSONOrEmptyTakesAnAbsentBodyForNoFields pins the difference between a request that sent
+// nothing and one that sent something unreadable: the first carries no fields, the second is a 400.
+func TestDecodeJSONOrEmptyTakesAnAbsentBodyForNoFields(t *testing.T) {
+	post := func(body string) (bool, *httptest.ResponseRecorder, map[string]any) {
+		t.Helper()
+		r := httptest.NewRequest(http.MethodPost, "/api/anything", strings.NewReader(body))
+		w := httptest.NewRecorder()
+		v := map[string]any{"name": "preset"}
+		return DecodeJSONOrEmpty(w, r, &v), w, v
+	}
+
+	if ok, w, v := post(""); !ok || w.Body.Len() != 0 || v["name"] != "preset" {
+		t.Errorf("an absent body: ok=%v code=%d fields=%v; want the handler's own values kept", ok, w.Code, v)
+	}
+	if ok, w, v := post(`{"name":"sent"}`); !ok || w.Body.Len() != 0 || v["name"] != "sent" {
+		t.Errorf("a body that was sent: ok=%v code=%d fields=%v", ok, w.Code, v)
+	}
+	if ok, w, _ := post(`{"name":`); ok || w.Code != http.StatusBadRequest {
+		t.Errorf("malformed JSON: ok=%v code=%d, want false and %d", ok, w.Code, http.StatusBadRequest)
 	}
 }

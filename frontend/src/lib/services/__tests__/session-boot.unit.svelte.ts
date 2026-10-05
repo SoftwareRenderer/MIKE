@@ -82,8 +82,8 @@ function deferredSession() {
  * The two bodies `/api/auth/session` answers with. `has_passkey` is the login form's branch, so the boot
  * hands it on whatever the answer said — the tests that do not care about it still have to answer it.
  */
-const SIGNED_IN: SessionAnswer = { authenticated: true, hasPasskey: true, caDownload: false };
-const SIGNED_OUT: SessionAnswer = { authenticated: false, hasPasskey: true, caDownload: false };
+const SIGNED_IN: SessionAnswer = { authenticated: true, hasPasskey: true, caDownload: false, deviceName: '' };
+const SIGNED_OUT: SessionAnswer = { authenticated: false, hasPasskey: true, caDownload: false, deviceName: '' };
 
 function cachedProject() {
     store.projects = [{ id: 'p1', name: 'repo', path: '/repo' } as Project];

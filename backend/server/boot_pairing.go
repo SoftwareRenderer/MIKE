@@ -34,7 +34,7 @@ func (s *Server) pairAtBoot(ctx context.Context) {
 		return
 	}
 	origin := s.bootPairingOrigin()
-	url := auth.PairingURL(origin, code.Code)
+	url := auth.PairingURL(origin, code.Code, "")
 	// The code is written here and nowhere else, and the browser lane reads it back out of this text
 	// (docs/testing.md → Passkeys in the e2e lane).
 	logging.Banner(auth.PairingBanner(auth.FormatPairingCode(code.Code), url, code.ExpiresAt))

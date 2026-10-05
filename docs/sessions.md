@@ -39,10 +39,12 @@ DB write.
   assertion.
 - `POST /api/sessions/revoke-others` → `{"revoked": n}`; deletes every session except the caller's.
 
-`GET /api/auth/session` is the public sibling of these. It answers `authenticated`, `has_passkey` and
-`tls_ca_available`, plus `csrf_token` when a session exists. `tls_ca_available` is `localCAvailable()`, the
+`GET /api/auth/session` is the public sibling of these. It answers `authenticated`, `has_passkey`,
+`tls_ca_available` and `device_name`, plus `csrf_token` when a session exists. `tls_ca_available` is `localCAvailable()`, the
 same decision the CA download and the `/api/config` row are made of, so a link the login form shows cannot
-point at a file the server would refuse to serve.
+point at a file the server would refuse to serve. `device_name` is about the browser asking rather than about
+any credential: what its own User-Agent reads as, which is the name the pairing form opens its field with
+(`docs/passkeys.md → How it is held`).
 
 **`/api/auth/*` and `/api/auth/passkeys*` have one client:** `frontend/src/lib/api/auth.ts` holds
 `checkSession`, the two ceremony calls (`registerPasskeyWithCode`, `signInWithPasskey`), `logout`, the
@@ -50,7 +52,8 @@ passkey list/rename/revoke pair and the mint/revoke of pairing codes — and it 
 token is stored. Its three unusual readings are what the boot path and the login form depend on. A session
 answer is read from the body whatever the status, so a signed-out browser is never read as an outage. The
 same answer's `has_passkey` decides whether the form asks for a passkey or for a pairing code, and its
-`tls_ca_available` (absent reads as false) whether that second body may link the CA download.
+`tls_ca_available` (absent reads as false) whether that second body may link the CA download. Its
+`device_name` (absent reads as blank) is what that body's device-name field starts with.
 A logout that 401s settles: revoking the current session signs out behind it, and the caller's teardown
 must still run.
 

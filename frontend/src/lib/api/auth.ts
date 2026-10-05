@@ -24,6 +24,10 @@ export interface SessionAnswer {
     /** Whether `CA_DOWNLOAD` below will answer a certificate. A server that does not sign its own
      *  address has nothing to hand out, and the pairing notice says so by staying quiet. */
     caDownload: boolean;
+    /** What this browser's `User-Agent` reads as: the name the pairing form opens with, empty when the
+     *  server read nothing. The page never reads `navigator.userAgent`, so the form's guess and the name
+     *  the registration falls back to cannot disagree. */
+    deviceName: string;
 }
 
 /**
@@ -72,6 +76,7 @@ export async function checkSession(): Promise<SessionAnswer> {
         authenticated,
         hasPasskey: typeof data?.has_passkey === 'boolean' ? data.has_passkey : null,
         caDownload: data?.tls_ca_available === true,
+        deviceName: typeof data?.device_name === 'string' ? data.device_name : '',
     };
 }
 
@@ -206,9 +211,15 @@ export async function revokePasskey(id: string): Promise<void> {
 /**
  * Mint a code that lets one more device register. It lives a few minutes, works once, and is answered
  * with everything the second device needs to be shown on screen or scanned off it.
+ * `name` says which device is being paired: it travels in the pairing link, never in the code, so a code
+ * typed out by hand arrives unnamed.
  */
-export async function mintPairingCode(): Promise<PairingCode> {
-    const res = await apiFetch(`${API_BASE}/auth/pairing`, { method: 'POST' });
+export async function mintPairingCode(name = ''): Promise<PairingCode> {
+    const res = await apiFetch(`${API_BASE}/auth/pairing`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+    });
     if (!res.ok) throw await apiError(res, t('api.mintPairingCode'));
     return res.json();
 }

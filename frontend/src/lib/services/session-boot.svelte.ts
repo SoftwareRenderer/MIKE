@@ -55,6 +55,8 @@ class SessionBoot {
     /** Whether this server has its own CA to hand out, from the same answer. It decides whether the
      *  login gate can offer a browser the certificate that would make this connection secure. */
     caDownload = $state(false);
+    /** What this browser reads as, from the same answer — the name the pairing form opens with. */
+    deviceName = $state('');
     /** First paint is this module's, not the board's: the session check decides what to paint. */
     isLoadingAuth = $state(true);
     /** The session check has not answered, so the wait is what the loading screen says. */
@@ -91,6 +93,7 @@ class SessionBoot {
             const session = await checkSession();
             this.hasPasskey = session.hasPasskey;
             this.caDownload = session.caDownload;
+            this.deviceName = session.deviceName;
             this.isAuthenticated = session.authenticated;
             authResolved = true;
             clearTimeout(offlineTimer);
@@ -161,6 +164,7 @@ class SessionBoot {
         this.isAuthenticated = false;
         this.hasPasskey = null;
         this.caDownload = false;
+        this.deviceName = '';
         this.isLoadingAuth = true;
         this.bootSlow = false;
         this.hasLocalCache = false;

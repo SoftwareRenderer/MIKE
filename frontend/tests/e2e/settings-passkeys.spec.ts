@@ -18,6 +18,7 @@ const NAME = '.passkeys-name';
 const NAME_INPUT = '.passkeys-name-input';
 const REVOKE = '.passkey-revoke';
 const MINT = 'button:has-text("Pair a new device")';
+const MINT_NAME = `${SECTION} .settings-create-input`;
 const CANCEL_CODES = 'button:has-text("Cancel the code")';
 const PAIRING_BOX = '.passkeys-pairing';
 const CONFIRM_BTN = '.btn-confirm';
@@ -96,5 +97,33 @@ test.describe('Devices & passkeys', () => {
     await page.locator(ROW).last().locator(REVOKE).click();
     await page.locator(CONFIRM_BTN).click();
     await expect(page.locator(ROW)).toHaveCount(before, { timeout: 10000 });
+  });
+
+  test('a name typed before minting rides the link and names the device that pairs with it', async ({ page, browser }) => {
+    const name = `Scanned tablet ${Date.now()}`;
+    await openPasskeysSection(page);
+    await page.fill(MINT_NAME, name);
+    await page.locator(MINT).click();
+    await expect(page.locator(PAIRING_BOX)).toBeVisible();
+
+    // The name travels in the link, not in the code; `+` is the fragment's spelling of a space.
+    const link = (await page.locator('.passkeys-url').textContent()) ?? '';
+    expect(link).toContain(`&name=${name.replace(/ /g, '+')}`);
+
+    const base = laneOrigin();
+    const code = (await page.locator('.passkeys-code').textContent()) ?? '';
+    const context = await signedOutContext(browser);
+    try {
+      const device = await context.newPage();
+      await attachVirtualAuthenticator(context, device);
+      // The link is the only thing that carries the name.
+      await pairBrowser(device, base, code, { link: link.trim() });
+    } finally {
+      await context.close();
+    }
+
+    await page.reload();
+    await openPasskeysSection(page);
+    await expect(page.locator(`${ROW}:has-text(${JSON.stringify(name)})`)).toBeVisible({ timeout: 10000 });
   });
 });

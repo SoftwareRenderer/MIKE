@@ -130,9 +130,28 @@ func TestAuthSessionAnswersWhetherTheInstallIsPaired(t *testing.T) {
 	}
 }
 
-func TestAuthSessionNotAuthenticated(t *testing.T) {
+// TestAuthSessionNamesTheBrowserThatAsked: the form's prefilled label comes from this answer, read by the
+// function that names a row nobody named.
+func TestAuthSessionNamesTheBrowserThatAsked(t *testing.T) {
 	s := testServer(t)
 
+	named := testRequest(http.MethodGet, "/api/auth/session", nil)
+	named.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "+
+		"(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	if body := mustJSON[map[string]any](t, testResponse(t, s, named).Body); body["device_name"] != "Chrome 120 \u00b7 Macintosh" {
+		t.Errorf("device_name = %v; want the label this User-Agent reads as", body["device_name"])
+	}
+
+	// An unreadable User-Agent gets no name, not the placeholder a stored row gets.
+	unreadable := testRequest(http.MethodGet, "/api/auth/session", nil)
+	unreadable.Header.Set("User-Agent", "Go-http-client/1.1")
+	if body := mustJSON[map[string]any](t, testResponse(t, s, unreadable).Body); body["device_name"] != nil {
+		t.Errorf("device_name = %v; want the field left out when the User-Agent says nothing", body["device_name"])
+	}
+}
+
+func TestAuthSessionNotAuthenticated(t *testing.T) {
+	s := testServer(t)
 	rr := testResponse(t, s, testRequest(http.MethodGet, "/api/auth/session", nil))
 
 	if rr.Code != http.StatusOK {

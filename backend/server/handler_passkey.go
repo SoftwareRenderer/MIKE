@@ -28,6 +28,9 @@ const (
 
 	// maxPasskeyNameLen is the device label's cap. It is a line in a settings list, not a document.
 	maxPasskeyNameLen = 64
+
+	// passkeyNameRefusal is the sentence a name outside that rule gets, at every route that takes one.
+	passkeyNameRefusal = "name must be 1 to 64 characters"
 )
 
 // A body that does not parse as a credential response is the person's browser having sent something the
@@ -207,10 +210,27 @@ func (s *Server) openSession(w http.ResponseWriter, r *http.Request) {
 }
 
 // handlePairingMint handles POST /api/auth/pairing. A signed-in device decides that another one may
-// register; the code it gets back authorizes exactly that.
+// register; the code it gets back authorizes exactly that, and the name in the body says which device it
+// is being paired for.
 func (s *Server) handlePairingMint(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireSession(w, r); !ok {
 		return
+	}
+	// A mint with no body is a mint for no name.
+	var req struct {
+		Name string `json:"name"`
+	}
+	if !httputil.DecodeJSONOrEmpty(w, r, &req) {
+		return
+	}
+	label := ""
+	if strings.TrimSpace(req.Name) != "" {
+		name, ok := cleanPasskeyName(req.Name)
+		if !ok {
+			JSONError(w, http.StatusBadRequest, passkeyNameRefusal)
+			return
+		}
+		label = name
 	}
 	host, err := s.relyingHost(r)
 	if err != nil {
@@ -226,7 +246,7 @@ func (s *Server) handlePairingMint(w http.ResponseWriter, r *http.Request) {
 		httputil.Fault(w, "mint pairing code", err)
 		return
 	}
-	url := auth.PairingURL(host.Origin, code.Code)
+	url := auth.PairingURL(host.Origin, code.Code, label)
 	qr, err := auth.PairingQRPNG(url)
 	if err != nil {
 		httputil.Fault(w, "render pairing code", err)
@@ -299,7 +319,7 @@ func (s *Server) handlePasskeyRename(w http.ResponseWriter, r *http.Request) {
 	}
 	name, ok := cleanPasskeyName(*req.Name)
 	if !ok {
-		JSONError(w, http.StatusBadRequest, "name must be 1 to 64 characters")
+		JSONError(w, http.StatusBadRequest, passkeyNameRefusal)
 		return
 	}
 	ctx, cancel := s.Detached()
@@ -348,7 +368,7 @@ func passkeyName(w http.ResponseWriter, typed, userAgent string) (string, bool) 
 	}
 	name, ok := cleanPasskeyName(typed)
 	if !ok {
-		JSONError(w, http.StatusBadRequest, "name must be 1 to 64 characters")
+		JSONError(w, http.StatusBadRequest, passkeyNameRefusal)
 		return "", false
 	}
 	return name, true
@@ -367,12 +387,25 @@ func cleanPasskeyName(raw string) (string, bool) {
 	return collapsed, true
 }
 
-// deviceLabel is what a person sees for a device they paired without naming. The User-Agent is the only
-// thing the browser volunteered, and its product tokens are half theatre: a WebKit browser ends with
-// `Safari/<engine version>` whatever it is, and Safari's own release rides the `Version/` token. So the
-// engine token is only believed when nothing else said who the browser is, and Safari's release is read
-// from where the browser actually writes it.
+// unknownDeviceName is what a device is called when its User-Agent said nothing readable.
+const unknownDeviceName = "Unknown device"
+
+// deviceLabel is what a person sees for a device they paired without naming. A stored row always says
+// something, so the unreadable case gets a name of its own.
 func deviceLabel(userAgent string) string {
+	if name, ok := guessedDeviceLabel(userAgent); ok {
+		return name
+	}
+	return unknownDeviceName
+}
+
+// guessedDeviceLabel reads a device's name off its User-Agent, and says whether it read one; the login
+// form needs the false answer, so its field starts blank rather than with a placeholder.
+//
+// The product tokens are theatre — a WebKit browser ends with `Safari/<engine version>` whatever it is —
+// so that token is believed only when nothing else said who the browser is, and Safari's own release comes
+// from its `Version/` token.
+func guessedDeviceLabel(userAgent string) (string, bool) {
 	platform := ""
 	if start, end := strings.Index(userAgent, "("), strings.Index(userAgent, ")"); start >= 0 && end > start+1 {
 		platform = strings.TrimSpace(strings.Split(userAgent[start+1:end], ";")[0])
@@ -397,7 +430,7 @@ func deviceLabel(userAgent string) string {
 	}
 	switch {
 	case agent == "":
-		return firstOf(platform, "Unknown device")
+		return platform, platform != ""
 	case agent == "Safari" && safariRelease != "":
 		version = safariRelease
 	case agent == "Edg":
@@ -406,20 +439,10 @@ func deviceLabel(userAgent string) string {
 		agent = "Opera"
 	}
 	if version == "" {
-		return firstOf(agent, platform)
+		return agent, true
 	}
 	if platform == "" {
-		return agent + " " + version
+		return agent + " " + version, true
 	}
-	return agent + " " + version + " · " + platform
-}
-
-// firstOf is the first value that says something.
-func firstOf(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
+	return agent + " " + version + " · " + platform, true
 }

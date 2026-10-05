@@ -41,14 +41,21 @@ export interface LoginState {
     tone: LoginTone;
     /** What is typed in the code field. */
     code: string;
+    /** What this device is called, sent with the registration. It opens with the name the server read off
+     *  this browser, or the one the pairing link carried; blank asks the server to name the device. */
+    name: string;
 }
 
 export type LoginEvent =
     | { type: 'pair' }
     | { type: 'back' }
     | { type: 'code'; value: string }
+    | { type: 'name'; value: string }
     | { type: 'start' }
     | { type: 'error'; message: string; tone?: LoginTone };
+
+/** How long a device label is. `maxPasskeyNameLen` (`backend/server/handler_passkey.go`) is the source. */
+export const DEVICE_NAME_LIMIT = 64;
 
 /** The body this browser starts on. `signin` is never the answer when there is no credential to offer. */
 function initialStage(hasPasskey: boolean | null, support: PasskeySupport): LoginStage {
@@ -56,10 +63,10 @@ function initialStage(hasPasskey: boolean | null, support: PasskeySupport): Logi
     return hasPasskey === false ? 'code' : 'signin';
 }
 
-export function initialState(hasPasskey: boolean | null, support: PasskeySupport): LoginState {
+export function initialState(hasPasskey: boolean | null, support: PasskeySupport, deviceName = ''): LoginState {
     const stage = initialStage(hasPasskey, support);
     const entry: LoginEntry = stage === 'code' ? 'code' : 'signin';
-    return { stage, hasPasskey, support, entry, error: '', tone: 'error', code: '' };
+    return { stage, hasPasskey, support, entry, error: '', tone: 'error', code: '', name: deviceName };
 }
 
 /**
@@ -85,6 +92,8 @@ export function next(state: LoginState, event: LoginEvent): LoginState {
             // One shape in the state however the field was filled; a keystroke arrives grouped from
             // `pairingCodeInput`, and a pairing link carries the server's grouping already.
             return { ...state, code: formatPairingCode(event.value), error: '' };
+        case 'name':
+            return { ...state, name: event.value, error: '' };
         case 'start':
             return { ...state, stage: 'ceremony', entry: state.stage === 'code' ? 'code' : state.entry, error: '' };
         case 'error': {
@@ -156,14 +165,14 @@ export function pairingCodeInput(value: string, caret: number, backward = false)
 }
 
 /**
- * The code a pairing link carries, if this page was opened from one.
- *
- * The code rides in the **fragment** (`#pair=CODE`) because a query string reaches a proxy's access log
- * and a Referer header, and this is a credential until the ceremony spends it. That also means the server
- * never sees it here: only this module reads it, and the caller strips it from the address as soon as the
- * field holds it.
+ * What a pairing link carries, if this page was opened from one: the code and the name ride the
+ * **fragment** (`#pair=CODE`) because a query string reaches a proxy's access log and a Referer header.
+ * The name is text out of a URL, so it arrives capped to `DEVICE_NAME_LIMIT`.
  */
-export function pairingCodeFromHash(hash: string): string {
-    const match = /^#pair=([A-Za-z0-9-]+)$/.exec(hash ?? '');
-    return match ? match[1] : '';
+export function pairingLinkFromHash(hash: string): { code: string; name: string } {
+    const fragment = hash ?? '';
+    // Only a fragment: a pairing code never belongs in a query string, which a proxy logs.
+    if (!fragment.startsWith('#')) return { code: '', name: '' };
+    const fields = new URLSearchParams(fragment.slice(1));
+    return { code: fields.get('pair') ?? '', name: (fields.get('name') ?? '').slice(0, DEVICE_NAME_LIMIT) };
 }

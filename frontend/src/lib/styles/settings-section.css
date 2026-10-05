@@ -164,3 +164,23 @@
     color: var(--color-status-red);
     border-color: var(--color-status-red);
 }
+
+/* The row a credential is created from: the field for what it will be called, and the button that makes
+ * it. Both credential lists that name a thing as it is created — a token, a pairing code — are this row. */
+:global(.settings-create) {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+:global(.settings-create-input) {
+    flex: 1;
+    min-width: 0;
+    padding: 6px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface-2);
+    color: var(--color-text-primary);
+    font-size: var(--text-sm);
+    font-family: inherit;
+}

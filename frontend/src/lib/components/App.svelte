@@ -1133,6 +1133,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     <LoginModal
         hasPasskey={sessionBoot.hasPasskey}
         caDownload={sessionBoot.caDownload}
+        deviceName={sessionBoot.deviceName}
         onClose={() => sessionBoot.startAfterLogin()}
     />
 {:else}

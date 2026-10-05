@@ -77,3 +77,29 @@ describe('typing a pairing code', () => {
         expect(el.selectionStart).toBe(3);
     });
 });
+
+/**
+ * The name the pairing body opens with when the page was not opened from a pairing link: what the server
+ * read off this browser, and a blank is an answer, so the field invents no placeholder. The link's own
+ * name belongs to the login spec, because this harness stubs `onMount`.
+ */
+describe('the name the pairing body opens with', () => {
+    /** The device-name field of a gate opened on a fresh install, whose first body is the pairing form. */
+    function nameField(props: Record<string, unknown> = {}): HTMLInputElement {
+        const { container } = render(LoginModal, { hasPasskey: false, onClose: () => { }, ...props });
+        return container.querySelector('#login-device-name') as HTMLInputElement;
+    }
+
+    it('starts with the name the server read off this browser', () => {
+        expect(nameField({ deviceName: 'Chrome 120 · Macintosh' }).value).toBe('Chrome 120 · Macintosh');
+    });
+
+    it('starts blank when the server read nothing', () => {
+        expect(nameField().value).toBe('');
+    });
+
+    it('is capped at the length a device label is', () => {
+        // The same 64 the server refuses.
+        expect(nameField().maxLength).toBe(64);
+    });
+});

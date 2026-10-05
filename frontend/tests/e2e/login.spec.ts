@@ -97,6 +97,24 @@ test.describe('Passkey login', () => {
         }
     });
 
+    test('a device named while it pairs is listed under the name it was given', async ({ page, browser }) => {
+        const base = baseOf();
+        // Unique because every spec on this lane server adds rows to the same list.
+        const name = `Probe tablet ${Date.now()}`;
+        const pairing = await mintPairingCode(page, base);
+
+        const device = await signedOutBrowser(browser);
+        try {
+            await pairBrowser(device.page, base, pairing.code, { name });
+
+            // The row carries what was typed here, not the label the browser would have been given.
+            const rows = await (await device.page.request.get(`${base}/api/auth/passkeys`)).json();
+            expect(rows.filter((row: { name: string }) => row.name === name)).toHaveLength(1);
+        } finally {
+            await device.context.close();
+        }
+    });
+
     test('the passkey signs the same browser back in', async ({ page, browser }) => {
         const base = baseOf();
         const pairing = await mintPairingCode(page, base);
