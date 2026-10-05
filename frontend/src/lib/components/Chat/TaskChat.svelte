@@ -1219,25 +1219,22 @@
     }
 
 
-    /** Ask what this deletion takes with it — a fork branch, and always the files the deleted turns
-     *  produced — then show the dialog. No row count is claimed: what goes is every row after this one in the
-     *  thread, which the loaded window neither counts nor bounds. */
+    /** Ask what this deletion takes with it beyond the thread — a fork branch — then show the dialog.
+     *  No row count is claimed: what goes is every row after this one in the thread, which the loaded window
+     *  neither counts nor bounds. */
     async function handleDeleteRequest(entryId: string) {
         let willDeleteBranch = false;
         let branchName = '';
-        let resetsFiles = false;
         try {
             const info = await checkMessageDelete(projectId, taskId, entryId);
             willDeleteBranch = info.will_delete_branch;
             branchName = info.branch_name || '';
-            resetsFiles = info.resets_files;
         } catch {
             // A check that did not answer promises nothing extra; the deletion itself still runs.
         }
 
         // One sentence per consequence the reader cannot undo, joined by a blank line so each stays whole.
         const lines = [t('chat.task.deleteConfirm')];
-        if (resetsFiles) lines.push(t('chat.task.deleteAlsoFiles'));
         if (willDeleteBranch && branchName) lines.push(t('chat.task.deleteAlsoBranch', { branch: branchName }));
         const message = lines.join('\n\n');
 

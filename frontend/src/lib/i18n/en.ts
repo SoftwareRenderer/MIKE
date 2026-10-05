@@ -1714,7 +1714,6 @@ const catalog = {
     // No row count: what goes is every row after this one in the thread, which the loaded window neither
     // counts nor bounds, and an entry on screen folds its tool-call rows into one.
     'chat.task.deleteConfirm': 'This deletes this message and every message after it in this thread. This action cannot be undone.',
-    'chat.task.deleteAlsoFiles': 'The files go back to the state the remaining conversation describes, so anything only the deleted turns produced is removed.',
     'chat.task.deleteAlsoBranch': 'This will also delete the git branch "{branch}".',
     'chat.task.deleteTitle': 'Delete Message',
 
