@@ -1,12 +1,13 @@
 import { test, expect, type Page } from '@playwright/test';
-import { attachVirtualAuthenticator, laneOrigin, mintPairingCode, pairBrowser, signedOutContext } from '../helpers-auth.mjs';
+import { attachVirtualAuthenticator, laneOrigin, pairBrowser, signedOutContext } from '../helpers-auth.mjs';
 
 /**
  * Settings → About → Devices & passkeys: the list of credentials this install will sign in, the label
  * a person gives each one, the code that adds one more, and the revocation that takes one away.
  *
- * Mutates immediately — it is outside the modal's Save/Cancel flow — so every assertion here is about
- * what the server now holds, read back after a reload rather than from what the page just rendered.
+ * Mutates immediately — it is outside the modal's Save/Cancel flow — so the assertions are about what the
+ * server now holds. Most read it back after a reload; the pairing test must not, because the page noticing
+ * the device by itself is the subject there.
  *
  * Runs in the `isolated` project: it registers and revokes credentials on the lane server.
  */
@@ -20,6 +21,8 @@ const REVOKE = '.passkey-revoke';
 const MINT = 'button:has-text("Pair a new device")';
 const CANCEL_CODES = 'button:has-text("Cancel the code")';
 const PAIRING_BOX = '.passkeys-pairing';
+const PAIRING_CODE = '.passkeys-code';
+const TOAST = '.toast';
 const CONFIRM_BTN = '.btn-confirm';
 
 async function openPasskeysSection(page: Page) {
@@ -73,25 +76,31 @@ test.describe('Devices & passkeys', () => {
     await expect(page.locator(PAIRING_BOX)).toHaveCount(0);
   });
 
-  test('a device paired from a minted code appears, and can be revoked again', async ({ page, browser }) => {
+  test('a device paired with a minted code appears by itself, and can be revoked again', async ({ page, browser }) => {
     await openPasskeysSection(page);
     const before = await page.locator(ROW).count();
 
     const base = laneOrigin();
-    const pairing = await mintPairingCode(page, base);
+    // The mint button is part of the subject: the watch that notices the new device starts from this click.
+    await page.locator(MINT).click();
+    const code = ((await page.locator(PAIRING_CODE).textContent()) ?? '').trim();
+    expect(code).toMatch(/^[0-9A-Z]{4}-[0-9A-Z]{4}$/);
+
     const context = await signedOutContext(browser);
     try {
       const device = await context.newPage();
       await attachVirtualAuthenticator(context, device);
-      await pairBrowser(device, base, pairing.code);
+      await pairBrowser(device, base, code);
     } finally {
       await context.close();
     }
 
-    await page.reload();
-    await openPasskeysSection(page);
+    // No reload anywhere below. The section re-reads the list while the code is live, that row is the code's
+    // spend, and the toast names the device the server labelled from its own browser.
+    await expect(page.locator(TOAST)).toContainText('is paired', { timeout: 15000 });
     // Oldest first, so the device that just joined is the last row.
     await expect(page.locator(ROW)).toHaveCount(before + 1, { timeout: 10000 });
+    await expect(page.locator(PAIRING_BOX)).toHaveCount(0);
 
     await page.locator(ROW).last().locator(REVOKE).click();
     await page.locator(CONFIRM_BTN).click();
