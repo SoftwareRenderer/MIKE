@@ -72,7 +72,10 @@ feeds, and what may end `Serve`: `docs/lifecycle.md → The TLS/plain listener`.
 A passkey is minted for a hostname and only ever released over a connection the browser calls secure:
 `https://…` or `http://localhost`. Plain HTTP on a LAN address therefore has **no login at all**. The gate
 says the connection cannot carry a passkey, hands out the local CA where there is one to hand out, and
-explains how to install it — instead of offering a button that can only fail. Serve TLS (here or
+explains how to install it — instead of offering a button that can only fail. The pairing body offers the CA
+whatever this connection looks like: the secure-context rule that matters belongs to the browser being
+paired, and the other way to satisfy it is to put MIKE behind a certificate that browser already trusts.
+Serve TLS (here or
 at the proxy, with `MIKE_TRUST_PROXY=1` so `X-Forwarded-Proto` decides the cookie's `Secure` flag
 and the origin a signature is checked against) or reach the install at `localhost`.
 

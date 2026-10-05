@@ -50,16 +50,26 @@ export type LoginEvent =
     | { type: 'start' }
     | { type: 'error'; message: string; tone?: LoginTone };
 
-/** The body this browser starts on. `signin` is never the answer when there is no credential to offer. */
-function initialStage(hasPasskey: boolean | null, support: PasskeySupport): LoginStage {
+/**
+ * The body this browser starts on. `signin` is never the answer when there is no credential to offer, and
+ * a pairing link is never answered by a sign-in: the code it carries can only buy a registration. A link is
+ * the one arrival at the code body on a browser that cannot run the ceremony, so that body carries the
+ * notice about the connection.
+ */
+function initialStage(hasPasskey: boolean | null, support: PasskeySupport, codeFromLink = ''): LoginStage {
+    if (codeFromLink) return 'code';
     if (support !== 'available') return 'unsupported';
     return hasPasskey === false ? 'code' : 'signin';
 }
 
-export function initialState(hasPasskey: boolean | null, support: PasskeySupport): LoginState {
-    const stage = initialStage(hasPasskey, support);
+/**
+ * The form as it opens. `codeFromLink` is the code a pairing link carried, already read out of the address
+ * (`pairingCodeFromHash`), empty when nobody arrived from a link.
+ */
+export function initialState(hasPasskey: boolean | null, support: PasskeySupport, codeFromLink = ''): LoginState {
+    const stage = initialStage(hasPasskey, support, codeFromLink);
     const entry: LoginEntry = stage === 'code' ? 'code' : 'signin';
-    return { stage, hasPasskey, support, entry, error: '', tone: 'error', code: '' };
+    return { stage, hasPasskey, support, entry, error: '', tone: 'error', code: formatPairingCode(codeFromLink) };
 }
 
 /**

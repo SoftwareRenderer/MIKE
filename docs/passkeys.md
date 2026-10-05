@@ -110,13 +110,20 @@ command that a stale environment variable selects runs at every restart.
 `navigator.credentials` insists on, and `passkeySupport()` names why a ceremony cannot run here.
 `insecure-context` is the one the person can act on, and on that one the gate refuses a prompt it knows the
 browser will not run and says the connection is not secure. `GET /api/auth/session` answers
-`tls_ca_available`, and where it says yes the notice also links the local CA and the steps to install it —
-that device has no session to download the certificate with. See `docs/tls.md → Certificates on disk`.
+`tls_ca_available`, and where it says yes the pairing body links the local CA and the steps to install it.
+The offer does not wait for this connection to read as insecure: the device being paired has no session to
+download the certificate any other way. See `docs/tls.md → Certificates on disk`.
 `$lib/utils/login-flow.ts` owns every branch:
 no passkey means the code field, a passkey means the assertion, and a cancelled prompt is a note rather
-than a fault. `LoginModal.svelte` paints the stage it is given and takes a `#pair=CODE` fragment out of
-the address bar as soon as the field holds it. `ConfigModal/PasskeysSection.svelte` is the management
-surface: list, rename, revoke, mint, and cancel the outstanding codes.
+than a fault. A `#pair=CODE` fragment is an input to that first branch: it is read before the form is built,
+not after it paints. The code it carries can only buy a registration, so the link opens the code field even
+over a connection that cannot run the ceremony. That read is where the address bar loses the fragment, and
+the certificate notice above rides that same field. `LoginModal.svelte` paints the stage it is given. `ConfigModal/PasskeysSection.svelte` is the management
+surface: list, rename, revoke, mint, and cancel the outstanding codes. While a minted code is live **the
+section re-reads the list**, and the row that spends the code takes the code's panel with it. The second
+device pairs at its own screen; the person holding the code is watching the first one. The re-read is a poll,
+not a frame on the app socket. The request that would carry the announcement is unauthenticated and labels
+the new device from its own `User-Agent` — a push would put browser-chosen text on every connected screen.
 
 **The test seam.** `backend/testutil/testwebauthn` builds a real ES256 credential and both ceremony
 bodies, so registration, assertion, wrong origin, missing user verification, counter regression and a
@@ -131,4 +138,6 @@ registrations, and a revoke outranking a claim still in flight. The ticket's pur
 claim, the last-passkey refusal, the atomic reset and every route refusal above are in the same run. Run it under `make check-race` for
 the concurrent case. `make test-e2e SPECS=login` walks a
 browser through pairing, registration and assertion; `make test-e2e SPECS=settings-passkeys` drives the
-Settings surface, including the minted code a second device pairs with.
+Settings surface, including the minted code a second device pairs with — that device's row arrives with no
+reload, and the spent code's panel goes with it. Which body a given install, connection and pairing link opens — and which of them hands over the certificate — is the pair
+`login-flow.unit.ts` and `app-shell-copy.unit.svelte.ts`, run with `npx vitest run` from `frontend/`.
