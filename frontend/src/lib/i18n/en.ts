@@ -2088,6 +2088,8 @@ const catalog = {
     'editor.searchFailed': 'Search failed ({status})',
     'editor.matches': { one: '{count} match', other: '{count} matches' },
     'editor.results': { one: '{count} result', other: '{count} results' },
+    'editor.resultsTruncated': { one: '{count}+ result', other: '{count}+ results' },
+    'editor.searchShowMore': { one: 'Show {count} more', other: 'Show {count} more' },
     'editor.searchInProject': 'Search in project',
     'editor.replace': 'Replace',
     'editor.replaceAll': 'All',

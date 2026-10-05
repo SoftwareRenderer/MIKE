@@ -3,6 +3,7 @@
     import { t } from '$lib/i18n';
     import { escapeHtml } from '$lib/utils/format';
     import { searchFsPaths, type FsSearchResult } from '$lib/api';
+    import { isAborted } from '$lib/api/helpers';
     import EmptyState from '$lib/components/EmptyState.svelte';
 
     let { projectId, taskId, onFileSelected, onClose }: {
@@ -25,6 +26,8 @@
     let loading = $state(false);
     let error = $state('');
     let searched = $state(false);
+    /** Whether the answer is the whole set or stopped at the server's ceiling. */
+    let truncated = $state(false);
 
     interface GroupedFile {
         path: string;
@@ -53,23 +56,65 @@
         return groups;
     });
 
+    /** Every row is its own node with its own highlighted markup, so a full answer costs real time to paint. */
+    const renderChunk = 200;
+    let visible = $state(renderChunk);
+
+    // The groups to paint: whole files until the budget runs out, then the one file cut off mid-way.
+    let visibleGroups = $derived.by(() => {
+        if (results.length <= visible) return groupedResults;
+        const taken: GroupedFile[] = [];
+        let rows = 0;
+        for (const group of groupedResults) {
+            if (rows >= visible) break;
+            const room = visible - rows;
+            taken.push(group.results.length <= room ? group : { ...group, results: group.results.slice(0, room) });
+            rows += Math.min(group.results.length, room);
+        }
+        return taken;
+    });
+
     // Debounce timer
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    /** Names the one search whose answer may paint: several can be in flight while a reader types. */
+    let request = 0;
+    let controller: AbortController | null = null;
+
+    function cancelInFlight() {
+        request++;
+        controller?.abort();
+        controller = null;
+        // Nothing is in flight to clear the waiting state, so clear it here.
+        loading = false;
+    }
 
     function scheduleSearch() {
         if (debounceTimer) clearTimeout(debounceTimer);
         debounceTimer = setTimeout(doSearch, 300);
     }
 
+    // Emptying the field is just a search for nothing, so the empty-query branch owns what it clears.
+    function clearQuery() {
+        query = '';
+        doSearch();
+    }
+
     async function doSearch() {
+        cancelInFlight();
+        const id = request;
+
         const q = query.trim();
         if (!q) {
             results = [];
+            truncated = false;
             searched = false;
             error = '';
             return;
         }
 
+        const own = new AbortController();
+        controller = own;
         loading = true;
         error = '';
         searched = true;
@@ -83,14 +128,24 @@
                 matchCase,
                 wholeWord,
                 regex: useRegex,
+                signal: own.signal,
             });
+            if (id !== request) return; // a later search already answered, or this one was cancelled
             rootPath = answer.root || '';
             results = answer.results || [];
+            truncated = answer.truncated === true;
+            visible = renderChunk; // a new answer is read from the top
         } catch (e) {
+            // A search this panel cancelled or superseded is not a fault, and it must not touch the state
+            // a newer search owns.
+            if (isAborted(e) || id !== request) return;
             error = String(e);
             results = [];
         } finally {
-            loading = false;
+            if (id === request) {
+                loading = false;
+                controller = null;
+            }
         }
     }
 
@@ -170,6 +225,8 @@
         if (!searched || !query.trim()) return '';
         if (loading) return t('editor.searching');
         if (results.length === 0) return t('editor.noResults');
+        // A stopped walk is not a count: without the plus, a broad query reads as thorough as a narrow one.
+        if (truncated) return t('editor.resultsTruncated', { count: results.length });
         return t('editor.results', { count: results.length });
     }
 
@@ -180,6 +237,7 @@
 
     onDestroy(() => {
         if (debounceTimer) clearTimeout(debounceTimer);
+        cancelInFlight();
     });
 </script>
 
@@ -256,7 +314,7 @@
                 </button>
             </div>
             {#if query}
-                <button class="clear-btn" onclick={() => { query = ''; results = []; searched = false; error = ''; inputEl?.focus(); }} aria-label={t('editor.clearSearchAria')}>
+                <button class="clear-btn" onclick={() => { clearQuery(); inputEl?.focus(); }} aria-label={t('editor.clearSearchAria')}>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
                         <line x1="18" y1="6" x2="6" y2="18"/>
                         <line x1="6" y1="6" x2="18" y2="18"/>
@@ -281,8 +339,13 @@
     {:else if searched && results.length === 0}
         <EmptyState compact title={t('editor.noResultsFound')} />
     {:else if results.length > 0}
+        {#if results.length > visible}
+            <button class="show-more" onclick={() => { visible += renderChunk; }}>
+                {t('editor.searchShowMore', { count: Math.min(renderChunk, results.length - visible) })}
+            </button>
+        {/if}
         <div class="search-results" role="list" aria-label={t('editor.resultsAria')}>
-            {#each groupedResults as group}
+            {#each visibleGroups as group}
                 <!-- File header -->
                 <div class="result-file-header" title={group.path}>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="file-icon" aria-hidden="true">
@@ -433,7 +496,8 @@
         font-size: var(--text-xs);
     }
 
-    .search-loading {
+    .search-loading,
+    .show-more {
         padding: 12px;
         color: var(--color-text-secondary);
         font-size: var(--text-xs);

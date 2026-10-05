@@ -716,7 +716,7 @@ func TestHandleFSSearch(t *testing.T) {
 		}
 	})
 
-	t.Run("limits results to 10", func(t *testing.T) {
+	t.Run("filename search lists more than ten files", func(t *testing.T) {
 		for i := 0; i < 20; i++ {
 			filename := filepath.Join(tmpDir, fmt.Sprintf("file%02d.txt", i))
 			os.WriteFile(filename, []byte(fmt.Sprintf("content %d", i)), 0o644)
@@ -728,9 +728,50 @@ func TestHandleFSSearch(t *testing.T) {
 			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 		}
 		result := mustJSON[map[string]any](t, rr.Body)
-		results := result["results"].([]any)
-		if len(results) > 10 {
-			t.Fatalf("expected at most 10 results, got %d", len(results))
+		if results := result["results"].([]any); len(results) != 20 {
+			t.Fatalf("filename search is capped below searchLimit: got %d of 20 files", len(results))
+		}
+	})
+
+	t.Run("content search stops at the ceiling inside one file", func(t *testing.T) {
+		// The ceiling has to stop the scan of one file, not just the walk, or a single file answers twice
+		// what the request asked for.
+		var many strings.Builder
+		for i := 0; i < 2*searchLimit; i++ {
+			many.WriteString("needle line\n")
+		}
+		if err := os.WriteFile(filepath.Join(tmpDir, "many.txt"), []byte(many.String()), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		req := testRequest(http.MethodGet, "/api/fs/search?q=needle&content=1&project="+projectID, nil)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+		result := mustJSON[map[string]any](t, rr.Body)
+		if results := result["results"].([]any); len(results) != searchLimit {
+			t.Fatalf("expected exactly %d results, got %d", searchLimit, len(results))
+		}
+		// The panel cannot tell 1000 matches from 1000+ by row count, so a stopped walk has to say so.
+		if result["truncated"] != true {
+			t.Errorf("expected truncated=true when the ceiling stopped the walk, got %v", result["truncated"])
+		}
+	})
+
+	t.Run("says the answer is complete when the walk ran to the end", func(t *testing.T) {
+		req := testRequest(http.MethodGet, "/api/fs/search?q=README&project="+projectID, nil)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+		result := mustJSON[map[string]any](t, rr.Body)
+		if len(result["results"].([]any)) == 0 {
+			t.Fatal("the fixture's README.md was not found")
+		}
+		if result["truncated"] != false {
+			t.Errorf("expected truncated=false for an answer the ceiling did not reach, got %v", result["truncated"])
 		}
 	})
 

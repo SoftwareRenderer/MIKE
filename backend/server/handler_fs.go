@@ -1,7 +1,7 @@
 package server
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -16,6 +16,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"mike/backend/errs"
 	"mike/backend/fsutil"
@@ -439,6 +443,37 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 	JSONResponse(w, http.StatusOK, result)
 }
 
+// searchWalkConcurrency is how many searches this process walks at once, so several readers cannot take the
+// machine from the containers that do the work.
+const searchWalkConcurrency = 2
+
+type searchSlots chan struct{}
+
+var fsWalkSlots = make(searchSlots, searchWalkConcurrency)
+
+// acquire takes a slot, or answers ctx.Err() when the request that asked for one is already gone.
+//
+// The release is good once: running it twice would free a slot this call never held.
+func (s searchSlots) acquire(ctx context.Context) (release func(), err error) {
+	got := func() func() {
+		var done sync.Once
+		return func() { done.Do(func() { <-s }) }
+	}
+	select {
+	case s <- struct{}{}:
+		return got(), nil
+	default:
+	}
+	started := time.Now()
+	select {
+	case s <- struct{}{}:
+		logging.For(logging.HTTP).Debugf("fs search waited %s for a walk slot", time.Since(started).Round(time.Millisecond))
+		return got(), nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 // handleFSSearch recursively searches for files by name and, with content=1, by content.
 //
 // Query parameters:
@@ -448,8 +483,8 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 //   - content: "1" to search file contents in addition to filenames
 //   - case, word, regex: "1" to match case-sensitively, whole words, or a regular expression
 //
-// Filename search returns up to 10 results, content search up to 50, skipping binary files. A
-// dot-prefixed file or directory is never searched; see searchSkipsName.
+// Either half answers at most searchLimit results, with truncated=true when that ceiling is why it stopped.
+// A dot-prefixed file or directory is never searched; see searchSkipsName.
 func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 
 	projectID := r.URL.Query().Get("project")
@@ -522,14 +557,16 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resultLimit := 10
-	if searchContent {
-		resultLimit = 50
+	release, slotErr := fsWalkSlots.acquire(r.Context())
+	if slotErr != nil {
+		Fail(w, slotErr, "fs search", "request cancelled")
+		return
 	}
+	defer release()
 
 	// The predicate is compiled once and the walk owns the walk order, the ignores and the limit; the
 	// handler keeps the part only it can do, which is deciding what directory the request may see.
-	results := fsSearch{
+	results, truncated := fsSearch{
 		root:      searchRoot,
 		query:     q,
 		matchCase: matchCase,
@@ -537,112 +574,214 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 		useRegex:  useRegex,
 		content:   searchContent,
 		contentRe: contentRe,
-		limit:     resultLimit,
+		limit:     searchLimit,
 	}.walk(r.Context())
 
 	if results == nil {
 		results = []searchResult{}
 	}
 	JSONResponse(w, http.StatusOK, map[string]any{
-		"root":    searchRoot,
-		"results": results,
+		"root":      searchRoot,
+		"results":   results,
+		"truncated": truncated,
 	})
 }
 
 // searchMaxFileBytes: with no matches to stop at, a content search would read the whole file.
 const searchMaxFileBytes int64 = 2 << 20
 
-// searchContentInFile searches for matches within a single file.
-// Returns true if the file was binary (content search skipped).
-func searchContentInFile(path, q string, matchCase, wholeWord, useRegex bool, contentRe *regexp.Regexp, onMatch func(lineNum int, lineText string)) bool {
-	f, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
+// searchMaxTextBytes caps the line text a content result carries, so the answer's size follows searchLimit
+// rather than the tree's largest file. A match is still judged on the whole line.
+const searchMaxTextBytes = 4 << 10
 
-	// Binary sniff: a null byte in the first 8KB means the file is skipped.
-	buf := make([]byte, 8192)
-	n, _ := f.Read(buf)
-	if n > 0 {
-		for _, b := range buf[:n] {
-			if b == 0 {
-				return true // binary file
-			}
+// searchBinarySniffBytes is how much of a file decides that it is binary and unreadable.
+const searchBinarySniffBytes = 8192
+
+// searchLimit is how many results either half of a search answers; a content result is one matching line.
+const searchLimit = 1000
+
+// lineMatcher is a search request's content predicate, built once for the whole walk. It answers questions
+// about bytes, so matching a line copies nothing.
+type lineMatcher struct {
+	query     []byte // folded to lower case unless matchCase
+	matchCase bool
+	wholeWord bool
+	useRegex  bool
+	re        *regexp.Regexp // set for a pattern search; the handler compiled it or answered 400
+	scratch   []byte         // fold buffer, reused for every line
+}
+
+func newLineMatcher(q string, matchCase, wholeWord, useRegex bool, re *regexp.Regexp) *lineMatcher {
+	if !matchCase {
+		q = strings.ToLower(q)
+	}
+	return &lineMatcher{query: []byte(q), matchCase: matchCase, wholeWord: wholeWord, useRegex: useRegex, re: re}
+}
+
+// matchesLine reports whether one line answers the query. An empty query matches every line.
+func (m *lineMatcher) matchesLine(line []byte) bool {
+	if len(m.query) == 0 {
+		return true
+	}
+	if m.useRegex {
+		if !m.wholeWord {
+			return m.re.Match(line)
 		}
+		return matchesWholeWord(m.re, line)
 	}
+	hay := line
+	if !m.matchCase {
+		hay = m.fold(line)
+	}
+	if !m.wholeWord {
+		return bytes.Contains(hay, m.query)
+	}
+	for idx := 0; idx+len(m.query) <= len(hay); {
+		pos := bytes.Index(hay[idx:], m.query)
+		if pos < 0 {
+			return false
+		}
+		if wordBounded(hay, idx+pos, idx+pos+len(m.query)) {
+			return true
+		}
+		idx += pos + 1
+	}
+	return false
+}
 
-	f.Seek(0, io.SeekStart)
-	scanner := bufio.NewScanner(f)
-	lineNum := 0
-	for scanner.Scan() {
-		lineNum++
-		line := scanner.Text()
-		if matchLine(line, q, matchCase, wholeWord, useRegex, contentRe) {
-			onMatch(lineNum, line)
+// wordBounded is the whole-word rule the edit tool applies to the same bytes, so a replacement is never
+// offered for a match the search did not list.
+func wordBounded(hay []byte, start, end int) bool {
+	return (start == 0 || !types.IsWordByte(hay[start-1])) &&
+		(end >= len(hay) || !types.IsWordByte(hay[end]))
+}
+
+// matchesWholeWord reports whether a pattern lands inside word boundaries of hay anywhere. Both halves of a
+// search answer a whole-word query here.
+func matchesWholeWord(re *regexp.Regexp, hay []byte) bool {
+	for _, span := range re.FindAllIndex(hay, -1) {
+		if wordBounded(hay, span[0], span[1]) {
+			return true
 		}
 	}
 	return false
 }
 
-// matchLine checks if a line matches the search query.
-func matchLine(line, q string, matchCase, wholeWord, useRegex bool, contentRe *regexp.Regexp) bool {
-	if q == "" {
-		return true
-	}
-	if useRegex && contentRe != nil {
-		if wholeWord {
-			// contentRe is already compiled, so check word boundaries around each match.
-			matches := contentRe.FindAllStringIndex(line, -1)
-			for _, m := range matches {
-				beforeOK := m[0] == 0 || !types.IsWordByte(line[m[0]-1])
-				afterOK := m[1] >= len(line) || !types.IsWordByte(line[m[1]])
-				if beforeOK && afterOK {
-					return true
-				}
-			}
-			return false
+// fold lower-cases a line into the matcher's buffer, which allocates nothing once grown. It decodes runes
+// itself rather than calling strings.ToLower, which allocates a copy per line; the two answer differently
+// only for the final-sigma rule.
+func (m *lineMatcher) fold(line []byte) []byte {
+	m.scratch = append(m.scratch[:0], line...)
+	for i, b := range line {
+		if b >= utf8.RuneSelf {
+			return m.foldRunes(line, i)
 		}
-		return contentRe.MatchString(line)
-	}
-	if useRegex {
-		// contentRe is only compiled for content search.
-		flags := ""
-		if !matchCase {
-			flags = "(?i)"
+		if b >= 'A' && b <= 'Z' {
+			m.scratch[i] = b + ('a' - 'A')
 		}
-		re, err := regexp.Compile(flags + q)
-		if err != nil {
-			return false
+	}
+	return m.scratch
+}
+
+// foldRunes finishes the fold from line's first non-ASCII byte, appending what it decodes: a folded rune is
+// not the same length as the rune it replaces.
+func (m *lineMatcher) foldRunes(line []byte, i int) []byte {
+	out := m.scratch[:i]
+	for i < len(line) {
+		r, size := utf8.DecodeRune(line[i:])
+		if r == utf8.RuneError && size == 1 {
+			out = append(out, line[i]) // keep an invalid byte as it is
+			i++
+			continue
 		}
-		return re.MatchString(line)
+		out = utf8.AppendRune(out, unicode.ToLower(r))
+		i += size
 	}
-	// Plain text search
-	checkLine := line
-	searchStr := q
-	if !matchCase {
-		checkLine = strings.ToLower(checkLine)
-		searchStr = strings.ToLower(searchStr)
+	m.scratch = out
+	return out
+}
+
+// contentReader holds the one buffer a content search reads whole files through, so a walk allocates once
+// and every line is a slice of it rather than a copy.
+type contentReader struct {
+	data []byte
+}
+
+// scanFile reports one file's matching lines through onMatch, which returns false to stop reading.
+func (c *contentReader) scanFile(path string, m *lineMatcher, onMatch func(lineNum int, line []byte) bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return
 	}
-	if wholeWord {
-		idx := 0
-		for idx <= len(checkLine)-len(searchStr) {
-			pos := strings.Index(checkLine[idx:], searchStr)
-			if pos == -1 {
-				break
-			}
-			absPos := idx + pos
-			beforeOK := absPos == 0 || !types.IsWordByte(checkLine[absPos-1])
-			afterPos := absPos + len(searchStr)
-			afterOK := afterPos >= len(checkLine) || !types.IsWordByte(checkLine[afterPos])
-			if beforeOK && afterOK {
-				return true
-			}
-			idx = absPos + 1
+	defer f.Close()
+
+	// The size comes from the open file: a DirEntry carries only its type, and d.Info() would be a second
+	// path lookup per file.
+	info, err := f.Stat()
+	if err != nil || info.Size() > searchMaxFileBytes {
+		return
+	}
+	size := int(info.Size())
+
+	buf := c.buffer(size)
+	n, _ := io.ReadFull(f, buf[:min(size, searchBinarySniffBytes)])
+	// A null byte in the first 8KB means the file is binary and skipped. The head is read on its own so a
+	// large binary is not paid for in full just to learn what it is.
+	if bytes.IndexByte(buf[:n], 0) < 0 {
+		if n < size {
+			more, _ := io.ReadFull(f, buf[n:size])
+			n += more
 		}
-		return false
+		c.scan(buf[:n], m, onMatch)
 	}
-	return strings.Contains(checkLine, searchStr)
+}
+
+// buffer returns the walk's one read buffer, grown to the largest file it has seen. A file that shrank
+// after the stat is searched as far as it goes.
+func (c *contentReader) buffer(size int) []byte {
+	if cap(c.data) < size {
+		c.data = make([]byte, size)
+	}
+	return c.data[:size]
+}
+
+// scan walks the buffer line by line. Every line is a subslice, so nothing is copied to find a match.
+func (c *contentReader) scan(data []byte, m *lineMatcher, onMatch func(lineNum int, line []byte) bool) {
+	lineNum := 0
+	for len(data) > 0 {
+		line := data
+		if i := bytes.IndexByte(data, '\n'); i >= 0 {
+			line, data = data[:i+1], data[i+1:]
+		} else {
+			data = nil
+		}
+		lineNum++
+		line = trimEOL(line)
+		if !m.matchesLine(line) {
+			continue
+		}
+		if !onMatch(lineNum, truncateLine(line)) {
+			return
+		}
+	}
+}
+
+// trimEOL drops the line terminator from a line of a file, whose convention is not known here.
+func trimEOL(line []byte) []byte {
+	line = bytes.TrimSuffix(line, []byte("\n"))
+	return bytes.TrimSuffix(line, []byte("\r"))
+}
+
+func truncateLine(line []byte) []byte {
+	if len(line) <= searchMaxTextBytes {
+		return line
+	}
+	for i := searchMaxTextBytes; i > 0; i-- {
+		if utf8.RuneStart(line[i]) {
+			return line[:i]
+		}
+	}
+	return line[:searchMaxTextBytes]
 }
 
 // errStopWalk is a sentinel error to stop filepath.WalkDir early.
@@ -1258,7 +1397,7 @@ func (f fsSearch) matchesFile(rel string) bool {
 			return false // invalid pattern
 		}
 		if f.wholeWord {
-			return f.nameRe.MatchString("\b" + rel + "\b")
+			return matchesWholeWord(f.nameRe, []byte(rel))
 		}
 		return f.nameRe.MatchString(rel)
 	}
@@ -1288,21 +1427,30 @@ func searchSkipsName(name string) bool {
 	return strings.HasPrefix(name, ".")
 }
 
-// walk collects the matches under the root, in a stable order, stopping at the limit or when ctx ends.
-// It reads the host filesystem even for a sandboxed task, because the worktree is bind-mounted into the
-// sandbox and both sides see the same files.
-func (f fsSearch) walk(ctx context.Context) []searchResult {
-	if f.useRegex && f.query != "" {
+// walk collects the matches under the root, in a stable order, stopping at the limit or when ctx ends. The
+// second result says whether the limit is why it stopped.
+//
+// It reads the host filesystem even for a sandboxed task, because the worktree is bind-mounted and both
+// sides see the same files.
+func (f fsSearch) walk(ctx context.Context) ([]searchResult, bool) {
+	if f.useRegex && !f.content && f.query != "" {
 		flags := ""
 		if !f.matchCase {
 			flags = "(?i)"
 		}
-		// An invalid pattern matches nothing rather than failing the request; the content search is the
-		// one that reports a bad pattern, because it is compiled before the walk starts.
+		// An invalid pattern matches nothing. Only the content half reports a bad pattern, because it is
+		// compiled before the walk starts.
 		f.nameRe, _ = regexp.Compile(flags + f.query)
 	}
 
 	var results []searchResult
+	truncated := false
+	var m *lineMatcher
+	var reader *contentReader
+	if f.content {
+		m = newLineMatcher(f.query, f.matchCase, f.wholeWord, f.useRegex, f.contentRe)
+		reader = &contentReader{}
+	}
 	_ = filepath.WalkDir(f.root, func(path string, d os.DirEntry, err error) error {
 		if ctx.Err() != nil {
 			return errStopWalk
@@ -1341,17 +1489,16 @@ func (f fsSearch) walk(ctx context.Context) []searchResult {
 
 		// Content search ignores the filename filter.
 		if f.content {
-			if info, infoErr := d.Info(); infoErr == nil && info.Size() > searchMaxFileBytes {
-				return nil
-			}
-			searchContentInFile(path, f.query, f.matchCase, f.wholeWord, f.useRegex, f.contentRe, func(lineNum int, lineText string) {
-				results = append(results, searchResult{Path: rel, Line: lineNum, Text: lineText})
+			reader.scanFile(path, m, func(lineNum int, line []byte) bool {
+				results = append(results, searchResult{Path: rel, Line: lineNum, Text: string(line)})
+				return len(results) < f.limit
 			})
 		} else if f.matchesFile(rel) {
 			results = append(results, searchResult{Path: rel})
 		}
 
 		if len(results) >= f.limit {
+			truncated = true
 			return errStopWalk
 		}
 		return nil
@@ -1363,5 +1510,5 @@ func (f fsSearch) walk(ctx context.Context) []searchResult {
 		}
 		return results[i].Line < results[j].Line
 	})
-	return results
+	return results, truncated
 }

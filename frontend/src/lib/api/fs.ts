@@ -147,6 +147,8 @@ export interface FsSearchResult {
 export interface FsSearchAnswer {
     root: string;
     results: FsSearchResult[];
+    /** True when matches exist beyond what this answer holds. */
+    truncated?: boolean;
 }
 
 /**
@@ -162,6 +164,8 @@ export async function searchFsPaths(params: {
     matchCase?: boolean;
     wholeWord?: boolean;
     regex?: boolean;
+    /** Cancels a search that further typing has made irrelevant. */
+    signal?: AbortSignal;
 }): Promise<FsSearchAnswer> {
     const query = new URLSearchParams({ q: params.query, project: params.project });
     if (params.task) query.set('task', params.task);
@@ -169,7 +173,7 @@ export async function searchFsPaths(params: {
     if (params.matchCase) query.set('case', '1');
     if (params.wholeWord) query.set('word', '1');
     if (params.regex) query.set('regex', '1');
-    const res = await apiFetch(`${API_BASE}/fs/search?${query.toString()}`);
+    const res = await apiFetch(`${API_BASE}/fs/search?${query.toString()}`, { signal: params.signal });
     if (!res.ok) throw await apiError(res, t('editor.searchFailed', { status: res.status }));
     return await res.json();
 }

@@ -143,6 +143,27 @@ case('a comment that quotes a tag does not swallow the markup after it', 1,
      '<!-- <input title="x"> -->\n<button aria-label="Save the file">{icon}</button>')
 case('comment text', 0, '<script>// TODO: rename the cancel button\nconst x = 1;</script>')
 case('block comment with an apostrophe', 0, "<script>/* don't translate this prose */\nconst x = 1;</script>")
+# A comment inside `{...}` — an attribute expression or a mustache — is inert too: an
+# apostrophe left in its prose opens a string that runs past the tag, the tag is never
+# found, and the markup inside it is counted as copy while the copy after it goes unseen.
+COMMENTED_ATTR = ("<input\n    oninput={(e) => {\n"
+                  "        // Written from the store's copy, not the caret\n"
+                  "        send(e.value);\n    }}\n")
+case('line comment with an apostrophe in an attribute expression', 0,
+     COMMENTED_ATTR + "    placeholder={t('editor.codePlaceholder')} />")
+case('an attribute literal in a tag like that is still seen', 1,
+     COMMENTED_ATTR + '    placeholder="Search files" />')
+case('block comment with an apostrophe in a tag attribute', 0,
+     "<input\n    title={label /* don't stretch it */ ? label : t('a.none')}\n"
+     "    aria-label={t('a.aria')} />")
+case('a quoted attribute in a tag like that is still seen', 1,
+     "<input\n    title={label /* don't stretch it */ ? label : t('a.none')}\n"
+     '    aria-label="Save the file" />')
+case('block comment with an apostrophe in a mustache', 0,
+     "<span>{value /* don't translate this prose */ ? t('a.ok') : t('a.no')}</span>")
+case('copy after a mustache like that is still measured', 1,
+     "<span>{value /* don't translate this prose */ ? t('a.ok') : t('a.no')}</span>\n"
+     '<button>Save now</button>')
 case('log line', 0, '<script>console.warn("Failed to arm the channel");</script>')
 case('log line continued on its own line', 0,
      '<script>console.warn(prefix,\n    `channel disarmed until it re-handshakes.`);</script>')

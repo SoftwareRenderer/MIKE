@@ -1,7 +1,9 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -10,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"mike/backend/git"
 	"mike/backend/types"
@@ -798,6 +801,60 @@ func TestFSSearchFilenameRegex(t *testing.T) {
 	}
 }
 
+// TestFSSearchFilenameWholeWordRegex: the whole-word toggle bounds where the pattern landed in the path, so
+// a longer word is excluded and an anchor still works.
+func TestFSSearchFilenameWholeWordRegex(t *testing.T) {
+	s := testServer(t)
+	cookie, csrf := loginTestCSRF(t, s)
+	base := t.TempDir()
+	for _, name := range []string{"handler.go", "ahandlerb.go"} {
+		if err := os.WriteFile(filepath.Join(base, name), []byte("package a\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.store.CreateProject(&types.Project{ID: "fs-word", Name: "FS Word Project", Path: base}); err != nil {
+		t.Fatal(err)
+	}
+
+	search := func(q string, wholeWord bool) []string {
+		t.Helper()
+		v := url.Values{"project": {"fs-word"}, "q": {q}, "regex": {"1"}}
+		if wholeWord {
+			v.Set("word", "1")
+		}
+		req := testRequest(http.MethodGet, "/api/fs/search?"+v.Encode(), nil)
+		withAuthCSRF(req, cookie, csrf)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("search %q: got %d", q, rr.Code)
+		}
+		var resp struct {
+			Results []struct {
+				Path string `json:"path"`
+			} `json:"results"`
+		}
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode search response: %v", err)
+		}
+		paths := make([]string, 0, len(resp.Results))
+		for _, r := range resp.Results {
+			paths = append(paths, r.Path)
+		}
+		return paths
+	}
+
+	if got := search(`handler`, true); len(got) != 1 || got[0] != "handler.go" {
+		t.Errorf("whole-word pattern matched %v, want exactly [handler.go]", got)
+	}
+	// Without the toggle the same pattern is a plain substring test, so the longer name answers too.
+	if got := search(`handler`, false); len(got) != 2 {
+		t.Errorf("pattern without the whole-word toggle matched %v, want both files", got)
+	}
+	if got := search(`^handler\.go$`, true); len(got) != 1 || got[0] != "handler.go" {
+		t.Errorf("anchored whole-word pattern matched %v, want exactly [handler.go]", got)
+	}
+}
+
 // TestFSSearchSkipsDotNames: neither half of a search reaches a dot-prefixed file or directory, and the
 // non-dot caches stay out as well. One token sits in most files of the fixture, so a single content query
 // answers both halves.
@@ -876,5 +933,162 @@ func TestFSSearchSkipsDotNames(t *testing.T) {
 		if contents[skip] {
 			t.Errorf("content search read into %s, which no search walks", skip)
 		}
+	}
+}
+
+// TestFSSearchLongLine: one long line must not end the scan of its file, so a match after a minified line
+// is still found.
+func TestFSSearchLongLine(t *testing.T) {
+	s := testServer(t)
+	cookie, csrf := loginTestCSRF(t, s)
+	base := t.TempDir()
+	long := strings.Repeat("x", 300_000) // a minified line is this long
+	if err := os.WriteFile(filepath.Join(base, "min.css"), []byte("needle before\n"+long+"\nneedle after\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.CreateProject(&types.Project{ID: "fs-longline", Name: "FS Long Line", Path: base}); err != nil {
+		t.Fatal(err)
+	}
+
+	v := url.Values{"project": {"fs-longline"}, "q": {"needle"}, "content": {"1"}}
+	req := testRequest(http.MethodGet, "/api/fs/search?"+v.Encode(), nil)
+	withAuthCSRF(req, cookie, csrf)
+	rr := testResponse(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("search: %d %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Results []struct {
+			Line int    `json:"line"`
+			Text string `json:"text"`
+		} `json:"results"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Results) != 2 {
+		t.Fatalf("a long line ended the file's scan: got %d results, want the line before and after it", len(resp.Results))
+	}
+	if resp.Results[0].Line != 1 || resp.Results[1].Line != 3 {
+		t.Errorf("line numbers after a long line: got %d and %d, want 1 and 3", resp.Results[0].Line, resp.Results[1].Line)
+	}
+}
+
+// TestFSSearchFoldsNonASCII: a line with a non-ASCII byte takes the same fold the rest of the product uses,
+// or case-insensitive search is quietly ASCII-only.
+func TestFSSearchFoldsNonASCII(t *testing.T) {
+	s := testServer(t)
+	cookie, csrf := loginTestCSRF(t, s)
+	base := t.TempDir()
+	if err := os.WriteFile(filepath.Join(base, "notes.txt"), []byte("café ÉCOLE\nplain ASCII LINE\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.CreateProject(&types.Project{ID: "fs-fold", Name: "FS Fold", Path: base}); err != nil {
+		t.Fatal(err)
+	}
+
+	search := func(q string, params ...string) map[int]bool {
+		t.Helper()
+		v := url.Values{"project": {"fs-fold"}, "q": {q}, "content": {"1"}}
+		for i := 0; i+1 < len(params); i += 2 {
+			v.Set(params[i], params[i+1])
+		}
+		req := testRequest(http.MethodGet, "/api/fs/search?"+v.Encode(), nil)
+		withAuthCSRF(req, cookie, csrf)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("search %q: %d %s", q, rr.Code, rr.Body.String())
+		}
+		var resp struct {
+			Results []struct {
+				Line int `json:"line"`
+			} `json:"results"`
+		}
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+			t.Fatal(err)
+		}
+		got := map[int]bool{}
+		for _, r := range resp.Results {
+			got[r.Line] = true
+		}
+		return got
+	}
+
+	if lines := search("école"); !lines[1] {
+		t.Errorf("a non-ASCII line was not folded for a case-insensitive search: %v", lines)
+	}
+	if lines := search("line"); !lines[2] {
+		t.Errorf("an ASCII line was not folded: %v", lines)
+	}
+	if lines := search("école", "case", "1"); lines[1] {
+		t.Errorf("case-sensitive search matched a differently-cased non-ASCII line: %v", lines)
+	}
+}
+
+// TestSearchSlotsBound: a search that cannot get a walk slot waits for one, and that wait ends when its
+// request ends.
+func TestSearchSlotsBound(t *testing.T) {
+	slots := make(searchSlots, 2)
+
+	first, err := slots.acquire(context.Background())
+	if err != nil {
+		t.Fatalf("first acquire: %v", err)
+	}
+	second, err := slots.acquire(context.Background())
+	if err != nil {
+		t.Fatalf("second acquire: %v", err)
+	}
+	defer second()
+
+	type outcome struct {
+		release func()
+		err     error
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	admitted := make(chan outcome, 1)
+	go func() {
+		release, err := slots.acquire(ctx)
+		admitted <- outcome{release: release, err: err}
+	}()
+
+	select {
+	case got := <-admitted:
+		t.Fatalf("a third walk was admitted while both slots were held: %v", got.err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	// The freed slot goes to the waiter, so both are held again for what follows.
+	first()
+	var third func()
+	select {
+	case got := <-admitted:
+		if got.err != nil {
+			t.Fatalf("waiter after a release: %v", got.err)
+		}
+		third = got.release
+		defer third()
+	case <-time.After(2 * time.Second):
+		t.Fatal("the released slot was never taken")
+	}
+
+	// A spent release must neither block nor free a slot the search no longer holds.
+	first()
+
+	// Both slots are held again, so this waiter's only way out is its own context.
+	blocked, cancelBlocked := context.WithCancel(context.Background())
+	blockedErr := make(chan error, 1)
+	go func() {
+		_, err := slots.acquire(blocked)
+		blockedErr <- err
+	}()
+	cancelBlocked()
+	select {
+	case err := <-blockedErr:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("a wait with no reader ended with %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the cancelled wait never ended")
 	}
 }

@@ -456,6 +456,24 @@ def regex_len(text, i):
     return 0
 
 
+def expr_span_len(text, i):
+    """Length of the comment or regex literal at text[i] == '/', inside a `{...}` expression,
+    or 0 if neither starts there.
+
+    A comment has to be inert here for the same reason `strip_comments` blanks it in a
+    script: an apostrophe in its prose opens a string that runs past the tag, so the tag is
+    never found and its attributes are counted as copy."""
+    n = len(text)
+    if i + 1 < n and text[i] == '/':
+        if text[i + 1] == '/':
+            end = text.find('\n', i)
+            return n - i if end == -1 else end - i
+        if text[i + 1] == '*':
+            end = text.find('*/', i + 2)
+            return n - i if end == -1 else end + 2 - i
+    return regex_len(text, i) if regex_starts_here(text, i) else 0
+
+
 def strip_comments(text):
     """Blank out // comments, /* */ comments and regex literals, tracking string state
     so a `//` inside a literal survives. Quotes inside a comment are inert (an apostrophe
@@ -619,9 +637,9 @@ def tag_len(text, i):
             if c == quote:
                 quote = ''
         elif c == '/' and depth > 0:
-            # A regex inside an attribute expression. Only inside one: at depth 0 a `/` is
-            # a closing tag or a self-closing slash, and the heuristic would not know.
-            ln = regex_len(text, j) if regex_starts_here(text, j) else 0
+            # Only inside an expression: at depth 0 a `/` is a closing tag or a self-closing
+            # slash, and the heuristic would not know which.
+            ln = expr_span_len(text, j)
             if ln:
                 j += ln
                 continue
@@ -653,8 +671,8 @@ def mustache_len(text, i):
                 continue
             if c == quote:
                 quote = ''
-        elif c == '/' and depth > 0 and regex_starts_here(text, j):
-            ln = regex_len(text, j)
+        elif c == '/' and depth > 0:
+            ln = expr_span_len(text, j)
             if ln:
                 j += ln
                 continue
