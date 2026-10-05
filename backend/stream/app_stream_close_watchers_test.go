@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
 
@@ -41,7 +42,7 @@ func TestCloseStopsTheProjectWatcher(t *testing.T) {
 	awaitWatched(t, asm, projectID, true)
 
 	// Delivery works here, so the silence measured after Close means something.
-	writeTestFile(t, project.Path, "before-close.txt", "before\n")
+	testgit.WriteFile(t, project.Path, "before-close.txt", "before\n")
 	client.await(t, 5*time.Second, isFsEventFor("before-close.txt"), 1, "fs_event for a watched project")
 	// A project reports one event per debounce window, so the write above can still have a
 	// later frame on its way; drain it before the quiet window starts.
@@ -49,6 +50,6 @@ func TestCloseStopsTheProjectWatcher(t *testing.T) {
 
 	shutdown()
 
-	writeTestFile(t, project.Path, "after-close.txt", "after\n")
+	testgit.WriteFile(t, project.Path, "after-close.txt", "after\n")
 	client.quietWindow(t, 3*time.Second, isFsEventFor("after-close.txt"), "fs_event after Close")
 }

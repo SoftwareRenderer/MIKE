@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"mike/backend/exec"
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
 
@@ -32,9 +33,9 @@ func rawImageProject(t *testing.T, s *Server, projectID string, files map[string
 	if err := s.store.CreateProject(&types.Project{ID: projectID, Name: projectID, Path: repo}); err != nil {
 		t.Fatal(err)
 	}
-	mustRunGit(t, repo, "init")
-	mustRunGit(t, repo, "config", "user.email", "test@test.com")
-	mustRunGit(t, repo, "config", "user.name", "Test")
+	testgit.Git(t, repo, "init")
+	testgit.Git(t, repo, "config", "user.email", "test@test.com")
+	testgit.Git(t, repo, "config", "user.name", "Test")
 	names := make([]string, 0, len(files))
 	for name, content := range files {
 		full := filepath.Join(repo, filepath.FromSlash(name))
@@ -47,9 +48,9 @@ func rawImageProject(t *testing.T, s *Server, projectID string, files map[string
 		names = append(names, name)
 	}
 	for _, name := range names {
-		mustRunGit(t, repo, "add", "--", name)
+		testgit.Git(t, repo, "add", "--", name)
 	}
-	mustRunGit(t, repo, "commit", "-m", "files")
+	testgit.Git(t, repo, "commit", "-m", "files")
 	return projectID, repo
 }
 
@@ -275,8 +276,8 @@ func TestFSRawRefBranchRefusesAnOversizedBlob(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repo, "big.png"), big, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	mustRunGit(t, repo, "add", "--", "big.png")
-	mustRunGit(t, repo, "commit", "-m", "big")
+	testgit.Git(t, repo, "add", "--", "big.png")
+	testgit.Git(t, repo, "commit", "-m", "big")
 
 	var before, after runtime.MemStats
 	runtime.GC()
@@ -342,7 +343,7 @@ func TestFSRawPutsNoFileNameInAHeader(t *testing.T) {
 func TestFSRawReadsACommittedObject(t *testing.T) {
 	s := testServer(t)
 	id, repo := rawImageProject(t, s, "p1", map[string][]byte{"logo.png": rawPNG})
-	head := strings.TrimSpace(mustRunGitOutput(t, repo, "rev-parse", "HEAD"))
+	head := strings.TrimSpace(testgit.GitOutput(t, repo, "rev-parse", "HEAD"))
 	if err := os.WriteFile(filepath.Join(repo, "logo.png"), []byte("REPLACED"), 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -752,13 +752,15 @@ func (m *mergeOrchestrator) mergeOnTargetBranch(projectID, dir, targetBranch, ta
 					mergeDetail = mergeErr.Error()
 				}
 				logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("merge failed (not a conflict): %s", mergeDetail)
-				m.logMergeFailed(taskID, task.CurrentThreadID, fmt.Sprintf("Merge failed: %s", mergeDetail))
+				m.persistAndBroadcastMergeMessage(taskID, task.CurrentThreadID,
+					fmt.Sprintf("Merge failed: %s", mergeDetail), "Merge failed", true)
 				return fmt.Errorf("merge failed (not a conflict): %s", mergeDetail)
 			}
 			// Flag it and abandon this merge: the model resolves the conflicts in a later turn.
 			_ = m.store.SetTaskMergeConflict(taskID, projectID, true)
 			_ = m.worktreeMgr.GitRunInDir(dir, "merge", "--abort")
-			m.logMergeFailed(taskID, task.CurrentThreadID, fmt.Sprintf("Merge failed: %v", resolveErr))
+			m.persistAndBroadcastMergeMessage(taskID, task.CurrentThreadID,
+				fmt.Sprintf("Merge failed: %v", resolveErr), "Merge failed", true)
 			return fmt.Errorf("merge conflict detected (will resolve via LLM): %w", resolveErr)
 		}
 	} else {
@@ -956,44 +958,18 @@ func (m *mergeOrchestrator) tryResolveMergeConflicts(dir, taskID, targetBranch, 
 }
 
 func (m *mergeOrchestrator) logMergeComplete(taskID, threadID, taskBranch, targetBranch string) {
-	if threadID == "" {
-		return
-	}
 	content := fmt.Sprintf("Branch %s merged into %s", taskBranch, targetBranch)
-	m.persistAndBroadcastMergeMessage(taskID, threadID, content, "Merged")
+	m.persistAndBroadcastMergeMessage(taskID, threadID, content, "Merged", false)
 }
 
-// logMergeFailed records the failure as a merge_resolution message.
-func (m *mergeOrchestrator) logMergeFailed(taskID, threadID, errorMsg string) {
+// persistAndBroadcastMergeMessage creates a merge_resolution message and broadcasts it. A thread of
+// its own is what makes the announcement readable later, so no thread means no message at all.
+// isError marks the frame as a failure; the key is absent otherwise, which is what the client reads
+// as false.
+func (m *mergeOrchestrator) persistAndBroadcastMergeMessage(taskID, threadID, content, label string, isError bool) {
 	if threadID == "" {
 		return
 	}
-	msgID := uuid.New().String()
-	if err := m.store.CreateTaskMessage(&types.TaskMessage{
-		ID:        msgID,
-		TaskID:    taskID,
-		ThreadID:  threadID,
-		Role:      "merge_resolution",
-		Content:   errorMsg,
-		CreatedAt: time.Now().UTC(),
-	}); err != nil {
-		logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("failed to log message: %v", err)
-		return
-	}
-	task, _ := m.store.GetTaskByID(taskID)
-	if task != nil && m.appStreamMgr != nil {
-		m.appStreamMgr.SendTaskEvent(task.ProjectID, taskID, types.StreamEvent{Type: types.WSTypeMergeResolution, Data: map[string]any{
-			"id":         msgID,
-			"content":    errorMsg,
-			"label":      "Merge failed",
-			"is_error":   true,
-			"created_at": time.Now().UTC().Format(time.RFC3339),
-		}})
-	}
-}
-
-// persistAndBroadcastMergeMessage creates a merge_resolution message and broadcasts it.
-func (m *mergeOrchestrator) persistAndBroadcastMergeMessage(taskID, threadID, content, label string) {
 	msgID := uuid.New().String()
 	if err := m.store.CreateTaskMessage(&types.TaskMessage{
 		ID:        msgID,
@@ -1009,12 +985,16 @@ func (m *mergeOrchestrator) persistAndBroadcastMergeMessage(taskID, threadID, co
 	// Broadcast to task stream clients for real-time display
 	task, _ := m.store.GetTaskByID(taskID)
 	if task != nil && m.appStreamMgr != nil {
-		m.appStreamMgr.SendTaskEvent(task.ProjectID, taskID, types.StreamEvent{Type: types.WSTypeMergeResolution, Data: map[string]any{
+		data := map[string]any{
 			"id":         msgID,
 			"content":    content,
 			"label":      label,
 			"created_at": time.Now().UTC().Format(time.RFC3339),
-		}})
+		}
+		if isError {
+			data["is_error"] = true
+		}
+		m.appStreamMgr.SendTaskEvent(task.ProjectID, taskID, types.StreamEvent{Type: types.WSTypeMergeResolution, Data: data})
 	}
 }
 

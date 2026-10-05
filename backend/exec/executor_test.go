@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -17,6 +16,7 @@ import (
 	"mike/backend/git"
 	"mike/backend/store"
 	"mike/backend/stream"
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 	pkgagent "mike/pkg/agent"
 )
@@ -27,22 +27,10 @@ func setupExecutorWithGit(t *testing.T) (*TaskExecutor, string, string, string) 
 	tmpDir := t.TempDir()
 	repoDir := filepath.Join(tmpDir, "repo")
 	worktreesDir := filepath.Join(tmpDir, "worktrees")
-	os.MkdirAll(repoDir, 0o755)
 	os.MkdirAll(worktreesDir, 0o755)
 
-	// Initialize git repo
-	runGit(t, repoDir, "init")
-	runGit(t, repoDir, "config", "user.email", "test@test.com")
-	runGit(t, repoDir, "config", "user.name", "Test")
-	os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Test\n"), 0o644)
-	runGit(t, repoDir, "add", "README.md")
-	runGit(t, repoDir, "commit", "-m", "Initial")
-
-	// Get the initial commit SHA
-	var initialSHA string
-	cmd := exec.Command("git", "-C", repoDir, "rev-parse", "HEAD")
-	out, _ := cmd.Output()
-	initialSHA = strings.TrimSpace(string(out))
+	testgit.RepoAtMessage(t, repoDir, "Initial")
+	initialSHA := testgit.GitOutput(t, repoDir, "rev-parse", "HEAD")
 
 	// Create store and config
 	dbPath := filepath.Join(tmpDir, "test.db")
@@ -72,15 +60,6 @@ func setupExecutorWithGit(t *testing.T) (*TaskExecutor, string, string, string) 
 	})
 
 	return te, repoDir, projectID, initialSHA
-}
-
-func runGit(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %s: %s: %v", args, string(out), err)
-	}
 }
 
 // TestPrepareTaskExecution_PreservesBaseRefOnRestart verifies that when a task
@@ -503,8 +482,8 @@ func TestCommitAndMerge_SerializesPerProject(t *testing.T) {
 	}
 	wtPath, _ := te.worktreeMgr.WorktreePath(taskID)
 	os.WriteFile(filepath.Join(wtPath, "initial.txt"), []byte("initial\n"), 0o644)
-	runGit(t, wtPath, "add", "initial.txt")
-	runGit(t, wtPath, "commit", "-m", "initial")
+	testgit.Git(t, wtPath, "add", "initial.txt")
+	testgit.Git(t, wtPath, "commit", "-m", "initial")
 
 	// Track execution order
 	var order []string
@@ -524,7 +503,7 @@ func TestCommitAndMerge_SerializesPerProject(t *testing.T) {
 	wg.Go(func() {
 		// Make a change before committing
 		os.WriteFile(filepath.Join(wtPath, "file-a"), []byte("content-a\n"), 0o644)
-		runGit(t, wtPath, "add", "file-a")
+		testgit.Git(t, wtPath, "add", "file-a")
 		close(startFirst)
 		te.merge.CommitAndMerge(projectID, taskID, wtPath, "commit-a", false)
 		mu.Lock()
@@ -541,7 +520,7 @@ func TestCommitAndMerge_SerializesPerProject(t *testing.T) {
 	// Second call — writes "file-b" content, should block until first releases
 	wg.Go(func() {
 		os.WriteFile(filepath.Join(wtPath, "file-b"), []byte("content-b\n"), 0o644)
-		runGit(t, wtPath, "add", "file-b")
+		testgit.Git(t, wtPath, "add", "file-b")
 		close(startSecond)
 		te.merge.CommitAndMerge(projectID, taskID, wtPath, "commit-b", false)
 		mu.Lock()
@@ -566,12 +545,7 @@ func TestCommitAndMerge_SerializesPerProject(t *testing.T) {
 	}
 
 	// Verify both commits exist on the branch
-	cmd := exec.Command("git", "-C", repoDir, "log", branchName, "--oneline")
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("git log: %v", err)
-	}
-	logOutput := string(out)
+	logOutput := testgit.GitOutput(t, repoDir, "log", branchName, "--oneline")
 	if !strings.Contains(logOutput, "commit-a") {
 		t.Errorf("expected commit-a in branch log, got:\n%s", logOutput)
 	}

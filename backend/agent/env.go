@@ -1,10 +1,6 @@
 package agent
 
-import (
-	"strings"
-
-	"mike/pkg/subproc"
-)
+import "mike/pkg/subproc"
 
 // Agent adapters spawn a subprocess (e.g. the `pi` binary) from an extension, and
 // that process can spawn further children on the host. Handing it os.Environ()
@@ -38,17 +34,7 @@ var agentEnvNames = map[string]bool{
 var agentEnvPrefixes = []string{"LC_"}
 
 // isAgentSafeEnv reports whether an environment variable name is on the allowlist.
-func isAgentSafeEnv(name string) bool {
-	if agentEnvNames[name] || subproc.IsProxyEnv(name) {
-		return true
-	}
-	for _, p := range agentEnvPrefixes {
-		if strings.HasPrefix(name, p) {
-			return true
-		}
-	}
-	return false
-}
+var isAgentSafeEnv = subproc.Allows(agentEnvNames, agentEnvPrefixes)
 
 // SafeAgentEnv returns the environment for an agent subprocess: the allowlisted part of the
 // server's, then extras (adapter-supplied values win, because os/exec keeps the last

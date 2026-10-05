@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"mike/backend/testutil/testgit"
 )
 
 // TestTaskDiffFallbackDivergenceBaseline verifies that a task whose branch exists but has
@@ -15,7 +17,7 @@ func TestTaskDiffFallbackDivergenceBaseline(t *testing.T) {
 	s := testServer(t)
 	projID, dir := createTestProjectWithPath(t, s)
 
-	mainBranch := mustRunGitOutput(t, dir, "rev-parse", "--abbrev-ref", "HEAD")
+	mainBranch := testgit.GitOutput(t, dir, "rev-parse", "--abbrev-ref", "HEAD")
 	if mainBranch == "" || mainBranch == "HEAD" {
 		t.Skipf("cannot determine main branch: %q", mainBranch)
 	}
@@ -50,8 +52,8 @@ func TestTaskDiffFallbackDivergenceBaseline(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(wtPath, "subtask-feature.txt"), []byte("from subtask\n"), 0o644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
-	mustRunGit(t, wtPath, "add", "subtask-feature.txt")
-	mustRunGit(t, wtPath, "commit", "-m", "Merge subtask changes")
+	testgit.Git(t, wtPath, "add", "subtask-feature.txt")
+	testgit.Git(t, wtPath, "commit", "-m", "Merge subtask changes")
 
 	// Move to review (HandleTaskCommits returns empty for backlog tasks).
 	cookie, csrfToken := loginTestCSRF(t, s)
@@ -123,7 +125,7 @@ func TestTaskDiffUnusableBaselineFallsBack(t *testing.T) {
 			s := testServer(t)
 			projID, dir := createTestProjectWithPath(t, s)
 
-			mainBranch := mustRunGitOutput(t, dir, "rev-parse", "--abbrev-ref", "HEAD")
+			mainBranch := testgit.GitOutput(t, dir, "rev-parse", "--abbrev-ref", "HEAD")
 			if mainBranch == "" || mainBranch == "HEAD" {
 				t.Skipf("cannot determine main branch: %q", mainBranch)
 			}
@@ -146,8 +148,8 @@ func TestTaskDiffUnusableBaselineFallsBack(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(wtPath, "merged-file.txt"), []byte("merged\n"), 0o644); err != nil {
 				t.Fatalf("write file: %v", err)
 			}
-			mustRunGit(t, wtPath, "add", "merged-file.txt")
-			mustRunGit(t, wtPath, "commit", "-m", "Merged subtask work")
+			testgit.Git(t, wtPath, "add", "merged-file.txt")
+			testgit.Git(t, wtPath, "commit", "-m", "Merged subtask work")
 
 			task, err := s.store.GetTask(projID, taskID)
 			if err != nil {

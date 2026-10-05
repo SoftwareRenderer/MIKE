@@ -45,9 +45,27 @@ var proxyEnvNames = map[string]bool{
 	"no_proxy":    true,
 }
 
+// Allows returns the accept-test for one family's allowlist: a name in names, a proxy variable, or
+// a name under one of the bulk prefixes. The tables stay with the family, so "what does this
+// subprocess get" is answerable in the package that decides it; the matching lives here so a family
+// cannot grow a different rule by editing its own loop.
+func Allows(names map[string]bool, prefixes []string) func(name string) bool {
+	return func(name string) bool {
+		if names[name] || IsProxyEnv(name) {
+			return true
+		}
+		for _, p := range prefixes {
+			if strings.HasPrefix(name, p) {
+				return true
+			}
+		}
+		return false
+	}
+}
+
 // Inherit returns the part of this process's environment that keep accepts, in os.Environ's order.
-// The allowlist belongs to the family that needs it; the rules shared by every family - matching a
-// prefix case-insensitively, dropping anything not claimed - are here so there is one copy of them.
+// The allowlist belongs to the family that needs it; what is shared is the walk of os.Environ, the
+// empty-value policy, and the matching in Allows above.
 func Inherit(keep func(name string) bool, empty EmptyPolicy) []string {
 	all := os.Environ()
 	env := make([]string, 0, len(all))

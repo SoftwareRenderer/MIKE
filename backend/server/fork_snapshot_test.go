@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"mike/backend/git"
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
 
@@ -60,8 +61,8 @@ func setupForkWithCheckpoint(t *testing.T, s *Server, name string) forkFixture {
 	if err := os.WriteFile(filepath.Join(wt, "file.txt"), []byte(content), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	mustRunGit(t, wt, "add", "-A")
-	checkpoint := strings.TrimSpace(mustRunGitOutput(t, wt, "stash", "create"))
+	testgit.Git(t, wt, "add", "-A")
+	checkpoint := strings.TrimSpace(testgit.GitOutput(t, wt, "stash", "create"))
 	if checkpoint == "" {
 		t.Fatal("stash create returned empty")
 	}
@@ -114,7 +115,7 @@ func TestForkInsideForkKeepsTheCheckpointItInherited(t *testing.T) {
 	fx := setupForkWithCheckpoint(t, s, "fork-of-fork")
 
 	// First generation: the fork is cut at the checkpoint, so its branch is the checkpoint.
-	if got := strings.TrimSpace(mustRunGitOutput(t, fx.worktreePath, "rev-parse", "thread/"+fx.forkID)); got != fx.checkpoint {
+	if got := strings.TrimSpace(testgit.GitOutput(t, fx.worktreePath, "rev-parse", "thread/"+fx.forkID)); got != fx.checkpoint {
 		t.Fatalf("first fork branched at %s, want the inherited checkpoint %s", got, fx.checkpoint)
 	}
 
@@ -123,7 +124,7 @@ func TestForkInsideForkKeepsTheCheckpointItInherited(t *testing.T) {
 	innerMsg := postMessageIn(t, s, fx, "actually, count to 3")
 	innerID := forkFrom(t, s, fx, fx.forkID, innerMsg)
 
-	if got := strings.TrimSpace(mustRunGitOutput(t, fx.worktreePath, "rev-parse", "thread/"+innerID)); got != fx.checkpoint {
+	if got := strings.TrimSpace(testgit.GitOutput(t, fx.worktreePath, "rev-parse", "thread/"+innerID)); got != fx.checkpoint {
 		t.Errorf("fork-of-a-fork branched at %s, want %s (the task's base commit means the files rewound past the conversation)", got, fx.checkpoint)
 	}
 	verifyWorktreeContent(t, fx.worktreePath, "file.txt", fx.fileContent, "after forking inside a fork")
@@ -191,8 +192,8 @@ func TestDeletingMessagesInAForkRollsBackToTheSurvivingCheckpoint(t *testing.T) 
 	if err := os.WriteFile(filepath.Join(fx.worktreePath, "file.txt"), []byte(later), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	mustRunGit(t, fx.worktreePath, "add", "-A")
-	forkSnapshot := strings.TrimSpace(mustRunGitOutput(t, fx.worktreePath, "stash", "create"))
+	testgit.Git(t, fx.worktreePath, "add", "-A")
+	forkSnapshot := strings.TrimSpace(testgit.GitOutput(t, fx.worktreePath, "stash", "create"))
 	assistant := &types.TaskMessage{
 		ID: "asst-fork-turn", TaskID: fx.taskID, ThreadID: fx.forkID, Role: "assistant", Content: "counted to 3",
 		GitCommitHash: forkSnapshot, CreatedAt: time.Now().UTC(),

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"mike/backend/git"
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
 
@@ -27,13 +28,13 @@ func TestSyncTargetIntoTask_NoNewCommits(t *testing.T) {
 	}
 	te.store.CreateTask(task)
 
-	runGit(t, repoDir, "checkout", "-b", "task/test-branch")
-	runGit(t, repoDir, "checkout", "master")
+	testgit.Git(t, repoDir, "checkout", "-b", "task/test-branch")
+	testgit.Git(t, repoDir, "checkout", "master")
 
 	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, taskID)
 	os.MkdirAll(wtPath, 0o755)
-	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/test-branch")
-	runGitInDir(t, wtPath, "checkout", "task/test-branch")
+	testgit.Git(t, repoDir, "worktree", "add", "--detach", wtPath, "task/test-branch")
+	testgit.Git(t, wtPath, "checkout", "task/test-branch")
 
 	err := te.merge.syncTargetIntoTask(projectID, taskID, "master", "task/test-branch", task)
 	if err != nil {
@@ -63,20 +64,20 @@ func TestSyncTargetIntoTask_CleanMerge(t *testing.T) {
 	}
 	te.store.CreateTask(task)
 
-	runGit(t, repoDir, "checkout", "-b", "task/clean-branch")
+	testgit.Git(t, repoDir, "checkout", "-b", "task/clean-branch")
 	os.WriteFile(filepath.Join(repoDir, "fileA.txt"), []byte("task version\n"), 0o644)
-	runGit(t, repoDir, "add", "fileA.txt")
-	runGit(t, repoDir, "commit", "-m", "task change file A")
-	runGit(t, repoDir, "checkout", "master")
+	testgit.Git(t, repoDir, "add", "fileA.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "task change file A")
+	testgit.Git(t, repoDir, "checkout", "master")
 
 	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, taskID)
 	os.MkdirAll(wtPath, 0o755)
-	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/clean-branch")
-	runGitInDir(t, wtPath, "checkout", "task/clean-branch")
+	testgit.Git(t, repoDir, "worktree", "add", "--detach", wtPath, "task/clean-branch")
+	testgit.Git(t, wtPath, "checkout", "task/clean-branch")
 
 	os.WriteFile(filepath.Join(repoDir, "fileB.txt"), []byte("master version\n"), 0o644)
-	runGit(t, repoDir, "add", "fileB.txt")
-	runGit(t, repoDir, "commit", "-m", "master change file B")
+	testgit.Git(t, repoDir, "add", "fileB.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "master change file B")
 
 	err := te.merge.syncTargetIntoTask(projectID, taskID, "master", "task/clean-branch", task)
 	if err != nil {
@@ -112,21 +113,21 @@ func TestSyncTargetIntoTask_Conflict_EntersMergeConflictState(t *testing.T) {
 	te.store.CreateTask(task)
 
 	// Create task branch with a change to shared file
-	runGit(t, repoDir, "checkout", "-b", "task/conflict-branch")
+	testgit.Git(t, repoDir, "checkout", "-b", "task/conflict-branch")
 	os.WriteFile(filepath.Join(repoDir, "shared.txt"), []byte("task version\n"), 0o644)
-	runGit(t, repoDir, "add", "shared.txt")
-	runGit(t, repoDir, "commit", "-m", "task change shared")
-	runGit(t, repoDir, "checkout", "master")
+	testgit.Git(t, repoDir, "add", "shared.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "task change shared")
+	testgit.Git(t, repoDir, "checkout", "master")
 
 	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, taskID)
 	os.MkdirAll(wtPath, 0o755)
-	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/conflict-branch")
-	runGitInDir(t, wtPath, "checkout", "task/conflict-branch")
+	testgit.Git(t, repoDir, "worktree", "add", "--detach", wtPath, "task/conflict-branch")
+	testgit.Git(t, wtPath, "checkout", "task/conflict-branch")
 
 	// Add conflicting change to master
 	os.WriteFile(filepath.Join(repoDir, "shared.txt"), []byte("master version\n"), 0o644)
-	runGit(t, repoDir, "add", "shared.txt")
-	runGit(t, repoDir, "commit", "-m", "master change shared")
+	testgit.Git(t, repoDir, "add", "shared.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "master change shared")
 
 	err := te.merge.syncTargetIntoTask(projectID, taskID, "master", "task/conflict-branch", task)
 	if err != nil {
@@ -166,16 +167,16 @@ func TestSyncTargetIntoTask_WorktreeMissing(t *testing.T) {
 	te.store.CreateTask(task)
 
 	// Create the task branch
-	runGit(t, repoDir, "checkout", "-b", "task/no-wt-branch")
+	testgit.Git(t, repoDir, "checkout", "-b", "task/no-wt-branch")
 	os.WriteFile(filepath.Join(repoDir, "task.txt"), []byte("task\n"), 0o644)
-	runGit(t, repoDir, "add", "task.txt")
-	runGit(t, repoDir, "commit", "-m", "task change")
-	runGit(t, repoDir, "checkout", "master")
+	testgit.Git(t, repoDir, "add", "task.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "task change")
+	testgit.Git(t, repoDir, "checkout", "master")
 
 	// Add a commit to master (so there are new commits)
 	os.WriteFile(filepath.Join(repoDir, "master.txt"), []byte("master\n"), 0o644)
-	runGit(t, repoDir, "add", "master.txt")
-	runGit(t, repoDir, "commit", "-m", "master change")
+	testgit.Git(t, repoDir, "add", "master.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "master change")
 
 	// Don't create a worktree — sync should skip gracefully
 	err := te.merge.syncTargetIntoTask(projectID, taskID, "master", "task/no-wt-branch", task)
@@ -204,17 +205,17 @@ func TestSyncTargetIntoTask_SubtaskChain(t *testing.T) {
 	te.store.CreateTask(parent)
 
 	// Create parent branch
-	runGit(t, repoDir, "checkout", "-b", "task/parent-branch")
+	testgit.Git(t, repoDir, "checkout", "-b", "task/parent-branch")
 	os.WriteFile(filepath.Join(repoDir, "parent.txt"), []byte("parent v1\n"), 0o644)
-	runGit(t, repoDir, "add", "parent.txt")
-	runGit(t, repoDir, "commit", "-m", "parent initial")
-	runGit(t, repoDir, "checkout", "master")
+	testgit.Git(t, repoDir, "add", "parent.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "parent initial")
+	testgit.Git(t, repoDir, "checkout", "master")
 
 	// Create parent worktree
 	parentWtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, parentID)
 	os.MkdirAll(parentWtPath, 0o755)
-	runGit(t, repoDir, "worktree", "add", "--detach", parentWtPath, "task/parent-branch")
-	runGitInDir(t, parentWtPath, "checkout", "task/parent-branch")
+	testgit.Git(t, repoDir, "worktree", "add", "--detach", parentWtPath, "task/parent-branch")
+	testgit.Git(t, parentWtPath, "checkout", "task/parent-branch")
 
 	// Create child task
 	childID := "child-sync"
@@ -232,22 +233,22 @@ func TestSyncTargetIntoTask_SubtaskChain(t *testing.T) {
 	te.store.CreateTask(child)
 
 	// Create child branch from parent branch (in parent worktree since it's locked there)
-	runGitInDir(t, parentWtPath, "checkout", "-b", "task/child-branch")
+	testgit.Git(t, parentWtPath, "checkout", "-b", "task/child-branch")
 	os.WriteFile(filepath.Join(parentWtPath, "child.txt"), []byte("child v1\n"), 0o644)
-	runGitInDir(t, parentWtPath, "add", "child.txt")
-	runGitInDir(t, parentWtPath, "commit", "-m", "child initial")
-	runGitInDir(t, parentWtPath, "checkout", "task/parent-branch")
+	testgit.Git(t, parentWtPath, "add", "child.txt")
+	testgit.Git(t, parentWtPath, "commit", "-m", "child initial")
+	testgit.Git(t, parentWtPath, "checkout", "task/parent-branch")
 
 	// Create child worktree
 	childWtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, childID)
 	os.MkdirAll(childWtPath, 0o755)
-	runGit(t, repoDir, "worktree", "add", "--detach", childWtPath, "task/child-branch")
-	runGitInDir(t, childWtPath, "checkout", "task/child-branch")
+	testgit.Git(t, repoDir, "worktree", "add", "--detach", childWtPath, "task/child-branch")
+	testgit.Git(t, childWtPath, "checkout", "task/child-branch")
 
 	// Add a non-conflicting commit to parent branch
 	os.WriteFile(filepath.Join(parentWtPath, "parent_new.txt"), []byte("parent new\n"), 0o644)
-	runGitInDir(t, parentWtPath, "add", "parent_new.txt")
-	runGitInDir(t, parentWtPath, "commit", "-m", "parent new file")
+	testgit.Git(t, parentWtPath, "add", "parent_new.txt")
+	testgit.Git(t, parentWtPath, "commit", "-m", "parent new file")
 
 	child, _ = te.store.GetTaskByID(childID)
 
@@ -283,20 +284,20 @@ func TestSyncTargetIntoTask_KeepsUnstagedWorkWhenTheStashFails(t *testing.T) {
 	}
 	te.store.CreateTask(task)
 
-	runGit(t, repoDir, "checkout", "-b", "task/refuse-branch")
+	testgit.Git(t, repoDir, "checkout", "-b", "task/refuse-branch")
 	os.WriteFile(filepath.Join(repoDir, "fileA.txt"), []byte("committed version\n"), 0o644)
-	runGit(t, repoDir, "add", "fileA.txt")
-	runGit(t, repoDir, "commit", "-m", "task change file A")
-	runGit(t, repoDir, "checkout", "master")
+	testgit.Git(t, repoDir, "add", "fileA.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "task change file A")
+	testgit.Git(t, repoDir, "checkout", "master")
 
 	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, taskID)
 	os.MkdirAll(wtPath, 0o755)
-	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/refuse-branch")
-	runGitInDir(t, wtPath, "checkout", "task/refuse-branch")
+	testgit.Git(t, repoDir, "worktree", "add", "--detach", wtPath, "task/refuse-branch")
+	testgit.Git(t, wtPath, "checkout", "task/refuse-branch")
 
 	os.WriteFile(filepath.Join(repoDir, "fileB.txt"), []byte("master version\n"), 0o644)
-	runGit(t, repoDir, "add", "fileB.txt")
-	runGit(t, repoDir, "commit", "-m", "master change file B")
+	testgit.Git(t, repoDir, "add", "fileB.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "master change file B")
 
 	// The work at risk: an unstaged edit to a tracked file, which is what a forced checkout reverts.
 	os.WriteFile(filepath.Join(wtPath, "fileA.txt"), []byte("uncommitted work\n"), 0o644)

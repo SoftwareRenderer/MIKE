@@ -401,7 +401,9 @@ Enforced by the server process, so it holds for non-sandboxed projects too.
   writes the pause and marks the branch before it cancels anything, because a cancelled run hands its exit
   to `AutoStartNextSibling`, which reads those rows.
 - **A task with unfinished children never runs its own turn.** Start, resume and dragging to In Progress
-  start what the schedule picks under it; the row rests started-but-pending.
+  start what the schedule picks under it; the row rests started-but-pending. For a click that decision has
+  one home, `startUnderSchedule` (`backend/api/task.go`), and it starts a row with a parent through
+  `StartSubtask` — the only starter that inherits the parent's model config.
 
 ## Commit and Done
 

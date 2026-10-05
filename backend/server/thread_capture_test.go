@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"mike/backend/git"
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
 
@@ -19,7 +20,7 @@ import (
 // git process does. Reading still works, so the failure lands in the capture rather than before it.
 func blockGitWrites(t *testing.T, worktreePath string) func() {
 	t.Helper()
-	gitDir := strings.TrimSpace(mustRunGitOutput(t, worktreePath, "rev-parse", "--absolute-git-dir"))
+	gitDir := strings.TrimSpace(testgit.GitOutput(t, worktreePath, "rev-parse", "--absolute-git-dir"))
 	lock := filepath.Join(gitDir, "index.lock")
 	if err := os.WriteFile(lock, nil, 0o644); err != nil {
 		t.Fatalf("block git: %v", err)
@@ -48,7 +49,7 @@ func threadCount(t *testing.T, s *Server, projID, taskID string) int {
 
 func stashCount(t *testing.T, worktreePath string) int {
 	t.Helper()
-	out := strings.TrimSpace(mustRunGitOutput(t, worktreePath, "stash", "list"))
+	out := strings.TrimSpace(testgit.GitOutput(t, worktreePath, "stash", "list"))
 	if out == "" {
 		return 0
 	}

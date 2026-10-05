@@ -24,12 +24,12 @@ func setupDoneSnapshotTest(t *testing.T) (string, *store.Store, *config.ConfigSt
 	os.MkdirAll(repoDir, 0o755)
 	os.MkdirAll(worktreesDir, 0o755)
 
-	runGitTest(t, repoDir, "init")
-	runGitTest(t, repoDir, "config", "user.email", "test@test.com")
-	runGitTest(t, repoDir, "config", "user.name", "Test")
-	writeTestFile(t, repoDir, "README.md", "# Base\n")
-	runGitTest(t, repoDir, "add", "README.md")
-	runGitTest(t, repoDir, "commit", "-m", "initial")
+	testgit.Git(t, repoDir, "init")
+	testgit.Git(t, repoDir, "config", "user.email", "test@test.com")
+	testgit.Git(t, repoDir, "config", "user.name", "Test")
+	testgit.WriteFile(t, repoDir, "README.md", "# Base\n")
+	testgit.Git(t, repoDir, "add", "README.md")
+	testgit.Git(t, repoDir, "commit", "-m", "initial")
 
 	s, err := store.NewStore(filepath.Join(tmpDir, "test.db"))
 	if err != nil {
@@ -77,34 +77,15 @@ func commitInWorktree(t *testing.T, wm *git.WorktreeManager, taskID, file, conte
 	if err != nil {
 		t.Fatalf("worktree path: %v", err)
 	}
-	writeTestFile(t, worktreePath, file, content)
-	runGitTest(t, worktreePath, "add", "-A")
-	runGitTest(t, worktreePath, "commit", "-m", "change "+file)
-	return runGitTestOutput(t, worktreePath, "rev-parse", "HEAD")
+	testgit.WriteFile(t, worktreePath, file, content)
+	testgit.Git(t, worktreePath, "add", "-A")
+	testgit.Git(t, worktreePath, "commit", "-m", "change "+file)
+	return testgit.GitOutput(t, worktreePath, "rev-parse", "HEAD")
 }
 
 func revParse(t *testing.T, dir, ref string) string {
 	t.Helper()
-	return runGitTestOutput(t, dir, "rev-parse", ref)
-}
-
-// runGitTest runs a git command in dir, failing the test on error.
-func runGitTest(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	testgit.Git(t, dir, args...)
-}
-
-// runGitTestOutput runs a git command in dir and returns trimmed output.
-func runGitTestOutput(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	return testgit.GitOutput(t, dir, args...)
-}
-
-func writeTestFile(t *testing.T, dir, name, content string) {
-	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
-		t.Fatalf("write file: %v", err)
-	}
+	return testgit.GitOutput(t, dir, "rev-parse", ref)
 }
 
 // markDone sets the task's pinned refs and status to done, persisting it.

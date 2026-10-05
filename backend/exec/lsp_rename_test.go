@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"mike/backend/testutil/testgit"
 )
 
 // fakeLSPManager records LSP method calls and returns canned responses.
@@ -52,8 +54,8 @@ func renameArgs() map[string]any {
 func TestHandleLSPRename_AppliesAllFiles(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
-	writeTestFile(t, filepath.Join(ws, "a.txt"), "foo := 1\nx := foo\n")
-	writeTestFile(t, filepath.Join(ws, "b.txt"), "y := foo\n")
+	testgit.WriteFile(t, ws, "a.txt", "foo := 1\nx := foo\n")
+	testgit.WriteFile(t, ws, "b.txt", "y := foo\n")
 
 	uriA := "file://" + filepath.Join(ws, "a.txt")
 	uriB := "file://" + filepath.Join(ws, "b.txt")
@@ -116,7 +118,7 @@ func TestHandleLSPRename_AppliesAllFiles(t *testing.T) {
 func TestHandleLSPRename_NotRenamable(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
-	writeTestFile(t, filepath.Join(ws, "a.txt"), "foo := 1\n")
+	testgit.WriteFile(t, ws, "a.txt", "foo := 1\n")
 	before, _ := os.ReadFile(filepath.Join(ws, "a.txt"))
 
 	fake := &fakeLSPManager{
@@ -148,7 +150,7 @@ func TestHandleLSPRename_NotRenamable(t *testing.T) {
 func TestHandleLSPRename_NullResult(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
-	writeTestFile(t, filepath.Join(ws, "a.txt"), "foo := 1\n")
+	testgit.WriteFile(t, ws, "a.txt", "foo := 1\n")
 
 	fake := &fakeLSPManager{
 		enabled: true,
@@ -177,7 +179,7 @@ func TestHandleLSPRename_NullResult(t *testing.T) {
 func TestHandleLSPRename_LSPError(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
-	writeTestFile(t, filepath.Join(ws, "a.txt"), "foo := 1\n")
+	testgit.WriteFile(t, ws, "a.txt", "foo := 1\n")
 
 	fake := &fakeLSPManager{
 		enabled: true,
@@ -206,7 +208,7 @@ func TestHandleLSPRename_LSPError(t *testing.T) {
 func TestHandleLSPRename_OutsideWorkspace(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
-	writeTestFile(t, filepath.Join(ws, "a.txt"), "foo := 1\n")
+	testgit.WriteFile(t, ws, "a.txt", "foo := 1\n")
 	outside := filepath.Join(t.TempDir(), "outside.txt")
 
 	fake := &fakeLSPManager{
@@ -272,7 +274,7 @@ func TestHandleLSPRename_ToolCallsDisabled(t *testing.T) {
 func TestHandleLSPRename_SymbolNotFound(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
-	writeTestFile(t, filepath.Join(ws, "a.txt"), "baz := 1\n")
+	testgit.WriteFile(t, ws, "a.txt", "baz := 1\n")
 	te := newBareTestExecutor(t)
 	te.lspMgr = &fakeLSPManager{enabled: true}
 	read, write := osReadWrite(ws)
@@ -282,12 +284,5 @@ func TestHandleLSPRename_SymbolNotFound(t *testing.T) {
 	}
 	if !strings.Contains(result, "not found") {
 		t.Errorf("result should say not found: %q", result)
-	}
-}
-
-func writeTestFile(t *testing.T, path, content string) {
-	t.Helper()
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"mike/backend/config"
 	"mike/backend/git"
 	"mike/backend/store"
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
 
@@ -35,13 +36,13 @@ func newWatcherBaselineEnv(t *testing.T) *watcherBaselineEnv {
 	if err := os.MkdirAll(worktreesDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, repoDir, "init")
-	runGit(t, repoDir, "config", "user.email", "test@test.com")
-	runGit(t, repoDir, "config", "user.name", "Test")
-	writeTestFile(t, repoDir, "README.md", "# Test\n")
-	runGit(t, repoDir, "add", "README.md")
-	runGit(t, repoDir, "commit", "-m", "Initial")
-	mainBranch := strings.TrimSpace(runGitTestOutput(t, repoDir, "rev-parse", "--abbrev-ref", "HEAD"))
+	testgit.Git(t, repoDir, "init")
+	testgit.Git(t, repoDir, "config", "user.email", "test@test.com")
+	testgit.Git(t, repoDir, "config", "user.name", "Test")
+	testgit.WriteFile(t, repoDir, "README.md", "# Test\n")
+	testgit.Git(t, repoDir, "add", "README.md")
+	testgit.Git(t, repoDir, "commit", "-m", "Initial")
+	mainBranch := strings.TrimSpace(testgit.GitOutput(t, repoDir, "rev-parse", "--abbrev-ref", "HEAD"))
 
 	dbPath := filepath.Join(tmpDir, "test.db")
 	s, err := store.NewStore(dbPath)
@@ -88,9 +89,9 @@ func (e *watcherBaselineEnv) commitOnTaskBranch(t *testing.T, name, content, mes
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeTestFile(t, wtPath, name, content)
-	runGit(t, wtPath, "add", name)
-	runGit(t, wtPath, "commit", "-m", message)
+	testgit.WriteFile(t, wtPath, name, content)
+	testgit.Git(t, wtPath, "add", name)
+	testgit.Git(t, wtPath, "commit", "-m", message)
 }
 
 // forkThread points the task's current thread at a branch forked off its own.
@@ -100,7 +101,7 @@ func (e *watcherBaselineEnv) forkThread(t *testing.T, threadID, forkBranch strin
 	if err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, e.repoDir, "branch", forkBranch, task.Branch)
+	testgit.Git(t, e.repoDir, "branch", forkBranch, task.Branch)
 	if err := e.store.CreateThread(&types.TaskThread{
 		ID: threadID, TaskID: e.taskID, Name: threadID, IsActive: true, GitBranch: forkBranch,
 	}); err != nil {
@@ -164,7 +165,7 @@ func TestWatcherKeepsADoneTaskDiffOutOfTheFileCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	task.Status = types.StatusDone
-	task.BranchTip = strings.TrimSpace(runGitTestOutput(t, e.repoDir, "rev-parse", task.Branch))
+	task.BranchTip = strings.TrimSpace(testgit.GitOutput(t, e.repoDir, "rev-parse", task.Branch))
 	if err := e.store.UpdateTask(task); err != nil {
 		t.Fatal(err)
 	}
@@ -185,8 +186,8 @@ func TestWatcherReportsUntrackedLinesApartFromTrackedAdditions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeTestFile(t, wtPath, "README.md", "# Test\nline one\nline two\n")
-	writeTestFile(t, wtPath, "scratch.txt", "a\nb\nc\n")
+	testgit.WriteFile(t, wtPath, "README.md", "# Test\nline one\nline two\n")
+	testgit.WriteFile(t, wtPath, "scratch.txt", "a\nb\nc\n")
 
 	var events []DiffStatsEvent
 	ww, err := NewWorktreeWatcher(e.wm, func(ev DiffStatsEvent) { events = append(events, ev) }, nil, nil)

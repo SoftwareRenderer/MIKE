@@ -12,7 +12,6 @@ package sandboxruntime
 import (
 	"context"
 	"os/exec"
-	"strings"
 
 	"mike/pkg/subproc"
 )
@@ -69,17 +68,7 @@ var podmanEnvNames = map[string]bool{
 var podmanEnvPrefixes = []string{"CONTAINERS_", "PODMAN_", "DOCKER_", "LC_"}
 
 // isPodmanSafeEnv reports whether an environment variable name may reach the podman CLI.
-func isPodmanSafeEnv(name string) bool {
-	if podmanEnvNames[name] || subproc.IsProxyEnv(name) {
-		return true
-	}
-	for _, p := range podmanEnvPrefixes {
-		if strings.HasPrefix(name, p) {
-			return true
-		}
-	}
-	return false
-}
+var isPodmanSafeEnv = subproc.Allows(podmanEnvNames, podmanEnvPrefixes)
 
 // PodmanEnv returns the environment for a podman subprocess: the allowlisted part of the server's
 // environment, then extras (extras last, because os/exec keeps the LAST occurrence of a key).

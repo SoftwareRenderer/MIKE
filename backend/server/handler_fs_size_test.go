@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"testing"
 
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
 
@@ -47,13 +48,13 @@ func fsSizeProject(t *testing.T, s *Server, projectID, name string, size int64) 
 	}); err != nil {
 		t.Fatal(err)
 	}
-	mustRunGit(t, repo, "init")
-	mustRunGit(t, repo, "config", "user.email", "test@test.com")
-	mustRunGit(t, repo, "config", "user.name", "Test")
+	testgit.Git(t, repo, "init")
+	testgit.Git(t, repo, "config", "user.email", "test@test.com")
+	testgit.Git(t, repo, "config", "user.name", "Test")
 	file := filepath.Join(repo, name)
 	sparseFile(t, file, size)
-	mustRunGit(t, repo, "add", name)
-	mustRunGit(t, repo, "commit", "-m", "big")
+	testgit.Git(t, repo, "add", name)
+	testgit.Git(t, repo, "commit", "-m", "big")
 	return projectID, file
 }
 

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"mike/backend/git"
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
 
@@ -36,22 +37,22 @@ func TestMergeConflictResolution_StagesOnlyConflictedFiles(t *testing.T) {
 	te.store.CreateTask(task)
 
 	// Create task branch with a change to shared.txt
-	runGit(t, repoDir, "checkout", "-b", "task/conflict-resolve")
+	testgit.Git(t, repoDir, "checkout", "-b", "task/conflict-resolve")
 	os.WriteFile(filepath.Join(repoDir, "shared.txt"), []byte("task version of shared\n"), 0o644)
-	runGit(t, repoDir, "add", "shared.txt")
-	runGit(t, repoDir, "commit", "-m", "task edits shared")
-	runGit(t, repoDir, "checkout", "master")
+	testgit.Git(t, repoDir, "add", "shared.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "task edits shared")
+	testgit.Git(t, repoDir, "checkout", "master")
 
 	// Create worktree for the task
 	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, taskID)
 	os.MkdirAll(wtPath, 0o755)
-	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/conflict-resolve")
-	runGitInDir(t, wtPath, "checkout", "task/conflict-resolve")
+	testgit.Git(t, repoDir, "worktree", "add", "--detach", wtPath, "task/conflict-resolve")
+	testgit.Git(t, wtPath, "checkout", "task/conflict-resolve")
 
 	// Add conflicting change to master
 	os.WriteFile(filepath.Join(repoDir, "shared.txt"), []byte("master version of shared\n"), 0o644)
-	runGit(t, repoDir, "add", "shared.txt")
-	runGit(t, repoDir, "commit", "-m", "master edits shared")
+	testgit.Git(t, repoDir, "add", "shared.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "master edits shared")
 
 	// Manually simulate the sync-merge that creates the conflict state:
 	// 1. Stash working tree changes
@@ -60,7 +61,7 @@ func TestMergeConflictResolution_StagesOnlyConflictedFiles(t *testing.T) {
 	unlockStash1()
 
 	// 2. Checkout task branch
-	runGitInDir(t, wtPath, "checkout", "-f", "task/conflict-resolve")
+	testgit.Git(t, wtPath, "checkout", "-f", "task/conflict-resolve")
 
 	// 3. Merge master into task branch (will conflict)
 	cmd := runGitCmd(wtPath, "merge", "master", "--no-edit")
@@ -177,30 +178,30 @@ func TestMergeConflictResolution_MultipleConflictedFiles(t *testing.T) {
 	te.store.CreateTask(task)
 
 	// Create task branch with changes to multiple files
-	runGit(t, repoDir, "checkout", "-b", "task/multi-conflict")
+	testgit.Git(t, repoDir, "checkout", "-b", "task/multi-conflict")
 	os.WriteFile(filepath.Join(repoDir, "fileA.txt"), []byte("task version A\n"), 0o644)
 	os.WriteFile(filepath.Join(repoDir, "fileB.txt"), []byte("task version B\n"), 0o644)
-	runGit(t, repoDir, "add", "fileA.txt", "fileB.txt")
-	runGit(t, repoDir, "commit", "-m", "task edits A and B")
-	runGit(t, repoDir, "checkout", "master")
+	testgit.Git(t, repoDir, "add", "fileA.txt", "fileB.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "task edits A and B")
+	testgit.Git(t, repoDir, "checkout", "master")
 
 	// Create worktree
 	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, taskID)
 	os.MkdirAll(wtPath, 0o755)
-	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/multi-conflict")
-	runGitInDir(t, wtPath, "checkout", "task/multi-conflict")
+	testgit.Git(t, repoDir, "worktree", "add", "--detach", wtPath, "task/multi-conflict")
+	testgit.Git(t, wtPath, "checkout", "task/multi-conflict")
 
 	// Conflicting changes on master for the same files
 	os.WriteFile(filepath.Join(repoDir, "fileA.txt"), []byte("master version A\n"), 0o644)
 	os.WriteFile(filepath.Join(repoDir, "fileB.txt"), []byte("master version B\n"), 0o644)
-	runGit(t, repoDir, "add", "fileA.txt", "fileB.txt")
-	runGit(t, repoDir, "commit", "-m", "master edits A and B")
+	testgit.Git(t, repoDir, "add", "fileA.txt", "fileB.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "master edits A and B")
 
 	// Simulate sync-merge conflict
 	unlockStash3 := te.worktreeMgr.LockProjectStash(projectID)
 	_ = te.worktreeMgr.GitRunInDir(wtPath, "stash", "push", "-u", "-m", "kanban sync-merge stash")
 	unlockStash3()
-	runGitInDir(t, wtPath, "checkout", "-f", "task/multi-conflict")
+	testgit.Git(t, wtPath, "checkout", "-f", "task/multi-conflict")
 	cmd := runGitCmd(wtPath, "merge", "master", "--no-edit")
 	if cmd.exitCode == 0 {
 		t.Fatal("merge should have conflicted")
@@ -270,26 +271,26 @@ func TestMergeConflictResolution_CommitMessage(t *testing.T) {
 	te.store.CreateTask(task)
 
 	// Set up conflict
-	runGit(t, repoDir, "checkout", "-b", "task/commit-msg")
+	testgit.Git(t, repoDir, "checkout", "-b", "task/commit-msg")
 	os.WriteFile(filepath.Join(repoDir, "conflict.txt"), []byte("task content\n"), 0o644)
-	runGit(t, repoDir, "add", "conflict.txt")
-	runGit(t, repoDir, "commit", "-m", "task edit")
-	runGit(t, repoDir, "checkout", "master")
+	testgit.Git(t, repoDir, "add", "conflict.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "task edit")
+	testgit.Git(t, repoDir, "checkout", "master")
 
 	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, taskID)
 	os.MkdirAll(wtPath, 0o755)
-	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/commit-msg")
-	runGitInDir(t, wtPath, "checkout", "task/commit-msg")
+	testgit.Git(t, repoDir, "worktree", "add", "--detach", wtPath, "task/commit-msg")
+	testgit.Git(t, wtPath, "checkout", "task/commit-msg")
 
 	os.WriteFile(filepath.Join(repoDir, "conflict.txt"), []byte("master content\n"), 0o644)
-	runGit(t, repoDir, "add", "conflict.txt")
-	runGit(t, repoDir, "commit", "-m", "master edit")
+	testgit.Git(t, repoDir, "add", "conflict.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "master edit")
 
 	// Simulate sync-merge conflict
 	unlockStash5 := te.worktreeMgr.LockProjectStash(projectID)
 	_ = te.worktreeMgr.GitRunInDir(wtPath, "stash", "push", "-u", "-m", "kanban sync-merge stash")
 	unlockStash5()
-	runGitInDir(t, wtPath, "checkout", "-f", "task/commit-msg")
+	testgit.Git(t, wtPath, "checkout", "-f", "task/commit-msg")
 	runGitCmd(wtPath, "merge", "master", "--no-edit")
 
 	// Resolve conflict
@@ -335,28 +336,28 @@ func TestMergeConflictResolution_WithFinalMerge(t *testing.T) {
 	te.store.CreateTask(task)
 
 	// Create task branch with a change
-	runGit(t, repoDir, "checkout", "-b", "task/full-flow")
+	testgit.Git(t, repoDir, "checkout", "-b", "task/full-flow")
 	os.WriteFile(filepath.Join(repoDir, "shared.txt"), []byte("line 1\ntask change\nline 3\n"), 0o644)
-	runGit(t, repoDir, "add", "shared.txt")
-	runGit(t, repoDir, "commit", "-m", "task edit")
-	runGit(t, repoDir, "checkout", "master")
+	testgit.Git(t, repoDir, "add", "shared.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "task edit")
+	testgit.Git(t, repoDir, "checkout", "master")
 
 	// Create worktree
 	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, taskID)
 	os.MkdirAll(wtPath, 0o755)
-	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/full-flow")
-	runGitInDir(t, wtPath, "checkout", "task/full-flow")
+	testgit.Git(t, repoDir, "worktree", "add", "--detach", wtPath, "task/full-flow")
+	testgit.Git(t, wtPath, "checkout", "task/full-flow")
 
 	// Conflicting change on master
 	os.WriteFile(filepath.Join(repoDir, "shared.txt"), []byte("line 1\nmaster change\nline 3\n"), 0o644)
-	runGit(t, repoDir, "add", "shared.txt")
-	runGit(t, repoDir, "commit", "-m", "master edit")
+	testgit.Git(t, repoDir, "add", "shared.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "master edit")
 
 	// Simulate sync-merge conflict
 	unlockStash6 := te.worktreeMgr.LockProjectStash(projectID)
 	_ = te.worktreeMgr.GitRunInDir(wtPath, "stash", "push", "-u", "-m", "kanban sync-merge stash")
 	unlockStash6()
-	runGitInDir(t, wtPath, "checkout", "-f", "task/full-flow")
+	testgit.Git(t, wtPath, "checkout", "-f", "task/full-flow")
 	runGitCmd(wtPath, "merge", "master", "--no-edit")
 
 	// Verify conflict state
@@ -393,7 +394,7 @@ func TestMergeConflictResolution_WithFinalMerge(t *testing.T) {
 	}
 
 	// Verify the resolved content is on master
-	runGit(t, repoDir, "checkout", "master")
+	testgit.Git(t, repoDir, "checkout", "master")
 	content, err := os.ReadFile(filepath.Join(repoDir, "shared.txt"))
 	if err != nil {
 		t.Fatalf("read shared.txt on master: %v", err)
@@ -426,17 +427,17 @@ func TestMergeConflictResolution_StashRestored(t *testing.T) {
 	te.store.CreateTask(task)
 
 	// Create task branch
-	runGit(t, repoDir, "checkout", "-b", "task/stash-restore")
+	testgit.Git(t, repoDir, "checkout", "-b", "task/stash-restore")
 	os.WriteFile(filepath.Join(repoDir, "shared.txt"), []byte("task version\n"), 0o644)
-	runGit(t, repoDir, "add", "shared.txt")
-	runGit(t, repoDir, "commit", "-m", "task edit")
-	runGit(t, repoDir, "checkout", "master")
+	testgit.Git(t, repoDir, "add", "shared.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "task edit")
+	testgit.Git(t, repoDir, "checkout", "master")
 
 	// Create worktree
 	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, taskID)
 	os.MkdirAll(wtPath, 0o755)
-	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/stash-restore")
-	runGitInDir(t, wtPath, "checkout", "task/stash-restore")
+	testgit.Git(t, repoDir, "worktree", "add", "--detach", wtPath, "task/stash-restore")
+	testgit.Git(t, wtPath, "checkout", "task/stash-restore")
 
 	// User has unstaged changes (e.g., work-in-progress notes)
 	unstagedFile := filepath.Join(wtPath, "notes.txt")
@@ -444,8 +445,8 @@ func TestMergeConflictResolution_StashRestored(t *testing.T) {
 
 	// Conflicting change on master
 	os.WriteFile(filepath.Join(repoDir, "shared.txt"), []byte("master version\n"), 0o644)
-	runGit(t, repoDir, "add", "shared.txt")
-	runGit(t, repoDir, "commit", "-m", "master edit")
+	testgit.Git(t, repoDir, "add", "shared.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "master edit")
 
 	// Simulate sync-merge conflict (stashes the notes.txt)
 	unlockStash8 := te.worktreeMgr.LockProjectStash(projectID)
@@ -460,7 +461,7 @@ func TestMergeConflictResolution_StashRestored(t *testing.T) {
 		t.Error("notes.txt should be stashed (not in worktree)")
 	}
 
-	runGitInDir(t, wtPath, "checkout", "-f", "task/stash-restore")
+	testgit.Git(t, wtPath, "checkout", "-f", "task/stash-restore")
 	runGitCmd(wtPath, "merge", "master", "--no-edit")
 
 	// Resolve conflict
@@ -516,22 +517,22 @@ func TestMergeConflictResolution_NoConflictedFilesAutoContinues(t *testing.T) {
 	te.store.CreateTask(task)
 
 	// Create task branch with a file
-	runGit(t, repoDir, "checkout", "-b", "task/auto-resolve")
+	testgit.Git(t, repoDir, "checkout", "-b", "task/auto-resolve")
 	os.WriteFile(filepath.Join(repoDir, "task_only.txt"), []byte("task only file\n"), 0o644)
-	runGit(t, repoDir, "add", "task_only.txt")
-	runGit(t, repoDir, "commit", "-m", "task adds file")
-	runGit(t, repoDir, "checkout", "master")
+	testgit.Git(t, repoDir, "add", "task_only.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "task adds file")
+	testgit.Git(t, repoDir, "checkout", "master")
 
 	// Create worktree
 	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, taskID)
 	os.MkdirAll(wtPath, 0o755)
-	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/auto-resolve")
-	runGitInDir(t, wtPath, "checkout", "task/auto-resolve")
+	testgit.Git(t, repoDir, "worktree", "add", "--detach", wtPath, "task/auto-resolve")
+	testgit.Git(t, wtPath, "checkout", "task/auto-resolve")
 
 	// Non-conflicting change on master (different file)
 	os.WriteFile(filepath.Join(repoDir, "master_only.txt"), []byte("master only file\n"), 0o644)
-	runGit(t, repoDir, "add", "master_only.txt")
-	runGit(t, repoDir, "commit", "-m", "master adds file")
+	testgit.Git(t, repoDir, "add", "master_only.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "master adds file")
 
 	// Merge should succeed cleanly (no conflicts)
 	err := te.merge.syncTargetIntoTask(projectID, taskID, "master", "task/auto-resolve", task)
@@ -579,28 +580,28 @@ func TestMergeConflictResolution_UnresolvedSkipped(t *testing.T) {
 	te.store.CreateTask(task)
 
 	// Create task branch with a change
-	runGit(t, repoDir, "checkout", "-b", "task/unresolved")
+	testgit.Git(t, repoDir, "checkout", "-b", "task/unresolved")
 	os.WriteFile(filepath.Join(repoDir, "shared.txt"), []byte("task version\n"), 0o644)
-	runGit(t, repoDir, "add", "shared.txt")
-	runGit(t, repoDir, "commit", "-m", "task edit")
-	runGit(t, repoDir, "checkout", "master")
+	testgit.Git(t, repoDir, "add", "shared.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "task edit")
+	testgit.Git(t, repoDir, "checkout", "master")
 
 	// Create worktree
 	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, taskID)
 	os.MkdirAll(wtPath, 0o755)
-	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/unresolved")
-	runGitInDir(t, wtPath, "checkout", "task/unresolved")
+	testgit.Git(t, repoDir, "worktree", "add", "--detach", wtPath, "task/unresolved")
+	testgit.Git(t, wtPath, "checkout", "task/unresolved")
 
 	// Conflicting change on master
 	os.WriteFile(filepath.Join(repoDir, "shared.txt"), []byte("master version\n"), 0o644)
-	runGit(t, repoDir, "add", "shared.txt")
-	runGit(t, repoDir, "commit", "-m", "master edit")
+	testgit.Git(t, repoDir, "add", "shared.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "master edit")
 
 	// Simulate sync-merge conflict
 	unlockStash10 := te.worktreeMgr.LockProjectStash(projectID)
 	_ = te.worktreeMgr.GitRunInDir(wtPath, "stash", "push", "-u", "-m", "kanban sync-merge stash")
 	unlockStash10()
-	runGitInDir(t, wtPath, "checkout", "-f", "task/unresolved")
+	testgit.Git(t, wtPath, "checkout", "-f", "task/unresolved")
 	runGitCmd(wtPath, "merge", "master", "--no-edit")
 
 	// --- Bad LLM resolution: leaves conflict markers ---
@@ -647,17 +648,17 @@ func TestMergeConflictResolution_SubtaskIntoParentBranch(t *testing.T) {
 	te.store.CreateTask(parent)
 
 	// Create parent branch
-	runGit(t, repoDir, "checkout", "-b", "task/"+parentID)
+	testgit.Git(t, repoDir, "checkout", "-b", "task/"+parentID)
 	os.WriteFile(filepath.Join(repoDir, "shared.txt"), []byte("parent initial\n"), 0o644)
-	runGit(t, repoDir, "add", "shared.txt")
-	runGit(t, repoDir, "commit", "-m", "parent initial")
-	runGit(t, repoDir, "checkout", "master")
+	testgit.Git(t, repoDir, "add", "shared.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "parent initial")
+	testgit.Git(t, repoDir, "checkout", "master")
 
 	// Create parent worktree
 	parentWtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, parentID)
 	os.MkdirAll(parentWtPath, 0o755)
-	runGit(t, repoDir, "worktree", "add", "--detach", parentWtPath, "task/"+parentID)
-	runGitInDir(t, parentWtPath, "checkout", "task/"+parentID)
+	testgit.Git(t, repoDir, "worktree", "add", "--detach", parentWtPath, "task/"+parentID)
+	testgit.Git(t, parentWtPath, "checkout", "task/"+parentID)
 
 	// Create subtask
 	subtaskID := "subtask-conflict-resolve"
@@ -676,28 +677,28 @@ func TestMergeConflictResolution_SubtaskIntoParentBranch(t *testing.T) {
 	te.store.CreateTask(subtask)
 
 	// Create subtask branch from parent branch
-	runGitInDir(t, parentWtPath, "checkout", "-b", "task/"+subtaskID)
+	testgit.Git(t, parentWtPath, "checkout", "-b", "task/"+subtaskID)
 	os.WriteFile(filepath.Join(parentWtPath, "shared.txt"), []byte("parent initial\ntask change\n"), 0o644)
-	runGitInDir(t, parentWtPath, "add", "shared.txt")
-	runGitInDir(t, parentWtPath, "commit", "-m", "subtask edit shared")
-	runGitInDir(t, parentWtPath, "checkout", "task/"+parentID)
+	testgit.Git(t, parentWtPath, "add", "shared.txt")
+	testgit.Git(t, parentWtPath, "commit", "-m", "subtask edit shared")
+	testgit.Git(t, parentWtPath, "checkout", "task/"+parentID)
 
 	// Create subtask worktree
 	subtaskWtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, subtaskID)
 	os.MkdirAll(subtaskWtPath, 0o755)
-	runGit(t, repoDir, "worktree", "add", "--detach", subtaskWtPath, "task/"+subtaskID)
-	runGitInDir(t, subtaskWtPath, "checkout", "task/"+subtaskID)
+	testgit.Git(t, repoDir, "worktree", "add", "--detach", subtaskWtPath, "task/"+subtaskID)
+	testgit.Git(t, subtaskWtPath, "checkout", "task/"+subtaskID)
 
 	// Parent makes a conflicting change to shared.txt
 	os.WriteFile(filepath.Join(parentWtPath, "shared.txt"), []byte("parent initial\nparent change\n"), 0o644)
-	runGitInDir(t, parentWtPath, "add", "shared.txt")
-	runGitInDir(t, parentWtPath, "commit", "-m", "parent edit shared")
+	testgit.Git(t, parentWtPath, "add", "shared.txt")
+	testgit.Git(t, parentWtPath, "commit", "-m", "parent edit shared")
 
 	// --- Simulate sync-merge conflict in subtask worktree ---
 	unlockStash11 := te.worktreeMgr.LockProjectStash(projectID)
 	_ = te.worktreeMgr.GitRunInDir(subtaskWtPath, "stash", "push", "-u", "-m", "kanban sync-merge stash")
 	unlockStash11()
-	runGitInDir(t, subtaskWtPath, "checkout", "-f", "task/"+subtaskID)
+	testgit.Git(t, subtaskWtPath, "checkout", "-f", "task/"+subtaskID)
 	runGitCmd(subtaskWtPath, "merge", "task/"+parentID, "--no-edit")
 
 	// Verify conflict
@@ -764,30 +765,30 @@ func TestMergeConflictResolution_PartialResolution_SkipsCommit(t *testing.T) {
 	te.store.CreateTask(task)
 
 	// Create task branch with changes to two files
-	runGit(t, repoDir, "checkout", "-b", "task/partial-resolve")
+	testgit.Git(t, repoDir, "checkout", "-b", "task/partial-resolve")
 	os.WriteFile(filepath.Join(repoDir, "fileA.txt"), []byte("task version A\n"), 0o644)
 	os.WriteFile(filepath.Join(repoDir, "fileB.txt"), []byte("task version B\n"), 0o644)
-	runGit(t, repoDir, "add", "fileA.txt", "fileB.txt")
-	runGit(t, repoDir, "commit", "-m", "task edits A and B")
-	runGit(t, repoDir, "checkout", "master")
+	testgit.Git(t, repoDir, "add", "fileA.txt", "fileB.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "task edits A and B")
+	testgit.Git(t, repoDir, "checkout", "master")
 
 	// Create worktree
 	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, taskID)
 	os.MkdirAll(wtPath, 0o755)
-	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/partial-resolve")
-	runGitInDir(t, wtPath, "checkout", "task/partial-resolve")
+	testgit.Git(t, repoDir, "worktree", "add", "--detach", wtPath, "task/partial-resolve")
+	testgit.Git(t, wtPath, "checkout", "task/partial-resolve")
 
 	// Conflicting changes on master
 	os.WriteFile(filepath.Join(repoDir, "fileA.txt"), []byte("master version A\n"), 0o644)
 	os.WriteFile(filepath.Join(repoDir, "fileB.txt"), []byte("master version B\n"), 0o644)
-	runGit(t, repoDir, "add", "fileA.txt", "fileB.txt")
-	runGit(t, repoDir, "commit", "-m", "master edits A and B")
+	testgit.Git(t, repoDir, "add", "fileA.txt", "fileB.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "master edits A and B")
 
 	// Simulate sync-merge conflict
 	unlockStash13 := te.worktreeMgr.LockProjectStash(projectID)
 	_ = te.worktreeMgr.GitRunInDir(wtPath, "stash", "push", "-u", "-m", "kanban sync-merge stash")
 	unlockStash13()
-	runGitInDir(t, wtPath, "checkout", "-f", "task/partial-resolve")
+	testgit.Git(t, wtPath, "checkout", "-f", "task/partial-resolve")
 	runGitCmd(wtPath, "merge", "master", "--no-edit")
 
 	// Verify both files are conflicted
@@ -843,28 +844,28 @@ func TestMergeConflictResolution_CommitIsMergeCommit(t *testing.T) {
 	te.store.CreateTask(task)
 
 	// Create task branch with a change
-	runGit(t, repoDir, "checkout", "-b", "task/merge-commit")
+	testgit.Git(t, repoDir, "checkout", "-b", "task/merge-commit")
 	os.WriteFile(filepath.Join(repoDir, "shared.txt"), []byte("task version\n"), 0o644)
-	runGit(t, repoDir, "add", "shared.txt")
-	runGit(t, repoDir, "commit", "-m", "task edit")
-	runGit(t, repoDir, "checkout", "master")
+	testgit.Git(t, repoDir, "add", "shared.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "task edit")
+	testgit.Git(t, repoDir, "checkout", "master")
 
 	// Create worktree
 	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, taskID)
 	os.MkdirAll(wtPath, 0o755)
-	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/merge-commit")
-	runGitInDir(t, wtPath, "checkout", "task/merge-commit")
+	testgit.Git(t, repoDir, "worktree", "add", "--detach", wtPath, "task/merge-commit")
+	testgit.Git(t, wtPath, "checkout", "task/merge-commit")
 
 	// Conflicting change on master
 	os.WriteFile(filepath.Join(repoDir, "shared.txt"), []byte("master version\n"), 0o644)
-	runGit(t, repoDir, "add", "shared.txt")
-	runGit(t, repoDir, "commit", "-m", "master edit")
+	testgit.Git(t, repoDir, "add", "shared.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "master edit")
 
 	// Simulate sync-merge conflict
 	unlockStash14 := te.worktreeMgr.LockProjectStash(projectID)
 	_ = te.worktreeMgr.GitRunInDir(wtPath, "stash", "push", "-u", "-m", "kanban sync-merge stash")
 	unlockStash14()
-	runGitInDir(t, wtPath, "checkout", "-f", "task/merge-commit")
+	testgit.Git(t, wtPath, "checkout", "-f", "task/merge-commit")
 	runGitCmd(wtPath, "merge", "master", "--no-edit")
 
 	// Resolve conflict
@@ -916,11 +917,11 @@ func TestCommitConflictResolution_DoesNotSweepUntrackedFiles(t *testing.T) {
 	}
 
 	// Task branch with a committed change.
-	runGit(t, repoDir, "checkout", "-b", "task/no-sweep")
+	testgit.Git(t, repoDir, "checkout", "-b", "task/no-sweep")
 	os.WriteFile(filepath.Join(repoDir, "shared.txt"), []byte("task change\n"), 0o644)
-	runGit(t, repoDir, "add", "shared.txt")
-	runGit(t, repoDir, "commit", "-m", "task edit")
-	runGit(t, repoDir, "checkout", "master")
+	testgit.Git(t, repoDir, "add", "shared.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "task edit")
+	testgit.Git(t, repoDir, "checkout", "master")
 
 	// Worktree on the task branch, in a final-merge conflict state (no MERGE_HEAD).
 	wtPath, err := te.worktreeMgr.WorktreePath(taskID)
@@ -928,8 +929,8 @@ func TestCommitConflictResolution_DoesNotSweepUntrackedFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	os.MkdirAll(wtPath, 0o755)
-	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/no-sweep")
-	runGitInDir(t, wtPath, "checkout", "task/no-sweep")
+	testgit.Git(t, repoDir, "worktree", "add", "--detach", wtPath, "task/no-sweep")
+	testgit.Git(t, wtPath, "checkout", "task/no-sweep")
 	if isMergeInProgress(wtPath) {
 		t.Fatal("precondition: no merge should be in progress")
 	}
@@ -1001,24 +1002,24 @@ func newSyncConflictFixture(t *testing.T, taskID, branch string, autoMerge bool)
 	}
 
 	// Task branch changes the middle line.
-	runGit(t, repoDir, "checkout", "-b", branch)
+	testgit.Git(t, repoDir, "checkout", "-b", branch)
 	os.WriteFile(filepath.Join(repoDir, "shared.txt"), []byte("line 1\ntask change\nline 3\n"), 0o644)
-	runGit(t, repoDir, "add", "shared.txt")
-	runGit(t, repoDir, "commit", "-m", "task edit")
-	runGit(t, repoDir, "checkout", "master")
+	testgit.Git(t, repoDir, "add", "shared.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "task edit")
+	testgit.Git(t, repoDir, "checkout", "master")
 
 	wtPath, err := te.worktreeMgr.WorktreePath(taskID)
 	if err != nil {
 		t.Fatalf("worktree path: %v", err)
 	}
 	os.MkdirAll(wtPath, 0o755)
-	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, branch)
-	runGitInDir(t, wtPath, "checkout", branch)
+	testgit.Git(t, repoDir, "worktree", "add", "--detach", wtPath, branch)
+	testgit.Git(t, wtPath, "checkout", branch)
 
 	// The target branch changes the same line, then gets merged into the task branch.
 	os.WriteFile(filepath.Join(repoDir, "shared.txt"), []byte("line 1\nmaster change\nline 3\n"), 0o644)
-	runGit(t, repoDir, "add", "shared.txt")
-	runGit(t, repoDir, "commit", "-m", "master edit")
+	testgit.Git(t, repoDir, "add", "shared.txt")
+	testgit.Git(t, repoDir, "commit", "-m", "master edit")
 	runGitCmd(wtPath, "merge", "master", "--no-edit")
 
 	if !isMergeInProgress(wtPath) {
@@ -1102,8 +1103,8 @@ func TestCommitConflictResolution_StillConflictedKeepsTheClick(t *testing.T) {
 	// The target branch moves again while the resolution is in flight, so the merge the click asks
 	// for conflicts once more.
 	os.WriteFile(filepath.Join(fx.repoDir, "shared.txt"), []byte("line 1\nmaster moved again\nline 3\n"), 0o644)
-	runGit(t, fx.repoDir, "add", "shared.txt")
-	runGit(t, fx.repoDir, "commit", "-m", "master moved")
+	testgit.Git(t, fx.repoDir, "add", "shared.txt")
+	testgit.Git(t, fx.repoDir, "commit", "-m", "master moved")
 
 	fx.te.ArmCommitAndDone(fx.taskID)
 	task, err := fx.te.store.GetTaskByID(fx.taskID)

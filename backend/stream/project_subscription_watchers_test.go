@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"mike/backend/store"
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
 
@@ -40,7 +41,7 @@ func newWatcherTestManager(t *testing.T, projectIDs ...string) *AppStreamManager
 		if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
 			t.Fatalf("mkdir %s: %v", root, err)
 		}
-		writeTestFile(t, root, filepath.Join(".git", "HEAD"), "ref: refs/heads/main\n")
+		testgit.WriteFile(t, root, filepath.Join(".git", "HEAD"), "ref: refs/heads/main\n")
 		if err := s.CreateProject(&types.Project{ID: id, Name: id, Path: root}); err != nil {
 			t.Fatalf("create project %s: %v", id, err)
 		}

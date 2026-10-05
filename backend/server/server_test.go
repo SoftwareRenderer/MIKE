@@ -243,18 +243,6 @@ func initGitRepo(t *testing.T, path string) {
 	testgit.RepoAtMessage(t, path, "Initial")
 }
 
-// mustRunGit runs a git command and fails the test on error.
-func mustRunGit(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	testgit.Git(t, dir, args...)
-}
-
-// mustRunGitOutput runs a git command and returns its stdout, failing on error.
-func mustRunGitOutput(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	return testgit.GitOutput(t, dir, args...)
-}
-
 // createTestTask creates a task via the API and returns its ID.
 func createTestTask(t *testing.T, s *Server, projectID string, prompt string) string {
 	t.Helper()
@@ -493,15 +481,15 @@ func TestHandleFSReadGutterMarkers(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mustRunGit(t, tmpDir, "init")
-	mustRunGit(t, tmpDir, "config", "user.email", "test@test.com")
-	mustRunGit(t, tmpDir, "config", "user.name", "Test")
+	testgit.Git(t, tmpDir, "init")
+	testgit.Git(t, tmpDir, "config", "user.email", "test@test.com")
+	testgit.Git(t, tmpDir, "config", "user.name", "Test")
 
 	originalContent := "line1\nline2\nline3\nline4\nline5\n"
 	testFile := filepath.Join(tmpDir, "test.txt")
 	os.WriteFile(testFile, []byte(originalContent), 0644)
-	mustRunGit(t, tmpDir, "add", "test.txt")
-	mustRunGit(t, tmpDir, "commit", "-m", "initial")
+	testgit.Git(t, tmpDir, "add", "test.txt")
+	testgit.Git(t, tmpDir, "commit", "-m", "initial")
 
 	cookie, csrfToken := loginTestCSRF(t, s)
 

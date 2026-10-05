@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
 
@@ -65,25 +66,15 @@ func fsRenamePost(t *testing.T, s *Server, project, path, name string) (int, str
 	return rr.Code, mustJSON[map[string]string](t, rr.Body)["path"]
 }
 
-func fsOpsWrite(t *testing.T, path, content string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // fsOpsGitRepo is a project row over a real git checkout, so a worktree can be created from it.
 func fsOpsGitRepo(t *testing.T, s *Server, id string, files map[string]string) string {
 	t.Helper()
 	repo := fsOpsProject(t, s, id, files)
-	mustRunGit(t, repo, "init")
-	mustRunGit(t, repo, "config", "user.email", "test@test.com")
-	mustRunGit(t, repo, "config", "user.name", "Test")
-	mustRunGit(t, repo, "add", ".")
-	mustRunGit(t, repo, "commit", "-m", "commit")
+	testgit.Git(t, repo, "init")
+	testgit.Git(t, repo, "config", "user.email", "test@test.com")
+	testgit.Git(t, repo, "config", "user.name", "Test")
+	testgit.Git(t, repo, "add", ".")
+	testgit.Git(t, repo, "commit", "-m", "commit")
 	return repo
 }
 
@@ -151,7 +142,7 @@ func TestFSDeleteStaysInsideTheProject(t *testing.T) {
 	repo := fsOpsProject(t, s, "fs-ops-del-escape", map[string]string{"a.txt": "a"})
 	outside := t.TempDir()
 	secret := filepath.Join(outside, "secret.txt")
-	fsOpsWrite(t, secret, "host secret")
+	testgit.WriteFile(t, outside, "secret.txt", "host secret")
 	link := filepath.Join(repo, "link")
 	if err := os.Symlink(outside, link); err != nil {
 		t.Fatal(err)
@@ -254,7 +245,7 @@ func TestFSMoveStaysInsideTheProject(t *testing.T) {
 	s := testServer(t)
 	repo := fsOpsProject(t, s, "fs-ops-move-escape", map[string]string{"a.txt": "a"})
 	outside := t.TempDir()
-	fsOpsWrite(t, filepath.Join(outside, "b.txt"), "b")
+	testgit.WriteFile(t, outside, "b.txt", "b")
 
 	// The source outside the project, and a destination outside it.
 	for _, body := range []map[string]any{
@@ -279,7 +270,7 @@ func TestFSMoveRefusesBeforeTouchingAnything(t *testing.T) {
 	s := testServer(t)
 	repo := fsOpsProject(t, s, "fs-ops-atomic", map[string]string{"one.txt": "1", "two.txt": "2"})
 	other := t.TempDir()
-	fsOpsWrite(t, filepath.Join(other, "ghost.txt"), "ghost")
+	testgit.WriteFile(t, other, "ghost.txt", "ghost")
 
 	status, _ := fsOpsPost(t, s, "move", "fs-ops-atomic", "", map[string]any{
 		"paths": []string{filepath.Join(repo, "one.txt"), filepath.Join(other, "ghost.txt"), filepath.Join(repo, "two.txt")},
@@ -396,7 +387,7 @@ func TestFSRenameStaysInsideTheProject(t *testing.T) {
 	s := testServer(t)
 	repo := fsOpsProject(t, s, "fs-ops-rename-escape", map[string]string{"a.txt": "a"})
 	outside := t.TempDir()
-	fsOpsWrite(t, filepath.Join(outside, "secret.txt"), "host secret")
+	testgit.WriteFile(t, outside, "secret.txt", "host secret")
 	link := filepath.Join(repo, "link")
 	if err := os.Symlink(outside, link); err != nil {
 		t.Fatal(err)

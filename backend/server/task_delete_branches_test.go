@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
 
@@ -113,7 +114,7 @@ func TestTaskDeleteRemovesForkThreadBranch(t *testing.T) {
 	const threadID = "0f0thread0"
 	threadBranch := "thread/" + threadID
 	wt := taskWorktreeDir(t, projDir, taskID)
-	mustRunGit(t, wt, "checkout", "-b", threadBranch)
+	testgit.Git(t, wt, "checkout", "-b", threadBranch)
 
 	task, err := s.store.GetTaskByID(taskID)
 	if err != nil {
@@ -149,7 +150,7 @@ func TestTaskDeleteRemovesForkThreadBranch(t *testing.T) {
 // taskWorktreeDir asks git where the task's worktree is rather than rebuilding the path.
 func taskWorktreeDir(t *testing.T, projDir, taskID string) string {
 	t.Helper()
-	out := mustRunGitOutput(t, projDir, "worktree", "list", "--porcelain")
+	out := testgit.GitOutput(t, projDir, "worktree", "list", "--porcelain")
 	var found string
 	for _, line := range strings.Split(out, "\n") {
 		if path := strings.TrimPrefix(line, "worktree "); path != line {

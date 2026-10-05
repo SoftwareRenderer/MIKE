@@ -9,6 +9,7 @@ import (
 	"mike/backend/config"
 	"mike/backend/git"
 	"mike/backend/store"
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
 
@@ -23,12 +24,12 @@ func TestWorktreeWatcherRetriesWhileInFlight(t *testing.T) {
 	os.MkdirAll(repoDir, 0o755)
 	os.MkdirAll(worktreesDir, 0o755)
 
-	runGit(t, repoDir, "init")
-	runGit(t, repoDir, "config", "user.email", "test@test.com")
-	runGit(t, repoDir, "config", "user.name", "Test")
-	writeTestFile(t, repoDir, "README.md", "# Test\n")
-	runGit(t, repoDir, "add", "README.md")
-	runGit(t, repoDir, "commit", "-m", "Initial")
+	testgit.Git(t, repoDir, "init")
+	testgit.Git(t, repoDir, "config", "user.email", "test@test.com")
+	testgit.Git(t, repoDir, "config", "user.name", "Test")
+	testgit.WriteFile(t, repoDir, "README.md", "# Test\n")
+	testgit.Git(t, repoDir, "add", "README.md")
+	testgit.Git(t, repoDir, "commit", "-m", "Initial")
 
 	dbPath := filepath.Join(tmpDir, "test.db")
 	s, err := store.NewStore(dbPath)
@@ -92,7 +93,7 @@ func TestWorktreeWatcherRetriesWhileInFlight(t *testing.T) {
 
 	// Trigger a filesystem change -> handleEvent arms the 1s throttle timer.
 	worktreePath := filepath.Join(worktreesDir, projID, taskID)
-	writeTestFile(t, worktreePath, "new.txt", "hello\n")
+	testgit.WriteFile(t, worktreePath, "new.txt", "hello\n")
 
 	// Wait long enough for the 1s throttle to fire (while still in flight).
 	time.Sleep(1400 * time.Millisecond)

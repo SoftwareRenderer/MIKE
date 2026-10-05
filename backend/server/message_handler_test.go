@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
 
@@ -1100,8 +1101,8 @@ func TestDeleteMessagesAfterCheckpointRollsBackFork(t *testing.T) {
 		t.Fatalf("write initial file: %v", err)
 	}
 	initGitRepo(t, tmpDir)
-	mustRunGit(t, tmpDir, "add", "file.txt")
-	mustRunGit(t, tmpDir, "commit", "-m", "Add file.txt")
+	testgit.Git(t, tmpDir, "add", "file.txt")
+	testgit.Git(t, tmpDir, "commit", "-m", "Add file.txt")
 
 	cookie, csrfToken := loginTestCSRF(t, s)
 	proj := map[string]any{"name": "checkpoint-rollback-test", "path": tmpDir}
@@ -1144,9 +1145,9 @@ func TestDeleteMessagesAfterCheckpointRollsBackFork(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(worktreePath, "file.txt"), []byte(friendContent), 0o644); err != nil {
 		t.Fatalf("write friend content: %v", err)
 	}
-	mustRunGit(t, worktreePath, "add", "file.txt")
-	mustRunGit(t, worktreePath, "commit", "-m", "friend changes")
-	checkpointCommit := mustRunGitOutput(t, worktreePath, "rev-parse", "HEAD")
+	testgit.Git(t, worktreePath, "add", "file.txt")
+	testgit.Git(t, worktreePath, "commit", "-m", "friend changes")
+	checkpointCommit := testgit.GitOutput(t, worktreePath, "rev-parse", "HEAD")
 
 	// Get the Main thread.
 	listReq := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/threads", nil)
@@ -1207,8 +1208,8 @@ func TestDeleteMessagesAfterCheckpointRollsBackFork(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(worktreePath, "file.txt"), []byte(forkContent), 0o644); err != nil {
 		t.Fatalf("write fork content: %v", err)
 	}
-	mustRunGit(t, worktreePath, "add", "file.txt")
-	mustRunGit(t, worktreePath, "commit", "-m", "fork changes")
+	testgit.Git(t, worktreePath, "add", "file.txt")
+	testgit.Git(t, worktreePath, "commit", "-m", "fork changes")
 	verifyWorktreeContent(t, worktreePath, "file.txt", forkContent, "fork committed changes")
 
 	// Delete the message just below the checkpoint (removes it and everything after).
@@ -1241,9 +1242,9 @@ func TestDeleteFirstRequestRollsBackToBase(t *testing.T) {
 		t.Fatalf("write initial file: %v", err)
 	}
 	initGitRepo(t, tmpDir)
-	mustRunGit(t, tmpDir, "add", "file.txt")
-	mustRunGit(t, tmpDir, "commit", "-m", "Add file.txt")
-	baseCommit := mustRunGitOutput(t, tmpDir, "rev-parse", "HEAD")
+	testgit.Git(t, tmpDir, "add", "file.txt")
+	testgit.Git(t, tmpDir, "commit", "-m", "Add file.txt")
+	baseCommit := testgit.GitOutput(t, tmpDir, "rev-parse", "HEAD")
 
 	cookie, csrfToken := loginTestCSRF(t, s)
 	proj := map[string]any{"name": "base-rollback-test", "path": tmpDir}
@@ -1342,7 +1343,7 @@ func TestDeleteCounterRequestRollsBackToPriorCheckpoint(t *testing.T) {
 		t.Fatalf("write README: %v", err)
 	}
 	initGitRepo(t, tmpDir)
-	baseCommit := mustRunGitOutput(t, tmpDir, "rev-parse", "HEAD")
+	baseCommit := testgit.GitOutput(t, tmpDir, "rev-parse", "HEAD")
 
 	cookie, csrfToken := loginTestCSRF(t, s)
 	proj := map[string]any{"name": "prior-checkpoint-test", "path": tmpDir}
@@ -1389,13 +1390,13 @@ func TestDeleteCounterRequestRollsBackToPriorCheckpoint(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(worktreePath, "hello.cs"), []byte(noCounter), 0o644); err != nil {
 		t.Fatalf("write no-counter: %v", err)
 	}
-	mustRunGit(t, worktreePath, "add", "hello.cs")
-	checkpointA := mustRunGitOutput(t, worktreePath, "stash", "create")
+	testgit.Git(t, worktreePath, "add", "hello.cs")
+	checkpointA := testgit.GitOutput(t, worktreePath, "stash", "create")
 	if err := os.WriteFile(filepath.Join(worktreePath, "hello.cs"), []byte(withCounter), 0o644); err != nil {
 		t.Fatalf("write with-counter: %v", err)
 	}
-	mustRunGit(t, worktreePath, "add", "hello.cs")
-	checkpointB := mustRunGitOutput(t, worktreePath, "stash", "create")
+	testgit.Git(t, worktreePath, "add", "hello.cs")
+	checkpointB := testgit.GitOutput(t, worktreePath, "stash", "create")
 	if checkpointA == "" || checkpointB == "" {
 		t.Fatal("expected non-empty checkpoint hashes")
 	}

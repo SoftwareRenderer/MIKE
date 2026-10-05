@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
 
@@ -523,8 +524,8 @@ func TestThreadForkFromInactiveThread(t *testing.T) {
 	}
 	initGitRepo(t, tmpDir)
 	// Commit file.txt so it is tracked (untracked files are lost by clean -fd)
-	mustRunGit(t, tmpDir, "add", "file.txt")
-	mustRunGit(t, tmpDir, "commit", "-m", "Add file.txt")
+	testgit.Git(t, tmpDir, "add", "file.txt")
+	testgit.Git(t, tmpDir, "commit", "-m", "Add file.txt")
 
 	cookie, csrfToken := loginTestCSRF(t, s)
 	proj := map[string]any{"name": "fork-inactive-test", "path": tmpDir}
@@ -720,9 +721,9 @@ func TestThreadSwitchRestoresForkCheckpoint(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(worktreePath, "hello.cs"), []byte(csContent), 0o644); err != nil {
 		t.Fatalf("write hello.cs: %v", err)
 	}
-	mustRunGit(t, worktreePath, "add", "hello.cs")
-	mustRunGit(t, worktreePath, "commit", "-m", "Add hello.cs")
-	commitHash := strings.TrimSpace(mustRunGitOutput(t, worktreePath, "rev-parse", "HEAD"))
+	testgit.Git(t, worktreePath, "add", "hello.cs")
+	testgit.Git(t, worktreePath, "commit", "-m", "Add hello.cs")
+	commitHash := strings.TrimSpace(testgit.GitOutput(t, worktreePath, "rev-parse", "HEAD"))
 
 	// Get the Main thread
 	threads := mustJSON[[]map[string]any](t, testResponseAuth(t, s, testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/threads", nil)).Body)
@@ -812,8 +813,8 @@ func TestSwitchToMainRestoresTaskBranch(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(worktreePath, "hello.cs"), []byte("class Hello {}\n"), 0o644); err != nil {
 		t.Fatalf("write hello.cs: %v", err)
 	}
-	mustRunGit(t, worktreePath, "add", "hello.cs")
-	mustRunGit(t, worktreePath, "commit", "-m", "Add hello.cs")
+	testgit.Git(t, worktreePath, "add", "hello.cs")
+	testgit.Git(t, worktreePath, "commit", "-m", "Add hello.cs")
 
 	threads := mustJSON[[]map[string]any](t, testResponseAuth(t, s, testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/threads", nil)).Body)
 	mainThreadID := threads[0]["id"].(string)
@@ -821,7 +822,7 @@ func TestSwitchToMainRestoresTaskBranch(t *testing.T) {
 	base := time.Now().UTC()
 	assistantMsg := &types.TaskMessage{
 		ID: "switchmain-msg-assistant", TaskID: taskID, ThreadID: mainThreadID, Role: "assistant",
-		Content: "done", GitCommitHash: strings.TrimSpace(mustRunGitOutput(t, worktreePath, "rev-parse", "HEAD")), CreatedAt: base,
+		Content: "done", GitCommitHash: strings.TrimSpace(testgit.GitOutput(t, worktreePath, "rev-parse", "HEAD")), CreatedAt: base,
 	}
 	if err := s.store.CreateTaskMessage(assistantMsg); err != nil {
 		t.Fatalf("create assistant msg: %v", err)
@@ -840,7 +841,7 @@ func TestSwitchToMainRestoresTaskBranch(t *testing.T) {
 		"from_message_id": checkpointMsg.ID,
 	})).Body)
 	forkThreadID := forkData["id"].(string)
-	if got := mustRunGitOutput(t, worktreePath, "branch", "--show-current"); got != "thread/"+forkThreadID {
+	if got := testgit.GitOutput(t, worktreePath, "branch", "--show-current"); got != "thread/"+forkThreadID {
 		t.Fatalf("after fork, expected branch thread/%s, got %s", forkThreadID, got)
 	}
 
@@ -848,7 +849,7 @@ func TestSwitchToMainRestoresTaskBranch(t *testing.T) {
 	testResponseAuth(t, s, testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/switch", map[string]any{
 		"thread_id": mainThreadID,
 	}))
-	got := mustRunGitOutput(t, worktreePath, "branch", "--show-current")
+	got := testgit.GitOutput(t, worktreePath, "branch", "--show-current")
 	if got != "task/"+taskID {
 		t.Fatalf("after switch to Main, expected branch task/%s, got %s", taskID, got)
 	}
@@ -879,9 +880,9 @@ func TestSwitchToAdvancedForkPreservesCommittedWork(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(worktreePath, "hello.cs"), []byte(csContent), 0o644); err != nil {
 		t.Fatalf("write hello.cs: %v", err)
 	}
-	mustRunGit(t, worktreePath, "add", "hello.cs")
-	mustRunGit(t, worktreePath, "commit", "-m", "Add hello.cs")
-	commitHash := strings.TrimSpace(mustRunGitOutput(t, worktreePath, "rev-parse", "HEAD"))
+	testgit.Git(t, worktreePath, "add", "hello.cs")
+	testgit.Git(t, worktreePath, "commit", "-m", "Add hello.cs")
+	commitHash := strings.TrimSpace(testgit.GitOutput(t, worktreePath, "rev-parse", "HEAD"))
 
 	threads := mustJSON[[]map[string]any](t, testResponseAuth(t, s, testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/threads", nil)).Body)
 	mainThreadID := threads[0]["id"].(string)
@@ -908,7 +909,7 @@ func TestSwitchToAdvancedForkPreservesCommittedWork(t *testing.T) {
 		"from_message_id": checkpointMsg.ID,
 	})).Body)
 	forkThreadID := forkData["id"].(string)
-	if got := mustRunGitOutput(t, worktreePath, "branch", "--show-current"); got != "thread/"+forkThreadID {
+	if got := testgit.GitOutput(t, worktreePath, "branch", "--show-current"); got != "thread/"+forkThreadID {
 		t.Fatalf("after fork, expected branch thread/%s, got %s", forkThreadID, got)
 	}
 
@@ -918,9 +919,9 @@ func TestSwitchToAdvancedForkPreservesCommittedWork(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(worktreePath, "hello.cs"), []byte(counterContent), 0o644); err != nil {
 		t.Fatalf("write counter: %v", err)
 	}
-	mustRunGit(t, worktreePath, "add", "hello.cs")
-	mustRunGit(t, worktreePath, "commit", "-m", "Add counter to 7")
-	forkAdvHash := strings.TrimSpace(mustRunGitOutput(t, worktreePath, "rev-parse", "HEAD"))
+	testgit.Git(t, worktreePath, "add", "hello.cs")
+	testgit.Git(t, worktreePath, "commit", "-m", "Add counter to 7")
+	forkAdvHash := strings.TrimSpace(testgit.GitOutput(t, worktreePath, "rev-parse", "HEAD"))
 
 	// Switch to Main (fork is clean/committed -> no stash created).
 	testResponseAuth(t, s, testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/switch", map[string]any{
@@ -932,10 +933,10 @@ func TestSwitchToAdvancedForkPreservesCommittedWork(t *testing.T) {
 	testResponseAuth(t, s, testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/switch", map[string]any{
 		"thread_id": forkThreadID,
 	}))
-	if got := mustRunGitOutput(t, worktreePath, "branch", "--show-current"); got != "thread/"+forkThreadID {
+	if got := testgit.GitOutput(t, worktreePath, "branch", "--show-current"); got != "thread/"+forkThreadID {
 		t.Fatalf("after switch back to fork, expected branch thread/%s, got %s", forkThreadID, got)
 	}
-	if got := strings.TrimSpace(mustRunGitOutput(t, worktreePath, "rev-parse", "HEAD")); got != forkAdvHash {
+	if got := strings.TrimSpace(testgit.GitOutput(t, worktreePath, "rev-parse", "HEAD")); got != forkAdvHash {
 		t.Fatalf("expected fork branch HEAD %s after switch back, got %s (work was rolled back to checkpoint)", forkAdvHash, got)
 	}
 	verifyWorktreeContent(t, worktreePath, "hello.cs", counterContent, "after switch back to advanced fork")
@@ -968,9 +969,9 @@ func TestSwitchToMainRecoversSlugBranchPreservesFork(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(worktreePath, "hello.cs"), []byte(csContent), 0o644); err != nil {
 		t.Fatalf("write hello.cs: %v", err)
 	}
-	mustRunGit(t, worktreePath, "add", "hello.cs")
-	mustRunGit(t, worktreePath, "commit", "-m", "Add hello.cs")
-	commitHash := strings.TrimSpace(mustRunGitOutput(t, worktreePath, "rev-parse", "HEAD"))
+	testgit.Git(t, worktreePath, "add", "hello.cs")
+	testgit.Git(t, worktreePath, "commit", "-m", "Add hello.cs")
+	commitHash := strings.TrimSpace(testgit.GitOutput(t, worktreePath, "rev-parse", "HEAD"))
 
 	threads := mustJSON[[]map[string]any](t, testResponseAuth(t, s, testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/threads", nil)).Body)
 	mainThreadID := threads[0]["id"].(string)
@@ -996,7 +997,7 @@ func TestSwitchToMainRecoversSlugBranchPreservesFork(t *testing.T) {
 		"from_message_id": checkpointMsg.ID,
 	})).Body)
 	forkThreadID := forkData["id"].(string)
-	if got := mustRunGitOutput(t, worktreePath, "branch", "--show-current"); got != "thread/"+forkThreadID {
+	if got := testgit.GitOutput(t, worktreePath, "branch", "--show-current"); got != "thread/"+forkThreadID {
 		t.Fatalf("after fork, expected branch thread/%s, got %s", forkThreadID, got)
 	}
 
@@ -1005,16 +1006,16 @@ func TestSwitchToMainRecoversSlugBranchPreservesFork(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(worktreePath, "hello.cs"), []byte(counterContent), 0o644); err != nil {
 		t.Fatalf("write counter: %v", err)
 	}
-	mustRunGit(t, worktreePath, "add", "hello.cs")
-	mustRunGit(t, worktreePath, "commit", "-m", "Add counter to 7")
-	forkAdvHash := strings.TrimSpace(mustRunGitOutput(t, worktreePath, "rev-parse", "HEAD"))
+	testgit.Git(t, worktreePath, "add", "hello.cs")
+	testgit.Git(t, worktreePath, "commit", "-m", "Add counter to 7")
+	forkAdvHash := strings.TrimSpace(testgit.GitOutput(t, worktreePath, "rev-parse", "HEAD"))
 
 	// Switch to Main. Its git_branch is empty and task/<taskID> does not exist, so
 	// ResolveMainBranch must recover the slug Main branch task/hey-zimxpq.
 	testResponseAuth(t, s, testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/switch", map[string]any{
 		"thread_id": mainThreadID,
 	}))
-	if got := mustRunGitOutput(t, worktreePath, "branch", "--show-current"); got != slugBranch {
+	if got := testgit.GitOutput(t, worktreePath, "branch", "--show-current"); got != slugBranch {
 		t.Fatalf("after switch to Main, expected recovered slug branch %s, got %s", slugBranch, got)
 	}
 
@@ -1022,7 +1023,7 @@ func TestSwitchToMainRecoversSlugBranchPreservesFork(t *testing.T) {
 	testResponseAuth(t, s, testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/switch", map[string]any{
 		"thread_id": forkThreadID,
 	}))
-	if got := strings.TrimSpace(mustRunGitOutput(t, worktreePath, "rev-parse", "HEAD")); got != forkAdvHash {
+	if got := strings.TrimSpace(testgit.GitOutput(t, worktreePath, "rev-parse", "HEAD")); got != forkAdvHash {
 		t.Fatalf("expected fork HEAD %s after switch back, got %s (fork work lost)", forkAdvHash, got)
 	}
 	verifyWorktreeContent(t, worktreePath, "hello.cs", counterContent, "after switch back to fork")
@@ -1052,9 +1053,9 @@ func setupForkWithCheckpointStash(t *testing.T, s *Server, projID, taskID string
 	if err := os.WriteFile(filepath.Join(worktreePath, "hello.cs"), []byte(csContent), 0o644); err != nil {
 		t.Fatalf("write hello.cs: %v", err)
 	}
-	mustRunGit(t, worktreePath, "add", "hello.cs")
-	mustRunGit(t, worktreePath, "commit", "-m", "Add hello.cs")
-	commitHash := strings.TrimSpace(mustRunGitOutput(t, worktreePath, "rev-parse", "HEAD"))
+	testgit.Git(t, worktreePath, "add", "hello.cs")
+	testgit.Git(t, worktreePath, "commit", "-m", "Add hello.cs")
+	commitHash := strings.TrimSpace(testgit.GitOutput(t, worktreePath, "rev-parse", "HEAD"))
 
 	threads := mustJSON[[]map[string]any](t, testResponseAuth(t, s, testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/threads", nil)).Body)
 	mainThreadID := threads[0]["id"].(string)
@@ -1081,7 +1082,7 @@ func setupForkWithCheckpointStash(t *testing.T, s *Server, projID, taskID string
 		"from_message_id": checkpointMsg.ID,
 	})).Body)
 	forkThreadID = forkData["id"].(string)
-	if got := mustRunGitOutput(t, worktreePath, "branch", "--show-current"); got != "thread/"+forkThreadID {
+	if got := testgit.GitOutput(t, worktreePath, "branch", "--show-current"); got != "thread/"+forkThreadID {
 		t.Fatalf("after fork, expected branch thread/%s, got %s", forkThreadID, got)
 	}
 
@@ -1091,12 +1092,12 @@ func setupForkWithCheckpointStash(t *testing.T, s *Server, projID, taskID string
 		t.Fatalf("write counter: %v", err)
 	}
 	// Simulate createCheckpoint: stage + stash create/store, keep worktree dirty.
-	mustRunGit(t, worktreePath, "add", "-A")
-	stashHash = strings.TrimSpace(mustRunGitOutput(t, worktreePath, "stash", "create"))
+	testgit.Git(t, worktreePath, "add", "-A")
+	stashHash = strings.TrimSpace(testgit.GitOutput(t, worktreePath, "stash", "create"))
 	if stashHash == "" {
 		t.Fatal("stash create returned empty")
 	}
-	mustRunGit(t, worktreePath, "stash", "store", "-m", "On thread/"+forkThreadID+": kanban-checkpoint-"+taskID, stashHash)
+	testgit.Git(t, worktreePath, "stash", "store", "-m", "On thread/"+forkThreadID+": kanban-checkpoint-"+taskID, stashHash)
 	forkAssistant := &types.TaskMessage{
 		ID: "ckpt-msg-forkassistant", TaskID: taskID, ThreadID: forkThreadID, Role: "assistant",
 		Content: "done counter", GitCommitHash: stashHash, CreatedAt: base.Add(2 * time.Second),
@@ -1139,8 +1140,8 @@ func TestSwitchRestoresForkCheckpointStash(t *testing.T) {
 
 	// Simulate the old bug's damage: the fork's uncommitted work was wiped, leaving the
 	// worktree clean at the branch checkpoint (counter lives only in the checkpoint stash).
-	mustRunGit(t, worktreePath, "checkout", "-f", "HEAD")
-	mustRunGit(t, worktreePath, "clean", "-fd")
+	testgit.Git(t, worktreePath, "checkout", "-f", "HEAD")
+	testgit.Git(t, worktreePath, "clean", "-fd")
 
 	// Get Main thread id.
 	threads := mustJSON[[]map[string]any](t, testResponseAuth(t, s, testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/threads", nil)).Body)
@@ -1154,7 +1155,7 @@ func TestSwitchRestoresForkCheckpointStash(t *testing.T) {
 	testResponseAuth(t, s, testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/switch", map[string]any{
 		"thread_id": forkThreadID,
 	}))
-	if got := mustRunGitOutput(t, worktreePath, "branch", "--show-current"); got != "thread/"+forkThreadID {
+	if got := testgit.GitOutput(t, worktreePath, "branch", "--show-current"); got != "thread/"+forkThreadID {
 		t.Fatalf("after switch back, expected branch thread/%s, got %s", forkThreadID, got)
 	}
 	verifyWorktreeContent(t, worktreePath, "hello.cs", counterContent, "after switching back to fork (checkpoint stash re-applied)")
@@ -1171,7 +1172,7 @@ func TestForkRefusesAForkPointFromAnotherThread(t *testing.T) {
 	foreign := postMessageIn(t, s, fx, "a row of the active fork")
 	before := threadCount(t, s, fx.projID, fx.taskID)
 	activeBefore := activeThreadID(t, s, fx.projID, fx.taskID)
-	branchesBefore := mustRunGitOutput(t, fx.worktreePath, "branch", "--list", "thread/*")
+	branchesBefore := testgit.GitOutput(t, fx.worktreePath, "branch", "--list", "thread/*")
 
 	fork := func(messageID string) *httptest.ResponseRecorder {
 		return testResponseAuth(t, s, testRequest("POST",
@@ -1195,7 +1196,7 @@ func TestForkRefusesAForkPointFromAnotherThread(t *testing.T) {
 	if got := activeThreadID(t, s, fx.projID, fx.taskID); got != activeBefore {
 		t.Errorf("a refused fork moved the active thread to %s", got)
 	}
-	if got := mustRunGitOutput(t, fx.worktreePath, "branch", "--list", "thread/*"); got != branchesBefore {
+	if got := testgit.GitOutput(t, fx.worktreePath, "branch", "--list", "thread/*"); got != branchesBefore {
 		t.Errorf("a refused fork left a branch:\n%s\nwant\n%s", got, branchesBefore)
 	}
 	verifyWorktreeContent(t, fx.worktreePath, "file.txt", fx.fileContent, "after a refused fork")

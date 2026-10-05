@@ -54,6 +54,16 @@ func TestCommitWorksWithoutAGitIdentity(t *testing.T) {
 	}
 }
 
+// TestFileRoundTrip pins the two file helpers every suite now reads and writes through: a write
+// creates the parent directories its name asks for, and the read gives back exactly those bytes.
+func TestFileRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	WriteFile(t, dir, "nested/in/file.txt", "written\n")
+	if got := ReadFile(t, dir, "nested/in/file.txt"); got != "written\n" {
+		t.Errorf("ReadFile returned %q, want the bytes WriteFile wrote", got)
+	}
+}
+
 // TestEmptyRepoHasNoCommits pins the bare fixture used by staging tests: a working tree git
 // recognises, with HEAD still unborn.
 func TestEmptyRepoHasNoCommits(t *testing.T) {

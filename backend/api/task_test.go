@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,6 +16,7 @@ import (
 	"mike/backend/git"
 	"mike/backend/store"
 	"mike/backend/stream"
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
 
@@ -350,26 +350,6 @@ func TestEnrichTaskWorktree(t *testing.T) {
 // autostarted=true, so the auto-answer system answers its questions from parent
 // context instead of stopping to wait for a user.
 
-// gitRun executes a git command in dir.
-func gitRun(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := osexec.Command("git", append([]string{"-C", dir}, args...)...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
-	}
-}
-
-// gitOutput runs a git command in dir and returns its stdout.
-func gitOutput(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	cmd := osexec.Command("git", append([]string{"-C", dir}, args...)...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
-	}
-	return string(out)
-}
-
 // TestHandleCommitAndDone_ExcludesUnstagedFiles: untracked worktree files stay local.
 func TestHandleCommitAndDone_ExcludesUnstagedFiles(t *testing.T) {
 	h, s, projID := newTaskHandlerWithExecutor(t)
@@ -402,7 +382,7 @@ func TestHandleCommitAndDone_ExcludesUnstagedFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(wtPath, "staged.txt"), []byte("staged content\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gitRun(t, wtPath, "add", "staged.txt")
+	testgit.Git(t, wtPath, "add", "staged.txt")
 	if err := os.WriteFile(filepath.Join(wtPath, "scratch.txt"), []byte("scratch content\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -436,15 +416,15 @@ func TestHandleCommitAndDone_ExcludesUnstagedFiles(t *testing.T) {
 		t.Errorf("scratch.txt must not be copied to the project dir (stat err=%v)", err)
 	}
 	// It must not be part of the merged branch either.
-	if out := gitOutput(t, proj.Path, "log", "--all", "--oneline", "--", "scratch.txt"); strings.TrimSpace(out) != "" {
+	if out := testgit.GitOutput(t, proj.Path, "log", "--all", "--oneline", "--", "scratch.txt"); strings.TrimSpace(out) != "" {
 		t.Errorf("scratch.txt appears in project branch history: %s", out)
 	}
 	// And it must not show up as untracked content in the project status.
-	if status := gitOutput(t, proj.Path, "status", "--porcelain"); strings.Contains(status, "scratch.txt") {
+	if status := testgit.GitOutput(t, proj.Path, "status", "--porcelain"); strings.Contains(status, "scratch.txt") {
 		t.Errorf("scratch.txt appears in project git status: %s", status)
 	}
 	// The staged change must still be committed and merged into the project.
-	if out := gitOutput(t, proj.Path, "show", "HEAD:staged.txt"); !strings.Contains(out, "staged content") {
+	if out := testgit.GitOutput(t, proj.Path, "show", "HEAD:staged.txt"); !strings.Contains(out, "staged content") {
 		t.Errorf("staged.txt not merged into project HEAD, got: %q", out)
 	}
 	// A click that merged cleanly must leave no intent behind for a later turn to act on.
@@ -463,7 +443,7 @@ func TestHandleCommitAndDone_ArmsClickForConflictResolution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get project: %v", err)
 	}
-	target := strings.TrimSpace(gitOutput(t, proj.Path, "rev-parse", "--abbrev-ref", "HEAD"))
+	target := strings.TrimSpace(testgit.GitOutput(t, proj.Path, "rev-parse", "--abbrev-ref", "HEAD"))
 
 	// ExecutionState=running makes the handler re-arm and return without starting an executor, so no
 	// LLM is involved.
@@ -490,12 +470,12 @@ func TestHandleCommitAndDone_ArmsClickForConflictResolution(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(wtPath, "shared.txt"), []byte("task change\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gitRun(t, wtPath, "add", "shared.txt")
+	testgit.Git(t, wtPath, "add", "shared.txt")
 	if err := os.WriteFile(filepath.Join(proj.Path, "shared.txt"), []byte("project change\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gitRun(t, proj.Path, "add", "shared.txt")
-	gitRun(t, proj.Path, "commit", "-m", "project change")
+	testgit.Git(t, proj.Path, "add", "shared.txt")
+	testgit.Git(t, proj.Path, "commit", "-m", "project change")
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/commit", h.HandleCommitAndDone)
@@ -537,14 +517,14 @@ func newTaskHandlerWithExecutor(t *testing.T) (*TaskHandler, *store.Store, strin
 		t.Fatal(err)
 	}
 
-	gitRun(t, repoDir, "init")
-	gitRun(t, repoDir, "config", "user.email", "test@test.com")
-	gitRun(t, repoDir, "config", "user.name", "Test")
+	testgit.Git(t, repoDir, "init")
+	testgit.Git(t, repoDir, "config", "user.email", "test@test.com")
+	testgit.Git(t, repoDir, "config", "user.name", "Test")
 	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Test\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gitRun(t, repoDir, "add", "README.md")
-	gitRun(t, repoDir, "commit", "-m", "Initial")
+	testgit.Git(t, repoDir, "add", "README.md")
+	testgit.Git(t, repoDir, "commit", "-m", "Initial")
 
 	dbPath := filepath.Join(tmpDir, "test.db")
 	s, err := store.NewStore(dbPath)
@@ -818,6 +798,79 @@ func TestHandleStartSubtask_WithChildren_StartsDeepestSubtask(t *testing.T) {
 	if !leaf.Autostarted {
 		t.Error("deepest descendant should be marked autostarted")
 	}
+}
+
+// createChildWithoutModelConfig writes a child the way plan-mode decomposition writes it: no model
+// config of its own, and a thread whose last word is the assistant's, so a start that gets as far as
+// preparing the run ends in review without reaching an LLM.
+func createChildWithoutModelConfig(t *testing.T, s *store.Store, projectID, id, parentID string) {
+	t.Helper()
+	createChainTask(t, s, projectID, id, id, "backlog", "idle", parentID, "thread-"+id, true)
+	child, err := s.GetTaskByID(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child.LlamaServerURL = ""
+	child.ModelName = ""
+	if err := s.UpdateTask(child); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// requireStartedOnParentsConfig is the same claim for every start route: a child that arrived with no
+// model config runs on its parent's instead of being refused for want of a server URL.
+func requireStartedOnParentsConfig(t *testing.T, route string, rr *httptest.ResponseRecorder, s *store.Store, id string) {
+	t.Helper()
+	if rr.Code != http.StatusOK {
+		t.Fatalf("%s status = %d, body=%s", route, rr.Code, rr.Body.String())
+	}
+	child, err := s.GetTaskByID(id)
+	if err != nil {
+		t.Fatalf("get %s: %v", id, err)
+	}
+	if child.LlamaServerURL != "http://localhost:8080" || child.ModelName != "test-model" {
+		t.Errorf("start left the child without the parent's model config: server=%q model=%q",
+			child.LlamaServerURL, child.ModelName)
+	}
+	if child.Status != types.StatusReview {
+		t.Errorf("started child with nothing left to run should wait in review: status=%q", child.Status)
+	}
+}
+
+func TestHandleStartSubtask_ChildWithoutModelConfigRunsOnTheParents(t *testing.T) {
+	h, s, projID := newTaskHandlerWithExecutor(t)
+	createChainTask(t, s, projID, "root-cfg-ss", "Root", "backlog", "idle", "", "", false)
+	createChildWithoutModelConfig(t, s, projID, "child-cfg-ss", "root-cfg-ss")
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/start-subtask", h.HandleStartSubtask)
+	rr := postToMux(t, mux, "/api/projects/"+projID+"/tasks/child-cfg-ss/start-subtask", nil)
+
+	requireStartedOnParentsConfig(t, "HandleStartSubtask", rr, s, "child-cfg-ss")
+}
+
+func TestHandleStart_ChildWithoutModelConfigRunsOnTheParents(t *testing.T) {
+	h, s, projID := newTaskHandlerWithExecutor(t)
+	createChainTask(t, s, projID, "root-cfg-st", "Root", "backlog", "idle", "", "", false)
+	createChildWithoutModelConfig(t, s, projID, "child-cfg-st", "root-cfg-st")
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/start", h.HandleStart)
+	rr := postToMux(t, mux, "/api/projects/"+projID+"/tasks/child-cfg-st/start", nil)
+
+	requireStartedOnParentsConfig(t, "HandleStart", rr, s, "child-cfg-st")
+}
+
+func TestHandleMove_ChildWithoutModelConfigRunsOnTheParents(t *testing.T) {
+	h, s, projID := newTaskHandlerWithExecutor(t)
+	createChainTask(t, s, projID, "root-cfg-mv", "Root", "backlog", "idle", "", "", false)
+	createChildWithoutModelConfig(t, s, projID, "child-cfg-mv", "root-cfg-mv")
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/move", h.HandleMove)
+	rr := postToMux(t, mux, "/api/projects/"+projID+"/tasks/child-cfg-mv/move", map[string]any{"status": "in_progress"})
+
+	requireStartedOnParentsConfig(t, "HandleMove", rr, s, "child-cfg-mv")
 }
 
 // TestHandleMove_SubtaskWithChildren_StartsDeepestSubtask verifies that moving
@@ -1168,7 +1221,7 @@ func TestTaskHandler_POST_DoesNotSeedAMeasuredPeak(t *testing.T) {
 // parentWithStagedWork builds the ordinary Review state: work staged but not committed.
 func parentWithStagedWork(t *testing.T, h *TaskHandler, projID, repoDir, id string) (*types.Task, string) {
 	t.Helper()
-	base := strings.TrimSpace(gitOutput(t, repoDir, "rev-parse", "--abbrev-ref", "HEAD"))
+	base := strings.TrimSpace(testgit.GitOutput(t, repoDir, "rev-parse", "--abbrev-ref", "HEAD"))
 	task := &types.Task{
 		ID: id, ProjectID: projID, Title: "parent " + id, Prompt: "work",
 		Status: types.StatusReview, Branch: "task/" + id, BaseRef: base, CurrentThreadID: "thread-" + id,
@@ -1186,7 +1239,7 @@ func parentWithStagedWork(t *testing.T, h *TaskHandler, projID, repoDir, id stri
 	if err := os.WriteFile(filepath.Join(wtPath, "parent_note.md"), []byte("written by the parent\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gitRun(t, wtPath, "add", "README.md", "parent_note.md")
+	testgit.Git(t, wtPath, "add", "README.md", "parent_note.md")
 	return task, base
 }
 
@@ -1207,8 +1260,8 @@ func subtaskMergedInto(t *testing.T, h *TaskHandler, projID string, parent *type
 	if err := os.WriteFile(filepath.Join(childWT, file), []byte("written by the subtask\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gitRun(t, childWT, "add", file)
-	gitRun(t, childWT, "commit", "-m", "subtask work")
+	testgit.Git(t, childWT, "add", file)
+	testgit.Git(t, childWT, "commit", "-m", "subtask work")
 	return h.executor.MergeBranch(projID, child.ID, child)
 }
 
@@ -1244,11 +1297,11 @@ func TestHandleCommitAndDone_CommitsTheParentsOwnWorkAfterASubtaskMerge(t *testi
 		t.Fatalf("commit-and-done status = %d, body=%s", rr.Code, rr.Body.String())
 	}
 
-	readme := gitOutput(t, proj.Path, "show", base+":README.md")
+	readme := testgit.GitOutput(t, proj.Path, "show", base+":README.md")
 	if !strings.Contains(readme, "the parent's edit") {
 		t.Errorf("the parent's own edit never reached %s; it reads %q", base, readme)
 	}
-	if out := gitOutput(t, proj.Path, "ls-tree", "--name-only", base); !strings.Contains(out, "child_work.txt") {
+	if out := testgit.GitOutput(t, proj.Path, "ls-tree", "--name-only", base); !strings.Contains(out, "child_work.txt") {
 		t.Errorf("the subtask's work never reached %s: %q", base, out)
 	}
 }
@@ -1279,8 +1332,8 @@ func TestHandleCommitAndDone_HandsWorktreeConflictToTheResolver(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(childWT, "README.md"), []byte("# Test\nthe subtask's edit\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gitRun(t, childWT, "add", "README.md")
-	gitRun(t, childWT, "commit", "-m", "subtask edit to the same file")
+	testgit.Git(t, childWT, "add", "README.md")
+	testgit.Git(t, childWT, "commit", "-m", "subtask edit to the same file")
 	if err := h.executor.MergeBranch(projID, child.ID, child); err == nil {
 		t.Fatal("the fixture must leave the parent's worktree with a conflict to resolve")
 	}
@@ -1328,7 +1381,7 @@ func TestHandleCommitAndDone_HandsWorktreeConflictToTheResolver(t *testing.T) {
 	if !strings.Contains(string(onDisk), "the parent's edit") {
 		t.Errorf("the parent's own edit was discarded instead of left to resolve: %q", onDisk)
 	}
-	onBranch := gitOutput(t, proj.Path, "show", parent.Branch+":README.md")
+	onBranch := testgit.GitOutput(t, proj.Path, "show", parent.Branch+":README.md")
 	if strings.Contains(onBranch, "<<<<<<<") {
 		t.Errorf("conflict markers were committed onto the branch: %q", onBranch)
 	}
@@ -1350,7 +1403,7 @@ func TestHandleCommitAndDone_ReportsACommitThatGitRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Another git process holding this worktree's index: the ordinary way a commit is refused.
-	wtName := filepath.Base(strings.TrimSpace(gitOutput(t, wtPath, "rev-parse", "--git-dir")))
+	wtName := filepath.Base(strings.TrimSpace(testgit.GitOutput(t, wtPath, "rev-parse", "--git-dir")))
 	lock := filepath.Join(proj.Path, ".git", "worktrees", wtName, "index.lock")
 	if err := os.WriteFile(lock, nil, 0o644); err != nil {
 		t.Fatal(err)
@@ -1368,7 +1421,7 @@ func TestHandleCommitAndDone_ReportsACommitThatGitRefused(t *testing.T) {
 	if updated.Status == types.StatusDone {
 		t.Error("the task reached Done on a commit that never happened")
 	}
-	if out := gitOutput(t, proj.Path, "ls-tree", "--name-only", base); strings.Contains(out, "parent_note.md") {
+	if out := testgit.GitOutput(t, proj.Path, "ls-tree", "--name-only", base); strings.Contains(out, "parent_note.md") {
 		t.Error("the uncommitted work was merged to the target branch anyway")
 	}
 }
@@ -1385,14 +1438,14 @@ func TestHandleCommitAndDone_DoneWhenOnlyTheProjectOwnsTheConflict(t *testing.T)
 	if err != nil {
 		t.Fatalf("get project: %v", err)
 	}
-	target := strings.TrimSpace(gitOutput(t, proj.Path, "rev-parse", "--abbrev-ref", "HEAD"))
+	target := strings.TrimSpace(testgit.GitOutput(t, proj.Path, "rev-parse", "--abbrev-ref", "HEAD"))
 
 	// One line both sides will reword, committed so the merge and the parked edit share a base.
 	if err := os.WriteFile(filepath.Join(proj.Path, "shared.txt"), []byte("the original sentence\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gitRun(t, proj.Path, "add", "shared.txt")
-	gitRun(t, proj.Path, "commit", "-m", "shared line")
+	testgit.Git(t, proj.Path, "add", "shared.txt")
+	testgit.Git(t, proj.Path, "commit", "-m", "shared line")
 
 	task := &types.Task{
 		ID:              "merged-anyway",
@@ -1416,7 +1469,7 @@ func TestHandleCommitAndDone_DoneWhenOnlyTheProjectOwnsTheConflict(t *testing.T)
 	if err := os.WriteFile(filepath.Join(wtPath, "shared.txt"), []byte("the task wording\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gitRun(t, wtPath, "add", "shared.txt")
+	testgit.Git(t, wtPath, "add", "shared.txt")
 	// ...and so does the person, in the project checkout, uncommitted.
 	if err := os.WriteFile(filepath.Join(proj.Path, "shared.txt"), []byte("the project's own wording\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -1447,17 +1500,17 @@ func TestHandleCommitAndDone_DoneWhenOnlyTheProjectOwnsTheConflict(t *testing.T)
 	if updated.HasMergeConflict {
 		t.Error("the task is flagged for the conflict resolver: that path has the model edit and stage the project's own words")
 	}
-	if out := gitOutput(t, proj.Path, "show", "HEAD:shared.txt"); !strings.Contains(out, "the task wording") {
+	if out := testgit.GitOutput(t, proj.Path, "show", "HEAD:shared.txt"); !strings.Contains(out, "the task wording") {
 		t.Errorf("the merge did not deliver the task's work: HEAD:shared.txt = %q", out)
 	}
 
 	// What is left over is the project's working copy, and it has to be reported: the file, and where
 	// the parked version still is.
-	if status := gitOutput(t, proj.Path, "status", "--porcelain"); !strings.Contains(status, "UU shared.txt") {
+	if status := testgit.GitOutput(t, proj.Path, "status", "--porcelain"); !strings.Contains(status, "UU shared.txt") {
 		t.Errorf("the project checkout was not left holding the conflict: %q", status)
 	}
 	label := git.StashMessageForAutoMerge(task.ID)
-	if out := gitOutput(t, proj.Path, "stash", "list"); !strings.Contains(out, label) {
+	if out := testgit.GitOutput(t, proj.Path, "stash", "list"); !strings.Contains(out, label) {
 		t.Errorf("the entry holding the project's own wording was dropped: %q", out)
 	}
 	msgs, err := s.GetTaskMessages(task.ID, task.CurrentThreadID)
