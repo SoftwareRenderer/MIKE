@@ -193,7 +193,7 @@ func TestStopRecordsHighWaterNotLastSample(t *testing.T) {
 	// doubling loop was measured peaking at 525 MB for no extra signal. Ending the exec session is what
 	// ends the allocation.
 	const hog = `( x=$(head -c 67108864 /dev/zero | tr "\0" a); sleep 30 ) & echo hog-started`
-	if out, err := sm.Exec(taskID, hog, nil); err != nil {
+	if out, err := sm.Exec(taskID, hog); err != nil {
 		t.Fatalf("start memhog: %v (%s)", err, out)
 	}
 

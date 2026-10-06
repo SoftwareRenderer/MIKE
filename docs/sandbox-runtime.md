@@ -42,11 +42,12 @@ clash.
 
 - **A bare `-e NAME` is unrepresentable.** Every assignment comes from
   `types.SandboxEnvArgs([]types.SandboxEnv)` (`backend/types/env.go`), which can only emit `KEY=VALUE`
-  and errors on a malformed key, so `Exec`/`ExecWithInput`/`execInternal` take `[]types.SandboxEnv`
-  rather than `[]string`. `podman -e NAME` copies the *client's* value of `NAME` into the container, so
-  a project that declared a variable's name without a value exported whatever the server had.
-- `Create` refuses the container on a malformed declaration, and `Exec` validates before the container
-  lookup so the cause is named.
+  and errors on a malformed key, and `Create` refuses the container on one. `podman -e NAME` copies the
+  *client's* value of `NAME` into the container, so a project that declared a variable's name without a
+  value exported whatever the server had.
+- **Exec takes no environment.** The container create is the only place an `-e` is emitted: past the
+  container name podman parses no more flags, so an exec-time `-e` names the program to run
+  (`execCommandArgs`).
 - Invent nothing else: no hardcoded `PATH` (an `-e` overrides the image's `ENV PATH`, which dropped a
   custom image's tooling) and no container-wide `TERM` (the terminal sets `TERM` on its own
   `podman exec`, `shellExecArgs`: it belongs to the TTY session, not the sandbox).

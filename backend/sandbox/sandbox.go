@@ -202,6 +202,17 @@ func shellExecArgs(containerName, mountPath, shell string) []string {
 	}
 }
 
+// execCommandArgs builds the `podman exec` argv for one shell command. Every flag comes before the
+// container name: podman stops parsing flags at the first positional, so an `-e` after it is taken as
+// the program to run.
+func execCommandArgs(stdin bool, mountPath, containerName, command string) []string {
+	args := []string{"exec"}
+	if stdin {
+		args = append(args, "-i")
+	}
+	return append(args, "-w", mountPath, containerName, "sh", "-c", command)
+}
+
 // agentConn holds the pipes to a running agent process.
 type agentConn struct {
 	cmd    *exec.Cmd
@@ -688,29 +699,20 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 // Exec runs a command inside the task's sandbox container.
 // Returns the combined stdout/stderr output.
 //
-// env is a declared-variable list, not a list of names, and that is the point of the type: a bare
-// `-e NAME` tells podman to copy NAME out of the environment of the podman process — the server's —
-// so a signature that accepted names would make host-environment leakage the natural-looking thing
-// to write. types.SandboxEnvArgs cannot emit one.
-func (sm *SandboxManager) Exec(taskID, command string, env []types.SandboxEnv) (string, error) {
-	return sm.execInternal(taskID, command, nil, env)
+// It takes no environment: a container's environment is configured on the container
+// (containerEnvArgs), and podman accepts no `-e` after the container name (execCommandArgs).
+func (sm *SandboxManager) Exec(taskID, command string) (string, error) {
+	return sm.execInternal(taskID, command, nil)
 }
 
 // ExecWithInput runs a command inside the task's sandbox container with stdin input.
 // Returns the combined stdout/stderr output.
-func (sm *SandboxManager) ExecWithInput(taskID, command string, stdin []byte, env []types.SandboxEnv) (string, error) {
-	return sm.execInternal(taskID, command, stdin, env)
+func (sm *SandboxManager) ExecWithInput(taskID, command string, stdin []byte) (string, error) {
+	return sm.execInternal(taskID, command, stdin)
 }
 
 // execInternal is Exec and ExecWithInput's shared body; a non-nil stdin is piped to the command.
-func (sm *SandboxManager) execInternal(taskID, command string, stdin []byte, env []types.SandboxEnv) (string, error) {
-	// Validated before the container lookup: a malformed declaration is the caller's bug and should
-	// report itself as one whether or not a container happens to be running.
-	envArgs, err := types.SandboxEnvArgs(env)
-	if err != nil {
-		return "", fmt.Errorf("task %s: exec environment rejected: %w", taskID, err)
-	}
-
+func (sm *SandboxManager) execInternal(taskID, command string, stdin []byte) (string, error) {
 	sm.mu.Lock()
 	containerName, ok := sm.active[taskID]
 	mountPath := sm.mountPaths[taskID]
@@ -720,23 +722,7 @@ func (sm *SandboxManager) execInternal(taskID, command string, stdin []byte, env
 		return "", fmt.Errorf("no sandbox container for task %s", taskID)
 	}
 
-	execArgs := []string{
-		"exec",
-	}
-	if stdin != nil {
-		execArgs = append(execArgs, "-i") // keep STDIN open
-	}
-	execArgs = append(execArgs,
-		"-w", mountPath,
-		containerName,
-	)
-
-	execArgs = append(execArgs, envArgs...)
-
-	// Run sh -c to handle shell features
-	execArgs = append(execArgs, "sh", "-c", command)
-
-	c := podmanCommand(execArgs...)
+	c := podmanCommand(execCommandArgs(stdin != nil, mountPath, containerName, command)...)
 
 	if stdin != nil {
 		c.Stdin = bytes.NewReader(stdin)
@@ -747,8 +733,7 @@ func (sm *SandboxManager) execInternal(taskID, command string, stdin []byte, env
 	out := toolresult.NewCapture()
 	c.Stdout = out
 	c.Stderr = out
-	err = c.Run()
-	if err != nil {
+	if err := c.Run(); err != nil {
 		return out.String(), fmt.Errorf("exec failed: %w", err)
 	}
 	return out.String(), nil
@@ -785,7 +770,7 @@ func (sm *SandboxManager) ExecProject(project *types.Project, command string, op
 	if err := sm.ensureProjectContainer(taskID, project, opts); err != nil {
 		return "", err
 	}
-	return sm.Exec(taskID, command, nil)
+	return sm.Exec(taskID, command)
 }
 
 // ensureProjectContainer ensures the project-level sandbox container exists and is running.
@@ -837,7 +822,7 @@ func (sm *SandboxManager) ExecProjectWithInput(project *types.Project, command s
 	if err := sm.ensureProjectContainer(taskID, project, opts); err != nil {
 		return "", err
 	}
-	return sm.ExecWithInput(taskID, command, stdin, nil)
+	return sm.ExecWithInput(taskID, command, stdin)
 }
 
 // ExecTask runs a command inside a task's sandbox container,
@@ -852,7 +837,7 @@ func (sm *SandboxManager) ExecTask(taskID, worktreePath string, project *types.P
 			return "", fmt.Errorf("create sandbox container: %w", err)
 		}
 	}
-	return sm.Exec(taskID, command, nil)
+	return sm.Exec(taskID, command)
 }
 
 func (sm *SandboxManager) startShell(taskID, worktreePath string, project *types.Project, opts SandboxOpts) (*ShellProcess, []types.AssignedPort, error) {

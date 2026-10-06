@@ -69,7 +69,7 @@ func TestSandboxContainerSeesNoHostEnv(t *testing.T) {
 		guestEcho("CONTAINERS_UNRELATED_PROBE"),
 	}, "; ")
 
-	out, err := sm.Exec(taskID, query, nil)
+	out, err := sm.Exec(taskID, query)
 	if err != nil {
 		t.Fatalf("exec in sandbox: %v\noutput: %s", err, out)
 	}
@@ -102,28 +102,21 @@ func guestEcho(name string) string {
 	return fmt.Sprintf(`printf '%%s\n' "${%s-unset}"`, name)
 }
 
-// TestExecRejectsAVariableNameNotAValue: Exec takes declared variables, so "pass this name
-// through" cannot be written at all, and a malformed name is refused rather than dropped.
-func TestExecRejectsAVariableNameNotAValue(t *testing.T) {
-	sm := NewSandboxManager(bootWithBridge(t))
-
-	// No container is registered for this id, so a refusal on the environment is only observable if
-	// the environment is validated before the container lookup matters. Assert on the error text,
-	// which names the field, rather than on the lookup error.
-	_, err := sm.Exec("test-no-such-task", "true", []types.SandboxEnv{{Key: "HOST_VAR", Value: ""}})
-	if err == nil || !strings.Contains(err.Error(), "no sandbox container") {
-		// The unknown-task error is the expected outcome here; reaching it proves the typed
-		// environment was accepted as well-formed and no bare -e was ever assembled.
-		t.Fatalf("expected the unknown-task error from an unknown task id, got %v", err)
-	}
-
-	_, err = sm.Exec("test-no-such-task", "true", []types.SandboxEnv{{Key: "-e", Value: "x"}})
-	if err == nil {
-		t.Fatal("a key starting with '-' was accepted")
-	}
-	if !strings.Contains(err.Error(), "exec environment rejected") {
-		t.Errorf("expected the environment refusal, got %v — execInternal validates before the "+
-			"container lookup, so this error is the proof the malformed name was the reason", err)
+// Podman reads no flag after the container name, so an exec-time `-e` would name the program to run.
+// Declared variables reach a container at creation (containerEnvArgs).
+func TestExecCommandArgsPutsEveryFlagLeftOfTheContainerName(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		stdin bool
+		want  []string
+	}{
+		{"no stdin", false, []string{"exec", "-w", "/home/sandbox/proj", "kanban-sandbox-t1", "sh", "-c", "echo hi"}},
+		{"stdin", true, []string{"exec", "-i", "-w", "/home/sandbox/proj", "kanban-sandbox-t1", "sh", "-c", "echo hi"}},
+	} {
+		got := execCommandArgs(tc.stdin, "/home/sandbox/proj", "kanban-sandbox-t1", "echo hi")
+		if strings.Join(got, "\x00") != strings.Join(tc.want, "\x00") {
+			t.Errorf("%s: execCommandArgs() = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }
 

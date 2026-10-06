@@ -378,39 +378,6 @@ func TestGetTaskDiff_RejectsFatalBaseRef(t *testing.T) {
 	}
 }
 
-func TestCreateWorktree_EarlyReturn_SanitizesFatalBranch(t *testing.T) {
-	repoDir, taskID, _, _, wm := setupTestRepo(t)
-
-	// Create the worktree normally first
-	branchName := "task/" + taskID
-	_, _, err := wm.CreateWorktree("test-project", taskID, branchName, "")
-	if err != nil {
-		t.Fatalf("create worktree: %v", err)
-	}
-
-	// Now simulate the "fatal:" scenario by putting the repo in detached HEAD
-	// and calling CreateWorktree again (early return path)
-	runGit(t, repoDir, "checkout", "--detach", "HEAD")
-	defer runGit(t, repoDir, "checkout", "master")
-
-	// Call CreateWorktree again — worktree already exists, hits early return
-	// gitCurrentBranch will return "HEAD" in detached state, which is fine
-	// But we need to test the "fatal:" case specifically
-	// Since we can't easily mock gitCurrentBranch, we verify the logic by
-	// checking that the early return path sanitizes the value.
-	// The actual sanitization is tested via resolveDiffBaseline above.
-	// Here we just verify the early return works without error.
-	_, baseRef, err := wm.CreateWorktree("test-project", taskID, branchName, "")
-	if err != nil {
-		t.Fatalf("create worktree (early return): %v", err)
-	}
-	// In detached HEAD state, gitCurrentBranch returns "HEAD" (valid), not "fatal:"
-	// The "fatal:" case only happens when git itself errors out
-	if baseRef == "fatal: Needed a single revision" {
-		t.Error("CreateWorktree should not return fatal: messages as baseRef")
-	}
-}
-
 // TestCreateWorktree_BothPathsReturnBranchName verifies that both the
 // fresh-creation and early-return (worktree exists) paths return a branch
 // name, not a commit SHA. This ensures BaseRef is always a usable merge target.

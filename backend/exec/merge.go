@@ -593,7 +593,9 @@ func (m *mergeOrchestrator) MergeBranch(projectID, taskID string, task *types.Ta
 			if startPoint == "" {
 				startPoint = "HEAD"
 			}
-			createCmd := git.Command("", "-C", project.Path, "branch", targetBranch, startPoint)
+			// The start point is a name the repository chose; --end-of-options stops git reading an
+			// option-shaped one as a flag of `git branch`.
+			createCmd := git.Command("", "-C", project.Path, "branch", targetBranch, "--end-of-options", startPoint)
 			if out, err := createCmd.CombinedOutput(); err != nil {
 				// A concurrent merge may have created it by now; re-verify before failing.
 				recheck := git.Command("", "-C", project.Path, "rev-parse", "--verify", "--quiet", "refs/heads/"+targetBranch)

@@ -300,15 +300,11 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName, sourceB
 	originalBranch, _ := wm.gitCurrentBranch(project.Path)
 
 	if _, err := os.Stat(worktreePath); err == nil {
-		// Sanitize: reject git error messages as branch names
-		if strings.HasPrefix(originalBranch, "fatal:") {
-			originalBranch = ""
-		}
 		return worktreePath, originalBranch, nil
 	}
 
 	// Save the originating branch to the project (best-effort)
-	if originalBranch != "" && !strings.HasPrefix(originalBranch, "fatal:") {
+	if originalBranch != "" {
 		_ = wm.store.UpdateProjectOriginBranch(projectID, originalBranch)
 	}
 
@@ -349,10 +345,6 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName, sourceB
 	baseRef := sourceBranch
 	if baseRef == "" {
 		baseRef = originalBranch
-	}
-	// Sanitize: reject git error messages as branch names
-	if strings.HasPrefix(baseRef, "fatal:") {
-		baseRef = ""
 	}
 
 	return worktreePath, baseRef, nil

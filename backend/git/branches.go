@@ -108,9 +108,30 @@ func (wm *WorktreeManager) branchExistsInRepo(repoPath, branchName string) bool 
 	return err == nil
 }
 
+// usableBranchName reports whether a branch name read out of a repository can be passed back to git
+// as one argument that is not an option: a clone can arrive with `--delete` checked out, and
+// `git branch main --delete` deletes main.
+func usableBranchName(name string) bool {
+	if name == "" || name[0] == '-' {
+		return false
+	}
+	return !strings.ContainsFunc(name, func(r rune) bool { return r <= ' ' || r == 0x7f })
+}
+
+// gitCurrentBranch answers the branch HEAD names, and nothing when git failed or named a value that
+// cannot be passed back (usableBranchName). Callers store what they are given, so git's own error
+// text must never become the answer.
 func (wm *WorktreeManager) gitCurrentBranch(dir string) (string, error) {
 	out, err := Run(dir, "rev-parse", "--abbrev-ref", "HEAD")
-	return strings.TrimSpace(out), err
+	name := strings.TrimSpace(out)
+	if err != nil {
+		return "", err
+	}
+	if !usableBranchName(name) {
+		logging.For(logging.Worktree).Warnf("ignoring current branch %q in %s: it cannot be passed back to git as an argument", name, dir)
+		return "", fmt.Errorf("current branch %q cannot be passed back to git as an argument", name)
+	}
+	return name, nil
 }
 
 // IsMergedInto checks if the task branch has been merged into the target branch.
@@ -136,7 +157,7 @@ func (wm *WorktreeManager) DivergenceBase(projectPath, mainBranch, taskBranch st
 			return ""
 		}
 	}
-	if mainBranch == "" || mainBranch == "HEAD" {
+	if mainBranch == "HEAD" {
 		// Detached HEAD — no main branch to measure divergence from.
 		return ""
 	}

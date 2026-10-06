@@ -49,7 +49,6 @@ func CloneArgs(src, dst string) []string {
 // which run a host binary with this process's environment. Accepted: a URL with an
 // allowed scheme, scp-like SSH syntax (git@host:org/repo.git), or a bare filesystem
 // path — local cloning is a supported workflow.
-// is a supported workflow.
 func ValidateCloneURL(cloneURL string) error {
 	s := strings.TrimSpace(cloneURL)
 	if s == "" {

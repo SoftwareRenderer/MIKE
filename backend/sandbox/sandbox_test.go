@@ -143,7 +143,7 @@ func TestExec(t *testing.T) {
 	}
 
 	// Run a command inside the sandbox
-	output, err := sm.Exec(taskID, "cat hello.txt", nil)
+	output, err := sm.Exec(taskID, "cat hello.txt")
 	if err != nil {
 		t.Fatalf("exec: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestExec(t *testing.T) {
 	}
 
 	// Test that the sandbox can write files
-	_, err = sm.Exec(taskID, "echo 'modified' > hello.txt", nil)
+	_, err = sm.Exec(taskID, "echo 'modified' > hello.txt")
 	if err != nil {
 		t.Fatalf("exec write: %v", err)
 	}
@@ -184,13 +184,13 @@ func TestExecWithInput(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		// Clean up files from inside the container (they're owned by root)
-		_, _ = sm.Exec(taskID, "rm -rf test_input.txt sub", nil)
+		_, _ = sm.Exec(taskID, "rm -rf test_input.txt sub")
 		_ = sm.Stop(taskID)
 	})
 
 	// Write a file via stdin (cat > file)
 	content := []byte("line1\nline2\nline3")
-	output, err := sm.ExecWithInput(taskID, "cat > test_input.txt", content, nil)
+	output, err := sm.ExecWithInput(taskID, "cat > test_input.txt", content)
 	if err != nil {
 		t.Fatalf("exec with input: %v (output: %s)", err, output)
 	}
@@ -206,7 +206,7 @@ func TestExecWithInput(t *testing.T) {
 
 	// Test with content containing special shell characters
 	specialContent := []byte("hello 'world' && echo $PATH > /dev/null")
-	_, err = sm.ExecWithInput(taskID, "mkdir -p sub && cat > sub/special.txt", specialContent, nil)
+	_, err = sm.ExecWithInput(taskID, "mkdir -p sub && cat > sub/special.txt", specialContent)
 	if err != nil {
 		t.Fatalf("exec with special chars: %v", err)
 	}
@@ -851,7 +851,7 @@ func TestCreateWithMemoryLimit(t *testing.T) {
 	}
 
 	// Verify the container can run commands
-	output, err := sm.Exec(taskID, "echo hello", nil)
+	output, err := sm.Exec(taskID, "echo hello")
 	if err != nil {
 		t.Fatalf("exec in memory-limited container: %v", err)
 	}
@@ -904,7 +904,7 @@ func TestMemoryLimitEnforced(t *testing.T) {
 	// only the shell (no extra tools in the base image). If the cgroup limit
 	// is enforced, the kernel OOM-kills the process before it finishes.
 	const memhog = `x=a; while [ ${#x} -lt 536870912 ]; do x="$x$x"; done; echo MEMHOG-OK`
-	out, err := sm.Exec(taskID, memhog, nil)
+	out, err := sm.Exec(taskID, memhog)
 	if err == nil {
 		t.Fatalf("memhog succeeded despite 128MB limit (limit not enforced); output: %q", out)
 	}
@@ -954,7 +954,7 @@ func TestGetMemoryStats(t *testing.T) {
 	// Background hog: hold a 64MB string for 30s, built by one command substitution so that it does
 	// not grow past what it asks for the way a doubling loop does.
 	const hog = `( x=$(head -c 67108864 /dev/zero | tr "\0" a); sleep 30 ) & echo hog-started`
-	out, err := sm.Exec(taskID, hog, nil)
+	out, err := sm.Exec(taskID, hog)
 	if err != nil {
 		t.Fatalf("start background memhog: %v (%s)", err, out)
 	}
@@ -1025,7 +1025,7 @@ func TestCreateWithCapabilities(t *testing.T) {
 	}
 
 	// Verify the container can run commands
-	output, err := sm.Exec(taskID, "echo hello", nil)
+	output, err := sm.Exec(taskID, "echo hello")
 	if err != nil {
 		t.Fatalf("exec in container with capabilities: %v", err)
 	}
@@ -1292,7 +1292,7 @@ func TestCreate_PlanModeReadonlyMount(t *testing.T) {
 	})
 
 	// Verify the worktree is mounted read-only by trying to write a file
-	out, err := sm.Exec(taskID, "touch /home/sandbox/test-proj/test-file", nil)
+	out, err := sm.Exec(taskID, "touch /home/sandbox/test-proj/test-file")
 	if err == nil {
 		t.Fatal("expected write to fail in plan mode (read-only mount)")
 	}
@@ -1306,7 +1306,7 @@ func TestCreate_PlanModeReadonlyMount(t *testing.T) {
 	if err := os.WriteFile(testFile, []byte("test content"), 0644); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
-	out, err = sm.Exec(taskID, "cat /home/sandbox/test-proj/existing-file.txt", nil)
+	out, err = sm.Exec(taskID, "cat /home/sandbox/test-proj/existing-file.txt")
 	if err != nil {
 		t.Fatalf("read should work in plan mode: %v", err)
 	}
