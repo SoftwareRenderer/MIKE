@@ -35,11 +35,13 @@ func (te *TaskExecutor) persistSessionCost(setup *taskExecSetup, lc *loopContext
 }
 
 // recoverTaskFromPanic reports a panic that unwound the loop and takes the task out of its in-flight state,
-// so a crash cannot leave a row that reads "running" forever. `r` is what recover() returned.
+// so a crash cannot leave a row that reads "running" forever. The row says the server stopped the run:
+// reusing a person's stop here puts a server fault on the board as something the user asked for. `r` is
+// what recover() returned.
 func (te *TaskExecutor) recoverTaskFromPanic(setup *taskExecSetup, r any) {
 	logging.For(logging.Recovery).With(logging.TaskID, setup.task.ID).Errorf("recovered from panic: %v", r)
 	te.sendAndPersistError(setup.task.ID, fmt.Sprintf("Internal error: %v", r), "panic")
-	te.handleCancelledTask(setup.task.ID, setup.projectID)
+	te.handleCrashedTask(setup.task.ID, setup.projectID)
 }
 
 // forgetTaskSetup removes the in-flight registry entry for this run — only if this run still owns it. A

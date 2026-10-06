@@ -41,7 +41,7 @@ func TestApplyStopTransition(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			task := &types.Task{Status: tc.status, ExecutionState: tc.execState}
-			changed := applyStopTransition(task)
+			changed := applyStopTransition(task, pausedByUserOutput)
 			if changed != tc.wantChanged {
 				t.Fatalf("changed = %v, want %v", changed, tc.wantChanged)
 			}
@@ -73,6 +73,61 @@ func createTaskRow(t *testing.T, s *store.Store, id, projectID string, status ty
 		t.Fatalf("create task: %v", err)
 	}
 	return task
+}
+
+// TestStopTransitionNamesWhatStoppedTheRun: a person's stop and a server fault move the row the same way,
+// and only the output tells them apart.
+func TestStopTransitionNamesWhatStoppedTheRun(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		output string
+		want   string
+	}{
+		{"a person's stop", pausedByUserOutput, "Paused by user"},
+		{"a recovered panic", crashedOutput, "Stopped by an internal error"},
+	} {
+		task := &types.Task{Status: types.StatusInProgress, ExecutionState: types.ExecStateRunning}
+		if !applyStopTransition(task, tc.output) {
+			t.Fatalf("%s: transition refused an in-flight row", tc.name)
+		}
+		if task.ExecutionState != types.ExecStatePaused || task.Status != types.StatusInProgress {
+			t.Errorf("%s: got %s/%s, want in_progress/paused — a stopped run must stay resumable", tc.name, task.Status, task.ExecutionState)
+		}
+		if task.Output != tc.want {
+			t.Errorf("%s: output = %q, want %q", tc.name, task.Output, tc.want)
+		}
+	}
+}
+
+// TestRecoverTaskFromPanicSaysTheServerStoppedIt pins what the row says after executeTask's deferred
+// recover: the run is over, the reason is a server fault, and the row is not left reading as someone's pause.
+func TestRecoverTaskFromPanicSaysTheServerStoppedIt(t *testing.T) {
+	t.Parallel()
+	te := newSessionCostTestExecutor(t)
+	s := te.store
+	proj := createProject(t, s, "proj-crashed", "Crashed")
+	task := createTaskRow(t, s, "crashed-task", proj.ID, "in_progress", "running")
+
+	te.recoverTaskFromPanic(&taskExecSetup{task: task, projectID: proj.ID}, "runtime error: index out of range [0] with length 0")
+
+	row := waitTaskState(t, s, "crashed-task", isPaused)
+	if row.Output != crashedOutput {
+		t.Errorf("output = %q, want %q: a server fault must not be recorded as a person's pause", row.Output, crashedOutput)
+	}
+	msgs, err := s.GetTaskMessages("crashed-task", row.CurrentThreadID)
+	if err != nil {
+		t.Fatalf("read messages: %v", err)
+	}
+	var sawPanic bool
+	for _, m := range msgs {
+		if m.Role == "error" && strings.HasPrefix(m.Content, "[panic] ") {
+			sawPanic = true
+		}
+	}
+	if !sawPanic {
+		t.Errorf("no [panic] error row stored; the fault never reached the transcript")
+	}
 }
 
 // TestStopStaleRunningTask: stopping a task whose executor no longer exists must succeed

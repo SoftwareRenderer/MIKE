@@ -170,15 +170,23 @@ func (te *TaskExecutor) startGateQueuePoller(gate *ConcurrencyGate, providerURL,
 	}, done
 }
 
-// applyStopTransition transitions an in-flight task row out of its running state
-func applyStopTransition(task *types.Task) bool {
+// The output an in-flight row is stopped with. A person's stop and a server fault are different facts about
+// the same transition, and the row is where that distinction survives: the task is the same paused,
+// resumable row either way, and `output` is what says who stopped it.
+const (
+	pausedByUserOutput = "Paused by user"
+	crashedOutput      = "Stopped by an internal error"
+)
+
+// applyStopTransition transitions an in-flight task row out of its running state, naming what stopped it.
+func applyStopTransition(task *types.Task, output string) bool {
 	if !task.ExecutionState.InFlight() {
 		return false
 	}
 	switch task.Status {
 	case types.StatusInProgress:
 		task.ExecutionState = types.ExecStatePaused
-		task.Output = "Paused by user"
+		task.Output = output
 	case types.StatusDone:
 		task.ExecutionState = types.ExecStateCompleted
 	default:
@@ -262,11 +270,22 @@ func (te *TaskExecutor) persistStopTransition(task *types.Task) bool {
 
 // handleCancelledTask applies the stop transition
 func (te *TaskExecutor) handleCancelledTask(taskID, projectID string) {
+	te.finishStoppedTask(taskID, projectID, pausedByUserOutput)
+}
+
+// handleCrashedTask is the stop transition for a run that ended on a server fault. The state machine is
+// the cancellation one — a stopped in_progress row stays paused, so it stays resumable — and only the row's
+// output says the server stopped it rather than a person.
+func (te *TaskExecutor) handleCrashedTask(taskID, projectID string) {
+	te.finishStoppedTask(taskID, projectID, crashedOutput)
+}
+
+func (te *TaskExecutor) finishStoppedTask(taskID, projectID, output string) {
 	fresh, err := te.store.GetTaskByID(taskID)
 	if err != nil {
 		return
 	}
-	if applyStopTransition(fresh) {
+	if applyStopTransition(fresh, output) {
 		te.persistStopTransition(fresh)
 	}
 	te.sendStopStatusEvent(projectID, taskID, fresh.ExecutionState)

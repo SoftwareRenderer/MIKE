@@ -1571,7 +1571,7 @@ func (te *TaskExecutor) StopTask(taskID string) error {
 	if err != nil {
 		return err
 	}
-	if applyStopTransition(task) {
+	if applyStopTransition(task, pausedByUserOutput) {
 		te.persistStopTransition(task)
 	}
 	te.sendStopStatusEvent(task.ProjectID, taskID, task.ExecutionState)
@@ -1598,7 +1598,7 @@ func (te *TaskExecutor) StopProjectTasks(projectID string) int {
 			// Same ordering as StopTask.
 			waitForExecutorExit(task.ID, state, executorExitGrace)
 			// Reset only in-flight tasks (in_progress → paused); preserve the column.
-			if applyStopTransition(&task) {
+			if applyStopTransition(&task, pausedByUserOutput) {
 				te.persistStopTransition(&task)
 			}
 			te.sendStopStatusEvent(projectID, task.ID, task.ExecutionState)
@@ -1619,7 +1619,7 @@ func (te *TaskExecutor) RecoverStaleTasks() int {
 	recovered := 0
 	for _, task := range inFlight {
 		oldState := task.ExecutionState
-		if !applyStopTransition(&task) {
+		if !applyStopTransition(&task, pausedByUserOutput) {
 			continue
 		}
 		te.taskMu.Lock()

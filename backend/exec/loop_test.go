@@ -1146,28 +1146,80 @@ func TestSplitSentences(t *testing.T) {
 	}
 }
 
+// crashingBashCommand is the command that ended a real review turn: the task's tool call stored both
+// results, then the loop detector's read-only classification panicked and the turn unwound.
+const crashingBashCommand = `cd /home/sandbox/MIKE && grep -rn --include="*.go" -E "Sprintf\(\"[^\"]*(\\|\\|\\||&&|; *\\$|\\becho\\b|\\bgrep\\b|\\brg\\b|\\bls\\b|\\bcat\\b)" backend/ pkg/ | grep -v _test | head -20; echo "=== search exec ==="; grep -rn "func (s \*Server) runSearch\|func.*search" backend/server/handler_fs.go | head -20`
+
+// readOnlyCommandCases pins the classifier's verdicts. A separator inside quotes is text, not a separator,
+// and a segment with no words decides nothing — the two rules every shape below turns on.
+var readOnlyCommandCases = []struct {
+	cmd  string
+	want bool
+}{
+	{"head src/main.go", true},
+	{"cat file.txt", true},
+	{"ls -la", true},
+	{"grep foo bar.txt", true},
+	{"echo hello > file.txt", false}, // redirect
+	{"python script.py", false},
+	{"git commit -m msg", false},
+	{"sed -i 's/a/b/' file", false},
+
+	// A quoted separator is an argument: `&&` and `|` inside quotes start no new segment.
+	{`grep "a&&|b" f`, true},
+	{`cat "a && b"`, true},
+	{`grep -E "s\"&&|x" f`, true},
+	{crashingBashCommand, true},
+
+	// Nothing to classify: the verdict is read-only, the same answer an unparseable command gets.
+	{"", true},
+	{"   ", true},
+	{"| grep x", true},
+
+	// Every segment decides: `;` separates commands the way `&&` and a pipe do.
+	{"echo hi; rm -f x", false},
+	{"echo hi | rm -f x", false},
+	{"grep x f | wc -l && git status", false},
+	{"echo a && echo b > out", false},
+}
+
 func TestIsReadOnlyCommand(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		cmd  string
-		want bool
-	}{
-		{"head src/main.go", true},
-		{"cat file.txt", true},
-		{"ls -la", true},
-		{"grep foo bar.txt", true},
-		{"echo hello > file.txt", false}, // redirect
-		{"python script.py", false},
-		{"git commit -m msg", false},
-		{"sed -i 's/a/b/' file", false},
-	}
-
-	for _, tt := range tests {
+	for _, tt := range readOnlyCommandCases {
 		got := isReadOnlyCommand(tt.cmd)
 		if got != tt.want {
 			t.Errorf("isReadOnlyCommand(%q) = %v, want %v", tt.cmd, got, tt.want)
 		}
 	}
+}
+
+// TestIsReadOnlyCommandNeverPanics holds the invariant the classifier exists under: its verdict chooses
+// which loop hint to show and grants nothing, so no command text may end the turn that asked for it.
+func TestIsReadOnlyCommandNeverPanics(t *testing.T) {
+	t.Parallel()
+	for _, tt := range readOnlyCommandCases {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("isReadOnlyCommand(%q) panicked: %v", tt.cmd, r)
+				}
+			}()
+			isReadOnlyCommand(tt.cmd)
+		}()
+	}
+}
+
+func FuzzIsReadOnlyCommand(f *testing.F) {
+	f.Add(crashingBashCommand)
+	f.Add(`grep "a&&|b" f`)
+	f.Add(`| grep x`)
+	f.Add(`echo hi; rm -f x`)
+	f.Add(`"`)
+	f.Add(`'`)
+	f.Add(`\\`)
+	f.Fuzz(func(t *testing.T, cmd string) {
+		isReadOnlyCommand(cmd)
+	})
 }
 
 // --- Sandbox Prompt Path Tests ---

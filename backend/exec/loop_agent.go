@@ -67,6 +67,9 @@ func (te *TaskExecutor) executeTaskWithAgent(setup *taskExecSetup) {
 		if r := recover(); r != nil {
 			logging.For(logging.Recovery).With(logging.TaskID, task.ID).Errorf("recovered from panic: %v", r)
 			te.sendAndPersistError(task.ID, fmt.Sprintf("Internal error: %v", r), "panic")
+			// This recover catches the panic before executeTask's cleanup does, so that cleanup sees
+			// nothing to recover and only a transition from here takes the row out of flight.
+			te.handleCrashedTask(task.ID, projectID)
 		}
 	}()
 

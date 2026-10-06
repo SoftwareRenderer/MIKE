@@ -258,62 +258,81 @@ func (d *loopDetector) phraseDetected() bool {
 	return d.phraseFired
 }
 
-// shellTokens splits a shell command into tokens, handling pipes and redirects.
+// The separator tokens shellTokens emits between words. A segment separator starts a new command; ">" does
+// not, it stays inside its segment where it says that segment writes a file.
+const (
+	sepPipe    = "|"
+	sepAnd     = "&&"
+	sepSemi    = ";"
+	redirToken = ">"
+)
+
+// shellTokens splits a shell command into words and separator tokens. Only a separator outside quotes
+// separates, a backslash makes the rune after it text (so an escaped quote does not end a quoted word), and
+// an unbalanced quote is tolerated: this feeds a loop hint, not a permission check.
 func shellTokens(cmd string) []string {
+	rs := []rune(cmd)
 	var tokens []string
 	current := strings.Builder{}
-	inSingleQuote, inDoubleQuote := false, false
-	for _, r := range cmd {
-		switch r {
-		case '\'':
-			inSingleQuote = !inSingleQuote
-		case '"':
-			if !inSingleQuote {
-				inDoubleQuote = !inDoubleQuote
+	flush := func() {
+		if current.Len() > 0 {
+			tokens = append(tokens, current.String())
+			current.Reset()
+		}
+	}
+	inSingle, inDouble := false, false
+	for i := 0; i < len(rs); i++ {
+		r := rs[i]
+		if r == '\\' && !inSingle && i+1 < len(rs) {
+			i++
+			current.WriteRune(rs[i])
+			continue
+		}
+		switch {
+		case inSingle:
+			if r == '\'' {
+				inSingle = false
 			} else {
 				current.WriteRune(r)
 			}
-		case ' ', '\t':
-			if !inSingleQuote && !inDoubleQuote {
-				if current.Len() > 0 {
-					tokens = append(tokens, current.String())
-					current.Reset()
-				}
+		case inDouble:
+			if r == '"' {
+				inDouble = false
 			} else {
 				current.WriteRune(r)
 			}
-		case '|', '&':
-			if !inSingleQuote && !inDoubleQuote {
-				if current.Len() > 0 {
-					tokens = append(tokens, current.String())
-					current.Reset()
-				}
-				if r == '|' {
-					tokens = append(tokens, "|")
-				} else {
-					tokens = append(tokens, "&&")
-				}
-			} else {
-				current.WriteRune(r)
+		case r == '\'':
+			inSingle = true
+		case r == '"':
+			inDouble = true
+		case r == ' ' || r == '\t' || r == '\n' || r == '\r':
+			flush()
+		case r == '|' || r == '&' || r == ';' || r == '>':
+			flush()
+			for i+1 < len(rs) && rs[i+1] == r {
+				i++
 			}
-		case '>':
-			if !inSingleQuote && !inDoubleQuote {
-				if current.Len() > 0 {
-					tokens = append(tokens, current.String())
-					current.Reset()
-				}
-				tokens = append(tokens, ">")
-			} else {
-				current.WriteRune(r)
-			}
+			tokens = append(tokens, separatorToken(r))
 		default:
 			current.WriteRune(r)
 		}
 	}
-	if current.Len() > 0 {
-		tokens = append(tokens, current.String())
-	}
+	flush()
 	return tokens
+}
+
+// separatorToken names the token for a run of one shell operator rune.
+func separatorToken(r rune) string {
+	switch r {
+	case '|':
+		return sepPipe
+	case '&':
+		return sepAnd
+	case ';':
+		return sepSemi
+	default:
+		return redirToken
+	}
 }
 
 // isReadOnlyCall classifies a tool call as read-only or state-changing. It chooses which hint to
@@ -340,7 +359,8 @@ func isReadOnlyCall(toolName, rawArgs string) bool {
 	return true
 }
 
-// readOnlyCommands are commands that only read data without modifying files.
+// readOnlyCommands and stateChangingCommands are the two known vocabularies of verbs. A verb in neither —
+// `cd`, a repository's own script, an installed tool — decides nothing and counts as read-only.
 var readOnlyCommands = []string{
 	"head", "tail", "cat", "wc", "ls", "stat", "file", "diff",
 	"grep", "find", "echo", "printf", "pwd", "whoami", "uname",
@@ -350,51 +370,58 @@ var readOnlyCommands = []string{
 	"basename", "dirname", "realpath", "readlink", "mktemp",
 }
 
-// isReadOnlyCommand checks if a shell command is read-only.
+var stateChangingCommands = []string{
+	"python", "python3", "node", "npm", "pip", "cargo", "go",
+	"make", "gcc", "g++", "rustc", "javac", "ruby", "perl",
+	"sed", "awk", "vim", "nano", "emacs", "touch",
+	"mv", "cp", "rm", "mkdir", "rmdir", "chmod", "chown",
+	"install", "curl", "wget", "apt", "yum", "dnf", "brew",
+	"git", "docker", "kubectl", "terraform", "ansible",
+}
+
+// isReadOnlyCommand reports whether every command on a shell line only reads. Each `&&`, `||`, `;` and pipe
+// segment is judged on its own, so neither a later `;` command nor a downstream pipe stage hides behind the
+// first verb. The verdict picks which loop hint to show and grants nothing: no command text can make it
+// refuse, panic or end the turn that asked for it.
 func isReadOnlyCommand(cmd string) bool {
-	cmd = strings.TrimSpace(cmd)
 	tokens := shellTokens(cmd)
-	if len(tokens) == 0 {
-		return true
-	}
-
-	for i, t := range tokens {
-		if t == "|" {
-			tokens = tokens[:i]
-			break
+	for start := 0; ; {
+		end := start
+		for end < len(tokens) && !endsSegment(tokens[end]) {
+			end++
 		}
+		if !readOnlySegment(tokens[start:end]) {
+			return false
+		}
+		if end == len(tokens) {
+			return true
+		}
+		start = end + 1
 	}
+}
 
-	verb := tokens[0]
+// endsSegment reports whether tok starts a new command.
+func endsSegment(tok string) bool {
+	return tok == sepPipe || tok == sepAnd || tok == sepSemi
+}
 
-	for _, t := range tokens {
-		if t == ">" || t == ">>" {
+// readOnlySegment judges one command: a redirect writes a file whatever the verb is, and otherwise the verb
+// — the segment's first word — decides. A segment with no words is a leading or doubled separator, and
+// falls open like any command this classifier cannot read.
+func readOnlySegment(segment []string) bool {
+	for _, t := range segment {
+		if t == redirToken {
 			return false
 		}
 	}
-
-	if strings.Contains(cmd, "&&") {
-		parts := strings.Split(cmd, "&&")
-		for _, part := range parts[1:] {
-			if !isReadOnlyCommand(strings.TrimSpace(part)) {
-				return false
-			}
-		}
+	if len(segment) == 0 {
+		return true
 	}
-
+	verb := segment[0]
 	if slices.Contains(readOnlyCommands, verb) {
 		return true
 	}
-
-	stateChanging := []string{
-		"python", "python3", "node", "npm", "pip", "cargo", "go",
-		"make", "gcc", "g++", "rustc", "javac", "ruby", "perl",
-		"sed", "awk", "vim", "nano", "emacs", "touch",
-		"mv", "cp", "rm", "mkdir", "rmdir", "chmod", "chown",
-		"install", "curl", "wget", "apt", "yum", "dnf", "brew",
-		"git", "docker", "kubectl", "terraform", "ansible",
-	}
-	return !slices.Contains(stateChanging, verb)
+	return !slices.Contains(stateChangingCommands, verb)
 }
 
 // buildHint generates a targeted system message based on loop type.

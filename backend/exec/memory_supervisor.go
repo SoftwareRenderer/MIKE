@@ -14,7 +14,8 @@ import (
 // DefaultMemSupervisorInterval is how often MemorySupervisor.TickOnce runs in production.
 const DefaultMemSupervisorInterval = 5 * time.Second
 
-// "Paused by user" is what the shared stop transition writes for every pause, including this one.
+// StopTask's transition writes pausedByUserOutput over this text, which is why the supervisor writes it
+// after the stop returns.
 const memoryPauseOutput = "Paused for memory pressure — resumes automatically when memory frees"
 
 // defaultIdleSandboxGrace is how long a container may belong to a task that is not working before the

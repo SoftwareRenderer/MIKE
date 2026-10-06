@@ -16,16 +16,21 @@ import (
 const otherAgentBinary = "codelint-cli"
 
 // stubAdapter is the adapter an agent extension ships. The field that matters is the binary its
-// SubprocessConfig names — the only place in the product that name exists.
+// SubprocessConfig names — the only place in the product that name exists. panicInConfig makes the run die
+// inside the adapter, which is how a test reaches the executor's own recover.
 type stubAdapter struct {
-	binary string
-	closed bool
+	binary        string
+	closed        bool
+	panicInConfig bool
 }
 
 var _ pkgagent.AgentAdapter = (*stubAdapter)(nil)
 
 func (s *stubAdapter) Init(context.Context, []byte) error { return nil }
 func (s *stubAdapter) SubprocessConfig(context.Context) pkgagent.SubprocessConfig {
+	if s.panicInConfig {
+		panic("runtime error: index out of range [0] with length 0")
+	}
 	return pkgagent.SubprocessConfig{Binary: s.binary}
 }
 func (s *stubAdapter) EncodeCommand(context.Context, string, []byte) []byte   { return nil }
@@ -52,8 +57,12 @@ func (p *recordingProber) BinaryAvailable(taskID, binary string) bool {
 // run in parallel: two of them under one name receive one adapter and close each other's.
 func registerStubAgent(t *testing.T) (string, *stubAdapter) {
 	t.Helper()
+	return registerAgentAdapter(t, &stubAdapter{binary: otherAgentBinary})
+}
+
+func registerAgentAdapter(t *testing.T, adapter *stubAdapter) (string, *stubAdapter) {
+	t.Helper()
 	name := "codelint-" + strings.ToLower(t.Name())
-	adapter := &stubAdapter{binary: otherAgentBinary}
 	agent.RegisterAdapterFactory(name, func() pkgagent.AgentAdapter { return adapter })
 	return name, adapter
 }
