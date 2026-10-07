@@ -434,16 +434,21 @@
         const entry = asked.entry;
         const paths = selectedPaths;
         const items: FileMenuItem[] = [];
-        if (entry) items.push({ label: t('explorer.shared.menuOpen'), icon: 'open', run: () => openEntry(entry, false) });
-        // `..` points above the root this listing is jailed to, so it has no window of its own.
-        if (entry && rowIsSelectable(entry)) {
-            items.push({ label: t('explorer.shared.menuOpenWindow'), icon: 'window', run: () => openInNewWindow(entry) });
-        }
-        if (paths.length > 0) {
-            items.push({ label: t('explorer.shared.menuCut'), icon: 'cut', disabled: mutating, run: () => setClipboard('cut', paths) });
-            items.push({ label: t('explorer.shared.menuCopy'), icon: 'copy', disabled: mutating, run: () => setClipboard('copy', paths) });
-            if (paths.length === 1) items.push({ label: t('explorer.shared.menuRename'), icon: 'rename', disabled: mutating, run: () => startRename(paths[0]) });
-            items.push({ label: t('explorer.shared.menuDelete'), icon: 'delete', destructive: true, disabled: mutating, run: () => void deletePaths(paths) });
+        if (entry) {
+            items.push({ label: t('explorer.shared.menuOpen'), icon: 'open', run: () => openEntry(entry, false) });
+
+            if (rowIsSelectable(entry)) {
+                items.push({ label: t('explorer.shared.menuOpenWindow'), icon: 'window', run: () => openInNewWindow(entry) });
+            }
+            if (paths.length > 0) {
+                items.push({ label: t('explorer.shared.menuCut'), icon: 'cut', disabled: mutating, run: () => setClipboard('cut', paths) });
+                items.push({ label: t('explorer.shared.menuCopy'), icon: 'copy', disabled: mutating, run: () => setClipboard('copy', paths) });
+                if (paths.length === 1) items.push({ label: t('explorer.shared.menuRename'), icon: 'rename', disabled: mutating, run: () => startRename(paths[0]) });
+                items.push({ label: t('explorer.shared.menuDelete'), icon: 'delete', destructive: true, disabled: mutating, run: () => void deletePaths(paths) });
+            }
+        } else {
+            items.push({ label: t('explorer.shared.newFileTitle'), icon: 'newfile', run: () => void toggleNewFile() });
+            items.push({ label: t('explorer.shared.newFolder'), icon: 'newfolder', run: () => void toggleNewFolder() });
         }
         if (clipboard) {
             items.push({
