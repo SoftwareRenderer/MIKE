@@ -168,6 +168,26 @@ describe('the checkpoint band', () => {
         })).toBeNull();
     });
 
+    it('names the newest checkpoint of the newest turn, not its last entry', () => {
+        const entries = [user('u1'), assistant('a1'), assistant('a2'), assistant('a3')];
+        expect(trailingCheckpoint({
+            entries, pendingCheckpoints: new Set(), checkpointLabels: new Map(), checkpointCommitHashes: hash(['a1', 'c1'], ['a2', 'c2']),
+        })).toEqual({ isPending: false, commitLabel: undefined, commitHash: 'c2' });
+    });
+
+    it('names that same checkpoint above the question that follows the turn', () => {
+        const entries = [user('u1'), assistant('a1'), assistant('a2'), user('u2')];
+        expect(buildCheckpointStateMap(entries, sources({ hashes: [['a1', 'c1']] })).get(3)).toEqual({ isPending: false, commitHash: 'c1' });
+    });
+
+    it('never carries an older turn\'s checkpoint past the question that started the newest one', () => {
+        // The turn that saved nothing has no band; the older one already has its own.
+        const entries = [user('u1'), assistant('a1'), user('u2'), assistant('a2')];
+        expect(trailingCheckpoint({
+            entries, pendingCheckpoints: new Set(), checkpointLabels: new Map(), checkpointCommitHashes: hash(['a1', 'c1']),
+        })).toBeNull();
+    });
+
     it('stays quiet for a trailing turn that saved nothing, and on an empty transcript', () => {
         expect(trailingCheckpoint({
             entries: [user('u1'), assistant('a1')],

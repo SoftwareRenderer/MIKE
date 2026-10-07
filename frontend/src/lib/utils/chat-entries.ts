@@ -565,11 +565,22 @@ function checkpointStateFor(entry: ChatEntry, sources: CheckpointSources): Check
     };
 }
 
-/**
- * Map each user message to the checkpoint band drawn above it: the newest turn *before* it, which is the
- * state of the work when that message arrived. A band never points forward — a checkpoint belongs to the turn
- * that captured it, and pointing forward puts one above the question that caused it and again above the next
- * message. The newest turn has no later user message to carry its band; `trailingCheckpoint` answers for it.
+/** The newest checkpoint of the turn that ends at `from`. The round that ends a turn usually saved nothing,
+ * so the scan passes over those rounds instead of answering that the turn has none. */
+function newestCheckpointOfTurn(entries: ChatEntry[], from: number, sources: CheckpointSources): CheckpointState | null {
+    for (let i = from; i >= 0; i--) {
+        const entry = entries[i]!;
+        // The question that started the turn is where it ends.
+        if (entry.role === 'user') return null;
+        if (entry.role !== 'assistant') continue;
+        const state = checkpointStateFor(entry, sources);
+        if (state) return state;
+    }
+    return null;
+}
+
+/** The band above each user message: the state the work was in when that message arrived, never a later turn's.
+ * `trailingCheckpoint` answers for the newest turn, which has no later message.
  *
  * @knipignore Which checkpoint a message shows the state before is asserted per entry order.
  */
@@ -578,41 +589,17 @@ export function buildCheckpointStateMap(
     sources: CheckpointSources,
 ): Map<number, CheckpointState | null> {
     const result = new Map<number, CheckpointState | null>();
-    let lastAssistant: number | null = null;
-
     for (let i = 0; i < entries.length; i++) {
-        const entry = entries[i]!;
-        if (entry.role === 'assistant') {
-            lastAssistant = i;
-            continue;
-        }
-        if (entry.role !== 'user') continue;
-        result.set(i, lastAssistant === null
-            ? null
-            : checkpointStateFor(entries[lastAssistant]!, sources));
-        // One band per turn: what this message's own turn leaves behind belongs to the next band, not here.
-        lastAssistant = null;
+        // Scan from the entry above: what this message's own turn leaves behind belongs to the next band.
+        if (entries[i]!.role === 'user') result.set(i, newestCheckpointOfTurn(entries, i - 1, sources));
     }
-
     return result;
 }
 
-/**
- * The band after the last message: the newest turn of the conversation, which no later user message carries.
- * The turn a reader most wants to inspect is the one that just finished, and without this it has no band.
- * `null` when the conversation ends on a user message, or that turn saved nothing.
- */
+/** The band after the last message: the newest turn, which no later message carries. Null when the conversation
+ * ends on a question, or that turn saved nothing. */
 export function trailingCheckpoint(args: { entries: ChatEntry[] } & CheckpointSources): CheckpointState | null {
-    const { entries } = args;
-    for (let i = entries.length - 1; i >= 0; i--) {
-        const entry = entries[i]!;
-        // The tail past the last question is the newest turn; anything before it already has a band.
-        if (entry.role === 'user') return null;
-        if (entry.role === 'assistant') {
-            return checkpointStateFor(entry, args);
-        }
-    }
-    return null;
+    return newestCheckpointOfTurn(args.entries, args.entries.length - 1, args);
 }
 
 /**

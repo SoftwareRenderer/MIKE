@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import type { StreamEvent } from '$lib/types';
 import { StreamState } from '$lib/services/stream-state.svelte';
 import { createStreamHandler, type StreamHandlerCallbacks } from '$lib/services/stream-handler';
-import { buildEntriesFromMessages, mergeLoadedHistory } from '$lib/utils/chat-entries';
+import { buildEntriesFromMessages, mergeLoadedHistory, trailingCheckpoint } from '$lib/utils/chat-entries';
 
 function makeCallbacks(overrides: Partial<StreamHandlerCallbacks> = {}): StreamHandlerCallbacks {
     return {
@@ -633,6 +633,91 @@ describe('createStreamHandler', () => {
         expect(stream.state.pendingCheckpoints.has('msg-1')).toBe(false);
         expect(stream.state.checkpointLabels.get('msg-1')).toBe('Checkpoint 1');
         expect(stream.state.checkpointCommitHashes.get('msg-1')).toBe('abc123');
+    });
+
+    describe('a checkpoint captured while a later round is streaming', () => {
+        /** Client ids for streaming entries, so a rename to a row id is visible in the assertions. */
+        function setupLive() {
+            let n = 0;
+            const stream = new StreamState();
+            const handleEvent = createStreamHandler(stream, makeCallbacks({ genId: () => `c${++n}` }));
+            const trailing = () => trailingCheckpoint({
+                entries: stream.state.entries,
+                pendingCheckpoints: stream.state.pendingCheckpoints,
+                checkpointLabels: stream.state.checkpointLabels,
+                checkpointCommitHashes: stream.state.checkpointCommitHashes,
+            });
+            // The frames name the captured row, not the entry on screen.
+            const captureRoundOneThenStreamTwo = (handleEvent: ReturnType<typeof createStreamHandler>) => {
+                handleEvent({ type: 'token', data: { text: 'round one' } }, false);
+                handleEvent({ type: 'tool_call', data: { tool_id: 'tc1', tool_name: 'write_file', args: {} } }, false);
+                handleEvent({ type: 'tool_result', data: { tool_id: 'tc1', success: true, output: 'ok' } }, false);
+                handleEvent({ type: 'git_checkpoint_pending', data: { message_id: 'A1' } }, false);
+                handleEvent({ type: 'token', data: { text: 'round two' } }, false);
+                handleEvent({ type: 'git_checkpoint_complete', data: { message_id: 'A1', commit_hash: 'h1', label: 'Wrote the file' } }, false);
+            };
+            return { stream, handleEvent, trailing, captureRoundOneThenStreamTwo };
+        }
+
+        const completeTurn = (assistant_message_id: string) =>
+            ({ type: 'complete', data: { state: 'review', assistant_message_id } }) as never;
+
+        it('shows one band from the first capture to the end of the turn, never in and out', () => {
+            const { handleEvent, trailing, captureRoundOneThenStreamTwo } = setupLive();
+            handleEvent({ type: 'user_message', data: { id: 'u1', role: 'user', content: 'do it' } }, false);
+            captureRoundOneThenStreamTwo(handleEvent);
+            expect(trailing()?.commitHash).toBe('h1');
+
+            handleEvent({ type: 'tool_call', data: { tool_id: 'tc2', tool_name: 'bash', args: {} } }, false);
+            handleEvent({ type: 'tool_result', data: { tool_id: 'tc2', success: true, output: 'ok' } }, false);
+            handleEvent({ type: 'token', data: { text: 'round three' } }, false);
+            handleEvent({ type: 'git_checkpoint_complete', data: { message_id: 'A2', commit_hash: 'h2' } }, false);
+            expect(trailing()?.commitHash).toBe('h2');
+
+            handleEvent(completeTurn('A3'), false);
+            // A next turn that has captured nothing yet still shows the newest state that exists.
+            handleEvent({ type: 'token', data: { text: 'next turn' } }, false);
+            handleEvent({ type: 'tool_call', data: { tool_id: 'tc3', tool_name: 'write_file', args: {} } }, false);
+            expect(trailing()?.commitHash).toBe('h2');
+        });
+
+        it('is still the band after the turn ends on the entry that carried it', () => {
+            // Left behind by the rename, the hash would name an entry no longer on screen.
+            const { stream, handleEvent, trailing, captureRoundOneThenStreamTwo } = setupLive();
+            captureRoundOneThenStreamTwo(handleEvent);
+            expect(trailing()?.commitHash).toBe('h1');
+
+            handleEvent(completeTurn('A2'), false);
+
+            expect(stream.state.entries[stream.state.entries.length - 1].id).toBe('A2');
+            expect(trailing()?.commitHash).toBe('h1');
+            expect(stream.state.checkpointCommitHashes.has('c2')).toBe(false);
+        });
+
+        it('leaves a hash the row already carries alone when the entry is renamed to it', () => {
+            const { stream, handleEvent, captureRoundOneThenStreamTwo } = setupLive();
+            stream.state.checkpointCommitHashes = new Map([['A2', 'from-row']]);
+            captureRoundOneThenStreamTwo(handleEvent);
+
+            handleEvent(completeTurn('A2'), false);
+
+            expect(stream.state.checkpointCommitHashes.get('A2')).toBe('from-row');
+            expect(stream.state.checkpointCommitHashes.has('c2')).toBe(false);
+        });
+
+        it('drops the alias when a read already put the row on screen', () => {
+            // Nothing reads a key whose entry is gone, so it would only accumulate.
+            const { stream, handleEvent } = setupLive();
+            handleEvent({ type: 'token', data: { text: 'round one' } }, false);
+            handleEvent({ type: 'git_checkpoint_complete', data: { message_id: 'A1', commit_hash: 'h1' } }, false);
+            stream.state.entries = [...stream.state.entries, { id: 'A1', role: 'assistant' as const, content: 'the row', isStreaming: false, createdAt: new Date().toISOString() }];
+
+            handleEvent(completeTurn('A1'), false);
+
+            expect(stream.state.entries.map(e => e.id)).toEqual(['A1']);
+            expect(stream.state.checkpointCommitHashes.has('c1')).toBe(false);
+            expect(stream.state.checkpointCommitHashes.get('A1')).toBe('h1');
+        });
     });
 
     it('suppressEvents skips token events', () => {

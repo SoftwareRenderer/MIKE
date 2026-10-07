@@ -24,6 +24,19 @@ function pointToolCallRef(s: typeof StreamState.prototype.state, toolId: string,
     s.activeToolCalls = next;
 }
 
+/** The frames name the assistant row, which the streaming entry does not carry yet, so a mid-turn capture is
+ * keyed under that entry. Renaming the entry to its row has to take the hash with it. */
+function moveCheckpointKey(s: typeof StreamState.prototype.state, from: string, to: string | null) {
+    const hash = s.checkpointCommitHashes.get(from);
+    if (hash === undefined) return;
+    const hashes = new Map(s.checkpointCommitHashes);
+    hashes.delete(from);
+    // A hash the row already carries came from its own capture, which is the newer one.
+    if (to && !hashes.has(to)) hashes.set(to, hash);
+    s.checkpointCommitHashes = hashes;
+    s.checkpointHashesVersion++;
+}
+
 /**
  * External callbacks the component must provide.
  *
@@ -284,9 +297,13 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                     const entry = s.entries.find(e => e.id === s.currentAssistantId);
                     if (entry && entry.id !== data.assistant_message_id) {
                         if (s.entries.some(e => e.id === data.assistant_message_id)) {
-                            s.entries = s.entries.filter(e => e.id !== s.currentAssistantId);
+                            const droppedId = s.currentAssistantId;
+                            s.entries = s.entries.filter(e => e.id !== droppedId);
+                            moveCheckpointKey(s, droppedId, null);
                         } else {
+                            const streamingId = s.currentAssistantId;
                             entry.id = data.assistant_message_id;
+                            moveCheckpointKey(s, streamingId, data.assistant_message_id);
                         }
                     }
                 }

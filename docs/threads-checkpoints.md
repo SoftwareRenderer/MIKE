@@ -123,12 +123,23 @@ a wrong answer here is a silent dead end rather than an error message.
 
 These rules keep the chat's checkpoint band and the Changes panel describing one thing.
 
-**A band belongs to the turn that captured it.** `buildCheckpointStateMap`
-(`frontend/src/lib/utils/chat-entries.ts`) puts a band above the next user message, which is where the reader
-sees the state that message arrived on. The newest turn has no later message, so `trailingCheckpoint` answers
-for it and `ChatEntries.svelte` draws that band after the list. A band that points forward draws a checkpoint
-above the question that caused it, and draws the same checkpoint twice in a two-turn thread. Tests:
-`frontend/src/lib/utils/__tests__/chat-entries.unit.ts`.
+**A band names the newest checkpoint of its turn, and one band per turn.** A turn is the run of entries between
+two user messages, and it holds one entry per LLM round. The round that ends a turn usually wrote no files, so
+reading only the turn's last entry leaves that turn's checkpoints with no band at all — and the live transcript
+disagreeing with the same rows read back. `newestCheckpointOfTurn` (`frontend/src/lib/utils/chat-entries.ts`)
+scans back to the question that started the turn and answers the newest entry that saved state.
+`buildCheckpointStateMap` puts that band above the next user message, where the reader sees the state that
+message arrived on; `trailingCheckpoint` answers for the newest turn, which has no later message, and
+`ChatEntries.svelte` draws it after the list. A band that points forward draws a checkpoint above the question
+that caused it, and draws the same checkpoint twice in a two-turn thread.
+
+**Mid-turn a capture's hash rides on the entry being streamed, and the rename moves it.** The frames name the
+assistant row, which no on-screen entry carries until `complete` renames the streaming entry to that row id.
+So `git_checkpoint_complete` keys the hash under the entry being streamed
+(`frontend/src/lib/services/stream-handler.ts`), and the rename moves it onto the row id instead of leaving
+the band naming an older round's checkpoint. Tests:
+`frontend/src/lib/utils/__tests__/chat-entries.unit.ts`,
+`frontend/src/lib/services/__tests__/stream-handler.unit.ts`.
 
 **A checkpoint's diff is baseline..snapshot and both of its reads name both refs.** The band's *view changes*
 asks `GET /api/projects/{id}/tasks/{taskID}/diff?head=` and lists files from that comparison. Expanding a
