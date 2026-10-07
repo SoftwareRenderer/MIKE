@@ -9,7 +9,7 @@ import { MODE_DESCRIPTIONS, modeTip } from '$lib/constants/modes';
 describe('MODE_DESCRIPTIONS', () => {
     it('answers every mode with the copy that shipped', () => {
         expect(MODE_DESCRIPTIONS.act).toBe('AI is required to provide structured responses during review, and has read/write access.');
-        expect(MODE_DESCRIPTIONS.plan).toBe('AI decomposes work into subtasks on the board, and only has read access.');
+        expect(MODE_DESCRIPTIONS.plan).toBe('AI decomposes work into subtasks on the board, and only has read access to its worktree.');
         expect(MODE_DESCRIPTIONS.explore).toBe('AI has read/write access.');
     });
 
@@ -28,7 +28,7 @@ describe('MODE_DESCRIPTIONS', () => {
 describe('modeTip', () => {
     it('answers each mode with the tooltip that shipped', () => {
         expect(modeTip('act')).toBe('Act mode: AI is required to provide structured responses during review, and has read/write access. Click to switch.');
-        expect(modeTip('plan')).toBe('Plan mode: AI decomposes work into subtasks on the board, and only has read access. Click to switch.');
+        expect(modeTip('plan')).toBe('Plan mode: AI decomposes work into subtasks on the board, and only has read access to its worktree. Click to switch.');
         expect(modeTip('explore')).toBe('Explore mode: AI has read/write access. Click to switch.');
     });
 

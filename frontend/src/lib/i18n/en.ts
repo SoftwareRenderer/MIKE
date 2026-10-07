@@ -968,7 +968,7 @@ const catalog = {
 
     // ── constants/modes.ts — operating-mode descriptions (read through MODE_DESCRIPTIONS) ──
     'app.mode.act': 'AI is required to provide structured responses during review, and has read/write access.',
-    'app.mode.plan': 'AI decomposes work into subtasks on the board, and only has read access.',
+    'app.mode.plan': 'AI decomposes work into subtasks on the board, and only has read access to its worktree.',
     'app.mode.explore': 'AI has read/write access.',
 
     // ── App/Sidebar.svelte ──
@@ -1560,7 +1560,7 @@ const catalog = {
     'chat.mode.aria': 'Operating mode',
     'chat.mode.toggleAria': 'Toggle operating mode',
     'chat.mode.actTip': 'Act mode: AI is required to provide structured responses during review, and has read/write access. Click to switch.',
-    'chat.mode.planTip': 'Plan mode: AI decomposes work into subtasks on the board, and only has read access. Click to switch.',
+    'chat.mode.planTip': 'Plan mode: AI decomposes work into subtasks on the board, and only has read access to its worktree. Click to switch.',
     'chat.mode.exploreTip': 'Explore mode: AI has read/write access. Click to switch.',
 
     // ── ChangeModelModal.svelte ──
