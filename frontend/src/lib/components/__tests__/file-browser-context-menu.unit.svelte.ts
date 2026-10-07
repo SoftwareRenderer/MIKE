@@ -180,15 +180,14 @@ describe('the file list context menu', () => {
         await loadRoot(container);
 
         await fireEvent.click(rowEl(container, `${ROOT}/a.txt`)!, { ctrlKey: true });
-        await fireEvent.contextMenu(container.querySelector('.file-browser-list')!, { clientX: 60, clientY: 200 });
-        await waitFor(() => expect(menuEl()).toBeTruthy());
-        expect(menuLabels()).toEqual(['Cut', 'Copy', 'Rename', 'Delete']);
+        await openRowMenu(container, `${ROOT}/a.txt`);
+        expect(menuLabels()).toEqual(['Open', 'Open in new window', 'Cut', 'Copy', 'Rename', 'Delete']);
 
         menuItem('Copy')!.click();
         await waitFor(() => expect(menuEl()).toBeNull());
 
         await fireEvent.contextMenu(container.querySelector('.file-browser-list')!, { clientX: 60, clientY: 200 });
-        await waitFor(() => expect(menuLabels()).toContain('Paste into folder'));
+        await waitFor(() => expect(menuLabels()).toEqual(['New file', 'New folder', 'Paste into folder']));
     });
 
     it('pastes a folder row into that folder, not into the folder being listed', async () => {
@@ -279,6 +278,63 @@ describe('the file list context menu', () => {
 
         await waitFor(() => expect(dialogStore.toast?.type).toBe('error'));
         expect(dialogStore.toast?.message).toBe('1 item was not changed: it no longer exists');
+    });
+});
+
+describe('adding something to the folder the file list shows', () => {
+    /** The listing below the rows: the area a right-click asks about the folder itself. */
+    async function openEmptyAreaMenu(container: HTMLElement) {
+        await fireEvent.contextMenu(container.querySelector('.file-browser-list')!, { clientX: 60, clientY: 200 });
+        await waitFor(() => expect(menuEl()).toBeTruthy());
+    }
+
+    // The menu item opens the header's name row — the one the header buttons open — and Enter creates.
+    async function nameTheNewThing(container: HTMLElement, label: string, name: string) {
+        menuItem(label)!.click();
+        await waitFor(() => expect(menuEl()).toBeNull());
+        await waitFor(() => expect(container.querySelector('.new-file-input')).toBeTruthy());
+        const input = container.querySelector('.new-file-input') as HTMLInputElement;
+        input.value = name;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        await fireEvent.keyDown(input, { key: 'Enter' });
+    }
+
+    it('offers a file and a folder, and nothing about the rows a selection holds', async () => {
+        const { container } = openBrowser();
+        await loadRoot(container);
+        await fireEvent.click(rowEl(container, `${ROOT}/a.txt`)!);
+
+        await openEmptyAreaMenu(container);
+
+        expect(menuLabels()).toEqual(['New file', 'New folder']);
+    });
+
+    it('writes the file it is named into the folder being listed', async () => {
+        const { container } = openBrowser();
+        await loadRoot(container);
+
+        await openEmptyAreaMenu(container);
+        await nameTheNewThing(container, 'New file', 'notes.md');
+
+        await waitFor(() => expect(posts.map(p => p.pathname)).toContain('/api/fs/write'));
+        const write = posts.find(p => p.pathname === '/api/fs/write')!;
+        expect(write.body).toEqual({ path: `${ROOT}/notes.md`, content: '' });
+        expect(write.query).toContain(`project=${PROJECT}`);
+        expect(write.query).toContain(`task=${TASK}`);
+    });
+
+    it('creates the folder it is named one level down, not at the root', async () => {
+        const { container } = openBrowser();
+        await loadRoot(container);
+        await enterFolder(container, `${ROOT}/src`);
+
+        await openEmptyAreaMenu(container);
+        await nameTheNewThing(container, 'New folder', 'docs');
+
+        await waitFor(() => expect(posts.map(p => p.pathname)).toContain('/api/fs/mkdir'));
+        const mkdir = posts.find(p => p.pathname === '/api/fs/mkdir')!;
+        expect(mkdir.body).toEqual({ path: `${ROOT}/src/docs` });
+        expect(mkdir.query).toContain(`task=${TASK}`);
     });
 });
 

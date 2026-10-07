@@ -2,7 +2,7 @@
     /** One answer the menu offers. */
     export interface FileMenuItem {
         label: string;
-        icon?: 'open' | 'window' | 'cut' | 'copy' | 'paste' | 'rename' | 'delete' | 'stage' | 'unstage' | 'discard';
+        icon?: 'open' | 'window' | 'cut' | 'copy' | 'paste' | 'rename' | 'delete' | 'newfile' | 'newfolder' | 'stage' | 'unstage' | 'discard';
         disabled?: boolean;
         /** Draws as a dangerous action; the caller has already asked for confirmation. */
         destructive?: boolean;
@@ -158,6 +158,16 @@
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M3 6h18"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
                         <path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                    </svg>
+                {:else if item.icon === 'newfile'}
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M15 2v5h5"/>
+                        <path d="M12 12v6"/><path d="M9 15h6"/>
+                    </svg>
+                {:else if item.icon === 'newfolder'}
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>
+                        <path d="M12 10v6"/><path d="M9 13h6"/>
                     </svg>
                 {:else if item.icon === 'open'}
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
