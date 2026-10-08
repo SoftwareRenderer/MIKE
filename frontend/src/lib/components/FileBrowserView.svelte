@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, tick } from 'svelte';
     import {
-        copyFsPaths, deleteFsPaths, listFsDirectory, moveFsPaths, renameFsPath,
+        copyFsPaths, deleteFsPaths, downloadURL, listFsDirectory, moveFsPaths, renameFsPath,
         createFsDirectory, writeFsFile,
         type FsOpsResult, type FsEntry,
     } from '$lib/api';
@@ -439,6 +439,13 @@
 
             if (rowIsSelectable(entry)) {
                 items.push({ label: t('explorer.shared.menuOpenWindow'), icon: 'window', run: () => openInNewWindow(entry) });
+                const targets = paths.length > 0 ? paths : [entry.path];
+                items.push({
+                    label: downloadLabel(targets),
+                    icon: 'download',
+                    disabled: mutating,
+                    run: () => startDownload(targets),
+                });
             }
             if (paths.length > 0) {
                 items.push({ label: t('explorer.shared.menuCut'), icon: 'cut', disabled: mutating, run: () => setClipboard('cut', paths) });
@@ -464,6 +471,34 @@
     function setClipboard(mode: 'copy' | 'cut', paths: string[]): void {
         if (paths.length === 0) return;
         clipboard = { mode, paths };
+    }
+
+    /**
+     * Whether the download these rows would produce is an archive. `GET /api/fs/download` decides that,
+     * and the label has to agree with it.
+     */
+    function downloadIsArchive(paths: string[]): boolean {
+        if (paths.length !== 1) return true;
+        return entries.find(e => e.path === paths[0])?.isDir ?? false;
+    }
+
+    function downloadLabel(paths: string[]): string {
+        return t(downloadIsArchive(paths) ? 'explorer.shared.menuDownloadArchive' : 'explorer.shared.menuDownload');
+    }
+
+    /**
+     * Hand the URL to the browser's own download. Blank target because a refusal arrives as a page, and
+     * no `download` attribute because the server names the file.
+     */
+    function startDownload(paths: string[]): void {
+        if (paths.length === 0) return;
+        const link = document.createElement('a');
+        link.href = downloadURL({ project: projectId, task: taskId || undefined, paths });
+        link.target = '_blank';
+        link.rel = 'noopener';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
     }
 
     // One toast for what landed, one for what failed, whatever the batch size.
@@ -841,6 +876,19 @@
                 >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
+                    </svg>
+                </button>
+                <button
+                    type="button"
+                    class="selection-btn btn-ghost"
+                    disabled={mutating}
+                    title={downloadLabel(selectedPaths)}
+                    aria-label={downloadLabel(selectedPaths)}
+                    onclick={() => startDownload(selectedPaths)}
+                >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>
                     </svg>
                 </button>
                 <button

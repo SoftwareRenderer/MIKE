@@ -929,13 +929,40 @@ func (s *Server) validateFSPath(project *types.Project, worktreeRoot, path strin
 	return resolved, nil
 }
 
+// openJailedFile is the second half of validateFSPath: it opens the path that check returned and hands
+// it back only while it is still the file that check looked at. A task owns the directory the name sits
+// in, so a symlink or a different file can appear there in that gap; the caller closes the file.
+func openJailedFile(w http.ResponseWriter, hostPath string, before os.FileInfo) (*os.File, os.FileInfo, bool) {
+	f, err := os.Open(hostPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			JSONError(w, http.StatusNotFound, safeNotFoundError())
+		} else {
+			Fault(w, "read file", err)
+		}
+		return nil, nil, false
+	}
+	info, err := f.Stat()
+	if err != nil {
+		f.Close()
+		Fault(w, "stat file", err)
+		return nil, nil, false
+	}
+	if !os.SameFile(before, info) {
+		f.Close()
+		refusePathJail(w, hostPath)
+		return nil, nil, false
+	}
+	return f, info, true
+}
+
 // fsTarget is a contained write destination and the roots its parent creation stays inside.
 type fsTarget struct {
 	path  string
 	roots []string
 }
 
-// fsScope is what a request settles before touching any path: which tree it writes into, and which
+// fsScope is what a request settles before touching any path: which tree it names, and which
 // roots nothing may leave.
 type fsScope struct {
 	project      *types.Project
@@ -943,11 +970,12 @@ type fsScope struct {
 	roots        []string
 }
 
-// fsWriteScope answers the request-level questions every write shares: which tree it names (?task=
+// fsRequestScope answers the request-level questions every file request shares, read or write: which
+// tree it names (?task=
 // must belong to ?project=), and whether the host can run that tree's sandbox. The order matters,
 // because each check is a precondition of the next. project must not be nil, and ok is false after
 // the response is written.
-func (s *Server) fsWriteScope(w http.ResponseWriter, r *http.Request, project *types.Project) (fsScope, bool) {
+func (s *Server) fsRequestScope(w http.ResponseWriter, r *http.Request, project *types.Project) (fsScope, bool) {
 	worktreePath, ok := s.fsWorktreeRoot(w, r, project)
 	if !ok {
 		return fsScope{}, false
@@ -979,7 +1007,7 @@ func (s *Server) fsScopeTarget(scope fsScope, path string) (fsTarget, error) {
 // fsWriteTarget is one path through both halves: the request's scope, then the target inside it.
 // ok is false after the response is written.
 func (s *Server) fsWriteTarget(w http.ResponseWriter, r *http.Request, project *types.Project, path string) (fsTarget, bool) {
-	scope, ok := s.fsWriteScope(w, r, project)
+	scope, ok := s.fsRequestScope(w, r, project)
 	if !ok {
 		return fsTarget{}, false
 	}

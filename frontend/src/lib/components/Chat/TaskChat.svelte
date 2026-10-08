@@ -25,7 +25,7 @@
     import { trustedExecutionState, isTaskPaused } from '$lib/utils/execution-state';
     import { offersResume } from '$lib/utils/review-bar';
     import { reselectProvider, getProviderDisplayName } from '$lib/utils/providers';
-    import { buildEntriesFromMessages, mergeLoadedHistory, buildEntryMetas, trailingCheckpoint, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, pendingToolIds, endsOnReviewResult, entriesAwaitingRows, takeEchoMatch, removeFailedSend, removeDismissedError } from '$lib/utils/chat-entries';
+    import { buildEntriesFromMessages, mergeLoadedHistory, buildEntryMetas, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, pendingToolIds, endsOnReviewResult, entriesAwaitingRows, takeEchoMatch, removeFailedSend, removeDismissedError } from '$lib/utils/chat-entries';
     import { getAppStreamRef } from '$lib/stream-ref';
     import { useConnectionRestored } from '$lib/composables/use-connection-restored.svelte';
     import { useTaskEvents } from '$lib/composables/use-task-events.svelte';
@@ -292,13 +292,6 @@
             lastUserMessageIds,
             streaming: isLoading,
         });
-    });
-
-    /** The newest turn's band. Its own because the turn that just finished has no later user message to
-     * carry one, and that is the state a reader most often wants to open. */
-    let trailingCp = $derived.by(() => {
-        void checkpointHashesVersion;
-        return trailingCheckpoint({ entries, pendingCheckpoints, checkpointLabels, checkpointCommitHashes });
     });
 
     function genId(): string {
@@ -1718,7 +1711,6 @@
         onSummaryEdit={handleSummaryEdit}
         onNavigateTask={handleMsgNavigateTask}
         {onViewChanges}
-        trailingCheckpoint={trailingCp}
         {openCheckpointHash}
         {onToggleFullscreen}
         {isChatFullscreen}

@@ -116,6 +116,9 @@ const catalog = {
     'explorer.shared.menuCut': 'Cut',
     'explorer.shared.menuCopy': 'Copy',
     'explorer.shared.menuPaste': 'Paste into folder',
+    // One row's file arrives as itself; a folder, or several rows, arrive as one tar.gz.
+    'explorer.shared.menuDownload': 'Download',
+    'explorer.shared.menuDownloadArchive': 'Download as .tar.gz',
     'explorer.shared.menuRename': 'Rename',
     'explorer.shared.menuDelete': 'Delete',
     'explorer.shared.selectedCount': { one: '{count} selected', other: '{count} selected' },

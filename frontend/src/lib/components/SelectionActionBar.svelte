@@ -31,7 +31,8 @@
 <style>
     @import '$lib/styles/shared.css';
 
-    /* Placed against the host's box, so the host has to be positioned. */
+    /* Placed against the host's box, so the host has to be positioned. An accent edge over a tinted
+       surface, with the deeper shadow, keeps the bar from reading as one more row of the listing. */
     .file-selection-bar {
         position: absolute;
         left: 8px;
@@ -39,19 +40,20 @@
         bottom: 8px;
         display: flex;
         align-items: center;
-        gap: 4px;
-        padding: 4px 6px;
-        background: var(--color-surface-1);
-        border: 1px solid var(--color-border);
+        gap: 6px;
+        padding: 6px 8px;
+        background: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface-1));
+        border: 1px solid var(--color-accent);
         border-radius: var(--radius-md);
-        box-shadow: var(--shadow-float);
+        box-shadow: var(--shadow-modal);
     }
 
     .selection-count {
         flex: 1;
         padding-left: 4px;
-        font-size: var(--text-xs);
-        color: var(--color-text-secondary);
+        border-right: 1px solid rgb(from var(--color-accent) r g b / 0.35);
+        font-size: var(--text-sm);
+        color: var(--color-text-primary);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -77,9 +79,6 @@
         :global(.file-selection-bar .selection-btn) {
             width: 36px;
             height: 36px;
-        }
-        .selection-count {
-            font-size: var(--text-sm);
         }
     }
 </style>

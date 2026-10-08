@@ -114,7 +114,7 @@ func (s *Server) decodeFSOpsBatch(w http.ResponseWriter, r *http.Request, needDe
 	if !ok {
 		return fsOpsBatch{}, false
 	}
-	scope, ok := s.fsWriteScope(w, r, project)
+	scope, ok := s.fsRequestScope(w, r, project)
 	if !ok {
 		return fsOpsBatch{}, false
 	}
@@ -250,7 +250,7 @@ func (s *Server) handleFSRenamePath(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	scope, ok := s.fsWriteScope(w, r, project)
+	scope, ok := s.fsRequestScope(w, r, project)
 	if !ok {
 		return
 	}

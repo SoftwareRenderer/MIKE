@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { findLastUserMessageBefore, trimEntriesForRegenerate, buildCheckpointStateMap, trailingCheckpoint, mergeToolCallsIntoAssistant, computeLastUserMessageIds, getCheckpointThreads, buildEntriesFromMessages, advisoryLabel, systemNoteText, pendingToolIds, endsOnReviewResult, editSubmitAction, takeEchoMatch, buildEntryMetas, removeFailedSend, removeDismissedError } from '$lib/utils/chat-entries';
+import { findLastUserMessageBefore, trimEntriesForRegenerate, buildCheckpointStateMap, mergeToolCallsIntoAssistant, computeLastUserMessageIds, getCheckpointThreads, buildEntriesFromMessages, advisoryLabel, systemNoteText, pendingToolIds, endsOnReviewResult, editSubmitAction, takeEchoMatch, buildEntryMetas, removeFailedSend, removeDismissedError } from '$lib/utils/chat-entries';
 import type { WindowRow } from '$lib/utils/chat-entries';
 import type { ChatEntry, Thread } from '$lib/types';
 import { PENDING_SEND_ID_PREFIX } from '$lib/utils/pending-sends';
@@ -112,7 +112,6 @@ describe('the checkpoint band', () => {
         return { id, role: 'user', content: 'hello', isStreaming: false, createdAt: new Date().toISOString() };
     }
 
-    const hash = (...pairs: [string, string][]) => new Map<string, string>(pairs);
     /** The three maps a band reads, with the two empty ones spelled once. */
     const sources = (over: { pending?: string[]; labels?: [string, string][]; hashes?: [string, string][] } = {}) => ({
         pendingCheckpoints: new Set(over.pending ?? []),
@@ -148,31 +147,10 @@ describe('the checkpoint band', () => {
         expect(map.get(2)).toEqual({ isPending: false, commitLabel: 'fix the gate', commitHash: 'c1' });
     });
 
-    it('answers for the newest turn, which no later message carries', () => {
-        // A band sits above a user message, so the newest turn has nothing above it: this is the only way to
-        // reach the state the last turn left behind.
-        const entries = [user('u1'), assistant('a1')];
-        expect(trailingCheckpoint({
-            entries, pendingCheckpoints: new Set(), checkpointLabels: new Map(), checkpointCommitHashes: hash(['a1', 'c1']),
-        })).toEqual({ isPending: false, commitLabel: undefined, commitHash: 'c1' });
-    });
-
-    it('names the last assistant of a trailing turn, and nothing when the conversation ends on a question', () => {
-        const tail = [user('u1'), assistant('a1'), assistant('a2')];
-        expect(trailingCheckpoint({
-            entries: tail, pendingCheckpoints: new Set(), checkpointLabels: new Map(), checkpointCommitHashes: hash(['a1', 'c1'], ['a2', 'c2']),
-        })?.commitHash).toBe('c2');
-        expect(trailingCheckpoint({
-            entries: [user('u1'), assistant('a1'), user('u2')],
-            pendingCheckpoints: new Set(), checkpointLabels: new Map(), checkpointCommitHashes: hash(['a1', 'c1']),
-        })).toBeNull();
-    });
-
-    it('names the newest checkpoint of the newest turn, not its last entry', () => {
-        const entries = [user('u1'), assistant('a1'), assistant('a2'), assistant('a3')];
-        expect(trailingCheckpoint({
-            entries, pendingCheckpoints: new Set(), checkpointLabels: new Map(), checkpointCommitHashes: hash(['a1', 'c1'], ['a2', 'c2']),
-        })).toEqual({ isPending: false, commitLabel: undefined, commitHash: 'c2' });
+    it('names the newest checkpoint of the turn, not the entry that ended it', () => {
+        const entries = [user('u1'), assistant('a1'), assistant('a2'), assistant('a3'), user('u2')];
+        expect(buildCheckpointStateMap(entries, sources({ hashes: [['a1', 'c1'], ['a2', 'c2']] })).get(4))
+            .toEqual({ isPending: false, commitLabel: undefined, commitHash: 'c2' });
     });
 
     it('names that same checkpoint above the question that follows the turn', () => {
@@ -180,22 +158,21 @@ describe('the checkpoint band', () => {
         expect(buildCheckpointStateMap(entries, sources({ hashes: [['a1', 'c1']] })).get(3)).toEqual({ isPending: false, commitHash: 'c1' });
     });
 
-    it('never carries an older turn\'s checkpoint past the question that started the newest one', () => {
-        // The turn that saved nothing has no band; the older one already has its own.
+    it('gives a turn that saved nothing no band of its own', () => {
+        // The older turn keeps its band above the question that follows it, and a band is never offered at an
+        // assistant row — the newest turn's state has no row to sit on.
         const entries = [user('u1'), assistant('a1'), user('u2'), assistant('a2')];
-        expect(trailingCheckpoint({
-            entries, pendingCheckpoints: new Set(), checkpointLabels: new Map(), checkpointCommitHashes: hash(['a1', 'c1']),
-        })).toBeNull();
+        const map = buildCheckpointStateMap(entries, sources({ hashes: [['a1', 'c1']] }));
+        expect(map.get(2)).toEqual({ isPending: false, commitHash: 'c1' });
+        expect([...map.keys()]).toEqual([0, 2]);
     });
 
-    it('stays quiet for a trailing turn that saved nothing, and on an empty transcript', () => {
-        expect(trailingCheckpoint({
-            entries: [user('u1'), assistant('a1')],
-            pendingCheckpoints: new Set(), checkpointLabels: new Map(), checkpointCommitHashes: new Map(),
-        })).toBeNull();
-        expect(trailingCheckpoint({
-            entries: [], pendingCheckpoints: new Set(), checkpointLabels: new Map(), checkpointCommitHashes: new Map(),
-        })).toBeNull();
+    it('draws no band below the newest turn, which no later message follows', () => {
+        // The newest turn's state is what the Changes panel answers, so a line under the last answer says
+        // "checkpoint" about the state the reader is already looking at.
+        const map = buildCheckpointStateMap([user('u1'), assistant('a1'), assistant('a2')], sources({ hashes: [['a1', 'c1']] }));
+        expect([...map.values()].some(s => s !== null)).toBe(false);
+        expect(buildCheckpointStateMap([], sources()).size).toBe(0);
     });
 
     it('reports nothing on an empty transcript', () => {
@@ -797,15 +774,10 @@ describe('buildEntryMetas', () => {
     });
 
     it('puts each checkpoint on one band, at the message that follows the turn that captured it', () => {
-        // A band points back, never forward: a1 belongs above u2 (the message its work preceded), a2 is the
-        // trailing band, so no checkpoint is drawn twice and none above the question that caused it.
+        // A band points back, never forward: a1 belongs above u2 (the message its work preceded), and a2's
+        // state has no band because no message follows it — so no checkpoint is drawn twice and none sits
+        // above the question that caused it.
         expect(metas().map(m => m.cpState?.commitHash ?? null)).toEqual([null, null, 'c1', null]);
-        expect(trailingCheckpoint({
-            entries: twoTurns,
-            pendingCheckpoints: base.pendingCheckpoints,
-            checkpointLabels: base.checkpointLabels,
-            checkpointCommitHashes: hashes,
-        })).toEqual({ isPending: false, commitLabel: undefined, commitHash: 'c2' });
     });
 });
 

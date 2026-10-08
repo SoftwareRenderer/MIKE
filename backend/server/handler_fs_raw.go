@@ -118,17 +118,15 @@ func looksLikeDrivePath(p string) bool {
 
 // refusePathJail answers a path that stopped being the one the jail checked. The name goes to the
 // log and the browser gets the sentence validateFSPath returns, so a swap attempt cannot be used
-// to read a host path back out of an error.
+// to read a host path back out of an error. openJailedFile holds why a swap is worth noticing.
 func refusePathJail(w http.ResponseWriter, hostPath string) {
-	logging.For(logging.HTTP).Warnf("raw image refused, path changed after containment: %s", hostPath)
+	logging.For(logging.HTTP).Warnf("file refused, path changed after containment: %s", hostPath)
 	JSONError(w, http.StatusBadRequest, fsutil.ErrOutside.Error())
 }
 
-// serveWorktreeImage writes the file on disk, refusing on the stat before reading anything.
-//
-// The validateFSPath that jailed hostPath resolved the path a moment earlier, and the task owns
-// that directory, so a symlink or a different file can appear there in the window. The lstat, the
-// regular-file rule and the os.SameFile comparison below are what notice.
+// serveWorktreeImage writes the file on disk, refusing on the stat before reading anything. The file
+// is taken through openJailedFile; the mode checks run first because opening a FIFO would block the
+// request on whatever a task chooses to write into it.
 func (s *Server) serveWorktreeImage(w http.ResponseWriter, hostPath, contentType string) {
 	before, err := os.Lstat(hostPath)
 	if err != nil {
@@ -153,26 +151,11 @@ func (s *Server) serveWorktreeImage(w http.ResponseWriter, hostPath, contentType
 		JSONError(w, http.StatusBadRequest, "path is not a regular file")
 		return
 	}
-	f, err := os.Open(hostPath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			JSONError(w, http.StatusNotFound, safeNotFoundError())
-		} else {
-			logging.For(logging.HTTP).Errorf("raw image open failed: %v", err)
-			JSONError(w, http.StatusInternalServerError, "failed to read file")
-		}
+	f, info, ok := openJailedFile(w, hostPath, before)
+	if !ok {
 		return
 	}
 	defer f.Close()
-	info, err := f.Stat()
-	if err != nil {
-		Fault(w, "stat file", err)
-		return
-	}
-	if !os.SameFile(before, info) {
-		refusePathJail(w, hostPath)
-		return
-	}
 	if info.Size() > maxRawFileBytes {
 		JSONError(w, http.StatusRequestEntityTooLarge, rawTooLargeMessage)
 		return

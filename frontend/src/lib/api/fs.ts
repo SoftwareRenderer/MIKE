@@ -66,6 +66,20 @@ async function postFsJSON(route: string, query: URLSearchParams, body: Record<st
     if (!res.ok) throw await apiError(res, fallback);
 }
 
+/**
+ * The URL `GET /api/fs/download` answers with the named paths as files the browser saves: one file's
+ * own bytes, a folder or a selection as one tar.gz, sent one `path` key each.
+ *
+ * A URL, not a fetch, so the browser streams bytes this app never holds — and its response names the
+ * saved file, so callers must not set the `download` attribute.
+ */
+export function downloadURL(params: { project: string; task?: string; paths: string[] }): string {
+    const query = new URLSearchParams({ project: params.project });
+    if (params.task) query.set('task', params.task);
+    for (const path of params.paths) query.append('path', path);
+    return `${API_BASE}/fs/download?${query.toString()}`;
+}
+
 /** One file's bytes, as `GET /api/fs/read` answers them. */
 export interface FsFileRead {
     content: string;

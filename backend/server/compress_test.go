@@ -333,6 +333,68 @@ func TestGetImageResponseIsPassedThrough(t *testing.T) {
 	}
 }
 
+// An `attachment` response leaves as the handler wrote it — in pieces, with the handler's own headers —
+// because buffering it would hold the whole download to hash it and compress it a second time.
+func TestGetAttachmentResponseIsPassedThrough(t *testing.T) {
+	s := testServer(t)
+	chunk := bytes.Repeat([]byte{0x1f, 0x8b}, 128<<10) // gzip's own bytes: nothing left to gain from brotli
+	chunks := 8
+	s.mux.HandleFunc("GET /test/download", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/gzip")
+		w.Header().Set("Content-Disposition", `attachment; filename=src.tar.gz`)
+		w.Header().Set("Cache-Control", "no-store")
+		for range chunks {
+			w.Write(chunk)
+		}
+	})
+
+	rec := &chunkRecordingWriter{header: http.Header{}}
+	req := httptest.NewRequest(http.MethodGet, "/test/download", nil)
+	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
+	CompressMiddleware(s.mux).ServeHTTP(rec, req)
+
+	if got := rec.header.Get("Content-Encoding"); got != "" {
+		t.Errorf("Content-Encoding = %q, want none — the archive is already compressed", got)
+	}
+	if got := rec.header.Get("Content-Disposition"); got != `attachment; filename=src.tar.gz` {
+		t.Errorf("Content-Disposition = %q; without it the browser shows the bytes instead of saving them", got)
+	}
+	if got := rec.header.Get("ETag"); got != "" {
+		t.Errorf("ETag = %q, want none — an ETag is what a buffered GET leaves behind", got)
+	}
+	if rec.writes < chunks {
+		t.Errorf("body left in %d write(s) of a max %d bytes: the whole download was buffered", rec.writes, rec.largest)
+	}
+	if rec.bytes != len(chunk)*chunks {
+		t.Errorf("%d bytes reached the client, want %d", rec.bytes, len(chunk)*chunks)
+	}
+}
+
+// A single-file download carries a Content-Length, and only the pass-through keeps it: the buffering
+// path deletes it to add an ETag.
+func TestGetAttachmentKeepsTheHandlersContentLength(t *testing.T) {
+	s := testServer(t)
+	body := bytes.Repeat([]byte{0x42}, 4<<10)
+	s.mux.HandleFunc("GET /test/download-one", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+		w.Header().Set("Content-Disposition", `attachment; filename=notes.md`)
+		w.Write(body)
+	})
+
+	rec := &chunkRecordingWriter{header: http.Header{}}
+	req := httptest.NewRequest(http.MethodGet, "/test/download-one", nil)
+	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
+	CompressMiddleware(s.mux).ServeHTTP(rec, req)
+
+	if got := rec.header.Get("Content-Length"); got != strconv.Itoa(len(body)) {
+		t.Errorf("Content-Length = %q, want the handler's own %d", got, len(body))
+	}
+	if rec.bytes != len(body) {
+		t.Errorf("%d bytes reached the client, want %d", rec.bytes, len(body))
+	}
+}
+
 // chunkRecordingWriter counts writes instead of keeping a body, so a buffering writer is visible.
 type chunkRecordingWriter struct {
 	header  http.Header

@@ -2,7 +2,9 @@ import type { ChatEntry, Thread } from '$lib/types';
 import { t } from '$lib/i18n';
 import { PENDING_SEND_ID_PREFIX } from './pending-sends';
 
-/** Checkpoint state for a single entry. */
+/** Checkpoint state for a single entry.
+ *
+ * @knipignore A production file names it only in `EntryMeta`, which the chat list reads through. */
 export interface CheckpointState {
     isPending: boolean;
     commitLabel?: string;
@@ -580,7 +582,8 @@ function newestCheckpointOfTurn(entries: ChatEntry[], from: number, sources: Che
 }
 
 /** The band above each user message: the state the work was in when that message arrived, never a later turn's.
- * `trailingCheckpoint` answers for the newest turn, which has no later message.
+ * A turn with no later message gets no band — its state is what the Changes panel already answers, so the only
+ * bands a reader meets mark a state they have scrolled back past.
  *
  * @knipignore Which checkpoint a message shows the state before is asserted per entry order.
  */
@@ -594,12 +597,6 @@ export function buildCheckpointStateMap(
         if (entries[i]!.role === 'user') result.set(i, newestCheckpointOfTurn(entries, i - 1, sources));
     }
     return result;
-}
-
-/** The band after the last message: the newest turn, which no later message carries. Null when the conversation
- * ends on a question, or that turn saved nothing. */
-export function trailingCheckpoint(args: { entries: ChatEntry[] } & CheckpointSources): CheckpointState | null {
-    return newestCheckpointOfTurn(args.entries, args.entries.length - 1, args);
 }
 
 /**
