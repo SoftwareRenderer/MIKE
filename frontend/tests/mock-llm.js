@@ -50,6 +50,7 @@ const textResponseReasoning = loadFixture('text_response_reasoning');
 const toolCallSandboxSleep = loadFixture('tool_call_sandbox_sleep');
 const toolCallBashLong = loadFixture('tool_call_bash_long');
 const toolCallLongRunning = loadFixture('tool_call_long_running');
+const toolCallLongArgsSleep = loadFixture('tool_call_long_args_sleep');
 const toolCallSlow = loadFixture('tool_call_slow');
 const toolCallSandboxMemhog = loadFixture('tool_call_sandbox_memhog');
 
@@ -159,6 +160,9 @@ const FIXTURES_BY_NAME = {
     tool_call_fail: [toolCallFail, 1],
     tool_call_loop: [toolCallLoop, 1],
     text_response_reasoning: [textResponseReasoning, 1],
+    // The tool-call-header-overflow probe: arguments long enough to be truncated AND a call that runs
+    // long enough for the elapsed counter to appear. No existing fixture is both.
+    tool_call_long_args_sleep: [toolCallLongArgsSleep, 1],
 };
 
 /**
@@ -437,6 +441,7 @@ const server = http.createServer((req, res) => {
                                     chunks === toolCallResponse ? 'tool_call' :
                                     chunks === toolCallSandboxSleep ? 'tool_call_sandbox_sleep' :
                                     chunks === toolCallSandboxMemhog ? 'tool_call_sandbox_memhog' :
+                                    chunks === toolCallLongArgsSleep ? 'tool_call_long_args_sleep' :
                                     chunks === toolCallComplete ? 'tool_call_complete' :
                                     chunks === toolCallReadFile ? 'tool_call_read_file' :
                                     chunks === textResponseSlow ? 'text_slow' :

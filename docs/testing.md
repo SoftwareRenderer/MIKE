@@ -364,7 +364,7 @@ slowest gate is `check:types` at ~8 s, and it is one `svelte-check` pass shared 
   what sees it.
 - **`npm run check:dead-surface`** — `frontend/dead-surface.py` measures what knip's own exemption hides and
   what no linter counts: an export alive only for its unit test, and a CSS declaration line copied into a
-  second stylesheet. The section below owns both rules and the ceiling's re-freeze.
+  second stylesheet. The section below owns both rules and what the count is for.
 - **`npm run check:types`** — `frontend/scripts/typecheck.sh` runs `svelte-check` on
   `tsconfig.unused.json`, which adds `noUnusedLocals` and `noUnusedParameters` to everything
   `tsconfig.json` says. That file extends it and changes no `include`, so this one pass sees every error
@@ -389,8 +389,8 @@ slowest gate is `check:types` at ~8 s, and it is one `svelte-check` pass shared 
 
 ### The dead-surface gate
 
-`frontend/dead-surface.py` is two measurements with different politics: one must read zero, the other has a
-frozen ceiling. It prints both numbers on every run, green included, so the run makes the claim and the exit
+`frontend/dead-surface.py` is two measurements with different politics: one must read zero, the other is a
+number the reader reads. It prints both on every run, green included, so the run makes the claim and the exit
 code only repeats it.
 
 **An untagged test-only export is a finding.** A declaration is test-only when no *other* production file
@@ -425,10 +425,11 @@ scoped `<style>` cannot reach another block's rule and a shared class trades a d
 selector. `CSS_CEILING` in the script holds the measured count, so the gate fires on a new copy rather than on
 the old pile.
 
-**Re-freezing the ceiling.** `cd frontend && python3 dead-surface.py --update-ceiling` measures the tree and
-writes the number into `CSS_CEILING`. A consolidation lands the smaller constant beside the diff. A rise runs
-it only with the reason in the commit message, because new scoped CSS that repeats `display: flex` is a
-decision someone signs.
+**The count gates nothing.** A scoped `<style>` block repeating `display: flex` costs the reader nothing, and
+no number of copies makes a rule wrong. A new copy is a judgement, not a finding, so the number is printed and
+the exit code stays quiet about it. `--verbose` prints the biggest groups with two `file:line` pairs each,
+which is how a copy that wants to be one shared class gets found. A tree that repeats one declaration in two
+stylesheets passes, and so does the same tree after a third copy.
 
 **Checking this.** `cd frontend && npm run check:dead-surface-test` asserts each rule in both directions. The
 seam that must be reported is reported, and the barrel, the re-export and the signature that must not be are

@@ -597,7 +597,7 @@
 </div>
 
 <style>
-    .tool-call-entry { padding: 4px 0; }
+    .tool-call-entry { padding: 4px 0; max-width: 100%; }
     .tool-call-card {
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
@@ -612,6 +612,7 @@
         color: var(--color-text-primary);
         display: flex;
         align-items: center;
+        overflow-wrap: anywhere;
     }
     .tool-args {
         font-size: var(--text-xs);
@@ -645,6 +646,7 @@
         font-family: inherit;
         text-align: left;
         width: 100%;
+        min-width: 0;
     }
     .tool-status {
         font-size: var(--text-xs);
@@ -652,6 +654,8 @@
         display: flex;
         align-items: center;
         gap: 4px;
+        flex-shrink: 0;
+        white-space: nowrap;
     }
     .tool-status.pending { color: var(--color-accent); }
     .progress-text { font-size: var(--text-sm); font-weight: 600; }

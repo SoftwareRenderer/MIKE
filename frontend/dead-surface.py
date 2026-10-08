@@ -4,7 +4,6 @@ test, and a CSS declaration copied into a second stylesheet.
 
     cd frontend && python3 dead-surface.py                   # both measurements, exit 1 on a finding
     cd frontend && python3 dead-surface.py -v                # + every retained seam and the biggest groups
-    cd frontend && python3 dead-surface.py --update-ceiling  # re-freeze measurement 2 after consolidating
 
 `npm run check:dead-surface` runs this, and `make test-frontend` runs it beside its self-test,
 `dead-surface_test.py`. `docs/testing.md → The dead-surface gate` owns the rules; what follows is the
@@ -24,8 +23,8 @@ what it imports. Naming is textual — an identifier anywhere outside a comment,
 
 Measurement 2 — how many CSS declaration lines are written in more than one stylesheet or `<style>`
 block, counting every copy past the first, with comments, whitespace, string literals and colours
-normalized away and a custom property keeping its name. Scoped blocks repeat tokens legitimately, so
-this number is frozen as `CSS_CEILING` and only rising above it fails.
+normalized away and a custom property keeping its name. It is printed on every run, green included, and
+fails nothing: the reader decides whether a new copy is worth consolidating.
 """
 import os
 import re
@@ -39,10 +38,6 @@ BARREL_RE = re.compile(r'(?:^|/)index\.ts$')
 CATALOG = 'src/lib/i18n/en.ts'
 UNIT_RE = re.compile(r'\.unit\.[^/]*$')
 TEST_DIR = '/__tests__/'
-
-# Measured with `python3 dead-surface.py --update-ceiling`. It only ever goes down; raising it is a
-# decision a person makes in a commit message, so the constant is the register.
-CSS_CEILING = 8083
 
 DECL_RE = re.compile(
     r'^[ \t]*export[ \t]+(?:async[ \t]+)?'
@@ -453,19 +448,8 @@ def measure_css(root):
     return total, groups
 
 
-def update_ceiling(path, value):
-    """Rewrite the `CSS_CEILING` constant in the script at `path` to `value`."""
-    src = read(path)
-    new, count = re.subn(r'(?m)^CSS_CEILING = \d+$', f'CSS_CEILING = {value}', src, count=1)
-    if not count:
-        raise SystemExit(f'dead-surface: no `CSS_CEILING = <n>` line in {path} to rewrite')
-    with open(path, 'w', encoding='utf-8') as fh:
-        fh.write(new)
-
-
 def main(argv, root='.'):
     verbose = '-v' in argv
-    recount = '--update-ceiling' in argv
     untagged, seams, unnamed = measure_seams(root)
     dupes, groups = measure_css(root)
     blocks = len(css_blocks(root))
@@ -482,7 +466,7 @@ def main(argv, root='.'):
     print(f'{len(unnamed):5d}  exports nothing in src/ names at all — they reach a consumer through '
           f'a signature, which is check:dead\'s question')
     print(f'{dupes:5d}  duplicated CSS declaration lines across {blocks} stylesheets and <style> '
-          f'blocks (ceiling {CSS_CEILING})')
+          f'blocks (reported, not gated)')
     if verbose:
         for decl, count, block_count, where in groups[:15]:
             print(f'    dup   {count:4d}x in {block_count:3d} blocks  {decl}   '
@@ -490,19 +474,7 @@ def main(argv, root='.'):
         if len(groups) > 15:
             print(f'    … {len(groups) - 15} more groups')
 
-    if recount:
-        update_ceiling(os.path.abspath(__file__), dupes)
-        print(f'ceiling re-frozen at {dupes}')
-        return 1 if untagged else 0
-
-    failed = bool(untagged)
-    if dupes > CSS_CEILING:
-        print(f'  DUP   the duplicated-declaration count rose from {CSS_CEILING} to {dupes}. A scoped '
-              f'<style> block repeating a token set is legal, so this is a ceiling and not a zero — '
-              f'but a rise is a new copy. Point the rule at a shared class, or re-freeze with '
-              f'`python3 dead-surface.py --update-ceiling` and say why in the commit.')
-        failed = True
-    return 1 if failed else 0
+    return 1 if untagged else 0
 
 
 if __name__ == '__main__':

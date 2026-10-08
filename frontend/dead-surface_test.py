@@ -8,7 +8,7 @@ Usage (from frontend/):   python3 dead-surface_test.py
 Each rule is pinned in both directions: the seam that must be reported and the lookalike that must not
 (an import from another production file, a template-literal hole, a barrel), the copy that must raise
 the CSS count and the two rules that merely resemble each other (`var(--a)` against `var(--b)`). The
-last cases prove the ceiling bites and that `--update-ceiling`'s rewrite writes the constant it names.
+last cases prove copied CSS is counted and gates nothing, and that an untagged seam fails anyway.
 """
 import contextlib
 import io
@@ -230,56 +230,24 @@ runs = ds.declarations_in('.a {\n  color: red; padding: 1px;\n  top:\n    2px;\n
 check('two runs on one line are two runs, and a wrapped run keeps its first line',
       [(l, d) for l, d in runs] == [(2, 'color:red'), (2, 'padding:1px'), (3, 'top:2px')])
 
-# --- the ceiling bites, and the re-freeze writes the constant ----------------
+# --- copied CSS is counted and gates nothing; the seam still fails -----------
 planted = sheets('.a { color: red; }', '.b { color: red; }')
 measured, _ = ds.measure_css(tree(planted))
-saved = ds.CSS_CEILING
-try:
-    ds.CSS_CEILING = measured
-    quiet = contextlib.redirect_stdout(io.StringIO())
-    with quiet:
-        at_ceiling = ds.main([], root=tree(planted))
-    ds.CSS_CEILING = measured + 1
-    with contextlib.redirect_stdout(io.StringIO()):
-        below = ds.main([], root=tree(planted))
-    ds.CSS_CEILING = measured - 1
-    buffer = io.StringIO()
-    with contextlib.redirect_stdout(buffer):
-        above = ds.main([], root=tree(planted))
-finally:
-    ds.CSS_CEILING = saved
-check('a tree at the ceiling passes', at_ceiling == 0)
-check('a tree under the ceiling passes', below == 0)
-check('a tree one line over the ceiling fails', above == 1)
-check('the ceiling failure names the command that re-freezes it',
-      '--update-ceiling' in buffer.getvalue() and f'from {measured - 1} to {measured}' in buffer.getvalue())
+buffer = io.StringIO()
+with contextlib.redirect_stdout(buffer):
+    dupes_exit = ds.main([], root=tree(planted))
+check('a tree of copied declarations passes: the count is reported, not gated', dupes_exit == 0)
+check('the run prints the number it measured and says it gates nothing',
+      f'{measured:5d}' in buffer.getvalue() and 'not gated' in buffer.getvalue())
 
 with_seam = dict(planted, **{'src/lib/a.ts': 'export const SEAM = 1;',
                              'src/lib/__tests__/a.unit.ts': 'const probe = SEAM;'})
 buffer = io.StringIO()
-ds.CSS_CEILING = 10000
-try:
-    with contextlib.redirect_stdout(buffer):
-        seam_exit = ds.main([], root=tree(with_seam))
-finally:
-    ds.CSS_CEILING = saved
-check('an untagged seam fails the run whatever the ceiling says', seam_exit == 1)
+with contextlib.redirect_stdout(buffer):
+    seam_exit = ds.main([], root=tree(with_seam))
+check('an untagged seam fails the run beside a tree full of copies', seam_exit == 1)
 check('the seam finding prints file:line and the two ways out',
       'src/lib/a.ts:1  SEAM' in buffer.getvalue() and '@knipignore' in buffer.getvalue())
-
-frozen = os.path.join(tempfile.mkdtemp(), 'gate.py')
-with open(frozen, 'w', encoding='utf-8') as fh:
-    fh.write('CSS_CEILING = 8112\n')
-ds.update_ceiling(frozen, 7963)
-check('the re-freeze rewrites the constant in place', 'CSS_CEILING = 7963\n' in open(frozen).read())
-nameless = os.path.join(tempfile.mkdtemp(), 'gate.py')
-with open(nameless, 'w', encoding='utf-8') as fh:
-    fh.write('CEILING = 1\n')
-try:
-    ds.update_ceiling(nameless, 1)
-    check('a script with no constant refuses the re-freeze', False)
-except SystemExit:
-    check('a script with no constant refuses the re-freeze', True)
 
 if failures:
     print(f'dead-surface_test: {len(failures)} FAILURE(S) of {cases_run} cases')

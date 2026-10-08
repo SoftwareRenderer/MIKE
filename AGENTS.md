@@ -146,7 +146,7 @@ make test-diff                                           # only the touched Go p
 make test-frontend-diff                                  # only the vitest files importing a touched frontend file
 make test-e2e [SPECS=chat-messages]                      # e2e lane (mock LLM): builds the frontend, needs MIKE_ENCRYPTION_KEY
 make test-e2e-diff                                       # only the e2e spec files this working tree touched
-cd frontend && npm run check:dead-surface                # untagged test-only exports; the CSS ceiling
+cd frontend && npm run check:dead-surface                # untagged test-only exports; the duplicated-CSS count
 cd frontend && npm run check:e2e-ownership                # a spec that starts a turn owns its project
 python3 scripts/gen-registry.py --check                  # registry.json matches the manifests
 ```
