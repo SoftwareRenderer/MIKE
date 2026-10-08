@@ -1,7 +1,7 @@
 <script lang="ts">
     import { tick } from 'svelte';
     import type { Thread, ChatEntry, LockWait, ChatTurn } from '$lib/types';
-    import { advisoryLabel, type EntryMeta, type CheckpointState } from '$lib/utils/chat-entries';
+    import { advisoryLabel, type EntryMeta } from '$lib/utils/chat-entries';
     import { computeStickyHeader, turnLabel, type StickyTurn } from '$lib/utils/chat-sticky-header';
     import { scrollToLine } from '$lib/utils/settle-scroll';
     import { isAtBottom, type ChatFollow } from '$lib/composables/use-chat-follow.svelte';
@@ -47,7 +47,6 @@
         onViewChanges,
         onToggleFullscreen,
         isChatFullscreen,
-        trailingCheckpoint = null,
         openCheckpointHash = '',
         follow,
         historyLoading = false,
@@ -93,8 +92,6 @@
         onViewChanges?: (commitHash: string, commitLabel?: string) => void;
         onToggleFullscreen?: () => void;
         isChatFullscreen?: boolean;
-        /** The newest turn's band: the conversation's last checkpoint, which no later user message carries. */
-        trailingCheckpoint?: CheckpointState | null;
         /** The checkpoint the Changes panel is showing, so its band reads as the open one. */
         openCheckpointHash?: string;
         /** Shared follow-the-bottom tracker (created by TaskChat). */
@@ -547,22 +544,6 @@
                 {/if}
                 </div>
             {/each}
-            {#if trailingCheckpoint}
-                {@const cp = trailingCheckpoint}
-                <!-- The newest turn's state: no later user message exists to carry this band, so without it
-                     the checkpoint a reader most wants to open has no way to be opened. -->
-                <CheckpointDivider
-                    threads={threads}
-                    activeThreadId={threads.find(th => th.is_active)?.id || ''}
-                    onSwitch={onThreadSwitch}
-                    isSwitching={isSwitching}
-                    isPending={cp.isPending}
-                    commitLabel={cp.commitLabel}
-                    commitHash={cp.commitHash}
-                    showChanges={changesOpen(cp.commitHash)}
-                    onViewChanges={onViewChanges}
-                />
-            {/if}
           </div>
         </div>
 

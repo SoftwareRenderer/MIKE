@@ -127,11 +127,16 @@ These rules keep the chat's checkpoint band and the Changes panel describing one
 two user messages, and it holds one entry per LLM round. The round that ends a turn usually wrote no files, so
 reading only the turn's last entry leaves that turn's checkpoints with no band at all — and the live transcript
 disagreeing with the same rows read back. `newestCheckpointOfTurn` (`frontend/src/lib/utils/chat-entries.ts`)
-scans back to the question that started the turn and answers the newest entry that saved state.
+scans back to the question that started the turn and answers the newest entry that saved state, and
 `buildCheckpointStateMap` puts that band above the next user message, where the reader sees the state that
-message arrived on; `trailingCheckpoint` answers for the newest turn, which has no later message, and
-`ChatEntries.svelte` draws it after the list. A band that points forward draws a checkpoint above the question
-that caused it, and draws the same checkpoint twice in a two-turn thread.
+message arrived on. A band that points forward draws a checkpoint above the question that caused it, and draws
+the same checkpoint twice in a two-turn thread.
+
+**The newest turn has no band, and drawing one is a regression.** A band marks a state the reader has scrolled
+back past; the newest checkpoint is the state the worktree is in now, which is what the Changes panel answers
+for the task. So the band's *view changes* for the newest checkpoint appears once a later message carries it,
+and the thread picker rides the bands above earlier messages. Test:
+`frontend/src/lib/components/__tests__/chat-entries-band-placement.unit.svelte.ts`.
 
 **Mid-turn a capture's hash rides on the entry being streamed, and the rename moves it.** The frames name the
 assistant row, which no on-screen entry carries until `complete` renames the streaming entry to that row id.

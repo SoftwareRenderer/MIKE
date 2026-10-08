@@ -1,7 +1,8 @@
 /**
- * A checkpoint band is the only way a reader reaches the files a turn left behind, so the newest turn's band
- * has to be in the DOM after the list — and its button has to say whether the Changes panel is showing that
- * checkpoint, because clicking that button again is what closes the panel.
+ * Where a checkpoint band is allowed to sit: above the user message whose arrival found the work in that
+ * state. Nothing sits under the newest answer — its state is what the Changes panel already answers — and the
+ * band that does draw has to say whether the Changes panel is showing it, because clicking it again is what
+ * closes the panel.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { render } from '@testing-library/svelte';
@@ -28,8 +29,9 @@ async function flush() {
 const entry = (id: string, role: 'user' | 'assistant') => ({
     id, role, content: `content of ${id}`, isStreaming: false, createdAt: new Date().toISOString(),
 });
-const meta = () => ({ cpState: null, cpThread: null, isLastUserMessage: false, isFirstUserMessage: false });
-const saved: CheckpointState = { isPending: false, commitHash: 'abc123' };
+const meta = (cpState: CheckpointState | null = null) =>
+    ({ cpState, cpThread: null, isLastUserMessage: false, isFirstUserMessage: false });
+const saved = (commitHash: string): CheckpointState => ({ isPending: false, commitHash });
 
 const baseProps = {
     activeThreadId: 'main',
@@ -57,13 +59,14 @@ const baseProps = {
     onViewChanges: vi.fn(),
 };
 
-/** The turn order a reader sees: one question, one answer, nothing after it. */
-async function renderTrailing(options: { trailingCheckpoint?: CheckpointState | null; openCheckpointHash?: string } = {}) {
-    const entries = [entry('u1', 'user'), entry('a1', 'assistant')];
+/** Two turns, each with a saved checkpoint: only the first has a message after it, so only it has a band. */
+async function renderTwoTurns(options: { openCheckpointHash?: string } = {}) {
+    const entries = [entry('u1', 'user'), entry('a1', 'assistant'), entry('u2', 'user'), entry('a2', 'assistant')];
+    const entryMetas = [meta(), meta(), meta(saved('c1')), meta()];
     const { container } = render(ChatEntries, {
         ...baseProps,
         entries,
-        entryMetas: entries.map(meta),
+        entryMetas,
         lastEntryIdx: entries.length - 1,
         follow: createChatFollow(),
         ...options,
@@ -72,27 +75,28 @@ async function renderTrailing(options: { trailingCheckpoint?: CheckpointState | 
     return container;
 }
 
-describe('the trailing checkpoint band', () => {
-    it('sits after the last message, where the newest turn has nothing else to carry it', async () => {
-        const container = await renderTrailing({ trailingCheckpoint: saved });
+describe('where a checkpoint band is drawn', () => {
+    it('draws one band per turn, above the message that follows the turn that captured it', async () => {
+        const container = await renderTwoTurns();
 
-        const bands = container.querySelectorAll('.checkpoint-divider');
-        expect(bands.length).toBe(1);
-
-        const rows = [...container.querySelectorAll('.chat-entry, .checkpoint-divider')];
-        expect(rows[rows.length - 1]?.classList.contains('checkpoint-divider')).toBe(true);
+        expect(container.querySelectorAll('.checkpoint-divider').length).toBe(1);
+        expect(container.querySelector('.chat-entry[data-entry-id="u2"] .checkpoint-divider')).not.toBeNull();
     });
 
-    it('answers nothing when the newest turn saved no state', async () => {
-        const container = await renderTrailing({ trailingCheckpoint: null });
-        expect(container.querySelectorAll('.checkpoint-divider').length).toBe(0);
+    it('draws nothing below the last row, where the newest turn has no band to wear', async () => {
+        const container = await renderTwoTurns();
+
+        // A band beside the entries rather than inside one is the line back under the newest answer.
+        expect(container.querySelectorAll('.chat-content > .checkpoint-divider').length).toBe(0);
+        const rows = [...container.querySelectorAll('.chat-entry')];
+        expect(rows[rows.length - 1]?.querySelector('.checkpoint-divider')).toBeNull();
     });
 
     it('reads as the open checkpoint while the Changes panel shows it', async () => {
-        const closed = await renderTrailing({ trailingCheckpoint: saved });
+        const closed = await renderTwoTurns();
         expect(closed.querySelector('.view-changes-btn')?.getAttribute('aria-expanded')).toBe('false');
 
-        const open = await renderTrailing({ trailingCheckpoint: saved, openCheckpointHash: 'abc123' });
+        const open = await renderTwoTurns({ openCheckpointHash: 'c1' });
         expect(open.querySelector('.view-changes-btn')?.getAttribute('aria-expanded')).toBe('true');
     });
 });

@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import type { StreamEvent } from '$lib/types';
+import type { ChatEntry, StreamEvent } from '$lib/types';
 import { StreamState } from '$lib/services/stream-state.svelte';
 import { createStreamHandler, type StreamHandlerCallbacks } from '$lib/services/stream-handler';
-import { buildEntriesFromMessages, mergeLoadedHistory, trailingCheckpoint } from '$lib/utils/chat-entries';
+import { buildCheckpointStateMap, buildEntriesFromMessages, mergeLoadedHistory, type CheckpointState } from '$lib/utils/chat-entries';
 
 function makeCallbacks(overrides: Partial<StreamHandlerCallbacks> = {}): StreamHandlerCallbacks {
     return {
@@ -636,17 +636,25 @@ describe('createStreamHandler', () => {
     });
 
     describe('a checkpoint captured while a later round is streaming', () => {
+        /** The band the question after this turn will wear. A turn has no band of its own, so a capture in
+         * flight is read through the scan the next question triggers: the hash has to land on the id that
+         * entry carries once `complete` renames it to its row. */
+        function bandOf(stream: StreamState): CheckpointState | null {
+            const entries: ChatEntry[] = [...stream.state.entries,
+                { id: 'next-question', role: 'user', content: '', isStreaming: false, createdAt: '' }];
+            return buildCheckpointStateMap(entries, {
+                pendingCheckpoints: stream.state.pendingCheckpoints,
+                checkpointLabels: stream.state.checkpointLabels,
+                checkpointCommitHashes: stream.state.checkpointCommitHashes,
+            }).get(entries.length - 1) ?? null;
+        }
+
         /** Client ids for streaming entries, so a rename to a row id is visible in the assertions. */
         function setupLive() {
             let n = 0;
             const stream = new StreamState();
             const handleEvent = createStreamHandler(stream, makeCallbacks({ genId: () => `c${++n}` }));
-            const trailing = () => trailingCheckpoint({
-                entries: stream.state.entries,
-                pendingCheckpoints: stream.state.pendingCheckpoints,
-                checkpointLabels: stream.state.checkpointLabels,
-                checkpointCommitHashes: stream.state.checkpointCommitHashes,
-            });
+            const band = () => bandOf(stream);
             // The frames name the captured row, not the entry on screen.
             const captureRoundOneThenStreamTwo = (handleEvent: ReturnType<typeof createStreamHandler>) => {
                 handleEvent({ type: 'token', data: { text: 'round one' } }, false);
@@ -656,41 +664,41 @@ describe('createStreamHandler', () => {
                 handleEvent({ type: 'token', data: { text: 'round two' } }, false);
                 handleEvent({ type: 'git_checkpoint_complete', data: { message_id: 'A1', commit_hash: 'h1', label: 'Wrote the file' } }, false);
             };
-            return { stream, handleEvent, trailing, captureRoundOneThenStreamTwo };
+            return { stream, handleEvent, band, captureRoundOneThenStreamTwo };
         }
 
         const completeTurn = (assistant_message_id: string) =>
             ({ type: 'complete', data: { state: 'review', assistant_message_id } }) as never;
 
-        it('shows one band from the first capture to the end of the turn, never in and out', () => {
-            const { handleEvent, trailing, captureRoundOneThenStreamTwo } = setupLive();
+        it('names the newest capture from the first one through the end of the turn', () => {
+            const { handleEvent, band, captureRoundOneThenStreamTwo } = setupLive();
             handleEvent({ type: 'user_message', data: { id: 'u1', role: 'user', content: 'do it' } }, false);
             captureRoundOneThenStreamTwo(handleEvent);
-            expect(trailing()?.commitHash).toBe('h1');
+            expect(band()?.commitHash).toBe('h1');
 
             handleEvent({ type: 'tool_call', data: { tool_id: 'tc2', tool_name: 'bash', args: {} } }, false);
             handleEvent({ type: 'tool_result', data: { tool_id: 'tc2', success: true, output: 'ok' } }, false);
             handleEvent({ type: 'token', data: { text: 'round three' } }, false);
             handleEvent({ type: 'git_checkpoint_complete', data: { message_id: 'A2', commit_hash: 'h2' } }, false);
-            expect(trailing()?.commitHash).toBe('h2');
+            expect(band()?.commitHash).toBe('h2');
 
             handleEvent(completeTurn('A3'), false);
-            // A next turn that has captured nothing yet still shows the newest state that exists.
+            // A turn that has captured nothing yet is named by the newest state that exists.
             handleEvent({ type: 'token', data: { text: 'next turn' } }, false);
             handleEvent({ type: 'tool_call', data: { tool_id: 'tc3', tool_name: 'write_file', args: {} } }, false);
-            expect(trailing()?.commitHash).toBe('h2');
+            expect(band()?.commitHash).toBe('h2');
         });
 
         it('is still the band after the turn ends on the entry that carried it', () => {
             // Left behind by the rename, the hash would name an entry no longer on screen.
-            const { stream, handleEvent, trailing, captureRoundOneThenStreamTwo } = setupLive();
+            const { stream, handleEvent, band, captureRoundOneThenStreamTwo } = setupLive();
             captureRoundOneThenStreamTwo(handleEvent);
-            expect(trailing()?.commitHash).toBe('h1');
+            expect(band()?.commitHash).toBe('h1');
 
             handleEvent(completeTurn('A2'), false);
 
             expect(stream.state.entries[stream.state.entries.length - 1].id).toBe('A2');
-            expect(trailing()?.commitHash).toBe('h1');
+            expect(band()?.commitHash).toBe('h1');
             expect(stream.state.checkpointCommitHashes.has('c2')).toBe(false);
         });
 
