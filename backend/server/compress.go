@@ -179,8 +179,11 @@ func (c *compressWriter) Write(p []byte) (int, error) {
 
 	// Bodies that must leave as the handler wrote them. An SSE stream needs real-time
 	// flushes; an image is bytes the browser already compressed, so the GET buffer below
-	// would hold several times the file to hash an ETag, then brotli it for nothing.
-	if ct := c.headers.Get("Content-Type"); ct == "text/event-stream" || strings.HasPrefix(ct, "image/") {
+	// would hold several times the file to hash an ETag, then brotli it for nothing. An
+	// `attachment` disposition is the same case: it is how a handler says the response is a
+	// file to save, not a document to render.
+	if ct := c.headers.Get("Content-Type"); ct == "text/event-stream" || strings.HasPrefix(ct, "image/") ||
+		strings.HasPrefix(c.headers.Get("Content-Disposition"), "attachment") {
 		c.passThrough()
 		return c.ResponseWriter.Write(p)
 	}

@@ -151,6 +151,7 @@ export {
     createFsDirectory,
     initGitRepository,
     searchFsPaths,
+    downloadURL,
     getHomeDirectory,
     resolveHomeDirectory,
 } from './fs';

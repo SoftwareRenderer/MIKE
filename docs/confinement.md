@@ -56,6 +56,14 @@ projects too because the server process enforces them.
   the opened file, because the task owns the directory the check just resolved, and `ref` reads from
   **`project.Path`** — the tree the request names is the project's, not the task's, since worktrees share
   one object database and a done task has no worktree left to name. `docs/api-contract.md → Raw file bytes`.
+- **A download jails every path of the batch it names.** `GET /api/fs/download` takes a repeated
+  `?path=`: the host or container paths the listing handed the browser. Each one is settled through
+  `fsRequestScope` then `fsScopeTarget` before any of them opens, so a selection whose last row leaves
+  the project streams nothing. A `.git` row is refused — the listing hides one, so reaching it takes a
+  hand-built URL — and so is a path above the folder the first path sits in, whose archive name would
+  walk out of the folder that was clicked. Inside the archive `fsutil.walkTree` holds the rules, which
+  is the walk a copy takes: symlinks are written as links and never read through, and irregular files
+  are skipped rather than opened. `docs/api-contract.md → Downloading a file or a folder`.
 - **A containment refusal answers `fsutil.ErrOutside` and nothing else**, because every file handler
   answers with `err.Error()` and `fsutil.Contained` names both the path it refused and the path a
   symlink resolved to. The two paths go to the log. A repository can carry a symlink, so repeating its
@@ -65,9 +73,9 @@ projects too because the server process enforces them.
   It runs the same `fsutil.Contained` check against the worktree root before the bytes go, because the task's
   own actions can plant a symlink at that name, and writes `0600` into a `0700` directory.
   `docs/sandbox-bridge.md`.
-- **The write jail is two halves so a batch can share one of them.** `fsWriteScope` settles what the
+- **The file jail is two halves so a batch can share one of them.** `fsRequestScope` settles what the
   *request* decides (`fsWorktreeRoot` → `requireSandboxAvailable`), `fsScopeTarget` settles what one
-  *path* needs (`ContainerToHost` → `validateFSPath`), and `fsWriteTarget` is the two in order for a handler
+  *path* needs (`ContainerToHost` → `validateFSPath`), and `fsWriteTarget` is the two in order for a write
   with a single path. `POST /api/fs/delete|copy|move|rename` (`handler_fs_ops.go`) resolves **every** path of
   the batch against the one `fsScope` before anything is removed or written, so a selection whose last row is
   outside the project moves nothing, and no path can be checked against a tree other than the one the request
@@ -87,6 +95,11 @@ projects too because the server process enforces them.
   copy that fails removes what it wrote, so a refused copy leaves no half-tree behind. The request's own bound
   sits beside it: at most `maxFSOpsBatch` (100) paths, and the `name copy`, `name copy2` search stops at
   `UniqueNameMaxTries` (200). Without them a paste of `node_modules` is unbounded work inside one HTTP request.
+- **The one file route with no size refusal is the one that captures nothing.** `GET /api/fs/download`
+  answers a folder with a tar.gz written straight to the response through one 32 KiB buffer, and the
+  compression middleware passes it through. The tree's size decides how long that takes, not how much the
+  server holds. What the request keeps is `maxFSOpsBatch`, which bounds its shape. A person asking for
+  their own tree is asking for the bytes.
 - Tests: `backend/fsutil/ops_test.go`, `backend/server/handler_fs_ops_test.go`, beside the ones above.
 
 ## The no-project host jail

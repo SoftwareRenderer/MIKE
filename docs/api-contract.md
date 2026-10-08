@@ -446,7 +446,9 @@ subresource, what it can carry is the whole permission:
 - `Cache-Control: no-store`, because the same URL answers differently after the next edit. `nosniff` and
   the `img-src 'self'` CSP come from `CORSMiddleware` like everywhere else.
 - **No `Content-Disposition`.** The name comes from the repository, and putting it in a header makes a
-  crafted filename a header writer; `inline` is the default the route wants anyway.
+  crafted filename a header writer; `inline` is the default the route wants anyway. A response that
+  *saves* a file instead of showing one is `GET /api/fs/download`, below, which carries the name through
+  an encoder rather than echoing it.
 - **`CompressMiddleware` passes this response through without buffering it.** The middleware keeps a
   whole GET body to hash an ETag and then compresses it. For an image that costs several times the file
   in memory plus a brotli pass over bytes a codec already finished with, and the buffer sits outside the
@@ -465,6 +467,60 @@ subresource, what it can carry is the whole permission:
   `io.CopyN` on the file, `io.LimitReader` plus a process kill on the object.
 
 Tests: `backend/server/handler_fs_raw_test.go`.
+
+## Downloading a file or a folder
+
+`GET /api/fs/download?project=&task=&path=&path=…` (`backend/server/handler_fs_download.go`) is the route
+the Explorer's "Download" asks for. One URL answers two questions, and the response says which one it
+answered:
+
+- **One path naming a regular file** is that file's own bytes. `application/octet-stream`, the handler's
+  `Content-Length`, and the name it has on disk in `Content-Disposition`. Wrapping a single file in an
+  archive hides its name and its type under a layer the person then has to undo.
+- **A folder, or several paths,** is one gzip'd tar (`application/gzip`). No `Content-Length`, because
+  gzip's size is not known before the walk. `fsutil.WriteTarGz` names every entry relative to the first
+  path's folder, so one folder unpacks to that folder and a selection unpacks to exactly the rows it held.
+
+What holds it up:
+
+- **`path` is repeatable** and takes the shape `/api/fs/read` takes: the host or container path the
+  listing handed the browser. A selection is a list of rows, not one path.
+- **Every path of the request is jailed before anything opens** — `fsRequestScope` then `fsScopeTarget`,
+  the batch routes' two halves — so a selection whose last row leaves the project sends no bytes. A
+  `.git` row refuses the whole request, as it does on the batch routes.
+- **A path above the first path's folder is a 400.** Its archive name would walk out of the folder that
+  was clicked. `fsutil.WriteTarGz` refuses that shape too; the route answers it as a request refusal
+  rather than as a failure halfway down a stream.
+- **Nothing is capped, because nothing is held.** One 32 KiB buffer per download, the archive written
+  straight to the response, and no `WriteTimeout` on the server. A large folder costs time and no
+  memory. What the request keeps is `maxFSOpsBatch` (100 paths), which bounds its shape rather than its
+  content.
+- **The tree rules live in `fsutil.walkTree`, the walk a copy takes**, so the two cannot drift apart.
+  Symlinks are archived as links and never read through, so no bytes from outside the jailed tree
+  arrive. Irregular files are skipped. `.git` stays out: the listing never shows one, and a `.git`
+  config can hold a remote URL with a token in it.
+- **The name in the header is encoded, never echoed.** `attachmentDisposition` builds it through
+  `mime.FormatMediaType`, which percent-encodes what RFC 2231 keeps out of a header value, and adds an
+  ASCII-folded `filename=` twin for a recipient that reads neither. `sanitizeDownloadName` folds
+  separators, control characters, a trailing dot, and a name longer than a file name.
+- **`/api/fs/raw` refuses a name in a header and this route cannot.** That response renders on this
+  origin; this one is saved. The encoder is what makes the difference safe.
+- **`CompressMiddleware` passes an `attachment` response through**, beside the SSE and `image/` escapes.
+  The middleware keeps a whole GET body to hash an ETag and then brotli-compresses it. For a download
+  that is the entire archive in memory, gzipped twice, with the single file's `Content-Length` deleted.
+  The disposition is the trigger because it is what the handler sets when the response is a file rather
+  than a document.
+- **A failure after the first byte cannot be a status.** `fsutil.WriteTarGz` reports a tree that changed
+  mid-stream; the route logs it and the download ends short. A truncated file the person asks for again
+  beats an archive whose framing is broken.
+
+The client hands the URL to the browser instead of fetching it: `downloadURL` in
+`frontend/src/lib/api/fs.ts`, clicked from an anchor with `target="_blank"`. The browser's own download
+UI is what streams and reports bytes this app never holds. A refusal then arrives as a page in a tab of
+its own, not in place of the explorer.
+
+Tests: `backend/server/handler_fs_download_test.go`, `backend/fsutil/tar_test.go`,
+`frontend/src/lib/components/__tests__/file-browser-download.unit.svelte.ts`.
 
 ## The Explorer's file batch
 

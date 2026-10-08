@@ -124,7 +124,7 @@ describe('the file list selection', () => {
         expect(barEl, 'a selection needs the touch path into its actions').toBeTruthy();
         expect(barEl!.querySelector('.selection-count')?.textContent).toBe('2 selected');
         expect([...barEl!.querySelectorAll('button')].map(b => b.getAttribute('aria-label')))
-            .toEqual(['Cut', 'Copy', 'Delete', 'Clear selection']);
+            .toEqual(['Cut', 'Copy', 'Download as .tar.gz', 'Delete', 'Clear selection']);
     });
 
     it('takes the range between the anchor and the row a shift-click lands on', async () => {

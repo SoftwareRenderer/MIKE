@@ -187,8 +187,13 @@ func checkCopySize(src string, info fs.FileInfo) error {
 	})
 }
 
-// copyOne copies one entry — file, symlink or directory tree — to dst.
+// copyOne copies src to dst. Which parts of the tree come along is walkTree's.
 func copyOne(src, dst string, info fs.FileInfo) error {
+	return walkTree(src, dst, string(filepath.Separator), info, copyEntry)
+}
+
+// copyEntry makes one visited entry into its copy.
+func copyEntry(src, dst string, info fs.FileInfo) error {
 	switch {
 	case info.Mode()&os.ModeSymlink != 0:
 		target, err := os.Readlink(src)
@@ -197,30 +202,9 @@ func copyOne(src, dst string, info fs.FileInfo) error {
 		}
 		return os.Symlink(target, dst)
 	case info.IsDir():
-		if err := os.Mkdir(dst, info.Mode().Perm()); err != nil {
-			return err
-		}
-		children, err := os.ReadDir(src)
-		if err != nil {
-			return err
-		}
-		for _, child := range children {
-			if child.Name() == GitDirName {
-				continue
-			}
-			childInfo, err := child.Info()
-			if err != nil {
-				return err
-			}
-			if err := copyOne(filepath.Join(src, child.Name()), filepath.Join(dst, child.Name()), childInfo); err != nil {
-				return err
-			}
-		}
-		return nil
-	case info.Mode().IsRegular():
+		return os.Mkdir(dst, info.Mode().Perm())
+	default: // the walk leaves only a regular file here
 		return copyFile(src, dst, info.Mode().Perm())
-	default:
-		return nil // an irregular file (socket, fifo, device) carries nothing worth copying
 	}
 }
 
@@ -250,7 +234,7 @@ func copyFile(src, dst string, perm os.FileMode) (err error) {
 	}()
 
 	var written int64
-	buf := make([]byte, 32*1024)
+	buf := make([]byte, copyBufSize)
 	for {
 		n, readErr := in.Read(buf)
 		if n > 0 {

@@ -137,3 +137,26 @@ describe('searchFsPaths', () => {
         expect(sent().url.search).toBe('?q=a&project=p1&task=t1&content=1&case=1&word=1&regex=1');
     });
 });
+
+describe('downloadURL', () => {
+    it('sends one path key per path, which is how a selection travels', async () => {
+        const { downloadURL } = await import('$lib/api/fs');
+
+        const url = new URL(downloadURL({
+            project: 'p1', task: 't1', paths: ['/w/src', '/w/a note.txt', '/w/b&c.txt'],
+        }), 'http://localhost');
+
+        expect(url.pathname).toBe('/api/fs/download');
+        expect(url.searchParams.getAll('path')).toEqual(['/w/src', '/w/a note.txt', '/w/b&c.txt']);
+        expect(url.searchParams.get('project')).toBe('p1');
+        expect(url.searchParams.get('task')).toBe('t1');
+    });
+
+    it('sends no task for a project\'s own checkout', async () => {
+        const { downloadURL } = await import('$lib/api/fs');
+
+        const url = new URL(downloadURL({ project: 'p1', paths: ['/w/a.go'] }), 'http://localhost');
+
+        expect(url.searchParams.has('task')).toBe(false);
+    });
+});
