@@ -2064,6 +2064,9 @@ const catalog = {
     // the "/" and "-" keys beside them.
     'editor.save': 'Save',
     'editor.saving': 'Saving...',
+    // Icon-only, and no key combination claimed: these exist because the narrow layout has no keyboard.
+    'editor.undo': 'Undo',
+    'editor.redo': 'Redo',
     'editor.loadingFile': 'Loading file...',
     'editor.loadingEditor': 'Loading editor...',
     'editor.fileNotFound': 'File not found',

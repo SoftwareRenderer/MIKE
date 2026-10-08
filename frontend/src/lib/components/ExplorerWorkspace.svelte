@@ -187,6 +187,7 @@
                         saving={core.editorSaving}
                         onToggleFullscreen={core.toggleEditorFullscreen}
                         mobileFullscreen={core.editorFullscreen}
+                        isMobile={isMobile}
                         pendingFsEvent={core.pendingFsEvent}
                         onLinesSelected={core.handleLinesSelected}
                         {scrollTops}

@@ -1129,6 +1129,7 @@
                                 onClose={closeDiffEditor}
                                 onToggleFullscreen={toggleEditorFullscreen}
                                 mobileFullscreen={editorFullscreen}
+                                isMobile={mobile}
                                 closeOnEscape={!mobile}
                             />
                         {:else}

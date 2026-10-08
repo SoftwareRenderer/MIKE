@@ -6,11 +6,14 @@
     import type { LSPSymbol } from '$lib/utils/lsp-symbols';
     import { appStore } from '$lib/stores';
     import { fullscreenToggleTitle } from '$lib/utils/keyboard';
+    // Type-only: the tab bar must not statically reach the editor chunk (scripts/boot-graph.ts).
+    import type { EditorHistory } from '$lib/utils/editor-history';
+    import EditorHistoryButtons from './EditorHistoryButtons.svelte';
     import { untrack } from 'svelte';
 
     let { projectId, projectPath, taskId, openFiles, activeFilePath, unsavedFiles, pinnedFiles, onFocused, onSymbolsUpdate, onHasChanges,
         onSelectTab, onCloseTab, onPinTab, onSave, saving, onToggleFullscreen, mobileFullscreen, pendingFsEvent = null,
-        onLinesSelected = null, scrollTops, onScrollTop }: {
+        onLinesSelected = null, scrollTops, onScrollTop, isMobile = false }: {
         projectId: string;
         projectPath?: string;
         taskId?: string;
@@ -36,6 +39,8 @@
         scrollTops?: Record<string, number>;
         /** Report a file's scroller offset (throttled upstream). */
         onScrollTop?: (path: string, top: number) => void;
+        /** Narrow layout: the tab bar shows the active file's undo/redo pair. */
+        isMobile?: boolean;
     } = $props();
 
     const fullscreenTitle = $derived(fullscreenToggleTitle(appStore.config));
@@ -63,6 +68,9 @@
     /** Files with a symbol extraction running. An unfinished pass has nothing to report, and
      *  publishing that would blank the outline column for a moment. */
     let pendingOutline = $state.raw(new Set<string>());
+    /** Every open editor's undo stack, keyed by path: the pair acts on the active file, so an
+     *  inactive editor's report must not light it. */
+    let historyByFile = $state.raw(new Map<string, EditorHistory>());
 
     /** The outline to publish, or null while an extraction for this file is unfinished. */
     const activeOutline = $derived.by(() => {
@@ -81,13 +89,17 @@
         const open = new Set(openFiles.map(f => f.path));
         const stale = [...untrack(() => outlineByFile).keys()].filter(p => !open.has(p));
         const abandoned = [...untrack(() => pendingOutline)].filter(p => !open.has(p));
-        if (stale.length === 0 && abandoned.length === 0) return;
+        const unheld = [...untrack(() => historyByFile).keys()].filter(p => !open.has(p));
+        if (stale.length === 0 && abandoned.length === 0 && unheld.length === 0) return;
         const next = new Map(outlineByFile);
         for (const p of stale) next.delete(p);
         outlineByFile = next;
         const nextPending = new Set(pendingOutline);
         for (const p of abandoned) nextPending.delete(p);
         pendingOutline = nextPending;
+        const nextHistory = new Map(historyByFile);
+        for (const p of unheld) nextHistory.delete(p);
+        historyByFile = nextHistory;
     });
 
     function handleSymbolsPending(filePath: string) {
@@ -110,6 +122,18 @@
 
     function handleHasChanges(filePath: string, hasChanges: boolean) {
         onHasChanges(filePath, hasChanges);
+    }
+
+    /** No report yet, and both directions are dim. */
+    const activeHistory = $derived(historyByFile.get(activeFilePath));
+
+    function handleHistoryChange(filePath: string, history: EditorHistory) {
+        const current = historyByFile.get(filePath);
+        // An editor reports per update; a Map per keystroke would rebuild the tab bar.
+        if (current && current.canUndo === history.canUndo && current.canRedo === history.canRedo) return;
+        const next = new Map(historyByFile);
+        next.set(filePath, history);
+        historyByFile = next;
     }
 </script>
 
@@ -160,6 +184,7 @@
         <!-- Actions -->
         {#if openFiles.length > 0}
             <div class="editor-tab-actions">
+                <EditorHistoryButtons history={activeHistory} isMobile={isMobile} />
                 {#if onToggleFullscreen}
                     <button type="button" class="editor-icon-btn" onclick={onToggleFullscreen} title={fullscreenTitle} aria-label={t('app.shortcut.toggleFullscreen')}>
                         {#if mobileFullscreen}
@@ -203,6 +228,7 @@
                     onSymbolsUpdate={(symbols) => handleSymbolsUpdate(file.path, symbols)}
                     onSymbolsPending={() => handleSymbolsPending(file.path)}
                     onHasChanges={(path: string, hasChanges: boolean) => handleHasChanges(path, hasChanges)}
+                    onHistoryChange={(history: EditorHistory) => handleHistoryChange(file.path, history)}
                     onClose={() => onCloseTab(file.path)}
                     pendingFsEvent={pendingFsEvent}
                     onLinesSelected={onLinesSelected}

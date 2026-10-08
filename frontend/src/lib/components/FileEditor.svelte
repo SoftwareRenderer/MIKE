@@ -7,7 +7,7 @@
     import { EditorView } from 'codemirror';
     import { EditorState, Transaction, Compartment, StateField, StateEffect, RangeSet, Range, type Extension } from '@codemirror/state';
     import { keymap } from '@codemirror/view';
-    import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
+    import { defaultKeymap, history, historyKeymap, indentWithTab, redo, undo } from '@codemirror/commands';
     import { bracketMatching, foldGutter, indentOnInput, foldKeymap, defaultHighlightStyle, syntaxHighlighting, indentUnit } from '@codemirror/language';
     import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
     import { LSPClient, serverCompletion, signatureHelp, serverDiagnostics, formatKeymap, renameKeymap, findReferencesKeymap } from '@codemirror/lsp-client';
@@ -42,6 +42,7 @@
     import { resolveGutterClickRange, toProjectRelative } from '$lib/utils/line-selection';
     import CustomSearchPanel from './CustomSearchPanel.svelte';
     import EditorFooter from './EditorFooter.svelte';
+    import EditorHistoryButtons from './EditorHistoryButtons.svelte';
     import Spinner from './Spinner.svelte';
     import { mount, unmount } from 'svelte';
     import { appStore, dialogStore } from '$lib/stores';
@@ -51,6 +52,7 @@
     import { getLanguageSupport, resolveFile } from '$lib/utils/editor-language';
     import { fileSuffix } from '$lib/utils/file-suffix';
     import { getOutline } from '$lib/utils/editor-outline';
+    import { historyDepths, type EditorHistory } from '$lib/utils/editor-history';
 
     let {
         projectId,
@@ -64,6 +66,7 @@
         onSymbolsUpdate = () => {},
         onSymbolsPending = () => {},
         onHasChanges = () => {},
+        onHistoryChange = () => {},
         onClose,
         // Presentation mode: 'explorer' (tab bar chrome, external) or 'diff'
         // (task-view diff-panel editor with its own header + confirm overlay).
@@ -74,6 +77,7 @@
         displayPath: displayPathProp,
         onToggleFullscreen,
         mobileFullscreen,
+        isMobile = false,
         closeOnEscape = false,
         pendingFsEvent = null,
         onLinesSelected = null,
@@ -94,6 +98,8 @@
         /** Called when a symbol extraction starts, so the outline can hold what it shows. */
         onSymbolsPending?: () => void;
         onHasChanges?: (filePath: string, hasChanges: boolean) => void;
+        /** This editor's undo stack, reported whenever it changes; see `EditorHistoryButtons`. */
+        onHistoryChange?: (history: EditorHistory) => void;
         onClose: (saved: boolean) => void;
         mode?: 'explorer' | 'diff';
         baseRef?: string;
@@ -101,6 +107,8 @@
         displayPath?: string;
         onToggleFullscreen?: () => void;
         mobileFullscreen?: boolean;
+        /** Narrow layout: the header shows the undo/redo pair. */
+        isMobile?: boolean;
         closeOnEscape?: boolean;
         /** Explorer-mode only: invoked with the gutter line selection so the
          *  caller can open a Create Task modal prefilled with the lines. */
@@ -138,6 +146,8 @@
     // historyDeltas: ordered list of (from, to, insert) deltas applied sequentially
     let historyBase = $state('');
     let historyDeltas = $state<{ from: number; to: number; insert: string }[]>([]);
+    let canUndo = $state(false);
+    let canRedo = $state(false);
 
     // LSP state
     let lspClient: LSPClient | null = null;
@@ -438,6 +448,36 @@
         }, 200);
     }
 
+    /** The flags come off the view rather than off `hasChanges`: a save empties neither branch, and a
+     *  reopened file arrives with its persisted deltas already on the stack. */
+    function syncHistory() {
+        if (!view) {
+            canUndo = false;
+            canRedo = false;
+            return;
+        }
+        const depths = historyDepths(view.state);
+        canUndo = depths.canUndo;
+        canRedo = depths.canRedo;
+    }
+
+    /** The view is read at click time: a reload hands the buttons a new one. */
+    function runHistory(direction: 'undo' | 'redo') {
+        if (!view) return;
+        (direction === 'undo' ? undo : redo)(view);
+    }
+
+    const editorHistory = $derived<EditorHistory>({
+        canUndo,
+        canRedo,
+        undo: () => runHistory('undo'),
+        redo: () => runHistory('redo'),
+    });
+
+    $effect(() => {
+        onHistoryChange(editorHistory);
+    });
+
     function destroyView() {
         if (scrollTrackView) {
             scrollTrackView.scrollDOM.removeEventListener('scroll', handleScrollTopEvent);
@@ -450,6 +490,7 @@
         }
         view?.destroy();
         view = null;
+        syncHistory();
     }
 
     function createEditor() {
@@ -571,6 +612,9 @@
                     cursorLine = line.number;
                     cursorCol = pos - line.from + 1;
                 }
+                // Read per update, not per document change: undoing a selection moves a branch
+                // without changing the text.
+                syncHistory();
             }),
             EditorState.tabSize.of(4),
             indentUnit.of('    '),
@@ -1552,6 +1596,7 @@
                 <span class="file-path" title={filePath}>{displayPath}</span>
             </div>
             <div class="editor-actions">
+                <EditorHistoryButtons history={editorHistory} isMobile={isMobile} />
                 {#if onToggleFullscreen}
                     <button type="button" class="editor-icon-btn editor-fullscreen-toggle" onclick={onToggleFullscreen} title={fullscreenTitle}>
                         {#if mobileFullscreen}
