@@ -605,15 +605,15 @@
         border-radius: var(--radius-md);
         padding: 8px;
     }
-    .tool-call-header { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+    .tool-call-header { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
     .tool-name {
         font-size: var(--text-sm);
         font-weight: 600;
         color: var(--color-text-primary);
-        display: flex;
-        align-items: center;
-        overflow-wrap: anywhere;
+        white-space: nowrap;
+        flex-shrink: 0;
     }
+    .tool-icon, .tool-sandbox-icon { flex-shrink: 0; }
     .tool-args {
         font-size: var(--text-xs);
         color: var(--color-text-secondary);
@@ -635,6 +635,10 @@
         min-width: 0;
         user-select: text;
     }
+    .tool-args-link, .tool-call-header > .tool-args {
+        flex: 1 1 0;
+        min-width: min(100%, 18ch);
+    }
     .tool-args-link {
         display: flex;
         align-items: center;
@@ -645,8 +649,6 @@
         color: inherit;
         font-family: inherit;
         text-align: left;
-        width: 100%;
-        min-width: 0;
     }
     .tool-status {
         font-size: var(--text-xs);
