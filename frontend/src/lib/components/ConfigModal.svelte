@@ -1019,10 +1019,7 @@
                     <div class="field-label">
                         <span class="field-label-inline">{t('settings.maxMemory')}</span>
                         <div class="readonly-value">{formatMB(config.memory_budget_mb)}</div>
-                        <span class="field-help">{t('settings.maxMemoryHelp', {
-                            pct: config.memory_budget_pct ?? 0,
-                            total: formatMB(config.memory_total_mb ?? 0),
-                        })}</span>
+                        <span class="field-help">{t('settings.maxMemoryHelp')}</span>
                     </div>
                 {/if}
                 {#if config?.tls_ca_available}
@@ -1040,7 +1037,6 @@
                                 {t('settings.caCertDownload')}
                             </a>
                         </div>
-                        <span class="field-help">{t('settings.caCertHelp')}</span>
                     </div>
                 {/if}
             </div>

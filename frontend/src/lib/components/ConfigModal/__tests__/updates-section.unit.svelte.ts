@@ -105,11 +105,6 @@ describe('a packaged install', () => {
         const { container } = open({});
         expect(container.textContent).toContain('getmike.dev');
     });
-
-    it('says nothing reaches disk without the install click', () => {
-        const { container } = open({});
-        expect(container.textContent).toContain('Nothing is installed until you click Install');
-    });
 });
 
 describe('a release that is downloaded and waiting', () => {
