@@ -881,6 +881,19 @@ queued notice under its own code (`send_refused`) rather than deleting it — a 
 
 **Tests:** `api/__tests__/queue-refused.unit.ts` (refused ≠ flushed, reported once, retired by a new
 write).
+
+## Signing out empties both halves
+
+Sign-out runs `clearQueue()` and then `clearAll()`. Both calls, in that order.
+
+- `clearAll()` empties the persisted queue, but `$lib/api/queue` still holds its array in memory, and the
+  next `enqueueAction` writes that whole array back. A queue erased only in the database comes back on the
+  first write after the person has signed out.
+- `gc()` is not the substitute: it prunes only entries whose task is gone, and it has one caller,
+  `Board.svelte`, which runs it after the board loads.
+- Test: `storage-clear-all.unit.ts` — the case that fails when `clearQueue()` is skipped, which is why the
+  order is the rule rather than a style choice.
+
 ## Checking this
 
 `cd frontend && npm test` covers `taskIsInFlight`, the offline queue, the mirror's coalescing and the pending

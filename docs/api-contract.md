@@ -384,6 +384,11 @@ is gone is diffed from the project repo, and that fallback calls `git.WorktreeMa
 as well, so no path can answer with patch text alone. Tests:
 `backend/stream/done_snapshot_test.go`, `backend/api/git_diff_parsed_test.go`.
 
+**The badge a diff row wears comes from the parsed file.** `getStatusBadge` (`$lib/utils/diff-parser.ts`) is
+the only source: it reads the parsed status. `GitStatusPanel.svelte` keeps its own badge for a git status
+entry, which is a different grammar with different inputs. Tests:
+`frontend/src/lib/utils/__tests__/diff-parser.unit.ts`.
+
 **A ref comparison is not reconciled by working-tree stats.** The panel shows one comparison and the board
 stream keeps pushing the task's working-tree stats, so the view that came from `?head=` or `?base=` has to
 say so. `DiffCache.loadDiff` and `refreshManifest` record whether the view on screen compares refs

@@ -31,7 +31,7 @@ only under load.
   is in `src/`, and a frontend change nobody built reads as green either way. Build before the run, then
   make it prove it bites: revert the changed file, rebuild, and watch the spec fail before believing the
   green. A `frontend/dist` with no `index.html` in it is the one case that does not read as a test
-  failure — the compiled-in copy is built from that same directory, so the server refuses its boot and a
+  failure. The compiled-in copy is built from that same directory, so the server refuses its boot and a
   spec sees `ECONNREFUSED` on 3000 (see `AGENTS.md → Debugging` for the stale-process version).
 - **Never write a test that greps a component's source.** `readFileSync('../Foo.svelte')` +
   `expect(source).toContain('…')` cannot fail a real bug, breaks on any rename, and duplicates what
@@ -50,9 +50,9 @@ only under load.
   (idle) never becoming visible, in whichever chat spec lost the race that run. Honouring this is cheap, and it
   makes each task's worktree its own as well.
 - **A project's `sandbox_enabled` is not a scratch flag.** The explorer seeds the folder it
-  browses from it (`sandboxEnabled ? mountPath : projectPath`), so a spec that turns sandboxing on
-  for the shared project makes a *concurrent* spec request the container path from the host —
-  `/api/fs` refuses it (`path outside allowed project directory`) and the panel never recovers.
+  browses from it (`sandboxEnabled ? mountPath : projectPath`). A spec that turns sandboxing on
+  for the shared project makes a *concurrent* spec request the container path from the host, and
+  `/api/fs` refuses it (`path outside allowed project directory`); the panel never recovers.
   That is why `agent-network-isolation` and the sandbox specs each run against their own project.
 - **Assert the directory, not just that a list exists.** `/api/fs` resolves the project *from the
   path*. An explorer holding a stale folder therefore asks for a path outside the current project and gets
@@ -150,7 +150,7 @@ the task to go idle" is a race against everyone else's turns. Any new turn-bound
   `--last-failed --workers=1`. So read a red full run as "which turn was not admitted, and by what", and only
   then as "which wait is too tight". Every remaining failure is a turn-bound wait.
 - **A turn-bound wait can be waiting at the memory gate, and an unreleased task is what closes it.** A live
-  task is charged against `exec.MemoryGate` while it exists: every container it owns costs `max(held, cap)`,
+  task is charged against `exec.MemoryGate` while it exists. Every container it owns costs `max(held, cap)`,
   and the cap is `types.DefaultSandboxMemoryLimitMB` (1024 MB) for every project this harness creates. One
   capacity covers every worker on the lane server, so a file that starts one turn per test and releases
   nothing closes the gate against its own later tests. At 13 live containers against a 14379 MB capacity the
@@ -267,9 +267,9 @@ has no plan route at all — `isPlanMode` answers false and the keyword table de
 sees `editor-line-task`'s real-time-streaming test wait 30 s for a `.tool-call-entry` that never
 arrives, because the mock answered that turn with plain text. Measured both ways on that one spec: red
 without the directory, green with one `plan-first/SKILL.md` inside it. Installing it costs no Go gate:
-the prompt test in `backend/exec` refuses the project's own container mount, never the mount root, so a
+the prompt test in `backend/exec` refuses the project's own container mount, never the mount root. A
 checkout whose home *is* `/home/sandbox` still passes `go test ./backend/exec/` with a skill installed.
-**A pinned tool-call fixture also needs its operand**: the tool runs in the task's worktree, and the
+**A pinned tool-call fixture also needs its operand**: the tool runs in the task's worktree. The
 e2e repos hold only a README, so a fixture that edits `src/lib/utils/format.ts` fails on a missing
 file unless the spec writes it first (`writeFileInWorktree`, task-scoped). And the task's **creation**
 prompt must stay keyword-free: `edit-file-<ts>` matches the mock's `\bedit\b` route, so the initial
@@ -349,6 +349,11 @@ slowest gate is `check:types` at ~8 s, and it is one `svelte-check` pass shared 
   the claim has to hold for every module the file reaches, at any depth — including `.svelte` modules and
   packages whose constructor touches `document`. Two tests passed this way when a file opted out: one with
   `showModal` throwing into an unhandled rejection, one asserting `-1` where the browser answers `1`.
+- **A unit file that imports a module using Svelte compiler macros must be `.svelte.ts`** (or
+  `.unit.svelte.ts`). Vite transforms only what the Svelte plugin claims, so a plain `.ts` file reaches a
+  `$state`, `$derived` or `$effect` body that never got compiled and the macros do nothing there. The
+  include list in `frontend/vitest.config.ts` accepts both spellings, so the wrong one runs and fails to
+  pin the reactivity it appears to be testing.
 - **`pool: 'threads'` is what shortened the run**, and `isolate` staying on is what makes it safe: no two
   files share a module registry, so `storage` and the i18n runtime cannot leak between them. Re-measure
   from `frontend/` with `npx vitest run --pool=forks` beside `npx vitest run`, paired in one run, because
@@ -474,7 +479,7 @@ launches the browser ignoring certificate errors, as the existing scripts do. Us
 - **`ERR_CONNECTION_REFUSED`** / wrong-protocol response: stale processes from an interrupted run hold
   the ports — run the cleanup block in `docs/testing.md → A run must leave nothing behind`.
 - **A panel container is visible before its content is.** `.git-graph` is on screen while the history
-  panel still reads "Loading commits…", so counting `.git-commit-row` right after it answers 0 for a
+  panel still reads "Loading commits…". Counting `.git-commit-row` right after it answers 0 for a
   repo that has commits — wait for the first row, not for the container.
 - **A spec that is green alone and red in a full run is sharing a repository.** Two specs `git add`
   in the same checkout and one loses with `index.lock: File exists` or an ENOENT worktree. Give the
@@ -561,6 +566,14 @@ rm -rf /tmp/kanban-test-data /tmp/kanban-test-data-isolated /tmp/kanban-test-wor
 
 ## Go unit test environment
 
+- **A Go test is deterministic and starts nothing it did not ask for.** `testServer(t)` gives an isolated
+  server (`backend/server/server_test.go`), `t.TempDir()` gives its files, and no test opens a network
+  socket it did not create itself. A test that reaches a real provider, podman daemon or hostname is
+  testing the machine, not the package.
+- **A green package is not proof about code that only runs inside a task.** `backend/exec`'s own tests never
+  start a task, so an `executionState` locking bug stays invisible until `-race` runs over the package that
+  does start one — `./backend/server/`. That is why `make check-race` names a package list rather than
+  trusting each suite.
 - **No `MIKE_ENCRYPTION_KEY` is needed.** The secret box is injected (`crypto.New` in `NewServer`) and no
   package reads the variable, so `go test ./backend/...` runs with it unset — a test that needed one once
   failed with `crypto: MIKE_ENCRYPTION_KEY environment variable is not set` instead of a readable failure.
@@ -605,7 +618,7 @@ rm -rf /tmp/kanban-test-data /tmp/kanban-test-data-isolated /tmp/kanban-test-wor
   **not** part of `./backend/... ./pkg/...`.
 - **A run that ended is not a thread that is complete.** `failTask` persists the task with
   `execution_state = failed` and writes the `error` row afterwards, so a test that polls the state and then
-  reads `GetTaskMessages` once can read between the two writes — it fails under load saying `no error row
+  reads `GetTaskMessages` once can read between the two writes. It fails under load saying `no error row
   stored` while the roles it prints a moment later (a second read) include the row. Wait for the row as well
   as the state; `backend/exec`'s `TestLLMCrashMidTurnWithToolCallLeavesNoPartialTurn` does.
 - **`make check-race`'s `RACE_PKGS` is not the whole concurrency surface.** It omits `./backend/lsp/`,
