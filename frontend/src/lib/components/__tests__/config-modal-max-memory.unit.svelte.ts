@@ -86,19 +86,19 @@ describe('Settings → About → System Info maximum sandbox memory', () => {
             memory_budget_mb: 13624, memory_total_mb: 15138, memory_budget_pct: 90,
         }));
 
-        // Grouped, not the bare figure: an operator compares it against installed RAM.
+        // Grouped, not the bare figure: the figure is read against a machine's own memory figures.
         expect(rowValue(container, 'Maximum Sandbox Memory')).toBe('13,624 MB');
     });
 
-    it('names the percentage, the installed RAM it came from and the variable that sets it', async () => {
+    it('points at the variable an administrator sets, and prints no figures of this machine', async () => {
         const { container } = await openAbout(makeConfig({
             memory_budget_mb: 13624, memory_total_mb: 15138, memory_budget_pct: 90,
         }));
 
         const help = row(container, 'Maximum Sandbox Memory')?.querySelector('.field-help')?.textContent ?? '';
-        expect(help).toContain('90%');
-        expect(help).toContain('15,138 MB');
         expect(help).toContain('MIKE_MEMORY_BUDGET_PCT');
+        expect(help).not.toContain('90%');
+        expect(help).not.toContain('15,138');
     });
 
     it('shows nothing when the gate is disabled', async () => {

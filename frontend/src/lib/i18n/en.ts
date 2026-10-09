@@ -291,11 +291,10 @@ const catalog = {
     'settings.database': 'Database',
     'settings.databaseHelp': "Path to the server's SQLite database",
     'settings.maxMemory': 'Maximum Sandbox Memory',
-    'settings.maxMemoryHelp': 'Shared by every sandbox MIKE started: {pct}% of this machine\'s {total} of RAM. Set it with MIKE_MEMORY_BUDGET_PCT.',
+    'settings.maxMemoryHelp': 'Maximum memory usage may be configured by your administrator using the MIKE_MEMORY_BUDGET_PCT environment variable.',
     'settings.caCert': 'CA Certificate',
     'settings.caCertDownload': 'Download CA Certificate',
     'settings.caCertHint': "Download the CA certificate that signed this server's certificate",
-    'settings.caCertHelp': "This server's certificate is signed by its own certificate authority. Import this file into another device's trust store to trust the connection there.",
 
     // ── ConfigModal/PreferencesTab.svelte — shortcut rows + UI preferences ──
     // Only labels and hints are copy: row ids and formatShortcut() output are data.
@@ -532,7 +531,7 @@ const catalog = {
     // The scope sentence is the one place a user learns what a leaked token would cost
     // them, so it names the routes. The row's revoke name carries its own id.
     'settings.tokens.title': 'API tokens',
-    'settings.tokens.help': 'Credentials for scripts and other headless clients, sent as "Authorization: Bearer <token>". A token can list projects, create, read, update and delete tasks, and start or stop a task — nothing else, and no other endpoint. It does not expire; revoke it to take it away.',
+    'settings.tokens.help': 'Credentials for scripts and other headless clients, sent as "Authorization: Bearer <token>". A token can list projects, create, read, update and delete tasks, and start or stop a task.',
     'settings.tokens.reloadTitle': 'Reload the token list',
     'settings.tokens.refresh': 'Refresh',
     'settings.tokens.loading': 'Loading...',
@@ -564,7 +563,7 @@ const catalog = {
     // The device list, and the code that adds one. A passkey is what signs a browser in, so the copy
     // never offers a password as the alternative.
     'settings.passkeys.title': 'Devices & passkeys',
-    'settings.passkeys.help': 'Every device that can sign in to this install. Signing in proves the browser holds that device’s key, so there is no password to send, lose or reuse. A device you no longer have is revoked here; when the last one is gone, start MIKE with --reset-passkeys.',
+    'settings.passkeys.listTitle': 'Registered Passkeys',
     'settings.passkeys.reloadTitle': 'Reload the device list',
     'settings.passkeys.refresh': 'Refresh',
     'settings.passkeys.loading': 'Loading...',
@@ -588,7 +587,6 @@ const catalog = {
     'settings.passkeys.pairHint': 'Create a code that lets one more device register a passkey',
     'settings.passkeys.mintNameAria': 'Name for the device being paired',
     'settings.passkeys.mintNamePlaceholder': 'e.g. Work laptop',
-    'settings.passkeys.mintNameHelp': 'The name travels with the pairing link, so the other device opens already named. A code typed by hand carries no name.',
     'settings.passkeys.minting': 'Creating a code...',
     'settings.passkeys.pairTitle': 'Open this link on the other device, or type the code into it.',
     'settings.passkeys.qrAlt': 'QR code for the pairing link',
@@ -884,7 +882,7 @@ const catalog = {
     // and is shown in the server's own words. docs/auto-update.md.
     'updates.title': 'Release updates',
     'updates.enable': 'Check for new releases',
-    'updates.enableDesc': 'Check {host} for updates once per day. Nothing is installed until you click Install.',
+    'updates.enableDesc': 'Check {host} for updates once per day.',
     'updates.managed': 'Updates are managed by your organization.',
     'updates.available': 'Release {version} is available',
     'updates.upToDate': 'You are up to date — {version} is the latest release',

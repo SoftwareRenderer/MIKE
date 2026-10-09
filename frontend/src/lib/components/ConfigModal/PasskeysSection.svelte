@@ -262,8 +262,6 @@
         </div>
     </div>
 
-    <p class="settings-note">{t('settings.passkeys.help')}</p>
-
     <div class="settings-create">
         <input
             type="text"
@@ -283,7 +281,6 @@
             title={t('settings.passkeys.pairHint')}
         >{minting ? t('settings.passkeys.minting') : t('settings.passkeys.pair')}</button>
     </div>
-    <p class="settings-note">{t('settings.passkeys.mintNameHelp')}</p>
 
     {#if pairing}
         <div class="settings-revealed passkeys-pairing" class:passkeys-pairing-expired={expired} role="status">
@@ -311,6 +308,8 @@
     {#if error}
         <div class="settings-list-error" role="alert">{error}</div>
     {/if}
+
+    <h4 class="passkeys-list-title">{t('settings.passkeys.listTitle')}</h4>
 
     {#if loading && passkeys.length === 0}
         <div class="settings-list-status" role="status">{t('settings.passkeys.loadingList')}</div>
@@ -369,6 +368,12 @@
 
     .passkeys-section {
         gap: 10px;
+    }
+    .passkeys-list-title {
+        margin: 0;
+        font-size: var(--text-sm);
+        font-weight: 600;
+        color: var(--color-text-secondary);
     }
     /* The label's own shape comes from `.settings-row-label`; this is only what makes it a field. */
     .passkeys-name {
