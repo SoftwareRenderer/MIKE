@@ -5,7 +5,7 @@
     import { projectEnablesMCPServer } from '$lib/utils/mcp-project';
 
     let {
-        commitAssistedBy = $bindable(true),
+        commitAssistedBy = $bindable(false),
         mcpServerIDs = $bindable<string[]>([]),
         mcpOptions = [] as MCPServer[],
         projectName = '',

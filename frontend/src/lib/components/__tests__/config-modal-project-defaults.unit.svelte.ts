@@ -96,9 +96,18 @@ describe('Settings project tab', () => {
         expect(projectTab.querySelector('.tab-icon svg')).toBeTruthy();
     });
 
-    it('reads a project row that never answered as on', async () => {
+    it('reads a project row that never answered as off', async () => {
         vi.mocked(updateConfig).mockResolvedValue(makeConfig());
         openProject();
+        const { container } = render(ConfigModal, { props: { config: makeConfig(), onClose: vi.fn(), onSaved: vi.fn() } });
+        await openProjectTab(container);
+
+        expect(container.querySelector(TRAILER_TOGGLE)?.getAttribute('aria-checked')).toBe('false');
+    });
+
+    it('reads a project row that said yes as on', async () => {
+        vi.mocked(updateConfig).mockResolvedValue(makeConfig());
+        openProject({ commit_assisted_by: true });
         const { container } = render(ConfigModal, { props: { config: makeConfig(), onClose: vi.fn(), onSaved: vi.fn() } });
         await openProjectTab(container);
 

@@ -74,8 +74,8 @@
     let sortOldestFirst = $state(false);
     let autoMaximizeChat = $state(true);
     let notifyOnReview = $state(false);
-    // The open project's answer to the "Assisted-by" commit trailer; absent means on.
-    let commitAssistedBy = $state(true);
+    // The open project's answer to the "Assisted-by" commit trailer; absent means off.
+    let commitAssistedBy = $state(false);
     // The MCP registry and this project's opt-in list. Both are edited here rather than in the tab: the
     // first rides the config payload, the second the project PUT.
     let mcpServers = $state<MCPServerDraft[]>([]);
@@ -231,7 +231,7 @@
             sortOldestFirst = config.sort_oldest_first === true;
             autoMaximizeChat = config.auto_maximize_chat_mobile !== false;
             notifyOnReview = uiStore.notifyOnReview;
-            commitAssistedBy = appStore.selectedProject?.commit_assisted_by !== false;
+            commitAssistedBy = appStore.selectedProject?.commit_assisted_by === true;
             mcpServers = buildMCPServers(config);
             projectMCPOpts = [...(appStore.selectedProject?.mcp_server_ids || [])];
             providers = buildProviders(config);
@@ -526,7 +526,7 @@
     async function saveProjectDefaults() {
         const row = appStore.selectedProject;
         if (!row) return;
-        const assistedBy = commitAssistedBy !== (row.commit_assisted_by !== false);
+        const assistedBy = commitAssistedBy !== (row.commit_assisted_by === true);
         const chosen = projectMCPServerIDs(config, projectMCPOpts);
         const mcpChanged = !sameIds(chosen, row.mcp_server_ids || []);
         if (!assistedBy && !mcpChanged) return;

@@ -320,9 +320,9 @@ type Project struct {
 }
 
 // AssistedByEnabled says whether this project's commit messages credit the models that contributed.
-// An unset value means on, so a row predating the flag keeps the trailer.
+// The line is a thing a person asked for, so an unset value means off.
 func (p *Project) AssistedByEnabled() bool {
-	return p.CommitAssistedBy == nil || *p.CommitAssistedBy
+	return p.CommitAssistedBy != nil && *p.CommitAssistedBy
 }
 
 // ProjectCounts holds task counts per status for a project.

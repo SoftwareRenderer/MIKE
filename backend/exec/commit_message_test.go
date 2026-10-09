@@ -423,7 +423,8 @@ func commitTrailerExecutor(t *testing.T, commitAssistedBy *bool, label string, c
 	return te, task
 }
 
-// TestGenerateCommitMessage_AssistedByFollowsTheProject: a row that never answered keeps the line, an explicit off drops it.
+// TestGenerateCommitMessage_AssistedByFollowsTheProject: the line appears only where the project said yes —
+// an unset row and an explicit off both drop it.
 func TestGenerateCommitMessage_AssistedByFollowsTheProject(t *testing.T) {
 	on, off := true, false
 	for _, tc := range []struct {
@@ -431,7 +432,7 @@ func TestGenerateCommitMessage_AssistedByFollowsTheProject(t *testing.T) {
 		assistedBy  *bool
 		wantTrailer bool
 	}{
-		{"unset keeps the line", nil, true},
+		{"unset drops the line", nil, false},
 		{"on keeps the line", &on, true},
 		{"off drops the line", &off, false},
 	} {
@@ -449,17 +450,18 @@ func TestGenerateCommitMessage_AssistedByFollowsTheProject(t *testing.T) {
 }
 
 // TestGenerateCommitMessage_FallbackFollowsTheProject: the title-only fallback carries the trailer only
-// where the project wants it.
+// where the project said yes.
 func TestGenerateCommitMessage_FallbackFollowsTheProject(t *testing.T) {
-	off := false
-	te, task := commitTrailerExecutor(t, &off, "", errors.New("provider down"))
-	if got := te.merge.GenerateCommitMessage(context.Background(), task); got != "Fix the parser" {
-		t.Fatalf("a project that declined the trailer got %q", got)
+	on, off := true, false
+	for _, assistedBy := range []*bool{nil, &off} {
+		te, task := commitTrailerExecutor(t, assistedBy, "", errors.New("provider down"))
+		if got := te.merge.GenerateCommitMessage(context.Background(), task); got != "Fix the parser" {
+			t.Errorf("a project that never said yes got %q, want the bare title", got)
+		}
 	}
 
-	te, task = commitTrailerExecutor(t, nil, "", errors.New("provider down"))
-	got := te.merge.GenerateCommitMessage(context.Background(), task)
-	if !strings.Contains(got, "Assisted-by: MIKE:utility-model") {
-		t.Fatalf("unset project fallback = %q, want the utility model named", got)
+	te, task := commitTrailerExecutor(t, &on, "", errors.New("provider down"))
+	if got := te.merge.GenerateCommitMessage(context.Background(), task); !strings.Contains(got, "Assisted-by: MIKE:utility-model") {
+		t.Errorf("a project that said yes = %q, want the utility model named", got)
 	}
 }

@@ -40,14 +40,15 @@ merge/commit half of `backend/exec/merge.go`.
   `TestHandleCommitAndDone_ArmsClickForConflictResolution`,
   `TestHandleCommitAndDone_DoneWhenOnlyTheProjectOwnsTheConflict`), `backend/exec/merge_restore_test.go`
   (`TestMergedDeliveredReadsTheMergeNotTheRestore`), `merge_conflict_resolution_test.go` (`TestCommitConflictResolution_DoesNotSweepUntrackedFiles`, `…_CommitAndDoneClickMergesWithAutoMergeOff`, `…_NoClickNoMergeWithAutoMergeOff`, `…_StillConflictedKeepsTheClick`), `commit_and_done_test.go`, `backend/git/worktree_test.go` (`TestCreateWorktree_ExcludesWorktreesDirFromProjectStatus`, `…_NoExcludeWhenWorktreesOutsideProject`), e2e `commit-and-done-unstaged.spec.ts`.
-- **The `Assisted-by` line is the project's answer.** `GenerateCommitMessage` and `StreamCommitMessage`
-  (`backend/exec/merge.go`) add the trailer only while `AssistedByEnabled` (`backend/types/domain.go`)
-  says so, and a project that never answered keeps it. Settings → the open project's own tab (named after
-  the project) stores that answer on the project's row; changing it stops no task and recreates no container.
+- **The `Assisted-by` line is the project's answer, and no answer means no line.** `GenerateCommitMessage` and
+  `StreamCommitMessage` (`backend/exec/merge.go`) add the trailer only while `AssistedByEnabled`
+  (`backend/types/domain.go`) says yes, and a project whose row cannot be read has no answer. Settings → the open
+  project's own tab (named after the project) stores that answer on the project's row; changing it stops no task and
+  recreates no container.
   Tests: `commit_message_test.go` (`TestGenerateCommitMessage_AssistedByFollowsTheProject`,
   `TestGenerateCommitMessage_FallbackFollowsTheProject`), `backend/api/project_test.go`
   (`TestUpdateProjectCommitTrailer`), `backend/store/projects_test.go`
-  (`TestProjectCommitAssistedByDefaultsOn`, `TestUpdateProjectCommitAssistedBy`).
+  (`TestProjectCommitAssistedByDefaultsOff`, `TestUpdateProjectCommitAssistedBy`).
 
 ### Where the work lands — the base branch
 

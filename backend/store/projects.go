@@ -44,7 +44,7 @@ func (s *Store) CreateProject(p *types.Project) error {
 	mcpIDsJSON := marshalColumnJSON(p.MCPServerIDs)
 	assistedBy := 0
 	if p.AssistedByEnabled() {
-		assistedBy = 1 // unset means on, the column's default
+		assistedBy = 1 // the trailer is stored only where a person asked for it
 	}
 	_, err := s.db.Exec(
 		`INSERT INTO projects (`+projectColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,

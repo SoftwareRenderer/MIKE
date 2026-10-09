@@ -328,7 +328,7 @@ func (m *mergeOrchestrator) ResolveMergeTarget(projectID string, task *types.Tas
 
 // GenerateCommitMessage writes the task's commit message from the conversation.
 // Every commit path goes through it, and each model that contributed gets its own Assisted-by line
-// unless the project turned that line off.
+// only where the project asked for that line.
 func (m *mergeOrchestrator) GenerateCommitMessage(ctx context.Context, task *types.Task) string {
 	assistedBy := m.assistedByEnabled(task.ProjectID)
 	taskMsgs, _ := m.store.GetTaskMessages(task.ID, task.CurrentThreadID)
@@ -354,12 +354,12 @@ func (m *mergeOrchestrator) GenerateCommitMessage(ctx context.Context, task *typ
 	return buildCommitMessageWithAssistedBy(commitMsg, models)
 }
 
-// assistedByEnabled reads the project's answer to the Assisted-by trailer; a project that cannot be
-// read keeps it.
+// assistedByEnabled reads the project's answer to the Assisted-by trailer; a project whose answer cannot
+// be read has none.
 func (m *mergeOrchestrator) assistedByEnabled(projectID string) bool {
 	project, err := m.store.GetProject(projectID)
 	if err != nil {
-		return true
+		return false
 	}
 	return project.AssistedByEnabled()
 }

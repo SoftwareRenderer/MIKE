@@ -892,8 +892,9 @@ func TestProjectSandboxCapabilities(t *testing.T) {
 	}
 }
 
-// TestProjectCommitAssistedByDefaultsOn: a row that never answered keeps the trailer.
-func TestProjectCommitAssistedByDefaultsOn(t *testing.T) {
+// TestProjectCommitAssistedByDefaultsOff: a row that never answered gets no trailer, whether it was
+// created without an answer or inserted without the column.
+func TestProjectCommitAssistedByDefaultsOff(t *testing.T) {
 	s := testStore(t)
 
 	if err := s.CreateProject(newProject("proj-new", "New", "/tmp/new")); err != nil {
@@ -908,8 +909,8 @@ func TestProjectCommitAssistedByDefaultsOn(t *testing.T) {
 		if err != nil {
 			t.Fatalf("get %s: %v", id, err)
 		}
-		if !got.AssistedByEnabled() {
-			t.Errorf("%s: trailer reads off, want on", id)
+		if got.AssistedByEnabled() {
+			t.Errorf("%s: trailer reads on, want off", id)
 		}
 	}
 }
