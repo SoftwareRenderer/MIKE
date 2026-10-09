@@ -65,7 +65,7 @@ clash.
 create and `PUT` (400 naming the field).
 
 - `GVisorCreateArgs` is the one copy of the posture both builders begin from (byte-identical up to their
-  own `--workdir` / `--network none`), and `AppendCapabilities` is the only way to append a `--cap-add`:
+  own `--workdir` / `--network none`). `AppendCapabilities` is the only way to append a `--cap-add`:
   it runs `GVisorIsolationForCaps` (runsc **and** `--cap-drop ALL`) first and refuses the whole grant
   otherwise, so no ordering mistake can reach podman.
 - Name shape stays the caller's and is answered differently on purpose: a task refuses its whole
@@ -110,6 +110,20 @@ create and `PUT` (400 naming the field).
 
 ### Capabilities are judged by shape, not name
 
+`capabilityPattern` (`pkg/sandboxruntime/podman_args.go`) accepts `^[A-Za-z][A-Za-z0-9_]*$` and nothing
+else, so a capability is a word and cannot be anything else.
+
+- The shape is the whole defence. `--privileged`, `--cap-add` and `SYS_ADMIN ALL` are each *text a person
+  or a manifest put in the capability field*, and each reaches podman as an argument to `--cap-add`, which
+  no runtime makes safe. A name list would not help: the refusal is that the value carries a flag, a space
+  or a separator.
+- `ValidateCapabilities` reports the first value it cannot accept, naming it, so the operator sees which
+  entry was refused rather than a list of accepted ones.
+- What a name *means* is decided elsewhere: `AppendCapabilities` refuses the grant unless the isolation
+  posture is already there (`docs/sandbox-runtime.md → Podman argument construction`).
+- Tests: `TestValidateCapabilityRule` (the table carries `--privileged`, `--cap-add`, `-v` and
+  `SYS_ADMIN,ALL`), `TestGVisorIsolationForCaps`, `TestAppendCapabilitiesRefusesAnUnisolatedGrant`.
+
 ## Extension sandbox mounts
 
 `backend/extensions/mount_policy.go`:
@@ -118,7 +132,7 @@ create and `PUT` (400 naming the field).
   extensions dir, system temp dir, `MIKE_EXT_MOUNT_ROOTS`.
 - **Only the extensions dir, the temp dir and the `MIKE_EXT_MOUNT_ROOTS` extras may be mounted
   read-write.** The workspace dir, the registered checkouts and anything borrowed from a project's
-  Sandbox Configuration come out `ro` however the manifest asks (`MountPolicy.ForceReadOnly`): a
+  Sandbox Configuration come out `ro` however the manifest asks (`MountPolicy.ForceReadOnly`). A
   manifest is registry text and the workspace holds every task's worktree.
 - Container paths must match `^/[A-Za-z0-9._/-]+$` — `:` or `,` would rewrite the podman mount spec.
 - Enforced on `PUT /api/extensions/{id}` **and** at install time: a manifest that self-grants a bad
@@ -183,12 +197,12 @@ create and `PUT` (400 naming the field).
   bar and the shield dot orange and asks for nothing. Red outlives the run because the numbers that produced
   it do.
 - **A dismissal is a column on the task row**, not a record in the browser that clicked: `POST
-  …/memory-alert-ack` through `Store.DismissTaskMemoryAlert`, then the task broadcast — the same path a status
-  change travels, so one operator with a phone and a laptop sees one answer. The ack keeps the three numbers
-  the alert showed and covers an alert when the limit matches and neither counter is worse, so a worse run
-  announces itself again; the comparison is by numbers and not a timestamp because a container's counters only
-  rise and `sandbox_stats` carries no time. A task that hits an identical cap in a later run stays dismissed —
-  nothing on the row distinguishes the runs, and a per-container run token would re-arm it.
+  …/memory-alert-ack` through `Store.DismissTaskMemoryAlert`, then the task broadcast. It is the same path a
+  status change travels, so one operator with a phone and a laptop sees one answer. The ack keeps the three
+  numbers the alert showed and covers an alert when the limit matches and neither counter is worse, so a
+  worse run announces itself again. The comparison is by numbers and not a timestamp: a container's counters
+  only rise and `sandbox_stats` carries no time. A task that hits an identical cap in a later run stays
+  dismissed — nothing on the row distinguishes the runs, and a per-container run token would re-arm it.
 - Tests: `backend/sandbox/memory_peak_test.go`, `backend/sandbox/memory_accounting_test.go`,
   `backend/extensions/memory_accounting_test.go`, `pkg/sandboxruntime/memorystats_test.go`,
   `backend/stream/sandbox_stats_test.go`, `backend/api/task_memory_alert_test.go`,
@@ -198,16 +212,16 @@ create and `PUT` (400 naming the field).
 ## The memory budget: what admits a task, what pauses one, and what it can take back
 
 - **One rule**, in `exec.MemoryGate`: `mikeMB + reservations + candidate ≤ capacity`. `mikeMB` is what MIKE
-  itself costs — every container it started plus its own process — and capacity is
+  itself costs — every container it started plus its own process. Capacity is
   `MIKE_MEMORY_BUDGET_PCT` (default 90) percent of **installed** RAM, computed once at startup in
   `backend/server` and handed to the gate, to `ConfigStore.SetMemoryBudget` for the About tab and to the
   startup log line. `/proc/meminfo` has exactly one reader in the tree (`meminfoMB` under `readMeminfoMB`),
   and `/proc/self/status` likewise (`selfRSSMB` under `readSelfRSSMB`).
-- **`mikeMB` is the sum of three accountants** (`memoryBudget.Measure`): task containers and the project-level
-  `proj:` terminal containers (`SandboxManager.MemoryAccounting`, over the same `active` map that holds both),
-  the extension sandboxes (`ExtensionSandboxManager.MemoryAccounting`), and the server process itself
-  (`selfProcessAccountant`, `VmRSS` — no cgroup, so held and charge are one figure; an unreadable `VmRSS` adds
-  nothing and warns once, not once per tick). Each container costs `max(held, cap)`
+- **`mikeMB` is the sum of three accountants** (`memoryBudget.Measure`). It counts task containers and the
+  project-level `proj:` terminal containers (`SandboxManager.MemoryAccounting`, over the same `active` map
+  that holds both), the extension sandboxes (`ExtensionSandboxManager.MemoryAccounting`), and the server
+  process itself (`selfProcessAccountant`, `VmRSS` — no cgroup, so held and charge are one figure). An
+  unreadable `VmRSS` adds nothing and warns once, not once per tick. Each container costs `max(held, cap)`
   (`sandboxruntime.ChargeMB`): a capped container pays its cap, an uncapped one what it holds, an unreadable
   one its cap alone — "unreadable" is not "free". Caps are recorded at container creation (`capsMB`,
   `extensionSandboxState.memLimitMB`), because the row that carried the limit can change while it runs.

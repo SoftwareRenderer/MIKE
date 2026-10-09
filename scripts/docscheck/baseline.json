@@ -1,10 +1,10 @@
 {
  "AGENTS.md": {
-  "history": 4,
-  "longsent": 2
+  "history": 0,
+  "longsent": 0
  },
  "_global": {
-  "longsent": 182
+  "longsent": 171
  },
  "docs/adding-a-preference.md": {
   "history": 0,
@@ -28,7 +28,7 @@
  },
  "docs/api.md": {
   "history": 0,
-  "longsent": 2
+  "longsent": 0
  },
  "docs/auto-answer.md": {
   "history": 0,
@@ -140,11 +140,11 @@
  },
  "docs/sessions.md": {
   "history": 0,
-  "longsent": 1
+  "longsent": 0
  },
  "docs/storage.md": {
   "history": 0,
-  "longsent": 4
+  "longsent": 1
  },
  "docs/subtask-outline.md": {
   "history": 0,
@@ -152,7 +152,7 @@
  },
  "docs/testing.md": {
   "history": 4,
-  "longsent": 12
+  "longsent": 9
  },
  "docs/threads-checkpoints.md": {
   "history": 2,
@@ -160,7 +160,7 @@
  },
  "docs/tls.md": {
   "history": 0,
-  "longsent": 1
+  "longsent": 0
  },
  "docs/typography.md": {
   "history": 0,
