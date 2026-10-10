@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { StreamState } from '$lib/services/stream-state.svelte';
 import { createStreamHandler, type StreamHandlerCallbacks } from '$lib/services/stream-handler';
-import { buildEntriesFromMessages, entriesAwaitingRows, mergeLoadedHistory } from '$lib/utils/chat-entries';
+import { buildEntriesFromMessages, entriesWithoutRows, mergeLoadedHistory } from '$lib/utils/chat-entries';
 import type { ChatEntry } from '$lib/types';
 
 /** Both sides of the merge come from the real builders, so a change to either is felt here. */
@@ -309,7 +309,7 @@ describe('mergeLoadedHistory — identity', () => {
     });
 });
 
-describe('entriesAwaitingRows — what a replaced conversation leaves on screen', () => {
+describe('entriesWithoutRows — what a replaced conversation leaves on screen', () => {
     const settled = (id: string, content: string): ChatEntry => ({
         id, role: 'assistant', content, isStreaming: false,
     });
@@ -317,7 +317,7 @@ describe('entriesAwaitingRows — what a replaced conversation leaves on screen'
     it('keeps nothing when every answer on screen has had its turn at the database', () => {
         const onScreen = [settled('u1', 'go'), settled('a1', 'an answer'), settled('a2', 'another')];
 
-        expect(entriesAwaitingRows(onScreen).map(e => e.id)).toEqual([]);
+        expect(entriesWithoutRows(onScreen).map(e => e.id)).toEqual([]);
     });
 
     it('keeps the answer streaming now, and everything written after it', () => {
@@ -326,7 +326,7 @@ describe('entriesAwaitingRows — what a replaced conversation leaves on screen'
             { id: 'live-0', role: 'assistant', content: 'Working on', isStreaming: true } as ChatEntry,
         ];
 
-        expect(entriesAwaitingRows(onScreen).map(e => e.id)).toEqual(['live-0']);
+        expect(entriesWithoutRows(onScreen).map(e => e.id)).toEqual(['live-0']);
     });
 
     it('keeps the turn whose tool call is still unanswered, text and card together', () => {
@@ -336,13 +336,13 @@ describe('entriesAwaitingRows — what a replaced conversation leaves on screen'
         ];
 
         // The card shares the entry of the text that announced it.
-        expect(entriesAwaitingRows(onScreen).map(e => e.id)).toEqual(['live-1']);
+        expect(entriesWithoutRows(onScreen).map(e => e.id)).toEqual(['live-1']);
     });
 
     it('keeps a send the server has not accepted', () => {
         const onScreen = [settled('a1', 'an answer'), { id: 'pend-1', role: 'user', content: 'next', isStreaming: false, queued: true } as ChatEntry];
 
-        expect(entriesAwaitingRows(onScreen).map(e => e.id)).toEqual(['pend-1']);
+        expect(entriesWithoutRows(onScreen).map(e => e.id)).toEqual(['pend-1']);
     });
 
     it('keeps a sandbox build box that is still writing', () => {
@@ -351,7 +351,7 @@ describe('entriesAwaitingRows — what a replaced conversation leaves on screen'
             { id: 'live-2', role: 'system', content: 'Building', isStreaming: false, buildLog: { title: 'Building', lines: ['step 1'] } } as ChatEntry,
         ];
 
-        expect(entriesAwaitingRows(onScreen).map(e => e.id)).toEqual(['live-2']);
+        expect(entriesWithoutRows(onScreen).map(e => e.id)).toEqual(['live-2']);
     });
 
     it('drops a finished build box, which is a row like any other', () => {
@@ -359,7 +359,7 @@ describe('entriesAwaitingRows — what a replaced conversation leaves on screen'
             { id: 'live-2', role: 'system', content: 'Building', isStreaming: false, buildLog: { title: 'Building', lines: ['step 1'], done: true } } as ChatEntry,
         ];
 
-        expect(entriesAwaitingRows(onScreen)).toEqual([]);
+        expect(entriesWithoutRows(onScreen)).toEqual([]);
     });
 
     it('reads the entries the stream left, not a hand-written list', () => {
@@ -372,6 +372,6 @@ describe('entriesAwaitingRows — what a replaced conversation leaves on screen'
         expect(live.length).toBeGreaterThan(1);
 
         // The call answered, so only the text streaming after it is still awaiting a row.
-        expect(entriesAwaitingRows(live).every(e => e.isStreaming)).toBe(true);
+        expect(entriesWithoutRows(live).every(e => e.isStreaming)).toBe(true);
     });
 });

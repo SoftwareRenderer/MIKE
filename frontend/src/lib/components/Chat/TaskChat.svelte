@@ -25,7 +25,7 @@
     import { trustedExecutionState, isTaskPaused } from '$lib/utils/execution-state';
     import { offersResume } from '$lib/utils/review-bar';
     import { reselectProvider, getProviderDisplayName } from '$lib/utils/providers';
-    import { buildEntriesFromMessages, mergeLoadedHistory, buildEntryMetas, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, pendingToolIds, endsOnReviewResult, entriesAwaitingRows, takeEchoMatch, removeFailedSend, removeDismissedError } from '$lib/utils/chat-entries';
+    import { buildEntriesFromMessages, mergeLoadedHistory, buildEntryMetas, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, pendingToolIds, endsOnReviewResult, entriesWithoutRows, takeEchoMatch, removeFailedSend, removeDismissedError } from '$lib/utils/chat-entries';
     import { getAppStreamRef } from '$lib/stream-ref';
     import { useConnectionRestored } from '$lib/composables/use-connection-restored.svelte';
     import { useTaskEvents } from '$lib/composables/use-task-events.svelte';
@@ -589,8 +589,8 @@
             const applies = !unchanged && windowIsReading(read, historyRows.length > 0);
             if (applies) {
                 const joined = applyWindowRead(historyRows, window.messages);
-                if (historyRows.length > 0 && !joined.keepsEarlier) {
-                    stream.state.entries = entriesAwaitingRows(stream.state.entries);
+                if (!joined.keepsEarlier) {
+                    stream.state.entries = entriesWithoutRows(stream.state.entries);
                 }
                 historyRows = joined.rows;
 
