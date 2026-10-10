@@ -89,7 +89,9 @@ func writeTarOne(tw *tar.Writer, path, name string, info fs.FileInfo, buf []byte
 		return tw.WriteHeader(header)
 
 	default: // the walk leaves only a regular file here
-		f, err := os.Open(path)
+		// Checked against the walk's lstat: a file swapped into the name afterwards still fills the size
+		// this header promises.
+		f, _, err := OpenVerified(path, info)
 		if err != nil {
 			return err
 		}

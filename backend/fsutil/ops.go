@@ -22,7 +22,7 @@ const (
 	CopyMaxDepth         = 32
 )
 
-// UniqueNameMaxTries is how many names UniqueName tries before giving up.
+// UniqueNameMaxTries is how many names UniqueName() tries before giving up.
 const UniqueNameMaxTries = 200
 
 // GitDirName is the name that takes a path out of the file operations.
@@ -204,14 +204,14 @@ func copyEntry(src, dst string, info fs.FileInfo) error {
 	case info.IsDir():
 		return os.Mkdir(dst, info.Mode().Perm())
 	default: // the walk leaves only a regular file here
-		return copyFile(src, dst, info.Mode().Perm())
+		return copyFile(src, dst, info)
 	}
 }
 
-// copyFile streams src into dst and checks the byte limit as it goes, so a file that grew after
-// the size check is still stopped.
-func copyFile(src, dst string, perm os.FileMode) (err error) {
-	in, err := os.Open(src)
+// copyFile streams src into dst, checking the byte limit as it goes so a file that grew after the size
+// check is still stopped. It opens through OpenVerified(): the tree being copied belongs to the task.
+func copyFile(src, dst string, info fs.FileInfo) (err error) {
+	in, _, err := OpenVerified(src, info)
 	if err != nil {
 		return err
 	}
@@ -222,7 +222,7 @@ func copyFile(src, dst string, perm os.FileMode) (err error) {
 		}
 	}()
 
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode().Perm())
 	if err != nil {
 		return err
 	}

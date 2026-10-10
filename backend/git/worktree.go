@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -737,19 +738,14 @@ func isBinaryExtension(path string) bool {
 	return binaryExts[ext]
 }
 
-// isBinaryContent checks if a file is binary by scanning the first 1KB for null bytes.
-func isBinaryContent(path string, size int64) bool {
+// isBinaryContent reports whether the first 1KB holds a null byte. It reads through the caller's open
+// file at an offset, so the caller's own read still starts at the beginning.
+func isBinaryContent(f io.ReaderAt, size int64) bool {
 	if size == 0 {
 		return false
 	}
-	limit := min(size, int64(1024))
-	f, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-	buf := make([]byte, limit)
-	n, _ := f.Read(buf)
+	buf := make([]byte, min(size, int64(1024)))
+	n, _ := f.ReadAt(buf, 0)
 	for i := range n {
 		if buf[i] == 0 {
 			return true

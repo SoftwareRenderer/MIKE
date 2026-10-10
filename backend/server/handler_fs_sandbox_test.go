@@ -5,8 +5,10 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"mike/backend/sandbox"
 	"mike/backend/types"
 )
 
@@ -226,5 +228,178 @@ func TestFSMkdirProjectScoped(t *testing.T) {
 	picker := filepath.Join(dir, "picker-mkdir")
 	if code := doMkdir("", picker); code != http.StatusOK {
 		t.Errorf("no-project picker mkdir: got %d, want 200", code)
+	}
+}
+
+// TestValidateFSPathContainerSpellingNamesTheHostFile: the container spelling is a name inside the
+// project's container, so what validateFSPath() hands back has to be the host file it stands for, jailed
+// like every other path.
+func TestValidateFSPathContainerSpellingNamesTheHostFile(t *testing.T) {
+	s := testServer(t)
+	dir := t.TempDir()
+	repo := filepath.Join(dir, "repo-host-form")
+	if err := os.MkdirAll(filepath.Join(repo, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	proj := sandboxFSProject(t, s, "hostform", "hostformproj", repo, true)
+
+	wantBase, err := filepath.EvalSymlinks(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.validateFSPath(proj, "", "/home/sandbox/hostformproj/sub/f.go")
+	if err != nil {
+		t.Fatalf("the project's own container path was refused: %v", err)
+	}
+	if strings.HasPrefix(got, sandbox.MountRoot+string(filepath.Separator)) {
+		t.Errorf("validateFSPath returned the container spelling %q; a caller that opens it resolves no symlink", got)
+	}
+	if want := filepath.Join(wantBase, "sub", "f.go"); got != want {
+		t.Errorf("returned %q, want the host file %q", got, want)
+	}
+
+	// A request naming a task is about that task's tree, so the spelling lands in its worktree.
+	wt := filepath.Join(dir, "task-wt")
+	if err := os.MkdirAll(wt, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wtBase, err := filepath.EvalSymlinks(wt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err = s.validateFSPath(proj, wt, "/home/sandbox/hostformproj/sub/f.go")
+	if err != nil {
+		t.Fatalf("the task's container path was refused: %v", err)
+	}
+	if want := filepath.Join(wtBase, "sub", "f.go"); got != want {
+		t.Errorf("with a task worktree returned %q, want %q", got, want)
+	}
+}
+
+// TestValidateFSPathMountShapedHostPathStillResolvesLinks is the escape: a project whose host path is
+// shaped exactly like its own mount (/home/sandbox/<name>) made the container spelling and the host path
+// one string, so the accepted answer was unresolved and the caller read through a committed link.
+func TestValidateFSPathMountShapedHostPathStillResolvesLinks(t *testing.T) {
+	s := testServer(t)
+	name := "mikeshapelink"
+	root := sandbox.MountPath(name)
+	// os.Mkdir, not MkdirAll: a test must not create /home/sandbox on a machine that lacks it.
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Skipf("%s does not exist and is not creatable here, so a host path shaped like the mount cannot be built: %v", root, err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("host secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "real.txt"), []byte("inside\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "link")); err != nil {
+		t.Fatal(err)
+	}
+	proj := sandboxFSProject(t, s, "shaped", name, root, true)
+
+	// The control: an ordinary file in the project still answers.
+	if _, err := s.validateFSPath(proj, "", filepath.Join(root, "real.txt")); err != nil {
+		t.Fatalf("an ordinary in-project read was refused: %v", err)
+	}
+
+	if got, err := s.validateFSPath(proj, "", filepath.Join(root, "link", "secret.txt")); err == nil {
+		t.Errorf("read through a committed symlink was accepted as %q; its bytes are outside the project", got)
+	}
+	// The same path spelled the container way is the request the browser actually sends.
+	if got, err := s.validateFSPath(proj, "", filepath.Join(sandbox.MountPath(name), "link", "secret.txt")); err == nil {
+		t.Errorf("the container spelling read through a committed symlink and was accepted as %q", got)
+	}
+}
+
+// TestFSSandboxPathRoundTripsThroughSymlinkedProjectPath: a project registered through a symlink puts
+// the jail's resolved answer and the caller's root in different trees, and the container path built from
+// them still has to name the directory that was asked for.
+func TestFSSandboxPathRoundTripsThroughSymlinkedProjectPath(t *testing.T) {
+	s := testServer(t)
+	realDir := t.TempDir()
+	linkDir := t.TempDir()
+	linked := filepath.Join(linkDir, "repo")
+	if err := os.Symlink(realDir, linked); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(realDir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	proj := sandboxFSProject(t, s, "rt", "rtproj", linked, true)
+	spelling := filepath.Join(sandbox.MountPath("rtproj"), "sub", "f.go")
+
+	host, err := s.validateFSPath(proj, "", spelling)
+	if err != nil {
+		t.Fatalf("the project's own container path was refused: %v", err)
+	}
+	back, ok := fsSandboxPath(proj.Path, proj, host)
+	if !ok || back != spelling {
+		t.Errorf("round trip of the jail's answer %q = (%q, %v), want the directory asked for (%q, true)",
+			host, back, ok, spelling)
+	}
+
+	// A task worktree under the linked tree gives the same answer, rooted on the worktree.
+	wt := filepath.Join(linked, "wt")
+	if err := os.MkdirAll(filepath.Join(realDir, "wt"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	host, err = s.validateFSPath(proj, wt, spelling)
+	if err != nil {
+		t.Fatalf("the task's container path was refused: %v", err)
+	}
+	back, ok = fsSandboxPath(wt, proj, host)
+	if !ok || back != spelling {
+		t.Errorf("task worktree round trip of %q = (%q, %v), want (%q, true)", host, back, ok, spelling)
+	}
+
+	// A file of the checkout named by a request that also named a task has no place in that container,
+	// which mounts only the worktree: no container path, not a ".."-stepping one beside the mount.
+	if got, ok := fsSandboxPath(filepath.Join(realDir, "wt"), proj, filepath.Join(realDir, "sub", "f.go")); ok {
+		t.Errorf("a checkout file was given the container path %q inside a container that cannot see it", got)
+	}
+}
+
+// TestFSRoutesOfASandboxedProjectActOnTheHostBytes: a sandboxed project's worktree is a host directory
+// the container bind-mounts, so the paste and the folder download read and write it with the server's own
+// privileges, from a tree the task controls.
+func TestFSRoutesOfASandboxedProjectActOnTheHostBytes(t *testing.T) {
+	s := testServer(t)
+	if !s.sandboxMgr.IsAvailable() {
+		t.Skip("gVisor is not installed here, so a sandboxed project's file request is refused before it reaches any filesystem")
+	}
+	repo := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repo, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "src", "notes.txt"), []byte("notes\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sandboxFSProject(t, s, "sb-hostpath", "sbhost", repo, true)
+	mount := sandbox.MountPath("sbhost")
+
+	// The browser sends the container spelling; the bytes it moves are the host's.
+	status, res := fsOpsPost(t, s, "copy", "sb-hostpath", "", map[string]any{
+		"paths": []string{mount + "/src/notes.txt"},
+		"dest":  mount + "/src",
+	})
+	if status != http.StatusOK || len(res.Done) != 1 {
+		t.Fatalf("paste of a sandboxed project's own file: status %d, done %+v", status, res.Done)
+	}
+	if copied, err := os.ReadFile(filepath.Join(repo, "src", "notes copy.txt")); err != nil || string(copied) != "notes\n" {
+		t.Errorf("the paste did not move the host bytes the container spelling names: %q, %v", copied, err)
+	}
+
+	rr := downloadAsk(t, s, "sb-hostpath", "", mount+"/src")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("download of a sandboxed project's folder: %d %s", rr.Code, rr.Body.String())
+	}
+	if got := unpackArchive(t, rr.Body)["src/notes.txt"]; got != "notes\n" {
+		t.Errorf("the archive's src/notes.txt = %q, want the host file's bytes", got)
 	}
 }

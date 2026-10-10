@@ -503,22 +503,22 @@ export function mergeLoadedHistory(
     });
 }
 
-/** True when no stored row could hold this entry yet: the turn streaming now, an unanswered call, a send the
- * server has not accepted, a build still running. */
-function awaitsRow(entry: ChatEntry): boolean {
-    return !!entry.isStreaming || !!entry.queued
+/** True when no stored row holds this entry, yet or ever: the turn streaming now, an unanswered call, a
+ * queued send, a build still running, a notice this browser wrote. */
+function noRowHolds(entry: ChatEntry): boolean {
+    return !!entry.local || !!entry.isStreaming || !!entry.queued
         || !!entry.buildLog && entry.buildLog.done !== true
         || (entry.toolCalls?.some(tc => tc.isPending) ?? false);
 }
 
 /**
- * The tail of the transcript from the first entry that has no stored row yet, oldest first. A merge can only
- * append, so an older entry kept through a replaced window lands below the newest answers.
+ * The tail of the transcript that survives a read which replaced the conversation: the run at its end that no
+ * stored row holds, oldest first. The cut sits at the end of that content rather than its start, because a
+ * merge can only append and an entry above the last row-backed one is older than a row the read proved exists.
  * `docs/reconnection.md → The tab that comes back`.
  */
-export function entriesAwaitingRows(entries: ChatEntry[]): ChatEntry[] {
-    const from = entries.findIndex(awaitsRow);
-    return from === -1 ? [] : entries.slice(from);
+export function entriesWithoutRows(entries: ChatEntry[]): ChatEntry[] {
+    return entries.slice(entries.findLastIndex(e => !noRowHolds(e)) + 1);
 }
 
 /**

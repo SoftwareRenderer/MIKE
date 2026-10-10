@@ -62,7 +62,8 @@ Delete on sight: history and defence (the commit message owns that story); a rul
 (write it once, at its definition, and point at it); paraphrase of the code.
 
 Write them flat — no advocacy, no adjectives doing the arguing. A test title names what breaks if the
-behaviour regresses, never what the change fixed. Measure the pile with
+behaviour regresses, never what the change fixed. A reference to another function is written `Foo()`; the
+name a doc comment starts with is its subject, not a reference, and stays bare. Measure the pile with
 `git diff HEAD -- <files> | grep '^+' | grep -cE '^\+[[:space:]]*(//|/\*|\*)'`; when it rivals the added
 code, the change is arguing with itself.
 
@@ -249,6 +250,8 @@ Enforced by the server process, so it holds for non-sandboxed projects too.
 
 - **File endpoints are jailed to the project plus the task the request names** — never the workspace dir —
   and containment checks the lexical **and** the symlink-resolved path.
+- **A jailed read opens the file the check named**, not the name — `fsutil.OpenVerified` — because whoever
+  owns the directory can move other bytes under that name in the gap.
 - **The no-project file flow is jailed to `$HOME` plus the declared directories**, decided once at startup
   and injected.
 - **Two host reads sit outside the tool path** (LSP document sync, a project's Dockerfile) and are jailed

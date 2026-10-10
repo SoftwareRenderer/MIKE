@@ -448,17 +448,21 @@ func (s *Server) HandlePreviewGet(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusNotFound, "preview asset not found")
 		return
 	}
-	info, err := os.Stat(file)
-	if err != nil || info.IsDir() {
+	// The doc's directory is the task's own: lstat the name, then open the file that lstat saw.
+	before, err := os.Lstat(file)
+	if err != nil || !before.Mode().IsRegular() {
 		JSONError(w, http.StatusNotFound, "preview asset not found")
 		return
 	}
-	if info.Size() > previewMaxAsset {
+	if before.Size() > previewMaxAsset {
 		JSONError(w, http.StatusRequestEntityTooLarge, "preview asset too large")
 		return
 	}
-	f, err := os.Open(file)
+	f, info, err := fsutil.OpenVerified(file, before)
 	if err != nil {
+		if errors.Is(err, fsutil.ErrSwapped) {
+			logging.For(logging.HTTP).Warnf("preview asset refused, path changed after containment: %s", rel)
+		}
 		JSONError(w, http.StatusNotFound, "preview asset not found")
 		return
 	}
@@ -520,7 +524,7 @@ func (s *Server) resolvePreviewAsset(baseDir, rel string) (string, error) {
 	// sides by hand here was a second spelling of that rule, and one the fs handlers had
 	// already stopped carrying. The answer differs only in a case the caller answers the
 	// same way: a missing base directory now resolves to its nearest existing ancestor
-	// instead of erroring, and the os.Stat that follows still says "not found".
+	// instead of erroring, and the os.Stat() that follows still says "not found".
 	return fsutil.Contained(candidate, []string{baseDir})
 }
 
