@@ -22,6 +22,8 @@ import {
 // The decisions that make a conversation growing at the top invisible.
 
 const rows = (...ids: string[]) => ids.map(id => ({ id }));
+const numbers = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => from + i);
+const run = (from: number, to: number) => rows(...numbers(from, to).map(String));
 
 describe('prependRows', () => {
     it('puts a page of older rows below the rows held', () => {
@@ -195,10 +197,11 @@ describe('mergeCachedRows', () => {
 
     it('takes the newest of the rows above, bounded by the floor', () => {
         const held = Array.from({ length: 200 }, (_, i) => ({ id: `h${i}` }));
-        const fresh = Array.from({ length: 3 }, (_, i) => ({ id: `f${i}` }));
+        // The window has to reach the rows held, so its oldest is one of them.
+        const fresh = [{ id: 'h199' }, { id: 'f1' }, { id: 'f2' }];
         const merged = mergeCachedRows(fresh, held);
         expect(merged).toHaveLength(CACHED_ROWS_FLOOR);
-        expect(merged[0].id).toBe(`h${200 - (CACHED_ROWS_FLOOR - 3)}`);
+        expect(merged[0].id).toBe(`h${199 - (CACHED_ROWS_FLOOR - 3)}`);
         expect(merged[merged.length - 1].id).toBe('f2');
     });
 
@@ -212,6 +215,19 @@ describe('mergeCachedRows', () => {
         const fresh = rows('d', 'e');
         expect(mergeCachedRows(fresh, [])).toBe(fresh);
         expect(mergeCachedRows(fresh, rows('d', 'e'))).toBe(fresh);
+    });
+
+    it('drops the rows a window leapt past, rather than mirroring a hole', () => {
+        // Two reads of the newest window with a long run between them share no row at all.
+        expect(mergeCachedRows(rows('x', 'y', 'z'), rows('a', 'b', 'c'))).toEqual(rows('x', 'y', 'z'));
+    });
+
+    it('keeps the mirror pageable, which is what the page-up merge needs', () => {
+        // `prependRows` puts a fetched page in front of everything held, so a mirrored hole would land the
+        // rows fetched for it above the older rows sitting under that hole.
+        const mirror = mergeCachedRows(run(41, 50), run(1, 10));
+        expect(mirror.map(r => r.id)).toEqual(run(41, 50).map(r => r.id));
+        expect(prependRows(mirror, run(11, 40)).map(r => Number(r.id))).toEqual([...numbers(11, 40), ...numbers(41, 50)]);
     });
 });
 

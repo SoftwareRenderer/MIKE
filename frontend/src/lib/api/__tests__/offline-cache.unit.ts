@@ -81,11 +81,12 @@ describe('offline message cache', () => {
 
     it('keeps the rows this browser already saw above a smaller window', async () => {
         const storage = await import('$lib/storage');
+        // The window reaches the rows held — they are the rows above it, not an unrelated older stretch.
         const older = Array.from({ length: 8 }, (_, i) => ({
             id: `old-${i}`, task_id: 't1', thread_id: '', role: 'user', content: `older ${i}`,
             created_at: `2026-01-01T00:00:0${i}Z`,
         }));
-        const seed = { messages: older, hasMore: false, before: '' };
+        const seed = { messages: [...older, messages[0]], hasMore: false, before: '' };
         await storage.setBoardCache(storage.messagesCacheKey('p1', 't1'), seed);
         mockResolvedFetch(messages, windowHeaders);
 
@@ -96,6 +97,26 @@ describe('offline message cache', () => {
         await vi.waitFor(async () => {
             const cached = await storage.getBoardCache<any>(storage.messagesCacheKey('p1', 't1'));
             expect(cached?.messages.map((m: any) => m.id)).toEqual([...older.map(m => m.id), 'm1', 'm2']);
+        });
+    });
+
+    it('replaces the mirror when the new window cannot be reached from it', async () => {
+        // Keeping a stretch the window leapt past leaves a hole in what a reload paints, and a page is only
+        // ever prepended onto it — so the rows fetched for the hole land above the older rows under it.
+        const storage = await import('$lib/storage');
+        const leapt = Array.from({ length: 8 }, (_, i) => ({
+            id: `old-${i}`, task_id: 't1', thread_id: '', role: 'user', content: `older ${i}`,
+            created_at: `2026-01-01T00:00:0${i}Z`,
+        }));
+        await storage.setBoardCache(storage.messagesCacheKey('p1', 't1'), { messages: leapt, hasMore: true, before: 'gone' });
+        mockResolvedFetch(messages, windowHeaders);
+
+        const { getTaskMessages } = await import('$lib/api/tasks');
+        await getTaskMessages('p1', 't1');
+
+        await vi.waitFor(async () => {
+            const cached = await storage.getBoardCache<any>(storage.messagesCacheKey('p1', 't1'));
+            expect(cached?.messages.map((m: any) => m.id)).toEqual(['m1', 'm2']);
         });
     });
 

@@ -88,10 +88,15 @@ export function replayBufferOwed(notice: WindowReadNotice): boolean {
 export const CACHED_ROWS_FLOOR = 60;
 
 /** The rows to leave in the cache after a read: the window just answered, with the rows the cache held
- * above it, up to the floor. */
+ * directly above it, up to the floor.
+ *
+ * Rows a window leapt past are dropped rather than kept. A page is only ever prepended, so a mirror with a
+ * hole in it either skips that hole when the reader pages up or lands the fetched run above older rows.
+ */
 export function mergeCachedRows<T extends PagedRow>(fresh: T[], held: T[]): T[] {
     if (held.length === 0) return fresh;
     const seen = new Set(fresh.map(r => r.id));
+    if (!held.some(r => seen.has(r.id))) return fresh;
     const room = Math.max(CACHED_ROWS_FLOOR, fresh.length) - fresh.length;
     if (room <= 0) return fresh;
     const above = held.filter(r => !seen.has(r.id));

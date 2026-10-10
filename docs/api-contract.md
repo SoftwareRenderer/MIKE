@@ -342,10 +342,12 @@ it is read off the position, not off a gesture event**: a kinetic scroll fires n
 against the fling (measured on a phone viewport: 28 writes in 91 frames). `readerScrolledUp` is the rule —
 an upward move the loop did not write is the reader's — and a move downward is not, because scroll
 anchoring writes that direction too.
-The offline cache holds **the newest window plus the rows this browser already saw above it**, bounded by
-`CACHED_ROWS_FLOOR`. A window of five answers is fewer rows than an earlier open may have read, and an
-offline reload opens on the bigger of the two. A page fetched by cursor is still not cached on its own —
-that is what the merge is for.
+The offline cache holds **the newest window plus the rows this browser already saw directly above it**,
+bounded by `CACHED_ROWS_FLOOR`. A window of five answers is fewer rows than an earlier open may have read, and
+an offline reload opens on the bigger of the two. Rows a window leapt past are dropped, not kept: a page is
+only ever prepended, so a holed mirror either skips the hole or lands the fetched run above older rows. A page
+fetched by cursor is still not cached on its own — that is what the merge is for, and the `mergeCachedRows`
+cases in `chat-window.unit.ts` are what holds the bound.
 
 The read walks the `(scope, created_at)` index for the window's positions, then fetches those rows by
 `rowid`. Positions come first, so the cut and the sort run over index entries, and the answer to "is there

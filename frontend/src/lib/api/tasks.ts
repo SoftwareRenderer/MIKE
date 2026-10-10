@@ -302,8 +302,8 @@ export async function getTaskMessages(
     }
 }
 
-/** Cache a fresh window together with the rows the cache already held above it, so an offline reload opens
- * on the larger of the two reads. */
+/** Cache a fresh window together with the rows the cache already held directly above it, so an offline
+ * reload opens on the larger of the two reads. */
 async function widenCache(projectId: string, taskId: string, window: MessageWindow): Promise<void> {
     const key = messagesCacheKey(projectId, taskId);
     let merged = window;
