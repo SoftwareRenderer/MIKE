@@ -23,6 +23,7 @@ import (
 
 	"github.com/creack/pty"
 
+	"mike/backend/fsutil"
 	"mike/backend/prompts"
 	"mike/backend/toolresult"
 	"mike/backend/types"
@@ -41,7 +42,7 @@ const (
 	// SkillsMount is where the prompts/skills/ directory is bind-mounted read-only.
 	SkillsMount = "/mnt/skills"
 	// MountRoot is where a project's worktree is bind-mounted inside its
-	// container. Build paths with MountPath, never by hand — the fs API's
+	// container. Build paths with MountPath(), never by hand — the fs API's
 	// containment check compares against this same value.
 	MountRoot = "/home/sandbox"
 	// livenessTTL is how long to cache the result of a container liveness check.
@@ -97,14 +98,15 @@ func ContainerToHost(worktreePath, projectName, p string) (string, bool) {
 	return filepath.Join(worktreePath, rel), true
 }
 
-// HostToContainer translates a host path under worktreePath to where the same
-// file sits under the project's sandbox mount.
-func HostToContainer(worktreePath, projectName, p string) string {
+// HostToContainer translates a host path under worktreePath to where the same file sits under the
+// project's sandbox mount, and reports false when p is not under worktreePath. fsutil.RelInsideRoot()
+// decides, because filepath.Rel() between two trees steps out with ".." rather than failing.
+func HostToContainer(worktreePath, projectName, p string) (string, bool) {
 	rel, err := filepath.Rel(filepath.Clean(worktreePath), filepath.Clean(p))
-	if err != nil {
-		return MountPath(projectName)
+	if err != nil || !fsutil.RelInsideRoot(rel) {
+		return "", false
 	}
-	return filepath.Join(MountPath(projectName), rel)
+	return filepath.Join(MountPath(projectName), rel), true
 }
 
 // SandboxOpts holds the configuration for sandbox container creation and execution.

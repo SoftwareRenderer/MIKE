@@ -202,9 +202,8 @@ func TestFSRawServesAnImageReachedThroughAProjectSymlink(t *testing.T) {
 	}
 }
 
-// TestFSRawRefusesADirectoryNamedLikeAnImage: the extension check runs on the name, so a directory
-// only meets the regular-file rule once the file is open. A FIFO would block the request on
-// whatever a task writes into it, which is the same rule.
+// TestFSRawRefusesADirectoryNamedLikeAnImage: the extension check runs on the name, so a directory only
+// meets the regular-file rule after the jail.
 func TestFSRawRefusesADirectoryNamedLikeAnImage(t *testing.T) {
 	s := testServer(t)
 	id, repo := rawImageProject(t, s, "p1", map[string][]byte{"logo.png": rawPNG})

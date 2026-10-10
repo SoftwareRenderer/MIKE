@@ -4,7 +4,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
+	"time"
 
 	"mike/backend/extensions"
 	"mike/backend/fsutil"
@@ -164,5 +166,44 @@ func TestDocSyncPathStaysInsideTheWorkspace(t *testing.T) {
 	}
 	if got, err := docSyncPath(workspace, "frost/amber/src/link.go"); err == nil {
 		t.Errorf("a symlink out of the workspace was read anyway: %q", got)
+	}
+}
+
+// TestReadDocForSyncRefusesANameThatIsNotAFile: the text a document sync sends lands in a language server
+// inside the task's own container, so a name that stopped being a regular file is refused — and a FIFO,
+// whose open waits for a writer, must not be opened at all.
+func TestReadDocForSyncRefusesANameThatIsNotAFile(t *testing.T) {
+	home := t.TempDir()
+	workspace := filepath.Join(home, "worktrees")
+	worktree := filepath.Join(workspace, "frost", "amber")
+	if err := os.MkdirAll(filepath.Join(worktree, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktree, "src", "main.go"), []byte("package main"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := readDocForSync(workspace, "frost/amber/src/main.go")
+	if err != nil {
+		t.Fatalf("an ordinary file was refused: %v", err)
+	}
+	if got != "package main" {
+		t.Errorf("read %q, want the file's text", got)
+	}
+
+	if err := syscall.Mkfifo(filepath.Join(worktree, "src", "pipe.go"), 0o644); err != nil {
+		t.Skipf("this filesystem cannot hold a FIFO, so an irregular name cannot be planted: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := readDocForSync(workspace, "frost/amber/src/pipe.go")
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("a FIFO was read as a document's text")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("readDocForSync never answered: it opened the name, and the name is a FIFO")
 	}
 }

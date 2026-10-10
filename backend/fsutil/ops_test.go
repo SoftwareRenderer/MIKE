@@ -308,3 +308,37 @@ func TestMovePathRefusesDirectoryIntoItself(t *testing.T) {
 		t.Fatalf("a refused move must touch nothing: %v", err)
 	}
 }
+
+// TestCopyEntryRefusesANameTheWalkNoLongerRecognises: the paste copies from the paths its walk measured,
+// and the tree belongs to the task, so a name made to stand for a file outside the project puts that
+// file's bytes inside it.
+func TestCopyEntryRefusesANameTheWalkNoLongerRecognises(t *testing.T) {
+	dir := t.TempDir()
+	name := filepath.Join(dir, "wt", "notes.txt")
+	writeTestFile(t, name, "notes")
+	secret := filepath.Join(dir, "host-secret.txt")
+	writeTestFile(t, secret, "host secret\n")
+	dstDir := filepath.Join(dir, "paste-here")
+	if err := os.MkdirAll(dstDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	checked, err := os.Lstat(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(name); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, name); err != nil {
+		t.Fatal(err)
+	}
+
+	dst := filepath.Join(dstDir, "notes.txt")
+	if err := copyEntry(name, dst, checked); !errors.Is(err, ErrSwapped) {
+		t.Fatalf("copying a swapped name = %v, want %v", err, ErrSwapped)
+	}
+	if got, err := os.ReadFile(dst); err == nil {
+		t.Errorf("the paste wrote %q into the destination", got)
+	}
+}

@@ -40,6 +40,41 @@ projects too because the server process enforces them.
 - Both jails go through `fsutil.Contained`, which needs the lexical path *and* the symlink-resolved path
   inside a root: a task with an rw bind mount can plant `link -> /etc` in its own worktree and a lexical
   check reads through it. The preview asset root calls it too.
+- **The jail names a file, and the open is checked against that name.** `fsutil.Contained` answers about
+  a name; opening it is a second syscall, and the task owns the directory the name sits in. So the name is
+  `Lstat`ed first and the opened file compared with that — `fsutil.OpenVerified`, refusing with
+  `ErrSwapped`, or `OpenChecked` where nothing else reads that stat. It refuses a name that is not a
+  regular file (`ErrNotRegular`) rather than opening it, because opening a FIFO waits for whoever writes
+  to it. A *link* at a name `Contained` returned is named `ErrSwapped` rather than an irregular file — a
+  jail never resolves to a link, so that is a swap, and the log line is the only place an attempt shows up.
+  Surfaces: the working-tree read, a preview asset,
+  the untracked content of a diff, `GET /projects/…/git/diff/file`, and the LSP document sync's read.
+  `openJailedFile` is the same rule with the response mapping on top, which `/api/fs/raw` and
+  `/api/fs/download` already used. A tree walked a name at a time is the same race at every entry: the
+  folder download's archive (`writeTarOne`, whose header comes from the walk's own lstat) and the host
+  paste (`copyFile`), both in `backend/fsutil/`. A swapped name there is how a file outside the project
+  reaches the browser, or lands inside it where the task can read it. Neither route has a container branch:
+  a sandboxed project's worktree is a host directory the container bind-mounts, so these are host reads of
+  a tree the task writes — `TestFSRoutesOfASandboxedProjectActOnTheHostBytes` pins that.
+  Tests: `TestOpenVerifiedRefusesANameThatChangedUnderTheCheck`, `TestUntrackedReadTargetHandsBackTheFileItChecked`,
+  `TestFSReadRefusesANameThatIsNotARegularFile`, `TestReadDocForSyncRefusesANameThatIsNotAFile`,
+  `TestOpenCheckedCallsALinkAtTheNameASwapNotAnIrregularFile`,
+  `TestWriteTarOneRefusesANameTheWalkNoLongerRecognises`,
+  `TestCopyEntryRefusesANameTheWalkNoLongerRecognises`.
+- **A container spelling is translated before the jail looks at it.** `validateFSPath` turns
+  `/home/sandbox/<project>/…` into the host file it stands for — `sandbox.ContainerToHost` against the tree
+  the request names, `project.Path` when it named no task — and jails *that*. The spelling is not a host
+  path, and a checkout can sit at `/home/sandbox/<its own name>`, where the two spellings are one string
+  and an answer returned unresolved never had its links read. A project with no container, another
+  project's mount and a lookalike mount name take the same refusal: none of them names a file here.
+- **The host→container half refuses instead of guessing.** `fsSandboxPath` converts against the root with
+  its symlinks resolved — the root `fsutil.Contained` accepted the path under — and
+  `sandbox.HostToContainer` answers `(string, bool)`. A `Rel` between two different trees does not fail, it
+  steps out with `..`, and `filepath.Join` cleans that away into a sibling of the mount. A path outside the
+  tree the request named yields no container path and the handler answers `fsutil.ErrOutside`, like any
+  other containment refusal.
+  Tests: `TestValidateFSPathMountShapedHostPathStillResolvesLinks`,
+  `TestFSSandboxPathRoundTripsThroughSymlinkedProjectPath`, `TestHostContainerRoundTrip`.
 - **Whether a `filepath.Rel` landed inside its root is `fsutil.RelInsideRoot` / `RelBelowRoot`**, never a
   hand-written `..` test: the two differ by `"."`, the root itself, and the loose `HasPrefix(rel, "..")`
   also refuses the legal name `..foo`. Lexical half only — a jail adds `Contained` for the symlink half.
@@ -134,8 +169,10 @@ path with `MIKE_ALLOW_ROOT_FS=1`.
 - `ensureDocSync` (`backend/lsp/extension_manager.go`) reads the file it is about to
   `didOpen`/`didChange` **with the server's own privileges** — the one host read left after `hostGuard`
   refused the tool's own — and its `filePath` is a tool argument joined to the workspace, so
-  `docSyncPath` runs it through `fsutil.Contained` before `os.ReadFile`. Without it a `..`-escaping
-  `path` on an LSP tool call or a diagnostics pass reads any file the server user can open.
+  `readDocForSync` runs it through `fsutil.Contained` and then opens the file that check named. Without
+  the first half a `..`-escaping `path` on an LSP tool call or a diagnostics pass reads any file the
+  server user can open. Without the second half, the text sent to a language server inside the task's own
+  container is whatever the task put at the name afterwards.
 - A project's `sandbox_dockerfile_path` is read at build time the same way and is checked **where it is
   accepted** (`checkHostPath` on create and `PUT`), against the jail the Dockerfile picker browses, for
   the same reason as `types.ValidateCommitHash`: the stored value is what the later read trusts and never
@@ -148,8 +185,9 @@ path with `MIKE_ALLOW_ROOT_FS=1`.
 read follows a link committed into the repo even though `git diff` itself answers from the object
 database. `git.UntrackedReadTarget` jails the `?full=1` re-read behind
 `GET /projects/{id}/tasks/{id}/diff/file`, whose path came from `git status` — which lists
-`key -> ~/.ssh/id_rsa` exactly the way it lists a file. Both reads are size-capped at
-`maxDiffFileBytes`; past the cap the cached window plus `truncated` is the answer.
+`key -> ~/.ssh/id_rsa` exactly the way it lists a file. Its answer is **the open file**, not a path: the
+listing's path and the content read are separate steps, and the worktree belongs to the task. Both reads
+are size-capped at `maxDiffFileBytes`; past the cap the cached window plus `truncated` is the answer.
 Tests: `backend/api/git_diff_file_path_test.go`, `git_diff_file_full_test.go`,
 `git_diff_size_cap_test.go`, `backend/git/untracked_symlink_test.go`.
 
@@ -173,7 +211,7 @@ Tests: `backend/api/git_diff_file_path_test.go`, `git_diff_file_full_test.go`,
   marker naming what was dropped. `toolresult.Truncate` runs *after* the whole output is in memory, and
   `find /` would have cost the server the run. A capture writer always reports the full byte count: a
   short one makes `io.Copy` stop and lose the rest silently.
-- `GET /api/fs/read` checks size **before** reading — `os.Stat` for the working tree,
+- `GET /api/fs/read` checks size **before** reading — `os.Lstat` for the working tree,
   `git cat-file -s` (`gitBlobSize`) for `?ref=` — so a request for a 4 GB file costs one subprocess
   instead of 4 GB.
 - What crosses the sandbox bridge is bounded the same way: `protocol.MaxFramePayload` is checked before
@@ -241,6 +279,6 @@ typed** is the permission to reach it, and it is also a risk: a typo is a dial i
 
 ## Checking this
 
-`go test ./backend/api/ ./backend/fsutil/ ./backend/server/` covers the jails and the caps.
-`make check-race` runs the same packages with the race detector, which is where a jail that holds only
-under concurrency shows it.
+`go test ./backend/api/ ./backend/fsutil/ ./backend/sandbox/ ./backend/server/` covers the jails, the
+two-way path translation and the caps. `make check-race` runs the same packages with the race detector,
+which is where a jail that holds only under concurrency shows it.

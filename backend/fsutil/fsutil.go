@@ -15,8 +15,8 @@ import (
 )
 
 // InsideRoots reports whether an already-resolved path is one of roots or below it. The comparison
-// is lexical, so it is only sound once the candidate has been through ResolveSymlinks and the roots
-// through NormalizeRoots — both in the same form. Contained is what does both halves for a path that
+// is lexical, so it is only sound once the candidate has been through ResolveSymlinks() and the roots
+// through NormalizeRoots() — both in the same form. Contained() is what does both halves for a path that
 // has not been resolved.
 func InsideRoots(resolved string, roots []string) bool { return inside(resolved, roots) }
 
@@ -102,6 +102,54 @@ func Contained(path string, roots []string) (string, error) {
 		return "", fmt.Errorf("%w: %q resolves to %q", ErrOutside, clean, resolved)
 	}
 	return resolved, nil
+}
+
+// ErrSwapped says the name a containment check accepted no longer names that file. It names no path:
+// a refusal answered from it reaches the requester, and the host path is not theirs.
+var ErrSwapped = errors.New("path changed after containment")
+
+// ErrNotRegular says the name holds something other than a file. Opening a FIFO waits for its writer.
+var ErrNotRegular = errors.New("path is not a regular file")
+
+// OpenVerified opens a path Contained() returned and returns the file only while it is still the file
+// that check looked at: the check and the open are two syscalls, and whoever owns the directory can put
+// another file, a link or a FIFO at the name in between. before is the name's os.Lstat() as checked —
+// os.Stat() describes where a link points — and the caller closes the file.
+func OpenVerified(p string, before os.FileInfo) (*os.File, os.FileInfo, error) {
+	if before == nil {
+		return nil, nil, ErrNotRegular
+	}
+	// Contained() never resolves to a link, so a link here was planted after the check: that is a swap.
+	if before.Mode()&os.ModeSymlink != 0 {
+		return nil, nil, ErrSwapped
+	}
+	if !before.Mode().IsRegular() {
+		return nil, nil, ErrNotRegular
+	}
+	f, err := os.Open(p)
+	if err != nil {
+		return nil, nil, err
+	}
+	info, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, nil, err
+	}
+	if !os.SameFile(before, info) {
+		f.Close()
+		return nil, nil, ErrSwapped
+	}
+	return f, info, nil
+}
+
+// OpenChecked is OpenVerified() for a caller that has no use for the name's stat of its own. A caller
+// that answers with a size takes OpenVerified(), so the number is the one the check saw.
+func OpenChecked(p string) (*os.File, os.FileInfo, error) {
+	before, err := os.Lstat(p)
+	if err != nil {
+		return nil, nil, err
+	}
+	return OpenVerified(p, before)
 }
 
 // ResolveSymlinks resolves every symlink in p. A path that does not exist yet (a

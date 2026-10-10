@@ -58,7 +58,10 @@ func TestHostContainerRoundTrip(t *testing.T) {
 	const name = "demo"
 	worktree := filepath.Join(string(filepath.Separator), "srv", "worktrees", "demo", "task-1")
 	for _, p := range []string{worktree, worktree + "/main.go", worktree + "/a/b/c.go"} {
-		container := HostToContainer(worktree, name, p)
+		container, ok := HostToContainer(worktree, name, p)
+		if !ok {
+			t.Fatalf("HostToContainer(%q) refused a path under the worktree", p)
+		}
 		back, ok := ContainerToHost(worktree, name, container)
 		if !ok {
 			t.Fatalf("ContainerToHost(%q) not recognised as under the mount", container)
@@ -69,8 +72,19 @@ func TestHostContainerRoundTrip(t *testing.T) {
 	}
 
 	// The worktree root maps to the mount root.
-	if got := HostToContainer(worktree, name, worktree); got != MountPath(name) {
-		t.Errorf("HostToContainer(worktree root) = %q, want %q", got, MountPath(name))
+	if got, ok := HostToContainer(worktree, name, worktree); !ok || got != MountPath(name) {
+		t.Errorf("HostToContainer(worktree root) = (%q, %v), want (%q, true)", got, ok, MountPath(name))
+	}
+	// A host path from another tree names no file in the mount, so it produces no container path at all —
+	// never a ".."-stepping join or a fallback to the mount root, which name a directory nobody asked for.
+	for _, p := range []string{
+		"/etc/passwd",
+		"/srv/worktrees/demo/task-2/main.go", // a sibling tree: Rel succeeds and steps out
+		"/srv/elsewhere/main.go",
+	} {
+		if got, ok := HostToContainer(worktree, name, p); ok {
+			t.Errorf("HostToContainer(%q) = %q; a path outside the worktree must yield no container path", p, got)
+		}
 	}
 	// A host path outside the mount does not translate, so the caller keeps what
 	// it already has.

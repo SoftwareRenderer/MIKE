@@ -296,3 +296,33 @@ func TestWriteTarGzStopsWhenTheContextEnds(t *testing.T) {
 		t.Fatal("a download nobody is waiting for still wrote bytes")
 	}
 }
+
+// TestWriteTarOneRefusesANameTheWalkNoLongerRecognises: a folder download takes each entry's header from
+// the walk's own lstat and opens the name afterwards, so a name made to stand for a different file ships
+// bytes nobody asked about — and a bigger one still fills the header's size.
+func TestWriteTarOneRefusesANameTheWalkNoLongerRecognises(t *testing.T) {
+	dir := t.TempDir()
+	name := filepath.Join(dir, "proj", "notes.txt")
+	writeTestFile(t, name, "notes")
+	secret := filepath.Join(dir, "host-secret.txt")
+	writeTestFile(t, secret, strings.Repeat("S", 4096))
+
+	checked, err := os.Lstat(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(name); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, name); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	err = writeTarOne(tw, name, "notes.txt", checked, make([]byte, copyBufSize))
+	_ = tw.Close()
+	if !errors.Is(err, ErrSwapped) {
+		t.Fatalf("archiving a swapped name = %v, want %v", err, ErrSwapped)
+	}
+}

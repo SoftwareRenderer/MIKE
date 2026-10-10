@@ -2,7 +2,9 @@ package git
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -98,15 +100,16 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 					}
 					// The read target, not the status path: an untracked symlink names a file
 					// somewhere else, and "somewhere else" may be a private key.
-					fullPath, fileSize, err := UntrackedReadTarget(worktreePath, filePath)
+					file, fileSize, err := UntrackedReadTarget(worktreePath, filePath)
 					if err != nil {
 						logging.For(logging.Git).Debugf("untracked %s: skipped: %v", filePath, err)
 						continue
 					}
 					// Skip content for large files or binary files.
 					// Binary detection: extension check first (O(1)), null-byte scan as fallback.
-					isBin := isBinaryExtension(filePath) || isBinaryContent(fullPath, fileSize)
+					isBin := isBinaryExtension(filePath) || isBinaryContent(file, fileSize)
 					if fileSize > maxDiffSize || isBin {
+						file.Close()
 						untracked = append(untracked, UntrackedFile{
 							Path:     filePath,
 							FileSize: fileSize,
@@ -115,7 +118,8 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 						continue
 					}
 					// Read file content directly (untracked = new file, all lines are additions)
-					data, err := os.ReadFile(fullPath)
+					data, err := io.ReadAll(io.LimitReader(file, maxDiffSize))
+					file.Close()
 					if err != nil {
 						continue
 					}
@@ -674,7 +678,7 @@ func (wm *WorktreeManager) filterLargeBinaryDiffs(worktreePath, diffText string)
 func walkUntrackedEntries(worktreePath, path string) []string {
 	fullPath := filepath.Join(worktreePath, path)
 	// Lstat, not Stat: a symlink is neither a regular file nor a directory, so it is listed
-	// neither here nor walked into. UntrackedReadTarget judges its target.
+	// neither here nor walked into. UntrackedReadTarget() judges its target.
 	info, err := os.Lstat(fullPath)
 	if err != nil {
 		return nil
@@ -849,26 +853,28 @@ func shortStatFromDiff(diff string) string {
 	return strings.Join(parts, ", ")
 }
 
-// UntrackedReadTarget resolves a worktree-relative path to the host file whose content may go
-// into a diff, plus its size, and refuses anything that is not a regular file inside the
-// worktree. git status lists a symlink the way it lists a file, so without this a
-// `key -> ../../.ssh/id_rsa` planted in a task worktree puts a private key in the task diff.
-func UntrackedReadTarget(worktreePath, rel string) (string, int64, error) {
+// UntrackedReadTarget opens the worktree-relative file whose content may go into a diff, plus its size,
+// and refuses anything that is not a regular file inside the worktree: git status lists
+// `key -> ../../.ssh/id_rsa` the way it lists a file.
+//
+// The answer is an open file the caller reads and closes, not a path — the worktree is the task's own,
+// so a path handed on is only a name (see OpenVerified()).
+func UntrackedReadTarget(worktreePath, rel string) (*os.File, int64, error) {
 	if rel == "" || filepath.IsAbs(rel) {
-		return "", 0, fmt.Errorf("path %q must be relative to the worktree", rel)
+		return nil, 0, fmt.Errorf("path %q must be relative to the worktree", rel)
 	}
 	resolved, err := fsutil.Contained(filepath.Join(worktreePath, rel), []string{filepath.Clean(worktreePath)})
 	if err != nil {
-		return "", 0, err
+		return nil, 0, err
 	}
-	info, err := os.Lstat(resolved)
+	f, info, err := fsutil.OpenChecked(resolved)
 	if err != nil {
-		return "", 0, err
+		if errors.Is(err, fsutil.ErrNotRegular) {
+			return nil, 0, fmt.Errorf("%s is not a regular file", rel)
+		}
+		return nil, 0, err
 	}
-	if !info.Mode().IsRegular() {
-		return "", 0, fmt.Errorf("%s is not a regular file", rel)
-	}
-	return resolved, info.Size(), nil
+	return f, info.Size(), nil
 }
 
 // stashUntrackedCommit returns the commit holding a stash entry's untracked files, when hash names a
