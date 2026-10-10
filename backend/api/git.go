@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -424,21 +425,25 @@ func (h *GitHandler) HandleProjectDiffFile(w http.ResponseWriter, r *http.Reques
 
 	// Stat before reading: this is a file the request named.
 	var fileSize int64
-	if st, err := os.Stat(worktreeFile); err == nil {
-		fileSize = st.Size()
+	before, statErr := os.Lstat(worktreeFile)
+	if statErr == nil {
+		fileSize = before.Size()
 	}
 
-	// The cap tested before the read is what bounds it.
+	// The cap is tested before the read, and OpenVerified() makes the read the file this stat described.
 	var fileContent string
 	var lineCount int
 	var isBinary bool
-	if fileSize <= maxDiffFileBytes {
-		contentOut, contentErr := os.ReadFile(worktreeFile)
-		if contentErr == nil {
-			fileContent = string(contentOut)
-			lineCount = strings.Count(fileContent, "\n")
-			if fileContent != "" && fileContent[len(fileContent)-1] != '\n' {
-				lineCount++
+	if statErr == nil && fileSize <= maxDiffFileBytes {
+		if f, _, err := fsutil.OpenVerified(worktreeFile, before); err == nil {
+			contentOut, contentErr := io.ReadAll(io.LimitReader(f, maxDiffFileBytes))
+			f.Close()
+			if contentErr == nil {
+				fileContent = string(contentOut)
+				lineCount = strings.Count(fileContent, "\n")
+				if fileContent != "" && fileContent[len(fileContent)-1] != '\n' {
+					lineCount++
+				}
 			}
 		}
 	}
@@ -1017,8 +1022,9 @@ func (h *GitHandler) HandleTaskDiffFile(w http.ResponseWriter, r *http.Request) 
 						httputil.JSONError(w, http.StatusForbidden, err.Error())
 						return
 					}
+					defer target.Close()
 					if size <= maxDiffFileBytes {
-						if data, readErr := os.ReadFile(target); readErr == nil {
+						if data, readErr := io.ReadAll(io.LimitReader(target, maxDiffFileBytes)); readErr == nil {
 							lines = git.SplitLines(string(data))
 							truncated = false
 						}

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
+	"io"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -1006,35 +1006,50 @@ func docSyncPath(workspacePath, filePath string) (string, error) {
 	return fsutil.Contained(filepath.Join(workspacePath, filePath), []string{workspacePath})
 }
 
+// readDocForSync reads the file docSyncPath() jailed, opened as the file that jail looked at. The reader
+// is a language server inside the task's own container, so the bytes cross to whoever can plant the name.
+func readDocForSync(workspacePath, filePath string) (string, error) {
+	absPath, err := docSyncPath(workspacePath, filePath)
+	if err != nil {
+		return "", err
+	}
+	f, _, err := fsutil.OpenChecked(absPath)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	content, err := io.ReadAll(f)
+	if err != nil {
+		return "", err
+	}
+	return string(content), nil
+}
+
 // ensureDocSync sends didOpen or didChange so the server never works from stale content, and
 // reports whether it sent anything: a server that already holds this exact text will not
 // republish it, so a caller waiting for a notification needs to know none is coming.
 func (m *ExtensionLSPManager) ensureDocSync(ctx context.Context, sc *sandboxClient, uri, workspacePath, filePath string, cfg *ServerConfig) (bool, error) {
-	absPath, err := docSyncPath(workspacePath, filePath)
-	if err != nil {
-		return false, err
-	}
-	content, err := os.ReadFile(absPath)
+	content, err := readDocForSync(workspacePath, filePath)
 	if err != nil {
 		return false, fmt.Errorf("read file for doc sync: %w", err)
 	}
 
-	action := decideDocSync(sc.openedFiles[uri], sc.openedFileContents[uri], string(content), sc.openedFileVersions[uri])
+	action := decideDocSync(sc.openedFiles[uri], sc.openedFileContents[uri], content, sc.openedFileVersions[uri])
 	switch action.kind {
 	case "open":
 		// The extension's per-file languageId, never the routing language.
-		if err := m.lspDidOpen(ctx, sc, uri, cfg.LanguageIDFor(filePath), string(content), action.version); err != nil {
+		if err := m.lspDidOpen(ctx, sc, uri, cfg.LanguageIDFor(filePath), content, action.version); err != nil {
 			return false, err
 		}
 	case "change":
-		if err := m.lspDidChange(ctx, sc, uri, string(content), action.version); err != nil {
+		if err := m.lspDidChange(ctx, sc, uri, content, action.version); err != nil {
 			return false, err
 		}
 	default:
 		return false, nil
 	}
 	sc.openedFiles[uri] = true
-	sc.openedFileContents[uri] = string(content)
+	sc.openedFileContents[uri] = content
 	sc.openedFileVersions[uri] = action.version
 	return true, nil
 }

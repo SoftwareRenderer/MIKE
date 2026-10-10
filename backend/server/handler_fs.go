@@ -100,8 +100,9 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 		}
 		content = []byte(output)
 	} else {
-		// Host filesystem (worktree is bind-mounted into sandbox)
-		info, statErr := os.Stat(hostPath)
+		// Host filesystem (worktree is bind-mounted into sandbox): lstat the name, then open the file
+		// that lstat saw — openJailedFile() says why the two differ here.
+		before, statErr := os.Lstat(hostPath)
 		if statErr != nil {
 			if os.IsNotExist(statErr) {
 				JSONError(w, http.StatusNotFound, safeNotFoundError())
@@ -110,16 +111,22 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		if info.IsDir() {
+		if before.IsDir() {
 			JSONError(w, http.StatusBadRequest, "path is a directory")
 			return
 		}
 		// Same rule as the ref branch: refuse on the size stat reports, not the read one.
-		if info.Size() > maxFSReadBytes {
+		if before.Size() > maxFSReadBytes {
 			JSONError(w, http.StatusRequestEntityTooLarge, fsTooLargeMessage)
 			return
 		}
-		data, readErr := os.ReadFile(hostPath)
+		f, _, opened := openJailedFile(w, hostPath, before)
+		if !opened {
+			return
+		}
+		defer f.Close()
+		// One byte past the cap, so a file that grew since the lstat is refused rather than buffered.
+		data, readErr := io.ReadAll(io.LimitReader(f, maxFSReadBytes+1))
 		if readErr != nil {
 			logging.For(logging.HTTP).Errorf("fs read failed: %v", readErr)
 			JSONError(w, http.StatusInternalServerError, "failed to read file")
@@ -309,7 +316,7 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 	if !rootOK {
 		return
 	}
-	// Use the form validateFSPath returns for the host listing below, so a
+	// Use the form validateFSPath() returns for the host listing below, so a
 	// symlinked directory cannot expose anything outside the root.
 	if worktreePath != "" {
 		resolved, err := s.validateFSPath(project, worktreePath, path)
@@ -342,7 +349,11 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 	if project != nil && project.SandboxEnabled {
 		// Accepts both host and container paths.
 		mountPath := sandbox.MountPath(project.Name)
-		sandboxPath := fsSandboxPath(worktreePath, project, path)
+		sandboxPath, spOK := fsSandboxPath(worktreePath, project, path)
+		if !spOK {
+			refuseNoContainerPath(w, path)
+			return
+		}
 		// Single command: ls -pA marks dirs with trailing /, one entry per line
 		opts, optsErr := s.fsSandboxOpts(project, taskID)
 		if optsErr != nil {
@@ -876,14 +887,28 @@ func (s *Server) requireSandboxAvailable(w http.ResponseWriter, project *types.P
 	return true
 }
 
-// fsSandboxPath returns the in-container path for p, which may arrive either as
-// a host path under the worktree or as a container path under the project's mount.
-func fsSandboxPath(worktreePath string, project *types.Project, p string) string {
+// fsSandboxPath returns the in-container path for p, which may arrive either as a host path under the
+// worktree or as a container path under the project's mount, and reports false when p names no file in
+// this project's container. The host half resolves the root first: validateFSPath() answers a
+// symlink-resolved path, and a filepath.Rel() against the unresolved root lands between two trees.
+func fsSandboxPath(worktreePath string, project *types.Project, p string) (string, bool) {
 	clean := filepath.Clean(p)
 	if _, ok := sandbox.TrimMountPrefix(project.Name, clean); ok {
-		return clean // already a container path
+		return clean, true // already a container path
 	}
-	return sandbox.HostToContainer(worktreePath, project.Name, clean)
+	root := worktreePath
+	if resolved, err := filepath.EvalSymlinks(worktreePath); err == nil {
+		root = resolved
+	}
+	return sandbox.HostToContainer(root, project.Name, clean)
+}
+
+// refuseNoContainerPath answers a path the file jail accepted but that no container path names — a file
+// of the checkout named by a request that also named a task, whose container mounts only the worktree.
+// The browser sees one containment refusal either way.
+func refuseNoContainerPath(w http.ResponseWriter, path string) {
+	logging.For(logging.HTTP).Warnf("no container path names %s: it is not under the tree the request named", path)
+	JSONError(w, http.StatusBadRequest, fsutil.ErrOutside.Error())
 }
 
 // projectFSRoots is what a project-scoped file request is contained to: the checkout plus,
@@ -899,8 +924,9 @@ func projectFSRoots(project *types.Project, worktreeRoot string) []string {
 	return roots
 }
 
-// validateFSPath returns the form of path that is safe to open, jailed to projectFSRoots.
-// Callers MUST open the returned path.
+// validateFSPath returns the host form of path, jailed to projectFSRoots() with every symlink
+// resolved. Callers MUST open the returned path; a container operation converts it with
+// fsSandboxPath(), which takes the host form.
 //
 // A refusal is logged with both paths and returned as fsutil.ErrOutside alone, because every
 // caller answers the browser with err.Error(): the host path a symlink committed into a
@@ -911,14 +937,25 @@ func (s *Server) validateFSPath(project *types.Project, worktreeRoot, path strin
 	}
 	cleanPath := filepath.Clean(path)
 
-	// A container path is accepted only inside this project's mount.
+	// A container spelling becomes the host file it stands for before the jail looks at it: a checkout
+	// can sit at /home/sandbox/<its own name>, where the two spellings are one string.
 	if strings.HasPrefix(cleanPath, sandbox.MountRoot+string(filepath.Separator)) {
+		host, ok := "", false
 		if project.SandboxEnabled {
-			if _, ok := sandbox.TrimMountPrefix(project.Name, cleanPath); ok {
-				return cleanPath, nil
+			// The tree the request names — the task's worktree when it named one. ContainerToHost()
+			// on an empty root answers ".", which names no file and jails to nothing.
+			root := worktreeRoot
+			if root == "" {
+				root = project.Path
 			}
+			host, ok = sandbox.ContainerToHost(root, project.Name, cleanPath)
 		}
-		return "", fmt.Errorf("path outside allowed project directory")
+		// Also the refusal for a project with no container, another project's mount and a lookalike
+		// mount name.
+		if !ok {
+			return "", fmt.Errorf("path outside allowed project directory")
+		}
+		cleanPath = filepath.Clean(host)
 	}
 
 	resolved, err := fsutil.Contained(cleanPath, projectFSRoots(project, worktreeRoot))
@@ -929,28 +966,21 @@ func (s *Server) validateFSPath(project *types.Project, worktreeRoot, path strin
 	return resolved, nil
 }
 
-// openJailedFile is the second half of validateFSPath: it opens the path that check returned and hands
-// it back only while it is still the file that check looked at. A task owns the directory the name sits
-// in, so a symlink or a different file can appear there in that gap; the caller closes the file.
+// openJailedFile is the second half of validateFSPath(): it opens the path that check returned through
+// fsutil.OpenVerified() and maps the refusal onto the response. The caller closes the file.
 func openJailedFile(w http.ResponseWriter, hostPath string, before os.FileInfo) (*os.File, os.FileInfo, bool) {
-	f, err := os.Open(hostPath)
+	f, info, err := fsutil.OpenVerified(hostPath, before)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		switch {
+		case errors.Is(err, fsutil.ErrSwapped):
+			refusePathJail(w, hostPath)
+		case errors.Is(err, fsutil.ErrNotRegular):
+			JSONError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, os.ErrNotExist):
 			JSONError(w, http.StatusNotFound, safeNotFoundError())
-		} else {
+		default:
 			Fault(w, "read file", err)
 		}
-		return nil, nil, false
-	}
-	info, err := f.Stat()
-	if err != nil {
-		f.Close()
-		Fault(w, "stat file", err)
-		return nil, nil, false
-	}
-	if !os.SameFile(before, info) {
-		f.Close()
-		refusePathJail(w, hostPath)
 		return nil, nil, false
 	}
 	return f, info, true
@@ -996,7 +1026,7 @@ func (s *Server) fsScopeTarget(scope fsScope, path string) (fsTarget, error) {
 		}
 	}
 	// Writing through a symlink planted in the project would land wherever it points, so use the
-	// path validateFSPath resolved.
+	// path validateFSPath() resolved.
 	resolved, err := s.validateFSPath(scope.project, scope.worktreePath, path)
 	if err != nil {
 		return fsTarget{}, err
@@ -1111,7 +1141,11 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 	}
 	// A sandboxed project has no host checkout to write into — no fallback to host.
 	if project != nil && project.SandboxEnabled {
-		sandboxPath := fsSandboxPath(project.Path, project, req.Path)
+		sandboxPath, spOK := fsSandboxPath(project.Path, project, req.Path)
+		if !spOK {
+			refuseNoContainerPath(w, req.Path)
+			return
+		}
 
 		// This is the project's own container rather than a task's, so no agent's approved folders apply.
 		opts, optsErr := s.fsSandboxOpts(project, "")
@@ -1231,15 +1265,19 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if project != nil && project.SandboxEnabled {
-		// Contain the path first: fsSandboxPath joins it relative to the mount, and a path
-		// outside the worktree becomes "../../.." that filepath.Join cleans away.
+		// The path is jailed first, so nothing below reaches the mount from outside the tree the
+		// request named.
 		resolved, err := s.validateFSPath(project, worktreePath, req.Path)
 		if err != nil {
 			JSONError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		req.Path = resolved
-		sandboxPath := fsSandboxPath(worktreePath, project, req.Path)
+		sandboxPath, spOK := fsSandboxPath(worktreePath, project, req.Path)
+		if !spOK {
+			refuseNoContainerPath(w, req.Path)
+			return
+		}
 		sandboxParent := filepath.Dir(sandboxPath)
 
 		// Combined check + mkdir in single command

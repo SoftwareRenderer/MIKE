@@ -2,6 +2,7 @@ package git
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -86,10 +87,14 @@ func TestUntrackedReadTargetRefusesWhatItMustAndAllowsWhatItMust(t *testing.T) {
 	_ = wm
 	_ = taskID
 
-	// An ordinary file: allowed, and the size came back with it.
-	target, size, err := UntrackedReadTarget(worktreePath, "notes.txt")
-	if err != nil || target != filepath.Join(worktreePath, "notes.txt") || size == 0 {
-		t.Fatalf("ordinary untracked file: %q, %d, %v", target, size, err)
+	// An ordinary file: opened, and the size came back with it.
+	file, size, err := UntrackedReadTarget(worktreePath, "notes.txt")
+	if err != nil {
+		t.Fatalf("ordinary untracked file: %v", err)
+	}
+	body := readAllClose(t, file)
+	if size != int64(len("a real untracked file\n")) || body != "a real untracked file\n" {
+		t.Errorf("ordinary untracked file = %q at %d bytes", body, size)
 	}
 
 	// A link that resolves outside the worktree: refused with the containment error, not a
@@ -100,12 +105,12 @@ func TestUntrackedReadTargetRefusesWhatItMustAndAllowsWhatItMust(t *testing.T) {
 		t.Errorf("refusal should name containment, got: %v", err)
 	}
 
-	// A link that stays inside: readable, resolved to the target it names.
-	target, _, err = UntrackedReadTarget(worktreePath, "inside-link.txt")
+	// A link that stays inside: readable, through to the file it names.
+	file, _, err = UntrackedReadTarget(worktreePath, "inside-link.txt")
 	if err != nil {
 		t.Errorf("a link inside the worktree must stay readable: %v", err)
-	} else if target != filepath.Join(worktreePath, "notes.txt") {
-		t.Errorf("resolved target = %q, want the link's target", target)
+	} else if body := readAllClose(t, file); body != "a real untracked file\n" {
+		t.Errorf("a link inside the worktree read %q, want its target's bytes", body)
 	}
 
 	// A directory is not file content, and neither is an absolute or escaping path.
@@ -117,6 +122,47 @@ func TestUntrackedReadTargetRefusesWhatItMustAndAllowsWhatItMust(t *testing.T) {
 	}
 	if _, _, err := UntrackedReadTarget(worktreePath, "../outside.txt"); err == nil {
 		t.Error("a path escaping by .. was accepted")
+	}
+}
+
+func readAllClose(t *testing.T, f *os.File) string {
+	t.Helper()
+	defer f.Close()
+	data, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	return string(data)
+}
+
+// TestUntrackedReadTargetHandsBackTheFileItChecked is why the answer is an open file and not a path: the
+// diff jails the name and reads afterwards, and the task owns that directory.
+func TestUntrackedReadTargetHandsBackTheFileItChecked(t *testing.T) {
+	wm, taskID, worktreePath, _ := worktreeWithSecretLink(t)
+	_ = wm
+	_ = taskID
+	if err := os.WriteFile(filepath.Join(worktreePath, "other.txt"), []byte("PLANTED AFTER THE CHECK\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	file, size, err := UntrackedReadTarget(worktreePath, "notes.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The task acts while the diff is still assembling.
+	if err := os.Remove(filepath.Join(worktreePath, "notes.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(worktreePath, "other.txt"), filepath.Join(worktreePath, "notes.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	if body := readAllClose(t, file); body != "a real untracked file\n" {
+		t.Errorf("the diff read %q after the name was swapped, want the bytes it checked", body)
+	}
+	if size != int64(len("a real untracked file\n")) {
+		t.Errorf("size = %d, the checked file's %d", size, len("a real untracked file\n"))
 	}
 }
 

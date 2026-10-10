@@ -77,6 +77,21 @@ func ensureUploadsDir(worktreePath string) (string, error) {
 	return dir, nil
 }
 
+// writeNewUpload writes an upload to the name firstFreeUploadPath() chose because nothing stood there.
+// O_EXCL is the point: the task owns the directory, and a plain open would follow a link planted in the
+// gap between the scan and this write.
+func writeNewUpload(path string, data []byte) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
 // uploadStemExt splits a name for the `-N` suffix. filepath.Ext answers a dotfile's whole name as its
 // extension, which would leave no stem to carry the suffix, so such a name keeps all of it as the stem:
 // `.env` becomes `.env-1`.
@@ -166,7 +181,7 @@ func (te *TaskExecutor) WriteTaskFile(projectID, taskID, rawName string, data []
 	if err != nil {
 		return "", errs.Operation("keep the uploaded file inside the task's worktree", err)
 	}
-	if err := os.WriteFile(safe, data, 0o600); err != nil {
+	if err := writeNewUpload(safe, data); err != nil {
 		return "", errs.Operation("write the uploaded file", err)
 	}
 
