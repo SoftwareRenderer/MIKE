@@ -108,7 +108,7 @@
     </div>
 {/snippet}
 
-<BaseModal {title} width="560px" zIndex={Z.modalStacked} modalClass="path-browser" maxHeight="80vh" footer={footer} onClose={onClose}>
+<BaseModal {title} width="560px" zIndex={Z.modalStacked} modalClass="path-browser" maxHeight="80vh" bodyStyle="padding-top: 0" footer={footer} onClose={onClose}>
     <!-- Path bar -->
     <div class="path-bar">
         <div class="path-bar-row">
