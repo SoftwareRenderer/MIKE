@@ -170,6 +170,8 @@ python3 scripts/gen-registry.py --check                  # registry.json matches
 - **Keyboard navigation moves real DOM focus** — targets come from pure resolvers, never a parallel
   "highlighted" store. `docs/navigation.md`.
 - **Project rows and task cards are real links**; never fake the context menu. `docs/link-rows.md`.
+- **Adding a project navigates to its board**, and a clone's row is on screen while the clone runs — a
+  placeholder address is never a Back entry. `docs/link-rows.md → A project the app just made`.
 - **Shortcuts and UI preferences ride the shared Settings Save/Cancel flow**, and `PUT /api/config` replaces
   the whole `keyboard_shortcuts` object, so always send every binding. `docs/adding-a-preference.md`.
 - **CJK typography is scoped to `:lang()`.** `docs/typography.md`.
