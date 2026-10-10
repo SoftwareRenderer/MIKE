@@ -29,6 +29,25 @@ tabindex="0">` — no nested interactive content, so the button→anchor swap is
 the browser opens a tab/window. A cloning project gets **no href** (still focusable, still inert).
 `role="button"` is kept, so Space is handled explicitly (a native anchor only activates on Enter).
 
+## A project the app just made
+
+Adding a project is a navigation to it, and to its board: `handleSelectProjectPath` and
+`handleCloneProject` in `App.svelte` both reach `selectProject(p, push, { board: true })`, which names
+`project`, clears `view`/`file`/`task`, and calls `applyView()` — the screen on screen belongs to the
+project the person left. Switching between two projects the person has seen keeps that screen (the `view`
+`currentView()` answers), so `board` is the caller's decision, not a rule inside `selectProject`.
+
+**A clone's row is selected before its project exists.** The placeholder id (`clone-pending-…`) is this
+browser's own, so for a project whose `cloning` is set `selectProject` asks the server nothing: no board,
+no cached mirror, no project subscription, no `last_project` setting. When the clone answers, the real
+project is selected with `push = false` — an address the server never served is a dead entry under the
+back button. A clone that fails while its row holds the screen takes the screen with it: the row goes and
+a surviving project replaces it, or the empty state does.
+
+The add writes push, so Back returns to the project open at the click, on the screen it was showing.
+`frontend/tests/e2e/add-project-navigation.spec.ts` holds those three shapes, and is what fails when an
+added project inherits the explorer of the project before it.
+
 ## Task card: full-cover overlay, not a root anchor
 
 The card root stays `<div class="card" role="button" tabindex="0" draggable>` and gets
@@ -132,7 +151,9 @@ file param's roots),
 `link-like-rows.spec.ts` (middle-click opens a real tab, no document navigation on left click, drag
 source is the card not the link, second tab lands on the linked project/task/explorer, and the terminal
 tab holds a terminal and nothing else), e2e
-`preferences-keyboard.spec.ts` (isolated; rebinding frees Ctrl+Click).
+`preferences-keyboard.spec.ts` (isolated; rebinding frees Ctrl+Click), e2e
+`frontend/tests/e2e/add-project-navigation.spec.ts` (an added project's address names it and no
+carried-over screen; a cloning row is the one on screen).
 
 ## Markup and stacking contract
 

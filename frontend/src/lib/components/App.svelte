@@ -283,11 +283,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 window.dispatchEvent(new CustomEvent('urlchanged'));
                 return;
             }
-            appStore.selectedProject = null;
-            appStore.board = null;
-            disconnectBoardStream();
-            appStore.selectedTask = null;
-            uiStore.showCardDetail = false;
+            clearProjectScreen();
             window.dispatchEvent(new CustomEvent('urlchanged'));
             return;
         }
@@ -702,9 +698,23 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 
     function disconnectBoardStream() {
         const project = appStore.selectedProject;
-        if (project && appStream) {
+        // A cloning placeholder is never subscribed, so this would name an id the server has never seen.
+        if (project && !project.cloning && appStream) {
             appStream.unsubscribeProject(project.id);
         }
+    }
+
+    /**
+     * Take the current project off the screen: no selection, no board, no frames, no task detail. The
+     * stream drops first because `disconnectBoardStream` reads the selection this clears; the URL stays
+     * with the caller.
+     */
+    function clearProjectScreen() {
+        disconnectBoardStream();
+        appStore.selectedProject = null;
+        appStore.board = null;
+        appStore.selectedTask = null;
+        uiStore.showCardDetail = false;
     }
 
     /** Hydrate cached done-task stats (IndexedDB) into the in-memory cache and the
@@ -879,33 +889,47 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     }
 
     /**
-     * Make `p` the current project. `push` is false where the URL is not a new navigation — the
-     * launch selection and every popstate — so no board-less URL is left under the app for the back
-     * button to land on. In an installed PWA that entry is the launch entry itself.
+     * Make `p` the current project. `push` is false where the URL is not a new navigation — the launch
+     * selection, every popstate, and a clone's placeholder taking the real project's id — so no
+     * board-less URL is left under the app for the back button to land on. In an installed PWA that entry
+     * is the launch entry itself.
+     *
+     * `board` says this project has never been on screen, so it opens on its own board rather than on the
+     * screen the person left.
      */
-    async function selectProject(p: Project, push = true) {
+    async function selectProject(p: Project, push = true, { board = false }: { board?: boolean } = {}) {
         disconnectBoardStream();
         const previous = appStore.selectedProject;
-        // The screen on screen is the `view` the new project's address bar has to keep naming.
-        const viewParam = urlRouter.currentView();
         const wasProjectSwitch = !!previous;
         const wasDifferentProject = !!previous && previous.id !== p.id;
         // Image progress belongs to the project it was sent for.
         if (wasDifferentProject) sandboxImageStatus.clear();
         currentBranch = '';
         appStore.selectedProject = p;
+        // A clone's placeholder has no row on the server: no board, mirror, subscription or setting to
+        // ask of it.
+        const pending = !!p.cloning;
         // The list on screen belongs to the project the user left; the new project's own cached copy
         // replaces it, never the old project's cards.
         if (wasDifferentProject) {
             appStore.board = null;
-            void showCachedBoard(p.id);
+            if (!pending) void showCachedBoard(p.id);
         }
-        saveAppSetting(LAST_PROJECT_KEY, p.id).catch(() => {});
-        // Re-mount explorer view for the new project (only on project switch, not initial load)
-        if (wasProjectSwitch && urlRouter.remountExplorers()) fsEventQueue = [];
-        // Update URL with project param
-        // Preserve task param from URL — restoreTaskFromUrl needs it after board loads
-        urlRouter.write({ project: p.id, task: appStore.selectedTask?.id || urlRouter.task, view: viewParam, file: urlRouter.file || null }, false, push);
+        if (!pending) saveAppSetting(LAST_PROJECT_KEY, p.id).catch(() => {});
+        if (board) {
+            fsEventQueue = [];
+            urlRouter.write({ project: p.id, task: '', view: null, file: null }, true, push);
+            urlRouter.applyView();
+            restoreExplorerSidebar();
+        } else {
+            // The screen on screen is the `view` the new project's address bar has to keep naming.
+            const viewParam = urlRouter.currentView();
+            // Re-mount explorer view for the new project (only on project switch, not initial load)
+            if (wasProjectSwitch && urlRouter.remountExplorers()) fsEventQueue = [];
+            // Preserve task param from URL — restoreTaskFromUrl needs it after the board loads.
+            urlRouter.write({ project: p.id, task: appStore.selectedTask?.id || urlRouter.task, view: viewParam, file: urlRouter.file || null }, false, push);
+        }
+        if (pending) return;
         try {
             const b = await getBoard(p.id);
             if (!applyBoard(b, p.id, boardSource(b))) return;
@@ -953,7 +977,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             const proj = await createProject(path, sandboxEnabled);
             appStore.projects = [...appStore.projects, proj];
             clearTaskDetail();
-            selectProject(proj);
+            selectProject(proj, true, { board: true });
         } catch (e) {
             addProjectError = String(e);
         }
@@ -977,24 +1001,41 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             updated_at: new Date().toISOString(),
         };
         appStore.projects = [...appStore.projects, placeholder];
+        // Navigate now — the progress belongs to the project being cloned.
+        clearTaskDetail();
+        void selectProject(placeholder, true, { board: true });
         try {
             const proj = await cloneProject(targetDir, gitUrl, sandboxEnabled, (percent) => {
                 appStore.projects = appStore.projects.map(x =>
                     x.id === placeholderId && x.cloneProgress !== percent ? { ...x, cloneProgress: percent } : x);
             });
             const list = appStore.projects;
+            const stillOnScreen = appStore.selectedProject?.id === placeholderId;
             if (list.some(p => p.id === placeholderId)) {
                 appStore.projects = list.map(p => (p.id === placeholderId ? proj : p));
             } else {
                 // A project-list refresh replaced the array mid-clone — append.
                 appStore.projects = [...list, proj];
             }
-            clearTaskDetail();
-            selectProject(proj);
+            // Someone who opened another project while the clone ran stays where they are.
+            if (stillOnScreen) {
+                await selectProject(proj, false, { board: true });
+            }
         } catch (e) {
+            const stillOnScreen = appStore.selectedProject?.id === placeholderId;
             appStore.projects = appStore.projects.filter(p => p.id !== placeholderId);
             addProjectError = String(e);
             showFileBrowserVal = true;
+            if (stillOnScreen) {
+                // The failed row was on screen, under an address naming a project that does not exist.
+                const next = appStore.projects[0];
+                if (next) {
+                    void selectProject(next, false, { board: true });
+                } else {
+                    clearProjectScreen();
+                    urlRouter.write({ project: '', view: null, file: null }, true, false);
+                }
+            }
         }
     }
 
@@ -1063,14 +1104,12 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             const index = appStore.projects.findIndex(x => x.id === p.id);
             appStore.projects = appStore.projects.filter(x => x.id !== p.id);
             const rest = appStore.projects;
-            // Auto-select next project (or previous if it was the last)
+            clearTaskDetail();
             if (rest.length > 0) {
-                clearTaskDetail();
+                // Auto-select next project (or previous if it was the last)
                 selectProject(rest[Math.min(Math.max(index, 0), rest.length - 1)]);
             } else {
-                clearTaskDetail();
-                appStore.selectedProject = null;
-                appStore.board = null;
+                clearProjectScreen();
             }
         } catch (e) {
             addProjectError = String(e);
