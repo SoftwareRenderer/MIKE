@@ -187,7 +187,25 @@ discovery (LSP availability = installed extensions). Frontend:
 `ConfigModal/ExtensionsTab.svelte` and the `Extension*` components beside it, whose Edit-dialog draft is
 `ConfigModal/extensions-draft.svelte.ts`.
 
+## Publishing a change an install can see
+
+A registry entry pins one commit, and an install materializes that commit's whole extension subdirectory. A
+pin therefore holds only while that commit still holds this content: the manifest the entry is projected
+from, *and* every other file under `<type>/<name>/`. Any commit that changes a file there moves the entry to
+HEAD on the next `python3 scripts/gen-registry.py`; a commit that changes nothing there leaves the pin where
+it was, so a run that touches nothing stays stable. `--check` fails while the registry names an older tree
+than HEAD, so a published pin cannot go stale quietly. `make test-gen-registry` runs both directions.
+
+Nothing else has to change for a fix to reach a person. A git-pinned extension is offered an update because
+the stored commit differs from the entry's (`HandleCheckUpdates`), not because the version moved —
+`UpdateAvailable` is the fallback for a source the registry does not pin. Bump `version` when the Browse
+card, the changelog and the image tag have to say something different too.
+
+`featured` is the one index field no manifest declares. A curator sets it in `registry.json` itself and the
+generator copies it forward from the previous file, so deleting the key by hand is the way to delete it.
+
 ## Checking this
 
 `go test ./backend/extensions/` covers install, repair and deletion.
 `python3 scripts/gen-registry.py --check` answers for the registry text an install reads.
+`make test-gen-registry` answers for the generator that writes it.

@@ -119,7 +119,8 @@ make test-e2e [SPECS=chat-messages]                      # e2e lane (mock LLM); 
 make test-e2e-diff                                       # only the e2e specs this tree touched
 cd frontend && npm run check:dead-surface                # untagged test-only exports; duplicated-CSS count
 cd frontend && npm run check:e2e-ownership               # a spec that starts a turn owns its project
-python3 scripts/gen-registry.py --check                  # registry.json matches the manifests
+python3 scripts/gen-registry.py --check                  # registry.json matches the manifests and pins
+make test-gen-registry                                   # the generator's own tests, both directions
 ```
 
 - **A spec exists only if it needs a browser or the real backend.** Component state belongs in vitest;

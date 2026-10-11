@@ -199,6 +199,14 @@ docs-check: ## Check the docs: pointers, indexes, line refs, env table, ADR shap
 test-docs-check: ## Test the documentation gate itself, both directions (~0.2s)
 	@python3 scripts/docs-check_test.py
 
+# The published extension index pins a commit, and an install materializes the whole extension directory
+# from it, so a pin that stops naming the current content ships bytes no curator vetted - silently,
+# because the registry text still looks self-consistent. scripts/gen-registry_test.py builds a throwaway
+# extensions repo and runs the generator's two promises each way: kept, and broken on purpose.
+.PHONY: test-gen-registry
+test-gen-registry: ## Test that a registry pin cannot go stale, both directions (~0.5s)
+	@python3 scripts/gen-registry_test.py
+
 # ---------------------------------------------------------------------------
 # Quality gate
 # ---------------------------------------------------------------------------
@@ -247,6 +255,8 @@ check: ## THE GATE: lint + archgate + docs-check + bridge-check + build + Go tes
 	@echo "==> docs-check (a dead pointer is a rule nobody can follow)"
 	@$(MAKE) --no-print-directory docs-check
 	@$(MAKE) --no-print-directory test-docs-check
+	@echo "==> test-gen-registry (a stale pin installs bytes nobody vetted)"
+	@$(MAKE) --no-print-directory test-gen-registry
 	@echo "==> bridge-check (a stale sandbox-bridge is an edit that never runs)"
 	@$(MAKE) --no-print-directory bridge-check
 	@echo "==> build"

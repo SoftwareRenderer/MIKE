@@ -10,11 +10,16 @@ only then installs the `subdir` content into `./extensions/<author>/<name>`. The
 full capability config stays in each manifest; the registry only carries what the
 Browse UI renders.
 
+An entry's `commit` names the content an install materializes, so a pin holds only while that commit
+holds this extension's whole subdirectory; a commit that changes any file under it moves the pin on the
+next run. `scripts/gen-registry_test.py` holds both directions of that bargain.
+
 Usage:
     python3 scripts/gen-registry.py            # regenerate registry.json
     python3 scripts/gen-registry.py --check    # verify it is up to date (CI)
 
-Run after adding/editing an extension manifest or bumping a published commit.
+Run after any commit under ../MIKE-extensions; an entry whose commit did not move is one whose content
+did not change.
 """
 
 import json
@@ -27,6 +32,12 @@ import tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXTENSIONS_DIR = os.path.normpath(os.path.join(ROOT, '..', 'MIKE-extensions'))
 REGISTRY_PATH = os.path.join(EXTENSIONS_DIR, 'registry.json')
+
+# The registry fields no manifest declares. A curator sets these in `registry.json` itself, so a
+# regeneration carries them across instead of deleting the curation: presence and absence both come
+# from the previous file, which makes deleting one by hand the way it gets deleted. Read by
+# backend/extensions' `RegistryEntry.Featured` and frontend `lib/composables/use-browse-order.ts`.
+CURATED_FIELDS = ('featured',)
 
 # A documentation-only template for third-party, self-hosted extensions. It is
 # NOT emitted into the published registry (a live index must not contain a fake,
@@ -302,8 +313,8 @@ def read_existing_registry():
 def git_show_manifest(commit, subdir):
     """The manifest as `commit` holds it, or None if that commit has no such file.
 
-    This is the only question a pin can be checked against: an entry is a promise about the commit
-    it names, and the commit is the only place the promise can be verified.
+    An entry's advertised fields are a promise about the commit it names, and the commit is the only
+    place that promise can be read back. `git_subdir_tree()` asks the same question of the bytes.
     """
     if not commit or not subdir:
         return None
@@ -315,6 +326,24 @@ def git_show_manifest(commit, subdir):
     except (subprocess.SubprocessError, FileNotFoundError):
         return None
     return out
+
+
+def git_subdir_tree(commit, subdir):
+    """The tree hash of `subdir` as `commit` holds it, or '' when that commit has no such directory.
+
+    An install materializes the whole subdirectory, so this is what two commits have to agree on for a
+    pin to still name the extension its entry describes.
+    """
+    if not commit or not subdir:
+        return ''
+    try:
+        return subprocess.run(
+            ['git', '-C', EXTENSIONS_DIR, 'rev-parse', '--verify', '--quiet',
+             '%s:%s' % (commit, subdir)],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return ''
 
 
 def pinned_entry(existing_entry, ext_type, name, repo):
@@ -368,13 +397,10 @@ def collect_entries(existing):
         prev = existing.get((ext_type, name)) or {}
         subdir = entry['subdir']
 
-        # A pin is a promise about a commit, so it is checked against that commit and against
-        # nothing else. The old rule compared the entry with the *previous registry file* — a
-        # projection, not the source — and that let a whole class of lie through: edit a manifest,
-        # regenerate (which wrote the new fields while keeping the old pin, because the previous
-        # registry already carried them), commit, regenerate again, and the pin stays behind for
-        # good — every install then checks out a commit without the fields the entry advertises, and
-        # `--check` reports "up to date" the whole time.
+        # A pin can only name committed content: the manifest the entry is projected from has to be the
+        # one HEAD holds, or the index advertises fields its pinned commit does not contain. The entry
+        # itself is projected from that commit below, never from the previous registry file, which is a
+        # projection and would agree with whatever it was last written with.
         with open(manifest_path) as f:
             worktree_manifest = f.read()
         head_manifest = git_show_manifest(head, subdir)
@@ -389,11 +415,18 @@ def collect_entries(existing):
                   % (subdir, name, head[:12]), file=sys.stderr)
             sys.exit(1)
 
-        # Keep the previous pin only while it still holds this exact content, so a run that touches
-        # nothing leaves the registry stable and an extension that changed moves to HEAD.
+        # A run that touched nothing has to leave the registry stable, so the previous pin is kept only
+        # while it still holds this content on both counts: the manifest the entry is projected from, and
+        # the subdirectory the install checks out, which is the content an install actually receives.
         pinned = pinned_entry(prev, ext_type, name, repo) if prev else None
-        if pinned is not None and entry_matches(entry, pinned):
+        pin_tree = git_subdir_tree(prev.get('commit', ''), subdir)
+        if pinned is not None and pin_tree and entry_matches(entry, pinned) \
+                and pin_tree == git_subdir_tree(head, subdir):
             entry['commit'] = prev['commit']
+
+        for field in CURATED_FIELDS:
+            if field in prev:
+                entry[field] = prev[field]
         entries.append(entry)
     entries.sort(key=lambda e: e['name'])
     return entries
