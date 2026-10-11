@@ -265,6 +265,38 @@ task out of Review, with and without an attachment, and a replace naming a row t
 user row leaves
 the thread whole.
 
+## A replayed write carries the identity it sent first
+
+Three bodies carry a `client_token` the server acts on — `POST …/tasks/{taskID}/send`,
+`POST /api/projects/{projectID}/tasks` and `POST …/tasks/{taskID}/threads/fork`. The client mints one identity
+per write and sends that same one with every replay of it, so a request whose answer was lost arrives as the
+same write rather than as a second one. `docs/reconnection.md` → *One identity per write, so a replay cannot
+land twice*.
+
+A token already answered is answered with what it produced, and nothing runs again. All three answers carry
+201 and the body the first arrival got: the send the message row (`id`, `role`, `content`, plus `thread_id`
+when the row has one), the create the task, the fork the thread. Each route asks `ClaimedWrite` or
+`ClaimedCreate` (`backend/store/claims.go`) **before** it changes anything, which is what keeps a replayed
+edit-and-send from being refused by the truncation its own first arrival caused. The claim is recorded after
+the write lands, by `ClaimWrite`, against the task or project the request named.
+
+Four bounds on the answer. A token is text from the request, so it is answered only inside the scope the
+request named. `client_claims` is looked up with `task_id`, or `project_id` for a create, which has no task
+yet; a token presented under another task claims nothing. A claimed row that has since been deleted answers
+404 for a create and a fork, never a fresh write: recreating the row would undo that deletion. A send whose row
+is gone (a later edit truncated it) is written again as the new message it now is. And an empty token claims
+nothing, so a body that sends none keeps the behaviour it had, the send route's own last-row dedupe among them.
+And a claim row is dropped when its task is deleted or once it passes `claimRetention`, so an identity older than
+that runs again rather than being answered.
+
+Every other route ignores the field: a move, a rename, a status change and `PUT /api/config` are
+last-writer-wins and answering the same value twice is the same result. The guard answers a replay, never a
+race — two arrivals carrying one token that land together both find nothing claimed.
+
+**Tests:** `backend/server/client_claim_test.go` — a replayed send, create and fork leave one row each, a fresh
+identity for the same words still runs, one task's identity answers nothing for another, and an edit replayed
+after its own first arrival still lands. `backend/store/claims_test.go` holds the claim itself.
+
 ## Child rows under a task path
 
 A route under `/api/projects/{projectID}/tasks/{taskID}/` names a task, but threads, messages and the

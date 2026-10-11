@@ -22,6 +22,25 @@ Object.defineProperty(svelteModule, 'onDestroy', {
     configurable: true,
 });
 
+// Node's `BroadcastChannel` reaches every worker thread of the process, so a queue notice posted in one test
+// file would land in another file's queue module, whose storage is a different mock. Each file gets its own;
+// `api/__tests__/queue-two-windows.unit.ts` installs a channel shared by its own windows.
+if (typeof globalThis.BroadcastChannel === 'function') {
+    class SameFileChannel {
+        constructor(readonly name: string) {}
+        addEventListener(): void {}
+        removeEventListener(): void {}
+        postMessage(): void {}
+        close(): void {}
+        dispatchEvent(): boolean { return false; }
+    }
+    Object.defineProperty(globalThis, 'BroadcastChannel', {
+        value: SameFileChannel,
+        configurable: true,
+        writable: true,
+    });
+}
+
 // jsdom's HTMLDialogElement declares `open` and nothing else, so showModal()/close() throw and a
 // component that opens its own <dialog> never reaches the markup the test is reading. What the app
 // asks of them: showModal makes it open, close makes it closed and says so.

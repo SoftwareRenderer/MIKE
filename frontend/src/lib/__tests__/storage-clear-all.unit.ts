@@ -42,7 +42,7 @@ describe('clearAll (sign-out sweep)', () => {
         await storage.setEditorDraft('/repo/src/main.go', 'package main');
         await storage.saveEditorHistory('/repo/src/main.go', 'base', []);
         await storage.saveUnsavedFiles('proj-a', ['/repo/src/main.go']);
-        await storage.saveQueue([{ type: 'updateConfig', params: { config: { providers: [] } }, id: 'a1', timestamp: 1 }]);
+        await storage.updateQueue(() => [{ type: 'updateConfig', params: { config: { providers: [] } }, id: 'a1', timestamp: 1 }]);
         await storage.saveAppSetting('locale-offer', { pack: 'x', outcome: 'installed' });
         await storage.saveDraftAttachments('task-1', []);
         await storage.setBoardCache('messages:proj-a:task-1', [{ content: 'diff of a private repo' }]);
@@ -108,9 +108,9 @@ describe('clearAll (sign-out sweep)', () => {
         expect(Object.keys(fakeKeysByStore(fakeIndexedDB)).sort()).toEqual(stores);
     });
 
-    it('cannot erase a queued write the queue module still holds in memory — clearQueue must run too', async () => {
+    it('clears memory too, because an emptied record does not stop this window sending what it holds', async () => {
         const storage = await import('$lib/storage');
-        const { enqueueAction, clearQueue } = await import('$lib/api/queue');
+        const { enqueueAction, clearQueue, getQueuedSends } = await import('$lib/api/queue');
         const send = (content: string): Parameters<typeof enqueueAction>[0] => ({
             type: 'sendTaskMessage', params: { projectId: 'proj-a', taskId: 'task-1', content } });
 
@@ -120,10 +120,15 @@ describe('clearAll (sign-out sweep)', () => {
         await storage.clearAll();
         expect(await storage.loadQueue()).toEqual([]);
 
-        // The next enqueue persists the whole in-memory array, and the erased write came back with it.
+        // The hazard clearQueue() answers: the record is empty, this window is not, and a release would send
+        // what this window holds whether the record names it or not.
+        expect(getQueuedSends('proj-a', 'task-1').map((s) => s.content))
+            .toEqual(['written while offline']);
+
+        // A change is written against the record, so the erased write does not ride back in on the next one.
         await enqueueAction(send('the next write'));
         expect((await storage.loadQueue()).map((a) => a.params.content))
-            .toEqual(['written while offline', 'the next write']);
+            .toEqual(['the next write']);
 
         clearQueue();
         await storage.clearAll();

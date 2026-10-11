@@ -5,11 +5,11 @@ import { t } from '$lib/i18n';
 
 // -- Task CRUD endpoints --
 
-export async function createTaskRaw(projectId: string, task: Partial<Task>): Promise<Task> {
+export async function createTaskRaw(projectId: string, task: Partial<Task>, clientToken?: string): Promise<Task> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(task),
+        body: JSON.stringify({ ...task, ...(clientToken ? { client_token: clientToken } : {}) }),
     });
     if (!res.ok) throw await apiError(res, t('api.createTask'));
     return res.json();
@@ -120,6 +120,9 @@ export interface SendTaskMessagePayload {
      * the old text. The server refuses (409) unless it is its thread's last user row, which is what makes a
      * queued edit safe to replay late. */
     replaceMessageId?: string;
+    /** The write's own identity: the live attempt and the replay of it carry the same one, so a send whose
+     * answer was lost cannot start a second turn. Minted by `writeOrQueue`. */
+    clientToken?: string;
 }
 
 /** What a live or replayed send answers with. A queued send names the queue action holding it. */
@@ -134,13 +137,14 @@ export interface SendResult {
 
 /** Send a user message via HTTP POST. Triggers executor and returns the created message. */
 export async function sendTaskMessageRaw(payload: SendTaskMessagePayload): Promise<SendResult> {
-    const { projectId, taskId, content, modelName, serverUrl, attachments, reasoningEffort, regenerate, replaceMessageId } = payload;
+    const { projectId, taskId, content, modelName, serverUrl, attachments, reasoningEffort, regenerate, replaceMessageId, clientToken } = payload;
     const body: Record<string, any> = { content };
     if (modelName) body.model_name = modelName;
     if (serverUrl) body.llama_server_url = serverUrl;
     if (reasoningEffort) body.reasoning_effort = reasoningEffort;
     if (regenerate) body.regenerate = regenerate;
     if (replaceMessageId) body.replace_message_id = replaceMessageId;
+    if (clientToken) body.client_token = clientToken;
     if (attachments && attachments.length > 0) {
         body.attachments = JSON.stringify(attachments);
     }

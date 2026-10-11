@@ -10,6 +10,8 @@
  * Scope is the surface `$lib/storage` touches, and nothing else. Requests and transactions only ever
  * succeed: no path here fires `onerror`, there is no `deleteDatabase`, `abort()` or `tx.error`. A
  * storage.ts error branch therefore cannot be exercised through this double.
+ * A transaction completes when its own requests have drained — not when it was opened — because a
+ * read-modify-write (`updateQueue`) queues its second request from the first request's handler.
  */
 
 export interface FakeRequest {
@@ -24,6 +26,27 @@ export interface FakeStore {
     put(value: any, key: string): FakeRequest;
     delete(key: string): FakeRequest;
     getAllKeys(): FakeRequest;
+}
+
+/**
+ * One store's operations, bound to the transaction that asked for them — as in IndexedDB, where a request belongs
+ * to the transaction its store was taken from. The count of outstanding requests is what `oncomplete` waits on.
+ */
+function bindStore(data: Map<string, any>, onSettle: (settled: () => void) => void): Omit<FakeStore, 'data'> {
+    function request(value: () => any): FakeRequest {
+        const req: FakeRequest = { result: null, onsuccess: null, onerror: null };
+        onSettle(() => {
+            req.result = value();
+            if (req.onsuccess) req.onsuccess();
+        });
+        return req;
+    }
+    return {
+        get: (key) => request(() => data.get(key) ?? undefined),
+        put: (value, key) => request(() => { data.set(key, value); return key; }),
+        delete: (key) => request(() => { data.delete(key); return undefined; }),
+        getAllKeys: () => request(() => [...data.keys()]),
+    };
 }
 
 export interface FakeTransaction {
@@ -61,17 +84,6 @@ class FakeDOMStringList {
     [Symbol.iterator]() { return this._items[Symbol.iterator](); }
 }
 
-function makeRequest(): FakeRequest {
-    return { result: null, onsuccess: null, onerror: null };
-}
-
-function fireRequest(req: FakeRequest, result: any) {
-    req.result = result;
-    queueMicrotask(() => {
-        if (req.onsuccess) req.onsuccess();
-    });
-}
-
 function stringList(items: string[]): DOMStringList {
     return new FakeDOMStringList(items) as unknown as DOMStringList;
 }
@@ -98,31 +110,9 @@ export function createFakeIndexedDB(): FakeIDBFactory {
                     objectStoreNames: stringList([]),
                     stores,
                     createObjectStore(storeName: string): FakeStore {
-                        const store: FakeStore = {
-                            data: new Map(),
-                            get(key) {
-                                const r = makeRequest();
-                                fireRequest(r, stores.get(storeName)!.data.get(key) ?? undefined);
-                                return r;
-                            },
-                            put(value, key) {
-                                const r = makeRequest();
-                                stores.get(storeName)!.data.set(key, value);
-                                fireRequest(r, key);
-                                return r;
-                            },
-                            delete(key) {
-                                const r = makeRequest();
-                                stores.get(storeName)!.data.delete(key);
-                                fireRequest(r, undefined);
-                                return r;
-                            },
-                            getAllKeys() {
-                                const r = makeRequest();
-                                fireRequest(r, [...stores.get(storeName)!.data.keys()]);
-                                return r;
-                            },
-                        };
+                        const data = new Map<string, any>();
+                        // Outside a transaction (the upgrade path) nobody is waiting on completion.
+                        const store: FakeStore = { data, ...bindStore(data, (run) => queueMicrotask(run)) };
                         stores.set(storeName, store);
                         (db as FakeDB).objectStoreNames = stringList([...stores.keys()]);
                         return store;
@@ -132,15 +122,29 @@ export function createFakeIndexedDB(): FakeIDBFactory {
                         if (!store) throw new Error(`Unknown store: ${storeName}`);
                         const tx: FakeTransaction = {
                             objectStore(sn) {
-                                if (sn === storeName) return store;
-                                throw new Error(`Wrong store: ${sn}`);
+                                if (sn !== storeName) throw new Error(`Wrong store: ${sn}`);
+                                return {
+                                    ...bindStore(store.data, settle),
+                                    get data() { return store.data; },
+                                };
                             },
                             oncomplete: null,
                             onerror: null,
                         };
-                        queueMicrotask(() => {
-                            if (tx.oncomplete) tx.oncomplete();
-                        });
+                        // The count of this transaction's outstanding requests: a handler that queues another
+                        // request keeps the transaction open until that one lands too.
+                        let outstanding = 0;
+                        function settle(run: () => void) {
+                            outstanding++;
+                            queueMicrotask(() => {
+                                run();
+                                outstanding--;
+                                if (outstanding > 0) return;
+                                queueMicrotask(() => {
+                                    if (outstanding === 0 && tx.oncomplete) tx.oncomplete();
+                                });
+                            });
+                        }
                         return tx;
                     },
                 };

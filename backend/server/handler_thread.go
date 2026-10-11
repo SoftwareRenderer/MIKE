@@ -267,6 +267,7 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 		FromThreadID  string `json:"from_thread_id"`
 		FromMessageID string `json:"from_message_id"`
 		NewContent    string `json:"new_content"`
+		ClientToken   string `json:"client_token"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.FromThreadID == "" || req.FromMessageID == "" {
 		JSONError(w, http.StatusBadRequest, "from_thread_id and from_message_id required")
@@ -291,6 +292,16 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 		return
 	case err != nil || forkPoint.ThreadID != req.FromThreadID:
 		JSONError(w, http.StatusBadRequest, "from_message_id is not a message of from_thread_id")
+		return
+	}
+	// Asked before anything is stopped or moved: a replay of a lost fork would rewind the shared worktree again.
+	if existing, claimed := s.store.ClaimedWrite(req.ClientToken, taskID); claimed {
+		claimedThread, err := s.store.GetThread(existing)
+		if err != nil {
+			Fail(w, err, "get forked thread", "thread not found")
+			return
+		}
+		JSONResponse(w, http.StatusCreated, claimedThread)
 		return
 	}
 
@@ -379,6 +390,9 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.CreateThread(newThread); err != nil {
 		Fail(w, err, "create thread", "task not found")
 		return
+	}
+	if err := s.store.ClaimWrite(req.ClientToken, projectID, taskID, store.ClaimForkThread, newThreadID); err != nil {
+		logging.For(logging.Thread).With(logging.TaskID, taskID).Warnf("fork went unclaimed: %v", err)
 	}
 	// Copy the parent conversation into the fork: whole entries up to the fork point, payloads and all.
 	inherited, err := s.store.CopyMessagesToThread(req.FromThreadID, newThreadID, req.FromMessageID)
