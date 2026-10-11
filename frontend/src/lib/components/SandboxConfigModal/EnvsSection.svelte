@@ -48,7 +48,7 @@
                {...LITERAL_TEXT_FIELD} />
         <span class="sandbox-eq">=</span>
         <span class="field-label">{t('sandbox.envValueAria')}</span>
-        <input type="text" class="env-input" bind:value={draft.newEnvValue} placeholder={t('sandbox.envValueInputPlaceholder')}
+        <input type="text" class="env-input env-input-value" bind:value={draft.newEnvValue} placeholder={t('sandbox.envValueInputPlaceholder')}
                disabled={locked} aria-label={t('sandbox.envValueAria')} onkeydown={rowForm.onFieldKeydown}
                {...LITERAL_TEXT_FIELD} />
         <div class="add-row-actions">

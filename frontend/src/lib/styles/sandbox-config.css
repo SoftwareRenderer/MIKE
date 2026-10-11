@@ -71,8 +71,10 @@
 
 /* ── A row that opens a section under itself ───────────────────────────────── */
 
-/* Nested one level under a switch, so its rows line up under the switch's label. */
-:global(.sandbox-config .config-row-subsection) {
+/* One level of nesting: 36px puts a nested row's or block's first line under the label of the row above
+ * it. A subsection opens a section under a switch; a nested block is a field the row above owns. */
+:global(.sandbox-config .config-row-subsection),
+:global(.sandbox-config .config-nested) {
     padding-left: 36px;
 }
 
@@ -122,7 +124,9 @@
 }
 
 :global(.sandbox-config .config-row-group.expanded > .ports-content),
-:global(.sandbox-config .config-row-group.expanded > .mounts-content) {
+:global(.sandbox-config .config-row-group.expanded > .mounts-content),
+:global(.sandbox-config .config-row-group.expanded > .envs-content),
+:global(.sandbox-config .config-row-group.expanded > .caps-content) {
     padding-left: 12px;
     padding-right: 12px;
     border-bottom: 1px solid var(--color-border);
@@ -146,10 +150,8 @@
     padding: 0 0 4px;
 }
 
-/* The capability picker is a field rather than a row of inputs, so it keeps its own box. */
 :global(.sandbox-config .caps-content) {
-    padding: 12px 12px 4px;
-    border-top: 1px solid var(--color-border);
+    padding: 12px 0 4px;
 }
 
 /* ── The field ─────────────────────────────────────────────────────────────── */
@@ -216,6 +218,10 @@
 
 :global(.sandbox-config .env-input-key) {
     max-width: 140px;
+}
+
+:global(.sandbox-config .env-input-value) {
+    max-width: 220px;
 }
 
 /* Shown only where a field owns a line of its own and the placeholder is its only label. */
@@ -536,8 +542,9 @@
    becomes a stack: one field per line with its name above it, the controls on a line of their own,
    everything a thumb aims at 44px or more. The fields need 446px of form at their 100px minimum. */
 @container sandbox-form (max-width: 480px) {
-    /* A nested section has no room to be indented here. */
-    :global(.sandbox-config .config-row-subsection) {
+    /* A nested row has no room to be indented here. */
+    :global(.sandbox-config .config-row-subsection),
+    :global(.sandbox-config .config-nested) {
         padding-left: 0;
     }
 
@@ -570,6 +577,15 @@
         grid-column: 1 / -1;
     }
 
+    :global(.sandbox-config .image-input),
+    :global(.sandbox-config .memory-input),
+    :global(.sandbox-config .port-input),
+    :global(.sandbox-config .mount-input),
+    :global(.sandbox-config .env-input) {
+        padding: 10px 8px;
+        font-size: var(--text-sm);
+    }
+
     :global(.sandbox-config .port-input),
     :global(.sandbox-config .mount-input),
     :global(.sandbox-config .env-input) {
@@ -577,8 +593,6 @@
         width: 100%;
         min-width: 0;
         max-width: none;
-        padding: 10px 8px;
-        font-size: var(--text-sm);
     }
 
     :global(.sandbox-config .btn-add-port),
