@@ -263,7 +263,7 @@ test.describe.serial('Sandbox Mounts', () => {
 
 });
 
-// The add row needs 452px on one line and a portrait screen has less; below that the form stacks,
+// The add row needs 434px on one line and a portrait screen has less; below that the form stacks,
 // and this checks the stacked form.
 test.describe('Sandbox Mounts on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });

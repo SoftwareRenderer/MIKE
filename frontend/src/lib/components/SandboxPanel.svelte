@@ -158,12 +158,9 @@ import { formatNetworkedExtensions, serverToolExtensions, serverToolMCPServers }
                         {#if task.assigned_ports && task.assigned_ports.length > 0}
                         <div class="sandbox-list">
                             {#each task.assigned_ports as port}
-                            <div class="sandbox-item">
-                                 <span class="sandbox-item-key" title={t('sandbox.hostAddress')}>{formatAssignedHost(port.host_port, port.host_ip)}</span>
-                                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                                    <path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                                </svg>
-                                <span class="sandbox-item-text" title={t('sandbox.containerPort')}>{port.container_port}</span>
+                            <div class="sandbox-item sandbox-item-pair">
+                                <span class="sandbox-item-key" title={t('sandbox.hostAddress')}>{formatAssignedHost(port.host_port, port.host_ip)}</span>
+                                <span class="sandbox-item-text" title={t('sandbox.containerPort')}>:{port.container_port}</span>
                             </div>
                             {/each}
                         </div>

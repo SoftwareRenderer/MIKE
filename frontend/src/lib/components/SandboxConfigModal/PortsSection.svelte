@@ -5,7 +5,8 @@
      * Isolation is off — an isolated container has nothing to reach these ports from.
      */
     import { t } from '$lib/i18n';
-    import { formatForwardPort } from '$lib/utils/sandbox-ports';
+    import type { PortForward } from '$lib/types';
+    import { formatAssignedHost, formatForwardPort } from '$lib/utils/sandbox-ports';
     import { editInPlace, onActivate, LITERAL_TEXT_FIELD } from '$lib/utils/row-form';
     import CancelEditButton from './CancelEditButton.svelte';
     import ExpandableSection from './ExpandableSection.svelte';
@@ -14,6 +15,11 @@
     let { draft, locked }: { draft: SandboxDraftOwner; locked: boolean } = $props();
 
     let formEl: HTMLDivElement | null = $state(null);
+
+    function hostHalf(port: PortForward): string {
+        const assigned = draft.activeHostPorts.get(port.container_port);
+        return assigned === undefined ? '' : formatAssignedHost(assigned, port.host_ip);
+    }
 
     const rowForm = editInPlace({
         form: () => formEl,
@@ -30,13 +36,10 @@
             {#each draft.forwardPorts as port, i}
                 <div class="port-item" class:editing={draft.editingPortIndex === i} onclick={() => rowForm.start(i)} role="button" tabindex="0" onkeydown={onActivate(() => rowForm.start(i))}>
                     <span class="port-mapping">
-                        {#if draft.activeHostPorts.has(port.container_port)}
-                            <span class="port-host" title={t('sandbox.hostPort')}>{draft.activeHostPorts.get(port.container_port)}</span>
-                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                                <path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
+                        {#if hostHalf(port)}
+                            <span class="port-host" title={t('sandbox.hostPort')}>{hostHalf(port)}</span>
                         {/if}
-                        <span class="port-container" title={t('sandbox.containerPort')}>{formatForwardPort(port)}</span>
+                        <span class="port-container" title={t('sandbox.containerPort')}>{hostHalf(port) ? `:${port.container_port}` : formatForwardPort(port)}</span>
                     </span>
                     <button type="button" class="btn-remove-port" onclick={(e) => { e.stopPropagation(); draft.removePortForward(i); }} disabled={locked} title={t('sandbox.remove')}>
                         {@render closeIcon()}

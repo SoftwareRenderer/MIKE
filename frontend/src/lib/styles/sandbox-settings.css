@@ -96,9 +96,9 @@
     font-family: var(--font-mono, monospace);
 }
 
-/* A key = value row spends one step of the gap on the sign. */
-:global(.sandbox-item-tight) {
-    gap: 4px;
+/* A host:container mapping is one token — `32789:3000` — so no air goes around its colon. */
+:global(.sandbox-item-pair) {
+    gap: 0;
 }
 
 /* The half that names the thing, and the half that is named. */
@@ -118,14 +118,7 @@
     white-space: nowrap;
 }
 
-/* The sign itself, and the note that stands in for an empty list. Both carry their own size:
-   neither sits inside a row that has one. */
-:global(.sandbox-eq) {
-    color: var(--color-text-secondary);
-    flex-shrink: 0;
-    font-size: var(--text-xs);
-}
-
+/* The note that stands in for an empty list; it carries its own size because it sits in no row that has one. */
 :global(.sandbox-note) {
     color: var(--color-text-tertiary);
     font-size: var(--text-xs);

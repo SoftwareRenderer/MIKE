@@ -30,7 +30,6 @@
                 <div class="env-item" class:editing={draft.editingEnvIndex === i} onclick={() => rowForm.start(i)} role="button" tabindex="0" onkeydown={onActivate(() => rowForm.start(i))}>
                     <div class="env-info">
                         <span class="env-key" title={env.key}>{env.key}</span>
-                        <span class="sandbox-eq">=</span>
                         <span class="env-value" title={env.value}>{env.value || t('sandbox.empty')}</span>
                     </div>
                     <button type="button" class="btn-remove-env" onclick={(e) => { e.stopPropagation(); draft.removeEnv(i); }} disabled={locked} title={t('sandbox.remove')}>
@@ -46,7 +45,6 @@
         <input type="text" class="env-input env-input-key" bind:value={draft.newEnvKey} placeholder={t('sandbox.envKeyPlaceholder')}
                disabled={locked} aria-label={t('sandbox.envNameAria')} onkeydown={rowForm.onFieldKeydown}
                {...LITERAL_TEXT_FIELD} />
-        <span class="sandbox-eq">=</span>
         <span class="field-label">{t('sandbox.envValueAria')}</span>
         <input type="text" class="env-input env-input-value" bind:value={draft.newEnvValue} placeholder={t('sandbox.envValueInputPlaceholder')}
                disabled={locked} aria-label={t('sandbox.envValueAria')} onkeydown={rowForm.onFieldKeydown}

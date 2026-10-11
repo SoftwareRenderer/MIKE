@@ -35,9 +35,6 @@
                 <div class="mount-item" class:editing={draft.editingMountIndex === i} onclick={() => rowForm.start(i)} role="button" tabindex="0" onkeydown={onActivate(() => rowForm.start(i))}>
                     <div class="mount-info">
                         <span class="mount-path" title={mount.host_path}>{mount.host_path}</span>
-                        <svg class="mount-arrow" width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                            <path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                        </svg>
                         <span class="mount-container" title={mount.container_path}>{mount.container_path}</span>
                     </div>
                     <div class="mount-actions">
@@ -63,9 +60,6 @@
                 <path d="M2 4h4l1.5 1.5H12V12H2V4z" stroke="currentColor" stroke-width="1.2" fill="none"/>
             </svg>
         </button>
-        <svg class="mount-arrow" width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-            <path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
         <span class="field-label">{t('sandbox.containerPath')}</span>
         <input type="text" class="mount-input" bind:value={draft.newMountContainerPath} placeholder="/container/path"
                disabled={locked} aria-label={t('sandbox.containerPath')} onkeydown={rowForm.onFieldKeydown}
@@ -128,11 +122,6 @@
         display: flex;
         align-items: center;
         gap: 6px;
-        flex-shrink: 0;
-    }
-
-    .mount-arrow {
-        color: var(--color-text-secondary);
         flex-shrink: 0;
     }
 </style>
