@@ -61,6 +61,7 @@ const catalog = {
     'explorer.shared.newFolderNameAria': 'New folder name',
     'explorer.shared.filenamePlaceholder': 'filename',
     'explorer.shared.folderNameLowerPlaceholder': 'folder name',
+    'explorer.shared.confirmCreate': 'Create',
     'explorer.shared.errReadDir': 'Failed to read directory',
     'explorer.shared.errCreateFile': 'Failed to create file',
     'explorer.shared.errCreateFolder': 'Failed to create folder',

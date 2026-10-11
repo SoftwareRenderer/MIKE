@@ -133,9 +133,12 @@ seeds the listing and opens no tab. A file link opens the tab, and the new windo
 IndexedDB restores: both windows hold the same store, so a file link always arrives against a stored list.
 
 **Both explorer screens take `initialFile`,** and each clamps it twice: `explorerPathRoots` with
-`fileWithinRoots` decide in `handlePopState` which roots a `file=` may sit under (the checkout, the URL
-task's worktree, and each container mount), and `ExplorerCore.isPathSafe` clamps again where the path is
-opened. The `..` row is refused by both entrances through `rowIsSelectable`.
+`fileWithinRoots` decide which roots a `file=` may sit under (the checkout, the URL task's worktree, and
+each container mount), and `ExplorerCore.isPathSafe` clamps again where the path is opened. The roots
+question has one home: `explorerRootsFor` in `App.svelte`. `handlePopState` calls it, and
+`urlRouter.declareFileRoots` holds it for every write, so an address never names a file its own project or
+task cannot show. A switch of subject therefore drops the file the old subject held, and the explorer that
+lands writes the one it restored. The `..` row is refused by both entrances through `rowIsSelectable`.
 
 ## Tests
 
@@ -145,7 +148,8 @@ buttons), `components/__tests__/terminal-buttons-are-links.unit.svelte.ts` (the 
 the link each explorer hands its header),
 `components/__tests__/file-browser-context-menu.unit.svelte.ts` (the file rows' window item, the URL it
 carries, and the middle-button gesture), `services/__tests__/url-router.unit.svelte.ts` (the address bar
-↔ router state mapping: the param order, what an omitted param means, which navigation is a Back entry), `utils/__tests__/app-link.unit.ts` (the hrefs, the reader, the
+↔ router state mapping: the param order, what an omitted param means, which navigation is a Back entry,
+and the `file=` a destination cannot show), `utils/__tests__/app-link.unit.ts` (the hrefs, the reader, the
 file param's roots),
 `utils/__tests__/keyboard.unit.ts` (click bindings), e2e
 `link-like-rows.spec.ts` (middle-click opens a real tab, no document navigation on left click, drag

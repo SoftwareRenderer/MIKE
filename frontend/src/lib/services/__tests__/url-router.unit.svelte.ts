@@ -14,6 +14,8 @@ function at(search: string): void {
 
 beforeEach(() => {
     at('');
+    // Start every test with a resolver that judges nothing, so one installed below cannot leak into it.
+    urlRouter.declareFileRoots(() => null);
     urlRouter.read();
     urlRouter.applyView();
 });
@@ -124,6 +126,54 @@ describe('write — state as the address bar', () => {
         urlRouter.write({ project: 'p1', task: 't8' }, false, false);
         expect(history.length).toBe(before + 1);
         expect(location.search).toBe('?project=p1&task=t8');
+    });
+});
+
+describe('the file an address may name', () => {
+    /** What `App.svelte` hands the router: `p1`'s checkout and `t7`'s worktree, `p2`'s own checkout,
+     *  and no row for a project it has never seen. */
+    function rootsOf(projectId: string, taskId: string): string[] | null {
+        if (projectId === 'p1') return taskId ? ['/srv/p1', '/work/p1/' + taskId] : ['/srv/p1'];
+        if (projectId === 'p2') return ['/srv/p2'];
+        return null;
+    }
+
+    it('drops the file the previous project held when a navigation moves to another project', () => {
+        urlRouter.declareFileRoots(rootsOf);
+        at('?project=p1&view=explorer&file=/srv/p1/a.go');
+        urlRouter.read();
+        urlRouter.write({ project: 'p2', view: 'explorer' });
+        expect(location.search).toBe('?project=p2&view=explorer');
+        expect(urlRouter.file).toBe('');
+    });
+
+    it('drops a task worktree file when the navigation names another task, or none', () => {
+        urlRouter.declareFileRoots(rootsOf);
+        at('?project=p1&task=t7&view=task-explorer&file=/work/p1/t7/a.go');
+        urlRouter.read();
+        urlRouter.write({ project: 'p1', task: 't8', view: 'task-explorer' });
+        expect(location.search).toBe('?project=p1&task=t8&view=task-explorer');
+        // Closing the card detail names no task, so the worktree goes with it.
+        history.replaceState(null, '', '/?project=p1&task=t7&view=task-explorer&file=/work/p1/t7/a.go');
+        urlRouter.read();
+        urlRouter.write({ project: 'p1' });
+        expect(location.search).toBe('?project=p1&view=task-explorer');
+    });
+
+    it('keeps the file a caller names that the destination does hold', () => {
+        urlRouter.declareFileRoots(rootsOf);
+        urlRouter.write({ project: 'p1', view: 'explorer', file: '/srv/p1/a.go' });
+        expect(location.search).toBe('?project=p1&view=explorer&file=/srv/p1/a.go');
+        urlRouter.write({ project: 'p1', task: 't7', view: 'task-explorer', file: '/work/p1/t7/a.go' });
+        expect(location.search).toBe('?project=p1&task=t7&view=task-explorer&file=/work/p1/t7/a.go');
+    });
+
+    it('judges nothing for a project this client holds no row for', () => {
+        urlRouter.declareFileRoots(rootsOf);
+        at('?project=p1&view=explorer&file=/srv/p1/a.go');
+        urlRouter.read();
+        urlRouter.write({ project: 'clone-pending-1', view: 'explorer' });
+        expect(location.search).toBe('?project=clone-pending-1&view=explorer&file=/srv/p1/a.go');
     });
 });
 

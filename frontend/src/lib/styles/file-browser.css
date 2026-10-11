@@ -45,10 +45,11 @@
     gap: 2px;
 }
 
-/* The Find, Upload, New file and New folder buttons. The Upload button lives with the
-   `<input type=file>` it opens, which is why both are in the shared component and why this rule
-   could not stay scoped in a host. */
-:global(.file-browser .new-file-btn) {
+/* The Find, Upload, New file and New folder buttons, plus a name row's commit and cancel. The Upload
+   button lives with the `<input type=file>` it opens, which is why both are in the shared component and why
+   this rule could not stay scoped in a host. */
+:global(.file-browser .new-file-btn),
+:global(.file-browser .name-row-btn) {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -60,15 +61,26 @@
     color: var(--color-text-secondary);
     cursor: pointer;
     border-radius: var(--radius-sm);
+    /* A name row is a flex row; the field gives up its width before these do. */
+    flex-shrink: 0;
 }
-:global(.file-browser .new-file-btn:hover) {
+/* `:not(:disabled)` so a commit that is dead until a name is typed does not light up under the pointer. */
+:global(.file-browser .new-file-btn:hover:not(:disabled)),
+:global(.file-browser .name-row-btn:hover:not(:disabled)) {
     opacity: 1;
     background: var(--color-surface-3);
     color: var(--color-text-primary);
 }
+:global(.file-browser .name-row-btn.is-confirm) {
+    color: var(--color-accent);
+}
 
 :global(.file-browser .new-file-input-row) {
     margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
 }
 
 :global(.file-browser .new-file-input) {
@@ -289,16 +301,32 @@
     :global(.file-browser .file-browser-label) {
         font-size: var(--text-sm);
     }
-    :global(.file-browser .new-file-btn) {
+    :global(.file-browser .new-file-btn),
+    :global(.file-browser .name-row-btn) {
         width: 32px;
         height: 32px;
+    }
+    /* Safari zooms the page when a focused input is smaller than 16px, and a zoomed page under the open
+       keyboard puts the row and its commit off screen. */
+    :global(.file-browser .new-file-input),
+    :global(.file-browser .file-rename-input) {
+        font-size: var(--text-lg);
+        padding: 6px 8px;
+    }
+    :global(.file-browser .new-file-input-row) {
+        flex: 1;
+    }
+    :global(.file-browser .new-file-input) {
+        flex: 1;
+        width: 100%;
+        min-width: 0;
     }
     :global(.file-browser .file-browser-path) {
         padding: 8px 10px;
     }
     :global(.file-browser .file-browser-path-input) {
         padding: 4px 8px;
-        font-size: var(--text-sm);
+        font-size: var(--text-lg);
     }
     :global(.file-browser .breadcrumb) {
         font-size: var(--text-sm);

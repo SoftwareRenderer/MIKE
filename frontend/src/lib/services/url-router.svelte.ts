@@ -74,6 +74,10 @@ interface UrlWrite {
     file?: string | null;
 }
 
+/** Which paths an address may name as `file` for a project and task. `App.svelte` installs it, being the
+ *  only place with the project list. */
+type FileRootsResolver = (projectId: string, taskId: string) => string[] | null;
+
 class UrlRouter {
     /** The address bar, as this module last read or wrote it. */
     project = $state('');
@@ -91,6 +95,8 @@ class UrlRouter {
     /** The search this module last rendered from, and when it reported a change. See `refresh()`. */
     private seenSearch = location.search;
     private lastChangeAt = 0;
+
+    private fileRoots: FileRootsResolver | null = null;
 
     /** Adopt the address bar. Returns what it says, so a caller can act on the params it names. */
     read(): UrlState {
@@ -132,11 +138,14 @@ class UrlRouter {
      */
     write(params: UrlWrite, clearThread = false, push = false): void {
         const current = new URLSearchParams(location.search);
+        const file = this.nameableFile(
+            params.project ?? '', params.task ?? '',
+            (params.file !== undefined ? params.file : current.get('file')) ?? '');
         const state: UrlState = {
             project: params.project ?? '',
             task: params.task ?? '',
             view: (params.view !== undefined ? params.view : current.get('view')) ?? '',
-            file: (params.file !== undefined ? params.file : current.get('file')) ?? '',
+            file,
             thread: clearThread ? '' : current.get('thread') ?? '',
         };
         // The Review Changes panel state follows a `view` that was named, whether or not it moved.
@@ -155,6 +164,18 @@ class UrlRouter {
         this.view = state.view;
         this.file = state.file;
         this.thread = state.thread;
+    }
+
+    declareFileRoots(resolve: FileRootsResolver): void {
+        this.fileRoots = resolve;
+    }
+
+    /** A `file` the destination cannot show is no file at all: the explorer that arrives writes the one it
+     *  opened. Judged whether a caller named it or it carried over from the address bar. */
+    private nameableFile(projectId: string, taskId: string, file: string): string {
+        if (!file || !this.fileRoots) return file;
+        const roots = this.fileRoots(projectId, taskId);
+        return roots && !fileWithinRoots(file, roots) ? '' : file;
     }
 
     /**

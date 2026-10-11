@@ -15,6 +15,9 @@
     import SelectionActionBar from '$lib/components/SelectionActionBar.svelte';
     import folderIcon from '$lib/assets/icons/folder.svg?raw';
     import fileIcon from '$lib/assets/icons/file.svg?raw';
+    import checkIcon from '$lib/assets/icons/check-circle.svg?raw';
+    import closeIcon from '$lib/assets/icons/close.svg?raw';
+    import editIcon from '$lib/assets/icons/edit.svg?raw';
     import { t, type MessageKey } from '$lib/i18n';
     import { explorerPathHref } from '$lib/utils/app-link';
     import { confirmList, pasteTarget, rowIsSelectable } from '$lib/utils/file-selection';
@@ -213,6 +216,24 @@
         createFolderError = '';
         await tick(); // wait for the row to render
         newFolderInput?.focus();
+    }
+
+    /**
+     * The row's buttons cancel `mousedown` so the field keeps focus: leaving it discards the name, and a
+     * blur unmounts the button before its `click` arrives.
+     */
+    function keepFieldFocused(e: MouseEvent): void {
+        e.preventDefault();
+    }
+
+    function cancelNewFile(): void {
+        showNewFile = false;
+        newFileName = '';
+    }
+
+    function cancelNewFolder(): void {
+        showNewFolder = false;
+        newFolderName = '';
     }
 
     async function handleCreateFile() {
@@ -706,11 +727,31 @@
                     bind:this={newFileInput}
                     placeholder={t('explorer.shared.filenamePlaceholder')}
                     value={newFileName}
+                    enterkeyhint="done"
+                    autocapitalize="none"
+                    spellcheck={false}
                     oninput={(e) => newFileName = (e.target as HTMLInputElement).value}
-                    onkeydown={(e) => { if (e.key === 'Enter') handleCreateFile(); if (e.key === 'Escape') { showNewFile = false; newFileName = ''; } }}
-                    onblur={() => { showNewFile = false; newFileName = ''; }}
+                    onkeydown={(e) => { if (e.key === 'Enter') void handleCreateFile(); if (e.key === 'Escape') cancelNewFile(); }}
+                    onblur={cancelNewFile}
                     aria-label={t('explorer.shared.newFileNameAria')}
                 />
+                <button
+                    type="button"
+                    class="name-row-btn is-confirm"
+                    onclick={() => void handleCreateFile()}
+                    onmousedown={keepFieldFocused}
+                    disabled={creating || !newFileName.trim()}
+                    title={t('explorer.shared.confirmCreate')}
+                    aria-label={t('explorer.shared.confirmCreate')}
+                ><Icon src={checkIcon} width={14} height={14} /></button>
+                <button
+                    type="button"
+                    class="name-row-btn"
+                    onclick={cancelNewFile}
+                    onmousedown={keepFieldFocused}
+                    title={t('explorer.shared.cancel')}
+                    aria-label={t('explorer.shared.cancel')}
+                ><Icon src={closeIcon} width={14} height={14} /></button>
             </div>
         {:else}
             <div class="new-file-input-row">
@@ -720,11 +761,31 @@
                     bind:this={newFolderInput}
                     placeholder={t('explorer.shared.folderNameLowerPlaceholder')}
                     value={newFolderName}
+                    enterkeyhint="done"
+                    autocapitalize="none"
+                    spellcheck={false}
                     oninput={(e) => newFolderName = (e.target as HTMLInputElement).value}
-                    onkeydown={(e) => { if (e.key === 'Enter') handleCreateFolder(); if (e.key === 'Escape') { showNewFolder = false; newFolderName = ''; } }}
-                    onblur={() => { showNewFolder = false; newFolderName = ''; }}
+                    onkeydown={(e) => { if (e.key === 'Enter') void handleCreateFolder(); if (e.key === 'Escape') cancelNewFolder(); }}
+                    onblur={cancelNewFolder}
                     aria-label={t('explorer.shared.newFolderNameAria')}
                 />
+                <button
+                    type="button"
+                    class="name-row-btn is-confirm"
+                    onclick={() => void handleCreateFolder()}
+                    onmousedown={keepFieldFocused}
+                    disabled={creatingFolder || !newFolderName.trim()}
+                    title={t('explorer.shared.confirmCreate')}
+                    aria-label={t('explorer.shared.confirmCreate')}
+                ><Icon src={checkIcon} width={14} height={14} /></button>
+                <button
+                    type="button"
+                    class="name-row-btn"
+                    onclick={cancelNewFolder}
+                    onmousedown={keepFieldFocused}
+                    title={t('explorer.shared.cancel')}
+                    aria-label={t('explorer.shared.cancel')}
+                ><Icon src={closeIcon} width={14} height={14} /></button>
             </div>
         {/if}
     </div>
@@ -748,6 +809,9 @@
                 type="text"
                 class="file-browser-path-input"
                 value={currentPath}
+                enterkeyhint="go"
+                autocapitalize="none"
+                spellcheck={false}
                 oninput={(e) => { currentPath = (e.target as HTMLInputElement).value; onPathChange(currentPath); }}
                 aria-label={t('explorer.shared.filePathAria')}
                 onkeydown={(e) => e.key === 'Enter' && handlePathInput()}
@@ -803,11 +867,31 @@
                         class="file-rename-input"
                         bind:this={renameInput}
                         value={renameValue}
+                        enterkeyhint="done"
+                        autocapitalize="none"
+                        spellcheck={false}
                         oninput={(e) => renameValue = (e.target as HTMLInputElement).value}
                         onkeydown={handleRenameKey}
                         onblur={() => renaming = null}
                         aria-label={t('explorer.shared.renameAria', { name: entry.name })}
                     />
+                    <button
+                        type="button"
+                        class="name-row-btn is-confirm"
+                        onclick={() => void commitRename()}
+                        onmousedown={keepFieldFocused}
+                        disabled={!renameValue.trim()}
+                        title={t('explorer.shared.menuRename')}
+                        aria-label={t('explorer.shared.menuRename')}
+                    ><Icon src={checkIcon} width={14} height={14} /></button>
+                    <button
+                        type="button"
+                        class="name-row-btn"
+                        onclick={() => renaming = null}
+                        onmousedown={keepFieldFocused}
+                        title={t('explorer.shared.cancel')}
+                        aria-label={t('explorer.shared.cancel')}
+                    ><Icon src={closeIcon} width={14} height={14} /></button>
                 </div>
             {:else}
                 <button
@@ -891,6 +975,16 @@
                         <path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>
                     </svg>
                 </button>
+                {#if selectedPaths.length === 1}
+                    <button
+                        type="button"
+                        class="selection-btn btn-ghost"
+                        disabled={mutating}
+                        title={t('explorer.shared.menuRename')}
+                        aria-label={t('explorer.shared.menuRename')}
+                        onclick={() => startRename(selectedPaths[0])}
+                    ><Icon src={editIcon} width={14} height={14} /></button>
+                {/if}
                 <button
                     type="button"
                     class="selection-btn btn-ghost destructive"

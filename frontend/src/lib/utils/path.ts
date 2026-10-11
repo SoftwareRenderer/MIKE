@@ -51,11 +51,6 @@ export function sandboxMountFromPath(hostPath: string): string {
     return sandboxMountPath(hostPath.split('/').filter(Boolean).pop() ?? '');
 }
 
-/** Whether `path` is inside the mount root, so it names the container's view of a tree. */
-export function isSandboxMountPath(path: string): boolean {
-    return path.startsWith(SANDBOX_MOUNT_ROOT + '/');
-}
-
 /**
  * Resolve a tool call's file path into the path the explorer addresses that file by.
  *
