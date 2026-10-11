@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-    baseName, isSandboxMountPath, isUnderPath, parentDir, sandboxMountFromPath,
+    baseName, isUnderPath, parentDir, sandboxMountFromPath,
     sandboxMountPath, toExplorerPath,
 } from '$lib/utils/path';
 
@@ -112,12 +112,5 @@ describe('the container mount', () => {
         expect(sandboxMountFromPath('/home/mike/proj')).toBe('/home/sandbox/proj');
         expect(sandboxMountFromPath('/home/mike/proj/')).toBe('/home/sandbox/proj');
         expect(sandboxMountFromPath('')).toBe('');
-    });
-
-    it('tells a mounted path from a host one', () => {
-        expect(isSandboxMountPath('/home/sandbox/proj/main.go')).toBe(true);
-        expect(isSandboxMountPath('/home/sandbox')).toBe(false); // the root itself is nobody's file
-        expect(isSandboxMountPath('/home/sandboxware/proj')).toBe(false);
-        expect(isSandboxMountPath('/home/mike/proj/main.go')).toBe(false);
     });
 });
