@@ -8,6 +8,15 @@
  * is what keeps a `.config-row` or a `.radio-label` belonging to this screen alone: the anchor costs
  * one class of specificity, which is exactly what a scoped rule would have carried. */
 
+/* ── The width the form has ────────────────────────────────────────────────── */
+
+/* The narrow-width rules at the end of this file read the form's own width: the modal, not the
+   window, is what decides whether a row fits. */
+:global(.sandbox-config) {
+    container-type: inline-size;
+    container-name: sandbox-form;
+}
+
 /* ── The row: icon, label, description, one control on the right ───────────── */
 :global(.sandbox-config .config-row) {
     display: flex;
@@ -179,6 +188,45 @@
     opacity: var(--opacity-disabled);
 }
 
+/* The widths that decide whether an add-row fits its form, so they sit beside the rule that reflows it. */
+:global(.sandbox-config .mount-input) {
+    flex: 1;
+    min-width: 100px;
+    max-width: 180px;
+}
+
+:global(.sandbox-config .port-input) {
+    flex: 1;
+    min-width: 120px;
+    max-width: 200px;
+}
+
+:global(.sandbox-config .env-input) {
+    flex: 1;
+    min-width: 80px;
+}
+
+:global(.sandbox-config .mount-input-host) {
+    max-width: 160px;
+}
+
+:global(.sandbox-config .port-input-bind) {
+    max-width: 170px;
+}
+
+:global(.sandbox-config .env-input-key) {
+    max-width: 140px;
+}
+
+/* Shown only where a field owns a line of its own and the placeholder is its only label. */
+:global(.sandbox-config .field-label) {
+    display: none;
+    font-size: var(--text-2xs);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    color: var(--color-text-secondary);
+}
+
 /* The two number fields keep no spinners. */
 :global(.sandbox-config .memory-input),
 :global(.sandbox-config .port-input) {
@@ -306,6 +354,16 @@
     align-items: center;
     gap: 6px;
     padding-left: 36px;
+    margin-top: 4px;
+}
+
+/* The non-field controls of an add row; they travel together when the row wraps. */
+:global(.sandbox-config .add-row-actions) {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+    margin-left: auto;
 }
 
 /* The 28px square button of every add row: confirm, add, browse, cancel. */
@@ -401,6 +459,17 @@
     font-size: var(--text-xs);
 }
 
+/* The two notes under a port row, in the same 36px indent family as the lists above. */
+:global(.sandbox-config .port-hint) {
+    padding: 2px 0 0 36px;
+    font-size: var(--text-2xs);
+    color: var(--color-text-muted);
+}
+
+:global(.sandbox-config .port-no-active) {
+    padding: 4px 8px 4px 36px;
+}
+
 /* ── Two choices, one box ──────────────────────────────────────────────────── */
 
 :global(.sandbox-config .radio-group) {
@@ -450,4 +519,124 @@
 
 :global(.sandbox-config .radio-text) {
     white-space: nowrap;
+}
+
+:global(.sandbox-config .radio-group-small) {
+    border-radius: var(--radius-sm);
+}
+
+:global(.sandbox-config .radio-group-small .radio-label) {
+    padding: 2px 7px;
+    font-size: var(--text-2xs);
+}
+
+/* ── A form that has no room to be a row ─────────────────────────────────── */
+
+/* Below this the widest add-row stops fitting and its confirm falls off the screen, so each list
+   becomes a stack: one field per line with its name above it, the controls on a line of their own,
+   everything a thumb aims at 44px or more. The fields need 446px of form at their 100px minimum. */
+@container sandbox-form (max-width: 480px) {
+    /* A nested section has no room to be indented here. */
+    :global(.sandbox-config .config-row-subsection) {
+        padding-left: 0;
+    }
+
+    :global(.sandbox-config .port-list),
+    :global(.sandbox-config .mount-list),
+    :global(.sandbox-config .env-list),
+    :global(.sandbox-config .port-add-row),
+    :global(.sandbox-config .mount-add-row),
+    :global(.sandbox-config .env-add-row),
+    :global(.sandbox-config .port-error),
+    :global(.sandbox-config .mount-error),
+    :global(.sandbox-config .env-error),
+    :global(.sandbox-config .port-hint),
+    :global(.sandbox-config .port-no-active) {
+        padding-left: 0;
+    }
+
+    /* The browse button is the one control that keeps a line-mate: it belongs to the host path. */
+    :global(.sandbox-config .port-add-row),
+    :global(.sandbox-config .mount-add-row),
+    :global(.sandbox-config .env-add-row) {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        row-gap: 4px;
+        align-items: center;
+    }
+
+    :global(.sandbox-config .field-label) {
+        display: block;
+        grid-column: 1 / -1;
+    }
+
+    :global(.sandbox-config .port-input),
+    :global(.sandbox-config .mount-input),
+    :global(.sandbox-config .env-input) {
+        grid-column: 1;
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+        padding: 10px 8px;
+        font-size: var(--text-sm);
+    }
+
+    :global(.sandbox-config .btn-add-port),
+    :global(.sandbox-config .btn-add-mount),
+    :global(.sandbox-config .btn-add-env),
+    :global(.sandbox-config .btn-browse-mount),
+    :global(.sandbox-config .btn-cancel-edit) {
+        width: 44px;
+        height: 44px;
+    }
+
+    :global(.sandbox-config .add-row-actions) {
+        grid-column: 1 / -1;
+        justify-content: flex-end;
+        gap: 10px;
+    }
+
+    :global(.sandbox-config .add-row-actions .radio-label) {
+        min-height: 44px;
+        padding: 10px 16px;
+        font-size: var(--text-sm);
+    }
+
+    /* Each field is named here, so the arrow and the `=` add nothing. */
+    :global(.sandbox-config .mount-add-row .mount-arrow),
+    :global(.sandbox-config .env-add-row .sandbox-eq) {
+        display: none;
+    }
+
+    /* A saved row spends height rather than hiding half a path: `title` is unreachable to a thumb. */
+    :global(.sandbox-config .port-item),
+    :global(.sandbox-config .mount-item),
+    :global(.sandbox-config .env-item) {
+        min-height: 44px;
+        padding: 8px;
+    }
+
+    :global(.sandbox-config .mount-info),
+    :global(.sandbox-config .env-info) {
+        flex-wrap: wrap;
+        row-gap: 2px;
+    }
+
+    :global(.sandbox-config .mount-path),
+    :global(.sandbox-config .mount-container),
+    :global(.sandbox-config .env-key),
+    :global(.sandbox-config .env-value) {
+        flex: 1 1 100%;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        text-overflow: clip;
+    }
+
+    /* The glyph stays 20px; the button around it is 44px. */
+    :global(.sandbox-config .btn-remove-port),
+    :global(.sandbox-config .btn-remove-mount),
+    :global(.sandbox-config .btn-remove-env) {
+        width: 44px;
+        height: 44px;
+    }
 }

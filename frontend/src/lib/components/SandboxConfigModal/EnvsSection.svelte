@@ -5,11 +5,20 @@
      * a bare `-e NAME` that inherits whatever the server process happens to hold.
      */
     import { t } from '$lib/i18n';
+    import { editInPlace, onActivate, LITERAL_TEXT_FIELD } from '$lib/utils/row-form';
     import CancelEditButton from './CancelEditButton.svelte';
     import ExpandableSection from './ExpandableSection.svelte';
     import type { SandboxDraftOwner } from './draft.svelte';
 
     let { draft, locked }: { draft: SandboxDraftOwner; locked: boolean } = $props();
+
+    let formEl: HTMLDivElement | null = $state(null);
+
+    const rowForm = editInPlace({
+        form: () => formEl,
+        edit: (i) => draft.editEnv(i),
+        add: () => draft.addEnv(),
+    });
 </script>
 
 <ExpandableSection contentClass="envs-content" bind:expanded={draft.envsExpanded}
@@ -18,7 +27,7 @@
     {#if draft.envs.length > 0}
         <div class="env-list">
             {#each draft.envs as env, i}
-                <div class="env-item" class:editing={draft.editingEnvIndex === i} onclick={() => draft.editEnv(i)} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && draft.editEnv(i)}>
+                <div class="env-item" class:editing={draft.editingEnvIndex === i} onclick={() => rowForm.start(i)} role="button" tabindex="0" onkeydown={onActivate(() => rowForm.start(i))}>
                     <div class="env-info">
                         <span class="env-key" title={env.key}>{env.key}</span>
                         <span class="sandbox-eq">=</span>
@@ -32,16 +41,24 @@
         </div>
     {/if}
 
-    <div class="env-add-row">
-        {#if draft.editingEnvIndex !== null}
-            <CancelEditButton onclick={() => draft.cancelEnvEdit()} />
-        {/if}
-        <input type="text" class="env-input env-input-key" bind:value={draft.newEnvKey} placeholder={t('sandbox.envKeyPlaceholder')} disabled={locked} aria-label={t('sandbox.envNameAria')} />
+    <div class="env-add-row" bind:this={formEl}>
+        <span class="field-label">{t('sandbox.envNameAria')}</span>
+        <input type="text" class="env-input env-input-key" bind:value={draft.newEnvKey} placeholder={t('sandbox.envKeyPlaceholder')}
+               disabled={locked} aria-label={t('sandbox.envNameAria')} onkeydown={rowForm.onFieldKeydown}
+               {...LITERAL_TEXT_FIELD} />
         <span class="sandbox-eq">=</span>
-        <input type="text" class="env-input" bind:value={draft.newEnvValue} placeholder={t('sandbox.envValueInputPlaceholder')} disabled={locked} aria-label={t('sandbox.envValueAria')} />
-        <button type="button" class="btn-add-env" class:pending={draft.hasPendingEnv} onclick={() => draft.addEnv()} disabled={locked} title={draft.editingEnvIndex !== null ? t('sandbox.saveVariable') : t('sandbox.addVariable')}>
-            {@render addIcon(draft.editingEnvIndex !== null)}
-        </button>
+        <span class="field-label">{t('sandbox.envValueAria')}</span>
+        <input type="text" class="env-input" bind:value={draft.newEnvValue} placeholder={t('sandbox.envValueInputPlaceholder')}
+               disabled={locked} aria-label={t('sandbox.envValueAria')} onkeydown={rowForm.onFieldKeydown}
+               {...LITERAL_TEXT_FIELD} />
+        <div class="add-row-actions">
+            {#if draft.editingEnvIndex !== null}
+                <CancelEditButton onclick={() => draft.cancelEnvEdit()} />
+            {/if}
+            <button type="button" class="btn-add-env" class:pending={draft.hasPendingEnv} onclick={() => draft.addEnv()} disabled={locked} title={draft.editingEnvIndex !== null ? t('sandbox.saveVariable') : t('sandbox.addVariable')}>
+                {@render addIcon(draft.editingEnvIndex !== null)}
+            </button>
+        </div>
     </div>
 
     {#if draft.envError}
@@ -76,17 +93,4 @@
 <style>
     @import '$lib/styles/sandbox-settings.css';
     @import '$lib/styles/sandbox-config.css';
-
-    .env-input {
-        flex: 1;
-        min-width: 80px;
-    }
-
-    .env-input-key {
-        max-width: 140px;
-    }
-
-    .env-add-row {
-        margin-top: 4px;
-    }
 </style>

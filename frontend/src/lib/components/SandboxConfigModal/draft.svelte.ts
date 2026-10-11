@@ -6,6 +6,14 @@ import { capSuggestionsFor, normalizeCapability } from './capabilities';
 import { draftFromProject, type ImageSource, type SandboxDraft } from './drafts';
 
 /**
+ * The add row commits either onto the row it opened from or onto a new last row. A new array either
+ * way: `$state` compares by identity.
+ */
+function putRow<T>(list: T[], index: number | null, entry: T): T[] {
+    return index === null ? [...list, entry] : list.map((row, i) => (i === index ? entry : row));
+}
+
+/**
  * The one reactive holder of a project's unsaved sandbox configuration. The modal constructs it when
  * the screen opens, every section reads and edits it, and nothing else holds sandbox configuration
  * state — one Save turns it into one `PUT` (`drafts.ts` owns that comparison).
@@ -240,14 +248,8 @@ export class SandboxDraftOwner {
         const container = Number(this.newContainerPort);
         const hostIP = normalizeBind(this.newHostIP) ?? '';
         const entry: PortForward = hostIP ? { container_port: container, host_ip: hostIP } : { container_port: container };
-        if (this.editingPortIndex !== null) {
-            const updated = [...this.forwardPorts];
-            updated[this.editingPortIndex] = entry;
-            this.forwardPorts = updated;
-            this.editingPortIndex = null;
-        } else {
-            this.forwardPorts = [...this.forwardPorts, entry];
-        }
+        this.forwardPorts = putRow(this.forwardPorts, this.editingPortIndex, entry);
+        this.editingPortIndex = null;
         this.newContainerPort = '';
         this.newHostIP = '';
     }
@@ -290,14 +292,8 @@ export class SandboxDraftOwner {
             container_path: this.newMountContainerPath.trim(),
             mode: this.newMountMode,
         };
-        if (this.editingMountIndex !== null) {
-            const updated = [...this.mounts];
-            updated[this.editingMountIndex] = mount;
-            this.mounts = updated;
-            this.editingMountIndex = null;
-        } else {
-            this.mounts = [...this.mounts, mount];
-        }
+        this.mounts = putRow(this.mounts, this.editingMountIndex, mount);
+        this.editingMountIndex = null;
         this.newMountHostPath = '';
         this.newMountContainerPath = '';
         this.newMountMode = 'rw';
@@ -346,14 +342,8 @@ export class SandboxDraftOwner {
             key: this.newEnvKey.trim(),
             value: this.newEnvValue,
         };
-        if (this.editingEnvIndex !== null) {
-            const updated = [...this.envs];
-            updated[this.editingEnvIndex] = env;
-            this.envs = updated;
-            this.editingEnvIndex = null;
-        } else {
-            this.envs = [...this.envs, env];
-        }
+        this.envs = putRow(this.envs, this.editingEnvIndex, env);
+        this.editingEnvIndex = null;
         this.newEnvKey = '';
         this.newEnvValue = '';
     }

@@ -5,6 +5,7 @@
      * a borrowed root is mounted read-only whatever this row offers.
      */
     import { t } from '$lib/i18n';
+    import { editInPlace, onActivate, LITERAL_TEXT_FIELD } from '$lib/utils/row-form';
     import CancelEditButton from './CancelEditButton.svelte';
     import ExpandableSection from './ExpandableSection.svelte';
     import type { SandboxDraftOwner } from './draft.svelte';
@@ -15,6 +16,14 @@
         /** Open the host-directory picker; the path it answers with lands in this section's field. */
         onBrowse: () => void;
     } = $props();
+
+    let formEl: HTMLDivElement | null = $state(null);
+
+    const rowForm = editInPlace({
+        form: () => formEl,
+        edit: (i) => draft.editMount(i),
+        add: () => draft.addMount(),
+    });
 </script>
 
 <ExpandableSection contentClass="mounts-content" bind:expanded={draft.mountsExpanded}
@@ -23,10 +32,10 @@
     {#if draft.mounts.length > 0}
         <div class="mount-list">
             {#each draft.mounts as mount, i}
-                <div class="mount-item" class:editing={draft.editingMountIndex === i} onclick={() => draft.editMount(i)} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && draft.editMount(i)}>
+                <div class="mount-item" class:editing={draft.editingMountIndex === i} onclick={() => rowForm.start(i)} role="button" tabindex="0" onkeydown={onActivate(() => rowForm.start(i))}>
                     <div class="mount-info">
                         <span class="mount-path" title={mount.host_path}>{mount.host_path}</span>
-                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                        <svg class="mount-arrow" width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                             <path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                         </svg>
                         <span class="mount-container" title={mount.container_path}>{mount.container_path}</span>
@@ -42,34 +51,43 @@
         </div>
     {/if}
 
-    <div class="mount-add-row">
-        <!-- The two placeholders are path shapes to type, not copy; the names are the aria-labels. -->
-        {#if draft.editingMountIndex !== null}
-            <CancelEditButton onclick={() => draft.cancelMountEdit()} />
-        {/if}
-        <input type="text" class="mount-input mount-input-host" bind:value={draft.newMountHostPath} placeholder="/host/path" disabled={locked} aria-label={t('sandbox.hostPath')} />
+    <div class="mount-add-row" bind:this={formEl}>
+        <!-- Path shapes to type, not copy; the names are the aria-labels, and the visible label once
+             a field owns a line. -->
+        <span class="field-label">{t('sandbox.hostPath')}</span>
+        <input type="text" class="mount-input mount-input-host" bind:value={draft.newMountHostPath} placeholder="/host/path"
+               disabled={locked} aria-label={t('sandbox.hostPath')} onkeydown={rowForm.onFieldKeydown}
+               {...LITERAL_TEXT_FIELD} />
         <button type="button" class="btn-browse-mount" onclick={onBrowse} disabled={locked} title={t('sandbox.browseHostDirectory')}>
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
                 <path d="M2 4h4l1.5 1.5H12V12H2V4z" stroke="currentColor" stroke-width="1.2" fill="none"/>
             </svg>
         </button>
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true" class="mount-arrow">
+        <svg class="mount-arrow" width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
             <path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
-        <input type="text" class="mount-input" bind:value={draft.newMountContainerPath} placeholder="/container/path" disabled={locked} aria-label={t('sandbox.containerPath')} />
-        <div class="radio-group radio-group-small">
-            <label class="radio-label" class:active={draft.newMountMode === 'rw'} title={t('sandbox.mountReadWrite')}>
-                <input type="radio" name="mount-mode" value="rw" checked={draft.newMountMode === 'rw'} onchange={() => draft.newMountMode = 'rw'} disabled={locked} />
-                <span class="radio-text">rw</span>
-            </label>
-            <label class="radio-label" class:active={draft.newMountMode === 'ro'} title={t('sandbox.mountReadOnly')}>
-                <input type="radio" name="mount-mode" value="ro" checked={draft.newMountMode === 'ro'} onchange={() => draft.newMountMode = 'ro'} disabled={locked} />
-                <span class="radio-text">ro</span>
-            </label>
+        <span class="field-label">{t('sandbox.containerPath')}</span>
+        <input type="text" class="mount-input" bind:value={draft.newMountContainerPath} placeholder="/container/path"
+               disabled={locked} aria-label={t('sandbox.containerPath')} onkeydown={rowForm.onFieldKeydown}
+               {...LITERAL_TEXT_FIELD} />
+        <div class="add-row-actions">
+            {#if draft.editingMountIndex !== null}
+                <CancelEditButton onclick={() => draft.cancelMountEdit()} />
+            {/if}
+            <div class="radio-group radio-group-small">
+                <label class="radio-label" class:active={draft.newMountMode === 'rw'} title={t('sandbox.mountReadWrite')}>
+                    <input type="radio" name="mount-mode" value="rw" checked={draft.newMountMode === 'rw'} onchange={() => draft.newMountMode = 'rw'} disabled={locked} />
+                    <span class="radio-text">rw</span>
+                </label>
+                <label class="radio-label" class:active={draft.newMountMode === 'ro'} title={t('sandbox.mountReadOnly')}>
+                    <input type="radio" name="mount-mode" value="ro" checked={draft.newMountMode === 'ro'} onchange={() => draft.newMountMode = 'ro'} disabled={locked} />
+                    <span class="radio-text">ro</span>
+                </label>
+            </div>
+            <button type="button" class="btn-add-mount" class:pending={draft.hasPendingMount} onclick={() => draft.addMount()} disabled={locked} title={draft.editingMountIndex !== null ? t('sandbox.saveMount') : t('sandbox.addMount')}>
+                {@render addIcon(draft.editingMountIndex !== null)}
+            </button>
         </div>
-        <button type="button" class="btn-add-mount" class:pending={draft.hasPendingMount} onclick={() => draft.addMount()} disabled={locked} title={draft.editingMountIndex !== null ? t('sandbox.saveMount') : t('sandbox.addMount')}>
-            {@render addIcon(draft.editingMountIndex !== null)}
-        </button>
     </div>
 
     {#if draft.mountError}
@@ -106,20 +124,6 @@
     @import '$lib/styles/sandbox-settings.css';
     @import '$lib/styles/sandbox-config.css';
 
-    .mount-input {
-        flex: 1;
-        min-width: 100px;
-        max-width: 180px;
-    }
-
-    .mount-input-host {
-        max-width: 160px;
-    }
-
-    .mount-add-row {
-        margin: 4px 2px 0;
-    }
-
     .mount-actions {
         display: flex;
         align-items: center;
@@ -130,14 +134,5 @@
     .mount-arrow {
         color: var(--color-text-secondary);
         flex-shrink: 0;
-    }
-
-    .radio-group-small {
-        border-radius: var(--radius-sm);
-    }
-
-    .radio-group-small .radio-label {
-        padding: 2px 7px;
-        font-size: var(--text-2xs);
     }
 </style>

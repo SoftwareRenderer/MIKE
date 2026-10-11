@@ -72,6 +72,10 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
+    /* The rule at the end queries this list's width: a saved path has less room in a task panel
+       than in the modal that shares the markup. */
+    container-type: inline-size;
+    container-name: sandbox-list;
 }
 
 :global(.sandbox-list-wrap) {
@@ -167,4 +171,22 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+/* A row with no room for both paths and the mode chip wraps instead of ellipsizing, because the
+   whole path lives only in a `title` a thumb cannot open. */
+@container sandbox-list (max-width: 520px) {
+    :global(.sandbox-item) {
+        flex-wrap: wrap;
+        align-items: flex-start;
+        padding: 6px 8px;
+    }
+
+    :global(.sandbox-item .sandbox-item-key),
+    :global(.sandbox-item .sandbox-item-text) {
+        flex: 1 1 100%;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        text-overflow: clip;
+    }
 }
