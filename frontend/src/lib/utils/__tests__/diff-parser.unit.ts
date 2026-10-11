@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { enrichRowsWithInlineSegments, buildDisplayItems, truncatePath, buildSideBySideRows, buildModifiedSegments, getStatusBadge } from '$lib/utils/diff-parser';
+import { enrichRowsWithInlineSegments, buildDisplayItems, jumpTargets, truncatePath, buildSideBySideRows, buildModifiedSegments, getStatusBadge } from '$lib/utils/diff-parser';
 import type { DiffFile, DiffRow } from '$lib/types/diff';
 
 function makeDiffFile(overrides: Partial<DiffFile> = {}): DiffFile {
@@ -224,6 +224,79 @@ describe('buildDisplayItems', () => {
         const items = buildDisplayItems(rows);
         const collapsed = items.filter(i => i.type === 'collapsed');
         expect(collapsed.length).toBe(0); // all within radius
+    });
+
+    it('names each drawn row its position in the file’s rows', () => {
+        // One change at each end and 20 context lines between them: 4 rows, a 14-line block, 4 rows.
+        const rows = [
+            row('added', '+'),
+            ...Array.from({ length: 20 }, () => row('context')),
+            row('added', '+'),
+        ];
+        const items = buildDisplayItems(rows);
+        const drawn = items.filter(i => i.type === 'row');
+        expect(drawn.map(i => i.type === 'row' ? i.rowIndex : -1)).toEqual([0, 1, 2, 3, 18, 19, 20, 21]);
+    });
+
+    it('names every row of a run too short to collapse', () => {
+        const rows = [row('added', '+'), ...Array.from({ length: 5 }, () => row('context')), row('added', '+')];
+        const items = buildDisplayItems(rows);
+        expect(items.filter(i => i.type === 'collapsed')).toHaveLength(0);
+        expect(items.map(i => i.type === 'row' ? i.rowIndex : -1)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    });
+
+    it('numbers a collapsed block from the row it starts at', () => {
+        const rows = [
+            row('added', '+'),
+            ...Array.from({ length: 20 }, (_, i) => row('context', `c${i}`)),
+            row('added', '+'),
+        ];
+        const item = buildDisplayItems(rows).find(i => i.type === 'collapsed');
+        const block = item?.type === 'collapsed' ? item.block : null;
+        expect(block?.startIndex).toBe(4);
+        expect(block?.rows.map(r => r.text)).toEqual(rows.slice(4, 18).map(r => r.text));
+    });
+});
+
+describe('jumpTargets', () => {
+    function row(lineNumber: number | null, variant: DiffRow['variant']): DiffRow {
+        return { lineNumber, variant, text: 'x' };
+    }
+
+    it('opens a context or added row at its own line', () => {
+        const rows = [row(4, 'context'), row(5, 'added')];
+        expect(jumpTargets(rows)).toEqual([4, 5]);
+    });
+
+    it('opens a removed row at the new-side line the deletion landed on', () => {
+        // The old file's 31-32 sit against the new file's 31, so the deletion happened just above it.
+        const rows = [row(30, 'context'), row(31, 'removed'), row(32, 'removed'), row(31, 'context'), row(32, 'context')];
+        expect(jumpTargets(rows)).toEqual([30, 31, 31, 31, 32]);
+    });
+
+    it('opens a deletion at the end of the hunk at the new-side line it followed', () => {
+        const rows = [row(5, 'context'), row(6, 'removed'), row(7, 'removed')];
+        expect(jumpTargets(rows)).toEqual([5, 5, 5]);
+    });
+
+    it('reads a mixed hunk against the new side, never against its own number', () => {
+        const rows = [row(1, 'context'), row(2, 'removed'), row(2, 'added'), row(3, 'removed')];
+        expect(jumpTargets(rows)).toEqual([1, 2, 2, 2]);
+    });
+
+    it('offers nothing for a file with no new side', () => {
+        const rows = [row(1, 'removed'), row(2, 'removed')];
+        expect(jumpTargets(rows)).toEqual([null, null]);
+    });
+
+    it('skips a row with no number of its own in both directions', () => {
+        const rows = [row(9, 'context'), row(10, 'removed'), row(null, 'context'), row(null, 'context')];
+        expect(jumpTargets(rows)).toEqual([9, 9, null, null]);
+    });
+
+    it('answers for every row, in row order', () => {
+        const rows = [row(1, 'added'), row(null, 'context'), row(3, 'removed')];
+        expect(jumpTargets(rows)).toHaveLength(rows.length);
     });
 });
 

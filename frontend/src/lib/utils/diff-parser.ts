@@ -114,13 +114,38 @@ export function enrichRowsWithInlineSegments(rows: ApiDiffRow[]): DiffRow[] {
  */
 interface CollapsedBlock {
     id: string;
-    count: number;
+    /** Where the block starts in the file's rows, so an expanded row knows its own position. */
+    startIndex: number;
     rows: DiffRow[];
 }
 
 export type DiffDisplayItem =
-    | { type: 'row'; row: DiffRow }
+    | { type: 'row'; row: DiffRow; rowIndex: number }
     | { type: 'collapsed'; block: CollapsedBlock };
+
+/** The line a click on each row opens, indexed by row position. A removed row has no line in the file the
+ *  editor opens, so it opens the new-side line its deletion sits against — `null` when there is no new side. */
+export function jumpTargets(rows: DiffRow[]): (number | null)[] {
+    const newSide = rows.map(r => (r.variant === 'removed' ? null : r.lineNumber));
+
+    // Nearest numbered new-side row ahead of, and behind, each index. An unnumbered row passes the number
+    // through rather than resetting the walk.
+    const ahead: (number | null)[] = new Array(rows.length).fill(null);
+    let carry: number | null = null;
+    for (let i = rows.length - 1; i >= 0; i--) {
+        ahead[i] = carry;
+        carry = newSide[i] ?? carry;
+    }
+    const behind: (number | null)[] = new Array(rows.length).fill(null);
+    carry = null;
+    for (let i = 0; i < rows.length; i++) {
+        behind[i] = carry;
+        carry = newSide[i] ?? carry;
+    }
+
+    return rows.map((row, i) =>
+        row.variant === 'removed' ? ahead[i] ?? behind[i] : newSide[i]);
+}
 
 /** Minimum number of consecutive context lines to offer collapsing. */
 const MIN_COLLAPSE_LINES = 8;
@@ -161,7 +186,7 @@ export function buildDisplayItems(rows: DiffRow[]): DiffDisplayItem[] {
         if (!shouldHide(i)) {
             const row = rows[i];
             if (row) {
-                items.push({ type: 'row', row });
+                items.push({ type: 'row', row, rowIndex: i });
             }
             i++;
             continue;
@@ -176,8 +201,11 @@ export function buildDisplayItems(rows: DiffRow[]): DiffDisplayItem[] {
 
         if (blockRows.length < MIN_COLLAPSE_LINES) {
             // Too small to collapse — show all
-            for (const row of blockRows) {
-                items.push({ type: 'row', row });
+            for (let ri = start; ri < i; ri++) {
+                const row = rows[ri];
+                if (row) {
+                    items.push({ type: 'row', row, rowIndex: ri });
+                }
             }
             continue;
         }
@@ -186,7 +214,7 @@ export function buildDisplayItems(rows: DiffRow[]): DiffDisplayItem[] {
             type: 'collapsed',
             block: {
                 id: `ctx-${start}-${i - 1}`,
-                count: blockRows.length,
+                startIndex: start,
                 rows: blockRows,
             },
         });
