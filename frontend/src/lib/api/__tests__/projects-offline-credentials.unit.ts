@@ -17,7 +17,10 @@ vi.mock('$lib/storage', async (importOriginal) => {
     return {
         ...actual,
         loadQueue: async () => persisted.queue ?? [],
-        saveQueue: async (actions: unknown[]) => { persisted.queue = actions; },
+        updateQueue: async (change: (held: unknown[]) => unknown[]) => {
+            persisted.queue = change(persisted.queue ?? []);
+            return persisted.queue as unknown[];
+        },
     };
 });
 

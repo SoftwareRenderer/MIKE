@@ -52,7 +52,7 @@
     import { getLanguageSupport, resolveFile } from '$lib/utils/editor-language';
     import { fileSuffix } from '$lib/utils/file-suffix';
     import { getOutline } from '$lib/utils/editor-outline';
-    import { historyDepths, type EditorHistory } from '$lib/utils/editor-history';
+    import { historyDepths, replayDeltas, type EditorHistory } from '$lib/utils/editor-history';
 
     let {
         projectId,
@@ -478,6 +478,32 @@
         onHistoryChange(editorHistory);
     });
 
+    /**
+     * A throttled persistence write: the wait, and the write it runs. Each holds the file and buffer the edit
+     * belonged to, because the diff editor hands one instance from file to file — a write that read `filePath`
+     * when it fired would store this buffer under the arriving file.
+     */
+    interface ArmedWrite { timer: ReturnType<typeof setTimeout> | null; write: (() => void) | null }
+    const armedDraft: ArmedWrite = { timer: null, write: null };
+    const armedHistory: ArmedWrite = { timer: null, write: null };
+
+    function armWrite(armed: ArmedWrite, delayMs: number, write: () => void) {
+        if (armed.timer) clearTimeout(armed.timer);
+        armed.write = write;
+        armed.timer = setTimeout(() => {
+            armed.timer = null;
+            armed.write?.();
+            armed.write = null;
+        }, delayMs);
+    }
+
+    /** Deliver an armed write to the file it was armed for, and discharge the wait. */
+    function deliverWrite(armed: ArmedWrite) {
+        if (armed.timer) { clearTimeout(armed.timer); armed.timer = null; }
+        armed.write?.();
+        armed.write = null;
+    }
+
     function destroyView() {
         if (scrollTrackView) {
             scrollTrackView.scrollDOM.removeEventListener('scroll', handleScrollTopEvent);
@@ -488,6 +514,9 @@
             clearTimeout(scrollReportTimer);
             scrollReportTimer = null;
         }
+        // Deliver, do not drop: the document is changing hands and the wait belongs to the file it was armed for.
+        deliverWrite(armedDraft);
+        deliverWrite(armedHistory);
         view?.destroy();
         view = null;
         syncHistory();
@@ -497,8 +526,9 @@
         if (!editorEl || editorCreating) return;
         editorCreating = true;
         const langSupport = getLanguageSupport(filePath);
-        // Use base content so delta replay starts from the saved state.
-        const initialDoc = historyBase || content;
+        // With a kept chain the document starts at its base and the replay reaches the buffer; with none it
+        // starts as the buffer. Either way the screen holds what `content` holds, which is what a save writes.
+        const initialDoc = historyDeltas.length > 0 ? historyBase : content;
         // Hover tooltip on the gutter rows. Read per row build, so an editor that outlives a
         // language switch shows the current one.
         const gutterTitle = () =>
@@ -584,6 +614,9 @@
                     if (!isExtensionContentSet(update.transactions.map(tr => tr.annotation(Transaction.userEvent)))) {
                         uiInjector.forwardEvent(INJECTION_POINTS.FILE_EDITOR, 'editor.contentChange', { content }, extAnchorEl);
                     }
+                    // Both throttled writes carry the file this edit happened in.
+                    const editedPath = filePath;
+                    const editedDoc = update.state.doc.toString();
                     // Capture delta for undo/redo history persistence.
                     // Only capture user edits (not programmatic changes during restore).
                     if (!(view as any).__restoring) {
@@ -593,16 +626,14 @@
                         });
                         if (deltas.length > 0) {
                             historyDeltas = [...historyDeltas, ...deltas];
+                            const base = historyBase;
+                            const pending = historyDeltas;
                             // Persist history (throttled)
-                            clearTimeout((view as any)._historyTimer);
-                            (view as any)._historyTimer = setTimeout(() => {
-                                saveEditorHistory(filePath, historyBase, historyDeltas).catch(() => {});
-                            }, 500);
+                            armWrite(armedHistory, 500, () => saveEditorHistory(editedPath, base, pending).catch(() => {}));
                         }
                     }
                     // Persist unsaved draft (throttled)
-                    clearTimeout((view as any)._draftTimer);
-                    (view as any)._draftTimer = setTimeout(() => setEditorDraft(filePath, content), 200);
+                    armWrite(armedDraft, 200, () => setEditorDraft(editedPath, editedDoc).catch(() => {}));
                 }
                 if (update.selectionSet) {
                     // Update cursor position (status bar only — symbol
@@ -757,7 +788,9 @@
             } else {
                 gutterMarkers = parseGutterMarkers(data.gutter_markers);
 
-                // Use unsaved draft if available, otherwise use current file content
+                // The draft is the buffer this browser left, so it is both what the screen paints and what a
+                // save writes. The undo chain rides along only when it reaches that same text: it is written
+                // later than the draft, so a chain that disagrees is the older reading.
                 const draft = await getEditorDraft(filePath);
                 content = draft !== null ? draft : fileContent;
                 baselineContent = fileContent;
@@ -768,11 +801,15 @@
 
                 // Load persisted undo/redo history (auto-evicted if older than 72h)
                 const savedHistory = await loadEditorHistory(filePath);
-                if (savedHistory && Array.isArray(savedHistory.deltas)) {
-                    historyBase = savedHistory.base;
-                    historyDeltas = savedHistory.deltas;
+                const kept = savedHistory
+                    && Array.isArray(savedHistory.deltas)
+                    && replayDeltas(savedHistory.base, savedHistory.deltas) === content
+                    ? savedHistory : null;
+                if (kept) {
+                    historyBase = kept.base;
+                    historyDeltas = kept.deltas;
                 } else {
-                    // No history or expired — start fresh from current file content
+                    // No chain, an expired one, or one recorded against different bytes.
                     historyBase = fileContent;
                     historyDeltas = [];
                 }

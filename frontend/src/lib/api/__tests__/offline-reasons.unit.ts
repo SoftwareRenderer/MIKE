@@ -117,6 +117,9 @@ describe('the two reasons the queue holds a write', () => {
         setOfflineStatus(true);
         await sendTaskMessage(SEND);
         setOfflineStatus(false);      // the queue goes out, and that send hangs
+        // The record is read before anything is sent, so wait for the replay to reach its request — the reason
+        // below is raised during the send, which is what this scenario is about.
+        await vi.waitFor(() => expect(log.filter(c => c.endsWith('/send'))).toEqual(['POST /api/projects/p1/tasks/t1/send']));
         setOfflineStatus(true);       // the socket drops again, mid-replay
 
         const second = await sendTaskMessage({ ...SEND, content: 'second' });

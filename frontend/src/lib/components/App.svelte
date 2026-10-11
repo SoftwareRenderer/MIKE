@@ -12,7 +12,7 @@
     import { diffStatsStore } from '$lib/stores/diff-stats.svelte';
     import { commitQueueStore } from '$lib/stores/commit-queue.svelte';
     import { taskEventStore } from '$lib/stores/task-events.svelte';
-    import { getProjects, getBoard, getConfig, deleteProject, createProject, cloneProject, createAppStream, getProjectCounts, setOfflineStatus, loadQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask, getDroppedActions } from '$lib/api';
+    import { getProjects, getBoard, getConfig, deleteProject, createProject, cloneProject, createAppStream, getProjectCounts, setOfflineStatus, loadQueue, flushQueueNow, adoptQueue, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask, getDroppedActions } from '$lib/api';
     import { reconnectBanner } from '$lib/services/reconnect-banner.svelte';
     import { sessionBoot } from '$lib/services/session-boot.svelte';
     import { repoNameFromGitUrl } from '$lib/utils/repo-name';
@@ -595,6 +595,9 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     // socket drops.
     function reconcileAfterAbsence(): void {
         appStream?.reconnectNow();
+        // The notices a sibling window sent while this one slept never arrived, and its pending rows are the
+        // shared record's.
+        void adoptQueue();
         refreshBoard().catch(() => {
             if (visibilityRetryTimer) return; // already retrying
             visibilityRetryTimer = setTimeout(() => {

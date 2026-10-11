@@ -36,14 +36,14 @@ import { t } from '$lib/i18n';
 /**
  * Create a new task in a project, queued when offline. Deliberately not `writeOrQueue`, and the reason is the
  * id: a create fixes its id before it sets out, so the card drawn on the board and the action held in the queue
- * are the same task — a decision `CreateTaskModal` owns (docs/reconnection.md).
+ * are the same task — a decision `CreateTaskModal` owns (docs/reconnection.md). That id is also the write's
+ * identity on the wire, so a create whose answer was lost is not a second task when it is tried again.
  */
-export async function createTask(projectId: string, task: Partial<Task>): Promise<Task> {
+export async function createTask(projectId: string, task: Partial<Task>, clientToken = generateId()): Promise<Task> {
     if (getOfflineStatus()) {
-        const id = generateId();
-        return await queueWrite('createTask', { projectId, taskData: task }, { ...task, id, status: task.status ?? 'backlog', created_at: new Date().toISOString() } as Task);
+        return await queueWrite('createTask', { projectId, taskData: task, clientToken }, { ...task, id: clientToken, status: task.status ?? 'backlog', created_at: new Date().toISOString() } as Task);
     }
-    return createTaskRaw(projectId, task);
+    return createTaskRaw(projectId, task, clientToken);
 }
 
 /** Fetch a single task by ID. */
@@ -228,7 +228,7 @@ export async function resumeTask(projectId: string, taskId: string): Promise<Tas
 export async function sendTaskMessage(payload: SendTaskMessagePayload): Promise<SendResult> {
     return writeOrQueue(
         { type: 'sendTaskMessage', params: { ...payload } },
-        () => sendTaskMessageRaw(payload),
+        (clientToken) => sendTaskMessageRaw({ ...payload, clientToken }),
         () => ({ id: generateId(), role: 'user', content: payload.content }),
     );
 }

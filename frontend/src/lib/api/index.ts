@@ -20,6 +20,7 @@ export {
     onQueueFlushed,
     loadQueue,
     clearQueue,
+    adoptQueue,
     enqueueAction,
     isTransientError,
     getQueuedTaskIds,
