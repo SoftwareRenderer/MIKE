@@ -59,7 +59,8 @@
                                 {#if draft.activeHostPorts.has(port.container_port)}
                                     <div class="sandbox-item sandbox-item-pair">
                                         <span class="sandbox-item-key" title={t('sandbox.hostPort')}>{formatAssignedHost(draft.activeHostPorts.get(port.container_port) ?? 0, port.host_ip)}</span>
-                                        <span class="sandbox-item-text" title={t('sandbox.containerPort')}>:{port.container_port}</span>
+                                        <span>:</span>
+                                        <span class="sandbox-item-text" title={t('sandbox.containerPort')}>{port.container_port}</span>
                                     </div>
                                 {/if}
                             {/each}

@@ -160,7 +160,8 @@ import { formatNetworkedExtensions, serverToolExtensions, serverToolMCPServers }
                             {#each task.assigned_ports as port}
                             <div class="sandbox-item sandbox-item-pair">
                                 <span class="sandbox-item-key" title={t('sandbox.hostAddress')}>{formatAssignedHost(port.host_port, port.host_ip)}</span>
-                                <span class="sandbox-item-text" title={t('sandbox.containerPort')}>:{port.container_port}</span>
+                                <span>:</span>
+                                <span class="sandbox-item-text" title={t('sandbox.containerPort')}>{port.container_port}</span>
                             </div>
                             {/each}
                         </div>

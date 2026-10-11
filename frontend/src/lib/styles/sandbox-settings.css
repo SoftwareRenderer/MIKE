@@ -96,11 +96,6 @@
     font-family: var(--font-mono, monospace);
 }
 
-/* A host:container mapping is one token — `32789:3000` — so no air goes around its colon. */
-:global(.sandbox-item-pair) {
-    gap: 0;
-}
-
 /* The half that names the thing, and the half that is named. */
 :global(.sandbox-item-key) {
     font-weight: 600;
@@ -181,5 +176,15 @@
         white-space: normal;
         overflow-wrap: anywhere;
         text-overflow: clip;
+    }
+
+    :global(.sandbox-item-pair) {
+        flex-wrap: nowrap;
+    }
+
+    :global(.sandbox-item-pair .sandbox-item-key),
+    :global(.sandbox-item-pair .sandbox-item-text) {
+        flex: 0 1 auto;
+        white-space: nowrap;
     }
 }

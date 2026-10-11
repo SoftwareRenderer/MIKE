@@ -21,6 +21,10 @@
         return assigned === undefined ? '' : formatAssignedHost(assigned, port.host_ip);
     }
 
+    function containerHalf(port: PortForward): string {
+        return hostHalf(port) ? `${port.container_port}` : formatForwardPort(port);
+    }
+
     const rowForm = editInPlace({
         form: () => formEl,
         edit: (i) => draft.editPort(i),
@@ -38,8 +42,9 @@
                     <span class="port-mapping">
                         {#if hostHalf(port)}
                             <span class="port-host" title={t('sandbox.hostPort')}>{hostHalf(port)}</span>
+                            <span>:</span>
                         {/if}
-                        <span class="port-container" title={t('sandbox.containerPort')}>{hostHalf(port) ? `:${port.container_port}` : formatForwardPort(port)}</span>
+                        <span class="port-container" title={t('sandbox.containerPort')}>{containerHalf(port)}</span>
                     </span>
                     <button type="button" class="btn-remove-port" onclick={(e) => { e.stopPropagation(); draft.removePortForward(i); }} disabled={locked} title={t('sandbox.remove')}>
                         {@render closeIcon()}

@@ -305,10 +305,6 @@
     color: var(--color-text-primary);
 }
 
-:global(.sandbox-config .port-mapping) {
-    gap: 0;
-}
-
 :global(.sandbox-config .mount-info),
 :global(.sandbox-config .env-info) {
     min-width: 0;
