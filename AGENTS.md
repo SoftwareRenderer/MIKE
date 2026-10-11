@@ -186,7 +186,10 @@ make test-gen-registry                                   # the generator's own t
 - **A card lists its subtasks as flat rows in run order, never as nested card boxes.** One pure function
   owns the order and it mirrors `exec`'s schedule. `docs/subtask-outline.md`.
 - Diff text is parsed once in `$lib/utils/diff-parser.ts`, and its badges are the diff badges; git status
-  entries keep their own. Sticky section headers use `position: sticky` over an opaque background.
+  entries keep their own.
+- **A diff row's gutter number is not its identity** — one column numbers a removed row from the old file and
+  every other row from the new one. Identify a row by its text; resolve a click through `jumpTargets`.
+  `docs/api-contract.md → Diffs`. Sticky section headers use `position: sticky` over an opaque background.
 
 ## Storage
 

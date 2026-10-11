@@ -391,6 +391,17 @@ the only source: it reads the parsed status. `GitStatusPanel.svelte` keeps its o
 entry, which is a different grammar with different inputs. Tests:
 `frontend/src/lib/utils/__tests__/diff-parser.unit.ts`.
 
+**A diff row's number is what its gutter shows, not a line of one file.** A unified diff carries one gutter:
+`git.ParseUnifiedDiff` numbers a removed row from the old file and every other row from the new one, so one
+number names two lines and nothing but the row's own text identifies it. `DiffViewer.svelte` looks the
+highlighted HTML up by that text for the same reason. A click resolves through `jumpTargets`
+(`$lib/utils/diff-parser.ts`): the editor opens the new file, so a removed row opens the new-side line its
+deletion left behind, and a row of a file with no new side is no control at all. The highlight pass runs for
+every file the panel draws — tracked, committed and untracked — rather than for the ones the reader has
+collapsed and reopened. Tests:
+`frontend/src/lib/components/__tests__/diff-row-text.unit.svelte.ts` (a row paints its own text),
+`frontend/src/lib/components/__tests__/diff-row-keyboard.unit.svelte.ts` (where a click lands).
+
 **A ref comparison is not reconciled by working-tree stats.** The panel shows one comparison and the board
 stream keeps pushing the task's working-tree stats, so the view that came from `?head=` or `?base=` has to
 say so. `DiffCache.loadDiff` and `refreshManifest` record whether the view on screen compares refs
