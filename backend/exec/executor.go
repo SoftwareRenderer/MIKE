@@ -75,14 +75,16 @@ type TaskExecutor struct {
 	// How long to wait before re-issuing a failed stream. Production is backoffFor; the retry loop
 	// reads this, so a test that only needs "retried, then failed" is not held to the production
 	// ladder. Its shape belongs to TestBackoffFor_* and TestQuietStreamBackoffWaitsAtLeastTheSilenceItSaw.
-	llmBackoff    func(attempt int, err error) time.Duration
-	gate          *ConcurrencyGate // per-LLM-request in-flight limit (incl. utility calls)
-	taskGate      *ConcurrencyGate // per-provider running-task limit
-	taskSlotWaits queuedWaiters    // which task-slot queue entry each task is blocked behind; see queuedWaiters
-	memGate       *MemoryGate      // sandbox memory budget gate; capacity 0 = disabled
-	taskMu        sync.Mutex
-	llmAdapter    *llmadapter.Adapter // provider request adaptation (llm extensions); nil = none
-	tasks         map[string]*executionState
+	llmBackoff func(attempt int, err error) time.Duration
+	// Truncates one conversation from inside a running turn. See Deps.RewindConversation.
+	rewindConversation func(projectID, taskID, messageID string) error
+	gate               *ConcurrencyGate // per-LLM-request in-flight limit (incl. utility calls)
+	taskGate           *ConcurrencyGate // per-provider running-task limit
+	taskSlotWaits      queuedWaiters    // which task-slot queue entry each task is blocked behind; see queuedWaiters
+	memGate            *MemoryGate      // sandbox memory budget gate; capacity 0 = disabled
+	taskMu             sync.Mutex
+	llmAdapter         *llmadapter.Adapter // provider request adaptation (llm extensions); nil = none
+	tasks              map[string]*executionState
 	// Per-task mutexes to serialize worktree access across executors and merges.
 	worktreeMu taskWorktreeLocks // taskID -> the task's own worktree lock
 	// Branch and merge behaviour of a finished turn. Its lock discipline is in mergeOrchestrator.
@@ -364,6 +366,10 @@ type Deps struct {
 	// LLMBackoff decides how long a failed stream waits before its next attempt. Nil is the
 	// production ladder.
 	LLMBackoff func(attempt int, err error) time.Duration
+	// RewindConversation deletes one message and every row after it in its thread, undoing what that
+	// implies for the pinned snapshots, the fork threads and the worktree — steps that belong to the
+	// server's "delete message" path alone. Nil means nothing can rewind, so the loop breaker never fires.
+	RewindConversation func(projectID, taskID, messageID string) error
 }
 
 // NewTaskExecutor wires an executor and the collaborators split out of it. Every TaskExecutor in
@@ -385,22 +391,23 @@ func NewTaskExecutor(deps Deps) *TaskExecutor {
 		binaries = deps.SandboxMgr
 	}
 	te := &TaskExecutor{
-		store:         deps.Store,
-		configStore:   deps.ConfigStore,
-		appStreamMgr:  deps.AppStreamMgr,
-		worktreeMgr:   deps.WorktreeMgr,
-		sandboxMgr:    deps.SandboxMgr,
-		agentRegistry: deps.AgentRegistry,
-		agentBinaries: binaries,
-		lspMgr:        lspMgrI,
-		extTools:      deps.ExtensionTools,
-		mcpReg:        deps.MCP,
-		commitQueue:   deps.CommitQueue,
-		llmBackoff:    llmBackoff,
-		gate:          NewConcurrencyGate(),
-		taskGate:      NewConcurrencyGate(),
-		memGate:       &MemoryGate{},
-		tasks:         make(map[string]*executionState),
+		store:              deps.Store,
+		configStore:        deps.ConfigStore,
+		appStreamMgr:       deps.AppStreamMgr,
+		worktreeMgr:        deps.WorktreeMgr,
+		sandboxMgr:         deps.SandboxMgr,
+		agentRegistry:      deps.AgentRegistry,
+		agentBinaries:      binaries,
+		lspMgr:             lspMgrI,
+		extTools:           deps.ExtensionTools,
+		mcpReg:             deps.MCP,
+		commitQueue:        deps.CommitQueue,
+		llmBackoff:         llmBackoff,
+		rewindConversation: deps.RewindConversation,
+		gate:               NewConcurrencyGate(),
+		taskGate:           NewConcurrencyGate(),
+		memGate:            &MemoryGate{},
+		tasks:              make(map[string]*executionState),
 	}
 	te.worktreeMu.Configure(taskLockSlowWait, func(taskID string, waited time.Duration) {
 		logging.For(logging.Tools).With(logging.TaskID, taskID).Warnf(

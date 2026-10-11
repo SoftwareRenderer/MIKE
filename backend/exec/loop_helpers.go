@@ -618,6 +618,34 @@ func userMessageToChatMessage(um stream.UserMessage) types.ChatMessage {
 	return types.ChatMessage{Role: "user", Content: um.Content}
 }
 
+// proceedInstruction is what the app sends when the run should carry on with no new information:
+// auto-summarization sends it after a summary, the loop breaker after a cut. It is a plain user row, so it
+// survives a restart.
+const proceedInstruction = "Proceed"
+
+// sendProceed writes the instruction as the task's next user message on threadID and shows it. A failed
+// write is returned rather than echoed, because the row is what a restarted run reads back.
+func (te *TaskExecutor) sendProceed(projectID, taskID, threadID string) error {
+	id := uuid.New().String()
+	if err := te.store.CreateTaskMessage(&types.TaskMessage{
+		ID:        id,
+		TaskID:    taskID,
+		ThreadID:  threadID,
+		Role:      "user",
+		Content:   proceedInstruction,
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		return err
+	}
+	te.rowsDurable(projectID, taskID)
+	data := map[string]any{"id": id, "role": "user", "content": proceedInstruction}
+	if threadID != "" {
+		data["thread_id"] = threadID
+	}
+	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeUserMessage, Data: data})
+	return nil
+}
+
 // handleLoopDetected counts a detected loop, returns true when the consecutive maximum is
 // reached and the task should terminate, otherwise injects a hint and notifies the frontend.
 // A non-empty target is named in the hint (tool loops).

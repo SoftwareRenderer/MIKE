@@ -38,6 +38,8 @@ type summarizeOrchestrator struct {
 	runningState func(taskID string) *executionState
 	// starts a task that has no executor, for the blocked message a summarization left behind.
 	lazyStart func(projectID, taskID, content, modelName, serverURL, reasoningEffort string, regenerate bool)
+	// sends the "Proceed" instruction. See TaskExecutor.sendProceed.
+	sendProceed func(projectID, taskID, threadID string) error
 	// So a summary and a chat turn cannot disagree about which provider answers.
 	utilityTarget     func(task *types.Task) (serverURL, model string, ok bool)
 	chatCompletion    func(ctx context.Context, serverURL, modelName string, messages []types.ChatMessage, opts *ChatCompletionOpts) (*types.ChatUsage, string, error)
@@ -60,6 +62,7 @@ func (te *TaskExecutor) newSummarizeOrchestrator() *summarizeOrchestrator {
 		worktreeMgr:    te.worktreeMgr,
 		runningState:   te.runningState,
 		lazyStart:      te.handleLazyStart,
+		sendProceed:    te.sendProceed,
 		utilityTarget:  te.utilityTarget,
 		chatCompletion: te.ChatCompletion,
 	}
@@ -288,18 +291,14 @@ func installSummary(messages []types.ChatMessage, task *types.Task, worktreePath
 	return messages, estimatePromptTokens(buildLLMContext(messages))
 }
 
-// injectProceedMessage persists and broadcasts a "Proceed" user message
+// injectProceedMessage puts the instruction in front of the run that will be fed the summary: the row
+// first, then the same message in the conversation the next call reads.
 func (s *summarizeOrchestrator) injectProceedMessage(setup *taskExecSetup, lc *loopContext) {
-	msgID := uuid.New().String()
-	_ = s.store.CreateTaskMessage(&types.TaskMessage{
-		ID: msgID, TaskID: setup.task.ID, ThreadID: setup.task.CurrentThreadID,
-		Role: "user", Content: "Proceed", CreatedAt: time.Now().UTC(),
-	})
-	lc.messages = append(lc.messages, types.ChatMessage{Role: "user", Content: "Proceed"})
-	s.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{
-		Type: types.WSTypeUserMessage,
-		Data: map[string]any{"id": msgID, "role": "user", "content": "Proceed"},
-	})
+	if err := s.sendProceed(setup.projectID, setup.task.ID, setup.task.CurrentThreadID); err != nil {
+		logging.For(logging.Summarize).With(logging.TaskID, setup.task.ID).Warnf("proceed instruction not recorded: %v", err)
+		return
+	}
+	lc.messages = append(lc.messages, types.ChatMessage{Role: "user", Content: proceedInstruction})
 }
 
 // applySummarization summarizes, persists the summary, installs it in the system prompt and

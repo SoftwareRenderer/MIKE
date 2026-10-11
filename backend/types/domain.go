@@ -119,8 +119,11 @@ type Config struct {
 	AutoMaximizeChatMobile *bool `json:"auto_maximize_chat_mobile,omitempty"`
 	// ReclaimIdleSandbox lets the memory supervisor release the container of a task idle past the
 	// reclaim grace. Nil = off. docs/sandbox-runtime.md.
-	ReclaimIdleSandbox *bool              `json:"reclaim_idle_sandbox,omitempty"`
-	KeyboardShortcuts  *KeyboardShortcuts `json:"keyboard_shortcuts,omitempty"`
+	ReclaimIdleSandbox *bool `json:"reclaim_idle_sandbox,omitempty"`
+	// LoopBreaker recovers from a run that reached its consecutive-failed-turn limit instead of stopping
+	// it: cut the failed call and the turns after it, then send "Proceed". Nil = off.
+	LoopBreaker       *bool              `json:"loop_breaker,omitempty"`
+	KeyboardShortcuts *KeyboardShortcuts `json:"keyboard_shortcuts,omitempty"`
 	// MCPServers is the registered MCP registry with every header value masked: GetConfig hands out no
 	// plaintext secret. The code that dials a server asks for OpenMCPServers instead.
 	MCPServers []MCPServer `json:"mcp_servers,omitempty"`

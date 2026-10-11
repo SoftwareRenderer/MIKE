@@ -58,6 +58,7 @@
     let defaultAutoSummarizeThreshold = $state(90);
     let runSiblingsParallel = $state(false);
     let reclaimIdleSandbox = $state(false);
+    let loopBreaker = $state(false);
     // Keyboard shortcut bindings (undefined = default, "" = disabled).
     // The Save payload always sends BOTH bindings (absent = reset to default).
     let keyboardCreateTask = $state<string | undefined>(undefined);
@@ -219,6 +220,7 @@
             defaultAutoSummarizeThreshold = config.default_auto_summarize_threshold ?? 90;
             runSiblingsParallel = config.run_siblings_parallel ?? false;
             reclaimIdleSandbox = config.reclaim_idle_sandbox ?? false;
+            loopBreaker = config.loop_breaker ?? false;
             keyboardCreateTask = config.keyboard_shortcuts?.create_task;
             keyboardCreateTaskSubmit = config.keyboard_shortcuts?.create_task_submit;
             keyboardOpenTerminal = config.keyboard_shortcuts?.open_terminal;
@@ -671,6 +673,7 @@
                 default_auto_summarize_threshold: defaultAutoSummarizeThreshold,
                 run_siblings_parallel: runSiblingsParallel,
                 reclaim_idle_sandbox: reclaimIdleSandbox,
+                loop_breaker: loopBreaker,
                 hide_model_badge: hideModelBadge,
                 sort_oldest_first: sortOldestFirst,
                 auto_maximize_chat_mobile: autoMaximizeChat,
@@ -918,6 +921,7 @@
                 bind:defaultAutoSummarizeThreshold
                 bind:runSiblingsParallel
                 bind:reclaimIdleSandbox
+                bind:loopBreaker
                 originBranch={appStore.selectedProject?.origin_branch || 'main'}
                 onDirty={markDirty}
             />

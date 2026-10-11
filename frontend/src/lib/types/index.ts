@@ -275,6 +275,9 @@ export interface Config {
     sort_oldest_first?: boolean; // put the least recently moved card on top of a column (default off)
     auto_maximize_chat_mobile?: boolean; // maximize the chat while its input has focus (default on)
     reclaim_idle_sandbox?: boolean; // release a waiting task's container to the memory budget (default off)
+    // Recover from a run that hit its consecutive-failed-turn limit: cut the failed call and the turns
+    // after it, then send "Proceed". Default off.
+    loop_breaker?: boolean;
     encryption_enabled?: boolean;
     tls_ca_available?: boolean; // server runs its own cert signed by its local CA → GET /api/tls/ca offers it
     // Everything MIKE started may share this ceiling, in MB; memory_total_mb is the installed RAM it

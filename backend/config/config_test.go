@@ -127,6 +127,13 @@ func TestUIFlagPreferences(t *testing.T) {
 			accessor: func(cs *ConfigStore) bool { return cs.GetReclaimIdleSandbox() },
 		},
 		{
+			// A run that hit its failed-turn limit is handed back until this is on.
+			name:     "loop_breaker",
+			set:      func(c *types.Config, v *bool) { c.LoopBreaker = v },
+			get:      func(c *types.Config) *bool { return c.LoopBreaker },
+			accessor: func(cs *ConfigStore) bool { return cs.GetLoopBreaker() },
+		},
+		{
 			// Unset is "never asked", not "off": a stored answer must not dissolve back into
 			// never-asked, and only the round-trip rows tell them apart.
 			name: "update_check_enabled",

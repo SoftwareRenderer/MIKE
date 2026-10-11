@@ -42,6 +42,7 @@ func TestPUTConfig_FieldWrongTypeIsRejectedWithoutPanicOrSilence(t *testing.T) {
 		{"sort_oldest_first is a string", `{"sort_oldest_first":"x"}`},
 		{"auto_maximize_chat_mobile is a string", `{"auto_maximize_chat_mobile":"x"}`},
 		{"reclaim_idle_sandbox is a string", `{"reclaim_idle_sandbox":"yes"}`},
+		{"loop_breaker is a string", `{"loop_breaker":"yes"}`},
 		{"default_max_failed_turns is a string", `{"default_max_failed_turns":"many"}`},
 		{"default_auto_summarize_threshold is a string", `{"default_auto_summarize_threshold":"half"}`},
 		// A default nothing dispatches on would be echoed back by the UI and ignored, so it is
@@ -183,7 +184,7 @@ func TestPUTConfig_AbsentFieldsKeepStoredValues(t *testing.T) {
 		"default_operating_mode":"plan","default_max_failed_turns":5,
 		"default_auto_summarize_threshold":42,"hide_model_badge":true,
 		"run_siblings_parallel":true,"sort_oldest_first":true,"auto_maximize_chat_mobile":false,
-		"reclaim_idle_sandbox":true}`
+		"reclaim_idle_sandbox":true,"loop_breaker":true}`
 	if w := putConfigRaw(t, cs, seed); w.Code != http.StatusOK {
 		t.Fatalf("seed PUT: status %d body %s", w.Code, w.Body.String())
 	}
@@ -275,5 +276,6 @@ func sameConfigExcept(a, b *types.Config, ignore ...string) bool {
 		eqBoolPtr("sort_oldest_first", a.SortOldestFirst, b.SortOldestFirst) &&
 		eqBoolPtr("auto_maximize_chat_mobile", a.AutoMaximizeChatMobile, b.AutoMaximizeChatMobile) &&
 		eqBoolPtr("reclaim_idle_sandbox", a.ReclaimIdleSandbox, b.ReclaimIdleSandbox) &&
+		eqBoolPtr("loop_breaker", a.LoopBreaker, b.LoopBreaker) &&
 		len(a.Providers) == len(b.Providers)
 }

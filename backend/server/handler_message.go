@@ -69,6 +69,19 @@ func (s *Server) truncateMessagesFrom(projectID, taskID string, msg *types.TaskM
 	return nil
 }
 
+// rewindConversationForRow is the executor's way onto the delete path above: it names a row and the
+// truncation stays in truncateMessagesFrom. A row of another task is refused.
+func (s *Server) rewindConversationForRow(projectID, taskID, messageID string) error {
+	msg, err := s.store.GetTaskMessageByID(messageID)
+	if err != nil {
+		return err
+	}
+	if msg.TaskID != taskID {
+		return fmt.Errorf("message %s belongs to task %s, not %s", messageID, msg.TaskID, taskID)
+	}
+	return s.truncateMessagesFrom(projectID, taskID, msg, false)
+}
+
 func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")

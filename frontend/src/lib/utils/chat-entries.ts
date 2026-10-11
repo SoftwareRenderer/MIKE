@@ -622,6 +622,7 @@ export function systemNoteText(kind: string | undefined, fallback: string): stri
     switch (kind) {
         case 'memory_pressure': return t('chat.system.memoryPaused');
         case 'memory_resumed': return t('chat.system.memoryResumed');
+        case 'loop_breaker': return t('chat.system.loopBreaker');
         default: return fallback;
     }
 }

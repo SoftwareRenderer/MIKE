@@ -97,6 +97,18 @@ state and clears when the retried call streams (`clearAwaiting`) or when the tur
 call never reached `finalizeTurn`, which is what persists it. So the client drops the half-streamed
 text with `dropAbandonedTurn()` and the retry streams the answer in its place.
 
+### A broken failure loop adds no frame shape
+
+The `loop_breaker` preference (Settings → Task defaults, `docs/adding-a-preference.md`) answers the run that
+reached its consecutive-failed-turn limit instead of ending it. What it sends is three frames the client
+already knows, in this order: a `hint` with `role: "system"` and `kind: "loop_breaker"`, the `user_message`
+echo of the `Proceed` instruction it stored as a user row, and a `status` frame reading `running`. The rows
+are the record — a `system` note (display-only) and a real user row — and the frames only show them landing,
+so a client that reconnects mid-break reads the same conversation. `chat.system.loopBreaker` words the note
+and `loopBreakerNoteText` (`backend/exec/loop_breaker.go`) stores that sentence on the row; the kind strings
+and `chat-entries.ts` must agree case for case. Tests: `backend/exec/loop_breaker_test.go`,
+`chat-entries.unit.ts`.
+
 ### A tool call the user stopped says so in a field
 
 A user message does not queue behind the tool call that is running. `toolCallContext`

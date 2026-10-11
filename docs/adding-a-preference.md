@@ -56,11 +56,18 @@ Example in-repo: `hide_model_badge` gates `.model-badge` in `Card.svelte`
 3. State / hydrate / save payload in `ConfigModal.svelte`.
 4. Toggle row in `ConfigModal/PreferencesTab.svelte` (UI section) — or in
    `ConfigModal/TaskDefaults.svelte` when the preference is a *behaviour* default rather than something this
-   browser renders (`run_siblings_parallel`, `reclaim_idle_sandbox`).
+   browser renders (`run_siblings_parallel`, `reclaim_idle_sandbox`, `loop_breaker`).
 5. Consume it. A browser-side preference reads `appStore.config` in the target component. A server-side
    one reads the accessor where the decision is made: `MemorySupervisor` calls `GetReclaimIdleSandbox` on
    the tick that decides. A stored preference is not a startup decision, so
    `AGENTS.md → Configuration`'s resolve-once rule does not apply to it.
+6. When the action the flag unlocks belongs to another layer, pass that layer's door rather than a copy of
+   its work. `loop_breaker` answers the run that hit its consecutive-failed-turn limit (`breakFailureLoop`,
+   `backend/exec/loop_breaker.go`) by cutting the failed call and the turns after it, which is what the
+   browser's "delete message" does. `exec.Deps.RewindConversation` is that door: `NewTaskExecutor` wires it
+   to `rewindConversationForRow` (`backend/server/handler_message.go`), so `truncateMessagesFrom` keeps
+   every step of the cut. An executor calling `DeleteTaskMessagesAfter` itself would leave the worktree
+   ahead of the conversation that describes it.
 
 **A flag that is on by default** (`auto_maximize_chat_mobile`) is the same plumbing read the other
 way: nil means on, so the client consumes `!== false`, hydrates `!== false` and defaults the tab
@@ -69,10 +76,11 @@ its regression is the explicit-false one, not the unset one.
 
 **Tests to add/update:** `backend/config/config_test.go` (round-trip + omitted-when-nil),
 `preferences-tab.unit.svelte.ts`, a component test for the gated widget (e.g.
-`card-model-badge.unit.svelte.ts`), e2e `preferences-hide-model-badge.spec.ts` (isolated). A Task-tab
-row instead extends `task-defaults.unit.svelte.ts` and the save-payload rows in
-`config-modal-run-parallel-save.unit.svelte.ts`; a preference a browser never acts on needs no spec — the
-Go round trip and the payload assertion are the round trip.
+`card-model-badge.unit.svelte.ts`), e2e `preferences-hide-model-badge.spec.ts` (isolated). A Task-tab row
+instead extends `task-defaults.unit.svelte.ts` and the save-payload rows in
+`config-modal-run-parallel-save.unit.svelte.ts`, and the behaviour the flag unlocks is tested where it lives
+(`loop_breaker` in `backend/exec/loop_breaker_test.go`). A preference a browser never acts on needs no
+spec — the Go round trip and the payload assertion are the round trip.
 
 ## When the preference belongs to a browser
 

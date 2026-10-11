@@ -121,6 +121,11 @@ type scriptToolCall struct {
 // toolCallsScript renders the calls as the delta chunk the client assembles, escaping the args text
 // into a JSON string so a test writes it the way the model does.
 func toolCallsScript(calls ...scriptToolCall) string {
+	return toolCallsScriptWith("", calls...)
+}
+
+// toolCallsScriptWith is toolCallsScript with the text the model said before the call.
+func toolCallsScriptWith(content string, calls ...scriptToolCall) string {
 	parts := make([]string, 0, len(calls))
 	for i, c := range calls {
 		args, err := json.Marshal(c.args)
@@ -130,8 +135,19 @@ func toolCallsScript(calls ...scriptToolCall) string {
 		parts = append(parts, fmt.Sprintf(`{"index":%d,"id":%q,"type":"function","function":{"name":%q,"arguments":%s}}`,
 			i, c.id, c.name, string(args)))
 	}
-	return `data: {"choices":[{"delta":{"tool_calls":[` + strings.Join(parts, ",") +
-		`]},"finish_reason":"tool_calls"}]}` + "\n\n"
+	delta := `{"tool_calls":[` + strings.Join(parts, ",") + `]}`
+	if content != "" {
+		delta = `{"content":` + jsonQuoted(content) + `,` + strings.TrimPrefix(delta, "{")
+	}
+	return `data: {"choices":[{"delta":` + delta + `,"finish_reason":"tool_calls"}]}` + "\n\n"
+}
+
+func jsonQuoted(s string) string {
+	b, err := json.Marshal(s)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
 }
 
 // textScript ends a turn with a question, so the loop detector does not end the run for an
@@ -162,6 +178,13 @@ const bashSleepThen = `echo started > started.txt; sleep 120`
 func newInterruptRun(t *testing.T, task *types.Task, scripts ...string) *interruptRun {
 	t.Helper()
 	te, repoDir, projectID, initialSHA := setupExecutorWithGit(t)
+	return newInterruptRunWith(t, te, repoDir, projectID, initialSHA, task, scripts...)
+}
+
+// newInterruptRunWith starts the same run on an executor the caller built, for a test that needs a
+// collaborator the plain fixture does not wire.
+func newInterruptRunWith(t *testing.T, te *TaskExecutor, repoDir, projectID, initialSHA string, task *types.Task, scripts ...string) *interruptRun {
+	t.Helper()
 	task.ID = "interrupt-task"
 	task.ProjectID = projectID
 	task.Status = types.StatusInProgress

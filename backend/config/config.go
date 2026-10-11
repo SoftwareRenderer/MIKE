@@ -226,7 +226,7 @@ var configRowKeys = []string{
 	"default_auto_commit", "default_auto_merge", "default_subtasks_auto_merge",
 	"default_operating_mode", "default_max_failed_turns", "default_auto_summarize_threshold",
 	"hide_model_badge", "update_check_enabled", "run_siblings_parallel", "sort_oldest_first",
-	"auto_maximize_chat_mobile", "reclaim_idle_sandbox", "keyboard_shortcuts",
+	"auto_maximize_chat_mobile", "reclaim_idle_sandbox", "loop_breaker", "keyboard_shortcuts",
 }
 
 func (cs *ConfigStore) snapshot() (*configSnapshot, error) {
@@ -315,6 +315,7 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	sortOldestFirstRaw := rows["sort_oldest_first"]
 	autoMaximizeChatMobileRaw := rows["auto_maximize_chat_mobile"]
 	reclaimIdleSandboxRaw := rows["reclaim_idle_sandbox"]
+	loopBreakerRaw := rows["loop_breaker"]
 	keyboardShortcutsRaw := rows["keyboard_shortcuts"]
 
 	cfg := &types.Config{
@@ -377,6 +378,9 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	}
 	if v, err := parseBoolPtr(reclaimIdleSandboxRaw); err == nil && v != nil {
 		cfg.ReclaimIdleSandbox = v
+	}
+	if v, err := parseBoolPtr(loopBreakerRaw); err == nil && v != nil {
+		cfg.LoopBreaker = v
 	}
 	cfg.KeyboardShortcuts = normalizeKeyboardShortcuts(cfg.KeyboardShortcuts)
 	return cfg, nil
@@ -536,6 +540,11 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 			return err
 		}
 	}
+	if c.LoopBreaker != nil {
+		if err := cs.db.SetConfigValue("loop_breaker", fmt.Sprintf("%t", *c.LoopBreaker)); err != nil {
+			return err
+		}
+	}
 	if c.KeyboardShortcuts != nil {
 		ksJSON, err := json.Marshal(c.KeyboardShortcuts)
 		if err != nil {
@@ -570,6 +579,7 @@ type configResponse struct {
 	SortOldestFirst               *bool                    `json:"sort_oldest_first,omitempty"`
 	AutoMaximizeChatMobile        *bool                    `json:"auto_maximize_chat_mobile,omitempty"`
 	ReclaimIdleSandbox            *bool                    `json:"reclaim_idle_sandbox,omitempty"`
+	LoopBreaker                   *bool                    `json:"loop_breaker,omitempty"`
 	KeyboardShortcuts             *types.KeyboardShortcuts `json:"keyboard_shortcuts,omitempty"`
 	// MCPServers is the registry with every header value masked. A project's own selection is on the
 	// project row, not here.
@@ -696,6 +706,7 @@ func (cs *ConfigStore) buildConfigResponse(cfg *types.Config) configResponse {
 		SortOldestFirst:               cfg.SortOldestFirst,
 		AutoMaximizeChatMobile:        cfg.AutoMaximizeChatMobile,
 		ReclaimIdleSandbox:            cfg.ReclaimIdleSandbox,
+		LoopBreaker:                   cfg.LoopBreaker,
 		KeyboardShortcuts:             normalizeKeyboardShortcuts(cfg.KeyboardShortcuts),
 		EncryptionEnabled:             cs.box != nil,
 		TLSCAAvailable:                cs.tlsCAAvailable,
@@ -767,6 +778,7 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		current.SortOldestFirst = updates.boolPtrOr("sort_oldest_first", current.SortOldestFirst)
 		current.AutoMaximizeChatMobile = updates.boolPtrOr("auto_maximize_chat_mobile", current.AutoMaximizeChatMobile)
 		current.ReclaimIdleSandbox = updates.boolPtrOr("reclaim_idle_sandbox", current.ReclaimIdleSandbox)
+		current.LoopBreaker = updates.boolPtrOr("loop_breaker", current.LoopBreaker)
 		current.DefaultMaxFailedTurns = updates.intPtrOr("default_max_failed_turns", current.DefaultMaxFailedTurns)
 		current.DefaultAutoSummarizeThreshold = updates.intPtrOr("default_auto_summarize_threshold", current.DefaultAutoSummarizeThreshold)
 		if threshold := current.DefaultAutoSummarizeThreshold; threshold != nil {
@@ -861,6 +873,16 @@ func (cs *ConfigStore) GetRunSiblingsParallel() bool {
 // past the reclaim grace. Unset or unparseable means off.
 func (cs *ConfigStore) GetReclaimIdleSandbox() bool {
 	raw, _ := cs.db.GetConfigValue("reclaim_idle_sandbox")
+	if v, err := parseBoolPtr(raw); err == nil && v != nil {
+		return *v
+	}
+	return false
+}
+
+// GetLoopBreaker reports whether a run that reaches its consecutive-failed-turn limit is recovered from
+// instead of handed back. Unset or unparseable means off.
+func (cs *ConfigStore) GetLoopBreaker() bool {
+	raw, _ := cs.db.GetConfigValue("loop_breaker")
 	if v, err := parseBoolPtr(raw); err == nil && v != nil {
 		return *v
 	}
