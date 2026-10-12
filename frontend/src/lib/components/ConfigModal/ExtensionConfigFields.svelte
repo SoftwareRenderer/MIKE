@@ -102,26 +102,6 @@
 {/if}
 
 <style>
-    .config-field {
-        display: flex;
-        flex-direction: column;
-        gap: 0.25rem;
-    }
-
-    .config-input {
-        background: var(--color-bg-input);
-        border: 1px solid var(--color-border-subtle);
-        border-radius: var(--radius-md);
-        padding: 0.5rem 0.75rem;
-        color: var(--color-text-primary);
-        font-size: var(--text-base);
-    }
-
-    .config-input:focus {
-        outline: none;
-        border-color: var(--color-accent);
-    }
-
     .mount-editor, .env-editor {
         display: flex;
         flex-direction: column;
