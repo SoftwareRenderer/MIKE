@@ -38,7 +38,7 @@ Switches that widen permissions or point to host paths have only one spelling to
 | `MIKE_ENCRYPTION_KEY` | Required. Combined with the `installation_salt` (written on first boot), it derives the AES-256-GCM data key once per process using argon2id. If the key is incorrect, startup fails and names the affected providers. |
 | `MIKE_LOGIN_RATE_LIMIT` | Ceremony and pairing-code budget per client IP per minute (default `5`). Cannot be disabled; invalid values fall back to `5`. |
 | `MIKE_REGISTRY_URL` | Extension registry index URL. Falls back to `https://registry.getmike.dev/registry.json`. Bare paths are resolved as local files relative to the CWD. |
-| `MIKE_UPDATE_URL` | Release manifest URL. Falls back to `https://getmike.dev/version`. Must use `https` (except loopback) and include a host. **`docs/auto-update.md`**. |
+| `MIKE_UPDATE_URL` | Release manifest URL. Falls back to `https://getmike.dev/download/version.json`. Must use `https` (except loopback) and include a host. **`docs/auto-update.md`**. |
 | `MIKE_DISABLE_UPDATES` | Exactly `1` disables all release updates (checks, downloads, and installs). Overrides stored preferences. **`docs/auto-update.md`**. |
 | `MIKE_TRUST_PROXY` | Exactly `1` enables `X-Forwarded-For` and `X-Forwarded-Proto` headers. Use only behind a trusted reverse proxy. |
 | `MIKE_RESTRICT_MCP` | Exactly `1` freezes the MCP server registry; no servers can be added, edited, or removed via Settings. **`docs/mcp.md`**. |
