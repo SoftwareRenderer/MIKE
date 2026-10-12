@@ -18,6 +18,7 @@ const (
 	retryNoteKind        = "retry"
 	memoryPauseNoteKind  = "memory_pressure"
 	memoryResumeNoteKind = "memory_resumed"
+	loopBreakerNoteKind  = "loop_breaker"
 )
 
 // systemNote is a note about the run in the task's own history. Role "system" is display-only:

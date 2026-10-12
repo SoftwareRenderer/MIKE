@@ -5,12 +5,31 @@
      * Isolation is off — an isolated container has nothing to reach these ports from.
      */
     import { t } from '$lib/i18n';
-    import { formatForwardPort } from '$lib/utils/sandbox-ports';
+    import type { PortForward } from '$lib/types';
+    import { formatAssignedHost, formatForwardPort } from '$lib/utils/sandbox-ports';
+    import { editInPlace, onActivate, LITERAL_TEXT_FIELD } from '$lib/utils/row-form';
     import CancelEditButton from './CancelEditButton.svelte';
     import ExpandableSection from './ExpandableSection.svelte';
     import type { SandboxDraftOwner } from './draft.svelte';
 
     let { draft, locked }: { draft: SandboxDraftOwner; locked: boolean } = $props();
+
+    let formEl: HTMLDivElement | null = $state(null);
+
+    function hostHalf(port: PortForward): string {
+        const assigned = draft.activeHostPorts.get(port.container_port);
+        return assigned === undefined ? '' : formatAssignedHost(assigned, port.host_ip);
+    }
+
+    function containerHalf(port: PortForward): string {
+        return hostHalf(port) ? `${port.container_port}` : formatForwardPort(port);
+    }
+
+    const rowForm = editInPlace({
+        form: () => formEl,
+        edit: (i) => draft.editPort(i),
+        add: () => draft.addPortForward(),
+    });
 </script>
 
 <ExpandableSection contentClass="ports-content" subsection bind:expanded={draft.portsExpanded}
@@ -19,15 +38,13 @@
     {#if draft.forwardPorts.length > 0}
         <div class="port-list">
             {#each draft.forwardPorts as port, i}
-                <div class="port-item" class:editing={draft.editingPortIndex === i} onclick={() => draft.editPort(i)} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && draft.editPort(i)}>
+                <div class="port-item" class:editing={draft.editingPortIndex === i} onclick={() => rowForm.start(i)} role="button" tabindex="0" onkeydown={onActivate(() => rowForm.start(i))}>
                     <span class="port-mapping">
-                        {#if draft.activeHostPorts.has(port.container_port)}
-                            <span class="port-host" title={t('sandbox.hostPort')}>{draft.activeHostPorts.get(port.container_port)}</span>
-                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                                <path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
+                        {#if hostHalf(port)}
+                            <span class="port-host" title={t('sandbox.hostPort')}>{hostHalf(port)}</span>
+                            <span>:</span>
                         {/if}
-                        <span class="port-container" title={t('sandbox.containerPort')}>{formatForwardPort(port)}</span>
+                        <span class="port-container" title={t('sandbox.containerPort')}>{containerHalf(port)}</span>
                     </span>
                     <button type="button" class="btn-remove-port" onclick={(e) => { e.stopPropagation(); draft.removePortForward(i); }} disabled={locked} title={t('sandbox.remove')}>
                         {@render closeIcon()}
@@ -41,15 +58,21 @@
         <div class="sandbox-note port-no-active">{t('sandbox.portsNoActive')}</div>
     {/if}
 
-    <div class="port-add-row">
-        {#if draft.editingPortIndex !== null}
-            <CancelEditButton onclick={() => draft.cancelPortEdit()} />
-        {/if}
-        <input type="text" class="port-input port-input-bind" bind:value={draft.newHostIP} placeholder={t('sandbox.hostInterface')} spellcheck="false" autocomplete="off" disabled={locked} aria-label={t('sandbox.hostInterfaceAria')} />
-        <input type="number" class="port-input" bind:value={draft.newContainerPort} placeholder={t('sandbox.containerPort')} min="1" max="65535" disabled={locked} aria-label={t('sandbox.containerPort')} />
-        <button type="button" class="btn-add-port" class:pending={draft.hasPendingPort} onclick={() => draft.addPortForward()} disabled={locked} title={draft.editingPortIndex !== null ? t('sandbox.savePort') : t('sandbox.addPort')}>
-            {@render addIcon(draft.editingPortIndex !== null)}
-        </button>
+    <div class="port-add-row" bind:this={formEl}>
+        <span class="field-label">{t('sandbox.hostInterface')}</span>
+        <input type="text" class="port-input port-input-bind" bind:value={draft.newHostIP} placeholder={t('sandbox.hostInterface')}
+               {...LITERAL_TEXT_FIELD} disabled={locked} aria-label={t('sandbox.hostInterfaceAria')} onkeydown={rowForm.onFieldKeydown} />
+        <span class="field-label">{t('sandbox.containerPort')}</span>
+        <input type="number" class="port-input" bind:value={draft.newContainerPort} placeholder={t('sandbox.containerPort')} min="1" max="65535"
+               {...LITERAL_TEXT_FIELD} disabled={locked} aria-label={t('sandbox.containerPort')} onkeydown={rowForm.onFieldKeydown} />
+        <div class="add-row-actions">
+            {#if draft.editingPortIndex !== null}
+                <CancelEditButton onclick={() => draft.cancelPortEdit()} />
+            {/if}
+            <button type="button" class="btn-add-port" class:pending={draft.hasPendingPort} onclick={() => draft.addPortForward()} disabled={locked} title={draft.editingPortIndex !== null ? t('sandbox.savePort') : t('sandbox.addPort')}>
+                {@render addIcon(draft.editingPortIndex !== null)}
+            </button>
+        </div>
     </div>
 
     {#if draft.portError}
@@ -88,25 +111,4 @@
 <style>
     @import '$lib/styles/sandbox-settings.css';
     @import '$lib/styles/sandbox-config.css';
-
-    .port-input {
-        flex: 1;
-        min-width: 120px;
-        max-width: 200px;
-    }
-
-    .port-input-bind {
-        max-width: 170px;
-    }
-
-    .port-hint {
-        padding: 2px 0 0 36px;
-        font-size: var(--text-2xs);
-        color: var(--color-text-muted);
-    }
-
-    .port-no-active {
-        padding: 4px 8px;
-        padding-left: 36px;
-    }
 </style>

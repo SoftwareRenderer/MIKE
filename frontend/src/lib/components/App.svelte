@@ -6,21 +6,20 @@
     import { t } from '$lib/i18n';
     import Spinner from './Spinner.svelte';
     import EmptyState from './EmptyState.svelte';
-    import { isSandboxMountPath } from '$lib/utils/path';
     import { isAnyModalOpen } from '$lib/utils/modal-state';
     import { connectionStore } from '$lib/stores/connection.svelte';
     import { sandboxStatsStore } from '$lib/stores/sandbox-stats.svelte';
     import { diffStatsStore } from '$lib/stores/diff-stats.svelte';
     import { commitQueueStore } from '$lib/stores/commit-queue.svelte';
     import { taskEventStore } from '$lib/stores/task-events.svelte';
-    import { getProjects, getBoard, getConfig, deleteProject, createProject, cloneProject, createAppStream, getProjectCounts, setOfflineStatus, loadQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask, getDroppedActions } from '$lib/api';
+    import { getProjects, getBoard, getConfig, deleteProject, createProject, cloneProject, createAppStream, getProjectCounts, setOfflineStatus, loadQueue, flushQueueNow, adoptQueue, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask, getDroppedActions } from '$lib/api';
     import { reconnectBanner } from '$lib/services/reconnect-banner.svelte';
     import { sessionBoot } from '$lib/services/session-boot.svelte';
     import { repoNameFromGitUrl } from '$lib/utils/repo-name';
     import { dragCarriesFiles } from '$lib/utils/file-drop';
     import { resolveBoardLandingColumn, resolveClosedTaskColumn, mergeTaskUpdateIntoBoard } from '$lib/utils/task-utils';
     import { resolveLandingProject } from '$lib/utils/project-landing';
-    import { explorerPathRoots } from '$lib/utils/app-link';
+    import { explorerPathRoots, fileWithinRoots } from '$lib/utils/app-link';
     import { urlRouter } from '$lib/services/url-router.svelte';
     import { reviewNotifier } from '$lib/services/review-notifications.svelte';
     import { getBoardCache, getBoardCacheEntry, boardCacheKey, doneStatsCacheKey, setBoardCache, removeBoardCache, loadAppSetting, saveAppSetting } from '$lib/storage';
@@ -261,20 +260,29 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 
     // A task's frames belong to the chat that reads it: `TaskChat` takes and releases the key. `docs/reconnection.md`
 
+    /** The paths the address bar may name as `file` for this project and task. `null` when no project is
+     *  known to judge against; an address naming no project means the one on screen. */
+    function explorerRootsFor(projectId: string, taskId: string): string[] | null {
+        const project = projectId
+            ? appStore.projects.find(p => p.id === projectId) ?? (projectId === appStore.selectedProject?.id ? appStore.selectedProject : null)
+            : appStore.selectedProject;
+        if (!project) return null;
+        return explorerPathRoots({
+            projectPath: project.path, projectName: project.name,
+            sandboxEnabled: !!project.sandbox_enabled, workspaceDir: appStore.config?.workspace_dir,
+            projectId: project.id, taskId: taskId || undefined,
+        });
+    }
+
+    // The router writes the address bar but holds no project list, so the shell hands it the answer.
+    urlRouter.declareFileRoots(explorerRootsFor);
+
     // Handle browser back/forward
     async function handlePopState() {
         const url = urlRouter.read();
         const projectId = url.project;
         const taskId = url.task;
-        const fileProject = (projectId ? appStore.projects.find(p => p.id === projectId) : null) ?? appStore.selectedProject;
-        const fileRoots = fileProject
-            ? explorerPathRoots({
-                projectPath: fileProject.path, projectName: fileProject.name,
-                sandboxEnabled: !!fileProject.sandbox_enabled, workspaceDir: appStore.config?.workspace_dir,
-                projectId: fileProject.id, taskId: taskId || undefined,
-            })
-            : [];
-        urlRouter.acceptFile(url.file, fileRoots);
+        urlRouter.acceptFile(url.file, explorerRootsFor(projectId, taskId) ?? []);
 
         if (!projectId && appStore.selectedProject) {
             const landing = await landingProject();
@@ -587,6 +595,9 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     // socket drops.
     function reconcileAfterAbsence(): void {
         appStream?.reconnectNow();
+        // The notices a sibling window sent while this one slept never arrived, and its pending rows are the
+        // shared record's.
+        void adoptQueue();
         refreshBoard().catch(() => {
             if (visibilityRetryTimer) return; // already retrying
             visibilityRetryTimer = setTimeout(() => {
@@ -1062,7 +1073,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 
     /** Collapse sidebar on tablet when a file is opened in the Explorer; restore when closed. */
     function handleExplorerFileChange(path: string | null) {
-        const isFileOpen = path != null && (path.startsWith(appStore.selectedProject?.path || '') || isSandboxMountPath(path));
+        const isFileOpen = path != null && fileWithinRoots(path, explorerRootsFor(appStore.selectedProject?.id ?? '', '') ?? []);
         if (isFileOpen) {
             urlRouter.write({ project: appStore.selectedProject?.id, view: urlRouter.changesOpen ? 'review' : 'explorer', file: path });
             // Auto-collapse sidebar on tablet to give editor more space

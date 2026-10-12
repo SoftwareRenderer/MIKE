@@ -74,7 +74,9 @@ describe('a changed row as a control', () => {
             const space = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
             rows[1].dispatchEvent(space);
             await waitFor(() => expect(onLineClick).toHaveBeenCalledTimes(1));
-            expect(onLineClick.mock.calls[0]).toEqual([path, 2]);
+            // The removed row's own number 2 names no line of the file the editor opens, so it answers
+            // with line 1.
+            expect(onLineClick.mock.calls[0]).toEqual([path, 1]);
             expect(space.defaultPrevented).toBe(true);
         }
     });
@@ -98,6 +100,18 @@ describe('a changed row as a control', () => {
                 expect(el.hasAttribute('role')).toBe(false);
                 expect(el.hasAttribute('tabindex')).toBe(false);
             }
+        }
+    });
+
+    it('offers nothing for a file the change deleted', () => {
+        const deleted = diffFile('gone.go', [row(1, 'removed', 'was here'), row(2, 'removed', 'and here')]);
+        const { container } = viewer({ unstagedFiles: [deleted], onLineClick: vi.fn() });
+        const rows = [...container.querySelectorAll<HTMLElement>('.diff-row')];
+        expect(rows).toHaveLength(2);
+        for (const el of rows) {
+            expect(el.hasAttribute('role')).toBe(false);
+            expect(el.hasAttribute('tabindex')).toBe(false);
+            expect(el.classList.contains('diff-row-clickable')).toBe(false);
         }
     });
 });

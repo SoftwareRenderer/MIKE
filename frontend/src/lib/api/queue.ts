@@ -1,6 +1,7 @@
 import { generateId, isAborted, registerSetHttpReachable } from './helpers';
 import { QUEUE_RETRY_BASE_DELAY_MS, RECONNECT_MAX_DELAY_MS } from '$lib/constants';
-import { loadQueue as loadQueueFromStorage, saveQueue as saveQueueToStorage, type QueuedAction as StoredQueuedAction } from '../storage';
+import { loadQueue as loadQueueFromStorage, updateQueue as updateQueueRecord, seizeQueue, claimQueue, releaseQueue, type QueuedAction as StoredQueuedAction } from '../storage';
+import { shouldReplay } from '$lib/utils/queue-ownership';
 import { getBoardCache, refusedSendsCacheKey, removeBoardCache, setBoardCache } from '../storage';
 import type { PendingSend } from '../utils/pending-sends';
 import type { Task } from '../types';
@@ -73,6 +74,87 @@ let replayRetryDelayMs = 0;
 let replayHeldUntil = 0;
 let actionQueue: QueuedAction[] = [];
 let flushPromise: Promise<void> | null = null;
+
+// The record is one per browser profile, so one window replays it and the rest only read it — two senders would
+// send each write twice. utils/queue-ownership.ts holds the rule; storage.ts holds the record.
+const windowId = generateId();
+let ownsReplay = false;
+
+/** The notice windows exchange so a reader follows without polling. */
+type QueueNotice = 'changed' | 'claimed' | 'released';
+const queueChannel: BroadcastChannel | null = typeof BroadcastChannel === 'function'
+    ? new BroadcastChannel('mike-queue')
+    : null;
+
+function announce(notice: QueueNotice): void {
+    queueChannel?.postMessage({ notice, windowId });
+}
+
+/** Take the replay at boot, from whoever held it: the newest window sends. Two windows booting together both
+ * write, so the read back decides, and until the other notices, one action can go out twice. */
+async function takeReplayAtBoot(): Promise<void> {
+    ownsReplay = await seizeQueue({ windowId, takenAt: Date.now() });
+    announce('claimed');
+}
+
+/** Ask the record whether this window still sends: its own name, or nobody's. Taking a record an owner let go is
+ * worth announcing, or readers never learn who took it. */
+async function checkReplay(): Promise<boolean> {
+    const heldBefore = ownsReplay;
+    ownsReplay = await claimQueue({ windowId, takenAt: Date.now() });
+    if (ownsReplay && !heldBefore) announce('claimed');
+    return ownsReplay;
+}
+
+/** Re-read the record, so a reader's pending rows and badges describe the shared queue. A window the browser
+ * froze missed the notices, so the tab-return watcher asks for this on its way back. */
+export async function adoptQueue(): Promise<void> {
+    actionQueue = await loadQueueFromStorage();
+    notifyQueueChanged();
+}
+
+/** A `claimed` ends this window's sending. Every notice is worth a re-read, and an empty record left behind by a
+ * closed owner is this window's to pick up. */
+queueChannel?.addEventListener('message', (event: MessageEvent) => {
+    const data = event.data as { notice?: QueueNotice; windowId?: string };
+    if (!data || data.windowId === windowId) return;
+    if (data.notice === 'claimed') ownsReplay = false;
+    void rereadAfterNotice();
+});
+
+/**
+ * Re-read once for a burst of notices rather than once per notice: a replay that lands N actions posts N of them.
+ * A notice arriving mid-read sets a second pass, so the last one always gets a read that started after it.
+ */
+let rereading: Promise<void> | null = null;
+let rereadAgain = false;
+function rereadAfterNotice(): Promise<void> {
+    if (rereading) {
+        rereadAgain = true;
+        return rereading;
+    }
+    const pass = (async () => {
+        do {
+            rereadAgain = false;
+            await adoptQueue();
+            sendQueueIfReachable();
+        } while (rereadAgain);
+    })();
+    rereading = pass;
+    const done = () => { if (rereading === pass) rereading = null; };
+    pass.then(done, done);
+    return pass;
+}
+
+// An owner that vanished would leave the queue unsent, so it hands the record back on the way out. A page in the
+// back-forward cache is frozen rather than gone, so it keeps the claim.
+if (typeof window !== 'undefined') {
+    window.addEventListener('pagehide', (event: PageTransitionEvent) => {
+        if (!ownsReplay || event.persisted) return;
+        ownsReplay = false;
+        void releaseQueue(windowId).then(() => announce('released'));
+    });
+}
 // Actions the server refused outright (404, 403, …) during the most recent flush. They are out of
 // the queue, so "is this task still queued?" answers no for them exactly as for an applied action.
 let droppedActions: QueuedAction[] = [];
@@ -109,11 +191,41 @@ function setHttpReachable(reachable: boolean) {
     sendQueueIfReachable();
 }
 
-/** The queue goes out when no reason is left holding it. */
+/** The queue goes out when no reason holds it and its pace is spent. The cheap checks come first because a
+ * window that only reads still answers this on every reachability flip. */
 function sendQueueIfReachable() {
-    if (queueLength() === 0 || getOfflineStatus()) return;
-    if (Date.now() < replayHeldUntil) return;
-    flushQueue();
+    if (!shouldReplay({
+        hasWork: queueLength() > 0,
+        held: getOfflineStatus(),
+        heldUntil: replayHeldUntil,
+        now: Date.now(),
+    })) return;
+    void startReplay();
+}
+
+/** The one replay this window may run. The handle and the in-flight flag are taken before the record is read, so
+ * a caller waiting for the queue to settle waits for that read too. */
+function startReplay(): Promise<void> {
+    if (!flushPromise) {
+        replaying = true;
+        flushPromise = replayIfOwned().finally(() => {
+            replaying = false;
+            flushPromise = null;
+        });
+    }
+    return flushPromise;
+}
+
+/** Take the replay if the record allows it; a reader waits for the owner. */
+async function replayIfOwned(): Promise<void> {
+    try {
+        if (!(await checkReplay())) return;
+        if (getOfflineStatus() || queueLength() === 0) return;
+        const resolvedTasks = await doFlush(stopAtFirstTransientError);
+        notifyQueueFlushed([], resolvedTasks);
+    } finally {
+        noteReplayDrained();
+    }
 }
 
 /** Register a callback fired when the queue changes (enqueue/dequeue/flush). */
@@ -144,16 +256,21 @@ function notifyQueueFlushed(optimisticTaskIds: string[], resolvedTasks: Map<stri
     }
 }
 
-/** Load queue from IndexedDB. */
+/**
+ * Read the record, then take the replay: this window is the newest, so it sends and an older one goes quiet.
+ */
 export async function loadQueue(): Promise<QueuedAction[]> {
     const loaded = await loadQueueFromStorage();
     actionQueue = Array.isArray(loaded) ? loaded : [];
+    await takeReplayAtBoot();
     return actionQueue;
 }
 
-/** Save queue to IndexedDB. */
-async function saveQueue() {
-    await saveQueueToStorage(actionQueue);
+/** Apply a change to the shared record and keep what it now holds as this window's copy. A change is stated
+ * against the record because every window shares it. */
+async function changeQueue(change: (held: QueuedAction[]) => QueuedAction[]): Promise<void> {
+    actionQueue = await updateQueueRecord(change, actionQueue);
+    announce('changed');
     notifyQueueChanged();
 }
 
@@ -183,8 +300,7 @@ export async function enqueueAction(action: { type: ActionType; params: Record<s
     if (SEND_ACTIONS.has(action.type) && action.params.projectId && action.params.taskId) {
         void clearRefusedSends(action.params.projectId, action.params.taskId);
     }
-    actionQueue.push(item);
-    await saveQueue();
+    await changeQueue(held => [...held, item]);
     return item;
 }
 
@@ -305,12 +421,14 @@ async function doFlush(onTransientError?: (e: unknown) => boolean): Promise<Map<
     droppedActions = [];
 
     while (queueLength() > 0) {
+        // A newer window took the claim: the rest of the record is its to replay.
+        if (!ownsReplay) break;
         const action = actionQueue[0];
         try {
             const result = await executeQueuedAction(action, idMap);
             trackResult(action, result, idMap, resolvedTasks);
-            actionQueue.shift();
-            await saveQueue();
+            // Out by identity: the record may have grown since the send, so the head is not this action.
+            await changeQueue(held => held.filter(a => a.id !== action.id));
         } catch (e: any) {
             console.error('[Queue] Failed to flush action:', action.type, e);
             if (isTransientError(e)) {
@@ -326,8 +444,7 @@ async function doFlush(onTransientError?: (e: unknown) => boolean): Promise<Map<
                     // The verdict has to outlive the queue entry it came from.
                     await recordRefusedSend(action).catch(() => {});
                 }
-                actionQueue.shift();
-                await saveQueue();
+                await changeQueue(held => held.filter(a => a.id !== action.id));
             }
         }
     }
@@ -335,18 +452,10 @@ async function doFlush(onTransientError?: (e: unknown) => boolean): Promise<Map<
     return resolvedTasks;
 }
 
-/** Flush queued actions via HTTP immediately (e.g., on page load). Independent of WebSocket state. */
+/** Boot's own attempt: the record goes out without waiting for the socket, through the same door as any replay. */
 export async function flushQueueNow(): Promise<void> {
-    if (flushPromise) return flushPromise;
     if (queueLength() === 0) return;
-
-    flushPromise = (async () => {
-        const resolvedTasks = await doFlush(stopAtFirstTransientError);
-        noteReplayDrained();
-        notifyQueueFlushed([], resolvedTasks);
-        flushPromise = null;
-    })();
-    return flushPromise;
+    return startReplay();
 }
 
 /** Stop the replay at the first retryable error, and hold the queue before trying again; a refused action
@@ -364,25 +473,6 @@ function noteReplayDrained() {
     if (queueLength() > 0) return;
     replayRetryDelayMs = 0;
     replayHeldUntil = 0;
-}
-
-/** Replay all queued actions in order. Triggered when the last reason for holding them is released. */
-async function flushQueue() {
-    if (flushPromise) return flushPromise;
-    if (queueLength() === 0) return;
-
-    flushPromise = (async () => {
-        replaying = true;
-        try {
-            const resolvedTasks = await doFlush(stopAtFirstTransientError);
-            notifyQueueFlushed([], resolvedTasks);
-        } finally {
-            noteReplayDrained();
-            replaying = false;
-            flushPromise = null;
-        }
-    })();
-    return flushPromise;
 }
 
 // =============================================================================
@@ -541,7 +631,7 @@ async function executeQueuedAction(action: QueuedAction, idMap: Map<string, stri
             await updateTaskMessageRaw(p.projectId, taskId, p.messageId, p.content);
             break;
         case 'createTask':
-            return createTaskRaw(p.projectId, p.taskData);
+            return createTaskRaw(p.projectId, p.taskData, p.clientToken);
         case 'updateTask':
             await updateTaskRaw(p.projectId, taskId, p.taskData);
             break;
@@ -585,7 +675,7 @@ async function executeQueuedAction(action: QueuedAction, idMap: Map<string, stri
             await switchTaskThreadRaw(p.projectId, taskId, p.threadId);
             break;
         case 'forkTaskThread':
-            await forkTaskThreadRaw(p.projectId, taskId, p.fromThreadId, p.fromMessageId, p.newContent);
+            await forkTaskThreadRaw(p.projectId, taskId, p.fromThreadId, p.fromMessageId, p.newContent, p.clientToken);
             break;
         case 'updateConfig':
             await updateConfigRaw(p.config);
@@ -604,6 +694,7 @@ async function executeQueuedAction(action: QueuedAction, idMap: Map<string, stri
 
 /**
  * Enqueue an action and return the optimistic result, tagged with the queued action's id.
+ * `params` carries the write's `clientToken`, which the replay sends again — see `writeOrQueue`.
  */
 export async function queueWrite<T>(type: ActionType, params: Record<string, any>, optimistic: T): Promise<T> {
     const queued = await enqueueAction({ type, params });
@@ -619,16 +710,20 @@ export async function queueWrite<T>(type: ActionType, params: Record<string, any
  */
 export async function writeOrQueue<T>(
     action: { type: ActionType; params: Record<string, any> },
-    live: () => Promise<T>,
+    live: (clientToken: string) => Promise<T>,
     optimistic?: () => T,
 ): Promise<T> {
+    // Minted before the write sets out, so the live attempt and the replay of it are one write to the server.
+    // Only a send, a create and a fork are guarded by it; the rest carry it unused.
+    const clientToken = generateId();
+    const params = { ...action.params, clientToken };
     const keep = async (): Promise<T> =>
         optimistic === undefined
-            ? await enqueueAction(action).then(() => undefined as T)
-            : await queueWrite(action.type, action.params, optimistic());
+            ? await enqueueAction({ type: action.type, params }).then(() => undefined as T)
+            : await queueWrite(action.type, params, optimistic());
     if (getOfflineStatus()) return keep();
     try {
-        return await live();
+        return await live(clientToken);
     } catch (e) {
         if (!isTransientError(e)) throw e;
         return keep();

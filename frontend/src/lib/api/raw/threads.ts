@@ -13,9 +13,10 @@ export async function switchTaskThreadRaw(projectId: string, taskId: string, thr
     return res.json();
 }
 
-export async function forkTaskThreadRaw(projectId: string, taskId: string, fromThreadId: string, fromMessageId: string, newContent?: string): Promise<Thread> {
+export async function forkTaskThreadRaw(projectId: string, taskId: string, fromThreadId: string, fromMessageId: string, newContent?: string, clientToken?: string): Promise<Thread> {
     const body: Record<string, string> = { from_thread_id: fromThreadId, from_message_id: fromMessageId };
     if (newContent) body.new_content = newContent;
+    if (clientToken) body.client_token = clientToken;
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/threads/fork`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

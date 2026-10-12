@@ -47,19 +47,6 @@
 <style>
     @import '$lib/styles/shared.css';
 
-    .field-label {
-        display: block;
-        font-size: var(--text-sm);
-        color: var(--color-text-tertiary);
-        margin-bottom: 0.25rem;
-    }
-
-    .field-desc {
-        color: var(--color-text-tertiary);
-        font-size: var(--text-xs);
-        margin: 0;
-    }
-
     .connectivity-row {
         display: flex;
         align-items: center;

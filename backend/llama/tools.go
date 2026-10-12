@@ -236,7 +236,7 @@ var toolLSPRename = newTool(types.ToolLSPRename, "LSP Rename",
 	},
 	[]string{"path", "symbol", "new_name"})
 
-// LSP tools require an installed LSP extension.
+// GetLSPToolDefinitions returns the LSP tools provided by an installed LSP extension.
 func GetLSPToolDefinitions() []types.ChatTool {
 	return []types.ChatTool{
 		toolLSPReferences,
@@ -246,7 +246,7 @@ func GetLSPToolDefinitions() []types.ChatTool {
 	}
 }
 
-// Parameter schemas pass through unchanged as they were validated at storage.
+// ContributedToolDefinitions converts a list of tool specifications into a list of chat tools.
 func ContributedToolDefinitions(specs []types.ToolSpec) []types.ChatTool {
 	if len(specs) == 0 {
 		return nil
@@ -282,7 +282,7 @@ var toolEditTask = newTool(types.ToolEditTask, "Edit Task",
 
 // ─── Mode-specific tool sets ───
 
-// Plan mode restricts tools to prevent unauthorized changes.
+// GetPlanModeToolDefinitions returns the restricted set of tools available in plan mode.
 func GetPlanModeToolDefinitions() []types.ChatTool {
 	return []types.ChatTool{
 		toolReadFile,
@@ -295,7 +295,7 @@ func GetPlanModeToolDefinitions() []types.ChatTool {
 	}
 }
 
-// Explore mode adds task management tools for brainstorming and prototyping.
+// GetExploreModeToolDefinitions returns the extended set of tools available in explore mode.
 func GetExploreModeToolDefinitions() []types.ChatTool {
 	return []types.ChatTool{
 		toolReadFile,

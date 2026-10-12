@@ -9,7 +9,8 @@
 //   editor-history     — key: file path → EditorHistory (undo/redo history)
 //   editor-tabs        — key: projectId → EditorTabState
 //   unsaved-files      — key: projectId → string[]
-//   offline-queue      — key 'actions' → QueuedAction[]
+//   offline-queue      — key 'actions' → QueuedAction[]; key 'queue-owner' → the window
+//                        that replays the actions (utils/queue-ownership.ts)
 //   explorer-layout    — key 'layout' → ExplorerLayout
 //   app-settings       — key: setting key → any
 //   attachments        — key: taskId → DraftAttachment[]
@@ -27,6 +28,7 @@
 // part of what `import { t }` pulls in — routing this import through `cache.ts` or
 // `boot.ts` would close the loop.
 import { t } from '$lib/i18n';
+import { holdsReplay, type QueueOwner } from '$lib/utils/queue-ownership';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -51,6 +53,8 @@ const STORE_BOARD_CACHE = 'board-cache';
 // Fixed keys for single-value stores
 const KEY_IDS = 'ids';
 const KEY_ACTIONS = 'actions';
+/** Which window replays the queue, beside the actions it replays. */
+const KEY_QUEUE_OWNER = 'queue-owner';
 const KEY_LAYOUT = 'layout';
 
 const ALL_STORES = [
@@ -387,9 +391,90 @@ export async function loadQueue(): Promise<QueuedAction[]> {
     return result ?? [];
 }
 
-/** Save offline queue. */
-export async function saveQueue(actions: QueuedAction[]): Promise<void> {
-    return dbPut(STORE_OFFLINE_QUEUE, KEY_ACTIONS, actions);
+/**
+ * Read the queue, change it, write it back — one `readwrite` transaction, because every window on this profile
+ * holds the same record and an in-memory array dumped over it erases what another window queued since. This
+ * window's copy stands in only when there is no record to read at all.
+ */
+export async function updateQueue(
+    change: (held: QueuedAction[]) => QueuedAction[],
+    heldElsewhere: QueuedAction[] = [],
+): Promise<QueuedAction[]> {
+    try {
+        const db = await openDB();
+        return await new Promise<QueuedAction[]>((resolve, reject) => {
+            const tx = db.transaction(STORE_OFFLINE_QUEUE, 'readwrite');
+            const store = tx.objectStore(STORE_OFFLINE_QUEUE);
+            const request = store.get(KEY_ACTIONS);
+            request.onsuccess = () => {
+                const held: QueuedAction[] = isArray(request.result) ? request.result : [];
+                const next = change(held);
+                store.put(toPlain(next), KEY_ACTIONS);
+                tx.oncomplete = () => resolve(next);
+            };
+            request.onerror = () => reject(request.error);
+            tx.onerror = () => reject(tx.error);
+        });
+    } catch {
+        return change(heldElsewhere);
+    }
+}
+
+/** A stored claim on the replay, or null when the key holds nothing usable. */
+function readOwner(raw: { windowId?: unknown; takenAt?: unknown } | null): QueueOwner | null {
+    if (!raw || typeof raw.windowId !== 'string' || typeof raw.takenAt !== 'number') return null;
+    return { windowId: raw.windowId, takenAt: raw.takenAt };
+}
+
+/** Which window replays the queue, and why only one window does: `utils/queue-ownership.ts`. */
+async function loadQueueOwner(): Promise<QueueOwner | null> {
+    return readOwner(await dbGet<{ windowId?: unknown; takenAt?: unknown }>(STORE_OFFLINE_QUEUE, KEY_QUEUE_OWNER));
+}
+
+/**
+ * Read the claim, decide what it becomes, write it back — one `readwrite` transaction, so two windows booting
+ * together cannot both be told the record is empty. `decide` returning null hands the key back.
+ */
+async function changeQueueOwner(decide: (held: QueueOwner | null) => QueueOwner | null): Promise<void> {
+    try {
+        const db = await openDB();
+        await new Promise<void>((resolve, reject) => {
+            const tx = db.transaction(STORE_OFFLINE_QUEUE, 'readwrite');
+            const store = tx.objectStore(STORE_OFFLINE_QUEUE);
+            const request = store.get(KEY_QUEUE_OWNER);
+            request.onsuccess = () => {
+                const next = decide(readOwner(request.result));
+                if (next === null) store.delete(KEY_QUEUE_OWNER);
+                else store.put(toPlain(next), KEY_QUEUE_OWNER);
+                tx.oncomplete = () => resolve();
+            };
+            request.onerror = () => reject(request.error);
+            tx.onerror = () => reject(tx.error);
+        });
+    } catch {
+        // No IndexedDB: there is no record to share, so the asking window is the only window there is.
+    }
+}
+
+/** Write the claim, then ask the record who owns it — two writers leave the later write's name there. */
+async function takeReplay(decide: (held: QueueOwner | null) => QueueOwner, owner: QueueOwner): Promise<boolean> {
+    await changeQueueOwner(decide);
+    return holdsReplay(await loadQueueOwner(), owner.windowId);
+}
+
+/** Take the replay from whoever holds it: the boot move of the newest window. */
+export function seizeQueue(owner: QueueOwner): Promise<boolean> {
+    return takeReplay(() => owner, owner);
+}
+
+/** Take the replay while nobody holds it: what a window does once the owner has let go. */
+export function claimQueue(owner: QueueOwner): Promise<boolean> {
+    return takeReplay(held => held ?? owner, owner);
+}
+
+/** Give up the replay, and only if this window still holds it. */
+export async function releaseQueue(windowId: string): Promise<void> {
+    await changeQueueOwner(held => (held && held.windowId === windowId ? null : held));
 }
 
 // ─── Draft attachments (IndexedDB: attachments store) ───────────────────────
@@ -536,14 +621,10 @@ async function cleanDraftTexts(allTaskIds: Set<string>): Promise<void> {
 
 /** Remove offline queue entries that reference deleted tasks. */
 async function cleanQueue(allTaskIds: Set<string>): Promise<void> {
-    const actions = await loadQueue();
-    const filtered = actions.filter(action => {
+    await updateQueue(held => held.filter(action => {
         const taskId = action.params?.taskId;
         return !taskId || allTaskIds.has(taskId);
-    });
-    if (filtered.length !== actions.length) {
-        await saveQueue(filtered);
-    }
+    }));
 }
 
 /** Remove draft attachments for deleted tasks. */

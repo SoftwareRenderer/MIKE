@@ -564,6 +564,9 @@ describe('systemNoteText', () => {
             'Task has been temporarily paused due to memory pressure, and will automatically resume');
         expect(systemNoteText('memory_resumed', 'server text')).toBe(
             'Memory freed up, so the task resumed automatically');
+        // backend/exec/loop_breaker.go stores this same sentence on the row.
+        expect(systemNoteText('loop_breaker', 'server text')).toBe(
+            'Loop breaker removed the failed tool call and the turns after it, and told the agent to proceed');
     });
 
     it('shows an unknown or missing kind its own text', () => {

@@ -15,7 +15,7 @@ import (
 // Template variables available in header values and set-rule values.
 const (
 	varReasoningEffort = "reasoning_effort"
-	varModel = "model"
+	varModel           = "model"
 )
 
 // Mapping describes how to adapt MIKE's request for one provider.
@@ -32,9 +32,9 @@ type Mapping struct {
 // BodyRules describes request-body transformations, applied in the order:
 // remove, remove_if, set.
 type BodyRules struct {
-	Remove   []string          `json:"remove,omitempty"`
+	Remove []string `json:"remove,omitempty"`
 	// Deletes key only when referenced key is absent (e.g. drop tool_choice when no tools are sent).
-	RemoveIf map[string]string `json:"remove_if,omitempty"`
+	RemoveIf map[string]string  `json:"remove_if,omitempty"`
 	Set      map[string]SetRule `json:"set,omitempty"`
 }
 

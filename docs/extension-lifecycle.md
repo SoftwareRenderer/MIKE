@@ -102,6 +102,53 @@ the install) or a name that is not a directory name is logged, not fetched. Dete
 files deleted while the server runs stay broken until the next start. Test:
 `backend/extensions/repair_test.go`.
 
+## A local install has no update path
+
+`install-local` materializes in place — `installInBackground` points `targetDir` at the folder it found — so
+the row and the folder are one thing, and the row records no `repo`+`commit`. Nothing then offers that row a
+newer copy. `HandleUpdateImage` answers 400 for a row whose `install_source` is not `registry`, and
+`repairRefusal` declines to restore it. The folder is the only copy there is.
+
+Deletion follows the same derivation: `removeExtensionFiles` (`backend/extensions/remove.go`) removes the
+directory for every row, local included. **Uninstalling an unpublished extension deletes the author's
+working copy.** Copy the folder out first, or keep the source elsewhere and install from a copy of it.
+
+### What an edit to the folder reaches
+
+Nothing watches the extensions tree, so a change lands the next time a reader opens the file.
+
+| Edited | When the new bytes are used |
+| --- | --- |
+| Anything served from the tree — UI module, entry document, stylesheet, catalog JSON | next request: `/extensions/` is a file server over the directory (`backend/server/routes.go`) |
+| An i18n catalog | next extension-list load (`frontend/src/lib/i18n/load-pack.ts`) |
+| A translated prompt template | next turn: `applyOverlay` parses the pack's files per render (`backend/prompts/overlay.go`) |
+| An agent adapter's WASM or binary | next run: `loadWasmAdapter` reads it from the folder (`backend/agent/loader.go`) |
+| An `llm` mappings file | next extension change, when `CollectLLMMappings` re-collects it (`backend/server/server.go`) |
+| `manifest.json`, and everything derived from it | never — see below |
+| An LSP server's own code, or its `Dockerfile` | only once the image ref is absent — see below |
+
+`manifest.json` is read at install and stored on the row; only the install path and the registry update
+path read it again. `PUT /api/extensions/{id}` patches display text, config and sandbox additions, and never
+opens the folder. A version bump therefore changes nothing, and neither does a capability, a
+`config_schema` entry, an egress domain, a `file_types` list, a `css_url` or a contributed tool's definition.
+
+The service worker holds the `/extensions/` tree `NetworkFirst` (`frontend/scripts/sw-routes.ts`), so an
+online browser asks the server; the stored body is only the offline fallback.
+
+Two levers move what is derived from that snapshot without a restart:
+
+- **Toggle the extension** (disable and re-enable, or save its configuration). `SetOnExtensionChanged`
+  (`backend/server/server.go`) reloads the agent registry, re-collects the LLM mappings, re-resolves the
+  prompt overlay and broadcasts `extension_change`.
+- **Reload the browser tab**, which re-reads the installed list and re-registers the UI and CSS halves.
+
+To land a manifest edit, delete the row and `install-local` again — with the folder copied out first. To
+rebuild a local language-server image, remove the image (`podman rmi`): `persistDerivedImage` records the
+ref after the first build and `ensureExtensionImage` builds only when the host lacks it.
+
+`GET /api/extensions/check-updates` matches a row to an index entry **by name alone**, so a local row
+sharing a published name is listed as updatable and the update it invites is refused.
+
 ## Egress and REST surface
 
 - `POST /{id}/proxy` is the egress path an **extension's own script** calls; a contributed tool and the
@@ -206,6 +253,7 @@ generator copies it forward from the previous file, so deleting the key by hand 
 
 ## Checking this
 
-`go test ./backend/extensions/` covers install, repair and deletion.
+`go test ./backend/extensions/` covers install, repair, deletion and the refusal that keeps a local install
+from being overwritten.
 `python3 scripts/gen-registry.py --check` answers for the registry text an install reads.
 `make test-gen-registry` answers for the generator that writes it.

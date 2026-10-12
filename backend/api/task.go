@@ -138,6 +138,22 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 			httputil.JSONError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		var clientToken string
+		if _, err := rawBody.decode("client_token", &clientToken); err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		// A create whose answer was lost is answered by the task that exists; inserting it again would make two
+		// cards for one click.
+		if existing, claimed := h.store.ClaimedCreate(clientToken, projectID); claimed {
+			claimedTask, err := h.store.GetTask(projectID, existing)
+			if err != nil {
+				httputil.Fail(w, err, "get created task", "task not found")
+				return
+			}
+			httputil.JSONResponse(w, http.StatusCreated, claimedTask)
+			return
+		}
 		// A mode nothing dispatches on must not reach the row: the tool-set switch falls through
 		// to act, so the task would be offered write tools while reading as something else.
 		if _, valid := types.ParseOperatingMode(string(task.OperatingMode)); task.OperatingMode != "" && !valid {
@@ -218,6 +234,10 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 			httputil.Fail(w, err, "create task", "project not found")
 			return
 		}
+		if err := h.store.ClaimWrite(clientToken, projectID, task.ID, store.ClaimCreateTask, task.ID); err != nil {
+			logging.For(logging.HTTP).With(logging.TaskID, task.ID).Warnf("created task went unclaimed: %v", err)
+		}
+		// CreateThread mints the thread's ID into mainThread.
 		mainThread := &types.TaskThread{
 			TaskID:    task.ID,
 			Name:      "Main",

@@ -170,8 +170,8 @@ func TestFailureTracker_DifferentFailuresInOneTurn(t *testing.T) {
 		t.Errorf("different failures in one turn: count = %d, want 1", got)
 	}
 	// The tracked signature should be the last one (sigB)
-	if ft.lastFailureSig != sigB {
-		t.Errorf("lastFailureSig = %q, want %q", ft.lastFailureSig, sigB)
+	if ft.lastFailure.signature != sigB {
+		t.Errorf("tracked failure = %q, want %q", ft.lastFailure.signature, sigB)
 	}
 
 	// Repeating sigB increments
@@ -188,14 +188,31 @@ func TestFailureTracker_DifferentFailuresInOneTurn(t *testing.T) {
 func TestFailureTracker_ResetClearsState(t *testing.T) {
 	t.Parallel()
 	var ft failureTracker
-	ft.lastFailureSig = "some_sig"
+	ft.lastFailure = turnResult{signature: "some_sig"}
 	ft.failCount = 5
 
 	ft.reset()
 	if ft.failCount != 0 {
 		t.Errorf("after reset: failCount = %d, want 0", ft.failCount)
 	}
-	if ft.lastFailureSig != "" {
-		t.Errorf("after reset: lastFailureSig = %q, want empty", ft.lastFailureSig)
+	if ft.lastFailure.signature != "" {
+		t.Errorf("after reset: tracked failure = %q, want empty", ft.lastFailure.signature)
+	}
+	if name, args := ft.failingCall(); name != "" || args != "" {
+		t.Errorf("after reset: failingCall = %q %q, want nothing named", name, args)
+	}
+}
+
+// The loop breaker matches a row by the call itself, which is what the row stores.
+func TestFailureTracker_FailingCallNamesTheCall(t *testing.T) {
+	t.Parallel()
+	const args = `{"command":"make test"}`
+	var ft failureTracker
+	ft.recordTurn([]turnResult{{
+		signature: "bash:" + args, name: "bash", rawArgs: args, success: false,
+	}})
+
+	if name, got := ft.failingCall(); name != "bash" || got != args {
+		t.Errorf("failingCall = %q %q, want bash %q", name, got, args)
 	}
 }

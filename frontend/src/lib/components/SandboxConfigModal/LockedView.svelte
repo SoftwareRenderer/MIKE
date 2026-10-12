@@ -57,11 +57,9 @@
                         <div class="sandbox-list">
                             {#each draft.forwardPorts as port}
                                 {#if draft.activeHostPorts.has(port.container_port)}
-                                    <div class="sandbox-item">
+                                    <div class="sandbox-item sandbox-item-pair">
                                         <span class="sandbox-item-key" title={t('sandbox.hostPort')}>{formatAssignedHost(draft.activeHostPorts.get(port.container_port) ?? 0, port.host_ip)}</span>
-                                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                                            <path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                                        </svg>
+                                        <span>:</span>
                                         <span class="sandbox-item-text" title={t('sandbox.containerPort')}>{port.container_port}</span>
                                     </div>
                                 {/if}

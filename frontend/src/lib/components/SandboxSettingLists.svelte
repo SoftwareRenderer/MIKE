@@ -25,9 +25,6 @@
             {#each mounts as mount}
                 <div class="sandbox-item">
                     <span class="sandbox-item-key sandbox-trunc" title={mount.host_path}>{mount.host_path}</span>
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                        <path d="M4 3L8 6L4 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
                     <span class="sandbox-item-text sandbox-trunc" title={mount.container_path}>{mount.container_path}</span>
                     <span class="sandbox-mode sandbox-mode-end" class:sandbox-mode-rw={mount.mode === 'rw'} class:sandbox-mode-ro={mount.mode === 'ro'} title={mount.mode === 'rw' ? t('sandbox.readWrite') : t('sandbox.readOnly')}>{mount.mode}</span>
                 </div>
@@ -41,9 +38,8 @@
         <span class="sandbox-section-label">{t('sandbox.environmentVariables')}</span>
         <div class="sandbox-list">
             {#each envs as env}
-                <div class="sandbox-item sandbox-item-tight">
+                <div class="sandbox-item">
                     <span class="sandbox-item-key sandbox-trunc" title={env.key}>{env.key}</span>
-                    <span class="sandbox-eq">=</span>
                     <span class="sandbox-item-text sandbox-trunc" title={env.value}>{env.value || t('sandbox.empty')}</span>
                 </div>
             {/each}

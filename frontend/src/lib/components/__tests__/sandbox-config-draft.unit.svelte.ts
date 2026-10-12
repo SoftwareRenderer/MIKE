@@ -13,6 +13,7 @@ vi.mock('$lib/api', async (importOriginal) => {
 });
 
 import { SandboxDraftOwner } from '$lib/components/SandboxConfigModal/draft.svelte';
+import { DOCKER_DEFAULT_CAPABILITIES } from '$lib/components/SandboxConfigModal/capabilities';
 import { projectChanges } from '$lib/components/SandboxConfigModal/drafts';
 import type { Project } from '$lib/types';
 
@@ -302,6 +303,28 @@ describe('the sandbox draft', () => {
             draft.capInputValue = '';
             draft.handleCapInputKeydown(keydown('Backspace'));
             expect(draft.capabilities).toEqual(['CAP_CHOWN']);
+        });
+
+        it("adds the defaults beside what was granted by hand, each name once", () => {
+            const draft = draftOf(storedRow({ sandbox_capabilities: ['CAP_SYS_ADMIN', 'CAP_KILL'] }));
+            draft.addDefaultCapabilities();
+
+            expect(draft.capabilities).toEqual([
+                'CAP_SYS_ADMIN', 'CAP_KILL',
+                ...DOCKER_DEFAULT_CAPABILITIES.filter(cap => cap !== 'CAP_KILL'),
+            ]);
+        });
+
+        it('offers the defaults only while one of them is missing', () => {
+            const draft = draftOf(storedRow({ sandbox_capabilities: [] }));
+            expect(draft.missingDefaultCapabilities).toEqual([...DOCKER_DEFAULT_CAPABILITIES]);
+
+            draft.addDefaultCapabilities();
+            expect(draft.missingDefaultCapabilities).toEqual([]);
+
+            // A second click is a no-op.
+            draft.addDefaultCapabilities();
+            expect(draft.capabilities).toEqual([...DOCKER_DEFAULT_CAPABILITIES]);
         });
     });
 

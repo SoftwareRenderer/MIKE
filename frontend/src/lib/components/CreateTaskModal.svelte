@@ -259,7 +259,7 @@
             }
         };
         if (isOfflineNow) {
-            const queued = await enqueueAction({ type: 'createTask', params: { projectId, taskData: taskDataWithId } });
+            const queued = await enqueueAction({ type: 'createTask', params: { projectId, taskData: taskDataWithId, clientToken: id } });
             (optimisticTask as any).actionId = queued.id;
             await queueStartIfEnabled();
         }
@@ -287,7 +287,7 @@
                 return;
             }
             // Nothing marks the app offline here: the failed request already reported its own reason.
-            const queued = await enqueueAction({ type: 'createTask', params: { projectId, taskData: taskDataWithId } });
+            const queued = await enqueueAction({ type: 'createTask', params: { projectId, taskData: taskDataWithId, clientToken: id } });
             (optimisticTask as any).actionId = queued.id;
             await queueStartIfEnabled();
             if (announceOffline) dialogStore.showToast(t('app.task.queuedOffline'));
@@ -296,7 +296,7 @@
         if (lineTaskFlow) {
             // The line-task variant needs the real ID to open the floating task
             try {
-                const realTask = await createTask(projectId, taskData);
+                const realTask = await createTask(projectId, taskData, id);
                 replaceOptimisticTask(id, realTask);
                 startTaskIfEnabled(projectId, realTask.id);
                 onOpenTask?.(realTask);
@@ -309,7 +309,7 @@
         // Fire-and-forget: try to create the task on the server in the background.
         // If online, replace the optimistic task with the real one.
         // If offline, createTask() returns the queued result (no-op since already queued above).
-        createTask(projectId, taskData).then((realTask) => {
+        createTask(projectId, taskData, id).then((realTask) => {
             replaceOptimisticTask(id, realTask);
             startTaskIfEnabled(projectId, realTask.id);
         }).catch((err) => handleCreateFailure(err, false));

@@ -155,7 +155,7 @@ type turnLanguageServer struct {
 	workspace string
 	language  string
 	cfg       *lsp.ServerConfig
-// held tracks if the pass owes a reference from GetOrCreate.
+	// held tracks if the pass owes a reference from GetOrCreate.
 	held bool
 }
 

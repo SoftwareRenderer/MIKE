@@ -1,7 +1,8 @@
 <script lang="ts">
     import type { DiffFile, DiffRow, DiffImageRequest, DiffImageSection, DiffImageSource } from '$lib/types/diff';
     import type { DiffDisplayItem } from '$lib/utils/diff-parser';
-    import { buildDisplayItems, truncatePath, getStatusBadge } from '$lib/utils/diff-parser';
+    import { buildDisplayItems, jumpTargets, truncatePath, getStatusBadge } from '$lib/utils/diff-parser';
+    import { storeBounded } from '$lib/utils/bounded-map';
     import { comparePathsRootLast, sortPathsRootLast } from '$lib/utils/sort-paths';
     import { isDisplayableImage, imageSides } from '$lib/utils/diff-image';
     import { highlightLinesAsync } from '$lib/highlighter';
@@ -98,16 +99,6 @@ import { slide } from 'svelte/transition';
                 el.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }, 50);
         });
-    });
-
-    // Map all untracked entries by path for lookup
-    let untrackedMap = $state(new Map<string, { path: string; fileSize?: number; isBinary?: boolean; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>());
-    $effect(() => {
-        const map = new Map<string, { path: string; fileSize?: number; isBinary?: boolean; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>();
-        for (const entry of [...stagedUntracked, ...unstagedUntracked]) {
-            map.set(entry.path, entry);
-        }
-        untrackedMap = map;
     });
 
     // Track which collapsed blocks are expanded
@@ -228,54 +219,57 @@ import { slide } from 'svelte/transition';
         hoveredRowKey = '';
     });
 
-    // Syntax highlight cache: plain Map, populated lazily on file expand.
-    // Not wrapped in $state — highlighting runs off-main-thread via queueMicrotask.
-    let highlightCache = $state(new Map<string, Record<string, string>>());
+    // Highlighted HTML per file, keyed by the line's text. A diff has one gutter, which numbers removed
+    // rows from the old file and every other row from the new one, so a line number names two rows.
+    let highlightCache = $state(new Map<string, Map<string, string>>());
 
-    function getHighlight(filePath: string, lineNumber: number | null): string | undefined {
-        if (!lineNumber) return undefined;
-        return highlightCache.get(filePath)?.[String(lineNumber)];
+    const HIGHLIGHTS_PER_FILE = 2000;
+
+    function getHighlight(filePath: string, text: string): string | undefined {
+        if (!text) return undefined;
+        return highlightCache.get(filePath)?.get(text);
     }
 
-    /** Pre-populate highlight cache for a file (loads language lazily via dynamic import). */
-    async function preloadHighlights(path: string, rows: Array<{ text?: string; lineNumber: number | null }>) {
-        if (highlightCache.has(path)) return;
+    /** The rows one section draws for a file. A file can be listed in the committed and working sections
+     *  at once, comparing different commits. */
+    function drawnRows(file: DiffFile, committed: boolean): DiffRow[] {
+        return committed && file.committedRows?.length ? file.committedRows : file.rows;
+    }
+
+    /** Row lists already sent to the highlighter, by array identity: a refresh hands over a new array. */
+    const highlightedList = new WeakSet<DiffRow[]>();
+
+    async function highlightFile(path: string, rows: DiffRow[]) {
         if (rows.length === 0) return;
-        const texts = rows.map(r => r.text ?? '');
-        const htmls = await highlightLinesAsync(texts, path);
-        const cache: Record<string, string> = {};
-        let hasAny = false;
+        const htmls = await highlightLinesAsync(rows.map(r => r.text ?? ''), path);
+        const byText = highlightCache.get(path) ?? new Map<string, string>();
         rows.forEach((row, i) => {
-            if (htmls[i]) {
-                cache[String(row.lineNumber)] = htmls[i];
-                hasAny = true;
-            }
+            const html = htmls[i];
+            if (html) storeBounded(byText, row.text ?? '', html, HIGHLIGHTS_PER_FILE);
         });
-        if (hasAny) {
-            highlightCache.set(path, cache);
-            highlightCache = new Map(highlightCache);
-        }
+        const next = new Map(highlightCache);
+        next.set(path, byText);
+        highlightCache = next;
     }
 
-    /** Pre-populate highlight cache for an untracked file entry. */
-    async function preloadUntrackedHighlights(entry: { path: string; fileSize?: number; file: DiffFile }) {
-        if (highlightCache.has(entry.path)) return;
-        if (entry.file.rows.length === 0 || entry.fileSize !== undefined) return;
-        const texts = entry.file.rows.map(r => r.text ?? '');
-        const htmls = await highlightLinesAsync(texts, entry.path);
-        const cache: Record<string, string> = {};
-        let hasAny = false;
-        entry.file.rows.forEach((row, i) => {
-            if (htmls[i]) {
-                cache[String(row.lineNumber)] = htmls[i];
-                hasAny = true;
-            }
-        });
-        if (hasAny) {
-            highlightCache.set(entry.path, cache);
-            highlightCache = new Map(highlightCache);
+    // Every file the panel is drawing gets one highlight pass — tracked, committed and untracked alike.
+    $effect(() => {
+        const open: Array<{ path: string; rows: DiffRow[] }> = [];
+        for (const f of sortedCommittedFiles) {
+            if (f.fileSize === undefined && isFileOpen(f.path)) open.push({ path: f.path, rows: drawnRows(f, true) });
         }
-    }
+        for (const f of [...sortedStagedFiles, ...sortedUnstagedFiles]) {
+            if (f.fileSize === undefined && isFileOpen(f.path)) open.push({ path: f.path, rows: drawnRows(f, false) });
+        }
+        for (const u of [...sortedStagedUntracked, ...sortedUnstagedUntracked]) {
+            if (u.fileSize === undefined && isFileOpen(u.path)) open.push({ path: u.path, rows: u.file.rows });
+        }
+        for (const { path, rows } of open) {
+            if (highlightedList.has(rows)) continue;
+            highlightedList.add(rows);
+            void highlightFile(path, rows);
+        }
+    });
 
     function toggleBlock(id: string) {
         expandedBlocks = { ...expandedBlocks, [id]: !expandedBlocks[id] };
@@ -283,26 +277,13 @@ import { slide } from 'svelte/transition';
 
     function toggleFile(path: string) {
         const next = new Set(collapsedFiles);
-        const wasCollapsed = next.has(path);
-        if (wasCollapsed) {
+        if (next.has(path)) {
             next.delete(path);
         } else {
             next.add(path);
         }
         collapsedFiles = next;
         saveCollapsedFiles(next);
-        // Preload highlights when expanding a file (not when collapsing)
-        if (wasCollapsed) {
-            const file = [...sortedStagedFiles, ...sortedUnstagedFiles].find(f => f.path === path);
-            if (file) {
-                preloadHighlights(file.path, file.rows);
-                return;
-            }
-            const entry = untrackedMap.get(path);
-            if (entry) {
-                preloadUntrackedHighlights(entry);
-            }
-        }
     }
 
     /** Modified, then Added, then Deleted, then Renamed; the path rule decides within a status. */
@@ -319,11 +300,6 @@ import { slide } from 'svelte/transition';
     }
 
     type UntrackedEntry = { path: string; fileSize?: number; isBinary?: boolean; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean };
-
-    function getDisplayItems(rows: DiffRow[]): DiffDisplayItem[] {
-        return buildDisplayItems(rows);
-    }
-
 
     function handleRowClick(filePath: string, lineNumber: number | null) {
         if (onLineClick && lineNumber != null) {
@@ -368,18 +344,20 @@ import { slide } from 'svelte/transition';
 
      `slot` is the row's position in the gutter, which is what `hoveredRowKey` names: the gutter and
      the line column are two lists side by side, and a collapsed block holds a slot of its own, so
-     its expanded rows start at the next one. Context rows carry no variant prefix of their own —
-     only context lines are ever collapsed into a block. -->
-{#snippet diffRow(path: string, row: DiffRow, slot: number, variantClass: string)}
+     its expanded rows start at the next one. `jumpTo` is the line a click opens, not the gutter number
+     when the row was removed. Context rows carry no variant prefix of their own — only context lines are
+     ever collapsed into a block. -->
+{#snippet diffRow(path: string, row: DiffRow, slot: number, variantClass: string, jumpTo: number | null)}
+    {@const highlighted = getHighlight(path, row.text ?? '')}
     <!-- The role and the tabindex are conditioned on the same test, which the a11y check cannot
          follow: a non-negative tabindex never appears without role="button" beside it. -->
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
     <div
-        class={`diff-row ${variantClass}${onLineClick && row.lineNumber != null ? ' diff-row-clickable' : ''}`}
-        role={onLineClick && row.lineNumber != null ? 'button' : undefined}
-        tabindex={onLineClick && row.lineNumber != null ? 0 : undefined}
-        onclick={() => handleRowClick(path, row.lineNumber)}
-        onkeydown={(e) => { if (onLineClick && row.lineNumber != null && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); handleRowClick(path, row.lineNumber); } }}
+        class={`diff-row ${variantClass}${onLineClick && jumpTo != null ? ' diff-row-clickable' : ''}`}
+        role={onLineClick && jumpTo != null ? 'button' : undefined}
+        tabindex={onLineClick && jumpTo != null ? 0 : undefined}
+        onclick={() => handleRowClick(path, jumpTo)}
+        onkeydown={(e) => { if (onLineClick && jumpTo != null && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); handleRowClick(path, jumpTo); } }}
         onmouseenter={() => { hoveredRowKey = `${path}:${slot}`; }}
         onmouseleave={() => { hoveredRowKey = ''; }}
     >
@@ -397,8 +375,8 @@ import { slide } from 'svelte/transition';
                         <span class={`diff-segment diff-segment-${seg.tone}`}>{seg.text}</span>
                     {/each}
                 </span>
-            {:else if getHighlight(path, row.lineNumber)}
-                <span class="diff-text">{@html getHighlight(path, row.lineNumber)!}</span>
+            {:else if highlighted}
+                <span class="diff-text">{@html highlighted}</span>
             {:else}
                 <span class="diff-text">{row.text || ' '}</span>
             {/if}
@@ -420,7 +398,7 @@ import { slide } from 'svelte/transition';
     </div>
 {/snippet}
 
-{#snippet diffFileBody(path: string, items: DiffDisplayItem[], truncated: boolean | undefined, onExpand: ((path: string) => void) | undefined)}
+{#snippet diffFileBody(path: string, items: DiffDisplayItem[], jumps: (number | null)[], truncated: boolean | undefined, onExpand: ((path: string) => void) | undefined)}
     <div class="diff-file-content">
         <div class="diff-file-body">
             <div class="diff-gutter">
@@ -449,8 +427,9 @@ import { slide } from 'svelte/transition';
                 <div class="diff-line-content-wrapper">
                     {#each items as item, i}
                         {#if item.type === 'row'}
-                            {@render diffRow(path, item.row, i, `diff-row-${item.row.variant}`)}
+                            {@render diffRow(path, item.row, i, `diff-row-${item.row.variant}`, jumps[item.rowIndex])}
                         {:else if item.type === 'collapsed'}
+                            {@const hidden = item.block.rows.length}
                             <button
                                 type="button"
                                 class="diff-collapse-btn"
@@ -459,24 +438,24 @@ import { slide } from 'svelte/transition';
                                 onmouseenter={() => { hoveredRowKey = `${path}:${i}`; }}
                                 onmouseleave={() => { hoveredRowKey = ''; }}
                                 title={expandedBlocks[item.block.id]
-                                    ? t('diff.hideLines', { count: item.block.count })
-                                    : t('diff.showLines', { count: item.block.count })}
+                                    ? t('diff.hideLines', { count: hidden })
+                                    : t('diff.showLines', { count: hidden })}
                             >
                                 {#if expandedBlocks[item.block.id]}
                                     <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
                                         <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                                     </svg>
-                                    {t('diff.hideLines', { count: item.block.count })}
+                                    {t('diff.hideLines', { count: hidden })}
                                 {:else}
                                     <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
                                         <path d="M4 4h8M4 8h8M4 12h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                                     </svg>
-                                    {t('diff.showLines', { count: item.block.count })}
+                                    {t('diff.showLines', { count: hidden })}
                                 {/if}
                             </button>
                             {#if expandedBlocks[item.block.id]}
                                 {#each item.block.rows as row, ji}
-                                    {@render diffRow(path, row, i + 1 + ji, 'diff-row-context')}
+                                    {@render diffRow(path, row, i + 1 + ji, 'diff-row-context', jumps[item.block.startIndex + ji])}
                                 {/each}
                             {/if}
                         {/if}
@@ -579,8 +558,9 @@ import { slide } from 'svelte/transition';
                     </div>
                 </div>
             {:else}
-                {@const items = getDisplayItems(file.rows)}
-                {@render diffFileBody(file.path, items, file.truncated, onExpandFile)}
+                {@const items = buildDisplayItems(file.rows)}
+                {@const jumps = jumpTargets(file.rows)}
+                {@render diffFileBody(file.path, items, jumps, file.truncated, onExpandFile)}
                 {/if}
             </div>
         {/if}
@@ -652,8 +632,9 @@ import { slide } from 'svelte/transition';
                     </div>
                 </div>
             {:else if ufile.rows.length > 0}
-                {@const uitems = getDisplayItems(ufile.rows)}
-                {@render diffFileBody(entry.path, uitems, entry.truncated, onExpandUntracked)}
+                {@const uitems = buildDisplayItems(ufile.rows)}
+                {@const ujumps = jumpTargets(ufile.rows)}
+                {@render diffFileBody(entry.path, uitems, ujumps, entry.truncated, onExpandUntracked)}
             {:else if ufile.added > 0 && !entry.loading}
                 <div class="diff-file-content">
                     <div class="diff-line-scroll">
@@ -813,7 +794,7 @@ import { slide } from 'svelte/transition';
             </button>
             <div class="diff-section-body">
                 {#each sortedCommittedFiles as file (file.path)}
-                    {@render diffFileEntry({ ...file, rows: file.committedRows?.length ? file.committedRows : file.rows }, false, false, 'committed')}
+                    {@render diffFileEntry({ ...file, rows: drawnRows(file, true) }, false, false, 'committed')}
                 {/each}
             </div>
         </div>

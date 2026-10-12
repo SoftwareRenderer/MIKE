@@ -173,7 +173,7 @@ func (h *ExtensionHandler) repairOne(ctx context.Context, m missingInstall) erro
 	return nil
 }
 
-// restores installed extensions whose files are gone, and reports the rows that
+// RepairMissingFiles restores installed extensions whose files are gone, and reports the rows that
 // cannot be restored on their own. It is meant to be called once, when the app starts, off the boot
 // path: with nothing missing it costs one stat per row and logs nothing.
 //

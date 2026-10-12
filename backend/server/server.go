@@ -542,16 +542,17 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 	s.refreshPromptLocale()
 
 	s.executor = kanbanexec.NewTaskExecutor(kanbanexec.Deps{
-		Store:          store,
-		ConfigStore:    cfgStore,
-		AppStreamMgr:   s.appStreamMgr,
-		WorktreeMgr:    worktreeMgr,
-		SandboxMgr:     s.sandboxMgr,
-		AgentRegistry:  agentRegistry,
-		LSPMgr:         s.extLSPMgr,
-		CommitQueue:    commitQueue,
-		ExtensionTools: s.extToolRegistry,
-		MCP:            s.mcpRegistry,
+		Store:              store,
+		ConfigStore:        cfgStore,
+		AppStreamMgr:       s.appStreamMgr,
+		WorktreeMgr:        worktreeMgr,
+		SandboxMgr:         s.sandboxMgr,
+		AgentRegistry:      agentRegistry,
+		LSPMgr:             s.extLSPMgr,
+		CommitQueue:        commitQueue,
+		ExtensionTools:     s.extToolRegistry,
+		MCP:                s.mcpRegistry,
+		RewindConversation: s.rewindConversationForRow,
 	})
 	s.executor.SetLLMAdapter(s.llmAdapter)
 	// The budget is measured on the same tick that samples the containers it counts, and reports

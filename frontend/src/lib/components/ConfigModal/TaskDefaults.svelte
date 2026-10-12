@@ -12,6 +12,7 @@
         defaultAutoSummarizeThreshold = $bindable(90),
         runSiblingsParallel = $bindable(false),
         reclaimIdleSandbox = $bindable(false),
+        loopBreaker = $bindable(false),
         originBranch,
         onDirty,
     }: {
@@ -22,6 +23,7 @@
         defaultAutoSummarizeThreshold?: number;
         runSiblingsParallel?: boolean;
         reclaimIdleSandbox?: boolean;
+        loopBreaker?: boolean;
         originBranch: string;
         onDirty?: () => void;
     } = $props();
@@ -90,6 +92,14 @@
             <span class="toggle-desc">{t('settings.defaults.maxFailedDesc')}</span>
         </div>
         <input id="default-max-failed" type="number" bind:value={defaultMaxFailedTurns} min="1" max="20" class="option-input" onchange={() => onDirty?.()} />
+    </div>
+
+    <div class="toggle-field">
+        <div class="toggle-label-group">
+            <span id="toggle-loop-breaker-label" class="toggle-label">{t('settings.defaults.loopBreaker')}</span>
+            <span id="toggle-loop-breaker-desc" class="toggle-desc">{t('settings.defaults.loopBreakerDesc')}</span>
+        </div>
+        <ToggleSwitch bind:checked={loopBreaker} ariaLabel={t('settings.defaults.loopBreakerAria')} ariaDescribedby="toggle-loop-breaker-desc" onChange={() => onDirty?.()} />
     </div>
 </fieldset>
 

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"mike/backend/httputil"
+	"mike/backend/store"
 	"mike/backend/stream"
 	"mike/backend/types"
 
@@ -46,6 +47,7 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 		ReasoningEffort string `json:"reasoning_effort"`
 		Attachments     string `json:"attachments"`
 		Regenerate      bool   `json:"regenerate"`
+		ClientToken     string `json:"client_token"`
 	}
 	if !httputil.DecodeJSON(w, r, &req) {
 		return
@@ -103,6 +105,11 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 		te.store.CreateTaskMessage(tm)
 	}
 
+	if err := te.store.ClaimWrite(req.ClientToken, projectID, taskID, store.ClaimSend, msgID); err != nil {
+		logging.For(logging.Exec).With(logging.TaskID, taskID).Warnf("send %s went unclaimed: %v", msgID, err)
+	}
+
+	// Broadcast echo to WS clients
 	echoData := map[string]any{"id": msgID, "role": "user", "content": req.Content}
 	if threadID != "" {
 		echoData["thread_id"] = threadID

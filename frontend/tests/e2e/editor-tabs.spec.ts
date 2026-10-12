@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test';
-import { writeFileSync, rmSync, readdirSync, statSync } from 'node:fs';
+import { writeFileSync, rmSync, readdirSync, statSync, mkdirSync, existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'path';
-import { getProjectId, isolatedProject, gotoProject, ownProjectPath, selectProject } from './helpers';
+import { apiGetJson, csrfFetch, getProjectId, isolatedProject, gotoProject, ownProjectPath, selectProject } from './helpers';
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
 isolatedProject();
@@ -440,6 +440,68 @@ test.describe('Editor Tabs', () => {
       try {
         rmSync(join(projectDir, file1), { force: true });
       } catch { /* ignore */ }
+    }
+  });
+
+  // `isolatedProject()` gives this worker one project, so the second is added over the API and deleted
+  // with the test. What must not survive a switch is the address naming a file the project it left held.
+  test('names only a file of the project on screen', async ({ page }) => {
+    test.setTimeout(45000);
+    const ownId = await getProjectId(page);
+    const ownDir = ownProjectPath();
+    expect(ownDir, 'this worker has no own project path').toBeTruthy();
+
+    const stamp = Date.now();
+    const ownFile = `switch-alpha-${stamp}.txt`;
+    const otherFile = `switch-bravo-${stamp}.txt`;
+    const otherDir = `/tmp/kanban-e2e-tabs-switch-${stamp}`;
+    writeFileSync(join(ownDir!, ownFile), 'Alpha\n');
+    mkdirSync(otherDir, { recursive: true });
+    writeFileSync(join(otherDir, otherFile), 'Bravo\n');
+    execSync('git init -q', { cwd: otherDir });
+    execSync('git add -A', { cwd: otherDir });
+    execSync('git -c user.email="e2e@mike.local" -c user.name="e2e" commit -qm seed', { cwd: otherDir });
+
+    try {
+      await csrfFetch(page, '/api/projects', { method: 'POST', body: { path: otherDir } });
+      let otherId = '';
+      await expect(async () => {
+        otherId = (await apiGetJson<any[]>(page, '/api/projects')).find((p: any) => p.path === otherDir)?.id || '';
+        expect(otherId).toBeTruthy();
+      }).toPass({ timeout: 30000 });
+      // The sidebar lists what it fetched, so pick the new row up before reaching for it.
+      await gotoProject(page);
+      await page.waitForSelector('.project-item', { timeout: 10000 });
+
+      await selectProject(page, ownId);
+      await page.locator('.explorer-btn').click();
+      await expect(page.locator('.file-browser-list')).toBeVisible({ timeout: 10000 });
+      await page.locator('.file-browser-item', { hasText: ownFile }).dblclick();
+      await expect(page.locator('.editor-tab-name').filter({ hasText: ownFile })).toBeVisible({ timeout: 10000 });
+      await expect.poll(() => page.url()).toContain(ownFile);
+
+      // The switch: the explorer stays on screen, holding another project's files.
+      await selectProject(page, otherId);
+      await expect(page.locator('.explorer-view')).toBeVisible({ timeout: 10000 });
+      await expect(page.locator('.editor-tab')).toHaveCount(0);
+      await expect.poll(() => page.url()).not.toContain(ownFile);
+
+      // Each project shows and names its own file.
+      await page.locator('.file-browser-item', { hasText: otherFile }).dblclick();
+      await expect(page.locator('.editor-tab-name').filter({ hasText: otherFile })).toBeVisible({ timeout: 10000 });
+      await selectProject(page, ownId);
+      await expect(page.locator('.editor-tab-name').filter({ hasText: ownFile })).toBeVisible({ timeout: 10000 });
+      await expect(page.locator('.editor-tab-name').filter({ hasText: otherFile })).toHaveCount(0);
+      await expect.poll(() => page.url()).toContain(ownFile);
+      await selectProject(page, otherId);
+      await expect(page.locator('.editor-tab-name').filter({ hasText: otherFile })).toBeVisible({ timeout: 10000 });
+      await expect.poll(() => page.url()).toContain(otherFile);
+    } finally {
+      const list = await apiGetJson<any[]>(page, '/api/projects').catch(() => []);
+      const row = (list || []).find((p: any) => p.path === otherDir);
+      if (row) await csrfFetch(page, `/api/projects/${row.id}`, { method: 'DELETE' });
+      if (existsSync(join(ownDir!, ownFile))) rmSync(join(ownDir!, ownFile), { force: true });
+      rmSync(otherDir, { recursive: true, force: true });
     }
   });
 });

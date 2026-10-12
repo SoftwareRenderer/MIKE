@@ -1174,10 +1174,7 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 				te.rowsDurable(setup.projectID, setup.task.ID)
 			}
 
-			turnFailures = append(turnFailures, turnResult{
-				signature: tc.Function.Name + ":" + tc.Function.Arguments,
-				success:   success,
-			})
+			turnFailures = append(turnFailures, callResult(tc.Function.Name, tc.Function.Arguments, success))
 
 			if skipped {
 				continue
@@ -1390,6 +1387,11 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 
 		// Check consecutive identical tool call failures (turn-level).
 		if count := lc.tracker.recordTurn(turnFailures); count >= maxFailures {
+			// The breaker cuts the failed call and the turns after it out of the conversation and asks
+			// the model to proceed; declining leaves the ordinary failure path.
+			if te.breakFailureLoop(setup, lc) {
+				return turnNextLLMCall
+			}
 			setup.task.ExecutionState = types.ExecStateFailed
 			setup.task.Status = types.StatusReview
 			setup.task.Output = fmt.Sprintf("Max consecutive failed turns (%d) reached", maxFailures)

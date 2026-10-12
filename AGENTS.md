@@ -176,6 +176,11 @@ make test-gen-registry                                   # the generator's own t
 - **Shortcuts and UI preferences ride the shared Settings Save/Cancel flow**, and `PUT /api/config` replaces
   the whole `keyboard_shortcuts` object, so always send every binding. `docs/adding-a-preference.md`.
 - **CJK typography is scoped to `:lang()`.** `docs/typography.md`.
+- **A form reflows to its own width, never the window's** — a size container decides when an add-row
+  stacks into one field per line, and every control below that width is 44px. The 768px `isMobile`
+  breakpoint is for app chrome, not a row's arithmetic.
+  `frontend/src/lib/styles/sandbox-config.css` holds the arithmetic, and the phone block of
+  `frontend/tests/e2e/sandbox-mounts.spec.ts` is what fails when it stops holding.
 - Chat never disguises a system message as a user message, shows the streaming cursor only during an active
   response, and formats stats as `X tokens · Ys · Z tok/s`.
 - **Chat autoscroll is judged from the scroll event, never from a gesture listener**, and new content
@@ -186,7 +191,10 @@ make test-gen-registry                                   # the generator's own t
 - **A card lists its subtasks as flat rows in run order, never as nested card boxes.** One pure function
   owns the order and it mirrors `exec`'s schedule. `docs/subtask-outline.md`.
 - Diff text is parsed once in `$lib/utils/diff-parser.ts`, and its badges are the diff badges; git status
-  entries keep their own. Sticky section headers use `position: sticky` over an opaque background.
+  entries keep their own.
+- **A diff row's gutter number is not its identity** — one column numbers a removed row from the old file and
+  every other row from the new one. Identify a row by its text; resolve a click through `jumpTargets`.
+  `docs/api-contract.md → Diffs`. Sticky section headers use `position: sticky` over an opaque background.
 
 ## Storage
 

@@ -135,3 +135,52 @@ describe('ConfigModal release-idle-sandboxes save payload', () => {
         expect(container.querySelector(RECLAIM)?.getAttribute('aria-checked')).toBe('true');
     });
 });
+
+const BREAKER = 'button[aria-label="Recover from failed turns automatically"]';
+
+describe('ConfigModal loop-breaker save payload', () => {
+    async function openDefaults(container: HTMLElement) {
+        await waitFor(() => expect(container.querySelector('button.tab-btn')).toBeTruthy(), { timeout: 1000 });
+        const tabs = Array.from(container.querySelectorAll('button.tab-btn'));
+        fireEvent.click(tabs.find((b) => b.textContent?.trim() === TASK_TAB)!);
+        await waitFor(() => expect(container.querySelector(BREAKER)).toBeTruthy(), { timeout: 1000 });
+    }
+
+    it('sends loop_breaker: true when the toggle is on', async () => {
+        vi.mocked(updateConfig).mockResolvedValue(makeConfig());
+        const { container } = render(ConfigModal, {
+            props: { config: makeConfig(), onClose: vi.fn(), onSaved: vi.fn() },
+        });
+        await openDefaults(container);
+
+        fireEvent.click(container.querySelector(BREAKER)!);
+        fireEvent.click(container.querySelector('button[title="Save settings"]')!);
+        await waitFor(() => expect(updateConfig).toHaveBeenCalledTimes(1), { timeout: 1000 });
+
+        expect(vi.mocked(updateConfig).mock.calls[0][0]).toMatchObject({ loop_breaker: true });
+    });
+
+    it('sends loop_breaker: false when the toggle is left off', async () => {
+        vi.mocked(updateConfig).mockResolvedValue(makeConfig());
+        const { container } = render(ConfigModal, {
+            props: { config: makeConfig(), onClose: vi.fn(), onSaved: vi.fn() },
+        });
+        await openDefaults(container);
+
+        fireEvent.click(container.querySelector('button[title="Save settings"]')!);
+        await waitFor(() => expect(updateConfig).toHaveBeenCalledTimes(1), { timeout: 1000 });
+
+        expect(vi.mocked(updateConfig).mock.calls[0][0]).toMatchObject({ loop_breaker: false });
+    });
+
+    it('hydrates the toggle from a stored preference', async () => {
+        const stored = { ...makeConfig(), loop_breaker: true };
+        vi.mocked(updateConfig).mockResolvedValue(stored);
+        const { container } = render(ConfigModal, {
+            props: { config: stored, onClose: vi.fn(), onSaved: vi.fn() },
+        });
+        await openDefaults(container);
+
+        expect(container.querySelector(BREAKER)?.getAttribute('aria-checked')).toBe('true');
+    });
+});

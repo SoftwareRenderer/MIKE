@@ -658,6 +658,12 @@ message after a reload while still offline, and the applied row reaching the scr
 `onConnected(true)` in `reconnect-banner.svelte.ts` runs the app's `silentRefresh()` once
 `initialLoadComplete`; `TaskChat` reloads history from the DB on reconnect because **turns completed while offline are never replayed** (buffer cleared at turn end). `offline` queues writes immediately, except a value that carries a secret — an unmasked provider key, or a clone URL with credentials in it — which is refused because the queue is persisted; `online` flushes the queue and calls `reconnectNow()` to skip backoff; `visibilitychange` refreshes the board (phone-sleep), and the open task's chat and diff answer the same signal together with the window's own `focus` and a bfcache `pageshow` — the chat whatever it believes, because a missed turn leaves no local trace, the diff only while the task looks able to move under it, never on the task's status. Project re-subscription forces a re-send of `task_diff_stats`.
 
+The queue's own shape is stated where it is held: one record per browser profile, changed by
+read-modify-write and replayed by the newest window alone (*One window replays the queue, and one record
+holds it*). The three writes that cannot land twice carry the identity they sent first, so a replay is
+answered rather than executed again (*One identity per write, so a replay cannot land twice*). Every other
+queued write is at-least-once, deliberately.
+
 ### How a request ends: cancelled, or unanswered
 
 `apiFetch` (`src/lib/api/helpers.ts`) is the one place that decides what a failed fetch means. Every request
@@ -817,6 +823,87 @@ queueable failure from a refusal it must not queue.
 Tests: `api/__tests__/write-or-queue.unit.ts` (answered, unanswered, refused, cancelled, already-offline);
 e2e `one-task-list.spec.ts` drives the edit that is queued by a request nobody answered and lands once.
 
+## One window replays the queue, and one record holds it
+
+`offline-queue` is one record per browser profile, not per window, so every window open on it holds the same
+queued writes. Two rules keep that shared record from becoming two of every write.
+
+**A change is stated against the record, never as an array.** `updateQueue` (`$lib/storage.ts`) reads the
+record, applies the change and writes it back inside one `readwrite` transaction, and the caller says what to
+do to what the record holds *now*. Dumping one window's in-memory array over it erases what another window
+queued in the meantime. An applied or refused action leaves by its `id`, never by position: between the send
+and that write the record may have grown, and the head is not necessarily this action any more. With no
+IndexedDB there is no record to read, so the caller's own array stands in and the session keeps its queue for
+as long as it lives.
+
+**The newest window owns the replay.** A `queue-owner` record beside the actions names the window that sends
+them, mutated by the same read-modify-write. Boot takes the replay from whoever holds it (`seizeQueue`), every
+flush asks the record first (`claimQueue`), and the owner hands it back on a `pagehide` that is not the
+back-forward cache (`releaseQueue`). The rules are pure in `$lib/utils/queue-ownership.ts`: `shouldReplay`
+answers the cheap question — work waiting, no reason holding it, its retry pace spent — on every reachability
+flip, and `holdsReplay` answers the separate one of whether the record names this window. A record that does
+not exist is answered as ours: with nowhere to store a claim, this window's queue is the only queue.
+
+**A window that does not send still answers from the record.** It queues its own writes, and
+`getQueuedSends`, `getQueuedTaskIds` and `getDroppedTaskIds` describe what the record holds, so its pending
+rows and queued badges match the owner's. `BroadcastChannel('mike-queue')` carries `changed`, `claimed` and
+`released`, and a reader re-reads on any of them. A burst of notices costs one re-read rather than one per
+notice: a notice landing during a read asks for a second pass, so the last notice is never answered by a read
+that began before it. `adoptQueue()` is that re-read for a window the browser
+froze and never saw the notices, called from the tab-return watcher in `App.svelte`.
+
+Two windows booting together both write the owner record, and the read-back leaves one of them the reader; until
+the notice lands, at most one action can go out twice. That overlap is what the write identity below is for.
+
+**Tests:** `src/lib/utils/__tests__/queue-ownership.unit.ts` holds the two rules.
+`src/lib/api/__tests__/queue-two-windows.unit.ts` covers one send for a write two windows hold, a reader that
+still names the pending send, the handover when the owner closes, a reader that answers a burst of notices with
+few re-reads, and a window with nowhere to store its claim.
+`src/lib/api/__tests__/queue-record-merge.unit.ts` holds the read-modify-write: an action queued in another
+window survives, and a record that grew mid-send is replayed in order rather than overwritten.
+
+## One identity per write, so a replay cannot land twice
+
+The queue replays what it holds, and replaying a write whose answer was lost reaches the server with the first
+attempt already applied. Three writes do not survive that: a send starts a turn, a create opens a card, a fork
+rewinds a worktree. They carry an identity the client minted.
+
+**The token is minted before the write sets out.** `writeOrQueue` mints one `clientToken` and hands the same
+string to the live call and to the queued action, so the attempt and every replay of it are one write as far as
+the server can tell. A refusal is answered and thrown, so the next attempt is a different write and mints a
+fresh one. `createTask` and `forkTaskThread` keep their own branch and pass the id they already fixed for the
+optimistic row. Only these three put `client_token` on the wire (`api/raw/tasks.ts`, `api/raw/threads.ts`);
+the rest carry it in the record and their route never reads it.
+
+**A claim records what the write produced.** `client_claims` (`backend/store/claims.go`) maps a token to the row
+it answered — the message, the task or the thread. Each guarded handler asks before it changes anything. That is
+what lets a replayed edit-and-send escape the refusal its own first arrival caused: the row it names to truncate
+stopped being the thread's last user row the moment the send landed. What a repeat is answered with, the scope
+the answer is confined to (a token is text from the request), and what a deleted answer row costs belong to the
+server's contract, in `docs/api-contract.md` → *A replayed write carries the identity it sent first*.
+
+**A claim is not forever.** The row ages out after `claimRetention` (30 days), pruned by `ClaimWrite` — the only
+writer — through `idx_client_claims_created_at`, so no sweep or boot step is owed; a deleted task drops its
+claims through the foreign key. A queue older than the horizon is then executed as a fresh write: the guard is
+gone, nothing else is.
+
+One thing the client leans on: a claim answers a replay, never a race — two arrivals carrying one token that
+land together both find nothing claimed. The queue replays only after its own attempt ended, and from one
+window, so the race is not the case that bites here.
+
+**Every other queued write is at-least-once, by decision.** A move, a rename, a status change and a
+`PUT /api/config` land the same value again and that is all; a clone stays last-writer-wins or refused. One
+consequence is written down rather than fixed: a replayed `deleteTask` whose first arrival succeeded comes back
+refused, and the refusal is reported as a refusal, not a delivery.
+
+**Tests:** `src/lib/api/__tests__/write-identity.unit.ts` holds the replay sending the token it already sent, a
+refusal and a next write each minting their own, and a create holding its fixed id in the record it leaves
+behind. `backend/store/claims_test.go` holds one token claimed once, another token as its own write, the task's
+deletion dropping its claim, a claim answering only the task or project it was written in, and a claim past the
+horizon stopping its answer. The prune's index is the one read `backend/store/schema_test.go` walks.
+`backend/server/client_claim_test.go` holds a replayed send, create and fork leaving one row each, two
+identities carrying the same words still running twice, and one task's identity answering nothing for another.
+
 ## What refuses the queue rather than joining it
 
 The queue is persisted to IndexedDB, so a queued value outlives the tab and the session. Two requests are
@@ -850,9 +937,10 @@ So the editor holds the wait, and `FileEditor.handleSave` sorts its own failure 
 
 - **no answer** — nothing is said and nothing on screen changes: the buffer, its draft and the tab's
   unsaved marker stay, and the Save button stays enabled because it is gated on `hasChanges`. The editor
-  runs the save again after `saveRetryDelayMs(attempt)` — 2 s, doubling to 15 s — and runs it at once on
-  the socket's false→true edge, the earliest honest signal that a write can land. The timer is the fallback
-  for a blip that never dropped the socket.
+  runs the save again after `saveRetryDelayMs(attempt)` — 2 s, doubling to 15 s. The socket's false→true
+  edge cuts that wait short and runs the save at once, and only an edge that **follows** the arming: the
+  `$effect` watches `connectionStore.connected`, not the timer, so a blip that never dropped the socket
+  runs its own delay.
 - **answered and refused** — never retried: a later attempt asks the same question and gets the same
   answer. This is the one save failure said out loud, once, as a toast carrying the server's sentence, a
   permanent fault being the one thing silence cannot describe.
@@ -860,8 +948,21 @@ So the editor holds the wait, and `FileEditor.handleSave` sorts its own failure 
 **The retry runs the save; it never replays a captured body.** Reading `content` when the attempt fires is
 what makes the newest edit win. Two existing guards keep the wait to one write per rung: one timer per
 editor, and `SaveController` turning any request made during a write into one coalesced follow-up. The wait
-ends when a write lands, when the buffer stops differing from the file — an external change reconciled it —
-and when the editor is switched or unmounted.
+ends when a write lands, when the buffer stops differing from the file — `reconcileExternalChange` reconciled
+it — and when the editor is switched or unmounted.
+
+**The two throttled writes an edit arms carry the file they were armed for.** An edit arms a draft save at
+200 ms and an undo-chain save at 500 ms. The diff editor hands one view instance from file to file, so a wait
+can outlive its file. Both are kept as a closure over the path and the document read **at the edit**, never
+at the timer. `destroyView()` delivers an outstanding wait to the file it was armed for rather than dropping
+it. Dropping loses the last keystrokes before the switch; letting it fire writes the arriving file with the
+leaving file's bytes — including the empty buffer a reload starts from.
+
+**The draft is the buffer, and the undo chain rides along only when it agrees.** A reopened file paints the
+draft, because that is both what the reader left and what a save writes. The persisted chain is kept only when
+`replayDeltas(base, deltas)` (`$lib/utils/editor-history.ts`) reaches that same text; the draft is written
+sooner than the chain, so a chain landing anywhere else is the older reading, and painting it would show one
+document and save another.
 
 **A save failure never writes `error`.** That state renders the *read*-failure pane, and the template's
 `{:else if error}` replaces `.editor-wrapper` with its text, so a save that reports itself that way deletes
@@ -869,7 +970,11 @@ the document the user was editing along with the reason. Say it in the toast, or
 
 **Tests:** `src/lib/components/__tests__/editor-save-failure.unit.svelte.ts` holds the surviving document,
 the silence during a blip, the attempt gaps of 2/4/8/15 s, and one write per rung.
-`src/lib/utils/__tests__/save-state.unit.ts` holds the gap sequence itself. E2E
+`src/lib/utils/__tests__/save-state.unit.ts` holds the gap sequence itself.
+`src/lib/components/__tests__/editor-buffer-persistence.unit.svelte.ts` holds the two throttled writes: the
+file that arrives gets neither the leaving file's draft nor its history, and a chain that disagrees with the
+draft paints and saves the draft. `src/lib/utils/__tests__/editor-history.unit.ts` holds the replay and its
+refusal. E2E
 `editor-save-retry.spec.ts` aborts the write in flight, checks the buffer stays on screen unannounced, and
 lets the retry land it against the real server — once.
 
@@ -892,19 +997,23 @@ write).
 
 Sign-out runs `clearQueue()` and then `clearAll()`. Both calls, in that order.
 
-- `clearAll()` empties the persisted queue, but `$lib/api/queue` still holds its array in memory, and the
-  next `enqueueAction` writes that whole array back. A queue erased only in the database comes back on the
-  first write after the person has signed out.
+- `clearAll()` erases the record, and a change is written *against* the record rather than as one window's
+  whole array, so an erased queue stays erased through the next enqueue.
+- `clearQueue()` is still required, and for a different reason: a window **sends what it holds**. The flush
+  walks the in-memory array, record or not, so a signed-out window that still names actions in memory would
+  put them on the wire once something answers again.
 - `gc()` is not the substitute: it prunes only entries whose task is gone, and it has one caller,
   `Board.svelte`, which runs it after the board loads.
-- Test: `storage-clear-all.unit.ts` — the case that fails when `clearQueue()` is skipped, which is why the
-  order is the rule rather than a style choice.
+- Test: `storage-clear-all.unit.ts` — "clears memory too, because an emptied record does not stop this window
+  sending what it holds", which is the case `clearQueue()` answers. That is why the order is the rule rather
+  than a style choice.
 
 ## Checking this
 
 `cd frontend && npm test` covers `taskIsInFlight`, the offline queue, the mirror's coalescing and the pending
 rows derived from the queue, and `stores/__tests__/app-store.unit.ts` the board helpers that are the only way
-the task list moves. `cd frontend && npx playwright test reconnect-refresh ws-stale-reconnect` drives a lost
+the task list moves. `go test ./backend/store/ ./backend/server/` covers the write identity: one claim
+answering once, and the three guarded routes leaving one row for a replay. `cd frontend && npx playwright test reconnect-refresh ws-stale-reconnect` drives a lost
 connection; `mirror-follows-frames offline-send-queue` drive the mirror and the queue across a reload;
 `return-after-review` drives the return onto a run that finished while the tab held nothing. `one-task-list`
 drives a board move and a queued card edit, which is where a second task list would show up as a card that

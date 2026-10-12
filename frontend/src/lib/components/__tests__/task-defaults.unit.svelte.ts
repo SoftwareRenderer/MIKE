@@ -105,3 +105,54 @@ describe('TaskDefaults release-idle-sandboxes toggle', () => {
         expect(idxReclaim).toBeLessThan(idxMaxFailed);
     });
 });
+
+const BREAKER_TOGGLE = 'button[aria-label="Recover from failed turns automatically"]';
+
+describe('TaskDefaults loop-breaker toggle', () => {
+    function renderWithBreaker(props: { loopBreaker?: boolean } = {}) {
+        const onDirty = vi.fn();
+        const utils = render(TaskDefaults, {
+            props: { originBranch: 'main', onDirty, ...props },
+        });
+        return {
+            ...utils,
+            onDirty,
+            toggle: () => utils.container.querySelector(BREAKER_TOGGLE) as HTMLButtonElement,
+        };
+    }
+
+    it('renders the toggle, off by default', () => {
+        const { toggle } = renderWithBreaker();
+        expect(toggle()).toBeTruthy();
+        expect(toggle()?.getAttribute('aria-checked')).toBe('false');
+    });
+
+    it('reflects a stored preference', () => {
+        const { toggle } = renderWithBreaker({ loopBreaker: true });
+        expect(toggle()?.getAttribute('aria-checked')).toBe('true');
+    });
+
+    it('toggles and reports dirty', async () => {
+        const { toggle, onDirty } = renderWithBreaker();
+        await fireEvent.click(toggle()!);
+        expect(toggle()?.getAttribute('aria-checked')).toBe('true');
+        expect(onDirty).toHaveBeenCalledTimes(1);
+    });
+
+    it('says what turning it on buys', () => {
+        const { container } = renderWithBreaker();
+        const desc = container.querySelector('#toggle-loop-breaker-desc');
+        expect(desc?.textContent).toBe('Attempts to automatically recover from failed turns');
+        expect((container.querySelector(BREAKER_TOGGLE) as HTMLButtonElement).getAttribute('aria-describedby'))
+            .toBe('toggle-loop-breaker-desc');
+    });
+
+    it('is the row directly under "Max failed turns"', () => {
+        const { container } = renderWithBreaker();
+        const fields = Array.from(container.querySelectorAll('.toggle-field'));
+        const idxMaxFailed = fields.findIndex((f) => f.textContent?.includes('Max failed turns'));
+        const idxBreaker = fields.findIndex((f) => f.textContent?.includes('Loop breaker'));
+        expect(idxMaxFailed).toBeGreaterThan(-1);
+        expect(idxBreaker).toBe(idxMaxFailed + 1);
+    });
+});

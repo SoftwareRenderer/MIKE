@@ -43,7 +43,7 @@
 </div>
 
 {#if draft.imageSource === 'image'}
-    <div class="config-row config-row-input">
+    <div class="config-row config-row-input config-nested">
         <div class="config-info">
             <div class="config-text">
                 <span class="config-label">{t('sandbox.imageName')}</span>

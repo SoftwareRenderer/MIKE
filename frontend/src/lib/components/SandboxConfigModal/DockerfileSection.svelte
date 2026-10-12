@@ -49,7 +49,7 @@
     }
 </script>
 
-<div class="dockerfile-section">
+<div class="dockerfile-section config-nested">
     <div class="dockerfile-header">
         <div class="config-text">
             <span class="config-label">{t('sandbox.dockerfile')}</span>
@@ -144,8 +144,7 @@
     @import '$lib/styles/sandbox-config.css';
 
     .dockerfile-section {
-        padding: 8px 0 0;
-        padding-left: 36px;
+        padding-top: 8px;
         display: flex;
         flex-direction: column;
         gap: 8px;
@@ -290,7 +289,6 @@
         gap: 6px;
         font-size: var(--text-xs);
         color: var(--color-text-secondary);
-        padding-left: 24px;
     }
 
     .image-tag-info code {
@@ -321,7 +319,6 @@
         font-size: var(--text-xs);
         line-height: 1.5;
         color: var(--color-text-secondary);
-        margin-bottom: 8px;
     }
 
     .build-log-line {
@@ -336,7 +333,6 @@
 
     .build-notice {
         padding: 6px 10px;
-        margin-bottom: 6px;
         background: rgb(from var(--color-status-blue) r g b / 0.08);
         border: 1px solid rgb(from var(--color-status-blue) r g b / 0.2);
         border-radius: var(--radius-sm);

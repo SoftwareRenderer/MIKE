@@ -191,6 +191,15 @@ function mountGeometry(container: HTMLElement, follow: ChatFollow, geometry?: Ma
                 return { top: CONTAINER_TOP + msgTop - DIVIDER_HEIGHT - top, bottom: CONTAINER_TOP + msgBottom - top };
             });
         });
+        // An entry holding no prompt row — the window can open on an answer — is landed by its own box.
+        Array.from(el.querySelectorAll<HTMLElement>('.chat-entry')).forEach((entry, idx) => {
+            if (entry.querySelector('.sticky-user-message')) return;
+            stubRect(entry, () => {
+                if (!laidOut) return { top: 0, bottom: 0 };
+                const [msgTop, msgBottom] = geom.get(idx) ?? [0, 0];
+                return { top: CONTAINER_TOP + msgTop - top, bottom: CONTAINER_TOP + msgBottom - top };
+            });
+        });
     }
     stubMessages();
 
@@ -582,5 +591,149 @@ describe('ChatEntries — sticky user-message header', () => {
         await view.relaidOut(new Map([[0, [0, 120]], [2, [400, 1000]]]));
         await view.nudge(-146);
         expect(headerText(container)).toBe('Zulu request');
+    });
+});
+
+function firstButton(container: HTMLElement) {
+    return container.querySelector<HTMLElement>('.chat-sticky-first');
+}
+
+function firstSpinner(container: HTMLElement) {
+    return container.querySelector('.chat-sticky-first .spinner');
+}
+
+/** Click the control, then let it see the scroll its landing causes. */
+async function tapFirst(container: HTMLElement, view: ReturnType<typeof mountGeometry>) {
+    firstButton(container)!.click();
+    await flush();
+    view.el.dispatchEvent(new Event('scroll')); // jsdom sends none for a scrollTop write
+    await flush();
+}
+
+describe('ChatEntries — go to the first message', () => {
+    // One prompt and one answer, the prompt tall so the reader sits well below the start.
+    const heldTurn = [
+        makeEntry('u-a', 'user', 'Alpha request\nmore'),
+        makeEntry('a-1', 'assistant', 'On it'),
+    ];
+    const TALL_FIRST = new Map<number, number[]>([[0, [300, 900]]]);
+    // The same conversation once the walk has fetched the prompt above it.
+    const landedMap = new Map<number, number[]>([[0, [600, 700]], [2, [800, 900]]]);
+
+    it('lands the oldest row held on the sticky line and retires the header', async () => {
+        const onJumpToFirst = vi.fn(() => Promise.resolve());
+        const { container, follow } = await renderChat(undefined, namedEntries, { onJumpToFirst });
+        const view = mountGeometry(container, follow);
+        await view.to(550);
+        expect(headerText(container)).toBe('Bravo request');
+
+        await tapFirst(container, view);
+
+        expect(onJumpToFirst).toHaveBeenCalledTimes(1);
+        // Alpha is the content top, so landing it on the line clamps at 0 and the header retires.
+        expect(view.at()).toBe(0);
+        expect(headerHidden(container)).toBe(true);
+    });
+
+    it('lands the first prompt the walk brought in', async () => {
+        let walkDone: () => void = () => {};
+        const onJumpToFirst = vi.fn(() => new Promise<void>(resolve => { walkDone = resolve; }));
+        const { container, follow, rerender } = await renderChat(undefined, heldTurn, {
+            hasEarlier: true, onJumpToFirst, onLoadEarlier: vi.fn(() => Promise.resolve()),
+        });
+        const view = mountGeometry(container, follow, TALL_FIRST, 4000);
+        await view.to(500);
+
+        firstButton(container)!.click();
+        await flush();
+        // The reader stays put until the rows arrive.
+        expect(view.at()).toBe(500);
+
+        const older = [
+            makeEntry('u-0', 'user', 'Zulu request\nmore'),
+            makeEntry('a-0', 'assistant', 'First reply'),
+            ...heldTurn,
+        ];
+        rerender({ entries: older, entryMetas: older.map(() => makeMeta()) });
+        walkDone();
+        await view.relaidOut(landedMap);
+        await flush();
+
+        expect(view.at()).toBe(600 - HEADER_HEIGHT);
+        expect(headerHidden(container)).toBe(true);
+    });
+
+    // A thread whose held window holds no prompt at all still has a first row to land.
+    const answersOnly = [makeEntry('a-1', 'assistant', 'Reading the tree')];
+
+    it('lands the first entry when no prompt is drawn', async () => {
+        const onJumpToFirst = vi.fn(() => Promise.resolve());
+        const { container, follow } = await renderChat(undefined, answersOnly, { onJumpToFirst });
+        const view = mountGeometry(container, follow, new Map([[0, [600, 700]]]), 4000);
+        await view.to(500);
+
+        await tapFirst(container, view);
+
+        // The window holds no prompt, so the entry's own box is what rests on the line.
+        expect(view.at()).toBe(600 - HEADER_HEIGHT);
+    });
+
+    it('wears a ring through the walk and takes no other jump meanwhile', async () => {
+        let walkDone: () => void = () => {};
+        const onJumpToFirst = vi.fn(() => new Promise<void>(resolve => { walkDone = resolve; }));
+        const onJumpToTurn = vi.fn(() => Promise.resolve(true));
+        const { container, follow } = await renderChat(undefined, answersOnly, {
+            onJumpToFirst, onJumpToTurn,
+            turns: [{ id: 'u-open', created_at: '2026-01-01T00:00:00Z', text: 'work through the tree\nfile by file' }],
+        });
+        const view = mountGeometry(container, follow, new Map(), 4000);
+        await view.to(500);
+        expect(firstSpinner(container)).toBeNull();
+
+        firstButton(container)!.click();
+        await flush();
+        expect(onJumpToFirst).toHaveBeenCalledTimes(1);
+        expect(firstSpinner(container)).toBeTruthy();
+        expect(container.querySelector('.chat-sticky-header')?.getAttribute('aria-busy')).toBe('true');
+
+        firstButton(container)!.click();
+        container.querySelector<HTMLElement>('.chat-sticky-bubble')!.click();
+        await flush();
+
+        // One jump at a time: neither control starts a second one.
+        expect(onJumpToFirst).toHaveBeenCalledTimes(1);
+        expect(onJumpToTurn).not.toHaveBeenCalled();
+        expect(view.at()).toBe(500);
+
+        walkDone();
+        await flush();
+        expect(firstSpinner(container)).toBeNull();
+    });
+
+    // The prompt read paginates on its own, so it can still promise an older page once the rows run out.
+    // Naming such a prompt leaves a header that answers no tap.
+    it('stays retired at the start when the prompt read still claims an older page', async () => {
+        const { container, follow } = await renderChat(undefined, heldTurn, {
+            hasEarlier: false,
+            turns: [{ id: 'u-a', created_at: '2026-01-01T00:00:00Z', text: 'Alpha request\nmore' }],
+            turnsHasMore: true,
+        });
+        const view = mountGeometry(container, follow, TALL_FIRST);
+        await view.to(500);
+        expect(headerHidden(container)).toBe(true);
+    });
+
+    it('sits beside the fullscreen control, and only when the walk exists', async () => {
+        const { container, follow } = await renderChat(undefined, namedEntries, {
+            onJumpToFirst: vi.fn(() => Promise.resolve()), onToggleFullscreen: vi.fn(),
+        });
+        mountGeometry(container, follow);
+        const buttons = Array.from(container.querySelectorAll<HTMLElement>('.chat-sticky-header button'));
+        const rankOf = (cls: string) => buttons.findIndex(b => b.classList.contains(cls));
+        expect(rankOf('chat-sticky-first')).toBeGreaterThan(rankOf('chat-sticky-bubble'));
+        expect(rankOf('chat-sticky-first')).toBeLessThan(rankOf('chat-sticky-fullscreen'));
+
+        const bare = await renderChat(undefined, namedEntries, { onToggleFullscreen: vi.fn() });
+        expect(firstButton(bare.container)).toBeNull();
     });
 });

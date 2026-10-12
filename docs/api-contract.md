@@ -97,6 +97,18 @@ state and clears when the retried call streams (`clearAwaiting`) or when the tur
 call never reached `finalizeTurn`, which is what persists it. So the client drops the half-streamed
 text with `dropAbandonedTurn()` and the retry streams the answer in its place.
 
+### A broken failure loop adds no frame shape
+
+The `loop_breaker` preference (Settings → Task defaults, `docs/adding-a-preference.md`) answers the run that
+reached its consecutive-failed-turn limit instead of ending it. What it sends is three frames the client
+already knows, in this order: a `hint` with `role: "system"` and `kind: "loop_breaker"`, the `user_message`
+echo of the `Proceed` instruction it stored as a user row, and a `status` frame reading `running`. The rows
+are the record — a `system` note (display-only) and a real user row — and the frames only show them landing,
+so a client that reconnects mid-break reads the same conversation. `chat.system.loopBreaker` words the note
+and `loopBreakerNoteText` (`backend/exec/loop_breaker.go`) stores that sentence on the row; the kind strings
+and `chat-entries.ts` must agree case for case. Tests: `backend/exec/loop_breaker_test.go`,
+`chat-entries.unit.ts`.
+
 ### A tool call the user stopped says so in a field
 
 A user message does not queue behind the tool call that is running. `toolCallContext`
@@ -265,6 +277,38 @@ task out of Review, with and without an attachment, and a replace naming a row t
 user row leaves
 the thread whole.
 
+## A replayed write carries the identity it sent first
+
+Three bodies carry a `client_token` the server acts on — `POST …/tasks/{taskID}/send`,
+`POST /api/projects/{projectID}/tasks` and `POST …/tasks/{taskID}/threads/fork`. The client mints one identity
+per write and sends that same one with every replay of it, so a request whose answer was lost arrives as the
+same write rather than as a second one. `docs/reconnection.md` → *One identity per write, so a replay cannot
+land twice*.
+
+A token already answered is answered with what it produced, and nothing runs again. All three answers carry
+201 and the body the first arrival got: the send the message row (`id`, `role`, `content`, plus `thread_id`
+when the row has one), the create the task, the fork the thread. Each route asks `ClaimedWrite` or
+`ClaimedCreate` (`backend/store/claims.go`) **before** it changes anything, which is what keeps a replayed
+edit-and-send from being refused by the truncation its own first arrival caused. The claim is recorded after
+the write lands, by `ClaimWrite`, against the task or project the request named.
+
+Four bounds on the answer. A token is text from the request, so it is answered only inside the scope the
+request named. `client_claims` is looked up with `task_id`, or `project_id` for a create, which has no task
+yet; a token presented under another task claims nothing. A claimed row that has since been deleted answers
+404 for a create and a fork, never a fresh write: recreating the row would undo that deletion. A send whose row
+is gone (a later edit truncated it) is written again as the new message it now is. And an empty token claims
+nothing, so a body that sends none keeps the behaviour it had, the send route's own last-row dedupe among them.
+And a claim row is dropped when its task is deleted or once it passes `claimRetention`, so an identity older than
+that runs again rather than being answered.
+
+Every other route ignores the field: a move, a rename, a status change and `PUT /api/config` are
+last-writer-wins and answering the same value twice is the same result. The guard answers a replay, never a
+race — two arrivals carrying one token that land together both find nothing claimed.
+
+**Tests:** `backend/server/client_claim_test.go` — a replayed send, create and fork leave one row each, a fresh
+identity for the same words still runs, one task's identity answers nothing for another, and an edit replayed
+after its own first arrival still lands. `backend/store/claims_test.go` holds the claim itself.
+
 ## Child rows under a task path
 
 A route under `/api/projects/{projectID}/tasks/{taskID}/` names a task, but threads, messages and the
@@ -327,10 +371,12 @@ answering "what is above the screen". The transcript draws a read ahead of the e
 a read that answers alone puts the newest answers above the older pages. The bottom of the list stops being
 the newest content, and the jump-to-latest button lands on an old row. A window that opens nowhere inside the
 rows held cannot be joined: another thread's read, or a truncation that cut the overlap away, answers alone.
-**Scrolling is the only
-affordance** — no control asks the reader to fetch anything. The list edge is the request, and it fires a
-viewport and a half before the reader gets there (`atTopOfList` and its `EARLIER_EDGE_VIEWPORTS`, in
-`frontend/src/lib/utils/chat-window.ts`) so the page lands while they are still reading toward it.
+**Paging has two starters**, and each names what it wants. The list edge is the passive one: it fires a
+request a viewport and a half before the reader gets there (`atTopOfList` and its `EARLIER_EDGE_VIEWPORTS`,
+in `frontend/src/lib/utils/chat-window.ts`), so the page lands while they are still reading toward it. The
+bubble floors one page at the prompt it names. The go-to-first control walks `before` until
+`X-Messages-More` runs out, so it lands the conversation's first message rather than the top of the window
+loaded so far.
 
 The scroll
 position is preserved by re-finding the entry under the top edge of the viewport (`data-entry-id`), never
@@ -390,6 +436,17 @@ as well, so no path can answer with patch text alone. Tests:
 the only source: it reads the parsed status. `GitStatusPanel.svelte` keeps its own badge for a git status
 entry, which is a different grammar with different inputs. Tests:
 `frontend/src/lib/utils/__tests__/diff-parser.unit.ts`.
+
+**A diff row's number is what its gutter shows, not a line of one file.** A unified diff carries one gutter:
+`git.ParseUnifiedDiff` numbers a removed row from the old file and every other row from the new one, so one
+number names two lines and nothing but the row's own text identifies it. `DiffViewer.svelte` looks the
+highlighted HTML up by that text for the same reason. A click resolves through `jumpTargets`
+(`$lib/utils/diff-parser.ts`): the editor opens the new file, so a removed row opens the new-side line its
+deletion left behind, and a row of a file with no new side is no control at all. The highlight pass runs for
+every file the panel draws — tracked, committed and untracked — rather than for the ones the reader has
+collapsed and reopened. Tests:
+`frontend/src/lib/components/__tests__/diff-row-text.unit.svelte.ts` (a row paints its own text),
+`frontend/src/lib/components/__tests__/diff-row-keyboard.unit.svelte.ts` (where a click lands).
 
 **A ref comparison is not reconciled by working-tree stats.** The panel shows one comparison and the board
 stream keeps pushing the task's working-tree stats, so the view that came from `?head=` or `?base=` has to

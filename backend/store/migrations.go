@@ -128,6 +128,18 @@ CREATE TABLE IF NOT EXISTS task_messages (
     FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 );
 
+-- One row per client-minted write identity: it names the row that identity produced, and goes with the task
+-- that owns it or when it ages past the horizon claims.go prunes to.
+CREATE TABLE IF NOT EXISTS client_claims (
+    token      TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    task_id    TEXT NOT NULL,
+    kind       TEXT NOT NULL,
+    result_id  TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS project_token_stats (
     project_id       TEXT NOT NULL,
     model_name       TEXT NOT NULL DEFAULT 'unknown',
@@ -174,4 +186,6 @@ CREATE INDEX IF NOT EXISTS idx_task_messages_task_time ON task_messages(task_id,
 CREATE INDEX IF NOT EXISTS idx_task_messages_user_thread ON task_messages(thread_id, created_at) WHERE role = 'user';
 CREATE INDEX IF NOT EXISTS idx_task_messages_user_task ON task_messages(task_id, created_at) WHERE role = 'user';
 CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
+-- The horizon prune in claims.go seeks here; without it that delete walks the whole table on every guarded write.
+CREATE INDEX IF NOT EXISTS idx_client_claims_created_at ON client_claims(created_at);
 `
