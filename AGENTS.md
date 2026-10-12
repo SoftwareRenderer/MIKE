@@ -444,6 +444,7 @@ deliberately omits.
 |---|---|
 | `docs/adr/README.md` | what belongs in a decision record, its shape, and the index of the records that exist |
 | `docs/configuration.md` | every env var, the flag twins, startup resolution, the archgate exceptions, the release packages |
+| `docs/docker.md` | the three build stages, the gVisor bundle and its sidecar tree, the flags and volumes a container needs, first boot, the limits an operator meets |
 | `docs/sandbox-runtime.md` | boot injection, the stale sweep, container environment, podman args, capabilities, mount policy, the git pointer pin, memory caps and admission, podman subprocesses |
 | `docs/sandbox-bridge.md` | bridge connections, LSP session binding, wire IDs, payload limits, upload lifetime |
 | `docs/skills.md` | the two skill roots a task is listed from, the paths it is told to open, same-named packages |

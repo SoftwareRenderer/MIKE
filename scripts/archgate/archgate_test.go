@@ -934,7 +934,7 @@ func TestMeasuredNumbersAgreeWithTheReview(t *testing.T) {
 	// What `grep -c 's\.mux\.Handle' backend/server/routes.go` answers: the verb-carrying routes plus
 	// the extensions file subtree. The frontend is served behind this mux, so it is no longer a subtree.
 	// A new registration moves this number and nothing else here.
-	const routeRegistrations = 131
+	const routeRegistrations = 133
 	if routes, checked, err := scanRoutes(root); err != nil {
 		t.Fatalf("scanRoutes: %v", err)
 	} else if checked != routeRegistrations {

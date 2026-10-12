@@ -142,7 +142,8 @@ describe('TaskDefaults loop-breaker toggle', () => {
     it('says what turning it on buys', () => {
         const { container } = renderWithBreaker();
         const desc = container.querySelector('#toggle-loop-breaker-desc');
-        expect(desc?.textContent).toBe('Attempts to automatically recover from failed turns');
+        expect(desc?.textContent)
+            .toBe('Attempts to automatically recover from failed turns. WARNING: This can cause unbounded token generation.');
         expect((container.querySelector(BREAKER_TOGGLE) as HTMLButtonElement).getAttribute('aria-describedby'))
             .toBe('toggle-loop-breaker-desc');
     });

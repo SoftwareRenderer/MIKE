@@ -1,0 +1,203 @@
+# The application image
+
+Read this before touching `Dockerfile`, `compose.yaml`, `scripts/docker-entrypoint.sh` or
+`scripts/mike-healthcheck.sh`.
+
+## What this owns
+
+How this tree becomes an image, and how that image becomes a running server: the flags and volumes a
+container needs, the two required values, the three build stages, and what to expect on first boot. It
+stops at the container's edge. What runs inside a task is the gVisor container
+(`docs/sandbox-runtime.md`), what a variable means is `docs/configuration.md`, and how the process
+stops is `docs/lifecycle.md`.
+
+## What must stay true
+
+- **The image is built from sources, never from this tree's outputs.** `.dockerignore` keeps
+  `frontend/dist`, the `make release` packages under `dist/`, the committed bridge and
+  `node_modules` out of the context. Stage 2 receives `frontend/dist` from stage 1 because that
+  directory is what `//go:embed` reads.
+- **The server binary is a release build and both binaries are CGO-free.** A `-tags release` build
+  serves the frontend it carries and refuses `--frontend-dist`. `CGO_ENABLED=0` keeps the bridge
+  runnable inside a guest whose C library is not this one.
+- **gVisor arrives as the release bundle, with its sidecar tree.** The published sha512 is checked
+  before anything is run. `runsc` executes the binaries under `gvisor-bin/` and looks for that
+  directory beside its own, so the extraction is whole. One binary pulled out of the bundle is not an
+  install.
+- **A stage spells its own `ARG` default.** Whether a global `ARG` default reaches a stage that
+  re-declares the name is a builder detail — podman/buildah 5.8 hands it over, and this tree has
+  measured no other builder. A `:=` default in the stage costs nothing, and `--build-arg` still
+  outranks it, so the stage keeps its own.
+- **The stage asserts what it can assert without privileges.** `podman --runtime-flag
+  ignore-cgroups=true --version`, `runsc --version`, the `runsc` PATH name and the sidecar tree are
+  all checked at build. `podman info` is not: it needs the privileges the container gets at run time,
+  so the entrypoint probes it and prints what it found.
+- **`privileged` and `seccomp=unconfined` buy the nested runtime, nothing else.** `compose.yaml`
+  publishes to `127.0.0.1` by default for that reason, TLS is the only mode, and the Host allowlist
+  stays mandatory. Task work runs with `--cap-drop ALL` inside gVisor.
+- **Storage lives off the engine's own overlayfs.** podman refuses `overlay` on `overlayfs`, which is
+  why `compose.yaml` names a volume for `/var/lib/containers` and the entrypoint can fall back to
+  `fuse-overlayfs` or `vfs`.
+- **The two required values stay required with no default.** `compose.yaml` refuses to render and the
+  entrypoint exits naming the variable. The image ships no agent CLI either: an adapter that needs a
+  host binary gets it in a derived image.
+- **The container never updates itself.** An install that is not an unpacked release directory
+  refuses, and a container is refused ahead of that test: `classifyInstall` reads the runtime's
+  marker file before it looks at the layout. A container shaped like a release still refuses,
+  because the swap survives `docker restart` and is gone on the next `compose up`.
+  `docs/auto-update.md`.
+
+## How it is held
+
+Stage `web` runs `npm ci` against the lockfile, then `npm run build`. Stage `go` builds `mike` and
+`sandbox-bridge` from `pkg/bridge/agent`, so a sandbox can never run a bridge older than this tree.
+Stage `runtime` installs Debian stable's podman (5.x, which this app's global `--runtime-flag` call
+needs), crun, netavark and aardvark-dns, then the gVisor bundle.
+
+The layout is what the binary's sibling lookups require: `WORKDIR /mike`, the bridge beside the
+executable (`GetAgentBinaryPath`), `prompts/` beside it (`resolvePromptDir`), and `extensions/`
+relative to the working directory. `/mike/data` is `0700`: `kanban.db`, the local CA and its key.
+
+`scripts/docker-entrypoint.sh` is the part that cannot be a build-time check. It refuses a missing
+`MIKE_ENCRYPTION_KEY` or `MIKE_ALLOWED_HOSTS`, defaults `MIKE_LISTEN` to `0.0.0.0`, probes `podman
+info` for the graph driver, writes `/etc/containers/storage.conf` when the kernel refuses `overlay`,
+then `exec`s the server so SIGTERM reaches the bounded shutdown path. That default is why no example
+below sets `MIKE_LISTEN`: the server's own default is loopback, and a published port cannot reach it.
+`MIKE_PREPULL_IMAGE=1` pulls the default sandbox image in the background instead of during the first
+task.
+
+`scripts/mike-healthcheck.sh` answers three questions separately — runsc, the podman store, and two
+HTTPS requests where one cannot say both: `/api/health` proves the listener, an unauthenticated
+`/api/config` proves the gate.
+
+## Start it
+
+Everything below assumes the image exists — built here or pulled, it makes no difference. The name
+used is the one `compose.yaml` gives a local build. Two values have no default, `MIKE_ENCRYPTION_KEY`
+and `MIKE_ALLOWED_HOSTS`, and the entrypoint exits naming whichever is missing.
+
+### From this checkout
+
+```bash
+cp .env.example .env      # fill in the two required values, then:
+docker compose up -d
+docker compose logs mike  # a data directory with no passkey prints a boxed pairing code here
+```
+
+`up` builds only when the image named under `image:` is absent; `--build` forces a rebuild. Set
+`MIKE_IMAGE_TAG` to the tag of an image you already built and it is used as-is. Open
+`https://localhost:3000` and register a passkey with the code from the log.
+
+### Your own compose file
+
+The same service without the build stage. The flags belong to the nested runtime and the volumes to
+the server's state; each line is load-bearing.
+
+```yaml
+services:
+  mike:
+    image: getmike/mike:local
+    restart: unless-stopped
+    privileged: true                       # nested podman + runsc need netlink, cgroup, devices
+    security_opt: [seccomp=unconfined]     # docker's default profile blocks runsc's syscalls
+    shm_size: 256m                         # sandbox containers take /dev/shm from here
+    tmpfs: [/tmp]
+    stop_grace_period: 40s                 # the server's own budget is 15s, then container teardown
+    ports: ["127.0.0.1:3000:3000"]
+    environment:
+      MIKE_ENCRYPTION_KEY: ${MIKE_ENCRYPTION_KEY:?openssl rand -hex 32}
+      MIKE_ALLOWED_HOSTS: localhost        # name every Host a browser will type, or 421
+      MIKE_DATA_DIR: /mike/data
+      MIKE_WORKTREES_DIR: /mike/worktrees   # unset, worktrees land in /mike/.worktrees instead
+    volumes:
+      - mike-data:/mike/data                # kanban.db, the local CA and its key
+      - mike-worktrees:/mike/worktrees
+      - mike-extensions:/mike/extensions    # installed extension code, deleted with the extension
+      - mike-containers:/var/lib/containers # podman's store, off the engine's own overlayfs
+      - /srv/projects:/mike/projects        # the checkouts agents edit and commit into
+
+volumes:
+  mike-data:
+  mike-worktrees:
+  mike-extensions:
+  mike-containers:
+```
+
+`docs/configuration.md` holds the optional variables. `MIKE_PREPULL_IMAGE=1` pulls the default sandbox
+image at boot instead of during the first task.
+
+### docker run
+
+```bash
+docker run -d --name mike \
+  --privileged --security-opt seccomp=unconfined \
+  --shm-size 256m --tmpfs /tmp --stop-timeout 40 \
+  -p 127.0.0.1:3000:3000 \
+  -e MIKE_ENCRYPTION_KEY -e MIKE_ALLOWED_HOSTS=localhost \
+  -e MIKE_DATA_DIR=/mike/data -e MIKE_WORKTREES_DIR=/mike/worktrees \
+  -v mike-data:/mike/data \
+  -v mike-worktrees:/mike/worktrees \
+  -v mike-extensions:/mike/extensions \
+  -v mike-containers:/var/lib/containers \
+  -v /srv/projects:/mike/projects \
+  getmike/mike:local
+
+docker logs mike        # the pairing code, on a data directory with no passkey yet
+```
+
+`-e MIKE_ENCRYPTION_KEY` with no value takes it from the shell, so the secret stays out of the command
+history and out of `docker inspect`. Losing every passkey is a one-shot command, not a GUI action:
+stop the service, then run the same image with `--reset-passkeys` as its only argument, against the
+same data volume and with the same two values in its environment. The entrypoint checks both before
+it hands anything to the server, and the server refuses a missing `MIKE_ENCRYPTION_KEY` on its own
+too.
+
+The browser warns on the first visit either way. The certificate is signed by the server's own CA in
+the data volume, so import `data/tls/mike-ca.crt` from that volume or accept the warning; reaching the
+server is the listen address plus the Host allowlist, never the certificate.
+
+## Rebuild it
+
+```bash
+docker build -t getmike/mike:local -f Dockerfile .
+```
+
+| Build arg | Meaning |
+|---|---|
+| `GVISOR_RELEASE` | `latest`, or a release spelled as its bare date: `20260928` |
+| `VERSION` | stamped into the binary and answered by `/api/version` |
+| `GO_IMAGE`, `NODE_IMAGE`, `RUNTIME_IMAGE` | the three base images |
+
+Pin the release when the runtime a rebuild downloads must be the one you tested; leave it `latest`
+when a rebuild should pick up the runtime the way a fresh install does. Reproducing a whole rebuild
+also needs `GO_IMAGE`, `NODE_IMAGE` and `RUNTIME_IMAGE` pinned by digest, because each tag floats.
+Either way the bundle's published sha512 is verified before anything is executed.
+
+## Limits an operator meets
+
+- **`/mike/projects` is a mount the server cannot see.** The no-project file jail is `$HOME` plus the
+  directories declared at startup, and nothing declares that path: adding a project from it answers
+  `path is outside the allowed host directories` with HTTP 403. It is a bind mount plus a startup
+  declaration, and only the first half exists today.
+- **`MIKE_ALLOW_ROOT_FS` is not forwarded.** `compose.yaml` leaves it alone on purpose, so `.env`
+  cannot widen the jail; the refusal names the variable because the widening is a boot decision.
+- **A hostname nobody listed is HTTP 421.** `localhost`, `127.0.0.1`, `::1` and the listen host are
+  accepted; a proxy's domain, `hostname.local` or a LAN IP goes into `MIKE_ALLOWED_HOSTS` first.
+- **A project must live under the bind mount** for its sandboxes to reach its `.git` at the same path.
+- **An agent adapter that shells out to a CLI fails until that CLI is installed** in a derived image;
+  the base image ships no node or python.
+
+## Checking this
+
+No gate builds this image: the `Makefile` has no docker target and `make check` never reads
+`Dockerfile`. So two commands, and be clear about what each one catches.
+
+```bash
+make docs-check          # a path or pointer in these lines that has stopped resolving
+docker build -t mike-image-check -f Dockerfile .
+```
+
+The build is the only thing that catches a wrong gVisor object, a missing package in the apt list or
+a stage that lost its `ARG` default — it fails on the step, with the step printed. After a run, the
+image's own `/usr/local/bin/mike-healthcheck` is the claim that the runtime is intact: the image
+installs `scripts/mike-healthcheck.sh` under that name, and it is what `HEALTHCHECK` runs.
