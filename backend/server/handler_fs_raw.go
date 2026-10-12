@@ -193,6 +193,14 @@ func gitInDir(ctx context.Context, dir string) func(args ...string) (string, err
 
 // gitBlobBytes reads the raw bytes of a git blob using cat-file, ensuring no extra output is returned.
 func gitBlobBytes(ctx context.Context, dir, spec string) ([]byte, bool, error) {
+	return gitBlobSpool(ctx, dir, spec, maxRawFileBytes)
+}
+
+// gitBlobSpool is gitBlobBytes with the caller's own ceiling on the bytes it will hold: what an image
+// route will not stream and an archive route will not list are different numbers, and neither belongs to
+// the other. truncated is true when the blob ran past it, and the process is stopped rather than drained —
+// draining is the read the answer just refused.
+func gitBlobSpool(ctx context.Context, dir, spec string, limit int64) ([]byte, bool, error) {
 	cmd := git.CommandContext(ctx, dir, "cat-file", "blob", "--end-of-options", spec)
 	var errOut cappedBuffer
 	cmd.Stderr = &errOut
@@ -203,10 +211,9 @@ func gitBlobBytes(ctx context.Context, dir, spec string) ([]byte, bool, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, false, err
 	}
-	data, readErr := io.ReadAll(io.LimitReader(pipe, maxRawFileBytes+1))
-	truncated := int64(len(data)) > maxRawFileBytes
+	data, readErr := io.ReadAll(io.LimitReader(pipe, limit+1))
+	truncated := int64(len(data)) > limit
 	if truncated {
-		// Draining the pipe would be the read that was just refused, so stop the process instead.
 		_ = cmd.Process.Kill()
 	}
 	waitErr := cmd.Wait()

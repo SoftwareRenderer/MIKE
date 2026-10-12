@@ -10,6 +10,7 @@
     import type { EditorHistory } from '$lib/utils/editor-history';
     import EditorHistoryButtons from './EditorHistoryButtons.svelte';
     import { untrack } from 'svelte';
+    import { isArchiveViewPath } from '$lib/utils/archive-file';
 
     let { projectId, projectPath, taskId, openFiles, activeFilePath, unsavedFiles, pinnedFiles, onFocused, onSymbolsUpdate, onHasChanges,
         onSelectTab, onCloseTab, onPinTab, onSave, saving, onToggleFullscreen, mobileFullscreen, pendingFsEvent = null,
@@ -46,11 +47,21 @@
     const fullscreenTitle = $derived(fullscreenToggleTitle(appStore.config));
 
     const fileEditor = useLazyComponent(() => import('./FileEditor.svelte'));
+    const archiveViewer = useLazyComponent(() => import('./ArchiveViewer.svelte'));
+
+    /**
+     * An archive tab lists its members instead of editing them. One split decides both panes, and each
+     * pane's chunk loads only when a tab needs it.
+     */
+    const textTabs = $derived(openFiles.filter(f => !isArchiveViewPath(f.path)));
+    const archiveTabs = $derived(openFiles.filter(f => isArchiveViewPath(f.path)));
 
     $effect(() => {
-        if (openFiles.length > 0) {
-            fileEditor.load();
-        }
+        if (archiveTabs.length > 0) archiveViewer.load();
+    });
+
+    $effect(() => {
+        if (textTabs.length > 0) fileEditor.load();
     });
 
     function getFileName(path: string): string {
@@ -211,31 +222,41 @@
 
     <!-- Editor panels -->
     <div class="editor-panels">
-        {#if fileEditor.loading}
-            <div class="file-editor-loading">{t('editor.loadingEditor')}</div>
-        {:else if fileEditor.component}
-            {@const FileEditor = fileEditor.component}
-            {#each openFiles as file (file.path)}
-                <FileEditor
-                    projectId={projectId}
-                    projectPath={projectPath}
-                    taskId={taskId}
-                    filePath={file.path}
-                    targetLine={file.targetLine}
-                    reveal={file.reveal}
-                    active={file.path === activeFilePath}
-                    onFocused={(focused: boolean) => handleEditorFocused(file.path, focused)}
-                    onSymbolsUpdate={(symbols) => handleSymbolsUpdate(file.path, symbols)}
-                    onSymbolsPending={() => handleSymbolsPending(file.path)}
-                    onHasChanges={(path: string, hasChanges: boolean) => handleHasChanges(path, hasChanges)}
-                    onHistoryChange={(history: EditorHistory) => handleHistoryChange(file.path, history)}
-                    onClose={() => onCloseTab(file.path)}
-                    pendingFsEvent={pendingFsEvent}
-                    onLinesSelected={onLinesSelected}
-                    initialScrollTop={scrollTops?.[file.path] ?? 0}
-                    onScrollTop={(top: number) => onScrollTop?.(file.path, top)}
-                />
+        {#if archiveViewer.component}
+            {@const ArchiveViewer = archiveViewer.component}
+            {#each archiveTabs as file (file.path)}
+                <div class="archive-pane" class:active={file.path === activeFilePath}>
+                    <ArchiveViewer projectId={projectId} taskId={taskId} path={file.path} />
+                </div>
             {/each}
+        {/if}
+        {#if textTabs.length > 0}
+            {#if fileEditor.loading}
+                <div class="file-editor-loading">{t('editor.loadingEditor')}</div>
+            {:else if fileEditor.component}
+                {@const FileEditor = fileEditor.component}
+                {#each textTabs as file (file.path)}
+                    <FileEditor
+                        projectId={projectId}
+                        projectPath={projectPath}
+                        taskId={taskId}
+                        filePath={file.path}
+                        targetLine={file.targetLine}
+                        reveal={file.reveal}
+                        active={file.path === activeFilePath}
+                        onFocused={(focused: boolean) => handleEditorFocused(file.path, focused)}
+                        onSymbolsUpdate={(symbols) => handleSymbolsUpdate(file.path, symbols)}
+                        onSymbolsPending={() => handleSymbolsPending(file.path)}
+                        onHasChanges={(path: string, hasChanges: boolean) => handleHasChanges(path, hasChanges)}
+                        onHistoryChange={(history: EditorHistory) => handleHistoryChange(file.path, history)}
+                        onClose={() => onCloseTab(file.path)}
+                        pendingFsEvent={pendingFsEvent}
+                        onLinesSelected={onLinesSelected}
+                        initialScrollTop={scrollTops?.[file.path] ?? 0}
+                        onScrollTop={(top: number) => onScrollTop?.(file.path, top)}
+                    />
+                {/each}
+            {/if}
         {/if}
     </div>
 </div>
@@ -404,6 +425,16 @@
         display: none;
     }
     .editor-panels :global(> .file-editor.active) {
+        display: flex;
+    }
+
+    /* An archive's pane sits in the same stack as an editor's, and only the active one shows. */
+    .archive-pane {
+        position: absolute;
+        inset: 0;
+        display: none;
+    }
+    .archive-pane.active {
         display: flex;
     }
 

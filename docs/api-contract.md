@@ -554,6 +554,40 @@ subresource, what it can carry is the whole permission:
 
 Tests: `backend/server/handler_fs_raw_test.go`.
 
+## Archive listing
+
+`GET /api/fs/archive?project=&task=&path=&ref=` answers what one archive holds. `GET /api/fs/archive/entry`
+adds `&entry=` and answers the text of one member (`backend/server/handler_fs_archive.go` and
+`backend/archive`). Both are read-only: the server walks the container, and no member is ever written to a
+disk.
+
+- **The format comes from the bytes, never the name.** `archive.Open` sniffs gzip, bzip2, zip and tar
+  magic. A file whose suffix claims an archive and whose bytes say otherwise is a 415, so the pane shows
+  the server's sentence instead of drawing bytes as text. The suffix decides only which pane opens
+  (`frontend/src/lib/utils/archive-file.ts`), so the names there and the formats the server reads must stay
+  in step.
+- **The listing is the archive's own order.** `Reader.List` walks members as the container holds them and
+  never sorts, so the answer is a property of the file and no locale touches it. A row is
+  `{name, size, mtime, isDir}`. `mtime` is fixed-width UTC and empty when the container recorded none.
+  The column says "Modified": tar and zip store no creation time, and a heading that promises one lies.
+- **A member is matched by exactly the name its row shows.** `requestName` strips a leading `./` or `/`,
+  and one normalisation names both the row and the lookup, so no prefix or separator trick reaches a
+  different member. One name twice is legal in both containers, so the listing repeats it and the read
+  answers the first — which is why the pane keys its rows by position and not by name.
+- **The member answer is the `/api/fs/read` answer** (`fsReadResponse`), so a member and a file are shown
+  in the same words by the same editor.
+- `ref` reads the committed object the way `/api/fs/raw` does: same validation, same `project.Path` object
+  database. The panel that offers the button shows a side that may not be in the worktree at all.
+- **The refusals are the whole vocabulary.** 415 is `not a readable archive` or `not a text file`, 404 is
+  `no such file in the archive`, and 413 is a member over `maxFSReadBytes` or a committed archive over
+  `archiveCommitBufferBytes`. 504 means the walk ran out of `archiveWalkBudget` before it could say
+  anything. A walk cut short after it had read rows is not a fault: it answers those rows with
+  `truncated: true`, because they are true.
+
+Tests: `backend/archive/archive_test.go`, `backend/server/handler_fs_archive_test.go`,
+`frontend/src/lib/components/__tests__/archive-listing.unit.svelte.ts`, and
+`frontend/tests/e2e/explorer-archive-listing.spec.ts`.
+
 ## Downloading a file or a folder
 
 `GET /api/fs/download?project=&task=&path=&path=…` (`backend/server/handler_fs_download.go`) is the route

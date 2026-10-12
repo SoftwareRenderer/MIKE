@@ -1,15 +1,17 @@
 <script lang="ts">
-    import type { DiffFile, DiffRow, DiffImageRequest, DiffImageSection, DiffImageSource } from '$lib/types/diff';
+    import type { DiffFile, DiffRow, DiffImageRequest, DiffArchiveRequest, DiffImageSection, DiffImageSource } from '$lib/types/diff';
     import type { DiffDisplayItem } from '$lib/utils/diff-parser';
     import { buildDisplayItems, jumpTargets, truncatePath, getStatusBadge } from '$lib/utils/diff-parser';
     import { storeBounded } from '$lib/utils/bounded-map';
     import { comparePathsRootLast, sortPathsRootLast } from '$lib/utils/sort-paths';
     import { isDisplayableImage, imageSides } from '$lib/utils/diff-image';
+    import { isArchiveViewPath } from '$lib/utils/archive-file';
     import { highlightLinesAsync } from '$lib/highlighter';
     import { formatBytes } from '$lib/utils/format';
     import { t } from '$lib/i18n';
     import Spinner from './Spinner.svelte';
     import ImageDiffModal from './ImageDiffModal.svelte';
+    import ArchiveModal from './ArchiveModal.svelte';
     import { loadCollapsedDiffFiles, saveCollapsedDiffFiles } from '$lib/storage';
 import { slide } from 'svelte/transition';
     import '$lib/styles/diff-viewer.css';
@@ -338,6 +340,22 @@ import { slide } from 'svelte/transition';
 
     let imageModal = $state<DiffImageRequest | null>(null);
 
+    /**
+     * What one archive row's "List contents" reads: the side of the comparison the section shows, the same
+     * rule "View image" follows. A removed file has no new side, so nothing is offered for it.
+     */
+    function archiveRequest(path: string, file: { isDeleted?: boolean; origPath?: string }, section: DiffImageSection): DiffArchiveRequest | null {
+        if (!imageSource || !isArchiveViewPath(path) || file.isDeleted) return null;
+        const refs = (section === 'committed' ? (imageSource.committed ?? imageSource.working) : imageSource.working) ?? {};
+        return {
+            path,
+            displayPath: file.origPath ? `${file.origPath} → ${path}` : path,
+            ref: refs.new ?? (section === 'committed' ? 'HEAD' : ''),
+        };
+    }
+
+    let archiveModal = $state<DiffArchiveRequest | null>(null);
+
 </script>
 
 <!-- One row of the diff, shared by the tracked and the untracked rendering.
@@ -384,8 +402,8 @@ import { slide } from 'svelte/transition';
     </div>
 {/snippet}
 
-<!-- A binary file the diff cannot show as text: its size, and the image viewer when there is one. -->
-{#snippet binaryNotice(image: DiffImageRequest | null, size: number | undefined)}
+<!-- A binary file the diff cannot show as text: its size, and the viewer it does have. -->
+{#snippet binaryNotice(image: DiffImageRequest | null, archive: DiffArchiveRequest | null, size: number | undefined)}
     <div class="diff-binary-notice">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M4 2h8a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2z" stroke="currentColor" stroke-width="1.2"/>
@@ -394,6 +412,9 @@ import { slide } from 'svelte/transition';
         <span>{t('diff.binaryWithSize', { size: formatBytes(size ?? 0) })}</span>
         {#if image}
             <button type="button" class="diff-view-image-btn" onclick={() => { imageModal = image }}>{t('diff.viewImage')}</button>
+        {/if}
+        {#if archive}
+            <button type="button" class="diff-list-contents-btn" onclick={() => { archiveModal = archive }}>{t('diff.listContents')}</button>
         {/if}
     </div>
 {/snippet}
@@ -483,6 +504,7 @@ import { slide } from 'svelte/transition';
     {@const isFileExpanded = isFileOpen(file.path)}
     {@const badge = getStatusBadge(file)}
     {@const image = imageRequest(file.path, file, section)}
+    {@const archive = archiveRequest(file.path, file, section)}
     <section class="diff-file-section diff-file-enter" use:registerFileSection={file.path}>
         <div class="diff-file-header-row">
             <button
@@ -530,7 +552,7 @@ import { slide } from 'svelte/transition';
                     <div class="diff-line-scroll">
                         <div class="diff-line-content-wrapper">
                             {#if file.isBinary}
-                                {@render binaryNotice(image, file.fileSize)}
+                                {@render binaryNotice(image, archive, file.fileSize)}
                             {:else}
                             <div class="diff-large-file-notice">
                                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -573,6 +595,7 @@ import { slide } from 'svelte/transition';
     {@const isLarge = entry.fileSize !== undefined}
     {@const isBin = !!entry.isBinary}
     {@const image = isBin ? imageRequest(entry.path, { isNewFile: true }, 'working') : null}
+    {@const archive = isBin ? archiveRequest(entry.path, {}, 'working') : null}
     <section class="diff-file-section diff-file-section-untracked diff-file-enter" use:registerFileSection={entry.path}>
         <div class="diff-file-header-row">
             <button
@@ -618,7 +641,7 @@ import { slide } from 'svelte/transition';
                     <div class="diff-line-scroll">
                         <div class="diff-line-content-wrapper">
                             {#if isBin}
-                                {@render binaryNotice(image, entry.fileSize)}
+                                {@render binaryNotice(image, archive, entry.fileSize)}
                             {:else}
                             <div class="diff-large-file-notice">
                                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -814,6 +837,17 @@ import { slide } from 'svelte/transition';
         oldRef={imageModal.oldRef}
         newRef={imageModal.newRef}
         onClose={() => { imageModal = null; }}
+    />
+{/if}
+
+{#if archiveModal && imageSource}
+    <ArchiveModal
+        project={imageSource.project}
+        task={imageSource.task ?? ''}
+        path={archiveModal.path}
+        displayPath={archiveModal.displayPath}
+        ref={archiveModal.ref}
+        onClose={() => { archiveModal = null; }}
     />
 {/if}
 

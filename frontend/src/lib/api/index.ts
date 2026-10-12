@@ -147,6 +147,8 @@ export {
     listFsDirectory,
     rawFileURL,
     readFsFile,
+    readFsArchive,
+    readFsArchiveEntry,
     FsReadRefused,
     writeFsFile,
     createFsDirectory,
@@ -156,7 +158,7 @@ export {
     getHomeDirectory,
     resolveHomeDirectory,
 } from './fs';
-export type { FsEntry, FsFileRead, FsSearchResult, FsSearchAnswer } from './fs';
+export type { FsEntry, FsFileRead, FsArchiveEntry, FsArchiveListing, FsSearchResult, FsSearchAnswer } from './fs';
 export { deleteFsPaths, copyFsPaths, moveFsPaths, renameFsPath } from './fs-ops';
 export type { FsOpsResult } from './fs-ops';
 

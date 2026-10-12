@@ -49,8 +49,8 @@ projects too because the server process enforces them.
   jail never resolves to a link, so that is a swap, and the log line is the only place an attempt shows up.
   Surfaces: the working-tree read, a preview asset,
   the untracked content of a diff, `GET /projects/…/git/diff/file`, and the LSP document sync's read.
-  `openJailedFile` is the same rule with the response mapping on top, which `/api/fs/raw` and
-  `/api/fs/download` already used. A tree walked a name at a time is the same race at every entry: the
+  `openJailedFile` is the same rule with the response mapping on top, which `/api/fs/raw`,
+  `/api/fs/download` and the archive listing already used. A tree walked a name at a time is the same race at every entry: the
   folder download's archive (`writeTarOne`, whose header comes from the walk's own lstat) and the host
   paste (`copyFile`), both in `backend/fsutil/`. A swapped name there is how a file outside the project
   reaches the browser, or lands inside it where the task can read it. Neither route has a container branch:
@@ -219,6 +219,16 @@ Tests: `backend/api/git_diff_file_path_test.go`, `git_diff_file_full_test.go`,
   on the host's chunk collector (a stale bridge must not be able to stream past it), and a sandboxed
   `bash` captures through `toolresult.Capture` exactly like the host path. Numbers:
   `docs/sandbox-bridge.md`.
+- **An archive is bounded three ways, each before the bytes are held.** Walking one costs time
+  proportional to the compressed file, so `archiveWalkBudget` bounds a listing or a member read off the
+  request context. A deadline bounds the work and not the accumulation, so `archiveMaxEntries` bounds the
+  rows a listing collects: gzip packs tar's 512-byte headers hard enough that a small file can hold an
+  enormous number of them. A walk that runs out of either answers the rows it reached with
+  `truncated: true`. A committed archive is held whole, because the reader needs bytes it can seek and git
+  answers with an object's bytes, so `archiveCommitBufferBytes` bounds it — probed with `git cat-file -s`
+  first and again by the bounded read. A working-tree archive is read through the open file and answers to
+  no such ceiling, and a member is bounded by `maxFSReadBytes`, the number `/api/fs/read` uses. Tests:
+  `backend/archive/archive_test.go` and `backend/server/handler_fs_archive_test.go`.
 - Tests: `backend/server/body_limit_test.go` (drives `middlewareChain`, because an unwired middleware
   protects nothing), `backend/httputil/decode_json_test.go`, `backend/extensions/proxy_limit_test.go`,
   `backend/toolresult/capture_test.go`, `backend/exec/bash_stream_cap_test.go`,

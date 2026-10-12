@@ -1,10 +1,12 @@
 <script lang="ts">
     import type { GitCommit } from '$lib/types';
-    import type { DiffFile, DiffRow, DiffImageRequest } from '$lib/types/diff';
+    import type { DiffFile, DiffRow, DiffImageRequest, DiffArchiveRequest } from '$lib/types/diff';
     import { buildSideBySideRows, truncatePath } from '$lib/utils/diff-parser';
     import type { SideBySideRow } from '$lib/utils/diff-parser';
     import { isDisplayableImage, imageSides } from '$lib/utils/diff-image';
+    import { isArchiveViewPath } from '$lib/utils/archive-file';
     import ImageDiffModal from './ImageDiffModal.svelte';
+    import ArchiveModal from './ArchiveModal.svelte';
     import { highlightLinesAsync } from '$lib/highlighter';
     // Token colors for the highlighted spans below. This overlay's side-by-side columns put that HTML
     // straight in .diff-line-content (no .diff-text wrapper), so it reads the shared table rather than
@@ -57,6 +59,17 @@
     }
 
     let imageModal = $state<DiffImageRequest | null>(null);
+
+    /**
+     * What a binary archive row's "List contents" asks for: this commit, the only side a commit's diff has.
+     * A file the commit removed has no such side, so nothing is offered for it.
+     */
+    function archiveRequest(file: DiffFile, cleanPath: string): DiffArchiveRequest | null {
+        if (!projectId || !isArchiveViewPath(cleanPath) || file.isDeleted) return null;
+        return { path: cleanPath, displayPath: cleanPath, ref: commit.hash };
+    }
+
+    let archiveModal = $state<DiffArchiveRequest | null>(null);
 
     // Syntax highlight cache: path -> Map<lineText, highlightedHtml>
     // Populated asynchronously via $effect (language packages loaded lazily).
@@ -375,6 +388,7 @@
                     {@const collapsed = isFileCollapsed(file.path)}
                     {@const cleanPath = formatPath(file.path)}
                     {@const image = imageRequest(file, cleanPath)}
+                    {@const archive = archiveRequest(file, cleanPath)}
                     <section class="diff-file-section">
                         <!-- File header (collapsible, sticky) -->
                         <button
@@ -407,6 +421,9 @@
                                         {#if image}
                                             <button type="button" class="diff-view-image-btn" onclick={() => { imageModal = image }}>{t('diff.viewImage')}</button>
                                         {/if}
+                                        {#if archive}
+                                            <button type="button" class="diff-list-contents-btn" onclick={() => { archiveModal = archive }}>{t('diff.listContents')}</button>
+                                        {/if}
                                     </div>
                                 {:else if file.isDeleted}
                                     <div class="diff-deleted-notice">{t('diff.deletedFile')}</div>
@@ -417,6 +434,9 @@
                                         {t('diff.binaryFile')}
                                         {#if image}
                                             <button type="button" class="diff-view-image-btn" onclick={() => { imageModal = image }}>{t('diff.viewImage')}</button>
+                                        {/if}
+                                        {#if archive}
+                                            <button type="button" class="diff-list-contents-btn" onclick={() => { archiveModal = archive }}>{t('diff.listContents')}</button>
                                         {/if}
                                     </div>
                                 {/if}
@@ -519,6 +539,17 @@
         oldRef={imageModal.oldRef}
         newRef={imageModal.newRef}
         onClose={() => { imageModal = null; }}
+    />
+{/if}
+
+{#if archiveModal}
+    <ArchiveModal
+        project={projectId}
+        task={taskId ?? ''}
+        path={archiveModal.path}
+        displayPath={archiveModal.displayPath}
+        ref={archiveModal.ref}
+        onClose={() => { archiveModal = null; }}
     />
 {/if}
 

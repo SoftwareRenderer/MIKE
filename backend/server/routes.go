@@ -139,6 +139,8 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/home", s.handleHome)
 	s.mux.HandleFunc("GET /api/fs/read", s.handleFSRead)
 	s.mux.HandleFunc("GET /api/fs/raw", s.handleFSRaw)
+	s.mux.HandleFunc("GET /api/fs/archive", s.handleFSArchive)
+	s.mux.HandleFunc("GET /api/fs/archive/entry", s.handleFSArchiveEntry)
 	// One or more paths out of a project as files the browser saves: a file's own bytes, a folder or a
 	// selection as one streamed tar.gz.
 	s.mux.HandleFunc("GET /api/fs/download", s.handleFSDownload)

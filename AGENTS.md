@@ -149,6 +149,8 @@ make test-gen-registry                                   # the generator's own t
 - **Every `/api` route declares its verb in the pattern** — handlers don't check `r.Method`, and a
   methodless route also escapes the CSRF middleware.
 - **A partial update decodes into pointer fields**, never a `map[string]any` behind type assertions.
+- **An archive is listed by the server and never unpacked** — the bytes decide the format, and a member is
+  read by exactly the name its row shows. `docs/api-contract.md → Archive listing`.
 - **`?parsed=1` is a contract every diff path must honour**; `git.ParseUnifiedDiff` is the only diff grammar.
 - **A server fault answers with MIKE's own message and the cause goes to the log.** `httputil.Fail` is the
   only place a status code is chosen.

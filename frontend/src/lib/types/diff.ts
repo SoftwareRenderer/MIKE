@@ -57,6 +57,15 @@ export interface DiffImageRequest {
     newRef: string;
 }
 
+/** One "List contents" click, in the shape ArchiveModal and GET /api/fs/archive want it. */
+export interface DiffArchiveRequest {
+    path: string;
+    /** What the row is called where it was clicked, rename included. */
+    displayPath: string;
+    /** The side of the comparison to read; empty is the file on disk. */
+    ref: string;
+}
+
 /**
  * The manifest body `/tasks/{id}/diff` answers with, and the body the `diff_changed` frame carries —
  * one shape over two transports (`api.diffManifest` and `Server.broadcastTaskDiff` in Go). Every field is

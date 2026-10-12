@@ -226,6 +226,22 @@ const catalog = {
     'explorer.pathPicker.dirPathAria': 'Directory path',
     'explorer.pathPicker.goParentAria': 'Go to parent directory',
 
+    // ── ArchiveViewer.svelte — an archive read as a list instead of as bytes ──
+    // Tar and zip record when a member was written, never when it was made, hence "Modified".
+    'explorer.archive.name': 'Name',
+    'explorer.archive.size': 'Size',
+    'explorer.archive.modified': 'Modified',
+    'explorer.archive.listingAria': 'Files in the archive',
+    'explorer.archive.entries': { one: '{count} entry', other: '{count} entries' },
+    'explorer.archive.truncated': '... Preview truncated.',
+    'explorer.archive.empty': 'Empty archive',
+    'explorer.archive.directory': 'Folder',
+    'explorer.archive.openEntry': 'Open {name}',
+    'explorer.archive.back': 'Back to the file list',
+    'explorer.archive.loadingEntry': 'Reading…',
+    'explorer.archive.entryFailed': 'Could not read file from the archive.',
+    'explorer.archive.failed': 'Could not read this archive.',
+
     // ═══ settings.* — Settings, ConfigModal and Extensions ═══
     // ── ConfigModal.svelte — shell, tabs, provider pairs, About, footer ──
     'settings.title': 'Settings',
@@ -1934,6 +1950,7 @@ const catalog = {
     'diff.shared.file': { one: '{count} file', other: '{count} files' },
     'diff.viewImage': 'View image',
     'diff.imageUnavailable': 'Image not available',
+    'diff.listContents': 'List contents',
 
     // ── DiffViewer ──
     'diff.binaryWithSize': 'Binary file — {size}',

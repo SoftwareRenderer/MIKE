@@ -113,12 +113,76 @@ export async function readFsFile(params: {
     /** Read what a commit holds instead of what the working tree holds. */
     ref?: string;
 }): Promise<FsFileRead> {
+    const res = await apiFetch(`${API_BASE}/fs/read?${fileScopeQuery(params).toString()}`);
+    if (!res.ok) throw await readRefusal(res);
+    return await res.json();
+}
+
+/**
+ * Which file one read means: the project, the task's tree, the path, and the commit when the working tree
+ * is not what is being read. Every file-reading route spells the scope this way.
+ */
+function fileScopeQuery(params: { path: string; project: string; task?: string; ref?: string }): URLSearchParams {
     const query = new URLSearchParams({ path: params.path, project: params.project });
     if (params.task) query.set('task', params.task);
     if (params.ref) query.set('ref', params.ref);
-    const res = await apiFetch(`${API_BASE}/fs/read?${query.toString()}`);
-    if (!res.ok) throw new FsReadRefused(res.status, (await apiError(res, t('editor.readFailed'))).message);
+    return query;
+}
+
+/** A file read that answered a status rather than content, as the error carrying the server's sentence. */
+async function readRefusal(res: Response): Promise<FsReadRefused> {
+    return new FsReadRefused(res.status, (await apiError(res, t('editor.readFailed'))).message);
+}
+
+/** One member of an archive, as the listing shows it. */
+export interface FsArchiveEntry {
+    /** Its name inside the archive — also the name that reads it back. */
+    name: string;
+    size: number;
+    /** Fixed-width UTC; empty when the archive recorded no time. */
+    mtime: string;
+    isDir: boolean;
+}
+
+/** What `GET /api/fs/archive` answers for one archive. */
+export interface FsArchiveListing {
+    /** The container the bytes turned out to be, not the clicked name. */
+    format: string;
+    /** Archive order, never re-sorted. */
+    entries: FsArchiveEntry[];
+    /** True when there are more rows than these. */
+    truncated?: boolean;
+}
+
+/**
+ * What one archive holds. Listing means walking the whole file, so the server may run out of its budget:
+ * that answer is `truncated` rows, or an `FsReadRefused` status when it read nothing.
+ */
+export async function readFsArchive(params: {
+    path: string;
+    project: string;
+    task?: string;
+    /** List what a commit holds instead of the file on disk. */
+    ref?: string;
+}): Promise<FsArchiveListing> {
+    const res = await apiFetch(`${API_BASE}/fs/archive?${fileScopeQuery(params).toString()}`);
+    if (!res.ok) throw await readRefusal(res);
     return await res.json();
+}
+
+/** The text of one member, by the name the listing showed. 413 and 415 are states, not faults. */
+export async function readFsArchiveEntry(params: {
+    path: string;
+    project: string;
+    entry: string;
+    task?: string;
+    ref?: string;
+}): Promise<string> {
+    const query = fileScopeQuery(params);
+    query.set('entry', params.entry);
+    const res = await apiFetch(`${API_BASE}/fs/archive/entry?${query.toString()}`);
+    if (!res.ok) throw await readRefusal(res);
+    return (await res.json()).content ?? '';
 }
 
 /**

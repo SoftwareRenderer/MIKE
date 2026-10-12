@@ -369,8 +369,9 @@
     flex-shrink: 0;
     opacity: 0.6;
 }
-/* Sits inside the binary notice's line rather than under it. */
-.diff-view-image-btn {
+/* The one chip a binary row offers an action with, whichever action it is. */
+.diff-view-image-btn,
+.diff-list-contents-btn {
     margin-left: 8px;
     padding: 2px 8px;
     border: 1px solid var(--color-border);
@@ -381,7 +382,8 @@
     font-size: var(--text-2xs);
     cursor: pointer;
 }
-.diff-view-image-btn:hover {
+.diff-view-image-btn:hover,
+.diff-list-contents-btn:hover {
     border-color: var(--color-accent);
     color: var(--color-accent);
 }
