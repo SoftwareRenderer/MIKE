@@ -31,7 +31,7 @@ function status(over: Partial<UpdateStatus> = {}): UpdateStatus {
         available: false,
         disabled: false,
         install: { kind: 'packaged', dir: '/opt/mike', can_stage: true },
-        manifest_url: 'https://getmike.dev/version',
+        manifest_url: 'https://getmike.dev/version.json',
         ...over,
     };
 }

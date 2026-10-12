@@ -532,14 +532,14 @@ func TestUpdateManifestURLIsResolvedAtBoot(t *testing.T) {
 		wantErr bool
 	}{
 		{value: "", want: ""},
-		{value: "https://getmike.dev/version", want: "https://getmike.dev/version"},
+		{value: "https://getmike.dev/version.json", want: "https://getmike.dev/version.json"},
 		{value: "https://mirror.example/version.json", want: "https://mirror.example/version.json"},
-		{value: "http://127.0.0.1:8080/version", want: "http://127.0.0.1:8080/version"},
-		{value: "http://localhost:8080/version", want: "http://localhost:8080/version"},
-		{value: "http://[::1]:8080/version", want: "http://[::1]:8080/version"},
-		{value: "http://getmike.dev/version", wantErr: true},
-		{value: "ftp://getmike.dev/version", wantErr: true},
-		{value: "getmike.dev/version", wantErr: true},
+		{value: "http://127.0.0.1:8080/version.json", want: "http://127.0.0.1:8080/version.json"},
+		{value: "http://localhost:8080/version.json", want: "http://localhost:8080/version.json"},
+		{value: "http://[::1]:8080/version.json", want: "http://[::1]:8080/version.json"},
+		{value: "http://getmike.dev/version.json", wantErr: true},
+		{value: "ftp://getmike.dev/version.json", wantErr: true},
+		{value: "getmike.dev/version.json", wantErr: true},
 		{value: "://", wantErr: true},
 		{value: "https:///no-host", wantErr: true},
 	}

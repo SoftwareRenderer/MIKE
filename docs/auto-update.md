@@ -11,7 +11,7 @@ Update checks involve executing network-provided code, so the process is designe
 
 ## The manifest
 
-`https://getmike.dev/version` answers one JSON object:
+`https://getmike.dev/version.json` answers one JSON object:
 
 ```json
 {
@@ -45,7 +45,7 @@ Manifest validation is strict to ensure binary integrity:
 Upload order is critical:
 
 1. Upload all archives named in `version.json` and verify their digests.
-2. Upload `version.json` last.
+2. Upload `version.json` last, to the path the manifest URL names — `https://getmike.dev/version.json` by default, or wherever `MIKE_UPDATE_URL` points.
 3. If a step fails, restore the previous `version.json`.
 
 The default asset root is `https://getmike.dev/download` (configurable via `UPDATE_BASE_URL`) and the manifest URL is `updates.DefaultManifestURL` (configurable via `MIKE_UPDATE_URL`). The client verifies that both share the same host.

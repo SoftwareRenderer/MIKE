@@ -33,7 +33,7 @@ func manifestDoc(t *testing.T, fields map[string]any) []byte {
 	return raw
 }
 
-const hosted = "https://getmike.dev/version"
+const hosted = "https://getmike.dev/version.json"
 
 func TestParseManifestAcceptsAWellFormedIndex(t *testing.T) {
 	m, err := ParseManifest(manifestDoc(t, map[string]any{"latest": "v1.4.2"}), hosted)
@@ -196,7 +196,7 @@ func TestKnownVersion(t *testing.T) {
 }
 
 func TestNewRefusesAURLItCannotFetch(t *testing.T) {
-	for _, raw := range []string{"http://getmike.dev/version", "not a url", "https:///no-host"} {
+	for _, raw := range []string{"http://getmike.dev/version.json", "not a url", "https:///no-host"} {
 		t.Run(raw, func(t *testing.T) {
 			if _, err := New(Options{ManifestURL: raw, Version: "1.0.0"}); err == nil {
 				t.Fatalf("New accepted %q", raw)
