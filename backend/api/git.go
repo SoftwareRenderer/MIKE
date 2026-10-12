@@ -27,18 +27,13 @@ type GitHandler struct {
 	store       *store.Store
 	worktreeMgr *git.WorktreeManager
 	diffCache   taskDiffCache
-	// getWorktreeMutex locks the per-task worktree and returns the function that releases it; the server
-	// sets it. A release function crosses the boundary rather than a *sync.Mutex, which a holder could
-	// copy and then serialize nothing.
+	// per-task worktree locks.
 	getWorktreeMutex func(taskID string) func()
-	// getProjectMutex locks the project-level git operations that touch shared state.
+	// per-project git locks.
 	getProjectMutex func(projectID string) func()
 }
 
-// taskDiffCache holds, per task, its worktree diff against HEAD at the baseline
-// git.WorktreeManager.TaskDiffBaseline names. Nothing else may be stored here: GET /tasks/{id}/diff/file
-// answers from it only when the request names no refs, so a request that does name them computes its own
-// comparison instead.
+// taskDiffCache caches task worktree diffs against HEAD.
 type taskDiffCache struct {
 	byTask sync.Map // taskID -> *git.TaskDiff
 }
@@ -60,24 +55,19 @@ func NewGitHandler(store *store.Store, worktreeMgr *git.WorktreeManager) *GitHan
 	return &GitHandler{store: store, worktreeMgr: worktreeMgr}
 }
 
-// SetWorktreeMutex sets the callback that hands out per-task worktree locks.
 func (h *GitHandler) SetWorktreeMutex(fn func(taskID string) func()) {
 	h.getWorktreeMutex = fn
 }
 
-// SetProjectMutex sets the callback that hands out per-project git locks.
 func (h *GitHandler) SetProjectMutex(fn func(projectID string) func()) {
 	h.getProjectMutex = fn
 }
 
-// UpdateDiffCache records the worktree watcher's working-tree diff, so on-demand file fetches work without
-// a full /diff call. See taskDiffCache for what may be stored here.
 func (h *GitHandler) UpdateDiffCache(taskID string, taskDiff *git.TaskDiff) {
 	h.diffCache.put(taskID, taskDiff)
 }
 
-// currentTaskDiff is this package's only way to compute the diff behind the Changes panel. It resolves the
-// baseline itself, so a caller cannot answer a different question than the one the panel asked.
+// currentTaskDiff computes diff for Changes panel.
 func (h *GitHandler) currentTaskDiff(task *types.Task, skipTruncate bool) (*git.TaskDiff, string, error) {
 	baseRef := h.worktreeMgr.TaskDiffBaseline(task)
 	taskDiff, err := h.worktreeMgr.GetTaskDiff(task.ID, baseRef, "", skipTruncate)
@@ -90,8 +80,7 @@ func (h *GitHandler) currentTaskDiff(task *types.Task, skipTruncate bool) (*git.
 	return taskDiff, baseRef, nil
 }
 
-// GetDiffManifest builds a task worktree's diff manifest, the format broadcastTaskDiff sends over
-// WebSocket, and records the diff it was built from for the per-file fetches that follow.
+// GetDiffManifest builds diff manifest for WebSocket broadcast.
 func (h *GitHandler) GetDiffManifest(task *types.Task) (any, error) {
 	taskDiff, baseRef, err := h.currentTaskDiff(task, false)
 	if err != nil {
@@ -102,13 +91,9 @@ func (h *GitHandler) GetDiffManifest(task *types.Task) (any, error) {
 	return buildDiffManifest(taskDiff, stagedPaths, baseRef), nil
 }
 
-// fullLogFormat is the git log pretty-format writeFullGitLog parses: one header
-// line of pipe-separated fields, then the body between the BODY/END markers.
+// fullLogFormat git log pretty-format for parsed commits.
 const fullLogFormat = `--format=%H|%h|%s|%aN|%aI|%P%n---BODY---%n%b%n---END---`
 
-// writeFullGitLog writes the ?full=1 commit log for dir: every commit with author, date, parents and
-// body, plus the current branch, the origin tip and a hasMore flag. Both log endpoints answer ?full=1
-// with exactly this, and callers validate branch and path first.
 func (h *GitHandler) writeFullGitLog(w http.ResponseWriter, dir, branch, path string, limit, offset int) {
 	args := []string{"-C", dir, "log"}
 	if offset > 0 {
@@ -117,7 +102,7 @@ func (h *GitHandler) writeFullGitLog(w http.ResponseWriter, dir, branch, path st
 	if limit > 0 {
 		args = append(args, "-n", strconv.Itoa(limit+1))
 	}
-	// --end-of-options: the branch is a client value.
+	// branch is a client value.
 	args = append(args, fullLogFormat, "--end-of-options", branch)
 	if path != "" {
 		args = append(args, "--", path)
@@ -189,8 +174,7 @@ func (h *GitHandler) writeFullGitLog(w http.ResponseWriter, dir, branch, path st
 	})
 }
 
-// HandleLog returns a project's commit log: hash, author, date, parents and branch refs per commit,
-// beside current_branch and origin_tip.
+// HandleLog returns project commit log.
 func (h *GitHandler) HandleLog(w http.ResponseWriter, r *http.Request) {
 	project, ok := resolveProject(w, r, h.store)
 	if !ok {
@@ -214,7 +198,6 @@ func (h *GitHandler) HandleLog(w http.ResponseWriter, r *http.Request) {
 	h.writeFullGitLog(w, project.Path, branch, path, limit, offset)
 }
 
-// getCurrentBranch returns the name of the currently checked-out branch.
 func (h *GitHandler) getCurrentBranch(path string) string {
 	c := git.Command("", "-C", path, "rev-parse", "--abbrev-ref", "HEAD")
 	out, err := c.CombinedOutput()
@@ -224,7 +207,6 @@ func (h *GitHandler) getCurrentBranch(path string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// getBranchMap returns a map of commit hash -> branch names for all local branches.
 func (h *GitHandler) getBranchMap(path string) map[string][]string {
 	c := git.Command("", "-C", path, "for-each-ref", "--format=%(objectname)|%(refname:short)", "refs/heads/")
 	out, err := c.CombinedOutput()
@@ -244,7 +226,6 @@ func (h *GitHandler) getBranchMap(path string) map[string][]string {
 	return m
 }
 
-// getOriginTip returns the commit hash where origin/<branch> points, or empty string if no remote.
 func (h *GitHandler) getOriginTip(path, branch string) string {
 	c := git.Command("", "-C", path, "rev-parse", "origin/"+branch)
 	out, err := c.CombinedOutput()
@@ -254,8 +235,6 @@ func (h *GitHandler) getOriginTip(path, branch string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// gitBranchNames runs a branch listing in dir and returns one trimmed entry per output line. The two
-// branch endpoints share it; a project passes -a for remote refs too.
 func gitBranchNames(dir string, args ...string) ([]string, error) {
 	out, err := git.Command("", append([]string{"-C", dir}, args...)...).CombinedOutput()
 	if err != nil {
@@ -270,7 +249,7 @@ func gitBranchNames(dir string, args ...string) ([]string, error) {
 	return branches, nil
 }
 
-// HandleBranches lists all branches of a project, local and remote.
+// HandleBranches lists project branches.
 func (h *GitHandler) HandleBranches(w http.ResponseWriter, r *http.Request) {
 	project, ok := resolveProject(w, r, h.store)
 	if !ok {
@@ -284,10 +263,7 @@ func (h *GitHandler) HandleBranches(w http.ResponseWriter, r *http.Request) {
 	httputil.JSONResponse(w, http.StatusOK, branches)
 }
 
-// HandleDiff returns a project's diff, always as the parser's output. Which diff is chosen by:
-//   - ?base=A&head=B — git diff A..B (commit-to-commit comparison)
-//   - ?cached=1      — git diff --cached (staged changes only)
-//   - neither        — git diff (working tree vs index)
+// HandleDiff returns project diff as parsed output.
 func (h *GitHandler) HandleDiff(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	project, ok := resolveProject(w, r, h.store)
@@ -309,15 +285,14 @@ func (h *GitHandler) HandleDiff(w http.ResponseWriter, r *http.Request) {
 	if cached {
 		c = git.Command("", "-C", project.Path, "diff", "--cached")
 	} else if base != "" && head != "" {
-		// The empty tree is a virtual constant, not a git object, so a range from it fails; diff-tree
-		// --root shows the root commit instead.
+		// handle empty tree as root.
 		if base == git.EmptyTreeHash {
 			c = git.Command("", "-C", project.Path, "diff-tree", "--root", "--format=", "-p", head)
 		} else {
 			c = git.Command("", "-C", project.Path, "diff", base+".."+head)
 		}
 	} else {
-		// Working tree vs index; staged changes come back separately under cached=1.
+		// working tree vs index.
 		c = git.Command("", "-C", project.Path, "diff")
 	}
 
@@ -326,7 +301,7 @@ func (h *GitHandler) HandleDiff(w http.ResponseWriter, r *http.Request) {
 		httputil.Fault(w, "git diff", err)
 		return
 	}
-	// The wire carries the one diff grammar in the product; the panel never parses patch text.
+	// returns parsed diff grammar.
 	files := git.ParseUnifiedDiff(string(out))
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(files); err != nil {
@@ -334,7 +309,7 @@ func (h *GitHandler) HandleDiff(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// HandleStatus returns working tree status, current HEAD hash, and git author identity.
+// HandleStatus returns working tree status, HEAD, and author.
 func (h *GitHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	project, ok := resolveProject(w, r, h.store)
 	if !ok {
@@ -347,7 +322,7 @@ func (h *GitHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	clean := len(strings.TrimSpace(string(out))) == 0
-	// HEAD is what the client compares its own copy against.
+	// HEAD hash for client comparison.
 	var headHash string
 	if headOut, err := git.Command("", "-C", project.Path, "rev-parse", "HEAD").CombinedOutput(); err == nil {
 		headHash = strings.TrimSpace(string(headOut))
@@ -371,9 +346,7 @@ func (h *GitHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// remoteAheadBehind reads refs/remotes/…, so the count moves only when something fetches and never
-// contacts the remote; the caller marks it approximate. A missing upstream, a detached HEAD and an
-// unborn branch all answer 0/0.
+// remoteAheadBehind counts ahead/behind relative to origin.
 func remoteAheadBehind(dir string) (ahead, behind int) {
 	c := git.Command("", "-C", dir, "rev-list", "--left-right", "--count", "HEAD...@{upstream}")
 	// stdout only, so a git warning on stderr cannot reach the parse.
@@ -394,9 +367,7 @@ func remoteAheadBehind(dir string) (ahead, behind int) {
 	return a, b
 }
 
-// HandleProjectDiffFile returns the diff for one project file plus its working-tree content. Query
-// params: path relative to the project root, and meta=true for metadata only — the cheap way to list
-// untracked files.
+// HandleProjectDiffFile returns one file's diff and content.
 func (h *GitHandler) HandleProjectDiffFile(w http.ResponseWriter, r *http.Request) {
 	project, ok := resolveProject(w, r, h.store)
 	if !ok {
@@ -407,8 +378,7 @@ func (h *GitHandler) HandleProjectDiffFile(w http.ResponseWriter, r *http.Reques
 		httputil.JSONError(w, http.StatusBadRequest, "path is required")
 		return
 	}
-	// git contains the diff itself, but the working-tree read is ours: jail it here and open only what
-	// the jail returned.
+	// jail the working-tree read.
 	worktreeFile, err := repoFilePath(project.Path, filePath)
 	if err != nil {
 		httputil.JSONError(w, http.StatusBadRequest, err.Error())
@@ -423,14 +393,14 @@ func (h *GitHandler) HandleProjectDiffFile(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Stat before reading: this is a file the request named.
+	// stat before reading.
 	var fileSize int64
 	before, statErr := os.Lstat(worktreeFile)
 	if statErr == nil {
 		fileSize = before.Size()
 	}
 
-	// The cap is tested before the read, and OpenVerified() makes the read the file this stat described.
+	// apply size cap before reading.
 	var fileContent string
 	var lineCount int
 	var isBinary bool
@@ -491,13 +461,10 @@ func (h *GitHandler) HandleProjectDiffFile(w http.ResponseWriter, r *http.Reques
 	httputil.JSONResponse(w, http.StatusOK, resp)
 }
 
-// maxDiffFileBytes is the largest working-tree file a diff read here pulls into memory, refused rather
-// than tried when the stat already shows it bigger.
+// maxDiffFileBytes max working-tree file size for memory reads.
 const maxDiffFileBytes int64 = 1_000_000
 
-// repoFilePath jails a repository-relative path to the checkout in dir and returns the host file it
-// names, symlink-resolved. The symlink check is the point: the working-tree read follows links, so a
-// committed `key.pem -> ../../.ssh/id_rsa` would read any file the server user can open.
+// repoFilePath jails repo-relative path and resolves symlinks.
 func repoFilePath(dir, rel string) (string, error) {
 	if rel == "" {
 		return "", fmt.Errorf("path is required")
@@ -508,7 +475,7 @@ func repoFilePath(dir, rel string) (string, error) {
 	return fsutil.Contained(filepath.Join(dir, rel), []string{filepath.Clean(dir)})
 }
 
-// HandleCheckout checks out a branch in the project's own checkout.
+// HandleCheckout checks out branch in project checkout.
 func (h *GitHandler) HandleCheckout(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	project, ok := resolveProject(w, r, h.store)
@@ -528,16 +495,13 @@ func (h *GitHandler) HandleCheckout(w http.ResponseWriter, r *http.Request) {
 	httputil.JSONResponse(w, http.StatusOK, map[string]string{"branch": branch})
 }
 
-// diffExitedWithChanges reports the git diff failure that is not a failure: exit 1 means there are
-// changes, and the output already captured is the diff.
+// diffExitedWithChanges reports git diff exit 1 as success.
 func diffExitedWithChanges(err error) bool {
 	exitErr, ok := err.(*exec.ExitError)
 	return ok && exitErr.ExitCode() == 1
 }
 
-// answerTaskGitFault answers a failed task-scoped git read and reports whether it wrote the response.
-// Git's exit 128 means the worktree is gone, which the panel acts on; anything else is a fault whose
-// cause goes to the log.
+// answerTaskGitFault handles task-scoped git faults.
 func answerTaskGitFault(w http.ResponseWriter, err error, operation string) bool {
 	if err == nil {
 		return false
@@ -550,9 +514,7 @@ func answerTaskGitFault(w http.ResponseWriter, err error, operation string) bool
 	return true
 }
 
-// refParam reads a git ref from a query parameter, or returns def when the query names none. The
-// returned value is always validated, def included, because a stored branch is never re-checked by
-// the git call that uses it.
+// refParam reads and validates git ref from query.
 func refParam(w http.ResponseWriter, r *http.Request, queryKey, def string) (string, bool) {
 	ref := r.URL.Query().Get(queryKey)
 	if ref == "" {
@@ -567,9 +529,7 @@ func refParam(w http.ResponseWriter, r *http.Request, queryKey, def string) (str
 	return ref, true
 }
 
-// checkoutBranchFrom reads and validates the branch out of a checkout request body, writes the refusal
-// and returns false when it is rejected. Both checkout endpoints share it, and the branch is a
-// `git checkout` argument, so the validation lives here rather than per endpoint.
+// checkoutBranchFrom reads and validates branch from request body.
 func checkoutBranchFrom(w http.ResponseWriter, r *http.Request) (string, bool) {
 	var req types.GitCheckoutRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -583,8 +543,7 @@ func checkoutBranchFrom(w http.ResponseWriter, r *http.Request) (string, bool) {
 	return req.Branch, true
 }
 
-// runCheckout switches the checkout in dir to branch. A refusal answers with git's own reason, capped:
-// git's full output is pages of server-side paths, and that goes to the log.
+// runCheckout switches checkout to branch.
 func runCheckout(w http.ResponseWriter, dir, branch string) bool {
 	out, err := git.Command("", "-C", dir, "checkout", branch).CombinedOutput()
 	if err != nil {
@@ -595,7 +554,7 @@ func runCheckout(w http.ResponseWriter, dir, branch string) bool {
 	return true
 }
 
-// gitErrorSummary returns a trimmed, length-capped summary of git's output.
+// gitErrorSummary trimmed summary of git output.
 func gitErrorSummary(out []byte) string {
 	s := strings.TrimSpace(string(out))
 	const maxLen = 300
@@ -605,8 +564,7 @@ func gitErrorSummary(out []byte) string {
 	return s
 }
 
-// handleGitRemote runs a project-level pull or push under the per-project mutex. op must be "pull" or
-// "push".
+// handleGitRemote runs project-level pull/push under lock.
 func (h *GitHandler) handleGitRemote(w http.ResponseWriter, r *http.Request, op string) {
 	projectID := r.PathValue("projectID")
 	project, ok := resolveProject(w, r, h.store)
@@ -616,11 +574,9 @@ func (h *GitHandler) handleGitRemote(w http.ResponseWriter, r *http.Request, op 
 	if h.getProjectMutex != nil {
 		defer h.getProjectMutex(projectID)()
 	}
-	// Bounded to the request: an unreachable remote would otherwise hold the per-project mutex, and a
-	// server-side git process, for the full ssh/TCP timeout.
+	// bound to request to avoid lock-holding timeouts.
 	c := git.CommandContext(r.Context(), "", "-C", project.Path, op)
-	// No c.Env: an extra list would replace the environment git.Command sets, which carries the prompt
-	// refusal and the execution fence — that fence is why a pre-push hook does not run on Push.
+	// do not override git.Command environment.
 	if out, err := c.CombinedOutput(); err != nil {
 		logging.For(logging.Managers).Errorf("git %s failed: %v: %s", op, err, out)
 		httputil.JSONError(w, http.StatusInternalServerError, "git "+op+" failed: "+gitErrorSummary(out))
@@ -639,8 +595,7 @@ func (h *GitHandler) HandlePush(w http.ResponseWriter, r *http.Request) {
 	h.handleGitRemote(w, r, "push")
 }
 
-// HandleTaskCommits returns the commits on a task's own branch, past its divergence point, plus the base
-// commit for the diff selector. A task whose worktree is gone is answered from the project repo.
+// HandleTaskCommits returns task commits past divergence point; falls back to project repo if worktree is gone.
 func (h *GitHandler) HandleTaskCommits(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
@@ -667,9 +622,7 @@ func (h *GitHandler) HandleTaskCommits(w http.ResponseWriter, r *http.Request) {
 	httputil.JSONResponse(w, http.StatusOK, result)
 }
 
-// getTaskCommitsFromProject answers the commit list from the project checkout for a task whose worktree
-// is gone, with the same refs and parser the worktree uses, so switching between them cannot show a
-// different history. Head is BranchTip when captured at commit time, else Branch.
+// getTaskCommitsFromProject returns task commits from project repo if worktree is gone; uses same refs/parser as worktree.
 func (h *GitHandler) getTaskCommitsFromProject(projectID string, task *types.Task, baseRef string) (*git.TaskCommitsResult, error) {
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
@@ -689,10 +642,7 @@ func (h *GitHandler) getTaskCommitsFromProject(projectID string, task *types.Tas
 	return result, nil
 }
 
-// HandleTaskDiff returns the diff and untracked files for a task's worktree, falling back to the project
-// repo when the worktree is gone. Query params:
-//   - base: custom base ref (overrides the resolved baseline)
-//   - head: second ref for a commit-to-commit diff
+// HandleTaskDiff returns task diff and untracked files; falls back to project repo if worktree is gone.
 func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
@@ -768,8 +718,7 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 	httputil.JSONResponse(w, http.StatusOK, taskDiff)
 }
 
-// stripUntrackedLines copies d with Lines removed from the untracked entries, setting LineCount so the
-// frontend knows the size without fetching content.
+// stripUntrackedLines copies d without untracked file content, keeping LineCount for size reporting.
 func stripUntrackedLines(d *git.TaskDiff) *git.TaskDiff {
 	copy := *d
 	copy.Untracked = make([]git.UntrackedFile, len(d.Untracked))
@@ -801,16 +750,14 @@ type diffManifestFile struct {
 	Staged      bool   `json:"staged,omitempty"`     // true if file is staged in the index
 }
 
-// diffManifest is GET /diff's per-file metadata (hashes, stats) without diff content.
+// diffManifest is per-file metadata without diff content.
 type diffManifest struct {
 	Files     map[string]diffManifestFile `json:"files"`
 	ShortStat string                      `json:"short_stat"`
 	BaseRef   string                      `json:"base_ref,omitempty"`
 }
 
-// getStagedPaths returns a set of file paths that are staged in the index — the index against HEAD,
-// never against the diff's base ref: a base ref may be a different branch, and comparing the index to
-// it would report all branch divergence as "staged".
+// getStagedPaths returns paths staged in index against HEAD.
 func getStagedPaths(wm *git.WorktreeManager, taskID string) map[string]struct{} {
 	if wm == nil {
 		return nil
@@ -891,9 +838,7 @@ func buildDiffManifest(d *git.TaskDiff, stagedPaths map[string]struct{}, baseRef
 	return manifest
 }
 
-// trackedFileResponse is one tracked file as /diff/file answers it. Both of that route's paths — the cached
-// working-tree diff and a request naming two refs — answer with it, so a caller cannot tell which it got
-// from the shape and must read the refs it asked for back out of its own request.
+// trackedFileResponse returns a tracked file's diff response.
 func trackedFileResponse(f *git.TrackedDiffFile) map[string]any {
 	resp := map[string]any{
 		"rows":      f.Rows,
@@ -917,9 +862,7 @@ func trackedFileResponse(f *git.TrackedDiffFile) map[string]any {
 	return resp
 }
 
-// diffBaseline names the commit every comparison for this task measures from — the task's pinned base on a
-// forked thread, where a branch moved forward by a merge cannot empty the diff. An empty customBase asks for
-// it; a caller that names one is running its own comparison.
+// diffBaseline returns the commit to measure from: customBase or task's pinned base.
 func (h *GitHandler) diffBaseline(task *types.Task, customBase string) string {
 	if customBase != "" {
 		return customBase
@@ -927,11 +870,7 @@ func (h *GitHandler) diffBaseline(task *types.Task, customBase string) string {
 	return h.worktreeMgr.TaskDiffBaseline(task)
 }
 
-// taskDiffBetween answers one comparison of a task's files: the two named trees, with the task's diff baseline
-// standing in for an empty base, and the project's own repository answering when this task's worktree is gone.
-// It reports the base it measured from, and writes it into the diff, so the panel can name both sides.
-// Every diff the panel reads for one task goes through here, so a checkpoint's view and the live panel measure
-// from the same commit.
+// taskDiffBetween computes diff between two trees, using task's baseline if base is empty; falls back to project repo.
 func (h *GitHandler) taskDiffBetween(task *types.Task, baseRef, headRef string, full bool) (*git.TaskDiff, string, error) {
 	base := h.diffBaseline(task, baseRef)
 	taskDiff, err := h.worktreeMgr.GetTaskDiff(task.ID, base, headRef, full)
@@ -944,10 +883,7 @@ func (h *GitHandler) taskDiffBetween(task *types.Task, baseRef, headRef string, 
 	return taskDiff, base, err
 }
 
-// writeRefFileDiff answers one file's diff between two refs. The panel's checkpoint view compares a
-// snapshot tree against the baseline, and a truncated row there must expand from those two trees: the
-// cached working-tree diff is a different comparison, and rows read from it would show work done after the
-// checkpoint while claiming to be the checkpoint's own.
+// writeRefFileDiff returns diff for one file between two refs.
 func (h *GitHandler) writeRefFileDiff(w http.ResponseWriter, task *types.Task, filePath, baseRef, headRef string, full bool) {
 	taskDiff, _, err := h.taskDiffBetween(task, baseRef, headRef, full)
 	if answerTaskGitFault(w, err, "git diff") {
@@ -961,9 +897,7 @@ func (h *GitHandler) writeRefFileDiff(w http.ResponseWriter, task *types.Task, f
 	httputil.JSONResponse(w, http.StatusOK, trackedFileResponse(f))
 }
 
-// HandleTaskDiffFile returns one file's diff, tracked or untracked. Query param path is relative to the
-// worktree; a task with no cached diff, or a path outside it, is an error. With ?head= the answer is that
-// file between ?base= (default: the task's diff baseline) and that ref, computed for the request.
+// HandleTaskDiffFile returns diff for one file, tracked or untracked.
 func (h *GitHandler) HandleTaskDiffFile(w http.ResponseWriter, r *http.Request) {
 	taskID := r.PathValue("taskID")
 	// The cache holds only that task's working-tree diff (see taskDiffCache), so the pair in the path is

@@ -26,9 +26,9 @@ import (
 // The payload is the library's own msgpack encoding of SessionData, which is the codec it generates for
 // persisting exactly that value; the JSON form is for the wire and drops what only the verifier needs.
 
-// TicketTTL is how long a begun ceremony stays openable. It bounds the window in which a stolen response
-// body could be replayed against a challenge nobody is waiting on, and it is longer than the ceremony's
-// own timeout so the library's answer is the one a person ever sees.
+// TicketTTL is how long a begun ceremony stays openable. It limits the window for
+// replaying a stolen response and is longer than the ceremony's own timeout so that
+// the library's answer is the one the user sees.
 const TicketTTL = 2 * time.Minute
 
 // The two purposes a ticket is sealed for. They are not interchangeable, so an unfinished registration

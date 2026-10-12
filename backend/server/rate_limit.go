@@ -10,16 +10,13 @@ import (
 	"mike/backend/startup"
 )
 
-// clientBucket tracks the request count for a single client IP within
-// a sliding window.
+// clientBucket tracks a client's request count in the current window.
 type clientBucket struct {
 	count     int       // number of requests in the current window
 	expiresAt time.Time // when the current window expires
 }
 
-// RateLimiter implements a sliding-window rate limiter keyed by client IP.
-// It uses a token-bucket approach: each client gets `limit` requests per
-// `window` duration. Requests beyond the limit receive HTTP 429.
+// RateLimiter budgets requests per client IP. Requests beyond the limit receive HTTP 429.
 type RateLimiter struct {
 	limit  int           // max requests per window
 	window time.Duration // window duration
@@ -29,9 +26,7 @@ type RateLimiter struct {
 	stopCh  chan struct{}
 }
 
-// NewRateLimiter creates a new IP-based rate limiter.
-// limit is the maximum number of requests allowed per window per IP.
-// window is the duration of the sliding window.
+// NewRateLimiter creates an IP-based rate limiter.
 func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
 	rl := &RateLimiter{
 		limit:   limit,
@@ -45,8 +40,6 @@ func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
 }
 
 // allow checks if a request from the given IP is allowed.
-// Returns (allowed, retryAfter) where retryAfter is the duration until
-// the next request will be allowed.
 func (rl *RateLimiter) allow(ip string) (bool, time.Duration) {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
@@ -73,7 +66,7 @@ func (rl *RateLimiter) allow(ip string) (bool, time.Duration) {
 	return true, 0
 }
 
-// cleanupLoop periodically removes expired buckets to prevent memory leaks.
+// cleanupLoop removes expired buckets to prevent memory leaks.
 func (rl *RateLimiter) cleanupLoop() {
 	ticker := time.NewTicker(rl.window * 2)
 	defer ticker.Stop()
@@ -94,7 +87,7 @@ func (rl *RateLimiter) cleanupLoop() {
 	}
 }
 
-// Stop shuts down the cleanup goroutine. Should be called during server shutdown.
+// Stop shuts down the cleanup goroutine.
 func (rl *RateLimiter) Stop() {
 	close(rl.stopCh)
 }
@@ -143,9 +136,8 @@ func newLoginRateLimiter(limit int) *RateLimiter {
 	return NewRateLimiter(limit, time.Minute)
 }
 
-// RateLimitMiddleware returns a middleware that applies rate limiting
-// to all requests passing through it. Clients exceeding the limit
-// receive HTTP 429 Too Many Requests with a Retry-After header.
+// RateLimitMiddleware applies rate limiting to requests. Clients exceeding the limit
+// receive HTTP 429 with a Retry-After header.
 func RateLimitMiddleware(limiter *RateLimiter, trustProxy bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := clientIP(r, trustProxy)

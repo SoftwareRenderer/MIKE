@@ -25,9 +25,7 @@ func (te *TaskExecutor) HandleRetry(w http.ResponseWriter, r *http.Request) {
 		httputil.Fail(w, err, "retry task", "task not found")
 		return
 	}
-	// Read again with the error kept: this is the response body, and a retried task the store cannot
-	// answer is not a 200 carrying null — the client's onTaskUpdated(null) would blank the card it just
-	// asked to retry.
+	// Read task again; a 200 with null would cause the client to blank the task card.
 	task, err := te.store.GetTask(projectID, taskID)
 	if err != nil {
 		httputil.Fail(w, err, "get task", "task not found")
@@ -69,14 +67,9 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 
 	threadID := task.CurrentThreadID
 
-	// A duplicate is the same submit arriving twice (double-click, WS replay, offline queue
-	// flush): the thread's last row is still that identical user message. Once the agent has
-	// answered anything since, the same words are a new answer.
+	// A duplicate is an identical message arriving twice (e.g. double-click, offline queue flush). If the agent has since replied, it is no longer a duplicate.
 	//
-	// A regenerate is not one: the row it matches is the question being re-answered, and the
-	// request is to run the thread as it stands — that is how "New Thread" arrives, the fork
-	// writing the edited question and this send starting it. So the row is not written twice,
-	// but the executor still runs.
+	// Regenerate requests are not duplicates; they rerun the thread as it stands. For a "New Thread", the fork writes the question and this handler starts execution.
 	msgID := uuid.New().String()
 	lastRowIsThisMessage := false
 	if last, err := te.store.GetLastMessageInThread(threadID); err == nil && last != nil &&
@@ -86,8 +79,7 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 	}
 	isDuplicate := lastRowIsThisMessage && !req.Regenerate
 
-	// allowed Pending: a message that will run starts the task, so it leaves review here.
-	// A deduped message starts nothing and must not move the card.
+	// Start the task if it was in Review or Done. Deduped messages do not move the task.
 	if !isDuplicate && (task.Status == types.StatusReview || task.Status == types.StatusDone) {
 		task.Status = types.StatusInProgress
 		task.ExecutionState = types.ExecStateIdle
@@ -111,7 +103,6 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 		te.store.CreateTaskMessage(tm)
 	}
 
-	// Broadcast echo to WS clients
 	echoData := map[string]any{"id": msgID, "role": "user", "content": req.Content}
 	if threadID != "" {
 		echoData["thread_id"] = threadID
@@ -122,10 +113,8 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 			echoData["attachments"] = atts
 		}
 	}
-	// Broadcast user_message echo to task subscribers
 	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeUserMessage, Data: echoData})
 
-	// Forward to executor or lazy-start. Skip when the message was deduped
 	if isDuplicate {
 		logging.For(logging.Exec).With(logging.TaskID, taskID).Infof("duplicate user message (%q) not persisted, skipping executor trigger", req.Content)
 		te.appStreamMgr.SendTaskEvent(projectID, taskID, types.TurnStatusEvent("idle", "Duplicate message ignored"))
@@ -140,7 +129,6 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Return the message
 	result := map[string]any{
 		"id":      msgID,
 		"role":    "user",
@@ -152,11 +140,8 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 	httputil.JSONResponse(w, http.StatusCreated, result)
 }
 
-// HandleCompact triggers agent context compaction via RPC.
-// If the task has an active agent runner, compaction is performed immediately.
-// If no runner exists (task is idle/stopped), the executor starts a temporary
-// agent runner, performs compaction, and keeps the runner alive for future
-// follow-up operations (the runner is normally kept alive after task completion).
+// HandleCompact triggers agent context compaction via RPC. If no agent runner
+// exists, one is started to perform the operation.
 func (te *TaskExecutor) HandleCompact(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
@@ -171,14 +156,12 @@ func (te *TaskExecutor) HandleCompact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Ensure we have an active agent runner.
 	runner, err := te.getAgentRunner(projectID, taskID)
 	if err != nil {
 		httputil.Fail(w, err, "start agent", "task not found")
 		return
 	}
 
-	// Use the runner to perform compaction.
 	compactCtx, compactCancel := context.WithTimeout(r.Context(), 120*time.Second)
 	compactResult, err := runner.Compact(compactCtx)
 	compactCancel()

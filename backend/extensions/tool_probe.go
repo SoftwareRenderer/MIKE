@@ -10,7 +10,7 @@ import (
 
 // The probe sends a tool's own declared request to an address a person typed but has not saved.
 
-// Shorter than the per-tool bound: a dialog is waiting on this answer.
+// Shorter than per-tool bounds because a dialog waits on this answer.
 const probeTimeout = 15 * time.Second
 
 // The probe's query text does not matter; the round trip, the address and the answer shape do.
@@ -33,8 +33,7 @@ type testURLResponse struct {
 	Results int    `json:"results,omitempty"`
 }
 
-// The refusal carries the declaration, because the declaration is the only thing the probe may send: it
-// may dial only an address one of this extension's own tools would send to.
+// The probe may only dial addresses that the extension's own tools would send to.
 func probeTarget(ext *Extension, key string) (*ToolConfig, string) {
 	if key == "" {
 		return nil, "key is required"
@@ -53,8 +52,7 @@ func probeTarget(ext *Extension, key string) (*ToolConfig, string) {
 	return tool, ""
 }
 
-// Every rejection is an answer in the body, not a status code: the dialog shows a refused probe and a
-// failed probe in the same slot.
+// Rejections are returned in the response body so the dialog can display them in a consistent slot.
 func runProbe(ctx context.Context, ext *Extension, tool *ToolConfig, req testURLRequest) testURLResponse {
 	key := strings.TrimSpace(req.Key)
 	target := strings.TrimSpace(req.URL)
@@ -133,7 +131,7 @@ func probeArgs(tool *ToolConfig) map[string]any {
 		if !ok {
 			continue
 		}
-		// An enum's values belong to the extension, so nothing generic can pick one.
+		// Enum values belong to the extension and cannot be guessed.
 		if _, hasEnum := def["enum"]; hasEnum {
 			continue
 		}
@@ -147,7 +145,7 @@ func probeArgs(tool *ToolConfig) map[string]any {
 	return args
 }
 
-// No route, nothing listening and a TLS failure are one class: the fix is the same.
+// Network and TLS failures are grouped as they require the same fix.
 func probeFailure(host string, err error) testURLResponse {
 	switch {
 	case errors.Is(err, ErrEgressForbidden):
@@ -171,7 +169,7 @@ func classifyProbe(tool *ToolConfig, result *EgressResult) testURLResponse {
 			Status:  result.StatusCode,
 		}
 	}
-	// Renders the body first: an answer that cannot render cannot be used.
+	// An answer that cannot be rendered is unusable.
 	if _, err := tool.Response.RenderAnswer(result.Body, result.IsJSON()); err != nil {
 		return testURLResponse{
 			Class:   answerProblemClass(result, "unexpected_shape"),
@@ -196,8 +194,7 @@ func classifyProbe(tool *ToolConfig, result *EgressResult) testURLResponse {
 	}
 }
 
-// The class of an answer that cannot be used: what the upstream's status and content type say, or
-// `fallback`. Answering in HTML needs a settings change whatever the status said, so that class wins.
+// The problem class is determined by the upstream's status and content type, with HTML answers taking priority.
 func answerProblemClass(result *EgressResult, fallback string) string {
 	if class := failureClass(result); class != "" {
 		return class

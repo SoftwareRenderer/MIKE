@@ -1,6 +1,6 @@
-// Package tls provisions HTTPS material: a self-signed local CA created once in the data
-// directory, and a server certificate it signs whose SANs cover localhost, the hostname and
-// the host's addresses. The CA key never leaves the data dir, and the CA is replaced only when
+// Package tls provisions HTTPS material via a self-signed local CA and a
+// server certificate covering localhost, the hostname, and host addresses.
+// The CA key never leaves the data dir, and the CA is replaced only when
 // it cannot be used.
 package tls
 
@@ -40,8 +40,8 @@ const (
 	caValidFor   = 10 * 365 * 24 * time.Hour // the CA is imported once; make it last
 	leafValidFor = 365 * 24 * time.Hour      // the leaf is cheap to replace
 
-	// leafRenewalWindow is how early a restart replaces a leaf that is about to expire, so a server
-	// restarted at least this often never serves an expired certificate.
+	// leafRenewalWindow determines how early a leaf is replaced on restart
+	// to prevent expiration.
 	leafRenewalWindow = 30 * 24 * time.Hour
 
 	caCertName   = "mike-ca.crt"
@@ -57,10 +57,9 @@ type certificateAuthority struct {
 	certPath string
 }
 
-// LoadWithCert creates a TLS config from the operator's certificate paths, or from a local CA in
-// dataDir/tls that signs a leaf covering localhost, the hostname and the LAN addresses. The leaf is
-// re-issued when those names change or when little of its life is left, and an operator's pair that
-// will not load is an error naming the flags. Returns a *Config (never nil).
+// LoadWithCert loads provided certificates or generates a self-signed
+// leaf from a local CA. Leaves are re-issued if names change or they near
+// expiration. Returns a *Config (never nil).
 func LoadWithCert(dataDir, certFile, keyFile string) (*Config, error) {
 	if certFile != "" && keyFile != "" {
 		// User-provided cert and key files
@@ -106,8 +105,8 @@ func LoadWithCert(dataDir, certFile, keyFile string) (*Config, error) {
 }
 
 // CertPEM returns the PEM encoding of a file's first CERTIFICATE block.
-// Re-encoding rather than returning the file is the point: only the certificate
-// goes out, and a file that is not a certificate is an error, never key material.
+// Re-encoding ensures only the certificate is returned and validates the
+// file content.
 func CertPEM(path string) ([]byte, error) {
 	pemBytes, err := os.ReadFile(path)
 	if err != nil {
@@ -123,9 +122,8 @@ func CertPEM(path string) ([]byte, error) {
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: block.Bytes}), nil
 }
 
-// ensureCA loads the local CA from tlsDir, creating and persisting it on first use. A usable CA is
-// never replaced, because devices that imported it would stop trusting the server; an unusable one is,
-// and that is logged at Error.
+// ensureCA loads the local CA from tlsDir, creating and persisting it on first use.
+// Usable CAs are never replaced to maintain trust on client devices; unusable ones are.
 func ensureCA(tlsDir string) (*certificateAuthority, error) {
 	certPath := filepath.Join(tlsDir, caCertName)
 	keyPath := filepath.Join(tlsDir, caKeyName)
@@ -185,8 +183,8 @@ func ensureCA(tlsDir string) (*certificateAuthority, error) {
 	return &certificateAuthority{cert: caCert, key: caKey, certPath: certPath}, nil
 }
 
-// leftBehind reports whether either path exists, which tells a first install from replacing a root.
-// A path that will not stat counts as occupied.
+// leftBehind reports whether either path exists, used to detect if a
+// first install is replacing an existing root.
 func leftBehind(paths ...string) bool {
 	for _, path := range paths {
 		if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
@@ -251,7 +249,7 @@ func generateLeaf(certPath, keyPath string, ca *certificateAuthority, dnsNames [
 		NotBefore: time.Now(),
 		NotAfter:  time.Now().Add(leafValidFor),
 
-		// digitalSignature only: this is a P-256 leaf, and keyEncipherment names RSA key transport.
+		// Use digitalSignature for P-256; keyEncipherment is for RSA.
 		KeyUsage:              x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
@@ -272,10 +270,8 @@ func generateLeaf(certPath, keyPath string, ca *certificateAuthority, dnsNames [
 	return writeKeyPEM(keyPath, leafKey)
 }
 
-// leafIsValid reports whether the certificate/key pair at certPath/keyPath is
-// still the right one to serve: it must parse, its key must match, it must be
-// signed by ca, still inside its validity window by leafRenewalWindow, and carrying the names
-// we would issue today.
+// leafIsValid returns true if the cert is valid, signed by ca, and
+// not nearing expiration.
 func leafIsValid(certPath, keyPath string, ca *certificateAuthority, dnsNames []string, ips []net.IP) bool {
 	pair, err := cryptotls.LoadX509KeyPair(certPath, keyPath)
 	if err != nil {
@@ -294,18 +290,15 @@ func leafIsValid(certPath, keyPath string, ca *certificateAuthority, dnsNames []
 	return sanNamesMatch(leaf, dnsNames, ips)
 }
 
-// sanNamesMatch reports whether a leaf certificate carries exactly the given
-// subject alternative names (order-independent, per kind). The leaf is compared
-// against the names collectLeafNames would issue today, so any host rename or
-// interface change reads as a mismatch and triggers a re-issue.
+// sanNamesMatch checks if certificate SANs exactly match the current
+// host configuration.
 func sanNamesMatch(leaf *x509.Certificate, dnsNames []string, ips []net.IP) bool {
 	return sameNames(leaf.DNSNames, dnsNames) && sameIPs(leaf.IPAddresses, ips)
 }
 
-// collectLeafNames returns the names the server certificate should be valid for:
-// localhost, the machine hostname (plus its .local mDNS alias) and every
-// non-loopback address of the host. Both slices are de-duplicated and sorted so
-// that an unchanged host yields an identical set.
+// collectLeafNames returns names for the server certificate: localhost,
+// hostname, and all non-loopback addresses. Both slices are de-duplicated
+// and sorted for stability.
 func collectLeafNames() (dnsNames []string, ips []net.IP) {
 	nameSet := map[string]bool{"localhost": true}
 	ipSet := map[string]net.IP{}
@@ -374,9 +367,8 @@ func writeCertPEM(path string, der []byte) error {
 	return nil
 }
 
-// writePrivateFile writes key material so that only this user can read it, whether or not the file
-// existed before — os.WriteFile applies its mode only when creating. A target that is not a regular
-// file is refused rather than written through.
+// writePrivateFile ensures owner-only permissions regardless of file existence.
+// A target that is not a regular file is refused.
 func writePrivateFile(path string, content []byte) error {
 	if fi, err := os.Lstat(path); err == nil {
 		if !fi.Mode().IsRegular() {
@@ -449,10 +441,8 @@ func parseKeyPEM(pemBytes []byte) (*ecdsa.PrivateKey, error) {
 	return x509.ParseECPrivateKey(block.Bytes)
 }
 
-// sameSet reports whether a and b hold the same distinct elements, ignoring
-// order and duplicates. key maps an element to its comparable identity, so each
-// caller decides what "the same name" means (net.IP needs it to ignore the
-// 4- vs 16-byte representation of IPv4).
+// sameSet returns true if two slices contain the same distinct elements,
+// ignoring order and duplicates.
 func sameSet[T any](a, b []T, key func(T) string) bool {
 	setA := make(map[string]bool, len(a))
 	for _, v := range a {

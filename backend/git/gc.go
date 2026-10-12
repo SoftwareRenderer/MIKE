@@ -13,7 +13,7 @@ import (
 	"mike/pkg/logging"
 )
 
-// threadBranchNamespace is the fork branch namespace; server/handler_thread.go writes the same name.
+// threadBranchNamespace is the namespace for fork branches.
 const threadBranchNamespace = "thread/"
 
 func setOf(names []string) map[string]bool {
@@ -24,9 +24,7 @@ func setOf(names []string) map[string]bool {
 	return set
 }
 
-// liveBranchAndThreadRefs returns the branch names tasks carry and the IDs threads hold — the two lists
-// a sweep must not delete. A read that fails warns and leaves that set empty, so those refs read as
-// absent; the caller decides what that means.
+// liveBranchAndThreadRefs returns the branch and thread references that must be preserved during GC.
 func (wm *WorktreeManager) liveBranchAndThreadRefs() (branches, threads map[string]bool) {
 	activeBranches, err := wm.store.GetAllTaskBranches()
 	if err != nil {
@@ -42,7 +40,7 @@ func (wm *WorktreeManager) liveBranchAndThreadRefs() (branches, threads map[stri
 	return branches, threads
 }
 
-// GarbageCollect removes worktree directories that have no matching task in the database.
+// GarbageCollect removes worktree directories with no matching task in the database.
 func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 	worktreesDir := wm.worktreesRoot()
 
@@ -198,8 +196,7 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 	return removed, nil
 }
 
-// PruneOrphanedBranches removes task/* and thread/* branches from a single project that no longer have
-// a matching entry in the database. It returns the number of branches removed.
+// PruneOrphanedBranches removes orphaned task/* and thread/* branches from a project.
 func (wm *WorktreeManager) PruneOrphanedBranches(projectID string) int {
 	project, err := wm.store.GetProject(projectID)
 	if err != nil {
@@ -258,10 +255,7 @@ func (wm *WorktreeManager) PruneOrphanedBranches(projectID string) int {
 	return removed
 }
 
-// taskSlugPrefixSet returns the task-branch slug prefixes ("task/<slug>-") of a project's active titled
-// tasks, so the sweep keeps a slug-named Main branch even when a fork is the active branch. The slug
-// comes from types.SlugifyBranchName, the function that named the branch: a sweep parsing a different
-// shape deletes a live branch.
+// taskSlugPrefixSet returns slug prefixes for active titled tasks to prevent GC of slug-named Main branches.
 func taskSlugPrefixSet(store *store.Store, projectID string) map[string]bool {
 	set := make(map[string]bool)
 	tasks, err := store.GetTasksByProject(projectID)
@@ -276,8 +270,7 @@ func taskSlugPrefixSet(store *store.Store, projectID string) map[string]bool {
 	return set
 }
 
-// ensureWorktreesExcluded keeps untracked worktree files out of the project's git status by excluding the
-// worktrees dir when it is inside the project. Best-effort: never blocks worktree creation.
+// ensureWorktreesExcluded excludes the worktrees directory from git status if it resides within the project.
 func (wm *WorktreeManager) ensureWorktreesExcluded(project *types.Project, worktreesDir string) {
 	cleanRoot := filepath.Clean(project.Path)
 	rel, err := filepath.Rel(cleanRoot, filepath.Clean(worktreesDir))
@@ -291,10 +284,8 @@ func (wm *WorktreeManager) ensureWorktreesExcluded(project *types.Project, workt
 	}
 }
 
-// EnsureExcluded appends one gitignore pattern to the repository's local .git/info/exclude, once. That
-// file belongs to the clone rather than the tree — never committed, shared by every worktree — and its
-// patterns are relative to the checkout root given here, so one meant to match inside a worktree must stay
-// unanchored.
+// EnsureExcluded appends a pattern to .git/info/exclude. This file is local to the clone
+// and shared across worktrees.
 func EnsureExcluded(projectRoot, pattern, header string) error {
 	excludePath, err := repoExcludeFile(projectRoot)
 	if err != nil {
@@ -326,9 +317,7 @@ func EnsureExcluded(projectRoot, pattern, header string) error {
 	return nil
 }
 
-// repoExcludeFile locates the repository's local exclude file. It lives in the common git dir: a checkout
-// made by `git worktree add` has a gitdir of its own and git reads exclude from the shared one, so a
-// pattern written under the per-checkout gitdir is a silent no-op.
+// repoExcludeFile locates the repository's local exclude file in the common git directory.
 func repoExcludeFile(projectRoot string) (string, error) {
 	out, err := Run(projectRoot, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {

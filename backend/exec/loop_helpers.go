@@ -18,26 +18,18 @@ import (
 	"mike/pkg/logging"
 )
 
-// sandboxRecreate describes a mid-turn rebuild of a running task's container: the task
-// changed in a way the container was created around, so it has to be built again.
+// sandboxRecreate describes a mid-turn rebuild of a running task's container.
 type sandboxRecreate struct {
-	reason string // the change in user-facing text, e.g. "mode change"
-	// connErrCode is stored when the new container is up but its bridge will not answer.
-	// It differs per caller because the two causes read differently in a message.
+	reason string // reason for rebuild (e.g. "mode change")
+	// connErrCode is the error code reported if the new bridge doesn't answer.
 	connErrCode string
 	opts        sandbox.SandboxOpts
-	// underLock applies the caller's own sandbox state inside the same write as the new callbacks,
-	// so the two are never visible apart. It takes the sandboxState being written, not the
-	// executionState: sandboxMu is already held here and is not reentrant.
+	// underLock applies state changes in the same write as the new callbacks.
 	underLock func(*sandboxState)
 }
 
-// recreateTaskSandbox stops a running task container, creates it again with the given
-// options, and points the sandbox tool callbacks at the new bridge connection. The
-// operating-mode and agent-sandbox-config checks both need it and differ only in what they
-// pass. A failure is reported before being returned — the task moves to failed/review with
-// the reason in its Output and the browser gets a persisted error — and callers end the turn
-// when an error comes back. Changed assigned ports are persisted.
+// recreateTaskSandbox rebuilds the task container and updates the sandbox tool callbacks.
+// Failures are reported to the user and end the turn. Changed assigned ports are persisted.
 func (te *TaskExecutor) recreateTaskSandbox(setup *taskExecSetup, state *executionState, r sandboxRecreate) error {
 	lg := logging.For(logging.Sandbox).With(logging.TaskID, setup.task.ID)
 
@@ -83,9 +75,8 @@ func (te *TaskExecutor) recreateTaskSandbox(setup *taskExecSetup, state *executi
 	return nil
 }
 
-// failSandboxRecreate lands a task in review after its container could not be rebuilt.
-// The work is not lost — the worktree is intact — so the task pauses where someone can fix
-// the sandbox configuration and resume it.
+// failSandboxRecreate puts a task in review after a failed container rebuild.
+// The worktree is preserved so the configuration can be fixed and the task resumed.
 func (te *TaskExecutor) failSandboxRecreate(setup *taskExecSetup, output, userMessage, code string) {
 	setup.task.ExecutionState = types.ExecStateFailed
 	setup.task.Status = types.StatusReview
@@ -95,16 +86,13 @@ func (te *TaskExecutor) failSandboxRecreate(setup *taskExecSetup, output, userMe
 	te.sendAndPersistError(setup.task.ID, userMessage, code)
 }
 
-// storeTask writes task back, preserving fields the executor does not own: Title and
-// TitleGenerating belong to the task handlers, so a full-row write from the executor's
-// start-time copy would clobber a title changed while the task was queued or running.
-// It cannot start a run; use storeTaskClaiming (see Store.UpdateTask).
+// storeTask writes a task back to the store, preserving Title and TitleGenerating.
+// It cannot be used to start a run.
 func (te *TaskExecutor) storeTask(task *types.Task, projectID string) error {
 	return te.storeTaskWith(task, projectID, false)
 }
 
-// storeTaskClaiming is storeTask for the caller that owns the run: it may put
-// the row into an in-flight execution_state.
+// storeTaskClaiming is storeTask for the caller that owns the run; may set the execution state.
 func (te *TaskExecutor) storeTaskClaiming(task *types.Task, projectID string) error {
 	return te.storeTaskWith(task, projectID, true)
 }
@@ -130,12 +118,8 @@ func (te *TaskExecutor) persistTaskClaiming(setup *taskExecSetup) {
 	te.storeTaskClaiming(setup.task, setup.projectID)
 }
 
-// startGateQueuePoller reports queue position and estimated wait once a second while a
-// caller waits for a gate slot (the per-request gate in the loop, the task gate on start).
-//
-// The returned onEnqueued callback must be passed to gate.Acquire: it hands the caller's
-// queue entry to the poller over a channel as soon as it is enqueued, so the position
-// reported is the caller's own and not the total waiter count. Close done to stop it.
+// startGateQueuePoller reports queue position and wait estimate once a second.
+// The returned onEnqueued callback must be passed to gate.Acquire.
 func (te *TaskExecutor) startGateQueuePoller(gate *ConcurrencyGate, providerURL, projectID, taskID string, ctx context.Context) (onEnqueued func(*queueEntry), done chan struct{}) {
 	entries := make(chan *queueEntry, 1)
 	done = make(chan struct{})
@@ -178,7 +162,7 @@ const (
 	crashedOutput      = "Stopped by an internal error"
 )
 
-// applyStopTransition transitions an in-flight task row out of its running state, naming what stopped it.
+// applyStopTransition transitions an in-flight task row out of its running state.
 func applyStopTransition(task *types.Task, output string) bool {
 	if !task.ExecutionState.InFlight() {
 		return false
@@ -196,16 +180,11 @@ func applyStopTransition(task *types.Task, output string) bool {
 	return true
 }
 
-// executorExitGrace bounds how long a caller waits for an executor to finish
-// writing before it applies a state transition anyway. Stop must stay
-// responsive and authoritative: the transition happens on timeout too, and the
-// guarded UpdateTask keeps a late writer from undoing it.
+// executorExitGrace is the timeout for waiting for an executor to finish writing.
 const executorExitGrace = 3 * time.Second
 
-// cancelExistingExecutor cancels the executor registered for taskID, if any,
-// and returns its state so the caller can wait for it. It leaves the map entry
-// for the caller to replace or delete. Agent executors keep their event loop
-// alive after completion, so they need cancelling too.
+// cancelExistingExecutor cancels the registered executor for taskID.
+// Agent executors are closed to stop their event loops.
 func (te *TaskExecutor) cancelExistingExecutor(taskID string) *executionState {
 	te.taskMu.Lock()
 	defer te.taskMu.Unlock()
@@ -221,11 +200,7 @@ func (te *TaskExecutor) cancelExistingExecutor(taskID string) *executionState {
 	return state
 }
 
-// waitForExecutorExit blocks until the executor has closed its finished channel
-// (every exit-path write has landed) or the timeout expires. The transition is
-// applied either way: a wedged executor must not keep a task stuck, and losing
-// the ordering is the lesser evil. A run that will never happen closes the channel
-// at once instead — see releasePrepared.
+// waitForExecutorExit blocks until the executor finishes writing or the timeout expires.
 func waitForExecutorExit(taskID string, state *executionState, timeout time.Duration) {
 	if state == nil || state.finished == nil {
 		return
@@ -237,7 +212,7 @@ func waitForExecutorExit(taskID string, state *executionState, timeout time.Dura
 	}
 }
 
-// sendStopStatusEvent sends the WS status event that tells task subscribers the executor exited
+// sendStopStatusEvent broadcasts a WS status event when the executor exits.
 func (te *TaskExecutor) sendStopStatusEvent(projectID, taskID string, state types.ExecutionState) {
 	activity := "Task stopped"
 	if state == types.ExecStatePaused {
@@ -248,7 +223,7 @@ func (te *TaskExecutor) sendStopStatusEvent(projectID, taskID string, state type
 	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.TurnStatusEvent(string(state), activity))
 }
 
-// persistStopTransition applies the stop transition
+// persistStopTransition applies the stop transition to the store.
 func (te *TaskExecutor) persistStopTransition(task *types.Task) bool {
 	// Only the paused transition carries user-visible output text; idle and
 	// completed keep the row's previous output.
@@ -268,14 +243,13 @@ func (te *TaskExecutor) persistStopTransition(task *types.Task) bool {
 	return changed
 }
 
-// handleCancelledTask applies the stop transition
+// handleCancelledTask applies the stop transition for a user-cancelled run.
 func (te *TaskExecutor) handleCancelledTask(taskID, projectID string) {
 	te.finishStoppedTask(taskID, projectID, pausedByUserOutput)
 }
 
-// handleCrashedTask is the stop transition for a run that ended on a server fault. The state machine is
-// the cancellation one — a stopped in_progress row stays paused, so it stays resumable — and only the row's
-// output says the server stopped it rather than a person.
+// handleCrashedTask applies the stop transition for a server fault.
+// The row remains paused and resumable.
 func (te *TaskExecutor) handleCrashedTask(taskID, projectID string) {
 	te.finishStoppedTask(taskID, projectID, crashedOutput)
 }
@@ -298,10 +272,7 @@ type modelSwitchResult struct {
 	contextWindow *int
 }
 
-// applyModelSwitch creates a new LlamaClient for the given serverURL/modelName,
-// updates the modelConfig, and optionally persists the override to the task DB row.
-// If discoverContext is true, it attempts to discover and save the context window. silence is the
-// run's watcher, handed on so the new client keeps announcing a quiet provider.
+// applyModelSwitch creates a new LlamaClient and updates the model configuration.
 func (te *TaskExecutor) applyModelSwitch(mc *modelConfig, task *types.Task, projectID, serverURL, modelName string, persistToDB, discoverContext bool, silence *streamSilenceWatcher) modelSwitchResult {
 	reasoningEffort := task.ReasoningEffort
 	if reasoningEffort == "" {
@@ -338,9 +309,7 @@ func (te *TaskExecutor) applyModelSwitch(mc *modelConfig, task *types.Task, proj
 	}
 }
 
-// broadcastDiffIfGitCmd looks up the execution state and broadcasts a diff
-// if the task has an active executor. Used after tool execution when a git
-// command may have changed the working tree state.
+// broadcastDiffIfGitCmd broadcasts a diff if a git command changed the working tree.
 func (te *TaskExecutor) broadcastDiffIfGitCmd(projectID, taskID string, task *types.Task) {
 	te.taskMu.Lock()
 	state := te.tasks[taskID]
@@ -350,9 +319,8 @@ func (te *TaskExecutor) broadcastDiffIfGitCmd(projectID, taskID string, task *ty
 	}
 }
 
-// checkAndBroadcastDiff computes the task diff and broadcasts stats only if the hash
-// differs from the last broadcast. This avoids duplicate broadcasts when fsnotify
-// already caught the same change.
+// checkAndBroadcastDiff computes and broadcasts the task diff if the hash changed.
+// This avoids redundant broadcasts from fsnotify.
 func (te *TaskExecutor) checkAndBroadcastDiff(projectID, taskID string, task *types.Task, state *executionState) {
 	diffResult, err := te.worktreeMgr.GetTaskDiff(taskID, te.worktreeMgr.TaskDiffBaseline(task), "")
 	if err != nil || (diffResult.Diff == "" && len(diffResult.Untracked) == 0) {
@@ -390,10 +358,7 @@ func (te *TaskExecutor) checkAndBroadcastDiff(projectID, taskID string, task *ty
 	})
 }
 
-// computeTaskDiffStats computes the current diff-stats broadcast payload for a task,
-// including committed-but-unmerged changes (unlike checkAndBroadcastDiff, which only
-// fires on working-tree changes). Returns nil when the task has no visible changes
-// or its worktree/branch cannot be resolved.
+// computeTaskDiffStats computes the current diff stats broadcast payload.
 func (te *TaskExecutor) computeTaskDiffStats(projectID, taskID string) *stream.DiffStatsEvent {
 	task, err := te.store.GetTaskByID(taskID)
 	if err != nil {
@@ -441,9 +406,7 @@ func (te *TaskExecutor) computeTaskDiffStats(projectID, taskID string) *stream.D
 }
 
 // broadcastParentDiffStats recomputes and broadcasts the parent task's diff stats
-// after a subtask merge moved the parent's branch. A parent that was never started
-// has no diff watcher of its own, so without this its card would not surface the
-// merged changes (button stuck on "Move to done" instead of "Commit and move to done").
+// after a subtask merge.
 func (te *TaskExecutor) broadcastParentDiffStats(projectID, parentID string) {
 	if te.appStreamMgr == nil || parentID == "" {
 		return
@@ -461,21 +424,15 @@ const (
 	advisoryAutoAnswer    = "auto_answer"
 )
 
-// advisory is a note about the workspace that the model must see but the user never
-// said: LSP diagnostics after an edit, the instructions for resolving a merge conflict.
-//
-// Never store one as a user message: it fakes a user bubble, the summarizer believes the
-// user said it, and a row written among the turn's tool_call rows costs that turn its
-// remaining calls on every rebuild. They are buffered during tool execution and delivered
-// by flushAdvisories once the turn's own messages are in the conversation.
+// advisory is a note about the workspace the model must see.
+// Buffered during tool execution and delivered at the turn boundary.
 type advisory struct {
 	kind     string // advisoryDiagnostics | advisoryMergeConflict | advisoryAutoAnswer — how the UI titles the note
 	severity string // mirrors TaskMessage.Severity: "" (default), "info", "error" — drives emphasis
 	text     string // what the model reads and the UI shows
 }
 
-// queueAdvisory buffers a note for delivery at the turn boundary. Safe to call from
-// inside tool execution, where writing a message would land it between tool_call rows.
+// queueAdvisory buffers a note for delivery at the turn boundary.
 func queueAdvisory(lc *loopContext, a advisory) {
 	if strings.TrimSpace(a.text) == "" {
 		return
@@ -483,11 +440,8 @@ func queueAdvisory(lc *loopContext, a advisory) {
 	lc.pendingAdvisories = append(lc.pendingAdvisories, a)
 }
 
-// flushAdvisories delivers every buffered note in queue order: persisted as an advisory
-// row, appended to the live conversation, and broadcast to the UI. Call it after the
-// turn's assistant and tool messages have been appended, so the note reads as commentary
-// on work that already happened, and before summarization, so the note is in the
-// summarizer's input.
+// flushAdvisories delivers buffered notes, persisting them as advisory rows.
+// Called after assistant/tool messages but before summarization.
 func (te *TaskExecutor) flushAdvisories(setup *taskExecSetup, lc *loopContext) {
 	if len(lc.pendingAdvisories) == 0 {
 		return
@@ -514,19 +468,8 @@ func (te *TaskExecutor) flushAdvisories(setup *taskExecSetup, lc *loopContext) {
 	lc.pendingAdvisories = nil
 }
 
-// autoAnswerTextStop answers a text-only turn of a run the user did not start, from the
-// parent's context — the same source ask_question's auto-answer uses — and hands the run
-// back to the LLM with the answer in the conversation.
-//
-// It returns turnNextLLMCall when the answer landed, turnStop when the slot wait was
-// cancelled (handleCancelledTask has run), and turnWaitIdle — the zero value — to leave the
-// settled turn alone, which is also what every decline does: a run the user started
-// themselves, a task with no parent to answer from, plan and explore mode, where a text
-// answer is the deliverable, and any failure of the answering call.
-//
-// The caller invokes it after the turn has already settled (Review, slot released, complete
-// frame sent) and after any queued user message was claimed, so a real message always beats
-// an automated answer and the board shows Review for the length of the answering call.
+// autoAnswerTextStop answers a text-only turn from the parent's context.
+// Returns turnNextLLMCall if the answer landed, turnStop if cancelled, and turnWaitIdle otherwise.
 func (te *TaskExecutor) autoAnswerTextStop(setup *taskExecSetup, lc *loopContext, assistantText string) turnOutcome {
 	if !setup.task.Autostarted || setup.task.ParentTaskID == "" || setup.task.IsPlanMode() || setup.task.IsExploreMode() {
 		return turnWaitIdle
@@ -564,8 +507,7 @@ func (te *TaskExecutor) autoAnswerTextStop(setup *taskExecSetup, lc *loopContext
 	return turnNextLLMCall
 }
 
-// ReviewContextFor reads the task's own thread for the merge-conflict prompt. Called mid-turn it
-// sees this turn's own review: the assistant row is persisted before its tool calls run.
+// ReviewContextFor reads the task's thread for the merge-conflict prompt.
 func (te *TaskExecutor) ReviewContextFor(task *types.Task) string {
 	rows, err := te.store.GetTaskMessages(task.ID, task.CurrentThreadID)
 	if err != nil {
@@ -575,14 +517,8 @@ func (te *TaskExecutor) ReviewContextFor(task *types.Task) string {
 	return reviewSummaries(rows)
 }
 
-// prepareMergeConflictTurn hands the model the instructions for resolving a conflict and
-// resets the turn state around it: the loop detector forgets the history (conflict work
-// repeating is expected, not a loop) and the half-built assistant/tool buffers are dropped.
-//
-// The note is flushed, not queued: every caller goes straight into the next LLM call, so a
-// queued note would arrive one call late and the model would resolve a conflict before being
-// told which files conflict. The full text is persisted, so a run restarted mid-conflict
-// rebuilds the same instructions rather than a marker row.
+// prepareMergeConflictTurn prepares the model to resolve a conflict and resets turn state.
+// The note is flushed immediately so the model sees it before the next call.
 func (te *TaskExecutor) prepareMergeConflictTurn(setup *taskExecSetup, lc *loopContext, conflictedFiles []string) {
 	prompt, err := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
 		TaskBranch:      setup.task.Branch,
@@ -609,8 +545,7 @@ func (te *TaskExecutor) prepareMergeConflictTurn(setup *taskExecSetup, lc *loopC
 	lc.finishReason = ""
 }
 
-// userMessageToChatMessage converts a UserMessage (with optional image attachments)
-// into a ChatMessage. If attachments are present, builds multi-modal ContentParts.
+// userMessageToChatMessage converts a UserMessage to a ChatMessage, handling attachments.
 func userMessageToChatMessage(um stream.UserMessage) types.ChatMessage {
 	if parts, ok := types.ContentParts(um.Content, um.Attachments); ok {
 		return types.ChatMessage{Role: "user", ContentParts: parts}
@@ -618,11 +553,8 @@ func userMessageToChatMessage(um stream.UserMessage) types.ChatMessage {
 	return types.ChatMessage{Role: "user", Content: um.Content}
 }
 
-// handleLoopDetected counts a detected loop, returns true when the consecutive maximum is
-// reached and the task should terminate, otherwise injects a hint and notifies the frontend.
-// A non-empty target is named in the hint (tool loops).
-// Explore mode suppresses hints entirely; plan mode does too - reading files and making
-// statements is normal planning behaviour. A valid turn resets the streak (recordTurn).
+// handleLoopDetected manages detected loops by injecting hints or terminating the task.
+// Returns true if the task should terminate.
 func handleLoopDetected(te *TaskExecutor, task *types.Task, projectID, taskID string, detector *loopDetector, loopType LoopType, target string, messages *[]types.ChatMessage, exploreMode bool) bool {
 	// In exploration/plan mode, suppress all loop hints — let the LLM freely explore / plan
 	if exploreMode || task.IsPlanMode() {
@@ -669,11 +601,7 @@ func handleLoopDetected(te *TaskExecutor, task *types.Task, projectID, taskID st
 	return false // continue
 }
 
-// sandboxCreateOpts is the sandbox configuration for creating (or recreating) setup's container on
-// the given image, with the worktree mounted read-only when readOnly says so. Four paths create this
-// container (start, plan/build-mode switch, agent config change, bridge recovery) and share it. Only
-// the image and the mode come from the caller — only EnsureImageForProject knows what the image
-// settled on; the project's own configuration is sandbox.ProjectOpts's.
+// sandboxCreateOpts returns the sandbox configuration for a task container.
 func (te *TaskExecutor) sandboxCreateOpts(setup *taskExecSetup, image string, readOnly bool) sandbox.SandboxOpts {
 	// The host folders this container may see are the ones the project configured, plus the ones the
 	// user approved for the agent this task runs. No other installed extension contributes a folder.
@@ -684,10 +612,7 @@ func (te *TaskExecutor) sandboxCreateOpts(setup *taskExecSetup, image string, re
 	return opts
 }
 
-// setupSandbox creates or reuses a sandbox container and connects to the agent. Returns the image
-// used and the agent client; the caller builds its callbacks from the latter. Assigned ports are not
-// returned: they are carried on setup.task and broadcast here, which is the only path that may write
-// task.AssignedPorts.
+// setupSandbox ensures the sandbox image exists, starts the container, and connects the agent.
 func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *bridge.Client, error) {
 	task := setup.task
 	projectID := setup.projectID

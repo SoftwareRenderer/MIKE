@@ -18,15 +18,13 @@ import (
 	"mike/pkg/procterm"
 )
 
-// Bounds for the tool's bash timeout. Ending the command — killing its group, flushing
-// its output — is pkg/procterm, shared with the sandbox-bridge's bash handler.
+// Bash timeout bounds. pkg/procterm handles process group killing and output flushing.
 const (
 	defaultBashTimeoutSec = 5
 	maxBashTimeoutSec     = 300
 )
 
-// normalizeBashTimeout clamps a tool-supplied timeout (seconds) to the supported
-// range, defaulting when unset.
+// normalizeBashTimeout clamps tool-supplied timeout to the supported range, defaulting when unset.
 func normalizeBashTimeout(timeout int64) int64 {
 	switch {
 	case timeout <= 0:
@@ -38,10 +36,9 @@ func normalizeBashTimeout(timeout int64) int64 {
 	}
 }
 
-// streamLineWriter accumulates a command's output and hands each completed line to onLine as it
-// arrives. mu lets one writer serve both the stdout and stderr copiers. The accumulator is a
-// toolresult.Capture because the bytes come from an LLM-written command; the line stream to the
-// browser is not bounded, since the UI follows a running command.
+// streamLineWriter accumulates output and forwards completed lines to onLine. Mu allows
+// concurrent writes from stdout and stderr. Total capture is bounded, but onLine is
+// unbounded for UI following.
 type streamLineWriter struct {
 	mu       sync.Mutex
 	captured toolresult.Capture
@@ -49,10 +46,10 @@ type streamLineWriter struct {
 	pend     []byte
 }
 
-// partialFlushBytes bounds the buffer held back waiting for a newline.
+// partialFlushBytes is the maximum buffer size held back waiting for a newline.
 const partialFlushBytes = 64 << 10
 
-// Write always reports the full length: a short count makes io.Copy stop and drop output.
+// Write reports full length to prevent io.Copy from stopping.
 func (w *streamLineWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -68,18 +65,15 @@ func (w *streamLineWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// WriteFrom streams a pipe into the writer until EOF, or until procterm.Drain closes the fd
-// (the normal end for a command that detached a child still holding it). What was written is
-// already in the accumulator and on the line stream, so neither count is reported back.
+// WriteFrom streams a pipe into the writer until EOF or procterm.Drain closes the fd.
 func (w *streamLineWriter) WriteFrom(r io.Reader) {
 	_, _ = io.Copy(w, r)
 }
 
-// String returns what was captured — up to the cap, plus the marker naming what was dropped.
+// String returns captured output, including a marker if truncated.
 func (w *streamLineWriter) String() string { return w.captured.String() }
 
-// flush emits a trailing partial line, so a command that ends without a newline still gets
-// its last line reported.
+// flush emits trailing partial lines.
 func (w *streamLineWriter) flush() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -90,8 +84,7 @@ func (w *streamLineWriter) flush() {
 	w.pend = nil
 }
 
-// emitLocked splits a chunk into lines and forwards them (called with mu held, so lines stay
-// in order). Trailing \r is trimmed to match the sandbox path.
+// emitLocked splits chunk into lines and forwards them, trimming trailing \r.
 func (w *streamLineWriter) emitLocked(chunk string) {
 	if w.onLine == nil {
 		return
@@ -101,13 +94,10 @@ func (w *streamLineWriter) emitLocked(chunk string) {
 	}
 }
 
-// execCommandStream runs a shell command on the host in dir, returns its combined output, and
-// forwards it line by line to onLine (may be nil). timeout is seconds: the whole process group
-// is killed when it expires, while a child the command detached keeps running, on purpose.
+// execCommandStream runs a shell command on the host in dir and forwards output to onLine.
+// Process group is killed on timeout, but detached children continue.
 //
-// Only the allowlisted environment reaches the command: these are LLM-written commands on the
-// host, so MIKE_ENCRYPTION_KEY must never be in their environment, and
-// GIT_TERMINAL_PROMPT=0 keeps an injected git transfer off a credential prompt.
+// Only allowlisted environment variables are used to prevent leaking secrets and avoid credential prompts.
 func execCommandStream(ctx context.Context, dir, command string, timeout int64, onLine func(text string)) (string, error) {
 	secs := normalizeBashTimeout(timeout)
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(secs)*time.Second)
@@ -117,16 +107,13 @@ func execCommandStream(ctx context.Context, dir, command string, timeout int64, 
 	c.Dir = dir
 	c.Env = agent.SafeAgentEnv("GIT_TERMINAL_PROMPT=0")
 	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	// Kill the group, not just bash. The error is swallowed on purpose: exec turns a Cancel
-	// error into the Wait error, hiding the result of a process that had already exited.
+	// Kill the process group. Error is ignored to let Wait() report the primary exit status.
 	c.Cancel = func() error {
 		_ = procterm.KillGroup(c.Process)
 		return nil
 	}
 
-	// Own the pipe ends. With exec-managed pipes, Wait() blocks on its copy
-	// goroutines for the whole WaitDelay whenever a child survives — owning the fds
-	// keeps the flush to procterm's grace period.
+	// Manage pipe ends manually to avoid Wait() blocking on copy goroutines if a child process survives.
 	stdoutR, stdoutW, err := os.Pipe()
 	if err != nil {
 		return "", fmt.Errorf("stdout pipe: %w", err)

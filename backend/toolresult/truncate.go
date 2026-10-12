@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// Truncate truncates a tool output string to at most ~10 lines and ~1024 bytes, returning the
+// Truncate truncates a tool output string to at most 10 lines and 1024 bytes, returning the
 // preview, the original line and byte counts, and whether truncation was applied.
 //
 // The preview holds up to maxLines-1 lines plus a marker, where maxLines is the number of

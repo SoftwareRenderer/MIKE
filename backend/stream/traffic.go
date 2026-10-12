@@ -1,8 +1,7 @@
 package stream
 
-// Count what one connection was sent. The count is taken where a frame is written to the socket, so the
-// number is what the browser received and not what a frame is thought to cost. Bandwidth is paid for here,
-// so a claim about it should be a reading and not an estimate.
+// Count frames sent to one connection. Counts bytes as written to the socket,
+// representing actual bandwidth used rather than estimates.
 
 import (
 	"fmt"
@@ -13,15 +12,17 @@ import (
 	"mike/backend/types"
 )
 
-// outboundFrame is one frame owed to a socket, with the name of what it counts as. The name is taken from
-// the map the sender built, never from the encoded bytes: a tool payload can contain the text `"type":"`.
+// outboundFrame is one frame to be written to a socket and its bucket name.
+// The name is taken from the map the sender built, never from the encoded bytes:
+// a tool payload can contain the text `"type":"`.
 type outboundFrame struct {
 	data   []byte
 	bucket string
 }
 
-// frameBucket names what a frame counts as. A task_event envelope carries every per-turn event, so those
-// count by the event inside them; every other frame counts by its own type.
+// frameBucket determines the bucket name for a frame. A task_event envelope
+// carries every per-turn event, so those count by the event inside them;
+// every other frame counts by its own type.
 func frameBucket(frame map[string]any) string {
 	name, _ := frame["type"].(string)
 	if name == string(types.WSTypeTaskEvent) {
@@ -53,7 +54,7 @@ func (l *trafficLedger) record(bucket string, n int) {
 	l.bytes[bucket] += n
 }
 
-// totals is the whole connection: frames written, and the bytes they carried.
+// totals returns the total frames and bytes written to the connection.
 func (l *trafficLedger) totals() (frames, bytes int) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -79,8 +80,7 @@ func (l *trafficLedger) bucketFrames(bucket string) int {
 	return l.frames[bucket]
 }
 
-// report writes the ledger with the biggest spender first, so the line answers "what did this connection
-// cost" without anyone adding it up.
+// report returns a summary of the ledger sorted by bytes descending.
 func (l *trafficLedger) report() string {
 	buckets := make([]string, 0, len(l.bytes))
 	l.mu.Lock()
@@ -105,7 +105,7 @@ func (l *trafficLedger) report() string {
 	return fmt.Sprintf("%d frames/%s written [%s]", totalFrames, formatBytes(totalBytes), strings.Join(parts, " "))
 }
 
-// formatBytes writes a byte count a reader can compare at a glance.
+// formatBytes formats a byte count for readability.
 func formatBytes(n int) string {
 	const unit = 1024
 	if n < unit {

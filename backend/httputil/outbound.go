@@ -14,20 +14,20 @@ import (
 	"time"
 )
 
-// A request whose URL someone else chose. client.go decides how it may be dialled; this decides how it is
-// made: one attempt, the caller's headers, the answer read under the upstream cap.
+// A request to an external URL. This defines how the request is constructed:
+// one attempt, using caller-provided headers and reading the response under the upstream size limit.
 
 type OutboundRequest struct {
 	Method string
 	URL    string
-	// Set as given. A header wanted only conditionally is left out rather than sent empty.
+	// Headers to include. Conditionally needed headers should be omitted rather than sent empty.
 	Headers map[string]string
-	// Sent as-is. An empty ContentType labels a nil body as JSON.
+	// Request body. If ContentType is empty, a nil body is treated as JSON.
 	Body        io.Reader
 	ContentType string
-	// Zero leaves only ctx bounding the call.
+	// If zero, only the context bounds the call.
 	Timeout time.Duration
-	// GrantedHosts are hosts the operator named. Naming one is the only way a loopback address is dialled.
+	// Hosts explicitly allowed by the operator. Loopback addresses are only dialed if explicitly granted.
 	GrantedHosts []string
 }
 
@@ -37,14 +37,13 @@ type OutboundAnswer struct {
 	Body        []byte
 }
 
-// DoOutbound makes one attempt, under the egress address rule. Redirects are not followed: the permission
-// covers the URL the caller named, and a 3xx would carry the request, and any credential on it, to a host
-// nothing validated.
+// DoOutbound makes one attempt to the specified URL. Redirects are not followed to
+// prevent credentials from being sent to an unvalidated host.
 func DoOutbound(ctx context.Context, r OutboundRequest) (*OutboundAnswer, error) {
 	return DoOutboundWith(ctx, NewExtensionEgressClientGranting(r.Timeout, r.GrantedHosts), r)
 }
 
-// DoOutboundWith makes the call with a client the caller chose.
+// DoOutboundWith makes the call using a provided http.Client.
 func DoOutboundWith(ctx context.Context, client *http.Client, r OutboundRequest) (*OutboundAnswer, error) {
 	method := strings.ToUpper(strings.TrimSpace(r.Method))
 	if method == "" {
@@ -82,11 +81,11 @@ func DoOutboundWith(ctx context.Context, client *http.Client, r OutboundRequest)
 func (a *OutboundAnswer) OK() bool          { return a.StatusCode >= 200 && a.StatusCode < 300 }
 func (a *OutboundAnswer) RateLimited() bool { return a.StatusCode == http.StatusTooManyRequests }
 
-// ErrDownloadTooLarge says a response body went past the caller's limit.
+// ErrDownloadTooLarge indicates the response body exceeded the size limit.
 var ErrDownloadTooLarge = errors.New("download exceeds its limit")
 
-// DownloadToFileGranting streams one GET to dest over the egress client that admits the hosts a
-// person named, and returns the byte count and the digest.
+// DownloadToFileGranting streams a GET request to dest using a client that allows
+// the specified hosts, returning the byte count and SHA256 digest.
 func DownloadToFileGranting(ctx context.Context, rawURL, dest string, limit int64, grantedHosts []string) (int64, string, error) {
 	client := NewExtensionEgressClientGranting(0, grantedHosts)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
@@ -119,14 +118,14 @@ func DownloadToFileGranting(ctx context.Context, rawURL, dest string, limit int6
 	return n, hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
-// RefusedForCredentials reports a refusal outright or a lack of authority.
+// RefusedForCredentials returns true if the response indicates a lack of authority.
 func (a *OutboundAnswer) RefusedForCredentials() bool {
 	return a.StatusCode == http.StatusForbidden || a.StatusCode == http.StatusUnauthorized
 }
 
 func (a *OutboundAnswer) IsJSON() bool { return IsJSONContentType(a.ContentType) }
 
-// IsJSONContentType is the one reading of an upstream content type, so two readers cannot disagree.
+// IsJSONContentType provides a single point of truth for identifying JSON content types.
 func IsJSONContentType(raw string) bool {
 	media, _, err := mime.ParseMediaType(raw)
 	if err != nil {

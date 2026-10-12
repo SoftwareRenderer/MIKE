@@ -20,9 +20,9 @@ import (
 	"mike/pkg/logging"
 )
 
-// rawImageTypes is the whole permission of GET /api/fs/raw: a name is served if and only if it is a
-// key, and its value is the Content-Type. SVG is absent because it is markup, and an <img> pointing at
-// the app's own origin would load it. frontend/src/lib/utils/diff-image.ts mirrors this set.
+// rawImageTypes defines the allowed image types for GET /api/fs/raw. SVG is excluded
+// to prevent markup injection via <img> tags. frontend/src/lib/utils/diff-image.ts
+// mirrors this set.
 var rawImageTypes = map[string]string{
 	".png":  "image/png",
 	".jpg":  "image/jpeg",
@@ -34,14 +34,14 @@ var rawImageTypes = map[string]string{
 	".avif": "image/avif",
 }
 
-// maxRawFileBytes is the upload cap, not maxFSReadBytes: this route answers for an image a person put
-// in the repository, so it is bounded by what the server will write into a worktree.
+// maxRawFileBytes is the maximum size for a raw image, mirroring the upload limit
+// for worktree writes.
 const maxRawFileBytes int64 = exec.MaxUploadBytes
 
 var rawTooLargeMessage = fmt.Sprintf("file too large (max %dMB)", maxRawFileBytes/(1<<20))
 
-// handleFSRaw streams one image out of a project. GET /api/fs/read cannot: it answers JSON, and a JSON
-// string of a PNG is the PNG with every invalid byte replaced.
+// handleFSRaw streams a project image directly. Unlike /api/fs/read, which returns JSON,
+// this route provides the raw bytes.
 //
 // Query: project (required), task (which working tree), path (relative to the repository root), ref
 // (optional — the committed object instead of the file on disk).
@@ -93,9 +93,8 @@ func (s *Server) handleFSRaw(w http.ResponseWriter, r *http.Request) {
 	s.serveCommittedImage(w, r, project.Path, ref, filepath.ToSlash(rel), contentType)
 }
 
-// repoRelativePath takes the path shape the diff surfaces hold and returns it for the filesystem. An
-// absolute path is refused rather than translated, so the route never guesses whether it was sent a host
-// path or a container path.
+// repoRelativePath converts a relative project path to a filesystem path, refusing
+// absolute paths to avoid ambiguity.
 func repoRelativePath(p string) (string, error) {
 	if p == "" {
 		return "", errors.New("path is required")
@@ -110,23 +109,20 @@ func repoRelativePath(p string) (string, error) {
 	return filepath.FromSlash(clean), nil
 }
 
-// looksLikeDrivePath catches the Windows spelling of an absolute path, which filepath.IsAbs answers
-// only on Windows. A colon not followed by a separator is an ordinary filename.
+// looksLikeDrivePath detects Windows-style absolute paths on non-Windows platforms.
 func looksLikeDrivePath(p string) bool {
 	return len(p) > 2 && p[1] == ':' && (p[2] == '/' || p[2] == '\\')
 }
 
-// refusePathJail answers a path that stopped being the one the jail checked. The name goes to the
-// log and the browser gets the sentence validateFSPath() returns, so a swap attempt cannot be used
-// to read a host path back out of an error. openJailedFile() holds why a swap is worth noticing.
+// refusePathJail logs and rejects a path that changed after the containment check,
+// preventing path-swap attacks.
 func refusePathJail(w http.ResponseWriter, hostPath string) {
 	logging.For(logging.HTTP).Warnf("file refused, path changed after containment: %s", hostPath)
 	JSONError(w, http.StatusBadRequest, fsutil.ErrOutside.Error())
 }
 
-// serveWorktreeImage streams the file on disk, refusing on the stat before reading anything. The path is
-// symlink-resolved by validateFSPath(), so a link or a FIFO standing at that name was put there after
-// the check, which openJailedFile() refuses.
+// serveWorktreeImage streams an image from disk, verifying it is not a directory and
+// that it remains jailed before reading.
 func (s *Server) serveWorktreeImage(w http.ResponseWriter, hostPath, contentType string) {
 	before, err := os.Lstat(hostPath)
 	if err != nil {
@@ -182,7 +178,7 @@ func (s *Server) serveCommittedImage(w http.ResponseWriter, r *http.Request, rep
 	_, _ = w.Write(data)
 }
 
-// gitInDir runs git in a directory that no task owns, in the shape gitBlobSize asks for.
+// gitInDir runs git commands in a specified directory, returning a function for easy execution.
 func gitInDir(ctx context.Context, dir string) func(args ...string) (string, error) {
 	return func(args ...string) (string, error) {
 		cmd := git.CommandContext(ctx, dir, args...)
@@ -195,8 +191,7 @@ func gitInDir(ctx context.Context, dir string) func(args ...string) (string, err
 	}
 }
 
-// gitBlobBytes captures one object's bytes. `cat-file blob` is plumbing and writes the object and
-// nothing else, which is what makes the result safe to hand to an <img>.
+// gitBlobBytes reads the raw bytes of a git blob using cat-file, ensuring no extra output is returned.
 func gitBlobBytes(ctx context.Context, dir, spec string) ([]byte, bool, error) {
 	cmd := git.CommandContext(ctx, dir, "cat-file", "blob", "--end-of-options", spec)
 	var errOut cappedBuffer
@@ -227,8 +222,8 @@ func gitBlobBytes(ctx context.Context, dir, spec string) ([]byte, bool, error) {
 	return data, false, nil
 }
 
-// cappedBuffer keeps the first cappedKeepBytes written to it, so a failing subprocess cannot make the
-// server hold what it printed. Write reports the full length: a short count stops os/exec's copier.
+// cappedBuffer captures only the first few kilobytes of output to prevent memory
+// exhaustion from failing subprocesses.
 type cappedBuffer struct {
 	buf bytes.Buffer
 }
@@ -247,8 +242,8 @@ func (c *cappedBuffer) Write(p []byte) (int, error) {
 
 func (c *cappedBuffer) String() string { return c.buf.String() }
 
-// writeImageHeaders writes no Content-Disposition: inline is the default, and putting the file's name
-// into a header would make a crafted name a header writer.
+// writeImageHeaders sets image headers, omitting Content-Disposition to avoid
+// header injection from filenames.
 func writeImageHeaders(w http.ResponseWriter, contentType string, size int64) {
 	h := w.Header()
 	h.Set("Content-Type", contentType)

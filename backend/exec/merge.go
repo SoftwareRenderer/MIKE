@@ -21,11 +21,11 @@ import (
 	"mike/pkg/logging"
 )
 
-// mergeOrchestrator owns what happens to a task's commits once a turn ends: branch, merge,
+// mergeOrchestrator owns what happens to a task's commits after a turn ends: branch, merge,
 // commit message, and the commit of a finished conflict resolution.
 //
 // It holds no executionState and takes neither taskMu nor sandboxMu. Serialization comes from
-// lockWorktree and from the release funcs WorktreeManager owns. Task state is read from the store,
+// lockWorktree and from WorktreeManager's release funcs. Task state is read from the store,
 // so a merge can run while no executor holds the task.
 type mergeOrchestrator struct {
 	store        *store.Store
@@ -41,7 +41,7 @@ type mergeOrchestrator struct {
 	utilityTarget    func(task *types.Task) (serverURL, model string, ok bool)
 	chatCompletion   func(ctx context.Context, serverURL, modelName string, messages []types.ChatMessage, opts *ChatCompletionOpts) (*types.ChatUsage, string, error)
 	streamCompletion func(ctx context.Context, serverURL, modelName string, messages []types.ChatMessage, cb types.StreamCallback, onProgress types.PromptProgressCallback) (*types.ChatUsage, error)
-	// Tasks whose merge conflict came from a commit-and-done click. In memory because only the
+	// Tasks whose merge conflict came from a commit-and-done click. In-memory because only the
 	// click knows it was a click; a conflict found at task start means "keep working".
 	commitDone struct {
 		mu    sync.Mutex
@@ -83,9 +83,8 @@ func (te *TaskExecutor) ArmCommitAndDone(taskID string) {
 	te.merge.ArmCommitAndDone(taskID)
 }
 
-// CommitAndDonePending reads the armed click back without consuming it. The merge path consults the
-// orchestrator itself; this forward is how backend/api's tests watch the arming rule, which lives
-// behind the unexported te.merge.
+// CommitAndDonePending reads the armed click without consuming it. The merge path consults the
+// orchestrator; this forward is for backend/api's tests to watch the arming rule.
 func (te *TaskExecutor) CommitAndDonePending(taskID string) bool {
 	return te.merge.CommitAndDonePending(taskID)
 }
@@ -99,7 +98,7 @@ func (te *TaskExecutor) StreamCommitMessage(s *httputil.SSE, taskID string, task
 }
 
 // branchChildFrom settles the branch a task forks from. "" means the project baseline.
-// The parent's real worktree branch is used, not the stored parent.Branch, which can be stale.
+// Use the parent's real worktree branch to avoid stale stored values.
 func (m *mergeOrchestrator) branchChildFrom(projectID string, task *types.Task) (string, error) {
 	if task.ParentTaskID == "" {
 		return "", nil
@@ -133,9 +132,8 @@ func (m *mergeOrchestrator) branchChildFrom(projectID string, task *types.Task) 
 }
 
 // EnsureParentBranch gives a not-yet-started parent (parent.Branch == "") the branch that becomes
-// the subtask auto-merge target. It creates a full worktree, not a bare branch, so
-// prepareTaskExecution reuses it when the parent starts. Only Branch is written: the parent keeps
-// its status and column while subtasks run.
+// the subtask auto-merge target. It creates a worktree so prepareTaskExecution can reuse it.
+// Only Branch is written; the parent keeps its status and column.
 func (m *mergeOrchestrator) EnsureParentBranch(projectID string, parent *types.Task) error {
 	project, err := m.store.GetProject(projectID)
 	if err != nil {
@@ -203,8 +201,7 @@ func (m *mergeOrchestrator) branchExists(projectID, branchName string) bool {
 	return err == nil
 }
 
-// recoverMissingBranch returns a stale branch sharing the missing branch's slug, recording it on
-// the task, or "" when there is no match.
+// recoverMissingBranch returns a stale branch sharing the missing branch's slug, or "".
 func (m *mergeOrchestrator) recoverMissingBranch(projectID, taskID, missingBranch string) string {
 	slugPrefix := types.TaskBranchSlugPrefix(missingBranch)
 	if slugPrefix == "" {
@@ -260,7 +257,7 @@ func (m *mergeOrchestrator) recoverMissingBranch(projectID, taskID, missingBranc
 }
 
 // randomSuffixLen is the random tail of a task branch name. types.TaskBranchSuffixLen is the
-// matching half of the branch-name parser — the two must agree.
+// matching half of the branch-name parser.
 const randomSuffixLen = types.TaskBranchSuffixLen
 
 func randomSuffix(n int) string {
@@ -273,9 +270,8 @@ func randomSuffix(n int) string {
 	return string(b)
 }
 
-// generateBranchName builds the task's branch name: the slugified title when there is one, the
-// task ID otherwise, always with a random tail because a branch left behind by a deleted task
-// would otherwise be reused. The whole name stays within types.MaxBranchName.
+// generateBranchName builds the task's branch name: the slugified title or the task ID,
+// always with a random tail to avoid reusing branches from deleted tasks. Max length is types.MaxBranchName.
 func (m *mergeOrchestrator) generateBranchName(task *types.Task, taskID, projectID string) string {
 	baseName := types.TaskBranchPrefix + task.ID
 	if !task.AutoMerge && task.Title != "" {
@@ -308,8 +304,8 @@ func (m *mergeOrchestrator) logSystemMessage(taskID, threadID, severity, content
 	systemNote{severity: severity, content: content}.recordOnThread(m.store, taskID, threadID)
 }
 
-// ResolveMergeTarget answers where the task's work lands: a child merges into its parent's branch,
-// a root task into base_ref or the project's origin branch.
+// ResolveMergeTarget answers where the task's work lands: child tasks merge into their parent's
+// branch, root tasks into base_ref or the project's origin branch.
 func (m *mergeOrchestrator) ResolveMergeTarget(projectID string, task *types.Task) string {
 	if task.ParentTaskID != "" {
 		// mergeInto creates the parent's branch on demand, so the child's own base_ref is never its target.
@@ -327,8 +323,7 @@ func (m *mergeOrchestrator) ResolveMergeTarget(projectID string, task *types.Tas
 }
 
 // GenerateCommitMessage writes the task's commit message from the conversation.
-// Every commit path goes through it, and each model that contributed gets its own Assisted-by line
-// only where the project asked for that line.
+// Each contributing model gets an Assisted-by line if the project enables it.
 func (m *mergeOrchestrator) GenerateCommitMessage(ctx context.Context, task *types.Task) string {
 	assistedBy := m.assistedByEnabled(task.ProjectID)
 	taskMsgs, _ := m.store.GetTaskMessages(task.ID, task.CurrentThreadID)
@@ -354,8 +349,7 @@ func (m *mergeOrchestrator) GenerateCommitMessage(ctx context.Context, task *typ
 	return buildCommitMessageWithAssistedBy(commitMsg, models)
 }
 
-// assistedByEnabled reads the project's answer to the Assisted-by trailer; a project whose answer cannot
-// be read has none.
+// assistedByEnabled reads the project's Assisted-by trailer preference.
 func (m *mergeOrchestrator) assistedByEnabled(projectID string) bool {
 	project, err := m.store.GetProject(projectID)
 	if err != nil {
@@ -364,8 +358,8 @@ func (m *mergeOrchestrator) assistedByEnabled(projectID string) bool {
 	return project.AssistedByEnabled()
 }
 
-// generateCommitMessageLLM asks the model for the message, falling back to the task's title (plus the
-// Assisted-by line when the project wants it) on any error.
+// generateCommitMessageLLM asks the model for the message, falling back to the task's title
+// (plus Assisted-by if enabled) on error.
 func (m *mergeOrchestrator) generateCommitMessageLLM(ctx context.Context, task *types.Task, turnText string, assistedBy bool) string {
 	serverURL, modelName, _ := m.utilityTarget(task)
 	if serverURL == "" || modelName == "" {
@@ -392,7 +386,7 @@ func (m *mergeOrchestrator) generateCommitMessageLLM(ctx context.Context, task *
 	return label
 }
 
-// StreamCommitMessage streams the message as SSE events. No timeout is applied.
+// StreamCommitMessage streams the message as SSE events.
 func (m *mergeOrchestrator) StreamCommitMessage(s *httputil.SSE, taskID string, task *types.Task) {
 	serverURL, modelName, _ := m.utilityTarget(task)
 	if serverURL == "" || modelName == "" {
@@ -469,8 +463,8 @@ func (m *mergeOrchestrator) StreamCommitMessage(s *httputil.SSE, taskID string, 
 	}
 }
 
-// CommitAndMerge commits the staged worktree changes and optionally merges the task branch.
-// Unstaged and untracked work is left alone. The commit queue serializes the git calls per project.
+// CommitAndMerge commits staged changes and optionally merges the task branch.
+// Unstaged and untracked work is ignored. The commit queue serializes calls per project.
 func (m *mergeOrchestrator) CommitAndMerge(projectID, taskID, worktreePath, commitMsg string, autoMerge bool) error {
 	release := m.commitQueue.Acquire(projectID)
 	defer release()
@@ -491,11 +485,9 @@ func (m *mergeOrchestrator) CommitAndMerge(projectID, taskID, worktreePath, comm
 	return nil
 }
 
-// MergeBranch merges the task's branch into the target branch: a child task merges into its
-// parent's branch, a root task into origin. It returns nil on success or when a merge does
-// not apply. When the target is checked out in another worktree (a parent created by
-// EnsureParentBranch, say) the merge runs inside that worktree, since git refuses to check
-// out a branch another worktree already holds.
+// MergeBranch merges the task's branch into the target. Child tasks merge into their parent's
+// branch; root tasks merge into origin. If the target is checked out in another worktree, the
+// merge runs there because git refuses to check out a branch held by another worktree.
 func (m *mergeOrchestrator) MergeBranch(projectID, taskID string, task *types.Task) error {
 	project, err := m.store.GetProject(projectID)
 	if err != nil {
@@ -676,11 +668,11 @@ func (m *mergeOrchestrator) mergeInWorktree(projectID, worktreePath, targetBranc
 	return m.mergeInto(projectID, worktreePath, targetBranch, taskBranch, taskID, "")
 }
 
-// mergeInto merges taskBranch into targetBranch in dir. restoreRef, when it differs from
-// targetBranch, is the checkout dir is put back on afterwards.
+// mergeInto merges taskBranch into targetBranch in dir. restoreRef, if different from
+// targetBranch, is the checkout restored after the merge.
 //
-// `landed` separates the bracket's two failures: with both joined, the restore conflict is still reachable
-// inside a failed merge, and only the merge outcome decides whether the task finished.
+// landed separates the bracket's two failures: restore conflicts are only reachable if the
+// merge succeeded.
 func (m *mergeOrchestrator) mergeInto(projectID, dir, targetBranch, taskBranch, taskID, restoreRef string) error {
 	landed := false
 	bracketErr := m.worktreeMgr.WithStash(projectID, dir, git.StashMessageForAutoMerge(taskID), func() error {
@@ -703,24 +695,21 @@ func (m *mergeOrchestrator) mergeInto(projectID, dir, targetBranch, taskBranch, 
 	return bracketErr
 }
 
-// errMergedWithConflictedRestore is a merge that delivered the work to the target branch, followed by a
-// restore of the checkout's own parked work that conflicted. mergeInto adds it only when the merge landed,
+// errMergedWithConflictedRestore is a merge that delivered the work to the target branch,
+// followed by a restore of the checkout's own parked work that conflicted. mergeInto adds it only when the merge landed,
 // which is what MergedDelivered is testing for.
 var errMergedWithConflictedRestore = errors.New("merged, but the parked work came back conflicted")
 
-// MergedDelivered is the Done test for a merge error: the branch reached its target. A conflicted restore
-// of the project's own parked work leaves the project's working copy holding the conflict and does not
-// undo that.
+// MergedDelivered is the Done test for a merge error: the branch reached its target.
+// Conflicted restores of parked work leave the project's working copy conflicted but the merge landed.
 //
-// The merge-conflict resolver must never be pointed at such a task: it answers a conflict by editing the
-// file and running `git add`, which is git's signal that the conflict is resolved, and what is conflicted
-// here is the person's own uncommitted text.
+// The merge-conflict resolver must not be pointed at such a task; it would attempt to resolve
+// the person's own uncommitted text.
 func MergedDelivered(mergeErr error) bool {
 	return mergeErr == nil || errors.Is(mergeErr, errMergedWithConflictedRestore)
 }
 
-// logConflictedRestore is the only announcement that a file was left with conflict markers by a merge that
-// succeeded, so it names the file and where the parked version still is.
+// logConflictedRestore announces a file left with conflict markers by a successful merge.
 func (m *mergeOrchestrator) logConflictedRestore(taskID, targetBranch string, conflict *git.RestoreConflictError) {
 	task, _ := m.store.GetTaskByID(taskID)
 	if task == nil {
@@ -735,9 +724,8 @@ func (m *mergeOrchestrator) logConflictedRestore(taskID, targetBranch string, co
 		targetBranch, strings.Join(conflict.Paths, ", "), git.StashMessageForAutoMerge(taskID)))
 }
 
-// mergeOnTargetBranch checks dir out on targetBranch and merges taskBranch into it, recording the
-// outcome. dir's own work is parked by the caller's stash bracket — nothing here may touch the
-// working tree before the checkout.
+// mergeOnTargetBranch checks out targetBranch and merges taskBranch into it.
+// dir's work is parked by the caller's stash bracket.
 func (m *mergeOrchestrator) mergeOnTargetBranch(projectID, dir, targetBranch, taskBranch, taskID string) error {
 	if err := m.worktreeMgr.GitRunInDir(dir, "checkout", "-f", targetBranch); err != nil {
 		return fmt.Errorf("checkout target branch %s: %w", targetBranch, err)
@@ -773,8 +761,7 @@ func (m *mergeOrchestrator) mergeOnTargetBranch(projectID, dir, targetBranch, ta
 	return nil
 }
 
-// findWorktreeForBranch returns the path of the worktree holding that branch, or "". git refuses to
-// check out a branch a worktree already holds, so a merge into the main checkout needs to know.
+// findWorktreeForBranch returns the path of the worktree holding that branch, or "".
 func (m *mergeOrchestrator) findWorktreeForBranch(projectID, branch string) string {
 	project, err := m.store.GetProject(projectID)
 	if err != nil {
@@ -804,8 +791,7 @@ func (m *mergeOrchestrator) findWorktreeForBranch(projectID, branch string) stri
 	return ""
 }
 
-// currentCheckoutRef returns dir's HEAD as a branch name, or a SHA when detached. "" means
-// unknown, and the merge then leaves the checkout where it ends up.
+// currentCheckoutRef returns dir's HEAD as a branch name or a SHA.
 func currentCheckoutRef(dir string) string {
 	cmd := git.Command(dir, "rev-parse", "--abbrev-ref", "HEAD")
 	out, err := cmd.Output()
@@ -824,11 +810,9 @@ func currentCheckoutRef(dir string) string {
 	return ref
 }
 
-// syncTargetIntoTask merges the target branch into the task's branch, so conflicts surface while
-// the model still has the task's changes in context. It returns nil on a clean merge, on nothing
-// to merge, and on entering merge-conflict state — MergeBranch checks task.HasMergeConflict and
-// skips the final merge then. Every other failure, the stash's included, is returned, so the final
-// merge never runs on a worktree that could not be moved safely.
+// syncTargetIntoTask merges the target branch into the task's branch to surface conflicts
+// while the model has context. Returns nil on clean merge, no changes, or entering merge-conflict state.
+// All other failures are returned.
 func (m *mergeOrchestrator) syncTargetIntoTask(projectID, taskID, targetBranch, taskBranch string, task *types.Task) error {
 	// Serialize against the task's own tool execution.
 	defer m.lockWorktree(taskID)()
@@ -899,8 +883,7 @@ func (m *mergeOrchestrator) syncTargetIntoTask(projectID, taskID, targetBranch, 
 	return syncErr
 }
 
-// conflictResolution is the outcome of commitConflictResolution: everything a caller needs to decide
-// what the task becomes once the conflict is gone.
+// conflictResolution is the outcome of commitConflictResolution, used to decide the task's fate.
 type conflictResolution struct {
 	// task is the task as the store holds it now. Never nil.
 	task *types.Task
@@ -913,21 +896,19 @@ type conflictResolution struct {
 	commitDone bool
 }
 
-// mergeWanted reports whether anything asked for this work to land in the target branch: the
-// task's auto_merge setting, or the user's click.
+// mergeWanted reports if the work should land in the target branch (auto_merge or user click).
 func (r conflictResolution) mergeWanted() bool {
 	return r.commitDone || (r.task != nil && r.task.AutoMerge)
 }
 
-// finishesTask reports whether the resolution delivered what mergeWanted asked for: committed, the work
-// in the target branch, nothing re-conflicted. Otherwise the task goes back to the user.
+// finishesTask reports if the resolution delivered the requested merge: committed,
+// landed in target, and not re-conflicted.
 func (r conflictResolution) finishesTask() bool {
 	return r.committed && r.mergeWanted() && MergedDelivered(r.mergeErr) && r.task != nil && !r.task.HasMergeConflict
 }
 
-// tryResolveMergeConflicts classifies a failed merge in dir: with no conflicted files git finished
-// the merge itself and --continue completes it; anything else is reported by naming the files. A
-// real conflict is aborted, never resolved here.
+// tryResolveMergeConflicts classifies a failed merge in dir. If no conflicted files, it tries
+// merge --continue. Otherwise, it reports the conflict and aborts.
 func (m *mergeOrchestrator) tryResolveMergeConflicts(dir, taskID, targetBranch, taskBranch string, task *types.Task) error {
 	if !isMergeInProgress(dir) {
 		return fmt.Errorf("merge failed but not in merge state (no MERGE_HEAD): %w", ErrNotAMergeConflict)
@@ -964,10 +945,8 @@ func (m *mergeOrchestrator) logMergeComplete(taskID, threadID, taskBranch, targe
 	m.persistAndBroadcastMergeMessage(taskID, threadID, content, "Merged", false)
 }
 
-// persistAndBroadcastMergeMessage creates a merge_resolution message and broadcasts it. A thread of
-// its own is what makes the announcement readable later, so no thread means no message at all.
-// isError marks the frame as a failure; the key is absent otherwise, which is what the client reads
-// as false.
+// persistAndBroadcastMergeMessage creates and broadcasts a merge_resolution message.
+// a thread is required for the message to be recorded.
 func (m *mergeOrchestrator) persistAndBroadcastMergeMessage(taskID, threadID, content, label string, isError bool) {
 	if threadID == "" {
 		return
@@ -1000,9 +979,7 @@ func (m *mergeOrchestrator) persistAndBroadcastMergeMessage(taskID, threadID, co
 	}
 }
 
-// stageResolvedConflicts stages every file whose conflict markers are gone. Nothing recorded as
-// resolved is still a success: the commit below is what records the resolution. The names come
-// from git's own listing, so they follow "--" and cannot be read as options of git add.
+// stageResolvedConflicts stages files whose conflict markers are gone.
 func (m *mergeOrchestrator) stageResolvedConflicts(taskID, worktreePath string) bool {
 	conflictedFiles := GetResolvedConflictedFiles(worktreePath)
 	if len(conflictedFiles) == 0 {
@@ -1016,8 +993,7 @@ func (m *mergeOrchestrator) stageResolvedConflicts(taskID, worktreePath string) 
 	return true
 }
 
-// commitMergeConflictResolution records a resolution as a commit. Both resolution paths commit
-// here so the message and author stay identical.
+// commitMergeConflictResolution records a resolution as a commit.
 func (m *mergeOrchestrator) commitMergeConflictResolution(taskID, worktreePath string) bool {
 	if _, err := git.Run(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...); err != nil {
 		logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("git commit failed: %v", err)
@@ -1026,9 +1002,8 @@ func (m *mergeOrchestrator) commitMergeConflictResolution(taskID, worktreePath s
 	return true
 }
 
-// commitConflictResolution runs the git work every conflict resolution shares: stage, commit,
-// drop the stale stash, clear the flag, attempt the final merge. Callers handle what differs
-// afterwards — inject a prompt, mark done, or fail.
+// commitConflictResolution runs the resolution workflow: stage, commit, drop stash, clear flag,
+// and attempt final merge.
 func (m *mergeOrchestrator) commitConflictResolution(projectID, taskID, worktreePath string, task *types.Task) conflictResolution {
 	// No worktree mutex here: MergeBranch→syncTargetIntoTask takes it and would deadlock.
 	// Safe because the LLM is done and the loop is single-threaded.

@@ -11,8 +11,7 @@ import (
 	"strings"
 )
 
-// A tool declaration is checked where the manifest is stored, so nothing downstream re-checks it. The
-// request's origin must name a configured `url` property, never a host written here.
+// A tool declaration is checked when the manifest is stored. The request origin must be a configured url property, not a hardcoded host.
 
 const (
 	// Every definition is sent with every request to the provider.
@@ -27,7 +26,7 @@ const (
 	maxResponseFields     = 8
 	maxPathLen            = 128
 
-	// Always capped, whatever the manifest asks: the answer costs the model's context.
+	// Capped to protect model context.
 	defaultToolResults      = 10
 	MaxToolResults          = 25
 	defaultToolSnippetChars = 500
@@ -43,14 +42,13 @@ var (
 	placeholderPattern = regexp.MustCompile(`\{\{([^{}]*)\}\}`)
 )
 
-// validateTools runs wherever a manifest is stored — install, update and PUT.
+// validateTools checks manifests during install, update, and PUT.
 func validateTools(caps *Capabilities, schema *ConfigSchema) error {
 	tools := caps.GetTools()
 	if len(tools) == 0 {
 		return nil
 	}
-	// The executor finds these rows by type, so a second executing capability would be stored under one
-	// type and missed by the other's lookup.
+	// Multiple executing capabilities would lead to duplicate storage and lookup misses.
 	if peers := caps.toolPeerNames(); len(peers) > 0 {
 		return fmt.Errorf("capabilities.tools: a tool extension declares %s beside tools — with two executing capabilities the row is stored under one type and the other's lookup misses it. Install them as separate extensions",
 			strings.Join(peers, ", "))
@@ -104,7 +102,7 @@ func (c *Capabilities) toolPeerNames() []string {
 	return peers
 }
 
-// Validate needs the manifest's own schema: a request template can only name a property that exists.
+// Validate ensures request templates only name existing schema properties.
 func (t *ToolConfig) Validate(schema *ConfigSchema) error {
 	if t == nil {
 		return nil
@@ -115,8 +113,7 @@ func (t *ToolConfig) Validate(schema *ConfigSchema) error {
 	if types.IsCoreToolName(t.Name) {
 		return fmt.Errorf("name %q belongs to a core tool — a contributed tool with a core name shadows the one the model would expect to reach", t.Name)
 	}
-	// The mcp_ prefix belongs to registered servers and dispatch routes on it, so a contributed tool
-	// taking it would never be reached.
+	// The mcp_ prefix is reserved for MCP servers.
 	if strings.HasPrefix(t.Name, types.MCPToolNamePrefix) {
 		return fmt.Errorf("name %q starts with %q, which is reserved for tools from a registered MCP server", t.Name, types.MCPToolNamePrefix)
 	}
@@ -229,8 +226,7 @@ func (r ToolResponse) validate() error {
 	return nil
 }
 
-// The manifest may write only what follows the configured origin. A manifest that could write its own
-// host would be choosing the peer its traffic reaches.
+// The manifest may only specify the path following the configured origin to prevent it from choosing its own host.
 func validateURLTemplate(raw string, schema *ConfigSchema, params map[string]bool) error {
 	const where = "request.url"
 	if raw == "" {
@@ -359,7 +355,7 @@ func splitDefault(body string) (name string, hasDefault bool) {
 	return name, true
 }
 
-// A numeric segment addresses an array element, so a nested answer needs no second grammar.
+// Numeric segments address array elements.
 func validateDottedPath(where, path string) error {
 	if strings.TrimSpace(path) == "" {
 		return fmt.Errorf("%s is empty", where)
@@ -375,8 +371,7 @@ func validateDottedPath(where, path string) error {
 	return nil
 }
 
-// A `url` property may not declare a default: a prefilled value that a Save writes back would make
-// registry text the grant.
+// url properties may not have defaults to ensure the address is provided by the user.
 func (s *ConfigSchema) validateURLProperties() error {
 	if s == nil {
 		return nil
@@ -410,8 +405,7 @@ func ValidateConfigValues(schema *ConfigSchema, config map[string]any) error {
 	return nil
 }
 
-// ConfiguredURLOf reads one configured target. A stored value that cannot be used is an error, not a skip:
-// "not configured yet" and "configured wrong" need different answers.
+// ConfiguredURLOf distinguishes between an unset value and an invalid one.
 func ConfiguredURLOf(key string, config map[string]any) (string, error) {
 	raw, ok := config[key]
 	if !ok || raw == nil {
@@ -431,8 +425,7 @@ func ConfiguredURLOf(key string, config map[string]any) (string, error) {
 	return text, nil
 }
 
-// ParseTargetURL reads an address a person typed. The port is explicit, so a stored origin and a typed one
-// compare equal.
+// ParseTargetURL reads a user-provided address and ensures the port is explicit for consistent comparison.
 func ParseTargetURL(raw string) (host, origin string, err error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -475,7 +468,7 @@ func defaultSchemePort(scheme string) string {
 	return "80"
 }
 
-// GrantedURLHosts counts a stored value because a person wrote it; an empty property grants nothing.
+// GrantedURLHosts lists hosts from configured url properties.
 func (s *ConfigSchema) GrantedURLHosts(config map[string]any) []string {
 	if s == nil {
 		return nil
@@ -502,8 +495,7 @@ func (s *ConfigSchema) GrantedURLHosts(config map[string]any) []string {
 	return hosts
 }
 
-// UsableContributedTools re-checks a stored row, which can predate a rule. One
-// broken declaration is left out and named; its siblings keep working.
+// UsableContributedTools filters tools that fail validation, allowing others to continue working.
 func (e *Extension) UsableContributedTools() ([]ToolConfig, error) {
 	if e == nil {
 		return nil, nil

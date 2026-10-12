@@ -12,14 +12,13 @@ import (
 // The MCP registry is one config row holding a JSON array, read the way providers are: the row keeps
 // every secret sealed and the config view hands out none of them.
 
-// EnvRestrictMCP names the operator switch that freezes the registry. This package owns the refusal its
-// sentence prints, so it keeps the name; backend/startup holds the copy the ladder reads, and
-// startup.TestEnvNamesMatchTheirOwners holds the two together.
+// EnvRestrictMCP names the operator switch that freezes the registry. This package owns the refusal
+// sentence; backend/startup holds the copy the ladder reads, and startup.TestEnvNamesMatchTheirOwners
+// holds the two together.
 const EnvRestrictMCP = "MIKE_RESTRICT_MCP"
 
-// ErrMCPLocked refuses every write that would change the registry while the operator holds it, and every
-// Test probe, which dials what a browser typed rather than what is stored. The sentence names the
-// variable and what is still writable, because the person refused is rarely the person who set it.
+// ErrMCPLocked refuses writes that change the registry while frozen, and Test probes that dial
+// user-typed values. The sentence names the variable and what remains writable.
 var ErrMCPLocked = fmt.Errorf(
 	"the MCP registry is frozen by %s: a server cannot be added, edited, removed or tested from Settings, "+
 		"while a project can still enable or disable a server on the list under Project Defaults", EnvRestrictMCP)
@@ -28,11 +27,9 @@ var ErrMCPLocked = fmt.Errorf(
 // other record kind cannot open here.
 const mcpKeyPurpose = "mcp-header"
 
-// mcpServersRow is the config row holding the registry.
 const mcpServersRow = "mcp_servers"
 
-// parseMCPServers reads the stored row. An unreadable row is read as empty and warned about: a missing
-// registry costs only the MCP tools.
+// parseMCPServers warns if the row is unreadable; a missing registry only disables MCP tools.
 func parseMCPServers(raw string) []types.MCPServer {
 	if strings.TrimSpace(raw) == "" {
 		return nil
@@ -61,8 +58,7 @@ func copyMCPServers(src []types.MCPServer) []types.MCPServer {
 	return out
 }
 
-// storedMCPServers is the registry as stored, secrets sealed. Every read-modify-write of the row goes
-// through it, because GetConfig hands out no value and writing its result back would drop one.
+// storedMCPServers is used for read-modify-write to avoid dropping values from GetConfig.
 func (cs *ConfigStore) storedMCPServers() ([]types.MCPServer, error) {
 	snap, err := cs.snapshot()
 	if err != nil {
@@ -71,8 +67,7 @@ func (cs *ConfigStore) storedMCPServers() ([]types.MCPServer, error) {
 	return copyMCPServers(snap.mcpServers), nil
 }
 
-// OpenMCPServers is the registry with every header value opened, for the code that dials a server; it
-// is the only place a stored MCP secret is opened, and it never hands out a masked placeholder.
+// OpenMCPServers is the only place a stored MCP secret is opened; it never hands out placeholders.
 func (cs *ConfigStore) OpenMCPServers() ([]types.MCPServer, error) {
 	servers, err := cs.storedMCPServers()
 	if err != nil {
@@ -99,7 +94,7 @@ func (cs *ConfigStore) OpenMCPServers() ([]types.MCPServer, error) {
 	return servers, nil
 }
 
-// openMCPHeader opens one stored header value; a value that is not sealed reads back as itself.
+// openMCPHeader returns the value as-is if it is not sealed.
 func (cs *ConfigStore) openMCPHeader(serverID, name, sealed string) (string, error) {
 	if cs.box == nil {
 		return "", fmt.Errorf("no encryption key configured")
@@ -117,9 +112,8 @@ func mcpRecord(serverID, name string) string {
 	return serverID + "\x00" + strings.ToLower(name)
 }
 
-// maskMCPServerSecrets replaces every stored header value with the masked placeholder, so Settings can
-// show that a token is set without receiving it. Which headers to mask is read from the stored row,
-// never from the list being masked.
+// maskMCPServerSecrets allows Settings to show a token is set without receiving it. The mask list
+// comes from the stored row, not the list being masked.
 func maskMCPServerSecrets(servers []types.MCPServer, stored []types.MCPServer) {
 	if len(servers) == 0 {
 		return
@@ -144,10 +138,7 @@ func maskMCPServerSecrets(servers []types.MCPServer, stored []types.MCPServer) {
 	}
 }
 
-// prepareMCPServers validates the incoming registry and rewrites it into the shape that gets stored:
-// a new server gets an ID, a header whose value is absent or the masked placeholder keeps what is
-// stored, an empty value drops the header, and anything else is sealed. Nothing is written before
-// every server validates.
+// prepareMCPServers ensures every server is validated and secrets are sealed before writing.
 func (cs *ConfigStore) prepareMCPServers(incoming []types.MCPServer) ([]types.MCPServer, error) {
 	stored, err := cs.storedMCPServers()
 	if err != nil {
@@ -212,9 +203,7 @@ func (cs *ConfigStore) prepareMCPServers(incoming []types.MCPServer) ([]types.MC
 	return out, nil
 }
 
-// mcpRegistryUnchanged reports whether the prepared registry is byte-for-byte what the row already holds.
-// The whole list is compared rather than the request body, because every config save sends the whole list
-// from every tab, and an untouched form round-trips: a masked header copies the stored sealed value.
+// mcpRegistryUnchanged compares the prepared list to the stored row to avoid redundant writes.
 func mcpRegistryUnchanged(prepared, stored []types.MCPServer) (bool, error) {
 	if len(prepared) == 0 && len(stored) == 0 {
 		return true, nil
@@ -231,7 +220,7 @@ func mcpRegistryUnchanged(prepared, stored []types.MCPServer) (bool, error) {
 	return string(now) == string(before), nil
 }
 
-// refuseMCPChange is the fence MIKE_RESTRICT_MCP puts on the registry. It runs before any row is written.
+// refuseMCPChange is the fence MIKE_RESTRICT_MCP puts on the registry.
 func (cs *ConfigStore) refuseMCPChange(prepared []types.MCPServer) error {
 	if !cs.mcpLocked {
 		return nil
@@ -247,8 +236,7 @@ func (cs *ConfigStore) refuseMCPChange(prepared []types.MCPServer) error {
 	return ErrMCPLocked
 }
 
-// validateMCPServers refuses the registry shapes that cannot be dialled safely, naming the field a
-// person has to correct.
+// validateMCPServers refuses shapes that cannot be dialled safely.
 func validateMCPServers(servers []types.MCPServer) error {
 	if len(servers) > types.MaxMCPServers {
 		return fmt.Errorf("too many MCP servers: %d, the most is %d", len(servers), types.MaxMCPServers)

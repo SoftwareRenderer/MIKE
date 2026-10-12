@@ -1,9 +1,7 @@
 // Package fsutil answers one question: is this path inside that root, once
 // symlinks are followed?
 //
-// The fs handlers, the preview handler and the extension mount policy must agree
-// on the answer: a symlink resolves against the host, so comparing strings alone
-// lets a link planted in a project reach outside it.
+// Symlinks resolve against the host; string comparison alone is insufficient to prevent a link from reaching outside a project.
 package fsutil
 
 import (
@@ -14,10 +12,7 @@ import (
 	"strings"
 )
 
-// InsideRoots reports whether an already-resolved path is one of roots or below it. The comparison
-// is lexical, so it is only sound once the candidate has been through ResolveSymlinks() and the roots
-// through NormalizeRoots() — both in the same form. Contained() is what does both halves for a path that
-// has not been resolved.
+// InsideRoots reports whether a resolved path is within the provided roots. Comparison is lexical and requires the path to be processed by ResolveSymlinks() and roots by NormalizeRoots().
 func InsideRoots(resolved string, roots []string) bool { return inside(resolved, roots) }
 
 // RootForms returns a directory in the two forms a candidate path is compared against: absolute and
@@ -58,8 +53,7 @@ func NormalizeRoots(roots []string) []string {
 	return out
 }
 
-// inside reports whether p is one of roots or below it. Empty roots are skipped, so an entry that
-// carried no path cannot open the jail.
+// inside reports whether p is within roots; empty roots are ignored.
 func inside(p string, roots []string) bool {
 	for _, root := range roots {
 		if root == "" {
@@ -75,13 +69,7 @@ func inside(p string, roots []string) bool {
 // ErrOutside says a path is not under any of the roots it was jailed to.
 var ErrOutside = errors.New("path is outside the allowed directory")
 
-// Contained returns the form of path that is safe to open, after requiring both the
-// lexical path and the symlink-resolved path to sit inside one of roots. Roots are
-// compared lexically and resolved, so a root behind a link still works.
-//
-// The resolution is the part that matters: a symlink inside a project resolves
-// against the host, so a string comparison alone reads through a `link -> /etc`
-// planted in a worktree a task can write to.
+// Contained returns a safe-to-open form of the path by requiring both the lexical path and its symlink-resolved form to be within the roots. This prevents symlinks from bypassing containment.
 func Contained(path string, roots []string) (string, error) {
 	clean := filepath.Clean(path)
 	if !inside(clean, roots) {
@@ -104,17 +92,13 @@ func Contained(path string, roots []string) (string, error) {
 	return resolved, nil
 }
 
-// ErrSwapped says the name a containment check accepted no longer names that file. It names no path:
-// a refusal answered from it reaches the requester, and the host path is not theirs.
+// ErrSwapped indicates the file changed after a containment check.
 var ErrSwapped = errors.New("path changed after containment")
 
 // ErrNotRegular says the name holds something other than a file. Opening a FIFO waits for its writer.
 var ErrNotRegular = errors.New("path is not a regular file")
 
-// OpenVerified opens a path Contained() returned and returns the file only while it is still the file
-// that check looked at: the check and the open are two syscalls, and whoever owns the directory can put
-// another file, a link or a FIFO at the name in between. before is the name's os.Lstat() as checked —
-// os.Stat() describes where a link points — and the caller closes the file.
+// OpenVerified opens a path returned by Contained() and verifies it is still the same file to prevent TOCTOU attacks. It ensures the file is not a symlink or a non-regular file.
 func OpenVerified(p string, before os.FileInfo) (*os.File, os.FileInfo, error) {
 	if before == nil {
 		return nil, nil, ErrNotRegular
@@ -152,13 +136,7 @@ func OpenChecked(p string) (*os.File, os.FileInfo, error) {
 	return OpenVerified(p, before)
 }
 
-// ResolveSymlinks resolves every symlink in p. A path that does not exist yet (a
-// write target, a mount not yet created) has its nearest existing ancestor
-// resolved and the missing tail re-joined, so a link on the existing part is
-// still caught.
-//
-// A symlink standing where p itself would be created is an error: writing through
-// it would land wherever the link points.
+// ResolveSymlinks resolves all symlinks in p. For non-existent paths, it resolves the nearest existing ancestor and appends the remaining tail. If the final path would be a symlink, an error is returned to prevent writing through it.
 func ResolveSymlinks(p string) (string, error) {
 	var tail []string
 	cur := filepath.Clean(p)

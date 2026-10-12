@@ -14,20 +14,15 @@ import (
 	"mike/pkg/logging"
 )
 
-// ReadLimit bounds one frame a client sends. The library default of 32 KiB is reachable in
-// ordinary use, and going over it closes the connection rather than refusing the frame, so
-// the browser reconnects, re-sends, and is closed again.
+// ReadLimit is the maximum size of a single frame from a client. If exceeded,
+// the connection is closed.
 const ReadLimit = 1 << 20
 
-// AcceptWS upgrades a WebSocket with the settings every MIKE endpoint shares, so no endpoint
-// hand-rolls its own accept. logTag names the endpoint in the failure log; on ok == false
-// nothing was accepted.
+// AcceptWS upgrades an HTTP connection to a WebSocket using shared settings.
+// logTag is used for logging failures. Returns ok=false if the upgrade failed.
 //
-// The Origin rule is stated here rather than inherited from coder/websocket, which accepts an
-// empty Origin. SameSite=Lax blocks a cross-site request first; this is the second lock on the
-// endpoints that hand out a shell, a workspace's files, or its language servers. A request with
-// no Origin is accepted: only a non-browser client omits it, and that client can set the
-// session cookie by hand anyway.
+// The Origin header is checked to prevent cross-site WebSocket hijacking. Requests
+// with no Origin are accepted, as they typically come from non-browser clients.
 func AcceptWS(w http.ResponseWriter, r *http.Request, logTag string) (conn *websocket.Conn, ok bool) {
 	if origin := r.Header.Get("Origin"); origin != "" && !sameOriginHost(origin, r.Host) {
 		// The operator needs to see the mismatch, not just that something refused.
@@ -47,9 +42,8 @@ func AcceptWS(w http.ResponseWriter, r *http.Request, logTag string) (conn *webs
 	return c, true
 }
 
-// sameOriginHost reports whether an Origin header names the host the request arrived at. The
-// scheme is ignored, the comparison is case-insensitive, and a port counts: "localhost" and
-// "localhost:3000" are different origins.
+// sameOriginHost checks if the Origin header matches the request host. The scheme
+// is ignored, and ports are considered part of the origin.
 func sameOriginHost(origin, host string) bool {
 	u, err := url.Parse(origin)
 	if err != nil || u.Host == "" {
@@ -76,10 +70,8 @@ func splitHostPort(hostport string) (host, port string) {
 	return h, p
 }
 
-// WriteTimeout bounds the delivery of one frame. coder/websocket takes a write deadline only
-// from the context it is handed, so a write without one waits forever on a peer that stopped
-// reading and every writer behind it waits too; an expired deadline also closes the
-// connection, so the error means "this peer is gone".
+// WriteTimeout is the maximum time allowed to deliver a single frame. An
+// expired deadline closes the connection.
 const WriteTimeout = 10 * time.Second
 
 // WriteText writes one text frame under a deadline built from ctx and timeout.
@@ -93,12 +85,12 @@ const (
 	// KeepaliveInterval stays under the 30-60 s idle timeout a proxy or VPN enforces.
 	KeepaliveInterval = 27 * time.Second
 
-	// KeepaliveTimeout bounds one ping so a silent peer cannot wedge the pinger.
+	// KeepaliveTimeout is the maximum time to wait for a pong before considering
+	// the peer dead.
 	KeepaliveTimeout = 10 * time.Second
 
-	// KeepaliveFrame is the app-level ping WithAppFrame sends beside the control ping. Control
-	// frames are invisible to JavaScript, so they never fire onmessage and never reset the
-	// browser's own stale-connection timer. Must stay valid JSON.
+	// KeepaliveFrame is a JSON payload sent as an application-level ping to
+	// ensure the browser's connection timer is reset.
 	KeepaliveFrame = `{"type":"ping"}`
 )
 
@@ -109,22 +101,18 @@ type keepaliveOptions struct {
 	appFrame bool
 }
 
-// WithAppFrame sends KeepaliveFrame after each control ping, for the endpoint whose client measures
-// silence from onmessage. The LSP socket speaks JSON-RPC and the terminal its own message type, so
-// both stay on the control ping alone: a frame neither declared is a foreign message there.
+// WithAppFrame sends an application-level ping (KeepaliveFrame) after each
+// control ping.
 func WithAppFrame() KeepaliveOption {
 	return func(o *keepaliveOptions) { o.appFrame = true }
 }
 
-// Keepalive pings conn until ctx is done, in its own goroutine. A failed ping calls onDead and
-// stops; callers pass the cancel of the context their read loop is blocked on, because Read never
-// returns for a peer that merely stopped talking, and the caller must be reading conn because only
-// Read() delivers a pong.
+// Keepalive pings the connection in a separate goroutine. If a ping fails,
+// onDead is called and the loop stops. The caller must be reading from the
+// connection to process pongs.
 //
-// writeMu holds off the caller's own frames while pinging (nil if nothing else writes). It is taken
-// with TryLock and the ping's deadline built after it, because a lock another writer holds is a
-// frame on its way out — liveness evidence. Queuing instead lets KeepaliveTimeout expire in line,
-// and the library closes the socket for a spent write context that wrote nothing.
+// If writeMu is provided, it is used to prevent concurrent writes. TryLock is
+// used to avoid queuing pings behind slow writes.
 func Keepalive(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, onDead func(), opts ...KeepaliveOption) {
 	keepalive(ctx, conn, KeepaliveInterval, KeepaliveTimeout, writeMu, onDead, opts...)
 }

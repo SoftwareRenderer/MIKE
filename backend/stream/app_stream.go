@@ -28,7 +28,7 @@ import (
 
 var toolCallMarker = []byte(`"event":"tool_call"`)
 
-// toolResultMarker names the frame that reports a tool call's result.
+// toolResultMarker identifies frames reporting tool call results.
 var toolResultMarker = []byte(`"event":"tool_result"`)
 
 func filterInternalPathsFromHashes(hashes map[string]string) map[string]string {
@@ -66,27 +66,23 @@ func filterInternalPathsFromList(paths []string) []string {
 const maxFrameBufferSize = 256 * 1024 // 256KB
 
 const (
-	// DefaultBufferSize and DefaultBufferBytes bound what one task's replay buffer and one
-	// connection's send queue hold, and both apply twice: a frame count bounds nothing on its
-	// own, since a frame may be maxFrameBufferSize long.
+	// DefaultBufferSize and DefaultBufferBytes bound the task replay buffer and connection send queue.
+	// A frame count is a secondary bound because frames can be up to maxFrameBufferSize.
 	DefaultBufferSize  = 5000
 	DefaultBufferBytes = 16 << 20
 
-	// DefaultTaskBufferKeys is how many tasks may hold a replay buffer at once; the oldest
-	// gives way.
+	// DefaultTaskBufferKeys is the maximum number of concurrent task replay buffers.
 	DefaultTaskBufferKeys = 64
 
-	// DefaultMaxConnections bounds live /api/stream sockets. Each costs a read loop, a
-	// pinger, a sender goroutine and a replay buffer.
+	// DefaultMaxConnections bounds live /api/stream sockets.
 	DefaultMaxConnections = 256
 
-	// DefaultMaxTaskSubs and DefaultMaxProjectSubs cap what one connection may ask to be
-	// told about; their keys arrive as text from the client.
+	// DefaultMaxTaskSubs and DefaultMaxProjectSubs limit subscriptions per connection.
 	DefaultMaxTaskSubs    = 1024
 	DefaultMaxProjectSubs = 256
 )
 
-// UserMessage carries a user message with optional model override.
+// UserMessage carries a user message and optional model override.
 type UserMessage struct {
 	Content         string
 	ModelName       string
@@ -101,18 +97,16 @@ type clientState struct {
 	conn       *websocket.Conn
 	projectSub map[string]struct{}
 	taskSub    map[string]struct{}
-	// noRowsTask is the subset of taskSub whose connections declared NoRows; see DurableThrough.
+	// noRowsTask is the subset of taskSub for tasks where the client declared NoRows; see DurableThrough().
 	noRowsTask map[string]struct{}
-	// writeMu separates the two writers of conn: the sender goroutine draining out, and the
-	// keepalive pinger, which takes it with TryLock (httputil.Keepalive).
+	// writeMu synchronizes the sender goroutine and the keepalive pinger (httputil.Keepalive).
 	writeMu sync.Mutex
 	out     *sendQueue
-	// traffic counts what this connection was sent, by frame type, for the disconnect line.
+	// traffic counts frames sent by type, used for disconnect logging.
 	traffic *trafficLedger
 
-	// A project's first-data pass is read by one worker per connection, in the order the
-	// subscriptions arrived. initMu guards the passes waiting to run; initOrder is exactly the
-	// keys of initPending, oldest first.
+	// A project's initial data is fetched by one worker per connection in subscription order.
+	// initMu guards initPending, and initOrder tracks the order.
 	initMu      sync.Mutex
 	initPending map[string]AppStreamSubscription
 	initOrder   []string
@@ -129,15 +123,12 @@ type AppStreamMessage struct {
 type AppStreamSubscription struct {
 	ProjectID string `json:"project_id"`
 	TaskID    string `json:"task_id,omitempty"`
-	// KnownStats declares, per done task, the task updated_at of the diff
-	// stats the client already has cached. When the value matches the
-	// server-side task.UpdatedAt, the initial task_diff_stats frame for that
-	// task is skipped (the client renders from its own cache — the done-task
-	// diff is immutable, so identical updated_at means identical stats).
+	// KnownStats maps done task IDs to their updated_at timestamps. If the server-side
+	// task.UpdatedAt matches, the initial task_diff_stats frame is skipped as the client's
+	// cache is current.
 	KnownStats map[string]string `json:"known_stats,omitempty"`
-	// NoRows declares that this browser has no stored copy of the conversation — its read of the messages
-	// window failed and it cached nothing — so the task's replay buffer is kept whole for it
-	// (DurableThrough). A client drops the claim as soon as a read answers.
+	// NoRows indicates the client has no stored conversation, so the task's replay
+	// buffer is kept whole (DurableThrough()). The client drops this claim after its first successful read.
 	NoRows bool `json:"no_rows,omitempty"`
 }
 
@@ -157,21 +148,20 @@ type AppStreamManager struct {
 	// Event-driven branch watcher — watches .git/HEAD for branch switches
 	branchWatcher *BranchWatcher
 
-	// Per-task ring buffer for reconnect sync.
-	// When a client subscribes to a task, it gets the buffered events so it can
-	// catch up on tokens/tool_calls that were streamed while it was disconnected.
+	// Per-task ring buffer for reconnect sync. When a client subscribes, it receives
+	// buffered events (tokens, tool_calls) missed during disconnection.
 	taskBufMu   sync.Mutex
 	taskBuffers map[string][]taskFrame // task key -> ring buffer
 	taskBufSize int
-	// taskBufLoad is the bytes each key's buffer holds. taskBufOrder is exactly the keys of
-	// taskBuffers, oldest opened first, which is the order they are evicted in.
+	// taskBufLoad is the byte size of each buffer. taskBufOrder tracks the buffers
+	// for eviction (oldest first).
 	taskBufLoad  map[string]int
 	taskBufOrder []string
-	// convRev counts durable conversation writes per task key, guarded by taskBufMu. See ConversationRevision.
+	// convRev counts durable conversation writes per task key; see ConversationRevision().
 	convRev      map[string]uint64
 	taskBufBound int // byte bound on one task's buffer
 	taskBufKeys  int // how many tasks may hold one
-	// queueFrames and queueBytes bound one connection's outbound queue; see sendQueue.
+	// queueFrames and queueBytes bound the connection outbound queue (sendQueue).
 	queueFrames    int
 	queueBytes     int
 	maxConns       int
@@ -181,20 +171,20 @@ type AppStreamManager struct {
 	// Latest-known sandbox memory stats
 	sandboxStatsProvider func(projectID, taskID string) *types.SandboxMemoryStats
 
-	// writeTimeout bounds one frame's delivery to one client; see httputil.WriteTimeout.
+	// writeTimeout bounds a single frame's delivery (httputil.WriteTimeout).
 	writeTimeout time.Duration
 }
 
 type taskFrame struct {
 	data   []byte
 	toolID string
-	// settlesToolID names the call a frame reports the result of. The replay fold matches frames by
-	// toolID, so a result's own id is held apart from it; see sendTaskPayload.
+	// settlesToolID identifies the tool call this frame reports the result of. The
+	// replay fold matches frames by toolID, and a result's ID is held separately.
 	settlesToolID string
 	bucket        string
 }
 
-// NewAppStreamManager creates a new AppStreamManager with filesystem watchers.
+// NewAppStreamManager creates an AppStreamManager with filesystem watchers.
 func NewAppStreamManager(store *store.Store, worktreeMgr *git.WorktreeManager) *AppStreamManager {
 	asm := &AppStreamManager{
 		clients:        make(map[*websocket.Conn]*clientState),
@@ -246,7 +236,7 @@ func (asm *AppStreamManager) UnwatchWorktree(taskID string) {
 	}
 }
 
-// Close stops all watchers and releases resources; it is the whole "websocket watchers" stage.
+// Close stops all watchers and releases resources.
 func (asm *AppStreamManager) Close() {
 	if asm.watcher != nil {
 		asm.watcher.Close()
@@ -261,12 +251,8 @@ func (asm *AppStreamManager) Close() {
 
 // -- Subscription management --
 
-// subscribeProject takes a project for this connection and reports whether the key is newly
-// held. A connection holds a key once: the browser keeps the set of what it subscribed to and
-// sends one unsubscribe per key, so a repeated subscribe frame changes nothing, and a reference
-// count here could only drift upward and leave a project's watchers armed forever. Everything a
-// subscription starts — the watchers below, the initial-data pass, a task buffer replay — runs
-// on the frame that newly takes the key and on no later one.
+// subscribeProject adds a project subscription. It returns true if the subscription is new.
+// A repeated subscription changes nothing, and an unsubscribe must follow to stop watchers.
 func (asm *AppStreamManager) subscribeProject(conn *websocket.Conn, projectID string) bool {
 	asm.mu.Lock()
 	client := asm.clients[conn]
@@ -302,7 +288,7 @@ func (asm *AppStreamManager) subscribeProject(conn *websocket.Conn, projectID st
 	return true
 }
 
-// unsubscribeProject releases the project; see subscribeProject for what a connection holds.
+// unsubscribeProject removes a project subscription.
 func (asm *AppStreamManager) unsubscribeProject(conn *websocket.Conn, projectID string) {
 	asm.mu.Lock()
 	client := asm.clients[conn]
@@ -314,8 +300,7 @@ func (asm *AppStreamManager) unsubscribeProject(conn *websocket.Conn, projectID 
 	asm.releaseProjectWatchers(projectID)
 }
 
-// subscribeTask takes a task for this connection, held once per key exactly as subscribeProject
-// holds a project, and replays only on the frame that newly takes it. noRows: AppStreamSubscription.NoRows.
+// subscribeTask adds a task subscription and replays buffered events if the subscription is new.
 func (asm *AppStreamManager) subscribeTask(conn *websocket.Conn, projectID, taskID string, noRows bool) bool {
 	key := projectID + ":" + taskID
 	asm.mu.Lock()
@@ -517,9 +502,7 @@ func TaskEventPayload(taskID string, event types.StreamEvent) map[string]any {
 // stops looking like a pause and starts looking like a wait someone is deciding about.
 const LockWaitNoticeEvery = 3 * time.Second
 
-// LockWaitNotifier returns the keylock notice that tells a task's clients why they are still waiting and
-// clears it when the lock is taken. The table already logs a slow wait for the operator; this is the half
-// for the person who clicked, so it belongs only on an acquisition a click is waiting on.
+// LockWaitNotifier tells a task's clients why they are still waiting for a lock.
 func (asm *AppStreamManager) LockWaitNotifier(projectID, taskID, domain string) keylock.WaitNotice {
 	return func(waited time.Duration, acquired bool) {
 		asm.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeLockWait, Data: map[string]any{
@@ -534,8 +517,7 @@ func (asm *AppStreamManager) LockWaitNotifier(projectID, taskID, domain string) 
 func (asm *AppStreamManager) SendTaskEvent(projectID, taskID string, event types.StreamEvent) {
 	asm.sendTaskPayload(projectID, taskID, TaskEventPayload(taskID, event))
 
-	// Clear per-task buffer when a streaming turn ends, so reconnecting clients
-	// don't get stale tokens from a previous turn.
+	// Clears the task buffer when a streaming turn ends to prevent stale token replay.
 	switch event.Type {
 	case types.WSTypeStatus:
 		status, ok := event.Data.(types.TurnStatus)
@@ -630,9 +612,8 @@ func (asm *AppStreamManager) BroadcastBranch(projectID, branch string) {
 	}))
 }
 
-// shouldSkipFsEvent reports whether an fs_event for the given path should not be
-// broadcast: internal files (.git, flight recorder), the temporary file an atomic
-// write renames into place, and paths ignored by git.
+// shouldSkipFsEvent reports whether an fs_event for the given path should be dropped (e.g. internal files,
+// atomic temp files, or git-ignored paths).
 func shouldSkipFsEvent(repoRoot, path string) bool {
 	if git.IsInternalFile(path) {
 		return true
@@ -643,9 +624,8 @@ func shouldSkipFsEvent(repoRoot, path string) bool {
 	return git.IsGitIgnored(repoRoot, path)
 }
 
-// BroadcastFsEvent sends an fs_event to all clients of a project. Events for
-// internal files (.git, flight recorder) or paths ignored by .gitignore are
-// dropped — they should not trigger explorer refreshes.
+// BroadcastFsEvent sends an fs_event to all clients of a project. Internal files and
+// git-ignored paths are dropped to avoid unnecessary explorer refreshes.
 func (asm *AppStreamManager) BroadcastFsEvent(projectID, repoRoot, op, path string) {
 	if shouldSkipFsEvent(repoRoot, path) {
 		return
@@ -663,11 +643,8 @@ func (asm *AppStreamManager) SetDiffCacheUpdate(fn func(taskID string, taskDiff 
 	}
 }
 
-// BroadcastDiffStats sends compact diff stats to all clients of a project.
-//
-// Three producers write these keys: here, the per-connection initial load below, and the stored snapshot
-// in done_snapshot.go. All three build them from a git.TaskDiff, so one diff answers one hash
-// (DiffHash) and one has_committed_changes (git.TaskDiff.HasCommittedWork) whichever of them spoke.
+// BroadcastDiffStats broadcasts compact diff stats. Produces frames from live diffs,
+// initial loads, or stored snapshots.
 func (asm *AppStreamManager) BroadcastDiffStats(event DiffStatsEvent) {
 	asm.sendBoardPayload(event.ProjectID, appFrame(types.WSTypeTaskDiffStats, map[string]any{
 		"task_id":               event.TaskID,
@@ -686,9 +663,7 @@ func (asm *AppStreamManager) BroadcastDiffStats(event DiffStatsEvent) {
 	}))
 }
 
-// DiffHash is the hash a task_diff_stats frame carries for a computed diff: the diff, its committed half,
-// the untracked files and the staged state. It takes the whole TaskDiff so no producer picks its own answer
-// to what counts as committed.
+// DiffHash computes a hash of the TaskDiff.
 func DiffHash(d *git.TaskDiff) string {
 	var hashInput strings.Builder
 	hashInput.WriteString(d.Diff)
@@ -702,11 +677,8 @@ func DiffHash(d *git.TaskDiff) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(hashInput.String())))
 }
 
-// BroadcastTaskUpdated sends a task_updated event and project_counts to all clients.
-//
-// The task is typed rather than `any` because the frame's whole contract is "the browser may take this row
-// at face value": with `any`, a caller could hand it a dereferenced row, a DTO, or a map and every one of
-// them marshals into something the client reads as a task.
+// BroadcastTaskUpdated broadcasts a task update. Uses types.Task to ensure the
+// payload matches the client's contract.
 func (asm *AppStreamManager) BroadcastTaskUpdated(projectID string, task *types.Task) {
 	asm.sendBoardPayload(projectID, appFrame(types.WSTypeTaskUpdated, map[string]any{
 		"task": TaskForBrowser(task),
@@ -714,12 +686,10 @@ func (asm *AppStreamManager) BroadcastTaskUpdated(projectID string, task *types.
 	asm.BroadcastProjectCounts()
 }
 
-// BroadcastTaskDeleted sends a task_deleted event and project_counts to all clients.
+// BroadcastTaskDeleted drops the task's replay buffer and broadcasts deletion.
 func (asm *AppStreamManager) BroadcastTaskDeleted(projectID, taskID string) {
-	// Drop the task's replay buffer: a deleted task's frames (tokens, stats,
-	// …) must never be replayed to a late subscriber. The buffer is normally
-	// cleared by terminal status/complete events, but deletion bypasses the
-	// executor lifecycle.
+	// Drop the replay buffer: a deleted task's frames must never be replayed.
+	// Normal lifecycle clears this, but deletion bypasses it.
 	asm.clearTaskBuffer(projectID + ":" + taskID)
 	asm.forgetConversationRevision(projectID, taskID)
 	asm.sendBoardPayload(projectID, appFrame(types.WSTypeTaskDeleted, map[string]any{
@@ -728,9 +698,7 @@ func (asm *AppStreamManager) BroadcastTaskDeleted(projectID, taskID string) {
 	asm.BroadcastProjectCounts()
 }
 
-// SendProjectEvent sends one typed event to every client subscribed to the project. For work that
-// belongs to the project rather than to a task — building its sandbox image while the file explorer
-// waits, where there is no task chat to carry the progress.
+// SendProjectEvent sends a project-level event (e.g. sandbox build progress).
 func (asm *AppStreamManager) SendProjectEvent(projectID string, event types.StreamEvent) {
 	asm.sendBoardPayload(projectID, appFrame(event.Type, map[string]any{
 		"data": event.Data,
@@ -754,9 +722,7 @@ func (asm *AppStreamManager) BroadcastExtensionChange() {
 
 // -- Task replay buffer --
 
-// bufferContentFrames are the buffered events whose content a conversation row carries once the turn has
-// written it, and a trim drops them. Every other event on the task channel is a current value — turn
-// state, token count, queue position — and a trim keeps the newest of each.
+// bufferContentFrames are events that form a conversation row; others are current state values.
 var bufferContentFrames = map[string]bool{
 	string(types.WSTypeToken):         true,
 	string(types.WSTypeReasoning):     true,
@@ -769,9 +735,7 @@ var bufferContentFrames = map[string]bool{
 	string(types.WSTypeError):         true,
 }
 
-// trimTaskBufferToUndurable keeps what the conversation rows cannot answer: every frame of a call with no
-// result row yet, and the newest value of each state event. The window read ends where durability ends and
-// the replay starts there, which is why a mid-turn open is owed seconds of stream rather than the turn.
+// trimTaskBufferToUndurable keeps only undurable events and the latest state values.
 func (asm *AppStreamManager) trimTaskBufferToUndurable(taskKey string) {
 	asm.taskBufMu.Lock()
 	defer asm.taskBufMu.Unlock()
@@ -896,9 +860,7 @@ func (asm *AppStreamManager) bufferTaskLocked(taskKey string, frame []byte, tool
 	asm.taskBufLoad[taskKey] = loaded
 }
 
-// makeRoomForTaskBufferLocked closes the oldest task buffer so an incoming task may open one.
-// Reaching the cap means tasks streamed without a terminal event or a deletion, and the
-// freshest keys are the ones someone may be looking at.
+// makeRoomForTaskBufferLocked evicts the oldest task buffer to make room for a new one.
 func (asm *AppStreamManager) makeRoomForTaskBufferLocked() {
 	if len(asm.taskBufOrder) == 0 || len(asm.taskBufOrder) < asm.taskBufKeys {
 		return
@@ -926,12 +888,7 @@ func extractToolID(frame []byte) string {
 	return data.ToolID
 }
 
-// foldToolCallFrames collapses the frames of one streaming tool call into the single frame a
-// subscriber is owed. The live path sends a call's whole args and then only its growth, and two
-// frames for one call replay as two cards — so the frames are joined where the replay is read, which
-// costs one pass per subscribe rather than one per frame as it is buffered, and keeps the JSON out of
-// the hub lock. A full buffer of one call's deltas measured 26 ms; the same pass over 5000 frames
-// with nothing to join measured 0.9 ms.
+// foldToolCallFrames collapses streaming tool call deltas into a single frame for subscribers.
 //
 // A frame carrying the whole args supersedes what was collected (args only grow), and a delta is
 // appended to the whole held so far. A delta with no whole ahead of it — the head has been trimmed
@@ -994,10 +951,7 @@ func toolCallArgs(frame []byte) map[string]any {
 	return data
 }
 
-// taskBufferFrames is the task's replay buffer as it stands. The caller holds at least asm.mu, so a
-// frame arriving now is either in the copy or about to reach that caller's connection over the socket.
-// The frames are shared, not copied: the buffer only ever appends past what this copy holds or trims
-// from its front, and a fold builds new frames rather than writing into these.
+// taskBufferFrames returns a snapshot of the task's replay buffer.
 func (asm *AppStreamManager) taskBufferFrames(taskKey string) []taskFrame {
 	asm.taskBufMu.Lock()
 	defer asm.taskBufMu.Unlock()
@@ -1026,8 +980,7 @@ func (asm *AppStreamManager) clearTaskBuffer(taskKey string) {
 	asm.dropTaskBufferLocked(taskKey)
 }
 
-// forgetConversationRevision retires a deleted task's count. A key reused by a new task starts at zero, which
-// costs a client one re-read.
+// forgetConversationRevision removes the conversation revision for a deleted task.
 func (asm *AppStreamManager) forgetConversationRevision(projectID, taskID string) {
 	key := projectID + ":" + taskID
 	asm.taskBufMu.Lock()
@@ -1055,10 +1008,7 @@ func (asm *AppStreamManager) computeAlreadyMerged(projectID string, task types.T
 	return asm.worktreeMgr.IsMergedInto(project.Path, task.Branch, targetBranch)
 }
 
-// sendDoneTaskInitialDiff sends a done task's task_diff_stats frame from the
-// persistent snapshot — no per-connection `git diff` runs. When the client
-// declared (via known_stats) that it already has stats for this exact task
-// state, the frame is skipped entirely.
+// sendDoneTaskInitialDiff sends the immutable diff stats for a done task from a stored snapshot.
 func (asm *AppStreamManager) sendDoneTaskInitialDiff(client *clientState, projectID string, task types.Task, sub AppStreamSubscription) {
 	d, err := MaterializeDoneTaskDiff(asm.store, asm.worktreeMgr, projectID, &task)
 	if err != nil || d == nil || !d.HasChanges {
@@ -1090,8 +1040,7 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 	live := len(asm.clients)
 	asm.mu.RUnlock()
 	if live >= asm.maxConns {
-		// Answered before the upgrade, so the browser sees a refusal rather than a connection
-		// it has to work out is dead. This reads a count only: connections arrive during the gap
+		// Refuses connections if the server is at capacity before upgrading to WebSocket. This reads a count only: connections arrive during the gap
 		// before the slot is taken at registration below, so that is the authoritative bound.
 		logging.For(logging.Stream).Warnf("refusing a connection: %d already live (limit %d)", live, asm.maxConns)
 		http.Error(w, "too many live stream connections", http.StatusServiceUnavailable)

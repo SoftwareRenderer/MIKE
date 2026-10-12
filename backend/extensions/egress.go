@@ -47,7 +47,7 @@ var (
 
 const defaultEgressTimeout = 30 * time.Second
 
-// Egress decides what the extension may reach; the route decides who may ask.
+// Egress verifies if an extension may reach the requested host.
 func Egress(ctx context.Context, ext *Extension, req EgressRequest) (*EgressResult, error) {
 	if ext == nil {
 		return nil, fmt.Errorf("%w: no extension", ErrEgressUnusable)
@@ -109,8 +109,8 @@ func Egress(ctx context.Context, ext *Extension, req EgressRequest) (*EgressResu
 	return answer, nil
 }
 
-// The one reading of an answer's status and content type. Both the sentence a tool call appends and the
-// class the probe reports come from it, so they cannot disagree.
+// failureClass reads an answer's status and content type to ensure
+// tool calls and probes report the same failure class.
 func failureClass(result *EgressResult) string {
 	switch {
 	case result == nil:

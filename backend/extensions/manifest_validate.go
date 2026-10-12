@@ -20,8 +20,8 @@ import (
 // Manifest validation: a malformed syntax profile or a duplicated file type is rejected at install
 // time instead of stored and left to degrade silently. Same spirit as mount_policy.go.
 
-// Validate checks an extension's file types and the syntax profiles they name. Run on install,
-// update and PUT, so a bad manifest is never persisted.
+// Validate checks an extension's file types and syntax profiles. A bad manifest
+// is never persisted; it is rejected on install, update and PUT.
 func (c *LSPConfig) Validate() error {
 	if c == nil {
 		return nil
@@ -98,9 +98,9 @@ func (c *LSPConfig) Validate() error {
 // than sorted out where it is applied, and the value is not the manifest's to give anyway.
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// Validate checks a declared dependency location. It checks the *declaration*, never whether
-// some host directory exists: that is the user's setting and the runtime's problem, and a
-// manifest cannot be held to a machine it does not run on.
+// Validate checks a declared dependency location. It checks the *declaration*,
+// never whether some host directory exists: that is the user's setting and the
+// runtime's problem, and a manifest cannot be held to a machine it does not run on.
 func (d *DependencyCache) Validate() error {
 	if d == nil {
 		return nil
@@ -127,9 +127,9 @@ func (d *DependencyCache) Validate() error {
 	return nil
 }
 
-// validateReloadFiles checks the paths that mean "the project changed". They are matched
-// against a workspace-relative changed-file list, so a path that escapes the workspace or names
-// the whole tree would recycle the server on every turn of every project.
+// validateReloadFiles checks the paths that trigger a server recycle. A path that
+// escapes the workspace or names the whole tree would recycle the server on every
+// turn of every project.
 func validateReloadFiles(files []string) error {
 	for _, f := range files {
 		trimmed := strings.TrimSpace(f)
@@ -151,9 +151,9 @@ func validateReloadFiles(files []string) error {
 	return nil
 }
 
-// Validate checks the environment gate: a gate whose check is empty would be stored, run as
-// nothing, and read as "the workspace is fine" forever — which is the silence this whole field
-// exists to prevent.
+// Validate checks the environment gate. A gate whose check is empty would be
+// stored, run as nothing, and read as "the workspace is fine" forever — which is
+// the silence this whole field exists to prevent.
 func (g *EnvironmentGate) Validate() error {
 	if g == nil {
 		return nil
@@ -176,7 +176,8 @@ func (s SyntaxSpec) declaresNames() bool {
 	return (s.CapitalizedTypes != nil && *s.CapitalizedTypes) || (s.CallAsFunction != nil && *s.CallAsFunction)
 }
 
-// Validate checks one syntax profile; the grammar builder cannot guess what a half-declared delimiter meant.
+// Validate checks one syntax profile; the grammar builder cannot guess what a
+// half-declared delimiter meant.
 func (s SyntaxSpec) Validate() error {
 	if s.LineComment == "" && len(s.LineComments) == 0 && s.BlockComment == nil && len(s.Strings) == 0 && len(s.Pairs) == 0 &&
 		len(s.Keywords) == 0 && len(s.Types) == 0 && len(s.Constants) == 0 && len(s.Builtins) == 0 && !s.Numbers && !s.declaresNames() {
@@ -264,8 +265,9 @@ var langSubtag = regexp.MustCompile(`^(?:[a-z]{2,3}|[a-z]{5,8})$`)
 // spelling its path in one of the two ways a browser would follow.
 var externalRef = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.\-]*:`)
 
-// Validate checks the shape of a translation pack's declaration. The files it points at are the
-// caller's business — see validateI18N, which checks both once the pack is on disk.
+// Validate checks a translation pack's declaration shape. The files it points
+// at are the caller's business — see validateI18N, which checks both once the
+// pack is on disk.
 func (c *I18NConfig) Validate() error {
 	if c == nil {
 		return nil
@@ -279,9 +281,9 @@ func (c *I18NConfig) Validate() error {
 	return validateAssetRelPath("capabilities.i18n.prompts_dir", c.PromptsDir, false)
 }
 
-// Validate checks the shape of a css pack's declaration. `css_url` is the one manifest field the
-// browser resolves before any of this package can run: the theme stylesheet is put in a <link> and,
-// because it must be right on the first frame, into the storage the pre-paint script in
+// Validate checks a css pack's declaration shape. `css_url` is the one manifest field the
+// browser resolves before any of this package can run: the theme stylesheet is put in a <link>
+// and, because it must be right on the first frame, into the storage the pre-paint script in
 // index.html reads. The same refusals the i18n paths get apply here for the same reason.
 func (c *CSSConfig) Validate() error {
 	if c == nil {
@@ -290,7 +292,7 @@ func (c *CSSConfig) Validate() error {
 	return validateAssetRelPath("capabilities.css.css_url", c.CSSURL, true)
 }
 
-// validateLocale accepts one bare language subtag and nothing else.
+// validateLocale accepts one bare language subtag.
 //
 // Strict on purpose, and the error says so: "zh-CN" and "zh-TW" are not the same language, and a
 // core that silently truncated a region tag would hand a Traditional-Chinese reader a pack that
@@ -317,10 +319,10 @@ func validateLocale(locale string) error {
 // path into a log line or an error message.
 const maxPackAssetPathLen = 200
 
-// validateAssetRelPath is the containment rule for every path a manifest declares inside its own
-// directory: the i18n catalog, the prompt overlay, a stylesheet. The browser turns each one into a
-// request against this server, so a path that escapes the directory with `..` would be an
-// authenticated read of anything the app serves.
+// validateAssetRelPath is the containment rule for every path a manifest declares
+// inside its own directory: the i18n catalog, the prompt overlay, a stylesheet. The
+// browser turns each one into a request against this server, so a path that escapes
+// the directory with `..` would be an authenticated read of anything the app serves.
 func validateAssetRelPath(where, value string, required bool) error {
 	if value == "" {
 		if required {
@@ -354,9 +356,10 @@ func validateAssetRelPath(where, value string, required bool) error {
 	return nil
 }
 
-// packFilePath resolves a pack-relative path inside the pack's directory and proves the result is
-// still inside it. The lexical check above is the readable error; this is the enforcement, because
-// filepath.Join collapses what a check like the one above refused to see.
+// packFilePath resolves a pack-relative path inside the pack's directory and
+// proves the result is still inside it. The lexical check above is the readable
+// error; this is the enforcement, because filepath.Join collapses what a check
+// like the one above refused to see.
 func packFilePath(packDir, rel string) (string, bool) {
 	rel = strings.TrimSpace(rel)
 	if rel == "" || filepath.IsAbs(rel) || filepath.VolumeName(rel) != "" {
@@ -370,7 +373,8 @@ func packFilePath(packDir, rel string) (string, bool) {
 	return full, true
 }
 
-// validateI18N refuses a manifest whose i18n block cannot be used as declared. Pass extDir "" when nothing was fetched.
+// validateI18N refuses a manifest whose i18n block cannot be used as declared.
+// Pass extDir "" when nothing was fetched.
 func validateI18N(caps *Capabilities, extDir string) error {
 	c := caps.GetI18N()
 	if c == nil {
@@ -437,9 +441,9 @@ var pluralCategories = map[string]bool{
 	"zero": true, "one": true, "two": true, "few": true, "many": true, "other": true,
 }
 
-// validateCatalogValue accepts a translated string or a plural table of them, and refuses
-// everything else with the offending value quoted into the message — the installer shows
-// this string, and "app.title is null" is the diagnosis.
+// validateCatalogValue accepts a translated string or a plural table of them,
+// refusing everything else with the offending value quoted into the message —
+// the installer shows this string, and "app.title is null" is the diagnosis.
 func validateCatalogValue(messagesURL, key string, value json.RawMessage) error {
 	notAString := fmt.Errorf("capabilities.i18n.messages_url %q: %s is %s, not a translated string — every value is a string or a plural table of them, and a null renders as a blank where a label belongs", messagesURL, key, value)
 	if len(value) == 0 {
@@ -462,9 +466,10 @@ func validateCatalogValue(messagesURL, key string, value json.RawMessage) error 
 	return validatePluralForms(messagesURL, key, forms)
 }
 
-// validatePluralForms refuses a table nothing could select a form from: an unknown category
-// is a typo that would never be read, a non-string form is the null problem again, and a
-// table without `other` has no answer for the counts its own language has no name for.
+// validatePluralForms refuses a table from which no form could be selected: an
+// unknown category is a typo that would never be read, a non-string form is the
+// null problem again, and a table without `other` has no answer for the counts
+// its own language has no name for.
 func validatePluralForms(messagesURL, key string, forms map[string]any) error {
 	names := slices.Sorted(maps.Keys(forms))
 	for _, name := range names {
@@ -481,9 +486,10 @@ func validatePluralForms(messagesURL, key string, forms map[string]any) error {
 	return nil
 }
 
-// validateI18NFiles reads what the declaration points at. A catalog that will not parse is not
-// discovered when the interface first paints in another language, and a template that will not
-// compile is not discovered mid-turn: both are refused here, once, at install.
+// validateI18NFiles reads the declared assets. A catalog that will not parse is not
+// discovered when the interface first paints in another language, and a template
+// that will not compile is not discovered mid-turn: both are refused here, once,
+// at install.
 func validateI18NFiles(c *I18NConfig, packDir string) error {
 	msgPath, ok := packFilePath(packDir, c.MessagesURL)
 	if !ok {

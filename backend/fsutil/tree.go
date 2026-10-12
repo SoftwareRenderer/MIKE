@@ -6,11 +6,7 @@ import (
 	"path/filepath"
 )
 
-// walkTree calls visit for path and then, for a directory, for everything below it, under the rules
-// both a copy and an archive follow: a symlink is visited as the link and never read through, an
-// irregular file (socket, fifo, device) is not visited, and a `.git` directory is not entered. out is
-// the entry's name where it lands, joined with outSep — the host's for a copy, a slash for an archive —
-// and an error from visit stops the walk.
+// walkTree calls visit for path and then, for a directory, for everything below it. Symlinks are visited as links, irregular files (sockets, FIFOs, devices) are skipped, and .git directories are not entered. An error from visit stops the walk.
 func walkTree(path, out, outSep string, info fs.FileInfo, visit func(path, out string, info fs.FileInfo) error) error {
 	if !info.Mode().IsRegular() && !info.IsDir() && info.Mode()&fs.ModeSymlink == 0 {
 		return nil

@@ -20,8 +20,7 @@ import (
 	"mike/pkg/logging"
 )
 
-// adapterRegistry holds registered adapter factories. Production loads WASM; tests
-// register mocks through RegisterAdapterFactory.
+// adapterRegistry holds registered adapter factories; tests can use RegisterAdapterFactory to mock.
 var adapterRegistry = struct {
 	sync.RWMutex
 	factories map[string]agent.AdapterFactory
@@ -29,29 +28,23 @@ var adapterRegistry = struct {
 	factories: make(map[string]agent.AdapterFactory),
 }
 
-// RegisterAdapterFactory overrides how the adapter for an extension name is produced. A test seam,
-// not a configuration path: nothing in the server calls it, and a real extension's adapter is
-// always its own WASM module. It lives outside _test.go so another package's test can register the
-// fake — backend/exec holds the test that a sandboxed task probes the binary its adapter named.
+// RegisterAdapterFactory overrides adapter factory for tests; not for production config.
 func RegisterAdapterFactory(name string, fn agent.AdapterFactory) {
 	adapterRegistry.Lock()
 	defer adapterRegistry.Unlock()
 	adapterRegistry.factories[name] = fn
 }
 
-// wasmAdapter wraps a wazero-loaded WASI reactor module behind the AgentAdapter interface.
+// wasmAdapter wraps a wazero WASI reactor module.
 //
-// Memory model (the wazero tinygo/greet.go pattern):
+// Memory model:
 //
-//	Host → WASM: Alloc(size), write the bytes there, pass (offset, size) as a `string`
+//	Host → WASM: Alloc(size), write bytes, pass (offset, size) as a `string`
 //	  parameter. Alloc → Write → Call → Free.
-//	WASM → host: the module calls the host-imported store_result(data string), which reads
-//	  the string out of linear memory and delivers it on resultCh — safe because that
-//	  callback fires synchronously, before fn.Call returns.
+//	WASM → host: the module calls host-imported store_result(data string), which reads
+//	  the string and delivers it on resultCh — synchronous, before fn.Call returns.
 //
-// Every exported call must be serialized under mu: the module, its bump allocator and the
-// size-1 resultCh are not concurrency-safe, and AgentRunner.readOutput calls ParseOutput
-// *without* holding r.mu.
+// serialized under mu: module, allocator and resultCh are not concurrency-safe.
 type wasmAdapter struct {
 	mu       sync.Mutex
 	runtime  wazero.Runtime
@@ -60,8 +53,7 @@ type wasmAdapter struct {
 	resultCh chan []byte // receives results from store_result host callback
 }
 
-// LoadAdapter loads an AgentAdapter for the given extension.
-// It first checks for a registered factory (test mocks), then falls back to WASM.
+// LoadAdapter loads AgentAdapter from factory (tests) or WASM.
 func LoadAdapter(ext *extensions.Extension) (agent.AgentAdapter, error) {
 	adapterRegistry.RLock()
 	factory, ok := adapterRegistry.factories[ext.Name]
@@ -73,10 +65,7 @@ func LoadAdapter(ext *extensions.Extension) (agent.AgentAdapter, error) {
 	return loadWasmAdapter(ext)
 }
 
-// loadWasmAdapter loads and instantiates a WASI reactor module.
-// The module is built with -buildmode=c-shared which produces _initialize
-// instead of _start. The host calls _initialize to set up the Go runtime,
-// then calls exported functions.
+// loadWasmAdapter instantiates a WASI reactor module using -buildmode=c-shared.
 func loadWasmAdapter(ext *extensions.Extension) (agent.AgentAdapter, error) {
 	if ext.Manifest.Capabilities.GetAgent() == nil || ext.Manifest.Capabilities.GetAgent().WasmModule == "" {
 		return nil, fmt.Errorf("extension %q has no wasm_module configured", ext.Name)
@@ -95,7 +84,6 @@ func loadWasmAdapter(ext *extensions.Extension) (agent.AgentAdapter, error) {
 			WithMemoryCapacityFromMax(true), // Size memory to the module's declared max, not just initial
 	)
 
-	// Register WASI imports.
 	if _, err := wasi_snapshot_preview1.Instantiate(ctx, runtime); err != nil {
 		runtime.Close(ctx)
 		return nil, fmt.Errorf("inject wasi: %w", err)
@@ -107,8 +95,6 @@ func loadWasmAdapter(ext *extensions.Extension) (agent.AgentAdapter, error) {
 		return nil, fmt.Errorf("compile wasm module: %w", err)
 	}
 
-	// Register host callback: env.store_result
-	// Called by the WASM module to pass results back to the host.
 	resultCh := make(chan []byte, 1)
 	_, err = runtime.NewHostModuleBuilder("env").
 		NewFunctionBuilder().
@@ -133,7 +119,6 @@ func loadWasmAdapter(ext *extensions.Extension) (agent.AgentAdapter, error) {
 		return nil, fmt.Errorf("instantiate env host module: %w", err)
 	}
 
-	// Use _initialize to init Go runtime (reactor mode, -buildmode=c-shared).
 	config := wazero.NewModuleConfig().
 		WithStartFunctions("_initialize").
 		WithStderr(os.Stderr)
@@ -158,7 +143,6 @@ func loadWasmAdapter(ext *extensions.Extension) (agent.AgentAdapter, error) {
 	}, nil
 }
 
-// resolveWasmPath finds the WASM module file for an extension.
 func resolveWasmPath(ext *extensions.Extension) string {
 	wasmModule := ext.Manifest.Capabilities.GetAgent().WasmModule
 
@@ -177,9 +161,7 @@ func resolveWasmPath(ext *extensions.Extension) string {
 	return candidates[len(candidates)-1]
 }
 
-// allocString allocates WASM linear memory via the module's Alloc function,
-// writes data there, and returns the offset. The caller must free it via
-// freeString when done.
+// allocString allocates WASM linear memory and writes data; must be freed.
 func (a *wasmAdapter) allocString(data []byte) (int32, error) {
 	if len(data) == 0 {
 		return 0, nil
@@ -202,7 +184,6 @@ func (a *wasmAdapter) allocString(data []byte) (int32, error) {
 	return ptr, nil
 }
 
-// freeString frees WASM memory allocated by allocString via the module's Free function.
 func (a *wasmAdapter) freeString(ptr int32) {
 	freeFn := a.module.ExportedFunction(agent.WasmFnFree)
 	if freeFn != nil {
@@ -210,18 +191,14 @@ func (a *wasmAdapter) freeString(ptr int32) {
 	}
 }
 
-// callFnStrings calls an exported WASM function with several string parameters: each is
-// allocated with the module's Alloc, written to linear memory, then passed as (ptr, len).
-// The result arrives through store_result (see readResult); ctx cancels fn.Call and the wait
-// for it. Callers must hold mu - see wasmAdapter.
+// callFnStrings calls exported WASM function with string parameters; requires mu.
 func (a *wasmAdapter) callFnStrings(ctx context.Context, name string, strs ...string) ([]byte, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.callFnStringsLocked(ctx, name, strs...)
 }
 
-// callFnStringsLocked is for callers already holding a.mu (e.g. Init); callFnStrings there re-enters
-// the lock.
+// callFnStringsLocked is callFnStrings without locking.
 func (a *wasmAdapter) callFnStringsLocked(ctx context.Context, name string, strs ...string) ([]byte, error) {
 	fn := a.module.ExportedFunction(name)
 	if fn == nil {
@@ -250,10 +227,7 @@ func (a *wasmAdapter) callFnStringsLocked(ctx context.Context, name string, strs
 	}()
 
 	if _, err := fn.Call(ctx, args...); err != nil {
-		// Drain any leftover result from the store_result callback that may have
-		// been sent before the error. Without this, resultCh (capacity 1) stays
-		// full and the next callFnStrings invocation deadlocks when store_result
-		// blocks on the full channel.
+		// drain resultCh to prevent deadlock on next call.
 		select {
 		case <-a.resultCh:
 		default:
@@ -264,10 +238,7 @@ func (a *wasmAdapter) callFnStringsLocked(ctx context.Context, name string, strs
 	return a.readResult(ctx)
 }
 
-// readResult blocks until the store_result host callback delivers data or ctx is cancelled.
-// Safe because store_result is called synchronously by the WASM runtime during fn.Call:
-// the callback fires before fn.Call returns. If the module never calls it, ctx.Done() is
-// the way out.
+// readResult blocks until store_result delivers data or ctx is cancelled.
 func (a *wasmAdapter) readResult(ctx context.Context) ([]byte, error) {
 	select {
 	case data := <-a.resultCh:
@@ -277,11 +248,7 @@ func (a *wasmAdapter) readResult(ctx context.Context) ([]byte, error) {
 	}
 }
 
-// Init initializes the adapter with config JSON.
-// Init returns int32 (0=success, 1=error) directly — not via store_result.
-// The config is passed as a single string parameter: the host calls Alloc,
-// writes the config, then passes (ptr, len) to the Init function.
-// ctx is used for cancellation during initialization and the validation call.
+// Init initializes adapter with config JSON; returns error if init or validation fails.
 func (a *wasmAdapter) Init(ctx context.Context, config []byte) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -291,7 +258,6 @@ func (a *wasmAdapter) Init(ctx context.Context, config []byte) error {
 		return fmt.Errorf("function %s not exported", agent.WasmFnInit)
 	}
 
-	// Alloc + write the config string (even empty, passes (0,0) as empty string).
 	ptr, err := a.allocString(config)
 	if err != nil {
 		return err
@@ -306,10 +272,6 @@ func (a *wasmAdapter) Init(ctx context.Context, config []byte) error {
 		return fmt.Errorf("adapter init returned error")
 	}
 
-	// Validate adapter is functional by checking SubprocessConfig returns data.
-	// This catches stale WASM binaries or Init implementations that return 0
-	// but leave the adapter in an unusable state. Call callFnStringsLocked
-	// directly since we already hold a.mu.
 	cfgData, err := a.callFnStringsLocked(ctx, agent.WasmFnSubprocessConfig)
 	if err != nil {
 		return fmt.Errorf("validate SubprocessConfig: %w", err)
@@ -325,7 +287,6 @@ func (a *wasmAdapter) Init(ctx context.Context, config []byte) error {
 	return nil
 }
 
-// SubprocessConfig returns the agent process configuration from the adapter.
 func (a *wasmAdapter) SubprocessConfig(ctx context.Context) agent.SubprocessConfig {
 	data, err := a.callFnStrings(ctx, agent.WasmFnSubprocessConfig)
 	if err != nil || len(data) == 0 {
@@ -340,7 +301,6 @@ func (a *wasmAdapter) SubprocessConfig(ctx context.Context) agent.SubprocessConf
 	return cfg
 }
 
-// EncodeCommand encodes a high-level command into protocol bytes.
 func (a *wasmAdapter) EncodeCommand(ctx context.Context, cmd string, data []byte) []byte {
 	result, err := a.callFnStrings(ctx, agent.WasmFnEncodeCommand, cmd, string(data))
 	if err != nil {
@@ -350,7 +310,6 @@ func (a *wasmAdapter) EncodeCommand(ctx context.Context, cmd string, data []byte
 	return result
 }
 
-// ParseOutput parses raw agent stdout bytes into events.
 func (a *wasmAdapter) ParseOutput(ctx context.Context, data []byte) []agent.Event {
 	result, err := a.callFnStrings(ctx, agent.WasmFnParseOutput, string(data))
 	if err != nil || len(result) == 0 {
@@ -365,7 +324,6 @@ func (a *wasmAdapter) ParseOutput(ctx context.Context, data []byte) []agent.Even
 	return events
 }
 
-// HandleUIRequest generates a response for an agent UI request.
 func (a *wasmAdapter) HandleUIRequest(ctx context.Context, id, method string) []byte {
 	result, err := a.callFnStrings(ctx, agent.WasmFnHandleUIRequest, id, method)
 	if err != nil {
@@ -375,8 +333,7 @@ func (a *wasmAdapter) HandleUIRequest(ctx context.Context, id, method string) []
 	return result
 }
 
-// Close releases the wazero runtime and calls the WASM adapter's Close function.
-// The mutex prevents Close from racing with concurrent callFnStrings/Init calls.
+// Close releases wazero runtime and calls WASM Close; requires mu.
 func (a *wasmAdapter) Close() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -393,9 +350,7 @@ func (a *wasmAdapter) Close() {
 	}
 }
 
-// ListModels returns the list of models available from the agent.
-// It runs the agent binary with "--list-models" flag and parses the tabular output.
-// This is implemented natively (not via WASM) because it requires subprocess execution.
+// ListModels returns models by running binary with --list-models; implemented natively.
 func (a *wasmAdapter) ListModels(ctx context.Context) []agent.AgentModel {
 	cfg := a.SubprocessConfig(ctx)
 	if cfg.Binary == "" {
@@ -404,7 +359,6 @@ func (a *wasmAdapter) ListModels(ctx context.Context) []agent.AgentModel {
 	}
 
 	cmd := exec.CommandContext(ctx, cfg.Binary, "--list-models")
-	// Same rule as the agent runner: the allowlisted environment only (see SafeAgentEnv).
 	cmd.Env = SafeAgentEnv(cfg.Env...)
 	output, err := cmd.Output()
 	if err != nil {
@@ -433,7 +387,7 @@ func (a *wasmAdapter) ListModels(ctx context.Context) []agent.AgentModel {
 	return models
 }
 
-// parseContextWindow parses context window strings like "256K", "196.6K", "1M" into integers.
+// parseContextWindow parses context window strings (e.g. 256K, 1M).
 func parseContextWindow(s string) (int, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {

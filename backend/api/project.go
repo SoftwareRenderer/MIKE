@@ -35,24 +35,18 @@ type ProjectHandler struct {
 	sandboxMgr  projectSandboxOps
 	executor    *exec.TaskExecutor
 	tasks       taskTreeDeleter
-	// hostRoot is the jail the file endpoints use, injected so "which directories did the
-	// operator declare" has one answer. A nil policy fails closed: nothing is inside a jail
-	// with no roots.
+	// jail for file endpoints; nil policy fails closed.
 	hostRoot *fsutil.HostRoot
-	// dangerZone is the resolved DANGER_ZONE grant, injected for the same reason as hostRoot: it
-	// decides whether an unsandboxed project may be created at all, and a project created and a
-	// project switched must consult one answer.
+	// resolved DANGER_ZONE grant.
 	dangerZone sandbox.DangerZone
 }
 
-// projectSandboxOps is the sandbox work a project owns rather than a task. These are the only two
-// methods ProjectHandler calls, so a test can check that the containers were stopped.
+// projectSandboxOps is the sandbox operations owned by the project.
 type projectSandboxOps interface {
 	BuildImageWithOptions(projectName, dockerfilePath string, opts sandbox.BuildOptions, onProgress func(line string)) error
 	StopProjectContainers(projectID string, taskIDs []string)
 }
 
-// ProjectDeps is what a ProjectHandler is wired with.
 type ProjectDeps struct {
 	Store       *store.Store
 	ConfigStore *config.ConfigStore
@@ -139,10 +133,7 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	httputil.JSONResponse(w, code, p)
 }
 
-// checkHostPath is the project side of the host jail: a request path must be inside $HOME plus
-// the declared directories unless MIKE_ALLOW_ROOT_FS=1 widened it. It answers nil when the
-// caller's own checks describe the failure better (a missing path is a 400, not a 403), and for
-// an empty path, which is a setting left at its default.
+// checkHostPath checks if path is inside the host jail.
 func (h *ProjectHandler) checkHostPath(path string) error {
 	if strings.TrimSpace(path) == "" || h.hostRoot.Unrestricted() {
 		return nil
@@ -153,9 +144,7 @@ func (h *ProjectHandler) checkHostPath(path string) error {
 	return nil
 }
 
-// prepareCloneTarget validates the clone source URL and resolves the clone
-// target directory (<path>/<repo-name>) inside the existing parent dir
-// req.Path. Returns the target path, or an error describing what is wrong.
+// prepareCloneTarget resolves clone target directory inside parent dir.
 func (h *ProjectHandler) prepareCloneTarget(req types.CreateProjectRequest) (string, error) {
 	if err := git.ValidateCloneURL(req.GitURL); err != nil {
 		return "", err
@@ -168,7 +157,6 @@ func (h *ProjectHandler) prepareCloneTarget(req types.CreateProjectRequest) (str
 	if err != nil {
 		return "", err
 	}
-	// Validate the target parent exists and is a directory.
 	info, err := os.Stat(req.Path)
 	if err != nil {
 		return "", fmt.Errorf("clone target parent does not exist: %w", err)
@@ -183,10 +171,7 @@ func (h *ProjectHandler) prepareCloneTarget(req types.CreateProjectRequest) (str
 	return targetPath, nil
 }
 
-// createProjectFromRequest validates that req.Path is an existing git
-// repository directory and persists the new project. On success it returns
-// the project and http.StatusCreated; on failure it returns nil with the
-// HTTP status code and a client-facing message.
+// createProjectFromRequest validates path as git repo and persists the project.
 func (h *ProjectHandler) createProjectFromRequest(req types.CreateProjectRequest) (*types.Project, int, string) {
 	req.Path = strings.TrimSpace(req.Path)
 	if req.Path == "" {
@@ -248,7 +233,6 @@ func (h *ProjectHandler) createProjectFromRequest(req types.CreateProjectRequest
 		return nil, http.StatusForbidden, "sandbox_dockerfile_path: " + err.Error()
 	}
 
-	// Collect existing project IDs to avoid collisions
 	existingIDs := []string{}
 	projects, _ := h.store.ListProjects()
 	for _, p := range projects {
@@ -298,16 +282,7 @@ func (h *ProjectHandler) createProjectFromRequest(req types.CreateProjectRequest
 	return p, http.StatusCreated, ""
 }
 
-// HandleClone streams a git clone with live progress over SSE, then creates the project from
-// the cloned directory. Body: CreateProjectRequest with Path = the clone-into parent directory
-// and GitURL = the repository to clone (both required).
-//
-// Each "data:" frame is one JSON object:
-//
-//	{"type":"status","message":"..."}  — informational
-//	{"type":"progress","percent":42}   — clone progress (0-100)
-//	{"type":"done","project":{...}}    — success, project created
-//	{"type":"error","message":"..."}   — failure, no project created
+// HandleClone streams git clone over SSE and creates the project.
 func (h *ProjectHandler) HandleClone(w http.ResponseWriter, r *http.Request) {
 	var req types.CreateProjectRequest
 	if !httputil.DecodeJSON(w, r, &req) {
@@ -412,8 +387,7 @@ func findModelConfig(p types.Provider, modelName string) *types.ModelConfig {
 	return nil
 }
 
-// applyPricing computes cost per model: per-model overrides win, provider values fall back.
-// Agent providers report their own cost directly.
+// applyPricing computes cost per model; overrides win, provider values fall back.
 func (h *ProjectHandler) applyPricing(stats *types.ProjectStats) {
 	cfg, err := h.configStore.GetConfig()
 	if err != nil {
@@ -474,8 +448,7 @@ func (h *ProjectHandler) applyPricing(stats *types.ProjectStats) {
 	}
 }
 
-// buildWantsNoCache reports whether a build request asked to skip the layer
-// cache. Absent or unparsable values mean "use the cache".
+// buildWantsNoCache checks if build request skips layer cache.
 func buildWantsNoCache(r *http.Request) bool {
 	v := r.URL.Query().Get("no_cache")
 	if v == "" {
@@ -488,9 +461,7 @@ func buildWantsNoCache(r *http.Request) bool {
 	return noCache
 }
 
-// HandleSandboxBuild builds a container image from the project's Dockerfile.
-// Streams build progress as SSE and returns final JSON result.
-// ?no_cache=1 skips the layer cache for this build only.
+// HandleSandboxBuild builds container image from Dockerfile; streams progress over SSE.
 func (h *ProjectHandler) HandleSandboxBuild(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("projectID")
 	noCache := buildWantsNoCache(r)
@@ -694,10 +665,7 @@ func (h *ProjectHandler) handleUpdateProject(w http.ResponseWriter, r *http.Requ
 	httputil.JSONResponse(w, http.StatusOK, p)
 }
 
-// applySandboxFields writes the sandbox fields the request provided, one store statement each. Every value
-// was validated by the caller before the first write, so a failure here is the store refusing, not the
-// caller: each returns an operation-classified fault naming the field, which the transport answers as a
-// server fault with the store's error in the log — none of these logged anything before.
+// applySandboxFields writes sandbox fields to store.
 func (h *ProjectHandler) applySandboxFields(id string, req types.UpdateProjectRequest, forwardPorts []types.PortForward) error {
 	if req.SandboxEnabled != nil {
 		if updateErr := h.store.UpdateProjectSandboxEnabled(id, *req.SandboxEnabled); updateErr != nil {
@@ -751,9 +719,7 @@ func (h *ProjectHandler) applySandboxFields(id string, req types.UpdateProjectRe
 	return nil
 }
 
-// stopProjectSandbox stops a project's own sandbox container and its terminal sessions. Both are
-// needed: that container is keyed "proj:"+projectID, and a file-browser listing creates it with no
-// task and no terminal open, so closing sessions alone leaves it running on the project's checkout.
+// stopProjectSandbox stops project's sandbox container and terminal sessions.
 func (h *ProjectHandler) stopProjectSandbox(projectID string) {
 	tasks, _ := h.store.GetTasksByProject(projectID)
 	taskIDs := make([]string, 0, len(tasks))
@@ -768,9 +734,7 @@ func (h *ProjectHandler) stopProjectSandbox(projectID string) {
 	}
 }
 
-// handleDeleteProject deletes a project by deleting its tasks, so each task's executor, sandbox
-// container and uploaded files go before its row does. Nothing removes a container once its task row is
-// gone: the startup sweep skips containers that are running.
+// handleDeleteProject deletes project by tearing down tasks, then project resources.
 func (h *ProjectHandler) handleDeleteProject(w http.ResponseWriter, id string) {
 	tasks, err := h.store.GetTasksByProject(id)
 	if err != nil {
@@ -799,8 +763,7 @@ func (h *ProjectHandler) handleDeleteProject(w http.ResponseWriter, id string) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// rootTaskIDs returns the tasks whose deletion covers the whole set. Deleting a task deletes its
-// subtree, and parent_task_id is a foreign key, so every parent is a row in the same list.
+// rootTaskIDs returns root tasks for deletion.
 func rootTaskIDs(tasks []types.Task) []string {
 	var roots []string
 	for _, t := range tasks {
@@ -811,8 +774,7 @@ func rootTaskIDs(tasks []types.Task) []string {
 	return roots
 }
 
-// repoNameFromGitURL extracts the repository name from a git URL.
-// Supports HTTPS (https://host/user/repo.git) and SSH (git@host:user/repo.git) forms.
+// repoNameFromGitURL extracts repository name from git URL.
 func repoNameFromGitURL(gitURL string) (string, error) {
 	s := strings.TrimSpace(gitURL)
 	if s == "" {
@@ -832,9 +794,7 @@ func repoNameFromGitURL(gitURL string) (string, error) {
 	return base, nil
 }
 
-// generateProjectID derives a project ID from path: its base name when that is a safe project
-// name, otherwise its slug. The slug can come back empty — a path with no letters or digits — so
-// the caller checks the answer.
+// generateProjectID derives project ID from path.
 func generateProjectID(path string, existingIDs []string) string {
 	base := filepath.Base(filepath.Clean(path))
 	// Slugging the whole path keeps colliding basenames distinguishable.

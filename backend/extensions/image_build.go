@@ -24,7 +24,7 @@ const (
 	// extensionBuildContextBridge is the in-context path extension Dockerfiles COPY — a
 	// contract with published extensions, not a layout choice.
 	extensionBuildContextBridge = "sandbox/sandbox-bridge"
-	// extensionBuildContextDirPrefix prefixes the temp directory holding the context.
+	// extensionBuildContextDirPrefix identifies temp directories holding the build context.
 	extensionBuildContextDirPrefix = "kanban-ext-build-"
 )
 
@@ -33,11 +33,12 @@ func buildExtensionImageArgs(imageRef, contextDir string) []string {
 	return []string{"build", "-t", imageRef, "-f", filepath.Join(contextDir, "Dockerfile"), contextDir}
 }
 
-// BuildExtensionImage builds an extension's image from a Dockerfile's text and tags it imageRef.
+// BuildExtensionImage builds an extension's image from Dockerfile text and tags it imageRef.
 //
-// No context is taken, on purpose: install and update run detached from the request so they finish
-// after the client disconnects (see streamOperation). The bound that matters is here - the process
-// carries PodmanWaitDelay, so a wedged build cannot hold its output pipes past shutdown.
+// No context is taken, on purpose: install and update run detached from the request
+// so they finish after the client disconnects (see streamOperation). The bound that
+// matters is here - the process carries PodmanWaitDelay, so a wedged build cannot
+// hold its output pipes past shutdown.
 func (rc *RegistryClient) BuildExtensionImage(dockerfileContent, imageRef string) error {
 	if err := sandboxruntime.ValidateImageRef(imageRef); err != nil {
 		return err
@@ -75,11 +76,11 @@ func (rc *RegistryClient) BuildExtensionImage(dockerfileContent, imageRef string
 	return nil
 }
 
-// extensionBridgeBinary finds the bridge to stage. It is the same binary Create later copies to
-// /sandbox-bridge, so a built image is never newer than the server that ran the build.
+// extensionBridgeBinary finds the bridge to stage. A built image is never newer than
+// the server that ran the build because this binary is copied into the image.
 //
-// Resolved up front because otherwise a missing bridge fails inside buildah as a glob error naming a
-// temp directory nobody is looking at.
+// Resolved up front because otherwise a missing bridge fails inside buildah as a
+// glob error naming a temp directory nobody is looking at.
 func (rc *RegistryClient) extensionBridgeBinary() (string, error) {
 	p, err := rc.rt.GetAgentBinaryPath()
 	if err != nil {
@@ -99,9 +100,10 @@ func (rc *RegistryClient) extensionBridgeBinary() (string, error) {
 	return abs, nil
 }
 
-// stageExtensionBuildContext writes the two files the build needs: the Dockerfile, and the bridge at
-// extensionBuildContextBridge. It writes no .dockerignore - there is nothing here to protect, and an
-// ignore rule meant for one build deciding another's inputs is what broke every language server.
+// stageExtensionBuildContext writes the Dockerfile and the bridge to the context.
+// It writes no .dockerignore - there is nothing here to protect, and an ignore
+// rule meant for one build deciding another's inputs is what broke every
+// language server.
 func stageExtensionBuildContext(contextDir, dockerfileContent, bridgePath string) error {
 	if err := os.WriteFile(filepath.Join(contextDir, "Dockerfile"), []byte(dockerfileContent), 0o644); err != nil {
 		return fmt.Errorf("write Dockerfile: %w", err)

@@ -50,12 +50,9 @@ func (s *Server) pairAtBoot(ctx context.Context) {
 	}
 }
 
-// bootPairingHost is the hostname the printed URL points at: the first Host the operator pinned, because
-// that is the name their browser will already be allowed to use, and otherwise the listen address with
-// every spelling of "this machine" replaced by the one that can carry a credential. A wildcard or a bare
-// address names no host a passkey can be bound to, and 127.0.0.1 is a secure context that no browser will
-// accept as a relying-party id, so both resolve to localhost rather than to a URL that refuses the very
-// ceremony it was printed for.
+// bootPairingHost determines the hostname for the pairing URL. It prefers the first allowed host since
+// that name is already pinned. Otherwise, it uses the listen address, but resolves wildcards, bare IPs,
+// and loopback addresses to localhost, because browsers refuse these as relying-party IDs for Passkeys.
 func (s *Server) bootPairingHost() string {
 	for _, host := range s.settings.AllowedHosts {
 		if host = strings.TrimSpace(host); host != "" {

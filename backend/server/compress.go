@@ -44,7 +44,7 @@ func etagMatches(etag, ifNoneMatch string) bool {
 	return false
 }
 
-// compressionLevel maps encoding name to its preference rank (lower = preferred).
+// encodingPriority maps encoding name to its preference rank (lower = preferred).
 var encodingPriority = map[string]int{
 	"br":      1,
 	"gzip":    2,

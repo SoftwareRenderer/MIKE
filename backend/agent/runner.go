@@ -1,7 +1,7 @@
-// Package agent runs agent-type extensions (Pi and the like) as subprocesses.
-// A WASM adapter loaded through wazero translates the agent's protocol; this package owns
-// the subprocess, its stdin/stdout bridge and the model listing. Subprocesses get
-// SafeAgentEnv, never os.Environ(), so an extension binary cannot read the server's secrets.
+// Package agent runs agent-type extensions as subprocesses.
+// A WASM adapter translates the agent's protocol; this package owns
+// the subprocess, its stdin/stdout bridge and the model listing.
+// Subprocesses get SafeAgentEnv to prevent leaking server secrets.
 package agent
 
 import (
@@ -20,8 +20,7 @@ import (
 	"mike/pkg/logging"
 )
 
-// AgentRunner manages an agent adapter (WASM) and its subprocess.
-// The adapter owns all protocol logic; the runner is a pure I/O bridge.
+// AgentRunner manages an agent adapter and its subprocess; acts as I/O bridge.
 //
 // Data flow:
 //
@@ -34,13 +33,10 @@ type AgentRunner struct {
 	cmd     *exec.Cmd
 	mu      sync.Mutex
 	closed  bool
-	// sendMu guards eventChan against close-while-sending: Close() may tear the
-	// channels down while the reader goroutine is mid-dispatch. channelsClosed is set
-	// under the write lock, so a send that observed false is still in flight under the
-	// read lock and cannot race the close.
+	// guards eventChan against close-while-sending.
 	sendMu         sync.RWMutex
 	channelsClosed bool
-	// closeOnce makes channel teardown idempotent — see closeChannels.
+	// makes channel teardown idempotent.
 	closeOnce   sync.Once
 	eventChan   chan pkgagent.Event
 	statsChan   chan pkgagent.SessionStatsData
@@ -61,7 +57,6 @@ type AgentRunner struct {
 	sessionFile string
 }
 
-// RunnerConfig holds runtime configuration passed to the adapter.
 type RunnerConfig struct {
 	ExtensionName string                  `json:"extension_name"`
 	SessionName   string                  `json:"session_name"`
@@ -82,9 +77,6 @@ type RunnerDeps struct {
 	SandboxEnabled bool
 }
 
-// NewAgentRunner prepares the adapter, then starts its process. A caller that must know the
-// binary before anything is spawned takes PrepareAgent and Start instead: the name lives only in
-// the adapter.
 func NewAgentRunner(ctx context.Context, deps RunnerDeps) (*AgentRunner, error) {
 	prepared, err := PrepareAgent(ctx, deps)
 	if err != nil {
@@ -93,10 +85,7 @@ func NewAgentRunner(ctx context.Context, deps RunnerDeps) (*AgentRunner, error) 
 	return prepared.Start(deps.SandboxMgr, deps.TaskID)
 }
 
-// Prepared is a loaded, initialized adapter that has said which process it runs, with that
-// process not started. Splitting construction here is what lets a sandboxed task's pre-flight ask
-// the container about the binary the adapter named — the backend knows nothing about agent
-// protocols and must not guess a name.
+// Prepared initialized adapter not yet started; allows pre-flight binary check.
 type Prepared struct {
 	adapter      pkgagent.AgentAdapter
 	spCfg        pkgagent.SubprocessConfig
@@ -104,8 +93,7 @@ type Prepared struct {
 	sandbox      bool
 }
 
-// PrepareAgent loads, initializes and resolves the adapter's subprocess config. An adapter that
-// cannot name a binary is refused here, before any process exists.
+// PrepareAgent initializes adapter and resolves subprocess config; refuses empty binary.
 func PrepareAgent(ctx context.Context, deps RunnerDeps) (*Prepared, error) {
 	ext, worktreePath, sessionName, sandboxEnabled := deps.Ext, deps.WorktreePath, deps.SessionName, deps.SandboxEnabled
 	cfg := RunnerConfig{
@@ -116,8 +104,7 @@ func PrepareAgent(ctx context.Context, deps RunnerDeps) (*Prepared, error) {
 		Config:        ext.Config,
 		AgentManifest: ext.Manifest.Capabilities.GetAgent(),
 	}
-	// {{property}} references become config_schema defaults, so the adapter gets values and not
-	// template strings.
+	// resolve config templates.
 	if cfg.AgentManifest != nil {
 		resolved := *cfg.AgentManifest
 		resolved.Sandbox = cfg.AgentManifest.ResolveSandboxTemplates(ext.Manifest.ConfigSchema)
@@ -151,14 +138,10 @@ func PrepareAgent(ctx context.Context, deps RunnerDeps) (*Prepared, error) {
 	}, nil
 }
 
-// Binary is the executable the adapter named, verbatim.
 func (p *Prepared) Binary() string { return p.spCfg.Binary }
 
-// Close releases the adapter of a preparation whose process was never started.
 func (p *Prepared) Close() { p.adapter.Close() }
 
-// Start spawns the agent process the adapter described and begins streaming its events. The
-// adapter is closed on failure and owned by the runner otherwise.
 func (p *Prepared) Start(sandboxMgr *sandbox.SandboxManager, taskID string) (*AgentRunner, error) {
 	if p.sandbox && sandboxMgr == nil {
 		return nil, fmt.Errorf("agent %q is configured to run in a sandbox container, which needs a sandbox manager", p.spCfg.Binary)
@@ -173,7 +156,7 @@ func (p *Prepared) Start(sandboxMgr *sandbox.SandboxManager, taskID string) (*Ag
 		done:         make(chan struct{}),
 	}
 
-	// Spawn the agent subprocess
+	// start subprocess.
 	if p.sandbox {
 		ph, err := sandboxMgr.StartProcess(taskID, p.spCfg.Binary, p.spCfg.Args)
 		if err != nil {
@@ -184,12 +167,10 @@ func (p *Prepared) Start(sandboxMgr *sandbox.SandboxManager, taskID string) (*Ag
 		r.stdin = ph.Stdin
 		r.stdout = ph.Stdout
 	} else {
-		// Host mode needs nothing agent-specific: the adapter's SubprocessConfig already carries the
-		// config-dir env vars it derived from the extension's sandbox_mount declaration.
+		// host mode: use SafeAgentEnv.
 		cmd := exec.Command(p.spCfg.Binary, p.spCfg.Args...)
 		cmd.Dir = p.worktreePath
-		// Never hand the agent the server's own environment: it would expose
-		// MIKE_ENCRYPTION_KEY to an extension-supplied binary.
+		// prevent leaking server secrets.
 		cmd.Env = SafeAgentEnv(p.spCfg.Env...)
 
 		stdin, err := cmd.StdinPipe()
@@ -217,9 +198,8 @@ func (p *Prepared) Start(sandboxMgr *sandbox.SandboxManager, taskID string) (*Ag
 		r.stdout = stdout
 	}
 
-	// Start stdout reader goroutine
-	// readCtx is cancelled when the runner closes (r.done closed), providing
-	// cancellation for ParseOutput and HandleUIRequest calls in the reader.
+	// start stdout reader.
+	// readCtx cancelled on runner close.
 	readCtx, readCancel := context.WithCancel(context.Background())
 	go func() {
 		<-r.done
@@ -231,7 +211,6 @@ func (p *Prepared) Start(sandboxMgr *sandbox.SandboxManager, taskID string) (*Ag
 	return r, nil
 }
 
-// Prompt sends a user message to the agent.
 func (r *AgentRunner) Prompt(ctx context.Context, message string, behavior ...string) error {
 	data := map[string]any{"message": message}
 	if len(behavior) > 0 && behavior[0] != "" {
@@ -253,12 +232,10 @@ func (r *AgentRunner) Prompt(ctx context.Context, message string, behavior ...st
 	return err
 }
 
-// EventChan returns the channel for receiving agent events.
 func (r *AgentRunner) EventChan() <-chan pkgagent.Event {
 	return r.eventChan
 }
 
-// Compact sends a compact command and waits for the result.
 func (r *AgentRunner) Compact(ctx context.Context) (*pkgagent.CompactResult, error) {
 	r.mu.Lock()
 	if !r.closed {
@@ -279,7 +256,6 @@ func (r *AgentRunner) Compact(ctx context.Context) (*pkgagent.CompactResult, err
 	}
 }
 
-// QueryStats sends a session stats query and waits for the response.
 func (r *AgentRunner) QueryStats(ctx context.Context) pkgagent.SessionStatsData {
 	r.mu.Lock()
 	if !r.closed {
@@ -323,8 +299,6 @@ func (r *AgentRunner) QueryModel(ctx context.Context) string {
 	return r.ModelName()
 }
 
-// SetModel sends a set_model command to the agent and waits for the model to update.
-// Returns immediately if the runner is closed or context is cancelled.
 func (r *AgentRunner) SetModel(ctx context.Context, modelName string) {
 	r.mu.Lock()
 	if r.closed {
@@ -352,8 +326,7 @@ func (r *AgentRunner) SetModel(ctx context.Context, modelName string) {
 	}
 }
 
-// SwitchSession sends a switch_session command to load a Pi session file.
-// Returns true if the command was sent successfully.
+// SwitchSession loads Pi session file.
 func (r *AgentRunner) SwitchSession(ctx context.Context, sessionPath string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -369,14 +342,14 @@ func (r *AgentRunner) SwitchSession(ctx context.Context, sessionPath string) boo
 	return err == nil
 }
 
-// SessionFile returns the session file path discovered via get_state.
+// SessionFile returns session file from get_state.
 func (r *AgentRunner) SessionFile() string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.sessionFile
 }
 
-// ModelName returns the agent model name discovered via get_state.
+// ModelName returns model name from get_state.
 func (r *AgentRunner) ModelName() string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -386,16 +359,14 @@ func (r *AgentRunner) ModelName() string {
 	return r.modelName
 }
 
-// ProviderName returns the agent provider name discovered from persist entries.
+// ProviderName returns provider name from persist entries.
 func (r *AgentRunner) ProviderName() string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.providerName
 }
 
-// LastStats returns the last known session stats. Prefer sessionCost
-// (accumulated from message_end + persist entries) over lastStats.Cost
-// because get_session_stats may return NaN/null cost (Pi agent bug).
+// LastStats returns last known session stats; prefer sessionCost.
 func (r *AgentRunner) LastStats() pkgagent.SessionStatsData {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -406,15 +377,13 @@ func (r *AgentRunner) LastStats() pkgagent.SessionStatsData {
 	return s
 }
 
-// SessionCost returns the accumulated cost from persist entries.
-// This is a reliable fallback when get_session_stats returns NaN/null cost.
+// SessionCost returns accumulated cost from persist entries.
 func (r *AgentRunner) SessionCost() float64 {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.sessionCost
 }
 
-// PID returns the agent subprocess PID.
 func (r *AgentRunner) PID() int {
 	if r.cmd == nil || r.cmd.Process == nil {
 		return -1
@@ -422,7 +391,6 @@ func (r *AgentRunner) PID() int {
 	return r.cmd.Process.Pid
 }
 
-// Close gracefully shuts down the agent runner.
 func (r *AgentRunner) Close() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -431,7 +399,7 @@ func (r *AgentRunner) Close() {
 	}
 	r.closed = true
 
-	// Send abort command (best-effort) with a short timeout context
+	// best-effort abort.
 	if r.stdin != nil {
 		abortCtx, abortCancel := context.WithTimeout(context.Background(), 2*time.Second)
 		bytes := r.adapter.EncodeCommand(abortCtx, pkgagent.CommandAbort, nil)
@@ -442,7 +410,7 @@ func (r *AgentRunner) Close() {
 		r.stdin.Close()
 	}
 
-	// Wait for process exit with timeout
+	// wait for exit or kill.
 	if r.cmd != nil && r.cmd.Process != nil {
 		done := make(chan error, 1)
 		go func() { done <- r.cmd.Wait() }()
@@ -465,9 +433,7 @@ func (r *AgentRunner) Close() {
 	r.closeChannels()
 }
 
-// closeChannels tears down the outbound channels exactly once, whichever path gets there
-// first: Close() or readOutput's defer. Testing a flag before closing is not atomic - two
-// teardowns can both pass and close the same channel twice, which panics the process.
+// closeChannels performs idempotent channel teardown.
 func (r *AgentRunner) closeChannels() {
 	r.closeOnce.Do(func() {
 		r.sendMu.Lock()
@@ -478,13 +444,8 @@ func (r *AgentRunner) closeChannels() {
 	})
 }
 
-// readOutput reads raw bytes from agent stdout and feeds them to the adapter.
-// ctx is cancelled when the runner closes, providing cancellation for ParseOutput
-// and HandleUIRequest calls.
 func (r *AgentRunner) readOutput(ctx context.Context) {
-	// The process exited (or stdout was closed): no more events will be produced, so
-	// release the outbound channels. Close() may have done it already — closeChannels
-	// is a no-op in that case.
+	// close channels on exit.
 	defer r.closeChannels()
 
 	buf := make([]byte, 32*1024)
@@ -505,14 +466,11 @@ func (r *AgentRunner) readOutput(ctx context.Context) {
 	}
 }
 
-// dispatchEvent routes events to the appropriate channel.
-// ctx is used for cancellation of HandleUIRequest calls.
 func (r *AgentRunner) dispatchEvent(ctx context.Context, event pkgagent.Event) {
-	// Route stats to dedicated channel
+	// route stats.
 	if event.Type == pkgagent.EventTypeStats {
 		r.mu.Lock()
-		// Merge stats: use full snapshot from get_session_stats, or accumulate
-		// per-message cost from message_end events.
+		// merge session stats.
 		if event.Stats.ContextWindow > 0 {
 			r.lastStats = event.Stats
 			// Also accumulate the cost from get_session_stats
@@ -532,7 +490,7 @@ func (r *AgentRunner) dispatchEvent(ctx context.Context, event pkgagent.Event) {
 		return
 	}
 
-	// Route compact responses to dedicated channel
+	// route compaction results.
 	if event.RawData != nil {
 		if cmd, ok := event.RawData["command"].(string); ok && cmd == "compact" {
 			result := &pkgagent.CompactResult{}
@@ -568,7 +526,7 @@ func (r *AgentRunner) dispatchEvent(ctx context.Context, event pkgagent.Event) {
 		}
 	}
 
-	// Route UI requests through adapter
+	// route UI requests.
 	if event.Type == pkgagent.EventTypeStatus && event.RawData != nil {
 		if method, ok := event.RawData["ui_request_method"].(string); ok && method != "" {
 			if uiID, ok := event.RawData["ui_request_id"].(string); ok {
@@ -583,7 +541,7 @@ func (r *AgentRunner) dispatchEvent(ctx context.Context, event pkgagent.Event) {
 			}
 		}
 
-		// Update model name if provided
+		// update model name.
 		if modelName, ok := event.RawData["model_name"].(string); ok && modelName != "" {
 			r.mu.Lock()
 			r.modelName = modelName
@@ -593,7 +551,7 @@ func (r *AgentRunner) dispatchEvent(ctx context.Context, event pkgagent.Event) {
 			default:
 			}
 		}
-		// Update session file path if provided
+		// update session file path.
 		if sessionFile, ok := event.RawData["session_file"].(string); ok && sessionFile != "" {
 			r.mu.Lock()
 			r.sessionFile = sessionFile
@@ -601,7 +559,7 @@ func (r *AgentRunner) dispatchEvent(ctx context.Context, event pkgagent.Event) {
 		}
 	}
 
-	// Capture provider name and accumulate cost from persist entries
+	// capture provider name and cost.
 	if event.Type == pkgagent.EventTypePersist && len(event.PersistEntries) > 0 {
 		var turnCost float64
 		for _, entry := range event.PersistEntries {
@@ -617,9 +575,7 @@ func (r *AgentRunner) dispatchEvent(ctx context.Context, event pkgagent.Event) {
 		}
 	}
 
-	// Send to main event channel (non-blocking). The read lock spans the send itself:
-	// closeChannels needs the write lock, so an in-flight send can never hit a closed
-	// channel. Non-blocking is what makes holding the lock here safe.
+	// send to event channel.
 	r.sendMu.RLock()
 	if !r.channelsClosed {
 		select {

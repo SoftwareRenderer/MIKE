@@ -41,13 +41,12 @@ type TaskHandler struct {
 	sandboxMgr     taskSandboxOps
 }
 
-// taskSandboxOps is the subset of sandbox.SandboxManager methods used for port refresh.
+// taskSandboxOps is the sandbox operations used for port refresh.
 type taskSandboxOps interface {
 	GetContainerPorts(taskID string) ([]types.AssignedPort, error)
 }
 
-// TaskDeps is what a TaskHandler is wired with. Four of these are legitimately nil on an unsandboxed
-// server.
+// TaskDeps is the dependencies for TaskHandler.
 type TaskDeps struct {
 	Store       *store.Store
 	BoardStream *stream.AppStreamManager
@@ -73,7 +72,7 @@ func NewTaskHandler(deps TaskDeps) *TaskHandler {
 	}
 }
 
-// refreshTaskPorts updates AssignedPorts from the live sandbox container.
+// refreshTaskPorts updates AssignedPorts from the sandbox container.
 func (h *TaskHandler) refreshTaskPorts(task *types.Task) {
 	if h.sandboxMgr == nil {
 		return
@@ -84,8 +83,7 @@ func (h *TaskHandler) refreshTaskPorts(task *types.Task) {
 	}
 }
 
-// EnrichWorktreeExists sets the WorktreeExists field on tasks based on filesystem state.
-// It uses the workspace_dir from config to build the worktree path.
+// EnrichWorktreeExists sets WorktreeExists field based on filesystem state.
 func EnrichWorktreeExists(tasks []types.Task, workspaceDir string) {
 	for i := range tasks {
 		path := filepath.Join(workspaceDir, tasks[i].ProjectID, tasks[i].ID)
@@ -94,7 +92,7 @@ func EnrichWorktreeExists(tasks []types.Task, workspaceDir string) {
 	}
 }
 
-// enrichTaskWorktree sets the WorktreeExists field on a single task.
+// enrichTaskWorktree sets WorktreeExists for one task.
 func enrichTaskWorktree(task *types.Task, workspaceDir string) {
 	path := filepath.Join(workspaceDir, task.ProjectID, task.ID)
 	_, err := os.Stat(path)
@@ -114,7 +112,6 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		if h.configStore != nil {
 			EnrichWorktreeExists(tasks, h.configStore.WorkspaceDir())
 		}
-		// Refresh assigned ports from live sandbox containers
 		for i := range tasks {
 			h.refreshTaskPorts(&tasks[i])
 		}
@@ -154,7 +151,6 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 			httputil.JSONError(w, http.StatusBadRequest, "plan_mode is not a task field: send operating_mode (act, plan or explore)")
 			return
 		}
-		// The id in the body is dropped: CreateTask mints the row's id.
 		task.ID = ""
 		task.ProjectID = projectID
 		// The sandbox layer records these as a container is removed; a body cannot produce them.
@@ -172,14 +168,12 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		}
 		if h.configStore != nil {
 			if cfg, err := h.configStore.GetConfig(); err == nil {
-				// Build skip set for fields explicitly sent by the client
 				skipFields := make(map[string]struct{})
 				for _, k := range []string{"auto_commit", "auto_merge", "subtasks_auto_merge"} {
 					if rawBody.has(k) {
 						skipFields[k] = struct{}{}
 					}
 				}
-				// Apply config defaults + parent inheritance for auto-merge fields
 				var parentTask *types.Task
 				if task.ParentTaskID != "" {
 					parentTask, _ = h.store.GetTask(projectID, task.ParentTaskID)
@@ -191,9 +185,6 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 						task.OperatingMode = *cfg.DefaultOperatingMode
 					}
 				}
-				// Default to act if nothing set it: the zero OperatingMode is "", which is
-				// not a mode, and an empty mode gets the act tool set by fall-through while
-				// reading as "unset" everywhere else.
 				if task.OperatingMode == "" {
 					task.OperatingMode = types.ModeAct
 				}
@@ -202,27 +193,22 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		// Validate parent_task_id if provided
 		if task.ParentTaskID != "" {
 			parent, err := h.store.GetTask(projectID, task.ParentTaskID)
 			if err != nil {
 				httputil.JSONError(w, http.StatusBadRequest, "parent task not found")
 				return
 			}
-			// Prevent self-reference (won't happen for new tasks, but guard anyway)
 			if task.ParentTaskID == task.ID {
 				httputil.JSONError(w, http.StatusBadRequest, "task cannot be its own parent")
 				return
 			}
-			// Any task may have subtasks; the parent's status picks the child's column.
 			task.Status = types.SubtaskStatusFor(parent.Status)
 			if task.Status == types.StatusInProgress {
-				// Pending: created, not started. The user starts it.
 				task.ExecutionState = types.ExecStateIdle
 			}
 		}
 		types.ClearSubtaskBaseBranch(&task)
-		// If the first line is short (≤5 words), use it as the title directly
 		if isShortTitle(task.Prompt) {
 			task.TitleGenerating = false
 		} else {
@@ -232,7 +218,6 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 			httputil.Fail(w, err, "create task", "project not found")
 			return
 		}
-		// CreateThread mints the thread's ID into mainThread.
 		mainThread := &types.TaskThread{
 			TaskID:    task.ID,
 			Name:      "Main",
@@ -249,7 +234,6 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 			httputil.Fail(w, err, "update task", "task not found")
 			return
 		}
-		// Store the task prompt as the first user message in the conversation
 		if task.Prompt != "" {
 			tm := &types.TaskMessage{
 				ID:        uuid.New().String(),
@@ -264,8 +248,6 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 			}
 			_ = h.store.CreateTaskMessage(tm)
 		}
-		// Spawn async goroutine to generate a better title via LLM
-		// (skip if first line was already a short, good-enough title)
 		if task.TitleGenerating {
 			h.startTitleGeneration(projectID, task.ID, task.Prompt)
 		}
@@ -376,8 +358,7 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// HandleSync answers the digest a window asks when it comes back; `syncDigest` builds the body. The answer must
-// not be kept, and the handler sets no ETag so CompressMiddleware can supply one.
+// HandleSync returns a digest of task state for synchronization.
 func (h *TaskHandler) HandleSync(w http.ResponseWriter, r *http.Request) {
 	if err := types.ValidateTaskID(r.PathValue("taskID")); err != nil {
 		httputil.JSONError(w, http.StatusBadRequest, err.Error())
@@ -558,10 +539,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
-// moveAllDescendantsToInProgress recursively moves all descendant tasks (children, grandchildren, etc.)
-// to in_progress/idle. Tasks in backlog or in_progress (not running/failed) are moved.
-//
-// allowed Pending: the work is in these children, not in the parent's own turn.
+// moveAllDescendantsToInProgress recursively moves descendants to in_progress/idle.
 func (h *TaskHandler) moveAllDescendantsToInProgress(taskID string) {
 	descendants, err := h.store.GetAllDescendants(taskID)
 	if err != nil {
@@ -583,9 +561,7 @@ func (h *TaskHandler) moveAllDescendantsToInProgress(taskID string) {
 	}
 }
 
-// moveAllDescendants recursively moves all descendant tasks (children, grandchildren, etc.)
-// to the target status. Skips descendants that are already running (e.g., just auto-started).
-// Processes in reverse order (leaves first) to ensure child tasks are moved before their parents.
+// moveAllDescendants recursively moves descendants to target status, leaves first.
 func (h *TaskHandler) moveAllDescendants(projectID, taskID string, targetStatus types.Status) {
 	descendants, err := h.store.GetAllDescendants(taskID)
 	if err != nil {
@@ -633,8 +609,7 @@ func (h *TaskHandler) moveAllDescendants(projectID, taskID string, targetStatus 
 	}
 }
 
-// unfinishedDescendants counts the descendants of a task that are not done, so Clear
-// Done can leave a finished parent whose subtree still holds live work.
+// unfinishedDescendants counts descendants not yet done.
 func (h *TaskHandler) unfinishedDescendants(taskID string) int {
 	descendants, err := h.store.GetAllDescendants(taskID)
 	if err != nil {
@@ -651,8 +626,7 @@ func (h *TaskHandler) unfinishedDescendants(taskID string) int {
 	return n
 }
 
-// checkAncestorInProgress walks up the ancestor chain and returns an error
-// if any ancestor (parent, grandparent, etc.) has status "in_progress".
+// checkAncestorInProgress checks if any ancestor is In Progress.
 func (h *TaskHandler) checkAncestorInProgress(task *types.Task) error {
 	visited := make(map[string]struct{})
 	currentID := task.ParentTaskID
@@ -673,8 +647,7 @@ func (h *TaskHandler) checkAncestorInProgress(task *types.Task) error {
 	return nil
 }
 
-// propagateSubtasksAutoMerge recursively sets auto_merge on all descendant tasks
-// to match the parent's subtasks_auto_merge setting (enable or disable).
+// propagateSubtasksAutoMerge recursively sets auto_merge on descendants.
 func (h *TaskHandler) propagateSubtasksAutoMerge(projectID, taskID string, enabled bool) {
 	descendants, err := h.store.GetAllDescendants(taskID)
 	if err != nil {
@@ -699,10 +672,7 @@ func (h *TaskHandler) propagateSubtasksAutoMerge(projectID, taskID string, enabl
 	}
 }
 
-// resolveGitAuthor returns the effective git author name/email.
-// Priority: env var override > project git config > defaults.
-// resolveGitAuthor returns the author a commit-and-done commit is signed with: env vars
-// win, then the project checkout's own git config.
+// resolveGitAuthor returns effective git author identity.
 func resolveGitAuthor(projectID string, s interface {
 	GetProject(id string) (*types.Project, error)
 }) (string, string) {
@@ -737,8 +707,7 @@ func resolveGitAuthor(projectID string, s interface {
 	return name, email
 }
 
-// HandleCommitPreviewStream streams the commit message generation via SSE.
-// Events: "metadata" (author/merge info), "prompt_progress", "token", "done".
+// HandleCommitPreviewStream streams commit message generation via SSE.
 func (h *TaskHandler) HandleCommitPreviewStream(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
@@ -765,10 +734,7 @@ func (h *TaskHandler) HandleCommitPreviewStream(w http.ResponseWriter, r *http.R
 	h.executor.StreamCommitMessage(sse, taskID, task)
 }
 
-// HandleCommitAndDone commits the worktree changes, merges into the origin branch, and moves the task to Done.
-// Operations are serialized per project to prevent git race conditions.
-// handConflictToAgent is what the click does with a conflict instead of refusing it: flag the
-// task, arm the click so the resolving turn finishes it, and hand the conflicted files to the model.
+// handConflictToAgent handles merge conflicts by flagging the task and triggering the LLM.
 func (h *TaskHandler) handConflictToAgent(w http.ResponseWriter, projectID, taskID string, task *types.Task) {
 	if h.executor != nil {
 		h.executor.ArmCommitAndDone(taskID)
@@ -842,6 +808,7 @@ func (h *TaskHandler) handConflictToAgent(w http.ResponseWriter, projectID, task
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
+// HandleCommitAndDone commits work, merges to origin, and marks task Done.
 func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
@@ -978,15 +945,12 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
-// taskTreeDeleter is the normal task-delete path, handed to the project handler so a project's
-// deletion is its tasks' deletions.
+// taskTreeDeleter is the interface for task tree deletion.
 type taskTreeDeleter interface {
 	deleteTaskTrees(projectID string, taskIDs ...string)
 }
 
-// deleteTaskTrees is the whole of deleting a task: the deleted-events, the teardown of each task in the
-// subtree, then one prune and one board broadcast for the batch. Every task deletion goes through here,
-// so a caller cannot report a deletion without carrying out its teardown.
+// deleteTaskTrees deletes task and its subtree, then prunes orphans.
 func (h *TaskHandler) deleteTaskTrees(projectID string, taskIDs ...string) {
 	for _, taskID := range taskIDs {
 		// Read before anything is deleted: the descendants go with their root by CASCADE, so a list
@@ -1003,7 +967,7 @@ func (h *TaskHandler) deleteTaskTrees(projectID string, taskIDs ...string) {
 	h.boardStreamMgr.Broadcast(projectID)
 }
 
-// broadcastTaskDeleted sends a task_deleted event for the given task and all its descendants.
+// broadcastTaskDeleted broadcasts task_deleted event for task and descendants.
 func (h *TaskHandler) broadcastTaskDeleted(projectID, taskID string, descendants []types.Task) {
 	for _, d := range descendants {
 		h.boardStreamMgr.BroadcastTaskDeleted(projectID, d.ID)
@@ -1011,7 +975,7 @@ func (h *TaskHandler) broadcastTaskDeleted(projectID, taskID string, descendants
 	h.boardStreamMgr.BroadcastTaskDeleted(projectID, taskID)
 }
 
-// cleanupTask tears down a deleted task and the descendants the caller read beforehand.
+// cleanupTask tears down a task and its descendants.
 func (h *TaskHandler) cleanupTask(taskID string, descendants []types.Task) {
 	// Reverse of the depth-first order: subtasks before their parent.
 	for i := len(descendants) - 1; i >= 0; i-- {
@@ -1020,7 +984,7 @@ func (h *TaskHandler) cleanupTask(taskID string, descendants []types.Task) {
 	h.cleanupSingleTask(taskID)
 }
 
-// cleanupSingleTask performs cleanup for a single task (no recursion).
+// cleanupSingleTask cleans up a single task.
 func (h *TaskHandler) cleanupSingleTask(taskID string) {
 	if h.executor != nil {
 		_ = h.executor.StopTask(taskID)
@@ -1076,9 +1040,7 @@ func (h *TaskHandler) cleanupSingleTask(taskID string) {
 	}
 }
 
-// startTitleGeneration spawns a goroutine that uses the LLM to generate
-// a concise title for the task. On success, it updates the task title.
-// On failure or timeout, it keeps the existing (first-line) title.
+// startTitleGeneration spawns goroutine to generate task title via LLM.
 func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -1167,7 +1129,7 @@ func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
 	}()
 }
 
-// finishTitleGeneration sets title_generating to false without changing the title.
+// finishTitleGeneration sets title_generating to false.
 func (h *TaskHandler) finishTitleGeneration(projectID, taskID string) {
 	task, err := h.store.GetTask(projectID, taskID)
 	if err != nil {
@@ -1185,9 +1147,7 @@ func (h *TaskHandler) finishTitleGeneration(projectID, taskID string) {
 	}
 }
 
-// HandleInit creates the worktree and branch for a task without starting LLM execution.
-// This enables the terminal and file explorer before the task is started.
-// It is idempotent — calling it on an already-initialized task returns the task as-is.
+// HandleInit initializes worktree and branch for a task.
 func (h *TaskHandler) HandleInit(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
@@ -1209,8 +1169,7 @@ func (h *TaskHandler) HandleInit(w http.ResponseWriter, r *http.Request) {
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
-// HandleStart starts a task: the descendants the schedule picks under it run first, and the row
-// starts its own turn once nothing under it is left to run.
+// HandleStart starts task and its descendants via the schedule.
 func (h *TaskHandler) HandleStart(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
@@ -1259,7 +1218,7 @@ func (h *TaskHandler) HandleStart(w http.ResponseWriter, r *http.Request) {
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
-// HandleStop pauses a task and every descendant that could still run.
+// HandleStop pauses task and its descendants.
 func (h *TaskHandler) HandleStop(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
@@ -1276,10 +1235,7 @@ func (h *TaskHandler) HandleStop(w http.ResponseWriter, r *http.Request) {
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
-// HandlePrioritize moves a task waiting for a provider running-task slot to the front of that queue.
-// A task that is not waiting there is not a fault — it may already hold its slot, or wait on the memory
-// budget instead — so it is answered with promoted=false, and the queue position the task's own stream
-// reports every second is what tells every open tab what the click changed.
+// HandlePrioritize prioritizes task in provider queue.
 func (h *TaskHandler) HandlePrioritize(w http.ResponseWriter, r *http.Request) {
 	taskID := r.PathValue("taskID")
 	if _, ok := resolveTask(w, r, h.store); !ok {
@@ -1288,7 +1244,7 @@ func (h *TaskHandler) HandlePrioritize(w http.ResponseWriter, r *http.Request) {
 	httputil.JSONResponse(w, http.StatusOK, map[string]any{"promoted": h.executor.PrioritizeQueuedTask(taskID)})
 }
 
-// HandleDismissMemoryAlert stores the dismissal on the task row; the broadcast reaches every device.
+// HandleDismissMemoryAlert dismisses memory alert on task row.
 func (h *TaskHandler) HandleDismissMemoryAlert(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")

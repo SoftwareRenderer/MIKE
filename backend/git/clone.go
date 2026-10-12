@@ -21,12 +21,8 @@ var cloneProgressRe = regexp.MustCompile(`Receiving objects:\s+(\d{1,3})%`)
 // schemes git may use. Helper transports (ext:, fd:, python:) are absent on purpose.
 var CloneAllowedProtocols = []string{"http", "https", "git", "ssh", "file"}
 
-// CloneProtocolArgs fences git's transport choice. It must come BEFORE the `clone`
-// subcommand, so the settings reach the process that parses the client-supplied URL,
-// not a child it spawns. Git runs a URL whose scheme names an executable helper
-// (`ext::sh -c 'id'` is a shell), and a user's protocol.ext.allow=always re-enables
-// that, so the refusal is set here rather than left to git's default.
-// so it is set explicitly here and in CloneEnv.
+// CloneProtocolArgs returns arguments that disable git's executable helper transports (e.g. ext::),
+// preventing remote code execution via the URL scheme.
 func CloneProtocolArgs() []string {
 	return []string{"-c", "protocol.ext.allow=never"}
 }
@@ -41,14 +37,9 @@ func CloneArgs(src, dst string) []string {
 	return append(CloneProtocolArgs(), "clone", "--progress", src, dst)
 }
 
-// ValidateCloneURL validates a clone source before it reaches `git clone`. Every
-// clone of a caller-supplied source — project creation, an extension checkout — goes
-// through here, so there is one answer to "may this reach git?".
-//
-// It rejects a leading '-' (git would read it as a flag) and helper transports,
-// which run a host binary with this process's environment. Accepted: a URL with an
-// allowed scheme, scp-like SSH syntax (git@host:org/repo.git), or a bare filesystem
-// path — local cloning is a supported workflow.
+// ValidateCloneURL ensures a clone source is safe to pass to git. It rejects leading dashes,
+// helper transports (to prevent RCE), and unsupported schemes. It allows approved schemes,
+// scp-like SSH syntax, and local filesystem paths.
 func ValidateCloneURL(cloneURL string) error {
 	s := strings.TrimSpace(cloneURL)
 	if s == "" {
@@ -131,13 +122,8 @@ func validateScpLikeCloneURL(s string, colon int) error {
 	return nil
 }
 
-// CloneEnv returns the complete environment for a clone. It is Env plus the transport fence, not
-// a base to be appended to: GIT_ALLOW_PROTOCOL is enforced by git itself whatever the user's git
-// config says, and GIT_TERMINAL_PROMPT=0 plus the execution fence already come from Env.
-//
-// It returns a whole environment because that is how its three callers use it (`cmd.Env =
-// git.CloneEnv()`), and a caller that assigned a bare extra list to cmd.Env would silently discard
-// the allowlist — os/exec takes the assignment, not a merge.
+// CloneEnv returns the environment for a clone, including the GIT_ALLOW_PROTOCOL fence.
+// It returns a complete environment slice because os/exec.Cmd.Env replaces rather than merges.
 func CloneEnv() []string {
 	return Env("GIT_ALLOW_PROTOCOL=" + strings.Join(CloneAllowedProtocols, ":"))
 }

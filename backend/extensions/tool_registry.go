@@ -5,16 +5,14 @@ import (
 	"mike/pkg/logging"
 )
 
-// ToolRegistry asks the store on every question instead of caching: enabling an extension or changing its
-// address changes the answer.
+// ToolRegistry queries the store directly to reflect changes in extension enablement or configuration.
 //
-// A tool is offered only when a call could succeed, so the model is never handed a tool that can only
-// fail.
+// Tools are offered only when they are usable to avoid handing the model tools that will fail.
 type ToolRegistry struct {
 	store *ExtensionStore
 }
 
-// ContributedTool is one offered tool with the row that runs it: the egress call needs its configuration.
+// ContributedTool associates an offered tool with its extension for configuration.
 type ContributedTool struct {
 	Spec      types.ToolSpec
 	Extension *Extension
@@ -38,7 +36,7 @@ func (r *ToolRegistry) Contributed() []ContributedTool {
 	return offered
 }
 
-// Lookup answers only for the tools Contributed returns, so a withheld tool cannot be run through here.
+// Lookup only finds tools that are currently offered.
 func (r *ToolRegistry) Lookup(name string) (*ContributedTool, bool) {
 	offered, _ := r.survey()
 	for i := range offered {
@@ -57,8 +55,7 @@ func (r *ToolRegistry) Spec(name string) (types.ToolSpec, bool) {
 	return types.ToolSpec{}, false
 }
 
-// NetworkedExtensions run in this process, so a project that closes its network does not close these
-// calls. The Sandbox Configuration states this with a list.
+// NetworkedExtensions run in the server process and are not affected by project network isolation.
 func (r *ToolRegistry) NetworkedExtensions() []types.NetworkedExtension {
 	offered := r.Contributed()
 	if len(offered) == 0 {
@@ -86,7 +83,7 @@ func (r *ToolRegistry) NetworkedExtensions() []types.NetworkedExtension {
 	return out
 }
 
-// A name already taken is skipped, not offered twice: dispatch resolves tools by name alone.
+// survey skips duplicate tool names because dispatch resolves tools by name.
 func (r *ToolRegistry) survey() ([]ContributedTool, []ToolProblem) {
 	rows, err := r.toolExtensions()
 	if err != nil {
@@ -144,14 +141,13 @@ func (r *ToolRegistry) toolExtensions() ([]Extension, error) {
 	return r.store.GetByType(ExtensionTypeTool)
 }
 
-// The origin is the only configuration a tool must have; every other placeholder carries a default or may
-// be empty. The wording comes from the call path, so both answers tell a person the same thing.
+// unconfiguredReason checks if the tool's required origin is configured.
 func unconfiguredReason(ext *Extension, tool *ToolConfig) string {
 	_, problem := tool.configuredOrigin(ext.Config)
 	return problem
 }
 
-// The manifest's description is passed through unchanged: it is the tool's only route to the model.
+// toolSpecFor uses the manifest's description to inform the model.
 func toolSpecFor(ext *Extension, tool *ToolConfig) types.ToolSpec {
 	display := tool.DisplayName
 	if display == "" {

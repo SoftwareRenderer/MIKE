@@ -23,7 +23,6 @@ import (
 	"mike/pkg/logging"
 )
 
-// RegistryClient fetches extension metadata and manages container images.
 type RegistryClient struct {
 	httpClient *http.Client
 	// rt qualifies image refs before they reach podman and owns the local-storage probe, so this
@@ -50,9 +49,6 @@ func NewRegistryClientWithBoot(boot sandboxruntime.Boot) *RegistryClient {
 	}
 }
 
-// ResolveURL resolves a relative URL against a base URL.
-// Supports file:// and http(s):// schemes.
-// If the target URL already has a scheme, it is returned as-is.
 func ResolveURL(base, target string) string {
 	// If target already has a scheme, return as-is
 	if strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://") || strings.HasPrefix(target, "file://") {
@@ -81,9 +77,6 @@ func ResolveURL(base, target string) string {
 	return resolved.String()
 }
 
-// fetchContent fetches content from a URL, supporting both HTTP(S) and file://
-// schemes. Bare filesystem paths (no scheme) are treated as local files, with
-// relative paths resolved against the working directory.
 func (rc *RegistryClient) fetchContent(url string) (io.ReadCloser, error) {
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 		path := strings.TrimPrefix(url, "file://")
@@ -113,7 +106,6 @@ func (rc *RegistryClient) fetchContent(url string) (io.ReadCloser, error) {
 	return resp.Body, nil
 }
 
-// FetchIndex downloads and parses the registry index.
 func (rc *RegistryClient) FetchIndex(url string) (RegistryIndex, error) {
 	body, err := rc.fetchContent(url)
 	if err != nil {
@@ -133,11 +125,6 @@ func (rc *RegistryClient) FetchIndex(url string) (RegistryIndex, error) {
 	return index, nil
 }
 
-// FetchChangelog fetches an extension's changelog from the central registry
-// server and returns its raw content. The URL is derived from the registry
-// base URL by appending "<author-slug>/<name>" — the same base location that
-// serves the registry index (works for http(s):// and file:// URLs, and for
-// bare local paths).
 func (rc *RegistryClient) FetchChangelog(baseURL, author, name string) (string, error) {
 	body, err := rc.fetchContent(ResolveURL(baseURL, authorDir(author)+"/"+name))
 	if err != nil {
@@ -152,7 +139,6 @@ func (rc *RegistryClient) FetchChangelog(baseURL, author, name string) (string, 
 	return string(data), nil
 }
 
-// FetchDockerfile downloads a Dockerfile and returns its contents.
 func (rc *RegistryClient) FetchDockerfile(url string) (string, error) {
 	body, err := rc.fetchContent(url)
 	if err != nil {
@@ -192,7 +178,6 @@ func warnSlowPodman(format string, args ...any) {
 	logging.For(logging.Extensions).Warnf(format, args...)
 }
 
-// PullImage pulls an OCI image via podman.
 func (rc *RegistryClient) PullImage(imageRef string) error {
 	if err := sandboxruntime.ValidateImageRef(imageRef); err != nil {
 		return err
@@ -214,7 +199,6 @@ func (rc *RegistryClient) PullImage(imageRef string) error {
 	return nil
 }
 
-// ImageExists checks if an image is available locally via podman.
 func (rc *RegistryClient) ImageExists(imageRef string) bool {
 	return rc.rt.ImageExists(imageRef)
 }
@@ -222,9 +206,6 @@ func (rc *RegistryClient) ImageExists(imageRef string) bool {
 // semverRegex matches semantic version strings (major.minor.patch).
 var semverRegex = regexp.MustCompile(`^v?(\d+)\.(\d+)\.(\d+)$`)
 
-// CompareVersion compares two semantic version strings.
-// Returns -1 if a < b, 0 if a == b, 1 if a > b.
-// Non-semver strings are compared lexicographically.
 func CompareVersion(a, b string) int {
 	matchA := semverRegex.FindStringSubmatch(a)
 	matchB := semverRegex.FindStringSubmatch(b)
@@ -255,15 +236,10 @@ func CompareVersion(a, b string) int {
 	return 0
 }
 
-// UpdateAvailable returns true if the remote version is newer than the installed version.
 func UpdateAvailable(installed, remote string) bool {
 	return CompareVersion(installed, remote) < 0
 }
 
-// newPermissions returns the UI permissions present in the remote (registry)
-// capabilities but absent from the installed extension's manifest — i.e. the
-// newly requested permissions a user would grant by updating. Unknown
-// permission names are passed through as-is.
 func newPermissions(installed, remote *Capabilities) []string {
 	if remote == nil || remote.UI == nil || len(remote.UI.Permissions) == 0 {
 		return nil
@@ -283,8 +259,6 @@ func newPermissions(installed, remote *Capabilities) []string {
 	return added
 }
 
-// newEgressHosts returns the hosts the new manifest can reach that the installed one cannot. A host
-// that was only removed is not one of them.
 func newEgressHosts(installed, remote *Capabilities) []string {
 	network := remote.GetNetwork()
 	if network == nil {
@@ -365,7 +339,6 @@ func gitErrorOutput(out []byte) string {
 	return line
 }
 
-// validateSubdir rejects paths that would escape the checkout root.
 func validateSubdir(subdir string) error {
 	if subdir == "" {
 		return nil
@@ -456,9 +429,8 @@ func (rc *RegistryClient) CheckoutExtensionContext(ctx context.Context, repo, co
 	return nil
 }
 
-// copyDir recursively copies the contents of src into dst, creating dst if
-// needed. Symbolic links are skipped (not followed, not recreated) to avoid
-// escaping the extension directory.
+// copyDir recursively copies the contents of src into dst.
+// Symbolic links are skipped (not followed, not recreated) to avoid escaping the extension directory.
 func copyDir(src, dst string) error {
 	info, err := os.Stat(src)
 	if err != nil {

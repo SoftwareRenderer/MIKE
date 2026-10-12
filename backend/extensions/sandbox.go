@@ -20,23 +20,19 @@ import (
 const (
 	// ExtensionContainerPrefix is the prefix for extension sandbox container names.
 	ExtensionContainerPrefix = "kanban-ext"
-	// DefaultExtensionMemory is the memory limit for an extension sandbox when neither its manifest
-	// nor the user sets one. It is above the peaks measured for the language servers, and a negative
-	// limit in a manifest means no bound at all.
+	// DefaultExtensionMemory is the measured peak for language servers; negative limit in manifest means no bound.
 	DefaultExtensionMemory = 2048
-	// ExtensionLivenessTTL is how long to cache a liveness check result.
+	// ExtensionLivenessTTL is the cache duration for liveness check results.
 	ExtensionLivenessTTL = 5 * time.Minute
-	// ExtensionStopGracePeriod is how long to keep a sandbox alive after the last
-	// client disconnects, to avoid restart overhead if the user quickly reconnects.
+	// ExtensionStopGracePeriod avoids restart overhead if the user quickly reconnects.
 	ExtensionStopGracePeriod = 15 * time.Minute
 )
 
-// memory answers the tracker to call; the nil-tracker rule is sandboxruntime.MemoryOrDefault's.
+// memory implements the tracker call; the nil-tracker rule is sandboxruntime.MemoryOrDefault's.
 func (sm *ExtensionSandboxManager) memory() sandboxruntime.MemoryUsage {
 	return sandboxruntime.MemoryOrDefault(sm.mem)
 }
 
-// ExtensionSandboxManager manages gVisor sandbox containers for extensions.
 type ExtensionSandboxManager struct {
 	mu            sync.Mutex
 	rt            *sandboxruntime.Runtime
@@ -54,8 +50,7 @@ type ExtensionSandboxManager struct {
 	extraMountRoots []string
 }
 
-// SetExtraMountRoots wires the resolved MIKE_EXT_MOUNT_ROOTS extras. Wiring-time, before any sandbox
-// starts; an empty list is the ordinary case.
+// SetExtraMountRoots wires resolved MIKE_EXT_MOUNT_ROOTS; must be called before any sandbox starts.
 func (sm *ExtensionSandboxManager) SetExtraMountRoots(roots []string) {
 	if sm == nil {
 		return
@@ -120,8 +115,6 @@ func NewExtensionSandboxManager(reg *RegistryClient, store *ExtensionStore, boot
 	return sm
 }
 
-// checkExtensionSandboxAvailable checks if gVisor and podman are available. Same
-// probe as the task sandbox manager — see sandboxruntime.GVisorAvailable.
 func checkExtensionSandboxAvailable() bool {
 	return sandboxruntime.GVisorAvailable("ext-sandbox")
 }
@@ -132,8 +125,6 @@ func (sm *ExtensionSandboxManager) cleanupStaleContainers() {
 	sm.rt.CleanupStaleContainers("ext-sandbox", ExtensionContainerPrefix+"-")
 }
 
-// SetExtensionsDir records the directory extension files are materialized in: a mount-allowlist
-// root, and where findLocalDockerfile looks.
 func (sm *ExtensionSandboxManager) SetExtensionsDir(dir string) {
 	if strings.TrimSpace(dir) == "" {
 		return
@@ -141,8 +132,6 @@ func (sm *ExtensionSandboxManager) SetExtensionsDir(dir string) {
 	sm.extensionsDir = dir
 }
 
-// SetWorkspaceDir records the configured worktrees/workspace directory, so it
-// can be part of the mount allowlist.
 func (sm *ExtensionSandboxManager) SetWorkspaceDir(dir string) {
 	if strings.TrimSpace(dir) == "" {
 		return
@@ -150,26 +139,16 @@ func (sm *ExtensionSandboxManager) SetWorkspaceDir(dir string) {
 	sm.workspaceDir = dir
 }
 
-// MountPolicy returns the host roots an extension sandbox may mount: workspace dir, registered
-// project paths, the extensions dir, the temp dir, the startup.Config.ExtMountRoots extras, and the paths
-// projects declare in their own Sandbox Configuration. Which of those a sandbox may write is
-// ForceReadOnly's rule. Built on demand, so new projects apply without a restart.
-//
-// Install and settings validation (ExtensionHandler.mountPolicy) never gets anyone's granted
-// dependency directory: a grant enters only through MountPolicyForExtension.
+// MountPolicy returns host roots an extension sandbox may mount. Built on demand so new projects
+// apply without restart. Granted dependency directories are excluded; see MountPolicyForExtension.
 func (sm *ExtensionSandboxManager) MountPolicy() *MountPolicy {
 	return sm.mountPolicy("")
 }
 
-// MountPolicyForExtension is MountPolicy plus the dependency directory granted to THIS
-// extension, pinned read-only. It is not a widening: a person named that directory for this
-// extension and could already have mounted it as ordinary sandbox configuration. What it buys
-// is that the bind passes the same gate as every other mount (ValidateHostPath, container-path
-// charset, read-only pinning) instead of trusting the stored string.
-//
-// The pin is unconditional: one granted directory is shared by every project this extension
-// serves, and a language server writing into a cache every project reads is how one project's
-// turn changes another's dependencies.
+// MountPolicyForExtension returns MountPolicy plus the granted dependency directory, pinned read-only.
+// This ensures the bind passes the same validation gate as other mounts. The pin is unconditional:
+// a shared granted directory must be read-only to prevent one project's turn from affecting
+// another's dependencies.
 func (sm *ExtensionSandboxManager) MountPolicyForExtension(ext *Extension) *MountPolicy {
 	var grant string
 	if ext != nil {
@@ -213,8 +192,6 @@ func (sm *ExtensionSandboxManager) mountPolicy(grantHostPath string) *MountPolic
 	return newMountPolicyWithReadOnly(roots, readOnlyRoots)
 }
 
-// extensionMemoryLimit resolves the memory limit (MB) for an extension's sandbox: 0 means no
-// limit, negative values are clamped to 0.
 func extensionMemoryLimit(ext *Extension) int {
 	if ext.SandboxConfig.MemoryLimit < 0 {
 		return 0
@@ -222,13 +199,8 @@ func extensionMemoryLimit(ext *Extension) int {
 	return ext.SandboxConfig.MemoryLimit
 }
 
-// DependencyMount is what a granted dependency directory gives a container: a mount plus the
-// environment assignment that points at it, or the reason there is nothing to bind.
-//
-// Derived in one place and used on both sides of the lifecycle: if the compatibility check and
-// the create each computed their own answer, a container built before a grant would be called
-// compatible with it and the grant would never take effect. The assignment belongs on the
-// container, not the server process.
+// DependencyMount is the mount and environment assignment for a granted dependency directory.
+// Derived in one place so compatibility checks and container creation agree.
 type DependencyMount struct {
 	Mount  types.SandboxMount
 	Env    types.SandboxEnv
@@ -236,12 +208,8 @@ type DependencyMount struct {
 	Reason string // why nothing is bound; empty when there is no grant at all, or when OK
 }
 
-// dependencyBind resolves the grant against the extension's own policy. Pass the per-extension one
-// (MountPolicyForExtension): with the narrow policy the granted path is not a root.
-//
-// A grant that cannot be honored is reported, not fatal. The extension still starts, resolves what
-// its image contains, and its environment check says so; refusing to create the container would turn
-// a deleted directory into an extension that will not load at all.
+// dependencyBind resolves grant against the extension's policy. Non-honorable grants are reported
+// but not fatal to allow the extension to start and report its state.
 func dependencyBind(ext *Extension, policy *MountPolicy) DependencyMount {
 	host := ext.SandboxConfig.DependencyGrant()
 	if host == "" {
@@ -283,9 +251,8 @@ func (sm *ExtensionSandboxManager) DesiredDependencyMount(ext *Extension) Depend
 	return dependencyBind(ext, sm.MountPolicyForExtension(ext))
 }
 
-// withDependency appends a bound dependency's addition to one half of the snapshot a compatibility
-// check compares against, copying first so the stored list it compares to is left alone. Both halves
-// carry it, or every check asks for a recreate. No-op when nothing is bound.
+// withDependency appends bound dependency to a snapshot for compatibility checks. Copying
+// prevents modifying the stored list.
 func withDependency[T any](items []T, bind DependencyMount, add T) []T {
 	if !bind.OK {
 		return items
@@ -293,20 +260,13 @@ func withDependency[T any](items []T, bind DependencyMount, add T) []T {
 	return append(append([]T(nil), items...), add)
 }
 
-// buildExtensionCreateArgs assembles the `podman create` args for an extension sandbox (always
-// `--network none`) and returns the mounted host project paths, so a mount-set change is
-// detectable later.
-//
-// Mounts and capabilities are re-validated here so a value stored before validation existed is
-// skipped and logged instead of becoming a container argument; a nil policy permits no custom
-// mount at all (fail closed).
+// buildExtensionCreateArgs assembles `podman create` args (always `--network none`) and returns
+// mounted project paths. Re-validates mounts and capabilities to ensure only valid arguments are passed.
 func buildExtensionCreateArgs(ext *Extension, containerName, image string, projectMounts map[string]string, policy *MountPolicy) ([]string, []string) {
 	// Container runs sleep infinity; sandbox-bridge is started via podman exec when needed.
 	createArgs := append(sandboxruntime.GVisorCreateArgs(containerName), "--network", "none")
 
-	// A malformed NAME is skipped one at a time — one stale entry in a stored manifest must not
-	// cost the rest of the grant — while the posture is all-or-nothing inside AppendCapabilities.
-	// Reaching that refusal here means this builder stopped asserting its own isolation.
+	// A malformed NAME is skipped individually so one stale entry doesn't block others.
 	var valid []string
 	for _, cap := range ext.SandboxConfig.Capabilities {
 		if err := ValidateCapability(cap); err != nil {
@@ -324,13 +284,8 @@ func buildExtensionCreateArgs(ext *Extension, containerName, image string, proje
 		}
 	}
 
-	// Mount each registered project at /mnt/<project-dirname> read-only. This allows the container
-	// to serve any workspace without recreation. A source here is not always operator-chosen: the
-	// current LSP workspace arrives in this map and originates from a client message, so it is
-	// judged by the same policy as the extension's own mounts — resolved, then inside a root.
-	// A refused source is still recorded, because the record is what MountsCompatible compares the
-	// desired set against: recording it only when mounted would make every request look like
-	// "project mounts changed" and recreate the sandbox forever.
+	// Mount registered projects read-only at /mnt/<project-dirname>. Refused sources are still
+	// recorded to maintain a stable comparison for MountsCompatible.
 	mountedProjects := make([]string, 0, len(projectMounts))
 	for hostPath, containerPath := range projectMounts {
 		if policy != nil {
@@ -431,8 +386,6 @@ func buildExtensionCreateArgs(ext *Extension, containerName, image string, proje
 	return createArgs, mountedProjects
 }
 
-// Create creates and starts an extension's sandbox container, which runs `sleep infinity`;
-// the bridge is started later per connection via `podman exec`.
 func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[string]string) ([]types.AssignedPort, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -539,8 +492,6 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 	return nil, nil
 }
 
-// StartSession opens a dedicated bridge connection into a running extension sandbox and takes a
-// reference for the caller. The connection is the reference: ReleaseSession ends both together.
 func (sm *ExtensionSandboxManager) StartSession(extID string) (*bridge.Client, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -596,7 +547,6 @@ func startBridgeLocked(containerName string) (*exec.Cmd, *bridge.Client, error) 
 	return agentCmd, bridge.NewClient(stdin, stdout), nil
 }
 
-// cancelStopLocked calls off a pending grace-period stop.
 func (sm *ExtensionSandboxManager) cancelStopLocked(extID string, state *extensionSandboxState, reason string) {
 	if state == nil || state.stopTimer == nil {
 		return
@@ -657,7 +607,6 @@ func (sm *ExtensionSandboxManager) ReleaseSession(extID string, client *bridge.C
 	return true
 }
 
-// stopLocked stops an extension sandbox (must hold sm.mu).
 func (sm *ExtensionSandboxManager) stopLocked(extID string) {
 	state := sm.states[extID]
 	if state == nil {
@@ -691,7 +640,6 @@ func (sm *ExtensionSandboxManager) stopLocked(extID string) {
 	logging.For(logging.Sandbox).Infof("ext=%s stopped", extID)
 }
 
-// Stop stops an extension sandbox.
 func (sm *ExtensionSandboxManager) Stop(extID string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -699,7 +647,6 @@ func (sm *ExtensionSandboxManager) Stop(extID string) error {
 	return nil
 }
 
-// Destroy fully removes an extension sandbox (stop + remove container).
 func (sm *ExtensionSandboxManager) Destroy(extID string) error {
 	sm.mu.Lock()
 	state := sm.states[extID]
@@ -728,8 +675,6 @@ func (sm *ExtensionSandboxManager) Destroy(extID string) error {
 	return nil
 }
 
-// Close stops all running extension sandboxes.
-// Called during server shutdown to clean up all containers.
 func (sm *ExtensionSandboxManager) Close() {
 	sm.mu.Lock()
 	extIDs := make([]string, 0, len(sm.states))
@@ -744,7 +689,6 @@ func (sm *ExtensionSandboxManager) Close() {
 	}
 }
 
-// ApplyMemoryLimit applies the given memory limit (MB)
 func (sm *ExtensionSandboxManager) ApplyMemoryLimit(extID string, limitMB int) error {
 	sm.mu.Lock()
 	state, ok := sm.states[extID]
@@ -764,8 +708,6 @@ func (sm *ExtensionSandboxManager) ApplyMemoryLimit(extID string, limitMB int) e
 	return sm.rt.ApplyMemoryLimit(state.containerName, limitMB)
 }
 
-// MemoryAccounting returns, in MB, what the live extension sandboxes hold and what they cost the
-// memory budget.
 func (sm *ExtensionSandboxManager) MemoryAccounting() (heldMB, chargeMB int64) {
 	sm.mu.Lock()
 	containers := make([]sandboxruntime.ContainerCharge, 0, len(sm.states))
@@ -799,7 +741,6 @@ func (sm *ExtensionSandboxManager) GetMemoryStats(extID string) *types.SandboxMe
 	return types.NewSandboxMemoryStats(sm.memory().Usage(containerName))
 }
 
-// IsRunning checks if an extension sandbox is running.
 func (sm *ExtensionSandboxManager) IsRunning(extID string) bool {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -820,8 +761,6 @@ func (sm *ExtensionSandboxManager) IsRunning(extID string) bool {
 	return state.isAlive
 }
 
-// customMountSnapshot returns a sorted list of "host:container:mode" strings
-// for the given mounts, suitable for equality comparison.
 func customMountSnapshot(mounts []types.SandboxMount) []string {
 	if len(mounts) == 0 {
 		return nil
@@ -834,8 +773,6 @@ func customMountSnapshot(mounts []types.SandboxMount) []string {
 	return snap
 }
 
-// envSnapshot returns a sorted "KEY=VALUE" list of the extension's own container
-// environment, suitable for equality comparison.
 func envSnapshot(envs []types.SandboxEnv) []string {
 	if len(envs) == 0 {
 		return nil
@@ -882,7 +819,6 @@ func (sm *ExtensionSandboxManager) MountsCompatible(extID string, desired map[st
 	return true, ""
 }
 
-// ListRunning returns all running extension sandboxes with their status.
 func (sm *ExtensionSandboxManager) ListRunning() map[string]ExtensionRuntimeStatus {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -990,8 +926,6 @@ func (sm *ExtensionSandboxManager) ensureExtensionImage(ext *Extension, image, d
 	return fmt.Errorf("extension %s image %s is not on this host and there is no Dockerfile to build it from", ext.ID, image)
 }
 
-// findLocalDockerfile walks the extensions directory for a subdirectory named after the
-// extension and returns its Dockerfile (extensions/<author>/<name>/Dockerfile), or "".
 func (sm *ExtensionSandboxManager) findLocalDockerfile(name string) (string, error) {
 	var found string
 	err := filepath.WalkDir(sm.extensionsDir, func(path string, d os.DirEntry, err error) error {

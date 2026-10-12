@@ -90,8 +90,6 @@ func decodeCeremonyRequest(w http.ResponseWriter, r *http.Request) (ceremonyRequ
 	return req, true
 }
 
-// handlePasskeyRegisterBegin handles POST /api/auth/passkey/register/begin.
-//
 // The pairing code is claimed here, not spent: the ticket carries the claim, and the code is spent by the
 // registration that lands. A browser that cannot run the ceremony — no prompt to show, no authenticator
 // behind it — has therefore bought nothing and can pair again with the same code.
@@ -123,8 +121,6 @@ func (s *Server) handlePasskeyRegisterBegin(w http.ResponseWriter, r *http.Reque
 	JSONResponse(w, http.StatusOK, map[string]any{"ticket": ticket, "options": options})
 }
 
-// handlePasskeyRegisterFinish handles POST /api/auth/passkey/register/finish.
-//
 // A finished registration is proof that this browser holds a new key and that the person verified
 // themselves to it, which is why the session is opened here — and it is where the pairing code is spent,
 // so a ceremony that never reached this call has cost the install nothing.
@@ -154,8 +150,7 @@ func (s *Server) handlePasskeyRegisterFinish(w http.ResponseWriter, r *http.Requ
 	s.openSession(w, r)
 }
 
-// handlePasskeyAssertBegin handles POST /api/auth/passkey/assert/begin. It offers only this host's
-// credentials, so a key that could not be accepted here is not what the person is prompted for.
+// It offers only this host's credentials, so a key that could not be accepted here is not what the person is prompted for.
 func (s *Server) handlePasskeyAssertBegin(w http.ResponseWriter, r *http.Request) {
 	host, err := s.relyingHost(r)
 	if err != nil {
@@ -170,7 +165,6 @@ func (s *Server) handlePasskeyAssertBegin(w http.ResponseWriter, r *http.Request
 	JSONResponse(w, http.StatusOK, map[string]any{"ticket": ticket, "options": options})
 }
 
-// handlePasskeyAssertFinish handles POST /api/auth/passkey/assert/finish.
 func (s *Server) handlePasskeyAssertFinish(w http.ResponseWriter, r *http.Request) {
 	req, ok := decodeCeremonyRequest(w, r)
 	if !ok {
@@ -209,8 +203,7 @@ func (s *Server) openSession(w http.ResponseWriter, r *http.Request) {
 	JSONResponse(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// handlePairingMint handles POST /api/auth/pairing. A signed-in device decides that another one may
-// register; the code it gets back authorizes exactly that, and the name in the body says which device it
+// A signed-in device decides that another one may register; the code it gets back authorizes exactly that, and the name in the body says which device it
 // is being paired for.
 func (s *Server) handlePairingMint(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireSession(w, r); !ok {
@@ -260,8 +253,7 @@ func (s *Server) handlePairingMint(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handlePairingRevoke handles DELETE /api/auth/pairing: every code this server has minted and not spent
-// stops working. The passkeys themselves are untouched — that is what revoking a device is for.
+// Every code this server has minted and not spent stops working. The passkeys themselves are untouched — that is what revoking a device is for.
 func (s *Server) handlePairingRevoke(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireSession(w, r); !ok {
 		return
@@ -279,7 +271,6 @@ type passkeyResponse struct {
 	LastUsed  string `json:"last_used"`
 }
 
-// handlePasskeysList handles GET /api/auth/passkeys.
 func (s *Server) handlePasskeysList(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireSession(w, r); !ok {
 		return
@@ -301,8 +292,7 @@ func (s *Server) handlePasskeysList(w http.ResponseWriter, r *http.Request) {
 	JSONResponse(w, http.StatusOK, out)
 }
 
-// handlePasskeyRename handles PATCH /api/auth/passkeys/{id}. A partial update on pointer fields:
-// absent means leave alone, present means write, and a wrong type is named rather than written.
+// A partial update on pointer fields: absent means leave alone, present means write, and a wrong type is named rather than written.
 func (s *Server) handlePasskeyRename(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireSession(w, r); !ok {
 		return
@@ -336,8 +326,7 @@ func (s *Server) handlePasskeyRename(w http.ResponseWriter, r *http.Request) {
 	JSONResponse(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// handlePasskeyRevoke handles DELETE /api/auth/passkeys/{id}. The last remaining passkey cannot be
-// revoked from here: a server nobody can sign in to is only repairable from the command line, so the GUI
+// The last remaining passkey cannot be revoked from here: a server nobody can sign in to is only repairable from the command line, so the GUI
 // cannot be the thing that does it (store.ErrLastPasskey).
 func (s *Server) handlePasskeyRevoke(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireSession(w, r); !ok {

@@ -8,9 +8,9 @@ import (
 	"mike/pkg/logging"
 )
 
-// ResolveMainBranch returns the branch to use for a task's Main thread. A titled
-// task's Main branch is slug-named (task/<slug>-<random6>), not task/<taskID>; if the
-// canonical branch is missing, recover the slug branch. Falls back to canonicalBranch.
+// ResolveMainBranch returns the branch to use for a task's Main thread. If the canonical
+// branch is missing, it tries to recover a slug-named branch (task/<slug>-<random6>) before
+// falling back to the canonical branch.
 func (wm *WorktreeManager) ResolveMainBranch(projectID, taskID, title, canonicalBranch string) string {
 	if canonicalBranch == "" {
 		canonicalBranch = types.TaskBranchPrefix + taskID
@@ -53,8 +53,7 @@ func (wm *WorktreeManager) ResolveMainBranch(projectID, taskID, title, canonical
 	return best
 }
 
-// ListProjectBranches lists a project's branch names under a prefix, such as "task/" or one task's
-// slug prefix. The rule about listings is in listBranchNames.
+// ListProjectBranches lists branch names in a project that match the given prefix.
 func (wm *WorktreeManager) ListProjectBranches(projectID, prefix string) ([]string, error) {
 	project, err := wm.store.GetProject(projectID)
 	if err != nil {
@@ -63,8 +62,8 @@ func (wm *WorktreeManager) ListProjectBranches(projectID, prefix string) ([]stri
 	return wm.listBranchNames(project.Path, prefix)
 }
 
-// listBranchNames lists refs/heads/<prefix>*, one path segment deep - the shape this repo writes.
-// It reads refs with for-each-ref because `git branch --list` prefixes entries with "+ " or "* ".
+// listBranchNames lists branches matching the prefix. It uses for-each-ref to avoid the
+// decoration (e.g. "* ") produced by git branch --list.
 func (wm *WorktreeManager) listBranchNames(dir, prefix string) ([]string, error) {
 	// A plain for-each-ref pattern matches only up to a slash boundary, so the glob is needed for a
 	// slug prefix to match anything.
@@ -85,8 +84,8 @@ func (wm *WorktreeManager) listBranchNames(dir, prefix string) ([]string, error)
 	return names, nil
 }
 
-// deleteBranch force-deletes a branch and puts what git printed in the error, since git gives its
-// reason on stderr. -D, not -d: the row that owned the branch is already gone.
+// deleteBranch force-deletes a branch. It uses -D because the task row owning the
+// branch has already been deleted.
 func (wm *WorktreeManager) deleteBranch(dir, branch string) error {
 	out, err := Run(dir, "branch", "-D", branch)
 	if err == nil {
@@ -108,9 +107,8 @@ func (wm *WorktreeManager) branchExistsInRepo(repoPath, branchName string) bool 
 	return err == nil
 }
 
-// usableBranchName reports whether a branch name read out of a repository can be passed back to git
-// as one argument that is not an option: a clone can arrive with `--delete` checked out, and
-// `git branch main --delete` deletes main.
+// usableBranchName reports whether a branch name is safe to pass as a git argument
+// (e.g. not starting with '-').
 func usableBranchName(name string) bool {
 	if name == "" || name[0] == '-' {
 		return false
@@ -118,9 +116,8 @@ func usableBranchName(name string) bool {
 	return !strings.ContainsFunc(name, func(r rune) bool { return r <= ' ' || r == 0x7f })
 }
 
-// gitCurrentBranch answers the branch HEAD names, and nothing when git failed or named a value that
-// cannot be passed back (usableBranchName). Callers store what they are given, so git's own error
-// text must never become the answer.
+// gitCurrentBranch returns the current branch name, or an error if it's missing
+// or not usable.
 func (wm *WorktreeManager) gitCurrentBranch(dir string) (string, error) {
 	out, err := Run(dir, "rev-parse", "--abbrev-ref", "HEAD")
 	name := strings.TrimSpace(out)
@@ -134,9 +131,7 @@ func (wm *WorktreeManager) gitCurrentBranch(dir string) (string, error) {
 	return name, nil
 }
 
-// IsMergedInto checks if the task branch has been merged into the target branch.
-// Uses git merge-base --is-ancestor to check if taskBranch is an ancestor of targetBranch.
-// Returns true if merged, false if not merged or if check fails.
+// IsMergedInto reports whether taskBranch has been merged into targetBranch.
 func (wm *WorktreeManager) IsMergedInto(projectPath, taskBranch, targetBranch string) bool {
 	if taskBranch == "" || targetBranch == "" {
 		return false

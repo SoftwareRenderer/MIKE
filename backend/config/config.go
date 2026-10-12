@@ -95,9 +95,8 @@ type ConfigStore struct {
 	// box opens stored provider keys. Built once at startup: a derivation costs hundreds of
 	// milliseconds, so no read path may pay one.
 	box *crypto.Box
-	// mcpLocked is the resolved MIKE_RESTRICT_MCP decision: the registry is frozen and
-	// refuseMCPChange is what says so. A store that never received it would be an unlocked store, so it
-	// arrives here rather than through a setter.
+	// mcpLocked is the resolved MIKE_RESTRICT_MCP decision. It is passed to NewConfigStore
+	// to ensure the store is locked if the environment requires it.
 	mcpLocked bool
 	// statResetLocked is the resolved MIKE_RESTRICT_STAT_RESET decision. One field feeds both the route
 	// that refuses the reset and the config view that hides it, so the two cannot disagree.

@@ -29,14 +29,14 @@ const (
 	partSuffix      = ".part"
 )
 
-// PreparedInfo is what a downloaded release is, for the answer that follows.
+// PreparedInfo describes a downloaded release.
 type PreparedInfo struct {
 	Version string `json:"version"`
 	Bytes   int64  `json:"bytes"`
 	SHA256  string `json:"sha256"`
-	// Files is how many files installing would replace, so the row can say how big the click is.
+	// Files is the number of files that would be replaced by installing.
 	Files int `json:"files"`
-	// Notes carries what is not a failure: a bridge outside the install directory, a dropped template.
+	// Notes contains non-fatal warnings about the release.
 	Notes []string `json:"notes,omitempty"`
 }
 
@@ -177,7 +177,7 @@ func (s *Service) Prepare(ctx context.Context) (PreparedInfo, error) {
 }
 
 // verifyArchive unpacks the downloaded archive into a throwaway directory, reports what installing it
-// would replace, and throws the tree away. The point is to pay the refusal now rather than at install.
+// would replace, and throws the tree away, identifying potential failures before the installation is promised.
 func (s *Service) verifyArchive(archive, version string) (int, []string, error) {
 	f, err := os.Open(archive)
 	if err != nil {

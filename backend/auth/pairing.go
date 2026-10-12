@@ -11,15 +11,12 @@ import (
 	"time"
 )
 
-// A pairing code is the one credential a person can type, and it buys exactly one thing: the right to
-// register a passkey on the browser that presented it. It never authenticates anything — no session
-// exists on the strength of a code, and the ceremony it unlocks still needs a signature only that
-// device's authenticator can make. That is what makes the printed code safe to leave on a terminal: what
-// it can buy is one registration, for a bounded time, and nothing either side of that.
+// A pairing code allows a browser to register a passkey. It does not authenticate the user or
+// create a session; the registration still requires a device signature. This makes printed codes
+// safe to leave on a terminal for a limited time.
 //
-// Codes live in memory. One registration spends one code, so a ceremony abandoned mid-way leaves its code
-// live until it is spent or its TTL passes; a restart drops every code and the next boot mints a new one if
-// the install is still unpaired, because a table would outlive the ceremony it exists for.
+// Codes live in memory. A registration spends one code. Abandoned ceremonies leave codes live until
+// they expire. Restarts drop all codes so they do not outlive the ceremony.
 
 const (
 	// BootPairingTTL is how long the code printed at startup stays live. It is longer than the code a
@@ -66,8 +63,8 @@ type pairingCode struct {
 type PairingCodes struct {
 	mu    sync.Mutex
 	codes map[string]*pairingCode // keyed by hex(sha256(code)), so a presented code is one lookup
-	// epoch counts the revokes. A spend a caller wants back is only ever back while the revoke count has
-	// not moved, so a code this set was told to drop cannot be re-created by a slow spender.
+	// epoch counts revokes. A code restored via undo() is refused if the epoch has moved,
+	// ensuring revoked codes stay dropped.
 	epoch uint64
 	// now is the clock, replaced only by a test that needs to watch a code expire.
 	now func() time.Time
@@ -203,9 +200,8 @@ func FormatPairingCode(code string) string {
 	return code[:4] + "-" + code[4:]
 }
 
-// randomCode draws from crypto/rand. 256 is not a multiple of the alphabet's size, so the bytes at or
-// above the largest multiple are redrawn rather than bending the tail of the alphabet — a pairing code
-// whose last characters are likelier than its first is a shorter guess than the one documented.
+// randomCode draws from crypto/rand. It redraws bytes to avoid modulo bias, ensuring
+// each alphabet symbol is equally likely.
 func randomCode() (string, error) {
 	limit := byte(256 - 256%len(pairingAlphabet))
 	b := make([]byte, pairingCodeLength)

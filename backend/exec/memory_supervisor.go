@@ -14,8 +14,7 @@ import (
 // DefaultMemSupervisorInterval is how often MemorySupervisor.TickOnce runs in production.
 const DefaultMemSupervisorInterval = 5 * time.Second
 
-// StopTask's transition writes pausedByUserOutput over this text, which is why the supervisor writes it
-// after the stop returns.
+// StopTask's transition overwrites this text; the supervisor writes it after stop returns.
 const memoryPauseOutput = "Paused for memory pressure — resumes automatically when memory frees"
 
 // defaultIdleSandboxGrace is how long a container may belong to a task that is not working before the
@@ -33,13 +32,12 @@ type memorySupervisorActions interface {
 	reclaimSandbox(taskID string) bool
 }
 
-// MemorySupervisor keeps sandbox memory inside the budget. With a non-empty gate queue it pauses the
-// running task whose pause frees the least, one per tick, and resumes a paused task once the budget
-// admits it. Only supervisor-paused tasks are auto-resumed: any user action clears the flag.
+// MemorySupervisor keeps sandbox memory within budget. If the gate queue is non-empty, it pauses
+// the running task that frees the least memory, one per tick, and resumes paused tasks as budget admits.
+// Only supervisor-paused tasks are auto-resumed; user actions clear the flag.
 //
-// The smallest pause is deliberate: stopping a task discards the turn it is working on and its
-// container's files, and the largest task is the one most likely to finish soon and free its own
-// memory.
+// Pausing the smallest reserve is deliberate: larger tasks are more likely to finish soon and
+// free their own memory.
 type MemorySupervisor struct {
 	store    *store.Store
 	gate     *MemoryGate
@@ -143,21 +141,19 @@ func (s *MemorySupervisor) TickOnce() {
 		return
 	}
 	budget := s.gate.Budget()
-	// Held sits beside the charge on purpose: a container capped at 2 GB holds 2 GB of the ceiling while
-	// holding 25 MB of RAM, and the two figures side by side is what makes that readable from the log.
+	// Held and charge are logged together to distinguish budget ceiling from actual RAM usage.
 	logging.For(logging.Exec).Debugf(
 		"memory budget: %d/%d MB (MIKE %d, held %d, reservations %d), host free %d, measured=%t, running %d, queued %d",
 		budget.InUseMB, budget.CapacityMB, budget.MikeMB, budget.HeldMB, budget.ReservationsMB,
 		budget.AvailableMB, budget.Measured, len(running), s.gate.QueueLen())
 
-	// A queue usually means tasks waiting for one to finish, and a task finishing frees memory, so
-	// waiting is the right response. A host below its free-RAM floor is different: nothing finishing
-	// soon is why it is tight, so the supervisor has to free memory now.
+	// A queue implies tasks are waiting for others to finish and free memory. A host below its
+	// free-RAM floor requires immediate memory reclamation.
 	queueBlocked := s.gate.QueueLen() > 0
 	emergency := s.gate.HostMemoryTight()
 	charges := s.liveCharges()
 	now := s.reclaim.clock()
-	// Tracked whether or not the preference is on: the clock has to predate anyone switching it on.
+	// trackIdleContainers updates the idle clock; it must predate the activation of the reclaim preference.
 	s.trackIdleContainers(charges, running, now)
 	if queueBlocked || emergency {
 		if len(running) > 0 {
@@ -166,12 +162,11 @@ func (s *MemorySupervisor) TickOnce() {
 				logging.For(logging.Exec).With(logging.TaskID, victim.ID).Warnf("memory supervisor: pause failed: %v", err)
 				return
 			}
-			// Set after stopTask returns: StopTask waits for the executor to exit, so a
-			// concurrent user start during the stop window won't be overwritten.
+			// Set after stopTask returns to avoid overwriting a concurrent user-initiated start.
 			if err := s.store.SetMemorySupervisorPaused(victim.ID, true); err != nil {
 				logging.For(logging.Exec).With(logging.TaskID, victim.ID).Warnf("memory supervisor: setting paused flag: %v", err)
 			}
-			// After the flag: the note promises the auto-resume that flag arms.
+			// The note promises the auto-resume armed by the flag.
 			s.actions.noteMemoryPause(victim.ID)
 			if emergency {
 				logging.For(logging.Exec).With(logging.TaskID, victim.ID).Warnf(
@@ -183,12 +178,11 @@ func (s *MemorySupervisor) TickOnce() {
 			}
 			return
 		}
-		// Nothing in flight can be paused: what the budget counts sits in containers of tasks waiting on a
-		// person, and no user action is coming to free it.
+		// If no tasks are in flight, memory is held by tasks waiting on users and cannot be paused.
 		s.reclaimIdleSandbox(charges, budget.AvailableMB, emergency, now)
 	}
 
-	// Resume path: no queue and a paused task fits.
+	// Resume: no queue and a paused task fits the budget.
 	paused, err := s.store.GetMemorySupervisorPausedTasks()
 	if err != nil {
 		logging.For(logging.Exec).Warnf("memory supervisor: reading paused tasks: %v", err)
@@ -199,7 +193,7 @@ func (s *MemorySupervisor) TickOnce() {
 	}
 	used := s.gate.InUse()
 	candidate := paused[0]
-	candEst := reserveForTask(s.store, candidate) // the same reserve that acquireMemSlot would make
+	candEst := reserveForTask(s.store, candidate) // use the same reserve as acquireMemSlot
 	if used+candEst > capacity {
 		return // would immediately re-queue
 	}
@@ -215,7 +209,7 @@ func (s *MemorySupervisor) TickOnce() {
 	}
 	if startErr != nil {
 		logging.For(logging.Exec).With(logging.TaskID, candidate.ID).Warnf("memory supervisor: resume failed: %v", startErr)
-		// Restore the flag so a start failure doesn't orphan the task as user-paused.
+		// Restore flag so a start failure doesn't leave the task orphaned as user-paused.
 		_ = s.store.SetMemorySupervisorPaused(candidate.ID, true)
 		return
 	}
@@ -225,8 +219,7 @@ func (s *MemorySupervisor) TickOnce() {
 }
 
 func (te *TaskExecutor) noteMemoryPause(taskID string) {
-	// The guarded write doubles as the ownership check: a row someone else started or stopped since the
-	// flag went on gets no note.
+	// The guarded write checks ownership; rows started or stopped by others since the flag was set get no note.
 	set, err := te.store.SetMemoryPressurePausedOutput(taskID, memoryPauseOutput)
 	if err != nil {
 		logging.For(logging.Exec).With(logging.TaskID, taskID).Warnf("memory supervisor note: output text: %v", err)
@@ -245,7 +238,7 @@ func (te *TaskExecutor) noteMemoryResume(taskID string) {
 		"Memory freed up, so the task resumed automatically")
 }
 
-// noteMemoryTransition reads the row afresh because the stop this follows rewrote it.
+// noteMemoryTransition re-reads the row because the preceding stop rewrote it.
 func (te *TaskExecutor) noteMemoryTransition(taskID, kind, severity, content string) {
 	task, err := te.store.GetTaskByID(taskID)
 	if err != nil {

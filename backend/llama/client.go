@@ -1,6 +1,5 @@
-// Package llama is the OpenAI-compatible chat client: streaming and non-streaming
-// completion, tool definitions (standard, plan, explore) and usage stats. Everything the
-// model understands is described here; backend/exec decides when to call it.
+// Package llama provides an OpenAI-compatible chat client supporting streaming
+// and non-streaming completion, tool definitions, and usage statistics.
 package llama
 
 import (
@@ -47,12 +46,11 @@ func (e *LlamaError) IsRequestRejected() bool {
 		e.StatusCode != http.StatusRequestTimeout && e.StatusCode != http.StatusTooManyRequests
 }
 
-// ErrStreamAborted is a stream that ended before its terminal frame: `data: [DONE]`, or a
-// non-empty finish_reason on the last choice. Reaching EOF is not an error, so without this a
-// provider that died mid-request reads as one that answered with nothing.
+// ErrStreamAborted indicates that the stream ended before receiving a terminal
+// frame (`data: [DONE]`) or a final finish reason.
 var ErrStreamAborted = errors.New("llama stream ended before completion")
 
-// errorBody is what a LlamaError carries for a non-200: the body, or the failure to hold it.
+// errorBody extracts the response body or returns the error if the read fails.
 func errorBody(resp *http.Response) string {
 	body, err := httputil.ReadUpstream(resp.Body)
 	if err != nil {
@@ -111,8 +109,8 @@ func applyReasoningParams(reqBody map[string]any, effort string) {
 	}
 }
 
-// applySamplingParams writes a model's sampler overrides into the request body, and only those: a
-// nil field is left out so the provider keeps its own value, and a zero (temperature 0) is typed.
+// applySamplingParams adds model-specific sampler overrides to the request body.
+// Nil fields are omitted, allowing the provider to use its defaults.
 func applySamplingParams(reqBody map[string]any, s *types.ModelSampling) {
 	if s == nil {
 		return
@@ -133,30 +131,27 @@ func putNumber[T float64 | int](reqBody map[string]any, key string, v *T) {
 	}
 }
 
-// Silence phases of an open stream. A provider that answered without sending a token is in a
-// different state from one that streamed tokens and stopped: the first is usually prompt
-// processing, the second is usually output the provider is holding back.
+// Silence phases describe the state of an open stream before the first token
+// arrives (prompt processing) or between subsequent tokens.
 const (
 	StreamPhaseFirstToken  = "first_token"
 	StreamPhaseMidResponse = "mid_response"
 )
 
-// When silence on a stream starts being worth reporting. Both are floors, not deadlines: nothing
-// here ends a stream for being silent unless a caller sets a ceiling (SetSilencePolicy).
+// Minimum durations of silence before reporting progress updates. These are
+// notice thresholds, not deadlines.
 const (
 	streamNoticeFirstToken  = 15 * time.Second // a cold prefill of 74k tokens measures ~10s
 	streamNoticeMidResponse = 30 * time.Second // longer than any gap between two tokens
 	streamWaitTick          = time.Second      // the clock's resolution; the caller throttles
 )
 
-// SilenceCallback reports silence on a stream that is still open. Called repeatedly while the
-// silence grows, never for a stream that is merely slow to the point of the notice floor.
+// SilenceCallback is called repeatedly while a stream remains silent beyond
+// the notice threshold.
 type SilenceCallback func(silent time.Duration, phase string)
 
-// ErrStreamSilent says the provider answered and then stopped sending, and that a configured
-// ceiling was reached. It exists because a quiet stream is not a dead one: a provider generating
-// grammar-constrained tool calls has been measured holding 16,267 tokens behind 76-89 seconds of
-// silence and then finishing normally, so this error names a ceiling, never a lost connection.
+// ErrStreamSilent indicates that a stream remained silent for longer than the
+// configured ceiling. This is distinct from a connection failure.
 type ErrStreamSilent struct {
 	Silent time.Duration
 	Phase  string // StreamPhaseFirstToken or StreamPhaseMidResponse
@@ -185,16 +180,15 @@ type LlamaClient struct {
 	adapter         *llmadapter.Adapter
 }
 
-// SetSampling attaches a model's sampler overrides. Nil keeps every one of them out of the request
-// body, so a model whose fields were left blank is sampled the provider's way.
+// SetSampling configures sampler overrides. If nil, the provider's defaults
+// are used.
 func (c *LlamaClient) SetSampling(s *types.ModelSampling) {
 	c.sampling = s
 }
 
-// SetSilencePolicy decides what a quiet stream costs. onWait hears every second of silence past
-// the notice floor while the stream is open; a non-zero ceiling ends the call with
-// ErrStreamSilent at that much silence. The zero ceiling, which is the default, never ends one —
-// only the peer closing, a failed keepalive or a cancelled context does.
+// SetSilencePolicy configures silence reporting and timeouts. onWait is
+// called periodically during silence, and a non-zero ceiling terminates the request
+// with ErrStreamSilent if exceeded.
 func (c *LlamaClient) SetSilencePolicy(ceiling time.Duration, onWait SilenceCallback) {
 	c.ceiling = ceiling
 	c.onWait = onWait
@@ -272,10 +266,8 @@ func toAPIMessage(m types.ChatMessage) map[string]any {
 	return result
 }
 
-// apiContentParts builds a multi-modal content array in the OpenAI shape
-// ({type: "image_url", image_url: {url: "data:..."}}). A part that is neither text nor an image with
-// data would serialize as null, which the provider refuses, so it is left out; when nothing is left,
-// the caller sends the message's plain text instead of an empty array.
+// apiContentParts constructs a multi-modal content array in the OpenAI format.
+// Parts that are neither text nor valid images are omitted.
 func apiContentParts(m types.ChatMessage) []any {
 	if len(m.ContentParts) == 0 {
 		return nil
@@ -298,9 +290,8 @@ func apiContentParts(m types.ChatMessage) []any {
 	return parts
 }
 
-// apiToolCalls builds an assistant message's tool calls. `arguments` must hold a JSON object: the
-// provider decodes it, so text the model truncated, double-encoded or left empty is replaced by {}.
-// The tool's own result row is what tells the model what happened to that call.
+// apiToolCalls constructs an assistant message's tool calls. Invalid JSON
+// arguments are replaced with an empty object `{}`.
 func apiToolCalls(m types.ChatMessage) []map[string]any {
 	var calls []map[string]any
 	for _, tc := range m.ToolCalls {

@@ -203,7 +203,6 @@ func StashMessageForSyncMerge(taskID string) string {
 	return stashMessageWithPrefix(stashLabelSyncMerge, taskID)
 }
 
-// StashMessageForAutoMerge returns a stash message for an auto-merge operation.
 func StashMessageForAutoMerge(taskID string) string {
 	return stashMessageWithPrefix(stashLabelAutoMerge, taskID)
 }

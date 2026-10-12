@@ -326,10 +326,8 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		agentSandbox := tm.agentGrantForShell(projectID, taskID)
 		var shell *sandbox.ShellProcess
 		var err error
-		// Both project and task terminals create the container on demand if it doesn't exist.
-		// Task executor also creates the container, but the terminal may be opened before
-		// the task starts (or the task was never started), so we create it here as needed.
-		// Only mount .git/ for task-level containers (not project-level terminals)
+		// Creates container on demand; terminal may be opened before task starts.
+		// Only mount .git/ for task-level containers (not project-level terminals).
 		shellProject := proj
 		if sandbox.IsProjectKey(taskID) {
 			shellProject = &types.Project{ID: proj.ID, Name: proj.Name}

@@ -30,12 +30,8 @@ const (
 	repairPassTimeout         = 10 * time.Minute
 )
 
-// errRepairInFlight marks "skipped, because the user is installing or updating this extension right
-// now". It is not a failure and is not counted as one.
 var errRepairInFlight = errors.New("an operation on this extension is already running")
 
-// missingInstall is one row whose materialized files are not usable, with the directory they should be
-// at and why the row can or cannot be repaired.
 type missingInstall struct {
 	ext        *Extension
 	dir        string
@@ -49,8 +45,6 @@ func (m missingInstall) String() string {
 	return fmt.Sprintf("ext=%s dir=%s: %s", m.ext.ID, m.dir, m.why)
 }
 
-// classifyMissingInstalls walks every installed row and reports the ones whose files are gone.
-//
 // The directory is derived from the stored record through extensionDir — the same derivation
 // removeExtensionFiles deletes with, so the two can never disagree about where an extension lives. A
 // name that cannot be a directory name is reported, not repaired: it would be a recursive write of
@@ -89,9 +83,6 @@ func (h *ExtensionHandler) classifyMissingInstalls() ([]missingInstall, error) {
 	return missing, nil
 }
 
-// repairRefusal says why this row cannot be restored on its own, or "" when it can. Everything here is
-// local arithmetic — the clone is what needs the network, and it only happens for a row this returned
-// "" for.
 func (h *ExtensionHandler) repairRefusal(ext *Extension, absRoot, dir string) string {
 	if h.registry == nil {
 		return "this server has no registry client, so nothing can be fetched"
@@ -148,7 +139,7 @@ func readInstalledManifest(dir string) (*ExtensionManifest, error) {
 	return &manifest, nil
 }
 
-// repairOne restores one row's files from the commit that row was installed at — never a newer one, which
+// restores one row's files from the commit that row was installed at — never a newer one, which
 // is an update the user has to ask for.
 //
 // It runs on the handler's existing in-flight guard, so a repair cannot overlap the install or update of
@@ -182,7 +173,7 @@ func (h *ExtensionHandler) repairOne(ctx context.Context, m missingInstall) erro
 	return nil
 }
 
-// RepairMissingFiles restores installed extensions whose files are gone, and reports the rows that
+// restores installed extensions whose files are gone, and reports the rows that
 // cannot be restored on their own. It is meant to be called once, when the app starts, off the boot
 // path: with nothing missing it costs one stat per row and logs nothing.
 //
@@ -237,7 +228,6 @@ func (h *ExtensionHandler) RepairMissingFiles(ctx context.Context) (repaired, re
 	return repaired, refused, nil
 }
 
-// short keeps a commit hash readable in a log line.
 func short(hash string) string {
 	if len(hash) > 8 {
 		return hash[:8]

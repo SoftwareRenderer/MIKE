@@ -18,10 +18,9 @@ import (
 // archiveSuffix is what a folder or a selection is saved as.
 const archiveSuffix = ".tar.gz"
 
-// handleFSDownload sends one or more of a project's paths to the browser as files it saves: a single
-// regular file is its own bytes, anything else is one gzip'd tar named after the folder the rows sit
-// in. Query: project (required), task (which working tree), path (repeatable, the shape
-// GET /api/fs/read takes).
+// handleFSDownload streams one or more project paths as downloadable files. A single
+// regular file is served directly; others are bundled into a .tar.gz archive named after
+// the common parent folder. Query: project (required), task (optional), path (repeatable).
 func (s *Server) handleFSDownload(w http.ResponseWriter, r *http.Request) {
 	asked := r.URL.Query()["path"]
 	if len(asked) == 0 {
@@ -65,15 +64,13 @@ func (s *Server) handleFSDownload(w http.ResponseWriter, r *http.Request) {
 	s.serveDownloadedArchive(w, r, root, paths, downloadName(paths, root))
 }
 
-// anyPresent separates a stale listing — one row went away, the archive carries the rest — from a
-// selection that no longer exists at all, which is the only case that answers "not found".
+// anyPresent returns true if at least one file in the selection exists, allowing for stale listings.
 func anyPresent(infos []os.FileInfo) bool {
 	return slices.ContainsFunc(infos, func(info os.FileInfo) bool { return info != nil })
 }
 
-// downloadTargets jails every path of the request before any of them opens, so a request whose last
-// row leaves the project sends no bytes. Every path must also sit under the first one's folder — the
-// root the archive is named and numbered from — or its entry name would walk out of it.
+// downloadTargets jails all paths and ensures they share the common parent of the first
+// path to ensure a valid archive structure.
 func (s *Server) downloadTargets(w http.ResponseWriter, scope fsScope, asked []string) (paths []string, root string, ok bool) {
 	paths = make([]string, 0, len(asked))
 	for _, p := range asked {
@@ -99,8 +96,7 @@ func (s *Server) downloadTargets(w http.ResponseWriter, scope fsScope, asked []s
 	return paths, root, true
 }
 
-// downloadEntries stats each path once, reporting a path that is gone as nil rather than failing the
-// request: the listing the selection was made from is a moment old.
+// downloadEntries stats each path, returning nil for non-existent files to handle stale selections.
 func (s *Server) downloadEntries(w http.ResponseWriter, paths []string) ([]os.FileInfo, bool) {
 	infos := make([]os.FileInfo, len(paths))
 	for i, p := range paths {
@@ -159,8 +155,7 @@ func (s *Server) serveDownloadedArchive(w http.ResponseWriter, r *http.Request, 
 	}
 }
 
-// attachmentDisposition names the saved file. mime.FormatMediaType percent-encodes what RFC 2231
-// keeps out of a header value, so a repository's file name cannot write a header line.
+// attachmentDisposition creates the Content-Disposition header, encoding the filename to prevent header injection.
 func attachmentDisposition(name string) string {
 	full := sanitizeDownloadName(name)
 	// sanitizeDownloadName has already removed what a header cannot carry; only non-ASCII is left here.
@@ -177,9 +172,7 @@ func attachmentDisposition(name string) string {
 		mime.FormatMediaType("attachment", map[string]string{"filename": full})
 }
 
-// sanitizeDownloadName keeps a repository's name to one file name: separators and control characters
-// become underscores, a trailing dot or space is trimmed, and an over-long name is cut on a rune
-// boundary.
+// sanitizeDownloadName sanitizes a filename by replacing separators and control characters with underscores and trimming trailing dots or spaces.
 func sanitizeDownloadName(name string) string {
 	mapped := strings.Map(func(r rune) rune {
 		if r < 0x20 || r == 0x7f || r == '\\' || r == '/' {

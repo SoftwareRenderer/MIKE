@@ -1,7 +1,7 @@
-// Package errs holds the sentinel errors that cross package boundaries. A producer reports an
-// outcome by wrapping one of these; the transport maps it to a status in one place
-// (httputil.Fail) instead of guessing from the call site, so producers never mention HTTP and
-// handlers never compare error strings.
+// Package errs holds the sentinel errors that cross package boundaries.
+// Producers wrap these sentinels; the transport maps them to HTTP statuses
+// in one place (httputil.Fail). This keeps HTTP logic out of producers
+// and prevents handlers from comparing error strings.
 //
 // Only classifications a caller actually acts on belong here.
 package errs
@@ -21,8 +21,7 @@ import (
 var ErrNotFound = errors.New("not found")
 
 // IsNotFound reports whether err (at any wrap depth) declares a missing thing.
-// A nil err is never "not found" — a caller that checked err != nil and still
-// lands here has a bug, and answering 500 surfaces it instead of hiding it.
+// A nil err is never not-found.
 func IsNotFound(err error) bool {
 	return errors.Is(err, ErrNotFound)
 }

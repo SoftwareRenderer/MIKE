@@ -5,14 +5,12 @@ import (
 	"mike/pkg/logging"
 )
 
-// A pause is written to the rows rather than derived from them: `paused` on a task stops it and every
-// descendant that could still run. The scheduler reads those rows, so a stopped branch stays stopped
-// whatever its runs report (isIncompleteForStart, AutoStartNextSibling), and a start clears the branch it
-// names — resumeBranch here, memory_supervisor.go for a pause that supervisor wrote.
+// A pause is stored on rows: paused on a task stops it and all descendants. The scheduler reads these
+// rows, so a stopped branch stays stopped regardless of run status. A start clears the branch
+// (see resumeBranch or memory_supervisor.go).
 
-// branchRows lists a task and everything under it, deepest first with the named task last, so no parent
-// reads stopped while one of its children still reads running. A descendant list that cannot be read is
-// reported and the named task is still answered.
+// branchRows lists a task and its descendants, deepest first, so parents are processed after children.
+// If the descendant list cannot be read, the error is logged but the named task is still processed.
 func (te *TaskExecutor) branchRows(taskID string) ([]types.Task, error) {
 	target, err := te.store.GetTaskByID(taskID)
 	if err != nil {
@@ -29,8 +27,8 @@ func (te *TaskExecutor) branchRows(taskID string) ([]types.Task, error) {
 	return append(order, *target), nil
 }
 
-// moveBranch writes one execution state over another on every row it is handed, broadcasting each move,
-// and returns the rows that had moved on in the meantime (store.TransitionTaskExecution).
+// moveBranch transitions the execution state of rows and broadcasts updates. It returns rows that
+// have changed since they were passed in.
 func (te *TaskExecutor) moveBranch(rows []types.Task, from, to types.ExecutionState) (refused []types.Task) {
 	for _, row := range rows {
 		moved, err := te.store.TransitionTaskExecution(row.ID, row.ProjectID, from, to)
@@ -48,9 +46,8 @@ func (te *TaskExecutor) moveBranch(rows []types.Task, from, to types.ExecutionSt
 	return refused
 }
 
-// resumeBranch clears the pause on a task and everything under it, because starting a task by hand is that
-// branch being answered: what runs next is the schedule's decision. Rows in any other state are left
-// alone — a run owns its row, and a turn waiting in Review waits for its person.
+// resumeBranch clears the pause on a task and its descendants. Manual starts clear the pause;
+// the scheduler then decides what runs next. Non-paused rows are ignored.
 func (te *TaskExecutor) resumeBranch(taskID string) {
 	rows, err := te.branchRows(taskID)
 	if err != nil {
@@ -59,18 +56,15 @@ func (te *TaskExecutor) resumeBranch(taskID string) {
 	te.moveBranch(rows, types.ExecStatePaused, types.ExecStateIdle)
 }
 
-// PauseTaskAndDescendants stops a task and everything under it: it cancels every run in the branch and
-// marks every row that was waiting to run, and every other row stays where it is. The mark comes before the
-// cancelling because a cancelled run reports its exit to the scheduler (loop.go, loop_agent.go), which
-// reads these rows and would otherwise continue the branch.
+// PauseTaskAndDescendants stops a task and its descendants: it cancels runs and marks waiting rows
+// as paused. Rows are marked before cancellation so the scheduler doesn't auto-resume the branch.
 func (te *TaskExecutor) PauseTaskAndDescendants(taskID string) error {
 	order, err := te.branchRows(taskID)
 	if err != nil {
 		return err
 	}
 
-	// Which rows hold a run decides which get cancelled: a run queued for a provider slot rests
-	// in_progress+idle too, and that is a state the mark writes.
+	// determine which rows hold a run to cancel; provider-queued runs are in_progress+idle.
 	held := make(map[string]bool, len(order))
 	var waiting []types.Task
 	for _, row := range order {
@@ -82,15 +76,14 @@ func (te *TaskExecutor) PauseTaskAndDescendants(taskID string) error {
 		}
 	}
 
-	// A row the write refused had moved on, so re-read it rather than guess whether a run now holds it.
+	// Re-read rows that refused transition to check if they are now in-flight.
 	for _, row := range te.moveBranch(waiting, types.ExecStateIdle, types.ExecStatePaused) {
 		if fresh, rerr := te.store.GetTaskByID(row.ID); rerr == nil && fresh.ExecutionState.InFlight() {
 			held[row.ID] = true
 		}
 	}
 
-	// A row holding a run goes through StopTask, the transition that writes the text the row reports. The
-	// named task is excluded here and answered by its own call below.
+	// StopTask is called for rows holding runs. The named task is handled separately at the end.
 	for _, row := range order[:len(order)-1] {
 		if !held[row.ID] && !te.hasLiveExecutor(row.ID) {
 			continue
@@ -100,6 +93,6 @@ func (te *TaskExecutor) PauseTaskAndDescendants(taskID string) error {
 		}
 	}
 
-	// A descendant that would not stop is a log line; the named task's error is the caller's to report.
+	// Descendant stop failures are logged; the named task's error is returned.
 	return te.StopTask(taskID)
 }

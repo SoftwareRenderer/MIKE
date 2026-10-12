@@ -4,7 +4,6 @@ import (
 	"mike/backend/types"
 )
 
-// toolDisplayNames maps tool names to their UI display names.
 var toolDisplayNames = map[string]string{
 	types.ToolReadFile:      "Read",
 	types.ToolWriteFile:     "Write",
@@ -21,7 +20,6 @@ var toolDisplayNames = map[string]string{
 	types.ToolLSPRename:     "LSP Rename",
 }
 
-// GetToolDisplayName returns the display name for a tool, or the raw name if unknown.
 func GetToolDisplayName(toolName string) string {
 	if name, ok := toolDisplayNames[toolName]; ok {
 		return name
@@ -94,8 +92,7 @@ type editTaskProps struct {
 
 // ─── Shared tool definitions (single source of truth) ───
 
-// newTool wraps one tool's parameter struct in the shape every provider is given. A tool keeps its
-// own props struct because a struct's field order is the order the LLM sees the parameters.
+// newTool wraps a tool's parameter struct. Struct field order determines the order the LLM sees parameters.
 func newTool[P any](name, displayName, description string, props P, required []string) types.ChatTool {
 	return types.ChatTool{
 		Type: "function",
@@ -239,8 +236,7 @@ var toolLSPRename = newTool(types.ToolLSPRename, "LSP Rename",
 	},
 	[]string{"path", "symbol", "new_name"})
 
-// GetLSPToolDefinitions returns the LSP-aware tool definitions.
-// These tools are only available when an LSP extension is installed.
+// LSP tools require an installed LSP extension.
 func GetLSPToolDefinitions() []types.ChatTool {
 	return []types.ChatTool{
 		toolLSPReferences,
@@ -250,9 +246,7 @@ func GetLSPToolDefinitions() []types.ChatTool {
 	}
 }
 
-// ContributedToolDefinitions turns the tools installed extensions declare into the definitions the
-// provider is given. The parameter schema passes through unchanged: extensions refused anything else when
-// the manifest was stored.
+// Parameter schemas pass through unchanged as they were validated at storage.
 func ContributedToolDefinitions(specs []types.ToolSpec) []types.ChatTool {
 	if len(specs) == 0 {
 		return nil
@@ -288,9 +282,7 @@ var toolEditTask = newTool(types.ToolEditTask, "Edit Task",
 
 // ─── Mode-specific tool sets ───
 
-// GetPlanModeToolDefinitions returns the restricted tool set for plan mode.
-// In plan mode, the LLM can read files, run safe read-only commands, create tasks, and signal completion.
-// Write, edit tools are removed to prevent unauthorized changes.
+// Plan mode restricts tools to prevent unauthorized changes.
 func GetPlanModeToolDefinitions() []types.ChatTool {
 	return []types.ChatTool{
 		toolReadFile,
@@ -303,9 +295,7 @@ func GetPlanModeToolDefinitions() []types.ChatTool {
 	}
 }
 
-// GetExploreModeToolDefinitions returns the tool set for exploration mode.
-// Same as standard (act) mode plus task management tools (create_task, view_tasks, edit_task).
-// This allows the LLM to brainstorm, prototype code, and organize work into tasks.
+// Explore mode adds task management tools for brainstorming and prototyping.
 func GetExploreModeToolDefinitions() []types.ChatTool {
 	return []types.ChatTool{
 		toolReadFile,
@@ -320,7 +310,6 @@ func GetExploreModeToolDefinitions() []types.ChatTool {
 	}
 }
 
-// GetToolDefinitions returns the standard tool definitions.
 func GetToolDefinitions() []types.ChatTool {
 	return []types.ChatTool{
 		toolReadFile,

@@ -2,18 +2,14 @@ package agent
 
 import "mike/pkg/subproc"
 
-// Agent adapters spawn a subprocess (e.g. the `pi` binary) from an extension, and
-// that process can spawn further children on the host. Handing it os.Environ()
-// leaked the whole server environment through /proc/self/environ — above all
-// MIKE_ENCRYPTION_KEY (decrypt
-// every stored provider key). Agent processes get an allowlist instead.
+// Agent adapters spawn subprocesses; they receive an allowlist of environment
+// variables to prevent leaking server credentials.
 //
-// agentEnvNames are the variables an agent, and the tooling it shells out to,
-// legitimately need. Everything else — credentials, tokens, MIKE_* configuration,
-// DANGER_ZONE, feature flags — is dropped.
+// agentEnvNames are variables required by agents and their children; all
+// others are dropped.
 var agentEnvNames = map[string]bool{
-	"PATH":    true, // adapters default to a bare binary name (e.g. "pi") resolved via exec.LookPath
-	"HOME":    true, // tooling finds its config directory, and its own credentials, through $HOME
+	"PATH":    true, // resolved via exec.LookPath
+	"HOME":    true, // used for config and credentials
 	"USER":    true,
 	"LOGNAME": true,
 	"SHELL":   true,
@@ -23,30 +19,23 @@ var agentEnvNames = map[string]bool{
 	"TMPDIR":  true,
 	"TMP":     true,
 	"TEMP":    true,
-	// Without these an agent cannot verify TLS on the host.
+	// required for TLS verification
 	"SSL_CERT_FILE":       true,
 	"SSL_CERT_DIR":        true,
 	"NODE_EXTRA_CA_CERTS": true,
 }
 
-// agentEnvPrefixes are families that are safe to allow in bulk (locale tuning,
-// e.g. LC_ALL/LC_CTYPE).
+// agentEnvPrefixes are safe variable prefixes (e.g. locale tuning).
 var agentEnvPrefixes = []string{"LC_"}
 
-// isAgentSafeEnv reports whether an environment variable name is on the allowlist.
+// isAgentSafeEnv checks if a variable name is allowlisted.
 var isAgentSafeEnv = subproc.Allows(agentEnvNames, agentEnvPrefixes)
 
-// SafeAgentEnv returns the environment for an agent subprocess: the allowlisted part of the
-// server's, then extras (adapter-supplied values win, because os/exec keeps the last
-// occurrence) — extras are how an agent gets provider credentials, which are never inherited.
-// A variable the server lacks is omitted rather than emitted empty; shells treat VAR= and unset
-// differently.
+// SafeAgentEnv returns allowlisted server environment plus extras (extras win).
+// Provider credentials are passed via extras.
 //
-// Do not use this elsewhere: git takes git.Env, podman/runsc take sandboxruntime.PodmanEnv, and
-// a host terminal takes term.hostShellEnv (os.Environ() only under DANGER_ZONE=1). None of them
-// is a route into a container — that environment is types.SandboxEnvArgs.
+// used only for agent subprocesses; git, podman, and terminals use their own env providers.
 func SafeAgentEnv(extras ...string) []string {
-	// KeepEmpty, unlike git and podman: this allowlist is a closed set of names, and an adapter may
-	// care whether LANGUAGES was cleared deliberately or never set at all.
+	// KeepEmpty: adapter may distinguish between cleared and unset variables.
 	return append(subproc.Inherit(isAgentSafeEnv, subproc.KeepEmpty), extras...)
 }

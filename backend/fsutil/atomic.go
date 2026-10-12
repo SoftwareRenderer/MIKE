@@ -6,13 +6,10 @@ import (
 	"strings"
 )
 
-// AtomicTempPrefix names the temporary file WriteFileAtomic writes through. The
-// watchers must know it: a rename also fires events for the temporary name, and
-// a watcher reports one fs_event per project per 500 ms, so a slow save would
-// otherwise tell the browser to create a file that has already been renamed away.
+// AtomicTempPrefix is used by WriteFileAtomic; watchers ignore these files to avoid reporting temporary names during renames.
 const AtomicTempPrefix = ".mike-tmp-"
 
-// Keeps the generated name inside NAME_MAX; a long file name must still save.
+// Capped to ensure temporary filenames stay within NAME_MAX.
 const tempNameBaseMaxLen = 180
 
 // IsAtomicTemp reports whether path is one of WriteFileAtomic's temporary files.
@@ -20,13 +17,7 @@ func IsAtomicTemp(path string) bool {
 	return strings.HasPrefix(filepath.Base(path), AtomicTempPrefix)
 }
 
-// WriteFileAtomic replaces the contents of path through a temporary file in the same directory
-// (rename is only atomic within one filesystem), so a crash mid-write costs the temporary, never
-// the file. Like os.WriteFile: an existing file keeps its mode, a new one is 0644, and the parent
-// directory must exist.
-//
-// A symlinked target is refused: renaming over a link would redirect a path the caller already
-// containment-checked. The file is synced before the rename, the directory is not.
+// WriteFileAtomic replaces the file contents via a temporary file in the same directory to ensure atomicity. Existing files keep their mode; new files are 0644. Symlinks are refused to prevent redirection of containment-checked paths. The file is synced before renaming.
 func WriteFileAtomic(path string, content []byte) error {
 	dir := filepath.Dir(path)
 
@@ -47,8 +38,7 @@ func WriteFileAtomic(path string, content []byte) error {
 		return err
 	}
 	tmpName := tmp.Name()
-	// Any failure below leaves a temporary behind. Removing it is best-effort: a
-	// failed unlink must not hide the error that caused it.
+	// Best-effort removal of temporary files on failure to avoid hiding the primary error.
 	defer func() {
 		if err != nil {
 			_ = os.Remove(tmpName)

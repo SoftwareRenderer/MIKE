@@ -18,8 +18,8 @@ import (
 	"mike/backend/types"
 )
 
-// Message rows are keyed by their own id, so this ties a message to the task in the request's
-// path. ok is false after writing the response.
+// messageInTask verifies that a message belongs to the specified task.
+// Returns false if a response was already written.
 func (s *Server) messageInTask(w http.ResponseWriter, projectID, taskID, messageID string) (*types.TaskMessage, bool) {
 	if _, ok := s.taskInPath(w, projectID, taskID); !ok {
 		return nil, false
@@ -36,13 +36,12 @@ func (s *Server) messageInTask(w http.ResponseWriter, projectID, taskID, message
 	return msg, true
 }
 
-// truncateMessagesFrom deletes the named message and everything after it in its thread, then undoes what that
-// implies: the file snapshots those turns pinned, the fork threads whose checkpoint row is gone, and the replay
-// buffer that would hand a reconnecting client the deleted turns back. No caller may state a subset of those
-// steps.
+// truncateMessagesFrom deletes a message and all subsequent messages in its
+// thread, releasing associated snapshots, cleaning up orphan forks, and clearing
+// the replay buffer. No caller may state a subset of those steps.
 //
-// `regenerate` says the thread is about to be answered again, so the executor re-syncs on its own and the fork
-// cleanup is skipped.
+// if regenerate is true, the thread is about to be answered again, so the
+// executor re-syncs and fork cleanup is skipped.
 func (s *Server) truncateMessagesFrom(projectID, taskID string, msg *types.TaskMessage, regenerate bool) error {
 	msgCreatedAt, msgTimeErr := s.store.GetMessageCreatedAt(msg.ID)
 	// The message's own thread_id, in case the task's active thread has moved on since the row was written.
@@ -232,8 +231,8 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 	JSONResponse(w, http.StatusOK, messages)
 }
 
-// handleTaskTurns answers where the prompts of a conversation are, which a window counted in answers does
-// not hold: the chat's sticky header names the prompt above the rows it has. GET …/turns only.
+// handleTaskTurns returns the prompt history for a conversation, which is
+// separate from the message window.
 func (s *Server) handleTaskTurns(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
@@ -264,8 +263,8 @@ func (s *Server) handleTaskTurns(w http.ResponseWriter, r *http.Request) {
 	JSONResponse(w, http.StatusOK, page.Turns)
 }
 
-// messageFloor reads the oldest position a window may include. A floor bounds how far one read travels, so
-// it needs `before` to travel from.
+// messageFloor returns the oldest cursor a window may include, which
+// requires a 'before' cursor to be set.
 func messageFloor(r *http.Request) (string, error) {
 	floor := r.URL.Query().Get("from")
 	if floor != "" && r.URL.Query().Get("before") == "" {
@@ -274,8 +273,8 @@ func messageFloor(r *http.Request) (string, error) {
 	return floor, nil
 }
 
-// pageLimit reads a caller's page size. Absent or unparsable is the default; outside 1..ceiling is a 400,
-// because the ceiling is what bounds the response.
+// pageLimit returns the requested page limit, defaulting if absent and
+// returning an error if it exceeds the ceiling.
 func pageLimit(r *http.Request, def, ceiling int) (int, error) {
 	raw := r.URL.Query().Get("limit")
 	if raw == "" {
@@ -385,9 +384,8 @@ func (s *Server) handleTaskMessageByID(w http.ResponseWriter, r *http.Request) {
 	httputil.MethodNotAllowed(w)
 }
 
-// publishSummaryEdit announces an edited summary to the task's clients and, when the edit changed the
-// summary in effect, wakes the running executor so its next call rebuilds the system prompt from the
-// stored row. Waking it for an older row would cancel a turn over a row nothing reads.
+// publishSummaryEdit broadcasts a summary edit and notifies the executor if
+// the current active summary was changed.
 func (s *Server) publishSummaryEdit(projectID, taskID string, msg *types.TaskMessage, content string) {
 	s.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeSummarization, Data: map[string]any{
 		"id":      msg.ID,
@@ -505,10 +503,9 @@ func (s *Server) cleanupDeletedMessageForks(projectID, taskID string, task *type
 	}
 }
 
-// resolveRollbackCommit returns the commit the worktree is reset to after messages are deleted
-// from a thread, so the file state reflects the remaining conversation. In order: the last
-// commit hash among the remaining messages; the thread's checkpoint_commit_hash, when the
-// deleted range took every checkpoint with it; the task's base_commit, when no checkpoint remains.
+// resolveRollbackCommit determines the commit to reset the worktree to after
+// message deletion, checking remaining messages, the thread checkpoint, and
+// finally the task base commit.
 func (s *Server) resolveRollbackCommit(task *types.Task, threadID string) string {
 	if c := s.getLastCommitHashInThread(threadID); c != "" {
 		return c

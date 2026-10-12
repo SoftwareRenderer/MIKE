@@ -425,11 +425,8 @@ type AgentConfig struct {
 	Sandbox      *types.AgentSandbox `json:"sandbox,omitempty"`       // default mounts and envs for sandbox containers
 }
 
-// ResolveSandboxTemplates resolves {{property_name}} template references
-// in Sandbox using the default values from the provided ConfigSchema.
-// This allows config_schema to hold the source-of-truth defaults while
-// sandbox uses template references to the same values.
-// Returns a nil sandbox if Sandbox is nil (no copy needed).
+// ResolveSandboxTemplates resolves {{property_name}} templates in Sandbox using ConfigSchema defaults.
+// Returns a nil sandbox if Sandbox is nil.
 func (a *AgentConfig) ResolveSandboxTemplates(schema *ConfigSchema) *types.AgentSandbox {
 	if a == nil || a.Sandbox == nil {
 		return nil
@@ -455,12 +452,10 @@ func (a *AgentConfig) ResolveSandboxTemplates(schema *ConfigSchema) *types.Agent
 	return &sb
 }
 
-// resolveTemplate checks if value is a {{property_name[]}} template and resolves
-// it to a config_schema array property's default value. The [] suffix signals
-// the property is an array — value comes from the first element.
-// Template names use the pattern {property_key}_{field}[] (e.g. {{sandbox_mount_host_path[]}}
-// → sandbox_mount[0].host_path). If no match is found or the value is not a
-// template, the original value is returned unchanged.
+// resolveTemplate resolves {{property_name[]}} templates to the first element of a
+// ConfigSchema array property. Templates follow the pattern {property_key}_{field}[]
+// (e.g. {{sandbox_mount_host_path[]}} → sandbox_mount[0].host_path). Returns the
+// original value if no match is found.
 func (s *ConfigSchema) resolveTemplate(value string) string {
 	if len(value) < 5 || value[0] != '{' || value[1] != '{' || value[len(value)-1] != '}' || value[len(value)-2] != '}' {
 		return value

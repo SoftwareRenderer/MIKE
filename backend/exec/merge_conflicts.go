@@ -10,17 +10,15 @@ import (
 	"mike/backend/git"
 )
 
-// ErrNotAMergeConflict means git merge failed with no merge in progress (no MERGE_HEAD): a
-// hook error, a missing branch, a lock — not a conflict. Callers detect it with errors.Is and show
-// the underlying git error instead.
+// ErrNotAMergeConflict means git merge failed without a merge in progress (no MERGE_HEAD).
+// This happens for hook errors, missing branches, or locks. Callers use errors.Is to show
+// the underlying git error.
 //
-// It carries text because an error that prints as nothing is a bug waiting for the one path that
-// surfaces it alone; being wrapped with %w is not the only way an error reaches a log.
+// It contains text to ensure it's visible in logs even if not wrapped with %w.
 var ErrNotAMergeConflict = errors.New("not a merge conflict")
 
-// isMergeInProgress checks whether a git merge is currently in progress in the given directory.
-// Uses `git rev-parse --git-dir` to correctly resolve the git directory in both
-// regular repos and worktrees (where .git is a file, not a directory).
+// isMergeInProgress reports if a git merge is in progress in dir. It uses
+// git rev-parse --git-dir to resolve the git directory in both repos and worktrees.
 func isMergeInProgress(dir string) bool {
 	cmd := git.Command(dir, "rev-parse", "--git-dir")
 	out, err := cmd.Output()
@@ -37,11 +35,8 @@ func isMergeInProgress(dir string) bool {
 }
 
 // GetConflictedFiles returns a deduplicated list of files with merge conflicts.
-// Uses git status --porcelain (catches UU, AD, DU, AA, DD, UD, UA) and falls back
-// to git diff --diff-filter=U (catches binary conflicts and renames).
-//
-// Both listings are read with -z: every name here goes back to git as a path, and the plain
-// form is display text that quotes a name outside plain ASCII.
+// It uses git status --porcelain and falls back to git diff --diff-filter=U for
+// binary conflicts and renames. Lists are read with -z to preserve paths with non-ASCII characters.
 func GetConflictedFiles(dir string) []string {
 	seen := make(map[string]struct{})
 	var files []string
@@ -81,8 +76,7 @@ func GetConflictedFiles(dir string) []string {
 	return files
 }
 
-// addUnique appends f to files unless seen already holds it, recording it in
-// seen. Dedup only — callers must not care whether f was new.
+// addUnique appends f to files if not already in seen.
 func addUnique(files []string, seen map[string]struct{}, f string) []string {
 	if _, ok := seen[f]; ok {
 		return files
@@ -91,10 +85,8 @@ func addUnique(files []string, seen map[string]struct{}, f string) []string {
 	return append(files, f)
 }
 
-// GetAllConflictsResolved reports whether every conflicted file is resolved, by asking
-// `git diff --check MERGE_HEAD -- <files>` for conflict markers rather than scanning file
-// contents. It needs all of them clean: git refuses the merge commit until every conflict is
-// staged, so partial resolution does not count.
+// GetAllConflictsResolved reports if every conflicted file is resolved. It uses
+// git diff --check MERGE_HEAD to detect markers. All files must be clean for a merge commit.
 func GetAllConflictsResolved(dir string) bool {
 	conflictedFiles := GetConflictedFiles(dir)
 	if len(conflictedFiles) == 0 {
@@ -136,11 +128,8 @@ func hasConflictMarkers(path string) bool {
 		strings.Contains(content, ">>>>>>>")
 }
 
-// GetResolvedConflictedFiles returns the conflicted files to stage for the
-// resolution commit. If all conflicts are resolved, returns all conflicted
-// files (git requires ALL to be staged for the merge commit). If any file
-// still has conflict markers, returns nil — the caller should skip the commit
-// and re-prompt the LLM.
+// GetResolvedConflictedFiles returns conflicted files to stage for the resolution commit.
+// If any file still has conflict markers, it returns nil.
 func GetResolvedConflictedFiles(dir string) []string {
 	if GetAllConflictsResolved(dir) {
 		return GetConflictedFiles(dir)

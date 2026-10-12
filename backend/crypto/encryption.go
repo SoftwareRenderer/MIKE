@@ -1,9 +1,10 @@
-// Package crypto encrypts the secrets kept in the database — provider API keys and the config
-// values an extension manifest marks sensitive — with AES-256-GCM.
+// Package crypto encrypts provider API keys and sensitive extension config
+// with AES-256-GCM.
 //
-// The stored form is bare base64 of `nonce ‖ ciphertext ‖ tag` and names no format, so opening a value is
-// the only test of what it is: ErrNotRecord is a plain value, ErrNotAuthentic a secret this build cannot
-// read. The GCM additional data binds a record to what it is and whose it is.
+// Stored values are base64(nonce ‖ ciphertext ‖ tag). Opening a value is
+// the only test of its format: ErrNotRecord for plain values, ErrNotAuthentic
+// for secrets this build cannot read. Additional data binds a record
+// to its purpose and owner.
 package crypto
 
 import (
@@ -76,8 +77,7 @@ func (b *Box) Opens(purpose, record, value string) bool {
 	return err == nil
 }
 
-// gcm opens the AEAD for this box's key. New derives the key at a length both aes and cipher accept,
-// so the two errors below cannot fire.
+// gcm returns the AEAD for this box's key.
 func (b *Box) gcm() (cipher.AEAD, error) {
 	block, err := aes.NewCipher(b.key)
 	if err != nil {
@@ -90,9 +90,9 @@ func (b *Box) gcm() (cipher.AEAD, error) {
 	return aesGCM, nil
 }
 
-// Encrypt seals value as the secret of type purpose belonging to record — "provider" and a provider id,
-// "extension-config" and an extension id plus its config key. A value lifted into another row, or another
-// kind of secret, will not open.
+// Encrypt seals value as a secret of type purpose belonging to record.
+// Examples: ("provider", providerID) or ("extension-config", extensionID+key).
+// A value moved to another record or purpose will not open.
 func (b *Box) Encrypt(purpose, record, value string) (string, error) {
 	if value == "" {
 		return "", nil
@@ -123,7 +123,7 @@ func (b *Box) Decrypt(purpose, record, sealed string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// A record is a nonce and a tag at minimum; anything shorter was never one.
+	// nonce and tag are required; anything shorter is not a record.
 	if len(data) < aesGCM.NonceSize()+aesGCM.Overhead() {
 		return "", ErrNotRecord
 	}
@@ -139,6 +139,5 @@ func aad(purpose, record string) []byte {
 	return []byte(purpose + fieldSep + record)
 }
 
-// Record joins the parts that name one secret into the record field. The separator lives here so no
-// caller can spell two records that open each other.
+// Record joins parts into a single record string. The separator is kept here to prevent collisions.
 func Record(parts ...string) string { return strings.Join(parts, fieldSep) }

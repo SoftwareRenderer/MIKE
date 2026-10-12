@@ -17,12 +17,11 @@ import (
 // Uploads are the only fs write whose body is not JSON: /api/fs/write's `content`
 // is a string field capped at 1 MB, so it cannot carry binary data.
 const (
-	// MaxUploadSize bounds one uploaded file. The number is the write's own, so the size the request is
-	// refused at and the size the write refuses cannot disagree.
+	// MaxUploadSize is the maximum size for a single uploaded file, mirroring
+	// the internal write limit.
 	MaxUploadSize = exec.MaxUploadBytes
-	// uploadTooLargeMessage is the answer both upload size checks give. Written by
-	// hand beside the constant it describes and pinned to it by a test, because a
-	// cap raised without its sentence tells the user a lie about the cap.
+	// uploadTooLargeMessage is the error message returned when an upload
+	// exceeds the size limit.
 	uploadTooLargeMessage = "file too large (max 20MB)"
 	// uploadBoundaryOverhead covers the multipart framing MaxBytesReader counts on top of
 	// the file body.
@@ -32,9 +31,9 @@ const (
 	uploadFormMemory = 1 << 20
 )
 
-// uploadedFile reads the one `file` part of a multipart body, bounding it before any of it is read so a
-// size cap is not an allocation. The func it returns closes the file and discards the form's temporary
-// files, and the caller defers it: Go defers in the caller's frame. ok is false after writing the response.
+// uploadedFile extracts the file from a multipart body, applying size limits
+// before reading. The returned cleanup function closes the file and removes
+// temporary form files.
 func uploadedFile(w http.ResponseWriter, r *http.Request) (multipart.File, *multipart.FileHeader, func(), bool) {
 	r.Body = http.MaxBytesReader(w, r.Body, MaxUploadSize+uploadBoundaryOverhead)
 	if err := r.ParseMultipartForm(uploadFormMemory); err != nil {

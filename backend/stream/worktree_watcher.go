@@ -111,8 +111,8 @@ func NewWorktreeWatcher(worktreeMgr *git.WorktreeManager, broadcast diffBroadcas
 	return ww, nil
 }
 
-// Watch starts monitoring a task's worktree directory for file changes. The diff baseline is not part of a
-// watch: a thread can fork, or the target branch move, while the watch is live.
+// Watch starts monitoring a task's worktree directory for file changes.
+// Watch ignores diff baseline; it can change (e.g. fork or target move) while live.
 func (ww *WorktreeWatcher) Watch(taskID, projectID string) error {
 	path, err := ww.worktreeMgr.WorktreePath(taskID)
 	if err != nil {
@@ -196,9 +196,8 @@ func (ww *WorktreeWatcher) Unwatch(taskID string) {
 
 // Close stops the watcher and its worker pool.
 //
-// The mutex is released before workerWg.Wait, never held across it: a worker in
-// computeAndBroadcast takes ww.mu in its deferred cleanup, so waiting for the pool while
-// holding it deadlocks whenever a compute is in flight.
+// Must release mutex before workerWg.Wait() to avoid deadlock with
+// computeAndBroadcast's deferred cleanup.
 func (ww *WorktreeWatcher) Close() {
 	ww.mu.Lock()
 	for _, timer := range ww.throttles {
@@ -224,9 +223,8 @@ func (ww *WorktreeWatcher) Close() {
 	logging.For(logging.Watcher).Info("closed")
 }
 
-// isClosed reports whether Close has begun. Close stops the timers it holds, but one that already fired
-// waits on ww.mu and then writes to maps Close released; doneCh closes first, so the answer holds for
-// anything running under the lock.
+// isClosed reports whether Close has begun. Coded such that timers firing
+// after Close() still synchronize on ww.mu before accessing released maps.
 func (ww *WorktreeWatcher) isClosed() bool {
 	select {
 	case <-ww.doneCh:
@@ -236,8 +234,8 @@ func (ww *WorktreeWatcher) isClosed() bool {
 	}
 }
 
-// scheduleDiff queues a diff compute for the task. It re-arms while a compute is in flight rather than
-// drop the pending change, which would leave the diff panel stale until the next filesystem event.
+// scheduleDiff queues a diff compute for the task. Re-arms if a compute
+// is in flight to avoid stale panels.
 func (ww *WorktreeWatcher) scheduleDiff(taskID, projectID string) {
 	ww.mu.Lock()
 	if ww.isClosed() {
@@ -507,8 +505,9 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID string) {
 	}
 }
 
-// DiffDigest reports the diff the last broadcast described: the hash `task_diff_stats` carries and how many
-// paths are staged. ok=false means this process computed none, which is an unknown and never a clean answer.
+// DiffDigest reports the diff the last broadcast described: the hash
+// `task_diff_stats` carries and how many paths are staged. ok=false means
+// no diff has been computed yet.
 func (ww *WorktreeWatcher) DiffDigest(taskID string) (hash string, staged int, ok bool) {
 	raw, found := ww.diffCache.Load(taskID)
 	if !found {

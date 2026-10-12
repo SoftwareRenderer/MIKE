@@ -15,7 +15,7 @@ const (
 // TLS-terminating proxy that said so under MIKE_TRUST_PROXY. There is deliberately no variable for
 // it — a flag an operator has to know about is a flag that is off during the deployment it is for.
 
-// handleAuthLogout handles POST /api/auth/logout.
+// POST /api/auth/logout
 // Requires a valid session. Deletes the session and clears the cookie.
 func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 
@@ -38,7 +38,7 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	JSONResponse(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// handleAuthSession handles GET /api/auth/session.
+// GET /api/auth/session
 // Returns the current authentication status, and whether this install has any passkey at all — the
 // boolean is the login form's branch between "sign in" and "type the code", and nothing else about a
 // credential is ever answered here.
@@ -54,8 +54,7 @@ func (s *Server) handleAuthSession(w http.ResponseWriter, r *http.Request) {
 	// The login gate offers the CA download only when this route would answer one — the same answer the
 	// download itself and the /api/config row read.
 	body["tls_ca_available"] = s.localCAvailable()
-	// Read by the same function that names a stored row nobody named, so the form's guess and the
-	// fallback cannot disagree.
+	// Use the same guess as the passkey ceremony to ensure consistency.
 	if name, ok := guessedDeviceLabel(r.UserAgent()); ok {
 		body["device_name"] = name
 	}
@@ -89,7 +88,6 @@ func (s *Server) sessionCookie(r *http.Request, token string, maxAge int) *http.
 	}
 }
 
-// setSessionCookie sets the SESSION cookie.
 func (s *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, token string, maxAge int) {
 	http.SetCookie(w, s.sessionCookie(r, token, maxAge))
 }

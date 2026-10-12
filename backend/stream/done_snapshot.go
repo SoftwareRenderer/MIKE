@@ -10,22 +10,21 @@ import (
 	"mike/pkg/logging"
 )
 
-// DoneTaskDiff is a done task's materialized diff. Its canonical diff is BaseRef..HeadRef — two pinned
-// refs — so once computed it never changes until the task is re-run. It backs both the task_diff_stats
-// frame and GET /tasks/{id}/diff instead of a `git diff` per connection.
+// DoneTaskDiff is a done task's materialized diff. Its canonical diff (BaseRef..HeadRef)
+// is immutable until the task is re-run. It backs the task_diff_stats frame and
+// GET /tasks/{id}/diff to avoid running git diff per connection.
 type DoneTaskDiff struct {
 	StatsJSON  string // JSON object of task_diff_stats frame fields (no type/task_id/already_merged)
 	DiffJSON   string // exact JSON body of the REST task-diff response
 	HasChanges bool   // false when the canonical diff is empty (nothing to broadcast/serve)
 }
 
-// doneDiffResponse mirrors the JSON shape of the REST GET /tasks/{id}/diff
-// response for a commit-to-commit (headRef) diff: TaskDiff fields with
-// json tags, untracked file lines stripped to line counts.
+// doneDiffResponse matches the JSON shape of the REST GET /tasks/{id}/diff
+// response for a commit-to-commit diff: TaskDiff fields with json tags,
+// and untracked file lines stripped to line counts.
 type doneDiffResponse struct {
 	Diff string `json:"diff"`
-	// Never omitempty: in a stored body the key's presence is what marks it as carrying the parsed
-	// view (empty diffs are never persisted).
+	// Never omitempty: key presence marks the response as carrying the parsed view.
 	ParsedFiles       []git.TrackedDiffFile          `json:"parsed_files"`
 	Untracked         []git.UntrackedFile            `json:"untracked"`
 	ShortStat         string                         `json:"short_stat"`
@@ -34,11 +33,9 @@ type doneDiffResponse struct {
 }
 
 // MaterializeDoneTaskDiff returns the cached diff snapshot for a done task,
-// computing and persisting it on first access (or when the pinned refs have
-// changed). It returns (nil, nil) when the task has no canonical diff (no
-// branch or empty diff) — the same condition under which the legacy code
-// sends no stats frame. Errors are returned when the diff cannot be computed
-// at all (e.g. repo missing); callers should fall back to the legacy path.
+// computing and persisting it if missing or outdated. Returns (nil, nil) if
+// the task has no canonical diff (no branch or empty diff). Errors are returned
+// if computation fails; callers should fall back to the legacy path.
 func MaterializeDoneTaskDiff(st *store.Store, wm *git.WorktreeManager, projectID string, task *types.Task) (*DoneTaskDiff, error) {
 	if task.Branch == "" {
 		return nil, nil
@@ -48,12 +45,11 @@ func MaterializeDoneTaskDiff(st *store.Store, wm *git.WorktreeManager, projectID
 		headRef = task.Branch
 	}
 	baseRef := resolveDoneTaskBaseRef(wm, task)
-	// Only a pinned BranchTip SHA is immutable. Legacy done tasks without one
-	// diff against a branch name that can still advance — those compute live
-	// and never persist (same behavior as before snapshots existed).
+	// Only a pinned BranchTip SHA is immutable. Tasks without one diff against
+	// a branch name that can advance; those compute live and never persist.
 	cacheable := task.BranchTip != ""
 
-	// Cache hit: the snapshot's pinned refs match the task's current refs.
+	// Cache hit: pinned refs match current refs.
 	// (Empty diffs are never persisted, so a stored snapshot always has changes.)
 	if cacheable {
 		if snap, err := st.GetTaskDiffSnapshot(task.ID); err == nil && snap != nil &&
@@ -71,7 +67,7 @@ func MaterializeDoneTaskDiff(st *store.Store, wm *git.WorktreeManager, projectID
 		return nil, err
 	}
 	if !diffResult.HasChanges() {
-		// Nothing to cache — mirrors the legacy "no frame for empty diff" behavior.
+		// Nothing to cache; mirrors legacy "no frame for empty diff" behavior.
 		return &DoneTaskDiff{HasChanges: false}, nil
 	}
 
@@ -128,9 +124,8 @@ func persistSnapshot(st *store.Store, task *types.Task, baseRef, headRef string,
 }
 
 // resolveDoneTaskBaseRef returns the base ref for a done task's canonical
-// diff: the pinned BaseCommit when captured (authoritative — required for a
-// correct diff after fast-forward merges, deliberately NOT re-resolved for
-// usability), otherwise the same resolved baseline the live paths use.
+// diff: the pinned BaseCommit if captured (prevents diff shifts after fast-forwards),
+// otherwise the same resolved baseline the live paths use.
 func resolveDoneTaskBaseRef(wm *git.WorktreeManager, task *types.Task) string {
 	if task.BaseCommit != "" {
 		return task.BaseCommit

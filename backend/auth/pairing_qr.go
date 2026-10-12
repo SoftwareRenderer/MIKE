@@ -27,10 +27,9 @@ const (
 	// pairingQRPixels is the PNG's side length: readable on a settings panel and on a second laptop's
 	// screen without being a poster.
 	pairingQRPixels = 256
-	// pairingQRMaxBytes bounds the encoded content, so a QR is never asked to hold an arbitrary string —
-	// the failure that matters is a picture that decodes to something else. It also has to hold the longest
-	// link PairingURL can build: a 253-character host, a port, and a 64-rune label escaped byte by byte is
-	// 1056 bytes.
+	// pairingQRMaxBytes bounds the encoded content to ensure the resulting QR remains readable and
+	// fits within reasonable limits. It accommodates the longest possible PairingURL: a 253-character
+	// host, a port, and a 64-rune label escaped byte by byte (~1056 bytes).
 	pairingQRMaxBytes = 1536
 )
 

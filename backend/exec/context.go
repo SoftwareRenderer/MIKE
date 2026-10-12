@@ -10,10 +10,8 @@ import (
 	"mike/pkg/logging"
 )
 
-// commitMessagePrompt is the system prompt for generating commit messages.
 const commitMessagePrompt = "You are a commit message generator. Given the conversation that led to the changes, generate a concise commit message. Simple changes only need a title. Titles must not have more than 80 characters. Explain key decisions ONLY IF changes include complex logic."
 
-// buildCommitMessages creates the chat messages for commit message generation.
 func buildCommitMessages(turnText string) []types.ChatMessage {
 	return []types.ChatMessage{
 		{Role: "system", Content: commitMessagePrompt},
@@ -21,7 +19,7 @@ func buildCommitMessages(turnText string) []types.ChatMessage {
 	}
 }
 
-// checkpointLabelPrompt generates a short 5-word label for git stash checkpoints.
+// checkpointLabelPrompt is the system prompt for short git stash checkpoint labels.
 const checkpointLabelPrompt = "Generate a short label of 5 words or less describing the file changes. Use imperative mood (e.g. 'Add login validation', 'Fix race condition'). Output ONLY the label, nothing else."
 
 func buildCheckpointLabelMessages(diffStat, turnText string) []types.ChatMessage {
@@ -31,7 +29,7 @@ func buildCheckpointLabelMessages(diffStat, turnText string) []types.ChatMessage
 	}
 }
 
-// formatToolAction extracts a human-readable action description from a tool call.
+// formatToolAction extracts a human-readable description from a tool call.
 func formatToolAction(name, arguments string) string {
 	var args map[string]any
 	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
@@ -104,8 +102,7 @@ func formatToolAction(name, arguments string) string {
 	return "perform an action"
 }
 
-// reviewSummary reads the summary out of a request_review call's arguments; empty means the
-// call carried none.
+// reviewSummary extracts the summary from a request_review call.
 func reviewSummary(arguments string) string {
 	var args map[string]any
 	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
@@ -115,7 +112,7 @@ func reviewSummary(arguments string) string {
 	return strings.TrimSpace(summary)
 }
 
-// formatToolStatus checks the tool result to determine success/failure.
+// formatToolStatus determines success or failure from a tool result.
 func formatToolStatus(toolCallID string, toolResults map[string]string) string {
 	output, ok := toolResults[toolCallID]
 	if !ok {
@@ -129,7 +126,7 @@ func formatToolStatus(toolCallID string, toolResults map[string]string) string {
 	return "successful"
 }
 
-// isTaskID checks if a string matches the task ID format (word-word-word).
+// isTaskID checks if a string matches task ID format (word-word-word).
 func isTaskID(s string) bool {
 	parts := strings.Split(s, "-")
 	if len(parts) != 3 {
@@ -143,8 +140,7 @@ func isTaskID(s string) bool {
 	return true
 }
 
-// extractTaskFields parses a JSON tool result and extracts task_id and title fields.
-// Returns empty strings if parsing fails or fields are missing.
+// extractTaskFields extracts task_id and title from a JSON tool result.
 func extractTaskFields(output string) (taskID, title string) {
 	var result map[string]string
 	if err := json.Unmarshal([]byte(output), &result); err != nil {
@@ -153,10 +149,7 @@ func extractTaskFields(output string) (taskID, title string) {
 	return result["task_id"], result["title"]
 }
 
-// formatToolResult returns the descriptive result text for a tool call. create_task and
-// edit_task report "task ID: [id] - [title]" on success (read out of the JSON result),
-// "but was unsuccessful. Error: [msg]" on failure, and create_task says "a task" when the
-// result is unknown. Every other tool reports "which was [status]".
+// formatToolResult returns descriptive result text for a tool call.
 func formatToolResult(name, toolCallID string, status string, toolResults map[string]string) string {
 	if name == types.ToolCreateTask {
 		if status == "successful" {
@@ -193,12 +186,12 @@ func formatToolResult(name, toolCallID string, status string, toolResults map[st
 	return "which was " + status
 }
 
-// sandboxableTools are the tools that can run inside a sandbox.
+// sandboxableTools are tools that can run inside a sandbox.
 var sandboxableTools = map[string]struct{}{
 	types.ToolReadFile: {}, types.ToolWriteFile: {}, types.ToolEditFile: {}, types.ToolBash: {},
 }
 
-// lspTools always run in an LSP extension sandbox, whatever the project's sandbox setting.
+// lspTools always run in an LSP sandbox, regardless of project settings.
 var lspTools = map[string]struct{}{
 	types.ToolLSPReferences: {}, types.ToolLSPDefinition: {}, types.ToolLSPHover: {}, types.ToolLSPRename: {},
 }
@@ -208,17 +201,15 @@ func inToolSet(name string, set map[string]struct{}) bool {
 	return ok
 }
 
-// isSandboxableTool returns true if the tool can run inside a sandbox.
 func isSandboxableTool(name string) bool {
 	return inToolSet(name, sandboxableTools)
 }
 
-// isLSPTool returns true for tools that run inside an LSP extension sandbox.
 func isLSPTool(name string) bool {
 	return inToolSet(name, lspTools)
 }
 
-// createCheckpoint snapshots the worktree after a turn's tool calls
+// createCheckpoint snapshots the worktree after a turn's tool calls.
 func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID, assistantMsgID string) {
 	// Check for file changes
 	statusOut, err := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "status", "--porcelain")
@@ -244,10 +235,7 @@ func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID,
 			projectID = task.ProjectID
 		}
 
-		// Stage the turn's work, capture it, then put the index back: no stash entry, no reset. The capture
-		// runs before the unstage because `git stash create` has no -u — a new non-image binary left
-		// untracked is absent from the snapshot's tree, and the restore that reads that tree ends in
-		// `clean -fd`, which would delete the file the turn produced.
+		// Stage work, capture as snapshot, then unstage: this avoids stash entries and ensures untracked binaries are preserved during restore, as git stash create lacks -u.
 		capture := func() (string, error) {
 			_ = te.worktreeMgr.GitRunInWorktree(taskID, "add", "-A")
 			out, err := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "stash", "create")
@@ -255,21 +243,16 @@ func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID,
 			return strings.TrimSpace(out), err
 		}
 
-		// Staging touches the index, which every worktree of the repository shares. A task with no
-		// project has no project lock to take.
+		// Staging touches the shared index; projects are locked to prevent concurrent index modification.
 		if projectID != "" {
 			defer te.worktreeMgr.LockProjectStash(projectID)()
 		}
-		// Released explicitly rather than deferred: the original scope ended at the capture, and
-		// holding the task worktree lock across the pinning and everything after it would widen a
-		// lock that tool calls, subtask merges and this checkpoint path all contend on.
+		// Released explicitly to avoid holding the worktree lock during pinning, reducing contention with tool calls and subtask merges.
 		unlockWorktree := te.LockWorktree(taskID)
 		snapHash, snapErr := capture()
 		unlockWorktree()
 
-		// A hash alone is not a checkpoint: git may prune an object nothing references, and the restore
-		// would fail much later against a conversation that still claims the state exists. So a failed
-		// pin is a failed checkpoint.
+		// A snapshot must be pinned to prevent git from pruning the object, ensuring the state exists during later restore.
 		if snapErr == nil && snapHash != "" {
 			if pinErr := te.worktreeMgr.PinTaskSnapshot(taskID, assistantMsgID, snapHash); pinErr != nil {
 				snapErr = pinErr
@@ -285,8 +268,7 @@ func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID,
 			return
 		}
 
-		// The hash stays the database's handle (task_messages.git_commit_hash); the ref is what keeps
-		// the object it names alive for the life of the task.
+		// Database uses the hash; a ref keeps the object alive.
 		if snapHash != "" {
 			_ = te.store.UpdateTaskMessageCommitHash(assistantMsgID, snapHash)
 		}
@@ -299,8 +281,7 @@ func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID,
 	}()
 }
 
-// GenerateCheckpointLabel generates a short 5-word label for a git stash checkpoint.
-// Falls back to the task title on any error.
+// GenerateCheckpointLabel generates a short label for a git stash checkpoint, falling back to task title.
 func (te *TaskExecutor) GenerateCheckpointLabel(ctx context.Context, taskID, diffStat, turnText string) string {
 	task, err := te.store.GetTaskByID(taskID)
 	if err != nil {
@@ -331,14 +312,12 @@ func (te *TaskExecutor) GenerateCheckpointLabel(ctx context.Context, taskID, dif
 	return label
 }
 
-// BuildConversationFromTaskMessages converts DB TaskMessages into ChatMessages for the
-// utility prompts (commit messages, checkpoint labels, thread fork titles). It rebuilds
-// the same conversation the LLM sees — see groupTaskMessages.
+// BuildConversationFromTaskMessages converts DB TaskMessages into ChatMessages for utility prompts.
 func BuildConversationFromTaskMessages(taskMsgs []types.TaskMessage) []types.ChatMessage {
 	return groupTaskMessages(taskMsgs)
 }
 
-// Rebuilds a conversation from persisted rows: a tool_call rides with the assistant row that issued it.
+// groupTaskMessages rebuilds a conversation from persisted rows, attaching tool calls to assistants.
 func groupTaskMessages(taskMsgs []types.TaskMessage) []types.ChatMessage {
 	toolRows, totalToolRows := toolCallRowsByOwner(taskMsgs)
 	messages := make([]types.ChatMessage, 0, len(taskMsgs))
@@ -393,9 +372,7 @@ func groupTaskMessages(taskMsgs []types.TaskMessage) []types.ChatMessage {
 	return messages
 }
 
-// toolCallRowsByOwner maps each assistant row's position to the tool_call rows belonging to it, and
-// returns the tool_call total so the caller can log what it could not attach. A row written before
-// the assistant_msg_id column existed names no owner, so it attaches to the nearest preceding assistant.
+// toolCallRowsByOwner maps assistant rows to their tool calls.
 func toolCallRowsByOwner(taskMsgs []types.TaskMessage) (map[int][]types.TaskMessage, int) {
 	idxByAssistantID := make(map[string]int)
 	total := 0
@@ -436,7 +413,6 @@ func toolCallRowsByOwner(taskMsgs []types.TaskMessage) (map[int][]types.TaskMess
 	return byAssistantIdx, total
 }
 
-// parseToolCallRow reads the tool invocation stored on a tool_call row.
 func parseToolCallRow(m types.TaskMessage) (toolID, toolName, rawArgs string) {
 	if m.ToolCalls == "" {
 		return "", "", ""
@@ -451,10 +427,7 @@ func parseToolCallRow(m types.TaskMessage) (toolID, toolName, rawArgs string) {
 	return toolID, toolName, rawArgs
 }
 
-// toolCallIDFromMessage returns the tool_id recorded in a task message's
-// tool_calls JSON, or "" when the message carries none. The id is what ties a
-// "tool" role reply back to the assistant's call, so a missing one degrades to
-// an unlinked result rather than dropping the result.
+// toolCallIDFromMessage extracts tool_id from tool_calls JSON.
 func toolCallIDFromMessage(m types.TaskMessage) string {
 	if m.ToolCalls == "" {
 		return ""
@@ -467,10 +440,7 @@ func toolCallIDFromMessage(m types.TaskMessage) string {
 	return id
 }
 
-// toolResultMessage rebuilds the "tool" role message that answers a tool call
-// from the task message holding its result. ok is false when there is no
-// tool_result or it does not parse, so callers skip the message instead of
-// appending an empty result the model would read as a successful no-op.
+// toolResultMessage rebuilds tool role message from result.
 func toolResultMessage(m types.TaskMessage) (types.ChatMessage, bool) {
 	if m.ToolResult == "" {
 		return types.ChatMessage{}, false
@@ -483,9 +453,7 @@ func toolResultMessage(m types.TaskMessage) (types.ChatMessage, bool) {
 	return types.ChatMessage{Role: "tool", Content: output, ToolCallID: toolCallIDFromMessage(m)}, true
 }
 
-// collectUniqueModels extracts unique model names from task messages, preserving
-// the order of first appearance. Only non-empty model names from assistant messages
-// are collected (user/tool/summarization messages don't carry model attribution).
+// collectUniqueModels extracts unique model names from assistant messages.
 func collectUniqueModels(taskMsgs []types.TaskMessage) []string {
 	seen := make(map[string]bool)
 	var models []string
@@ -501,8 +469,7 @@ func collectUniqueModels(taskMsgs []types.TaskMessage) []string {
 	return models
 }
 
-// displayModelName shortens a namespaced model name for commit trailers:
-// "orgname/model" → "model". Non-namespaced names are returned unchanged.
+// displayModelName shortens namespaced model name for commit trailers.
 func displayModelName(name string) string {
 	if i := strings.Index(name, "/"); i > 0 {
 		return name[i+1:]
@@ -510,16 +477,12 @@ func displayModelName(name string) string {
 	return name
 }
 
-// assistedByModel formats a model name for an Assisted-by trailer:
-// the org prefix is dropped and the MIKE: brand is prepended, e.g.
-// "openai/gpt-4o" → "MIKE:gpt-4o".
+// assistedByModel formats model name for Assisted-by trailer.
 func assistedByModel(name string) string {
 	return "MIKE:" + displayModelName(name)
 }
 
-// buildAssistedBy formats one or more Assisted-by trailer lines.
-// Returns an empty string if no models are provided.
-// Output: "\n\nAssisted-by: model1\nAssisted-by: model2"
+// buildAssistedBy formats Assisted-by trailer lines.
 func buildAssistedBy(models []string) string {
 	if len(models) == 0 {
 		return ""
@@ -535,8 +498,7 @@ func buildAssistedBy(models []string) string {
 	return sb.String()
 }
 
-// buildCommitMessageWithAssistedBy appends Assisted-by trailer(s) to a commit message body.
-// Each unique model gets its own Assisted-by line.
+// buildCommitMessageWithAssistedBy appends Assisted-by trailers to commit message body.
 func buildCommitMessageWithAssistedBy(body string, models []string) string {
 	trailer := buildAssistedBy(models)
 	if trailer == "" {
@@ -545,7 +507,6 @@ func buildCommitMessageWithAssistedBy(body string, models []string) string {
 	return body + trailer
 }
 
-// hasRequestReview checks if an assistant message contains a request_review tool call.
 func hasRequestReview(m *types.ChatMessage) bool {
 	for _, tc := range m.ToolCalls {
 		if tc.Function.Name == types.ToolRequestReview {
@@ -555,7 +516,6 @@ func hasRequestReview(m *types.ChatMessage) bool {
 	return false
 }
 
-// collectToolIDs extracts tool call IDs from a set of assistant messages.
 func collectToolIDs(msgs []*types.ChatMessage) map[string]bool {
 	ids := make(map[string]bool)
 	for _, m := range msgs {
@@ -566,11 +526,7 @@ func collectToolIDs(msgs []*types.ChatMessage) map[string]bool {
 	return ids
 }
 
-// ExtractCommitContext returns the first user message and every assistant message that
-// contains a request_review call, plus those assistants' tool results. Nothing else: working
-// turns are already visible in the diff, so the commit generator gets the task prompt plus
-// what the agent claimed it had done when it asked for review. A conversation with no
-// request_review yields only the task prompt.
+// ExtractCommitContext extracts first user message and request_review turns for commit context.
 func ExtractCommitContext(messages []types.ChatMessage) []types.ChatMessage {
 	var firstUser *types.ChatMessage
 	var requestReviews []*types.ChatMessage // all request_review assistant messages, chronological
@@ -621,9 +577,7 @@ func ExtractCommitContext(messages []types.ChatMessage) []types.ChatMessage {
 	return result
 }
 
-// reviewSummaries returns what each request_review said the work was, oldest first, as one block.
-// A request_review's result is the constant "Task complete", so only the call's summary argument
-// says anything.
+// reviewSummaries returns summaries of all request_review calls.
 func reviewSummaries(taskMsgs []types.TaskMessage) string {
 	messages := groupTaskMessages(taskMsgs)
 	seen := make(map[string]bool)
@@ -647,7 +601,7 @@ func reviewSummaries(taskMsgs []types.TaskMessage) string {
 	return strings.Join(summaries, "\n\n")
 }
 
-// ExtractLastTurns extracts the last N turns (user + assistant pairs, including tool results) from a conversation.
+// ExtractLastTurns extracts the last N turns from a conversation.
 func ExtractLastTurns(messages []types.ChatMessage, n int) []types.ChatMessage {
 	// Group messages into turns: each turn starts with a user message and includes
 	// all following assistant/tool_call messages until the next user message.
@@ -682,21 +636,17 @@ func ExtractLastTurns(messages []types.ChatMessage, n int) []types.ChatMessage {
 	return result
 }
 
-// FormatConversationTurns formats a slice of chat messages into readable text: one labelled
-// block per message, which is what the checkpoint-label prompt reads.
+// FormatConversationTurns formats chat messages into readable text for prompts.
 func FormatConversationTurns(messages []types.ChatMessage) string {
 	return formatTurns(messages, false)
 }
 
-// commitContextText builds the context the commit message generator reads: the messages
-// ExtractCommitContext selected, as one assistant block. A task reviewed more than once
-// contributed more than one change, so each summary is a line under its own text, not a turn.
+// commitContextText builds context for the commit message generator.
 func commitContextText(conversation []types.ChatMessage) string {
 	return formatTurns(ExtractCommitContext(conversation), true)
 }
 
-// formatTurns renders messages as prompt text. With consolidate set, consecutive assistant
-// messages share one "Assistant:" label, written before the first line that needs one.
+// formatTurns renders messages as prompt text.
 func formatTurns(messages []types.ChatMessage, consolidate bool) string {
 	// Map tool IDs to results for status lookup.
 	toolResults := make(map[string]string)

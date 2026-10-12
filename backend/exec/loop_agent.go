@@ -20,15 +20,15 @@ import (
 	"github.com/google/uuid"
 )
 
-// The adapter owns its LLM calls, tools and compaction; this manages the subprocess and streams its events.
+// agentInitialPrompt determines the initial prompt based on session state and history.
 func agentInitialPrompt(task *types.Task, taskMsgs []types.TaskMessage, initialContent string, useSessionResumption bool) (initialPrompt string) {
 	if initialContent != "" {
 		if useSessionResumption {
-			// Agent has the session from switch_session, just send the new message.
+			// resume session
 			initialPrompt = initialContent
 			logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("lazy-start via session resume: sending user message")
 		} else {
-			// Replay context as fallback.
+			// fallback to context replay
 			replayMsgs := taskMsgs
 			if len(taskMsgs) > 0 && taskMsgs[len(taskMsgs)-1].Content == initialContent {
 				replayMsgs = taskMsgs[:len(taskMsgs)-1]
@@ -58,7 +58,7 @@ func agentInitialPrompt(task *types.Task, taskMsgs []types.TaskMessage, initialC
 }
 
 func (te *TaskExecutor) executeTaskWithAgent(setup *taskExecSetup) {
-	// task is rebound from the store later in the run, so it is a local, not an alias of setup.task.
+	// use local copies for consistency.
 	ctx, task, projectID, worktreePath := setup.ctx, setup.task, setup.projectID, setup.worktreePath
 	serverURL, requestedModel := setup.serverURL, setup.modelName
 	userMsgChan, sandboxEnabled, initialContent := setup.userMsgChan, setup.sandboxEnabled, setup.initialContent
@@ -87,7 +87,7 @@ func (te *TaskExecutor) executeTaskWithAgent(setup *taskExecSetup) {
 		return
 	}
 
-	// The adapter names the binary, so it is loaded before anything asks the container about it.
+	// load adapter to find the binary name.
 	prepared, err := te.prepareAgent(ctx, ext, task.ID, worktreePath, sessionName, sandboxEnabled)
 	if err != nil {
 		te.failTask(task, projectID, err.Error(), agentStartErrorCode(err))
@@ -100,7 +100,7 @@ func (te *TaskExecutor) executeTaskWithAgent(setup *taskExecSetup) {
 		return
 	}
 
-	// Kept on the state after the event loop exits: compaction can be asked for while idle.
+	// store runner for post-loop operations (e.g. compaction).
 	te.taskMu.Lock()
 	if state, exists := te.tasks[task.ID]; exists && state.ctx == ctx {
 		state.agentRunner = runner
@@ -121,7 +121,7 @@ func (te *TaskExecutor) executeTaskWithAgent(setup *taskExecSetup) {
 	modelCancel()
 	logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("model=%s", activeModel)
 
-	// Needed to resume the agent's own session after a restart.
+	// resume agent session.
 	sessionFile := runner.SessionFile()
 	if sessionFile != "" {
 		logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("sessionFile=%s", sessionFile)
@@ -142,8 +142,7 @@ func (te *TaskExecutor) executeTaskWithAgent(setup *taskExecSetup) {
 
 	te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.TurnStatusEvent("running", "Agent started"))
 
-	// The subprocess starts fresh every run: resume a saved session if there is one, otherwise
-	// replay the conversation as a transcript.
+	// resume saved session or replay history as a transcript.
 	useSessionResumption := false
 	if len(taskMsgs) > 1 && task.SessionID != "" {
 		switchCtx, switchCancel := context.WithTimeout(ctx, 5*time.Second)
@@ -170,8 +169,7 @@ func (te *TaskExecutor) executeTaskWithAgent(setup *taskExecSetup) {
 		return
 	}
 
-	// An agent that has not reported a status within a bounded window is a failed start; the wait owns
-	// that window and has already reported why if it says stop.
+	// verify agent started.
 	if !te.validateAgentStart(ctx, runner, task, projectID, sandboxEnabled) {
 		return
 	}
@@ -183,9 +181,7 @@ func (te *TaskExecutor) executeTaskWithAgent(setup *taskExecSetup) {
 	var stopReason string
 	var totalPromptTokens, totalPredictedTokens int
 
-	// sendAgentStats publishes a session-stats event. Every field is a cumulative
-	// session total, except cost: some agents report no cost in stats, so it falls back
-	// to the per-message accumulation.
+	// broadcast cumulative session stats. Cost falls back to per-message accumulation if stats report 0.
 	sendAgentStats := func(stats pkgagent.SessionStatsData) {
 		if stats.ContextWindow <= 0 {
 			return
@@ -205,9 +201,7 @@ func (te *TaskExecutor) executeTaskWithAgent(setup *taskExecSetup) {
 		}})
 	}
 
-	// sendAgentComplete clears the frontend's streaming state. Its token figures are
-	// per-turn sums, and a persist entry carries no cache count, so cache_tokens stays 0
-	// here — cumulative cache numbers belong in the stats event.
+	// notify frontend that turn is complete. Token figures are per-turn sums.
 	sendAgentComplete := func(state types.ExecutionState, promptTokens, predictedTokens int, turnDuration time.Duration) {
 		te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
 			"state":            state,
@@ -279,7 +273,7 @@ func (te *TaskExecutor) executeTaskWithAgent(setup *taskExecSetup) {
 					// No tokens received (e.g., error turn); use full duration as gen time
 					predictedMs = turnEnd.Sub(turnStartTime).Milliseconds()
 				}
-				// Inject timing into persist entries so CreateTaskMessage accumulates speeds
+				// add timing for speed metrics.
 				for i := range event.PersistEntries {
 					if event.PersistEntries[i].Role == "assistant" {
 						event.PersistEntries[i].PromptMs = promptMs
@@ -323,8 +317,7 @@ func (te *TaskExecutor) executeTaskWithAgent(setup *taskExecSetup) {
 					}
 				default:
 					te.handleAgentTurnComplete(task, projectID, worktreePath, runner, stopReason, &agentEnded)
-					// idle keeps the loop alive for follow-ups; a terminal state exits and
-					// sends its own complete
+					// keep loop alive for follow-ups.
 					if !agentEnded {
 						sendAgentComplete(task.ExecutionState, totalPromptTokens, totalPredictedTokens, time.Since(turnStartTime))
 					}
@@ -386,18 +379,15 @@ func (te *TaskExecutor) executeTaskWithAgent(setup *taskExecSetup) {
 	}
 }
 
-// agentBinaries is the container-side question the agent pre-flight asks. A test answers it to
-// record which name was asked about, which is the whole behaviour under test.
+// agentBinaries checks if a binary exists in the container.
 type agentBinaries interface {
 	BinaryAvailable(taskID, binary string) bool
 }
 
-// errAgentBinaryNotAvailable is the refusal that a task's sandbox container does not hold the
-// binary its adapter names. It keeps its own code to the browser: a missing binary reads
-// differently from an agent that failed to start.
+// errAgentBinaryNotAvailable is returned when the sandbox container lacks the agent binary.
 var errAgentBinaryNotAvailable = errors.New("agent binary not available in the sandbox container")
 
-// agentStartErrorCode picks the code a start that never reached the event loop reports.
+// agentStartErrorCode maps start errors to codes.
 func agentStartErrorCode(err error) string {
 	if errors.Is(err, errAgentBinaryNotAvailable) {
 		return "agent_not_available"
@@ -405,8 +395,7 @@ func agentStartErrorCode(err error) string {
 	return "agent_start_failed"
 }
 
-// binaryProber answers the container question: whatever was injected, else the task sandbox
-// manager, else nothing — and "nothing" is not "available".
+// binaryProber provides the binary availability check.
 func (te *TaskExecutor) binaryProber() agentBinaries {
 	if te.agentBinaries != nil {
 		return te.agentBinaries
@@ -417,8 +406,8 @@ func (te *TaskExecutor) binaryProber() agentBinaries {
 	return nil
 }
 
-// prepareAgent loads the adapter and, for a sandboxed task, checks the container holds the binary
-// that adapter named. The order is the rule: the adapter is the only place the name exists.
+// prepareAgent initializes the agent and verifies its binary in the sandbox.
+// The adapter is the only place the binary name exists.
 func (te *TaskExecutor) prepareAgent(ctx context.Context, ext *extensions.Extension, taskID, worktreePath, sessionName string, sandboxEnabled bool) (*agent.Prepared, error) {
 	prepared, err := agent.PrepareAgent(ctx, agent.RunnerDeps{
 		Ext:            ext,
@@ -446,10 +435,8 @@ func (te *TaskExecutor) prepareAgent(ctx context.Context, ext *extensions.Extens
 	return prepared, nil
 }
 
-// accumulateAgentSessionCost adds a run's spend to the project's token stats and to the task.
-//
-// The task total is task.SessionCost + finalCost, never finalCost alone: the task arrives with
-// whatever earlier runs left there, and overwriting it resets the session badge to one run's spend.
+// accumulateAgentSessionCost adds current run cost to totals.
+// The task total accumulates costs across multiple runs.
 func (te *TaskExecutor) accumulateAgentSessionCost(projectID string, task *types.Task, finalCost float64, modelName, providerName string) {
 	if finalCost > 0 {
 		if providerName == "" {
@@ -464,22 +451,18 @@ func (te *TaskExecutor) accumulateAgentSessionCost(projectID string, task *types
 
 func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, worktreePath string, runner *agent.AgentRunner, stopReason string, agentEnded *bool) {
 	if task.AutoCommit {
-		// A commit-and-done click merges whatever auto_merge says: read it here, consume it after.
+		// handle commit-and-done.
 		commitDone := task.HasMergeConflict && te.merge.CommitAndDonePending(task.ID)
 		if task.HasMergeConflict {
 			logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("agent finished resolving conflicts, committing resolution")
-			// Same stage + commit steps as the LLM loop (commitConflictResolution). The stash
-			// deliberately differs: this flow pops it because the agent keeps working and
-			// CommitAndMerge runs next, where the LLM loop drops it.
+			// resolve conflicts and commit.
 			commitOK := te.merge.stageResolvedConflicts(task.ID, worktreePath)
 			if commitOK {
 				commitOK = te.merge.commitMergeConflictResolution(task.ID, worktreePath)
 			}
 			if commitOK {
 				logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("conflict resolution committed")
-				// Found by label: this runs long after the sync-merge that pushed — see
-				// NewestStashHashForMessage. Released explicitly, not deferred: a lock held past
-				// here would span the merges below, and merge must come before the stash lock.
+				// restore sync-merge stash.
 				unlockStash := te.worktreeMgr.LockProjectStash(projectID)
 				if _, err := te.worktreeMgr.RestoreStashForTask(worktreePath, git.StashMessageForSyncMerge(task.ID)); err != nil {
 					logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("restoring the sync-merge stash: %v", err)
@@ -511,7 +494,7 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, wor
 			}
 			return
 		}
-		// The conflict is over, so the click is spent - merge failure included.
+		// consume the commit-and-done request.
 		commitDone = te.merge.takeCommitAndDone(task.ID, MergedDelivered(mergeErr))
 		if !MergedDelivered(mergeErr) {
 			logging.For(logging.Agent).With(logging.TaskID, task.ID).Warnf("merge failed, moving to review: %v", mergeErr)
@@ -610,10 +593,8 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, wor
 	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 }
 
-// persistAgentTurnEntries writes pre-parsed agent turn entries to the DB. It is generic over
-// adapters: it only iterates PersistEntry values into TaskMessage rows. The sandbox flag goes
-// into tool_call ToolCallsJSON so the frontend still shows the sandbox icon after a refresh —
-// the adapter knows nothing about sandbox mode, and this mirrors the non-agent loop.
+// persistAgentTurnEntries saves agent turns to the database.
+// Sandbox flag is added to ToolCallsJSON for frontend visibility.
 func (te *TaskExecutor) persistAgentTurnEntries(projectID, taskID, threadID string, entries []pkgagent.PersistEntry, startTime time.Time, sandbox bool) (totalPromptTokens, totalPredictedTokens int) {
 	if len(entries) == 0 {
 		return 0, 0
@@ -642,8 +623,7 @@ func (te *TaskExecutor) persistAgentTurnEntries(projectID, taskID, threadID stri
 			totalPredictedTokens += entry.PredictedTokens
 
 		case "tool_call":
-			// The adapter knows nothing about sandbox mode, so the flag is added here — see the
-			// function comment.
+			// add sandbox flag for frontend.
 			toolCallsJSON := entry.ToolCallsJSON
 			var toolCallData map[string]any
 
@@ -682,8 +662,7 @@ func (te *TaskExecutor) persistAgentTurnEntries(projectID, taskID, threadID stri
 	return totalPromptTokens, totalPredictedTokens
 }
 
-// buildContextReplay renders the conversation as text. It is the fallback when session resumption
-// is unavailable: the subprocess starts with no memory of its own.
+// buildContextReplay creates a text transcript of the history as a fallback.
 func buildContextReplay(messages []types.TaskMessage) string {
 	var sb strings.Builder
 	sb.WriteString("<conversation_history>\n")
@@ -838,11 +817,8 @@ func toStreamEvent(event pkgagent.Event, sandbox bool) types.StreamEvent {
 	}
 }
 
-// validateAgentStart waits for the agent to show it is alive: a status of "running", or persist entries
-// from an agent that answered before saying anything. It returns false when the run must not continue, and
-// in every such case it has already reported the cause (a failed start, or a task the user stopped) — the
-// caller's only job is to return. The window exists because a subprocess that never answers is not
-// "slow", it is absent: nothing else in the run would notice, and the task would sit "running" forever.
+// validateAgentStart ensures the agent is responsive.
+// Returns false if the agent fails to report a status within the timeout.
 func (te *TaskExecutor) validateAgentStart(ctx context.Context, runner *agent.AgentRunner, task *types.Task, projectID string, sandboxEnabled bool) bool {
 	// An agent that has not reported a status within this timeout is a failed start.
 	startupCtx, startupCancel := context.WithTimeout(ctx, 30*time.Second)

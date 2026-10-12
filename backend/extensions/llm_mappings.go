@@ -12,13 +12,11 @@ import (
 	"mike/pkg/logging"
 )
 
-// defaultMappingsFile is used when the llm capability does not name a file.
 const defaultMappingsFile = "mappings.json"
 
-// CollectLLMMappings flattens the mapping files of all enabled `llm`
-// extensions, ordered by (author, name), then file order within each file.
-// Extensions whose mapping file is missing or malformed are skipped with a
-// warning — a broken mappings file must never take down LLM traffic.
+// CollectLLMMappings flattens mapping files of enabled `llm` extensions,
+// ordered by (author, name). A broken mappings file must never take
+// down LLM traffic, so malformed files are skipped with a warning.
 func CollectLLMMappings(store *ExtensionStore, extensionsDir string) ([]llmadapter.Mapping, error) {
 	exts, err := store.GetByType(ExtensionTypeLLM)
 	if err != nil {
@@ -81,9 +79,8 @@ func extensionDir(extensionsDir, author, name string) string {
 	return standard
 }
 
-// mappingsFilePath resolves an extension's mapping file to
-// <extension dir>/<file>, rejecting file values that are absolute, empty, or
-// escape the extension's directory.
+// mappingsFilePath resolves an extension's mapping file to <extension dir>/<file>,
+// rejecting values that are absolute, empty, or escape the directory.
 func mappingsFilePath(extensionsDir, author, name, file string) (string, bool) {
 	file = strings.TrimSpace(file)
 	if file == "" || filepath.IsAbs(file) || strings.Contains(file, "..") {

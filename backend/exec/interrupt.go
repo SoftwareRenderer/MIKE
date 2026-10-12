@@ -10,8 +10,7 @@ const interruptedToolResult = "Interrupted"
 // sends a message, so a message is not queued behind a command that runs for minutes. What the turn
 // settles afterwards (commit, merge, checkpoint) runs on setup.ctx and is never interrupted.
 //
-// len(setup.userMsgChan) is the state and msgWake only the hint; the count can only grow while this
-// watches, because the executor goroutine is that channel's only consumer.
+// len(setup.userMsgChan) tracks pending messages; msgWake notifies the watcher to check the count. The executor goroutine is the sole consumer.
 func toolCallContext(setup *taskExecSetup) (ctx context.Context, cancel context.CancelFunc) {
 	ctx, cancel = context.WithCancel(setup.ctx)
 	pending := len(setup.userMsgChan)

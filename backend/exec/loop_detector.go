@@ -13,7 +13,7 @@ import (
 var pathRegex = regexp.MustCompile(`"path"\s*:\s*"([^"]+)"`)
 
 // extractPathFromArgs extracts the "path" value from (possibly partial) JSON args.
-// Tries regex on raw string, then parsed JSON, then double-encoded JSON.
+// Tries regex, then parsed JSON, then double-encoded JSON.
 func extractPathFromArgs(args string) string {
 	// Try regex on raw string (works when "path" key has appeared in stream)
 	matches := pathRegex.FindStringSubmatch(args)
@@ -43,7 +43,6 @@ func extractPathFromArgs(args string) string {
 }
 
 // countEditLines counts lines added and removed from edit_file tool args.
-// Parses the (possibly partial) JSON to extract oldText/newText from edits array.
 // Returns (added, removed) line counts.
 func countEditLines(args string) (added, removed int) {
 	// Try parsed JSON first (works when full edits array is available)
@@ -101,7 +100,7 @@ func newLoopDetector() *loopDetector {
 }
 
 // reset clears all tracked state (called on user message or after hint injection).
-// Does NOT clear hintIndices — those are preserved until hints are removed from context.
+// Does NOT clear hintIndices.
 func (d *loopDetector) reset() {
 	d.lastReadToolName = ""
 	d.lastReadArgs = ""
@@ -117,13 +116,12 @@ func (d *loopDetector) clearHints() {
 	d.hintIndices = d.hintIndices[:0]
 }
 
-// recordHintIndex tracks the position of an injected loop hint in the messages slice.
+// recordHintIndex tracks the position of an injected loop hint.
 func (d *loopDetector) recordHintIndex(idx int) {
 	d.hintIndices = append(d.hintIndices, idx)
 }
 
 // removeHints removes tracked hint messages from the conversation and clears the tracker.
-// Returns the cleaned messages slice.
 func (d *loopDetector) removeHints(messages []types.ChatMessage) []types.ChatMessage {
 	if len(d.hintIndices) == 0 {
 		return messages
@@ -149,11 +147,8 @@ func (d *loopDetector) resetText() {
 	d.textWindow = d.textWindow[:0]
 }
 
-// asksInLastParagraph reports whether a question mark appears in the final paragraph of a
-// text-only response, paragraphs being the blank-line-separated blocks of markdown text.
-// Only the closing paragraph can be waiting for the user: a response that asked something
-// two paragraphs ago and ends in a statement is a statement. A fenced code block is text
-// like any other.
+// asksInLastParagraph reports whether a question mark appears in the final paragraph.
+// Only the closing paragraph can be waiting for the user.
 func asksInLastParagraph(text string) bool {
 	lines := strings.Split(text, "\n")
 	inParagraph := false
@@ -175,8 +170,7 @@ func asksInLastParagraph(text string) bool {
 	return false
 }
 
-// isQuestionMark covers the question-mark code points rather than ASCII alone: a response
-// written in another script asks with its own mark.
+// isQuestionMark covers question-mark code points for multiple scripts.
 func isQuestionMark(r rune) bool {
 	switch r {
 	case '?', '\u00BF', '\u037E', '\u055E', '\u061F', '\u109E',
@@ -187,9 +181,6 @@ func isQuestionMark(r rune) bool {
 }
 
 // recordTurn records an LLM turn and returns the loop type if detected.
-// toolCalls: the tool calls made this turn (nil or empty for text-only).
-// assistantText: the text content of the response.
-// finishReason: the LLM's finish_reason ("stop", "tool_calls", etc.).
 // Returns (loopType, rawArgs) where rawArgs is the argument text of the repeated call.
 func (d *loopDetector) recordTurn(toolCalls []types.ChatToolCall, assistantText, finishReason string) (LoopType, string) {
 	hasToolCalls := len(toolCalls) > 0 && toolCalls[0].Function.Name != ""
@@ -239,8 +230,8 @@ func (d *loopDetector) recordTurn(toolCalls []types.ChatToolCall, assistantText,
 	return LoopNone, ""
 }
 
-// checkStreamingText feeds accumulated streaming text into the phrase and block detectors.
-// Sets phraseFired flag and returns LoopPhrase if exact phrase repetition is detected.
+// checkStreamingText feeds accumulated streaming text into detectors.
+// Returns LoopPhrase if repetition is detected.
 func (d *loopDetector) checkStreamingText(text string) LoopType {
 	if d.phraseDet.check(text) {
 		d.phraseFired = true
@@ -267,9 +258,8 @@ const (
 	redirToken = ">"
 )
 
-// shellTokens splits a shell command into words and separator tokens. Only a separator outside quotes
-// separates, a backslash makes the rune after it text (so an escaped quote does not end a quoted word), and
-// an unbalanced quote is tolerated: this feeds a loop hint, not a permission check.
+// shellTokens splits a shell command into words and separator tokens.
+// Handles quotes and escaped characters.
 func shellTokens(cmd string) []string {
 	rs := []rune(cmd)
 	var tokens []string
@@ -335,8 +325,7 @@ func separatorToken(r rune) string {
 	}
 }
 
-// isReadOnlyCall classifies a tool call as read-only or state-changing. It chooses which hint to
-// show; it grants nothing.
+// isReadOnlyCall classifies a tool call as read-only or state-changing.
 func isReadOnlyCall(toolName, rawArgs string) bool {
 	switch toolName {
 	case types.ToolReadFile:
@@ -359,8 +348,8 @@ func isReadOnlyCall(toolName, rawArgs string) bool {
 	return true
 }
 
-// readOnlyCommands and stateChangingCommands are the two known vocabularies of verbs. A verb in neither —
-// `cd`, a repository's own script, an installed tool — decides nothing and counts as read-only.
+// readOnlyCommands and stateChangingCommands are the two known vocabularies of verbs.
+// Verbs in neither count as read-only.
 var readOnlyCommands = []string{
 	"head", "tail", "cat", "wc", "ls", "stat", "file", "diff",
 	"grep", "find", "echo", "printf", "pwd", "whoami", "uname",
@@ -379,10 +368,8 @@ var stateChangingCommands = []string{
 	"git", "docker", "kubectl", "terraform", "ansible",
 }
 
-// isReadOnlyCommand reports whether every command on a shell line only reads. Each `&&`, `||`, `;` and pipe
-// segment is judged on its own, so neither a later `;` command nor a downstream pipe stage hides behind the
-// first verb. The verdict picks which loop hint to show and grants nothing: no command text can make it
-// refuse, panic or end the turn that asked for it.
+// isReadOnlyCommand reports whether every command on a shell line only reads.
+// Each segment (separated by |, &&, ;) is judged individually.
 func isReadOnlyCommand(cmd string) bool {
 	tokens := shellTokens(cmd)
 	for start := 0; ; {
@@ -405,9 +392,7 @@ func endsSegment(tok string) bool {
 	return tok == sepPipe || tok == sepAnd || tok == sepSemi
 }
 
-// readOnlySegment judges one command: a redirect writes a file whatever the verb is, and otherwise the verb
-// — the segment's first word — decides. A segment with no words is a leading or doubled separator, and
-// falls open like any command this classifier cannot read.
+// readOnlySegment judges one command: a redirect writes a file, otherwise the first word decides.
 func readOnlySegment(segment []string) bool {
 	for _, t := range segment {
 		if t == redirToken {

@@ -13,31 +13,17 @@ const (
 	MaxRelSegmentLen = 255 // NAME_MAX on every supported filesystem
 )
 
-// RelInsideRoot reports whether rel — a path as filepath.Rel(root, target) writes it, so the
-// host's own separator — names target as
-// root itself or something under it. filepath.Rel answers "how do I get there", so the two
-// spellings that mean "not under root" are ".." and anything below it; rel == "." is the target
-// being the root, which is inside it. A cleaned user-supplied path answers the same question, and
-// this is not a lexical-only check: the symlink-resolved side is fsutil.Contained's. A path in the
-// API's slash grammar is the other separator's question (see server.repoRelativePath).
+// RelInsideRoot reports whether rel (produced by filepath.Rel) names a target that is the root itself or something under it. It rejects ".." and paths starting with "../". For symlink-resolved checks, use Contained(). For paths using forward slashes on all platforms, see server.repoRelativePath().
 func RelInsideRoot(rel string) bool {
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-// RelBelowRoot is RelInsideRoot for a caller that needs the target strictly below the root — a
-// file under a directory, a subdir of a checkout — where the root itself is not an answer. The
-// two questions are kept apart because a site that means one and reads the other either accepts
-// the directory as its own file or refuses a legitimate root.
+// RelBelowRoot reports whether rel is strictly below the root (not the root itself).
 func RelBelowRoot(rel string) bool {
 	return rel != "." && RelInsideRoot(rel)
 }
 
-// ValidateRelPath checks the shape of a client-supplied path meant to be joined
-// onto a directory that is already contained: non-empty, relative, free of
-// "."/".." and empty segments, free of backslashes (another tool's separator) and
-// control characters, within the length limits above, and not a name
-// WriteFileAtomic's temporary files use. Shape only — whether the joined path is
-// inside the project is a separate check (see Server.validateFSPath).
+// ValidateRelPath ensures a client-supplied relative path is well-formed: no absolute paths, no "." or "..", no empty segments, no backslashes or control characters, and within length limits. It also rejects names reserved for atomic writes.
 func ValidateRelPath(rel string) error {
 	if rel == "" {
 		return fmt.Errorf("path is empty")

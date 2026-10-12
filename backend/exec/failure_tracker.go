@@ -19,12 +19,10 @@ type failureTracker struct {
 // Returns the current consecutive failure count after processing.
 func (t *failureTracker) recordTurn(results []turnResult) int {
 	if len(results) == 0 {
-		// Text-only response resets counter
 		t.reset()
 		return 0
 	}
 
-	// If any tool succeeded, reset
 	for _, r := range results {
 		if r.success {
 			t.reset()
@@ -32,20 +30,17 @@ func (t *failureTracker) recordTurn(results []turnResult) int {
 		}
 	}
 
-	// All failed — check if they all share the same signature
 	sigs := make(map[string]struct{})
 	for _, r := range results {
 		sigs[r.signature] = struct{}{}
 	}
 
 	if len(sigs) > 1 {
-		// Different tool calls failed — reset counter, start fresh with the last one
 		t.lastFailureSig = results[len(results)-1].signature
 		t.failCount = 1
 		return 1
 	}
 
-	// All failed with the same signature
 	sig := results[0].signature
 	if sig == t.lastFailureSig {
 		t.failCount++
@@ -56,7 +51,6 @@ func (t *failureTracker) recordTurn(results []turnResult) int {
 	return t.failCount
 }
 
-// reset clears all tracked state.
 func (t *failureTracker) reset() {
 	t.lastFailureSig = ""
 	t.failCount = 0

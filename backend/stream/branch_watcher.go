@@ -21,7 +21,6 @@ type branchProject struct {
 type branchBroadcastFn func(projectID, branch string)
 
 // BranchWatcher detects branch switches by watching .git/HEAD via fsnotify.
-// Replaces the polling-based branch poller with event-driven detection.
 type BranchWatcher struct {
 	mu        sync.Mutex
 	watcher   *fsnotify.Watcher

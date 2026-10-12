@@ -19,12 +19,8 @@ type TaskCommitsResult struct {
 	Commits    []TaskCommit `json:"commits"`
 }
 
-// taskCommitFormat is the `git log --format` behind every task commit list. Both readers
-// of that log (the worktree, and the project checkout after commit-and-done) parse this
-// one format, so it is declared once.
-//
-// The separator is %x1f, not '|': a subject may contain a pipe, which would arrive as a
-// truncated subject and a date that is really part of the subject.
+// taskCommitFormat defines the git log format used for task commit lists. It uses
+// %x1f as a separator because commit subjects may contain pipes.
 const taskCommitFormat = "--format=%H%x1f%h%x1f%s%x1f%aI"
 
 // ParseTaskCommits turns that output into commits, newest first. A line missing any of
@@ -50,11 +46,9 @@ func ParseTaskCommits(out string) []TaskCommit {
 	return commits
 }
 
-// TaskCommitsIn reads a task's commit log from the checkout in dir: BaseCommit is the
-// commit baseRef names (nil if empty or unresolvable) and Commits are those in
-// baseRef..headRef. An empty headRef means HEAD; an empty baseRef means all of headRef.
-// A live worktree asks for HEAD; a task whose worktree is gone asks for the branch tip
-// stored on its row. Refs get --end-of-options so a leading dash is not read as a flag.
+// TaskCommitsIn reads the commit log from the checkout in dir. It returns commits
+// in the range baseRef..headRef. If baseRef is provided, it also resolves the base commit.
+// --end-of-options is used to prevent refs starting with '-' from being read as flags.
 func TaskCommitsIn(dir, baseRef, headRef string) (*TaskCommitsResult, error) {
 	if headRef == "" {
 		headRef = "HEAD"

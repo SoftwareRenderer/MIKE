@@ -18,8 +18,6 @@ import (
 	"mike/pkg/logging"
 )
 
-// removeExtensionFiles deletes a deleted extension's materialized directory and returns a sentence
-// naming the path when it could not. It returns "" when the files are gone, including "there were none".
 func (h *ExtensionHandler) removeExtensionFiles(ext *Extension) string {
 	if ext == nil {
 		return "the extension record is missing, so no files could be located"
@@ -27,8 +25,7 @@ func (h *ExtensionHandler) removeExtensionFiles(ext *Extension) string {
 	return h.removeMaterializedDir(ext.ID, ext.Author, ext.Name)
 }
 
-// removeMaterializedDir deletes one extension's directory under the extensions root, deriving the path
-// through extensionDir from author and name - the only derivation every reader uses, and both names come
+// removeMaterializedDir derives the path through extensionDir from author and name - the only derivation every reader uses, and both names come
 // from a third-party manifest. Used by the delete endpoint (a row exists) and by a failed install (none
 // was written, and the files must not outlive the attempt).
 func (h *ExtensionHandler) removeMaterializedDir(extID, author, name string) string {
@@ -46,7 +43,6 @@ func (h *ExtensionHandler) removeMaterializedDir(extID, author, name string) str
 	return removeInstalledDir(extID, absRoot, extensionDir(absRoot, author, name))
 }
 
-// removeInstalledDir removes one derived directory, and the author folder once it is empty.
 func removeInstalledDir(extID, absRoot, dir string) string {
 	// Never the root, never outside it: checked lexically and again with symlinks resolved, because a
 	// symlinked extensions/<author> would otherwise delete whatever it points at.

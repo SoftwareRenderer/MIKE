@@ -7,12 +7,9 @@ import (
 	"mike/backend/types"
 )
 
-// taskUpdateRequest is the body of PUT /api/projects/{projectID}/tasks/{taskID}.
-//
-// Every field is a pointer because the endpoint is a partial update: an absent key means "leave
-// that column alone", a present one means "write this value" — including "" and false. A JSON
-// null decodes to nil and reads as absent. A wrong-typed value is a 400 naming that field, and
-// nothing is written until every field validates.
+// taskUpdateRequest handles partial updates to a task. Every field is a pointer so that
+// absent keys are ignored, present keys are written (including "" and false), and JSON nulls
+// are treated as absent. Nothing is written until every field validates.
 type taskUpdateRequest struct {
 	Title                     *string `json:"title"`
 	Prompt                    *string `json:"prompt"`
@@ -41,8 +38,8 @@ type taskUpdateRequest struct {
 // parent changes - the caller must tell it which ones the client sent itself.
 var autoMergeFieldNames = []string{"auto_commit", "auto_merge", "subtasks_auto_merge"}
 
-// autoMergeFieldsSent reports which of those the client sent, in the shape ApplyTaskCreationDefaults
-// wants for its skip set.
+// autoMergeFieldsSent reports which of autoMergeFieldNames the client sent, in the shape
+// ApplyTaskCreationDefaults wants for its skip set.
 func (u *taskUpdateRequest) autoMergeFieldsSent() map[string]struct{} {
 	sent := make(map[string]struct{})
 	for _, name := range autoMergeFieldNames {
@@ -62,15 +59,12 @@ func (u *taskUpdateRequest) autoMergeFieldsSent() map[string]struct{} {
 	return sent
 }
 
-// apply writes the fields the body carried onto task and reports whether operating_mode changed,
-// which the caller needs in order to remount a container that is not running.
-//
-// Every validation runs before anything is written, so a body this handler rejects leaves the
-// task exactly as it was found.
+// apply reports whether operating_mode changed, which is needed to remount a container
+// that is not running. Every validation runs before anything is written, so a rejected
+// body leaves the task exactly as it was found.
 func (u *taskUpdateRequest) apply(task *types.Task) (operatingModeChanged bool, err error) {
-	// Validate first: a bad status leaves a card on no column at all, a bad execution_state a card
-	// with no spinner and no transition out, and a bad mode a task with write tools that the user
-	// believes is read-only.
+	// Validate first: a bad status leaves a card on no column, a bad execution_state a card
+	// with no spinner, and a bad mode a task with write tools the user believes is read-only.
 	var status types.Status
 	if u.Status != nil {
 		var valid bool
@@ -169,24 +163,22 @@ func (u *taskUpdateRequest) apply(task *types.Task) (operatingModeChanged bool, 
 	return operatingModeChanged, nil
 }
 
-// badField is the only error apply returns: a message already written for the client, so apply can
-// never leak an internal error into a response.
+// badField returns an error message written for the client, so apply never
+// leaks internal errors into a response.
 func badField(msg string) error { return errors.New(msg) }
 
-// fieldsPresent is the create path's answer to "did the client send this key at all", which a
-// decoded struct cannot tell you: a zero value and an omitted field look identical. It holds
-// json.RawMessage so the one value read back out of it, attachments, is decoded rather than
-// asserted - `att.(string)` panicked on a number.
+// fieldsPresent identifies sent keys to distinguish between zero values and omitted fields.
+// It uses json.RawMessage so attachments are decoded rather than asserted, preventing
+// panics on unexpected types.
 type fieldsPresent map[string]json.RawMessage
 
-// has reports whether the body carried key.
 func (f fieldsPresent) has(key string) bool {
 	_, ok := f[key]
 	return ok
 }
 
-// decode reads key into target, reporting false when the key is absent or null. A value that will
-// not decode is the client's mistake, and the error names the field.
+// decode reports false when key is absent or null. A value that will not decode is
+// the client's mistake, and the error names the field.
 func (f fieldsPresent) decode(key string, target any) (bool, error) {
 	raw, ok := f[key]
 	if !ok || string(raw) == "null" {

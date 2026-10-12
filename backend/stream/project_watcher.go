@@ -144,9 +144,9 @@ func (pw *ProjectWatcher) handleEvent(event fsnotify.Event) {
 		return
 	}
 
-	// The atomic-write temporary (fsutil.IsAtomicTemp) must not take this project's
-	// debounce slot, or the browser hears about a file that has already been renamed
-	// away. The worktree watcher skips the same names via git.ShouldIgnoreFile.
+	// Ignore atomic-write temporaries to avoid broadcasting files that are
+	// immediately renamed away. The worktree watcher skips the same names
+	// via git.ShouldIgnoreFile.
 	if fsutil.IsAtomicTemp(event.Name) {
 		pw.mu.Unlock()
 		return

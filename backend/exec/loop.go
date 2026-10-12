@@ -31,14 +31,12 @@ var imageExts = map[string]struct{}{
 	".svg": {}, ".ico": {}, ".tiff": {}, ".tif": {}, ".avif": {}, ".apng": {},
 }
 
-// isImageFile returns true if the file path has a known image extension.
 func isImageFile(path string) bool {
 	lower := strings.ToLower(filepath.Ext(path))
 	_, ok := imageExts[lower]
 	return ok
 }
 
-// unstageNewBinaryFiles unstages newly staged binary non-image files.
 func unstageNewBinaryFiles(wm *git.WorktreeManager, taskID string) {
 	out, err := wm.GitRunInWorktreeOutput(taskID, "diff", "--staged", "--numstat", "--diff-filter=A")
 	if err != nil || len(strings.TrimSpace(out)) == 0 {
@@ -55,15 +53,13 @@ const (
 	llmRetryWindow   = 3 * time.Minute
 )
 
-// backoffFor returns the duration to wait before the next LLM retry attempt. It is the ladder
-// production runs; the retry loop reads TaskExecutor.llmBackoff, which defaults to this.
+// backoffFor returns the wait duration for the next LLM retry attempt. It serves as the default backoff strategy.
 func backoffFor(attempt int, err error) time.Duration {
 	var le *llama.LlamaError
 	if errors.As(err, &le) && le.IsRateLimit() && le.RetryAfter > 0 {
 		return le.RetryAfter + time.Second + jitter()
 	}
-	// A stream that went quiet is the provider being slow, not the link being broken. Waiting less
-	// than the silence already observed just re-issues the request into the same slowness.
+	// Waiting less than the observed silence just re-issues the request into the same slowness.
 	var silent *llama.ErrStreamSilent
 	if errors.As(err, &silent) && silent.Silent > 0 {
 		return silent.Silent + time.Second + jitter()
@@ -71,17 +67,13 @@ func backoffFor(attempt int, err error) time.Duration {
 	return time.Duration(1<<attempt) * 2 * time.Second // 2s, 4s, 8s, ...
 }
 
-// llmIsRequestRejected reports a provider answer that says our request was unacceptable. Calling it
-// again sends the same body to the same refusal, so the retry loop is skipped and the failure is
-// reported as what it is: a request to fix, not a connection to wait out.
+// llmIsRequestRejected reports a provider refusal. Since retrying the same request will fail again, the retry loop is skipped.
 func llmIsRequestRejected(err error) bool {
 	var le *llama.LlamaError
 	return errors.As(err, &le) && le.IsRequestRejected()
 }
 
-// llmFailure is the sentence and the code a failed LLM call is reported under. They are decided
-// together because the two faults ask different things of the reader: a lost connection may answer on
-// the next try, a refused request will not, and only a refused request is a bug in MIKE.
+// llmFailure pairs a failure code with a user-facing sentence. Different codes distinguish between transient connection issues and deterministic request rejections.
 type llmFailure struct {
 	code     string
 	sentence string
@@ -109,12 +101,7 @@ func classifyLLMFailure(err error) llmFailure {
 // sentence shown for it.
 const streamSilenceDomain = "model"
 
-// streamSilenceWatcher tells the people watching a turn that its provider has sent nothing for a
-// while, and takes the notice back as soon as the stream speaks or the call ends. It rides the
-// slow-lock channel because a wait with a name already has a place in the chat.
-//
-// Nothing here ends a call: silence means the provider is holding its answer back, not that the
-// link is gone - llama.ErrStreamSilent holds that measurement.
+// streamSilenceWatcher announces a quiet provider and withdraws the notice when the stream speaks or the call ends. Silence indicates a slow provider, not a broken link.
 type streamSilenceWatcher struct {
 	mu        sync.Mutex
 	send      func(string, string, types.StreamEvent)
@@ -135,9 +122,7 @@ func (te *TaskExecutor) newStreamSilenceWatcher(projectID, taskID string) *strea
 	}
 }
 
-// notice is the wait frame every locked-out caller already uses, carrying one extra field: which
-// kind of quiet this is. "Still waiting for the first token" and "stopped mid-answer" need
-// different sentences, and a person deciding whether to wait needs the difference.
+// notice sends a lock-wait event to the frontend, specifying the current silence phase.
 func (w *streamSilenceWatcher) notice(waited time.Duration, acquired bool, phase string) {
 	w.send(w.projectID, w.taskID, types.StreamEvent{Type: types.WSTypeLockWait, Data: map[string]any{
 		"domain":         streamSilenceDomain,
@@ -231,7 +216,6 @@ func newStreamFlusher(projectID, taskID string, send func(projectID, taskID stri
 	}
 }
 
-// appendToken buffers a token for batched sending.
 func (f *streamFlusher) appendToken(text string) {
 	f.loopDetector.checkStreamingText(text)
 	f.mu.Lock()
@@ -239,14 +223,12 @@ func (f *streamFlusher) appendToken(text string) {
 	f.mu.Unlock()
 }
 
-// appendReasoning buffers reasoning text for batched sending.
 func (f *streamFlusher) appendReasoning(text string) {
 	f.mu.Lock()
 	f.reasoningBuf.WriteString(text)
 	f.mu.Unlock()
 }
 
-// appendToolCall buffers a tool call delta for batched sending.
 func (f *streamFlusher) appendToolCall(toolID, toolName, displayName, path, args string, argLen, prevLen int, sandbox bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -401,7 +383,6 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 	setupCopy := *shared
 	setup := &setupCopy
 
-	// Declare lc at function scope so the defer can reference it.
 	var lc *loopContext
 	defer func() {
 		close(setup.done) // signal executor exit for ForwardUserMessage type-switch
@@ -477,7 +458,6 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 		te.confirmMemReservation(setup)
 	}
 
-	// Check if this setup.task uses an agent provider
 	if te.configStore.IsAgentProvider(setup.serverURL) {
 		logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Infof("detected agent provider (url=%s), calling executeTaskWithAgent", setup.serverURL)
 		te.executeTaskWithAgent(setup)

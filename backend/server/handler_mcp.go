@@ -8,12 +8,10 @@ import (
 	"mike/backend/mcp"
 )
 
-// handleMCPTest serves POST /api/mcp/test: Settings → MCP asking one server whether it is there. A
-// verdict is a 200 carrying a kind and a sentence a person can act on; only a body that cannot be dialled
-// at all is a 4xx naming the field, and nothing is written.
+// handleMCPTest tests a single MCP server's availability. Returns a 200 with the
+// server's response, or a 4xx if the server cannot be reached.
 func (s *Server) handleMCPTest(w http.ResponseWriter, r *http.Request) {
-	// A probe dials what the browser typed, so under the lock it is the one way to reach an address no
-	// person registered. It refuses before the dial rather than after.
+	// probes the provided address; refuses if MCP is restricted before attempting the dial.
 	if s.settings.RestrictMCP {
 		httputil.JSONError(w, http.StatusForbidden, config.ErrMCPLocked.Error())
 		return

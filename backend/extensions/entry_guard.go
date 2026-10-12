@@ -7,11 +7,10 @@ import (
 	"strings"
 )
 
-// refuseUninstallable judges the two index fields that reach the host before any manifest is
-// read. Name derives the directory the checkout is os.RemoveAll'd into, and unsafeDirName is
-// the rule the delete path already holds a stored record to. DockerfileURL is fetched and
-// handed to podman build, whose RUN steps run on the host runtime — no --runtime reaches
-// podman build. A row or index restored from before this rule is not consent.
+// refuseUninstallable prevents extensions from gaining host access before any manifest is read.
+// It rejects unsafe directory names that could be target of os.RemoveAll.
+// It also validates DockerfileURL because podman build's RUN steps execute on the host runtime,
+// as --runtime does not affect the build process. Restore of an old index does not bypass this.
 func refuseUninstallable(entry *RegistryEntry) error {
 	if reason := unsafeDirName(entry.Name); reason != "" {
 		return fmt.Errorf("registry entry %s", reason)

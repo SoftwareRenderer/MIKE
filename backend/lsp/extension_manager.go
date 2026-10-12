@@ -20,13 +20,13 @@ import (
 	"mike/pkg/logging"
 )
 
-// errStaleClient marks a sandbox bridge connection that has outlived its process. The
+// errStaleClient marks a bridge connection that outlived its process. The
 // handler drops the workspace entry on seeing it so the next request reconnects - match it
 // with errors.Is, since matching the text lets a reword disable the recovery.
 var errStaleClient = errors.New("stale")
 
 // ServerConfig holds the configuration for a single language server. The argv is not part of it:
-// the manifest is the only source of what gets executed (see startSession).
+// the manifest is the only source of what gets executed.
 type ServerConfig struct {
 	Command string // binary to execute (e.g., "gopls")
 	// FileTypes is what the extension declares it serves, and what its server calls each one —
@@ -39,8 +39,8 @@ type ServerConfig struct {
 	ChatDiagnostics bool
 }
 
-// LanguageIDFor answers what a document notification must call this file — the per-file id, not
-// the routing language, because tsserver keeps the first verdict it hears for a URI.
+// LanguageIDFor returns the per-file ID for document notifications, not the routing
+// language; tsserver keeps the first verdict it hears for a URI.
 func (c *ServerConfig) LanguageIDFor(name string) string {
 	if c == nil {
 		return ""
@@ -48,37 +48,34 @@ func (c *ServerConfig) LanguageIDFor(name string) string {
 	return (&extensions.LSPConfig{Language: c.Language, FileTypes: c.FileTypes}).LanguageIDFor(name)
 }
 
-// lspStartTimeout bounds `lsp_start`, which the bridge answers as soon as it has spawned the
-// server, so it only ever waits on a bridge that stopped answering: a whole sandbox coming up
-// cold takes well under a second.
+// lspStartTimeout bounds `lsp_start`. The bridge answers once the server is spawned,
+// so this only waits on a dead bridge; cold sandboxes start in under a second.
 const lspStartTimeout = 8 * time.Second
 
-// lspRequestTimeout ceilings one LSP tool request (references, hover, rename). It is derived
-// from the caller's context, so stopping a task ends the call instead of letting it hold the
-// worktree lock.
+// lspRequestTimeout ceilings one LSP tool request. Derived from the caller's context
+// so stopping a task releases the worktree lock.
 const lspRequestTimeout = 15 * time.Second
 
-// lspSendTimeout ceilings one sandbox-bridge round trip. It is derived from the caller's context so
-// the caller's deadline always wins; minted from context.Background() it would make every budget in
-// the caller advisory.
+// lspSendTimeout ceilings one bridge round trip. Derived from the caller's context
+// so the caller's deadline wins.
 const lspSendTimeout = 30 * time.Second
 
-// lspInitReplyTimeout bounds the initialize response at four times the slowest healthy reply.
-// A server that never finishes initializing must not look like a slow one for half a minute.
+// lspInitReplyTimeout bounds the initialize response. A server that never initializes
+// must not appear merely slow.
 const lspInitReplyTimeout = 5 * time.Second
 
-// ExtensionLSPManager manages LSP connections that live inside extension sandboxes, discovering
-// each language server through the extension system.
+// ExtensionLSPManager manages LSP connections in extension sandboxes, discovered
+// via the extension system.
 type ExtensionLSPManager struct {
 	extStore   *extensions.ExtensionStore
 	extSandbox *extensions.ExtensionSandboxManager
 	projects   projectPaths
 	mu         sync.Mutex
 	clients    map[string]*sandboxClient // workspaceKey → client state
-	// serverCh receives messages from all LSP servers. An answer dropped here is a browser waiting
-	// on a request its server already answered, so the send waits for room — see deliverToRouter.
+	// serverCh receives messages from all LSP servers. Sends wait for room to avoid
+	// dropping answers for waiting browsers.
 	serverCh chan json.RawMessage
-	// done closes once, at Close, so a blocked deliverToRouter cannot outlive the handler.
+	// done closes at Close to stop blocked deliverToRouter calls.
 	done      chan struct{}
 	closeOnce sync.Once
 	// subscribers receive a copy of all LSP server messages (for filtered listening)
@@ -92,43 +89,38 @@ type sandboxClient struct {
 	workspace    string // host workspace path
 	language     string
 	extensionID  string
-	// projectMounts maps host project path → container mount path (/mnt/<project-dirname>),
+	// projectMounts maps host project paths to container mount paths (/mnt/<project-dirname>)
 	// for URI translation.
 	projectMounts map[string]string
-	// initMu serializes the handshake on this connection: `initialized` is one flag shared
-	// by every caller of EnsureInitialized (tools, the editor channel, the diagnostics pass),
-	// so neither the check nor the handshake may race another caller into asking twice.
+	// initMu serializes the handshake; `initialized` is shared by all callers so the
+	// handshake only happens once.
 	initMu      sync.Mutex
 	initialized bool
 	openedFiles map[string]bool
-	// The last content sent per URI, so an on-disk change (an agent edit between LSP calls)
-	// can be re-synced via didChange: tsserver and gopls do not watch the filesystem.
+	// tracks content sent per URI to sync on-disk changes via didChange;
+	// tsserver and gopls do not watch the filesystem.
 	openedFileContents map[string]string
 	openedFileVersions map[string]int
-	// refs counts the holders that can hand the connection back — the editor WebSocket and a
-	// diagnostics pass. Agent tool calls are not counted: they have no lifetime in which to
-	// release, so counting them would keep every server alive forever.
+	// counts holders (editor WebSocket, diagnostics pass). Tool calls are not counted
+	// to avoid pinning servers forever.
 	refs int
-	// Set when the language server is gone. The bridge connection outlives it, so without this
-	// flag the map keeps handing out a connection that only answers `lsp server died`.
+	// set when the server exits. The bridge connection outlives the server; this flag
+	// prevents handing out dead connections.
 	dead atomic.Bool
-	// extension is the installed record this connection was created from: its manifest
-	// declares the workspace files whose change makes this server re-read the project, and
-	// core never interprets a file name.
+	// the extension record used for this connection; its manifest declares which
+	// file changes trigger a project re-read.
 	extension *extensions.Extension
 	// The dependency directory is a container-level `-e` (see extensions.DependencyMount),
 	// never a per-connection setting.
 }
 
-// usable reports whether requests may still go through this connection: both the bridge
-// connection and the language server on the far end of it have to be standing.
+// usable reports if requests can go through: both the bridge and the server must be alive.
 func (sc *sandboxClient) usable() bool {
 	return sc != nil && sc.bridgeClient != nil && sc.bridgeClient.IsAlive() && !sc.dead.Load()
 }
 
-// newSandboxClient builds a sandboxClient with its document-sync maps ready to write —
-// ensureDocSync writes them unconditionally, so a struct literal panics on the first tool call.
-// A new client has no holders; see sandboxClient.refs.
+// newSandboxClient builds a sandboxClient with initialized sync maps to prevent panics.
+// New clients have no holders.
 func newSandboxClient(bridgeClient *bridge.Client, workspace, language, extensionID string, projectMounts map[string]string) *sandboxClient {
 	return &sandboxClient{
 		bridgeClient:       bridgeClient,
@@ -142,7 +134,7 @@ func newSandboxClient(bridgeClient *bridge.Client, workspace, language, extensio
 	}
 }
 
-// swapPrefix replaces a path's leading root and reports whether it had one.
+// swapPrefix replaces a path's leading root and reports if it was found.
 func swapPrefix(path, from, to string) (string, bool) {
 	if rest, ok := strings.CutPrefix(path, from); ok {
 		return to + rest, true
@@ -150,8 +142,7 @@ func swapPrefix(path, from, to string) (string, bool) {
 	return "", false
 }
 
-// translateURIs recursively rewrites file URIs in data, host paths → container paths when
-// toContainer is true and the other way round when it is false.
+// translateURIs recursively rewrites file URIs between host and container paths.
 func translateURIs(val any, workspacePath string, projectMounts map[string]string, toContainer bool) any {
 	switch v := val.(type) {
 	case string:
@@ -196,8 +187,8 @@ func translateURIs(val any, workspacePath string, projectMounts map[string]strin
 	}
 }
 
-// translateURIsMsg translates file URIs in a JSON message, returning the
-// original message unchanged if it is not valid JSON or re-marshal fails.
+// translateURIsMsg translates URIs in a JSON message; returns original if JSON is
+// invalid or marshal fails.
 func translateURIsMsg(msg json.RawMessage, workspacePath string, projectMounts map[string]string, toContainer bool) json.RawMessage {
 	var data any
 	if err := json.Unmarshal(msg, &data); err != nil {
@@ -221,8 +212,7 @@ func translateURIsToHost(msg json.RawMessage, workspacePath string, projectMount
 }
 
 // NewExtensionLSPManager creates a new ExtensionLSPManager.
-// projectPaths is the single thing the LSP manager needs from the project table: the
-// registered workspace paths, which bound which mount a language server may see.
+// projectPaths provides registered workspace paths to bound language server mounts.
 type projectPaths interface {
 	ListProjects() ([]types.Project, error)
 }
@@ -239,9 +229,8 @@ func NewExtensionLSPManager(extStore *extensions.ExtensionStore, extSandbox *ext
 	}
 }
 
-// deliverToRouter hands one message to the handler's router, waiting for room rather than
-// dropping it. Waiting is safe because the router never blocks on a browser, and the send ends at
-// Close.
+// deliverToRouter hands a message to the router, waiting for room. Safe because
+// the router never blocks on a browser.
 func (m *ExtensionLSPManager) deliverToRouter(msg json.RawMessage) {
 	select {
 	case m.serverCh <- msg:
@@ -249,9 +238,8 @@ func (m *ExtensionLSPManager) deliverToRouter(msg json.RawMessage) {
 	}
 }
 
-// SandboxMemory returns the live memory usage of the sandbox running the language server for
-// the given workspace and file, resolved to a language through the extension registry. Zero
-// stats (Running: false) when nothing is running there.
+// SandboxMemory returns memory usage of the sandbox running the language server for the
+// given workspace and file. Returns zero stats if nothing is running.
 func (m *ExtensionLSPManager) SandboxMemory(workspacePath, filePath string) *types.SandboxMemoryStats {
 	cfg := m.GetRegistry().Lookup(filePath)
 	if cfg == nil {
@@ -275,8 +263,7 @@ func (m *ExtensionLSPManager) SandboxMemory(workspacePath, filePath string) *typ
 	return m.extSandbox.GetMemoryStats(extensionID)
 }
 
-// Close retires every connection rather than emptying the map, so no `podman exec`, language
-// server, or sandbox reference is left stranded.
+// Close retires every connection to avoid leaving stranded processes or sandbox references.
 func (m *ExtensionLSPManager) Close() {
 	m.closeOnce.Do(func() { close(m.done) })
 	m.mu.Lock()
@@ -296,9 +283,8 @@ func (m *ExtensionLSPManager) GetRegistry() *ExtensionRegistry {
 	return &ExtensionRegistry{extStore: m.extStore}
 }
 
-// GetOrCreate returns the connection for one workspace and language and takes a reference for
-// the caller; Release hands it back, and the connection dies with the last holder. ctx bounds
-// creation, including the server start — see lspStartTimeout.
+// GetOrCreate returns the connection and takes a reference; Release hands it back.
+// Connection dies with the last holder.
 func (m *ExtensionLSPManager) GetOrCreate(ctx context.Context, workspacePath, language string) (*LSPProcess, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -326,10 +312,8 @@ func (m *ExtensionLSPManager) GetOrCreate(ctx context.Context, workspacePath, la
 	}, nil
 }
 
-// startSession gives one workspace its own language server on a dedicated bridge connection (a
-// language server has one root, so two workspaces on one connection answers one of them about
-// the other's project), plus the publish pump. A cold attach that loses the key joins the
-// installed connection and closes the bridge it opened.
+// startSession gives a workspace its own server on a dedicated bridge (servers have one root).
+// Cold attaches that lose the race join the winner.
 func (m *ExtensionLSPManager) startSession(ctx context.Context, ext *extensions.Extension, workspacePath, language string, refs int) (*sandboxClient, error) {
 	workspaceKey := processKey(workspacePath, language)
 	lspConfig := ext.Manifest.Capabilities.GetLSP()
@@ -405,9 +389,8 @@ func (m *ExtensionLSPManager) startSession(ctx context.Context, ext *extensions.
 	return client, nil
 }
 
-// liveClient returns the usable connection for workspaceKey, or nil; one that is no longer
-// usable is retired on the spot, never handed out. hold takes the reference in the same
-// critical section as the lookup, so a release cannot retire it in between.
+// liveClient returns the usable connection or nil; unusable connections are retired
+// immediately. hold takes a reference to prevent retirement during use.
 func (m *ExtensionLSPManager) liveClient(workspaceKey string, hold bool) *sandboxClient {
 	m.mu.Lock()
 	sc := m.clients[workspaceKey]
@@ -426,9 +409,8 @@ func (m *ExtensionLSPManager) liveClient(workspaceKey string, hold bool) *sandbo
 	return nil
 }
 
-// retire drops a connection that can no longer be used and hands back its sandbox reference.
-// Every deletion goes through here — an entry removed without the hand-back leaves a container
-// no holder can ever release — and a connection already gone is a no-op.
+// retire drops an unusable connection and releases its sandbox reference.
+// All deletions go through here to avoid leaking containers.
 func (m *ExtensionLSPManager) retire(workspaceKey string, sc *sandboxClient) {
 	if sc == nil {
 		// Nothing to retire. The test below compares identity, so a nil would match the live

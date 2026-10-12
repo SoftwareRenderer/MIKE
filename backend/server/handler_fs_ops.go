@@ -89,10 +89,7 @@ type fsOpsBatch struct {
 	dest  fsOpsPath
 }
 
-// decodeFSOpsBatch reads a batch and resolves every path through the write jail: the request's
-// scope once (?task= must belong to ?project=, sandbox available), then each path from container to
-// host and against the project. A refusal ends the request before anything moves, and dest is
-// required when needDest is true.
+// decodeFSOpsBatch decodes a batch and verifies all paths against the project jail.
 func (s *Server) decodeFSOpsBatch(w http.ResponseWriter, r *http.Request, needDest bool) (fsOpsBatch, bool) {
 	var req fsOpsRequest
 	if !httputil.DecodeJSON(w, r, &req) {

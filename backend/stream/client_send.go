@@ -1,9 +1,7 @@
 package stream
 
-// One goroutine per connection is the only writer to its socket besides the keepalive pinger: the
-// producer of a frame — an executor turn, a watcher, a broadcast — hands it over and returns,
-// because a browser that stopped reading may not set the pace for the turn that produced the frame,
-// for the other subscribers of it, or for the pinger that holds the same lock.
+// One goroutine per connection is the only writer to its socket besides the keepalive pinger.
+// This separates the turn producer from the delivery pace of any single slow browser.
 
 import (
 	"context"
@@ -15,21 +13,9 @@ import (
 	"mike/pkg/logging"
 )
 
-// sendQueue holds the frames waiting for one connection.
-//
-// Its bound is the replay buffer's — DefaultBufferSize frames and DefaultBufferBytes bytes per
-// connection — because an overflowing queue and a truncated replay mean the same thing to the
-// client: frames it will never see. maxFrameBufferSize caps one frame, which is what makes the
-// frame bound a byte bound as well.
-//
-// A replay gets a smaller budget than the queue it is written into (replayFrame/replayByte): a frame the
-// queue discards is a hole in a live stream, while a frame a replay never queues is content the
-// subscriber reads from the database seconds later. Without the reservation, subscribing to a task whose
-// buffer fills the queue would force the resync the replay is meant to avoid.
-//
-// Over the bound the OLDEST frames go and never the newest: a client that stopped reading is
-// caught up on the tail. Every drop is counted, because a gap the client cannot see is a chat that
-// stays wrong until it is reloaded.
+// sendQueue holds the frames waiting for one connection. It uses a fixed frame and byte budget,
+// dropping the oldest frames first. A smaller budget is reserved for replays to prevent resyncs
+// when subscribing to large buffers.
 type sendQueue struct {
 	wake  chan struct{} // buffered 1; signals that the deque is non-empty
 	frame int
@@ -56,7 +42,7 @@ func newSendQueue(frameBound, byteBound int) *sendQueue {
 	}
 }
 
-// replayBudget narrows what one replay may queue.
+// replayBudget sets the budget for a single replay batch.
 func (q *sendQueue) replayBudget(frames, bytes int) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -82,11 +68,8 @@ func (q *sendQueue) push(frame []byte, bucket string) {
 	q.notify()
 }
 
-// pushReplay queues the frames a subscriber missed: behind any replay already queued, so replays keep the
-// order they were asked for, and ahead of every live frame, so a replay is never interrupted by what the
-// task said meanwhile. A batch over the replay budget is trimmed here, oldest first, and the count left
-// behind is returned: those frames are not missed, because the subscriber reads the conversation from the
-// database right after asking.
+// pushReplay queues frames a subscriber missed. Replays are placed behind existing replays
+// and ahead of live frames. Batches exceeding the replay budget are trimmed (oldest first).
 func (q *sendQueue) pushReplay(batch []outboundFrame) int {
 	if len(batch) == 0 {
 		return 0
@@ -112,8 +95,7 @@ func (q *sendQueue) pushReplay(batch []outboundFrame) int {
 	return refused
 }
 
-// fitToBudget trims a replay batch to the replay budget, oldest frames first. One frame always
-// survives: a subscriber owed something gets at least the newest of it.
+// fitToBudget trims a batch to fit the budget, ensuring at least one frame survives.
 func fitToBudget(batch []outboundFrame, frames, bytes int) ([]outboundFrame, int) {
 	total := 0
 	for _, f := range batch {
@@ -155,7 +137,7 @@ func (q *sendQueue) droppedFrames() int {
 	return q.dropped
 }
 
-// close refuses anything further: the sender has gone, so nothing will drain this again.
+// close closes the queue and clears pending frames.
 func (q *sendQueue) close() {
 	q.mu.Lock()
 	q.live, q.replayed, q.bytes = nil, 0, 0
@@ -163,9 +145,7 @@ func (q *sendQueue) close() {
 	q.mu.Unlock()
 }
 
-// trimLocked drops from the oldest end until the queue is inside both bounds. One frame always
-// survives: dropping the newest frame is never the answer, and one oversized frame is what the
-// caller asked to be delivered.
+// trimLocked drops oldest frames until the queue is within bounds, ensuring at least one frame remains.
 func (q *sendQueue) trimLocked() {
 	for len(q.live) > 1 && (len(q.live) > q.frame || q.bytes > q.byte) {
 		frame := q.live[0]
@@ -179,8 +159,7 @@ func (q *sendQueue) trimLocked() {
 	}
 }
 
-// notify wakes the sender. A coalesced signal cannot strand a frame: the sender drains the queue
-// before it waits again, so a wake it never saw is one it does not need.
+// notify wakes the sender goroutine.
 func (q *sendQueue) notify() {
 	select {
 	case q.wake <- struct{}{}:
@@ -199,22 +178,19 @@ func newClientState(conn *websocket.Conn, asm *AppStreamManager) *clientState {
 		out:         newSendQueue(asm.queueFrames, asm.queueBytes),
 		traffic:     newTrafficLedger(),
 	}
-	// Half the queue stays for live frames; see sendQueue.
+	// Schedules the replay budget as half of the total queue capacity.
 	client.out.replayBudget(asm.queueFrames/2, asm.queueBytes/2)
 	return client
 }
 
-// deliver hands a marshalled frame to each target's queue. Returning here means the frame is
-// queued, not written: which client is slow is that client's problem.
+// deliver queues a frame for each target. Delivery is asynchronous.
 func (asm *AppStreamManager) deliver(targets []*clientState, frame []byte, bucket string) {
 	for _, client := range targets {
 		client.out.push(frame, bucket)
 	}
 }
 
-// runSender writes this connection's queued frames until the connection is over. It is the only
-// writer to conn besides the keepalive pinger, which is why writeMu is the two of them's only
-// point of contact.
+// runSender writes queued frames to the connection. Synchronizes with the keepalive pinger via writeMu.
 func (asm *AppStreamManager) runSender(ctx context.Context, client *clientState) {
 	defer client.out.close()
 	for {
@@ -243,14 +219,8 @@ func (asm *AppStreamManager) runSender(ctx context.Context, client *clientState)
 	}
 }
 
-// endConnectionForResync ends a connection that missed frames, once it has been sent everything
-// the queue still held, so what the client did receive is a contiguous tail with the hole behind
-// it.
-//
-// The app has one resync and it belongs to a new connection: onConnected(true) runs silentRefresh()
-// and TaskChat.loadHistory(). A wait for this server never gets a deadline, so a client that fell
-// behind is released to resync rather than timed out, and rather than left streaming a gap it has
-// no way to notice.
+// endConnectionForResync closes a connection that missed frames. This forces the client to
+// establish a new connection and resync its state.
 func endConnectionForResync(client *clientState, missed int) {
 	logging.For(logging.Stream).Warnf("dropped %d frame(s) for a connection that stopped reading; ending it so the client resyncs", missed)
 	client.writeMu.Lock()

@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	// DefaultSandboxSampleInterval is how often every live container is read. It is also how often
-	// the memory budget is measured, so a container can only grow unmeasured for one interval.
+	// DefaultSandboxSampleInterval is how often every live container is read.
+	// Budget is also measured at this interval, bounding unmeasured growth.
 	DefaultSandboxSampleInterval = 500 * time.Millisecond
 	// DefaultSandboxStatsInterval is how often changed values are pushed to clients.
 	DefaultSandboxStatsInterval = 2 * time.Second
@@ -32,11 +32,9 @@ type SandboxStatsBroadcaster interface {
 	SendTaskEvent(projectID, taskID string, event types.StreamEvent)
 }
 
-// BudgetMeasure reports, in megabytes, what MIKE costs the memory budget: mikeMB is every container it
-// started plus its own process (each container at its limit when the limit is the larger figure),
-// heldMB what those containers actually hold. ok is false when the host could not be read at all, so
-// the budget keeps its own ledger instead of being told the host is empty. It is implemented by a
-// wiring type in backend/server.
+// BudgetMeasure reports, in megabytes, what MIKE costs the memory budget:
+// mikeMB is sum of container limits and server process; heldMB is actual usage.
+// ok=false if host read fails, signaling budget to use its own ledger.
 type BudgetMeasure interface {
 	Measure() (mikeMB, heldMB, availableMB, totalMB int64, ok bool)
 }
@@ -44,9 +42,8 @@ type BudgetMeasure interface {
 // SandboxStatsSampler samples every live sandbox container and pushes sandbox_stats task events
 // to subscribers when a sampled value changes.
 //
-// Sampling follows the container, not the task's status: a task that is idle with its container
-// alive still holds memory, and the budget must see it. Tasks with no row (the project's "proj:"
-// terminal container) are not sampled.
+// Samples containers regardless of task status to track idle memory.
+// Project terminal containers are not sampled.
 type SandboxStatsSampler struct {
 	source         SandboxStatsSource
 	tasks          TaskStatusLookup
@@ -63,8 +60,8 @@ type SandboxStatsSampler struct {
 	stopCh   chan struct{}
 	wg       sync.WaitGroup
 
-	// The budget is measured once per sample tick and passed to the sink unchanged. Both fields are
-	// under mu because SetBudget can be called after the sampler has started.
+	// Budget is measured and sunk per sample tick. Synchronized as
+	// SetBudget can be called during operation.
 	budget     BudgetMeasure
 	budgetSink func(mikeMB, heldMB, availableMB, totalMB int64)
 }
@@ -77,9 +74,8 @@ func (s *SandboxStatsSampler) SetBudget(measure BudgetMeasure, sink func(mikeMB,
 	s.mu.Unlock()
 }
 
-// NewSandboxStatsSampler creates a sampler. Call Start to begin periodic sampling; a test passes
-// zero for both intervals and steps SampleOnce and publish by hand, which is how every sampler
-// test drives it.
+// NewSandboxStatsSampler creates a sampler. Call Start to begin periodic sampling;
+// zero intervals allow manual driving in tests via SampleOnce and publish.
 func NewSandboxStatsSampler(source SandboxStatsSource, tasks TaskStatusLookup, broadcaster SandboxStatsBroadcaster, sampleInterval, sendInterval time.Duration) *SandboxStatsSampler {
 	return &SandboxStatsSampler{
 		source:         source,
@@ -94,8 +90,8 @@ func NewSandboxStatsSampler(source SandboxStatsSource, tasks TaskStatusLookup, b
 	}
 }
 
-// Start launches the sampling ticker and the slower broadcast ticker. A zero interval means that
-// ticker never fires, which is how a test drives the sampler by hand.
+// Start launches the sampling ticker and the slower broadcast ticker.
+// Zero intervals disable tickers for manual test driving.
 func (s *SandboxStatsSampler) Start() {
 	s.run(s.sampleInterval, s.SampleOnce)
 	s.run(s.sendInterval, s.publish)
@@ -128,8 +124,8 @@ func (s *SandboxStatsSampler) Stop() {
 	s.wg.Wait()
 }
 
-// SampleOnce reads every live container once and records what each holds. This is the number
-// every client and the memory budget is built from.
+// SampleOnce reads every live container once and records what each holds.
+// Basis for client stats and memory budget.
 func (s *SandboxStatsSampler) SampleOnce() {
 	for _, taskID := range s.source.ActiveTaskIDs() {
 		task, err := s.tasks.GetTaskByID(taskID)

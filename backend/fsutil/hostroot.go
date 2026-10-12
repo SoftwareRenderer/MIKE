@@ -9,18 +9,13 @@ import (
 	"strings"
 )
 
-// AllowRootFSEnv names the variable whose resolution widens the host-directory jail. The rule
-// ("only the exact value 1", and a set-but-other value warns) is startup's; this constant is the
-// name the refusal quotes. It is read
-// per call, not cached at startup.
+// AllowRootFSEnv is the environment variable that widens the host-directory jail.
 const AllowRootFSEnv = "MIKE_ALLOW_ROOT_FS"
 
 // ErrHostRoot says a path is outside every root of the jail. Handlers answer it with 403.
 var ErrHostRoot = errors.New("path is outside the allowed host directories")
 
-// escapeMarker is the text os.Root puts on a refusal caused by a symlink in the path. That
-// error is neither a sentinel nor a distinct type, so matching the text is the only way to
-// tell "symlink involved, try the read fallback" from "no such path".
+// escapeMarker identifies os.Root errors caused by symlinks, as no sentinel is provided.
 const escapeMarker = "path escapes from parent"
 
 // hostRoot is one allowed directory, kept as declared (absolute, cleaned) and
@@ -30,29 +25,14 @@ type hostRoot struct {
 	resolved string
 }
 
-// HostRoot jails the no-project file endpoints — the directory picker, its mkdir, git init,
-// and adding a project by path — to the operator's home plus the directories declared at
-// startup. A request naming a project is jailed to that project instead
-// (Server.validateFSPath).
-//
-// os.Root refuses any path involving a symlink, even one inside the root: reads of a legitimate
-// link fall back to Contained, and creation walks the components itself.
+// HostRoot jails no-project file endpoints to the operator's home and declared directories. It uses os.Root to refuse paths with symlinks, falling back to Contained() for legitimate reads.
 type HostRoot struct {
 	roots []hostRoot
-	// widened is the resolved MIKE_ALLOW_ROOT_FS decision. It arrives resolved because a jail that
-	// re-read the variable per call could widen between two calls of one request, and because the
-	// rule "only the exact value 1 widens" then lives in two places. A root set built around a
-	// project passes false: the widening is never project-scoped.
+	// widened stores the MIKE_ALLOW_ROOT_FS decision at construction to ensure consistency during a request.
 	widened bool
 }
 
-// NewHostRoot builds the jail from the operator's home plus declaredDirs — directories named
-// at startup (workspace dir, extensions dir) that a request cannot carry. They are made
-// absolute against the working directory: the extensions dir defaults to "extensions".
-//
-// allowRootFS is the widened-jail decision (startup.Config.AllowRootFS). It belongs to the
-// constructor because the jail is one object with one policy: a request that could change the
-// answer mid-flight would make the roots listed in a refusal not the roots that refused.
+// NewHostRoot builds the jail from the operator's home and declared directories, ensuring they are absolute.
 func NewHostRoot(allowRootFS bool, declaredDirs ...string) *HostRoot {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -210,9 +190,7 @@ func (h *HostRoot) Stat(p string) (fs.FileInfo, error) {
 	return fi, serr
 }
 
-// resolvedFallback resolves a path os.Root refused. Contained requires the resolved path to be inside
-// the same roots, so the fallback cannot widen the jail, and the refusal's cause stays in the message
-// because an escape and a broken symlink otherwise read the same to whoever is debugging one.
+// resolvedFallback resolves a path refused by os.Root and ensures it remains within the jail.
 func (h *HostRoot) resolvedFallback(p string, cause error) (string, error) {
 	resolved, err := h.resolveInside(p)
 	if err != nil {
@@ -276,10 +254,7 @@ func (h *HostRoot) resolveInside(p string) (string, error) {
 	return resolved, nil
 }
 
-// MkdirAll creates a directory chain under a root, never through a symlink.
-//
-// Not (*os.Root).MkdirAll: its own refusal is a *PathError nothing can classify, so a jailed
-// mkdir would answer 500 where the jail means 403.
+// MkdirAll creates a directory chain under a root without following symlinks. It avoids (*os.Root).MkdirAll to ensure jail refusals are correctly classified as 403.
 func (h *HostRoot) MkdirAll(p string, perm fs.FileMode) error {
 	if h.unrestricted() {
 		return os.MkdirAll(p, perm)

@@ -17,17 +17,16 @@ import (
 	"mike/pkg/logging"
 )
 
-// PromptOverlay is the resolved prompt-locale answer: the active pack's translated
-// template directory (empty when there is no pack, or it ships no templates) and the
-// pack's locale tag, carried through verbatim because core holds no language names.
+// PromptOverlay holds the active pack's translated template directory
+// and locale tag. The locale is carried verbatim because core holds
+// no language names.
 type PromptOverlay struct {
 	Dir    string
 	Locale string
 }
 
-// ActivePromptOverlay reads the extension list and resolves the active pack's
-// prompt side. It is called at startup and on every extension change, so enabling
-// a pack switches the prompt language without a restart.
+// ActivePromptOverlay resolves the active pack's prompt side using the store.
+// Enabling a pack switches the prompt language without a restart.
 //
 // A list that cannot be read is an error rather than an English answer: the caller
 // decides whether to keep the previous language or fall back, and "the database had
@@ -40,13 +39,11 @@ func ActivePromptOverlay(store *ExtensionStore, extensionsDir string) (PromptOve
 	return PromptOverlayFor(exts, extensionsDir), nil
 }
 
-// PromptOverlayFor is ActivePromptOverlay for a list the caller already holds — the
-// half with no database, and the half the tests speak to.
+// PromptOverlayFor is ActivePromptOverlay for a list the caller already holds.
 //
 // A pack whose `prompts_dir` resolves outside its own directory loses the templates
-// and keeps the locale: the directive is derived from the pack that is enabled, while
-// the directory is a path a manifest named, and a named path is only trusted as far as
-// the pack's own folder.
+// and keeps the locale: the directory is a path a manifest named, and a named path
+// is only trusted as far as the pack's own folder.
 func PromptOverlayFor(exts []Extension, extensionsDir string) PromptOverlay {
 	pack := ActiveI18N(exts)
 	if pack == nil {
@@ -66,11 +63,10 @@ func PromptOverlayFor(exts []Extension, extensionsDir string) PromptOverlay {
 	return answer
 }
 
-// PromptDirInPack resolves a pack-relative prompts directory and proves the result is the
-// pack's own. Contained twice, like the delete path: packFilePath is the lexical proof (which
-// is what refuses .. readably) and the symlink check is the enforcement, because filepath.Join
-// collapses the segments a lexical check refused to see. The symlink-free path is returned.
-// A prompts_dir naming the pack directory itself (rel == ".") is refused, as at install.
+// PromptDirInPack resolves a pack-relative prompts directory and proves it is contained
+// within the pack. It uses packFilePath for lexical proof and a symlink check for
+// enforcement, as filepath.Join collapses segments a lexical check refuses.
+// A prompts_dir naming the pack directory itself (rel == ".") is refused.
 func PromptDirInPack(packDir, rel string) (string, bool) {
 	full, ok := packFilePath(packDir, rel)
 	if !ok {

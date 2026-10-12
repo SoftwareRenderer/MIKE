@@ -21,8 +21,7 @@ import (
 // sandboxruntime.GVisorIsolationForCaps describes.
 
 // MountPolicy is an allowlist of host roots an extension sandbox may
-// bind-mount from. A nil policy is valid and fails closed: nothing is inside an
-// empty allowlist.
+// bind-mount from. A nil policy fails closed.
 type MountPolicy struct {
 	roots []string
 	// readOnlyRoots are roots the sandbox may read but never write: the workspace dir (every
@@ -33,20 +32,16 @@ type MountPolicy struct {
 	readOnlyRoots []string
 }
 
-// newMountPolicy builds a policy from raw root paths. Each is made absolute and
-// symlink-resolved (a root that does not exist yet keeps its cleaned absolute
-// form) so it matches the resolved form of a candidate path.
+// newMountPolicy builds a policy from raw root paths.
 func newMountPolicy(roots []string) *MountPolicy {
 	return &MountPolicy{roots: fsutil.NormalizeRoots(roots)}
 }
 
-// newMountPolicyWithReadOnly is newMountPolicy plus the subset of those roots that
-// may only ever be bind-mounted read-only.
+// newMountPolicyWithReadOnly is newMountPolicy plus the subset of roots that may only ever be bind-mounted read-only.
 func newMountPolicyWithReadOnly(roots, readOnlyRoots []string) *MountPolicy {
 	return &MountPolicy{roots: fsutil.NormalizeRoots(roots), readOnlyRoots: fsutil.NormalizeRoots(readOnlyRoots)}
 }
 
-// Roots returns a copy of the policy's allowlist roots.
 func (p *MountPolicy) Roots() []string {
 	if p == nil {
 		return nil
@@ -56,9 +51,7 @@ func (p *MountPolicy) Roots() []string {
 	return out
 }
 
-// mountRoots assembles the default allowlist: the configured workspace dir, the
-// registered project paths, the extensions dir, the system temp dir and the
-// MIKE_EXT_MOUNT_ROOTS extras.
+// mountRoots assembles the default allowlist.
 //
 // extraRoots is the resolved value of that variable (startup.Config.ExtMountRoots), passed in by the
 // sandbox manager that was wired with it. Reading it here instead would let one policy in the
@@ -79,7 +72,6 @@ func mountRoots(extensionsDir, workspaceDir string, projectPaths, extraRoots []s
 	return append(roots, extraRoots...)
 }
 
-// insideRoot reports whether the resolved path is one of the roots or below it.
 func (p *MountPolicy) insideRoot(resolved string) bool {
 	if p == nil {
 		return false
@@ -87,9 +79,7 @@ func (p *MountPolicy) insideRoot(resolved string) bool {
 	return fsutil.InsideRoots(resolved, p.roots)
 }
 
-// ForceReadOnly reports whether a host path is one the sandbox may only read, whatever mode the
-// caller asked for (see MountPolicy.readOnlyRoots). Call it with a resolved path (see
-// ValidateHostPath).
+// ForceReadOnly reports whether a host path is restricted to read-only.
 func (p *MountPolicy) ForceReadOnly(resolved string) bool {
 	if p == nil {
 		return true
@@ -97,8 +87,7 @@ func (p *MountPolicy) ForceReadOnly(resolved string) bool {
 	return fsutil.InsideRoots(resolved, p.readOnlyRoots)
 }
 
-// ValidateHostPath checks a mount's host path: absolute, no ".." segment, and
-// symlink-resolved INSIDE one of the policy's roots. Returns the resolved path.
+// ValidateHostPath checks a mount's host path for absolute path, no ".." segment, and containment within the policy's roots.
 //
 // Resolution is fsutil.ResolveSymlinks rather than an ancestor walk: a symlink standing where
 // the mount source would be created has a target that does not exist, so it cannot be checked,
@@ -123,8 +112,8 @@ func (p *MountPolicy) ValidateHostPath(hostPath string) (string, error) {
 	return resolved, nil
 }
 
-// withExtraRoots returns a policy with additional roots added to p's own
-// (re-normalized, deduplicated). Adding a root must not un-pin the existing ones.
+// withExtraRoots returns a policy with additional roots (re-normalized,
+// deduplicated). Adding a root must not un-pin the existing ones.
 func (p *MountPolicy) withExtraRoots(roots ...string) *MountPolicy {
 	if p == nil {
 		return newMountPolicy(roots)
@@ -132,7 +121,6 @@ func (p *MountPolicy) withExtraRoots(roots ...string) *MountPolicy {
 	return newMountPolicyWithReadOnly(append(p.Roots(), roots...), p.readOnlyRoots)
 }
 
-// ValidateMount validates a single extension sandbox mount.
 func (p *MountPolicy) ValidateMount(m types.SandboxMount) error {
 	if err := sandboxruntime.ValidateContainerPath(m.ContainerPath); err != nil {
 		return err
@@ -146,7 +134,7 @@ func (p *MountPolicy) ValidateMount(m types.SandboxMount) error {
 	return nil
 }
 
-// ValidateMounts validates a whole mount list, naming the first offender.
+// ValidateMounts validates a whole mount list.
 func (p *MountPolicy) ValidateMounts(mounts []types.SandboxMount) error {
 	for i, m := range mounts {
 		if err := p.ValidateMount(m); err != nil {
@@ -156,16 +144,15 @@ func (p *MountPolicy) ValidateMounts(mounts []types.SandboxMount) error {
 	return nil
 }
 
-// ValidateCapability rejects a malformed capability string, naming it. There is no denylist: a
-// grant lands in a gVisor guest that started from --cap-drop ALL, so callers judge it by what it
-// can reach (sandboxruntime.GVisorIsolationForCaps).
+// ValidateCapability rejects a malformed capability string. There is no
+// denylist: a grant lands in a gVisor guest that started from --cap-drop ALL,
+// so callers judge it by what it can reach (sandboxruntime.GVisorIsolationForCaps).
 func ValidateCapability(cap string) error { return sandboxruntime.ValidateCapability(cap) }
 
-// ValidateCapabilities validates a capability list, naming the first offender.
+// ValidateCapabilities validates a capability list.
 func ValidateCapabilities(caps []string) error { return sandboxruntime.ValidateCapabilities(caps) }
 
-// ValidateSandboxAdditions checks the two fields that can widen a sandbox: host
-// mounts and Linux capabilities.
+// ValidateSandboxAdditions checks the two fields that can widen a sandbox: host mounts and Linux capabilities.
 func (p *MountPolicy) ValidateSandboxAdditions(mounts []types.SandboxMount, capabilities []string) error {
 	if err := p.ValidateMounts(mounts); err != nil {
 		return err
@@ -173,8 +160,8 @@ func (p *MountPolicy) ValidateSandboxAdditions(mounts []types.SandboxMount, capa
 	return ValidateCapabilities(capabilities)
 }
 
-// ShadowsToolState reports whether a path would cover the language server's own writable state in
-// its container: the tmpfs, or the container user's cache directory.
+// ShadowsToolState reports whether a path covers the language server's own
+// writable state in its container (tmpfs or user cache).
 //
 // Both users mount it read-only, and a server with a read-only cache publishes nothing about a file
 // it cannot load — no error, no warning — so a broken file looks clean. A borrowed Sandbox
@@ -201,9 +188,9 @@ func ShadowsToolState(containerPath string) bool {
 	return false
 }
 
-// ValidateDependencyGrant returns the resolved host path of a dependency cache, or refuses it. The user
-// typed it themselves, so it is judged on having a sensible shape rather than against the allowlist
-// that MountPolicy applies to an extension's own requests.
+// ValidateDependencyGrant returns the resolved host path of a dependency cache,
+// or refuses it. The user typed it themselves, so it is judged on having a sensible
+// shape rather than against the allowlist.
 func ValidateDependencyGrant(hostPath string) (string, error) {
 	trimmed := strings.TrimSpace(hostPath)
 	if trimmed == "" {
@@ -235,9 +222,8 @@ func ValidateDependencyGrant(hostPath string) (string, error) {
 	return resolved, nil
 }
 
-// ValidateAgentMountGrant returns the grant to store for one agent sandbox mount. A missing mode means
-// read-only. A folder that does not exist yet is accepted as long as a folder above it exists, because
-// the agent creates its own config folder the first time it runs.
+// ValidateAgentMountGrant returns the grant to store for one agent sandbox mount.
+// A folder that does not exist yet is accepted if a folder above it exists, as the agent creates its own config folder.
 func ValidateAgentMountGrant(mount types.SandboxMount) (types.SandboxMount, error) {
 	expanded := ExpandHostPath(strings.TrimSpace(mount.HostPath))
 	if expanded == "" {
@@ -301,8 +287,7 @@ func ExpandHostPath(p string) string {
 	return filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(p, "~"), "/"))
 }
 
-// systemGrantRoots are host trees a dependency directory is never in, and that must never be handed to
-// a language server at all. /opt is absent on purpose: real toolchain caches live there.
+// systemGrantRoots are host trees a dependency directory is never in, and that must never be handed to a language server.
 var systemGrantRoots = []string{"/etc", "/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/boot", "/dev", "/proc", "/sys", "/run", "/var"}
 
 // credentialGrantDirs hold secrets rather than dependencies, relative to any home. A grant is readable

@@ -8,27 +8,23 @@ import (
 	"mike/pkg/logging"
 )
 
-// bridgeSandboxManager is the subset of SandboxManager operations used by
-// bridge recovery. It is extracted as an interface so the recovery flow can be
-// unit-tested without a live gVisor container.
+// bridgeSandboxManager is a subset of SandboxManager for bridge recovery,
+// enabling tests without gVisor.
 type bridgeSandboxManager interface {
-	// GetClient returns the agent client for a task, creating a fresh client on
-	// the task's agent pipes if the cached one is dead.
+	// GetClient returns the agent client for a task, reconnecting if needed.
 	GetClient(taskID string) (*bridge.Client, error)
-	// ContainerIsRunning reports whether the task's sandbox container is
-	// tracked and running.
+	// ContainerIsRunning reports if the task's sandbox container is running.
 	ContainerIsRunning(taskID string) bool
-	// Stop tears down the task's sandbox container, agent process, and client.
+	// Stop tears down the task's sandbox container, agent, and client.
 	Stop(taskID string) error
-	// Create provisions a fresh sandbox container and agent for the task.
+	// Create provisions a new sandbox container and agent for the task.
 	Create(taskID, worktreePath string, project *types.Project, opts sandbox.SandboxOpts) ([]types.AssignedPort, error)
 }
 
-// maxBridgeRecoveryAttempts bounds consecutive recovery attempts per task.
+// maxBridgeRecoveryAttempts is the maximum consecutive recovery attempts per task.
 const maxBridgeRecoveryAttempts = 3
 
-// recoverBridgeForTask attempts to restore the sandbox bridge for a task after
-// a bridge failure
+// recoverBridgeForTask attempts to restore the sandbox bridge for a task after a failure.
 func (te *TaskExecutor) recoverBridgeForTask(mgr bridgeSandboxManager, setup *taskExecSetup, state *executionState, imageToUse string, onRecovered func()) bool {
 	maxAttempts := maxBridgeRecoveryAttempts
 
@@ -43,7 +39,6 @@ func (te *TaskExecutor) recoverBridgeForTask(mgr bridgeSandboxManager, setup *ta
 	te.taskMu.Unlock()
 
 	logging.For(logging.Bridge).With(logging.TaskID, setup.task.ID).Infof("attempt %d: trying client reconnect", attempt)
-	// try to get a fresh client
 	newClient, err := mgr.GetClient(setup.task.ID)
 	if err == nil {
 		probeErr := newClient.Ping(setup.ctx)
@@ -59,7 +54,7 @@ func (te *TaskExecutor) recoverBridgeForTask(mgr bridgeSandboxManager, setup *ta
 		err = probeErr
 	}
 
-	// agent is dead — recreate the sandbox
+	// Recreate sandbox if agent is dead.
 	if mgr.ContainerIsRunning(setup.task.ID) {
 		logging.For(logging.Bridge).With(logging.TaskID, setup.task.ID).Warnf("client reconnect failed (%v), recreating sandbox", err)
 		if stopErr := mgr.Stop(setup.task.ID); stopErr != nil {

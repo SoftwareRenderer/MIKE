@@ -17,12 +17,9 @@ type DiffStats struct {
 	AlreadyMerged    bool
 }
 
-// ComputeDiffStats computes diff statistics from a task diff result, excluding
-// internal files. This encapsulates the common logic shared between
-// checkAndBroadcastDiff (exec package) and sendInitialProjectData (stream package).
+// ComputeDiffStats computes diff statistics from a task diff result, excluding internal files.
 //
-// The AlreadyMerged field is left as false by default — the caller should set it
-// after verifying via worktreeMgr.IsMergedInto(projectPath, task.Branch, targetBranch).
+// AlreadyMerged defaults to false; the caller sets it after verifying with worktreeMgr.IsMergedInto().
 func ComputeDiffStats(diffResult *git.TaskDiff) *DiffStats {
 	var untrackedLines, trackedAdd, trackedDel, visibleTracked, visibleUntracked int
 	for path, f := range diffResult.Tracked {
@@ -54,10 +51,8 @@ func ComputeDiffStats(diffResult *git.TaskDiff) *DiffStats {
 	}
 }
 
-// CheckAlreadyMerged returns the target branch to check against, or empty string
-// if the merge check should be skipped. The caller should then invoke
-// worktreeMgr.IsMergedInto(projectPath, task.Branch, targetBranch) when both
-// values are non-empty.
+// CheckAlreadyMerged returns the target branch for merge verification. If empty, the
+// check is skipped. The caller verifies using worktreeMgr.IsMergedInto().
 func CheckAlreadyMerged(task types.Task) (targetBranch string, shouldCheck bool) {
 	targetBranch = task.BaseRef
 	if strings.HasPrefix(targetBranch, "fatal:") {

@@ -6,15 +6,12 @@ package extensions
 // derived-only is the architecture, and it is what keeps the client's rendered
 // language and the server's prompt locale from ever disagreeing.
 
-// GetI18N returns this extension's translation-pack declaration, or nil when the
-// extension declares none.
+// GetI18N returns the translation-pack declaration if present.
 //
-// The declaration, not the Type field, is what makes an extension a pack: Type
-// is what inferExtensionType inferred for display and routing, so a manifest
-// that ships a catalog alongside, say, an LSP still carries a catalog. The
-// frontend's resolveI18NPack tests the same thing
-// (frontend/src/lib/i18n/load-pack.ts) — the two ends of one rule, kept in step
-// deliberately.
+// The declaration, not the Type field, makes an extension a pack: Type
+// is inferred for display and routing, so a manifest shipping a catalog
+// alongside an LSP still carries a catalog. The frontend's resolveI18NPack
+// tests the same thing (frontend/src/lib/i18n/load-pack.ts).
 func (e *Extension) GetI18N() *I18NConfig {
 	if e == nil {
 		return nil
@@ -22,12 +19,12 @@ func (e *Extension) GetI18N() *I18NConfig {
 	return e.Manifest.Capabilities.GetI18N()
 }
 
-// ActiveI18N returns the enabled translation pack that defines the active language, or nil when
-// none is enabled — which means English. The winner is the first enabled pack by priority then
-// name, the same rule the frontend resolves with; a disabled pack never contributes text.
+// ActiveI18N returns the enabled translation pack defining the active language,
+// or nil for English. The winner is the first enabled pack by priority then
+// name, matching the frontend's resolution rule.
 //
-// This is the one derivation: the server-side prompt locale calls it rather than re-deriving the
-// rule, or the UI and the prompts disagree about which pack is active.
+// The server-side prompt locale calls this to ensure the UI and prompts
+// agree on the active pack.
 func ActiveI18N(extensions []Extension) *Extension {
 	var winner *Extension
 	for i := range extensions {
@@ -48,9 +45,9 @@ func ActiveI18N(extensions []Extension) *Extension {
 	return &pack
 }
 
-// packsOrderedBefore reports whether a sorts ahead of b under the ordering rule
-// (priority ascending, then name ascending). Equal on both means the same
-// extension — names are unique per author and the list holds one row each.
+// packsOrderedBefore reports whether a sorts ahead of b (priority ascending,
+// then name ascending). Names are unique per author and the list holds one
+// row each.
 func packsOrderedBefore(a, b *Extension) bool {
 	if a.Manifest.Priority != b.Manifest.Priority {
 		return a.Manifest.Priority < b.Manifest.Priority

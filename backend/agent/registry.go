@@ -10,18 +10,17 @@ import (
 	"mike/pkg/logging"
 )
 
-// ConfigStore is the interface the registry needs for user-configured agent settings.
+// ConfigStore interface for user-configured agent settings.
 type ConfigStore interface {
 	GetAgentProvider() *types.Provider
 }
 
-// ExtensionStore is the interface the registry needs from the extension store.
+// ExtensionStore interface for extension discovery.
 type ExtensionStore interface {
 	GetByType(extType string) ([]ext.Extension, error)
 }
 
-// AgentRegistry discovers enabled agent extensions and maps agent://<name> URLs to extensions.
-// Agent extensions auto-register as providers via ToProviders().
+// AgentRegistry discovers enabled agent extensions and maps agent://<name> URLs.
 type AgentRegistry struct {
 	mu          sync.RWMutex
 	store       ExtensionStore
@@ -30,7 +29,6 @@ type AgentRegistry struct {
 	enabled     []string                  // names of enabled agents
 }
 
-// NewAgentRegistry creates a new registry that discovers agent extensions from the store.
 func NewAgentRegistry(store ExtensionStore, configStore ConfigStore) *AgentRegistry {
 	r := &AgentRegistry{
 		store:       store,
@@ -41,8 +39,6 @@ func NewAgentRegistry(store ExtensionStore, configStore ConfigStore) *AgentRegis
 	return r
 }
 
-// LookupByName resolves an agent by extension name. A caller holding an agent://<name> provider URL
-// parses it first: types.ParseAgentURL owns the grammar, this owns the enabled check.
 func (r *AgentRegistry) LookupByName(name string) *ext.Extension {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -53,8 +49,7 @@ func (r *AgentRegistry) LookupByName(name string) *ext.Extension {
 	return ext
 }
 
-// ToProviders converts agent extensions to provider entries for the UI.
-// Each agent extension becomes a provider with URL agent://<name>.
+// ToProviders converts agents to provider entries for the UI.
 func (r *AgentRegistry) ToProviders() []types.Provider {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -79,8 +74,7 @@ func (r *AgentRegistry) ToProviders() []types.Provider {
 	return providers
 }
 
-// GetAgentSandbox answers nil until the user approves a folder in Settings > Extensions: the mount
-// list written in the manifest is only a suggestion and is never used here.
+// GetAgentSandbox returns sandbox config if mounts are approved in Settings > Extensions.
 func (r *AgentRegistry) GetAgentSandbox(agentName string) *types.AgentSandbox {
 	r.mu.RLock()
 	installed, ok := r.agents[agentName]
@@ -113,8 +107,7 @@ func (r *AgentRegistry) GetAgentSandbox(agentName string) *types.AgentSandbox {
 		granted = append(granted, m)
 	}
 
-	// The agent config folder from the provider settings replaces the host folder of a mount the user has
-	// already approved. It never adds a mount of its own.
+	// provider config directory replaces host path of an approved mount.
 	if dir := r.agentConfigDir(); dir != "" {
 		if len(granted) > 0 {
 			logging.For(logging.Agent).Infof("agent=%s mount %q takes its host path from the provider's config directory %q",
@@ -138,8 +131,7 @@ func (r *AgentRegistry) GetAgentSandbox(agentName string) *types.AgentSandbox {
 		return nil
 	}
 
-	// The environment variables from the manifest name folders inside the container that only exist once a
-	// host folder has been approved, so they are returned with the mounts and never on their own.
+	// manifest environment variables are returned only if mounts are approved.
 	if def.Sandbox != nil {
 		if resolved := def.ResolveSandboxTemplates(installed.Manifest.ConfigSchema); resolved != nil {
 			sb.Envs = resolved.Envs
@@ -153,8 +145,7 @@ func (r *AgentRegistry) GetAgentSandbox(agentName string) *types.AgentSandbox {
 	return &sb
 }
 
-// A saved approval can be older than the checks that exist today, and the agent config folder from the
-// provider settings is a second way a host path can end up in a mount.
+// refuseMount validates mount and checks if host path is approved.
 func refuseMount(m types.SandboxMount) error {
 	if err := types.ValidateSandboxMount(m); err != nil {
 		return err
@@ -184,7 +175,7 @@ func (r *AgentRegistry) agentConfigDir() string {
 	return ext.ExpandHostPath(strings.TrimSpace(provider.AgentConfigDir))
 }
 
-// parseEnvArray parses a JSON array of env objects from extension config.
+// parseEnvArray parses JSON array of env objects.
 func parseEnvArray(v any) ([]types.SandboxEnv, error) {
 	items, ok := v.([]any)
 	if !ok {
@@ -203,8 +194,7 @@ func parseEnvArray(v any) ([]types.SandboxEnv, error) {
 	return envs, nil
 }
 
-// Reload re-scans the extension store for enabled agent extensions.
-// Called after extension enable/disable/install/delete.
+// Reload re-scans store for agent extensions.
 func (r *AgentRegistry) Reload() {
 	r.mu.Lock()
 	defer r.mu.Unlock()

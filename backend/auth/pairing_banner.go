@@ -6,8 +6,8 @@ import (
 	"unicode/utf8"
 )
 
-// The boot printout is drawn with spaces and rule characters rather than as a picture, because a picture
-// depends on the reader's cell shape and text does not.
+// The boot printout uses text and rule characters rather than ASCII art to ensure
+// alignment regardless of the terminal's character aspect ratio.
 
 const (
 	bannerPad     = 3

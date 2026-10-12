@@ -17,12 +17,11 @@ import (
 	"mike/pkg/logging"
 )
 
-// maxDiffSize is the largest file whose contents a diff carries: past it the hunk is replaced by a
-// size annotation, because the panel cannot show a megabyte of text and the model cannot read one.
+// maxDiffSize is the largest file diffed in full; larger files are replaced by a size annotation.
 const maxDiffSize = 1 << 20
 
-// commitToCommitDiff runs git diff baseRef..headRef in dir; an empty baseRef means HEAD. The shortstat
-// comes off the unfiltered patch, so it still counts files the binary filter strips.
+// commitToCommitDiff runs git diff baseRef..headRef in dir (baseRef defaults to HEAD). shortStat
+// uses the unfiltered patch to include files stripped by the binary filter.
 func (wm *WorktreeManager) commitToCommitDiff(dir, baseRef, headRef string) (diff string, shortStat string, annotations map[string]*fileAnnotation, err error) {
 	target := baseRef
 	if target == "" {
@@ -37,12 +36,8 @@ func (wm *WorktreeManager) commitToCommitDiff(dir, baseRef, headRef string) (dif
 	return diff, shortStat, annotations, nil
 }
 
-// GetTaskDiff returns the git diff for a task's worktree.
-// baseRef is the branch/ref to diff against (e.g., "master"). If empty, uses HEAD.
-// headRef is an optional second ref for comparing two commits (git diff baseRef..headRef).
-// When headRef is set the answer is those two trees and nothing else: no untracked files, and no
-// committed half taken from HEAD.
-// If skipTruncate is true, the diff is not truncated (used for ?full=1 API requests).
+// GetTaskDiff returns the git diff for a task's worktree. If headRef is set, it
+// performs a commit-to-commit diff; otherwise, it diffs the worktree against baseRef (or HEAD).
 func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTruncate ...bool) (*TaskDiff, error) {
 	worktreePath, err := wm.taskWorktree(taskID)
 	if err != nil {
@@ -242,9 +237,8 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 	}, nil
 }
 
-// parseUnifiedDiffToFiles parses a unified diff into per-file TrackedDiffFile entries.
-// This mirrors the frontend parseUnifiedDiff but runs on the backend for caching.
-// annotations provides metadata for binary/large files whose hunks were replaced.
+// parseUnifiedDiffToFiles parses a unified diff into per-file entries,
+// using annotations for binary or large files.
 func parseUnifiedDiffToFiles(diff string, truncatedFiles []string, origStats map[string]FileChangeStats, annotations map[string]*fileAnnotation) map[string]*TrackedDiffFile {
 	if diff == "" || !strings.Contains(diff, "\n") {
 		// Even with empty diff, annotations may have binary/large file entries
@@ -442,9 +436,8 @@ func parseUnifiedDiffToFiles(diff string, truncatedFiles []string, origStats map
 	return files
 }
 
-// truncateDiffLines truncates a unified diff so each file has at most maxChangeLines change
-// lines. Lines are dropped from the end of a hunk and the @@ header counts are updated to stay
-// valid. Returns the truncated diff and the paths that were cut.
+// truncateDiffLines truncates a unified diff so each file has at most maxChangeLines changes.
+// It drops lines from the end of hunks and updates @@ header counts. Returns the truncated diff and cut paths.
 func truncateDiffLines(diff string, maxChangeLines int) (string, []string) {
 	if !strings.Contains(diff, "\n") {
 		return diff, nil
@@ -577,10 +570,8 @@ func truncateDiffLines(diff string, maxChangeLines int) (string, []string) {
 	return strings.Join(result, "\n"), truncatedFiles
 }
 
-// filterLargeBinaryDiffs replaces diff hunks for binary or >1MB files with size annotations.
-// Returns the filtered diff and a map of file annotations for the parser to consume.
-// Binary detection uses git's own "Binary files a/X and b/Y differ" marker.
-// Large-file detection uses os.Stat() (>1MB text files).
+// filterLargeBinaryDiffs replaces hunks for binary or >1MB files with size annotations.
+// Uses git's binary marker and os.Stat for large files.
 func (wm *WorktreeManager) filterLargeBinaryDiffs(worktreePath, diffText string) (string, map[string]*fileAnnotation) {
 	if diffText == "" {
 		return diffText, nil
@@ -672,9 +663,8 @@ func (wm *WorktreeManager) filterLargeBinaryDiffs(worktreePath, diffText string)
 	return out, annotations
 }
 
-// walkUntrackedEntries expands git status --porcelain "?? " entries into individual file paths.
-// When a whole directory is untracked, git status returns "?? dir/" — this function walks
-// the directory and returns all regular file paths (relative to worktreePath).
+// walkUntrackedEntries expands "?? " entries from git status --porcelain into individual
+// file paths, walking untracked directories.
 func walkUntrackedEntries(worktreePath, path string) []string {
 	fullPath := filepath.Join(worktreePath, path)
 	// Lstat, not Stat: a symlink is neither a regular file nor a directory, so it is listed
@@ -711,8 +701,8 @@ func walkUntrackedEntries(worktreePath, path string) []string {
 	return files
 }
 
-// TaskDiffFromRepo computes the commit-to-commit TaskDiff of a repository directory, for a task whose
-// worktree is gone.
+// TaskDiffFromRepo computes a commit-to-commit TaskDiff from a repository directory
+// for a task with no worktree.
 func (wm *WorktreeManager) TaskDiffFromRepo(repoPath, baseRef, headRef string, skipTruncate bool) (*TaskDiff, error) {
 	if repoPath == "" || headRef == "" {
 		return nil, fmt.Errorf("TaskDiffFromRepo: repoPath and headRef are required")
@@ -743,7 +733,7 @@ func (wm *WorktreeManager) TaskDiffFromRepo(repoPath, baseRef, headRef string, s
 	}, nil
 }
 
-// extractDiffPaths pulls both a/ and b/ paths from "diff --git a/X b/Y" header.
+// extractDiffPaths extracts a/ and b/ paths from a "diff --git" header.
 func extractDiffPaths(line string) (aPath, bPath string) {
 	rest := strings.TrimPrefix(line, "diff --git ")
 
@@ -773,8 +763,7 @@ func extractDiffPaths(line string) (aPath, bPath string) {
 	return aPath, bPath
 }
 
-// diffBlockPath names the file a `diff --git` header opens. An unreadable header gets "unknown", a key no
-// file ever asks for.
+// diffBlockPath returns the file path from a diff --git header, or "unknown" if unreadable.
 func diffBlockPath(line string) string {
 	if _, bPath := extractDiffPaths(line); bPath != "" {
 		return bPath
@@ -782,9 +771,8 @@ func diffBlockPath(line string) string {
 	return "unknown"
 }
 
-// TaskDiffBaseline is the ref a task's diff, commit list and diff stats are computed against, and the only
-// way to ask. It answers the pinned commit, else a divergence point when the recorded ref is gone, else the
-// fork thread's merge-base, degrading to the next link instead of failing.
+// TaskDiffBaseline returns the reference used to compute a task's diff and stats
+// (pinned commit, divergence point, or merge-base).
 func (wm *WorktreeManager) TaskDiffBaseline(task *types.Task) string {
 	if wm == nil || wm.store == nil || task == nil {
 		return ""
@@ -801,9 +789,8 @@ func (wm *WorktreeManager) TaskDiffBaseline(task *types.Task) string {
 	return wm.resolveDiffBaseline(task.ID, baseRef, task.Branch, forkBranch)
 }
 
-// resolveDiffBaseline computes the ref to diff a task against: baseRef for the original thread, the
-// merge-base of forkBranch and taskBranch for a fork, and baseRef again when the task branch *is* the thread
-// branch. A merge-base it cannot find is nothing a caller can act on, so it answers baseRef.
+// resolveDiffBaseline computes the ref to diff a task against (merge-base for forks,
+// baseRef for original threads).
 func (wm *WorktreeManager) resolveDiffBaseline(taskID, baseRef, taskBranch, forkBranch string) string {
 	// Reject invalid baseRef values (e.g. git error messages like "fatal: ...")
 	if strings.HasPrefix(baseRef, "fatal:") {
@@ -829,8 +816,7 @@ func (wm *WorktreeManager) resolveDiffBaseline(taskID, baseRef, taskBranch, fork
 	return strings.TrimSpace(mb)
 }
 
-// shortStatFromDiff computes a git-style shortstat: "X file(s) changed, Y insertion(s)(+),
-// Z deletion(s)(-)", omitting zero-value parts.
+// shortStatFromDiff computes a git-style shortstat, omitting zero-value parts.
 func shortStatFromDiff(diff string) string {
 	stats := countFileChanges(diff)
 	files := len(stats)
@@ -853,12 +839,8 @@ func shortStatFromDiff(diff string) string {
 	return strings.Join(parts, ", ")
 }
 
-// UntrackedReadTarget opens the worktree-relative file whose content may go into a diff, plus its size,
-// and refuses anything that is not a regular file inside the worktree: git status lists
-// `key -> ../../.ssh/id_rsa` the way it lists a file.
-//
-// The answer is an open file the caller reads and closes, not a path — the worktree is the task's own,
-// so a path handed on is only a name (see OpenVerified()).
+// UntrackedReadTarget opens a worktree-relative file and returns its size, verifying
+// it is a regular file within the worktree.
 func UntrackedReadTarget(worktreePath, rel string) (*os.File, int64, error) {
 	if rel == "" || filepath.IsAbs(rel) {
 		return nil, 0, fmt.Errorf("path %q must be relative to the worktree", rel)
@@ -877,9 +859,8 @@ func UntrackedReadTarget(worktreePath, rel string) (*os.File, int64, error) {
 	return f, info.Size(), nil
 }
 
-// stashUntrackedCommit returns the commit holding a stash entry's untracked files, when hash names a
-// stash commit made with -u. Git keeps those files only in the third parent, so reading the stash
-// commit's own tree would lose them.
+// stashUntrackedCommit returns the commit holding a stash's untracked files (-u).
+// Git stores these in the third parent.
 func (wm *WorktreeManager) stashUntrackedCommit(dir, hash string) (string, bool) {
 	out, err := Run(dir, "rev-list", "--parents", "-n1", hash)
 	if err != nil {
@@ -897,7 +878,7 @@ func (wm *WorktreeManager) stashUntrackedCommit(dir, hash string) (string, bool)
 	return candidate, true
 }
 
-// extractBlobHash extracts the second (new) hash from "index abc..def mode" line.
+// extractBlobHash extracts the new hash from an "index" line.
 func extractBlobHash(line string) string {
 	line = strings.TrimPrefix(line, "index ")
 	parts := strings.SplitN(line, "..", 2)
@@ -909,25 +890,22 @@ func extractBlobHash(line string) string {
 	return ""
 }
 
-// ComputeUntrackedHash computes a SHA-256 hash for an untracked file based on its lines.
+// ComputeUntrackedHash computes a SHA-256 hash for an untracked file.
 func ComputeUntrackedHash(u UntrackedFile) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(u.Path+strings.Join(u.Lines, "\n"))))
 }
 
-// ParseUnifiedDiff parses raw git diff output into per-file entries, sorted by path. It is the only
-// diff grammar in the product: ?parsed=1 ships its output and the panel never re-parses patch text.
-// backend/git/diff_parse_parity_test.go holds the parity cases.
+// ParseUnifiedDiff parses raw git diff output into per-file entries, sorted by path.
 func ParseUnifiedDiff(patch string) []TrackedDiffFile {
 	return SortedParsedFiles(parseUnifiedDiffToFiles(patch, nil, nil, nil))
 }
 
-// stripDiffSide removes a leading "a/" or "b/" diff-side prefix.
+// stripDiffSide removes a leading "a/" or "b/" prefix.
 func stripDiffSide(path, side string) string {
 	return strings.TrimPrefix(path, side)
 }
 
-// SortedParsedFiles flattens a parsed map into path order, so a response never inherits Go's map
-// iteration order.
+// SortedParsedFiles flattens a parsed map into path order for deterministic output.
 func SortedParsedFiles(tracked map[string]*TrackedDiffFile) []TrackedDiffFile {
 	out := make([]TrackedDiffFile, 0, len(tracked))
 	for _, f := range tracked {
@@ -941,7 +919,7 @@ func SortedParsedFiles(tracked map[string]*TrackedDiffFile) []TrackedDiffFile {
 	return out
 }
 
-// annotationsToFiles creates TrackedDiffFile entries from annotations (for empty diffs with binary files).
+// annotationsToFiles creates entries from annotations for empty diffs with binary files.
 func annotationsToFiles(annotations map[string]*fileAnnotation) map[string]*TrackedDiffFile {
 	files := make(map[string]*TrackedDiffFile, len(annotations))
 	for path, ann := range annotations {

@@ -17,17 +17,16 @@ type BoardHandler struct {
 	sandboxMgr  sandboxOps
 }
 
-// sandboxOps is the subset of sandbox.SandboxManager methods used for port refresh.
+// sandboxOps interface for container port refresh.
 type sandboxOps interface {
 	GetContainerPorts(taskID string) ([]types.AssignedPort, error)
 }
 
-// NewBoardHandler creates a new BoardHandler.
 func NewBoardHandler(store *store.Store, configStore *config.ConfigStore, sandboxMgr sandboxOps) *BoardHandler {
 	return &BoardHandler{store: store, configStore: configStore, sandboxMgr: sandboxMgr}
 }
 
-// HandleBoard returns the board (all tasks) for a project.
+// HandleBoard returns board (all tasks) for a project.
 func (h *BoardHandler) HandleBoard(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	if _, ok := resolveProject(w, r, h.store); !ok {
@@ -43,14 +42,14 @@ func (h *BoardHandler) HandleBoard(w http.ResponseWriter, r *http.Request) {
 		tasks = []types.Task{}
 	}
 
-	// Enrich tasks with worktree existence info
+	// enrich tasks with worktree existence.
 	if h.configStore != nil {
 		if cfg, err := h.configStore.GetConfig(); err == nil {
 			EnrichWorktreeExists(tasks, cfg.WorkspaceDir)
 		}
 	}
 
-	// Refresh assigned ports from live sandbox containers
+	// refresh ports from live sandboxes.
 	if h.sandboxMgr != nil {
 		for i := range tasks {
 			ports, err := h.sandboxMgr.GetContainerPorts(tasks[i].ID)
@@ -60,7 +59,6 @@ func (h *BoardHandler) HandleBoard(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// The board is the row the browser renders, so it is the same projection the task_updated frame
-	// carries — including no agent result text. A single task read still answers in full.
+	// returns browser-ready task rows.
 	httputil.JSONResponse(w, http.StatusOK, types.Board{Tasks: stream.BrowserRows(tasks)})
 }

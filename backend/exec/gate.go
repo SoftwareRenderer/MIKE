@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// providerState tracks active slots and the rate window for a single provider.
+// providerState tracks active slots and the rate window for a provider.
 type providerState struct {
 	active      int
 	lastAcquire time.Time
@@ -16,7 +16,7 @@ type providerState struct {
 	nextAllowed time.Time
 }
 
-// queueEntry represents a goroutine waiting for a provider slot or rate allowance.
+// queueEntry waits for a provider slot or rate allowance.
 type queueEntry struct {
 	provider     string
 	done         chan struct{}
@@ -25,21 +25,20 @@ type queueEntry struct {
 	slotReturned bool
 }
 
-// errGateAbandoned reports that a waiter left the queue without ever holding a slot. A caller gets an
-// error rather than a nil grant, so it cannot proceed believing it holds a slot.
+// errGateAbandoned reports that a waiter left the queue without acquiring a slot.
 var errGateAbandoned = errors.New("concurrency gate: waiter abandoned without a slot")
 
 func newQueueEntry(provider string) *queueEntry {
 	return &queueEntry{provider: provider, done: make(chan struct{}, 1)}
 }
 
-// gateKey drops the trailing slash so URLs that differ only by one share a gate.
+// gateKey drops the trailing slash so URLs match.
 func gateKey(providerURL string) string {
 	return strings.TrimRight(providerURL, "/")
 }
 
 // ConcurrencyGate limits concurrent operations per provider (by URL) and, optionally, how fast new
-// requests may start. Acquire blocks until a slot and a rate allowance are available.
+// requests may start. Acquire blocks until a slot and rate allowance are available.
 type ConcurrencyGate struct {
 	mu sync.Mutex
 
@@ -50,15 +49,13 @@ type ConcurrencyGate struct {
 	completions   int
 }
 
-// NewConcurrencyGate creates a new ConcurrencyGate.
 func NewConcurrencyGate() *ConcurrencyGate {
 	return &ConcurrencyGate{
 		providers: make(map[string]*providerState),
 	}
 }
 
-// grantLocked takes the slot and advances the rate window. Caller holds g.mu with both verified
-// available.
+// grantLocked takes the slot and advances the rate window; requires g.mu.
 func (g *ConcurrencyGate) grantLocked(ps *providerState, maxRPS int) {
 	now := time.Now()
 	ps.active++
@@ -66,7 +63,7 @@ func (g *ConcurrencyGate) grantLocked(ps *providerState, maxRPS int) {
 	g.advanceWindowLocked(ps, maxRPS, now)
 }
 
-// advanceWindowLocked moves the rate window past a start at now. Caller holds g.mu.
+// advanceWindowLocked moves the rate window past now; requires g.mu.
 func (g *ConcurrencyGate) advanceWindowLocked(ps *providerState, maxRPS int, now time.Time) {
 	if maxRPS > 0 {
 		ps.nextAllowed = now.Add(time.Second / time.Duration(maxRPS))
@@ -88,9 +85,7 @@ func (g *ConcurrencyGate) frontUnservedIdxLocked(providerURL string) int {
 	return -1
 }
 
-// Acquire blocks until the provider has a slot and its rate window is open (concurrency min 1, maxRPS
-// 0 = unlimited). It returns the waiter's queue entry, nil when granted immediately, or an error if ctx
-// is cancelled.
+// Acquire blocks until a slot and rate window are available; returns nil if granted immediately.
 func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concurrency, maxRPS int, onEnqueued func(*queueEntry)) (*queueEntry, error) {
 	providerURL = gateKey(providerURL)
 	if concurrency < 1 {
@@ -107,7 +102,7 @@ func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concu
 		g.providers[providerURL] = ps
 	}
 
-	// The same condition the queued path below checks; one rate window binds every waiter.
+	// fast path: one rate window binds every waiter.
 	if ps.active < concurrency && !ps.nextAllowed.After(time.Now()) {
 		g.grantLocked(ps, maxRPS)
 		g.mu.Unlock()
@@ -118,8 +113,7 @@ func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concu
 	g.queue.push(entry)
 	g.mu.Unlock()
 	if onEnqueued != nil {
-		// Called before blocking, so a waiting caller can report its own position; a nil entry passed to
-		// Position counts every waiter, not just those ahead.
+		// allows caller to report its own position before blocking.
 		onEnqueued(entry)
 	}
 
@@ -130,15 +124,13 @@ func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concu
 			served := entry.served
 			g.mu.Unlock()
 			if !served {
-				// Removed without being served: cancelled. Report an error rather than a grant we do not
-				// hold, even when ctx has no error yet.
+				// cancelled without being served.
 				if err := ctx.Err(); err != nil {
 					return entry, err
 				}
 				return entry, errGateAbandoned
 			}
-			// Release already took the slot for us. Wait out the rate window, or hand the slot back if
-			// ctx ends first.
+			// slot was taken by Release; wait for rate window.
 			for {
 				g.mu.Lock()
 				if !ps.nextAllowed.After(time.Now()) {
@@ -151,8 +143,7 @@ func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concu
 				select {
 				case <-entry.done:
 				case <-ctx.Done():
-					// A slot we will never use: give it back, or the provider loses that capacity for the
-					// process lifetime.
+					// return slot if cancelled during handoff.
 					g.abandonServedSlot(entry)
 					return entry, ctx.Err()
 				case <-time.After(wait):
@@ -168,8 +159,7 @@ func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concu
 			return entry, nil
 		}
 
-		// Nothing else wakes this loop except the window opening, so a slot freeing early is seen on the
-		// next backoff.
+		// slot freeing is seen on next backoff.
 		var wait time.Duration
 		if maxRPS > 0 && ps.nextAllowed.After(time.Now()) {
 			wait = time.Until(ps.nextAllowed)
@@ -185,7 +175,7 @@ func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concu
 			timer.Stop()
 			entry.once.Do(func() { close(entry.done) })
 			g.cleanupEntry(entry)
-			// Release may have taken a slot for us already; return it.
+			// return slot if taken by Release.
 			g.abandonServedSlot(entry)
 			return entry, ctx.Err()
 		case <-timer.C:
@@ -194,8 +184,7 @@ func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concu
 	}
 }
 
-// Release returns a slot and serves the front waiter when the rate window is open, taking its slot up
-// front. A rate-blocked waiter grants itself on its rate timer.
+// Release returns a slot and serves the front waiter if the rate window is open.
 func (g *ConcurrencyGate) Release(providerURL string) {
 	providerURL = gateKey(providerURL)
 	g.mu.Lock()
@@ -230,20 +219,15 @@ func (g *ConcurrencyGate) Release(providerURL string) {
 
 	g.mu.Unlock()
 
-	// Signalled outside the lock, and never blocking: the slot is already accounted for, and a waiter
-	// that cancelled first has closed the channel.
+	// signal outside lock; waiter may have already cancelled.
 	if signal != nil {
 		signal.once.Do(func() { wake(signal.done) })
 	}
 }
 
-// Promote moves a queued waiter to the front of the queue, so the next freed slot goes to it ahead of the
-// waiters already queued. It returns false when the entry is no longer queued: it was granted, it gave
-// up, or it was handed a slot and is waiting out the rate window — in every case the reorder would decide
-// nothing.
+// Promote moves a queued waiter to the front; returns false if no longer queued.
 //
-// The waiter is not woken. It re-reads the gate on its own backoff, and entry.done is closed by its
-// cancellation path, which a wake here would race with.
+// Does not wake the waiter to avoid racing with cancellation.
 func (g *ConcurrencyGate) Promote(entry *queueEntry) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -255,8 +239,7 @@ func (g *ConcurrencyGate) Promote(entry *queueEntry) bool {
 	return true
 }
 
-// countAheadLocked returns the waiters ahead of currentEntry (nil = any) and whether it is queued.
-// Caller holds g.mu.
+// countAheadLocked counts waiters ahead of currentEntry; requires g.mu.
 func (g *ConcurrencyGate) countAheadLocked(providerURL string, currentEntry *queueEntry) (ahead int, found bool) {
 	for _, e := range g.queue.entries {
 		if e.provider != providerURL {
@@ -278,7 +261,6 @@ func (g *ConcurrencyGate) countAheadLocked(providerURL string, currentEntry *que
 	return ahead, found
 }
 
-// positionLocked is Position under the caller's lock.
 func (g *ConcurrencyGate) positionLocked(providerURL string, currentEntry *queueEntry) int {
 	ahead, found := g.countAheadLocked(providerURL, currentEntry)
 	if found {
@@ -287,8 +269,7 @@ func (g *ConcurrencyGate) positionLocked(providerURL string, currentEntry *queue
 	return ahead
 }
 
-// Position returns the 1-indexed queue position for the provider, counting every waiter when
-// currentEntry is nil, or 0 when no one is waiting.
+// Position returns 1-indexed queue position.
 func (g *ConcurrencyGate) Position(providerURL string, currentEntry *queueEntry) int {
 	providerURL = gateKey(providerURL)
 	g.mu.Lock()
@@ -296,8 +277,7 @@ func (g *ConcurrencyGate) Position(providerURL string, currentEntry *queueEntry)
 	return g.positionLocked(providerURL, currentEntry)
 }
 
-// EstimateWait returns the estimated wait in seconds: the average slot duration times the queue
-// position.
+// EstimateWait returns estimated wait in seconds (average slot duration * position).
 func (g *ConcurrencyGate) EstimateWait(providerURL string, currentEntry *queueEntry) int {
 	providerURL = gateKey(providerURL)
 	g.mu.Lock()
@@ -320,9 +300,7 @@ func (g *ConcurrencyGate) cleanupEntry(entry *queueEntry) {
 	g.queue.remove(entry)
 }
 
-// abandonServedSlot returns the slot Release took for entry when the waiter gives up during the
-// handoff; without it ps.active stays inflated until the process restarts. It is a no-op when no slot was
-// taken or it was already returned, and releases through Release so the slot reaches the next waiter.
+// abandonServedSlot returns the slot taken by Release if the waiter gives up during handoff.
 func (g *ConcurrencyGate) abandonServedSlot(entry *queueEntry) {
 	g.mu.Lock()
 	returnSlot := entry.served && !entry.slotReturned

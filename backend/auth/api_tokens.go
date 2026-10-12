@@ -41,7 +41,6 @@ type APITokenManager struct {
 	store *store.Store
 }
 
-// NewAPITokenManager returns a manager over the shared store.
 func NewAPITokenManager(s *store.Store) *APITokenManager {
 	return &APITokenManager{store: s}
 }

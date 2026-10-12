@@ -31,11 +31,9 @@ func ParseChangelog(data string) []ChangelogEntry {
 	return entries
 }
 
-// ChangelogSince returns the entries strictly newer than the entry whose hash
-// equals sinceHash (case-insensitive) — i.e. everything after it in the
-// oldest → newest ordering. It anchors on the FIRST matching occurrence.
-// Returns empty when sinceHash is empty or no entry matches it (per spec,
-// an unknown installed commit shows no changes).
+// ChangelogSince returns entries newer than sinceHash (case-insensitive).
+// It returns everything after the first matching entry in the oldest → newest
+// ordering. It returns nil if sinceHash is empty or no entry matches.
 func ChangelogSince(entries []ChangelogEntry, sinceHash string) []ChangelogEntry {
 	if sinceHash == "" {
 		return nil

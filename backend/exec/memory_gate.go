@@ -8,24 +8,21 @@ import (
 	"mike/pkg/logging"
 )
 
-// memoryGatePollInterval is how often a waiter re-checks when no Release signal arrives. It stays well
-// under DefaultMemSupervisorInterval so a Release-triggered grant beats the supervisor tick.
+// memoryGatePollInterval is the re-check interval when no Release signal arrives. It is shorter than
+// DefaultMemSupervisorInterval so a Release-triggered grant occurs before the supervisor tick.
 const memoryGatePollInterval = 500 * time.Millisecond
 
-// memWaiter is one goroutine blocked in Acquire. done is buffered so Release can signal without
-// blocking.
+// memWaiter is a goroutine blocked in Acquire. done is buffered so Release can signal without blocking.
 type memWaiter struct {
 	amountMB int64
 	done     chan struct{}
-	// served is set by Release before it signals. It is only a hint: the grant is confirmed by
-	// re-reading used under mu.
+	// served is set by Release before signaling; the grant is confirmed by re-reading used under mu.
 	served bool
 }
 
-// MemoryGate is a blocking resource gate counting megabytes, not slots; capacity 0 disables it.
-// Admission is `mikeMB + reservations + candidate <= capacity`, where mikeMB is what MIKE's own
-// containers and processes cost, so the ceiling is MIKE's share of the machine and the other users of
-// the host stay out of the sum.
+// MemoryGate is a blocking resource gate counting megabytes; capacity 0 disables it.
+// Admission: mikeMB + reservations + candidate <= capacity. mikeMB is the cost of MIKE's own
+// containers and processes; the ceiling is MIKE's share of host RAM.
 type MemoryGate struct {
 	mu       sync.Mutex
 	used     int64 // reserved by tasks admitted but with no container yet
@@ -39,21 +36,19 @@ type MemoryGate struct {
 	measured    bool  // false until the first sample; until then the reservations alone decide
 }
 
-// memoryAvailableFloorPct is the share of total RAM below which a task is made to wait rather than the
-// host being pushed into an OOM kill. The admission ceiling answers a different question and is set in
-// backend/server from MIKE_MEMORY_BUDGET_PCT.
+// memoryAvailableFloorPct is the RAM threshold below which tasks wait to avoid host OOM. The
+// admission ceiling is set in backend/server via MIKE_MEMORY_BUDGET_PCT.
 const memoryAvailableFloorPct = 5
 
-// SetMeasurements records one budget tick's readings. mikeMB is what MIKE's containers and process
-// cost, heldMB what they actually hold; the two host figures decide only the pause floor.
+// SetMeasurements records budget readings. mikeMB is the cost of MIKE's containers and process,
+// heldMB is what they actually hold; host figures decide the pause floor.
 func (g *MemoryGate) SetMeasurements(mikeMB, heldMB, availableMB, totalMB int64) {
 	g.mu.Lock()
 	g.mikeMB, g.heldMB, g.availableMB, g.totalMB, g.measured = mikeMB, heldMB, availableMB, totalMB, true
 	g.mu.Unlock()
 }
 
-// HostMemoryTight reports whether the host has less free RAM than the floor allows. A host that has
-// never been measured is never tight.
+// HostMemoryTight reports if the host has less free RAM than the floor allows. Unmeasured hosts are not tight.
 func (g *MemoryGate) HostMemoryTight() bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -63,8 +58,7 @@ func (g *MemoryGate) HostMemoryTight() bool {
 	return g.availableMB*100 < g.totalMB*memoryAvailableFloorPct
 }
 
-// pressureLocked returns what MIKE itself costs the ceiling; a gate that has never been sampled answers
-// 0 and leaves the reservation ledger to decide. Caller holds mu.
+// pressureLocked returns MIKE's cost against the ceiling; returns 0 if never sampled. Caller holds mu.
 func (g *MemoryGate) pressureLocked() int64 {
 	if !g.measured {
 		return 0
@@ -72,8 +66,8 @@ func (g *MemoryGate) pressureLocked() int64 {
 	return g.mikeMB
 }
 
-// roomLocked reports whether amountMB more fits under the ceiling; caller holds mu. A zero-size
-// candidate is admitted only while the budget is already under the ceiling.
+// roomLocked reports if amountMB fits under the ceiling; caller holds mu. Zero-size candidates
+// are admitted if the budget is under the ceiling.
 func (g *MemoryGate) roomLocked(amountMB int64) bool {
 	if g.capacity == 0 {
 		return true
@@ -92,9 +86,8 @@ func (g *MemoryGate) SetCapacity(capMB int64) {
 	g.mu.Unlock()
 }
 
-// Acquire blocks until amountMB are available or ctx is cancelled; a non-positive amount and a capacity
-// of 0 succeed at once. On grant the caller owns amountMB and must Release the same amount; on
-// cancellation it owns nothing.
+// Acquire blocks until amountMB are available or ctx is cancelled. Non-positive amounts or
+// capacity 0 succeed immediately. On grant, caller must Release the same amount.
 func (g *MemoryGate) Acquire(ctx context.Context, amountMB int64, onEnqueued func(*memWaiter)) error {
 
 	g.mu.Lock()
@@ -173,8 +166,7 @@ func (g *MemoryGate) Acquire(ctx context.Context, amountMB int64, onEnqueued fun
 	}
 }
 
-// Release returns amountMB to the pool and serves the front waiter when there is room. Releasing more
-// than was acquired clamps to zero.
+// Release returns amountMB to the pool and serves the front waiter if room exists. Over-releases clamp to zero.
 func (g *MemoryGate) Release(amountMB int64) {
 	if amountMB <= 0 {
 		return
@@ -213,8 +205,7 @@ func (g *MemoryGate) InUse() int64 {
 	return g.pressureLocked() + g.used
 }
 
-// BudgetSnapshot is one read of everything the gate decides and reports with, taken under the lock. The
-// figures travel to one log line together.
+// BudgetSnapshot is a locked snapshot of gate figures for logging.
 type BudgetSnapshot struct {
 	CapacityMB     int64
 	InUseMB        int64 // MikeMB + ReservationsMB
@@ -248,8 +239,7 @@ func (g *MemoryGate) QueueLen() int {
 	return g.queue.Len()
 }
 
-// frontLocked returns 0 when the queue holds a waiter, else -1. Every entry in it is live: served and
-// cancelled entries are removed under mu.
+// frontLocked returns 0 if the queue holds a waiter, else -1. Served and cancelled entries are removed under mu.
 func (g *MemoryGate) frontLocked() int {
 	if len(g.queue.entries) == 0 {
 		return -1

@@ -6,33 +6,26 @@ import (
 	"mike/pkg/keylock"
 )
 
-// tryLockProjectWorktree waits up to timeout for the project's worktree lock and returns its release
-// function. On timeout it returns (nil, false): nothing is held and no waiter is left behind, so the
-// next caller is not queued behind a run that already gave up.
+// tryLockProjectWorktree waits up to timeout for the project's worktree lock.
+// Returns (nil, false) on timeout.
 func (wm *WorktreeManager) tryLockProjectWorktree(projectID string, timeout time.Duration) (func(), bool) {
 	return wm.worktree.TryLock(projectID, timeout)
 }
 
-// LockProjectMerge acquires the per-project merge lock and returns the function that releases it.
-// The main checkout has a single HEAD and index, so interleaved merges clobber each other's checkout,
-// stashes and restore. Lock order: always acquired BEFORE (never after) the project stash lock.
-//
-// The wait is unbounded on purpose; see gitSlowWait.
+// LockProjectMerge acquires the per-project merge lock. Interleaved merges would
+// clobber the index and checkout. Lock order: always acquired before the project stash lock.
+// Wait is unbounded.
 func (wm *WorktreeManager) LockProjectMerge(projectID string) func() {
 	return wm.merge.Lock(projectID)
 }
 
-// LockProjectStash acquires the per-project stash lock and returns the function that releases it.
-// Stash is repo-wide - one stack for every worktree, holding the user's own entries - so stash
-// operations must not interleave. Call it as `defer wm.LockProjectStash(projectID)()` when the
-// critical section is the enclosing block; capture the release function when it is not.
-//
-// The wait is unbounded on purpose; see gitSlowWait.
+// LockProjectStash acquires the per-project stash lock. Stash is repo-wide, so
+// operations must not interleave. Wait is unbounded.
 func (wm *WorktreeManager) LockProjectStash(projectID string) func() {
 	return wm.stash.Lock(projectID)
 }
 
-// LockProjectStashWatched is LockProjectStash with the wait reported, for a caller a person is waiting on.
+// LockProjectStashWatched is LockProjectStash with reported wait for user-facing operations.
 func (wm *WorktreeManager) LockProjectStashWatched(projectID string, every time.Duration, notice keylock.WaitNotice) func() {
 	return wm.stash.LockWatched(projectID, every, notice)
 }

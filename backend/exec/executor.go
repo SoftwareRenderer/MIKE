@@ -1,8 +1,6 @@
-// Package exec is the execution engine: a task's LLM or agent loop, from accepting a user
-// message until the run settles, including tool execution, summarization, sandbox setup,
-// merge conflicts, checkpoints and the provider gates.
-// The loop never touches a ResponseWriter, so a turn keeps running - and reporting over the
-// task's WebSocket - whatever the browser does.
+// Package exec is the execution engine for tasks: manages the LLM/agent loop, tool
+// execution, summarization, sandbox setup, merge conflicts, and checkpoints. Reporting
+// occurs via WebSocket, independent of the HTTP response.
 package exec
 
 import (
@@ -39,24 +37,16 @@ import (
 	"mike/pkg/logging"
 )
 
-// TaskExecutor handles task execution endpoints and orchestrates AI task execution.
+// TaskExecutor orchestrates AI task execution.
 //
-// A concern is split out of this type by moving its methods onto a collaborator struct that
-// NewTaskExecutor constructs and holds — never by splitting executionState: its lock discipline
-// depends on the sandbox fields being read as one snapshot (sandbox, setSandbox), and a state
-// owned by two groups gets its fields captured piecemeal — a mix of old and new sandbox
-// callbacks reads a stopped container through a live client.
+// Concerns are split into collaborator structs held by TaskExecutor to avoid splitting
+// executionState, which requires atomic sandbox snapshots to prevent race conditions
+// (e.g. reading stopped containers via live clients). Collaborators receive only
+// necessary dependencies and never access taskMu or sandboxMu directly; instead,
+// they use provided functions that handle locking.
 //
-// A collaborator is constructed with exactly the dependencies its own functions use, plus:
-//   - a lock as a release func — func() func(), or func(string) func() per task — never a
-//     *sync.Mutex, for the reason LockWorktree gives;
-//   - *executionState only when its concern owns the fields it reads, and otherwise neither it
-//     nor a *TaskExecutor;
-//   - no way to take taskMu or sandboxMu. A collaborator that needs state they guard gets a func
-//     value whose body takes the lock here, on this side of the seam.
-//
-// Outside callers only ever see TaskExecutor, so a split keeps a one-line delegator for each
-// name they use.
+// Outside callers only ever see TaskExecutor, so a split keeps a one-line delegator
+// for each name they use.
 type TaskExecutor struct {
 	store         *store.Store
 	configStore   *config.ConfigStore
@@ -64,17 +54,14 @@ type TaskExecutor struct {
 	worktreeMgr   *git.WorktreeManager
 	sandboxMgr    *sandbox.SandboxManager
 	agentRegistry *agent.AgentRegistry
-	// Whether a task's sandbox container holds a given binary. A test injects a recorder: which
-	// name the pre-flight asks about is the behaviour under test.
+	// Determines if a task's sandbox container holds a given binary.
 	agentBinaries agentBinaries
 	lspMgr        lspManager
 	extTools      *extensions.ToolRegistry
-	// mcpReg offers the tools of the servers a project enabled. Read per turn, never cached here.
+	// Provides tools for MCP servers enabled by a project; read per turn.
 	mcpReg      *mcp.Registry
 	commitQueue *CommitQueue
-	// How long to wait before re-issuing a failed stream. Production is backoffFor; the retry loop
-	// reads this, so a test that only needs "retried, then failed" is not held to the production
-	// ladder. Its shape belongs to TestBackoffFor_* and TestQuietStreamBackoffWaitsAtLeastTheSilenceItSaw.
+	// Backoff duration for re-issuing failed streams.
 	llmBackoff    func(attempt int, err error) time.Duration
 	gate          *ConcurrencyGate // per-LLM-request in-flight limit (incl. utility calls)
 	taskGate      *ConcurrencyGate // per-provider running-task limit
@@ -83,14 +70,13 @@ type TaskExecutor struct {
 	taskMu        sync.Mutex
 	llmAdapter    *llmadapter.Adapter // provider request adaptation (llm extensions); nil = none
 	tasks         map[string]*executionState
-	// Per-task mutexes to serialize worktree access across executors and merges.
+	// Serializes worktree access per task across executors and merges.
 	worktreeMu taskWorktreeLocks // taskID -> the task's own worktree lock
-	// Branch and merge behaviour of a finished turn. Its lock discipline is in mergeOrchestrator.
+	// Manages branch and merge behavior of finished turns.
 	merge *mergeOrchestrator
-	// The tool-call dispatcher: the table of tool handlers and the environment each call runs in.
+	// Dispatches tool calls using a table of handlers.
 	tools *toolRunner
-	// The task's context window: the threshold decision, the rolling summary, the manual paths.
-	// Its lock discipline is in summarizeOrchestrator.
+	// Manages the task's context window and summaries.
 	summarize *summarizeOrchestrator
 }
 
@@ -112,18 +98,15 @@ func (te *TaskExecutor) toolDisplayName(toolName string) string {
 	return llama.GetToolDisplayName(toolName)
 }
 
-// SetLLMAdapter wires the provider request adapter (from enabled `llm`
-// extensions). New LlamaClients created by this executor then adapt their
-// requests to provider-specific formats. Nil = no adaptation.
+// SetLLMAdapter wires the provider request adapter from enabled LLM extensions.
 func (te *TaskExecutor) SetLLMAdapter(a *llmadapter.Adapter) {
 	te.llmAdapter = a
 }
 
-// MemGate returns the sandbox memory budget gate. Server wiring calls SetCapacity on it at startup.
+// MemGate returns the sandbox memory budget gate.
 func (te *TaskExecutor) MemGate() *MemoryGate { return te.memGate }
 
-// memorySupervisorActions: a resume continues the run that was paused, so it carries that run's
-// provenance instead of claiming a start of its own — see resumeProvenance.
+// Stop, start, and startSubtask use resumeProvenance to continue paused runs.
 func (te *TaskExecutor) stopTask(taskID string) error { return te.StopTask(taskID) }
 func (te *TaskExecutor) startTask(projectID, taskID string) error {
 	return te.StartTask(projectID, taskID, te.resumeProvenance(taskID))
@@ -132,18 +115,14 @@ func (te *TaskExecutor) startSubtask(projectID, taskID string) error {
 	return te.StartSubtask(projectID, taskID, te.resumeProvenance(taskID))
 }
 
-// resumeProvenance answers "did a click name this task?" for a memory-supervisor resume with the
-// answer the paused run already recorded: the supervisor chose the task by its memory cost, which
-// says nothing about who is waiting on it. A task that cannot be read answers false, so the run
-// waits for a person rather than answering for one who may be there.
+// resumeProvenance checks if a task was started by a person's click, using the
+// recorded provenance for paused runs.
 func (te *TaskExecutor) resumeProvenance(taskID string) bool {
 	task, err := te.store.GetTaskByID(taskID)
 	return err == nil && task.Autostarted
 }
 
-// newLlamaClient creates a LlamaClient with the provider request adapter attached, that provider's
-// ceiling for a quiet stream, and that model's sampler overrides. Resolving the overrides here, and
-// not at a call site, is what makes a utility call sample the way the turn that asked for it does.
+// newLlamaClient creates a LlamaClient with adapter, silence policy, and sampler overrides.
 func (te *TaskExecutor) newLlamaClient(serverURL, modelName, reasoningEffort, apiKey string, silence *streamSilenceWatcher) *llama.LlamaClient {
 	client := llama.NewLlamaClient(serverURL, modelName, reasoningEffort, apiKey)
 	client.SetAdapter(te.llmAdapter)
@@ -152,39 +131,29 @@ func (te *TaskExecutor) newLlamaClient(serverURL, modelName, reasoningEffort, ap
 	return client
 }
 
-// executionState is everything one running task holds between an executor taking it and its
-// defer releasing it. Locking, because these fields are read from the executor loop, HTTP
-// handlers and tool calls:
+// executionState holds all state for a running task. Locking:
 //
-//   - sandboxMu guards the sandboxExec/sandboxExecStream/sandboxRead/sandboxWrite/sandboxEdit/
-//     sandboxOperatingMode/agentSandboxHash/recoverBridge group. Read it with sandbox() and write
-//     it with setSandbox(), never field by field. sandboxMu is a leaf: never held while taking
-//     taskMu.
-//   - activeSummarize has its own mutex, for the same one-field-one-lock reason.
-//   - taskMu (on TaskExecutor) guards everything else here together with the tasks map:
-//     runnerClosed, lastDiffHash, bridgeRecoveryAttempts. A method that reached
-//     this state through the map already holds it.
-//   - ctx, cancel and the channels are set once at construction, so they need no lock.
+//   - sandboxMu: Guards sandbox callbacks and config. Use sandbox() and setSandbox(); leaf lock.
+//   - activeSummarize.mu: Guards active summarize request.
+//   - taskMu (TaskExecutor): Guards other fields and the tasks map.
+//   - Immutable fields: ctx, cancel, and channels need no lock.
 type executionState struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 	userMsgChan chan stream.UserMessage
-	// msgWake hints that userMsgChan grew; nothing is read off it as a message, so the executor
-	// goroutine stays that channel's only consumer, and a stale hint interrupts nothing because a
-	// waiter re-reads the channel.
+	// msgWake hints that userMsgChan has new messages.
 	msgWake         chan struct{}
 	summarizeCh     chan *summarizeRequest // send a request, receives result via resultCh
 	activeSummarize struct {
 		mu      sync.Mutex
 		request *summarizeRequest // currently active summarize request (nil = none)
 	}
-	agentRunner  *agent.AgentRunner // Agent runner — kept alive after completion for on-demand compaction
+	agentRunner  *agent.AgentRunner // Agent runner; kept alive for on-demand compaction.
 	runnerClosed bool
 	projectName  string
 	createdIDs   []string // task IDs created by create_task during this execution
 	executorType string   // "llm" or "agent" — tracks which executor type is active
-	// sandboxEnabled is the task's project setting, fixed for the run. toolEnv.hostGuard refuses
-	// a sandboxed task's host fallbacks with it.
+	// Task's project sandbox setting, fixed for the run.
 	sandboxEnabled bool
 	// lastDiffHash tracks the last broadcast diff hash to avoid duplicate broadcasts
 	// when fsnotify already caught the same change.
@@ -1543,7 +1512,7 @@ func (te *TaskExecutor) StartTask(projectID, taskID string, autostarted bool) er
 	return nil
 }
 
-// StopTask cancels the task's live executor and transitions the task row out of its in-flight state
+// StopTask cancels the task's live executor and transitions the task row out of its in-flight state.
 func (te *TaskExecutor) StopTask(taskID string) error {
 	te.taskMu.Lock()
 	state, ok := te.tasks[taskID]

@@ -32,12 +32,12 @@ type Settings struct {
 	// Enabled is the effective answer: off when the organization switch forbids it, the stored
 	// preference otherwise.
 	Enabled bool
-	// Answered is false while nobody has ever answered, which owes the first-run prompt. It is not
+	// Answered is false if the first-run prompt has not yet been shown. It is not
 	// the same as Enabled=false.
 	Answered bool
 }
 
-// State is what the last check learned and what is still owed.
+// State is what the last check learned and any pending update information.
 type State struct {
 	// CurrentVersion is this binary's version, as /api/version answers it.
 	CurrentVersion string `json:"current_version"`
@@ -48,7 +48,7 @@ type State struct {
 	NotesURL  string `json:"notes_url,omitempty"`
 	// Asset is this machine's archive, empty when the newest manifest names none for it.
 	Asset Asset `json:"asset,omitempty"`
-	// Available is the whole point: a newer release with an archive for this machine.
+	// Available is true if a newer release with a compatible archive is available.
 	Available bool `json:"available"`
 	// CheckedAt is when the last check finished, in fixed-width UTC.
 	CheckedAt string `json:"checked_at,omitempty"`
@@ -70,12 +70,12 @@ type State struct {
 	PreparedAt      string `json:"prepared_at,omitempty"`
 }
 
-// Status is the status answer: the last known state plus what is true of this install right now.
+// Status summarizes the update state and current installation status.
 type Status struct {
 	State
 	Enabled bool `json:"enabled"`
-	// Disabled is the organization switch: nothing here checks, downloads, installs or restarts, and
-	// the client says so instead of offering the click.
+	// Disabled is true if updates are forbidden by the organization switch: nothing here checks, downloads, installs or restarts, and
+	// the client reports this status instead of offering the click.
 	Disabled bool `json:"disabled"`
 	Answered bool `json:"answered"`
 	// Install is what this process could do about an update.
@@ -88,7 +88,7 @@ type Status struct {
 }
 
 // Service answers the update questions for one server: one install directory per process, so nothing
-// is keyed and its mutex is the whole locking story.
+// is keyed and a single mutex is sufficient.
 type Service struct {
 	mu sync.Mutex
 
@@ -301,7 +301,7 @@ func (s *Service) Restart() error {
 	return s.restart()
 }
 
-// forbidden is the organization switch speaking. It is checked before anything that could reach the
+// forbidden checks if updates are disabled by the operator. It is checked before anything that could reach the
 // network or the install directory, so a release the last process learned about cannot be installed by a
 // deployment that has since turned updates off.
 func (s *Service) forbidden() error {
@@ -333,7 +333,7 @@ func (s *Service) Status(set Settings) Status {
 	}
 }
 
-// CheckAutomatic is the daily pass on a browser's behalf. The day belongs to the install, not to whichever
+// CheckAutomatic performs a once-daily update check on behalf of the browser. The day belongs to the install, not to whichever
 // browser asked first: the first one today gets the fetch, and every later one is answered from what that
 // fetch learned. A check that ran and failed spent the day like one that succeeded, because `record`
 // timestamps every check that runs.
@@ -349,8 +349,8 @@ func (s *Service) CheckAutomatic(ctx context.Context, set Settings) (Status, err
 	return s.Check(ctx, set)
 }
 
-// checkRefusal is why a check may not dial the manifest, or nil. Both entry points ask it before dialling,
-// so the daily pass cannot answer a spent day over the sentence that names the switch which forbids it.
+// checkRefusal ensures that disabling updates takes precedence over the daily check limit. Both entry points ask it before dialling,
+// so a refusal reason is returned instead of a cached result from earlier today.
 func (s *Service) checkRefusal(set Settings) error {
 	if err := s.forbidden(); err != nil {
 		return err
@@ -432,7 +432,7 @@ func (s *Service) Check(ctx context.Context, set Settings) (Status, error) {
 	return s.Status(set), nil
 }
 
-// record changes the state under the lock and writes it back, so the dot and the next page load agree.
+// record changes the state under the lock and writes it back, ensuring the UI reflects the change immediately.
 func (s *Service) record(change func(*State)) {
 	s.mu.Lock()
 	s.state.Note = ""
@@ -472,19 +472,19 @@ func (s *Service) load() (string, error) {
 	return s.store.GetConfigValue(stateKey)
 }
 
-// refusal is the state a person can change; the sentence reaches the browser unchanged.
+// refusal returns an error that the user can resolve; the message is passed to the browser unchanged.
 func refusal(format string, args ...any) error { return errs.Conflict(fmt.Sprintf(format, args...)) }
 
-// fault is MIKE's own problem: the cause goes to the log, the browser gets the operation's name.
+// fault returns an error representing a server-side failure: the cause is logged and the operation name is returned to the browser.
 func fault(operation string, cause error) error { return errs.Operation(operation, cause) }
 
-// errDisabled says the preference has not been turned on, which is the state a person can change here.
+// errDisabled returns an error indicating that update checks are off in Settings.
 func errDisabled() error {
 	return refusal("update checks are off; turn them on in Settings → About")
 }
 
 // checkManifestURL is the rule startup applies to the variable, applied here to the value: a caller that
-// built a URL from a fixture meets the same bar as the operator who typed one.
+// built a URL from a fixture is subject to the same rules as the operator who typed one.
 func checkManifestURL(raw string) error {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || u.Host == "" {

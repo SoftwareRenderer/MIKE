@@ -15,9 +15,8 @@ import (
 	"mike/pkg/logging"
 )
 
-// mapSensitiveConfig applies transform to every config value the schema declares sensitive and copies
-// the rest unchanged; with no schema nothing is known to be secret, so nothing is touched. The result is
-// always a copy, because these maps reach both the store and the browser.
+// mapSensitiveConfig transforms config values declared sensitive by the schema.
+// Result is always a copy to avoid mutating shared maps.
 func mapSensitiveConfig(config map[string]any, schema *ConfigSchema, transform func(key string, value any) (any, bool)) map[string]any {
 	if schema == nil || len(schema.Properties) == 0 || config == nil {
 		return config
@@ -39,12 +38,12 @@ func mapSensitiveConfig(config map[string]any, schema *ConfigSchema, transform f
 	return result
 }
 
-// extensionKeyPurpose is the record kind an extension's sensitive config value is sealed under, next to
-// the extension id and the config key, so a value cannot move between them.
+// extensionKeyPurpose is the sealing purpose for sensitive config values; prevents a value
+// from being moved between extensions or keys.
 const extensionKeyPurpose = "extension-config"
 
-// encryptConfigValues encrypts the sensitive config values the manifest declares. With no box there is no
-// key to seal with, so a secret is dropped rather than written plain.
+// encryptConfigValues encrypts sensitive config values declared in the manifest.
+// Secrets are dropped if no encryption box is available.
 func encryptConfigValues(box *crypto.Box, extID string, config map[string]any, schema *ConfigSchema) map[string]any {
 	return mapSensitiveConfig(config, schema, func(key string, v any) (any, bool) {
 		plain := fmt.Sprintf("%v", v)
@@ -68,8 +67,8 @@ func encryptConfigValues(box *crypto.Box, extID string, config map[string]any, s
 	})
 }
 
-// decryptConfigValues decrypts the sensitive values the manifest declares. A record that will not open
-// answers as no value; a value that could not be a record at all passes through unchanged.
+// decryptConfigValues decrypts sensitive values declared in the manifest.
+// Non-records pass through unchanged.
 func decryptConfigValues(box *crypto.Box, extID string, config map[string]any, schema *ConfigSchema) map[string]any {
 	return mapSensitiveConfig(config, schema, func(key string, v any) (any, bool) {
 		strVal, okStr := v.(string)
@@ -91,8 +90,8 @@ func decryptConfigValues(box *crypto.Box, extID string, config map[string]any, s
 	})
 }
 
-// rawSQL is this package's whole database need. The extensions table is its schema, not the store's, so
-// it speaks SQL without inheriting the store's typed accessors.
+// rawSQL is the database interface for extensions. Uses raw SQL because the extensions
+// table is managed separately from the core store.
 type rawSQL interface {
 	Exec(query string, args ...any) (sql.Result, error)
 	Query(query string, args ...any) (*sql.Rows, error)
@@ -181,9 +180,7 @@ func (es *ExtensionStore) List() ([]Extension, error) {
 	return es.GetByType("")
 }
 
-// allProjects is the one place these listings reach the project table. The nil answers are the
-// store's own state, not a read failure: an ExtensionStore built without the project accessor has no
-// paths to lend, and a nil-receiver call is what a zero-value store answers.
+// allProjects accesses project table for mount paths. Returns nil if project accessor is missing.
 func (es *ExtensionStore) allProjects() ([]types.Project, error) {
 	if es == nil || es.projects == nil {
 		return nil, nil
@@ -191,8 +188,8 @@ func (es *ExtensionStore) allProjects() ([]types.Project, error) {
 	return es.projects.ListProjects()
 }
 
-// ListProjectPaths returns the host path of every registered project. These paths are the
-// extension-sandbox mount allowlist: an extension may mount what the app already mounts, nothing more.
+// ListProjectPaths returns host paths of registered projects to form the
+// extension-sandbox mount allowlist.
 func (es *ExtensionStore) ListProjectPaths() ([]string, error) {
 	projects, err := es.allProjects()
 	if err != nil {
@@ -207,9 +204,7 @@ func (es *ExtensionStore) ListProjectPaths() ([]string, error) {
 	return paths, nil
 }
 
-// ListProjectSandboxMountPaths returns the host paths every project declares in its Sandbox
-// Configuration. The task sandbox already bind-mounts them, so the LSP sandbox may borrow them,
-// read-only (MountPolicy.ForceReadOnly).
+// ListProjectSandboxMountPaths returns the host paths declared in project Sandbox Configurations.
 func (es *ExtensionStore) ListProjectSandboxMountPaths() ([]string, error) {
 	projects, err := es.allProjects()
 	if err != nil {
@@ -261,8 +256,7 @@ func (es *ExtensionStore) GetByType(extType string) ([]Extension, error) {
 	return extensions, nil
 }
 
-// ErrExtensionNotFound is the extensions member of the errs.ErrNotFound family. GetByID
-// wraps it with the ID in the message, because callers display that.
+// ErrExtensionNotFound is an extension-specific instance of errs.ErrNotFound.
 var ErrExtensionNotFound = fmt.Errorf("extension %w", errs.ErrNotFound)
 
 // GetByID retrieves an extension by ID.
@@ -277,8 +271,8 @@ func (es *ExtensionStore) GetByID(id string) (*Extension, error) {
 	return ext, nil
 }
 
-// GetByAuthorName retrieves an extension by its author/name identity key. IDs are timestamped, so the
-// pair is what makes two installs of one tool the same extension.
+// GetByAuthorName retrieves extension by author/name; this pair is the stable
+// identity across timestamped IDs.
 func (es *ExtensionStore) GetByAuthorName(author, name string) (*Extension, error) {
 	ext, err := es.queryOne(`WHERE author = ? AND name = ?`, author, name)
 	if err == sql.ErrNoRows {
@@ -290,8 +284,8 @@ func (es *ExtensionStore) GetByAuthorName(author, name string) (*Extension, erro
 	return ext, nil
 }
 
-// queryOne runs a single-row extensions query. The WHERE clause is a literal fragment, never built from
-// caller data; sql.ErrNoRows comes back unwrapped so the caller can name the identity it looked up.
+// queryOne runs single-row query. WHERE clause is a literal to prevent injection;
+// returns unwrapped sql.ErrNoRows.
 func (es *ExtensionStore) queryOne(where string, args ...any) (*Extension, error) {
 	ext, err := es.scanExtension(es.db.QueryRow(
 		`SELECT `+extensionColumns+` FROM extensions `+where, args...))
@@ -365,8 +359,7 @@ func (es *ExtensionStore) Create(ext *Extension) error {
 	return nil
 }
 
-// execOne runs a statement that must reach the extension named by id, and returns the store's own
-// "not found" when it reached nothing.
+// execOne runs statement for a specific extension; returns error if no rows were affected.
 func (es *ExtensionStore) execOne(op, id, query string, args ...any) error {
 	result, err := es.db.Exec(query, args...)
 	if err != nil {
@@ -401,9 +394,7 @@ func (es *ExtensionStore) SetEnabled(id string, enabled bool) error {
 	return es.execOne("set enabled", id, `UPDATE extensions SET enabled = ? WHERE id = ?`, store.B2I(enabled), id)
 }
 
-// SetImageRef records the image an extension's sandbox runs in both places it is kept: image_ref (the UI
-// and the delete path) and container_config.image (the container create). Only those two columns; the
-// caller's copy of the manifest or config may predate another writer.
+// SetImageRef records the sandbox image in both image_ref and container_config.image.
 func (es *ExtensionStore) SetImageRef(id, imageRef string, containerConfig ContainerConfig) error {
 	containerConfigJSON, err := json.Marshal(containerConfig)
 	if err != nil {
@@ -504,7 +495,7 @@ func (es *ExtensionStore) StorageDelete(extID, namespace, key string) error {
 	return nil
 }
 
-// StorageDeleteAll removes every stored value for an extension, so deleting one leaves no rows behind.
+// StorageDeleteAll removes all stored values for an extension.
 func (es *ExtensionStore) StorageDeleteAll(extID string) error {
 	_, err := es.db.Exec(
 		`DELETE FROM extension_storage WHERE ext_id = ?`,

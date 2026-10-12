@@ -22,9 +22,8 @@ import (
 	"mike/pkg/logging"
 )
 
-// JSONRPCMessage is the routing view of a JSON-RPC 2.0 message: a request (id and method), a
-// response (id only), or a notification (method only). Only these members are read — the bytes are
-// forwarded unchanged, so `jsonrpc` and `params` are not modelled here.
+// JSONRPCMessage is the routing view of a JSON-RPC 2.0 message. Only id, method,
+// result, and error are read; others are forwarded unchanged.
 type JSONRPCMessage struct {
 	ID     *json.Number    `json:"id,omitempty"`
 	Method string          `json:"method,omitempty"`
@@ -32,12 +31,11 @@ type JSONRPCMessage struct {
 	Error  *RPCError       `json:"error,omitempty"`
 }
 
-// RPCError is the error object's message; its code and data are not read.
+// RPCError is the error object's message; code and data are not read.
 type RPCError struct {
 	Message string `json:"message"`
 }
 
-// SubscribeParams carries the workspace and file path for subscription.
 type SubscribeParams struct {
 	Workspace string `json:"workspace"`
 	File      string `json:"file"`
@@ -69,35 +67,33 @@ const (
 type ClientSession struct {
 	conn     *websocket.Conn
 	clientID uint64
-	// mu protects the session's maps (incomingIDs, channelIDs, workspaceKeys, activeWorkspaces)
-	// and the pending order below from concurrent access by forwardRequest/routeResponse goroutines.
+	// mu protects session maps and pending order.
 	mu sync.Mutex
-	// backendRequestID → clientRequestID (incoming responses)
+	// backendRequestID → clientRequestID for incoming responses.
 	incomingIDs map[string]string
-	// backendRequestID → channelID (for multiplex response routing)
+	// backendRequestID → channelID for multiplex routing.
 	channelIDs map[string]int64
-	// backendRequestID → workspaceKey (workspace + language, for per-language routing)
+	// backendRequestID → workspaceKey for per-language routing.
 	workspaceKeys map[string]string
-	// pendingOrder holds the backend IDs the three maps have a mapping for, oldest forwarded
-	// first; pendingElems indexes it by ID. Exceeding a bound is then a lookup, not a scan.
+	// pendingOrder holds backend IDs in order of forwarding; pendingElems
+	// indexes them for fast bound checks.
 	pendingOrder *list.List
 	pendingElems map[string]*list.Element
-	// activeWorkspaces is the set of workspace keys this session talks to, however many channels
-	// reached them: disconnection releases these keys, a notification reaches these sessions.
+	// activeWorkspaces is the set of workspace keys this session talks to;
+	// used to route notifications and decide when to release a server.
 	activeWorkspaces map[string]struct{}
-	// frames is this session's outbound queue, and quit ends the one goroutine that owns writes
-	// to the socket. Nothing else may write to conn.
+	// frames is the outbound queue; quit stops the session's single writer goroutine.
 	frames chan []byte
 	quit   chan struct{}
-	// done closes when the writer has returned, so hang-up follows the last queued write.
+	// done closes when the writer returns, ensuring all queued writes are attempted.
 	done chan struct{}
 	// stopped makes stop idempotent; once set, deliver refuses.
 	stopped bool
 }
 
-// deliver queues one frame for this browser without blocking. A session at its bound has its socket
-// ended, so a slow browser degrades to a reconnect rather than delaying other traffic — the app
-// stream's rule (docs/api-contract.md). ok is false once a frame has been refused.
+// deliver queues a frame for the browser without blocking. If the bound is reached,
+// the socket is ended to prevent slow browsers from delaying traffic. ok is false
+// once a frame has been refused.
 func (s *ClientSession) deliver(frame []byte) bool {
 	s.mu.Lock()
 	if s.stopped {
@@ -116,9 +112,8 @@ func (s *ClientSession) deliver(frame []byte) bool {
 	return false
 }
 
-// stop ends the session's writer and the socket underneath it; every path that finds the browser
-// unreachable goes through here. CloseNow, not a close handshake: a peer that stopped reading does
-// not answer one, and a graceful Close waits 5s for that answer.
+// stop ends the writer and the socket. Uses CloseNow because a peer that stopped
+// reading will not answer a close handshake.
 func (s *ClientSession) stop(status websocket.StatusCode, reason string) {
 	s.mu.Lock()
 	if !s.stopped {
@@ -130,15 +125,13 @@ func (s *ClientSession) stop(status websocket.StatusCode, reason string) {
 	s.conn.CloseNow()
 }
 
-// uses records that this session talks to a workspace. A session holds a key once however many
-// channels it multiplexes, which is what makes the release decision count sessions.
+// uses records that this session talks to a workspace; used for reference counting.
 func (s *ClientSession) uses(workspaceKey string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.activeWorkspaces[workspaceKey] = struct{}{}
 }
 
-// newClientSession builds the bookkeeping one connection starts with.
 func newClientSession(conn *websocket.Conn, clientID uint64, frameBound int) *ClientSession {
 	return &ClientSession{
 		conn:             conn,
@@ -155,8 +148,7 @@ func newClientSession(conn *websocket.Conn, clientID uint64, frameBound int) *Cl
 	}
 }
 
-// serve is the only writer to this session's socket. A failed write ends the session: the client
-// reconnects, and a peer that refused one frame will refuse the next.
+// serve is the session's sole socket writer. Failed writes end the session.
 func (s *ClientSession) serve() {
 	defer close(s.done)
 	for {
@@ -172,23 +164,23 @@ func (s *ClientSession) serve() {
 	}
 }
 
-// droppedReq is a forwarded request the session gives up on because too many others are waiting.
-// It carries what its failure answer needs, because nothing may be dropped silently.
+// droppedReq is a forwarded request dropped due to bound overflow; carries data
+// needed for the failure response.
 type droppedReq struct {
 	backendID   string
 	clientReqID string
 	channelID   int64
 }
 
-// track records where the answer to a forwarded request must go, and returns the oldest outstanding
-// request when this one crossed the session's bound. The caller answers what it returns.
+// track tracks a request's return path and returns the oldest outstanding request
+// if the bound is exceeded. The caller answers what it returns.
 func (s *ClientSession) track(backendID, clientReqID string, channelID int64, workspaceKey string, bound int) *droppedReq {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.incomingIDs[backendID] = clientReqID
 	s.channelIDs[backendID] = channelID
 	s.workspaceKeys[backendID] = workspaceKey
-	// A forwarded request is this session talking to the workspace; uses states the rule.
+	// A forwarded request marks the workspace as active for this session.
 	s.activeWorkspaces[workspaceKey] = struct{}{}
 	s.pendingElems[backendID] = s.pendingOrder.PushBack(backendID)
 	if len(s.incomingIDs) <= bound {
@@ -201,15 +193,13 @@ func (s *ClientSession) track(backendID, clientReqID string, channelID int64, wo
 	return s.dropLocked(oldest.Value.(string))
 }
 
-// forget removes one request's mappings when its answer arrived or its own send failed.
+// forget removes a request's mappings upon answer or send failure.
 func (s *ClientSession) forget(backendID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.dropLocked(backendID)
 }
 
-// backendIDFor answers the browser's request id with the id this handler gave the server, and reports
-// false when nothing is outstanding under it.
 func (s *ClientSession) backendIDFor(clientReqID string) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -221,8 +211,8 @@ func (s *ClientSession) backendIDFor(clientReqID string) (string, bool) {
 	return "", false
 }
 
-// dropLocked removes a request's mappings and returns what an answer to it needs, or nil when it is
-// already gone. Callers hold s.mu.
+// dropLocked removes request mappings and returns data for an answer.
+// Caller must hold s.mu.
 func (s *ClientSession) dropLocked(backendID string) *droppedReq {
 	elem, ok := s.pendingElems[backendID]
 	if !ok {
@@ -252,27 +242,24 @@ type queuedInit struct {
 type workspaceState struct {
 	process *LSPProcess
 	cfg     *ServerConfig
-	// mu guards every field below it, written by the server-message router and by whichever client
-	// goroutine arrives first. Lock order is h.mu → mu → ClientSession.mu, never the opposite.
+	// mu guards state fields; lock order is h.mu → mu → ClientSession.mu.
 	mu sync.Mutex
-	// Only the first channel's initialize reaches the server; later channels get initResponse.
+	// true if the first initialize has succeeded; later channels use initResponse.
 	initialized  bool
 	initResponse json.RawMessage
-	// Initializes arriving while the first is in flight wait in queuedInitialize.
+	// true if an initialize is currently in flight.
 	pendingInitialize bool
 	queuedInitialize  []*queuedInit
-	// Only the first "initialized" notification reaches the server.
+	// true if the first "initialized" notification was sent.
 	sentInitialized bool
-	// writes is this workspace's path to its language server's stdin, taken in order by
-	// serveWorkspaceWrites. The channel is never closed: a caller may still hold this pointer after
-	// a drop, so its enqueue is refused rather than panicking.
+	// queue for the server's stdin. Never closed to avoid panics from late enqueues.
 	writes chan *writeJob
 	quit   chan struct{}
 	closed bool
 }
 
-// writeJob is one message waiting its turn on a language server's stdin, carrying what a refusal or
-// a failed write needs to answer the waiter. clientReqID is empty for a notification.
+// writeJob is a message waiting for the server's stdin; carries context for
+// answering failures. clientReqID is empty for notifications.
 type writeJob struct {
 	ctx          context.Context
 	msg          json.RawMessage
@@ -285,8 +272,6 @@ type writeJob struct {
 	backendID    string
 }
 
-// enqueueWrite hands one message to this workspace's writer. ok is false when the entry is closed or
-// its queue is full, and a refusal must be answered: nothing may wait for a write that will not happen.
 func (ws *workspaceState) enqueueWrite(job *writeJob) bool {
 	ws.mu.Lock()
 	defer ws.mu.Unlock()
@@ -301,8 +286,6 @@ func (ws *workspaceState) enqueueWrite(job *writeJob) bool {
 	}
 }
 
-// closeWrites ends this entry's writer. Nothing can queue afterwards: closed is set under the lock
-// the enqueue checks, so the drain that follows sees everything still waiting.
 func (ws *workspaceState) closeWrites() {
 	ws.mu.Lock()
 	if !ws.closed {
@@ -312,7 +295,6 @@ func (ws *workspaceState) closeWrites() {
 	ws.mu.Unlock()
 }
 
-// markInitializedSent reports whether this is the entry's first "initialized" notification.
 func (ws *workspaceState) markInitializedSent() bool {
 	ws.mu.Lock()
 	defer ws.mu.Unlock()
@@ -323,7 +305,7 @@ func (ws *workspaceState) markInitializedSent() bool {
 	return true
 }
 
-// initDecision is what one initialize request found on the entry.
+// initDecision is the result of an initialize request check.
 type initDecision int
 
 const (
@@ -333,9 +315,6 @@ const (
 	initOverflow                     // too many are already waiting; the queue is failed, not grown
 )
 
-// decideInitialize answers one initialize request against the entry: the cached response, the replay
-// queue, or the claim on the forward. The caller holding initFirst owns that request — a failed send
-// goes to abandonInitialize, a response to cacheInitResponse.
 func (ws *workspaceState) decideInitialize(session *ClientSession, clientReqID string, channelID int64, bound int) (initDecision, json.RawMessage) {
 	ws.mu.Lock()
 	defer ws.mu.Unlock()
@@ -359,8 +338,6 @@ func (ws *workspaceState) decideInitialize(session *ClientSession, clientReqID s
 	}
 }
 
-// cacheInitResponse stores an initialize response and returns the requests queued behind it, which
-// the caller replays. It returns nil for anything that is not an initialize result.
 func (ws *workspaceState) cacheInitResponse(serverMsg json.RawMessage) []*queuedInit {
 	var rpc JSONRPCMessage
 	if err := json.Unmarshal(serverMsg, &rpc); err != nil || rpc.Result == nil {
@@ -385,8 +362,6 @@ func (ws *workspaceState) cacheInitResponse(serverMsg json.RawMessage) []*queued
 	return queued
 }
 
-// abandonInitialize unwinds a first initialize that never reached the server and returns everyone
-// queued behind it, so later initializes don't queue behind a failed request.
 func (ws *workspaceState) abandonInitialize() []*queuedInit {
 	ws.mu.Lock()
 	defer ws.mu.Unlock()
@@ -396,10 +371,8 @@ func (ws *workspaceState) abandonInitialize() []*queuedInit {
 	return queued
 }
 
-// serveWorkspaceWrites owns one workspace's path to its language server's stdin. A notification is
-// written and acknowledged before the writer takes the next message, so a server reads a didChange
-// before the request computed from it; a request is handed to its own goroutine, because a server
-// correlates answers by JSON-RPC id and a slow one must not hold the queue.
+// serveWorkspaceWrites writes messages to the server's stdin. Notifications are
+// serialized to preserve order; requests are handled concurrently to avoid blocking the queue.
 func (h *LSPHandler) serveWorkspaceWrites(ws *workspaceState) {
 	defer h.wg.Done()
 	for {
@@ -425,8 +398,8 @@ func (h *LSPHandler) serveWorkspaceWrites(ws *workspaceState) {
 	}
 }
 
-// writeRequest is one request's round trip, off the writer and off the socket's read loop. A failure
-// is answered: the browser waiting on this id has to be told.
+// writeRequest is one request's round trip. A failure is answered: the browser
+// waiting on this id must be notified.
 func (h *LSPHandler) writeRequest(job *writeJob) {
 	err := h.manager.SendToServer(job.ctx, job.process, job.msg)
 	if err == nil {

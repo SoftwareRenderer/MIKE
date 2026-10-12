@@ -13,12 +13,11 @@ import (
 // request body, and a typed value is sent exactly as stored. So every field is a pointer, and the
 // only judgement here is whether a typed value is one a provider can accept.
 
-// ErrInvalidConfig refuses a config whose own values are impossible. The handler answers it as a 400
-// carrying the sentence, because whoever typed the value is the one who can fix it.
+// ErrInvalidConfig is answered as a 400 because whoever typed the value is the one who can fix it.
 var ErrInvalidConfig = errors.New("invalid configuration")
 
-// samplerBound is one field's accepted range. loOpen makes the lower bound exclusive where 0 means
-// something else to the provider: top_p of 0 admits no token, repetition_penalty of 0 mutes output.
+// samplerBound defines a field's range. loOpen makes the lower bound exclusive where 0 means
+// something else to the provider (e.g. top_p=0 admits no token).
 type samplerBound struct {
 	name   string
 	lo, hi float64
@@ -41,7 +40,6 @@ func (b samplerBound) accepts(v float64) bool {
 	return v >= b.lo && v <= b.hi
 }
 
-// The accepted ranges, and the same numbers the Settings field hints print (settings.sampling.*Hint).
 // A provider that takes a wider range still gets the narrower one.
 var samplerFloatBounds = []samplerBound{
 	{name: "temperature", lo: 0, hi: 2, pick: func(s *types.ModelSampling) *float64 { return s.Temperature }},
@@ -61,9 +59,8 @@ var samplerIntBounds = []struct {
 	{name: "seed", lo: 0, pick: func(s *types.ModelSampling) *int { return s.Seed }},
 }
 
-// validateModelSampling refuses a sampler override outside its range, naming the provider, the model
-// and the field — the provider list is one stored array, so "temperature" alone names no row. A field
-// nobody typed is nil and is never a refusal.
+// validateModelSampling refuses overrides outside their range. It names the provider, model and
+// field because the provider list is one stored array. A field nobody typed is nil and never refused.
 func validateModelSampling(providers []types.Provider) error {
 	for _, p := range providers {
 		for _, m := range p.Models {
@@ -87,7 +84,7 @@ func validateModelSampling(providers []types.Provider) error {
 	return nil
 }
 
-// The row a refusal points at. An LLM provider carries no name, so the URL identifies it.
+// samplingRowLabel identifies a provider by name or URL if the name is missing.
 func samplingRowLabel(p types.Provider, modelName string) string {
 	owner := strings.TrimSpace(p.Name)
 	if owner == "" {
@@ -96,13 +93,11 @@ func samplingRowLabel(p types.Provider, modelName string) string {
 	return fmt.Sprintf("provider %q model %q", owner, modelName)
 }
 
-// trimNum prints 2 as "2", so the refusal sentence reads "between 0 and 2".
 func trimNum(v float64) string {
 	return strconv.FormatFloat(v, 'f', -1, 64)
 }
 
-// GetModelSampling returns the overrides stored for a model, or nil for a model, provider or config
-// the store does not know — the same answer as "send nothing".
+// GetModelSampling returns nil for unknown models, providers or configs; this means "send nothing".
 func (cs *ConfigStore) GetModelSampling(modelName, providerURL string) *types.ModelSampling {
 	m, ok := cs.providerModel(modelName, providerURL)
 	if !ok {

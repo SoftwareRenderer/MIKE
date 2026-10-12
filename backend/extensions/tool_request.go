@@ -10,8 +10,7 @@ import (
 	"strings"
 )
 
-// The contributed-tool grammar. Templates and answer shape live in one file because both read the same
-// manifest fields, and a second reader of a declaration is a second place to be wrong.
+// Templates and answer shapes are processed together to ensure consistent manifest interpretation.
 
 type FilledRequest struct {
 	Method string
@@ -20,7 +19,7 @@ type FilledRequest struct {
 	Query url.Values
 }
 
-// Answers both gates, offering the tool and running it, so a person gets the same instruction from both.
+// configuredOrigin ensures consistent validation when offering and running a tool.
 func (t *ToolConfig) configuredOrigin(config map[string]any) (address, problem string) {
 	key := t.OriginProperty()
 	if key == "" {
@@ -36,8 +35,7 @@ func (t *ToolConfig) configuredOrigin(config map[string]any) (address, problem s
 	return value, ""
 }
 
-// FillRequest reads the origin rather than filling it: the URL names a configuration property. A
-// parameter that resolves to nothing is dropped, not sent empty.
+// FillRequest resolves the tool's origin and parameters; empty parameters are dropped.
 func (t *ToolConfig) FillRequest(args map[string]any, config map[string]any) (*FilledRequest, error) {
 	base, problem := t.configuredOrigin(config)
 	if problem != "" {
@@ -66,7 +64,7 @@ func (t *ToolConfig) FillRequest(args map[string]any, config map[string]any) (*F
 		target += "?" + values.Encode()
 	}
 
-	// Checks the address of the string actually sent, not the code path that built it.
+	// Verifies the final URL matches the configured origin.
 	u, err := url.Parse(target)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", t.Name, err)
@@ -101,7 +99,7 @@ func (t *ToolConfig) fillParameters(declared map[string]string, args, config map
 	return values, nil
 }
 
-// Validate refused a placeholder that names nothing, so an unresolved one here is a bug.
+// An unresolved placeholder indicates a validation bug.
 func fillTemplate(tmpl string, args, config map[string]any) (string, error) {
 	if tmpl == "" {
 		return "", nil
@@ -155,8 +153,7 @@ func configString(v any) (string, bool) {
 	}
 }
 
-// RenderAnswer shows only the fields the manifest named, in the order it named them. A body that cannot
-// be rendered is an error, not an empty result: a model cannot tell those apart.
+// RenderAnswer extracts manifest-defined fields from the response; rendering failures are errors to distinguish them from empty results.
 func (r ToolResponse) RenderAnswer(body []byte, isJSON bool) (string, error) {
 	if !isJSON {
 		return "", fmt.Errorf("the upstream answered with %s rather than JSON — this instance does not serve the format the extension asks for", contentTypeHint(body))

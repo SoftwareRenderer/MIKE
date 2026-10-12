@@ -2,7 +2,6 @@ package config
 
 import "mike/backend/types"
 
-// GetAgentProvider returns the first configured agent provider
 func (cs *ConfigStore) GetAgentProvider() *types.Provider {
 	cfg, err := cs.GetConfig()
 	if err == nil {
