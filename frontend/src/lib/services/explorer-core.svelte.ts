@@ -111,6 +111,8 @@ export class ExplorerCore {
     private commitOffset = $state(0);
     private tabSaveTimer: ReturnType<typeof setTimeout> | null = null;
     private lastEventCount = 0;
+    /** The subject whose tabs the screen holds; the argument `resetTabs` answers to. */
+    private tabsSubject = '';
 
     constructor(edges: ExplorerEdges) {
         this.edges = edges;
@@ -173,8 +175,15 @@ export class ExplorerCore {
 
     // ---- Tabs ----
 
-    /** Everything the tab list and the unsaved set hold; used when the screen moves to another subject. */
-    resetTabs(): void {
+    /**
+     * Empty the tab list and the unsaved set for a new subject — a project, a task — and only when the
+     * subject is new. A screen re-runs its subject effect without the subject changing, and clearing
+     * then letting the address bar re-open the file throws away whatever the caller asked for beyond a
+     * path: a go-to-definition jump that opened this explorer carries a line, and the URL carries none.
+     */
+    resetTabs(subject: string): void {
+        if (subject === this.tabsSubject) return;
+        this.tabsSubject = subject;
         this.openFiles = [];
         this.activeFilePath = '';
         this.pinnedFiles = new Set();

@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import crypto from 'node:crypto';
-import http from 'node:http';
+import https from 'node:https';
 import { getProjectId } from './helpers';
 
 // The terminal endpoint hands out a shell, so its WebSocket handshake verifies
@@ -9,14 +9,23 @@ import { getProjectId } from './helpers';
 // specs pin both sides: a same-host page from the app still gets a working
 // shell, and a cross-site handshake is refused before any shell exists.
 
-/** Performs a raw WebSocket upgrade handshake and returns the HTTP status. */
+/**
+ * Performs a raw WebSocket upgrade handshake and returns the HTTP status.
+ *
+ * Over TLS, never the plain port: a plaintext request is answered with the redirect to HTTPS before any
+ * route runs, so every Origin — refused or accepted — would read 301 and the Origin check would go
+ * unmeasured. The lane's leaf is signed by a CA its own data directory created, which nothing trusts;
+ * the certificate is not what this spec measures, the same posture `use.ignoreHTTPSErrors` takes for
+ * the browser.
+ */
 function upgradeStatus(baseURL: string, path: string, origin: string, cookie = ''): Promise<number> {
     const base = new URL(baseURL);
     return new Promise<number>((resolve, reject) => {
-        const req = http.request(
+        const req = https.request(
             {
                 host: base.hostname,
-                port: base.port || (base.protocol === 'https:' ? 443 : 80),
+                port: base.port || 443,
+                rejectUnauthorized: false,
                 path,
                 method: 'GET',
                 headers: {

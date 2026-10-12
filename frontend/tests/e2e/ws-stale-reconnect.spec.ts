@@ -133,7 +133,14 @@ test.describe('Reconnecting banner and tab wake-up', () => {
             .poll(() => boardFetches.length, { timeout: 15000, message: 'waking the tab issued no board fetch' })
             .toBeGreaterThan(before);
 
-        expect(consoleErrors.filter(e => !e.includes('Navigation duplicated'))).toHaveLength(0);
+        // The two sentences the lane always prints, neither of which belongs to the wake-up path: the
+        // app's report of a replaced address, and Chromium refusing `/sw.js` — each lane server signs with
+        // a CA its own data directory created, and `ignoreHTTPSErrors` does not reach a service-worker
+        // script fetch. The app falls back to the asset identity (`docs/frontend-updates.md`), and the
+        // suite is written against a lane with no worker in it (`ui-navigation.spec.ts`).
+        const laneNoise = (e: string) => e.includes('Navigation duplicated')
+            || e.includes('An SSL certificate error occurred when fetching the script');
+        expect(consoleErrors.filter(e => !laneNoise(e))).toHaveLength(0);
         await expect(page.locator('.card').first()).toBeVisible();
     });
 });

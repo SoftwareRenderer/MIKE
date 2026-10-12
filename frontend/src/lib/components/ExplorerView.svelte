@@ -125,8 +125,7 @@
     // merges in a tab that arrived while the restore was in flight, which is what a window opened from
     // a file link brings: its own tab, ahead of the ones the other window left behind.
     $effect(() => {
-        const _ = projectId;
-        core.resetTabs();
+        core.resetTabs(projectId);
         core.loadSavedTabs().then((saved) => {
             if (!saved) return;
             core.scrollTops = saved.scrollTops ?? {};

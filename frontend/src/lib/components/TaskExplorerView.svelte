@@ -87,8 +87,7 @@
     // explorer, so the tabs a restore races with are merged in, and only the ones inside this task's
     // worktree are worth having.
     $effect(() => {
-        const _ = taskId;
-        core.resetTabs();
+        core.resetTabs(taskId);
         core.loadSavedTabs().then((saved) => {
             if (!saved || saved.openFiles.length === 0) return;
             const openWas = core.activeFilePath;
