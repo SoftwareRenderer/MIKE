@@ -124,6 +124,24 @@ else, so a capability is a word and cannot be anything else.
 - Tests: `TestValidateCapabilityRule` (the table carries `--privileged`, `--cap-add`, `-v` and
   `SYS_ADMIN,ALL`), `TestGVisorIsolationForCaps`, `TestAppendCapabilitiesRefusesAnUnisolatedGrant`.
 
+## What a task container binds besides its worktree
+
+Three reads a task cannot do through the bridge still need a mount. All three are `ro`, and none of them
+is configurable — what a person can widen is `SandboxMounts`, declared per project in its Sandbox
+Configuration.
+
+- `<project.Path>/.git` at its own absolute path, so git can resolve refs and worktree metadata from the
+  worktree's pointer file.
+- The bundled skill packages at `sandbox.SkillsMount`, from `sandbox.SkillsDir()` (`prompts.SkillsDir()`).
+- The project's own skill packages at `sandbox.ProjectSkillsMount`, from `SandboxOpts.ProjectSkillsDir`.
+  `ProjectOpts` fills it with `prompts.ProjectSkillsDir(project.Path)` — the same call the prompt builder
+  makes, because the bind and the listing are one contract. `docs/skills.md → What must stay true`.
+- Both skills binds are built by `readOnlyBindArg`, which emits **no mount** when the directory is
+  missing: an optional directory nobody created is not a container failure. A directory that appears
+  after the container exists is not bound into it — the container is created at run start and stopped at
+  run end, so the gap is inside one run.
+- Tests: `backend/sandbox/projectskills_test.go`, `backend/sandbox/git_pointer_test.go`.
+
 ## Extension sandbox mounts
 
 `backend/extensions/mount_policy.go`:

@@ -3369,7 +3369,7 @@ func TestBuildMessagesFromDB_KeepsReasoningSeparate(t *testing.T) {
 	}
 
 	task := &types.Task{OperatingMode: "act"}
-	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", "proj", false)
+	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", promptScope{projectName: "proj"})
 
 	// Skip system prompt (index 0)
 	if len(messages) != 5 {
@@ -3413,7 +3413,7 @@ func TestBuildMessagesFromDB_ExcludesLoopHints(t *testing.T) {
 	}
 
 	task := &types.Task{OperatingMode: "act"}
-	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", "proj", false)
+	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", promptScope{projectName: "proj"})
 
 	// system + user + assistant = 3 (hint excluded)
 	if len(messages) != 3 {
@@ -3436,7 +3436,7 @@ func TestBuildMessagesFromDB_ToolCallWithReasoning(t *testing.T) {
 	}
 
 	task := &types.Task{OperatingMode: "act"}
-	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", "proj", false)
+	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", promptScope{projectName: "proj"})
 
 	// system + user + assistant + tool = 4
 	if len(messages) != 4 {
@@ -3485,7 +3485,7 @@ func TestBuildMessagesFromDB_ReasoningOnlyWithToolCalls(t *testing.T) {
 	}
 
 	task := &types.Task{OperatingMode: "act"}
-	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", "proj", false)
+	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", promptScope{projectName: "proj"})
 
 	// system + user + assistant(read_file) + tool + assistant(edit_file) + tool = 6
 	if len(messages) != 6 {

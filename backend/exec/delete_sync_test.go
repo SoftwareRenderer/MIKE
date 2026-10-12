@@ -53,7 +53,7 @@ func TestDeletedMessagesNotSentToLLM(t *testing.T) {
 
 	// Build initial messages from DB (simulates executor startup)
 	taskMsgs, _ := te.store.GetTaskMessages(taskID, threadID)
-	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", "Delete Test", false)
+	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", promptScope{projectName: "Delete Test"})
 
 	// Verify: should have system + 4 messages = 5
 	if len(messages) != 5 {
@@ -81,7 +81,7 @@ func TestDeletedMessagesNotSentToLLM(t *testing.T) {
 
 	// Re-sync from the DB
 	taskMsgs, _ = te.store.GetTaskMessages(taskID, threadID)
-	messages = buildMessagesFromDB(task, taskMsgs, "/worktree", "Delete Test", false)
+	messages = buildMessagesFromDB(task, taskMsgs, "/worktree", promptScope{projectName: "Delete Test"})
 
 	newMsg := types.ChatMessage{Role: "user", Content: "Third user message"}
 	messages = append(messages, newMsg)
@@ -166,7 +166,7 @@ func TestDeletedMessagesWithRegenerate(t *testing.T) {
 
 	// Build initial messages from DB
 	taskMsgs, _ := te.store.GetTaskMessages(taskID, threadID)
-	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", "Regen Test", false)
+	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", promptScope{projectName: "Regen Test"})
 
 	// Simulate regenerate: DB deletes msg3+msg4, in-memory truncates
 	_, _ = te.store.DeleteTaskMessagesAfter(taskID, "msg-user2", threadID)
@@ -239,7 +239,7 @@ func TestDeletedSingleMessageNotSentToLLM(t *testing.T) {
 
 	// Re-sync from DB
 	taskMsgs, _ := te.store.GetTaskMessages(taskID, threadID)
-	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", "Single Delete Test", false)
+	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", promptScope{projectName: "Single Delete Test"})
 
 	// Verify: system + user + assistant = 3 (error removed)
 	if len(messages) != 3 {

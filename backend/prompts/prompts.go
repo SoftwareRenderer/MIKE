@@ -3,10 +3,14 @@
 package prompts
 
 import (
+	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"text/template"
+
+	"mike/backend/fsutil"
 )
 
 // PromptData holds the variables passed to system prompt templates.
@@ -33,6 +37,33 @@ type Skill struct {
 	Name        string // skill name from frontmatter
 	Description string // skill description from frontmatter
 	Location    string // path to the SKILL.md file
+}
+
+// ProjectSkillsSubdir is the project directory's skill packages, used by both the prompt's scan and
+// the sandbox's mount.
+const ProjectSkillsSubdir = ".agents/skills"
+
+// ProjectSkillsDir returns a project's skill-package directory; empty when it has no path.
+func ProjectSkillsDir(projectPath string) string {
+	if strings.TrimSpace(projectPath) == "" {
+		return ""
+	}
+	return filepath.Join(projectPath, ProjectSkillsSubdir)
+}
+
+// Skill origins are the tags that tell two same-named skills apart.
+const (
+	SkillOriginBundled = "bundled"
+	SkillOriginProject = "project"
+)
+
+// SkillRoot is one directory of skill packages, and the path an agent must read them through.
+type SkillRoot struct {
+	Dir string // empty scans nothing
+	// Reported instead of Dir when the agent cannot read the host path.
+	Prefix string
+	// Prompt text only, never a path.
+	Origin string
 }
 
 // funcs are helper template functions.
@@ -97,46 +128,50 @@ func SkillsDir() string {
 	return skillsDir
 }
 
-// DiscoverSkills scans the prompts/skills/ directory for skill packages.
-// Each skill is a directory containing a SKILL.md file with YAML frontmatter.
-// If containerMount is non-empty (e.g. "/mnt/skills"), skill locations use
-// that mount path instead of the host filesystem path.
-// Returns a sorted slice of Skill metadata (name, description, location).
-func DiscoverSkills(containerMount string) []Skill {
-	dir := promptDir()
-	skillsDir := filepath.Join(dir, "skills")
+// Only the frontmatter block is wanted, and these bytes come out of a repository.
+const skillReadLimit = 64 << 10
 
-	entries, err := os.ReadDir(skillsDir)
-	if err != nil {
-		return nil // no skills directory is not an error
-	}
-
+// DiscoverSkills scans each root one level deep for a directory holding a SKILL.md whose frontmatter
+// names it. A missing root is not an error, and a repeated name gains a tag instead of dropping a
+// package.
+func DiscoverSkills(roots ...SkillRoot) []Skill {
 	var skills []Skill
-	for _, entry := range entries {
-		if !entry.IsDir() {
+	taken := map[string]bool{}
+	for _, root := range roots {
+		// An absolute root keeps the advertised path from depending on the agent's working directory.
+		dir, _, ok := fsutil.RootForms(root.Dir)
+		if !ok {
 			continue
 		}
-		skillPath := filepath.Join(skillsDir, entry.Name(), "SKILL.md")
-		data, err := os.ReadFile(skillPath)
+		entries, err := os.ReadDir(dir)
 		if err != nil {
-			continue // skip directories without SKILL.md
+			continue
 		}
+		for _, entry := range entries {
+			// A symlinked package is a link, not a directory, so it is skipped.
+			if !entry.IsDir() {
+				continue
+			}
+			data, ok := readSkillFile(filepath.Join(dir, entry.Name(), "SKILL.md"), dir)
+			if !ok {
+				continue
+			}
+			name, description := parseSkillFrontmatter(data)
+			if name == "" || description == "" {
+				continue
+			}
 
-		name, description := parseSkillFrontmatter(data)
-		if name == "" || description == "" {
-			continue // skip skills missing required frontmatter fields
+			loc := filepath.Join(dir, entry.Name(), "SKILL.md")
+			if root.Prefix != "" {
+				loc = filepath.Join(root.Prefix, entry.Name(), "SKILL.md")
+			}
+
+			skills = append(skills, Skill{
+				Name:        uniqueSkillName(taken, name, entry.Name(), root.Origin),
+				Description: description,
+				Location:    loc,
+			})
 		}
-
-		loc := skillPath
-		if containerMount != "" {
-			loc = filepath.Join(containerMount, entry.Name(), "SKILL.md")
-		}
-
-		skills = append(skills, Skill{
-			Name:        name,
-			Description: description,
-			Location:    loc,
-		})
 	}
 
 	// Sort by name for deterministic output
@@ -149,6 +184,50 @@ func DiscoverSkills(containerMount string) []Skill {
 	}
 
 	return skills
+}
+
+// The file comes from a repository checkout, so it must resolve to a regular file inside the root,
+// and the read is capped.
+func readSkillFile(path, root string) ([]byte, bool) {
+	inside, err := fsutil.Contained(path, []string{root})
+	if err != nil {
+		return nil, false
+	}
+	f, _, err := fsutil.OpenChecked(inside)
+	if err != nil {
+		return nil, false
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, skillReadLimit))
+	if err != nil {
+		return nil, false
+	}
+	return data, true
+}
+
+// A display name no other skill in the list carries: tagged by origin, then directory, then a count.
+func uniqueSkillName(taken map[string]bool, name, dirName, origin string) string {
+	if !taken[name] {
+		taken[name] = true
+		return name
+	}
+	for i := 0; ; i++ {
+		tag := strconv.Itoa(i)
+		switch i {
+		case 0:
+			tag = origin
+		case 1:
+			tag = dirName
+		}
+		if tag == "" || tag == name {
+			continue
+		}
+		candidate := name + " (" + tag + ")"
+		if !taken[candidate] {
+			taken[candidate] = true
+			return candidate
+		}
+	}
 }
 
 // parseSkillFrontmatter extracts the name and description from YAML frontmatter

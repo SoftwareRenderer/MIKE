@@ -34,7 +34,7 @@ func toolRow(t *testing.T, owner, id, name, args, output string) types.TaskMessa
 
 func rebuildRows(rows []types.TaskMessage) []types.ChatMessage {
 	task := &types.Task{ID: "rebuild-task", OperatingMode: "act", CurrentThreadID: "th"}
-	return buildMessagesFromDB(task, rows, "/host/wt", "proj", false)
+	return buildMessagesFromDB(task, rows, "/host/wt", promptScope{projectName: "proj"})
 }
 
 func summarizeRebuild(msgs []types.ChatMessage) (roles []string, toolCallIDs, toolResultIDs []string) {

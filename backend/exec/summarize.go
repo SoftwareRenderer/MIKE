@@ -285,9 +285,9 @@ func setSystemPrompt(messages []types.ChatMessage, prompt string) []types.ChatMe
 // appended and the summary rewritten into the system prompt, its only route to the model — and what
 // that call will consume. The number is estimated: no provider reports usage for a context that has
 // not been sent.
-func installSummary(messages []types.ChatMessage, task *types.Task, worktreePath, projectName string, sandboxEnabled bool, summary string) ([]types.ChatMessage, int) {
+func installSummary(messages []types.ChatMessage, task *types.Task, worktreePath string, scope promptScope, summary string) ([]types.ChatMessage, int) {
 	messages = append(messages, types.ChatMessage{Role: "summarization", Content: summary})
-	messages = setSystemPrompt(messages, composeSystemPrompt(task, worktreePath, projectName, sandboxEnabled, summary))
+	messages = setSystemPrompt(messages, composeSystemPrompt(task, worktreePath, scope, summary))
 	return messages, estimatePromptTokens(buildLLMContext(messages))
 }
 
@@ -365,7 +365,7 @@ func (s *summarizeOrchestrator) applySummarization(setup *taskExecSetup, ctx con
 
 	_ = s.store.FixPostSummaryTimestamps(taskID, task.CurrentThreadID, summaryAnchor, summaryCreatedAt)
 
-	messages, compressedUsed := installSummary(messages, task, setup.worktreePath, setup.projectName(), setup.sandboxEnabled, sumResult.summary)
+	messages, compressedUsed := installSummary(messages, task, setup.worktreePath, setup.promptScope(), sumResult.summary)
 
 	s.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeSummarization, Data: map[string]any{
 		"id":               summaryMsgID,
@@ -548,15 +548,10 @@ func (s *summarizeOrchestrator) HandleSummarize(w http.ResponseWriter, r *http.R
 
 		taskMsgs, _ := s.store.GetTaskMessages(task.ID, task.CurrentThreadID)
 		project, _ := s.store.GetProject(projectID)
-		projectName := ""
-		sandboxEnabled := false
-		if project != nil {
-			projectName = project.Name
-			sandboxEnabled = project.SandboxEnabled
-		}
+		scope := promptScopeOf(project)
 		worktreePath, _ := s.worktreeMgr.WorktreePath(taskID)
 
-		messages := buildMessagesFromDB(task, taskMsgs, worktreePath, projectName, sandboxEnabled)
+		messages := buildMessagesFromDB(task, taskMsgs, worktreePath, scope)
 		previousSummary := extractPrevSummary(messages)
 
 		serverURL, modelName, _ := s.utilityTarget(task)
@@ -591,7 +586,7 @@ func (s *summarizeOrchestrator) HandleSummarize(w http.ResponseWriter, r *http.R
 		})
 
 		// Only the estimate is wanted here; this path holds no live conversation.
-		_, compressedUsed := installSummary(messages, task, worktreePath, projectName, sandboxEnabled, sumResult.summary)
+		_, compressedUsed := installSummary(messages, task, worktreePath, scope, sumResult.summary)
 
 		s.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeSummarization, Data: map[string]any{
 			"id":               summaryMsgID,

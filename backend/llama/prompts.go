@@ -11,7 +11,7 @@ import (
 )
 
 // BuildSystemPrompt creates the system prompt for task execution.
-func BuildSystemPrompt(worktreePath, cwd, summary, skillsMount string, operatingMode types.OperatingMode) string {
+func BuildSystemPrompt(worktreePath, cwd, summary string, skillRoots []prompts.SkillRoot, operatingMode types.OperatingMode) string {
 	var tools []types.ChatTool
 	switch operatingMode {
 	case types.ModePlan:
@@ -41,7 +41,7 @@ func BuildSystemPrompt(worktreePath, cwd, summary, skillsMount string, operating
 		PlanMode:     operatingMode == types.ModePlan,
 		ExploreMode:  operatingMode == types.ModeExplore,
 		Tools:        toolInfos,
-		Skills:       prompts.DiscoverSkills(skillsMount),
+		Skills:       prompts.DiscoverSkills(skillRoots...),
 		AgentsMd:     agentsMd,
 		Summary:      summary,
 	}

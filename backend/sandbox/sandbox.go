@@ -41,6 +41,9 @@ const (
 	BaseImage = "docker.io/library/ubuntu:latest"
 	// SkillsMount is where the prompts/skills/ directory is bind-mounted read-only.
 	SkillsMount = "/mnt/skills"
+	// A project's .agents/skills/. Its directory is not mounted otherwise, so this bind is what
+	// makes the prompt's skill paths readable in the container.
+	ProjectSkillsMount = "/mnt/project-skills"
 	// MountRoot is where a project's worktree is bind-mounted inside its
 	// container. Build paths with MountPath(), never by hand — the fs API's
 	// containment check compares against this same value.
@@ -124,6 +127,7 @@ type SandboxOpts struct {
 	ForwardPorts     []types.PortForward
 	AgentSandbox     *types.AgentSandbox // mounts and envs for agent sandbox
 	SkillsDir        string
+	ProjectSkillsDir string
 	SandboxMounts    []types.SandboxMount
 	SandboxEnvs      []types.SandboxEnv
 	Capabilities     []string
@@ -142,6 +146,7 @@ func ProjectOpts(project *types.Project) SandboxOpts {
 		MemoryLimit:      project.SandboxMemoryLimit,
 		ForwardPorts:     project.ForwardPorts,
 		SkillsDir:        prompts.SkillsDir(),
+		ProjectSkillsDir: prompts.ProjectSkillsDir(project.Path),
 		SandboxMounts:    project.SandboxMounts,
 		SandboxEnvs:      project.SandboxEnvs,
 		Capabilities:     project.SandboxCapabilities,
@@ -373,13 +378,31 @@ func gitPointerMountArgs(taskID, worktreePath, mountPath, projectPath string) ([
 	return sandboxruntime.WorktreeGitPointerMount(worktreePath, mountPath)
 }
 
+// A missing hostDir binds nothing: an optional skill folder must not refuse the container.
+func readOnlyBindArg(taskID, what, hostDir, containerPath string) []string {
+	if hostDir == "" {
+		return nil
+	}
+	absDir, err := filepath.Abs(hostDir)
+	if err != nil {
+		logging.For(logging.Sandbox).With(logging.TaskID, taskID).Warnf("skipping %s mount: invalid path %s: %v", what, hostDir, err)
+		return nil
+	}
+	if _, err := os.Stat(absDir); err != nil {
+		return nil
+	}
+	logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("mounting %s read-only: %s -> %s", what, absDir, containerPath)
+	return []string{"-v", sandboxruntime.BindMountSpec(absDir, containerPath, "ro")}
+}
+
 // Create creates a gVisor sandbox container for a task.
 //
 // Mounts: the worktree at /home/sandbox/<project.Name> (read-only in plan mode) with its git
 // pointer pinned read-only over it for a task container (see gitPointerMountArgs);
 // project.Path/.git read-only at its own absolute path, so git can resolve refs and
 // worktree metadata; opts.AgentSandbox mounts and envs; skillsDir read-only at SkillsMount
-// when non-empty; opts.SandboxMounts appended last.
+// and opts.ProjectSkillsDir read-only at ProjectSkillsMount, each when non-empty and present;
+// opts.SandboxMounts appended last.
 //
 // Configuration: opts.BaseImage or the BaseImage constant; --network none when
 // networkIsolation; --memory=<limit>M when memoryLimit > 0; environment limited to what was
@@ -567,17 +590,8 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 	}
 
 	// Skills directory mount (read-only, for skill packages)
-	if opts.SkillsDir != "" {
-		absSkillsDir, err := filepath.Abs(opts.SkillsDir)
-		if err != nil {
-			logging.For(logging.Sandbox).With(logging.TaskID, taskID).Warnf("skipping skills mount: invalid path %s: %v", opts.SkillsDir, err)
-		} else if _, err := os.Stat(absSkillsDir); err == nil {
-			createArgs = append(createArgs,
-				"-v", sandboxruntime.BindMountSpec(absSkillsDir, SkillsMount, "ro"),
-			)
-			logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("mounting skills read-only: %s -> %s", absSkillsDir, SkillsMount)
-		}
-	}
+	createArgs = append(createArgs, readOnlyBindArg(taskID, "skills", opts.SkillsDir, SkillsMount)...)
+	createArgs = append(createArgs, readOnlyBindArg(taskID, "project skills", opts.ProjectSkillsDir, ProjectSkillsMount)...)
 
 	// Custom mounts (user-configured per-project)
 	for _, m := range opts.SandboxMounts {

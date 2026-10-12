@@ -196,35 +196,37 @@ func TestRenderHelpers_ShippedTemplates(t *testing.T) {
 	})
 }
 
+func writeSkillDir(t *testing.T, root, dirName, body string) {
+	t.Helper()
+	skillDir := filepath.Join(root, dirName)
+	if err := os.MkdirAll(skillDir, 0o700); err != nil {
+		t.Fatalf("mkdir %s: %v", dirName, err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(body), 0o600); err != nil {
+		t.Fatalf("write %s: %v", dirName, err)
+	}
+}
+
 // TestDiscoverSkills reads the frontmatter format the shipped skills actually use
-// and keeps the containerMount remap honest: an agent in a sandbox is told to
+// and keeps the Prefix remap honest: an agent in a sandbox is told to
 // read the mounted path, never the host path.
 func TestDiscoverSkills(t *testing.T) {
 	dir := t.TempDir()
+	skillsDir := filepath.Join(dir, "skills")
 	skills := map[string]string{
 		"plan-first": "---\nname: plan-first\ndescription: \"Quoted, with a comma\"\n---\n\nBody.\n",
 		"plain":      "---\nname: plain\ndescription: Bare description\n---\n\nBody.\n",
 		"incomplete": "---\nname: incomplete\n---\n\nNo description, so it is not a skill.\n",
 	}
 	for name, body := range skills {
-		skillDir := filepath.Join(dir, "skills", name)
-		if err := os.MkdirAll(skillDir, 0o700); err != nil {
-			t.Fatalf("mkdir %s: %v", name, err)
-		}
-		if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(body), 0o600); err != nil {
-			t.Fatalf("write %s: %v", name, err)
-		}
+		writeSkillDir(t, skillsDir, name, body)
 	}
 	// A directory with no SKILL.md is skipped, not an error.
-	if err := os.MkdirAll(filepath.Join(dir, "skills", "not-a-skill"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(skillsDir, "not-a-skill"), 0o700); err != nil {
 		t.Fatalf("mkdir not-a-skill: %v", err)
 	}
 
-	prev := promptDir
-	promptDir = func() string { return dir }
-	t.Cleanup(func() { promptDir = prev })
-
-	got := DiscoverSkills("")
+	got := DiscoverSkills(SkillRoot{Dir: skillsDir, Origin: "bundled"})
 	if len(got) != 2 {
 		t.Fatalf("discovered %d skills, want 2 (frontmatter-less dirs are skipped): %+v", len(got), got)
 	}
@@ -239,17 +241,136 @@ func TestDiscoverSkills(t *testing.T) {
 		t.Errorf("bare frontmatter description mangled: %+v", s)
 	}
 	for _, s := range got {
-		if filepath.Base(s.Location) != "SKILL.md" || !strings.HasPrefix(s.Location, dir) {
-			t.Errorf("skill %q location %q is not the host SKILL.md under %s", s.Name, s.Location, dir)
+		if filepath.Base(s.Location) != "SKILL.md" || !strings.HasPrefix(s.Location, skillsDir) {
+			t.Errorf("skill %q location %q is not the host SKILL.md under %s", s.Name, s.Location, skillsDir)
 		}
 	}
 
 	// With a mount configured, every location moves under it.
-	mounted := DiscoverSkills("/mnt/skills")
+	mounted := DiscoverSkills(SkillRoot{Dir: skillsDir, Prefix: "/mnt/skills", Origin: "bundled"})
 	for _, s := range mounted {
 		want := filepath.Join("/mnt/skills", s.Name, "SKILL.md")
 		if s.Location != want {
 			t.Errorf("mount remap: got %q, want %q", s.Location, want)
+		}
+	}
+}
+
+// TestDiscoverSkillsProjectRoot: the project's own .agents/skills/ is scanned, one level deep only.
+func TestDiscoverSkillsProjectRoot(t *testing.T) {
+	projectDir := t.TempDir()
+	root := ProjectSkillsDir(projectDir)
+	writeSkillDir(t, root, "ship-checklist", "---\nname: ship-checklist\ndescription: What to check before a release\n---\n\nBody.\n")
+	if err := os.MkdirAll(filepath.Join(root, "ship-checklist", "sub"), 0o700); err != nil {
+		t.Fatalf("mkdir sub: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "ship-checklist", "sub", "SKILL.md"),
+		[]byte("---\nname: nested-only\ndescription: One level only\n---\n"), 0o600); err != nil {
+		t.Fatalf("write nested SKILL.md: %v", err)
+	}
+
+	host := DiscoverSkills(SkillRoot{Dir: root, Origin: "project"})
+	if len(host) != 1 || host[0].Name != "ship-checklist" {
+		t.Fatalf("discovered %+v, want only the top-level ship-checklist", host)
+	}
+	want := filepath.Join(root, "ship-checklist", "SKILL.md")
+	if host[0].Location != want {
+		t.Errorf("host location %q, want %q", host[0].Location, want)
+	}
+
+	sandboxed := DiscoverSkills(SkillRoot{Dir: root, Prefix: "/mnt/project-skills", Origin: "project"})
+	if want := filepath.Join("/mnt/project-skills", "ship-checklist", "SKILL.md"); sandboxed[0].Location != want {
+		t.Errorf("sandbox location %q, want %q", sandboxed[0].Location, want)
+	}
+
+	// A project with no directory of its own contributes nothing, and does not fail the list.
+	empty := DiscoverSkills(
+		SkillRoot{Dir: filepath.Join(t.TempDir(), "absent"), Origin: "project"},
+		SkillRoot{Dir: "", Origin: "project"},
+	)
+	if len(empty) != 0 {
+		t.Errorf("absent roots discovered %+v, want none", empty)
+	}
+}
+
+// TestDiscoverSkillsCollisionsKeepsBoth: a project's plan-first does not silence the bundled one.
+func TestDiscoverSkillsCollisionsKeepsBoth(t *testing.T) {
+	bundled := t.TempDir()
+	project := t.TempDir()
+	writeSkillDir(t, bundled, "plan-first", "---\nname: plan-first\ndescription: Bundled plan workflow\n---\n")
+	writeSkillDir(t, project, "alpha", "---\nname: plan-first\ndescription: The project's own plan workflow\n---\n")
+	writeSkillDir(t, project, "plan-first", "---\nname: plan-first\ndescription: Same name as its directory\n---\n")
+	writeSkillDir(t, project, "zeta", "---\nname: plan-first\ndescription: Another package with that name\n---\n")
+
+	got := DiscoverSkills(
+		SkillRoot{Dir: bundled, Origin: "bundled"},
+		SkillRoot{Dir: project, Origin: "project"},
+	)
+	byName := map[string]string{}
+	for _, s := range got {
+		byName[s.Name] = s.Description
+	}
+	want := map[string]string{
+		"plan-first":           "Bundled plan workflow",
+		"plan-first (project)": "The project's own plan workflow",
+		"plan-first (2)":       "Same name as its directory",
+		"plan-first (zeta)":    "Another package with that name",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("discovered %d of %d documents: %+v", len(got), len(want), got)
+	}
+	for name, description := range want {
+		if byName[name] != description {
+			t.Errorf("skill %q carries %q, want %q (each document keeps a name of its own)", name, byName[name], description)
+		}
+	}
+}
+
+// TestDiscoverSkillsSkipsLinkedAndBoundedSKILL: a linked or over-cap SKILL.md is skipped, not read.
+func TestDiscoverSkillsSkipsLinkedAndBoundedSKILL(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+
+	linked := filepath.Join(root, "linked")
+	if err := os.MkdirAll(linked, 0o700); err != nil {
+		t.Fatalf("mkdir linked: %v", err)
+	}
+	writeSkillDir(t, outside, "target", "---\nname: linked\ndescription: Reaches outside the root\n---\n")
+	if err := os.Symlink(filepath.Join(outside, "target", "SKILL.md"), filepath.Join(linked, "SKILL.md")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	late := filepath.Join(root, "late")
+	if err := os.MkdirAll(late, 0o700); err != nil {
+		t.Fatalf("mkdir late: %v", err)
+	}
+	padding := strings.Repeat("x", skillReadLimit)
+	if err := os.WriteFile(filepath.Join(late, "SKILL.md"),
+		[]byte(padding+"\n---\nname: late\ndescription: Frontmatter past the cap\n---\n"), 0o600); err != nil {
+		t.Fatalf("write late SKILL.md: %v", err)
+	}
+
+	if got := DiscoverSkills(SkillRoot{Dir: root, Origin: "project"}); len(got) != 0 {
+		t.Fatalf("discovered %+v, want neither the linked nor the over-cap skill", got)
+	}
+
+	// A long body after the frontmatter is still a skill.
+	writeSkillDir(t, root, "long-body",
+		"---\nname: long-body\ndescription: Long body after the frontmatter\n---\n"+strings.Repeat("y", skillReadLimit*2))
+	got := DiscoverSkills(SkillRoot{Dir: root, Origin: "project"})
+	if len(got) != 1 || got[0].Name != "long-body" {
+		t.Fatalf("discovered %+v, want the long-bodied skill alone", got)
+	}
+}
+
+// TestProjectSkillsDirNamesTheMountedDirectory: the listed directory and the bound one are one path.
+func TestProjectSkillsDirNamesTheMountedDirectory(t *testing.T) {
+	if got := ProjectSkillsDir("/srv/repos/app"); got != filepath.Join("/srv/repos/app", ProjectSkillsSubdir) {
+		t.Errorf("ProjectSkillsDir = %q", got)
+	}
+	for _, empty := range []string{"", "   "} {
+		if got := ProjectSkillsDir(empty); got != "" {
+			t.Errorf("ProjectSkillsDir(%q) = %q, want no directory to scan or mount", empty, got)
 		}
 	}
 }
