@@ -902,7 +902,7 @@
     }
     .chat-jump-latest:hover {
         opacity: 1;
-        background: color-mix(in srgb, var(--color-accent) 100%);
+        background: color-mix(in srgb, var(--color-accent) 18%, var(--color-surface-1));
         border-color: var(--color-accent-hover);
         color: var(--color-text-primary);
     }
