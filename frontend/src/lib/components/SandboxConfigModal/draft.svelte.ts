@@ -2,7 +2,7 @@ import { getBoard, getProject, updateProject, buildSandboxImageStream } from '$l
 import { t } from '$lib/i18n';
 import type { AssignedPort, PortForward, Project, SandboxEnv, SandboxMount, Task } from '$lib/types';
 import { bindForInput, normalizeBind, portRowError } from '$lib/utils/sandbox-ports';
-import { capSuggestionsFor, normalizeCapability } from './capabilities';
+import { capSuggestionsFor, capabilitiesToAdd, normalizeCapability } from './capabilities';
 import { draftFromProject, type ImageSource, type SandboxDraft } from './drafts';
 
 /**
@@ -355,6 +355,13 @@ export class SandboxDraftOwner {
     // ── Capabilities ─────────────────────────────────────────────────────────
 
     capSuggestions = $derived.by(() => capSuggestionsFor(this.capInputValue, this.capabilities));
+
+    missingDefaultCapabilities = $derived(capabilitiesToAdd(this.capabilities));
+
+    /** Grants Docker's default set and keeps whatever is already on the list. */
+    addDefaultCapabilities(): void {
+        this.capabilities = [...this.capabilities, ...this.missingDefaultCapabilities];
+    }
 
     addCapability(cap: string): void {
         const normalized = normalizeCapability(cap);

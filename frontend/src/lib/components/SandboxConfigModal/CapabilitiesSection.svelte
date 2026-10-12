@@ -51,35 +51,44 @@
                 {/each}
             </div>
         {/if}
-        <div class="caps-input-field" class:focus={draft.capDropdownOpen}>
-            <input
-                type="text"
-                class="caps-input"
-                bind:value={draft.capInputValue}
-                oninput={() => draft.handleCapInputChange()}
-                onkeydown={(e) => draft.handleCapInputKeydown(e)}
-                onfocus={handleCapInputFocus}
-                onblur={handleCapInputBlur}
-                onclick={handleCapInputClick}
-                placeholder={draft.capabilities.length === 0 ? t('sandbox.capSuggestionPlaceholder') : t('sandbox.capAddMorePlaceholder')}
-                disabled={locked}
-                autocomplete="off"
-                spellcheck="false"
-                aria-label={t('sandbox.addCapabilityAria')}
-                role="combobox"
-                aria-expanded={draft.capDropdownOpen}
-                aria-controls="caps-dropdown-list"
-            />
-            {#if draft.capDropdownOpen && draft.capSuggestions.length > 0}
-                <div id="caps-dropdown-list" class="caps-dropdown" role="listbox">
-                    {#each draft.capSuggestions as suggestion, i}
-                        <button type="button" class="caps-dropdown-item" class:selected={i === draft.capSelectedIndex} role="option" aria-selected={i === draft.capSelectedIndex} onclick={() => draft.addCapability(suggestion)}>
-                            <span class="caps-dropdown-name">{suggestion}</span>
-                            <span class="caps-dropdown-desc">{capDesc(suggestion)}</span>
-                        </button>
-                    {/each}
-                </div>
-            {/if}
+        <div class="caps-add-row">
+            <div class="caps-input-field" class:focus={draft.capDropdownOpen}>
+                <input
+                    type="text"
+                    class="caps-input"
+                    bind:value={draft.capInputValue}
+                    oninput={() => draft.handleCapInputChange()}
+                    onkeydown={(e) => draft.handleCapInputKeydown(e)}
+                    onfocus={handleCapInputFocus}
+                    onblur={handleCapInputBlur}
+                    onclick={handleCapInputClick}
+                    placeholder={draft.capabilities.length === 0 ? t('sandbox.capSuggestionPlaceholder') : t('sandbox.capAddMorePlaceholder')}
+                    disabled={locked}
+                    autocomplete="off"
+                    spellcheck="false"
+                    aria-label={t('sandbox.addCapabilityAria')}
+                    role="combobox"
+                    aria-expanded={draft.capDropdownOpen}
+                    aria-controls="caps-dropdown-list"
+                />
+                {#if draft.capDropdownOpen && draft.capSuggestions.length > 0}
+                    <div id="caps-dropdown-list" class="caps-dropdown" role="listbox">
+                        {#each draft.capSuggestions as suggestion, i}
+                            <button type="button" class="caps-dropdown-item" class:selected={i === draft.capSelectedIndex} role="option" aria-selected={i === draft.capSelectedIndex} onclick={() => draft.addCapability(suggestion)}>
+                                <span class="caps-dropdown-name">{suggestion}</span>
+                                <span class="caps-dropdown-desc">{capDesc(suggestion)}</span>
+                            </button>
+                        {/each}
+                    </div>
+                {/if}
+            </div>
+            <button
+                type="button"
+                class="caps-defaults"
+                onclick={() => draft.addDefaultCapabilities()}
+                disabled={locked || draft.missingDefaultCapabilities.length === 0}
+                title={t('sandbox.capDefaultsTitle')}
+            >{t('sandbox.capDefaults')}</button>
         </div>
     </div>
 </ExpandableSection>
@@ -147,9 +156,17 @@
         background: rgb(from var(--color-accent-light) r g b / 0.2);
     }
 
+    .caps-add-row {
+        display: flex;
+        align-items: stretch;
+        gap: 6px;
+    }
+
     /* Input field */
     .caps-input-field {
         position: relative;
+        flex: 1;
+        min-width: 0;
     }
 
     .caps-input {
@@ -226,5 +243,36 @@
     .caps-dropdown-desc {
         font-size: var(--text-2xs);
         color: var(--color-text-secondary);
+    }
+
+    .caps-defaults {
+        flex-shrink: 0;
+        padding: 0 10px;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        background: var(--color-surface-1);
+        color: var(--color-text-secondary);
+        font-family: var(--font-sans, system-ui, sans-serif);
+        font-size: var(--text-xs);
+        white-space: nowrap;
+        transition: background var(--dur-base), color var(--dur-base);
+    }
+
+    /* `opacity: 1` cancels app.css's hover dim, the way `.caps-tag-remove` does. */
+    .caps-defaults:hover:not(:disabled) {
+        opacity: 1;
+        background: var(--color-surface-2);
+        color: var(--color-text-primary);
+    }
+
+    /* The reflow `sandbox-config.css` gives the other add-rows: one control per line, 44px to hit. */
+    @container sandbox-form (max-width: 480px) {
+        .caps-add-row {
+            flex-direction: column;
+        }
+
+        .caps-defaults {
+            min-height: 44px;
+        }
     }
 </style>

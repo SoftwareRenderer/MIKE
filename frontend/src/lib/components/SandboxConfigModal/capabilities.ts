@@ -52,6 +52,34 @@ export const KNOWN_CAPABILITIES: readonly string[] = [
     'CAP_SYSLOG',
 ];
 
+/**
+ * Docker's documented default set. podman defaults to 11 of these and a host may replace them in
+ * `containers.conf`, so this names Docker's set rather than asking the host what it defaults to.
+ *
+ * @knipignore Its tests measure the set and its order; the app reaches it through `capabilitiesToAdd`.
+ */
+export const DOCKER_DEFAULT_CAPABILITIES: readonly string[] = [
+    'CAP_CHOWN',
+    'CAP_DAC_OVERRIDE',
+    'CAP_FSETID',
+    'CAP_FOWNER',
+    'CAP_MKNOD',
+    'CAP_NET_RAW',
+    'CAP_SETGID',
+    'CAP_SETUID',
+    'CAP_SETFCAP',
+    'CAP_SETPCAP',
+    'CAP_NET_BIND_SERVICE',
+    'CAP_SYS_CHROOT',
+    'CAP_KILL',
+    'CAP_AUDIT_WRITE',
+];
+
+/** The defaults not already granted. */
+export function capabilitiesToAdd(selected: readonly string[]): string[] {
+    return DOCKER_DEFAULT_CAPABILITIES.filter(cap => !selected.includes(cap));
+}
+
 /** The field's text is a capability name whatever case it was typed in. */
 export function normalizeCapability(cap: string): string {
     return cap.trim().toUpperCase();
