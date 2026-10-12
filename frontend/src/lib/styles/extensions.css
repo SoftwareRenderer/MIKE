@@ -22,9 +22,59 @@ is installed there yet. Same attention color as .unpublished-badge. */
     flex-shrink: 0;
 }
 
-/* In the Edit dialog: the location the manifest declared, the field that names the host directory,
-and the grant as it stands. Quieter than a warning — this is a setting, not a fault. */
-:global(.ext-dep-env, .ext-dep-path, .ext-dep-input) {
+:global(.config-fields) {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+:global(.config-fields h4) {
+    margin: 0;
+    font-size: var(--text-base);
+    color: var(--color-text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+:global(.config-fields .config-field) {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+:global(.config-fields .field-label) {
+    display: block;
+    font-size: var(--text-sm);
+    color: var(--color-text-tertiary);
+    margin-bottom: 0.25rem;
+}
+
+:global(.config-fields .field-desc) {
+    color: var(--color-text-tertiary);
+    font-size: var(--text-xs);
+    margin: 0;
+}
+
+:global(.config-fields .field-desc code) {
+    font-family: var(--font-mono, monospace);
+}
+
+:global(.config-fields .config-input) {
+    background: var(--color-bg-input);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-md);
+    padding: 0.5rem 0.75rem;
+    color: var(--color-text-primary);
+    font-size: var(--text-base);
+}
+
+:global(.config-fields .config-input:focus) {
+    outline: none;
+    border-color: var(--color-accent);
+}
+
+:global(.ext-dep-env, .ext-dep-path, .config-fields .config-input.ext-dep-input) {
     font-family: var(--font-mono, monospace);
     font-size: var(--text-xs);
 }
