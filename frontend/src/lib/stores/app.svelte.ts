@@ -4,16 +4,25 @@ import { getConfig } from '$lib/api/config';
 import { isFromCache } from '$lib/api/cache';
 
 // ─── Board Helpers ───
+function replaceTaskById(tasks: Task[], taskId: string, task: Task): Task[] | null {
+    const idx = tasks.findIndex(t => t.id === taskId);
+    if (idx === -1) return null;
+    const home = tasks.findIndex(t => t.id === task.id);
+    if (home === -1 || home === idx) {
+        const next = [...tasks];
+        next[idx] = task;
+        return next;
+    }
+    return tasks.filter((_, i) => i !== idx);
+}
 
 /** Replace a task in the board. No-op if board is null or task not found. */
 export function updateTaskInBoard(appStore: AppStore, taskId: string, updated: Task): void {
     const board = appStore.board;
     if (!board) return;
-    const idx = board.tasks.findIndex(t => t.id === taskId);
-    if (idx === -1) return;
-    const newTasks = [...board.tasks];
-    newTasks[idx] = updated;
-    appStore.board = { ...board, tasks: newTasks };
+    const tasks = replaceTaskById(board.tasks || [], taskId, updated);
+    if (!tasks) return;
+    appStore.board = { ...board, tasks };
 }
 
 /** Remove a task from the board. No-op if board is null or task not found. */
@@ -24,11 +33,13 @@ export function removeTaskFromBoard(appStore: AppStore, taskId: string): void {
 }
 
 /** Add a task to the board. No-op when no board is on screen: an optimistic card belongs to the
- * board this browser is looking at, and a card with no board under it would be a list nothing owns. */
+ * board this browser is looking at, and a card with no board under it would be a list nothing owns.
+ * A card whose id the board already carries is rewritten in place rather than opened twice. */
 export function appendTaskToBoard(appStore: AppStore, task: Task): void {
     const board = appStore.board;
     if (!board) return;
-    appStore.board = { ...board, tasks: [...(board.tasks || []), task] };
+    const tasks = board.tasks || [];
+    appStore.board = { ...board, tasks: replaceTaskById(tasks, task.id, task) ?? [...tasks, task] };
 }
 
 /**
@@ -39,11 +50,11 @@ export function appendTaskToBoard(appStore: AppStore, task: Task): void {
 export function applyResolvedTasksToBoard(appStore: AppStore, resolved: Map<string, Task>): void {
     const board = appStore.board;
     if (!board) return;
-    const tasks = (board.tasks || []).map(t => {
-        const created = resolved.get(t.id);
-        if (!created) return t;
-        return resolved.get(created.id) || created;
-    });
+    let tasks = board.tasks || [];
+    for (const [id, answer] of resolved) {
+        const next = replaceTaskById(tasks, id, resolved.get(answer.id) || answer);
+        if (next) tasks = next;
+    }
     appStore.board = { ...board, tasks };
 }
 

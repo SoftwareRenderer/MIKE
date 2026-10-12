@@ -533,7 +533,8 @@ export function applyQueuedActionsToBoard(
                     // Never moved yet, so the new task starts at the top of its column.
                     moved_at: now,
                 };
-                result.push(task);
+
+                if (!result.some(t => t.id === task.id)) result.push(task);
                 optIdMap.set(task.id, task.id);
                 break;
             }

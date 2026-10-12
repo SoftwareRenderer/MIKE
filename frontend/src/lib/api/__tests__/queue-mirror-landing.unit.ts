@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import type { Task } from '$lib/types';
 
 // A mirror landing replays the queue onto the board, and `applyBoard` is the one place that does it:
-// the replay is not idempotent, so a second pass opens a second card.
+// the replay guesses fields, so a second pass rewrites them, but it never opens a second row for one id.
 //
 // No IndexedDB mock: the transform reads the in-memory queue.
 
@@ -55,7 +55,7 @@ describe('a mirror board plus the pending queue', () => {
         expect(board[0]?.status).toBe('review');
     });
 
-    it('is not idempotent: replaying one queue twice opens two cards', async () => {
+    it('opens no second row when the replay meets a board that already carries the card', async () => {
         const { enqueueAction, applyQueuedActionsToBoard } = await queueModule();
         await enqueueAction({
             type: 'createTask',
@@ -65,6 +65,9 @@ describe('a mirror board plus the pending queue', () => {
         const once = applyQueuedActionsToBoard([boardTask('t1')], 'p1');
         const twice = applyQueuedActionsToBoard(once, 'p1');
 
-        expect(twice.filter(t => t.id === 'opt-1')).toHaveLength(2);
+        // The card's id is the one the click minted, so a board holding it was overlaid once already. Two
+        // rows for one id is `each_key_duplicate` in the column that draws them.
+        expect(twice.filter(t => t.id === 'opt-1')).toHaveLength(1);
+        expect(twice.map(t => t.id)).toEqual(['t1', 'opt-1']);
     });
 });
