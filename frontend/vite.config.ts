@@ -21,7 +21,7 @@ export default defineConfig({
             // Icons are in public/ — Vite auto-copies them to dist root
             includeAssets: [],
             manifest: {
-                name: 'MIKE: Integrated Kanban Environment',
+                name: '', // Intentionally blank to allow project name to show up in window titles
                 short_name: 'MIKE',
                 description: 'AI-powered project management with task automation',
                 theme_color: '#141414',
