@@ -73,6 +73,6 @@
 
     .radio-group-small .radio-label {
         padding: 2px 7px;
-        font-size: var(--text-sm);
+        font-size: var(--text-2xs);
     }
 </style>

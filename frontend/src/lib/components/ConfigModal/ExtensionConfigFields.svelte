@@ -122,7 +122,6 @@
         border-color: var(--color-accent);
     }
 
-    /* Mount/Env editors */
     .mount-editor, .env-editor {
         display: flex;
         flex-direction: column;
@@ -147,7 +146,8 @@
         border-radius: var(--radius-md);
         padding: 0.4rem 0.5rem;
         color: var(--color-text-primary);
-        font-size: var(--text-sm);
+        font-family: var(--font-mono, monospace);
+        font-size: var(--text-xs);
         flex: 1;
         min-width: 0;
     }
@@ -168,7 +168,8 @@
         border-radius: var(--radius-md);
         padding: 0.4rem 0.5rem;
         color: var(--color-text-primary);
-        font-size: var(--text-sm);
+        font-family: var(--font-mono, monospace);
+        font-size: var(--text-xs);
         flex: 1;
         min-width: 0;
     }
@@ -185,7 +186,8 @@
 
     .env-equals {
         color: var(--color-text-tertiary);
-        font-size: var(--text-sm);
+        font-family: var(--font-mono, monospace);
+        font-size: var(--text-xs);
         flex-shrink: 0;
     }
 

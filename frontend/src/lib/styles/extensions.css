@@ -22,9 +22,7 @@ is installed there yet. Same attention color as .unpublished-badge. */
     flex-shrink: 0;
 }
 
-/* In the Edit dialog: the location the manifest declared, the field that names the host directory,
-and the grant as it stands. Quieter than a warning — this is a setting, not a fault. */
-:global(.ext-dep-env, .ext-dep-path, .ext-dep-input) {
+:global(.ext-dep-env, .ext-dep-path, .config-fields .config-input.ext-dep-input) {
     font-family: var(--font-mono, monospace);
     font-size: var(--text-xs);
 }

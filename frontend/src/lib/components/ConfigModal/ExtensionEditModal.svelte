@@ -344,4 +344,8 @@
         margin: 0;
     }
 
+    .field-desc code {
+        font-family: var(--font-mono, monospace);
+    }
+
 </style>
