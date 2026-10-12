@@ -209,6 +209,10 @@
     background: var(--color-surface-2);
     opacity: 1;
 }
+/* Dimmed rather than hidden, and kept above .selected so a selection still wins. */
+:global(.file-browser .file-browser-item.ignored) {
+    color: var(--color-text-muted);
+}
 /* Selected rows. */
 :global(.file-browser .file-browser-item.selected),
 :global(.file-browser .file-browser-item.selected:hover) {

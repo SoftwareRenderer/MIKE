@@ -492,6 +492,30 @@ request failed. Tests:
 `backend/api/git_diff_identity_test.go`, `backend/stream/worktree_watcher_baseline_test.go`,
 `backend/api/checkpoint_diff_test.go`.
 
+## The directory listing's ignored rows
+
+`GET /api/fs?project=&task=&path=&files=1` answers one directory. Every `entry` carries `name`,
+`isDir`, `path`, `isGitRepo` and `ignored`.
+
+- **`ignored` is git's answer, never this server's guess at a name.** One
+  `git check-ignore --stdin -z` process judges the whole directory (`git.IgnoredPaths`), run in the
+  listed directory so a nested `.gitignore` speaks for the directory that holds it. A tracked path is
+  never `ignored`, so a rule written after a commit does not dim committed work. Any git failure
+  answers `false` for every row.
+- **The explorer draws every row and dims the ignored ones.** `FileBrowserView.svelte` filters
+  nothing: a hidden path leaves the person no way to open it. `file-browser.css` gives an `ignored`
+  row the muted text colour, and a selection still reads as one.
+- **A listing of no repository marks nothing.** The directory picker — the request with no `project`
+  — asks no question about git at all, so every `ignored` it receives is false.
+- **`ignored` decides nothing else.** `fs_event` still drops an ignored path (`shouldSkipFsEvent`), so
+  a regenerated `dist/` reaches a listing on the next request rather than by itself.
+  `/api/fs/search` narrows further: it skips a dot-prefixed name (`searchSkipsName`) and the
+  well-known build directories (`git.ShouldIgnorePath`), whether or not a rule mentions them.
+
+Tests: `go test ./backend/server/ -run TestFSListing`, and
+`frontend/src/lib/components/__tests__/file-browser-lists-everything.unit.svelte.ts` for the row that
+vanishes or stops being dimmed.
+
 ## Raw file bytes
 
 `GET /api/fs/raw?project=&task=&path=&ref=` is the only route that returns a project file's **bytes**.

@@ -3,20 +3,21 @@ import { render, cleanup, fireEvent, waitFor } from '@testing-library/svelte';
 import FileBrowserView from '$lib/components/FileBrowserView.svelte';
 
 /**
- * Both explorer listings show dot-prefixed names, and only the ignored directories stay hidden. The
- * add-project picker hides them behind its own option: `file-browser-hidden-files.unit.svelte.ts`.
+ * The listing draws every row the server sent and dims the ones git excludes: a dropped row is a
+ * file no one can open without typing its path. The add-project picker hides names by design —
+ * `file-browser-hidden-files.unit.svelte.ts`.
  */
 
 const ROOT = '/home/sandbox/worktrees/fs-dots';
 
-const LISTING: Record<string, { name: string; isDir: boolean; path: string }[]> = {
+const LISTING: Record<string, { name: string; isDir: boolean; path: string; ignored?: boolean }[]> = {
     [ROOT]: [
         { name: '.github', isDir: true, path: `${ROOT}/.github` },
         { name: 'src', isDir: true, path: `${ROOT}/src` },
         { name: '.git', isDir: true, path: `${ROOT}/.git` },
-        { name: '.cache', isDir: true, path: `${ROOT}/.cache` },
-        { name: 'node_modules', isDir: true, path: `${ROOT}/node_modules` },
-        { name: '.env', isDir: false, path: `${ROOT}/.env` },
+        { name: '.cache', isDir: true, path: `${ROOT}/.cache`, ignored: true },
+        { name: 'node_modules', isDir: true, path: `${ROOT}/node_modules`, ignored: true },
+        { name: '.env', isDir: false, path: `${ROOT}/.env`, ignored: true },
         { name: '.gitignore', isDir: false, path: `${ROOT}/.gitignore` },
     ],
     [`${ROOT}/.github`]: [
@@ -79,20 +80,23 @@ async function loadRoot(container: HTMLElement) {
     input.value = ROOT;
     input.dispatchEvent(new Event('input', { bubbles: true }));
     await fireEvent.keyDown(input, { key: 'Enter' });
-    await waitFor(() => expect(rowEls(container).length).toBe(4));
+    await waitFor(() => expect(rowEls(container).length).toBe(7));
 }
 
-describe('the file listing\'s dot-prefixed rows', () => {
-    it('lists dot files and a dot directory, and the ignored directories stay out', async () => {
+describe('the file listing draws what the server listed', () => {
+    it('lists every row, and dims only the ones git excludes', async () => {
         const { container } = openBrowser();
         await loadRoot(container);
 
         const names = rowNames(container);
-        for (const shown of ['.github', 'src', '.env', '.gitignore']) {
+        for (const shown of ['.github', 'src', '.git', '.cache', 'node_modules', '.env', '.gitignore']) {
             expect(names).toContain(shown);
         }
-        for (const hidden of ['.git', '.cache', 'node_modules']) {
-            expect(names).not.toContain(hidden);
+        for (const name of ['.cache', 'node_modules', '.env']) {
+            expect(rowEl(container, `${ROOT}/${name}`)!.classList.contains('ignored')).toBe(true);
+        }
+        for (const name of ['.github', 'src', '.gitignore']) {
+            expect(rowEl(container, `${ROOT}/${name}`)!.classList.contains('ignored')).toBe(false);
         }
     });
 

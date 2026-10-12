@@ -302,6 +302,32 @@ func (s *Server) handleFSWrite(w http.ResponseWriter, r *http.Request) {
 	JSONResponse(w, http.StatusOK, map[string]string{"status": "written", "path": target.path})
 }
 
+// fsEntry is one row of a GET /api/fs listing.
+type fsEntry struct {
+	Name      string `json:"name"`
+	IsDir     bool   `json:"isDir"`
+	Path      string `json:"path"`
+	IsGitRepo bool   `json:"isGitRepo"`
+	// Ignored is git's answer about the path; the explorer dims such a row instead of hiding it.
+	Ignored bool `json:"ignored"`
+}
+
+// markIgnored fills in Ignored for the rows of a listing of dir, in one check-ignore process.
+// The `..` row stays unmarked: git calls it "outside the repository", a fatal that blanks the batch.
+func markIgnored(entries []fsEntry, dir string) {
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.Name == ".." {
+			continue
+		}
+		names = append(names, e.Name)
+	}
+	ignored := git.IgnoredPaths(dir, names)
+	for i := range entries {
+		entries[i].Ignored = ignored[entries[i].Name]
+	}
+}
+
 func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	if path == "" {
@@ -325,13 +351,6 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		path = resolved
-	}
-
-	type fsEntry struct {
-		Name      string `json:"name"`
-		IsDir     bool   `json:"isDir"`
-		Path      string `json:"path"`
-		IsGitRepo bool   `json:"isGitRepo"`
 	}
 
 	var result struct {
@@ -393,6 +412,10 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 			// IsGitRepo stays false: the in-sandbox browser has no use for it.
 			result.Entries = append(result.Entries, fsEntry{Name: name, IsDir: isDir, Path: sandboxFullPath})
 		}
+		// The container lists the directory the host holds, so git judges the host form of it.
+		if git.IsGitRepo(path) {
+			markIgnored(result.Entries, path)
+		}
 		sort.SliceStable(result.Entries, func(i, j int) bool {
 			return strings.ToLower(result.Entries[i].Name) < strings.ToLower(result.Entries[j].Name)
 		})
@@ -445,6 +468,11 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 			Path:      fullPath,
 			IsGitRepo: isGit || git.HasGitDir(fullPath),
 		})
+	}
+
+	// The directory picker (no project) asks no question of git.
+	if project != nil && isGit {
+		markIgnored(result.Entries, path)
 	}
 
 	sort.SliceStable(result.Entries, func(i, j int) bool {

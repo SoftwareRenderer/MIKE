@@ -127,15 +127,7 @@
     });
     let entryPaths = $derived(new Set(entries.map(e => e.path)));
 
-    // Never listed: build output, caches and tool state — a dot prefix is not what puts a name here.
-    // The add-project picker (`FileBrowser.svelte`) is the only listing that hides dot names, and it
-    // has its own option for showing them.
-    const ignoredDirs = new Set([
-        'node_modules', '.next', 'dist', 'build', '.cache', '__pycache__',
-        '.venv', 'target', 'vendor', '.gradle', '.mypy_cache', '.pytest_cache',
-        'coverage', '.nuxt', '.output', '.svelte-kit', '.turbo', '.vercel',
-        '.docker', '.git', '.vscode', '.idea',
-    ]);
+    // Every row the server listed is drawn; git-ignored ones are dimmed, never hidden.
 
     $effect(() => {
         if (!currentPath) {
@@ -158,11 +150,7 @@
         try {
             const listing = await listFsDirectory({ path: target, files: true, project: projectId, task: taskId });
             entries = listing.entries
-                .filter(e => {
-                    if (e.name === '..') return false; // the listing prepends its own
-                    if (e.isDir && ignoredDirs.has(e.name)) return false;
-                    return true;
-                })
+                .filter(e => e.name !== '..') // the listing prepends its own
                 .sort((a, b) => {
                     // Directories first, then files, alphabetical within each group
                     if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
@@ -897,6 +885,7 @@
                 <button
                     class="file-browser-item {rowClass}"
                     class:dir={entry.isDir}
+                    class:ignored={entry.ignored}
                     class:selected={isSelected}
                     class:is-cut={isCut(entry.path)}
                     role="treeitem"

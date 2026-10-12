@@ -7,6 +7,8 @@ export interface FsEntry {
     isDir: boolean;
     path: string;
     isGitRepo: boolean;
+    /** git excludes this path; the explorer dims the row rather than leaving it out. */
+    ignored?: boolean;
 }
 
 /** What `GET /api/fs` answers for one directory. */

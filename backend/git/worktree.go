@@ -165,6 +165,43 @@ func IsGitIgnored(repoRoot, relPath string) bool {
 	return cmd.Run() == nil
 }
 
+// IgnoredPaths reports which of relPaths — paths under dir — git excludes, answering a whole
+// directory listing from one check-ignore process. git finds the repository from dir, so a
+// subdirectory is judged by the .gitignore files that reach it.
+//
+// A tracked path is never reported. Nothing is reported when there is no repository, no git, or git
+// fails. Pass paths the directory really holds: git matches `build/` only against a directory it sees.
+func IgnoredPaths(dir string, relPaths []string) map[string]bool {
+	ignored := make(map[string]bool, len(relPaths))
+	if dir == "" || len(relPaths) == 0 {
+		return ignored
+	}
+	// -z on both halves: a file name may hold a newline, which a line-separated batch would split.
+	var batch strings.Builder
+	for _, p := range relPaths {
+		batch.WriteString(p)
+		batch.WriteByte(0)
+	}
+
+	cmd := Command(dir, "check-ignore", "--stdin", "-z")
+	cmd.Stdin = strings.NewReader(batch.String())
+	var out strings.Builder
+	cmd.Stdout = &out
+	// Exit 1 means nothing in the batch is ignored; any other failure judged nothing at all.
+	if err := cmd.Run(); err != nil {
+		if code, ok := GitExitCode(err); !ok || code != 1 {
+			logging.For(logging.Git).Warnf("check-ignore over %d paths failed: %v", len(relPaths), err)
+		}
+		return ignored
+	}
+	for name := range strings.SplitSeq(out.String(), "\x00") {
+		if name != "" {
+			ignored[name] = true
+		}
+	}
+	return ignored
+}
+
 // IsInternalFile returns true if the path is an internal file that should not
 // appear in the diff panel or card stats (e.g., .git/*, kanban.trace).
 func IsInternalFile(path string) bool {
