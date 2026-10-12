@@ -216,7 +216,7 @@ func TestMaybeAutoSummarize_RestartResumesWithSameSummary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload task: %v", err)
 	}
-	restarted := buildLLMContext(buildMessagesFromDB(reloaded, rows, setup.worktreePath, proj.Name, false))
+	restarted := buildLLMContext(buildMessagesFromDB(reloaded, rows, setup.worktreePath, promptScope{projectName: proj.Name}))
 	if len(restarted) == 0 || restarted[0].Role != "system" {
 		t.Fatalf("rebuilt context has no system message: %+v", restarted)
 	}
@@ -237,7 +237,7 @@ func TestComposeSystemPrompt_SandboxCwd(t *testing.T) {
 	chdirRepoRoot(t)
 	task := &types.Task{OperatingMode: "act"}
 
-	host := composeSystemPrompt(task, "/host/worktree", "proj", false, "S")
+	host := composeSystemPrompt(task, "/host/worktree", promptScope{projectName: "proj", sandboxEnabled: false}, "S")
 	if !strings.Contains(host, "/host/worktree") {
 		t.Fatalf("host prompt lost the worktree path:\n%s", host)
 	}
@@ -248,7 +248,7 @@ func TestComposeSystemPrompt_SandboxCwd(t *testing.T) {
 		t.Fatalf("non-sandboxed prompt mentions the sandbox mount:\n%s", host)
 	}
 
-	sandboxed := composeSystemPrompt(task, "/host/worktree", "proj", true, "S")
+	sandboxed := composeSystemPrompt(task, "/host/worktree", promptScope{projectName: "proj", sandboxEnabled: true}, "S")
 	if !strings.Contains(sandboxed, "/home/sandbox/proj") {
 		t.Fatalf("sandboxed prompt lacks the container cwd:\n%s", sandboxed)
 	}

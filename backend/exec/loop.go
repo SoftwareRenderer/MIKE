@@ -480,7 +480,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 	client := te.newLlamaClient(setup.serverURL, setup.modelName, reasoningEffort, apiKey, silence)
 	tools := te.toolDefinitionsFor(setup.ctx, setup.task)
 	taskMsgs, _ := te.store.GetTaskMessages(setup.task.ID, setup.task.CurrentThreadID)
-	messages := buildMessagesFromDB(setup.task, taskMsgs, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
+	messages := buildMessagesFromDB(setup.task, taskMsgs, setup.worktreePath, setup.promptScope())
 
 	// Remove duplicate user messages that may occur during regeneration due to
 	// race conditions between DELETE and POST handlers.
@@ -517,7 +517,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 		sandboxEnabled:   setup.sandboxEnabled,
 	}
 	// Sync once more to ensure we have the latest DB state (e.g. if messages were added/deleted)
-	lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
+	lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.promptScope())
 
 	// Carry over the accumulated session cost from prior runs/executors so the badge
 	// reflects the full session cost across provider/model switches and executor restarts.
@@ -855,7 +855,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 				lc.reasoningContent.Reset()
 				lc.pendingToolCalls = nil
 				lc.finishReason = ""
-				lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
+				lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.promptScope())
 				continue
 			}
 			// New user message — cancel current LLM call.
@@ -897,7 +897,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 			if !hadRegenerate {
 				// Re-sync with DB to pick up user messages (already created by HandleSend)
 				// and any deleted messages. Do NOT append — syncMessagesFromDB already includes them.
-				lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
+				lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.promptScope())
 			}
 
 			// Apply model overrides from queued messages.
@@ -1636,7 +1636,7 @@ func (te *TaskExecutor) foldQueuedUserMessage(setup *taskExecSetup, lc *loopCont
 	}
 	// Re-sync with DB to pick up the user message (already created by HandleSend)
 	// and any deleted messages. Do NOT append — syncMessagesFromDB already includes it.
-	lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
+	lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.promptScope())
 }
 
 // adoptMessageModel points the run at the provider and model a queued message names.
@@ -1733,7 +1733,7 @@ idleWait:
 			// Count messages before DB sync (includes in-memory summary).
 			preSyncCount := len(lc.messages)
 			// Re-sync from DB to pick up any messages queued during summarization.
-			lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
+			lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.promptScope())
 			// Clear summarizing flag
 			setup.task.Summarizing = false
 			_ = te.store.SetTaskSummarizing(setup.task.ID, false)
@@ -1824,13 +1824,13 @@ func (te *TaskExecutor) persistAndSendError(taskID, message, code string, turnOv
 // excluded from the next LLM call. It also refreshes the task to pick up
 // any thread changes from fork cleanup.
 // Returns the synced messages and the (possibly updated) task.
-func (te *TaskExecutor) syncMessagesFromDB(task *types.Task, worktreePath, projectName string, sandboxEnabled bool) ([]types.ChatMessage, *types.Task) {
+func (te *TaskExecutor) syncMessagesFromDB(task *types.Task, worktreePath string, scope promptScope) ([]types.ChatMessage, *types.Task) {
 	// Reload task from DB to pick up thread changes (e.g., fork cleanup switched active thread).
 	if updatedTask, err := te.store.GetTaskByID(task.ID); err == nil && updatedTask != nil {
 		task = updatedTask
 	}
 	taskMsgs, _ := te.store.GetTaskMessages(task.ID, task.CurrentThreadID)
-	return buildMessagesFromDB(task, taskMsgs, worktreePath, projectName, sandboxEnabled), task
+	return buildMessagesFromDB(task, taskMsgs, worktreePath, scope), task
 }
 
 // truncateForRegenerate drops the last user message and everything after it from the

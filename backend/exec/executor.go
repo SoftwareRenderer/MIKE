@@ -1913,27 +1913,67 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 
 // -- Helper functions --
 
+// promptScope decides whether the prompt points at container paths or host paths.
+type promptScope struct {
+	projectName    string
+	projectPath    string
+	sandboxEnabled bool
+}
+
+// The scope a project row decides; a missing row has no project skills.
+func promptScopeOf(project *types.Project) promptScope {
+	if project == nil {
+		return promptScope{}
+	}
+	return promptScope{projectName: project.Name, projectPath: project.Path, sandboxEnabled: project.SandboxEnabled}
+}
+
+// Its own sandbox decision, not the row's.
+func (s *taskExecSetup) promptScope() promptScope {
+	scope := promptScopeOf(s.project)
+	scope.sandboxEnabled = s.sandboxEnabled
+	return scope
+}
+
+func skillRoots(scope promptScope) []prompts.SkillRoot {
+	// A Prefix the container did not mount is a file the agent cannot open.
+	roots := []prompts.SkillRoot{
+		{Dir: prompts.SkillsDir(), Prefix: sandbox.SkillsMount, Origin: prompts.SkillOriginBundled},
+		{Dir: prompts.ProjectSkillsDir(scope.projectPath), Prefix: sandbox.ProjectSkillsMount, Origin: prompts.SkillOriginProject},
+	}
+	// A host task reads the host directory, so it gets no prefix.
+	scanned := make([]prompts.SkillRoot, 0, len(roots))
+	for _, root := range roots {
+		if root.Dir == "" {
+			continue
+		}
+		if !scope.sandboxEnabled {
+			root.Prefix = ""
+		}
+		scanned = append(scanned, root)
+	}
+	return scanned
+}
+
 // composeSystemPrompt builds a task's system prompt, embedding the most recent
 // conversation summary (empty for a task that was never summarized)
-func composeSystemPrompt(task *types.Task, worktreePath, projectName string, sandboxEnabled bool, summary string) string {
+func composeSystemPrompt(task *types.Task, worktreePath string, scope promptScope, summary string) string {
 	cwd := worktreePath
-	skillsMount := ""
-	if sandboxEnabled {
-		cwd = sandbox.MountPath(projectName)
-		skillsMount = sandbox.SkillsMount
+	if scope.sandboxEnabled {
+		cwd = sandbox.MountPath(scope.projectName)
 	}
-	return llama.BuildSystemPrompt(worktreePath, cwd, summary, skillsMount, task.OperatingMode)
+	return llama.BuildSystemPrompt(worktreePath, cwd, summary, skillRoots(scope), task.OperatingMode)
 }
 
 // buildMessagesFromDB loads persisted messages and builds the system prompt.
 // The summary in effect is extracted from the rebuilt conversation, so it is read by the one rule
 // (extractPrevSummary) rather than by a second walk over the stored rows.
-func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktreePath, projectName string, sandboxEnabled bool) []types.ChatMessage {
+func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktreePath string, scope promptScope) []types.ChatMessage {
 	// One rebuild path for every consumer of persisted rows (see groupTaskMessages): the conversation —
 	// tool calls with their assistant row, tool results right after, advisories under their own role —
 	// and the system prompt on front, carrying that conversation's summary.
 	conversation := groupTaskMessages(taskMsgs)
-	prompt := composeSystemPrompt(task, worktreePath, projectName, sandboxEnabled, extractPrevSummary(conversation))
+	prompt := composeSystemPrompt(task, worktreePath, scope, extractPrevSummary(conversation))
 	return append([]types.ChatMessage{{Role: "system", Content: prompt}}, conversation...)
 }
 

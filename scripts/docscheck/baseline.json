@@ -4,7 +4,7 @@
   "longsent": 0
  },
  "_global": {
-  "longsent": 171
+  "longsent": 169
  },
  "docs/adding-a-preference.md": {
   "history": 0,
@@ -136,9 +136,13 @@
  },
  "docs/sandbox-runtime.md": {
   "history": 0,
-  "longsent": 11
+  "longsent": 6
  },
  "docs/sessions.md": {
+  "history": 0,
+  "longsent": 0
+ },
+ "docs/skills.md": {
   "history": 0,
   "longsent": 0
  },
@@ -152,7 +156,7 @@
  },
  "docs/testing.md": {
   "history": 4,
-  "longsent": 9
+  "longsent": 3
  },
  "docs/threads-checkpoints.md": {
   "history": 2,

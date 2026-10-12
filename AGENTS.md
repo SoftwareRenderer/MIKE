@@ -248,6 +248,9 @@ podman. Without it, sandboxed projects refuse to start tasks — hard error, no 
 - **A capability is judged by its shape, never its name** — `--privileged` is an argument, not a
   capability, and it is refused. `docs/sandbox-runtime.md → Capabilities are judged by shape, not name`
 - **The bridge is stdio-only** — no listener and no port. Interactive terminals bypass it.
+- **A project's own skills reach its containers read-only** — the bind is that project's `.agents/skills/`
+  directory and nothing wider, and the prompt lists skills by the path the container can open.
+  `docs/skills.md`.
 - **Plan mode's bash restriction is prompt text, not executor-enforced.** What holds a planning turn is the
   read-only worktree mount plus the sandbox — don't add a fake allowlist.
 - Bridge invariants: **`docs/sandbox-bridge.md`**. Boot, the sweep, environment construction, capabilities
@@ -437,6 +440,7 @@ deliberately omits.
 | `docs/configuration.md` | every env var, the flag twins, startup resolution, the archgate exceptions, the release packages |
 | `docs/sandbox-runtime.md` | boot injection, the stale sweep, container environment, podman args, capabilities, mount policy, the git pointer pin, memory caps and admission, podman subprocesses |
 | `docs/sandbox-bridge.md` | bridge connections, LSP session binding, wire IDs, payload limits, upload lifetime |
+| `docs/skills.md` | the two skill roots a task is listed from, the paths it is told to open, same-named packages |
 | `docs/confinement.md` | path jails, the no-project host jail, size and output caps, subprocess environments |
 | `docs/locking.md` | keylock domains, accessor shape, lock order, watched waits, `sandboxMu` |
 | `docs/storage.md` | what is in `tx`, the schema and its DDL, stored timestamps, file permissions, ID generation |

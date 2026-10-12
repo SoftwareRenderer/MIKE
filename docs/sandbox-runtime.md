@@ -48,9 +48,9 @@ clash.
 - **The `exec` command does not accept its own environment flags.** The container create is the only place
   an `-e` is emitted: past the container name podman parses no more flags, so an exec-time `-e` names the program to run
   (`execCommandArgs`).
-- No other environment variables should be hardcoded: no hardcoded `PATH` (an `-e` overrides the image's
-  `ENV PATH`, which dropped a custom image's tooling) and no container-wide `TERM` (the terminal sets `TERM` on its own
-  `podman exec`, `shellExecArgs`: it belongs to the TTY session, not the sandbox).
+- Invent no other variable: no `PATH` (an `-e` overrides the image's `ENV PATH`, which dropped a
+  custom image's tooling) and no container-wide `TERM` (the terminal sets `TERM` on its own
+  `podman exec` in `shellExecArgs` — it belongs to the TTY session, not the sandbox).
 - Tests: `backend/sandbox/containerenv_test.go`, `backend/sandbox/hostenv_test.go`. The last runs a real
   gVisor container and asserts a host variable reaches it **only** if allowlisted to the podman client —
   the probe variable must be one a host could set, or the test passes vacuously.
@@ -123,6 +123,24 @@ else, so a capability is a word and cannot be anything else.
   posture is already there (`docs/sandbox-runtime.md → Podman argument construction`).
 - Tests: `TestValidateCapabilityRule` (the table carries `--privileged`, `--cap-add`, `-v` and
   `SYS_ADMIN,ALL`), `TestGVisorIsolationForCaps`, `TestAppendCapabilitiesRefusesAnUnisolatedGrant`.
+
+## What a task container binds besides its worktree
+
+Three reads a task cannot do through the bridge still need a mount. All three are `ro`, and none of them
+is configurable — what a person can widen is `SandboxMounts`, declared per project in its Sandbox
+Configuration.
+
+- `<project.Path>/.git` at its own absolute path, so git can resolve refs and worktree metadata from the
+  worktree's pointer file.
+- The bundled skill packages at `sandbox.SkillsMount`, from `sandbox.SkillsDir()` (`prompts.SkillsDir()`).
+- The project's own skill packages at `sandbox.ProjectSkillsMount`, from `SandboxOpts.ProjectSkillsDir`.
+  `ProjectOpts` fills it with `prompts.ProjectSkillsDir(project.Path)` — the same call the prompt builder
+  makes, because the bind and the listing are one contract. `docs/skills.md → What must stay true`.
+- Both skills binds are built by `readOnlyBindArg`, which emits **no mount** when the directory is
+  missing: an optional directory nobody created is not a container failure. A directory that appears
+  after the container exists is not bound into it — the container is created at run start and stopped at
+  run end, so the gap is inside one run.
+- Tests: `backend/sandbox/projectskills_test.go`, `backend/sandbox/git_pointer_test.go`.
 
 ## Extension sandbox mounts
 
@@ -218,7 +236,7 @@ else, so a capability is a word and cannot be anything else.
   startup log line. `/proc/meminfo` has exactly one reader in the tree (`meminfoMB` under `readMeminfoMB`),
   and `/proc/self/status` likewise (`selfRSSMB` under `readSelfRSSMB`).
 - **`mikeMB` is the sum of three accountants** (`memoryBudget.Measure`). It counts task containers and the
-  project-level `proj:` terminal containers (`SandboxManager.MemoryAccounting`, over the same `active` map
+  project-level `proj:` terminal containers (`SandboxManager.MemoryAccounting`, over the `active` map
   that holds both), the extension sandboxes (`ExtensionSandboxManager.MemoryAccounting`), and the server
   process itself (`selfProcessAccountant`, `VmRSS` — no cgroup, so held and charge are one figure). An
   unreadable `VmRSS` adds nothing and warns once, not once per tick. Each container costs `max(held, cap)`

@@ -364,7 +364,7 @@ const catalog = {
     'settings.defaults.maxFailed': 'Max failed turns',
     'settings.defaults.maxFailedDesc': 'Stop task after this many consecutive LLM failures',
     'settings.defaults.loopBreaker': 'Loop breaker',
-    'settings.defaults.loopBreakerDesc': 'Attempts to automatically recover from failed turns',
+    'settings.defaults.loopBreakerDesc': 'Attempts to automatically recover from failed turns. WARNING: This can cause unbounded token generation.',
     'settings.defaults.loopBreakerAria': 'Recover from failed turns automatically',
 
     // ── ConfigModal/ProjectDefaults.svelte ──
