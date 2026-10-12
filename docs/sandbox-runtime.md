@@ -16,11 +16,23 @@ measured on a real host.
 - Tests: `pkg/sandboxruntime/runtime_test.go`
   (`TestBootDeclinesTheHostSweepByDefault`, `TestGetAgentBinaryPathPrefersTheWiredPath`).
 
-## One probe, one sweep
+## Two availability probes, one sweep
 
 - `sandboxruntime.GVisorAvailable(tag)` is used by both `SandboxManager.checkAvailable` and the extension
   manager's probe — they must be consistent to ensure both task and extension sandboxes agree about whether
-  the host can run gVisor.
+  the host can run gVisor. It is a **presence** probe: `runsc` in PATH, `runsc --version`, `podman` in PATH.
+  Product availability stays with it, because a startup that started a container to find out would put a
+  container launch on every boot.
+- `Runtime.ProbeSandbox(ctx, image)` is the second question — **did a gVisor container run?** — and answers
+  it with one throwaway container: `GVisorCreateArgs`, `--network none`, no mount, no capability, `start -a`
+  of `/bin/true`, removed in every path. The container is named `mike-sandbox-probe-<pid>`, outside the
+  `kanban-sandbox-` family the boot sweep and the e2e teardown act on by name. An image the host does not
+  have is reported as usable: the store answered, so the sandbox works and the missing image is someone
+  else's failure (`ImageAvailabilityError`). Presence-only would miss the measured broken host: runsc
+  installs fine on a nested/overlayfs root whose podman storage cannot initialise, and that host refuses
+  every create with exit status 125. `scripts/sandboxprobe` exposes it as a command and
+  `backend/testutil/sandboxcheck.Require(t, image)` as the test skip; `docs/testing.md → Go unit test
+  environment` owns when a test may use them.
 - `Runtime.CleanupStaleContainers(tag, nameFilter)` is the shared startup sweep that is best-effort and
   bounded to 15 seconds (prefixes `kanban-sandbox-` / `kanban-ext-`); neither manager should re-implement the
   logic for listing, parsing, and removing containers.

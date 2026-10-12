@@ -1,8 +1,7 @@
 import { test, expect } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
-import { getProjectId, csrfFetch, isolatedProject, gotoProject } from './helpers';
+import { getProjectId, csrfFetch, isolatedProject, gotoProject, requireSandbox } from './helpers';
 
 // Own project: enabling sandboxing on a project is refused (409) while tasks are running
 // on it, so on the shared project this test skipped itself whenever another spec happened
@@ -11,19 +10,10 @@ isolatedProject();
 
 test.describe.serial('Sandbox Dockerfile Build', () => {
   let projectId: string;
-  let sandboxAvailable = false;
-
-  test.beforeAll(() => {
-    try {
-      execSync('podman --runtime runsc images', { timeout: 15000, stdio: 'pipe' });
-      sandboxAvailable = true;
-    } catch {
-      sandboxAvailable = false;
-    }
-  });
 
   test.beforeEach(async ({ page }) => {
-    test.skip(!sandboxAvailable, 'gVisor sandbox is not functional in this environment');
+    // Build asks this host to build an image, so this spec rests on a working container store.
+    requireSandbox();
 
     await page.goto('/');
     await page.waitForSelector('.project-item', { timeout: 10000 });

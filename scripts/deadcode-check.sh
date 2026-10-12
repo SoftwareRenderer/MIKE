@@ -22,10 +22,10 @@ DEADCODE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lint-tools.sh"
 DEADCODE="$("$DEADCODE" path deadcode)"
 
 # Every main this tree builds, in one invocation so a function reachable from any of them is live:
-# the server binary, the bridge's other main, and the two script mains. The script mains belong here
+# the server binary, the bridge's other main, and the script mains. The script mains belong here
 # because this step is the only dead-code check that ever sees them — scripts/ is outside the
 # build-and-test scope, so a declaration nothing calls there is measured nowhere else.
-ROOTS=("." "./pkg/bridge/agent" "./scripts/archgate" "./scripts/i18nparity")
+ROOTS=("." "./pkg/bridge/agent" "./scripts/archgate" "./scripts/i18nparity" "./scripts/sandboxprobe")
 
 # Test-only accessors: "<package-dir>:<funcName>". Scoped by directory as well as name so
 # allowing `Write` in pkg/logging cannot also excuse an unrelated `Write` elsewhere.

@@ -112,6 +112,7 @@ curl -sk https://localhost:3000/api/config   # 401 JSON = up; -k because the CA 
 
 ```bash
 make check | make lint | make check-race                 # gate / static half / -race over the lock packages
+make sandbox-probe                                       # can a gVisor container start on this host?
 make test-go | make test-frontend                        # Go unit / vitest + the frontend gates
 make test-diff                                           # only the touched Go packages
 make test-frontend-diff                                  # only vitest files importing a touched file
@@ -126,6 +127,9 @@ make test-gen-registry                                   # the generator's own t
 - **A spec exists only if it needs a browser or the real backend.** Component state belongs in vitest;
   never write a `readFileSync` + `toContain` "test".
 - **A spec skips only for a prerequisite global setup cannot provide**, and says which in the skip reason.
+- **A test runs only where its container can start** — `sandboxcheck.Require(t, image)` in Go,
+  `requireSandbox()` in e2e. A host whose podman storage cannot initialise skips with that reason; it does
+  not fail. `docs/testing.md → Go unit test environment`.
 - **Config-modifying specs run in the `isolated` project**, and **a spec that runs an executor turn owns its
   project and releases its tasks when the test ends** — an unreleased task closes the admission gate on the
   tests after it.

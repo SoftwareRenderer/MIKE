@@ -4,15 +4,14 @@ import (
 	"context"
 	"testing"
 
+	"mike/backend/testutil/sandboxcheck"
 	"mike/backend/types"
 )
 
 func TestAgentClient(t *testing.T) {
 
 	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping integration test")
-	}
+	sandboxcheck.Require(t, BaseImage)
 
 	dir := taskWorktreeDir(t)
 	taskID := "test-agent-client"

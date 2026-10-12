@@ -4,6 +4,17 @@ import { existsSync, writeFileSync, mkdirSync, readFileSync, cpSync, readdirSync
 import { dirname, join } from 'path';
 import https from 'node:https';
 import { laneRequestOptions } from '../lane-tls';
+import { readSandboxVerdict } from '../sandbox-verdict';
+
+/**
+ * Skip the calling test unless this host can start a gVisor container. Only a spec that starts one may
+ * call it: a spec that merely reads sandbox settings never reaches podman and must still run.
+ */
+export function requireSandbox(): void {
+  const verdict = readSandboxVerdict();
+  test.skip(!verdict.usable,
+    `sandbox is not fully supported in this environment — ${verdict.reason}; specs that start a container are skipped`);
+}
 
 /**
  * Find a provider by its reference string: the stable integer ID (as a string)
