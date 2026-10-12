@@ -342,6 +342,17 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         urlRouter.openTaskExplorer(project.id, task.id);
     }
 
+    /** Closing writes the task detail's own address, so the detail has to follow the write.
+     *  `docs/link-rows.md → What a close lands on`. */
+    function closeTaskExplorer(): void {
+        const project = appStore.selectedProject;
+        const task = appStore.selectedTask;
+        if (!project || !task) return;
+        urlRouter.write({ project: project.id, task: task.id, view: null, file: null }, false, true);
+        uiStore.showCardDetail = !urlRouter.applyView();
+        fsEventQueue = [];
+    }
+
     async function routeDefinitionJump(event: Event): Promise<void> {
         const detail = (event as CustomEvent<{ path: string; line?: number; taskId?: string }>).detail;
         // Project jumps are heard by the project explorer, which owns the only
@@ -1307,7 +1318,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         onUpdateFile={(path: string | null) => urlRouter.write({ project: appStore.selectedProject?.id, task: appStore.selectedTask?.id, view: urlRouter.changesOpen ? 'task-review' : 'task-explorer', file: path }, false, !!path)}
                         changesOpen={urlRouter.changesOpen}
                         onChangesOpen={(open: boolean) => urlRouter.write({ project: appStore.selectedProject?.id, task: appStore.selectedTask?.id, view: open ? 'task-review' : 'task-explorer' }, false, open)}
-                        onClose={() => { urlRouter.write({ project: appStore.selectedProject?.id, task: appStore.selectedTask?.id, view: null, file: null }, false, true); urlRouter.applyView(); fsEventQueue = []; }}
+                        onClose={closeTaskExplorer}
                     />
                 {:else if uiStore.showCardDetail && appStore.selectedTask}
                     <CardDetail task={appStore.selectedTask} tasks={appStore.tasks} projectPath={appStore.selectedProject?.path} projectName={appStore.selectedProject?.name} workspaceDir={appStore.config?.workspace_dir} sandboxEnabled={appStore.selectedProject?.sandbox_enabled} fsEventQueue={fsEventQueue} activeTab={cardDetailActiveTab} onActiveTabChange={(tab: 'context' | 'chat' | 'diff' | 'checkpoint') => cardDetailActiveTab = tab} onClose={(status?: string) => {

@@ -85,6 +85,22 @@ because `role="button"` gets no free one — are `handleLinkClick` / `handleLink
 used by two specs).
 `draggable="false"` keeps the text inside the top-bar button from becoming a link drag payload.
 
+## What a close lands on
+
+The × of an explorer writes the address of the screen behind it, then opens that screen. The close has to
+make the app agree with the address it wrote: an explorer that arrived by address has the task detail
+closed (`restoreTaskFromUrl`), and an address naming a task with no screen of its own *is* that detail.
+`closeTaskExplorer` in `App.svelte` therefore writes `?project=&task=` with no `view` and sets
+`uiStore.showCardDetail` from what `applyView()` answers.
+
+- A **task explorer**'s × lands on that task's detail, including in a tab that opened on the explorer link.
+- The **Review Changes** panel's × is the panel's own: it returns to the explorer it belongs to, and that
+  explorer's × then follows the rule above.
+- The **project explorer**'s × writes `?project=` with no `view`, which is the board, and restores the
+  sidebar it auto-collapsed on a tablet.
+- Both closes push, so the browser's Back returns to the explorer. Escape reaches the same close through
+  `ExplorerCore.handleKeydown`.
+
 ## Terminal buttons
 
 `App/TopBar.svelte`, `CardDetail/TaskHeader.svelte` (absent in the floating view, like the Explorer
@@ -157,7 +173,10 @@ source is the card not the link, second tab lands on the linked project/task/exp
 tab holds a terminal and nothing else), e2e
 `preferences-keyboard.spec.ts` (isolated; rebinding frees Ctrl+Click), e2e
 `frontend/tests/e2e/add-project-navigation.spec.ts` (an added project's address names it and no
-carried-over screen; a cloning row is the one on screen).
+carried-over screen; a cloning row is the one on screen), e2e
+`frontend/tests/e2e/task-explorer-close.spec.ts` (a task explorer's × lands on that task's detail
+whichever way the explorer arrived, the Review Changes × keeps its explorer, and Back returns to the
+explorer the close left).
 
 ## Markup and stacking contract
 
@@ -169,4 +188,5 @@ Sidebar project rows and task cards are real links, so the browser's own link ac
 - **Never** re-tune these rows with `<button>`/`<div>` + a faked context menu — the link menu is DOM-level and unsynthesizable. Keep selectors tag-agnostic (`.project-item`, not `button.project-item`).
 ## Checking this
 
-`cd frontend && npm test` covers the row and card markup in `link-rows.unit.svelte.ts`.
+`cd frontend && npm test` covers the row and card markup in `link-rows.unit.svelte.ts`, and
+`make test-e2e SPECS=task-explorer-close` the screen each close lands on.
