@@ -1300,6 +1300,8 @@ const catalog = {
     'sandbox.capSuggestionPlaceholder': 'Type capability name, e.g. CAP_NET_RAW',
     'sandbox.capAddMorePlaceholder': 'Add more...',
     'sandbox.removeCapability': 'Remove {cap}',
+    'sandbox.capDefaults': 'Docker defaults',
+    'sandbox.capDefaultsTitle': 'Add the capabilities Docker grants by default',
     'sandbox.imageSource': 'Image Source',
     'sandbox.imageSourceDesc': 'Container image for sandbox',
     'sandbox.imagePrebuilt': 'Pre-built',
