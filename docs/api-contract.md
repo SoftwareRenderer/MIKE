@@ -5,32 +5,31 @@ table's exemptions, and the error vocabulary.
 
 ## Which package owns an endpoint
 
-**A domain package serves its own endpoints.** `backend/api` holds the handlers for domain resources —
+**Each domain package is responsible for serving its own endpoints.** `backend/api` holds the handlers for domain resources —
 `TaskHandler`, `ProjectHandler`, `BoardHandler`, `GitHandler`. A new handler for a task, project, board
 or git route goes there, constructed in `NewServer` and registered on the `*Server`'s mux. `backend/server`
-holds the transport: the listener, TLS, session/CSRF middleware, the shutdown stage table, the detached
+holds the transport: the listener, TLS, session/CSRF middleware, the shutdown stage table, and the detached
 base context. It therefore holds the endpoints that are *about the listener* — the `(*Server)` methods in
-`handler_*.go` (`handleFS…`, `handleThread…`, `handleSessions…`), which are methods on `Server` precisely
-because they call `s.broadcastTaskDiff`, `s.lockWorktree`, `s.fsWriteTarget` and take the `s.gitTask` lock.
+`handler_*.go` (`handleFS…`, `handleThread…`, `handleSessions…`), which are methods on `Server` because they
+access `s.broadcastTaskDiff`, `s.lockWorktree`, `s.fsWriteTarget` and use the `s.gitTask` lock.
 `handleTaskSend` is one of them for the same reason: the truncation it may perform releases the checkpoints
-the discarded turns pinned and the forks keyed on their rows, which is `handler_message.go`'s work.
+the discarded turns pinned and the forks keyed on their rows, which is `handler_message.go`'s responsibility.
 
-The direction is `server → api` and never back; `backend/api` imports no `backend/server`, which is why a
-handler that needs the hub or a lock is *injected* with a function value instead. That one-way edge is what
-makes two plausible refactors unavailable rather than merely deferred. Folding every handler into one
-package means moving `Server` with them or taking a `server ↔ api` import cycle. Splitting
-`backend/api` by domain means inventing a shared-helper package to solve a naming problem, because
+Dependencies flow from `server → api` and never in reverse; `backend/api` imports no `backend/server`, which is why a
+handler that needs the hub or a lock is *injected* with a function value instead. This one-way dependency is what
+prevents certain refactors that would otherwise introduce import cycles. Folding every handler into one
+package would require moving `Server` with them or creating a `server ↔ api` import cycle. Splitting
+`backend/api` by domain would require a shared-helper package to solve a naming problem, because
 `resolveTask`, `requireWorktreeMgr` and `resolveWorktree` (`http.go`) are shared between `task.go` and
-`git.go`. The mixed `Handle*`/`handle*` naming inside `backend/api` is the same boundary showing through,
-not drift: a handler is exported because `backend/server`'s route table names it. It is unexported because only
-the package calls it, so renaming one set into the other changes who may reach it.
+`git.go`. The mixed `Handle*`/`handle*` naming inside `backend/api` is a reflection of this boundary: a handler is exported because `backend/server`'s route table names it; it is unexported because only
+the package calls it.
 
 ## Who may call a route at all
 
-Two credentials reach this server. A login cookie reaches everything the middleware guards. A bearer
-token reaches the patterns in `tokenScope` (`backend/server/token_auth.go`) and nothing else. The grant is
+Two credentials provide access to this server. A session cookie provides access to all endpoints protected by the authentication middleware. A bearer
+token provides access to the patterns in `tokenScope` (`backend/server/token_auth.go`) and nothing else. The grant is
 checked against the pattern the mux reports for the request, so a route renamed without editing that
-map loses its grant rather than keeping one under the old name. `docs/api.md` is the client-facing
+map loses its access rather than keeping one under the old name. `docs/api.md` is the client-facing
 version of that list and of what each route does; `TestTokenScopeIsTheApprovedSet` holds the code and
 that list together. Nothing else in this file changes for a token caller except CSRF, which has no
 cookie to protect.
@@ -45,11 +44,11 @@ fetch can run on a detached context while the swap stays behind a click; the rou
 
 ## Frames
 
-- Inbound frames are `stream.AppStreamMessage` (`Data` is `json.RawMessage`). **Outbound** frames are
-  flat maps built where they're broadcast (no shared envelope struct in Go) — a `task_event` carries
+- Inbound WebSocket frames use the `stream.AppStreamMessage` structure (`Data` is `json.RawMessage`). **Outbound** frames are
+  sent as flat maps built where they're broadcast (no shared envelope struct in Go) — a `task_event` carries
   `task_id`/`event` beside `data`, so the client reads `msg.task_id`, **not** `msg.data.task_id`.
 - `subscribe_task` carries `no_rows`: this connection holds no conversation rows of its own, so the task's
-  replay buffer is kept whole for it. `docs/reconnection.md → The reload meets the replay buffer` owns that
+  replay buffer is kept whole for it. `docs/reconnection.md → The Replay Buffer` owns that
   rule and what clears the claim.
 - A frame that is not a JSON object is dropped and reported once (`parseStreamFrame` in
   `api/helpers.ts`, the one reader of both sockets' `onmessage`). A `JSON.parse` throw inside `onmessage`
@@ -282,8 +281,7 @@ the thread whole.
 Three bodies carry a `client_token` the server acts on — `POST …/tasks/{taskID}/send`,
 `POST /api/projects/{projectID}/tasks` and `POST …/tasks/{taskID}/threads/fork`. The client mints one identity
 per write and sends that same one with every replay of it, so a request whose answer was lost arrives as the
-same write rather than as a second one. `docs/reconnection.md` → *One identity per write, so a replay cannot
-land twice*.
+same write rather than as a second one: `docs/reconnection.md → The Offline Queue`.
 
 A token already answered is answered with what it produced, and nothing runs again. All three answers carry
 201 and the body the first arrival got: the send the message row (`id`, `role`, `content`, plus `thread_id`
@@ -381,10 +379,10 @@ loaded so far.
 The scroll
 position is preserved by re-finding the entry under the top edge of the viewport (`data-entry-id`), never
 by a pixel guess, and re-applied over the frames after the insert. Entries are `content-visibility: auto`,
-so the rows above report placeholder heights when a page lands and grow after it; measured, one landing
-slid the reader 156 px off their row before this settled. **The reader's own scroll ends the settling, and
-it is read off the position, not off a gesture event**: a kinetic scroll fires no `wheel`, `touchstart` or
-`keydown` once the finger leaves the screen, so on touch the listeners cannot see it and the settle writes
+so the rows above report placeholder heights when a page lands and grow after it. Measured, one landing
+slid the reader 156 px off their row before this settled. The reader's own scroll **ends the settling**, and
+it is read off the position, not off a gesture event: a kinetic scroll fires no `wheel`, `touchstart` or
+`keydown` once the finger leaves the screen. On touch the listeners cannot see it, so the settle writes
 against the fling (measured on a phone viewport: 28 writes in 91 frames). `readerScrolledUp` is the rule —
 an upward move the loop did not write is the reader's — and a move downward is not, because scroll
 anchoring writes that direction too.

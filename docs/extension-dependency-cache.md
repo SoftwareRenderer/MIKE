@@ -50,8 +50,8 @@ argument, and a manifest carrying it is **refused**, not stripped.
 
 ## The second two-origins grant: an agent's configuration folder
 
-`PUT /api/extensions/{id}/agent-mount` (`backend/agent-extensions.md → A manifest's sandbox mount is a
-proposal`) is the same shape — the manifest names the container path, a person names the host path — with
+`PUT /api/extensions/{id}/agent-mount` (`docs/agent-extensions.md → Sandbox Mounts: Proposal vs Grant`)
+is the same shape — the manifest names the container path, a person names the host path — with
 three differences worth knowing when reading either one:
 
 - **`rw` is possible**, and the mode is the person's choice; a dependency directory is always bound

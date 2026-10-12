@@ -1,78 +1,47 @@
 # Locking
 
-The rules are in `AGENTS.md → Concurrency`. This is the shape of the tables and the reasons behind the
-timeouts.
+The primary rules are in `AGENTS.md → Concurrency`. This document describes the implementation details, table shapes, and the reasoning behind timeouts.
 
-## Keyed locks come from `pkg/keylock`
+## Keyed Locks (`pkg/keylock`)
 
-- One named domain type per lock domain: `type stashLocks struct{ keylock.Table }` in the package that
-  owns it — `stashLocks`/`mergeLocks`/`worktreeLocks` in `git`, `taskWorktreeLocks` in `exec`,
-  `gitTaskLocks`/`gitProjectLocks` in `server`. The table is embedded **by value**, so a zero-value owner
-  still works and `go vet` copylocks refuses copying an owner struct.
-- Two forms: `Lock(key)` waits indefinitely, `TryLock(key, timeout)` gives up.
-- **Distinct types and distinct tables are both required**: a task ID and a project ID are drawn from the
-  same alphabet, so a shared table would fuse two domains in silence.
-  `TestLockProjectStashAndMergeAreDistinctTables` holds behaviour, table identity and type identity.
-- No hand-rolled key→mutex tables in `backend/`: archgate's `locks` rule keeps it that way. Its baseline
-  is the bridge's `fileLocks`, the one deliberate exception: a different process, and migrating it
-  re-signs a committed binary for nothing.
-- A timed-out `TryLock` acquires nothing later: a goroutine that wins the lock after its caller gave up
-  has to release it, or the lock is stolen for an instant. (`CreateWorktree`'s `tryLockProjectWorktree`
-  does exactly this; a goroutine that acquires after its caller gave up must release, or the project
-  stays uncreatable until restart.)
-- Tests: `pkg/keylock/keylock_test.go`, `backend/git/locks_test.go`.
+The system uses keyed locks to manage concurrency across shared resources.
 
-## Accessors return a release function, never a mutex
+- **Domain Isolation**: Each lock domain must have its own named type (e.g., `type stashLocks struct{ keylock.Table }`). This prevents accidental "fusion" of domains that share the same ID alphabet (e.g., task IDs and project IDs).
+- **Implementation**: Tables are embedded by value.
+- **Wait Strategies**: 
+  - `Lock(key)`: Waits indefinitely.
+  - `TryLock(key, timeout)`: Gives up after the timeout.
+- **Cleanup**: If a `TryLock` times out but the goroutine eventually acquires the lock, that goroutine **must** release it immediately. Failure to do so "steals" the lock and may block other operations until restart.
 
-`WorktreeManager` exposes `LockProjectStash(id) func()` / `LockProjectMerge(id) func()`, `TaskExecutor`
-exposes `LockWorktree(id) func()`, and `api.GitHandler` is injected with `func(string) func()`. A
-returned `*sync.Mutex` can be stored, copied and passed on, and a caller holding a copy serializes on a
-*different* lock while believing it holds the one that protects the repository.
-`TestNoExportedMutexAccessor` fails on any exported method returning `*sync.Mutex`.
+## Accessor Pattern
 
-## Lock order and waits
+To prevent the misuse of mutexes, accessors must return a release function (`func()`) rather than the mutex itself (`*sync.Mutex`).
 
-- **Merge before stash, never after** — which is why a release is written out explicitly (not deferred)
-  wherever the enclosing function later calls `MergeBranch`.
-- **No mutex is ever held across a `WaitGroup.Wait` for a goroutine that takes it.**
-  `WorktreeWatcher.Close` stops the timers and closes `doneCh` under `ww.mu`, releases it, and only then
-  waits for the pool, because `computeAndBroadcast` locks the same mutex in its deferred in-flight
-  cleanup; a compute in flight a second after a file write is the ordinary case, so holding the mutex
-  across the wait deadlocks `Close` — and with it the shutdown step that closes the watchers. Pinned by
-  `TestCloseDoesNotWaitHoldingTheLock`.
-- **Do not add a seconds-scale bound to a git-family lock.** `mergeMu` and `stashMu` are both reachable
-  while a goroutine waits on the task's tool lock (`mergeOrchestrator`'s restore path and
-  `exec/context.go`'s request lock each take it), which is held across an entire tool call (`bash` ≤ 300 s), so the wait is
-  usually legitimate. Wedged sections are surfaced by the per-domain slow-wait report instead:
-  `gitSlowWait` 2 s, `requestLockSlowWait` 5 s, `taskLockSlowWait` 60 s. The one bounded git wait is
-  `worktreeLockTimeout` (30 s) on worktree creation, which waits on nothing else.
-- **A prepared execution is owned until its loop is launched or it is given back.**
-  `prepareTaskExecution` registers the executor entry and the `finished` channel that `StopTask` waits on
-  before it transitions the row. A caller that returns without launching the loop owes `releasePrepared`,
-  which cancels, unregisters and closes that channel. Cancelling alone leaves the task reading as running.
-  It also makes the next stop wait out `executorExitGrace` for a write that can never arrive.
+Returning a mutex would allow callers to store or copy it, potentially leading to situations where a caller serializes on the wrong lock while believing it holds the correct one. `TestNoExportedMutexAccessor` ensures no exported methods return a mutex.
 
-## A wait a person is watching announces itself
+## Lock Order and Wait Rules
 
-`keylock.Table.LockWatched` repeats a notice every `every` while the caller waits and once more when the
-lock is taken, and says nothing at all when the lock was free — a line that flashes for a 2 ms
-acquisition is a line that gets ignored. The owning packages expose watched twins
-(`LockProjectStashWatched`, `LockWorktreeWatched`) that take the notice as a parameter, because the table
-must still not leave the package. The caller supplies `stream.LockWaitNotifier(projectID, taskID,
-domain)`, which is where a lock's frame is shaped — the one other producer of that frame is a wait that is
-not a lock and carries one extra field, so it shapes its own (`docs/reconnection.md`) — and
-`QueueIndicator` renders it as the top rung of
-the line that already says "Awaiting LLM provider…". It is wired where a click is the waiter (Commit &
-Done behind a tool call, a thread switch behind a stash) and deliberately not where it is not (merges from
-turns, GC) — the split is `Lock` versus `TryLock` in the same package, expressed in UI terms.
+- **Merge vs. Stash**: Always acquire merge locks before stash locks.
+- **Deadlock Prevention**: Never hold a mutex across a `WaitGroup.Wait` for a goroutine that also requires that mutex. (e.g., `WorktreeWatcher.Close` must release its mutex before waiting for the pool).
+- **Git-Family Timeouts**: Avoid adding seconds-scale bounds to git-family locks (e.g., `mergeMu`, `stashMu`). These are often held across tool calls that can last up to 300s. Instead, use slow-wait reports (e.g., `gitSlowWait` at 2s) to identify wedged sections.
+- **Execution Ownership**: A prepared execution (`prepareTaskExecution`) is owned by the caller until its loop is launched or it is released via `releasePrepared`. Failing to release a prepared execution leaves the task in a "running" state and delays subsequent stop operations.
 
-Tests: `pkg/keylock/lockwatch_test.go`, `backend/exec/lock_watch_test.go`, `backend/git/lock_watch_test.go`,
-`backend/stream/lock_wait_test.go`, `frontend/src/lib/components/__tests__/queue-indicator.unit.svelte.ts`.
+## Watched Waits (User Notifications)
 
-## `executionState.sandboxMu` is a leaf lock
+`keylock.Table.LockWatched` provides a way to notify the user when they are waiting for a lock.
 
-It may be taken under `taskMu`; `taskMu` must never be taken under it. Fields guarded by it are read as a
-**snapshot** (`sandbox()`) and written through `setSandbox`, never captured piecemeal: `executeTask`'s
-wait reads some of them after a `StopTask` can have run and would assemble a mix of old and new.
-`sandboxRecreate.underLock` takes `*sandboxState` for the same reason — it runs while `sandboxMu` is held.
-Test: `backend/exec/tools_test.go`.
+- **Behavior**: It sends a notice periodically while waiting and one final notice when the lock is acquired. It remains silent if the lock is acquired immediately.
+- **UI Integration**: Notifications are shaped via `stream.LockWaitNotifier` and rendered in the `QueueIndicator` (e.g., "Awaiting LLM provider...").
+- **Usage**: Watched locks are used for user-facing actions (e.g., Commit & Done, thread switches) but not for background processes (e.g., GC or turn-based merges).
+
+## Sandbox Lock (`sandboxMu`)
+
+`executionState.sandboxMu` is a leaf lock.
+
+- **Hierarchy**: It can be taken while holding `taskMu`, but `taskMu` must **never** be taken while holding `sandboxMu`.
+- **Consistency**: To avoid inconsistent states, always read sandbox state as a snapshot via `sandbox()` or update it via `setSandbox`. Never read fields piecemeal.
+
+## Checking this
+
+`make check-race` runs `-race` over the packages that take these locks; `go test ./pkg/keylock/` covers the keyed table itself.
+

@@ -1,73 +1,53 @@
 # Keyboard Navigation — Board and Task View
 
-Read this before touching arrow-key handling in `App.svelte`, `App/Sidebar.svelte`,
-`CardDetail.svelte`, or the two resolver modules. The hard rules live in
-`AGENTS.md → Frontend`.
+Read this before touching arrow-key handling in `App.svelte`, `App/Sidebar.svelte`, `CardDetail.svelte`, or the resolver modules. Rules live in `AGENTS.md → Frontend`.
 
-## Board overview
+## Board Overview
 
-Arrow keys move **real DOM focus** (the global `:focus-visible` ring) — no separate "highlighted"
-store. A 5-column ring `[Projects][Backlog][In Progress][Review][Done]`: the project list is the
-leftmost column (always lands on the active project), board Left/Right skip empty columns and never
-wrap, Down/Up wrap within a column.
+Arrow keys move **real DOM focus** (the `:focus-visible` ring), not a separate "highlighted" store.
 
-Resolvers: `resolveArrowTarget` / `resolveOverviewArrowTarget` in
-`composables/use-board-arrow-nav.ts`, wired in `App.svelte`; project-list keydown in
-`App/Sidebar.svelte`. The project focus ring is an **inset box-shadow** on `.project-item:focus` —
-ancestors clip outlines, and `click()+focus()` defeats `:focus-visible`.
+- **Columns**: `[Projects][Backlog][In Progress][Review][Done]`.
+- **Left/Right**: Skip empty columns; do not wrap.
+- **Up/Down**: Wrap within the current column.
+- **Project List**: The leftmost column. Focus lands on the active project. Focus is shown as an **inset box-shadow** on `.project-item:focus` because ancestors clip outlines.
 
-`Card.svelte`'s `handleCardKeydown` takes Enter/Space **only when the event target is the card
-root**: a keydown aimed at a nested control (action icon, expand bar, subtask card) is that
-control's own activation, and `preventDefault()` on it cancels the button. Only a browser turns a
-keypress into a button click, so the activation itself is covered by e2e, its non-prevention by
-vitest.
+**Card activation**: `Card.svelte` handles Enter/Space only if the event target is the card root. Keydowns on nested controls (icons, subtask cards) are handled by those controls; `preventDefault()` there cancels the card's activation.
 
-Tests: `composables/__tests__/board-arrow-nav.unit.ts`, `components/__tests__/card-actions-keyboard.unit.svelte.ts`,
-e2e `board-arrow-nav.spec.ts`.
+Resolvers: `resolveArrowTarget` / `resolveOverviewArrowTarget` in `composables/use-board-arrow-nav.ts`.
+
+Tests: `composables/__tests__/board-arrow-nav.unit.ts`, `components/__tests__/card-actions-keyboard.unit.svelte.ts`, e2e `board-arrow-nav.spec.ts`.
 
 ## Task View (`CardDetail.svelte`)
 
-The three columns `[Board][Chat][Diff]` are focusable; arrow keys move real DOM focus. All handlers
-live in `CardDetail.svelte`'s window keydown listener, using pure resolvers from
-`composables/use-task-detail-column-nav.ts` (`resolveDetailColumn`, `resolveDiffFileTarget`,
-`canSwitchDetailColumn`).
+The `[Board][Chat][Diff]` columns are focusable. Handlers live in `CardDetail.svelte`'s window keydown listener, using resolvers from `composables/use-task-detail-column-nav.ts`.
 
-- Left/Right cycle Board→Chat→Diff→Board.
-- Plain arrows in any editable focus (incl. the chat input) keep native text behavior;
-  **Ctrl+Alt+Left/Right** switches columns from any focus (except while editing a file).
-- Up/Down and PageUp/PageDown dispatch on the focused column (overview cards / page-scroll chat /
-  diff file headers). The chat column answers all four from any focus inside it — its transcript is not a
-  tab stop, so the browser's own scroll keys would move some other scroll chain — with the distance from
-  `chatScrollDelta`. The other two columns are rings of focusable rows, so a page is not a step on them and
-  they answer arrows only.
+- **Left/Right**: Cycle Board $\to$ Chat $\to$ Diff $\to$ Board.
+- **Ctrl+Alt+Left/Right**: Switch columns from any focus (except when editing a file).
+- **Up/Down & PageUp/PageDown**:
+    - **Board/Diff**: Focusable rows; PageUp/Down is not supported.
+    - **Chat**: Answers all four from any focus inside the column; uses `chatScrollDelta` to scroll the transcript (which is not a tab stop).
+- **Editable fields**: Plain arrows in inputs keep native text behavior.
 
-Tests: `composables/__tests__/task-detail-column-nav.unit.ts`, e2e `task-view-column-nav.spec.ts`, and the
-chat half of both by `chat-scroll-takeover.spec.ts` (which also needs the follow tracker to leave the
-reader where a key landed them — `AGENTS.md → Frontend`).
-## File list (`FileBrowserView.svelte`)
+Tests: `composables/__tests__/task-detail-column-nav.unit.ts`, e2e `task-view-column-nav.spec.ts`, and `chat-scroll-takeover.spec.ts`.
 
-The listing owns its clipboard keys and the panel that wraps it carries them. Ctrl+X, Ctrl+C, Ctrl+V, F2
-and Delete reach the file selection wherever focus sits inside that panel, and nowhere outside it — the
-editor's Ctrl+C stays the editor's. `keyIsOurs` hands the keys back to the browser while focus sits in a
-field being typed (the path field, a name being retyped, the new-file row) and while the context menu is
-open.
+## File List (`FileBrowserView.svelte`)
 
-**A folder change must not strand the keyboard.** A new listing can remove the row that holds focus, and a
-keystroke arriving on `<body>` afterwards reaches no handler at all. `loadDir` records whether this panel
-holds focus, and when the panel ends up holding none once the new rows are rendered it focuses the listing,
-which is a focus target through `tabindex="-1"`. A panel that holds no focus keeps it that way, so a
-listing refreshed by the watcher never pulls the keyboard out of the editor.
+The file list panel handles clipboard and rename keys (Ctrl+X, Ctrl+C, Ctrl+V, F2, Delete). These only work when focus is inside the panel; the editor's own Ctrl+C remains separate.
 
-A key aimed at one row with an empty selection is about that row: `focusedRowPath` reads the
-`[data-index]` of the event target, the same read the menu key makes. Ctrl+V pastes into the folder being
-listed, while the menu's Paste takes the folder the menu names (`pasteTarget`). No selection and no row
-under focus is a silent no-op.
+`keyIsOurs` returns keys to the browser when:
+- Focus is in an input field (path field, renaming a file, new-file row).
+- The context menu is open.
 
-Tests: `components/__tests__/file-browser-clipboard.unit.svelte.ts` delivers every key to the focused
-element as a browser does, including a cut in one folder and a paste in another.
+**Focus persistence**: When a folder changes, the row holding focus may vanish. If the panel held focus before the change, `loadDir` ensures the listing itself (`tabindex="-1"`) is focused after rendering new rows. If the panel did not hold focus, it stays unfocused to avoid stealing focus from the editor.
 
-## Checking this
+**Selection**:
+- **No selection**: A key aimed at a row targets that row (`focusedRowPath` reads `[data-index]`). Ctrl+V pastes into the current folder.
+- **With selection**: Actions apply to the selection.
+- **No focus/selection**: Silent no-op.
 
-`cd frontend && npm test` covers the resolvers (`board-arrow-nav.unit.ts` is one of them).
-`cd frontend && npx playwright test ui-navigation focus-management` proves real focus moves, which a unit
-test cannot.
+Tests: `components/__tests__/file-browser-clipboard.unit.svelte.ts`.
+
+## Verification
+
+- `cd frontend && npm test`: Covers resolvers.
+- `cd frontend && npx playwright test ui-navigation focus-management`: Verifies real DOM focus moves.

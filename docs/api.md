@@ -1,10 +1,9 @@
 # The HTTP API for a bearer token
 
-Read this when you are writing something that drives MIKE from outside the browser — a script, a
-CI job, another agent. It is the client-facing half: how a token is provisioned, which routes it
-opens, and what those routes do. `docs/api-contract.md` is the internal contract (frame shapes,
-route-table exemptions, error vocabulary) and `AGENTS.md → API` the rules; a route change edits
-that file and re-checks the scope table here.
+Use this guide when controlling MIKE from outside the browser, such as with a script, CI job, or another agent.
+It covers token provisioning, available routes, and their functions. `docs/api-contract.md` is the internal
+contract (frame shapes, route-table exemptions, error vocabulary) and `AGENTS.md → API` the rules; a route
+change edits that file and re-checks the scope table here.
 
 ## Provisioning a token
 
@@ -12,25 +11,23 @@ that file and re-checks the scope table here.
 thing the screen shows afterwards), press **Create token**, and copy the value from the panel that
 appears.
 
-- **The value is shown once.** Only `hex(sha256(token))` is stored, so the row cannot be replayed as
-  a credential if the database is copied, and this server cannot tell you the value again. Lost it,
+- **The token value is shown only once.** We store only the hash (`hex(sha256(token))`), so the server
+  cannot retrieve the original value and a copied database replays no credential. Lost it,
   revoke the row and issue another.
-- The token looks like `mike_` followed by 64 hex characters. The prefix is stable: use it to teach
-  a secret scanner what yours are.
-- **It does not expire.** Revoking the row is the control, and it takes effect on the token's very
+- Tokens start with `mike_` followed by 64 hex characters. This stable prefix helps secret scanners
+  identify them.
+- **Tokens do not expire.** Revoke the token to disable it; the change takes effect on the token's very
   next request — there is no cache to wait out.
-- A row shows **Last used**, stamped at most once a minute (the same throttle a login session's
-  `last_seen` uses, because the store serialises on one connection). Revoked rows are gone; the
-  listing holds labels and timestamps only, never a credential.
-- Everything on this screen is session-cookie work. **A token cannot list, create or revoke
-  tokens** — that is deliberate, so a leaked token cannot promote itself.
-- Neither can it pair a device: the routes that mint a pairing code and manage the registered passkeys
-  (`POST`/`DELETE /api/auth/pairing`, `GET`/`PATCH`/`DELETE /api/auth/passkeys`) are cookie-and-CSRF work,
-  out of the route allowlist below. A token that could register a passkey could sign in as the whole
-  application.
+- The **Last used** timestamp is updated at most once per minute to reduce database load. Revoked rows
+  are gone; the listing holds labels and timestamps only, never a credential.
+- Management of tokens requires a session cookie. **A token cannot list, create or revoke tokens** —
+  that is deliberate, so a leaked token cannot promote itself.
+- Bearer tokens cannot pair devices or manage passkeys, as these routes require session cookies and
+  CSRF protection (`POST`/`DELETE /api/auth/pairing`, `GET`/`PATCH`/`DELETE /api/auth/passkeys`), so a
+  stolen token cannot take the whole account.
 
-The mechanism is `backend/auth/api_tokens.go` (issue and validate), `backend/server/token_auth.go`
-(the route allowlist), `backend/server/handler_tokens.go` (the three management routes).
+Implementation: `backend/auth/api_tokens.go` (issuance and validation), `backend/server/token_auth.go`
+(the route allowlist), and `backend/server/handler_tokens.go` (the three management routes).
 
 ## Presenting it
 
@@ -38,25 +35,25 @@ The mechanism is `backend/auth/api_tokens.go` (issue and validate), `backend/ser
 Authorization: Bearer mike_1f4c…
 ```
 
-- Only the `Authorization` header. A token in a query string would land in every proxy log and
-  browser history between you and the server, so no route reads one.
+- Use only the `Authorization` header. Tokens are not accepted in query strings to avoid leaking them
+  in proxy logs or browser history.
 - The scheme is case-insensitive (RFC 7235); the secret is not.
-- The header is authoritative. A request that presents a token is never served by a session cookie
-  it happens to travel with: an unknown or revoked token answers **401** (`WWW-Authenticate: Bearer`)
-  rather than quietly acting as whoever's cookie arrived.
-- TLS is on by default and the server signs its own certificate; a client that is not on the
-  machine needs the local CA from Settings → About (**Download CA Certificate**).
-- Two guards still apply to every call, cookie or not. The **Host** must name the server (loopback,
-  the address it listens on, or an entry of `MIKE_ALLOWED_HOSTS`) or the request is refused **421**.
-  And a request body over 32 MB is refused **413** before it is read.
-- No CSRF header is needed or consulted with a token. CSRF exists because a browser attaches a
-  session cookie by itself; a token reaches the server only because your code put it in the header.
+- The `Authorization` header takes precedence. If a token is provided, the server ignores any session
+  cookies. An invalid or revoked token returns **401** (`WWW-Authenticate: Bearer`), even if a valid
+  session cookie is present.
+- TLS is enabled by default. Clients outside the host machine must install the local CA certificate
+  available in Settings → About (**Download CA Certificate**).
+- Every request must pass two checks: the **Host** header must match the server (loopback, the address
+  it listens on, or an entry of `MIKE_ALLOWED_HOSTS`) or the request is refused **421**. And a request
+  body over 32 MB is refused **413** before it is read.
+- Bearer tokens do not require CSRF headers because they are explicitly added by the client, unlike
+  session cookies which are automatically attached by browsers.
 
 ## What a token reaches
 
-The whole list. Anything not here answers **403** — the credential is live, the route is not
-grantable to it. `tokenScope` in `backend/server/token_auth.go` is the same table, and
-`TestTokenScopeIsTheApprovedSet` fails when the two drift.
+Tokens have access to all routes listed below. Any other route returns **403** — the credential is
+live, but the route is not grantable to it. `tokenScope` in `backend/server/token_auth.go` is the same
+table, and `TestTokenScopeIsTheApprovedSet` fails when the two drift.
 
 | Method | Path | |
 |---|---|---|
@@ -76,9 +73,9 @@ Not on it, among others: `/api/config`, `/api/sessions`, `/api/tokens`, the file
 `/resume`, `/summarize`, `/compact`, `…/move`, `DELETE …/tasks/done`, and creating or deleting a project.
 Extensions, previews, terminals and both WebSocket upgrades (`/api/stream`, `/api/lsp`) are outside it too.
 
-`…/move` is absent because it is not needed: `PUT …/tasks/{id}` writes `status`, which is what
-moving a card between columns is. The WebSockets are absent because a browser is the only thing that
-cannot put a header on a WebSocket, and a script is not a browser.
+`…/move` is unnecessary because `PUT …/tasks/{id}` can update the `status` to move a card between
+columns. WebSockets are not supported for bearer tokens because standard WebSocket clients cannot
+easily set custom headers.
 
 ## Reading a task
 
@@ -100,8 +97,8 @@ Every task route answers a `task` object. The fields worth branching on:
 | `session_cost` | USD spent by the last run |
 | `created_at`, `updated_at`, `moved_at` | RFC3339 UTC; `moved_at` is the last column change |
 
-**`status` is not the answer to "is it still running".** A stopped task keeps `status = in_progress`
-and moves `execution_state` to `paused`. Poll those two together:
+**`status` does not indicate if a task is running.** A paused task remains `status = in_progress`
+and moves `execution_state` to `paused`. Poll both fields together:
 
 ```bash
 jq -r '"\(.status) \(.execution_state)"' <<<"$task"
@@ -185,11 +182,10 @@ completes whatever the client does afterwards.
 
 ## Watching a run
 
-There is no streaming endpoint for a token: `/api/stream` is a WebSocket and stays session-only.
-Poll `GET …/tasks/{taskID}` — `execution_state` is what moves while a run goes (`running`, then
-`completed`, `failed` or `paused`), and `output` carries what the agent reported. There is
-deliberately no timeout on this server: a long wait is a long wait, so give your client no deadline
-for it, and treat a lost connection as "keep asking" rather than "it failed".
+Bearer tokens cannot use the streaming endpoint (`/api/stream`), which is session-only. Instead, poll
+`GET …/tasks/{taskID}` — `execution_state` is what moves while a run goes (`running`, then
+`completed`, `failed` or `paused`), and `output` carries what the agent reported. The server has no
+timeout; clients should handle long waits and connection losses by retrying.
 
 ## Errors
 
@@ -206,8 +202,7 @@ for it, and treat a lost connection as "keep asking" rather than "it failed".
 | `429` | too many login attempts — the passkey ceremony and pairing-code routes only; token calls are not rate-limited, because a 256-bit secret is not guessable |
 | `500` | this server's fault. The body is MIKE's own sentence and the cause is in its log, not in your response |
 
-A server fault is reported as MIKE's sentence on purpose: the cause would be git's stderr, a driver
-message or an absolute path into someone's working directory.
+Server faults return a generic error message to avoid leaking sensitive information like system paths or driver errors.
 
 ## Tests that hold this surface
 

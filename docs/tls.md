@@ -6,66 +6,58 @@ lives in `AGENTS.md → Server Management`.
 
 ## Certificates on disk
 
-TLS is **not optional**: the server always serves it, signed by a local CA created on first start in
-`data/tls/`: `mike-ca.crt`/`mike-ca.key` (self-signed root, `O=MIKE, CN=MIKE Local CA`, 10 years) signs the
-server certificate `mike.crt`/`mike.key` (`O=MIKE, CN=localhost`, 1 year). `--tls-cert`/`--tls-key` point
-the server at a certificate of the operator's instead — a way to change which certificate is served, never
-a way out of TLS — and they have no environment spelling.
+TLS is **not optional**. The server always serves it, signed by a local CA created at first start in
+`data/tls/`: the root (`mike-ca.crt`/`mike-ca.key`, 10 years) signs the server certificate
+(`mike.crt`/`mike.key`, 1 year). `--tls-cert`/`--tls-key` point the server at an operator's
+certificate instead — a way to change which certificate is served, but never a way out of TLS.
 
 The leaf's SANs cover `localhost`/127.0.0.1/::1 **plus the machine hostname, `<hostname>.local`
 and every non-loopback address of the host**, so other devices can reach it by name or LAN IP.
 Import `data/tls/mike-ca.crt` into a device's trust store to make the certificate valid there.
-While that default certificate is in use the CA is also downloadable: `GET /api/tls/ca` serves it,
+While that default certificate is in use, the CA is downloadable: `GET /api/tls/ca` serves it,
 Settings → About → System Info links to it, and so does the login gate when the browser reports an
-insecure connection (`docs/passkeys.md → How it is held`). `tls_ca_available` is what makes either link appear,
-in `GET /api/config` and in the public `GET /api/auth/session`. Both links and the download itself come from
-the one `localCAvailable()` decision made when the server is built, so a link can never point at a 404.
+insecure connection (`docs/passkeys.md → Presentation & UI`). `tls_ca_available` controls these links
+in `GET /api/config` and `GET /api/auth/session`. Both links and the download depend on a single
+`localCAvailable()` decision made at boot.
 
-The route is **public for GET**, listed in `publicPaths` beside the ceremony routes and the session check. The
-device that needs the certificate is the one with no session yet: a browser that will not run a passkey prompt
-is being told to trust this address before it can sign in. That costs nothing secret. A root certificate is
-public data by design; the CA *key* is never served and never leaves the data dir. A key is written
-owner-only whether it is new or replacing a file that was not, and a target that is not a regular file is
-refused rather than written through. The only
-file the route can name is `Config.CAFile` — no request field is ever a path — and Host pinning still applies.
-`tls.CertPEM` answers with a certificate block or an error, so the download cannot be turned into a key dump
-even if that path were swapped for a key file. A `--tls-cert`/`--tls-key` install has no CA of
-ours, so the route answers 404 and both links are absent rather than explained.
+The route is **public for GET**, listed in `publicPaths` beside the ceremony routes and the session check.
+The device that needs the certificate is the one with no session yet: a browser that cannot run a
+passkey prompt is told to trust this address before it can sign in. A root certificate is public data;
+the CA *key* never leaves the data dir. Keys are written with owner-only permissions. If the target
+is not a regular file, the write is refused. The only file the route can name is `Config.CAFile` — no
+request field is ever a path — and Host pinning still applies. `tls.CertPEM` answers with a certificate
+block or an error, so the download cannot be turned into a key dump. An operator's `--tls-cert`/`--tls-key`
+install has no CA of ours, so the route answers 404 and links are absent.
 
-The leaf is re-issued when the host's names change (network or hostname change), and whenever it expires
+The leaf is re-issued when the host's names change (network or hostname change), or whenever it expires
 inside `leafRenewalWindow` (30 days). A server restarted at least that often never serves an expired
-certificate. Replacing a leaf costs nothing: no device remembers it, and the CA behind it is untouched.
+certificate. Replacing a leaf costs nothing: no device remembers it, and the CA is untouched.
 
-The CA is reused while it is usable, and usable is a check on load — it parses, the key matches the
-certificate, it is a CA with `KeyUsageCertSign`, and it sits inside its own validity. Anything else is
-replaced. That replacement is an `Error` naming both files and the reason. Every device that imported the
-old root stops trusting this server at that moment, and the log line is the only place that says so. A
-first install has no root behind it and says nothing about one.
+The CA is reused if it is valid on load: it must parse, the key must match the certificate, it must have
+`KeyUsageCertSign`, and it must not be expired. If any check fails, the CA is replaced. Replacement is an
+`Error` naming both files and the reason. Every device that imported the old root stops trusting the
+server at that moment; the log line is the only record. A first install has no root and says nothing.
 
-The root signs leaves and nothing else: `pathlen:0` with `KeyUsageCertSign|CRLSign`. A key that walks out
-of the data directory therefore cannot mint a CA that chains (`TestLocalCARejectsAChain`). A healthy root
-is never rotated, so a CA created before this pin keeps the shape it was issued with.
+The root signs leaves only: `pathlen:0` with `KeyUsageCertSign|CRLSign`. A key leaked from the data
+directory cannot mint a CA that chains (`TestLocalCARejectsAChain`). A healthy root is never rotated.
 
 The pair to be served is loaded before anything is announced: `LoadWithCert` loads an operator's
-`--tls-cert`/`--tls-key` and names the flags when they do not form a pair, and `Serve` loads the leaf
-this package wrote. A pair that cannot be served stops the boot. Otherwise the listener holds a nil
+`--tls-cert`/`--tls-key` (naming the flags if they do not form a pair), and `Serve` loads the leaf
+this package wrote. A pair that cannot be served stops the boot. Otherwise, the listener holds a nil
 config: every ClientHello panics inside `crypto/tls`, net/http recovers it per connection, and the port
 answers while serving nothing.
 
 The server sends the leaf alone: the CA is a root, so an importing client needs no intermediate.
 
 A plain-HTTP connection reaching the TLS port is redirected, not served: the listener's first-byte sniff
-hands it to the plain half, which answers 301 → https (`docs/lifecycle.md → The TLS/plain listener`).
+hands it to the plain half, which answers 301 → https (`docs/lifecycle.md → TLS and Plain Listener`).
 WebSockets upgrade to `wss://`.
 
 The session cookie's `Secure` flag follows the request, not the boot configuration
 (`requestIsHTTPS`): TLS terminated here, or a TLS-terminating proxy whose `X-Forwarded-Proto: https`
-is honoured because `MIKE_TRUST_PROXY=1` is set. One reading, two users — the redirect above and
-the cookie — because a deployment where they disagree is the failure the flag exists to prevent.
-A proxy must therefore set `proxy_set_header X-Forwarded-Proto $scheme;` *and* have
-`MIKE_TRUST_PROXY=1`; with either missing, MIKE can only see cleartext on that hop and marks the cookie
-honestly, which is also the reading that tells the browser the connection is not a secure one. There is
-deliberately **no variable** for the flag.
+is honoured because `MIKE_TRUST_PROXY=1` is set. Proxies must set `proxy_set_header X-Forwarded-Proto $scheme;`
+and `MIKE_TRUST_PROXY=1`. If either is missing, MIKE sees cleartext and marks the cookie as insecure,
+which also tells the browser the connection is not secure. There is deliberately **no variable** for the flag.
 
 ## A certificate is not the gate
 
@@ -84,24 +76,21 @@ stripped on both sides, so an `example.com` entry answers `example.com:443`; a m
 rejected too.
 
 Which bytes reach this decision is the listener's own rule — the TLS/plain first-byte sniff, the queue it
-feeds, and what may end `Serve`: `docs/lifecycle.md → The TLS/plain listener`.
+feeds, and what may end `Serve`: `docs/lifecycle.md → TLS and Plain Listener`.
 
 ## Login needs a secure context, and a hostname
 
 A passkey is minted for a hostname and only ever released over a connection the browser calls secure:
-`https://…` or `http://localhost`. Plain HTTP on a LAN address therefore has **no login at all**. The gate
-says the connection cannot carry a passkey, hands out the local CA where there is one to hand out, and
-explains how to install it — instead of offering a button that can only fail. The pairing body offers the CA
-whatever this connection looks like: the secure-context rule that matters belongs to the browser being
-paired, and the other way to satisfy it is to put MIKE behind a certificate that browser already trusts.
-Serve TLS (here or
-at the proxy, with `MIKE_TRUST_PROXY=1` so `X-Forwarded-Proto` decides the cookie's `Secure` flag
-and the origin a signature is checked against) or reach the install at `localhost`.
+`https://…` or `http://localhost`. Plain HTTP on a LAN address has **no login at all**. The gate
+explains that the connection cannot carry a passkey, hands out the local CA if available, and
+explains how to install it. The pairing body offers the CA regardless of the connection: the secure-context
+rule belongs to the browser being paired. To satisfy it, use TLS (here or at a proxy with
+`MIKE_TRUST_PROXY=1`) or reach the install at `localhost`.
 
 The name is the credential's audience, not a cosmetic detail: an address is not a relying-party id, so
 `https://192.168.1.20:3000` has no passkey to offer even over TLS. Pin the hostname in
-`MIKE_ALLOWED_HOSTS` and pair through that name. A fresh install prints its pairing code and says so when
-the address it printed cannot hold the credential it is inviting — `docs/passkeys.md → How it is held`.
+`MIKE_ALLOWED_HOSTS` and pair through that name. A fresh install prints its pairing code and warns if
+the address it printed cannot hold the credential it is inviting — `docs/passkeys.md → Presentation & UI`.
 
 ## Tests
 

@@ -1,17 +1,12 @@
 # Auto-Answer
 
-Read this before touching `automatedAnswers` (`backend/exec/executor.go`), the `ask_question` handling or
-the text-only stop in `finalizeTurn` (`backend/exec/loop.go`), or `autoAnswerTextStop`
-(`backend/exec/loop_helpers.go`).
+Use this guide before modifying `automatedAnswers` (`backend/exec/executor.go`), `ask_question` handling, the text-only stop in `finalizeTurn` (`backend/exec/loop.go`), or `autoAnswerTextStop` (`backend/exec/loop_helpers.go`).
 
-A subtask runs on its parent's behalf, so `ask_question` has nobody to answer it. Auto-answer asks the
-parent's context instead and lets the run continue. Two stop shapes are answered, and nothing else is.
+Subtasks run on behalf of their parent. When a subtask calls `ask_question`, the system uses the parent's context to generate an answer and continue the run. Only two specific stop conditions are auto-answered.
 
-## Eligibility: what `Autostarted` means
+## Eligibility: The `Autostarted` Flag
 
-`Autostarted` (`types.Task`, column `tasks.autostarted`, `json:"-"` so the browser never sees it) is
-**per-run provenance**, rewritten by `StartTask` on every start. It answers "did a click name this
-task?", not "did a human want this":
+`Autostarted` (column `tasks.autostarted`) tracks a task's origin for the current run. It is reset by `StartTask` on every start. It distinguishes whether a task was started by a direct user action or automatically by the system:
 
 | The run began when… | `Autostarted` |
 |---|---|
@@ -23,71 +18,37 @@ task?", not "did a human want this":
 `subtasksToStart` is that pick: every startable descendant under the **Run subtasks in parallel** setting, and
 the single deepest one without it.
 
-The supervisor row is deliberate: it picks its victim by memory cost, which says nothing about who is
-waiting on the task, so `resumeProvenance` hands the resume the answer the paused run already gave.
-Without that, a subtask its user started by name would come back from a pause answering for them.
+The memory supervisor picks tasks to resume based on memory cost, not origin. Therefore, `resumeProvenance` preserves the `Autostarted` status from the paused run. This prevents a task started by a user from being auto-answered after a memory pause.
 
-So starting a parent opts its whole subtree into answering itself, and a task the user starts by name
-never gets answered. One gap in that last clause: a message arriving mid-run does not clear the flag,
-and neither does the lazy start a message triggers re-declare it, so a chain-started subtask a person
-has since been typing into keeps answering itself.
+Starting a parent automatically enables auto-answering for its entire subtree. Tasks started directly by a user are never auto-answered. Note: if a user sends a message to a subtask that was already started automatically, the `Autostarted` flag is not cleared. The task continues to be auto-answered.
 
-Both paths additionally require a parent to answer from (no parent ⇒ decline) and are off in plan and
-explore mode, where a text answer is the deliverable.
+Auto-answering requires a parent task and is disabled in `plan` and `explore` modes, where the output is the final deliverable.
 
-## The answering call
+## The Answering Process
 
-One non-streaming completion, no tools: `prompts/answer_question.tmpl` carries the parent's title and
-prompt, `answer_question_user.tmpl` the questions, in order. The endpoint is the **parent's** provider
-and model, falling back to the subtask's and then to the Utility pair (`utilityTarget`).
+The system makes a non-streaming LLM call without tools. It uses `prompts/answer_question.tmpl` (parent's title and prompt) and `answer_question_user.tmpl` (the questions). The call uses the parent's provider and model, falling back to the subtask's, then to the Utility pair (`utilityTarget`).
 
-The model answers `"1) … 2) …"` on one line and `splitNumberedAnswers` accepts only markers numbered in
-the expected position, skipping decimals (`Go 1.21`). Out-of-order numbering, too few segments, or an
-empty response is an error, not a guess — and an error means the question goes to the user.
+The model must answer with numbered options (e.g., `1) … 2) …`). `splitNumberedAnswers` validates these markers; decimals are ignored. Any numbering error, missing segments, or an empty response is treated as a failure, and the question is forwarded to the user.
 
 ## Shape 1: `ask_question`
 
-The question is already a tool result, so the answer replaces it: the `toolResult` output is
-overwritten, the row is rewritten (`UpdateTaskMessageToolResult`), and a second `tool_result` frame
-re-broadcasts it so the card fills in. `ToolCall.svelte` recognises an answered question as *result ≠
-question* and titles the block "Automated answer (parent context)". A decline leaves the question as
-the result and the task moves to review — which is also what clears a pending commit-and-done click.
+The answer replaces the original `ask_question` tool result: the `toolResult` output is overwritten, the database row is updated via `UpdateTaskMessageToolResult`, and a new `tool_result` frame is broadcast. `ToolCall.svelte` identifies these as automated answers. If auto-answering is declined, the task moves to review.
 
 ## Shape 2: a turn that ends with only a message
 
-`finalizeTurn`'s text-only branch settles the turn first (review, slot released, `complete` frame),
-runs auto-summarization, and takes any queued user message. Only then does `autoAnswerTextStop` run, so
-**a real message always beats an automated answer**, and the board shows review for the length of the
-answering call. On success it:
+`finalizeTurn` first settles the turn (marking it as review, releasing the slot, and sending a `complete` frame), runs auto-summarization, and processes any queued user messages. `autoAnswerTextStop` runs last, ensuring that a real user message always takes precedence over an automated answer. On success, it:
 
-- writes the answer as an **advisory** row (`kind: "auto_answer"`, `flushAdvisories`) — never a user
-  row, which would fake a user bubble and make the summarizer believe the user spoke.
-  `toAPIMessage` maps advisory→user, so the model still reads it as a reply, and the row survives a
-  restart. The card is titled by `advisoryLabel`.
-- reclaims the running-task slot (`syncTaskSlot`), claims the run again (`persistTaskClaiming`),
-  broadcasts `status/running`, and returns `turnNextLLMCall`.
+- writes the answer as an **advisory** row (`kind: "auto_answer"`, `flushAdvisories`). This prevents the summarizer from mistaking the automated answer for a user message. `toAPIMessage` treats advisories as user messages for the model's context, and the row is persisted. The UI uses `advisoryLabel` for the card title.
+- reclaims the running-task slot (`syncTaskSlot`), re-establishes the run claim (`persistTaskClaiming`), broadcasts `status/running`, and triggers the next LLM call (`turnNextLLMCall`).
 
-It returns `turnWaitIdle` (the zero value) to leave the settled turn alone and `turnStop` only when the
-slot wait was cancelled. The call site sits **before** `AutoStartNextSibling`: a run that keeps working
-has not finished its branch.
+It returns `turnWaitIdle` to maintain the settled turn, or `turnStop` if the slot wait was cancelled. This happens before `AutoStartNextSibling`, as a continuing run has not yet finished its branch.
 
-## What it does not do
+## Limitations
 
-The answering model sees the parent's title and prompt and nothing else — not the subtask's history,
-not its flags — and has no tool. Every merge decision stays where it is read: `auto_commit` and
-`auto_merge` are consulted only inside the `request_review` handling, which auto-answer never reaches,
-and `ArmCommitAndDone` is still the only thing that authorizes a merge. A subtask with `auto_merge=false`
-therefore gets answered, runs on to `request_review`, commits its own branch and waits in review with
-the parent's branch untouched.
+The answering model only sees the parent's title and prompt; it has no access to the subtask's history, flags, or tools. Merge decisions are handled separately: `auto_commit` and `auto_merge` are only used during `request_review`, which auto-answer does not trigger. `ArmCommitAndDone` remains the only way to authorize a merge. For example, a subtask with `auto_merge=false` will be auto-answered, commit its own branch, and wait in review without affecting the parent's branch.
 
-Nothing caps the number of answers per run. The bounds are the loop detector (`maxLoopHints` fails the
-task) and cancellation; a failed merge or an unresolved conflict still waits for a person.
+Nothing caps the number of answers per run. The bounds are the loop detector (`maxLoopHints` fails the task) and cancellation; a failed merge or an unresolved conflict still waits for a person.
 
 ## Tests
 
-`backend/exec/auto_answer_test.go` — the answering call, the answer grammar, and which `ask_question`
-calls count as questions. `backend/exec/auto_answer_text_stop_test.go` — the text-only stop: continued
-and answered, unanswered when user-started or in plan mode, and answered without reaching the merge.
-`chat-entries.unit.ts` titles the card. `memory_supervisor_test.go` pins that a resume keeps the
-provenance the paused run recorded. Both executor specs drive a real run, so `make check-race`
-covers them.
+`backend/exec/auto_answer_test.go` — the answering call, the answer grammar, and which `ask_question` calls count as questions. `backend/exec/auto_answer_text_stop_test.go` — the text-only stop: continued and answered, unanswered when user-started or in plan mode, and answered without reaching the merge. `chat-entries.unit.ts` titles the card. `memory_supervisor_test.go` pins that a resume keeps the provenance the paused run recorded. Both executor specs drive a real run, so `make check-race` covers them.

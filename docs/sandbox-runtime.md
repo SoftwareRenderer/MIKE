@@ -3,13 +3,13 @@
 The rules are in `AGENTS.md → Sandboxing`. This is how the runtime implements them, and what was
 measured on a real host.
 
-## Boot decisions are one injected value
+## Boot configuration is a single injected value
 
-- `sandboxruntime.Boot{SweepStaleContainersAtBoot, AgentPath}` is built once in `server.NewServer` from
-  `startup.Config` and handed to `NewSandboxManager`, `NewExtensionSandboxManager`,
+- `sandboxruntime.Boot{SweepStaleContainersAtBoot, AgentPath}` is created once in `server.NewServer` from
+  `startup.Config` and passed to `NewSandboxManager`, `NewExtensionSandboxManager`,
   `NewRegistryClientWithBoot` and `sandboxruntime.NewRuntimeWithBoot` — the last is the **only** Runtime
-  constructor, so there is no boot-less form to forget.
-- The zero `Boot` **declines** the host sweep, so a test binary or an ad-hoc caller cannot delete a live
+  constructor, ensuring there is no boot-less form.
+- A default (zero) `Boot` value disables the host sweep, so a test binary or an ad-hoc caller cannot delete a live
   server's containers by forgetting a variable.
 - An image build needs the bridge path too (the registry client stages it into the build context), which
   is why the boot reaches `NewRegistryClientWithBoot` and not only the two managers.
@@ -18,21 +18,21 @@ measured on a real host.
 
 ## One probe, one sweep
 
-- `sandboxruntime.GVisorAvailable(tag)` backs both `SandboxManager.checkAvailable` and the extension
-  manager's probe — they must agree, or a task sandbox and an extension sandbox disagree about whether
-  the host can run gVisor at all.
-- `Runtime.CleanupStaleContainers(tag, nameFilter)` is the shared best-effort, 15 s-bounded startup sweep
-  (prefixes `kanban-sandbox-` / `kanban-ext-`); neither manager may re-implement the list/parse/remove
-  loop.
-- `staleContainerNames` skips containers that are **running**: the sweep removes leftovers, never a live
-  sandbox. That is why a container that outlives its task row survives a restart, and why task and
-  project deletion are the things that must stop containers (`docs/storage.md`,
+- `sandboxruntime.GVisorAvailable(tag)` is used by both `SandboxManager.checkAvailable` and the extension
+  manager's probe — they must be consistent to ensure both task and extension sandboxes agree about whether
+  the host can run gVisor.
+- `Runtime.CleanupStaleContainers(tag, nameFilter)` is the shared startup sweep that is best-effort and
+  bounded to 15 seconds (prefixes `kanban-sandbox-` / `kanban-ext-`); neither manager should re-implement the
+  logic for listing, parsing, and removing containers.
+- `staleContainerNames` does not remove containers that are **running**: the sweep removes leftovers,
+  never a live sandbox. If a container survives after its task row is gone, it survives a restart, which is why
+  task and project deletion are the primary ways to stop containers (`docs/storage.md`,
   `AGENTS.md → Deletion`).
-- `backend/sandbox`'s `TestMain` calls its own `cleanupStaleTestContainers`, which `podman rm -f`s every
-  `kanban-sandbox-*` on the host, running or not — so a live server's task and project sandboxes are
+- `backend/sandbox`'s `TestMain` calls its own `cleanupStaleTestContainers`, which uses `podman rm -f` on every
+  `kanban-sandbox-*` on the host, whether running or not — so a live server's task and project sandboxes are
   deleted by `go test ./backend/sandbox/` even when it runs no test at all. Running this package's tests
-  beside a live server is therefore destructive. Scoping the sweep to a test-owned prefix is the fix and
-  is not taken, because not every test names its container `test-*`.
+  beside a live server is therefore destructive. Scoping the sweep to a test-owned prefix would be the fix,
+  but has not been implemented because not every test names its container `test-*`.
 
 ## The container environment
 
@@ -40,16 +40,16 @@ measured on a real host.
 agent extension's declared `sandbox_env` into `-e` flags, project config appended last so it wins a
 clash.
 
-- **A bare `-e NAME` is unrepresentable.** Every assignment comes from
+- **A flag like `-e NAME` without a value is not supported.** Every assignment comes from
   `types.SandboxEnvArgs([]types.SandboxEnv)` (`backend/types/env.go`), which can only emit `KEY=VALUE`
   and errors on a malformed key, and `Create` refuses the container on one. `podman -e NAME` copies the
   *client's* value of `NAME` into the container, so a project that declared a variable's name without a
-  value exported whatever the server had.
-- **Exec takes no environment.** The container create is the only place an `-e` is emitted: past the
-  container name podman parses no more flags, so an exec-time `-e` names the program to run
+  value would export whatever the server had.
+- **The `exec` command does not accept its own environment flags.** The container create is the only place
+  an `-e` is emitted: past the container name podman parses no more flags, so an exec-time `-e` names the program to run
   (`execCommandArgs`).
-- Invent nothing else: no hardcoded `PATH` (an `-e` overrides the image's `ENV PATH`, which dropped a
-  custom image's tooling) and no container-wide `TERM` (the terminal sets `TERM` on its own
+- No other environment variables should be hardcoded: no hardcoded `PATH` (an `-e` overrides the image's
+  `ENV PATH`, which dropped a custom image's tooling) and no container-wide `TERM` (the terminal sets `TERM` on its own
   `podman exec`, `shellExecArgs`: it belongs to the TTY session, not the sandbox).
 - Tests: `backend/sandbox/containerenv_test.go`, `backend/sandbox/hostenv_test.go`. The last runs a real
   gVisor container and asserts a host variable reaches it **only** if allowlisted to the podman client —
@@ -64,12 +64,12 @@ clash.
 `types.ValidateSandboxMount`/`ValidateSandboxAdditions` check a project's Sandbox Configuration on
 create and `PUT` (400 naming the field).
 
-- `GVisorCreateArgs` is the one copy of the posture both builders begin from (byte-identical up to their
+- `GVisorCreateArgs` is the standard configuration that both builders use as a starting point (byte-identical up to their
   own `--workdir` / `--network none`). `AppendCapabilities` is the only way to append a `--cap-add`:
   it runs `GVisorIsolationForCaps` (runsc **and** `--cap-drop ALL`) first and refuses the whole grant
   otherwise, so no ordering mistake can reach podman.
-- Name shape stays the caller's and is answered differently on purpose: a task refuses its whole
-  capability list (a project row is operator configuration), an extension sandbox skips the one
+- The name format is determined by the caller and is handled differently by design: a task rejects its whole
+  capability list (a project row is operator configuration), while an extension sandbox ignores a single
   malformed name and grants the rest.
 - Because a project row can predate the rule, `Create` refuses again at container creation rather than
   trusting stored config.
@@ -83,25 +83,25 @@ create and `PUT` (400 naming the field).
 
 ### A task worktree's git pointer is pinned read-only
 
-- **No task container starts without the pin.** `sandboxruntime.WorktreeGitPointerMount` returns the
+- **Every task container must have the pin established to start.** `sandboxruntime.WorktreeGitPointerMount` returns the
   `-v` pair that mounts `<worktree>/.git` read-only at `<mountPath>/.git`, and `sandbox.Create` appends
-  it after the worktree's own mount. A container that cannot establish it is refused.
+  it after the worktree's own mount. A container that cannot establish it is rejected.
 - The worktree is bind-mounted `rw` and a linked worktree's `.git` is a plain file inside it, so the
   guest can rewrite it. That file names the gitdir every later **host** git command reads, and git
   executes configuration: `filter.<name>.clean` runs when git compares a file to the index, which is
   what the editor's gutter marks and the diff panel ask for. No configuration key closes that hole,
   because the config that executes is the one the pointer names — `git.ExecutionFence` holds what the
   environment can pin instead (`docs/git-operations.md → One command constructor`).
-- **A missing pointer, or one that is not a regular file, is a refusal** rather than a mount skipped:
+- **If the git pointer is missing or is not a regular file, the container is rejected** rather than a mount skipped:
   a task worktree is always a linked worktree, so a directory with no pointer is not the shape `Create`
   was asked to sandbox.
-- **A project container gets no pin.** Its mount is the checkout itself and the terminal around it is a
+- **Project containers do not receive a pin.** Their mount is the checkout itself and the terminal around it is a
   person's own, where `git commit` writes into the repository's `.git` directory by design. `IsProjectKey`
   is the switch.
 - `sandboxruntime.VerifyWorktreeGitPointer` is the pre-flight companion to the mount: the pointer's
   `gitdir:` must name a directory **under** `<projectGitDir>/worktrees/` once cleaned. Text that keeps
   the admin prefix and walks out of it with `..` names a directory git reaches after its own cleaning.
-  The check is skipped when `<projectPath>/.git` is not a directory — a project that is itself a
+  The check is omitted if `<projectPath>/.git` is not a directory — a project that is itself a
   worktree or submodule names its gitdir in a file, so the expectation does not exist for it — and the
   pin still applies there.
 - Tests: `backend/sandbox/git_pointer_test.go`, and `TestWorktreeGitPointerMountIsReadOnly`,
@@ -113,9 +113,9 @@ create and `PUT` (400 naming the field).
 `capabilityPattern` (`pkg/sandboxruntime/podman_args.go`) accepts `^[A-Za-z][A-Za-z0-9_]*$` and nothing
 else, so a capability is a word and cannot be anything else.
 
-- The shape is the whole defence. `--privileged`, `--cap-add` and `SYS_ADMIN ALL` are each *text a person
+- The structural validation is the primary defense. `--privileged`, `--cap-add` and `SYS_ADMIN ALL` are each *text a person
   or a manifest put in the capability field*, and each reaches podman as an argument to `--cap-add`, which
-  no runtime makes safe. A name list would not help: the refusal is that the value carries a flag, a space
+  no runtime makes safe. A name list would not help: the request is rejected because the value carries a flag, a space
   or a separator.
 - `ValidateCapabilities` reports the first value it cannot accept, naming it, so the operator sees which
   entry was refused rather than a list of accepted ones.
@@ -132,8 +132,8 @@ else, so a capability is a word and cannot be anything else.
   extensions dir, system temp dir, `MIKE_EXT_MOUNT_ROOTS`.
 - **Only the extensions dir, the temp dir and the `MIKE_EXT_MOUNT_ROOTS` extras may be mounted
   read-write.** The workspace dir, the registered checkouts and anything borrowed from a project's
-  Sandbox Configuration come out `ro` however the manifest asks (`MountPolicy.ForceReadOnly`). A
-  manifest is registry text and the workspace holds every task's worktree.
+  Sandbox Configuration are forced to be read-only (`ro`) regardless of what the manifest asks (`MountPolicy.ForceReadOnly`).
+  Manifests are provided as text from the registry and the workspace holds every task's worktree.
 - Container paths must match `^/[A-Za-z0-9._/-]+$` — `:` or `,` would rewrite the podman mount spec.
 - Enforced on `PUT /api/extensions/{id}` **and** at install time: a manifest that self-grants a bad
   sandbox is rejected, not persisted.
@@ -169,7 +169,7 @@ else, so a capability is a word and cannot be anything else.
   on. This is the same instrument the git-family locks use: report, keep waiting. No podman operation
   has a deadline.
 - Shutdown order follows from that rule — a session's shell dies while its container can still receive it
-  — and the stage list itself is `docs/lifecycle.md → Shutdown is a declared stage list`.
+  — and the stage list itself is `docs/lifecycle.md → Shutdown Stage List`.
 - Tests: `backend/sandbox/podman_wait_test.go`, `TestTerminalManagerClose`, `pkg/subproc/subproc_test.go`,
   `TestPodmanLabelNamesTheOperation`, `pkg/sandboxruntime/podmanenv_test.go`.
 

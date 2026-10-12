@@ -1,65 +1,44 @@
-# Server lifecycle: construction order, shutdown, base contexts
+# Server Lifecycle: Construction, Shutdown, and Base Contexts
 
-The rules are in `AGENTS.md → Server Management`.
+The primary rules are in `AGENTS.md → Server Management`.
 
-## Shutdown is a declared stage list
+## Shutdown Stage List
 
-- A component registers its stop step with `s.reg(stage, name, step)` at a stage declared in
-  `backend/server/lifecycle.go`, **where it is constructed**, so construction order is shutdown order and
-  `NewServer` reads as the list of things that need stopping. Registering a stage twice panics at startup,
-  and a nil step is refused at registration — otherwise it panics at shutdown, far from its cause.
-- The first stage cancels the server's base context (`Server.Detached()`), before any resource a detached
-  operation still writes through is taken away. What sets the rest of the order is the pipe/`WaitDelay`
-  rule in `docs/sandbox-runtime.md`: websocket watchers → terminal sessions → lsp → extensions → sandbox
-  containers → database, so a session's shell is killed while its container can still receive it.
-- The **websocket watchers** stage is `AppStreamManager.Close`, and it closes all three watchers that
-  manager constructs — worktree, project, branch. A watcher built there but left out of `Close` keeps its
-  inotify watches and keeps broadcasting through the rest of the shutdown: it watches paths the later
-  stages are deleting, and `/api/stream` has no stage of its own, so the frames it produces go to a hub
-  nobody is closing. Test: `backend/stream/app_stream_close_watchers_test.go`.
-- SIGTERM must end the process. `srv.Shutdown` runs under `server.RunShutdownWithDeadline`
-  (`backend/server/shutdown.go`, 15 s). Every step waits on something uninterruptible (a container not
-  answering podman, an LSP bridge whose peer died), and a shutdown that hangs leaves the process **holding
-  the data directory open** — it re-creates `kanban.db`/`-wal` after whatever deleted them, so the next run
-  boots on the previous run's database. A bounded *context* bounds nothing here; the deadline is enforced
-  by leaving anyway. Each step logs `shutdown: <name>` before running, so the last line names what wedged.
-- Never `log.Fatalf` on a `Serve()` error (`main.go`): run the signal cleanup path (flight recorder,
-  `srv.Shutdown`) and then exit 1. `log.Fatalf` skips that cleanup and makes any listener error an abrupt
-  exit.
-- Tests: `backend/server/lifecycle_test.go` (`TestNewServerRegistersEveryStage` refuses a step that moved
-  out of `NewServer`), `backend/server/shutdown_test.go`.
+Components register their stop step via `s.reg(stage, name, step)` during construction. This ensures that construction order mirrors shutdown order, and `NewServer` serves as the definitive list of components that require stopping.
 
-## Every base context is registered, with its reason
+**Shutdown Order**:
+WebSocket watchers $\to$ Terminal sessions $\to$ LSP $\to$ Extensions $\to$ Sandbox containers $\to$ Database.
 
-`context.Background()`/`context.TODO()` in production Go is one archgate rule (`ctxroot`). Baseline entries
-are `file|function|reason|x<count>`, where the reason is:
+This order ensures that dependent resources are removed after the components that use them (e.g., a shell is killed before its container is deleted).
 
-- **root** — nothing above it to cancel from;
-- **detached** — a write whose point is to leave state behind, so it must outlive the request that began
-  it, and its parent is `Server.Detached()`;
-- **legacy** — a caller has a context and does not pass one.
+- **WebSocket Watchers**: `AppStreamManager.Close` must close all watchers. If a watcher is omitted, it may keep inotify watches active and continue broadcasting frames after the hub is closed.
+- **Deadlines**: Shutdown runs with a 15s deadline (`backend/server/shutdown.go`). Because some steps may hang (e.g., a non-responsive container), the process will exit after the deadline to avoid locking the data directory. Each step logs `shutdown: <name>` for debugging.
+- **Error Handling**: Never use `log.Fatalf` for `Serve()` errors in `main.go`. Instead, run the signal cleanup path (flight recorder, `srv.Shutdown`) before exiting with 1. This prevents abrupt exits that skip resource cleanup.
 
-The count is part of the key, so a second base context inside an already-classified function is a finding,
-and the rule refuses a baseline line it cannot parse rather than silently un-classifying that site.
-`backend/server/sideeffects.go` is the same idea as data for HTTP — detached operations, request-scoped
-reads, and the idempotent writes allowed on a read — held by `sideeffects_test.go` against the real route
-table.
+**Tests**: `backend/server/lifecycle_test.go` and `backend/server/shutdown_test.go`.
 
-`Server.Detached()` is the only parent for work that outlives a request: shutdown cancels it in the one
-place that knows when to stop, and a test or ad-hoc caller cannot start detached work that no shutdown will
-ever reach.
+## Base Contexts
 
-## The TLS/plain listener
+Production code must not use `context.Background()` or `context.TODO()` without registration (`ctxroot` rule). Registrations are categorized by reason:
 
-The first-byte sniff must not run inside `hybridListener.Accept()`: `net/http` accepts **serially**, so one
-peer that connects and sends nothing stalls every later handshake, and returning that peer's EOF reads as a
-dead listener, ends `Serve` and kills the process. `Accept()` waits on a queue a per-connection goroutine
-fills — not a worker pool, since N workers still block everyone at N silent peers. Silent peers are closed
-and logged per host, never handed to `net/http`, and only the listener's own accept error may end `Serve`.
-The plain half exists to send `RedirectHTTPSMiddleware`'s 301 and nothing else: the server has no
-plain-HTTP mode, so a cleartext request is one click on a wrong address, not a deployment.
-Test: `backend/server/listener_test.go`.
-## Checking this
+- **root**: No parent context exists.
+- **detached**: Work that must outlive the initiating request; these use `Server.Detached()` as the parent.
+- **legacy**: A caller lacks a context and cannot pass one.
 
-`make check-race` runs `./backend/server/`, where the tests boot a server and take it down again: the
-shutdown stages, the base-context registry and the TLS listener.
+`Server.Detached()` is the only parent for work that outlives a request, ensuring that all detached operations are cancelled during server shutdown.
+
+`backend/server/sideeffects.go` tracks detached operations and request-scoped reads to ensure consistency across the route table.
+
+## TLS and Plain Listener
+
+The first-byte sniff is performed before `hybridListener.Accept()`. Because `net/http` accepts connections serially, a peer that connects without sending data would otherwise stall all subsequent handshakes. 
+
+- **Silent Peers**: Connections that send no data are closed and logged per host, never reaching `net/http`.
+- **Plain HTTP**: The plain-text listener exists solely to serve 301 redirects to HTTPS. The server does not support a full plain-HTTP mode.
+- **Termination**: Only an error from the listener's own `Accept()` call should end `Serve()`.
+
+**Tests**: `backend/server/listener_test.go`.
+
+## Verification
+
+Running `make check-race` executes `./backend/server/`, which boots and shuts down the server, verifying the shutdown stages, base-context registry, and TLS listener.
