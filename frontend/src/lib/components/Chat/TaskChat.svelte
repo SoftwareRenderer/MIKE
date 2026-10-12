@@ -776,6 +776,16 @@
         return true;
     }
 
+    /**
+     * Pages the older windows until the conversation runs out, so the caller can land the reader on its first
+     * message. A page that answers nothing ends the walk with rows still above.
+     */
+    async function walkToFirstMessage(): Promise<void> {
+        while (hasEarlier && !destroyed) {
+            if (!(await loadEarlierMessages({ limit: MESSAGE_JUMP_LIMIT, settle: false }))) return;
+        }
+    }
+
     function turnRowOnScreen(entryId: string): boolean {
         const el = follow.el;
         return !!el && !!el.querySelector(`[data-entry-id="${CSS.escape(entryId)}"]`);
@@ -1723,6 +1733,7 @@
         turns={chatTurns}
         turnsHasMore={turnsHasMore}
         onJumpToTurn={jumpToTurn}
+        onJumpToFirst={walkToFirstMessage}
     />
     {#if showStartButton}
         <StartPanel

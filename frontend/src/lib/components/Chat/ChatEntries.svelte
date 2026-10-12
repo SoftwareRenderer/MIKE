@@ -47,6 +47,7 @@
         onViewChanges,
         onToggleFullscreen,
         isChatFullscreen,
+        onJumpToFirst,
         openCheckpointHash = '',
         follow,
         historyLoading = false,
@@ -114,6 +115,8 @@
         turnsHasMore?: boolean;
         /** Fetch until the prompt the header names is on screen. True once it is. */
         onJumpToTurn?: (entryId: string) => Promise<boolean>;
+        /** Fetch every older window, so the conversation's first message can be landed. */
+        onJumpToFirst?: () => Promise<void>;
     } = $props();
 
     /** Whether the Changes panel is showing this checkpoint, so its band reads as the open one. */
@@ -212,6 +215,9 @@
     let stickyEntryId = $state('');
     // The named prompt's row is being fetched: the header says so rather than look idle.
     let stickyJumping = $state(false);
+    let stickyFirstJumping = $state(false);
+    // Both jumps land the same row, so a second one would fight the first.
+    let stickyBusy = $derived(stickyJumping || stickyFirstJumping);
     // The overlay hangs over the top of the scroller, so it decides where a message
     // has to land to be readable rather than behind it.
     let stickyHeaderEl: HTMLElement | null = $state(null);
@@ -270,9 +276,9 @@
         const scrollTop = el.scrollTop;
 
         if (tapped && (follow.intent !== tapped.intent || follow.atBottom)) tapped = null;
-        // Without a prompt read the row window is all the header knows about what lies above, and
-        // `hasEarlier` is as much as it can claim.
-        const olderTurnsBeyond = turnsHasMore || (turns.length === 0 && hasEarlier);
+        // Nothing older than the rows held means nothing older to name, even when the prompt read still
+        // promises an older page.
+        const olderTurnsBeyond = hasEarlier && (turnsHasMore || turns.length === 0);
         const sticky = computeStickyHeader(
             stickyTurns(el, containerTop, scrollTop), scrollTop, line, tapped?.entryId ?? '', olderTurnsBeyond,
         );
@@ -285,7 +291,7 @@
     /** Land the message the header names on the sticky line, under the overlay. */
     async function handleStickyClickInternal() {
         const scroller = chatScrollEl;
-        if (!scroller || stickyEntryId === '' || stickyJumping) return;
+        if (!scroller || stickyEntryId === '' || stickyBusy) return;
         // Declare the takeover before anything moves, or the follow tracker's pin loop and the settle
         // loop of a page that lands write scrollTop against us.
         follow.stopFollowing();
@@ -309,6 +315,33 @@
         if (line === null) return;
         scrollToLine(scroller, target, line);
         // A tap that moves nothing fires no scroll event, so update the header here too.
+        computeStickyFromScroll();
+    }
+
+    /** The conversation's oldest row on screen: its first prompt, or the first entry when no prompt is drawn. */
+    function firstRow(scroller: HTMLElement): HTMLElement | null {
+        return scroller.querySelector<HTMLElement>('.sticky-user-message')
+            ?? scroller.querySelector<HTMLElement>('.chat-entry');
+    }
+
+    /** Fetch every older window, then land the first message on the sticky line. */
+    async function handleJumpFirstInternal() {
+        const scroller = chatScrollEl;
+        if (!scroller || stickyBusy) return;
+        follow.stopFollowing();
+        tapped = null;
+        stickyFirstJumping = true;
+        try {
+            await onJumpToFirst?.();
+            await tick();
+        } finally {
+            stickyFirstJumping = false;
+        }
+        // If a page failed, the oldest row held is as close to the start as the app knows.
+        const target = firstRow(scroller);
+        const line = stickyLineOffset();
+        if (!target || line === null) return;
+        scrollToLine(scroller, target, line);
         computeStickyFromScroll();
     }
 
@@ -365,11 +398,20 @@
         <!-- Mounted whenever there are entries and hidden by class: the sticky line is this element's
              measured bottom edge. -->
         <div class="chat-sticky-header" class:hidden-header={!computedShowHeader} bind:this={stickyHeaderEl}
-             role="status" aria-live="polite" aria-busy={stickyJumping || undefined}>
+             role="status" aria-live="polite" aria-busy={stickyBusy || undefined}>
             <button class="chat-sticky-bubble" onclick={handleStickyClickInternal} title={t('chat.entries.scrollToMessage')} aria-label={t('chat.entries.scrollToMessage')}>
                 {#if stickyJumping}<Spinner decorative />{/if}
                 <span class="chat-sticky-text">{computedStickyMessage}</span>
             </button>
+            {#if onJumpToFirst}
+                <button type="button" class="chat-sticky-first" onclick={handleJumpFirstInternal} title={t('chat.entries.scrollToFirst')} aria-label={t('chat.entries.scrollToFirst')}>
+                    {#if stickyFirstJumping}
+                        <Spinner size={12} decorative />
+                    {:else}
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8l4-4 4 4M4 12.5l4-4 4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    {/if}
+                </button>
+            {/if}
             {#if onToggleFullscreen}
                 <button type="button" class="chat-sticky-fullscreen" onclick={onToggleFullscreen} title={fullscreenTitle} aria-label={t('chat.entries.toggleFullscreen')}>
                     {#if isChatFullscreen}
@@ -668,6 +710,7 @@
         opacity: 1;
         background: color-mix(in srgb, var(--color-accent) 28%, transparent);
     }
+    .chat-sticky-first,
     .chat-sticky-fullscreen {
         display: flex;
         pointer-events: auto;
@@ -684,6 +727,7 @@
         border-radius: var(--radius-sm);
         flex-shrink: 0;
     }
+    .chat-sticky-first:hover,
     .chat-sticky-fullscreen:hover {
         opacity: 1;
         background: var(--color-surface-3);

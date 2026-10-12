@@ -1693,6 +1693,7 @@ const catalog = {
     'chat.entries.historyOwing': 'Could not read this conversation — showing the running turn as it arrives',
     'chat.entries.historyRetry': 'Retry',
     'chat.entries.scrollToMessage': 'Scroll to message',
+    'chat.entries.scrollToFirst': 'Scroll to first message',
     'chat.entries.scrollToLatest': 'Scroll to latest message',
     'chat.entries.latest': 'Latest',
     'chat.entries.toggleFullscreen': 'Toggle fullscreen',

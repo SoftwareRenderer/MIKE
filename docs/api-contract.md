@@ -371,10 +371,12 @@ answering "what is above the screen". The transcript draws a read ahead of the e
 a read that answers alone puts the newest answers above the older pages. The bottom of the list stops being
 the newest content, and the jump-to-latest button lands on an old row. A window that opens nowhere inside the
 rows held cannot be joined: another thread's read, or a truncation that cut the overlap away, answers alone.
-**Scrolling is the only
-affordance** — no control asks the reader to fetch anything. The list edge is the request, and it fires a
-viewport and a half before the reader gets there (`atTopOfList` and its `EARLIER_EDGE_VIEWPORTS`, in
-`frontend/src/lib/utils/chat-window.ts`) so the page lands while they are still reading toward it.
+**Paging has two starters**, and each names what it wants. The list edge is the passive one: it fires a
+request a viewport and a half before the reader gets there (`atTopOfList` and its `EARLIER_EDGE_VIEWPORTS`,
+in `frontend/src/lib/utils/chat-window.ts`), so the page lands while they are still reading toward it. The
+bubble floors one page at the prompt it names. The go-to-first control walks `before` until
+`X-Messages-More` runs out, so it lands the conversation's first message rather than the top of the window
+loaded so far.
 
 The scroll
 position is preserved by re-finding the entry under the top edge of the viewport (`data-entry-id`), never
