@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"mike/backend/git"
+	"mike/backend/sandbox"
+	"mike/backend/testutil/sandboxcheck"
 	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
@@ -2287,9 +2289,7 @@ func TestSubtasksAutoMergeSetsAutoCommitOnDescendants(t *testing.T) {
 
 func TestTaskOperatingModeRemount(t *testing.T) {
 	s := testServer(t)
-	if !s.sandboxMgr.IsAvailable() {
-		t.Skip("gVisor not available, skipping sandbox test")
-	}
+	sandboxcheck.Require(t, sandbox.BaseImage)
 	projID := createTestProject(t, s)
 
 	// Enable sandboxing on the project

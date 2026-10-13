@@ -100,13 +100,13 @@ describe('the listing', () => {
     it('says so when the rows it shows are not all of them', async () => {
         stub({ '/api/fs/archive': { body: { ...listing, truncated: true } } });
         const { findByText } = open();
-        await findByText('Not everything is listed — reading the archive ran out of its budget.');
+        await findByText('... Preview truncated.');
     });
 
     it('shows nothing was found for an archive that holds no files', async () => {
         stub({ '/api/fs/archive': { body: { format: 'zip', entries: [] } } });
         const { findByText } = open();
-        await findByText('This archive holds no files.');
+        await findByText('Empty archive');
     });
 
     it('answers an unreadable archive with the server’s own sentence', async () => {

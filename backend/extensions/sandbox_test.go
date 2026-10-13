@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"mike/backend/testutil/sandboxcheck"
 	"mike/backend/types"
 	"mike/pkg/sandboxruntime"
 )
@@ -1108,6 +1109,9 @@ func writeInstalledDockerfile(t *testing.T, root, author, name string) string {
 }
 
 func TestExtensionImageSource(t *testing.T) {
+	// The short-ref case asks podman whether a local build exists, so this table needs a store that
+	// answers "yes" or "no" truthfully.
+	sandboxcheck.Require(t, "docker.io/library/ubuntu:latest")
 	extDir := t.TempDir()
 	writeInstalledDockerfile(t, extDir, "go-team", "gopls")
 	sm := NewExtensionSandboxManager(NewRegistryClient(), nil, sandboxruntime.Boot{})

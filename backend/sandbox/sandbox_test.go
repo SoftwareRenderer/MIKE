@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"mike/backend/testutil/sandboxcheck"
 	"mike/backend/types"
 	"mike/pkg/sandboxruntime"
 )
@@ -92,9 +93,7 @@ func TestIsAvailable(t *testing.T) {
 func TestCreateAndStop(t *testing.T) {
 
 	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping integration test")
-	}
+	sandboxcheck.Require(t, BaseImage)
 
 	// Create a temp directory to use as worktree
 	dir := taskWorktreeDir(t)
@@ -121,9 +120,7 @@ func TestCreateAndStop(t *testing.T) {
 func TestExec(t *testing.T) {
 
 	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping integration test")
-	}
+	sandboxcheck.Require(t, BaseImage)
 
 	dir := taskWorktreeDir(t)
 	taskID := "test-exec-task"
@@ -171,9 +168,7 @@ func TestExec(t *testing.T) {
 func TestExecWithInput(t *testing.T) {
 
 	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping integration test")
-	}
+	sandboxcheck.Require(t, BaseImage)
 
 	dir := taskWorktreeDir(t)
 	taskID := "test-exec-input-task"
@@ -222,9 +217,7 @@ func TestExecWithInput(t *testing.T) {
 func TestCleanupStaleContainers(t *testing.T) {
 
 	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping integration test")
-	}
+	sandboxcheck.Require(t, BaseImage)
 
 	dir := t.TempDir()
 
@@ -277,9 +270,7 @@ func TestCleanupStaleContainers(t *testing.T) {
 func TestCreate_OverridesImageEntrypoint(t *testing.T) {
 
 	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping integration test")
-	}
+	sandboxcheck.Require(t, BaseImage)
 	if !sm.ImageReady("docker.io/alpine/git") {
 		t.Skip("docker.io/alpine/git image not available locally")
 	}
@@ -420,9 +411,7 @@ func TestCreateContainerArgs(t *testing.T) {
 func TestCreate_MissingImageIsActionable(t *testing.T) {
 
 	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping integration test")
-	}
+	sandboxcheck.Require(t, BaseImage)
 
 	taskID := "test-missing-image-task"
 	missing := "localhost/kanban-does-not-exist-image:1"
@@ -511,7 +500,11 @@ func TestContainerIsRunning_CacheExpired(t *testing.T) {
 	}
 }
 
+// TestStopProjectContainers: stopping a project's containers drops its tasks and leaves another
+// project's alone. The bookkeeping is in-memory, but `retainContainer` restores what podman would not
+// remove, so the claim rests on a store that answers.
 func TestStopProjectContainers(t *testing.T) {
+	sandboxcheck.Require(t, BaseImage)
 	sm := &SandboxManager{
 		active:     make(map[string]string),
 		mountPaths: make(map[string]string),
@@ -565,9 +558,7 @@ func TestStopProjectContainers_NoContainers(t *testing.T) {
 
 func TestImageReady(t *testing.T) {
 	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping image test")
-	}
+	sandboxcheck.Require(t, BaseImage)
 
 	// alpine:latest should be available (used in tests)
 	if !sm.ImageReady("alpine:latest") {
@@ -586,9 +577,7 @@ func TestImageReady(t *testing.T) {
 
 func TestBuildImage(t *testing.T) {
 	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping build test")
-	}
+	sandboxcheck.Require(t, BaseImage)
 
 	// Create a temp directory with a simple Dockerfile
 	tmpDir := t.TempDir()
@@ -617,9 +606,7 @@ func TestBuildImage(t *testing.T) {
 
 func TestBuildImage_InvalidDockerfile(t *testing.T) {
 	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping build test")
-	}
+	sandboxcheck.Require(t, BaseImage)
 
 	// Create a temp directory with an invalid Dockerfile
 	tmpDir := t.TempDir()
@@ -637,9 +624,7 @@ func TestBuildImage_InvalidDockerfile(t *testing.T) {
 
 func TestBuildImage_MissingFile(t *testing.T) {
 	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping build test")
-	}
+	sandboxcheck.Require(t, BaseImage)
 
 	err := sm.BuildImageWithProgress("test-missing-proj", "/nonexistent/path/Dockerfile", nil)
 	if err == nil {
@@ -729,9 +714,7 @@ func TestProjectImageName(t *testing.T) {
 func TestBinaryAvailable(t *testing.T) {
 
 	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping integration test")
-	}
+	sandboxcheck.Require(t, BaseImage)
 
 	dir := taskWorktreeDir(t)
 	taskID := "test-binary-available-task"
@@ -762,9 +745,7 @@ func TestBinaryAvailable(t *testing.T) {
 func TestStartProcess(t *testing.T) {
 
 	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping integration test")
-	}
+	sandboxcheck.Require(t, BaseImage)
 
 	dir := taskWorktreeDir(t)
 	taskID := "test-startprocess-task"
@@ -811,9 +792,7 @@ func TestStartProcess(t *testing.T) {
 
 func TestStartProcess_NonexistentTask(t *testing.T) {
 	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping integration test")
-	}
+	sandboxcheck.Require(t, BaseImage)
 
 	// Try to start a process in a non-existent container
 	_, err := sm.StartProcess("nonexistent-task", "echo", []string{"hello"})
@@ -825,9 +804,7 @@ func TestStartProcess_NonexistentTask(t *testing.T) {
 func TestCreateWithMemoryLimit(t *testing.T) {
 
 	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping integration test")
-	}
+	sandboxcheck.Require(t, BaseImage)
 
 	dir := taskWorktreeDir(t)
 	taskID := "test-memory-task"
@@ -882,9 +859,7 @@ func TestCreateWithMemoryLimit(t *testing.T) {
 func TestMemoryLimitEnforced(t *testing.T) {
 
 	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping integration test")
-	}
+	sandboxcheck.Require(t, BaseImage)
 
 	dir := taskWorktreeDir(t)
 	taskID := "test-mem-enforced"
@@ -929,9 +904,7 @@ func TestMemoryLimitEnforced(t *testing.T) {
 func TestGetMemoryStats(t *testing.T) {
 
 	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping integration test")
-	}
+	sandboxcheck.Require(t, BaseImage)
 
 	dir := taskWorktreeDir(t)
 	taskID := "test-memstats-task"
@@ -997,9 +970,7 @@ func TestGetMemoryStats(t *testing.T) {
 func TestCreateWithCapabilities(t *testing.T) {
 
 	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping integration test")
-	}
+	sandboxcheck.Require(t, BaseImage)
 
 	dir := taskWorktreeDir(t)
 	taskID := "test-capabilities-task"
@@ -1037,9 +1008,7 @@ func TestCreateWithCapabilities(t *testing.T) {
 func TestExecProject_FullConfig(t *testing.T) {
 
 	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping integration test")
-	}
+	sandboxcheck.Require(t, BaseImage)
 
 	dir := t.TempDir()
 	project := &types.Project{ID: "test-execproj-fullcfg", Name: "test-execproj", Path: dir}
@@ -1079,9 +1048,7 @@ func TestExecProject_FullConfig(t *testing.T) {
 func TestExecProjectWithInput_FullConfig(t *testing.T) {
 
 	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping integration test")
-	}
+	sandboxcheck.Require(t, BaseImage)
 
 	dir := t.TempDir()
 	project := &types.Project{ID: "test-execproj-input-fullcfg", Name: "test-execproj-input", Path: dir}
@@ -1111,9 +1078,7 @@ func TestExecProjectWithInput_FullConfig(t *testing.T) {
 func TestExecTask_FullConfig(t *testing.T) {
 
 	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping integration test")
-	}
+	sandboxcheck.Require(t, BaseImage)
 
 	dir := taskWorktreeDir(t)
 	taskID := "test-exectask-fullcfg"
@@ -1140,9 +1105,7 @@ func TestExecTask_FullConfig(t *testing.T) {
 func TestEnsureProjectContainer_RecreatesWhenStopped(t *testing.T) {
 
 	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping integration test")
-	}
+	sandboxcheck.Require(t, BaseImage)
 
 	dir := t.TempDir()
 	project := &types.Project{ID: "test-recreate-proj", Name: "test-recreate", Path: dir}
@@ -1180,9 +1143,7 @@ func TestEnsureProjectContainer_RecreatesWhenStopped(t *testing.T) {
 func TestEnsureProjectContainer_RecreatesWhenMountStale(t *testing.T) {
 
 	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping integration test")
-	}
+	sandboxcheck.Require(t, BaseImage)
 
 	projectID := "test-stale-mount-proj"
 	project := &types.Project{ID: projectID, Name: "test-stale-mount"}
@@ -1235,9 +1196,7 @@ func TestEnsureProjectContainer_RecreatesWhenMountStale(t *testing.T) {
 func TestCreate_CustomMountCreatesHostDir(t *testing.T) {
 
 	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping integration test")
-	}
+	sandboxcheck.Require(t, BaseImage)
 
 	baseDir := taskWorktreeDir(t)
 	// Use a nested path that does NOT exist yet
@@ -1274,9 +1233,7 @@ func TestCreate_CustomMountCreatesHostDir(t *testing.T) {
 func TestCreate_PlanModeReadonlyMount(t *testing.T) {
 
 	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping integration test")
-	}
+	sandboxcheck.Require(t, BaseImage)
 
 	// Create a temp directory to use as worktree
 	dir := taskWorktreeDir(t)
@@ -1366,9 +1323,7 @@ func firstGlobalIPv4(t *testing.T) string {
 func TestCreate_PublishesOnConfiguredInterface(t *testing.T) {
 
 	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping integration test")
-	}
+	sandboxcheck.Require(t, BaseImage)
 	hostIP := firstGlobalIPv4(t)
 
 	taskID := "test-sandbox-iface"

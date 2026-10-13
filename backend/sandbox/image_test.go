@@ -3,13 +3,13 @@ package sandbox
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"mike/backend/testutil/sandboxcheck"
 	"mike/backend/types"
 	"mike/pkg/sandboxruntime"
 )
@@ -183,12 +183,7 @@ func TestEnsureImageForProjectUnreadableDockerfile(t *testing.T) {
 // anything runs in it.
 func TestEnsureImageForProjectBuildsProjectImage(t *testing.T) {
 	sm := NewSandboxManager(sandboxruntime.Boot{})
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping integration test")
-	}
-	if _, err := exec.LookPath("podman"); err != nil {
-		t.Skip("podman not installed, skipping integration test")
-	}
+	sandboxcheck.Require(t, BaseImage)
 
 	dir := t.TempDir()
 	dockerfile := filepath.Join(dir, "Dockerfile")

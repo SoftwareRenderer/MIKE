@@ -158,6 +158,13 @@ test-e2e-diff: ## Playwright specs this working tree touched (--only-changed)
 	@$(MAKE) --no-print-directory frontend
 	cd frontend && npx playwright test --only-changed
 
+# Whether this host can run a gVisor container at all, which a broken podman storage makes expensive
+# to ask by hand. Where it fails, the tests that need a container skip with that reason rather than
+# fail (docs/testing.md → Go unit test environment).
+.PHONY: sandbox-probe
+sandbox-probe: ## Ask whether a gVisor container can start on this host
+	@go run ./scripts/sandboxprobe
+
 # A locale pack fails silently in both directions, so neither failure shows up in the UI: a
 # missing message key falls back to English per key (a pack missing 300 keys still looks
 # translated), and a prompt overlay that renames a placeholder or drops a {{if}} only fails when
@@ -247,7 +254,7 @@ check-release: ## Compile and test the -tags release variant that make package s
 	@go test -tags $(RELEASE_TAGS) ./backend/startup/ -count=1
 
 .PHONY: check
-check: ## THE GATE: lint + archgate + docs-check + bridge-check + build + Go tests + frontend gates
+check: ## THE GATE: lint + archgate + docs-check + bridge-check + build + sandbox probe + Go tests + frontend gates
 	@$(MAKE) --no-print-directory lint
 	@echo "==> archgate (structural debt against its baselines)"
 	@$(MAKE) --no-print-directory archgate
@@ -262,6 +269,8 @@ check: ## THE GATE: lint + archgate + docs-check + bridge-check + build + Go tes
 	@echo "==> build"
 	@go build -trimpath -o mike .
 	@$(MAKE) --no-print-directory check-release
+	@echo "==> sandbox probe (can a gVisor container start on this host?)"
+	@$(MAKE) --no-print-directory sandbox-probe || echo "  ^ sandbox is not fully supported here: the tests that start a container skip with this reason instead of failing"
 	@echo "==> go test"
 	@$(MAKE) --no-print-directory test-go
 	@echo "==> frontend unit tests + gates (the type-check runs there, once, strict)"

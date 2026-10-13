@@ -8,9 +8,10 @@ import https from 'node:https';
 import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
-import { execSync, execFileSync } from 'node:child_process';
+import { execSync, execFileSync, spawnSync } from 'node:child_process';
 import { pairAndReadSession, readPairingCode } from './helpers-auth.mjs';
 import { laneRequestOptions } from './lane-tls';
+import { SANDBOX_VERDICT_FILE, writeSandboxVerdict, type SandboxVerdict } from './sandbox-verdict';
 
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
@@ -146,8 +147,50 @@ async function seedChatConversation(cookie: string, csrfToken: string): Promise<
     console.log(`[global-setup] Chat fixture: project ${project.id}, task ${task.id}, ${made} rows`);
 }
 
+/**
+ * Ask this host whether a gVisor container can start, once per run, and say so when it cannot.
+ *
+ * A probe that could not run answers usable: the harness not knowing is not a prerequisite the
+ * environment failed to provide, and recording it as one would hand every container spec a free skip.
+ */
+function probeSandbox(): void {
+    const run = spawnSync('go', ['run', './scripts/sandboxprobe', '--json'], {
+        cwd: PROJECT_ROOT,
+        encoding: 'utf-8',
+        timeout: 180_000,
+    });
+    let usable = true;
+    let reason = '';
+    const probed = parseProbeAnswer(run.stdout);
+    if (run.error || !probed) {
+        reason = `the probe did not answer (${run.error ?? run.stdout ?? run.signal ?? `exit ${run.status}`}) — sandbox specs run anyway`;
+        console.log(`[global-setup] Warning: ${reason}`);
+    } else {
+        usable = probed.usable;
+        reason = probed.reason;
+    }
+    writeSandboxVerdict({ usable, reason });
+    if (!usable) {
+        console.log(`\n*** WARNING: the sandbox is not fully supported in this environment — ${reason}`);
+        console.log('*** Specs that start a container are skipped, not failed. `make sandbox-probe` re-asks the question.\n');
+    }
+}
+
+/** The probe's `--json` answer, or null when the command did not produce one. */
+function parseProbeAnswer(stdout: string | null): SandboxVerdict | null {
+    try {
+        const parsed = JSON.parse(String(stdout));
+        return typeof parsed?.usable === 'boolean'
+            ? { usable: parsed.usable, reason: parsed.reason ?? '' }
+            : null;
+    } catch {
+        return null;
+    }
+}
+
 async function setup(): Promise<void> {
     assertFrontendBuilt();
+    probeSandbox();
     ensureTestRepo();
     seedLocalExtensions();
     seedPublishedExtensionSources();
@@ -355,7 +398,7 @@ function removeHarnessContainers(): void {
  * up. Reported rather than removed here, because a leftover may belong to another run.
  */
 function reportLeftovers(): void {
-    const roots = [TEST_REPO, TEST_REPO_2, CHAT_REPO, CHAT_FIXTURE_FILE, TEST_DATA_DIR, TEST_DATA_DIR_ISOLATED, TEST_WORKTREES, TEST_OWN_REPOS, ...HARNESS_LOGS];
+    const roots = [TEST_REPO, TEST_REPO_2, CHAT_REPO, CHAT_FIXTURE_FILE, TEST_DATA_DIR, TEST_DATA_DIR_ISOLATED, TEST_WORKTREES, TEST_OWN_REPOS, SANDBOX_VERDICT_FILE, ...HARNESS_LOGS];
     const survivors = roots.filter(root => fs.existsSync(root));
     let containers = '?';
     try {
@@ -424,6 +467,10 @@ export async function teardown(): Promise<void> {
     // Delete the generated registry index and the i18n pack repo setup built
     try { fs.rmSync(GENERATED_REGISTRY_FILE, { force: true }); } catch { /* ignore */ }
     try { fs.rmSync(I18N_PACK_REPO, { recursive: true, force: true }); } catch { /* ignore */ }
+
+    // Before the leftover report, so an interrupted run's verdict is named there rather than silently
+    // overwritten by the next setup.
+    try { fs.unlinkSync(SANDBOX_VERDICT_FILE); } catch { /* ignore */ }
 
     reportLeftovers();
 

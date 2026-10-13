@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { getProjectId, csrfFetch, isolatedProject, gotoProject } from './helpers';
+import { getProjectId, csrfFetch, isolatedProject, gotoProject, requireSandbox } from './helpers';
 
 // Own project: this spec turns sandboxing on and off, and the project explorer takes the folder it
 // browses from that flag — so a spec browsing during the window asked the host for the container
@@ -103,6 +103,8 @@ test.describe.serial('Agent + Network Isolation', () => {
   });
 
   test('should allow task start when LLM provider + network isolation enabled', async ({ page }) => {
+    // Only this test starts a container; the siblings assert refusals that never reach podman.
+    requireSandbox();
     const projectId = await getProjectId(page);
 
     // Stop any running tasks from previous tests (serial suite shared state)
@@ -131,8 +133,8 @@ test.describe.serial('Agent + Network Isolation', () => {
       return res.ok ? res.json() : null;
     }, projectId);
     if (!projectData?.sandbox_enabled) {
-      console.warn('Sandbox could not be enabled — skipping test');
-      test.skip('Sandbox not enabled (may require gVisor)');
+      // The worker's own project: only its own unfinished task can refuse this change.
+      test.skip('Cannot enable sandbox: tasks are running from parallel tests');
     }
 
     // Get the default LLM provider

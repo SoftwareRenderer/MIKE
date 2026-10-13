@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"mike/backend/testutil/sandboxcheck"
 	"mike/backend/types"
 	"mike/pkg/sandboxruntime"
 )
@@ -175,9 +176,7 @@ func TestStopWithoutSinkReadsNothing(t *testing.T) {
 // held when the container stopped. Held RAM falls back between samples, so these differ.
 func TestStopRecordsHighWaterNotLastSample(t *testing.T) {
 	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping integration test")
-	}
+	sandboxcheck.Require(t, BaseImage)
 
 	taskID := "test-peak-highwater"
 	// The smallest cap that leaves room for the 64 MB below plus the sandbox's own ~23 MB and the copy

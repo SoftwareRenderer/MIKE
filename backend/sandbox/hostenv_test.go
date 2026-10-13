@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"mike/backend/testutil/sandboxcheck"
 	"mike/backend/types"
 )
 
@@ -20,9 +21,7 @@ import (
 func TestSandboxContainerSeesNoHostEnv(t *testing.T) {
 
 	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping integration test")
-	}
+	sandboxcheck.Require(t, BaseImage)
 
 	// Secrets the running server genuinely holds. t.Setenv restores them on cleanup, so the
 	// surrounding suite is unaffected.

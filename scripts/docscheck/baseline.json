@@ -4,7 +4,7 @@
   "longsent": 0
  },
  "_global": {
-  "longsent": 169
+  "longsent": 86
  },
  "docs/adding-a-preference.md": {
   "history": 0,
@@ -20,7 +20,7 @@
  },
  "docs/agent-extensions.md": {
   "history": 0,
-  "longsent": 2
+  "longsent": 0
  },
  "docs/api-contract.md": {
   "history": 1,
@@ -35,12 +35,12 @@
   "longsent": 0
  },
  "docs/auto-update.md": {
-  "history": 4,
-  "longsent": 6
+  "history": 0,
+  "longsent": 0
  },
  "docs/commit-and-done.md": {
   "history": 0,
-  "longsent": 4
+  "longsent": 0
  },
  "docs/configuration.md": {
   "history": 0,
@@ -49,6 +49,10 @@
  "docs/confinement.md": {
   "history": 0,
   "longsent": 9
+ },
+ "docs/docker.md": {
+  "history": 0,
+  "longsent": 0
  },
  "docs/documentation.md": {
   "history": 0,
@@ -80,23 +84,23 @@
  },
  "docs/languages.md": {
   "history": 0,
-  "longsent": 9
+  "longsent": 1
  },
  "docs/lifecycle.md": {
   "history": 0,
-  "longsent": 2
+  "longsent": 0
  },
  "docs/link-rows.md": {
   "history": 0,
-  "longsent": 4
+  "longsent": 3
  },
  "docs/llm-streaming.md": {
   "history": 0,
-  "longsent": 1
+  "longsent": 0
  },
  "docs/locking.md": {
   "history": 0,
-  "longsent": 4
+  "longsent": 0
  },
  "docs/lsp-transport.md": {
   "history": 0,
@@ -104,7 +108,7 @@
  },
  "docs/markup-sanitizing.md": {
   "history": 0,
-  "longsent": 5
+  "longsent": 0
  },
  "docs/mcp.md": {
   "history": 0,
@@ -115,8 +119,8 @@
   "longsent": 0
  },
  "docs/notifications.md": {
-  "history": 1,
-  "longsent": 2
+  "history": 0,
+  "longsent": 0
  },
  "docs/passkeys.md": {
   "history": 0,
@@ -124,15 +128,15 @@
  },
  "docs/preview.md": {
   "history": 0,
-  "longsent": 6
+  "longsent": 0
  },
  "docs/reconnection.md": {
-  "history": 5,
-  "longsent": 23
+  "history": 0,
+  "longsent": 0
  },
  "docs/sandbox-bridge.md": {
-  "history": 3,
-  "longsent": 6
+  "history": 1,
+  "longsent": 0
  },
  "docs/sandbox-runtime.md": {
   "history": 0,
@@ -155,12 +159,12 @@
   "longsent": 0
  },
  "docs/testing.md": {
-  "history": 4,
-  "longsent": 3
+  "history": 2,
+  "longsent": 2
  },
  "docs/threads-checkpoints.md": {
-  "history": 2,
-  "longsent": 9
+  "history": 1,
+  "longsent": 5
  },
  "docs/tls.md": {
   "history": 0,
@@ -172,6 +176,6 @@
  },
  "docs/ui-extensions.md": {
   "history": 0,
-  "longsent": 8
+  "longsent": 0
  }
 }

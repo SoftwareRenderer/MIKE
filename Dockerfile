@@ -24,8 +24,8 @@ ARG NODE_IMAGE=node:22-slim
 ARG RUNTIME_IMAGE=debian:trixie-slim
 # A gVisor release channel, or a pinned release spelled as its bare date (`20260928`). The bucket
 # path already carries the word `release`, so `release-20260928` is a 404. No default is spelled
-# here: a global ARG's default reaches a stage in some builders and not in others (measured on
-# podman/buildah, which hands over an empty one), so the stage that reads it holds the default.
+# here: whether a global ARG's default reaches a stage that re-declares the name is a builder detail
+# (podman/buildah 5.8 hands it over), so the stage that reads it holds a `:=` default of its own.
 ARG GVISOR_RELEASE
 # Recorded into the binary the same way the Makefile does it; its default sits in that stage too.
 ARG VERSION
@@ -95,8 +95,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # gVisor: the release bundle, whose published sha512 is checked before anything is run. Since
-# release/20260831 the bucket carries only the bundle — the bare `runsc` object is gone, and with it
-# the recipe `scripts/install-gvisor.sh` still uses, which 404s until it asks for this file too.
+# release/20260831 the bucket carries only the bundle — the bare `runsc` object is gone, so a
+# single-binary recipe 404s — and `scripts/install-gvisor.sh` installs this same file on a host.
 # The bundle is also what runsc now needs: it executes the binaries under `gvisor-bin/` at runtime
 # and looks for that directory beside its own, so the tree is extracted whole and left whole. Only
 # the containerd shim is dropped, this image having no containerd.
