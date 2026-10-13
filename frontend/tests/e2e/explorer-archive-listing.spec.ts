@@ -88,6 +88,14 @@ const MEMBERS: Member[] = [
   { name: 'report.txt', body: 'one thousand and one lines\n' },
 ];
 
+/** One member path that fits the widened column, and one longer than any column. */
+const FITS = 'notes/quarterly-report-2026-10.txt';
+const DEEP = 'vendor/packages/reporting/src/main/europe/reporting/export/quarterly-summary.txt';
+const LONG_MEMBERS: Member[] = [
+  { name: FITS, body: 'fits\n' },
+  { name: DEEP, body: 'one thousand and one lines\n' },
+];
+
 const ARCHIVE_NAME = 'fixture-bundle.tar.gz';
 
 test.describe('Explorer archive listing', () => {
@@ -121,6 +129,11 @@ test.describe('Explorer archive listing', () => {
 
     await expect(page.locator('.archive-summary')).toContainText('tar.gz');
     await expect(page.locator('.archive-summary')).toContainText('3 entries');
+
+    // A pane with room needs no sideways panning to read a name; the phone block below is the other half.
+    const pans = await page.locator('.archive-scroll')
+      .evaluate(el => el.scrollWidth - el.clientWidth);
+    expect(pans, 'a wide pane never needs panning to read a name').toBe(0);
   });
 
   test('a member opens as itself, and the listing is still there behind it', async ({ page }) => {
@@ -167,5 +180,114 @@ test.describe('Explorer archive listing', () => {
 
     await expect(page.locator('.archive-note-error')).toContainText('not a readable archive', { timeout: 10000 });
     await expect(page.locator('.archive-table')).toHaveCount(0);
+  });
+});
+
+// A phone gives the Name column 170px, about 24 characters, and a thumb has no hover to ask for the rest.
+// Here the listing pans sideways and an open member's path wraps.
+test.describe('Explorer archive listing on a phone', () => {
+  // Serial, because one afterAll drains the files both tests write.
+  test.describe.configure({ mode: 'serial' });
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  const written: string[] = [];
+  test.afterAll(() => {
+    for (const name of written.splice(0)) rmSync(join(projectDir(), name), { force: true });
+  });
+
+  /** Opens the archive through the project's deep link; the sidebar row a desktop spec clicks is off-screen. */
+  async function openOnPhone(page: Page, name: string, bytes: Buffer): Promise<void> {
+    writeFileSync(join(projectDir(), name), bytes);
+    await gotoProject(page);
+    await expect(page.locator('.top-bar')).toBeVisible({ timeout: 10000 });
+    await page.locator('.explorer-btn').tap();
+    const row = page.locator('.file-browser-item', { hasText: name });
+    await expect(row).toBeVisible({ timeout: 10000 });
+    await row.tap();
+  }
+
+  /** The listing's own geometry, and where the two meta columns sit while it pans. */
+  const listingGeometry = (page: Page) =>
+    page.evaluate(() => {
+      const box = (sel: string) => document.querySelector<HTMLElement>(sel)!.getBoundingClientRect();
+      const scroller = document.querySelector<HTMLElement>('.archive-scroll')!;
+      const cell = document.querySelector<HTMLElement>('.archive-cell-name')!;
+      // The button or span inside does its own clipping, so the cut is measured there.
+      const text = cell.querySelector<HTMLElement>('button, span')!;
+      const name = cell.getBoundingClientRect();
+      // The middle of the pinned size column, where a panned name passes under.
+      const size = box('.archive-cell-size');
+      const at = { x: size.left + size.width / 2, y: size.top + size.height / 2 };
+      const hit = document.elementFromPoint(at.x, at.y);
+      const reached = [...document.querySelectorAll<HTMLElement>('.archive-cell-name')]
+        .map(boxOf => boxOf.getBoundingClientRect())
+        .filter(b => at.x >= b.left && at.x <= b.right && at.y >= b.top && at.y <= b.bottom).length;
+      return {
+        pans: scroller.scrollWidth - scroller.clientWidth,
+        scrolled: scroller.scrollLeft,
+        nameLeft: Math.round(name.left),
+        room: name.width,
+        // A leftover here means the column is still too narrow for a path that fits.
+        cut: text.scrollWidth - text.clientWidth,
+        held: [size, box('.archive-cell-date')].map(r => Math.round(r.right)),
+        offscreen: box('.archive-cell-date').right - window.innerWidth,
+        // Counted together: a sample with nothing overlapping says nothing about which is on top.
+        under: reached,
+        pinnedOnTop: hit !== null && hit.closest('.archive-cell-size') !== null,
+      };
+    });
+
+  test('pans the name column with size and modified held on screen', async ({ page }) => {
+    const name = 'phone-listing.tar.gz';
+    written.push(name);
+    await openOnPhone(page, name, gzipSync(tar(LONG_MEMBERS)));
+
+    await expect(page.locator('.archive-table')).toBeVisible({ timeout: 10000 });
+
+    const before = await listingGeometry(page);
+    expect(before.room, 'the name column has no more room than the pane gives it').toBeGreaterThanOrEqual(300);
+    expect(before.cut, 'a member path that fits is not cut off').toBeLessThanOrEqual(0);
+    expect(before.pans, 'the listing does not reach past the pane at all').toBeGreaterThan(0);
+    expect(before.offscreen, 'a pinned column sits off the screen').toBeLessThanOrEqual(0.5);
+
+    // Halfway, where a name still reaches under the pinned columns; at the far end nothing overlaps.
+    const listing = page.locator('.archive-scroll');
+    await listing.evaluate(el => { el.scrollLeft = 100; });
+    const halfway = await listingGeometry(page);
+    expect(halfway.under, 'nothing is panned under the pinned columns here').toBe(1);
+    expect(halfway.pinnedOnTop, 'a panned name paints over the size column it slid under').toBe(true);
+
+    // The swipe is the browser's own, so this measures the room and the pinned columns, not the gesture.
+    await listing.evaluate(el => { el.scrollLeft = el.scrollWidth; });
+    const panned = await listingGeometry(page);
+    expect(panned.scrolled, 'the far end of the pan cannot be reached').toBeGreaterThanOrEqual(before.pans - 0.5);
+    expect(panned.held, 'the size and modified columns moved with the names').toEqual(before.held);
+    expect(panned.nameLeft, 'the names never slid sideways').toBeLessThan(before.nameLeft);
+  });
+
+  test('wraps an open member’s path instead of cutting it off', async ({ page }) => {
+    const name = 'phone-entry-name.tar.gz';
+    written.push(name);
+    await openOnPhone(page, name, gzipSync(tar(LONG_MEMBERS)));
+
+    await expect(page.locator('.archive-table')).toBeVisible({ timeout: 10000 });
+    await page.locator('.archive-name-btn').filter({ hasText: DEEP }).tap();
+    await expect(page.locator('.archive-entry-name')).toBeVisible({ timeout: 10000 });
+
+    // Fragments are counted by the y they sit on, because a clipped name still reports several.
+    const bar = await page.evaluate(() => {
+      const el = document.querySelector<HTMLElement>('.archive-entry-name')!;
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const lines = [...range.getClientRects()];
+      return {
+        lines: new Set(lines.map(r => Math.round(r.top))).size,
+        offscreen: lines.filter(r => r.right > window.innerWidth + 0.5).length,
+        back: document.querySelector<HTMLElement>('.archive-back')!.getBoundingClientRect().right,
+      };
+    });
+    expect(bar.lines, 'the path is cut to one line').toBeGreaterThanOrEqual(2);
+    expect(bar.offscreen, 'part of the path sits outside the screen').toBe(0);
+    expect(bar.back, 'the back button left the screen').toBeLessThanOrEqual(390.5);
   });
 });

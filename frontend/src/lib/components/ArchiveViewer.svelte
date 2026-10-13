@@ -213,6 +213,9 @@
         background: var(--color-surface-0);
         color: var(--color-text-primary);
         font-size: var(--text-xs);
+        container-type: inline-size;
+        container-name: archive-view;
+        --archive-date-col: 130px;
     }
 
     .archive-placeholder {
@@ -281,7 +284,7 @@
         text-align: right;
     }
     .archive-col-date, .archive-cell-date {
-        width: 130px;
+        width: var(--archive-date-col);
         color: var(--color-text-tertiary);
     }
     .archive-cell-size, .archive-cell-date {
@@ -341,5 +344,31 @@
     }
     .archive-entry :global(.cm-editor) {
         height: 100%;
+    }
+
+    @container archive-view (max-width: 560px) {
+        .archive-table {
+            min-width: 560px;
+        }
+
+        .archive-col-date, .archive-cell-date {
+            position: sticky;
+            right: 0;
+        }
+        .archive-col-size, .archive-cell-size {
+            position: sticky;
+            right: var(--archive-date-col);
+        }
+        .archive-cell-size, .archive-cell-date {
+            background: var(--color-surface-0);
+        }
+
+        .archive-entry-bar {
+            align-items: flex-start;
+        }
+        .archive-entry-name {
+            white-space: normal;
+            overflow-wrap: anywhere;
+        }
     }
 </style>
