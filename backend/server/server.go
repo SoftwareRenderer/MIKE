@@ -375,6 +375,8 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 	defer s.reg(stageLoginRateLimiter, "login rate limiter", s.loginLimiter.Stop)()
 	// Cancelled before any resource a detached operation might still be writing through is taken away.
 	defer s.reg(stageDetachedWork, "detached work", s.baseCancel)()
+
+	s.store.StartVacuumSweep(s.base)
 	// First thing built, last thing closed: every step above reads or writes through it. The pool's wait
 	// count is logged on the way out: a zero is the evidence the single connection is not the constraint.
 	defer s.reg(stageDatabase, "database", func() {

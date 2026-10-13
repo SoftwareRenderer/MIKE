@@ -106,6 +106,35 @@ keeps `rowid` as its last key column, which is what lets the role filter keep th
 in the shared index instead pushes `rowid` back and puts a temp B-tree in every conversation read. Tests:
 `backend/store/messages_turns_test.go`.
 
+## Free pages go back to the operating system
+
+A database in SQLite's default mode gives back only the pages a delete emptied at the very end of the
+file; every interior free page stays on the freelist and the file keeps that size forever. The live file
+measured 360 MB with 152 MB of it pages no row uses. `backend/store/vacuum.go` owns both halves of the
+answer.
+
+- `NewStore` puts the file in `PRAGMA auto_vacuum = INCREMENTAL`. The conversion is a `VACUUM`, because the
+  pragma is ignored on a file whose header has already been written. That rewrite is the last unbounded
+  one the file ever pays — 791 ms for this install's 360 MB file, timed at the boot that converted it —
+  and a new file takes the mode in microseconds. A refusal is logged and boot continues: such a database
+  answers correctly, it just keeps the size of everything ever deleted from it.
+- `StartVacuumSweep` truncates free pages in bursts on the server's base context. No shutdown stage names
+  it, because the detached-work stage cancels it and the database closes after that stage.
+- `vacuumFloorPages` keeps a truncation off the serialisation point until 16 MB is there to give back.
+  `vacuumBurstPages` caps one hold at 43 ms, measured on this host's disk with the log it applies included,
+  so a deeper mess unwinds over later ticks instead of in one hold.
+- **A burst is not over when it returns pages.** In WAL mode the main file lags the page count, and
+  SQLite's own auto-checkpoint waits for ~1000 dirty pages — a threshold reclamation never has to cross.
+  `reclaimFreePages` therefore checkpoints, and checkpoints again *before* measuring: a page freed inside
+  an unapplied transaction is not in the file's freelist, and `PRAGMA freelist_count` reads the file. A
+  database holding 500 free pages measured `freelist_count = 0` until its log was applied.
+- Incremental rather than FULL autovacuum. FULL moves pages inside whichever write next finds a freelist,
+  so a task deletion's cost lands on the next unrelated insert with no bound anyone chose. Here the cost
+  sits in one statement on a timer this package declares.
+- Fragmentation is out of reach and stays out. A burst truncates pages no row uses at all; it cannot
+  compact a page that is half empty. Only the boot `VACUUM` does that, which is why it runs once rather
+  than never.
+
 ## File permissions
 
 Data dir `0700`; `kanban.db` plus `-wal`/`-shm` `0600` (`backend/store/store.go`); `kanban.trace` `0600`
@@ -122,4 +151,5 @@ A failing system source panics rather than issuing a guessable ID. Shape: `word-
 ## Checking this
 
 `go test ./backend/store/` covers the transaction boundary, the schema against its scanners, the stored
-instants and the ID shapes.
+instants, the ID shapes and the free-page reclaim. `-run 'Autovacuum|DefaultMode|ReclaimFreePages'` is the
+reclaim on its own.

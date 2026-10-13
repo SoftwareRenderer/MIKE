@@ -81,6 +81,10 @@ func NewStore(dbPath string) (*Store, error) {
 	if err := pragma(db, "PRAGMA foreign_keys = ON", "enable foreign keys"); err != nil {
 		return nil, err
 	}
+
+	if err := ensureIncrementalAutovacuum(db); err != nil {
+		logging.For(logging.Store).Warnf("database is not in incremental autovacuum: %v", err)
+	}
 	s := &Store{db: db}
 	if err := s.initSchema(); err != nil {
 		return nil, fmt.Errorf("init schema: %w", err)

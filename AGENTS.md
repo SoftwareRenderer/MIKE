@@ -212,7 +212,8 @@ make test-gen-registry                                   # the generator's own t
 - **An instant that SQL compares is stored as fixed-width UTC text.** `docs/storage.md`.
 - A test that needs a write to fail halfway installs a SQLite `RAISE(ABORT)` trigger, never a hook in
   production code.
-- What is inside `tx`, the DDL, timestamps, permissions and ID generation: **`docs/storage.md`**.
+- What is inside `tx`, the DDL, timestamps, permissions, space reclamation and ID generation:
+  **`docs/storage.md`**.
 
 ## Sessions & Auth
 
