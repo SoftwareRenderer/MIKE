@@ -105,8 +105,10 @@ server, a node install, or access to the source tree.
 
 ## Contents
 
-- `mike-server` — the server.
-- `prompts/` — the templates the executor renders into a system prompt.
+- `mike-server` — the server. It carries its own copy of the prompt templates and the web app.
+- `prompts/` — the templates the executor renders into a system prompt; what is here answers for its
+  own name and the copy in the binary answers what is not, so a deleted file costs nothing. Its
+  `skills/` holds the skill packages every task is offered; an agent opens those, the server never does.
 - `sandbox/sandbox-bridge` — the program that runs inside every task container.
 - `examples/` — Dockerfiles to build a project's sandbox image from: point the project's sandbox
   settings at one and build the image. They are samples, so an update never rewrites them.
@@ -203,6 +205,12 @@ for target in "$@"; do
     # What the server reads at run time, plus the samples it never opens: the extensions tree is
     # written at run time, and examples/ is only ever opened by whoever builds an image from one.
     cp "$ROOT"/prompts/*.tmpl "$stage/prompts/"
+    # Skill packages ship as found. They are copied rather than parsed: an agent opens them through the
+    # read-only skills mount.
+    if [[ -d "$ROOT/prompts/skills" ]]; then
+        cp -R "$ROOT/prompts/skills" "$stage/prompts/skills"
+        find "$stage/prompts/skills" -type f -exec chmod 0644 {} +
+    fi
     cp "$ROOT/extensions/README.md" "$stage/extensions/"
     cp "$ROOT/examples/kanban.Dockerfile" "$ROOT/examples/pi.Dockerfile" "$stage/examples/"
     cp "$ROOT/LICENSE" "$ROOT/NOTICE" "$ROOT/THIRD_PARTY_NOTICES.md" "$stage/"

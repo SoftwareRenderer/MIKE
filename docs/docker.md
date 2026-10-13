@@ -16,7 +16,8 @@ stops is `docs/lifecycle.md`.
 - **The image is built from sources, never from this tree's outputs.** `.dockerignore` keeps
   `frontend/dist`, the `make release` packages under `dist/`, the committed bridge and
   `node_modules` out of the context. Stage 2 receives `frontend/dist` from stage 1 because that
-  directory is what `//go:embed` reads.
+  directory is what `//go:embed` reads. `prompts/` goes in whole, tracked skill packages included, so a
+  deployed task is offered the same bundled skills a source run is.
 - **The server binary is a release build and both binaries are CGO-free.** A `-tags release` build
   serves the frontend it carries and refuses `--frontend-dist`. `CGO_ENABLED=0` keeps the bridge
   runnable inside a guest whose C library is not this one.

@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"mike/backend/prompts"
 	"mike/backend/server"
 	"mike/backend/store"
 	"mike/backend/tls"
@@ -70,6 +71,12 @@ func main() {
 		log.Fatalf("Configuration error: %v", err)
 	}
 	logging.For(logging.Main).Infof("serving the frontend from: %s", assetSource)
+
+	promptTemplates, err := embeddedPromptTemplates()
+	if err != nil {
+		log.Fatalf("Configuration error: %v", err)
+	}
+	prompts.SetCoreFS(promptTemplates)
 
 	// Potentially contains API keys and passwords, so this is never on by default.
 	if cfg.PProf {

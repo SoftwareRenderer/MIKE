@@ -93,7 +93,9 @@ The `Apply` phase is triggered by the user:
 
 1. Re-hash `release.tar.gz` against the recorded digest to ensure no tampering occurred.
 2. Unpack into a temporary directory inside the install directory. Only the files the server reads are
-   kept: `mike-server`, `sandbox-bridge` and `prompts/*.tmpl`.
+   kept: `mike-server`, `sandbox-bridge` and `prompts/*.tmpl`. The swap keeps the operator's text current;
+   a template missing from the install renders from the copy compiled into the binary
+   (`backend/prompts/layer.go`) rather than failing the turn.
 3. Determine which files to swap based on the paths currently used by the server.
 4. Backup the current release to `.update-backup/` and rename new files into place.
 5. Record the staged version and backup path, then clear the prepared state.

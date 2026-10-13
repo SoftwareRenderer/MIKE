@@ -149,9 +149,9 @@ RUN mkdir -p /etc/containers/registries.conf.d && \
 WORKDIR /mike
 COPY --from=go  /out/mike             /mike/mike
 COPY --from=go  /out/sandbox-bridge   /mike/sandbox-bridge
-# The templates only: `.dockerignore` keeps `prompts/skills/` out of the context, so a deployed
-# image ships no skills — `prompts.SkillsDir()` returns empty and the sandbox skips that mount.
-COPY prompts/*.tmpl /mike/prompts/
+# The templates, and the tracked skill packages beside them. A deployed task is offered those skills at
+# the read-only /mnt/skills bind; an untracked package stays out of the context.
+COPY prompts/ /mike/prompts/
 COPY scripts/docker-entrypoint.sh /usr/local/bin/mike-entrypoint.sh
 COPY scripts/mike-healthcheck.sh  /usr/local/bin/mike-healthcheck
 RUN chmod 0755 /mike/mike /mike/sandbox-bridge /usr/local/bin/mike-entrypoint.sh /usr/local/bin/mike-healthcheck && \

@@ -9,6 +9,7 @@ package prompts
 
 import (
 	"bytes"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -92,19 +93,20 @@ func report(kind, dir, name string, err error) {
 	logging.For(logging.Prompts).Infof("translation pack %s: %s template %s: %v — core English answers for it", dir, kind, name, err)
 }
 
-// parseCore builds a template set from core's files. An empty file list is
-// os.ErrNotExist, which is what a missing prompts directory has always meant.
-func parseCore(files []string) (*template.Template, error) {
-	if len(files) == 0 {
+// parseCore builds a template set from core's names, read through the layers of layer.go. An empty name
+// list is os.ErrNotExist, the answer a missing prompts directory gives.
+func parseCore(names []string) (*template.Template, error) {
+	if len(names) == 0 {
 		return nil, os.ErrNotExist
 	}
 	// Funcs on every entry point: an unregistered function is a parse error, so a
 	// pack template using `inc` has to find it here or it would parse at install
 	// (FuncMap() is what the installer checks with) and fail at render.
-	return template.New("prompts").Funcs(funcs).ParseFiles(files...)
+	return template.New("prompts").Funcs(funcs).ParseFS(coreFS(), names...)
 }
 
-// applyOverlay redefines the pack's templates over an existing set, one file at a time.
+// applyOverlay redefines the pack's templates over an existing set, one file at a time. It is the one
+// template read that is not an fs.FS: the extension installer owns that directory's lifetime.
 // text/template replaces a same-named definition and leaves the set untouched when a file fails
 // to parse, so a broken pack template loses only itself to core's English one, and a pack may add
 // a sub-template its own base.tmpl calls. Glob's sorted names keep a case-insensitive clash
@@ -125,17 +127,23 @@ func applyOverlay(set *template.Template, dir string) {
 	}
 }
 
-// render resolves one template and renders it: core's files first, then the
+// render resolves one template out of its own file, so a template unrelated to this render cannot break
+// it.
+func render(name string, data any) (string, error) {
+	return renderSet([]string{name}, name, data)
+}
+
+// renderSet resolves one template against a set of core files: core first, then the
 // pack's over them, and core's answer again if the pack's fails to execute.
 //
 // The execute retry re-parses core alone rather than mutating the set, so a pack
 // template that breaks on *this turn's data* (a field it invented, a range over
 // something that is not a list) costs only its own template, and the cost is one
-// extra parse on the path that is already reading every template from disk.
-func render(coreFiles []string, name string, data any) (string, error) {
+// extra parse on the path that is already reading every template anyway.
+func renderSet(coreNames []string, name string, data any) (string, error) {
 	state := overlay.Load()
 
-	set, err := parseCore(coreFiles)
+	set, err := parseCore(coreNames)
 	if err != nil {
 		return "", err
 	}
@@ -153,7 +161,7 @@ func render(coreFiles []string, name string, data any) (string, error) {
 	}
 	report("execute", state.dir, name, err)
 
-	core, err := parseCore(coreFiles)
+	core, err := parseCore(coreNames)
 	if err != nil {
 		return "", err
 	}
@@ -164,26 +172,9 @@ func render(coreFiles []string, name string, data any) (string, error) {
 	return buf.String(), nil
 }
 
-// coreGlob returns core's whole template set. The system prompt needs all of it because base.tmpl
-// calls the plan-mode and explore-mode sub-templates, which resolve by the name their file
-// *defines* rather than by its file name — a name a translating pack has to keep.
+// coreGlob returns core's whole template set, both layers, each name once. The system prompt needs all of
+// it because base.tmpl calls the plan-mode and explore-mode sub-templates, which resolve by the name their
+// file *defines* rather than by its file name — a name a translating pack has to keep.
 func coreGlob() ([]string, error) {
-	files, err := filepath.Glob(filepath.Join(promptDir(), "*.tmpl"))
-	if err != nil {
-		return nil, err
-	}
-	return files, nil
-}
-
-// coreFile returns core's single template file for the renders that own exactly
-// one (or, for the prompt pairs, two) files. Keeping each entry point's core file
-// set the size it has always been means a template unrelated to this render
-// cannot break it.
-func coreFile(names ...string) []string {
-	dir := promptDir()
-	files := make([]string, 0, len(names))
-	for _, n := range names {
-		files = append(files, filepath.Join(dir, n))
-	}
-	return files
+	return fs.Glob(coreFS(), "*.tmpl")
 }

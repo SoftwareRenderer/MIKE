@@ -23,7 +23,8 @@ own machine against real repositories.
   with the extension. Don't hand-edit. Source is `../MIKE-extensions/`, whose `registry.json` is generated
   — never edit it by hand.
 - `Makefile` — build/run/test entry points. `data/` — SQLite DB, TLS certs, trace files. `prompts/` — LLM
-  prompt templates. `Dockerfile` + `compose.yaml` + `.env.example` — deployment.
+  prompt templates, which the binary also carries, and the bundled skill packages. `Dockerfile` +
+  `compose.yaml` + `.env.example` — deployment.
 - `.env` is the only source of the master password, the encryption key and `MIKE_ALLOWED_HOSTS`.
 
 ## Non-Negotiables

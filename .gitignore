@@ -19,7 +19,11 @@ frontend/test-results
 test-results
 test-results2
 .worktrees/*
-prompts/skills/
+# The bundled skill root ships one tracked package: plan-first, which the executor's plan route and the
+# mock LLM both key off. The `*` matters because git does not descend into an excluded directory, so a
+# `!` rule under a bare `prompts/skills/` exclusion would never be read.
+prompts/skills/*
+!prompts/skills/plan-first/
 TODO.md
 
 # Compiled binaries

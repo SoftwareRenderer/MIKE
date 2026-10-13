@@ -68,11 +68,13 @@ Reachability is determined by `MIKE_LISTEN` and Host pinning (`MIKE_ALLOWED_HOST
 - Built with `CGO_ENABLED=0` (uses modernc.org SQLite).
 - Archives are byte-comparable (sorted names, zeroed mtime).
 - The SPA is embedded into the binary via `go:embed`. In `-tags release` builds, `MIKE_FRONTEND_DIST` is disabled.
+- The prompt templates are embedded the same way and the shipped `prompts/` directory still answers for
+  its own names, so an install that loses a template still renders. `docs/i18n.md → Prompt templates`.
 
 **Archive Layout:**
 - `mike-server` (executable)
 - `extensions/` (README only)
-- `prompts/`
+- `prompts/` (the templates a task is prompted from, and `skills/` — the skill packages it is offered)
 - `sandbox/` (`sandbox-bridge`)
 - `examples/` (the sample sandbox Dockerfiles; the server reads neither of them)
 - Licences and README.

@@ -41,13 +41,17 @@ installation.
   `prompts.skillReadLimit`. A symlinked package *directory* never reaches that code:
   `os.ReadDir` reports it as a link, which is not a directory.
 - The bundled directory keeps its resolution (`prompts.SkillsDir()` beside the executable or the working
-  directory) and stays gitignored: a checkout with no bundled skills lists only the project's, which is
-  the state `docs/testing.md` describes for the mock LLM's plan-mode branch.
+  directory). `plan-first` is tracked at `prompts/skills/plan-first/` and travels in the release package
+  and the image, so every checkout advertises it. That is the state `docs/testing.md` describes for the
+  mock LLM's plan-mode branch. What an operator adds beside it stays local: `.gitignore` excludes
+  `prompts/skills/*` except that one package.
 
 ## Checking this
 
 `go test ./backend/prompts/` fails if the frontmatter grammar, the one-level scan, the suffix rule or the
-linked/oversized skip regresses.
+linked/oversized skip regresses. `TestShippedPlanFirstSkillIsDiscoverable` fails if the tracked package's
+frontmatter stops naming itself — the edit that removes the plan route from every system prompt while
+breaking nothing else.
 
 - `go test ./backend/sandbox/` fails if the bound directory stops matching the scanned one.
   `TestProjectOptsCarriesTheProjectSkillDirectory`, `TestReadOnlyBindArgBindsOnlyWhatExists`.

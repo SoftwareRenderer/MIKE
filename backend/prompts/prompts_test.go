@@ -326,6 +326,30 @@ func TestDiscoverSkillsCollisionsKeepsBoth(t *testing.T) {
 	}
 }
 
+// The repository's own bundled skill is what tells every task the plan route exists, and it ships in the
+// release package and the image. A frontmatter edit that drops `name` or `description` takes it out of
+// every system prompt without failing anything else, so this is the gate that notices.
+func TestShippedPlanFirstSkillIsDiscoverable(t *testing.T) {
+	dir := filepath.Join("..", "..", "prompts", "skills")
+	skills := DiscoverSkills(SkillRoot{Dir: dir, Origin: SkillOriginBundled})
+
+	var found *Skill
+	for i, skill := range skills {
+		if skill.Name == "plan-first" {
+			found = &skills[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("%s discovers %+v, want the shipped plan-first: without it no task is told a plan route exists", dir, skills)
+	}
+	if found.Description == "" {
+		t.Error("the shipped plan-first has no description, which is what a task selects it on")
+	}
+	if want := filepath.Join("plan-first", "SKILL.md"); !strings.HasSuffix(found.Location, want) {
+		t.Errorf("the shipped plan-first is discovered at %q, want a path ending in %q", found.Location, want)
+	}
+}
+
 // TestDiscoverSkillsSkipsLinkedAndBoundedSKILL: a linked or over-cap SKILL.md is skipped, not read.
 func TestDiscoverSkillsSkipsLinkedAndBoundedSKILL(t *testing.T) {
 	root := t.TempDir()

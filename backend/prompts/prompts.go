@@ -1,5 +1,6 @@
-// Package prompts renders the LLM prompt templates under prompts/ and discovers agent
-// skills, keeping template loading and path resolution out of the execution loop.
+// Package prompts renders the LLM prompt templates and discovers agent skills, keeping template loading
+// and path resolution out of the execution loop. The rules for which copy of a template answers live in
+// layer.go and overlay.go.
 package prompts
 
 import (
@@ -86,7 +87,8 @@ func FuncMap() template.FuncMap {
 	return fm
 }
 
-// promptDir resolves the prompts directory. Tests override it.
+// promptDir resolves the prompts directory, which both overrides the compiled-in templates and holds the
+// bundled skills. Tests override it.
 var promptDir = func() string {
 	return resolvePromptDir()
 }
@@ -281,7 +283,7 @@ func stripQuotes(s string) string {
 	return s
 }
 
-// RenderSystemPrompt renders the system prompt from templates loaded from disk.
+// RenderSystemPrompt renders the system prompt from the core templates.
 //
 // Every core template is parsed, because base.tmpl calls the plan-mode and explore-mode
 // sub-templates; a pack's templates are then laid over them by name (see overlay.go), and core
@@ -290,13 +292,13 @@ func RenderSystemPrompt(data PromptData) (string, error) {
 	if data.Locale == "" {
 		data.Locale = ActiveLocale()
 	}
-	files, err := coreGlob()
+	names, err := coreGlob()
 	if err != nil {
 		return "", err
 	}
 	// Render by name: Execute() would render the alphabetically-first file, so
 	// a new template could hijack the system prompt.
-	return render(files, "base.tmpl", data)
+	return renderSet(names, "base.tmpl", data)
 }
 
 // MergeConflictData holds the variables for the merge conflict resolution prompt.
@@ -314,7 +316,7 @@ type MergeConflictData struct {
 // Parsed with FuncMap like every other entry point: a pack template using `inc` is accepted
 // at install (validateI18N parses with FuncMap) and would otherwise fail here at render.
 func RenderMergeConflictPrompt(data MergeConflictData) (string, error) {
-	return render(coreFile("merge_conflict.tmpl"), "merge_conflict.tmpl", data)
+	return render("merge_conflict.tmpl", data)
 }
 
 // SummarizeData holds the variables for the context summarization prompt.
@@ -348,11 +350,11 @@ func RenderAnswerQuestionPrompt(data AnswerQuestionData) (string, string, error)
 // renderPair renders a prompt's two halves: the system template, and the user message that carries
 // what the system message may not hold on its own.
 func renderPair(systemFile, userFile string, data any) (string, string, error) {
-	system, err := render(coreFile(systemFile), systemFile, data)
+	system, err := render(systemFile, data)
 	if err != nil {
 		return "", "", err
 	}
-	user, err := render(coreFile(userFile), userFile, data)
+	user, err := render(userFile, data)
 	if err != nil {
 		return "", "", err
 	}

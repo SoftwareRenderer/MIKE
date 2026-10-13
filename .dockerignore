@@ -21,7 +21,6 @@ data/
 .worktrees
 worktrees
 extensions/
-prompts/skills/
 TODO.md
 docs/
 test-results
@@ -45,7 +44,9 @@ dist/
 sandbox/sandbox-bridge
 sandbox/sandbox-bridge.srcs
 
-# ── Not needed by either build stage ─────────────────────────────────────────
+# ── Not needed by either build stage ─────────────────────────────────────
+# `prompts/` IS context, skills included: the tracked plan-first package ships so a deployed task is
+# offered the plan route. An untracked package reaches the image only if it is in the tree it is built from.
 # Sample sandbox Dockerfiles: they ship in the release package, not in the image.
 examples/
 **/__pycache__

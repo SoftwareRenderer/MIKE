@@ -26,7 +26,8 @@ func resetOverlay(t *testing.T) {
 	SetOverlay("", "")
 }
 
-// writePack materializes a pack's template directory and returns its path.
+// writePack materializes a directory of template files (a pack's, or the disk layer's) and returns its
+// path.
 func writePack(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
