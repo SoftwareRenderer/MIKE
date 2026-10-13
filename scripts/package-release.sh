@@ -33,6 +33,9 @@ if ! compgen -G "$ROOT/prompts/*.tmpl" > /dev/null; then
     echo "package-release: no prompts/*.tmpl; nothing is packaged without the prompt templates" >&2
     exit 1
 fi
+
+require prompts/README.md
+require sandbox/README.md
 require extensions/README.md
 require examples/kanban.Dockerfile
 require examples/pi.Dockerfile
@@ -112,7 +115,9 @@ server, a node install, or access to the source tree.
 - `prompts/` — the templates the executor renders into a system prompt; what is here answers for its
   own name and the copy in the binary answers what is not, so a deleted file costs nothing. Its
   `skills/` holds the skill packages every task is offered; an agent opens those, the server never does.
-- `sandbox/sandbox-bridge` — the program that runs inside every task container.
+  Its `README.md` says what editing a template does and how to undo it.
+- `sandbox/` — `sandbox-bridge`, the program that runs inside every task container, and the `README.md`
+  that names what it is.
 - `examples/` — Dockerfiles to build a project's sandbox image from: point the project's sandbox
   settings at one and build the image. They are samples, so an update never rewrites them.
 - `extensions/` — where installed extensions are written. Only its README ships here; the rest
@@ -207,19 +212,21 @@ for target in "$@"; do
 
     # What the server reads at run time, plus the samples it never opens: the extensions tree is
     # written at run time, and examples/ is only ever opened by whoever builds an image from one.
-    cp "$ROOT"/prompts/*.tmpl "$stage/prompts/"
+    cp "$ROOT"/prompts/*.tmpl "$ROOT/prompts/README.md" "$stage/prompts/"
     # Skill packages ship as found. They are copied rather than parsed: an agent opens them through the
     # read-only skills mount.
     if [[ -d "$ROOT/prompts/skills" ]]; then
         cp -R "$ROOT/prompts/skills" "$stage/prompts/skills"
         find "$stage/prompts/skills" -type f -exec chmod 0644 {} +
     fi
+    cp "$ROOT/sandbox/README.md" "$stage/sandbox/"
     cp "$ROOT/extensions/README.md" "$stage/extensions/"
     cp "$ROOT/examples/kanban.Dockerfile" "$ROOT/examples/pi.Dockerfile" "$stage/examples/"
     cp "$ROOT/LICENSE" "$ROOT/NOTICE" "$ROOT/THIRD_PARTY_NOTICES.md" "$stage/"
 
     write_readme "$stage/README.md" "$name" "$VERSION"
-    chmod 0644 "$stage/README.md" "$stage"/prompts/*.tmpl "$stage/extensions/README.md" \
+    chmod 0644 "$stage/README.md" "$stage"/prompts/*.tmpl "$stage/prompts/README.md" \
+        "$stage/sandbox/README.md" "$stage/extensions/README.md" \
         "$stage"/examples/*.Dockerfile "$stage"/LICENSE "$stage"/NOTICE "$stage"/THIRD_PARTY_NOTICES.md
 
     tar "${TAR_OPTS[@]}" -cf - -C "$STAGING_ROOT" "$name" | gzip -n -9 > "$archive"
