@@ -17,9 +17,9 @@ import (
 	"mike/pkg/logging"
 )
 
-// Installing a release moves four groups of files — the binary, the bridge, the templates, the Dockerfiles
-// — and stops there: the running process keeps the inode it was started from, so nothing about the current
-// server changes until it is restarted, which the same click asks for.
+// Installing a release moves three groups of files — the binary, the bridge, the templates — and stops
+// there: the running process keeps the inode it was started from, so nothing about the current server
+// changes until it is restarted, which the same click asks for.
 const (
 	// stagingPrefix names the throwaway directory an install unpacks into — inside the install directory,
 	// so the swap is a rename on one filesystem.
@@ -156,14 +156,6 @@ func (s *Service) swapPlan(release string) ([]swapFile, []string, []string, erro
 		return nil, nil, nil, err
 	}
 	files = append(files, prompts...)
-
-	for _, name := range []string{"kanban.Dockerfile", "pi.Dockerfile"} {
-		src := filepath.Join(release, "sandbox", name)
-		if _, err := os.Stat(src); err != nil {
-			continue
-		}
-		files = append(files, swapFile{src: src, dst: filepath.Join(s.install.Dir, "sandbox", name), mode: 0o644})
-	}
 	return files, stale, notes, nil
 }
 

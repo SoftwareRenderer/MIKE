@@ -34,8 +34,8 @@ if ! compgen -G "$ROOT/prompts/*.tmpl" > /dev/null; then
     exit 1
 fi
 require extensions/README.md
-require sandbox/kanban.Dockerfile
-require sandbox/pi.Dockerfile
+require examples/kanban.Dockerfile
+require examples/pi.Dockerfile
 require LICENSE
 require NOTICE
 require THIRD_PARTY_NOTICES.md
@@ -107,8 +107,9 @@ server, a node install, or access to the source tree.
 
 - `mike-server` — the server.
 - `prompts/` — the templates the executor renders into a system prompt.
-- `sandbox/sandbox-bridge` — the program that runs inside every task container, plus the
-  Dockerfiles a project's sandbox image is built from.
+- `sandbox/sandbox-bridge` — the program that runs inside every task container.
+- `examples/` — Dockerfiles to build a project's sandbox image from: point the project's sandbox
+  settings at one and build the image. They are samples, so an update never rewrites them.
 - `extensions/` — where installed extensions are written. Only its README ships here; the rest
   of the tree is created by Settings → Extensions.
 - `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`
@@ -145,7 +146,8 @@ because a passkey belongs to a name.
 
 The working directory: `data/` (database, TLS material, flight recorder), `.worktrees/`,
 `extensions/`, and the `prompts/` and `sandbox/` directories beside them. Every one of those is
-found relative to where the server is started, so start it from here.
+found relative to where the server is started, so start it from here. `examples/` is the one
+directory nothing is written to or read from while the server runs.
 
 ## Verifying the download
 
@@ -180,7 +182,7 @@ for target in "$@"; do
     archive="$OUT/$name.tar.gz"
 
     rm -rf "$stage"
-    mkdir -p "$stage/extensions" "$stage/prompts" "$stage/sandbox"
+    mkdir -p "$stage/extensions" "$stage/examples" "$stage/prompts" "$stage/sandbox"
 
     # The server is built as a release: it reads no frontend directory. The bridge takes no tag.
     CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
@@ -198,15 +200,16 @@ for target in "$@"; do
         fi
     done
 
-    # The three runtime directories, and nothing else: the extensions tree is written at run time.
+    # What the server reads at run time, plus the samples it never opens: the extensions tree is
+    # written at run time, and examples/ is only ever opened by whoever builds an image from one.
     cp "$ROOT"/prompts/*.tmpl "$stage/prompts/"
     cp "$ROOT/extensions/README.md" "$stage/extensions/"
-    cp "$ROOT/sandbox/kanban.Dockerfile" "$ROOT/sandbox/pi.Dockerfile" "$stage/sandbox/"
+    cp "$ROOT/examples/kanban.Dockerfile" "$ROOT/examples/pi.Dockerfile" "$stage/examples/"
     cp "$ROOT/LICENSE" "$ROOT/NOTICE" "$ROOT/THIRD_PARTY_NOTICES.md" "$stage/"
 
     write_readme "$stage/README.md" "$name" "$VERSION"
     chmod 0644 "$stage/README.md" "$stage"/prompts/*.tmpl "$stage/extensions/README.md" \
-        "$stage"/sandbox/*.Dockerfile "$stage"/LICENSE "$stage"/NOTICE "$stage"/THIRD_PARTY_NOTICES.md
+        "$stage"/examples/*.Dockerfile "$stage"/LICENSE "$stage"/NOTICE "$stage"/THIRD_PARTY_NOTICES.md
 
     tar "${TAR_OPTS[@]}" -cf - -C "$STAGING_ROOT" "$name" | gzip -n -9 > "$archive"
     echo "package-release: $archive"

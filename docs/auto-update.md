@@ -92,12 +92,16 @@ Stale staging directories, partial downloads, or temporary verification trees ar
 The `Apply` phase is triggered by the user:
 
 1. Re-hash `release.tar.gz` against the recorded digest to ensure no tampering occurred.
-2. Unpack into a temporary directory inside the install directory. Only specified files (`mike-server`, `sandbox-bridge`, `prompts/*.tmpl`, `sandbox/*.Dockerfile`) are kept.
+2. Unpack into a temporary directory inside the install directory. Only the files the server reads are
+   kept: `mike-server`, `sandbox-bridge` and `prompts/*.tmpl`.
 3. Determine which files to swap based on the paths currently used by the server.
 4. Backup the current release to `.update-backup/` and rename new files into place.
 5. Record the staged version and backup path, then clear the prepared state.
 
 Rolling back is a manual process using the backup directory.
+
+A release ships the sample Dockerfiles under `examples/` and installs nothing there: the swap covers what
+the running server opens, and nothing opens a sample. A person who edited one in place keeps the edit.
 
 ## Restart
 

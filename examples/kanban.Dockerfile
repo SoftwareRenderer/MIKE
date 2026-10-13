@@ -3,7 +3,7 @@
 # Full dev stack: Go backend, Svelte/Vite frontend, gVisor sandboxing,
 # Playwright e2e tests, Pi coding agent.
 #
-# Build:  docker build -f sandbox/kanban.Dockerfile -t kanban-dev .
+# Build:  docker build -f examples/kanban.Dockerfile -t kanban-dev .
 # Run:    docker run --rm -it -v $(pwd):/app kanban-dev
 
 FROM ubuntu:24.04

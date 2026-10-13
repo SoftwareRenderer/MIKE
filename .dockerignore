@@ -42,6 +42,8 @@ sandbox/sandbox-bridge
 sandbox/sandbox-bridge.srcs
 
 # ── Not needed by either build stage ─────────────────────────────────────────
+# Sample sandbox Dockerfiles: they ship in the release package, not in the image.
+examples/
 **/__pycache__
 LICENSE
 NOTICE

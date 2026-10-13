@@ -102,6 +102,8 @@ func stageFixtureFor(t *testing.T, version string, archive []byte) *stageFixture
 	write(t, bridge, "OLD-BRIDGE", 0o755)
 	write(t, filepath.Join(dir, "prompts", "old.tmpl"), "REMOVED-IN-NEW-RELEASE", 0o644)
 	write(t, filepath.Join(dir, "prompts", "system.tmpl"), "OLD-PROMPT", 0o644)
+	// A shipped sample the operator edited in place, which is what an install must leave alone.
+	write(t, filepath.Join(dir, "examples", "kanban.Dockerfile"), "EDITED-BY-OPERATOR", 0o644)
 
 	fetcher := &fakeFetcher{dlBody: archive}
 	if archive != nil {
@@ -195,16 +197,17 @@ func read(t *testing.T, path string) string {
 func goodArchive(t *testing.T) []byte {
 	t.Helper()
 	return releaseArchive(t, "1.4.2", "linux", "amd64", map[string]string{
-		"mike-server":               "NEW-BINARY",
-		"prompts/system.tmpl":       "NEW-PROMPT",
-		"sandbox/sandbox-bridge":    "NEW-BRIDGE",
-		"sandbox/kanban.Dockerfile": "FROM scratch",
-		"README.md":                 "release notes",
+		"mike-server":                "NEW-BINARY",
+		"prompts/system.tmpl":        "NEW-PROMPT",
+		"sandbox/sandbox-bridge":     "NEW-BRIDGE",
+		"examples/kanban.Dockerfile": "FROM scratch",
+		"README.md":                  "release notes",
 	})
 }
 
-// Installing moves every file the release ships onto the path *this* server uses and keeps what it
-// replaced; the running process is untouched until it is restarted.
+// Installing moves the files the server reads onto the path *this* server uses and keeps what it replaced;
+// the running process is untouched until it is restarted. A sample the release ships is not a file the
+// server reads, so it is not installed over.
 func TestInstallPutsTheReleaseInPlace(t *testing.T) {
 	f := stageFixtureFor(t, "1.4.2", goodArchive(t))
 	f.check(t)
@@ -213,8 +216,8 @@ func TestInstallPutsTheReleaseInPlace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	if prepared.Version != "1.4.2" || prepared.Files != 4 || prepared.SHA256 != digestHex(f.archive) {
-		t.Errorf("prepared = %+v, want 1.4.2 over four files at the archive's digest", prepared)
+	if prepared.Version != "1.4.2" || prepared.Files != 3 || prepared.SHA256 != digestHex(f.archive) {
+		t.Errorf("prepared = %+v, want 1.4.2 over three files at the archive's digest", prepared)
 	}
 	// The automatic half changes nothing the server runs; only the archive and its record appear.
 	if got := read(t, f.exe); got != "OLD-BINARY" {
@@ -238,8 +241,10 @@ func TestInstallPutsTheReleaseInPlace(t *testing.T) {
 	if got := read(t, filepath.Join(f.dir, "prompts", "system.tmpl")); got != "NEW-PROMPT" {
 		t.Errorf("the prompt template holds %q", got)
 	}
-	if got := read(t, filepath.Join(f.dir, "sandbox", "kanban.Dockerfile")); got != "FROM scratch" {
-		t.Errorf("the Dockerfile holds %q", got)
+	// The release ships a sample under examples/ and installs nothing there: what a person edited in
+	// place is theirs, and no code reads the shipped copy.
+	if got := read(t, filepath.Join(f.dir, "examples", "kanban.Dockerfile")); got != "EDITED-BY-OPERATOR" {
+		t.Errorf("the install rewrote the shipped sample with %q", got)
 	}
 
 	// The binary stays executable: a release that lands mode 0644 will not start.
@@ -271,8 +276,8 @@ func TestInstallPutsTheReleaseInPlace(t *testing.T) {
 		t.Errorf("the dropped template was not kept: %q", got)
 	}
 
-	if res.Version != "1.4.2" || res.BackupPath != backup || len(res.Replaced) != 4 {
-		t.Errorf("result = %+v, want 1.4.2 with the backup path and four replaced files", res)
+	if res.Version != "1.4.2" || res.BackupPath != backup || len(res.Replaced) != 3 {
+		t.Errorf("result = %+v, want 1.4.2 with the backup path and three replaced files", res)
 	}
 	if res.SHA256 != digestHex(f.archive) {
 		t.Errorf("result digest = %q, want the archive's own digest", res.SHA256)

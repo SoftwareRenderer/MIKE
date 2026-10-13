@@ -73,7 +73,8 @@ Reachability is determined by `MIKE_LISTEN` and Host pinning (`MIKE_ALLOWED_HOST
 - `mike-server` (executable)
 - `extensions/` (README only)
 - `prompts/`
-- `sandbox/` (`sandbox-bridge` and Dockerfiles)
+- `sandbox/` (`sandbox-bridge`)
+- `examples/` (the sample sandbox Dockerfiles; the server reads neither of them)
 - Licences and README.
 
 Extract, `cd` into the directory, and run.
