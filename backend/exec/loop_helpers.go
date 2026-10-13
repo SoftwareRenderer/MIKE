@@ -539,7 +539,7 @@ func (te *TaskExecutor) prepareMergeConflictTurn(setup *taskExecSetup, lc *loopC
 	lc.detector.clearHints()
 	te.flushAdvisories(setup, lc)
 	te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.TurnStatusEvent("running", "Resolving merge conflicts"))
-	lc.pendingToolCalls = nil
+	lc.clearToolCalls()
 	lc.assistantContent.Reset()
 	lc.reasoningContent.Reset()
 	lc.finishReason = ""

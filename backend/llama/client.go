@@ -752,36 +752,73 @@ func hasContent(choice types.ChatChoice) bool {
 	return false
 }
 
-// MergeToolCalls merges streaming tool call deltas by index into complete tool calls.
-func MergeToolCalls(existing []types.ChatToolCall, deltas []types.ChatToolCall) []types.ChatToolCall {
-	idxMap := make(map[int]int)
-	for i, tc := range existing {
-		idxMap[tc.Index] = i
-	}
+// ToolCallAccumulator joins a stream's tool-call deltas into complete calls, keyed by the stream
+// index each delta arrives on. Each call's arguments go into one growable buffer: joining them
+// into a string after every delta copies the whole prefix and costs the square of their size on
+// the goroutine that reads the provider's socket.
+//
+// A snapshot from Calls holds a view onto the buffer as it stood at that moment, since a buffer
+// only ever writes past the bytes it has handed out.
+type ToolCallAccumulator struct {
+	order []int                // stream indexes, in the order their calls opened
+	byIdx map[int]*toolCallBuf // stream index -> the call accumulating there
+}
 
-	for _, delta := range deltas {
-		pos, ok := idxMap[delta.Index]
-		isNew := !ok
-		if isNew {
-			pos = len(existing)
-			idxMap[delta.Index] = pos
-			existing = append(existing, delta)
+// toolCallBuf is one call being assembled, under the stream index it arrived on.
+type toolCallBuf struct {
+	id   string
+	name string
+	typ  string
+	args strings.Builder
+}
+
+// Add folds one frame's deltas into the calls they belong to: an unknown stream index opens a
+// call, a known one continues it. A name or argument piece is appended; an id or type replaces
+// what was there, because a provider sends those whole.
+func (a *ToolCallAccumulator) Add(deltas []types.ChatToolCall) {
+	for _, d := range deltas {
+		buf := a.byIdx[d.Index]
+		if buf == nil {
+			if a.byIdx == nil {
+				a.byIdx = make(map[int]*toolCallBuf)
+			}
+			buf = &toolCallBuf{}
+			a.byIdx[d.Index] = buf
+			a.order = append(a.order, d.Index)
 		}
-		if !isNew {
-			if delta.ID != "" {
-				existing[pos].ID = delta.ID
-			}
-			if delta.Function.Name != "" {
-				existing[pos].Function.Name += delta.Function.Name
-			}
-			if delta.Function.Arguments != "" {
-				existing[pos].Function.Arguments += delta.Function.Arguments
-			}
-			if delta.Type != "" {
-				existing[pos].Type = delta.Type
-			}
+		if d.ID != "" {
+			buf.id = d.ID
+		}
+		if d.Type != "" {
+			buf.typ = d.Type
+		}
+		if d.Function.Name != "" {
+			buf.name += d.Function.Name
+		}
+		if d.Function.Arguments != "" {
+			buf.args.WriteString(d.Function.Arguments)
 		}
 	}
+}
 
-	return existing
+// Calls returns the calls opened so far, in the order their streams opened.
+func (a *ToolCallAccumulator) Calls() []types.ChatToolCall {
+	if len(a.order) == 0 {
+		return nil
+	}
+	out := make([]types.ChatToolCall, 0, len(a.order))
+	for _, idx := range a.order {
+		buf := a.byIdx[idx]
+		call := types.ChatToolCall{Index: idx, ID: buf.id, Type: buf.typ}
+		call.Function.Name = buf.name
+		call.Function.Arguments = buf.args.String()
+		out = append(out, call)
+	}
+	return out
+}
+
+// Reset drops every call, so a call that never finished leaves nothing to the next one.
+func (a *ToolCallAccumulator) Reset() {
+	a.order = nil
+	a.byIdx = nil
 }

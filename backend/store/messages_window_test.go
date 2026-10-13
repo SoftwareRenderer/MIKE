@@ -333,6 +333,8 @@ func TestConversationReadsDoNotSortInATempBTree(t *testing.T) {
 
 	threadWhere, threadArgs := conversationWhere("task-1", "thread-1", nil, nil)
 	taskWhere, taskArgs := conversationWhere("task-1", "", nil, nil)
+	floor := messageKey{at: "2024-06-15T12:00:00.000000000Z", rowid: 3}
+	windowedWhere, windowedArgs := conversationWhere("task-1", "thread-1", nil, &floor)
 	window := func(where string) string {
 		return messageKeyCols + where + ` ` + newestFirstOrder + ` LIMIT 10`
 	}
@@ -347,7 +349,8 @@ func TestConversationReadsDoNotSortInATempBTree(t *testing.T) {
 		{"thread of one task", taskThreadMessagesSQL, []any{"task-1", "thread-1"}},
 		{"whole task read", taskMessagesAllSQL, []any{"task-1"}},
 		{"newest row of a thread", lastMessageInThreadSQL, []any{"thread-1"}},
-		{"newest summary of a thread", lastSummarizationSQL, []any{"thread-1"}},
+		{"newest summary of a thread", newestSummarizationSQL, []any{"thread-1"}},
+		{"read from a summary onward", conversationRowsSQL + windowedWhere + ` ` + messageOrder, windowedArgs},
 	}
 	for _, q := range queries {
 		plan := explainPlan(t, s, q.sql, q.args...)

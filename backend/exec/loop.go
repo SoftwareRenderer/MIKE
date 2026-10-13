@@ -322,18 +322,22 @@ type loopContext struct {
 	assistantContent strings.Builder
 	reasoningContent strings.Builder
 	pendingToolCalls []types.ChatToolCall
-	prevArgLens      map[string]int // tool_id -> arg length, for detecting streaming updates
-	finishReason     string         // LLM finish_reason from last stream ("stop", "tool_calls", etc.)
-	detector         *loopDetector
-	silence          *streamSilenceWatcher // announces a quiet provider for the whole run
-	tracker          failureTracker
-	mc               *modelConfig
-	client           *llama.LlamaClient
-	providerName     string
-	contextWindow    *int
-	sandboxEnabled   bool
-	callStartTime    time.Time // start of current LLM call (for per-call Duration)
-	usage            *types.ChatUsage
+	// toolCallStream holds the streamed tool calls of the current LLM call; the loop reads them
+	// back through pendingToolCalls.
+	toolCallStream llama.ToolCallAccumulator
+	toolPaths      map[string]string // tool_id -> the path once it could be read from the args
+	prevArgLens    map[string]int    // tool_id -> arg length, for detecting streaming updates
+	finishReason   string            // LLM finish_reason from last stream ("stop", "tool_calls", etc.)
+	detector       *loopDetector
+	silence        *streamSilenceWatcher // announces a quiet provider for the whole run
+	tracker        failureTracker
+	mc             *modelConfig
+	client         *llama.LlamaClient
+	providerName   string
+	contextWindow  *int
+	sandboxEnabled bool
+	callStartTime  time.Time // start of current LLM call (for per-call Duration)
+	usage          *types.ChatUsage
 	// pendingAdvisories holds lsp notes collected during tool execution
 	pendingAdvisories        []advisory
 	touchedFiles             []string
@@ -341,6 +345,38 @@ type loopContext struct {
 	// lastDiagnosticsText suppresses re-injecting findings the model has already been shown.
 	lastDiagnosticsText string
 	sessionCost         float64 // accumulated API cost (USD) of completed calls for this task run
+}
+
+// foldToolCalls merges one frame's tool-call deltas into the calls of the current LLM call.
+func (lc *loopContext) foldToolCalls(deltas []types.ChatToolCall) {
+	lc.toolCallStream.Add(deltas)
+	lc.pendingToolCalls = lc.toolCallStream.Calls()
+}
+
+// clearToolCalls drops the calls of an LLM call that will not finish — a retry, a cancellation, a
+// user message that replaces the turn. What was accumulated would otherwise open the next call
+// beside a call the provider already stopped sending.
+func (lc *loopContext) clearToolCalls() {
+	lc.toolCallStream.Reset()
+	lc.toolPaths = nil
+	lc.pendingToolCalls = nil
+}
+
+// toolPath names the file a streaming tool call is working on, for the browser's live label. The
+// arguments grow every token, so a path is looked up once and remembered.
+func (lc *loopContext) toolPath(toolID, args string) string {
+	if p, ok := lc.toolPaths[toolID]; ok {
+		return p
+	}
+	p := extractPathFromArgs(args)
+	if p == "" {
+		return ""
+	}
+	if lc.toolPaths == nil {
+		lc.toolPaths = make(map[string]string)
+	}
+	lc.toolPaths[toolID] = p
+	return p
 }
 
 // toolResult holds one executed tool call's outcome. Incomplete calls (empty
@@ -479,16 +515,10 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 	silence := te.newStreamSilenceWatcher(setup.projectID, setup.task.ID)
 	client := te.newLlamaClient(setup.serverURL, setup.modelName, reasoningEffort, apiKey, silence)
 	tools := te.toolDefinitionsFor(setup.ctx, setup.task)
-	taskMsgs, _ := te.store.GetTaskMessages(setup.task.ID, setup.task.CurrentThreadID)
-	messages := buildMessagesFromDB(setup.task, taskMsgs, setup.worktreePath, setup.promptScope())
 
-	// Remove duplicate user messages that may occur during regeneration due to
-	// race conditions between DELETE and POST handlers.
-	if setup.regenerate {
-		messages = removeDuplicateUserMessage(messages)
-	}
-
-	// Context tracking: load context window from provider config, discover if unknown
+	// Context tracking: load context window from provider config, discover if unknown. Discovery is
+	// a network round trip, so it runs before the conversation is read — reading first would leave
+	// the rows stale by however long it took.
 	var contextWindow *int
 	if cw := te.configStore.GetModelContextWindow(setup.modelName, setup.serverURL); cw != nil {
 		contextWindow = cw
@@ -498,6 +528,16 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 		logging.For(logging.Exec).Infof("discovered context window for %s: %d", setup.modelName, *discovered)
 	}
 
+	// Read last, so the conversation is current when the first call is made.
+	messages, updatedTask := te.conversationFromDB(setup.task, setup.worktreePath, setup.promptScope())
+	setup.task = updatedTask
+
+	// Remove duplicate user messages that may occur during regeneration due to
+	// race conditions between DELETE and POST handlers.
+	if setup.regenerate {
+		messages = removeDuplicateUserMessage(messages)
+	}
+
 	maxFailures := setup.task.MaxConsecutiveFailedTurns
 	if maxFailures == 0 {
 		maxFailures = 3
@@ -505,19 +545,16 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 
 	// Consolidate all mutable loop state into a single struct.
 	lc = &loopContext{
-		messages:         messages,
-		pendingToolCalls: nil,
-		prevArgLens:      make(map[string]int),
-		detector:         newLoopDetector(),
-		silence:          silence,
-		mc:               mc,
-		client:           client,
-		providerName:     providerName,
-		contextWindow:    contextWindow,
-		sandboxEnabled:   setup.sandboxEnabled,
+		messages:       messages,
+		prevArgLens:    make(map[string]int),
+		detector:       newLoopDetector(),
+		silence:        silence,
+		mc:             mc,
+		client:         client,
+		providerName:   providerName,
+		contextWindow:  contextWindow,
+		sandboxEnabled: setup.sandboxEnabled,
 	}
-	// Sync once more to ensure we have the latest DB state (e.g. if messages were added/deleted)
-	lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.promptScope())
 
 	// Carry over the accumulated session cost from prior runs/executors so the badge
 	// reflects the full session cost across provider/model switches and executor restarts.
@@ -615,7 +652,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 		// Clear turn-specific state before each LLM call.
 		lc.prevArgLens = make(map[string]int)
 		lc.finishReason = ""
-		lc.pendingToolCalls = nil
+		lc.clearToolCalls()
 		lc.assistantContent.Reset()
 		lc.reasoningContent.Reset()
 
@@ -710,7 +747,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 			}
 			if len(choice.Delta.ToolCalls) > 0 {
 				priorLen := len(lc.pendingToolCalls)
-				lc.pendingToolCalls = llama.MergeToolCalls(lc.pendingToolCalls, choice.Delta.ToolCalls)
+				lc.foldToolCalls(choice.Delta.ToolCalls)
 				for i := range len(lc.pendingToolCalls) {
 					tc := lc.pendingToolCalls[i]
 					if tc.ID == "" || tc.Function.Name == "" {
@@ -724,7 +761,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 						continue
 					}
 					lc.prevArgLens[tc.ID] = argLen
-					path := extractPathFromArgs(tc.Function.Arguments)
+					path := lc.toolPath(tc.ID, tc.Function.Arguments)
 					actualPrevLen := prevLen
 					if isNew {
 						actualPrevLen = 0
@@ -736,7 +773,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 			if time.Since(lastProgressSend) > 2*time.Second {
 				for _, tc := range lc.pendingToolCalls {
 					if tc.Function.Name == types.ToolWriteFile && tc.Function.Arguments != "" {
-						te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolProgress, Data: map[string]any{"tool_id": tc.ID, "bytes_written": len(tc.Function.Arguments), "path": extractPathFromArgs(tc.Function.Arguments)}})
+						te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolProgress, Data: map[string]any{"tool_id": tc.ID, "bytes_written": len(tc.Function.Arguments), "path": lc.toolPath(tc.ID, tc.Function.Arguments)}})
 						lastProgressSend = time.Now()
 					}
 				}
@@ -803,7 +840,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 					// Reset builders so retry doesn't concatenate partial content.
 					lc.assistantContent.Reset()
 					lc.reasoningContent.Reset()
-					lc.pendingToolCalls = nil
+					lc.clearToolCalls()
 					lc.finishReason = ""
 					flusher.reset()
 					lc.callStartTime = time.Now()
@@ -853,9 +890,9 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 				releaseAfterStreamEnd()
 				lc.assistantContent.Reset()
 				lc.reasoningContent.Reset()
-				lc.pendingToolCalls = nil
+				lc.clearToolCalls()
 				lc.finishReason = ""
-				lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.promptScope())
+				lc.messages, setup.task = te.conversationFromDB(setup.task, setup.worktreePath, setup.promptScope())
 				continue
 			}
 			// New user message — cancel current LLM call.
@@ -881,7 +918,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 			// Clear partial assistant state.
 			lc.assistantContent.Reset()
 			lc.reasoningContent.Reset()
-			lc.pendingToolCalls = nil
+			lc.clearToolCalls()
 			lc.finishReason = ""
 
 			// If any queued message is a setup.regenerate, truncate stale assistant messages.
@@ -896,8 +933,8 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 			}
 			if !hadRegenerate {
 				// Re-sync with DB to pick up user messages (already created by HandleSend)
-				// and any deleted messages. Do NOT append — syncMessagesFromDB already includes them.
-				lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.promptScope())
+				// and any deleted messages. Do NOT append — conversationFromDB already includes them.
+				lc.messages, setup.task = te.conversationFromDB(setup.task, setup.worktreePath, setup.promptScope())
 			}
 
 			// Apply model overrides from queued messages.
@@ -1450,7 +1487,7 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 			lc.messages = lc.detector.removeHints(lc.messages)
 		}
 
-		lc.pendingToolCalls = nil
+		lc.clearToolCalls()
 		lc.assistantContent.Reset()
 		lc.reasoningContent.Reset()
 		lc.finishReason = ""
@@ -1635,8 +1672,8 @@ func (te *TaskExecutor) foldQueuedUserMessage(setup *taskExecSetup, lc *loopCont
 		return
 	}
 	// Re-sync with DB to pick up the user message (already created by HandleSend)
-	// and any deleted messages. Do NOT append — syncMessagesFromDB already includes it.
-	lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.promptScope())
+	// and any deleted messages. Do NOT append — conversationFromDB already includes it.
+	lc.messages, setup.task = te.conversationFromDB(setup.task, setup.worktreePath, setup.promptScope())
 }
 
 // adoptMessageModel points the run at the provider and model a queued message names.
@@ -1727,19 +1764,23 @@ idleWait:
 			// Fallback (non-utility) summarization requests go to the task's
 			// CURRENT provider - lc.mc follows mid-run switches.
 			sumURL, _ := lc.mc.get()
+			// Nothing else writes to the thread while the summary is being made, so its newest user
+			// row is compared across the summarization: a different row is input that arrived
+			// meanwhile. A length cannot answer this, because FixPostSummaryTimestamps re-dates the
+			// run's own rows to after the summary row.
+			queuedThread := setup.task.CurrentThreadID
+			queuedBefore, _ := te.store.GetLastUserMessageInThread(queuedThread)
 			lc.messages, _ = te.summarize.applySummarization(setup, req.ctx, lc.messages, sumURL, activeModel, req.resultCh)
 			lc.detector.reset() // context changed, clear stale text window
 			lc.detector.clearHints()
-			// Count messages before DB sync (includes in-memory summary).
-			preSyncCount := len(lc.messages)
-			// Re-sync from DB to pick up any messages queued during summarization.
-			lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.promptScope())
+			// Re-sync from DB to pick up any messages queued during summarization, and any deleted ones.
+			lc.messages, setup.task = te.conversationFromDB(setup.task, setup.worktreePath, setup.promptScope())
+			queuedNow, _ := te.store.GetLastUserMessageInThread(queuedThread)
+			hasQueuedInput := queuedNow != "" && queuedNow != queuedBefore
 			// Clear summarizing flag
 			setup.task.Summarizing = false
 			_ = te.store.SetTaskSummarizing(setup.task.ID, false)
 			te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
-			// If DB has more messages than we had in-memory, new input arrived.
-			hasQueuedInput := len(lc.messages) > preSyncCount
 			if !hasQueuedInput {
 				// No new user input — stay idle, don't call LLM with just the summary.
 				// Defensive release: the task is expected not to hold a slot
@@ -1817,20 +1858,16 @@ func (te *TaskExecutor) persistAndSendError(taskID, message, code string, turnOv
 	}
 }
 
-// syncMessagesFromDB re-syncs the in-memory conversation with the database.
-// When messages are deleted from the DB (e.g., user deletes chat messages),
-// the in-memory lc.messages slice is stale. This function reloads messages
-// from the DB and rebuilds the conversation, ensuring deleted messages are
-// excluded from the next LLM call. It also refreshes the task to pick up
-// any thread changes from fork cleanup.
-// Returns the synced messages and the (possibly updated) task.
-func (te *TaskExecutor) syncMessagesFromDB(task *types.Task, worktreePath string, scope promptScope) ([]types.ChatMessage, *types.Task) {
-	// Reload task from DB to pick up thread changes (e.g., fork cleanup switched active thread).
-	if updatedTask, err := te.store.GetTaskByID(task.ID); err == nil && updatedTask != nil {
-		task = updatedTask
+// conversationFromDB rebuilds the loop's conversation from the newest summarization row onward,
+// which is all buildLLMContext keeps of a rebuilt conversation anyway. It reads the task as stored
+// now — a fork cleanup can move the run to another thread mid-turn — and rebuilds rather than
+// edits, because rows are added and deleted outside the run.
+func (te *TaskExecutor) conversationFromDB(task *types.Task, worktreePath string, scope promptScope) ([]types.ChatMessage, *types.Task) {
+	if updated, err := te.store.GetTaskByID(task.ID); err == nil && updated != nil {
+		task = updated
 	}
-	taskMsgs, _ := te.store.GetTaskMessages(task.ID, task.CurrentThreadID)
-	return buildMessagesFromDB(task, taskMsgs, worktreePath, scope), task
+	rows, _ := te.store.GetTaskMessagesFromSummary(task.ID, task.CurrentThreadID)
+	return buildMessagesFromDB(task, rows, worktreePath, scope), task
 }
 
 // truncateForRegenerate drops the last user message and everything after it from the

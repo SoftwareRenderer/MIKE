@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"mike/backend/types"
+
+	"mike/pkg/logging"
 )
 
 // taskMessageCols is the column list every task_messages reader must use, kept next to
@@ -440,6 +442,60 @@ func (s *Store) GetTaskMessages(taskID, threadID string) ([]types.TaskMessage, e
 	})
 }
 
+// newestSummarizationSQL names the summarization row in effect for a thread: the newest one, which
+// is where extractPrevSummary and buildLLMContext cut a conversation. Starting later than it loses
+// the summary the system prompt carries.
+const newestSummarizationSQL = `SELECT id, created_at, rowid FROM task_messages WHERE thread_id = ? AND role = 'summarization' ` + newestFirstOrder + ` LIMIT 1`
+
+// newestSummarization is that row's position in the conversation order, or nil when no thread is
+// named or it holds no summary.
+func (s *Store) newestSummarization(threadID string) (*messageKey, error) {
+	if threadID == "" {
+		return nil, nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var k messageKey
+	err := s.db.QueryRow(newestSummarizationSQL, threadID).Scan(&k.id, &k.at, &k.rowid)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read summarization row of thread %s: %w", threadID, err)
+	}
+	return &k, nil
+}
+
+// conversationRowsSQL opens a conversation read over the whole column list.
+const conversationRowsSQL = `SELECT ` + taskMessageCols + ` FROM task_messages WHERE `
+
+// GetTaskMessagesFromSummary reads a thread from its newest summarization row onward, or the whole
+// thread when it has none: everything older was folded into that row. A caller that counts rows
+// rather than sending them wants GetTaskMessages.
+func (s *Store) GetTaskMessagesFromSummary(taskID, threadID string) ([]types.TaskMessage, error) {
+	floor, err := s.newestSummarization(threadID)
+	if err != nil {
+		// The window is an optimisation over the whole-thread read, so a failed lookup answers
+		// with that read rather than with an empty conversation.
+		logging.For(logging.Store).Warnf("summarization row of thread %s unreadable, reading the whole thread: %v", threadID, err)
+		return s.GetTaskMessages(taskID, threadID)
+	}
+	if floor == nil {
+		return s.GetTaskMessages(taskID, threadID)
+	}
+
+	where, args := conversationWhere(taskID, threadID, nil, floor)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	rows, err := s.db.Query(conversationRowsSQL+where+` `+messageOrder, args...)
+	if err != nil {
+		return nil, err
+	}
+	return scanRows(rows, func(r *sql.Rows) (types.TaskMessage, error) {
+		return scanTaskMessage(r)
+	})
+}
+
 // CountTaskMessages counts a task's conversation rows. A write no durability seam sees — a fork copying a
 // thread's rows — moves this count and no revision.
 func (s *Store) CountTaskMessages(taskID string) (int, error) {
@@ -567,24 +623,14 @@ func (s *Store) GetLastUserMessageInThread(threadID string) (string, error) {
 	return id, err
 }
 
-// lastSummarizationSQL is the summary row in effect for a thread: the newest one. It is the SQL twin of
-// extractPrevSummary in backend/exec, which must name the same row.
-const lastSummarizationSQL = `SELECT id FROM task_messages WHERE thread_id = ? AND role = 'summarization' ` + newestFirstOrder + ` LIMIT 1`
-
 // LastSummarizationMessageID returns the id of the newest summarization row of a thread, or "" when the
 // thread has none.
 func (s *Store) LastSummarizationMessageID(threadID string) (string, error) {
-	if threadID == "" {
-		return "", nil
+	k, err := s.newestSummarization(threadID)
+	if k == nil {
+		return "", err
 	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	var id string
-	err := s.db.QueryRow(lastSummarizationSQL, threadID).Scan(&id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
-	}
-	return id, err
+	return k.id, nil
 }
 
 // lastMessageInThreadSQL is the newest row of a thread.

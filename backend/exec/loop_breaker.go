@@ -43,7 +43,7 @@ func (te *TaskExecutor) breakFailureLoop(setup *taskExecSetup, lc *loopContext) 
 	}
 
 	// A cut can switch the run to another thread, so the thread is read after it.
-	lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.promptScope())
+	lc.messages, setup.task = te.conversationFromDB(setup.task, setup.worktreePath, setup.promptScope())
 	threadID := setup.task.CurrentThreadID
 
 	note := systemNote{kind: loopBreakerNoteKind, severity: "info", content: loopBreakerNoteText}

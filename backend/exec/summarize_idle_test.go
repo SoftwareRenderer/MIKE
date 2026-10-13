@@ -5,9 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
-	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -108,6 +105,13 @@ func waitForCondition(timeout time.Duration, cond func() bool) bool {
 // mock LLM. Returns the executor, the setup, and the task ID.
 func summarizeIdleSetup(t *testing.T, projID, projName, taskID string, serverURL string) (*TaskExecutor, *taskExecSetup) {
 	t.Helper()
+	return summarizeIdleSetupSeeded(t, projID, projName, taskID, serverURL, nil)
+}
+
+// summarizeIdleSetupSeeded is summarizeIdleSetup over a thread whose `history` rows were written
+// an hour before that user message.
+func summarizeIdleSetupSeeded(t *testing.T, projID, projName, taskID string, serverURL string, history []types.TaskMessage) (*TaskExecutor, *taskExecSetup) {
+	t.Helper()
 	te := newSessionCostTestExecutor(t)
 	s := te.store
 	proj := createProject(t, s, projID, projName)
@@ -128,6 +132,16 @@ func summarizeIdleSetup(t *testing.T, projID, projName, taskID string, serverURL
 	}
 	if err := s.CreateTask(task); err != nil {
 		t.Fatalf("create task: %v", err)
+	}
+	seeded := time.Now().UTC().Add(-time.Hour)
+	for i, m := range history {
+		m.ID = uuid.New().String()
+		m.TaskID = taskID
+		m.ThreadID = "thread-1"
+		m.CreatedAt = seeded.Add(time.Duration(i) * time.Second)
+		if err := s.CreateTaskMessage(&m); err != nil {
+			t.Fatalf("seed %s message: %v", m.Role, err)
+		}
 	}
 	if err := s.CreateTaskMessage(&types.TaskMessage{
 		ID: uuid.New().String(), TaskID: taskID, ThreadID: "thread-1",
@@ -179,15 +193,7 @@ func summarizeIdleSetup(t *testing.T, projID, projName, taskID string, serverURL
 // TestExecuteTask_ManualSummarize_StaysIdleWithoutQueuedMessage: a task in review that is manually
 // summarized with no queued user message must not start a fresh LLM call; it stays review/idle.
 func TestExecuteTask_ManualSummarize_StaysIdleWithoutQueuedMessage(t *testing.T) {
-	// Summarization renders prompts/summarize.tmpl from the CWD — chdir to the
-	// repo root so the template is found (mirrors how the running server resolves it).
-	_, thisFile, _, _ := runtime.Caller(0)
-	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
-	oldwd, _ := os.Getwd()
-	if err := os.Chdir(repoRoot); err != nil {
-		t.Fatalf("chdir to repo root: %v", err)
-	}
-	defer func() { _ = os.Chdir(oldwd) }()
+	chdirRepoRoot(t)
 
 	var streamCalls atomic.Int32
 	var summarizeCalls atomic.Int32
@@ -265,13 +271,7 @@ func TestExecuteTask_ManualSummarize_StaysIdleWithoutQueuedMessage(t *testing.T)
 // behavior that the previous test protects: when a user message IS queued while
 // the task is in review, summarizing must still start the task (a new LLM call).
 func TestExecuteTask_ManualSummarize_StartsWithQueuedMessage(t *testing.T) {
-	_, thisFile, _, _ := runtime.Caller(0)
-	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
-	oldwd, _ := os.Getwd()
-	if err := os.Chdir(repoRoot); err != nil {
-		t.Fatalf("chdir to repo root: %v", err)
-	}
-	defer func() { _ = os.Chdir(oldwd) }()
+	chdirRepoRoot(t)
 
 	var streamCalls atomic.Int32
 	var summarizeCalls atomic.Int32
@@ -316,5 +316,77 @@ func TestExecuteTask_ManualSummarize_StartsWithQueuedMessage(t *testing.T) {
 	case <-resultCh:
 	case <-time.After(10 * time.Second):
 		t.Fatalf("timed out waiting for summarization to complete")
+	}
+}
+
+// TestExecuteTask_ManualSummarize_ExistingSummaryDoesNotStartATurn: summarizing a thread that
+// already holds a summary, with no queued user message, must leave the task review/idle — the run
+// reads its conversation from that row, and its own last rows sit behind the new one.
+func TestExecuteTask_ManualSummarize_ExistingSummaryDoesNotStartATurn(t *testing.T) {
+	chdirRepoRoot(t)
+
+	var streamCalls atomic.Int32
+	var summarizeCalls atomic.Int32
+	firstChat := make(chan struct{}, 1)
+	server := mockSummarizeIdleLLM(&streamCalls, &summarizeCalls, firstChat)
+	defer server.Close()
+
+	te, setup := summarizeIdleSetupSeeded(t, "proj-sum-twice", "Sum Twice", "sum-twice-task", server.URL,
+		[]types.TaskMessage{
+			{Role: "user", Content: "An earlier message"},
+			{Role: "assistant", Content: "An earlier answer."},
+			{Role: "summarization", Content: "The summary of the rows before it"},
+		})
+	taskID := setup.task.ID
+
+	select {
+	case <-firstChat:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("timed out waiting for first LLM request")
+	}
+	waitFor(t, 10*time.Second, "task to reach review/idle after first response", func() bool {
+		got, err := te.store.GetTaskByID(taskID)
+		return err == nil && got != nil && got.Status == types.StatusReview && got.ExecutionState == types.ExecStateIdle
+	})
+
+	reqCtx, reqCancel := context.WithCancel(context.Background())
+	defer reqCancel()
+	resultCh := make(chan error, 1)
+	setup.summarizeCh <- &summarizeRequest{ctx: reqCtx, resultCh: resultCh, cancel: reqCancel}
+	select {
+	case err := <-resultCh:
+		if err != nil {
+			t.Fatalf("summarization failed: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("timed out waiting for summarization to complete")
+	}
+
+	// The fixture only holds if this was the thread's second summarization row.
+	summaries := 0
+	rows, err := te.store.GetTaskMessages(taskID, "thread-1")
+	if err != nil {
+		t.Fatalf("read the thread: %v", err)
+	}
+	for _, m := range rows {
+		if m.Role == "summarization" {
+			summaries++
+		}
+	}
+	if summaries != 2 {
+		t.Fatalf("the thread holds %d summarization rows, want the seeded one and this run's", summaries)
+	}
+
+	if waitForCondition(700*time.Millisecond, func() bool { return streamCalls.Load() >= 2 }) {
+		t.Fatalf("task started a new LLM call after a second summarization with no queued message (streamCalls=%d)",
+			streamCalls.Load())
+	}
+	got, err := te.store.GetTaskByID(taskID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if got.Status != types.StatusReview || got.ExecutionState != types.ExecStateIdle {
+		t.Fatalf("task should remain review/idle after a second summarization, got status=%q state=%q",
+			got.Status, got.ExecutionState)
 	}
 }
