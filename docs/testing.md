@@ -130,7 +130,9 @@ Four facts about the read model decide whether a turn assertion can pass, and a 
 export const MIRROR_COALESCE_MS = 1500;
 ```
 
-There is no allowlist, so the permission dies with the symbol and the seam count moves only when the code moves. knip cannot make this call itself. `ignore` in `knip.json` keeps an ignored test file's imports counting as usage, and `tags: ["-knipignore"]` exempts a tagged declaration from its report, so a tag costs nothing there. A tag is free to knip and binding here: an untagged seam fails the run, and the tag's one-line reason is what a reviewer reads.
+There is no allowlist, so the permission dies with the symbol and the seam count moves only when the code moves. knip cannot make this call itself. `ignore` in `knip.json` keeps an ignored test file's imports counting as usage, and `tags: ["-knipignore"]` exempts a tagged declaration from the unused report, so a tag changes no verdict in knip.
+
+It does cost a line: knip calls a tag redundant whenever the module itself calls the internal, and prints one *tag hint* per retained seam. Only two of them change knip's answer, and the hints never move its exit code, so `check:dead` passes `--no-tag-hints`. A tag is free to knip's verdict and binding here: an untagged seam fails the run, and the tag's one-line reason is what a reviewer reads.
 
 **Naming is textual, which is the safe direction.** A production file names a symbol when the identifier appears anywhere in it outside a comment, a quoted string or a `<style>` block — a template-literal hole and a Svelte mustache included. A barrel and the English catalog name what they carry without being measured, so a symbol the app reaches through `index.ts` is not a seam. An export no file names at all reaches its consumer through a signature, and `npm run check:dead` owns that question.
 
@@ -148,6 +150,7 @@ Knip traps, each measured on this tree:
 
 - **Never pass `--production`.** It breaks module resolution, and knip then names every runtime dependency (22 of them) as unused.
 - **The config lives in `frontend/`.** knip takes the workspace root from the config file's directory, so `-c /tmp/knip.json` analyzes a different tree and reports different numbers.
+- **A tag hint is not an issue type.** `exclude: ["tags"]` answers `Ignored unknown issue type "tags" in exclude` and silences nothing; the switch is `--no-tag-hints`.
 - **`cycles` stays out of `include`.** `src/lib/components/Card.svelte` imports itself so a subtask renders with the same markup, so the cycle it reports is intended structure. (It is not a resolution artifact: the self-import is on line 9 of that file, not in `components/Card/`.)
 
 **What neither gate sees.** A declaration read by something outside the JS module graph: `AppStreamEventType` in `src/lib/api/events.ts` is exported for the archgate `wsevents` rule, which locates the union by the text `export type AppStreamEventType` (`scripts/archgate/rules_routes.go`) and errors if that text is gone. The declaration carries the same `@knipignore` tag every retained seam carries, and `frontend/dead-surface.py` is what requires the tag and its reason there. Both gates are also blind to an object property nobody reads, a CSS class no template uses, and a REST route the UI stopped calling.

@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
-    "check:dead": "knip --no-progress --no-config-hints",
+    "check:dead": "knip --no-progress --no-config-hints --no-tag-hints",
     "check:dead-surface": "python3 dead-surface.py",
     "check:dead-surface-test": "python3 dead-surface_test.py",
     "check:e2e-ownership": "python3 e2e-ownership.py",
