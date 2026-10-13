@@ -6,11 +6,12 @@ libraries that MIKE depends on and their respective licenses.
 
 Full license texts are available inside each dependency's package.
 
-**Scope.** Only what is compiled into what MIKE distributes — the `kanban` and `sandbox-bridge`
+**Scope.** Only what is compiled into what MIKE distributes — the `mike-server` and `sandbox-bridge`
 binaries and `frontend/dist`. An extension's own dependencies (its language server, WASM adapter or
-bundled JS) are covered by that extension's `LICENSE`, `NOTICE` and `THIRD_PARTY_NOTICES.md`.
+bundled JS) are covered by that extension's `LICENSE` and `NOTICE`, and by its own
+`THIRD_PARTY_NOTICES.md` when it bundles third-party code.
 
-**Last updated:** 2026-10-03
+**Last updated:** 2026-10-13
 
 ---
 
@@ -23,7 +24,7 @@ go list -deps -f '{{if .Module}}{{.Module.Path}}{{end}}' ./backend/... ./pkg/...
 ```
 
 `go list -m all` answers the module *graph*, which also lists modules required by a dependency's
-`go.mod` but never imported here. The linked set is the same on linux, darwin and windows.
+`go.mod` but never imported here.
 
 | Module | License | Copyright |
 |--------|---------|-----------|
@@ -68,15 +69,17 @@ NOTICE content to reproduce on its behalf, and `NOTICE` gains no entry for it.
 `github.com/modelcontextprotocol/go-sdk` is mid-relicensing: its `LICENSE` says the project moves from
 MIT to Apache-2.0, that new contributions are Apache-2.0, and that contributions whose authors have not
 consented to the move stay MIT. Both permission notices are therefore carried — the Apache-2.0 text and
-copyright in the module's `LICENSE`, the MIT one reproduced in `NOTICE`. The module ships no `NOTICE`
-file of its own, so nothing is reproduced here on Apache-2.0's behalf.
+copyright in the module's `LICENSE`, the MIT one reproduced in `NOTICE`. That same `LICENSE` also
+licenses the project's documentation (excluding its specifications) under CC-BY-4.0; no documentation is
+compiled into a binary, so no CC-BY-4.0 work ships here. The module ships no `NOTICE` file of its own,
+so nothing is reproduced here on Apache-2.0's behalf.
 
 ## Frontend production dependencies
 
-Source of truth: `frontend/package-lock.json` (production `dependencies`) as bundled into
-`frontend/dist`. A package a dependency imports for its **types only** is absent — nothing of it reaches
-`dist` — and the diagram renderer's chunks are present but fetched on demand, so they are listed beside
-the code that is loaded at startup.
+Source of truth: the modules the build compiles into `frontend/dist`. A scratch build with sourcemaps
+names them exactly — build into a throwaway `outDir` with `build.sourcemap` on, then take the union of
+every emitted `sources` array under `node_modules/`. Never ship the `.map` files; a sourcemap publishes
+the sources, and `scripts/package-release.sh` refuses one in `frontend/dist`.
 
 | Package | License |
 |---------|---------|
@@ -117,13 +120,11 @@ the code that is loaded at startup.
 | @xterm/xterm | MIT |
 | chevrotain | Apache-2.0 |
 | clsx | MIT |
-| codemirror | MIT |
 | cose-base | MIT |
 | crelt | MIT |
 | cytoscape | MIT |
 | cytoscape-cose-bilkent | MIT |
 | cytoscape-fcose | MIT |
-| d3 | ISC |
 | d3-array | ISC |
 | d3-axis | ISC |
 | d3-brush | ISC |
@@ -136,7 +137,7 @@ the code that is loaded at startup.
 | d3-path | ISC |
 | d3-sankey | BSD-3-Clause |
 | d3-scale | ISC |
-| d3-scale-chromatic | ISC |
+| d3-scale-chromatic | ISC and Apache-Style (ColorBrewer) |
 | d3-selection | ISC |
 | d3-shape | ISC |
 | d3-time | ISC |
@@ -150,6 +151,7 @@ the code that is loaded at startup.
 | dompurify | (MPL-2.0 OR Apache-2.0) — treated as Apache-2.0 |
 | elkjs | EPL-2.0 |
 | es-toolkit | MIT |
+| idb | ISC |
 | internmap | ISC |
 | katex | MIT |
 | khroma | MIT |
@@ -164,4 +166,10 @@ the code that is loaded at startup.
 | ts-dedent | MIT |
 | uuid | MIT |
 | w3c-keyname | MIT |
+| workbox-cacheable-response | MIT |
+| workbox-core | MIT |
+| workbox-expiration | MIT |
+| workbox-precaching | MIT |
+| workbox-routing | MIT |
+| workbox-strategies | MIT |
 | workbox-window | MIT |
