@@ -40,7 +40,23 @@ Manifest validation is strict to ensure binary integrity:
 
 ## Publishing
 
-`make package` writes `dist/version.json` and `dist/sha256sum.txt`. The generator reads digests from `sha256sum.txt` to ensure the manifest and the checksum file agree. It refuses versions without archives, invalid filenames, or non-HTTPS asset roots. `--check` verifies the disk against the generated output. `SOURCE_DATE_EPOCH` ensures reproducible builds. Test: `scripts/gen-version-manifest_test.sh`.
+`make package` writes `dist/version.json` and `dist/sha256sum.txt`. The generator reads digests from `sha256sum.txt` to ensure the manifest and the checksum file agree. It refuses versions without archives, invalid filenames, or non-HTTPS asset roots. `--check` verifies the disk against the generated output. Test: `scripts/gen-version-manifest_test.sh`.
+
+### The release instant
+
+`scripts/release-instant.sh` answers one epoch for a whole build, and `scripts/package-release.sh` stamps
+every archive member with it and hands the same value to the manifest generator, so `published` and the
+archive mtimes are one instant: when the release's commit landed.
+
+The instant is the commit `v<version>` peels to, read as its **committer** date. A rebase or an amend moves
+that date and leaves the author date alone, and an annotated tag's tagger date records when someone ran
+`git tag -a`, which is not when the code changed.
+
+`SOURCE_DATE_EPOCH` in the environment wins, which is how a reproducible-build harness states the instant it
+wants; a value that is not epoch seconds stops the build and names the variable. A version nobody tagged
+falls back to this machine's clock and says so on stderr — the only way to package a checkout with no tag,
+and it costs the byte-comparability.
+Test: `scripts/release-instant_test.sh`.
 
 Upload order is critical:
 

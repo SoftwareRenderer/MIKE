@@ -66,7 +66,8 @@ Reachability is determined by `MIKE_LISTEN` and Host pinning (`MIKE_ALLOWED_HOST
 
 **Binary Properties:**
 - Built with `CGO_ENABLED=0` (uses modernc.org SQLite).
-- Archives are byte-comparable (sorted names, zeroed mtime).
+- Archives are byte-comparable: sorted names, zeroed owner and group, no gzip timestamp, and every
+  member's mtime pinned to the release instant. `docs/auto-update.md → The release instant`.
 - The SPA is embedded into the binary via `go:embed`. In `-tags release` builds, `MIKE_FRONTEND_DIST` is disabled.
 - The prompt templates are embedded the same way and the shipped `prompts/` directory still answers for
   its own names, so an install that loses a template still renders. `docs/i18n.md → Prompt templates`.

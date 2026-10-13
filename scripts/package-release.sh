@@ -90,8 +90,11 @@ elf_arch() {
     esac
 }
 
-# Sorted names, no uid/gid or mtime from this machine, no gzip timestamp: byte-comparable runs.
-TAR_OPTS=(--sort=name --owner=0 --group=0 --numeric-owner --mtime='UTC 1970-01-01')
+# Sorted names, no uid/gid from this machine, no gzip timestamp, and every member's mtime pinned to the
+# release instant (scripts/release-instant.sh): byte-comparable runs, and an unpacked release that dates to
+# the commit it was built from.
+EPOCH="$("$ROOT/scripts/release-instant.sh" "$VERSION")"
+TAR_OPTS=(--sort=name --owner=0 --group=0 --numeric-owner "--mtime=@$EPOCH")
 
 # The first thing a buyer reads. Neither podman nor runsc is inside the archive, and the binary finds
 # prompts/, sandbox-bridge and extensions/ relative to the working directory, so both are stated.
@@ -230,7 +233,9 @@ echo "package-release: $OUT/sha256sum.txt"
 
 # The manifest the update check reads. Its digests are read out of sha256sum.txt rather than
 # recomputed, so the two files a buyer and an install compare cannot disagree.
-UPDATE_BASE_URL="${UPDATE_BASE_URL:-https://getmike.dev/download}" \
+# The manifest's `published` is the instant the archives were stamped with, not a second read of the
+# clock, so the date a buyer sees in version.json is the date every file in the archive carries.
+SOURCE_DATE_EPOCH="$EPOCH" UPDATE_BASE_URL="${UPDATE_BASE_URL:-https://getmike.dev/download}" \
     python3 "$ROOT/scripts/gen-version-manifest.py" --dist "$OUT" --version "$VERSION"
 echo "package-release: $OUT/version.json"
 # Nothing here signs the archives, so this is as far as the build can vouch for them.

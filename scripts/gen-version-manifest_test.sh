@@ -102,7 +102,7 @@ check "--check refuses a manifest whose schema was edited" 1 $?
 python3 "$GEN" --dist "$work/tamper" --version 1.4.2 >/dev/null 2>&1
 sed -i 's/"published": "[^"]*"/"published": "2030-01-01T00:00:00Z"/' "$work/tamper/version.json"
 python3 "$GEN" --dist "$work/tamper" --version 1.4.2 --check >/dev/null 2>&1
-check "--check ignores the announcement instant" 0 $?
+check "--check ignores the release instant" 0 $?
 
 echo
 if (( fail )); then

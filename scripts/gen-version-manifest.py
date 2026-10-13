@@ -7,8 +7,7 @@ The digests come from the sha256sum.txt that `scripts/package-release.sh` just w
 and the checksum file cannot disagree: this script reads one file, never re-hashes an archive.
 
 `--check` compares the file on disk against what this script would write and exits non-zero on a
-difference. It ignores `published`, which records when the release was announced and is the only field
-that is not derived from the archives.
+difference. It ignores `published`.
 """
 
 import argparse
@@ -133,7 +132,8 @@ def main() -> None:
     except json.JSONDecodeError as exc:
         fail(f"--check: {path} is not JSON: {exc}")
 
-    # `published` is the announcement moment, not a fact about the bytes, so it is not compared.
+    # `published` is the release instant the packaging run resolved, which this run cannot re-derive
+    # unless it was handed the same SOURCE_DATE_EPOCH, so it is not compared.
     for field, want in (("schema", doc["schema"]), ("latest", doc["latest"]), ("assets", doc["assets"])):
         if on_disk.get(field) != want:
             fail(f"--check: {path} disagrees about {field}\n    on disk: {on_disk.get(field)!r}\n    expected: {want!r}")
