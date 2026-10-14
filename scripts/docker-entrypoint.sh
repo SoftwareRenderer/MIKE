@@ -18,19 +18,22 @@ die() {
 
 need() {
     # The message names the variable and says where it belongs, because the failure is
-    # reached both by compose (which guards these in compose.yaml) and by a bare
+    # reached both by compose (which guards it in compose.yaml) and by a bare
     # `docker run`, which does not.
     [ -n "${1:-}" ] || die "$2 is not set. Put it in .env (see .env.example) or pass -e $2=... — the server refuses to start without it."
 }
 
 need "${MIKE_ENCRYPTION_KEY:-}" MIKE_ENCRYPTION_KEY
-need "${MIKE_ALLOWED_HOSTS:-}" MIKE_ALLOWED_HOSTS
 
 # The server listens where the published port can reach it, which is never the container's
 # own loopback. TLS has no switch: the CA and its leaf land in the data volume prepared below.
 : "${MIKE_LISTEN:=0.0.0.0}"
 : "${MIKE_PORT:=3000}"
-export MIKE_LISTEN MIKE_PORT
+# Unset or empty answers loopback only: the server admits `localhost`, `127.0.0.1` and `::1` without
+# being told (backend/server/middleware.go → newHostAllowlist), and a wildcard listen names no host,
+# so nothing else joins the list. Every other name a browser will type is a deliberate edit here.
+: "${MIKE_ALLOWED_HOSTS:=localhost}"
+export MIKE_LISTEN MIKE_PORT MIKE_ALLOWED_HOSTS
 
 # /mike/data holds kanban.db, the local CA and its key, and the flight recorder: owner-only,
 # even when the volume was created by the engine as 0755.

@@ -25,7 +25,7 @@ own machine against real repositories.
 - `Makefile` — build/run/test entry points. `data/` — SQLite DB, TLS certs, trace files. `prompts/` — LLM
   prompt templates, which the binary also carries, and the bundled skill packages. `Dockerfile` +
   `compose.yaml` + `.env.example` — deployment.
-- `.env` is the only source of the master password, the encryption key and `MIKE_ALLOWED_HOSTS`.
+- `.env` is the only source of the encryption key, and of any `MIKE_ALLOWED_HOSTS` widening beyond the `localhost` default.
 
 ## Non-Negotiables
 

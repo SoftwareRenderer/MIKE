@@ -35,11 +35,12 @@ stops is `docs/lifecycle.md`.
   so the entrypoint probes it and prints what it found.
 - **`privileged` and `seccomp=unconfined` buy the nested runtime, nothing else.** `compose.yaml`
   publishes to `127.0.0.1` by default for that reason, TLS is the only mode, and the Host allowlist
-  stays mandatory. Task work runs with `--cap-drop ALL` inside gVisor.
+  defaults to `localhost`, so no other name reaches this server unasked. Task work runs with
+  `--cap-drop ALL` inside gVisor.
 - **Storage lives off the engine's own overlayfs.** podman refuses `overlay` on `overlayfs`, which is
   why `compose.yaml` names a volume for `/var/lib/containers` and the entrypoint can fall back to
   `fuse-overlayfs` or `vfs`.
-- **The two required values stay required with no default.** `compose.yaml` refuses to render and the
+- **`MIKE_ENCRYPTION_KEY` stays required with no default.** `compose.yaml` refuses to render and the
   entrypoint exits naming the variable. The image ships no agent CLI either: an adapter that needs a
   host binary gets it in a derived image.
 - **The container never updates itself.** An install that is not an unpacked release directory
@@ -60,10 +61,11 @@ executable (`GetAgentBinaryPath`), `prompts/` beside it (`resolvePromptDir`), an
 relative to the working directory. `/mike/data` is `0700`: `kanban.db`, the local CA and its key.
 
 `scripts/docker-entrypoint.sh` is the part that cannot be a build-time check. It refuses a missing
-`MIKE_ENCRYPTION_KEY` or `MIKE_ALLOWED_HOSTS`, defaults `MIKE_LISTEN` to `0.0.0.0`, probes `podman
-info` for the graph driver, writes `/etc/containers/storage.conf` when the kernel refuses `overlay`,
-then `exec`s the server so SIGTERM reaches the bounded shutdown path. That default is why no example
-below sets `MIKE_LISTEN`: the server's own default is loopback, and a published port cannot reach it.
+`MIKE_ENCRYPTION_KEY`, defaults `MIKE_LISTEN` to `0.0.0.0` and `MIKE_ALLOWED_HOSTS` to `localhost`,
+probes `podman info` for the graph driver, writes `/etc/containers/storage.conf` when the kernel
+refuses `overlay`, then `exec`s the server so SIGTERM reaches the bounded shutdown path. The
+`MIKE_LISTEN` default is why no example below sets it: the server's own default is loopback, and a
+published port cannot reach it.
 `MIKE_PREPULL_IMAGE=1` pulls the default sandbox image in the background instead of during the first
 task.
 
@@ -74,13 +76,15 @@ HTTPS requests where one cannot say both: `/api/health` proves the listener, an 
 ## Start it
 
 Everything below assumes the image exists — built here or pulled, it makes no difference. The name
-used is the one `compose.yaml` gives a local build. Two values have no default, `MIKE_ENCRYPTION_KEY`
-and `MIKE_ALLOWED_HOSTS`, and the entrypoint exits naming whichever is missing.
+used is the one `compose.yaml` gives a local build. One value has no default, `MIKE_ENCRYPTION_KEY`,
+and the entrypoint exits naming it. `MIKE_ALLOWED_HOSTS` defaults to `localhost`, which is all the
+loopback every example here publishes needs; the name a browser types instead — a proxy's domain,
+`hostname.local`, a LAN IP — has to be listed.
 
 ### From this checkout
 
 ```bash
-cp .env.example .env      # fill in the two required values, then:
+cp .env.example .env      # fill in the one required value, then:
 docker compose up -d
 docker compose logs mike  # a data directory with no passkey prints a boxed pairing code here
 ```
@@ -107,7 +111,6 @@ services:
     ports: ["127.0.0.1:3000:3000"]
     environment:
       MIKE_ENCRYPTION_KEY: ${MIKE_ENCRYPTION_KEY:?openssl rand -hex 32}
-      MIKE_ALLOWED_HOSTS: localhost        # name every Host a browser will type, or 421
       MIKE_DATA_DIR: /mike/data
       MIKE_WORKTREES_DIR: /mike/worktrees   # unset, worktrees land in /mike/.worktrees instead
     volumes:
@@ -124,7 +127,9 @@ volumes:
   mike-containers:
 ```
 
-`docs/configuration.md` holds the optional variables. `MIKE_PREPULL_IMAGE=1` pulls the default sandbox
+`docs/configuration.md` holds the optional variables. Nothing above sets `MIKE_ALLOWED_HOSTS`: the
+entrypoint's `localhost` default is what a browser reaching the published loopback port presents, and
+a name beyond that belongs in the list. `MIKE_PREPULL_IMAGE=1` pulls the default sandbox
 image at boot instead of during the first task.
 
 ### docker run
@@ -134,7 +139,7 @@ docker run -d --name mike \
   --privileged --security-opt seccomp=unconfined \
   --shm-size 256m --tmpfs /tmp --stop-timeout 40 \
   -p 127.0.0.1:3000:3000 \
-  -e MIKE_ENCRYPTION_KEY -e MIKE_ALLOWED_HOSTS=localhost \
+  -e MIKE_ENCRYPTION_KEY \
   -e MIKE_DATA_DIR=/mike/data -e MIKE_WORKTREES_DIR=/mike/worktrees \
   -v mike-data:/mike/data \
   -v mike-worktrees:/mike/worktrees \
@@ -149,7 +154,7 @@ docker logs mike        # the pairing code, on a data directory with no passkey 
 `-e MIKE_ENCRYPTION_KEY` with no value takes it from the shell, so the secret stays out of the command
 history and out of `docker inspect`. Losing every passkey is a one-shot command, not a GUI action:
 stop the service, then run the same image with `--reset-passkeys` as its only argument, against the
-same data volume and with the same two values in its environment. The entrypoint checks both before
+same data volume and with the key in its environment. The entrypoint checks for it before
 it hands anything to the server, and the server refuses a missing `MIKE_ENCRYPTION_KEY` on its own
 too.
 
@@ -183,7 +188,8 @@ Either way the bundle's published sha512 is verified before anything is executed
 - **`MIKE_ALLOW_ROOT_FS` is not forwarded.** `compose.yaml` leaves it alone on purpose, so `.env`
   cannot widen the jail; the refusal names the variable because the widening is a boot decision.
 - **A hostname nobody listed is HTTP 421.** `localhost`, `127.0.0.1`, `::1` and the listen host are
-  accepted; a proxy's domain, `hostname.local` or a LAN IP goes into `MIKE_ALLOWED_HOSTS` first.
+  accepted, and the entrypoint's `MIKE_ALLOWED_HOSTS` default adds nothing to them; a proxy's domain,
+  `hostname.local` or a LAN IP goes into that list first.
 - **A project must live under the bind mount** for its sandboxes to reach its `.git` at the same path.
 - **An agent adapter that shells out to a CLI fails until that CLI is installed** in a derived image;
   the base image ships no node or python.
