@@ -12,7 +12,7 @@
     import { diffStatsStore } from '$lib/stores/diff-stats.svelte';
     import { commitQueueStore } from '$lib/stores/commit-queue.svelte';
     import { taskEventStore } from '$lib/stores/task-events.svelte';
-    import { getProjects, getBoard, getConfig, deleteProject, createProject, cloneProject, createAppStream, getProjectCounts, setOfflineStatus, loadQueue, flushQueueNow, adoptQueue, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask, getDroppedActions } from '$lib/api';
+    import { getProjects, getCachedProjects, getCachedConfig, getBoard, getConfig, deleteProject, createProject, cloneProject, createAppStream, getProjectCounts, setOfflineStatus, loadQueue, flushQueueNow, adoptQueue, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask, getDroppedActions } from '$lib/api';
     import { reconnectBanner } from '$lib/services/reconnect-banner.svelte';
     import { sessionBoot } from '$lib/services/session-boot.svelte';
     import { repoNameFromGitUrl } from '$lib/utils/repo-name';
@@ -537,7 +537,11 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         dialogStore.showToast(t('api.queueRejected', { count }), 'error');
     }
 
-    async function loadAppData() {
+    /** Replays this browser's queued writes, then reads projects, the board, the config and the counts,
+     * and puts them on screen. In `mirror` mode nothing here waits on the network, and the mirror stream's
+     * own reconnect is what brings live data back. */
+    async function loadAppData(mode: 'live' | 'mirror') {
+        const mirrored = mode === 'mirror';
         try {
             // Restore offline action queue from IndexedDB
             await loadQueue();
@@ -557,15 +561,17 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             // board landed: the Review ledger reads counts in the order it is told about them, and the
             // board on screen is what makes a rise on this project explainable
             // (`docs/notifications.md → The ledger`).
-            const configRead = getConfig().catch(() => null);
-            const countsRead = getProjectCounts().catch(() => null);
-            const projs = await getProjects();
-            appStore.projects = projs || [];
+            const configRead = (mirrored ? getCachedConfig() : getConfig()).catch(() => null);
+            const projsRead = mirrored ? getCachedProjects() : getProjects();
+            // Counts have no mirror, so offline there is nothing to read them from.
+            const countsRead = mirrored ? Promise.resolve(null) : getProjectCounts().catch(() => null);
+            const projs = (await projsRead) ?? [];
+            appStore.projects = projs;
             if (appStore.projects.length > 0) {
                 const targetProject = (urlRouter.project ? appStore.projects.find(p => p.id === urlRouter.project) : null)
                     ?? await landingProject();
                 if (targetProject) {
-                    await selectProject(targetProject, false);
+                    await selectProject(targetProject, false, { cached: mirrored });
                 }
                 // The landing replayed this project's queued writes already; a second pass opens a
                 // second card.
@@ -769,10 +775,10 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         diffStatsStore.fillAbsent(toAdd);
     }
 
-    /** The board of the project just opened, as IndexedDB last saw it, applied while its live board
-     * is in flight. Dropped if that project is no longer the one on screen, or if a live board for
-     * it has landed in the meantime (`appStore.board` is set by every board write). */
-    async function showCachedBoard(projectId: string): Promise<void> {
+    /** The board of the project just opened, as IndexedDB last saw it; dropped if that project is no longer
+     * on screen, or if a board for it has already landed. `final` marks the offline screen's copy, which no
+     * live board follows. */
+    async function showCachedBoard(projectId: string, final = false): Promise<void> {
         let entry: { data: unknown; cachedAt: number } | null = null;
         try {
             entry = await getBoardCacheEntry(boardCacheKey(projectId));
@@ -783,9 +789,9 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         if (!cached || appStore.board || appStore.selectedProject?.id !== projectId) return;
         if (!applyBoard(cached, projectId, 'mirror')) return;
         reconnectBanner.lastSyncedAt = entry!.cachedAt;
-        // The banner says "this is the newest copy there is", which is only true with no socket to
-        // bring the live board in; a slow-but-connected switch must not flash it.
-        sessionBoot.servingFromCache = !connectionStore.connected;
+        // The banner claims this is the newest copy there is. That holds when no socket can bring a live
+        // board in, and when `final` says nothing live is coming.
+        sessionBoot.servingFromCache = final || !connectionStore.connected;
     }
 
     async function refreshBoard() {
@@ -826,12 +832,16 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         try {
             // Wait for pending queue flush
             await waitForFlush();
+            // If any read fell back to the mirror, the screen is still showing cached data: a reconnecting
+            // socket says nothing about whether the data arrived.
             const projs = await getProjects();
             appStore.projects = projs || [];
+            let fromMirror = isFromCache(projs);
             const project = appStore.selectedProject;
             if (project) {
                 const projectId = project.id;
                 const b = await getBoard(projectId);
+                fromMirror = fromMirror || isFromCache(b);
                 if (applyBoard(b, projectId, boardSource(b))) {
                     // Update selected task reference
                     { const sel = appStore.selectedTask; if (sel) {
@@ -844,8 +854,9 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             }
             const c = await getConfig();
             appStore.config = c;
-            sessionBoot.servingFromCache = false;
-            reconnectBanner.lastSyncedAt = Date.now();
+            fromMirror = fromMirror || isFromCache(c);
+            sessionBoot.servingFromCache = fromMirror;
+            if (!fromMirror) reconnectBanner.lastSyncedAt = Date.now();
         } catch {
             // Still offline — keep cached data
         }
@@ -918,8 +929,10 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
      *
      * `board` says this project has never been on screen, so it opens on its own board rather than on the
      * screen the person left.
+     *
+     * `cached` is the offline screen's: the mirrored board is shown as it stands, and no live read starts.
      */
-    async function selectProject(p: Project, push = true, { board = false }: { board?: boolean } = {}) {
+    async function selectProject(p: Project, push = true, { board = false, cached = false }: { board?: boolean; cached?: boolean } = {}) {
         disconnectBoardStream();
         const previous = appStore.selectedProject;
         const wasProjectSwitch = !!previous;
@@ -953,14 +966,21 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         }
         if (pending) return;
         try {
-            const b = await getBoard(p.id);
-            if (!applyBoard(b, p.id, boardSource(b))) return;
+            if (cached) {
+                await showCachedBoard(p.id, true);
+                // Nothing mirrored for this project, or the person moved on while it was read. Either way
+                // there is no board to restore a task onto or to subscribe with.
+                if (!appStore.board || appStore.selectedProject?.id !== p.id) return;
+            } else {
+                const b = await getBoard(p.id);
+                if (!applyBoard(b, p.id, boardSource(b))) return;
+                sessionBoot.servingFromCache = isFromCache(b);
+            }
             const boardTasks = appStore.tasks;
             // Mobile: land the board on the column that has work
             if (wasDifferentProject && isMobileCtx.isMobile) {
                 boardFocus = { projectId: p.id, column: resolveBoardLandingColumn(boardTasks) };
             }
-            sessionBoot.servingFromCache = isFromCache(b);
             // Restore task from URL after board loads (await so task detail renders before return)
             await restoreTaskFromUrl();
             // Hydrate cached done-task stats BEFORE subscribing so the

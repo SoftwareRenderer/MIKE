@@ -55,14 +55,15 @@ vi.mock('$lib/services/locale-offer.svelte', () => ({ localeOffer: packs }));
 const { sessionBoot } = await import('$lib/services/session-boot.svelte');
 const { reconnectBanner } = await import('$lib/services/reconnect-banner.svelte');
 
-/** The app's side of a boot, in the order it was asked for it. */
+/** The app's side of a boot, in the order it was asked for it, with the load reporting which screen it was
+ *  asked to fill. */
 function recordingApp() {
     const calls: string[] = [];
     sessionBoot.configure({
         closeStream: () => void calls.push('close'),
         openStream: (mode) => void calls.push(`open:${mode}`),
-        loadAppData: async () => {
-            calls.push('load');
+        loadAppData: async (mode) => {
+            calls.push(`load:${mode}`);
         },
     });
     return calls;
@@ -128,7 +129,7 @@ describe('the boot offer', () => {
         expect(sessionBoot.isLoadingAuth).toBe(true);
         emptyMirror.resolve(SIGNED_IN);
         await booting;
-        expect(calls).toEqual(['close', 'open:live', 'load']);
+        expect(calls).toEqual(['close', 'open:live', 'load:live']);
     });
 
     it('says the server is slow, not gone, and takes the offer back when the answer lands', async () => {
@@ -180,7 +181,7 @@ describe('the two boot paths', () => {
         expect(calls).toEqual([]); // signed out: no stream, just the login form
 
         await sessionBoot.startAfterLogin();
-        expect(calls).toEqual(['close', 'open:live', 'load']);
+        expect(calls).toEqual(['close', 'open:live', 'load:live']);
         expect(sessionBoot.isAuthenticated).toBe(true);
         // A session exists only behind a passkey, so the form after a sign-out asks for one.
         expect(sessionBoot.hasPasskey).toBe(true);
@@ -195,10 +196,29 @@ describe('the two boot paths', () => {
         calls.length = 0;
 
         await sessionBoot.useLocalCache();
-        expect(calls).toEqual(['close', 'open:mirror', 'load']);
+        expect(calls).toEqual(['close', 'open:mirror', 'load:mirror']);
         expect(reconnectBanner.lastSyncedAt).toBe(store.mirrorCachedAt);
         expect(sessionBoot.isLoadingAuth).toBe(false);
         expect(sessionBoot.hasLocalCache).toBe(false);
+    });
+
+    it('covers the mirror read with the loading screen, so the empty shell never paints', async () => {
+        // What the operator saw: the empty start pane ("Welcome to MIKE") where the cached board belongs.
+        cachedProject();
+        api.checkSession.mockRejectedValue(new TypeError('Failed to fetch'));
+        let loadingDuringRead: boolean | null = null;
+        sessionBoot.configure({
+            closeStream: () => {},
+            openStream: () => {},
+            loadAppData: async () => { loadingDuringRead = sessionBoot.isLoadingAuth; },
+        });
+
+        await sessionBoot.boot();
+        expect(sessionBoot.isLoadingAuth).toBe(false); // the offline screen itself
+
+        await sessionBoot.useLocalCache();
+        expect(loadingDuringRead).toBe(true);
+        expect(sessionBoot.isLoadingAuth).toBe(false); // down again once the read is done
     });
 
     it('asks for a translation pack only after the extension list resolved', async () => {

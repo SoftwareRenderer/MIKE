@@ -41,6 +41,7 @@ export type { SendResult, SendTaskMessagePayload } from './raw/tasks';
 export {
     getProject,
     getProjects,
+    getCachedProjects,
     getProjectCounts,
     getProjectStats,
     resetProjectStats,
@@ -102,6 +103,7 @@ export {
 // -- Config --
 export {
     getConfig,
+    getCachedConfig,
     updateConfig,
     testConnection,
     fetchModels,

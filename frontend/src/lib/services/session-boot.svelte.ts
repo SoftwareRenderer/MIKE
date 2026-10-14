@@ -34,8 +34,10 @@ interface BootActions {
     /** Open the app stream. `mirror` is the offline screen's own: its task handlers stay silent until a
      *  live board replaces the mirrored one. */
     openStream(mode: 'live' | 'mirror'): void;
-    /** Flush this browser's queued writes, then read projects, the board on screen, the config, counts. */
-    loadAppData(): Promise<void>;
+    /** Flush this browser's queued writes, then read projects, the board on screen, the config, counts.
+     *  `mirror` is the offline screen's load, where nothing waits on the network: a request that never
+     *  answers would otherwise sit between the click and the board. */
+    loadAppData(mode: 'live' | 'mirror'): Promise<void>;
 }
 
 /** Before the app configures the boot there is no stream to open and no board to read. */
@@ -121,7 +123,7 @@ class SessionBoot {
         this.actions.openStream('live');
         urlRouter.read();
         urlRouter.applyView();
-        await this.actions.loadAppData();
+        await this.actions.loadAppData('live');
         this.offerLanguagePack();
     }
 
@@ -134,17 +136,18 @@ class SessionBoot {
         await this.startSession();
     }
 
-    /** "Load Local Cache": the mirror, with the age line counting from when the mirror last landed. */
+    /** "Offline Mode": show the mirror, and count the data's age from the moment it was written. */
     async useLocalCache(): Promise<void> {
         this.hasLocalCache = false; // hide the offline screen
         this.actions.closeStream(); // the mirror's stream must not outlive the mirror
-        // Keep isLoadingAuth = true so the loading screen bridges the gap
-        // while cached data is read from IndexedDB (avoids flash of empty state)
+        // The offline screen hides the loading screen, so raise it again: the app shell underneath has no
+        // project and no config, and shows its empty state while the mirror is read.
+        this.isLoadingAuth = true;
         this.isAuthenticated = true;
         this.actions.openStream('mirror');
         const mirror = await getBoardCacheEntry('projects').catch(() => null);
         if (mirror) reconnectBanner.lastSyncedAt = mirror.cachedAt;
-        await this.actions.loadAppData(); // marks the initial load complete
+        await this.actions.loadAppData('mirror'); // marks the initial load complete
         this.isLoadingAuth = false; // hide loading screen after data is loaded
         this.offerLanguagePack();
     }

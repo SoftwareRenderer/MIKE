@@ -394,6 +394,8 @@ never marks the app offline, and nothing in the product puts a deadline on a wai
   server-side mirror `terminalTurnStates` must agree with it.
 - **The offline mirror holds only what this browser received**, and a mirror landing paints a view that
   holds nothing rather than replacing one that holds something.
+- **The offline screen answers from the mirror** — its projects, board and config come out of IndexedDB with
+  no request in front of them, and the loading screen stays up over that read.
 - Mechanisms: **`docs/reconnection.md`**.
 
 ## Licensing

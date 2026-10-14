@@ -11,6 +11,12 @@ import { t } from '$lib/i18n';
 
 // -- Configuration endpoints --
 
+/** The configuration as this browser last saw it, marked as cached data. `null` when nothing is mirrored. */
+export async function getCachedConfig(): Promise<Config | null> {
+    const cached = await getBoardCache<Config>('config');
+    return cached ? markCached(cached) : null;
+}
+
 /** Fetch the current server configuration (LLM endpoint, model, workspace, providers). Falls back to cached copy on failure.
  * Always tries the network first: a read is what releases the queue (`api/queue.ts`). */
 export async function getConfig(): Promise<Config> {
@@ -22,8 +28,8 @@ export async function getConfig(): Promise<Config> {
         setBoardCache('config', data).catch(() => {});
         return data;
     } catch (e) {
-        const cached = await getBoardCache<Config>('config');
-        if (cached) return markCached(cached);
+        const cached = await getCachedConfig();
+        if (cached) return cached;
         throw e;
     }
 }

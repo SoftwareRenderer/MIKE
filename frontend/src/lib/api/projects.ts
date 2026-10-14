@@ -17,6 +17,12 @@ import { repoNameFromGitUrl } from '../utils/repo-name';
 import { gitUrlCarriesCredentials } from '../utils/git-url';
 import { t } from '$lib/i18n';
 
+/** The projects list as this browser last saw it, marked as cached data. `null` when nothing is mirrored. */
+export async function getCachedProjects(): Promise<Project[] | null> {
+    const cached = await getBoardCache<Project[]>('projects');
+    return cached ? markCached(cached) : null;
+}
+
 /** Fetch all projects from the server. Falls back to cached copy on failure.
  * Always tries the network first: a read is what releases the queue (`api/queue.ts`). */
 export async function getProjects(): Promise<Project[]> {
@@ -28,8 +34,8 @@ export async function getProjects(): Promise<Project[]> {
         setBoardCache('projects', data).catch(() => {});
         return data;
     } catch (e) {
-        const cached = await getBoardCache<Project[]>('projects');
-        if (cached) return markCached(cached);
+        const cached = await getCachedProjects();
+        if (cached) return cached;
         throw e;
     }
 }
