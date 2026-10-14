@@ -1035,7 +1035,7 @@ const catalog = {
     'app.login.codePlaceholder': 'XXXX-XXXX',
     'app.login.nameAria': 'Device name',
     'app.login.namePlaceholder': 'e.g. Work laptop',
-    'app.login.nameHelp': 'This is what the device is called under Settings > Devices & passkeys. Clear it and MIKE calls it whatever this browser says it is.',
+    'app.login.nameHelp': 'This is what the device is called under Settings > Devices & passkeys.',
     'app.login.createPasskey': 'Create a passkey',
     'app.login.back': 'Back',
     // The prompt is the browser's, so the wait is described from the browser's side.
