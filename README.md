@@ -8,17 +8,46 @@
 
 ## Quick Start
 
-TBD.
+Prerequisite:
+- docker or podman must be installed
+
+1. Generate a secure key
+
+```bash
+openssl rand -hex 32
+```
+
+2. Create a `.env` file, containing the secure key:
+```
+MIKE_ENCRYPTION_KEY=secure_key
+```
+
+3. Use docker / podman:
+
+```bash
+podman run -p 3000:3000 --env-file .env --privileged docker.io/softwarerenderer/mike:latest
+```
+Note that privileged access is only needed in this containerized Quick Start in order to support nested containers.
+
+4. Navigate to https://localhost:3000
+
+5. You will be prompted to pair a Passkey using a code provided after starting the application.
+  - Firefox on Linux: As of 2026-10-10, there is limited support for Passkeys.
+
 
 ## Manual Setup
 
 Prerequisites:
-
 - [Podman](https://podman.io/docs/installation)
 - [gVisor](https://gvisor.dev/docs/user_guide/install/)
 - [git](https://git-scm.com/install/)
 
-TBD.
+1. Download the latest release
+2. Set the encryption key and run:
+```bash
+MIKE_ENCRYPTION_KEY=testkey ./mike-server -port 3000
+```
+3. Continue from step 4 in the [Quick Start](#quick-start) section.
 
 ## Development
 
@@ -45,7 +74,4 @@ This example listens on all network interfaces.
 MIKE_ENCRYPTION_KEY=testkey go run . -listen 0.0.0.0 -allowed-hosts your.hostname.com
 ```
 
-3. Navigate to https://localhost:3000
-
-4. You will be prompted to pair a Passkey using a code provided after starting the application.
-  - Firefox on Linux: As of 2026-10-10, there is limited support for Passkeys.
+3. Continue from step 4 in the [Quick Start](#quick-start) section.
