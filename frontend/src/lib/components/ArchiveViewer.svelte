@@ -216,7 +216,7 @@
         container-type: inline-size;
         container-name: archive-view;
         --archive-size-col: 90px;
-        --archive-date-col: 130px;
+        --archive-date-col: 108px;
     }
 
     .archive-placeholder {
@@ -357,11 +357,13 @@
             position: sticky;
             right: 0;
             min-width: var(--archive-date-col);
+            max-width: var(--archive-date-col);
         }
         .archive-col-size, .archive-cell-size {
             position: sticky;
             right: var(--archive-date-col);
             min-width: var(--archive-size-col);
+            max-width: var(--archive-size-col);
         }
         .archive-cell-size, .archive-cell-date {
             background: var(--color-surface-0);

@@ -231,6 +231,13 @@ test.describe('Explorer archive listing on a phone', () => {
         scrolled: scroller.scrollLeft,
         nameLeft: Math.round(first.left),
         room: widest.getBoundingClientRect().width,
+        // How much name is actually readable next to the pinned columns at this scroll position.
+        nameVisible: size.left - Math.max(first.left, scroller.getBoundingClientRect().left),
+        // The date keeps its own ellipsis; it must not be clipped by the column's width.
+        dateCut: (() => {
+          const date = document.querySelector<HTMLElement>('.archive-cell-date')!;
+          return date.scrollWidth - date.clientWidth;
+        })(),
         cut: worstCut,
         // How far past the visible end the longest name reaches, which is what panning is for.
         endPastView: Math.max(...cells.map(c => c.getBoundingClientRect().right)) - scroller.getBoundingClientRect().right,
@@ -251,7 +258,9 @@ test.describe('Explorer archive listing on a phone', () => {
 
     const before = await listingGeometry(page);
     expect(before.room, 'the name column has no more room than the pane gives it').toBeGreaterThanOrEqual(300);
+    expect(before.nameVisible, 'the pinned columns leave too little of the name readable').toBeGreaterThanOrEqual(180);
     expect(before.cut, 'a member path is shortened with an ellipsis').toBe(0);
+    expect(before.dateCut, 'the date is shortened with an ellipsis').toBe(0);
     expect(before.pans, 'the listing does not reach past the pane at all').toBeGreaterThan(0);
     expect(before.endPastView, 'no name reaches past the pane, so there is nothing to pan to').toBeGreaterThan(0);
     expect(before.offscreen, 'a pinned column sits off the screen').toBeLessThanOrEqual(0.5);
