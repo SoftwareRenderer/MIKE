@@ -215,6 +215,7 @@
         font-size: var(--text-xs);
         container-type: inline-size;
         container-name: archive-view;
+        --archive-size-col: 90px;
         --archive-date-col: 130px;
     }
 
@@ -280,7 +281,7 @@
         white-space: nowrap;
     }
     .archive-col-size, .archive-cell-size {
-        width: 90px;
+        width: var(--archive-size-col);
         text-align: right;
     }
     .archive-col-date, .archive-cell-date {
@@ -349,15 +350,18 @@
     @container archive-view (max-width: 560px) {
         .archive-table {
             min-width: 560px;
+            table-layout: auto;
         }
 
         .archive-col-date, .archive-cell-date {
             position: sticky;
             right: 0;
+            min-width: var(--archive-date-col);
         }
         .archive-col-size, .archive-cell-size {
             position: sticky;
             right: var(--archive-date-col);
+            min-width: var(--archive-size-col);
         }
         .archive-cell-size, .archive-cell-date {
             background: var(--color-surface-0);

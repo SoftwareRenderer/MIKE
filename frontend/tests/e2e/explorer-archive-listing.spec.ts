@@ -211,24 +211,29 @@ test.describe('Explorer archive listing on a phone', () => {
     page.evaluate(() => {
       const box = (sel: string) => document.querySelector<HTMLElement>(sel)!.getBoundingClientRect();
       const scroller = document.querySelector<HTMLElement>('.archive-scroll')!;
-      const cell = document.querySelector<HTMLElement>('.archive-cell-name')!;
-      // The button or span inside does its own clipping, so the cut is measured there.
-      const text = cell.querySelector<HTMLElement>('button, span')!;
-      const name = cell.getBoundingClientRect();
+      const cells = [...document.querySelectorAll<HTMLElement>('.archive-cell-name')];
+      const first = cells[0].getBoundingClientRect();
+      const widest = cells.reduce((a, b) => (b.getBoundingClientRect().width > a.getBoundingClientRect().width ? b : a));
+      // A button or span inside does its own clipping, so a cut shows there and not on the cell.
+      const worstCut = Math.max(...cells.map(c => {
+        const text = c.querySelector<HTMLElement>('button, span')!;
+        return text.scrollWidth - text.clientWidth;
+      }));
       // The middle of the pinned size column, where a panned name passes under.
       const size = box('.archive-cell-size');
       const at = { x: size.left + size.width / 2, y: size.top + size.height / 2 };
       const hit = document.elementFromPoint(at.x, at.y);
-      const reached = [...document.querySelectorAll<HTMLElement>('.archive-cell-name')]
-        .map(boxOf => boxOf.getBoundingClientRect())
+      const reached = cells
+        .map(c => c.getBoundingClientRect())
         .filter(b => at.x >= b.left && at.x <= b.right && at.y >= b.top && at.y <= b.bottom).length;
       return {
         pans: scroller.scrollWidth - scroller.clientWidth,
         scrolled: scroller.scrollLeft,
-        nameLeft: Math.round(name.left),
-        room: name.width,
-        // A leftover here means the column is still too narrow for a path that fits.
-        cut: text.scrollWidth - text.clientWidth,
+        nameLeft: Math.round(first.left),
+        room: widest.getBoundingClientRect().width,
+        cut: worstCut,
+        // How far past the visible end the longest name reaches, which is what panning is for.
+        endPastView: Math.max(...cells.map(c => c.getBoundingClientRect().right)) - scroller.getBoundingClientRect().right,
         held: [size, box('.archive-cell-date')].map(r => Math.round(r.right)),
         offscreen: box('.archive-cell-date').right - window.innerWidth,
         // Counted together: a sample with nothing overlapping says nothing about which is on top.
@@ -246,8 +251,9 @@ test.describe('Explorer archive listing on a phone', () => {
 
     const before = await listingGeometry(page);
     expect(before.room, 'the name column has no more room than the pane gives it').toBeGreaterThanOrEqual(300);
-    expect(before.cut, 'a member path that fits is not cut off').toBeLessThanOrEqual(0);
+    expect(before.cut, 'a member path is shortened with an ellipsis').toBe(0);
     expect(before.pans, 'the listing does not reach past the pane at all').toBeGreaterThan(0);
+    expect(before.endPastView, 'no name reaches past the pane, so there is nothing to pan to').toBeGreaterThan(0);
     expect(before.offscreen, 'a pinned column sits off the screen').toBeLessThanOrEqual(0.5);
 
     // Halfway, where a name still reaches under the pinned columns; at the far end nothing overlaps.
@@ -261,6 +267,7 @@ test.describe('Explorer archive listing on a phone', () => {
     await listing.evaluate(el => { el.scrollLeft = el.scrollWidth; });
     const panned = await listingGeometry(page);
     expect(panned.scrolled, 'the far end of the pan cannot be reached').toBeGreaterThanOrEqual(before.pans - 0.5);
+    expect(panned.endPastView, 'panning to the end still leaves a name cut short').toBeLessThanOrEqual(0.5);
     expect(panned.held, 'the size and modified columns moved with the names').toEqual(before.held);
     expect(panned.nameLeft, 'the names never slid sideways').toBeLessThan(before.nameLeft);
   });
@@ -271,7 +278,8 @@ test.describe('Explorer archive listing on a phone', () => {
     await openOnPhone(page, name, gzipSync(tar(LONG_MEMBERS)));
 
     await expect(page.locator('.archive-table')).toBeVisible({ timeout: 10000 });
-    await page.locator('.archive-name-btn').filter({ hasText: DEEP }).tap();
+    // A long row runs under the pinned columns, so the tap goes to the end of it that is on screen.
+    await page.locator('.archive-name-btn').filter({ hasText: DEEP }).tap({ position: { x: 20, y: 8 } });
     await expect(page.locator('.archive-entry-name')).toBeVisible({ timeout: 10000 });
 
     // Fragments are counted by the y they sit on, because a clipped name still reports several.
