@@ -2095,6 +2095,12 @@ const catalog = {
     'editor.fileTooLarge': 'File too large to edit (max 1MB)',
     'editor.readFailed': 'Failed to read file',
     'editor.saveFailed': 'Failed to save',
+    // The card a clicked hex value opens in a stylesheet.
+    'editor.color.title': 'Pick a color',
+    'editor.color.swatch': 'Color picker',
+    'editor.color.hex': 'Hex value',
+    'editor.color.apply': 'Apply',
+    'editor.color.cancel': 'Cancel',
     'editor.unsavedTitle': 'Unsaved Changes',
     'editor.unsavedMessage': 'You have unsaved changes. Discard them?',
     'editor.keepEditing': 'Keep Editing',

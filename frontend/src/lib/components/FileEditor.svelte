@@ -53,6 +53,8 @@
     import { fileSuffix } from '$lib/utils/file-suffix';
     import { getOutline } from '$lib/utils/editor-outline';
     import { historyDepths, replayDeltas, type EditorHistory } from '$lib/utils/editor-history';
+    import { colorPicker, type ColorTarget } from '$lib/utils/editor-color-picker';
+    import ColorPicker from './FileEditor/ColorPicker.svelte';
 
     let {
         projectId,
@@ -297,6 +299,8 @@
     let view: EditorView | null = null;
     // Reactive flag to signal when the editor view is created (for LSP effect dependency)
     let editorReady = $state(false);
+    /** The color token the pointer chose, and where it is; the card opens on it and nothing else. */
+    let colorCard = $state<ColorTarget | null>(null);
     // Retry state for LSP symbol extraction. Headers are only re-extracted on
     // load / save / external change, so a single failed request (e.g. gopls
     // still warming up after a cold sandbox start) must retry with backoff —
@@ -517,9 +521,28 @@
         // Deliver, do not drop: the document is changing hands and the wait belongs to the file it was armed for.
         deliverWrite(armedDraft);
         deliverWrite(armedHistory);
+        colorCard = null;
         view?.destroy();
         view = null;
         syncHistory();
+    }
+
+    function closeColorCard() {
+        colorCard = null;
+    }
+
+    /** The card answers with the whole replacement token; the write is an ordinary edit, so the dirty tab,
+     *  the draft and undo all take it. */
+    function applyColor(token: string) {
+        const target = colorCard;
+        colorCard = null;
+        if (!view || !target || target.color === token) return;
+        view.dispatch({
+            changes: { from: target.from, to: target.to, insert: token },
+            selection: { anchor: target.from + token.length },
+            userEvent: 'input.color',
+        });
+        view.focus();
     }
 
     function createEditor() {
@@ -546,6 +569,13 @@
             stickyScroll(),
             keepViewportParsed(),
             closeHoverOnScroll(),
+            // A declared syntax profile builds no parse tree, so a style block inside one is found by
+            // reading its tags; a grammar reports its own colors.
+            ...colorPicker({
+                mode: resolveFile(filePath).spec ? 'style-block' : 'grammar',
+                onPick: (target) => { colorCard = target; },
+                onClose: closeColorCard,
+            }),
             sectionHeadersField,
             gitGutterExt.extension,
             highlightActiveLineGutter(),
@@ -1678,6 +1708,13 @@
                 <div class="editor-wrapper" bind:this={editorEl}></div>
                 <div class="ext-anchor" bind:this={extAnchorEl}></div>
                 <div class="search-container" bind:this={searchContainerEl}></div>
+                {#if colorCard && (mode === 'diff' || active)}
+                    <!-- One card per token: clicking another value re-creates it, so the field always holds
+                         the token the pointer chose rather than the last one typed into it. -->
+                    {#key `${colorCard.from}:${colorCard.to}:${colorCard.color}`}
+                        <ColorPicker target={colorCard} onApply={applyColor} onClose={closeColorCard} />
+                    {/key}
+                {/if}
             {/if}
         </div>
 
