@@ -446,17 +446,7 @@ export class ExplorerCore {
         this.diffCommitFiles = [];
         if (this.edges.isMobile.isMobile) this.activeTab = 'editor';
         try {
-            // The previous commit in the log is the base; the first parent when the log is
-            // narrowed, and the empty tree for a root commit.
-            let baseHash: string;
-            if (index > 0) {
-                baseHash = this.commits[index - 1].hash;
-            } else if (commit.parents && commit.parents.length > 0) {
-                baseHash = commit.parents[0];
-            } else {
-                baseHash = EMPTY_TREE;
-            }
-            this.diffCommitFiles = await this.edges.fetchCommitDiff(baseHash, commit.hash);
+            this.diffCommitFiles = await this.edges.fetchCommitDiff(commit.parents?.[0] || EMPTY_TREE, commit.hash);
         } catch (e) {
             console.error('Failed to fetch commit diff:', e);
             this.diffCommitFiles = [];
