@@ -146,9 +146,11 @@ func loadWasmAdapter(ext *extensions.Extension) (agent.AgentAdapter, error) {
 func resolveWasmPath(ext *extensions.Extension) string {
 	wasmModule := ext.Manifest.Capabilities.GetAgent().WasmModule
 
+	// Tried in order: the installed folder, the source tree the module build writes into, then the bare
+	// module name, which is also what the caller's error reports.
 	candidates := []string{
-		filepath.Join("extensions", "agent", ext.Name, wasmModule),
-		filepath.Join(ext.Name, wasmModule),
+		filepath.Join(extensions.InstalledDir(ext), wasmModule),
+		filepath.Join(extensions.DefaultExtensionsDir, "agent", ext.Name, wasmModule),
 		wasmModule,
 	}
 

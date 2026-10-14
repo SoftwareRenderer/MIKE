@@ -37,8 +37,9 @@ func loadPiWasm(t *testing.T) agent.AgentAdapter {
 	t.Helper()
 	withProjectRoot(t)
 	ext := &extensions.Extension{
-		Name: "pi",
-		Type: extensions.ExtensionTypeAgent,
+		Name:   "pi",
+		Author: "getmike.dev",
+		Type:   extensions.ExtensionTypeAgent,
 		Manifest: extensions.ExtensionManifest{
 			Version: "1.0.0",
 			Capabilities: &extensions.Capabilities{
@@ -48,9 +49,15 @@ func loadPiWasm(t *testing.T) agent.AgentAdapter {
 			},
 		},
 	}
+	// A module nobody built is a missing prerequisite: skip, and say how to build it. A module that is
+	// on disk but will not load is a broken build, which must fail.
+	path := resolveWasmPath(ext)
+	if _, err := os.Stat(path); err != nil {
+		t.Skipf("no pi.wasm at %s — build it with ../MIKE-extensions/agent/pi/build.sh", path)
+	}
 	adapter, err := loadWasmAdapter(ext)
 	if err != nil {
-		t.Skipf("cannot load pi.wasm (run build.sh first): %v", err)
+		t.Fatalf("loadWasmAdapter with a module on disk: %v", err)
 	}
 	t.Cleanup(func() { adapter.Close() })
 	return adapter

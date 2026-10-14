@@ -74,11 +74,15 @@ type ExtensionConfig struct {
 	ExtensionsDir string
 }
 
+// DefaultExtensionsDir is the extensions directory used when the configuration names none, and the
+// directory the static server serves as /extensions.
+const DefaultExtensionsDir = "extensions"
+
 // ExtensionsDirOrDefault returns the configured extensions directory, defaulting
 // to "extensions" (the directory the static server serves as /extensions/).
 func (c *ExtensionConfig) ExtensionsDirOrDefault() string {
 	if c == nil || c.ExtensionsDir == "" {
-		return "extensions"
+		return DefaultExtensionsDir
 	}
 	return c.ExtensionsDir
 }
@@ -996,16 +1000,16 @@ func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry
 		fail(err)
 		return
 	}
-	targetDir := filepath.Join(root, authorDir(entry.Author), entry.Name)
+	installed := extensionDir(root, entry.Author, entry.Name)
+	targetDir := installed
 	if entry.localDir != "" {
 		targetDir = entry.localDir
 
-		readable := extensionDir(root, entry.Author, entry.Name)
-		if filepath.Clean(readable) != filepath.Clean(targetDir) {
+		if filepath.Clean(installed) != filepath.Clean(targetDir) {
 			fail(fmt.Errorf(
 				"local extension folder %q is not the author folder the installed record reads it from — rename it to %q and install again",
 				filepath.Base(filepath.Dir(targetDir)),
-				filepath.Base(filepath.Dir(readable)),
+				filepath.Base(filepath.Dir(installed)),
 			))
 			return
 		}
@@ -1440,7 +1444,7 @@ func (h *ExtensionHandler) updateImageInBackground(id, name, url string, ackNewD
 
 	if gitPinned {
 		// Re-checkout the newly vetted commit (verified) and rebuild from it.
-		targetDir := filepath.Join(h.config.ExtensionsDirOrDefault(), authorDir(entry.Author), entry.Name)
+		targetDir := extensionDir(h.config.ExtensionsDirOrDefault(), entry.Author, entry.Name)
 		emit(10, "Fetching extension...")
 		if err := h.registry.CheckoutExtension(entry.Repo, entry.Commit, entry.Subdir, targetDir); err != nil {
 			fail(fmt.Errorf("failed to fetch extension (commit %s): %w", entry.Commit, err))

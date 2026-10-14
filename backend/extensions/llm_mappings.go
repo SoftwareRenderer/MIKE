@@ -79,6 +79,15 @@ func extensionDir(extensionsDir, author, name string) string {
 	return standard
 }
 
+// InstalledDir is the folder an installed extension's files live in, derived from the stored record the
+// same way removal and repair derive it.
+func InstalledDir(ext *Extension) string {
+	if ext == nil {
+		return ""
+	}
+	return extensionDir(DefaultExtensionsDir, ext.Author, ext.Name)
+}
+
 // mappingsFilePath resolves an extension's mapping file to <extension dir>/<file>,
 // rejecting values that are absolute, empty, or escape the directory.
 func mappingsFilePath(extensionsDir, author, name, file string) (string, bool) {

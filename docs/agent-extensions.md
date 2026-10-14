@@ -2,8 +2,12 @@
 
 Read this before writing or changing a WASM adapter, `backend/agent/`, or `backend/exec/loop_agent.go`.
 Rules are defined in `AGENTS.md → Extensions`. Reference implementation:
-`../MIKE-extensions/agent/pi/` (its unit tests live there too and are **not** part of
-`go test ./backend/... ./pkg/...`).
+`../MIKE-extensions/agent/pi/`, which speaks Pi's RPC JSONL (its unit tests live there too and are
+**not** part of `go test ./backend/... ./pkg/...`). `../MIKE-extensions/agent/claude-code/` is a
+second adapter over a different wire — Claude Code's stream-json transport, where a turn ends on a
+`result` line and a tool's output arrives back on a `user` message. Read it before adding an agent
+whose protocol is neither. Both emit the same `pkg/agent` events; nothing in this repository
+knows the difference.
 
 ## Layering
 
@@ -42,7 +46,17 @@ Event types: `token`, `reasoning`, `tool_call`, `tool_result`, `status`, `stats`
 | `manifest.json` | Declares `agent.wasm_module` |
 | `LICENSE` / `NOTICE` / `THIRD_PARTY_NOTICES.md` | Required — extensions are independently licensed projects |
 
-Tests in `backend/agent` (`TestWasmPiAdapter_*`) verify that `pi.wasm` loads in wazero. These tests skip if the artifact is missing, so a successful `go test` doesn't guarantee the artifact exists. To verify, manually copy the built module to the expected path and run the tests.
+Tests in `backend/agent` (`TestWasmPiAdapter_*`) load `pi.wasm` through the production loader. A module
+nobody built skips with the path it looked for; a module that is on disk and will not load **fails**, so a
+broken build cannot hide behind a green suite.
+
+**Where the module comes from.** `resolveWasmPath` asks `extensions.InstalledDir(ext)` first — the same
+`<extensions>/<author>/<name>/` folder that removal, repair and the config form derive. Then the
+adapter's source tree, then the bare module name, which is also what the error names when nothing
+exists. An extension installed from a folder on this machine
+(`POST /api/extensions/install-local`, offered by the Browse dialog through `GET /api/extensions/local`)
+therefore loads the module its own install materialized, with no registry in the loop.
+`backend/agent/loader_test.go` fails when that ordering breaks.
 
 **URL Scheme:** Use `agent://<name>` (replacing `pi://agent`). Definitions and parsing are centralized in `backend/types/agent_url.go` to avoid import cycles with `backend/config`. The frontend mirrors this as `AGENT_URL_PREFIX`. `TestRegistry_EmittedProviderURLsParseBack` verifies that emitted URLs can be parsed back.
 
