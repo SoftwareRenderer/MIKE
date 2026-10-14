@@ -45,8 +45,7 @@ own machine against real repositories.
 - **Backend:** edit `backend/` or `pkg/` → `gofmt -w` the touched files → `make build` → restart.
 - **Rebuild the committed `sandbox-bridge`** after any edit under `pkg/` — `make bridge-check` fails
   otherwise.
-- A `-tags release` binary cannot be shown a build it was not compiled from: prove a packaged artifact by
-  unpacking it, never by refreshing a tab.
+- A `-tags release` binary must run the frontend it was built with; verify packaged artifacts by unpacking them, not by refreshing a browser tab.
 
 ## Verify the Tool Output, Not the Expectation
 
@@ -70,8 +69,7 @@ code, the change is arguing with itself.
 
 ## Known Gaps — Do Not Trust These
 
-- **A red `./...` is not your regression** until it survives the scoping: `go build ./...` and `go vet ./...`
-  fail at HEAD on the pulled artifacts under `extensions/`.
+- **A red `./...` is not your regression** until it survives scoping: `go build ./...` and `go vet ./...` may fail due to pulled artifacts in `extensions/`.
 - **A green package is not proof** — `docs/testing.md → Go unit test environment`.
 - **`deadcode` needs every main as a root** — `scripts/deadcode-check.sh` holds them, and a missing root
   calls live code dead.

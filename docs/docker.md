@@ -13,41 +13,15 @@ stops is `docs/lifecycle.md`.
 
 ## What must stay true
 
-- **The image is built from sources, never from this tree's outputs.** `.dockerignore` keeps
-  `frontend/dist`, the `make release` packages under `dist/`, the committed bridge and
-  `node_modules` out of the context. Stage 2 receives `frontend/dist` from stage 1 because that
-  directory is what `//go:embed` reads. `prompts/` goes in whole, tracked skill packages included, so a
-  deployed task is offered the same bundled skills a source run is.
-- **The server binary is a release build and both binaries are CGO-free.** A `-tags release` build
-  serves the frontend it carries and refuses `--frontend-dist`. `CGO_ENABLED=0` keeps the bridge
-  runnable inside a guest whose C library is not this one.
-- **gVisor arrives as the release bundle, with its sidecar tree.** The published sha512 is checked
-  before anything is run. `runsc` executes the binaries under `gvisor-bin/` and looks for that
-  directory beside its own, so the extraction is whole. One binary pulled out of the bundle is not an
-  install.
-- **A stage spells its own `ARG` default.** Whether a global `ARG` default reaches a stage that
-  re-declares the name is a builder detail — podman/buildah 5.8 hands it over, and this tree has
-  measured no other builder. A `:=` default in the stage costs nothing, and `--build-arg` still
-  outranks it, so the stage keeps its own.
-- **The stage asserts what it can assert without privileges.** `podman --runtime-flag
-  ignore-cgroups=true --version`, `runsc --version`, the `runsc` PATH name and the sidecar tree are
-  all checked at build. `podman info` is not: it needs the privileges the container gets at run time,
-  so the entrypoint probes it and prints what it found.
-- **`privileged` and `seccomp=unconfined` buy the nested runtime, nothing else.** `compose.yaml`
-  publishes to `127.0.0.1` by default for that reason, TLS is the only mode, and the Host allowlist
-  defaults to `localhost`, so no other name reaches this server unasked. Task work runs with
-  `--cap-drop ALL` inside gVisor.
-- **Storage lives off the engine's own overlayfs.** podman refuses `overlay` on `overlayfs`, which is
-  why `compose.yaml` names a volume for `/var/lib/containers` and the entrypoint can fall back to
-  `fuse-overlayfs` or `vfs`.
-- **`MIKE_ENCRYPTION_KEY` stays required with no default.** `compose.yaml` refuses to render and the
-  entrypoint exits naming the variable. The image ships no agent CLI either: an adapter that needs a
-  host binary gets it in a derived image.
-- **The container never updates itself.** An install that is not an unpacked release directory
-  refuses, and a container is refused ahead of that test: `classifyInstall` reads the runtime's
-  marker file before it looks at the layout. A container shaped like a release still refuses,
-  because the swap survives `docker restart` and is gone on the next `compose up`.
-  `docs/auto-update.md`.
+- **Build images from source, never from existing artifacts.** `.dockerignore` keeps `frontend/dist`, `dist/` packages, the committed bridge, and `node_modules` out of the context. Stage 2 copies `frontend/dist` from Stage 1 so that `//go:embed` can bundle it into the binary. `prompts/` are included in full, including tracked skill packages, so deployed tasks have the same skills as source runs.
+- **The server binary is a release build and is CGO-free.** A `-tags release` build serves its own embedded frontend and refuses `--frontend-dist`. `CGO_ENABLED=0` ensures the bridge is statically linked, allowing it to run on guests with different C libraries.
+- **gVisor is installed as a release bundle with its sidecar tree.** The bundle's sha512 is verified before execution. `runsc` uses binaries in `gvisor-bin/` and expects that directory to be adjacent; the extraction must be complete. Installing a single binary from the bundle is insufficient.
+- **Each stage defines its own `ARG` defaults.** Whether a global `ARG` default reaches a stage that re-declares the name depends on the builder; we use podman/buildah 5.8. A `:=` default in the stage costs nothing, and `--build-arg` still takes precedence.
+- **Stages verify tool availability without root privileges.** `podman --runtime-flag ignore-cgroups=true --version`, `runsc --version`, the `runsc` PATH name, and the sidecar tree are all checked at build. `podman info` is not checked because it requires privileges available only at runtime; the entrypoint probes it instead.
+- **`privileged` and `seccomp=unconfined` enable the nested runtime.** `compose.yaml` binds to `127.0.0.1` for this reason; TLS is mandatory, and the Host allowlist defaults to `localhost` to prevent unauthorized access. Task work runs with `--cap-drop ALL` inside gVisor.
+- **Storage is kept separate from the engine's overlayfs.** Podman refuses `overlay` on `overlayfs`, so `compose.yaml` provides a volume for `/var/lib/containers`. The entrypoint falls back to `fuse-overlayfs` or `vfs` if needed.
+- **`MIKE_ENCRYPTION_KEY` is required and has no default.** `compose.yaml` fails if it is missing, and the entrypoint exits with an error naming the variable. The image does not include an agent CLI; adapters requiring a host binary must use a derived image.
+- **The container does not update itself.** Installs that are not unpacked release directories are refused. A container is refused before this check: `classifyInstall` checks the runtime's marker file before the layout. Even if a container looks like a release, it will refuse to update because a restart preserves the state, but a new `compose up` replaces the container. See `docs/auto-update.md`.
 
 ## How it is held
 

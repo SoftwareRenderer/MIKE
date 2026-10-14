@@ -1,13 +1,11 @@
 #!/bin/sh
 # MIKE container entrypoint (see Dockerfile, compose.yaml).
 #
-# Everything here is a precondition the server cannot check for itself: it verifies runsc
-# and podman exist, but it does not know whether podman's *storage* came up, and a server
-# that boots on broken storage answers 200 to every task and then fails the sandbox. So the
-# decision is made once, here, before PID 1 is handed over — and the graph driver ends up in
-# the log, because "which driver did we land on" is the first question when a sandbox fails.
+# Verifies preconditions the server cannot, specifically that podman storage is operational.
+# A server starting with broken storage would incorrectly report success for tasks before
+# failing the sandbox. The graph driver is logged as it is the first diagnostic for sandbox failures.
 #
-# POSIX sh only: this runs as PID 1's parent shell on a slim distro.
+# POSIX sh only: runs as PID 1's parent shell on a slim distro.
 
 set -eu
 
@@ -17,9 +15,8 @@ die() {
 }
 
 need() {
-    # The message names the variable and says where it belongs, because the failure is
-    # reached both by compose (which guards it in compose.yaml) and by a bare
-    # `docker run`, which does not.
+    # Identify the missing variable and how to provide it, as this check is hit by both 
+    # `docker compose` and bare `docker run` calls.
     [ -n "${1:-}" ] || die "$2 is not set. Put it in .env (see .env.example) or pass -e $2=... — the server refuses to start without it."
 }
 
@@ -41,9 +38,9 @@ mkdir -p /mike/data /mike/worktrees /mike/extensions /mike/projects
 chmod 0700 /mike/data
 
 # ── podman storage ───────────────────────────────────────────────────────────
-# `podman info` is the only probe that exercises the real store: it resolves the graph
-# driver and mounts the storage, so a driver the kernel refuses shows up here as an error
-# rather than as a sandbox that never starts.
+# `podman info` exercises the real store to resolve the graph driver and mount storage.
+# This ensures that drivers refused by the kernel cause a failure here instead of later
+# during sandbox execution.
 storage_probe() {
     podman info --format '{{.Store.GraphDriverName}}' 2>&1
 }
@@ -51,10 +48,9 @@ storage_probe() {
 out="$(storage_probe || true)"
 case "$out" in
     *"'overlay' is not supported over overlayfs"* | *'overlayfs is not supported as an overlay'* | *'mount_program'*)
-        # Nested on a host whose storage sits on overlayfs too. fuse-overlayfs is the fast
-        # answer; if it is not usable either, vfs is the honest slow one. Either way this is
-        # logged, because it is a real performance cliff an operator would otherwise chase
-        # through sandbox logs.
+        # Nested on a host using overlayfs. `fuse-overlayfs` is the preferred fast fallback;
+        # `vfs` is the slow, last-resort fallback. This is logged because both are
+        # significant performance cliffs.
         if [ -e /dev/fuse ]; then
             echo "mike-entrypoint: kernel overlay unavailable over overlayfs; using fuse-overlayfs (/dev/fuse present)"
             mkdir -p /etc/containers
