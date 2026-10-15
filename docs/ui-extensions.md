@@ -31,8 +31,10 @@ Because the `/extensions/` tree is public and on the same origin, an extension c
 outside a host-mounted frame (e.g., via a direct link). To prevent this, `CORSMiddleware` appends
 `sandbox allow-scripts` to the CSP of every `/extensions/` response. This gives the document an
 opaque origin: it cannot access `localStorage` or `GET /api/auth/session`. `/api/preview/...` carries
-the same directive in `previewDocCSPStrict`; the two are one rule stated twice because two handlers
-serve the two trees. Verified by `TestIsolationHeaders` (the header is sent) and
+the same directive under its two scripts postures; under the default no-script posture it carries a
+tokenless `sandbox` instead, which refuses scripts even in a frame whose own attribute asked for
+`allow-scripts` (`docs/preview.md → Postures`). The two trees state the rule twice because two
+handlers serve them. Verified by `TestIsolationHeaders` (the header is sent) and
 `extension-frame-channel.spec.ts` (what the browser does with it).
 
 **The entry point is the extension's directory URL.** The host requests the directory rather than

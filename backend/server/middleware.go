@@ -53,6 +53,12 @@ var publicPaths = map[string]map[string]struct{}{
 // and the CORP exemption in isOpaqueOriginAsset.
 const hostClientPath = "/host-client.js"
 
+// isPreviewPath reports the token-addressed preview tree, where the token in the URL alone answers a
+// response. The auth, CORP and CSP exemptions each give their own reason for using it.
+func isPreviewPath(path string) bool {
+	return strings.HasPrefix(path, "/api/preview/")
+}
+
 // isDocumentPath reports the URLs the application document answers. The service worker precaches
 // "/index.html" by name and abandons its install on a non-200, so that URL is public beside "/" and
 // must carry a nonce like every other document.
@@ -74,8 +80,9 @@ func isPublicPath(path, method string) bool {
 	if strings.HasPrefix(path, "/extensions/") {
 		return true
 	}
-	// Preview docs/assets (the /nav control endpoint stays session-authed)
-	if strings.HasPrefix(path, "/api/preview/") && !isPreviewNavPath(path) {
+	// Preview docs and assets: the token in the URL is the credential, because an opaque-origin frame
+	// cannot send a session cookie. The nav record is at /api/preview-nav/ and stays session-authed.
+	if isPreviewPath(path) {
 		return method == http.MethodGet || method == http.MethodHead
 	}
 	// PWA assets (manifest, service worker, icons) are always public. A worker fetches its own scripts
@@ -93,17 +100,6 @@ func isPublicPath(path, method string) bool {
 		return ok
 	}
 	return false
-}
-
-// isPreviewNavPath reports whether the path is exactly
-// /api/preview/<token>/nav (4 path segments) — the session-authed watchdog
-// endpoint. A file named "nav" inside a subdirectory has more segments, so
-// it stays a public preview asset, not this route.
-func isPreviewNavPath(path string) bool {
-	if !strings.HasPrefix(path, "/api/preview/") || !strings.HasSuffix(path, "/nav") {
-		return false
-	}
-	return strings.Count(path, "/") == 4
 }
 
 // requestIsHTTPS reports whether the browser reached this server over TLS: terminated here, or a proxy
@@ -136,7 +132,7 @@ func (s *Server) CORSMiddleware(next http.Handler) http.Handler {
 			w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
 		}
 
-		if !strings.HasPrefix(r.URL.Path, "/api/preview/") || isPreviewNavPath(r.URL.Path) {
+		if !isPreviewPath(r.URL.Path) {
 			// 'self' is required — the app's own hashed bundle is a same-origin script — and it is
 			// also the ceiling: extension code is served from this same origin under /extensions/,
 			// so the nonce cannot be the control here, only a statement about index.html's one
@@ -149,9 +145,8 @@ func (s *Server) CORSMiddleware(next http.Handler) http.Handler {
 			} else {
 				csp += " script-src 'self';"
 			}
-			// An extension document is public on this origin, so its response carries the sandbox the
-			// mounted frame asks for: opened at the top level it would otherwise run as the signed-in
-			// user. Same directive as previewDocCSPStrict; docs/ui-extensions.md.
+			// An extension document is public on this origin, so its response carries the sandbox the mounted
+			// frame asks for: opened at the top level it would run as the signed-in user. docs/ui-extensions.md.
 			if strings.HasPrefix(r.URL.Path, "/extensions/") {
 				csp += " sandbox allow-scripts;"
 			}
@@ -183,7 +178,7 @@ func isOpaqueOriginAsset(path string) bool {
 	if strings.HasPrefix(path, "/extensions/") || path == hostClientPath {
 		return true
 	}
-	return strings.HasPrefix(path, "/api/preview/") && !isPreviewNavPath(path)
+	return isPreviewPath(path)
 }
 
 // effectiveAllowedHosts returns the extra accepted Host values (e.g.
@@ -360,7 +355,14 @@ func PanicRecoveryMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if err := recover(); err != nil {
-				logging.For(logging.Recovery).Infof("%s %s: %v\n%s", r.Method, r.URL.Path, err, debug.Stack())
+				// The matched route pattern, never the request path: a panic under /api/preview/<token>/…
+				// would log a live bearer token. An unrouted request names only its first path segment.
+				route := r.Pattern
+				if route == "" {
+					seg, _, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/"), "/")
+					route = "unrouted /" + seg
+				}
+				logging.For(logging.Recovery).Infof("%s %s: %v\n%s", r.Method, route, err, debug.Stack())
 				JSONError(w, http.StatusInternalServerError, "internal server error")
 			}
 		}()

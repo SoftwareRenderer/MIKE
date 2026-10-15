@@ -9,16 +9,16 @@ import { apiGetConfig, createTaskViaApi, csrfFetch, ensureTaskStarted, getTaskDa
 // preview-as-code-view-mirror contract (unsaved edits + external on-disk
 // changes refresh the preview live), and the security model against a local
 // egress listener:
-//  - DEFAULT (scripts off): bare sandbox — a static page renders like a
-//    no-JS browser, no dynamic data leaves, and there is no self-navigation
-//    at all (the sandbox refuses even <meta refresh>).
+//  - DEFAULT (scripts off): the server serves script-src 'none', a sandbox with no tokens and no
+//    connect-src — the page renders like a no-JS browser, nothing dynamic leaves, and it cannot
+//    navigate itself at all.
 //  - SCRIPTS ON: strict zero-egress CSP, opaque-origin isolation; external
 //    self-navigation is blocked in flight by the host's frame-src 'self',
 //    same-origin navs OUT of the tree (incl. <meta refresh>) are contained
 //    by the load-event watchdog (frame reset, token released, warned).
 //  - IN-TREE NAVIGATION: the doc may navigate to any file in the project
 //    tree (links, JS, <meta refresh>) — the watchdog asks the server's nav
-//    record (GET /nav) and allows only fresh in-tree serves; navigated
+//    record (GET /api/preview-nav/{token}) and allows only fresh in-tree serves; navigated
 //    sibling documents carry the same doc CSP as the root doc, and the live
 //    refresh is paused while the preview is on another in-tree page.
 // Fixtures live in a uniquely named /tmp/kanban-test-repo subdir (plus one
@@ -461,8 +461,11 @@ test.describe.serial('HTML Preview extension', () => {
     );
     await btn.click();
     const csp = (await docResponse).headers()['content-security-policy'] || '';
-    // Scripts off → permissive CSP is safe (a scriptless page is fully static).
-    expect(csp, 'scripts-off preview served with the permissive CSP').toContain('connect-src *');
+    // Scripts off is the server's answer, not only the frame's attribute: the policy runs nothing and
+    // sends nothing, while the page's own static refs still load (asserted below).
+    expect(csp, 'scripts-off preview served with script-src none').toContain("script-src 'none'");
+    expect(csp, 'scripts-off preview served with connect-src none').toContain("connect-src 'none'");
+    expect(csp, 'scripts-off preview sandbox carries no tokens').toMatch(/(^|;\s*)sandbox\s*(;|$)/);
 
     // Code view hidden, overlay shown.
     await expect(page.locator('.file-editor.active .editor-wrapper')).toHaveCSS('display', 'none', { timeout: 10000 });
@@ -503,6 +506,36 @@ test.describe.serial('HTML Preview extension', () => {
     await btn.click();
     await expect(page.locator('.file-editor.active .editor-wrapper')).toBeVisible({ timeout: 10000 });
     await expect(btn).not.toHaveClass(/active/);
+  });
+
+  test('scripts-off with allow_network on: the served policy still refuses scripts', async ({ page }) => {
+    // Scripts off with the network setting on: the served policy still refuses scripts, and the frame
+    // no longer asks for allow-scripts either, so the two locks say the same thing.
+    await csrfFetch(page, `/api/extensions/${extId}`, { method: 'PUT', body: { config: { allow_scripts: false, allow_network: true } } });
+
+    await openFile(page, [`html-preview-${TS}`, PAGE_FILE]);
+    const btn = previewButton(page);
+    await expect(btn).toBeVisible({ timeout: 10000 });
+
+    const docResponse = page.waitForResponse(
+        (resp) => resp.url().includes('/api/preview/') && resp.request().resourceType() === 'document',
+    );
+    await btn.click();
+    const csp = (await docResponse).headers()['content-security-policy'] || '';
+    expect(csp, 'scripts-off never selects a policy that permits scripts').toContain("script-src 'none'");
+    expect(csp, 'scripts-off never opens an egress channel').toContain("connect-src 'none'");
+
+    const extFrame = page.frames().find(fr => fr.url().includes('/extensions/') && fr.url().includes('html-preview'));
+    expect(extFrame, 'extension frame present').toBeTruthy();
+    expect(await extFrame!.locator('#preview-frame').getAttribute('sandbox'),
+        'scripts off: the frame asks for nothing, and the served policy is what refuses them').toBe('');
+
+    const frame = await previewFrameOf(page);
+    await expect(frame.locator('#title')).toHaveText('HTML Preview Fixture', { timeout: 15000 });
+    await expect(frame.locator('#js-target')).toHaveText('before', 'the page never ran');
+
+    await btn.click();
+    await expect(page.locator('.file-editor.active .editor-wrapper')).toBeVisible({ timeout: 10000 });
   });
 
   test('scripts-off meta-refresh: the bare sandbox refuses the redirect, preview stays', async ({ page }) => {

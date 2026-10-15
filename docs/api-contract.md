@@ -247,6 +247,11 @@ One action is one verb: `/api/extensions` answers `PUT {id}`, `PATCH {id}/enable
 `POST .../tasks/{taskID}/resume` is registered on `executor.HandleRetry` directly, because the client's
 Resume and a restart of a failed turn are the same operation.
 
+`GET /api/preview-nav/{token}` answers the preview watchdog's question — which page the token last
+served — and sits *beside* `/api/preview/` rather than inside it. Everything under that prefix is
+public and answered by the token alone, so a session-authed control living there needs a carve-out in
+the auth rule and reserves one name inside every previewed repository.
+
 `apiroutes` asks the other half of the question: a registered `/api` pattern must match a path literal in
 `frontend/src` or in `scripts/mike-healthcheck.sh`, so a route nobody calls fails `make check` as surely as
 a route missing its verb. It is the same debt as an unheard stream event, and a route nobody reaches still
@@ -704,6 +709,11 @@ no caller in `src/`; the clipboard stays, the terminal pastes with it) **and**
 `Cross-Origin-Resource-Policy: same-origin`, except the two trees an opaque-origin frame loads as
 subresources: `/extensions/` and `/api/preview/{token}/{path...}` (`isOpaqueOriginAsset`). Marking those
 breaks the extension iframe and the preview's own assets.
+
+Nothing here answers with `Access-Control-Allow-Origin`, in any value. With the preview frame's opaque
+origin, that absence is what makes a previewed file loadable and unreadable at the same time. The one
+value that would lift it is `null` — what an opaque origin calls itself — and it admits every sandboxed
+iframe on the internet. Gate: `TestPreviewResponsesNeverGrantACrossOriginRead`.
 
 `CompressMiddleware` puts a strong ETag — a digest of the body — on every GET it buffers, and answers
 `If-None-Match` with a 304 that repeats the `ETag` and whatever `Cache-Control` the handler set. A

@@ -7,10 +7,11 @@
  * navigated within the tree.
  * A new serve from the same editor implicitly releases its previous doc.
  *
- *  - preview.serve:        strict CSP (default), paired with a bare sandbox
- *  - preview.serveScripts: strict CSP, paired with allow-scripts
+ *  - preview.serve:        static loads only — script-src 'none', a bare sandbox
+ *  - preview.serveScripts: strict zero-egress CSP, paired with allow-scripts
  *  - preview.serveNetwork: permissive CSP (scripts + network)
- * See the CSP constants in backend/server/handler_preview.go.
+ * The capability the extension dispatched is the posture the server serves, and an extension reaches
+ * `network` only through a manifest grant. The policies live in backend/server/handler_preview.go.
  */
 import type { CapabilityDef, HostContext } from '../types';
 import { apiFetch } from '$lib/api/helpers';
@@ -36,8 +37,8 @@ interface ServeResult {
     url: string;
 }
 
-// seq only grows, so the extension can tell a fresh load from a stale
-// record; isDoc marks the doc's own content vs a sibling file.
+// seq only grows, so the extension can tell a fresh load from a stale record. `ok` is the server's
+// `seq > 0`, and stays in the shape because an installed extension reads it.
 interface NavState {
     seq: number;
     path: string;
@@ -45,7 +46,13 @@ interface NavState {
     isDoc: boolean;
 }
 
-async function serve(ctx: HostContext, args: { content: string }, allowNetwork: boolean): Promise<ServeResult> {
+// The posture names the host posts; previewPosture*Name in backend/server/handler_preview.go holds the
+// matching names and the policies they select.
+const POSTURE_NO_SCRIPT = 'no-script';
+const POSTURE_SCRIPTS = 'scripts';
+const POSTURE_NETWORK = 'network';
+
+async function serve(ctx: HostContext, args: { content: string }, posture: string): Promise<ServeResult> {
     // Bump before the async POST; only the newest generation applies on
     // completion (a stale serve must not release a newer serve's doc).
     let gen = 0;
@@ -64,7 +71,7 @@ async function serve(ctx: HostContext, args: { content: string }, allowNetwork: 
             project: typeof context.projectId === 'string' ? context.projectId : '',
             path: typeof context.filePath === 'string' ? context.filePath : '',
             task: typeof context.taskId === 'string' ? context.taskId : '',
-            allow_network: allowNetwork,
+            posture,
         }),
     });
     if (!res.ok) {
@@ -94,7 +101,7 @@ async function navState(_ctx: HostContext, args: { token: string }): Promise<Nav
     if (!token) {
         throw new Error('token is required');
     }
-    const res = await apiFetch(`/api/preview/${token}/nav`);
+    const res = await apiFetch(`/api/preview-nav/${token}`);
     if (!res.ok) {
         throw new Error(`preview nav state failed (${res.status})`);
     }
@@ -115,25 +122,23 @@ async function release(ctx: HostContext, args: { token: string }): Promise<{ ok:
 }
 
 export const previewCapabilities: Record<string, CapabilityDef> = {
-    // Strict CSP (zero egress) — the default posture; the extension pairs it
-    // with a bare sandbox (no scripts).
+    // The default posture: static loads, nothing runs.
     [CAP_PREVIEW_SERVE]: {
         kind: 'call',
         argsSchema: { content: 'string' },
-        handler: (ctx, args) => serve(ctx, args, false),
+        handler: (ctx, args) => serve(ctx, args, POSTURE_NO_SCRIPT),
     },
-    // Strict CSP (zero egress) with scripts allowed; paired with allow-scripts.
+    // Zero-egress CSP with scripts allowed; paired with allow-scripts.
     [CAP_PREVIEW_SERVE_SCRIPTS]: {
         kind: 'call',
         argsSchema: { content: 'string' },
-        handler: (ctx, args) => serve(ctx, args, false),
+        handler: (ctx, args) => serve(ctx, args, POSTURE_SCRIPTS),
     },
-    // The only permissive-CSP path (legacy open network) — must be declared in
-    // the extension's manifest permissions.
+    // Scripts and network egress; needs the extension's manifest permission.
     [CAP_PREVIEW_SERVE_NETWORK]: {
         kind: 'call',
         argsSchema: { content: 'string' },
-        handler: (ctx, args) => serve(ctx, args, true),
+        handler: (ctx, args) => serve(ctx, args, POSTURE_NETWORK),
     },
     [CAP_PREVIEW_RELEASE]: {
         kind: 'call',

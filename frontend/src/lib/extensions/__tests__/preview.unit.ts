@@ -112,7 +112,7 @@ describe('preview.serve', () => {
         expect(body.project).toBe('p1');
         expect(body.path).toBe('/proj/page.html');
         expect(body.task).toBe('t1');
-        expect(body.allow_network).toBe(false);
+        expect(body.posture).toBe('no-script');
 
         const resp = messages.find((m) => m.type === 'response' && m.id === 'm1');
         expect(resp.ok).toBe(true);
@@ -133,11 +133,11 @@ describe('preview.serve', () => {
         await flush();
 
         const body = JSON.parse(apiFetchMock.mock.calls[0][1]?.body as string);
-        expect(body).toEqual({ content: '<svg/>', project: 'p2', path: 'page.html', task: '', allow_network: false });
+        expect(body).toEqual({ content: '<svg/>', project: 'p2', path: 'page.html', task: '', posture: 'no-script' });
         expect(messages.find((m) => m.id === 'm1')?.ok).toBe(true);
     });
 
-    it('preview.serveScripts serves the strict CSP (scripts posture)', async () => {
+    it('preview.serveScripts is the only capability that posts the scripts posture', async () => {
         okResponse({ token: 'tokS', url: '/api/preview/tokS/' });
         const { channel, contentWindow } = makeChannel([CAP_PREVIEW_SERVE_SCRIPTS], {
             component: 'FileEditor', filePath: 'p.html', projectId: 'p1',
@@ -149,7 +149,7 @@ describe('preview.serve', () => {
         await flush();
 
         const body = JSON.parse(apiFetchMock.mock.calls[0][1]?.body as string);
-        expect(body.allow_network).toBe(false);
+        expect(body.posture).toBe('scripts');
     });
 
     it('preview.serveNetwork is the only capability that serves the permissive CSP', async () => {
@@ -164,7 +164,7 @@ describe('preview.serve', () => {
         await flush();
 
         const body = JSON.parse(apiFetchMock.mock.calls[0][1]?.body as string);
-        expect(body.allow_network).toBe(true);
+        expect(body.posture).toBe('network');
     });
 
     it('rejects preview.serveNetwork when the extension did not declare it', async () => {
@@ -226,7 +226,7 @@ describe('preview.navState', () => {
 
         expect(apiFetchMock).toHaveBeenCalledTimes(1);
         const [url, init] = apiFetchMock.mock.calls[0];
-        expect(url).toBe('/api/preview/tok123/nav');
+        expect(url).toBe('/api/preview-nav/tok123');
         expect(init?.method).toBeUndefined(); // GET
         const resp = messages.find((m) => m.id === 'm1');
         expect(resp.ok).toBe(true);

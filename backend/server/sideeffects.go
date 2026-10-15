@@ -168,7 +168,7 @@ var requestScopedReads = []sideEffectEntry{
 	{"GET /api/projects/{projectID}/tasks/{taskID}/diff/file", "one file of the task diff, re-read from the object database"},
 	{"GET /api/preview/{token}", "the preview document itself"},
 	{"GET /api/preview/{token}/{path...}", "a preview asset, served from the resolved worktree"},
-	{"GET /api/preview/{token}/nav", "the preview's navigation record"},
+	{"GET /api/preview-nav/{token}", "the preview's navigation record"},
 	{
 		"POST /api/updates/check",
 		"a fetch of the release manifest that caches its answer as one config row. The verb looks like a " +

@@ -30,40 +30,77 @@ const (
 	previewMaxContent  = 10 << 20         // doc size cap
 	previewMaxAsset    = 25 << 20         // sibling asset size cap
 	previewSweepPeriod = 30 * time.Second // TTL sweep interval
+	// previewMaxAge is a hard limit: every read refreshes the idle TTL, and a read costs only the URL,
+	// so a leaked token would otherwise live as long as whoever holds it keeps asking for it.
+	previewMaxAge = 60 * time.Minute
 )
 
-// The `sandbox` directive must never be dropped. This URL is served on the application's own origin,
-// so a document served here could otherwise read the session cookie and the CSRF token that
-// GET /api/auth/session hands to any same-origin document. The iframe's own sandbox attribute is the
-// second lock on it, not the first.
+// Every preview policy ends in `sandbox`: this URL is on the application's own origin, so a document
+// here could otherwise read the session cookie and the CSRF token. The frame's own sandbox attribute is
+// the second lock, not the first.
 const previewDocCSPStrict = "default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' data: blob:; style-src 'self' 'unsafe-inline' data: blob:; img-src 'self' data: blob:; font-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'none'; frame-src 'none'; worker-src 'self' blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'; sandbox allow-scripts"
 
-// previewDocCSPNetwork — the permissive policy; served only when the
-// extension's "allow network" setting opts in per serve. `connect-src *` includes
-// 'self', so this is the policy that most needed the sandbox above: without it, a
-// document holding this header could reach the same-origin API directly.
+// previewDocCSPNoScript — the default posture: nothing runs and nothing is sent out, while the page's
+// own static resources still load. It is its own policy because the strict one permits script execution,
+// which a frame with a dropped sandbox attribute, or this URL opened in a tab, would then use.
+const previewDocCSPNoScript = "default-src 'none'; script-src 'none'; worker-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; style-src * 'unsafe-inline' data: blob:; img-src * data: blob:; font-src * data: blob:; media-src * data: blob:; frame-src * data: blob:; sandbox;"
+
+// previewDocCSPNetwork — the permissive policy, reached only through the preview.serveNetwork grant.
+// Its `connect-src *` includes 'self', so this is the policy that most needs the sandbox.
 const previewDocCSPNetwork = "default-src * data: blob: 'unsafe-inline'; script-src * 'unsafe-inline' data: blob:; style-src * 'unsafe-inline' data: blob:; img-src * data: blob:; font-src * data: blob:; connect-src * data: blob:; frame-src * data: blob:; worker-src * blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'; sandbox allow-scripts"
 
-// previewNavRecord — only committed HTML-family page loads are recorded
-// (see isDocNav). A 404 or an out-of-tree navigation leaves the record
-// stale, and the extension's watchdog rejects any navigation that didn't
-// produce a fresh record.
+// previewNavRecord is the last committed HTML-family page load under a token. A failed or out-of-tree
+// load records nothing, so the extension's watchdog stops any navigation that produced no fresh record.
 type previewNavRecord struct {
 	path  string // token-relative path ("" = the doc's own dir)
-	ok    bool   // always true: only a committed (2xx) response records one. The extension's navigation decision reads this key, so it stays.
 	isDoc bool   // the doc's own content (dir URL or self-reference)
+}
+
+// previewPosture is what a served preview document may do; one policy per posture.
+type previewPosture int
+
+const (
+	// previewNoScript is the zero value, so anything unrecognised answers with it.
+	previewNoScript previewPosture = iota
+	// previewScripts runs the page's JavaScript under the strict zero-egress policy.
+	previewScripts
+	// previewNetwork runs scripts and lets the page reach the network.
+	previewNetwork
+)
+
+// The wire names of the postures, as the host posts them.
+const (
+	previewPostureNoScriptName = "no-script"
+	previewPostureScriptsName  = "scripts"
+	previewPostureNetworkName  = "network"
+)
+
+// previewPostureFrom maps the posture name the host posts to a policy. The name is the extension's own
+// word and not a grant, so anything unrecognised is previewNoScript; the manifest grant in
+// frontend/src/lib/extensions/channel.ts is what limits the names an extension may post.
+func previewPostureFrom(name string) previewPosture {
+	switch name {
+	case previewPostureScriptsName:
+		return previewScripts
+	case previewPostureNetworkName:
+		return previewNetwork
+	default:
+		return previewNoScript
+	}
 }
 
 // previewDoc is a served preview document.
 type previewDoc struct {
-	content      string
-	fileName     string // previewed file's base name ("" if unknown)
-	baseDir      string // worktree root, or the file's own dir when outside it ("" = self-contained)
-	dirRel       string // doc's dir relative to baseDir ("" = baseDir itself)
-	allowNetwork bool   // the extension's "allow network" opt-in (true: permissive CSP, false: strict)
-	navSeq       int    // committed page loads under this token; the watchdog compares it to detect a fresh load
-	lastNav      previewNavRecord
-	lastAccess   time.Time
+	content    string
+	fileName   string // previewed file's base name ("" if unknown)
+	baseDir    string // worktree root, or the file's own dir when outside it ("" = self-contained)
+	dirRel     string // doc's dir relative to baseDir ("" = baseDir itself)
+	posture    previewPosture
+	createdAt  time.Time
+	expired    bool // past previewMaxAge: a stub that only answers "preview expired"
+	navSeq     int  // committed page loads under this token; the watchdog compares it to detect a fresh load
+	lastNav    previewNavRecord
+	lastAccess time.Time
 }
 
 // previewDocContentType: natural type of the previewed file (host-derived —
@@ -120,7 +157,7 @@ func (ps *previewStore) stopSweeper() {
 // errPreviewTooLarge: the stored (post-rewrite) content exceeds the cap.
 var errPreviewTooLarge = errors.New("preview content too large")
 
-func (ps *previewStore) put(content, fileName, baseDir, dirRel string, allowNetwork bool) (string, error) {
+func (ps *previewStore) put(content, fileName, baseDir, dirRel string, posture previewPosture) (string, error) {
 	// Mint the token first — the rewrite target is built from it. A mint failure
 	// aborts the put, so a weak token is never registered or served.
 	token, err := newPreviewToken()
@@ -138,7 +175,8 @@ func (ps *previewStore) put(content, fileName, baseDir, dirRel string, allowNetw
 	for len(ps.docs) >= previewMaxLive {
 		ps.evictOldestLocked()
 	}
-	ps.docs[token] = &previewDoc{content: content, fileName: fileName, baseDir: baseDir, dirRel: dirRel, allowNetwork: allowNetwork, lastAccess: time.Now()}
+	now := time.Now()
+	ps.docs[token] = &previewDoc{content: content, fileName: fileName, baseDir: baseDir, dirRel: dirRel, posture: posture, lastAccess: now, createdAt: now}
 	return token, nil
 }
 
@@ -151,10 +189,14 @@ func isHTMLFamilyCT(ct string) bool {
 }
 
 func previewDocCSP(doc *previewDoc) string {
-	if doc.allowNetwork {
+	switch doc.posture {
+	case previewScripts:
+		return previewDocCSPStrict
+	case previewNetwork:
 		return previewDocCSPNetwork
+	default:
+		return previewDocCSPNoScript
 	}
-	return previewDocCSPStrict
 }
 
 var (
@@ -206,7 +248,10 @@ func (ps *previewStore) get(token string) *previewDoc {
 	if !ok {
 		return nil
 	}
-	doc.lastAccess = time.Now()
+	// A reader cannot bring an expired stub back, so renewing it would only keep a dead token around.
+	if !doc.expired {
+		doc.lastAccess = time.Now()
+	}
 	return doc
 }
 
@@ -223,7 +268,7 @@ func (ps *previewStore) recordNav(token, rel string, isDoc bool) {
 	defer ps.mu.Unlock()
 	if doc, exists := ps.docs[token]; exists {
 		doc.navSeq++
-		doc.lastNav = previewNavRecord{path: rel, ok: true, isDoc: isDoc}
+		doc.lastNav = previewNavRecord{path: rel, isDoc: isDoc}
 	}
 }
 
@@ -241,8 +286,14 @@ func (ps *previewStore) sweep(now time.Time) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 	for tok, d := range ps.docs {
-		if now.Sub(d.lastAccess) > previewTTL {
+		if d.expired || now.Sub(d.lastAccess) > previewTTL {
 			delete(ps.docs, tok)
+			continue
+		}
+		if now.Sub(d.createdAt) > previewMaxAge {
+			// The hard limit: the content goes now and the token stays as a stub, so the route can
+			// answer "preview expired" where an unknown token answers "preview not found".
+			d.content, d.baseDir, d.expired = "", "", true
 		}
 	}
 }
@@ -274,16 +325,14 @@ func newPreviewToken() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// previewServeRequest: only `content` comes from the client. The host fills
-// project/path/task (the editor's open file) so the server can resolve
-// sibling assets. AllowNetwork is the extension's opt-in; it only widens the
-// doc's CSP (default: strict).
+// previewServeRequest: only `content` and `posture` come from the client; the host fills
+// project/path/task so the server can resolve sibling assets.
 type previewServeRequest struct {
-	Content      string `json:"content"`
-	Project      string `json:"project"`
-	Path         string `json:"path"`
-	Task         string `json:"task"`
-	AllowNetwork bool   `json:"allow_network"`
+	Content string `json:"content"`
+	Project string `json:"project"`
+	Path    string `json:"path"`
+	Task    string `json:"task"`
+	Posture string `json:"posture"`
 }
 
 // HandlePreviewServe — POST /api/preview (session + CSRF). url is the doc's
@@ -335,7 +384,7 @@ func (s *Server) HandlePreviewServe(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	token, err := s.previewStore.put(req.Content, fileName, baseDir, dirRel, req.AllowNetwork)
+	token, err := s.previewStore.put(req.Content, fileName, baseDir, dirRel, previewPostureFrom(req.Posture))
 	if err != nil {
 		if errors.Is(err, errPreviewTooLarge) {
 			JSONError(w, http.StatusRequestEntityTooLarge, err.Error())
@@ -378,6 +427,11 @@ func (s *Server) HandlePreviewGet(w http.ResponseWriter, r *http.Request) {
 	}
 	if doc == nil {
 		JSONError(w, http.StatusNotFound, "preview not found")
+		return
+	}
+	if doc.expired {
+		// The content is gone either way; the wording tells a caller whether re-serving would help.
+		JSONError(w, http.StatusNotFound, "preview expired")
 		return
 	}
 	rel := strings.TrimPrefix(r.PathValue("path"), "/")
@@ -443,6 +497,17 @@ func (s *Server) HandlePreviewGet(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusNotFound, "preview not found")
 		return
 	}
+	// The `.git` rule and the type rule both judge only the requested path, so a refused file is never
+	// opened.
+	if previewUnderGitDir(rel) {
+		JSONError(w, http.StatusNotFound, "preview asset not found")
+		return
+	}
+	ct, ctOK := previewAssetContentType(rel)
+	if !ctOK {
+		JSONError(w, http.StatusNotFound, "preview asset not found")
+		return
+	}
 	file, err := s.resolvePreviewAsset(doc.baseDir, rel)
 	if err != nil {
 		JSONError(w, http.StatusNotFound, "preview asset not found")
@@ -467,9 +532,10 @@ func (s *Server) HandlePreviewGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer f.Close()
-	ct := previewAssetContentType(file)
 	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Cache-Control", "no-store")
+	// docs/preview.md → A previewed page can embed, it cannot read.
+	logging.For(logging.HTTP).Debugf("preview sibling served: %s (loaded, not readable by the page's own scripts)", rel)
 	if isHTMLFamilyCT(ct) {
 		// A sibling page the doc navigates to must keep the doc's CSP;
 		// otherwise the posture could be skipped by linking to a sibling .html.
@@ -484,11 +550,10 @@ func (s *Server) HandlePreviewGet(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// HandlePreviewNav — GET /api/preview/{token}/nav (session-authed). Returns
+// HandlePreviewNav — GET /api/preview-nav/{token} (session-authed). Returns
 // the last page load under the token; the extension asks this after a frame
 // load it didn't start, and allows the navigation only if a fresh record
-// came back. A file at the worktree root literally named "nav" is hidden by
-// this route (documented limitation).
+// came back.
 func (s *Server) HandlePreviewNav(w http.ResponseWriter, r *http.Request) {
 	seq, nav, ok := s.previewStore.lastNav(r.PathValue("token"))
 	if !ok {
@@ -496,9 +561,10 @@ func (s *Server) HandlePreviewNav(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	JSONResponse(w, http.StatusOK, map[string]any{
-		"seq":   seq,
-		"path":  nav.path,
-		"ok":    nav.ok,
+		"seq":  seq,
+		"path": nav.path,
+		// Derived, not stored: a record exists exactly when a page committed. Installed extensions read this key.
+		"ok":    seq > 0,
 		"isDoc": nav.isDoc,
 	})
 }
@@ -519,21 +585,55 @@ func (s *Server) resolvePreviewAsset(baseDir, rel string) (string, error) {
 	// Collapse ".." segments before joining, so every path left to judge is one the
 	// containment check can take at face value.
 	candidate := filepath.Join(baseDir, filepath.Clean("/"+filepath.ToSlash(rel)))
-	// The jail every host file the server hands to a browser goes through: the lexical
-	// path and the symlink-resolved path must both sit inside the root. Resolving both
-	// sides by hand here was a second spelling of that rule, and one the fs handlers had
-	// already stopped carrying. The answer differs only in a case the caller answers the
-	// same way: a missing base directory now resolves to its nearest existing ancestor
-	// instead of erroring, and the os.Stat() that follows still says "not found".
+	// The jail every host file served to a browser goes through: the lexical path and the
+	// symlink-resolved path must both sit inside the root.
 	return fsutil.Contained(candidate, []string{baseDir})
 }
 
-// previewAssetContentType: extension-based type, defaulting to octet-stream.
-func previewAssetContentType(path string) string {
-	if ct := mime.TypeByExtension(strings.ToLower(filepath.Ext(path))); ct != "" {
-		return ct
+// previewAssetCT is what one preview token will hand over: the types a browser embeds as a subresource,
+// plus the HTML family an in-tree navigation lands on. There is no fallback type for an unmapped name,
+// because one would turn a leaked token into an unauthenticated read of everything under its root
+// (`.env`, `.git/config`); a type is listed twice where platforms disagree about which name they answer.
+var previewAssetCT = map[string]bool{
+	// HTML family. A sibling page reached by an in-tree link is served here, and carries the doc's CSP.
+	"text/html": true, "application/xhtml+xml": true, "image/svg+xml": true,
+	// A page's own scripts and styles. Loading is not executing (that is script-src), and not reading.
+	"text/javascript": true, "application/javascript": true,
+	"text/css":  true,
+	"image/png": true, "image/jpeg": true, "image/gif": true, "image/webp": true, "image/avif": true,
+	"image/bmp": true, "image/apng": true, "image/tiff": true, "image/x-icon": true,
+	"image/vnd.microsoft.icon": true,
+	"font/woff":                true, "font/woff2": true, "font/ttf": true, "font/otf": true, "font/collection": true,
+	"application/font-woff": true, "application/font-woff2": true, "application/vnd.ms-fontobject": true,
+	"video/mp4": true, "video/webm": true, "video/ogg": true, "video/quicktime": true,
+	"audio/mpeg": true, "audio/ogg": true, "audio/wav": true, "audio/x-wav": true, "audio/mp4": true,
+	"audio/aac": true, "audio/flac": true, "audio/webm": true,
+}
+
+// previewAssetContentType: the extension's type, and whether that type may be served at all.
+func previewAssetContentType(path string) (string, bool) {
+	ct := mime.TypeByExtension(strings.ToLower(filepath.Ext(path)))
+	if ct == "" {
+		return "", false
 	}
-	return "application/octet-stream"
+	// The platform database carries a parameter on the text types.
+	base := ct
+	if i := strings.IndexByte(base, ';'); i >= 0 {
+		base = strings.TrimSpace(base[:i])
+	}
+	return ct, previewAssetCT[base]
+}
+
+// previewUnderGitDir: a checkout's `.git` is never one of a page's assets, because its config can carry
+// a credential in a remote URL. The type allow-list already refuses what a real checkout holds here, so
+// this is the second lock, for a host whose mime database maps something under `.git` to an embedded type.
+func previewUnderGitDir(rel string) bool {
+	for _, seg := range strings.Split(filepath.ToSlash(rel), "/") {
+		if strings.EqualFold(seg, ".git") {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveWorktreeForFile: host worktree for project/task (task worktree or

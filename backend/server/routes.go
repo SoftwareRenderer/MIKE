@@ -78,9 +78,10 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("POST /api/preview", s.HandlePreviewServe)
 	s.mux.HandleFunc("GET /api/preview/{token}", s.HandlePreviewGet)
 	s.mux.HandleFunc("GET /api/preview/{token}/{path...}", s.HandlePreviewGet)
-	// Watchdog nav state (session-authed; the exact route wins over {path...})
-	s.mux.HandleFunc("GET /api/preview/{token}/nav", s.HandlePreviewNav)
 	s.mux.HandleFunc("DELETE /api/preview/{token}", s.HandlePreviewDelete)
+	// Watchdog nav state (session-authed). It sits beside /api/preview/ rather than inside it, because
+	// everything under that prefix is public and answered by the token alone.
+	s.mux.HandleFunc("GET /api/preview-nav/{token}", s.HandlePreviewNav)
 
 	s.mux.HandleFunc("GET /api/extensions", s.extHandler.HandleList)
 	// Each registration names the one handler it reaches: the mux answers the 405, so no closure here

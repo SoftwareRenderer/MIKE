@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"mike/backend/startup"
+	"mike/pkg/logging"
 )
 
 // login returns the session cookie and CSRF token of a freshly paired device on s. Several
@@ -527,5 +528,30 @@ func TestHostPinMiddlewareCoversUpgradesAndPublicPaths(t *testing.T) {
 	s.HostPinMiddleware(s.mux).ServeHTTP(rr, req)
 	if rr.Code != http.StatusMisdirectedRequest {
 		t.Fatalf("websocket upgrade with foreign Host: status = %d, want 421", rr.Code)
+	}
+}
+
+// A panic on a preview URL must not write the bearer token into the log — the log is the one way a
+// preview token still leaves this process.
+func TestPanicRecovery_LogsTheRouteNotThePreviewToken(t *testing.T) {
+	sink, restore := logging.TestSink()
+	defer restore()
+
+	const token = "0123456789abcdef0123456789abcdef"
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/preview/{token}/{path...}", func(http.ResponseWriter, *http.Request) {
+		panic("preview handler exploded")
+	})
+
+	rr := httptest.NewRecorder()
+	PanicRecoveryMiddleware(mux).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/preview/"+token+"/index.html", nil))
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("a recovered panic answered %d, want 500", rr.Code)
+	}
+	if out := sink.String(); !strings.Contains(out, "/api/preview/{token}/{path...}") {
+		t.Errorf("the panic log names no route, so it cannot be triaged: %s", out)
+	} else if strings.Contains(out, token) {
+		t.Errorf("the panic log carries the preview token: %s", out)
 	}
 }

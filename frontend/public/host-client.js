@@ -148,10 +148,11 @@
         preview: {
             /**
              * Serve a doc; resolves to { token, url }; supersedes this editor's
-             * previous doc. (scripts, network) select the posture
+             * previous doc. Scripts off always selects the no-script posture,
+             * whatever `network` asks for.
              */
             serve: (content, scripts, network) => {
-                const cap = network ? 'preview.serveNetwork' : scripts ? 'preview.serveScripts' : 'preview.serve';
+                const cap = !scripts ? 'preview.serve' : network ? 'preview.serveNetwork' : 'preview.serveScripts';
                 if (!granted.includes(cap)) {
                     return Promise.reject(new Error(cap + ' is not granted to this extension'));
                 }

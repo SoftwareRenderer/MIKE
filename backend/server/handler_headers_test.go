@@ -122,7 +122,7 @@ func TestIsolationHeaders(t *testing.T) {
 	}{
 		{path: "/", wantCORP: true, wantPerms: true},
 		{path: "/api/config", wantCORP: true, wantPerms: true},
-		{path: "/api/preview/deadbeef/nav", wantCORP: true, wantPerms: true},
+		{path: "/api/preview-nav/deadbeef", wantCORP: true, wantPerms: true},
 		{path: "/api/tls/ca", wantCORP: true, wantPerms: true},
 		{
 			// The bridge every extension entry loads from an opaque-origin frame.
@@ -146,6 +146,12 @@ func TestIsolationHeaders(t *testing.T) {
 			path:       "/api/preview/deadbeef/style.css",
 			wantPerms:  true,
 			wantNoCorp: "an opaque-origin preview document loads its own assets the same way",
+		},
+		{
+			// The nav route sits beside /api/preview/, so a worktree file named nav is an ordinary asset.
+			path:       "/api/preview/deadbeef/nav",
+			wantPerms:  true,
+			wantNoCorp: "a sibling file named nav is a preview asset, not the nav route",
 		},
 	}
 

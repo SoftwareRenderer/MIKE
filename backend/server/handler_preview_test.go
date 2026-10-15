@@ -65,7 +65,7 @@ func TestPreviewToken_MintFailureIsFatal(t *testing.T) {
 
 	// Store level: put errors out and registers nothing.
 	ps := newPreviewStore()
-	token, err := ps.put("<html></html>", "index.html", "", "", false)
+	token, err := ps.put("<html></html>", "index.html", "", "", previewNoScript)
 	if err == nil {
 		t.Fatalf("expected put to fail when the entropy source fails, got token %q", token)
 	}
@@ -143,14 +143,14 @@ func getPreviewWithHeaders(t *testing.T, s *Server, target string, headers map[s
 	return rr
 }
 
-// navState reads GET /api/preview/{token}/nav with a session.
+// navState reads GET /api/preview-nav/{token} with a session.
 func navState(t *testing.T, s *Server, cookie, token string) map[string]any {
 	t.Helper()
-	req := testRequest("GET", "/api/preview/"+token+"/nav", nil)
+	req := testRequest("GET", "/api/preview-nav/"+token, nil)
 	withAuth(req, cookie)
 	rr := testResponse(t, s, req)
 	if rr.Code != http.StatusOK {
-		t.Fatalf("GET /nav: %d %s", rr.Code, rr.Body.String())
+		t.Fatalf("GET /api/preview-nav: %d %s", rr.Code, rr.Body.String())
 	}
 	return mustJSON[map[string]any](t, rr.Body)
 }
@@ -220,10 +220,10 @@ func TestPreviewServesDocWithoutSession(t *testing.T) {
 	if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
 		t.Errorf("Content-Type = %q, want text/html…", ct)
 	}
-	// Default (no allow_network) → strict, zero-egress policy.
+	// Default (no posture) → the no-script policy.
 	csp := rr.Header().Get("Content-Security-Policy")
-	if csp != previewDocCSPStrict {
-		t.Errorf("default doc must carry the strict CSP, got:\n%s", csp)
+	if csp != previewDocCSPNoScript {
+		t.Errorf("default doc must carry the no-script CSP, got:\n%s", csp)
 	}
 	if strings.Contains(csp, "frame-ancestors") {
 		t.Errorf("preview doc must be frameable (no frame-ancestors), got:\n%s", csp)
@@ -236,93 +236,163 @@ func TestPreviewServesDocWithoutSession(t *testing.T) {
 	}
 }
 
-// allow_network opts the doc into the legacy permissive policy.
-func TestPreviewServesPermissiveCSPWhenAllowNetwork(t *testing.T) {
+// Each posture answers with exactly one policy, and a posture the client invents gets the narrowest one:
+// an absent field, a stale bundle's `allow_network` and a forged string all answer the no-script policy.
+func TestPreviewServe_PostureSelectsPolicy(t *testing.T) {
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 	html := "<!DOCTYPE html><html><body><h1>hi</h1></body></html>"
-	token, _ := servePreview(t, s, cookie, csrfToken, map[string]any{"content": html, "allow_network": true})
-
-	rr := getPreview(t, s, "/api/preview/"+token+"/")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("doc GET: expected 200, got %d %s", rr.Code, rr.Body.String())
-	}
-	csp := rr.Header().Get("Content-Security-Policy")
-	if csp != previewDocCSPNetwork {
-		t.Errorf("allow_network doc must carry the permissive CSP, got:\n%s", csp)
-	}
-	if strings.Contains(csp, "frame-ancestors") {
-		t.Errorf("preview doc must be frameable (no frame-ancestors), got:\n%s", csp)
-	}
-}
-
-// INVARIANT: no load-type directive of the strict policy may carry a `*` — a
-// wildcard there is a live exfil channel (the load request itself delivers the
-// URL to the remote server). connect-src must be fully closed.
-func TestPreviewDocCSPStrict_NoWildcardInLoadDirectives(t *testing.T) {
-	for _, name := range []string{"default-src", "script-src", "style-src", "img-src", "font-src", "media-src", "frame-src", "worker-src", "object-src"} {
-		if got := cspDirectiveValue(previewDocCSPStrict, name); strings.Contains(got, "*") {
-			t.Errorf("strict CSP: %q must not contain a wildcard, got %q", name, got)
-		}
-	}
-	if got := cspDirectiveValue(previewDocCSPStrict, "connect-src"); got != "'none'" {
-		t.Errorf("strict CSP: connect-src = %q, want 'none'", got)
-	}
-}
-
-// INVARIANT: the preview document is opaque-origin because the SERVER says so, not
-// because the extension remembered to write `sandbox` on the frame it builds. The
-// preview URL is same-origin with the application, and GET /api/auth/session answers
-// any cookie-carrying same-origin GET with the CSRF token — so a preview document
-// that kept the origin is one fetch away from every mutating endpoint, and from
-// arbitrary code execution. `allow-same-origin` is the token that would hand it back.
-//
-// `allow-scripts` must be present in both policies: a sandbox source only adds
-// restrictions, so the token costs nothing, while a bare `sandbox` would silently
-// break the scripts-on preview mode html-preview offers as a setting.
-func TestPreviewDocCSP_SandboxsWithoutSameOrigin(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		csp  string
+		body map[string]any
+		want string
 	}{
-		{"strict", previewDocCSPStrict},
-		{"network", previewDocCSPNetwork},
+		{"default", map[string]any{"content": html}, previewDocCSPNoScript},
+		{"no-script", map[string]any{"content": html, "posture": "no-script"}, previewDocCSPNoScript},
+		{"scripts", map[string]any{"content": html, "posture": "scripts"}, previewDocCSPStrict},
+		{"network", map[string]any{"content": html, "posture": "network"}, previewDocCSPNetwork},
+		{"unknown posture", map[string]any{"content": html, "posture": "everything"}, previewDocCSPNoScript},
+		{"legacy allow_network", map[string]any{"content": html, "allow_network": true}, previewDocCSPNoScript},
 	} {
-		sandbox := cspDirectiveValue(tc.csp, "sandbox")
-		if sandbox == "" {
+		token, _ := servePreview(t, s, cookie, csrfToken, tc.body)
+		rr := getPreview(t, s, "/api/preview/"+token+"/")
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s doc GET: expected 200, got %d %s", tc.name, rr.Code, rr.Body.String())
+		}
+		csp := rr.Header().Get("Content-Security-Policy")
+		if csp != tc.want {
+			t.Errorf("%s: CSP =\n%s\nwant\n%s", tc.name, csp, tc.want)
+		}
+		if strings.Contains(csp, "frame-ancestors") {
+			t.Errorf("%s: preview doc must be frameable (no frame-ancestors), got:\n%s", tc.name, csp)
+		}
+	}
+}
+
+// INVARIANT: no policy that can run a byte leaves that byte a way out. A `*` in a load directive is a way
+// out, because the load itself carries the URL to a remote server, so every policy that runs scripts
+// confines its load directives and shuts connect-src. previewDocCSPNetwork is the exception, and it sits
+// behind the preview.serveNetwork grant.
+func TestPreviewDocCSP_NeverPairsScriptsWithEgress(t *testing.T) {
+	load := []string{"default-src", "script-src", "style-src", "img-src", "font-src", "media-src", "frame-src", "worker-src", "object-src"}
+	for _, tc := range []struct {
+		name        string
+		csp         string
+		runsScripts bool
+	}{
+		{"no-script", previewDocCSPNoScript, false},
+		{"strict", previewDocCSPStrict, true},
+	} {
+		// runsScripts is written out rather than read from the policy: a policy that stopped running
+		// scripts would otherwise skip the checks below and look compliant.
+		if runs := cspDirectiveValue(tc.csp, "script-src") != "'none'"; runs != tc.runsScripts {
+			t.Errorf("%s policy: script-src = %q against runsScripts = %v", tc.name,
+				cspDirectiveValue(tc.csp, "script-src"), tc.runsScripts)
+		}
+		if !tc.runsScripts {
+			continue
+		}
+		for _, name := range load {
+			if got := cspDirectiveValue(tc.csp, name); strings.Contains(got, "*") {
+				t.Errorf("%s policy runs scripts and would send data out through %s = %q", tc.name, name, got)
+			}
+		}
+		if got := cspDirectiveValue(tc.csp, "connect-src"); got != "'none'" {
+			t.Errorf("%s policy runs scripts: connect-src = %q, want 'none'", tc.name, got)
+		}
+	}
+}
+
+// INVARIANT: the no-script policy runs nothing, and every directive that could reach a URL the document
+// invented is 'none'. Only the load directives a scriptless render needs stay open.
+func TestPreviewDocCSPNoScript_RendersWithoutRunningAnything(t *testing.T) {
+	for _, name := range []string{"default-src", "script-src", "worker-src", "connect-src", "object-src", "base-uri", "form-action"} {
+		if got := cspDirectiveValue(previewDocCSPNoScript, name); got != "'none'" {
+			t.Errorf("no-script CSP: %s = %q, want 'none'", name, got)
+		}
+	}
+	for _, name := range []string{"style-src", "img-src", "font-src", "media-src", "frame-src"} {
+		if got := cspDirectiveValue(previewDocCSPNoScript, name); !strings.Contains(got, "*") {
+			t.Errorf("no-script CSP: %s = %q, want a wildcard (a no-JS browser loads these)", name, got)
+		}
+	}
+}
+
+// INVARIANT: the preview document is opaque-origin because the server says so, not because the extension
+// remembered to write `sandbox` on its frame. This URL is same-origin with the application and
+// GET /api/auth/session answers any same-origin GET with the CSRF token, so a document that kept its
+// origin is one fetch away from every mutating endpoint. `allow-same-origin` would hand that back, so it
+// never appears; `allow-scripts` appears only in the two postures whose policy already permits scripts.
+func TestPreviewDocCSP_SandboxsWithoutSameOrigin(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		csp         string
+		wantScripts bool
+	}{
+		{"no-script", previewDocCSPNoScript, false},
+		{"strict", previewDocCSPStrict, true},
+		{"network", previewDocCSPNetwork, true},
+	} {
+		if !cspHasDirective(tc.csp, "sandbox") {
 			t.Errorf("%s CSP: no sandbox directive — an unframed preview document would keep the app's origin", tc.name)
 			continue
 		}
+		sandbox := cspDirectiveValue(tc.csp, "sandbox")
 		for _, token := range strings.Fields(sandbox) {
 			if token == "allow-same-origin" {
 				t.Errorf("%s CSP: sandbox carries allow-same-origin, which restores the app's origin, its cookies and its API", tc.name)
 			}
 		}
-		if !strings.Contains(" "+sandbox+" ", " allow-scripts ") {
-			t.Errorf("%s CSP: sandbox = %q, want allow-scripts (a bare sandbox breaks the scripts-on preview mode)", tc.name, sandbox)
+		if got := strings.Contains(" "+sandbox+" ", " allow-scripts "); got != tc.wantScripts {
+			t.Errorf("%s CSP: sandbox = %q, allow-scripts present = %v, want %v", tc.name, sandbox, got, tc.wantScripts)
 		}
 	}
 }
 
-// The directive must reach the browser, not just the constant: both postures answer
-// with it on the document response.
+// The directive has to reach the browser, not just the constant: every posture answers with it on the
+// document response and with the tokens its own policy promises. TestPreviewServe_PostureSelectsPolicy
+// compares the header with the constant the handler reads, so only this test proves the token survived.
 func TestPreviewResponsesCarrySandbox(t *testing.T) {
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 
-	for _, allowNetwork := range []bool{false, true} {
+	for _, tc := range []struct {
+		posture     string
+		wantSandbox string
+	}{
+		{"", ""},
+		{"no-script", ""},
+		{"scripts", "allow-scripts"},
+		{"network", "allow-scripts"},
+	} {
 		token, _ := servePreview(t, s, cookie, csrfToken, map[string]any{
-			"content":       "<!DOCTYPE html><html><body><h1>hi</h1></body></html>",
-			"allow_network": allowNetwork,
+			"content": "<!DOCTYPE html><html><body><h1>hi</h1></body></html>",
+			"posture": tc.posture,
 		})
 		rr := getPreview(t, s, "/api/preview/"+token+"/")
 		if rr.Code != http.StatusOK {
-			t.Fatalf("allow_network=%v doc GET: expected 200, got %d %s", allowNetwork, rr.Code, rr.Body.String())
+			t.Fatalf("posture=%q doc GET: expected 200, got %d %s", tc.posture, rr.Code, rr.Body.String())
 		}
-		if got := cspDirectiveValue(rr.Header().Get("Content-Security-Policy"), "sandbox"); got == "" {
-			t.Errorf("allow_network=%v: served document has no sandbox directive", allowNetwork)
+		csp := rr.Header().Get("Content-Security-Policy")
+		if !cspHasDirective(csp, "sandbox") {
+			t.Errorf("posture=%q: served document has no sandbox directive", tc.posture)
+			continue
+		}
+		if got := cspDirectiveValue(csp, "sandbox"); got != tc.wantSandbox {
+			t.Errorf("posture=%q: sandbox = %q, want %q", tc.posture, got, tc.wantSandbox)
 		}
 	}
+}
+
+// cspHasDirective reports whether the policy names a directive at all, even with no value after it.
+func cspHasDirective(csp, name string) bool {
+	for _, part := range strings.Split(csp, ";") {
+		fields := strings.Fields(part)
+		if len(fields) > 0 && fields[0] == name {
+			return true
+		}
+	}
+	return false
 }
 
 // cspDirectiveValue extracts one directive's value from a CSP string ("" if absent).
@@ -459,6 +529,69 @@ func TestPreviewAsset_Subdirectory(t *testing.T) {
 	}
 }
 
+// This list is the whole answer to what a leaked preview token can read. An unmapped name once answered
+// application/octet-stream, which made every byte under the root readable — `.env`, keys, git config.
+func TestPreviewAsset_TypeAllowList(t *testing.T) {
+	s := testServer(t)
+	cookie, csrfToken := loginTestCSRF(t, s)
+	projectID, dir := previewTestProject(t, s)
+
+	want := map[string]int{
+		// What a page embeds: styles, scripts, media, and the HTML a link walks to.
+		"rel.css":        http.StatusOK,
+		"app.js":         http.StatusOK,
+		"logo.svg":       http.StatusOK,
+		"sub/page2.html": http.StatusOK,
+		"logo.png":       http.StatusOK,
+		"font.woff2":     http.StatusOK,
+		"clip.mp3":       http.StatusOK,
+		// What only a token thief wants.
+		".env":                http.StatusNotFound,
+		".env.production":     http.StatusNotFound,
+		"id_rsa":              http.StatusNotFound,
+		"server.pem":          http.StatusNotFound,
+		"config.json":         http.StatusNotFound,
+		"local.settings.json": http.StatusNotFound,
+		"notes.txt":           http.StatusNotFound,
+		"data.csv":            http.StatusNotFound,
+		"app.js.map":          http.StatusNotFound,
+		"doc.pdf":             http.StatusNotFound,
+		"mod.wasm":            http.StatusNotFound,
+		"LICENSE":             http.StatusNotFound,
+		// Names the type rule would serve, so only the `.git` rule refuses them. `sub/.git/` keeps the
+		// fixture's real checkout intact.
+		"sub/.git/config.html": http.StatusNotFound,
+		"sub/.git/hooks/x.js":  http.StatusNotFound,
+		// Refused by the type rule alone: no extension, so no type.
+		".git/config.json": http.StatusNotFound,
+		"sub/.git/HEAD":    http.StatusNotFound,
+	}
+
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name := range want {
+		file := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, []byte("content of "+name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	token, _ := servePreview(t, s, cookie, csrfToken, map[string]any{
+		"content": "<html></html>", "project": projectID, "path": "page.html",
+	})
+
+	for name, wantStatus := range want {
+		rr := getPreview(t, s, "/api/preview/"+token+"/"+name)
+		if rr.Code != wantStatus {
+			t.Errorf("anon GET %s: got %d, want %d (%s)", name, rr.Code, wantStatus, rr.Body.String())
+		}
+	}
+}
+
 func TestPreviewAsset_TraversalRejected(t *testing.T) {
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
@@ -580,6 +713,137 @@ func TestPreviewTTL_SweepExpiresIdleDocs(t *testing.T) {
 	rr := getPreview(t, s, "/api/preview/"+token+"/")
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 after TTL sweep, got %d", rr.Code)
+	}
+}
+
+// Any read refreshes the idle TTL, and a read costs only the URL, so a stolen token lives as long as
+// whoever holds it keeps asking. The absolute cap is what ends that.
+func TestPreviewMaxAge_ReadsCannotRenewADoc(t *testing.T) {
+	s := testServer(t)
+	cookie, csrfToken := loginTestCSRF(t, s)
+	projectID, dir := previewTestProject(t, s)
+	if err := os.WriteFile(filepath.Join(dir, "style.css"), []byte("body{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	serve := func() string {
+		tok, _ := servePreview(t, s, cookie, csrfToken, map[string]any{
+			"content": "<html></html>", "project": projectID, "path": "page.html",
+		})
+		// Both docs are already overdue on the idle rule, well inside the absolute cap.
+		s.previewStore.mu.Lock()
+		s.previewStore.docs[tok].lastAccess = time.Now().Add(-previewTTL - time.Second)
+		s.previewStore.mu.Unlock()
+		return tok
+	}
+	serves := func(tok string) bool {
+		s.previewStore.sweep(time.Now())
+		s.previewStore.mu.Lock()
+		defer s.previewStore.mu.Unlock()
+		d, ok := s.previewStore.docs[tok]
+		return ok && !d.expired
+	}
+
+	read, idle := serve(), serve()
+	getPreview(t, s, "/api/preview/"+read+"/style.css") // the holder renews it
+	if !serves(read) {
+		t.Fatal("a doc the holder read was swept — the read no longer renews the idle TTL, so this test's premise is gone")
+	}
+	if serves(idle) {
+		t.Fatal("an idle doc survived the idle rule")
+	}
+
+	// Both now past the absolute cap. The read must not save it this time.
+	s.previewStore.mu.Lock()
+	if d, ok := s.previewStore.docs[read]; ok {
+		d.createdAt = time.Now().Add(-previewMaxAge - time.Second)
+	}
+	s.previewStore.mu.Unlock()
+	getPreview(t, s, "/api/preview/"+read+"/style.css")
+	if serves(read) {
+		t.Error("a read renewed a doc past previewMaxAge — a leaked token stays readable for as long as it is used")
+	}
+}
+
+// INVARIANT: no response under /api/preview/ grants a cross-origin read. A preview document has an opaque
+// origin, and `Access-Control-Allow-Origin: null` is the only value that would let it read the bytes it is
+// handed — and that value admits every sandboxed iframe on the internet. Nothing sets it today; this
+// pins the decision rather than the current handlers.
+func TestPreviewResponsesNeverGrantACrossOriginRead(t *testing.T) {
+	s := testServer(t)
+	cookie, csrfToken := loginTestCSRF(t, s)
+	projectID, dir := previewTestProject(t, s)
+	if err := os.WriteFile(filepath.Join(dir, "style.css"), []byte("body{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	token, _ := servePreview(t, s, cookie, csrfToken, map[string]any{
+		"content": "<html></html>", "project": projectID, "path": "page.html",
+	})
+
+	for _, target := range []string{
+		"/api/preview/" + token + "/",                   // the document the frame shows
+		"/api/preview/" + token + "/style.css",          // a sibling it loads
+		"/api/preview/" + token + "/page.html",          // the self-reference
+		"/api/preview/" + token + "/.env",               // refused by type
+		"/api/preview/" + token + "/gone.css",           // refused because absent
+		"/api/preview/" + strings.Repeat("f", 32) + "/", // refused because unknown
+		"/api/preview-nav/" + token,                     // the session-authed record beside the tree
+	} {
+		req := secureRequest(httptest.NewRequest(http.MethodGet, "http://localhost"+target, nil))
+		req.Host = "localhost"
+		rr := httptest.NewRecorder()
+		// Served through the full middleware chain, so a header CORSMiddleware would add shows up here.
+		s.middlewareChain(s.mux).ServeHTTP(rr, req)
+		if got := rr.Header().Get("Access-Control-Allow-Origin"); got != "" {
+			t.Errorf("%s: Access-Control-Allow-Origin = %q — the preview document is now allowed to read this response", target, got)
+		}
+	}
+}
+
+// An expired token is answered apart from one never minted, because a caller can act on the difference:
+// re-serve, or say the preview stopped.
+func TestPreviewExpiredToken_AnswersExpiredNotNotFound(t *testing.T) {
+	s := testServer(t)
+	cookie, csrfToken := loginTestCSRF(t, s)
+	projectID, dir := previewTestProject(t, s)
+	if err := os.WriteFile(filepath.Join(dir, "style.css"), []byte("body{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	token, _ := servePreview(t, s, cookie, csrfToken, map[string]any{
+		"content": "<html></html>", "project": projectID, "path": "page.html",
+	})
+	s.previewStore.mu.Lock()
+	s.previewStore.docs[token].createdAt = time.Now().Add(-previewMaxAge - time.Second)
+	s.previewStore.mu.Unlock()
+	s.previewStore.sweep(time.Now())
+
+	for _, target := range []string{"/api/preview/" + token + "/", "/api/preview/" + token + "/style.css"} {
+		rr := getPreview(t, s, target)
+		if rr.Code != http.StatusNotFound {
+			t.Errorf("%s: %d, want 404", target, rr.Code)
+		}
+		if body := rr.Body.String(); !strings.Contains(body, "preview expired") {
+			t.Errorf("%s: %s, want the answer to say the token expired", target, body)
+		}
+	}
+
+	// A token that was never minted answers with the other message.
+	rr := getPreview(t, s, "/api/preview/"+strings.Repeat("e", 32)+"/")
+	if body := rr.Body.String(); rr.Code != http.StatusNotFound || !strings.Contains(body, "preview not found") {
+		t.Errorf("unknown token: %d %s, want 404 preview not found", rr.Code, body)
+	}
+
+	// A 404 on the stub must not renew it; the idle rule still retires it.
+	s.previewStore.mu.Lock()
+	s.previewStore.docs[token].lastAccess = time.Now().Add(-previewTTL - time.Second)
+	s.previewStore.mu.Unlock()
+	getPreview(t, s, "/api/preview/"+token+"/")
+	s.previewStore.sweep(time.Now())
+	s.previewStore.mu.Lock()
+	_, stillThere := s.previewStore.docs[token]
+	s.previewStore.mu.Unlock()
+	if stillThere {
+		t.Error("an expired stub survived a read plus the idle rule — a dead token would sit in the table for as long as anything asked for it")
 	}
 }
 
@@ -794,7 +1058,7 @@ func TestPreviewSelfReference_ServesServedContent(t *testing.T) {
 	if body := rr.Body.String(); body != content {
 		t.Errorf("body = %q, want served content %q", body, content)
 	}
-	if csp := rr.Header().Get("Content-Security-Policy"); csp != previewDocCSPStrict {
+	if csp := rr.Header().Get("Content-Security-Policy"); csp != previewDocCSPNoScript {
 		t.Errorf("self-ref doc must carry the preview CSP, got %q", csp)
 	}
 }
@@ -841,8 +1105,8 @@ func TestPreviewDoc_SubdirDirectoryRouting(t *testing.T) {
 	if rr.Body.String() != content {
 		t.Fatalf("body = %q, want %q", rr.Body.String(), content)
 	}
-	if csp := rr.Header().Get("Content-Security-Policy"); csp != previewDocCSPStrict {
-		t.Errorf("doc CSP = %q, want strict", csp)
+	if csp := rr.Header().Get("Content-Security-Policy"); csp != previewDocCSPNoScript {
+		t.Errorf("doc CSP = %q, want the doc's posture policy", csp)
 	}
 
 	// No-slash dir URL → 301 to the slashed one.
@@ -924,8 +1188,8 @@ func TestPreviewSubdirDoc_SiblingsResolveFromWorktreeRoot(t *testing.T) {
 	}
 }
 
-// Sibling DOCUMENTS carry the doc CSP (strict by default, permissive with
-// allow_network) — a navigated page must keep the doc's egress posture.
+// Sibling DOCUMENTS carry the doc CSP (the no-script policy by default, the permissive one
+// under the network posture) — a navigated page must keep the doc's egress posture.
 func TestPreviewSiblingDoc_CarriesDocCSP(t *testing.T) {
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
@@ -946,8 +1210,8 @@ func TestPreviewSiblingDoc_CarriesDocCSP(t *testing.T) {
 	if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
 		t.Errorf("Content-Type = %q", ct)
 	}
-	if csp := rr.Header().Get("Content-Security-Policy"); csp != previewDocCSPStrict {
-		t.Errorf("sibling doc CSP = %q, want strict", csp)
+	if csp := rr.Header().Get("Content-Security-Policy"); csp != previewDocCSPNoScript {
+		t.Errorf("sibling doc CSP = %q, want the doc's posture policy", csp)
 	}
 
 	// Non-document siblings keep no CSP.
@@ -960,7 +1224,7 @@ func TestPreviewSiblingDoc_CarriesDocCSP(t *testing.T) {
 	}
 }
 
-func TestPreviewSiblingDoc_PermitsCSPWithAllowNetwork(t *testing.T) {
+func TestPreviewSiblingDoc_PermitsCSPWithNetworkPosture(t *testing.T) {
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
 	projectID, dir := previewTestProject(t, s)
@@ -969,14 +1233,14 @@ func TestPreviewSiblingDoc_PermitsCSPWithAllowNetwork(t *testing.T) {
 	}
 	token, _ := servePreview(t, s, cookie, csrfToken, map[string]any{
 		"content": "<html></html>", "project": projectID, "path": "page.html",
-		"allow_network": true,
+		"posture": "network",
 	})
 	rr := getPreview(t, s, "/api/preview/"+token+"/page2.html")
 	if rr.Code != http.StatusOK {
 		t.Fatalf("sibling doc GET: %d", rr.Code)
 	}
 	if csp := rr.Header().Get("Content-Security-Policy"); csp != previewDocCSPNetwork {
-		t.Errorf("sibling doc CSP = %q, want permissive", csp)
+		t.Errorf("sibling doc CSP = %q, want the permissive policy", csp)
 	}
 }
 
@@ -1080,18 +1344,18 @@ func TestPreviewStorePut_RewriteGrowthExceedsCap(t *testing.T) {
 	unit := `a href="/x">` // 10 chars → ~55 after rewrite
 	n := previewMaxContent / len(unit)
 	content := strings.Repeat(unit, n) // ≤ cap pre-rewrite
-	if _, err := ps.put(content, "index.html", "", "", false); err == nil {
+	if _, err := ps.put(content, "index.html", "", "", previewNoScript); err == nil {
 		t.Fatal("expected errPreviewTooLarge for content that exceeds the cap post-rewrite")
 	} else if !errors.Is(err, errPreviewTooLarge) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// Control: same size, no refs → stored fine.
-	if _, err := ps.put(strings.Repeat("x", n*len(unit)), "index.html", "", "", false); err != nil {
+	if _, err := ps.put(strings.Repeat("x", n*len(unit)), "index.html", "", "", previewNoScript); err != nil {
 		t.Fatalf("no-ref content at the cap must store: %v", err)
 	}
 }
 
-// --- nav record + /nav endpoint ------------------------------------------------
+// --- nav record + the nav route -----------------------------------------------
 
 func TestPreviewNavRecord_CommittedDocumentsBumpSequence(t *testing.T) {
 	s := testServer(t)
@@ -1186,7 +1450,7 @@ func TestPreviewNavRecord_CommittedDocumentsBumpSequence(t *testing.T) {
 
 func TestPreviewNav_RequiresSession(t *testing.T) {
 	s := testServer(t)
-	req := testRequest("GET", "/api/preview/some-token/nav", nil)
+	req := testRequest("GET", "/api/preview-nav/some-token", nil)
 	rr := testResponse(t, s, req)
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 without session, got %d", rr.Code)
@@ -1196,11 +1460,39 @@ func TestPreviewNav_RequiresSession(t *testing.T) {
 func TestPreviewNav_UnknownToken(t *testing.T) {
 	s := testServer(t)
 	cookie, _ := loginTestCSRF(t, s)
-	req := testRequest("GET", "/api/preview/nonexistent-token/nav", nil)
+	req := testRequest("GET", "/api/preview-nav/nonexistent-token", nil)
 	withAuth(req, cookie)
 	rr := testResponse(t, s, req)
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 for unknown token, got %d", rr.Code)
+	}
+}
+
+// The watchdog route sits beside /api/preview/{token}/, so no name inside a previewed tree is reserved by
+// it: a file called nav there is answered by the asset rules, not by the record.
+func TestPreviewNavName_IsAnAssetNotTheRecord(t *testing.T) {
+	s := testServer(t)
+	cookie, csrfToken := loginTestCSRF(t, s)
+	projectID, dir := previewTestProject(t, s)
+	if err := os.WriteFile(filepath.Join(dir, "nav"), []byte("NAV-ON-DISK"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	token, _ := servePreview(t, s, cookie, csrfToken, map[string]any{
+		"content": "<html></html>", "project": projectID, "path": "page.html",
+	})
+
+	rr := getPreview(t, s, "/api/preview/"+token+"/nav")
+	if rr.Code == http.StatusUnauthorized {
+		t.Fatalf("the asset route answers without a session; got the watchdog's 401")
+	}
+	if body := rr.Body.String(); strings.Contains(body, `"seq"`) {
+		t.Fatalf("an asset request must not answer with the nav record: %s", body)
+	}
+
+	// And the record is readable, for the token, at its own path.
+	rec := navState(t, s, cookie, token)
+	if rec["seq"] == nil {
+		t.Fatalf("nav record must carry a sequence: %v", rec)
 	}
 }
 
