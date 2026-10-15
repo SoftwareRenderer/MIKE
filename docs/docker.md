@@ -92,7 +92,7 @@ services:
       - mike-worktrees:/mike/worktrees
       - mike-extensions:/mike/extensions    # installed extension code, deleted with the extension
       - mike-containers:/var/lib/containers # podman's store, off the engine's own overlayfs
-      - /srv/projects:/mike/projects        # the checkouts agents edit and commit into
+      - /srv/projects:/root        # the checkouts agents edit and commit into
 
 volumes:
   mike-data:
@@ -119,7 +119,7 @@ docker run -d --name mike \
   -v mike-worktrees:/mike/worktrees \
   -v mike-extensions:/mike/extensions \
   -v mike-containers:/var/lib/containers \
-  -v /srv/projects:/mike/projects \
+  -v /srv/projects:/root \
   getmike/mike:local
 
 docker logs mike        # the pairing code, on a data directory with no passkey yet
