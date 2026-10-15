@@ -3,9 +3,9 @@ import { render, cleanup, fireEvent, waitFor } from '@testing-library/svelte';
 import FileBrowserView from '$lib/components/FileBrowserView.svelte';
 
 /**
- * The listing draws every row the server sent and dims the ones git excludes: a dropped row is a
- * file no one can open without typing its path. The add-project picker hides names by design —
- * `file-browser-hidden-files.unit.svelte.ts`.
+ * The listing draws every row the server sent and dims the ones git excludes. `.git` never arrives to be
+ * dropped — the server unlists it (`handler_fs_gitdir_test.go`); the add-project picker hides names by
+ * design in `file-browser-hidden-files.unit.svelte.ts`.
  */
 
 const ROOT = '/home/sandbox/worktrees/fs-dots';
@@ -14,7 +14,6 @@ const LISTING: Record<string, { name: string; isDir: boolean; path: string; igno
     [ROOT]: [
         { name: '.github', isDir: true, path: `${ROOT}/.github` },
         { name: 'src', isDir: true, path: `${ROOT}/src` },
-        { name: '.git', isDir: true, path: `${ROOT}/.git` },
         { name: '.cache', isDir: true, path: `${ROOT}/.cache`, ignored: true },
         { name: 'node_modules', isDir: true, path: `${ROOT}/node_modules`, ignored: true },
         { name: '.env', isDir: false, path: `${ROOT}/.env`, ignored: true },
@@ -80,7 +79,7 @@ async function loadRoot(container: HTMLElement) {
     input.value = ROOT;
     input.dispatchEvent(new Event('input', { bubbles: true }));
     await fireEvent.keyDown(input, { key: 'Enter' });
-    await waitFor(() => expect(rowEls(container).length).toBe(7));
+    await waitFor(() => expect(rowEls(container).length).toBe(6));
 }
 
 describe('the file listing draws what the server listed', () => {
@@ -89,7 +88,7 @@ describe('the file listing draws what the server listed', () => {
         await loadRoot(container);
 
         const names = rowNames(container);
-        for (const shown of ['.github', 'src', '.git', '.cache', 'node_modules', '.env', '.gitignore']) {
+        for (const shown of ['.github', 'src', '.cache', 'node_modules', '.env', '.gitignore']) {
             expect(names).toContain(shown);
         }
         for (const name of ['.cache', 'node_modules', '.env']) {

@@ -230,6 +230,43 @@ func fsReadAt(t *testing.T, s *Server, cookie, csrfToken, projectID, file, ref s
 	return testResponse(t, s, req)
 }
 
+// fsRow is one entry of a GET /api/fs listing.
+type fsRow struct {
+	isDir     bool
+	isGitRepo bool
+	ignored   bool
+}
+
+// fsListing lists one directory through `GET /api/fs` and answers whether that directory is a
+// repository, with its entries keyed by name. An empty projectID leaves `project` off the request, the
+// way the add-project picker's request does.
+func fsListing(t *testing.T, s *Server, projectID, dir string) (bool, map[string]fsRow) {
+	t.Helper()
+	cookie, csrf := loginTestCSRF(t, s)
+	q := url.Values{"path": {dir}, "files": {"1"}}
+	if projectID != "" {
+		q.Set("project", projectID)
+	}
+	req := testRequest(http.MethodGet, "/api/fs?"+q.Encode(), nil)
+	withAuthCSRF(req, cookie, csrf)
+	rr := testResponse(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET /api/fs %s: %d %s", dir, rr.Code, rr.Body.String())
+	}
+	var body struct {
+		IsGitRepo bool      `json:"isGitRepo"`
+		Entries   []fsEntry `json:"entries"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	rows := make(map[string]fsRow, len(body.Entries))
+	for _, e := range body.Entries {
+		rows[e.Name] = fsRow{isDir: e.IsDir, isGitRepo: e.IsGitRepo, ignored: e.Ignored}
+	}
+	return body.IsGitRepo, rows
+}
+
 // TestFSReadRefRejectsGitOptions: a `?ref=` shaped like a git option is refused with 400, and the
 // rev is passed after --end-of-options. An option-shaped ref handed to `git show "--output=X:p"`
 // would create or truncate a file anywhere the server user can write.
@@ -658,7 +695,6 @@ func TestFSListGitBadge(t *testing.T) {
 		t.Skip("git not available")
 	}
 	s := testServer(t)
-	cookie, csrf := loginTestCSRF(t, s)
 	base := t.TempDir()
 
 	// A directory that is NOT a repository, holding a plain subdirectory and a
@@ -691,32 +727,13 @@ func TestFSListGitBadge(t *testing.T) {
 		}
 	}
 
-	type listEntry struct {
-		Name      string `json:"name"`
-		IsGitRepo bool   `json:"isGitRepo"`
-	}
-	type listResp struct {
-		IsGitRepo bool        `json:"isGitRepo"`
-		Entries   []listEntry `json:"entries"`
-	}
-
 	// list returns the badge for the listed directory itself under the "" key.
 	list := func(projectID, path string) map[string]bool {
 		t.Helper()
-		q := url.Values{"path": {path}, "project": {projectID}}
-		req := testRequest(http.MethodGet, "/api/fs?"+q.Encode(), nil)
-		withAuthCSRF(req, cookie, csrf)
-		rr := testResponse(t, s, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("list %s: %d %s", path, rr.Code, rr.Body.String())
-		}
-		var resp listResp
-		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-			t.Fatalf("decode listing: %v", err)
-		}
-		badges := map[string]bool{"": resp.IsGitRepo}
-		for _, e := range resp.Entries {
-			badges[e.Name] = e.IsGitRepo
+		isGit, rows := fsListing(t, s, projectID, path)
+		badges := map[string]bool{"": isGit}
+		for name, row := range rows {
+			badges[name] = row.isGitRepo
 		}
 		return badges
 	}

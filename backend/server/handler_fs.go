@@ -312,6 +312,12 @@ type fsEntry struct {
 	Ignored bool `json:"ignored"`
 }
 
+// listingSkipsName reports whether a listing offers no row for this name. `.git` is the repository's own
+// state, and a row is a click target: the add-project picker would otherwise take it as a project path.
+func listingSkipsName(name string) bool {
+	return name == fsutil.GitDirName
+}
+
 // markIgnored fills in Ignored for the rows of a listing of dir, in one check-ignore process.
 // The `..` row stays unmarked: git calls it "outside the repository", a fatal that blanks the batch.
 func markIgnored(entries []fsEntry, dir string) {
@@ -408,6 +414,9 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 			if !includeFiles && !isDir {
 				continue
 			}
+			if listingSkipsName(name) {
+				continue
+			}
 			sandboxFullPath := filepath.Join(sandboxPath, name)
 			// IsGitRepo stays false: the in-sandbox browser has no use for it.
 			result.Entries = append(result.Entries, fsEntry{Name: name, IsDir: isDir, Path: sandboxFullPath})
@@ -459,6 +468,9 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 
 	for _, e := range entries {
 		if !includeFiles && !e.IsDir() {
+			continue
+		}
+		if listingSkipsName(e.Name()) {
 			continue
 		}
 		fullPath := filepath.Join(path, e.Name())

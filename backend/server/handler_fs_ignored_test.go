@@ -1,9 +1,6 @@
 package server
 
 import (
-	"encoding/json"
-	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -52,7 +49,7 @@ func TestFSListingMarksIgnoredRows(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	root := fsListing(t, s, projectID, repo)
+	_, root := fsListing(t, s, projectID, repo)
 	want := map[string]bool{
 		"README.md": false, ".gitignore": false, "keep.log": false, "tracked.log": false,
 		"node_modules": false, // no rule mentions it; the listing no longer judges names
@@ -61,26 +58,31 @@ func TestFSListingMarksIgnoredRows(t *testing.T) {
 		"sub":          false,
 	}
 	for name, ignored := range want {
-		if got, ok := root[name]; !ok {
+		row, ok := root[name]
+		if !ok {
 			t.Errorf("%s: not listed at all", name)
-		} else if got != ignored {
-			t.Errorf("%s: ignored=%v, want %v", name, got, ignored)
+		} else if row.ignored != ignored {
+			t.Errorf("%s: ignored=%v, want %v", name, row.ignored, ignored)
 		}
 	}
 
 	// A nested .gitignore is judged by the directory that holds it.
-	sub := fsListing(t, s, projectID, filepath.Join(repo, "sub"))
-	if !sub["secret.txt"] {
+	_, sub := fsListing(t, s, projectID, filepath.Join(repo, "sub"))
+	if row, ok := sub["secret.txt"]; !ok {
+		t.Error("sub/secret.txt: not listed at all")
+	} else if !row.ignored {
 		t.Error("sub/secret.txt: not marked, though sub/.gitignore excludes it")
 	}
-	if sub["visible.txt"] {
+	if row, ok := sub["visible.txt"]; !ok {
+		t.Error("sub/visible.txt: not listed at all")
+	} else if row.ignored {
 		t.Error("sub/visible.txt: marked though nothing excludes it")
 	}
 	// The parent row is judged by whatever lists it, never here: `..` is a fatal "outside the
 	// repository" to check-ignore, which would blank the whole batch.
-	if ignored, ok := sub[".."]; !ok {
+	if row, ok := sub[".."]; !ok {
 		t.Error("a subdirectory listing offers no parent row")
-	} else if ignored {
+	} else if row.ignored {
 		t.Error("the parent row is marked ignored")
 	}
 }
@@ -99,41 +101,14 @@ func TestFSListingOutsideARepositoryMarksNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	listing := fsListing(t, s, projectID, dir)
+	_, listing := fsListing(t, s, projectID, dir)
 	for _, name := range []string{"notes.log", "build"} {
-		got, ok := listing[name]
+		row, ok := listing[name]
 		if !ok {
 			t.Fatalf("%s: not listed", name)
 		}
-		if got {
+		if row.ignored {
 			t.Errorf("%s: marked ignored with no repository to decide it", name)
 		}
 	}
-}
-
-// fsListing lists one directory of a project and returns entry name -> ignored.
-func fsListing(t *testing.T, s *Server, projectID, dir string) map[string]bool {
-	t.Helper()
-	cookie, csrf := loginTestCSRF(t, s)
-	q := url.Values{"project": {projectID}, "path": {dir}, "files": {"1"}}
-	req := testRequest(http.MethodGet, "/api/fs?"+q.Encode(), nil)
-	withAuthCSRF(req, cookie, csrf)
-	rr := testResponse(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("GET /api/fs: %d %s", rr.Code, rr.Body.String())
-	}
-	var body struct {
-		Entries []struct {
-			Name    string `json:"name"`
-			Ignored bool   `json:"ignored"`
-		} `json:"entries"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	got := make(map[string]bool, len(body.Entries))
-	for _, e := range body.Entries {
-		got[e.Name] = e.Ignored
-	}
-	return got
 }

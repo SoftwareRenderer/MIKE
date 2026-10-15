@@ -507,9 +507,23 @@ request failed. Tests:
   listed directory so a nested `.gitignore` speaks for the directory that holds it. A tracked path is
   never `ignored`, so a rule written after a commit does not dim committed work. Any git failure
   answers `false` for every row.
-- **The explorer draws every row and dims the ignored ones.** `FileBrowserView.svelte` filters
-  nothing: a hidden path leaves the person no way to open it. `file-browser.css` gives an `ignored`
-  row the muted text colour, and a selection still reads as one.
+- **The explorer draws every row the server answers, and dims the ignored ones.**
+  `FileBrowserView.svelte` filters nothing; the one name kept out of a listing is `.git`, and it is kept
+  out at the source. `file-browser.css` gives an `ignored` row the muted text colour, and a selection
+  still reads as one.
+- **No listing offers a row for `.git`.** `listingSkipsName` (`backend/server/handler_fs.go`)
+  drops the name from both listing branches — the host `os.ReadDir` walk and a sandboxed project's
+  `ls -pA` — so a sandboxed project cannot show what a host one hides. Both shapes of it go: the
+  directory of a full checkout, and the one-line gitfile of a linked worktree. The reason is that a row
+  is a click target. The add-project picker's Select answers with the directory it has loaded, so a
+  `.git` row could become a project's path, and Settings → Sandbox offers every row as a mount source.
+- **Unlisted is not forbidden.** A path box in either picker, an Explorer deep link and every read,
+  write and download route still resolve `.git`; only the row is gone, so archiving a parent still
+  carries it. The task explorer browses by breadcrumb with no path box, so within that panel the name
+  is reachable only by a deep link.
+- **Nothing about `.git` is git's verdict.** The row is dropped before `markIgnored` runs, and
+  `check-ignore` answers `false` for `.git` anyway — `..` is the only name there that fails the batch.
+  A listing keeps `.github` and `.gitignore`, because those are the person's own files.
 - **A listing of no repository marks nothing.** The directory picker — the request with no `project`
   — asks no question about git at all, so every `ignored` it receives is false.
 - **`ignored` decides nothing else.** `fs_event` still drops an ignored path (`shouldSkipFsEvent`), so
@@ -517,9 +531,10 @@ request failed. Tests:
   `/api/fs/search` narrows further: it skips a dot-prefixed name (`searchSkipsName`) and the
   well-known build directories (`git.ShouldIgnorePath`), whether or not a rule mentions them.
 
-Tests: `go test ./backend/server/ -run TestFSListing`, and
-`frontend/src/lib/components/__tests__/file-browser-lists-everything.unit.svelte.ts` for the row that
-vanishes or stops being dimmed.
+Tests: `go test ./backend/server/ -run TestFSListing` — which covers the dimming, the listing with no
+repository, and the absent `.git` row — and
+`frontend/src/lib/components/__tests__/file-browser-lists-everything.unit.svelte.ts` for the rows that
+vanish or stop being dimmed.
 
 ## Raw file bytes
 
