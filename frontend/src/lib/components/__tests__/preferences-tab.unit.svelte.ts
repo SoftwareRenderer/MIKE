@@ -127,6 +127,35 @@ describe('PreferencesTab auto-maximize-chat toggle', () => {
     });
 });
 
+describe('PreferencesTab auto-maximize-code-viewer toggle', () => {
+    const TOGGLE = 'button[aria-label="Auto maximize code viewer"]';
+
+    function renderCodeViewerTab(props: { autoMaximizeCodeViewer?: boolean } = {}) {
+        const onDirty = vi.fn();
+        const utils = render(PreferencesTab, {
+            props: { createTaskKey: undefined, createTaskSubmitKey: undefined, onDirty, ...props },
+        });
+        return { ...utils, onDirty, toggle: () => utils.container.querySelector(TOGGLE) as HTMLButtonElement };
+    }
+
+    it('is on when nothing is stored for it', () => {
+        const { toggle } = renderCodeViewerTab();
+        expect(toggle()?.getAttribute('aria-checked')).toBe('true');
+    });
+
+    it('reflects a stored false', () => {
+        const { toggle } = renderCodeViewerTab({ autoMaximizeCodeViewer: false });
+        expect(toggle()?.getAttribute('aria-checked')).toBe('false');
+    });
+
+    it('toggles and reports dirty', async () => {
+        const { toggle, onDirty } = renderCodeViewerTab();
+        await fireEvent.click(toggle()!);
+        expect(toggle()?.getAttribute('aria-checked')).toBe('false');
+        expect(onDirty).toHaveBeenCalledTimes(1);
+    });
+});
+
 /** jsdom has no Notification, and the row reads the permission at render time, so the stub goes in first. */
 function stubNotification(permission: 'default' | 'granted' | 'denied', answer?: 'granted' | 'denied') {
     const requestPermission = vi.fn().mockResolvedValue(answer ?? (permission === 'default' ? 'granted' : permission));

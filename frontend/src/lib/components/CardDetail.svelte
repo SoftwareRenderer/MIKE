@@ -251,7 +251,7 @@
         if (!fullPath) return;
         diffEditor.load();
 
-        if (shouldAutoFullscreenDiffEditor(diffColEl?.offsetWidth ?? 0, mobile)) {
+        if (shouldAutoFullscreenDiffEditor(diffColEl?.offsetWidth ?? 0, mobile, uiStore.autoMaximizeCodeViewer)) {
             editorFullscreen = true;
         }
         editingFile = { path: fullPath, lineNumber, displayPath: relativePath };

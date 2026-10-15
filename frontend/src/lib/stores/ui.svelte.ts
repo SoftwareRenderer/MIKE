@@ -2,6 +2,7 @@ import { loadAppSetting, saveAppSetting } from '$lib/storage';
 
 /** IndexedDB app-settings key holding this browser's Review-notification choice. */
 const NOTIFY_ON_REVIEW_KEY = 'notify-on-review';
+const AUTO_MAXIMIZE_CODE_VIEWER_KEY = 'auto-maximize-code-viewer';
 
 // ─── UI Visibility State ───
 
@@ -28,6 +29,9 @@ export class UiStore {
     /** Whether this browser asks for a notification when a task enters Review. Per browser because
      *  permission and delivery are per browser — the server never sees it (docs/notifications.md). */
     public notifyOnReview = $state(false);
+    /** Whether a narrow diff column may maximize the code viewer it opens from a diff line.
+     *  On until this browser stores a different answer. */
+    public autoMaximizeCodeViewer = $state(true);
 
     /** Open Settings, optionally on a named tab; the update dot names 'about'. */
     public openSettings(tab: string | null = null): void {
@@ -39,10 +43,17 @@ export class UiStore {
         loadAppSetting(NOTIFY_ON_REVIEW_KEY, false).then((v: unknown) => {
             this.notifyOnReview = v === true;
         }).catch(() => {});
+        loadAppSetting(AUTO_MAXIMIZE_CODE_VIEWER_KEY, true).then((v: unknown) => {
+            this.autoMaximizeCodeViewer = v !== false;
+        }).catch(() => {});
     }
 
     /** Write this browser's choice back to its own storage. */
     persistNotifyOnReview(): void {
         saveAppSetting(NOTIFY_ON_REVIEW_KEY, this.notifyOnReview).catch(() => {});
+    }
+
+    persistAutoMaximizeCodeViewer(): void {
+        saveAppSetting(AUTO_MAXIMIZE_CODE_VIEWER_KEY, this.autoMaximizeCodeViewer).catch(() => {});
     }
 }

@@ -74,6 +74,7 @@
     let updateCheckEnabled = $state<boolean | null>(null);
     let sortOldestFirst = $state(false);
     let autoMaximizeChat = $state(true);
+    let autoMaximizeCodeViewer = $state(true);
     let notifyOnReview = $state(false);
     // The open project's answer to the "Assisted-by" commit trailer; absent means off.
     let commitAssistedBy = $state(false);
@@ -233,6 +234,7 @@
             sortOldestFirst = config.sort_oldest_first === true;
             autoMaximizeChat = config.auto_maximize_chat_mobile !== false;
             notifyOnReview = uiStore.notifyOnReview;
+            autoMaximizeCodeViewer = uiStore.autoMaximizeCodeViewer;
             commitAssistedBy = appStore.selectedProject?.commit_assisted_by === true;
             mcpServers = buildMCPServers(config);
             projectMCPOpts = [...(appStore.selectedProject?.mcp_server_ids || [])];
@@ -686,6 +688,8 @@
             await saveProjectDefaults();
             uiStore.notifyOnReview = notifyOnReview;
             uiStore.persistNotifyOnReview();
+            uiStore.autoMaximizeCodeViewer = autoMaximizeCodeViewer;
+            uiStore.persistAutoMaximizeCodeViewer();
             // The switch may have just answered the question the dot is waiting on.
             void updateCheck.refresh();
             onSaved();
@@ -940,7 +944,7 @@
 
         <!-- Preferences Tab -->
         {#if activeTab === 'preferences'}
-            <PreferencesTab bind:createTaskKey={keyboardCreateTask} bind:createTaskSubmitKey={keyboardCreateTaskSubmit} bind:openTerminalKey={keyboardOpenTerminal} bind:startTaskKey={keyboardStartTask} bind:toggleFullscreenKey={keyboardToggleFullscreen} bind:multiSelectClickKey={keyboardMultiSelectClick} bind:hideHints={keyboardHideHints} bind:hideModelBadge={hideModelBadge} bind:sortOldestFirst={sortOldestFirst} bind:autoMaximizeChat={autoMaximizeChat} bind:notifyOnReview={notifyOnReview} onDirty={markDirty} />
+            <PreferencesTab bind:createTaskKey={keyboardCreateTask} bind:createTaskSubmitKey={keyboardCreateTaskSubmit} bind:openTerminalKey={keyboardOpenTerminal} bind:startTaskKey={keyboardStartTask} bind:toggleFullscreenKey={keyboardToggleFullscreen} bind:multiSelectClickKey={keyboardMultiSelectClick} bind:hideHints={keyboardHideHints} bind:hideModelBadge={hideModelBadge} bind:sortOldestFirst={sortOldestFirst} bind:autoMaximizeChat={autoMaximizeChat} bind:autoMaximizeCodeViewer={autoMaximizeCodeViewer} bind:notifyOnReview={notifyOnReview} onDirty={markDirty} />
         {/if}
 
         <!-- Extensions Tab -->

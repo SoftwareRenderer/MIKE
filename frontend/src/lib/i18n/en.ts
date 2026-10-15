@@ -354,6 +354,8 @@ const catalog = {
     'settings.preferences.oldestFirstDesc': 'Put the least recently moved task at the top of each column',
     'settings.preferences.autoMaximizeChat': 'Auto maximize chat visibility on mobile',
     'settings.preferences.autoMaximizeChatDesc': 'Maximize the chat panel while the chat input has focus',
+    'settings.preferences.autoMaximizeCodeViewer': 'Auto maximize code viewer',
+    'settings.preferences.autoMaximizeCodeViewerDesc': 'When clicking on a line of code in the diff panel, maximize the view if the column is narrow',
     'settings.preferences.notifyOnReview': 'Notify when a task enters Review',
     'settings.preferences.notifyOnReviewDesc': 'Send a browser notification when a task starts waiting for you while you are looking elsewhere',
     'settings.preferences.notifyBlocked': 'This browser is not showing notifications for this site — allow them in its site settings',

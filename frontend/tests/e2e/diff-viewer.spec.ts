@@ -8,6 +8,43 @@ import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch, ensureTaskSt
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
 isolatedProject();
 
+/**
+ * Mirrors DIFF_EDITOR_FULLSCREEN_MAX_WIDTH in `$lib/utils/diff-editor-layout.ts`. No spec imports
+ * from `$lib`, so the number is repeated here rather than read.
+ */
+const DIFF_EDITOR_FULLSCREEN_MAX_WIDTH = 900;
+
+/**
+ * Asserts the diff column is rendered and narrower than the maximize threshold, which both
+ * maximize tests assume. The column is measured, not the window: the resize handles decide it.
+ */
+async function expectNarrowDiffColumn(page: Page): Promise<void> {
+    const box = await page.locator('.column-diff').boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.width).toBeGreaterThan(0);
+    expect(box!.width).toBeLessThan(DIFF_EDITOR_FULLSCREEN_MAX_WIDTH);
+}
+
+/**
+ * Writes this browser's "Auto maximize code viewer" choice into IndexedDB. The app reads it at
+ * boot, so a spec that wants the other answer seeds it and reloads.
+ */
+async function seedAutoMaximizeCodeViewer(page: Page, enabled: boolean): Promise<void> {
+    await page.evaluate(async ([key, value]: [string, boolean]) => {
+        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+            const rq = indexedDB.open('kanban-storage');
+            rq.onsuccess = () => resolve(rq.result);
+            rq.onerror = () => reject(rq.error);
+        });
+        await new Promise<void>((resolve, reject) => {
+            const tx = db.transaction('app-settings', 'readwrite');
+            tx.objectStore('app-settings').put(value, key);
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+        });
+    }, ['auto-maximize-code-viewer', enabled]);
+}
+
 
 // --- Shared utilities ---
 
@@ -243,17 +280,41 @@ test.describe.serial('Diff panel user interactions', () => {
         const fileSection = page.locator('.diff-file-section', { hasText: testFile });
         await expect(fileSection).toBeVisible({ timeout: 10000 });
 
-        // The rendered column, not the window: at the 1280px viewport the 22%/55%
-        // split leaves the diff column ~450px, under the 1200px threshold.
-        const diffBox = await page.locator('.column-diff').boundingBox();
-        expect(diffBox).not.toBeNull();
-        expect(diffBox!.width).toBeGreaterThan(0);
-        expect(diffBox!.width).toBeLessThan(1200);
+        await expectNarrowDiffColumn(page);
 
         await fileSection.locator('.diff-row-clickable').first().click();
         await expect(page.locator('.file-editor')).toBeVisible({ timeout: 5000 });
         await expect(page.locator('.task-detail-page.fullscreen')).toBeVisible();
         // Where Escape leaves the reader is the editor spec's question, not this panel's.
+
+        execSync(`rm -f ${filePath}`);
+    });
+
+    test('leaves the editor inline when this browser turned auto-maximize off', async ({ page }) => {
+        const { taskInfo, worktreeDir } = await sharedTask(page);
+
+        const uniqueId = Date.now();
+        const testFile = `keep-inline-test-${uniqueId}.txt`;
+        const filePath = join(worktreeDir, testFile);
+
+        writeFileSync(filePath, 'Keep inline content\nSecond line\n');
+
+        await navigateToTask(page, taskInfo.taskId, taskInfo.projectId);
+        await page.waitForSelector('.task-detail-page', { timeout: 10000 });
+
+        const fileSection = page.locator('.diff-file-section', { hasText: testFile });
+        await expect(fileSection).toBeVisible({ timeout: 10000 });
+
+        // The same narrow column as the test above; only what this browser stored differs.
+        await expectNarrowDiffColumn(page);
+
+        await seedAutoMaximizeCodeViewer(page, false);
+        await page.reload();
+        await page.waitForSelector('.task-detail-page', { timeout: 10000 });
+
+        await page.locator('.diff-file-section', { hasText: testFile }).locator('.diff-row-clickable').first().click();
+        await expect(page.locator('.file-editor')).toBeVisible({ timeout: 5000 });
+        await expect(page.locator('.task-detail-page.fullscreen')).toHaveCount(0);
 
         execSync(`rm -f ${filePath}`);
     });

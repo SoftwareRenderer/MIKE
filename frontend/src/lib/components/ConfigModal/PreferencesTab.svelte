@@ -15,6 +15,7 @@
         hideModelBadge = $bindable(false),
         sortOldestFirst = $bindable(false),
         autoMaximizeChat = $bindable(true),
+        autoMaximizeCodeViewer = $bindable(true),
         notifyOnReview = $bindable(false),
         onDirty,
     }: {
@@ -28,6 +29,7 @@
         hideModelBadge?: boolean;
         sortOldestFirst?: boolean;
         autoMaximizeChat?: boolean;
+        autoMaximizeCodeViewer?: boolean;
         notifyOnReview?: boolean;
         onDirty?: () => void;
     } = $props();
@@ -223,6 +225,15 @@
         </div>
         <div class="shortcut-controls">
             <ToggleSwitch bind:checked={autoMaximizeChat} ariaLabel={t('settings.preferences.autoMaximizeChat')} ariaDescribedby="auto-maximize-chat-desc" onChange={() => onDirty?.()} />
+        </div>
+    </div>
+    <div class="shortcut-row">
+        <div class="shortcut-info">
+            <span class="shortcut-name">{t('settings.preferences.autoMaximizeCodeViewer')}</span>
+            <span id="auto-maximize-code-viewer-desc" class="shortcut-desc">{t('settings.preferences.autoMaximizeCodeViewerDesc')}</span>
+        </div>
+        <div class="shortcut-controls">
+            <ToggleSwitch bind:checked={autoMaximizeCodeViewer} ariaLabel={t('settings.preferences.autoMaximizeCodeViewer')} ariaDescribedby="auto-maximize-code-viewer-desc" onChange={() => onDirty?.()} />
         </div>
     </div>
     <div class="shortcut-row">
