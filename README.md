@@ -4,7 +4,8 @@
 
 [MIKE](https://getmike.dev) is a LLM harness that streamlines software development work. It integrates strong sandbox isolation (via [gVisor](https://gvisor.dev/)) and securely supports custom extensions (via [iframe sandbox](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/iframe#sandbox)/[wazero](https://wazero.io/)). It also features a Progressive Web App optimized to improve usability on spotty networks. Works with [llama.cpp](https://llama.app/) and inference providers that support the OpenAI Chat Completions API.
 
-> [!WARNING] The API and Extension surfaces are still being solidified. No stable API/Extension interfaces will be guaranteeed until version 1.0.
+> [!NOTE]
+> The API and Extension surfaces are still being solidified. No stable API/Extension interfaces will be guaranteeed until version 1.0.
 
 ## Quick Start
 
