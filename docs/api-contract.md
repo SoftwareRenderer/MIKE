@@ -517,10 +517,12 @@ request failed. Tests:
   directory of a full checkout, and the one-line gitfile of a linked worktree. The reason is that a row
   is a click target. The add-project picker's Select answers with the directory it has loaded, so a
   `.git` row could become a project's path, and Settings → Sandbox offers every row as a mount source.
-- **Unlisted is not forbidden.** A path box in either picker, an Explorer deep link and every read,
-  write and download route still resolve `.git`; only the row is gone, so archiving a parent still
-  carries it. The task explorer browses by breadcrumb with no path box, so within that panel the name
-  is reachable only by a deep link.
+- **Unlisted is not forbidden to a read.** A path box in either picker, an Explorer deep link and every read
+  route still resolve `.git`, so a deep link can open it and archiving a parent still carries it. Nothing that
+  changes a file does: the batch routes refuse a `.git` row, and `requireNoGitSegment` refuses it for a write
+  and an upload — `docs/confinement.md → File endpoints: the project plus the task the request names`. The task
+  explorer browses by breadcrumb with no path box, so within that panel the name is reachable only by a deep
+  link.
 - **Nothing about `.git` is git's verdict.** The row is dropped before `markIgnored` runs, and
   `check-ignore` answers `false` for `.git` anyway — `..` is the only name there that fails the batch.
   A listing keeps `.github` and `.gitignore`, because those are the person's own files.

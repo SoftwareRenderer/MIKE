@@ -75,15 +75,6 @@ type fsOpsPath struct {
 	target fsTarget
 }
 
-// refusal is the one thing a path inside the project can still be refused for: anything under
-// .git.
-func (p fsOpsPath) refusal() error {
-	if fsutil.HasGitSegment(p.target.path) {
-		return fsutil.ErrGitPath
-	}
-	return nil
-}
-
 type fsOpsBatch struct {
 	paths []fsOpsPath
 	dest  fsOpsPath
@@ -133,8 +124,7 @@ func (s *Server) decodeFSOpsBatch(w http.ResponseWriter, r *http.Request, needDe
 		JSONError(w, http.StatusBadRequest, err.Error())
 		return fsOpsBatch{}, false
 	}
-	if fsutil.HasGitSegment(dest.path) {
-		JSONError(w, http.StatusBadRequest, fsutil.ErrGitPath.Error())
+	if !requireNoGitSegment(w, dest) {
 		return fsOpsBatch{}, false
 	}
 	info, err := os.Stat(dest.path)
@@ -162,7 +152,7 @@ func (s *Server) handleFSDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	res := fsOpsResponse{Done: []fsOpsItem{}, Failed: []fsOpsItem{}}
 	for _, p := range batch.paths {
-		if err := p.refusal(); err != nil {
+		if err := gitSegmentRefusal(p.target.path); err != nil {
 			res.addFailure(p.asked, "delete", err)
 			continue
 		}
@@ -200,7 +190,7 @@ func (s *Server) fsOpsPaste(w http.ResponseWriter, r *http.Request, move bool) {
 	}
 	res := fsOpsResponse{Done: []fsOpsItem{}, Failed: []fsOpsItem{}}
 	for _, p := range batch.paths {
-		if err := p.refusal(); err != nil {
+		if err := gitSegmentRefusal(p.target.path); err != nil {
 			res.addFailure(p.asked, op, err)
 			continue
 		}
@@ -256,8 +246,7 @@ func (s *Server) handleFSRenamePath(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if fsutil.HasGitSegment(target.path) {
-		JSONError(w, http.StatusBadRequest, fsutil.ErrGitPath.Error())
+	if !requireNoGitSegment(w, target) {
 		return
 	}
 	dir := filepath.Dir(target.path)

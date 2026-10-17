@@ -79,8 +79,7 @@ func (s *Server) downloadTargets(w http.ResponseWriter, scope fsScope, asked []s
 			JSONError(w, http.StatusBadRequest, err.Error())
 			return nil, "", false
 		}
-		if fsutil.HasGitSegment(target.path) {
-			JSONError(w, http.StatusBadRequest, fsutil.ErrGitPath.Error())
+		if !requireNoGitSegment(w, target) {
 			return nil, "", false
 		}
 		paths = append(paths, target.path)

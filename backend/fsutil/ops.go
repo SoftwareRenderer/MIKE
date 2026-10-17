@@ -32,10 +32,10 @@ const GitDirName = ".git"
 var (
 	// ErrProtectedPath: the path is a project checkout or a task worktree, or holds one.
 	ErrProtectedPath = errors.New("the project or task directory itself cannot be deleted")
-	// ErrGitPath: the path is or is under a .git directory. Copying a worktree's .git pointer gives
-	// a repository that answers for the wrong tree, and deleting it breaks every worktree the
-	// project has.
-	ErrGitPath = errors.New("a .git directory cannot be copied, moved, renamed or deleted")
+	// ErrGitPath: the path is or is under a .git directory. Copying a worktree's .git pointer gives a
+	// repository that answers for the wrong tree, deleting it breaks every worktree the project has,
+	// and writing it changes how git behaves in that checkout.
+	ErrGitPath = errors.New("a .git directory cannot be written, copied, moved, renamed or deleted")
 	// ErrCopyTooLarge: the tree passed one of the limits above.
 	ErrCopyTooLarge = errors.New("too large to copy")
 	// ErrCopyIntoItself: the destination is inside the source.

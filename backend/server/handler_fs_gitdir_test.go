@@ -1,10 +1,13 @@
 package server
 
 import (
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"mike/backend/fsutil"
 	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
@@ -90,5 +93,89 @@ func TestFSListingOffersNoGitRow(t *testing.T) {
 				t.Errorf("%s: %s isDir=%v, want %v", c.name, name, row.isDir, isDir)
 			}
 		}
+	}
+}
+
+// TestFSWriteRefusesAGitPath keeps a save out of .git. The symlink case is what proves the check
+// uses the resolved path.
+func TestFSWriteRefusesAGitPath(t *testing.T) {
+	s := testServer(t)
+	dir := t.TempDir()
+	sandboxFSProject(t, s, "fs-gitdir-write", "FS Gitdir Write", dir, false)
+	testgit.Git(t, dir, "init")
+	if err := os.Symlink(filepath.Join(dir, ".git"), filepath.Join(dir, "state")); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(dir, ".git", "config")
+	before, err := os.ReadFile(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct{ what, path string }{
+		{"the checkout's own config", filepath.Join(dir, ".git", "config")},
+		{"a hook inside .git", filepath.Join(dir, ".git", "hooks", "pre-commit")},
+		{"a link that resolves into .git", filepath.Join(dir, "state", "config")},
+	}
+	for _, c := range cases {
+		req := testRequest(http.MethodPost, "/api/fs/write?project=fs-gitdir-write", map[string]string{
+			"path":    c.path,
+			"content": "[core]\n\thooksPath = " + filepath.Join(dir, ".git", "hooks") + "\n",
+		})
+		rr := testResponseAuth(t, s, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("%s: the save was accepted (status %d): %s", c.what, rr.Code, rr.Body.String())
+		}
+		if !strings.Contains(rr.Body.String(), fsutil.ErrGitPath.Error()) {
+			t.Errorf("%s: body = %s, want the sentence for a .git path", c.what, rr.Body.String())
+		}
+	}
+
+	if after, err := os.ReadFile(config); err != nil || string(after) != string(before) {
+		t.Errorf(".git/config is %q, want the untouched %q (%v)", after, before, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".git", "hooks", "pre-commit")); !os.IsNotExist(err) {
+		t.Error("a hook was written into .git/hooks")
+	}
+}
+
+// TestFSUploadRefusesAGitPath is the same refusal on the upload route, which names its folder and
+// its path inside that folder as two separate fields.
+func TestFSUploadRefusesAGitPath(t *testing.T) {
+	s := testServer(t)
+	dir := t.TempDir()
+	sandboxFSProject(t, s, "fs-gitdir-upload", "FS Gitdir Upload", dir, false)
+	testgit.Git(t, dir, "init")
+	config := filepath.Join(dir, ".git", "config")
+	before, err := os.ReadFile(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct{ what, dir, relpath string }{
+		{"the relative path names .git", dir, filepath.Join(".git", "config")},
+		{"the target directory is .git", filepath.Join(dir, ".git"), "hooks/pre-commit"},
+	}
+	for _, c := range cases {
+		rr := uploadFile(t, s, uploadArgs{
+			projectID: "fs-gitdir-upload",
+			dir:       c.dir,
+			relpath:   c.relpath,
+			filename:  "payload",
+			content:   []byte("payload\n"),
+		})
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("%s: the upload was accepted (status %d): %s", c.what, rr.Code, rr.Body.String())
+		}
+		if !strings.Contains(rr.Body.String(), fsutil.ErrGitPath.Error()) {
+			t.Errorf("%s: body = %s, want the sentence for a .git path", c.what, rr.Body.String())
+		}
+	}
+
+	if after, err := os.ReadFile(config); err != nil || string(after) != string(before) {
+		t.Errorf(".git/config is %q, want the untouched %q (%v)", after, before, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".git", "hooks", "pre-commit")); !os.IsNotExist(err) {
+		t.Error("a hook was uploaded into .git/hooks")
 	}
 }

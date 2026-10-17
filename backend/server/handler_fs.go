@@ -1074,6 +1074,26 @@ func (s *Server) fsScopeTarget(scope fsScope, path string) (fsTarget, error) {
 	return fsTarget{path: resolved, roots: scope.roots}, nil
 }
 
+// gitSegmentRefusal refuses a path inside .git, because a repository's own files are not what these
+// endpoints edit. Check the resolved path, since a symlink can point into .git without naming it, and
+// keep this out of fsScopeTarget so that reads can still open .git.
+func gitSegmentRefusal(path string) error {
+	if fsutil.HasGitSegment(path) {
+		return fsutil.ErrGitPath
+	}
+	return nil
+}
+
+// requireNoGitSegment answers the request when its target is inside .git.
+// ok is false after the response is written.
+func requireNoGitSegment(w http.ResponseWriter, target fsTarget) bool {
+	if err := gitSegmentRefusal(target.path); err != nil {
+		JSONError(w, http.StatusBadRequest, err.Error())
+		return false
+	}
+	return true
+}
+
 // fsWriteTarget is one path through both halves: the request's scope, then the target inside it.
 // ok is false after the response is written.
 func (s *Server) fsWriteTarget(w http.ResponseWriter, r *http.Request, project *types.Project, path string) (fsTarget, bool) {
@@ -1084,6 +1104,9 @@ func (s *Server) fsWriteTarget(w http.ResponseWriter, r *http.Request, project *
 	target, err := s.fsScopeTarget(scope, path)
 	if err != nil {
 		JSONError(w, http.StatusBadRequest, err.Error())
+		return fsTarget{}, false
+	}
+	if !requireNoGitSegment(w, target) {
 		return fsTarget{}, false
 	}
 	return target, true

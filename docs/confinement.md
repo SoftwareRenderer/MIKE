@@ -124,6 +124,13 @@ projects too because the server process enforces them.
   wrong row should not cost the rest of it. Only a containment failure, which is the jail rather than one
   row's bad luck, fails the whole request. A nested `.git` directory is skipped by both the size walk and the
   copy itself, so a folder that happens to hold a repository does not drag it along.
+- **A save cannot change the repository's own state.** `gitSegmentRefusal` holds the `.git` refusal for
+  every route that changes a file: `requireNoGitSegment` answers it for `POST /api/fs/write` and
+  `POST /api/fs/upload`, and the batch routes report it per row. A read still opens `.git`, so the
+  execution fence, not this refusal, is what outranks a `.git/config` that was already rewritten
+  (`docs/git-operations.md`). Because the listing hides the name, this is what stops a hand-typed URL:
+  `docs/api-contract.md → The directory listing's ignored rows`.
+  `go test ./backend/server/ -run TestFSWriteRefusesAGitPath` holds both routes.
 - **Every bound runs before the bytes** (`backend/fsutil/ops.go`): a copy walks its tree and refuses past
   `CopyMaxBytes` (64 MiB), `CopyMaxEntries` (5000) or `CopyMaxDepth` (32), the copy loop re-counts as it writes
   (the walk is the refusal, the running total is the bound against a tree a task is still writing into), and a

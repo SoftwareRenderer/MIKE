@@ -136,8 +136,7 @@ func (s *Server) archiveRequest(w http.ResponseWriter, r *http.Request) (*archiv
 		JSONError(w, http.StatusBadRequest, err.Error())
 		return nil, false
 	}
-	if fsutil.HasGitSegment(target.path) {
-		JSONError(w, http.StatusBadRequest, fsutil.ErrGitPath.Error())
+	if !requireNoGitSegment(w, target) {
 		return nil, false
 	}
 

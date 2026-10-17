@@ -241,6 +241,21 @@ func TestFSCopyIntoAnotherFolder(t *testing.T) {
 	}
 }
 
+func TestFSCopyRefusesAGitDestination(t *testing.T) {
+	s := testServer(t)
+	repo := fsOpsProject(t, s, "fs-ops-git-dest", map[string]string{"a.txt": "a", ".git/config": "[core]"})
+
+	status, _ := fsOpsPost(t, s, "copy", "fs-ops-git-dest", "", map[string]any{
+		"paths": []string{filepath.Join(repo, "a.txt")}, "dest": filepath.Join(repo, ".git"),
+	})
+	if status != http.StatusBadRequest {
+		t.Errorf("copy into .git: status %d, want 400", status)
+	}
+	if _, err := os.Lstat(filepath.Join(repo, ".git", "a.txt")); !os.IsNotExist(err) {
+		t.Error("the copy landed inside .git")
+	}
+}
+
 func TestFSMoveStaysInsideTheProject(t *testing.T) {
 	s := testServer(t)
 	repo := fsOpsProject(t, s, "fs-ops-move-escape", map[string]string{"a.txt": "a"})
@@ -385,7 +400,7 @@ func TestFSRename(t *testing.T) {
 
 func TestFSRenameStaysInsideTheProject(t *testing.T) {
 	s := testServer(t)
-	repo := fsOpsProject(t, s, "fs-ops-rename-escape", map[string]string{"a.txt": "a"})
+	repo := fsOpsProject(t, s, "fs-ops-rename-escape", map[string]string{"a.txt": "a", ".git/config": "[core]"})
 	outside := t.TempDir()
 	testgit.WriteFile(t, outside, "secret.txt", "host secret")
 	link := filepath.Join(repo, "link")
@@ -398,6 +413,14 @@ func TestFSRenameStaysInsideTheProject(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(outside, "secret.txt")); err != nil {
 		t.Errorf("a rename reached outside the project: %v", err)
+	}
+
+	// A path inside .git is refused here even though the project jail would allow it.
+	if status, _ := fsRenamePost(t, s, "fs-ops-rename-escape", filepath.Join(repo, ".git", "config"), "c.txt"); status != http.StatusBadRequest {
+		t.Errorf("rename of a .git path: status %d, want 400", status)
+	}
+	if _, err := os.Stat(filepath.Join(repo, ".git", "config")); err != nil {
+		t.Errorf("the refused rename moved the git configuration: %v", err)
 	}
 }
 
