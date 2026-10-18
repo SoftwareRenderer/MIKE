@@ -37,10 +37,11 @@ vi.mock('$lib/stores', () => ({
 }));
 
 // Every buffer is dirty the way a real one is after a reload: the browser's own draft differs from the file.
+// No base is recorded, which is what a draft written by an older build looks like — the buffer wins alone.
 const DRAFT = 'edited by hand';
 const DISK = 'on disk';
 vi.mock('$lib/storage', () => ({
-    getEditorDraft: () => Promise.resolve(DRAFT),
+    getEditorDraft: () => Promise.resolve({ text: DRAFT, base: null, ts: 0 }),
     setEditorDraft: () => Promise.resolve(),
     clearEditorDraft: () => Promise.resolve(),
     loadEditorHistory: () => Promise.resolve(null),

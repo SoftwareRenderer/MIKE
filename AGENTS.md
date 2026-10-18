@@ -390,6 +390,9 @@ never marks the app offline, and nothing in the product puts a deadline on a wai
 - **A write queues while offline, and so does a write that got no answer** — `writeOrQueue` decides that at
   the api layer. A request carrying a plaintext secret is refused rather than queued, because the queue is
   persisted.
+- **An unsaved file draft carries the bytes it diverged from**, so a file that moved under it is merged on the
+  way back in. A region both sides changed is painted into the buffer for the person to resolve, never
+  dropped. `docs/reconnection.md → The Editor Buffer Across a Browser Being Away`.
 - **A task's status is never the answer to "is it still running"** — `taskIsInFlight` is, and the
   server-side mirror `terminalTurnStates` must agree with it.
 - **The offline mirror holds only what this browser received**, and a mirror landing paints a view that

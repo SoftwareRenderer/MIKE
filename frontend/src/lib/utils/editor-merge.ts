@@ -1,38 +1,92 @@
 import { diffLines } from 'diff';
 
 /**
- * Three-way merge reconciling an externally-updated file with the editor's buffer without
- * losing unsaved edits: `base` is the content last loaded from or saved to disk, `ours` the
- * current buffer, `theirs` fresh disk content after an `fs_event`.
- *
- * Line-based. Non-overlapping changes from both sides combine; a two-sided change to one
- * region fails the merge (null) so the caller keeps the local buffer and warns rather than
- * dropping user content.
+ * Three-way merge of a file with the editor's buffer, so an unsaved edit is not the thing that gets
+ * dropped. `base` is what the file held, `ours` the buffer, `theirs` the bytes the file holds now.
  */
 
-/** Result of reconciling an external change against the editor buffer. */
 export type ExternalChangeResult =
-    | { kind: 'no-op' } // disk unchanged since we knew it (e.g. our own save echo)
-    | { kind: 'reload'; content: string } // no unsaved edits -> adopt disk content
-    | { kind: 'merged'; content: string } // clean 3-way merge (user edits preserved)
-    | { kind: 'conflict' }; // overlapping edits -> keep local buffer, warn user
+    | { kind: 'no-op' }
+    | { kind: 'reload'; content: string }
+    | { kind: 'merged'; content: string }
+    /** The text holds both sides, between the markers, for a person to resolve. */
+    | { kind: 'conflict'; content: string };
 
-/**
- * Decide how the editor should react to an external change on disk.
- */
+/** One decision for both paths: the file moved while the buffer was open, or while the browser was away. */
 export function reconcileExternalChange(
     savedContent: string,
     ours: string,
     theirs: string,
 ): ExternalChangeResult {
-    // Disk hasn't changed since the editor last loaded/saved it — nothing to do.
     if (theirs === savedContent) return { kind: 'no-op' };
-    // No unsaved edits: safe to adopt the disk content wholesale.
     if (ours === savedContent) return { kind: 'reload', content: theirs };
-    // Unsaved edits AND a disk change: attempt a three-way merge.
-    const merged = mergeText(savedContent, ours, theirs);
-    if (merged === null) return { kind: 'conflict' };
-    return { kind: 'merged', content: merged };
+    const merged = mergeTextWithMarkers(savedContent, ours, theirs);
+    if (merged.conflicts > 0) return { kind: 'conflict', content: merged.text };
+    return { kind: 'merged', content: merged.text };
+}
+
+/** What a reopening editor starts from: the draft this browser left, updated for the file's bytes now.
+ *  A draft with no recorded base has no merge partner, so the buffer stands alone. */
+export function adoptDraft(
+    draft: { text: string; base: string | null } | null,
+    disk: string,
+): { content: string; conflicted: boolean } {
+    if (!draft) return { content: disk, conflicted: false };
+    if (draft.base === null) return { content: draft.text, conflicted: false };
+    const result = reconcileExternalChange(draft.base, draft.text, disk);
+    if (result.kind === 'no-op') return { content: draft.text, conflicted: false };
+    return { content: result.content, conflicted: result.kind === 'conflict' };
+}
+
+// The three lines a two-sided region is written with. They are fixed text, never catalog keys: they land
+// inside the person's file, where the browser's language must not reach.
+export const CONFLICT_OURS = '<<<<<<<unsaved';
+/** @knipignore Named by the tests that assemble a conflict block by hand. */
+export const CONFLICT_SEPARATOR = '=======';
+/** @knipignore As above: a test names it to build a conflict block. */
+export const CONFLICT_THEIRS = '>>>>>>>on-disk';
+
+/** Which marker a line is. */
+export type MarkerKind = 'ours' | 'separator' | 'theirs';
+
+/** The marker a line carries, or null. Matched exactly, so a divider of `=` in prose is not one. */
+export function markerOf(line: string): MarkerKind | null {
+    if (line === CONFLICT_OURS) return 'ours';
+    if (line === CONFLICT_SEPARATOR) return 'separator';
+    if (line === CONFLICT_THEIRS) return 'theirs';
+    return null;
+}
+
+/** One region both sides changed, spanning its marker lines. */
+export interface ConflictBlock {
+    /** 1-based, both ends inside the block. */
+    startLine: number;
+    endLine: number;
+}
+
+/** The complete `ours`/`separator`/`theirs` triples in `text`. A marker left open is not reported: it is
+ *  somebody mid-edit, or a marker that was already in the file. */
+export function conflictBlocks(text: string): ConflictBlock[] {
+    return completeBlocks(text.split('\n').map(markerOf));
+}
+
+/** The blocks in a document's marker kinds, so a caller need not build them. */
+export function completeBlocks(marks: (MarkerKind | null)[]): ConflictBlock[] {
+    const blocks: ConflictBlock[] = [];
+    let open = 0;
+    let separated = false;
+    for (let i = 0; i < marks.length; i++) {
+        const mark = marks[i];
+        // A second `ours` restarts the block: an unclosed one is nobody's conflict.
+        if (mark === 'ours') { open = i + 1; separated = false; }
+        else if (mark === 'separator' && open && !separated) separated = true;
+        else if (mark === 'theirs' && open && separated) {
+            blocks.push({ startLine: open, endLine: i + 1 });
+            open = 0;
+            separated = false;
+        }
+    }
+    return blocks;
 }
 
 /** A single CodeMirror change that turns `before` into `after`. */
@@ -42,16 +96,13 @@ export interface TextReplace {
     insert: string;
 }
 
-/**
- * The smallest single replace that turns `before` into `after`, by stripping what the two agree on
- * at each end. Several separate edits collapse into one region spanning them; the text that comes
- * out is still `after`.
- */
+/** The smallest single replace that turns `before` into `after`, by dropping what the two agree on at each
+ *  end. Several edits collapse into one region, and the text out is still `after`. */
 export function minimalReplace(before: string, after: string): TextReplace {
     let prefix = 0;
     const shared = Math.min(before.length, after.length);
     while (prefix < shared && before[prefix] === after[prefix]) prefix++;
-    // Each bound stops at the prefix, so a pure insertion cannot overlap it.
+    // Both suffix bounds stop at the prefix, so an insertion cannot overlap itself.
     let suffix = 0;
     while (
         suffix < before.length - prefix &&
@@ -67,77 +118,82 @@ export function minimalReplace(before: string, after: string): TextReplace {
     };
 }
 
-/**
- * Line-based three-way merge of `base` with two derived texts (`ours`, `theirs`).
- * Returns the merged text, or `null` if `ours` and `theirs` edit the same region
- * of `base` differently (a conflict).
+/** Every line either side wrote survives, and a region both sides changed becomes a conflict block instead
+ *  of a guess.
  *
- * @knipignore The merge is asserted on three texts; `reconcileExternalChange` adds what the editor does next.
+ * @knipignore Tests merge three texts directly; `reconcileExternalChange` and `adoptDraft` decide what
+ * the editor does with the answer.
  */
-export function mergeText(base: string, ours: string, theirs: string): string | null {
+export function mergeTextWithMarkers(base: string, ours: string, theirs: string): { text: string; conflicts: number } {
     const baseLines = base.split('\n');
     const N = baseLines.length;
-
-    const oOps = toOps(base, ours);
-    const tOps = toOps(base, theirs);
-
-    // Per-base-line replacements from each side (base line index -> covering op).
-    const oDels = buildDels(oOps);
-    const tDels = buildDels(tOps);
-
-    // Pure insertions keyed by base boundary index (0..N).
-    const adds = new Map<number, { lines: string[]; side: 'o' | 't' }[]>();
-    const addOp = (key: number, entry: { lines: string[]; side: 'o' | 't' }) => {
-        const arr = adds.get(key) ?? [];
-        // Skip an insertion already made identically by the other side (dedupe).
-        if (!arr.some((e) => e.side !== entry.side && sameLines(e.lines, entry.lines))) {
-            arr.push(entry);
-            adds.set(key, arr);
-        }
-    };
-    for (const op of oOps) if (op.op === 'add') addOp(op.pos, { lines: op.lines, side: 'o' });
-    for (const op of tOps) if (op.op === 'add') addOp(op.pos, { lines: op.lines, side: 't' });
+    const oChunks = toChunks(base, ours);
+    const tChunks = toChunks(base, theirs);
 
     const out: string[] = [];
-    let i = 0;
-    while (i < N) {
-        const at = adds.get(i);
-        if (at) for (const a of at) out.push(...a.lines);
+    let conflicts = 0;
+    let pos = 0; // the base line the output is caught up to
+    let oi = 0;
+    let ti = 0;
 
-        const od = findDel(oDels, i);
-        const td = findDel(tDels, i);
-        if (od && td) {
-            // Both sides changed this region. Identical edits are fine; otherwise conflict.
-            if (sameLines(od.lines, td.lines)) {
-                out.push(...od.lines);
-                i += od.count;
+    while (oi < oChunks.length || ti < tChunks.length) {
+        const start = Math.min(oChunks[oi]?.start ?? Infinity, tChunks[ti]?.start ?? Infinity);
+        for (; pos < start; pos++) out.push(baseLines[pos]);
+
+        // Everything either side changed from `start` onward, taking a chunk that starts inside the span
+        // so far: one span changed on both sides is one region, not two.
+        const mine: Chunk[] = [];
+        const yours: Chunk[] = [];
+        let end = start;
+        for (;;) {
+            const oc = oChunks[oi];
+            const tc = tChunks[ti];
+            const opens = end === start;
+            const takeOurs = !!oc && (oc.start < end || (opens && oc.start === start));
+            const takeTheirs = !!tc && (tc.start < end || (opens && tc.start === start));
+            if (!takeOurs && !takeTheirs) break;
+            if (takeOurs && takeTheirs && oc.start > tc.start) {
+                yours.push(tc); end = Math.max(end, tc.end); ti++;
+            } else if (takeOurs) {
+                mine.push(oc); end = Math.max(end, oc.end); oi++;
             } else {
-                return null;
+                yours.push(tc); end = Math.max(end, tc.end); ti++;
             }
-        } else if (od) {
-            out.push(...od.lines);
-            i += od.count;
-        } else if (td) {
-            out.push(...td.lines);
-            i += td.count;
-        } else {
-            out.push(baseLines[i]);
-            i++;
         }
-    }
-    const atEnd = adds.get(N);
-    if (atEnd) for (const a of atEnd) out.push(...a.lines);
 
-    return out.join('\n');
+        const ourText = mine.flatMap(c => c.text);
+        const theirText = yours.flatMap(c => c.text);
+        if (!yours.length) out.push(...ourText);
+        else if (!mine.length) out.push(...theirText);
+        else if (sameLines(ourText, theirText)) out.push(...ourText);
+        else if (mine.some(c => c.end > c.start) && yours.some(c => c.end > c.start)) {
+            // Each side replaced lines in one span: two claims on the same lines, and picking an order
+            // between them would be a guess.
+            conflicts++;
+            out.push(CONFLICT_OURS, ...ourText, CONFLICT_SEPARATOR, ...theirText, CONFLICT_THEIRS);
+        } else {
+            // One side only inserted, so it displaced nothing the other touched: both stand, ours first
+            // where they meet at one boundary.
+            for (const c of inOrder(mine, yours)) {
+                if (c.end === c.start && yours.includes(c) && mine.some(m => sameLines(m.text, c.text))) continue;
+                out.push(...c.text);
+            }
+        }
+        pos = end;
+    }
+    for (; pos < N; pos++) out.push(baseLines[pos]);
+
+    return { text: out.join('\n'), conflicts };
 }
 
 // ─── internal helpers ───────────────────────────────────────────────────────
 
-interface Op {
-    op?: 'add';
-    pos: number;
-    count: number;
-    lines: string[];
+/** One side's change in base coordinates. A replacement spans the lines it took; an insertion
+ *  (start === end) displaces none. */
+interface Chunk {
+    start: number;
+    end: number;
+    text: string[];
 }
 
 function linesOf(value: string): string[] {
@@ -146,58 +202,59 @@ function linesOf(value: string): string[] {
     return parts;
 }
 
-function countLines(value: string): number {
-    return linesOf(value).length;
-}
-
-/** Convert a single diff (base -> text) into operations in base coordinates. */
-function toOps(base: string, text: string): Op[] {
-    const d = diffLines(base, text);
-    const ops: Op[] = [];
-    let basePos = 0;
-    let pending: Op | null = null;
-    for (const part of d) {
-        const n = countLines(part.value);
+/** One side's diff (base -> text) as chunks, in ascending base order. */
+function toChunks(base: string, text: string): Chunk[] {
+    const chunks: Chunk[] = [];
+    let pos = 0;
+    let removed: string[] | null = null;
+    const flush = (added: string[]) => {
+        if (!removed) {
+            chunks.push({ start: pos, end: pos, text: added });
+            return;
+        }
+        const chunk = { start: pos, end: pos + removed.length, text: added };
+        // A diff's window is wider than the change: lines it shares with what replaced them are
+        // unchanged, and leaving them in would report an edit overlapping its neighbour's.
+        let lead = 0;
+        while (lead < removed.length && lead < added.length && removed[lead] === added[lead]) lead++;
+        let trail = 0;
+        while (
+            trail < removed.length - lead &&
+            trail < added.length - lead &&
+            removed[removed.length - 1 - trail] === added[added.length - 1 - trail]
+        ) trail++;
+        chunk.start += lead;
+        chunk.end -= trail;
+        chunk.text = added.slice(lead, added.length - trail);
+        chunks.push(chunk);
+    };
+    for (const part of diffLines(base, text)) {
+        const lines = linesOf(part.value);
         if (part.removed) {
-            pending = { pos: basePos, count: n, lines: [] };
-            basePos += n;
+            removed = removed ? [...removed, ...lines] : lines;
         } else if (part.added) {
-            if (pending) {
-                pending.lines = linesOf(part.value);
-                ops.push(pending);
-                pending = null;
-            } else {
-                ops.push({ op: 'add', pos: basePos, count: 0, lines: linesOf(part.value) });
-            }
+            flush(lines);
+            removed = null;
         } else {
-            if (pending) {
-                ops.push(pending);
-                pending = null;
-            }
-            basePos += n;
+            if (removed) flush([]);
+            removed = null;
+            pos += lines.length;
         }
     }
-    if (pending) ops.push(pending);
-    return ops;
+    if (removed) flush([]);
+    return chunks;
 }
 
-/** Map each base line index covered by a replacement op to that op. */
-function buildDels(ops: Op[]): Map<number, Op> {
-    const m = new Map<number, Op>();
-    for (const op of ops) {
-        if (op.op !== 'add') {
-            for (let k = op.pos; k < op.pos + op.count; k++) m.set(k, op);
-        }
+/** Two ascending lists of chunks as one, ours first where they start at the same base line. */
+function inOrder(mine: Chunk[], yours: Chunk[]): Chunk[] {
+    const all: Chunk[] = [];
+    let i = 0;
+    let j = 0;
+    while (i < mine.length || j < yours.length) {
+        if (j >= yours.length || (i < mine.length && mine[i].start <= yours[j].start)) all.push(mine[i++]);
+        else all.push(yours[j++]);
     }
-    return m;
-}
-
-/** Find the replacement op covering base line index `i`, if any. */
-function findDel(m: Map<number, Op>, i: number): Op | null {
-    for (const [k, v] of m) {
-        if (i >= k && i < k + v.count) return v;
-    }
-    return null;
+    return all;
 }
 
 function sameLines(a: string[], b: string[]): boolean {

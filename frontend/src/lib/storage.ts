@@ -5,7 +5,7 @@
 // Object stores:
 //   collapsed-tasks / collapsed-sections / collapsed-diff-files — key 'ids' → string[]
 //   drafts             — key: taskId → string (draft chat text)
-//   editor-drafts      — key: file path → string (draft file content)
+//   editor-drafts      — key: file path → EditorDraft (unsaved buffer + the file bytes it diverged from)
 //   editor-history     — key: file path → EditorHistory (undo/redo history)
 //   editor-tabs        — key: projectId → EditorTabState
 //   unsaved-files      — key: projectId → string[]
@@ -246,15 +246,41 @@ export async function setDraftText(taskId: string, text: string): Promise<void> 
 }
 
 // ─── Branch editor drafts (IndexedDB: editor-drafts store) ──────────────────
+// A draft is the buffer this browser left plus the file bytes it diverged from, because reopening a file
+// whose content moved underneath it is a three-way merge, and a merge with no base can only pick a side.
 
-/** Get saved draft content for a file. Returns `null` if no draft exists. */
-export async function getEditorDraft(path: string): Promise<string | null> {
-    return dbGet<string>(STORE_EDITOR_DRAFTS, path);
+export interface EditorDraft {
+    /** The unsaved buffer. */
+    text: string;
+    /** What the file held when `text` diverged from it; null when that is unknown. */
+    base: string | null;
+    /** When the buffer was last written. Nothing evicts on it: an unsaved buffer outlives any age. */
+    ts: number;
 }
 
-/** Save draft content for a file. */
-export async function setEditorDraft(path: string, text: string): Promise<void> {
-    return dbPut(STORE_EDITOR_DRAFTS, path, text);
+/** Read one stored value as a draft, including the bare string an older build wrote. */
+function asEditorDraft(raw: unknown): EditorDraft | null {
+    if (typeof raw === 'string') return { text: raw, base: null, ts: 0 };
+    if (raw && typeof raw === 'object') {
+        const rec = raw as Partial<EditorDraft>;
+        if (typeof rec.text === 'string') {
+            return { text: rec.text, base: typeof rec.base === 'string' ? rec.base : null, ts: rec.ts ?? 0 };
+        }
+    }
+    return null;
+}
+
+/** Get the saved draft for a file, with the bytes it diverged from. `null` when there is none. */
+export async function getEditorDraft(path: string): Promise<EditorDraft | null> {
+    return asEditorDraft(await dbGetRaw(STORE_EDITOR_DRAFTS, path));
+}
+
+/**
+ * Store the buffer a file's editor holds, naming the file bytes it sits on. Pass what was last read from
+ * or written to that file, never the buffer itself, which would make the merge do nothing.
+ */
+export async function setEditorDraft(path: string, text: string, base: string | null): Promise<void> {
+    return dbPut(STORE_EDITOR_DRAFTS, path, { text, base, ts: Date.now() } satisfies EditorDraft);
 }
 
 /** Remove draft content for a file. */

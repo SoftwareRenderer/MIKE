@@ -35,6 +35,39 @@ Each view determines if it is "behind" by asking the server for a sync digest (`
 - **Chat**: Compares the current `revision` with the server. If the server has moved, it refetches the newest message window.
 - **Diff**: Refreshes the manifest and re-evaluates if the base commit has moved.
 
+## The Editor Buffer Across a Browser Being Away
+
+An unsaved buffer belongs to the browser, not the server: the editor writes it to the `editor-drafts`
+store as the reader types (throttled, and flushed on `beforeunload`, because a reload never destroys the
+component), and reopens a file from it. Two rules keep that buffer honest about the file.
+
+### A draft carries the bytes it diverged from
+
+An `editor-drafts` record is `{ text, base, ts }`, and
+`base` is what the file held when `text` was written — the draft's merge partner, kept because a merge
+with no base can only pick a side. Reopening a file whose bytes moved is then a three-way merge
+(`adoptDraft` → `reconcileExternalChange`, `$lib/utils/editor-merge`). It is the same question an
+`fs_event` answers while the buffer is open, so a change is not merged one way while reading and another
+way while returning. What each answer does:
+
+- File unchanged since the draft: paint the draft.
+- Unsaved edits and a change elsewhere: merge, **silently** — a reader who was asked nothing has nothing to read.
+- Both sides changed one region: paint both, between `<<<<<<<unsaved`, `=======` and `>>>>>>>on-disk`.
+  That marker text is a token rather than a catalog key because it lands inside the person's file, where
+  the browser's language has no business. `editor-conflict.ts` tints the lines and the banner counts the
+  blocks; resolving means deleting lines, so the buffer's text is the only record and both read it fresh.
+- A draft older than the base (the bare string an older build wrote): the buffer stands alone.
+
+Saving a buffer that still holds markers is allowed and never assumed: `handleSave` asks first, because
+writing them is a thing a person can want — the file may hold the version they would rather not lose —
+and never what "Save" means by default.
+
+### A save the connection lost waits with the editor, not in the queue
+
+A body replayed from IndexedDB
+would overwrite whatever the file got since, so `offline-queue` never carries file content. The editor
+holding the buffer holds the wait (`saveRetryDelayMs`) until the write lands.
+
 ## Execution State Sync
 
 To ensure the UI correctly reflects whether a task is running, paused, or stopped, the app uses a hierarchy of truth:
@@ -78,6 +111,6 @@ The server does not time out slow clients. Instead:
 
 `make test-frontend` runs the unit files below; `make test-e2e SPECS=reconnect-refresh` runs the specs.
 
-- **E2E Tests**: `reconnect-refresh.spec.ts`, `away-and-back.spec.ts`, `sync-return-freshness.spec.ts`, `focus-return-review.spec.ts`, `offline-mode-cached-board.spec.ts`.
-- **Unit Tests**: `connection-restored.unit.svelte.ts`, `task-events-delivery.unit.svelte.ts`, `stream-subscription.unit.ts`, `chat-history-merge.unit.ts`, `session-boot.unit.svelte.ts`.
+- **E2E Tests**: `reconnect-refresh.spec.ts`, `away-and-back.spec.ts`, `sync-return-freshness.spec.ts`, `focus-return-review.spec.ts`, `offline-mode-cached-board.spec.ts`, `editor-draft-merge.spec.ts`, `editor-external-change.spec.ts`.
+- **Unit Tests**: `connection-restored.unit.svelte.ts`, `task-events-delivery.unit.svelte.ts`, `stream-subscription.unit.ts`, `chat-history-merge.unit.ts`, `session-boot.unit.svelte.ts`, and for the editor buffer `editor-merge.unit.ts`, `editor-conflict.unit.ts`, `editor-draft-merge-on-open.unit.svelte.ts`, `editor-buffer-persistence.unit.svelte.ts`, `storage-editor-draft.unit.ts`.
 - **Backend Tests**: `app_stream_test.go`, `app_stream_subscribe_race_test.go`, `handler_task_sync_test.go`.

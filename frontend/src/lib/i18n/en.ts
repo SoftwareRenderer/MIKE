@@ -2109,7 +2109,15 @@ const catalog = {
     // A catalog value holds the plain '&'; Svelte escapes it when it renders.
     'editor.discardAndClose': 'Discard & Close',
     'editor.externalConflict':
-        '"{name}" was changed externally and overlaps your unsaved edits. Your edits were kept.',
+        '"{name}" was updated while your draft was unsaved. The file has been updated with conflict markers.',
+    'editor.conflictCount': { one: '{count} unresolved conflict', other: '{count} unresolved conflicts' },
+    'editor.conflictHint': 'Review conflicts',
+    'editor.conflictNext': 'Next conflict',
+    'editor.conflictSaveTitle': 'Save conflict markers?',
+    'editor.conflictSaveMessage':
+        'Your draft contains conflicts. Recommend resolving conflicts before saving.',
+    'editor.conflictSaveConfirm': 'Save anyway',
+    'editor.conflictKeep': 'Keep resolving',
     'editor.createSubtaskFromLines': 'Create a subtask from selected lines',
     'editor.createTaskFromLines': 'Create a task from selected lines',
     // Each part of the status bar is one whole message, so a pack sets its own word order.

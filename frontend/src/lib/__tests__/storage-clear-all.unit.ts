@@ -39,7 +39,7 @@ describe('clearAll (sign-out sweep)', () => {
 
         // Fill the stores through the module's own API.
         await storage.setDraftText('task-1', 'a prompt the next user must not read');
-        await storage.setEditorDraft('/repo/src/main.go', 'package main');
+        await storage.setEditorDraft('/repo/src/main.go', 'package main var x int', 'package main');
         await storage.saveEditorHistory('/repo/src/main.go', 'base', []);
         await storage.saveUnsavedFiles('proj-a', ['/repo/src/main.go']);
         await storage.updateQueue(() => [{ type: 'updateConfig', params: { config: { providers: [] } }, id: 'a1', timestamp: 1 }]);

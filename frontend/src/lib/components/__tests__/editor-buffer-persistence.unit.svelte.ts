@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // Which bytes the editor starts from, and which file a throttled write lands on. The diff editor (`CardDetail`)
 // reuses one instance for every file it shows, and a reopened file can hold a draft, an undo chain, or both.
-// docs/reconnection.md → "A file save the connection lost waits with the editor".
+// docs/reconnection.md → "A save the connection lost waits with the editor, not in the queue".
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, act } from '@testing-library/svelte';
 import { undoDepth } from '@codemirror/commands';
@@ -32,16 +32,16 @@ vi.mock('$lib/stores', () => ({
 }));
 
 // What the browser's mirror holds, per path, as the real storage module would.
-const drafts: Record<string, string> = {};
+const drafts: Record<string, { text: string; base: string | null; ts: number }> = {};
 const histories: Record<string, { ts: number; base: string; deltas: unknown[] }> = {};
-const draftWrites: Array<{ path: string; content: string }> = [];
+const draftWrites: Array<{ path: string; text: string; base: string | null }> = [];
 const historyWrites: Array<{ path: string }> = [];
 
 vi.mock('$lib/storage', () => ({
     getEditorDraft: (path: string) => Promise.resolve(drafts[path] ?? null),
-    setEditorDraft: (path: string, content: string) => {
-        draftWrites.push({ path, content });
-        drafts[path] = content;
+    setEditorDraft: (path: string, text: string, base: string | null) => {
+        draftWrites.push({ path, text, base });
+        drafts[path] = { text, base, ts: 1 };
         return Promise.resolve();
     },
     clearEditorDraft: (path: string) => { delete drafts[path]; return Promise.resolve(); },
@@ -136,7 +136,7 @@ describe('a file switch inside the editor’s persistence debounce', () => {
         expect(draftWrites.filter(w => w.path === B)).toEqual([]);
         expect(historyWrites.filter(w => w.path === B)).toEqual([]);
         // The first file's edit is still persisted, to the first file.
-        expect(draftWrites.filter(w => w.path === A).at(-1)?.content).toBe('typed first on disk\n');
+        expect(draftWrites.filter(w => w.path === A).at(-1)?.text).toBe('typed first on disk\n');
     });
 
     it('leaves the file that arrives with nothing it did not write', async () => {
@@ -159,9 +159,22 @@ describe('a file switch inside the editor’s persistence debounce', () => {
     });
 });
 
+describe('a reload taken while a persistence wait is still open', () => {
+    it('hands the buffer to storage on the way out', async () => {
+        const { container } = await openFirst();
+        await type(container, 'typed ');
+        expect(draftWrites).toHaveLength(0);
+
+        // A reload never destroys the component, so only the unload path can still save this buffer.
+        await act(async () => { window.dispatchEvent(new Event('beforeunload')); });
+
+        expect(draftWrites.filter(w => w.path === A).at(-1)?.text).toBe('typed first on disk\n');
+    });
+});
+
 describe('a reopen whose draft and undo chain disagree', () => {
     it('paints and saves the draft, which is the buffer the reader left', async () => {
-        drafts[A] = 'typed and never saved';
+        drafts[A] = { text: 'typed and never saved', base: DISK[A], ts: 1 };
         histories[A] = {
             ts: Date.now(),
             base: DISK[A],
@@ -177,7 +190,7 @@ describe('a reopen whose draft and undo chain disagree', () => {
     });
 
     it('keeps undo when the chain reaches the buffer the draft holds', async () => {
-        drafts[A] = 'typed and never saved';
+        drafts[A] = { text: 'typed and never saved', base: DISK[A], ts: 1 };
         histories[A] = {
             ts: Date.now(),
             base: DISK[A],

@@ -7,9 +7,6 @@ import { getProjectId, projectDirPath, selectProject, isolatedProject, gotoProje
 // Editor reconciliation of externally-changed files
 // ============================================================
 //
-// Split out of file-editor.spec.ts: these write into the PROJECT directory and wait for the open
-// editor to notice, and that file's Explorer tests stage/reset files in the same repo.
-
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
 isolatedProject();
 
@@ -34,10 +31,18 @@ test.describe('Editor External Change Reconciliation', () => {
     await expect(page.locator('.cm-editor')).toBeVisible({ timeout: 10000 });
   }
 
+  /** Type at the end of line 1. A click lands the caret on whichever line its centre hits, so the line an
+   *  edit belongs on has to be selected explicitly. */
+  async function editEndOfLine1(page: Page, text: string) {
+    await page.locator('.cm-content').first().click();
+    await page.keyboard.press('Control+Home');
+    await page.keyboard.press('End');
+    await page.keyboard.type(text);
+  }
+
   test('reloads an open file when it is changed externally with no unsaved edits', async ({ page }) => {
     const projectId = await getProjectId(page);
-    // The project explorer and Review-Changes read the PROJECT directory, not a task
-    // worktree — see projectDirPath() in helpers.ts.
+    // The project explorer reads the PROJECT directory, not a task worktree — see projectDirPath().
     const projectDir = await projectDirPath(page, projectId);
 
     const uniqueId = Date.now();
@@ -49,12 +54,9 @@ test.describe('Editor External Change Reconciliation', () => {
       await openFileInEditor(page, projectId, projectDir, file);
       await expect(page.locator('.cm-content')).toContainText('Line 2: beta');
 
-      // Change the file externally (editor has no unsaved edits)
       writeFileSync(absFile, 'Line 1: alpha\nLine 2: BETA-CHANGED\nLine 3: gamma\n');
 
-      // The reload is driven by the editor's external-change poll, whose interval is
-      // long relative to a single test; under parallel load it regularly needs more
-      // than the 10s default, so ask for 25s explicitly.
+      // The editor's external-change poll is slow relative to one test, so this wait is explicit.
       await expect.poll(async () => {
         return (await page.locator('.cm-content').textContent()) ?? '';
       }, { timeout: 25000 }).toContain('BETA-CHANGED');
@@ -65,8 +67,6 @@ test.describe('Editor External Change Reconciliation', () => {
 
   test('merges an external change with non-overlapping unsaved edits', async ({ page }) => {
     const projectId = await getProjectId(page);
-    // The project explorer and Review-Changes read the PROJECT directory, not a task
-    // worktree — see projectDirPath() in helpers.ts.
     const projectDir = await projectDirPath(page, projectId);
 
     const uniqueId = Date.now();
@@ -77,19 +77,11 @@ test.describe('Editor External Change Reconciliation', () => {
     try {
       await openFileInEditor(page, projectId, projectDir, file);
 
-      // User edits line 1 in the editor. Clicking .cm-content puts the caret on
-      // whichever line its centre lands on, so the line has to be selected explicitly —
-      // otherwise "non-overlapping" isn't, and the merge is being tested by luck.
-      await page.locator('.cm-content').first().click();
-      await page.keyboard.press('Control+Home'); // document start
-      await page.keyboard.press('End');          // end of line 1
-      await page.keyboard.type(' USER');
+      await editEndOfLine1(page, ' USER');
       await page.waitForTimeout(400); // let draft/unsaved state settle
 
-      // Externally edit a different line (line 3)
       writeFileSync(absFile, 'Line 1: alpha\nLine 2: beta\nLine 3: gamma EXTERNAL\n');
 
-      // Both the user edit AND the external change must be present
       await expect.poll(async () => {
         return (await page.locator('.cm-content').textContent()) ?? '';
       }).toContain('alpha USER');
@@ -101,10 +93,8 @@ test.describe('Editor External Change Reconciliation', () => {
     }
   });
 
-  test('keeps the user buffer and shows a toast on a conflicting external change', async ({ page }) => {
+  test('writes both versions into the buffer on a conflicting external change', async ({ page }) => {
     const projectId = await getProjectId(page);
-    // The project explorer and Review-Changes read the PROJECT directory, not a task
-    // worktree — see projectDirPath() in helpers.ts.
     const projectDir = await projectDirPath(page, projectId);
 
     const uniqueId = Date.now();
@@ -115,27 +105,23 @@ test.describe('Editor External Change Reconciliation', () => {
     try {
       await openFileInEditor(page, projectId, projectDir, file);
 
-      // User edits line 1 — the same line the external change will touch, which is
-      // only guaranteed if the caret is placed explicitly (a click lands on whichever
-      // line its centre hits).
-      await page.locator('.cm-content').first().click();
-      await page.keyboard.press('Control+Home');
-      await page.keyboard.press('End');
-      await page.keyboard.type(' USER');
+      // The same line the external change is about to move.
+      await editEndOfLine1(page, ' USER');
       await page.waitForTimeout(400);
 
-      // Externally edit the SAME line differently
       writeFileSync(absFile, 'Line 1: alpha EXTERNAL\nLine 2: beta\nLine 3: gamma\n');
 
-      // User edit must be preserved (not overwritten by the external change)
-      await page.waitForTimeout(1200); // allow debounce + fetch + reconcile
+      // Neither side is dropped: the buffer carries both, between the markers, for the reader to resolve.
+      // Keeping only its own buffer would write the external change away on the next save.
+      await expect(page.locator('.conflict-banner')).toBeVisible({ timeout: 25000 });
       const content = (await page.locator('.cm-content').textContent()) ?? '';
       expect(content).toContain('alpha USER');
-      expect(content).not.toContain('alpha EXTERNAL');
+      expect(content).toContain('alpha EXTERNAL');
+      expect(content).toContain('unsaved');
 
-      // A non-blocking toast should be shown
+      // And the reader is told, because the file on disk now disagrees with what was opened.
       await expect(page.locator('.toast')).toBeVisible({ timeout: 5000 });
-      await expect(page.locator('.toast')).toContainText('changed externally');
+      await expect(page.locator('.toast')).toContainText('changed on disk');
     } finally {
       try { rmSync(absFile, { force: true }); } catch { /* ignore */ }
     }

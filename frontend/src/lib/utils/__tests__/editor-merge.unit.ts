@@ -1,5 +1,18 @@
 import { describe, it, expect } from 'vitest';
-import { mergeText, minimalReplace, reconcileExternalChange } from '$lib/utils/editor-merge';
+import {
+    CONFLICT_OURS,
+    adoptDraft,
+    CONFLICT_SEPARATOR,
+    CONFLICT_THEIRS,
+    conflictBlocks,
+    mergeTextWithMarkers,
+    minimalReplace,
+    reconcileExternalChange,
+} from '$lib/utils/editor-merge';
+
+/** The three lines a two-sided region is written with, in order. */
+const block = (ours: string, theirs: string) =>
+    [CONFLICT_OURS, ours, CONFLICT_SEPARATOR, theirs, CONFLICT_THEIRS].join('\n');
 
 describe('reconcileExternalChange', () => {
     it('returns no-op when disk is unchanged since the editor last knew it', () => {
@@ -18,62 +31,119 @@ describe('reconcileExternalChange', () => {
         expect(r).toEqual({ kind: 'merged', content: 'EXTERNAL\nb\nUSER\nd\n' });
     });
 
-    it('reports a conflict when both sides edit the same region', () => {
+    it('carries both sides of a region both sides edited', () => {
         const r = reconcileExternalChange('a\nb\nc\nd\n', 'a\nb\nUSER\nd\n', 'a\nb\nEXTERNAL\nd\n');
-        expect(r).toEqual({ kind: 'conflict' });
+        expect(r).toEqual({
+            kind: 'conflict',
+            content: `a\nb\n${block('USER', 'EXTERNAL')}\nd\n`,
+        });
     });
 });
 
-describe('mergeText', () => {
-    it('combines independent user and external edits', () => {
-        expect(mergeText('a\nb\nc\nd\n', 'a\nb\nUSER\nd\n', 'EXTERNAL\nb\nc\nd\n')).toBe(
-            'EXTERNAL\nb\nUSER\nd\n',
-        );
+describe('adoptDraft', () => {
+    const DRAFT = { text: 'a\nX\nc\n', base: 'a\nb\nc\n' };
+
+    it('paints the file when no draft was left', () => {
+        expect(adoptDraft(null, 'a\nb\nc\n')).toEqual({ content: 'a\nb\nc\n', conflicted: false });
     });
 
-    it('returns null on a same-line conflict', () => {
-        expect(mergeText('a\nb\nc\nd\n', 'a\nb\nUSER\nd\n', 'a\nb\nEXTERNAL\nd\n')).toBeNull();
+    it('paints the draft when the file has not moved since', () => {
+        expect(adoptDraft(DRAFT, 'a\nb\nc\n')).toEqual({ content: 'a\nX\nc\n', conflicted: false });
     });
 
-    it('returns base when nothing changed', () => {
-        expect(mergeText('a\nb\nc\n', 'a\nb\nc\n', 'a\nb\nc\n')).toBe('a\nb\nc\n');
+    it('merges the draft into a file that moved elsewhere', () => {
+        // The draft rewrote line 2, the file rewrote line 3: both stand, and nothing is said.
+        expect(adoptDraft(DRAFT, 'a\nb\nC3\n')).toEqual({ content: 'a\nX\nC3\n', conflicted: false });
     });
 
-    it('adopts the external change when the user made no edits', () => {
-        expect(mergeText('a\nb\nc\n', 'a\nb\nc\n', 'a\nb\nNEW\n')).toBe('a\nb\nNEW\n');
+    it('paints both sides when the draft and the file moved over the same line', () => {
+        const a = adoptDraft(DRAFT, 'a\nOTHER\nc\n');
+        expect(a.conflicted).toBe(true);
+        expect(a.content).toContain('X');
+        expect(a.content).toContain('OTHER');
     });
 
-    it('merges two pure insertions at different positions', () => {
-        expect(mergeText('a\nb\nc\n', 'a\nX\nb\nc\n', 'a\nb\nMID\nc\n')).toBe('a\nX\nb\nMID\nc\n');
+    it('keeps a draft whose base was never recorded, whatever the file says now', () => {
+        const legacy = { text: 'typed and never saved', base: null };
+        expect(adoptDraft(legacy, 'rewritten by someone else')).toEqual({
+            content: 'typed and never saved',
+            conflicted: false,
+        });
+    });
+});
+
+describe('mergeTextWithMarkers', () => {
+    it('keeps both sides of a region both sides changed', () => {
+        const m = mergeTextWithMarkers('a\nb\nc\nd\n', 'a\nB1\nB2\nd\n', 'a\nC1\nd\n');
+        expect(m.conflicts).toBe(1);
+        expect(m.text).toBe(`a\n${block('B1\nB2', 'C1')}\nd\n`);
     });
 
-    it('keeps both insertions when both sides insert at the same boundary', () => {
-        expect(mergeText('a\nb\nc\n', 'a\nX\nb\nc\n', 'a\nY\nb\nc\n')).toBe('a\nX\nY\nb\nc\n');
+    it('writes both sides of a line one side deleted and the other rewrote', () => {
+        const m = mergeTextWithMarkers('a\nb\nc\n', 'a\nc\n', 'a\nB\nc\n');
+        expect(m.conflicts).toBe(1);
+        expect(m.text).toBe(`a\n${[CONFLICT_OURS, CONFLICT_SEPARATOR, 'B', CONFLICT_THEIRS].join('\n')}\nc\n`);
     });
 
-    it('dedupes an identical insertion made by both sides', () => {
-        expect(mergeText('a\nb\nc\n', 'a\nX\nb\nc\n', 'a\nX\nb\nc\n')).toBe('a\nX\nb\nc\n');
+    it('counts one conflict per region and merges the rest silently', () => {
+        const m = mergeTextWithMarkers('a\nb\nc\nd\n', 'A\nb\nc\nD\n', 'A2\nb\nc\nD2\n');
+        expect(m.conflicts).toBe(2);
+        expect(conflictBlocks(m.text)).toHaveLength(2);
     });
 
-    it('flags a conflict when both sides replace the same region differently', () => {
-        expect(mergeText('a\nb\nc\nd\n', 'a\nB1\nB2\nd\n', 'a\nC1\nd\n')).toBeNull();
+    it('writes no marker over a merge that is clean', () => {
+        expect(mergeTextWithMarkers('a\nb\nc\nd\n', 'a\nb\nUSER\nd\n', 'EXTERNAL\nb\nc\nd\n'))
+            .toEqual({ text: 'EXTERNAL\nb\nUSER\nd\n', conflicts: 0 });
     });
 
-    it('combines a deletion with an external insertion elsewhere', () => {
-        expect(mergeText('a\nb\nc\n', 'a\nc\n', 'a\nY\nb\nc\n')).toBe('a\nY\nc\n');
+    it('is the base when neither side changed anything', () => {
+        expect(mergeTextWithMarkers('a\nb\nc\n', 'a\nb\nc\n', 'a\nb\nc\n'))
+            .toEqual({ text: 'a\nb\nc\n', conflicts: 0 });
     });
 
-    it('handles files without a trailing newline', () => {
-        expect(mergeText('a\nb', 'a\nX\nb', 'a\nb\nc')).toBe('a\nX\nb\nc');
+    it('is the other side when one side changed nothing', () => {
+        expect(mergeTextWithMarkers('a\nb\nc\n', 'a\nb\nc\n', 'a\nb\nNEW\n').text).toBe('a\nb\nNEW\n');
     });
 
-    it('handles a single-line file', () => {
-        expect(mergeText('x', 'y', 'x')).toBe('y');
-        expect(mergeText('x', 'x', 'z')).toBe('z');
+    it('merges two insertions at different boundaries', () => {
+        expect(mergeTextWithMarkers('a\nb\nc\n', 'a\nX\nb\nc\n', 'a\nb\nMID\nc\n').text)
+            .toBe('a\nX\nb\nMID\nc\n');
     });
 
-    it('produces the user edit when both sides made the identical edit', () => {
-        expect(mergeText('a\nb\nc\n', 'a\nX\nc\n', 'a\nX\nc\n')).toBe('a\nX\nc\n');
+    it('keeps both insertions at one boundary, and drops one both sides made the same', () => {
+        expect(mergeTextWithMarkers('a\nb\nc\n', 'a\nX\nb\nc\n', 'a\nY\nb\nc\n').text)
+            .toBe('a\nX\nY\nb\nc\n');
+        expect(mergeTextWithMarkers('a\nb\nc\n', 'a\nX\nb\nc\n', 'a\nX\nb\nc\n').text)
+            .toBe('a\nX\nb\nc\n');
+    });
+
+    it('takes the edit once when both sides made it identically', () => {
+        expect(mergeTextWithMarkers('a\nb\nc\n', 'a\nX\nc\n', 'a\nX\nc\n').text).toBe('a\nX\nc\n');
+    });
+
+    it('handles a file with no trailing newline, and a one-line file', () => {
+        expect(mergeTextWithMarkers('a\nb', 'a\nX\nb', 'a\nb\nc').text).toBe('a\nX\nb\nc');
+        expect(mergeTextWithMarkers('x', 'y', 'x').text).toBe('y');
+        expect(mergeTextWithMarkers('x', 'x', 'z').text).toBe('z');
+    });
+});
+
+describe('conflictBlocks', () => {
+    it('spans a complete triple', () => {
+        const text = `keep\n${block('mine', 'theirs')}\nkeep\n`;
+        expect(conflictBlocks(text)).toEqual([{ startLine: 2, endLine: 6 }]);
+    });
+
+    it('reports nothing for a block left open', () => {
+        expect(conflictBlocks(`${CONFLICT_OURS}\nmine\n${CONFLICT_SEPARATOR}\ntheirs\n`)).toEqual([]);
+    });
+
+    it('reports nothing for a divider of equals in ordinary text', () => {
+        expect(conflictBlocks('Title\n=======\nSome prose\n')).toEqual([]);
+    });
+
+    it('reports nothing once the markers have been removed', () => {
+        expect(conflictBlocks('mine\n')).toEqual([]);
     });
 });
 

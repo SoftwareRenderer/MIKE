@@ -47,7 +47,8 @@
     import { mount, unmount } from 'svelte';
     import { appStore, dialogStore } from '$lib/stores';
     import { fullscreenToggleTitle } from '$lib/utils/keyboard';
-    import { reconcileExternalChange, minimalReplace } from '$lib/utils/editor-merge';
+    import { adoptDraft, minimalReplace, reconcileExternalChange } from '$lib/utils/editor-merge';
+    import { conflictHighlight, countConflicts, nextConflictLine } from '$lib/utils/editor-conflict';
     import { fsEventConcernsFile, type FsEvent } from '$lib/utils/fs-event';
     import { getLanguageSupport, resolveFile } from '$lib/utils/editor-language';
     import { fileSuffix } from '$lib/utils/file-suffix';
@@ -138,6 +139,9 @@
 
     // Tracked incrementally to avoid O(n) string compare/split on every edit
     let hasChanges = $state(false);
+    /** Unresolved merge blocks in the buffer. Read from the text, which is the record: a person who
+     *  deletes the markers has resolved it. */
+    const conflicts = $derived(countConflicts(content));
     let lineCount = $state(0);
     let charCount = $state(0);
     let cursorLine = $state(1);
@@ -216,28 +220,30 @@
     });
 
     /**
-     * Re-read the file from disk and reconcile it against the current buffer.
-     * Non-overlapping external edits are merged in; a conflict keeps the user's
-     * buffer and surfaces a toast. Never silently discards unsaved content.
+     * Re-read the file and reconcile it with the buffer, the same way `loadFile` treats a draft the file
+     * moved under. A region both sides changed is written into the buffer, so neither side is dropped.
      */
     async function checkExternalChange() {
+        const readPath = filePath;
         try {
-            const disk = await readFsFile({ path: filePath, project: projectId, task: taskId });
+            const disk = await readFsFile({ path: readPath, project: projectId, task: taskId });
+            // A file switch during that read: this buffer belongs to whoever is open now.
+            if (filePath !== readPath) return;
+            // A reload blanks `content` for the length of its read, and merging against that would file
+            // what is left of the buffer as a draft.
+            if (loading) return;
             const theirs: string = disk.content ?? '';
             const result = reconcileExternalChange(savedContent, content, theirs);
             if (result.kind === 'no-op') return;
-            if (result.kind === 'conflict') {
-                dialogStore.showToast(
-                    t('editor.externalConflict', { name: baseName(filePath) || filePath }),
-                    'error',
-                );
-                return;
-            }
-            // reload (no unsaved edits) or merged (user edits preserved)
-            applyDiskContent(result.content, theirs, parseGutterMarkers(disk.gutter_markers));
+            applyDiskContent(result.content, theirs, readPath, parseGutterMarkers(disk.gutter_markers));
+            if (result.kind === 'conflict') reportConflict(readPath);
         } catch {
             // Transient read failure — keep the buffer untouched.
         }
+    }
+
+    function reportConflict(path: string) {
+        dialogStore.showToast(t('editor.externalConflict', { name: baseName(path) || path }), 'error');
     }
 
     /** Gutter markers as the server reports them: line number to change types. Null when the
@@ -251,12 +257,11 @@
         return m;
     }
 
-    /** Replace the editor buffer with reconciled content and re-baseline to disk. */
-    function applyDiskContent(
-        newContent: string,
-        diskContent: string,
-        markers: Map<number, string[]> | null = null,
-    ) {
+    /**
+     * Move the buffer onto reconciled content and re-baseline to the file's bytes. The path travels with
+     * it: the file open when the read began may not be the one open now.
+     */
+    function applyDiskContent(newContent: string, diskContent: string, path: string, markers: Map<number, string[]> | null = null) {
         if (mode === 'explorer') {
             // The markers the server computed against HEAD replace ones keyed to content that no
             // longer exists, and the baseline moves with them. Assign them before the dispatch: the
@@ -267,6 +272,10 @@
             }
             if (gitGutterState) gitGutterState.baselineContent = diskContent;
         }
+        // The baseline moves before the dispatch: the wait it arms writes a draft, and that has to carry
+        // the bytes the buffer now sits on.
+        savedContent = diskContent;
+        baselineContent = diskContent;
         if (view) {
             // Only what changed is dispatched: replacing the whole document rebuilds every visible
             // line and gutter marker.
@@ -278,14 +287,19 @@
             (view as any)._symbolTimer = setTimeout(extractSymbols, 300);
         }
         content = newContent;
-        savedContent = diskContent;
-        baselineContent = diskContent;
         hasChanges = content !== savedContent;
         // Disk already says what the buffer says, so a waiting write has nothing left to carry.
         if (!hasChanges) cancelSaveRetry();
         lineCount = content ? content.split('\n').length : 0;
         charCount = content.length;
-        setEditorDraft(filePath, content).catch(() => {});
+        recordDraft(path, content, diskContent);
+    }
+
+    /** The draft record is the buffer plus the bytes it sits on; equal bytes leave no record. Every draft
+     *  write comes through here, including the wait that fires after a reconcile cleared the record. */
+    function recordDraft(path: string, text: string, base: string) {
+        const write = text === base ? clearEditorDraft(path) : setEditorDraft(path, text, base);
+        write.catch(() => {});
     }
 
     // svelte-ignore non_reactive_update — DOM ref via bind:this
@@ -644,9 +658,11 @@
                     if (!isExtensionContentSet(update.transactions.map(tr => tr.annotation(Transaction.userEvent)))) {
                         uiInjector.forwardEvent(INJECTION_POINTS.FILE_EDITOR, 'editor.contentChange', { content }, extAnchorEl);
                     }
-                    // Both throttled writes carry the file this edit happened in.
+                    // The throttled writes carry the file this edit happened in and the bytes the buffer
+                    // sat on, which are the merge base of everything typed after.
                     const editedPath = filePath;
                     const editedDoc = update.state.doc.toString();
+                    const editedBase = savedContent;
                     // Capture delta for undo/redo history persistence.
                     // Only capture user edits (not programmatic changes during restore).
                     if (!(view as any).__restoring) {
@@ -663,7 +679,7 @@
                         }
                     }
                     // Persist unsaved draft (throttled)
-                    armWrite(armedDraft, 200, () => setEditorDraft(editedPath, editedDoc).catch(() => {}));
+                    armWrite(armedDraft, 200, () => recordDraft(editedPath, editedDoc, editedBase));
                 }
                 if (update.selectionSet) {
                     // Update cursor position (status bar only — symbol
@@ -677,6 +693,7 @@
                 // without changing the text.
                 syncHistory();
             }),
+            ...conflictHighlight(),
             EditorState.tabSize.of(4),
             indentUnit.of('    '),
             ...(langSupport ? [langSupport] : []),
@@ -818,16 +835,22 @@
             } else {
                 gutterMarkers = parseGutterMarkers(data.gutter_markers);
 
-                // The draft is the buffer this browser left, so it is both what the screen paints and what a
-                // save writes. The undo chain rides along only when it reaches that same text: it is written
-                // later than the draft, so a chain that disagrees is the older reading.
+                // The draft is the buffer this browser left, merged up to the file's bytes before it
+                // paints. An undo chain rides along only when it reaches that same text.
                 const draft = await getEditorDraft(filePath);
-                content = draft !== null ? draft : fileContent;
+                const adopted = adoptDraft(draft, fileContent);
+                content = adopted.content;
                 baselineContent = fileContent;
                 savedContent = fileContent;
                 hasChanges = content !== savedContent;
                 lineCount = content ? content.split('\n').length : 0;
                 charCount = content.length;
+                if (filePath === requestPath) {
+                    // The merged text replaces the record it was merged from, so the same file change is
+                    // not merged twice.
+                    recordDraft(filePath, content, fileContent);
+                    if (adopted.conflicted) reportConflict(filePath);
+                }
 
                 // Load persisted undo/redo history (auto-evicted if older than 72h)
                 const savedHistory = await loadEditorHistory(filePath);
@@ -980,8 +1003,36 @@
         void handleSave();
     });
 
+    /** True while this buffer's confirmation is on screen, so a second request cannot stack another. */
+    let conflictConfirmOpen = false;
+
+    /**
+     * Writing markers is something a person can want, since the file may hold the side they would rather
+     * not lose, but it is never what "Save" means by default — so it is asked for first.
+     */
+    async function confirmConflictSave(): Promise<boolean> {
+        if (conflictConfirmOpen) return false;
+        conflictConfirmOpen = true;
+        try {
+            return await dialogStore.showConfirm({
+                title: t('editor.conflictSaveTitle'),
+                message: t('editor.conflictSaveMessage', { count: conflicts }),
+                confirmText: t('editor.conflictSaveConfirm'),
+                cancelText: t('editor.conflictKeep'),
+                variant: 'destructive',
+            });
+        } finally {
+            conflictConfirmOpen = false;
+        }
+    }
+
     async function handleSave() {
         if (!filePath) return;
+        if (conflicts > 0 && !(await confirmConflictSave())) {
+            // Nothing was written; the explorer's Save button is waiting for that answer.
+            announceSaveSettled(false);
+            return;
+        }
         if (!saveController.begin(saveIsNeeded())) {
             // Refused with nothing running: there is no save to wait for.
             if (!saveController.busy) announceSaveSettled(false);
@@ -1038,6 +1089,13 @@
         // A save asked for during that write runs now if anything is still unsaved, unless a retry is
         // already armed to carry it.
         if (saveController.settle(saveIsNeeded()) && !saveRetryTimer) await handleSave();
+    }
+
+    function jumpToNextConflict() {
+        if (!view) return;
+        const here = view.state.doc.lineAt(view.state.selection.main.head).number;
+        const next = nextConflictLine(view.state.doc.toString(), here);
+        if (next) jumpToLine(next);
     }
 
     /** Position cursor on a specific line and scroll it into view. */
@@ -1624,7 +1682,14 @@
     onMount(() => {
         window.addEventListener('jump-to-line', handleJumpToLine);
         window.addEventListener('editor-save-request', handleSaveRequest);
+        // A reload never destroys this component, so only the unload path can hand the buffer to storage.
+        window.addEventListener('beforeunload', flushArmedWrites);
     });
+
+    function flushArmedWrites() {
+        deliverWrite(armedDraft);
+        deliverWrite(armedHistory);
+    }
 
     onDestroy(() => {
         clearUnrelatedEventTimer();
@@ -1641,6 +1706,7 @@
         destroyView();
         window.removeEventListener('jump-to-line', handleJumpToLine);
         window.removeEventListener('editor-save-request', handleSaveRequest);
+        window.removeEventListener('beforeunload', flushArmedWrites);
     });
 </script>
 
@@ -1705,6 +1771,17 @@
             {:else if fileTooLarge}
                 <div id="file-editor-too-large" class="editor-placeholder">{t('editor.fileTooLarge')}</div>
             {:else}
+                {#if conflicts > 0}
+                    <!-- The markers in the buffer are the record; this only says how many there are and
+                         how to reach the next one. -->
+                    <div class="conflict-banner" role="alert">
+                        <span class="conflict-summary">{t('editor.conflictCount', { count: conflicts })}</span>
+                        <span class="conflict-hint">{t('editor.conflictHint')}</span>
+                        <button type="button" class="conflict-next" onclick={jumpToNextConflict}>
+                            {t('editor.conflictNext')}
+                        </button>
+                    </div>
+                {/if}
                 <div class="editor-wrapper" bind:this={editorEl}></div>
                 <div class="ext-anchor" bind:this={extAnchorEl}></div>
                 <div class="search-container" bind:this={searchContainerEl}></div>
@@ -1756,6 +1833,39 @@
 </div>
 
 <style>
+    /* The palette's own red, so an installed `css` extension that retints the app moves this with it. */
+    .conflict-banner {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 4px 12px;
+        padding: 6px 8px;
+        flex-shrink: 0;
+        border-bottom: 1px solid var(--color-status-red);
+        background: var(--color-status-red-bg);
+        font-size: var(--text-xs);
+    }
+    .conflict-summary {
+        color: var(--color-status-red);
+        font-weight: 600;
+    }
+    .conflict-hint {
+        color: var(--color-text-tertiary);
+    }
+    .conflict-next {
+        margin-left: auto;
+        padding: 2px 8px;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        background: var(--color-bg-input);
+        color: var(--color-text-primary);
+        font-size: var(--text-xs);
+        cursor: pointer;
+    }
+    .conflict-next:hover {
+        border-color: var(--color-status-red);
+    }
+
     .file-editor {
         display: none;
         flex-direction: column;
