@@ -76,3 +76,12 @@ MIKE_ENCRYPTION_KEY=testkey go run . -listen 0.0.0.0 -allowed-hosts your.hostnam
 ```
 
 3. Continue from step 4 in the [Quick Start](#quick-start) section.
+
+# Feature Highlights
+
+In additon to common features such as automatic context compaction, Skills, AGENTS.md, MCP, and background tasks, MIKE also includes a few "invisible" improvements that help maintain smooth operation:
+
+- RAM Management: Parallel tasks means that more builds and tests are running. To avoid out-of-memory errors, MIKE monitors usage and automatically pauses/resumes tasks.
+- RESTful Web API: This enables programmatic control over the board state, and has built in security controls such as enforced encryption, Bearer tokens, rate limits, and authorized hosts.
+- Upstream error handling: Potential issues related to the inference provider or model such as failed tool calls, loops, crashes, or rate limits are always recoverable and don't result in lost progress.
+- Enterprise Readiness: Administrators have control over deployed configuration, and can prevent changes such as installation of extensions and inference providers.
