@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { writeFileSync, rmSync, readdirSync, statSync, mkdirSync, existsSync } from 'node:fs';
+import { writeFileSync, readFileSync, rmSync, readdirSync, statSync, mkdirSync, existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'path';
 import { apiGetJson, csrfFetch, getProjectId, isolatedProject, gotoProject, ownProjectPath, selectProject } from './helpers';
@@ -382,7 +382,7 @@ test.describe('Editor Tabs', () => {
     }
   });
 
-  test('should warn about unsaved changes when closing a tab', async ({ page }) => {
+  test('closing a tab keeps its unsaved text, and asks nothing', async ({ page }) => {
     const projectId = await getProjectId(page);
     // The project explorer lists the project directory, so that is where the fixture
     // files have to be written — not a task worktree.
@@ -392,53 +392,37 @@ test.describe('Editor Tabs', () => {
 
     const uniqueId = Date.now();
     const file1 = `tab-unsaved-close-${uniqueId}.txt`;
-    writeFileSync(join(projectDir, file1), 'Original content\n');
+    const abs = join(projectDir, file1);
+    writeFileSync(abs, 'Original content\n');
 
     try {
-      // Open explorer
       await selectProject(page, projectId);
       await page.waitForSelector('.top-bar', { timeout: 10000 });
       await page.locator('.explorer-btn').click();
       await expect(page.locator('.explorer-view')).toBeVisible({ timeout: 10000 });
       await expect(page.locator('.file-browser-list')).toBeVisible({ timeout: 10000 });
 
-      // Open the file
       await page.locator('.file-browser-item', { hasText: file1 }).click();
       await expect(page.locator('.cm-editor')).toBeVisible({ timeout: 10000 });
 
-      // Edit the file to create unsaved changes (focus the editor first)
       await page.locator('.cm-content').click();
       await page.keyboard.press('End');
       await page.keyboard.type(' Modified');
-      await page.waitForTimeout(300);
-
-      // Tab should have unsaved indicator
       await expect(page.locator('.editor-tab.unsaved')).toBeVisible();
 
-      // Try to close the tab
+      // Closing costs nothing, so nothing is asked: the buffer is parked, not thrown away.
       await page.locator('.btn-close-tab').click();
-
-      // Confirmation dialog should appear
-      await expect(page.locator('.overlay')).toBeVisible({ timeout: 5000 });
-      await expect(page.locator('.modal')).toContainText('Unsaved changes');
-      await expect(page.locator('.modal')).toContainText('Discard');
-
-      // Cancel — tab should stay open (ConfirmationDialog renders .btn-cancel/.btn-confirm)
-      await page.locator('.modal-footer .btn-cancel').click();
-      await expect(page.locator('.overlay')).not.toBeVisible({ timeout: 5000 });
-      await expect(page.locator('.editor-tab')).toHaveCount(1);
-
-      // Try closing again, this time confirm
-      await page.locator('.btn-close-tab').click();
-      await expect(page.locator('.overlay')).toBeVisible({ timeout: 5000 });
-      await page.locator('.btn-confirm').click();
-
-      // Tab should be closed
-      await expect(page.locator('.overlay')).not.toBeVisible({ timeout: 5000 });
       await expect(page.locator('.editor-tab')).toHaveCount(0);
+      await expect(page.locator('.overlay')).toHaveCount(0);
+
+      // The file on disk is untouched, and reopening reads the parked buffer back.
+      expect(readFileSync(abs, 'utf8')).toBe('Original content\n');
+      await page.locator('.file-browser-item', { hasText: file1 }).click();
+      await expect(page.locator('.cm-content')).toContainText('Original content Modified');
+      await expect(page.locator('.editor-tab.unsaved')).toBeVisible();
     } finally {
       try {
-        rmSync(join(projectDir, file1), { force: true });
+        rmSync(abs, { force: true });
       } catch { /* ignore */ }
     }
   });

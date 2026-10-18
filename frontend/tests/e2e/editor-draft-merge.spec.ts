@@ -80,7 +80,7 @@ test('a draft and a change to another line both reach the buffer, unsaid', async
     expect(buffer).toContain('gamma EXTERNAL');
 
     // A merge that took both sides owes the reader no message.
-    await expect(page.locator('.toast', { hasText: 'unsaved' })).toHaveCount(0);
+    await expect(page.locator('.toast')).toHaveCount(0);
   } finally {
     try { rmSync(absFile, { force: true }); } catch { /* ignore */ }
   }

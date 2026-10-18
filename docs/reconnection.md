@@ -62,6 +62,12 @@ Saving a buffer that still holds markers is allowed and never assumed: `handleSa
 writing them is a thing a person can want — the file may hold the version they would rather not lose —
 and never what "Save" means by default.
 
+### Closing an editor is not discarding it
+
+Closing a file's tab keeps its buffer: the draft is what the next open reads, so closing asks nothing and
+loses nothing. Reopening brings the text back still marked unsaved. Deleting the text is how a person throws
+an edit away — a buffer equal to its file leaves no record behind.
+
 ### A save the connection lost waits with the editor, not in the queue
 
 A body replayed from IndexedDB

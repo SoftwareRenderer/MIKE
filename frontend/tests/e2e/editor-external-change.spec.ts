@@ -119,9 +119,9 @@ test.describe('Editor External Change Reconciliation', () => {
       expect(content).toContain('alpha EXTERNAL');
       expect(content).toContain('unsaved');
 
-      // And the reader is told, because the file on disk now disagrees with what was opened.
+      // And the reader is told about this file: the wording is the catalog's to choose, the file name is not.
       await expect(page.locator('.toast')).toBeVisible({ timeout: 5000 });
-      await expect(page.locator('.toast')).toContainText('changed on disk');
+      await expect(page.locator('.toast')).toContainText(file);
     } finally {
       try { rmSync(absFile, { force: true }); } catch { /* ignore */ }
     }

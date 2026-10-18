@@ -1,4 +1,4 @@
-import { appStore, dialogStore, uiStore } from '$lib/stores';
+import { appStore, uiStore } from '$lib/stores';
 import { isAnyModalOpen } from '$lib/utils/modal-state';
 import { effectiveToggleFullscreenKey, matchShortcut } from '$lib/utils/keyboard';
 import { buildLineSelectionPrompt } from '$lib/utils/line-selection';
@@ -8,13 +8,12 @@ import {
     type EditorTabState,
 } from '$lib/storage';
 import { revealFileTab, toPersistedTabs, type OpenFileTab } from '$lib/utils/editor-tabs';
-import { baseName, isUnderPath } from '$lib/utils/path';
+import { isUnderPath } from '$lib/utils/path';
 import { EDITOR_SAVE_SETTLED, SAVE_SETTLE_BACKSTOP_MS, SaveRequestGuard } from '$lib/utils/save-state';
 import type { LSPSymbol } from '$lib/utils/lsp-symbols';
 import type { FsEvent } from '$lib/utils/fs-event';
 import type { GitCommit, GitLogResponse } from '$lib/types';
 import type { DiffFile } from '$lib/types/diff';
-import { t } from '$lib/i18n';
 
 /** Commits per page of history. */
 const COMMIT_BATCH_SIZE = 30;
@@ -261,25 +260,9 @@ export class ExplorerCore {
         this.activeFilePath = path;
     };
 
-    handleCloseTab = async (path: string): Promise<void> => {
+    handleCloseTab = (path: string): void => {
         const idx = this.openFiles.findIndex(f => f.path === path);
         if (idx < 0) return;
-
-        if (this.unsavedFiles.has(path)) {
-            const fileName = baseName(path) || path;
-            const confirmed = await dialogStore.showConfirm({
-                title: t('explorer.shared.unsavedChanges'),
-                message: t('explorer.shared.unsavedDiscardMessage', { file: fileName }),
-                confirmText: t('explorer.shared.discard'),
-                cancelText: t('explorer.shared.cancel'),
-                variant: 'destructive',
-            });
-            if (!confirmed) return;
-            // Without this the discarded edit comes back on the next open.
-            clearEditorDraft(path).catch(() => {});
-            clearEditorHistory(path).catch(() => {});
-        }
-
         this.closeTab(path, idx);
     }
 

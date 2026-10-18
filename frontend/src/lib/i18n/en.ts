@@ -34,7 +34,6 @@ const catalog = {
     'explorer.shared.cancel': 'Cancel',
     'explorer.shared.discard': 'Discard',
     'explorer.shared.unsavedChanges': 'Unsaved changes',
-    'explorer.shared.unsavedDiscardMessage': '"{file}" has unsaved changes. Discard them?',
     'explorer.shared.openTerminal': 'Open terminal',
     'explorer.shared.terminalTitle': 'Open terminal ({shortcut})',
     'explorer.shared.closeEscape': 'Close (Escape)',
