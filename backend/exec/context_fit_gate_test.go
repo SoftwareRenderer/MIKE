@@ -135,6 +135,46 @@ func TestFitRequestWithoutReportedUsageStillTrimsTheBatch(t *testing.T) {
 	}
 }
 
+// A resumed run rebuilds its conversation from stored rows and has made no call yet, so the count stored on
+// the newest assistant row is the only real measure of what that conversation costs.
+func TestFitRequestPricesAResumedConversationFromTheStoredCount(t *testing.T) {
+	t.Parallel()
+	te, setup, lc := gateSetup(t, 4000)
+	lc.usage = nil
+	lc.reportedPrompt = promptBudget(4000, defaultSummarizeThreshold) / 2
+	lc.messages = convWith(trimRow{id: "c1", name: types.ToolReadFile, output: filler(3000, "aa")})
+
+	sent := te.fitRequestToWindow(setup, lc, "test-model")
+
+	if !strings.Contains(sent[3].Content, "trimmed to") {
+		t.Error("the resumed run priced its conversation by estimate alone and sent the oversized result whole")
+	}
+	if n := summarizationRows(t, te, setup.task.ID, "thread-1"); n != 0 {
+		t.Errorf("%d summarization rows, want 0", n)
+	}
+}
+
+// The shape of the failure this path exists to stop: 150,299 tokens of conversation already counted against
+// a 262,144 window, and one tool result the word estimate cannot price correctly.
+func TestFitRequestTrimsTheOversizedResultOfAWindowFullConversation(t *testing.T) {
+	t.Parallel()
+	const window = 262144
+	te, setup, lc := gateSetup(t, window)
+	lc.usage = &types.ChatUsage{PromptTokens: 150299}
+	lc.messages = convWith(trimRow{id: "c1", name: types.ToolBash, output: filler(102177, "aa")})
+
+	sent := te.fitRequestToWindow(setup, lc, "test-model")
+
+	if !strings.Contains(sent[3].Content, "trimmed to") {
+		t.Fatal("the run was handed the whole result, which the provider refuses")
+	}
+	budget := promptBudget(window, defaultSummarizeThreshold)
+	extra := reportedConversation(lc, lc.messages) - conversationTokens(buildLLMContext(lc.messages))
+	if over := conversationTokens(sent) + extra + toolBatchTokens(sent) - budget; over > 0 {
+		t.Errorf("the request is %d tokens over the budget the provider priced", over)
+	}
+}
+
 func TestFitRequestSummarizesWhenTheConversationIsTheCause(t *testing.T) {
 	chdirRepoRoot(t)
 	te, setup, lc := gateSetup(t, 1000, "SUMMARY-GATE")

@@ -79,11 +79,21 @@ func conversationTokens(messages []types.ChatMessage) int {
 	return history
 }
 
+// lastReportedCount is the provider's own count for this conversation: the one it gave this run's last call,
+// or the one stored on the turn a resumed run rebuilt from. It is 0 only where nothing ever reported one.
+func lastReportedCount(lc *loopContext) int {
+	if lc.usage != nil && lc.usage.PromptTokens > 0 {
+		return lc.usage.PromptTokens
+	}
+	return lc.reportedPrompt
+}
+
 // reportedConversation is what the provider counted for the conversation at its last call, plus the answer it
 // gave and the results appended since. A word count only reads message text, so it cannot price the system
 // prompt, the tool definitions or the provider's tokenizer.
 func reportedConversation(lc *loopContext, messages []types.ChatMessage) int {
-	if lc.usage == nil || lc.usage.PromptTokens <= 0 {
+	counted := lastReportedCount(lc)
+	if counted <= 0 {
 		return 0
 	}
 	last := -1
@@ -103,7 +113,7 @@ func reportedConversation(lc *loopContext, messages []types.ChatMessage) int {
 		}
 	}
 	appended := estimatePromptTokens(messages[last:])
-	return lc.usage.PromptTokens + appended - toolBatchTokens(messages)
+	return counted + appended - toolBatchTokens(messages)
 }
 
 // fitRequestToWindow returns the messages one LLM call is sent, made to fit the model's window: a

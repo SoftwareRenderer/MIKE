@@ -6,6 +6,24 @@ import (
 	"mike/backend/types"
 )
 
+// lastReportedPrompt walks back to the newest assistant row the provider answered.
+func TestLastReportedPrompt(t *testing.T) {
+	t.Parallel()
+	rows := []types.TaskMessage{
+		{Role: "assistant", PromptTokens: 100},
+		{Role: "tool_call"},
+		{Role: "assistant", PromptTokens: 5000},
+		{Role: "tool_call"},
+		{Role: "user"},
+	}
+	if got := lastReportedPrompt(rows); got != 5000 {
+		t.Errorf("lastReportedPrompt = %d, want the newest answered turn at 5000", got)
+	}
+	if got := lastReportedPrompt([]types.TaskMessage{{Role: "assistant"}, {Role: "user"}}); got != 0 {
+		t.Errorf("lastReportedPrompt = %d, want 0 when no row holds a count", got)
+	}
+}
+
 // A tool_call is sent with its arguments, which is how a long command reaches the model.
 func TestEstimatePromptTokensCountsToolCallArguments(t *testing.T) {
 	t.Parallel()

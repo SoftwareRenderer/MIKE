@@ -49,6 +49,10 @@ could not see, because trimming against the estimate alone stops too late and re
 limit anyway. A summarization newer than that answer prices nothing: it replaced the conversation the number
 described.
 
+A resumed run has made no call, so `conversationFromDB` carries over the count stored on the newest assistant
+row. Without it the first call of every resumed run is priced by estimate alone, which is how a task that
+already failed on window size fails again the moment it is retried.
+
 Two triggers can ask for a summary in one iteration — the usage trigger `maybeAutoSummarize` and the cause
 rule here — and both reach the provider through `summarizeNow`, which holds the one rule that keeps that
 from costing two summaries: `loopContext.summarizedAtLen` is the conversation length a summarization left
@@ -66,5 +70,6 @@ the model needed, on a number nothing told us.
 `go test ./backend/exec/ -run 'TestPromptBudget|TestTrimToFit|TestFitRequest|TestGate|TestRunTrims'` —
 `TestRunTrimsAnOversizedReadBeforeTheProviderSeesIt` runs a task end to end and judges the bytes the provider
 was handed. `TestRunTrimsWhatTheReportedUsagePutOverBudget` runs one against a provider that reported a usage
-leaving no room at all. A gate that stopped being wired, or stopped believing the provider, fails there rather
-than quietly.
+leaving no room at all. `TestFitRequestPricesAResumedConversationFromTheStoredCount` covers the resumed run,
+which has no live usage to price by. A gate that stopped being wired, or stopped believing the provider, fails
+there rather than quietly.

@@ -61,7 +61,7 @@ func TestConversationWindowSendsWhatTheWholeThreadSends(t *testing.T) {
 		t.Fatalf("read the whole thread: %v", err)
 	}
 	whole := buildMessagesFromDB(stored, wholeRows, worktree, scope)
-	windowed, _ := te.conversationFromDB(task, worktree, scope)
+	windowed, _, _ := te.conversationFromDB(task, worktree, scope)
 
 	wholePayload, windowedPayload := buildLLMContext(whole), buildLLMContext(windowed)
 	if len(wholePayload) < 3 {

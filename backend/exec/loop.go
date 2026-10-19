@@ -338,6 +338,10 @@ type loopContext struct {
 	sandboxEnabled bool
 	callStartTime  time.Time // start of current LLM call (for per-call Duration)
 	usage          *types.ChatUsage
+	// reportedPrompt is the token count the provider gave for the stored turn this conversation was rebuilt
+	// from. A run starting from stored rows has made no call yet, and this is the only measurement of what
+	// that conversation costs that was not estimated.
+	reportedPrompt int
 	// summarizedAtLen is the conversation length a summarization last produced.
 	summarizedAtLen int
 	// pendingAdvisories holds lsp notes collected during tool execution
@@ -531,7 +535,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 	}
 
 	// Read last, so the conversation is current when the first call is made.
-	messages, updatedTask := te.conversationFromDB(setup.task, setup.worktreePath, setup.promptScope())
+	messages, updatedTask, storedPrompt := te.conversationFromDB(setup.task, setup.worktreePath, setup.promptScope())
 	setup.task = updatedTask
 
 	// Remove duplicate user messages that may occur during regeneration due to
@@ -556,6 +560,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 		providerName:   providerName,
 		contextWindow:  contextWindow,
 		sandboxEnabled: setup.sandboxEnabled,
+		reportedPrompt: storedPrompt,
 	}
 
 	// Carry over the accumulated session cost from prior runs/executors so the badge
@@ -894,7 +899,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 				lc.reasoningContent.Reset()
 				lc.clearToolCalls()
 				lc.finishReason = ""
-				lc.messages, setup.task = te.conversationFromDB(setup.task, setup.worktreePath, setup.promptScope())
+				lc.messages, setup.task, _ = te.conversationFromDB(setup.task, setup.worktreePath, setup.promptScope())
 				continue
 			}
 			// New user message — cancel current LLM call.
@@ -936,7 +941,7 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 			if !hadRegenerate {
 				// Re-sync with DB to pick up user messages (already created by HandleSend)
 				// and any deleted messages. Do NOT append — conversationFromDB already includes them.
-				lc.messages, setup.task = te.conversationFromDB(setup.task, setup.worktreePath, setup.promptScope())
+				lc.messages, setup.task, _ = te.conversationFromDB(setup.task, setup.worktreePath, setup.promptScope())
 			}
 
 			// Apply model overrides from queued messages.
@@ -1675,7 +1680,7 @@ func (te *TaskExecutor) foldQueuedUserMessage(setup *taskExecSetup, lc *loopCont
 	}
 	// Re-sync with DB to pick up the user message (already created by HandleSend)
 	// and any deleted messages. Do NOT append — conversationFromDB already includes it.
-	lc.messages, setup.task = te.conversationFromDB(setup.task, setup.worktreePath, setup.promptScope())
+	lc.messages, setup.task, _ = te.conversationFromDB(setup.task, setup.worktreePath, setup.promptScope())
 }
 
 // adoptMessageModel points the run at the provider and model a queued message names.
@@ -1776,7 +1781,7 @@ idleWait:
 			lc.detector.reset() // context changed, clear stale text window
 			lc.detector.clearHints()
 			// Re-sync from DB to pick up any messages queued during summarization, and any deleted ones.
-			lc.messages, setup.task = te.conversationFromDB(setup.task, setup.worktreePath, setup.promptScope())
+			lc.messages, setup.task, _ = te.conversationFromDB(setup.task, setup.worktreePath, setup.promptScope())
 			// This conversation is what that summarization produced, so the auto triggers wait for it
 			// to grow.
 			lc.summarizedAtLen = len(lc.messages)
@@ -1863,16 +1868,27 @@ func (te *TaskExecutor) persistAndSendError(taskID, message, code string, turnOv
 	}
 }
 
-// conversationFromDB rebuilds the loop's conversation from the newest summarization row onward,
-// which is all buildLLMContext keeps of a rebuilt conversation anyway. It reads the task as stored
-// now — a fork cleanup can move the run to another thread mid-turn — and rebuilds rather than
-// edits, because rows are added and deleted outside the run.
-func (te *TaskExecutor) conversationFromDB(task *types.Task, worktreePath string, scope promptScope) ([]types.ChatMessage, *types.Task) {
+// conversationFromDB rebuilds the loop's conversation from the newest summarization row onward, which is
+// all buildLLMContext keeps of a rebuilt conversation anyway. It reads the task as stored now — a fork
+// cleanup can move the run to another thread mid-turn — and rebuilds rather than edits, because rows are
+// added and deleted outside the run. The token count it returns is the provider's own last measurement of
+// this conversation, which is the one number a resumed run cannot estimate for itself.
+func (te *TaskExecutor) conversationFromDB(task *types.Task, worktreePath string, scope promptScope) ([]types.ChatMessage, *types.Task, int) {
 	if updated, err := te.store.GetTaskByID(task.ID); err == nil && updated != nil {
 		task = updated
 	}
 	rows, _ := te.store.GetTaskMessagesFromSummary(task.ID, task.CurrentThreadID)
-	return buildMessagesFromDB(task, rows, worktreePath, scope), task
+	return buildMessagesFromDB(task, rows, worktreePath, scope), task, lastReportedPrompt(rows)
+}
+
+// lastReportedPrompt is the prompt count the provider answered the newest assistant row with.
+func lastReportedPrompt(rows []types.TaskMessage) int {
+	for i := len(rows) - 1; i >= 0; i-- {
+		if rows[i].Role == "assistant" && rows[i].PromptTokens > 0 {
+			return rows[i].PromptTokens
+		}
+	}
+	return 0
 }
 
 // truncateForRegenerate drops the last user message and everything after it from the
