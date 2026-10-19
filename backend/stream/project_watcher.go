@@ -3,35 +3,24 @@ package stream
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
 
 	"mike/backend/fsutil"
+	"mike/backend/git"
 	"mike/pkg/logging"
 )
 
-// isInternalPathInProject checks if absPath is .git or flight recorder relative to projectRoot.
+// isInternalPathInProject judges a watched event by the same internal-file rule the diff panel uses.
+// That rule reads a project-relative path, so the absolute event name is made relative first.
 func isInternalPathInProject(absPath, projectRoot string) bool {
 	rel, err := filepath.Rel(projectRoot, absPath)
 	if err != nil {
 		return false
 	}
-	if rel == ".git" || strings.HasPrefix(rel, ".git"+string(filepath.Separator)) {
-		return true
-	}
-	for _, part := range strings.Split(rel, string(filepath.Separator)) {
-		if part == ".git" {
-			return true
-		}
-	}
-	base := filepath.Base(absPath)
-	if base == "kanban.trace" || base == "kanban.trace.old" {
-		return true
-	}
-	return false
+	return git.IsInternalFile(rel)
 }
 
 type fsBroadcastFn func(projectID, repoRoot, op, path string)

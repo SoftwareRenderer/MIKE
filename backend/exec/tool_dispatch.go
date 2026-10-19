@@ -466,6 +466,11 @@ func (r *toolRunner) runBash(ctx context.Context, args map[string]any, env *tool
 	// The cap lands before the reason goes in front of the output: a command that exits non-zero emits the
 	// same bytes a succeeding one does.
 	if len(out) > maxToolResultBytes {
+		// This cut removes the capture's own marker, which held the dropped byte count,
+		// so it is logged here.
+		logging.For(logging.Tools).With(logging.TaskID, env.task.ID).Warnf(
+			"dropped %d bytes of tool output beyond the %d byte per-result cap",
+			len(out)-maxToolResultBytes, maxToolResultBytes)
 		out = out[:maxToolResultBytes] + commandCutNotice
 	}
 	if err != nil {

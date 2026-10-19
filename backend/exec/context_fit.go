@@ -92,14 +92,14 @@ func lastReportedCount(lc *loopContext) int {
 // reportedConversation is what the provider counted for the conversation at its last call, plus the answer it
 // gave and the results appended since. A word count only reads message text, so it cannot price the system
 // prompt, the tool definitions or the provider's tokenizer.
-func reportedConversation(lc *loopContext, messages []types.ChatMessage) int {
+func reportedConversation(lc *loopContext) int {
 	counted := lastReportedCount(lc)
 	if counted <= 0 {
 		return 0
 	}
 	last := -1
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == "assistant" {
+	for i := len(lc.messages) - 1; i >= 0; i-- {
+		if lc.messages[i].Role == "assistant" {
 			last = i
 			break
 		}
@@ -107,14 +107,14 @@ func reportedConversation(lc *loopContext, messages []types.ChatMessage) int {
 	if last < 0 {
 		return 0
 	}
-	for _, m := range messages[last+1:] {
+	for _, m := range lc.messages[last+1:] {
 		if m.Role == "summarization" {
 			// The summary replaced the conversation this count describes.
 			return 0
 		}
 	}
-	appended := estimatePromptTokens(messages[last:])
-	return counted + appended - toolBatchTokens(messages)
+	appended := estimatePromptTokens(lc.messages[last:])
+	return counted + appended - toolBatchTokens(lc.messages)
 }
 
 // fitRequestToWindow returns the messages one LLM call is sent, made to fit the model's window: a
@@ -128,7 +128,7 @@ func (te *TaskExecutor) fitRequestToWindow(setup *taskExecSetup, lc *loopContext
 	}
 	estimated, history := requestSplit(llmMessages)
 	// extra is the part of the conversation the provider counted and the estimate did not.
-	extra := reportedConversation(lc, lc.messages) - history
+	extra := reportedConversation(lc) - history
 	if extra < 0 {
 		extra = 0
 	}

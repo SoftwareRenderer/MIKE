@@ -169,7 +169,7 @@ func TestFitRequestTrimsTheOversizedResultOfAWindowFullConversation(t *testing.T
 		t.Fatal("the run was handed the whole result, which the provider refuses")
 	}
 	budget := promptBudget(window, defaultSummarizeThreshold)
-	extra := reportedConversation(lc, lc.messages) - conversationTokens(buildLLMContext(lc.messages))
+	extra := reportedConversation(lc) - conversationTokens(buildLLMContext(lc.messages))
 	if over := conversationTokens(sent) + extra + toolBatchTokens(sent) - budget; over > 0 {
 		t.Errorf("the request is %d tokens over the budget the provider priced", over)
 	}
@@ -191,7 +191,7 @@ func TestFitRequestTrimsADenseResultThatOnlyItsBytesPrice(t *testing.T) {
 		t.Fatalf("the megabyte went out whole: %d bytes of the %d sent back", len(sent[3].Content), len(blob))
 	}
 	budget := promptBudget(window, defaultSummarizeThreshold)
-	extra := reportedConversation(lc, lc.messages) - conversationTokens(buildLLMContext(lc.messages))
+	extra := reportedConversation(lc) - conversationTokens(buildLLMContext(lc.messages))
 	if over := conversationTokens(sent) + extra + toolBatchTokens(sent) - budget; over > 0 {
 		t.Errorf("the request is %d tokens over the budget the provider priced", over)
 	}
@@ -240,7 +240,7 @@ func TestFitRequestTrimsWhatTheProviderPricedOverBudget(t *testing.T) {
 	if n := summarizationRows(t, te, setup.task.ID, "thread-1"); n != 0 {
 		t.Errorf("%d summarization rows, want 0: the conversation is inside what the provider priced", n)
 	}
-	extra := reportedConversation(lc, lc.messages) - conversationTokens(buildLLMContext(lc.messages))
+	extra := reportedConversation(lc) - conversationTokens(buildLLMContext(lc.messages))
 	if over := conversationTokens(sent) + extra + toolBatchTokens(sent) - budget; over > 0 {
 		t.Errorf("the request sent is %d tokens over what the provider priced as the budget", over)
 	}
@@ -258,7 +258,7 @@ func TestFitRequestIgnoresAReportedCountOlderThanTheSummary(t *testing.T) {
 	}
 	lc.usage = &types.ChatUsage{PromptTokens: 50000}
 
-	if got := reportedConversation(lc, lc.messages); got != 0 {
+	if got := reportedConversation(lc); got != 0 {
 		t.Errorf("reported conversation = %d tokens, want 0: that number prices rows that are gone", got)
 	}
 	sent := te.fitRequestToWindow(setup, lc, "test-model")

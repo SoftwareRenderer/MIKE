@@ -32,7 +32,6 @@ describe('the editor-drafts record', () => {
 
         const draft = await storage.getEditorDraft(PATH);
         expect(draft).toMatchObject({ text: 'typed in the editor\n', base: 'what the file held\n' });
-        expect(typeof draft!.ts).toBe('number');
     });
 
     it('reads a bare string an older build wrote as a draft with no base', async () => {
@@ -43,7 +42,6 @@ describe('the editor-drafts record', () => {
         expect(await storage.getEditorDraft(PATH)).toEqual({
             text: 'a buffer with no recorded base',
             base: null,
-            ts: 0,
         });
     });
 

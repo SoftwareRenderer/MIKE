@@ -32,7 +32,7 @@ vi.mock('$lib/stores', () => ({
 }));
 
 // What the browser's mirror holds, per path, as the real storage module would.
-const drafts: Record<string, { text: string; base: string | null; ts: number }> = {};
+const drafts: Record<string, { text: string; base: string | null }> = {};
 const histories: Record<string, { ts: number; base: string; deltas: unknown[] }> = {};
 const draftWrites: Array<{ path: string; text: string; base: string | null }> = [];
 const historyWrites: Array<{ path: string }> = [];
@@ -41,7 +41,7 @@ vi.mock('$lib/storage', () => ({
     getEditorDraft: (path: string) => Promise.resolve(drafts[path] ?? null),
     setEditorDraft: (path: string, text: string, base: string | null) => {
         draftWrites.push({ path, text, base });
-        drafts[path] = { text, base, ts: 1 };
+        drafts[path] = { text, base };
         return Promise.resolve();
     },
     clearEditorDraft: (path: string) => { delete drafts[path]; return Promise.resolve(); },
@@ -174,7 +174,7 @@ describe('a reload taken while a persistence wait is still open', () => {
 
 describe('a reopen whose draft and undo chain disagree', () => {
     it('paints and saves the draft, which is the buffer the reader left', async () => {
-        drafts[A] = { text: 'typed and never saved', base: DISK[A], ts: 1 };
+        drafts[A] = { text: 'typed and never saved', base: DISK[A] };
         histories[A] = {
             ts: Date.now(),
             base: DISK[A],
@@ -190,7 +190,7 @@ describe('a reopen whose draft and undo chain disagree', () => {
     });
 
     it('keeps undo when the chain reaches the buffer the draft holds', async () => {
-        drafts[A] = { text: 'typed and never saved', base: DISK[A], ts: 1 };
+        drafts[A] = { text: 'typed and never saved', base: DISK[A] };
         histories[A] = {
             ts: Date.now(),
             base: DISK[A],

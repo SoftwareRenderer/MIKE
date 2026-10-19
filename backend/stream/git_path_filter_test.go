@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"path/filepath"
 	"testing"
 
 	"mike/backend/git"
@@ -159,5 +160,23 @@ func TestFilterInternalPathsFromHashes_empty(t *testing.T) {
 	result = filterInternalPathsFromHashes(map[string]string{})
 	if len(result) != 0 {
 		t.Errorf("expected empty map for empty input, got %v", result)
+	}
+}
+
+func TestWatchedInternalPathIsJudgedFromTheProjectRoot(t *testing.T) {
+	root := filepath.Join(string(filepath.Separator), "work", "repo")
+	for _, tc := range []struct {
+		abs  string
+		want bool
+	}{
+		{filepath.Join(root, ".git", "index"), true},
+		{filepath.Join(root, "vendor", "lib", ".git"), true},
+		{filepath.Join(root, "data", "kanban.trace"), true},
+		{filepath.Join(root, "src", "main.go"), false},
+		{filepath.Join(root, "kanban.trace.bak"), false},
+	} {
+		if got := isInternalPathInProject(tc.abs, root); got != tc.want {
+			t.Errorf("isInternalPathInProject(%q, %q) = %v, want %v", tc.abs, root, got, tc.want)
+		}
 	}
 }

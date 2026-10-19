@@ -39,7 +39,7 @@ vi.mock('$lib/stores', () => ({
 const drafts: Record<string, { text: string; base: string | null }> = {};
 
 vi.mock('$lib/storage', () => ({
-    getEditorDraft: (path: string) => Promise.resolve(drafts[path] ? { ...drafts[path], ts: 1 } : null),
+    getEditorDraft: (path: string) => Promise.resolve(drafts[path] ?? null),
     setEditorDraft: (path: string, text: string, base: string | null) => {
         drafts[path] = { text, base };
         return Promise.resolve();

@@ -256,17 +256,15 @@ export interface EditorDraft {
     text: string;
     /** What the file held when `text` diverged from it; null when that is unknown. */
     base: string | null;
-    /** When the buffer was last written. Nothing evicts on it: an unsaved buffer outlives any age. */
-    ts: number;
 }
 
 /** Read one stored value as a draft, including the bare string an older build wrote. */
 function asEditorDraft(raw: unknown): EditorDraft | null {
-    if (typeof raw === 'string') return { text: raw, base: null, ts: 0 };
+    if (typeof raw === 'string') return { text: raw, base: null };
     if (raw && typeof raw === 'object') {
         const rec = raw as Partial<EditorDraft>;
         if (typeof rec.text === 'string') {
-            return { text: rec.text, base: typeof rec.base === 'string' ? rec.base : null, ts: rec.ts ?? 0 };
+            return { text: rec.text, base: typeof rec.base === 'string' ? rec.base : null };
         }
     }
     return null;
@@ -282,7 +280,7 @@ export async function getEditorDraft(path: string): Promise<EditorDraft | null> 
  * or written to that file, never the buffer itself, which would make the merge do nothing.
  */
 export async function setEditorDraft(path: string, text: string, base: string | null): Promise<void> {
-    return dbPut(STORE_EDITOR_DRAFTS, path, { text, base, ts: Date.now() } satisfies EditorDraft);
+    return dbPut(STORE_EDITOR_DRAFTS, path, { text, base } satisfies EditorDraft);
 }
 
 /** Remove draft content for a file. */

@@ -160,3 +160,37 @@ func TestBashOutputIsCappedWhicheverWayTheCommandEnds(t *testing.T) {
 		}
 	}
 }
+
+// This test is not parallel, because TestSink redirects the process log for its duration.
+func TestBashOutputCapReportsTheDroppedBytesToTheLog(t *testing.T) {
+	buf, restore := logging.TestSink()
+	defer restore()
+
+	worktree := t.TempDir()
+	te := newToolTestExecutor(t, worktree)
+	task := makeTestTask(t, te.store, "proj-cutlog", "task-cutlog")
+
+	te.executeTool(context.Background(), types.ToolBash,
+		map[string]any{"command": "yes filler-line | head -n 200000", "timeout": float64(30)},
+		worktree, task, &executionState{}, nil)
+
+	got := buf.String()
+	if !strings.Contains(got, "component=tools") || !strings.Contains(got, "task_id=task-cutlog") {
+		t.Fatalf("the cut must be attributable, got %q", got)
+	}
+	if !strings.Contains(got, strconv.Itoa(maxToolResultBytes)) {
+		t.Errorf("the report should name the cap it applied, got %q", got)
+	}
+	dropped := 0
+	if i := strings.Index(got, "dropped "); i >= 0 {
+		for _, field := range strings.Fields(got[i:]) {
+			if n, err := strconv.Atoi(field); err == nil {
+				dropped = n
+				break
+			}
+		}
+	}
+	if dropped <= 0 {
+		t.Errorf("a cut must report the bytes it dropped, got %q", got)
+	}
+}

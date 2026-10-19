@@ -221,8 +221,9 @@ Tests: `backend/api/git_diff_file_path_test.go`, `git_diff_file_full_test.go`,
 - **What a tool hands the model is capped again, whichever way it ended.** `maxToolResultBytes` bounds a
   `bash` result *before* its failure reason is prefixed: a command that exits non-zero emits the same bytes
   as one that succeeds. A `read_file` window is bounded after its `offset`/`limit` cut. The capture limit
-  bounds the process; this bounds the conversation. `backend/exec/output_limits_test.go` is what fails when a
-  path skips it.
+  bounds the process; this bounds the conversation. This cut lands past the capture's own trailing marker,
+  so where the capture dropped bytes, its count is reported to the log at this cut instead of reaching the
+  model. `backend/exec/output_limits_test.go` is what fails when a path skips it.
 - `GET /api/fs/read` checks size **before** reading — `os.Lstat` for the working tree,
   `git cat-file -s` (`gitBlobSize`) for `?ref=` — so a request for a 4 GB file costs one subprocess
   instead of 4 GB.
