@@ -175,6 +175,34 @@ func TestFitRequestTrimsTheOversizedResultOfAWindowFullConversation(t *testing.T
 	}
 }
 
+// The same conversation with the result the word estimate cannot see: a megabyte of base64 answers a
+// command for a build artifact, and the provider counts what a word count calls free.
+func TestFitRequestTrimsADenseResultThatOnlyItsBytesPrice(t *testing.T) {
+	t.Parallel()
+	const window = 262144
+	te, setup, lc := gateSetup(t, window)
+	lc.usage = &types.ChatUsage{PromptTokens: 150299}
+	blob := denseBlob(1<<20, 76)
+	lc.messages = convWith(trimRow{id: "c1", name: types.ToolBash, output: blob})
+
+	sent := te.fitRequestToWindow(setup, lc, "test-model")
+
+	if !strings.Contains(sent[3].Content, "trimmed to") {
+		t.Fatalf("the megabyte went out whole: %d bytes of the %d sent back", len(sent[3].Content), len(blob))
+	}
+	budget := promptBudget(window, defaultSummarizeThreshold)
+	extra := reportedConversation(lc, lc.messages) - conversationTokens(buildLLMContext(lc.messages))
+	if over := conversationTokens(sent) + extra + toolBatchTokens(sent) - budget; over > 0 {
+		t.Errorf("the request is %d tokens over the budget the provider priced", over)
+	}
+	if n := summarizationRows(t, te, setup.task.ID, "thread-1"); n != 0 {
+		t.Errorf("%d summarization rows, want 0: the output is the cause, not the conversation", n)
+	}
+	if lc.messages[3].Content != blob {
+		t.Error("the trim reached the conversation; the stored row keeps every byte")
+	}
+}
+
 func TestFitRequestSummarizesWhenTheConversationIsTheCause(t *testing.T) {
 	chdirRepoRoot(t)
 	te, setup, lc := gateSetup(t, 1000, "SUMMARY-GATE")

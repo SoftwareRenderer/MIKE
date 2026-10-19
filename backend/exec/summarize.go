@@ -230,9 +230,18 @@ func formatChatHistory(messages []types.ChatMessage, skipSummaryMsg bool) string
 
 var wordRe = regexp.MustCompile(`\S+`)
 
+// minBytesPerToken is the tightest packing the estimate believes: whitespace-poor text — base64, a minified
+// JSON document, a megabyte-long log line — has almost no words, and a word count alone prices it as free.
+const minBytesPerToken = 4
+
+// estimateTokensFromText is a floor on what a provider charges, never a tokenizer: the larger of the word
+// count and the byte count.
 func estimateTokensFromText(text string) int {
-	words := wordRe.FindAllString(text, -1)
-	return int(float64(len(words)) * 1.3)
+	byWords := int(float64(len(wordRe.FindAllString(text, -1))) * 1.3)
+	if byBytes := len(text) / minBytesPerToken; byBytes > byWords {
+		return byBytes
+	}
+	return byWords
 }
 
 func estimatePromptTokens(messages []types.ChatMessage) int {

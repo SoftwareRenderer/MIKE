@@ -108,6 +108,15 @@ func failed(err error) (string, bool) {
 	return fmt.Sprintf("Error: %v", err), false
 }
 
+// maxToolResultBytes is what one tool result may cost the conversation: a command's output and a read's
+// windowed content are both held to it, and every cut says so, because a truncated result that reads as the
+// whole one sends the model off to conclude something that isn't there.
+const (
+	maxToolResultBytes = 50 * 1024
+	commandCutNotice   = "\n\n... (output truncated at 50KB) ..."
+	readCutNotice      = "\n\n... (file truncated at 50KB, use offset/limit parameters to read remaining lines) ..."
+)
+
 // orFail answers with a handler's own result, or with its error in the failed shape.
 func orFail(result string, err error) (string, bool) {
 	if err != nil {
@@ -239,9 +248,8 @@ func (r *toolRunner) runReadFile(ctx context.Context, args map[string]any, env *
 	}
 	// Truncate to keep a huge file out of the WebSocket frames: the LLM doesn't need all of it, and
 	// the notice tells it more exists.
-	const maxReadSize = 50 * 1024 // 50KB
-	if len(content) > maxReadSize {
-		content = content[:maxReadSize] + "\n\n... (file truncated at 50KB, use offset/limit parameters to read remaining lines) ..."
+	if len(content) > maxToolResultBytes {
+		content = content[:maxToolResultBytes] + readCutNotice
 	}
 	return content, true
 }
@@ -455,12 +463,13 @@ func (r *toolRunner) runBash(ctx context.Context, args map[string]any, env *tool
 	// Strip ANSI escape codes so the LLM sees clean text and the frontend displays it without
 	// garbled sequences.
 	out = stripANSI(out)
+	// The cap lands before the reason goes in front of the output: a command that exits non-zero emits the
+	// same bytes a succeeding one does.
+	if len(out) > maxToolResultBytes {
+		out = out[:maxToolResultBytes] + commandCutNotice
+	}
 	if err != nil {
 		return fmt.Sprintf("Failed: %v\n%s", err, out), false
-	}
-	const maxOutputSize = 50 * 1024 // 50KB
-	if len(out) > maxOutputSize {
-		out = out[:maxOutputSize] + "\n\n... (output truncated at 50KB) ..."
 	}
 	return out, true
 }

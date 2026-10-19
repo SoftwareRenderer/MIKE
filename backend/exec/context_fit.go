@@ -3,6 +3,7 @@ package exec
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"mike/backend/types"
 	"mike/pkg/logging"
@@ -234,27 +235,39 @@ func cutToTokens(text string, target int) string {
 	if target <= 0 || estimateTokensFromText(text) <= target {
 		return text
 	}
-	// The estimate counts words, so the token target becomes a word count.
-	room := int(float64(target) / 1.3)
-	if room <= 0 {
-		return ""
-	}
+	// The estimate counts words and bytes, so the target becomes the room each of them leaves.
+	words := int(float64(target) / 1.3)
+	bytes := target * minBytesPerToken
 	lines := strings.Split(text, "\n")
 	kept := 0
 	for kept < len(lines) {
 		n := len(strings.Fields(lines[kept]))
-		if n > room {
+		size := len(lines[kept]) + 1
+		if n > words || size > bytes {
 			break
 		}
-		room -= n
+		words -= n
+		bytes -= size
 		kept++
 	}
-	if kept == 0 {
-		words := strings.Fields(lines[0])
-		if len(words) > room {
-			words = words[:room]
-		}
-		return strings.Join(words, " ")
+	if kept > 0 {
+		return strings.Join(lines[:kept], "\n")
 	}
-	return strings.Join(lines[:kept], "\n")
+	return cutDenseLine(lines[0], target)
+}
+
+// cutDenseLine keeps the prefix of a line too dense to stop at a break: the byte room the target implies
+// decides where it ends, and the words inside that prefix are then counted back.
+func cutDenseLine(line string, target int) string {
+	end := min(target*minBytesPerToken, len(line))
+	for end > 0 && !utf8.RuneStart(line[end-1]) {
+		end--
+	}
+	cut := line[:end]
+	if keep := int(float64(target) / 1.3); len(strings.Fields(cut)) > keep {
+		if ends := wordRe.FindAllStringIndex(cut, keep+1); len(ends) > keep {
+			cut = cut[:ends[keep][0]]
+		}
+	}
+	return cut
 }

@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"strings"
 	"testing"
 
 	"mike/backend/types"
@@ -36,6 +37,19 @@ func TestEstimatePromptTokensCountsToolCallArguments(t *testing.T) {
 	args := estimatePromptTokens([]types.ChatMessage{withCall})
 	if got := args - bare; got < 1900 || got > 2100 {
 		t.Errorf("a 2000 token command counted %d tokens", got)
+	}
+}
+
+// A megabyte of base64 has a word per line at most, so only its bytes tell the gate what it costs.
+func TestEstimateTokensPricesDenseTextByItsBytes(t *testing.T) {
+	t.Parallel()
+	blob := denseBlob(1<<20, 76)
+	if got, want := estimateTokensFromText(blob), len(blob)/minBytesPerToken; got < want {
+		t.Errorf("a %d byte blob estimated %d tokens, want at least its byte count over %d", len(blob), got, minBytesPerToken)
+	}
+	spaced := strings.Repeat("a ", 40)
+	if got, want := estimateTokensFromText(spaced), int(float64(len(strings.Fields(spaced)))*1.3); got != want {
+		t.Errorf("text the word count already over-prices came to %d tokens, want %d", got, want)
 	}
 }
 

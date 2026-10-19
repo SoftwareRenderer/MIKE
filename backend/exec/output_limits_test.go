@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"mike/backend/toolresult"
+	"mike/backend/types"
 	"mike/pkg/bridge/protocol"
 	"mike/pkg/logging"
 )
@@ -121,5 +122,41 @@ func TestReadFileToolRefusesAFilePastTheLimit(t *testing.T) {
 	}
 	if !strings.Contains(result, "limit") {
 		t.Errorf("the model should be told the limit, got: %q", result)
+	}
+}
+
+// A command that exits non-zero prints the same bytes a succeeding one does, and its output is a tool result
+// like any other.
+func TestBashOutputIsCappedWhicheverWayTheCommandEnds(t *testing.T) {
+	t.Parallel()
+	worktree := t.TempDir()
+	te := newToolTestExecutor(t, worktree)
+	task := makeTestTask(t, te.store, "proj-bashcap", "task-bashcap")
+
+	for _, tc := range []struct {
+		name    string
+		command string
+		wantOK  bool
+	}{
+		{name: "succeeds", command: "yes filler-line | head -n 200000", wantOK: true},
+		{name: "fails", command: "yes filler-line | head -n 200000; exit 3", wantOK: false},
+	} {
+		result, ok := te.executeTool(context.Background(), types.ToolBash,
+			map[string]any{"command": tc.command, "timeout": float64(30)}, worktree, task, &executionState{}, nil)
+
+		if ok != tc.wantOK {
+			t.Errorf("%s: ok = %v, want %v", tc.name, ok, tc.wantOK)
+		}
+		// The failure reason rides in front of the output, which is the part the cap holds.
+		output := result
+		if line, rest, found := strings.Cut(result, "\n"); found && strings.HasPrefix(line, "Failed:") {
+			output = rest
+		}
+		if len(output) > maxToolResultBytes+len(commandCutNotice) {
+			t.Errorf("%s: the model was handed %d bytes of output, want the cap of %d", tc.name, len(output), maxToolResultBytes)
+		}
+		if !strings.Contains(result, "output truncated at") {
+			t.Errorf("%s: the cut is silent, so the tail reads as the whole log", tc.name)
+		}
 	}
 }

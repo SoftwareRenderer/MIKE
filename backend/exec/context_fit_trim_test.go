@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"mike/backend/types"
 )
@@ -42,6 +43,20 @@ func convWith(rows ...trimRow) []types.ChatMessage {
 	}
 	msgs = append(msgs, types.ChatMessage{Role: "assistant", ToolCalls: calls})
 	return append(msgs, tools...)
+}
+
+// denseBlob is output with hardly any whitespace to price it: a base64 dump, a minified JSON document.
+// width is the characters between newlines, 0 for one unbroken line.
+func denseBlob(bytes, width int) string {
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+	var sb strings.Builder
+	for i := 0; sb.Len() < bytes; i++ {
+		sb.WriteByte(alphabet[(i*13+5)%len(alphabet)])
+		if width > 0 && sb.Len()%width == 0 {
+			sb.WriteByte('\n')
+		}
+	}
+	return sb.String()
 }
 
 func toolContents(msgs []types.ChatMessage) []string {
@@ -182,6 +197,28 @@ func TestTrimMarkerNamesTheRoutePerTool(t *testing.T) {
 	}
 }
 
+// A dense result is priced by its bytes, so it reaches the floor a word-priced result does.
+func TestTrimToFitCutsADenseResultToTheFloor(t *testing.T) {
+	t.Parallel()
+	conv := convWith(trimRow{id: "c1", name: types.ToolBash, output: denseBlob(1<<20, 0)})
+
+	kept, reports := trimToFit(conv, 600)
+
+	if len(reports) != 1 {
+		t.Fatalf("%d results trimmed, want the megabyte cut: %+v", len(reports), reports)
+	}
+	body, _, found := strings.Cut(kept[3].Content, "… (trimmed")
+	if !found {
+		t.Fatal("no trim notice on the cut result")
+	}
+	if got := estimateTokensFromText(body); got < minKeptTokens*3/4 {
+		t.Errorf("a dense cut kept %d tokens, below the floor of %d", got, minKeptTokens)
+	}
+	if len(body) >= len(conv[3].Content) {
+		t.Errorf("the megabyte came back whole: %d bytes", len(body))
+	}
+}
+
 func TestTrimToFitDoesNotModifyTheConversation(t *testing.T) {
 	t.Parallel()
 	conv := convWith(trimRow{id: "c1", name: types.ToolReadFile, output: filler(3000, "aa")})
@@ -231,6 +268,47 @@ func TestCutToTokensCutsASingleLongLine(t *testing.T) {
 	}
 	if got := estimateTokensFromText(cut); got > 100 {
 		t.Errorf("cut estimates %d tokens, want at most 100", got)
+	}
+}
+
+// A megabyte of base64 has one word per line and no line break to stop on, so the cut has to land inside
+// the line.
+func TestCutToTokensCutsInsideADenseLine(t *testing.T) {
+	t.Parallel()
+	blob := denseBlob(1<<20, 0)
+	for _, target := range []int{1, 8, 512, 4096} {
+		cut := cutToTokens(blob, target)
+		if !strings.HasPrefix(blob, cut) {
+			t.Errorf("target %d: the cut is not a prefix of the result", target)
+		}
+		if len(cut) >= len(blob) {
+			t.Fatalf("target %d: the megabyte came back whole", target)
+		}
+		if got := estimateTokensFromText(cut); got > target {
+			t.Errorf("target %d: a dense cut estimates %d tokens", target, got)
+		}
+		if !utf8.ValidString(cut) {
+			t.Errorf("target %d: the cut split a rune", target)
+		}
+	}
+	if got := cutToTokens(denseBlob(1<<20, 0), 512); got == "" {
+		t.Error("a dense result lost everything")
+	}
+}
+
+// Whitespace-poor lines still end on a break, and the bytes decide where.
+func TestCutToTokensCutsDenseLinesOnABoundary(t *testing.T) {
+	t.Parallel()
+	blob := denseBlob(1<<20, 76)
+	cut := cutToTokens(blob, 4096)
+	if strings.Count(blob, "\n") == strings.Count(cut, "\n") {
+		t.Fatal("the cut took every line, so it cut nothing")
+	}
+	if strings.HasSuffix(cut, "\n") {
+		t.Error("the cut kept a trailing newline")
+	}
+	if got := estimateTokensFromText(cut); got > 4096 {
+		t.Errorf("a dense cut estimates %d tokens, want at most 4096", got)
 	}
 }
 

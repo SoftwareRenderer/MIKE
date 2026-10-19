@@ -10,9 +10,9 @@ finds out, because the request was already made to fit.
 - **The request being sent is the thing measured.** That is what the provider counted for the conversation at
   its last call, plus every message appended since — a read appended after the last answer is exactly the
   bytes that overflow.
-- **The provider's own count wins over a guess about it.** A word count prices message text and tool call
-  arguments; the system prompt, the tool definitions and the provider's tokenizer are in no word count. It
-  decides only where a provider reports no usage.
+- **The provider's own count wins over a guess about it.** The estimate prices message text and tool call
+  arguments by words and by bytes; the system prompt, the tool definitions and the provider's tokenizer are in
+  no estimate. It decides only where a provider reports no usage.
 - **One budget, read the same way by both triggers.** The prompt ceiling is `promptBudget`: a percentage of
   the model's window, the rest left for the answer. The same Settings value drives both.
 - **A crossing is answered by its cause.** A conversation already over budget without its newest tool
@@ -33,15 +33,18 @@ finds out, because the request was already made to fit.
 `fitRequestToWindow` is the one place a request's size is judged, and the loop builds every call through it.
 
 `promptBudget` answers the largest prompt this window accepts, and `shouldSummarize` compares against it, so
-the threshold and the ceiling cannot drift apart. `estimatePromptTokens` measures the assembled request; it
-is a word count, not a tokenizer, and the gate is deliberately pessimistic at the margin — cutting too much
-costs the model one re-read, sending too much costs a refused request.
+the threshold and the ceiling cannot drift apart. `estimatePromptTokens` measures the assembled request as the
+larger of a word count and a byte count, never as a tokenizer. The byte count is what makes whitespace-poor
+output — a base64 dump, a minified JSON document, a megabyte on one line — cost something at all: priced by
+words alone it reads as free and reaches the provider over its limit. The gate is deliberately pessimistic at
+the margin — cutting too much costs the model one re-read, sending too much costs a refused request.
 
 `classifyOverflow` splits the request with `conversationTokens`: what it would cost without the newest run of
 tool results. Over budget with the batch gone means the conversation is the cause, and `summarizeNow`
 compacts it. Otherwise `trimToFit` shortens results, oldest first, each to the room left, never below
 `minKeptTokens`, and each keeps a notice naming the route back: `offset` and `limit` for a read, a narrowed
-re-run for a command. A cut is reported to the log with its `task_id` and the count dropped.
+re-run for a command. A cut ends on a line break, or inside a line too dense to fit one. A cut is reported to
+the log with its `task_id` and the count dropped.
 
 `reportedConversation` is where the provider's count enters. It adds the answer and the results appended
 since that call to what the provider counted. The room `trimToFit` is given shrinks by whatever the estimate
@@ -71,5 +74,6 @@ the model needed, on a number nothing told us.
 `TestRunTrimsAnOversizedReadBeforeTheProviderSeesIt` runs a task end to end and judges the bytes the provider
 was handed. `TestRunTrimsWhatTheReportedUsagePutOverBudget` runs one against a provider that reported a usage
 leaving no room at all. `TestFitRequestPricesAResumedConversationFromTheStoredCount` covers the resumed run,
-which has no live usage to price by. A gate that stopped being wired, or stopped believing the provider, fails
-there rather than quietly.
+which has no live usage to price by. `TestFitRequestTrimsADenseResultThatOnlyItsBytesPrice` runs one where the
+oversized result is base64, which only the byte count prices. A gate that stopped being wired, or stopped
+believing the provider, fails there rather than quietly.
