@@ -338,6 +338,8 @@ type loopContext struct {
 	sandboxEnabled bool
 	callStartTime  time.Time // start of current LLM call (for per-call Duration)
 	usage          *types.ChatUsage
+	// summarizedAtLen is the conversation length a summarization last produced.
+	summarizedAtLen int
 	// pendingAdvisories holds lsp notes collected during tool execution
 	pendingAdvisories        []advisory
 	touchedFiles             []string
@@ -693,8 +695,8 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 		var lastProgressSend time.Time // throttle progress updates to ~1/2s
 		var lastPredictedN int         // track predicted tokens for real-time stats events
 
-		// Assemble LLM context (compresses history via summary if one exists).
-		llmMessages := buildLLMContext(lc.messages)
+		// Assemble LLM context, made to fit the window this model accepts.
+		llmMessages := te.fitRequestToWindow(setup, lc, activeModel)
 
 		// Set status before the LLM call so the frontend picks up streaming tokens.
 		setup.task.Status = types.StatusInProgress
@@ -1775,6 +1777,9 @@ idleWait:
 			lc.detector.clearHints()
 			// Re-sync from DB to pick up any messages queued during summarization, and any deleted ones.
 			lc.messages, setup.task = te.conversationFromDB(setup.task, setup.worktreePath, setup.promptScope())
+			// This conversation is what that summarization produced, so the auto triggers wait for it
+			// to grow.
+			lc.summarizedAtLen = len(lc.messages)
 			queuedNow, _ := te.store.GetLastUserMessageInThread(queuedThread)
 			hasQueuedInput := queuedNow != "" && queuedNow != queuedBefore
 			// Clear summarizing flag

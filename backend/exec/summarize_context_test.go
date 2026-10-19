@@ -156,8 +156,10 @@ func TestMaybeAutoSummarize_NewestSummaryWins(t *testing.T) {
 		t.Fatalf("first summary missing from system message:\n%s", lc.messages[0].Content)
 	}
 
-	// Context is still above the threshold, so a second summarization runs and must
-	// fold the first summary in (passed as PreviousSummary) and replace it.
+	// The conversation has grown since that summary and is still above the threshold, so
+	// a second summarization runs and must fold the first summary in (passed as
+	// PreviousSummary) and replace it.
+	lc.messages = append(lc.messages, types.ChatMessage{Role: "user", Content: "and now the next phase"})
 	te.summarize.maybeAutoSummarize(setup, lc, "test-model", true)
 
 	if got := extractPrevSummary(lc.messages); got != "SUMMARY-TWO: second phase" {

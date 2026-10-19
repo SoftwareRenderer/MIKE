@@ -4,7 +4,7 @@
   "longsent": 0
  },
  "_global": {
-  "longsent": 86
+  "longsent": 81
  },
  "docs/adding-a-preference.md": {
   "history": 0,
@@ -49,6 +49,10 @@
  "docs/confinement.md": {
   "history": 0,
   "longsent": 9
+ },
+ "docs/context-window.md": {
+  "history": 0,
+  "longsent": 0
  },
  "docs/docker.md": {
   "history": 0,

@@ -92,24 +92,21 @@ type summarizeResult struct {
 // must summarize at the percentage it advertises.
 const defaultSummarizeThreshold = config.DefaultAutoSummarizeThreshold
 
-// shouldSummarize reports whether usage has crossed thresholdPct percent of the window.
+// shouldSummarize reports whether usage has crossed the prompt budget.
 func shouldSummarize(usedTokens, contextWindow, thresholdPct int) bool {
-	if contextWindow <= 0 {
-		return false
-	}
-	if thresholdPct <= 0 || thresholdPct > 100 {
-		thresholdPct = defaultSummarizeThreshold
-	}
-	return usedTokens >= contextWindow*thresholdPct/100
+	budget := promptBudget(contextWindow, thresholdPct)
+	return budget > 0 && usedTokens >= budget
 }
 
-// contextTokensUsed is what the model will consume on the next call: prompt + completion of the
-// last one, the same number the frontend shows. Falls back to an estimate when usage is unreported.
+// contextTokensUsed is what the conversation costs: prompt + completion of the last call, the number the
+// frontend shows, or that estimate when usage is unreported. It leaves out the tool results appended since,
+// which fitRequestToWindow judges — counting them here would summarize away a read the model just asked
+// for.
 func contextTokensUsed(lc *loopContext) int {
 	if lc != nil && lc.usage != nil && lc.usage.PromptTokens > 0 {
 		return lc.usage.PromptTokens + lc.usage.CompletionTokens
 	}
-	return estimatePromptTokens(buildLLMContext(lc.messages))
+	return conversationTokens(buildLLMContext(lc.messages))
 }
 
 // summarizeContext produces the rolling summary. It never modifies the messages slice.
@@ -395,17 +392,29 @@ func (s *summarizeOrchestrator) maybeAutoSummarize(setup *taskExecSetup, lc *loo
 	if lc.contextWindow == nil {
 		return
 	}
-	threshold := s.configStore.AutoSummarizeThreshold()
-	if !shouldSummarize(contextTokensUsed(lc), *lc.contextWindow, threshold) {
+	if !shouldSummarize(contextTokensUsed(lc), *lc.contextWindow, s.configStore.AutoSummarizeThreshold()) {
 		return
 	}
-	// Fallback (non-utility) summarization requests go to the task's CURRENT
-	// provider — lc.mc follows mid-run switches, setup.serverURL does not.
-	curURL, _ := lc.mc.get()
-	var summary string
-	lc.messages, summary = s.applySummarization(setup, setup.ctx, lc.messages, curURL, activeModel, nil)
-	if summary != "" && injectProceed {
-		s.injectProceedMessage(setup, lc)
+	s.summarizeNow(setup, lc, activeModel, injectProceed)
+}
+
+// summarizeNow compacts the conversation and installs the summary for the loop's next call. Both triggers
+// come here, and neither gets a second summary out of a conversation that has not grown.
+func (s *summarizeOrchestrator) summarizeNow(setup *taskExecSetup, lc *loopContext, activeModel string, injectProceed bool) {
+	if len(lc.messages) == lc.summarizedAtLen {
+		return
+	}
+	// Summarization goes to the task's CURRENT provider — lc.mc follows mid-run switches, setup.serverURL
+	// does not.
+	serverURL, _ := lc.mc.get()
+	messages, summary := s.applySummarization(setup, setup.ctx, lc.messages, serverURL, activeModel, nil)
+	if summary != "" {
+		lc.messages = messages
+		if injectProceed {
+			s.injectProceedMessage(setup, lc)
+		}
+		// The Proceed instruction belongs to what this summarization left behind.
+		lc.summarizedAtLen = len(lc.messages)
 	}
 	lc.detector.reset()
 	lc.detector.clearHints()

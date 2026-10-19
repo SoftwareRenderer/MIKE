@@ -224,8 +224,8 @@ request, and `handleTaskMessages` takes three verbs through one function.
 
 The frontend is served **behind** the mux (`spaBehind`, `backend/server/routes.go`), never as a route in
 it. That is a route-verb rule rather than a styling preference: a catch-all pattern inside a
-`ServeMux` outranks that mux's own verb-mismatch answer. `GET` on a POST-only `/api` route would be served
-the application document — a 200 that reads to a caller as a route which accepted the request. Behind the
+`ServeMux` outranks that mux's own verb-mismatch answer. A `GET` on a POST-only `/api` route would
+be served the application document — a 200 that reads to a caller as a route which accepted the request. Behind the
 mux, an unmatched path outside `/api/` is the SPA's and everything under `/api/` keeps the mux's answer,
 405 and `Allow` included. `TestSPAServesNothingToAWrongVerbOnAnAPIPath` and
 `TestMuxRefusesAnUnregisteredVerbWhileTheSPAServes` pin the two directions.
@@ -334,7 +334,7 @@ for one. `?limit=` sizes the window **in units of conversation, not rows**. An a
 `tool_call` rows whose `assistant_msg_id` names it are one answer; a user row is one on its own. Opening a
 task wants the newest handful of answers, and the row count of five answers depends on how much tool work
 each one did. Default 5, ceiling 25 — outside that a 400 naming the parameter — and `?before=<cursor>` walks
-back. `?from=<cursor>` **floors** one page of that walk: the named row is the oldest the page may answer,
+back. `?from=<cursor>` **floors** one page of that walk. The named row is the oldest the page may answer,
 and the rows below it stay for the next page rather than being skipped. A floor travels with `before` — alone
 it would name an older end for a read starting at the newest one — and is a 400 naming `from` if it is not a
 cursor this route issued. A cursor the route never issued is a 400, not an empty page: a client
@@ -358,7 +358,7 @@ the user rows are: the newest prompts of the task's active thread, oldest first,
 prompt up to `store.TurnLabelChars` characters, bounded in the read rather than in the response. Each also
 carries `cursor`: that prompt's own position, in the encoding the window's `before` and `from` take. A client
 that wants one prompt's rows asks for them by name instead of walking to them. The chat's sticky header
-needs the prompt above the rows it holds, and the window counted in answers cannot name it: one turn is
+needs the prompt above the rows it holds, and the window counted in answers cannot name it. One turn is
 routinely more answers than a window, so the prompt that opened that turn is older than every row the task
 opens on. Default 10, ceiling 50 — outside that a 400 naming `limit` — and a `before` this
 route never issued is a 400 naming `before`. Its cursor names a prompt and the window's names a row: the
@@ -682,10 +682,10 @@ Tests: `backend/server/handler_fs_download_test.go`, `backend/fsutil/tar_test.go
   `maxFSOpsBatch` (100 paths), a destination folder that no longer exists — fail the **request** before a path
   is touched, which is what makes a paste atomic. Anything learned while running (a source that vanished, a
   `.git` row, a tree over its copy bound) is one entry in `failed` and the rest of the selection still lands,
-  because a batch is a person's selection. `fsOpsReason` is the whole vocabulary: fsutil's own refusals and
-  `os.ErrNotExist` are sentences the requester can act on and are passed through; anything else is this
-  server's problem, so its cause goes to the log and the caller gets MIKE's sentence, like everywhere else
-  (`Errors` below).
+  because a batch is a person's selection. The vocabulary is `fsOpsReason`. Fsutil's own refusals and
+  `os.ErrNotExist` are sentences the requester can act on, so they pass through. Anything else is
+  this server's problem: its cause goes to the log and the caller gets MIKE's sentence, like
+  everywhere else (`Errors` below).
 - A move into the folder the path already sits in answers `done` with no `to` — the no-op the click asked for —
   while the same request as a copy is a duplicate, which is why only the move short-circuits. `/rename` is the
   one single-path route, and a name the folder already holds there is a **409** rather than an auto-rename:
