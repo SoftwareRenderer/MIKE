@@ -3,7 +3,7 @@
 The rules are in `AGENTS.md → Confinement`. These are the mechanisms, and they hold for **non-sandboxed**
 projects too because the server process enforces them.
 
-## Where a task runs is one column
+## Where a task runs is decided by a single setting
 
 - `project.sandbox_enabled` is the whole answer: **on** means every LLM-initiated action
   (`read_file`/`write_file`/`edit_file`/`bash`, the LSP tools, the agent adapter) runs in the container
