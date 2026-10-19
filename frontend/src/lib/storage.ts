@@ -29,6 +29,8 @@
 // `boot.ts` would close the loop.
 import { t } from '$lib/i18n';
 import { holdsReplay, type QueueOwner } from '$lib/utils/queue-ownership';
+import { sandboxMountFromPath } from '$lib/utils/path';
+import type { Project } from '$lib/types';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -581,11 +583,32 @@ export async function saveCollapsedDiffFiles(scope: string, ids: Set<string>): P
 // ─── Garbage collection ─────────────────────────────────────────────────────
 
 /**
+ * Every path an editor can key a record by for the projects named: the checkout on the host, the container's
+ * mount for a sandboxed project, and that project's task worktrees under the workspace. A root missing here
+ * erases a buffer that is live, so an empty project list answers empty and the caller sweeps nothing.
+ */
+export function editorRecordRoots(
+    projects: readonly Pick<Project, 'id' | 'path' | 'sandbox_enabled'>[],
+    workspaceDir?: string,
+): Set<string> {
+    const roots = new Set<string>();
+    for (const project of projects) {
+        if (!project.path) continue;
+        roots.add(project.path);
+        const mount = project.sandbox_enabled ? sandboxMountFromPath(project.path) : '';
+        if (mount) roots.add(mount);
+        if (workspaceDir) roots.add(`${workspaceDir}/${project.id}`);
+    }
+    return roots;
+}
+
+/**
  * Remove all stale entries for task IDs that no longer exist.
  * Call this after the board is loaded to clean up data for deleted tasks.
  *
  * @param allTaskIds  Set of currently existing task IDs
- * @param allProjectPaths  Optional set of valid project paths; if provided, also cleans stale editor drafts
+ * @param allProjectPaths  Paths an editor record may legally be keyed by (`editorRecordRoots`); if provided,
+ *                         also cleans the editor records of projects that are gone
  * @param allProjectIds  Optional set of valid project IDs; if provided, also cleans stale board cache
  * @param projectId  Optional current project ID; if provided, also cleans stale message/diff caches for that project
  */
@@ -599,11 +622,7 @@ export async function gc(allTaskIds: Set<string>, allProjectPaths?: Set<string>,
     await cleanDraftAttachments(allTaskIds);
 
     if (allProjectPaths) {
-        await cleanEditorDraftsByProject(allProjectPaths);
-    }
-
-    if (allProjectPaths) {
-        await cleanEditorHistoryByProject(allProjectPaths);
+        await cleanEditorRecordsByProject(allProjectPaths);
     }
 
     if (allProjectIds) {
@@ -662,27 +681,16 @@ async function cleanDraftAttachments(allTaskIds: Set<string>): Promise<void> {
     }
 }
 
-/** Remove editor drafts for files in projects that no longer exist. */
-async function cleanEditorDraftsByProject(allProjectPaths: Set<string>): Promise<void> {
-    const keys = await dbGetAllKeys(STORE_EDITOR_DRAFTS);
-    const toDelete = keys.filter(path => {
-        return !allProjectPaths.has(path) &&
-            ![...allProjectPaths].some(p => path.startsWith(p + '/'));
-    });
-    if (toDelete.length > 0) {
-        await dbDeleteKeys(STORE_EDITOR_DRAFTS, toDelete);
-    }
-}
-
-/** Remove editor history for files in projects that no longer exist. */
-async function cleanEditorHistoryByProject(allProjectPaths: Set<string>): Promise<void> {
-    const keys = await dbGetAllKeys(STORE_EDITOR_HISTORY);
-    const toDelete = keys.filter(path => {
-        return !allProjectPaths.has(path) &&
-            ![...allProjectPaths].some(p => path.startsWith(p + '/'));
-    });
-    if (toDelete.length > 0) {
-        await dbDeleteKeys(STORE_EDITOR_HISTORY, toDelete);
+/** Remove the editor records for files in projects that no longer exist: the buffer and the undo chain that
+ *  rode with it, both keyed by the file's path. */
+async function cleanEditorRecordsByProject(allProjectPaths: Set<string>): Promise<void> {
+    const roots = [...allProjectPaths];
+    const live = (path: string) => allProjectPaths.has(path) || roots.some(p => path.startsWith(p + '/'));
+    for (const store of [STORE_EDITOR_DRAFTS, STORE_EDITOR_HISTORY]) {
+        const toDelete = (await dbGetAllKeys(store)).filter(path => !live(path));
+        if (toDelete.length > 0) {
+            await dbDeleteKeys(store, toDelete);
+        }
     }
 }
 

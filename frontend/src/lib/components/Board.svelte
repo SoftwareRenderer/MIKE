@@ -6,7 +6,7 @@
     import { moveTask, clearDoneTasks, deleteTask, startTask } from '$lib/api';
     import { sortByLastMoved } from '$lib/utils/sort-tasks';
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
-    import { gc } from '$lib/storage';
+    import { gc, editorRecordRoots } from '$lib/storage';
     import { mergeQueuedUpdate, ancestorInProgress, willConsolidateIntoParent } from '$lib/utils/task-utils';
     import { createStatusLabel } from '$lib/utils/subtask-status';
     import { createBulkTaskActions } from '$lib/utils/bulk-task-actions';
@@ -21,7 +21,7 @@
         uiInjector.refreshSlot(INJECTION_POINTS.PROJECT_BOARD, { component: 'Board', projectId });
     });
 
-    let { tasks, projectId, projectPath, onAddTask, onCreateChildTask, onRefreshBoard, onSelectTask, scrollToColumn, boardFocus }: { tasks: Task[]; projectId: string; projectPath?: string; onAddTask?: () => void; onCreateChildTask?: (parentId: string) => void; onRefreshBoard?: () => void; onSelectTask?: (task: Task) => void; scrollToColumn?: string | null; boardFocus?: { projectId: string; column: string } | null } = $props();
+    let { tasks, projectId, onAddTask, onCreateChildTask, onRefreshBoard, onSelectTask, scrollToColumn, boardFocus }: { tasks: Task[]; projectId: string; onAddTask?: () => void; onCreateChildTask?: (parentId: string) => void; onRefreshBoard?: () => void; onSelectTask?: (task: Task) => void; scrollToColumn?: string | null; boardFocus?: { projectId: string; column: string } | null } = $props();
 
     /**
      * A column is two things at once: `id` is **data** (compared, persisted, sent to the
@@ -74,8 +74,8 @@
             gcInitialized = true;
             (async () => {
                 const allIds = new Set(tasks.map(t => t.id));
-                const projectPaths = projectPath ? new Set([projectPath]) : undefined;
-                await gc(allIds, projectPaths, undefined, projectId);
+                const roots = editorRecordRoots(appStore.projects, appStore.config?.workspace_dir);
+                await gc(allIds, roots.size ? roots : undefined, undefined, projectId);
             })().catch(() => {});
         }
     });

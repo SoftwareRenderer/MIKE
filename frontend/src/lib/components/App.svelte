@@ -1357,7 +1357,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                     <Board
                         tasks={appStore.tasks}
                         projectId={appStore.selectedProject.id}
-                        projectPath={appStore.selectedProject.path}
                         scrollToColumn={scrollToColumn}
                         {boardFocus}
                         onAddTask={() => { uiStore.creatingChildOf = null; uiStore.showCreateTask = true; }}

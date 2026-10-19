@@ -68,6 +68,16 @@ Closing a file's tab keeps its buffer: the draft is what the next open reads, so
 loses nothing. Reopening brings the text back still marked unsaved. Deleting the text is how a person throws
 an edit away — a buffer equal to its file leaves no record behind.
 
+### The sweep has to know every spelling a buffer is keyed by
+
+A record's key is the path the editor used: the checkout on the host, the container's mount
+(`/home/sandbox/<name>`) for a sandboxed project, or a task worktree under the workspace. The board prunes
+the records whose project is gone, and it appears the moment an explorer closes. So it judges every key
+against every spelling `editorRecordRoots` derives from the projects the browser holds. A root missing there
+deletes what the reader just typed. An empty project list prunes nothing at all.
+`frontend/tests/e2e/editor-draft-board-sweep.spec.ts` and `storage-editor-sweep.unit.ts` are what fail when
+that stops holding.
+
 ### A save the connection lost waits with the editor, not in the queue
 
 A body replayed from IndexedDB
