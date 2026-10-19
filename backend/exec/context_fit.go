@@ -8,11 +8,11 @@ import (
 	"mike/pkg/logging"
 )
 
-// This file decides whether a request fits the model's context window, and what to cut when it does not.
-// Whether the conversation is getting long is summarize.go's.
+// This file decides whether a request fits the model's context window, and what to cut when it does not;
+// whether the conversation has grown too long is summarize.go's decision.
 
-// promptBudget is the largest prompt the loop may send: thresholdPct of the model's window, the rest left
-// for the answer. A window nobody reported answers 0, which every caller reads as no gate.
+// promptBudget is the largest prompt the loop may send. A window nobody reported answers 0, which every
+// caller reads as no gate.
 func promptBudget(contextWindow, thresholdPct int) int {
 	if contextWindow <= 0 {
 		return 0
@@ -28,8 +28,8 @@ type overflowCause int
 
 const (
 	causeFits overflowCause = iota
-	// causeHistory: the conversation alone is past the budget. Everything older than a summary stops
-	// being sent, so only a summary moves it.
+	// causeHistory: the conversation alone is past the budget, and only a summary moves it — everything
+	// older than the summary stops being sent.
 	causeHistory
 	// causeToolOutput: the conversation fits and the newest tool results do not, so the results are cut.
 	causeToolOutput
@@ -58,38 +58,81 @@ func toolBatchTokens(messages []types.ChatMessage) int {
 			if m.Role != "tool" {
 				break
 			}
-			total += estimatePromptTokens([]types.ChatMessage{m})
+			total += estimateTokensFromText(m.Content)
 		}
 		return total
 	}
 	return 0
 }
 
+// requestSplit returns what a request costs, and what the same request costs without its newest run of tool
+// results. Both come from one pass, because a long conversation is measured on every LLM call.
+func requestSplit(messages []types.ChatMessage) (int, int) {
+	total := estimatePromptTokens(messages)
+	return total, total - toolBatchTokens(messages)
+}
+
 // conversationTokens is what a request would cost without its newest tool batch, which is also what the
 // usage trigger measures.
 func conversationTokens(messages []types.ChatMessage) int {
-	return estimatePromptTokens(messages) - toolBatchTokens(messages)
+	_, history := requestSplit(messages)
+	return history
+}
+
+// reportedConversation is what the provider counted for the conversation at its last call, plus the answer it
+// gave and the results appended since. A word count only reads message text, so it cannot price the system
+// prompt, the tool definitions or the provider's tokenizer.
+func reportedConversation(lc *loopContext, messages []types.ChatMessage) int {
+	if lc.usage == nil || lc.usage.PromptTokens <= 0 {
+		return 0
+	}
+	last := -1
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "assistant" {
+			last = i
+			break
+		}
+	}
+	if last < 0 {
+		return 0
+	}
+	for _, m := range messages[last+1:] {
+		if m.Role == "summarization" {
+			// The summary replaced the conversation this count describes.
+			return 0
+		}
+	}
+	appended := estimatePromptTokens(messages[last:])
+	return lc.usage.PromptTokens + appended - toolBatchTokens(messages)
 }
 
 // fitRequestToWindow returns the messages one LLM call is sent, made to fit the model's window: a
-// conversation already past the budget is summarized, otherwise the tool results that do not fit are
-// trimmed. Trimming lands on this copy and never on lc.messages, so every send re-derives the cut.
+// conversation already past the budget is summarized, otherwise the tool results that do not fit are trimmed.
+// Trimming lands on this copy and never on lc.messages, so every send cuts again from the full conversation.
 func (te *TaskExecutor) fitRequestToWindow(setup *taskExecSetup, lc *loopContext, activeModel string) []types.ChatMessage {
 	llmMessages := buildLLMContext(lc.messages)
 	budget := 0
 	if lc.contextWindow != nil {
 		budget = promptBudget(*lc.contextWindow, te.configStore.AutoSummarizeThreshold())
 	}
-	request := estimatePromptTokens(llmMessages)
-	cause := classifyOverflow(request, conversationTokens(llmMessages), budget)
+	estimated, history := requestSplit(llmMessages)
+	// extra is the part of the conversation the provider counted and the estimate did not.
+	extra := reportedConversation(lc, lc.messages) - history
+	if extra < 0 {
+		extra = 0
+	}
+	cause := classifyOverflow(estimated+extra, history+extra, budget)
 	if cause == causeFits {
 		return llmMessages
 	}
 	if cause == causeHistory {
 		te.summarize.summarizeNow(setup, lc, activeModel, true)
 		llmMessages = buildLLMContext(lc.messages)
+		extra = 0
 	}
-	trimmed, reports := trimToFit(llmMessages, budget)
+	// trimToFit measures the request itself, so it is charged the same shortfall. A batch cause leaves the
+	// conversation inside the budget, so this stays positive.
+	trimmed, reports := trimToFit(llmMessages, budget-extra)
 	for _, r := range reports {
 		logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Warnf(
 			"trimmed %s result to %d tokens, dropping %d, to fit a %d token budget",
@@ -108,16 +151,16 @@ type trimReport struct {
 	droppedTokens int
 }
 
-// trimToFit shortens tool results until the request takes budget tokens or fewer, oldest first, cutting
-// each result once and never removing one — its assistant tool_call still has to be answered. The messages
-// handed in are not modified, and once every result sits at minKeptTokens the request comes back as it is.
-func trimToFit(messages []types.ChatMessage, budget int) ([]types.ChatMessage, []trimReport) {
+// trimToFit shortens tool results until the request takes limit tokens or fewer, oldest first, cutting each
+// result once and never removing one — its assistant tool_call still has to be answered. The messages handed
+// in are not modified, and once every result sits at minKeptTokens the request comes back as it is.
+func trimToFit(messages []types.ChatMessage, limit int) ([]types.ChatMessage, []trimReport) {
 	kept := make([]types.ChatMessage, len(messages))
 	copy(kept, messages)
 	names := toolNamesByID(kept)
 	cut := make(map[int]bool)
 	var reports []trimReport
-	for over := estimatePromptTokens(kept) - budget; over > 0; {
+	for over := estimatePromptTokens(kept) - limit; over > 0; {
 		i := -1
 		for j := range kept {
 			if kept[j].Role == "tool" && !cut[j] && estimateTokensFromText(kept[j].Content) > minKeptTokens {
@@ -161,8 +204,8 @@ func toolNamesByID(messages []types.ChatMessage) map[string]string {
 	return names
 }
 
-// trimMarker tells the model how much it did not get and how to ask for the rest: a read is re-read by
-// line, a command is re-run narrowed.
+// trimMarker tells the model how much it missed and how to ask for the rest: a trimmed read is re-read with
+// offset and limit, a trimmed command is re-run narrowed.
 func trimMarker(toolName, body, original string) string {
 	switch toolName {
 	case types.ToolReadFile:

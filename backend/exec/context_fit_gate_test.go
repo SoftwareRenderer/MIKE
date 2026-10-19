@@ -48,8 +48,8 @@ func TestToolBatchTokens(t *testing.T) {
 	}
 }
 
-// gateSetup is summarizeSetup's conversation with the numbers a must-fit test needs, and a usage far under
-// the threshold, so any summary in these tests came from the gate.
+// gateSetup is summarizeSetup plus what a must-fit test needs: a context window, and a usage far under it,
+// so any summary these tests see came from the gate and not from the usage trigger.
 func gateSetup(t *testing.T, window int, summaries ...string) (*TaskExecutor, *taskExecSetup, *loopContext) {
 	t.Helper()
 	te, setup, lc, _ := summarizeSetup(t, summaries...)
@@ -121,6 +121,20 @@ func TestFitRequestTrimsTheBatchAndKeepsTheConversation(t *testing.T) {
 	}
 }
 
+// A provider that reports nothing leaves the estimate as the only measure, and the batch is still cut.
+func TestFitRequestWithoutReportedUsageStillTrimsTheBatch(t *testing.T) {
+	t.Parallel()
+	te, setup, lc := gateSetup(t, 4000)
+	lc.usage = nil
+	lc.messages = convWith(trimRow{id: "c1", name: types.ToolReadFile, output: filler(8000, "aa")})
+
+	sent := te.fitRequestToWindow(setup, lc, "test-model")
+
+	if !strings.Contains(sent[3].Content, "trimmed to") {
+		t.Error("an oversized result was sent whole because nothing reported its size")
+	}
+}
+
 func TestFitRequestSummarizesWhenTheConversationIsTheCause(t *testing.T) {
 	chdirRepoRoot(t)
 	te, setup, lc := gateSetup(t, 1000, "SUMMARY-GATE")
@@ -142,6 +156,49 @@ func TestFitRequestSummarizesWhenTheConversationIsTheCause(t *testing.T) {
 	}
 }
 
+// The provider counted this conversation larger than a word count can.
+func TestFitRequestTrimsWhatTheProviderPricedOverBudget(t *testing.T) {
+	t.Parallel()
+	te, setup, lc := gateSetup(t, 4000)
+	lc.messages = convWith(trimRow{id: "c1", name: types.ToolReadFile, output: filler(3000, "aa")})
+	budget := promptBudget(4000, defaultSummarizeThreshold)
+	lc.usage = &types.ChatUsage{PromptTokens: budget / 2}
+
+	sent := te.fitRequestToWindow(setup, lc, "test-model")
+
+	if !strings.Contains(sent[3].Content, "trimmed to") {
+		t.Error("the estimate alone said the request fitted, so the oversized result was sent whole")
+	}
+	if n := summarizationRows(t, te, setup.task.ID, "thread-1"); n != 0 {
+		t.Errorf("%d summarization rows, want 0: the conversation is inside what the provider priced", n)
+	}
+	extra := reportedConversation(lc, lc.messages) - conversationTokens(buildLLMContext(lc.messages))
+	if over := conversationTokens(sent) + extra + toolBatchTokens(sent) - budget; over > 0 {
+		t.Errorf("the request sent is %d tokens over what the provider priced as the budget", over)
+	}
+}
+
+// A summarization replaced the conversation that the reported count describes.
+func TestFitRequestIgnoresAReportedCountOlderThanTheSummary(t *testing.T) {
+	t.Parallel()
+	te, setup, lc := gateSetup(t, 1000)
+	lc.messages = []types.ChatMessage{
+		{Role: "system", Content: "the prompt"},
+		{Role: "assistant", Content: "the answer it priced"},
+		{Role: "summarization", Content: "what replaced all of it"},
+		{Role: "user", Content: "hello"},
+	}
+	lc.usage = &types.ChatUsage{PromptTokens: 50000}
+
+	if got := reportedConversation(lc, lc.messages); got != 0 {
+		t.Errorf("reported conversation = %d tokens, want 0: that number prices rows that are gone", got)
+	}
+	sent := te.fitRequestToWindow(setup, lc, "test-model")
+	if sent[len(sent)-1].Content != "hello" {
+		t.Error("a request inside its budget was rewritten")
+	}
+}
+
 // The usage trigger runs just before this gate, and one conversation state is answered once.
 func TestFitRequestDoesNotSummarizeWhatWasJustSummarized(t *testing.T) {
 	chdirRepoRoot(t)
@@ -159,8 +216,8 @@ func TestFitRequestDoesNotSummarizeWhatWasJustSummarized(t *testing.T) {
 	}
 }
 
-// The notice goes to the model; this line is the operator's half. Not t.Parallel — TestSink redirects the
-// process's log.
+// This is the log line the operator sees, not the notice the model is sent. Not t.Parallel: TestSink
+// redirects the whole process's log.
 func TestGateReportsTheCutToTheLog(t *testing.T) {
 	buf, restore := logging.TestSink()
 	defer restore()

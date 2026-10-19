@@ -98,10 +98,9 @@ func shouldSummarize(usedTokens, contextWindow, thresholdPct int) bool {
 	return budget > 0 && usedTokens >= budget
 }
 
-// contextTokensUsed is what the conversation costs: prompt + completion of the last call, the number the
-// frontend shows, or that estimate when usage is unreported. It leaves out the tool results appended since,
-// which fitRequestToWindow judges — counting them here would summarize away a read the model just asked
-// for.
+// contextTokensUsed is what the conversation costs the next call: prompt + completion of the last one, or
+// that estimate when usage is unreported. It leaves out the tool results appended since, which
+// fitRequestToWindow judges — counting them here would summarize away a read the model just asked for.
 func contextTokensUsed(lc *loopContext) int {
 	if lc != nil && lc.usage != nil && lc.usage.PromptTokens > 0 {
 		return lc.usage.PromptTokens + lc.usage.CompletionTokens
@@ -250,6 +249,10 @@ func estimatePromptTokens(messages []types.ChatMessage) int {
 			total += estimateTokensFromText(m.Content)
 		}
 		total += estimateTokensFromText(m.ReasoningContent)
+		// The provider receives a tool_call with its arguments, so those words are part of the request.
+		for _, tc := range m.ToolCalls {
+			total += estimateTokensFromText(tc.Function.Name) + estimateTokensFromText(tc.Function.Arguments)
+		}
 	}
 	return total
 }

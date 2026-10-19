@@ -75,6 +75,7 @@ code, the change is arguing with itself.
   calls live code dead.
 - **Some tests fail only under load** — read `docs/testing.md → Tests that fail only under load` before
   believing a red that names them.
+- **Auto-summarization and the must-fit gate both need a reported context window** — a provider that reports none gets neither, and an oversized turn reaches it anyway. `docs/context-window.md`.
 - **A `WaitDelay` bounds a subprocess's output pipes, not the child**; only a cancelled context bounds the
   child. A long-running subprocess needs both.
 - **An LSP extension's `environment` check decides nothing** — no health verdict exists to read.
@@ -296,6 +297,21 @@ Enforced by the server process, so it holds for non-sandboxed projects too.
 - `executionState.sandboxMu` is a **leaf lock**: taken under `taskMu`, never the reverse.
 - Domain names, timeouts and watched-wait wiring: **`docs/locking.md`**.
 
+## Context Window
+
+- **Judge the request about to be sent** — the provider's own count for the conversation, plus the tool
+  results appended since, which it never saw. Usage on its own describes a call that finished.
+  `docs/context-window.md`.
+- **A word count prices nothing the provider counts** — the system prompt, the tool definitions and its
+  tokenizer are in its number, so where a provider reported one, that number is the measure and the estimate
+  is the fallback.
+- **A crossing is answered by its cause**: a conversation already past the budget is summarized, tool results
+  that do not fit are trimmed. Never the reverse — a summary drops everything older than its marker, which
+  is the read the model just asked for.
+- **Trimming lands on the copy a call is built from** — the stored tool row, the reviewer's card and the
+  in-memory conversation keep every byte, so the cut is re-derived on every send.
+- **Every assistant `tool_call` keeps its tool message** — content is ours to cut, the row is not.
+
 ## Git
 
 - **`git.Command`/`git.CommandContext` are the only way this repo starts git** — the execution fence cannot
@@ -455,6 +471,7 @@ deliberately omits.
 | `docs/skills.md` | the two skill roots a task is listed from, the paths it is told to open, same-named packages |
 | `docs/confinement.md` | path jails, the no-project host jail, size and output caps, subprocess environments |
 | `docs/locking.md` | keylock domains, accessor shape, lock order, watched waits, `sandboxMu` |
+| `docs/context-window.md` | the prompt budget, what each trigger measures, the cause rule, the trim floor and its notice, an unreported window |
 | `docs/storage.md` | what is in `tx`, the schema and its DDL, stored timestamps, file permissions, ID generation |
 | `docs/git-operations.md` | command construction and execution fence, worktree layout, stash identity, ref/clone/hash fences, slugify |
 | `docs/lifecycle.md` | construction order = shutdown order, the base-context registry, the TLS listener |

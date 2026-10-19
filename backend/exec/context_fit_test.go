@@ -1,6 +1,25 @@
 package exec
 
-import "testing"
+import (
+	"testing"
+
+	"mike/backend/types"
+)
+
+// A tool_call is sent with its arguments, which is how a long command reaches the model.
+func TestEstimatePromptTokensCountsToolCallArguments(t *testing.T) {
+	t.Parallel()
+	withCall := types.ChatMessage{Role: "assistant"}
+	withCall.ToolCalls = []types.ToolCallMsg{{ID: "c1", Type: "function"}}
+	withCall.ToolCalls[0].Function.Name = types.ToolBash
+	withCall.ToolCalls[0].Function.Arguments = filler(2000, "aa")
+
+	bare := estimatePromptTokens([]types.ChatMessage{{Role: "assistant"}})
+	args := estimatePromptTokens([]types.ChatMessage{withCall})
+	if got := args - bare; got < 1900 || got > 2100 {
+		t.Errorf("a 2000 token command counted %d tokens", got)
+	}
+}
 
 // Both gates must cross at the same token count, or a run summarizes at one number and gets refused at
 // another.

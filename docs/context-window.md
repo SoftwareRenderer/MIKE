@@ -7,9 +7,12 @@ finds out, because the request was already made to fit.
 
 ## What must stay true
 
-- **The request being sent is the thing measured.** A call's reported usage describes the call that has
-  finished; it knows nothing of the tool results appended since, and a read appended after the last answer
-  is exactly the bytes that overflow.
+- **The request being sent is the thing measured.** That is what the provider counted for the conversation at
+  its last call, plus every message appended since — a read appended after the last answer is exactly the
+  bytes that overflow.
+- **The provider's own count wins over a guess about it.** A word count prices message text and tool call
+  arguments; the system prompt, the tool definitions and the provider's tokenizer are in no word count. It
+  decides only where a provider reports no usage.
 - **One budget, read the same way by both triggers.** The prompt ceiling is `promptBudget`: a percentage of
   the model's window, the rest left for the answer. The same Settings value drives both.
 - **A crossing is answered by its cause.** A conversation already over budget without its newest tool
@@ -40,6 +43,12 @@ compacts it. Otherwise `trimToFit` shortens results, oldest first, each to the r
 `minKeptTokens`, and each keeps a notice naming the route back: `offset` and `limit` for a read, a narrowed
 re-run for a command. A cut is reported to the log with its `task_id` and the count dropped.
 
+`reportedConversation` is where the provider's count enters. It adds the answer and the results appended
+since that call to what the provider counted. The room `trimToFit` is given shrinks by whatever the estimate
+could not see, because trimming against the estimate alone stops too late and reaches the provider over its
+limit anyway. A summarization newer than that answer prices nothing: it replaced the conversation the number
+described.
+
 Two triggers can ask for a summary in one iteration — the usage trigger `maybeAutoSummarize` and the cause
 rule here — and both reach the provider through `summarizeNow`, which holds the one rule that keeps that
 from costing two summaries: `loopContext.summarizedAtLen` is the conversation length a summarization left
@@ -56,4 +65,6 @@ the model needed, on a number nothing told us.
 
 `go test ./backend/exec/ -run 'TestPromptBudget|TestTrimToFit|TestFitRequest|TestGate|TestRunTrims'` —
 `TestRunTrimsAnOversizedReadBeforeTheProviderSeesIt` runs a task end to end and judges the bytes the provider
-was handed, so a gate that stopped being wired fails there rather than quietly.
+was handed. `TestRunTrimsWhatTheReportedUsagePutOverBudget` runs one against a provider that reported a usage
+leaving no room at all. A gate that stopped being wired, or stopped believing the provider, fails there rather
+than quietly.
