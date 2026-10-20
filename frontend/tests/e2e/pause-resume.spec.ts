@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { getProjectId, createTaskViaApi, navigateToTask, waitForChatForm, ensureTaskStarted, waitForTaskState, isolatedProject, gotoProject } from './helpers';
+import { getProjectId, createTaskViaApi, navigateToTask, waitForChatForm, ensureTaskStarted, waitForTaskState, isolatedProject, gotoProject, cardInColumn } from './helpers';
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
 isolatedProject();
@@ -20,16 +20,6 @@ isolatedProject();
  */
 
 test.describe.configure({ mode: 'serial' });
-
-/**
- * Column-scoped card locator. Unscoped `.card[data-task-id]` is ambiguous for
- * ~200ms after a column move: the card's fade transition keeps the old node
- * in the DOM (and matching the selector) in the source column while the new
- * node fades in in the target column.
- */
-function cardInColumn(page: any, taskId: string, column: string) {
-  return page.locator(`.column[aria-label="${column} column"] .card[data-task-id="${taskId}"]`);
-}
 
 /** The status badge (the card may also carry a model badge). */
 const CARD_BADGE = '.badge:not(.model-badge)';

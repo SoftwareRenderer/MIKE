@@ -111,6 +111,7 @@ The app maintains a local mirror of the board (`board:<projectId>`) in browser s
 Writes performed while offline are stored in the `offline-queue`.
 - **Projection**: Pending messages are derived from the queue and rendered as "pending" rows in the chat.
 - **Flushing**: The queue is flushed immediately upon reconnection.
+- **A read the queue is about to change waits for it.** `waitForFlush()` guards `refreshBoard()`, `silentRefresh()` and the board read in `selectProject()`, which is how boot lands on a project. The replay's answer is the newer row, so a board fetched before that answer paints a value the server has already replaced. Nothing repairs the paint: the action has left the queue, so `applyQueuedActionsToBoard` does not re-derive it. `offline-send-queue.spec.ts` holds both halves of that ordering open to pin it.
 - **Persistence**: Queue entries are stored locally; those containing secrets (e.g., API keys) are refused and never persisted.
 
 ### Signing out empties both halves
@@ -127,6 +128,6 @@ The server does not time out slow clients. Instead:
 
 `make test-frontend` runs the unit files below; `make test-e2e SPECS=reconnect-refresh` runs the specs.
 
-- **E2E Tests**: `reconnect-refresh.spec.ts`, `away-and-back.spec.ts`, `sync-return-freshness.spec.ts`, `focus-return-review.spec.ts`, `offline-mode-cached-board.spec.ts`, `editor-draft-merge.spec.ts`, `editor-external-change.spec.ts`.
+- **E2E Tests**: `reconnect-refresh.spec.ts`, `away-and-back.spec.ts`, `sync-return-freshness.spec.ts`, `focus-return-review.spec.ts`, `offline-mode-cached-board.spec.ts`, `offline-send-queue.spec.ts`, `editor-draft-merge.spec.ts`, `editor-external-change.spec.ts`.
 - **Unit Tests**: `connection-restored.unit.svelte.ts`, `task-events-delivery.unit.svelte.ts`, `stream-subscription.unit.ts`, `chat-history-merge.unit.ts`, `session-boot.unit.svelte.ts`, and for the editor buffer `editor-merge.unit.ts`, `editor-conflict.unit.ts`, `editor-draft-merge-on-open.unit.svelte.ts`, `editor-buffer-persistence.unit.svelte.ts`, `storage-editor-draft.unit.ts`.
 - **Backend Tests**: `app_stream_test.go`, `app_stream_subscribe_race_test.go`, `handler_task_sync_test.go`.

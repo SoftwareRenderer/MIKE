@@ -972,6 +972,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 // there is no board to restore a task onto or to subscribe with.
                 if (!appStore.board || appStore.selectedProject?.id !== p.id) return;
             } else {
+                // Boot fired the replay without awaiting it, so this read can overtake the rows it changes.
+                await waitForFlush();
                 const b = await getBoard(p.id);
                 if (!applyBoard(b, p.id, boardSource(b))) return;
                 sessionBoot.servingFromCache = isFromCache(b);

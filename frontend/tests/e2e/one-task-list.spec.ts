@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { csrfFetch, editTaskTitle, getProjectId, goOnline, gotoProject, isolatedProject, queuedActionCount } from './helpers';
+import { csrfFetch, cardInColumn, editTaskTitle, getProjectId, goOnline, gotoProject, isolatedProject, queuedActionCount } from './helpers';
 
 /**
  * The app holds one task list, and it is `appStore.board`'s own list (`appStore.tasks` reads it, never a
@@ -51,7 +51,10 @@ test.describe('One task list', () => {
     expect(taskId).toBeTruthy();
     const rowUrl = `/api/projects/${projectId}/tasks/${taskId}`;
 
-    await dropOnColumn(page, taskId, 'In Progress');
+    // Review, not In Progress: a drop onto In Progress starts the task, and that turn would move the card
+    // again while this test is still reading the board. The claim is about a move, whichever column it lands
+    // on — `docs/testing.md → E2E failure patterns`.
+    await dropOnColumn(page, taskId, 'Review');
     await expect(column(page, 'Backlog').locator(`.card[data-task-id="${taskId}"]`)).toHaveCount(0, { timeout: 15000 });
 
     // The row may answer with another column than the drop asked for — a subtask consolidates under its
@@ -60,10 +63,14 @@ test.describe('One task list', () => {
       .poll(async () => (await csrfFetch(page, rowUrl, { method: 'GET' })).data.status, { timeout: 20000 })
       .not.toBe('backlog');
     const status = (await csrfFetch(page, rowUrl, { method: 'GET' })).data.status as string;
-    await expect(column(page, COLUMN_TITLES[status]).locator(`.card[data-task-id="${taskId}"]`)).toBeVisible();
+    const target = COLUMN_TITLES[status];
+    await expect(cardInColumn(page, taskId, target)).toBeVisible();
+    // One card, once the move has finished drawing: a board mid-fade draws the same task in the column it
+    // left and the column it entered. A second card that STAYS is the regression this spec exists for.
+    await expect(board(page).locator(`.card[data-task-id="${taskId}"]`)).toHaveCount(1, { timeout: 15000 });
 
     // The task view opened off that board reads the same task, not a second copy of it.
-    await board(page).locator(`.card-open-link[href*="task=${taskId}"]`).click();
+    await cardInColumn(page, taskId, target).locator('.card-open-link').click();
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 15000 });
   });
 

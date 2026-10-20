@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import {
-  getProjectId, createTaskViaApi, navigateToTask, csrfFetch, isolatedProject, gotoProject,
+  getProjectId, createTaskViaApi, navigateToTask, csrfFetch, isolatedProject, gotoProject, editTaskTitle, goOnline,
 } from './helpers';
 // Each test file gets its own project, because it starts a turn: see isolatedProject() in helpers.ts.
 isolatedProject();
@@ -126,5 +126,47 @@ test.describe.serial('Offline send queue', () => {
 
         // 8. The queued error notice is gone (client-side only — never persisted to the DB).
         await expect(page.locator('.error-card', { hasText: 'queued' })).toHaveCount(0);
+    });
+
+    /**
+     * The replay's answer is the newer row, so a board read that starts before it must wait for it. Holding
+     * the read open past the replay makes that ordering repeatable: a boot that reads through the replay
+     * answers with the pre-write row, and since the action has left the queue by then, nothing re-derives
+     * the write and the card keeps a value the server no longer holds.
+     */
+    test('a board that lands after the replay shows what the replay wrote', async ({ page, context }) => {
+        test.setTimeout(120000);
+        const projectId = await getProjectId(page);
+        const taskId = (await page.locator('.column[aria-label="Backlog column"] .card')
+            .evaluateAll(cs => cs.map(c => (c as HTMLElement).dataset.taskId).filter(Boolean) as string[]))[0];
+        expect(taskId).toBeTruthy();
+        const title = `replay-before-board-${Date.now()}`;
+
+        // The race is a board read that reaches the server BEFORE the replay and arrives AFTER it, so both
+        // halves are staged: the write is held back, the read's answer is held back longer. Both stay well
+        // inside apiFetch's 5s ceiling — a board read that gave up would fall back to the mirror instead.
+        const hold = (ms: number) => new Promise(r => setTimeout(r, ms));
+        await context.route(url => url.pathname === `/api/projects/${projectId}/board`, async (route) => {
+            const read = await route.fetch();
+            await hold(1500);
+            await route.fulfill({ response: read });
+        });
+        await context.route(url => url.pathname === `/api/projects/${projectId}/tasks/${taskId}`, async (route) => {
+            if (route.request().method() !== 'PUT') { await route.fallback(); return; }
+            await hold(1200);
+            await route.fallback();
+        });
+
+        await page.context().setOffline(true);
+        await editTaskTitle(page, taskId, title);
+        await expect(page.locator(`.card[data-task-id="${taskId}"]`)).toContainText(title, { timeout: 15000 });
+        await expect(async () => { expect(await queuedActionCount(page)).toBe(1); }).toPass({ timeout: 15000 });
+
+        await goOnline(page);
+        await page.reload();
+
+        await expect(page.locator(`.card[data-task-id="${taskId}"]`)).toContainText(title, { timeout: 30000 });
+        const row = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}`, { method: 'GET' });
+        expect(row.data.title).toBe(title);
     });
 });

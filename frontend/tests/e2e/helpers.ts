@@ -438,6 +438,15 @@ export async function selectProject(page: Page, projectId: string): Promise<void
   await page.locator(`a.project-item[href$="project=${projectId}"]`).click();
 }
 /**
+ * One task's card inside one column. Unscoped, `.card[data-task-id]` matches the same task twice for
+ * the ~200ms a column move takes to draw: the node leaving the old column stays attached through its
+ * fade outro while the node arriving in the new column fades in from opacity 0. Name the column, or
+ * wait for the board to hold one card before acting on it.
+ */
+export function cardInColumn(page: Page, taskId: string, columnTitle: string): Locator {
+  return page.locator(`.column[aria-label="${columnTitle} column"] .card[data-task-id="${taskId}"]`);
+}
+/**
  * The directory a project points at — what its file browser, Review-Changes panel and
  * project-level git commands read. Not a task worktree: use findWorktreeDir for task flows.
  */

@@ -292,32 +292,43 @@ test.describe.serial('Browser Navigation (Back/Forward)', () => {
     await launch.close();
   });
 
-  test('back twice from a task keeps the project board', async ({ page }) => {
-    await expect(page.locator('.board')).toBeVisible({ timeout: 10000 });
-    const landedProject = new URL(page.url()).searchParams.get('project');
-    expect(landedProject).toBeTruthy();
+  test('back twice from a task keeps the project board', async ({ page, context }) => {
+    // A fresh tab, because this test counts the app's own entries and the harness made one before it: the
+    // first API call a page makes goes through `getOrigin`, which launches this context at `/` and lets the
+    // app land it on whatever project a browser with no last-project preference lands on. Back reaching that
+    // launch is the browser working, so the measurement starts at the tab's own first navigation.
+    const projectId = await getProjectId(page);
+    const tab = await context.newPage();
+    await tab.goto(`/?project=${projectId}`);
+    await expect(tab.locator('.board')).toBeVisible({ timeout: 10000 });
+    // [about:blank, this board] — a landing that pushed instead of replacing would answer 3.
+    expect(await tab.evaluate(() => history.length)).toBe(2);
 
     const taskTitle = `nav-double-back-${Date.now()}`;
-    await createTaskViaApi(page, landedProject as string, taskTitle);
-    await page.waitForSelector(`.card-title-text:has-text("${taskTitle}")`, { timeout: 10000 });
-    await page.click(`.card-title-text:has-text("${taskTitle}")`);
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    await createTaskViaApi(page, projectId, taskTitle);
+    await tab.waitForSelector(`.card-title-text:has-text("${taskTitle}")`, { timeout: 10000 });
+    await tab.click(`.card-title-text:has-text("${taskTitle}")`);
+    await expect(tab.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    // The task added one entry and nothing else added any.
+    expect(await tab.evaluate(() => history.length)).toBe(3);
 
-    await page.goBack();
+    await tab.goBack();
     await expect(async () => {
-      expect(page.url()).not.toContain('task=');
+      expect(tab.url()).not.toContain('task=');
     }).toPass({ timeout: 5000 });
-    await expect(page.locator('.board')).toBeVisible({ timeout: 5000 });
+    await expect(tab.locator('.board')).toBeVisible({ timeout: 5000 });
+    expect(new URL(tab.url()).searchParams.get('project')).toBe(projectId);
 
     // Nothing is left under the app's own entries: in an installed PWA back closes the window,
-    // here it lands on the blank page the context started with. Either way, never the board-less
+    // here it lands on the blank page the tab started with. Either way, never the board-less
     // panel while projects exist.
-    await page.goBack().catch(() => {});
-    await expect(page.locator('#main-content > .empty-state')).toHaveCount(0);
-    if (await page.locator('#main-content').count() > 0) {
-        await expect(page.locator('.board')).toBeVisible();
-        expect(new URL(page.url()).searchParams.get('project')).toBe(landedProject);
+    await tab.goBack().catch(() => {});
+    await expect(tab.locator('#main-content > .empty-state')).toHaveCount(0);
+    if (await tab.locator('#main-content').count() > 0) {
+        await expect(tab.locator('.board')).toBeVisible();
+        expect(new URL(tab.url()).searchParams.get('project')).toBeTruthy();
     }
+    await tab.close();
   });
 });
 
