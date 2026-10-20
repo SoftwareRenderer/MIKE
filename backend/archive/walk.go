@@ -10,6 +10,8 @@ import (
 	"errors"
 	"io"
 	"unicode/utf8"
+
+	"mike/backend/fsutil"
 )
 
 // List walks the members in archive order and never re-sorts, so the rows are a property of the file and
@@ -169,7 +171,7 @@ func (r *Reader) readZipEntry(ctx context.Context, name string) ([]byte, error) 
 			return nil, err
 		}
 		defer rc.Close()
-		return readMember(&ctxReadCloser{ReadCloser: rc, ctx: ctx}, r.opts.MaxMemberBytes)
+		return readMember(fsutil.ContextReader(ctx, rc), r.opts.MaxMemberBytes)
 	}
 	return nil, ErrNoEntry
 }

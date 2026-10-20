@@ -1,6 +1,7 @@
 package fsutil
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -276,4 +277,31 @@ func MovePath(src, dst string) error {
 		return err
 	}
 	return os.RemoveAll(srcClean)
+}
+
+// ContextReader bounds a read by a context: each Read refuses once ctx is done, so a copy that would
+// otherwise wait forever on a stalled source returns when its caller stops caring. The check is per
+// Read because a copy has no other opportunity to notice.
+func ContextReader(ctx context.Context, r io.Reader) io.Reader {
+	return &ctxReader{ctx: ctx, r: r}
+}
+
+// ContextReadCloser is ContextReader over a source that must also be closed.
+func ContextReadCloser(ctx context.Context, rc io.ReadCloser) io.ReadCloser {
+	return struct {
+		io.Reader
+		io.Closer
+	}{ContextReader(ctx, rc), rc}
+}
+
+type ctxReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (r *ctxReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.r.Read(p)
 }

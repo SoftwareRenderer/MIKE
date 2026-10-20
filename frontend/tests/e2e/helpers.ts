@@ -305,31 +305,21 @@ function ownStorageState(testInfo: TestInfo): string | undefined {
   return (testInfo.project.use as { storageState?: string }).storageState;
 }
 
-/** Delete every task of this worker's own project, from a page of its own. */
+/**
+ * Delete every task of this worker's own project, from a page of its own. A refusal is logged rather than
+ * thrown, because a silent leftover is what the next file inherits and a throw in teardown fails the wrong test.
+ */
 async function emptyOwnProject(browser: Browser, storageState?: string): Promise<void> {
   if (!ownProject) return;
   const context = await browser.newContext(storageState ? { storageState } : {});
   const page = await context.newPage();
   try {
-    await clearAllTasks(page, ownProject.id);
+    const refused = await deleteTasksExcept(page, ownProject.id, []);
+    if (refused.length > 0) {
+      console.log(`[helpers] left ${refused.length} task(s) on project ${ownProject.id}: ${refused.join(', ')}`);
+    }
   } finally {
     await context.close();
-  }
-}
-
-/**
- * Delete every task on a project. A refusal is logged rather than thrown, because a silent leftover is what
- * the next file inherits.
- */
-export async function clearAllTasks(page: Page, projectId: string): Promise<void> {
-  const board = await apiGetJson<{ tasks?: any[] }>(page, `/api/projects/${projectId}/board`);
-  const refused: string[] = [];
-  for (const t of board?.tasks || []) {
-    const res = await csrfFetch(page, `/api/projects/${projectId}/tasks/${t.id}`, { method: 'DELETE' });
-    if (!res.ok) refused.push(`${t.id} (${res.status})`);
-  }
-  if (refused.length > 0) {
-    console.log(`[helpers] left ${refused.length} task(s) on project ${projectId}: ${refused.join(', ')}`);
   }
 }
 
@@ -378,22 +368,34 @@ async function seedIfEmpty(page: Page, id: string): Promise<void> {
 }
 
 /** The URL of this file's own project, e.g. `/?project=xyz`. */
-export function projectUrl(path = '/'): string {
+function projectUrl(path = '/'): string {
   if (!ownProject) return path;
   if (/[?&]project=/.test(path)) return path;
   const [before, query] = path.split('?');
   return `${before}?project=${ownProject.id}${query ? `&${query}` : ''}`;
 }
+
+/**
+ * Delete every task whose status is not in `keep`, and name the ones that refused. The two callers judge the
+ * result differently — a teardown only logs a refusal, a spec re-reads the board — so the judging stays with
+ * them and this only does the deleting.
+ */
+async function deleteTasksExcept(page: Page, projectId: string, keep: string[]): Promise<string[]> {
+  const board = await apiGetJson<{ tasks?: any[] }>(page, `/api/projects/${projectId}/board`);
+  const refused: string[] = [];
+  for (const t of (board?.tasks || []).filter((t: any) => !keep.includes(t.status))) {
+    const res = await csrfFetch(page, `/api/projects/${projectId}/tasks/${t.id}`, { method: 'DELETE' });
+    if (!res.ok) refused.push(`${t.id} (${res.status})`);
+  }
+  return refused;
+}
+
 /**
  * Delete every task whose status is not in `keep`. Some assertions only hold on a sparse
  * board, and a worker's project outlives the spec that filled it.
  */
 export async function clearBoardExcept(page: Page, projectId: string, keep: string[] = []): Promise<void> {
-  const board = await apiGetJson<{ tasks?: any[] }>(page, `/api/projects/${projectId}/board`);
-  const doomed = (board?.tasks || []).filter((t: any) => !keep.includes(t.status));
-  for (const t of doomed) {
-    await csrfFetch(page, `/api/projects/${projectId}/tasks/${t.id}`, { method: 'DELETE' });
-  }
+  await deleteTasksExcept(page, projectId, keep);
   await expect(async () => {
     const after = await apiGetJson<{ tasks?: any[] }>(page, `/api/projects/${projectId}/board`);
     expect((after?.tasks || []).filter((t: any) => !keep.includes(t.status))).toHaveLength(0);
@@ -799,21 +801,4 @@ export function writeFileInWorktree(projectId: string, taskId: string, filePath:
   } catch {
     // An untracked file is still detected by the diff
   }
-}
-
-// --- Extension helpers ---
-
-/**
- * True when an enabled LSP extension declares `suffix`. The host binary is not the prerequisite a
- * language-server test has — without the installed extension there is no server to talk to.
- */
-export async function hasInstalledLspExtension(page: Page, suffix: string): Promise<boolean> {
-  // GET, not csrfFetch: that one always sends a JSON content-type with no body, which a GET-only route
-  // rejects, and the caller cannot tell a refusal from an empty list.
-  const list = (await apiGetJson<any[]>(page, '/api/extensions')) || [];
-  return list.some((e) => {
-    if (e?.type !== 'lsp' || !e?.enabled) return false;
-    const types = e?.manifest?.capabilities?.lsp?.file_types || [];
-    return types.some((ft: any) => ft?.extension === suffix);
-  });
 }

@@ -431,22 +431,9 @@ func copyFile(ctx context.Context, src, dst string) error {
 	}
 	// Cancellable so a shutdown stops before a rename rather than during one: a cancelled copy leaves
 	// the previous file in place.
-	if _, err := io.Copy(out, &ctxReader{ctx: ctx, r: in}); err != nil {
+	if _, err := io.Copy(out, fsutil.ContextReader(ctx, in)); err != nil {
 		out.Close()
 		return err
 	}
 	return out.Close()
-}
-
-// ctxReader stops a copy between reads. The renames come last, so nothing waits mid-rename.
-type ctxReader struct {
-	ctx context.Context
-	r   io.Reader
-}
-
-func (c *ctxReader) Read(p []byte) (int, error) {
-	if err := c.ctx.Err(); err != nil {
-		return 0, err
-	}
-	return c.r.Read(p)
 }

@@ -1,10 +1,13 @@
 package fsutil
 
 import (
+	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -340,5 +343,42 @@ func TestCopyEntryRefusesANameTheWalkNoLongerRecognises(t *testing.T) {
 	}
 	if got, err := os.ReadFile(dst); err == nil {
 		t.Errorf("the paste wrote %q into the destination", got)
+	}
+}
+
+// closedSource records that Close reached it, so a wrapped source cannot be left open.
+type closedSource struct {
+	io.Reader
+	closed bool
+}
+
+func (s *closedSource) Close() error {
+	s.closed = true
+	return nil
+}
+
+func TestContextReaderRefusesOnceTheContextIsDone(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	r := ContextReader(ctx, strings.NewReader("payload"))
+	if got, err := io.ReadAll(r); err != nil || string(got) != "payload" {
+		t.Fatalf("read before the cancel = %q, %v; want the bytes", got, err)
+	}
+	cancel()
+	if _, err := r.Read(make([]byte, 1)); !errors.Is(err, context.Canceled) {
+		t.Fatalf("read after the cancel = %v, want %v", err, context.Canceled)
+	}
+}
+
+func TestContextReadCloserClosesTheSourceItWraps(t *testing.T) {
+	src := &closedSource{Reader: strings.NewReader("payload")}
+	rc := ContextReadCloser(context.Background(), src)
+	if _, err := io.ReadAll(rc); err != nil {
+		t.Fatal(err)
+	}
+	if err := rc.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if !src.closed {
+		t.Error("Close did not reach the wrapped source")
 	}
 }

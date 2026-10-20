@@ -11,6 +11,8 @@ import (
 	"io"
 	"strings"
 	"time"
+
+	"mike/backend/fsutil"
 )
 
 // The containers this package reads. The rest — xz, zstd, 7z, rar — answer ErrNotArchive, since reading
@@ -73,23 +75,7 @@ func NewSeekable(at io.ReaderAt, size int64) *Source {
 // deadline is checked inside the read: skipping a large member is one long read the walk would never see
 // between entries.
 func (s *Source) openStream(ctx context.Context) io.ReadCloser {
-	return &ctxReadCloser{
-		ReadCloser: io.NopCloser(io.NewSectionReader(s.at, 0, s.size)),
-		ctx:        ctx,
-	}
-}
-
-// ctxReadCloser makes a deadline real for a read that could otherwise wait forever.
-type ctxReadCloser struct {
-	io.ReadCloser
-	ctx context.Context
-}
-
-func (c *ctxReadCloser) Read(p []byte) (int, error) {
-	if err := c.ctx.Err(); err != nil {
-		return 0, err
-	}
-	return c.ReadCloser.Read(p)
+	return fsutil.ContextReadCloser(ctx, io.NopCloser(io.NewSectionReader(s.at, 0, s.size)))
 }
 
 // Reader reads one archive whose format has been recognised.
