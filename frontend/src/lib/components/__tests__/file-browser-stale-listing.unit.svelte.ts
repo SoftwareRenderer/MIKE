@@ -33,6 +33,7 @@ function fsPayload(path: string) {
 }
 
 let releaseSlow: () => void = () => {};
+let releaseHome: () => void = () => {};
 
 beforeAll(() => {
     vi.stubGlobal('matchMedia', (query: string) => ({
@@ -66,6 +67,24 @@ function stubOverlappingFetch() {
     }));
 }
 
+/** The `/api/home` round trip blocks until `releaseHome()`; every listing answers at once, so the
+ *  home listing is the one that starts last and the one a path typed in the meantime must survive. */
+function stubSlowHome() {
+    const blocked = new Promise<void>(r => { releaseHome = r; });
+    vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+        const url = new URL(String(input), 'http://localhost');
+        const json = (body: unknown, status = 200) =>
+            new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+
+        if (url.pathname === '/api/home') {
+            await blocked;
+            return json({ home: SLOW });
+        }
+        if (url.pathname === '/api/fs') return json(fsPayload(url.searchParams.get('path') || ''));
+        return json({ error: 'unexpected request' }, 404);
+    }));
+}
+
 async function goToPath(container: HTMLElement, path: string) {
     const input = container.querySelector('.path-input') as HTMLInputElement;
     input.value = path;
@@ -75,6 +94,9 @@ async function goToPath(container: HTMLElement, path: string) {
 
 const listed = (container: HTMLElement) =>
     [...container.querySelectorAll('.file-entry .name')].map(e => e.textContent);
+
+/** Every path the component asked the server for, in order. */
+const calls = () => (vi.mocked(fetch).mock.calls as any[]).map(c => String(c[0]));
 
 describe('FileBrowser — a stale directory listing must not win', () => {
     afterEach(() => {
@@ -104,6 +126,31 @@ describe('FileBrowser — a stale directory listing must not win', () => {
         expect(container.querySelector('.git-indicator'),
             'the indicator belongs to TARGET — its loss means the stale listing won').toBeTruthy();
         expect(container.querySelector('.current-path')?.textContent).toContain(TARGET);
+        expect(listed(container)).toEqual(['main.go']);
+    });
+
+    it('keeps the path typed while the home directory was still being looked up', async () => {
+        // The other half of the same race: the home listing does not merely reply late, it starts late —
+        // after the directory already chosen — so `loadDir`'s guard sees it as the newer load and lets it
+        // win. What the person sees is their own path replaced by home, and "Select" greyed out. The home
+        // button runs the same lookup the mount does, so it is how the window is opened here.
+        stubSlowHome();
+        const { container } = render(FileBrowser, {
+            props: { onClose: () => {}, onSelect: () => {}, onClone: async () => {} },
+        });
+
+        await fireEvent.click(container.querySelector('.home-btn') as Element);
+        await expect.poll(calls).toContain('/api/home');
+
+        await goToPath(container, TARGET);
+        await waitFor(() => expect(container.querySelector('.git-indicator')).toBeTruthy(), { timeout: 2000 });
+
+        releaseHome();
+        await new Promise(r => setTimeout(r, 200));
+
+        expect(container.querySelector('.git-indicator'),
+            'the indicator belongs to TARGET — its loss means the home listing answered over it').toBeTruthy();
+        expect((container.querySelector('.path-input') as HTMLInputElement).value).toBe(TARGET);
         expect(listed(container)).toEqual(['main.go']);
     });
 });

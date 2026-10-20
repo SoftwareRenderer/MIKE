@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"mike/backend/testutil/sandboxcheck"
 	"mike/backend/types"
 	"mike/pkg/sandboxruntime"
 )
@@ -1109,13 +1108,16 @@ func writeInstalledDockerfile(t *testing.T, root, author, name string) string {
 }
 
 func TestExtensionImageSource(t *testing.T) {
-	// The short-ref case asks podman whether a local build exists, so this table needs a store that
-	// answers "yes" or "no" truthfully.
-	sandboxcheck.Require(t, "docker.io/library/ubuntu:latest")
+	// A short ref is resolved by asking whether this host built that image, which is a fact about the
+	// machine's storage and not about this code, so the manager is asked to use a stated store: the
+	// one image below is the only thing "built here".
 	extDir := t.TempDir()
 	writeInstalledDockerfile(t, extDir, "go-team", "gopls")
 	sm := NewExtensionSandboxManager(NewRegistryClient(), nil, sandboxruntime.Boot{})
 	sm.extensionsDir = extDir
+	sm.imageProbe = func(image string) bool {
+		return image == "localhost/kanban-ext-gopls:1.0.0"
+	}
 
 	tests := []struct {
 		name      string
@@ -1132,6 +1134,13 @@ func TestExtensionImageSource(t *testing.T) {
 			name:      "short ref resolved to the local build",
 			ext:       &Extension{ID: "e2", Name: "gopls", Version: "0.7.0", ContainerConfig: ContainerConfig{Image: "kanban-ext-gopls:1.0.0"}},
 			wantImage: "localhost/kanban-ext-gopls:1.0.0",
+		},
+		{
+			// A short ref that is nobody's local build is a name someone pulled, and docker's
+			// reading of it is the one podman would have used.
+			name:      "short ref with no local build falls back to docker's registry",
+			ext:       &Extension{ID: "e6", Name: "gopls", Version: "0.7.0", ContainerConfig: ContainerConfig{Image: "myuser/img:1"}},
+			wantImage: "docker.io/myuser/img:1",
 		},
 		{
 			name:      "no image, Dockerfile installed: derived",

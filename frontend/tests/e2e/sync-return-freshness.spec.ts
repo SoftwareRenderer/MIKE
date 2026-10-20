@@ -3,7 +3,7 @@ import { execSync } from 'child_process';
 import { writeFileSync } from 'fs';
 import {
   isolatedProject, createTaskViaApi, navigateToTask, csrfFetch, waitForWorktree,
-  getWorktreePath, ownProjectId, apiGetJson, stopReading, comeBack,
+  getWorktreePath, ownProjectId, apiGetJson, stopReading, comeBack, sendTurn,
 } from './helpers';
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
@@ -15,6 +15,7 @@ isolatedProject();
  * `docs/reconnection.md → The tab that comes back`.
  */
 
+/** One newest-window read, as the recording holds it: how many digests had been asked when it went out. */
 /** While `__away`, every frame but the keepalive is dropped before the app sees it. While `__unfocused`, the
  * page reports no focus — the window on another desktop, never hidden, so no `visibilitychange` fires. */
 async function watchTheReturn(page: Page): Promise<void> {
@@ -23,7 +24,7 @@ async function watchTheReturn(page: Page): Promise<void> {
     w.__away = false;
     w.__unfocused = false;
     w.__syncCalls = 0;
-    w.__revisions = [] as Array<string | null>;
+    w.__windowReads = [] as number[];
     Object.defineProperty(document, 'hasFocus', {
       configurable: true,
       get: () => () => !w.__unfocused,
@@ -33,9 +34,7 @@ async function watchTheReturn(page: Page): Promise<void> {
       const url = typeof input === 'string' ? input
         : input instanceof URL ? input.href : (input as Request).url;
       if (url.includes('/sync')) w.__syncCalls++;
-      if (url.includes('/messages')) {
-        w.__revisions.push(new Headers(init?.headers).get('If-None-Match'));
-      }
+      if (url.includes('/messages')) w.__windowReads.push(w.__syncCalls);
       return realFetch(input as any, init);
     }) as typeof window.fetch;
     const RealWebSocket = window.WebSocket;
@@ -59,6 +58,28 @@ async function watchTheReturn(page: Page): Promise<void> {
 async function digest(page: Page, projectId: string, taskId: string) {
   return apiGetJson<{ diff: { known: boolean; hash?: string } }>(
     page, `/api/projects/${projectId}/tasks/${taskId}/sync`);
+}
+
+/**
+ * The return gesture, pressed until the screen acts on it. A return signal is deduped for
+ * `RETURN_DEDUPE_MS` — 2 s, `$lib/utils/tab-return.ts` — so one synthetic `focus` can land inside a
+ * reconcile the screen just did and be refused outright; a reader who clicks the window twice is this
+ * gesture twice. `why` answers `'ok'` when the claim holds and names what is missing otherwise, so a red
+ * says which half never arrived rather than only that a ceiling was reached.
+ */
+async function comeBackUntil(page: Page, why: () => Promise<string>): Promise<void> {
+  await expect.poll(async () => {
+    await comeBack(page);
+    return why();
+  }, { timeout: 20_000 }).toBe('ok');
+}
+
+/** The screen's own recording: how many digests it asked, and when each newest-window read went out. */
+async function recording(page: Page) {
+  return page.evaluate(() => ({
+    sync: (window as any).__syncCalls as number,
+    reads: (window as any).__windowReads as number[],
+  }));
 }
 
 test.describe('the window that comes back', () => {
@@ -120,21 +141,25 @@ test.describe('the window that comes back', () => {
     await navigateToTask(page, taskId, projectId);
     await expect(page.locator('.chat-form')).toBeVisible({ timeout: 20_000 });
 
-    const before = await page.evaluate(() => ({
-      sync: (window as any).__syncCalls as number,
-      reads: (window as any).__revisions.length as number,
-    }));
-    await comeBack(page);
+    // What the screen had applied is not the test's premise to hold. A page the lane starves reconciles on
+    // its own clock — the suspension trigger reads a starved timer as a wake — so a claim about which
+    // baseline a later read may name is a claim about the machine, and that is what flaked here. What the
+    // machine cannot spare the screen is the fetch: the digest asked, a window read following it.
+    stopReading(page);
+    const content = `written while unread ${unique}`;
+    await sendTurn(page, projectId, taskId, content);
+    const held = await recording(page);
 
-    await expect.poll(async () => {
-      const now = await page.evaluate(() => ({
-        sync: (window as any).__syncCalls as number,
-        reads: (window as any).__revisions as Array<string | null>,
-      }));
-      // One digest, and the window read that follows it names no baseline: this screen has applied nothing it
-      // can name.
-      return now.sync > before.sync && now.reads.length > before.reads
-        && now.reads.slice(before.reads).every(v => v === null);
-    }, { timeout: 20_000 }).toBe(true);
+    await comeBackUntil(page, async () => {
+      const now = await recording(page);
+      if (now.sync === held.sync) return 'no digest was asked';
+      // A read belongs to this return because the hook stamps it with the digests asked when it went out.
+      return now.reads.some(digests => digests > held.sync)
+        ? 'ok' : `digest asked, no window read issued after it (${now.reads.length} read(s) recorded)`;
+    });
+
+    // The row is the half with teeth: a return that reads nothing leaves it away whatever the counters say,
+    // and this is what the person came back to see.
+    await expect(page.locator('.chat-message', { hasText: content })).toBeVisible({ timeout: 20_000 });
   });
 });

@@ -356,6 +356,11 @@ func TestAConnectionThatMissedFramesIsEndedSoTheClientResyncs(t *testing.T) {
 
 	c := dialStream(t, asm)
 	c.sendSubscription(t, "subscribe_task", "proj-drop", "task-drop")
+	// The flood has to reach a live subscription. A frame that arrives before the server applies
+	// the subscription is buffered for its replay instead, and a replay trimmed to the connection's
+	// budget is the other decided behaviour of this pair: reported, connection kept
+	// (TestStatsFrameOnAFullReplayKeepsTheConnectionOpen). Flooding that path ends nothing.
+	awaitTaskSub(t, asm, clientAlone(t, asm), "proj-drop", "task-drop")
 	for i := 0; i < 200; i++ {
 		asm.SendTaskEvent("proj-drop", "task-drop", tokenEvent(fmt.Sprintf("frame-%d", i)))
 	}

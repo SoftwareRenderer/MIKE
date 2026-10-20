@@ -78,7 +78,7 @@ func TestQualifyLocalImageRef(t *testing.T) {
 	}
 }
 
-// ResolveImageRef with the probe injected, so the test touches neither podman nor a registry.
+// ResolveImageRefWith with the probe injected, so the test touches neither podman nor a registry.
 func TestResolveImageRefWith(t *testing.T) {
 	// Only the locally-built extension image exists on this "host".
 	exists := func(image string) bool {
@@ -97,22 +97,22 @@ func TestResolveImageRefWith(t *testing.T) {
 		{"", "", "empty stays empty for the caller's default"},
 	}
 	for _, tc := range tests {
-		if got := resolveImageRefWith(tc.image, exists); got != tc.want {
-			t.Errorf("resolveImageRefWith(%q) = %q, want %q (%s)", tc.image, got, tc.want, tc.why)
+		if got := ResolveImageRefWith(tc.image, exists); got != tc.want {
+			t.Errorf("ResolveImageRefWith(%q) = %q, want %q (%s)", tc.image, got, tc.want, tc.why)
 		}
 	}
 
 	// A qualified ref must not cost a probe call — that is the common path and it must stay free.
 	probes := 0
 	counting := func(string) bool { probes++; return false }
-	_ = resolveImageRefWith("docker.io/library/ubuntu:24.04", counting)
-	_ = resolveImageRefWith("localhost/x", counting)
-	_ = resolveImageRefWith("", counting)
+	_ = ResolveImageRefWith("docker.io/library/ubuntu:24.04", counting)
+	_ = ResolveImageRefWith("localhost/x", counting)
+	_ = ResolveImageRefWith("", counting)
 	if probes != 0 {
 		t.Errorf("qualified refs probed local storage %d times, want 0", probes)
 	}
 	// A short ref probes exactly once.
-	if _ = resolveImageRefWith("busybox:latest", counting); probes != 1 {
+	if _ = ResolveImageRefWith("busybox:latest", counting); probes != 1 {
 		t.Errorf("short ref probed local storage %d times, want 1", probes)
 	}
 }

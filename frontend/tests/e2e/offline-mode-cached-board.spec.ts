@@ -1,10 +1,15 @@
 import { test, expect, type Page } from '@playwright/test';
-import { getProjectId, gotoProject } from './helpers';
+import { getProjectId, gotoProject, isolatedProject } from './helpers';
 
 /**
  * The offline screen reads the mirror, so a request that hangs forever cannot sit between the click and the
  * cached board. The symptom was the empty start pane in its place.
  */
+
+// This worker's own project, which `isolatedProject()` seeds before the test: the file that ran on this
+// worker before this one leaves that project empty, and an empty board has no card for the waits below.
+// See isolatedProject() in helpers.ts.
+isolatedProject();
 
 function mirrored(page: Page, key: string) {
   return page.evaluate((k) => new Promise<unknown>((resolve) => {

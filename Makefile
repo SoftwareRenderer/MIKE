@@ -89,10 +89,11 @@ GOFMT_DIRS := backend pkg scripts $(wildcard *.go)
 .PHONY: test
 test: test-go test-frontend ## Run all tests (Go unit + frontend unit)
 
-# `-parallel 4`, not 8: `backend/stream`'s `TestAConnectionThatMissedFramesIsEndedSoTheClientResyncs`
-# asserts a liveness property behind a 10 s bound and went red in 3 of 6 full-scope runs at 8, against 0
-# of 3 at 4. The concurrency is not what the flag buys — packages overlap, so the suite takes 43 s at 4
-# and 41 s at 8.
+# `-parallel 4`. The concurrency is not what the flag buys — packages overlap, so the suite takes 43 s
+# at 4 and 41 s at 8. Nothing is known to fail at 8: the test this number was pinned for,
+# `backend/stream`'s `TestAConnectionThatMissedFramesIsEndedSoTheClientResyncs`, was racing the
+# server's read loop rather than running out of CPU (`docs/testing.md → Go unit test environment`).
+# Raising it is a measurement, not this comment.
 .PHONY: test-go
 test-go: ## Run Go unit tests (parallel; the gate)
 	go test $(GO_SCOPE) -count=1 -parallel 4

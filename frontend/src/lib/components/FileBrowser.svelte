@@ -102,6 +102,14 @@
         }
     }
 
+    /**
+     * An edit of the path field is the person's own intent, so it counts as the newest load: without it, a
+     * home lookup still in flight writes its directory over the path just typed.
+     */
+    function notePathEdit() {
+        loadSeq++;
+    }
+
     async function handleInitGit() {
         initGitLoading = true;
         error = '';
@@ -176,7 +184,13 @@
 
     /** The home button and the mount share this, so both land on the same directory. */
     async function goHome() {
-        await loadDir(await resolveHomeDirectory());
+        // The lookup has not started loading yet, so it claims its slot before the round trip: whatever the
+        // person does while the home address is being read is the newer load, and `notePathEdit()` counts a
+        // keystroke as one.
+        const seq = ++loadSeq;
+        const home = await resolveHomeDirectory();
+        if (seq !== loadSeq) return;
+        await loadDir(home);
     }
 
     function formatPath(p: string): string {
@@ -218,6 +232,7 @@
                         type="text"
                         class="path-input"
                         bind:value={currentPath}
+                        oninput={notePathEdit}
                         onkeydown={(e) => { if (e.key === 'Enter') handleInputChange(); }}
                         placeholder={t('explorer.shared.pathPlaceholder')}
                         aria-label={t('explorer.shared.filePathAria')}

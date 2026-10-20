@@ -1,4 +1,4 @@
-import { test, expect, type Browser, type Page } from '@playwright/test';
+import { test, expect, type Browser, type Locator, type Page } from '@playwright/test';
 import { readFileSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'path';
@@ -92,6 +92,29 @@ test.describe.serial('A clicked color in a stylesheet', () => {
     await page.locator('.file-browser-item', { hasText: FIXTURE_FILE }).click();
     await expect(page.locator('.cm-editor')).toBeVisible({ timeout: 15000 });
   });
+
+  /**
+   * A click on the middle of `needle`'s own glyphs. A `.cm-line` box spans the whole line rather than its
+   * text, so clicking that locator clicks the line's centre — on a fixture whose line carries a color, that
+   * is the color, and the card it opens answers a question nobody asked. The box is read in the same tick as
+   * the click: the point is only valid for the layout it was measured in.
+   */
+  async function clickGlyphs(page: Page, line: Locator, needle: string): Promise<void> {
+    const point = await line.evaluate((root: HTMLElement, text: string) => {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const at = (node.textContent ?? '').indexOf(text);
+        if (at < 0) continue;
+        const range = document.createRange();
+        range.setStart(node, at);
+        range.setEnd(node, at + text.length);
+        const box = range.getBoundingClientRect();
+        return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+      }
+      throw new Error(`"${text}" is not on that line`);
+    }, needle);
+    await page.mouse.click(point.x, point.y);
+  }
 
   /** The text under every underlined token in the open file. */
   async function underlined(page: Page): Promise<string[]> {
@@ -187,13 +210,15 @@ test.describe.serial('A clicked color in a stylesheet', () => {
   });
 
   test('a click on text the grammar is not claiming opens nothing', async ({ page }) => {
-    const selector = page.locator('.cm-line', { hasText: '#nav' }).first();
-    await expect(selector).toBeVisible();
-    await selector.click();
+    // `#nav` is the selector a `#` reads like, and the comment holds a hex spelled like a color; a click on
+    // either names no color token, so no card opens.
+    const selectorLine = page.locator('.cm-line', { hasText: '#nav' }).first();
+    await expect(selectorLine).toBeVisible();
+    await clickGlyphs(page, selectorLine, 'nav');
     await expect(card(page)).toHaveCount(0);
 
-    const comment = page.locator('.cm-line', { hasText: '#abcdef' }).first();
-    await comment.click();
+    const commentLine = page.locator('.cm-line', { hasText: '#abcdef' }).first();
+    await clickGlyphs(page, commentLine, '#abcdef');
     await expect(card(page)).toHaveCount(0);
   });
 });

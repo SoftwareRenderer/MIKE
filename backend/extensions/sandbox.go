@@ -44,6 +44,10 @@ type ExtensionSandboxManager struct {
 	available     bool
 	extensionsDir string
 	workspaceDir  string
+	// imageProbe answers "is this image built on this host" for a legacy short ref. Production leaves
+	// it nil and podman answers; a test states the answer, because which tags happen to sit in this
+	// machine's image storage is not a fact a unit test can assert about.
+	imageProbe func(string) bool
 	// extraMountRoots is the resolved MIKE_EXT_MOUNT_ROOTS list, wired once by NewServer. The mount
 	// set is fixed when a container is created, so reading the variable per policy would let a later
 	// container disagree with an earlier one about what the operator declared.
@@ -869,12 +873,21 @@ func (sm *ExtensionSandboxManager) extensionImageSource(ext *Extension) (image, 
 			return "", "", fmt.Errorf("extension %s declares an unusable image: %w", ext.ID, err)
 		}
 		// Old records carry a short ref ("kanban-ext-gopls:1.0.0"); resolve it to the local build.
-		return sm.rt.ResolveImageRef(declared), dockerfilePath, nil
+		return sm.resolveImageRef(declared), dockerfilePath, nil
 	}
 	if dockerfilePath == "" {
 		return "", "", fmt.Errorf("extension %s (%s) has no container image and no Dockerfile to build one from, so its sandbox cannot start", ext.ID, ext.Name)
 	}
 	return ExtensionImageRef(ext.Name, ext.Version), dockerfilePath, nil
+}
+
+// resolveImageRef qualifies an image reference the way every podman call needs it. The local-storage
+// probe behind a short ref is injected when this manager has one; see imageProbe.
+func (sm *ExtensionSandboxManager) resolveImageRef(image string) string {
+	if sm.imageProbe != nil {
+		return sandboxruntime.ResolveImageRefWith(image, sm.imageProbe)
+	}
+	return sm.rt.ResolveImageRef(image)
 }
 
 // persistDerivedImage saves an image the sandbox had to derive, so it is derived once. Best effort: the

@@ -108,17 +108,21 @@ func ValidateConfiguredImageRef(image string) error {
 	return nil
 }
 
-// ResolveImageRef turns any reference into one podman can use without prompting: a qualified ref
-// comes back unchanged with no podman call, a short one becomes "localhost/<name>" if that image
-// exists locally and docker.io's interpretation otherwise. The local probe is for values stored
-// before refs were qualified — "kanban-ext-gopls:1.0.0" is a local build, "myuser/img" is not.
+// ResolveImageRef turns any reference into one podman can use without prompting, asking this host's
+// storage whether a short name is a local build.
 func (r *Runtime) ResolveImageRef(image string) string {
-	return resolveImageRefWith(image, r.imageExists)
+	return ResolveImageRefWith(image, r.imageExists)
 }
 
-// resolveImageRefWith is ResolveImageRef with the local-storage probe injected, so the decision is
-// testable without podman or a registry.
-func resolveImageRefWith(image string, exists func(string) bool) string {
+// ResolveImageRefWith is ResolveImageRef with the local-storage probe supplied by the caller: a
+// qualified ref comes back unchanged with no probe call, a short one becomes "localhost/<name>" if
+// that image exists locally and docker.io's interpretation otherwise. The local probe is for values
+// stored before refs were qualified — "kanban-ext-gopls:1.0.0" is a local build, "myuser/img" is not.
+//
+// The probe is a parameter because whether an image is built on this host is state no unit test can
+// state truthfully, and a caller deciding for a stored record — an extension's image ref — is the
+// one that needs the question pinned.
+func ResolveImageRefWith(image string, exists func(string) bool) string {
 	if image == "" || IsQualifiedImageRef(image) {
 		return image
 	}
