@@ -35,7 +35,12 @@ Handles the WebAuthn flow. It derives the `RelyingHost` (rpID, origin) from the 
 Transports ceremony state between requests. Tickets are HMAC-SHA256 signed using `MIKE_ENCRYPTION_KEY` and have a limited TTL and payload size.
 
 ### Presentation & UI
-- **Pairing**: Codes are provided in URL fragments. The boot banner prints the code in a specific frame for terminal visibility.
+- **Pairing**: Codes are provided in URL fragments. The boot banner prints the code in a specific frame for
+  terminal visibility, with one URL per authorized host — Host Pinning above means any name the operator
+  pinned in `--allowed-hosts`/`MIKE_ALLOWED_HOSTS` is an address a person may pair at. With none configured
+  the listen address stands in, resolved to `localhost` when it names no host. An authorized address is
+  printed with the rest, and a warning names it. With several URLs on screen the banner says a passkey
+  belongs to the address it was paired at.
 - **QR Codes**: Settings provides a PNG QR code for pairing links.
 - **Browser Flow**: `$lib/utils/login-flow.ts` manages the transition between the code field and passkey assertion.
 - **Management**: `ConfigModal/PasskeysSection.svelte` allows renaming and revoking devices.
@@ -60,3 +65,4 @@ Stores one row per device. `ResetPasskeys` deletes all records within a transact
 - `make test-e2e SPECS=login`: Verifies the full pairing and login flow.
 - `make test-e2e SPECS=settings-passkeys`: Verifies device management and pairing.
 - `login-flow.unit.ts` & `app-shell-copy.unit.svelte.ts`: Verify the browser-side flow.
+- `TestPairingBannerPrintsOneRowPerAuthorizedHost` and `TestBootPairingPrintsAPairingURLForEveryAuthorizedHost` hold the banner's URL rows. `TestBootPairingURLNamesAHostThatCanCarryACredential` holds which address each URL names.

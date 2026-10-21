@@ -90,8 +90,9 @@ rule belongs to the browser being paired. To satisfy it, use TLS (here or at a p
 
 The name is the credential's audience, not a cosmetic detail: an address is not a relying-party id, so
 `https://192.168.1.20:3000` has no passkey to offer even over TLS. Pin the hostname in
-`MIKE_ALLOWED_HOSTS` and pair through that name. A fresh install prints its pairing code and warns if
-the address it printed cannot hold the credential it is inviting — `docs/passkeys.md → Presentation & UI`.
+`MIKE_ALLOWED_HOSTS` and pair through that name. A fresh install prints its pairing code, and warns about
+every address it printed that cannot hold the credential it is inviting —
+`docs/passkeys.md → Presentation & UI`.
 
 ## Tests
 

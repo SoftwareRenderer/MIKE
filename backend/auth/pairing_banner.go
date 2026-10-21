@@ -16,6 +16,8 @@ const (
 	// bannerMaxColumns is the widest box that still fits a normal terminal. A wrapped row looks broken and
 	// the code reads fine without a frame, so an over-long row drops the frame rather than the budget.
 	bannerMaxColumns = 80
+
+	bannerHostNote = "A passkey belongs to one address — pair there."
 )
 
 // PairingBanner is the pairing code as the boot log shows it. `code` is the dashed form (`FormatPairingCode`).
@@ -23,19 +25,27 @@ const (
 // The code row is a contract across languages: the browser lane reads the code back out of the server's log
 // to pair its test device, so it must be the label, then the dashed code, then nothing — see PAIRING_CODE_ROW
 // in `frontend/tests/helpers-auth.mjs`.
-func PairingBanner(code, url string, expiresAt time.Time) string {
+func PairingBanner(code string, urls []string, expiresAt time.Time) string {
 	indent := strings.Repeat(" ", bannerIndent)
-	return box([]string{
+	rows := []string{
 		"",
 		"No passkey is registered yet — pair the first device.",
 		"",
 		indent + "PAIRING CODE" + strings.Repeat(" ", bannerCodeGap) + code,
-		indent + url,
+	}
+	for _, url := range urls {
+		rows = append(rows, indent+url)
+	}
+	rows = append(rows, "")
+	if len(urls) > 1 {
+		rows = append(rows, bannerHostNote)
+	}
+	rows = append(rows,
+		"The code works once and expires at "+expiresAt.UTC().Format("2006-01-02 15:04:05")+" UTC.",
+		"Restart MIKE to print a new code, or mint one in Settings.",
 		"",
-		"The code works once and expires at " + expiresAt.UTC().Format("2006-01-02 15:04:05") + " UTC.",
-		"Restart MIKE to print a new one, or mint one in Settings.",
-		"",
-	})
+	)
+	return box(rows)
 }
 
 // Widths are counted in runes: a row carries an em dash, and counting its bytes would put every border two
