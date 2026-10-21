@@ -25,6 +25,8 @@ MIKE_ENCRYPTION_KEY=secure_key
 
 3. Use docker / podman:
 
+Example docker-compose.yml: https://hub.docker.com/r/softwarerenderer/mike
+
 ```bash
 podman run -p 3000:3000 --env-file .env --privileged docker.io/softwarerenderer/mike:latest
 ```
