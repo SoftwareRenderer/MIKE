@@ -48,7 +48,10 @@ projects too because the server process enforces them.
   to it. A *link* at a name `Contained` returned is named `ErrSwapped` rather than an irregular file — a
   jail never resolves to a link, so that is a swap, and the log line is the only place an attempt shows up.
   Surfaces: the working-tree read, a preview asset,
-  the untracked content of a diff, `GET /projects/…/git/diff/file`, and the LSP document sync's read.
+  the untracked content of a diff, `GET /projects/…/git/diff/file`, the LSP document sync's read, and
+  the public `/extensions/` file server (`noEscapeFS`), which answers with no session at all.
+  A write to an accepted name takes the same care for the same reason: `WriteFileAtomic` refuses a
+  link standing at the name, where `os.WriteFile` would follow it out of every jail.
   `openJailedFile` is the same rule with the response mapping on top, which `/api/fs/raw`,
   `/api/fs/download` and the archive listing already used. A tree walked a name at a time is the same race at every entry: the
   folder download's archive (`writeTarOne`, whose header comes from the walk's own lstat) and the host

@@ -1169,6 +1169,23 @@ func resolveGitIdentity() (name, email string) {
 	return name, email
 }
 
+// hostStat is the stat a file request uses: the host jail when no project is named, the host itself when one is.
+func (s *Server) hostStat(project *types.Project) func(string) (fs.FileInfo, error) {
+	if project == nil {
+		return s.hostRoot.Stat
+	}
+	return os.Stat
+}
+
+// hostRefused writes the 403 for a host jail refusal and returns true when the caller must return.
+func (s *Server) hostRefused(w http.ResponseWriter, project *types.Project, err error) bool {
+	if err != nil && project == nil && fsutil.IsHostRootRefusal(err) {
+		JSONError(w, http.StatusForbidden, err.Error())
+		return true
+	}
+	return false
+}
+
 func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Path string `json:"path"`
@@ -1186,6 +1203,7 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 	}
 	// With a project the path is jailed to it like every other fs endpoint; with none the host
 	// jail decides.
+	stat := s.hostStat(project)
 	if project != nil {
 		resolved, err := s.validateFSPath(project, "", req.Path)
 		if err != nil {
@@ -1193,10 +1211,6 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		req.Path = resolved
-	} else if _, err := s.hostRoot.Stat(req.Path); err != nil && fsutil.IsHostRootRefusal(err) {
-		// Refuse before git is spawned.
-		JSONError(w, http.StatusForbidden, err.Error())
-		return
 	}
 
 	if !s.requireSandboxAvailable(w, project) {
@@ -1250,9 +1264,12 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Host filesystem (no project or sandbox disabled)
-	info, err := os.Stat(req.Path)
+	info, err := stat(req.Path)
+	if s.hostRefused(w, project, err) {
+		return
+	}
 	if err != nil {
-		JSONError(w, http.StatusBadRequest, "path does not exist: "+err.Error())
+		JSONError(w, http.StatusBadRequest, "path does not exist")
 		return
 	}
 	if !info.IsDir() {
@@ -1275,26 +1292,28 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cmd := git.Command("", "-C", req.Path, "init")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git init failed: %s", out))
+	if _, err := cmd.CombinedOutput(); err != nil {
+		Fault(w, "git init", err)
 		return
 	}
 
+	// This directory belongs to the person rather than to the server, so the write goes through the
+	// atomic writer, which refuses a symlink standing at the name.
 	readmePath := filepath.Join(req.Path, "README.md")
-	if err := os.WriteFile(readmePath, []byte("# "+filepath.Base(req.Path)+"\n"), 0644); err != nil {
+	if err := fsutil.WriteFileAtomic(readmePath, []byte("# "+filepath.Base(req.Path)+"\n")); err != nil {
 		Fault(w, "create README.md", err)
 		return
 	}
 
 	cmd = git.Command("", "-C", req.Path, "add", "README.md")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git add failed: %s", out))
+	if _, err := cmd.CombinedOutput(); err != nil {
+		Fault(w, "git add", err)
 		return
 	}
 	commitArgs := []string{"-C", req.Path, "-c", "user.name=" + name, "-c", "user.email=" + email, "commit", "-m", "Initial commit"}
 	cmd = git.Command("", commitArgs...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git commit failed: %s", out))
+	if _, err := cmd.CombinedOutput(); err != nil {
+		Fault(w, "git commit", err)
 		return
 	}
 
@@ -1397,17 +1416,8 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 	}
 	// Host filesystem (no project or sandbox disabled): the picker's path, so everything below
 	// goes through fsutil.HostRoot instead of os.
-	stat := os.Stat
+	stat := s.hostStat(project)
 	mkdir := func(p string) error { return os.MkdirAll(p, 0755) }
-	// hostRefused answers a jail refusal wherever it surfaced — on the path, its parent, or the
-	// mkdir walk. Unreported it arrives as a plausible 400 or a 500 instead of a 403.
-	hostRefused := func(err error) bool {
-		if err != nil && project == nil && fsutil.IsHostRootRefusal(err) {
-			JSONError(w, http.StatusForbidden, err.Error())
-			return true
-		}
-		return false
-	}
 	if project != nil {
 		resolved, err := s.validateFSPath(project, worktreePath, req.Path)
 		if err != nil {
@@ -1416,16 +1426,15 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 		}
 		req.Path = resolved
 	} else {
-		stat = s.hostRoot.Stat
 		mkdir = func(p string) error { return s.hostRoot.MkdirAll(p, 0755) }
 		// Stat the requested path before its parent so a jail refusal is not blamed on the parent.
-		if _, err := s.hostRoot.Stat(req.Path); err != nil && !errors.Is(err, fs.ErrNotExist) && hostRefused(err) {
+		if _, err := stat(req.Path); s.hostRefused(w, project, err) {
 			return
 		}
 	}
 	parent := filepath.Dir(req.Path)
 	info, err := stat(parent)
-	if hostRefused(err) {
+	if s.hostRefused(w, project, err) {
 		return
 	}
 	if err != nil || !info.IsDir() {
@@ -1439,7 +1448,7 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := mkdir(req.Path); err != nil {
-		if hostRefused(err) {
+		if s.hostRefused(w, project, err) {
 			return
 		}
 		Fault(w, "create directory", err)

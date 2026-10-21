@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"mike/backend/fsutil"
+	"mike/backend/git"
 	"mike/backend/types"
 
 	"mike/backend/startup"
@@ -255,5 +256,83 @@ func TestHomeEndpointReportsTheHome(t *testing.T) {
 	}
 	if !strings.Contains(body, `"home"`) || !strings.Contains(body, home) {
 		t.Errorf("home must still be reported: %s", body)
+	}
+}
+
+// TestFSInitGitRefusesANamePlantedAsALink (security): a link standing at README.md is written
+// wherever it points, which can be outside every host root and is not reported anywhere else.
+func TestFSInitGitRefusesANamePlantedAsALink(t *testing.T) {
+	s, home, outside, cookie, csrf := jailedHostRootServer(t)
+	t.Setenv("GIT_AUTHOR_NAME", "Test Author")
+	t.Setenv("GIT_AUTHOR_EMAIL", "test@example.com")
+
+	const stored = "ssh-rsa AAAA key\n"
+	victim := filepath.Join(outside, "authorized_keys")
+	if err := os.WriteFile(victim, []byte(stored), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := filepath.Join(home, "unpacked")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(victim, filepath.Join(dir, "README.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	req := testRequest(http.MethodPost, "/api/fs/init-git", map[string]string{"path": dir})
+	withAuthCSRF(req, cookie, csrf)
+	if rr := testResponse(t, s, req); rr.Code == http.StatusOK {
+		t.Errorf("init-git at a linked README.md = 200, want a refusal: %s", rr.Body.String())
+	}
+
+	got, err := os.ReadFile(victim)
+	if err != nil {
+		t.Fatalf("the link's target is gone: %v", err)
+	}
+	if string(got) != stored {
+		t.Errorf("init-git wrote through the symlink: %q", got)
+	}
+}
+
+// TestFSInitGitLeavesACommittedReadme (feature): the picker's "initialize git repository" leaves a
+// repository with one commit holding README.md, not a bare `git init` and not an untracked file.
+func TestFSInitGitLeavesACommittedReadme(t *testing.T) {
+	s, home, _, cookie, csrf := jailedHostRootServer(t)
+	t.Setenv("GIT_AUTHOR_NAME", "Test Author")
+	t.Setenv("GIT_AUTHOR_EMAIL", "test@example.com")
+
+	dir := filepath.Join(home, "new-project")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	req := testRequest(http.MethodPost, "/api/fs/init-git", map[string]string{"path": dir})
+	withAuthCSRF(req, cookie, csrf)
+	rr := testResponse(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("init-git = %d: %s", rr.Code, rr.Body.String())
+	}
+
+	body, err := os.ReadFile(filepath.Join(dir, "README.md"))
+	if err != nil {
+		t.Fatalf("no README.md: %v", err)
+	}
+	if string(body) != "# new-project\n" {
+		t.Errorf("README.md = %q, want %q", body, "# new-project\n")
+	}
+	// A clean working tree says the README was staged and committed.
+	out, err := git.Command(dir, "-C", dir, "status", "--porcelain").Output()
+	if err != nil || len(out) != 0 {
+		t.Errorf("working tree after init-git is not clean: out=%q err=%v", out, err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if fsutil.IsAtomicTemp(e.Name()) {
+			t.Errorf("a temporary write survived in %s: %s", dir, e.Name())
+		}
 	}
 }

@@ -1,11 +1,15 @@
 package server
 
 import (
+	"errors"
 	"io/fs"
 	"mike/backend/fsutil"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
+
+	"mike/pkg/logging"
 )
 
 func (s *Server) setupRoutes() {
@@ -295,8 +299,25 @@ type noEscapeFS struct{ dir string }
 
 func (n noEscapeFS) Open(name string) (http.File, error) {
 	abs := filepath.Join(n.dir, filepath.FromSlash("/"+name))
-	if _, err := fsutil.Contained(abs, []string{n.dir}); err != nil {
+	resolved, err := fsutil.Contained(abs, []string{n.dir})
+	if err != nil {
 		return nil, fs.ErrNotExist
 	}
-	return http.Dir(n.dir).Open(name)
+	before, err := os.Lstat(resolved)
+	if err != nil {
+		return nil, fs.ErrNotExist
+	}
+	// A directory is opened through http.Dir because nothing is read from that handle. The index
+	// page served beneath it comes back through this jail under its own name.
+	if before.IsDir() {
+		return http.Dir(n.dir).Open(name)
+	}
+	f, _, err := fsutil.OpenVerified(resolved, before)
+	if err != nil {
+		if errors.Is(err, fsutil.ErrSwapped) {
+			logging.For(logging.HTTP).Warnf("extension asset refused, path changed after containment: %q", name)
+		}
+		return nil, fs.ErrNotExist
+	}
+	return f, nil
 }
