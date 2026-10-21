@@ -14,9 +14,19 @@ var pairingCodeRow = regexp.MustCompile(`(?m)PAIRING CODE\s+([0-9A-Z]{4}-[0-9A-Z
 
 var bannerWhen = time.Date(2026, 10, 4, 15, 9, 2, 0, time.UTC)
 
+func rowCount(banner, want string) int {
+	rows := 0
+	for _, line := range strings.Split(strings.TrimSuffix(banner, "\n"), "\n") {
+		if strings.TrimSpace(strings.Trim(line, "│")) == want {
+			rows++
+		}
+	}
+	return rows
+}
+
 func TestPairingBannerShowsTheCodeOnItsOwnRow(t *testing.T) {
 	t.Parallel()
-	banner := PairingBanner("266A-SG2B", "http://localhost:3000/#pair=266ASG2B", bannerWhen)
+	banner := PairingBanner("266A-SG2B", []string{"http://localhost:3000/#pair=266ASG2B"}, bannerWhen)
 
 	found := pairingCodeRow.FindAllStringSubmatch(banner, -1)
 	if len(found) != 1 {
@@ -35,9 +45,60 @@ func TestPairingBannerShowsTheCodeOnItsOwnRow(t *testing.T) {
 	}
 }
 
+func TestPairingBannerPrintsOneRowPerAuthorizedHost(t *testing.T) {
+	t.Parallel()
+	urls := []string{
+		PairingURL("https://mike.lan:3000", "ABCD2345", ""),
+		PairingURL("https://mike.example.com:3000", "ABCD2345", ""),
+	}
+	banner := PairingBanner("ABCD-2345", urls, bannerWhen)
+
+	for _, want := range urls {
+		if rows := rowCount(banner, want); rows != 1 {
+			t.Errorf("%q appears on %d rows, want 1:\n%s", want, rows, banner)
+		}
+	}
+	if found := pairingCodeRow.FindAllStringSubmatch(banner, -1); len(found) != 1 {
+		t.Fatalf("%d rows carry a pairing code, want 1:\n%s", len(found), banner)
+	}
+}
+
+func TestPairingBannerHostNoteFitsSixtyColumns(t *testing.T) {
+	t.Parallel()
+	if n := utf8.RuneCountInString(bannerHostNote); n+2*(bannerPad+1) > 60 {
+		t.Errorf("the host note is %d columns, which draws a framed row of %d over the terminal of 60",
+			n, n+2*(bannerPad+1))
+	}
+	longHost := strings.Repeat("a", 60) + ".example.internal"
+	for _, urls := range [][]string{
+		{PairingURL("https://mike.lan:3000", "ABCD2345", ""), PairingURL("https://mike.example.com:3000", "ABCD2345", "")},
+		{PairingURL("https://"+longHost, "ABCD2345", ""), PairingURL("https://mike.lan:3000", "ABCD2345", "")},
+	} {
+		banner := PairingBanner("ABCD-2345", urls, bannerWhen)
+		if rows := rowCount(banner, bannerHostNote); rows != 1 {
+			t.Fatalf("%d rows carry the host note, want 1:\n%s", rows, banner)
+		}
+	}
+}
+
+func TestPairingBannerHostNoteFollowsTheAddressCount(t *testing.T) {
+	t.Parallel()
+	one := PairingBanner("ABCD-2345", []string{PairingURL("https://mike.lan:3000", "ABCD2345", "")}, bannerWhen)
+	if rows := rowCount(one, bannerHostNote); rows != 0 {
+		t.Errorf("%d rows carry the host note for one address, want 0:\n%s", rows, one)
+	}
+	several := PairingBanner("ABCD-2345", []string{
+		PairingURL("https://mike.lan:3000", "ABCD2345", ""),
+		PairingURL("https://mike.example.com:3000", "ABCD2345", ""),
+	}, bannerWhen)
+	if rows := rowCount(several, bannerHostNote); rows != 1 {
+		t.Errorf("%d rows carry the host note for two addresses, want 1:\n%s", rows, several)
+	}
+}
+
 func TestPairingBannerFrameIsEven(t *testing.T) {
 	t.Parallel()
-	banner := PairingBanner("ABCD-2345", "http://localhost:3000/#pair=ABCD2345", bannerWhen)
+	banner := PairingBanner("ABCD-2345", []string{"http://localhost:3000/#pair=ABCD2345", "https://mike.lan:3000/#pair=ABCD2345"}, bannerWhen)
 	lines := strings.Split(strings.TrimSuffix(banner, "\n"), "\n")
 	width := utf8.RuneCountInString(lines[0])
 	if width > bannerMaxColumns {
@@ -60,7 +121,7 @@ func TestPairingBannerFrameIsEven(t *testing.T) {
 func TestPairingBannerDropsTheFrameRatherThanWrapping(t *testing.T) {
 	t.Parallel()
 	host := strings.Repeat("a", 60) + ".example.internal"
-	banner := PairingBanner("ABCD-2345", PairingURL("https://"+host, "ABCD2345", ""), bannerWhen)
+	banner := PairingBanner("ABCD-2345", []string{PairingURL("https://"+host, "ABCD2345", "")}, bannerWhen)
 
 	if strings.Contains(banner, "│") || strings.Contains(banner, "┌") {
 		t.Fatalf("a %d-column host was framed anyway:\n%s", len(host), banner)

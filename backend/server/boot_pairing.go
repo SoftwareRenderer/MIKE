@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"strconv"
 	"strings"
@@ -33,32 +32,57 @@ func (s *Server) pairAtBoot(ctx context.Context) {
 		logging.For(logging.Auth).Errorf("could not mint a pairing code, so this install cannot be paired: %v", err)
 		return
 	}
-	origin := s.bootPairingOrigin()
-	url := auth.PairingURL(origin, code.Code, "")
+	hosts := s.bootPairingHosts()
+	urls := make([]string, 0, len(hosts))
+	for _, host := range hosts {
+		urls = append(urls, auth.PairingURL(host.origin, code.Code, ""))
+	}
 	// The code is written here and nowhere else, and the browser lane reads it back out of this text
 	// (docs/testing.md → Passkeys in the e2e lane).
-	logging.Banner(auth.PairingBanner(auth.FormatPairingCode(code.Code), url, code.ExpiresAt))
+	logging.Banner(auth.PairingBanner(auth.FormatPairingCode(code.Code), urls, code.ExpiresAt))
 
 	if !startup.IsLoopbackAddr(s.settings.Listen) {
 		logging.For(logging.Auth).Warnf("this server listens on %s, which other machines can reach: anyone who can reach that "+
 			"port can spend %.0f minutes trying this code, at %d attempts per minute per address",
 			s.settings.Listen, auth.BootPairingTTL.Minutes(), s.settings.LoginRateLimit)
 	}
-	if _, err := auth.NewRelyingHost(s.bootPairingAuthority(), true); err != nil {
-		logging.For(logging.Auth).Warnf("the URL above points at %q, which cannot hold a passkey: %v. Open MIKE by a hostname — "+
-			"a name in MIKE_ALLOWED_HOSTS — and type the code there", s.bootPairingHost(), err)
+	for _, host := range hosts {
+		if _, err := auth.NewRelyingHost(host.authority, true); err != nil {
+			logging.For(logging.Auth).Warnf("the URL above points at %q, which cannot hold a passkey: %v. Open MIKE by a hostname — "+
+				"a name in MIKE_ALLOWED_HOSTS — and type the code there", host.origin, err)
+		}
 	}
 }
 
-// bootPairingHost determines the hostname for the pairing URL. It prefers the first allowed host since
-// that name is already pinned. Otherwise, it uses the listen address, but resolves wildcards, bare IPs,
-// and loopback addresses to localhost, because browsers refuse these as relying-party IDs for Passkeys.
-func (s *Server) bootPairingHost() string {
-	for _, host := range s.settings.AllowedHosts {
-		if host = strings.TrimSpace(host); host != "" {
-			return host
+// bootPairingHost is one address the pairing banner prints a URL for. The origin is spelled exactly as the
+// Host pinning accepts it and as NewRelyingHost spells a ceremony origin, so a person who opens the printed
+// URL can pair, and the verifier releases the passkey they made there.
+type bootPairingHost struct {
+	origin    string
+	authority string
+}
+
+// bootPairingHosts are the addresses the banner offers a pairing URL for, because a passkey belongs to the
+// address it was paired at. With no authorized host the listen address stands in, and a wildcard, bare
+// address or loopback address becomes localhost, because a browser will not accept one as a relying party.
+func (s *Server) bootPairingHosts() []bootPairingHost {
+	var hosts []bootPairingHost
+	seen := make(map[string]struct{}, len(s.settings.AllowedHosts))
+	for _, entry := range s.settings.AllowedHosts {
+		host := normalizeHost(entry)
+		if _, duplicate := seen[host]; host == "" || duplicate {
+			continue
 		}
+		seen[host] = struct{}{}
+		hosts = append(hosts, newBootPairingHost(host, s.settings.Port))
 	}
+	if len(hosts) > 0 {
+		return hosts
+	}
+	return []bootPairingHost{newBootPairingHost(s.bootPairingListenHost(), s.settings.Port)}
+}
+
+func (s *Server) bootPairingListenHost() string {
 	listen := strings.Trim(strings.TrimSpace(s.settings.Listen), "[]")
 	if listen == "" || listen == "0.0.0.0" || listen == "::" || listen == "*" {
 		return "localhost"
@@ -69,17 +93,11 @@ func (s *Server) bootPairingHost() string {
 	return listen
 }
 
-// bootPairingAuthority is that host with the listen port on it, which is what a relying-party host is
-// derived from.
-func (s *Server) bootPairingAuthority() string {
-	return net.JoinHostPort(s.bootPairingHost(), strconv.Itoa(s.settings.Port))
-}
-
-// bootPairingOrigin is the scheme-and-host half of the pairing URL. TLS has no switch, so the printed
-// address is always https; port 443 is the scheme's own and is left off.
-func (s *Server) bootPairingOrigin() string {
-	if s.settings.Port == 0 || s.settings.Port == 443 {
-		return fmt.Sprintf("https://%s", s.bootPairingHost())
+func newBootPairingHost(host string, port int) bootPairingHost {
+	portText := strconv.Itoa(port)
+	origin := "https://" + host
+	if port != 0 && port != 443 {
+		origin += ":" + portText
 	}
-	return fmt.Sprintf("https://%s:%d", s.bootPairingHost(), s.settings.Port)
+	return bootPairingHost{origin: origin, authority: net.JoinHostPort(host, portText)}
 }

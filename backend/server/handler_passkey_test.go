@@ -3,8 +3,11 @@ package server
 import (
 	"crypto/tls"
 	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -681,30 +684,68 @@ func TestBootPairingPrintsTheCodeRowWithNoPrefix(t *testing.T) {
 	}
 }
 
+func TestBootPairingPrintsAPairingURLForEveryAuthorizedHost(t *testing.T) {
+	s := testServerWith(t, func(c *startup.Config) {
+		c.Listen, c.AllowedHosts, c.Port = "0.0.0.0", []string{"mike.lan", "mike.example.com"}, 3000
+	})
+	buf, restore := logging.TestSink()
+	defer restore()
+
+	s.pairAtBoot(t.Context())
+
+	printed := buf.String()
+	for _, want := range []string{"https://mike.lan:3000/#pair=", "https://mike.example.com:3000/#pair="} {
+		if !strings.Contains(printed, want) {
+			t.Errorf("no pairing URL was printed for %q:\n%s", want, printed)
+		}
+	}
+}
+
 // TestBootPairingURLNamesAHostThatCanCarryACredential: the printed URL is what the device holding the new
 // passkey opens, so it must not point at an address the ceremony will refuse.
 func TestBootPairingURLNamesAHostThatCanCarryACredential(t *testing.T) {
 	for _, tc := range []struct {
-		name       string
-		listen     string
-		allowed    []string
-		port       int
-		wantOrigin string
+		name        string
+		listen      string
+		allowed     []string
+		port        int
+		wantOrigins []string
 	}{
-		{name: "loopback address becomes localhost", listen: "127.0.0.1", port: 3000, wantOrigin: "https://localhost:3000"},
-		{name: "ipv6 any", listen: "::", port: 3000, wantOrigin: "https://localhost:3000"},
-		{name: "wildcard", listen: "0.0.0.0", port: 3000, wantOrigin: "https://localhost:3000"},
-		{name: "a pinned host wins", listen: "0.0.0.0", allowed: []string{"mike.example.com"}, port: 8443, wantOrigin: "https://mike.example.com:8443"},
-		{name: "the default port is not spelled", listen: "localhost", port: 443, wantOrigin: "https://localhost"},
+		{name: "loopback address becomes localhost", listen: "127.0.0.1", port: 3000, wantOrigins: []string{"https://localhost:3000"}},
+		{name: "ipv6 any", listen: "::", port: 3000, wantOrigins: []string{"https://localhost:3000"}},
+		{name: "wildcard", listen: "0.0.0.0", port: 3000, wantOrigins: []string{"https://localhost:3000"}},
+		{name: "a pinned host wins", listen: "0.0.0.0", allowed: []string{"mike.example.com"}, port: 8443, wantOrigins: []string{"https://mike.example.com:8443"}},
+		{name: "the default port is not spelled", listen: "localhost", port: 443, wantOrigins: []string{"https://localhost"}},
+		{name: "every authorized host is offered, including an address", listen: "0.0.0.0", allowed: []string{"mike.lan", " Mike.Example.COM:8443 ", "mike.lan", " 10.0.0.5 "}, port: 8443,
+			wantOrigins: []string{"https://mike.lan:8443", "https://mike.example.com:8443", "https://10.0.0.5:8443"}},
 	} {
 		s := testServerWith(t, func(c *startup.Config) {
 			c.Listen, c.AllowedHosts, c.Port = tc.listen, tc.allowed, tc.port
 		})
-		if got := s.bootPairingOrigin(); got != tc.wantOrigin {
-			t.Errorf("%s: origin = %q; want %q", tc.name, got, tc.wantOrigin)
+		hosts := s.bootPairingHosts()
+		var origins []string
+		for _, host := range hosts {
+			origins = append(origins, host.origin)
 		}
-		if _, err := auth.NewRelyingHost(s.bootPairingAuthority(), true); err != nil {
-			t.Errorf("%s: the printed URL points at a host that cannot carry a passkey: %v", tc.name, err)
+		if !slices.Equal(origins, tc.wantOrigins) {
+			t.Errorf("%s: origins = %q; want %q", tc.name, origins, tc.wantOrigins)
+		}
+		for _, host := range hosts {
+			relying, err := auth.NewRelyingHost(host.authority, true)
+			name, _, _ := net.SplitHostPort(host.authority)
+			if net.ParseIP(name) != nil {
+				if !errors.Is(err, auth.ErrHostCannotHostPasskeys) {
+					t.Errorf("%s: the address %q was printed but accepted as a relying party", tc.name, host.origin)
+				}
+				continue
+			}
+			if err != nil {
+				t.Errorf("%s: the printed URL points at a host that cannot carry a passkey: %v", tc.name, err)
+				continue
+			}
+			if relying.Origin != host.origin {
+				t.Errorf("%s: the banner prints %q while the ceremony binds %q", tc.name, host.origin, relying.Origin)
+			}
 		}
 	}
 }
