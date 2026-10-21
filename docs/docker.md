@@ -106,6 +106,10 @@ entrypoint's `localhost` default is what a browser reaching the published loopba
 a name beyond that belongs in the list. `MIKE_PREPULL_IMAGE=1` pulls the default sandbox
 image at boot instead of during the first task.
 
+A certificate pair the operator owns arrives as `MIKE_TLS_CERT` and `MIKE_TLS_KEY`, beside a mount of
+the files — a path inside the image is not a path on the host. The leaf under `/mike/data/tls` then
+goes unused. **`docs/tls.md`**.
+
 ### docker run
 
 ```bash

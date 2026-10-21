@@ -33,6 +33,11 @@ type Config struct {
 }
 
 const (
+	EnvTLSCert = "MIKE_TLS_CERT"
+	EnvTLSKey  = "MIKE_TLS_KEY"
+)
+
+const (
 	certOrganization = "MIKE"
 	caCommonName     = "MIKE Local CA"
 	leafCommonName   = "localhost"
@@ -70,7 +75,7 @@ func LoadWithCert(dataDir, certFile, keyFile string) (*Config, error) {
 			return nil, fmt.Errorf("tls: key file not found: %s: %w", keyFile, err)
 		}
 		if _, err := cryptotls.LoadX509KeyPair(certFile, keyFile); err != nil {
-			return nil, fmt.Errorf("tls: --tls-cert/--tls-key do not form a usable pair (%s, %s): %w", certFile, keyFile, err)
+			return nil, fmt.Errorf("tls: --tls-cert/--tls-key (or %s/%s) do not form a usable pair (%s, %s): %w", EnvTLSCert, EnvTLSKey, certFile, keyFile, err)
 		}
 		logging.For(logging.TLS).Infof("TLS enabled using provided certificates (%s, %s)", certFile, keyFile)
 		return &Config{CertFile: certFile, KeyFile: keyFile}, nil

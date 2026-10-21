@@ -155,8 +155,10 @@ func TestLoadWithCert_UserProvided_MismatchedPair(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error for a certificate and key that do not belong together")
 	}
-	if !strings.Contains(err.Error(), "--tls-cert") || !strings.Contains(err.Error(), "--tls-key") {
-		t.Errorf("the error must name the flags the operator set, got: %v", err)
+	for _, want := range []string{"--tls-cert", "--tls-key", EnvTLSCert, EnvTLSKey} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error must name the spelling the operator set (%s), got: %v", want, err)
+		}
 	}
 }
 

@@ -8,8 +8,9 @@ lives in `AGENTS.md → Server Management`.
 
 TLS is **not optional**. The server always serves it, signed by a local CA created at first start in
 `data/tls/`: the root (`mike-ca.crt`/`mike-ca.key`, 10 years) signs the server certificate
-(`mike.crt`/`mike.key`, 1 year). `--tls-cert`/`--tls-key` point the server at an operator's
-certificate instead — a way to change which certificate is served, but never a way out of TLS.
+(`mike.crt`/`mike.key`, 1 year). `--tls-cert`/`--tls-key`, or `MIKE_TLS_CERT`/`MIKE_TLS_KEY`, point
+the server at an operator's certificate instead — a way to change which certificate is served, but
+never a way out of TLS.
 
 The leaf's SANs cover `localhost`/127.0.0.1/::1 **plus the machine hostname, `<hostname>.local`
 and every non-loopback address of the host**, so other devices can reach it by name or LAN IP.
@@ -42,8 +43,8 @@ The root signs leaves only: `pathlen:0` with `KeyUsageCertSign|CRLSign`. A key l
 directory cannot mint a CA that chains (`TestLocalCARejectsAChain`). A healthy root is never rotated.
 
 The pair to be served is loaded before anything is announced: `LoadWithCert` loads an operator's
-`--tls-cert`/`--tls-key` (naming the flags if they do not form a pair), and `Serve` loads the leaf
-this package wrote. A pair that cannot be served stops the boot. Otherwise, the listener holds a nil
+pair, naming both of its spellings when the two halves do not belong together, and `Serve` loads the
+leaf this package wrote. A pair that cannot be served stops the boot. Otherwise, the listener holds a nil
 config: every ClientHello panics inside `crypto/tls`, net/http recovers it per connection, and the port
 answers while serving nothing.
 
@@ -100,8 +101,9 @@ and re-issue rules, CA/leaf reuse, and `CertPEM` answering with a certificate an
 leaf is replaced from an untouched CA, and a replaced root is announced at `Error`
 (`TestEnsureCA_AnnouncesAReplacedRoot`, whose `checkReplacement` also holds that the replacement is a CA
 and signs the served leaf). Keys are owner-only both created and replacing
-(`TestKeyFilesAreOwnerOnly`), and an unloadable pair is refused by `--tls-cert`/`--tls-key` and by `Serve`
-before anything is served.
+(`TestKeyFilesAreOwnerOnly`), and an unloadable pair is refused before anything is served.
+`backend/startup` holds the ladder that decides whose pair this is
+(`TestTLSCertificatePairResolvesFlagOverEnvironment`).
 `backend/server/handler_tls_test.go` holds the download: it answers with no session, 404s without a local
 CA, takes only GET, still pins the `Host`, and reports `tls_ca_available` in `/api/config` and
 `/api/auth/session`. `backend/server/server_tls_test.go` holds what `Serve` does with a pair it cannot
@@ -110,6 +112,7 @@ The listener's test is listed in `docs/lifecycle.md`.
 
 ## Checking this
 
-`go test ./backend/tls/ ./backend/server/` covers the CA and its leaf, the download's guards, the Host
-pinning that decides reachability, and the per-request `Secure` flag a forwarded `X-Forwarded-Proto` sets.
+`go test ./backend/tls/ ./backend/server/ ./backend/startup/` covers the CA and its leaf, the
+download's guards, the Host pinning that decides reachability, the per-request `Secure` flag a
+forwarded `X-Forwarded-Proto` sets, and the ladder that picks whose certificate pair is served.
 `backend/tls` is not in `RACE_PKGS`, so `go test -race ./backend/tls/` is its own command.

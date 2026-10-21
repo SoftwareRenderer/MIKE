@@ -22,6 +22,8 @@ const (
 	EnvDataDir           = "MIKE_DATA_DIR"
 	EnvWorktreesDir      = "MIKE_WORKTREES_DIR"
 	EnvFrontendDist      = "MIKE_FRONTEND_DIST"
+	EnvTLSCert           = "MIKE_TLS_CERT"
+	EnvTLSKey            = "MIKE_TLS_KEY"
 	EnvAllowedHosts      = "MIKE_ALLOWED_HOSTS"
 	EnvLogLevel          = "MIKE_LOG_LEVEL"
 	EnvEncryptionKey     = "MIKE_ENCRYPTION_KEY"
@@ -210,11 +212,11 @@ func Resolve(f Flags) (Config, error) {
 
 	// Only whose certificate is served is decided here; TLS has no switch. Half a pair is refused the
 	// way a present-but-invalid flag value is, rather than falling through to the generated leaf.
-	if (f.TLSCertPath == "") != (f.TLSKeyPath == "") {
-		return Config{}, fmt.Errorf("--tls-cert and --tls-key must both be given or both omitted")
+	c.TLSCertPath = resolveString(f.TLSCertPath, EnvTLSCert, "")
+	c.TLSKeyPath = resolveString(f.TLSKeyPath, EnvTLSKey, "")
+	if (c.TLSCertPath == "") != (c.TLSKeyPath == "") {
+		return Config{}, fmt.Errorf("--tls-cert/--tls-key and %s/%s must both be given or both omitted", EnvTLSCert, EnvTLSKey)
 	}
-	c.TLSCertPath = f.TLSCertPath
-	c.TLSKeyPath = f.TLSKeyPath
 
 	c.LogLevel = resolveString(f.LogLevel, EnvLogLevel, defaultLogLevel)
 	c.ResetPasskeys = f.ResetPasskeys

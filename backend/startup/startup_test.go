@@ -7,6 +7,7 @@ import (
 
 	"mike/backend/config"
 	"mike/backend/fsutil"
+	"mike/backend/tls"
 	"mike/backend/updates"
 	"mike/pkg/logging"
 )
@@ -186,7 +187,7 @@ var resolverEnv = []string{
 	EnvLogLevel, EnvEncryptionKey, EnvRegistryURL, EnvExtMountRoots,
 	EnvAgentPath, EnvSkipSandboxSweep, EnvTrustProxy, EnvLoginRateLimit, EnvAllowRootFS,
 	EnvDangerZone, EnvGCDryRun, EnvPProf, EnvMemoryBudgetPct, EnvUpdateURL, EnvDisableUpdates,
-	EnvRestrictMCP, EnvRestrictStatReset,
+	EnvRestrictMCP, EnvRestrictStatReset, EnvTLSCert, EnvTLSKey,
 }
 
 func clearResolverEnv(t testing.TB) {
@@ -383,23 +384,61 @@ func TestResolveRefusesAnUnparsableListenAddress(t *testing.T) {
 	}
 }
 
-// Half a certificate pair is a flag that was typed and then forgotten, so it refuses the boot by name
-// rather than silently serving the generated leaf and telling nobody.
 func TestResolveRefusesHalfACertificatePair(t *testing.T) {
-	for _, f := range []Flags{{TLSCertPath: "/srv/mike.crt"}, {TLSKeyPath: "/srv/mike.key"}} {
-		_, err := resolveWithKey(t, f)
-		if err == nil {
-			t.Fatalf("Resolve accepted half a certificate pair: %+v", f)
-		}
-		for _, want := range []string{"--tls-cert", "--tls-key"} {
-			if !strings.Contains(err.Error(), want) {
-				t.Errorf("refusal %q does not name %s", err, want)
-			}
-		}
+	cases := []struct {
+		name  string
+		env   map[string]string
+		flags Flags
+	}{
+		{name: "--tls-cert alone", flags: Flags{TLSCertPath: "/srv/mike.crt"}},
+		{name: "--tls-key alone", flags: Flags{TLSKeyPath: "/srv/mike.key"}},
+		{name: EnvTLSCert + " alone", env: map[string]string{EnvTLSCert: "/srv/mike.crt"}},
+		{name: EnvTLSKey + " alone", env: map[string]string{EnvTLSKey: "/srv/mike.key"}},
+		{name: "a flag's cert with " + EnvTLSKey + " set empty, which is how compose spells an unset value", env: map[string]string{EnvTLSKey: ""}, flags: Flags{TLSCertPath: "/srv/mike.crt"}},
 	}
-	c := mustResolve(t, Flags{TLSCertPath: "/srv/mike.crt", TLSKeyPath: "/srv/mike.key"})
-	if c.TLSCertPath == "" || c.TLSKeyPath == "" {
-		t.Errorf("a whole pair did not reach the resolved config: %+v", c)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			clearResolverEnv(t)
+			for name, value := range tc.env {
+				t.Setenv(name, value)
+			}
+			_, err := resolveWithKey(t, tc.flags)
+			if err == nil {
+				t.Fatalf("Resolve accepted half a certificate pair: %+v %v", tc.env, tc.flags)
+			}
+			for _, want := range []string{"--tls-cert", "--tls-key", EnvTLSCert, EnvTLSKey} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("refusal %q does not name %s", err, want)
+				}
+			}
+		})
+	}
+}
+
+func TestTLSCertificatePairResolvesFlagOverEnvironment(t *testing.T) {
+	cases := []struct {
+		name              string
+		envCert, envKey   string
+		flags             Flags
+		wantCert, wantKey string
+	}{
+		{name: "both variables", envCert: "/env/mike.crt", envKey: "/env/mike.key", wantCert: "/env/mike.crt", wantKey: "/env/mike.key"},
+		{name: "both flags", envCert: "/env/mike.crt", envKey: "/env/mike.key",
+			flags: Flags{TLSCertPath: "/flag/mike.crt", TLSKeyPath: "/flag/mike.key"}, wantCert: "/flag/mike.crt", wantKey: "/flag/mike.key"},
+		{name: "each flag replaces only its own variable", envCert: "/env/mike.crt", envKey: "/env/mike.key",
+			flags: Flags{TLSCertPath: "/flag/mike.crt"}, wantCert: "/flag/mike.crt", wantKey: "/env/mike.key"},
+		{name: "unset means the local CA", wantCert: "", wantKey: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			clearResolverEnv(t)
+			t.Setenv(EnvTLSCert, tc.envCert)
+			t.Setenv(EnvTLSKey, tc.envKey)
+			c := mustResolve(t, tc.flags)
+			if c.TLSCertPath != tc.wantCert || c.TLSKeyPath != tc.wantKey {
+				t.Errorf("pair = (%q, %q), want (%q, %q)", c.TLSCertPath, c.TLSKeyPath, tc.wantCert, tc.wantKey)
+			}
+		})
 	}
 }
 
@@ -520,6 +559,12 @@ func TestEnvNamesMatchTheirOwners(t *testing.T) {
 	}
 	if config.EnvRestrictStatReset != EnvRestrictStatReset {
 		t.Errorf("config.EnvRestrictStatReset = %q, startup says %q", config.EnvRestrictStatReset, EnvRestrictStatReset)
+	}
+	if tls.EnvTLSCert != EnvTLSCert {
+		t.Errorf("tls.EnvTLSCert = %q, startup says %q", tls.EnvTLSCert, EnvTLSCert)
+	}
+	if tls.EnvTLSKey != EnvTLSKey {
+		t.Errorf("tls.EnvTLSKey = %q, startup says %q", tls.EnvTLSKey, EnvTLSKey)
 	}
 }
 

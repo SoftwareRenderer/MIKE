@@ -75,6 +75,10 @@ services:
       # requests are HTTP 421.
       MIKE_ALLOWED_HOSTS: '${MIKE_ALLOWED_HOSTS:-localhost}'
       MIKE_TRUST_PROXY: ${MIKE_TRUST_PROXY:-}
+      # These two choose the certificate this server presents, instead of the leaf its local CA signs.
+      # Set both or neither, and mount the files read-only into this container.
+      MIKE_TLS_CERT: '${MIKE_TLS_CERT:-}'
+      MIKE_TLS_KEY: '${MIKE_TLS_KEY:-}'
       MIKE_REGISTRY_URL: ${MIKE_REGISTRY_URL:-}
       MIKE_LOGIN_RATE_LIMIT: ${MIKE_LOGIN_RATE_LIMIT:-}
       # Pull the default sandbox base image at boot instead of on the first task.

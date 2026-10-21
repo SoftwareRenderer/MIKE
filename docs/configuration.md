@@ -16,7 +16,7 @@ Configuration is resolved **once** at startup. Consumers receive the final decis
 
 ## Variables with a `--flag` twin
 
-Seven of the ten flags have environment twins; **flags win**:
+Nine of the ten flags have environment twins; **flags win**:
 - `--port`/`MIKE_PORT`
 - `--listen`/`MIKE_LISTEN`
 - `--data-dir`/`MIKE_DATA_DIR`
@@ -24,12 +24,16 @@ Seven of the ten flags have environment twins; **flags win**:
 - `--frontend-dist`/`MIKE_FRONTEND_DIST` (dev-only)
 - `--allowed-hosts`/`MIKE_ALLOWED_HOSTS`
 - `--log-level`/`MIKE_LOG_LEVEL`
+- `--tls-cert`/`MIKE_TLS_CERT`
+- `--tls-key`/`MIKE_TLS_KEY`
 
-The following have no environment twin:
-- `--tls-cert`, `--tls-key`
+One flag has no environment twin:
 - `--reset-passkeys` (one-shot operation; deletes credentials)
 
-Switches that widen permissions or point to host paths have only one spelling to ensure the operator is aware of them. `--worktrees-dir` is a runtime override and is not persisted to the database.
+`--reset-passkeys` is the only flag with one spelling: a variable that selects a wipe runs it at
+every restart. Every other host path a deployment points at is readable from a container's
+environment.
+`--worktrees-dir` is a runtime override and is not persisted to the database.
 
 ## The table
 
@@ -47,6 +51,8 @@ Switches that widen permissions or point to host paths have only one spelling to
 | `MIKE_ALLOWED_HOSTS` | Extra comma-separated hostnames accepted in the `Host` header. `localhost`, `127.0.0.1`, `::1` and the listen host are accepted without being listed, so unset means loopback-only; the container entrypoint defaults it to `localhost`. Rejections result in HTTP 421. **`docs/tls.md`**. |
 | `MIKE_EXT_MOUNT_ROOTS` | `os.PathList` of extra host roots that extension sandboxes may bind-mount. |
 | `MIKE_LOG_LEVEL` | Log verbosity: `debug`, `info` (default), `warn`, or `error`. Invalid values cause startup to fail. |
+| `MIKE_TLS_CERT` | Path to the certificate this server presents. With `MIKE_TLS_KEY` it replaces the leaf the local CA signs; both or neither, and a pair that cannot be loaded stops the boot. **`docs/tls.md`**. |
+| `MIKE_TLS_KEY` | Path to the private key beside `MIKE_TLS_CERT`. **`docs/tls.md`**. |
 | `MIKE_AGENT_PATH` | Absolute path to the `sandbox-bridge` binary. Tried before executable-relative searches. |
 | `MIKE_SANDBOX_SKIP_STARTUP_CLEANUP` | Any non-empty value suppresses the boot sweep that deletes stale `kanban-sandbox-*` and `kanban-ext-*` containers. |
 | `MIKE_MEMORY_BUDGET_PCT` | Percentage of installed RAM (default `90`) available for all sandboxes. Invalid values (outside `1-100`) cause startup to fail. **`docs/sandbox-runtime.md`**. |
