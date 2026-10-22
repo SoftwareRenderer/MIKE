@@ -178,10 +178,9 @@ func composeContextCutNote(tail string) string {
 	if strings.TrimSpace(tail) == "" {
 		return ""
 	}
-	return "Your conversation was compacted into the summary in your instructions because it reached the " +
-		"model's context limit. Your work was interrupted mid-task, not finished: everything older than that " +
+	return "Your conversation was compacted into the summary because it reached the context limit." +
+		"Your work was interrupted mid-task, not finished: everything older than that " +
 		"summary is gone except the turns below, reproduced as they happened.\n\n" +
-		"Continue from the last thing you were doing. This reproduction is abbreviated, so re-read a file " +
-		"before editing it rather than trusting what is quoted here.\n\n" +
+		"Continue from the last thing you were doing. This reproduction may be abbreviated.\n\n" +
 		"<recent_turns>\n" + tail + "\n</recent_turns>"
 }
