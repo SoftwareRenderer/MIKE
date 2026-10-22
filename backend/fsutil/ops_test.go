@@ -148,6 +148,12 @@ func TestHasGitSegment(t *testing.T) {
 		"/p/wt/sub/.git/objects": true,
 		"/p/git/git.txt":         false,
 		"/p/mygit":               false,
+		// These rows cover the case-folded spellings and the slash-separated relative path a preview uses.
+		"/p/.GIT/config":  true,
+		"/p/.Git":         true,
+		"rel/.git/config": true,
+		"/p/.gitx":        false,
+		"/p/git.":         false,
 	} {
 		if got := HasGitSegment(path); got != want {
 			t.Errorf("HasGitSegment(%q) = %v, want %v", path, got, want)

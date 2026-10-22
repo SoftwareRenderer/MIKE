@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"mike/backend/httputil"
+	"mike/backend/types"
 	"mike/pkg/logging"
 )
 
@@ -86,7 +87,9 @@ func Egress(ctx context.Context, ext *Extension, req EgressRequest) (*EgressResu
 	if source == "" {
 		source = "proxy"
 	}
-	logging.For(logging.Extensions).Infof("extension=%s source=%s method=%s url=%s status=pending", ext.Name, source, method, u.String())
+	// The address goes to the log without any credential it carries: an extension may put one in it.
+	loggedURL := types.RedactURL(u.String())
+	logging.For(logging.Extensions).Infof("extension=%s source=%s method=%s url=%s status=pending", ext.Name, source, method, loggedURL)
 
 	answer, err := egressCall(ctx, httputil.OutboundRequest{
 		Method:       method,
@@ -98,14 +101,14 @@ func Egress(ctx context.Context, ext *Extension, req EgressRequest) (*EgressResu
 		GrantedHosts: req.GrantedHosts,
 	})
 	if err != nil {
-		logging.For(logging.Extensions).Warnf("extension=%s source=%s url=%s %v", ext.Name, source, u.String(), err)
+		logging.For(logging.Extensions).Warnf("extension=%s source=%s url=%s %v", ext.Name, source, loggedURL, err)
 		if errors.Is(err, httputil.ErrUpstreamTooLarge) {
 			return nil, fmt.Errorf("%w: response too large", ErrEgressUpstream)
 		}
 		return nil, fmt.Errorf("%w: %v", ErrEgressUpstream, err)
 	}
 	logging.For(logging.Extensions).Infof("extension=%s source=%s method=%s url=%s status=%d bytes=%d",
-		ext.Name, source, method, u.String(), answer.StatusCode, len(answer.Body))
+		ext.Name, source, method, loggedURL, answer.StatusCode, len(answer.Body))
 	return answer, nil
 }
 
@@ -137,16 +140,21 @@ func FailureHint(result *EgressResult) string {
 	return failureHints[failureClass(result)]
 }
 
-// Matches the manifest's allowlist or a configured address. An empty allowlist means the manifest
-// declares no third-party API.
+// allowHost admits the manifest's allowlist or an address this extension has configured. An empty
+// allowlist declares no third-party API, and each side is folded by types.CanonicalHost first.
 func allowHost(ext *Extension, network *NetworkConfig, host string, granted []string) error {
+	want := types.CanonicalHost(host)
+	if want == "" {
+		// An address that names no host would match an allowlist entry that names none.
+		return fmt.Errorf("%w: the url names no host", ErrEgressUnusable)
+	}
 	for _, d := range network.AllowedDomains {
-		if d == host {
+		if types.CanonicalHost(d) == want {
 			return nil
 		}
 	}
 	for _, g := range granted {
-		if g == host {
+		if types.CanonicalHost(g) == want {
 			return nil
 		}
 	}

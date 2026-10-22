@@ -6,12 +6,12 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
-	"net"
 	"net/http"
 	"runtime/debug"
 	"strings"
 
 	"mike/backend/httputil"
+	"mike/backend/types"
 	"mike/pkg/logging"
 
 	"mike/backend/startup"
@@ -207,11 +207,11 @@ func newHostAllowlist(addr, extraHosts string) *hostAllowlist {
 	for _, h := range loopbackHosts {
 		a.hosts[h] = struct{}{}
 	}
-	if listenHost := normalizeHost(addr); listenHost != "" && listenHost != "0.0.0.0" && listenHost != "::" {
+	if listenHost := types.CanonicalHost(addr); listenHost != "" && listenHost != "0.0.0.0" && listenHost != "::" {
 		a.hosts[listenHost] = struct{}{}
 	}
 	for _, entry := range strings.Split(extraHosts, ",") {
-		if h := normalizeHost(entry); h != "" {
+		if h := types.CanonicalHost(entry); h != "" {
 			a.hosts[h] = struct{}{}
 		}
 	}
@@ -221,27 +221,12 @@ func newHostAllowlist(addr, extraHosts string) *hostAllowlist {
 // allows reports whether a Host header value names this server. Missing/empty
 // Host values are rejected: without an origin there is nothing to check.
 func (a *hostAllowlist) allows(rawHost string) bool {
-	h := normalizeHost(rawHost)
+	h := types.CanonicalHost(rawHost)
 	if h == "" {
 		return false
 	}
 	_, ok := a.hosts[h]
 	return ok
-}
-
-// normalizeHost reduces a Host header value (or allowlist entry) to a bare,
-// lowercase hostname: strip the port (falling back to the raw value when there
-// is none), unwrap IPv6 brackets, drop the FQDN root dot.
-func normalizeHost(raw string) string {
-	h := strings.TrimSpace(raw)
-	if h == "" {
-		return ""
-	}
-	if stripped, _, err := net.SplitHostPort(h); err == nil {
-		h = stripped
-	}
-	h = strings.TrimSuffix(strings.Trim(h, "[]"), ".")
-	return strings.ToLower(h)
 }
 
 // HostPinMiddleware rejects requests whose Host header names a different authority than this

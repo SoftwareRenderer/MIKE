@@ -12,7 +12,11 @@ The address rules and sandbox warnings for MCP servers are detailed in `docs/con
 - **Security**:
   - **Egress**: Requests use an egress client that only allows loopback for the specific host.
   - **No Redirects**: Redirects are not followed to prevent proxying into the local network.
-  - **Headers**: Stored tokens are attached via `httputil.WithHeaders` and never leave the process.
+  - **Headers**: A stored token is attached to a request only for the host the row was registered
+    with, and it is never echoed in a response body. The Test action resolves a masked header from the
+    registry rather than the browser, so the row's id and the address are two separate pieces of request
+    text: `probeTarget` sends the saved value only when the typed address names the same host
+    (`types.SameHost`) as the saved one, and says in its answer when it withheld one.
 - **Resource Bounds**: All incoming data is capped (e.g., `httputil.MaxUpstreamBodyBytes` for SSE and `toolresult.MaxCaptureBytes` for tool results).
 - **Wait Times**: Only a context deadline bounds a wait. A timeout of `0` means a call runs until it answers or the task is stopped.
 

@@ -394,7 +394,10 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 			output, err = s.sandboxMgr.ExecProject(project, "ls -pA "+shellQuote(sandboxPath), opts)
 		}
 		if err != nil {
-			JSONError(w, http.StatusNotFound, err.Error())
+			// A failing `ls` is a directory that is not there, so the answer matches the host branch
+			// below. The text here is podman's, which describes this server rather than the path.
+			logging.For(logging.HTTP).Warnf("fs sandbox listing failed: %v", err)
+			JSONError(w, http.StatusNotFound, "directory not found")
 			return
 		}
 		result.Path = sandboxPath

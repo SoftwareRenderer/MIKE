@@ -363,13 +363,13 @@ func (s *Server) HandlePreviewServe(w http.ResponseWriter, r *http.Request) {
 	if req.Project != "" || req.Path != "" {
 		worktreeRoot, dir, hostPath, err := s.resolveFSFilePath(req.Project, req.Task, req.Path)
 		if err != nil {
-			// A project or task that no longer exists is a 404; the other failures this
-			// resolver returns are the client's path being rejected, which stay 400.
-			if errs.IsNotFound(err) {
-				Fail(w, err, "resolve preview file", "project not found")
+			// A project or task that has gone is a 404, and a store fault is a 500 whose cause stays in
+			// the log. What is left is this request's own path being refused.
+			if !errs.IsNotFound(err) && !errs.IsOperation(err) {
+				JSONError(w, http.StatusBadRequest, err.Error())
 				return
 			}
-			JSONError(w, http.StatusBadRequest, err.Error())
+			Fail(w, err, "resolve preview file", "project not found")
 			return
 		}
 		fileName = filepath.Base(hostPath)
@@ -497,9 +497,9 @@ func (s *Server) HandlePreviewGet(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusNotFound, "preview not found")
 		return
 	}
-	// The `.git` rule and the type rule both judge only the requested path, so a refused file is never
-	// opened.
-	if previewUnderGitDir(rel) {
+	// A checkout's `.git` is never one of a page's assets: its config can carry a credential. The type
+	// rule below already refuses what a real checkout holds, and neither rule opens what it refuses.
+	if fsutil.HasGitSegment(rel) {
 		JSONError(w, http.StatusNotFound, "preview asset not found")
 		return
 	}
@@ -624,18 +624,6 @@ func previewAssetContentType(path string) (string, bool) {
 	return ct, previewAssetCT[base]
 }
 
-// previewUnderGitDir: a checkout's `.git` is never one of a page's assets, because its config can carry
-// a credential in a remote URL. The type allow-list already refuses what a real checkout holds here, so
-// this is the second lock, for a host whose mime database maps something under `.git` to an embedded type.
-func previewUnderGitDir(rel string) bool {
-	for _, seg := range strings.Split(filepath.ToSlash(rel), "/") {
-		if strings.EqualFold(seg, ".git") {
-			return true
-		}
-	}
-	return false
-}
-
 // resolveWorktreeForFile: host worktree for project/task (task worktree or
 // project root) + /home/sandbox/<name>/… → host path translation. The task is
 // honoured only when it belongs to the project — see requireTaskOwnership.
@@ -675,14 +663,14 @@ func (s *Server) resolveFSFilePath(projectID, taskID, filePath string) (worktree
 		if errs.IsNotFound(err) {
 			return "", "", "", fmt.Errorf("project %w", errs.ErrNotFound)
 		}
-		return "", "", "", err
+		return "", "", "", errs.Operation("read project", err)
 	}
 	worktreePath, hostPath, err := s.resolveWorktreeForFile(project, taskID, filePath)
 	if err != nil {
 		if errs.IsNotFound(err) {
 			return "", "", "", fmt.Errorf("task worktree %w", errs.ErrNotFound)
 		}
-		return "", "", "", err
+		return "", "", "", errs.Operation("resolve worktree", err)
 	}
 	// Relative paths resolve against the worktree root defensively.
 	if !filepath.IsAbs(hostPath) {

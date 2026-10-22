@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // TestInheritKeepsOnlyWhatTheFilterAccepts is the whole reason a filter is passed in rather than an
@@ -152,5 +153,22 @@ func TestWatchStopsReportingOnceTheSubprocessFinished(t *testing.T) {
 	defer mu.Unlock()
 	if fired != 0 {
 		t.Errorf("a finished subprocess reported %d time(s), want 0", fired)
+	}
+}
+
+func TestSummarizeBoundsSubprocessOutput(t *testing.T) {
+	if got := Summarize([]byte("fatal: could not read\nfrom remote\n"), AnswerMax); got != "fatal: could not read from remote" {
+		t.Errorf("Summarize() = %q, want the single-line summary", got)
+	}
+	if got := Summarize(nil, AnswerMax); got != "" {
+		t.Errorf("Summarize(nil) = %q, want nothing", got)
+	}
+	long := strings.Repeat("x", 5000)
+	if got := Summarize([]byte(long), AnswerMax); len(got) > AnswerMax+len("…") {
+		t.Errorf("Summarize did not bound a %d-byte output (got %d)", len(long), len(got))
+	}
+
+	if got := Summarize([]byte(strings.Repeat("ä", 400)), 100); !utf8.ValidString(got) {
+		t.Errorf("Summarize cut through a rune: %q", got)
 	}
 }

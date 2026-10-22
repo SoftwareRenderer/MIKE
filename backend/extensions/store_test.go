@@ -584,6 +584,31 @@ func TestStorageNamespacesAreIsolated(t *testing.T) {
 	}
 }
 
+func TestStorageListPrefixIsLiteral(t *testing.T) {
+	es := testStore(t)
+	es.StorageSet("ext1", "ns", "a%c", json.RawMessage(`1`))
+	es.StorageSet("ext1", "ns", "axc", json.RawMessage(`2`))
+	es.StorageSet("ext1", "ns", `a\c`, json.RawMessage(`3`))
+	es.StorageSet("ext1", "ns", "a_c", json.RawMessage(`4`))
+
+	for _, tc := range []struct {
+		prefix string
+		want   string
+	}{
+		{"a%", "a%c"},
+		{"a_", "a_c"},
+		{`a\`, `a\c`},
+	} {
+		entries, err := es.StorageList("ext1", "ns", tc.prefix)
+		if err != nil {
+			t.Fatalf("list %q: %v", tc.prefix, err)
+		}
+		if len(entries) != 1 || entries[0].Key != tc.want {
+			t.Errorf("prefix %q listed %+v, want only %q", tc.prefix, entries, tc.want)
+		}
+	}
+}
+
 func TestStorageListWithPrefix(t *testing.T) {
 	es := testStore(t)
 	es.StorageSet("ext1", "ns", "b", json.RawMessage(`1`))

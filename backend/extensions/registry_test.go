@@ -803,16 +803,3 @@ func TestExtCloneArgsFencesTransports(t *testing.T) {
 		t.Errorf("source must be an unmodified single argument, got %v", args)
 	}
 }
-
-// TestGitErrorOutputBounded: git output reaches the install error, so it is
-// summarised rather than forwarded whole.
-func TestGitErrorOutputBounded(t *testing.T) {
-	got := gitErrorOutput([]byte("fatal: could not read\nfrom remote\n"))
-	if got != "fatal: could not read from remote" {
-		t.Errorf("gitErrorOutput() = %q, want the single-line summary", got)
-	}
-	long := strings.Repeat("x", 5000)
-	if out := gitErrorOutput([]byte(long)); len(out) > 400 {
-		t.Errorf("gitErrorOutput did not bound a %d-byte output (got %d)", len(long), len(out))
-	}
-}

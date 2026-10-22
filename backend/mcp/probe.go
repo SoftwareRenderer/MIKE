@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"mike/backend/types"
+	"mike/pkg/logging"
 )
 
 // The Test action answers over the cache and writes nothing to storage: the row it dials is the form's
@@ -45,7 +46,7 @@ type TestAnswer struct {
 // verdict with a kind and a sentence, not an error; only a body there is no point dialling is an error,
 // and it names the field the same way a save of that row would.
 func (r *Registry) ProbeForm(ctx context.Context, body TestRequest) (TestAnswer, error) {
-	server, err := r.probeTarget(body)
+	server, withheld, err := r.probeTarget(body)
 	if err != nil {
 		return TestAnswer{}, err
 	}
@@ -59,17 +60,29 @@ func (r *Registry) ProbeForm(ctx context.Context, body TestRequest) (TestAnswer,
 	if probeErr != nil {
 		answer.Kind = string(failureKind(probeErr))
 		answer.Message = probeErr.Error()
+		if withheld {
+			// A server that was never offered the credential needs a different fix from one that
+			// rejected it, and the status code cannot tell the two apart.
+			answer.Message = withheldTokenNotice + " " + answer.Message
+		}
 		return answer, nil
 	}
 	answer.OK = true
+	if withheld {
+		answer.Message = withheldTokenNotice
+	}
 	return answer, nil
 }
 
-// probeTarget is the form's row as a registered server. A masked header is resolved from the registry
-// rather than the request, so a saved token is exercised without the browser holding it.
-func (r *Registry) probeTarget(body TestRequest) (types.MCPServer, error) {
+// withheldTokenNotice tells the person the probe ran without the credential they expected.
+const withheldTokenNotice = "A saved token was not sent, because this address names a different host " +
+	"than the saved server; re-enter the token to test this address with it."
+
+// probeTarget is the form's row as a registered server. A masked header comes from the registry, never
+// the request, and is spent only on the host that row names. withheld says a header was held back.
+func (r *Registry) probeTarget(body TestRequest) (types.MCPServer, bool, error) {
 	if strings.TrimSpace(body.URL) == "" {
-		return types.MCPServer{}, errors.New("url is required")
+		return types.MCPServer{}, false, errors.New("url is required")
 	}
 	server := types.MCPServer{
 		ID:             strings.TrimSpace(body.ID),
@@ -86,18 +99,34 @@ func (r *Registry) probeTarget(body TestRequest) (types.MCPServer, error) {
 		headers = append(headers, types.MCPHeader{Name: strings.TrimSpace(h.Name)})
 	}
 	if err := types.ValidateMCPServer(server.Name, server.URL, body.TimeoutSeconds, headers); err != nil {
-		return types.MCPServer{}, err
+		return types.MCPServer{}, false, err
 	}
 
-	stored := r.storedHeaders(server.ID)
+	// An unregistered id has no row, so its URL is empty, so no stored value belongs anywhere.
+	row := r.storedRow(server.ID)
+	storedHost := types.URLHost(row.URL)
+	typedHost := types.URLHost(server.URL)
+
+	withheld := false
 	for _, h := range body.Headers {
 		name := strings.TrimSpace(h.Name)
 		if name == "" {
 			continue
 		}
 		value := h.Value
-		if value == types.MaskedSecret {
-			value = stored[strings.ToLower(name)]
+		fromVault := value == types.MaskedSecret
+		if fromVault {
+			value = storedHeader(row, name)
+			if value != "" && !types.SameHost(typedHost, storedHost) {
+				logging.For(logging.MCP).Infof("mcp server %s: stored %s header withheld from %s, which is not the saved host %s",
+					row.Name, name, typedHost, storedHost)
+				withheld = true
+				continue
+			}
+			if value != "" {
+				// The log names the server and the host, never the secret.
+				logging.For(logging.MCP).Infof("mcp server %s: stored %s header sent to %s", row.Name, name, typedHost)
+			}
 		}
 		if value == "" {
 			continue
@@ -105,31 +134,34 @@ func (r *Registry) probeTarget(body TestRequest) (types.MCPServer, error) {
 		keep := value
 		server.Headers = append(server.Headers, types.MCPHeader{Name: name, Value: &keep})
 	}
-	return server, nil
+	return server, withheld, nil
 }
 
-// storedHeaders is one registered server's header values, opened, by lower-cased name. An unregistered
-// id has none, so a masked value there sends nothing.
-func (r *Registry) storedHeaders(id string) map[string]string {
+// storedRow is one registered server by id, with its header values opened. An unregistered id has none,
+// which reads as the zero row.
+func (r *Registry) storedRow(id string) types.MCPServer {
 	if id == "" {
-		return nil
+		return types.MCPServer{}
 	}
 	servers, err := r.registered()
 	if err != nil {
-		return nil
+		return types.MCPServer{}
 	}
-	out := map[string]string{}
 	for _, s := range servers {
-		if s.ID != id {
-			continue
-		}
-		for _, h := range s.Headers {
-			if h.Value != nil {
-				out[strings.ToLower(h.Name)] = *h.Value
-			}
+		if s.ID == id {
+			return s
 		}
 	}
-	return out
+	return types.MCPServer{}
+}
+
+func storedHeader(row types.MCPServer, name string) string {
+	for _, h := range row.Headers {
+		if strings.EqualFold(h.Name, name) && h.Value != nil {
+			return *h.Value
+		}
+	}
+	return ""
 }
 
 // reportName attributes a failure to the address the person typed when the form has no name yet.

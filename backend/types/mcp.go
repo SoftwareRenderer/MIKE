@@ -9,10 +9,6 @@ import (
 	"time"
 )
 
-// MaskedSecret stands in for a stored secret in a response, and reads as "unchanged" on the way back.
-// The config view writes it and the probe resolves it back to what is stored.
-const MaskedSecret = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" // 10 bullets
-
 // A server's tools are never stored here: they are read from the server itself.
 
 // MaxMCPServers bounds the registry: every enabled server's tools ride on every provider request.

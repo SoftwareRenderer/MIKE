@@ -52,6 +52,10 @@ template out of the process.
 - `request.url` must **begin** with `{{config.<key>}}`, bare, and the rest is a path: no `?`, `#`,
   whitespace, `@` or `//` after it. Parameters belong in `request.query`, and a secret belongs in a
   header template.
+- An **argument filled into that path is escaped into one path segment**, so `/`, `?`, `#` and `%` reach
+  the upstream as `%2F`, `%3F`, `%23` and `%25`. The manifest authors the segments and the model fills
+  one; a configured value is a person's own text and stays as typed. A query entry is encoded once, by
+  the query map — `tool_request_test.go` pins both halves.
 - `request.query` is filled for both verbs: a GET has it in the URL, a POST sends it as an
   `application/x-www-form-urlencoded` body. The model never supplies a body.
 - `response.results` is a dotted path to the array of items (`meta.items.0` reaches a nested answer);
@@ -117,12 +121,17 @@ that out loud when isolation is on; `frontend/src/lib/utils/server-tool-network.
 
 `POST /api/extensions/{id}/test-url` sends the **declaration's own request** to the address in the body,
 with the form's current values overlaid on the stored configuration — so a typed-but-unsaved address and
-an unsaved token are both exercised. It writes nothing: the answer belongs to the open dialog, and a
-stored probe is a setting nobody saved and a stale one besides. It is classified by failure rather than
-by HTTP syntax (`unreachable`, `not_json`, `rate_limited`, `refused`, `unexpected_shape`, `empty`,
-`reachable`) because each class has a different fix in a different program. A `url` property that no
-contributed tool reads is refused: the probe is a dialer with a person's authority behind it, so it dials
-only the addresses the extension's own tools would send to. Tests: `tool_probe_test.go`.
+an unsaved token are both exercised. A sensitive field the form holds as the mask stands for the stored
+value, which is how a save reads the same payload. A stored credential is spent **only on the host the
+row's own address property names**. The address is request text and the secret is not, so pairing one
+extension's id with another host must not spend a value the API refuses to show back. A credential the
+person typed here is theirs to send. Withheld secrets are said in the answer: a server that wants auth
+refuses the probe either way, and the two fixes differ. It writes nothing: the answer belongs to the open
+dialog, and a stored probe is a setting nobody saved and a stale one besides. It is classified by failure
+rather than by HTTP syntax (`unreachable`, `not_json`, `rate_limited`, `refused`, `unexpected_shape`,
+`empty`, `reachable`) because each class has a different fix in a different program. A `url` property that
+no contributed tool reads is refused: the probe is a dialer with a person's authority behind it, so it
+dials only the addresses the extension's own tools would send to. Tests: `tool_probe_test.go`.
 
 ## What core may never learn
 

@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"mike/backend/types"
 )
 
 // Environment variable names. Every read of a variable happens here; a consumer keeps a constant of
@@ -396,7 +398,7 @@ func resolveUpdateURL(raw string) (string, error) {
 		return "", fmt.Errorf("%s=%q is not a URL", EnvUpdateURL, raw)
 	}
 	host := u.Hostname()
-	loopback := host == "localhost" || net.ParseIP(host) != nil && net.ParseIP(host).IsLoopback()
+	loopback := types.IsLoopbackHost(host)
 	switch {
 	case u.Scheme == "https":
 		return raw, nil

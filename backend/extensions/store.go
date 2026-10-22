@@ -24,8 +24,7 @@ func mapSensitiveConfig(config map[string]any, schema *ConfigSchema, transform f
 
 	result := make(map[string]any, len(config))
 	for k, v := range config {
-		prop := schema.GetProperty(k)
-		if prop == nil || !prop.Sensitive {
+		if !schema.IsSensitive(k) {
 			result[k] = v
 			continue
 		}
@@ -430,13 +429,17 @@ func (es *ExtensionStore) StorageGet(extID, namespace, key string) (*KVEntry, er
 	return &KVEntry{Key: key, Value: json.RawMessage(value), UpdatedAt: updatedAt}, nil
 }
 
+// likeEscaper quotes a literal for a LIKE pattern, where '%' and '_' are wildcards.
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
 // StorageList returns all keys in a namespace, optionally filtered by prefix.
 func (es *ExtensionStore) StorageList(extID, namespace, prefix string) ([]KVEntry, error) {
 	query := `SELECT key, value, updated_at FROM extension_storage WHERE ext_id = ? AND namespace = ?`
 	args := []any{extID, namespace}
 	if prefix != "" {
-		query += ` AND key LIKE ?`
-		args = append(args, prefix+"%")
+		// The prefix is data, not a pattern. Its wildcards must not widen the listing.
+		query += ` AND key LIKE ? ESCAPE '\'`
+		args = append(args, likeEscaper.Replace(prefix)+"%")
 	}
 	query += ` ORDER BY key`
 

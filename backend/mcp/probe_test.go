@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"mike/backend/types"
+	"mike/pkg/logging"
 )
 
 // The Test action is the only place the classification reaches a person rather than the log, so what it
@@ -71,6 +72,92 @@ func TestProbeFormUsesTheStoredTokenForAMaskedHeader(t *testing.T) {
 	}
 	if !strings.Contains(answer.Message, "Settings") {
 		t.Errorf("message %q does not say where a token is set", answer.Message)
+	}
+}
+
+// The request carries the address but never the token, so a row's id cannot spend its credential.
+func TestProbeTargetWithholdsTheStoredTokenFromAnotherHost(t *testing.T) {
+	const token = "s3cret-token"
+	value := "Bearer " + token
+	stored := registered("https://mcp.example.internal/mcp", 5)
+	stored.Headers = []types.MCPHeader{{Name: "Authorization", Value: &value}}
+	reg := NewRegistry(fakeSource{servers: []types.MCPServer{stored}}, fakeProjects{}, testID)
+
+	server, withheld, err := reg.probeTarget(TestRequest{
+		ID: stored.ID, Name: stored.Name, URL: "https://elsewhere.example/mcp", TimeoutSeconds: 5,
+		Headers: []TestHeader{{Name: "Authorization", Value: types.MaskedSecret}},
+	})
+	if err != nil {
+		t.Fatalf("the form was refused instead of dialled without the secret: %v", err)
+	}
+	if !withheld {
+		t.Error("the probe was not told a stored secret was withheld, so its answer cannot say so")
+	}
+	for _, h := range server.Headers {
+		if h.Value != nil && *h.Value == value {
+			t.Errorf("the stored token was attached to a request for %s", server.URL)
+		}
+	}
+
+	// The same form pointed at the host the row names still gets the token.
+	same, withheld, err := reg.probeTarget(TestRequest{
+		ID: stored.ID, Name: stored.Name, URL: "https://mcp.example.internal:8443/other/path",
+		TimeoutSeconds: 5,
+		Headers:        []TestHeader{{Name: "Authorization", Value: types.MaskedSecret}},
+	})
+	if err != nil || withheld || len(same.Headers) != 1 {
+		t.Errorf("same-host edit of the saved address: withheld=%v headers=%d err=%v, want the token sent",
+			withheld, len(same.Headers), err)
+	}
+}
+
+func TestProbeFormSendsTheStoredTokenToALoopbackSpellingOfTheSavedHost(t *testing.T) {
+	const token = "s3cret-token"
+	fake := fakeMCPServer(t, fakeOptions{Stateless: true, RequireToken: token})
+	value := "Bearer " + token
+	stored := registered(fake.URL, 5)
+	stored.Headers = []types.MCPHeader{{Name: "Authorization", Value: &value}}
+
+	// The same listener under the other loopback spelling.
+	typed := strings.Replace(stored.URL, "127.0.0.1", "localhost", 1)
+	if typed == stored.URL {
+		typed = strings.Replace(stored.URL, "[::1]", "localhost", 1)
+	}
+	reg := NewRegistry(fakeSource{servers: []types.MCPServer{stored}}, fakeProjects{}, testID)
+	answer, err := probeForm(t, reg, TestRequest{
+		ID: stored.ID, Name: stored.Name, URL: typed, TimeoutSeconds: 5,
+		Headers: []TestHeader{{Name: "Authorization", Value: types.MaskedSecret}},
+	})
+	if err != nil {
+		t.Fatalf("%s was not diallable: %v", typed, err)
+	}
+	if !answer.OK {
+		t.Errorf("the saved token was not sent to %s: %s (%s)", typed, answer.Message, answer.Kind)
+	}
+}
+
+func TestProbeFormLogsWhenAStoredTokenIsSent(t *testing.T) {
+	const token = "s3cret-token"
+	fake := fakeMCPServer(t, fakeOptions{Stateless: true, RequireToken: token})
+	value := "Bearer " + token
+	stored := registered(fake.URL, 5)
+	stored.Headers = []types.MCPHeader{{Name: "Authorization", Value: &value}}
+	reg := NewRegistry(fakeSource{servers: []types.MCPServer{stored}}, fakeProjects{}, testID)
+
+	buf, restore := logging.TestSink()
+	defer restore()
+	if _, err := probeForm(t, reg, TestRequest{
+		ID: stored.ID, Name: stored.Name, URL: fake.URL, TimeoutSeconds: 5,
+		Headers: []TestHeader{{Name: "Authorization", Value: types.MaskedSecret}},
+	}); err != nil {
+		t.Fatalf("probe: %v", err)
+	}
+	logged := buf.String()
+	if !strings.Contains(logged, "stored") || !strings.Contains(logged, "mcp server") {
+		t.Errorf("nothing in the log names the sent secret:\n%s", logged)
+	}
+	if strings.Contains(logged, token) {
+		t.Errorf("the log carries the secret itself:\n%s", logged)
 	}
 }
 

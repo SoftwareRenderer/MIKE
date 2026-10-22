@@ -714,6 +714,15 @@ absolute worktree path, and logs nothing.
   connection asks for past its own cap: the refusal is logged, the connection keeps running and keeps
   every key it already held. See *Every upgrade is admitted by a count, never a deadline*.
 - The ratchet is the `status500` archgate rule (0 violations across 289 examined).
+- One seam decides whether upstream text reaches the browser. Words from a remote **stay** for clone,
+  checkout, pull and push: they are the diagnosis of a repository the person owns. Nothing else tells
+  them the branch does not exist, or that the remote rejected a non-fast-forward. They are bounded by
+  `subproc.Summarize` at `subproc.AnswerMax`, and the full run is mirrored to the log at `Warn`. A
+  sandbox `exec` failure and a database fault **do not stay**: each answers MIKE's own sentence and puts
+  its cause in the log, since both describe this server and the caller can act on neither. A sandbox
+  image build refusal is neither case, because its Dockerfile is the caller's own file, so its text
+  stays with the 502. A refusal written for the caller (a path outside the jail, a label too long) keeps
+  its sentence too.
 
 Tests: `backend/errs/errs_test.go`, `backend/httputil/httputil_test.go`.
 

@@ -8,6 +8,7 @@ import (
 
 	"mike/backend/auth"
 	"mike/backend/startup"
+	"mike/backend/types"
 	"mike/pkg/logging"
 )
 
@@ -69,7 +70,7 @@ func (s *Server) bootPairingHosts() []bootPairingHost {
 	var hosts []bootPairingHost
 	seen := make(map[string]struct{}, len(s.settings.AllowedHosts))
 	for _, entry := range s.settings.AllowedHosts {
-		host := normalizeHost(entry)
+		host := types.CanonicalHost(entry)
 		if _, duplicate := seen[host]; host == "" || duplicate {
 			continue
 		}
