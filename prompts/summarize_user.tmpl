@@ -1,4 +1,8 @@
 Summarize the following content:
+{{- if .Interrupted}}
+
+Note that the conversation was mid-task and did not finish. Make **In Progress** and **Next Steps** say exactly where it stopped — what it was reasoning about, the tool calls it had just made and what they returned — so the work carries on from that point instead of repeating it.
+{{- end}}
 {{- if .PreviousSummary}}
 # Previous Summary
 

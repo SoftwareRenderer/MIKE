@@ -110,7 +110,7 @@ func summarizeSetup(t *testing.T, summaries ...string) (*TaskExecutor, *taskExec
 
 // TestMaybeAutoSummarize_SummaryReachesLLMContext: after auto-summarization feeds the compressed
 // context back to the LLM, the request must carry the summary (in the system prompt) next to the
-// injected "Proceed".
+// reproduction of the cut point and the injected "Proceed".
 func TestMaybeAutoSummarize_SummaryReachesLLMContext(t *testing.T) {
 	chdirRepoRoot(t)
 	te, setup, lc, _ := summarizeSetup(t, "SUMMARY-ONE: build the widget")
@@ -128,14 +128,20 @@ func TestMaybeAutoSummarize_SummaryReachesLLMContext(t *testing.T) {
 	}
 
 	sent := buildLLMContext(lc.messages)
-	if len(sent) != 2 {
-		t.Fatalf("expected [system, user \"Proceed\"], got %d messages: %+v", len(sent), sent)
+	if len(sent) != 3 {
+		t.Fatalf("expected [system, context_cut note, user \"Proceed\"], got %d messages: %+v", len(sent), sent)
 	}
 	if sent[0].Role != "system" || !strings.Contains(sent[0].Content, "SUMMARY-ONE") {
 		t.Fatalf("system message sent to the LLM lacks the summary: %+v", sent[0])
 	}
-	if sent[1].Role != "user" || sent[1].Content != "Proceed" {
-		t.Fatalf("expected the injected Proceed, got role=%q content=%q", sent[1].Role, sent[1].Content)
+	if sent[1].Role != "advisory" || !strings.Contains(sent[1].Content, "context limit") {
+		t.Fatalf("the cut point was not reproduced to the model: role=%q content=%.120q", sent[1].Role, sent[1].Content)
+	}
+	if !strings.Contains(sent[1].Content, "did work") {
+		t.Error("the reproduction sent with the summary does not carry the turn it replaced")
+	}
+	if sent[2].Role != "user" || sent[2].Content != "Proceed" {
+		t.Fatalf("expected the injected Proceed, got role=%q content=%q", sent[2].Role, sent[2].Content)
 	}
 	for _, m := range sent {
 		if m.Role == "summarization" {

@@ -422,17 +422,19 @@ const (
 	advisoryDiagnostics   = "diagnostics"
 	advisoryMergeConflict = "merge_conflict"
 	advisoryAutoAnswer    = "auto_answer"
+	// advisoryContextCut reproduces the turns a summarization dropped when the run ran out of context.
+	advisoryContextCut = "context_cut"
 )
 
-// advisory is a note about the workspace the model must see.
-// Buffered during tool execution and delivered at the turn boundary.
+// advisory is a note the model must see and the person never sent, about the workspace or about the run.
+// Buffered during tool execution and delivered at the turn boundary, or at a summarization.
 type advisory struct {
-	kind     string // advisoryDiagnostics | advisoryMergeConflict | advisoryAutoAnswer — how the UI titles the note
+	kind     string // advisoryDiagnostics | advisoryMergeConflict | advisoryAutoAnswer | advisoryContextCut — how the UI titles the note
 	severity string // mirrors TaskMessage.Severity: "" (default), "info", "error" — drives emphasis
 	text     string // what the model reads and the UI shows
 }
 
-// queueAdvisory buffers a note for delivery at the turn boundary.
+// queueAdvisory buffers a note for delivery at the turn boundary, and declines one with nothing to say.
 func queueAdvisory(lc *loopContext, a advisory) {
 	if strings.TrimSpace(a.text) == "" {
 		return
@@ -440,8 +442,8 @@ func queueAdvisory(lc *loopContext, a advisory) {
 	lc.pendingAdvisories = append(lc.pendingAdvisories, a)
 }
 
-// flushAdvisories delivers buffered notes, persisting them as advisory rows.
-// Called after assistant/tool messages but before summarization.
+// flushAdvisories delivers buffered notes, persisting them as advisory rows. Called at a turn
+// boundary, and after a summarization has installed its marker.
 func (te *TaskExecutor) flushAdvisories(setup *taskExecSetup, lc *loopContext) {
 	if len(lc.pendingAdvisories) == 0 {
 		return

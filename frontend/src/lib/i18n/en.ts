@@ -1479,6 +1479,7 @@ const catalog = {
     'chat.advisory.diagnostics': 'Workspace diagnostics',
     'chat.advisory.mergeConflict': 'Merge conflict',
     'chat.advisory.autoAnswer': 'Automated answer (parent context)',
+    'chat.advisory.contextCut': 'Context compacted',
     'chat.advisory.note': 'Environment note',
     'chat.system.memoryPaused': 'Task has been temporarily paused due to memory pressure, and will automatically resume',
     'chat.system.memoryResumed': 'Memory freed up, so the task resumed automatically',

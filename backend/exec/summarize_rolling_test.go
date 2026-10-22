@@ -145,7 +145,7 @@ func TestSummarizeContext_UsesCompressedHistoryOnly(t *testing.T) {
 		{Role: "assistant", Content: "SECOND-WORK-UNIQUETOKEN"},
 	}
 
-	if _, err := te.summarize.summarizeContext(context.Background(), messages, llm.server.URL, "test-model", extractPrevSummary(messages)); err != nil {
+	if _, err := te.summarize.summarizeContext(context.Background(), messages, llm.server.URL, "test-model", extractPrevSummary(messages), false); err != nil {
 		t.Fatalf("summarize: %v", err)
 	}
 
@@ -202,9 +202,15 @@ func TestMaybeAutoSummarize_SecondPassFoldsSummaryPlusTail(t *testing.T) {
 		if m.Role == "summarization" {
 			t.Error("summarization marker leaked into the LLM context")
 		}
-		if strings.Contains(m.Content, "ROUND-ONE-") {
+		if strings.Contains(m.Content, "ROUND-ONE-") && m.Role != "advisory" {
 			t.Errorf("pre-summary message survived into the LLM context: %.80s", m.Content)
 		}
+	}
+	// The one place the dropped turns may still be read is the reproduction of the cut point.
+	if !slices.ContainsFunc(between, func(m types.ChatMessage) bool {
+		return m.Role == "advisory" && strings.Contains(m.Content, "ROUND-ONE-WORK-UNIQUETOKEN")
+	}) {
+		t.Error("the turns the summary dropped were not reproduced for the model")
 	}
 	for _, want := range []string{"Proceed", "ROUND-TWO-REQUEST-UNIQUETOKEN", "ROUND-TWO-WORK-UNIQUETOKEN"} {
 		if !slices.ContainsFunc(between, func(m types.ChatMessage) bool {
@@ -228,8 +234,8 @@ func TestMaybeAutoSummarize_SecondPassFoldsSummaryPlusTail(t *testing.T) {
 	)
 	mustNotContain(t, second, "second pass", "ROUND-ONE-REQUEST-UNIQUETOKEN", "ROUND-ONE-WORK-UNIQUETOKEN")
 
-	// After the second pass the newest summary replaces what it folded away, and the
-	// tail restarts (only the injected continuation is in it).
+	// The newest summary now replaces what it folded away, and the tail restarts: the continuation
+	// from the first pass, and the reproduction of the turns this pass dropped.
 	after := buildLLMContext(lc.messages)
 	if !strings.Contains(after[0].Content, "GENERATED-SUMMARY-2") {
 		t.Fatalf("system message must carry the newest summary: %.200s", after[0].Content)
@@ -238,7 +244,7 @@ func TestMaybeAutoSummarize_SecondPassFoldsSummaryPlusTail(t *testing.T) {
 		if m.Role == "summarization" {
 			t.Error("summarization marker leaked into the LLM context")
 		}
-		if strings.Contains(m.Content, "ROUND-") {
+		if strings.Contains(m.Content, "ROUND-") && m.Role != "advisory" {
 			t.Errorf("folded-away message survived into the LLM context: %.80s", m.Content)
 		}
 	}

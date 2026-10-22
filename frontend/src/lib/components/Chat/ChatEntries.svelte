@@ -511,7 +511,7 @@
                     </div>
                 {:else if entry.role === 'advisory'}
                     <div class="advisory-entry">
-                        <div class="advisory-card" class:advisory-error={entry.severity === 'error'}>
+                        <div class="advisory-card" class:advisory-error={entry.severity === 'error'} class:advisory-cut={entry.kind === 'context_cut'}>
                             <div class="advisory-header">
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                     <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
@@ -881,6 +881,12 @@
         white-space: pre-wrap;
         word-break: break-word;
         color: var(--color-text-primary);
+    }
+    /* The cut point of a compacted context is a transcript, so it scrolls inside its card instead of
+       pushing the conversation down by its whole length. */
+    .advisory-cut .advisory-text {
+        max-height: 14rem;
+        overflow-y: auto;
     }
 
     .merge-resolution-entry {

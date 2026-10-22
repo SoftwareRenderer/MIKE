@@ -535,6 +535,7 @@ describe('advisoryLabel', () => {
         expect(advisoryLabel('diagnostics')).toBe('Workspace diagnostics');
         expect(advisoryLabel('merge_conflict')).toBe('Merge conflict');
         expect(advisoryLabel('auto_answer')).toBe('Automated answer (parent context)');
+        expect(advisoryLabel('context_cut')).toBe('Context compacted');
     });
 
     it('falls back to the generic note for unknown or missing kinds', () => {

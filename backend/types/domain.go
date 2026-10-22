@@ -380,7 +380,7 @@ type TaskMessage struct {
 	GitCommitHash    string    `json:"git_commit_hash,omitempty"`
 	IsLoopHint       bool      `json:"is_loop_hint,omitempty"` // injected loop hint: kept out of the rebuilt LLM context
 	AssistantMsgID   string    `json:"-"`                      // assistant row a tool_call row belongs to; rebuild-internal (groupTaskMessages), never sent to the client
-	Kind             string    `json:"kind,omitempty"`         // sub-classifies a row within its role; advisory rows: "diagnostics" | "merge_conflict" | "auto_answer" (titles the note)
+	Kind             string    `json:"kind,omitempty"`         // sub-classifies a row within its role; advisory rows: "diagnostics" | "merge_conflict" | "auto_answer" | "context_cut" (titles the note)
 	CreatedAt        time.Time `json:"created_at"`
 }
 

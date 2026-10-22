@@ -61,6 +61,26 @@ rule here — and both reach the provider through `summarizeNow`, which holds th
 from costing two summaries: `loopContext.summarizedAtLen` is the conversation length a summarization left
 behind, and nothing summarizes again until it grows.
 
+## The cut point
+
+A crossing stops work that was still running, so a summary alone leaves the model holding a report of work it
+never finished. `summarizeNow` therefore records a `context_cut` advisory right after the marker it installed:
+the last few assistant turns, their reasoning, the calls they made and the first lines of what each answered,
+capped with the oldest turn spent first. Both manual paths skip it — a person pressing Summarize interrupted
+nothing.
+
+It is a text reproduction rather than the real rows because the conversation a resumed run reads back opens at
+its newest summarization row: rows sitting before that marker would be sent while the run lives and lost on
+resume. The advisory is written after the marker, so `GetTaskMessagesFromSummary` hands both reads the same
+conversation, and an advisory is the role that says *the model had to see this and the person never said it*.
+
+`renderRecentContext` bounds it: a reasoning block keeps its end, where the conclusion names the next move,
+and everything else keeps its start, where a call's file and a result's first lines live. A call left
+unanswered when the cut came says so — that is where the work stopped. `trimToFit` never touches the note, so
+the cap is applied as it is built. The note is for the run, not for the next summary: `formatChatHistory`
+skips advisories, so a rolling summarization folds forward the summary rather than this echo of what it
+replaced.
+
 ## The window nobody reported
 
 A provider that reports no window, and answers no discovery request, leaves `contextWindow` nil. Then neither
@@ -70,10 +90,12 @@ the model needed, on a number nothing told us.
 
 ## Checking this
 
-`go test ./backend/exec/ -run 'TestPromptBudget|TestTrimToFit|TestFitRequest|TestGate|TestRunTrims'` —
+`go test ./backend/exec/ -run 'TestPromptBudget|TestTrimToFit|TestFitRequest|TestGate|TestRunTrims|TestRenderRecentContext|TestContextCut'` —
 `TestRunTrimsAnOversizedReadBeforeTheProviderSeesIt` runs a task end to end and judges the bytes the provider
 was handed. `TestRunTrimsWhatTheReportedUsagePutOverBudget` runs one against a provider that reported a usage
 leaving no room at all. `TestFitRequestPricesAResumedConversationFromTheStoredCount` covers the resumed run,
 which has no live usage to price by. `TestFitRequestTrimsADenseResultThatOnlyItsBytesPrice` runs one where the
 oversized result is base64, which only the byte count prices. A gate that stopped being wired, or stopped
-believing the provider, fails there rather than quietly.
+believing the provider, fails there rather than quietly. `TestContextCutNoteIsStoredAfterTheSummaryItExplains`
+fails if the reproduction of the cut point goes missing from the read a resumed run makes, and
+`TestRenderRecentContextDropsTheOldestTurnFirst` fails if the reproduction stops fitting the room it is given.

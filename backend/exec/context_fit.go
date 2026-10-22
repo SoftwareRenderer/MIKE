@@ -236,7 +236,7 @@ func cutToTokens(text string, target int) string {
 		return text
 	}
 	// The estimate counts words and bytes, so the target becomes the room each of them leaves.
-	words := int(float64(target) / 1.3)
+	words := wordsIn(target)
 	bytes := target * minBytesPerToken
 	lines := strings.Split(text, "\n")
 	kept := 0
@@ -264,7 +264,7 @@ func cutDenseLine(line string, target int) string {
 		end--
 	}
 	cut := line[:end]
-	if keep := int(float64(target) / 1.3); len(strings.Fields(cut)) > keep {
+	if keep := wordsIn(target); len(strings.Fields(cut)) > keep {
 		if ends := wordRe.FindAllStringIndex(cut, keep+1); len(ends) > keep {
 			cut = cut[:ends[keep][0]]
 		}

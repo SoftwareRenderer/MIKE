@@ -40,6 +40,8 @@ type summarizeOrchestrator struct {
 	lazyStart func(projectID, taskID, content, modelName, serverURL, reasoningEffort string, regenerate bool)
 	// sends the "Proceed" instruction. See TaskExecutor.sendProceed.
 	sendProceed func(projectID, taskID, threadID string) error
+	// injectAdvisory records and delivers a note the model must see and the person never sent.
+	injectAdvisory func(setup *taskExecSetup, lc *loopContext, a advisory)
 	// So a summary and a chat turn cannot disagree about which provider answers.
 	utilityTarget     func(task *types.Task) (serverURL, model string, ok bool)
 	chatCompletion    func(ctx context.Context, serverURL, modelName string, messages []types.ChatMessage, opts *ChatCompletionOpts) (*types.ChatUsage, string, error)
@@ -56,13 +58,17 @@ type summarizeOrchestrator struct {
 // One wiring definition, so every executor's summarize collaborator is wired the same way.
 func (te *TaskExecutor) newSummarizeOrchestrator() *summarizeOrchestrator {
 	s := &summarizeOrchestrator{
-		store:          te.store,
-		configStore:    te.configStore,
-		appStreamMgr:   te.appStreamMgr,
-		worktreeMgr:    te.worktreeMgr,
-		runningState:   te.runningState,
-		lazyStart:      te.handleLazyStart,
-		sendProceed:    te.sendProceed,
+		store:        te.store,
+		configStore:  te.configStore,
+		appStreamMgr: te.appStreamMgr,
+		worktreeMgr:  te.worktreeMgr,
+		runningState: te.runningState,
+		lazyStart:    te.handleLazyStart,
+		sendProceed:  te.sendProceed,
+		injectAdvisory: func(setup *taskExecSetup, lc *loopContext, a advisory) {
+			queueAdvisory(lc, a)
+			te.flushAdvisories(setup, lc)
+		},
 		utilityTarget:  te.utilityTarget,
 		chatCompletion: te.ChatCompletion,
 	}
@@ -108,12 +114,14 @@ func contextTokensUsed(lc *loopContext) int {
 	return conversationTokens(buildLLMContext(lc.messages))
 }
 
-// summarizeContext produces the rolling summary. It never modifies the messages slice.
-func (s *summarizeOrchestrator) summarizeContext(ctx context.Context, messages []types.ChatMessage, serverURL, modelName, previousSummary string) (summarizeResult, error) {
+// summarizeContext produces the rolling summary and never modifies the messages slice. interrupted says the
+// run was cut off by the context limit, which is what makes the summary say where the work stopped.
+func (s *summarizeOrchestrator) summarizeContext(ctx context.Context, messages []types.ChatMessage, serverURL, modelName, previousSummary string, interrupted bool) (summarizeResult, error) {
 	chatHistory := formatChatHistory(buildLLMContext(messages), previousSummary != "")
 	systemPrompt, userPrompt, err := prompts.RenderSummarizePrompt(prompts.SummarizeData{
 		ChatHistory:     chatHistory,
 		PreviousSummary: previousSummary,
+		Interrupted:     interrupted,
 	})
 	if err != nil {
 		return summarizeResult{}, fmt.Errorf("load summarize prompt: %w", err)
@@ -234,29 +242,40 @@ var wordRe = regexp.MustCompile(`\S+`)
 // JSON document, a megabyte-long log line — has almost no words, and a word count alone prices it as free.
 const minBytesPerToken = 4
 
+// tokensPerWord is how many tokens the estimate counts for one word.
+const tokensPerWord = 1.3
+
+// wordsIn is how many words a budget of tokens leaves.
+func wordsIn(tokens int) int { return int(float64(tokens) / tokensPerWord) }
+
 // estimateTokensFromText is a floor on what a provider charges, never a tokenizer: the larger of the word
 // count and the byte count.
 func estimateTokensFromText(text string) int {
-	byWords := int(float64(len(wordRe.FindAllString(text, -1))) * 1.3)
+	byWords := int(float64(len(wordRe.FindAllString(text, -1))) * tokensPerWord)
 	if byBytes := len(text) / minBytesPerToken; byBytes > byWords {
 		return byBytes
 	}
 	return byWords
 }
 
+// textOf is a message's plain text, which for an attachment sits in its parts.
+func textOf(m types.ChatMessage) string {
+	if len(m.ContentParts) == 0 {
+		return m.Content
+	}
+	var parts []string
+	for _, p := range m.ContentParts {
+		if p.Type == "text" {
+			parts = append(parts, p.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
 func estimatePromptTokens(messages []types.ChatMessage) int {
 	total := 0
 	for _, m := range messages {
-		if len(m.ContentParts) > 0 {
-			// multi-modal: the text is in ContentParts, not Content
-			for _, p := range m.ContentParts {
-				if p.Type == "text" {
-					total += estimateTokensFromText(p.Text)
-				}
-			}
-		} else {
-			total += estimateTokensFromText(m.Content)
-		}
+		total += estimateTokensFromText(textOf(m))
 		total += estimateTokensFromText(m.ReasoningContent)
 		// The provider receives a tool_call with its arguments, so those words are part of the request.
 		for _, tc := range m.ToolCalls {
@@ -317,7 +336,7 @@ func (s *summarizeOrchestrator) injectProceedMessage(setup *taskExecSetup, lc *l
 // The summary row is persisted before anything is published, so a restart at any point resumes
 // with it. The prompt is rewritten in place rather than rebuilt from the DB, because the
 // in-memory conversation is a superset of the persisted one.
-func (s *summarizeOrchestrator) applySummarization(setup *taskExecSetup, ctx context.Context, messages []types.ChatMessage, serverURL, modelName string, resultCh chan error) ([]types.ChatMessage, string) {
+func (s *summarizeOrchestrator) applySummarization(setup *taskExecSetup, ctx context.Context, messages []types.ChatMessage, serverURL, modelName string, resultCh chan error, interrupted bool) ([]types.ChatMessage, string) {
 	task := setup.task
 	taskID := setup.task.ID
 	projectID := setup.projectID
@@ -341,7 +360,7 @@ func (s *summarizeOrchestrator) applySummarization(setup *taskExecSetup, ctx con
 		serverURL = utilURL
 		modelName = utilModel
 	}
-	sumResult, err := s.summarizeContext(ctx, messages, serverURL, modelName, prevSummary)
+	sumResult, err := s.summarizeContext(ctx, messages, serverURL, modelName, prevSummary, interrupted)
 	if err != nil {
 		logging.For(logging.Summarize).With(logging.TaskID, taskID).Warnf("summarization failed: %v", err)
 		clearFlag()
@@ -416,12 +435,15 @@ func (s *summarizeOrchestrator) summarizeNow(setup *taskExecSetup, lc *loopConte
 	if len(lc.messages) == lc.summarizedAtLen {
 		return
 	}
+	// The cut point is read from the conversation as it stands, because the summarization drops it.
+	cutNote := composeContextCutNote(renderRecentContext(buildLLMContext(lc.messages)))
 	// Summarization goes to the task's CURRENT provider — lc.mc follows mid-run switches, setup.serverURL
 	// does not.
 	serverURL, _ := lc.mc.get()
-	messages, summary := s.applySummarization(setup, setup.ctx, lc.messages, serverURL, activeModel, nil)
+	messages, summary := s.applySummarization(setup, setup.ctx, lc.messages, serverURL, activeModel, nil, true)
 	if summary != "" {
 		lc.messages = messages
+		s.injectAdvisory(setup, lc, advisory{kind: advisoryContextCut, text: cutNote})
 		if injectProceed {
 			s.injectProceedMessage(setup, lc)
 		}
@@ -576,7 +598,7 @@ func (s *summarizeOrchestrator) HandleSummarize(w http.ResponseWriter, r *http.R
 		previousSummary := extractPrevSummary(messages)
 
 		serverURL, modelName, _ := s.utilityTarget(task)
-		sumResult, err := s.summarizeContext(ctx, messages, serverURL, modelName, previousSummary)
+		sumResult, err := s.summarizeContext(ctx, messages, serverURL, modelName, previousSummary, false)
 		if err != nil {
 			logging.For(logging.Summarize).With(logging.TaskID, taskID).Warnf("manual summarization failed: %v", err)
 			clearFlag()

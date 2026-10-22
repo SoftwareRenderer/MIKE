@@ -2866,9 +2866,10 @@ func TestMaybeAutoSummarize_InjectProceedWhenFeedingBack(t *testing.T) {
 		t.Fatal("expected a summarization message to be appended when context exceeds 90%")
 	}
 
-	// ...followed immediately by the injected user "Proceed" message.
-	if summaryIdx != len(lc.messages)-2 {
-		t.Fatalf("expected 'Proceed' immediately after the summary, got %d messages with summary at index %d", len(lc.messages), summaryIdx)
+	// ...and the injected user "Proceed" message comes last, after the reproduction of what the
+	// summarization dropped.
+	if summaryIdx > len(lc.messages)-2 {
+		t.Fatalf("expected rows after the summary, got %d messages with summary at index %d", len(lc.messages), summaryIdx)
 	}
 	last := lc.messages[len(lc.messages)-1]
 	if last.Role != "user" || last.Content != "Proceed" {

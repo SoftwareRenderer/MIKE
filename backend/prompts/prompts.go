@@ -323,6 +323,7 @@ func RenderMergeConflictPrompt(data MergeConflictData) (string, error) {
 type SummarizeData struct {
 	ChatHistory     string // formatted conversation history
 	PreviousSummary string // summary from a prior summarization, empty if first
+	Interrupted     bool   // the run was cut off by the context limit, not summarized on request
 }
 
 // RenderSummarizePrompt renders the context summarization prompt pair: the

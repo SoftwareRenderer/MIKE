@@ -609,6 +609,7 @@ export function advisoryLabel(kind?: string): string {
         case 'diagnostics': return t('chat.advisory.diagnostics');
         case 'merge_conflict': return t('chat.advisory.mergeConflict');
         case 'auto_answer': return t('chat.advisory.autoAnswer');
+        case 'context_cut': return t('chat.advisory.contextCut');
         default: return t('chat.advisory.note');
     }
 }

@@ -1777,7 +1777,7 @@ idleWait:
 			// run's own rows to after the summary row.
 			queuedThread := setup.task.CurrentThreadID
 			queuedBefore, _ := te.store.GetLastUserMessageInThread(queuedThread)
-			lc.messages, _ = te.summarize.applySummarization(setup, req.ctx, lc.messages, sumURL, activeModel, req.resultCh)
+			lc.messages, _ = te.summarize.applySummarization(setup, req.ctx, lc.messages, sumURL, activeModel, req.resultCh, false)
 			lc.detector.reset() // context changed, clear stale text window
 			lc.detector.clearHints()
 			// Re-sync from DB to pick up any messages queued during summarization, and any deleted ones.
