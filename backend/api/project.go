@@ -24,6 +24,7 @@ import (
 	"mike/backend/types"
 	"mike/pkg/logging"
 	"mike/pkg/sandboxruntime"
+	"mike/pkg/subproc"
 )
 
 // ProjectHandler handles project CRUD operations.
@@ -119,7 +120,9 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		cmd := git.Command("", git.CloneArgs(req.GitURL, targetPath)...)
 		cmd.Env = git.CloneEnv()
 		if out, err := cmd.CombinedOutput(); err != nil {
-			httputil.JSONError(w, http.StatusBadRequest, "git clone failed: "+strings.TrimSpace(string(out)))
+			// The response gets the short version, because a failed clone can explain itself at length.
+			logging.For(logging.Git).Warnf("clone %s into %s failed: %s", types.RedactURL(req.GitURL), targetPath, strings.TrimSpace(string(out)))
+			httputil.JSONError(w, http.StatusBadRequest, "git clone failed: "+subproc.Summarize(out, subproc.AnswerMax))
 			return
 		}
 		req.Path = targetPath
@@ -313,7 +316,7 @@ func (h *ProjectHandler) HandleClone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sendEvent(map[string]any{"type": string(types.SSETypeStatus), "message": "Cloning " + req.GitURL + " into " + targetPath + "..."})
+	sendEvent(map[string]any{"type": string(types.SSETypeStatus), "message": "Cloning " + types.RedactURL(req.GitURL) + " into " + targetPath + "..."})
 
 	out, err := git.CloneContext(r.Context(), req.GitURL, targetPath, func(percent int) {
 		sendEvent(map[string]any{"type": string(types.SSETypeProgress), "percent": percent})
@@ -324,10 +327,11 @@ func (h *ProjectHandler) HandleClone(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, context.Canceled) {
 			// The client went away; nobody is reading this stream, and calling a cancelled
 			// clone a "git clone failure" would put the user's own navigation in the error log.
-			logging.For(logging.Git).Infof("cancelled by client: %s", req.GitURL)
+			logging.For(logging.Git).Infof("cancelled by client: %s", types.RedactURL(req.GitURL))
 			return
 		}
-		sendEvent(map[string]any{"type": string(types.SSETypeError), "message": "git clone failed: " + strings.TrimSpace(out)})
+		logging.For(logging.Git).Warnf("clone %s into %s failed: %s", types.RedactURL(req.GitURL), targetPath, strings.TrimSpace(out))
+		sendEvent(map[string]any{"type": string(types.SSETypeError), "message": "git clone failed: " + subproc.Summarize([]byte(out), subproc.AnswerMax)})
 		return
 	}
 

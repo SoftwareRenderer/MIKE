@@ -63,6 +63,14 @@ type Extension struct {
 	Subdir string `json:"subdir,omitempty"`
 }
 
+// SensitiveProperty reports whether the manifest declares this config key to hold a secret.
+func (e *Extension) SensitiveProperty(key string) bool {
+	if e == nil {
+		return false
+	}
+	return e.Manifest.ConfigSchema.IsSensitive(key)
+}
+
 // ExtensionManifest defines the metadata and capabilities of an extension.
 type ExtensionManifest struct {
 	DisplayName  string        `json:"display_name"`
@@ -554,6 +562,13 @@ func (s *ConfigSchema) GetProperty(key string) *SchemaProp {
 		}
 	}
 	return nil
+}
+
+// IsSensitive reports whether this schema declares the key to hold a secret. A key it does not list,
+// or no schema at all, declares none.
+func (s *ConfigSchema) IsSensitive(key string) bool {
+	prop := s.GetProperty(key)
+	return prop != nil && prop.Sensitive
 }
 
 // SchemaTypeURL marks a config property whose value is an address a person typed. It is the only kind of

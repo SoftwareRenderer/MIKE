@@ -50,7 +50,7 @@ func (t *ToolConfig) FillRequest(args map[string]any, config map[string]any) (*F
 	if err != nil {
 		return nil, err
 	}
-	suffix, err := fillTemplate(t.RequestSuffix(), args, config)
+	suffix, err := fillTemplate(t.RequestSuffix(), args, config, url.PathEscape)
 	if err != nil {
 		return nil, fmt.Errorf("%s: request.url: %w", t.Name, err)
 	}
@@ -87,7 +87,9 @@ func (t *ToolConfig) fillParameters(declared map[string]string, args, config map
 	}
 	values := url.Values{}
 	for _, key := range sortedToolKeys(declared) {
-		filled, err := fillTemplate(declared[key], args, config)
+		// No escaper: the query map encodes its own values when it is sent, and a second pass here would
+		// send %2520 for a space.
+		filled, err := fillTemplate(declared[key], args, config, nil)
 		if err != nil {
 			return nil, fmt.Errorf("%s: request.query[%q]: %w", t.Name, key, err)
 		}
@@ -99,8 +101,9 @@ func (t *ToolConfig) fillParameters(declared map[string]string, args, config map
 	return values, nil
 }
 
-// An unresolved placeholder indicates a validation bug.
-func fillTemplate(tmpl string, args, config map[string]any) (string, error) {
+// fillTemplate resolves the placeholders of one declared template. escapeArgument guards a model-written
+// value that becomes part of the path, where a "/" or "?" would move the request; nil leaves it written.
+func fillTemplate(tmpl string, args, config map[string]any, escapeArgument func(string) string) (string, error) {
 	if tmpl == "" {
 		return "", nil
 	}
@@ -115,6 +118,9 @@ func fillTemplate(tmpl string, args, config map[string]any) (string, error) {
 				return strings.TrimSpace(def)
 			}
 			return ""
+		}
+		if escapeArgument != nil && strings.HasPrefix(name, "args.") {
+			return escapeArgument(value)
 		}
 		return value
 	})

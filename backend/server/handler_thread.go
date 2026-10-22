@@ -15,6 +15,7 @@ import (
 	"mike/backend/stream"
 	"mike/backend/types"
 	"mike/pkg/logging"
+	"mike/pkg/subproc"
 )
 
 func (s *Server) handleThreads(w http.ResponseWriter, r *http.Request) {
@@ -36,15 +37,6 @@ func (s *Server) handleThreads(w http.ResponseWriter, r *http.Request) {
 	default:
 		httputil.MethodNotAllowed(w)
 	}
-}
-
-// gitErrorDetail caps git's own output for a log line.
-func gitErrorDetail(out string) string {
-	out = strings.TrimSpace(out)
-	if len(out) > 200 {
-		return out[:200] + "…"
-	}
-	return out
 }
 
 // releaseThreadSnapshots unpins the worktree state a thread owns: its handoff snapshot plus the checkpoint
@@ -472,7 +464,7 @@ func (s *Server) checkoutThreadBranch(projectID, taskID string, task *types.Task
 	out, err := s.executor.WorktreeMgr().GitRunInWorktreeOutput(taskID, "checkout", "-f", branch)
 	if err != nil {
 		// git's own words, because "exit status 1" tells you nothing about a refused checkout.
-		logging.For(logging.Thread).With(logging.TaskID, taskID).Warnf("could not check out %s: %v: %s", branch, err, gitErrorDetail(out))
+		logging.For(logging.Thread).With(logging.TaskID, taskID).Warnf("could not check out %s: %v: %s", branch, err, subproc.Summarize([]byte(out), subproc.AnswerMax))
 		return ""
 	}
 	_, _ = s.executor.WorktreeMgr().GitRunInWorktreeOutput(taskID, "clean", "-fd")
@@ -487,7 +479,7 @@ func (s *Server) deleteThreadBranch(taskID string, branchName string) {
 	// A failure here is a branch that outlived its thread, so it must not be dropped silently.
 	out, err := s.executor.WorktreeMgr().GitRunInWorktreeOutput(taskID, "branch", "-D", branchName)
 	if err != nil {
-		logging.For(logging.Thread).With(logging.TaskID, taskID).Warnf("could not delete branch %s: %v: %s", branchName, err, gitErrorDetail(out))
+		logging.For(logging.Thread).With(logging.TaskID, taskID).Warnf("could not delete branch %s: %v: %s", branchName, err, subproc.Summarize([]byte(out), subproc.AnswerMax))
 	}
 }
 
@@ -538,7 +530,7 @@ func (s *Server) stashWorktreeState(projectID, taskID, threadID, label string) (
 func (s *Server) refuseUnsavedWork(w http.ResponseWriter, projectID string, task *types.Task, done string, cause error, wasRunning bool) {
 	logging.For(logging.Thread).With(logging.TaskID, task.ID).Warnf("refused to %s: %v", done, cause)
 	message := fmt.Sprintf("could not save this thread's work — nothing was %s", done)
-	if detail := gitErrorDetail(cause.Error()); detail != "" {
+	if detail := subproc.Summarize([]byte(cause.Error()), subproc.AnswerMax); detail != "" {
 		message += ": " + detail
 	}
 	if wasRunning {

@@ -16,6 +16,7 @@ import (
 
 	"mike/backend/fsutil"
 	"mike/backend/git"
+	"mike/backend/types"
 	"mike/pkg/sandboxruntime"
 	"mike/pkg/subproc"
 
@@ -267,7 +268,7 @@ func newEgressHosts(installed, remote *Capabilities) []string {
 	current := egressHostSet(installed.GetNetwork())
 	var added []string
 	for _, host := range network.AllowedDomains {
-		key := normalizeEgressHost(host)
+		key := types.CanonicalHost(host)
 		if key == "" {
 			continue
 		}
@@ -287,15 +288,11 @@ func egressHostSet(network *NetworkConfig) map[string]struct{} {
 	}
 	set := make(map[string]struct{}, len(network.AllowedDomains))
 	for _, host := range network.AllowedDomains {
-		if key := normalizeEgressHost(host); key != "" {
+		if key := types.CanonicalHost(host); key != "" {
 			set[key] = struct{}{}
 		}
 	}
 	return set
-}
-
-func normalizeEgressHost(host string) string {
-	return strings.ToLower(strings.TrimSpace(host))
 }
 
 // commitHashRe matches a full hex commit hash: 40-char (SHA-1) or 64-char
@@ -311,7 +308,7 @@ var commitHashRe = regexp.MustCompile(`^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$`)
 // revision is installed.
 func validateGitSource(repo, commit string) error {
 	if err := git.ValidateCloneURL(repo); err != nil {
-		return fmt.Errorf("repo %q: %w", repo, err)
+		return fmt.Errorf("repo %q: %w", types.RedactURL(repo), err)
 	}
 	if !commitHashRe.MatchString(commit) {
 		return fmt.Errorf("commit must be a full 40-char SHA-1 or 64-char SHA-256 hex hash: %q", commit)
@@ -324,19 +321,6 @@ func validateGitSource(repo, commit string) error {
 // flags. repo must already have passed validateGitSource.
 func extCloneArgs(repo, dst string) []string {
 	return append(git.CloneProtocolArgs(), "clone", "-q", "--no-checkout", repo, dst)
-}
-
-// gitErrorOutput summarises git output for an error returned to the caller: one
-// line, bounded. The full output is logged; a client gets enough to act on
-// ("repository not found", "transport not allowed") without this becoming a
-// channel for whatever a subprocess printed.
-func gitErrorOutput(out []byte) string {
-	const max = 300
-	line := strings.Join(strings.Fields(string(out)), " ")
-	if len(line) > max {
-		return line[:max] + "…"
-	}
-	return line
 }
 
 func validateSubdir(subdir string) error {
@@ -392,8 +376,8 @@ func (rc *RegistryClient) CheckoutExtensionContext(ctx context.Context, repo, co
 	// a credential prompt hanging the install request. See git.CloneEnv.
 	cloneCmd.Env = git.CloneEnv()
 	if out, err := cloneCmd.CombinedOutput(); err != nil {
-		logging.For(logging.Extensions).Warnf("clone %s failed: %v: %s", repo, err, out)
-		return fmt.Errorf("clone %s: %w (output: %s)", repo, err, gitErrorOutput(out))
+		logging.For(logging.Extensions).Warnf("clone %s failed: %v: %s", types.RedactURL(repo), err, out)
+		return fmt.Errorf("clone %s: %w (output: %s)", repo, err, subproc.Summarize(out, subproc.AnswerMax))
 	}
 
 	checkoutCmd := git.CommandContext(ctx, "", "-C", srcDir, "checkout", "-q", commit)

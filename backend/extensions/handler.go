@@ -288,12 +288,13 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 				"sandbox_mount is granted through the extension's mount control, not through its configuration")
 			return
 		}
-		// Merge config: preserve existing sensitive values when masked placeholder is sent
+		// A sensitive field the form holds as the mask was not changed, so the stored value survives.
+		// The probe reads the same placeholder the same way.
 		merged := make(map[string]any, len(req.Config))
 		for k, v := range req.Config {
 			strVal, isStr := v.(string)
-			isSensitive := ext.Manifest.ConfigSchema != nil && ext.Manifest.ConfigSchema.GetProperty(k) != nil && ext.Manifest.ConfigSchema.GetProperty(k).Sensitive
-			if isSensitive && isStr && strVal == maskedValue {
+			isSensitive := ext.SensitiveProperty(k)
+			if isSensitive && isStr && strVal == types.MaskedSecret {
 				// Preserve existing value (user didn't change the field)
 				if existing, ok := ext.Config[k]; ok {
 					merged[k] = existing
@@ -1826,17 +1827,14 @@ type ExtensionUpdate struct {
 	Changelog []ChangelogEntry `json:"changelog,omitempty"`
 }
 
-// maskedValue is what a sensitive field shows in the browser.
-const maskedValue = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" // 10 bullets
-
-// maskConfig replaces every schema-declared sensitive value with maskedValue. An empty
+// maskConfig replaces every schema-declared sensitive value with the mask. An empty
 // value passes through — a mask in a blank field reads as if a secret were set.
 func maskConfig(config map[string]any, schema *ConfigSchema) map[string]any {
 	return mapSensitiveConfig(config, schema, func(_ string, v any) (any, bool) {
 		if fmt.Sprintf("%v", v) == "" {
 			return nil, false
 		}
-		return maskedValue, true
+		return types.MaskedSecret, true
 	})
 }
 

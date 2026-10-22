@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"mike/backend/types"
+	"mike/pkg/logging"
 )
 
 // The probe sends a tool's own declared request to an address a person typed but has not saved.
@@ -60,10 +63,10 @@ func runProbe(ctx context.Context, ext *Extension, tool *ToolConfig, req testURL
 	if err != nil {
 		return rejectedProbe(fmt.Sprintf("address %s: %v", key, err))
 	}
-	probing := ext.WithOverlayConfig(req.Config, map[string]any{key: target})
+	probing, withheld := probeConfig(ext, key, host, target, req.Config)
 	request, err := tool.FillRequest(probeArgs(tool), probing.Config)
 	if err != nil {
-		return rejectedProbe(err.Error())
+		return noteWithheld(rejectedProbe(err.Error()), withheld)
 	}
 	// The grant is the address being tested, never a stored one.
 	egress := EgressRequest{
@@ -78,17 +81,72 @@ func runProbe(ctx context.Context, ext *Extension, tool *ToolConfig, req testURL
 	}
 	result, err := Egress(ctx, probing, egress)
 	if err != nil {
-		return probeFailure(host, err)
+		return noteWithheld(probeFailure(host, err), withheld)
 	}
-	return classifyProbe(tool, result)
+	return noteWithheld(classifyProbe(tool, result), withheld)
+}
+
+// withheldSecretNotice tells the person the verdict was computed without the credential they expected.
+const withheldSecretNotice = "A saved credential was not sent, because this address names a different " +
+	"host than the saved address does; re-enter the credential to test this address with it."
+
+func noteWithheld(answer testURLResponse, withheld bool) testURLResponse {
+	if !withheld {
+		return answer
+	}
+	answer.Message = withheldSecretNotice + " " + answer.Message
+	return answer
+}
+
+// probeConfig is the stored row as the probe sees it: the form's values on top, and the row's
+// credentials only for the address they were saved with.
+func probeConfig(ext *Extension, key, typedHost, target string, form map[string]any) (*Extension, bool) {
+	values := make(map[string]any, len(form)+1)
+	for name, value := range form {
+		if text, isStr := value.(string); isStr && text == types.MaskedSecret && ext.SensitiveProperty(name) {
+			// The mask is the browser's placeholder for the stored value, not a credential.
+			continue
+		}
+		values[name] = value
+	}
+	// The address under test is never withheld, sensitive or not: there is no probe to send without it.
+	values[key] = target
+	probing := ext.withOverlayConfig(values)
+
+	// Credentials belong to the saved address, and with none saved they belong nowhere.
+	storedHost := ""
+	if raw, isStr := ext.Config[key].(string); isStr {
+		storedHost = types.URLHost(raw)
+	}
+	send := types.SameHost(storedHost, typedHost)
+
+	withheld := false
+	for name, value := range ext.Config {
+		text, isStr := value.(string)
+		// Everything in the overlay came from the person, who may send their own values wherever they chose.
+		if _, fromForm := values[name]; fromForm || !ext.SensitiveProperty(name) || !isStr || strings.TrimSpace(text) == "" {
+			continue
+		}
+		if send {
+			// The log records that a stored credential left the process, but never the value.
+			logging.For(logging.Extensions).Infof("extension=%s stored config %q sent to %s", ext.ID, name, typedHost)
+			continue
+		}
+		delete(probing.Config, name)
+		logging.For(logging.Extensions).Infof("extension=%s stored config %q withheld from %s, which is not the saved host %s",
+			ext.ID, name, typedHost, storedHost)
+		withheld = true
+	}
+	return probing, withheld
 }
 
 func rejectedProbe(message string) testURLResponse {
 	return testURLResponse{Class: "unusable", Message: message}
 }
 
-// WithOverlayConfig is the stored row with the form's current values on top. The row is untouched.
-func (e *Extension) WithOverlayConfig(overlay map[string]any, origin map[string]any) *Extension {
+// withOverlayConfig is the stored row with the form's values on top, and the row itself untouched. A key
+// the manifest does not declare is dropped, so a form cannot invent a configuration property.
+func (e *Extension) withOverlayConfig(values map[string]any) *Extension {
 	if e == nil {
 		return nil
 	}
@@ -97,13 +155,10 @@ func (e *Extension) WithOverlayConfig(overlay map[string]any, origin map[string]
 	for k, v := range e.Config {
 		copied.Config[k] = v
 	}
-	for k, v := range overlay {
+	for k, v := range values {
 		if e.Manifest.ConfigSchema.GetProperty(k) == nil {
 			continue
 		}
-		copied.Config[k] = v
-	}
-	for k, v := range origin {
 		copied.Config[k] = v
 	}
 	return &copied

@@ -43,11 +43,11 @@ var (
 	ErrCopyIntoItself = errors.New("cannot copy or move a directory into itself")
 )
 
-// HasGitSegment reports whether path is named .git or has it in the middle. The last name counts as
-// well as the middle ones, because a worktree's .git is a pointer file rather than a folder.
+// HasGitSegment reports whether path is or runs through .git in any spelling, its last name included —
+// a worktree's .git is a pointer file. One rule serves the file jail and a preview's assets.
 func HasGitSegment(path string) bool {
-	for _, seg := range strings.Split(filepath.Clean(path), string(filepath.Separator)) {
-		if seg == GitDirName {
+	for _, seg := range strings.Split(filepath.ToSlash(filepath.Clean(path)), "/") {
+		if strings.EqualFold(seg, GitDirName) {
 			return true
 		}
 	}

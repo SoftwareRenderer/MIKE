@@ -27,6 +27,14 @@ The rules are in `AGENTS.md → Git`. This is the mechanism behind each fence.
   would silence it for every project. A task container cannot reach them once the pointer is pinned,
   because the config that defines them is chosen by the pointer. `GIT_TERMINAL_PROMPT=0` is what keeps a
   remote that cannot authenticate from hanging the request.
+- Every subcommand MIKE passes is a **literal builtin**, and that is a dependency on git's own rule
+  rather than on anything here. Git expands an alias only where the word it was given is not a command
+  it knows, so a repository's `[alias] status` never replaces the builtin `git status` runs. Verified on
+  git 2.43 — with `-c alias.status=…`/`-c alias.diff=…`, `git status` and `git diff` ran the builtin and
+  the alias never fired, while `-c alias.zz=…` with `git zz` ran the alias. So the fence holds while the
+  call sites pass words no caller chose. A future call site that forwards a caller-changed word as the
+  *subcommand* — a "run this git verb" parameter — would break it, and no test here would notice except
+  one that defines an alias and asserts it did not run.
 - Bounds: a **cancelled context** bounds the child, a **WaitDelay** bounds the output pipes after the
   kill, and neither substitutes for the other. `WithStash`'s bracket and the worktree watcher both
   involve processes that can outlive their caller (see `docs/locking.md`).
@@ -217,6 +225,9 @@ option (`--output=/tmp/pwn` would create/truncate a file anywhere the server use
 - `git.ValidateCloneURL` mirrors it host-side: no leading `-`, no control characters, no remote-helper
   `::` transport (`ext::sh -c 'id'`), and a **case-sensitive** scheme check because git's own is
   (`HTTPS://` is refused as transport `HTTPS`).
+- A clone source is **quoted back without its password**: `types.RedactURL` writes the log line and the
+  progress message, so a source pasted as `https://user:token@host/` is not written down. Git redacts its
+  own failure text; this covers the words MIKE writes.
 - **Every** clone of a caller-supplied source goes through both halves — project creation
   (`api.prepareCloneTarget`) and the extension install (`extensions.CheckoutExtension`). Git's own
   refusal of `ext::` is a host default, not a defence (a host with `protocol.ext.allow=always` would run

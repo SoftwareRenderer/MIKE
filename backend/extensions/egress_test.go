@@ -79,6 +79,30 @@ func TestEgressRefusesAHostNobodyAllowed(t *testing.T) {
 	}
 }
 
+func TestEgressAllowlistComparesHostsNotSpellings(t *testing.T) {
+	ext := egressExt(&NetworkConfig{AllowedDomains: []string{"API.Example.com"}}, nil)
+	network := ext.Manifest.Capabilities.Network
+
+	for _, spelled := range []string{"api.example.com", "API.EXAMPLE.com", "api.example.com."} {
+		if err := allowHost(ext, network, spelled, nil); err != nil {
+			t.Errorf("the entry API.Example.com refused %q: %v", spelled, err)
+		}
+	}
+
+	// A granted address is compared the same way, in either spelling.
+	granted := egressExt(&NetworkConfig{}, nil)
+	if err := allowHost(granted, granted.Manifest.Capabilities.Network, "API.example.com", []string{"api.example.com"}); err != nil {
+		t.Errorf("a granted host refused its own spelling: %v", err)
+	}
+
+	// Case folding must not turn an entry into a prefix match.
+	for _, other := range []string{"evilexample.com", "example.com", "api.example.com.evil.test"} {
+		if err := allowHost(ext, network, other, nil); !errors.Is(err, ErrEgressForbidden) {
+			t.Errorf("%q was admitted by the entry API.Example.com: %v", other, err)
+		}
+	}
+}
+
 // Unchanged for an extension that declares its peers and configures none.
 func TestEgressStillHonoursTheManifestAllowlist(t *testing.T) {
 	allowLoopbackProxy(t)
@@ -202,5 +226,24 @@ func TestEgressDoesNotFollowRedirects(t *testing.T) {
 	}
 	if redirected {
 		t.Error("the redirect was followed to a host nothing validated for this call")
+	}
+}
+
+func TestEgressRefusesAnAddressThatNamesNoHost(t *testing.T) {
+	ext := egressExt(&NetworkConfig{AllowedDomains: []string{"", "."}}, nil)
+	network := ext.Manifest.Capabilities.Network
+
+	if err := allowHost(ext, network, "", nil); !errors.Is(err, ErrEgressUnusable) {
+		t.Errorf(`allowHost("") err = %v, want %v`, err, ErrEgressUnusable)
+	}
+	for _, raw := range []string{"http:///x", "http://./x"} {
+		if _, err := Egress(context.Background(), ext, EgressRequest{URL: raw}); !errors.Is(err, ErrEgressUnusable) {
+			t.Errorf("Egress(%q) err = %v, want %v", raw, err, ErrEgressUnusable)
+		}
+	}
+
+	// Refusing an empty entry must not weaken the list itself.
+	if err := allowHost(ext, network, "example.com", nil); !errors.Is(err, ErrEgressForbidden) {
+		t.Errorf("example.com err = %v, want %v", err, ErrEgressForbidden)
 	}
 }

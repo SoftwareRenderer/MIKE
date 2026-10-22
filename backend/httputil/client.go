@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"mike/backend/types"
 )
 
 // Outbound HTTP goes through this file so the redirect policy is decided once. Three clients, named
@@ -118,12 +120,7 @@ func FetchSchemeAllowed(u *url.URL) bool {
 	case "https":
 		return true
 	case "http":
-		host := u.Hostname()
-		if strings.EqualFold(host, "localhost") {
-			return true
-		}
-		ip := net.ParseIP(host)
-		return ip != nil && ip.IsLoopback()
+		return types.IsLoopbackHost(u.Hostname())
 	default:
 		return false
 	}

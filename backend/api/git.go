@@ -20,6 +20,7 @@ import (
 	"mike/backend/stream"
 	"mike/backend/types"
 	"mike/pkg/logging"
+	"mike/pkg/subproc"
 )
 
 // GitHandler handles git operations.
@@ -548,20 +549,10 @@ func runCheckout(w http.ResponseWriter, dir, branch string) bool {
 	out, err := git.Command("", "-C", dir, "checkout", branch).CombinedOutput()
 	if err != nil {
 		logging.For(logging.Managers).Errorf("git checkout failed in %s: %v: %s", dir, err, out)
-		httputil.JSONError(w, http.StatusInternalServerError, "git checkout failed: "+gitErrorSummary(out))
+		httputil.JSONError(w, http.StatusInternalServerError, "git checkout failed: "+subproc.Summarize(out, subproc.AnswerMax))
 		return false
 	}
 	return true
-}
-
-// gitErrorSummary trimmed summary of git output.
-func gitErrorSummary(out []byte) string {
-	s := strings.TrimSpace(string(out))
-	const maxLen = 300
-	if len(s) > maxLen {
-		s = s[:maxLen] + "..."
-	}
-	return s
 }
 
 // handleGitRemote runs project-level pull/push under lock.
@@ -579,7 +570,7 @@ func (h *GitHandler) handleGitRemote(w http.ResponseWriter, r *http.Request, op 
 	// do not override git.Command environment.
 	if out, err := c.CombinedOutput(); err != nil {
 		logging.For(logging.Managers).Errorf("git %s failed: %v: %s", op, err, out)
-		httputil.JSONError(w, http.StatusInternalServerError, "git "+op+" failed: "+gitErrorSummary(out))
+		httputil.JSONError(w, http.StatusInternalServerError, "git "+op+" failed: "+subproc.Summarize(out, subproc.AnswerMax))
 		return
 	}
 	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": op + "ed"})

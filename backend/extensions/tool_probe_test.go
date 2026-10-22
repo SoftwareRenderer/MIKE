@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"mike/backend/types"
 )
 
 // What is under test: the probe sends the extension's own request to the typed address, reports which
@@ -99,6 +101,154 @@ func TestProbeSendsTheUnsavedToken(t *testing.T) {
 	}
 	if got := seen.Header.Get("Authorization"); got != "Bearer typed-token" {
 		t.Errorf("Authorization = %q, want the unsaved token the form holds", got)
+	}
+}
+
+// Ten bullets in a sensitive field stands for the stored value, which the browser was never shown.
+func TestProbeSendsTheStoredTokenForAMaskedField(t *testing.T) {
+	var seen http.Request
+	upstream := searchUpstream(t, &seen, `{"results":[{"title":"A"}]}`, http.StatusOK, "application/json")
+	defer upstream.Close()
+
+	h := addProbeExtension(t, upstream.URL, map[string]string{"Authorization": "Bearer {{auth_token}}"})
+	stored, err := h.store.GetByID("search-ext")
+	if err != nil {
+		t.Fatalf("read the row: %v", err)
+	}
+	stored.Config["auth_token"] = "vault-held-token"
+	if err := h.store.Update(stored.ID, stored); err != nil {
+		t.Fatalf("store the token: %v", err)
+	}
+
+	_, answer := answerProbe(t, h, probeBody("base_url", upstream.URL, map[string]any{"auth_token": types.MaskedSecret}))
+	if !answer.OK {
+		t.Fatalf("answer = %+v, want the saved token used", answer)
+	}
+	if got := seen.Header.Get("Authorization"); got != "Bearer vault-held-token" {
+		t.Errorf("Authorization = %q, want the stored token behind the mask", got)
+	}
+}
+
+func TestProbeSendsNoCredentialForAnUnbackedMask(t *testing.T) {
+	var seen http.Request
+	upstream := searchUpstream(t, &seen, `{"results":[{"title":"A"}]}`, http.StatusOK, "application/json")
+	defer upstream.Close()
+
+	h := addProbeExtension(t, upstream.URL, map[string]string{"Authorization": "Bearer {{auth_token}}"})
+	if _, answer := answerProbe(t, h, probeBody("base_url", upstream.URL, map[string]any{"auth_token": types.MaskedSecret})); !answer.OK {
+		t.Fatalf("answer = %+v", answer)
+	}
+	if got := seen.Header.Get("Authorization"); got != "" {
+		t.Errorf("Authorization = %q, want no credential sent for a mask that stores nothing", got)
+	}
+}
+
+// The answer has to say the probe ran without the token: a server that wants auth refuses it either way.
+func TestProbeWithholdsTheStoredTokenFromAnotherHost(t *testing.T) {
+	var seen http.Request
+	upstream := searchUpstream(t, &seen, `{"results":[{"title":"A"}]}`, http.StatusOK, "application/json")
+	defer upstream.Close()
+
+	h := addProbeExtension(t, "https://search.example", map[string]string{"Authorization": "Bearer {{auth_token}}"})
+	stored, err := h.store.GetByID("search-ext")
+	if err != nil {
+		t.Fatalf("read the row: %v", err)
+	}
+	stored.Config["auth_token"] = "vault-held-token"
+	stored.Config["categories"] = "it"
+	if err := h.store.Update(stored.ID, stored); err != nil {
+		t.Fatalf("store the token: %v", err)
+	}
+
+	_, answer := answerProbe(t, h, probeBody("base_url", upstream.URL, nil))
+	if got := seen.Header.Get("Authorization"); got != "" {
+		t.Errorf("Authorization = %q — the stored token reached an address the row never named", got)
+	}
+	if !strings.Contains(answer.Message, "different host") {
+		t.Errorf("message %q does not say the saved token was withheld", answer.Message)
+	}
+
+	// Only credentials are withheld, so a stored non-secret still rides along: the reference
+	// declaration routes `categories` into the `language` parameter, which the upstream sees.
+	if got := seen.URL.Query().Get("language"); got != "it" {
+		t.Errorf("language = %q, want the stored non-secret value to survive", got)
+	}
+}
+
+// The dialog always posts the mask, so the host rule has to hold behind it too.
+func TestProbeWithholdsTheStoredTokenBehindAMaskOnAnotherHost(t *testing.T) {
+	var seen http.Request
+	upstream := searchUpstream(t, &seen, `{"results":[{"title":"A"}]}`, http.StatusOK, "application/json")
+	defer upstream.Close()
+
+	h := addProbeExtension(t, "https://search.example", map[string]string{"Authorization": "Bearer {{auth_token}}"})
+	stored, err := h.store.GetByID("search-ext")
+	if err != nil {
+		t.Fatalf("read the row: %v", err)
+	}
+	stored.Config["auth_token"] = "vault-held-token"
+	if err := h.store.Update(stored.ID, stored); err != nil {
+		t.Fatalf("store the token: %v", err)
+	}
+
+	_, answer := answerProbe(t, h, probeBody("base_url", upstream.URL, map[string]any{"auth_token": types.MaskedSecret}))
+	if got := seen.Header.Get("Authorization"); got != "" {
+		t.Errorf("Authorization = %q — the mask reached another host carrying the stored token", got)
+	}
+	if !strings.Contains(answer.Message, "different host") {
+		t.Errorf("message %q does not say the saved token was withheld", answer.Message)
+	}
+}
+
+func TestProbeSendsTheStoredTokenToAnotherLoopbackSpelling(t *testing.T) {
+	var seen http.Request
+	upstream := searchUpstream(t, &seen, `{"results":[{"title":"A"}]}`, http.StatusOK, "application/json")
+	defer upstream.Close()
+
+	storedAddress := "http://localhost:" + strings.TrimPrefix(upstream.URL, "http://127.0.0.1:")
+	h := addProbeExtension(t, storedAddress, map[string]string{"Authorization": "Bearer {{auth_token}}"})
+	stored, err := h.store.GetByID("search-ext")
+	if err != nil {
+		t.Fatalf("read the row: %v", err)
+	}
+	stored.Config["auth_token"] = "vault-held-token"
+	if err := h.store.Update(stored.ID, stored); err != nil {
+		t.Fatalf("store the token: %v", err)
+	}
+
+	_, answer := answerProbe(t, h, probeBody("base_url", upstream.URL, map[string]any{"auth_token": types.MaskedSecret}))
+	if got := seen.Header.Get("Authorization"); got != "Bearer vault-held-token" {
+		t.Errorf("Authorization = %q, want the stored token: %s", got, answer.Message)
+	}
+}
+
+func TestProbeSendsTheAddressItTestsEvenWhenThatPropertyIsSensitive(t *testing.T) {
+	var seen http.Request
+	upstream := searchUpstream(t, &seen, `{"results":[{"title":"A"}]}`, http.StatusOK, "application/json")
+	defer upstream.Close()
+
+	h := addProbeExtension(t, "https://search.example", map[string]string{"Authorization": "Bearer {{auth_token}}"})
+	stored, err := h.store.GetByID("search-ext")
+	if err != nil {
+		t.Fatalf("read the row: %v", err)
+	}
+	for i := range stored.Manifest.ConfigSchema.Properties {
+		if stored.Manifest.ConfigSchema.Properties[i].Key == "base_url" {
+			stored.Manifest.ConfigSchema.Properties[i].Sensitive = true
+		}
+	}
+	stored.Config["auth_token"] = "vault-held-token"
+	if err := h.store.Update(stored.ID, stored); err != nil {
+		t.Fatalf("store the row: %v", err)
+	}
+
+	_, answer := answerProbe(t, h, probeBody("base_url", upstream.URL, nil))
+	wantHost := strings.TrimPrefix(upstream.URL, "http://")
+	if seen.Host != wantHost {
+		t.Fatalf("the probe reached %q, want the address under test %q (answer %q)", seen.Host, wantHost, answer.Message)
+	}
+	if got := seen.Header.Get("Authorization"); got != "" {
+		t.Errorf("Authorization = %q — the other host still got the stored token", got)
 	}
 }
 
@@ -272,8 +422,8 @@ func TestWithOverlayConfigLeavesTheRowAlone(t *testing.T) {
 	row.Manifest.ConfigSchema = searxngLikeSchema()
 	row.Config = map[string]any{"base_url": "https://stored.example", "categories": "general"}
 
-	probe := row.WithOverlayConfig(map[string]any{"auth_token": "typed", "not_a_property": "x", "categories": "it"},
-		map[string]any{"base_url": "https://typed.example"})
+	probe := row.withOverlayConfig(map[string]any{"auth_token": "typed", "not_a_property": "x",
+		"categories": "it", "base_url": "https://typed.example"})
 
 	if row.Config["base_url"] != "https://stored.example" || len(row.Config) != 2 {
 		t.Errorf("the row itself changed: %v", row.Config)

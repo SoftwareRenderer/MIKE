@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"mike/backend/types"
 )
 
 func makeTestExtWithConfig(t *testing.T, id, name string, config map[string]any, schema *ConfigSchema) *Extension {
@@ -370,7 +372,7 @@ func TestMaskConfig(t *testing.T) {
 	masked := maskConfig(config, schema)
 
 	// Sensitive value should be masked
-	if masked["token"] != maskedValue {
+	if masked["token"] != types.MaskedSecret {
 		t.Errorf("token = %v, want masked value", masked["token"])
 	}
 
@@ -429,8 +431,8 @@ func TestMaskConfig_PreservedOnUpdate(t *testing.T) {
 	// This is what happens when user edits only the username field
 	updateReq := UpdateExtensionRequest{
 		Config: map[string]any{
-			"token":    maskedValue, // masked placeholder sent from frontend
-			"username": "bob",       // user changed this
+			"token":    types.MaskedSecret, // masked placeholder sent from frontend
+			"username": "bob",              // user changed this
 		},
 	}
 	body, _ := json.Marshal(updateReq)

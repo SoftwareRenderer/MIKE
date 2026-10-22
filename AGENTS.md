@@ -395,7 +395,7 @@ Types: `lsp`, `ui`, `css`, `i18n`, `agent`, `llm`, `tool`.
   retries.
 - **The address a person typed is the only widening**, and it still goes through the egress client.
 - **The operator can freeze the registry** (`MIKE_RESTRICT_MCP=1`).
-- **A stored header never leaves the process that stores it.**
+- **A stored header is spent only on the host the row that stores it names**, and never echoed back.
 - Mechanics, the caps and the elicitation argument: **`docs/mcp.md`**.
 
 ## Reconnection & Offline

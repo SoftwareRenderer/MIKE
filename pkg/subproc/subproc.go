@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // EmptyPolicy decides what happens to a variable the server has set to an empty string. It is a
@@ -105,4 +106,22 @@ func Watch(what string, after time.Duration, report func(format string, args ...
 			"a wedged podman holds its own database lock and every later call behind it", what, after)
 	})
 	return func() { timer.Stop() }
+}
+
+// AnswerMax is how much of a subprocess's output a response or a message may carry.
+const AnswerMax = 300
+
+// Summarize is what a subprocess said, bounded for a person to read: one line, at most max characters.
+// The whole of it belongs in the log, and a message wants a smaller bound than a log line does.
+func Summarize(out []byte, max int) string {
+	line := strings.Join(strings.Fields(string(out)), " ")
+	if len(line) <= max {
+		return line
+	}
+	// Cut on a rune boundary: git prints paths and author names, and half a rune arrives as junk.
+	cut := max
+	for cut > 0 && !utf8.RuneStart(line[cut]) {
+		cut--
+	}
+	return line[:cut] + "…"
 }

@@ -186,7 +186,8 @@ func versionParts(v string) ([]int, error) {
 	return out, nil
 }
 
-// manifestHost is the host the manifest was fetched from, which is the only host its URLs may name.
+// manifestHost is the host the manifest was fetched from, the only host its URLs may name. The port
+// stays in — another port is another service — so do not fold this into types.CanonicalHost.
 func manifestHost(from string) (string, error) {
 	u, err := url.Parse(strings.TrimSpace(from))
 	if err != nil || u.Host == "" {
