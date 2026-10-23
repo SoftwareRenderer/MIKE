@@ -45,7 +45,6 @@
 {/if}
 
 <style>
-    @import '$lib/styles/shared.css';
 
     .connectivity-row {
         display: flex;

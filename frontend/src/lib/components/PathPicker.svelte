@@ -179,7 +179,6 @@
 </BaseModal>
 
 <style>
-    @import '$lib/styles/shared.css';
     @import '$lib/styles/path-browser.css';
 
     :global(.path-browser .modal-body) {

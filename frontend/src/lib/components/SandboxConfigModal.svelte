@@ -163,7 +163,6 @@
 {/if}
 
 <style>
-    @import '$lib/styles/shared.css';
 
     :global(.sandbox-config-modal .close-btn) {
         width: 28px;

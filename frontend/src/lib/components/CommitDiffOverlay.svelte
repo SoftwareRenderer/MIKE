@@ -554,7 +554,6 @@
 {/if}
 
 <style>
-    @import '$lib/styles/shared.css';
 
     .commit-diff-overlay {
         display: flex;

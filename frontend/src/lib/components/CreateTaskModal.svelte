@@ -456,7 +456,6 @@
 <FileMentionDropdown {...mention.dropdownProps} />
 
 <style>
-    @import '$lib/styles/shared.css';
 
     :global(.create-task-modal .modal-body) {
         display: flex;

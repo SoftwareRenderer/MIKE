@@ -6,7 +6,7 @@
 //   collapsed-tasks / collapsed-sections / collapsed-diff-files — key 'ids' → string[]
 //   drafts             — key: taskId → string (draft chat text)
 //   editor-drafts      — key: file path → EditorDraft (unsaved buffer + the file bytes it diverged from)
-//   editor-history     — key: file path → EditorHistory (undo/redo history)
+//   editor-history     — key: file path → PersistedEditorHistory (undo/redo history)
 //   editor-tabs        — key: projectId → EditorTabState
 //   unsaved-files      — key: projectId → string[]
 //   offline-queue      — key 'actions' → QueuedAction[]; key 'queue-owner' → the window
@@ -298,7 +298,11 @@ export interface EditorDelta {
     insert: string;
 }
 
-export interface EditorHistory {
+/**
+ * The undo chain as it is written to IndexedDB. Distinct from `$lib/utils/editor-history`'s
+ * `EditorHistory`, which is a live editor's undo stack as its chrome sees it.
+ */
+export interface PersistedEditorHistory {
     // Timestamp when this history was created (ms)
     ts: number;
     // Base document content (first snapshot)
@@ -311,8 +315,8 @@ const MAX_HISTORY_DELTAS = 1000;
 const HISTORY_MAX_AGE_MS = 72 * 60 * 60 * 1000; // 72 hours
 
 /** Load persisted undo/redo history for a file. Returns `null` if none exists or expired. */
-export async function loadEditorHistory(path: string): Promise<EditorHistory | null> {
-    const history = await dbGet<EditorHistory>(STORE_EDITOR_HISTORY, path);
+export async function loadEditorHistory(path: string): Promise<PersistedEditorHistory | null> {
+    const history = await dbGet<PersistedEditorHistory>(STORE_EDITOR_HISTORY, path);
     if (history && Date.now() - history.ts > HISTORY_MAX_AGE_MS) {
         await clearEditorHistory(path);
         return null;

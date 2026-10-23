@@ -101,7 +101,6 @@
 </div>
 
 <style>
-    @import '$lib/styles/shared.css';
 
     /* Sticky wrapper: view-tabs + search-row + category-row, flush with modal-header */
     .sticky-header {

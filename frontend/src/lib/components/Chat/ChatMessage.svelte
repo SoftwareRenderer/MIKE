@@ -358,7 +358,6 @@
 {/snippet}
 
 <style>
-    @import '$lib/styles/shared.css';
 
     .chat-message {
         padding: 12px 0;
