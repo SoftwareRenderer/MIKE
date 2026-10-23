@@ -1,17 +1,14 @@
 package server
 
 import (
-	"bufio"
-	"net"
 	"net/http"
 
 	"mike/pkg/logging"
 )
 
-// statusLogWriter records the status a handler answers with, and forwards Flush and Hijack because a
-// wrapper that loses them silently breaks streaming and every socket upgrade.
+// statusLogWriter records the status a handler answers with.
 type statusLogWriter struct {
-	http.ResponseWriter
+	passThroughWriter
 	status      int
 	wroteHeader bool
 }
@@ -25,24 +22,11 @@ func (w *statusLogWriter) WriteHeader(status int) {
 	w.ResponseWriter.WriteHeader(status)
 }
 
-func (w *statusLogWriter) Flush() {
-	if f, ok := w.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
-}
-
-func (w *statusLogWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	if hj, ok := w.ResponseWriter.(http.Hijacker); ok {
-		return hj.Hijack()
-	}
-	return nil, nil, http.ErrNotSupported
-}
-
 // StatusLogMiddleware reports every answer of 400 or above, and sits just inside the panic recovery so a
 // recovered panic is reported too.
 func (s *Server) StatusLogMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sw := &statusLogWriter{ResponseWriter: w, status: http.StatusOK}
+		sw := &statusLogWriter{passThroughWriter: passThroughWriter{w}, status: http.StatusOK}
 		next.ServeHTTP(sw, r)
 		if sw.status < http.StatusBadRequest {
 			return

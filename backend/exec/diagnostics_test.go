@@ -478,13 +478,9 @@ type wedgedLSPManager struct {
 
 func (m *wedgedLSPManager) GetRegistry() *lsp.ExtensionRegistry { return m.registry }
 
-// The rest of the session contract is not what this fake is about — it exists to
-// be wedged in `lsp_start` — so each answers the benign thing: nothing to
-// recycle, and no handshake completed yet.
+// This fake exists to be wedged in `lsp_start`, so the rest of the contract answers the benign thing:
+// no file needs re-reading, and there is no process to release.
 func (m *wedgedLSPManager) FilesChanged(string, []string) bool { return false }
-
-func (m *wedgedLSPManager) SessionInitialized(string, string) bool { return false }
-func (m *wedgedLSPManager) MarkSessionInitialized(string, string)  {}
 
 func (m *wedgedLSPManager) Release(string, string) {}
 

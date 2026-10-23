@@ -646,21 +646,11 @@ func (asm *AppStreamManager) SetDiffCacheUpdate(fn func(taskID string, taskDiff 
 // BroadcastDiffStats broadcasts compact diff stats. Produces frames from live diffs,
 // initial loads, or stored snapshots.
 func (asm *AppStreamManager) BroadcastDiffStats(event DiffStatsEvent) {
-	asm.sendBoardPayload(event.ProjectID, appFrame(types.WSTypeTaskDiffStats, map[string]any{
-		"task_id":               event.TaskID,
-		"hash":                  event.DiffHash,
-		"short_stat":            event.ShortStat,
-		"files_n":               event.FilesN,
-		"untracked_n":           event.UntrackedN,
-		"untracked_lines":       event.UntrackedLines,
-		"tracked_add":           event.TrackedAdd,
-		"tracked_del":           event.TrackedDel,
-		"file_hashes":           filterInternalPathsFromHashes(event.ChangedHashes),
-		"removed_files":         filterInternalPathsFromList(event.RemovedFiles),
-		"staged_paths":          filterInternalPathsFromList(event.StagedPaths),
-		"has_committed_changes": event.HasCommittedChanges,
-		"already_merged":        event.AlreadyMerged,
-	}))
+	fields := diffStatsKeys(event)
+	fields["task_id"] = event.TaskID
+	fields["removed_files"] = filterInternalPathsFromList(event.RemovedFiles)
+	fields["already_merged"] = event.AlreadyMerged
+	asm.sendBoardPayload(event.ProjectID, appFrame(types.WSTypeTaskDiffStats, fields))
 }
 
 // DiffHash computes a hash of the TaskDiff.
@@ -1228,25 +1218,13 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 			asm.WatchWorktree(task.ID, projectID)
 		}
 		if diffResult, err := asm.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil && diffResult.HasChanges() {
-			hash := DiffHash(diffResult)
-			stats := ComputeDiffStats(diffResult)
-			filesN := stats.VisibleTracked + stats.VisibleUntracked
+			event := diffStatsOf(diffResult)
 			// Check if task branch commits are already merged into the target branch.
-			stats.AlreadyMerged = asm.computeAlreadyMerged(projectID, task)
-			statsFrame := appFrame(types.WSTypeTaskDiffStats, map[string]any{ // the shape BroadcastDiffStats documents
-				"task_id":               task.ID,
-				"hash":                  hash,
-				"short_stat":            diffResult.ShortStat,
-				"files_n":               filesN,
-				"untracked_n":           stats.VisibleUntracked,
-				"untracked_lines":       stats.UntrackedLines,
-				"tracked_add":           stats.TrackedAdd,
-				"tracked_del":           stats.TrackedDel,
-				"file_hashes":           filterInternalPathsFromHashes(diffResult.GetPerFileHashes()),
-				"staged_paths":          filterInternalPathsFromList(diffResult.StagedPaths),
-				"has_committed_changes": diffResult.HasCommittedWork(),
-				"already_merged":        stats.AlreadyMerged,
-			})
+			event.AlreadyMerged = asm.computeAlreadyMerged(projectID, task)
+			fields := diffStatsKeys(event)
+			fields["task_id"] = task.ID
+			fields["already_merged"] = event.AlreadyMerged
+			statsFrame := appFrame(types.WSTypeTaskDiffStats, fields)
 			statsMsg, _ := json.Marshal(statsFrame)
 			client.out.push(statsMsg, frameBucket(statsFrame))
 			// No per-file task_diff manifest frame is broadcast: no component reads it, and the

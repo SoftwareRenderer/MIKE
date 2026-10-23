@@ -201,6 +201,33 @@ func (c *LlamaClient) SetAdapter(a *llmadapter.Adapter) {
 	c.adapter = a
 }
 
+// postChat sends one chat request with the auth header and the headers the provider mapping asked for.
+// The mapping runs first, because it rewrites the body that is then marshalled.
+func (c *LlamaClient) postChat(ctx context.Context, reqBody map[string]any) (*http.Response, error) {
+	adapterHeaders := c.applyAdapter(reqBody)
+
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	c.setAuthHeader(req)
+	for k, v := range adapterHeaders {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("post to llama: %w", err)
+	}
+	return resp, nil
+}
+
 // applyAdapter applies the matched provider mapping to reqBody (in place) and
 // returns the resolved headers to add. Nil when no mapping matches.
 func (c *LlamaClient) applyAdapter(reqBody map[string]any) map[string]string {
@@ -372,8 +399,6 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 		return nil, fmt.Errorf("no user message in chat request; chat templates require at least one")
 	}
 
-	url := c.baseURL + "/chat/completions"
-
 	reqBody := map[string]any{
 		"model":           c.modelName,
 		"messages":        requestMessages(messages),
@@ -391,27 +416,11 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 	}
 	applyReasoningParams(reqBody, c.reasoningEffort)
 	applySamplingParams(reqBody, c.sampling)
-	adapterHeaders := c.applyAdapter(reqBody)
-
-	data, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	c.setAuthHeader(req)
-	for k, v := range adapterHeaders {
-		req.Header.Set(k, v)
-	}
 
 	callStart := time.Now()
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.postChat(ctx, reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("post to llama: %w", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
 
@@ -605,8 +614,6 @@ func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatM
 		maxTokens = *opts.MaxTokens
 	}
 
-	url := c.baseURL + "/chat/completions"
-
 	reqBody := map[string]any{
 		"model":       c.modelName,
 		"messages":    requestMessages(messages),
@@ -618,27 +625,11 @@ func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatM
 	}
 	applyReasoningParams(reqBody, c.reasoningEffort)
 	applySamplingParams(reqBody, c.sampling)
-	adapterHeaders := c.applyAdapter(reqBody)
-
-	data, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, "", fmt.Errorf("marshal request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
-	if err != nil {
-		return nil, "", fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	c.setAuthHeader(req)
-	for k, v := range adapterHeaders {
-		req.Header.Set(k, v)
-	}
 
 	callStart := time.Now()
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.postChat(ctx, reqBody)
 	if err != nil {
-		return nil, "", fmt.Errorf("post to llama: %w", err)
+		return nil, "", err
 	}
 	defer resp.Body.Close()
 

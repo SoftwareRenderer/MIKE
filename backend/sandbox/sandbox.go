@@ -378,6 +378,36 @@ func gitPointerMountArgs(taskID, worktreePath, mountPath, projectPath string) ([
 	return sandboxruntime.WorktreeGitPointerMount(worktreePath, mountPath)
 }
 
+// mountMode answers the mode to mount with. A blank or unknown mode means fallback.
+func mountMode(mode, fallback string) string {
+	if mode != "ro" && mode != "rw" {
+		return fallback
+	}
+	return mode
+}
+
+// bindMountArg resolves one host directory and returns its `-v` argument, creating the directory when it
+// is missing. A mount that cannot be honored is reported and returns nil, so the container still starts.
+func bindMountArg(taskID, what, hostPath, containerPath, mode string) []string {
+	if hostPath == "" || containerPath == "" {
+		return nil
+	}
+	absHost, err := filepath.Abs(hostPath)
+	if err != nil {
+		logging.For(logging.Sandbox).With(logging.TaskID, taskID).Warnf("skipping %s mount: invalid host path %s: %v", what, hostPath, err)
+		return nil
+	}
+	if _, err := os.Stat(absHost); err != nil {
+		if mkErr := os.MkdirAll(absHost, 0o755); mkErr != nil {
+			logging.For(logging.Sandbox).With(logging.TaskID, taskID).Warnf("skipping %s mount %s -> %s: cannot create the directory: %v", what, absHost, containerPath, mkErr)
+			return nil
+		}
+		logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("created %s directory %s", what, absHost)
+	}
+	logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("mounting %s: %s -> %s (%s)", what, absHost, containerPath, mode)
+	return []string{"-v", sandboxruntime.BindMountSpec(absHost, containerPath, mode)}
+}
+
 // A missing hostDir binds nothing: an optional skill folder must not refuse the container.
 func readOnlyBindArg(taskID, what, hostDir, containerPath string) []string {
 	if hostDir == "" {
@@ -563,29 +593,8 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 	// containerEnvArgs below.
 	if opts.AgentSandbox != nil {
 		for _, m := range opts.AgentSandbox.Mounts {
-			if m.HostPath == "" || m.ContainerPath == "" {
-				continue
-			}
-			absHost, err := filepath.Abs(m.HostPath)
-			if err != nil {
-				logging.For(logging.Sandbox).With(logging.TaskID, taskID).Warnf("skipping agent mount: invalid host path %s: %v", m.HostPath, err)
-				continue
-			}
-			if _, err := os.Stat(absHost); err != nil {
-				if mkErr := os.MkdirAll(absHost, 0o755); mkErr != nil {
-					logging.For(logging.Sandbox).With(logging.TaskID, taskID).Warnf("skipping agent mount %s -> %s: cannot create the granted directory: %v", absHost, m.ContainerPath, mkErr)
-					continue
-				}
-				logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("created granted agent directory %s", absHost)
-			}
-			mountMode := m.Mode
-			if mountMode != "ro" && mountMode != "rw" {
-				mountMode = "ro"
-			}
 			createArgs = append(createArgs,
-				"-v", sandboxruntime.BindMountSpec(absHost, m.ContainerPath, mountMode),
-			)
-			logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("mounting agent sandbox %s -> %s (%s)", absHost, m.ContainerPath, mountMode)
+				bindMountArg(taskID, "agent sandbox", m.HostPath, m.ContainerPath, mountMode(m.Mode, "ro"))...)
 		}
 	}
 
@@ -595,26 +604,8 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 
 	// Custom mounts (user-configured per-project)
 	for _, m := range opts.SandboxMounts {
-		hostPath, err := filepath.Abs(m.HostPath)
-		if err != nil {
-			logging.For(logging.Sandbox).With(logging.TaskID, taskID).Warnf("skipping mount: invalid host path %s: %v", m.HostPath, err)
-			continue
-		}
-		if _, err := os.Stat(hostPath); err != nil {
-			if mkErr := os.MkdirAll(hostPath, 0o755); mkErr != nil {
-				logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("skipping mount: cannot create host path %s: %v", hostPath, mkErr)
-				continue
-			}
-			logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("created host directory %s", hostPath)
-		}
-		mode := m.Mode
-		if mode != "ro" && mode != "rw" {
-			mode = "rw" // default to rw
-		}
 		createArgs = append(createArgs,
-			"-v", sandboxruntime.BindMountSpec(hostPath, m.ContainerPath, mode),
-		)
-		logging.For(logging.Sandbox).With(logging.TaskID, taskID).Infof("mounting %s -> %s (%s)", hostPath, m.ContainerPath, mode)
+			bindMountArg(taskID, "custom", m.HostPath, m.ContainerPath, mountMode(m.Mode, "rw"))...)
 	}
 
 	// Environment: exactly what was configured for this sandbox, and nothing else. Built here, at

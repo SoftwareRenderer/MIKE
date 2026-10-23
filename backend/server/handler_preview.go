@@ -70,9 +70,8 @@ const (
 
 // The wire names of the postures, as the host posts them.
 const (
-	previewPostureNoScriptName = "no-script"
-	previewPostureScriptsName  = "scripts"
-	previewPostureNetworkName  = "network"
+	previewPostureScriptsName = "scripts"
+	previewPostureNetworkName = "network"
 )
 
 // previewPostureFrom maps the posture name the host posts to a policy. The name is the extension's own

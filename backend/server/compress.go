@@ -1,12 +1,10 @@
 package server
 
 import (
-	"bufio"
 	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
-	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -117,7 +115,7 @@ func CompressMiddleware(next http.Handler) http.Handler {
 }
 
 type compressWriter struct {
-	http.ResponseWriter
+	passThroughWriter
 	headers       http.Header
 	body          bytes.Buffer
 	code          int
@@ -133,12 +131,12 @@ type compressWriter struct {
 
 func newCompressWriter(w http.ResponseWriter, r *http.Request, encoding string) *compressWriter {
 	return &compressWriter{
-		ResponseWriter: w,
-		headers:        make(http.Header),
-		encoding:       encoding,
-		method:         r.Method,
-		req:            r,
-		contentLength:  -1,
+		passThroughWriter: passThroughWriter{w},
+		headers:           make(http.Header),
+		encoding:          encoding,
+		method:            r.Method,
+		req:               r,
+		contentLength:     -1,
 	}
 }
 
@@ -340,16 +338,7 @@ func (c *compressWriter) Flush() {
 			c.gz.Flush()
 		}
 	}
-	if f, ok := c.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
-}
-
-func (c *compressWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	if hj, ok := c.ResponseWriter.(http.Hijacker); ok {
-		return hj.Hijack()
-	}
-	return nil, nil, http.ErrNotSupported
+	c.passThroughWriter.Flush()
 }
 
 // noWriterToFile wraps an http.File to prevent io.WriterTo (sendfile) optimization,

@@ -445,36 +445,40 @@ func routeKey(r route, types map[string]string) string {
 	return r.field + "." + r.handler
 }
 
-// afterMethodGuard returns the body following `if r.Method != http.MethodGet { … return }`.
-func afterMethodGuard(body, verb string) (string, bool) {
-	needle := "r.Method != " + methodConst(verb)
-	i := strings.Index(body, needle)
-	if i < 0 {
-		return "", false
-	}
+// braceSpan returns the balanced `{ … }` at or after index i as a half-open slice of body, and false
+// when the body ends before the braces balance.
+func braceSpan(body string, i int) (start, end int, ok bool) {
 	brace := strings.Index(body[i:], "{")
 	if brace < 0 {
-		return "", false
+		return 0, 0, false
 	}
-	depth, end := 0, -1
-	for j := i + brace; j < len(body); j++ {
+	start = i + brace
+	depth := 0
+	for j := start; j < len(body); j++ {
 		switch body[j] {
 		case '{':
 			depth++
 		case '}':
 			depth--
-			if depth == 0 {
-				end = j
-			}
 		}
-		if end >= 0 {
-			break
+		if depth == 0 {
+			return start, j + 1, true
 		}
 	}
-	if end < 0 {
+	return 0, 0, false
+}
+
+// afterMethodGuard returns the body following `if r.Method != http.MethodGet { … return }`.
+func afterMethodGuard(body, verb string) (string, bool) {
+	i := strings.Index(body, "r.Method != "+methodConst(verb))
+	if i < 0 {
 		return "", false
 	}
-	return body[end+1:], true
+	_, end, ok := braceSpan(body, i)
+	if !ok {
+		return "", false
+	}
+	return body[end:], true
 }
 
 // findingFile names the file a finding belongs to. A closure lives in routes.go, and a Server method
@@ -553,29 +557,11 @@ func extractMethodIf(body, verb string) (string, bool) {
 	if i < 0 {
 		return "", false
 	}
-	brace := strings.Index(body[i:], "{")
-	if brace < 0 {
+	start, end, ok := braceSpan(body, i)
+	if !ok {
 		return "", false
 	}
-	depth, end := 0, -1
-	for j := i + brace; j < len(body); j++ {
-		switch body[j] {
-		case '{':
-			depth++
-		case '}':
-			depth--
-			if depth == 0 {
-				end = j
-			}
-		}
-		if end >= 0 {
-			break
-		}
-	}
-	if end < 0 {
-		return "", false
-	}
-	return body[i+brace : end+1], true
+	return body[start:end], true
 }
 
 // scanWSEvents reports a Go app-stream event that no frontend code names. The reverse direction

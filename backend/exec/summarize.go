@@ -329,6 +329,39 @@ func (s *summarizeOrchestrator) injectProceedMessage(setup *taskExecSetup, lc *l
 	lc.messages = append(lc.messages, types.ChatMessage{Role: "user", Content: proceedInstruction})
 }
 
+// recordSummary persists a finished summary, moves the rows written while it ran after it, and publishes
+// it. The row and the frame share one id and one instant, so they cannot disagree about one summary.
+func (s *summarizeOrchestrator) recordSummary(projectID, taskID, threadID, model string, res summarizeResult, anchor time.Time, contextUsed int) {
+	msgID := uuid.New().String()
+	createdAt := time.Now().UTC()
+	_ = s.store.CreateTaskMessage(&types.TaskMessage{
+		ID:              msgID,
+		TaskID:          taskID,
+		ThreadID:        threadID,
+		Role:            "summarization",
+		Content:         res.summary,
+		ModelName:       model,
+		PromptTokens:    res.promptTokens,
+		PredictedTokens: res.predictedTokens,
+		PromptMs:        int(res.promptMs),
+		PredictedMs:     int(res.predictedMs),
+		CreatedAt:       createdAt,
+	})
+	_ = s.store.FixPostSummaryTimestamps(taskID, threadID, anchor, createdAt)
+
+	s.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeSummarization, Data: map[string]any{
+		"id":               msgID,
+		"summary":          res.summary,
+		"created_at":       createdAt.Format(time.RFC3339),
+		"prompt_tokens":    res.promptTokens,
+		"predicted_tokens": res.predictedTokens,
+		"prompt_ms":        res.promptMs,
+		"predicted_ms":     res.predictedMs,
+		"model_name":       model,
+		"context_used":     contextUsed,
+	}})
+}
+
 // applySummarization summarizes, persists the summary, installs it in the system prompt and
 // broadcasts the event. It returns the conversation for the next call and the installed
 // summary, which is "" if summarization failed and the messages came back untouched.
@@ -370,42 +403,13 @@ func (s *summarizeOrchestrator) applySummarization(setup *taskExecSetup, ctx con
 		return messages, ""
 	}
 
-	summaryMsgID := uuid.New().String()
-	summaryCreatedAt := time.Now().UTC()
 	// The anchor is the row's UpdatedAt, stamped when the Summarizing flag was set.
 	if updated, err := s.store.GetTaskByID(taskID); err == nil && updated != nil {
 		task = updated
 	}
-	summaryAnchor := task.UpdatedAt
-	_ = s.store.CreateTaskMessage(&types.TaskMessage{
-		ID:              summaryMsgID,
-		TaskID:          taskID,
-		ThreadID:        task.CurrentThreadID,
-		Role:            "summarization",
-		Content:         sumResult.summary,
-		ModelName:       modelName,
-		PromptTokens:    sumResult.promptTokens,
-		PredictedTokens: sumResult.predictedTokens,
-		PromptMs:        int(sumResult.promptMs),
-		PredictedMs:     int(sumResult.predictedMs),
-		CreatedAt:       summaryCreatedAt,
-	})
-
-	_ = s.store.FixPostSummaryTimestamps(taskID, task.CurrentThreadID, summaryAnchor, summaryCreatedAt)
-
 	messages, compressedUsed := installSummary(messages, task, setup.worktreePath, setup.promptScope(), sumResult.summary)
+	s.recordSummary(projectID, taskID, task.CurrentThreadID, modelName, sumResult, task.UpdatedAt, compressedUsed)
 
-	s.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeSummarization, Data: map[string]any{
-		"id":               summaryMsgID,
-		"summary":          sumResult.summary,
-		"created_at":       summaryCreatedAt.Format(time.RFC3339),
-		"prompt_tokens":    sumResult.promptTokens,
-		"predicted_tokens": sumResult.predictedTokens,
-		"prompt_ms":        sumResult.promptMs,
-		"predicted_ms":     sumResult.predictedMs,
-		"model_name":       modelName,
-		"context_used":     compressedUsed,
-	}})
 	logging.For(logging.Summarize).With(logging.TaskID, taskID).Infof("summarized context (messages preserved, LLM context compressed)")
 
 	clearFlag()
@@ -605,8 +609,6 @@ func (s *summarizeOrchestrator) HandleSummarize(w http.ResponseWriter, r *http.R
 			return
 		}
 
-		summaryMsgID := uuid.New().String()
-		summaryCreatedAt := time.Now().UTC()
 		// Here the anchor is the newest existing message: every taskMsg predates the summary.
 		var summaryAnchor time.Time
 		for _, m := range taskMsgs {
@@ -614,39 +616,12 @@ func (s *summarizeOrchestrator) HandleSummarize(w http.ResponseWriter, r *http.R
 				summaryAnchor = m.CreatedAt
 			}
 		}
-		_ = s.store.CreateTaskMessage(&types.TaskMessage{
-			ID:              summaryMsgID,
-			TaskID:          task.ID,
-			ThreadID:        task.CurrentThreadID,
-			Role:            "summarization",
-			Content:         sumResult.summary,
-			ModelName:       modelName,
-			PromptTokens:    sumResult.promptTokens,
-			PredictedTokens: sumResult.predictedTokens,
-			PromptMs:        int(sumResult.promptMs),
-			PredictedMs:     int(sumResult.predictedMs),
-			CreatedAt:       summaryCreatedAt,
-		})
 
 		// Only the estimate is wanted here; this path holds no live conversation.
 		_, compressedUsed := installSummary(messages, task, worktreePath, scope, sumResult.summary)
-
-		s.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeSummarization, Data: map[string]any{
-			"id":               summaryMsgID,
-			"summary":          sumResult.summary,
-			"created_at":       time.Now().UTC().Format(time.RFC3339),
-			"prompt_tokens":    sumResult.promptTokens,
-			"predicted_tokens": sumResult.predictedTokens,
-			"prompt_ms":        sumResult.promptMs,
-			"predicted_ms":     sumResult.predictedMs,
-			"model_name":       task.ModelName,
-			"context_used":     compressedUsed,
-		}})
+		s.recordSummary(projectID, taskID, task.CurrentThreadID, modelName, sumResult, summaryAnchor, compressedUsed)
 
 		logging.For(logging.Summarize).With(logging.TaskID, taskID).Infof("manual summarization complete (messages preserved, LLM context compressed)")
-
-		// so the window's messages sort after the summary
-		_ = s.store.FixPostSummaryTimestamps(taskID, task.CurrentThreadID, summaryAnchor, summaryCreatedAt)
 
 		clearFlag()
 

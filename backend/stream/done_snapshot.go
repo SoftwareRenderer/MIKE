@@ -71,23 +71,9 @@ func MaterializeDoneTaskDiff(st *store.Store, wm *git.WorktreeManager, projectID
 		return &DoneTaskDiff{HasChanges: false}, nil
 	}
 
-	hash := DiffHash(diffResult)
-	stats := ComputeDiffStats(diffResult)
-	filesN := stats.VisibleTracked + stats.VisibleUntracked
-
-	statsObj := map[string]any{ // the stored form of the shape BroadcastDiffStats documents
-		"hash":                  hash,
-		"short_stat":            diffResult.ShortStat,
-		"files_n":               filesN,
-		"untracked_n":           stats.VisibleUntracked,
-		"untracked_lines":       stats.UntrackedLines,
-		"tracked_add":           stats.TrackedAdd,
-		"tracked_del":           stats.TrackedDel,
-		"file_hashes":           filterInternalPathsFromHashes(diffResult.GetPerFileHashes()),
-		"staged_paths":          filterInternalPathsFromList(diffResult.StagedPaths),
-		"has_committed_changes": diffResult.HasCommittedWork(),
-	}
-	statsJSON, err := json.Marshal(statsObj)
+	// A stored snapshot holds the shared keys only. It belongs to no connection, and already_merged is
+	// recomputed when the snapshot is replayed.
+	statsJSON, err := json.Marshal(diffStatsKeys(diffStatsOf(diffResult)))
 	if err != nil {
 		return nil, err
 	}

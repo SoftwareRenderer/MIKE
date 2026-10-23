@@ -1,11 +1,13 @@
 package server
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
+	"net"
 	"net/http"
 	"runtime/debug"
 	"strings"
@@ -16,6 +18,25 @@ import (
 
 	"mike/backend/startup"
 )
+
+// passThroughWriter forwards Flush and Hijack, which a middleware wrapper must not drop: without them
+// streaming stalls and a socket upgrade fails. compressWriter overrides Flush to flush its own encoder.
+type passThroughWriter struct {
+	http.ResponseWriter
+}
+
+func (w passThroughWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (w passThroughWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := w.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, http.ErrNotSupported
+}
 
 // Re-export JSON helpers from httputil.
 var (
