@@ -897,7 +897,6 @@
 </div>
 
 <style>
-    @import '$lib/styles/shared.css';
 
     /* The scrim the panel below it dims: one tier apart, so the panel is never painted under its
        own scrim by whatever else is on screen. */

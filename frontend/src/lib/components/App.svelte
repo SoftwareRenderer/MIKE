@@ -1519,7 +1519,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 </svelte:head>
 
 <style>
-    @import '$lib/styles/shared.css';
 
     /* -- Loading screen -- */
     .loading-screen {

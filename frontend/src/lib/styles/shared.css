@@ -1,10 +1,9 @@
-/* Shared utility styles — imported via @import in components
-   :global() rules stay unscoped so they match elements across all components */
+/* Shared utility styles. Imported once by `main.ts` */
 
 
 /* Close button — used in modals, dialogs, overlays. Its content is always the `close.svg` mark, and
    the call site passes the size to `Icon`, so nothing here sizes text. */
-:global(.close-btn) {
+.close-btn {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -17,7 +16,7 @@
     line-height: 1;
     flex-shrink: 0;
 }
-:global(.close-btn:hover) {
+.close-btn:hover {
     opacity: 1;
     color: var(--color-text-primary);
     background: var(--color-surface-3);
@@ -37,7 +36,7 @@
 
    The colour changes carry `:not(:disabled)`: a control that reacts under the pointer is not claiming to
    be dead, which is the invariant `app.css` states for the disabled dim. */
-:global(.btn) {
+.btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -54,7 +53,7 @@
     white-space: nowrap;
     transition: background var(--dur-base), border-color var(--dur-base), color var(--dur-base);
 }
-:global(.btn:hover:not(:disabled)) {
+.btn:hover:not(:disabled) {
     opacity: 1;
     background: var(--color-surface-3);
     border-color: var(--color-border-bright);
@@ -63,12 +62,12 @@
 /* The affirmative answer — the Save, Create and Confirm button of every dialog footer. Each variant
    pins its own border colour on hover, because `.btn`'s hover brightens a border a filled variant has
    none of. */
-:global(.btn-primary) {
+.btn-primary {
     border-color: transparent;
     background: var(--color-btn-primary-bg);
     color: var(--color-btn-text);
 }
-:global(.btn-primary:hover:not(:disabled)) {
+.btn-primary:hover:not(:disabled) {
     opacity: 1;
     border-color: transparent;
     background: var(--color-btn-primary-hover);
@@ -76,12 +75,12 @@
 
 /* The neutral answer — a card action that sits on a surface and has to stay apart from it. Same hover
    as `.btn`: a variant answers which colour the answer is, never how the pointer is answered. */
-:global(.btn-secondary) {
+.btn-secondary {
     background: var(--color-btn-secondary-bg);
     border-color: var(--color-border-subtle);
     color: var(--color-text-primary);
 }
-:global(.btn-secondary:hover:not(:disabled)) {
+.btn-secondary:hover:not(:disabled) {
     opacity: 1;
     background: var(--color-surface-3);
     border-color: var(--color-border-bright);
@@ -89,24 +88,24 @@
 
 /* The answer that undoes something: the red fill the stop/remove controls already use, brightening
    rather than dimming under the pointer. */
-:global(.btn-danger) {
+.btn-danger {
     border-color: transparent;
     background: var(--color-status-red-dark);
     color: var(--color-btn-text);
 }
-:global(.btn-danger:hover:not(:disabled)) {
+.btn-danger:hover:not(:disabled) {
     border-color: transparent;
     background: var(--color-status-red);
 }
 
 /* No box of its own — the same hover `.close-btn` has, for a control that sits in a row rather than
    opening a dialog. Combines with `.btn` when that colouring is wanted on a bordered chip. */
-:global(.btn-ghost) {
+.btn-ghost {
     border-color: transparent;
     background: none;
     color: var(--color-text-secondary);
 }
-:global(.btn-ghost:hover:not(:disabled)) {
+.btn-ghost:hover:not(:disabled) {
     opacity: 1;
     border-color: transparent;
     background: var(--color-surface-3);
@@ -115,7 +114,7 @@
 
 /* The dense size of the family, for a control inside a row or a card footer. After `.btn`, so its
    padding is the one that wins. */
-:global(.btn-small) {
+.btn-small {
     padding: 0.25rem 0.5rem;
     font-size: var(--text-xs);
 }

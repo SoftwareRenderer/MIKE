@@ -178,7 +178,6 @@ import { formatNetworkedExtensions, serverToolExtensions, serverToolMCPServers }
 </BaseModal>
 
 <style>
-    @import '$lib/styles/shared.css';
     @import '$lib/styles/sandbox-settings.css';
 
     .panel-title {

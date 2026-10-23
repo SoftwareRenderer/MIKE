@@ -29,7 +29,6 @@
 </div>
 
 <style>
-    @import '$lib/styles/shared.css';
 
     /* Placed against the host's box, so the host has to be positioned. An accent edge over a tinted
        surface, with the deeper shadow, keeps the bar from reading as one more row of the listing. */

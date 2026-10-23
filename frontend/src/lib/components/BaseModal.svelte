@@ -142,7 +142,6 @@
 </div>
 
 <style>
-    @import '$lib/styles/shared.css';
 
     .overlay {
         position: fixed;

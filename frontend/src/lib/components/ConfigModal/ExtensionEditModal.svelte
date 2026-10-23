@@ -282,7 +282,6 @@
 {/if}
 
 <style>
-    @import '$lib/styles/shared.css';
 
     .ext-dep-pending {
         font-size: var(--text-xs);

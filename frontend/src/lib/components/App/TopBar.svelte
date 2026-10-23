@@ -136,7 +136,6 @@
 </header>
 
 <style>
-    @import '$lib/styles/shared.css';
 
     .top-bar {
         display: flex;

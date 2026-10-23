@@ -1,4 +1,5 @@
 import './app.css';
+import '$lib/styles/shared.css';
 import { mount } from 'svelte';
 import App from './lib/components/App.svelte';
 import { appStore } from './lib/stores';

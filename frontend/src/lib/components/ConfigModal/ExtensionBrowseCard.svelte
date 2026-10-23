@@ -155,7 +155,6 @@
 </div>
 
 <style>
-    @import '$lib/styles/shared.css';
 
     .card-header {
         display: flex;

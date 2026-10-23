@@ -93,7 +93,6 @@
 {/if}
 
 <style>
-    @import '$lib/styles/shared.css';
 
     /* Updates section */
     .updates-section {

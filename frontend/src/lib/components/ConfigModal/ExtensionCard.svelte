@@ -213,7 +213,6 @@
 </div>
 
 <style>
-    @import '$lib/styles/shared.css';
 
     .card-actions .btn-icon {
         position: relative;

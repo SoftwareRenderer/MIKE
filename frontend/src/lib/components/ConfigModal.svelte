@@ -1083,7 +1083,6 @@
 {/snippet}
 
 <style>
-    @import '$lib/styles/shared.css';
     @import '$lib/styles/settings-section.css';
 
     /* Fixed modal size */

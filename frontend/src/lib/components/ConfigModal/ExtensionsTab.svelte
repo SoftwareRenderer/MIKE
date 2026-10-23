@@ -610,7 +610,6 @@
 </div>
 
 <style>
-    @import '$lib/styles/shared.css';
 
     @import '$lib/styles/extensions.css';
 

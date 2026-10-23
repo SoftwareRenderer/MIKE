@@ -87,12 +87,6 @@
     flex: 1;
 }
 
-/* Unscoped, as it has always been in both views: it widens the tap target of every close button
- * the app draws, shared.css's 4px aside. */
-:global(.close-btn) {
-    padding: 6px;
-}
-
 /* Both header buttons are the same box; Review Changes only exists in the branch view, and its
  * markup lives in the shared header, so its selector shares the rule instead of repeating it. */
 :global(.explorer-view .terminal-btn),
