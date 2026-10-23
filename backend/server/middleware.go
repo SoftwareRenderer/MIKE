@@ -340,19 +340,22 @@ func PanicRecoveryMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if err := recover(); err != nil {
-				// The matched route pattern, never the request path: a panic under /api/preview/<token>/…
-				// would log a live bearer token. An unrouted request names only its first path segment.
-				route := r.Pattern
-				if route == "" {
-					seg, _, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/"), "/")
-					route = "unrouted /" + seg
-				}
-				logging.For(logging.Recovery).Infof("%s %s: %v\n%s", r.Method, route, err, debug.Stack())
+				logging.For(logging.Recovery).Infof("%s %s: %v\n%s", r.Method, requestRoute(r), err, debug.Stack())
 				JSONError(w, http.StatusInternalServerError, "internal server error")
 			}
 		}()
 		next.ServeHTTP(w, r)
 	})
+}
+
+// requestRoute names a request by the route that matched it, or by its first path segment when nothing
+// matched, because a request path can carry a bearer token or a pairing code.
+func requestRoute(r *http.Request) string {
+	if r.Pattern != "" {
+		return r.Pattern
+	}
+	seg, _, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/"), "/")
+	return "unrouted /" + seg
 }
 
 // CSRFMiddleware validates the X-CSRF-Token header against the stored token.

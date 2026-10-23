@@ -713,6 +713,16 @@ absolute worktree path, and logs nothing.
   a cause — while the live count and the limit go to the log at `Warn`. Same for a subscription a single
   connection asks for past its own cap: the refusal is logged, the connection keeps running and keeps
   every key it already held. See *Every upgrade is admitted by a count, never a deadline*.
+- Every answer of 400 or above is logged once, by `StatusLogMiddleware`, at the level its status class
+  deserves: `Error` for a 5xx, `Warn` for the four statuses that mean someone was kept out (401, 403,
+  421, 429), and `Debug` for every other 4xx. It sits just inside `PanicRecoveryMiddleware` and outside
+  the bearer-token, CSRF and session middlewares, so a recovered panic and a refusal at the gate are
+  reported by one rule.
+- That record names the **route**, never the request. `routeFor` asks the mux which route a request would
+  reach, because a middleware that calls `r.WithContext` copies the Request and the mux records the
+  pattern on that copy. The path and query stay out: a preview path segment is a live bearer token, and a
+  pairing URL query carries a code. `addr` is `clientIP`, the address the login limiter budgets under. The
+  cause of a 500 is a second record — `Fail` writes it, and this one cannot know it.
 - The ratchet is the `status500` archgate rule (0 violations across 289 examined).
 - One seam decides whether upstream text reaches the browser. Words from a remote **stay** for clone,
   checkout, pull and push: they are the diagnosis of a repository the person owns. Nothing else tells
@@ -724,7 +734,9 @@ absolute worktree path, and logs nothing.
   stays with the 502. A refusal written for the caller (a path outside the jail, a label too long) keeps
   its sentence too.
 
-Tests: `backend/errs/errs_test.go`, `backend/httputil/httputil_test.go`.
+Tests: `backend/errs/errs_test.go`, `backend/httputil/httputil_test.go`, and
+`backend/server/status_log_test.go` (which level each refusal reaches, and that the route is named while
+the path and the query are not).
 
 ## Response headers
 

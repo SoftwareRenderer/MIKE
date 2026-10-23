@@ -30,6 +30,7 @@ Handles the WebAuthn flow. It derives the `RelyingHost` (rpID, origin) from the 
 - **Spending**: A code is "spent" (deleted) upon successful registration.
 - **TTLs**: Different TTLs for boot-time and Settings-minted codes.
 - **Rate Limiting**: Bound by `MIKE_LOGIN_RATE_LIMIT`.
+- **Refusal Logging**: A wrong code answers 401 and leaves one `Warn` naming the route, the status and the address. The code is in no part of that line, per *Zero-Leakage*; `docs/api-contract.md → Errors` owns which level each refusal gets.
 
 ### Tickets (`backend/auth/ticket.go`)
 Transports ceremony state between requests. Tickets are HMAC-SHA256 signed using `MIKE_ENCRYPTION_KEY` and have a limited TTL and payload size.

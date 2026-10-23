@@ -1001,6 +1001,7 @@ func (s *Server) middlewareChain(h http.Handler) http.Handler {
 		s.HostPinMiddleware,
 		s.RedirectHTTPSMiddleware,
 		PanicRecoveryMiddleware,
+		s.StatusLogMiddleware,
 		// Before anything that reads a body.
 		MaxBodyMiddleware(httputil.MaxRequestBodyBytes),
 		NonceMiddleware,
