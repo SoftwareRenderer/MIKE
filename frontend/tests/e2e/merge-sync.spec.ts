@@ -16,6 +16,10 @@ test.describe.serial('Merge Sync', () => {
   });
 
   test('should sync main into task branch before final merge when main has new commits', async ({ page }) => {
+    // Turn budget: the click's merge waits for the turn `createTaskViaApi` started, and that turn queues
+    // behind every other worker's. The poll below asks for 120s of it, so the test has to be longer than
+    // the 90s default or that budget is unreachable and the wait dies mid-queue.
+    test.setTimeout(180_000);
     const taskId = await createTaskViaApi(page, projectId, `merge-sync-${Date.now()}`);
     expect(taskId).not.toBe('');
 

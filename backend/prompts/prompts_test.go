@@ -172,19 +172,21 @@ func TestRenderHelpers_ShippedTemplates(t *testing.T) {
 				t.Errorf("summarize user message is missing %q", want)
 			}
 		}
-		if strings.Contains(user, "context limit") {
-			t.Error("a summary nobody was cut off by the window is told about the window anyway")
+		if strings.Contains(user, "did not finish") {
+			t.Error("a summary nobody was cut off is told the run was interrupted anyway")
 		}
 	})
 
-	t.Run("summarize of an interrupted run names the cause", func(t *testing.T) {
+	// The summarizer is told the run stopped, never what stopped it: the cause is named to the
+	// executor by exec's composeContextCutNote(), on the turn that continues the work.
+	t.Run("summarize of an interrupted run says the work did not finish", func(t *testing.T) {
 		_, user, err := RenderSummarizePrompt(SummarizeData{
 			ChatHistory: "assistant: reading", Interrupted: true,
 		})
 		if err != nil {
 			t.Fatalf("RenderSummarizePrompt: %v", err)
 		}
-		for _, want := range []string{"context limit", "did not finish"} {
+		for _, want := range []string{"mid-task", "did not finish"} {
 			if !strings.Contains(user, want) {
 				t.Errorf("interrupted summarize is missing %q", want)
 			}

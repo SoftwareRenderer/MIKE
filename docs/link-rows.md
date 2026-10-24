@@ -43,8 +43,6 @@ back button. A clone that fails while its row holds the screen takes the screen 
 a surviving project replaces it, or the empty state does.
 
 The add writes push, so Back returns to the project open at the click, on the screen it was showing.
-`frontend/tests/e2e/add-project-navigation.spec.ts` holds those three shapes, and is what fails when an
-added project inherits the explorer of the project before it.
 
 ## Task card: full-cover overlay, not a root anchor
 
@@ -171,8 +169,6 @@ lands writes the one it restored. The `..` row is refused by both entrances thro
   drag source is the card not the link, a second tab lands on the linked project/task/explorer, and a
   terminal tab holds a terminal and nothing else.
 - `preferences-keyboard.spec.ts` (e2e, isolated) — rebinding frees Ctrl+Click.
-- `add-project-navigation.spec.ts` (e2e) — an added project's address names it with no carried-over
-  screen, and a cloning row is the one on screen.
 - `task-explorer-close.spec.ts` (e2e) — a task explorer's × lands on that task's detail whichever way the
   explorer arrived, the Review Changes × keeps its explorer, and Back returns to the explorer the close
   left.

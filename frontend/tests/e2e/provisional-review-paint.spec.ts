@@ -206,6 +206,11 @@ test.describe('A Review result read out of the browser while the server is still
     await waitForTaskState(page, projectId, taskId, t => t.status === 'review' && notInFlight(t), 90_000);
     await navigateToTask(page, taskId, projectId);
     await expect(page.locator(REVIEW).first()).toBeVisible({ timeout: 30_000 });
+    // The open whose read fills this browser's cache. A row is painted long before the write that caches it
+    // lands, and a paint with nothing cached shows neither the rows nor the pending indicator.
+    await expect
+      .poll(async () => (await cachedRoles(page, projectId, taskId)).length, { timeout: 15_000 })
+      .toBeGreaterThan(0);
 
     // A read that comes back late and broken: the wait has to become the notice, not the empty transcript
     // the cached rows are no longer a claim about.
