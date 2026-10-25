@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -42,37 +43,59 @@ func etagMatches(etag, ifNoneMatch string) bool {
 	return false
 }
 
-// encodingPriority maps encoding name to its preference rank (lower = preferred).
+// encodingPriority holds the encodings this server can write, in preference order. A client
+// offering only something else is answered with identity bytes, because a client that cannot
+// name a decoder usually has none.
 var encodingPriority = map[string]int{
-	"br":      1,
-	"gzip":    2,
-	"deflate": 3,
-	"*":       4,
+	"br":   1,
+	"gzip": 2,
 }
 
-// selectEncoding picks the best compression encoding the client supports.
-// Returns "" if no supported encoding is found.
-func selectEncoding(acceptEncoding string) string {
-	if acceptEncoding == "" {
-		return ""
+type compressEncoder interface {
+	io.WriteCloser
+	Flush() error
+}
+
+func encodingWriter(encoding string, w io.Writer) (compressEncoder, bool) {
+	switch encoding {
+	case "br":
+		return brotli.NewWriter(w), true
+	case "gzip":
+		return gzip.NewWriter(w), true
 	}
+	return nil, false
+}
 
+func acceptToken(entry string) (string, bool) {
+	name, params, _ := strings.Cut(entry, ";")
+	for param := range strings.SplitSeq(params, ";") {
+		key, value, ok := strings.Cut(param, "=")
+		if !ok || !strings.EqualFold(strings.TrimSpace(key), "q") {
+			continue
+		}
+		if q, err := strconv.ParseFloat(strings.TrimSpace(value), 64); err == nil && q == 0 {
+			return "", false
+		}
+	}
+	return strings.TrimSpace(name), true
+}
+
+func selectEncoding(acceptEncoding string) string {
 	best := ""
-	bestRank := 5 // worse than wildcard
+	bestRank := 0
 
-	for part := range strings.SplitSeq(acceptEncoding, ",") {
-		part = strings.TrimSpace(part)
-		// Strip quality factor (e.g. "br;q=0.8" -> "br")
-		encoding := strings.TrimSpace(strings.Split(part, ";")[0])
-
-		lower := strings.ToLower(encoding)
-		rank, ok := encodingPriority[lower]
+	for entry := range strings.SplitSeq(acceptEncoding, ",") {
+		encoding, ok := acceptToken(entry)
 		if !ok {
 			continue
 		}
-		if rank < bestRank {
-			bestRank = rank
-			best = lower
+		encoding = strings.ToLower(encoding)
+		rank, ok := encodingPriority[encoding]
+		if !ok {
+			continue
+		}
+		if best == "" || rank < bestRank {
+			best, bestRank = encoding, rank
 		}
 	}
 
@@ -124,8 +147,7 @@ type compressWriter struct {
 	encoding      string
 	method        string
 	req           *http.Request
-	gz            *gzip.Writer
-	br            *brotli.Writer
+	enc           compressEncoder
 	contentLength int64 // parsed from Content-Length header, -1 if unknown
 }
 
@@ -162,15 +184,8 @@ func (c *compressWriter) Write(p []byte) (int, error) {
 		c.WriteHeader(http.StatusOK)
 	}
 	if c.committed {
-		switch c.encoding {
-		case "br":
-			if c.br != nil {
-				return c.br.Write(p)
-			}
-		case "gzip":
-			if c.gz != nil {
-				return c.gz.Write(p)
-			}
+		if c.enc != nil {
+			return c.enc.Write(p)
 		}
 		return c.ResponseWriter.Write(p)
 	}
@@ -231,19 +246,21 @@ func (c *compressWriter) flushHeaders() {
 
 func (c *compressWriter) commit() {
 	c.committed = true
-	c.headers.Set("Content-Encoding", c.encoding)
 	c.headers.Del("Content-Length")
+
+	enc, ok := encodingWriter(c.encoding, c.ResponseWriter)
+	if ok {
+		c.enc = enc
+		c.headers.Set("Content-Encoding", c.encoding)
+	}
 
 	c.flushHeaders()
 
-	switch c.encoding {
-	case "br":
-		c.br = brotli.NewWriter(c.ResponseWriter)
-		c.br.Write(c.body.Bytes())
-	case "gzip":
-		c.gz = gzip.NewWriter(c.ResponseWriter)
-		c.gz.Write(c.body.Bytes())
+	if ok {
+		c.enc.Write(c.body.Bytes())
+		return
 	}
+	c.ResponseWriter.Write(c.body.Bytes())
 }
 
 func (c *compressWriter) finish() {
@@ -259,15 +276,8 @@ func (c *compressWriter) finish() {
 		return
 	}
 
-	switch c.encoding {
-	case "br":
-		if c.br != nil {
-			c.br.Close()
-		}
-	case "gzip":
-		if c.gz != nil {
-			c.gz.Close()
-		}
+	if c.enc != nil {
+		c.enc.Close()
 	}
 }
 
@@ -305,38 +315,31 @@ func (c *compressWriter) finishGET() {
 func (c *compressWriter) writeBody(body []byte) {
 	c.headers.Del("Content-Length")
 
-	if c.encoding != "" && int64(len(body)) >= minCompressSize {
+	// The size check comes first, so the middleware allocates no writer for a body
+	// it will send uncompressed.
+	var enc compressEncoder
+	compress := false
+	if len(body) >= minCompressSize {
+		enc, compress = encodingWriter(c.encoding, c.ResponseWriter)
+	}
+	if compress {
 		c.headers.Set("Content-Encoding", c.encoding)
 	}
 
 	c.flushHeaders()
 
-	if c.encoding != "" && int64(len(body)) >= minCompressSize {
-		switch c.encoding {
-		case "br":
-			br := brotli.NewWriter(c.ResponseWriter)
-			br.Write(body)
-			br.Close()
-		case "gzip":
-			gz := gzip.NewWriter(c.ResponseWriter)
-			gz.Write(body)
-			gz.Close()
-		}
-	} else {
+	if !compress {
 		c.ResponseWriter.Write(body)
+		return
 	}
+
+	enc.Write(body)
+	enc.Close()
 }
 
 func (c *compressWriter) Flush() {
-	switch c.encoding {
-	case "br":
-		if c.br != nil {
-			c.br.Flush()
-		}
-	case "gzip":
-		if c.gz != nil {
-			c.gz.Flush()
-		}
+	if c.enc != nil {
+		c.enc.Flush()
 	}
 	c.passThroughWriter.Flush()
 }

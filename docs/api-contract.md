@@ -752,6 +752,14 @@ origin, that absence is what makes a previewed file loadable and unreadable at t
 value that would lift it is `null` — what an opaque origin calls itself — and it admits every sandboxed
 iframe on the internet. Gate: `TestPreviewResponsesNeverGrantACrossOriginRead`.
 
+`Accept-Encoding` is answered with `br` or `gzip` and nothing else, and `Content-Encoding` is set
+only where a writer for that encoding was built. A client offering only `deflate`, `*`, `zstd`, or a
+token it refused with `q=0` is answered with identity bytes — a header naming an encoding nobody wrote
+is a body the client cannot read. Above a `q` of zero the ranking is the server's: `br` is answered in
+preference to `gzip` however the client weights the two.
+Tests: `backend/server/compress_test.go` (`TestSelectEncoding`, `TestEverySelectableEncodingHasAWriter`,
+and the negotiation matrix).
+
 `CompressMiddleware` puts a strong ETag — a digest of the body — on every GET it buffers, and answers
 `If-None-Match` with a 304 that repeats the `ETag` and whatever `Cache-Control` the handler set. A
 handler that sets its **own** `ETag` therefore loses the 304: the middleware skips the `If-None-Match`

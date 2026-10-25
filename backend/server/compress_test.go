@@ -24,15 +24,21 @@ func TestSelectEncoding(t *testing.T) {
 		{"br only", "br", "br"},
 		{"gzip only", "gzip", "gzip"},
 		{"br preferred over gzip", "gzip, br", "br"},
-		{"gzip preferred over deflate", "deflate, gzip", "gzip"},
 		{"br preferred over all", "deflate, gzip, br", "br"},
-		{"wildcard", "*", "*"},
-		{"br preferred over wildcard", "*, br", "br"},
-		{"with quality factors", "gzip; q=1.0, br; q=0.5", "br"},
+		{"typical browser header", "gzip, deflate, br, zstd", "br"},
+		{"case insensitive", "BR, GZIP", "br"},
+		{"deflate alone is identity", "deflate", ""},
+		{"wildcard is identity", "*", ""},
+		{"zstd is identity", "zstd", ""},
+		{"identity alone is identity", "identity", ""},
 		{"unknown encoding ignored", "unknown, br", "br"},
 		{"all unknown", "unknown1, unknown2", ""},
-		{"case insensitive", "BR, GZIP", "br"},
-		{"typical browser header", "gzip, deflate, br", "br"},
+		{"q=0 refuses brotli", "br;q=0, gzip", "gzip"},
+		{"q=0.0 refuses brotli", "br;q=0.0, gzip", "gzip"},
+		{"q parameter is case insensitive", "br;Q=0, gzip", "gzip"},
+		{"q=0 on the only encoding offered", "br;q=0", ""},
+		{"unparseable q is not a refusal", "br;q=abc, gzip", "br"},
+		{"a q above zero does not reorder br and gzip", "gzip; q=1.0, br; q=0.5", "br"},
 	}
 
 	for _, tc := range tests {
@@ -42,6 +48,14 @@ func TestSelectEncoding(t *testing.T) {
 				t.Errorf("selectEncoding(%q) = %q, want %q", tc.header, got, tc.expected)
 			}
 		})
+	}
+}
+
+func TestEverySelectableEncodingHasAWriter(t *testing.T) {
+	for encoding := range encodingPriority {
+		if _, ok := encodingWriter(encoding, io.Discard); !ok {
+			t.Errorf("selectEncoding can answer %q, which encodingWriter cannot produce", encoding)
+		}
 	}
 }
 
@@ -97,6 +111,34 @@ func TestCompressMiddleware_EncodingNegotiation(t *testing.T) {
 			acceptEncoding: "",
 			body:           "hello",
 			wantEncoding:   "",
+		},
+		{
+			name:           "deflate-only client gets the full body uncompressed",
+			acceptEncoding: "deflate",
+			body:           strings.Repeat("z", 2048),
+			contentType:    "application/json",
+			wantEncoding:   "",
+		},
+		{
+			name:           "wildcard-only client gets the full body uncompressed",
+			acceptEncoding: "*",
+			body:           strings.Repeat("z", 2048),
+			contentType:    "application/json",
+			wantEncoding:   "",
+		},
+		{
+			name:           "identity-only client is left alone",
+			acceptEncoding: "identity",
+			body:           strings.Repeat("z", 2048),
+			contentType:    "application/json",
+			wantEncoding:   "",
+		},
+		{
+			name:           "brotli refused with q=0 falls back to gzip",
+			acceptEncoding: "br;q=0, gzip",
+			body:           strings.Repeat("w", 2048),
+			contentType:    "application/json",
+			wantEncoding:   "gzip",
 		},
 	}
 
