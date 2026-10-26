@@ -2,29 +2,24 @@ import { test, expect, type Page } from '@playwright/test';
 import { execSync } from 'child_process';
 import {
     isolatedProject, gotoProject, ownProjectId, ownProjectPath, csrfFetch, descenderProblems,
+    getTaskData, waitForTaskState,
 } from './helpers';
 
-// A long branch name used to occupy a 160px badge that could not shrink (`flex-shrink: 0`) beside a
-// path that would not shrink either, so the Explorer header overflowed its panel and the
-// Open-terminal button was drawn past the right edge — measured at ≤440px with a 50-char branch
-// (`types.MaxBranchName`), and at desktop widths once the workspace path was long. Both Explorer
-// headers carry that markup, so both are measured here, in a real browser: overflow is layout, and
-// jsdom has no layout engine.
-//
-// The branch text also never got an ellipsis: `text-overflow` only paints on a box whose own
-// overflow is hidden, and the badge is a flex container — so its text was an anonymous flex item
-// clipped mid-glyph (measured scrollWidth 349 against clientWidth 160 on the badge itself).
+// Overflow is layout, so it is measured in a real browser: jsdom has no layout engine. Both Explorer headers
+// carry the same markup, so both are measured.
 
-const LONG_TITLE = 'Add support for nested workspace scoped dependency caches across providers';
-// task/<slug capped at types.BranchSlugMaxLen>-<6 random chars> == types.MaxBranchName (50).
-const LONG_BRANCH_PREFIX = 'task/add-support-for-nested-workspace-scope-';
+// The title route answers with the selected fixture, so this is the one whose text is long enough to fill the
+// branch-name budget. The spec reads the branch back from the task row, so the fixture owns the words.
+const TITLE_FIXTURE = 'title_long';
+// generateBranchName (backend/exec/merge.go) cuts task/<slug>-<random6>, and the slug keeps what is left of
+// types.MaxBranchName (50). An ID-named branch is 27 characters, so it is never this.
+const MAXIMAL_TASK_BRANCH = /^task\/.{38}-[a-z0-9]{6}$/;
 const PROJECT_BRANCH = 'feature/reconcile-dependency-cache-across-workspaces-and-reg'.slice(0, 50);
-// Narrowest first: that is where the bug lives, so the failure message names the button that was drawn
-// off the panel rather than a later, milder symptom. 280 is below any phone viewport, and is here because
-// that is where a `min-width: 160px` branch list stops fitting beside its anchor.
+// Narrowest first, so the first failure is the worst one. 280 is below any phone viewport, and it is included
+// because a min-width: 160px branch list stops fitting beside its anchor there.
 const WIDTHS = [280, 320, 420, 480, 768, 1024, 1440];
 
-/** '' when nothing in the header is drawn outside the viewport and the header fits its panel. */
+/** headerOverflow names what is drawn outside the viewport or outside its panel, and returns '' when nothing is. */
 async function headerOverflow(page: Page): Promise<string> {
     return page.evaluate(() => {
         const header = document.querySelector('.explorer-header');
@@ -58,7 +53,7 @@ async function badgeProblems(page: Page): Promise<string> {
         if (label.scrollWidth <= label.clientWidth) {
             problems.push(`branch name was not truncated: ${label.scrollWidth} <= ${label.clientWidth}`);
         }
-        // One line is 43px, two is 57px; a third means the path is no longer clamped.
+        // One line is 43px and two is 57px. A third line means the path is no longer clamped.
         const h = header!.getBoundingClientRect().height;
         if (h > 64) problems.push(`header grew to ${Math.round(h)}px tall`);
         return problems.join('; ');
@@ -66,9 +61,8 @@ async function badgeProblems(page: Page): Promise<string> {
 }
 
 /**
- * Every header control must be the thing a click there hits. `headerOverflow` cannot see this: a
- * `<button>` sizes to its content, so it can outgrow its shrunken wrapper and sit on a neighbour while
- * `scrollWidth == clientWidth` and no button leaves the panel.
+ * Every header control must be the element a click there hits. headerOverflow cannot see a button that
+ * outgrew its wrapper but still leaves the panel's own scroll width alone.
  */
 async function coveredControls(page: Page): Promise<string> {
     return page.evaluate(() => {
@@ -111,8 +105,8 @@ async function openListProblems(page: Page): Promise<string> {
             );
         }
         for (const item of Array.from(list.querySelectorAll('.explorer-dropdown-item'))) {
-            // A row that spills is the row whose ref you cannot read; ellipsis inside the label is fine,
-            // but the row itself must hold its content.
+            // A row that spills hides the ref it names. An ellipsis inside the label is fine, because the row
+            // itself must hold its content.
             if (item.scrollWidth > item.clientWidth) {
                 problems.push(
                     `row content overflows its row: ${item.scrollWidth} > ${item.clientWidth}`
@@ -134,21 +128,30 @@ test.describe.serial('Explorer header with a long branch name', () => {
 
     test('task explorer keeps its buttons on screen at every width', async ({ page }) => {
         const projectId = ownProjectId();
-        // An explicit title skips title generation (that keys off the prompt), and a one-word prompt
-        // keeps the task out of the executor: this spec needs a branch, not an LLM turn.
+        // Only a model-written title buys a long branch. generateBranchName slugs the title only when a model
+        // wrote it, and an ID-named branch is too short to overflow, so the task is created titleless with the
+        // long-title fixture pinned. Backlog status keeps the executor out of this spec.
         const created = await csrfFetch(page, `/api/projects/${projectId}/tasks`, {
             method: 'POST',
-            body: { title: LONG_TITLE, prompt: 'x', status: 'backlog' },
+            body: { prompt: `reconcile the cache probe with the board llm-fixture:${TITLE_FIXTURE}`, status: 'backlog' },
         });
         expect(created.ok, `create task: ${JSON.stringify(created.data)}`).toBe(true);
         const taskId = created.data.id;
 
+        // A worktree initialized before the title lands keeps the ID-based name for good, so the title is
+        // awaited before the view that initializes the worktree is mounted.
+        await waitForTaskState(page, projectId, taskId, t => !!t.title && !t.title_generating);
+        await gotoProject(page, `/?project=${projectId}&task=${taskId}&view=task-explorer`);
+        await waitForTaskState(page, projectId, taskId, t => !!t.branch);
+        const branch = String((await getTaskData(page, projectId, taskId)).branch);
+        expect(branch, `branch ${JSON.stringify(branch)} is not a maximal task branch`)
+            .toMatch(MAXIMAL_TASK_BRANCH);
+
         for (const width of WIDTHS) {
             await page.setViewportSize({ width, height: 800 });
-            // The view initializes the worktree (and so the branch) on mount.
             await gotoProject(page, `/?project=${projectId}&task=${taskId}&view=task-explorer`);
             await expect(page.locator('.explorer-branch-badge'), `${width}px: branch name shown`)
-                .toContainText(LONG_BRANCH_PREFIX);
+                .toContainText(branch);
             await expect(() => headerOverflow(page), `${width}px: header fits`).resolves.toBe('');
             await expect(() => badgeProblems(page), `${width}px: badge truncates`).resolves.toBe('');
             for (const sel of ['.project-path', '.branch-badge-label']) {
@@ -167,7 +170,7 @@ test.describe.serial('Explorer header with a long branch name', () => {
         for (const width of WIDTHS) {
             await page.setViewportSize({ width, height: 800 });
             for (const view of ['explorer', 'review']) {
-                // view=explorer shows the branch dropdown, view=review the badge variant of it.
+                // view=explorer shows the branch dropdown, and view=review shows the badge variant of it.
                 await gotoProject(page, `/?project=${projectId}&view=${view}`);
                 const label = page.locator(view === 'review' ? '.branch-badge-label' : '.explorer-name');
                 await expect(label, `${width}px/${view}: branch name shown`).toHaveText(PROJECT_BRANCH);

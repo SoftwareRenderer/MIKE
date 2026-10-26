@@ -34,11 +34,10 @@ CREATE TABLE IF NOT EXISTS passkeys (
 
 // initPasskeys creates the passkeys table. Like the other credential tables it is created by the package
 // that reads it, not by baseSchemaSQL.
-func (s *Store) initPasskeys() error {
+func (s *Store) initPasskeys() ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, err := s.db.Exec(passkeyTable)
-	return err
+	return s.applySchema(passkeyTable)
 }
 
 // NewPasskey carries the fields of a passkeys row. CredentialID is the authenticator's credential id in

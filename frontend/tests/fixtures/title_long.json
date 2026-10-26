@@ -1,0 +1,78 @@
+[
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": "Add support"
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": " for nested"
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": " workspace scoped"
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": " dependency caches"
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": " across providers"
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "content": ""
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 45,
+      "completion_tokens": 14,
+      "total_tokens": 59,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "timings": {
+      "prompt_ms": 320,
+      "predicted_ms": 180,
+      "prompt_per_token_ms": 0,
+      "predicted_per_token_ms": 0,
+      "prompt_per_second": 0,
+      "predicted_per_second": 0
+    }
+  }
+]

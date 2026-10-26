@@ -1,7 +1,8 @@
 // Package store is the persistence layer: one SQLite database, its schema, and typed accessors for
 // tasks, messages, threads, projects, sessions, stats and config. One connection, so the PRAGMAs apply
 // everywhere, and s.mu is the serialisation point. The schema is created whole from its DDL
-// (migrations.go); nothing upgrades an older database.
+// (migrations.go). A database written by an older release is completed in place (schema_upgrade.go), and the
+// data work that shape test cannot see is recorded in the schema marker (schema_meta.go).
 package store
 
 import (
@@ -11,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -86,17 +88,40 @@ func NewStore(dbPath string) (*Store, error) {
 		logging.For(logging.Store).Warnf("database is not in incremental autovacuum: %v", err)
 	}
 	s := &Store{db: db}
-	if err := s.initSchema(); err != nil {
-		return nil, fmt.Errorf("init schema: %w", err)
+	var added []string
+	for _, init := range []struct {
+		label string
+		run   func() ([]string, error)
+	}{
+		{"init schema", s.initSchema},
+		{"init schema meta", s.initSchemaMeta},
+		{"init sessions", s.initSessions},
+		{"init api tokens", s.initAPITokens},
+		{"init passkeys", s.initPasskeys},
+	} {
+		changes, err := init.run()
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", init.label, err)
+		}
+		added = append(added, changes...)
 	}
-	if err := s.initSessions(); err != nil {
-		return nil, fmt.Errorf("init sessions: %w", err)
+	// A boot that added columns logs them, and that line is the whole announcement.
+	if len(added) > 0 {
+		logging.For(logging.Store).Infof("upgraded an older database in place, added: %s", strings.Join(added, " "))
 	}
-	if err := s.initAPITokens(); err != nil {
-		return nil, fmt.Errorf("init api tokens: %w", err)
+	// A file from a newer build is judged before any step runs.
+	if err := s.checkSchemaStepsAhead(schemaSteps); err != nil {
+		return nil, err
 	}
-	if err := s.initPasskeys(); err != nil {
-		return nil, fmt.Errorf("init passkeys: %w", err)
+	if err := s.warnIfPredatesTheBaseline(); err != nil {
+		return nil, err
+	}
+	// The shape pass has run, so a step may name a column this release added.
+	if err := s.runSchemaSteps(schemaSteps); err != nil {
+		return nil, err
+	}
+	if err := s.stampSchemaMarker(); err != nil {
+		return nil, err
 	}
 	if err := s.initConfigDefaults(); err != nil {
 		return nil, fmt.Errorf("init config defaults: %w", err)
@@ -171,13 +196,12 @@ func (s *Store) QueryRow(query string, args ...any) *sql.Row {
 	return s.db.QueryRow(query, args...)
 }
 
-// initSchema runs the DDL. The lock covers it because schema work must not interleave with anything
-// else this store does.
-func (s *Store) initSchema() error {
+// initSchema runs the DDL, which creates what is missing and adds columns to tables that predate this
+// release.
+func (s *Store) initSchema() ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, err := s.db.Exec(baseSchemaSQL)
-	return err
+	return s.applySchema(baseSchemaSQL)
 }
 
 func (s *Store) initConfigDefaults() error {
