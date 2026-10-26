@@ -108,6 +108,9 @@ func TestHandleCreateTask_Basic(t *testing.T) {
 	if child.Status != types.StatusBacklog {
 		t.Errorf("expected status 'backlog', got %q", child.Status)
 	}
+	if !child.TitleLLM {
+		t.Errorf("a title the model wrote carries no mark: title=%q title_llm=false", child.Title)
+	}
 }
 
 func TestHandleCreateTask_InheritsSettings(t *testing.T) {

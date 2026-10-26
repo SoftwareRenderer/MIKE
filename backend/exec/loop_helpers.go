@@ -86,8 +86,8 @@ func (te *TaskExecutor) failSandboxRecreate(setup *taskExecSetup, output, userMe
 	te.sendAndPersistError(setup.task.ID, userMessage, code)
 }
 
-// storeTask writes a task back to the store, preserving Title and TitleGenerating.
-// It cannot be used to start a run.
+// storeTask writes a task back to the store. The stored title, its mark and TitleGenerating win over
+// this copy. It cannot be used to start a run.
 func (te *TaskExecutor) storeTask(task *types.Task, projectID string) error {
 	return te.storeTaskWith(task, projectID, false)
 }
@@ -100,6 +100,7 @@ func (te *TaskExecutor) storeTaskClaiming(task *types.Task, projectID string) er
 func (te *TaskExecutor) storeTaskWith(task *types.Task, projectID string, claim bool) error {
 	if cur, err := te.store.GetTask(projectID, task.ID); err == nil {
 		task.Title = cur.Title
+		task.TitleLLM = cur.TitleLLM
 		task.TitleGenerating = cur.TitleGenerating
 	}
 	if claim {

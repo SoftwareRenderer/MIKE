@@ -251,6 +251,7 @@ func TestTaskBoolFields(t *testing.T) {
 
 	task.OperatingMode = "plan"
 	task.TitleGenerating = true
+	task.TitleLLM = true
 	if err := s.CreateTask(task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -259,8 +260,46 @@ func TestTaskBoolFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
-	if !got.AutoCommit || !got.IsPlanMode() || !got.TitleGenerating {
+	if !got.AutoCommit || !got.IsPlanMode() || !got.TitleGenerating || !got.TitleLLM {
 		t.Fatalf("bool fields not preserved: %+v", got)
+	}
+}
+
+func TestTaskTitleAndMarkAreStoredTogether(t *testing.T) {
+	s := testStore(t)
+	proj := newProject("proj-1", "test", "/tmp/test")
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := newTask("task-1", "proj-1")
+	task.Title = "first line of the prompt"
+	task.TitleGenerating = true
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	if err := s.SetTaskTitle("proj-1", "task-1", "Fix login flake"); err != nil {
+		t.Fatalf("set task title: %v", err)
+	}
+	marked, err := s.GetTask("proj-1", "task-1")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if !marked.TitleLLM || marked.TitleGenerating {
+		t.Fatalf("the generated title was stored without its mark: title=%q title_llm=%v title_generating=%v", marked.Title, marked.TitleLLM, marked.TitleGenerating)
+	}
+
+	marked.Title = "retyped by a person"
+	marked.TitleLLM = false
+	if err := s.UpdateTask(marked); err != nil {
+		t.Fatalf("update task: %v", err)
+	}
+	again, err := s.GetTask("proj-1", "task-1")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if again.TitleLLM {
+		t.Errorf("a person's title kept the model's mark: title=%q title_llm=%v", again.Title, again.TitleLLM)
 	}
 }
 

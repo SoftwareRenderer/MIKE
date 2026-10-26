@@ -98,6 +98,7 @@ func (u *taskUpdateRequest) apply(task *types.Task) (operatingModeChanged bool, 
 	// Nothing below this line can fail.
 	if u.Title != nil {
 		task.Title = *u.Title
+		task.TitleLLM = false
 	}
 	if u.Prompt != nil {
 		task.Prompt = *u.Prompt

@@ -22,6 +22,41 @@ func editTaskTarget(t *testing.T, s *store.Store, projectID, taskID string, auto
 	return task
 }
 
+func TestHandleEditTask_TitleEditSetsTheMark(t *testing.T) {
+	t.Parallel()
+	te := newTestExecutor(t)
+	parent := createParentTask(t, te.store, "parent-mark-1", "proj-mark-1", "backlog")
+	editTaskTarget(t, te.store, "proj-mark-1", "target-mark-1", true, true, true, "")
+
+	if _, err := te.tools.handleEditTask(map[string]any{
+		"task_id": "target-mark-1",
+		"prompt":  "a reworded prompt and nothing else",
+	}, parent); err != nil {
+		t.Fatalf("prompt-only edit: %v", err)
+	}
+	unmarked, err := te.store.GetTaskByID("target-mark-1")
+	if err != nil {
+		t.Fatalf("get edited task: %v", err)
+	}
+	if unmarked.TitleLLM {
+		t.Errorf("a prompt-only edit set the mark: title=%q title_llm=true", unmarked.Title)
+	}
+
+	if _, err := te.tools.handleEditTask(map[string]any{
+		"task_id": "target-mark-1",
+		"title":   "Renamed by the model",
+	}, parent); err != nil {
+		t.Fatalf("title edit: %v", err)
+	}
+	marked, err := te.store.GetTaskByID("target-mark-1")
+	if err != nil {
+		t.Fatalf("get edited task: %v", err)
+	}
+	if !marked.TitleLLM {
+		t.Errorf("the model's title reached the row without its mark: title=%q", marked.Title)
+	}
+}
+
 // TestHandleEditTask_NestingRespectsParentSubtasksAutoMerge_False: nesting a task under a parent whose
 // "allow subtask to auto merge" preference is off disables the task's auto_merge, whatever config says.
 func TestHandleEditTask_NestingRespectsParentSubtasksAutoMerge_False(t *testing.T) {

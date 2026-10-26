@@ -58,6 +58,7 @@ func (r *toolRunner) handleCreateTask(args map[string]any, parent *types.Task, s
 		MaxConsecutiveFailedTurns: parent.MaxConsecutiveFailedTurns,
 		OperatingMode:             types.ModeAct,
 		ParentTaskID:              actualParentID,
+		TitleLLM:                  true,
 		CreatedAt:                 now,
 		UpdatedAt:                 now,
 	}
@@ -270,6 +271,7 @@ func (r *toolRunner) handleEditTask(args map[string]any, currentTask *types.Task
 
 	if hasTitle {
 		target.Title = title
+		target.TitleLLM = true
 	}
 	if hasPrompt {
 		target.Prompt = prompt

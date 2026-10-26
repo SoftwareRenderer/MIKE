@@ -1091,7 +1091,7 @@ func (te *TaskExecutor) InitTask(projectID, taskID string) (*types.Task, error) 
 		return task, nil
 	}
 
-	branchName := te.merge.generateBranchName(task, taskID, projectID)
+	branchName := te.merge.generateBranchName(task, projectID)
 
 	// Atomic set prevents double worktree creation from concurrent callers.
 	set, err := te.store.SetTaskBranchIfEmpty(taskID, projectID, branchName)
@@ -1257,7 +1257,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 
 	branchName := task.Branch
 	if branchName == "" {
-		branchName = te.merge.generateBranchName(task, taskID, projectID)
+		branchName = te.merge.generateBranchName(task, projectID)
 	}
 	// A child branches from its parent, which also gives the parent a branch if it has none.
 	sourceBranch, err := te.merge.branchChildFrom(projectID, task)

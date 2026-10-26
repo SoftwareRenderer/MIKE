@@ -74,6 +74,10 @@ running containers — nothing else would ever remove them.
   queues that read those columns. The flag is what says "someone dismissed it": `{peak 0, kills 2,
   limit 0}` is a real dismissal on a kernel without `memory.peak`, so the three numbers alone cannot
   carry it.
+- `title_llm` is a property of the `title` string, so whichever write stores a title stores who wrote it:
+  `SetTaskTitle`, and a person's title `PUT` with the mark cleared. A run's task copy puts both back from
+  the stored row, so `UpdateTask` carries the column — a mark that outlived the title it described would
+  name a branch after text nobody chose.
 
 ## An instant that SQL compares is fixed-width UTC
 

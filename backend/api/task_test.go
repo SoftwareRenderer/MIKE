@@ -1184,9 +1184,38 @@ func TestTitleGenerationDoesNotClobberTaskStatus(t *testing.T) {
 	if task.Title != "Generated Title" {
 		t.Fatalf("title not updated: %q (title_generating=%v)", task.Title, task.TitleGenerating)
 	}
+	if !task.TitleLLM {
+		t.Errorf("the generated title reached the row without its mark")
+	}
 	if task.Status != types.StatusInProgress || task.ExecutionState != types.ExecStateRunning || task.Branch != "task/"+taskID {
 		t.Fatalf("title update clobbered task state: status=%s exec=%s branch=%q",
 			task.Status, task.ExecutionState, task.Branch)
+	}
+}
+
+func TestTaskHandler_POST_CannotMarkATitleAsTheModels(t *testing.T) {
+	h, s, worktreesDir := newTestTaskHandler(t)
+	proj := &types.Project{ID: "claim-title-proj", Name: "claim-title", Path: filepath.Join(worktreesDir, "claim-title")}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatal(err)
+	}
+
+	rr := doTaskRequest(t, newTaskMux(h), http.MethodPost, "/api/projects/claim-title-proj/tasks",
+		map[string]any{"title": "typed by hand", "prompt": "typed by hand", "title_llm": true})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create task: %d %s", rr.Code, rr.Body.String())
+	}
+	var created types.Task
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatalf("parse created task: %v", err)
+	}
+
+	stored, err := s.GetTask(proj.ID, created.ID)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if stored.TitleLLM {
+		t.Errorf("a created row took the model's mark from the body")
 	}
 }
 

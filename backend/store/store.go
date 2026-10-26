@@ -251,7 +251,7 @@ func scanTime(s string) time.Time {
 
 // scanTask scans a row into a Task, handling bool/time conversions.
 func scanTask(s scanner, t *types.Task) error {
-	var autoCommit, autoMerge, subtasksAutoMerge, titleGenerating, summarizing, hasMergeConflict, autostarted, memSupPaused int
+	var autoCommit, autoMerge, subtasksAutoMerge, titleGenerating, titleLLM, summarizing, hasMergeConflict, autostarted, memSupPaused int
 	var memAlertAcked int
 	var ackPeakMB, ackOOMKills, ackLimitMB int64
 	var createdAt, updatedAt, movedAt string
@@ -259,7 +259,7 @@ func scanTask(s scanner, t *types.Task) error {
 	err := s.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Prompt, &t.Status,
 		&t.SessionID, &t.Branch, &baseRef, &baseCommit, &branchTip, &t.Output, &t.ExecutionState, &hasMergeConflict,
 		&t.LlamaServerURL, &t.ModelName, &reasoningEffort, &t.MaxConsecutiveFailedTurns,
-		&autoCommit, &autoMerge, &subtasksAutoMerge, &t.OperatingMode, &parentTaskID, &autostarted, &titleGenerating, &summarizing, &currentThreadID, &createdAt, &updatedAt, &movedAt, &assignedPortsJSON, &t.SessionCost, &t.SandboxMemoryPeakMB, &t.SandboxOOMKills, &memSupPaused,
+		&autoCommit, &autoMerge, &subtasksAutoMerge, &t.OperatingMode, &parentTaskID, &autostarted, &titleGenerating, &titleLLM, &summarizing, &currentThreadID, &createdAt, &updatedAt, &movedAt, &assignedPortsJSON, &t.SessionCost, &t.SandboxMemoryPeakMB, &t.SandboxOOMKills, &memSupPaused,
 		&memAlertAcked, &ackPeakMB, &ackOOMKills, &ackLimitMB)
 	if err != nil {
 		return err
@@ -272,6 +272,7 @@ func scanTask(s scanner, t *types.Task) error {
 	t.ParentTaskID = parentTaskID.String
 	t.Autostarted = I2B(autostarted)
 	t.TitleGenerating = I2B(titleGenerating)
+	t.TitleLLM = I2B(titleLLM)
 	t.Summarizing = I2B(summarizing)
 	t.MemorySupervisorPaused = I2B(memSupPaused)
 	t.CurrentThreadID = currentThreadID.String

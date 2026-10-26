@@ -38,6 +38,9 @@ type Task struct {
 	Summarizing               bool           `json:"summarizing"`
 	CurrentThreadID           string         `json:"current_thread_id,omitempty"`
 	WorktreeExists            bool           `json:"worktree_exists"`
+	// TitleLLM records that a model wrote the task title, rather than a person or the prompt's first
+	// line. Only a title a model wrote may name the task's branch.
+	TitleLLM bool `json:"-"`
 	// Autostarted records whether this execution was started autonomously
 	Autostarted bool      `json:"-"`
 	CreatedAt   time.Time `json:"created_at"`

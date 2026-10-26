@@ -154,7 +154,7 @@ func (m *mergeOrchestrator) EnsureParentBranch(projectID string, parent *types.T
 		return nil
 	}
 
-	branchName := m.generateBranchName(parent, parent.ID, projectID)
+	branchName := m.generateBranchName(parent, projectID)
 
 	// The compare-and-set stops two callers creating a worktree for the same parent.
 	set, err := m.store.SetTaskBranchIfEmpty(parent.ID, projectID, branchName)
@@ -270,13 +270,13 @@ func randomSuffix(n int) string {
 	return string(b)
 }
 
-// generateBranchName builds the task's branch name: the slugified title or the task ID,
-// always with a random tail to avoid reusing branches from deleted tasks. Max length is types.MaxBranchName.
-func (m *mergeOrchestrator) generateBranchName(task *types.Task, taskID, projectID string) string {
+// generateBranchName builds the task's branch name: the title's slug when a model wrote that title, and
+// otherwise the task ID. The random tail keeps a new task off a deleted task's branch, and the name stays
+// within types.MaxBranchName.
+func (m *mergeOrchestrator) generateBranchName(task *types.Task, projectID string) string {
 	baseName := types.TaskBranchPrefix + task.ID
-	if !task.AutoMerge && task.Title != "" {
-		slug := types.SlugifyBranchName(task.Title)
-		if slug != "" {
+	if task.TitleLLM && !task.AutoMerge {
+		if slug := types.SlugifyBranchName(task.Title); slug != "" {
 			baseName = types.TaskBranchPrefix + slug
 		}
 	}
@@ -286,11 +286,11 @@ func (m *mergeOrchestrator) generateBranchName(task *types.Task, taskID, project
 	}
 	branchName := baseName + "-" + randomSuffix(randomSuffixLen)
 
-	wtPath, wtErr := m.worktreeMgr.WorktreePath(taskID)
+	wtPath, wtErr := m.worktreeMgr.WorktreePath(task.ID)
 	_, wtStatErr := os.Stat(wtPath)
 	wtExists := wtErr == nil && wtStatErr == nil
 	if !wtExists && m.branchExists(projectID, branchName) {
-		extra := "-" + taskID[:8]
+		extra := "-" + task.ID[:8]
 		if len(branchName)+len(extra) <= types.MaxBranchName {
 			branchName += extra
 		}
@@ -546,7 +546,7 @@ func (m *mergeOrchestrator) MergeBranch(projectID, taskID string, task *types.Ta
 			logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("parent %s has no worktree, creating it now", parent.ID)
 			branchName := parent.Branch
 			if branchName == "" {
-				branchName = m.generateBranchName(parent, parent.ID, projectID)
+				branchName = m.generateBranchName(parent, projectID)
 			}
 			if _, _, err := m.worktreeMgr.CreateWorktree(projectID, parent.ID, branchName, ""); err != nil {
 				logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("failed to create parent worktree: %v", err)

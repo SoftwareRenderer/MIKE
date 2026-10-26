@@ -61,6 +61,44 @@ func TestPUTTask_FieldWrongTypeIsRejectedWithoutPanicOrSilence(t *testing.T) {
 	}
 }
 
+func TestPUTTask_OnlyATitleEditClearsTheModelsMark(t *testing.T) {
+	h, s, _ := newTestTaskHandler(t)
+	setupTaskValidationProject(t, h, s)
+	mux := newTaskMux(h)
+	const path = "/api/projects/task-val-proj/tasks/task-val-task"
+
+	marked, err := s.GetTask("task-val-proj", "task-val-task")
+	if err != nil {
+		t.Fatalf("read seeded task: %v", err)
+	}
+	marked.TitleLLM = true
+	if err := s.UpdateTask(marked); err != nil {
+		t.Fatalf("mark the seeded title: %v", err)
+	}
+
+	if rr := doTaskRequest(t, mux, http.MethodPut, path, json.RawMessage(`{"prompt":"reworded"}`)); rr.Code != http.StatusOK {
+		t.Fatalf("prompt PUT: status %d body %s", rr.Code, rr.Body.String())
+	}
+	kept, err := s.GetTask("task-val-proj", "task-val-task")
+	if err != nil {
+		t.Fatalf("read task: %v", err)
+	}
+	if !kept.TitleLLM {
+		t.Errorf("a PUT that never mentioned the title cleared the model's mark")
+	}
+
+	if rr := doTaskRequest(t, mux, http.MethodPut, path, json.RawMessage(`{"title":"retyped by a person"}`)); rr.Code != http.StatusOK {
+		t.Fatalf("title PUT: status %d body %s", rr.Code, rr.Body.String())
+	}
+	retyped, err := s.GetTask("task-val-proj", "task-val-task")
+	if err != nil {
+		t.Fatalf("read task: %v", err)
+	}
+	if retyped.TitleLLM {
+		t.Errorf("a person's title kept the model's mark: title=%q", retyped.Title)
+	}
+}
+
 // TestPUTTask_PartialUpdateLeavesAbsentFieldsAlone pins the half of the contract that the
 // pointer-field rewrite must not disturb: a field the body does not mention keeps its value,
 // and a field the body mentions is written - including the values a naive "is it the zero

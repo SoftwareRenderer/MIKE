@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"mike/backend/types"
 	"mike/pkg/logging"
 )
 
@@ -67,6 +68,24 @@ func TestFreshSchemaServesTheReadsWithoutAColumnList(t *testing.T) {
 		t.Fatalf("create message: %v", err)
 	}
 	s.AccumulateProjectStats("schema-proj", "m-1", "1", 0.5)
+
+	sandboxed := newProject("schema-sandbox-proj", "schema-sandbox", "/tmp/schema-sandbox")
+	sandboxed.SandboxEnabled = true
+	if err := s.CreateProject(sandboxed); err != nil {
+		t.Fatalf("create the sandboxed project: %v", err)
+	}
+	running := newTask("schema-running-task", sandboxed.ID)
+	running.ExecutionState = types.ExecStateRunning
+	if err := s.CreateTask(running); err != nil {
+		t.Fatalf("create the running task: %v", err)
+	}
+	pool, err := s.GetRunningSandboxedTasks()
+	if err != nil {
+		t.Errorf("the supervisor's pool read failed: %v", err)
+	}
+	if len(pool) != 1 || pool[0].ID != running.ID {
+		t.Errorf("the supervisor's pool = %v, want only %s", pool, running.ID)
+	}
 
 	if _, err := s.GetProjectStats("schema-proj"); err != nil {
 		t.Errorf("the cumulative stats read failed: %v", err)

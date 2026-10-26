@@ -87,8 +87,9 @@ which reads `refs/heads/<prefix>*` with `for-each-ref`. `git branch --list` deco
 `+ ` on a branch a linked worktree holds, `* ` on the current one — and anything compared against
 that output misses both, which is how the branches the refusal produced stayed invisible to the sweep
 meant to catch them. The glob is one path segment wide, the shape this repo writes (`task/<id>`,
-`task/<slug>-<random6>`, `thread/<id>`), so a nested branch a person made under the same namespace is
-never read as an orphan.
+`task/<slug>-<random6>`, `thread/<id>`), so a nested branch a person made under the same namespace is never
+read as an orphan. Both task forms carry the same random tail, and the slug-named one appears only for a
+title a model wrote.
 
 **Tests:** `backend/git/worktree_removal_test.go` (the three-part removal, the decorated orphan,
 live branches kept), `backend/git/branch_listing_test.go` (both markers, slug prefix, one segment),
@@ -253,8 +254,14 @@ reached git as an option. Tests: `backend/server/handler_message_commit_hash_tes
 matching *parser* `types.TaskBranchSlugPrefix` (with `TaskBranchSuffixLen`, the random tail `exec`
 appends) lives beside them — a GC that parses a different shape than the executor writes deletes live
 branches. Never add a second copy of either. Non-ASCII letters are dropped, not transliterated.
+The slug reaches a task's branch name only when a model wrote the title: `exec.generateBranchName` reads
+`task.TitleLLM`, and otherwise names the branch `task/<taskID>-<random6>`. Two title writers are not the
+model's — a person typing it on the board, and `autoGenerateTitle`, the prompt's first line truncated. The
+model's own title arrives asynchronously, usually after the branch was named, so the branch keeps the name
+it was given; nothing renames it.
 Tests: `backend/types/slug_test.go`, `backend/server/handler_fs_test.go`,
-`backend/api/project_test.go`, `backend/extensions/registry_test.go`.
+`backend/api/project_test.go`, `backend/extensions/registry_test.go`,
+`backend/exec/executor_test.go` (`TestGenerateBranchName_*`).
 
 ## Which git calls carry a context
 

@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     parent_task_id               TEXT NULL,
     autostarted                  INTEGER NOT NULL DEFAULT 0,
     title_generating             INTEGER NOT NULL DEFAULT 0,
+    title_llm                    INTEGER NOT NULL DEFAULT 0,
     summarizing                  INTEGER NOT NULL DEFAULT 0,
     -- The thread a turn runs on, owned by SetActiveThread; the thread table holds its checkpoints.
     current_thread_id            TEXT NULL,

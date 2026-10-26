@@ -554,35 +554,12 @@ func TestCommitAndMerge_SerializesPerProject(t *testing.T) {
 	}
 }
 
-func TestSlugifyBranchName_NormalTitle(t *testing.T) {
-	t.Parallel()
-	slug := types.SlugifyBranchName("Fix login bug #123")
-	if slug != "fix-login-bug-123" {
-		t.Errorf("expected 'fix-login-bug-123', got %q", slug)
-	}
-}
-
-func TestGenerateBranchName_FallsBackToTaskIDWhenSlugIsEmpty(t *testing.T) {
+func TestGenerateBranchName_ModelTitleNamesTheBranch(t *testing.T) {
 	t.Parallel()
 	te, _, projectID, _ := setupExecutorWithGit(t)
 	taskID := "frost-amber-quartz"
-	task := &types.Task{ID: taskID, ProjectID: projectID, Title: "###"}
-	branchName := te.merge.generateBranchName(task, taskID, projectID)
-	expectedPrefix := "task/" + taskID + "-"
-	if !strings.HasPrefix(branchName, expectedPrefix) {
-		t.Errorf("expected prefix %q, got %q", expectedPrefix, branchName)
-	}
-	if len(branchName) != len("task/"+taskID)+1+randomSuffixLen {
-		t.Errorf("expected len %d, got %d (%q)", len("task/"+taskID)+1+randomSuffixLen, len(branchName), branchName)
-	}
-}
-
-func TestGenerateBranchName_UsesSlugForNormalTitle(t *testing.T) {
-	t.Parallel()
-	te, _, projectID, _ := setupExecutorWithGit(t)
-	taskID := "frost-amber-quartz"
-	task := &types.Task{ID: taskID, ProjectID: projectID, Title: "Fix login"}
-	branchName := te.merge.generateBranchName(task, taskID, projectID)
+	task := &types.Task{ID: taskID, ProjectID: projectID, Title: "Fix login", TitleLLM: true}
+	branchName := te.merge.generateBranchName(task, projectID)
 	expectedPrefix := "task/fix-login-"
 	if !strings.HasPrefix(branchName, expectedPrefix) {
 		t.Errorf("expected prefix %q, got %q", expectedPrefix, branchName)
@@ -592,14 +569,55 @@ func TestGenerateBranchName_UsesSlugForNormalTitle(t *testing.T) {
 	}
 }
 
+func TestGenerateBranchName_AutoMergeKeepsTheTaskID(t *testing.T) {
+	t.Parallel()
+	te, _, projectID, _ := setupExecutorWithGit(t)
+	taskID := "frost-amber-quartz"
+	task := &types.Task{ID: taskID, ProjectID: projectID, Title: "Fix login", TitleLLM: true, AutoMerge: true}
+	branchName := te.merge.generateBranchName(task, projectID)
+	if expectedPrefix := "task/" + taskID + "-"; !strings.HasPrefix(branchName, expectedPrefix) {
+		t.Errorf("expected prefix %q, got %q", expectedPrefix, branchName)
+	}
+}
+
+func TestGenerateBranchName_TitleWithoutTheMarkLeavesTheTaskID(t *testing.T) {
+	t.Parallel()
+	te, _, projectID, _ := setupExecutorWithGit(t)
+	taskID := "frost-amber-quartz"
+	task := &types.Task{ID: taskID, ProjectID: projectID, Title: "Fix login"}
+	branchName := te.merge.generateBranchName(task, projectID)
+	expectedPrefix := "task/" + taskID + "-"
+	if !strings.HasPrefix(branchName, expectedPrefix) {
+		t.Errorf("expected prefix %q, got %q", expectedPrefix, branchName)
+	}
+	if len(branchName) != len("task/"+taskID)+1+randomSuffixLen {
+		t.Errorf("expected len %d, got %d (%q)", len("task/"+taskID)+1+randomSuffixLen, len(branchName), branchName)
+	}
+}
+
+func TestGenerateBranchName_FallsBackToTaskIDWhenSlugIsEmpty(t *testing.T) {
+	t.Parallel()
+	te, _, projectID, _ := setupExecutorWithGit(t)
+	taskID := "frost-amber-quartz"
+	task := &types.Task{ID: taskID, ProjectID: projectID, Title: "###", TitleLLM: true}
+	branchName := te.merge.generateBranchName(task, projectID)
+	expectedPrefix := "task/" + taskID + "-"
+	if !strings.HasPrefix(branchName, expectedPrefix) {
+		t.Errorf("expected prefix %q, got %q", expectedPrefix, branchName)
+	}
+	if len(branchName) != len("task/"+taskID)+1+randomSuffixLen {
+		t.Errorf("expected len %d, got %d (%q)", len("task/"+taskID)+1+randomSuffixLen, len(branchName), branchName)
+	}
+}
+
 func TestGenerateBranchName_MaxLength(t *testing.T) {
 	t.Parallel()
 	te, _, projectID, _ := setupExecutorWithGit(t)
 	taskID := "frost-amber-quartz"
 	// Title that slugifies to more than 45 chars (types.BranchSlugMaxLen)
 	longTitle := "Fix a very long bug description that exceeds the maximum allowed branch name length limit"
-	task := &types.Task{ID: taskID, ProjectID: projectID, Title: longTitle}
-	branchName := te.merge.generateBranchName(task, taskID, projectID)
+	task := &types.Task{ID: taskID, ProjectID: projectID, Title: longTitle, TitleLLM: true}
+	branchName := te.merge.generateBranchName(task, projectID)
 	if len(branchName) > types.MaxBranchName {
 		t.Errorf("branch name len = %d (%q), want <= %d", len(branchName), branchName, types.MaxBranchName)
 	}

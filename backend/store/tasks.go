@@ -27,7 +27,15 @@ func marshalAssignedPorts(ports []types.AssignedPort) string {
 // (and for CreateTask's INSERT). The mapping is positional, so a column added to
 // the schema but not to this list — or listed in a different order than scanTask
 // expects — breaks at scan time rather than at compile time.
-const taskColumns = `id, project_id, title, prompt, status, session_id, branch, base_ref, base_commit, branch_tip, output, execution_state, has_merge_conflict, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_merge, subtasks_auto_merge, operating_mode, parent_task_id, autostarted, title_generating, summarizing, current_thread_id, created_at, updated_at, moved_at, assigned_ports, session_cost, sandbox_memory_peak_mb, sandbox_oom_kills, memory_supervisor_paused, memory_alert_acked, memory_alert_ack_peak_mb, memory_alert_ack_oom_kills, memory_alert_ack_limit_mb`
+const taskColumns = `id, project_id, title, prompt, status, session_id, branch, base_ref, base_commit, branch_tip, output, execution_state, has_merge_conflict, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_merge, subtasks_auto_merge, operating_mode, parent_task_id, autostarted, title_generating, title_llm, summarizing, current_thread_id, created_at, updated_at, moved_at, assigned_ports, session_cost, sandbox_memory_peak_mb, sandbox_oom_kills, memory_supervisor_paused, memory_alert_acked, memory_alert_ack_peak_mb, memory_alert_ack_oom_kills, memory_alert_ack_limit_mb`
+
+func aliasedColumns(columns, alias string) string {
+	names := strings.Split(columns, ",")
+	for i, name := range names {
+		names[i] = alias + "." + strings.TrimSpace(name)
+	}
+	return strings.Join(names, ", ")
+}
 
 // CreateTask inserts a new task. With no ID it mints one here, beside the insert that claims it, so
 // no other writer can take it first; callers read the ID back from the struct.
@@ -49,12 +57,12 @@ func (s *Store) CreateTask(t *types.Task) error {
 	args := []any{
 		t.ID, t.ProjectID, t.Title, t.Prompt, t.Status, t.SessionID, t.Branch, ptrStr(t.BaseRef), ptrStr(t.BaseCommit), ptrStr(t.BranchTip), t.Output, t.ExecutionState, B2I(t.HasMergeConflict),
 		t.LlamaServerURL, t.ModelName, ptrStr(t.ReasoningEffort), t.MaxConsecutiveFailedTurns, B2I(t.AutoCommit), B2I(t.AutoMerge), B2I(t.SubtasksAutoMerge), t.OperatingMode,
-		ptrStr(t.ParentTaskID), B2I(t.Autostarted), B2I(t.TitleGenerating), B2I(t.Summarizing), ptrStr(t.CurrentThreadID), t.CreatedAt.Format(time.RFC3339), t.UpdatedAt.Format(time.RFC3339), movedAt.UTC().Format(time.RFC3339), assignedPortsJSON, t.SessionCost, t.SandboxMemoryPeakMB, t.SandboxOOMKills, B2I(t.MemorySupervisorPaused),
+		ptrStr(t.ParentTaskID), B2I(t.Autostarted), B2I(t.TitleGenerating), B2I(t.TitleLLM), B2I(t.Summarizing), ptrStr(t.CurrentThreadID), t.CreatedAt.Format(time.RFC3339), t.UpdatedAt.Format(time.RFC3339), movedAt.UTC().Format(time.RFC3339), assignedPortsJSON, t.SessionCost, t.SandboxMemoryPeakMB, t.SandboxOOMKills, B2I(t.MemorySupervisorPaused),
 	}
 	args = append(args, ackValues(t.MemoryAlertAck)...)
 	_, err := s.db.Exec(
 		`INSERT INTO tasks (`+taskColumns+`)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		args...,
 	)
 	return err
@@ -200,9 +208,9 @@ func (s *Store) GetRunningSandboxedTasks() ([]types.Task, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	// Bare column names would be ambiguous after the JOIN with projects.
-	const tcols = "t.id, t.project_id, t.title, t.prompt, t.status, t.session_id, t.branch, t.base_ref, t.base_commit, t.branch_tip, t.output, t.execution_state, t.has_merge_conflict, t.llama_server_url, t.model_name, t.reasoning_effort, t.max_consecutive_failed_turns, t.auto_commit, t.auto_merge, t.subtasks_auto_merge, t.operating_mode, t.parent_task_id, t.autostarted, t.title_generating, t.summarizing, t.current_thread_id, t.created_at, t.updated_at, t.moved_at, t.assigned_ports, t.session_cost, t.sandbox_memory_peak_mb, t.sandbox_oom_kills, t.memory_supervisor_paused, t.memory_alert_acked, t.memory_alert_ack_peak_mb, t.memory_alert_ack_oom_kills, t.memory_alert_ack_limit_mb"
+	cols := aliasedColumns(taskColumns, "t")
 	rows, err := s.db.Query(
-		`SELECT ` + tcols + ` FROM tasks t JOIN projects p ON p.id = t.project_id` +
+		`SELECT ` + cols + ` FROM tasks t JOIN projects p ON p.id = t.project_id` +
 			` WHERE p.sandbox_enabled = 1 AND t.execution_state IN ` + inFlightStates +
 			` ORDER BY t.sandbox_memory_peak_mb ASC`,
 	)
@@ -258,7 +266,7 @@ func (s *Store) updateTask(t *types.Task, claim bool) error {
 	args := []any{t.Status, now.Format(time.RFC3339), t.Title, t.Prompt, t.Status, t.SessionID, t.Branch, ptrStr(t.BaseRef), ptrStr(t.BaseCommit), ptrStr(t.BranchTip), t.Output}
 	args = append(args, execArgs...)
 	args = append(args, B2I(t.HasMergeConflict),
-		t.LlamaServerURL, t.ModelName, ptrStr(t.ReasoningEffort), t.MaxConsecutiveFailedTurns, B2I(t.AutoCommit), B2I(t.AutoMerge), B2I(t.SubtasksAutoMerge), t.OperatingMode, ptrStr(t.ParentTaskID), B2I(t.Autostarted), B2I(t.TitleGenerating), ptrStr(t.CurrentThreadID), assignedPortsJSON, t.SessionCost, now.Format(time.RFC3339), t.ID)
+		t.LlamaServerURL, t.ModelName, ptrStr(t.ReasoningEffort), t.MaxConsecutiveFailedTurns, B2I(t.AutoCommit), B2I(t.AutoMerge), B2I(t.SubtasksAutoMerge), t.OperatingMode, ptrStr(t.ParentTaskID), B2I(t.Autostarted), B2I(t.TitleGenerating), B2I(t.TitleLLM), ptrStr(t.CurrentThreadID), assignedPortsJSON, t.SessionCost, now.Format(time.RFC3339), t.ID)
 
 	var movedAt string
 	// The row answers with the state it actually holds; typing the scan target keeps
@@ -268,7 +276,7 @@ func (s *Store) updateTask(t *types.Task, claim bool) error {
 	var memAlerted int
 	var ackPeak, ackKills, ackLimit int64
 	err := s.db.QueryRow(
-		`UPDATE tasks SET moved_at = CASE WHEN status <> ? THEN ? ELSE moved_at END, title = ?, prompt = ?, status = ?, session_id = ?, branch = ?, base_ref = ?, base_commit = ?, branch_tip = ?, output = ?, `+execSet+`, has_merge_conflict = ?, llama_server_url = ?, model_name = ?, reasoning_effort = ?, max_consecutive_failed_turns = ?, auto_commit = ?, auto_merge = ?, subtasks_auto_merge = ?, operating_mode = ?, parent_task_id = ?, autostarted = ?, title_generating = ?, current_thread_id = ?, assigned_ports = ?, session_cost = ?, updated_at = ? WHERE id = ? RETURNING moved_at, execution_state, sandbox_memory_peak_mb, sandbox_oom_kills, memory_alert_acked, memory_alert_ack_peak_mb, memory_alert_ack_oom_kills, memory_alert_ack_limit_mb`,
+		`UPDATE tasks SET moved_at = CASE WHEN status <> ? THEN ? ELSE moved_at END, title = ?, prompt = ?, status = ?, session_id = ?, branch = ?, base_ref = ?, base_commit = ?, branch_tip = ?, output = ?, `+execSet+`, has_merge_conflict = ?, llama_server_url = ?, model_name = ?, reasoning_effort = ?, max_consecutive_failed_turns = ?, auto_commit = ?, auto_merge = ?, subtasks_auto_merge = ?, operating_mode = ?, parent_task_id = ?, autostarted = ?, title_generating = ?, title_llm = ?, current_thread_id = ?, assigned_ports = ?, session_cost = ?, updated_at = ? WHERE id = ? RETURNING moved_at, execution_state, sandbox_memory_peak_mb, sandbox_oom_kills, memory_alert_acked, memory_alert_ack_peak_mb, memory_alert_ack_oom_kills, memory_alert_ack_limit_mb`,
 		args...,
 	).Scan(&movedAt, &storedExec, &t.SandboxMemoryPeakMB, &t.SandboxOOMKills, &memAlerted, &ackPeak, &ackKills, &ackLimit)
 	if err != nil {
@@ -371,6 +379,7 @@ func (s *Store) TransitionTaskExecution(taskID, projectID string, from, to types
 func (s *Store) SetTaskTitle(projectID, taskID, title string) error {
 	return s.updateTaskColumns(taskID, projectID,
 		taskColumn{"title", title},
+		taskColumn{"title_llm", 1},
 		taskColumn{"title_generating", 0})
 }
 
