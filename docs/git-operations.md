@@ -39,6 +39,19 @@ The rules are in `AGENTS.md → Git`. This is the mechanism behind each fence.
   kill, and neither substitutes for the other. `WithStash`'s bracket and the worktree watcher both
   involve processes that can outlive their caller (see `docs/locking.md`).
 
+## Whose repository git will open
+
+`git` refuses to open a repository owned by a uid other than its own, and that refusal says nothing
+about the repository: `rev-parse --git-dir` answers 128 for it and for "no repository here" alike. A
+refusal reaches a person as `path is not a git repository`, and git's own sentence, the one naming the
+fix, is discarded.
+
+The grant belongs to the image and never to `ExecutionFence()`, because a fence is how every install
+gets it. The fence pins hooks, `core.fsmonitor`, the editor, the pager and askpass, and leaves
+`credential.helper` and `core.sshCommand` alone on purpose. So on a host running git over other
+people's checkouts, the uid check is all that stands between a planted `.git/config` and a helper
+running in this process. `docs/docker.md → How it is held`.
+
 ## The worktree layout
 
 `<worktreesDir>/<projectID>/<taskID>`, derived in `backend/git` only: `worktreesRoot` →

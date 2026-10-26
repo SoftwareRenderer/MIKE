@@ -37,6 +37,14 @@ export MIKE_LISTEN MIKE_PORT MIKE_ALLOWED_HOSTS
 mkdir -p /mike/data /mike/worktrees /mike/extensions /mike/projects
 chmod 0700 /mike/data
 
+# ── git ownership ────────────────────────────────────────────────────────────
+# The mounted checkouts keep their host uid while this server runs as root, and git will not open a
+# repository owned by another uid. `docs/docker.md` holds why the grant belongs to the image.
+if ! grep -qs 'directory = \*' /etc/gitconfig; then
+    printf '%s\n' '[safe]' '	directory = *' >>/etc/gitconfig
+    echo "mike-entrypoint: git will open a repository owned by any uid ([safe] directory in /etc/gitconfig)"
+fi
+
 # ── podman storage ───────────────────────────────────────────────────────────
 # `podman info` exercises the real store to resolve the graph driver and mount storage.
 # This ensures that drivers refused by the kernel cause a failure here instead of later

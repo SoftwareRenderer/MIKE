@@ -21,6 +21,7 @@ stops is `docs/lifecycle.md`.
 - **`privileged` and `seccomp=unconfined` enable the nested runtime.** `compose.yaml` binds to `127.0.0.1` for this reason; TLS is mandatory, and the Host allowlist defaults to `localhost` to prevent unauthorized access. Task work runs with `--cap-drop ALL` inside gVisor.
 - **Storage is kept separate from the engine's overlayfs.** Podman refuses `overlay` on `overlayfs`, so `compose.yaml` provides a volume for `/var/lib/containers`. The entrypoint falls back to `fuse-overlayfs` or `vfs` if needed.
 - **`MIKE_ENCRYPTION_KEY` is required and has no default.** `compose.yaml` fails if it is missing, and the entrypoint exits with an error naming the variable. The image does not include an agent CLI; adapters requiring a host binary must use a derived image.
+- **`safe.directory` is granted at runtime, by the image, and never by the binary.** A mounted checkout keeps its host uid while this server runs as root, so git would refuse every project the person adds. The build cannot make the grant: `git config --global` writes `$HOME/.gitconfig`, which the documented mount covers with the checkouts. `GIT_CONFIG_GLOBAL` is the other wrong file — it replaces the one `resolveGitIdentity()` reads the author from.
 - **The container does not update itself.** Installs that are not unpacked release directories are refused. A container is refused before this check: `classifyInstall` checks the runtime's marker file before the layout. Even if a container looks like a release, it will refuse to update because a restart preserves the state, but a new `compose up` replaces the container. See `docs/auto-update.md`.
 
 ## How it is held
@@ -42,6 +43,12 @@ refuses `overlay`, then `exec`s the server so SIGTERM reaches the bounded shutdo
 published port cannot reach it.
 `MIKE_PREPULL_IMAGE=1` pulls the default sandbox image in the background instead of during the first
 task.
+
+The entrypoint also grants git every repository uid by appending `[safe] directory = *` to
+`/etc/gitconfig`, the image's own file, so no mount can cover it and no rebuilt container loses it.
+The grant belongs to the image because the only other uid inside this container is the operator's own;
+the server binary refuses to carry it, since a host install runs git over several people's checkouts.
+`docs/git-operations.md → Whose repository git will open`.
 
 `scripts/mike-healthcheck.sh` answers three questions separately — runsc, the podman store, and two
 HTTPS requests where one cannot say both: `/api/health` proves the listener, an unauthenticated
