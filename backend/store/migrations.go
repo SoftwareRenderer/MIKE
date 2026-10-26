@@ -1,11 +1,10 @@
 package store
 
 // baseSchemaSQL is the whole schema: every table, column and index the task, project, message, thread
-// and stats accessors read. The two credential tables sit beside their own accessors.
+// and stats accessors read. The credential tables sit beside their own accessors.
 //
-// Every statement is IF NOT EXISTS, so this changes no table it finds. A file whose tables predate
-// this DDL boots and then fails each read naming a column it lacks: delete the file, it is not
-// upgraded. A new column goes here, in the order its scanner reads it, because the scan is positional.
+// A new column goes here in scanner order, because the scan is positional. A table this DDL finds is given
+// the columns here that it lacks, so NOT NULL needs a DEFAULT to be addable.
 const baseSchemaSQL = `
 
 CREATE TABLE IF NOT EXISTS projects (
@@ -34,12 +33,12 @@ CREATE TABLE IF NOT EXISTS tasks (
     title                        TEXT NOT NULL,
     prompt                       TEXT NOT NULL,
     status                       TEXT NOT NULL DEFAULT 'backlog',
-    session_id                   TEXT,
-    branch                       TEXT,
+    session_id                   TEXT NOT NULL DEFAULT '',
+    branch                       TEXT NOT NULL DEFAULT '',
     base_ref                     TEXT DEFAULT NULL,
     base_commit                  TEXT DEFAULT NULL,
     branch_tip                   TEXT DEFAULT NULL,
-    output                       TEXT,
+    output                       TEXT NOT NULL DEFAULT '',
     execution_state              TEXT NOT NULL DEFAULT 'idle',
     has_merge_conflict           INTEGER NOT NULL DEFAULT 0,
     llama_server_url             TEXT NOT NULL DEFAULT '',

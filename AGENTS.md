@@ -208,7 +208,13 @@ make test-gen-registry                                   # the generator's own t
   `Store.tx`**; anything outside `tx` states its reason at its definition.
 - **`ON DELETE CASCADE` deletes rows, nothing else** — containers, worktrees, branches and uploads are
   stopped by the deletion path, not by the schema. See *Deletion*.
-- **The schema is created whole**: a new column is added to the DDL, never by a migration probe.
+- **Structure is completed by shape, data by a stamped step** — `applySchema` adds what a file lacks and
+  nothing else; a rename, a rewrite or a meaning change is a keyed `schemaStep` recorded in `schema_meta`,
+  never an edit to the DDL alone. `docs/storage.md → The marker, and the step ladder beside the shape pass`.
+- **`PRAGMA user_version` is read and never written** — 1..12 there marks a pre-release file, which the boot
+  says out loud. A file carrying a one-way step this build does not have refuses the boot naming the step.
+- **A boot that changed a database logs what it changed**, and nothing else announces it.
+  `docs/storage.md → Every upgrade is logged`.
 - **An instant that SQL compares is stored as fixed-width UTC text.** `docs/storage.md`.
 - A test that needs a write to fail halfway installs a SQLite `RAISE(ABORT)` trigger, never a hook in
   production code.

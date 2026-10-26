@@ -175,8 +175,8 @@ func TestFreshSchemaCarriesTheIndexesTheReadsWalk(t *testing.T) {
 	}
 }
 
-// A second start must disturb nothing the first one wrote: the DDL is repeatable only because every
-// statement is IF NOT EXISTS, and a reopen that logs has found something wrong with the schema.
+// A second start must disturb nothing the first one wrote: the DDL creates what is missing and adds
+// nothing a table already has, and a reopen that logs has found something wrong with the schema.
 func TestSchemaReopensQuietlyAndKeepsItsRows(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kanban.db")
 	s, err := NewStore(path)
@@ -216,49 +216,6 @@ func TestSchemaReopensQuietlyAndKeepsItsRows(t *testing.T) {
 	defer func() { _ = verified.Close() }()
 	if _, err := verified.GetProject("reopen-proj"); err != nil {
 		t.Errorf("the row written before the restart is gone: %v", err)
-	}
-}
-
-// The DDL changes no table it finds: an older tasks table keeps its columns and rows, and each read
-// naming a column it lacks fails. This pins the refusal to migrate (docs/storage.md).
-func TestSchemaLeavesAnOlderTableAlone(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "old.db")
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	// The shape the tasks indexes walk, and none of the columns added since.
-	if _, err := db.Exec(`CREATE TABLE tasks (
-		id TEXT PRIMARY KEY, project_id TEXT NOT NULL, title TEXT NOT NULL DEFAULT '',
-		status TEXT NOT NULL DEFAULT 'backlog', parent_task_id TEXT NULL,
-		created_at TEXT NOT NULL, updated_at TEXT NOT NULL, moved_at TEXT NOT NULL DEFAULT ''
-	)`); err != nil {
-		t.Fatalf("create the older tasks table: %v", err)
-	}
-	if _, err := db.Exec(`INSERT INTO tasks (id, project_id, title, created_at, updated_at)
-		VALUES ('old-1', 'old-proj', 'written before this DDL', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`); err != nil {
-		t.Fatalf("seed the older row: %v", err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatalf("close: %v", err)
-	}
-
-	s, err := NewStore(path)
-	if err != nil {
-		t.Fatalf("NewStore: %v", err)
-	}
-	defer func() { _ = s.Close() }()
-
-	found := []string{"id", "project_id", "title", "status", "parent_task_id", "created_at", "updated_at", "moved_at"}
-	if have := tableColumns(t, s.db, "tasks"); strings.Join(have, ",") != strings.Join(found, ",") {
-		t.Errorf("initSchema changed the table it found: %v, want %v", have, found)
-	}
-	var title string
-	if err := s.db.QueryRow(`SELECT title FROM tasks WHERE id = 'old-1'`).Scan(&title); err != nil {
-		t.Errorf("the row this file arrived with is gone: %v", err)
-	}
-	if _, err := s.GetTasksByProject("old-proj"); err == nil || !strings.Contains(err.Error(), "no such column") {
-		t.Errorf("scanning a table missing its columns answered %v, want a missing-column failure", err)
 	}
 }
 

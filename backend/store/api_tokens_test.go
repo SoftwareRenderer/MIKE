@@ -150,8 +150,8 @@ func TestAPITokenSecretIsUnique(t *testing.T) {
 	}
 }
 
-// The table is created outside the user_version-gated probe chain, so a database written by an
-// older build still gets it on reopen.
+// The table is declared and created by the package that reads it, through the same applySchema pass as every
+// other table, so a database written by an older build still gets it on reopen.
 func TestAPITokenTableSurvivesReopen(t *testing.T) {
 	s, dbPath := newStoreAt(t)
 	newAPITokenRow(t, s, "tok-1", "mike_across-reopen", "kept")

@@ -45,11 +45,10 @@ func hashToken(token string) string {
 
 // initSessions creates the sessions table and its lookup index. It lives with the session accessors
 // rather than in baseSchemaSQL, which holds no credential table.
-func (s *Store) initSessions() error {
+func (s *Store) initSessions() ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, err := s.db.Exec(sessionTable)
-	return err
+	return s.applySchema(sessionTable)
 }
 
 // NewSession carries the fields of a session row.

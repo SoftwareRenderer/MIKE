@@ -30,6 +30,7 @@ function loadFixture(name) {
 
 const textResponse = loadFixture('text_response');
 const textResponseLong = loadFixture('text_response_long');
+const titleLong = loadFixture('title_long');
 const textResponseSlow = loadFixture('text_response_slow');
 const toolCallResponse = loadFixture('tool_call_response');
 const toolCallFail = loadFixture('tool_call_fail');
@@ -160,6 +161,9 @@ const FIXTURES_BY_NAME = {
     tool_call_fail: [toolCallFail, 1],
     tool_call_loop: [toolCallLoop, 1],
     text_response_reasoning: [textResponseReasoning, 1],
+    // Title routing streams the selected fixture's content, so a spec that needs a long title, and so a long
+    // branch name, pins this one instead of hoping the keyword route answers something long.
+    title_long: [titleLong, 1],
     // The tool-call-header-overflow probe: arguments long enough to be truncated AND a call that runs
     // long enough for the elapsed counter to appear. No existing fixture is both.
     tool_call_long_args_sleep: [toolCallLongArgsSleep, 1],
@@ -445,7 +449,8 @@ const server = http.createServer((req, res) => {
                                     chunks === toolCallComplete ? 'tool_call_complete' :
                                     chunks === toolCallReadFile ? 'tool_call_read_file' :
                                     chunks === textResponseSlow ? 'text_slow' :
-                                    chunks === textResponseLong ? 'text_long' : 'text';
+                                    chunks === textResponseLong ? 'text_long' :
+                                    chunks === titleLong ? 'title_long' : 'text';
                 const msgs = parsed.messages || [];
                 const lastUser = msgs.filter(m => m.role === 'user').pop();
                 console.error(`[mock-llm] request #${requestCount}: routing to ${fixtureName} (delay=${chunkDelay}ms) stream=${parsed.stream} last_user="${(lastUser?.content || '').slice(0, 80)}..."`);
