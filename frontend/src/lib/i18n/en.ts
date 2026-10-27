@@ -906,7 +906,7 @@ const catalog = {
     'updates.title': 'Release updates',
     'updates.enable': 'Check for new releases',
     'updates.enableDesc': 'Check {host} for updates once per day.',
-    'updates.managed': 'Updates are managed by your organization.',
+    'updates.managed': 'Updates are managed by your administrator.',
     'updates.available': 'Release {version} is available',
     'updates.upToDate': 'You are up to date — {version} is the latest release',
     'updates.lastChecked': 'Last checked {time}',
@@ -928,9 +928,6 @@ const catalog = {
     'updates.restartHint': 'Stop the server and start it again so it runs the new release',
     'updates.applying': 'Restarting…',
     'updates.restarting': 'The server is restarting. Reload this page once it answers again.',
-    'updates.cannotStage': 'This server cannot update its own files.',
-    // The command is what a container has to run, so it stays exact rather than translated.
-    'updates.pullCommand': 'docker compose pull && docker compose up -d',
     'updates.dot.update': 'A new release is available',
     'updates.dot.ready': 'A release is downloaded and waiting to be installed',
     'updates.dot.question': 'MIKE is asking whether it may check for new releases',

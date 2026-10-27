@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -12,6 +14,7 @@ import (
 	"mike/backend/types"
 
 	"mike/backend/startup"
+	"mike/backend/updates"
 )
 
 // fixtureManifest answers a release index from a local server: the loopback spelling of
@@ -40,6 +43,39 @@ func fixtureManifest(t *testing.T, version string) *manifestFixture {
 	f.Server = srv
 	t.Cleanup(srv.Close)
 	return f
+}
+
+// stageableUpdateService replaces the service a test server booted with one built on an unpacked release,
+// because a test binary runs from a build directory and would only answer the managed refusal. The binary a
+// swap would replace is a file in that release directory, never the test binary.
+func stageableUpdateService(t *testing.T, s *Server, o updates.Options) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "prompts"), 0o755); err != nil {
+		t.Fatalf("prompts: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "prompts", "turn.tmpl"), []byte("{{.X}}"), 0o644); err != nil {
+		t.Fatalf("prompt template: %v", err)
+	}
+	exe := filepath.Join(dir, "mike-server")
+	if err := os.WriteFile(exe, []byte("OLD-BINARY"), 0o755); err != nil {
+		t.Fatalf("binary: %v", err)
+	}
+	if o.Version == "" {
+		o.Version = "1.4.0"
+	}
+	if o.Store == nil {
+		o.Store = updateStateStore{s.store}
+	}
+	if o.Restart == nil {
+		o.Restart = func() error { return nil }
+	}
+	o.InstallDir, o.Executable, o.ContainerMarkers = dir, exe, []string{}
+	svc, err := updates.New(o)
+	if err != nil {
+		t.Fatalf("update service: %v", err)
+	}
+	s.updatesService = svc
 }
 
 func TestUpdateStatusAnswersWithoutACheck(t *testing.T) {
@@ -82,18 +118,19 @@ func TestUpdateStatusReportsWhoDecided(t *testing.T) {
 		disabled     bool
 		preference   *bool
 		wantEnabled  bool
-		wantDisabled bool
+		wantManaged  bool
 		wantAnswered bool
 	}{
 		{name: "never answered", preference: nil},
 		{name: "declined", preference: ptr(false), wantAnswered: true},
 		{name: "opted in", preference: ptr(true), wantEnabled: true, wantAnswered: true},
-		{name: "disabled over an opt-in", disabled: true, preference: ptr(true), wantDisabled: true, wantAnswered: true},
-		{name: "disabled and never asked", disabled: true, wantDisabled: true},
+		{name: "disabled over an opt-in", disabled: true, preference: ptr(true), wantManaged: true, wantAnswered: true},
+		{name: "disabled and never asked", disabled: true, wantManaged: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			s := testServerWith(t, func(c *startup.Config) { c.DisableUpdates = tc.disabled })
+			stageableUpdateService(t, s, updates.Options{DisableUpdates: tc.disabled})
 			if tc.preference != nil {
 				setPreference(t, s, *tc.preference)
 			}
@@ -105,8 +142,8 @@ func TestUpdateStatusReportsWhoDecided(t *testing.T) {
 			if got := body["enabled"]; got != tc.wantEnabled {
 				t.Errorf("enabled = %v, want %v (%s)", got, tc.wantEnabled, rec.Body)
 			}
-			if got := body["disabled"]; got != tc.wantDisabled {
-				t.Errorf("disabled = %v, want %v", got, tc.wantDisabled)
+			if got := body["managed"]; got != tc.wantManaged {
+				t.Errorf("managed = %v, want %v", got, tc.wantManaged)
 			}
 			if _, ok := body["forced"]; ok {
 				t.Errorf("the answer still carries the override field someone used to force: %s", rec.Body)
@@ -148,6 +185,7 @@ func TestDisabledDeploymentRefusesEveryUpdateRoute(t *testing.T) {
 func TestUpdateCheckRefusedWhileDisabled(t *testing.T) {
 	manifest := fixtureManifest(t, "9.9.9")
 	s := testServerWith(t, func(c *startup.Config) { c.UpdateManifestURL = manifest.URL })
+	stageableUpdateService(t, s, updates.Options{ManifestURL: manifest.URL})
 
 	rec := testResponseAuth(t, s, testRequest(http.MethodPost, "/api/updates/check", nil))
 	if rec.Code != http.StatusConflict {
@@ -163,6 +201,7 @@ func TestUpdateCheckRefusedWhileDisabled(t *testing.T) {
 func TestUpdateCheckAgainstAHostTheOperatorNamed(t *testing.T) {
 	manifest := fixtureManifest(t, "9.9.9")
 	s := testServerWith(t, func(c *startup.Config) { c.UpdateManifestURL = manifest.URL })
+	stageableUpdateService(t, s, updates.Options{ManifestURL: manifest.URL})
 	setPreference(t, s, true)
 
 	rec := testResponseAuth(t, s, testRequest(http.MethodPost, "/api/updates/check", nil))
@@ -176,13 +215,14 @@ func TestUpdateCheckAgainstAHostTheOperatorNamed(t *testing.T) {
 	if body["latest"] != "9.9.9" {
 		t.Errorf("latest = %v, want the manifest's answer", body["latest"])
 	}
-	// Available depends on this binary's version, which is "dev" in a test build: what matters is that
-	// the answer is a *note* about comparing, not a failure of the check.
 	if lastErr, _ := body["last_error"].(string); lastErr != "" {
 		t.Errorf("last_error = %q on a check that reached its manifest", lastErr)
 	}
-	if note, _ := body["note"].(string); !strings.Contains(note, "no release to compare") {
-		t.Errorf("note = %q, want the sentence for a build with no release version", note)
+	// A release is offered only when the manifest names an archive for this machine's os and architecture.
+	if available, _ := body["available"].(bool); !available {
+		if note, _ := body["note"].(string); !strings.Contains(note, "names no archive") {
+			t.Errorf("note = %q with no release offered: the answer should say why", note)
+		}
 	}
 }
 
@@ -192,6 +232,7 @@ func TestUpdateCheckAgainstAHostTheOperatorNamed(t *testing.T) {
 func TestUpdateAutomaticCheckIsGatedByTheInstallDay(t *testing.T) {
 	manifest := fixtureManifest(t, "9.9.9")
 	s := testServerWith(t, func(c *startup.Config) { c.UpdateManifestURL = manifest.URL })
+	stageableUpdateService(t, s, updates.Options{ManifestURL: manifest.URL})
 	setPreference(t, s, true)
 
 	for _, who := range []string{"first", "second"} {
@@ -217,6 +258,7 @@ func TestUpdateAutomaticCheckIsGatedByTheInstallDay(t *testing.T) {
 func TestUpdateCheckReportsAFailureWithoutLosingTheAnswer(t *testing.T) {
 	manifest := fixtureManifest(t, "9.9.9")
 	s := testServerWith(t, func(c *startup.Config) { c.UpdateManifestURL = manifest.URL })
+	stageableUpdateService(t, s, updates.Options{ManifestURL: manifest.URL})
 	setPreference(t, s, true)
 	if rec := testResponseAuth(t, s, testRequest(http.MethodPost, "/api/updates/check", nil)); rec.Code != http.StatusOK {
 		t.Fatalf("first check: %d %s", rec.Code, rec.Body)
@@ -267,30 +309,54 @@ func TestUpdateApplyRefusesWhileATaskRuns(t *testing.T) {
 // Fetching a release renames nothing, so the refusal that guards the swap does not belong on it.
 func TestUpdatePrepareIsNotStoppedByRunningWork(t *testing.T) {
 	s := testServer(t)
+	stageableUpdateService(t, s, updates.Options{})
 	startRunningTask(t, s, "Write the changelog")
 
 	rec := testResponseAuth(t, s, testRequest(http.MethodPost, "/api/updates/prepare", nil))
-	if body := rec.Body.String(); strings.Contains(body, "work is in flight") {
+	body := rec.Body.String()
+	if strings.Contains(body, "work is in flight") {
 		t.Errorf("a download was refused over running work: %d %s", rec.Code, body)
+	}
+	if !strings.Contains(body, "no newer release is known") {
+		t.Errorf("refusal %q is not the one about the release: %d", body, rec.Code)
 	}
 }
 
-// The install half answers a refusal as a refusal, whatever it is refusing about: this server's own
-// install is not a release directory, and a POST must not make that a server fault.
-func TestUpdateApplyRefusesAnInstallThatCannotTakeARelease(t *testing.T) {
-	s := testServer(t)
-	rec := testResponseAuth(t, s, testRequest(http.MethodPost, "/api/updates/apply", nil))
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("status = %d body %s, want 409", rec.Code, rec.Body)
+// An install that cannot take a release is managed. The status answer says who manages it, every route that
+// could act on a release refuses with that sentence, and the manifest is never asked about it.
+func TestAManagedInstallRefusesEveryUpdateRoute(t *testing.T) {
+	manifest := fixtureManifest(t, "9.9.9")
+	s := testServerWith(t, func(c *startup.Config) { c.UpdateManifestURL = manifest.URL })
+	setPreference(t, s, true)
+
+	rec := testResponseAuth(t, s, testRequest(http.MethodGet, "/api/updates/status", nil))
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v\n%s", err, rec.Body)
 	}
-	if body := rec.Body.String(); !strings.Contains(body, "cannot replace its own files") {
-		t.Errorf("refusal %q does not say what is missing", body)
+	if body["managed"] != true || body["enabled"] != false {
+		t.Errorf("managed = %v enabled = %v, want managed and not enabled: %s", body["managed"], body["enabled"], rec.Body)
+	}
+
+	for _, path := range []string{"/api/updates/check", "/api/updates/prepare", "/api/updates/apply", "/api/updates/restart"} {
+		rec := testResponseAuth(t, s, testRequest(http.MethodPost, path, nil))
+		if rec.Code != http.StatusConflict {
+			t.Errorf("POST %s = %d body %s, want 409", path, rec.Code, rec.Body)
+			continue
+		}
+		if refused := rec.Body.String(); !strings.Contains(refused, "updates are managed by your administrator") {
+			t.Errorf("refusal from %s does not say who manages this release: %s", path, refused)
+		}
+	}
+	if got := manifest.hits(); got != 0 {
+		t.Errorf("a managed server made %d request(s) of the manifest", got)
 	}
 }
 
 // A restart is only ever the second half of an install.
 func TestUpdateRestartRefusesWhenNothingIsStaged(t *testing.T) {
 	s := testServer(t)
+	stageableUpdateService(t, s, updates.Options{})
 	rec := testResponseAuth(t, s, testRequest(http.MethodPost, "/api/updates/restart", nil))
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status = %d body %s, want 409", rec.Code, rec.Body)

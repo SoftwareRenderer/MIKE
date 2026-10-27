@@ -52,9 +52,6 @@ func (s *Service) Apply(ctx context.Context) (ApplyResult, error) {
 	if err := s.forbidden(); err != nil {
 		return ApplyResult{}, err
 	}
-	if !s.install.CanStage {
-		return ApplyResult{}, refusal("this install cannot replace its own files: %s", s.install.Reason)
-	}
 	prepared := s.prepared()
 	if prepared.Version == "" {
 		return ApplyResult{}, refusal("nothing is downloaded to install; check for updates first")

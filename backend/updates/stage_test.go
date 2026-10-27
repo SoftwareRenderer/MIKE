@@ -404,43 +404,6 @@ func TestPrepareRefusesAnArchiveThatIsNotWhatTheManifestPromised(t *testing.T) {
 	}
 }
 
-// A container is refused before a byte is fetched: the swap would be lost on the next start of the
-// image, which is the worst possible outcome of a half-applied update.
-func TestTheUpdateHalvesRefuseAnInstallThatCannotTakeThem(t *testing.T) {
-	dir := releaseDir(t)
-	exe := filepath.Join(dir, "mike-server")
-	write(t, exe, "OLD-BINARY", 0o755)
-	// The marker is the test's own, so the refusal is decided here rather than by whether the machine
-	// running the suite happens to be a container.
-	marker := filepath.Join(t.TempDir(), ".containerenv")
-	write(t, marker, "MARKER", 0o644)
-	archive := goodArchive(t)
-	fetcher := &fakeFetcher{dlBody: archive, body: manifestDoc(t, map[string]any{"latest": "1.4.2"})}
-
-	svc, err := New(Options{
-		Version:          "1.4.2",
-		Store:            &fakeStore{},
-		Fetcher:          fetcher,
-		InstallDir:       dir,
-		Executable:       exe,
-		ContainerMarkers: []string{marker},
-		Now:              fixedClock(),
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	if _, err := svc.Prepare(context.Background()); err == nil || !strings.Contains(err.Error(), "container") {
-		t.Fatalf("Prepare = %v, want the container refusal", err)
-	}
-	if _, err := svc.Apply(context.Background()); err == nil || !strings.Contains(err.Error(), "container") {
-		t.Fatalf("Apply = %v, want the container refusal", err)
-	}
-	if fetcher.dlCalls != 0 {
-		t.Errorf("a refused install downloaded %d archives", fetcher.dlCalls)
-	}
-}
-
 // The check and the download are separate steps, so the download re-asks the question the check
 // answered: whatever the cache claims, an old row must not talk this server into a downgrade.
 func TestPrepareRefusesADowngradeFromAStaleRow(t *testing.T) {

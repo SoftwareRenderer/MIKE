@@ -938,11 +938,11 @@ export interface CreatedAPIToken extends APITokenInfo {
     token: string;
 }
 
-/** What this install could do about a new release. Only `packaged` may replace its own files. */
+/** What this install could do about a new release. `managed` is the answer the client acts on; it reads
+ *  `can_stage` only to decide whether to fetch a newer release on its own. */
 export interface UpdateInstall {
     kind: 'packaged' | 'container' | 'source' | 'unknown';
     dir?: string;
-    reason?: string;
     can_stage: boolean;
 }
 
@@ -962,7 +962,7 @@ export interface UpdateStatus {
     checked_at?: string;
     /** The last check's failure, kept so the About tab can say why the dot never lit. */
     last_error?: string;
-    /** What a check learned that is neither an error nor a version, e.g. a version it cannot compare. */
+    /** What a check learned that is neither an error nor a version, e.g. a release with no archive for this machine. */
     note?: string;
     staged_version?: string;
     backup_path?: string;
@@ -973,8 +973,8 @@ export interface UpdateStatus {
     prepared_files?: number;
     prepared_at?: string;
     enabled: boolean;
-    /** The organization switch: nothing on this server checks, downloads, installs or restarts. */
-    disabled: boolean;
+    /** Something outside this process decides its release, so nothing here checks, downloads, installs or restarts. */
+    managed: boolean;
     /** False while nobody has ever answered the opt-in question — the state that owes the prompt. */
     answered: boolean;
     install: UpdateInstall;

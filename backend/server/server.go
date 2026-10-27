@@ -443,11 +443,14 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 		return nil, fmt.Errorf("create update service: %w", err)
 	}
 	s.updatesService = updatesService
-	// The posture is announced once per boot so the operator's log, not the UI, is the record of which
-	// switch this process booted on.
-	if settings.DisableUpdates {
+	// The posture is announced once per boot so the operator's log, not the UI, is the record of why this
+	// process will never ask about a release.
+	switch install := updatesService.InstallShape(); {
+	case settings.DisableUpdates:
 		logging.For(logging.Updates).Infof("release updates are disabled by %s: this server will not check for, download, install or restart onto a release", updates.EnvDisableUpdates)
-	} else {
+	case !install.CanStage:
+		logging.For(logging.Updates).Infof("release updates are managed by your administrator: %s", install.Reason)
+	default:
 		manifestURL := settings.UpdateManifestURL
 		if manifestURL == "" {
 			manifestURL = updates.DefaultManifestURL

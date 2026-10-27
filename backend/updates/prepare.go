@@ -85,7 +85,7 @@ func (s *Service) want() (Asset, string, error) {
 	// server into a downgrade.
 	newer, err := CompareVersions(s.state.Latest, s.version)
 	if err != nil {
-		return Asset{}, "", refusal("this build reports its version as %s, so there is no release to compare it with", quoteOrEmpty(s.version))
+		return Asset{}, "", fault("compare this build with release "+s.state.Latest, err)
 	}
 	if newer <= 0 {
 		return Asset{}, "", refusal("release %s is not newer than the running %s", s.state.Latest, s.version)
@@ -98,9 +98,6 @@ func (s *Service) want() (Asset, string, error) {
 func (s *Service) Prepare(ctx context.Context) (PreparedInfo, error) {
 	if err := s.forbidden(); err != nil {
 		return PreparedInfo{}, err
-	}
-	if !s.install.CanStage {
-		return PreparedInfo{}, refusal("this install cannot replace its own files: %s", s.install.Reason)
 	}
 	release, err := s.beginWork("prepare")
 	if err != nil {

@@ -8,23 +8,24 @@ import { test, expect, type Page } from '@playwright/test';
  * is what `settings-provider.spec.ts` assumed, and it timed out on a Providers locator with the About
  * panel on screen.
  *
- * The run's own servers answer `disabled` (`MIKE_DISABLE_UPDATES=1`, global-setup), so the status is
- * stubbed here: the posture a person lives in, without the manifest host in the run. The stub also
- * records the check requests, because which of them carries `?auto=1` is the contract between the daily
- * pass and the install's day. The button's half of that contract — no flag, so the day cannot refuse a
- * person — is pinned by `update-check.unit.svelte.ts` and the handler test instead: About shows the action
- * row only for a saved preference, which a stubbed status cannot grant.
+ * The run's own servers are managed (`MIKE_DISABLE_UPDATES=1` and a source tree, so `/api/updates/status`
+ * answers `managed`), and the status is stubbed here: the posture a person lives in, without the manifest
+ * host in the run. The stub also records the check requests, because which of them carries `?auto=1` is
+ * the contract between the daily pass and the install's day. The button's half of that contract — no flag,
+ * so the day cannot refuse a person — is pinned by `update-check.unit.svelte.ts` and the handler test
+ * instead: About shows the action row only for a saved preference, which a stubbed status cannot grant.
  */
 
-// The shape `/api/updates/status` answers with (backend/updates/service.go). `can_stage` false is what
-// keeps the pass's follow-up (`autoPrepare`) from reaching for a download this test never asked for.
+// The shape `/api/updates/status` answers with (backend/updates/service.go). `can_stage` stays false here so
+// the pass's follow-up (`autoPrepare`) does not reach for a download this spec never asked for. A real
+// managed server would answer `managed` as well, and that would skip the check this spec measures.
 const STATUS = {
   current_version: 'v0.0.0-e2e',
   latest: '',
   available: false,
   checked_at: '',
   enabled: false,
-  disabled: false,
+  managed: false,
   answered: true,
   install: { kind: 'packaged', dir: '/opt/mike', can_stage: false },
   manifest_url: 'https://updates.invalid/version',

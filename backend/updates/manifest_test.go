@@ -217,7 +217,7 @@ func TestNewRefusesAURLItCannotFetch(t *testing.T) {
 }
 
 func TestStatusAnswersWithoutACheck(t *testing.T) {
-	s, err := New(Options{Version: "1.4.0", InstallDir: t.TempDir()})
+	s, err := New(Options{Version: "1.4.0", InstallDir: releaseDir(t), ContainerMarkers: []string{}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestStatusAnswersWithoutACheck(t *testing.T) {
 	if st.State.CurrentVersion != "1.4.0" {
 		t.Errorf("CurrentVersion = %q", st.State.CurrentVersion)
 	}
-	if !st.Enabled || st.Disabled || !st.Answered {
+	if !st.Enabled || st.Managed || !st.Answered {
 		t.Errorf("the settings did not reach the answer: %+v", st)
 	}
 	if st.Working != "" {

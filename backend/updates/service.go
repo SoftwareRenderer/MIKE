@@ -74,9 +74,9 @@ type State struct {
 type Status struct {
 	State
 	Enabled bool `json:"enabled"`
-	// Disabled is true if updates are forbidden by the organization switch: nothing here checks, downloads, installs or restarts, and
-	// the client reports this status instead of offering the click.
-	Disabled bool `json:"disabled"`
+	// Managed is true when something outside this process decides its release. The client disables the
+	// update control on this answer alone.
+	Managed  bool `json:"managed"`
 	Answered bool `json:"answered"`
 	// Install is what this process could do about an update.
 	Install Install `json:"install"`
@@ -301,12 +301,24 @@ func (s *Service) Restart() error {
 	return s.restart()
 }
 
-// forbidden checks if updates are disabled by the operator. It is checked before anything that could reach the
-// network or the install directory, so a release the last process learned about cannot be installed by a
-// deployment that has since turned updates off.
+// InstallShape is what this process could do about a release, decided when the service was built.
+func (s *Service) InstallShape() Install { return s.install }
+
+// managed is true when something other than this process decides its release. Either the operator's switch
+// forbids the whole path, or the install cannot take a release: an image, a development build, or a binary
+// that does not run from an unpacked release. Both mean the same thing here: nothing may check for,
+// download, install or restart onto a release.
+func (s *Service) managed() bool { return s.disabled || !s.install.CanStage }
+
+// forbidden is a managed deployment's refusal to check for, download, install or restart onto a release.
+// It runs before anything that could reach the network or the install directory, so a release an earlier
+// process learned about cannot be installed by a deployment that has since turned updates off.
 func (s *Service) forbidden() error {
 	if s.disabled {
 		return refusal("updates are disabled by %s, so this server will not check for, download or replace anything", EnvDisableUpdates)
+	}
+	if !s.install.CanStage {
+		return refusal("updates are managed by your administrator: %s", s.install.Reason)
 	}
 	return nil
 }
@@ -321,11 +333,9 @@ func (s *Service) Status(set Settings) Status {
 	s.workMu.Unlock()
 
 	return Status{
-		State: st,
-		// Disabled wins here rather than at every caller: "the switch forbids it" and "this deployment
-		// said yes" cannot both be true of one process.
-		Enabled:     set.Enabled && !s.disabled,
-		Disabled:    s.disabled,
+		State:       st,
+		Enabled:     set.Enabled && !s.managed(),
+		Managed:     s.managed(),
 		Answered:    set.Answered,
 		Install:     s.install,
 		ManifestURL: s.manifestURL,
@@ -335,8 +345,7 @@ func (s *Service) Status(set Settings) Status {
 
 // CheckAutomatic performs a once-daily update check on behalf of the browser. The day belongs to the install, not to whichever
 // browser asked first: the first one today gets the fetch, and every later one is answered from what that
-// fetch learned. A check that ran and failed spent the day like one that succeeded, because `record`
-// timestamps every check that runs.
+// fetch learned. A check that ran and failed spent the day like one that succeeded.
 func (s *Service) CheckAutomatic(ctx context.Context, set Settings) (Status, error) {
 	// The refusal is answered before the day is consulted, and no day is spent on a check that will not
 	// run: a person's later yes gets its first answer on the next boot rather than tomorrow.
@@ -395,22 +404,14 @@ func (s *Service) Check(ctx context.Context, set Settings) (Status, error) {
 	asset, hasAsset := manifest.AssetFor(s.goos, s.goarch)
 	newer, err := CompareVersions(manifest.Latest, s.version)
 	if err != nil {
-		// The manifest was checked when it was parsed, so this is the *local* version refusing to
-		// compare: a development or image build. What it cannot say is a note, never "up to date".
-		s.record(func(st *State) {
-			st.Latest = manifest.Latest
-			st.Published = manifest.Published
-			st.NotesURL = manifest.NotesURL
-			st.Asset = Asset{}
-			st.Available = false
-			st.LastError = ""
-			st.Note = "this build reports its version as " + quoteOrEmpty(s.version) + ", so there is no release to compare it with"
-		})
-		return s.Status(set), nil
+		// The manifest's version was validated when it parsed, so this can only be this build's own
+		// version refusing to compare, which is a shape forbidden() has already turned away.
+		s.recordFailure(err)
+		return s.Status(set), fault("compare this build with release "+manifest.Latest, err)
 	}
 
 	note := ""
-	if _, has := manifest.AssetFor(s.goos, s.goarch); !has && newer > 0 {
+	if !hasAsset && newer > 0 {
 		note = fmt.Sprintf("release %s names no archive for %s/%s", manifest.Latest, s.goos, s.goarch)
 	}
 	s.mu.Lock()
@@ -432,21 +433,17 @@ func (s *Service) Check(ctx context.Context, set Settings) (Status, error) {
 	return s.Status(set), nil
 }
 
-// record changes the state under the lock and writes it back, ensuring the UI reflects the change immediately.
-func (s *Service) record(change func(*State)) {
+// recordFailure keeps the last good answer and notes the failure beside it: a server that could not reach
+// the manifest today is still running an older release than the one it saw yesterday. The attempt is
+// stamped with its own instant, so a failed check spends the day the way a successful one does.
+func (s *Service) recordFailure(cause error) {
+	logging.For(logging.Updates).Warnf("update check failed: %v", cause)
 	s.mu.Lock()
 	s.state.Note = ""
-	change(&s.state)
+	s.state.LastError = cause.Error()
 	s.state.CheckedAt = s.now().UTC().Format(time.RFC3339)
 	s.mu.Unlock()
 	s.persist()
-}
-
-// recordFailure keeps the last good answer and notes the failure beside it: a server that could not reach
-// the manifest today is still running an older release than the one it saw yesterday.
-func (s *Service) recordFailure(cause error) {
-	logging.For(logging.Updates).Warnf("update check failed: %v", cause)
-	s.record(func(st *State) { st.LastError = cause.Error() })
 }
 
 func (s *Service) persist() {

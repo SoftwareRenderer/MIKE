@@ -2,10 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, fireEvent, cleanup, waitFor } from '@testing-library/svelte';
 import type { UpdateStatus } from '$lib/types';
 
-// The three install shapes have to read differently: a packaged install gets buttons, a container gets
-// the command, anything else gets the reason. And the two halves of an update read differently: a
-// downloaded release offers Install, a swapped one offers Restart. The service is real; the network and
-// IndexedDB are not.
+// An install that takes its own releases gets the buttons; one whose release is managed elsewhere gets the
+// sentence naming who manages it, and nothing else. The service is real; the network and IndexedDB are not.
 
 const api = vi.hoisted(() => ({
     fetchUpdateStatus: vi.fn(),
@@ -37,7 +35,7 @@ function status(over: Partial<UpdateStatus> = {}): UpdateStatus {
         enabled: true,
         answered: true,
         available: false,
-        disabled: false,
+        managed: false,
         install: { kind: 'packaged', dir: '/opt/mike', can_stage: true },
         manifest_url: 'https://getmike.dev/download/version.json',
         ...over,
@@ -90,10 +88,10 @@ describe('a packaged install', () => {
     });
 
     it('says what it cannot tell rather than claiming the install is current', () => {
-        const { container } = open({ note: 'this build reports its version as "dev", so there is no release to compare it with' });
+        const { container } = open({ note: 'release 1.4.2 names no archive for linux/arm64' });
         const verdict = container.querySelector('[data-testid="update-verdict"]');
-        expect(verdict?.textContent).toContain('no release to compare');
-        expect(verdict?.textContent).not.toContain('No release newer than');
+        expect(verdict?.textContent).toContain('names no archive');
+        expect(verdict?.textContent).not.toContain('is the latest release');
     });
 
     it('says the row has no verdict until a check has produced a version', () => {
@@ -146,28 +144,6 @@ describe('a release that is downloaded and waiting', () => {
     });
 });
 
-describe('an install that cannot take a release', () => {
-    it('gives a container the command instead of the buttons', () => {
-        const { container } = open({
-            available: true,
-            latest: '1.4.2',
-            install: { kind: 'container', dir: '/app', can_stage: false, reason: 'this server runs inside a container' },
-        });
-        expect(container.querySelector('[data-testid="update-download"]')).toBeNull();
-        expect(container.querySelector('[data-testid="update-check-now"]')).toBeNull();
-        expect(container.textContent).toContain('this server runs inside a container');
-        expect(container.querySelector('code')?.textContent).toContain('docker compose pull');
-    });
-
-    it('gives a development tree the reason', () => {
-        const { container } = open({
-            install: { kind: 'source', dir: '/src/MIKE', can_stage: false, reason: 'this build reports its version as "dev"' },
-        });
-        expect(container.querySelector('[data-testid="update-download"]')).toBeNull();
-        expect(container.textContent).toContain('this build reports its version as "dev"');
-    });
-});
-
 describe('staged and waiting for a restart', () => {
     it('says what is on disk, where the previous release went, and how to roll back', () => {
         const { container } = open({ staged_version: '1.4.2', backup_path: '/opt/mike/.update-backup' });
@@ -207,18 +183,19 @@ describe('staged and waiting for a restart', () => {
 });
 
 describe('who decided', () => {
-    // The organization switch: nothing to click, and one sentence saying why, in place of the buttons.
-    it('replaces every action with the sentence naming the organization', () => {
-        const { container } = open({ disabled: true, available: true, latest: '1.4.2', prepared_version: '1.4.2' });
+    it('replaces every action with the sentence naming the administrator', () => {
+        const { container } = open({ managed: true, available: true, latest: '1.4.2', prepared_version: '1.4.2' });
         const toggle = container.querySelector<HTMLButtonElement>('button[role="switch"]');
         expect(toggle?.disabled).toBe(true);
         expect(toggle?.getAttribute('aria-checked')).toBe('false');
         expect(container.querySelector('[data-testid="update-managed"]')?.textContent)
-            .toContain('Updates are managed by your organization');
+            .toContain('Updates are managed by your administrator');
         expect(container.querySelector('[data-testid="update-check-now"]')).toBeNull();
         expect(container.querySelector('[data-testid="update-download"]')).toBeNull();
         expect(container.querySelector('[data-testid="update-install"]')).toBeNull();
         expect(container.querySelector('[data-testid="update-verdict"]')).toBeNull();
+        expect(container.querySelector('code')).toBeNull();
+        expect(container.textContent).not.toContain('docker compose');
         // The switch's description is what tells a screen reader the control is inert for a reason.
         expect(toggle?.getAttribute('aria-describedby')).toBe('update-check-desc');
     });
