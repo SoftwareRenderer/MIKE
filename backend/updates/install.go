@@ -1,6 +1,7 @@
 package updates
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -46,7 +47,7 @@ func classifyInstall(installDir, version string, markers []string) Install {
 			return Install{
 				Kind:   KindContainer,
 				Dir:    dir,
-				Reason: "this server runs inside a container, where a replaced binary is lost the next time the image is started; pull the image instead",
+				Reason: "this server runs from a container image, whose files are replaced by pulling the image",
 			}
 		}
 	}
@@ -54,14 +55,14 @@ func classifyInstall(installDir, version string, markers []string) Install {
 		return Install{
 			Kind:   KindSource,
 			Dir:    dir,
-			Reason: "this build reports its version as " + quoteOrEmpty(version) + ", so there is no release to compare it with",
+			Reason: fmt.Sprintf("this build runs version %s, which is not a release version, so there is no release to update it from", quoteOrEmpty(version)),
 		}
 	}
 	if dir == "" || !isReleaseLayout(dir) {
 		return Install{
 			Kind:   KindUnknown,
 			Dir:    dir,
-			Reason: "the directory this binary runs from is not shaped like an unpacked release, so nothing here can be safely replaced",
+			Reason: "this binary does not run from a directory shaped like an unpacked release, so nothing here can be safely replaced",
 		}
 	}
 	return Install{Kind: KindPackaged, Dir: dir, CanStage: true}

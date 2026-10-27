@@ -2,6 +2,7 @@ package updates
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -34,8 +35,8 @@ func TestADisabledDeploymentRefusesEveryStep(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if !svc.Status(Settings{}).Disabled {
-		t.Errorf("the answer does not say updates are disabled")
+	if !svc.Status(Settings{}).Managed {
+		t.Errorf("the answer does not say updates are managed")
 	}
 
 	fetches := f.fetcher.getCalls
@@ -81,10 +82,75 @@ func TestADisabledServiceStillReportsItsInstallShape(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	st := s.Status(Settings{Enabled: true})
-	if !st.Disabled || st.Enabled {
-		t.Errorf("disabled=%v enabled=%v, want disabled and not enabled", st.Disabled, st.Enabled)
+	if !st.Managed || st.Enabled {
+		t.Errorf("managed=%v enabled=%v, want managed and not enabled", st.Managed, st.Enabled)
 	}
 	if st.Install.CanStage {
-		t.Errorf("the answer offers staging while disabled: %+v", st.Install)
+		t.Errorf("the answer offers staging while managed: %+v", st.Install)
+	}
+}
+
+// An install that cannot replace its own files is managed, even when it knows about a newer release. The
+// refusal comes before a byte is asked for, because a downloaded release sitting in a container image is the
+// worst outcome of a half-applied update.
+func TestAnInstallThatCannotTakeAReleaseIsManaged(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), ".dockerenv")
+	write(t, marker, "MARKER", 0o644)
+
+	cases := []struct {
+		name  string
+		opts  Options
+		wants []string
+	}{
+		{name: "a container image", opts: Options{Version: "1.4.0", InstallDir: releaseDir(t), ContainerMarkers: []string{marker}}, wants: []string{"managed by your administrator", "container image"}},
+		{name: "a development build", opts: Options{Version: "dev", ContainerMarkers: []string{}}, wants: []string{"managed by your administrator", "not a release version"}},
+		{name: "a binary outside a release layout", opts: Options{Version: "1.4.0", InstallDir: t.TempDir(), ContainerMarkers: []string{}}, wants: []string{"managed by your administrator", "unpacked release"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fetcher := &fakeFetcher{body: manifestDoc(t, map[string]any{"latest": "1.4.2"}), dlBody: goodArchive(t)}
+			o := tc.opts
+			o.Fetcher, o.Store, o.Now = fetcher, &fakeStore{}, fixedClock()
+			svc, err := New(o)
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+
+			st := svc.Status(Settings{Enabled: true, Answered: true})
+			if !st.Managed || st.Enabled {
+				t.Errorf("managed=%v enabled=%v, want managed and not enabled", st.Managed, st.Enabled)
+			}
+			if st.Install.CanStage {
+				t.Errorf("the answer offers staging: %+v", st.Install)
+			}
+
+			ctx := context.Background()
+			steps := map[string]func() error{
+				"check":   func() error { _, err := svc.Check(ctx, Settings{Enabled: true, Answered: true}); return err },
+				"prepare": func() error { _, err := svc.Prepare(ctx); return err },
+				"apply":   func() error { _, err := svc.Apply(ctx); return err },
+				"restart": func() error { return svc.Restart() },
+			}
+			for _, name := range []string{"check", "prepare", "apply", "restart"} {
+				err := steps[name]()
+				if err == nil {
+					t.Fatalf("%s ran on an install that cannot take a release", name)
+				}
+				if !errs.IsConflict(err) {
+					t.Errorf("%s error %q is not a conflict", name, err)
+				}
+				for _, want := range tc.wants {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("%s error %q does not say %q", name, err, want)
+					}
+				}
+			}
+			if fetcher.getCalls != 0 {
+				t.Errorf("a managed server made %d request(s) of the manifest", fetcher.getCalls)
+			}
+			if fetcher.dlCalls != 0 {
+				t.Errorf("a managed server downloaded %d archive(s)", fetcher.dlCalls)
+			}
+		})
 	}
 }

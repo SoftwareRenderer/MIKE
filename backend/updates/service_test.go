@@ -145,16 +145,10 @@ func TestCheckRecordsWhatIsNewer(t *testing.T) {
 		latest    string
 		wantAvail bool
 		wantAsset bool
-		// wantNote is the sentence the About tab shows when the check ran but could not compare: a
-		// state beside the answer, not a failure of it.
-		wantNote string
 	}{
 		{name: "a newer release with an archive", current: "1.4.0", latest: "1.4.2", wantAvail: true, wantAsset: true},
 		{name: "the same release", current: "1.4.2", latest: "1.4.2"},
 		{name: "a newer binary than the manifest", current: "1.5.0", latest: "1.4.2"},
-		// The version a development build carries is not comparable, and "cannot tell" is neither
-		// "current" nor "newer available".
-		{name: "a build with no release version", current: "dev", latest: "1.4.2", wantNote: "no release to compare"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -170,10 +164,7 @@ func TestCheckRecordsWhatIsNewer(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Check: %v", err)
 			}
-			if gotNote := tc.wantNote != "" && !strings.Contains(st.State.Note, tc.wantNote); gotNote {
-				t.Errorf("Note = %q, want a sentence saying %q", st.State.Note, tc.wantNote)
-			}
-			if tc.wantNote == "" && st.State.Note != "" {
+			if st.State.Note != "" {
 				t.Errorf("Note = %q on a check that had nothing to caveat", st.State.Note)
 			}
 			if st.State.Available != tc.wantAvail {
@@ -268,7 +259,7 @@ func TestStateSurvivesARestart(t *testing.T) {
 	store := &fakeStore{}
 	dir := releaseDir(t)
 
-	first, err := New(Options{Version: "1.4.0", Store: store, Fetcher: &fakeFetcher{body: manifestDoc(t, nil)}, InstallDir: dir, Now: fixedClock()})
+	first, err := New(Options{Version: "1.4.0", Store: store, Fetcher: &fakeFetcher{body: manifestDoc(t, nil)}, InstallDir: dir, ContainerMarkers: []string{}, Now: fixedClock()})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -276,7 +267,7 @@ func TestStateSurvivesARestart(t *testing.T) {
 		t.Fatalf("Check: %v", err)
 	}
 
-	second, err := New(Options{Version: "1.4.0", Store: store, Fetcher: &fakeFetcher{}, InstallDir: dir, Now: fixedClock()})
+	second, err := New(Options{Version: "1.4.0", Store: store, Fetcher: &fakeFetcher{}, InstallDir: dir, ContainerMarkers: []string{}, Now: fixedClock()})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

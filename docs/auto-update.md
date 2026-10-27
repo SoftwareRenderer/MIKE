@@ -6,8 +6,8 @@ preference, or the `/api/updates/*` routes.
 Update checks involve executing network-provided code, so the process is designed around multiple safety refusals:
 
 - **Updates are purely opt-in.** Users must first opt-in to checks and then explicitly click *Install* to modify the installation directory.
-- **Containers are excluded.** Since changes to image layers are volatile, containers receive instructions to run `docker compose pull` instead of downloading files directly.
-- **Non-release builds are excluded.** Development checkouts and builds whose siblings do not match a release layout do not self-modify.
+- **A managed deployment does none of it.** A server whose release is decided elsewhere answers `managed` and refuses all four actions before anything reaches the network or the disk. Two things make a deployment managed: the `MIKE_DISABLE_UPDATES` switch, and an install that cannot replace its own files. The install shapes that cannot are a container image, where a swapped binary survives `docker restart` but is gone after the next `compose up`; a build whose version is not a release's; and a binary whose siblings do not match a release layout. The shape is decided once, by `classifyInstall`.
+- **A managed server answers one sentence.** Settings → About disables the control and says *Updates are managed by your administrator.* It shows no verdict, no reason paragraph and no command. What a person with an image can do is run `docker compose pull`, and whether to do that is their operator's call rather than this screen's.
 
 ## The manifest
 
@@ -85,11 +85,15 @@ The `update_check_enabled` configuration has three states:
 | `false` | Declined. Checks are disabled. |
 | `true` | Enabled. The server performs a daily manifest check. |
 
-The `MIKE_DISABLE_UPDATES` environment variable overrides all other settings. If set to `1`, updates are completely disabled. `Status` answers `disabled`, and the About tab indicates that updates are managed by the organization.
+The `MIKE_DISABLE_UPDATES` environment variable overrides all other settings. If set to `1`, updates are completely disabled. `Status` answers `managed`, and the About tab says updates are managed by the administrator.
 
-Update prompts are managed by the client. If a user's preference is 'unanswered', the browser prompts them on boot. Dismissing the prompt without answering will cause it to reappear on the next boot.
+The other cause is the install shape, and it answers the same way: `managed` is the switch **or** `install.can_stage == false`, computed in one place so the client that hides the click and the refusal that backs it up cannot disagree. Which of the two made a process managed is logged once at boot, so the operator's log is the record.
 
-Refusals return a message displayed in the About tab. Containers include the `docker compose pull` command. The system distinguishes release builds from source checkouts by checking for the presence of `prompts/*.tmpl` beside the binary.
+Update prompts are managed by the client. If a user's preference is 'unanswered', the browser prompts them on boot. Dismissing the prompt without answering will cause it to reappear on the next boot. A managed server is never asked: no prompt, no daily check, no preference written on its behalf.
+
+A refusal is a conflict carrying a sentence the browser may show. A managed install's refusal names who manages the release and repeats the shape's cause; `Install.Reason` holds that cause, and the status answer ships it as `install.reason` for whoever reads it, while the client renders the one sentence and nothing else. A release build is told from a source checkout by the presence of `prompts/*.tmpl` beside the binary.
+
+Tests: `backend/updates/disable_test.go` (both causes, all four steps, zero requests) and `TestAManagedInstallRefusesEveryUpdateRoute` in `backend/server/handler_updates_test.go`.
 
 ## Prepare: fetch, verify, keep
 
@@ -132,10 +136,10 @@ A process with no restart path (e.g., started by hand) is refused.
 | Route | Egress | Refuses when |
 |---|---|---|
 | `GET /api/updates/status` | none | never |
-| `POST /api/updates/check` | one manifest GET | `MIKE_DISABLE_UPDATES=1` or preference is off |
-| `POST /api/updates/prepare` | the archive | `MIKE_DISABLE_UPDATES=1`, no newer release known, or update already running |
-| `POST /api/updates/apply` | none | `MIKE_DISABLE_UPDATES=1`, a task turn is running, or no archive downloaded |
-| `POST /api/updates/restart` | none | `MIKE_DISABLE_UPDATES=1`, nothing staged, or no restart path |
+| `POST /api/updates/check` | one manifest GET | `MIKE_DISABLE_UPDATES=1`, the preference is off, or the install is managed |
+| `POST /api/updates/prepare` | the archive | `MIKE_DISABLE_UPDATES=1`, the install is managed, no newer release known, or an update already running |
+| `POST /api/updates/apply` | none | `MIKE_DISABLE_UPDATES=1`, the install is managed, a task turn is running, or no archive downloaded |
+| `POST /api/updates/restart` | none | `MIKE_DISABLE_UPDATES=1`, the install is managed, nothing staged, or no restart path |
 
 All routes require a session cookie and CSRF protection. Bearer tokens are not permitted. `prepare` and `apply` run as detached operations to ensure they complete even if the browser tab is closed.
 

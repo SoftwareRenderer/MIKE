@@ -16,12 +16,9 @@
     } = $props();
 
     const status = $derived(updateCheck.status);
-    const install = $derived(status?.install ?? null);
-    const managed = $derived(status?.disabled === true);
-    /** Only a packaged install has a release layout it may replace; everything else reads the reason. */
-    const canStage = $derived(install?.can_stage === true);
-    // The organization switch answers for every browser, so the toggle shows the server's answer, inert,
-    // with the sentence naming it in place of everything a person could click.
+    // Somewhere else decides this deployment's release, so the toggle cannot be changed and the sentence
+    // naming who manages the release replaces every action.
+    const managed = $derived(status?.managed === true);
     const enabledNow = $derived(!managed && enabled === true);
     const busy = $derived(updateCheck.phase !== 'idle' || !!status?.working);
     const prepared = $derived(status?.prepared_version || '');
@@ -33,7 +30,6 @@
     // The swap landed and this process cannot restart itself; the sentence says how to finish it.
     const restartNote = $derived(updateCheck.lastApplied?.restart_note || '');
 
-    // A version that cannot be compared is not "up to date", so the server's note takes this row.
     const verdict = $derived.by(() => {
         const st = status;
         if (!st) return '';
@@ -107,7 +103,7 @@
                     class="btn-update-apply btn-update-card"
                     data-testid="update-install"
                     onclick={() => void updateCheck.apply()}
-                    disabled={busy || !canStage}
+                    disabled={busy}
                     title={t('updates.installHint')}
                 >{updateCheck.phase === 'applying' ? t('updates.installing') : t('updates.install', { version: prepared })}</button>
             </div>
@@ -131,40 +127,31 @@
                         class="btn-update-restart btn-update-card"
                         data-testid="update-restart"
                         onclick={() => void updateCheck.restart()}
-                        disabled={busy || !canStage}
+                        disabled={busy}
                         title={t('updates.restartHint')}
                     >{updateCheck.phase === 'restarting' ? t('updates.applying') : t('updates.restart')}</button>
                 {/if}
             </div>
         {/if}
 
-        {#if install && !canStage}
-            <div class="update-card">
-                <p class="update-card-line">{install.reason || t('updates.cannotStage')}</p>
-                {#if install.kind === 'container'}
-                    <p class="update-command"><code>{t('updates.pullCommand')}</code></p>
-                {/if}
-            </div>
-        {:else}
-            <div class="update-actions">
-                <button
-                    type="button"
-                    class="btn-update-check"
-                    data-testid="update-check-now"
-                    onclick={() => void updateCheck.checkNow()}
-                    disabled={busy}
-                    title={t('updates.checkHint')}
-                >{updateCheck.phase === 'checking' ? t('settings.checking') : t('updates.check')}</button>
-                <button
-                    type="button"
-                    class="btn-update-prepare"
-                    data-testid="update-download"
-                    onclick={() => void updateCheck.prepare()}
-                    disabled={busy || !status?.available || !!prepared}
-                    title={t('updates.downloadHint')}
-                >{updateCheck.phase === 'preparing' ? t('updates.downloading') : t('updates.download')}</button>
-            </div>
-        {/if}
+        <div class="update-actions">
+            <button
+                type="button"
+                class="btn-update-check"
+                data-testid="update-check-now"
+                onclick={() => void updateCheck.checkNow()}
+                disabled={busy}
+                title={t('updates.checkHint')}
+            >{updateCheck.phase === 'checking' ? t('settings.checking') : t('updates.check')}</button>
+            <button
+                type="button"
+                class="btn-update-prepare"
+                data-testid="update-download"
+                onclick={() => void updateCheck.prepare()}
+                disabled={busy || !status?.available || !!prepared}
+                title={t('updates.downloadHint')}
+            >{updateCheck.phase === 'preparing' ? t('updates.downloading') : t('updates.download')}</button>
+        </div>
 
         {#if updateCheck.fault}
             <p class="update-fault" role="status">{updateCheck.fault}</p>
@@ -233,17 +220,6 @@
     .update-card-line {
         margin: 0;
         font-size: var(--text-sm);
-        color: var(--color-text-primary);
-        overflow-wrap: anywhere;
-    }
-
-    .update-command {
-        margin: 6px 0 0;
-        font-size: var(--text-xs);
-    }
-
-    .update-command code {
-        font-family: var(--font-mono);
         color: var(--color-text-primary);
         overflow-wrap: anywhere;
     }

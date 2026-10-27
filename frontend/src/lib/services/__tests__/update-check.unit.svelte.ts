@@ -43,7 +43,7 @@ function status(over: Partial<UpdateStatus> = {}): UpdateStatus {
         enabled: true,
         answered: true,
         available: false,
-        disabled: false,
+        managed: false,
         install: { kind: 'packaged', dir: '/opt/mike', can_stage: true },
         manifest_url: 'https://getmike.dev/download/version.json',
         ...over,
@@ -226,14 +226,14 @@ describe('the dot', () => {
         expect(updateCheck.dot).toBe('question');
     });
 
-    it('stays dark when the organization forbids updates', async () => {
-        api.fetchUpdateStatus.mockResolvedValue(status({ answered: false, disabled: true }));
+    it('stays dark when the release is managed elsewhere', async () => {
+        api.fetchUpdateStatus.mockResolvedValue(status({ answered: false, managed: true }));
         await updateCheck.refresh();
         expect(updateCheck.dot).toBe('none');
     });
 
-    it('is dark on a build whose version cannot be compared', async () => {
-        api.fetchUpdateStatus.mockResolvedValue(status({ available: false, note: 'this build reports its version as "dev"' }));
+    it('does not light the dot for a newer release a managed server cannot take', async () => {
+        api.fetchUpdateStatus.mockResolvedValue(status({ managed: true, available: true, latest: '1.4.2' }));
         await updateCheck.refresh();
         expect(updateCheck.dot).toBe('none');
     });
@@ -286,8 +286,8 @@ describe('the opt-in question', () => {
     });
 });
 
-describe('a deployment that forbids updates', () => {
-    const forbidden = { disabled: true, answered: false, available: true, latest: '1.4.2', prepared_version: '1.4.2' };
+describe('a deployment whose release is managed elsewhere', () => {
+    const forbidden = { managed: true, answered: false, available: true, latest: '1.4.2', prepared_version: '1.4.2' };
 
     it('asks, checks, downloads and prompts nothing', async () => {
         api.fetchUpdateStatus.mockResolvedValue(status(forbidden));

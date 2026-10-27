@@ -39,7 +39,7 @@ class UpdateCheckStore {
         await this.refresh();
         // A deployment that forbids updates hears nothing about them: no question, no check, no
         // download, and no preference written on its behalf.
-        if (this.status?.disabled) return;
+        if (this.status?.managed) return;
         // The question first: while it is unanswered checks are off, so there is nothing to ask the
         // manifest about, and a slow manifest must not delay the dialog by its own round trip.
         await this.askConsent();
@@ -69,7 +69,7 @@ class UpdateCheckStore {
     /** The dot on the Settings icon. */
     get dot(): UpdateDot {
         const status = this.status;
-        if (!status || status.disabled) return 'none';
+        if (!status || status.managed) return 'none';
         if (status.prepared_version) return 'ready';
         if (status.available) return 'update';
         return this.consentOwed ? 'question' : 'none';
@@ -78,7 +78,7 @@ class UpdateCheckStore {
     /** Whether this install may be offered the opt-in question at all. */
     get consentOwed(): boolean {
         const status = this.status;
-        return !!status && !status.answered && !status.disabled;
+        return !!status && !status.answered && !status.managed;
     }
 
     get busy(): boolean {
