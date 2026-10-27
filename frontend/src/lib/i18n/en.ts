@@ -276,6 +276,8 @@ const catalog = {
     'settings.providersEmptyHint': 'Add an LLM provider to get started. Supports any OpenAI-compatible API.',
     'settings.validateWorker': 'Please select a Worker provider and model.',
     'settings.validateUtility': 'Please select a Utility provider and model.',
+    'settings.pairSaveFailed': 'The Worker and Utility defaults were not saved. Press Save again to set them.',
+    'settings.validatePairNoURL': '{title} provider has no URL. Enter one, or choose another provider.',
     'settings.agentConnectionTest': 'Agent provider — binary checked at runtime',
     'settings.discardTitle': 'Discard changes?',
     'settings.discardMessage': 'You have unsaved changes. Discard them?',

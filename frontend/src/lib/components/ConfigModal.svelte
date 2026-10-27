@@ -3,7 +3,7 @@
     import { tick } from 'svelte';
     import type { Config, ProjectUpdates, Provider } from '$lib/types';
     import { isAgentProvider } from '$lib/types';
-    import { getModelName, getProviderDisplayName } from '$lib/utils/providers';
+    import { getModelName, getProviderDisplayName, providerRef } from '$lib/utils/providers';
     import { t } from '$lib/i18n';
     import { formatMB, usdSymbol } from '$lib/utils/format';
     import { CA_DOWNLOAD, updateConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi, testMCPServer, updateProject } from '$lib/api';
@@ -107,17 +107,12 @@
     const currencySymbol = $derived(usdSymbol());
 
     // -- Provider management --
-    /** The reference string for a provider: its stable ID (LLM) or name (agent). */
-    function providerRef(p: { id?: number; name?: string; kind?: string }): string {
-        return p.kind === 'agent' ? (p.name || '') : String(p.id ?? 0);
-    }
-
     /** A row the server derives from an installed agent extension, not one the user typed. */
     function isAgentDraft(p: ProviderDraft): boolean {
         return p.kind === 'agent';
     }
 
-    /** Find a provider draft by its reference string (LLM ID or agent name). */
+    /** Find a provider draft by its reference string. */
     function findProviderByRef(ref: string) {
         if (!ref) return null;
         return providers.find(p => providerRef(p) === ref) || null;
@@ -510,6 +505,10 @@
             if (prov.kind === 'agent') return !!model;
             return !!model && prov.models.some(m => m.name.trim() === model);
         };
+        const addressable = (prov: ProviderDraft | null) =>
+            prov === null || isAgentDraft(prov) || !!prov.url.trim();
+        if (!addressable(workerProv)) return t('settings.validatePairNoURL', { title: t('settings.pair.worker') });
+        if (!addressable(utilityProv)) return t('settings.validatePairNoURL', { title: t('settings.pair.utility') });
         if (!workerProvider || !workerModel || !modelValid(workerProv, workerModel)) {
             return t('settings.validateWorker');
         }
@@ -600,6 +599,36 @@
         }
     }
 
+    function draftBehindRef(ref: string): ProviderDraft | null {
+        if (!ref) return null;
+        const p = findProviderByRef(ref);
+        return p && !isAgentDraft(p) && !p.id ? p : null;
+    }
+
+    function savedIDForDraft(draft: ProviderDraft, saved: Provider[]): string {
+        const url = (draft.url || '').trim();
+        const rowsHere = saved.filter(p => !isAgentProvider(p) && (p.url || '').trim() === url);
+        if (rowsHere.length === 0) return '';
+        const position = providers
+            .filter(d => !isAgentDraft(d) && (d.url || '').trim() === url)
+            .findIndex(d => d.uid === draft.uid);
+        const row = rowsHere[position] ?? rowsHere[0];
+        return row.id ? String(row.id) : '';
+    }
+
+    /**
+     * Adopts the IDs the save just created, so the form refers to providers the way the server does. A
+     * draft left without an ID would be given a fresh one by the next save, and a fresh ID orphans the
+     * API key sealed against the old one.
+     */
+    function adoptSavedIDs(saved: Provider[]): void {
+        for (const d of providers) {
+            if (isAgentDraft(d) || d.id) continue;
+            const id = savedIDForDraft(d, saved);
+            if (id) d.id = Number(id);
+        }
+    }
+
     async function handleSave() {
         const validationError = validatePrimaryProviders();
         if (validationError) {
@@ -660,13 +689,9 @@
                     }
                     return base;
                 });
-            const cfg = await updateConfig(updateCheckPayload({
+            const body = updateCheckPayload({
                 workspace_dir: config?.workspace_dir || '',
                 providers: savedProviders,
-                worker_provider: workerProvider,
-                worker_model: workerModel,
-                utility_provider: utilityProvider,
-                utility_model: utilityModel,
                 default_auto_commit: defaultAutoCommit,
                 default_auto_merge: defaultAutoMerge,
                 default_subtasks_auto_merge: defaultSubtasksAutoMerge,
@@ -683,8 +708,34 @@
                 // The whole registry every save: a server missing from this body is a deleted one. Under
                 // the operator's lock nothing is sent, so nothing is claimed.
                 ...(mcpLocked ? {} : { mcp_servers: mcpServersPayload(mcpServers) }),
-            } as Config));
-            appStore.config = cfg;
+            } as Config);
+            const workerDraft = draftBehindRef(workerProvider);
+            const utilityDraft = draftBehindRef(utilityProvider);
+            if (!workerDraft) { body.worker_provider = workerProvider; body.worker_model = workerModel; }
+            if (!utilityDraft) { body.utility_provider = utilityProvider; body.utility_model = utilityModel; }
+            let saved = await updateConfig(body);
+            if (workerDraft || utilityDraft) {
+                adoptSavedIDs(saved.providers || []);
+                const pair = {} as Config;
+                let pending = false;
+                if (workerDraft?.id) {
+                    workerProvider = providerRef(workerDraft);
+                    pair.worker_provider = workerProvider;
+                    pair.worker_model = workerModel;
+                    pending = true;
+                }
+                if (utilityDraft?.id) {
+                    utilityProvider = providerRef(utilityDraft);
+                    pair.utility_provider = utilityProvider;
+                    pair.utility_model = utilityModel;
+                    pending = true;
+                }
+                if (!pending) error = t('settings.pairSaveFailed');
+                else {
+                    try { saved = await updateConfig(pair); } catch { error = t('settings.pairSaveFailed'); }
+                }
+            }
+            appStore.config = saved;
             await saveProjectDefaults();
             uiStore.notifyOnReview = notifyOnReview;
             uiStore.persistNotifyOnReview();
@@ -692,7 +743,7 @@
             uiStore.persistAutoMaximizeCodeViewer();
             // The switch may have just answered the question the dot is waiting on.
             void updateCheck.refresh();
-            onSaved();
+            if (!error) onSaved();
         } catch (e) {
             error = String(e);
         } finally {

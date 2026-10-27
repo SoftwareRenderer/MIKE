@@ -25,12 +25,13 @@ export function displayModelName(name: string): string {
 }
 
 /**
- * The reference string for a provider: its stable integer ID (LLM) or name (agent).
+ * Returns the string that names a provider: an agent's name, a saved provider's ID, or the uid of a
+ * provider the server has not created yet. A draft carries the browser's own uid, so the server is never
+ * handed a reference it cannot resolve.
  */
-export function providerRef(p: { id?: number; name?: string; kind?: string; url?: string }): string {
-    return p.kind === 'agent' || (p.url || '').startsWith(AGENT_URL_PREFIX)
-        ? (p.name || '')
-        : String(p.id ?? 0);
+export function providerRef(p: { id?: number; name?: string; kind?: string; url?: string; uid?: string }): string {
+    if (p.kind === 'agent' || (p.url || '').startsWith(AGENT_URL_PREFIX)) return p.name || '';
+    return p.id ? String(p.id) : (p.uid || '');
 }
 
 /**
