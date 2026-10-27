@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-    baseName, isUnderPath, parentDir, sandboxMountFromPath,
-    sandboxMountPath, toExplorerPath,
+    baseName, getWorktreeDisplayPath, isUnderPath, parentDir, sandboxMountFromPath,
+    sandboxMountPath, toExplorerPath, toHomeRelative,
 } from '$lib/utils/path';
 
 /**
@@ -92,6 +92,37 @@ describe('the two cuts on a path', () => {
         // The explorers list this folder; the picker walks to it. One answer, from both.
         expect(parentDir('/p/docs/readme.md')).toBe('/p/docs');
         expect(baseName('/p/docs/readme.md')).toBe('readme.md');
+    });
+});
+
+describe('the display path', () => {
+    it('shortens a path under a home directory', () => {
+        expect(toHomeRelative('/home/mike/repos/kanban/.worktrees/proj-1/frost-amber'))
+            .toBe('~/repos/kanban/.worktrees/proj-1/frost-amber');
+    });
+
+    it('shows a path outside any home directory whole', () => {
+        expect(toHomeRelative('/mike/worktrees/proj-1/frost-amber')).toBe('/mike/worktrees/proj-1/frost-amber');
+        expect(toHomeRelative('/mike/projects/kanban')).toBe('/mike/projects/kanban');
+    });
+
+    it('leaves a home directory with nothing under it alone', () => {
+        expect(toHomeRelative('/home/mike')).toBe('/home/mike');
+    });
+
+    it('answers an empty path with no label', () => {
+        expect(toHomeRelative('')).toBe('');
+    });
+
+    it('keeps the worktree folders in front of the task ID', () => {
+        expect(getWorktreeDisplayPath('/mike/worktrees', 'proj-1', 'frost-amber'))
+            .toBe('/mike/worktrees/proj-1/frost-amber');
+        expect(getWorktreeDisplayPath('/home/mike/kanban/.worktrees/', 'proj-1', 'frost-amber'))
+            .toBe('~/kanban/.worktrees/proj-1/frost-amber');
+    });
+
+    it('answers nothing when the worktree root is unknown', () => {
+        expect(getWorktreeDisplayPath('', 'proj-1', 'frost-amber')).toBe('');
     });
 });
 

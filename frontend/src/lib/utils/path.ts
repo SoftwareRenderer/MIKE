@@ -1,12 +1,10 @@
 /**
- * Convert an absolute path to a `~/` prefixed display path.
- * Falls back to the basename if it doesn't match a home directory pattern.
+ * Convert an absolute path to a `~/` prefixed display path. A path outside a home directory is shown
+ * whole, because the last part of a worktree path is a task ID, which tells the reader nothing on its own.
  */
 export function toHomeRelative(path: string): string {
-    if (!path) return '';
     const match = path.match(/^\/home\/[^/]+\/(.+)$/);
-    if (match) return '~/' + match[1];
-    return baseName(path) || path;
+    return match ? '~/' + match[1] : path;
 }
 
 /**
