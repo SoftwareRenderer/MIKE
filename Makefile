@@ -50,6 +50,14 @@ bridge: ## Build the sandbox-bridge binary committed at sandbox/sandbox-bridge
 bridge-check: ## Fail if sandbox/sandbox-bridge was not built from this tree's sources
 	@scripts/bridge-stamp.sh check $(BRIDGE_STAMP)
 
+IMAGE_ENGINE ?= $(shell command -v docker >/dev/null 2>&1 && echo docker || echo podman)
+IMAGE_TAG    ?= getmike/mike:local
+IMAGE_ARGS   = --build-arg VERSION=$(VERSION) $(if $(GVISOR_RELEASE),--build-arg GVISOR_RELEASE=$(GVISOR_RELEASE),)
+
+.PHONY: image
+image: ## Build the application image, stamped docker-<version>
+	$(IMAGE_ENGINE) build -t $(IMAGE_TAG) $(IMAGE_ARGS) -f Dockerfile .
+
 # ---------------------------------------------------------------------------
 # Scope
 # ---------------------------------------------------------------------------

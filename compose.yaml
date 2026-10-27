@@ -27,7 +27,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        VERSION: ${MIKE_VERSION:-compose}
+        VERSION: ${MIKE_VERSION:-}
         GVISOR_RELEASE: ${GVISOR_RELEASE:-latest}
     image: getmike/mike:${MIKE_IMAGE_TAG:-local}
     restart: unless-stopped

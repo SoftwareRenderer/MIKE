@@ -17,7 +17,8 @@ ARG NODE_IMAGE=node:22-slim
 ARG RUNTIME_IMAGE=debian:trixie-slim
 # gVisor release channel or date (e.g., 20260928). Defaults are handled in the runtime stage.
 ARG GVISOR_RELEASE
-# Version string embedded into the binary.
+# The release tag stamped into the binary as docker-<tag>. The build context has no .git directory, so a
+# build that knows its release passes it with --build-arg VERSION=. Without it the server reports docker.
 ARG VERSION
 
 # ── Stage 1: frontend (Vite → /build/dist) ───────────────────────────────────
@@ -41,8 +42,8 @@ COPY --from=web /build/dist ./frontend/dist
 ENV CGO_ENABLED=0
 ARG VERSION
 # Build the server (release tags) and the sandbox bridge.
-RUN : "${VERSION:=docker}" && \
-    go build -tags release -trimpath -buildvcs=false -ldflags "-s -w -X mike/backend/server.Version=${VERSION}" \
+RUN version="docker${VERSION:+-$VERSION}" && \
+    go build -tags release -trimpath -buildvcs=false -ldflags "-s -w -X mike/backend/server.Version=${version}" \
       -o /out/mike . && \
     go build -trimpath -buildvcs=false -ldflags "-s -w" \
       -o /out/sandbox-bridge ./pkg/bridge/agent

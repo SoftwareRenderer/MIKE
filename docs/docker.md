@@ -16,7 +16,7 @@ stops is `docs/lifecycle.md`.
 - **Build images from source, never from existing artifacts.** `.dockerignore` keeps `frontend/dist`, `dist/` packages, the committed bridge, and `node_modules` out of the context. Stage 2 copies `frontend/dist` from Stage 1 so that `//go:embed` can bundle it into the binary. `prompts/` are included in full, including tracked skill packages, so deployed tasks have the same skills as source runs.
 - **The server binary is a release build and is CGO-free.** A `-tags release` build serves its own embedded frontend and refuses `--frontend-dist`. `CGO_ENABLED=0` ensures the bridge is statically linked, allowing it to run on guests with different C libraries.
 - **gVisor is installed as a release bundle with its sidecar tree.** The bundle's sha512 is verified before execution. `runsc` uses binaries in `gvisor-bin/` and expects that directory to be adjacent; the extraction must be complete. Installing a single binary from the bundle is insufficient.
-- **Each stage defines its own `ARG` defaults.** Whether a global `ARG` default reaches a stage that re-declares the name depends on the builder; we use podman/buildah 5.8. A `:=` default in the stage costs nothing, and `--build-arg` still takes precedence.
+- **Each stage defines its own `ARG` defaults.** Whether a global `ARG` default reaches a stage that re-declares the name depends on the builder; we use podman/buildah 5.8. A `:=` default in the stage costs nothing, and `--build-arg` still takes precedence. `VERSION` takes its default in the build stage's shell instead, because the string stamped there is `docker-<tag>` rather than the argument itself.
 - **Stages verify tool availability without root privileges.** `podman --runtime-flag ignore-cgroups=true --version`, `runsc --version`, the `runsc` PATH name, and the sidecar tree are all checked at build. `podman info` is not checked because it requires privileges available only at runtime; the entrypoint probes it instead.
 - **`privileged` and `seccomp=unconfined` enable the nested runtime.** `compose.yaml` binds to `127.0.0.1` for this reason; TLS is mandatory, and the Host allowlist defaults to `localhost` to prevent unauthorized access. Task work runs with `--cap-drop ALL` inside gVisor.
 - **Storage is kept separate from the engine's overlayfs.** Podman refuses `overlay` on `overlayfs`, so `compose.yaml` provides a volume for `/var/lib/containers`. The entrypoint falls back to `fuse-overlayfs` or `vfs` if needed.
@@ -71,8 +71,9 @@ docker compose logs mike  # a data directory with no passkey prints a boxed pair
 ```
 
 `up` builds only when the image named under `image:` is absent; `--build` forces a rebuild. Set
-`MIKE_IMAGE_TAG` to the tag of an image you already built and it is used as-is. Open
-`https://localhost:3000` and register a passkey with the code from the log.
+`MIKE_IMAGE_TAG` to the tag of an image you already built and it is used as-is. A compose build takes its
+version from `MIKE_VERSION`, because compose cannot run git, and an unset one leaves the image reporting
+only docker. Open `https://localhost:3000` and register a passkey with the code from the log.
 
 ### Your own compose file
 
@@ -150,13 +151,20 @@ server is the listen address plus the Host allowlist, never the certificate.
 ## Rebuild it
 
 ```bash
-docker build -t getmike/mike:local -f Dockerfile .
+make image                                            # This stamps docker-v0.1.1 when the tree is at v0.1.1.
+docker build -t getmike/mike:local -f Dockerfile .    # This stamps a bare docker, because no tag was passed.
 ```
+
+`make image` reads this tree's version from git, so the image names the release it was built from:
+`docker-v0.1.1` at the tag, and `docker-v0.1.1-22-gfd0df1b98` 22 commits past it. `/api/version` and
+Settings answer that string. The build context has no `.git` directory, so any other build has to be told
+the tag with `--build-arg VERSION=v0.1.1`. `IMAGE_ENGINE` chooses docker or podman, `IMAGE_TAG` names the
+image, and `GVISOR_RELEASE` pins the runtime.
 
 | Build arg | Meaning |
 |---|---|
 | `GVISOR_RELEASE` | `latest`, or a release spelled as its bare date: `20260928` |
-| `VERSION` | stamped into the binary and answered by `/api/version` |
+| `VERSION` | the release tag to stamp; the binary carries `docker-<tag>`, answered by `/api/version` |
 | `GO_IMAGE`, `NODE_IMAGE`, `RUNTIME_IMAGE` | the three base images |
 
 Pin the release when the runtime a rebuild downloads must be the one you tested; leave it `latest`
@@ -181,13 +189,15 @@ Either way the bundle's published sha512 is verified before anything is executed
 
 ## Checking this
 
-No gate builds this image: the `Makefile` has no docker target and `make check` never reads
+No gate builds this image: `make image` builds it only when invoked, and `make check` never reads
 `Dockerfile`. So two commands, and be clear about what each one catches.
 
 ```bash
 make docs-check          # a path or pointer in these lines that has stopped resolving
 docker build -t mike-image-check -f Dockerfile .
 ```
+
+That check build names no `VERSION`, so the image it produces reports only docker.
 
 The build is the only thing that catches a wrong gVisor object, a missing package in the apt list or
 a stage that lost its `ARG` default — it fails on the step, with the step printed. After a run, the
