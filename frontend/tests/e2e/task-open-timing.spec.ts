@@ -546,8 +546,10 @@ test.describe('Where a task open spends its time', () => {
     await annotateLevers(page, projectId, taskId, slow, 'open on a 400 kbps link', false);
     expect(slow.firstRowAt).toBeGreaterThan(win!.end);
 
-    // One row lands, so the thread's ETag moves. The gap between the two `wire` figures is the browser's
-    // own conditional revalidation at work: an unchanged thread costs a round trip, a moved one costs the body.
+    // One row lands, so the next read is a different window. Its size proves nothing: the window holds five
+    // rows, and appending one drops the oldest, so the payload moves by the difference between two rows.
+    // What this asserts is what its title says. The read carried a body, and on a link this slow the open
+    // waits behind that body rather than behind the server.
     await seedConversation(page, projectId, taskId, 1, 'one row more #i#');
     await gotoProject(page);
     await page.waitForSelector('.project-item', { timeout: 10000 });
@@ -555,10 +557,13 @@ test.describe('Where a task open spends its time', () => {
     const movedWin = moved.calls.find(c => c.path === '/api/…/task/messages');
     expect(movedWin, 'the second open never read the window').toBeTruthy();
     annotate(`the same read after one row arrived: ${movedWin!.bytes} B compressed, ${movedWin!.wire} B `
-      + `actually sent, ${movedWin!.end - movedWin!.start}ms (unchanged thread: ${win!.bytes} B, `
+      + `actually sent, ${movedWin!.end - movedWin!.start}ms (the read before it: ${win!.bytes} B, `
       + `${win!.wire} B sent, ${win!.end - win!.start}ms)`);
-    expect(movedWin!.wire, 'a moved thread sent fewer bytes than an unchanged one')
-      .toBeGreaterThanOrEqual(win!.wire);
+    expect(movedWin!.bytes, 'the moved thread was answered with no body').toBeGreaterThan(0);
+    const transfer = movedWin!.end - movedWin!.responseStart;
+    const serverTime = movedWin!.responseStart - movedWin!.requestStart;
+    expect(transfer, `the body's transfer (${transfer}ms) is what the open waits behind, against `
+      + `${serverTime}ms of server`).toBeGreaterThan(serverTime);
   });
 
   test('what a provisional paint would show: how far the cached window lags', async ({ page }) => {

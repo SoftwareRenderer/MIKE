@@ -417,6 +417,10 @@ never marks the app offline, and nothing in the product puts a deadline on a wai
   dropped. `docs/reconnection.md → The Editor Buffer Across a Browser Being Away`.
 - **A task's status is never the answer to "is it still running"** — `taskIsInFlight` is, and the
   server-side mirror `terminalTurnStates` must agree with it.
+- **A screen that cannot order its own reading of a task against the board's copy asks the server** — a turn
+  that starts and ends between the two readings leaves the copy on the value it held. Left to the rule alone
+  the screen says "Agent is responding" over a finished task, with nothing left to tell it.
+  `docs/reconnection.md → A row reading the board's copy cannot be ordered against`.
 - **The offline mirror holds only what this browser received**, and a mirror landing paints a view that
   holds nothing rather than replacing one that holds something.
 - **The offline screen answers from the mirror** — its projects, board and config come out of IndexedDB with

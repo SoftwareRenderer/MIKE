@@ -2,7 +2,7 @@ import { test, expect, type Browser, type Page } from '@playwright/test';
 import { writeFileSync, rmSync, mkdirSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'path';
-import { csrfFetch, createTaskViaApi, navigateToTask } from './helpers';
+import { csrfFetch, createTaskViaApi, navigateToTask, selectProject } from './helpers';
 
 // Gutter line selection in the Explorer code editor: a click opens the Create
 // Task modal as an INTERACTIVE FLOATING WINDOW (no dim, app behind stays
@@ -24,12 +24,11 @@ import { csrfFetch, createTaskViaApi, navigateToTask } from './helpers';
 // navigates to the full task view; browser back restores the explorer with
 // the last-viewed file and its scroll position.
 //
-// Isolation: dedicated repo + project (/tmp/kanban-test-repo-line-task) —
-// never the shared kanban-test-repo, so file creation and task worktrees
-// cannot race with other specs' git operations in parallel workers.
+// Isolation: this file's repo is per worker (/tmp/kanban-test-repo-line-task-<worker>), never the shared
+// kanban-test-repo. A fixed name lets one worker delete a repo another worker is editing.
 
-const LT_REPO = '/tmp/kanban-test-repo-line-task';
-const PROJECT_NAME = 'kanban-test-repo-line-task';
+const WORKER = process.env.TEST_PARALLEL_INDEX || '0';
+const LT_REPO = `/tmp/kanban-test-repo-line-task-${WORKER}`;
 const LINES_FILE = 'lines.txt';
 // Tall file for the scroll-restoration test (must be scrollable).
 const LONG_FILE = 'long.txt';
@@ -121,7 +120,7 @@ test.describe('Editor gutter line selection → Create Task', () => {
   async function openProjectExplorer(page: Page) {
     await page.goto('/');
     await page.waitForSelector('.project-item', { timeout: 10000 });
-    await page.locator('.project-item', { hasText: PROJECT_NAME }).first().click();
+    await selectProject(page, projectId);
     await page.waitForSelector('.top-bar', { timeout: 10000 });
     await page.locator('.explorer-btn').click();
     await expect(page.locator('.explorer-view')).toBeVisible({ timeout: 10000 });
@@ -515,14 +514,20 @@ test.describe('Editor gutter line selection → Create Task', () => {
     await expect(page.locator('.task-detail-page:not(.floating)')).toBeVisible({ timeout: 10000 });
     await page.goBack();
     await expect(page.locator('.explorer-view')).toBeVisible({ timeout: 10000 });
-    // long.txt is the active file again
-    await expect(page.locator('.explorer-view .cm-content')).toContainText(`long line ${lineNo}`, { timeout: 10000 });
-    // Editor scroll restored near the saved offset
+    await expect(page.locator('.editor-tab.active .editor-tab-name'),
+      "the address bar named this file, so this is the tab that has to be open — the editor's text cannot "
+      + 'answer which file is open, because CodeMirror renders only the lines in view')
+      .toHaveText(LONG_FILE, { timeout: 10000 });
+    // For a few frames after a pane opens CodeMirror rewrites its own scroll offset, so a landing counts only
+    // for what the next frame keeps of it.
     await expect.poll(async () => {
       const top = await page.evaluate(() =>
         document.querySelector('.explorer-view .file-editor.active .cm-scroller')?.scrollTop ?? -1);
       return Math.abs(top - savedTop);
-    }, { timeout: 15000 }).toBeLessThanOrEqual(40);
+    }, {
+      timeout: 15000,
+      message: 'the restored scroll offset never landed — the pane kept the offset it was created with',
+    }).toBeLessThanOrEqual(40);
   });
 
   test('delete from the floating view removes the task', async ({ page }) => {

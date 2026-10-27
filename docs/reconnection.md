@@ -28,6 +28,7 @@ The app reconciles state when a tab regains focus, wakes from sleep, or is resto
 - Window `focus`.
 - `pageshow` (bfcache).
 - Clock jump (detects page suspension/sleep).
+- A task row reading the board's copy cannot be ordered against — see **A row reading the board's copy cannot be ordered against**.
 
 ### Reconciliation Logic
 Each view determines if it is "behind" by asking the server for a sync digest (`GET /api/.../sync`):
@@ -91,6 +92,14 @@ To ensure the UI correctly reflects whether a task is running, paused, or stoppe
 2. **The Board's Copy**: Used as a fallback.
 
 `TaskChat` reads the task row at mount to decide if it should show a "running" indicator or a "paused" bar, regardless of what the board thinks.
+
+### A row reading the board's copy cannot be ordered against
+
+`trustedExecutionState` decides from three values: the row as last read, the board's copy at that read, and the board's copy now. When the copy's value is what it was at the read, the reading wins. That is right for a board that never heard the task start, and wrong as a verdict: a turn that starts *and ends* between the read and the frame leaves the copy exactly where it was. A screen whose row read was slow then holds `running` over a finished task — "Agent is responding…" and a Stop button beside a header that says Idle, with nothing left to tell it, since the copy has stopped moving.
+
+So the disagreement is what asks the server. `TaskChat` runs the reconciliation a returning tab runs whenever it holds the task in flight while the board's copy denies it. The answer either changes what the screen holds or changes nothing; a task genuinely running is asked once, not polled, because confirming it moves no dependency. That read also brings back a transcript whose rows went out before the screen subscribed.
+
+`frontend/tests/e2e/missed-turn-end.spec.ts` holds a task row read's bytes until that turn has ended, then expects the Stop button to go. It is red when the hierarchy above is left to decide alone.
 
 ## Offline Mode & Mirroring
 

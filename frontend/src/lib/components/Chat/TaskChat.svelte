@@ -226,6 +226,15 @@
         if (was === undefined || taskIsInFlight(taskExecutionState) || !taskIsInFlight(was)) return;
         stream.dropUnresolvedToolCalls();
     });
+
+    // Our own reading of the task says the turn is running and the board's copy says it is not, and the rule
+    // that settles such a disagreement keeps the reading — even after the turn ends, because the copy is back
+    // on the value it held. So the disagreement asks the server once, the way a returning tab does
+    // (docs/reconnection.md → A row reading the board's copy cannot be ordered against).
+    $effect(() => {
+        if (!taskIsInFlight(knownExecutionState) || taskIsInFlight(taskExecutionState)) return;
+        void reconcileAfterAbsence();
+    });
     let queueStatus = $derived(commitQueueStore.statusOf(projectId, taskId));
 
     let threads: Thread[] = $state([]);

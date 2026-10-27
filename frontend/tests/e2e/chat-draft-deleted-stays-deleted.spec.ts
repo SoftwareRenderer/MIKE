@@ -57,6 +57,17 @@ async function deleteAll(textarea: Locator): Promise<void> {
   await expect(textarea).toHaveValue('');
 }
 
+/**
+ * Click a card once the board has stopped animating a move. A card that just changed column stays on screen
+ * while the node it left fades out, so `[data-task-id]` matches two elements for a moment after the move.
+ */
+async function clickCard(page: Page, taskId: string): Promise<void> {
+  const card = page.locator(`.card[data-task-id="${taskId}"]`);
+  await expect(card, 'the board holds one node for this task: the move it just made has finished fading')
+      .toHaveCount(1);
+  await card.click();
+}
+
 test.describe('Chat draft text the person deleted', () => {
   test.beforeEach(async ({ page }) => {
     await gotoProject(page);
@@ -89,9 +100,9 @@ test.describe('Chat draft text the person deleted', () => {
     await deleteAll(textarea);
 
     // A card click is a client-side switch: no reload, and this task's chat is rebuilt on the way back.
-    await page.locator(`[data-task-id="${awayId}"]`).click();
+    await clickCard(page, awayId);
     await expect(page.locator('.chat-form textarea')).toBeVisible();
-    await page.locator(`[data-task-id="${taskId}"]`).click();
+    await clickCard(page, taskId);
     await expect(page.locator('.chat-form textarea')).toBeVisible();
 
     await expect(page.locator('.chat-form textarea'), 'the reopened box holds text nobody deleted')

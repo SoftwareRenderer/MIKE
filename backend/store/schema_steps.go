@@ -81,7 +81,7 @@ func (s *Store) checkSchemaStepsAhead(steps []schemaStep) error {
 	}
 	if len(oneWay) > 0 {
 		return fmt.Errorf("schema upgrade refused: step %s rewrote data this build cannot read, and this build does not "+
-			"have that step. Run the build that recorded it.", strings.Join(oneWay, ", "))
+			"have that step. Run the build that recorded it", strings.Join(oneWay, ", "))
 	}
 	if len(ahead) > 0 {
 		logging.For(logging.Store).Warnf("this database has been through step %s, which this build does not know. That step "+

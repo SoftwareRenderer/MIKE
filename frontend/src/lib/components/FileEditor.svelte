@@ -18,6 +18,7 @@
     import { isLSPAvailable } from '$lib/utils/lsp-connection-manager';
     import { SaveController, EDITOR_SAVE_SETTLED, saveRetryDelayMs } from '$lib/utils/save-state';
     import { errorText } from '$lib/utils/error-text';
+    import { restoreScrollTop, restoresSavedOffset } from '$lib/utils/editor-scroll';
     import { connectionStore } from '$lib/stores/connection.svelte';
     import { extensionManager } from '$lib/services/extension-manager.svelte';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
@@ -116,8 +117,7 @@
         /** Explorer-mode only: invoked with the gutter line selection so the
          *  caller can open a Create Task modal prefilled with the lines. */
         onLinesSelected?: ((sel: { relativePath: string; startLine: number; lines: string[] }) => void) | null;
-        /** Restored editor scroll offset (applied after creation unless a
-         *  targetLine jump takes priority). */
+        /** Restored editor scroll offset, in explorer mode. A `targetLine` jump outranks it. */
         initialScrollTop?: number;
         /** Called (throttled) with the scroller's current scrollTop. */
         onScrollTop?: (top: number) => void;
@@ -742,12 +742,6 @@
         // Jump to target line if set
         if (targetLine >= 1) {
             requestAnimationFrame(() => jumpToLine(targetLine));
-        } else if (initialScrollTop > 0) {
-            requestAnimationFrame(() => {
-                const scroller = view?.scrollDOM;
-                if (!scroller) return;
-                scroller.scrollTop = Math.min(initialScrollTop, Math.max(0, scroller.scrollHeight - scroller.clientHeight));
-            });
         }
     }
 
@@ -1399,6 +1393,16 @@
             return;
         }
     }
+
+    // Restore the scroll offset of a reopened file. The offset can arrive after the view was built, and the
+    // view is not reactive, so the pane is looked up again each frame rather than captured here.
+    $effect(() => {
+        const top = initialScrollTop;
+        if (!restoresSavedOffset({ top, targetLine, mode })) return;
+        let gone = false;
+        restoreScrollTop(() => (gone ? null : view?.scrollDOM ?? null), top);
+        return () => { gone = true; };
+    });
 
     // Jump to targetLine when editor is ready (from diff view click)
     $effect(() => {
