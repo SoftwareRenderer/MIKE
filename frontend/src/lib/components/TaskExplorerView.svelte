@@ -145,6 +145,7 @@
         pathClamped
         closeAria={t('explorer.taskView.closeAria')}
         branch={selectedBranch}
+        projectId={projectId}
         statusColor={statusColor}
         changesOpen={changesOpen}
         onChangesOpen={onChangesOpen}

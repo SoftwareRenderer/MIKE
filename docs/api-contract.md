@@ -420,6 +420,35 @@ row they were reading. `frontend/tests/e2e/chat-scroll-jitter.spec.ts` answers t
 wheel spec cannot: it tags every `scrollTop` write so an app write is distinguishable from the browser's
 kinetic scroll and anchoring, and asserts the settle leaves a fling alone and a still reader on their row.
 
+## The branch listing names its holder
+
+`GET /api/projects/{id}/git/branches` answers one row per ref: `name`, `worktree` — the path of a worktree
+holding that branch checked out, or empty — and `task_id` for the task a held ref belongs to. The project's
+own checkout is not a holder, so the branch it is on answers empty: that row is the screen's own state, not a
+reason to refuse it.
+
+- **git is the source.** One `git branch -a --format=%(refname:short)%09%(worktreepath)`, and nothing is
+  guessed from a name. `gitBranchRefs` (`backend/api/git.go`) splits the pair; `sameCheckout` folds the
+  project's own path back to empty, because git prints a resolved path and the row holds what was typed.
+- **A remote-tracking ref is already shortened by the time it arrives.** `refs/remotes/origin/x` comes as
+  `origin/x`, which is the shape of a local `feature/x`. The client cannot tell those apart, so it applies
+  the one filter it always applied (`getLocalBranches`) and learns holders from the field.
+- **The switcher leaves a held row out and counts it.** `getSwitchableBranches` drops rows with a holder:
+  `git checkout` answers `already used by worktree at …`, so the row is a refusal dressed as a choice. The
+  withheld count comes back with the list and `ExplorerHeader` prints it as a note. A task history is one
+  held branch per task, so a silent 173-to-5 list would read as work that went missing.
+- **A held ref with a task behind it is a link, and a query is the only way to it.** `attachTaskIDs`
+  (`backend/api/git.go`) reads `task_id` from the project's task rows, never from the ref's name. The row is
+  `taskViewHref` to that task: the work on the branch is readable there, and this checkout cannot take the
+  branch at all. It stays out of the default list because it is not a choice the screen can make, and the
+  note says *type to find one* only when such a row exists — a count with nothing reachable must not promise
+  one.
+
+Tests: `TestHandleBranchesNamesTheWorktreeHoldingEachRef` and
+`TestHandleBranchesNamesTheTaskBehindAHeldBranch` (`backend/api/git_test.go`),
+`git-local-branches.unit.ts`, `explorer-header-branch-list.unit.svelte.ts`, e2e
+`explorer-branch-switcher.spec.ts`.
+
 ## Diffs
 
 `?parsed=1` is a contract every path on `/tasks/{id}/diff` must honour, including the fast ones. The panel

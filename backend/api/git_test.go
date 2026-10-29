@@ -935,6 +935,103 @@ func TestHandleCheckout_ValidBranch(t *testing.T) {
 	}
 }
 
+// A branch another worktree holds is one `git checkout` refuses here, and the project's own checkout is not
+// such a holder.
+func TestHandleBranchesNamesTheWorktreeHoldingEachRef(t *testing.T) {
+	h, s, _, _ := newTestGitHandler(t)
+
+	projPath := t.TempDir()
+	initGitRepo(t, projPath)
+	mustRun(t, projPath, "git", "branch", "free-branch")
+	head := strings.TrimSpace(testgit.GitOutput(t, projPath, "rev-parse", "--abbrev-ref", "HEAD"))
+	heldDir := filepath.Join(t.TempDir(), "task-worktree")
+	mustRun(t, projPath, "git", "worktree", "add", "-b", "task/held-there", heldDir, "HEAD")
+
+	proj := &types.Project{ID: "branches-holder-proj", Name: "branches-holder-proj", Path: projPath}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/projects/{projectID}/git/branches", h.HandleBranches)
+	req := httptest.NewRequest("GET", "/api/projects/branches-holder-proj/git/branches", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 listing branches, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var refs []struct{ Name, Worktree string }
+	if err := json.NewDecoder(rec.Body).Decode(&refs); err != nil {
+		t.Fatalf("decode branch rows: %v: %s", err, rec.Body.String())
+	}
+	holder := map[string]string{}
+	for _, ref := range refs {
+		holder[ref.Name] = ref.Worktree
+	}
+	if _, ok := holder[head]; !ok {
+		t.Fatalf("the checked-out branch is missing from the listing: %+v", holder)
+	}
+	if holder[head] != "" {
+		t.Errorf("the checkout itself reported a holder %q; the screen must still be able to show its own branch", holder[head])
+	}
+	if got, ok := holder["free-branch"]; !ok || got != "" {
+		t.Errorf("free-branch: holder %q (present %v), want no holder", got, ok)
+	}
+	if holder["task/held-there"] == "" {
+		t.Errorf("a branch a second worktree holds reported no holder: %+v", holder)
+	}
+}
+
+// A held task branch names the task it belongs to; a held branch no task row owns names none.
+func TestHandleBranchesNamesTheTaskBehindAHeldBranch(t *testing.T) {
+	h, s, _, _ := newTestGitHandler(t)
+
+	projPath := t.TempDir()
+	initGitRepo(t, projPath)
+	proj := &types.Project{ID: "branches-task-proj", Name: "branches-task-proj", Path: projPath}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := s.CreateTask(&types.Task{
+		ID: "branches-task-row", ProjectID: proj.ID, Title: "keep", Status: types.StatusBacklog,
+		Branch: "task/keep-this-one",
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	mustRun(t, projPath, "git", "worktree", "add", "-q", "-b", "task/keep-this-one",
+		filepath.Join(t.TempDir(), "held"), "HEAD")
+	// This ref is held by a worktree with no task row behind it.
+	mustRun(t, projPath, "git", "worktree", "add", "-q", "-b", "unclaimed",
+		filepath.Join(t.TempDir(), "mine"), "HEAD")
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/projects/{projectID}/git/branches", h.HandleBranches)
+	rr := doRequest(t, mux, http.MethodGet, "/api/projects/branches-task-proj/git/branches")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	var rows []struct {
+		Name     string `json:"name"`
+		Worktree string `json:"worktree"`
+		TaskID   string `json:"task_id"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &rows); err != nil {
+		t.Fatalf("decode branches: %v", err)
+	}
+	taskID := map[string]string{}
+	for _, row := range rows {
+		taskID[row.Name] = row.TaskID
+	}
+
+	if taskID["task/keep-this-one"] != "branches-task-row" {
+		t.Errorf("a held task branch naming no task is a row with nothing to open; got %q", taskID["task/keep-this-one"])
+	}
+	if taskID["unclaimed"] != "" {
+		t.Errorf("a branch no task row owns must not name a task, got %q", taskID["unclaimed"])
+	}
+}
+
 // --- HandlePull / HandlePush tests ---
 
 // addBareRemote creates a bare repo, registers it as "origin" in projPath,

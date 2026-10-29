@@ -3,6 +3,8 @@
      * Branch text field with a filtered dropdown; the blur close is delayed because clicking a row
      * blurs the input first.
      */
+    import { filterBranches } from '$lib/utils/branch-rows';
+
     let { value = $bindable(''), branches = [], placeholder = '' }: {
         value?: string;
         branches?: string[];
@@ -12,11 +14,7 @@
     let open = $state(false);
     let activeIndex = $state(0);
 
-    let filtered = $derived.by(() => {
-        const query = value.trim().toLowerCase();
-        if (!query) return branches;
-        return branches.filter(b => b.toLowerCase().includes(query));
-    });
+    const filtered = $derived(filterBranches(branches, value));
 
     function openDropdown() {
         open = true;

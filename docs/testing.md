@@ -18,6 +18,20 @@ Read this when writing or debugging e2e or unit tests. `AGENTS.md → Testing` k
 - Assert the directory, not just that a list exists. `/api/fs` resolves the project *from the path*. An explorer holding a stale folder therefore asks for a path outside the current project and gets 400 `path outside allowed project directory` — the panel then shows an error and never retries. `ExplorerView` reseeds its folder when `projectPath` changes; a spec that clicks into the tree should pin the directory it means (`.file-browser-path-input` value) before clicking.
 - Never `.project-item` + `.first()` once per-worker projects exist — that is somebody else's project. Use `selectProject(page, projectId)`. Same trap: a helper that returns "the first entry in the worktrees dir" (`findWorktreeDir(projectId)` is keyed by project).
 - A spec that stages or commits in a PROJECT directory must own that project (`isolatedProject()`). `git add`/`git commit`/`git reset` in the shared `/tmp/kanban-test-repo` races with the other specs' index writes, and it showed up as *unrelated* specs losing their `.file-browser-list` — the explorer's listing is a live `git status` and it does not retry after an error. Worktree git (`gitWithRetry`, `writeFileInWorktree`) is already per-task and needs nothing.
+- **A branch picker's choices come from the api layer, never from the route's names.** The route answers
+  shortened refs, and only the side that ran git can tell a remote-tracking `origin/main` from a local
+  `feature/main` (`docs/api-contract.md → The branch listing names its holder`). The explorer once had a filter
+  of its own (`!b.includes('/')`), and it dropped every namespaced local branch. That left row assertions
+  running against `master` alone, where they cannot fail. `explorer-header-overflow` now measures its long ref
+  through `PROJECT_BRANCH`, a slashed name, so any such filtering is the red it reports.
+- **A rule about what a payload means belongs in vitest, not in a spec.** Staging a payload in the e2e lane
+  takes either a route stub, which asserts against your own fixture rather than the server, or a database row.
+  And the lane cannot stage one against a developer's own server. `global-setup` takes port 3000 from
+  whatever holds it, boots against the dev data directory, and deletes the `kanban.db` it finds there, sessions
+  included: no API revokes a session and no API deletes the file. So the payload rules live in
+  `src/lib/components/__tests__/*.unit.svelte.ts`, where the branches route is a prop. The server's half
+  belongs in the handler's Go test. The spec keeps only what git itself can stage: a worktree really holding a
+  ref, and a real refusal over an untracked file.
 - The two file browsers are one component (`FileBrowserView`) whose listing answers to two names. Every listing is `.file-browser-list` and every row `.file-browser-item`. The task explorer's listing and rows carry `file-list` / `file-entry` as well, because that is the name its specs locate them by (the props are `listingClass` / `rowClass`, and `file-drop.css` matches either). Drop the second name and no gate fails — only `editor-line-task`.
 - `toHaveCount(0)` is not a visibility check. It counts attached nodes. An element the component builds with the card and reveals by unhiding its row is attached the whole time — the hover card's "Go to Definition" button is one. Say `toBeHidden()` for "not on screen yet", and keep `toHaveCount(0)` for a node the code never creates.
 - `[role="dialog"]` is not a selector here. BaseModal, `CommitDiffOverlay`, `TerminalPanel` and BOTH explorer views carry `role="dialog"`, and every ChatMessage's edit `<dialog>` has it implicitly. So the bare locator is a strict-mode violation whenever a chat or the explorer is mounted, and `expect(x).not.toBeVisible()` then proves nothing. Scope by content: `[role="dialog"]`.filter({ has: page.locator('.commit-textarea') }), or the login gate by its own `.login-modal` class.

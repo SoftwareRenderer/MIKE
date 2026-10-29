@@ -246,6 +246,12 @@ class UrlRouter {
         return !wasOpen;
     }
 
+    /** Open the task itself — the view that names no `view` — from a screen that knows only its id. */
+    openTask(projectId: string, taskId: string): void {
+        this.write({ project: projectId, task: taskId, view: '' }, true, true);
+        this.applyView();
+    }
+
     /** Open the project explorer and mirror it in the URL. */
     openProjectExplorer(projectId: string): void {
         this.write({ project: projectId, view: PROJECT_EXPLORER_VIEW }, false, true);

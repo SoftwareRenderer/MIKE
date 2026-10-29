@@ -91,21 +91,63 @@ export async function getCommitDiffFiles(projectId: string, baseHash: string, he
     return getProjectDiffFiles(projectId, { base: baseHash, head: headHash });
 }
 
-/** List every ref the server calls a branch, in the order it returned them — remote-tracking refs and
- * the detached `HEAD` line included. A list offered to a person wants getLocalBranches. */
-export async function getGitBranches(projectId: string): Promise<string[]> {
+/** BranchRef is one row of the branch route: a short ref, the worktree holding it, and the task behind it. */
+interface BranchRef {
+    name: string;
+    /** The route omits an empty holder, so a ref this checkout may take carries no `worktree` key at all. */
+    worktree?: string;
+    /** task_id names the task whose worktree holds this ref. */
+    task_id?: string;
+}
+
+/** getGitBranches returns every ref the server calls a branch, remote-tracking refs and the detached `HEAD`
+ * line included. */
+async function getGitBranches(projectId: string): Promise<BranchRef[]> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/branches`);
     if (!res.ok) throw await apiError(res, t('api.fetchBranches'));
     return res.json();
 }
 
-/**
- * The branches a person may be offered: local branches only, so a remote-tracking ref and the detached
- * `HEAD` line are never a choice. Order is the server's — a branch list never follows the UI locale.
- */
+/** isLocalRef tells whether a row is a branch of this repository rather than a memory of a remote one. */
+function isLocalRef(ref: BranchRef): boolean {
+    return !ref.name.startsWith('origin/') && ref.name !== 'HEAD';
+}
+
+/** getLocalBranches returns the branches a person may be offered: the local ones, in the server's order. */
 export async function getLocalBranches(projectId: string): Promise<string[]> {
     const all = await getGitBranches(projectId);
-    return all.filter(b => !b.startsWith('origin/') && b !== 'HEAD');
+    return all.filter(isLocalRef).map(b => b.name);
+}
+
+/**
+ * getSwitchableBranches returns what the project explorer may offer as a switch, plus the refs it withheld
+ * because another worktree holds them and the task behind each of those.
+ */
+export async function getSwitchableBranches(projectId: string): Promise<{
+    branches: string[];
+    held: HeldBranch[];
+    withheld: number;
+}> {
+    const all = await getGitBranches(projectId);
+    const branches: string[] = [];
+    const held: HeldBranch[] = [];
+    let withheld = 0;
+    for (const ref of all) {
+        if (!isLocalRef(ref)) continue;
+        if (!ref.worktree) {
+            branches.push(ref.name);
+            continue;
+        }
+        withheld++;
+        if (ref.task_id) held.push({ name: ref.name, taskId: ref.task_id });
+    }
+    return { branches, held, withheld };
+}
+
+/** HeldBranch is a ref a task's worktree holds; the row for it links to that task. */
+export interface HeldBranch {
+    name: string;
+    taskId: string;
 }
 
 /** Checkout a branch in a project's worktree. */

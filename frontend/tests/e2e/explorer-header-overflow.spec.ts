@@ -15,9 +15,13 @@ const TITLE_FIXTURE = 'title_long';
 // types.MaxBranchName (50). An ID-named branch is 27 characters, so it is never this.
 const MAXIMAL_TASK_BRANCH = /^task\/.{38}-[a-z0-9]{6}$/;
 const PROJECT_BRANCH = 'feature/reconcile-dependency-cache-across-workspaces-and-reg'.slice(0, 50);
-// Narrowest first, so the first failure is the worst one. 280 is below any phone viewport, and it is included
-// because a min-width: 160px branch list stops fitting beside its anchor there.
+// Widths run narrowest first, so the first failure is the worst one. 280 is below any phone viewport, and it
+// is where the project path squeezes the branch trigger hardest.
 const WIDTHS = [280, 320, 420, 480, 768, 1024, 1440];
+// NARROW_PX is the panel width below which the branch list is drawn for a thumb. It matches the
+// `@container explorer-header` block in styles/explorer.css.
+const NARROW_PX = 420;
+const TAP_PX = 44;
 
 /** headerOverflow names what is drawn outside the viewport or outside its panel, and returns '' when nothing is. */
 async function headerOverflow(page: Page): Promise<string> {
@@ -123,6 +127,26 @@ async function openListProblems(page: Page): Promise<string> {
     });
 }
 
+/** Below NARROW_PX every row is a thumb target, and the ref it names is drawn whole. */
+async function narrowListProblems(page: Page, tapPx: number): Promise<string> {
+    return page.evaluate((minRowHeight) => {
+        const list = document.querySelector('.explorer-dropdown-list');
+        if (!list) return 'no open .explorer-dropdown-list';
+        const problems: string[] = [];
+        for (const row of Array.from(list.querySelectorAll('button.explorer-dropdown-item'))) {
+            const h = Math.round(row.getBoundingClientRect().height);
+            if (h < minRowHeight) problems.push(`row is ${h}px tall, below the ${minRowHeight}px tap minimum`);
+            const label = row.querySelector('.explorer-dropdown-name') as HTMLElement | null;
+            if (!label) problems.push('row has no .explorer-dropdown-name');
+            else if (label.scrollWidth > label.clientWidth || label.scrollHeight > label.clientHeight) {
+                problems.push(`ref is cut rather than wrapped: content ${label.scrollWidth}x${label.scrollHeight}`
+                    + ` in box ${label.clientWidth}x${label.clientHeight}`);
+            }
+        }
+        return problems.join('; ');
+    }, tapPx);
+}
+
 test.describe.serial('Explorer header with a long branch name', () => {
     isolatedProject();
 
@@ -186,7 +210,7 @@ test.describe.serial('Explorer header with a long branch name', () => {
         }
     });
 
-    test('no header control is covered by the open branch list', async ({ page }) => {
+    test('the open branch list stays in the panel and lists the branch you are on', async ({ page }) => {
         const projectId = ownProjectId();
         expect(ownProjectPath(), 'isolatedProject() did not claim a repo').toBeTruthy();
         execSync(`git -C ${ownProjectPath()} checkout -q -B ${PROJECT_BRANCH}`);
@@ -198,10 +222,17 @@ test.describe.serial('Explorer header with a long branch name', () => {
                 .toHaveText(PROJECT_BRANCH);
             await page.click('.explorer-dropdown-btn');
             await expect(page.locator('.explorer-dropdown-list')).toBeVisible();
+            // The branch the header shows is a row of the list.
+            const listed = await page.locator('.explorer-dropdown-name').allTextContents();
+            expect(listed, `${width}px: the list names the checked-out branch`).toContain(PROJECT_BRANCH);
             await expect(() => openListProblems(page), `${width}px: branch list inside the panel`)
                 .resolves.toBe('');
             await expect(() => coveredControls(page), `${width}px: controls clickable with the list open`)
                 .resolves.toBe('');
+            if (width <= NARROW_PX) {
+                await expect(() => narrowListProblems(page, TAP_PX), `${width}px: rows are thumb-sized`)
+                    .resolves.toBe('');
+            }
             await page.keyboard.press('Escape');
             // Escape closes the branch list, not the panel behind it.
             await expect(page.locator('.explorer-dropdown-list'), `${width}px: Escape closed the list`)

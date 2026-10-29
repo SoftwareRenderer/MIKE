@@ -47,6 +47,18 @@ The file list panel handles clipboard and rename keys (Ctrl+X, Ctrl+C, Ctrl+V, F
 
 Tests: `components/__tests__/file-browser-clipboard.unit.svelte.ts`.
 
+## Explorer branch list (`ExplorerHeader.svelte`)
+
+The switcher's listbox moves **real DOM focus** between rows (`tabindex="-1"` buttons); there is no active-row state, so nothing can disagree with what is focused. ArrowDown on the trigger opens the list, and opening focuses the filter field — the query is the fast path through a list longer than its box, and the arrows need a starting point. `nextBranchRow(index, key, count)` decides the target row (-1 leaves the key alone: Enter activates the focused button natively, Escape belongs to the shared order in `explorer-core.svelte.ts`), and `filterBranches` is the same query rule `BranchPicker.svelte` uses.
+
+A ref another worktree holds is not among the switch rows: it comes up only when a query names it, as a link to the task that holds it (`docs/api-contract.md → The branch listing names its holder`). Typing is the only route there, which is what the list's note says while the query is empty. The arrow ring covers both kinds of row — anchors and buttons, never a loading or empty message — so nobody has to know which kind a row is to reach it.
+
+Closing hands focus back to the trigger. A browser drops a focus target removed with its list onto the document body, which costs a keyboard user their place in the header. The listener that notices the list held focus goes on **before** the field is focused, since that first focus is the case it exists for.
+
+Resolvers: `utils/branch-rows.ts`.
+
+Tests: `utils/__tests__/branch-rows.unit.ts`, `components/__tests__/explorer-header-branch-list.unit.svelte.ts`, e2e `explorer-branch-switcher.spec.ts`.
+
 ## Verification
 
 - `cd frontend && npm test`: Covers resolvers.

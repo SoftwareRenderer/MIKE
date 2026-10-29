@@ -196,6 +196,9 @@ make test-gen-registry                                   # the generator's own t
   that shows it (`uiStore.notifyOnReview`), never in `/api/config`. `docs/notifications.md`.
 - **A card lists its subtasks as flat rows in run order, never as nested card boxes.** One pure function
   owns the order and it mirrors `exec`'s schedule. `docs/subtask-outline.md`.
+- **A branch another worktree holds is never a checkout option, and the row naming one opens its task.** The
+  screen decides from the holder the route reports, never from the ref's name.
+  `docs/api-contract.md → The branch listing names its holder`.
 - Diff text is parsed once in `$lib/utils/diff-parser.ts`, and its badges are the diff badges; git status
   entries keep their own.
 - **A diff row's gutter number is not its identity** — one column numbers a removed row from the old file and

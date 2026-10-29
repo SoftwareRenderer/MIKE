@@ -73,6 +73,7 @@ function renderExplorerHeader(terminalHref: string, onOpenTerminal = vi.fn()) {
     const { container } = render(ExplorerHeader, {
         props: {
             pathLabel: 'MIKE',
+            projectId: 'p1',
             closeAria: 'Close explorer',
             branch: 'main',
             changesOpen: false,

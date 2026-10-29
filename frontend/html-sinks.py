@@ -98,6 +98,9 @@ URL_SINKS: dict[tuple[str, str], str] = {
         "encoded-by:lib/utils/app-link — taskTerminalHref",
     ("src/lib/components/ExplorerHeader.svelte", "terminalHref"):
         "literal — a prop; ExplorerView passes projectTerminalHref (app-link encodes)",
+    ("src/lib/components/ExplorerHeader.svelte", "taskViewHref(projectId, held.taskId)"):
+        "encoded-by:lib/utils/app-link — a held branch row; project and task are percent-encoded and the "
+        "string starts with location.pathname",
     ("src/lib/components/Chat/ToolCall.svelte", "iconInfo.src"):
         "literal — the tool-icon table maps tool names to ?raw imports, and Icon.svelte "
         "refuses anything that is not a lone sanitized <svg> root",

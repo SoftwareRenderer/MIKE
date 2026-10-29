@@ -25,7 +25,13 @@
     overflow: hidden;
 }
 
+/* The header, not the branch trigger, is the list's containing block: the trigger is a flex item the project
+ * path squeezes, so a list anchored to it is measured against 27px and hangs off the panel. The same box is
+ * the size condition for the touch rules below, so neither reads the window. */
 :global(.explorer-view .explorer-header) {
+    position: relative;
+    container-type: inline-size;
+    container-name: explorer-header;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -141,7 +147,7 @@
 
 /* Branch selector */
 :global(.explorer-view .explorer-selector) {
-    position: relative;
+    /* The list is positioned against the header, not against this rule's box. */
     min-width: 0;
 }
 
@@ -180,17 +186,38 @@
 :global(.explorer-view .explorer-dropdown-list) {
     position: absolute;
     top: 100%;
-    left: 0;
+    left: 8px;
     z-index: var(--z-dropdown);
-    min-width: 160px;
-    max-width: min(320px, 100vw);
-    max-height: 240px;
-    overflow-y: auto;
+    /* 100% is the header here, so the list is as wide as the panel allows and never wider. */
+    width: min(320px, calc(100% - 16px));
     background: var(--color-surface-2);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-popover);
     margin-top: 2px;
+}
+
+/* The filter stays put while the rows scroll. */
+:global(.explorer-view .explorer-dropdown-rows) {
+    max-height: 240px;
+    overflow-y: auto;
+}
+
+:global(.explorer-view .explorer-dropdown-filter) {
+    display: block;
+    width: 100%;
+    padding: 6px 10px;
+    border: none;
+    border-bottom: 1px solid var(--color-border);
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+    background: var(--color-surface-1);
+    color: var(--color-text-primary);
+    font-size: var(--text-base);
+    font-family: var(--font-mono, monospace);
+    outline: none;
+}
+:global(.explorer-view .explorer-dropdown-filter:focus) {
+    background: var(--color-surface-2);
 }
 
 :global(.explorer-view .explorer-dropdown-item) {
@@ -227,9 +254,63 @@
     color: var(--color-text-tertiary);
     cursor: default;
 }
+/* A failed read carries both halves: what happened, and the way to ask again. */
+:global(.explorer-view .explorer-dropdown-item.error) {
+    flex-wrap: wrap;
+    row-gap: 6px;
+    color: var(--color-text-secondary);
+}
+:global(.explorer-view .explorer-dropdown-retry) {
+    margin-left: auto;
+    padding: 2px 8px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-3);
+    color: var(--color-text-primary);
+    font-size: var(--text-sm);
+    cursor: pointer;
+}
+/* The note sits outside the scroll box, so the reason is not below the fold. */
+:global(.explorer-view .explorer-dropdown-note) {
+    padding: 6px 10px;
+    border-top: 1px solid var(--color-border);
+    color: var(--color-text-tertiary);
+    font-size: var(--text-sm);
+}
+/* These rows open a task; the rows above them change this checkout. */
+:global(.explorer-view .explorer-dropdown-held) {
+    border-top: 1px solid var(--color-border);
+}
+:global(.explorer-view .explorer-dropdown-item.is-held) {
+    text-decoration: none;
+    color: var(--color-text-secondary);
+}
+:global(.explorer-view .explorer-dropdown-hint) {
+    margin-left: auto;
+    padding-left: 8px;
+    color: var(--color-text-tertiary);
+    font-size: var(--text-sm);
+    white-space: nowrap;
+}
 :global(.explorer-view .explorer-check-empty) {
     display: inline-block;
     width: 10px;
+}
+
+/* A panel this narrow is aimed at with a thumb, so every control is 44px, and a ref too long for one line
+ * wraps instead of eliding because `title` is a hover affordance and a tap has none. */
+@container explorer-header (max-width: 420px) {
+    :global(.explorer-view .explorer-dropdown-item) {
+        min-height: 44px;
+    }
+    :global(.explorer-view .explorer-dropdown-filter),
+    :global(.explorer-view .explorer-dropdown-retry) {
+        min-height: 44px;
+    }
+    :global(.explorer-view .explorer-dropdown-name) {
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
 }
 
 :global(.explorer-view .explorer-body) {

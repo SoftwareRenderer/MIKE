@@ -236,32 +236,80 @@ func (h *GitHandler) getOriginTip(path, branch string) string {
 	return strings.TrimSpace(string(out))
 }
 
-func gitBranchNames(dir string, args ...string) ([]string, error) {
+// branchRef is one row of the branch listing: the short ref, and the worktree holding it checked out.
+type branchRef struct {
+	Name     string `json:"name"`
+	Worktree string `json:"worktree,omitempty"`
+	// TaskID is the task whose worktree holds this branch.
+	TaskID string `json:"task_id,omitempty"`
+}
+
+// attachTaskIDs names the task whose row claims each branch, so a screen can offer the task for a branch
+// this checkout cannot take. A store failure leaves the rows unlabelled rather than failing the listing.
+func attachTaskIDs(refs []branchRef, s *store.Store, projectID string) {
+	tasks, err := s.GetTasksByProject(projectID)
+	if err != nil {
+		logging.For(logging.Managers).Warnf("branches: task lookup for project %s failed: %v", projectID, err)
+		return
+	}
+	byBranch := make(map[string]string, len(tasks))
+	for _, task := range tasks {
+		if task.Branch == "" {
+			continue
+		}
+		if _, seen := byBranch[task.Branch]; !seen {
+			byBranch[task.Branch] = task.ID
+		}
+	}
+	for i := range refs {
+		refs[i].TaskID = byBranch[refs[i].Name]
+	}
+}
+
+// sameCheckout reports whether git's worktree path is the checkout this project is. Git prints its own
+// resolved path, so a symlinked or trailing-separator path must not read as a second worktree.
+func sameCheckout(worktreePath, projectPath string) bool {
+	a, b := filepath.Clean(worktreePath), filepath.Clean(projectPath)
+	if a == b {
+		return true
+	}
+	ra, errA := filepath.EvalSymlinks(a)
+	rb, errB := filepath.EvalSymlinks(b)
+	return errA == nil && errB == nil && ra == rb
+}
+
+func gitBranchRefs(dir string, args ...string) ([]branchRef, error) {
 	out, err := git.Command("", append([]string{"-C", dir}, args...)...).CombinedOutput()
 	if err != nil {
 		return nil, err
 	}
-	var branches []string
+	var refs []branchRef
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			branches = append(branches, line)
+		name, holder, _ := strings.Cut(strings.TrimSpace(line), "\t")
+		if name == "" {
+			continue
 		}
+		if holder != "" && sameCheckout(holder, dir) {
+			holder = ""
+		}
+		refs = append(refs, branchRef{Name: name, Worktree: holder})
 	}
-	return branches, nil
+	return refs, nil
 }
 
-// HandleBranches lists project branches.
+// HandleBranches lists project branches with the worktree holding each one, if any.
 func (h *GitHandler) HandleBranches(w http.ResponseWriter, r *http.Request) {
 	project, ok := resolveProject(w, r, h.store)
 	if !ok {
 		return
 	}
-	branches, err := gitBranchNames(project.Path, "branch", "-a", "--format=%(refname:short)")
+	refs, err := gitBranchRefs(project.Path, "branch", "-a", "--format=%(refname:short)%09%(worktreepath)")
 	if err != nil {
 		httputil.Fault(w, "git branches", err)
 		return
 	}
-	httputil.JSONResponse(w, http.StatusOK, branches)
+	attachTaskIDs(refs, h.store, project.ID)
+	httputil.JSONResponse(w, http.StatusOK, refs)
 }
 
 // HandleDiff returns project diff as parsed output.

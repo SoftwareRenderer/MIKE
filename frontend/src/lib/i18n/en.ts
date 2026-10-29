@@ -152,6 +152,21 @@ const catalog = {
     'explorer.view.closeAria': 'Close branch view',
     'explorer.view.switchBranch': 'Switch branch',
     'explorer.view.noBranches': 'No branches',
+    'explorer.view.noBranchMatch': 'No branch matches that',
+    // The list says this instead of "No branches" when the request failed.
+    'explorer.view.errLoadBranches': 'Failed to read branches',
+    'explorer.view.retry': 'Retry',
+    'explorer.view.filterBranches': 'Filter branches',
+    // A refusal carries git's own reason.
+    'explorer.view.errCheckout': 'Failed to switch to {branch}: {error}',
+    // The count says the list is short on purpose: another worktree holds these.
+    'explorer.view.branchesHeldElsewhere': {
+        one: '{count} branch is checked out in another worktree',
+        other: '{count} branches are checked out in other worktrees',
+    },
+    // A ref this checkout cannot take belongs to a task, and the row opens it.
+    'explorer.view.branchesHeldHint': '— type to find one',
+    'explorer.view.branchHeldByTask': 'open its task',
 
     // ── TaskExplorerView.svelte — same shell, scoped to one task's worktree ──
     'explorer.taskView.aria': 'Task explorer view',

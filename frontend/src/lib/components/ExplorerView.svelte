@@ -1,8 +1,10 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { getGitLogFull, getGitBranches, checkoutBranch, getCommitDiffFiles } from '$lib/api';
+    import { getGitLogFull, getSwitchableBranches, checkoutBranch, getCommitDiffFiles } from '$lib/api';
+    import type { HeldBranch } from '$lib/api';
     import { toHomeRelative, sandboxMountFromPath, parentDir } from '$lib/utils/path';
     import { projectTerminalHref, parseExplorerFile } from '$lib/utils/app-link';
+    import { dialogStore } from '$lib/stores';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { fromPersistedTabs, mergeRestoredTabs } from '$lib/utils/editor-tabs';
     import { ExplorerCore, type ExplorerProps } from '$lib/services/explorer-core.svelte';
@@ -26,6 +28,11 @@
     let selectedBranch = $state('');
     let branches = $state<string[]>([]);
     let loadingBranches = $state(true);
+    let branchesError = $state(false);
+    /** withheld counts the refs the list left out because another worktree holds them. */
+    let withheld = $state(0);
+    /** heldBranches are the refs a task holds; each one opens that task. */
+    let heldBranches = $state<HeldBranch[]>([]);
     let checkoutLoading = $state(false);
     let showDropdown = $state(false);
     let navigatedFolder = $state('');
@@ -74,12 +81,20 @@
 
     async function loadBranches() {
         loadingBranches = true;
+        branchesError = false;
         try {
-            const allBranches = await getGitBranches(projectId);
-            branches = allBranches.filter(b => !b.includes('/'));
+            // The api layer decides which refs are a choice; a name cannot tell a local branch from a
+            // remote-tracking one.
+            const switchable = await getSwitchableBranches(projectId);
+            branches = switchable.branches;
+            heldBranches = switchable.held;
+            withheld = switchable.withheld;
         } catch (e) {
             console.error('Failed to load branches:', e);
             branches = [];
+            heldBranches = [];
+            withheld = 0;
+            branchesError = true;
         } finally {
             loadingBranches = false;
         }
@@ -94,6 +109,11 @@
             // Commits reload via the effect watching selectedBranch
         } catch (e) {
             console.error('Failed to checkout branch:', e);
+            // Without this a refused switch is a control that appears to do nothing.
+            dialogStore.showToast(
+                t('explorer.view.errCheckout', { branch, error: e instanceof Error ? e.message : String(e) }),
+                'error',
+            );
         } finally {
             checkoutLoading = false;
         }
@@ -229,9 +249,14 @@
         branch={selectedBranch}
         branches={branches}
         branchesLoading={loadingBranches}
+        branchesError={branchesError}
+        projectId={projectId}
+        withheld={withheld}
+        heldBranches={heldBranches}
         checkoutLoading={checkoutLoading}
         bind:dropdownOpen={showDropdown}
         onSelectBranch={handleBranchSelect}
+        onRetryBranches={loadBranches}
         changesOpen={changesOpen}
         onChangesOpen={onChangesOpen}
         showReview
