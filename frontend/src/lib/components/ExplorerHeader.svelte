@@ -60,7 +60,9 @@
 
     // svelte-ignore non_reactive_update — these are DOM refs, read from effects and handlers
     let dropdownEl: HTMLDivElement | null = null;
+    // svelte-ignore non_reactive_update — DOM ref via bind:this
     let triggerEl: HTMLButtonElement | null = null;
+    // svelte-ignore non_reactive_update — DOM ref via bind:this
     let filterEl: HTMLInputElement | null = null;
     let query = $state('');
 
@@ -163,7 +165,8 @@
             </button>
 
             {#if dropdownOpen}
-                <div class="explorer-dropdown-list" bind:this={dropdownEl} onkeydown={handleListKeydown}>
+                <!-- The box only positions its contents; the filter and the listbox inside carry the semantics. -->
+                <div class="explorer-dropdown-list" role="presentation" bind:this={dropdownEl} onkeydown={handleListKeydown}>
                     {#if branchesLoading}
                         <div class="explorer-dropdown-item loading">{t('explorer.shared.loading')}</div>
                     {:else if branchesError}
