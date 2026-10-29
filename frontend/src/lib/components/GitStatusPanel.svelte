@@ -1557,7 +1557,8 @@
         font-size: var(--text-xs);
         color: var(--color-text-secondary);
         flex-shrink: 0;
-        width: 3.5rem;
+        min-width: 3.5rem;
+        white-space: nowrap;
     }
     .commit-dropdown-subject {
         overflow: hidden;
