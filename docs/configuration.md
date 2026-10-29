@@ -11,7 +11,8 @@ Configuration is resolved **once** at startup. Consumers receive the final decis
 - **Empty Values:** Set-but-empty variables are treated as unset.
 - **Opt-in Switches:** These must be exactly `1`. Other truthy values (e.g., `true`, `yes`) are ignored and trigger a boot warning.
 - **Sandbox Cleanup:** `MIKE_SANDBOX_SKIP_STARTUP_CLEANUP` suppresses the stale container sweep; any non-empty value disables the sweep.
-- **Access:** Only `main.go` and `backend/startup` read `MIKE_*` variables. Exceptions include the git author identity and the operator's shell environment.
+- **Access:** Only `main.go` and `backend/startup` read `MIKE_*` variables. Exceptions include the git
+  author identity, which `main.go` stamps from git's own variables, and the operator's shell environment.
 - **Warnings:** Soft refusals are printed once and stored in `startup.Config.Warnings`.
 
 ## Variables with a `--flag` twin
@@ -61,6 +62,8 @@ environment.
 | `MIKE_FRONTEND_DIST` | **Dev only.** Serve SPA from this directory (default `./frontend/dist`) instead of the embedded copy. Refused in `-tags release` binaries. |
 | `DANGER_ZONE` | Exactly `1` allows disabling sandboxing for projects. Does not gate execution. |
 | `MIKE_ALLOW_ROOT_FS` | Exactly `1` allows no-project file endpoints (e.g., directory picker) to reach any host path. Otherwise jailed to `$HOME` and workspace/extensions dirs. |
+| `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` | Who commits are authored as. Stamped at boot onto every commit; unset leaves the repository's own `user.name`/`user.email` to decide. **`docs/confinement.md → The git author identity`**. |
+| `GIT_COMMITTER_NAME` / `GIT_COMMITTER_EMAIL` | The committer half of the same identity, taken before `GIT_AUTHOR_*` variable by variable. |
 
 ## Reachability is not the certificate
 

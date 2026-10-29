@@ -1139,37 +1139,11 @@ func (s *Server) writeContainedFile(w http.ResponseWriter, target fsTarget, cont
 	return true
 }
 
-// resolveGitIdentity reads the commit identity from git's environment
-// (GIT_COMMITTER_* first, then GIT_AUTHOR_*), then from the global git config.
-func resolveGitIdentity() (name, email string) {
-	// Standard git env vars (GIT_COMMITTER takes precedence over GIT_AUTHOR)
-	if name == "" {
-		name = os.Getenv("GIT_COMMITTER_NAME")
-	}
-	if name == "" {
-		name = os.Getenv("GIT_AUTHOR_NAME")
-	}
-	if email == "" {
-		email = os.Getenv("GIT_COMMITTER_EMAIL")
-	}
-	if email == "" {
-		email = os.Getenv("GIT_AUTHOR_EMAIL")
-	}
-	if name != "" && email != "" {
-		return name, email
-	}
-
-	if name == "" {
-		if out, err := git.Command("", "config", "--global", "user.name").CombinedOutput(); err == nil {
-			name = strings.TrimSpace(string(out))
-		}
-	}
-	if email == "" {
-		if out, err := git.Command("", "config", "--global", "user.email").CombinedOutput(); err == nil {
-			email = strings.TrimSpace(string(out))
-		}
-	}
-	return name, email
+// resolveGitIdentity returns the identity that a new repository's first commit would carry,
+// falling back to the operator's global git config. An empty result makes the caller refuse the
+// request, because the repository it is about to create could never be committed to.
+func resolveGitIdentity() (string, string) {
+	return git.ResolveAuthorIdentity(git.GlobalConfig)
 }
 
 // hostStat is the stat a file request uses: the host jail when no project is named, the host itself when one is.

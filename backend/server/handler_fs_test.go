@@ -670,8 +670,7 @@ func TestFSInitGitRejectsPathOutsideProject(t *testing.T) {
 	}
 
 	// The in-project flow keeps working.
-	t.Setenv("GIT_AUTHOR_NAME", "Test Author")
-	t.Setenv("GIT_AUTHOR_EMAIL", "test@example.com")
+	stampTestIdentity(t, "Test Author", "test@example.com")
 	sub := filepath.Join(projDir, "subdir")
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)

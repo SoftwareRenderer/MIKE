@@ -17,6 +17,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"mike/backend/git"
 	"mike/backend/testutil/testgit"
 	"mike/backend/tls"
 	"mike/backend/types"
@@ -913,152 +914,57 @@ func TestHandleFSSearch(t *testing.T) {
 	})
 }
 
+// stampTestIdentity sets the commit identity the way the server's startup does, and restores the
+// previous one when the test ends.
+func stampTestIdentity(t *testing.T, name, email string) {
+	t.Helper()
+	origName, origEmail := git.AuthorIdentity()
+	t.Cleanup(func() { git.SetAuthorIdentity(origName, origEmail) })
+	git.SetAuthorIdentity(name, email)
+}
+
+// TestGitIdentityAvailable covers the identity question the initialize-repository request answers
+// before it writes anything. Each subtest sets the commit identity itself and points HOME at an
+// empty directory, so the person running the test cannot answer through their own global git
+// config.
 func TestGitIdentityAvailable(t *testing.T) {
-	saveEnv := func(keys ...string) map[string]string {
-		orig := make(map[string]string)
-		for _, k := range keys {
-			orig[k] = os.Getenv(k)
-		}
-		return orig
-	}
-	restoreEnv := func(saved map[string]string) {
-		for k, v := range saved {
-			if v == "" {
-				os.Unsetenv(k)
-			} else {
-				os.Setenv(k, v)
-			}
-		}
-	}
+	t.Setenv("HOME", t.TempDir())
 
-	gitEnvKeys := []string{
-		"GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME",
-		"GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL",
-	}
-
-	t.Run("standard git env vars satisfy check", func(t *testing.T) {
-		saved := saveEnv(gitEnvKeys...)
-		defer restoreEnv(saved)
-		for _, k := range gitEnvKeys {
-			os.Unsetenv(k)
-		}
-		os.Setenv("GIT_AUTHOR_NAME", "Git User")
-		os.Setenv("GIT_AUTHOR_EMAIL", "git@example.com")
-
+	t.Run("the identity stamped at boot answers", func(t *testing.T) {
+		stampTestIdentity(t, "Stamped Person", "stamped@example.com")
 		name, email := resolveGitIdentity()
-		if name != "Git User" {
-			t.Errorf("expected name=\"Git User\", got %q", name)
-		}
-		if email != "git@example.com" {
-			t.Errorf("expected email=\"git@example.com\", got %q", email)
+		if name != "Stamped Person" || email != "stamped@example.com" {
+			t.Errorf("got %q <%q>, want the identity the boot stamped", name, email)
 		}
 	})
 
-	t.Run("GIT_COMMITTER takes precedence over GIT_AUTHOR", func(t *testing.T) {
-		saved := saveEnv(gitEnvKeys...)
-		defer restoreEnv(saved)
-		for _, k := range gitEnvKeys {
-			os.Unsetenv(k)
-		}
-		os.Setenv("GIT_AUTHOR_NAME", "Author")
-		os.Setenv("GIT_COMMITTER_NAME", "Committer")
-		os.Setenv("GIT_AUTHOR_EMAIL", "author@example.com")
-		os.Setenv("GIT_COMMITTER_EMAIL", "committer@example.com")
-
-		name, email := resolveGitIdentity()
-		if name != "Committer" {
-			t.Errorf("expected name=\"Committer\", got %q", name)
-		}
-		if email != "committer@example.com" {
-			t.Errorf("expected email=\"committer@example.com\", got %q", email)
+	t.Run("one stamped half survives the global config lookup", func(t *testing.T) {
+		stampTestIdentity(t, "Stamped Person", "")
+		if name, _ := resolveGitIdentity(); name != "Stamped Person" {
+			t.Errorf("name=%q, want the unset email to leave the stamped name alone", name)
 		}
 	})
 
-	t.Run("partial identity — only email from env, name from git config", func(t *testing.T) {
-		saved := saveEnv(gitEnvKeys...)
-		defer restoreEnv(saved)
-		for _, k := range gitEnvKeys {
-			os.Unsetenv(k)
+	t.Run("nothing configured answers nothing", func(t *testing.T) {
+		stampTestIdentity(t, "", "")
+		if name, email := resolveGitIdentity(); name != "" || email != "" {
+			t.Errorf("got %q <%q>, want the empty pair the caller refuses on", name, email)
 		}
-		os.Setenv("GIT_AUTHOR_EMAIL", "only-email@example.com")
-
-		name, email := resolveGitIdentity()
-		// Email comes from env var, name falls back to git config (or empty)
-		if email != "only-email@example.com" {
-			t.Errorf("expected email=\"only-email@example.com\", got %q", email)
-		}
-		_ = name
-	})
-
-	t.Run("partial identity — only name from env, email from git config", func(t *testing.T) {
-		saved := saveEnv(gitEnvKeys...)
-		defer restoreEnv(saved)
-		for _, k := range gitEnvKeys {
-			os.Unsetenv(k)
-		}
-		os.Setenv("GIT_AUTHOR_NAME", "Only Name")
-
-		name, email := resolveGitIdentity()
-		if name != "Only Name" {
-			t.Errorf("expected name=\"Only Name\", got %q", name)
-		}
-		_ = email
-	})
-
-	t.Run("no env vars falls back to git config", func(t *testing.T) {
-		saved := saveEnv(gitEnvKeys...)
-		defer restoreEnv(saved)
-		for _, k := range gitEnvKeys {
-			os.Unsetenv(k)
-		}
-
-		name, email := resolveGitIdentity()
-		// Asserts only that the git-config fallback does not panic: the answer depends
-		// on the machine's global config.
-		_ = name
-		_ = email
 	})
 }
 
-func TestHandleFSInitGit_EnvVars(t *testing.T) {
+// TestHandleFSInitGitNeedsAnIdentity covers the identity check that runs before a repository is
+// created, because otherwise the request would leave behind a repository that cannot be committed
+// to.
+func TestHandleFSInitGitNeedsAnIdentity(t *testing.T) {
 	s := testServer(t)
+	t.Setenv("HOME", t.TempDir())
 
-	gitEnvKeys := []string{
-		"GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME",
-		"GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL",
-	}
-	saveEnv := func(keys ...string) map[string]string {
-		orig := make(map[string]string)
-		for _, k := range keys {
-			orig[k] = os.Getenv(k)
-		}
-		return orig
-	}
-	restoreEnv := func(saved map[string]string) {
-		for k, v := range saved {
-			if v == "" {
-				os.Unsetenv(k)
-			} else {
-				os.Setenv(k, v)
-			}
-		}
-	}
-
-	t.Run("succeeds with git env vars even without git config", func(t *testing.T) {
-		saved := saveEnv(gitEnvKeys...)
-		defer restoreEnv(saved)
-		for _, k := range gitEnvKeys {
-			os.Unsetenv(k)
-		}
-		// resolveGitIdentity reads GIT_* at call time, so env vars stand in for a
-		// machine-level git config.
-		os.Setenv("GIT_AUTHOR_NAME", "Test Author")
-		os.Setenv("GIT_AUTHOR_EMAIL", "test@example.com")
+	t.Run("succeeds with the identity the boot stamped", func(t *testing.T) {
+		stampTestIdentity(t, "Test Author", "test@example.com")
 
 		tmpDir := t.TempDir()
-		req := testRequest(http.MethodPost, "/api/fs/init-git", map[string]string{
-			"path": tmpDir,
-		})
+		req := testRequest(http.MethodPost, "/api/fs/init-git", map[string]string{"path": tmpDir})
 		cookie, csrfToken := loginTestCSRF(t, s)
 		withAuthCSRF(req, cookie, csrfToken)
 		rr := testResponse(t, s, req)
@@ -1066,59 +972,28 @@ func TestHandleFSInitGit_EnvVars(t *testing.T) {
 		if rr.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 		}
-
 		if _, err := os.Stat(filepath.Join(tmpDir, ".git")); os.IsNotExist(err) {
 			t.Fatal("expected .git directory to exist")
 		}
 	})
 
-	t.Run("succeeds with fallback identity", func(t *testing.T) {
-		saved := saveEnv(gitEnvKeys...)
-		defer restoreEnv(saved)
-		for _, k := range gitEnvKeys {
-			os.Unsetenv(k)
-		}
-		os.Setenv("GIT_COMMITTER_NAME", "Kanban Bot")
-		os.Setenv("GIT_COMMITTER_EMAIL", "bot@kanban.local")
+	t.Run("refuses when nothing names an identity", func(t *testing.T) {
+		stampTestIdentity(t, "", "")
 
 		tmpDir := t.TempDir()
-		req := testRequest(http.MethodPost, "/api/fs/init-git", map[string]string{
-			"path": tmpDir,
-		})
+		req := testRequest(http.MethodPost, "/api/fs/init-git", map[string]string{"path": tmpDir})
 		cookie, csrfToken := loginTestCSRF(t, s)
 		withAuthCSRF(req, cookie, csrfToken)
 		rr := testResponse(t, s, req)
 
-		if rr.Code != http.StatusOK {
-			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-		}
-	})
-
-	t.Run("rejects when no identity available", func(t *testing.T) {
-		saved := saveEnv(gitEnvKeys...)
-		defer restoreEnv(saved)
-		for _, k := range gitEnvKeys {
-			os.Unsetenv(k)
-		}
-
-		tmpDir := t.TempDir()
-		req := testRequest(http.MethodPost, "/api/fs/init-git", map[string]string{
-			"path": tmpDir,
-		})
-		cookie, csrfToken := loginTestCSRF(t, s)
-		withAuthCSRF(req, cookie, csrfToken)
-		rr := testResponse(t, s, req)
-
-		if rr.Code == http.StatusOK {
-			// A machine-level git config makes the negative case impossible here.
-			t.Log("git config was available, skipping negative test")
-			return
-		}
 		if rr.Code != http.StatusBadRequest {
 			t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
 		}
 		if !strings.Contains(rr.Body.String(), "user.name") && !strings.Contains(rr.Body.String(), "user.email") {
 			t.Fatalf("expected identity error, got: %s", rr.Body.String())
+		}
+		if _, err := os.Stat(filepath.Join(tmpDir, ".git")); err == nil {
+			t.Fatal("a refused init left a repository behind")
 		}
 	})
 }
@@ -1162,6 +1037,32 @@ func TestHandleStatus_IncludesAuthorInfo(t *testing.T) {
 	}
 	if authorEmail != "test@test.com" {
 		t.Fatalf("expected author_email 'test@test.com', got '%s'", authorEmail)
+	}
+}
+
+// TestHandleStatus_ReportsTheStampedIdentity covers a server configured with an identity and a
+// project that sets none of its own: the git status response has to name the configured person,
+// because that is who the commit will belong to.
+func TestHandleStatus_ReportsTheStampedIdentity(t *testing.T) {
+	s := testServer(t)
+	t.Setenv("HOME", t.TempDir())
+	stampTestIdentity(t, "Compose User", "compose@example.com")
+
+	tmpDir := t.TempDir()
+	testgit.Init(t, tmpDir)
+	s.store.CreateProject(&types.Project{ID: "stamped-author", Name: "Stamped Author", Path: tmpDir})
+
+	req := testRequest("GET", "/api/projects/stamped-author/git/status", nil)
+	cookie, csrfToken := loginTestCSRF(t, s)
+	withAuthCSRF(req, cookie, csrfToken)
+	rr := testResponse(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("git status: %d %s", rr.Code, rr.Body.String())
+	}
+
+	result := mustJSON[map[string]any](t, rr.Body)
+	if result["authorName"] != "Compose User" || result["authorEmail"] != "compose@example.com" {
+		t.Errorf("got %v <%v>, want the identity the environment named", result["authorName"], result["authorEmail"])
 	}
 }
 

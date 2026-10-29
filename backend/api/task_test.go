@@ -1626,3 +1626,40 @@ func TestTaskHandler_PUT_NestingClearsBaseBranch(t *testing.T) {
 		t.Errorf("base_ref = %q after nesting, want empty", task.BaseRef)
 	}
 }
+
+// authorStore is a stand-in store for resolveGitAuthor, which reads only the project's path.
+type authorStore struct{ project *types.Project }
+
+func (s authorStore) GetProject(string) (*types.Project, error) { return s.project, nil }
+
+// TestResolveGitAuthorInventsNoCommitter covers a project whose repository sets no identity and
+// whose server sets none either: the answer is empty, so the commit dialog shows no name.
+func TestResolveGitAuthorInventsNoCommitter(t *testing.T) {
+	origName, origEmail := git.AuthorIdentity()
+	defer git.SetAuthorIdentity(origName, origEmail)
+	git.SetAuthorIdentity("", "")
+	// HOME points at an empty directory so that the person running this test cannot answer through
+	// their own global git config.
+	t.Setenv("HOME", t.TempDir())
+
+	dir := testgit.EmptyRepo(t)
+	name, email := resolveGitAuthor("p1", authorStore{&types.Project{ID: "p1", Path: dir}})
+	if name != "" || email != "" {
+		t.Errorf("got %q <%q>, want an empty pair when nothing names an identity", name, email)
+	}
+}
+
+// TestResolveGitAuthorPrefersTheIdentityStampedAtBoot covers an identity configured for the server
+// winning over the one the repository sets for itself.
+func TestResolveGitAuthorPrefersTheIdentityStampedAtBoot(t *testing.T) {
+	origName, origEmail := git.AuthorIdentity()
+	defer git.SetAuthorIdentity(origName, origEmail)
+	t.Setenv("HOME", t.TempDir())
+	git.SetAuthorIdentity("Boot Person", "boot@example.com")
+
+	dir := testgit.Repo(t)
+	name, email := resolveGitAuthor("p1", authorStore{&types.Project{ID: "p1", Path: dir}})
+	if name != "Boot Person" || email != "boot@example.com" {
+		t.Errorf("got %q <%q>, want the stamped identity to outrank the repository's %q", name, email, testgit.AuthorName)
+	}
+}

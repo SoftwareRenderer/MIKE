@@ -692,39 +692,22 @@ func (h *TaskHandler) propagateSubtasksAutoMerge(projectID, taskID string, enabl
 	}
 }
 
-// resolveGitAuthor returns effective git author identity.
+// resolveGitAuthor returns the name and email that a commit in this project would carry. An empty
+// result means nothing configures an identity anywhere, and the caller then shows none rather than
+// inventing one.
 func resolveGitAuthor(projectID string, s interface {
 	GetProject(id string) (*types.Project, error)
 }) (string, string) {
-	name, email := git.AuthorIdentity()
-
-	// If env vars are set, they take priority
-	nameSet := name != ""
-	emailSet := email != ""
-
-	// Try to get values from project's git config
-	if proj, err := s.GetProject(projectID); err == nil && proj.Path != "" {
-		if !nameSet {
-			if out, err := git.Command("", "-C", proj.Path, "config", "user.name").CombinedOutput(); err == nil {
-				name = strings.TrimSpace(string(out))
-			}
+	dir := ""
+	if proj, err := s.GetProject(projectID); err == nil {
+		dir = proj.Path
+	}
+	return git.ResolveAuthorIdentity(func(key string) string {
+		if dir == "" {
+			return ""
 		}
-		if !emailSet {
-			if out, err := git.Command("", "-C", proj.Path, "config", "user.email").CombinedOutput(); err == nil {
-				email = strings.TrimSpace(string(out))
-			}
-		}
-	}
-
-	// Fallback defaults if still empty
-	if name == "" {
-		name = "Kanban"
-	}
-	if email == "" {
-		email = "kanban@local"
-	}
-
-	return name, email
+		return git.RepoConfig(dir, key)
+	})
 }
 
 // HandleCommitPreviewStream streams commit message generation via SSE.

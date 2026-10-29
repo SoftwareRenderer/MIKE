@@ -43,7 +43,9 @@ Read this when writing or debugging e2e or unit tests. `AGENTS.md → Testing` k
 - `test.fixme(title, fn)` marks a test whose *expectation* is unverified — never a flake mask. Fixing the six that were here turned up six test bugs (wrong directory, wrong button, wrong line of the file, `[role=dialog]` ambiguity), not six product bugs.
 
 - Heavy fixtures get a dedicated repo — specs that create large files or mutate the working tree must NOT write into the shared `/tmp/kanban-test-repo` (other specs' `git add -A && git commit` races with them). Init a dedicated repo (e.g. `/tmp/kanban-test-repo-<name>`), create its project in `beforeAll` (use `browser.newContext({ storageState })` — `page` is not available in `beforeAll`), delete both in `afterAll`, and wrap the describe in `.serial`. See `editor-wrap-highlight.spec.ts`.
-- global-setup sets a **local git identity** on the test repos — don't remove it: backend commit-and-done commits don't pass `-c` author flags, and without it those e2e tests fail silently (commit skipped, task still moves to Done).
+- global-setup sets a **local git identity** on the test repos — don't remove it: commit-and-done passes
+  `-c` author flags only when the server's own environment names `GIT_AUTHOR_*`, and with neither git
+  refuses the commit ("Committer identity unknown") and those e2e tests fail.
 
 ## Tests that fail only under load
 

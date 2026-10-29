@@ -1861,6 +1861,28 @@ func TestGitAuthorFlags_BothSet(t *testing.T) {
 	}
 }
 
+func TestAuthorIdentityFromEnvPrefersCommitterPerHalf(t *testing.T) {
+	env := map[string]string{
+		"GIT_COMMITTER_NAME": "Committer",
+		"GIT_AUTHOR_NAME":    "Author",
+		"GIT_AUTHOR_EMAIL":   "  author@example.com  ",
+	}
+	name, email := AuthorIdentityFromEnv(func(key string) string { return env[key] })
+	if name != "Committer" {
+		t.Errorf("name=%q, want the GIT_COMMITTER_* half the operator set", name)
+	}
+	if email != "author@example.com" {
+		t.Errorf("email=%q, want the GIT_AUTHOR_* half to fill where GIT_COMMITTER_* named nothing, with "+
+			"the padding a compose file leaves on it trimmed", email)
+	}
+}
+
+func TestAuthorIdentityFromEnvNamesNothingWhenTheEnvironmentDoesNot(t *testing.T) {
+	if name, email := AuthorIdentityFromEnv(func(string) string { return "" }); name != "" || email != "" {
+		t.Errorf("got %q <%q>, want an empty pair so git resolves from the repository", name, email)
+	}
+}
+
 func TestParseUnifiedDiffToFiles_RemovedLineNumbers(t *testing.T) {
 	// Verify that removed lines get old-file line numbers (not new-file line numbers).
 	// Bug: all removed lines in a hunk were assigned the same newLine value.

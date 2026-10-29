@@ -30,9 +30,10 @@ const EmptyTreeHash = "4b825dc642cb6eb9a060e54bf899d69f826635b6"
 // hexRe matches a string of exactly 40 hex characters (a git SHA-1).
 var hexRe = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
-// Git author identity, process-wide: unset means git uses its own configured default. The
-// add-project flow sets it once and every later commit uses it, so it is written while other
-// goroutines read it - use SetAuthorIdentity / AuthorIdentity, never the variables below.
+// authorName and authorEmail hold the commit identity the whole server shares. An empty name or
+// email means git falls back to whatever the repository configures. The server sets this at
+// startup and again when it initialises a repository, both times while tasks are committing, so it
+// is read through SetAuthorIdentity and AuthorIdentity.
 var (
 	authorMu    sync.RWMutex
 	authorName  string
@@ -44,6 +45,58 @@ func SetAuthorIdentity(name, email string) {
 	authorMu.Lock()
 	authorName, authorEmail = name, email
 	authorMu.Unlock()
+}
+
+// ResolveAuthorIdentity returns the identity for a commit: the one configured for this server,
+// with whichever of the name and email it did not set looked up through fill. The caller supplies
+// fill because only it knows whether the repository in hand is the one about to be committed to.
+func ResolveAuthorIdentity(fill func(key string) string) (name, email string) {
+	name, email = AuthorIdentity()
+	if name == "" {
+		name = fill("user.name")
+	}
+	if email == "" {
+		email = fill("user.email")
+	}
+	return name, email
+}
+
+// AuthorIdentityFromEnv reads the commit identity from GIT_COMMITTER_NAME, GIT_COMMITTER_EMAIL,
+// GIT_AUTHOR_NAME and GIT_AUTHOR_EMAIL. The committer values win when both pairs are set, and a
+// name or email that none of them sets comes back empty.
+func AuthorIdentityFromEnv(lookup func(string) string) (name, email string) {
+	return firstNamed(lookup, "GIT_COMMITTER_NAME", "GIT_AUTHOR_NAME"),
+		firstNamed(lookup, "GIT_COMMITTER_EMAIL", "GIT_AUTHOR_EMAIL")
+}
+
+func firstNamed(lookup func(string) string, names ...string) string {
+	for _, name := range names {
+		if value := strings.TrimSpace(lookup(name)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+// GlobalConfig reads one git configuration key from the operator's own config file. It returns an
+// empty string when the key is not set there or when git cannot read the file.
+func GlobalConfig(key string) string {
+	return configValue("config", "--global", key)
+}
+
+// RepoConfig reads one git configuration key as the repository at dir sees it: that repository's
+// own config first, then the operator's, then the system's. It returns an empty string when no
+// level sets the key.
+func RepoConfig(dir, key string) string {
+	return configValue("-C", dir, "config", key)
+}
+
+func configValue(args ...string) string {
+	out, err := Command("", args...).CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // AuthorIdentity returns the configured overrides.

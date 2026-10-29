@@ -376,13 +376,7 @@ func (h *GitHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	if headOut, err := git.Command("", "-C", project.Path, "rev-parse", "HEAD").CombinedOutput(); err == nil {
 		headHash = strings.TrimSpace(string(headOut))
 	}
-	var authorName, authorEmail string
-	if nameOut, err := git.Command("", "-C", project.Path, "config", "user.name").CombinedOutput(); err == nil {
-		authorName = strings.TrimSpace(string(nameOut))
-	}
-	if emailOut, err := git.Command("", "-C", project.Path, "config", "user.email").CombinedOutput(); err == nil {
-		authorEmail = strings.TrimSpace(string(emailOut))
-	}
+	authorName, authorEmail := resolveGitAuthor(project.ID, h.store)
 	ahead, behind := remoteAheadBehind(project.Path)
 	httputil.JSONResponse(w, http.StatusOK, map[string]any{
 		"clean":       clean,
@@ -1387,7 +1381,11 @@ func (h *GitHandler) HandleProjectCommit(w http.ResponseWriter, r *http.Request)
 		httputil.JSONError(w, http.StatusBadRequest, "no staged changes to commit")
 		return
 	}
-	cmd = git.Command("", "-C", project.Path, "commit", "-m", req.Message)
+	// The identity configured for this server goes on the command line, because a checkout with no
+	// user.name of its own has nothing else to commit under and would be refused.
+	args := append([]string{"-C", project.Path}, git.GitAuthorFlags()...)
+	args = append(args, "commit", "-m", req.Message)
+	cmd = git.Command("", args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		logging.For(logging.Managers).Errorf("git commit failed: %v: %s", err, out)
 		httputil.JSONError(w, http.StatusInternalServerError, "git commit failed")

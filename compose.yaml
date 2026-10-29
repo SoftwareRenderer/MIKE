@@ -84,6 +84,13 @@ services:
       # Pull the default sandbox base image at boot instead of on the first task.
       MIKE_PREPULL_IMAGE: ${MIKE_PREPULL_IMAGE:-}
 
+      # Who commits are authored as. Naming the author half alone is enough: the server stamps it onto
+      # every commit, committer included. An empty value means unset. **docs/configuration.md**.
+      GIT_AUTHOR_NAME: '${GIT_AUTHOR_NAME:-}'
+      GIT_AUTHOR_EMAIL: '${GIT_AUTHOR_EMAIL:-}'
+      GIT_COMMITTER_NAME: '${GIT_COMMITTER_NAME:-}'
+      GIT_COMMITTER_EMAIL: '${GIT_COMMITTER_EMAIL:-}'
+
     volumes:
       # kanban.db (encrypted provider keys, session hashes), the local CA + server cert, and
       # the flight recorder. Owner-only inside; the CA never rotates, so keep the volume.

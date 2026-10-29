@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"mike/backend/git"
 	"mike/backend/prompts"
 	"mike/backend/server"
 	"mike/backend/store"
@@ -65,6 +66,8 @@ func main() {
 	for _, warning := range cfg.Warnings {
 		logging.For(logging.Main).Warn(warning)
 	}
+
+	stampCommitIdentity(os.Getenv)
 
 	assets, assetSource, err := frontendAssets(cfg.FrontendDist)
 	if err != nil {
@@ -207,6 +210,23 @@ func main() {
 }
 
 // The trace holds ~30s of runtime internals, so the file is 0600.
+// stampCommitIdentity sets the commit identity from this process's GIT_COMMITTER_* and
+// GIT_AUTHOR_* variables, which is how a container with no git config file gets commits at all.
+// When no variable sets an identity it stores nothing, so each repository keeps the identity it
+// configures for itself.
+func stampCommitIdentity(lookup func(string) string) {
+	name, email := git.AuthorIdentityFromEnv(lookup)
+	git.SetAuthorIdentity(name, email)
+	if name == "" && email == "" {
+		return
+	}
+	ident := name
+	if email != "" {
+		ident += " <" + email + ">"
+	}
+	logging.For(logging.Main).Infof("commits will be authored as %s", ident)
+}
+
 func openTraceFile(path string) (*os.File, error) {
 	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 }

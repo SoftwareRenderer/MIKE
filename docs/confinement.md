@@ -279,8 +279,26 @@ occurrence).
 
 `git.SetAuthorIdentity` / `git.AuthorIdentity` (`backend/git/worktree.go`) are process-wide and
 accessor-only: there are deliberately no exported `GitAuthorName`/`GitAuthorEmail` variables, because the
-add-project flow writes the identity while tasks are committing. Making it per-`WorktreeManager` is still
-open.
+boot and the add-project flow write the identity while tasks are committing. Making it per-`WorktreeManager`
+is still open.
+
+- **The boot stamps it from the environment and from nothing else** — `stampCommitIdentity` (`main.go`)
+  through `git.AuthorIdentityFromEnv`, which takes `GIT_COMMITTER_*` before `GIT_AUTHOR_*`, each half on
+  its own. A container with no gitconfig has nothing for git to resolve by itself: unstamped,
+  `GIT_AUTHOR_*` reaches the author only and the commit is refused with `Committer identity unknown`, so
+  the stamped pair is what answers the committer half.
+- **What the deployment does not name stays the repository's decision.** The stamp reads no git
+  configuration, so an unnamed deployment keeps the identity a repository configures for itself. The one
+  `git config --global` read is the check that refuses to initialize a repository when neither the stamp
+  nor that config names a person (`resolveGitIdentity`, `backend/server/handler_fs.go`).
+- **Every screen that names a committer answers from the same pair**, through
+  `git.ResolveAuthorIdentity`: the stamped pair first, then one config reader the caller scopes.
+  `resolveGitAuthor` (`backend/api/task.go`) feeds the commit preview's metadata and the project's git
+  status. It answers an empty pair rather than a name no commit would carry: an identity invented there is
+  a promise the commit does not keep.
+- Tests: `TestStampCommitIdentityPutsTheEnvironmentOnEveryCommit` (root), `TestResolveGitAuthor*`
+  (`backend/api/`), `TestAuthorIdentityFromEnv*` (`backend/git/`).
+
 ## The address a person typed is a network grant
 
 Two origins of an outbound address exist, and they are not equally trusted. An address this server chose —

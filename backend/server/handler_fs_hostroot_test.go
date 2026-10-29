@@ -176,8 +176,7 @@ func TestFSMkdirIsJailedToTheHostRoots(t *testing.T) {
 
 func TestFSInitGitIsJailedToTheHostRoots(t *testing.T) {
 	s, home, outside, cookie, csrf := jailedHostRootServer(t)
-	t.Setenv("GIT_AUTHOR_NAME", "Test Author")
-	t.Setenv("GIT_AUTHOR_EMAIL", "test@example.com")
+	stampTestIdentity(t, "Test Author", "test@example.com")
 
 	initGit := func(path string) *httptest.ResponseRecorder {
 		req := testRequest(http.MethodPost, "/api/fs/init-git", map[string]string{"path": path})
@@ -263,8 +262,7 @@ func TestHomeEndpointReportsTheHome(t *testing.T) {
 // wherever it points, which can be outside every host root and is not reported anywhere else.
 func TestFSInitGitRefusesANamePlantedAsALink(t *testing.T) {
 	s, home, outside, cookie, csrf := jailedHostRootServer(t)
-	t.Setenv("GIT_AUTHOR_NAME", "Test Author")
-	t.Setenv("GIT_AUTHOR_EMAIL", "test@example.com")
+	stampTestIdentity(t, "Test Author", "test@example.com")
 
 	const stored = "ssh-rsa AAAA key\n"
 	victim := filepath.Join(outside, "authorized_keys")
@@ -299,8 +297,7 @@ func TestFSInitGitRefusesANamePlantedAsALink(t *testing.T) {
 // repository with one commit holding README.md, not a bare `git init` and not an untracked file.
 func TestFSInitGitLeavesACommittedReadme(t *testing.T) {
 	s, home, _, cookie, csrf := jailedHostRootServer(t)
-	t.Setenv("GIT_AUTHOR_NAME", "Test Author")
-	t.Setenv("GIT_AUTHOR_EMAIL", "test@example.com")
+	stampTestIdentity(t, "Test Author", "test@example.com")
 
 	dir := filepath.Join(home, "new-project")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
