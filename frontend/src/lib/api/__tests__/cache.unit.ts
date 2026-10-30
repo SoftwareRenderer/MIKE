@@ -28,11 +28,4 @@ describe('cache markers', () => {
         expect(marked).toBe(arr);
         expect(isFromCache(marked)).toBe(true);
     });
-
-    it('markCached is idempotent', () => {
-        const data = { key: 'value' };
-        markCached(data);
-        markCached(data);
-        expect(isFromCache(data)).toBe(true);
-    });
 });

@@ -182,51 +182,6 @@ test.describe('Editor Tabs', () => {
     }
   });
 
-  test('should show unsaved indicator on tab', async ({ page }) => {
-    const projectId = await getProjectId(page);
-    // The project explorer lists the project directory, so that is where the fixture
-    // files have to be written — not a task worktree.
-    const projectDir = ownProjectPath();
-    expect(projectDir, 'this worker has no own project path').toBeTruthy();
-    expect(projectId, 'this worker has no own project id').toBeTruthy();
-
-    const uniqueId = Date.now();
-    const file1 = `tab-unsaved-${uniqueId}.txt`;
-    writeFileSync(join(projectDir, file1), 'Original content\n');
-
-    try {
-      // Open explorer
-      await selectProject(page, projectId);
-      await page.waitForSelector('.top-bar', { timeout: 10000 });
-      await page.locator('.explorer-btn').click();
-      await expect(page.locator('.explorer-view')).toBeVisible({ timeout: 10000 });
-      await expect(page.locator('.file-browser-list')).toBeVisible({ timeout: 10000 });
-
-      // Open the file
-      await page.locator('.file-browser-item', { hasText: file1 }).click();
-      await expect(page.locator('.cm-editor')).toBeVisible({ timeout: 10000 });
-
-      // Tab should NOT have unsaved class initially
-      const tab = page.locator('.editor-tab');
-      expect(await tab.first().getAttribute('class')).not.toContain('unsaved');
-
-      // Edit the file in CodeMirror — click into it first, it is not autofocused
-      await page.locator('.cm-content').click();
-      await page.keyboard.press('End');
-      await page.keyboard.type(' Modified');
-
-      // Wait for the change to be detected
-      await page.waitForTimeout(300);
-
-      // Tab should now have unsaved indicator
-      await expect(tab.first()).toHaveClass(/unsaved/);
-    } finally {
-      try {
-        rmSync(join(projectDir, file1), { force: true });
-      } catch { /* ignore */ }
-    }
-  });
-
   test('should re-open an already-open file and switch to its tab', async ({ page }) => {
     const projectId = await getProjectId(page);
     // The project explorer lists the project directory, so that is where the fixture

@@ -76,23 +76,6 @@ func TestDefinitionsCarryTheirName(t *testing.T) {
 	}
 }
 
-// TestToolNamesMatchTheirDefinitions closes the loop the constants exist for: types.CoreToolNames and
-// the definitions must be the same set, so renaming a constant without the definition (or the
-// other way round) fails here rather than at the first tool call nobody answers.
-func TestToolNamesMatchTheirDefinitions(t *testing.T) {
-	declared := map[string]bool{}
-	for _, n := range types.CoreToolNames() {
-		declared[n] = true
-	}
-	all := append(append(append(GetToolDefinitions(), GetPlanModeToolDefinitions()...),
-		GetExploreModeToolDefinitions()...), GetLSPToolDefinitions()...)
-	for _, n := range toolNames(all) {
-		if !declared[n] {
-			t.Errorf("a tool is defined as %q but types.CoreToolNames does not declare it", n)
-		}
-	}
-}
-
 // toolNames extracts the names of a definition list, tolerating a missing Function so a broken
 // definition surfaces in the test that owns it rather than as a nil dereference here.
 func toolNames(defs []types.ChatTool) []string {

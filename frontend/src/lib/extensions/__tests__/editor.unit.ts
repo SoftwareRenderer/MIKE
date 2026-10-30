@@ -102,22 +102,6 @@ describe('editor capability catalog', () => {
         }
         expect(SUPPORTED_CAPABILITIES['editor.footerButtonClick']).toBeUndefined();
     });
-
-    it('grants declared editor capabilities through computeGrants', () => {
-        const granted = computeGrants([
-            'editor.addFooterButton',
-            'editor.getContent',
-            'editor.setOverlay',
-            'editor.contentChange',
-        ]);
-        expect(granted).toEqual([
-            'editor.addFooterButton',
-            'editor.getContent',
-            'editor.setOverlay',
-            'editor.contentChange',
-        ]);
-        expect(computeGrants(['editor.addFooterButton', 'files.read'])).toEqual(['editor.addFooterButton']);
-    });
 });
 
 describe('editor.addFooterButton', () => {

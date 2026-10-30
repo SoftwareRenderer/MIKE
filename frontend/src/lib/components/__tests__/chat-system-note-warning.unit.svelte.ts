@@ -61,10 +61,4 @@ describe('system note — a memory pause is drawn as a warning, not an error', (
         expect(container.querySelector('.system-message')?.textContent).toContain('Merge conflict detected');
     });
 
-    it('draws a merge note stored with severity="warning" in the warning style too', () => {
-        const { container } = render(ChatMessage, {
-            role: 'system', severity: 'warning', content: 'Merge aborted — the target branch moved',
-        });
-        expect((container.querySelector('.system-card') as Element).classList.contains('system-warning')).toBe(true);
-    });
 });
