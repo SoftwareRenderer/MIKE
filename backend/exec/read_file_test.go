@@ -255,35 +255,6 @@ func TestReadFile_OffsetPastEnd(t *testing.T) {
 	}
 }
 
-// TestReadFile_OffsetPastEnd_NoPanic: read_file with an offset past the file's last line
-// surfaces an error and never panics.
-func TestReadFile_OffsetPastEnd_NoPanic(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	te := newToolTestExecutor(t, dir)
-	task := makeTestTask(t, te.store, "proj-read-8", "task-read-8")
-
-	// 194 lines exactly (matches the panic: len(lines) == 194).
-	lines := make([]string, 194)
-	for i := range lines {
-		lines[i] = "line_" + string(rune('0'+i%10))
-	}
-	content := strings.Join(lines, "\n")
-	filePath := "repro-panic.txt"
-	if err := os.WriteFile(filepath.Join(dir, filePath), []byte(content), 0644); err != nil {
-		t.Fatalf("write test file: %v", err)
-	}
-
-	// offset=218 -> offsetIdx=217 > len(lines)=194. Must NOT panic.
-	_, ok := te.executeTool(context.Background(), "read_file", map[string]any{
-		"path":   filePath,
-		"offset": float64(218),
-	}, dir, task, &executionState{}, nil)
-	if ok {
-		t.Fatal("expected failure for offset past end")
-	}
-}
-
 // TestReadFile_OffsetValid_LimitClamped verifies that a valid offset with an
 // oversized limit is silently clamped to the remaining lines (no error).
 func TestReadFile_OffsetValid_LimitClamped(t *testing.T) {

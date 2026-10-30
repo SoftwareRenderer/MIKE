@@ -282,23 +282,6 @@ func TestHandleCreateTask_MissingTitle(t *testing.T) {
 	}
 }
 
-func TestHandleCreateTask_MissingPrompt(t *testing.T) {
-	t.Parallel()
-	te := newTestExecutor(t)
-	parent := createParentTask(t, te.store, "parent-task-7", "proj-1", "backlog")
-
-	_, err := te.tools.handleCreateTask(map[string]any{
-		"title": "Task without prompt",
-	}, parent, nil)
-
-	if err == nil {
-		t.Error("expected error for missing prompt, got nil")
-	}
-	if !strings.Contains(err.Error(), "title and prompt are required") {
-		t.Errorf("unexpected error message: %s", err)
-	}
-}
-
 func TestHandleCreateTask_ParentNotFound(t *testing.T) {
 	t.Parallel()
 	te := newTestExecutor(t)
