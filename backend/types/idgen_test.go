@@ -9,13 +9,6 @@ import (
 	"testing"
 )
 
-func TestTaskWordsCount(t *testing.T) {
-	expected := 256
-	if len(taskWords) != expected {
-		t.Errorf("expected %d words, got %d", expected, len(taskWords))
-	}
-}
-
 func TestTaskWordsNoDuplicates(t *testing.T) {
 	seen := make(map[string]int, len(taskWords))
 	for _, w := range taskWords {

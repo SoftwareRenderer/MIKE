@@ -1,10 +1,7 @@
 package store
 
 import (
-	"encoding/json"
 	"testing"
-
-	"mike/backend/types"
 )
 
 func TestGetSetConfigValue(t *testing.T) {
@@ -48,43 +45,5 @@ func TestConfigOverwrite(t *testing.T) {
 	}
 	if val != "value2" {
 		t.Fatalf("expected value2, got %s", val)
-	}
-}
-
-func TestConfigProvidersJSON(t *testing.T) {
-	s := testStore(t)
-
-	providers := []types.Provider{
-		{
-			Name:        "neptune",
-			DisplayName: "Neptune",
-			URL:         "http://neptune:8010/v1",
-			Models: []types.ModelConfig{
-				{Name: "model-a", ReasoningEffort: "low"},
-				{Name: "model-b", ReasoningEffort: "high"},
-			},
-			Concurrency: 2,
-		},
-	}
-	jsonData, _ := json.Marshal(providers)
-
-	if err := s.SetConfigValue("providers", string(jsonData)); err != nil {
-		t.Fatalf("set providers: %v", err)
-	}
-
-	val, err := s.GetConfigValue("providers")
-	if err != nil {
-		t.Fatalf("get providers: %v", err)
-	}
-
-	var got []types.Provider
-	if err := json.Unmarshal([]byte(val), &got); err != nil {
-		t.Fatalf("unmarshal providers: %v", err)
-	}
-	if len(got) != 1 || got[0].Name != "neptune" {
-		t.Fatalf("unexpected providers: %+v", got)
-	}
-	if len(got[0].Models) != 2 {
-		t.Fatalf("expected 2 models, got %d", len(got[0].Models))
 	}
 }

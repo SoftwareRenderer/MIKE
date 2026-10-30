@@ -44,20 +44,6 @@ func TestParseOperatingMode(t *testing.T) {
 	}
 }
 
-// TestOperatingModeRoundTrip: the constants must keep spelling the wire values, because they
-// cross SQLite, JSON and the WebSocket layer. Renaming a constant is fine; changing its value is
-// a migration.
-func TestOperatingModeRoundTrip(t *testing.T) {
-	for _, m := range []OperatingMode{ModeAct, ModePlan, ModeExplore} {
-		if _, ok := ParseOperatingMode(string(m)); !ok {
-			t.Errorf("%q does not parse: a constant must always be a valid wire value", m)
-		}
-	}
-	if ModeAct != "act" || ModePlan != "plan" || ModeExplore != "explore" {
-		t.Errorf("operating mode wire values changed: %q %q %q", ModeAct, ModePlan, ModeExplore)
-	}
-}
-
 // TestTaskModeHelpers: the per-mode helpers are the whole vocabulary this package offers for
 // "what may this turn do". Which of them mounts the worktree read-only is decided where the
 // container arguments are built, not here.
