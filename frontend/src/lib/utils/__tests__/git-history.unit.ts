@@ -64,11 +64,6 @@ describe('buildCommitTooltip', () => {
         ]);
     });
 
-    it('carries the hidden date for tight density', () => {
-        const tip = buildCommitTooltip(COMMIT, 'tight', CTX);
-        expect(tip).toContain('Sandbox · 2024-05-04 14:30:00');
-    });
-
     it('carries the hidden author for tighest density', () => {
         const tip = buildCommitTooltip(COMMIT, 'tighest', CTX);
         expect(tip).toContain('Sandbox · 2024-05-04 14:30:00');

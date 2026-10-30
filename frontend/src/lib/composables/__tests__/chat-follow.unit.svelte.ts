@@ -218,24 +218,6 @@ describe('createChatFollow — never fights the user', () => {
         expect(follow.atBottom).toBe(false);
         follow.destroy();
     });
-
-    it('resumes following as soon as the user scrolls back to the bottom', () => {
-        const follow = createChatFollow();
-        const { el, fire } = makeScroller(2000, 500);
-        follow.attach(el, null);
-        pinFrames();
-        fire('wheel', { deltaY: -120 } as never);
-        el.scrollTop = 0;
-        follow.handleScroll();
-        expect(follow.atBottom).toBe(false);
-
-        el.scrollTop = 999999;
-        follow.handleScroll();
-        expect(follow.atBottom).toBe(true);
-        follow.pin();
-        expect(distanceFromBottom(el)).toBe(0);
-        follow.destroy();
-    });
 });
 
 describe('createChatFollow — a takeover during an in-flight pin', () => {

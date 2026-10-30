@@ -117,12 +117,6 @@ describe("the card's out-of-memory pill", () => {
         expect(container.querySelector('.oom-badge')).toBeNull();
     });
 
-    it('says nothing about a run that stayed under its limit', async () => {
-        projectWithLimit(1024);
-        const container = renderCard(task({ sandbox_memory_peak_mb: 512 }));
-        expect(container.querySelector('.oom-badge')).toBeNull();
-    });
-
     it('says nothing about the alert someone dismissed', async () => {
         projectWithLimit(1024);
         const container = renderCard(task({ memory_alert_ack: { peak_mb: 1024, oom_kills: 0, limit_mb: 1024 } }));

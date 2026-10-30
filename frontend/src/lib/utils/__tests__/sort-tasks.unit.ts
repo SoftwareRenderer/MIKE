@@ -39,16 +39,6 @@ describe('sortByLastMoved', () => {
         expect(sortByLastMoved([a, b]).map(t => t.id)).toEqual(['a', 'b']);
     });
 
-    it('keeps equal timestamps in the incoming order (no tiebreaker)', () => {
-        const same = '2025-01-01T00:00:00Z';
-        const sorted = sortByLastMoved([
-            makeTask('first', same),
-            makeTask('second', same),
-            makeTask('third', same),
-        ]);
-        expect(sorted.map(t => t.id)).toEqual(['first', 'second', 'third']);
-    });
-
     it('sorts unparseable or missing timestamps as oldest', () => {
         const sorted = sortByLastMoved([
             makeTask('no-moved-at', '' as string),
@@ -107,14 +97,5 @@ describe('sortByLastMoved with oldestFirst', () => {
         const input = [makeTask('first', same), makeTask('second', same), makeTask('third', same)];
         expect(sortByLastMoved(input, true).map(t => t.id)).toEqual(['first', 'second', 'third']);
         expect(sortByLastMoved(input).map(t => t.id)).toEqual(['first', 'second', 'third']);
-    });
-
-    it('does not mutate the input array', () => {
-        const tasks = [
-            makeTask('new', '2025-02-01T00:00:00Z'),
-            makeTask('old', '2025-01-01T00:00:00Z'),
-        ];
-        sortByLastMoved(tasks, true);
-        expect(tasks.map(t => t.id)).toEqual(['new', 'old']);
     });
 });

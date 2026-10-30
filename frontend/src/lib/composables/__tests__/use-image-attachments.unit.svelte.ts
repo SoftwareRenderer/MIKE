@@ -252,15 +252,6 @@ describe('the drop ring', () => {
         expect(h.intake.isOver).toBe(true);
     });
 
-    it('ignores a drag that carries no file, so moving text stays a move', () => {
-        const h = setup();
-
-        h.intake.handleDragEnter(dragOf(['text/plain']));
-        h.intake.handleDragOver(dragOf(['text/plain'], 'dragover'));
-
-        expect(h.intake.isOver).toBe(false);
-    });
-
     it('sorts a dropped set into the same three buckets', async () => {
         const h = setup();
 

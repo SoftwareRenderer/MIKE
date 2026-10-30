@@ -13,80 +13,12 @@ test.describe('Thread Switch', () => {
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
-  test('should handle rapid thread switches without corruption', async ({ page }) => {
-    const projectId = await getProjectId(page);
-    const taskId = await createTaskViaApi(page, projectId, `thread-switch-${Date.now()}`);
-    await ensureTaskStarted(page, projectId, taskId);
-    await navigateToTask(page, taskId);
-
-    // Create a message to fork from
-    const msgResult = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/messages`, {
-      method: 'POST',
-      body: { role: 'user', content: 'Fork point message' },
-    });
-    expect(msgResult.ok).toBe(true);
-    const msgId = msgResult.data?.id;
-
-    // Get the main thread
-    const threadsResult = await page.evaluate(async ({ pid, tid }) => {
-      const res = await fetch(`/api/projects/${pid}/tasks/${tid}/threads`);
-      return res.json();
-    }, { pid: projectId, tid: taskId });
-    const mainThreadId = threadsResult[0]?.id;
-
-    // Fork to create a second thread
-    const forkResult = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/threads/fork`, {
-      method: 'POST',
-      body: { from_thread_id: mainThreadId, from_message_id: msgId },
-    });
-    expect(forkResult.ok).toBe(true);
-    const forkThreadId = forkResult.data?.id;
-
-    // Rapidly switch between threads via API (simulating rapid user clicks)
-    // The server mutex should serialize these requests
-    const switchResults = await page.evaluate(async ({ pid, tid, mainId, forkId }) => {
-      // Get CSRF token
-      const sessionRes = await fetch('/api/auth/session');
-      const session = await sessionRes.json();
-      const csrf = session.csrf_token || '';
-      const results = [];
-      const switches = [forkId, mainId, forkId, mainId]; // rapid back-and-forth
-      for (const threadId of switches) {
-        const res = await fetch(`/api/projects/${pid}/tasks/${tid}/threads/switch`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(csrf ? { 'X-CSRF-Token': csrf } : {}),
-          },
-          credentials: 'include',
-          body: JSON.stringify({ thread_id: threadId }),
-        });
-        results.push({ threadId, status: res.status });
-      }
-      return results;
-    }, { pid: projectId, tid: taskId, mainId: mainThreadId, forkId: forkThreadId });
-
-    // All switches should succeed
-    for (const result of switchResults) {
-      expect(result.status).toBe(200);
-    }
-
-    // Verify final state: exactly one active thread
-    const finalThreads = await page.evaluate(async ({ pid, tid }) => {
-      const res = await fetch(`/api/projects/${pid}/tasks/${tid}/threads`);
-      return res.json();
-    }, { pid: projectId, tid: taskId });
-
-    const activeThreads = finalThreads.filter((t: any) => t.is_active === true);
-    expect(activeThreads.length).toBe(1);
-
-    // Verify task's current_thread_id matches the active thread
-    const taskData = await page.evaluate(async ({ pid, tid }) => {
-      const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
-      return res.json();
-    }, { pid: projectId, tid: taskId });
-    expect(taskData.current_thread_id).toBe(activeThreads[0].id);
-  });
+  // Every switch answering 200 and leaving exactly one active thread is the handler's serialisation, and
+  // `TestThreadSwitchConcurrent` (backend/server/thread_handler_test.go) holds it: Main and a fork, a
+  // switch to each thrown at the same mutex, the same status check, the same `is_active` count and
+  // `current_thread_id` assertion. This body drove those calls through `page.evaluate` and read nothing
+  // the screen drew, so it added neither a git fact nor a browser one. What the Go test cannot read is the
+  // conversation the browser draws for the thread it landed on, which is the spec below.
 
   test('should switch thread via UI and update chat entries', async ({ page }) => {
     const projectId = await getProjectId(page);

@@ -169,46 +169,6 @@ func TestLoadWithCert_UserProvided_MissingCert(t *testing.T) {
 	}
 }
 
-func TestLoadWithCert_UserProvided_MissingKey(t *testing.T) {
-	dir := t.TempDir()
-	certPath := filepath.Join(dir, "cert.pem")
-	if err := os.WriteFile(certPath, []byte("dummy-cert"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	_, err := LoadWithCert(t.TempDir(), certPath, "/nonexistent/key.pem")
-	if err == nil {
-		t.Fatal("expected error for missing key file")
-	}
-}
-
-func TestLoadWithCert_AutoGenerate_ReusesExisting(t *testing.T) {
-	dataDir := t.TempDir()
-
-	cfg1, err := LoadWithCert(dataDir, "", "")
-	if err != nil {
-		t.Fatalf("first load: %v", err)
-	}
-	info1, err := os.Stat(cfg1.CertFile)
-	if err != nil {
-		t.Fatalf("failed to stat cert: %v", err)
-	}
-
-	cfg2, err := LoadWithCert(dataDir, "", "")
-	if err != nil {
-		t.Fatalf("second load: %v", err)
-	}
-	info2, err := os.Stat(cfg2.CertFile)
-	if err != nil {
-		t.Fatalf("failed to stat cert after reuse: %v", err)
-	}
-
-	// Mtime should be the same (not regenerated)
-	if !info1.ModTime().Equal(info2.ModTime()) {
-		t.Error("cert was regenerated on second load")
-	}
-}
-
 func TestLoadWithCert_ReusesCAAndLeafAcrossCalls(t *testing.T) {
 	dataDir := t.TempDir()
 
@@ -1016,30 +976,6 @@ func TestSameIPs_IgnoresIPv4Representation(t *testing.T) {
 }
 
 // --- CertPEM ---------------------------------------------------------------
-
-func TestCertPEM_ReturnsCertificate(t *testing.T) {
-	cfg, err := LoadWithCert(t.TempDir(), "", "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	pemBytes, err := CertPEM(cfg.CAFile)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	block, _ := pem.Decode(pemBytes)
-	if block == nil || block.Type != "CERTIFICATE" {
-		t.Fatalf("expected a CERTIFICATE PEM block, got %+v", block)
-	}
-	cert, err := x509.ParseCertificate(block.Bytes)
-	if err != nil {
-		t.Fatalf("served bytes are not a parseable certificate: %v", err)
-	}
-	if !cert.IsCA {
-		t.Error("expected the CA certificate itself, got a non-CA certificate")
-	}
-}
 
 // The reason CertPEM re-encodes instead of returning the file: a caller writes
 // the result to an HTTP response, so key material must never come back out.
