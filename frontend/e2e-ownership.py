@@ -45,7 +45,6 @@ BASELINE = {
     # The isolated lane runs one worker against its own server (playwright.config.ts), so its turns
     # queue behind nothing. It still pays for the rule's absence if that lane ever parallelises.
     'html-preview.spec.ts': 'isolated lane: one worker, its own server',
-    'mode-select.spec.ts': 'isolated lane: one worker, its own server',
     'preferences-hide-model-badge.spec.ts': 'isolated lane: one worker, its own server',
     'preferences-keyboard.spec.ts': 'isolated lane: one worker, its own server',
     'provider-task-concurrency.spec.ts': 'isolated lane: one worker, its own server',

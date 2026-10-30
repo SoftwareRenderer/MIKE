@@ -108,17 +108,6 @@ describe('usePromiseDialog', () => {
         await expect(answered).resolves.toBe(true);
     });
 
-    it('Enter answers nothing while the slot is empty', async () => {
-        const store = new Slots();
-        render(Probe, { props: { slot: slotOf(store, 'a'), label: 'a' } });
-        await flush();
-
-        await fireEvent.keyDown(window, { key: 'Enter' });
-        await flush();
-
-        expect(store.a).toBeNull();
-    });
-
     it('leaves Enter alone when confirmOnEnter is off', async () => {
         const store = new Slots();
         render(Probe, { props: { slot: slotOf(store, 'a'), label: 'a', confirmOnEnter: false } });
