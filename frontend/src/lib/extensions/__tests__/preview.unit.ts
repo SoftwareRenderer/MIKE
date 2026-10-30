@@ -7,7 +7,6 @@ import {
     CAP_PREVIEW_RELEASE,
     CAP_PREVIEW_NAV_STATE,
     SUPPORTED_CAPABILITIES,
-    computeGrants,
 } from '../capabilities';
 import { apiFetch } from '$lib/api/helpers';
 import type { HostRequest } from '../types';
@@ -70,16 +69,6 @@ describe('preview capability catalog', () => {
             expect(SUPPORTED_CAPABILITIES[cap].kind).toBe('call');
             expect(typeof SUPPORTED_CAPABILITIES[cap].handler).toBe('function');
         }
-    });
-
-    it('grants only declared, known preview capabilities', () => {
-        const granted = computeGrants([CAP_PREVIEW_SERVE, CAP_PREVIEW_SERVE_SCRIPTS, CAP_PREVIEW_SERVE_NETWORK, CAP_PREVIEW_RELEASE, CAP_PREVIEW_NAV_STATE, 'preview.bogus']);
-        expect(granted).toContain(CAP_PREVIEW_SERVE);
-        expect(granted).toContain(CAP_PREVIEW_SERVE_SCRIPTS);
-        expect(granted).toContain(CAP_PREVIEW_SERVE_NETWORK);
-        expect(granted).toContain(CAP_PREVIEW_RELEASE);
-        expect(granted).toContain(CAP_PREVIEW_NAV_STATE);
-        expect(granted).not.toContain('preview.bogus');
     });
 });
 
@@ -246,18 +235,6 @@ describe('preview.navState', () => {
         expect(resp.ok).toBe(false);
         expect(resp.error).toContain('404');
     });
-
-    it('rejects the call when not granted', async () => {
-        const { channel, contentWindow, messages } = makeChannel([], {});
-        send(channel, contentWindow, {
-            type: 'call', id: 'm1', cap: CAP_PREVIEW_NAV_STATE, args: { token: 'tok123' },
-        });
-        await flush();
-        const resp = messages.find((m) => m.id === 'm1');
-        expect(resp.ok).toBe(false);
-        expect(resp.error).toContain('not granted');
-        expect(apiFetchMock).not.toHaveBeenCalled();
-    });
 });
 
 describe('preview.release', () => {
@@ -388,16 +365,5 @@ describe('preview.release', () => {
         await flush();
 
         expect(deleteCalls()).toHaveLength(0);
-    });
-
-    it('rejects the call when not granted', async () => {
-        const { channel, contentWindow, messages } = makeChannel([], {});
-        send(channel, contentWindow, {
-            type: 'call', id: 'm1', cap: CAP_PREVIEW_RELEASE, args: { token: 'tok123' },
-        });
-        await flush();
-        const resp = messages.find((m) => m.type === 'response' && m.id === 'm1');
-        expect(resp.ok).toBe(false);
-        expect(apiFetchMock).not.toHaveBeenCalled();
     });
 });

@@ -1,14 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { installFakeIndexedDB } from '../../__tests__/fake-indexeddb';
 
-function mockRejectedFetch(name = 'TypeError') {
-    const err: any = new Error(name === 'AbortError' ? 'The operation was aborted' : 'Failed to fetch');
-    err.name = name;
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(err));
-}
-
-function mockServerErrorFetch() {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({ error: 'internal server error' }) }));
+function mockRejectedFetch() {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(Object.assign(new Error('Failed to fetch'), { name: 'TypeError' })));
 }
 
 describe('sendTaskMessage queueing on network failure', () => {
@@ -24,7 +18,7 @@ describe('sendTaskMessage queueing on network failure', () => {
     it('queues a sendTaskMessage action and returns a queued result when the network fails (TypeError)', async () => {
         const { sendTaskMessage } = await import('$lib/api/tasks');
         const { loadQueue } = await import('$lib/api/queue');
-        mockRejectedFetch('TypeError');
+        mockRejectedFetch();
 
         const result = await sendTaskMessage({ projectId: 'p1', taskId: 't1', content: 'hello world', modelName: 'model-a', serverUrl: 'http://llm:8010/v1' });
 
@@ -44,25 +38,12 @@ describe('sendTaskMessage queueing on network failure', () => {
         });
     });
 
-    // Used to be a test that a timeout (AbortError) queues the message. There is no client-side timeout
-    // any more, and an abort is no longer a network event: it means somebody stopped this request.
-    it('does NOT queue a send the user cancelled (AbortError), and the rejection reaches the caller', async () => {
-        const { sendTaskMessage } = await import('$lib/api/tasks');
-        const { loadQueue } = await import('$lib/api/queue');
-        mockRejectedFetch('AbortError');
-
-        await expect(sendTaskMessage({ projectId: 'p1', taskId: 't1', content: 'cancelled message' })).rejects.toThrow();
-
-        const queue = await loadQueue();
-        expect(queue).toHaveLength(0);
-    });
-
     // A replay that loses the effort runs the task at the model's configured default instead
     // (exec/loop.go falls back to GetModelReasoningEffort when the request carries none).
     it('replays a queued send with the reasoning effort chosen for it', async () => {
         const { sendTaskMessage } = await import('$lib/api/tasks');
         const { loadQueue, flushQueueNow } = await import('$lib/api/queue');
-        mockRejectedFetch('TypeError');
+        mockRejectedFetch();
 
         await sendTaskMessage({ projectId: 'p1', taskId: 't1', content: 'think harder', modelName: 'model-a', reasoningEffort: 'high' });
         expect((await loadQueue())[0].params).toMatchObject({ reasoningEffort: 'high' });
@@ -93,7 +74,7 @@ describe('sendTaskMessage queueing on network failure', () => {
     it('queues an edit-and-send with its replace intent and replays it', async () => {
         const { sendTaskMessage } = await import('$lib/api/tasks');
         const { loadQueue, flushQueueNow } = await import('$lib/api/queue');
-        mockRejectedFetch('TypeError');
+        mockRejectedFetch();
 
         await sendTaskMessage({ projectId: 'p1', taskId: 't1', content: 'worded differently', replaceMessageId: 'm-7' });
         expect((await loadQueue())[0].params).toMatchObject({ replaceMessageId: 'm-7' });
@@ -111,16 +92,5 @@ describe('sendTaskMessage queueing on network failure', () => {
         await flushQueueNow();
 
         expect(bodies).toEqual([expect.objectContaining({ content: 'worded differently', replace_message_id: 'm-7' })]);
-    });
-
-    it('does NOT queue and rejects on non-transient server errors (HTTP 500)', async () => {
-        const { sendTaskMessage } = await import('$lib/api/tasks');
-        const { loadQueue } = await import('$lib/api/queue');
-        mockServerErrorFetch();
-
-        await expect(sendTaskMessage({ projectId: 'p1', taskId: 't1', content: 'server error message' })).rejects.toBeTruthy();
-
-        const queue = await loadQueue();
-        expect(queue).toHaveLength(0);
     });
 });

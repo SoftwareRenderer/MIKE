@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import {
     isolatedProject, gotoProject, getProjectId, csrfFetch, navigateToTask, waitForChatFormReady,
-    waitForSendButton, sendMessage,
+    waitForSendButton,
 } from './helpers';
 
 // A reader leaving the bottom is the follow tracker's whole job, and not every gesture that asks for what
@@ -19,13 +19,12 @@ import {
 // button is a sibling of `.chat-messages`, so the tracker's own keydown listener never hears the key while
 // `CardDetail`'s window listener is the one that scrolls.
 //
-// Gestures the tracker can see are covered elsewhere: `chat-stream-follow.spec.ts` (a large wheel-up
-// during a response) and `chat-scroll-jitter.spec.ts` (a touch fling coasting).
+// Gestures the tracker can see are covered elsewhere: `chat-stream-follow.spec.ts` (a wheel-up during a
+// response, the in-band notch among them included in `chat-follow.unit.svelte.ts`) and
+// `chat-scroll-jitter.spec.ts` (a touch fling coasting).
 isolatedProject();
 
 const SEED_ROWS = 120;
-/** Pinned mock fixture: 16 chunks at 100ms, so the answer streams while the reader works the wheel. */
-const STREAMING_PROMPT = 'llm-fixture:text_slow';
 /** `SCROLL_BOTTOM_THRESHOLD`: how far above the bottom still counts as being at it. */
 const BOTTOM_BAND = 32;
 
@@ -39,7 +38,7 @@ interface Write { t: number; to: number; height: number; view: number; by: strin
  */
 async function installRecorder(page: Page): Promise<void> {
     await page.evaluate(() => {
-        const rec: any = { writes: [], scrolls: 0, scrollsAtGesture: 0, gestureAt: 0, landedAt: 0, firstWheelUp: 0, lastKey: '', focusTrail: [] as string[], tag: 'app' };
+        const rec: any = { writes: [], scrolls: 0, scrollsAtGesture: 0, gestureAt: 0, landedAt: 0, lastKey: '', focusTrail: [] as string[], tag: 'app' };
         (window as any).__rec = rec;
         const list = document.querySelector('.chat-messages') as HTMLElement;
         const proto = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop')!;
@@ -62,9 +61,6 @@ async function installRecorder(page: Page): Promise<void> {
         list.addEventListener('pointerdown', landed, { capture: true, passive: true });
         document.addEventListener('wheel', landed, { capture: true, passive: true });
         document.addEventListener('keydown', landed, { capture: true });
-        list.addEventListener('wheel', (e: WheelEvent) => {
-            if (e.deltaY < 0 && !rec.firstWheelUp) rec.firstWheelUp = performance.now();
-        }, { capture: true });
         // Where a key actually landed: a scroll key only moves the transcript through the focus chain.
         const name = (n: EventTarget | null) => {
             const t = n as HTMLElement | null;
@@ -102,7 +98,7 @@ async function waitForScrollEvent(page: Page): Promise<void> {
     }, undefined, { timeout: 5000 }).catch(() => undefined);
 }
 
-interface Since { pins: Write[]; scrolls: number; wheelUp: number; lastKey: string; focusTrail: string[] }
+interface Since { pins: Write[]; scrolls: number; lastKey: string; focusTrail: string[] }
 
 /** What the app wrote, and what the browser moved, since the gesture began. */
 function sinceGesture(page: Page): Promise<Since> {
@@ -117,7 +113,6 @@ function sinceGesture(page: Page): Promise<Since> {
             // A write to the very bottom is the follow tracker pinning the reader back to it.
             pins: after.filter(w => w.by === 'app' && w.height - w.view - w.to <= 0 && w.t >= from),
             scrolls: rec.scrolls - rec.scrollsAtGesture,
-            wheelUp: rec.firstWheelUp,
             lastKey: rec.lastKey,
             focusTrail: [...(rec.focusTrail as string[])],
         };
@@ -291,28 +286,5 @@ test.describe('Gestures that ask for what is above', () => {
         await expect(jump, 'leaving the bottom did not offer the way back to it').toBeVisible();
         await jump.focus();
         await step('PageUp', arrowed);
-    });
-
-    test('a wheel-up inside the bottom band is not undone by the next growth pin', async ({ page }) => {
-        test.setTimeout(120000);
-        await openConversation(page);
-
-        // Tokens must be arriving: the pin this measures is the one growth triggers.
-        await sendMessage(page, `takeover-wheel ${Date.now()} ${STREAMING_PROMPT}`);
-        await expect(page.locator('.btn-stop')).toBeVisible({ timeout: 20000 });
-        await page.waitForTimeout(400);
-        const box = await page.locator('.chat-messages').boundingBox();
-        expect(box, 'no chat list to park the pointer on').not.toBeNull();
-        await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
-
-        // One short notch: it lands inside the band that still counts as being at the bottom, so nothing
-        // about the resulting position says "the reader left" — only the gesture does.
-        await beginGesture(page);
-        await page.mouse.wheel(0, -BOTTOM_BAND / 2);
-        const since = await sinceGesture(page);
-        expect(since.wheelUp, 'the wheel never reached the chat').toBeGreaterThan(0);
-
-        await waitForSendButton(page, 30000);
-        await expectLeftAlone(page, 'a wheel-up inside the bottom band during a streaming answer');
     });
 });

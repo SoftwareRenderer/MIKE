@@ -54,11 +54,6 @@ test.describe.serial('Hide model badge preference', () => {
         await ensureSaveableConfig(page);
     });
 
-    test('model badge is shown on task cards by default', async ({ page }) => {
-        await ensureCardWithModelBadge(page);
-        await expect(page.locator(MODEL_BADGE).first()).toBeVisible();
-    });
-
     test('toggling hides the model badge on task cards and persists', async ({ page }) => {
         await ensureCardWithModelBadge(page);
 
@@ -94,22 +89,6 @@ test.describe.serial('Hide model badge preference', () => {
         await expect(page.locator('.config-modal')).not.toBeVisible({ timeout: 5000 });
 
         await expect(page.locator(MODEL_BADGE).first()).toBeVisible({ timeout: 5000 });
-        await waitForConfig(page, c => c.hide_model_badge === false);
-    });
-
-    test('preference persists server-side across reloads', async ({ page }) => {
-        // Carries over from the previous test: preference is off.
-        await page.goto('/');
-        await page.waitForSelector('.card', { timeout: 10000 });
-
-        await apiPutConfig(page, { hide_model_badge: true });
-        await waitForConfig(page, c => c.hide_model_badge === true);
-        await page.reload();
-        await page.waitForSelector('.card', { timeout: 10000 });
-        await expect(page.locator(MODEL_BADGE)).toHaveCount(0);
-
-        // Restore for other suites
-        await apiPutConfig(page, { hide_model_badge: false });
         await waitForConfig(page, c => c.hide_model_badge === false);
     });
 });

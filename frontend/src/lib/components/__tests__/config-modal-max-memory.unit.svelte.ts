@@ -4,8 +4,8 @@ import ConfigModal from '$lib/components/ConfigModal.svelte';
 import type { Config } from '$lib/types';
 
 // The Maximum Sandbox Memory row is a pure function of the budget the server was started with
-// (MIKE_MEMORY_BUDGET_PCT of installed RAM). A server whose gate is off reports 0, and so does a cached
-// config written by one that predates the field; neither has a row to show.
+// (MIKE_MEMORY_BUDGET_PCT of installed RAM). A server whose gate is off reports 0 for it, and a
+// cached config written by one that predates the field reads the same as 0: no row to show.
 
 vi.mock('$lib/api', async (importOriginal) => {
     const actual = await importOriginal<typeof import('$lib/api')>();
@@ -109,13 +109,5 @@ describe('Settings → About → System Info maximum sandbox memory', () => {
         expect(rowValue(container, 'Maximum Sandbox Memory')).toBeNull();
         // The row is absent, not the section.
         expect(container.querySelector(SYSTEM_INFO_ROW)).toBeTruthy();
-    });
-
-    it('shows nothing for a config that predates the field', async () => {
-        const config = makeConfig();
-        expect(config.memory_budget_mb).toBeUndefined();
-
-        const { container } = await openAbout(config);
-        expect(rowValue(container, 'Maximum Sandbox Memory')).toBeNull();
     });
 });

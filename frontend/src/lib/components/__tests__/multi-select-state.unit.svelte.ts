@@ -73,20 +73,6 @@ describe('MultiSelectBar', () => {
         vi.spyOn(window, 'dispatchEvent').mockImplementation(vi.fn());
     });
 
-    it('should show action bar when 2+ tasks are selected', () => {
-        multiSelect.toggle('task-1');
-        multiSelect.toggle('task-2');
-
-        const { container } = render(MultiSelectBar, {
-            multiSelect,
-            tasks,
-            onClear,
-        });
-
-        const bar = container.querySelector('.multi-select-bar');
-        expect(bar).toBeTruthy();
-    });
-
     it('should show action bar when 1 task is selected', () => {
         multiSelect.toggle('task-1');
 

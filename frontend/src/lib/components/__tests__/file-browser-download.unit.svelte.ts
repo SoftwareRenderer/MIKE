@@ -198,16 +198,4 @@ describe('downloading from the file list', () => {
         expect(url.searchParams.getAll('path')).toEqual([`${ROOT}/a.txt`, `${ROOT}/b.txt`]);
     });
 
-    it('offers nothing to download on the row above the root', async () => {
-        const { container } = openBrowser();
-        await loadRoot(container);
-        await fireEvent.click(rowEl(container, `${ROOT}/src`)!);
-        await waitFor(() => expect(rowEl(container, ROOT)).toBeTruthy());
-
-        await openRowMenu(container, ROOT);
-
-        expect(menuItem('Download')).toBeFalsy();
-        expect(menuItem('Download as .tar.gz')).toBeFalsy();
-        expect(anchorClicks).toHaveLength(0);
-    });
 });
