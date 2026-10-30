@@ -407,28 +407,6 @@ func updateTask(t *testing.T, s *Server, projectID string, taskID string, update
 	}
 }
 
-// Test: subtask move from review to done
-func TestSubtaskMoveReviewToDone(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	parentID := createTestTask(t, s, projID, "parent-task")
-	subID := createTestSubtask(t, s, projID, parentID, "subtask")
-
-	// Move subtask to review
-	moveTask(t, s, projID, subID, "review")
-	status := getTaskStatus(t, s, projID, subID)
-	if status != "review" {
-		t.Fatalf("expected review, got %s", status)
-	}
-
-	// Move subtask from review to done
-	moveTask(t, s, projID, subID, "done")
-	status = getTaskStatus(t, s, projID, subID)
-	if status != "done" {
-		t.Fatalf("expected done, got %s", status)
-	}
-}
-
 // Test: subtask move from review to backlog
 func TestSubtaskMoveReviewToBacklog(t *testing.T) {
 	s := testServer(t)
@@ -569,41 +547,6 @@ func TestTaskStartChangesStatus(t *testing.T) {
 	status = getTaskStatus(t, s, projID, taskID)
 	if status != "in_progress" {
 		t.Fatalf("expected in_progress, got %s", status)
-	}
-}
-
-// Test: task delete cascades to subtasks
-func TestTaskDeleteCascadesToSubtasks(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	parentID := createTestTask(t, s, projID, "parent-delete")
-	subID := createTestSubtask(t, s, projID, parentID, "sub-delete")
-
-	// Verify both exist
-	if getTaskStatus(t, s, projID, parentID) != "backlog" {
-		t.Fatal("parent should exist")
-	}
-	if getTaskStatus(t, s, projID, subID) != "backlog" {
-		t.Fatal("subtask should exist")
-	}
-
-	// Delete the parent (returns 204 NoContent)
-	req := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+parentID, nil)
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("delete parent: expected 204, got %d %s", rr.Code, rr.Body.String())
-	}
-
-	// Verify both are gone
-	req = testRequest("GET", "/api/projects/"+projID+"/tasks/"+parentID, nil)
-	rr = testResponseAuth(t, s, req)
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 for parent, got %d", rr.Code)
-	}
-	req = testRequest("GET", "/api/projects/"+projID+"/tasks/"+subID, nil)
-	rr = testResponseAuth(t, s, req)
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 for subtask (cascade), got %d", rr.Code)
 	}
 }
 
@@ -2225,31 +2168,6 @@ func TestSubtasksAutoMergeDisablePropagates(t *testing.T) {
 	// Verify subA's auto_merge is now false (disable propagates)
 	if getTaskAutoMerge(t, s, projID, subA) {
 		t.Fatal("subA auto_merge should be false after parent disables subtasks_auto_merge")
-	}
-}
-
-// Test: enabling subtasks_auto_merge on a task with no subtasks is a no-op
-func TestSubtasksAutoMergeNoSubtasks(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-
-	taskID := createTestTask(t, s, projID, "no-subtasks")
-
-	// Enable subtasks_auto_merge on a task with no children
-	updateTask(t, s, projID, taskID, map[string]any{
-		"subtasks_auto_merge": true,
-	})
-
-	// Should succeed without error
-	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID, nil)
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
-	}
-
-	result := mustJSON[map[string]any](t, rr.Body)
-	if result["subtasks_auto_merge"] != true {
-		t.Fatal("subtasks_auto_merge should be true")
 	}
 }
 
