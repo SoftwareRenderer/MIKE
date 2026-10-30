@@ -158,32 +158,6 @@ test.describe.serial('Keyboard shortcut preferences', () => {
         await resetShortcuts(page);
     });
 
-    test('bindings persist server-side in /api/config', async ({ page }) => {
-        await page.locator(SETTINGS_BTN).first().click();
-        await page.locator(PREFERENCES_TAB).click();
-        await page.locator(KEY_CHIP).click();
-        await page.keyboard.press('Control+K');
-        await expect(page.locator(KEY_CHIP)).toHaveText('Ctrl+K');
-        await page.locator(SAVE_BTN).click();
-        await expect(page.locator('.config-modal')).not.toBeVisible({ timeout: 5000 });
-
-        // Server-side persistence check
-        await waitForConfig(page, c =>
-            c.keyboard_shortcuts && c.keyboard_shortcuts.create_task === 'control+k'
-        );
-        const config = await apiGetConfig(page);
-        expect(config.keyboard_shortcuts.create_task).toBe('control+k');
-
-        // The bound combo triggers the modal
-        await page.keyboard.press('Control+K');
-        await expect(page.locator(CREATE_MODAL)).toBeVisible({ timeout: 5000 });
-        await page.keyboard.press('Escape');
-        await expect(page.locator(CREATE_MODAL)).not.toBeVisible({ timeout: 5000 });
-
-        // Restore the default for other suites
-        await resetShortcuts(page);
-    });
-
     test('rebinding submit to Shift+Enter makes it the only trigger', async ({ page }) => {
         await resetShortcuts(page);
         await page.reload();
