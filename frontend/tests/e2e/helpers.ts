@@ -679,18 +679,6 @@ export async function waitForChatForm(page: Page): Promise<boolean> {
   return true;
 }
 
-/**
- * Ensure chat form is ready for input (send button visible, isLoading=false).
- * Waits for the LLM to finish any pending response before resolving.
- */
-export async function ensureChatForm(page: Page, requireSendBtn = true): Promise<void> {
-  await waitForChatForm(page);
-  if (requireSendBtn) {
-    // Turn budget, same as waitForSendButton: the executor may still be answering.
-    await expect(page.locator('.btn-send')).toBeVisible({ timeout: 45_000 });
-  }
-}
-
 // --- Navigation helpers ---
 
 /**

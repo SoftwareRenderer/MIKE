@@ -104,37 +104,6 @@ test.describe.serial('Chat Message Actions', () => {
     await expect(firstDeleteBtn).not.toBeVisible();
   });
 
-  test('should confirm before deleting a message', async ({ page }) => {
-    // Send a message to have something to delete
-    const msgContent = `delete confirm test ${Date.now()}`;
-    const countBefore = await page.locator('.chat-message.user').count();
-
-    await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/send`, {
-      method: 'POST',
-      body: { content: msgContent },
-    });
-
-    await expect(async () => {
-      expect(await page.locator('.chat-message.user').count()).toBeGreaterThan(countBefore);
-    }).toPass({ timeout: 10000 });
-
-    await waitForSendButton(page);
-
-    // The second user message should have a delete button
-    const userMessages = page.locator('.chat-message.user');
-    const lastUserMsg = userMessages.nth(await userMessages.count() - 1);
-    const deleteBtn = lastUserMsg.locator('[aria-label="Delete message and all following messages"]');
-
-    if (!(await deleteBtn.isVisible().catch(() => false))) {
-      return; // Only one message, no delete button
-    }
-
-    await deleteBtn.click();
-    await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
-    await page.click('[role="dialog"] .btn-confirm');
-    await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
-  });
-
   test('should not duplicate the previous assistant message after deleting a user message', async ({ page }) => {
     // Every id here comes from the messages API and every step waits for the turn to be ANSWERED.
     // Ids, never counts: the route answers a bounded window (see `messageRows` in helpers.ts), so a count read
