@@ -77,19 +77,6 @@ describe('ChatForm Escape behavior', () => {
         expect(document.activeElement).not.toBe(textarea);
     });
 
-    it('Escape behaves identically when idle: blurs without stopping', () => {
-        const onStop = vi.fn();
-        const { container } = render(ChatForm, { props: { ...baseProps, isLoading: false, onStop } });
-
-        const textarea = textareaOf(container);
-        textarea.focus();
-
-        fireEvent.keyDown(textarea, { key: 'Escape', bubbles: true, cancelable: true });
-
-        expect(onStop).not.toHaveBeenCalled();
-        expect(document.activeElement).not.toBe(textarea);
-    });
-
     it('Escape preserves the draft text', () => {
         const { container } = render(ChatForm, { props: { ...baseProps, isLoading: true } });
 

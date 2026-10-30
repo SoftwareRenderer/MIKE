@@ -6,9 +6,9 @@ import type { Extension, ExtensionType, RegistryEntry } from '$lib/types';
 /**
  * The Browse view puts the translation pack for the browser's own language directly after the
  * featured entries, so the one row a `zh-CN` visitor came to Settings for is not buried at its
- * registry index position. The order itself is decided by `orderBrowseEntries`; these cases prove
- * the wiring — that the tab hands the resolver the *browser's* tag, and that an installed pack is
- * not promoted.
+ * registry index position. The order itself is decided by `orderBrowseEntries`, whose own suite
+ * tries each tag; these cases prove the wiring — that the tab hands the resolver *the browser's*
+ * tag, and that an installed pack is not promoted.
  */
 
 const REGISTRY: RegistryEntry[] = [
@@ -118,15 +118,6 @@ describe('the Browse view and the browser language', () => {
             const container = await renderBrowse([], REGISTRY);
             expect(browseOrder(container)).toEqual([
                 'featured-ui', 'pack-zh', 'pylsp', 'pack-de', 'prettier',
-            ]);
-        });
-    });
-
-    it('lists another language pack for another browser language', async () => {
-        await withBrowserLanguage('de-AT', async () => {
-            const container = await renderBrowse([], REGISTRY);
-            expect(browseOrder(container)).toEqual([
-                'featured-ui', 'pack-de', 'pylsp', 'pack-zh', 'prettier',
             ]);
         });
     });
