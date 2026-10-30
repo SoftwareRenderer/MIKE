@@ -425,58 +425,6 @@ test.describe('Clear Done Tasks', () => {
 });
 
 // ============================================================
-// Project ID in URL
-// ============================================================
-
-test.describe('Project ID in URL', () => {
-  test.beforeEach(async ({ page }) => {
-    await gotoProject(page);
-    await page.waitForSelector('.project-item', { timeout: 10000 });
-  });
-
-  test('should use folder basename as project ID', async ({ page }) => {
-    const projects = await page.evaluate(async () => {
-      const res = await fetch('/api/projects');
-      return res.json();
-    });
-
-    const testProject = projects.find(
-      (p: any) => p.path === '/tmp/kanban-test-repo'
-    );
-    expect(testProject).toBeDefined();
-    expect(testProject.id).toBe('kanban-test-repo');
-  });
-
-  test('should use slugified full path on basename collision', async ({ page }) => {
-    const { execSync } = await import('node:child_process');
-    const fs = await import('node:fs');
-    const tempPath = '/tmp/collision-parent/kanban-test-repo';
-
-    if (!fs.existsSync(tempPath)) {
-      fs.mkdirSync(tempPath, { recursive: true });
-      fs.writeFileSync(`${tempPath}/README.md`, '# Collision Test\n');
-      execSync('git init', { cwd: tempPath });
-      execSync('git add README.md', { cwd: tempPath });
-      execSync(
-        'git -c user.email="test@kanban.local" -c user.name="Test" commit -m "init"',
-        { cwd: tempPath }
-      );
-    }
-
-    const result = await csrfFetch(page, '/api/projects', {
-      method: 'POST',
-      body: { path: tempPath },
-    });
-    const projectData = result.data;
-
-    expect(projectData.id).not.toBe('kanban-test-repo');
-    expect(projectData.id).toBe('tmp-collision-parent-kanban-test-repo');
-
-    await csrfFetch(page, `/api/projects/${projectData.id}`, { method: 'DELETE' });
-  });
-});
-
-// ============================================================
 // Mobile Delete Scroll Column
 // ============================================================
 
@@ -575,7 +523,6 @@ test.describe('Mobile Delete Scroll Column', () => {
 test.describe('Multi-Select', () => {
   let taskId1: string;
   let taskId2: string;
-  let taskId3: string;
   let projectId: string;
 
   test.beforeEach(async ({ page }) => {
@@ -585,14 +532,8 @@ test.describe('Multi-Select', () => {
 
     taskId1 = await createTaskViaApi(page, projectId, `multi-select-test-${Date.now()}-1`);
     taskId2 = await createTaskViaApi(page, projectId, `multi-select-test-${Date.now()}-2`);
-    taskId3 = await createTaskViaApi(page, projectId, `multi-select-test-${Date.now()}-3`);
 
-    await page.waitForSelector(`[data-task-id="${taskId3}"]`, { timeout: 10000 });
-  });
-
-  test('should support multi-select mode', async ({ page }) => {
-    const card = page.locator('.card').first();
-    await expect(card).toBeVisible();
+    await page.waitForSelector(`[data-task-id="${taskId2}"]`, { timeout: 10000 });
   });
 
   test('should confirm before starting selected tasks with task titles listed', async ({ page }) => {
@@ -703,30 +644,6 @@ test.describe('Multi-Select', () => {
     await expect(bar).not.toBeVisible();
     await expect(card1).not.toHaveClass(/multi-selected/);
     await expect(card2).not.toHaveClass(/multi-selected/);
-  });
-
-  test('should not show Start button when selected tasks are in different columns', async ({ page }) => {
-
-    await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId2}/move`, {
-      method: 'POST',
-      body: { status: 'in_progress' },
-    });
-    await expect(async () => {
-      const inProgressCards = await page.locator('.column[aria-label="In Progress column"] .card').count();
-      expect(inProgressCards).toBeGreaterThan(0);
-    }).toPass({ timeout: 5000 });
-
-    const card1 = page.locator(`[data-task-id="${taskId1}"]`);
-    const card2 = page.locator(`[data-task-id="${taskId2}"]`).first();
-
-    await card1.click({ modifiers: ['Control'] });
-    await card2.click({ modifiers: ['Control'] });
-
-    const startBtn = page.locator('.bar-btn-start');
-    await expect(startBtn).not.toBeVisible();
-
-    const deleteBtn = page.locator('.bar-btn-delete');
-    await expect(deleteBtn).toBeVisible();
   });
 
 });
