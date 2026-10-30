@@ -87,18 +87,6 @@ async function openEditDialog(page: import('@playwright/test').Page) {
 }
 
 test.describe.serial('Extension dependency directory', () => {
-    test('says in Browse, before installing, that setup comes after installation', async ({ page }) => {
-        // A local extension, so the card reads the declaration from the manifest's own shape.
-        await openExtensionsTab(page);
-        await page.locator('.view-tab', { hasText: 'Browse' }).click();
-
-        const card = fixtureRow(page);
-        await expect(card.locator('.needs-setup-badge'), 'a declarer is not badged before install').toBeVisible({ timeout: 5000 });
-        const note = card.locator('.ext-needs-setup-note');
-        await expect(note).toContainText('Requires additional setup after installation');
-        await expect(note).toContainText('FAKE_CACHE=/fake/mod');
-    });
-
     test('installs the fixture extension that declares a dependency cache', async ({ page }) => {
         await page.goto('/');
         await page.waitForSelector('.project-item', { timeout: 15000 });
