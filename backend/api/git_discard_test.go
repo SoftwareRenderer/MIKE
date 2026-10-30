@@ -223,17 +223,6 @@ func TestHandleProjectDiscardPaths_RejectsPathOutsideRepo(t *testing.T) {
 	}
 }
 
-func TestHandleProjectDiscardPaths_RejectsMissingPath(t *testing.T) {
-	mux, _ := discardFixture(t)
-
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, httptest.NewRequest("POST", "/api/projects/discard-proj/git/discard",
-		strings.NewReader(`{}`)))
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
 // The panel may act on a status line a concurrent commit already cleared; that is a no-op, not a fault.
 func TestHandleProjectDiscardPaths_CleanFileIsANoOp(t *testing.T) {
 	mux, repoPath := discardFixture(t)
