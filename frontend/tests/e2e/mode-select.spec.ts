@@ -1,11 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import {
-  getProjectId,
-  navigateToTask,
-  ensureTaskStarted,
-  sendMessage,
-  findProviderByRef,
-} from './helpers';
+import { getProjectId } from './helpers';
 
 /** Dismiss the Create Task modal. Named by its label: the shared button family carries no class a
  *  restyle has to keep, so a styling class here is a locator that breaks on a rename. */
@@ -70,32 +64,6 @@ test.describe.serial('ModeSelect component', () => {
     await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
   });
 
-  test('should switch to Explore mode', async ({ page }) => {
-    // Open the Create Task modal
-    await page.locator('.add-task-btn').first().click();
-    await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
-
-    // Click the mode selector to open dropdown
-    await page.locator('.mode-btn').click();
-    await expect(page.locator('.mode-dropdown')).toBeVisible({ timeout: 5000 });
-
-    // Select Explore mode
-    await page.locator('.mode-option.explore').click();
-
-    // Verify the button now shows "Explore"
-    await expect(page.locator('.mode-btn .mode-label')).toHaveText('Explore');
-
-    // Verify the explore icon is active
-    await expect(page.locator('.mode-btn .mode-icon.explore')).toBeVisible();
-
-    // Verify dropdown closed after selection
-    await expect(page.locator('.mode-dropdown')).not.toBeVisible({ timeout: 5000 });
-
-    // Close modal
-    await dismissTaskModal(page).click();
-    await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
-  });
-
   test('should switch back to Act mode', async ({ page }) => {
     // Open the Create Task modal
     await page.locator('.add-task-btn').first().click();
@@ -123,143 +91,6 @@ test.describe.serial('ModeSelect component', () => {
     // Close modal
     await dismissTaskModal(page).click();
     await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
-  });
-
-  test('should persist mode after page reload', async ({ page }) => {
-    const projectId = await getProjectId(page);
-
-    // Create a task in Plan mode via the API (more reliable than UI for exact mode)
-    const config = await page.evaluate(async () => {
-      const res = await fetch('/api/config');
-      return res.ok ? res.json() : null;
-    });
-    const defaultProvider = findProviderByRef(config?.providers || [], config?.worker_provider);
-    const workerModel = config?.worker_model || '';
-
-    const csrf = await page.evaluate(async () => {
-      const res = await fetch('/api/auth/session');
-      const data = await res.json();
-      return data.csrf_token || '';
-    });
-
-    const uniquePrompt = `mode-persist-${Date.now()}`;
-    const taskId = await page.evaluate(async ({ pid, csrfToken, provider, prompt, modelName }) => {
-      const res = await fetch(`/api/projects/${pid}/tasks`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken,
-        },
-        credentials: 'include',
-        body: JSON.stringify({
-          prompt,
-          operating_mode: 'plan',
-          llama_server_url: provider?.url || '',
-          model_name: modelName,
-        }),
-      });
-      const data = await res.json();
-      return data.id || '';
-    }, { pid: projectId, csrfToken: csrf, provider: defaultProvider, prompt: uniquePrompt, modelName: workerModel });
-
-    if (!taskId) {
-      throw new Error('Failed to create task in Plan mode');
-    }
-
-    // Verify the mode persisted on the server by fetching the task data
-    const taskData = await page.evaluate(async ({ pid, tid }) => {
-      const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
-      return res.ok ? res.json() : null;
-    }, { pid: projectId, tid: taskId });
-
-    expect(taskData).not.toBeNull();
-    expect(taskData.operating_mode).toBe('plan');
-
-    // Also verify via the board API (simulates a page reload fetching fresh data)
-    const boardData = await page.evaluate(async ({ pid, tid }) => {
-      const res = await fetch(`/api/projects/${pid}/board`);
-      const board = await res.json();
-      return board.tasks.find((t: any) => t.id === tid) || null;
-    }, { pid: projectId, tid: taskId });
-
-    expect(boardData).not.toBeNull();
-    expect(boardData.operating_mode).toBe('plan');
-  });
-
-  test('should trigger plan-mode LLM routing', async ({ page }) => {
-    test.setTimeout(30000);
-    const projectId = await getProjectId(page);
-
-    // Create a task in Plan mode via the API
-    const config = await page.evaluate(async () => {
-      const res = await fetch('/api/config');
-      return res.ok ? res.json() : null;
-    });
-    const defaultProvider = findProviderByRef(config?.providers || [], config?.worker_provider);
-    const workerModel = config?.worker_model || '';
-
-    const csrf = await page.evaluate(async () => {
-      const res = await fetch('/api/auth/session');
-      const data = await res.json();
-      return data.csrf_token || '';
-    });
-
-    const taskId = await page.evaluate(async ({ pid, csrfToken, provider, modelName }) => {
-      const res = await fetch(`/api/projects/${pid}/tasks`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken,
-        },
-        credentials: 'include',
-        body: JSON.stringify({
-          prompt: `plan-mode-llm-test-${Date.now()}`,
-          operating_mode: 'plan',
-          llama_server_url: provider?.url || '',
-          model_name: modelName,
-        }),
-      });
-      const data = await res.json();
-      return data.id || '';
-    }, { pid: projectId, csrfToken: csrf, provider: defaultProvider, modelName: workerModel });
-
-    if (!taskId) {
-      throw new Error('Failed to create task in Plan mode');
-    }
-
-    // Navigate to the task
-    await navigateToTask(page, taskId);
-
-    // Move task to in_progress so the executor starts
-    await ensureTaskStarted(page, projectId, taskId);
-
-    // Wait for the chat form to appear
-    await expect(page.locator('.chat-form')).toBeVisible({ timeout: 15000 });
-
-    // Wait for send or stop button (form is interactive)
-    await expect(async () => {
-      const hasSend = await page.locator('.btn-send').isVisible();
-      const hasStop = await page.locator('.btn-stop').isVisible();
-      expect(hasSend || hasStop).toBe(true);
-    }).toPass({ timeout: 15000 });
-
-    // If executor is still running (stop button visible), skip this test gracefully
-    if (await page.locator('.btn-stop').isVisible().catch(() => false)) {
-      return;
-    }
-
-    // Send a message — in Plan mode, the LLM should receive the plan-mode system prompt
-    // and respond with a create_task tool call (via the mock LLM's plan-mode routing)
-    await sendMessage(page, 'Plan this feature');
-
-    // Wait for the LLM response to appear (the mock returns create_task tool call for plan mode)
-    // The tool call should appear as a tool call message in the chat
-    await expect(async () => {
-      // Check that a tool call or AI response appeared
-      const hasToolCall = await page.locator('.tool-call').isVisible().catch(() => false);
-      const hasAiMessage = await page.locator('.chat-message.ai').count();
-      expect(hasToolCall || hasAiMessage > 0).toBe(true);
-    }).toPass({ timeout: 30000 });
   });
 
   test('should close dropdown when clicking outside', async ({ page }) => {

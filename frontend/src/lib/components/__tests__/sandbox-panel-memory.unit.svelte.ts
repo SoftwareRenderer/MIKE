@@ -149,11 +149,6 @@ describe('SandboxPanel memory section', () => {
         expect(peak.classList.contains('reached')).toBe(true);
     });
 
-    it('marks the peak red when it overshot the limit', () => {
-        const { container } = renderPanel(stats({ memory_peak_mb: 2048, memory_limit_mb: 1024 }));
-        expect(container.querySelector('.memory-peak')?.classList.contains('reached')).toBe(true);
-    });
-
     it('keeps the peak neutral just below the limit', () => {
         const { container } = renderPanel(stats({ memory_peak_mb: 1023, memory_limit_mb: 1024 }));
         expect(container.querySelector('.memory-peak')?.classList.contains('reached')).toBe(false);

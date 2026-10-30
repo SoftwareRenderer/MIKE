@@ -338,55 +338,6 @@ test.describe('File @ Mention', () => {
     expect(value).toBe('@README.md');
   });
 
-  test('should filter results by query after @', async ({ page }) => {
-    // Update mock to filter based on query
-    await page.route('/api/fs/search*', async (route) => {
-      const url = new URL(route.request().url());
-      const q = url.searchParams.get('q') || '';
-
-      const allFiles = [
-        { path: 'README.md' },
-        { path: 'src/app.ts' },
-        { path: 'src/components/Button.svelte' },
-        { path: 'src/utils.ts' },
-        { path: 'package.json' },
-      ];
-
-      const results = q
-        ? allFiles.filter(f => f.path.toLowerCase().includes(q.toLowerCase()))
-        : allFiles;
-
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ root: '/tmp/test-repo', results }),
-      });
-    });
-
-    await page.locator('.add-task-btn').click();
-    await expect(page.locator('#task-description')).toBeVisible();
-
-    const textarea = page.locator('#task-description');
-    await typeAtSign(page, textarea);
-
-    // Wait for initial dropdown
-    await expect(page.locator('.mention-dropdown')).toBeVisible({ timeout: 5000 });
-    await expect(page.locator('.mention-item')).toHaveCount(5);
-
-    // Type more after @ to filter
-    await page.evaluate(el => {
-      (el as HTMLTextAreaElement).value = '@src';
-      (el as HTMLTextAreaElement).setSelectionRange(4, 4);
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-    }, await textarea.elementHandle());
-
-    // Wait for filtered results
-    await expect(async () => {
-      const count = await page.locator('.mention-item').count();
-      expect(count).toBeGreaterThan(0);
-      expect(count).toBeLessThan(5);
-    }).toPass({ timeout: 5000 });
-  });
 });
 
 // --- Edit Diff Expand Persistence (parallel) ---

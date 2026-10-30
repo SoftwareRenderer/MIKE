@@ -59,16 +59,6 @@ func TestPhraseDetector_ExactRepetition(t *testing.T) {
 		t.Error("should detect exact phrase repetition")
 	}
 }
-
-func TestPhraseDetector_CaseInsensitive(t *testing.T) {
-	t.Parallel()
-	d := newPhraseDetector()
-
-	if !repeatPhrase(d, testPhrase) {
-		t.Error("should detect case-insensitive repetition")
-	}
-}
-
 func TestPhraseDetector_ShortPhraseIgnored(t *testing.T) {
 	t.Parallel()
 	d := newPhraseDetector()
@@ -80,16 +70,6 @@ func TestPhraseDetector_ShortPhraseIgnored(t *testing.T) {
 		t.Error("should not fire on short phrases")
 	}
 }
-
-func TestPhraseDetector_WhitespaceNormalization(t *testing.T) {
-	t.Parallel()
-	d := newPhraseDetector()
-
-	if !repeatPhrase(d, testPhrase) {
-		t.Error("should detect repetition despite extra whitespace")
-	}
-}
-
 func TestPhraseDetector_FiresOnce(t *testing.T) {
 	t.Parallel()
 	d := newPhraseDetector()
@@ -137,16 +117,6 @@ func TestPhraseDetector_NewlineBoundary(t *testing.T) {
 		t.Error("should detect repetition across newline boundary")
 	}
 }
-
-func TestPhraseDetector_DoubleNewlineBoundary(t *testing.T) {
-	t.Parallel()
-	d := newPhraseDetector()
-
-	if !repeatPhrase(d, testPhrase+"\n\n") {
-		t.Error("should detect repetition across double newline boundary")
-	}
-}
-
 func TestPhraseDetector_CodeBlockNotTriggered(t *testing.T) {
 	t.Parallel()
 	d := newPhraseDetector()
@@ -167,16 +137,6 @@ func TestPhraseDetector_ExclamationBoundary(t *testing.T) {
 		t.Error("should detect repetition with exclamation boundary")
 	}
 }
-
-func TestPhraseDetector_QuestionBoundary(t *testing.T) {
-	t.Parallel()
-	d := newPhraseDetector()
-
-	if !repeatPhrase(d, "What do you think about this approach and implementation?") {
-		t.Error("should detect repetition with question boundary")
-	}
-}
-
 func TestPhraseDetector_IncompleteSentenceAccumulates(t *testing.T) {
 	t.Parallel()
 	d := newPhraseDetector()

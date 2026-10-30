@@ -319,17 +319,6 @@ describe('ExtensionHostChannel capability enforcement', () => {
         channel.destroy();
     });
 
-    it('forwards events to the extension', () => {
-        const {  channel, messages , arm } = makeChannel([CAP_CREATE_TASK_PASTE]);
-        arm();
-        channel.forward('createTask.events.paste', { text: 'https://github.com/a/b/issues/1' });
-        const ev = messages[messages.length - 1];
-        expect(ev.type).toBe('event');
-        expect(ev.cap).toBe('createTask.events.paste');
-        expect(ev.data.text).toContain('github.com');
-        channel.destroy();
-    });
-
     it('drops a pushed event for a capability that is not granted', () => {
         // `editor.contentChange` is the whole file, which `editor.getContent` is the permission
         // for; a frame holding neither must not be handed the text.

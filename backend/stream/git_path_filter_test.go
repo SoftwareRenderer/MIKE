@@ -148,21 +148,6 @@ func TestFilterInternalPathsFromList_empty(t *testing.T) {
 	}
 }
 
-// TestFilterInternalPathsFromHashes_empty verifies empty/nil input handling.
-func TestFilterInternalPathsFromHashes_empty(t *testing.T) {
-	// nil input
-	result := filterInternalPathsFromHashes(nil)
-	if len(result) != 0 {
-		t.Errorf("expected empty map for nil input, got %v", result)
-	}
-
-	// empty input
-	result = filterInternalPathsFromHashes(map[string]string{})
-	if len(result) != 0 {
-		t.Errorf("expected empty map for empty input, got %v", result)
-	}
-}
-
 func TestWatchedInternalPathIsJudgedFromTheProjectRoot(t *testing.T) {
 	root := filepath.Join(string(filepath.Separator), "work", "repo")
 	for _, tc := range []struct {

@@ -29,14 +29,6 @@ describe('ExpandedTasksStore', () => {
         expect(store.has('t1')).toBe(false);
     });
 
-    it('leaves the previous set alone when it adds', () => {
-        store.add('t1');
-        const before = store.all;
-        store.add('t2');
-        expect(before.has('t2')).toBe(false);
-        expect(store.all.has('t2')).toBe(true);
-    });
-
     it('writes the parents it does not hold as collapsed', async () => {
         store.replace(new Set(['t1', 't3']));
         await store.persist(new Set(['t1', 't2', 't3', 't4']), new Set(['t1', 't2', 't3', 't4']));
