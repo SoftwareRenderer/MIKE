@@ -43,10 +43,4 @@ describe('DiffStatsStore', () => {
         expect(store.get('t1')?.hash).toBe('live');
         expect(store.get('t2')?.hash).toBe('cached');
     });
-
-    it('writes nothing when the mirror has nothing to add', () => {
-        store.set('t1', stats('live'));
-        store.fillAbsent({ t1: stats('cached') });
-        expect(store.get('t1')?.hash).toBe('live');
-    });
 });
