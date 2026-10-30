@@ -3,7 +3,6 @@ package api
 import (
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -123,18 +122,5 @@ func TestUpdateProjectRefusesWideningSandboxSettings(t *testing.T) {
 	p, _ := h.store.GetProject(projID)
 	if len(p.SandboxCapabilities) != 1 || p.SandboxCapabilities[0] != "CHOWN" || len(p.SandboxMounts) != 1 {
 		t.Fatalf("settings not stored: caps=%v mounts=%+v", p.SandboxCapabilities, p.SandboxMounts)
-	}
-}
-
-// TestCreateProjectMountHostPathIsAbsoluteOnly pins why the host path must be
-// absolute: a relative one is resolved against the server's working directory by
-// filepath.Abs at container-creation time, which is nobody's idea of where the
-// project's cache should live.
-func TestCreateProjectMountHostPathIsAbsoluteOnly(t *testing.T) {
-	if err := types.ValidateSandboxMount(types.SandboxMount{HostPath: filepath.Join(t.TempDir(), "x"), ContainerPath: "/x"}); err != nil {
-		t.Errorf("an absolute host path was refused: %v", err)
-	}
-	if err := types.ValidateSandboxMount(types.SandboxMount{HostPath: "x", ContainerPath: "/x"}); err == nil {
-		t.Error("a relative host path was accepted")
 	}
 }

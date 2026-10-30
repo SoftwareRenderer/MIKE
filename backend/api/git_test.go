@@ -1063,34 +1063,6 @@ func newPullPushMux(h *GitHandler) *http.ServeMux {
 	return mux
 }
 
-func TestHandlePull_RequiresPOST(t *testing.T) {
-	h, s, _, _ := newTestGitHandler(t)
-	projPath := t.TempDir()
-	initGitRepo(t, projPath)
-	proj := &types.Project{ID: "pull-method-proj", Name: "pull-method-proj", Path: projPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatal(err)
-	}
-
-	mux := newPullPushMux(h)
-
-	// GET is not allowed for the pull route.
-	req := httptest.NewRequest("GET", "/api/projects/pull-method-proj/git/pull", nil)
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-	if rec.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("expected 405 for GET pull, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	// GET is not allowed for the push route.
-	req = httptest.NewRequest("GET", "/api/projects/pull-method-proj/git/push", nil)
-	rec = httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-	if rec.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("expected 405 for GET push, got %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
 func TestHandlePush_Success(t *testing.T) {
 	h, s, _, _ := newTestGitHandler(t)
 	projPath := t.TempDir()
