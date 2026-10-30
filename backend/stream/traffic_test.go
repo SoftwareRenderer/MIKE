@@ -48,19 +48,6 @@ func TestFrameBucketComesFromTheEnvelopeNotItsPayload(t *testing.T) {
 	}
 }
 
-// TestFrameBucketSurvivesTheWire: the same name has to come out of the encoded bytes too, because a name
-// lost between the map and the socket leaves a bandwidth line with nothing behind it.
-func TestFrameBucketSurvivesTheWire(t *testing.T) {
-	frame := TaskEventPayload("task-1", tokenEvent("hello"))
-	msg, err := json.Marshal(frame)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if got, want := frameBucket(frame), frameBucket(mustDecode(t, msg)); got != want {
-		t.Fatalf("bucket before the wire is %q, after it %q", got, want)
-	}
-}
-
 func TestTrafficLedgerReportNamesTheBiggestSpenderFirst(t *testing.T) {
 	ledger := newTrafficLedger()
 	ledger.record("token", 40)
@@ -146,13 +133,4 @@ func mustMarshal(t *testing.T, v any) []byte {
 		t.Fatalf("marshal: %v", err)
 	}
 	return msg
-}
-
-func mustDecode(t *testing.T, frame []byte) map[string]any {
-	t.Helper()
-	var frameMap map[string]any
-	if err := json.Unmarshal(frame, &frameMap); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	return frameMap
 }

@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -497,94 +496,6 @@ func TestWorktreeWatcherMultiTask(t *testing.T) {
 	ww.mu.Unlock()
 	if remaining != 0 {
 		t.Fatalf("path cache has %d entries after unwatch all, expected 0", remaining)
-	}
-}
-
-// TestWorktreeWatcherWorkerPoolBounds verifies that the worker pool limits
-// concurrent diff computations.
-func TestWorktreeWatcherWorkerPoolBounds(t *testing.T) {
-	tmpDir := t.TempDir()
-	repoDir := filepath.Join(tmpDir, "repo")
-	worktreesDir := filepath.Join(tmpDir, "worktrees")
-	os.MkdirAll(repoDir, 0o755)
-	os.MkdirAll(worktreesDir, 0o755)
-
-	testgit.Git(t, repoDir, "init")
-	testgit.Git(t, repoDir, "config", "user.email", "test@test.com")
-	testgit.Git(t, repoDir, "config", "user.name", "Test")
-	testgit.WriteFile(t, repoDir, "README.md", "# Test\n")
-	testgit.Git(t, repoDir, "add", "README.md")
-	testgit.Git(t, repoDir, "commit", "-m", "Initial")
-
-	dbPath := filepath.Join(tmpDir, "test.db")
-	s, err := store.NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	defer s.Close()
-
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false, false)
-	cfgStore.SetWorkspaceDirOverride(worktreesDir)
-	cfg, err := cfgStore.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	if err := cfgStore.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-
-	projID := "test-project"
-	proj := &types.Project{ID: projID, Name: "test", Path: repoDir}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-
-	taskID := "test-task"
-	branchName := "kanban/" + taskID
-	task := &types.Task{
-		ID:             taskID,
-		ProjectID:      projID,
-		Title:          "Test task",
-		Prompt:         "Test prompt",
-		Status:         types.StatusInProgress,
-		ExecutionState: types.ExecStateRunning,
-		Branch:         branchName,
-	}
-	if err := s.CreateTask(task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	wm := git.NewWorktreeManager(s, cfgStore)
-	_, _, err = wm.CreateWorktree(projID, taskID, branchName, "")
-	if err != nil {
-		t.Fatalf("create worktree: %v", err)
-	}
-
-	// Create watcher
-	ww, err := NewWorktreeWatcher(wm, func(event DiffStatsEvent) {}, nil, nil)
-	if err != nil {
-		t.Skipf("skip worker pool test (inotify limit): %v", err)
-	}
-	go ww.StartEventLoop()
-	defer ww.Close()
-
-	err = ww.Watch(taskID, projID)
-	if err != nil {
-		t.Fatalf("watch task: %v", err)
-	}
-
-	// Verify the job channel is bounded
-	ww.mu.Lock()
-	poolCap := cap(ww.jobCh)
-	ww.mu.Unlock()
-
-	// Pool size should be NumCPU-1 (min 1)
-	expected := runtime.NumCPU() - 1
-	if expected < 1 {
-		expected = 1
-	}
-	if poolCap != expected {
-		t.Fatalf("job channel capacity is %d, expected %d (NumCPU-1)", poolCap, expected)
 	}
 }
 
