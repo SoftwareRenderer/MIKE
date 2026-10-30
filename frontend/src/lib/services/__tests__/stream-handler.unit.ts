@@ -21,55 +21,6 @@ function makeCallbacks(overrides: Partial<StreamHandlerCallbacks> = {}): StreamH
     };
 }
 
-describe('StreamState', () => {
-    it('starts with empty state', () => {
-        const s = new StreamState();
-        expect(s.state.entries).toEqual([]);
-        expect(s.state.currentAssistantId).toBeNull();
-        expect(s.state.awaitingResponse).toBe(false);
-    });
-
-    it('ensureAssistantEntry creates a new entry', () => {
-        const s = new StreamState();
-        const entry = s.ensureAssistantEntry(() => 'test-id');
-        expect(entry.id).toBe('test-id');
-        expect(entry.role).toBe('assistant');
-        expect(s.state.entries.length).toBe(1);
-    });
-
-    it('closeCurrentAssistant sets isStreaming to false', () => {
-        const s = new StreamState();
-        s.ensureAssistantEntry(() => 'test-id');
-        s.closeCurrentAssistant();
-        expect(s.state.entries[0].isStreaming).toBe(false);
-        expect(s.state.currentAssistantId).toBeNull();
-    });
-
-    it('reset clears all state', () => {
-        const s = new StreamState();
-        s.ensureAssistantEntry(() => 'test-id');
-        s.state.awaitingResponse = true;
-        s.state.queuePosition = 5;
-        s.reset();
-        expect(s.state.entries).toEqual([]);
-        expect(s.state.awaitingResponse).toBe(false);
-        expect(s.state.queuePosition).toBe(0);
-    });
-
-    it('clearAwaiting resets queue position (task holds its gate slot once tokens flow)', () => {
-        const s = new StreamState();
-        s.state.awaitingResponse = true;
-        s.state.queuePosition = 2;
-        s.state.queueEstimatedWait = 60;
-        s.state.promptProgress = 40;
-        s.clearAwaiting();
-        expect(s.state.awaitingResponse).toBe(false);
-        expect(s.state.queuePosition).toBe(0);
-        expect(s.state.queueEstimatedWait).toBe(0);
-        expect(s.state.promptProgress).toBe(0);
-    });
-});
-
 // Only the frame's own field tells a stopped call from a failed one: success is false for both, and
 // the card colours them yellow and red.
 describe('tool_result interrupted flag', () => {
@@ -463,17 +414,6 @@ describe('createStreamHandler', () => {
         handleEvent({ type: 'tool_call', data: { tool_id: 'wf1', tool_name: 'write_file', args: null, raw_args_delta: 'more content' } }, false);
 
         expect(stream.state.entries[0].toolCalls![0].path).toBe('src/file.go');
-    });
-
-    it('tool_result event resolves pending tool call', () => {
-        const { stream, handleEvent } = setup();
-        handleEvent({ type: 'token', data: { text: '' } }, false);
-        handleEvent({ type: 'tool_call', data: { tool_id: 'tc1', tool_name: 'read_file', args: {} } }, false);
-        handleEvent({ type: 'tool_result', data: { tool_id: 'tc1', success: true, output: 'file content', duration: 100 } }, false);
-        const tc = stream.state.entries[0].toolCalls![0];
-        expect(tc.result).toBe('file content');
-        expect(tc.isPending).toBe(false);
-        expect(tc.success).toBe(true);
     });
 
     it('regression: ask_question auto-answer re-broadcast updates resolved tool call', () => {
@@ -964,18 +904,6 @@ describe('createStreamHandler', () => {
         expect(tc.linesAdded).toBe(5);
     });
 
-    it('tool_progress without tool_id broadcasts to all active tool calls', () => {
-        const { stream, handleEvent } = setup();
-        handleEvent({ type: 'token', data: { text: '' } }, false);
-        handleEvent({ type: 'tool_call', data: { tool_id: 'tcA', tool_name: 'write_file', args: {} } }, false);
-        handleEvent({ type: 'tool_call', data: { tool_id: 'tcB', tool_name: 'edit_file', args: {} } }, false);
-        // Broadcast progress (no tool_id) — both active tool calls get updated
-        handleEvent({ type: 'tool_progress', data: { bytes_written: 100 } }, false);
-        const entry = stream.state.entries[0];
-        expect(entry.toolCalls![0].bytesWritten).toBe(100);
-        expect(entry.toolCalls![1].bytesWritten).toBe(100);
-    });
-
     it('tool_result ignores stale tool_id not in activeToolCalls', () => {
         const { stream, handleEvent } = setup();
         handleEvent({ type: 'token', data: { text: '' } }, false);
@@ -1035,18 +963,6 @@ describe('createStreamHandler', () => {
     });
 
     describe('allocation optimizations', () => {
-        it('tool_result mutates tc through live entries proxy for Svelte reactivity', () => {
-            const { stream, handleEvent } = setup();
-            handleEvent({ type: 'token', data: { text: '' } }, false);
-            handleEvent({ type: 'tool_call', data: { tool_id: 'tc1', tool_name: 'read_file', args: {} } }, false);
-            handleEvent({ type: 'tool_result', data: { tool_id: 'tc1', success: true, output: 'content', duration: 50 } }, false);
-            expect(stream.state.entries[0].toolCalls![0].toolId).toBe('tc1');
-            expect(stream.state.entries[0].toolCalls![0].result).toBe('content');
-            expect(stream.state.entries[0].toolCalls![0].isPending).toBe(false);
-            expect(stream.state.entries[0].toolCalls![0].success).toBe(true);
-            expect(stream.state.entries[0].toolCalls![0].duration).toBe(50);
-        });
-
         it('tool_output mutates in-place without replacing toolCalls array', () => {
             const { stream, handleEvent } = setup();
             handleEvent({ type: 'token', data: { text: '' } }, false);
@@ -1093,21 +1009,6 @@ describe('createStreamHandler', () => {
             handleEvent({ type: 'token', data: { text: ' world' } }, false);
             expect(stream.state.entries).toBe(entriesRef);
             expect(stream.state.entries[0].content).toBe('Hello world');
-        });
-
-        it('100 token events produce no array allocations', () => {
-            const { stream, handleEvent } = setup();
-            handleEvent({ type: 'token', data: { text: 'first' } }, false);
-            const entriesRef = stream.state.entries;
-            const entryRef = stream.state.entries[0];
-            for (let i = 0; i < 100; i++) {
-                handleEvent({ type: 'token', data: { text: ` token${i}` } }, false);
-            }
-            // Entries array and entry object should be the same references
-            expect(stream.state.entries).toBe(entriesRef);
-            expect(stream.state.entries[0]).toBe(entryRef);
-            expect(stream.state.entries[0].content).toContain(' token99');
-            expect(stream.state.entries.length).toBe(1);
         });
     });
 

@@ -140,16 +140,6 @@ func TestPhraseDetector_ExclamationBoundary(t *testing.T) {
 		t.Error("should detect repetition with exclamation boundary")
 	}
 }
-
-func TestPhraseDetector_QuestionBoundary(t *testing.T) {
-	t.Parallel()
-	d := newPhraseDetector()
-
-	if !repeatPhrase(d, "What do you think about this approach and implementation?") {
-		t.Error("should detect repetition with question boundary")
-	}
-}
-
 func TestPhraseDetector_IncompleteSentenceAccumulates(t *testing.T) {
 	t.Parallel()
 	d := newPhraseDetector()

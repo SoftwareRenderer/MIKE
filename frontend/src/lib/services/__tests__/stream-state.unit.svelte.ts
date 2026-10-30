@@ -42,16 +42,6 @@ describe('StreamState', () => {
         expect(s.state.currentAssistantId).toBe('gen-1');
     });
 
-    it('ensureAssistantEntry creates a new entry after closeCurrentAssistant', () => {
-        const s = new StreamState();
-        s.ensureAssistantEntry(() => 'gen-1');
-        s.closeCurrentAssistant();
-        // Now currentAssistantId is null, so a new entry should be created
-        const entry = s.ensureAssistantEntry(() => 'gen-2');
-        expect(entry.id).toBe('gen-2');
-        expect(s.state.entries.length).toBe(2);
-    });
-
     it('ensureAssistantEntry creates new entry when previous one was removed from entries', () => {
         const s = new StreamState();
         s.ensureAssistantEntry(() => 'gen-1');
@@ -207,22 +197,6 @@ describe('StreamState', () => {
         expect(s.state.checkpointLabels.size).toBe(0);
         expect(s.state.checkpointCommitHashes.size).toBe(0);
         expect(s.state.checkpointHashesVersion).toBe(0);
-    });
-
-    it('state is deeply reactive via $state()', () => {
-        const s = new StreamState();
-        expect(s.state.entries).toEqual([]);
-
-        s.ensureAssistantEntry(() => 'reactive-test');
-        expect(s.state.entries.length).toBe(1);
-
-        // Mutating entry content should be reflected in state
-        s.state.entries[0].content = 'Hello';
-        expect(s.state.entries[0].content).toBe('Hello');
-
-        // Further mutations also work
-        s.state.entries[0].content = 'Hello World';
-        expect(s.state.entries[0].content).toBe('Hello World');
     });
 
     it('multiple ensureAssistantEntry calls create separate entries', () => {

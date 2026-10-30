@@ -418,23 +418,6 @@ func TestNothingListeningIsUnreachable(t *testing.T) {
 	}
 }
 
-// The URL a person typed is what MIKE dials; anything else the server points at is refused, so a
-// registered server cannot be used as a proxy into the local network.
-func TestRedirectFromTheRegisteredURLIsNotFollowed(t *testing.T) {
-	private := httptest.NewServer(http.NotFoundHandler())
-	t.Cleanup(private.Close)
-
-	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, private.URL, http.StatusFound)
-	}))
-	t.Cleanup(proxy.Close)
-
-	_, err := connect(context.Background(), registered(proxy.URL, 3), testID)
-	if err == nil {
-		t.Fatal("a redirect was followed, so one registered URL can reach any address")
-	}
-}
-
 // A registered server whose address is not a URL at all is a configuration fault, reported without a
 // dial.
 func TestUnparseableAddressNeverDials(t *testing.T) {

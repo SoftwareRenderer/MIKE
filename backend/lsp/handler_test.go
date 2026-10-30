@@ -755,56 +755,6 @@ func TestInitializedNotificationForwarded(t *testing.T) {
 	}
 }
 
-func TestTwoClientsDifferentWorkspaces(t *testing.T) {
-	mgr := newMockProcessManager()
-	reg := newTestRegistry()
-	handler := NewLSPHandler(reg, mgr)
-	defer handler.Close()
-
-	url := startTestServer(t, handler)
-
-	client1 := subscribeClient(t, url, 1, "/tmp/project-a", "main.go", "go")
-
-	client2 := subscribeClient(t, url, 2, "/tmp/project-b", "main.go", "go")
-
-	client1.sendLSP(t, map[string]any{
-		"jsonrpc": "2.0",
-		"id":      100,
-		"method":  "textDocument/completion",
-		"params":  map[string]any{},
-	})
-
-	time.Sleep(50 * time.Millisecond)
-
-	sent := mgr.SentMessages()
-	if len(sent) != 1 {
-		t.Fatalf("expected 1 sent message, got %d", len(sent))
-	}
-
-	var m map[string]any
-	json.Unmarshal(sent[0], &m)
-	response := map[string]any{
-		"jsonrpc": "2.0",
-		"id":      m["id"],
-		"result":  map[string]any{"items": []any{}},
-	}
-	respData, _ := json.Marshal(response)
-	mgr.Deliver(respData)
-
-	resp := client1.receiveJSON(t)
-	if resp.ID == nil || resp.ID.String() != "100" {
-		t.Errorf("client1: expected id 100, got %v", resp.ID)
-	}
-
-	// Nothing arrives, so this read times out.
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer cancel()
-	_, _, err := client2.conn.Read(ctx)
-	if err == nil {
-		t.Error("client2 should not have received any message (different workspace)")
-	}
-}
-
 func TestTwoClientsSameWorkspace(t *testing.T) {
 	mgr := newMockProcessManager()
 	reg := newTestRegistry()

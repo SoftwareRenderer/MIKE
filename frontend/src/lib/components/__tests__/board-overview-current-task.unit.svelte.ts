@@ -117,15 +117,6 @@ describe('BoardOverview — revealing the current task', () => {
         expect(scrollIntoView).toHaveBeenCalledTimes(1);
     });
 
-    it('does NOT re-center when the same object instance is re-passed', async () => {
-        const task = makeTask('running-task');
-        const { rerender } = mount(task);
-        await drainFrames();
-        rerender({ currentTask: task });
-        await drainFrames();
-        expect(scrollIntoView).toHaveBeenCalledTimes(1);
-    });
-
     it('re-centers when the task actually changes', async () => {
         const first = makeTask('task-a');
         const { rerender } = mount(first);

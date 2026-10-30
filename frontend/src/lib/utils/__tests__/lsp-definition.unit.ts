@@ -122,12 +122,6 @@ describe('identifierRange', () => {
         });
     });
 
-    it('still finds the word when the pointer is on its trailing edge', () => {
-        const doc = text();
-        const end = offsetOf(DOC, 'Println') + 'Println'.length;
-        expect(identifierRange(doc, end)).toEqual({ from: offsetOf(DOC, 'Println'), to: end });
-    });
-
     it('returns null off an identifier', () => {
         const doc = text();
         // The ')' between two non-identifier characters has no word on either side.

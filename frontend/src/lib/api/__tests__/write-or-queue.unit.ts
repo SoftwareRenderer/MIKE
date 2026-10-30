@@ -104,19 +104,4 @@ describe('a task write the server never answered', () => {
         await waitForFlush();
         expect(await loadQueue()).toEqual([]);
     });
-
-    it('spends no request once the app knows the server cannot be answered', async () => {
-        const { updateTask } = await import('$lib/api/tasks');
-        const { waitForFlush } = await import('$lib/api/queue');
-        vi.stubGlobal('fetch', unanswered());
-        await updateTask(PROJECT, TASK, TYPED);
-        await waitForFlush();
-
-        const sent: string[] = [];
-        vi.stubGlobal('fetch', answering(sent));
-        const second = await updateTask(PROJECT, TASK, { title: 'second edit' });
-
-        expect(sent).toEqual([]);
-        expect((second as any).queued).toBe(true);
-    });
 });

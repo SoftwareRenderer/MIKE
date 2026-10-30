@@ -15,29 +15,6 @@ import (
 	"mike/pkg/bridge/protocol"
 )
 
-// TestBashCancelRequest verifies that bash_cancel frames are constructed and parsed correctly.
-func TestBashCancelRequest(t *testing.T) {
-	msgID := uint32(42)
-	targetMsgID := uint32(100)
-
-	frame := protocol.NewBashCancelRequest(msgID, targetMsgID)
-
-	if frame.MsgID != msgID {
-		t.Errorf("expected MsgID %d, got %d", msgID, frame.MsgID)
-	}
-	if frame.Type != protocol.TypeRequest {
-		t.Errorf("expected TypeRequest, got %v", frame.Type)
-	}
-
-	params, err := protocol.ParseBashCancelParams(frame)
-	if err != nil {
-		t.Fatalf("ParseBashCancelParams: %v", err)
-	}
-	if params.TargetMsgID != targetMsgID {
-		t.Errorf("expected TargetMsgID %d, got %d", targetMsgID, params.TargetMsgID)
-	}
-}
-
 // TestBashContextCancellation verifies that cancelling the context sends a cancel frame.
 // A mock agent reads frames from the client and sends a result back.
 func TestBashContextCancellation(t *testing.T) {

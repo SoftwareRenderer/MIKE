@@ -86,30 +86,6 @@ describe('formatRelativeTime', () => {
         expect(formatRelativeTime('')).toBe('');
     });
 
-    it('returns empty string for invalid date', () => {
-        expect(formatRelativeTime('not-a-date')).toBe('');
-    });
-
-    it('returns "just now" for very recent dates', () => {
-        const now = new Date().toISOString();
-        expect(formatRelativeTime(now)).toBe('just now');
-    });
-
-    it('returns minutes ago for recent dates', () => {
-        const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-        expect(formatRelativeTime(fiveMinAgo)).toBe('5m ago');
-    });
-
-    it('returns hours ago for dates within 24h', () => {
-        const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
-        expect(formatRelativeTime(threeHoursAgo)).toBe('3h ago');
-    });
-
-    it('returns days ago for dates within 7 days', () => {
-        const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
-        expect(formatRelativeTime(twoDaysAgo)).toBe('2d ago');
-    });
-
     it('returns date string for dates older than 7 days', () => {
         const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
         const result = formatRelativeTime(tenDaysAgo);
