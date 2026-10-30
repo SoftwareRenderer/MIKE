@@ -5,8 +5,8 @@ import { getProjectId } from './helpers';
 // the browser Origin (same host) rather than opting out with
 // InsecureSkipVerify — the posture the LSP endpoint has always kept. The refusal a
 // cross-site Origin gets is pinned by `backend/httputil/ws_origin_test.go` and
-// `TestHandleTerminal_OriginVerification`; what needs the browser is that a page of the
-// app's own still gets a working shell out of that handshake.
+// `backend/term/terminal_test.go`'s `TestHandleTerminal_OriginVerification`; what needs the
+// browser is that a page of the app's own still gets a working shell out of that handshake.
 
 test.describe.serial('Terminal WebSocket origin verification', () => {
     test('a same-host page connects and gets a working shell', async ({ page }) => {
