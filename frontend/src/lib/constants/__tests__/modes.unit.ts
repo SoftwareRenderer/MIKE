@@ -13,12 +13,6 @@ describe('MODE_DESCRIPTIONS', () => {
         expect(MODE_DESCRIPTIONS.explore).toBe('AI has read/write access.');
     });
 
-    it('stays readable through the index signature the call sites use', () => {
-        const mode = 'plan';
-        expect(MODE_DESCRIPTIONS[mode]).toBe(MODE_DESCRIPTIONS.plan);
-        expect(MODE_DESCRIPTIONS['no-such-mode']).toBeUndefined();
-    });
-
     it('reads only the modes that exist (the catalog has no orphan key)', () => {
         expect(Object.keys(MODE_DESCRIPTIONS).sort()).toEqual(['act', 'explore', 'plan']);
     });

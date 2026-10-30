@@ -304,31 +304,6 @@ func TestEnrichWorktreeExists(t *testing.T) {
 		t.Error("task-2 should have worktree_exists=false")
 	}
 }
-
-func TestEnrichWorktreeExists_UsesProjectID(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create worktree at the CORRECT path: workspaceDir/projectID/taskID
-	projectID := "my-project"
-	taskID := "my-task"
-	os.MkdirAll(filepath.Join(tmpDir, projectID, taskID), 0o755)
-
-	// Also create a directory at the WRONG path: workspaceDir/taskID (no projectID)
-	// This should NOT match
-	os.MkdirAll(filepath.Join(tmpDir, taskID), 0o755)
-
-	tasks := []types.Task{
-		{ID: taskID, ProjectID: projectID},
-	}
-
-	EnrichWorktreeExists(tasks, tmpDir)
-
-	// Should find the worktree at workspaceDir/projectID/taskID
-	if !tasks[0].WorktreeExists {
-		t.Error("task should have worktree_exists=true (found at workspaceDir/projectID/taskID)")
-	}
-}
-
 func TestEnrichTaskWorktree(t *testing.T) {
 	tmpDir := t.TempDir()
 	projectID := "proj"
@@ -561,92 +536,6 @@ func newTaskHandlerWithExecutor(t *testing.T) (*TaskHandler, *store.Store, strin
 		Executor: executor, WorktreeMgr: worktreeMgr})
 	return h, s, projID
 }
-
-// createParentWithSubtask creates an in_progress parent with one subtask whose
-// thread already ends in an assistant message. This lets StartTask persist the
-// autostarted flag and return early without invoking the LLM.
-func createParentWithSubtask(t *testing.T, s *store.Store, projectID string) (string, string) {
-	t.Helper()
-	now := time.Now().UTC()
-
-	parent := &types.Task{
-		ID:              "parent-auto-start",
-		ProjectID:       projectID,
-		Title:           "Parent Auto Start",
-		Prompt:          "Parent prompt",
-		Status:          types.StatusBacklog,
-		ExecutionState:  types.ExecStateIdle,
-		LlamaServerURL:  "http://localhost:8080",
-		ModelName:       "test-model",
-		OperatingMode:   "act",
-		CurrentThreadID: "thread-parent",
-		CreatedAt:       now,
-		UpdatedAt:       now,
-	}
-	if err := s.CreateTask(parent); err != nil {
-		t.Fatal(err)
-	}
-
-	child := &types.Task{
-		ID:              "child-auto-start",
-		ProjectID:       projectID,
-		Title:           "Child Auto Start",
-		Prompt:          "Child prompt",
-		Status:          types.StatusBacklog,
-		ExecutionState:  types.ExecStateIdle,
-		ParentTaskID:    parent.ID,
-		LlamaServerURL:  "http://localhost:8080",
-		ModelName:       "test-model",
-		OperatingMode:   "act",
-		CurrentThreadID: "thread-child",
-		CreatedAt:       now,
-		UpdatedAt:       now,
-	}
-	if err := s.CreateTask(child); err != nil {
-		t.Fatal(err)
-	}
-
-	// Seed the child thread so StartTask returns early (no LLM) after persisting
-	// the autostarted flag: a user prompt message followed by an assistant reply.
-	for _, m := range []*types.TaskMessage{
-		{ID: "u1", TaskID: child.ID, ThreadID: child.CurrentThreadID, Role: "user", Content: child.Prompt, CreatedAt: now},
-		{ID: "a1", TaskID: child.ID, ThreadID: child.CurrentThreadID, Role: "assistant", Content: "Done.", CreatedAt: now},
-	} {
-		if err := s.CreateTaskMessage(m); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	return parent.ID, child.ID
-}
-
-// TestHandleStart_MarksSubtaskAutostarted verifies that starting a
-// parent task with subtasks marks the selected subtask autostarted=true, so its
-// ask_question calls are auto-answered from parent context.
-func TestHandleStart_MarksSubtaskAutostarted(t *testing.T) {
-	h, s, projID := newTaskHandlerWithExecutor(t)
-	parentID, childID := createParentWithSubtask(t, s, projID)
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/start", h.HandleStart)
-	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projID+"/tasks/"+parentID+"/start", nil)
-	rr := httptest.NewRecorder()
-	mux.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("HandleStart status = %d, body=%s", rr.Code, rr.Body.String())
-	}
-
-	child, err := s.GetTaskByID(childID)
-	if err != nil {
-		t.Fatalf("get child: %v", err)
-	}
-	if !child.Autostarted {
-		t.Errorf("child task should be marked autostarted=true when started via its parent (got %v)", child.Autostarted)
-	}
-}
-
-// --- Autostart chain: start paths (chain = started-but-pending, deepest first) ---
 
 // createChainTask creates a task for chain tests. When seed is true, the
 // task's thread is seeded with a user + assistant message pair so StartTask

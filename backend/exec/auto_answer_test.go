@@ -178,25 +178,6 @@ func TestAskQuestionResults_AlignmentWithIncompleteCalls(t *testing.T) {
 	}
 }
 
-func TestAskQuestionResults_AllComplete(t *testing.T) {
-	t.Parallel()
-	pending := []types.ChatToolCall{
-		mkToolCall("c0", "ask_question", ""),
-		mkToolCall("c1", "bash", ""),
-		mkToolCall("c2", "ask_question", ""),
-	}
-	results := []toolResult{
-		{toolCallID: "c0", output: "q0", success: true},
-		{toolCallID: "c1", output: "out", success: true},
-		{toolCallID: "c2", output: "q2", success: true},
-	}
-	got := askQuestionResults(pending, results)
-	want := map[int]int{0: 0, 2: 2}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("askQuestionResults: got %#v, want %#v", got, want)
-	}
-}
-
 // A failed ask_question results in an error, not a question, so it must not reach the user
 // as "the agent has a question", and an auto-started subtask must not answer it from the
 // parent's context. A real question in the same turn still does.

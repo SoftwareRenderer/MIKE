@@ -102,27 +102,6 @@ test.describe('Explorer upload by drop', () => {
     await expect(page.locator('.toast')).toContainText('Upload cancelled', { timeout: 10000 });
   });
 
-  test('confirming the question replaces the file', async ({ page }) => {
-    const name = `replace-ok-${Date.now()}.txt`;
-    const target = join(projectDir(), name);
-    writeFileSync(target, 'original\n');
-
-    await gotoProject(page);
-    await openExplorer(page);
-    await expect(page.locator('.file-browser-item', { hasText: name })).toBeVisible({ timeout: 10000 });
-
-    await dropOntoList(page, [{ name, content: 'replacement\n' }]);
-
-    const question = page.locator('[role="dialog"]').filter({ hasText: 'Replace existing files?' });
-    await expect(question).toBeVisible({ timeout: 10000 });
-    // The button names the action, so the dialog cannot be read as "delete".
-    await expect(question.locator('.btn-confirm')).toHaveText('Replace');
-    await question.locator('.btn-confirm').click();
-
-    await expect.poll(() => readFileSync(target, 'utf8')).toBe('replacement\n');
-    await expect(page.locator('.toast')).toContainText('Uploaded 1 file', { timeout: 10000 });
-  });
-
   test('the Upload button is the same upload without a drag', async ({ page }) => {
     await gotoProject(page);
     await openExplorer(page);

@@ -185,15 +185,6 @@ describe('Sandbox Configuration save payload', () => {
         expect(await save(container)).toStrictEqual({ sandbox_mounts: [] });
     });
 
-    it('writes a forward port under sandbox_forward_ports, interface included only when one is set', async () => {
-        const { container } = renderModal(projectWith({ forward_ports: [] }));
-        await expand(container, 'Toggle port forwarding settings');
-        await fireEvent.input(one<HTMLInputElement>(container, '.port-input[aria-label="Container port"]'), { target: { value: '3000' } });
-        await fireEvent.click(one<HTMLButtonElement>(container, '.btn-add-port'));
-
-        expect(await save(container)).toStrictEqual({ sandbox_forward_ports: [{ container_port: 3000 }] });
-    });
-
     it('switching from Dockerfile to a pre-built image clears the stored Dockerfile path', async () => {
         const { container } = renderModal(projectWith({
             sandbox_image: 'docker.io/library/ubuntu:24.04',

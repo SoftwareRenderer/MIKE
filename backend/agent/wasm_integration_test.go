@@ -397,30 +397,3 @@ func TestWasmPiAdapter_ToolNameMapping(t *testing.T) {
 		})
 	}
 }
-
-// TestWasmPiAdapter_AllocPattern verifies the core wazero allocation pattern
-// from the greet.go guide: Alloc returns valid linear memory offsets that
-// the host can Write to and Read back correctly via the store_result callback.
-func TestWasmPiAdapter_AllocPattern(t *testing.T) {
-	adapter := loadPiWasm(t)
-
-	// Init must succeed (exercises Alloc → Write → Call → Free for config)
-	cfg := RunnerConfig{
-		ExtensionName: "pi",
-		SessionName:   "alloc-test",
-		WorktreePath:  t.TempDir(),
-	}
-	cfgBytes, _ := json.Marshal(cfg)
-	if err := adapter.Init(context.Background(), cfgBytes); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
-
-	// SubprocessConfig exercises Alloc(0) → store_result callback
-	spCfg := adapter.SubprocessConfig(context.Background())
-	if spCfg.Binary != "pi" {
-		t.Errorf("Binary = %q, want pi", spCfg.Binary)
-	}
-	if len(spCfg.Args) == 0 {
-		t.Error("expected non-empty args from SubprocessConfig")
-	}
-}

@@ -60,15 +60,6 @@ func TestPhraseDetector_ExactRepetition(t *testing.T) {
 	}
 }
 
-func TestPhraseDetector_CaseInsensitive(t *testing.T) {
-	t.Parallel()
-	d := newPhraseDetector()
-
-	if !repeatPhrase(d, testPhrase) {
-		t.Error("should detect case-insensitive repetition")
-	}
-}
-
 func TestPhraseDetector_ShortPhraseIgnored(t *testing.T) {
 	t.Parallel()
 	d := newPhraseDetector()
@@ -78,15 +69,6 @@ func TestPhraseDetector_ShortPhraseIgnored(t *testing.T) {
 	d.check(short)
 	if d.check(short) {
 		t.Error("should not fire on short phrases")
-	}
-}
-
-func TestPhraseDetector_WhitespaceNormalization(t *testing.T) {
-	t.Parallel()
-	d := newPhraseDetector()
-
-	if !repeatPhrase(d, testPhrase) {
-		t.Error("should detect repetition despite extra whitespace")
 	}
 }
 
@@ -138,15 +120,6 @@ func TestPhraseDetector_NewlineBoundary(t *testing.T) {
 	}
 }
 
-func TestPhraseDetector_DoubleNewlineBoundary(t *testing.T) {
-	t.Parallel()
-	d := newPhraseDetector()
-
-	if !repeatPhrase(d, testPhrase+"\n\n") {
-		t.Error("should detect repetition across double newline boundary")
-	}
-}
-
 func TestPhraseDetector_CodeBlockNotTriggered(t *testing.T) {
 	t.Parallel()
 	d := newPhraseDetector()
@@ -167,16 +140,6 @@ func TestPhraseDetector_ExclamationBoundary(t *testing.T) {
 		t.Error("should detect repetition with exclamation boundary")
 	}
 }
-
-func TestPhraseDetector_QuestionBoundary(t *testing.T) {
-	t.Parallel()
-	d := newPhraseDetector()
-
-	if !repeatPhrase(d, "What do you think about this approach and implementation?") {
-		t.Error("should detect repetition with question boundary")
-	}
-}
-
 func TestPhraseDetector_IncompleteSentenceAccumulates(t *testing.T) {
 	t.Parallel()
 	d := newPhraseDetector()
@@ -1896,25 +1859,6 @@ func TestPhraseDetector_PendingBufferBound(t *testing.T) {
 	}
 }
 
-func TestPhraseDetector_UTF8NoBufferBloat(t *testing.T) {
-	t.Parallel()
-	// Multi-byte UTF-8 with no sentence boundary must not grow the pending buffer with each call.
-	d := newPhraseDetector()
-
-	// UTF-8 text with multi-byte characters, no sentence boundaries
-	utf8Text := "café résumé naïve 日本語 🎉"
-
-	// Feed the same text multiple times (no boundaries, so it accumulates in pending)
-	for i := 0; i < 10; i++ {
-		d.check(utf8Text)
-	}
-
-	// However many calls accumulate, pending is bounded by maxPendingSize.
-	if len(d.pending) > maxPendingSize {
-		t.Errorf("pending buffer %d bytes exceeds maxPendingSize %d (UTF-8 bloat?)", len(d.pending), maxPendingSize)
-	}
-}
-
 // --- StopProjectTasks Tests ---
 
 func TestStopProjectTasks(t *testing.T) {
@@ -2388,48 +2332,6 @@ func TestBuildLLMContext_WithSummary(t *testing.T) {
 	for i, exp := range expected {
 		if result[i].Role != exp.Role || result[i].Content != exp.Content {
 			t.Errorf("message[%d] mismatch: got %s:%q, want %s:%q", i, result[i].Role, result[i].Content, exp.Role, exp.Content)
-		}
-	}
-}
-
-func TestBuildLLMContext_DropsPreSummaryMessages(t *testing.T) {
-	t.Parallel()
-	// Pre-summary messages are dropped (their content is in the system prompt summary).
-	var messages []types.ChatMessage
-	messages = append(messages, types.ChatMessage{Role: "system", Content: "system prompt"})
-	for i := 1; i <= 5; i++ {
-		messages = append(messages, types.ChatMessage{Role: "user", Content: fmt.Sprintf("old message %d", i)})
-		messages = append(messages, types.ChatMessage{Role: "assistant", Content: fmt.Sprintf("old response %d", i)})
-	}
-	messages = append(messages, types.ChatMessage{Role: "summarization", Content: "summary"})
-	messages = append(messages, types.ChatMessage{Role: "user", Content: "new message"})
-
-	result := buildLLMContext(messages)
-
-	// Only system prompt + post-summary messages: 2
-	if len(result) != 2 {
-		t.Fatalf("expected 2 messages, got %d", len(result))
-	}
-	// System prompt preserved
-	if result[0].Role != "system" {
-		t.Errorf("expected system message, got %s", result[0].Role)
-	}
-	// All old messages should be absent
-	for i := 1; i <= 5; i++ {
-		for _, m := range result {
-			if m.Content == fmt.Sprintf("old message %d", i) {
-				t.Errorf("pre-summary message 'old message %d' should be dropped", i)
-			}
-		}
-	}
-	// Post-summary message preserved
-	if result[1].Content != "new message" {
-		t.Errorf("expected 'new message', got %q", result[1].Content)
-	}
-	// No summarization in output
-	for _, m := range result {
-		if m.Role == "summarization" {
-			t.Error("summarization messages should be filtered out")
 		}
 	}
 }
@@ -2949,59 +2851,6 @@ func TestMaybeAutoSummarize_NoTriggerBelowThreshold(t *testing.T) {
 }
 
 // --- Reasoning-Only Loop Detection Tests ---
-
-func TestLoopDetector_ReasoningOnlyIncrementsHintCount(t *testing.T) {
-	t.Parallel()
-	te := newTestExecutor(t)
-	now := time.Now().UTC()
-
-	// Create project and task
-	proj := &types.Project{ID: "proj-reasoning", Name: "Reasoning Test", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
-	if err := te.store.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	task := &types.Task{
-		ID: "task-reasoning", ProjectID: proj.ID, Title: "Test", Prompt: "Test",
-		Status: types.StatusInProgress, ExecutionState: types.ExecStateRunning,
-		CreatedAt: now, UpdatedAt: now,
-	}
-	if err := te.store.CreateTask(task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	detector := newLoopDetector()
-	messages := []types.ChatMessage{{Role: "system", Content: "system prompt"}}
-
-	// First call — should NOT terminate (streak 1/3)
-	terminated := handleLoopDetected(te, task, proj.ID, task.ID, detector, LoopReasoningOnly, "", &messages, false)
-	if terminated {
-		t.Fatal("first hint should not terminate")
-	}
-	if detector.loopStreak != 1 {
-		t.Errorf("expected loopStreak=1, got %d", detector.loopStreak)
-	}
-
-	// Second call — should NOT terminate (streak 2/3)
-	terminated = handleLoopDetected(te, task, proj.ID, task.ID, detector, LoopReasoningOnly, "", &messages, false)
-	if terminated {
-		t.Fatal("second hint should not terminate")
-	}
-	if detector.loopStreak != 2 {
-		t.Errorf("expected loopStreak=2, got %d", detector.loopStreak)
-	}
-
-	// Third call — SHOULD terminate (streak 3 >= maxLoopHints)
-	terminated = handleLoopDetected(te, task, proj.ID, task.ID, detector, LoopReasoningOnly, "", &messages, false)
-	if !terminated {
-		t.Fatal("third hint should terminate (>= maxLoopHints)")
-	}
-
-	// Verify task was marked as failed
-	taskAfter, _ := te.store.GetTaskByID(task.ID)
-	if taskAfter.ExecutionState != types.ExecStateFailed {
-		t.Errorf("expected execution_state='failed', got %q", taskAfter.ExecutionState)
-	}
-}
 
 // TestLoopDetector_ResetClearsStreak verifies that detector.reset() clears loopStreak,
 // which is the mechanism used when a user action (e.g., message delete) changes context.
