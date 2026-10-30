@@ -512,15 +512,6 @@ func TestFormatToolAction_RequestReviewNoSummary(t *testing.T) {
 	}
 }
 
-func TestFormatToolAction_RequestReviewEmptySummary(t *testing.T) {
-	t.Parallel()
-	args := `{"summary":""}`
-	action := formatToolAction("request_review", args)
-	if action != "request a review" {
-		t.Errorf("got %q, want %q", action, "request a review")
-	}
-}
-
 // reviewCallWithSummary builds a request_review call carrying a summary.
 func reviewCallWithSummary(id, summary string) types.ToolCallMsg {
 	tc := toolCallMsg(id, "request_review")

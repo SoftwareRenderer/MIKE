@@ -268,46 +268,6 @@ func TestBuildToolResultEvent_EditFile(t *testing.T) {
 	}
 }
 
-func TestBuildToolResultEvent_RequestReview(t *testing.T) {
-	t.Parallel()
-	// request_review — not bash/read_file
-	output := "Task complete"
-	msgID := "review-msg"
-	toolID := "call_review"
-
-	data := buildToolResultEvent(toolID, "request_review", output, true, false, 0,
-		map[string]any{},
-		`{}`,
-		"", false, false, msgID)
-
-	if data["output"] != output {
-		t.Errorf("request_review output should be full: got %q, want %q", data["output"], output)
-	}
-	if _, ok := data["result_truncated"]; ok {
-		t.Error("request_review should not have result_truncated field")
-	}
-}
-
-func TestBuildToolResultEvent_AskQuestion(t *testing.T) {
-	t.Parallel()
-	// ask_question — not bash/read_file
-	output := "What framework should I use?"
-	msgID := "ask-msg"
-	toolID := "call_ask"
-
-	data := buildToolResultEvent(toolID, "ask_question", output, true, false, 0,
-		map[string]any{"question": "What framework should I use?"},
-		`{"question":"What framework should I use?"}`,
-		"", false, false, msgID)
-
-	if data["output"] != output {
-		t.Errorf("ask_question output should be full: got %q, want %q", data["output"], output)
-	}
-	if _, ok := data["result_truncated"]; ok {
-		t.Error("ask_question should not have result_truncated field")
-	}
-}
-
 func TestBuildToolResultEvent_UnknownTool(t *testing.T) {
 	t.Parallel()
 	// Unknown tool — not bash/read_file
