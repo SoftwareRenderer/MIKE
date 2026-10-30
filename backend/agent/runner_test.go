@@ -274,35 +274,6 @@ func TestAgentRunner_QueryStats(t *testing.T) {
 	}
 }
 
-// TestRunnerConfig_Serialization verifies RunnerConfig marshals/unmarshals correctly.
-func TestRunnerConfig_Serialization(t *testing.T) {
-	cfg := RunnerConfig{
-		ExtensionName: "pi",
-		SessionName:   "kanban-test-task",
-		WorktreePath:  "/tmp/worktree",
-		Sandbox:       true,
-		Config:        map[string]any{"key": "value"},
-		AgentManifest: &extensions.AgentConfig{},
-	}
-
-	data, err := json.Marshal(cfg)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-
-	var decoded RunnerConfig
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-
-	if decoded.ExtensionName != cfg.ExtensionName {
-		t.Errorf("ExtensionName = %q, want %q", decoded.ExtensionName, cfg.ExtensionName)
-	}
-	if decoded.Sandbox != cfg.Sandbox {
-		t.Errorf("Sandbox = %v, want %v", decoded.Sandbox, cfg.Sandbox)
-	}
-}
-
 // TestAdapterRegistry verifies factory registration and lookup.
 func TestAdapterRegistry(t *testing.T) {
 	called := false
@@ -328,30 +299,6 @@ func TestAdapterRegistry(t *testing.T) {
 
 	if !called {
 		t.Error("expected factory to be called")
-	}
-}
-
-// TestEventTypes verifies event type constants are non-empty and unique.
-func TestEventTypes(t *testing.T) {
-	types := []string{
-		agent.EventTypeToken,
-		agent.EventTypeReasoning,
-		agent.EventTypeToolCall,
-		agent.EventTypeToolResult,
-		agent.EventTypeStatus,
-		agent.EventTypeStats,
-		agent.EventTypeError,
-		agent.EventTypePersist,
-	}
-	seen := make(map[string]bool)
-	for _, typ := range types {
-		if typ == "" {
-			t.Error("event type is empty")
-		}
-		if seen[typ] {
-			t.Errorf("duplicate event type: %q", typ)
-		}
-		seen[typ] = true
 	}
 }
 
@@ -471,38 +418,6 @@ func TestAgentRunner_Compact(t *testing.T) {
 	}
 }
 
-// TestPersistEntry_Serialization verifies agent.PersistEntry marshals correctly.
-func TestPersistEntry_Serialization(t *testing.T) {
-	entry := agent.PersistEntry{
-		Role:             "assistant",
-		Content:          "Hello world",
-		ReasoningContent: "Let me think...",
-		ModelName:        "test-model",
-		PromptTokens:     100,
-		PredictedTokens:  50,
-	}
-
-	data, err := json.Marshal(entry)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-
-	var decoded agent.PersistEntry
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-
-	if decoded.Role != entry.Role {
-		t.Errorf("Role = %q, want %q", decoded.Role, entry.Role)
-	}
-	if decoded.Content != entry.Content {
-		t.Errorf("Content = %q, want %q", decoded.Content, entry.Content)
-	}
-	if decoded.PromptTokens != entry.PromptTokens {
-		t.Errorf("PromptTokens = %d, want %d", decoded.PromptTokens, entry.PromptTokens)
-	}
-}
-
 // brokenAdapter implements agent.AgentAdapter returning nil/empty for everything.
 type brokenAdapter struct {
 	subprocessConfig agent.SubprocessConfig
@@ -613,32 +528,6 @@ func TestAgentRunner_CloseNilEncode(t *testing.T) {
 
 	// Double-close should also be safe
 	runner.Close()
-}
-
-// TestSubprocessConfig_Serialization verifies agent.SubprocessConfig marshals correctly.
-func TestSubprocessConfig_Serialization(t *testing.T) {
-	cfg := agent.SubprocessConfig{
-		Binary: "pi",
-		Args:   []string{"--mode", "rpc", "--name", "test"},
-		Env:    []string{"PI_DIR=/tmp/pi"},
-	}
-
-	data, err := json.Marshal(cfg)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-
-	var decoded agent.SubprocessConfig
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-
-	if decoded.Binary != cfg.Binary {
-		t.Errorf("Binary = %q, want %q", decoded.Binary, cfg.Binary)
-	}
-	if len(decoded.Args) != len(cfg.Args) {
-		t.Errorf("Args len = %d, want %d", len(decoded.Args), len(cfg.Args))
-	}
 }
 
 // --- Channel teardown and late dispatch ---

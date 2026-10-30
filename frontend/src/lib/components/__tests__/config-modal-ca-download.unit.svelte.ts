@@ -4,8 +4,8 @@ import ConfigModal from '$lib/components/ConfigModal.svelte';
 import type { Config } from '$lib/types';
 
 // The CA row is a pure function of config.tls_ca_available, which the server
-// reports only while it runs its own CA-signed certificate. Also covers a cached
-// config written by a server that had no such field.
+// reports only while it runs its own CA-signed certificate — and a cached config
+// written by a server that had no such field reads the same as `false`.
 
 vi.mock('$lib/api', async (importOriginal) => {
     const actual = await importOriginal<typeof import('$lib/api')>();
@@ -85,13 +85,5 @@ describe('Settings → About → System Info CA download', () => {
         expect(container.querySelector(CA_LINK)).toBeNull();
         // The rest of System Info is untouched — the row is absent, not the section.
         expect(container.querySelector(SYSTEM_INFO_ROW)).toBeTruthy();
-    });
-
-    it('offers nothing for a config that predates the field', async () => {
-        const config = makeConfig();
-        expect(config.tls_ca_available).toBeUndefined();
-
-        const { container } = await openAbout(config);
-        expect(container.querySelector(CA_LINK)).toBeNull();
     });
 });

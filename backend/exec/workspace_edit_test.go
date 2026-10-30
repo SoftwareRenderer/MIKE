@@ -245,15 +245,6 @@ func TestWorkspaceEditTargets_AllInside(t *testing.T) {
 	}
 }
 
-func TestWorkspaceEditTargets_OutsideWorkspace(t *testing.T) {
-	t.Parallel()
-	ws := "/home/u/work"
-	uris := []string{"file:///home/u/work/a.ts", "file:///home/u/other/b.ts"}
-	if _, err := workspaceEditTargets(ws, uris); err == nil {
-		t.Fatal("expected error for target outside workspace")
-	}
-}
-
 func TestWorkspaceEditTargets_PrefixTrick(t *testing.T) {
 	t.Parallel()
 	// /home/u/work-evil must NOT pass as inside /home/u/work

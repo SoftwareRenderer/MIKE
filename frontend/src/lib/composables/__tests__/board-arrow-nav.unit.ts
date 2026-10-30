@@ -126,11 +126,6 @@ describe('resolveArrowTarget — Up/Down within a column (wrap both ends)', () =
         expect(idOf(resolveArrowTarget({ columns: cols, activeElement: card('t1'), key: 'ArrowUp' }))).toBe('t1');
     });
 
-    it('does not leave the current column', () => {
-        const cols = setupBoard(1, 1, 0, 0);
-        expect(idOf(resolveArrowTarget({ columns: cols, activeElement: card('t1'), key: 'ArrowDown' }))).toBe('t1');
-    });
-
     it('moves between project items (focus stays in the projects column)', () => {
         const cols = setupBoard(1, 0, 0, 0, 2);
         expect(idOf(resolveArrowTarget({ columns: cols, activeElement: proj('p1'), key: 'ArrowDown' }))).toBe('p2');

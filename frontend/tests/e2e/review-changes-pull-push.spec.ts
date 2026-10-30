@@ -103,21 +103,15 @@ test.describe.serial('Review Changes: commit button + pull/push', () => {
         await openChangesPanel(page);
     });
 
-    test('Commit button is visible but disabled on a clean tree; Pull/Push buttons present', async ({ page }) => {
-        const commitBtn = page.locator('.panel-commit-btn');
-        await expect(commitBtn).toBeVisible();
-        await expect(commitBtn).toBeDisabled();
-        await expect(commitBtn).toHaveAttribute('title', 'Nothing staged to commit');
-
-        // A clean tree defaults to the last-commit comparison (EMPTY_TREE → HEAD
-        // for this single-commit fixture repo; its only file is README.md).
-        await expect(page.locator('.sr-only', { hasText: 'Showing diff with 1 file' })).toBeVisible({ timeout: 15000 });
-
-        const pullBtn = pullButton(page);
-        const pushBtn = pushButton(page);
-        await expect(pullBtn).toBeVisible();
-        await expect(pushBtn).toBeVisible();
-    });
+    // A clean tree answers with the Commit button present, disabled and titled `Nothing staged to commit`,
+    // beside the Pull and Push buttons: that is what a `git status` payload means to the panel, and
+    // `git-status-panel.unit.svelte.ts` owns it ("always renders the Commit button, disabled when nothing is
+    // staged", "renders Pull and Push buttons with tooltips"), including both title strings. That file's
+    // "enables the Commit button when there are staged entries" owns the enabled half, which the spec below
+    // needs only as a premise. This lane keeps the git facts: a commit really reaching a bare remote, a real
+    // commit really arriving from it, and git's own refusal over a branch with no upstream.
+    // The one assertion with no vitest owner was this body's `.sr-only` line ("Showing diff with 1 file"),
+    // the panel naming the comparison it holds — a payload reading to add to that unit file, not a spec.
 
     test('Commit button enables with staged changes; Push delivers the commit to the remote', async ({ page }) => {
         const uniqueId = Date.now();

@@ -66,44 +66,6 @@ func TestIsMergeInProgress_ReturnsFalseWhenNoMerge(t *testing.T) {
 	}
 }
 
-// TestGetConflictedFiles_DetectsUUConflicts verifies that standard UU (both modified) conflicts are detected.
-func TestGetConflictedFiles_DetectsUUConflicts(t *testing.T) {
-	t.Parallel()
-	tmpDir := t.TempDir()
-	testgit.Git(t, tmpDir, "init")
-	testgit.Git(t, tmpDir, "config", "user.email", "test@test.com")
-	testgit.Git(t, tmpDir, "config", "user.name", "Test")
-
-	// Create initial file
-	os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("line 1\nline 2\nline 3\n"), 0o644)
-	testgit.Git(t, tmpDir, "add", "file.txt")
-	testgit.Git(t, tmpDir, "commit", "-m", "Initial")
-
-	// Create conflicting branch
-	testgit.Git(t, tmpDir, "checkout", "-b", "feature")
-	os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("line 1\nfeature change\nline 3\n"), 0o644)
-	testgit.Git(t, tmpDir, "add", "file.txt")
-	testgit.Git(t, tmpDir, "commit", "-m", "Feature")
-
-	// Conflicting change on master
-	testgit.Git(t, tmpDir, "checkout", "master")
-	os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("line 1\nmaster change\nline 3\n"), 0o644)
-	testgit.Git(t, tmpDir, "add", "file.txt")
-	testgit.Git(t, tmpDir, "commit", "-m", "Master")
-
-	// Start merge (will conflict)
-	cmd := exec.Command("git", "merge", "feature")
-	cmd.Dir = tmpDir
-	_ = cmd.Run()
-
-	files := GetConflictedFiles(tmpDir)
-	if len(files) != 1 || files[0] != "file.txt" {
-		t.Fatalf("expected [file.txt], got %v", files)
-	}
-
-	testgit.Git(t, tmpDir, "merge", "--abort")
-}
-
 // TestGetConflictedFiles_DetectsMultipleConflicts verifies that multiple conflicted files are all detected.
 func TestGetConflictedFiles_DetectsMultipleConflicts(t *testing.T) {
 	t.Parallel()

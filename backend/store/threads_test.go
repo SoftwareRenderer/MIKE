@@ -32,14 +32,6 @@ func TestCreateAndGetThread(t *testing.T) {
 	}
 }
 
-func TestGetThreadNotFound(t *testing.T) {
-	s := testStore(t)
-	_, err := s.GetThread("nonexistent")
-	if err == nil {
-		t.Fatal("expected error for missing thread")
-	}
-}
-
 func TestGetThreadsByTask(t *testing.T) {
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")

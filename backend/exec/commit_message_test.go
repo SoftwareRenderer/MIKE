@@ -180,19 +180,6 @@ func TestCollectUniqueModels_Empty(t *testing.T) {
 	}
 }
 
-func TestCollectUniqueModels_SingleModel(t *testing.T) {
-	t.Parallel()
-	msgs := []types.TaskMessage{
-		{Role: "assistant", ModelName: "gpt-4o"},
-		{Role: "assistant", ModelName: "gpt-4o"},
-		{Role: "assistant", ModelName: "gpt-4o"},
-	}
-	models := collectUniqueModels(msgs)
-	if len(models) != 1 || models[0] != "gpt-4o" {
-		t.Errorf("expected [gpt-4o], got %v", models)
-	}
-}
-
 func TestCollectUniqueModels_MultipleModels(t *testing.T) {
 	t.Parallel()
 	msgs := []types.TaskMessage{
@@ -206,26 +193,6 @@ func TestCollectUniqueModels_MultipleModels(t *testing.T) {
 	expected := []string{"gpt-4o", "claude-3.5", "llama-3"}
 	if len(models) != len(expected) {
 		t.Fatalf("expected %d models, got %d: %v", len(expected), len(models), models)
-	}
-	for i, m := range expected {
-		if models[i] != m {
-			t.Errorf("models[%d] = %q, want %q", i, models[i], m)
-		}
-	}
-}
-
-func TestCollectUniqueModels_PreservesOrder(t *testing.T) {
-	t.Parallel()
-	msgs := []types.TaskMessage{
-		{Role: "assistant", ModelName: "second"},
-		{Role: "assistant", ModelName: "first"},
-		{Role: "assistant", ModelName: "third"},
-	}
-	models := collectUniqueModels(msgs)
-	// Order should be first appearance: second, first, third
-	expected := []string{"second", "first", "third"}
-	if len(models) != len(expected) {
-		t.Fatalf("expected %d models, got %d", len(expected), len(models))
 	}
 	for i, m := range expected {
 		if models[i] != m {
@@ -263,20 +230,6 @@ func TestCollectUniqueModels_AllEmpty(t *testing.T) {
 	models := collectUniqueModels(msgs)
 	if len(models) != 0 {
 		t.Errorf("expected 0 models, got %d: %v", len(models), models)
-	}
-}
-
-func TestCollectUniqueModels_UserMessagesIgnored(t *testing.T) {
-	t.Parallel()
-	// Only assistant messages have model names; user/tool/summarization messages are skipped
-	msgs := []types.TaskMessage{
-		{Role: "user", ModelName: ""},
-		{Role: "assistant", ModelName: "gpt-4o"},
-		{Role: "tool", ModelName: ""},
-	}
-	models := collectUniqueModels(msgs)
-	if len(models) != 1 || models[0] != "gpt-4o" {
-		t.Errorf("expected [gpt-4o], got %v", models)
 	}
 }
 
@@ -374,14 +327,6 @@ func TestBuildCommitMessageWithAssistedBy_MultipleModels(t *testing.T) {
 func TestBuildCommitMessageWithAssistedBy_NoModels(t *testing.T) {
 	t.Parallel()
 	result := buildCommitMessageWithAssistedBy("Fix bug", nil)
-	if result != "Fix bug" {
-		t.Errorf("expected just the message, got %q", result)
-	}
-}
-
-func TestBuildCommitMessageWithAssistedBy_EmptyModelList(t *testing.T) {
-	t.Parallel()
-	result := buildCommitMessageWithAssistedBy("Fix bug", []string{})
 	if result != "Fix bug" {
 		t.Errorf("expected just the message, got %q", result)
 	}

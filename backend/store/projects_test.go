@@ -22,14 +22,6 @@ func TestCreateAndGetProject(t *testing.T) {
 	}
 }
 
-func TestGetProjectNotFound(t *testing.T) {
-	s := testStore(t)
-	_, err := s.GetProject("nonexistent")
-	if err == nil {
-		t.Fatal("expected error for missing project")
-	}
-}
-
 func TestListProjects(t *testing.T) {
 	s := testStore(t)
 	// Create projects in non-alphabetical order

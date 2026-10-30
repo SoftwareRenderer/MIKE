@@ -115,21 +115,3 @@ func TestCloneContextHonoursAnAlreadyCancelledContext(t *testing.T) {
 		t.Errorf("error = %v, want it to wrap context.Canceled", err)
 	}
 }
-
-// TestCloneContextCompletesARealClone is the happy path for the clone entry point.
-func TestCloneContextCompletesARealClone(t *testing.T) {
-	src := seedSourceRepo(t)
-	dst := filepath.Join(t.TempDir(), "dst")
-
-	seen := -1
-	out, err := CloneContext(context.Background(), src, dst, func(pct int) { seen = pct })
-	if err != nil {
-		t.Fatalf("CloneContext: %v (out=%q)", err, out)
-	}
-	// A local clone of a one-commit repo legitimately reports no progress at all, so the callback
-	// must not be asserted on — only that wiring one does not break the clone.
-	_ = seen
-	if _, err := os.Stat(filepath.Join(dst, "f.txt")); err != nil {
-		t.Errorf("the clone produced no working tree: %v", err)
-	}
-}

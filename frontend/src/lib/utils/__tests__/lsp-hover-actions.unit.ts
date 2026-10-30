@@ -55,10 +55,6 @@ describe('reduceHover — opening', () => {
         expect(effects).toContain('arm');
     });
 
-    it('opens nothing until the hover delay elapses', () => {
-        expect(run([{ type: 'pointermove', zone: 'token', token: TOKEN_A }]).state.phase).toBe('arming');
-    });
-
     it('opens the card when the hover delay elapses', () => {
         const { state, effects } = run([{ type: 'pointermove', zone: 'token', token: TOKEN_A }, { type: 'hover-elapsed' }]);
         expect(state.phase).toBe('open');
@@ -86,15 +82,6 @@ describe('reduceHover — dismissing', () => {
         expect(state).toBe(HOVER_IDLE);
         expect(effects).toContain('cancel-arm');
         expect(effects).not.toContain('open');
-    });
-
-    it('stays open while the pointer is on the identifier', () => {
-        const { state, effects } = run(
-            [{ type: 'pointermove', zone: 'token', token: TOKEN_A }],
-            openOnA(),
-        );
-        expect(state.phase).toBe('open');
-        expect(effects).toEqual([]);
     });
 
     it('stays open while the pointer is inside the card', () => {

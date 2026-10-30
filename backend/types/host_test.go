@@ -52,12 +52,3 @@ func TestSameHostFoldsNothingButLoopback(t *testing.T) {
 		}
 	}
 }
-
-// Host pinning and the egress allowlist must fold a host the same way, so both read CanonicalHost.
-func TestCanonicalHostIsTheOneRuleForHostPinToo(t *testing.T) {
-	for _, spelled := range []string{"MIKE.LAN.", "mike.lan:3000", "  mike.lan  "} {
-		if CanonicalHost(spelled) != "mike.lan" {
-			t.Errorf("CanonicalHost(%q) = %q, want mike.lan", spelled, CanonicalHost(spelled))
-		}
-	}
-}

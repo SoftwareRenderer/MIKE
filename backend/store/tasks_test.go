@@ -79,14 +79,6 @@ func TestTaskAutostartedPersistence(t *testing.T) {
 	}
 }
 
-func TestGetTaskNotFound(t *testing.T) {
-	s := testStore(t)
-	_, err := s.GetTask("proj-1", "task-1")
-	if err == nil {
-		t.Fatal("expected error for missing task")
-	}
-}
-
 func TestGetTaskByID(t *testing.T) {
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")

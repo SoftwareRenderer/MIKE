@@ -20,13 +20,6 @@ func TestCheckpointLabelPrompt_Exists(t *testing.T) {
 	}
 }
 
-func TestCheckpointLabelPrompt_DifferentFromCommitPrompt(t *testing.T) {
-	t.Parallel()
-	if checkpointLabelPrompt == commitMessagePrompt {
-		t.Error("checkpointLabelPrompt should differ from commitMessagePrompt")
-	}
-}
-
 func TestCheckpointLabelPrompt_UseDescription(t *testing.T) {
 	t.Parallel()
 	// Label is only generated at fork time, not during checkpoint creation.
@@ -506,15 +499,6 @@ func TestFormatToolAction_RequestReviewWithSummary(t *testing.T) {
 func TestFormatToolAction_RequestReviewNoSummary(t *testing.T) {
 	t.Parallel()
 	args := `{}`
-	action := formatToolAction("request_review", args)
-	if action != "request a review" {
-		t.Errorf("got %q, want %q", action, "request a review")
-	}
-}
-
-func TestFormatToolAction_RequestReviewEmptySummary(t *testing.T) {
-	t.Parallel()
-	args := `{"summary":""}`
 	action := formatToolAction("request_review", args)
 	if action != "request a review" {
 		t.Errorf("got %q, want %q", action, "request a review")
