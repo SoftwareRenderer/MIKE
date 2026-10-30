@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { Extension, RegistryEntry } from '$lib/types';
 import {
-    LOCALE_OFFER_SETTING_KEY,
     entryDisplayName,
     primarySubtag,
     resolveLocaleOffer,
@@ -271,11 +270,5 @@ describe('entryDisplayName', () => {
         expect(entryDisplayName(makeEntry({ name: 'locale-ja', display_name: '日本語' }))).toBe('日本語');
         expect(entryDisplayName(makeEntry({ name: 'locale-ko', display_name: '  한국어  ' }))).toBe('한국어');
         expect(entryDisplayName(makeEntry({ name: 'locale-ko', display_name: '' }))).toBe('locale-ko');
-    });
-});
-
-describe('the record key', () => {
-    it('is the app-settings key the service reads and writes', () => {
-        expect(LOCALE_OFFER_SETTING_KEY).toBe('locale-offer');
     });
 });

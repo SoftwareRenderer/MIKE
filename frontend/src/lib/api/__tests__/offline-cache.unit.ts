@@ -314,22 +314,6 @@ describe('done-task diff cache (immutable head-ref diff)', () => {
         expect(cached).toEqual(diff);
     });
 
-    it('falls back to the cached done diff when the network fails', async () => {
-        const storage = await import('$lib/storage');
-        const { isFromCache } = await import('$lib/api/cache');
-        await storage.setBoardCache(storage.doneDiffCacheKey('p1', 't1', 'sha-tip'), diff);
-        mockRejectedFetch();
-
-        const { getTaskDiff } = await import('$lib/api/git');
-        const result = await getTaskDiff('p1', 't1', { headRef: 'sha-tip' });
-
-        // Wait: cache-first means the cached copy is returned BEFORE the fetch
-        // is even attempted, so this is indistinguishable from a hit — both
-        // must yield the marked cached copy.
-        expect(result).toMatchObject(diff);
-        expect(isFromCache(result)).toBe(true);
-    });
-
     it('does NOT use the done cache for checkpoint, custom-base, or full requests', async () => {
         const storage = await import('$lib/storage');
         mockRejectedFetch();

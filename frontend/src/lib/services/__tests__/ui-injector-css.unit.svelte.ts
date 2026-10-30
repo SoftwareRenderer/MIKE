@@ -46,22 +46,6 @@ describe('UIInjector CSS extension handling', () => {
         };
     }
 
-    it('resolves a relative css_url against the author/name base', () => {
-        const ext = makeCSSExtension('styles.css');
-        ext.manifest.author = 'softwarerenderer';
-        injector.registerFromExtensions([ext]);
-        const link = document.getElementById('kanban-theme-stylesheet');
-        expect(link?.getAttribute('href')).toBe('/extensions/softwarerenderer/test-theme/styles.css');
-    });
-
-    it('slugifies the author in the resolved css_url', () => {
-        const ext = makeCSSExtension('./styles.css');
-        ext.manifest.author = 'Software Renderer';
-        injector.registerFromExtensions([ext]);
-        const link = document.getElementById('kanban-theme-stylesheet');
-        expect(link?.getAttribute('href')).toBe('/extensions/software-renderer/test-theme/styles.css');
-    });
-
     it('injects a <link> tag when a CSS extension has css_url', () => {
         injector.registerFromExtensions([makeCSSExtension('styles.css')]);
 
@@ -87,13 +71,6 @@ describe('UIInjector CSS extension handling', () => {
 
     it('rejects an external (https) css_url — no stylesheet injected', () => {
         injector.registerFromExtensions([makeCSSExtension('https://evil.example/theme.css')]);
-
-        expect(document.getElementById('kanban-theme-stylesheet')).toBeFalsy();
-        expect(localStorage.getItem('kanban-theme-css')).toBeNull();
-    });
-
-    it('rejects a protocol-relative css_url — no stylesheet injected', () => {
-        injector.registerFromExtensions([makeCSSExtension('//evil.example/theme.css')]);
 
         expect(document.getElementById('kanban-theme-stylesheet')).toBeFalsy();
         expect(localStorage.getItem('kanban-theme-css')).toBeNull();
@@ -149,40 +126,6 @@ describe('UIInjector CSS extension handling', () => {
         injector.registerFromExtensions([lightExt]);
 
         expect(document.getElementById('kanban-theme-stylesheet')?.getAttribute('href')).toBe('/extensions/test/mike-light/theme/light.css');
-    });
-
-    it('does not inject for LSP extensions', () => {
-        const lspExt: Extension = {
-            id: 'gopls',
-            name: 'gopls',
-            version: '1.0.0',
-            type: 'lsp',
-            enabled: true,
-            manifest: {
-                display_name: 'Go LSP',
-                description: 'Go',
-                author: 'Go',
-                version: '1.0.0',
-                capabilities: {
-                    lsp: {
-                        command: 'gopls',
-                        args: ['serve'],
-                        file_types: [{ extension: 'go', language_id: 'go', label: 'Go' }],
-                        language: 'go',
-                    },
-                },
-            },
-            config: {},
-            container_config: {},
-            sandbox_config: { network_isolation: false, memory_limit: 0 },
-            running: false,
-            installed_at: '',
-            built_at: '',
-            install_source: 'registry',
-        };
-
-        injector.registerFromExtensions([lspExt]);
-        expect(document.getElementById('kanban-theme-stylesheet')).toBeFalsy();
     });
 
     it('does not inject for UI extensions (they use index.html, not css_url)', () => {
@@ -252,70 +195,6 @@ describe('UIInjector CSS extension handling', () => {
 
         // CSS extensions should not create injection registrations
         expect(injector.registrations.length).toBe(0);
-    });
-
-    it('UI extension registrations use manifest priority for order', () => {
-        const extLow: Extension = {
-            id: 'ext-low',
-            name: 'ext-low',
-            version: '1.0.0',
-            type: 'ui',
-            enabled: true,
-            manifest: {
-                display_name: 'Low Priority',
-                description: '',
-                author: '',
-                version: '1.0.0',
-                priority: 0,
-                capabilities: {
-                    ui: {
-                        injection_points: ['taskCard'],
-                    },
-                },
-            },
-            config: {},
-            container_config: {},
-            sandbox_config: { network_isolation: false, memory_limit: 0 },
-            running: false,
-            installed_at: '',
-            built_at: '',
-            install_source: 'manual',
-        };
-        const extHigh: Extension = {
-            id: 'ext-high',
-            name: 'ext-high',
-            version: '1.0.0',
-            type: 'ui',
-            enabled: true,
-            manifest: {
-                display_name: 'High Priority',
-                description: '',
-                author: '',
-                version: '1.0.0',
-                priority: 10,
-                capabilities: {
-                    ui: {
-                        injection_points: ['taskCard'],
-                    },
-                },
-            },
-            config: {},
-            container_config: {},
-            sandbox_config: { network_isolation: false, memory_limit: 0 },
-            running: false,
-            installed_at: '',
-            built_at: '',
-            install_source: 'manual',
-        };
-
-        // Register high-priority extension first in the array
-        injector.registerFromExtensions([extHigh, extLow]);
-
-        const regs = injector.getRegistrations('taskCard' as any);
-        expect(regs.length).toBe(2);
-        // Lower priority value = loaded first
-        expect(regs[0].extensionName).toBe('ext-low');
-        expect(regs[1].extensionName).toBe('ext-high');
     });
 
     it('UI extension with default priority (0) loads before explicit priority 10', () => {

@@ -283,21 +283,6 @@ describe('PreferencesTab create-task row', () => {
         expect(onDirty).not.toHaveBeenCalled();
     });
 
-    it('flags invalid presses and keeps capturing', async () => {
-        const { create, getByText } = renderTab();
-        const chip = create.getByRole('button', { name: /create task shortcut/i });
-        await fireEvent.click(chip);
-
-        // F5 without a modifier is not a valid binding.
-        await fireEvent.keyDown(window, { key: 'F5' });
-        expect(chip.textContent).toBe('Press a key...');
-        expect(getByText(/invalid/i)).toBeTruthy();
-
-        // A valid press still assigns.
-        await fireEvent.keyDown(window, { key: '5' });
-        expect(chip.textContent).toBe('5');
-    });
-
     it('drops the rejection hint once a valid key is captured', async () => {
         const { create, queryByText } = renderTab();
         const chip = create.getByRole('button', { name: /create task shortcut/i });

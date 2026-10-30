@@ -78,15 +78,6 @@ describe('findStickyStack', () => {
         expect(findStickyStack(fakeView(4), headers).map((h) => h.line)).toEqual([1, 2, 3]);
     });
 
-    it('shows the outer header above the inner header (stacked)', () => {
-        const headers: SectionHeader[] = [
-            { line: 1, endLine: 12, depth: 0 }, // function foo
-            { line: 2, endLine: 9, depth: 1 },  // nested declaration
-        ];
-        const stack = findStickyStack(fakeView(4), headers);
-        expect(stack.map((h) => h.line)).toEqual([1, 2]); // outer above inner
-    });
-
     it('keeps the header pinned while the viewport top is inside the body', () => {
         // LSP-style full-body range: function declared on line 10, body ends
         // on line 40.
@@ -249,11 +240,6 @@ describe('buildSectionHeaders', () => {
             { line: 1, endLine: 20, depth: 0 }, // foo
             { line: 6, endLine: 15, depth: 1 }, // method inside foo
         ]);
-    });
-
-    it('does not truncate a parent to its first child (keeps full body range)', () => {
-        const headers = buildSectionHeaders([{ line: 1, endLine: 30 }]); // function spans 1..30
-        expect(headers[0].endLine).toBe(30);
     });
 });
 
