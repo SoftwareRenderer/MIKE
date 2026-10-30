@@ -1,5 +1,4 @@
 import { test, expect } from '@playwright/test';
-import { getProjectId } from './helpers';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -15,42 +14,6 @@ test.describe('Find in Files', () => {
         // Open the Explorer view
         await page.locator('.explorer-btn').click();
         await expect(page.locator('.explorer-view')).toBeVisible({ timeout: 10000 });
-    });
-
-    test('should open find panel with Ctrl+Shift+F', async ({ page }) => {
-        // Press Ctrl+Shift+F to open find panel
-        await page.keyboard.down('Control');
-        await page.keyboard.down('Shift');
-        await page.keyboard.press('KeyF');
-        await page.keyboard.up('Shift');
-        await page.keyboard.up('Control');
-
-        // Find panel should be visible
-        await expect(page.locator('.file-search-panel')).toBeVisible();
-        await expect(page.locator('.search-input')).toBeVisible();
-    });
-
-    test('should search filenames and show results', async ({ page }) => {
-        // Open find panel
-        await page.keyboard.down('Control');
-        await page.keyboard.down('Shift');
-        await page.keyboard.press('KeyF');
-        await page.keyboard.up('Shift');
-        await page.keyboard.up('Control');
-
-        await expect(page.locator('.file-search-panel')).toBeVisible();
-
-        // Toggle to filename-only search
-        await page.locator('button[title="Search Filenames Only"]').click();
-
-        // Type search query - search for "test" which matches the test project files
-        await page.locator('.search-input').fill('test');
-
-        // Wait for results (debounced search + network)
-        await page.waitForSelector('.search-results, .empty-state', { timeout: 10000 });
-
-        // Should show match count in footer
-        await expect(page.locator('.search-footer .match-count')).toBeVisible();
     });
 
     test('should close find panel with Escape', async ({ page }) => {

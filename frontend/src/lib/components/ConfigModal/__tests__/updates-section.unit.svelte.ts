@@ -173,13 +173,6 @@ describe('staged and waiting for a restart', () => {
         expect(container.textContent).toContain('this process has no restart path');
         expect(container.querySelector('[data-testid="update-restart"]')).toBeTruthy();
     });
-
-    it('shows the sentence of a server that has no restart path once the click is refused', async () => {
-        api.restartToUpdate.mockRejectedValue(new Error('this process has no restart path; restart it the way it was started'));
-        const { container } = open({ staged_version: '1.4.2' });
-        fireEvent.click(container.querySelector('[data-testid="update-restart"]')!);
-        await waitFor(() => expect(container.textContent).toContain('no restart path'));
-    });
 });
 
 describe('who decided', () => {

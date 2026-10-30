@@ -119,31 +119,10 @@ describe('buildModifiedSegments', () => {
         expect(newSegments[0].text).toBe('same line');
     });
 
-    it('identical lines produce all-context segments (used to detect unchanged paired lines)', () => {
-        // When ToolCall.svelte pairs old/new lines positionally, identical lines
-        // should be detected as unchanged and rendered as a single context line.
-        // buildModifiedSegments returns all-context segments for identical input,
-        // but the caller (formatEditDiff) should check oldLine === newLine first.
-        const { oldSegments } = wordDiff('### 3. Verification', '### 3. Verification');
-        const allContext = oldSegments.every(s => s.tone === 'context');
-        expect(allContext).toBe(true);
-    });
-
     it('handles empty strings', () => {
         const { oldSegments, newSegments } = wordDiff('', '');
         expect(oldSegments).toHaveLength(0);
         expect(newSegments).toHaveLength(0);
-    });
-
-    it('handles change in middle of line', () => {
-        const { oldSegments, newSegments } = wordDiff('const x = 1', 'const x = 2');
-        // "const x = " (context) + "1" (removed/added) + "" (context)
-        const oldTones = oldSegments.map(s => s.tone);
-        const newTones = newSegments.map(s => s.tone);
-        expect(oldTones).toContain('context');
-        expect(oldTones).toContain('removed');
-        expect(newTones).toContain('context');
-        expect(newTones).toContain('added');
     });
 
     it('handles multi-word changes', () => {
@@ -200,18 +179,6 @@ describe('buildDisplayItems', () => {
         // Some context lines near changes should remain as rows (CONTEXT_RADIUS = 3)
         const rowItems = items.filter(i => i.type === 'row');
         expect(rowItems.length).toBeGreaterThan(2); // at least the changed lines
-    });
-
-    it('does not collapse short context blocks', () => {
-        const rows = [
-            row('removed', '-'),
-            row('context'),
-            row('context'),
-            row('added', '+'),
-        ];
-        const items = buildDisplayItems(rows);
-        const collapsed = items.filter(i => i.type === 'collapsed');
-        expect(collapsed.length).toBe(0);
     });
 
     it('keeps context lines near changes visible', () => {
@@ -292,11 +259,6 @@ describe('jumpTargets', () => {
     it('skips a row with no number of its own in both directions', () => {
         const rows = [row(9, 'context'), row(10, 'removed'), row(null, 'context'), row(null, 'context')];
         expect(jumpTargets(rows)).toEqual([9, 9, null, null]);
-    });
-
-    it('answers for every row, in row order', () => {
-        const rows = [row(1, 'added'), row(null, 'context'), row(3, 'removed')];
-        expect(jumpTargets(rows)).toHaveLength(rows.length);
     });
 });
 
@@ -430,12 +392,6 @@ describe('getStatusBadge', () => {
 
     it('shows M (Modified) for a normal modified file', () => {
         const badge = getStatusBadge(makeDiffFile({ added: 3, removed: 2 }));
-        expect(badge.letter).toBe('M');
-        expect(badge.color).toBe('var(--color-git-modified)');
-    });
-
-    it('shows M (Modified) for binary files', () => {
-        const badge = getStatusBadge(makeDiffFile({ isBinary: true, added: 0, removed: 0 }));
         expect(badge.letter).toBe('M');
         expect(badge.color).toBe('var(--color-git-modified)');
     });

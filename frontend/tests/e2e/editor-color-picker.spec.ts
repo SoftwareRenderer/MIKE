@@ -1,4 +1,4 @@
-import { test, expect, type Browser, type Locator, type Page } from '@playwright/test';
+import { test, expect, type Browser, type Page } from '@playwright/test';
 import { readFileSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'path';
@@ -8,8 +8,9 @@ import { csrfFetch } from './helpers';
 // the editor's own edit path (dirty tab, draft, Save).
 //
 // Which spellings count as a color is the grammar's answer, measured in
-// `src/lib/utils/__tests__/editor-color.unit.ts`; what only a browser can prove is that the underline lands
-// on the glyph the click has to hit and that the write reaches the file.
+// `src/lib/utils/__tests__/editor-color.unit.ts` and drawn in `editor-color-picker.unit.ts`; what only a
+// browser can prove is that the card lands under the glyph the click hit, that a tap opens it too, and that
+// the write reaches the file.
 //
 // The spec owns its repo and project (/tmp/kanban-test-repo-color) and starts no turn, as in
 // editor-wrap-highlight.spec.ts.
@@ -17,15 +18,6 @@ import { csrfFetch } from './helpers';
 const COLOR_REPO = '/tmp/kanban-test-repo-color';
 const PROJECT_NAME = 'kanban-test-repo-color';
 const FIXTURE_FILE = 'theme.css';
-// The html fixture asks the same question at a grammar boundary: the colors sit in a nested CSS parser
-// inside `<style>`, and the `style="…"` attribute beside them is not one.
-const HTML_FILE = 'page.html';
-const HTML_FIXTURE = [
-  '<!doctype html>',
-  '<style>body { background: #f0f; }</style>',
-  '<p style="color: #0f0">not a color token</p>',
-  '</html>',
-].join('\n');
 const FIXTURE = [
   ':root { --brand: #ABC; }',
   '',
@@ -82,7 +74,6 @@ test.describe.serial('A clicked color in a stylesheet', () => {
     // Each test gets a clean browser context, so an editor draft a test leaves dies with it; the disk is
     // the state that is shared, and it is rewritten here.
     writeFileSync(join(COLOR_REPO, FIXTURE_FILE), FIXTURE);
-    writeFileSync(join(COLOR_REPO, HTML_FILE), HTML_FIXTURE);
     await page.goto('/');
     await page.waitForSelector('.project-item', { timeout: 10000 });
     await page.locator('.project-item', { hasText: PROJECT_NAME }).first().click();
@@ -93,39 +84,12 @@ test.describe.serial('A clicked color in a stylesheet', () => {
     await expect(page.locator('.cm-editor')).toBeVisible({ timeout: 15000 });
   });
 
-  /**
-   * A click on the middle of `needle`'s own glyphs. A `.cm-line` box spans the whole line rather than its
-   * text, so clicking that locator clicks the line's centre — on a fixture whose line carries a color, that
-   * is the color, and the card it opens answers a question nobody asked. The box is read in the same tick as
-   * the click: the point is only valid for the layout it was measured in.
-   */
-  async function clickGlyphs(page: Page, line: Locator, needle: string): Promise<void> {
-    const point = await line.evaluate((root: HTMLElement, text: string) => {
-      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-        const at = (node.textContent ?? '').indexOf(text);
-        if (at < 0) continue;
-        const range = document.createRange();
-        range.setStart(node, at);
-        range.setEnd(node, at + text.length);
-        const box = range.getBoundingClientRect();
-        return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-      }
-      throw new Error(`"${text}" is not on that line`);
-    }, needle);
-    await page.mouse.click(point.x, point.y);
-  }
-
   /** The text under every underlined token in the open file. */
   async function underlined(page: Page): Promise<string[]> {
     return page.locator('.cm-editor').evaluate((root: HTMLElement) =>
       Array.from(root.querySelectorAll('.cm-color-value')).map((el) => el.textContent ?? ''),
     );
   }
-
-  test('underlines the colors, and nothing the grammar calls a selector or a comment', async ({ page }) => {
-    await expect.poll(() => underlined(page), { timeout: 15000 }).toEqual(['#ABC', '#112233aa', '#abc']);
-  });
 
   test('the underline is the color it spells, and the card lands under the value', async ({ page }) => {
     await expect.poll(() => underlined(page), { timeout: 15000 }).toContain('#112233aa');
@@ -198,27 +162,4 @@ test.describe.serial('A clicked color in a stylesheet', () => {
     }
   });
 
-  test('a style block inside an html document is a stylesheet where the colors are', async ({ page }) => {
-    await page.locator('.file-browser-item', { hasText: HTML_FILE }).click();
-    await expect(page.locator('.cm-editor')).toBeVisible({ timeout: 15000 });
-    await expect.poll(() => underlined(page), { timeout: 15000 }).toEqual(['#f0f']);
-
-    await page.locator('.cm-color-value', { hasText: '#f0f' }).first().click();
-    await card(page).locator('.token').fill('#3fb950');
-    await card(page).getByRole('button', { name: 'Apply' }).click();
-    await expect(page.locator('.cm-editor')).toContainText('background: #3fb950');
-  });
-
-  test('a click on text the grammar is not claiming opens nothing', async ({ page }) => {
-    // `#nav` is the selector a `#` reads like, and the comment holds a hex spelled like a color; a click on
-    // either names no color token, so no card opens.
-    const selectorLine = page.locator('.cm-line', { hasText: '#nav' }).first();
-    await expect(selectorLine).toBeVisible();
-    await clickGlyphs(page, selectorLine, 'nav');
-    await expect(card(page)).toHaveCount(0);
-
-    const commentLine = page.locator('.cm-line', { hasText: '#abcdef' }).first();
-    await clickGlyphs(page, commentLine, '#abcdef');
-    await expect(card(page)).toHaveCount(0);
-  });
 });

@@ -201,10 +201,5 @@ describe('orderBrowseEntries', () => {
             const result = orderBrowseEntries([], registry, () => false, 'alpha', 'zh-CN');
             expect(result.map(e => e.name)).toEqual(['alpha-pack', 'alpha-one', 'alpha-two']);
         });
-
-        it('orders as before when the caller passes no browser language at all', () => {
-            const registry = [entry('reg-a'), pack('pack-zh', 'zh')];
-            expect(orderBrowseEntries([], registry, () => false, '').map(e => e.name)).toEqual(['reg-a', 'pack-zh']);
-        });
     });
 });

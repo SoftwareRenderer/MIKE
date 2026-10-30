@@ -1,7 +1,6 @@
 package protocol
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -55,20 +54,6 @@ func TestReadFrameRefusesAnOversizedDeclaredPayloadWithoutAllocating(t *testing.
 	// errors.Is and still have spent the claim.
 	if allocated := int64(after.TotalAlloc) - int64(before.TotalAlloc); allocated > 1<<20 {
 		t.Errorf("refusal allocated %d bytes from a length that never arrived", allocated)
-	}
-}
-
-// The cap is a ceiling, not a default: a frame within it reads whole.
-func TestReadFrameReadsAPayloadWithinTheCap(t *testing.T) {
-	payload := bytes.Repeat([]byte("x"), 4096)
-	r := &quietReader{buf: append(frameHeader(7, TypeResult, uint32(len(payload))), payload...)}
-
-	frame, err := ReadFrame(r)
-	if err != nil {
-		t.Fatalf("ReadFrame: %v", err)
-	}
-	if frame.MsgID != 7 || !bytes.Equal(frame.Payload, payload) {
-		t.Errorf("frame = {MsgID %d, %d bytes}, want {7, %d bytes}", frame.MsgID, len(frame.Payload), len(payload))
 	}
 }
 

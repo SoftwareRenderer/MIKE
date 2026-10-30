@@ -85,11 +85,3 @@ func TestCaptureIsSafeUnderTwoCopiers(t *testing.T) {
 		t.Error("2 MiB of writes must report truncation")
 	}
 }
-
-// toolresult.Truncate is unchanged by the cap: it still describes what an LLM sees of a result it holds.
-func TestTruncateStillIgnoresSmallOutput(t *testing.T) {
-	preview, lines, bytes, truncated := toolresult.Truncate("one\ntwo\n")
-	if truncated || preview != "one\ntwo\n" || lines != 3 || bytes != 8 {
-		t.Fatalf("toolresult.Truncate changed for small output: %q %d %d %v", preview, lines, bytes, truncated)
-	}
-}

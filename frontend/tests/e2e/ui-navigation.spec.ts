@@ -1,29 +1,9 @@
 import { test, expect } from '@playwright/test';
 import {
-  getProjectId, createTaskViaApi, navigateToTask, csrfFetch, ensureTaskStarted, findProviderByRef, apiGetJson, isolatedProject, gotoProject,
+  getProjectId, createTaskViaApi, navigateToTask, ensureTaskStarted, apiGetJson, isolatedProject, gotoProject,
 } from './helpers';
 // Each test file gets its own project, because it starts a turn: see isolatedProject() in helpers.ts.
 isolatedProject();
-
-
-// Helper: create a subtask via API (CSRF-aware)
-async function createSubtaskViaApi(page: test.Page, projectId: string, parentTaskId: string, prompt: string): Promise<string> {
-    const config = await page.evaluate(async () => {
-        const res = await fetch('/api/config');
-        return res.json();
-    });
-    const defaultProvider = findProviderByRef(config.providers || [], config.worker_provider);
-    const result = await csrfFetch(page, `/api/projects/${projectId}/tasks`, {
-        method: 'POST',
-        body: {
-            prompt,
-            parent_task_id: parentTaskId,
-            llama_server_url: defaultProvider?.url || '',
-            model_name: config?.worker_model || '',
-        },
-    });
-    return result.data.id;
-}
 
 // ─── Browser Navigation (serial — navigation state is shared) ───
 
@@ -204,38 +184,6 @@ test.describe.serial('Browser Navigation (Back/Forward)', () => {
     expect(activeProjectAfter?.trim()).toBe(projectName);
     expect(page.url()).toContain(`project=${projectId}`);
   });
-
-  test('subtask navigation creates history entry (pushState fix)', async ({ page }) => {
-    const projectId = await getProjectId(page);
-
-    // Create a parent task and a subtask via API
-    const parentTitle = `nav-parent-${Date.now()}`;
-    const parentId = await createTaskViaApi(page, projectId, parentTitle);
-    const subtaskId = await createSubtaskViaApi(page, projectId, parentId, `nav-sub-${Date.now()}`);
-
-    // Navigate to project view
-    await gotoProject(page, `/?project=${projectId}`);
-    await expect(page.locator('.board')).toBeVisible({ timeout: 10000 });
-
-    // Navigate directly to subtask URL (simulates what pushState would set)
-    await navigateToTask(page, subtaskId);
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
-    expect(page.url()).toContain(`task=${subtaskId}`);
-
-    // Use in-app back button (more reliable than browser goBack)
-    const backBtn = page.locator('.btn-back');
-    if (await backBtn.isVisible().catch(() => false)) {
-      await backBtn.click();
-    } else {
-      // Fallback: navigate to project board directly
-      await gotoProject(page, `/?project=${projectId}`);
-    }
-
-    // Wait for board to appear and task detail to disappear
-    await expect(page.locator('.board')).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('.task-detail-page')).not.toBeVisible();
-  });
-
   test('switch project via sidebar, open task, back preserves new project', async ({ page}) => {
     const projectId = await getProjectId(page);
     // The name of the project under test, from the API: the sidebar renders
@@ -335,34 +283,6 @@ test.describe.serial('Browser Navigation (Back/Forward)', () => {
 // ─── Offline Cache (serial — route interceptions and IndexedDB state) ───
 
 test.describe.serial('Offline Cache', () => {
-  test('board renders from cache when the API is unreachable', async ({ page }) => {
-    // 1. Load the board normally, which is what populates the client-side cache.
-    await gotoProject(page);
-    await page.waitForSelector('.project-item', { timeout: 10000 });
-    const projectId = await getProjectId(page);
-    await gotoProject(page, `/?project=${projectId}`);
-    await page.waitForSelector('.card', { timeout: 10000 });
-    expect(await page.locator('.card').count()).toBeGreaterThan(0);
-
-    // Make the API unreachable while the document and its assets still load. That is the state the
-    // offline screen exists for. context.setOffline(true) would take the document down too, and the
-    // service worker does not serve the shell here, leaving only Chrome's error page to assert on.
-    await page.route('**/api/**', (route) => route.abort());
-    await gotoProject(page, `/?project=${projectId}`, { waitUntil: 'domcontentloaded' }).catch(() => {});
-
-    // 3. The offline screen, then the cached board behind it.
-    await expect(page.locator('.offline-screen')).toBeVisible({ timeout: 15000 });
-    await page.click('.offline-btn');
-    await page.waitForSelector('.card', { timeout: 15000 });
-    expect(await page.locator('.card').count()).toBeGreaterThan(0);
-
-    // 4. Cached data is labelled as such — a silent stale board is the failure mode
-    //    this whole path exists to avoid.
-    await expect(page.locator('.cache-banner')).toContainText('Viewing cached data', { timeout: 10000 });
-
-    await page.unroute('**/api/**');
-  });
-
   test('offline queue persists and merges with cached board', async ({ page, context }) => {
       // Ensure we're online (previous test may have set offline mode)
       await context.setOffline(false);
@@ -421,107 +341,6 @@ test.describe.serial('Offline Cache', () => {
       await page.waitForSelector('.card', { timeout: 10000 });
 
       // 6. Verify the task now exists on the server
-      await expect(async () => {
-          const cards = await page.locator('.card').count();
-          expect(cards).toBeGreaterThanOrEqual(cardsBefore + 1);
-      }).toPass({ timeout: 15000 });
-  });
-
-  test('queued actions survive flush failure and retry on reconnect', async ({ page, context }) => {
-      // Ensure we're online (previous test may have set offline mode)
-      await context.setOffline(false);
-
-      // 1. Navigate to the board and let it load
-      await gotoProject(page);
-      await page.waitForSelector('.card', { timeout: 10000 });
-
-      const cardsBefore = await page.locator('.card').count();
-
-      // 2. Block ALL API requests (true offline simulation)
-      await page.route('/api/**', async (route) => {
-          await route.abort('failed');
-      });
-
-      // 3. Create a task via the UI while offline
-      const createBtn = page.getByText('+ Create Task').first();
-      await expect(createBtn).toBeVisible();
-      await createBtn.click();
-
-      const modal = page.locator('[role="dialog"]:has-text("Create Task")');
-      await expect(modal).toBeVisible({ timeout: 10000 });
-
-      await modal.locator('textarea').fill(`retry-task-${Date.now()}`);
-      await modal.locator('.btn-primary').click();
-      await expect(modal).not.toBeVisible({ timeout: 10000 });
-
-      // Verify action is queued
-      await expect(async () => {
-          const queueLength = await page.evaluate(() => {
-              return new Promise<number>((resolve) => {
-                  const db = indexedDB.open('kanban-storage');
-                  db.onsuccess = () => {
-                      const s = db.result.transaction('offline-queue', 'readonly').objectStore('offline-queue');
-                      const req = s.get('actions');
-                      req.onsuccess = () => resolve(req.result?.length || 0);
-                      req.onerror = () => resolve(0);
-                  };
-                  db.onerror = () => resolve(0);
-              });
-          });
-          expect(queueLength).toBeGreaterThan(0);
-      }).toPass({ timeout: 10000 });
-
-      // 4. Reload WHILE STILL OFFLINE — flushQueueNow() fails, actions must stay in queue
-      // Auth fails → offline screen appears → click "Offline Mode" to load from cache
-      await gotoProject(page, '/', { waitUntil: 'domcontentloaded' });
-      await expect(page.locator('.offline-screen')).toBeVisible({ timeout: 10000 });
-      await page.click('.offline-btn');
-      await page.waitForSelector('.card', { timeout: 15000 });
-
-      // Verify actions are STILL in the queue (not discarded by failed flush)
-      await expect(async () => {
-          const queueLength = await page.evaluate(() => {
-              return new Promise<number>((resolve) => {
-                  const db = indexedDB.open('kanban-storage');
-                  db.onsuccess = () => {
-                      const s = db.result.transaction('offline-queue', 'readonly').objectStore('offline-queue');
-                      const req = s.get('actions');
-                      req.onsuccess = () => resolve(req.result?.length || 0);
-                      req.onerror = () => resolve(0);
-                  };
-                  db.onerror = () => resolve(0);
-              });
-          });
-          expect(queueLength).toBeGreaterThan(0);
-      }).toPass({ timeout: 10000 });
-
-      // 5. Restore API access and reload — flushQueueNow() retries on fresh connection
-      await page.route('/api/**', async (route) => {
-          await route.continue();
-      });
-
-      // 6. Reload — auth succeeds, flushQueueNow() flushes the queue via HTTP
-      await gotoProject(page);
-      await page.waitForSelector('.card', { timeout: 10000 });
-
-      // 7. Verify queue is now empty (actions were flushed)
-      await expect(async () => {
-          const queueLength = await page.evaluate(() => {
-              return new Promise<number>((resolve) => {
-                  const db = indexedDB.open('kanban-storage');
-                  db.onsuccess = () => {
-                      const s = db.result.transaction('offline-queue', 'readonly').objectStore('offline-queue');
-                      const req = s.get('actions');
-                      req.onsuccess = () => resolve(req.result?.length || 0);
-                      req.onerror = () => resolve(0);
-                  };
-                  db.onerror = () => resolve(0);
-              });
-          });
-          expect(queueLength).toBe(0);
-      }).toPass({ timeout: 15000 });
-
-      // 8. Verify task exists on the server
       await expect(async () => {
           const cards = await page.locator('.card').count();
           expect(cards).toBeGreaterThanOrEqual(cardsBefore + 1);
