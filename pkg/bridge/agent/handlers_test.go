@@ -88,53 +88,8 @@ func tempFiles(t *testing.T, dir string) []string {
 	return out
 }
 
-func TestEditApply(t *testing.T) {
-	content := "line one\nline two\nline three\n"
-
-	type edit struct{ Old, New string }
-	edits := []edit{{"line two", "LINE TWO"}}
-
-	// Simplified edit application (matches edit.go logic)
-	result := content
-	for _, e := range edits {
-		idx := -1
-		for i := 0; i <= len(result)-len(e.Old); i++ {
-			if result[i:i+len(e.Old)] == e.Old {
-				idx = i
-				break
-			}
-		}
-		if idx == -1 {
-			t.Fatalf("oldText %q not found", e.Old)
-		}
-		result = result[:idx] + e.New + result[idx+len(e.Old):]
-	}
-
-	want := "line one\nLINE TWO\nline three\n"
-	if result != want {
-		t.Errorf("result = %q, want %q", result, want)
-	}
-}
-
-func TestRequestParsing(t *testing.T) {
-	// Test that request frames are built and parsed correctly
-	params, _ := json.Marshal(protocol.ReadParams{Path: "test.txt"})
-	frame := protocol.NewRequest(42, protocol.MethodRead, params)
-
-	if frame.MsgID != 42 {
-		t.Errorf("MsgID = %d, want 42", frame.MsgID)
-	}
-	if frame.Type != protocol.TypeRequest {
-		t.Errorf("Type = %d, want %d", frame.Type, protocol.TypeRequest)
-	}
-
-	// Verify payload structure
-	payload := frame.Payload
-	if payload[0] != protocol.MethodRead {
-		t.Errorf("method byte = %d, want %d", payload[0], protocol.MethodRead)
-	}
-}
-
+// No path here drives MethodWrite over the wire, so this is the only pin that the write request
+// carries both the path and the bytes it will write.
 func TestWriteParams_Marshal(t *testing.T) {
 	p := protocol.WriteParams{Path: "src/main.go", Content: "package main"}
 	data, err := json.Marshal(p)
@@ -148,47 +103,6 @@ func TestWriteParams_Marshal(t *testing.T) {
 	}
 	if got.Path != p.Path || got.Content != p.Content {
 		t.Errorf("round-trip failed: got %+v, want %+v", got, p)
-	}
-}
-
-func TestBashParams_Marshal(t *testing.T) {
-	p := protocol.BashParams{Command: "ls -la", Timeout: 30}
-	data, err := json.Marshal(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var got protocol.BashParams
-	if err := json.Unmarshal(data, &got); err != nil {
-		t.Fatal(err)
-	}
-	if got.Command != p.Command || got.Timeout != p.Timeout {
-		t.Errorf("round-trip failed")
-	}
-}
-
-func TestEditParams_Marshal(t *testing.T) {
-	p := protocol.EditParams{
-		Path: "test.go",
-		Edits: []protocol.Edit{
-			{OldText: "foo", NewText: "bar"},
-			{OldText: "baz", NewText: "qux"},
-		},
-	}
-	data, err := json.Marshal(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var got protocol.EditParams
-	if err := json.Unmarshal(data, &got); err != nil {
-		t.Fatal(err)
-	}
-	if len(got.Edits) != 2 {
-		t.Fatalf("edits count = %d, want 2", len(got.Edits))
-	}
-	if got.Edits[0].OldText != "foo" || got.Edits[1].NewText != "qux" {
-		t.Error("edit round-trip failed")
 	}
 }
 

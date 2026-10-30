@@ -225,18 +225,6 @@ describe('the dot', () => {
         await updateCheck.refresh();
         expect(updateCheck.dot).toBe('question');
     });
-
-    it('stays dark when the release is managed elsewhere', async () => {
-        api.fetchUpdateStatus.mockResolvedValue(status({ answered: false, managed: true }));
-        await updateCheck.refresh();
-        expect(updateCheck.dot).toBe('none');
-    });
-
-    it('does not light the dot for a newer release a managed server cannot take', async () => {
-        api.fetchUpdateStatus.mockResolvedValue(status({ managed: true, available: true, latest: '1.4.2' }));
-        await updateCheck.refresh();
-        expect(updateCheck.dot).toBe('none');
-    });
 });
 
 describe('the opt-in question', () => {

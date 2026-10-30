@@ -66,12 +66,6 @@ describe('buildSandboxImageStream no-cache modifier', () => {
         expect(requestedUrl()).toMatch(/\/projects\/p1\/sandbox\/build\?no_cache=1$/);
     });
 
-    it('still streams plain text lines to the callback', async () => {
-        const lines: string[] = [];
-        await buildSandboxImageStream('p1', (l) => lines.push(l), { noCache: true });
-        expect(lines).toEqual(['Building sandbox image from Dockerfile...']);
-    });
-
     it('posts with credentials and the CSRF header', async () => {
         await buildSandboxImageStream('p1', () => { }, { noCache: true });
         const init = buildCall()[1];

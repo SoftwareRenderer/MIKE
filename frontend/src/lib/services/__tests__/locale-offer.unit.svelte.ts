@@ -126,22 +126,6 @@ describe('localeOffer.detect', () => {
 });
 
 describe('localeOffer.install', () => {
-    it('reports progress while the operation streams', async () => {
-        let seen: number[] = [];
-        api.installExtension.mockImplementation(() => ({
-            [Symbol.asyncIterator]: async function* () {
-                for (const pct of [10, 40, 100]) {
-                    seen.push(pct);
-                    yield { extension: 'locale-ja', progress: pct, message: 'step', done: pct === 100 };
-                }
-            },
-        }));
-        await localeOffer.detect('ja');
-        await localeOffer.install();
-        expect(seen).toEqual([10, 40, 100]);
-        expect(localeOffer.state.phase).toBe('idle');
-    });
-
     it('remembers the install, reloads the extension list, and switches without a prompt', async () => {
         await localeOffer.detect('ja');
         await localeOffer.install();

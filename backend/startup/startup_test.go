@@ -481,7 +481,6 @@ func TestWeakSecrets(t *testing.T) {
 		wantWeak []string
 	}{
 		{name: "strong", encKey: "strong-enough-key", wantWeak: nil},
-		{name: "encryption key weak", encKey: "1234567", wantWeak: []string{EnvEncryptionKey}},
 		{name: "exactly 8 chars is ok", encKey: "12345678", wantWeak: nil},
 		{name: "exactly 7 chars is weak", encKey: "1234567", wantWeak: []string{EnvEncryptionKey}},
 		{name: "empty secret is ignored", wantWeak: nil},

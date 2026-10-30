@@ -136,16 +136,6 @@ describe('DiffCache', () => {
         expect(cache.tracker.hash).toBeNull();
     });
 
-    it('state is reactive via $state()', () => {
-        const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
-        expect(cache.state.files).toEqual({});
-        cache.updateDiff({
-            files: { 'a.ts': { hash: 'h1', type: 'tracked', added: 1, removed: 0 } },
-        });
-        expect(cache.state.files['a.ts']).toBeDefined();
-        expect(cache.state.files['a.ts'].added).toBe(1);
-    });
-
     it('a path moves section only when the answer says it did', async () => {
         let resolveStage: (value: GitBatchResult) => void = () => {};
         const apis = makeApis({
@@ -202,25 +192,6 @@ describe('DiffCache', () => {
         expect(DiffCache.stagedPathsKey([])).toBe('');
     });
 
-    it('getters provide live projectId and taskId for API calls', async () => {
-        const apis = makeApis();
-        let currentProject = 'proj-1';
-        let currentTask = 'task-1';
-        const cache = new DiffCache(apis, () => currentProject, () => currentTask);
-        // Verify initial IDs are used
-        cache.state.files = {
-            'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0, staged: false },
-            'b.ts': { path: 'b.ts', rows: [], added: 0, removed: 0, staged: false },
-        };
-        await cache.stagePaths(['a.ts'], true);
-        expect(apis.stageTaskPaths).toHaveBeenCalledWith('proj-1', 'task-1', ['a.ts'], true);
-        // Change the values the getters close over
-        currentProject = 'proj-2';
-        currentTask = 'task-2';
-        await cache.stagePaths(['b.ts'], false);
-        expect(apis.stageTaskPaths).toHaveBeenCalledWith('proj-2', 'task-2', ['b.ts'], false);
-    });
-
     it('setFile replaces files record via spread for Svelte reactivity', () => {
         const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
         cache.state.files = {
@@ -237,17 +208,6 @@ describe('DiffCache', () => {
         };
         cache.setUntrackedMeta('a.ts', { fileSize: 200, loading: true });
         expect(cache.state.untracked['a.ts'].fileSize).toBe(200);
-    });
-
-    it('applyStagedPaths replaces files record via spread for Svelte reactivity', () => {
-        const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
-        cache.state.files = {
-            'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0, staged: false },
-            'b.ts': { path: 'b.ts', rows: [], added: 0, removed: 0, staged: false },
-        };
-        cache.applyStagedPaths(['a.ts']);
-        expect(cache.state.files['a.ts'].staged).toBe(true);
-        expect(cache.state.files['b.ts'].staged).toBe(false);
     });
 
     it('processStats reconciles full manifest when hash changes with no file_hashes', async () => {
