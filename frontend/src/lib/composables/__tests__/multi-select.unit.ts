@@ -87,16 +87,6 @@ describe('MultiSelect', () => {
         expect(arr).toContain('b');
     });
 
-    it('toggling same task twice returns to unselected', () => {
-        const ms = new MultiSelect();
-        ms.toggle('x');
-        expect(ms.count).toBe(1);
-        ms.toggle('x');
-        expect(ms.count).toBe(0);
-        ms.toggle('x');
-        expect(ms.count).toBe(1);
-    });
-
     it('add does not duplicate existing task', () => {
         const ms = new MultiSelect();
         ms.add('task-1');

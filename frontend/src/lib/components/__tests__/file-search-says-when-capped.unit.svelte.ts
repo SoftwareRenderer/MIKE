@@ -48,3 +48,28 @@ describe('the result count', () => {
         expect(await searchWith({ root: '/repo', results: rows(2), truncated: true })).toBe('2+ results');
     });
 });
+
+describe('the highlighted line', () => {
+    it('paints the match as a mark and every other byte as text', async () => {
+        const view = render(FileSearchPanel, {
+            props: { projectId: 'p1', onFileSelected: () => {}, onClose: () => {} },
+        });
+        searchFsPaths.mockResolvedValue({
+            root: '/repo',
+            results: [{ path: 'a.go', line: 1, text: 'call <script>alert("x")</script> hit' }],
+        });
+        await fireEvent.input(view.container.querySelector('input.search-input') as HTMLInputElement, { target: { value: 'hit' } });
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(400);
+        });
+        await act(async () => {
+            await Promise.resolve();
+        });
+
+        // The row is {@html}, so an answer that holds markup reaches it as text or not at all.
+        const line = view.container.querySelector('.line-text') as HTMLElement;
+        expect(line.querySelector('script')).toBeNull();
+        expect(line.textContent).toBe('call <script>alert("x")</script> hit');
+        expect(line.querySelector('mark')?.textContent).toBe('hit');
+    });
+});

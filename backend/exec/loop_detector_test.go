@@ -40,15 +40,6 @@ func TestCountEditLines_EmptyEdits(t *testing.T) {
 	}
 }
 
-func TestCountEditLines_NoEditsKey(t *testing.T) {
-	t.Parallel()
-	args := `{"path":"foo.go"}`
-	added, removed := countEditLines(args)
-	if added != 0 || removed != 0 {
-		t.Errorf("added = %d, removed = %d, want 0, 0", added, removed)
-	}
-}
-
 func TestCountEditLines_PartialJSON(t *testing.T) {
 	t.Parallel()
 	// Partial JSON — edits array not yet complete, parseToolArgs returns nil

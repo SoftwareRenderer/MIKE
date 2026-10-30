@@ -60,21 +60,7 @@ describe('UIInjector anchor leak (channels map retention)', () => {
         return (i as any).channels;
     }
 
-    it('drops the anchor from the channels map once its last channel is torn down', () => {
-        injector.registerFromExtensions([makeUIExtension('md', 'md', 'fileEditor')]);
-        const anchor = anchorDiv();
-
-        injector.renderSlot('fileEditor' as any, { component: 'FileEditor', filePath: 'a.md' }, anchor);
-        // While mounted, the anchor is tracked in the map.
-        expect(channelsMap(injector).has(anchor)).toBe(true);
-
-        injector.teardownSlot('fileEditor' as any, anchor);
-        // After teardown the anchor has no channels → its entry is removed, so
-        // the (dead) DOM element is no longer pinned in the map.
-        expect(channelsMap(injector).has(anchor)).toBe(false);
-    });
-
-    it('keeps an anchor that still has other channels, and prunes empty ones on bulk teardown', () => {
+    it('drops an anchor once its last channel is torn down, and keeps one that still has others', () => {
         injector.registerFromExtensions([makeUIExtension('md', 'md', 'fileEditor')]);
         const anchor1 = anchorDiv();
         const anchor2 = anchorDiv();

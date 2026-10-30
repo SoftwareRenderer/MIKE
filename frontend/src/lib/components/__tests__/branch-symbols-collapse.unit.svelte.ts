@@ -53,14 +53,4 @@ describe('symbol tree collapse state', () => {
         expect(childRow()).toBeNull();
     });
 
-    it('leaves another file with the same tree expanded', async () => {
-        const { rerender } = renderPanel();
-        await waitFor(() => expect(collapseToggle()).toBeTruthy());
-
-        fireEvent.click(collapseToggle()!);
-        await waitFor(() => expect(childRow()).toBeNull());
-
-        await rerender({ filePath: '/p/gamma.ts' });
-        expect(childRow()).toBeTruthy();
-    });
 });

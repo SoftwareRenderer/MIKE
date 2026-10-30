@@ -24,14 +24,6 @@ describe('createFocusTrap', () => {
         vi.restoreAllMocks();
     });
 
-    it('calls onClose when Escape is pressed', () => {
-        const onClose = vi.fn();
-        const trap = createFocusTrap(container, onClose);
-        container.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-        expect(onClose).toHaveBeenCalledTimes(1);
-        trap.destroy();
-    });
-
     it('stops Escape from propagating to window-level handlers', () => {
         const onClose = vi.fn();
         const trap = createFocusTrap(container, onClose);

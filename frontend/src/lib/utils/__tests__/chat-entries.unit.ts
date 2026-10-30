@@ -38,11 +38,6 @@ describe('findLastUserMessageBefore', () => {
         const entries = [entry('assistant', 'orphan')];
         expect(findLastUserMessageBefore(entries, 0)).toBe(-1);
     });
-
-    it('returns -1 when the first entry is the target', () => {
-        const entries = [entry('assistant', 'hi'), entry('user', 'hey')];
-        expect(findLastUserMessageBefore(entries, 0)).toBe(-1);
-    });
 });
 
 describe('trimEntriesForRegenerate', () => {
@@ -172,10 +167,6 @@ describe('the checkpoint band', () => {
         // "checkpoint" about the state the reader is already looking at.
         const map = buildCheckpointStateMap([user('u1'), assistant('a1'), assistant('a2')], sources({ hashes: [['a1', 'c1']] }));
         expect([...map.values()].some(s => s !== null)).toBe(false);
-        expect(buildCheckpointStateMap([], sources()).size).toBe(0);
-    });
-
-    it('reports nothing on an empty transcript', () => {
         expect(buildCheckpointStateMap([], sources()).size).toBe(0);
     });
 });

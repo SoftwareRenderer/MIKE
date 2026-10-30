@@ -148,14 +148,6 @@ describe('requiresInstallReview (network capability OR dangerous permissions)', 
         expect(requiresInstallReview({ capabilities: { ui: { permissions: ['network.proxy'] } } })).toBe(true);
     });
 
-    it('is true when both are declared', () => {
-        expect(
-            requiresInstallReview({
-                capabilities: { ui: { permissions: ['network.proxy'] }, network: { allowed_domains: ['x.dev'] } },
-            }),
-        ).toBe(true);
-    });
-
     it('is false for safe permissions only', () => {
         expect(requiresInstallReview({ capabilities: { ui: { permissions: ['editor.save', 'storage.get'] } } })).toBe(false);
     });

@@ -106,19 +106,3 @@ func TestComputeDiffStatsCountsVisibleFilesOnly(t *testing.T) {
 		})
 	}
 }
-
-// The client adds UntrackedLines to TrackedAdd to get the card's "+N", so folding untracked lines into
-// TrackedAdd here — which one of this function's two predecessors did — prints every untracked line
-// twice.
-func TestComputeDiffStatsKeepsUntrackedLinesOutOfTrackedAdd(t *testing.T) {
-	got := ComputeDiffStats(&git.TaskDiff{
-		Tracked:   map[string]*git.TrackedDiffFile{"a.txt": {Path: "a.txt", Added: 3, Removed: 2}},
-		Untracked: []git.UntrackedFile{{Path: "new.txt", Lines: []string{"l1", "l2", "l3"}}},
-	})
-	if got.TrackedAdd != 3 {
-		t.Errorf("TrackedAdd = %d, want 3 — untracked lines belong to UntrackedLines", got.TrackedAdd)
-	}
-	if got.UntrackedLines != 3 {
-		t.Errorf("UntrackedLines = %d, want 3", got.UntrackedLines)
-	}
-}

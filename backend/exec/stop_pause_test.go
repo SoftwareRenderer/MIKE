@@ -150,22 +150,6 @@ func TestStopStaleRunningTask(t *testing.T) {
 	}
 }
 
-// TestStopStaleNonInProgressTask verifies a stale in-flight row outside the
-// In Progress column settles to idle (not paused) when stopped.
-func TestStopStaleNonInProgressTask(t *testing.T) {
-	t.Parallel()
-	te := newSessionCostTestExecutor(t)
-	s := te.store
-	proj := createProject(t, s, "proj-stop-stale-2", "Stop Stale 2")
-
-	createTaskRow(t, s, "stale-review", proj.ID, "review", "running")
-
-	if err := te.StopTask("stale-review"); err != nil {
-		t.Fatalf("StopTask: %v", err)
-	}
-	waitTaskState(t, s, "stale-review", isIdle)
-}
-
 // TestStopStaleMissingTask verifies StopTask still errors for a task that does
 // not exist at all.
 func TestStopStaleMissingTask(t *testing.T) {

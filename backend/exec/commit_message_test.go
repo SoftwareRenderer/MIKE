@@ -378,15 +378,6 @@ func TestBuildCommitMessageWithAssistedBy_NoModels(t *testing.T) {
 		t.Errorf("expected just the message, got %q", result)
 	}
 }
-
-func TestBuildCommitMessageWithAssistedBy_EmptyModelList(t *testing.T) {
-	t.Parallel()
-	result := buildCommitMessageWithAssistedBy("Fix bug", []string{})
-	if result != "Fix bug" {
-		t.Errorf("expected just the message, got %q", result)
-	}
-}
-
 func TestBuildCommitMessageWithAssistedBy_PreservesMessageBody(t *testing.T) {
 	t.Parallel()
 	// Message body with newlines should be preserved

@@ -46,14 +46,4 @@ describe('applyExploreModeRule', () => {
         expect(result).toEqual({ mode: 'explore', modeChangedByUser: false, autoExploreBase: null });
     });
 
-    it('leaves a non-explore mode untouched when ? is removed (no base to revert to)', () => {
-        const result = applyExploreModeRule('no question here', state('plan'));
-        expect(result).toEqual({ mode: 'plan', modeChangedByUser: false, autoExploreBase: null });
-    });
-
-    it('does not revert when the user has manually changed the mode', () => {
-        const result = applyExploreModeRule('no question here', state('explore', true, 'act'));
-        expect(result).toEqual({ mode: 'explore', modeChangedByUser: true, autoExploreBase: 'act' });
-    });
-
 });

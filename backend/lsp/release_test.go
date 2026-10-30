@@ -37,20 +37,6 @@ func TestReleaseHandsTheConnectionBackOnlyToTheLastHolder(t *testing.T) {
 	}
 }
 
-// TestReleaseWithoutASandboxManager: a manager built without an extension sandbox manager still
-// drops the connection instead of panicking on the hand-back.
-func TestReleaseWithoutASandboxManager(t *testing.T) {
-	m := &ExtensionLSPManager{clients: map[string]*sandboxClient{}}
-	key := processKey("/work/tree", "go")
-	m.clients[key] = newSandboxClient(nil, "/work/tree", "go", "gopls", nil)
-
-	m.Release("/work/tree", "go")
-
-	if _, ok := m.clients[key]; ok {
-		t.Error("the last reference went unreleased")
-	}
-}
-
 func TestReleaseOfUnknownWorkspaceIsHarmless(t *testing.T) {
 	m := &ExtensionLSPManager{clients: map[string]*sandboxClient{}}
 

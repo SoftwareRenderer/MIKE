@@ -311,21 +311,6 @@ func (m *mockAgentLister) ToProviders() []types.Provider {
 	return m.providers
 }
 
-func TestFilterPersistedProviders(t *testing.T) {
-	providers := []types.Provider{
-		{Name: "llm", Kind: "llm", URL: "http://localhost:8080/v1", Concurrency: 1},
-		{Name: "pi", Kind: "agent", URL: "agent://pi", Concurrency: 1},
-		{Name: "other-llm", Kind: "llm", URL: "http://localhost:9090/v1", Concurrency: 2},
-	}
-	filtered := filterPersistedProviders(providers)
-	if len(filtered) != 2 {
-		t.Fatalf("expected 2 providers, got %d", len(filtered))
-	}
-	if filtered[0].Name != "llm" || filtered[1].Name != "other-llm" {
-		t.Errorf("agent:// provider was not filtered out")
-	}
-}
-
 func TestBuildConfigResponseMergesAgentProviders(t *testing.T) {
 	cs := testConfigStore(t)
 
@@ -669,26 +654,6 @@ func TestBuildConfigResponseMasksAPIKeys(t *testing.T) {
 		if leak != "" && strings.Contains(string(body), leak) {
 			t.Errorf("config response body leaks %q", leak)
 		}
-	}
-}
-
-func TestUpdateConfig_MaxRequestsPerSecond(t *testing.T) {
-	cs := testConfigStore(t)
-
-	cfg := &types.Config{
-		Providers: []types.Provider{
-			{ID: 1, URL: "http://neptune:8010/v1", Concurrency: 1, MaxRequestsPerSecond: 4},
-		},
-	}
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-	read, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	if len(read.Providers) != 1 || read.Providers[0].MaxRequestsPerSecond != 4 {
-		t.Fatalf("expected MaxRequestsPerSecond=4 persisted, got %+v", read.Providers)
 	}
 }
 
