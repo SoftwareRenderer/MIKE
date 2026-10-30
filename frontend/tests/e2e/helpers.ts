@@ -1,6 +1,6 @@
 import { expect, test, Page, Locator, Browser, TestInfo } from '@playwright/test';
 import { execSync } from 'child_process';
-import { existsSync, writeFileSync, mkdirSync, readFileSync, cpSync, readdirSync } from 'fs';
+import { existsSync, writeFileSync, mkdirSync, readFileSync, cpSync } from 'fs';
 import { dirname, join } from 'path';
 import https from 'node:https';
 import { laneRequestOptions } from '../lane-tls';
@@ -448,7 +448,7 @@ export function cardInColumn(page: Page, taskId: string, columnTitle: string): L
 }
 /**
  * The directory a project points at — what its file browser, Review-Changes panel and
- * project-level git commands read. Not a task worktree: use findWorktreeDir for task flows.
+ * project-level git commands read. Not a task worktree: that is `getWorktreePath`.
  */
 export async function projectDirPath(page: Page, projectId: string): Promise<string | null> {
   const projects = await apiGetJson<any[]>(page, '/api/projects');
@@ -733,23 +733,6 @@ export async function createTaskViaApi(page: Page, projectId: string, prompt: st
   }).toPass({ timeout: 5000 });
   return taskId;
 }
-/**
- * First worktree directory of `projectId`, polling until it exists (a worktree appears only
- * once a task starts). Keyed by project: the worktrees dir holds every worker's projects.
- */
-export async function findWorktreeDir(projectId: string, timeoutMs = 10000): Promise<string | null> {
-  const projDir = `/tmp/kanban-test-worktrees/${projectId}`;
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    try {
-      const first = readdirSync(projDir).find((t) => existsSync(join(projDir, t, '.git')));
-      if (first) return join(projDir, first);
-    } catch { /* the project has no worktrees directory yet */ }
-    if (Date.now() > deadline) return null;
-    await new Promise((r) => setTimeout(r, 200));
-  }
-}
-
 export function getWorktreePath(projectId: string, taskId: string): string {
   return `/tmp/kanban-test-worktrees/${projectId}/${taskId}`;
 }
