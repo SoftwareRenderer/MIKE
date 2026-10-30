@@ -80,15 +80,6 @@ describe('SandboxConfigModal memory limit', () => {
         expect(changes).toEqual({ sandbox_memory_limit: 0 });
     });
 
-    it('sends an explicit 0 when clearing, never null/undefined', async () => {
-        const { container } = renderModal(projectWith({ sandbox_memory_limit: 2048 }));
-        const changes = await saveWith(container, '');
-
-        expect(changes.sandbox_memory_limit).toBe(0);
-        expect(changes.sandbox_memory_limit).not.toBeNull();
-        expect(changes.sandbox_memory_limit).not.toBeUndefined();
-    });
-
     it('renders an unlimited project as a blank field with a "No limit" placeholder', () => {
         const { container } = renderModal(projectWith({ sandbox_memory_limit: 0 }));
         const input = memoryInput(container);
