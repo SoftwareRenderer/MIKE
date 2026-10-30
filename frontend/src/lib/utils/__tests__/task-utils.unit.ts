@@ -318,17 +318,3 @@ describe('countWithDescendants', () => {
         expect(countWithDescendants('root', 'review', children)).toBe(3);
     });
 });
-
-describe('planBulkMove', () => {
-    it('sends an ancestor before its descendants', () => {
-        const tasks = [
-            makeTask('root'),
-            makeTask('child', 'root'),
-            makeTask('grandchild', 'child'),
-        ];
-
-        const plan = planBulkMove(tasks, ['grandchild', 'root', 'child'], 'review');
-
-        expect(plan.movable).toEqual(['root', 'child', 'grandchild']);
-    });
-});

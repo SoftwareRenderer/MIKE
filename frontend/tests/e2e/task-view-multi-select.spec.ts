@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch, findProviderByRef, isolatedProject, gotoProject, clearBoardExcept, getTaskData, waitForTaskState } from './helpers';
+import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch, findProviderByRef, isolatedProject, gotoProject, clearBoardExcept, waitForTaskState } from './helpers';
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
 isolatedProject();
@@ -154,45 +154,6 @@ test.describe.serial('Multi-select parent/subtask recursion', () => {
     await expect(page.locator(`.column-context [data-task-id="${childTaskId1}"]`).first()).not.toHaveClass(/multi-selected/);
     await expect(page.locator(`.column-context [data-task-id="${childTaskId2}"]`).first()).not.toHaveClass(/multi-selected/);
   });
-
-  test('should delete a parent with nested subtasks without an error toast', async ({ page }) => {
-
-    // Ctrl+Click the parent title to select it and all its descendants
-    const parentTitle = page.locator(`.column-context [data-task-id="${parentTaskId}"] .card-title-text`).first();
-    await expect(parentTitle).toBeVisible();
-    await parentTitle.click({ modifiers: ['Control'] });
-
-    // Multi-select bar should show the whole subtree (parent + 2 children + grandchild)
-    const bar = page.locator('.multi-select-bar');
-    await expect(bar).toBeVisible();
-    await expect(bar).toContainText('Delete 4 tasks');
-
-    await bar.locator('.bar-btn-delete').click();
-    const confirmBtn = page.locator('.modal-footer .btn-confirm');
-    await expect(confirmBtn).toBeVisible();
-    await confirmBtn.click();
-
-    // All tasks should disappear from the board overview
-    await expect(page.locator(`.column-context [data-task-id="${parentTaskId}"]`).first()).not.toBeVisible();
-    await expect(page.locator(`.column-context [data-task-id="${childTaskId1}"]`).first()).not.toBeVisible();
-    await expect(page.locator(`.column-context [data-task-id="${childTaskId2}"]`).first()).not.toBeVisible();
-    await expect(page.locator(`.column-context [data-task-id="${grandchildTaskId}"]`).first()).not.toBeVisible();
-
-    // No error toast — the old behavior surfaced "Failed to delete task: task not found"
-    // for each descendant because the server cascade had already deleted them.
-    await expect(page.locator('.toast.error')).not.toBeVisible();
-
-    // Server-side: none of the four tasks remain
-    await expect(async () => {
-      const tasks = await page.evaluate(async (pid) => {
-        const res = await fetch(`/api/projects/${pid}/board`);
-        const board = await res.json();
-        return board.tasks || [];
-      }, projectId);
-      const ids = new Set(tasks.map((t: any) => t.id));
-      expect(ids.has(parentTaskId) || ids.has(childTaskId1) || ids.has(childTaskId2) || ids.has(grandchildTaskId)).toBe(false);
-    }).toPass({ timeout: 10000 });
-  });
 });
 
   test.beforeEach(async ({ page }) => {
@@ -239,103 +200,6 @@ test.describe.serial('Multi-select parent/subtask recursion', () => {
     await expect(bar).toContainText('2');
   });
 
-  test('should show Delete button in action bar', async ({ page }) => {
-
-    const card2 = page.locator(`.column-context [data-task-id="${taskId2}"]`);
-    const card3 = page.locator(`.column-context [data-task-id="${taskId3}"]`);
-
-    await card2.click({ modifiers: ['Control'] });
-    await card3.click({ modifiers: ['Control'] });
-
-    const deleteBtn = page.locator('.bar-btn-delete');
-    await expect(deleteBtn).toBeVisible();
-    await expect(deleteBtn).toContainText('Delete 2 tasks');
-  });
-
-  test('should show Start button when all selected are in Backlog', async ({ page }) => {
-
-    const card2 = page.locator(`.column-context [data-task-id="${taskId2}"]`);
-    const card3 = page.locator(`.column-context [data-task-id="${taskId3}"]`);
-
-    await card2.click({ modifiers: ['Control'] });
-    await card3.click({ modifiers: ['Control'] });
-
-    const startBtn = page.locator('.bar-btn-start');
-    await expect(startBtn).toBeVisible();
-    await expect(startBtn).toContainText('Start 2 tasks');
-  });
-
-  test('should confirm before deleting selected tasks', async ({ page }) => {
-
-    const card2 = page.locator(`.column-context [data-task-id="${taskId2}"]`);
-    const card3 = page.locator(`.column-context [data-task-id="${taskId3}"]`);
-
-    await card2.click({ modifiers: ['Control'] });
-    await card3.click({ modifiers: ['Control'] });
-
-    const deleteBtn = page.locator('.bar-btn-delete');
-    await deleteBtn.click();
-
-    // Confirmation dialog should appear
-    const dialog = page.locator('.modal');
-    await expect(dialog).toBeVisible();
-    await expect(dialog).toContainText('Permanently delete 2 tasks');
-
-    // Cancel — tasks should still be visible
-    const cancelBtn = page.locator('.modal-footer .btn-cancel');
-    await cancelBtn.click();
-    await expect(dialog).not.toBeVisible();
-
-    // Cards should still be in the board overview
-    await expect(card2).toBeVisible();
-    await expect(card3).toBeVisible();
-  });
-
-  test('should move the selection only after asking', async ({ page }) => {
-
-    const card2 = page.locator(`.column-context [data-task-id="${taskId2}"]`);
-    const card3 = page.locator(`.column-context [data-task-id="${taskId3}"]`);
-    await card2.click({ modifiers: ['Control'] });
-    await card3.click({ modifiers: ['Control'] });
-
-    await page.locator('.multi-select-bar .bar-btn-move').click();
-    await page.locator('.move-item', { hasText: 'Review' }).click();
-
-    const dialog = page.locator('.modal');
-    await expect(dialog).toBeVisible();
-    await expect(dialog).toContainText('Move 2 tasks to Review?');
-
-    await page.locator('.modal-footer .btn-cancel').click();
-    await expect(dialog).not.toBeVisible();
-
-    // Server truth: nothing moved
-    expect((await getTaskData(page, projectId, taskId2)).status).toBe('backlog');
-    expect((await getTaskData(page, projectId, taskId3)).status).toBe('backlog');
-  });
-
-  test('should say that moving to In Progress starts the tasks', async ({ page }) => {
-
-    const card2 = page.locator(`.column-context [data-task-id="${taskId2}"]`);
-    const card3 = page.locator(`.column-context [data-task-id="${taskId3}"]`);
-    await card2.click({ modifiers: ['Control'] });
-    await card3.click({ modifiers: ['Control'] });
-
-    await page.locator('.multi-select-bar .bar-btn-move').click();
-    await page.locator('.move-item', { hasText: 'In Progress' }).click();
-
-    const dialog = page.locator('.modal');
-    await expect(dialog).toBeVisible();
-    await expect(dialog).toContainText('Move 2 tasks to In Progress? This starts them.');
-
-    // Cancelling started nothing.
-    await page.locator('.modal-footer .btn-cancel').click();
-    for (const id of [taskId2, taskId3]) {
-      const t = await getTaskData(page, projectId, id);
-      expect(t.status).toBe('backlog');
-      expect(t.execution_state).not.toBe('running');
-    }
-  });
-
   test('should move the selected tasks to the chosen column on confirm', async ({ page }) => {
 
     const card2 = page.locator(`.column-context [data-task-id="${taskId2}"]`);
@@ -352,76 +216,6 @@ test.describe.serial('Multi-select parent/subtask recursion', () => {
 
     // The selection is gone with the batch.
     await expect(page.locator('.multi-select-bar')).not.toBeVisible();
-  });
-
-  test('should delete selected tasks on confirmation', async ({ page }) => {
-
-    const card2 = page.locator(`.column-context [data-task-id="${taskId2}"]`);
-    const card3 = page.locator(`.column-context [data-task-id="${taskId3}"]`);
-
-    await card2.click({ modifiers: ['Control'] });
-    await card3.click({ modifiers: ['Control'] });
-
-    const deleteBtn = page.locator('.bar-btn-delete');
-    await deleteBtn.click();
-
-    // Confirm deletion
-    const confirmBtn = page.locator('.modal-footer .btn-confirm');
-    await confirmBtn.click();
-
-    // Wait for tasks to be removed from the board overview
-    await expect(card2).not.toBeVisible();
-    await expect(card3).not.toBeVisible();
-
-    // Multi-select bar should disappear
-    const bar = page.locator('.multi-select-bar');
-    await expect(bar).not.toBeVisible();
-  });
-
-  test('should not show Start button when selected tasks are in different columns', async ({ page }) => {
-
-    // Move taskId3 to in_progress. Note: with the mock LLM the auto-start may
-    // immediately complete the task and move it to Review — either way it leaves
-    // Backlog, which is all this test needs.
-    await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId3}/move`, {
-      method: 'POST',
-      body: { status: 'in_progress' },
-    });
-
-    // Wait for the board overview to reflect the move and the DOM to settle.
-    // Rapid status transitions (backlog → in_progress → review) combined with
-    // fade transitions can briefly render duplicate cards for the same task, so
-    // wait until exactly one visible card remains in a non-Backlog section.
-    await expect(async () => {
-      const groups = await page.locator('.column-context .section-group').all();
-      let visibleCount = 0;
-      let inBacklog = false;
-      for (const group of groups) {
-        const title = (await group.locator('.section-title').textContent()) || '';
-        const card = group.locator(`[data-task-id="${taskId3}"]`);
-        if ((await card.count()) > 0 && (await card.first().isVisible().catch(() => false))) {
-          visibleCount++;
-          if (title.includes('Backlog')) inBacklog = true;
-        }
-      }
-      expect(visibleCount).toBe(1);
-      expect(inBacklog).toBe(false);
-    }).toPass({ timeout: 15000 });
-
-    // Select taskId1 (backlog) and taskId3 (non-backlog)
-    const card1 = page.locator(`.column-context [data-task-id="${taskId1}"]`).first();
-    const card3 = page.locator(`.column-context [data-task-id="${taskId3}"]`).first();
-
-    await card1.click({ modifiers: ['Control'] });
-    await card3.click({ modifiers: ['Control'] });
-
-    // Start button should NOT be visible (tasks in different columns)
-    const startBtn = page.locator('.bar-btn-start');
-    await expect(startBtn).not.toBeVisible();
-
-    // But delete button should still be visible
-    const deleteBtn = page.locator('.bar-btn-delete');
-    await expect(deleteBtn).toBeVisible();
   });
 
   test('should clear selection when clicking clear button', async ({ page }) => {

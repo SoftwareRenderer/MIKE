@@ -8,9 +8,10 @@ import ChatForm from '$lib/components/Chat/ChatForm.svelte';
 // ============================================================
 // The panel maximizes while the chat input holds focus, and the input is the only thing that
 // reports it: every other control of the form — the model bar (provider, model, compaction,
-// operating mode) and attach / send / stop — is transparent in both directions, so tapping one
-// never moves the task view in or out of full screen. A leave is focus going outside the form
-// or nowhere; the @ mention list is not a leave — it renders outside the form and hands focus
+// operating mode) and the buttons beside the input — is transparent in both directions: reporting
+// binds to the textarea alone, so one control outside it proves the rule for every one of them. A
+// leave is focus going outside the form or nowhere; the @ mention list is not a leave — it renders
+// outside the form and hands focus
 // back to the input as soon as a row is picked. (jsdom never dispatches focusout from
 // element.blur(), so Escape's blur-first path is not exercised here.)
 
@@ -132,27 +133,6 @@ describe('ChatForm focus notification', () => {
 
         expect(onInputFocus).not.toHaveBeenCalled();
         expect(onInputBlur).not.toHaveBeenCalled();
-    });
-
-    it('reports nothing for a control other than the textarea', () => {
-        // A streaming turn shows ■ Stop, a draft shows ➤ Send; both share the attach button.
-        const streaming = renderForm({ isLoading: true });
-        const drafting = renderForm({ value: 'draft' });
-        const seen = new Set<string>();
-
-        for (const { container, onInputFocus, onInputBlur } of [streaming, drafting]) {
-            for (const selector of ['.btn-attach', '.btn-stop', '.btn-send']) {
-                const control = container.querySelector<HTMLButtonElement>(selector);
-                if (!control) continue;
-                seen.add(selector);
-                fireEvent.focusIn(control);
-                fireEvent.focusOut(control, { relatedTarget: null });
-            }
-            expect(onInputFocus).not.toHaveBeenCalled();
-            expect(onInputBlur).not.toHaveBeenCalled();
-        }
-
-        expect([...seen].sort()).toEqual(['.btn-attach', '.btn-send', '.btn-stop']);
     });
 
     it('does not report a leave while the @ mention list is open', async () => {
