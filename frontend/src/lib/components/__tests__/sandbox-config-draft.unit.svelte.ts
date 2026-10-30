@@ -20,8 +20,8 @@ import type { Project } from '$lib/types';
 /**
  * The draft the Sandbox Configuration edits. Every section writes this one holder, so the rules that
  * decide what a Save will carry live here rather than in any section: the auto-answer isolation gets
- * when sandboxing is switched on, the refusal of a row that cannot be added, and the `KEY=VALUE`
- * shape an environment declaration must keep.
+ * when sandboxing is switched on, and the refusal of a row that cannot be added. What a refused or an
+ * accepted row then looks like on the wire is `sandbox-config-payload.unit.svelte.ts`.
  */
 
 function storedRow(overrides: Partial<Project> = {}): Project {
@@ -116,27 +116,6 @@ describe('the sandbox draft', () => {
     });
 
     describe('environment variables', () => {
-        it('adds a declaration as a key with a value, even when the value is empty', () => {
-            const draft = draftOf(storedRow({ sandbox_envs: [] }));
-            draft.newEnvKey = 'EMPTY';
-            draft.addEnv();
-
-            expect(draft.envs).toEqual([{ key: 'EMPTY', value: '' }]);
-        });
-
-        it('refuses a nameless and a duplicated declaration with the catalog sentences', () => {
-            const draft = draftOf(storedRow({ sandbox_envs: [{ key: 'TAKEN', value: '1' }] }));
-
-            draft.newEnvKey = ' ';
-            draft.addEnv();
-            expect(draft.envError).toBe('Environment variable name is required');
-            expect(draft.envs).toHaveLength(1);
-
-            draft.newEnvKey = 'TAKEN';
-            draft.addEnv();
-            expect(draft.envError).toBe('Duplicate variable name: TAKEN');
-            expect(draft.envs).toHaveLength(1);
-        });
 
         it('replaces the declaration being edited and nothing else', () => {
             const draft = draftOf(storedRow({ sandbox_envs: [{ key: 'A', value: '1' }, { key: 'B', value: '2' }] }));
@@ -179,15 +158,6 @@ describe('the sandbox draft', () => {
     });
 
     describe('forwarded ports', () => {
-        it('leaves the interface out when every interface is meant', () => {
-            const draft = draftOf(storedRow({ forward_ports: [] }));
-            draft.newContainerPort = '3000';
-            draft.newHostIP = '0.0.0.0';
-            draft.addPortForward();
-
-            expect(draft.forwardPorts).toEqual([{ container_port: 3000 }]);
-        });
-
         it('refuses a port out of range or an interface that is not an address', () => {
             const draft = draftOf(storedRow({ forward_ports: [] }));
 
@@ -210,14 +180,6 @@ describe('the sandbox draft', () => {
             draft.newHostIP = '192.168.1.100';
             draft.addPortForward();
             expect(draft.forwardPorts).toEqual([{ container_port: 80, host_ip: '192.168.1.100' }]);
-        });
-
-        it('names a typed-but-un-added row so a Save can refuse it', () => {
-            const draft = draftOf(storedRow());
-            expect(draft.hasPendingRow).toBe(false);
-
-            draft.newEnvKey = 'NOT_ADDED';
-            expect(draft.hasPendingRow).toBe(true);
         });
 
         it('merges the project terminal with what running tasks publish', async () => {

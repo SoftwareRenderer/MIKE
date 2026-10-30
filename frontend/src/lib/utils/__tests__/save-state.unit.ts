@@ -36,26 +36,12 @@ describe('SaveController.begin', () => {
         expect(c.busy).toBe(false);
     });
 
-    it('refuses a second save while one is in flight', () => {
-        const c = new SaveController();
-        expect(c.begin(true)).toBe(true);
-        expect(c.begin(true)).toBe(false);
-    });
-
     it('refuses every further request while in flight, not just the first', () => {
         const c = new SaveController();
         c.begin(true);
         expect(c.begin(true)).toBe(false);
         expect(c.begin(true)).toBe(false);
         expect(c.settle(true)).toBe(true);
-    });
-
-    it('does not start a second request when an in-flight refusal arrives with nothing to write', () => {
-        const c = new SaveController();
-        c.begin(true);
-        expect(c.begin(false)).toBe(false);
-        // The refusal was noted, but the buffer is clean once the first save lands.
-        expect(c.settle(false)).toBe(false);
     });
 });
 

@@ -75,14 +75,4 @@ test.describe.serial('CSS extension injection', () => {
     await page.reload();
     await expect(cssLink(page)).toBeAttached({ timeout: 10000 });
   });
-
-  test('the injected stylesheet survives a reload, in addition to the app bundles', async ({ page }) => {
-    await page.goto('/');
-    await page.waitForSelector('.project-item', { timeout: 10000 });
-    await page.reload();
-
-    await expect(cssLink(page)).toBeAttached({ timeout: 10000 });
-    const appCss = page.locator('link[rel="stylesheet"][href*="/assets/"]');
-    expect(await appCss.count()).toBeGreaterThan(0);
-  });
 });

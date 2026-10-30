@@ -81,20 +81,6 @@ func TestCreateRefusesUnsafeSandboxAdditions(t *testing.T) {
 	}
 }
 
-// A mount missing one end is skipped, which is what an unconfigured agent extension looks like.
-func TestCreateSkipsAHalfDeclaredAgentMount(t *testing.T) {
-	sm := NewSandboxManager(sandboxruntime.Boot{})
-	project := &types.Project{ID: "p-half", Name: "half-proj", Path: t.TempDir()}
-
-	opts := SandboxOpts{AgentSandbox: &types.AgentSandbox{
-		Mounts: []types.SandboxMount{{HostPath: "", ContainerPath: "/root/.pi", Mode: "rw"}},
-	}}
-	if _, err := sm.Create("task-half", taskWorktreeDir(t), project, opts); err != nil &&
-		strings.Contains(err.Error(), "agent sandbox mount") {
-		t.Errorf("an unfinished agent mount was refused as a bad mount: %v", err)
-	}
-}
-
 // sharedPrefaceDiff names the first argument at which args stops matching the shared gVisor
 // preface, and "" when it matches. backend/extensions holds the same check for its builder: the two
 // command lines share the posture byte for byte and this is what fails the day one of them

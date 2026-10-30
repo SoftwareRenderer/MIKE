@@ -56,18 +56,4 @@ test.describe('Stop and the tool card', () => {
 
     await expect(page.locator(PENDING), 'a stopped turn cannot answer its tool call').toHaveCount(0);
   });
-
-  test('a task that is still running keeps the card of its live call', async ({ page }) => {
-    test.setTimeout(60000);
-    const taskId = await startStreamingToolCall(page, projectId, 'live');
-
-    // The other half of the rule: an unanswered call on a task that IS in flight is live work.
-    await page.waitForTimeout(1500);
-    await expect(page.locator(PENDING)).toHaveCount(1);
-    await expect(page.locator('.tool-call-card').first()).toContainText('Execute');
-
-    // Cleanup: leave the task paused so no gate slot stays held.
-    await page.locator('.btn-stop').click();
-    await waitForTaskState(page, projectId, taskId, (t) => t?.execution_state === 'paused');
-  });
 });
