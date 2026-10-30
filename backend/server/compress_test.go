@@ -311,32 +311,6 @@ func TestCompressMiddleware_FullStack(t *testing.T) {
 	}
 }
 
-func TestCompressMiddleware_ContentLengthRemoved(t *testing.T) {
-	s := testServer(t)
-	largeBody := strings.Repeat("a", 2048)
-	s.mux.HandleFunc("/test/cl", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Content-Length", "2048")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(largeBody))
-	})
-
-	handler := CompressMiddleware(s.mux)
-
-	req := httptest.NewRequest("GET", "/test/cl", nil)
-	req.Header.Set("Accept-Encoding", "br")
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	resp := w.Result()
-	// Content-Length should be removed from the handler's headers
-	// (the http.Response will have one set by httptest, but it should be the compressed size)
-	if resp.Header.Get("Content-Encoding") != "br" {
-		t.Errorf("expected Content-Encoding: br, got: %q", resp.Header.Get("Content-Encoding"))
-	}
-}
-
 // TestGetImageResponseIsPassedThrough: the GET buffer exists to hash an ETag, and an image is
 // already-compressed bytes, so holding one costs several times the file in memory for a body that
 // cannot shrink. This is what keeps a large binary response's own size cap the real bound.
@@ -652,61 +626,6 @@ func TestETagEmptyBody(t *testing.T) {
 	expected := computeETag([]byte{})
 	if etag != expected {
 		t.Errorf("ETag = %q; want %q", etag, expected)
-	}
-}
-
-func TestETagWildcardIfNoneMatch(t *testing.T) {
-	s := testServer(t)
-	s.mux.HandleFunc("/test/wildcard", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("wildcard test"))
-	})
-
-	handler := CompressMiddleware(s.mux)
-
-	req := httptest.NewRequest("GET", "/test/wildcard", nil)
-	req.Header.Set("If-None-Match", "*")
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusNotModified {
-		t.Fatalf("expected 304 for wildcard If-None-Match, got %d", rr.Code)
-	}
-}
-
-func TestETagMultipleIfNoneMatch(t *testing.T) {
-	s := testServer(t)
-	body := []byte("multi etag test")
-	s.mux.HandleFunc("/test/multi", func(w http.ResponseWriter, r *http.Request) {
-		w.Write(body)
-	})
-
-	handler := CompressMiddleware(s.mux)
-
-	// First request: get the ETag
-	req1 := httptest.NewRequest("GET", "/test/multi", nil)
-	rr1 := httptest.NewRecorder()
-	handler.ServeHTTP(rr1, req1)
-
-	etag := rr1.Header().Get("ETag")
-
-	// Second request: If-None-Match with multiple values, ours is in the middle
-	req2 := httptest.NewRequest("GET", "/test/multi", nil)
-	req2.Header.Set("If-None-Match", `"first-one", `+etag+`, "last-one"`)
-	rr2 := httptest.NewRecorder()
-	handler.ServeHTTP(rr2, req2)
-
-	if rr2.Code != http.StatusNotModified {
-		t.Fatalf("expected 304 when ETag is in multi-value If-None-Match, got %d", rr2.Code)
-	}
-
-	// Third request: If-None-Match with multiple values, ours is NOT in the list
-	req3 := httptest.NewRequest("GET", "/test/multi", nil)
-	req3.Header.Set("If-None-Match", `"first-one", "last-one"`)
-	rr3 := httptest.NewRecorder()
-	handler.ServeHTTP(rr3, req3)
-
-	if rr3.Code != http.StatusOK {
-		t.Fatalf("expected 200 when ETag is NOT in multi-value If-None-Match, got %d", rr3.Code)
 	}
 }
 

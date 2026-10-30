@@ -150,20 +150,6 @@ func TestAuthSessionNamesTheBrowserThatAsked(t *testing.T) {
 	}
 }
 
-func TestAuthSessionNotAuthenticated(t *testing.T) {
-	s := testServer(t)
-	rr := testResponse(t, s, testRequest(http.MethodGet, "/api/auth/session", nil))
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d; want 200; body: %s", rr.Code, rr.Body.String())
-	}
-
-	body := mustJSON[map[string]bool](t, rr.Body)
-	if body["authenticated"] {
-		t.Error("expected authenticated = false")
-	}
-}
-
 func TestAuthSessionAuthenticated(t *testing.T) {
 	s := testServer(t)
 

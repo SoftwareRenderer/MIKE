@@ -364,21 +364,6 @@ func TestFSReadRefValidRefsStillWork(t *testing.T) {
 	}
 }
 
-// TestValidateGitRefBlocksOptions double-checks the shared validator used by
-// /api/fs/read (the table lives in backend/types/validate_test.go).
-func TestFSReadRefTable(t *testing.T) {
-	for _, ref := range []string{"HEAD", "main", "refs/heads/main", "0123456789abcdef0123456789abcdef01234567", "task/frost-amber-quartz"} {
-		if err := types.ValidateGitRef(ref); err != nil {
-			t.Errorf("ValidateGitRef(%q) = %v, want nil", ref, err)
-		}
-	}
-	for _, ref := range []string{"", "-", "-f", "--output=/tmp/pwn", "HEAD~1", "HEAD^", "a..b", "feat branch", "feat\n"} {
-		if err := types.ValidateGitRef(ref); err == nil {
-			t.Errorf("ValidateGitRef(%q) = nil, want error", ref)
-		}
-	}
-}
-
 // TestFSReadRefInTaskWorktree covers the task-scoped branch of the handler
 // (GitRunInWorktreeOutput), which resolves the worktree from the DB before the
 // ref reaches git. Same rule must hold: option-shaped refs are rejected before

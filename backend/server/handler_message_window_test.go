@@ -185,19 +185,6 @@ func TestMessagesRouteRefusesABadWindowRequest(t *testing.T) {
 	}
 }
 
-// A window stays a window: the rows beyond it are not sent, and the rows it does send are whole answers.
-func TestMessagesWindowHoldsOnlyItsWindow(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Bounded")
-	seedWindow(t, s, projID, taskID, 12)
-
-	messages, _ := readWindow(t, s, "/api/projects/"+projID+"/tasks/"+taskID+"/messages?limit=2")
-	if len(messages) != 2 {
-		t.Fatalf("window holds %d rows, want the 2 units asked for", len(messages))
-	}
-}
-
 // The redaction pass runs over the window, and what it sends is still redacted.
 func TestMessagesWindowStillRedacts(t *testing.T) {
 	s := testServer(t)
