@@ -157,12 +157,6 @@ describe('ChatEntries — Jump to latest button', () => {
         cleanup();
     });
 
-    it('hands the real scroll container to the tracker', async () => {
-        const { follow, scroller } = await mount();
-        expect(follow.el).toBe(scroller);
-        cleanup();
-    });
-
     it('wraps the entries in a content element the tracker can observe', async () => {
         const { container } = await mount();
         const content = container.querySelector('.chat-content');

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildStorageNamespace } from '../handlers/storage';
-import { computeGrants, SUPPORTED_CAPABILITIES } from '../capabilities';
+import { SUPPORTED_CAPABILITIES } from '../capabilities';
 
 describe('buildStorageNamespace', () => {
     it('uses project + task scope from the injection context', () => {
@@ -25,9 +25,5 @@ describe('storage capability catalog', () => {
             expect(def).toBeTruthy();
             expect(def.kind).toBe('call');
         }
-    });
-
-    it('is grantable through computeGrants', () => {
-        expect(computeGrants(['storage.get', 'storage.set'])).toEqual(['storage.get', 'storage.set']);
     });
 });

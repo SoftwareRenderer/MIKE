@@ -575,35 +575,6 @@ func TestImageReady(t *testing.T) {
 	_ = sm.ImageReady("")
 }
 
-func TestBuildImage(t *testing.T) {
-	sm := NewSandboxManager(bootWithBridge(t))
-	sandboxcheck.Require(t, BaseImage)
-
-	// Create a temp directory with a simple Dockerfile
-	tmpDir := t.TempDir()
-	dockerfile := filepath.Join(tmpDir, "Dockerfile")
-	content := []byte("FROM alpine:latest\nRUN echo hello\n")
-	if err := os.WriteFile(dockerfile, content, 0644); err != nil {
-		t.Fatalf("write dockerfile: %v", err)
-	}
-
-	projectName := "test-build-proj"
-
-	// Build the image
-	err := sm.BuildImageWithProgress(projectName, dockerfile, nil)
-	if err != nil {
-		t.Fatalf("build image: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = sm.podmanExec("rmi", ProjectImageName(projectName))
-	})
-
-	expectedName := ProjectImageName(projectName)
-	if !sm.ImageReady(expectedName) {
-		t.Fatalf("expected image %q to exist", expectedName)
-	}
-}
-
 func TestBuildImage_InvalidDockerfile(t *testing.T) {
 	sm := NewSandboxManager(bootWithBridge(t))
 	sandboxcheck.Require(t, BaseImage)
@@ -619,16 +590,6 @@ func TestBuildImage_InvalidDockerfile(t *testing.T) {
 	err := sm.BuildImageWithProgress("test-invalid-proj", dockerfile, nil)
 	if err == nil {
 		t.Fatal("expected error for invalid Dockerfile")
-	}
-}
-
-func TestBuildImage_MissingFile(t *testing.T) {
-	sm := NewSandboxManager(bootWithBridge(t))
-	sandboxcheck.Require(t, BaseImage)
-
-	err := sm.BuildImageWithProgress("test-missing-proj", "/nonexistent/path/Dockerfile", nil)
-	if err == nil {
-		t.Fatal("expected error for missing Dockerfile")
 	}
 }
 

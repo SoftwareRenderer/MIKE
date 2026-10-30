@@ -93,17 +93,12 @@ test.describe.serial('Review Changes: discard', () => {
         await openChangesPanel(page, projectId);
     });
 
-    test('cancelling the confirmation leaves the file alone', async ({ page }) => {
-        await clickDiscard(page, 'tracked.txt');
-        const dialog = confirmDialog(page);
-        await expect(dialog).toBeVisible({ timeout: 5000 });
-        await expect(dialog).toContainText('goes back to its last commit');
-        await dialog.locator('.btn-cancel').click();
-        await expect(dialog).not.toBeVisible({ timeout: 5000 });
-
-        expect(readFileSync(join(REPO, 'tracked.txt'), 'utf-8')).toBe('edited by the spec\n');
-        await expect(page.locator('.changes-file-row', { hasText: 'tracked.txt' })).toBeVisible();
-    });
+    // A declined dialog is a payload rule with three vitest owners, and a cancelled discard proves
+    // nothing about git because nothing is sent: `git-status-panel.unit.svelte.ts` holds "sends nothing
+    // when the confirmation is declined" and "names the file and says which shape of loss is coming"
+    // (the `goes back to its last commit` / `deleted from disk` wording per status letter), and
+    // `confirmation-dialog.unit.svelte.ts` holds "empties the slot and resolves false when cancelled".
+    // What is left for this lane is what git does to the bytes, which is the two specs below.
 
     test('confirming reverts one file and touches no other', async ({ page }) => {
         await clickDiscard(page, 'tracked.txt');

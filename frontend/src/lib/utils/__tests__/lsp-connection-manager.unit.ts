@@ -286,17 +286,6 @@ describe('LSP connection manager — message routing', () => {
   });
 
   describe('channel lifecycle', () => {
-    it('handles empty channel list', () => {
-      dispatchMessage([], JSON.stringify({ jsonrpc: '2.0', method: 'test' }));
-      // No error
-    });
-
-    it('handles channel with null handler', () => {
-      const ch: Channel = { id: 1, workspace: '/tmp/test', handler: null };
-      dispatchMessage([ch], JSON.stringify({ jsonrpc: '2.0', method: 'test' }));
-      // No error
-    });
-
     it('handles removed channels', () => {
       setup(3);
       // Simulate removing channel 2

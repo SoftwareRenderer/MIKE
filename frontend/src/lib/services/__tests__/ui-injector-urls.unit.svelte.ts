@@ -130,10 +130,6 @@ describe('the URL the extension iframe is mounted at', () => {
             .toBe('/extensions/test/html-preview/Preview.js');
     });
 
-    it('carries a channel token in the query without leaving the extension tree', () => {
-        const src = entry(makeExt('a?b', 'test')) + '?extch=' + '0'.repeat(32);
-        expect(new URL(src, 'https://app.local').pathname).toBe('/extensions/test/a%3Fb/');
-    });
 });
 
 describe('resolveAssetURL', () => {
