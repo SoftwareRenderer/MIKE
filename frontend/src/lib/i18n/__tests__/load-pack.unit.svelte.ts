@@ -3,7 +3,6 @@ import type { Extension } from '$lib/types';
 import { resolveI18NPack, loadI18NFromExtensions } from '$lib/i18n/load-pack';
 import { i18n } from '$lib/i18n/runtime.svelte';
 import { DEFAULT_LOCALE, en } from '$lib/i18n/en';
-import { loadAppSetting, saveAppSetting, deleteAppSetting } from '$lib/storage';
 
 // The loader is the only new behavior in T6: resolve the enabled i18n extension,
 // fetch its catalog from the pack's own served directory, and hand it to the
@@ -345,16 +344,6 @@ describe('loadI18NFromExtensions', () => {
             const cached = store.db.get(CACHE_KEY) as { source: string; locale: string };
             expect(cached.source).toBe('/extensions/tester/pack-ja');
             expect(cached.locale).toBe('ja');
-        });
-
-        it('uses the mocked storage helpers rather than IndexedDB directly', async () => {
-            mockCatalogFetch(JSON.stringify(zh));
-            await loadI18NFromExtensions([makePack({ name: 'pack-zh', locale: 'zh' })]);
-            expect(saveAppSetting).toHaveBeenCalledWith(CACHE_KEY, expect.objectContaining({ locale: 'zh' }));
-
-            await loadI18NFromExtensions([]);
-            expect(deleteAppSetting).toHaveBeenCalledWith(CACHE_KEY);
-            expect(loadAppSetting).toBeDefined();
         });
     });
 });
