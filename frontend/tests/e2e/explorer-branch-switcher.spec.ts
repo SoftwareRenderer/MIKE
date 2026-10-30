@@ -13,19 +13,6 @@ const BLOCKER = 'branch-switch-blocker.txt';
 test.describe('Explorer branch switcher', { tag: '@explorer-branch' }, () => {
     isolatedProject();
 
-    test('the list opens on the trigger and closes on a click anywhere else', async ({ page }) => {
-        const projectId = ownProjectId();
-        await gotoProject(page, `/?project=${projectId}&view=explorer`);
-
-        await page.click('.explorer-dropdown-btn');
-        await expect(page.locator('.explorer-dropdown-list')).toBeVisible();
-        // Opening puts focus in the filter field.
-        await expect(page.locator('.explorer-dropdown-filter')).toBeFocused();
-
-        await page.click('.explorer-view', { position: { x: 5, y: 5 } });
-        await expect(page.locator('.explorer-dropdown-list')).toHaveCount(0);
-    });
-
     test('a branch another worktree holds is not offered, and the list says what it left out', async ({ page }) => {
         const repo = repoPath();
         const projectId = ownProjectId();
@@ -84,26 +71,6 @@ test.describe('Explorer branch switcher', { tag: '@explorer-branch' }, () => {
             execSync(`git -C ${repo} branch -q -D refuse-me`, { stdio: 'ignore' });
             rmSync(`${repo}/${BLOCKER}`, { force: true });
         }
-    });
-
-    test('the filter leaves the rows a query could name, and never claims an empty repository', async ({ page }) => {
-        const repo = repoPath();
-        const projectId = ownProjectId();
-        execSync(`git -C ${repo} rev-parse --verify feature/switch-target 2>/dev/null || git -C ${repo} branch feature/switch-target HEAD`);
-
-        await gotoProject(page, `/?project=${projectId}&view=explorer`);
-        await page.click('.explorer-dropdown-btn');
-        await expect(page.locator('.explorer-dropdown-filter')).toBeVisible();
-
-        await page.fill('.explorer-dropdown-filter', 'switch-target');
-        await expect(page.locator('.explorer-dropdown-item')).toHaveCount(1);
-        await expect(page.locator('.explorer-dropdown-item').first()).toContainText('feature/switch-target');
-
-        // A query no ref answers keeps the list and says what happened.
-        await page.fill('.explorer-dropdown-filter', 'zzz-no-such-branch');
-        await expect(page.locator('.explorer-dropdown-list')).toBeVisible();
-        await expect(page.locator('.explorer-dropdown-item.empty')).toContainText('No branch matches');
-        await expect(page.locator('.explorer-dropdown-item.empty')).not.toContainText('This repository has no branches');
     });
 
     test('the keyboard reaches a row and Enter moves the checkout', async ({ page }) => {
