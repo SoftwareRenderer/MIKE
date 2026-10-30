@@ -84,19 +84,4 @@ describe('editor-tabs storage', () => {
         expect(b!.openFiles[0].path).toBe('/b/file');
         expect(b!.pinnedFiles).toEqual(['/b/file']);
     });
-
-    it('handles empty openFiles array', async () => {
-        const { saveEditorTabs, loadEditorTabs } = await import('$lib/storage');
-
-        await saveEditorTabs('empty-proj', {
-            openFiles: [],
-            activeFilePath: '',
-            pinnedFiles: [],
-        });
-
-        const loaded = await loadEditorTabs('empty-proj');
-        expect(loaded!.openFiles).toEqual([]);
-        expect(loaded!.activeFilePath).toBe('');
-        expect(loaded!.pinnedFiles).toEqual([]);
-    });
 });

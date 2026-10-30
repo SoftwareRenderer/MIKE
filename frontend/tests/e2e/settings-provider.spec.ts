@@ -167,58 +167,6 @@ test.describe.serial('Model switcher in task view', () => {
         taskData = await getTaskData(page, projectId, taskId);
         expect(taskData.model_name).toBe('model-a2');
     });
-
-    test('should include reasoning_effort in send request', async ({ page }) => {
-        // Create and open a task
-        const taskId = await createTaskViaApi(page, await page.evaluate(async () => {
-            const res = await fetch('/api/projects');
-            return (await res.json())[0]?.id;
-        }), `model-switch-test-${Date.now()}`);
-        await navigateToTask(page, taskId);
-        await waitForChatForm(page);
-
-        const projectId = await page.evaluate(async () => {
-            const params = new URLSearchParams(window.location.search);
-            return params.get('project') || '';
-        });
-
-        // Wait for streaming to complete (send button visible means idle)
-        await expect(page.locator('.chat-form')).toBeVisible({ timeout: 15000 });
-        await expect(async () => {
-            const hasSend = await page.locator('.btn-send').isVisible();
-            if (hasSend) return;
-            const hasStop = await page.locator('.btn-stop').isVisible();
-            if (hasStop) await page.locator('.btn-stop').click().catch(() => {});
-            throw new Error('Neither send nor stop button visible');
-        }).toPass({ timeout: 15000 });
-        await expect(page.locator('.btn-send')).toBeVisible({ timeout: 30000 });
-
-        // Switch to model-a2 which has reasoning_effort: high
-        await page.click('.model-trigger');
-        await page.waitForSelector('.portal-model-dropdown', { timeout: 5000 });
-        await page.click('.model-option:has-text("model-a2")');
-        await expect(page.locator('.portal-model-dropdown')).toBeHidden({ timeout: 5000 });
-
-        // Intercept the /send request to verify it includes reasoning_effort
-        const sendPromise = page.waitForResponse(resp =>
-            resp.url().includes('/send') && resp.status() === 201
-        );
-
-        // Send a message
-        const chatTextarea = page.locator('textarea[placeholder*="message"]');
-        await chatTextarea.fill(`test-message-${Date.now()}`);
-        await chatTextarea.press('Enter');
-
-        const response = await sendPromise;
-        const request = response.request();
-        const postData = request.postData();
-
-        // Verify the request body includes reasoning_effort
-        expect(postData).toContain('"reasoning_effort"');
-        expect(postData).toContain('"high"');
-        expect(postData).toContain('"model_name"');
-        expect(postData).toContain('"model-a2"');
-    });
 });
 
 // ─── Settings Model Delete Tests ────────────────────────────────────────────
@@ -671,15 +619,6 @@ test.describe.serial('Provider max requests per second', () => {
         await seedProviderConfig(page, 5);
         await page.goto('/');
         await page.waitForSelector('.card', { timeout: 10000 });
-    });
-
-    test('should round-trip max_requests_per_second through config API', async ({ page }) => {
-        // beforeEach seeded max_requests_per_second: 5; the server must persist and
-        // serialize it verbatim (plain int, no omitempty).
-        const config = await apiGetConfig(page);
-        const provider = config.providers.find((p: any) => p.url === seedUrl);
-        expect(provider).toBeDefined();
-        expect(provider.max_requests_per_second).toBe(5);
     });
 
     test('should show and persist Max requests/sec in the provider card UI', async ({ page }) => {

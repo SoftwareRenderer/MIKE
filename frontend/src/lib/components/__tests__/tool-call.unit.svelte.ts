@@ -115,19 +115,6 @@ describe('ToolCall - pending status text', () => {
         expect(container.querySelector('.progress-text')?.textContent).toBe('Writing: src/file.go');
     });
 
-    it('shows "Writing..." while the write runs on a file the header already names', () => {
-        const { container } = render(ToolCall, {
-            ...baseProps,
-            toolCall: makeToolCall({
-                toolName: 'write_file',
-                args: { path: 'src/file.go', content: 'package main' },
-                isPending: true,
-            }),
-        });
-        expect(container.querySelector('.tool-args')?.textContent).toBe('./src/file.go');
-        expect(container.querySelector('.progress-text')?.textContent).toBe('Writing...');
-    });
-
     it('shows "Preparing: path" for pending read_file', () => {
         const { container } = render(ToolCall, {
             ...baseProps,

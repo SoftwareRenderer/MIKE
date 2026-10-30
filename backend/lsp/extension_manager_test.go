@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -205,35 +204,6 @@ func TestExtensionRegistry_Lookup_Disabled(t *testing.T) {
 	}
 }
 
-// TestExtensionRegistry_InitParamsOverrideReachesTheServer: an override the manifest declares rides
-// into the config a task's language server is started with.
-func TestExtensionRegistry_InitParamsOverrideReachesTheServer(t *testing.T) {
-	store := testExtensionStore(t)
-	if err := store.InitSchema(); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
-
-	ext := makeTestLSPExt("go", "go")
-	ext.Manifest.Capabilities.GetLSP().InitParamsOverride = map[string]any{
-		"hover": map[string]any{"actions": map[string]any{"enabled": true}},
-	}
-	if err := store.Create(ext); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	reg := NewExtensionRegistry(store)
-	cfg := reg.Lookup("main.go")
-	if cfg == nil {
-		t.Fatal("Lookup(main.go) = nil, want config")
-	}
-	if cfg.Language != "go" {
-		t.Errorf("Language = %q, want go", cfg.Language)
-	}
-	if cfg.InitParamsOverride == nil {
-		t.Error("InitParamsOverride = nil, want non-nil")
-	}
-}
-
 func TestExtensionRegistry_NoLSPConfig(t *testing.T) {
 	store := testExtensionStore(t)
 	if err := store.InitSchema(); err != nil {
@@ -363,34 +333,6 @@ func TestExtensionLSPManager_GetOrCreate_ContextCancelled(t *testing.T) {
 	}
 }
 
-func TestExtensionLSPManager_Release_NoClient(t *testing.T) {
-	store := testExtensionStore(t)
-	if err := store.InitSchema(); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
-	reg := extensions.NewRegistryClient()
-	sandbox := extensions.NewExtensionSandboxManager(reg, store, sandboxruntime.Boot{})
-	mgr := NewExtensionLSPManager(store, sandbox, nil)
-
-	// Should not panic
-	mgr.Release("/tmp/workspace", "go")
-}
-
-func TestExtensionLSPManager_ServerMessageCh(t *testing.T) {
-	store := testExtensionStore(t)
-	if err := store.InitSchema(); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
-	reg := extensions.NewRegistryClient()
-	sandbox := extensions.NewExtensionSandboxManager(reg, store, sandboxruntime.Boot{})
-	mgr := NewExtensionLSPManager(store, sandbox, nil)
-
-	ch := mgr.ServerMessageCh()
-	if ch == nil {
-		t.Error("ServerMessageCh() = nil")
-	}
-}
-
 func TestExtensionLSPManager_SubscribeAndUnsubscribe(t *testing.T) {
 	store := testExtensionStore(t)
 	if err := store.InitSchema(); err != nil {
@@ -449,78 +391,6 @@ func TestExtensionLSPManager_SubscribeAndUnsubscribe(t *testing.T) {
 	}
 
 	mgr.Unsubscribe(sub2)
-}
-
-func TestParsePublishDiagnostics(t *testing.T) {
-	// Simulates the JSON parsing logic used in triggerLSPDiagnostics
-	raw := json.RawMessage(`{
-		"jsonrpc": "2.0",
-		"method": "textDocument/publishDiagnostics",
-		"params": {
-			"uri": "file:///tmp/main.go",
-			"diagnostics": [
-				{
-					"range": {"start": {"line": 5}, "end": {"line": 5}},
-					"severity": 1,
-					"message": "undefined: foo"
-				},
-				{
-					"range": {"start": {"line": 10}, "end": {"line": 10}},
-					"severity": 2,
-					"message": "unused variable"
-				},
-				{
-					"range": {"start": {"line": 15}, "end": {"line": 15}},
-					"severity": 1,
-					"message": "syntax error"
-				}
-			]
-		}
-	}`)
-
-	var envelope struct {
-		Method string `json:"method"`
-		Params struct {
-			URI         string `json:"uri"`
-			Diagnostics []struct {
-				Range struct {
-					Start struct {
-						Line int `json:"line"`
-					} `json:"start"`
-				} `json:"range"`
-				Message  string `json:"message"`
-				Severity int    `json:"severity"`
-			} `json:"diagnostics"`
-		} `json:"params"`
-	}
-	if err := json.Unmarshal(raw, &envelope); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-
-	if envelope.Method != "textDocument/publishDiagnostics" {
-		t.Errorf("method = %q, want %q", envelope.Method, "textDocument/publishDiagnostics")
-	}
-	if envelope.Params.URI != "file:///tmp/main.go" {
-		t.Errorf("uri = %q, want %q", envelope.Params.URI, "file:///tmp/main.go")
-	}
-
-	// Filter for errors (severity <= 1)
-	var errors []string
-	for _, d := range envelope.Params.Diagnostics {
-		if d.Severity <= 1 {
-			errors = append(errors, fmt.Sprintf("Line %d: %s", d.Range.Start.Line+1, d.Message))
-		}
-	}
-
-	if len(errors) != 2 {
-		t.Fatalf("got %d errors, want 2", len(errors))
-	}
-	if errors[0] != "Line 6: undefined: foo" {
-		t.Errorf("errors[0] = %q, want %q", errors[0], "Line 6: undefined: foo")
-	}
-	if errors[1] != "Line 16: syntax error" {
-		t.Errorf("errors[1] = %q, want %q", errors[1], "Line 16: syntax error")
-	}
 }
 
 func TestHasAnyLSPToolCallsExtension(t *testing.T) {

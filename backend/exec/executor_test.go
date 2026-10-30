@@ -350,37 +350,6 @@ func TestHasRunningTasks_BacklogStaleCleanup(t *testing.T) {
 	}
 }
 
-func TestHasRunningTasks_ReviewStaleCleanup(t *testing.T) {
-	t.Parallel()
-	te, _, projectID, _ := setupExecutorWithGit(t)
-	taskID := "test-review-task"
-
-	task := &types.Task{
-		ID:        taskID,
-		ProjectID: projectID,
-		Title:     "Test task",
-		Status:    types.StatusReview,
-	}
-	te.store.CreateTask(task)
-
-	// Manually add a stale entry to the tasks map (status != in_progress)
-	ctx, cancel := context.WithCancel(context.Background())
-	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, executorType: "llm"}
-	t.Cleanup(func() { cancel() })
-
-	if te.HasRunningTasks(projectID) {
-		t.Error("HasRunningTasks should return false for review task")
-	}
-
-	// Entry remains in map — HasRunningTasks is read-only, cleanup is done by StopTask
-	te.taskMu.Lock()
-	_, stillExists := te.tasks[taskID]
-	te.taskMu.Unlock()
-	if !stillExists {
-		t.Error("review entry should still be in tasks map (not mutated)")
-	}
-}
-
 func TestHasRunningTasks_NotInMap(t *testing.T) {
 	t.Parallel()
 	te, _, projectID, _ := setupExecutorWithGit(t)

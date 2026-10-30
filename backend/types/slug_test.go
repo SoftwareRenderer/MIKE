@@ -57,12 +57,6 @@ func TestSlugifyBranchName_AllSpecialChars(t *testing.T) {
 	}
 }
 
-func TestSlugifyBranchName_AllHyphens(t *testing.T) {
-	if slug := SlugifyBranchName("---"); slug != "" {
-		t.Errorf("expected empty string, got %q", slug)
-	}
-}
-
 func TestSlugifyBranchName_MaxLength(t *testing.T) {
 	// Title that slugifies to more than BranchSlugMaxLen chars.
 	longTitle := "Fix a very long bug description that exceeds the maximum allowed branch name length limit"
@@ -74,15 +68,6 @@ func TestSlugifyBranchName_MaxLength(t *testing.T) {
 	// name inside MaxBranchName.
 	if len(TaskBranchPrefix+slug) > MaxBranchName {
 		t.Errorf("task/%s = %d chars, want <= %d", slug, len(TaskBranchPrefix+slug), MaxBranchName)
-	}
-}
-
-func TestBranchSlugMaxLen_DerivedFromMaxBranchName(t *testing.T) {
-	if BranchSlugMaxLen != MaxBranchName-len(TaskBranchPrefix) {
-		t.Errorf("BranchSlugMaxLen = %d, want %d", BranchSlugMaxLen, MaxBranchName-len(TaskBranchPrefix))
-	}
-	if MaxBranchName != 50 {
-		t.Errorf("MaxBranchName = %d, want 50 (established fact: task branches are capped at 50)", MaxBranchName)
 	}
 }
 

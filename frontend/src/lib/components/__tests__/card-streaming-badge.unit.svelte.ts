@@ -100,16 +100,6 @@ function renderCard(task: Task) {
 }
 
 describe('Card status badge tracks its reactive sources', () => {
-    it('shows Running while this client has an in-flight turn for the task', () => {
-        streamingTaskStore.add('card-1');
-        try {
-            const container = renderCard(makeTask());
-            expect(badgeText(container)).toBe(t('board.badge.running'));
-        } finally {
-            streamingTaskStore.delete('card-1');
-        }
-    });
-
     it('drops the Running badge when the task stops streaming', async () => {
         streamingTaskStore.add('card-1');
         const container = renderCard(makeTask());

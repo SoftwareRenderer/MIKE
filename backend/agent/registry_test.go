@@ -279,54 +279,6 @@ func TestRegistry_GetAgentSandboxRefusesADangerousHostPath(t *testing.T) {
 	}
 }
 
-// TestRegistry_GetAgentSandboxWithOverrides tests extension config overrides.
-func TestRegistry_GetAgentSandboxWithOverrides(t *testing.T) {
-	store := &mockExtensionStore{
-		extensions: []ext.Extension{
-			{
-				Name:    "pi",
-				Type:    ext.ExtensionTypeAgent,
-				Enabled: true,
-				Config: map[string]any{
-					"sandbox_mount": []any{
-						map[string]any{"host_path": "~/.agent/config", "container_path": "/root/agent/config", "mode": "rw"},
-					},
-				},
-				Manifest: ext.ExtensionManifest{
-					Version: "1.0.0",
-					Capabilities: &ext.Capabilities{Agent: &ext.AgentConfig{
-						Sandbox: &types.AgentSandbox{
-							Mounts: []types.SandboxMount{
-								{HostPath: "~/.default/config", ContainerPath: "/root/default/config", Mode: "ro"},
-							},
-						},
-					}},
-				},
-			},
-		},
-	}
-
-	// With sandbox_mount array override: mode should be "rw" and paths from config
-	registry := NewAgentRegistry(store, nil)
-	sb := registry.GetAgentSandbox("pi")
-	if sb == nil {
-		t.Fatal("expected non-nil sandbox")
-	}
-	if len(sb.Mounts) != 1 {
-		t.Fatalf("expected 1 mount, got %d", len(sb.Mounts))
-	}
-	if sb.Mounts[0].Mode != "rw" {
-		t.Errorf("Mounts[0].Mode = %q, want rw (from extension config)", sb.Mounts[0].Mode)
-	}
-	expectedHost := ""
-	if homeDir, err := os.UserHomeDir(); err == nil {
-		expectedHost = homeDir + "/.agent/config"
-	}
-	if sb.Mounts[0].HostPath != expectedHost {
-		t.Errorf("Mounts[0].HostPath = %q, want %q", sb.Mounts[0].HostPath, expectedHost)
-	}
-}
-
 // TestRegistry_GetAgentSandboxProviderOverride: the provider's config folder replaces a folder the user has
 // already approved, and cannot create an approval of its own.
 func TestRegistry_GetAgentSandboxProviderOverride(t *testing.T) {

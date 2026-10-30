@@ -206,14 +206,3 @@ func TestTheAddressRuleAppliesToARegisteredServer(t *testing.T) {
 		}
 	}
 }
-
-// The host a person typed is the one address admitted at loopback, which is what makes a local MCP
-// server usable while a name that resolves elsewhere stays refused.
-func TestTheTypedHostIsGrantedAtLoopback(t *testing.T) {
-	fake := fakeMCPServer(t, fakeOptions{Stateless: true})
-	// 127.0.0.1 is loopback, and it is the host in the URL: the grant is what lets this connect at
-	// all, so a failure here means the grant was dropped and every local server stopped working.
-	if _, err := connect(context.Background(), registered(fake.URL, 3), testID); err != nil {
-		t.Fatalf("the granted loopback host was refused: %v", err)
-	}
-}

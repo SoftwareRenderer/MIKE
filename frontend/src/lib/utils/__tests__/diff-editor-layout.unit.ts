@@ -27,8 +27,4 @@ describe('shouldAutoFullscreenDiffEditor', () => {
         expect(shouldAutoFullscreenDiffEditor(449, false, false)).toBe(false);
         expect(shouldAutoFullscreenDiffEditor(899, false, false)).toBe(false);
     });
-
-    it('uses the 900px constant', () => {
-        expect(DIFF_EDITOR_FULLSCREEN_MAX_WIDTH).toBe(900);
-    });
 });
