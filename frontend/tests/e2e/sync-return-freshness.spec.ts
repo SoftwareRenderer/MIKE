@@ -3,7 +3,7 @@ import { execSync } from 'child_process';
 import { writeFileSync } from 'fs';
 import {
   isolatedProject, createTaskViaApi, navigateToTask, csrfFetch, waitForWorktree,
-  getWorktreePath, ownProjectId, apiGetJson, stopReading, comeBack, sendTurn,
+  getWorktreePath, ownProjectId, apiGetJson, stopReading, comeBack, sendTurn, getTaskData,
 } from './helpers';
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
@@ -161,5 +161,41 @@ test.describe('the window that comes back', () => {
     // The row is the half with teeth: a return that reads nothing leaves it away whatever the counters say,
     // and this is what the person came back to see.
     await expect(page.locator('.chat-message', { hasText: content })).toBeVisible({ timeout: 20_000 });
+  });
+
+  // The detail view shows its own copy of the row. It missed the updates while the window was away, and the
+  // board request is blocked here, so only the read on return can move it.
+  test('lands the row it read when the board would not answer', async ({ page }) => {
+    await watchTheReturn(page);
+    const projectId = ownProjectId();
+    const unique = Date.now();
+    const taskId = await createTaskViaApi(page, projectId, `sync-row-${unique}`);
+    await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/move`, {
+      method: 'POST', body: { status: 'in_progress' },
+    });
+    await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/messages`, {
+      method: 'POST', body: { role: 'user', content: `asked while away ${unique}` },
+    });
+
+    await navigateToTask(page, taskId, projectId);
+    await expect(page.locator('.chat-form')).toBeVisible({ timeout: 20_000 });
+    // The bar over the input appears for `taskStatus === 'review'` and nothing else, so there is none yet.
+    const reviewBar = page.locator('.chat-review-bar');
+    await expect(reviewBar).toHaveCount(0);
+
+    stopReading(page);
+    await page.route('**/board', route => route.abort());
+    await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/move`, {
+      method: 'POST', body: { status: 'review' },
+    });
+    await expect.poll(async () => (await getTaskData(page, projectId, taskId)).status, { timeout: 20_000 })
+      .toBe('review');
+
+    await comeBackUntil(page, async () => (await reviewBar.count()) > 0
+      ? 'ok' : 'the row the screen read never reached the view');
+    await page.unroute('**/board');
+
+    // Reading the row must not have replaced the transcript this return also reads.
+    await expect(page.locator('.chat-message', { hasText: `asked while away ${unique}` })).toBeVisible();
   });
 });

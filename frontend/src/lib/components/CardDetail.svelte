@@ -2,7 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import type { Task, TaskCommit } from '$lib/types';
     import type { DiffFile, DiffImageSource } from '$lib/types/diff';
-    import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
+    import { appStore, uiStore, dialogStore, updateTaskInBoard, updateTaskAndSelection, removeTaskFromBoard } from '$lib/stores';
     import { streamingTaskStore } from '$lib/stores/streaming-tasks.svelte';
     import { diffStatsStore } from '$lib/stores/diff-stats.svelte';
     import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, clearDoneTasks, stageTaskPaths, toDiffFiles, getTask } from '$lib/api';
@@ -885,7 +885,7 @@
         if (verdict.row) {
             try {
                 current = await getTask(task.project_id, task.id);
-                updateTaskInBoard(appStore, current.id, current);
+                updateTaskAndSelection(appStore, current);
             } catch {
                 // Unreachable: compare against the row this screen already holds.
             }

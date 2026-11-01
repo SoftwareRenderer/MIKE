@@ -6,7 +6,7 @@ vi.mock('$lib/storage', () => ({
     saveAppSetting: vi.fn(async () => {}),
 }));
 
-import { updateTaskInBoard, removeTaskFromBoard, appendTaskToBoard, applyResolvedTasksToBoard } from '$lib/stores/app.svelte';
+import { updateTaskInBoard, updateTaskAndSelection, removeTaskFromBoard, appendTaskToBoard, applyResolvedTasksToBoard } from '$lib/stores/app.svelte';
 import { appStore } from '$lib/stores';
 import type { Board, Task } from '$lib/types';
 
@@ -17,6 +17,7 @@ function makeTask(id: string, over: Partial<Task> = {}): Task {
 describe('the one task list', () => {
     beforeEach(() => {
         appStore.board = null;
+        appStore.selectedTask = null;
     });
 
     it('reads from the board, so no second list can disagree with it', () => {
@@ -80,5 +81,28 @@ describe('the one task list', () => {
         appStore.board = { project_id: 'p1', tasks: [makeTask('opt')] } as Board;
         appendTaskToBoard(appStore, makeTask('opt', { title: 'clicked twice' }));
         expect(appStore.tasks.map(t => [t.id, t.title])).toEqual([['opt', 'clicked twice']]);
+    });
+
+    it("moves the detail's pinned copy with the board's list", () => {
+        const pinned = makeTask('a', { status: 'in_progress' });
+        appStore.board = { project_id: 'p1', tasks: [pinned] } as Board;
+        appStore.selectedTask = pinned;
+        updateTaskAndSelection(appStore, makeTask('a', { status: 'review' }));
+        expect(appStore.tasks.find(t => t.id === 'a')?.status).toBe('review');
+        expect(appStore.selectedTask?.status).toBe('review');
+    });
+
+    it('leaves the pinned copy of another task where it is', () => {
+        const pinned = makeTask('a');
+        appStore.board = { project_id: 'p1', tasks: [pinned, makeTask('b', { status: 'review' })] } as Board;
+        appStore.selectedTask = pinned;
+        updateTaskAndSelection(appStore, makeTask('b', { status: 'done' }));
+        expect(appStore.selectedTask?.status).toBe('backlog');
+    });
+
+    it('moves the pinned copy even when no board holds the task', () => {
+        appStore.selectedTask = makeTask('a', { status: 'in_progress' });
+        updateTaskAndSelection(appStore, makeTask('a', { status: 'review' }));
+        expect(appStore.selectedTask?.status).toBe('review');
     });
 });

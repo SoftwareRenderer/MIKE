@@ -34,6 +34,10 @@ The app reconciles state when a tab regains focus, wakes from sleep, or is resto
 Each view determines if it is "behind" by asking the server for a sync digest (`GET /api/.../sync`):
 - **Board**: Always refreshes.
 - **Chat**: Compares the current `revision` with the server. If the server has moved, it refetches the newest message window.
+- **Row**: A view that reads the task row writes the answer back with `updateTaskAndSelection`, not
+  `updateTaskInBoard`. The open detail reads its props from `selectedTask`, which only the former updates.
+- **Thread**: When the digest names a thread the switcher is not showing, re-read the thread list before the
+  rows: the window route answers for whichever thread is current.
 - **Diff**: Refreshes the manifest and re-evaluates if the base commit has moved.
 
 ## The Editor Buffer Across a Browser Being Away

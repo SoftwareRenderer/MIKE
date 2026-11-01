@@ -25,6 +25,13 @@ export function updateTaskInBoard(appStore: AppStore, taskId: string, updated: T
     appStore.board = { ...board, tasks };
 }
 
+/** updateTaskAndSelection replaces a task in the board list, and in `selectedTask` when the detail view is open
+ * on it. The detail reads its props from `selectedTask`, so the board list alone leaves it on the old row. */
+export function updateTaskAndSelection(appStore: AppStore, updated: Task): void {
+    updateTaskInBoard(appStore, updated.id, updated);
+    if (appStore.selectedTask?.id === updated.id) appStore.selectedTask = updated;
+}
+
 /** Remove a task from the board. No-op if board is null or task not found. */
 export function removeTaskFromBoard(appStore: AppStore, taskId: string): void {
     const board = appStore.board;

@@ -5,7 +5,7 @@
     import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
     import { sendTaskMessage, getTaskMessages, readCachedWindow, type MessageWindow, MESSAGE_JUMP_LIMIT, getTaskTurns, deleteTaskMessagesAfter, deleteTaskMessage, updateTaskMessage, stopTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, onQueueFlushed, getQueuedTaskIds, getQueuedSends, getRefusedSends, getDroppedTaskIds, getTask, isFromCache, type AppStream, type SendResult } from '$lib/api';
     import { PENDING_SEND_ID_PREFIX, pendingSendEntries } from '$lib/utils/pending-sends';
-    import { appStore, dialogStore, updateTaskInBoard } from '$lib/stores';
+    import { appStore, dialogStore, updateTaskInBoard, updateTaskAndSelection } from '$lib/stores';
     import { streamingTaskStore } from '$lib/stores/streaming-tasks.svelte';
     import { diffStatsStore } from '$lib/stores/diff-stats.svelte';
     import { commitQueueStore } from '$lib/stores/commit-queue.svelte';
@@ -206,16 +206,18 @@
     let suppressEvents = $state(true);
     $effect(() => { suppressEvents = taskStatus !== 'in_progress' && !isLoading; });
 
-    /** The task's own `execution_state` and the board's copy it was read against. */
+    // rowExecutionState holds the task row's own `execution_state` as last read; rowStateBoardCopy is the
+    // board's copy at that moment.
     let rowExecutionState = $state<string | null>(null);
     let rowStateBoardCopy = $state('');
     let knownExecutionState = $derived(
         trustedExecutionState(rowExecutionState, rowStateBoardCopy, taskExecutionState),
     );
-    /** Record a reading of the task's own row. */
-    function noteTaskRow(executionState: string | undefined) {
+    /** noteTaskRow records what the task's row said, with the board's copy at the time of that read.
+     * trustedExecutionState() drops the recorded value once the board's copy moves, since that move is newer. */
+    function noteTaskRow(executionState: string | undefined, readAgainst = taskExecutionState) {
         rowExecutionState = executionState || null;
-        rowStateBoardCopy = taskExecutionState;
+        rowStateBoardCopy = readAgainst;
     }
 
     let lastExecutionState: string | undefined;
@@ -227,10 +229,9 @@
         stream.dropUnresolvedToolCalls();
     });
 
-    // Our own reading of the task says the turn is running and the board's copy says it is not, and the rule
-    // that settles such a disagreement keeps the reading — even after the turn ends, because the copy is back
-    // on the value it held. So the disagreement asks the server once, the way a returning tab does
-    // (docs/reconnection.md → A row reading the board's copy cannot be ordered against).
+    // The row says a turn is running and the board's copy says it is not, and the row wins: the screen would keep
+    // saying "Agent is responding" with nothing left to correct it. So ask the server, the way a returning tab
+    // does (docs/reconnection.md → A row reading the board's copy cannot be ordered against).
     $effect(() => {
         if (!taskIsInFlight(knownExecutionState) || taskIsInFlight(taskExecutionState)) return;
         void reconcileAfterAbsence();
@@ -551,13 +552,13 @@
         return { seq, read };
     }
 
-    /** The task's own row, recorded the moment it lands. `execution_state` is what decides whether an
-     * unanswered tool call is work or a leftover, and the model fields decide what the form offers. A row
-     * that did not answer costs the reading, never the paint: the board's copy stands in. */
+    /** readTaskRow reads the task's row and records what it said. `execution_state` decides whether an
+     * unanswered tool call is work or a leftover. A failed read leaves the board's copy in charge. */
     async function readTaskRow(): Promise<Task | null> {
+        const readAgainst = taskExecutionState;
         try {
             const row = await getTask(projectId, taskId);
-            noteTaskRow(row.execution_state);
+            noteTaskRow(row.execution_state, readAgainst);
             return row;
         } catch {
             return null;
@@ -1152,15 +1153,16 @@
         stream.dropUnresolvedToolCalls();
         stream.state.entries = stream.state.entries.filter(e => e.id !== streamingId);
         stream.state.processedToolIds = new Set();
-        // The row the stop returns is the freshest reading, so the rebuild needs no waiting for the board.
+        // The row the stop returns is the newest answer, so the rebuild does not wait for the board.
         let stoppedState = 'paused';
+        const readAgainst = taskExecutionState;
         try {
             const stopped = await stopTask(projectId, taskId);
             stoppedState = stopped?.execution_state || 'paused';
         } catch (e) {
             console.error('Failed to stop task:', e);
         }
-        noteTaskRow(stoppedState);
+        noteTaskRow(stoppedState, readAgainst);
         // Re-read the transcript so unpersisted streaming rows don't come back as duplicates.
         await loadHistory(false, stoppedState);
     }
@@ -1647,12 +1649,28 @@
         void reconcileAfterAbsence();
     });
 
-    /**
-     * What a window that has not been being read does about it: it asks the server, because a missed turn
-     * leaves nothing here that could report it. No digest, or `force` (the reader clicking Retry), is read as
-     * "everything moved".
-     */
+    /** reconcileRun is the reconciliation in flight. Waking up fires the tab watcher and the reconnect handler
+     * together, and two runs can apply their results in the wrong order. */
+    let reconcileRun: { force: boolean; done: Promise<void> } | null = null;
+
+    /** reconcileAfterAbsence asks the server what this view missed: a window that has not been reading holds
+     * nothing that could report a missed turn. No digest, or `force` (the reader clicking Retry), counts as
+     * "everything moved", and a forced call starts its own run because the run in flight may report no change. */
     async function reconcileAfterAbsence(force = false): Promise<void> {
+        const running = reconcileRun;
+        if (running && (running.force || !force)) return running.done;
+        const done = reconcileNow(force);
+        reconcileRun = { force, done };
+        try {
+            await done;
+        } finally {
+            if (reconcileRun?.done === done) reconcileRun = null;
+        }
+    }
+
+    /** reconcileNow reads the digest, then whatever this view cannot answer for itself. */
+    async function reconcileNow(force: boolean): Promise<void> {
+        const readAgainst = taskExecutionState;
         const digest = force ? null : await fetchTaskSync(projectId, taskId);
         const verdict = digest
             ? resyncPlan({
@@ -1664,11 +1682,24 @@
         let executionState = knownExecutionState;
         if (verdict.row) {
             try {
-                executionState = (await getTask(projectId, taskId)).execution_state;
-                noteTaskRow(executionState);
+                const row = await getTask(projectId, taskId);
+                executionState = row.execution_state;
+                noteTaskRow(executionState, readAgainst);
+                // Take the whole row: `taskStatus` and `taskSummarizing` are props only the board can set, and
+                // `refreshBoard()` skips this task while another refresh is running.
+                updateTaskAndSelection(appStore, row);
             } catch {
-                // Deleted or unreachable: keep the reading from the last row read.
+                // Use the board's copy: a failed read is not retried, so the old value would stay and the screen
+                // would keep saying "Agent is responding". A turn this browser is streaming shows as running.
+                noteTaskRow(undefined);
+                executionState = taskExecutionState;
             }
+        }
+        if (digest?.thread && digest.thread !== activeThreadId) {
+            // The digest names another thread, so this ETag describes rows about to be replaced: clear it and
+            // reload the thread list first.
+            historyRevision = '';
+            await loadThreads();
         }
         if (!taskIsInFlight(executionState)) dropStaleStreamingState();
         // A held ETag can only confirm what this screen already claimed it holds, so doubt reads the rows.
