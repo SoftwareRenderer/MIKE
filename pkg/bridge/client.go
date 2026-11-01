@@ -568,11 +568,18 @@ func (c *Client) Bash(ctx context.Context, command string, timeout int64) (*Bash
 // The raw parameter is the raw JSON-RPC message bytes.
 // Returns the raw JSON-RPC response bytes.
 func (c *Client) LSPSend(ctx context.Context, raw json.RawMessage) ([]byte, error) {
+	return c.lspRoundTrip(ctx, protocol.LSPParams{Raw: raw})
+}
+
+// lspRoundTrip sends one LSP request and waits for the single answer the bridge owes it. The wait is
+// bounded by lspCallCtx rather than the caller's context, because a wedged server would otherwise hold
+// the caller's request goroutine with it. An error frame is an answer, so it comes back as an error.
+func (c *Client) lspRoundTrip(ctx context.Context, params protocol.LSPParams) ([]byte, error) {
 	ctx, cancel := lspCallCtx(ctx)
 	defer cancel()
 
-	params, _ := json.Marshal(protocol.LSPParams{Raw: raw})
-	frame := protocol.NewRequest(c.nextMsgID(), protocol.MethodLSP, params)
+	payload, _ := json.Marshal(params)
+	frame := protocol.NewRequest(c.nextMsgID(), protocol.MethodLSP, payload)
 
 	final, _, err := c.waitForCtx(ctx, frame, 0)
 	if err != nil {
@@ -607,20 +614,8 @@ func (c *Client) LSPNotify(ctx context.Context, raw json.RawMessage) error {
 // There is deliberately no environment parameter: the server's environment is the container's, set at
 // creation, which is also what the extension's own environment check sees.
 func (c *Client) LSPStart(ctx context.Context, command string, args []string) error {
-	ctx, cancel := lspCallCtx(ctx)
-	defer cancel()
-
-	params, _ := json.Marshal(protocol.LSPParams{Command: command, Args: args})
-	frame := protocol.NewRequest(c.nextMsgID(), protocol.MethodLSP, params)
-
-	final, _, err := c.waitForCtx(ctx, frame, 0)
-	if err != nil {
-		return err
-	}
-	if final.Type == protocol.TypeError {
-		return errors.New(final.ErrorMsg())
-	}
-	return nil
+	_, err := c.lspRoundTrip(ctx, protocol.LSPParams{Command: command, Args: args})
+	return err
 }
 
 // Ping performs a lightweight round-trip to verify the bridge is responsive.

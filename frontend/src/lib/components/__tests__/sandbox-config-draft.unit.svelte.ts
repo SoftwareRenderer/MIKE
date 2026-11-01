@@ -298,19 +298,18 @@ describe('the sandbox draft', () => {
             await draft.rebuild(row);
 
             expect(updateProject).not.toHaveBeenCalled();
-            expect(buildSandboxImageStream).toHaveBeenCalledWith('p1', expect.any(Function), { noCache: false });
+            expect(buildSandboxImageStream).toHaveBeenCalledWith('p1', expect.any(Function));
         });
 
         it('saves a Dockerfile the row does not know about before building it', async () => {
             const row = storedRow({ sandbox_dockerfile_path: '/tmp/p1/Dockerfile.old' });
             const draft = draftOf(row);
             draft.selectDockerfile('/tmp/p1/Dockerfile');
-            draft.buildNoCache = true;
 
             await draft.rebuild(row);
 
             expect(updateProject).toHaveBeenCalledWith('p1', { sandbox_dockerfile_path: '/tmp/p1/Dockerfile' });
-            expect(buildSandboxImageStream.mock.calls[0][2]).toEqual({ noCache: true });
+            expect(buildSandboxImageStream).toHaveBeenCalledTimes(1);
             expect(draft.building).toBe(false);
         });
 

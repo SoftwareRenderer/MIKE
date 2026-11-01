@@ -54,6 +54,7 @@ export {
 
 // A sandbox build is a progress stream, never a queued write, so it lives under ./raw/.
 export { buildSandboxImageStream } from './raw/projects';
+export type { SandboxBuildResult } from './raw/projects';
 
 // -- Tasks --
 export {

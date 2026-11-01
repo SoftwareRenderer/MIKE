@@ -1,4 +1,4 @@
-import type { ProjectCounts, Task, StreamEvent } from '$lib/types';
+import type { ProjectCounts, Task, StreamEvent, StorageUsage } from '$lib/types';
 import type { AppStreamFrame } from './events';
 import { isKeepaliveFrame } from './events';
 import { API_BASE, parseStreamFrame } from './helpers';
@@ -13,6 +13,8 @@ import { isSuspensionGap } from '$lib/utils/page-suspension';
 
 export interface AppStreamCallbacks {
     onProjectCounts?: (counts: Record<string, ProjectCounts>) => void;
+    /** The server's filesystem, pushed rather than fetched. */
+    onStorageUsage?: (usage: StorageUsage) => void;
     onRefresh?: () => void;
     onDiffStats?: (task_id: string, hash: string, short_stat: string, files_n: number, untracked_n: number, untracked_lines: number, tracked_add: number, tracked_del: number, file_hashes?: Record<string, string>, removed_files?: string[], staged_paths?: string[], has_committed_changes?: boolean, already_merged?: boolean) => void;
     onBranch?: (branch: string) => void;
@@ -288,6 +290,9 @@ export function createAppStream(callbacks: AppStreamCallbacks, options: AppStrea
             }
             if (msg.type === 'project_counts' && callbacks.onProjectCounts) {
                 callbacks.onProjectCounts(msg.data);
+            }
+            if (msg.type === 'storage_usage' && callbacks.onStorageUsage) {
+                callbacks.onStorageUsage({ total_bytes: msg.total_bytes, avail_bytes: msg.avail_bytes });
             }
             if (msg.type === 'task_diff_stats' && callbacks.onDiffStats) {
                 callbacks.onDiffStats(msg.task_id, msg.hash, msg.short_stat, msg.files_n || 0, msg.untracked_n, msg.untracked_lines, msg.tracked_add || 0, msg.tracked_del || 0, msg.file_hashes, msg.removed_files, msg.staged_paths, msg.has_committed_changes, msg.already_merged);

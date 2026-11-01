@@ -275,6 +275,22 @@ func (b *memoryBudget) Measure() (mikeMB, heldMB, availableMB, totalMB int64, ok
 	return mikeMB, heldMB, available, total, true
 }
 
+// workspaceStorageProbe reads the filesystem holding the worktrees root. The root is a setting, so it
+// is resolved per call. The failure is logged once: nothing else reports it.
+func workspaceStorageProbe(root func() string) func() (fsutil.DiskUsage, bool) {
+	var warned sync.Once
+	return func() (fsutil.DiskUsage, bool) {
+		usage, err := fsutil.DiskUsageFor(root())
+		if err != nil {
+			warned.Do(func() {
+				logging.For(logging.Host).Warnf("reading the worktrees filesystem: the Done count will report no storage usage (%v)", err)
+			})
+			return fsutil.DiskUsage{}, false
+		}
+		return usage, true
+	}
+}
+
 // The task row is the only thing that outlives the cgroup these numbers were read from.
 func sandboxMemoryPeakSink(st *store.Store) func(taskID string, peakMB int64, oomKills int64) {
 	return func(taskID string, peakMB int64, oomKills int64) {
@@ -411,6 +427,7 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 
 	worktreeMgr := git.NewWorktreeManager(store, cfgStore)
 	s.appStreamMgr = stream.NewAppStreamManager(store, worktreeMgr)
+	s.appStreamMgr.SetStorageProbe(workspaceStorageProbe(cfgStore.WorkspaceDir))
 	// First to close: a watcher runs git and container work on its own goroutines, and everything it
 	// can reach is torn down below it.
 	defer s.reg(stageWebsocketWatchers, "websocket watchers", s.appStreamMgr.Close)()
@@ -459,6 +476,11 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 	}
 
 	s.sandboxMgr = sandbox.NewSandboxManager(boot)
+	// 	// A build's scratch root sits under the workspace root, outside every checkout and never the data directory.
+	// 	// Sweeping before anything starts means every entry here belongs to the previous process.
+	sandbox.SetScratchRoot(worktreesDir)
+	sandbox.SweepScratch()
+	defer s.reg(stageImageBuilds, "image builds", sandbox.CancelBuilds)()
 	defer s.reg(stageSandboxContainers, "sandbox containers", s.sandboxMgr.Cleanup)()
 	// Emits a sandbox_stats task event only when usage changes.
 	s.sandboxStatsSampler = stream.NewSandboxStatsSampler(s.sandboxMgr, store, s.appStreamMgr,
@@ -590,6 +612,16 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 		logging.For(logging.Startup).Infof("memory supervisor: gate capacity %d MB (%d%% of %d MB total, %s)",
 			capacityMB, memPct, totalMB, startup.EnvMemoryBudgetPct)
 	}
+	// 	// A build belongs to no task, so the supervisor that charges live containers never sees one; it books its
+	// 	// container's limit through this same gate. A gate with capacity 0 grants immediately, which is the disabled
+	// 	// case.
+	memGate := s.executor.MemGate()
+	sandbox.SetMemoryAdmission(func(ctx context.Context, amountMB int64, waiting func()) (func(), error) {
+		if err := memGate.AcquireNoticed(ctx, amountMB, waiting); err != nil {
+			return nil, err
+		}
+		return func() { memGate.Release(amountMB) }, nil
+	})
 	s.terminalMgr.SetAgentRegistry(agentRegistry)
 
 	s.taskHandler = api.NewTaskHandler(api.TaskDeps{

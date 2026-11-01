@@ -46,11 +46,13 @@ func (bw *BranchWatcher) Watch(projectID, path string) error {
 	bw.mu.Lock()
 	defer bw.mu.Unlock()
 
-	headPath := filepath.Join(path, ".git", "HEAD")
+	headPath := headPathOf(path)
 
-	// Remove existing watcher if re-watching
+	// A re-watch replaces the watch, so the previous directory leaves by the name it was added
+	// under — the .git directory. Removing HEAD would name a path never registered: it
+	// answers nothing and leaves the old directory watched after the row moved.
 	if existing, exists := bw.projects[projectID]; exists {
-		_ = bw.watcher.Remove(filepath.Join(existing.path, ".git", "HEAD"))
+		_ = bw.watcher.Remove(gitDirOf(existing.path))
 	}
 
 	branch := readBranchFile(headPath)
@@ -64,7 +66,7 @@ func (bw *BranchWatcher) Watch(projectID, path string) error {
 	}
 
 	// Watch .git dir (not HEAD directly) — git replaces HEAD via temp+rename.
-	gitDir := filepath.Join(path, ".git")
+	gitDir := gitDirOf(path)
 	if err := bw.watcher.Add(gitDir); err != nil {
 		delete(bw.projects, projectID)
 		return err
@@ -84,8 +86,8 @@ func (bw *BranchWatcher) Unwatch(projectID string) {
 		return
 	}
 
-	_ = bw.watcher.Remove(filepath.Join(info.path, ".git", "HEAD"))
-	_ = bw.watcher.Remove(filepath.Join(info.path, ".git"))
+	// The .git directory is what was added; HEAD is only where its events point.
+	_ = bw.watcher.Remove(gitDirOf(info.path))
 	delete(bw.projects, projectID)
 
 	logging.For(logging.Watcher).With(logging.ProjectID, projectID).Infof("stopped watching")
@@ -115,7 +117,7 @@ func (bw *BranchWatcher) handleEvent(event fsnotify.Event) {
 	var projectID string
 	var info branchProject
 	for id, proj := range bw.projects {
-		if event.Name == filepath.Join(proj.path, ".git", "HEAD") {
+		if event.Name == headPathOf(proj.path) {
 			projectID = id
 			info = proj
 			break
@@ -139,6 +141,17 @@ func (bw *BranchWatcher) handleEvent(event fsnotify.Event) {
 
 	logging.For(logging.Watcher).With(logging.ProjectID, projectID).Infof("branch changed: %s", branch)
 	bw.broadcast(projectID, branch)
+}
+
+// gitDirOf is the directory a project's branch watch is registered on. fsnotify reports the file that
+// changed inside a watched directory, so the watch is the directory's while every event names HEAD.
+func gitDirOf(projectPath string) string {
+	return filepath.Join(projectPath, ".git")
+}
+
+// headPathOf is the file whose rewrite changes the branch a project is on.
+func headPathOf(projectPath string) string {
+	return filepath.Join(gitDirOf(projectPath), "HEAD")
 }
 
 // readBranchFile extracts the branch name from a .git/HEAD file.

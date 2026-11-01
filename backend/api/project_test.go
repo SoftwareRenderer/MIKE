@@ -1,8 +1,9 @@
 package api
 
 import (
-	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -143,29 +144,6 @@ func makeCommittedRepo(t *testing.T, path string, commits int) string {
 		runGit("commit", "-m", "commit")
 	}
 	return "file://" + path
-}
-
-// readSSEEvents parses the "data: <json>" frames of an SSE response body.
-func readSSEEvents(t *testing.T, body io.Reader) []map[string]any {
-	t.Helper()
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-	var events []map[string]any
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-		var ev map[string]any
-		if err := json.Unmarshal([]byte(line[len("data: "):]), &ev); err != nil {
-			t.Fatalf("bad SSE frame %q: %v", line, err)
-		}
-		events = append(events, ev)
-	}
-	if err := scanner.Err(); err != nil {
-		t.Fatalf("read SSE: %v", err)
-	}
-	return events
 }
 
 // TestHandleCloneStreamsProgress verifies that HandleClone streams clone
@@ -417,35 +395,150 @@ func TestHandleSandboxBuildNoDockerfilePath(t *testing.T) {
 	}
 }
 
-// TestBuildWantsNoCache checks that only an explicit truthy ?no_cache value
-// disables the build layer cache; anything else keeps the default cached build.
-func TestBuildWantsNoCache(t *testing.T) {
-	tests := []struct {
-		query string
-		want  bool
-	}{
-		{"", false},
-		{"no_cache=", false},
-		{"no_cache=1", true},
-		{"no_cache=true", true},
-		{"no_cache=TRUE", true},
-		{"no_cache=0", false},
-		{"no_cache=false", false},
-		{"no_cache=maybe", false},
-		{"other=1", false},
+// recordingSandbox answers the project handler's sandbox calls with the batches it was handed, and a build with
+// the result or the failure the test put in it.
+type recordingSandbox struct {
+	stoppedProjects []string
+	result          *sandbox.BuildResult
+	err             error
+}
+
+func (r *recordingSandbox) BuildProjectImage(context.Context, *types.Project, sandbox.BuildOptions, func(string)) (*sandbox.BuildResult, error) {
+	return r.result, r.err
+}
+
+func (r *recordingSandbox) StopProjectContainers(projectID string, _ []string) {
+	r.stoppedProjects = append(r.stoppedProjects, projectID)
+}
+
+// sseDataFrames is the payload of every `data:` frame of an SSE body, in the order they were written.
+func sseDataFrames(body string) []string {
+	var frames []string
+	for _, line := range strings.Split(body, "\n") {
+		if value, ok := strings.CutPrefix(line, "data:"); ok {
+			frames = append(frames, strings.TrimPrefix(value, " "))
+		}
 	}
-	for _, tc := range tests {
-		t.Run("query="+tc.query, func(t *testing.T) {
-			u := "/api/projects/p1/sandbox/build"
-			if tc.query != "" {
-				u += "?" + tc.query
-			}
-			req := httptest.NewRequest(http.MethodPost, u, nil)
-			if got := buildWantsNoCache(req); got != tc.want {
-				t.Fatalf("buildWantsNoCache(%q) = %v, want %v", tc.query, got, tc.want)
-			}
-		})
+	return frames
+}
+
+// readSSEEvents parses the "data: <json>" frames of an SSE response body.
+func readSSEEvents(t *testing.T, body io.Reader) []map[string]any {
+	t.Helper()
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("read SSE: %v", err)
 	}
+	var events []map[string]any
+	for _, frame := range sseDataFrames(string(raw)) {
+		var ev map[string]any
+		if err := json.Unmarshal([]byte(frame), &ev); err != nil {
+			t.Fatalf("bad SSE frame %q: %v", frame, err)
+		}
+		events = append(events, ev)
+	}
+	return events
+}
+
+// The build stream is plain lines with one JSON frame at the end, and the reader can only end its wait by
+// recognizing that frame. Without the discriminator the person reads "Build completed without result" over an
+// image that exists.
+func TestSandboxBuildStreamEndsInAFrameTheReaderCanIdentify(t *testing.T) {
+	h, projID, s := testProjectHandlerWithStore(t)
+	if err := s.UpdateProjectSandboxDockerfilePath(projID, "Dockerfile"); err != nil {
+		t.Fatal(err)
+	}
+	h.sandboxMgr = &recordingSandbox{result: &sandbox.BuildResult{
+		Image: "localhost/mike-test:abc", Commit: "abc", RunSetHash: strings.Repeat("a", 64), Files: 2,
+	}}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/projects/{projectID}/sandbox/build", h.HandleSandboxBuild)
+	rr := doSandboxBuildRequest(t, mux, projID)
+
+	frames := sseDataFrames(rr.Body.String())
+	if len(frames) == 0 {
+		t.Fatalf("stream wrote no frame: %q", rr.Body.String())
+	}
+	last := frames[len(frames)-1]
+	var result map[string]any
+	if err := json.Unmarshal([]byte(last), &result); err != nil {
+		t.Fatalf("last frame %q is not the JSON result: %v", last, err)
+	}
+	if status, ok := result["status"].(string); !ok || status == "" {
+		t.Fatalf("result frame %q carries no status string for the reader to pick it out by", last)
+	}
+	// The result is flattened, not nested: the reader's type is the build's own field list.
+	if result["image"] != "localhost/mike-test:abc" || result["files"] != float64(2) {
+		t.Fatalf("result frame %q does not carry the build's own fields flattened", last)
+	}
+}
+
+// The reader treats a stream that ends without a result frame as one that never answered, so a build that failed
+// must be told to it some other way: one `error: …` line and no JSON frame after it.
+func TestSandboxBuildStreamEndsWithNoErrorLineWhenItEndsWithNoResult(t *testing.T) {
+	h, projID, s := testProjectHandlerWithStore(t)
+	if err := s.UpdateProjectSandboxDockerfilePath(projID, "Dockerfile"); err != nil {
+		t.Fatal(err)
+	}
+	h.sandboxMgr = &recordingSandbox{err: errors.New("build docker.io/library/node:22: exit status 125")}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/projects/{projectID}/sandbox/build", h.HandleSandboxBuild)
+	rr := doSandboxBuildRequest(t, mux, projID)
+
+	frames := sseDataFrames(rr.Body.String())
+	last := frames[len(frames)-1]
+	if !strings.HasPrefix(last, "error: ") {
+		t.Fatalf("last frame %q is not the error line the reader is shown", last)
+	}
+	for _, frame := range frames {
+		if strings.HasPrefix(frame, "{") {
+			t.Fatalf("a failed build wrote a result frame: %q", frame)
+		}
+	}
+}
+
+// TestBuildOptionsFromRequest checks the build's one control. A malformed value is a refusal rather than a
+// default: an ignored `confirm_run_set` is a person's approval thrown away, and an ignored `no_cache` is a
+// request for something nobody honoured.
+func TestBuildOptionsFromRequest(t *testing.T) {
+	hash := strings.Repeat("a", 64)
+
+	// Absent means no approval — an empty value too, which is unset rather than a malformed hash — and an
+	// unrelated parameter is nobody's business.
+	for _, query := range []string{"", "other=1", "confirm_run_set="} {
+		opts, err := buildOptionsFromRequest(buildRequestWithQuery(t, query))
+		if err != nil || opts.ConfirmRunSet != "" {
+			t.Errorf("query %q: %v (%+v), want an unapproved build", query, err, opts)
+		}
+	}
+
+	opts, err := buildOptionsFromRequest(buildRequestWithQuery(t, "confirm_run_set="+hash))
+	if err != nil || opts.ConfirmRunSet != hash {
+		t.Fatalf("a real hash was refused: %v (%+v)", err, opts)
+	}
+
+	for _, bad := range []string{"confirm_run_set=anything", "confirm_run_set=" + hash[:63] + "z"} {
+		if _, err := buildOptionsFromRequest(buildRequestWithQuery(t, bad)); err == nil {
+			t.Errorf("%q accepted, want the refusal that names the hash the stream reported", bad)
+		}
+	}
+
+	// There is no build cache to skip, so the key is refused by name — by presence, not by value: a request that
+	// sent it asked for something.
+	for _, gone := range []string{"no_cache=", "no_cache=1", "no_cache=maybe"} {
+		_, err := buildOptionsFromRequest(buildRequestWithQuery(t, gone))
+		if err == nil || !strings.Contains(err.Error(), "no_cache") {
+			t.Errorf("%q: err = %v, want a refusal naming no_cache", gone, err)
+		}
+	}
+}
+
+// buildRequestWithQuery is the build route with a query string, which every option test reads.
+func buildRequestWithQuery(t *testing.T, query string) *http.Request {
+	t.Helper()
+	return httptest.NewRequest(http.MethodPost, "/api/projects/p1/sandbox/build?"+query, nil)
 }
 
 // A sandbox image that names no registry ("ubuntu:24.04") breaks every later sandbox start, so it

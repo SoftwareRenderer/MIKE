@@ -2,14 +2,12 @@ package sandbox
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"mike/backend/testutil/sandboxcheck"
 	"mike/backend/types"
 	"mike/pkg/sandboxruntime"
 )
@@ -179,21 +177,23 @@ func TestEnsureImageForProjectUnreadableDockerfile(t *testing.T) {
 	}
 }
 
-// TestEnsureImageForProjectBuildsProjectImage: a Dockerfile-backed project gets its image built before
-// anything runs in it.
+// TestEnsureImageForProjectBuildsProjectImage: a Dockerfile-backed project gets its image built, in the
+// sandbox, from its commit, before anything runs in it — and the second call finds it already there.
 func TestEnsureImageForProjectBuildsProjectImage(t *testing.T) {
-	sm := NewSandboxManager(sandboxruntime.Boot{})
-	sandboxcheck.Require(t, BaseImage)
-
-	dir := t.TempDir()
-	dockerfile := filepath.Join(dir, "Dockerfile")
-	if err := os.WriteFile(dockerfile, []byte("FROM docker.io/library/alpine:latest\nRUN echo prepared\n"), 0o644); err != nil {
-		t.Fatalf("write dockerfile: %v", err)
+	requireBuilder(t)
+	sm := NewSandboxManager(bootWithBridge(t))
+	if !sm.available {
+		t.Skip("gVisor is not available on this host")
 	}
-	project := &types.Project{Name: "ensure-image-proj", SandboxDockerfilePath: dockerfile}
+	useScratchRoot(t)
+
+	repo := testRepo(t, map[string]string{
+		"Dockerfile": "FROM scratch\nCOPY prepared /prepared\n",
+		"prepared":   "prepared\n",
+	})
+	project := &types.Project{Name: "ensure-image-proj", Path: repo, SandboxDockerfilePath: filepath.Join(repo, "Dockerfile")}
 	image := ProjectImageName(project.Name)
 	t.Cleanup(func() { _, _ = sm.podmanExec("rmi", image) })
-
 	if sm.ImageReady(image) {
 		_, _ = sm.podmanExec("rmi", image)
 	}
@@ -229,7 +229,8 @@ func TestEnsureImageForProjectBuildsProjectImage(t *testing.T) {
 		t.Error("no build output was reported through onProgress")
 	}
 
-	// A second call is a no-op: the image exists, so nothing is announced and nothing is rebuilt.
+	// A second call is a no-op: the image exists, so nothing is announced and nothing is rebuilt. The cache
+	// key the build stamped on the image is what answers "already the one you want" without staging a byte.
 	phases = nil
 	if _, err := sm.EnsureImageForProject(project, func(status types.SandboxImageStatus) {
 		phases = append(phases, status.Phase)

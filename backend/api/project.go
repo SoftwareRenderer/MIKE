@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -44,7 +45,7 @@ type ProjectHandler struct {
 
 // projectSandboxOps is the sandbox operations owned by the project.
 type projectSandboxOps interface {
-	BuildImageWithOptions(projectName, dockerfilePath string, opts sandbox.BuildOptions, onProgress func(line string)) error
+	BuildProjectImage(ctx context.Context, project *types.Project, opts sandbox.BuildOptions, onProgress func(line string)) (*sandbox.BuildResult, error)
 	StopProjectContainers(projectID string, taskIDs []string)
 }
 
@@ -235,6 +236,12 @@ func (h *ProjectHandler) createProjectFromRequest(req types.CreateProjectRequest
 	if err := h.checkHostPath(req.SandboxDockerfilePath); err != nil {
 		return nil, http.StatusForbidden, "sandbox_dockerfile_path: " + err.Error()
 	}
+	// The build context names a subtree of a commit, so it is checked as a repository path and not as a
+	// host path: a value that names a directory on this machine is a misunderstanding of the field.
+	contextRoot, err := sandbox.NormalizeBuildContextValue(req.SandboxBuildContext)
+	if err != nil {
+		return nil, http.StatusBadRequest, "sandbox_build_context: " + err.Error()
+	}
 
 	existingIDs := []string{}
 	projects, _ := h.store.ListProjects()
@@ -270,6 +277,7 @@ func (h *ProjectHandler) createProjectFromRequest(req types.CreateProjectRequest
 		SandboxNetworkIsolation: networkIsolation,
 		SandboxImage:            req.SandboxImage,
 		SandboxDockerfilePath:   req.SandboxDockerfilePath,
+		SandboxBuildContext:     contextRoot,
 		SandboxMemoryLimit:      req.SandboxMemoryLimit,
 		ForwardPorts:            forwardPorts,
 		SandboxMounts:           req.SandboxMounts,
@@ -452,25 +460,24 @@ func (h *ProjectHandler) applyPricing(stats *types.ProjectStats) {
 	}
 }
 
-// buildWantsNoCache checks if build request skips layer cache.
-func buildWantsNoCache(r *http.Request) bool {
-	v := r.URL.Query().Get("no_cache")
-	if v == "" {
-		return false
-	}
-	noCache, err := strconv.ParseBool(v)
-	if err != nil {
-		return false
-	}
-	return noCache
+// runSetHashPattern accepts the instruction-set hash the build reports and accepts back as confirmation.
+var runSetHashPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// buildResultFrame is the build stream's last frame: the build's own fields flattened beside the `status` the
+// reader picks the result out by. Every other frame of that stream is a line for the log, so a result the reader
+// cannot tell from a line is a build that finished and reads as one that never answered.
+type buildResultFrame struct {
+	Status string `json:"status"`
+	*sandbox.BuildResult
 }
 
-// HandleSandboxBuild builds container image from Dockerfile; streams progress over SSE.
+// HandleSandboxBuild builds the project's sandbox image from its Dockerfile, streaming progress over SSE.
+//
+// The plan is reported before anything runs — commit, file and byte counts, base image, `RUN` steps — so the
+// confirmation below is a decision rather than a formality.
 func (h *ProjectHandler) HandleSandboxBuild(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("projectID")
-	noCache := buildWantsNoCache(r)
 
-	// Get the project to find the Dockerfile path
 	project, ok := resolveProject(w, r, h.store)
 	if !ok {
 		return
@@ -484,34 +491,51 @@ func (h *ProjectHandler) HandleSandboxBuild(w http.ResponseWriter, r *http.Reque
 		httputil.JSONError(w, http.StatusInternalServerError, "streaming not supported")
 		return
 	}
-
 	// Each frame is one raw progress line, not JSON: this stream's reader shows the lines.
 	sendLine := sse.Data
 
-	if noCache {
-		sendLine("Building sandbox image from Dockerfile (no cache)...")
-	} else {
-		sendLine("Building sandbox image from Dockerfile...")
+	opts, err := buildOptionsFromRequest(r)
+	if err != nil {
+		httputil.JSONError(w, http.StatusBadRequest, err.Error())
+		return
 	}
+	sendLine("Building the sandbox image…")
 
-	err := h.sandboxMgr.BuildImageWithOptions(project.Name, project.SandboxDockerfilePath, sandbox.BuildOptions{NoCache: noCache}, func(line string) {
-		sendLine(line)
+	// The request's context bounds the build: closing the tab stops the container.
+	result, err := h.sandboxMgr.BuildProjectImage(r.Context(), project, opts, func(line string) {
+		_ = sendLine(line)
 	})
-
 	if err != nil {
 		sendLine("error: " + err.Error())
 		return
+	}
+	// The instruction set is recorded only for an image that exists. A build that failed or was refused
+	// leaves the approval the person already gave, which is what makes the next build's refusal true.
+	if err := h.store.UpdateProjectSandboxRunSetHash(project.ID, result.RunSetHash); err != nil {
+		sendLine("warning: the approved instruction set could not be recorded: " + err.Error())
 	}
 
 	// Stop all containers and terminal sessions so they pick up the new image
 	h.stopProjectSandbox(id)
 
-	// Final result as JSON
-	sse.JSON(map[string]string{
-		"status":  "built",
-		"image":   sandbox.ProjectImageName(project.Name),
-		"project": id,
-	})
+	sse.JSON(buildResultFrame{Status: "built", BuildResult: result})
+}
+
+// buildOptionsFromRequest reads the build's one control. An unparseable value is a refusal, not a default: an
+// ignored `confirm_run_set` would be a person's approval thrown away.
+func buildOptionsFromRequest(r *http.Request) (sandbox.BuildOptions, error) {
+	opts := sandbox.BuildOptions{}
+	// Refused by name rather than ignored, and by presence rather than by value: a request that sent this key
+	// asked for something, and answering it with an ordinary build is the silent default this ladder refuses
+	// elsewhere. There is nothing to skip — a build container's store is born empty and dies with it.
+	if _, ok := r.URL.Query()["no_cache"]; ok {
+		return opts, fmt.Errorf("no_cache: a build always rebuilds, so there is no build cache to skip")
+	}
+	opts.ConfirmRunSet = strings.TrimSpace(r.URL.Query().Get("confirm_run_set"))
+	if opts.ConfirmRunSet != "" && !runSetHashPattern.MatchString(opts.ConfirmRunSet) {
+		return opts, fmt.Errorf("confirm_run_set: expected the instruction-set hash the refusal reported")
+	}
+	return opts, nil
 }
 
 // HandleByID handles GET, PUT, DELETE for a single project.
@@ -598,6 +622,12 @@ func (h *ProjectHandler) handleUpdateProject(w http.ResponseWriter, r *http.Requ
 			return
 		}
 	}
+	if req.SandboxBuildContext != nil {
+		if _, err := sandbox.NormalizeBuildContextValue(*req.SandboxBuildContext); err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, "sandbox_build_context: "+err.Error())
+			return
+		}
+	}
 	// The MCP opt-in list is validated here rather than at its write, so a list over the bound leaves
 	// the project exactly as it was.
 	var mcpIDs []string
@@ -613,7 +643,7 @@ func (h *ProjectHandler) handleUpdateProject(w http.ResponseWriter, r *http.Requ
 	// Modifying sandbox settings during execution would kill bridge processes
 	// mid-tool-call, causing "broken pipe" errors.
 	hasSandboxChange := req.SandboxEnabled != nil || req.SandboxNetworkIsolation != nil ||
-		req.SandboxImage != nil || req.SandboxDockerfilePath != nil ||
+		req.SandboxImage != nil || req.SandboxDockerfilePath != nil || req.SandboxBuildContext != nil ||
 		req.SandboxMemoryLimit != nil || req.SandboxForwardPorts != nil ||
 		req.SandboxMounts != nil || req.SandboxEnvs != nil ||
 		req.SandboxCapabilities != nil
@@ -684,6 +714,14 @@ func (h *ProjectHandler) applySandboxFields(id string, req types.UpdateProjectRe
 	if req.SandboxImage != nil {
 		if updateErr := h.store.UpdateProjectSandboxImage(id, *req.SandboxImage); updateErr != nil {
 			return errs.Operation("update sandbox image setting", updateErr)
+		}
+	}
+	if req.SandboxBuildContext != nil {
+		// The value was validated before anything was written; normalizing it again is what stores the
+		// one spelling of the subtree rather than the one that was typed.
+		contextRoot, _ := sandbox.NormalizeBuildContextValue(*req.SandboxBuildContext)
+		if updateErr := h.store.UpdateProjectSandboxBuildContext(id, contextRoot); updateErr != nil {
+			return errs.Operation("update sandbox setting", updateErr)
 		}
 	}
 	if req.SandboxDockerfilePath != nil {

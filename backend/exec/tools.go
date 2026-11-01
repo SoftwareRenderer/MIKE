@@ -302,17 +302,8 @@ func formatLocationArray(result any, worktreePath string, label string) string {
 		if !ok {
 			continue
 		}
-		uri, _ := loc["uri"].(string)
-		rangeMap, _ := loc["range"].(map[string]any)
-		start, _ := rangeMap["start"].(map[string]any)
-		line, _ := start["line"].(float64)
-		character, _ := start["character"].(float64)
-
-		// Extract relative path from URI
-		path := strings.TrimPrefix(uri, "file://")
-		rel, _ := filepath.Rel(worktreePath, path)
-
-		fmt.Fprintf(&buf, "  %d. %s:%d:%d\n", i+1, rel, int(line)+1, int(character)+1)
+		rel, line, character := locationOf(loc, worktreePath)
+		fmt.Fprintf(&buf, "  %d. %s:%d:%d\n", i+1, rel, line, character)
 	}
 	return buf.String()
 }
@@ -323,17 +314,8 @@ func formatDefinitionResult(result any, worktreePath string) string {
 	switch v := result.(type) {
 	case map[string]any:
 		// Single Location
-		loc := v
-		uri, _ := loc["uri"].(string)
-		rangeMap, _ := loc["range"].(map[string]any)
-		start, _ := rangeMap["start"].(map[string]any)
-		line, _ := start["line"].(float64)
-		character, _ := start["character"].(float64)
-
-		path := strings.TrimPrefix(uri, "file://")
-		rel, _ := filepath.Rel(worktreePath, path)
-
-		return fmt.Sprintf("Definition found at %s:%d:%d", rel, int(line)+1, int(character)+1)
+		rel, line, character := locationOf(v, worktreePath)
+		return fmt.Sprintf("Definition found at %s:%d:%d", rel, line, character)
 	case []any:
 		// Location[] or LocationLink[]
 		if len(v) == 0 {
@@ -346,26 +328,31 @@ func formatDefinitionResult(result any, worktreePath string) string {
 			if !ok {
 				continue
 			}
-			uri, _ := loc["uri"].(string)
-			// Handle LocationLink (targetRange) vs Location (range)
-			rangeMap, _ := loc["range"].(map[string]any)
-			if rangeMap == nil {
-				rangeMap, _ = loc["targetSelectionRange"].(map[string]any)
-			}
-			start, _ := rangeMap["start"].(map[string]any)
-			line, _ := start["line"].(float64)
-			character, _ := start["character"].(float64)
-
-			path := strings.TrimPrefix(uri, "file://")
-			rel, _ := filepath.Rel(worktreePath, path)
-
-			fmt.Fprintf(&buf, "  %d. %s:%d:%d\n", i+1, rel, int(line)+1, int(character)+1)
+			rel, line, character := locationOf(loc, worktreePath)
+			fmt.Fprintf(&buf, "  %d. %s:%d:%d\n", i+1, rel, line, character)
 		}
 		return buf.String()
 	default:
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return string(data)
 	}
+}
+
+// locationOf reads one LSP Location, or a LocationLink by the range it targets — a definition answer
+// carries either, and a reference answer can carry either. LSP counts lines and characters from zero,
+// so the pair comes back ready to print for a person.
+func locationOf(loc map[string]any, worktreePath string) (rel string, line, character int) {
+	uri, _ := loc["uri"].(string)
+	rangeMap, _ := loc["range"].(map[string]any)
+	if rangeMap == nil {
+		rangeMap, _ = loc["targetSelectionRange"].(map[string]any)
+	}
+	start, _ := rangeMap["start"].(map[string]any)
+	lineF, _ := start["line"].(float64)
+	charF, _ := start["character"].(float64)
+
+	rel, _ = filepath.Rel(worktreePath, strings.TrimPrefix(uri, "file://"))
+	return rel, int(lineF) + 1, int(charF) + 1
 }
 
 // formatHoverResult formats hover information result.

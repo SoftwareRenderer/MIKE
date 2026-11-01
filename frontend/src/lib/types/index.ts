@@ -71,6 +71,8 @@ export interface Project {
     sandbox_network_isolation?: boolean;
     sandbox_image?: string;
     sandbox_dockerfile_path?: string;
+    /** The committed subtree a Dockerfile build sends as its build context, relative to the repository root. Empty means the directory holding the Dockerfile. */
+    sandbox_build_context?: string;
     sandbox_memory_limit?: number;
     forward_ports?: PortForward[];
     sandbox_mounts?: SandboxMount[];
@@ -94,6 +96,7 @@ export interface ProjectUpdates {
     sandbox_network_isolation?: boolean;
     sandbox_image?: string;
     sandbox_dockerfile_path?: string;
+    sandbox_build_context?: string;
     sandbox_memory_limit?: number;
     sandbox_forward_ports?: PortForward[];
     sandbox_mounts?: SandboxMount[];
@@ -476,6 +479,12 @@ export interface ProjectCounts {
     backlog: number;
     in_progress: number;
     review: number;
+}
+
+/** The server's own filesystem, as the `storage_usage` frame pushes it. Bytes, not a rounded unit. */
+export interface StorageUsage {
+    total_bytes: number;
+    avail_bytes: number;
 }
 
 export interface ModelStats {

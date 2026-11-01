@@ -171,6 +171,9 @@ type AppStreamManager struct {
 	// Latest-known sandbox memory stats
 	sandboxStatsProvider func(projectID, taskID string) *types.SandboxMemoryStats
 
+	// storageProbe feeds storageUsageFrame; nil sends nothing.
+	storageProbe func() (fsutil.DiskUsage, bool)
+
 	// writeTimeout bounds a single frame's delivery (httputil.WriteTimeout).
 	writeTimeout time.Duration
 }
@@ -595,6 +598,48 @@ func (asm *AppStreamManager) BroadcastProjectCounts() {
 func (asm *AppStreamManager) Broadcast(projectID string) {
 	asm.sendBoardPayload(projectID, appFrame(types.WSTypeBoardRefresh, nil))
 	asm.BroadcastProjectCounts()
+	// Runs after every teardown step, so freed bytes are already counted.
+	asm.broadcastStorageUsage()
+}
+
+// SetStorageProbe registers the reading storageUsageFrame carries. An unwired probe and ok=false both
+// mean no reading.
+func (asm *AppStreamManager) SetStorageProbe(probe func() (fsutil.DiskUsage, bool)) {
+	asm.mu.Lock()
+	asm.storageProbe = probe
+	asm.mu.Unlock()
+}
+
+// storageUsageFrame builds the storage_usage frame, or nil when there is nothing to send. The client
+// divides by total_bytes, so a zero total sends nothing.
+func (asm *AppStreamManager) storageUsageFrame() *outboundFrame {
+	asm.mu.RLock()
+	probe := asm.storageProbe
+	asm.mu.RUnlock()
+	if probe == nil {
+		return nil
+	}
+	usage, ok := probe()
+	if !ok || usage.TotalBytes == 0 {
+		return nil
+	}
+	msg, err := json.Marshal(appFrame(types.WSTypeStorageUsage, map[string]any{
+		"total_bytes": usage.TotalBytes,
+		"avail_bytes": usage.AvailBytes,
+	}))
+	if err != nil {
+		return nil
+	}
+	return &outboundFrame{data: msg, bucket: string(types.WSTypeStorageUsage)}
+}
+
+// broadcastStorageUsage pushes the filesystem reading to every client. One missed is one kept.
+// docs/api-contract.md → The filesystem reading is pushed
+func (asm *AppStreamManager) broadcastStorageUsage() {
+	frame := asm.storageUsageFrame()
+	if frame != nil {
+		asm.BroadcastAll(frame.data, frame.bucket)
+	}
 }
 
 // BroadcastCommitStatus sends a commit_status event to all clients of a project.
@@ -674,6 +719,10 @@ func (asm *AppStreamManager) BroadcastTaskUpdated(projectID string, task *types.
 		"task": TaskForBrowser(task),
 	}))
 	asm.BroadcastProjectCounts()
+	// Done is the status the reading measures.
+	if task != nil && task.Status == types.StatusDone {
+		asm.broadcastStorageUsage()
+	}
 }
 
 // BroadcastTaskDeleted drops the task's replay buffer and broadcasts deletion.
@@ -1087,6 +1136,10 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 
 	// Send initial project counts
 	asm.BroadcastProjectCounts()
+	// The Done count's reading too: this connection has missed every push.
+	if frame := asm.storageUsageFrame(); frame != nil {
+		client.out.push(frame.data, frame.bucket)
+	}
 
 	// Read loop — handle client messages
 	for {

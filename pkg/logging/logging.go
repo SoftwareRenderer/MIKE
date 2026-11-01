@@ -30,6 +30,9 @@ import (
 const (
 	TaskID    = "task_id"
 	ProjectID = "project_id"
+	// BuildID names one image build, and is the only way a leftover container or scratch directory can be
+	// traced back to the run that left it.
+	BuildID = "build_id"
 )
 
 // Components is the whole vocabulary of subsystem names. Copy one; do not invent one. The merges

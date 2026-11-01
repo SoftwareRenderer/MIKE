@@ -36,6 +36,9 @@ const (
 	WSTypeTaskEvent     WSMessageType = "task_event"
 	WSTypeBoardRefresh  WSMessageType = "board_refresh"
 	WSTypeProjectCounts WSMessageType = "project_counts"
+	// WSTypeStorageUsage carries the server's own filesystem — total_bytes and avail_bytes, flat on
+	// the frame.
+	WSTypeStorageUsage  WSMessageType = "storage_usage"
 	WSTypeProjectBranch WSMessageType = "project_branch"
 	WSTypeProjectPorts  WSMessageType = "project_ports"
 	WSTypeTaskUpdated   WSMessageType = "task_updated"

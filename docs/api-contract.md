@@ -67,6 +67,30 @@ fetch can run on a detached context while the swap stays behind a click; the rou
 - Use optimistic UI for user messages (add immediately, skip the echo).
 - Model/provider changes ride a `user_message` with optional `model_name`/`llama_server_url`.
 
+### The filesystem reading is pushed, never asked for
+
+`storage_usage` is a flat frame carrying `total_bytes` and `avail_bytes` — the server's own filesystem,
+measured with `statfs` on the worktrees root (`cfgStore.WorkspaceDir()`, wired in
+`backend/server/server.go`). It is the only way the browser learns this figure: there is no route for it,
+and `apiroutes` would refuse one, because a route nobody calls is the failure that rule exists for.
+
+- `avail_bytes` is what an unprivileged process can still write, so a filesystem's root-reserved blocks
+  count as *used*. That is the space this server can fill, and the Done count warns on it: past 80%
+  used the count turns red behind a warning symbol (`isStoragePressured` in `utils/storage-usage.ts`).
+- It is a **current-state value**, not a record of transitions: a client that misses one keeps the
+  reading it holds. Three things push it. `BroadcastTaskUpdated` does it when the task it carries has
+  landed in Done — that move is when the worktree the count represents grows. `Broadcast` does it after
+  a structural change has settled — that is how clearing Done, or deleting a task or a project, stops
+  the count from staying red over space just freed. That broadcast runs after the teardown steps, so the
+  bytes are gone by then. `HandleStream` does it to a connection it has just accepted, so a board opened
+  after the last task landed is not left showing nothing.
+- The frame is `null`-suppressed: with no probe wired, or a probe that cannot read the root, no frame is
+  sent at all. A frame of zeroes would be a divide-by-zero the client cannot tell from an empty disk.
+
+Test: `backend/stream/app_stream_storage_test.go` drives all three over a real socket. The name is in
+both vocabularies (`backend/types/ws.go`, `api/events.ts`) and `make archgate RULE=wsevents` fails if
+one side drops it.
+
 ### The task row a browser holds has no result text
 
 `output` is the text the agent reported when its turn ended. It is the largest field a row has, and nothing in
@@ -723,6 +747,34 @@ Tests: `backend/server/handler_fs_download_test.go`, `backend/fsutil/tar_test.go
 
 Tests: `backend/server/handler_fs_ops_test.go`; client side `frontend/src/lib/api/fs-ops.ts` and
 `frontend/src/lib/components/__tests__/file-browser-context-menu.unit.svelte.ts`.
+
+## A project image build is a stream with one control
+
+- `POST /api/projects/{projectID}/sandbox/build` answers as an SSE stream whose frames are **raw progress
+  lines**, not JSON objects — the reader prints them. A failure arrives as a final `error: …` line, because
+  the stream has already answered 200 by then. Its one control is a query parameter, read before the first
+  frame.
+- **`no_cache` is refused by name.** There is no build cache to skip, and a request that sent the key asked
+  for something, so it answers 400 rather than building anyway.
+- **`confirm_run_set` carries a hash, and it is the only answer to a changed `RUN` set.** An image records
+  the instruction set it was built from. A build whose `RUN` steps differ is refused inside the stream,
+  naming the new hash; re-sending that hash as `confirm_run_set` is the person's approval. The stored hash is
+  written only after an image exists, so a refused or failed build leaves the approval a person already gave
+  untouched. The mechanism and why `podman load` is the moment it guards:
+  `docs/sandbox-runtime.md → A project image builds inside a sandbox container`.
+- **`sandbox_build_context` is a repository path, on create and on update.** It names the committed subtree
+  the build may `COPY` from; empty means the directory holding the Dockerfile. A value is stored in one
+  cleaned spelling (`NormalizeBuildContextValue`), because the build's cache key is derived from it. An
+  absolute path, a home or variable reference, a drive letter, a `.git` segment or any `..` is a 400 naming
+  the field, before anything is written — the field is never a host path picker.
+- **The last frame of a successful build is `buildResultFrame`, flattened beside a `status` string.** The
+  reader picks the result out by that key. A result it cannot tell from a progress line is a build that finished
+  and reads as one that never answered. Test: `TestSandboxBuildStreamEndsInAFrameTheReaderCanIdentify`.
+- A build refusal keeps its own sentence on the way out, for the reason the Errors section gives: the
+  Dockerfile being built is the caller's own file.
+
+Tests: `backend/api/project_build_context_test.go`, `TestBuildOptionsFromRequest`,
+`backend/sandbox/build_e2e_test.go`.
 
 ## Errors
 

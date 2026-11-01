@@ -20,6 +20,11 @@ export interface SandboxDraft {
     memoryLimitMB: number | null;
     image: string;
     dockerfilePath: string;
+    /**
+     * The committed subtree the build sends as its context, relative to the repository root. Empty is not
+     * "no context": it is the directory holding the Dockerfile, the smallest one that answers `COPY`.
+     */
+    buildContext: string;
     imageSource: ImageSource;
     forwardPorts: PortForward[];
     mounts: SandboxMount[];
@@ -42,6 +47,7 @@ export function draftFromProject(project: Project): SandboxDraft {
         memoryLimitMB: memoryLimitToInput(project.sandbox_memory_limit ?? DEFAULT_MEMORY_LIMIT_MB),
         image: project.sandbox_image ?? '',
         dockerfilePath,
+        buildContext: project.sandbox_build_context ?? '',
         imageSource: dockerfilePath ? 'dockerfile' : 'image',
         forwardPorts: project.forward_ports ?? [],
         mounts: project.sandbox_mounts ?? [],
@@ -113,9 +119,15 @@ export function projectChanges(project: Project, draft: SandboxDraft): SandboxCh
         if (project.sandbox_dockerfile_path) {
             changes.sandbox_dockerfile_path = '';
         }
+        if (project.sandbox_build_context) {
+            changes.sandbox_build_context = '';
+        }
     } else {
         if (draft.dockerfilePath !== (project.sandbox_dockerfile_path ?? '')) {
             changes.sandbox_dockerfile_path = draft.dockerfilePath;
+        }
+        if (draft.buildContext !== (project.sandbox_build_context ?? '')) {
+            changes.sandbox_build_context = draft.buildContext;
         }
         if (project.sandbox_image) {
             changes.sandbox_image = '';

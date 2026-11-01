@@ -34,6 +34,7 @@
     import { setAppStreamRef } from '$lib/stream-ref';
     import { extensionManager } from '$lib/services/extension-manager.svelte';
     import { sandboxImageStatus } from '$lib/services/sandbox-image-status.svelte';
+    import { storageStatus } from '$lib/services/storage-usage.svelte';
     import { updateCheck } from '$lib/services/update-check.svelte';
     import { useLazyComponent } from '$lib/composables/use-lazy-component.svelte';
     import UpdateDot from './UpdateDot.svelte';
@@ -386,6 +387,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         if (mode === 'mirror') {
             appStream = createAppStream({
                 onProjectCounts: (counts) => { applyProjectCounts(counts); },
+                onStorageUsage: (usage) => { storageStatus.update(usage); },
                 onRefresh: () => refreshBoard(),
                 onDiffStats: () => {},
                 onBranch: (branch) => { currentBranch = branch; },
@@ -403,6 +405,9 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         appStream = createAppStream({
             onProjectCounts: (counts) => {
                 applyProjectCounts(counts);
+            },
+            onStorageUsage: (usage) => {
+                storageStatus.update(usage);
             },
             onRefresh: () => refreshBoard(),
             onDiffStats: (task_id, hash, _short_stat, files_n, untracked_n, untracked_lines, tracked_add, tracked_del, file_hashes, removed_files, staged_paths, has_committed_changes, already_merged) => {

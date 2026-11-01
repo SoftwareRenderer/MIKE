@@ -6,6 +6,8 @@
     import Card from './Card.svelte';
     import { fade } from 'svelte/transition';
     import { countWithDescendants } from '$lib/utils/task-utils';
+    import { storageStatus } from '$lib/services/storage-usage.svelte';
+    import { isStoragePressured, storageUsageSentence } from '$lib/utils/storage-usage';
     import { t } from '$lib/i18n';
 
     let { columnId, label, color, tasks, childrenMap, expandedTasks, onToggleExpanded, onDrop, onAddTask, projectId, onClearAll, onCreateChildTask, onSelect, canDrop, onRefreshBoard, multiSelect }: {
@@ -41,6 +43,26 @@
     let cardListEl: HTMLDivElement | null = null;
 
     let taskCount = $derived(tasks.reduce((sum, t) => sum + countWithDescendants(t.id, columnId, childrenMap), 0));
+
+    // Only the Done column, and only with a reading.
+    let storageUsage = $derived(columnId === 'done' ? storageStatus.usage : null);
+    let storageTip = $derived(storageUsageSentence(storageUsage));
+    let storageLow = $derived(isStoragePressured(storageUsage));
+    // A tap pins: a touch screen has no pointer leave to close it.
+    let storageHovered = $state(false);
+    let storagePinned = $state(false);
+    let storageOpen = $derived(storageHovered || storagePinned);
+    let storageTipId = $derived(`storage-tip-${columnId}`);
+
+    // A tap raises pointerenter too, which would reopen what its own click just closed.
+    function hoverStorage(e: PointerEvent, on: boolean) {
+        if (e.pointerType === 'mouse') storageHovered = on;
+    }
+
+    function dismissStorage() {
+        storageHovered = false;
+        storagePinned = false;
+    }
 
     function handleScroll() {
         if (!cardListEl) return;
@@ -98,7 +120,35 @@
             {label}
         </h3>
         <div class="header-right">
-            <span class="count">{taskCount}</span>
+            {#if storageTip}
+                <button
+                    type="button"
+                    class="count storage-count"
+                    class:is-low={storageLow}
+                    class:is-open={storageOpen}
+                    aria-label={storageLow ? t('board.column.storageLowAria') : t('board.column.storageAria')}
+                    aria-expanded={storageOpen}
+                    aria-describedby={storageOpen ? storageTipId : undefined}
+                    onpointerenter={(e) => hoverStorage(e, true)}
+                    onpointerleave={(e) => hoverStorage(e, false)}
+                    onclick={() => { storagePinned = !storagePinned; }}
+                    onkeydown={(e) => { if (e.key === 'Escape') dismissStorage(); }}
+                >
+                    {#if storageLow}
+                        <svg class="storage-warn" width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                            <path d="M8 2 14.6 13.5H1.4L8 2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                            <path d="M8 6.4v3.1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                            <circle cx="8" cy="11.7" r="0.85" fill="currentColor"/>
+                        </svg>
+                    {/if}
+                    <span>{taskCount}</span>
+                </button>
+                {#if storageOpen}
+                    <div id={storageTipId} class="storage-tip" role="tooltip">{storageTip}</div>
+                {/if}
+            {:else}
+                <span class="count">{taskCount}</span>
+            {/if}
             {#if columnId === 'backlog' && onAddTask && !addBtnVisible}
                 <button class="add-btn" onclick={() => onAddTask()} type="button" aria-label={t('board.column.newTaskAria')} title={t('board.column.newTaskAria')}>
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
@@ -160,12 +210,20 @@
             min-width: 340px;
         }
     }
+    /* Widen the tap target where there is no hover. */
+    @media (hover: none) {
+        .storage-count {
+            padding: 8px 12px;
+        }
+    }
     .column-header {
         display: flex;
         align-items: center;
         justify-content: space-between;
         padding: 12px 16px;
         border-bottom: 2px solid var(--col-color);
+        /* Against the header: the column clips overflow. */
+        position: relative;
     }
     .column-header h3 {
         display: flex;
@@ -187,6 +245,38 @@
         padding: 2px 8px;
         font-size: var(--text-xs);
         color: var(--color-text-secondary);
+    }
+    .storage-count {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        border: none;
+        font: inherit;
+        font-size: var(--text-xs);
+        cursor: pointer;
+    }
+    .storage-count.is-open {
+        background: var(--color-surface-4);
+    }
+    .storage-count.is-low {
+        color: var(--color-status-red);
+    }
+    .storage-warn {
+        flex-shrink: 0;
+    }
+    .storage-tip {
+        position: absolute;
+        top: calc(100% - 2px);
+        right: 12px;
+        z-index: var(--z-dropdown);
+        padding: 6px 9px;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        background: var(--color-surface-2);
+        box-shadow: var(--shadow-popover);
+        color: var(--color-text-secondary);
+        font-size: var(--text-xs);
+        white-space: nowrap;
     }
     .header-right {
         display: flex;

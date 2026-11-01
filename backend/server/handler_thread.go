@@ -437,10 +437,7 @@ func threadNameFromQuestion(content string) string {
 	if trimmed == "" {
 		return "Fork"
 	}
-	if runes := []rune(trimmed); len(runes) > 35 {
-		return string(runes[:35])
-	}
-	return trimmed
+	return types.Clip(trimmed, 35)
 }
 
 // checkoutThreadBranch checks out the branch a thread's work lives on and returns the branch it landed on

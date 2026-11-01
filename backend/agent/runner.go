@@ -232,20 +232,28 @@ func (r *AgentRunner) Prompt(ctx context.Context, message string, behavior ...st
 	return err
 }
 
+// send writes one argument-less command to the runner's stdin, best-effort: a closed runner has
+// nowhere to put it, and a command the adapter cannot encode is reported by the answer that never
+// arrives. The lock is what makes the closed check mean "this writer has finished".
+func (r *AgentRunner) send(ctx context.Context, command string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return
+	}
+	bytes := r.adapter.EncodeCommand(ctx, command, nil)
+	if bytes == nil {
+		return
+	}
+	_, _ = r.stdin.Write(bytes)
+}
+
 func (r *AgentRunner) EventChan() <-chan pkgagent.Event {
 	return r.eventChan
 }
 
 func (r *AgentRunner) Compact(ctx context.Context) (*pkgagent.CompactResult, error) {
-	r.mu.Lock()
-	if !r.closed {
-		bytes := r.adapter.EncodeCommand(ctx, pkgagent.CommandCompact, nil)
-		if bytes != nil {
-			r.stdin.Write(bytes) // best-effort
-		}
-	}
-	r.mu.Unlock()
-
+	r.send(ctx, pkgagent.CommandCompact)
 	select {
 	case result := <-r.compactChan:
 		return result, result.Err
@@ -257,15 +265,7 @@ func (r *AgentRunner) Compact(ctx context.Context) (*pkgagent.CompactResult, err
 }
 
 func (r *AgentRunner) QueryStats(ctx context.Context) pkgagent.SessionStatsData {
-	r.mu.Lock()
-	if !r.closed {
-		bytes := r.adapter.EncodeCommand(ctx, pkgagent.CommandStats, nil)
-		if bytes != nil {
-			r.stdin.Write(bytes) // best-effort
-		}
-	}
-	r.mu.Unlock()
-
+	r.send(ctx, pkgagent.CommandStats)
 	select {
 	case stats := <-r.statsChan:
 		return stats
@@ -277,15 +277,7 @@ func (r *AgentRunner) QueryStats(ctx context.Context) pkgagent.SessionStatsData 
 }
 
 func (r *AgentRunner) QueryModel(ctx context.Context) string {
-	r.mu.Lock()
-	if !r.closed {
-		bytes := r.adapter.EncodeCommand(ctx, pkgagent.CommandGetState, nil)
-		if bytes != nil {
-			r.stdin.Write(bytes) // best-effort
-		}
-	}
-	r.mu.Unlock()
-
+	r.send(ctx, pkgagent.CommandGetState)
 	timeout := time.NewTimer(3 * time.Second)
 	defer timeout.Stop()
 
