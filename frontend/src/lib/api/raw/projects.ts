@@ -30,17 +30,28 @@ export async function updateProjectRaw(id: string, updates: ProjectUpdates): Pro
     return res.json();
 }
 
-/** Stream build progress via SSE. onLine is called for each progress line.
- *  opts.noCache skips the container build layer cache for this build only. A plain fetch rather than
+/** The build stream's last frame: `sandbox.BuildResult` marshalled. Every other frame of that stream is a plain
+ *  line for the log, and `status` is what tells the result from a line that happens to start with `{`. */
+export interface SandboxBuildResult {
+    status: string;
+    image: string;
+    commit: string;
+    from: string;
+    run_set_hash: string;
+    cache_key: string;
+    files: number;
+}
+
+/**
+ *  Stream build progress via SSE, one line per frame. A plain fetch rather than
  *  `apiFetch` for the reason `streamCommitPreview` (`api/tasks.ts`) states. */
 export async function buildSandboxImageStream(
     id: string,
     onLine: (line: string) => void,
-    opts?: { noCache?: boolean },
-): Promise<{ status: string; image: string; project: string }> {
+): Promise<SandboxBuildResult> {
     const headers = await csrfHeaders();
 
-    const url = `${API_BASE}/projects/${id}/sandbox/build${opts?.noCache ? '?no_cache=1' : ''}`;
+    const url = `${API_BASE}/projects/${id}/sandbox/build`;
     const res = await fetch(url, {
         method: 'POST',
         credentials: 'include',
@@ -51,20 +62,20 @@ export async function buildSandboxImageStream(
         throw new Error(err.error || t('api.buildSandboxImage'));
     }
 
-    let result: { status: string; image: string; project: string } | null = null;
+    let result: SandboxBuildResult | null = null;
 
     for await (const frame of readEventStream(res)) {
         const data = frame.data;
-        // The final result is the JSON object carrying `status`; everything else is a line for the
-        // log, including a `{`-shaped line that is not valid JSON.
+        // The final result is the JSON object carrying a `status` string; everything else is a line for the
+        // log, including a `{`-shaped line that is not valid JSON or is JSON that names no result.
         if (data.startsWith('{')) {
             try {
                 const parsed = JSON.parse(data);
-                if (parsed && typeof parsed === 'object' && 'status' in parsed) {
-                    result = parsed;
+                if (parsed && typeof parsed === 'object' && typeof parsed.status === 'string') {
+                    result = parsed as SandboxBuildResult;
                     continue;
                 }
-            } catch {}
+            } catch { }
         }
         onLine(data);
     }

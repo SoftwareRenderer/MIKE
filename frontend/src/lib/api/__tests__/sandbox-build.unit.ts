@@ -2,28 +2,48 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import { buildSandboxImageStream } from '../raw/projects';
 
-/** Minimal SSE Response whose single chunk carries the given data frames. */
-function sseResponse(frames: string[]): Response {
-    const payload = new TextEncoder().encode(frames.map(f => `data: ${f}\n\n`).join(''));
-    let delivered = false;
+/** A `Response` whose body delivers the given text in the given chunks. */
+function streamInChunks(...text: string[]): Response {
+    const encoder = new TextEncoder();
+    let next = 0;
     return {
         ok: true,
         body: {
             getReader: () => ({
-                read: async () => {
-                    if (delivered) return { done: true, value: undefined };
-                    delivered = true;
-                    return { done: false, value: payload };
-                },
+                read: async () =>
+                    next < text.length
+                        ? { done: false, value: encoder.encode(text[next++]) }
+                        : { done: true, value: undefined },
                 releaseLock: () => { },
             }),
         },
     } as unknown as Response;
 }
 
-const RESULT = '{"status":"built","image":"proj-img","project":"p1"}';
+/** Minimal SSE Response whose single chunk carries the given data frames. */
+function sseResponse(frames: string[]): Response {
+    return streamInChunks(frames.map(f => `data: ${f}\n\n`).join(''));
+}
 
-describe('buildSandboxImageStream no-cache modifier', () => {
+// The frame `buildResultFrame` writes — `sandbox.BuildResult` flattened beside the `status` the reader picks the
+// result out by.
+const RESULT =
+    '{"status":"built","image":"localhost/mike-p1:1f2e3d","commit":"1f2e3d4c5b6a","from":"docker.io/library/node:22",' +
+    '"run_set_hash":"' + 'a'.repeat(64) + '","cache_key":"9f8e7d6c","files":2}';
+
+/**
+ * The lines `POST /api/projects/{id}/sandbox/build` really writes: the handler's opener, the guest's own
+ * failure tail, and the handler's `error: …` line. They arrive as plain text, and only the last frame of a
+ * successful build is the JSON result.
+ */
+const BUILD_LINES = [
+    'Building the sandbox image…',
+    'time="2026-09-25T02:56:52Z" level=error msg="[graphdriver] prior storage driver overlay failed: \'overlay\' is not supported over overlayfs"',
+    'Error: \'overlay\' is not supported over overlayfs, a mount_program is required',
+    'error: build docker.io/library/node:22: exit status 125',
+];
+
+describe('buildSandboxImageStream starts the build', () => {
     let fetchMock: ReturnType<typeof vi.fn>;
 
     beforeEach(() => {
@@ -32,7 +52,7 @@ describe('buildSandboxImageStream no-cache modifier', () => {
         fetchMock = vi.fn(async (url: any) =>
             String(url).includes('/api/auth/session')
                 ? ({ ok: true, json: async () => ({ authenticated: true, csrf_token: 'csrf-token' }) } as Response)
-                : sseResponse(['Building sandbox image from Dockerfile...', RESULT]));
+                : sseResponse([BUILD_LINES[0], RESULT]));
         vi.stubGlobal('fetch', fetchMock);
     });
 
@@ -46,28 +66,10 @@ describe('buildSandboxImageStream no-cache modifier', () => {
         return calls[0] as [string, RequestInit];
     }
 
-    function requestedUrl(): string {
-        return buildCall()[0];
-    }
-
-    it('omits the no_cache param by default', async () => {
+    it('posts to the build route with credentials and the CSRF header', async () => {
         const res = await buildSandboxImageStream('p1', () => { });
         expect(res.status).toBe('built');
-        expect(requestedUrl()).not.toContain('no_cache');
-    });
-
-    it('omits the no_cache param when explicitly disabled', async () => {
-        await buildSandboxImageStream('p1', () => { }, { noCache: false });
-        expect(requestedUrl()).not.toContain('no_cache');
-    });
-
-    it('appends no_cache=1 when the cache is disabled', async () => {
-        await buildSandboxImageStream('p1', () => { }, { noCache: true });
-        expect(requestedUrl()).toMatch(/\/projects\/p1\/sandbox\/build\?no_cache=1$/);
-    });
-
-    it('posts with credentials and the CSRF header', async () => {
-        await buildSandboxImageStream('p1', () => { }, { noCache: true });
+        expect(buildCall()[0]).toMatch(/\/projects\/p1\/sandbox\/build$/);
         const init = buildCall()[1];
         expect(init.method).toBe('POST');
         expect(init.credentials).toBe('include');
@@ -75,36 +77,7 @@ describe('buildSandboxImageStream no-cache modifier', () => {
     });
 });
 
-/**
- * The lines `POST /api/projects/{id}/sandbox/build` really writes — captured with `curl -N` against a
- * dev server whose podman cannot start. They arrive as plain text, and only the last frame of a
- * successful build is the JSON result.
- */
-const BUILD_LINES = [
-    'Building sandbox image from Dockerfile...',
-    'time="2026-09-25T02:56:52Z" level=error msg="[graphdriver] prior storage driver overlay failed: \'overlay\' is not supported over overlayfs"',
-    'Error: \'overlay\' is not supported over overlayfs, a mount_program is required',
-    'error: build image localhost/sandbox-sse-src: exit status 125',
-];
-
 describe('buildSandboxImageStream reads the server frame stream', () => {
-    function streamInChunks(...text: string[]): Response {
-        const encoder = new TextEncoder();
-        let next = 0;
-        return {
-            ok: true,
-            body: {
-                getReader: () => ({
-                    read: async () =>
-                        next < text.length
-                            ? { done: false, value: encoder.encode(text[next++]) }
-                            : { done: true, value: undefined },
-                    releaseLock: () => { },
-                }),
-            },
-        } as unknown as Response;
-    }
-
     it('hands every build line to the callback, byte for byte', async () => {
         const body = BUILD_LINES.map((l) => `data: ${l}\n\n`).join('');
         // One chunk ends inside the second frame's payload.
@@ -116,7 +89,22 @@ describe('buildSandboxImageStream reads the server frame stream', () => {
         const result = await buildSandboxImageStream('p1', (l) => lines.push(l));
 
         expect(lines).toEqual(BUILD_LINES);
-        expect(result).toEqual({ status: 'built', image: 'proj-img', project: 'p1' });
+        expect(result.image).toBe('localhost/mike-p1:1f2e3d');
+        expect(result.status).toBe('built');
+        expect(result.files).toBe(2);
+    });
+
+    it('keeps a JSON line that names no result in the log', async () => {
+        // A `{`-shaped frame is not thereby the result: only a `status` string is. Reading any object as the
+        // result would end the log at the first line that happens to look like JSON.
+        vi.stubGlobal('fetch', vi.fn(async () =>
+            streamInChunks('data: {"note":"a line that looks like JSON"}\n\ndata: ' + RESULT + '\n\n')));
+
+        const lines: string[] = [];
+        const result = await buildSandboxImageStream('p1', (l) => lines.push(l));
+
+        expect(lines).toEqual(['{"note":"a line that looks like JSON"}']);
+        expect(result.status).toBe('built');
     });
 
     it('reports a stream that ends without a result frame as incomplete', async () => {

@@ -30,6 +30,9 @@ const (
 	// stageSandboxStatsSampler before the containers it samples, or it reports a sandbox that no longer
 	// exists.
 	stageSandboxStatsSampler
+	// stageImageBuilds before the containers: an image build streams from a container of its own, and a
+	// build whose container vanished mid-stream leaves a scratch directory behind for the boot sweep.
+	stageImageBuilds
 	stageSandboxContainers
 	stageLoginRateLimiter
 	// stageDatabase last: every step above reads or writes through it.
@@ -48,6 +51,7 @@ var stageNames = [stageCount]string{
 	stageExtensionSandboxManager: "extension sandbox manager",
 	stageMemorySupervisor:        "memory supervisor",
 	stageSandboxStatsSampler:     "sandbox stats sampler",
+	stageImageBuilds:             "image builds",
 	stageSandboxContainers:       "sandbox containers",
 	stageLoginRateLimiter:        "login rate limiter",
 	stageDatabase:                "database",

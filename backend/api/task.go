@@ -899,7 +899,11 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 				logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("failed to ensure parent branch: %v", err)
 			} else {
 				// Reload task with updated parent info
-				task, _ = h.store.GetTask(projectID, taskID)
+				reloaded, ok := h.reloadTask(w, projectID, taskID)
+				if !ok {
+					return
+				}
+				task = reloaded
 			}
 		}
 	}
@@ -908,7 +912,11 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	if mergeErr := h.executor.MergeBranch(projectID, taskID, task); !exec.MergedDelivered(mergeErr) {
 		logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("merge failed: %v", mergeErr)
 		// Reload to check for merge conflict flag set by MergeBranch
-		task, _ = h.store.GetTask(projectID, taskID)
+		reloaded, ok := h.reloadTask(w, projectID, taskID)
+		if !ok {
+			return
+		}
+		task = reloaded
 		if !task.HasMergeConflict {
 			// Non-conflict merge failure (e.g., branch creation failed) — return error
 			h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
@@ -918,7 +926,11 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	}
 
 	// Reload task — MergeBranch may have set merge conflict flag
-	task, _ = h.store.GetTask(projectID, taskID)
+	reloaded, ok := h.reloadTask(w, projectID, taskID)
+	if !ok {
+		return
+	}
+	task = reloaded
 	if task.HasMergeConflict {
 		h.handConflictToAgent(w, projectID, taskID, task)
 		return
@@ -1200,25 +1212,7 @@ func (h *TaskHandler) HandleStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out := h.startUnderSchedule(projectID, task, children)
-	if len(out.startedChildren) > 0 {
-		h.respondWithStartedTask(w, projectID, out.startedChildren[len(out.startedChildren)-1])
-		return
-	}
-	if out.childStartErr != nil {
-		httputil.Fail(w, out.childStartErr, "start subtask", "subtask not found")
-		return
-	}
-	if out.selfStartErr != nil {
-		// Already-running arrives as errs.ErrConflict and answers 409 with its own sentence;
-		// a genuine fault answers 500 without echoing its text.
-		httputil.Fail(w, out.selfStartErr, "start task", "task not found")
-		return
-	}
-	// Nothing started and nothing failed: the row rests on children that are still finishing.
-	task, _ = h.store.GetTask(projectID, taskID)
-	h.refreshTaskPorts(task)
-	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-	httputil.JSONResponse(w, http.StatusOK, task)
+	h.respondScheduleOutcome(w, projectID, taskID, out, "start task")
 }
 
 // HandleStop pauses task and its descendants.
@@ -1232,10 +1226,7 @@ func (h *TaskHandler) HandleStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, _ := h.store.GetTask(projectID, taskID)
-	h.refreshTaskPorts(task)
-	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-	httputil.JSONResponse(w, http.StatusOK, task)
+	h.respondWithTask(w, projectID, taskID)
 }
 
 // HandlePrioritize prioritizes task in provider queue.
@@ -1370,48 +1361,68 @@ func (h *TaskHandler) HandleStartSubtask(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	out := h.startUnderSchedule(projectID, task, children)
+	h.respondScheduleOutcome(w, projectID, taskID, out, "start subtask")
+}
+
+// respondScheduleOutcome answers a startUnderSchedule result: the child it started, the refusal that
+// stopped a start, or the row resting on children still finishing. `operation` names the clicked row in
+// the error sentence, because the row that failed to start is the one a person clicked.
+func (h *TaskHandler) respondScheduleOutcome(w http.ResponseWriter, projectID, taskID string, out startOutcome, operation string) {
 	if len(out.startedChildren) > 0 {
-		h.respondWithStartedTask(w, projectID, out.startedChildren[len(out.startedChildren)-1])
+		h.respondWithTask(w, projectID, out.startedChildren[len(out.startedChildren)-1])
 		return
 	}
 	if out.childStartErr != nil {
-		httputil.Fail(w, out.childStartErr, "start subtask", "task not found")
+		// Both handlers land here on a child's failed start, so both name a subtask.
+		httputil.Fail(w, out.childStartErr, "start subtask", "subtask not found")
 		return
 	}
 	if out.selfStartErr != nil {
-		httputil.Fail(w, out.selfStartErr, "start subtask", "task not found")
+		// Already-running arrives as errs.ErrConflict and answers 409 with its own sentence;
+		// a genuine fault answers 500 without echoing its text.
+		httputil.Fail(w, out.selfStartErr, operation, "task not found")
 		return
 	}
 	// Nothing started and nothing failed: the row rests on children that are still finishing.
-	task, _ = h.store.GetTask(projectID, taskID)
+	h.respondWithTask(w, projectID, taskID)
+}
+
+// reloadTask reads the row again after an operation that may have rewritten it. The row can be gone — a
+// task deleted in another tab while the request ran — so the read and its refusal are one function: a
+// caller that ignored the error and dereferenced the result answered 500 with a nil dereference.
+func (h *TaskHandler) reloadTask(w http.ResponseWriter, projectID, taskID string) (*types.Task, bool) {
+	task, err := h.store.GetTask(projectID, taskID)
+	if err != nil {
+		httputil.Fail(w, err, "reload task", "task not found")
+		return nil, false
+	}
+	return task, true
+}
+
+// respondWithTask reloads the row and answers with it: dev ports refreshed, the board told, the JSON
+// written. A click that changed a task ends here rather than answering from the copy it started with,
+// because the executor writes the same row while the request is in flight.
+func (h *TaskHandler) respondWithTask(w http.ResponseWriter, projectID, taskID string) {
+	task, ok := h.reloadTask(w, projectID, taskID)
+	if !ok {
+		return
+	}
 	h.refreshTaskPorts(task)
 	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
-// respondWithStartedTask loads the just-started task, refreshes its dev ports,
-// broadcasts the update to the board, and returns it as a 200 JSON response.
-func (h *TaskHandler) respondWithStartedTask(w http.ResponseWriter, projectID, taskID string) {
-	startedTask, _ := h.store.GetTask(projectID, taskID)
-	if startedTask != nil {
-		h.refreshTaskPorts(startedTask)
-		h.boardStreamMgr.BroadcastTaskUpdated(projectID, startedTask)
-	}
-	httputil.JSONResponse(w, http.StatusOK, startedTask)
+// firstLine is the line a title is taken from: what a person typed before any newline.
+func firstLine(text string) string {
+	return strings.TrimSpace(strings.Split(text, "\n")[0])
 }
 
 func autoGenerateTitle(prompt string) string {
-	line := strings.Split(prompt, "\n")[0]
-	line = strings.TrimSpace(line)
-	if len(line) > 80 {
-		line = line[:77] + "..."
-	}
-	return line
+	return types.ClipMark(firstLine(prompt), 77, "...")
 }
 
 func isShortTitle(prompt string) bool {
-	line := strings.Split(prompt, "\n")[0]
-	line = strings.TrimSpace(line)
+	line := firstLine(prompt)
 	if line == "" {
 		return false
 	}

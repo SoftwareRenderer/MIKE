@@ -133,6 +133,7 @@ func TestGVisorCreateArgsIsTheIsolatedShape(t *testing.T) {
 		"--runtime-flag=ignore-cgroups",
 		"create",
 		"--pull", "never",
+		"--image-volume", "ignore",
 		"--name", "kanban-sandbox-task-1",
 		"--runtime", "runsc",
 		"--security-opt", "label=disable",
@@ -192,6 +193,23 @@ func TestAppendCapabilitiesRefusesAnUnisolatedGrant(t *testing.T) {
 	}
 	if got := out[len(isolated):]; !reflect.DeepEqual(got, []string{"--cap-add", "CHOWN", "--cap-add", "SYS_ADMIN"}) {
 		t.Errorf("appended %v", got)
+	}
+}
+
+// TestAppendCapabilitiesRefusesACapabilityThatIsNotAName holds the append path's own promise: a stored project row
+// is not the only caller, and `--privileged` written as a capability is an argument, not a grant.
+func TestAppendCapabilitiesRefusesACapabilityThatIsNotAName(t *testing.T) {
+	isolated := GVisorCreateArgs("kanban-sandbox-x")
+	// "ALL" is deliberately absent: it is a plain name, the policy judges shape rather than names, and
+	// the measurement behind GVisorIsolationForCaps is what makes a wide guest set survivable.
+	for _, cap := range []string{"", "  ", "SYS_ADMIN ALL", "--privileged", "--cap-add", "NET_RAW,CHOWN"} {
+		out, err := AppendCapabilities(isolated, []string{"CHOWN", cap})
+		if err == nil {
+			t.Errorf("%q was accepted as a capability", cap)
+		}
+		if !reflect.DeepEqual(out, isolated) {
+			t.Errorf("%q: a refusal left the argument list changed: %v", cap, out[len(isolated):])
+		}
 	}
 }
 

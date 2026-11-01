@@ -1,8 +1,7 @@
 <script lang="ts">
     /**
      * The image built here from a Dockerfile that lives on the server. The build is streamed into the
-     * log below and outlives this dialog; the cache checkbox modifies only the next build started
-     * from here and is never a saved setting.
+     * log below and outlives this dialog.
      */
     import { t } from '$lib/i18n';
     import Spinner from '../Spinner.svelte';
@@ -57,12 +56,6 @@
         </div>
         {#if draft.dockerfilePath}
             <div class="build-actions">
-                <!-- Applies to the next build started here, not a saved setting -->
-                <label class="cache-toggle" class:disabled={busy}
-                       title={t('sandbox.skipCacheTitle')}>
-                    <input type="checkbox" aria-label={t('sandbox.disableCacheAria')} bind:checked={draft.buildNoCache} disabled={busy} />
-                    <span class="cache-toggle-text">{t('sandbox.disableCache')}</span>
-                </label>
                 {#if dockerfileChanged}
                     <button type="button" class="btn-build" onclick={() => draft.rebuild(project)} disabled={busy} title={t('sandbox.buildImage')}>
                         {#if draft.building}
@@ -75,7 +68,7 @@
                         {draft.building ? t('sandbox.building') : t('sandbox.build')}
                     </button>
                 {:else}
-                    <button type="button" class="btn-rebuild" onclick={() => draft.rebuild(project)} disabled={busy} title={draft.buildNoCache ? t('sandbox.rebuildImageNoCache') : t('sandbox.rebuildImage')}>
+                    <button type="button" class="btn-rebuild" onclick={() => draft.rebuild(project)} disabled={busy} title={t('sandbox.rebuildImage')}>
                         {#if draft.building}
                             <Spinner decorative />
                         {:else}
@@ -112,6 +105,13 @@
         </button>
     </div>
 
+    <div class="build-context-row">
+        <label class="build-context-label" for="sandbox-build-context">{t('sandbox.buildContext')}</label>
+        <input id="sandbox-build-context" class="build-context-input" type="text" spellcheck="false"
+               autocomplete="off" placeholder="." bind:value={draft.buildContext} disabled={locked}
+               title={t('sandbox.buildContextDesc')} />
+    </div>
+
     {#if draft.building}
         <div class="build-notice">{t('sandbox.buildNotice')}</div>
     {/if}
@@ -130,6 +130,8 @@
     {#if draft.buildError}
         <div class="build-error">{draft.buildError}</div>
     {/if}
+
+    <p class="build-venue-note">{t('sandbox.buildVenue')}</p>
 
     <div class="image-tag-info">
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
@@ -157,39 +159,12 @@
         gap: 8px;
     }
 
-    /* Build controls: cache modifier + build/rebuild button, right-aligned */
+    /* Build/rebuild button, right-aligned */
     .build-actions {
         display: flex;
         align-items: center;
         gap: 8px;
         flex-shrink: 0;
-    }
-
-    /* "Disable cache" checkbox next to the build button */
-    .cache-toggle {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        font-size: var(--text-xs);
-        color: var(--color-text-secondary);
-        cursor: pointer;
-        white-space: nowrap;
-        user-select: none;
-    }
-
-    .cache-toggle input[type="checkbox"] {
-        margin: 0;
-        cursor: pointer;
-        accent-color: var(--color-accent);
-    }
-
-    .cache-toggle.disabled {
-        opacity: var(--opacity-disabled);
-        cursor: not-allowed;
-    }
-
-    .cache-toggle.disabled input[type="checkbox"] {
-        cursor: not-allowed;
     }
 
     .btn-build,
@@ -233,6 +208,32 @@
     .btn-build:hover:not(:disabled) {
         opacity: 1;
         background: var(--color-accent);
+    }
+
+    .build-venue-note {
+        margin: 0;
+        font-size: 11px;
+        color: var(--text-tertiary, var(--text-secondary));
+    }
+
+    .build-context-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+
+    .build-context-label {
+        font-size: 12px;
+        color: var(--text-secondary);
+        white-space: nowrap;
+    }
+
+    .build-context-input {
+        flex: 1 1 12rem;
+        min-width: 0;
+        font-family: var(--font-mono, monospace);
+        font-size: 12px;
     }
 
     .dockerfile-path-row {

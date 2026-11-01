@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS projects (
     sandbox_network_isolation INTEGER NOT NULL DEFAULT 0,
     sandbox_image            TEXT DEFAULT NULL,
     sandbox_dockerfile_path  TEXT DEFAULT NULL,
+    sandbox_build_context    TEXT DEFAULT NULL,
     sandbox_memory_limit     INTEGER NOT NULL DEFAULT 1024,
     sandbox_forward_ports    TEXT DEFAULT NULL,
     sandbox_mounts           TEXT DEFAULT NULL,
@@ -23,6 +24,7 @@ CREATE TABLE IF NOT EXISTS projects (
     sandbox_capabilities     TEXT DEFAULT NULL,
     commit_assisted_by       INTEGER NOT NULL DEFAULT 0,
     mcp_server_ids           TEXT DEFAULT NULL,
+    sandbox_run_set_hash     TEXT DEFAULT NULL,
     created_at               TEXT NOT NULL,
     updated_at               TEXT NOT NULL
 );

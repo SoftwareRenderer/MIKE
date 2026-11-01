@@ -724,6 +724,34 @@ Tests: `backend/server/handler_fs_download_test.go`, `backend/fsutil/tar_test.go
 Tests: `backend/server/handler_fs_ops_test.go`; client side `frontend/src/lib/api/fs-ops.ts` and
 `frontend/src/lib/components/__tests__/file-browser-context-menu.unit.svelte.ts`.
 
+## A project image build is a stream with one control
+
+- `POST /api/projects/{projectID}/sandbox/build` answers as an SSE stream whose frames are **raw progress
+  lines**, not JSON objects — the reader prints them. A failure arrives as a final `error: …` line, because
+  the stream has already answered 200 by then. Its one control is a query parameter, read before the first
+  frame.
+- **`no_cache` is refused by name.** There is no build cache to skip, and a request that sent the key asked
+  for something, so it answers 400 rather than building anyway.
+- **`confirm_run_set` carries a hash, and it is the only answer to a changed `RUN` set.** An image records
+  the instruction set it was built from. A build whose `RUN` steps differ is refused inside the stream,
+  naming the new hash; re-sending that hash as `confirm_run_set` is the person's approval. The stored hash is
+  written only after an image exists, so a refused or failed build leaves the approval a person already gave
+  untouched. The mechanism and why `podman load` is the moment it guards:
+  `docs/sandbox-runtime.md → A project image builds inside a sandbox container`.
+- **`sandbox_build_context` is a repository path, on create and on update.** It names the committed subtree
+  the build may `COPY` from; empty means the directory holding the Dockerfile. A value is stored in one
+  cleaned spelling (`NormalizeBuildContextValue`), because the build's cache key is derived from it. An
+  absolute path, a home or variable reference, a drive letter, a `.git` segment or any `..` is a 400 naming
+  the field, before anything is written — the field is never a host path picker.
+- **The last frame of a successful build is `buildResultFrame`, flattened beside a `status` string.** The
+  reader picks the result out by that key. A result it cannot tell from a progress line is a build that finished
+  and reads as one that never answered. Test: `TestSandboxBuildStreamEndsInAFrameTheReaderCanIdentify`.
+- A build refusal keeps its own sentence on the way out, for the reason the Errors section gives: the
+  Dockerfile being built is the caller's own file.
+
+Tests: `backend/api/project_build_context_test.go`, `TestBuildOptionsFromRequest`,
+`backend/sandbox/build_e2e_test.go`.
+
 ## Errors
 
 A server fault answers MIKE's own sentence; the cause goes to the log. `errs.Operation(operation, cause)`

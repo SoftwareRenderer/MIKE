@@ -289,9 +289,12 @@ func (sm *SandboxManager) SetMemoryPeakSink(sink func(taskID string, peakMB int6
 	sm.mu.Unlock()
 }
 
-// cleanupStaleContainers removes any kanban-sandbox-* containers left behind.
+// cleanupStaleContainers removes the containers this manager's own name families left behind: a task or
+// project sandbox, and a one-shot image build. Running containers stay (see staleContainerNames), so a
+// second server cannot pull a live sandbox out from under the first.
 func (sm *SandboxManager) cleanupStaleContainers() {
 	sm.rt.CleanupStaleContainers("sandbox", ContainerNamePrefix+"-")
+	sm.rt.CleanupStaleContainers("build", sandboxruntime.StaleBuildFilter)
 }
 
 // IsAvailable returns true if gVisor (runsc) is installed and podman can use it.
@@ -1323,78 +1326,6 @@ func ProjectImageName(projectName string) string {
 		return sandboxruntime.QualifyLocalImageRef(safeName)
 	}
 	return sandboxruntime.QualifyLocalImageRef(fmt.Sprintf("%s-%s", ProjectImagePrefix, safeName))
-}
-
-// BuildOptions controls optional behavior of an image build.
-type BuildOptions struct {
-	// NoCache disables the container build layer cache (podman build --no-cache).
-	NoCache bool
-}
-
-// buildPodmanBuildArgs returns the podman arguments for an image build.
-// The context directory is always last so a flag can never swallow it.
-func buildPodmanBuildArgs(imageName, contextDir string, noCache bool) []string {
-	args := []string{"build", "-t", imageName}
-	if noCache {
-		args = append(args, "--no-cache")
-	}
-	return append(args, contextDir)
-}
-
-// BuildImageWithProgress builds a container image, streaming progress lines via onProgress.
-// onProgress is called for each line of output (nil means no callback).
-// The build layer cache is used; use BuildImageWithOptions to disable it.
-func (sm *SandboxManager) BuildImageWithProgress(projectName, dockerfilePath string, onProgress func(line string)) error {
-	return sm.BuildImageWithOptions(projectName, dockerfilePath, BuildOptions{}, onProgress)
-}
-
-// BuildImageWithOptions builds a container image with explicit options, streaming
-// progress lines via onProgress (nil means no callback).
-func (sm *SandboxManager) BuildImageWithOptions(projectName, dockerfilePath string, opts BuildOptions, onProgress func(line string)) error {
-	if !sm.available {
-		return fmt.Errorf("gVisor not available (runsc not installed)")
-	}
-	// Rejects an empty path and one starting with a dash, which podman would
-	// otherwise read as a flag.
-	if err := sandboxruntime.ValidateDockerfilePath(dockerfilePath); err != nil {
-		return err
-	}
-
-	content, err := os.ReadFile(dockerfilePath)
-	if err != nil {
-		return fmt.Errorf("read dockerfile: %w", err)
-	}
-
-	// Create a temp directory and write the Dockerfile
-	tmpDir, err := os.MkdirTemp("", "kanban-sandbox-build")
-	if err != nil {
-		return fmt.Errorf("create temp dir: %w", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	dockerfile := filepath.Join(tmpDir, "Dockerfile")
-	if err := os.WriteFile(dockerfile, content, 0o644); err != nil {
-		return fmt.Errorf("write dockerfile to temp dir: %w", err)
-	}
-
-	imageName := ProjectImageName(projectName)
-
-	// Validate the derived image name before passing to podman to prevent
-	// argument injection (e.g. if ProjectImagePrefix is ever emptied).
-	if err := sandboxruntime.ValidateImageRef(imageName); err != nil {
-		return fmt.Errorf("invalid project image name: %w", err)
-	}
-
-	// Remove any existing image with the same name
-	_, _ = sm.podmanExec("rmi", imageName) // best-effort
-
-	// Build the image with streaming output
-	logging.For(logging.Sandbox).With(logging.ProjectID, projectName).Infof("building image %s from %s (no_cache=%v)", imageName, dockerfilePath, opts.NoCache)
-	if err := sm.streamPodman(podmanCommand(buildPodmanBuildArgs(imageName, tmpDir, opts.NoCache)...), "build", imageName, "build", onProgress); err != nil {
-		return err
-	}
-	logging.For(logging.Sandbox).With(logging.ProjectID, projectName).Infof("image %s built successfully", imageName)
-	return nil
 }
 
 // StopProjectContainers stops all sandbox containers associated with a project.

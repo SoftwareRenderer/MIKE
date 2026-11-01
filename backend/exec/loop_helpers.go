@@ -78,12 +78,7 @@ func (te *TaskExecutor) recreateTaskSandbox(setup *taskExecSetup, state *executi
 // failSandboxRecreate puts a task in review after a failed container rebuild.
 // The worktree is preserved so the configuration can be fixed and the task resumed.
 func (te *TaskExecutor) failSandboxRecreate(setup *taskExecSetup, output, userMessage, code string) {
-	setup.task.ExecutionState = types.ExecStateFailed
-	setup.task.Status = types.StatusReview
-	setup.task.Output = output
-	te.persistTask(setup)
-	te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
-	te.sendAndPersistError(setup.task.ID, userMessage, code)
+	te.fail(setup.task, setup.projectID, output, userMessage, code)
 }
 
 // storeTask writes a task back to the store. The stored title, its mark and TitleGenerating win over

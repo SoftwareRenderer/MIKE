@@ -85,18 +85,6 @@ func ValidateImageRef(image string) error {
 	return nil
 }
 
-// ValidateDockerfilePath rejects paths that start with a dash,
-// preventing them from being interpreted as podman flags.
-func ValidateDockerfilePath(path string) error {
-	if path == "" {
-		return fmt.Errorf("dockerfile path must not be empty")
-	}
-	if strings.HasPrefix(path, "-") {
-		return fmt.Errorf("dockerfile path must not start with a dash: %q", path)
-	}
-	return nil
-}
-
 // Boot is how the process started, as far as the container runtime is concerned. Both fields are
 // decided once at startup (backend/startup) and passed down, because each one controls something a
 // per-call re-read gets wrong: whether this process may delete the host's leftover sandbox containers,
@@ -307,10 +295,10 @@ func (r *Runtime) CleanupStaleContainers(logTag, nameFilter string) []string {
 	var removed []string
 	for _, name := range staleContainerNames(strings.Fields(strings.TrimSpace(string(out))), r.IsRunning) {
 		if rmErr := r.RemoveContainer(name); rmErr != nil {
-			logging.For(logging.Runtime).Warnf("startup: failed to remove stale container %s (probe %s): %v", name, logTag, rmErr)
+			logging.For(logging.Runtime).Warnf("startup: failed to remove stale %s container %s: %v", logTag, name, rmErr)
 			continue
 		}
-		logging.For(logging.Runtime).Infof("startup: removed stale container %s (probe %s)", name, logTag)
+		logging.For(logging.Runtime).Infof("startup: removed stale %s container %s", logTag, name)
 		removed = append(removed, name)
 	}
 	return removed

@@ -28,9 +28,10 @@ func JSONError(w http.ResponseWriter, status int, message string) {
 	json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
-// MethodNotAllowed answers 405 for a handler registered without a method in its
-// route. The body is plain text; a handler whose client parses error bodies
-// answers with JSONError instead.
+// MethodNotAllowed answers 405 with a plain-text body. It stays live even though every route declares
+// its verb: a handler several verbs share needs a default arm, and a `GET` pattern also matches HEAD, so
+// that arm — not the mux — is what answers a HEAD request. A handler whose client parses error bodies
+// answers with JSONError instead. docs/api-contract.md → Route verbs.
 func MethodNotAllowed(w http.ResponseWriter) {
 	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 }

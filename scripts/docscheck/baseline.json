@@ -4,13 +4,17 @@
   "longsent": 0
  },
  "_global": {
-  "longsent": 81
+  "longsent": 76
  },
  "docs/adding-a-preference.md": {
   "history": 0,
   "longsent": 0
  },
  "docs/adr/0001-key-decisions-are-recorded.md": {
+  "history": 0,
+  "longsent": 0
+ },
+ "docs/adr/0002-image-builds-run-in-a-sandbox-container-over-a-commit-subtree.md": {
   "history": 0,
   "longsent": 0
  },
@@ -24,7 +28,7 @@
  },
  "docs/api-contract.md": {
   "history": 1,
-  "longsent": 14
+  "longsent": 12
  },
  "docs/api.md": {
   "history": 0,
@@ -84,7 +88,7 @@
  },
  "docs/i18n.md": {
   "history": 2,
-  "longsent": 18
+  "longsent": 15
  },
  "docs/languages.md": {
   "history": 0,

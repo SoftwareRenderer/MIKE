@@ -1946,12 +1946,20 @@ func userMessagesEqual(a, b types.ChatMessage) bool {
 // failTask sets the task to failed/review state, persists it, broadcasts the
 // update, and sends a WebSocket error event.
 func (te *TaskExecutor) failTask(task *types.Task, projectID, output, code string) {
+	te.fail(task, projectID, output, output, code)
+}
+
+// fail is a run ending in Review: the row keeps the output, the board sees the state, and the panel
+// gets userMessage, which is the same sentence as the output except where an internal step is the cause
+// and naming it would tell a person nothing. The row goes to Review, never Failed: the worktree stands
+// so the cause can be fixed and the task resumed.
+func (te *TaskExecutor) fail(task *types.Task, projectID, output, userMessage, code string) {
 	task.ExecutionState = types.ExecStateFailed
 	task.Status = types.StatusReview
 	task.Output = output
 	te.storeTask(task, projectID)
 	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-	te.sendAndPersistError(task.ID, output, code)
+	te.sendAndPersistError(task.ID, userMessage, code)
 }
 
 // turnStatsFrame builds the WSTypeComplete payload a turn ends with. The frame is a flat map of these

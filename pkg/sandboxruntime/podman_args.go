@@ -161,6 +161,10 @@ func GVisorCreateArgs(containerName string) []string {
 		"--runtime-flag=ignore-cgroups",
 		"create",
 		"--pull", "never",
+		// 		// A `VOLUME` line makes podman create an anonymous volume per container and `rm -f` leaves it behind; enough
+		// 		// leftovers fill podman's 2048 volume locks and every create is then refused. MIKE mounts only binds,
+		// 		// which `ignore` leaves alone.
+		"--image-volume", "ignore",
 		"--name", containerName,
 		"--runtime", "runsc",
 		"--security-opt", "label=disable",
@@ -190,9 +194,14 @@ func GVisorIsolationForCaps(args []string) error {
 
 // AppendCapabilities is the only way this repo appends a --cap-add. It writes the runsc and
 // --cap-drop ALL preface before the first capability, so a grant cannot land on a container that does
-// not start from that isolation, and no call site can get the ordering wrong.
+// not start from that isolation, and no call site can get the ordering wrong or skip the shape check.
 func AppendCapabilities(args []string, caps []string) ([]string, error) {
 	if err := GVisorIsolationForCaps(args); err != nil {
+		return args, err
+	}
+	// 	// Checked here too, because this function is the promise that no call site forges a grant: a value with a
+	// 	// space or a leading dash reaches podman as extra arguments. Every name is checked before any is appended.
+	if err := ValidateCapabilities(caps); err != nil {
 		return args, err
 	}
 	for _, cap := range caps {

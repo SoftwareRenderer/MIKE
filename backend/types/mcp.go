@@ -149,10 +149,7 @@ func validateMCPServerURL(name, raw string) error {
 
 // shortenForReport keeps a parse failure reportable without echoing a URL that may hold a credential.
 func shortenForReport(raw string) string {
-	if len(raw) > 60 {
-		return raw[:60] + "…"
-	}
-	return raw
+	return ClipMark(raw, 60, "…")
 }
 
 // NewMCPServerID returns the ID a newly registered server gets. It is random rather than a slug of

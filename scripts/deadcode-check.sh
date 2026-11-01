@@ -40,6 +40,7 @@ pkg/logging/logging.go:String
 pkg/logging/logging.go:Reset
 pkg/logging/logging.go:Lines
 backend/auth/pairing.go:Live
+backend/sandbox/build.go:ActiveBuildCount
 "
 
 # pkg/logging, one reason each. deadcode walks a call graph, so it cannot see three legitimate shapes:

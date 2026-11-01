@@ -300,19 +300,26 @@ const DefaultSandboxMemoryLimitMB = 1024
 
 // Project represents a workspace project.
 type Project struct {
-	ID                      string         `json:"id"`
-	Name                    string         `json:"name"`
-	Path                    string         `json:"path"`
-	OriginBranch            string         `json:"origin_branch,omitempty"`
-	SandboxEnabled          bool           `json:"sandbox_enabled"`
-	SandboxNetworkIsolation bool           `json:"sandbox_network_isolation"`
-	SandboxImage            string         `json:"sandbox_image,omitempty"`
-	SandboxDockerfilePath   string         `json:"sandbox_dockerfile_path,omitempty"`
-	SandboxMemoryLimit      int            `json:"sandbox_memory_limit"`
-	ForwardPorts            []PortForward  `json:"forward_ports,omitempty"`
-	SandboxMounts           []SandboxMount `json:"sandbox_mounts,omitempty"`
-	SandboxEnvs             []SandboxEnv   `json:"sandbox_envs,omitempty"`
-	SandboxCapabilities     []string       `json:"sandbox_capabilities,omitempty"`
+	ID                      string `json:"id"`
+	Name                    string `json:"name"`
+	Path                    string `json:"path"`
+	OriginBranch            string `json:"origin_branch,omitempty"`
+	SandboxEnabled          bool   `json:"sandbox_enabled"`
+	SandboxNetworkIsolation bool   `json:"sandbox_network_isolation"`
+	SandboxImage            string `json:"sandbox_image,omitempty"`
+	SandboxDockerfilePath   string `json:"sandbox_dockerfile_path,omitempty"`
+	// SandboxBuildContext is the repository-relative subtree an image build may read. Empty means the
+	// directory holding the Dockerfile, which is the smallest context that lets a Dockerfile copy its own
+	// files; anything wider is a value a person set.
+	SandboxBuildContext string         `json:"sandbox_build_context,omitempty"`
+	SandboxMemoryLimit  int            `json:"sandbox_memory_limit"`
+	ForwardPorts        []PortForward  `json:"forward_ports,omitempty"`
+	SandboxMounts       []SandboxMount `json:"sandbox_mounts,omitempty"`
+	SandboxEnvs         []SandboxEnv   `json:"sandbox_envs,omitempty"`
+	SandboxCapabilities []string       `json:"sandbox_capabilities,omitempty"`
+	// 	// SandboxRunSetHash is the command set of the image a person last approved; a build whose set differs is
+	// 	// refused until they approve the new one.
+	SandboxRunSetHash string `json:"sandbox_run_set_hash,omitempty"`
 	// MCPServerIDs is this project's opt-in list: the registered servers whose tools it may offer.
 	// An ID with no registered server behind it is inert, not an error — a server a person deleted
 	// must not fail every project that had it enabled.

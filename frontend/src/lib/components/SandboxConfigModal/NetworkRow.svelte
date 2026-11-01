@@ -1,8 +1,10 @@
 <script lang="ts">
     /**
-     * Whether the sandbox container may reach the network. It bounds the container only: contributed
+     * Whether the sandbox container may reach the network. It bounds the agent's container only: contributed
      * tools and MCP tools are called in the MIKE server process, so their requests leave while isolation
-     * is on (`frontend/src/lib/utils/server-tool-network.ts` is the rule).
+     * is on (`frontend/src/lib/utils/server-tool-network.ts` is the rule). An image build is also unaffected:
+     * it always has a network, whatever this switch says, so its steps can install what the Dockerfile asks
+     * for.
      */
     import { t } from '$lib/i18n';
     import { appStore } from '$lib/stores';
