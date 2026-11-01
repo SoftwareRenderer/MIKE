@@ -9,7 +9,7 @@ projects too because the server process enforces them.
   (`read_file`/`write_file`/`edit_file`/`bash`, the LSP tools, the agent adapter) runs in the container
   and a missing bridge is an error rather than a host fallback. The **off** case runs those actions on the
   host, because turning a project's sandbox off *is* the operator's decision about that project.
-- `DANGER_ZONE=1` is the permission to make that decision — creating a project with sandboxing disabled,
+- `DANGER_ZONE=1` is the permission to make that decision. Creating a project with sandboxing disabled,
   or switching one to unsandboxed, is 403 without it (`cannot create project with sandbox disabled — set
   DANGER_ZONE=1 to allow`, checked in `backend/api/project.go` against the injected
   `sandbox.DangerZone` — never a `Getenv` at the gate). It never gates execution.
@@ -31,8 +31,9 @@ projects too because the server process enforces them.
 `backend/server/handler_fs.go`:
 
 - `validateFSPath` takes the resolved worktree root (`fsWorktreeRoot`) and allows exactly that directory
-  and the project checkout — **never the workspace dir**, which holds every project's task worktrees, so
-  a workspace root would allow one project-scoped read, write or mkdir to reach any task on the host.
+  and the project checkout — **never the workspace dir**. The workspace holds every project's task
+  worktrees, so a workspace root would let one project-scoped read, write or mkdir reach any task on the
+  host.
 - `?project=` and `?task=` arrive uncorrelated, so `requireTaskOwnership` ties them
   (`store.GetTask(project.ID, taskID)`) before either is honoured. `resolveWorktreeForFile` calls it too,
   because the preview asset root is derived from the same resolution and a preview token is read without

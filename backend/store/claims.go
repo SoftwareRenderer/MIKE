@@ -32,15 +32,22 @@ const pruneExpiredClaimsSQL = `DELETE FROM client_claims WHERE created_at < ?`
 // ClaimedWrite answers what this write identity already produced inside one task. A token is text from the
 // request, so it is answered only where it was written: another task's row is a read nobody granted.
 func (s *Store) ClaimedWrite(token, taskID string) (resultID string, claimed bool) {
+	return s.claimed(token, "task_id", taskID)
+}
+
+// claimed is the guard's question in one place: what did this identity already produce, inside the scope
+// that can answer for it. The two callers differ only in which column names that scope, so the scope
+// column is the one thing they pass, and it is a literal of this package — never text from a request.
+// A read that fails is "nothing claimed": a claim table that cannot be read must not refuse a message.
+func (s *Store) claimed(token, scopeColumn, scopeValue string) (resultID string, claimed bool) {
 	if token == "" {
 		return "", false
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	// A read that fails is "nothing claimed": a claim table that cannot be read must not refuse a message.
 	var id string
-	if err := s.db.QueryRow(`SELECT result_id FROM client_claims WHERE token = ? AND task_id = ?`,
-		token, taskID).Scan(&id); err != nil {
+	if err := s.db.QueryRow(`SELECT result_id FROM client_claims WHERE token = ? AND `+scopeColumn+` = ?`,
+		token, scopeValue).Scan(&id); err != nil {
 		return "", false
 	}
 	return id, true
@@ -49,17 +56,7 @@ func (s *Store) ClaimedWrite(token, taskID string) (resultID string, claimed boo
 // ClaimedCreate answers what a create carrying this identity already made, scoped to the project the request
 // names — a create has no task to name yet.
 func (s *Store) ClaimedCreate(token, projectID string) (taskID string, claimed bool) {
-	if token == "" {
-		return "", false
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	var id string
-	if err := s.db.QueryRow(`SELECT result_id FROM client_claims WHERE token = ? AND project_id = ?`,
-		token, projectID).Scan(&id); err != nil {
-		return "", false
-	}
-	return id, true
+	return s.claimed(token, "project_id", projectID)
 }
 
 // ClaimWrite records what this write identity produced, and answers nothing: an identity already recorded keeps

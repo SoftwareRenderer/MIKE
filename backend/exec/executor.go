@@ -779,18 +779,12 @@ func (te *TaskExecutor) SelectSubtaskToStart(parent *types.Task, subtasks []type
 	// Multiple deepest subtasks — use LLM to pick
 	var subtaskParts []string
 	for i, s := range deepest {
-		promptPreview := s.Prompt
-		if len(promptPreview) > 300 {
-			promptPreview = promptPreview[:300] + "..."
-		}
+		promptPreview := types.ClipMark(s.Prompt, 300, "...")
 		subtaskParts = append(subtaskParts, fmt.Sprintf("Subtask %d (ID: %s):\n  Title: %s\n  Description: %s",
 			i+1, s.ID, s.Title, promptPreview))
 	}
 
-	promptPreview := parent.Prompt
-	if len(promptPreview) > 500 {
-		promptPreview = promptPreview[:500]
-	}
+	promptPreview := types.Clip(parent.Prompt, 500)
 	prompt := fmt.Sprintf(`You are a task scheduler. Given a parent task and its deepest-level incomplete subtasks, select the ONE subtask that should be started first. Consider dependencies, complexity, and logical ordering.
 
 Parent task:

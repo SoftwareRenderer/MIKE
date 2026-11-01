@@ -115,6 +115,9 @@ func NewExtensionSandboxManager(reg *RegistryClient, store *ExtensionStore, boot
 	// for in the first place.
 	if sm.available && boot.SweepStaleContainersAtBoot {
 		sm.cleanupStaleContainers()
+		// The same authority that reclaims a stale container reclaims the temp directory an interrupted
+		// install left, which is the other half of what a killed installer leaves behind.
+		SweepInterruptedTemp()
 	}
 	return sm
 }

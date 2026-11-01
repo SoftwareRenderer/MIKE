@@ -7,11 +7,11 @@ The rules are in `AGENTS.md → Extensions`. Dependency-cache grants have their 
 
 - The image is built **before** `store.Create` (`installInBackground`); a `type: lsp` entry with neither
   image nor Dockerfile is refused (`installNeedsImage`); a failure after `CheckoutExtension` deletes the
-  checkout through a deferred guard — a directory with no row is listed by `GET /api/extensions/local` as
+  checkout through a deferred guard. A directory with no row is listed by `GET /api/extensions/local` as
   installable under the manifest it shipped with.
-- A **local folder may declare `"image"`** in its manifest (`ExtensionManifest.Image`, carried by the one
-  mapping `localRegistryEntry` that feeds both the browse listing and the install, since a folder has no
-  registry index entry to carry one; never pulled at install, only on first sandbox start).
+- A **local folder may declare `"image"`** in its manifest (`ExtensionManifest.Image`). The one mapping
+  `localRegistryEntry` carries it, because a folder has no registry index entry to carry one. It is never
+  pulled at install, only on first sandbox start.
 - `installDockerfile` treats a read failure as an error, never as "no Dockerfile". The update path refuses
   an LSP whose new commit ships neither, instead of keeping the previous commit's image under new code. A
   record that predates the rule is repaired lazily at `Create` (`persistDerivedImage` →

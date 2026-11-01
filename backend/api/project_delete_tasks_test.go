@@ -5,7 +5,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"mike/backend/sandbox"
 	"mike/backend/store"
 	"mike/backend/types"
 )
@@ -116,19 +115,6 @@ func TestProjectDeleteWithoutTaskPathStillDeletesTheRow(t *testing.T) {
 	if len(tasks) != 0 {
 		t.Errorf("%d task rows survived the CASCADE", len(tasks))
 	}
-}
-
-// recordingSandbox answers the project handler's sandbox calls with the batches it was handed.
-type recordingSandbox struct {
-	stoppedProjects []string
-}
-
-func (r *recordingSandbox) BuildImageWithOptions(string, string, sandbox.BuildOptions, func(string)) error {
-	return nil
-}
-
-func (r *recordingSandbox) StopProjectContainers(projectID string, _ []string) {
-	r.stoppedProjects = append(r.stoppedProjects, projectID)
 }
 
 // The project's own container is keyed "proj:"+projectID, and a file-browser listing starts it with no

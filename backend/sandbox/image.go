@@ -1,12 +1,17 @@
 package sandbox
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	"mike/backend/types"
 )
+
+// buildCeiling bounds a build started by a turn or a terminal, which has no request context to cancel it.
+const buildCeiling = 45 * time.Minute
 
 // Where a project's sandbox image comes from. Decided in one place so the executor, the
 // terminal paths and the file-system handlers cannot disagree about whether it exists.
@@ -57,14 +62,8 @@ type imageOp struct {
 	err error
 }
 
-// EnsureImageForProject returns the image a project's sandbox runs on, having made sure that image
-// exists — built from the project's Dockerfile, or pulled — reporting progress through onProgress
-// (nil is fine).
-//
-// Every path that can start a sandbox calls this, and container creation runs with --pull=never, so
-// this is the only place an image can arrive and the only place its progress can be reported.
-// Concurrent callers share one build: opening an explorer fires several file requests at once, and
-// without this each would start its own multi-minute build of the same image.
+// EnsureImageForProject makes sure the project's sandbox image exists, by build or by pull, reporting progress
+// through onProgress (nil is fine). It takes no context: closing a dialog must not cancel a build.
 func (sm *SandboxManager) EnsureImageForProject(project *types.Project, onProgress func(status types.SandboxImageStatus)) (string, error) {
 	pi := ResolveProjectImage(project)
 
@@ -75,8 +74,7 @@ func (sm *SandboxManager) EnsureImageForProject(project *types.Project, onProgre
 		}
 	}
 
-	// Qualified here, once, for every source: a generated name is qualified already, and a value
-	// stored before that rule existed is resolved to the image it means.
+	// 	// Qualified here for every source, so a value stored before the rule existed still resolves.
 	image := sm.rt.ResolveImageRef(pi.Image)
 	if sm.ImageReady(image) {
 		return image, nil
@@ -97,10 +95,20 @@ func (sm *SandboxManager) EnsureImageForProject(project *types.Project, onProgre
 	err := sm.doOnce(image, func() error {
 		// The caller that won the race has done the work for all of them.
 		if sm.ImageReady(image) {
-			return nil
+			// 			// A project image built here carries its cache key, so a cache hit is answered without staging a byte;
+			// 			// anything older, or built from other input, is rebuilt.
+			if !pi.NeedsBuild() {
+				return nil
+			}
+			if key, keyErr := sm.projectBuildKey(context.Background(), project); keyErr == nil &&
+				sm.ImageCarriesBuild(image, key) {
+				return nil
+			}
 		}
 		if pi.NeedsBuild() {
-			if err := sm.BuildImageWithProgress(project.Name, pi.Dockerfile, func(line string) {
+			ctx, cancel := context.WithTimeout(context.Background(), buildCeiling)
+			defer cancel()
+			if _, err := sm.BuildProjectImage(ctx, project, BuildOptions{}, func(line string) {
 				emit(types.SandboxImageStatus{Phase: phase, Line: line})
 			}); err != nil {
 				return fmt.Errorf("build sandbox image %s: %w", image, err)
@@ -122,9 +130,8 @@ func (sm *SandboxManager) EnsureImageForProject(project *types.Project, onProgre
 	return image, nil
 }
 
-// doOnce runs fn once per key at a time. A caller that arrives while the key is in flight waits
-// for that result (including its error) instead of starting a second copy. Nothing is cached after
-// fn returns, so a failed build can be retried.
+// doOnce runs fn once per key at a time, and a caller arriving mid-flight waits for that result instead of
+// starting a second copy. Nothing is cached, so a failure can be retried.
 func (sm *SandboxManager) doOnce(key string, fn func() error) (err error) {
 	sm.imageOpsMu.Lock()
 	if op, ok := sm.imageOps[key]; ok {

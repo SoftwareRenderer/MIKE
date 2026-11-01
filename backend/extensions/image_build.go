@@ -3,6 +3,7 @@ package extensions
 import (
 	"fmt"
 	"io"
+	"mike/pkg/logging"
 	"mike/pkg/subproc"
 	"os"
 	"path/filepath"
@@ -26,7 +27,37 @@ const (
 	extensionBuildContextBridge = "sandbox/sandbox-bridge"
 	// extensionBuildContextDirPrefix identifies temp directories holding the build context.
 	extensionBuildContextDirPrefix = "kanban-ext-build-"
+	// extensionCheckoutDirPrefix names the temp checkout an install clones into; it is removed by the
+	// install that made it, which is the step a killed process skips.
+	extensionCheckoutDirPrefix = "kanban-ext-checkout-"
 )
+
+// SweepInterruptedTemp removes the temporary directories an interrupted install or update left behind: the deferred
+// call that normally removes them cannot run when the process is killed, and at boot every match of MIKE's own
+// prefixes is an orphan.
+func SweepInterruptedTemp() {
+	tmp := os.TempDir()
+	entries, err := os.ReadDir(tmp)
+	if err != nil {
+		logging.For(logging.Extensions).Warnf("install sweep could not read %s: %v", tmp, err)
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasPrefix(name, extensionBuildContextDirPrefix) && !strings.HasPrefix(name, extensionCheckoutDirPrefix) {
+			continue
+		}
+		path := filepath.Join(tmp, name)
+		if err := os.RemoveAll(path); err != nil {
+			logging.For(logging.Extensions).Warnf("leftover install directory %s could not be removed: %v", path, err)
+			continue
+		}
+		logging.For(logging.Extensions).Infof("removed leftover install directory %s", path)
+	}
+}
 
 // buildExtensionImageArgs is pure, so tests can pin the argv shape.
 func buildExtensionImageArgs(imageRef, contextDir string) []string {

@@ -31,6 +31,7 @@ export class SandboxDraftOwner {
     memoryLimitMB = $state<number | null>(null);
     image = $state('');
     dockerfilePath = $state('');
+    buildContext = $state('');
     imageSource = $state<ImageSource>('image');
     forwardPorts = $state<PortForward[]>([]);
     mounts = $state<SandboxMount[]>([]);
@@ -74,8 +75,6 @@ export class SandboxDraftOwner {
 
     // ── The image build this screen can start ────────────────────────────────
     building = $state(false);
-    /** Builds started from here skip the layer cache. Not a setting — never saved. */
-    buildNoCache = $state(false);
     buildError = $state('');
     buildLog = $state<string[]>([]);
 
@@ -95,6 +94,7 @@ export class SandboxDraftOwner {
         this.memoryLimitMB = draft.memoryLimitMB;
         this.image = draft.image;
         this.dockerfilePath = draft.dockerfilePath;
+        this.buildContext = draft.buildContext;
         this.imageSource = draft.imageSource;
         this.forwardPorts = draft.forwardPorts;
         this.mounts = draft.mounts;
@@ -121,6 +121,7 @@ export class SandboxDraftOwner {
             memoryLimitMB: this.memoryLimitMB,
             image: this.image,
             dockerfilePath: this.dockerfilePath,
+            buildContext: this.buildContext,
             imageSource: this.imageSource,
             forwardPorts: this.forwardPorts,
             mounts: this.mounts,
@@ -440,7 +441,7 @@ export class SandboxDraftOwner {
                 } else {
                     this.buildLog.push(line);
                 }
-            }, { noCache: this.buildNoCache });
+            });
         } catch (e) {
             this.buildError = String(e);
         } finally {

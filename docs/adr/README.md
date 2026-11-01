@@ -62,3 +62,4 @@ What this makes cheap, what it makes impossible, and what would reopen it.
 | # | Decision | Status |
 |---|---|---|
 | [0001](0001-key-decisions-are-recorded.md) | Key decisions get a numbered file, written when the choice is made and never backfilled | accepted |
+| [0002](0002-image-builds-run-in-a-sandbox-container-over-a-commit-subtree.md) | An image build runs in a one-shot gVisor container with the project's own sandbox configuration, over a subtree of a pinned commit | proposed |

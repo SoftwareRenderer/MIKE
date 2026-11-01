@@ -86,6 +86,16 @@ func (g *MemoryGate) SetCapacity(capMB int64) {
 	g.mu.Unlock()
 }
 
+// AcquireNoticed is Acquire with a queue notice a caller outside this package can supply: `*memWaiter` is
+// unexported, so another package cannot name the callback.
+func (g *MemoryGate) AcquireNoticed(ctx context.Context, amountMB int64, waiting func()) error {
+	return g.Acquire(ctx, amountMB, func(*memWaiter) {
+		if waiting != nil {
+			waiting()
+		}
+	})
+}
+
 // Acquire blocks until amountMB are available or ctx is cancelled. Non-positive amounts or
 // capacity 0 succeed immediately. On grant, caller must Release the same amount.
 func (g *MemoryGate) Acquire(ctx context.Context, amountMB int64, onEnqueued func(*memWaiter)) error {

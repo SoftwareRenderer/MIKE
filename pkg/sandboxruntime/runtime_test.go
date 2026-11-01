@@ -370,30 +370,6 @@ func TestClearCgroupMemoryLimit_MissingDir(t *testing.T) {
 	}
 }
 
-func TestValidateDockerfilePath(t *testing.T) {
-	tests := []struct {
-		name    string
-		path    string
-		wantErr bool
-	}{
-		{"valid absolute", "/home/user/Dockerfile", false},
-		{"valid relative", "Dockerfile", false},
-		{"valid subpath", "path/to/Dockerfile", false},
-		{"dash prefix", "-f", true},
-		{"dash prefix path", "--file=/tmp/Dockerfile", true},
-		{"empty string", "", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateDockerfilePath(tt.path)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateDockerfilePath(%q) error = %v, wantErr %v", tt.path, err, tt.wantErr)
-			}
-		})
-	}
-}
-
 // TestGVisorAvailable_FalseWithoutRunsc pins the fail-closed path: with a PATH
 // that has no runsc, the probe must report unavailable rather than assuming it.
 // Both sandbox managers now share this probe, so a false here means neither will

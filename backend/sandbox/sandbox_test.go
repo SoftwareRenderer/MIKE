@@ -303,6 +303,41 @@ func TestCreate_OverridesImageEntrypoint(t *testing.T) {
 	}
 }
 
+// TestATaskContainerFromAnImageThatDeclaresAVolumeLeaksNone fails if a task container leaves a podman volume behind:
+// leftovers consume podman's fixed table of 2048 volume locks, and once they are gone the host refuses every create.
+func TestATaskContainerFromAnImageThatDeclaresAVolumeLeaksNone(t *testing.T) {
+	sm := NewSandboxManager(bootWithBridge(t))
+	sandboxcheck.Require(t, BaseImage)
+	if !sm.ImageReady("docker.io/alpine/git") {
+		t.Skip("docker.io/alpine/git image not available locally — it is the image here that declares a volume")
+	}
+
+	before := volumeCount(t, sm)
+	taskID := "test-volume-leak-task"
+	if _, err := sm.Create(taskID, taskWorktreeDir(t), &types.Project{Name: "test-proj"}, SandboxOpts{
+		BaseImage: "docker.io/alpine/git",
+	}); err != nil {
+		t.Fatalf("create sandbox: %v", err)
+	}
+	if err := sm.Stop(taskID); err != nil {
+		t.Logf("stop reported (the volume is the subject here, not the stop): %v", err)
+	}
+	if after := volumeCount(t, sm); after != before {
+		t.Errorf("podman volumes went %d → %d: a task container leaked one, and its lock never comes back", before, after)
+	}
+}
+
+// volumeCount counts podman's volumes. MIKE never creates one — every mount it asks for is a bind — so a volume
+// that appears during this test was left behind by the container it made.
+func volumeCount(t *testing.T, sm *SandboxManager) int {
+	t.Helper()
+	out, err := sm.rt.PodmanExec("volume", "ls", "-q")
+	if err != nil {
+		t.Fatalf("list podman volumes: %v", err)
+	}
+	return len(strings.Fields(string(out)))
+}
+
 func TestCreateWithoutGVisor(t *testing.T) {
 	// Simulate unavailable gVisor by creating a manager and forcing unavailable
 	sm := &SandboxManager{
@@ -497,152 +532,6 @@ func TestContainerIsRunning_CacheExpired(t *testing.T) {
 	// Cache should be cleared after a failed check
 	if _, stillCached := sm.livenessCache["task-expired"]; stillCached {
 		t.Error("expected liveness cache to be cleared after failed check")
-	}
-}
-
-// TestStopProjectContainers: stopping a project's containers drops its tasks and leaves another
-// project's alone. The bookkeeping is in-memory, but `retainContainer` restores what podman would not
-// remove, so the claim rests on a store that answers.
-func TestStopProjectContainers(t *testing.T) {
-	sandboxcheck.Require(t, BaseImage)
-	sm := &SandboxManager{
-		active:     make(map[string]string),
-		mountPaths: make(map[string]string),
-		agents:     make(map[string]*agentConn),
-		available:  true,
-	}
-
-	// Simulate containers for project "proj-A": two tasks + project-level
-	sm.active["task-a1"] = "kanban-sandbox-task-a1"
-	sm.active["task-a2"] = "kanban-sandbox-task-a2"
-	sm.active["proj:proj-A"] = "kanban-sandbox-proj-proj-A"
-	// Container for a different project
-	sm.active["task-b1"] = "kanban-sandbox-task-b1"
-
-	// Stop containers for project A
-	sm.StopProjectContainers("proj-A", []string{"task-a1", "task-a2"})
-
-	// Project A containers should be stopped (removed from active map)
-	for _, taskID := range []string{"task-a1", "task-a2", "proj:proj-A"} {
-		if _, tracked := sm.active[taskID]; tracked {
-			t.Errorf("expected %s container to be stopped", taskID)
-		}
-	}
-
-	// Project B container should still be running
-	if _, tracked := sm.active["task-b1"]; !tracked {
-		t.Error("expected task-b1 container to still be running (different project)")
-	}
-}
-
-// TestStopProjectContainers_NoContainers: stopping what was never started is not a failure, and it
-// tracks nothing. The deletion path reports cleanup errors to the person deleting, so a phantom
-// failure here would be shown to them for nothing.
-func TestStopProjectContainers_NoContainers(t *testing.T) {
-	sm := &SandboxManager{
-		active:     make(map[string]string),
-		mountPaths: make(map[string]string),
-		agents:     make(map[string]*agentConn),
-		available:  true,
-	}
-
-	if err := sm.Stop("nonexistent-task"); err != nil {
-		t.Errorf("Stop of a task with no container = %v, want nil", err)
-	}
-
-	sm.StopProjectContainers("proj-empty", []string{"nonexistent-task"})
-	if len(sm.active) != 0 {
-		t.Errorf("stopping an empty project tracked %d container(s): %v", len(sm.active), sm.active)
-	}
-}
-
-func TestImageReady(t *testing.T) {
-	sm := NewSandboxManager(bootWithBridge(t))
-	sandboxcheck.Require(t, BaseImage)
-
-	// alpine:latest should be available (used in tests)
-	if !sm.ImageReady("alpine:latest") {
-		t.Skip("alpine:latest not available locally, skipping")
-	}
-
-	// Non-existent image should not be ready
-	if sm.ImageReady("nonexistent-image-xyz-12345:latest") {
-		t.Error("expected nonexistent image to not be ready")
-	}
-
-	// Empty string should use default (ubuntu:latest)
-	// This may or may not be available, just check it doesn't panic
-	_ = sm.ImageReady("")
-}
-
-func TestBuildImage_InvalidDockerfile(t *testing.T) {
-	sm := NewSandboxManager(bootWithBridge(t))
-	sandboxcheck.Require(t, BaseImage)
-
-	// Create a temp directory with an invalid Dockerfile
-	tmpDir := t.TempDir()
-	dockerfile := filepath.Join(tmpDir, "Dockerfile")
-	content := []byte("FROM nonexistent-image-xyz-12345:latest\n")
-	if err := os.WriteFile(dockerfile, content, 0644); err != nil {
-		t.Fatalf("write dockerfile: %v", err)
-	}
-
-	err := sm.BuildImageWithProgress("test-invalid-proj", dockerfile, nil)
-	if err == nil {
-		t.Fatal("expected error for invalid Dockerfile")
-	}
-}
-
-// TestBuildPodmanBuildArgs checks that --no-cache appears only when requested
-// and the context directory stays the last argument.
-func TestBuildPodmanBuildArgs(t *testing.T) {
-	tests := []struct {
-		name    string
-		noCache bool
-		want    []string
-	}{
-		{"cache used by default", false, []string{"build", "-t", "proj-img", "/tmp/ctx"}},
-		{"no-cache flag added on request", true, []string{"build", "-t", "proj-img", "--no-cache", "/tmp/ctx"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := buildPodmanBuildArgs("proj-img", "/tmp/ctx", tc.noCache)
-			if strings.Join(got, " ") != strings.Join(tc.want, " ") {
-				t.Fatalf("args = %v, want %v", got, tc.want)
-			}
-			if got[len(got)-1] != "/tmp/ctx" {
-				t.Fatalf("context dir must be last, got %v", got)
-			}
-		})
-	}
-}
-
-func TestBuildImageWithProgress_InvalidImageRef(t *testing.T) {
-	// BuildImageWithProgress must validate the derived image name before
-	// passing it to podman. This catches issues if ProjectImagePrefix is
-	// ever emptied or projectName produces an invalid image ref.
-	sm := &SandboxManager{
-		active:    make(map[string]string),
-		rt:        sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{}),
-		available: true,
-	}
-
-	// Create a temp Dockerfile so we get past the file-read step
-	tmpDir := t.TempDir()
-	dockerfile := filepath.Join(tmpDir, "Dockerfile")
-	if err := os.WriteFile(dockerfile, []byte("FROM alpine:latest"), 0644); err != nil {
-		t.Fatalf("write dockerfile: %v", err)
-	}
-
-	// A project name containing a semicolon produces an image ref like
-	// "sandbox-my;project" which fails ValidateImageRef (semicolon not in
-	// allowed character set). This verifies the validation gate exists.
-	err := sm.BuildImageWithProgress("my;project", dockerfile, nil)
-	if err == nil {
-		t.Fatal("expected error for project name producing invalid image ref")
-	}
-	if !strings.Contains(err.Error(), "invalid project image name") {
-		t.Fatalf("expected image name validation error, got: %v", err)
 	}
 }
 
@@ -1235,7 +1124,7 @@ func TestCreate_PlanModeReadonlyMount(t *testing.T) {
 
 // The bind address reaches podman as given, since podman derives the forward target from
 // it. Every-interface is spelled with no address at all, and a loopback address maps a port
-// a gVisor guest cannot answer - both are the user's choice, not ours to rewrite.
+// a gVisor guest cannot answer — both are the user's choice, not ours to rewrite.
 func TestForwardPortSpec(t *testing.T) {
 	tests := []struct {
 		name          string

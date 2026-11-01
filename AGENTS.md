@@ -113,6 +113,7 @@ curl -sk https://localhost:3000/api/config   # 401 JSON = up; -k because the CA 
 ```bash
 make check | make lint | make check-race                 # gate / static half / -race over the lock packages
 make sandbox-probe                                       # can a gVisor container start on this host?
+make build-probe                                         # can one build an image? minutes; pulls a builder image
 make test-go | make test-frontend                        # Go unit / vitest + the frontend gates
 make test-diff                                           # only the touched Go packages
 make test-frontend-diff                                  # only vitest files importing a touched file
@@ -264,6 +265,16 @@ podman. Without it, sandboxed projects refuse to start tasks — hard error, no 
 - **A capability is judged by its shape, never its name** — `--privileged` is an argument, not a
   capability, and it is refused. `docs/sandbox-runtime.md → Capabilities are judged by shape, not name`
 - **The bridge is stdio-only** — no listener and no port. Interactive terminals bypass it.
+- **A project image builds in a one-shot gVisor container over a staged subtree of the commit, never the
+  working tree**, and it always has a build network — `sandbox_network_isolation` governs the agent, not the
+  build. `docs/sandbox-runtime.md → A project image builds inside a sandbox container`.
+- **Never `podman commit`, never an assembled capability grant** — guest writes are invisible to host storage,
+  and `sandboxruntime.BuilderGrant` is one constant because a grant with a hole in it breaks every step.
+- **The Dockerfile is parsed, not judged, and its short image refs never resolve against the host's store** —
+  the venue jails the instruction shapes; a local base is written `localhost/…`, a line a person reviews.
+- **A build's context is a repo-relative subtree defaulting to the Dockerfile's directory**, and a changed
+  `RUN` set is built only by a request carrying its hash as `confirm_run_set`.
+  `docs/api-contract.md → A project image build is a stream with one control`.
 - **A project's own skills reach its containers read-only** — the bind is that project's `.agents/skills/`
   directory and nothing wider, and the prompt lists skills by the path the container can open.
   `docs/skills.md`.

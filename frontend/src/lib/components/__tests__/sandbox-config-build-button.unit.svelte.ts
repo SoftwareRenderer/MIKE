@@ -25,7 +25,6 @@ vi.mock('$lib/api', async (importOriginal) => {
 import SandboxConfigModal from '$lib/components/SandboxConfigModal.svelte';
 import type { Project } from '$lib/types';
 
-const CHECKBOX_SELECTOR = 'input[aria-label="Disable build cache"]';
 const DOCKERFILE_PATH = '/tmp/repo/Dockerfile';
 
 function projectWith(overrides: Partial<Project> = {}): Project {
@@ -47,95 +46,51 @@ function renderModal(project: Project, inProgressCount = 0) {
     });
 }
 
-function checkbox(container: HTMLElement): HTMLInputElement {
-    const el = container.querySelector<HTMLInputElement>(CHECKBOX_SELECTOR);
-    if (!el) throw new Error('disable-cache checkbox not found');
-    return el;
-}
-
 function rebuildButton(container: HTMLElement): HTMLButtonElement {
     const el = container.querySelector<HTMLButtonElement>('.btn-rebuild');
     if (!el) throw new Error('rebuild button not found');
     return el;
 }
 
-describe('SandboxConfigModal disable-cache checkbox', () => {
+describe('SandboxConfigModal rebuild button', () => {
     beforeEach(() => {
         updateProject.mockReset().mockResolvedValue({});
         getProject.mockResolvedValue({ id: 'p1', active_terminal_ports: [] });
         getBoard.mockResolvedValue({ tasks: [] });
-        buildSandboxImageStream.mockReset().mockResolvedValue({ status: 'built', image: 'img', project: 'p1' });
+        buildSandboxImageStream.mockReset().mockResolvedValue({ status: 'built', image: 'localhost/mike-p1:1f2e3d' });
     });
 
     afterEach(() => {
         cleanup();
     });
 
-    it('renders the checkbox next to the rebuild button, unchecked by default', async () => {
-        const { container } = renderModal(projectWith());
-
-        const box = checkbox(container);
-        expect(box.checked).toBe(false);
-        expect(box.disabled).toBe(false);
-
-        // Inline: the checkbox and the rebuild button share the same action group
-        const actions = box.closest('.build-actions');
-        expect(actions).not.toBeNull();
-        expect(actions!.contains(rebuildButton(container))).toBe(true);
-    });
-
-    it('omits no_cache (cache used) when rebuild is clicked untouched', async () => {
+    it('starts the build the row names, with no modifier to choose', async () => {
         const { container } = renderModal(projectWith());
 
         await fireEvent.click(rebuildButton(container));
         await waitFor(() => expect(buildSandboxImageStream).toHaveBeenCalled());
 
-        expect(buildSandboxImageStream.mock.calls[0][2]).toEqual({ noCache: false });
+        expect(buildSandboxImageStream).toHaveBeenCalledWith('p1', expect.any(Function));
     });
 
-    it('passes noCache when the checkbox is ticked before rebuild', async () => {
-        const { container } = renderModal(projectWith());
-
-        // A plain click flips `checked` and fires the event bind:checked listens to.
-        await fireEvent.click(checkbox(container));
-        expect(checkbox(container).checked).toBe(true);
-
-        await fireEvent.click(rebuildButton(container));
-        await waitFor(() => expect(buildSandboxImageStream).toHaveBeenCalled());
-
-        expect(buildSandboxImageStream.mock.calls[0][2]).toEqual({ noCache: true });
-    });
-
-    it('stays ticked for a follow-up rebuild (modal-scoped, not reset per click)', async () => {
-        const { container } = renderModal(projectWith());
-
-        await fireEvent.click(checkbox(container));
-        await fireEvent.click(rebuildButton(container));
-        await waitFor(() => expect(buildSandboxImageStream).toHaveBeenCalledTimes(1));
-        await fireEvent.click(rebuildButton(container));
-        await waitFor(() => expect(buildSandboxImageStream).toHaveBeenCalledTimes(2));
-
-        expect(buildSandboxImageStream.mock.calls[1][2]).toEqual({ noCache: true });
-    });
-
-    it('is disabled while a build is running', async () => {
+    it('is disabled while a build runs and live again once it ends', async () => {
         let finish: (() => void) | undefined;
         buildSandboxImageStream.mockImplementation(() => new Promise((resolve) => {
-            finish = () => resolve({ status: 'built', image: 'img', project: 'p1' });
+            finish = () => resolve({ status: 'built', image: 'localhost/mike-p1:1f2e3d' });
         }));
 
         const { container } = renderModal(projectWith());
         await fireEvent.click(rebuildButton(container));
         await waitFor(() => expect(buildSandboxImageStream).toHaveBeenCalled());
-
-        expect(checkbox(container).disabled).toBe(true);
+        expect(rebuildButton(container).disabled).toBe(true);
 
         finish?.();
-        await waitFor(() => expect(checkbox(container).disabled).toBe(false));
+        await waitFor(() => expect(rebuildButton(container).disabled).toBe(false));
     });
 
-    it('is not rendered when no Dockerfile is selected', async () => {
+    it('offers no build control when the row names no Dockerfile', async () => {
         const { container } = renderModal(projectWith({ sandbox_dockerfile_path: '' }));
-        expect(container.querySelector(CHECKBOX_SELECTOR)).toBeNull();
+        expect(container.querySelector('.btn-rebuild')).toBeNull();
+        expect(container.querySelector('.btn-build')).toBeNull();
     });
 });

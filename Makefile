@@ -174,6 +174,13 @@ test-e2e-diff: ## Playwright specs this working tree touched (--only-changed)
 sandbox-probe: ## Ask whether a gVisor container can start on this host
 	@go run ./scripts/sandboxprobe
 
+# Deliberately not part of `check`: it pulls a builder image and then runs builds inside a container,
+# which is minutes of work for a question only the operator's host can answer. docs/adr/ holds what the
+# answer is for.
+.PHONY: build-probe
+build-probe: ## Ask whether a gVisor container can build an image (the nested-builder ladder)
+	@go run ./scripts/sandboxprobe --build
+
 # A locale pack fails silently in both directions, so neither failure shows up in the UI: a
 # missing message key falls back to English per key (a pack missing 300 keys still looks
 # translated), and a prompt overlay that renames a placeholder or drops a {{if}} only fails when

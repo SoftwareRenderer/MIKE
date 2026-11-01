@@ -51,11 +51,7 @@ func formatToolAction(name, arguments string) string {
 		}
 	case types.ToolBash:
 		if cmd, ok := args["command"].(string); ok && cmd != "" {
-			// Truncate long commands
-			cmd = strings.TrimSpace(cmd)
-			if len(cmd) > 77 {
-				cmd = cmd[:74] + "..."
-			}
+			cmd = types.ClipMark(strings.TrimSpace(cmd), 74, "...")
 			return "execute `" + cmd + "`"
 		}
 	case types.ToolRequestReview:
