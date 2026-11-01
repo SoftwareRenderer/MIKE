@@ -1784,6 +1784,10 @@ const catalog = {
     'board.column.newTaskAria': 'Create a new task',
     'board.column.addTaskTitle': 'Create a new task ({shortcut})',
     'board.column.clearAllAria': { one: 'Clear all {count} done task', other: 'Clear all {count} done tasks' },
+    'board.column.storageUsed': '{used} of {total} used ({percent})',
+    'board.column.storageLow': 'Storage: {used} of {total} used ({percent})',
+    'board.column.storageAria': 'Show storage usage',
+    'board.column.storageLowAria': 'Storage low. Show storage usage',
 
     // ── Board.svelte — move / start / model / clear-done feedback ──
     'board.toast.moved': 'Task moved to {status}',

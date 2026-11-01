@@ -275,6 +275,22 @@ func (b *memoryBudget) Measure() (mikeMB, heldMB, availableMB, totalMB int64, ok
 	return mikeMB, heldMB, available, total, true
 }
 
+// workspaceStorageProbe reads the filesystem holding the worktrees root. The root is a setting, so it
+// is resolved per call. The failure is logged once: nothing else reports it.
+func workspaceStorageProbe(root func() string) func() (fsutil.DiskUsage, bool) {
+	var warned sync.Once
+	return func() (fsutil.DiskUsage, bool) {
+		usage, err := fsutil.DiskUsageFor(root())
+		if err != nil {
+			warned.Do(func() {
+				logging.For(logging.Host).Warnf("reading the worktrees filesystem: the Done count will report no storage usage (%v)", err)
+			})
+			return fsutil.DiskUsage{}, false
+		}
+		return usage, true
+	}
+}
+
 // The task row is the only thing that outlives the cgroup these numbers were read from.
 func sandboxMemoryPeakSink(st *store.Store) func(taskID string, peakMB int64, oomKills int64) {
 	return func(taskID string, peakMB int64, oomKills int64) {
@@ -411,6 +427,7 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 
 	worktreeMgr := git.NewWorktreeManager(store, cfgStore)
 	s.appStreamMgr = stream.NewAppStreamManager(store, worktreeMgr)
+	s.appStreamMgr.SetStorageProbe(workspaceStorageProbe(cfgStore.WorkspaceDir))
 	// First to close: a watcher runs git and container work on its own goroutines, and everything it
 	// can reach is torn down below it.
 	defer s.reg(stageWebsocketWatchers, "websocket watchers", s.appStreamMgr.Close)()

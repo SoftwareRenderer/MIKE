@@ -478,6 +478,12 @@ export interface ProjectCounts {
     review: number;
 }
 
+/** The server's own filesystem, as the `storage_usage` frame pushes it. Bytes, not a rounded unit. */
+export interface StorageUsage {
+    total_bytes: number;
+    avail_bytes: number;
+}
+
 export interface ModelStats {
     model_name: string;
     provider_name: string;

@@ -36,6 +36,7 @@ export type AppStreamEventType =
     | 'task_event'
     | 'board_refresh'
     | 'project_counts'
+    | 'storage_usage'
     | 'project_branch'
     | 'project_ports'
     | 'task_updated'

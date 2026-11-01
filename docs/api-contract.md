@@ -67,6 +67,30 @@ fetch can run on a detached context while the swap stays behind a click; the rou
 - Use optimistic UI for user messages (add immediately, skip the echo).
 - Model/provider changes ride a `user_message` with optional `model_name`/`llama_server_url`.
 
+### The filesystem reading is pushed, never asked for
+
+`storage_usage` is a flat frame carrying `total_bytes` and `avail_bytes` — the server's own filesystem,
+measured with `statfs` on the worktrees root (`cfgStore.WorkspaceDir()`, wired in
+`backend/server/server.go`). It is the only way the browser learns this figure: there is no route for it,
+and `apiroutes` would refuse one, because a route nobody calls is the failure that rule exists for.
+
+- `avail_bytes` is what an unprivileged process can still write, so a filesystem's root-reserved blocks
+  count as *used*. That is the space this server can fill, and the Done count warns on it: past 80%
+  used the count turns red behind a warning symbol (`isStoragePressured` in `utils/storage-usage.ts`).
+- It is a **current-state value**, not a record of transitions: a client that misses one keeps the
+  reading it holds. Three things push it. `BroadcastTaskUpdated` does it when the task it carries has
+  landed in Done — that move is when the worktree the count represents grows. `Broadcast` does it after
+  a structural change has settled — that is how clearing Done, or deleting a task or a project, stops
+  the count from staying red over space just freed. That broadcast runs after the teardown steps, so the
+  bytes are gone by then. `HandleStream` does it to a connection it has just accepted, so a board opened
+  after the last task landed is not left showing nothing.
+- The frame is `null`-suppressed: with no probe wired, or a probe that cannot read the root, no frame is
+  sent at all. A frame of zeroes would be a divide-by-zero the client cannot tell from an empty disk.
+
+Test: `backend/stream/app_stream_storage_test.go` drives all three over a real socket. The name is in
+both vocabularies (`backend/types/ws.go`, `api/events.ts`) and `make archgate RULE=wsevents` fails if
+one side drops it.
+
 ### The task row a browser holds has no result text
 
 `output` is the text the agent reported when its turn ended. It is the largest field a row has, and nothing in
