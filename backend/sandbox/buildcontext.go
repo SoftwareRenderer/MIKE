@@ -117,8 +117,8 @@ func NormalizeBuildContextValue(rel string) (string, error) {
 	if trimmed == "" {
 		return "", nil
 	}
-	// 	// Refused as written, before folding: nobody writes `a/../b` meaning `b`, and a `..` here reaches for a
-	// 	// subtree the context does not hold.
+	// Refused as written, before any folding: nobody writes `a/../b` meaning `b`, and a `..` here reaches
+	// outside the context directory.
 	for _, seg := range strings.Split(trimmed, "/") {
 		if seg == ".." {
 			return "", fmt.Errorf(`path must not contain ".."`)

@@ -752,7 +752,9 @@ Tests: `backend/server/handler_fs_ops_test.go`; client side `frontend/src/lib/ap
 
 - `POST /api/projects/{projectID}/sandbox/build` answers as an SSE stream whose frames are **raw progress
   lines**, not JSON objects — the reader prints them. A failure arrives as a final `error: …` line, because
-  the stream has already answered 200 by then. Its one check is a query parameter, read before the first
+  the stream has already answered 200 by then. That line carries the cause rather than an exit status, because
+  the reader reports it as the failure; the same cause is logged at `ERROR` with `project_id` and `build_id`,
+  since the panel keeps only the line. Its one check is a query parameter, read before the first
   frame.
 - **`no_cache` is refused by name.** There is no build cache to skip, and a request that sent the key asked
   for something, so it answers 400 rather than building anyway.

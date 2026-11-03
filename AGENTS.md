@@ -271,6 +271,9 @@ podman. Without it, sandboxed projects refuse to start tasks — hard error, no 
   `docs/sandbox-runtime.md → A project image builds inside a sandbox container`.
 - **Never `podman commit`, never an assembled capability grant** — guest writes are invisible to host storage,
   and `sandboxruntime.BuilderGrant` is one constant because a grant with a hole in it breaks every step.
+- **The nested builder image is fetched by the host, the way a base is**: the build container is created with
+  `--pull never` and pulls nothing.
+  `docs/sandbox-runtime.md → A project image builds inside a sandbox container`.
 - **The Dockerfile is read for its image refs and judged for nothing else**: no instruction whitelist, no
   approval of its commands, no version rule on a base. Its short image refs never resolve against the host's
   store, and a `RUN` step never sees MIKE's mounts — the venue jails the instruction shapes. A local base is

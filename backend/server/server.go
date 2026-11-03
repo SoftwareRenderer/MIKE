@@ -476,8 +476,8 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 	}
 
 	s.sandboxMgr = sandbox.NewSandboxManager(boot)
-	// 	// A build's scratch root sits under the workspace root, outside every checkout and never the data directory.
-	// 	// Sweeping before anything starts means every entry here belongs to the previous process.
+	// A build's scratch root sits under the workspace root, outside every checkout and never the data directory.
+	// Sweeping before anything starts means every entry here belongs to the previous process.
 	sandbox.SetScratchRoot(worktreesDir)
 	sandbox.SweepScratch()
 	defer s.reg(stageImageBuilds, "image builds", sandbox.CancelBuilds)()
@@ -612,9 +612,9 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 		logging.For(logging.Startup).Infof("memory supervisor: gate capacity %d MB (%d%% of %d MB total, %s)",
 			capacityMB, memPct, totalMB, startup.EnvMemoryBudgetPct)
 	}
-	// 	// A build belongs to no task, so the supervisor that charges live containers never sees one; it books its
-	// 	// container's limit through this same gate. A gate with capacity 0 grants immediately, which is the disabled
-	// 	// case.
+	// A build belongs to no task, so the supervisor that charges live containers never sees one; it books its
+	// container's limit through this same gate. A gate with capacity 0 grants immediately, which is the disabled
+	// case.
 	memGate := s.executor.MemGate()
 	sandbox.SetMemoryAdmission(func(ctx context.Context, amountMB int64, waiting func()) (func(), error) {
 		if err := memGate.AcquireNoticed(ctx, amountMB, waiting); err != nil {

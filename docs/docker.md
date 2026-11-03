@@ -184,6 +184,10 @@ Either way the bundle's published sha512 is verified before anything is executed
   accepted, and the entrypoint's `MIKE_ALLOWED_HOSTS` default adds nothing to them; a proxy's domain,
   `hostname.local` or a LAN IP goes into that list first.
 - **A project must live under the bind mount** for its sandboxes to reach its `.git` at the same path.
+- **The first image build fetches about 600 MB into this container's own store.** The nested builder image
+  `quay.io/buildah/stable:latest` ships in no image MIKE builds. This container's podman store is its own, so a
+  machine that built images before still starts empty here. MIKE pulls it when it is missing; pull it inside the
+  container to skip that wait.
 - **An agent adapter that shells out to a CLI fails until that CLI is installed** in a derived image;
   the base image ships no node or python.
 

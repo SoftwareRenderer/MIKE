@@ -74,7 +74,7 @@ func (sm *SandboxManager) EnsureImageForProject(project *types.Project, onProgre
 		}
 	}
 
-	// 	// Qualified here for every source, so a value stored before the rule existed still resolves.
+	// Qualified for every source, because a stored ref may still be a short name.
 	image := sm.rt.ResolveImageRef(pi.Image)
 	if sm.ImageReady(image) {
 		return image, nil
@@ -95,8 +95,8 @@ func (sm *SandboxManager) EnsureImageForProject(project *types.Project, onProgre
 	err := sm.doOnce(image, func() error {
 		// The caller that won the race has done the work for all of them.
 		if sm.ImageReady(image) {
-			// 			// A project image built here carries its cache key, so a cache hit is answered without staging a byte;
-			// 			// anything older, or built from other input, is rebuilt.
+			// A project image built here carries its cache key, so a matching image is reused without staging
+			// anything; one that is older, or built from other input, is rebuilt.
 			if !pi.NeedsBuild() {
 				return nil
 			}

@@ -65,9 +65,13 @@ export async function buildSandboxImageStream(
     }
 
     let result: SandboxBuildResult | null = null;
+    // The server reports a failure as a final `error: …` line, because it answered 200 before the build ran.
+    // The thrown error carries that line as its cause.
+    let cause = '';
 
     for await (const frame of readEventStream(res)) {
         const data = frame.data;
+        if (data.startsWith('error: ')) cause = data.slice('error: '.length);
         // The final result is the JSON object carrying a `status` string; everything else is a line for the
         // log, including a `{`-shaped line that is not valid JSON or is JSON that names no result.
         if (data.startsWith('{')) {
@@ -82,7 +86,7 @@ export async function buildSandboxImageStream(
         onLine(data);
     }
 
-    if (!result) throw new Error(t('api.buildCompletedWithoutResult'));
+    if (!result) throw new Error(cause || t('api.operationEndedEarly'));
     return result;
 }
 

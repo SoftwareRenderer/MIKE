@@ -12,6 +12,7 @@ import (
 
 	"mike/backend/testutil/sandboxcheck"
 	"mike/backend/types"
+	"mike/pkg/logging"
 	"mike/pkg/sandboxruntime"
 )
 
@@ -600,6 +601,26 @@ func TestBuildResolvesAnArgNamedBaseInASandbox(t *testing.T) {
 	}
 	if files := imageRootFS(t, result.Image); files["artifact"] != "built-from-a-named-arg\n" {
 		t.Errorf("the image built on the resolved base does not hold the committed file: %v", files)
+	}
+}
+
+// The panel keeps only the stream's last line, so a build that fails after its plan has to reach the log
+// carrying its build id.
+func TestABuildThatFailsAfterThePlanLogsItsBuildID(t *testing.T) {
+	sm, project, _ := buildE2E(t, map[string]string{"Dockerfile": "FROM docker.io/library/alpine:3.20\n"}, "")
+	project.SandboxMounts = []types.SandboxMount{{HostPath: t.TempDir(), ContainerPath: "not-an-absolute-path"}}
+
+	buf, restore := logging.TestSink()
+	defer restore()
+	if _, err := sm.BuildProjectImage(context.Background(), project, nil); err == nil {
+		t.Fatal("a build container mounting at a relative path was accepted")
+	}
+
+	out := buf.String()
+	for _, want := range []string{"level=ERROR", "component=sandbox", "project_id=builde2e", "build_id=builde2e-"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the failed build logged no %q:\n%s", want, out)
+		}
 	}
 }
 

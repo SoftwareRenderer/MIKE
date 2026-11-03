@@ -1192,7 +1192,6 @@ const catalog = {
     'api.updateProject': 'Failed to update project',
     'api.buildSandboxImage': 'Failed to build sandbox image',
     'api.streamingNotSupported': 'Streaming not supported',
-    'api.buildCompletedWithoutResult': 'Build completed without result',
     'api.deleteProject': 'Failed to delete project',
     'api.resetStats': 'Failed to reset stats',
     'api.createTask': 'Failed to create task',

@@ -3,14 +3,10 @@ package sandboxruntime
 // The parts of a `podman create` command line that are a security decision: the isolation preface
 // every container MIKE builds starts from (GVisorCreateArgs), the one append path for a capability
 // grant (AppendCapabilities), the one way a bind mount's `-v` value is written (BindMountSpec), and
-// the values that arrive from outside this process — a capability name, and a bind mount's
-// in-container path. Mounts carry the weight: one mount of "/" hands the
-// sandbox the host tree, and a ":" or "," in a container path rewrites the mount's options — an
-// "ro" becomes "rw". A capability is judged by shape instead, because every container MIKE creates
-// runs under gVisor with `--cap-drop ALL` (GVisorIsolationForCaps records what was measured) and
-// the grant goes through the one function that checks that runtime before appending.
+// the validators for values that arrive from outside this process.
 //
-// Every caller that builds container arguments takes these from here.
+// Every caller that builds container arguments takes these from here; docs/sandbox-runtime.md holds
+// why each one is the boundary it is.
 
 import (
 	"fmt"
@@ -161,9 +157,9 @@ func GVisorCreateArgs(containerName string) []string {
 		"--runtime-flag=ignore-cgroups",
 		"create",
 		"--pull", "never",
-		// 		// A `VOLUME` line makes podman create an anonymous volume per container and `rm -f` leaves it behind; enough
-		// 		// leftovers fill podman's 2048 volume locks and every create is then refused. MIKE mounts only binds,
-		// 		// which `ignore` leaves alone.
+		// A `VOLUME` line makes podman create an anonymous volume per container and `rm -f` leaves it behind; enough
+		// leftovers fill podman's 2048 volume locks and every create is then refused. MIKE mounts only binds,
+		// which `ignore` leaves alone.
 		"--image-volume", "ignore",
 		"--name", containerName,
 		"--runtime", "runsc",
@@ -178,10 +174,6 @@ func GVisorCreateArgs(containerName string) []string {
 // the way granting a capability assumes: gVisor as the runtime, and every capability dropped
 // before the grant. Anywhere else `--cap-add` is a privilege on the host kernel, so a caller that
 // fails this check must not add one.
-//
-// This replaced a denylist of capability names, measured not to be the boundary: under runsc a
-// guest with SYS_ADMIN still cannot write through a read-only bind mount, see a host PID, or
-// bind-mount the host tree. The runtime is what the safety rests on.
 func GVisorIsolationForCaps(args []string) error {
 	if !hasArgPair(args, "--runtime", "runsc") {
 		return fmt.Errorf("capabilities may only be granted to a gVisor (runsc) container; this command line does not select that runtime")
@@ -199,8 +191,7 @@ func AppendCapabilities(args []string, caps []string) ([]string, error) {
 	if err := GVisorIsolationForCaps(args); err != nil {
 		return args, err
 	}
-	// 	// Checked here too, because this function is the promise that no call site forges a grant: a value with a
-	// 	// space or a leading dash reaches podman as extra arguments. Every name is checked before any is appended.
+	// A space or a leading dash in a name would reach podman as extra arguments.
 	if err := ValidateCapabilities(caps); err != nil {
 		return args, err
 	}

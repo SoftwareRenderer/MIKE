@@ -37,8 +37,8 @@ const (
 const (
 	buildCacheKeyLabel = "mike.build-cache-key"
 	buildCommitLabel   = "mike.commit"
-	// 	buildBaseLabel records which base the bytes were built on, which the cache key cannot say: a ref like
-	// 	`alpine:3.20` can move.
+	// buildBaseLabel records which base the bytes were built on, which the cache key cannot say: a ref like
+	// `alpine:3.20` can move.
 	buildBaseLabel = "mike.base-image"
 )
 
@@ -57,8 +57,8 @@ type BuildResult struct {
 	CacheKey    string   `json:"cache_key"`
 	Files       int      `json:"files"`
 	ScratchPeak string   `json:"scratch_peak,omitempty"`
-	// 	BaseImageID is the id of each image the host handed in, in file order — the bytes a floating tag names
-	// 	only on the day it was fetched.
+	// BaseImageID is the id of each image the host handed in, in file order — the bytes a floating tag names
+	// only on the day it was fetched.
 	BaseImageID string `json:"base_image_id,omitempty"`
 }
 
@@ -78,8 +78,8 @@ type buildPlan struct {
 	containerName string
 	stagedFiles   int
 	stagedBytes   int64
-	// 	baseNames[i] holds every name the guest's store must answer for archive i, so any spelling the Dockerfile
-	// 	used resolves. An unlisted spelling fails on `--pull=never` rather than downloading.
+	// baseNames[i] holds every name the guest's store must answer for archive i, so any spelling the Dockerfile
+	// used resolves. An unlisted spelling fails on `--pull=never` rather than downloading.
 	baseNames    [][]string
 	baseImageIDs []string
 }
@@ -253,8 +253,11 @@ func (sm *SandboxManager) projectBuildKey(ctx context.Context, project *types.Pr
 }
 
 // BuildProjectImage builds the project's sandbox image and returns what it did. onProgress receives the
-// builder's own lines, one at a time, and is called from this goroutine.
-func (sm *SandboxManager) BuildProjectImage(ctx context.Context, project *types.Project, onProgress func(line string)) (*BuildResult, error) {
+// builder's own lines, one at a time, from this goroutine.
+//
+// A failure is logged as well as returned: the stream's last line is all the panel keeps, so without the log
+// entry a failed build leaves nothing to grep by.
+func (sm *SandboxManager) BuildProjectImage(ctx context.Context, project *types.Project, onProgress func(line string)) (result *BuildResult, err error) {
 	emit := func(line string) {
 		if onProgress != nil {
 			onProgress(line)
@@ -262,20 +265,42 @@ func (sm *SandboxManager) BuildProjectImage(ctx context.Context, project *types.
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	plan, err := sm.planProjectBuild(ctx, project, emit)
+
+	var plan *buildPlan
+	defer func() {
+		if err == nil {
+			return
+		}
+		entry := logging.For(logging.Sandbox).With(logging.ProjectID, project.ID)
+		if plan != nil {
+			entry = entry.With(logging.BuildID, plan.scratch.ID)
+		}
+		// A build whose stream went away was stopped by the person watching it, not by a fault.
+		if ctx.Err() != nil {
+			entry.Warnf("image build of %s stopped before it answered: %v", ProjectImageName(project.Name), err)
+			return
+		}
+		entry.Errorf("image build of %s failed: %v", ProjectImageName(project.Name), err)
+	}()
+
+	plan, err = sm.planProjectBuild(ctx, project, emit)
 	if err != nil {
 		return nil, err
 	}
 	defer plan.scratch.Remove()
 	defer registerBuild(plan.scratch.ID, cancel)()
-	// 	The budget is taken before any work, so a build that never gets room has staged nothing and started nothing.
+	// The budget is taken before any work, so a build that never gets room has staged nothing and started nothing.
 	releaseMemory, err := reserveBuildMemory(ctx, project, emit)
 	if err != nil {
 		return nil, err
 	}
 	defer releaseMemory()
 
-	result := &BuildResult{
+	if err := sm.ensureBuilderImage(ctx, emit); err != nil {
+		return nil, err
+	}
+
+	result = &BuildResult{
 		Image:    ProjectImageName(project.Name),
 		Commit:   plan.commit,
 		From:     plan.fromRef,
@@ -301,6 +326,20 @@ func (sm *SandboxManager) BuildProjectImage(ctx context.Context, project *types.
 	}
 	result.ScratchPeak = humanBytes(plan.scratch.peak.Load())
 	return result, nil
+}
+
+// ensureBuilderImage fetches the nested builder image into the host's image store, because the build container
+// is created with `--pull never` and cannot fetch it itself.
+func (sm *SandboxManager) ensureBuilderImage(ctx context.Context, emit func(string)) error {
+	ref := sandboxruntime.BuilderImageDefault
+	if sm.ImageReady(ref) {
+		return nil
+	}
+	emit(fmt.Sprintf("pulling the nested builder image %s (once per host)…", ref))
+	if err := sm.PullImageWithProgress(ref, emit); err != nil {
+		return fmt.Errorf("pull the nested builder image %s: %w", ref, err)
+	}
+	return nil
 }
 
 // buildTailLines bounds how much guest output is kept to read a cause from. A failing buildah names its reason in
@@ -333,8 +372,8 @@ func buildFailureHint(lines []string) string {
 // with each spelling the file used, because the build container downloads nothing.
 func (sm *SandboxManager) stageBaseImageArchives(ctx context.Context, plan *buildPlan, emit func(string)) error {
 	for i, raw := range plan.file.Bases {
-		// 	Docker's qualification only, never `ResolveImageRef`: that prefers the host's image store, and a host image
-		// 	is bytes no container can reach. A local base is spelled `localhost/…`, which a person reviews.
+		// Docker's qualification only, never `ResolveImageRef`: that prefers the host's image store, and a host image
+		// is bytes no container can reach. A local base is spelled `localhost/…`, which a person reviews.
 		ref := sandboxruntime.QualifyDockerImageRef(raw)
 		if !sm.ImageReady(ref) {
 			emit(fmt.Sprintf("pulling %s for the build to be handed…", ref))
@@ -373,8 +412,10 @@ func (sm *SandboxManager) runBuildContainer(ctx context.Context, plan *buildPlan
 	}
 	name := plan.containerName
 
-	if _, err := sm.rt.PodmanExecContext(ctx, args...); err != nil {
-		return fmt.Errorf("create the build container: %w", err)
+	out, err := sm.rt.PodmanExecContext(ctx, args...)
+	if err != nil {
+		// podman names the cause in its own sentence; an exit status alone does not.
+		return fmt.Errorf("create the build container: %w: %s", err, lastLine(string(out)))
 	}
 	// One teardown path, on every exit: a build container is single-use (its layers live in its own
 	// writable layer) and a leftover is invisible except by its name, which carries the build id.
@@ -424,8 +465,8 @@ func buildShellQuote(s string) string {
 // the project's inherited mounts read-only, a network, no published ports.
 func (sm *SandboxManager) buildContainerArgs(plan *buildPlan) ([]string, error) {
 	project := plan.project
-	// 	// Only what this function reads is taken from the project's configuration; task-only fields are left alone
-	// 	// rather than filled with values that would do nothing.
+	// Only what this function reads is taken from the project's configuration; task-only fields are left alone
+	// rather than filled with values that would do nothing.
 	opts := ProjectOpts(project)
 
 	args := sandboxruntime.GVisorCreateArgs(plan.containerName)
@@ -441,8 +482,8 @@ func (sm *SandboxManager) buildContainerArgs(plan *buildPlan) ([]string, error) 
 	}
 	args = append(args, envArgs...)
 
-	// 	// Inherited mounts, read-only: a mount row grants a task and its reviewed code, not a Dockerfile nobody has
-	// 	// read.
+	// Inherited mounts, read-only: a mount row grants a task and its reviewed code, not a Dockerfile nobody has
+	// read.
 	for _, m := range opts.SandboxMounts {
 		if m.HostPath == "" || m.ContainerPath == "" {
 			continue
@@ -463,8 +504,8 @@ func (sm *SandboxManager) buildContainerArgs(plan *buildPlan) ([]string, error) 
 	if opts.MemoryLimit > 0 {
 		args = append(args, "--memory", fmt.Sprintf("%dM", opts.MemoryLimit))
 	}
-	// 	// A build always has a network: the isolation switch asks whether the agent may reach out, which this is not.
-	// 	// Reads are unaffected, and there is no route to the host's loopback.
+	// A build always gets a network: `sandbox_network_isolation` decides for the agent, not for a build. Its
+	// inputs arrive as a bind mount, and there is no route to the host's loopback.
 
 	return append(args, sandboxruntime.BuilderImageDefault, "/bin/sh", "-c", buildContainerScript(plan)), nil
 }
@@ -477,8 +518,8 @@ func buildContainerScript(plan *buildPlan) string {
 	fmt.Fprintf(&b, "set -e\n")
 	fmt.Fprintf(&b, "mkdir -p %s/s %s/r\n", buildStoreRoot, buildStoreRoot)
 	for i, archive := range plan.baseArchives {
-		// 		// The guest is told only the archive's name and takes the id from the pull: with several images in the
-		// 		// store, "the first one" names nothing.
+		// The guest is told only the archive's name and takes the id from the pull: with several images in the
+		// store, "the first one" names nothing.
 		fmt.Fprintf(&b, "id=$(%s pull docker-archive:%s/%s | tail -1)\n", store, buildBaseMount, filepath.Base(archive))
 		for _, name := range plan.baseNames[i] {
 			fmt.Fprintf(&b, "%s tag \"$id\" %s > /dev/null\n", store, buildShellQuote(name))
@@ -540,8 +581,8 @@ func (sm *SandboxManager) loadBuiltImage(plan *buildPlan, result *BuildResult, e
 		return fmt.Errorf("the build produced %q, which is not a usable image name: %w", loaded, err)
 	}
 
-	// 	The build record is read off the loaded image **before** the project's name is moved onto it, because that
-	// 	name is a claim the project can boot from.
+	// The build record is read off the loaded image **before** the project's name is moved onto it, because that
+	// name is a claim the project can boot from.
 	key, err := sm.imageLabel(loaded, buildCacheKeyLabel)
 	if err != nil || key == "" {
 		return fmt.Errorf("the built image carries no build record: %v", err)
@@ -560,19 +601,19 @@ func (sm *SandboxManager) loadBuiltImage(plan *buildPlan, result *BuildResult, e
 	if err != nil {
 		return fmt.Errorf("the retagged image %s cannot be read back: %w", result.Image, err)
 	}
-	// 	The builder's own tag is an intermediate, dropped by name rather than by id: the loaded id is what the
-	// 	project boots from now.
+	// The builder's own tag is an intermediate, dropped by name rather than by id: the loaded id is what the
+	// project boots from now.
 	if _, err := sm.podmanExec("untag", loadedID, loaded); err != nil {
 		logging.For(logging.Sandbox).With(logging.BuildID, plan.scratch.ID).Warnf("intermediate name %s left on image %s: %v", loaded, loadedID, err)
 	}
-	// 	The replaced image is retired by id, and skipped when that id is the one that just landed.
+	// The replaced image is retired by id, and skipped when that id is the one that just landed.
 	if retired := strings.TrimSpace(string(previous)); hasPrevious && retired != "" && !sameImageID(retired, loadedID) {
 		if _, err := sm.podmanExec("rmi", retired); err != nil {
 			logging.For(logging.Sandbox).With(logging.ProjectID, plan.project.ID).Warnf("previous project image %s could not be removed: %v", result.Image, err)
 		}
 	}
-	// 	Every removal above may fail, so the caller's one guarantee is checked here: the project's name resolves to
-	// 	the image this build produced.
+	// Every removal above may fail, so the caller's one guarantee is checked here: the project's name resolves to
+	// the image this build produced.
 	if settled, idErr := sm.imageIDOf(result.Image); idErr != nil || settled != loadedID {
 		return fmt.Errorf("the project image %s does not resolve to the image just built (%s): %v", result.Image, loadedID, idErr)
 	}

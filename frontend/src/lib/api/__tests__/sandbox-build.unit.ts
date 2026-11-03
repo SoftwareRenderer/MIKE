@@ -107,14 +107,25 @@ describe('buildSandboxImageStream reads the server frame stream', () => {
         expect(result.status).toBe('built');
     });
 
-    it('reports a stream that ends without a result frame as incomplete', async () => {
-        // The server's own failure path: it writes `error: …` as a log line and returns.
+    it('names the stream’s error line when a build ends without a result frame', async () => {
+        // The server's own failure path: it writes `error: …` as a log line and returns. The thrown error
+        // carries that line as its cause.
         vi.stubGlobal('fetch', vi.fn(async () =>
             streamInChunks(BUILD_LINES.map((l) => `data: ${l}\n\n`).join(''))));
 
         const lines: string[] = [];
         await expect(buildSandboxImageStream('p1', (l) => lines.push(l)))
-            .rejects.toThrow('Build completed without result');
+            .rejects.toThrow('build docker.io/library/node:22: exit status 125');
         expect(lines[lines.length - 1]).toContain('exit status 125');
+    });
+
+    it('says the stream ended when it gives neither a result nor a cause', async () => {
+        // A build cut off mid-flight answers nothing, so the fallback says only that the wait ended — the same
+        // words the extension-install stream uses when its terminal frame never arrives.
+        vi.stubGlobal('fetch', vi.fn(async () =>
+            streamInChunks('data: Building the sandbox image…\n\n')));
+
+        await expect(buildSandboxImageStream('p1', () => { }))
+            .rejects.toThrow('Operation ended before reporting completion');
     });
 });

@@ -138,7 +138,9 @@ else, so a capability is a word and cannot be anything else.
 - `ValidateCapabilities` reports the first value it cannot accept, naming it, so the operator sees which
   entry was refused rather than a list of accepted ones.
 - What a name *means* is decided elsewhere: `AppendCapabilities` refuses the grant unless the isolation
-  posture is already there (`docs/sandbox-runtime.md → Podman argument construction`).
+  posture is already there (`docs/sandbox-runtime.md → Podman argument construction`). The runtime is what the
+  safety rests on: under `runsc`, a guest holding `SYS_ADMIN` still cannot write through a read-only bind mount,
+  see a host PID, or bind-mount the host tree. A denylist of names was measured away as not being that boundary.
 - Tests: `TestValidateCapabilityRule` (the table carries `--privileged`, `--cap-add`, `-v` and
   `SYS_ADMIN,ALL`), `TestGVisorIsolationForCaps`, `TestAppendCapabilitiesRefusesAnUnisolatedGrant`.
 
@@ -281,6 +283,9 @@ This section is the mechanism.
   The Dockerfile is untrusted text that builds inside gVisor, so MIKE does not read which commands it runs and
   does not ask a person to bless them: containment is the control. Everything the parser does not read is the
   builder's, and the file reaches the builder unchanged.
+- **The nested builder image is fetched by the host, the way a base is.** `runBuildContainer` creates its
+  container with `--pull never`, so that image cannot arrive any other way: `ensureBuilderImage` fetches it
+  before the create and says so in the stream. `docs/docker.md → Limits an operator meets` for what that costs.
 - **The instruction whitelist was measured away.** An earlier version refused instructions, flags and path
   shapes it had not read. The builder jails those shapes itself. It resolves a `COPY /etc/passwd` and a
   `--mount=type=bind,source=…` *under the context directory*, clamps an escaping `COPY ../x` inside it, gives a
