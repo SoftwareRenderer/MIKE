@@ -24,7 +24,6 @@ CREATE TABLE IF NOT EXISTS projects (
     sandbox_capabilities     TEXT DEFAULT NULL,
     commit_assisted_by       INTEGER NOT NULL DEFAULT 0,
     mcp_server_ids           TEXT DEFAULT NULL,
-    sandbox_run_set_hash     TEXT DEFAULT NULL,
     created_at               TEXT NOT NULL,
     updated_at               TEXT NOT NULL
 );

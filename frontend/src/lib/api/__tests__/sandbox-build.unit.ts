@@ -29,7 +29,7 @@ function sseResponse(frames: string[]): Response {
 // result out by.
 const RESULT =
     '{"status":"built","image":"localhost/mike-p1:1f2e3d","commit":"1f2e3d4c5b6a","from":"docker.io/library/node:22",' +
-    '"run_set_hash":"' + 'a'.repeat(64) + '","cache_key":"9f8e7d6c","files":2}';
+    '"bases":["docker.io/library/node:22"],"cache_key":"9f8e7d6c","files":2}';
 
 /**
  * The lines `POST /api/projects/{id}/sandbox/build` really writes: the handler's opener, the guest's own

@@ -242,7 +242,11 @@ This section is the mechanism.
   A guest reaches the internet but **not the host's loopback**: the gateway is the CNI address, so a build
   cannot call MIKE's own API.
 - **Three binds:** the staged context read-only at `/mike-ctx`, the
-  output directory read-write at `/mike-out`, the base archive read-only at `/mike-base`.
+  output directory read-write at `/mike-out`, the base archive read-only at `/mike-base`. None of the three
+  reaches a `RUN` step: the step's filesystem is the image being built, not the container running the builder,
+  so a `RUN` that writes to a bind path fails with "nonexistent directory" — measured. The handoff is
+  one-way in both directions: `RUN` reads the context only through what a `COPY` put in the image, and writes
+  only into the image.
 - **The grant is fixed, and it is tested as a whole.** `BuilderGrant` is the fourteen names the nested builder
   asks for. `BuildGrant` — `SETUID`, `SETGID`, `SETFCAP` — is the measured minimum inside it: each of the three
   is necessary, every pair failing at the `/proc/<pid>/uid_map` or `gid_map` write.
@@ -271,13 +275,12 @@ This section is the mechanism.
 - **The builder is nested buildah, and MIKE models no instruction.** Inside the guest: storage `vfs`, root
   and runroot under `/var/tmp/mike-build` (**not** `/tmp`, which is guest tmpfs — a `vfs` layer there fails
   its xattr reads), `bud --isolation chroot --pull=never`, flags before the context.
-- **The file is read, not judged.** `backend/sandbox/dockerfile.go` answers two questions and no third.
-  Which images does this file need: every stage's base, and every `COPY --from` naming an image, deduped in
-  file order. The guest never pulls, so the host hands each one in, and a ref missed is a build that dies
-  pulling it. Which commands can run: each `RUN`, and each `ONBUILD RUN`, which runs in a later build of this
-  image. Those hash with the `SHELL` lines, because the shell changes what every command means, and a person
-  approves the result — this is the one check the sandbox cannot make for MIKE. Everything else is the
-  builder's.
+- **The file is read for its image refs and judged for nothing else.** `backend/sandbox/dockerfile.go`
+  answers one question: which images must the host fetch. Every stage's base, and every `COPY --from` naming
+  an image, deduped in file order — the guest never pulls, so a ref missed is a build that dies pulling it.
+  The Dockerfile is untrusted text that builds inside gVisor, so MIKE does not read which commands it runs and
+  does not ask a person to bless them: containment is the control. Everything the parser does not read is the
+  builder's, and the file reaches the builder unchanged.
 - **The instruction whitelist was measured away.** An earlier version refused instructions, flags and path
   shapes it had not read. The builder jails those shapes itself. It resolves a `COPY /etc/passwd` and a
   `--mount=type=bind,source=…` *under the context directory*, clamps an escaping `COPY ../x` inside it, gives a
@@ -285,8 +288,7 @@ This section is the mechanism.
   `HEALTHCHECK`, `RUN --mount=type=cache` and multi-stage files. So the whitelist bought refusals
   and a false story about where the safety lives.
   `TestBuildPassesThroughWhatTheVenueAlreadyJails` and
-  `TestBuildRunsAMultiStageDockerfileOverTwoImages` hold the two halves, and
-  `docs/adr/0002-image-builds-run-in-a-sandbox-container-over-a-commit-subtree.md` records the reversal.
+  `TestBuildRunsAMultiStageDockerfileOverTwoImages` hold the two halves.
 - **A Dockerfile names images by registry spelling, so it cannot name one off this machine's store.** A short
   ref is qualified the way Docker qualifies it: `docker.io/library/…`. The local-store lookup
   (`ResolveImageRef`) is deliberately not applied to it, because that lookup exists for *stored* settings,
@@ -294,10 +296,20 @@ This section is the mechanism.
   copy any image on the host into the project — measured, no network involved. An image in the host's store is
   bytes no sandboxed process can reach. `TestBuildCannotNameAHostLocalImageByShortName` holds the rule. An
   explicit `localhost/my-runner:1` still builds, since that line is something a person reviewed.
-- **Three refusals stay, each because MIKE would otherwise say something false.** `--platform`: the host
-  pulls, so the build gets this host's architecture. An image named by a `$variable`: it cannot be fetched by
-  a name that is not yet a name. `# escape=` with a non-default character: it moves where one command ends,
-  so the approved set would not be the set that runs.
+- **Two refusals stay, each because MIKE would otherwise say something false.** `--platform`: the host
+  pulls, so the build gets this host's architecture. `# escape=` with a non-default character: it moves where
+  one instruction ends, so MIKE would read a different file than the builder does.
+- **A base a `$variable` names is resolved, not refused.** MIKE hands the builder no `--build-arg` of its
+  own, so a build arg's only possible value is the `ARG` default written in the same file. Measured: a stage
+  that re-declares the arg bare sees that default with nothing passed in. So the parser reads the same line the
+  builder reads, and fetches what it names. The archive arrives tagged with the qualified ref and with the
+  file's own spelling, so the guest's second expansion finds it under `--pull=never` and nothing needs
+  pinning. `TestBuildResolvesAnArgNamedBaseInASandbox` proves the two readings agree.
+- **An `ARG` names a base only from above the first `FROM`** — that is the builder's scoping, measured on
+  both engines. A default written below the `FROM` is empty inside the stage, for anything but a bare
+  re-declaration, and it can never name the image a stage builds on. An `ARG` written with no `=` has no
+  value, and a base naming it is refused by name — MIKE cannot fetch what has none. Defaults expand lazily,
+  bounded, and never from the environment.
 - **The artifact is pushed out as bytes; `podman commit` is never the path.** The guest's writes are
   invisible to the host's storage because `GVisorCreateArgs` sets `overlay2=root:self`, so a host-side commit
   would produce an image that silently omits every `RUN` step. The guest runs
@@ -311,15 +323,17 @@ This section is the mechanism.
   string compare there reports one image as two and deletes the project's new image. Every removal is
   allowed to fail with a `Warn`, and the function's last act is to confirm the project's name resolves to
   the image it just built — with `--pull=never` on container creation, a lost name is a task that cannot
-  start. `podman load` is where repository text becomes a trusted base, which is why the `RUN`-set
-  confirmation and the audit hash land there.
+  start. `podman load` is also where the `mike.base-image` digests become durable: they are the answer to
+  "which bytes", which a floating tag cannot give.
 - **The base image arrives as an archive.** The guest is never the one that fetches, so the host exports
   the resolved `FROM` ref with `podman save` into `/mike-base` and the guest imports it. A base the host does
   not have is pulled by the **host** through the ordinary qualified-ref path and handed in; the guest never
   pulls, and a base the host cannot fetch is a refusal naming the ref.
-- **The build's cache key is `(commit, context tree OID, base ref, RUN set)`**, stamped on the image as the
-  `mike.build-cache-key` label and read back by `ImageCarriesBuild`. A changed `RUN` set needs
-  `confirm_run_set` carrying the hash the refusal reported.
+- **The build's cache key is `(commit, context tree OID, Dockerfile bytes, base refs)`**, stamped on the
+  image as the `mike.build-cache-key` label and read back by `ImageCarriesBuild`. A tag that moves on the
+  registry does not change that key. `mike.base-image` records the digests the build actually used, which is
+  the only answer to "which bytes": MIKE pulls a base it does not already have, so a floating tag means "this
+  host's copy" until something refreshes it.
 - **Nothing survives a build.** One owner, one deferred block: the container and the scratch directory go
   on every exit, and a refusal counts as an exit. The archive is deleted as soon as it is loaded, and on a
   failed load too, which leaves the previous image in place. `kanban-build-*` is a boot-swept family and

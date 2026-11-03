@@ -14,7 +14,7 @@ that was never written down: write the record now, while the alternatives are st
 | A choice between options someone would plausibly choose differently (a port vs. stdio, a hash vs. a position, `memory.max` vs. `memory.high`) | A rule with no plausible alternative ("never log the master password") — that is `AGENTS.md` |
 | The measurement the decision rests on, with the command that re-runs it | The current list of variables, routes or files — that is a table of record in the subsystem doc, or generated |
 | What the decision gives up, and the case that would reopen it | A work plan or a backlog: open one as `**Status:** proposed` |
-| The history of the decision itself: what it replaced, and what broke | History in a rule document, where it can only go stale |
+| Why the plausible alternative does not work, argued from how the system behaves | A day-by-day account of what was tried and then reversed, in any document |
 | — | A decision taken before this practice existed. Nobody remembers what was weighed then, so give the current reason in the subsystem doc instead (ADR-0001) |
 
 ## The shape
@@ -42,9 +42,12 @@ What this makes cheap, what it makes impossible, and what would reopen it.
 ```
 
 - **Status** is `accepted`, `proposed` (a decision not yet taken — this is where a plan lives),
-  `superseded by NNNN`, or `deprecated`. A record is never edited after the fact: a new decision that
-  reverses an old one gets a new number, and the old one's status is changed to point at it. That is
-  the only history an ADR directory keeps on purpose.
+  `superseded by NNNN`, or `deprecated`. A record describes the decision **as it stands**: what a later day
+  learns replaces the sentence it made false, in the same section, rather than piling underneath it, so a
+  reader is given one answer and not a transcript. What a record owes its reader is the present reason and the
+  measurement behind it; the dates that stay are the ones still load-bearing. A new number is for a decision
+  that abandons the old record's premise outright; until then, the record that owns the venue owns the change.
+  That is the only history an ADR directory keeps on purpose.
 - **Abstract** is the whole decision in two or three sentences, for the reader who needs the answer and
   not the argument. It states the choice and its effect; the reasoning belongs below it.
 - **Evidence** is inline where it is short — a figure, a host, the date it was measured — and always
@@ -55,11 +58,12 @@ What this makes cheap, what it makes impossible, and what would reopen it.
   reader who wants the reasoning comes to the index here. `scripts/docs-check.py` refuses a record that
   names no rule, and a superseded pointer that names nothing.
 - Past tense, superseded paths and figures that a newer measurement will beat are welcome **here** and
-  refused elsewhere; that is what the gate's limits on length and past-tense sentences enforce.
+  refused elsewhere; that is what the gate's limits on length and past-tense sentences enforce. Welcome is
+  not the mode — a measurement reads in the past tense, a decision does not.
 
 ## Index
 
 | # | Decision | Status |
 |---|---|---|
 | [0001](0001-key-decisions-are-recorded.md) | Key decisions get a numbered file, written when the choice is made and never backfilled | accepted |
-| [0002](0002-image-builds-run-in-a-sandbox-container-over-a-commit-subtree.md) | An image build runs in a one-shot gVisor container with the project's own sandbox configuration, over a subtree of a pinned commit | proposed |
+| [0002](0002-image-builds-run-in-a-sandbox-container-over-a-commit-subtree.md) | An image build runs in a one-shot gVisor container with the project's own sandbox configuration, over a subtree of a pinned commit | accepted |

@@ -99,7 +99,7 @@ func TestBuildProjectImageBuildsACommittedTreeInASandbox(t *testing.T) {
 	}
 
 	var lines []string
-	result, err := sm.BuildProjectImage(context.Background(), project, BuildOptions{}, func(line string) {
+	result, err := sm.BuildProjectImage(context.Background(), project, func(line string) {
 		lines = append(lines, line)
 	})
 	if err != nil {
@@ -168,7 +168,7 @@ func TestBuildRemovesItsContainerAndScratchOnEveryExit(t *testing.T) {
 			if tc.name == "context below the dockerfile" {
 				project.SandboxBuildContext = "sub"
 			}
-			_, err := sm.BuildProjectImage(context.Background(), project, BuildOptions{}, nil)
+			_, err := sm.BuildProjectImage(context.Background(), project, nil)
 			if tc.ok && err != nil {
 				t.Fatalf("the build failed: %v", err)
 			}
@@ -207,7 +207,7 @@ func TestBuildProducesNoImageForACopySourceAboveTheContext(t *testing.T) {
 	project.SandboxDockerfilePath = filepath.Join(project.Path, "service", "Dockerfile")
 
 	before, _ := sm.imageIDOf(ProjectImageName(project.Name))
-	_, err := sm.BuildProjectImage(context.Background(), project, BuildOptions{}, nil)
+	_, err := sm.BuildProjectImage(context.Background(), project, nil)
 	if err == nil {
 		t.Fatal("a COPY source above the context built, and the design says the staged tree is the file's whole world")
 	}
@@ -230,7 +230,7 @@ func TestBuildContextSelectsASubtreeOfThePinnedCommitForARealBuild(t *testing.T)
 	}, ".")
 	project.SandboxDockerfilePath = filepath.Join(project.Path, "service", "Dockerfile")
 
-	result, err := sm.BuildProjectImage(context.Background(), project, BuildOptions{}, nil)
+	result, err := sm.BuildProjectImage(context.Background(), project, nil)
 	if err != nil {
 		t.Fatalf("the build failed: %v", err)
 	}
@@ -254,16 +254,13 @@ func TestLoadedImageCarriesWhatTheRunStepWrote(t *testing.T) {
 		"hello":      "written-by-a-run-step\n",
 	}, "")
 
-	result, err := sm.BuildProjectImage(context.Background(), project, BuildOptions{}, nil)
+	result, err := sm.BuildProjectImage(context.Background(), project, nil)
 	if err != nil {
 		t.Fatalf("the build failed: %v", err)
 	}
 	t.Cleanup(func() {
 		_, _ = exec.Command("podman", "rmi", result.Image).CombinedOutput()
 	})
-	if len(result.Runs) != 1 {
-		t.Fatalf("the build reported %d RUN steps", len(result.Runs))
-	}
 	files := imageRootFS(t, result.Image)
 	if files["greet"] != "written-by-a-run-step\n" {
 		t.Errorf("the loaded image holds no output from the RUN step: %v", files)
@@ -292,10 +289,9 @@ func TestLoadRefusalLeavesTheProjectTheImageItHad(t *testing.T) {
 	before := imageID(t, projectImage)
 
 	plan := &buildPlan{
-		project:    &types.Project{ID: "loadrefuse", Name: "load-refuse"},
-		scratch:    scratch,
-		cacheKey:   "the-key-this-build-would-stamp",
-		runSetHash: "ffffffffffffffff",
+		project:  &types.Project{ID: "loadrefuse", Name: "load-refuse"},
+		scratch:  scratch,
+		cacheKey: "the-key-this-build-would-stamp",
 	}
 	result := &BuildResult{Image: projectImage}
 
@@ -372,7 +368,7 @@ func TestLoadRetiresThePreviousImageOnlyAfterTheNewOneIsAccepted(t *testing.T) {
 
 			// What a real build would have pushed: the builder's tag, the labels, and the archive.
 			labelled := commitWithLabel(t, "docker.io/library/alpine:3.20", builtImage,
-				map[string]string{buildCacheKeyLabel: cacheKey, buildRunSetLabel: "aaaaaaaaaaaaaaaa"})
+				map[string]string{buildCacheKeyLabel: cacheKey})
 			// The image the project already holds: an older build in one case, the very same id in the other.
 			from := "docker.io/library/alpine:3.20"
 			if tc.sameID {
@@ -385,10 +381,9 @@ func TestLoadRetiresThePreviousImageOnlyAfterTheNewOneIsAccepted(t *testing.T) {
 			saveTo(t, builtImage, scratch.Archive())
 
 			plan := &buildPlan{
-				project:    &types.Project{ID: "loadok", Name: "load-ok"},
-				scratch:    scratch,
-				cacheKey:   cacheKey,
-				runSetHash: "aaaaaaaaaaaaaaaa",
+				project:  &types.Project{ID: "loadok", Name: "load-ok"},
+				scratch:  scratch,
+				cacheKey: cacheKey,
 			}
 			if err := sm.loadBuiltImage(plan, &BuildResult{Image: projectImage}, nil); err != nil {
 				t.Fatalf("the load failed: %v", err)
@@ -467,7 +462,7 @@ func TestARunStepNeedingMoreThanTheBuildGrantSaysSo(t *testing.T) {
 	}, "")
 
 	var lines []string
-	_, err := sm.BuildProjectImage(context.Background(), project, BuildOptions{}, func(line string) { lines = append(lines, line) })
+	_, err := sm.BuildProjectImage(context.Background(), project, func(line string) { lines = append(lines, line) })
 	if err == nil {
 		t.Skip("this host let a RUN step take a mount namespace inside the build container, so the grant's " +
 			"ceiling is not where docs/adr/0002 says it is and the refusal sentence needs re-measuring")
@@ -502,7 +497,7 @@ func TestBuildRunsAMultiStageDockerfileOverTwoImages(t *testing.T) {
 		"hello":      "built-in-an-earlier-stage\n",
 	}, "")
 
-	result, err := sm.BuildProjectImage(context.Background(), project, BuildOptions{}, nil)
+	result, err := sm.BuildProjectImage(context.Background(), project, nil)
 	if err != nil {
 		t.Fatalf("the build failed: %v", err)
 	}
@@ -534,7 +529,8 @@ func shortImageID(id string) string {
 }
 
 // Repository text must not name an image from the host's own store: a short ref means what Docker means by it, not
-// what this machine happens to hold. This was measured against the leak before it was fixed.
+// what this machine happens to hold. The rule has to hold for an `ARG` default too, the other way a file names a
+// base.
 func TestBuildCannotNameAHostLocalImageByShortName(t *testing.T) {
 	requireHostImage(t, "docker.io/library/alpine:3.20")
 	const short = "mike-host-store-probe"
@@ -551,17 +547,59 @@ func TestBuildCannotNameAHostLocalImageByShortName(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = exec.Command("podman", "rmi", localRef).Run() })
 
-	sm, project, _ := buildE2E(t, map[string]string{"Dockerfile": "FROM " + short + ":1\n"}, "")
-	_, err := sm.BuildProjectImage(context.Background(), project, BuildOptions{}, nil)
+	for _, spell := range []struct {
+		name       string
+		dockerfile string
+	}{
+		{"written out", "FROM " + short + ":1\n"},
+		{"named by an ARG", "ARG BASE=" + short + ":1\nFROM ${BASE}\n"},
+	} {
+		t.Run(spell.name, func(t *testing.T) {
+			sm, project, _ := buildE2E(t, map[string]string{"Dockerfile": spell.dockerfile}, "")
+			_, err := sm.BuildProjectImage(context.Background(), project, nil)
 
-	// Whether the public registry has that name is not MIKE's business; what is provable is that the host's
-	// own image never came in. The failure case is equally fine and needs no network to reach.
-	if err == nil {
-		t.Cleanup(func() { _ = exec.Command("podman", "rmi", ProjectImageName(project.Name)).Run() })
-		files := imageRootFS(t, ProjectImageName(project.Name))
-		if files["marker"] != "" {
-			t.Errorf("a short FROM read the host's image store: marker=%q", files["marker"])
-		}
+			// Whether the public registry has that name is not MIKE's business; what is provable is that the
+			// host's own image never came in. The failure case is equally fine and needs no network to reach.
+			if err == nil {
+				t.Cleanup(func() { _ = exec.Command("podman", "rmi", ProjectImageName(project.Name)).Run() })
+				files := imageRootFS(t, ProjectImageName(project.Name))
+				if files["marker"] != "" {
+					t.Errorf("a short FROM read the host's image store: marker=%q", files["marker"])
+				}
+			}
+		})
+	}
+}
+
+// A base named by a build arg is still a name the host has to fetch by. The archive arrives tagged with each
+// spelling, so the guest's own expansion of `${BASE_IMAGE}` finds it under `--pull=never` — which only a build can
+// show.
+func TestBuildResolvesAnArgNamedBaseInASandbox(t *testing.T) {
+	requireHostImage(t, "docker.io/library/alpine:3.20")
+	sm, project, _ := buildE2E(t, map[string]string{
+		"Dockerfile": strings.Join([]string{
+			"ARG BASE_IMAGE=alpine:3.20",
+			"FROM ${BASE_IMAGE}",
+			"COPY hello /hello",
+			"RUN cp /hello /artifact",
+		}, "\n"),
+		"hello": "built-from-a-named-arg\n",
+	}, "")
+
+	result, err := sm.BuildProjectImage(context.Background(), project, nil)
+	if err != nil {
+		t.Fatalf("a base named by a build arg did not build: %v", err)
+	}
+	t.Cleanup(func() { _ = exec.Command("podman", "rmi", result.Image).Run() })
+
+	if strings.Join(result.Bases, ",") != "alpine:3.20" {
+		t.Errorf("the build fetched %v, want the ref the ARG default names", result.Bases)
+	}
+	if result.BaseImageID == "" {
+		t.Error("the build recorded no base image id, so the bytes it built on are unnamed")
+	}
+	if files := imageRootFS(t, result.Image); files["artifact"] != "built-from-a-named-arg\n" {
+		t.Errorf("the image built on the resolved base does not hold the committed file: %v", files)
 	}
 }
 
@@ -574,7 +612,7 @@ func TestBuildReachesTheNetworkEvenForAnIsolatedProject(t *testing.T) {
 	}, "")
 	project.SandboxNetworkIsolation = true
 
-	res, err := sm.BuildProjectImage(context.Background(), project, BuildOptions{}, nil)
+	res, err := sm.BuildProjectImage(context.Background(), project, nil)
 	if err != nil {
 		t.Fatalf("an isolated project could not build its image: %v", err)
 	}

@@ -267,14 +267,15 @@ podman. Without it, sandboxed projects refuse to start tasks — hard error, no 
 - **The bridge is stdio-only** — no listener and no port. Interactive terminals bypass it.
 - **A project image builds in a one-shot gVisor container over a staged subtree of the commit, never the
   working tree**, and it always has a build network — `sandbox_network_isolation` governs the agent, not the
-  build. `docs/sandbox-runtime.md → A project image builds inside a sandbox container`.
+  build. The subtree defaults to the directory holding the Dockerfile.
+  `docs/sandbox-runtime.md → A project image builds inside a sandbox container`.
 - **Never `podman commit`, never an assembled capability grant** — guest writes are invisible to host storage,
   and `sandboxruntime.BuilderGrant` is one constant because a grant with a hole in it breaks every step.
-- **The Dockerfile is parsed, not judged, and its short image refs never resolve against the host's store** —
-  the venue jails the instruction shapes; a local base is written `localhost/…`, a line a person reviews.
-- **A build's context is a repo-relative subtree defaulting to the Dockerfile's directory**, and a changed
-  `RUN` set is built only by a request carrying its hash as `confirm_run_set`.
-  `docs/api-contract.md → A project image build is a stream with one control`.
+- **The Dockerfile is read for its image refs and judged for nothing else**: no instruction whitelist, no
+  approval of its commands, no version rule on a base. Its short image refs never resolve against the host's
+  store, and a `RUN` step never sees MIKE's mounts — the venue jails the instruction shapes. A local base is
+  written `localhost/…`, which a person reviews.
+  `docs/api-contract.md → A project image build is a stream with one query check`.
 - **A project's own skills reach its containers read-only** — the bind is that project's `.agents/skills/`
   directory and nothing wider, and the prompt lists skills by the path the container can open.
   `docs/skills.md`.

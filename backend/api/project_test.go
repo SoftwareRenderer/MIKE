@@ -403,7 +403,7 @@ type recordingSandbox struct {
 	err             error
 }
 
-func (r *recordingSandbox) BuildProjectImage(context.Context, *types.Project, sandbox.BuildOptions, func(string)) (*sandbox.BuildResult, error) {
+func (r *recordingSandbox) BuildProjectImage(context.Context, *types.Project, func(string)) (*sandbox.BuildResult, error) {
 	return r.result, r.err
 }
 
@@ -449,7 +449,7 @@ func TestSandboxBuildStreamEndsInAFrameTheReaderCanIdentify(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.sandboxMgr = &recordingSandbox{result: &sandbox.BuildResult{
-		Image: "localhost/mike-test:abc", Commit: "abc", RunSetHash: strings.Repeat("a", 64), Files: 2,
+		Image: "localhost/mike-test:abc", Commit: "abc", Files: 2,
 	}}
 
 	mux := http.NewServeMux()
@@ -499,36 +499,20 @@ func TestSandboxBuildStreamEndsWithNoErrorLineWhenItEndsWithNoResult(t *testing.
 	}
 }
 
-// TestBuildOptionsFromRequest checks the build's one control. A malformed value is a refusal rather than a
-// default: an ignored `confirm_run_set` is a person's approval thrown away, and an ignored `no_cache` is a
-// request for something nobody honoured.
-func TestBuildOptionsFromRequest(t *testing.T) {
-	hash := strings.Repeat("a", 64)
-
-	// Absent means no approval — an empty value too, which is unset rather than a malformed hash — and an
-	// unrelated parameter is nobody's business.
-	for _, query := range []string{"", "other=1", "confirm_run_set="} {
-		opts, err := buildOptionsFromRequest(buildRequestWithQuery(t, query))
-		if err != nil || opts.ConfirmRunSet != "" {
-			t.Errorf("query %q: %v (%+v), want an unapproved build", query, err, opts)
-		}
-	}
-
-	opts, err := buildOptionsFromRequest(buildRequestWithQuery(t, "confirm_run_set="+hash))
-	if err != nil || opts.ConfirmRunSet != hash {
-		t.Fatalf("a real hash was refused: %v (%+v)", err, opts)
-	}
-
-	for _, bad := range []string{"confirm_run_set=anything", "confirm_run_set=" + hash[:63] + "z"} {
-		if _, err := buildOptionsFromRequest(buildRequestWithQuery(t, bad)); err == nil {
-			t.Errorf("%q accepted, want the refusal that names the hash the stream reported", bad)
+// TestRejectBuildQuery checks the build route's one control: a key it cannot honour is refused by name, and an
+// unrelated parameter is left alone.
+func TestRejectBuildQuery(t *testing.T) {
+	// An absent query, and an unrelated parameter, are nobody's business.
+	for _, query := range []string{"", "other=1"} {
+		if err := rejectBuildQuery(buildRequestWithQuery(t, query)); err != nil {
+			t.Errorf("query %q refused: %v", query, err)
 		}
 	}
 
 	// There is no build cache to skip, so the key is refused by name — by presence, not by value: a request that
 	// sent it asked for something.
 	for _, gone := range []string{"no_cache=", "no_cache=1", "no_cache=maybe"} {
-		_, err := buildOptionsFromRequest(buildRequestWithQuery(t, gone))
+		err := rejectBuildQuery(buildRequestWithQuery(t, gone))
 		if err == nil || !strings.Contains(err.Error(), "no_cache") {
 			t.Errorf("%q: err = %v, want a refusal naming no_cache", gone, err)
 		}

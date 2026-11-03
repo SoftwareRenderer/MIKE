@@ -28,7 +28,15 @@ var schemaSteps = []schemaStep{
 		Key:   "2026-10-26-tasks-null-to-blank",
 		Apply: fillBlankWhereNull,
 	},
+	{
+		Key:    dropRunSetHashColumnKey,
+		OneWay: true,
+		Apply:  dropProjectRunSetHash,
+	},
 }
+
+// dropRunSetHashColumnKey is the step's key, named so the test asserts on the same string the file records.
+const dropRunSetHashColumnKey = "2026-11-02-drop-project-run-set-hash"
 
 // runSchemaSteps runs the steps this file has not recorded. A step that fails stops the boot and names
 // itself, so no board is served over partly moved data.
@@ -138,6 +146,29 @@ func fillBlankWhereNull(s *Store) error {
 	}
 	if filled > 0 {
 		logging.For(logging.Store).Infof("blanked %d task row values that arrived as NULL", filled)
+	}
+	return nil
+}
+
+// dropProjectRunSetHash removes the column that held the command set a person last approved. MIKE reads a
+// project Dockerfile for its image refs only, so the hash had no reader (docs/sandbox-runtime.md → A project
+// image builds inside a sandbox container).
+//
+// One-way: an older build selects the column by name, so without it every project read fails.
+func dropProjectRunSetHash(s *Store) error {
+	columns, _, err := s.liveColumns("projects")
+	if err != nil {
+		return err
+	}
+	for _, c := range columns {
+		if c == "sandbox_run_set_hash" {
+			return s.tx(func(tx *sql.Tx) error {
+				if _, err := tx.Exec(`ALTER TABLE projects DROP COLUMN sandbox_run_set_hash`); err != nil {
+					return fmt.Errorf("drop projects.sandbox_run_set_hash: %w", err)
+				}
+				return nil
+			})
+		}
 	}
 	return nil
 }

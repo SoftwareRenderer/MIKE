@@ -317,9 +317,6 @@ type Project struct {
 	SandboxMounts       []SandboxMount `json:"sandbox_mounts,omitempty"`
 	SandboxEnvs         []SandboxEnv   `json:"sandbox_envs,omitempty"`
 	SandboxCapabilities []string       `json:"sandbox_capabilities,omitempty"`
-	// 	// SandboxRunSetHash is the command set of the image a person last approved; a build whose set differs is
-	// 	// refused until they approve the new one.
-	SandboxRunSetHash string `json:"sandbox_run_set_hash,omitempty"`
 	// MCPServerIDs is this project's opt-in list: the registered servers whose tools it may offer.
 	// An ID with no registered server behind it is inert, not an error — a server a person deleted
 	// must not fail every project that had it enabled.

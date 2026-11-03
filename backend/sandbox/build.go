@@ -36,7 +36,6 @@ const (
 // MIKE's.
 const (
 	buildCacheKeyLabel = "mike.build-cache-key"
-	buildRunSetLabel   = "mike.run-set"
 	buildCommitLabel   = "mike.commit"
 	// 	buildBaseLabel records which base the bytes were built on, which the cache key cannot say: a ref like
 	// 	`alpine:3.20` can move.
@@ -47,13 +46,6 @@ const (
 // They are not the project's: the grant is not monotone, and a set with one name missing from it breaks builds
 // that the whole set completes (docs/adr/0002).
 
-// BuildOptions carries what a person approved for one image build.
-type BuildOptions struct {
-	// 	ConfirmRunSet is the command-set hash a person approved. A changed set is refused without it: reviewing a
-	// 	diff is not approving `RUN curl … | sh`.
-	ConfirmRunSet string
-}
-
 // BuildResult is what a build produced: the audit line reports it and the tests assert it. Nothing decides from
 // it.
 type BuildResult struct {
@@ -62,13 +54,11 @@ type BuildResult struct {
 	From   string `json:"from"`
 	// Bases names every image the Dockerfile asked for, which is what the host fetched and handed in.
 	Bases       []string `json:"bases,omitempty"`
-	RunSetHash  string   `json:"run_set_hash"`
 	CacheKey    string   `json:"cache_key"`
 	Files       int      `json:"files"`
-	Runs        []string `json:"runs,omitempty"`
 	ScratchPeak string   `json:"scratch_peak,omitempty"`
-	// 	BaseImageID is the id of each image the host handed in, in file order — the version a floating tag cannot
-	// 	name.
+	// 	BaseImageID is the id of each image the host handed in, in file order — the bytes a floating tag names
+	// 	only on the day it was fetched.
 	BaseImageID string `json:"base_image_id,omitempty"`
 }
 
@@ -84,7 +74,6 @@ type buildPlan struct {
 	fromRef       string
 	baseArchives  []string
 	file          *BuildFile
-	runSetHash    string
 	cacheKey      string
 	containerName string
 	stagedFiles   int
@@ -98,9 +87,13 @@ type buildPlan struct {
 // ContextDir is the staged tree inside the scratch directory.
 func (p *buildPlan) ContextDir() string { return p.scratch.ContextDir() }
 
+// baseImageLabel joins the base ids the way the `mike.base-image` label and the build result both name them.
+// Empty means no base's id could be read.
+func (p *buildPlan) baseImageLabel() string { return strings.Join(p.baseImageIDs, ",") }
+
 // planProjectBuild reads, checks and stages everything a build needs, so a Dockerfile that cannot work fails by
 // line and path rather than three minutes into a container.
-func (sm *SandboxManager) planProjectBuild(ctx context.Context, project *types.Project, opts BuildOptions, emit func(string)) (*buildPlan, error) {
+func (sm *SandboxManager) planProjectBuild(ctx context.Context, project *types.Project, emit func(string)) (*buildPlan, error) {
 	if project == nil {
 		return nil, fmt.Errorf("no project")
 	}
@@ -152,10 +145,9 @@ func (sm *SandboxManager) planProjectBuild(ctx context.Context, project *types.P
 		return nil, fmt.Errorf("%s at %s: %w", dockerfileRel, staged.Commit[:min(len(staged.Commit), 12)], err)
 	}
 	plan.file = file
-	plan.runSetHash = file.RunSetHash()
 
 	for _, ref := range file.Bases {
-		if err := validateBuildFrom(ref); err != nil {
+		if err := validateBuildBase(ref); err != nil {
 			scratch.Remove()
 			return nil, err
 		}
@@ -163,10 +155,6 @@ func (sm *SandboxManager) planProjectBuild(ctx context.Context, project *types.P
 	plan.fromRef = file.FirstFrom
 
 	if err := checkBuildMounts(project); err != nil {
-		scratch.Remove()
-		return nil, err
-	}
-	if err := checkRunSetConfirmation(project, opts, plan.runSetHash); err != nil {
 		scratch.Remove()
 		return nil, err
 	}
@@ -186,24 +174,14 @@ func contextTreeOID(ctx context.Context, repo, commit, root string) (string, err
 	return resolveGitRef(ctx, repo, "rev-parse", spec)
 }
 
-// validateBuildFrom checks a base image named by repository text, which this design allows. It must name a
-// version: a base that moves makes the cache key and the audit line meaningless.
-func validateBuildFrom(ref string) error {
-	// 	Shape only: the host expands Docker's short names later (stageBaseImageArchives), so the rule that
-	// 	qualifies a typed setting does not apply to a repository's file.
+// validateBuildBase checks a base named by repository text for shape only: the ref reaches a podman argument, so
+// it must not be able to become one. What it names is the file's business, and `mike.base-image` records the bytes
+// a floating tag cannot name.
+func validateBuildBase(ref string) error {
+	// The host expands Docker's short names later (stageBaseImageArchives), so the rule that qualifies a typed
+	// setting does not apply to a repository's file.
 	if err := sandboxruntime.ValidateImageRef(ref); err != nil {
 		return fmt.Errorf("an image the Dockerfile names: %w", err)
-	}
-	if strings.EqualFold(ref, "scratch") {
-		return nil
-	}
-	if strings.Contains(ref, "@sha256:") {
-		return nil
-	}
-	last := ref[strings.LastIndex(ref, "/")+1:]
-	tag := last[strings.LastIndex(last, ":")+1:]
-	if !strings.Contains(last, ":") || tag == "latest" {
-		return fmt.Errorf("the Dockerfile's image %q does not name a version: pin it with a tag other than `latest`, or with a digest", ref)
 	}
 	return nil
 }
@@ -218,19 +196,6 @@ func checkBuildMounts(project *types.Project) error {
 		}
 	}
 	return nil
-}
-
-// checkRunSetConfirmation is the provenance gate. An unchanged set needs nothing; a changed one needs the
-// hash of the change, so a person has read what runs.
-func checkRunSetConfirmation(project *types.Project, opts BuildOptions, runSetHash string) error {
-	stored := project.SandboxRunSetHash
-	if stored == "" || stored == runSetHash {
-		return nil
-	}
-	if opts.ConfirmRunSet == runSetHash {
-		return nil
-	}
-	return fmt.Errorf("the Dockerfile's RUN steps changed since this image was approved — review them and send the new set (%s) as confirm_run_set to build it", runSetHash)
 }
 
 // buildCacheKey is the commit, the context tree, the Dockerfile's bytes and the images it names. The bytes are
@@ -289,7 +254,7 @@ func (sm *SandboxManager) projectBuildKey(ctx context.Context, project *types.Pr
 
 // BuildProjectImage builds the project's sandbox image and returns what it did. onProgress receives the
 // builder's own lines, one at a time, and is called from this goroutine.
-func (sm *SandboxManager) BuildProjectImage(ctx context.Context, project *types.Project, opts BuildOptions, onProgress func(line string)) (*BuildResult, error) {
+func (sm *SandboxManager) BuildProjectImage(ctx context.Context, project *types.Project, onProgress func(line string)) (*BuildResult, error) {
 	emit := func(line string) {
 		if onProgress != nil {
 			onProgress(line)
@@ -297,7 +262,7 @@ func (sm *SandboxManager) BuildProjectImage(ctx context.Context, project *types.
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	plan, err := sm.planProjectBuild(ctx, project, opts, emit)
+	plan, err := sm.planProjectBuild(ctx, project, emit)
 	if err != nil {
 		return nil, err
 	}
@@ -311,25 +276,23 @@ func (sm *SandboxManager) BuildProjectImage(ctx context.Context, project *types.
 	defer releaseMemory()
 
 	result := &BuildResult{
-		Image:      ProjectImageName(project.Name),
-		Commit:     plan.commit,
-		From:       plan.fromRef,
-		Bases:      append([]string{}, plan.file.Bases...),
-		RunSetHash: plan.runSetHash,
-		CacheKey:   plan.cacheKey,
-		Files:      plan.stagedFiles,
-		Runs:       plan.file.Runs,
+		Image:    ProjectImageName(project.Name),
+		Commit:   plan.commit,
+		From:     plan.fromRef,
+		Bases:    append([]string{}, plan.file.Bases...),
+		CacheKey: plan.cacheKey,
+		Files:    plan.stagedFiles,
 	}
 
 	logging.For(logging.Sandbox).With(logging.ProjectID, project.ID).With(logging.BuildID, plan.scratch.ID).Infof(
-		"building %s from commit %s: context=%s files=%d bytes=%d from=%s runs=%d run_set=%s network=open mounts=%d",
+		"building %s from commit %s: context=%s files=%d bytes=%d from=%s bases=%d network=open mounts=%d",
 		result.Image, shortCommit(plan.commit), plan.contextRoot, plan.stagedFiles, plan.stagedBytes,
-		plan.fromRef, len(plan.file.Runs), plan.runSetHash[:12], len(project.SandboxMounts))
+		plan.fromRef, len(plan.file.Bases), len(project.SandboxMounts))
 
 	if err := sm.stageBaseImageArchives(ctx, plan, emit); err != nil {
 		return nil, err
 	}
-	result.BaseImageID = strings.Join(plan.baseImageIDs, ",")
+	result.BaseImageID = plan.baseImageLabel()
 	if err := sm.runBuildContainer(ctx, plan, emit); err != nil {
 		return nil, err
 	}
@@ -374,12 +337,12 @@ func (sm *SandboxManager) stageBaseImageArchives(ctx context.Context, plan *buil
 		// 	is bytes no container can reach. A local base is spelled `localhost/…`, which a person reviews.
 		ref := sandboxruntime.QualifyDockerImageRef(raw)
 		if !sm.ImageReady(ref) {
-			emit(fmt.Sprintf("pulling %s so the build can run without network…", ref))
+			emit(fmt.Sprintf("pulling %s for the build to be handed…", ref))
 			if err := sm.PullImageWithProgress(ref, emit); err != nil {
 				return fmt.Errorf("pull the Dockerfile's image %s: %w", ref, err)
 			}
 		}
-		// No ref validation here: `validateBuildFrom` checked every ref the file named at plan time, and
+		// No ref validation here: `validateBuildBase` checked every ref the file named at plan time, and
 		// qualification cannot make an invalid ref valid.
 		archive := plan.scratch.BaseArchiveAt(i)
 		emit(fmt.Sprintf("handing %s to the build container…", ref))
@@ -523,11 +486,10 @@ func buildContainerScript(plan *buildPlan) string {
 	}
 	pairs := [][2]string{
 		{buildCacheKeyLabel, plan.cacheKey},
-		{buildRunSetLabel, plan.runSetHash},
 		{buildCommitLabel, plan.commit},
 	}
-	if len(plan.baseImageIDs) > 0 {
-		pairs = append(pairs, [2]string{buildBaseLabel, strings.Join(plan.baseImageIDs, ",")})
+	if label := plan.baseImageLabel(); label != "" {
+		pairs = append(pairs, [2]string{buildBaseLabel, label})
 	}
 	labels := ""
 	for _, l := range pairs {
@@ -614,7 +576,7 @@ func (sm *SandboxManager) loadBuiltImage(plan *buildPlan, result *BuildResult, e
 	if settled, idErr := sm.imageIDOf(result.Image); idErr != nil || settled != loadedID {
 		return fmt.Errorf("the project image %s does not resolve to the image just built (%s): %v", result.Image, loadedID, idErr)
 	}
-	emit(fmt.Sprintf("image %s ready (run set %s)", result.Image, plan.runSetHash[:12]))
+	emit(fmt.Sprintf("image %s ready", result.Image))
 	return nil
 }
 

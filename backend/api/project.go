@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -45,7 +44,7 @@ type ProjectHandler struct {
 
 // projectSandboxOps is the sandbox operations owned by the project.
 type projectSandboxOps interface {
-	BuildProjectImage(ctx context.Context, project *types.Project, opts sandbox.BuildOptions, onProgress func(line string)) (*sandbox.BuildResult, error)
+	BuildProjectImage(ctx context.Context, project *types.Project, onProgress func(line string)) (*sandbox.BuildResult, error)
 	StopProjectContainers(projectID string, taskIDs []string)
 }
 
@@ -460,9 +459,6 @@ func (h *ProjectHandler) applyPricing(stats *types.ProjectStats) {
 	}
 }
 
-// runSetHashPattern accepts the instruction-set hash the build reports and accepts back as confirmation.
-var runSetHashPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
-
 // buildResultFrame is the build stream's last frame: the build's own fields flattened beside the `status` the
 // reader picks the result out by. Every other frame of that stream is a line for the log, so a result the reader
 // cannot tell from a line is a build that finished and reads as one that never answered.
@@ -472,9 +468,6 @@ type buildResultFrame struct {
 }
 
 // HandleSandboxBuild builds the project's sandbox image from its Dockerfile, streaming progress over SSE.
-//
-// The plan is reported before anything runs — commit, file and byte counts, base image, `RUN` steps — so the
-// confirmation below is a decision rather than a formality.
 func (h *ProjectHandler) HandleSandboxBuild(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("projectID")
 
@@ -494,25 +487,19 @@ func (h *ProjectHandler) HandleSandboxBuild(w http.ResponseWriter, r *http.Reque
 	// Each frame is one raw progress line, not JSON: this stream's reader shows the lines.
 	sendLine := sse.Data
 
-	opts, err := buildOptionsFromRequest(r)
-	if err != nil {
+	if err := rejectBuildQuery(r); err != nil {
 		httputil.JSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	sendLine("Building the sandbox image…")
 
 	// The request's context bounds the build: closing the tab stops the container.
-	result, err := h.sandboxMgr.BuildProjectImage(r.Context(), project, opts, func(line string) {
+	result, err := h.sandboxMgr.BuildProjectImage(r.Context(), project, func(line string) {
 		_ = sendLine(line)
 	})
 	if err != nil {
 		sendLine("error: " + err.Error())
 		return
-	}
-	// The instruction set is recorded only for an image that exists. A build that failed or was refused
-	// leaves the approval the person already gave, which is what makes the next build's refusal true.
-	if err := h.store.UpdateProjectSandboxRunSetHash(project.ID, result.RunSetHash); err != nil {
-		sendLine("warning: the approved instruction set could not be recorded: " + err.Error())
 	}
 
 	// Stop all containers and terminal sessions so they pick up the new image
@@ -521,21 +508,14 @@ func (h *ProjectHandler) HandleSandboxBuild(w http.ResponseWriter, r *http.Reque
 	sse.JSON(buildResultFrame{Status: "built", BuildResult: result})
 }
 
-// buildOptionsFromRequest reads the build's one control. An unparseable value is a refusal, not a default: an
-// ignored `confirm_run_set` would be a person's approval thrown away.
-func buildOptionsFromRequest(r *http.Request) (sandbox.BuildOptions, error) {
-	opts := sandbox.BuildOptions{}
-	// Refused by name rather than ignored, and by presence rather than by value: a request that sent this key
-	// asked for something, and answering it with an ordinary build is the silent default this ladder refuses
-	// elsewhere. There is nothing to skip — a build container's store is born empty and dies with it.
+// rejectBuildQuery answers a build request's controls before the first frame. A key the route cannot honour is
+// refused by name rather than ignored.
+func rejectBuildQuery(r *http.Request) error {
+	// By presence rather than by value: `?no_cache=0` still asks for a skip that does not exist.
 	if _, ok := r.URL.Query()["no_cache"]; ok {
-		return opts, fmt.Errorf("no_cache: a build always rebuilds, so there is no build cache to skip")
+		return fmt.Errorf("no_cache: a build always rebuilds, so there is no build cache to skip")
 	}
-	opts.ConfirmRunSet = strings.TrimSpace(r.URL.Query().Get("confirm_run_set"))
-	if opts.ConfirmRunSet != "" && !runSetHashPattern.MatchString(opts.ConfirmRunSet) {
-		return opts, fmt.Errorf("confirm_run_set: expected the instruction-set hash the refusal reported")
-	}
-	return opts, nil
+	return nil
 }
 
 // HandleByID handles GET, PUT, DELETE for a single project.

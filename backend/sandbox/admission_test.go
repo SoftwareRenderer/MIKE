@@ -87,7 +87,7 @@ func TestBuildWaitsForTheBudgetBeforeItStartsAnything(t *testing.T) {
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		_, err := sm.BuildProjectImage(context.Background(), project, BuildOptions{}, func(line string) {
+		_, err := sm.BuildProjectImage(context.Background(), project, func(line string) {
 			mu.Lock()
 			lines = append(lines, line)
 			mu.Unlock()
@@ -134,14 +134,14 @@ func TestBuildReleasesItsReservationOnEveryExit(t *testing.T) {
 		"Dockerfile": "RUN make\n",
 	}, "")
 	refused.SandboxMemoryLimit = 1024
-	if _, err := sm.BuildProjectImage(context.Background(), refused, BuildOptions{}, nil); err == nil {
+	if _, err := sm.BuildProjectImage(context.Background(), refused, nil); err == nil {
 		t.Fatal("the build succeeded where the gate refuses it")
 	}
 	if releases.Load() != 0 {
 		t.Fatalf("a build refused by the gate booked memory (%d releases)", releases.Load())
 	}
 
-	built, err := sm.BuildProjectImage(context.Background(), buildableProject(t, sm), BuildOptions{}, nil)
+	built, err := sm.BuildProjectImage(context.Background(), buildableProject(t, sm), nil)
 	if err != nil {
 		t.Fatalf("the build failed: %v", err)
 	}

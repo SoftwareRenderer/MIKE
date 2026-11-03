@@ -47,8 +47,8 @@ func (s *Store) CreateProject(p *types.Project) error {
 		assistedBy = 1 // the trailer is stored only where a person asked for it
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO projects (`+projectColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.ID, p.Name, p.Path, ptrStr(p.OriginBranch), B2I(p.SandboxEnabled), B2I(p.SandboxNetworkIsolation), ptrStr(p.SandboxImage), ptrStr(p.SandboxDockerfilePath), ptrStr(p.SandboxBuildContext), p.SandboxMemoryLimit, forwardPortsJSON, mountsJSON, envsJSON, capsJSON, assistedBy, mcpIDsJSON, ptrStr(p.SandboxRunSetHash), p.CreatedAt.Format(time.RFC3339), p.UpdatedAt.Format(time.RFC3339),
+		`INSERT INTO projects (`+projectColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.ID, p.Name, p.Path, ptrStr(p.OriginBranch), B2I(p.SandboxEnabled), B2I(p.SandboxNetworkIsolation), ptrStr(p.SandboxImage), ptrStr(p.SandboxDockerfilePath), ptrStr(p.SandboxBuildContext), p.SandboxMemoryLimit, forwardPortsJSON, mountsJSON, envsJSON, capsJSON, assistedBy, mcpIDsJSON, p.CreatedAt.Format(time.RFC3339), p.UpdatedAt.Format(time.RFC3339),
 	)
 	return err
 }
@@ -56,16 +56,16 @@ func (s *Store) CreateProject(p *types.Project) error {
 // projectColumns lists the projects table columns in the exact order scanProject
 // reads them. Keep the two in step — a SELECT built from anything else will scan
 // silently wrong values, not fail.
-const projectColumns = `id, name, path, origin_branch, sandbox_enabled, sandbox_network_isolation, sandbox_image, sandbox_dockerfile_path, sandbox_build_context, sandbox_memory_limit, sandbox_forward_ports, sandbox_mounts, sandbox_envs, sandbox_capabilities, commit_assisted_by, mcp_server_ids, sandbox_run_set_hash, created_at, updated_at`
+const projectColumns = `id, name, path, origin_branch, sandbox_enabled, sandbox_network_isolation, sandbox_image, sandbox_dockerfile_path, sandbox_build_context, sandbox_memory_limit, sandbox_forward_ports, sandbox_mounts, sandbox_envs, sandbox_capabilities, commit_assisted_by, mcp_server_ids, created_at, updated_at`
 
 // scanProject reads one project row from either a *sql.Row or an *sql.Rows cursor
 // and applies the column conventions (NULL-able text columns collapse to "",
 // 0/1 integers to bools, JSON columns unmarshal best-effort).
 func scanProject(s scanner, p *types.Project) error {
-	var originBranch, sandboxImage, sandboxDockerfilePath, buildContext, runSetHash, forwardPortsJSON, mountsJSON, envsJSON, capsJSON, mcpIDsJSON sql.NullString
+	var originBranch, sandboxImage, sandboxDockerfilePath, buildContext, forwardPortsJSON, mountsJSON, envsJSON, capsJSON, mcpIDsJSON sql.NullString
 	var sandboxEnabled, sandboxNetworkIsolation, commitAssistedBy int
 	var createdAt, updatedAt string
-	if err := s.Scan(&p.ID, &p.Name, &p.Path, &originBranch, &sandboxEnabled, &sandboxNetworkIsolation, &sandboxImage, &sandboxDockerfilePath, &buildContext, &p.SandboxMemoryLimit, &forwardPortsJSON, &mountsJSON, &envsJSON, &capsJSON, &commitAssistedBy, &mcpIDsJSON, &runSetHash, &createdAt, &updatedAt); err != nil {
+	if err := s.Scan(&p.ID, &p.Name, &p.Path, &originBranch, &sandboxEnabled, &sandboxNetworkIsolation, &sandboxImage, &sandboxDockerfilePath, &buildContext, &p.SandboxMemoryLimit, &forwardPortsJSON, &mountsJSON, &envsJSON, &capsJSON, &commitAssistedBy, &mcpIDsJSON, &createdAt, &updatedAt); err != nil {
 		return err
 	}
 	p.OriginBranch = originBranch.String
@@ -76,7 +76,6 @@ func scanProject(s scanner, p *types.Project) error {
 	p.SandboxImage = sandboxImage.String
 	p.SandboxDockerfilePath = sandboxDockerfilePath.String
 	p.SandboxBuildContext = buildContext.String
-	p.SandboxRunSetHash = runSetHash.String
 	if forwardPortsJSON.Valid && forwardPortsJSON.String != "" {
 		_ = json.Unmarshal([]byte(forwardPortsJSON.String), &p.ForwardPorts)
 	}
@@ -198,12 +197,6 @@ func (s *Store) UpdateProjectSandboxDockerfilePath(id string, path string) error
 // resets the column to NULL, which means "the directory holding the Dockerfile".
 func (s *Store) UpdateProjectSandboxBuildContext(id string, context string) error {
 	return s.updateProjectColumn(id, "sandbox_build_context", ptrStr(context))
-}
-
-// UpdateProjectSandboxRunSetHash records the command set the current project image was built from. Only the build
-// path writes it: a project edit would be approval of a change nobody read.
-func (s *Store) UpdateProjectSandboxRunSetHash(id string, hash string) error {
-	return s.updateProjectColumn(id, "sandbox_run_set_hash", ptrStr(hash))
 }
 
 // UpdateProjectSandboxMemoryLimit updates the sandbox_memory_limit for a project.

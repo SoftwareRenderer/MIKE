@@ -116,6 +116,65 @@ func TestARowThatArrivedWithNullsBootsAndReads(t *testing.T) {
 	}
 }
 
+// The column is out of this build's DDL, so the shape pass will not touch it and only a step can. An older file
+// that has it loses it, and its project row keeps everything this build reads.
+func TestAnOlderFileLosesTheRunSetColumnAndKeepsItsRow(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runset.db")
+	db := openRaw(t, path)
+	for _, stmt := range splitStatements(baselineDDL(t)) {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("build the older schema: %v", err)
+		}
+	}
+	if _, err := db.Exec(`ALTER TABLE projects ADD COLUMN sandbox_run_set_hash TEXT DEFAULT NULL`); err != nil {
+		t.Fatalf("add the column the way the release that had it did: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO projects (id, name, path, sandbox_run_set_hash, created_at, updated_at)
+		VALUES ('rp', 'runset', '/tmp/runset', '` + strings.Repeat("a", 64) + `', '2026-10-20T00:00:00Z', '2026-10-20T00:00:00Z')`); err != nil {
+		t.Fatalf("seed the project: %v", err)
+	}
+	closeRaw(t, db)
+
+	_, restore := logging.TestSink()
+	defer restore()
+	s := openStore(t, path)
+
+	if _, err := s.db.Exec(`SELECT sandbox_run_set_hash FROM projects`); err == nil {
+		t.Error("the column survived the boot that dropped it")
+	}
+	p, err := s.GetProject("rp")
+	if err != nil {
+		t.Fatalf("the project row did not survive its column: %v", err)
+	}
+	if p.Name != "runset" || p.Path != "/tmp/runset" {
+		t.Errorf("the row reads (%q, %q), want the values it was seeded with", p.Name, p.Path)
+	}
+	if done, err := s.stepDone(dropRunSetHashColumnKey); err != nil || !done {
+		t.Errorf("the step that dropped the column is not recorded (done=%v err=%v)", done, err)
+	}
+	// An older build selects the column by name, so the file has to refuse it rather than fail every read.
+	if _, found, err := s.metaValue(oneWayRowPrefix + dropRunSetHashColumnKey); err != nil || !found {
+		t.Errorf("a step that destroyed a column is not marked one-way (found=%v err=%v)", found, err)
+	}
+}
+
+// This build's own DDL has no such column, so on a fresh file the step has to decline rather than fail.
+func TestAFreshFileBootsOverTheDropStepWithNothingToDrop(t *testing.T) {
+	s, _ := newStoreAt(t)
+	columns, _, err := s.liveColumns("projects")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range columns {
+		if c == "sandbox_run_set_hash" {
+			t.Fatal("a file this build created has the column this build does not have")
+		}
+	}
+	if err := s.runSchemaSteps([]schemaStep{{Key: "2026-11-02-probe", Apply: dropProjectRunSetHash}}); err != nil {
+		t.Errorf("the drop was refused where there was nothing to drop: %v", err)
+	}
+}
+
 // markFutureRow writes a marker row for a step this build does not have. It writes the table directly, so the
 // test does not use the code under test.
 func markFutureRow(t *testing.T, s *Store, key string, oneWay bool) {

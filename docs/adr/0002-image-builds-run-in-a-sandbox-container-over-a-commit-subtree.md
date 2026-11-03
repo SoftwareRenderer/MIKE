@@ -1,268 +1,168 @@
 # ADR-0002 — A project image build runs in a sandbox container, over a subtree of a commit
 
-**Status:** accepted (2026-10-30, landed with `backend/sandbox/build.go`)
+**Status:** accepted
 
-**Rules that follow:** `docs/sandbox-runtime.md → A project image builds inside a sandbox container`, `docs/api-contract.md → A project image build is a stream with one control`, `docs/sandbox-runtime.md → Extension sandbox mounts`, `docs/extension-lifecycle.md → The build context is created by this package, and it is the jail`
+**Rules that follow:** `docs/sandbox-runtime.md → A project image builds inside a sandbox container`, `docs/sandbox-runtime.md → Extension sandbox mounts`, `docs/extension-lifecycle.md → The build context is created by this package, and it is the jail`
 
 ## Abstract
 
-A project's sandbox image is built by a one-shot gVisor container, not by the host runtime. Its
-permissions come from the project's Sandbox Configuration unchanged — capabilities, environment, mounts,
-memory, network — and its *inputs* come from a subtree of a pinned commit, staged into a directory MIKE
-writes. The context defaults to the Dockerfile's own directory, so the widest build input is always a
-value a person set. The build's network is deliberately not that value (see the correction below); the base
-image is handed to it as an archive, so
-no repository text can reach a socket through a build.
+A project's sandbox image is built by a one-shot gVisor container, not by a host `podman build`. Its inputs
+are a subtree of a pinned commit that MIKE stages, never a working tree; its permissions are MIKE's own fixed
+grant plus the project's memory limit and environment, never the project's capability list; the finished image
+is pushed out through a bind mount and loaded on the host. No build step runs on the host runtime, and no
+untracked host file is ever build input.
 
 ## Context
 
-`BuildImageWithOptions` writes the project's Dockerfile into an empty temp directory and builds with that
-as the context, so `COPY` of a repository file cannot work: the support is absent, which is also why it is
-harmless. Meanwhile the build's `RUN` steps execute on the host runtime — `--runtime` does not affect a
-build, as `backend/extensions/entry_guard.go` records — outside gVisor and outside the `--cap-drop ALL`
-posture every MIKE container otherwise starts from. Supporting `COPY` therefore forces a choice about what
-a build may read, and the two obvious answers are both wrong: the checkout holds untracked host files
-(`.env`, the database) and usually `.worktrees/` with every task's in-flight edits, and a task worktree is
-unreviewed content feeding an image named after the *project*, which every later task then boots.
+A host `podman build` executes its steps on the host runtime — `--runtime` does not affect a build, as
+`backend/extensions/entry_guard.go` records — which is outside gVisor and outside the `--cap-drop ALL` posture
+every other MIKE container starts from. Letting a build read repository files therefore forces a decision
+about what a build may read, and the two obvious answers are both wrong: the checkout holds untracked host
+files (`.env`, the database) and usually `.worktrees/`, with every task's in-flight edits in it; and a task
+worktree is unreviewed content feeding an image named after the *project*, which every later task boots.
 
 ## Decision
 
-`Create()` runs the build, with `ProjectOpts(project)` as its permission set and four caller decisions on
-top: the image is the resolved `FROM` ref, the worktree argument is the staged subtree instead of a
-directory that already exists, every inherited mount is read-only regardless of its configured mode, and
-the container publishes no ports. The Dockerfile is handed to a nested builder inside that container
-whole — `buildah --isolation=chroot`, measured green — so MIKE models no instruction semantics at all. The
-staged subtree is a `git archive` of a pinned commit containing the tracked files under the configured context
-root; the root defaults to the directory holding the Dockerfile, and the Dockerfile itself is read from the
-same commit rather than from the live path. What MIKE reads out of the file is the image refs and the command
-set (see the correction below); `COPY` and `ADD` sources are not MIKE's to judge, because the builder resolves
-them under the staged context — measured — and the read-only mount is what keeps them there.
+`runBuildContainer` runs the build from the argument list `buildContainerArgs` builds. What reaches that list
+from the project is its memory limit, its configured environment and its inherited mounts; everything else is
+MIKE's: the image is the resolved base ref, the worktree argument is the staged subtree rather than a directory
+that already exists, every inherited mount is read-only whatever mode its row spells, and no port is
+published. The build's own file goes whole to a nested builder inside that container —
+`buildah --isolation=chroot`, measured green under runsc — so MIKE models no build step itself.
 
-**A build has a network, and it is not the project's network setting.** The host exports
-each image the file names with `podman save` and the guest imports it, and a base the host lacks is pulled by
-the host, through the same qualified-ref rules every image MIKE uses goes through. The network exists so `RUN`
-steps can install what the Dockerfile asks for; the isolation switch is not consulted, because that switch is a
-statement about the agent. The cost of the decoupling is written where a person will read it — Settings, and the
-bullet in `docs/sandbox-runtime.md` — namely that an isolated project still has build-time egress.
+The staged subtree is a `git archive` of one pinned commit holding the tracked files under the configured
+context root (`StageBuildContext`). That root is a repository path a person set, and its default is the
+directory holding the file the build is built from, so the widest build input is always a value from
+Settings. Untracked files, `.git` and the worktrees directory are not in the set rather than excluded by a
+rule, and the entry count and the byte total are bounded before a byte is written
+(`fsutil.CopyMaxEntries`).
 
-The finished image is pushed by the builder as a `docker-archive` into a per-build scratch directory MIKE
-created and mounted for that purpose, then `podman load`ed on the host. The build container's capability
-grant is the project's configured set plus the measured builder minimum (see the correction below), and it is
-**tested as a whole** rather than composed, because granting more can break a build that a smaller set
-completes — see the grant's evidence below.
+**The guest never fetches; the host hands every image in.** A base the host lacks is pulled by the host,
+through the same qualified-ref rules every image MIKE uses goes through, and exported with `podman save` into
+the read-only `/mike-base`. `--pull=never` holds even though a build has a network: the container environment
+carries no registry credentials by design, and a fetch inside the guest would let a spelling MIKE never handed
+in resolve to something else. The digests actually used are recorded on the built image (`mike.base-image`),
+which is the only durable answer to "which bytes". This host-side pull is the one action build input makes the
+host take on the operator's network, with the operator's credentials, before any container exists.
+
+**An image named by build input is qualified, never looked up locally.** A short ref means what the registry
+means by it (`docker.io/library/…`). `ResolveImageRef`'s local-store lookup exists for *stored* settings and is
+deliberately not applied here: applied to repository text it let a tracked file copy an image out of the host's
+store into the project, measured with no network involved. An image in the host's store is otherwise bytes no
+sandboxed process can reach. `TestBuildCannotNameAHostLocalImageByShortName` holds the rule, and an explicit
+`localhost/…` still builds because that spelling is one a person reviewed.
+
+**A build always has a network, and `sandbox_network_isolation` is not consulted.** That switch answers a
+question about the agent — can the thing editing my code phone home. A build fetching what a project asks for
+is MIKE running a person's build file, and one switch answering both questions means an isolated project
+cannot build anything that installs a dependency. The cost is stated in the doc that owns the subsystem and
+not in Settings: an isolated project still has build-time egress. Three things bound a build instead, and none
+of them is its reach — what it can read (the staged context, the project's mounts read-only, the grant below),
+where it can write (its own scratch directory), and the fact that it publishes no port. Measured 2026-10-30
+through the product's own arguments: a step fetched a public page, and the guest could not reach the host's
+loopback — the gateway is the CNI address, not `127.0.0.1` — so a build cannot call MIKE's own API.
+`TestBuildReachesTheNetworkEvenForAnIsolatedProject` asserts the route exists; a Go test reaches no network, so
+the fetch itself stays a measurement (`make build-probe`).
+
+**The artifact leaves through a bind mount, because a guest write is invisible to the host.**
+`GVisorCreateArgs` sets `overlay2=root:self`, which keeps the root overlay inside the guest: the container's
+`UpperDir` measured 0 bytes with a file written into it, running and stopped. So `podman commit`,
+`podman export` and `podman cp` out see nothing, and a commit after a build step would silently yield an image
+without it. The builder writes a `docker-archive` to the one read-write bind (`/mike-out`) and the host
+`podman load`s it, from a directory MIKE created and destroys on every exit. That staged context arrives by
+the same route rather than by `podman cp`, which streams a tar the builder image does not ship and dies on a
+closed pipe. The load is where build input becomes the trusted base of the project's later tasks, so anything
+MIKE checks about provenance belongs there and nowhere earlier.
+
+**The grant is one named constant, tested whole.** A build's capabilities are `sandboxruntime.BuilderGrant` —
+the fourteen names the nested builder hands each of its steps — with `BuildGrant`'s three (`SETUID`, `SETGID`,
+`SETFCAP`) as the measured floor inside it: each of the three is necessary, every pair failing at the
+`/proc/<pid>/uid_map` or `gid_map` write. A build reads **none** of the project's Capabilities, because that
+row describes the container the agent runs in and a build is not the agent. Granting a project's own list
+*plus* the floor is the shape that cannot build: a hand-assembled list can sit short of the fourteen, and
+denied the set it wants, buildah takes the path that also raises `RLIMIT_NOFILE` and `RLIMIT_NPROC` to
+`1048576`, which a rootless gVisor guest — measured inside the builder image at hard `nofile=524288`,
+`nproc=63710` — cannot do without `CAP_SYS_RESOURCE`. `podman create` names the capabilities it refused and
+the line is discarded, because the create succeeded.
+
+Adding privileges is not monotone either. Measured on the development host 2026-10-30, each stage judged by
+the tag existing in the guest's own store — three instruments that read the builder's output instead each
+reported a pass that had not happened:
+
+| grant | build |
+|---|---|
+| nothing | fails at `writing "0 0 4294967295" to /proc/<pid>/gid_map` |
+| `SETUID SETGID SETFCAP` | builds, runs a step, and survives `chown -R`, `chmod`, `ln -s`, a hard link, `touch -d` and a `tar` |
+| the three ∪ Docker's default set (14) | builds |
+| the same, less `CHOWN` (13) | builds |
+| that set plus `SYS_ADMIN` and `SYS_RESOURCE` (15) | builds |
+| the same fifteen, less `CHOWN` (14) | **fails extracting the base layer at `lchown /etc/shadow: operation not permitted`** |
+| Docker's default set less `KILL` and `NET_BIND_SERVICE`, plus `SYS_ADMIN` and `SYS_PTRACE` | **fails at `setting "RLIMIT_NOFILE" limit to soft=1048576,hard=1048576 (was soft=524288,hard=524288): operation not permitted`** (2026-10-31) |
+| the three plus `SYS_ADMIN` alone | **fails extracting the base layer at `setting up pivot dir: permission denied`** (2026-10-31) |
+
+The failure mode is a set with a **hole** in it — privileges wide enough to move buildah off the
+user-namespace path, without the `CHOWN` that path's absence then requires — not a large grant, and not one
+poisoned name. So a candidate grant is tested whole rather than derived from a set that worked, and the
+shipped answer is a constant nobody assembles. A step needing a privilege outside that set is a build this
+venue declines rather than a grant the list grows to cover; `buildFailureHint` states the fixed grant instead
+of handing over the builder's line, and `TestARunStepNeedingMoreThanTheBuildGrantSaysSo` holds the refusal
+through the product's own argument path.
+
+**The layer store is `vfs` on the container's rootfs, under `/var/tmp/mike-build`.** The guest's `/tmp` is
+tmpfs, and a `vfs` layer there fails its own extended-attribute read ("no such file or directory"); `overlay`
+inside the guest fails at its first mount ("transport endpoint is not connected"); `fuse-overlayfs` would need
+`/dev/fuse`, which this package has no grant shape for. `--tmpfs …:size=` is honoured under runsc and is
+simply unusable for a store, so the disk bound is taken from the other side: the output directory is the one
+artifact visible from the host, `buildScratch.Watch` samples it while the build runs, and past the cap the
+build is stopped.
+
+**One host path is written: the build's own scratch directory.** A directory a person chose is never writable
+by a build. The host channel is the mount list, not the context — `types.ValidateSandboxMount` checks shape
+(absolute, no `..`, not `/`) and nothing jails a mount's host path, since jailing it against the host root
+would stop nothing while `$HOME` sits inside that root — so a build inherits every mount read-only and reports
+a missing mount instead of `bindMountArg` creating one on the host.
 
 ## Consequences
 
-**Cheaper.** The build sees fewer bytes than either container that exists today — no checkout, no task
-worktree, no untracked file at all, `.git` read-only as now — and because the inputs are a commit, what ran
-is nameable after the fact. The builder pushes the artifact out and the host loads it, so the host never
-executes repository bytes.
+**Cheaper.** A build sees fewer bytes than either container that exists today: no checkout, no task worktree,
+no untracked file, and no `.git` it can write. Its inputs are a commit, so what ran is nameable after the
+fact, and the host never executes build bytes.
 
-**No new egress, and one new input.** For a project whose network isolation is off, a task turn already has
-a networked shell over its worktree and `.git`, so a networked build reaches what a turn reaches. What the
-decision *does* create is `FROM`: a repository text now names an image ref that the **host** pulls. Validate
-it with `ValidateConfiguredImageRef`, pin the digest after the pull, and consider an operator freeze
-modelled on `MIKE_RESTRICT_MCP`. Review that as the widening it is.
+**Narrower than it looks, and that is the price.** A build's layers live in one disposable container, so a
+build container is single-use, its scratch directory grows while it runs, and layer caching is per-build: a
+commit is one layer. Build-time egress exists even for a project with network isolation on. A tracked secret
+inside the context subtree stays reachable, and nothing at this layer helps — the same bytes are reachable
+from a task turn.
 
-**The host channel is the mount list, not the context.** `types.ValidateSandboxMount` checks shape —
-absolute, no `..`, not `/` — and nothing jails a mount's host path; jailing it against the host root would
-stop nothing, because `$HOME` is inside the host root. So a build inherits mounts read-only (`mountMode`
-defaults to *rw* today, which is what a build of a repository should never get), and reports a missing
-mount instead of `bindMountArg` creating it on the host.
+**Whoever controls a repository controls the toolchain every later task boots.** The image carries the
+project's mounts, its configured environment and its credentials into a read-write worktree of a real
+repository, and code from a hostile base runs in every later task, including the turns nobody reviews. The
+task container is the same jail, and that is the whole answer: an image that stayed inside the build jail
+would be useless. Checked by building rather than by argument, a hostile base gains arbitrary code execution
+the product already grants, plus persistence; from inside a task container it reads only the worktree and the
+project's configured mounts, and sends them only where the project's own network setting already allows. The
+review diff is produced by host git reading the worktree, so an image cannot lie about it either. Tag drift
+stays, priced as what it is: a reproducibility annoyance recorded by `mike.base-image`, not an exfiltration
+path.
 
-**What the landing decided about the network, and what it reversed.** The first landing air-gapped every build
-container (`--network none`, unconditionally) on the reasoning that a builder never needs the network because
-its base image arrives as an archive the host pulled. That reasoning was true only of the *base image*. A `RUN`
-step installs things, and most real Dockerfiles install things — `apk add`, `apt-get`, `pip install`, `go mod
-download`, `npm ci` — so an unconditional `none` was a silent feature ban, paid for with a property nobody had
-asked to protect at that price.
+**The venue is the limit, not a reading of the input.** Everything a build step can do is what this container
+and the nested builder allow: the builder resolves a path reference under the staged context and clamps one
+that tries to escape it, gives a secret mount no secret store and a host-network request no interface, and
+builds a multi-stage input over two images (measured in the nested builder). MIKE judges no build input at
+this layer, so the one reading that has to be *complete* rather than conservative is the list of images the
+host must fetch — a ref missed is a build that dies fetching it. `TestBuildPassesThroughWhatTheVenueAlreadyJails`
+and `TestBuildRunsAMultiStageDockerfileOverTwoImages` hold both halves.
 
-The second answer tied the build to `sandbox_network_isolation`, applied the way `SandboxManager.Create`
-applies it for a task container, on the principle that one switch should mean one thing. It meant the
-opposite: one word was made to answer two different questions — "can the thing editing my code phone home",
-which is a question about the agent, and "may MIKE fetch the packages this Dockerfile asks for", which is a
-question about MIKE running a person's build file. Setting the first off silently turned the second off too, so
-an isolated project could not build anything that installs a dependency. The operator's call was to decouple
-them.
+**What would reopen this.** *Per-layer caching:* nesting the builder was adopted because it measured green on
+a two-line input, and `make build-probe` re-runs that measurement; a builder that cached across builds without
+a shared writable store would take the single-use cost back. *The premise itself:* this record holds while a
+build container can reach nothing worth harming. The day one can reach a credential, a writable host path,
+MIKE's own API, or a privilege outside `BuilderGrant`, containment stops being the whole answer and the
+decision is argued again. Both conditions are measurable rather than philosophical.
 
-**The shipped rule is the third: a build always has a network, and the isolation switch is not consulted.**
-What the switch governs is the agent's container, which is what it was written for. Three things bound a build
-instead, and none of them moved: what it can *read* (the staged context, the project's mounts read-only, the
-measured grant), where it can *write* (its own scratch directory), and the fact that it publishes no port. Its
-reach is the sandbox's reach. Measured 2026-10-30 through the product's own arguments: a `RUN` step fetched a
-public page, and the guest could not reach the host's loopback — the gateway is the CNI address, not
-`127.0.0.1` — so a build cannot call MIKE's own API. `TestBuildReachesTheNetworkEvenForAnIsolatedProject`
-asserts the route exists; the fetch itself is not a test, because a Go test reaches no network.
-
-`--pull=never` holds even with a network, and that is about *who* fetches rather than whether: the host pulled
-each named ref, recorded its digest on the built image and handed the bytes in, the container environment
-carries no registry credentials by design, and a guest pull would let a spelling MIKE never handed in resolve
-to something else. The same reasoning covers the **host-side pull** of a base the host lacks, which is the one
-network action repository text makes the host take — on the operator's network, with the operator's credentials,
-before any container starts.
-
-The cost is recorded here rather than spelled out in the dialog: the switch's own wording no longer over-claims
-(it says it blocks the container's network, not all network), and this record plus the bullet in
-`docs/sandbox-runtime.md` carry the rest. A Settings notice naming builds was built and removed the same day —
-the operator's call was that a fourth warning on a row that already carries two is noise, and the fact belongs
-in the doc that owns the subsystem.
-
-**Costs.** Layer caching becomes per-build: a commit is one layer, so cache on the base digest, the ordered
-`RUN` text and the context tree hash. MIKE's parser keeps the reading — the `RUN` text the audit hash is
-built from and the image refs the host has to hand in — and loses instruction fidelity to the builder, which
-is the part that could not be got right twice. What it does not keep is the refusal pass; see the correction
-below. A build writes one host path, its own scratch directory, and
-nothing else: a directory a person chose is never writable by a build. A tracked secret stays reachable:
-nothing at this layer helps, and the same bytes are reachable from a task turn.
-
-**Reopens this if measured green:** nesting a builder under runsc (`buildah --isolation=chroot`, or kaniko,
-on a two-line Dockerfile) would restore per-`RUN` caching and remove MIKE's parser from the correctness
-path. **Measured 2026-10-30 on the development host: it is green**, so this record adopts it. The egress
-correction below is what the same day's measurement forced on the mechanism.
-
-`make build-probe` re-runs the measurement; it is not part of `make check`, because it pulls a builder
-image and takes minutes. The recipe, each half of which was found by failing without it:
-
-- **The grant.** With nothing added, buildah dies at `writing "0 0 4294967295" to /proc/<pid>/gid_map:
-  operation not permitted` — it wants a user namespace and `--cap-drop ALL` left it unable to make one.
-  **The measured minimum is three: `SETUID`, `SETGID`, `SETFCAP`**, in `sandboxruntime.BuildGrant`, which is
-  what the probe measures as its floor. Each of the three
-  is necessary — every pair fails at that `uid_map`/`gid_map` write — and a stage counts as passing only
-  when the guest's own store lists the tag it was supposed to build, because three instruments that read
-  buildah's output instead each reported a pass that had not happened. `SYS_ADMIN` is not required, and
-  neither are `SYS_CHROOT`, `MKNOD` nor `AUDIT_WRITE`. What a build is *granted* is now
-  `sandboxruntime.BuilderGrant`, the fourteen names the nested builder asks each `RUN` step for: see the
-  correction at the end of this record.
-- **The grant is non-monotone, and the shape of it is now measured rather than inferred.** `make build-probe`
-  runs the ladder and reports every grant it tried. Measured 2026-10-30 on the development host, each stage
-  judged by the tag existing in the guest's own store:
-
-  | grant | build |
-  |---|---|
-  | nothing | fails at `writing "0 0 4294967295" to /proc/<pid>/gid_map` |
-  | `SETUID SETGID SETFCAP` | builds, runs a `RUN` step, and survives `chown -R`, `chmod`, `ln -s`, a hard link, `touch -d` and a `tar` |
-  | the three ∪ Docker's default set (14) | builds |
-  | the same, less `CHOWN` (13) | builds |
-  | that set plus `SYS_ADMIN` and `SYS_RESOURCE` (15) | builds |
-  | the same fifteen, less `CHOWN` (14) | **fails extracting the base layer at `lchown /etc/shadow: operation not permitted`** |
-  | Docker's default set less `KILL` and `NET_BIND_SERVICE`, plus `SYS_ADMIN` and `SYS_PTRACE` | **fails at `setting "RLIMIT_NOFILE" limit to soft=1048576,hard=1048576 (was soft=524288,hard=524288): operation not permitted`** (measured 2026-10-31) |
-  | the three plus `SYS_ADMIN` alone | **fails extracting the base layer at `setting up pivot dir: permission denied`** (measured 2026-10-31) |
-
-  So the finding is not "bigger breaks it" and not one poisoned name: it is the **pair** — privileges wide
-  enough to move buildah off the user-namespace path, without the `CHOWN` that path's absence then requires.
-  podman says so at create time (`Capabilities requested by user or image are not allowed by default:
-  "CAP_CHOWN"`) and buildah pays for it at extraction. Two consequences hold. Removing one capability from a
-  working set measures nothing, so a candidate grant is tested whole. And the recommended defaults are not a
-  hazard on this host — a person who clicks the defaults gets a build that builds — while a hand-assembled
-  wide grant can be. What the product shipped here was corrected the next day, and both halves of this
-  paragraph's shipping decision are superseded below: the pair is measured by the probe's
-  `grant-without-chown` stage, and the refusal sentence no longer points at a project's list.
-- **The store.** `vfs`, with its root on the container's **rootfs**: the same build commits fine under
-  `/var/tmp` and fails under `/tmp`, where the guest's tmpfs answers a layer's xattr read with "no such
-  file or directory". The `overlay` driver inside the guest fails at its first mount, "transport endpoint
-  is not connected", and `fuse-overlayfs` would need `/dev/fuse`, which this package has no grant shape
-  for.
-- **The context.** Written by the guest's own shell: `podman cp` into a running container streams a tar
-  the builder image does not ship, and the copy dies with a closed pipe.
-
-What it costs, and what the landing must answer: a build's layers live in one disposable container, so a
-build container is single-use and the scratch directory grows while it runs; and the grant above is measured
-against a two-rung ladder, so the first real project Dockerfile re-owes it.
-
-**Egress, measured the same day, and it corrects this record's `podman commit`.** `--runtime-flag
-overlay2=root:self`, which `GVisorCreateArgs` puts on every container, keeps the root overlay inside the
-guest: the container's `UpperDir` measured 0 bytes with a file written into it, running and stopped. So
-`podman cp` out finds nothing, `podman mount` refuses rootless, and **`podman commit` and `podman export`
-cannot see guest writes at all** — a commit after a `RUN` step would silently yield an image without it.
-The one path that crosses the boundary is a bind mount: `-v <scratch>:/mike-out:rprivate,rw` was written
-from the guest and read from the host while running. The artifact is therefore pushed out by the builder
-(`docker-archive:`) and `podman load`ed host-side, from a directory MIKE made. That load is where
-repository-authored bytes become the trusted base of the project's later tasks, so the provenance check —
-the instruction-set hash and the person's confirmation — belongs at the load and nowhere earlier.
-
-**The store does not go on tmpfs, which is what this record proposed for the disk bound.** A `vfs` layer
-whose root is guest tmpfs fails its own xattr reads (the same failure `/tmp` produced), so the store stays on
-the container rootfs under `/var/tmp/mike-build` and the disk bound is taken from the other side: the output
-directory is sampled while the build runs and the build is stopped past its cap. `--tmpfs …:size=` is
-honoured under runsc; it is simply not usable for a layer store.
-
-**Landed 2026-10-30** with the staging, the read-only inheritance and the archive/load egress.
-`backend/sandbox/build_e2e_test.go` is the proof that survives this record: committed bytes reach the image,
-a `RUN` step's output survives the `podman load`, and no container or scratch directory survives any exit. The
-grant is re-measured by `make build-probe`, which is not part of `make check`.
-
-**The parser's refusal pass was measured away the same day, and this record wrote it as a requirement.** The
-first landing whitelisted instructions and refused `RUN` flags, `COPY --from` and path shapes the reader had
-not read, on the reasoning that a file MIKE cannot fully read must not be executed. Two things were wrong
-with that. It claimed a property the venue already supplies — measured in the nested builder, `COPY /etc/passwd`
-and `RUN --mount=type=bind,source=/etc/passwd` resolve *under the context directory*, an escaping `COPY ../x`
-is clamped inside it, `--mount=type=secret` finds no secret store, `--network=host` finds no interface, and
-`ARG`, `SHELL`, `VOLUME`, `HEALTHCHECK`, `ONBUILD`, `STOPSIGNAL`, `RUN --mount=type=cache` and multi-stage
-files all build. And it cost real things: multi-stage Dockerfiles, which are the common shape, could not be
-built at all, and every refused line was a project's working file turned into an error message.
-
-What the reading has to keep is what the venue cannot do for itself. The **image refs**, because the guest does not fetch and the host must fetch each one — a ref the reader misses is a build that dies pulling it, so this
-reading must be complete rather than conservative, which is the opposite of a whitelist. And the **command
-set**, because a person approves it and the sandbox is what runs it: `ONBUILD RUN` joins the set since it runs
-in a later build of the same image, `SHELL` joins the hash since it changes every command's meaning, and
-`# escape=` is refused since it moves where a command ends. `--platform` stays refused for a third reason: the
-host pulls, so the build gets this host's architecture and saying otherwise would be a lie. `TestBuildPassesThroughWhatTheVenueAlreadyJails` and `TestBuildRunsAMultiStageDockerfileOverTwoImages` hold the two halves;
-`TestBuildProducesNoImageForACopySourceAboveTheContext` replaces the old test that asserted the refusal.
-
-**And the `FROM` policy this record asked for was declined, with one exception measured first.** The record
-ended by asking for an operator allowlist, digest pinning and a freeze switch, on the worry that a repository
-gets to choose the base image. The operator's rule is that the sandbox is the boundary, so the question is
-whether that choice reaches anything the sandbox does not already grant. Checked by building, not by argument:
-a hostile base gains arbitrary code execution *that the product already grants*, and it gains persistence —
-its code runs in every later task, including turns nobody reviews — but from inside a task container it reads
-only the worktree and the project's configured mounts, and can only send them where the project's own network
-setting already allows. No host file is reachable that the jail does not already grant, and the review diff is
-produced by host git reading the worktree, so a hostile image cannot lie about it either.
-
-One thing was not sandbox-reachable and was reachable by `FROM`: `ResolveImageRef` resolves a short name
-against the host's image store first, so `FROM my-runner:1` in a tracked file copied a local image's bytes into
-the project's image — measured, no network needed. That is fixed by not applying the local lookup to
-repository text, one line, and held by `TestBuildCannotNameAHostLocalImageByShortName`. An allowlist, per-project
-digest pinning and a freeze switch are **not** built: they would be a permission system around a choice the
-boundary already contains, which is the mistake this record's first landing made with the instruction
-whitelist. Tag drift stays, priced as what it is — a reproducibility annoyance recorded by `mike.base-image`,
-not an exfiltration path.
-
-The lesson is the one AGENTS.md states generally: a gate that duplicates a boundary is not a boundary, it is
-an inventory of what the boundary already handles — and an inventory that is wrong in the pessimistic
-direction is invisible except to the person whose file it rejects.
-
-**The grant this record shipped was a union, and the union is what broke a real build.** The Decision above
-granted the project's configured capabilities on top of the measured minimum, which reads as generosity — the
-person's own list, plus what a builder needs. Measured 2026-10-31 on a real project Dockerfile, that is exactly
-the shape that cannot build. A build's nested builder hands each `RUN` step containers-common's **default set**
-of fourteen names; a union is a superset of the minimum, not of that set, and a project's list assembled by
-hand can sit *short* of it. Denied the set it wants, buildah takes the path that also raises `RLIMIT_NOFILE`
-and `RLIMIT_NPROC` to `1048576`, and a rootless gVisor guest — measured inside the builder image at hard
-`nofile=524288`, `nproc=63710` — cannot raise a hard limit without `CAP_SYS_RESOURCE`. Every `RUN` step of the
-project's Dockerfile died at that raise. `podman create` reported the two refused names (`CAP_KILL`,
-`CAP_NET_BIND_SERVICE`) and MIKE discarded the line, because the create succeeded.
-
-Three things follow, and all three are now the product.
-
-- **The grant is a named constant, not a composition.** `sandboxruntime.BuilderGrant` is the fourteen names the
-  nested builder asks for, `BuildGrant`'s three measured inside it, so the floor this record measured is still
-  a subset of what ships. A grant with a *hole* in it is the failure mode — not a large grant, and not one
-  poisoned name — which is why the answer is a set nobody assembles rather than a rule about how to assemble
-  one. The probe's decisive stage measures the shipped set, so a green `make build-probe` is now a statement
-  about a real build.
-- **A build reads none of the project's Capabilities.** That row is a statement about the container the agent
-  runs in, and a build is not the agent; a person's task-container list silently breaking their builds is not
-  a meaning anyone intended. A `RUN` step needing a privilege outside the set — a mount namespace, `SYS_ADMIN`
-  — is a build this venue declines rather than one the list grows to cover; such a base is built outside and
-  named `localhost/…`, which is the spelling this record already requires of a host-local image.
-- **This is a widening for the common case, said plainly.** A project that configured nothing built under three
-  capabilities and builds under fourteen now. All fourteen are guest-local on a `--cap-drop ALL` base with one
-  writable bind (its own scratch output), no published port and no route to the host's loopback, which is the
-  argument `GVisorIsolationForCaps` makes about every grant: the runtime is what the safety rests on.
-
-`buildFailureHint` is rewritten to match, and it is the part this record got wrong the longest: it keyed on a
-permission keyword and then asserted the person's own list was the suspect, so on the build above it advised
-removing the capabilities whose absence was the cause. It now states the fixed grant and points at the
-Dockerfile. `TestARunStepNeedingMoreThanTheBuildGrantSaysSo` holds the refusal through the product's own
-argument path; the pair it replaces is re-measured by the probe's `grant-without-chown` stage.
+**Re-measured by.** `backend/sandbox/build_e2e_test.go` runs real builds and is the only place this record is
+checked against a container rather than an argument list: committed bytes reach the image, a step's output
+survives the `podman load`, and no container or scratch directory survives any exit. `make build-probe`
+re-measures the nested-builder question and the whole grant ladder, judging each stage by the guest's own
+store; it is not part of `make check`, because it pulls a builder image and takes minutes. Its decisive stage
+is the shipped set, and `grant-without-chown` is the stage whose passing would falsify the table above.

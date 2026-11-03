@@ -37,9 +37,11 @@ export interface SandboxBuildResult {
     image: string;
     commit: string;
     from: string;
-    run_set_hash: string;
+    bases: string[];
     cache_key: string;
+    base_image_id?: string;
     files: number;
+    scratch_peak?: string;
 }
 
 /**

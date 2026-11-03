@@ -49,19 +49,19 @@ func testPlan(t *testing.T, project *types.Project) *buildPlan {
 	}
 }
 
-// A `FROM` ref is checked as strictly as a configured image, and must name a version: a base that moves makes the
-// cache key and the audit line meaningless.
-func TestBuildRefusesAFROMRefWithoutAVersion(t *testing.T) {
-	for _, bad := range []string{"alpine", "alpine:latest", "docker.io/library/ubuntu:latest", "--privileged", "-x", "a b", "", "a;rm -rf /", "$(id)", "alpine:3.20 --privileged"} {
-		if err := validateBuildFrom(bad); err == nil {
+// A `FROM` ref reaches a podman argument, so its shape is checked and what it names is not.
+func TestBuildRefusesAFROMRefThatCannotBeAnArgument(t *testing.T) {
+	for _, bad := range []string{"--privileged", "-x", "a b", "", "a;rm -rf /", "$(id)", "alpine:3.20 --privileged"} {
+		if err := validateBuildBase(bad); err == nil {
 			t.Errorf("accepted FROM %q", bad)
 		}
 	}
 	for _, good := range []string{
-		"alpine:3.20", "docker.io/library/alpine:3.20", "quay.io/buildah/stable:v1.40.0",
+		"alpine", "alpine:latest", "alpine:3.20", "docker.io/library/ubuntu:latest",
+		"docker.io/library/alpine:3.20", "quay.io/buildah/stable:v1.40.0",
 		"ghcr.io/o/r@sha256:" + strings.Repeat("a", 64), "scratch",
 	} {
-		if err := validateBuildFrom(good); err != nil {
+		if err := validateBuildBase(good); err != nil {
 			t.Errorf("refused FROM %q: %v", good, err)
 		}
 	}
@@ -111,34 +111,6 @@ func TestBuildDoesNotCreateAMissingHostMount(t *testing.T) {
 	project.SandboxMounts = nil
 	if err := checkBuildMounts(project); err != nil {
 		t.Errorf("a project with no mounts was refused: %v", err)
-	}
-}
-
-// The instruction set is what a person approves. A build after a change is refused until the new hash comes
-// back, because reviewing a diff is not the same as approving `RUN curl ... | sh`.
-func TestBuildRefusesAChangedRunSetUntilConfirmed(t *testing.T) {
-	project := buildTestProject(t.TempDir())
-	const approved = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	const changed = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	project.SandboxRunSetHash = approved
-
-	if err := checkRunSetConfirmation(project, BuildOptions{}, approved); err != nil {
-		t.Errorf("an unchanged instruction set was refused: %v", err)
-	}
-	err := checkRunSetConfirmation(project, BuildOptions{}, changed)
-	if err == nil {
-		t.Fatal("a changed instruction set built without approval")
-	}
-	if !strings.Contains(err.Error(), changed) {
-		t.Errorf("the refusal does not report the hash to confirm: %v", err)
-	}
-	if err := checkRunSetConfirmation(project, BuildOptions{ConfirmRunSet: changed}, changed); err != nil {
-		t.Errorf("the approved hash was refused: %v", err)
-	}
-	// A project that never built has nothing to compare against, so the first build is not gated.
-	project.SandboxRunSetHash = ""
-	if err := checkRunSetConfirmation(project, BuildOptions{}, changed); err != nil {
-		t.Errorf("the first build was refused: %v", err)
 	}
 }
 
@@ -252,7 +224,6 @@ func TestBuildContainerScriptPinsTheGuestContract(t *testing.T) {
 		{"docker.io/library/golang:1.23", "golang:1.23"},
 	}
 	plan.cacheKey = "deadbeef"
-	plan.runSetHash = strings.Repeat("a", 64)
 	plan.commit = strings.Repeat("b", 40)
 	plan.baseImageIDs = []string{"sha256:" + strings.Repeat("c", 64)}
 
