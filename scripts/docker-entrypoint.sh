@@ -34,7 +34,7 @@ export MIKE_LISTEN MIKE_PORT MIKE_ALLOWED_HOSTS
 
 # /mike/data holds kanban.db, the local CA and its key, and the flight recorder: owner-only,
 # even when the volume was created by the engine as 0755.
-mkdir -p /mike/data /mike/worktrees /mike/extensions /mike/projects
+mkdir -p /mike/data /mike/worktrees /mike/extensions
 chmod 0700 /mike/data
 
 # ── git ownership ────────────────────────────────────────────────────────────

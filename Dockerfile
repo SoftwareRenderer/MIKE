@@ -117,7 +117,7 @@ COPY prompts/ /mike/prompts/
 COPY scripts/docker-entrypoint.sh /usr/local/bin/mike-entrypoint.sh
 COPY scripts/mike-healthcheck.sh  /usr/local/bin/mike-healthcheck
 RUN chmod 0755 /mike/mike /mike/sandbox-bridge /usr/local/bin/mike-entrypoint.sh /usr/local/bin/mike-healthcheck && \
-    mkdir -p /mike/data /mike/worktrees /mike/extensions /mike/projects && \
+    mkdir -p /mike/data /mike/worktrees /mike/extensions && \
     chmod 0700 /mike/data
 
 # Verify podman flags and gVisor installation during build to prevent runtime failures.

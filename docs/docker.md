@@ -20,6 +20,7 @@ stops is `docs/lifecycle.md`.
 - **Stages verify tool availability without root privileges.** `podman --runtime-flag ignore-cgroups=true --version`, `runsc --version`, the `runsc` PATH name, and the sidecar tree are all checked at build. `podman info` is not checked because it requires privileges available only at runtime; the entrypoint probes it instead.
 - **`privileged` and `seccomp=unconfined` enable the nested runtime.** `compose.yaml` binds to `127.0.0.1` for this reason; TLS is mandatory, and the Host allowlist defaults to `localhost` to prevent unauthorized access. Task work runs with `--cap-drop ALL` inside gVisor.
 - **Storage is kept separate from the engine's overlayfs.** Podman refuses `overlay` on `overlayfs`, so `compose.yaml` provides a volume for `/var/lib/containers`. The entrypoint falls back to `fuse-overlayfs` or `vfs` if needed.
+- **The checkouts mount is the container's `$HOME`.** The endpoints that carry no project see only `$HOME` plus the worktrees and extensions dirs, so `compose.yaml` mounts the projects at `/projects` and sets `HOME` there: those two lines are one decision.
 - **`MIKE_ENCRYPTION_KEY` is required and has no default.** `compose.yaml` fails if it is missing, and the entrypoint exits with an error naming the variable. The image does not include an agent CLI; adapters requiring a host binary must use a derived image.
 - **`safe.directory` is granted at runtime, by the image, and never by the binary.** A mounted checkout keeps its host uid while this server runs as root, so git would refuse every project the person adds. The build cannot make the grant: `git config --global` writes `$HOME/.gitconfig`, which the documented mount covers with the checkouts. `GIT_CONFIG_GLOBAL` is the other wrong file — it replaces the one `resolveGitIdentity()` reads the author from.
 - **The container does not update itself.** Installs that are not unpacked release directories are refused. A container is refused before this check: `classifyInstall` checks the runtime's marker file before the layout. Even if a container looks like a release, it will refuse to update because a restart preserves the state, but a new `compose up` replaces the container. See `docs/auto-update.md`.
@@ -92,6 +93,7 @@ services:
     stop_grace_period: 40s                 # the server's own budget is 15s, then container teardown
     ports: ["127.0.0.1:3000:3000"]
     environment:
+      HOME: /projects                         # the projects mount below is the picker's jail root
       MIKE_ENCRYPTION_KEY: ${MIKE_ENCRYPTION_KEY:?openssl rand -hex 32}
       MIKE_DATA_DIR: /mike/data
       MIKE_WORKTREES_DIR: /mike/worktrees   # unset, worktrees land in /mike/.worktrees instead
@@ -100,7 +102,7 @@ services:
       - mike-worktrees:/mike/worktrees
       - mike-extensions:/mike/extensions    # installed extension code, deleted with the extension
       - mike-containers:/var/lib/containers # podman's store, off the engine's own overlayfs
-      - /srv/projects:/root        # the checkouts agents edit and commit into
+      - /srv/projects:/projects    # the checkouts agents edit and commit into
 
 volumes:
   mike-data:
@@ -125,13 +127,14 @@ docker run -d --name mike \
   --privileged --security-opt seccomp=unconfined \
   --shm-size 256m --tmpfs /tmp --stop-timeout 40 \
   -p 127.0.0.1:3000:3000 \
+  -e HOME=/projects \
   -e MIKE_ENCRYPTION_KEY \
   -e MIKE_DATA_DIR=/mike/data -e MIKE_WORKTREES_DIR=/mike/worktrees \
   -v mike-data:/mike/data \
   -v mike-worktrees:/mike/worktrees \
   -v mike-extensions:/mike/extensions \
   -v mike-containers:/var/lib/containers \
-  -v /srv/projects:/root \
+  -v /srv/projects:/projects \
   getmike/mike:local
 
 docker logs mike        # the pairing code, on a data directory with no passkey yet
@@ -174,10 +177,12 @@ Either way the bundle's published sha512 is verified before anything is executed
 
 ## Limits an operator meets
 
-- **`/mike/projects` is a mount the server cannot see.** The no-project file jail is `$HOME` plus the
-  directories declared at startup, and nothing declares that path: adding a project from it answers
-  `path is outside the allowed host directories` with HTTP 403. It is a bind mount plus a startup
-  declaration, and only the first half exists today.
+- **A checkout tree outside `$HOME` is invisible.** Adding a project from it answers `path is outside
+  the allowed host directories` with HTTP 403, and the picker cannot list it.
+  **`docs/confinement.md → The no-project host jail`**.
+- **A project row keeps the path it was added with.** Project-scoped file endpoints jail to that
+  checkout, not to `$HOME`, so a registered project under another path keeps working while its mount
+  stays; the picker opens at `$HOME`.
 - **`MIKE_ALLOW_ROOT_FS` is not forwarded.** `compose.yaml` leaves it alone on purpose, so `.env`
   cannot widen the jail; the refusal names the variable because the widening is a boot decision.
 - **A hostname nobody listed is HTTP 421.** `localhost`, `127.0.0.1`, `::1` and the listen host are

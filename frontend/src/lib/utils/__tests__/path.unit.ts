@@ -103,7 +103,7 @@ describe('the display path', () => {
 
     it('shows a path outside any home directory whole', () => {
         expect(toHomeRelative('/mike/worktrees/proj-1/frost-amber')).toBe('/mike/worktrees/proj-1/frost-amber');
-        expect(toHomeRelative('/mike/projects/kanban')).toBe('/mike/projects/kanban');
+        expect(toHomeRelative('/projects/kanban')).toBe('/projects/kanban');
     });
 
     it('leaves a home directory with nothing under it alone', () => {

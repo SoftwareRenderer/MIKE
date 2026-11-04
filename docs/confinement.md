@@ -171,6 +171,9 @@ path with `MIKE_ALLOW_ROOT_FS=1`.
 - A clone refusal happens in `prepareCloneTarget`, **before** any byte is fetched, so a refused request
   leaves no partial checkout. The jail reaches the picker only through a refusal: `GET /api/home` answers
   the home it opens at and nothing about the jail.
+- **A container answers this jail by choosing `$HOME`.** The image's deployment sets `HOME` to the
+  checkouts mount, so the root the picker opens at is the tree agents edit — `compose.yaml` and
+  `.env.example` carry that pair.
 - Tests: `backend/fsutil/hostroot_test.go`, `backend/server/handler_fs_hostroot_test.go`,
   `backend/server/server_hostroot_test.go`, `backend/api/project_hostroot_test.go`,
   `backend/server/handler_fs_sandbox_test.go`, `backend/server/handler_fs_upload_test.go`.
