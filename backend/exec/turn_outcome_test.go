@@ -2,7 +2,7 @@ package exec
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -33,7 +33,7 @@ func mockToolThenTextLLM(streamCalls *atomic.Int32, toolName, toolArgs string) *
 		var body struct {
 			Stream bool `json:"stream"`
 		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = json.UnmarshalRead(r.Body, &body)
 		if !body.Stream {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"summary"},"finish_reason":"stop"}]}`))

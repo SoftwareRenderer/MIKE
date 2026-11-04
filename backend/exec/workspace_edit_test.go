@@ -1,7 +1,7 @@
 package exec
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"strings"
 	"testing"
@@ -127,7 +127,7 @@ func TestApplyTextEdits_OutOfBoundsLine(t *testing.T) {
 
 func TestParseWorkspaceEdit_ChangesMap(t *testing.T) {
 	t.Parallel()
-	resp := json.RawMessage(`{
+	resp := jsontext.Value(`{
 		"jsonrpc": "2.0", "id": 7,
 		"result": {
 			"changes": {
@@ -158,7 +158,7 @@ func TestParseWorkspaceEdit_ChangesMap(t *testing.T) {
 
 func TestParseWorkspaceEdit_DocumentChanges(t *testing.T) {
 	t.Parallel()
-	resp := json.RawMessage(`{
+	resp := jsontext.Value(`{
 		"jsonrpc": "2.0", "id": 8,
 		"result": {
 			"documentChanges": [
@@ -181,7 +181,7 @@ func TestParseWorkspaceEdit_DocumentChanges(t *testing.T) {
 
 func TestParseWorkspaceEdit_UnknownChangeKind(t *testing.T) {
 	t.Parallel()
-	resp := json.RawMessage(`{
+	resp := jsontext.Value(`{
 		"jsonrpc": "2.0", "id": 9,
 		"result": {
 			"documentChanges": [
@@ -200,7 +200,7 @@ func TestParseWorkspaceEdit_UnknownChangeKind(t *testing.T) {
 
 func TestParseWorkspaceEdit_NullResult(t *testing.T) {
 	t.Parallel()
-	resp := json.RawMessage(`{"jsonrpc": "2.0", "id": 10, "result": null}`)
+	resp := jsontext.Value(`{"jsonrpc": "2.0", "id": 10, "result": null}`)
 	edits, err := parseWorkspaceEdit(resp)
 	if err != nil {
 		t.Fatal(err)
@@ -212,7 +212,7 @@ func TestParseWorkspaceEdit_NullResult(t *testing.T) {
 
 func TestParseWorkspaceEdit_LSPError(t *testing.T) {
 	t.Parallel()
-	resp := json.RawMessage(`{"jsonrpc": "2.0", "id": 11, "error": {"code": -32602, "message": "Invalid newName"}}`)
+	resp := jsontext.Value(`{"jsonrpc": "2.0", "id": 11, "error": {"code": -32602, "message": "Invalid newName"}}`)
 	_, err := parseWorkspaceEdit(resp)
 	if err == nil {
 		t.Fatal("expected error for LSP error envelope")
@@ -224,7 +224,7 @@ func TestParseWorkspaceEdit_LSPError(t *testing.T) {
 
 func TestParseWorkspaceEdit_UnexpectedShape(t *testing.T) {
 	t.Parallel()
-	resp := json.RawMessage(`{"jsonrpc": "2.0", "id": 12, "result": {"foo": "bar"}}`)
+	resp := jsontext.Value(`{"jsonrpc": "2.0", "id": 12, "result": {"foo": "bar"}}`)
 	if _, err := parseWorkspaceEdit(resp); err == nil {
 		t.Error("expected error for result without changes/documentChanges")
 	}

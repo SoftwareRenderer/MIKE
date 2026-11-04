@@ -4,7 +4,7 @@ package api
 // comparison its Changes panel is showing.
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"path/filepath"

@@ -32,8 +32,8 @@ type testURLResponse struct {
 	OK      bool   `json:"success"`
 	Class   string `json:"class"`
 	Message string `json:"message"`
-	Status  int    `json:"status,omitempty"`
-	Results int    `json:"results,omitempty"`
+	Status  int    `json:"status,omitzero"`
+	Results int    `json:"results,omitzero"`
 }
 
 // The probe may only dial addresses that the extension's own tools would send to.

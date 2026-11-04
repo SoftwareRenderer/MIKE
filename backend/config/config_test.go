@@ -1,7 +1,8 @@
 package config
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -692,7 +693,7 @@ func TestHandleConfig_MaxRequestsPerSecondRoundTrip(t *testing.T) {
 			MaxRequestsPerSecond int    `json:"max_requests_per_second"`
 		} `json:"providers"`
 	}
-	if err := json.NewDecoder(getResp.Body).Decode(&got); err != nil {
+	if err := json.UnmarshalRead(getResp.Body, &got); err != nil {
 		t.Fatalf("decode get config: %v", err)
 	}
 	if len(got.Providers) != 1 || got.Providers[0].MaxRequestsPerSecond != 4 {
@@ -1110,8 +1111,8 @@ func TestHandleConfig_KeyboardShortcutsResetOmittedInResponse(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("PUT /api/config status = %d, want 200", resp.StatusCode)
 	}
-	var got map[string]json.RawMessage
-	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+	var got map[string]jsontext.Value
+	if err := json.UnmarshalRead(resp.Body, &got); err != nil {
 		t.Fatalf("decode PUT response: %v", err)
 	}
 	if _, ok := got["keyboard_shortcuts"]; ok {

@@ -18,7 +18,7 @@ package main
 //	go run ./scripts/i18nparity --strict              # warnings fail too
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"flag"
 	"fmt"
 	"maps"

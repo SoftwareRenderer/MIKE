@@ -7,15 +7,6 @@ import (
 
 // A path sits in exactly one of the three sets, and says why. A path in two sets would be cancellable and
 // not cancellable at once; an entry with no reason is one the next reader deletes.
-
-func entries(sets ...[]sideEffectEntry) []sideEffectEntry {
-	var out []sideEffectEntry
-	for _, s := range sets {
-		out = append(out, s...)
-	}
-	return out
-}
-
 func TestSideEffectClassificationIsDisjointAndExplained(t *testing.T) {
 	sets := map[string][]sideEffectEntry{
 		"detachedOperations":      detachedOperations,

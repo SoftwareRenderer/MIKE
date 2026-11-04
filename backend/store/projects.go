@@ -2,7 +2,7 @@ package store
 
 import (
 	"database/sql"
-	"encoding/json"
+	"encoding/json/v2"
 	"reflect"
 	"time"
 
@@ -76,21 +76,11 @@ func scanProject(s scanner, p *types.Project) error {
 	p.SandboxImage = sandboxImage.String
 	p.SandboxDockerfilePath = sandboxDockerfilePath.String
 	p.SandboxBuildContext = buildContext.String
-	if forwardPortsJSON.Valid && forwardPortsJSON.String != "" {
-		_ = json.Unmarshal([]byte(forwardPortsJSON.String), &p.ForwardPorts)
-	}
-	if mountsJSON.Valid && mountsJSON.String != "" {
-		_ = json.Unmarshal([]byte(mountsJSON.String), &p.SandboxMounts)
-	}
-	if envsJSON.Valid && envsJSON.String != "" {
-		_ = json.Unmarshal([]byte(envsJSON.String), &p.SandboxEnvs)
-	}
-	if capsJSON.Valid && capsJSON.String != "" {
-		_ = json.Unmarshal([]byte(capsJSON.String), &p.SandboxCapabilities)
-	}
-	if mcpIDsJSON.Valid && mcpIDsJSON.String != "" {
-		_ = json.Unmarshal([]byte(mcpIDsJSON.String), &p.MCPServerIDs)
-	}
+	scanJSONColumn(forwardPortsJSON, &p.ForwardPorts)
+	scanJSONColumn(mountsJSON, &p.SandboxMounts)
+	scanJSONColumn(envsJSON, &p.SandboxEnvs)
+	scanJSONColumn(capsJSON, &p.SandboxCapabilities)
+	scanJSONColumn(mcpIDsJSON, &p.MCPServerIDs)
 	p.CreatedAt = scanTime(createdAt)
 	p.UpdatedAt = scanTime(updatedAt)
 	return nil

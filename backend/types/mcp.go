@@ -39,7 +39,7 @@ type MCPServer struct {
 	Headers []MCPHeader `json:"headers,omitempty"`
 	// TimeoutSeconds is this server's deadline for one session, with no ceiling. Zero means no deadline:
 	// the wait ends when the caller's context does, which is what a long-running remote tool needs.
-	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
+	TimeoutSeconds int `json:"timeout_seconds,omitzero"`
 }
 
 // MCPHeader is one header sent to the server on every request. Value follows Provider.APIKey's
@@ -47,7 +47,7 @@ type MCPServer struct {
 // anything else is a new value to seal.
 type MCPHeader struct {
 	Name  string  `json:"name"`
-	Value *string `json:"value,omitempty"`
+	Value *string `json:"value,omitzero"`
 }
 
 // Timeout is this server's deadline for one session. Zero is no deadline — the wait is bounded by the

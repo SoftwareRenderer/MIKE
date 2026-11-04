@@ -50,14 +50,14 @@ type Task struct {
 	AssignedPorts []AssignedPort `json:"assigned_ports,omitempty"`
 	SessionCost   float64        `json:"session_cost"`
 	// SandboxMemoryPeakMB is the last run's peak. Written only by Store.RecordTaskSandboxMemory.
-	SandboxMemoryPeakMB int64 `json:"sandbox_memory_peak_mb,omitempty"`
+	SandboxMemoryPeakMB int64 `json:"sandbox_memory_peak_mb,omitzero"`
 	// Processes the OOM killer took from that same container. Same single writer.
-	SandboxOOMKills int64 `json:"sandbox_oom_kills,omitempty"`
+	SandboxOOMKills int64 `json:"sandbox_oom_kills,omitzero"`
 	// Nil when nobody dismissed the alert. Written only by Store.DismissTaskMemoryAlert.
 	MemoryAlertAck *MemoryAlertAck `json:"memory_alert_ack"`
 	// MemorySupervisorPaused is set when the memory supervisor pauses the task.
 	// Any user-initiated start or stop clears it, so the supervisor never resumes a task the user moved.
-	MemorySupervisorPaused bool `json:"memory_supervisor_paused,omitempty"`
+	MemorySupervisorPaused bool `json:"memory_supervisor_paused,omitzero"`
 }
 
 // IsPlanMode returns true if the task is in plan mode.
@@ -84,7 +84,7 @@ type TaskThread struct {
 	IsActive              bool       `json:"is_active"`
 	GitBranch             string     `json:"git_branch,omitempty"`
 	CheckpointMessageID   string     `json:"checkpoint_message_id,omitempty"`
-	CheckpointMessageTime *time.Time `json:"checkpoint_message_time,omitempty"`
+	CheckpointMessageTime *time.Time `json:"checkpoint_message_time,omitzero"`
 	CheckpointCommitHash  string     `json:"checkpoint_commit_hash,omitempty"` // git commit at fork point
 	WorktreeStashHash     string     `json:"worktree_stash_hash,omitempty"`    // git stash create hash for worktree restoration
 	CreatedAt             time.Time  `json:"created_at"`
@@ -104,29 +104,29 @@ type Config struct {
 	DefaultAutoMerge              *bool          `json:"default_auto_merge"`
 	DefaultSubtasksAutoMerge      *bool          `json:"default_subtasks_auto_merge"`
 	DefaultOperatingMode          *OperatingMode `json:"default_operating_mode"`
-	DefaultMaxFailedTurns         *int           `json:"default_max_failed_turns,omitempty"`
-	DefaultAutoSummarizeThreshold *int           `json:"default_auto_summarize_threshold,omitempty"`
+	DefaultMaxFailedTurns         *int           `json:"default_max_failed_turns,omitzero"`
+	DefaultAutoSummarizeThreshold *int           `json:"default_auto_summarize_threshold,omitzero"`
 	// HideModelBadge hides the model badge on board task cards. Nil = visible (default).
-	HideModelBadge *bool `json:"hide_model_badge,omitempty"`
+	HideModelBadge *bool `json:"hide_model_badge,omitzero"`
 	// UpdateCheckEnabled is the operator's answer to "may MIKE ask whether a newer release exists".
 	// Nil means never answered — off, and still owed the first-run question. docs/auto-update.md.
-	UpdateCheckEnabled *bool `json:"update_check_enabled,omitempty"`
+	UpdateCheckEnabled *bool `json:"update_check_enabled,omitzero"`
 	// RunSiblingsParallel starts all of a parent's startable subtasks at once
 	// (instead of one at a time). Nil = off (sequential, the default).
-	RunSiblingsParallel *bool `json:"run_siblings_parallel,omitempty"`
+	RunSiblingsParallel *bool `json:"run_siblings_parallel,omitzero"`
 	// SortOldestFirst puts the least recently moved card at the top of a board
 	// column. Nil = off (newest move on top, the default).
-	SortOldestFirst *bool `json:"sort_oldest_first,omitempty"`
+	SortOldestFirst *bool `json:"sort_oldest_first,omitzero"`
 	// AutoMaximizeChatMobile maximizes the task chat while its input holds focus on
 	// the mobile layout. Nil = on (default).
-	AutoMaximizeChatMobile *bool `json:"auto_maximize_chat_mobile,omitempty"`
+	AutoMaximizeChatMobile *bool `json:"auto_maximize_chat_mobile,omitzero"`
 	// ReclaimIdleSandbox lets the memory supervisor release the container of a task idle past the
 	// reclaim grace. Nil = off. docs/sandbox-runtime.md.
-	ReclaimIdleSandbox *bool `json:"reclaim_idle_sandbox,omitempty"`
+	ReclaimIdleSandbox *bool `json:"reclaim_idle_sandbox,omitzero"`
 	// LoopBreaker recovers from a run that reached its consecutive-failed-turn limit instead of stopping
 	// it: cut the failed call and the turns after it, then send "Proceed". Nil = off.
-	LoopBreaker       *bool              `json:"loop_breaker,omitempty"`
-	KeyboardShortcuts *KeyboardShortcuts `json:"keyboard_shortcuts,omitempty"`
+	LoopBreaker       *bool              `json:"loop_breaker,omitzero"`
+	KeyboardShortcuts *KeyboardShortcuts `json:"keyboard_shortcuts,omitzero"`
 	// MCPServers is the registered MCP registry with every header value masked: GetConfig hands out no
 	// plaintext secret. The code that dials a server asks for OpenMCPServers instead.
 	MCPServers []MCPServer `json:"mcp_servers,omitempty"`
@@ -138,48 +138,48 @@ type Config struct {
 // with "+" then the key, which may be the pseudo-key "click" ("meta+click").
 type KeyboardShortcuts struct {
 	// CreateTask opens the create-task dialog on the project board.
-	CreateTask *string `json:"create_task,omitempty"`
+	CreateTask *string `json:"create_task,omitzero"`
 	// CreateTaskSubmit creates the task inside the create-task dialog.
-	CreateTaskSubmit *string `json:"create_task_submit,omitempty"`
+	CreateTaskSubmit *string `json:"create_task_submit,omitzero"`
 	// OpenTerminal opens the terminal panel on pages with a terminal button.
-	OpenTerminal *string `json:"open_terminal,omitempty"`
+	OpenTerminal *string `json:"open_terminal,omitzero"`
 	// StartTask starts the task in the task view while the Start Task button is shown.
-	StartTask *string `json:"start_task,omitempty"`
+	StartTask *string `json:"start_task,omitzero"`
 	// ToggleFullscreen maximizes or minimizes the focused area (chat, diff,
 	// file editor, terminal panel) in the task view / explorer views.
-	ToggleFullscreen *string `json:"toggle_fullscreen,omitempty"`
+	ToggleFullscreen *string `json:"toggle_fullscreen,omitzero"`
 	// MultiSelectClick is the modifier+click combo that toggles task-card
 	// multi-select (e.g. "meta+click"). Other modifier clicks on a card are left
 	// to the browser, which opens the card's link in a new tab or window.
-	MultiSelectClick *string `json:"multi_select_click,omitempty"`
+	MultiSelectClick *string `json:"multi_select_click,omitzero"`
 	// HideHints hides the keycap hints on shortcut buttons (tooltips stay).
-	HideHints *bool `json:"hide_hints,omitempty"`
+	HideHints *bool `json:"hide_hints,omitzero"`
 }
 
 // ModelSampling holds a model's sampler overrides. A nil field is left out of the request body, so
 // the provider samples its own way; the bounds on a typed value are judged where the row is saved.
 type ModelSampling struct {
-	Temperature       *float64 `json:"temperature,omitempty"`
-	TopP              *float64 `json:"top_p,omitempty"`
-	TopK              *int     `json:"top_k,omitempty"`
-	MinP              *float64 `json:"min_p,omitempty"`
-	FrequencyPenalty  *float64 `json:"frequency_penalty,omitempty"`
-	PresencePenalty   *float64 `json:"presence_penalty,omitempty"`
-	RepetitionPenalty *float64 `json:"repetition_penalty,omitempty"`
-	Seed              *int     `json:"seed,omitempty"`
+	Temperature       *float64 `json:"temperature,omitzero"`
+	TopP              *float64 `json:"top_p,omitzero"`
+	TopK              *int     `json:"top_k,omitzero"`
+	MinP              *float64 `json:"min_p,omitzero"`
+	FrequencyPenalty  *float64 `json:"frequency_penalty,omitzero"`
+	PresencePenalty   *float64 `json:"presence_penalty,omitzero"`
+	RepetitionPenalty *float64 `json:"repetition_penalty,omitzero"`
+	Seed              *int     `json:"seed,omitzero"`
 }
 
 // ModelConfig represents a model with its per-model settings.
 type ModelConfig struct {
 	Name              string         `json:"name"`
 	ReasoningEffort   string         `json:"reasoning_effort"`
-	ContextWindow     *int           `json:"context_window,omitempty"`      // nil if not reported by LLM
-	InputPrice        *float64       `json:"input_price,omitempty"`         // USD per 1M input (non-cached) tokens; nil = inherit provider default
-	OutputPrice       *float64       `json:"output_price,omitempty"`        // USD per 1M output tokens; nil = inherit provider default
-	CacheReadPrice    *float64       `json:"cache_read_price,omitempty"`    // USD per 1M cache-read tokens; nil = inherit provider default
-	CacheWritePrice   *float64       `json:"cache_write_price,omitempty"`   // USD per 1M cache-write tokens; nil = inherit provider default
-	PowerConsumptionW *float64       `json:"power_consumption_w,omitempty"` // Watts override; nil = inherit provider default
-	Sampling          *ModelSampling `json:"sampling,omitempty"`            // nil = the model sends no sampler override at all
+	ContextWindow     *int           `json:"context_window,omitzero"`      // nil if not reported by LLM
+	InputPrice        *float64       `json:"input_price,omitzero"`         // USD per 1M input (non-cached) tokens; nil = inherit provider default
+	OutputPrice       *float64       `json:"output_price,omitzero"`        // USD per 1M output tokens; nil = inherit provider default
+	CacheReadPrice    *float64       `json:"cache_read_price,omitzero"`    // USD per 1M cache-read tokens; nil = inherit provider default
+	CacheWritePrice   *float64       `json:"cache_write_price,omitzero"`   // USD per 1M cache-write tokens; nil = inherit provider default
+	PowerConsumptionW *float64       `json:"power_consumption_w,omitzero"` // Watts override; nil = inherit provider default
+	Sampling          *ModelSampling `json:"sampling,omitzero"`            // nil = the model sends no sampler override at all
 }
 
 // ProviderKind distinguishes between standard LLM providers and coding agents.
@@ -201,7 +201,7 @@ type Provider struct {
 	DisplayName           string        `json:"display_name"`
 	Kind                  string        `json:"kind"` // "llm" (default) or "agent"
 	URL                   string        `json:"url"`
-	APIKey                *string       `json:"api_key,omitempty"` // nil=preserve, ""=clear, value=set; encrypted in DB, masked in API responses
+	APIKey                *string       `json:"api_key,omitzero"` // nil=preserve, ""=clear, value=set; encrypted in DB, masked in API responses
 	Models                []ModelConfig `json:"models"`
 	Concurrency           int           `json:"concurrency"`
 	MaxRequestsPerSecond  int           `json:"max_requests_per_second"`    // 0 = unlimited; max new LLM request starts per second
@@ -324,7 +324,7 @@ type Project struct {
 	ActiveTerminalPorts []AssignedPort `json:"active_terminal_ports,omitempty"` // transient: assigned ports from project-level terminal
 	// CommitAssistedBy is this project's answer to the "Assisted-by" commit trailer, read through
 	// AssistedByEnabled.
-	CommitAssistedBy *bool     `json:"commit_assisted_by,omitempty"`
+	CommitAssistedBy *bool     `json:"commit_assisted_by,omitzero"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
 }
@@ -359,7 +359,7 @@ type GitLogResponse struct {
 	Commits       []GitCommit `json:"commits"`
 	CurrentBranch string      `json:"current_branch"`       // name of the checked-out branch
 	OriginTip     string      `json:"origin_tip,omitempty"` // commit hash where origin/<branch> points
-	HasMore       bool        `json:"has_more,omitempty"`   // true if more commits available beyond this batch
+	HasMore       bool        `json:"has_more,omitzero"`    // true if more commits available beyond this batch
 }
 
 // TaskMessage represents a chat message for a task.
@@ -371,23 +371,23 @@ type TaskMessage struct {
 	Severity         string    `json:"severity,omitempty"` // system-message severity: "" (default/warning), "info", "error"
 	Content          string    `json:"content"`
 	ReasoningContent string    `json:"reasoning_content,omitempty"`
-	HasReasoning     bool      `json:"has_reasoning,omitempty"` // true if message has reasoning (even if suppressed)
+	HasReasoning     bool      `json:"has_reasoning,omitzero"` // true if message has reasoning (even if suppressed)
 	ToolCalls        string    `json:"tool_calls,omitempty"`
 	ToolResult       string    `json:"tool_result,omitempty"`
-	ResultTruncated  bool      `json:"result_truncated,omitempty"` // true if tool_result output was truncated
-	Attachments      string    `json:"attachments,omitempty"`      // JSON array of {mimeType, data} for images
+	ResultTruncated  bool      `json:"result_truncated,omitzero"` // true if tool_result output was truncated
+	Attachments      string    `json:"attachments,omitempty"`     // JSON array of {mimeType, data} for images
 	ModelName        string    `json:"model_name,omitempty"`
 	ProviderName     string    `json:"provider_name,omitempty"`
-	PromptTokens     int       `json:"prompt_tokens,omitempty"`
-	PredictedTokens  int       `json:"predicted_tokens,omitempty"`
-	CacheTokens      int       `json:"cache_tokens,omitempty"`
-	PromptMs         int       `json:"prompt_ms,omitempty"`
-	PredictedMs      int       `json:"predicted_ms,omitempty"`
-	Duration         int64     `json:"duration,omitempty"`
+	PromptTokens     int       `json:"prompt_tokens,omitzero"`
+	PredictedTokens  int       `json:"predicted_tokens,omitzero"`
+	CacheTokens      int       `json:"cache_tokens,omitzero"`
+	PromptMs         int       `json:"prompt_ms,omitzero"`
+	PredictedMs      int       `json:"predicted_ms,omitzero"`
+	Duration         int64     `json:"duration,omitzero"`
 	GitCommitHash    string    `json:"git_commit_hash,omitempty"`
-	IsLoopHint       bool      `json:"is_loop_hint,omitempty"` // injected loop hint: kept out of the rebuilt LLM context
-	AssistantMsgID   string    `json:"-"`                      // assistant row a tool_call row belongs to; rebuild-internal (groupTaskMessages), never sent to the client
-	Kind             string    `json:"kind,omitempty"`         // sub-classifies a row within its role; advisory rows: "diagnostics" | "merge_conflict" | "auto_answer" | "context_cut" (titles the note)
+	IsLoopHint       bool      `json:"is_loop_hint,omitzero"` // injected loop hint: kept out of the rebuilt LLM context
+	AssistantMsgID   string    `json:"-"`                     // assistant row a tool_call row belongs to; rebuild-internal (groupTaskMessages), never sent to the client
+	Kind             string    `json:"kind,omitempty"`        // sub-classifies a row within its role; advisory rows: "diagnostics" | "merge_conflict" | "auto_answer" | "context_cut" (titles the note)
 	CreatedAt        time.Time `json:"created_at"`
 }
 

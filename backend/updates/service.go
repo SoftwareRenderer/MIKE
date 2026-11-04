@@ -2,7 +2,7 @@ package updates
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"net/url"
 	"os"
@@ -47,7 +47,7 @@ type State struct {
 	Published string `json:"published,omitempty"`
 	NotesURL  string `json:"notes_url,omitempty"`
 	// Asset is this machine's archive, empty when the newest manifest names none for it.
-	Asset Asset `json:"asset,omitempty"`
+	Asset Asset `json:"asset"`
 	// Available is true if a newer release with a compatible archive is available.
 	Available bool `json:"available"`
 	// CheckedAt is when the last check finished, in fixed-width UTC.
@@ -65,8 +65,8 @@ type State struct {
 	// is what the answer says installing would replace.
 	PreparedVersion string `json:"prepared_version,omitempty"`
 	PreparedSHA256  string `json:"prepared_sha256,omitempty"`
-	PreparedBytes   int64  `json:"prepared_bytes,omitempty"`
-	PreparedFiles   int    `json:"prepared_files,omitempty"`
+	PreparedBytes   int64  `json:"prepared_bytes,omitzero"`
+	PreparedFiles   int    `json:"prepared_files,omitzero"`
 	PreparedAt      string `json:"prepared_at,omitempty"`
 }
 

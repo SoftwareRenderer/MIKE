@@ -2,7 +2,8 @@ package lsp
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -74,12 +75,12 @@ type ExtensionLSPManager struct {
 	clients    map[string]*sandboxClient // workspaceKey → client state
 	// serverCh receives messages from all LSP servers. Sends wait for room to avoid
 	// dropping answers for waiting browsers.
-	serverCh chan json.RawMessage
+	serverCh chan jsontext.Value
 	// done closes at Close to stop blocked deliverToRouter calls.
 	done      chan struct{}
 	closeOnce sync.Once
 	// subscribers receive a copy of all LSP server messages (for filtered listening)
-	subscribers []chan json.RawMessage
+	subscribers []chan jsontext.Value
 	subMu       sync.Mutex
 }
 
@@ -189,7 +190,7 @@ func translateURIs(val any, workspacePath string, projectMounts map[string]strin
 
 // translateURIsMsg translates URIs in a JSON message; returns original if JSON is
 // invalid or marshal fails.
-func translateURIsMsg(msg json.RawMessage, workspacePath string, projectMounts map[string]string, toContainer bool) json.RawMessage {
+func translateURIsMsg(msg jsontext.Value, workspacePath string, projectMounts map[string]string, toContainer bool) jsontext.Value {
 	var data any
 	if err := json.Unmarshal(msg, &data); err != nil {
 		return msg
@@ -202,12 +203,12 @@ func translateURIsMsg(msg json.RawMessage, workspacePath string, projectMounts m
 }
 
 // translateURIsToContainer translates file URIs from host paths to container paths.
-func translateURIsToContainer(msg json.RawMessage, workspacePath string, projectMounts map[string]string) json.RawMessage {
+func translateURIsToContainer(msg jsontext.Value, workspacePath string, projectMounts map[string]string) jsontext.Value {
 	return translateURIsMsg(msg, workspacePath, projectMounts, true)
 }
 
 // translateURIsToHost translates file URIs from container paths back to host paths.
-func translateURIsToHost(msg json.RawMessage, workspacePath string, projectMounts map[string]string) json.RawMessage {
+func translateURIsToHost(msg jsontext.Value, workspacePath string, projectMounts map[string]string) jsontext.Value {
 	return translateURIsMsg(msg, workspacePath, projectMounts, false)
 }
 
@@ -223,15 +224,15 @@ func NewExtensionLSPManager(extStore *extensions.ExtensionStore, extSandbox *ext
 		extSandbox:  extSandbox,
 		projects:    projects,
 		clients:     make(map[string]*sandboxClient),
-		serverCh:    make(chan json.RawMessage, 256),
+		serverCh:    make(chan jsontext.Value, 256),
 		done:        make(chan struct{}),
-		subscribers: make([]chan json.RawMessage, 0),
+		subscribers: make([]chan jsontext.Value, 0),
 	}
 }
 
 // deliverToRouter hands a message to the router, waiting for room. Safe because
 // the router never blocks on a browser.
-func (m *ExtensionLSPManager) deliverToRouter(msg json.RawMessage) {
+func (m *ExtensionLSPManager) deliverToRouter(msg jsontext.Value) {
 	select {
 	case m.serverCh <- msg:
 	case <-m.done:
@@ -588,7 +589,7 @@ func (m *ExtensionLSPManager) sandboxMountPlan(ext *extensions.Extension, worksp
 
 // SendToServer sends a JSON-RPC message to the server and waits for the response, translating
 // file URIs host → container. The caller's deadline always wins over lspSendTimeout.
-func (m *ExtensionLSPManager) SendToServer(ctx context.Context, process *LSPProcess, msg json.RawMessage) error {
+func (m *ExtensionLSPManager) SendToServer(ctx context.Context, process *LSPProcess, msg jsontext.Value) error {
 	workspaceKey := processKey(process.Workspace, process.Language)
 
 	sc := m.liveClient(workspaceKey, false)
@@ -623,22 +624,22 @@ func (m *ExtensionLSPManager) SendToServer(ctx context.Context, process *LSPProc
 }
 
 // ServerMessageCh returns a channel that receives messages from LSP servers.
-func (m *ExtensionLSPManager) ServerMessageCh() <-chan json.RawMessage {
+func (m *ExtensionLSPManager) ServerMessageCh() <-chan jsontext.Value {
 	return m.serverCh
 }
 
 // Subscribe returns a channel that receives a copy of every server message; call Unsubscribe
 // when done. It is bidirectional so Unsubscribe can close it.
-func (m *ExtensionLSPManager) Subscribe() chan json.RawMessage {
+func (m *ExtensionLSPManager) Subscribe() chan jsontext.Value {
 	m.subMu.Lock()
 	defer m.subMu.Unlock()
-	ch := make(chan json.RawMessage, 64)
+	ch := make(chan jsontext.Value, 64)
 	m.subscribers = append(m.subscribers, ch)
 	return ch
 }
 
 // Unsubscribe removes a subscriber channel and closes it.
-func (m *ExtensionLSPManager) Unsubscribe(ch chan json.RawMessage) {
+func (m *ExtensionLSPManager) Unsubscribe(ch chan jsontext.Value) {
 	m.subMu.Lock()
 	defer m.subMu.Unlock()
 	for i, s := range m.subscribers {
@@ -651,7 +652,7 @@ func (m *ExtensionLSPManager) Unsubscribe(ch chan json.RawMessage) {
 }
 
 // broadcastToSubscribers sends a copy of the message to all subscribers.
-func (m *ExtensionLSPManager) broadcastToSubscribers(msg json.RawMessage) {
+func (m *ExtensionLSPManager) broadcastToSubscribers(msg jsontext.Value) {
 	m.subMu.Lock()
 	defer m.subMu.Unlock()
 	for _, sub := range m.subscribers {
@@ -771,7 +772,7 @@ func (m *ExtensionLSPManager) adaptProjectMounts(workspacePath, wsContainerPath 
 // LSPRequest makes a synchronous JSON-RPC request to the server that handles the given file
 // and returns the raw JSON response. ctx bounds every step: a stopped task must not keep
 // talking to the server.
-func (m *ExtensionLSPManager) LSPRequest(ctx context.Context, workspacePath, filePath, method string, params any) (json.RawMessage, error) {
+func (m *ExtensionLSPManager) LSPRequest(ctx context.Context, workspacePath, filePath, method string, params any) (jsontext.Value, error) {
 	ext, err := m.lookupExtensionByFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("no LSP extension for file %q: %w", filePath, err)

@@ -6,7 +6,7 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"os/exec"
@@ -63,7 +63,7 @@ type RunnerConfig struct {
 	WorktreePath  string                  `json:"worktree_path"`
 	Sandbox       bool                    `json:"sandbox"`
 	Config        map[string]any          `json:"config,omitempty"`
-	AgentManifest *extensions.AgentConfig `json:"agent_manifest,omitempty"`
+	AgentManifest *extensions.AgentConfig `json:"agent_manifest,omitzero"`
 }
 
 // RunnerDeps is one agent run. Its three string fields are interchangeable to the compiler, so a call

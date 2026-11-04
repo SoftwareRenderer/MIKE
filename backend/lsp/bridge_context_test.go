@@ -2,7 +2,8 @@ package lsp
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"io"
 	"testing"
 	"time"
@@ -37,7 +38,7 @@ func wedgedManager(t *testing.T) (*ExtensionLSPManager, *LSPProcess) {
 	t.Helper()
 	m := &ExtensionLSPManager{
 		clients:  map[string]*sandboxClient{},
-		serverCh: make(chan json.RawMessage, 1),
+		serverCh: make(chan jsontext.Value, 1),
 	}
 	m.clients[processKey("/work/tree", "go")] = newSandboxClient(wedgedBridge(t), "/work/tree", "go", "ext-1", nil)
 	return m, &LSPProcess{Workspace: "/work/tree", Language: "go"}
@@ -72,7 +73,7 @@ func TestSendReturnsOnCancelledContext(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- m.SendToServer(ctx, proc, json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`))
+		done <- m.SendToServer(ctx, proc, jsontext.Value(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`))
 	}()
 
 	select {

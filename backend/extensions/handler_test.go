@@ -3,7 +3,8 @@ package extensions
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -76,7 +77,7 @@ func TestHandleList_Empty(t *testing.T) {
 	}
 
 	var result []ExtensionResponse
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+	if err := json.UnmarshalRead(w.Body, &result); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if len(result) != 0 {
@@ -104,7 +105,7 @@ func TestHandleList_WithExtensions(t *testing.T) {
 	}
 
 	var result []ExtensionResponse
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+	if err := json.UnmarshalRead(w.Body, &result); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if len(result) != 2 {
@@ -153,7 +154,7 @@ func TestHandleList_SortedByPriority(t *testing.T) {
 	}
 
 	var result []ExtensionResponse
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+	if err := json.UnmarshalRead(w.Body, &result); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if len(result) != 3 {
@@ -189,7 +190,7 @@ func TestHandleList_SamePriority_SortedByName(t *testing.T) {
 	h.HandleList(w, req)
 
 	var result []ExtensionResponse
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+	if err := json.UnmarshalRead(w.Body, &result); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if len(result) != 3 {
@@ -225,7 +226,7 @@ func TestHandleGet_Found(t *testing.T) {
 	}
 
 	var result ExtensionResponse
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+	if err := json.UnmarshalRead(w.Body, &result); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if result.Name != "test-extension" {
@@ -270,7 +271,7 @@ func TestHandleUpdate(t *testing.T) {
 	}
 
 	var result ExtensionResponse
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+	if err := json.UnmarshalRead(w.Body, &result); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if result.Version != "2.0.0" {
@@ -771,7 +772,7 @@ func TestHandleLocalExtensions(t *testing.T) {
 	}
 
 	var result RegistryIndex
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+	if err := json.UnmarshalRead(w.Body, &result); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if len(result) != 2 {
@@ -829,7 +830,7 @@ func TestHandleLocalExtensions_EmptyDir(t *testing.T) {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
 	var result RegistryIndex
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+	if err := json.UnmarshalRead(w.Body, &result); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if len(result) != 0 {
@@ -849,7 +850,7 @@ func TestHandleRegistryIndex_WithMock(t *testing.T) {
 	}
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(index)
+		json.MarshalWrite(w, index)
 	}))
 	defer mockServer.Close()
 
@@ -866,7 +867,7 @@ func TestHandleRegistryIndex_WithMock(t *testing.T) {
 	}
 
 	var result RegistryIndex
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+	if err := json.UnmarshalRead(w.Body, &result); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if len(result) != 1 {
@@ -920,7 +921,7 @@ func TestHandleInstall_Success(t *testing.T) {
 	}
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(index)
+		json.MarshalWrite(w, index)
 	}))
 	defer mockServer.Close()
 
@@ -1168,7 +1169,7 @@ func TestHandleInstall_GitPinned(t *testing.T) {
 	}
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(index)
+		json.MarshalWrite(w, index)
 	}))
 	defer mockServer.Close()
 
@@ -1230,7 +1231,7 @@ func TestHandleInstall_GitPinned_FailsOnBadCommit(t *testing.T) {
 	}
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(index)
+		json.MarshalWrite(w, index)
 	}))
 	defer mockServer.Close()
 
@@ -1278,7 +1279,7 @@ func TestHandleCheckUpdates_CommitChange(t *testing.T) {
 	}
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(index)
+		json.MarshalWrite(w, index)
 	}))
 	defer mockServer.Close()
 
@@ -1297,7 +1298,7 @@ func TestHandleCheckUpdates_CommitChange(t *testing.T) {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
 	var result []ExtensionUpdate
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+	if err := json.UnmarshalRead(w.Body, &result); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if len(result) != 1 {
@@ -1319,7 +1320,7 @@ func TestHandleCheckUpdates_NoCommitChange(t *testing.T) {
 	}
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(index)
+		json.MarshalWrite(w, index)
 	}))
 	defer mockServer.Close()
 
@@ -1335,7 +1336,7 @@ func TestHandleCheckUpdates_NoCommitChange(t *testing.T) {
 	h.HandleCheckUpdates(w, req)
 
 	var result []ExtensionUpdate
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+	if err := json.UnmarshalRead(w.Body, &result); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if len(result) != 0 {
@@ -1397,7 +1398,7 @@ func TestHandleCheckUpdates_Changelog(t *testing.T) {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
 	var result []ExtensionUpdate
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+	if err := json.UnmarshalRead(w.Body, &result); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if len(result) != 1 {
@@ -1440,7 +1441,7 @@ func TestHandleCheckUpdates_ChangelogNoMatchingHash(t *testing.T) {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
 	var result []ExtensionUpdate
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+	if err := json.UnmarshalRead(w.Body, &result); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if len(result) != 1 {
@@ -1477,7 +1478,7 @@ func TestHandleCheckUpdates_ChangelogFetchFails(t *testing.T) {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
 	var result []ExtensionUpdate
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+	if err := json.UnmarshalRead(w.Body, &result); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if len(result) != 1 {
@@ -1515,7 +1516,7 @@ func TestHandleCheckUpdates_NoChangelogForVersionUpdate(t *testing.T) {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
 	var result []ExtensionUpdate
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+	if err := json.UnmarshalRead(w.Body, &result); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if len(result) != 1 {
@@ -1546,7 +1547,7 @@ func TestHandleCheckUpdates_NewPermissions(t *testing.T) {
 	}
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(index)
+		json.MarshalWrite(w, index)
 	}))
 	defer mockServer.Close()
 
@@ -1568,7 +1569,7 @@ func TestHandleCheckUpdates_NewPermissions(t *testing.T) {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
 	var result []ExtensionUpdate
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+	if err := json.UnmarshalRead(w.Body, &result); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if len(result) != 1 {
@@ -1612,7 +1613,7 @@ func TestHandleCheckUpdates_DomainsAdded(t *testing.T) {
 	}
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(index)
+		json.MarshalWrite(w, index)
 	}))
 	defer mockServer.Close()
 
@@ -1642,7 +1643,7 @@ func TestHandleCheckUpdates_DomainsAdded(t *testing.T) {
 	h.HandleCheckUpdates(w, req)
 
 	var result []ExtensionUpdate
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+	if err := json.UnmarshalRead(w.Body, &result); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	byName := make(map[string]ExtensionUpdate, len(result))
@@ -1683,7 +1684,7 @@ func TestHandleInstall_FallbackCopiesLicenseURL(t *testing.T) {
 	}
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(index)
+		json.MarshalWrite(w, index)
 	}))
 	defer mockServer.Close()
 
@@ -1729,7 +1730,7 @@ func TestHandleInstall_AlreadyInstalled(t *testing.T) {
 	}
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(index)
+		json.MarshalWrite(w, index)
 	}))
 	defer mockServer.Close()
 
@@ -1767,7 +1768,7 @@ func TestHandleInstall_AlreadyInstalled_TimestampedID(t *testing.T) {
 	}
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(index)
+		json.MarshalWrite(w, index)
 	}))
 	defer mockServer.Close()
 
@@ -1799,7 +1800,7 @@ func TestHandleInstall_DuplicateInFlight(t *testing.T) {
 	}
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(index)
+		json.MarshalWrite(w, index)
 	}))
 	defer mockServer.Close()
 
@@ -1829,7 +1830,7 @@ func TestHandleInstall_CompletesAfterClientDisconnect(t *testing.T) {
 	}
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(index)
+		json.MarshalWrite(w, index)
 	}))
 	defer mockServer.Close()
 
@@ -1893,7 +1894,7 @@ func TestHandleUpdateImage_StreamsProgress(t *testing.T) {
 	}
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(index)
+		json.MarshalWrite(w, index)
 	}))
 	defer mockServer.Close()
 
@@ -1954,7 +1955,7 @@ func newHostUpdateFixture(t *testing.T) (*ExtensionHandler, *Extension, string) 
 	}}
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(index)
+		json.MarshalWrite(w, index)
 	}))
 	t.Cleanup(mockServer.Close)
 
@@ -2038,6 +2039,29 @@ func TestHandleUpdateImage_MalformedBody(t *testing.T) {
 	}
 }
 
+// A body that stops half way is a bad request, and a body that never arrived is not. The reader cannot
+// tell them apart — both arrive as io.ErrUnexpectedEOF — so the handler decides from the bytes.
+func TestHandleUpdateImage_TruncatedBodyRefusedEmptyBodyAccepted(t *testing.T) {
+	h, ext, _ := newHostUpdateFixture(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/extensions/"+ext.ID+"/update",
+		strings.NewReader(`{"acknowledge_new_domains":tr`))
+	w := httptest.NewRecorder()
+	h.HandleUpdateImage(w, req, ext.ID)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("a half-written body got %d, want 400: %s", w.Code, w.Body.String())
+	}
+	if guardHolds(h.inFlightOps, ext.Name) {
+		t.Error("the in-flight guard was taken for a request that was refused")
+	}
+
+	// No body at all is an ordinary update that sent no acknowledgment, which is what `{}` means too.
+	last := postUpdate(t, h, ext.ID, "")
+	if !last.Done || last.Error == "" {
+		t.Errorf("an empty body stopped meaning 'no acknowledgment': %+v", last)
+	}
+}
+
 func TestHandleUpdateImage_NewHostAcknowledged(t *testing.T) {
 	h, ext, _ := newHostUpdateFixture(t)
 
@@ -2081,7 +2105,7 @@ func TestHandleCheckUpdates_NoUpdates(t *testing.T) {
 	}
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(index)
+		json.MarshalWrite(w, index)
 	}))
 	defer mockServer.Close()
 
@@ -2103,7 +2127,7 @@ func TestHandleCheckUpdates_NoUpdates(t *testing.T) {
 	}
 
 	var result []ExtensionUpdate
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+	if err := json.UnmarshalRead(w.Body, &result); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if len(result) != 0 {
@@ -2122,7 +2146,7 @@ func TestHandleCheckUpdates_UpdateAvailable(t *testing.T) {
 	}
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(index)
+		json.MarshalWrite(w, index)
 	}))
 	defer mockServer.Close()
 
@@ -2144,7 +2168,7 @@ func TestHandleCheckUpdates_UpdateAvailable(t *testing.T) {
 	}
 
 	var result []ExtensionUpdate
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+	if err := json.UnmarshalRead(w.Body, &result); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if len(result) != 1 {
@@ -2247,9 +2271,9 @@ func TestHandleStorage_List(t *testing.T) {
 	if err := h.store.Create(ext); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	h.store.StorageSet("test-ext", "ns", "abc", json.RawMessage(`1`))
-	h.store.StorageSet("test-ext", "ns", "abd", json.RawMessage(`2`))
-	h.store.StorageSet("test-ext", "ns", "x", json.RawMessage(`3`))
+	h.store.StorageSet("test-ext", "ns", "abc", jsontext.Value(`1`))
+	h.store.StorageSet("test-ext", "ns", "abd", jsontext.Value(`2`))
+	h.store.StorageSet("test-ext", "ns", "x", jsontext.Value(`3`))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/extensions/test-ext/storage?namespace=ns&prefix=ab", nil)
 	w := httptest.NewRecorder()
@@ -2298,8 +2322,8 @@ func TestHandleDelete_CleansStorage(t *testing.T) {
 	if err := h.store.Create(ext); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	h.store.StorageSet("test-ext", "p:proj1", "tags", json.RawMessage(`["a"]`))
-	h.store.StorageSet("test-ext", "global", "prefs", json.RawMessage(`{"x":1}`))
+	h.store.StorageSet("test-ext", "p:proj1", "tags", jsontext.Value(`["a"]`))
+	h.store.StorageSet("test-ext", "global", "prefs", jsontext.Value(`{"x":1}`))
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/extensions/test-ext", nil)
 	w := httptest.NewRecorder()
@@ -2531,7 +2555,7 @@ func TestHandleInstall_RefusesALanguageServerWithNoImage(t *testing.T) {
 	}
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(index)
+		json.MarshalWrite(w, index)
 	}))
 	defer mockServer.Close()
 
@@ -2583,7 +2607,7 @@ func TestHandleInstall_BuildFailureLeavesNoRowAndNoFiles(t *testing.T) {
 	}}
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(index)
+		json.MarshalWrite(w, index)
 	}))
 	defer mockServer.Close()
 

@@ -7,7 +7,8 @@ package extensions
 
 import (
 	"cmp"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"mike/backend/types"
 	"net/url"
 	"slices"
@@ -35,9 +36,9 @@ const maxExtensionValueBytes = 64 * 1024
 
 // KVEntry is a single key/value pair in an extension's scoped storage.
 type KVEntry struct {
-	Key       string          `json:"key"`
-	Value     json.RawMessage `json:"value"`
-	UpdatedAt string          `json:"updated_at"`
+	Key       string         `json:"key"`
+	Value     jsontext.Value `json:"value"`
+	UpdatedAt string         `json:"updated_at"`
 }
 
 // Extension represents an installed extension in the system.
@@ -80,23 +81,23 @@ type ExtensionManifest struct {
 	LicenseURL   string        `json:"license_url,omitempty"`
 	Version      string        `json:"version"`
 	Priority     int           `json:"priority"` // loading order: lower values load first (default 0)
-	ConfigSchema *ConfigSchema `json:"config_schema,omitempty"`
-	Capabilities *Capabilities `json:"capabilities,omitempty"`
+	ConfigSchema *ConfigSchema `json:"config_schema,omitzero"`
+	Capabilities *Capabilities `json:"capabilities,omitzero"`
 	Image        string        `json:"image,omitempty"`
 }
 
 // Capabilities groups the functional capabilities an extension provides.
 type Capabilities struct {
-	LSP     *LSPConfig     `json:"lsp,omitempty"`
-	UI      *UIConfig      `json:"ui,omitempty"`
-	CSS     *CSSConfig     `json:"css,omitempty"`
-	Agent   *AgentConfig   `json:"agent,omitempty"`
-	Network *NetworkConfig `json:"network,omitempty"` // server-side network capability
-	LLM     *LLMConfig     `json:"llm,omitempty"`     // provider request adaptation
-	I18N    *I18NConfig    `json:"i18n,omitempty"`    // data-only translation pack (UI catalog + prompt templates)
+	LSP     *LSPConfig     `json:"lsp,omitzero"`
+	UI      *UIConfig      `json:"ui,omitzero"`
+	CSS     *CSSConfig     `json:"css,omitzero"`
+	Agent   *AgentConfig   `json:"agent,omitzero"`
+	Network *NetworkConfig `json:"network,omitzero"` // server-side network capability
+	LLM     *LLMConfig     `json:"llm,omitzero"`     // provider request adaptation
+	I18N    *I18NConfig    `json:"i18n,omitzero"`    // data-only translation pack (UI catalog + prompt templates)
 	// Declaring tools makes the extension's type `tool`, and that column is how the executor finds the
 	// row, so a manifest pairing tools with another executing capability is refused.
-	Tools []ToolConfig `json:"tools,omitempty"`
+	Tools []ToolConfig `json:"tools,omitzero"`
 }
 
 // GetLSP returns the LSP capability, or nil if not present.
@@ -214,15 +215,15 @@ type LSPConfig struct {
 	// connection), so the server only stores and serves it — there is no
 	// server-side reader. Independent of ToolCallsEnabled, which the executor
 	// checks server-side for the agent's LSP tools.
-	EditorEnabled *bool `json:"editor_enabled,omitempty"`
+	EditorEnabled *bool `json:"editor_enabled,omitzero"`
 	// ToolCallsEnabled controls whether LSP tools (references, definition,
 	// rename, hover) are available to agent tool calls. Nil or true = enabled.
-	ToolCallsEnabled *bool `json:"tool_calls_enabled,omitempty"`
+	ToolCallsEnabled *bool `json:"tool_calls_enabled,omitzero"`
 	// ChatDiagnosticsEnabled controls the turn-boundary pass that hands the files a turn
 	// edited to their language server
-	ChatDiagnosticsEnabled *bool `json:"chat_diagnostics_enabled,omitempty"`
+	ChatDiagnosticsEnabled *bool `json:"chat_diagnostics_enabled,omitzero"`
 	// Sandbox declares default sandbox options (writable mounts, envs, memory).
-	Sandbox *SandboxConfig `json:"sandbox,omitempty"`
+	Sandbox *SandboxConfig `json:"sandbox,omitzero"`
 }
 
 // IsToolCallsEnabled returns true if LSP tool calls are enabled.
@@ -259,7 +260,7 @@ type SyntaxSpec struct {
 	LineComment string `json:"line_comment,omitempty"`
 	// LineComments are extra line-comment markers where a language has more than one (PHP: "//" and "#").
 	LineComments []string      `json:"line_comments,omitempty"`
-	BlockComment *CommentToken `json:"block_comment,omitempty"`
+	BlockComment *CommentToken `json:"block_comment,omitzero"`
 	Strings      []StringToken `json:"strings,omitempty"`
 	// Pairs are the brackets, and the input to the generic fold provider.
 	Pairs     []CommentToken `json:"pairs,omitempty"`
@@ -267,15 +268,15 @@ type SyntaxSpec struct {
 	Types     []string       `json:"types,omitempty"`
 	Constants []string       `json:"constants,omitempty"`
 	Builtins  []string       `json:"builtins,omitempty"`
-	Numbers   bool           `json:"numbers,omitempty"`
-	Region    *CommentToken  `json:"region,omitempty"`
+	Numbers   bool           `json:"numbers,omitzero"`
+	Region    *CommentToken  `json:"region,omitzero"`
 	// CapitalizedTypes colors an identifier whose first letter is upper-case as a type name — Go's
 	// exported `ChatMessage`, a JS class. Pointer because the answer defaults to true when the manifest
 	// says nothing, and a plain bool with omitempty would drop an author's explicit false on the way
 	// back out and hand the browser the default instead of the refusal.
-	CapitalizedTypes *bool `json:"capitalized_types,omitempty"`
+	CapitalizedTypes *bool `json:"capitalized_types,omitzero"`
 	// CallAsFunction colors a name applied to arguments (`name(`) as a function name. Same default.
-	CallAsFunction *bool `json:"call_as_function,omitempty"`
+	CallAsFunction *bool `json:"call_as_function,omitzero"`
 }
 
 // CommentToken is an open/close delimiter pair: a block comment, a bracket pair or a region marker.
@@ -288,8 +289,8 @@ type CommentToken struct {
 // it honours backslash escapes, and whether it may span lines.
 type StringToken struct {
 	Quote     string `json:"quote"`
-	Escapes   bool   `json:"escapes,omitempty"`
-	Multiline bool   `json:"multiline,omitempty"`
+	Escapes   bool   `json:"escapes,omitzero"`
+	Multiline bool   `json:"multiline,omitzero"`
 }
 
 // fileSuffix normalizes a path or file name to the bare lowercase suffix file types match on.
@@ -381,7 +382,7 @@ type ToolConfig struct {
 	Request    ToolRequest    `json:"request"`
 	Response   ToolResponse   `json:"response"`
 	// Withholds this tool from the agent while the extension stays installed.
-	ToolCallsEnabled *bool `json:"tool_calls_enabled,omitempty"`
+	ToolCallsEnabled *bool `json:"tool_calls_enabled,omitzero"`
 }
 
 // IsToolCallsEnabled reports whether the tool is offered. Nil means offered.
@@ -402,7 +403,7 @@ type ToolRequest struct {
 	URL   string            `json:"url"`
 	Query map[string]string `json:"query,omitempty"`
 	// Bounds one upstream round trip. Zero is the default, not no timeout.
-	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
+	TimeoutSeconds int `json:"timeout_seconds,omitzero"`
 }
 
 // ToolField is one line of a rendered result: the label the agent sees and the key it reads.
@@ -419,18 +420,18 @@ type ToolResponse struct {
 	Fields []ToolField `json:"fields"`
 	Total  string      `json:"total,omitempty"`
 	// Always capped, whatever the manifest asks: the answer spends the model's context.
-	MaxResults      int `json:"max_results,omitempty"`
-	MaxSnippetChars int `json:"max_snippet_chars,omitempty"`
+	MaxResults      int `json:"max_results,omitzero"`
+	MaxSnippetChars int `json:"max_snippet_chars,omitzero"`
 }
 
 // AgentConfig defines agent-specific extension configuration.
 // The agent adapter (WASM module) handles all protocol details.
 type AgentConfig struct {
-	WasmModule   string              `json:"wasm_module,omitempty"`   // path to WASM adapter module (relative to extension dir)
-	Description  string              `json:"description,omitempty"`   // short description shown in provider card (markdown)
-	SetupInfo    string              `json:"setup_info,omitempty"`    // setup instructions shown in provider card (markdown, newline-separated items)
-	ConfigSchema *ConfigSchema       `json:"config_schema,omitempty"` // user-configurable options
-	Sandbox      *types.AgentSandbox `json:"sandbox,omitempty"`       // default mounts and envs for sandbox containers
+	WasmModule   string              `json:"wasm_module,omitempty"`  // path to WASM adapter module (relative to extension dir)
+	Description  string              `json:"description,omitempty"`  // short description shown in provider card (markdown)
+	SetupInfo    string              `json:"setup_info,omitempty"`   // setup instructions shown in provider card (markdown, newline-separated items)
+	ConfigSchema *ConfigSchema       `json:"config_schema,omitzero"` // user-configurable options
+	Sandbox      *types.AgentSandbox `json:"sandbox,omitzero"`       // default mounts and envs for sandbox containers
 }
 
 // ResolveSandboxTemplates resolves {{property_name}} templates in Sandbox using ConfigSchema defaults.
@@ -524,7 +525,7 @@ type ConfigSchema struct {
 // where keys are property names) or a JSON array (internal representation).
 func (s *ConfigSchema) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		Properties json.RawMessage `json:"properties,omitempty"`
+		Properties jsontext.Value `json:"properties,omitempty"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -583,11 +584,11 @@ type SchemaProp struct {
 	Type        string   `json:"type"`
 	Title       string   `json:"title,omitempty"`
 	Description string   `json:"description,omitempty"`
-	Default     any      `json:"default,omitempty"`
-	Minimum     *float64 `json:"minimum,omitempty"`
-	Maximum     *float64 `json:"maximum,omitempty"`
+	Default     any      `json:"default,omitzero"`
+	Minimum     *float64 `json:"minimum,omitzero"`
+	Maximum     *float64 `json:"maximum,omitzero"`
 	Enum        []any    `json:"enum,omitempty"`
-	Sensitive   bool     `json:"sensitive,omitempty"` // if true, value is encrypted at rest
+	Sensitive   bool     `json:"sensitive,omitzero"` // if true, value is encrypted at rest
 }
 
 // ContainerConfig defines how the extension container is built/run.
@@ -611,7 +612,7 @@ type SandboxConfig struct {
 	// Environment says how to tell whether this server can answer at all in this workspace
 	// (a missing dependency root, a cold cache). When it cannot, the suppressed diagnostic
 	// codes are the server guessing, and core does not forward them to the model.
-	Environment *EnvironmentGate `json:"environment,omitempty"`
+	Environment *EnvironmentGate `json:"environment,omitzero"`
 	// ReloadFiles are workspace-relative paths whose change means the language
 	// server has to re-read the project (a go.mod, a lockfile). A server sees no
 	// file-watch events through a bind mount, so the turn's changed-file list is
@@ -619,7 +620,7 @@ type SandboxConfig struct {
 	ReloadFiles []string `json:"reload_files,omitempty"`
 	// Dependency names where this server reads its resolved dependencies from, so the host can
 	// supply them without being told where to look. Manifest data.
-	Dependency *DependencyCache `json:"dependency_cache,omitempty"`
+	Dependency *DependencyCache `json:"dependency_cache,omitzero"`
 	// DependencyHostPath is the host directory the user granted for that cache. It lives
 	// beside the declaration, not inside it, so the two origins stay distinguishable in the stored
 	// record: a manifest declares a path in its own container, a human names a directory on this
@@ -733,12 +734,12 @@ type RegistryEntry struct {
 	DisplayName   string        `json:"display_name"`
 	Description   string        `json:"description"`
 	Author        string        `json:"author"`
-	Featured      bool          `json:"featured,omitempty"`
+	Featured      bool          `json:"featured,omitzero"`
 	Homepage      string        `json:"homepage,omitempty"`
 	LicenseURL    string        `json:"license_url,omitempty"`
 	Image         string        `json:"image,omitempty"`          // OCI image reference
 	DockerfileURL string        `json:"dockerfile_url,omitempty"` // URL to Dockerfile
-	Capabilities  *Capabilities `json:"capabilities,omitempty"`   // capability config (mirrors manifest)
+	Capabilities  *Capabilities `json:"capabilities,omitzero"`    // capability config (mirrors manifest)
 	Repo          string        `json:"repo,omitempty"`
 	Commit        string        `json:"commit,omitempty"`
 	Subdir        string        `json:"subdir,omitempty"`

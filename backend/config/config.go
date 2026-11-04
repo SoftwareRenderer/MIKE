@@ -4,7 +4,7 @@
 package config
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -570,16 +570,16 @@ type configResponse struct {
 	DefaultAutoMerge              *bool                    `json:"default_auto_merge"`
 	DefaultSubtasksAutoMerge      *bool                    `json:"default_subtasks_auto_merge"`
 	DefaultOperatingMode          *string                  `json:"default_operating_mode"`
-	DefaultMaxFailedTurns         *int                     `json:"default_max_failed_turns,omitempty"`
-	DefaultAutoSummarizeThreshold *int                     `json:"default_auto_summarize_threshold,omitempty"`
-	HideModelBadge                *bool                    `json:"hide_model_badge,omitempty"`
-	UpdateCheckEnabled            *bool                    `json:"update_check_enabled,omitempty"`
-	RunSiblingsParallel           *bool                    `json:"run_siblings_parallel,omitempty"`
-	SortOldestFirst               *bool                    `json:"sort_oldest_first,omitempty"`
-	AutoMaximizeChatMobile        *bool                    `json:"auto_maximize_chat_mobile,omitempty"`
-	ReclaimIdleSandbox            *bool                    `json:"reclaim_idle_sandbox,omitempty"`
-	LoopBreaker                   *bool                    `json:"loop_breaker,omitempty"`
-	KeyboardShortcuts             *types.KeyboardShortcuts `json:"keyboard_shortcuts,omitempty"`
+	DefaultMaxFailedTurns         *int                     `json:"default_max_failed_turns,omitzero"`
+	DefaultAutoSummarizeThreshold *int                     `json:"default_auto_summarize_threshold,omitzero"`
+	HideModelBadge                *bool                    `json:"hide_model_badge,omitzero"`
+	UpdateCheckEnabled            *bool                    `json:"update_check_enabled,omitzero"`
+	RunSiblingsParallel           *bool                    `json:"run_siblings_parallel,omitzero"`
+	SortOldestFirst               *bool                    `json:"sort_oldest_first,omitzero"`
+	AutoMaximizeChatMobile        *bool                    `json:"auto_maximize_chat_mobile,omitzero"`
+	ReclaimIdleSandbox            *bool                    `json:"reclaim_idle_sandbox,omitzero"`
+	LoopBreaker                   *bool                    `json:"loop_breaker,omitzero"`
+	KeyboardShortcuts             *types.KeyboardShortcuts `json:"keyboard_shortcuts,omitzero"`
 	// MCPServers is the registry with every header value masked. A project's own selection is on the
 	// project row, not here.
 	MCPServers []types.MCPServer `json:"mcp_servers,omitempty"`

@@ -10,7 +10,7 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"maps"
 	"os"
@@ -105,90 +105,120 @@ func LoadCatalog(path string) (*Catalog, error) {
 	}
 }
 
-// loadJSONCatalog walks the token stream rather than unmarshalling into a map, because
-// encoding/json silently keeps the last of a duplicate key — the exact failure this checks for.
+// loadJSONCatalog walks the value tree rather than unmarshalling into a map, because a repeated
+// member name — the exact failure this checks for — is refused by the grammar before any caller can
+// say which key repeated and where. The walk asks for the grammar that keeps duplicates so it can
+// name them.
 func loadJSONCatalog(path string, raw []byte) (*Catalog, error) {
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
 	c := &Catalog{Path: path, Values: map[string]string{}, Tables: map[string]map[string]string{}}
-
-	// decodeObject reads the members of an object whose '{' has already been consumed.
-	var decodeObject func(prefix string) error
-	decodeObject = func(prefix string) error {
-		seen := map[string]bool{}
-		members := map[string]string{} // member name -> value, for the string members only
-		notATable := false             // a member that is not a plain string value
-		for dec.More() {
-			kt, err := dec.Token()
-			if err != nil {
-				return err
-			}
-			key, ok := kt.(string)
-			if !ok {
-				return fmt.Errorf("expected an object key, found %v", kt)
-			}
-			full := key
-			if prefix != "" {
-				full = prefix + "." + key
-			}
-			if seen[key] {
-				c.Duplicates = append(c.Duplicates, full)
-			}
-			seen[key] = true
-
-			nt, err := dec.Token()
-			if err != nil {
-				return err
-			}
-			if d, isDelim := nt.(json.Delim); isDelim && d == '{' {
-				members[key] = ""
-				notATable = true
-				if err := decodeObject(full); err != nil {
-					return err
-				}
-				continue
-			}
-			if d, isDelim := nt.(json.Delim); isDelim && d == '[' {
-				members[key] = ""
-				notATable = true
-				c.Notes = append(c.Notes, fmt.Sprintf("%s: value is an array, which cannot be a message", full))
-				if err := skipValue(dec); err != nil {
-					return err
-				}
-				continue
-			}
-			switch v := nt.(type) {
-			case string:
-				members[key] = v
-				c.set(full, v)
-			case json.Number, bool, nil:
-				members[key] = ""
-				notATable = true
-				c.Values[full] = fmt.Sprint(v)
-				c.Notes = append(c.Notes, fmt.Sprintf("%s: value is %v, not a string — message values must be quoted", full, v))
-			default:
-				return fmt.Errorf("%s: unexpected value %v", full, nt)
-			}
-		}
-		_, err := dec.Token() // consume '}'
-		if prefix != "" && !notATable && isPluralTable(members, false) {
-			c.recordTable(prefix, members)
-		}
-		return err
-	}
-
-	tok, err := dec.Token()
+	dec := jsontext.NewDecoder(bytes.NewReader(raw), jsontext.AllowDuplicateNames(true))
+	top, err := dec.ReadValue()
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	if d, ok := tok.(json.Delim); !ok || d != '{' {
-		return nil, fmt.Errorf("%s: expected a JSON object of messages, found %v", path, tok)
+	if top.Kind() != jsontext.KindBeginObject {
+		return nil, fmt.Errorf("%s: expected a JSON object of messages, found %s", path, top.Kind())
 	}
-	if err := decodeObject(""); err != nil {
+	if err := walkObject(c, "", top.Clone()); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	c.Duplicates = dedupe(c.Duplicates)
 	return c, nil
+}
+
+// objectMember is one member of a JSON object, kept in the order it was written.
+type objectMember struct {
+	Name  string
+	Value jsontext.Value
+}
+
+// membersOf lists an object's members in the order they were written, a repeated name included.
+func membersOf(v jsontext.Value) ([]objectMember, error) {
+	dec := jsontext.NewDecoder(bytes.NewReader(v), jsontext.AllowDuplicateNames(true))
+	if _, err := dec.ReadToken(); err != nil { // the '{'
+		return nil, err
+	}
+	var out []objectMember
+	for dec.PeekKind() != jsontext.KindEndObject {
+		name, err := dec.ReadToken()
+		if err != nil {
+			return nil, err
+		}
+		if name.Kind() != jsontext.KindString {
+			return nil, fmt.Errorf("expected an object key, found %s", name.Kind())
+		}
+		// The token's text is the decoder's buffer, voided by the next call: read the name now.
+		key := name.String()
+		value, err := dec.ReadValue()
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, objectMember{Name: key, Value: value.Clone()})
+	}
+	if _, err := dec.ReadToken(); err != nil { // the '}'
+		return nil, err
+	}
+	return out, nil
+}
+
+// unquoted reads the text a JSON string value holds, given its encoded form. A token names the same
+// text already decoded; a value carries the bytes as they were written.
+func unquoted(raw string) (string, error) {
+	text, err := jsontext.AppendUnquote(nil, []byte(raw))
+	if err != nil {
+		return "", err
+	}
+	return string(text), nil
+}
+
+// walkObject records one object's members under prefix and descends into the objects among them.
+func walkObject(c *Catalog, prefix string, v jsontext.Value) error {
+	members, err := membersOf(v)
+	if err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	byName := map[string]string{} // member name -> value, for the string members only
+	notATable := false            // a member that is not a plain string value
+	for _, m := range members {
+		full := m.Name
+		if prefix != "" {
+			full = prefix + "." + m.Name
+		}
+		if seen[m.Name] {
+			c.Duplicates = append(c.Duplicates, full)
+		}
+		seen[m.Name] = true
+
+		switch m.Value.Kind() {
+		case jsontext.KindBeginObject:
+			byName[m.Name] = ""
+			notATable = true
+			if err := walkObject(c, full, m.Value); err != nil {
+				return err
+			}
+		case jsontext.KindBeginArray:
+			byName[m.Name] = ""
+			notATable = true
+			c.Notes = append(c.Notes, fmt.Sprintf("%s: value is an array, which cannot be a message", full))
+		case jsontext.KindString:
+			text, err := unquoted(string(m.Value))
+			if err != nil {
+				return err
+			}
+			byName[m.Name] = text
+			c.set(full, text)
+		default:
+			byName[m.Name] = ""
+			notATable = true
+			c.Values[full] = string(m.Value)
+			c.Notes = append(c.Notes, fmt.Sprintf("%s: value is %s, not a string — message values must be quoted", full, m.Value))
+		}
+	}
+	if prefix != "" && !notATable && isPluralTable(byName, false) {
+		c.recordTable(prefix, byName)
+	}
+	return nil
 }
 
 // dedupe keeps a repeated key reported once even when two rules both noticed it.
@@ -202,32 +232,6 @@ func dedupe(in []string) []string {
 		}
 	}
 	return out
-}
-
-// skipValue consumes a value the caller has decided not to keep, including nested containers.
-func skipValue(dec *json.Decoder) error {
-	depth := 0
-	for {
-		tok, err := dec.Token()
-		if err != nil {
-			return err
-		}
-		if d, ok := tok.(json.Delim); ok {
-			switch d {
-			case '[', '{':
-				depth++
-			case ']', '}':
-				depth--
-				if depth == 0 {
-					return nil
-				}
-			}
-			continue
-		}
-		if depth == 0 {
-			return nil
-		}
-	}
 }
 
 func (c *Catalog) set(key, value string) {

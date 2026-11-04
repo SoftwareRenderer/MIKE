@@ -5,7 +5,7 @@ package extensions
 // readable sentence, and what a manifest is never allowed to supply.
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"os"

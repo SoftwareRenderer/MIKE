@@ -2,7 +2,7 @@ package exec
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -25,7 +25,7 @@ func mockAnswerLLM(answer string) *httptest.Server {
 				Role string `json:"role"`
 			} `json:"messages"`
 		}
-		_ = json.NewDecoder(r.Body).Decode(&req)
+		_ = json.UnmarshalRead(r.Body, &req)
 		hasUser := false
 		for _, m := range req.Messages {
 			if m.Role == "user" {
@@ -43,7 +43,7 @@ func mockAnswerLLM(answer string) *httptest.Server {
 			"choices": []any{map[string]any{"message": map[string]any{"content": answer}}},
 			"usage":   map[string]any{"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
 		}
-		_ = json.NewEncoder(w).Encode(resp)
+		_ = json.MarshalWrite(w, resp)
 	}))
 }
 

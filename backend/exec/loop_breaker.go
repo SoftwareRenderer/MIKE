@@ -5,7 +5,7 @@ package exec
 // is asked again. The truncation belongs to the server's delete path — see Deps.RewindConversation.
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"slices"
 
 	"mike/backend/types"

@@ -11,10 +11,10 @@ type Event struct {
 	Type           string           `json:"type"`
 	Text           string           `json:"text,omitempty"`            // for EventTypeToken
 	Thinking       string           `json:"thinking,omitempty"`        // for EventTypeReasoning
-	ToolCall       ToolCallData     `json:"tool_call,omitempty"`       // for EventTypeToolCall
-	ToolResult     ToolResultData   `json:"tool_result,omitempty"`     // for EventTypeToolResult
-	Status         StatusData       `json:"status,omitempty"`          // for EventTypeStatus
-	Stats          SessionStatsData `json:"stats,omitempty"`           // for EventTypeStats
+	ToolCall       ToolCallData     `json:"tool_call"`                 // for EventTypeToolCall
+	ToolResult     ToolResultData   `json:"tool_result"`               // for EventTypeToolResult
+	Status         StatusData       `json:"status"`                    // for EventTypeStatus
+	Stats          SessionStatsData `json:"stats"`                     // for EventTypeStats
 	PersistEntries []PersistEntry   `json:"persist_entries,omitempty"` // for EventTypePersist
 	RawData        map[string]any   `json:"raw_data,omitempty"`        // adapter-specific extra fields
 }
@@ -60,11 +60,11 @@ type PersistEntry struct {
 	ReasoningContent string  `json:"reasoning_content,omitempty"`
 	ModelName        string  `json:"model_name,omitempty"`
 	ProviderName     string  `json:"provider_name,omitempty"`
-	PromptTokens     int     `json:"prompt_tokens,omitempty"`
-	PredictedTokens  int     `json:"predicted_tokens,omitempty"`
-	PromptMs         int64   `json:"prompt_ms,omitempty"`        // prompt processing time (ms)
-	PredictedMs      int64   `json:"predicted_ms,omitempty"`     // generation time (ms)
-	Cost             float64 `json:"cost,omitempty"`             // per-message cost from usage.cost.total
+	PromptTokens     int     `json:"prompt_tokens,omitzero"`
+	PredictedTokens  int     `json:"predicted_tokens,omitzero"`
+	PromptMs         int64   `json:"prompt_ms,omitzero"`         // prompt processing time (ms)
+	PredictedMs      int64   `json:"predicted_ms,omitzero"`      // generation time (ms)
+	Cost             float64 `json:"cost,omitzero"`              // per-message cost from usage.cost.total
 	ToolCallsJSON    string  `json:"tool_calls_json,omitempty"`  // JSON of tool call data (role=tool_call)
 	ToolResultJSON   string  `json:"tool_result_json,omitempty"` // JSON of tool result data (role=tool_call)
 }
@@ -104,7 +104,7 @@ type SubprocessConfig struct {
 // AgentModel describes a model available from an agent.
 type AgentModel struct {
 	Name          string `json:"name"`
-	ContextWindow *int   `json:"context_window,omitempty"`
+	ContextWindow *int   `json:"context_window,omitzero"`
 }
 
 // AgentAdapter is the boundary between the runner (backend) and a WASM adapter: the runner loads the

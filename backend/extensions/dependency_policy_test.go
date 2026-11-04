@@ -5,7 +5,7 @@ package extensions
 // extension's container — the allowlist must be as narrow as it was before.
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"os"
 	"path/filepath"
 	"strings"

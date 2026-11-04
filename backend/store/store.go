@@ -8,7 +8,7 @@ package store
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -311,10 +311,21 @@ func scanTask(s scanner, t *types.Task) error {
 		movedAt = createdAt
 	}
 	t.MovedAt = scanTime(movedAt)
-	if assignedPortsJSON.Valid && assignedPortsJSON.String != "" {
-		_ = json.Unmarshal([]byte(assignedPortsJSON.String), &t.AssignedPorts)
-	}
+	scanJSONColumn(assignedPortsJSON, &t.AssignedPorts)
 	return nil
+}
+
+// scanJSONColumn reads a column holding one JSON value into dest. A value that does not decode leaves
+// dest as the row left it: the reader writes what it reached before it fails, and a half-read column
+// must not become members no one wrote.
+func scanJSONColumn[T any](raw sql.NullString, dest *T) {
+	if !raw.Valid || raw.String == "" {
+		return
+	}
+	var v T
+	if err := json.Unmarshal([]byte(raw.String), &v); err == nil {
+		*dest = v
+	}
 }
 
 // scanTaskThread scans a row into a TaskThread.

@@ -5,7 +5,7 @@
 package llmadapter
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"sort"
 	"strings"
@@ -26,7 +26,7 @@ type Mapping struct {
 	// Template-resolved headers. Headers with unresolved {{placeholders}} are skipped.
 	Headers map[string]string `json:"headers,omitempty"`
 	// Body transforms the request body in place.
-	Body BodyRules `json:"body,omitempty"`
+	Body BodyRules `json:"body"`
 }
 
 // BodyRules describes request-body transformations, applied in the order:
@@ -79,7 +79,7 @@ type SetRule struct {
 	// Variable used for gating and table lookups. If empty, uses the first placeholder in the string value.
 	From string `json:"from,omitempty"`
 	// Value to write: a string (template-resolved), a scalar (verbatim), or a map (lookup table with optional '*' fallback).
-	Value any `json:"value,omitempty"`
+	Value any `json:"value,omitzero"`
 	// Rule applies only if resolved 'from' value is in this list. Gated rules with no resolvable variable never apply.
 	When []string `json:"when,omitempty"`
 }

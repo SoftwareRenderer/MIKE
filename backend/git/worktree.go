@@ -510,12 +510,12 @@ func ParseStatusPaths(out string) []string {
 // UntrackedFile carries raw content lines: an untracked file is always new, so there is no diff.
 type UntrackedFile struct {
 	Path      string   `json:"path"`
-	Lines     []string `json:"lines,omitempty"`      // file content lines (set for text files)
-	LineCount int      `json:"line_count,omitempty"` // total line count (set when Lines is omitted)
-	FileSize  int64    `json:"file_size,omitempty"`  // set when file is binary or >1MB (lines omitted)
-	IsBinary  bool     `json:"is_binary,omitempty"`  // true when file is detected as binary
-	Truncated bool     `json:"truncated,omitempty"`  // true when lines were truncated to maxChangeLines
-	OrigAdded int      `json:"orig_added,omitempty"` // original line count before truncation
+	Lines     []string `json:"lines,omitempty"`     // file content lines (set for text files)
+	LineCount int      `json:"line_count,omitzero"` // total line count (set when Lines is omitted)
+	FileSize  int64    `json:"file_size,omitzero"`  // set when file is binary or >1MB (lines omitted)
+	IsBinary  bool     `json:"is_binary,omitzero"`  // true when file is detected as binary
+	Truncated bool     `json:"truncated,omitzero"`  // true when lines were truncated to maxChangeLines
+	OrigAdded int      `json:"orig_added,omitzero"` // original line count before truncation
 }
 
 // DiffRow represents a single line in a parsed diff. Word-level inline
@@ -535,13 +535,13 @@ type TrackedDiffFile struct {
 	Rows          []DiffRow `json:"rows"`
 	Added         int       `json:"added"`
 	Removed       int       `json:"removed"`
-	FileSize      *int64    `json:"fileSize,omitempty"`  // set for binary/large files
-	IsBinary      bool      `json:"isBinary,omitempty"`  // true when file is binary (git-detected)
-	IsNew         bool      `json:"isNew,omitempty"`     // true when file is newly created (from "new file mode" marker)
-	IsDeleted     bool      `json:"isDeleted,omitempty"` // true when file is deleted (from "deleted file mode" marker)
-	Truncated     bool      `json:"truncated,omitempty"`
-	OrigAdded     int       `json:"origAdded,omitempty"`
-	OrigRemoved   int       `json:"origRemoved,omitempty"`
+	FileSize      *int64    `json:"fileSize,omitzero"`  // set for binary/large files
+	IsBinary      bool      `json:"isBinary,omitzero"`  // true when file is binary (git-detected)
+	IsNew         bool      `json:"isNew,omitzero"`     // true when file is newly created (from "new file mode" marker)
+	IsDeleted     bool      `json:"isDeleted,omitzero"` // true when file is deleted (from "deleted file mode" marker)
+	Truncated     bool      `json:"truncated,omitzero"`
+	OrigAdded     int       `json:"origAdded,omitzero"`
+	OrigRemoved   int       `json:"origRemoved,omitzero"`
 }
 
 // TaskDiff carries two shapes: Tracked is a per-file map, for incremental updates, and Diff is the

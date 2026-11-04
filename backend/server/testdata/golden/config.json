@@ -1,5 +1,5 @@
 {
-  "database_path": "\u003cTMP\u003e/test.db",
+  "database_path": "<TMP>/test.db",
   "default_auto_commit": true,
   "default_auto_merge": null,
   "default_operating_mode": "plan",
@@ -49,5 +49,5 @@
   "version": "dev",
   "worker_model": "golden-model",
   "worker_provider": "Golden Provider",
-  "workspace_dir": "\u003cTMP\u003e/worktrees"
+  "workspace_dir": "<TMP>/worktrees"
 }

@@ -2,7 +2,7 @@ package exec
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,12 +17,12 @@ import (
 type fakeLSPManager struct {
 	lspManager
 	methods            []string
-	responses          map[string]json.RawMessage
+	responses          map[string]jsontext.Value
 	enabled            bool
 	lastParamsByMethod map[string]any
 }
 
-func (f *fakeLSPManager) LSPRequest(_ context.Context, workspacePath, filePath, method string, params any) (json.RawMessage, error) {
+func (f *fakeLSPManager) LSPRequest(_ context.Context, workspacePath, filePath, method string, params any) (jsontext.Value, error) {
 	f.methods = append(f.methods, method)
 	if f.lastParamsByMethod == nil {
 		f.lastParamsByMethod = map[string]any{}
@@ -31,7 +31,7 @@ func (f *fakeLSPManager) LSPRequest(_ context.Context, workspacePath, filePath, 
 	if resp, ok := f.responses[method]; ok {
 		return resp, nil
 	}
-	return json.RawMessage(`{"jsonrpc":"2.0","result":null}`), nil
+	return jsontext.Value(`{"jsonrpc":"2.0","result":null}`), nil
 }
 
 func (f *fakeLSPManager) IsToolCallsEnabledForFile(string) bool { return f.enabled }
@@ -61,10 +61,10 @@ func TestHandleLSPRename_AppliesAllFiles(t *testing.T) {
 	uriB := "file://" + filepath.Join(ws, "b.txt")
 	fake := &fakeLSPManager{
 		enabled: true,
-		responses: map[string]json.RawMessage{
-			"textDocument/prepareRename": json.RawMessage(
+		responses: map[string]jsontext.Value{
+			"textDocument/prepareRename": jsontext.Value(
 				`{"jsonrpc":"2.0","id":1,"result":{"start":{"line":0,"character":0},"end":{"line":0,"character":3}}}`),
-			"textDocument/rename": json.RawMessage(fmt.Sprintf(`{
+			"textDocument/rename": jsontext.Value(fmt.Sprintf(`{
 				"jsonrpc":"2.0","id":2,
 				"result":{"changes":{
 					%q:[
@@ -123,8 +123,8 @@ func TestHandleLSPRename_NotRenamable(t *testing.T) {
 
 	fake := &fakeLSPManager{
 		enabled: true,
-		responses: map[string]json.RawMessage{
-			"textDocument/prepareRename": json.RawMessage(`{"jsonrpc":"2.0","id":1,"result":null}`),
+		responses: map[string]jsontext.Value{
+			"textDocument/prepareRename": jsontext.Value(`{"jsonrpc":"2.0","id":1,"result":null}`),
 		},
 	}
 	te := newBareTestExecutor(t)
@@ -154,9 +154,9 @@ func TestHandleLSPRename_NullResult(t *testing.T) {
 
 	fake := &fakeLSPManager{
 		enabled: true,
-		responses: map[string]json.RawMessage{
-			"textDocument/prepareRename": json.RawMessage(`{"jsonrpc":"2.0","id":1,"result":{"start":{"line":0,"character":0},"end":{"line":0,"character":3}}}`),
-			"textDocument/rename":        json.RawMessage(`{"jsonrpc":"2.0","id":2,"result":null}`),
+		responses: map[string]jsontext.Value{
+			"textDocument/prepareRename": jsontext.Value(`{"jsonrpc":"2.0","id":1,"result":{"start":{"line":0,"character":0},"end":{"line":0,"character":3}}}`),
+			"textDocument/rename":        jsontext.Value(`{"jsonrpc":"2.0","id":2,"result":null}`),
 		},
 	}
 	te := newBareTestExecutor(t)
@@ -183,9 +183,9 @@ func TestHandleLSPRename_LSPError(t *testing.T) {
 
 	fake := &fakeLSPManager{
 		enabled: true,
-		responses: map[string]json.RawMessage{
-			"textDocument/prepareRename": json.RawMessage(`{"jsonrpc":"2.0","id":1,"result":{"start":{"line":0,"character":0},"end":{"line":0,"character":3}}}`),
-			"textDocument/rename":        json.RawMessage(`{"jsonrpc":"2.0","id":2,"error":{"code":-32602,"message":"name taken"}}`),
+		responses: map[string]jsontext.Value{
+			"textDocument/prepareRename": jsontext.Value(`{"jsonrpc":"2.0","id":1,"result":{"start":{"line":0,"character":0},"end":{"line":0,"character":3}}}`),
+			"textDocument/rename":        jsontext.Value(`{"jsonrpc":"2.0","id":2,"error":{"code":-32602,"message":"name taken"}}`),
 		},
 	}
 	te := newBareTestExecutor(t)
@@ -213,9 +213,9 @@ func TestHandleLSPRename_OutsideWorkspace(t *testing.T) {
 
 	fake := &fakeLSPManager{
 		enabled: true,
-		responses: map[string]json.RawMessage{
-			"textDocument/prepareRename": json.RawMessage(`{"jsonrpc":"2.0","id":1,"result":{"start":{"line":0,"character":0},"end":{"line":0,"character":3}}}`),
-			"textDocument/rename": json.RawMessage(fmt.Sprintf(`{
+		responses: map[string]jsontext.Value{
+			"textDocument/prepareRename": jsontext.Value(`{"jsonrpc":"2.0","id":1,"result":{"start":{"line":0,"character":0},"end":{"line":0,"character":3}}}`),
+			"textDocument/rename": jsontext.Value(fmt.Sprintf(`{
 				"jsonrpc":"2.0","id":2,
 				"result":{"changes":{%q:[
 					{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":3}},"newText":"bar"}

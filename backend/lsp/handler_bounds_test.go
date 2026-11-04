@@ -6,7 +6,8 @@ package lsp
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,15 +24,15 @@ import (
 // the session's bound is what keeps that count finite.
 type deafManager struct {
 	mu        sync.Mutex
-	sent      []json.RawMessage
+	sent      []jsontext.Value
 	processes map[string]*LSPProcess
-	replies   chan json.RawMessage
+	replies   chan jsontext.Value
 }
 
 func newDeafManager() *deafManager {
 	return &deafManager{
 		processes: make(map[string]*LSPProcess),
-		replies:   make(chan json.RawMessage, 64),
+		replies:   make(chan jsontext.Value, 64),
 	}
 }
 
@@ -53,14 +54,14 @@ func (m *deafManager) Release(workspacePath, language string) {
 	delete(m.processes, processKey(workspacePath, language))
 }
 
-func (m *deafManager) SendToServer(_ context.Context, _ *LSPProcess, msg json.RawMessage) error {
+func (m *deafManager) SendToServer(_ context.Context, _ *LSPProcess, msg jsontext.Value) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sent = append(m.sent, msg)
 	return nil
 }
 
-func (m *deafManager) ServerMessageCh() <-chan json.RawMessage { return m.replies }
+func (m *deafManager) ServerMessageCh() <-chan jsontext.Value { return m.replies }
 
 func (m *deafManager) SandboxMemory(workspacePath, filePath string) *types.SandboxMemoryStats {
 	return nil

@@ -3,7 +3,8 @@ package lsp
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"os"
 	"os/exec"
@@ -93,7 +94,7 @@ export function load(taskId: string) {
 		t.Fatalf("definition: %v", err)
 	}
 	var defEnvelope struct {
-		Result json.RawMessage `json:"result"`
+		Result jsontext.Value `json:"result"`
 	}
 	if err := json.Unmarshal(defResp, &defEnvelope); err != nil {
 		t.Fatalf("definition unmarshal: %v (%s)", err, defResp)
@@ -114,7 +115,7 @@ export function load(taskId: string) {
 		t.Fatalf("references: %v", err)
 	}
 	var refsEnvelope struct {
-		Result json.RawMessage `json:"result"`
+		Result jsontext.Value `json:"result"`
 	}
 	if err := json.Unmarshal(refsResp, &refsEnvelope); err != nil {
 		t.Fatalf("references unmarshal: %v (%s)", err, refsResp)
@@ -189,7 +190,7 @@ export function reload(taskId: string) {
 		t.Fatalf("references after didChange: %v", err)
 	}
 	var refs2Envelope struct {
-		Result json.RawMessage `json:"result"`
+		Result jsontext.Value `json:"result"`
 	}
 	if err := json.Unmarshal(refsResp2, &refs2Envelope); err != nil {
 		t.Fatalf("references after didChange unmarshal: %v", err)

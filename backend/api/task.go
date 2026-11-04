@@ -5,7 +5,7 @@ package api
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -823,7 +823,11 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	var body struct {
 		CommitMessage string `json:"commit_message"`
 	}
-	_ = json.NewDecoder(io.LimitReader(r.Body, 1024*1024)).Decode(&body)
+	// A body that does not decode carries no message: the reader writes what it reached before it
+	// fails, so a half-read one keeps its name out of the commit.
+	if err := json.UnmarshalRead(io.LimitReader(r.Body, 1024*1024), &body); err != nil {
+		body.CommitMessage = ""
+	}
 
 	// Serialize commit-and-done per project to prevent git race conditions
 	h.boardStreamMgr.BroadcastCommitStatus(projectID, taskID, "queued")

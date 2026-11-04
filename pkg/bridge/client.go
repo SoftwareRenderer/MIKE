@@ -6,7 +6,8 @@ package bridge
 import (
 	"context"
 	"encoding/binary"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -44,7 +45,7 @@ type Client struct {
 	closed   bool
 	// lspNotificationCh receives LSP server notifications (e.g., publishDiagnostics)
 	// forwarded from the sandbox bridge.
-	lspNotificationCh chan json.RawMessage
+	lspNotificationCh chan jsontext.Value
 }
 
 // pendingReq tracks an in-flight request.
@@ -79,7 +80,7 @@ func NewClient(stdin io.WriteCloser, stdout io.ReadCloser) *Client {
 		conn:              conn,
 		pending:           make(map[uint32]*pendingReq),
 		readDone:          make(chan struct{}),
-		lspNotificationCh: make(chan json.RawMessage, 64),
+		lspNotificationCh: make(chan jsontext.Value, 64),
 	}
 	c.nextID.Store(1)
 	go c.readLoop()
@@ -114,7 +115,7 @@ func (c *Client) readDoneClosed() bool {
 
 // LSPNotificationCh returns a channel that receives LSP server notifications
 // (e.g., publishDiagnostics) forwarded from the sandbox bridge.
-func (c *Client) LSPNotificationCh() <-chan json.RawMessage {
+func (c *Client) LSPNotificationCh() <-chan jsontext.Value {
 	return c.lspNotificationCh
 }
 
@@ -567,7 +568,7 @@ func (c *Client) Bash(ctx context.Context, command string, timeout int64) (*Bash
 // LSPSend sends a raw JSON-RPC message to the LSP server and waits for the response.
 // The raw parameter is the raw JSON-RPC message bytes.
 // Returns the raw JSON-RPC response bytes.
-func (c *Client) LSPSend(ctx context.Context, raw json.RawMessage) ([]byte, error) {
+func (c *Client) LSPSend(ctx context.Context, raw jsontext.Value) ([]byte, error) {
 	return c.lspRoundTrip(ctx, protocol.LSPParams{Raw: raw})
 }
 
@@ -594,7 +595,7 @@ func (c *Client) lspRoundTrip(ctx context.Context, params protocol.LSPParams) ([
 // LSPNotify sends a raw JSON-RPC notification to the LSP server without waiting for a response.
 // Use this for notifications (messages without an 'id' field) like initialized, didOpen, etc.
 // ctx bounds the write, which is the only thing here that can block.
-func (c *Client) LSPNotify(ctx context.Context, raw json.RawMessage) error {
+func (c *Client) LSPNotify(ctx context.Context, raw jsontext.Value) error {
 	ctx, cancel := lspCallCtx(ctx)
 	defer cancel()
 

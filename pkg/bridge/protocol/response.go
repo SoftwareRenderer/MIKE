@@ -2,7 +2,7 @@ package protocol
 
 import (
 	"encoding/binary"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 )
 
@@ -117,7 +117,7 @@ type BashParams struct {
 
 // LSPParams holds the parsed parameters for an LSP request.
 type LSPParams struct {
-	Raw     json.RawMessage `json:"raw"`               // raw JSON-RPC message
-	Command string          `json:"command,omitempty"` // LSP server command (first request only)
-	Args    []string        `json:"args,omitempty"`    // LSP server args (first request only)
+	Raw     jsontext.Value `json:"raw"`               // raw JSON-RPC message
+	Command string         `json:"command,omitempty"` // LSP server command (first request only)
+	Args    []string       `json:"args,omitempty"`    // LSP server args (first request only)
 }

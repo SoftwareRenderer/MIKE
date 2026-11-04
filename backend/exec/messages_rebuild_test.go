@@ -6,7 +6,7 @@ package exec
 // their results.
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"slices"
 	"testing"
 

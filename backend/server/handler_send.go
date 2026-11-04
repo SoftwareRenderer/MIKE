@@ -3,7 +3,7 @@ package server
 import (
 	"bytes"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -37,8 +37,12 @@ func (s *Server) handleTaskSend(w http.ResponseWriter, r *http.Request) {
 		ReplaceMessageID string `json:"replace_message_id"`
 		ClientToken      string `json:"client_token"`
 	}
-	// A body that is not JSON is the delegate's to reject.
-	_ = json.Unmarshal(raw, &peek)
+	// A body that is not JSON is the delegate's to reject. A body that stopped half way is not a body
+	// either, and the reader has already written what it reached: nothing below is read unless the
+	// whole value decoded.
+	if err := json.Unmarshal(raw, &peek); err != nil {
+		peek.ReplaceMessageID, peek.ClientToken = "", ""
+	}
 
 	// Asked here, before the truncate: the first arrival made the row this request names no longer the thread's
 	// last, so the truncate would refuse a replay for the change it caused.

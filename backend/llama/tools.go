@@ -32,7 +32,7 @@ func GetToolDisplayName(toolName string) string {
 type paramSchema struct {
 	Type        string          `json:"type"`
 	Description string          `json:"description"`
-	Items       *editItemSchema `json:"items,omitempty"`
+	Items       *editItemSchema `json:"items,omitzero"`
 }
 
 type editItemSchema struct {

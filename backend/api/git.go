@@ -1,7 +1,7 @@
 package api
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -382,7 +382,7 @@ func (h *GitHandler) HandleDiff(w http.ResponseWriter, r *http.Request) {
 	// returns parsed diff grammar.
 	files := git.ParseUnifiedDiff(string(out))
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(files); err != nil {
+	if err := json.MarshalWrite(w, files); err != nil {
 		logging.For(logging.Git).Infof("encoding parsed diff for project %s: %v", projectID, err)
 	}
 }
@@ -794,17 +794,17 @@ func stripUntrackedLines(d *git.TaskDiff) *git.TaskDiff {
 type diffManifestFile struct {
 	Hash        string `json:"hash"`
 	Type        string `json:"type"` // "tracked" or "untracked"
-	Added       int    `json:"added,omitempty"`
-	Removed     int    `json:"removed,omitempty"`
-	Truncated   bool   `json:"truncated,omitempty"`
-	OrigAdded   int    `json:"origAdded,omitempty"`
-	OrigRemoved int    `json:"origRemoved,omitempty"`
-	LineCount   int    `json:"line_count,omitempty"` // for untracked files
-	FileSize    int64  `json:"file_size,omitempty"`  // for binary/large files
-	IsBinary    bool   `json:"is_binary,omitempty"`  // true for binary files
-	IsNew       bool   `json:"isNew,omitempty"`      // true when file is newly created
-	IsDeleted   bool   `json:"isDeleted,omitempty"`  // true when file is deleted
-	Staged      bool   `json:"staged,omitempty"`     // true if file is staged in the index
+	Added       int    `json:"added,omitzero"`
+	Removed     int    `json:"removed,omitzero"`
+	Truncated   bool   `json:"truncated,omitzero"`
+	OrigAdded   int    `json:"origAdded,omitzero"`
+	OrigRemoved int    `json:"origRemoved,omitzero"`
+	LineCount   int    `json:"line_count,omitzero"` // for untracked files
+	FileSize    int64  `json:"file_size,omitzero"`  // for binary/large files
+	IsBinary    bool   `json:"is_binary,omitzero"`  // true for binary files
+	IsNew       bool   `json:"isNew,omitzero"`      // true when file is newly created
+	IsDeleted   bool   `json:"isDeleted,omitzero"`  // true when file is deleted
+	Staged      bool   `json:"staged,omitzero"`     // true if file is staged in the index
 }
 
 // diffManifest is per-file metadata without diff content.

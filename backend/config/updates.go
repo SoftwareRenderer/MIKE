@@ -1,7 +1,8 @@
 package config
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 
 	"mike/backend/types"
@@ -12,14 +13,14 @@ import (
 //
 // A JSON null reads as absent, so a client sending "providers": null keeps the provider list.
 type configUpdates struct {
-	fields map[string]json.RawMessage
+	fields map[string]jsontext.Value
 	// err is reported as a 400. Recording it rather than returning keeps the handler
 	// a linear list of assignments.
 	err error
 }
 
 func newConfigUpdates(body []byte) (*configUpdates, error) {
-	var fields map[string]json.RawMessage
+	var fields map[string]jsontext.Value
 	if err := json.Unmarshal(body, &fields); err != nil {
 		return nil, err
 	}

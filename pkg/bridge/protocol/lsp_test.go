@@ -5,7 +5,8 @@ package protocol
 // Frame framing itself is protocol_test.go's; driving a session is the agent's.
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"testing"
 )
 
@@ -38,7 +39,7 @@ func TestLSPParams_StartCommand(t *testing.T) {
 }
 
 func TestLSPParams_RawMessage(t *testing.T) {
-	rawJSON := json.RawMessage(`{"jsonrpc":"2.0","id":42,"method":"textDocument/diagnostics"}`)
+	rawJSON := jsontext.Value(`{"jsonrpc":"2.0","id":42,"method":"textDocument/diagnostics"}`)
 	params := LSPParams{Raw: rawJSON}
 
 	data, err := json.Marshal(params)

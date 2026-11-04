@@ -1,7 +1,7 @@
 package server
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"net/http"
@@ -70,9 +70,9 @@ func refuseCeremony(w http.ResponseWriter, operation string, err error) {
 // credential, verbatim: it is signed bytes, and a client that had to reshape it would be a client that
 // could not complete the ceremony.
 type ceremonyRequestPayload struct {
-	Ticket   string          `json:"ticket"`
-	Name     string          `json:"name"`
-	Response json.RawMessage `json:"response"`
+	Ticket   string         `json:"ticket"`
+	Name     string         `json:"name"`
+	Response jsontext.Value `json:"response"`
 }
 
 // decodeCeremonyRequest reads the envelope within the bound the verifier needs applied before its bytes

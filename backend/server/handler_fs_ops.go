@@ -35,7 +35,7 @@ type fsOpsRequest struct {
 type fsOpsItem struct {
 	From    string `json:"from"`
 	To      string `json:"to,omitempty"`
-	Renamed bool   `json:"renamed,omitempty"`
+	Renamed bool   `json:"renamed,omitzero"`
 	Reason  string `json:"reason,omitempty"`
 }
 

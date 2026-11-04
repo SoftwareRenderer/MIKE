@@ -2,7 +2,7 @@ package config
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -131,7 +131,7 @@ type FetchModelsRequest struct {
 // FetchedModel represents a model returned from the LLM's /models endpoint.
 type FetchedModel struct {
 	Name          string `json:"name"`
-	ContextWindow *int   `json:"context_window,omitempty"` // nil if not reported by LLM
+	ContextWindow *int   `json:"context_window,omitzero"` // nil if not reported by LLM
 }
 
 // FetchModelsResponse is the result of fetching models from an LLM server.

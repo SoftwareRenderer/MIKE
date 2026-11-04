@@ -1,7 +1,7 @@
 package types
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"strings"
 )
 
@@ -31,7 +31,7 @@ type ContentPart struct {
 	Text string `json:"text,omitempty"`
 	// ImageSource is set only for image parts; serialized to OpenAI image_url
 	// format for the LLM API.
-	ImageSource *ImageSource `json:"source,omitempty"`
+	ImageSource *ImageSource `json:"source,omitzero"`
 }
 
 // NewImagePart builds an image ContentPart from an attachment. An empty mime
@@ -126,16 +126,16 @@ type ChatToolCall struct {
 // (vLLM); the llama client folds the latter into ReasoningContent.
 type ChatChoiceDelta struct {
 	Content          *string        `json:"content"`
-	ReasoningContent *string        `json:"reasoning_content,omitempty"`
-	Reasoning        *string        `json:"reasoning,omitempty"`
+	ReasoningContent *string        `json:"reasoning_content,omitzero"`
+	Reasoning        *string        `json:"reasoning,omitzero"`
 	ToolCalls        []ChatToolCall `json:"tool_calls,omitempty"`
 }
 
 // ChatChoiceMessage takes reasoning under the same two names as ChatChoiceDelta.
 type ChatChoiceMessage struct {
 	Content          *string `json:"content"`
-	ReasoningContent *string `json:"reasoning_content,omitempty"`
-	Reasoning        *string `json:"reasoning,omitempty"`
+	ReasoningContent *string `json:"reasoning_content,omitzero"`
+	Reasoning        *string `json:"reasoning,omitzero"`
 }
 
 // ChatChoice is a single choice in the response.
@@ -179,10 +179,10 @@ type PromptProgressData struct {
 // ChatResponse is a full streaming response frame.
 type ChatResponse struct {
 	Choices        []ChatChoice        `json:"choices"`
-	Usage          *ChatUsage          `json:"usage,omitempty"`
-	Timings        *ChatTimings        `json:"timings,omitempty"`
-	PromptProgress *PromptProgressData `json:"prompt_progress,omitempty"`
-	Metrics        *VllmMetrics        `json:"metrics,omitempty"`
+	Usage          *ChatUsage          `json:"usage,omitzero"`
+	Timings        *ChatTimings        `json:"timings,omitzero"`
+	PromptProgress *PromptProgressData `json:"prompt_progress,omitzero"`
+	Metrics        *VllmMetrics        `json:"metrics,omitzero"`
 }
 
 // VllmMetrics carries the vLLM server-side timings the backend actually uses,

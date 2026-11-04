@@ -15,7 +15,7 @@ type TaskCommit struct {
 
 // TaskCommitsResult holds the base commit info and list of task-specific commits.
 type TaskCommitsResult struct {
-	BaseCommit *TaskCommit  `json:"base_commit,omitempty"` // commit at the divergence point
+	BaseCommit *TaskCommit  `json:"base_commit,omitzero"` // commit at the divergence point
 	Commits    []TaskCommit `json:"commits"`
 }
 

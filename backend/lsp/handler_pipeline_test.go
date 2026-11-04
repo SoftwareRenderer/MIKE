@@ -5,7 +5,8 @@ package lsp
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -24,11 +25,11 @@ import (
 type gateManager struct {
 	mu       sync.Mutex
 	finished []string
-	sent     []json.RawMessage
+	sent     []jsontext.Value
 	arrived  map[string]chan struct{}
 	released map[string]chan struct{}
 	held     map[string]bool
-	replies  chan json.RawMessage
+	replies  chan jsontext.Value
 }
 
 func newGateManager() *gateManager {
@@ -36,7 +37,7 @@ func newGateManager() *gateManager {
 		arrived:  map[string]chan struct{}{},
 		released: map[string]chan struct{}{},
 		held:     map[string]bool{},
-		replies:  make(chan json.RawMessage, 256),
+		replies:  make(chan jsontext.Value, 256),
 	}
 }
 
@@ -111,8 +112,8 @@ func (m *gateManager) lastIDOf(t *testing.T, method string) string {
 	defer m.mu.Unlock()
 	for i := len(m.sent) - 1; i >= 0; i-- {
 		var msg struct {
-			ID     *json.Number `json:"id"`
-			Method string       `json:"method"`
+			ID     *jsontext.Value `json:"id"`
+			Method string          `json:"method"`
 		}
 		if err := json.Unmarshal(m.sent[i], &msg); err != nil {
 			continue
@@ -134,7 +135,7 @@ func (m *gateManager) lastRequestNamedBy(t *testing.T, method string) string {
 		var msg struct {
 			Method string `json:"method"`
 			Params struct {
-				ID *json.Number `json:"id"`
+				ID *jsontext.Value `json:"id"`
 			} `json:"params"`
 		}
 		if err := json.Unmarshal(m.sent[i], &msg); err != nil || msg.Method != method {
@@ -155,7 +156,7 @@ func (m *gateManager) GetOrCreate(_ context.Context, workspacePath, language str
 
 func (m *gateManager) Release(string, string) {}
 
-func (m *gateManager) SendToServer(ctx context.Context, _ *LSPProcess, msg json.RawMessage) error {
+func (m *gateManager) SendToServer(ctx context.Context, _ *LSPProcess, msg jsontext.Value) error {
 	method := methodOf(msg)
 	m.mu.Lock()
 	arrival, release, held := m.arrived[method], m.released[method], m.held[method]
@@ -180,7 +181,7 @@ func (m *gateManager) SendToServer(ctx context.Context, _ *LSPProcess, msg json.
 	return nil
 }
 
-func (m *gateManager) ServerMessageCh() <-chan json.RawMessage { return m.replies }
+func (m *gateManager) ServerMessageCh() <-chan jsontext.Value { return m.replies }
 
 func (m *gateManager) SandboxMemory(string, string) *types.SandboxMemoryStats {
 	return &types.SandboxMemoryStats{}
@@ -188,15 +189,21 @@ func (m *gateManager) SandboxMemory(string, string) *types.SandboxMemoryStats {
 
 // answer pushes one server response onto the stream the handler routes from.
 func (m *gateManager) answer(serverID any, result string) {
+	// The id goes back as the JSON text the request carried: a language server echoes the id it was
+	// given, it does not retype it.
+	var id any = serverID
+	if raw, ok := serverID.(string); ok {
+		id = jsontext.Value(raw)
+	}
 	body, _ := json.Marshal(map[string]any{
 		"jsonrpc": "2.0",
-		"id":      serverID,
+		"id":      id,
 		"result":  map[string]any{"contents": result},
 	})
 	m.replies <- body
 }
 
-func methodOf(msg json.RawMessage) string {
+func methodOf(msg jsontext.Value) string {
 	var envelope struct {
 		Method string `json:"method"`
 	}

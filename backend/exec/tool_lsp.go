@@ -2,7 +2,8 @@ package exec
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -132,7 +133,7 @@ func (r *toolRunner) handleLSPRename(ctx context.Context, args map[string]any, w
 		return "", err
 	}
 	var preEnvelope struct {
-		Result json.RawMessage `json:"result"`
+		Result jsontext.Value `json:"result"`
 	}
 	if err := json.Unmarshal(prepareResp, &preEnvelope); err != nil {
 		return "", fmt.Errorf("unmarshal prepareRename response: %w", err)

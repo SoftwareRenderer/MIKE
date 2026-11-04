@@ -2,7 +2,7 @@ package server
 
 import (
 	"bufio"
-	"encoding/json"
+	"encoding/json/v2"
 	"io"
 	"net/http"
 	"os"

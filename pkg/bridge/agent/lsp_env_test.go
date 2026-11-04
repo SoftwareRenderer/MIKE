@@ -4,7 +4,7 @@ package main
 // protocol has no second door for it: no field on the wire, nothing applied to the spawned process.
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"strings"
 	"testing"
 

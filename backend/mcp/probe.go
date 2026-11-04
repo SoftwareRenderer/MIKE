@@ -39,7 +39,7 @@ type TestAnswer struct {
 	Kind    string `json:"kind,omitempty"`
 	Message string `json:"message"`
 	Tools   int    `json:"tools"`
-	Dropped int    `json:"dropped,omitempty"`
+	Dropped int    `json:"dropped,omitzero"`
 }
 
 // ProbeForm dials the server the form describes and lists it. A server that could not be reached is a

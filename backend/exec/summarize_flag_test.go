@@ -2,7 +2,7 @@ package exec
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -32,7 +32,7 @@ func mockSummarizeFlagLLM(release chan struct{}, summarizeStarted chan struct{})
 		var body struct {
 			Stream bool `json:"stream"`
 		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = json.UnmarshalRead(r.Body, &body)
 		if !body.Stream {
 			// Non-streaming context summarization: hold it open until released.
 			select {

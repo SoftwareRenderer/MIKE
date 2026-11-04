@@ -2,7 +2,7 @@ package exec
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"maps"
@@ -1200,6 +1200,7 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 				}
 			}
 			toolDuration := time.Since(toolStart).Milliseconds()
+			result = toolResultText(result)
 			isSandboxed := (lc.sandboxEnabled && isSandboxableTool(tc.Function.Name)) || isLSPTool(tc.Function.Name)
 			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: buildToolResultEvent(tc.ID, tc.Function.Name, result, success, wasInterrupted, toolDuration, args, tc.Function.Arguments, extractPathFromArgs(tc.Function.Arguments), isSandboxed, streamed, toolCallMsgID)})
 			toolResults = append(toolResults, toolResult{toolCallID: tc.ID, output: result, messageID: toolCallMsgID, args: args, rawArgs: tc.Function.Arguments, success: success, duration: toolDuration})

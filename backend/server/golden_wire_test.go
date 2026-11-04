@@ -16,7 +16,8 @@ package server
 // and read the diff. A golden update that no change asked for is a wire change nobody approved.
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"flag"
 	"net/http"
 	"os"
@@ -137,7 +138,10 @@ func checkGolden(t *testing.T, name string, body []byte, tmpRoots []string) {
 	if err := json.Unmarshal(body, &decoded); err != nil {
 		t.Fatalf("%s: body is not JSON (%v): %s", name, err, truncate(string(body), 300))
 	}
-	normalized, err := json.MarshalIndent(normalizeWire(decoded, tmpRoots), "", "  ")
+	// The comparison below is on bytes, so the key order is pinned here rather than inherited:
+	// the encoder leaves a map's order unspecified, and a golden that changes when nothing did is
+	// worse than no golden.
+	normalized, err := json.Marshal(normalizeWire(decoded, tmpRoots), jsontext.WithIndent("  "), json.Deterministic(true))
 	if err != nil {
 		t.Fatalf("%s: re-marshal: %v", name, err)
 	}

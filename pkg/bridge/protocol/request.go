@@ -2,7 +2,8 @@ package protocol
 
 import (
 	"encoding/binary"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 )
 
@@ -62,7 +63,7 @@ func ParseRequest(frame *Frame) (*Request, error) {
 
 	// Validate JSON only for non-binary methods
 	if jsonLen > 0 && !isBinaryMethod(method) {
-		var js json.RawMessage
+		var js jsontext.Value
 		if err := json.Unmarshal(params, &js); err != nil {
 			return nil, fmt.Errorf("invalid JSON params: %w", err)
 		}

@@ -5,7 +5,7 @@ package exec
 // not what it had done.
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"path/filepath"
 	"reflect"
 	"testing"

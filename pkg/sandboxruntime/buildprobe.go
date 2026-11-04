@@ -93,10 +93,10 @@ type BuildProbeStage struct {
 type BuildProbeResult struct {
 	Stage         string   `json:"stage"`
 	Caps          []string `json:"caps,omitempty"`
-	Network       bool     `json:"network,omitempty"`
-	MeasuresRun   bool     `json:"measures_run,omitempty"`
+	Network       bool     `json:"network,omitzero"`
+	MeasuresRun   bool     `json:"measures_run,omitzero"`
 	OK            bool     `json:"ok"`
-	Informational bool     `json:"informational,omitempty"`
+	Informational bool     `json:"informational,omitzero"`
 	Reason        string   `json:"reason,omitempty"`
 }
 

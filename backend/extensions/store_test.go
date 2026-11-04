@@ -2,7 +2,7 @@ package extensions
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"os"
 	"path/filepath"
@@ -532,7 +532,7 @@ func TestTempDirCleanup(t *testing.T) {
 
 func TestStorageRoundTrip(t *testing.T) {
 	es := testStore(t)
-	if _, err := es.StorageSet("ext1", "p:proj1", "tags", json.RawMessage(`["a","b"]`)); err != nil {
+	if _, err := es.StorageSet("ext1", "p:proj1", "tags", jsontext.Value(`["a","b"]`)); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 	entry, err := es.StorageGet("ext1", "p:proj1", "tags")
@@ -557,8 +557,8 @@ func TestStorageGetMissingReturnsNil(t *testing.T) {
 
 func TestStorageOverwrite(t *testing.T) {
 	es := testStore(t)
-	es.StorageSet("ext1", "p:proj1", "k", json.RawMessage(`1`))
-	es.StorageSet("ext1", "p:proj1", "k", json.RawMessage(`2`))
+	es.StorageSet("ext1", "p:proj1", "k", jsontext.Value(`1`))
+	es.StorageSet("ext1", "p:proj1", "k", jsontext.Value(`2`))
 	entry, _ := es.StorageGet("ext1", "p:proj1", "k")
 	if string(entry.Value) != `2` {
 		t.Fatalf("expected overwritten value, got %s", entry.Value)
@@ -567,9 +567,9 @@ func TestStorageOverwrite(t *testing.T) {
 
 func TestStorageNamespacesAreIsolated(t *testing.T) {
 	es := testStore(t)
-	es.StorageSet("ext1", "nsA", "k", json.RawMessage(`1`))
-	es.StorageSet("ext1", "nsB", "k", json.RawMessage(`2`))
-	es.StorageSet("ext2", "nsA", "k", json.RawMessage(`3`))
+	es.StorageSet("ext1", "nsA", "k", jsontext.Value(`1`))
+	es.StorageSet("ext1", "nsB", "k", jsontext.Value(`2`))
+	es.StorageSet("ext2", "nsA", "k", jsontext.Value(`3`))
 
 	// Same key in different namespace is distinct.
 	a, _ := es.StorageGet("ext1", "nsA", "k")
@@ -586,10 +586,10 @@ func TestStorageNamespacesAreIsolated(t *testing.T) {
 
 func TestStorageListPrefixIsLiteral(t *testing.T) {
 	es := testStore(t)
-	es.StorageSet("ext1", "ns", "a%c", json.RawMessage(`1`))
-	es.StorageSet("ext1", "ns", "axc", json.RawMessage(`2`))
-	es.StorageSet("ext1", "ns", `a\c`, json.RawMessage(`3`))
-	es.StorageSet("ext1", "ns", "a_c", json.RawMessage(`4`))
+	es.StorageSet("ext1", "ns", "a%c", jsontext.Value(`1`))
+	es.StorageSet("ext1", "ns", "axc", jsontext.Value(`2`))
+	es.StorageSet("ext1", "ns", `a\c`, jsontext.Value(`3`))
+	es.StorageSet("ext1", "ns", "a_c", jsontext.Value(`4`))
 
 	for _, tc := range []struct {
 		prefix string
@@ -611,10 +611,10 @@ func TestStorageListPrefixIsLiteral(t *testing.T) {
 
 func TestStorageListWithPrefix(t *testing.T) {
 	es := testStore(t)
-	es.StorageSet("ext1", "ns", "b", json.RawMessage(`1`))
-	es.StorageSet("ext1", "ns", "abc", json.RawMessage(`2`))
-	es.StorageSet("ext1", "ns", "abd", json.RawMessage(`3`))
-	es.StorageSet("ext1", "ns", "x", json.RawMessage(`4`))
+	es.StorageSet("ext1", "ns", "b", jsontext.Value(`1`))
+	es.StorageSet("ext1", "ns", "abc", jsontext.Value(`2`))
+	es.StorageSet("ext1", "ns", "abd", jsontext.Value(`3`))
+	es.StorageSet("ext1", "ns", "x", jsontext.Value(`4`))
 
 	entries, err := es.StorageList("ext1", "ns", "ab")
 	if err != nil {
@@ -630,7 +630,7 @@ func TestStorageListWithPrefix(t *testing.T) {
 
 func TestStorageDelete(t *testing.T) {
 	es := testStore(t)
-	es.StorageSet("ext1", "ns", "k", json.RawMessage(`1`))
+	es.StorageSet("ext1", "ns", "k", jsontext.Value(`1`))
 	if err := es.StorageDelete("ext1", "ns", "k"); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -642,14 +642,14 @@ func TestStorageDelete(t *testing.T) {
 
 func TestStorageRejectsInvalidJSON(t *testing.T) {
 	es := testStore(t)
-	if _, err := es.StorageSet("ext1", "ns", "k", json.RawMessage(`not-json`)); err == nil {
+	if _, err := es.StorageSet("ext1", "ns", "k", jsontext.Value(`not-json`)); err == nil {
 		t.Fatal("expected error for invalid JSON")
 	}
 }
 
 func TestStorageRejectsOversizedValue(t *testing.T) {
 	es := testStore(t)
-	big := json.RawMessage(`"` + strings.Repeat("a", maxExtensionValueBytes+1) + `"`)
+	big := jsontext.Value(`"` + strings.Repeat("a", maxExtensionValueBytes+1) + `"`)
 	if _, err := es.StorageSet("ext1", "ns", "k", big); err == nil {
 		t.Fatal("expected error for oversized value")
 	}
@@ -657,10 +657,10 @@ func TestStorageRejectsOversizedValue(t *testing.T) {
 
 func TestStorageDeleteAll(t *testing.T) {
 	es := testStore(t)
-	es.StorageSet("ext1", "nsA", "k1", json.RawMessage(`1`))
-	es.StorageSet("ext1", "nsA", "k2", json.RawMessage(`2`))
-	es.StorageSet("ext1", "nsB", "k1", json.RawMessage(`3`))
-	es.StorageSet("ext2", "nsA", "k1", json.RawMessage(`4`))
+	es.StorageSet("ext1", "nsA", "k1", jsontext.Value(`1`))
+	es.StorageSet("ext1", "nsA", "k2", jsontext.Value(`2`))
+	es.StorageSet("ext1", "nsB", "k1", jsontext.Value(`3`))
+	es.StorageSet("ext2", "nsA", "k1", jsontext.Value(`4`))
 
 	if err := es.StorageDeleteAll("ext1"); err != nil {
 		t.Fatalf("delete all: %v", err)

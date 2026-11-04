@@ -4,7 +4,8 @@ import (
 	"bufio"
 	"context"
 	"encoding/binary"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"os/exec"
@@ -29,7 +30,7 @@ type lspSession struct {
 	pendingMu sync.Mutex
 	// outputCh receives LSP server notifications (e.g., publishDiagnostics)
 	// so they can be forwarded to the host asynchronously.
-	outputCh chan json.RawMessage
+	outputCh chan jsontext.Value
 }
 
 // isClosed returns true if the session has been closed.
@@ -65,7 +66,7 @@ func newLSPSession(command string, args []string) (*lspSession, error) {
 		stdin:    stdin,
 		stdout:   stdout,
 		pending:  make(map[string]chan []byte),
-		outputCh: make(chan json.RawMessage, 64),
+		outputCh: make(chan jsontext.Value, 64),
 	}
 
 	// Stream stderr to log
@@ -135,7 +136,7 @@ func (s *lspSession) readLoop() {
 
 		// Extract JSON-RPC id to match with pending request
 		var envelope struct {
-			ID *json.RawMessage `json:"id"`
+			ID *jsontext.Value `json:"id"`
 		}
 		if err := json.Unmarshal(msg, &envelope); err != nil {
 			// Notification or malformed — no pending match
@@ -170,13 +171,13 @@ func (s *lspSession) readLoop() {
 }
 
 // sendJSONRPC writes a JSON-RPC message with Content-Length framing.
-func sendJSONRPC(w io.Writer, raw json.RawMessage) error {
+func sendJSONRPC(w io.Writer, raw jsontext.Value) error {
 	_, err := fmt.Fprintf(w, "Content-Length: %d\r\n\r\n%s", len(raw), raw)
 	return err
 }
 
 // send sends a JSON-RPC message to the LSP server and waits for the response.
-func (s *lspSession) send(ctx context.Context, raw json.RawMessage) ([]byte, error) {
+func (s *lspSession) send(ctx context.Context, raw jsontext.Value) ([]byte, error) {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -186,7 +187,7 @@ func (s *lspSession) send(ctx context.Context, raw json.RawMessage) ([]byte, err
 
 	// Extract JSON-RPC id for correlation
 	var envelope struct {
-		ID *json.RawMessage `json:"id"`
+		ID *jsontext.Value `json:"id"`
 	}
 	if err := json.Unmarshal(raw, &envelope); err != nil || envelope.ID == nil {
 		// Notification — just send, no response expected.
@@ -279,7 +280,7 @@ func (h *handler) handleLSP(out io.Writer, req *protocol.Request) {
 		// with it leaves that holder talking to a process that never saw `initialize`.
 		if lsp != nil && lsp.session != nil && !lsp.session.isClosed() {
 			if lsp.command == p.Command && slices.Equal(lsp.args, p.Args) {
-				_ = h.writeFrame(out, protocol.NewResult(req.MsgID, json.RawMessage(`{"status":"started"}`)))
+				_ = h.writeFrame(out, protocol.NewResult(req.MsgID, jsontext.Value(`{"status":"started"}`)))
 				return
 			}
 			_ = h.writeFrame(out, protocol.NewError(req.MsgID,
@@ -310,7 +311,7 @@ func (h *handler) handleLSP(out io.Writer, req *protocol.Request) {
 		}()
 
 		// Send init response
-		result := protocol.NewResult(req.MsgID, json.RawMessage(`{"status":"started"}`))
+		result := protocol.NewResult(req.MsgID, jsontext.Value(`{"status":"started"}`))
 		_ = h.writeFrame(out, result)
 		return
 	}

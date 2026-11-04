@@ -7,7 +7,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -115,8 +116,8 @@ type clientState struct {
 
 // AppStreamMessage is the envelope for client-to-server messages.
 type AppStreamMessage struct {
-	Type string          `json:"type"`
-	Data json.RawMessage `json:"data"`
+	Type string         `json:"type"`
+	Data jsontext.Value `json:"data"`
 }
 
 // AppStreamSubscription is the data for subscribe/unsubscribe messages.
@@ -129,7 +130,7 @@ type AppStreamSubscription struct {
 	KnownStats map[string]string `json:"known_stats,omitempty"`
 	// NoRows indicates the client has no stored conversation, so the task's replay
 	// buffer is kept whole (DurableThrough()). The client drops this claim after its first successful read.
-	NoRows bool `json:"no_rows,omitempty"`
+	NoRows bool `json:"no_rows,omitzero"`
 }
 
 // AppStreamManager manages the /api/stream WebSocket for all app events.
@@ -913,7 +914,7 @@ func (asm *AppStreamManager) makeRoomForTaskBufferLocked() {
 
 func extractToolID(frame []byte) string {
 	var parsed struct {
-		Data json.RawMessage `json:"data"`
+		Data jsontext.Value `json:"data"`
 	}
 	if err := json.Unmarshal(frame, &parsed); err != nil {
 		return ""
@@ -978,7 +979,7 @@ func foldToolCall(held, next []byte) []byte {
 // an object payload.
 func toolCallArgs(frame []byte) map[string]any {
 	var envelope struct {
-		Data json.RawMessage `json:"data"`
+		Data jsontext.Value `json:"data"`
 	}
 	if err := json.Unmarshal(frame, &envelope); err != nil || len(envelope.Data) == 0 {
 		return nil

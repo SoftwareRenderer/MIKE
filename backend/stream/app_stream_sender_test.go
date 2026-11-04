@@ -8,10 +8,11 @@ package stream
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -396,9 +397,22 @@ func TestTurnStatusFrameCarriesTheBytesItAlwaysDid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("map payload: %v", err)
 	}
-	if !bytes.Equal(typed, before) {
+	if !sameJSON(typed, before) {
 		t.Fatalf("the typed payload changed the wire:\n got %s\nwant %s", typed, before)
 	}
+}
+
+// sameJSON reports two payloads holding the same members and values. A frame is a map, and a map's
+// member order is the encoder's to choose, so bytes cannot be what this compares.
+func sameJSON(a, b []byte) bool {
+	var one, two any
+	if err := json.Unmarshal(a, &one); err != nil {
+		return false
+	}
+	if err := json.Unmarshal(b, &two); err != nil {
+		return false
+	}
+	return reflect.DeepEqual(one, two)
 }
 
 // TestStatusFrameThatIsNotATurnStatusSaysSo: whether the turn ended is read off the payload, so a

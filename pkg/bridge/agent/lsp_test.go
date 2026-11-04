@@ -5,7 +5,8 @@ package main
 // be refused, and the connection ending must take its server along.
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"net"
 	"syscall"
@@ -179,7 +180,7 @@ func TestLSPRequest_WithoutASessionIsRefused(t *testing.T) {
 	h, agentEnd, testEnd := lspHandler(t)
 
 	reply := lspRequest(t, h, agentEnd, testEnd, 7, protocol.LSPParams{
-		Raw: json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"textDocument/hover","params":{}}`),
+		Raw: jsontext.Value(`{"jsonrpc":"2.0","id":1,"method":"textDocument/hover","params":{}}`),
 	})
 	if reply.Type != protocol.TypeError {
 		t.Fatalf("reply type = %v, want an error", reply.Type)

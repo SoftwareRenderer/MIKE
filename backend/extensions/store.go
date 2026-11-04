@@ -2,7 +2,8 @@ package extensions
 
 import (
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"strings"
@@ -426,7 +427,7 @@ func (es *ExtensionStore) StorageGet(extID, namespace, key string) (*KVEntry, er
 	if err != nil {
 		return nil, fmt.Errorf("query storage: %w", err)
 	}
-	return &KVEntry{Key: key, Value: json.RawMessage(value), UpdatedAt: updatedAt}, nil
+	return &KVEntry{Key: key, Value: jsontext.Value(value), UpdatedAt: updatedAt}, nil
 }
 
 // likeEscaper quotes a literal for a LIKE pattern, where '%' and '_' are wildcards.
@@ -456,7 +457,7 @@ func (es *ExtensionStore) StorageList(extID, namespace, prefix string) ([]KVEntr
 		if err := rows.Scan(&e.Key, &value, &e.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan storage: %w", err)
 		}
-		e.Value = json.RawMessage(value)
+		e.Value = jsontext.Value(value)
 		entries = append(entries, e)
 	}
 	if err := rows.Err(); err != nil {
@@ -467,8 +468,8 @@ func (es *ExtensionStore) StorageList(extID, namespace, prefix string) ([]KVEntr
 
 // StorageSet writes a key in an extension's namespace; the value must be valid JSON. It returns the
 // stored entry.
-func (es *ExtensionStore) StorageSet(extID, namespace, key string, value json.RawMessage) (*KVEntry, error) {
-	if len(value) == 0 || !json.Valid(value) {
+func (es *ExtensionStore) StorageSet(extID, namespace, key string, value jsontext.Value) (*KVEntry, error) {
+	if len(value) == 0 || !value.IsValid() {
 		return nil, fmt.Errorf("value must be valid JSON")
 	}
 	if len(value) > maxExtensionValueBytes {

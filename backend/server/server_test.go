@@ -3,7 +3,7 @@ package server
 import (
 	"bytes"
 	stdtls "crypto/tls"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"io/fs"
@@ -201,8 +201,7 @@ func testResponseAuth(t *testing.T, s *Server, req *http.Request) *httptest.Resp
 func mustJSON[T any](t *testing.T, body io.Reader) T {
 	t.Helper()
 	var dest T
-	decoder := json.NewDecoder(body)
-	if err := decoder.Decode(&dest); err != nil {
+	if err := json.UnmarshalRead(body, &dest); err != nil {
 		t.Fatalf("decode JSON: %v", err)
 	}
 	return dest
@@ -507,7 +506,7 @@ func TestHandleFSReadGutterMarkers(t *testing.T) {
 		}
 
 		var resp fsReadResponse
-		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		if err := json.UnmarshalRead(rr.Body, &resp); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
 		if resp.GutterMarkers == nil {
@@ -539,7 +538,7 @@ func TestHandleFSReadGutterMarkers(t *testing.T) {
 		}
 
 		var resp fsReadResponse
-		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		if err := json.UnmarshalRead(rr.Body, &resp); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
 		if resp.GutterMarkers != nil {
@@ -559,7 +558,7 @@ func TestHandleFSReadGutterMarkers(t *testing.T) {
 		}
 
 		var resp fsReadResponse
-		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		if err := json.UnmarshalRead(rr.Body, &resp); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
 		if resp.GutterMarkers != nil {
@@ -576,7 +575,7 @@ func TestHandleFSReadGutterMarkers(t *testing.T) {
 		}
 
 		var resp fsReadResponse
-		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		if err := json.UnmarshalRead(rr.Body, &resp); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
 		if resp.Content != originalContent {
@@ -1121,7 +1120,7 @@ func TestDoneTaskDiffReturnsCommittedDiff(t *testing.T) {
 	}
 
 	var resp map[string]any
-	json.NewDecoder(rr.Body).Decode(&resp)
+	json.UnmarshalRead(rr.Body, &resp)
 
 	// A done task answers with a raw diff string, not a manifest.
 	diff, ok := resp["diff"].(string)
@@ -1270,7 +1269,7 @@ func TestDoneTaskDiffSnapshotBypassedForFullAndCustomRefs(t *testing.T) {
 		t.Fatalf("full diff fetch returned %d: %s", rr.Code, rr.Body.String())
 	}
 	var resp map[string]any
-	json.NewDecoder(rr.Body).Decode(&resp)
+	json.UnmarshalRead(rr.Body, &resp)
 	if d, _ := resp["diff"].(string); !strings.Contains(d, "line2") {
 		t.Fatalf("full=1 response missing diff content: %v", resp)
 	}
@@ -1342,7 +1341,7 @@ func TestSandboxDisableBlockedWithoutDangerZone(t *testing.T) {
 		t.Fatalf("expected 403 Forbidden, got %d: %s", rr.Code, rr.Body.String())
 	}
 	var errResp map[string]any
-	json.NewDecoder(rr.Body).Decode(&errResp)
+	json.UnmarshalRead(rr.Body, &errResp)
 	errMsg, _ := errResp["error"].(string)
 	if !strings.Contains(errMsg, "DANGER_ZONE") {
 		t.Fatalf("expected error mentioning DANGER_ZONE, got: %s", errMsg)
@@ -1412,7 +1411,7 @@ func TestSandboxCreateDisabledBlockedWithoutDangerZone(t *testing.T) {
 		t.Fatalf("expected 403 Forbidden, got %d: %s", rr.Code, rr.Body.String())
 	}
 	var errResp map[string]any
-	json.NewDecoder(rr.Body).Decode(&errResp)
+	json.UnmarshalRead(rr.Body, &errResp)
 	errMsg, _ := errResp["error"].(string)
 	if !strings.Contains(errMsg, "DANGER_ZONE") {
 		t.Fatalf("expected error mentioning DANGER_ZONE, got: %s", errMsg)

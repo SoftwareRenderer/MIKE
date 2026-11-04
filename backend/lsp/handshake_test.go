@@ -2,7 +2,7 @@ package lsp
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"io"
 	"os"
 	"path/filepath"
@@ -84,7 +84,7 @@ func TestEnsureInitializedHandshakesOnce(t *testing.T) {
 	m := &ExtensionLSPManager{
 		extStore: extStore,
 		clients:  map[string]*sandboxClient{},
-		serverCh: make(chan json.RawMessage, 8),
+		serverCh: make(chan jsontext.Value, 8),
 	}
 	m.clients[processKey("/work/tree", "go")] = newSandboxClient(cl, "/work/tree", "go", "gopls", nil)
 
@@ -108,7 +108,7 @@ func TestEnsureInitializedConcurrentAsksOneHandshake(t *testing.T) {
 		t.Fatalf("Create(gopls): %v", err)
 	}
 	cl, requests, _ := bridgePair(t)
-	m := &ExtensionLSPManager{extStore: extStore, clients: map[string]*sandboxClient{}, serverCh: make(chan json.RawMessage, 8)}
+	m := &ExtensionLSPManager{extStore: extStore, clients: map[string]*sandboxClient{}, serverCh: make(chan jsontext.Value, 8)}
 	m.clients[processKey("/work/tree", "go")] = newSandboxClient(cl, "/work/tree", "go", "gopls", nil)
 
 	var failed atomic.Int32
@@ -134,7 +134,7 @@ func TestEnsureInitializedConcurrentAsksOneHandshake(t *testing.T) {
 }
 
 func TestEnsureInitializedRequiresLiveConnection(t *testing.T) {
-	m := &ExtensionLSPManager{clients: map[string]*sandboxClient{}, serverCh: make(chan json.RawMessage, 1)}
+	m := &ExtensionLSPManager{clients: map[string]*sandboxClient{}, serverCh: make(chan jsontext.Value, 1)}
 
 	err := m.EnsureInitialized(context.Background(), "/work/tree", goCfg())
 	if err == nil {
@@ -152,7 +152,7 @@ func TestSyncDocumentSendsOnlyWhenContentDiffers(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 	cl, requests, notifications := bridgePair(t)
-	m := &ExtensionLSPManager{clients: map[string]*sandboxClient{}, serverCh: make(chan json.RawMessage, 8)}
+	m := &ExtensionLSPManager{clients: map[string]*sandboxClient{}, serverCh: make(chan jsontext.Value, 8)}
 	m.clients[processKey(dir, "go")] = newSandboxClient(cl, dir, "go", "gopls", nil)
 	ctx := context.Background()
 
@@ -197,7 +197,7 @@ func TestSyncDocumentSendsOnlyWhenContentDiffers(t *testing.T) {
 }
 
 func TestSyncDocumentRequiresConnection(t *testing.T) {
-	m := &ExtensionLSPManager{clients: map[string]*sandboxClient{}, serverCh: make(chan json.RawMessage, 1)}
+	m := &ExtensionLSPManager{clients: map[string]*sandboxClient{}, serverCh: make(chan jsontext.Value, 1)}
 
 	uri, synced, err := m.SyncDocument(context.Background(), "/work/tree", "main.go", goCfg())
 	if err == nil {
@@ -217,7 +217,7 @@ func TestGetOrCreateRetriesThroughADeadConnection(t *testing.T) {
 	m := &ExtensionLSPManager{
 		extStore: extStore,
 		clients:  map[string]*sandboxClient{},
-		serverCh: make(chan json.RawMessage, 8),
+		serverCh: make(chan jsontext.Value, 8),
 	}
 	key := processKey("/work/tree", "go")
 	sc := newSandboxClient(cl, "/work/tree", "go", "gopls", nil)
@@ -265,7 +265,7 @@ func TestGetOrCreateReusesTheServerItStarted(t *testing.T) {
 	m := &ExtensionLSPManager{
 		extStore: extStore,
 		clients:  map[string]*sandboxClient{},
-		serverCh: make(chan json.RawMessage, 8),
+		serverCh: make(chan jsontext.Value, 8),
 	}
 	key := processKey("/work/tree", "go")
 	sc := newSandboxClient(cl, "/work/tree", "go", "gopls", nil)

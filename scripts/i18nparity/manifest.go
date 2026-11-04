@@ -9,7 +9,8 @@ package main
 // message.
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"net/url"
 	"os"
@@ -32,9 +33,9 @@ type Manifest struct {
 
 	// Capabilities are the declared capability blocks, kept as raw JSON so an unexpected or
 	// forbidden one is still seen instead of being dropped by an unknown-field decode.
-	Capabilities map[string]json.RawMessage
+	Capabilities map[string]jsontext.Value
 	// TopLevelKeys records every key present, so a stray `permissions` is catchable.
-	TopLevelKeys map[string]json.RawMessage
+	TopLevelKeys map[string]jsontext.Value
 }
 
 var (
@@ -154,16 +155,10 @@ func (m *Manifest) I18n(f *Findings) *I18nCapability {
 	}
 	// Strict on unknown fields: a typo'd key ("messages_uri") would otherwise decode to an empty
 	// field and the pack would silently ship no messages.
-	dec := json.NewDecoder(strings.NewReader(string(raw)))
-	dec.DisallowUnknownFields()
 	var i18n I18nCapability
-	if err := dec.Decode(&i18n); err != nil {
+	if err := json.Unmarshal(raw, &i18n, json.RejectUnknownMembers(true)); err != nil {
 		f.Errf("capabilities.i18n: %v", err)
 		return nil
-	}
-	// Any leftover bytes after one value means the block was not a single object.
-	if dec.More() {
-		f.Errf("capabilities.i18n: expected a single JSON object")
 	}
 
 	if !bareLocale.MatchString(i18n.Locale) {

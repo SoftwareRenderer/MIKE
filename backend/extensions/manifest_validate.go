@@ -1,7 +1,8 @@
 package extensions
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io/fs"
 	"maps"
@@ -444,7 +445,7 @@ var pluralCategories = map[string]bool{
 // validateCatalogValue accepts a translated string or a plural table of them,
 // refusing everything else with the offending value quoted into the message —
 // the installer shows this string, and "app.title is null" is the diagnosis.
-func validateCatalogValue(messagesURL, key string, value json.RawMessage) error {
+func validateCatalogValue(messagesURL, key string, value jsontext.Value) error {
 	notAString := fmt.Errorf("capabilities.i18n.messages_url %q: %s is %s, not a translated string — every value is a string or a plural table of them, and a null renders as a blank where a label belongs", messagesURL, key, value)
 	if len(value) == 0 {
 		return notAString
@@ -499,7 +500,7 @@ func validateI18NFiles(c *I18NConfig, packDir string) error {
 	if err != nil {
 		return fmt.Errorf("capabilities.i18n.messages_url %q cannot be read: %w", c.MessagesURL, err)
 	}
-	var catalog map[string]json.RawMessage
+	var catalog map[string]jsontext.Value
 	if err := json.Unmarshal(data, &catalog); err != nil {
 		return fmt.Errorf("capabilities.i18n.messages_url %q is not a message catalog — a JSON object of message key to translated string: %w", c.MessagesURL, err)
 	}

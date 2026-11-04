@@ -2,7 +2,8 @@ package exec
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -500,7 +501,7 @@ func TestExecuteTool_EditFile_SingleEdit(t *testing.T) {
 
 	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
 		"path":  "test.txt",
-		"edits": json.RawMessage(editsJSON),
+		"edits": jsontext.Value(editsJSON),
 	}, dir, &types.Task{}, &executionState{}, nil)
 	if !ok {
 		t.Fatalf("expected success, got failure: %s", result)
@@ -533,7 +534,7 @@ func TestExecuteTool_EditFile_MultipleEdits(t *testing.T) {
 
 	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
 		"path":  "test.txt",
-		"edits": json.RawMessage(editsJSON),
+		"edits": jsontext.Value(editsJSON),
 	}, dir, &types.Task{}, &executionState{}, nil)
 	if !ok {
 		t.Fatalf("expected success, got failure: %s", result)
@@ -614,7 +615,7 @@ func TestExecuteTool_EditFile_SandboxDelegation(t *testing.T) {
 	})
 	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
 		"path":  "test.txt",
-		"edits": json.RawMessage(editsJSON),
+		"edits": jsontext.Value(editsJSON),
 	}, dir, &types.Task{}, state, nil)
 	if !ok {
 		t.Fatalf("expected success, got failure: %s", result)
@@ -669,7 +670,7 @@ func TestExecuteTool_EditFile_SandboxDelegation_Error(t *testing.T) {
 	editsJSON, _ := json.Marshal([]map[string]any{{"oldText": "nope", "newText": "x"}})
 	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
 		"path":  "test.txt",
-		"edits": json.RawMessage(editsJSON),
+		"edits": jsontext.Value(editsJSON),
 	}, dir, &types.Task{}, state, nil)
 	if ok {
 		t.Fatalf("expected failure, got success: %s", result)
@@ -705,7 +706,7 @@ func TestExecuteTool_EditFile_SandboxDelegation_Recovery(t *testing.T) {
 	te := newBareTestExecutor(t)
 	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
 		"path":  "test.txt",
-		"edits": json.RawMessage(edits),
+		"edits": jsontext.Value(edits),
 	}, dir, &types.Task{}, state, nil)
 	if !ok {
 		t.Fatalf("expected success after recovery, got failure: %s", result)
@@ -758,7 +759,7 @@ func BenchmarkExecuteTool_EditFile(b *testing.B) {
 		te := newBareTestExecutor(b)
 		result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
 			"path":  "test.txt",
-			"edits": json.RawMessage(editsJSON),
+			"edits": jsontext.Value(editsJSON),
 		}, dir, &types.Task{}, &executionState{}, nil)
 		if !ok {
 			b.Fatalf("edit_file failed: %s", result)
@@ -782,7 +783,7 @@ func TestExecuteTool_EditFile_OldTextNotFound(t *testing.T) {
 
 	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
 		"path":  "test.txt",
-		"edits": json.RawMessage(editsJSON),
+		"edits": jsontext.Value(editsJSON),
 	}, dir, &types.Task{}, &executionState{}, nil)
 	if ok {
 		t.Fatalf("expected failure, got success: %s", result)
@@ -808,7 +809,7 @@ func TestExecuteTool_EditFile_DuplicateOldText(t *testing.T) {
 
 	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
 		"path":  "test.txt",
-		"edits": json.RawMessage(editsJSON),
+		"edits": jsontext.Value(editsJSON),
 	}, dir, &types.Task{}, &executionState{}, nil)
 	if ok {
 		t.Fatalf("expected failure for duplicate oldText, got success: %s", result)
@@ -835,7 +836,7 @@ func TestExecuteTool_EditFile_OverlappingEdits(t *testing.T) {
 
 	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
 		"path":  "test.txt",
-		"edits": json.RawMessage(editsJSON),
+		"edits": jsontext.Value(editsJSON),
 	}, dir, &types.Task{}, &executionState{}, nil)
 	if ok {
 		t.Fatalf("expected failure for overlapping edits, got success: %s", result)
@@ -867,7 +868,7 @@ func TestExecuteTool_EditFile_OutsideWorktreeIsAHostEdit(t *testing.T) {
 
 	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
 		"path":  "../victim.txt",
-		"edits": json.RawMessage(editsJSON),
+		"edits": jsontext.Value(editsJSON),
 	}, worktree, &types.Task{}, &executionState{}, nil)
 	if !ok {
 		t.Fatalf("expected the host edit to succeed, got failure: %s", result)
@@ -898,7 +899,7 @@ func TestExecuteTool_EditFile_EmptyOldText(t *testing.T) {
 
 	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
 		"path":  "test.txt",
-		"edits": json.RawMessage(editsJSON),
+		"edits": jsontext.Value(editsJSON),
 	}, dir, &types.Task{}, &executionState{}, nil)
 	if ok {
 		t.Fatalf("expected failure for empty oldText, got success: %s", result)
@@ -921,7 +922,7 @@ func TestExecuteTool_EditFile_NoEdits(t *testing.T) {
 
 	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
 		"path":  "test.txt",
-		"edits": json.RawMessage(editsJSON),
+		"edits": jsontext.Value(editsJSON),
 	}, dir, &types.Task{}, &executionState{}, nil)
 	if ok {
 		t.Fatalf("expected failure for empty edits, got success: %s", result)
@@ -960,7 +961,7 @@ func TestExecuteTool_EditFile_Sandboxed(t *testing.T) {
 
 	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
 		"path":  "test.txt",
-		"edits": json.RawMessage(editsJSON),
+		"edits": jsontext.Value(editsJSON),
 	}, dir, &types.Task{}, &executionState{sandboxRead: sandboxRead, sandboxWrite: sandboxWrite}, nil)
 	if !ok {
 		t.Fatalf("expected success, got failure: %s", result)
@@ -991,7 +992,7 @@ func TestExecuteTool_EditFile_MissingFile(t *testing.T) {
 
 	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
 		"path":  "nonexistent.txt",
-		"edits": json.RawMessage(editsJSON),
+		"edits": jsontext.Value(editsJSON),
 	}, "/tmp/worktree", &types.Task{}, &executionState{}, nil)
 	if ok {
 		t.Fatalf("expected failure for missing file, got success: %s", result)
@@ -1439,7 +1440,7 @@ func TestExecuteTool_EditFile_BridgeRecovery(t *testing.T) {
 	edits, _ := json.Marshal([]map[string]any{{"oldText": "line two", "newText": "modified two"}})
 	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
 		"path":  "test.txt",
-		"edits": json.RawMessage(edits),
+		"edits": jsontext.Value(edits),
 	}, dir, &types.Task{}, state, nil)
 	if !ok {
 		t.Fatalf("expected success after recovery, got failure: %s", result)
@@ -1498,7 +1499,7 @@ func TestExecuteTool_EditFile_WriteBridgeRecovery(t *testing.T) {
 	edits, _ := json.Marshal([]map[string]any{{"oldText": "line two", "newText": "modified two"}})
 	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
 		"path":  "test.txt",
-		"edits": json.RawMessage(edits),
+		"edits": jsontext.Value(edits),
 	}, dir, &types.Task{}, state, nil)
 	if !ok {
 		t.Fatalf("expected success after recovery, got failure: %s", result)

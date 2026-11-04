@@ -8,7 +8,8 @@ package lsp
 import (
 	"container/list"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -26,10 +27,10 @@ import (
 // JSONRPCMessage is the routing view of a JSON-RPC 2.0 message. Only id, method,
 // result, and error are read; others are forwarded unchanged.
 type JSONRPCMessage struct {
-	ID     *json.Number    `json:"id,omitempty"`
+	ID     *jsontext.Value `json:"id,omitzero"`
 	Method string          `json:"method,omitempty"`
-	Result json.RawMessage `json:"result,omitempty"`
-	Error  *RPCError       `json:"error,omitempty"`
+	Result jsontext.Value  `json:"result,omitempty"`
+	Error  *RPCError       `json:"error,omitzero"`
 }
 
 // RPCError is the error object's message; code and data are not read.
@@ -247,7 +248,7 @@ type workspaceState struct {
 	mu sync.Mutex
 	// true if the first initialize has succeeded; later channels use initResponse.
 	initialized  bool
-	initResponse json.RawMessage
+	initResponse jsontext.Value
 	// true if an initialize is currently in flight.
 	pendingInitialize bool
 	queuedInitialize  []*queuedInit
@@ -263,7 +264,7 @@ type workspaceState struct {
 // answering failures. clientReqID is empty for notifications.
 type writeJob struct {
 	ctx          context.Context
-	msg          json.RawMessage
+	msg          jsontext.Value
 	method       string
 	process      *LSPProcess
 	workspaceKey string
@@ -316,7 +317,7 @@ const (
 	initOverflow                     // too many are already waiting; the queue is failed, not grown
 )
 
-func (ws *workspaceState) decideInitialize(session *ClientSession, clientReqID string, channelID int64, bound int) (initDecision, json.RawMessage) {
+func (ws *workspaceState) decideInitialize(session *ClientSession, clientReqID string, channelID int64, bound int) (initDecision, jsontext.Value) {
 	ws.mu.Lock()
 	defer ws.mu.Unlock()
 	switch {
@@ -339,13 +340,13 @@ func (ws *workspaceState) decideInitialize(session *ClientSession, clientReqID s
 	}
 }
 
-func (ws *workspaceState) cacheInitResponse(serverMsg json.RawMessage) []*queuedInit {
+func (ws *workspaceState) cacheInitResponse(serverMsg jsontext.Value) []*queuedInit {
 	var rpc JSONRPCMessage
 	if err := json.Unmarshal(serverMsg, &rpc); err != nil || rpc.Result == nil {
 		return nil
 	}
 	var result struct {
-		Capabilities json.RawMessage `json:"capabilities"`
+		Capabilities jsontext.Value `json:"capabilities"`
 	}
 	if err := json.Unmarshal(rpc.Result, &result); err != nil || len(result.Capabilities) == 0 {
 		return nil
@@ -461,8 +462,8 @@ type lspRegistry interface {
 type lspManager interface {
 	GetOrCreate(ctx context.Context, workspacePath, language string) (*LSPProcess, error)
 	Release(workspacePath, language string)
-	SendToServer(ctx context.Context, process *LSPProcess, msg json.RawMessage) error
-	ServerMessageCh() <-chan json.RawMessage
+	SendToServer(ctx context.Context, process *LSPProcess, msg jsontext.Value) error
+	ServerMessageCh() <-chan jsontext.Value
 	SandboxMemory(workspacePath, filePath string) *types.SandboxMemoryStats
 }
 
@@ -658,7 +659,7 @@ func (h *LSPHandler) serverMessageRouter() {
 
 // handleClientMessage processes one WebSocket message: workspace/subscribe registers a
 // channel's workspace, a JSON-RPC message must carry the _workspace hint.
-func (h *LSPHandler) handleClientMessage(ctx context.Context, session *ClientSession, msg json.RawMessage) {
+func (h *LSPHandler) handleClientMessage(ctx context.Context, session *ClientSession, msg jsontext.Value) {
 	var sub struct {
 		Method string `json:"method"`
 	}
@@ -721,7 +722,7 @@ const cancelMethod = "$/cancelRequest"
 // forwardCancel forwards a cancel that still names work the server is doing, with the id the
 // server knows. The two sides number requests independently, so the browser's number is never
 // passed through.
-func (h *LSPHandler) forwardCancel(ctx context.Context, session *ClientSession, msg json.RawMessage, workspaceKey string) {
+func (h *LSPHandler) forwardCancel(ctx context.Context, session *ClientSession, msg jsontext.Value, workspaceKey string) {
 	rewritten, ok := rewriteCancelID(msg, session)
 	if !ok {
 		return
@@ -731,10 +732,10 @@ func (h *LSPHandler) forwardCancel(ctx context.Context, session *ClientSession, 
 
 // rewriteCancelID replaces params.id with the backend id mapped from the browser's. It reports false
 // for anything that names no outstanding request, including params that are absent or carry no id.
-func rewriteCancelID(msg json.RawMessage, session *ClientSession) (json.RawMessage, bool) {
+func rewriteCancelID(msg jsontext.Value, session *ClientSession) (jsontext.Value, bool) {
 	var envelope struct {
 		Params *struct {
-			ID *json.Number `json:"id"`
+			ID *jsontext.Value `json:"id"`
 		} `json:"params"`
 	}
 	if err := json.Unmarshal(msg, &envelope); err != nil || envelope.Params == nil || envelope.Params.ID == nil {
@@ -752,8 +753,8 @@ func rewriteCancelID(msg json.RawMessage, session *ClientSession) (json.RawMessa
 	if !ok {
 		return nil, false
 	}
-	// json.Number marshals unquoted, as the request id arrived.
-	params["id"] = json.Number(backendID)
+	// The id goes back as a bare number, the way it arrived.
+	params["id"] = jsontext.Value(backendID)
 	out, err := json.Marshal(msgMap)
 	if err != nil {
 		return nil, false
@@ -763,7 +764,7 @@ func rewriteCancelID(msg json.RawMessage, session *ClientSession) (json.RawMessa
 
 // extractHints pulls _ch, _workspace, _lang and _file out of a message and returns them with
 // the message stripped of those fields, or (0, "", "", "", msg) when there is no _ch.
-func extractHints(msg json.RawMessage) (int64, string, string, string, json.RawMessage) {
+func extractHints(msg jsontext.Value) (int64, string, string, string, jsontext.Value) {
 	var msgMap map[string]any
 	if err := json.Unmarshal(msg, &msgMap); err != nil {
 		return 0, "", "", "", msg
@@ -772,19 +773,11 @@ func extractHints(msg json.RawMessage) (int64, string, string, string, json.RawM
 	if !ok {
 		return 0, "", "", "", msg
 	}
-	var channelID int64
-	switch v := chRaw.(type) {
-	case float64:
-		channelID = int64(v)
-	case json.Number:
-		var err error
-		channelID, err = v.Int64()
-		if err != nil {
-			return 0, "", "", "", msg
-		}
-	default:
+	v, ok := chRaw.(float64)
+	if !ok {
 		return 0, "", "", "", msg
 	}
+	channelID := int64(v)
 	delete(msgMap, "_ch")
 	workspace, _ := msgMap["_workspace"].(string)
 	delete(msgMap, "_workspace")
@@ -811,7 +804,7 @@ func (h *LSPHandler) allowWorkspace(session *ClientSession, workspace string) bo
 
 // handleSubscription processes the workspace/subscribe message.
 // A single session can subscribe to multiple workspaces (one per channel).
-func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSession, msg json.RawMessage) {
+func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSession, msg jsontext.Value) {
 	var sub struct {
 		ChannelID int64           `json:"_ch"`
 		Params    SubscribeParams `json:"params"`
@@ -868,7 +861,7 @@ func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSess
 // handleInitialize intercepts initialize: the first channel's request reaches the server, later
 // ones get the cached response, and those arriving while it is in flight are queued and replayed.
 // No branch holds a lock across the forward.
-func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSession, msg json.RawMessage, clientReqID string, channelID int64, workspacePath, workspaceKey, filePath string) {
+func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSession, msg jsontext.Value, clientReqID string, channelID int64, workspacePath, workspaceKey, filePath string) {
 	// This path creates a workspace from a client-supplied hint, with no subscribe first.
 	if !h.allowWorkspace(session, workspacePath) {
 		// Answer the request rather than closing: this socket carries every other editor.
@@ -1076,7 +1069,7 @@ func (h *LSPHandler) messageBound() int {
 // forwardRequest remaps the request ID and hands it to its workspace's writer; channelID routes
 // the answer back. ctx is the connection's. The error it returns means the request never reached
 // the writer, and the caller unwinds whatever waited on it.
-func (h *LSPHandler) forwardRequest(ctx context.Context, session *ClientSession, msg json.RawMessage, method, clientReqID string, channelID int64, workspaceKey string) error {
+func (h *LSPHandler) forwardRequest(ctx context.Context, session *ClientSession, msg jsontext.Value, method, clientReqID string, channelID int64, workspaceKey string) error {
 	backendID := h.nextBackendID.Add(1)
 	backendIDStr := strconv.FormatInt(backendID, 10)
 
@@ -1132,9 +1125,15 @@ func (h *LSPHandler) forwardRequest(ctx context.Context, session *ClientSession,
 // answerError replies to a client request that will never reach the language server, so the
 // editor is not left waiting on a server that is already gone.
 func (h *LSPHandler) answerError(session *ClientSession, clientReqID string, channelID int64, message string) {
+	// The id goes back as the JSON the client sent (see remapResponseIDWithChannel); a request whose
+	// id never arrived is answered with null, which is what JSON-RPC asks for.
+	id := jsontext.Value(clientReqID)
+	if !id.IsValid() {
+		id = jsontext.Value("null")
+	}
 	payload, err := json.Marshal(map[string]any{
 		"jsonrpc": "2.0",
-		"id":      clientReqID,
+		"id":      id,
 		"_ch":     channelID,
 		"error": map[string]any{
 			"code":    -32000,
@@ -1152,7 +1151,7 @@ func (h *LSPHandler) answerError(session *ClientSession, clientReqID string, cha
 
 // forwardRaw hands one message to the workspace's writer without ID remapping. A refused message
 // is logged rather than answered: it has no id.
-func (h *LSPHandler) forwardRaw(ctx context.Context, session *ClientSession, msg json.RawMessage, method, workspaceKey string) {
+func (h *LSPHandler) forwardRaw(ctx context.Context, session *ClientSession, msg jsontext.Value, method, workspaceKey string) {
 	h.mu.Lock()
 	ws, ok := h.workspaces[workspaceKey]
 	h.mu.Unlock()
@@ -1178,7 +1177,7 @@ func (h *LSPHandler) forwardRaw(ctx context.Context, session *ClientSession, msg
 }
 
 // routeServerMessage routes a message from the language server to the appropriate client(s).
-func (h *LSPHandler) routeServerMessage(serverMsg json.RawMessage) {
+func (h *LSPHandler) routeServerMessage(serverMsg jsontext.Value) {
 	var rpc JSONRPCMessage
 	if err := json.Unmarshal(serverMsg, &rpc); err != nil {
 		logging.For(logging.LSP).Warnf("invalid server message: %v", err)
@@ -1205,7 +1204,7 @@ func (h *LSPHandler) routeServerMessage(serverMsg json.RawMessage) {
 
 // routeNotification delivers a server notification to every session with active workspaces;
 // the client-side dispatcher scopes it to the channels sharing that workspace.
-func (h *LSPHandler) routeNotification(serverMsg json.RawMessage) {
+func (h *LSPHandler) routeNotification(serverMsg jsontext.Value) {
 	h.mu.Lock()
 	clients := make([]*ClientSession, 0, len(h.clients))
 	for _, s := range h.clients {
@@ -1224,7 +1223,7 @@ func (h *LSPHandler) routeNotification(serverMsg json.RawMessage) {
 
 // routeResponse routes a server response back to the originating client with ID remapping.
 // In multiplex mode, includes a channel ID hint (_ch) for frontend routing.
-func (h *LSPHandler) routeResponse(serverMsg json.RawMessage, backendID string) {
+func (h *LSPHandler) routeResponse(serverMsg jsontext.Value, backendID string) {
 	h.mu.Lock()
 	var targetSession *ClientSession
 	var originalClientID string
@@ -1278,7 +1277,7 @@ func (h *LSPHandler) routeResponse(serverMsg json.RawMessage, backendID string) 
 
 // mergeInitParams merges the config's InitParamsOverride into an initialize request and makes
 // sure workspaceFolders is set from rootUri (gopls v0.23+ requires it).
-func mergeInitParams(msg json.RawMessage, cfg *ServerConfig) json.RawMessage {
+func mergeInitParams(msg jsontext.Value, cfg *ServerConfig) jsontext.Value {
 	var msgMap map[string]any
 	if err := json.Unmarshal(msg, &msgMap); err != nil {
 		return msg // malformed, forward as-is
@@ -1347,7 +1346,7 @@ func mergeInitParams(msg json.RawMessage, cfg *ServerConfig) json.RawMessage {
 }
 
 // remapRequestID replaces the "id" field in a JSON-RPC request with a new backend ID.
-func remapRequestID(msg json.RawMessage, backendID int64) json.RawMessage {
+func remapRequestID(msg jsontext.Value, backendID int64) jsontext.Value {
 	var msgMap map[string]any
 	if err := json.Unmarshal(msg, &msgMap); err != nil {
 		return nil
@@ -1362,12 +1361,15 @@ func remapRequestID(msg json.RawMessage, backendID int64) json.RawMessage {
 
 // remapResponseIDWithChannel replaces the "id" field, and when channelID > 0 adds {"_ch": n}
 // so the frontend routes the response to the right virtual transport.
-func remapResponseIDWithChannel(msg json.RawMessage, clientID string, channelID int64) json.RawMessage {
+//
+// clientID is the raw JSON of the id the client sent, so it goes back as a jsontext.Value: JSON-RPC
+// allows a number or a string, and a client that sent 5 must get 5, not "5".
+func remapResponseIDWithChannel(msg jsontext.Value, clientID string, channelID int64) jsontext.Value {
 	var msgMap map[string]any
 	if err := json.Unmarshal(msg, &msgMap); err != nil {
 		return nil
 	}
-	msgMap["id"] = clientID
+	msgMap["id"] = jsontext.Value(clientID)
 	if channelID > 0 {
 		msgMap["_ch"] = channelID
 	}

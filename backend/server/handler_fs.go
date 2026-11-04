@@ -1494,7 +1494,7 @@ func gitAuthorFlagCmd() string {
 // searchResult is one matching file, or one matching line of one file when the search reads contents.
 type searchResult struct {
 	Path string `json:"path"`           // relative to search root
-	Line int    `json:"line,omitempty"` // 1-based line number (content search)
+	Line int    `json:"line,omitzero"`  // 1-based line number (content search)
 	Text string `json:"text,omitempty"` // matching line content (content search)
 }
 

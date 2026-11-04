@@ -98,6 +98,6 @@ func TurnStatusEvent(state, activity string) StreamEvent {
 type TerminalMessage struct {
 	Type string `json:"type"`
 	Data string `json:"data"`
-	Rows int    `json:"rows,omitempty"`
-	Cols int    `json:"cols,omitempty"`
+	Rows int    `json:"rows,omitzero"`
+	Cols int    `json:"cols,omitzero"`
 }

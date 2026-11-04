@@ -5,7 +5,8 @@ package exec
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"strings"
 	"time"
@@ -151,7 +152,7 @@ func groupByServerLanguage(registry *lsp.ExtensionRegistry, files []string) []la
 
 // turnLanguageServer is one language server shared by all files of that language in a pass. This prevents the server from being torn down between files.
 type turnLanguageServer struct {
-	sub       chan json.RawMessage
+	sub       chan jsontext.Value
 	workspace string
 	language  string
 	cfg       *lsp.ServerConfig

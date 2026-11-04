@@ -2,7 +2,7 @@ package exec
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -32,7 +32,7 @@ func mockSummarizeIdleLLM(streamCalls, summarizeCalls *atomic.Int32, firstChat c
 				Role string `json:"role"`
 			} `json:"messages"`
 		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = json.UnmarshalRead(r.Body, &body)
 		if body.Stream {
 			streamCalls.Add(1)
 			select {

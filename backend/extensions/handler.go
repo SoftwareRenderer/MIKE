@@ -1,7 +1,9 @@
 package extensions
 
 import (
-	"encoding/json"
+	"bytes"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -28,7 +30,7 @@ type sseEvent struct {
 	Message   string             `json:"message"`
 	Done      bool               `json:"done"`
 	Error     string             `json:"error,omitempty"`
-	Result    *ExtensionResponse `json:"result,omitempty"`
+	Result    *ExtensionResponse `json:"result,omitzero"`
 }
 
 // inFlight guards concurrent install/update per extension name. The guard stays
@@ -1362,7 +1364,14 @@ func (h *ExtensionHandler) HandleUpdateImage(w http.ResponseWriter, r *http.Requ
 		AcknowledgeNewDomains bool `json:"acknowledge_new_domains"`
 	}
 	if r.Body != nil {
-		if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		// The bytes say whether a body arrived. v2's reader answers io.ErrUnexpectedEOF for a body that
+		// never came and for one that stopped half way through a value, and only the second is a bad
+		// request; v1's decoder told them apart, this cannot.
+		raw, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+		if err == nil && len(bytes.TrimSpace(raw)) > 0 {
+			err = json.Unmarshal(raw, &req)
+		}
+		if err != nil {
 			httputil.JSONError(w, http.StatusBadRequest, "acknowledge_new_domains must be true or false")
 			return
 		}
@@ -1705,9 +1714,9 @@ func (h *ExtensionHandler) HandleStorage(w http.ResponseWriter, r *http.Request,
 		httputil.JSONResponse(w, http.StatusOK, entries)
 	case http.MethodPut:
 		var req struct {
-			Namespace string          `json:"namespace"`
-			Key       string          `json:"key"`
-			Value     json.RawMessage `json:"value"`
+			Namespace string         `json:"namespace"`
+			Key       string         `json:"key"`
+			Value     jsontext.Value `json:"value"`
 		}
 		if !httputil.DecodeJSON(w, r, &req) {
 			return
@@ -1770,10 +1779,10 @@ func servedURLFromDir(extensionsDir, dir string) string {
 // UpdateExtensionRequest is the request body for updating an extension.
 type UpdateExtensionRequest struct {
 	Version         string            `json:"version,omitempty"`
-	Manifest        ExtensionManifest `json:"manifest,omitempty"`
+	Manifest        ExtensionManifest `json:"manifest"`
 	Config          map[string]any    `json:"config,omitempty"`
-	ContainerConfig ContainerConfig   `json:"container_config,omitempty"`
-	SandboxConfig   SandboxConfig     `json:"sandbox_config,omitempty"`
+	ContainerConfig ContainerConfig   `json:"container_config"`
+	SandboxConfig   SandboxConfig     `json:"sandbox_config"`
 }
 
 // InstallExtensionRequest is the request body for installing from registry.
@@ -1819,7 +1828,7 @@ type ExtensionUpdate struct {
 	NewPermissions []string `json:"new_permissions,omitempty"`
 	// DomainsAdded is set when the update names a host in `allowed_domains` that the installed
 	// manifest does not. Removing a host never sets it.
-	DomainsAdded bool `json:"domains_added,omitempty"`
+	DomainsAdded bool `json:"domains_added,omitzero"`
 	// Changelog lists the changes (oldest → newest) newer than the installed
 	// commit, from the extension's published changelog. Empty when no
 	// changelog is published, it cannot be fetched, the installed commit is

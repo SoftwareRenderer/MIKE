@@ -5,7 +5,7 @@ package stream
 // field the card and the detail view read.
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"slices"
 	"strings"
 	"testing"

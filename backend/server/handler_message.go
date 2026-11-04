@@ -1,7 +1,8 @@
 package server
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"mike/backend/httputil"
@@ -349,8 +350,8 @@ func (s *Server) handleTaskMessageByID(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodPatch {
 		var req struct {
-			Content    *json.RawMessage `json:"content"`
-			CommitHash string           `json:"git_commit_hash"`
+			Content    *jsontext.Value `json:"content"`
+			CommitHash string          `json:"git_commit_hash"`
 		}
 		if !httputil.DecodeJSON(w, r, &req) {
 			return

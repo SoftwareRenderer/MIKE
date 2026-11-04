@@ -1,7 +1,8 @@
 package exec
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -22,7 +23,7 @@ type lspEnvelope struct {
 		Code    int    `json:"code"`
 		Message string `json:"message"`
 	} `json:"error"`
-	Result json.RawMessage `json:"result"`
+	Result jsontext.Value `json:"result"`
 }
 
 // errText is the sentence a caller answers an error envelope with.
@@ -138,7 +139,7 @@ func applyTextEdits(content string, edits []lspTextEdit) (string, error) {
 // parseWorkspaceEdit parses a JSON-RPC rename response envelope into per-URI
 // edits. A null result (nothing renamed) yields (nil, nil). An LSP error
 // envelope yields an error carrying the code and message.
-func parseWorkspaceEdit(response json.RawMessage) (map[string][]lspTextEdit, error) {
+func parseWorkspaceEdit(response jsontext.Value) (map[string][]lspTextEdit, error) {
 	var envelope lspEnvelope
 	if err := json.Unmarshal(response, &envelope); err != nil {
 		return nil, fmt.Errorf("unmarshal rename response: %w", err)

@@ -2,7 +2,7 @@ package api
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -569,7 +569,7 @@ func postToMux(t *testing.T, mux *http.ServeMux, path string, body any) *httptes
 	t.Helper()
 	var buf bytes.Buffer
 	if body != nil {
-		if err := json.NewEncoder(&buf).Encode(body); err != nil {
+		if err := json.MarshalWrite(&buf, body); err != nil {
 			t.Fatal(err)
 		}
 	}

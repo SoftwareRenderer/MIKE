@@ -12,7 +12,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 
 	"github.com/fxamacker/cbor/v2"

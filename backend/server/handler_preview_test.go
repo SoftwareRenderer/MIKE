@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"mime"
@@ -1500,7 +1500,7 @@ func TestPreviewNavName_IsAnAssetNotTheRecord(t *testing.T) {
 func TestPreviewServeRequestShape(t *testing.T) {
 	var req previewServeRequest
 	body := []byte(`{"content":"<i>hi</i>","project":"p1","path":"a/b.html","task":"t1"}`)
-	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&req); err != nil {
+	if err := json.UnmarshalRead(bytes.NewReader(body), &req); err != nil {
 		t.Fatal(err)
 	}
 	if req.Content != "<i>hi</i>" || req.Project != "p1" || req.Path != "a/b.html" || req.Task != "t1" {

@@ -2,7 +2,7 @@ package server
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -343,7 +343,7 @@ func TestFSReadRefValidRefsStillWork(t *testing.T) {
 			t.Fatalf("ref %q: expected 200, got %d: %s", ref, rr.Code, rr.Body.String())
 		}
 		var resp fsReadResponse
-		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		if err := json.UnmarshalRead(rr.Body, &resp); err != nil {
 			t.Fatalf("ref %q: decode: %v", ref, err)
 		}
 		if resp.Content != fsReadRefContent {
@@ -431,7 +431,7 @@ func TestFSReadRefInTaskWorktree(t *testing.T) {
 			t.Fatalf("ref %q: expected 200, got %d: %s", ref, rr.Code, rr.Body.String())
 		}
 		var resp fsReadResponse
-		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		if err := json.UnmarshalRead(rr.Body, &resp); err != nil {
 			t.Fatalf("ref %q: decode: %v", ref, err)
 		}
 		if resp.Content != "worktree commit\n" {
@@ -775,7 +775,7 @@ func TestFSSearchFilenameRegex(t *testing.T) {
 			return rr.Code, nil
 		}
 		var resp searchResp
-		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		if err := json.UnmarshalRead(rr.Body, &resp); err != nil {
 			t.Fatalf("decode search response: %v", err)
 		}
 		paths := make([]string, 0, len(resp.Results))
@@ -836,7 +836,7 @@ func TestFSSearchFilenameWholeWordRegex(t *testing.T) {
 				Path string `json:"path"`
 			} `json:"results"`
 		}
-		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		if err := json.UnmarshalRead(rr.Body, &resp); err != nil {
 			t.Fatalf("decode search response: %v", err)
 		}
 		paths := make([]string, 0, len(resp.Results))
@@ -905,7 +905,7 @@ func TestFSSearchSkipsDotNames(t *testing.T) {
 			t.Fatalf("search %q: %d %s", q, rr.Code, rr.Body.String())
 		}
 		var resp searchResp
-		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		if err := json.UnmarshalRead(rr.Body, &resp); err != nil {
 			t.Fatalf("decode search response: %v", err)
 		}
 		got := map[string]bool{}
@@ -966,7 +966,7 @@ func TestFSSearchLongLine(t *testing.T) {
 			Text string `json:"text"`
 		} `json:"results"`
 	}
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+	if err := json.UnmarshalRead(rr.Body, &resp); err != nil {
 		t.Fatal(err)
 	}
 	if len(resp.Results) != 2 {
@@ -1007,7 +1007,7 @@ func TestFSSearchFoldsNonASCII(t *testing.T) {
 				Line int `json:"line"`
 			} `json:"results"`
 		}
-		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		if err := json.UnmarshalRead(rr.Body, &resp); err != nil {
 			t.Fatal(err)
 		}
 		got := map[int]bool{}

@@ -1,7 +1,8 @@
 package lsp
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"io"
 	"strings"
 	"sync"
@@ -25,7 +26,7 @@ type captureBridge struct {
 func (c *captureBridge) record(params []byte) {
 	// sandbox-bridge wraps the JSON-RPC message in an LSPParams envelope ({"raw": …}).
 	var wrapper struct {
-		Raw json.RawMessage `json:"raw"`
+		Raw jsontext.Value `json:"raw"`
 	}
 	if err := json.Unmarshal(params, &wrapper); err != nil || len(wrapper.Raw) == 0 {
 		return

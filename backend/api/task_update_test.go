@@ -1,7 +1,7 @@
 package api
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
 	"net/http"
 	"strconv"
 	"testing"
@@ -46,7 +46,7 @@ func TestPUTTask_FieldWrongTypeIsRejectedWithoutPanicOrSilence(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rr := doTaskRequest(t, mux, http.MethodPut, path, json.RawMessage(tc.body))
+			rr := doTaskRequest(t, mux, http.MethodPut, path, jsontext.Value(tc.body))
 			if rr.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want 400 (body %s)", rr.Code, rr.Body.String())
 			}
@@ -76,7 +76,7 @@ func TestPUTTask_OnlyATitleEditClearsTheModelsMark(t *testing.T) {
 		t.Fatalf("mark the seeded title: %v", err)
 	}
 
-	if rr := doTaskRequest(t, mux, http.MethodPut, path, json.RawMessage(`{"prompt":"reworded"}`)); rr.Code != http.StatusOK {
+	if rr := doTaskRequest(t, mux, http.MethodPut, path, jsontext.Value(`{"prompt":"reworded"}`)); rr.Code != http.StatusOK {
 		t.Fatalf("prompt PUT: status %d body %s", rr.Code, rr.Body.String())
 	}
 	kept, err := s.GetTask("task-val-proj", "task-val-task")
@@ -87,7 +87,7 @@ func TestPUTTask_OnlyATitleEditClearsTheModelsMark(t *testing.T) {
 		t.Errorf("a PUT that never mentioned the title cleared the model's mark")
 	}
 
-	if rr := doTaskRequest(t, mux, http.MethodPut, path, json.RawMessage(`{"title":"retyped by a person"}`)); rr.Code != http.StatusOK {
+	if rr := doTaskRequest(t, mux, http.MethodPut, path, jsontext.Value(`{"title":"retyped by a person"}`)); rr.Code != http.StatusOK {
 		t.Fatalf("title PUT: status %d body %s", rr.Code, rr.Body.String())
 	}
 	retyped, err := s.GetTask("task-val-proj", "task-val-task")
@@ -114,12 +114,12 @@ func TestPUTTask_PartialUpdateLeavesAbsentFieldsAlone(t *testing.T) {
 		"model_name":"model-a","llama_server_url":"http://example/v1","reasoning_effort":"high",
 		"max_consecutive_failed_turns":7,"auto_commit":true,"auto_merge":true,
 		"subtasks_auto_merge":true,"title_generating":true,"operating_mode":"plan"}`
-	if rr := doTaskRequest(t, mux, http.MethodPut, path, json.RawMessage(seed)); rr.Code != http.StatusOK {
+	if rr := doTaskRequest(t, mux, http.MethodPut, path, jsontext.Value(seed)); rr.Code != http.StatusOK {
 		t.Fatalf("seed PUT: status %d body %s", rr.Code, rr.Body.String())
 	}
 
 	// One field written; every other seeded field must survive it.
-	rr := doTaskRequest(t, mux, http.MethodPut, path, json.RawMessage(`{"title":"renamed"}`))
+	rr := doTaskRequest(t, mux, http.MethodPut, path, jsontext.Value(`{"title":"renamed"}`))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("rename PUT: status %d body %s", rr.Code, rr.Body.String())
 	}
@@ -155,7 +155,7 @@ func TestPUTTask_PartialUpdateLeavesAbsentFieldsAlone(t *testing.T) {
 	// decode cannot express - an omitted field and a false one look identical once decoded -
 	// which is the whole reason the fields are pointers.
 	clear := `{"max_consecutive_failed_turns":0,"output":"","prompt":""}`
-	if rr := doTaskRequest(t, mux, http.MethodPut, path, json.RawMessage(clear)); rr.Code != http.StatusOK {
+	if rr := doTaskRequest(t, mux, http.MethodPut, path, jsontext.Value(clear)); rr.Code != http.StatusOK {
 		t.Fatalf("clear PUT: status %d body %s", rr.Code, rr.Body.String())
 	}
 	task, err = s.GetTask("task-val-proj", "task-val-task")
@@ -185,11 +185,11 @@ func TestPUTTask_ModeChangeAndPrerequisiteRules(t *testing.T) {
 	// There is no "unset" mode to ask for. Runtime treats an empty mode as act by falling
 	// through the tool-set switch, so storing "" would leave a task that behaves like act while
 	// every reader sees something else - the client is told instead.
-	if rr := doTaskRequest(t, mux, http.MethodPut, path, json.RawMessage(`{"operating_mode":""}`)); rr.Code != http.StatusBadRequest {
+	if rr := doTaskRequest(t, mux, http.MethodPut, path, jsontext.Value(`{"operating_mode":""}`)); rr.Code != http.StatusBadRequest {
 		t.Fatalf("empty-mode PUT: status %d body %s, want 400", rr.Code, rr.Body.String())
 	}
 	// A real mode change lands, and the stored row says so.
-	if rr := doTaskRequest(t, mux, http.MethodPut, path, json.RawMessage(`{"operating_mode":"explore"}`)); rr.Code != http.StatusOK {
+	if rr := doTaskRequest(t, mux, http.MethodPut, path, jsontext.Value(`{"operating_mode":"explore"}`)); rr.Code != http.StatusOK {
 		t.Fatalf("explore PUT: status %d body %s", rr.Code, rr.Body.String())
 	}
 	task, err := s.GetTask("task-val-proj", "task-val-task")
@@ -203,7 +203,7 @@ func TestPUTTask_ModeChangeAndPrerequisiteRules(t *testing.T) {
 	// auto_merge without auto_commit: the handler sets auto_commit, because auto-commit is a
 	// prerequisite for auto-merge and storing the pair the other way round is a task that
 	// silently never merges.
-	if rr := doTaskRequest(t, mux, http.MethodPut, path, json.RawMessage(`{"auto_commit":false,"auto_merge":true}`)); rr.Code != http.StatusOK {
+	if rr := doTaskRequest(t, mux, http.MethodPut, path, jsontext.Value(`{"auto_commit":false,"auto_merge":true}`)); rr.Code != http.StatusOK {
 		t.Fatalf("auto-merge PUT: status %d body %s", rr.Code, rr.Body.String())
 	}
 	task, err = s.GetTask("task-val-proj", "task-val-task")
@@ -225,7 +225,7 @@ func TestPUTTask_MalformedBodyIsRejectedNotIgnored(t *testing.T) {
 
 	for _, body := range []string{`{"title":`, `[]`, `"just a string"`, `n`} {
 		t.Run(body, func(t *testing.T) {
-			rr := doTaskRequest(t, mux, http.MethodPut, path, json.RawMessage(body))
+			rr := doTaskRequest(t, mux, http.MethodPut, path, jsontext.Value(body))
 			if rr.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want 400 for body %s", rr.Code, body)
 			}
@@ -254,7 +254,7 @@ func TestPOSTTask_FieldWrongTypeIsRejected(t *testing.T) {
 		{"operating_mode wrong type", `{"title":"t","operating_mode":9}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			rr := doTaskRequest(t, mux, http.MethodPost, path, json.RawMessage(tc.body))
+			rr := doTaskRequest(t, mux, http.MethodPost, path, jsontext.Value(tc.body))
 			if rr.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want 400 (body %s)", rr.Code, rr.Body.String())
 			}

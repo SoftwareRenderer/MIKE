@@ -2,7 +2,8 @@ package exec
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"strings"
 	"sync"
@@ -29,7 +30,7 @@ type recordingLSPManager struct {
 	created      []string // language of each GetOrCreate
 	released     []string // language of each Release
 	held         map[string]string
-	sub          chan json.RawMessage
+	sub          chan jsontext.Value
 	subscribes   int
 	unsubscribes int
 	// publish builds the notification for a synced document; "" means the server had
@@ -70,17 +71,17 @@ func (m *recordingLSPManager) Release(_, language string) {
 	m.released = append(m.released, language)
 }
 
-func (m *recordingLSPManager) Subscribe() chan json.RawMessage {
+func (m *recordingLSPManager) Subscribe() chan jsontext.Value {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.subscribes++
 	if m.sub == nil {
-		m.sub = make(chan json.RawMessage, 32)
+		m.sub = make(chan jsontext.Value, 32)
 	}
 	return m.sub
 }
 
-func (m *recordingLSPManager) Unsubscribe(ch chan json.RawMessage) {
+func (m *recordingLSPManager) Unsubscribe(ch chan jsontext.Value) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.unsubscribes++
@@ -91,8 +92,8 @@ func (m *recordingLSPManager) Unsubscribe(ch chan json.RawMessage) {
 
 func (m *recordingLSPManager) IsToolCallsEnabledForFile(string) bool { return true }
 
-func (m *recordingLSPManager) LSPRequest(context.Context, string, string, string, any) (json.RawMessage, error) {
-	return json.RawMessage(`{"result":null}`), nil
+func (m *recordingLSPManager) LSPRequest(context.Context, string, string, string, any) (jsontext.Value, error) {
+	return jsontext.Value(`{"result":null}`), nil
 }
 
 func (m *recordingLSPManager) EnsureInitialized(_ context.Context, _ string, cfg *lsp.ServerConfig) error {

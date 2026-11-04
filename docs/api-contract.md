@@ -41,9 +41,45 @@ check learned rather than making a request of its own — the row that route ser
 fetch can run on a detached context while the swap stays behind a click; the route that ends the process is
 `POST /api/updates/restart`.
 
+## The JSON era this server speaks
+
+Every byte crossing this boundary — request body, response body, WebSocket frame, stored payload — is
+`encoding/json/v2` with its own defaults. No call site passes an option that restores v1's shape. Those
+defaults are the contract, and `backend/httputil/json_defaults_test.go` fails when one of them drifts.
+
+Three of them are load-bearing for whoever reads a response:
+
+- **An absent list or map is `[]` or `{}`.** A client counts what arrived instead of testing for `null`
+  first. A field that truly means "absent" says so with `omitempty`, not with a nil it forgot to set.
+- **A nil `[]byte` is the empty string.** Whether a payload exists is not readable off its bytes, so a
+  route that must tell "no file" from an empty file carries a separate field for the difference.
+- **A member matches a field on its exact name.** A payload whose casing differs is dropped in silence: no
+  error, and the field keeps its zero value. Nothing relaxes this for a whole decode. Where a named
+  upstream really does send another casing, that field carries `case:ignore` and a comment names it.
+
+Key order in a marshaled map is unspecified, so nothing may compare two marshaled maps byte for byte. A
+check that writes one to a golden file passes `json.Deterministic(true)` and says why.
+
+The grammar is enforced in both directions, and a foreign payload meets it first. A duplicate member name,
+bytes after the value, and invalid UTF-8 inside a string are each an error — where v1 takes the last
+duplicate and writes U+FFFD. Only v1's `Decoder` tolerates bytes after the value.
+
+Foreign bytes are repaired where a tool's result is settled, at `exec.toolResultText`. Three consumers
+marshal that string — the task frame, the stored tool_call row and the conversation — and the row's
+marshal error is discarded, so foreign bytes would persist a half-written row. The per-result cap also
+cuts on a byte index and can split a rune. `backend/exec/tool_result_utf8_test.go` fails when the repair
+goes. Bytes from any other foreign source (a commit message, a provider's own response) still meet a hard
+error: a route carrying them answers with a short body and a log line, and a request carrying one fails to
+build.
+
+A payload forwarded without being understood is a `jsontext.Value` from `encoding/json/jsontext`. That is
+exactly what `json.RawMessage` is: v1 defines it as an alias of that type.
+
+Tests: `backend/httputil/json_defaults_test.go`.
+
 ## Frames
 
-- Inbound WebSocket frames use the `stream.AppStreamMessage` structure (`Data` is `json.RawMessage`). **Outbound** frames are
+- Inbound WebSocket frames use the `stream.AppStreamMessage` structure (`Data` is a `jsontext.Value`). **Outbound** frames are
   sent as flat maps built where they're broadcast (no shared envelope struct in Go) — a `task_event` carries
   `task_id`/`event` beside `data`, so the client reads `msg.task_id`, **not** `msg.data.task_id`.
 - `subscribe_task` carries `no_rows`: this connection holds no conversation rows of its own, so the task's

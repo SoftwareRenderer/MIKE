@@ -1,7 +1,8 @@
 package types
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 )
 
@@ -14,7 +15,7 @@ func (p *Provider) UnmarshalJSON(data []byte) error {
 	type providerAlias Provider
 	var raw struct {
 		*providerAlias
-		Models json.RawMessage `json:"models"`
+		Models jsontext.Value `json:"models"`
 	}
 	raw.providerAlias = (*providerAlias)(p)
 

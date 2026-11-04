@@ -1,7 +1,7 @@
 package extensions
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -38,7 +38,7 @@ func TestFetchIndex(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(index)
+		json.MarshalWrite(w, index)
 	}))
 	defer server.Close()
 

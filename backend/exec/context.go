@@ -2,7 +2,7 @@ package exec
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"strings"
 
@@ -448,7 +448,10 @@ func toolResultMessage(m types.TaskMessage) (types.ChatMessage, bool) {
 		return types.ChatMessage{}, false
 	}
 	var result map[string]any
-	if err := json.Unmarshal([]byte(m.ToolResult), &result); err != nil {
+	// A row written before a tool's bytes were repaired, or by an older server, holds bytes v2 will not
+	// decode; dropping the message here would leave an assistant tool_call with no tool row beside it, so
+	// the bytes are made decodable and the row keeps its place. docs/api-contract.md → The JSON era
+	if err := json.Unmarshal([]byte(toolResultText(m.ToolResult)), &result); err != nil {
 		return types.ChatMessage{}, false
 	}
 	output, _ := result["output"].(string)

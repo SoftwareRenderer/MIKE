@@ -1,7 +1,8 @@
 package api
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"net/http"
 	"strings"
 	"testing"
@@ -119,7 +120,7 @@ func TestDismissMemoryAlertRejectsAnIncompleteBody(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.body, func(t *testing.T) {
-			rr := doTaskRequest(t, mux, http.MethodPost, memoryAlertPath, json.RawMessage(tc.body))
+			rr := doTaskRequest(t, mux, http.MethodPost, memoryAlertPath, jsontext.Value(tc.body))
 			if rr.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want 400 (body %s)", rr.Code, rr.Body.String())
 			}

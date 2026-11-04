@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"compress/gzip"
+	"encoding/json/jsontext"
 	"fmt"
 	"io"
 	"net/http"
@@ -267,9 +268,8 @@ func TestCompressMiddleware_WithJSONResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to decompress brotli: %v", err)
 	}
-	// JSONResponse adds a trailing newline
-	if !bytes.HasSuffix(decompressed, []byte("\n")) {
-		t.Error("expected trailing newline from json.Encoder")
+	if !jsontext.Value(decompressed).IsValid() {
+		t.Error("the decompressed body is not one JSON value")
 	}
 }
 

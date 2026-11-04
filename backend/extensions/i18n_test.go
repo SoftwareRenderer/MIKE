@@ -13,7 +13,7 @@ package extensions
 // Change the fixture in one and change it in the other.
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"strings"
 	"testing"
 )

@@ -25,20 +25,20 @@ type CreateProjectRequest struct {
 // UpdateProjectRequest is the request body for updating a project.
 type UpdateProjectRequest struct {
 	Name                    string         `json:"name,omitempty"`
-	SandboxEnabled          *bool          `json:"sandbox_enabled,omitempty"`
-	SandboxNetworkIsolation *bool          `json:"sandbox_network_isolation,omitempty"`
-	SandboxImage            *string        `json:"sandbox_image,omitempty"`
-	SandboxDockerfilePath   *string        `json:"sandbox_dockerfile_path,omitempty"`
-	SandboxBuildContext     *string        `json:"sandbox_build_context,omitempty"`
-	SandboxMemoryLimit      *int           `json:"sandbox_memory_limit,omitempty"`
+	SandboxEnabled          *bool          `json:"sandbox_enabled,omitzero"`
+	SandboxNetworkIsolation *bool          `json:"sandbox_network_isolation,omitzero"`
+	SandboxImage            *string        `json:"sandbox_image,omitzero"`
+	SandboxDockerfilePath   *string        `json:"sandbox_dockerfile_path,omitzero"`
+	SandboxBuildContext     *string        `json:"sandbox_build_context,omitzero"`
+	SandboxMemoryLimit      *int           `json:"sandbox_memory_limit,omitzero"`
 	SandboxForwardPorts     []PortForward  `json:"sandbox_forward_ports,omitempty"`
 	SandboxMounts           []SandboxMount `json:"sandbox_mounts,omitempty"`
 	SandboxEnvs             []SandboxEnv   `json:"sandbox_envs,omitempty"`
 	SandboxCapabilities     []string       `json:"sandbox_capabilities,omitempty"`
-	CommitAssistedBy        *bool          `json:"commit_assisted_by,omitempty"`
+	CommitAssistedBy        *bool          `json:"commit_assisted_by,omitzero"`
 	// MCPServerIDs is this project's MCP opt-in list. A pointer because a partial update must tell
 	// "leave it alone" from "enable nothing"; the list is written whole either way.
-	MCPServerIDs *[]string `json:"mcp_server_ids,omitempty"`
+	MCPServerIDs *[]string `json:"mcp_server_ids,omitzero"`
 }
 
 // GitCheckoutRequest is the request body for git checkout.

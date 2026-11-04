@@ -1,7 +1,7 @@
 package stream
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 
 	"mike/backend/git"

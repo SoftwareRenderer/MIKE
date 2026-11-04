@@ -2,7 +2,8 @@ package mcp
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -62,9 +63,9 @@ func probeServer(t *testing.T, answer func(method string) (map[string]any, map[s
 			return
 		}
 		var req struct {
-			ID     json.RawMessage `json:"id"`
-			Method string          `json:"method"`
-			Params map[string]any  `json:"params"`
+			ID     jsontext.Value `json:"id"`
+			Method string         `json:"method"`
+			Params map[string]any `json:"params"`
 		}
 		if err := json.Unmarshal(raw, &req); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
@@ -84,7 +85,7 @@ func probeServer(t *testing.T, answer func(method string) (map[string]any, map[s
 			body["result"] = result
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(body)
+		_ = json.MarshalWrite(w, body)
 	}))
 	t.Cleanup(ts.Close)
 	return ts, log

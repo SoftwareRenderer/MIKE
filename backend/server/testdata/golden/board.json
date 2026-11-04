@@ -4,7 +4,7 @@
       "auto_commit": false,
       "auto_merge": false,
       "branch": "task/task-golden-2",
-      "created_at": "\u003cVOLATILE\u003e",
+      "created_at": "<VOLATILE>",
       "execution_state": "",
       "has_merge_conflict": false,
       "id": "task-golden-2",
@@ -12,7 +12,7 @@
       "max_consecutive_failed_turns": 0,
       "memory_alert_ack": null,
       "model_name": "",
-      "moved_at": "\u003cVOLATILE\u003e",
+      "moved_at": "<VOLATILE>",
       "operating_mode": "",
       "output": "",
       "project_id": "proj-golden",
@@ -25,14 +25,14 @@
       "summarizing": false,
       "title": "Golden review task",
       "title_generating": false,
-      "updated_at": "\u003cVOLATILE\u003e",
+      "updated_at": "<VOLATILE>",
       "worktree_exists": false
     },
     {
       "auto_commit": false,
       "auto_merge": false,
       "branch": "task/task-golden",
-      "created_at": "\u003cVOLATILE\u003e",
+      "created_at": "<VOLATILE>",
       "execution_state": "",
       "has_merge_conflict": false,
       "id": "task-golden",
@@ -40,7 +40,7 @@
       "max_consecutive_failed_turns": 0,
       "memory_alert_ack": null,
       "model_name": "",
-      "moved_at": "\u003cVOLATILE\u003e",
+      "moved_at": "<VOLATILE>",
       "operating_mode": "",
       "output": "",
       "project_id": "proj-golden",
@@ -53,7 +53,7 @@
       "summarizing": false,
       "title": "Golden done task",
       "title_generating": false,
-      "updated_at": "\u003cVOLATILE\u003e",
+      "updated_at": "<VOLATILE>",
       "worktree_exists": true
     }
   ]

@@ -1,7 +1,8 @@
 package main
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"os"
 	"path/filepath"
 	"slices"
@@ -34,7 +35,7 @@ func loadManifestOf(t *testing.T, mutate func(map[string]any)) (*Findings, *Mani
 	if mutate != nil {
 		mutate(m)
 	}
-	raw, err := json.MarshalIndent(m, "", "  ")
+	raw, err := json.Marshal(m, jsontext.WithIndent("  "))
 	if err != nil {
 		t.Fatal(err)
 	}

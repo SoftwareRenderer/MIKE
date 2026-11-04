@@ -1,7 +1,8 @@
 package api
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 
 	"mike/backend/types"
@@ -169,9 +170,9 @@ func (u *taskUpdateRequest) apply(task *types.Task) (operatingModeChanged bool, 
 func badField(msg string) error { return errors.New(msg) }
 
 // fieldsPresent identifies sent keys to distinguish between zero values and omitted fields.
-// It uses json.RawMessage so attachments are decoded rather than asserted, preventing
+// It uses jsontext.Value so attachments are decoded rather than asserted, preventing
 // panics on unexpected types.
-type fieldsPresent map[string]json.RawMessage
+type fieldsPresent map[string]jsontext.Value
 
 func (f fieldsPresent) has(key string) bool {
 	_, ok := f[key]

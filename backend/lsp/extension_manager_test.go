@@ -2,7 +2,7 @@ package lsp
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"os"
 	"path/filepath"
@@ -347,13 +347,13 @@ func TestExtensionLSPManager_SubscribeAndUnsubscribe(t *testing.T) {
 	sub2 := mgr.Subscribe()
 
 	// Simulate a server message being broadcast (normally from SendToServer or notification forwarding)
-	msg := json.RawMessage(`{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file:///tmp/test.go","diagnostics":[]}}`)
+	msg := jsontext.Value(`{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file:///tmp/test.go","diagnostics":[]}}`)
 
 	// Directly invoke broadcastToSubscribers (simulating what SendToServer does)
 	mgr.broadcastToSubscribers(msg)
 
 	// Both subscribers should receive the message
-	for i, ch := range []chan json.RawMessage{sub1, sub2} {
+	for i, ch := range []chan jsontext.Value{sub1, sub2} {
 		select {
 		case received := <-ch:
 			if string(received) != string(msg) {
@@ -367,7 +367,7 @@ func TestExtensionLSPManager_SubscribeAndUnsubscribe(t *testing.T) {
 	mgr.Unsubscribe(sub1)
 
 	// Broadcast another message
-	msg2 := json.RawMessage(`{"jsonrpc":"2.0","method":"window/logMessage","params":{"type":1,"message":"test"}}`)
+	msg2 := jsontext.Value(`{"jsonrpc":"2.0","method":"window/logMessage","params":{"type":1,"message":"test"}}`)
 	mgr.broadcastToSubscribers(msg2)
 
 	// sub1 should NOT receive it (channel closed)

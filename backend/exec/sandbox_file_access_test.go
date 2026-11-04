@@ -2,7 +2,7 @@ package exec
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -51,7 +51,7 @@ func TestSandboxedTaskWithoutBridgeRefusesEveryHostTool(t *testing.T) {
 			name: "edit_file",
 			tool: "edit_file",
 			args: func(target string) map[string]any {
-				return map[string]any{"path": target, "edits": json.RawMessage(`[{"oldText":"a","newText":"b"}]`)}
+				return map[string]any{"path": target, "edits": jsontext.Value(`[{"oldText":"a","newText":"b"}]`)}
 			},
 			target: func(_, outside string) string { return filepath.Join(outside, "edited.txt") },
 		},
@@ -188,7 +188,7 @@ func TestLSPToolReadsWorktreeFileWhenUnsandboxed(t *testing.T) {
 
 	fake := &fakeLSPManager{
 		enabled:   true,
-		responses: map[string]json.RawMessage{"textDocument/references": json.RawMessage(`{"jsonrpc":"2.0","id":1,"result":[]}`)},
+		responses: map[string]jsontext.Value{"textDocument/references": jsontext.Value(`{"jsonrpc":"2.0","id":1,"result":[]}`)},
 	}
 	te := newBareTestExecutor(t)
 	te.lspMgr = fake

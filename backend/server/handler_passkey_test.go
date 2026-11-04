@@ -2,7 +2,7 @@ package server
 
 import (
 	"crypto/tls"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"net"
 	"net/http"
@@ -138,7 +138,7 @@ func registerPasskeyOver(t *testing.T, s *Server, name string, tp ceremonyTransp
 	finished := testResponse(t, s, ceremonyPost(t, "/api/auth/passkey/register/finish", map[string]any{
 		"ticket":   ticket,
 		"name":     name,
-		"response": json.RawMessage(response),
+		"response": jsontext.Value(response),
 	}, tp))
 	if finished.Code != http.StatusOK {
 		t.Fatalf("register/finish: %d %s", finished.Code, finished.Body.String())
@@ -175,7 +175,7 @@ func signInOver(t *testing.T, s *Server, credential *testwebauthn.Credential, co
 	}
 	return testResponse(t, s, ceremonyPost(t, "/api/auth/passkey/assert/finish", map[string]any{
 		"ticket":   ticket,
-		"response": json.RawMessage(response),
+		"response": jsontext.Value(response),
 	}, tp))
 }
 
@@ -200,7 +200,7 @@ func TestPasskeyPairingOpensASessionOnTheBrowserThatFinishedIt(t *testing.T) {
 		}
 	}
 	if rr := testResponse(t, s, ceremonyPost(t, "/api/auth/passkey/assert/finish",
-		map[string]any{"ticket": "forged", "response": json.RawMessage(`{}`)}, plainCeremony)); rr.Code == http.StatusOK {
+		map[string]any{"ticket": "forged", "response": jsontext.Value(`{}`)}, plainCeremony)); rr.Code == http.StatusOK {
 		t.Error("a forged ticket opened a session")
 	}
 
@@ -253,7 +253,7 @@ func finishRegistrationWith(t *testing.T, s *Server, ticket, challenge, name str
 	return testResponse(t, s, ceremonyPost(t, "/api/auth/passkey/register/finish", map[string]any{
 		"ticket":   ticket,
 		"name":     name,
-		"response": json.RawMessage(response),
+		"response": jsontext.Value(response),
 	}, plainCeremony))
 }
 
@@ -336,7 +336,7 @@ func TestCeremonyTicketCannotCrossPurposes(t *testing.T) {
 	}
 	crossed := testResponse(t, s, ceremonyPost(t, "/api/auth/passkey/register/finish", map[string]any{
 		"ticket":   assertTicket,
-		"response": json.RawMessage(body),
+		"response": jsontext.Value(body),
 	}, plainCeremony))
 	if crossed.Code != http.StatusUnauthorized {
 		t.Fatalf("a sign-in ticket presented to registration = %d; want 401", crossed.Code)
@@ -363,7 +363,7 @@ func TestCeremonyRefusalIsMIKEsOwnMessage(t *testing.T) {
 	}
 	refused := testResponse(t, s, ceremonyPost(t, "/api/auth/passkey/assert/finish", map[string]any{
 		"ticket":   ticket,
-		"response": json.RawMessage(body),
+		"response": jsontext.Value(body),
 	}, plainCeremony))
 	if refused.Code != http.StatusUnauthorized {
 		t.Fatalf("a forged assertion = %d; want 401; body %s", refused.Code, refused.Body.String())

@@ -1,7 +1,8 @@
 package main
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"maps"
 	"os"
 	"path/filepath"
@@ -113,7 +114,7 @@ func (f *fixture) setManifest(t *testing.T, mutate func(map[string]any)) {
 		t.Fatal(err)
 	}
 	mutate(m)
-	out, err := json.MarshalIndent(m, "", "  ")
+	out, err := json.Marshal(m, jsontext.WithIndent("  "))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +133,7 @@ func tsCatalog(m map[string]string) string {
 
 func jsonCatalog(t *testing.T, m map[string]string) string {
 	t.Helper()
-	out, err := json.MarshalIndent(m, "", "  ")
+	out, err := json.Marshal(m, jsontext.WithIndent("  "))
 	if err != nil {
 		t.Fatal(err)
 	}

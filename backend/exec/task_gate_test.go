@@ -2,7 +2,7 @@ package exec
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -65,7 +65,7 @@ func (m *heldLLMMock) Handler() http.HandlerFunc {
 		var reqBody struct {
 			Stream bool `json:"stream"`
 		}
-		_ = json.NewDecoder(r.Body).Decode(&reqBody)
+		_ = json.UnmarshalRead(r.Body, &reqBody)
 		n := atomic.AddInt32(&m.reqCount, 1)
 		m.arrivals <- n
 		// Hold the stream open until this request's index has been released

@@ -2,7 +2,8 @@ package lsp
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -45,10 +46,10 @@ type mockProcessManager struct {
 	processes map[string]*mockProcess // key: "workspace\tlanguage"
 	nextID    int
 	// sentMessages captures messages sent to the server (in order)
-	sentMessages []json.RawMessage
+	sentMessages []jsontext.Value
 	// sendErr, when set, is what every send to the server answers with.
 	sendErr   error
-	messageCh chan json.RawMessage
+	messageCh chan jsontext.Value
 }
 
 // mockProcess wraps LSPProcess with a test-only reference count.
@@ -60,7 +61,7 @@ type mockProcess struct {
 func newMockProcessManager() *mockProcessManager {
 	return &mockProcessManager{
 		processes: make(map[string]*mockProcess),
-		messageCh: make(chan json.RawMessage, 1024),
+		messageCh: make(chan jsontext.Value, 1024),
 	}
 }
 
@@ -96,14 +97,14 @@ func (m *mockProcessManager) Release(workspacePath, language string) {
 	}
 }
 
-func (m *mockProcessManager) SendToServer(_ context.Context, process *LSPProcess, msg json.RawMessage) error {
+func (m *mockProcessManager) SendToServer(_ context.Context, process *LSPProcess, msg jsontext.Value) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sentMessages = append(m.sentMessages, msg)
 	return m.sendErr
 }
 
-func (m *mockProcessManager) ServerMessageCh() <-chan json.RawMessage {
+func (m *mockProcessManager) ServerMessageCh() <-chan jsontext.Value {
 	return m.messageCh
 }
 
@@ -117,17 +118,17 @@ func (m *mockProcessManager) Subscribe(process *LSPProcess, clientID uint64) cha
 
 func (m *mockProcessManager) Unsubscribe(process *LSPProcess, clientID uint64) {}
 
-func (m *mockProcessManager) Deliver(msg json.RawMessage) {
+func (m *mockProcessManager) Deliver(msg jsontext.Value) {
 	select {
 	case m.messageCh <- msg:
 	default:
 	}
 }
 
-func (m *mockProcessManager) SentMessages() []json.RawMessage {
+func (m *mockProcessManager) SentMessages() []jsontext.Value {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	copied := make([]json.RawMessage, len(m.sentMessages))
+	copied := make([]jsontext.Value, len(m.sentMessages))
 	copy(copied, m.sentMessages)
 	return copied
 }
@@ -180,7 +181,7 @@ func (c *testClient) sendLSP(t *testing.T, v any) {
 }
 
 // receive reads a JSON message from the server.
-func (c *testClient) receive(t *testing.T) json.RawMessage {
+func (c *testClient) receive(t *testing.T) jsontext.Value {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -525,7 +526,7 @@ func receiveResponseFor(t *testing.T, c *testClient, wantID string, wantCh int64
 	return JSONRPCMessage{}
 }
 
-func countSentMethods(sent []json.RawMessage, method string) int {
+func countSentMethods(sent []jsontext.Value, method string) int {
 	count := 0
 	for _, m := range sent {
 		var req struct {
@@ -925,15 +926,15 @@ func TestRouteDropsFramesItCannotDispatch(t *testing.T) {
 	url := startTestServer(t, handler)
 	client := subscribeClientDefault(t, url, "/tmp/test-project", "main.go")
 
-	for _, frame := range []json.RawMessage{
-		json.RawMessage(`{"jsonrpc":"2.0","id":99,"method":"window/workDoneProgress","params":{"token":"abc"}}`),
-		json.RawMessage(`{"jsonrpc":"2.0","result":{}}`),
-		json.RawMessage(`{}`),
+	for _, frame := range []jsontext.Value{
+		jsontext.Value(`{"jsonrpc":"2.0","id":99,"method":"window/workDoneProgress","params":{"token":"abc"}}`),
+		jsontext.Value(`{"jsonrpc":"2.0","result":{}}`),
+		jsontext.Value(`{}`),
 	} {
 		mgr.Deliver(frame)
 	}
 
-	mgr.Deliver(json.RawMessage(`{"jsonrpc":"2.0","method":"window/logMessage","params":{"type":3,"message":"probe"}}`))
+	mgr.Deliver(jsontext.Value(`{"jsonrpc":"2.0","method":"window/logMessage","params":{"type":3,"message":"probe"}}`))
 
 	first := client.receive(t)
 	if !strings.Contains(string(first), "window/logMessage") {
@@ -1064,7 +1065,7 @@ func TestLSPReadyNotificationCachedResponse(t *testing.T) {
 			"serverInfo":   map[string]any{"name": "gopls"},
 		},
 	}
-	mgr.Deliver(json.RawMessage(mustMarshal(t, initResponse)))
+	mgr.Deliver(jsontext.Value(mustMarshal(t, initResponse)))
 
 	resp1 := client1.receiveJSON(t)
 	if resp1.ID == nil || resp1.ID.String() != "1" {
@@ -1160,7 +1161,7 @@ func TestSubscriptionAllowsAllowedWorkspace(t *testing.T) {
 }
 
 // waitForSentMessages waits until n messages have reached the language server.
-func waitForSentMessages(t *testing.T, mgr *mockProcessManager, n int) []json.RawMessage {
+func waitForSentMessages(t *testing.T, mgr *mockProcessManager, n int) []jsontext.Value {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for {

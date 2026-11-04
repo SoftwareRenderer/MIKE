@@ -8,7 +8,7 @@ package httputil
 // structured data, and Data for plain text.
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 )

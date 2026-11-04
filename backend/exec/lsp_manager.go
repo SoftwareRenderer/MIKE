@@ -2,7 +2,7 @@ package exec
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 
 	"mike/backend/lsp"
 )
@@ -15,10 +15,10 @@ type lspManager interface {
 	Release(workspacePath, language string)
 	EnsureInitialized(ctx context.Context, workspacePath string, cfg *lsp.ServerConfig) error
 	SyncDocument(ctx context.Context, workspacePath, filePath string, cfg *lsp.ServerConfig) (string, bool, error)
-	Subscribe() chan json.RawMessage
-	Unsubscribe(ch chan json.RawMessage)
+	Subscribe() chan jsontext.Value
+	Unsubscribe(ch chan jsontext.Value)
 	IsToolCallsEnabledForFile(filePath string) bool
-	LSPRequest(ctx context.Context, workspacePath, filePath, method string, params any) (json.RawMessage, error)
+	LSPRequest(ctx context.Context, workspacePath, filePath, method string, params any) (jsontext.Value, error)
 	// FilesChanged ends the language-server connections of this workspace whose
 	// extension declared one of the changed files as a reason to re-read the
 	// project (`reload_files`). Returns true if any connection was ended.

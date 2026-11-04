@@ -4,7 +4,7 @@ package extensions
 // the user approving it: a folder list written in the manifest is a suggestion and gives no permission.
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"os"

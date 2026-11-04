@@ -1,7 +1,7 @@
 package extensions
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"maps"
 	"net/url"

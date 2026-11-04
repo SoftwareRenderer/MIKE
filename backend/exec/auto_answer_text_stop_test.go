@@ -2,7 +2,7 @@ package exec
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -59,7 +59,7 @@ func (m *textStopMock) handle(w http.ResponseWriter, r *http.Request) {
 			Content string `json:"content"`
 		} `json:"messages"`
 	}
-	_ = json.NewDecoder(r.Body).Decode(&body)
+	_ = json.UnmarshalRead(r.Body, &body)
 
 	if !body.Stream {
 		// One endpoint serves every non-streaming call the turn makes. Only the answering call
@@ -77,7 +77,7 @@ func (m *textStopMock) handle(w http.ResponseWriter, r *http.Request) {
 			content = textStopAnswer
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		_ = json.MarshalWrite(w, map[string]any{
 			"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": content}}},
 			"usage":   map[string]any{"prompt_tokens": 10, "completion_tokens": 8, "total_tokens": 18},
 		})

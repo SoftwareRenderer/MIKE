@@ -47,7 +47,7 @@ type Entry struct {
 type Listing struct {
 	Format    string  `json:"format"`
 	Entries   []Entry `json:"entries"`
-	Truncated bool    `json:"truncated,omitempty"`
+	Truncated bool    `json:"truncated,omitzero"`
 }
 
 // Options carries the caller's limits. They are required rather than defaulted: a zero means "no room".

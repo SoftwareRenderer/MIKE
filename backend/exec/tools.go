@@ -3,7 +3,9 @@ package exec
 import (
 	"bufio"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -155,33 +157,39 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 	return result, ok
 }
 
+// parseToolArgs turns a call's argument text into the map the tool runs on. Nothing a rejected decode
+// wrote is handed on: the reader fills its destination as it goes, so a text that fails part way
+// leaves a map holding the members it reached, and a tool must not run on those.
 func parseToolArgs(s string) map[string]any {
 	result := make(map[string]any)
 	s = strings.TrimSpace(s)
 	if s == "" || s == "{}" {
 		return result
 	}
-	if err := json.Unmarshal([]byte(s), &result); err != nil {
-		var innerStr string
-		if err2 := json.Unmarshal([]byte(s), &innerStr); err2 == nil && innerStr != "" {
-			if err3 := json.Unmarshal([]byte(innerStr), &result); err3 == nil {
-				return result
-			}
-		}
-		if len(s) > 1 && s[0] == '{' && s[1] == '{' {
-			trimmed := s[1:]
-			if err4 := json.Unmarshal([]byte(trimmed), &result); err4 == nil {
-				return result
-			}
-		}
-		// Don't log for clearly incomplete (streaming) JSON — e.g. just "{" or "{"path":"
-		if len(s) >= 1 && s[0] == '{' && s[len(s)-1] != '}' {
-			return result
-		}
-		logging.For(logging.Tools).Warnf("failed to parse args: %v (raw: %q)", err, s)
-		return map[string]any{"raw": s}
+	err := json.Unmarshal([]byte(s), &result)
+	if err == nil {
+		return result
 	}
-	return result
+	result = make(map[string]any)
+	var innerStr string
+	if err2 := json.Unmarshal([]byte(s), &innerStr); err2 == nil && innerStr != "" {
+		var unwrapped map[string]any
+		if err3 := json.Unmarshal([]byte(innerStr), &unwrapped); err3 == nil {
+			return unwrapped
+		}
+	}
+	if len(s) > 1 && s[0] == '{' && s[1] == '{' {
+		var trimmedArgs map[string]any
+		if err4 := json.Unmarshal([]byte(s[1:]), &trimmedArgs); err4 == nil {
+			return trimmedArgs
+		}
+	}
+	// Don't log for clearly incomplete (streaming) JSON — e.g. just "{" or "{"path":"
+	if len(s) >= 1 && s[0] == '{' && s[len(s)-1] != '}' {
+		return result
+	}
+	logging.For(logging.Tools).Warnf("failed to parse args: %v (raw: %q)", err, s)
+	return map[string]any{"raw": s}
 }
 
 // maxEchoedArgsBytes bounds what of a call's own arguments is quoted back to the model
@@ -190,14 +198,15 @@ const maxEchoedArgsBytes = 200
 // unparseableToolArgs is the answer for a tool call whose arguments could not be decoded
 func unparseableToolArgs(rawArgs string, parsed map[string]any) string {
 	trimmed := strings.TrimSpace(rawArgs)
-	if trimmed == "" || len(parsed) > 0 || json.Valid([]byte(trimmed)) {
+	if trimmed == "" || len(parsed) > 0 || jsontext.Value(trimmed).IsValid() {
 		return ""
 	}
 	offset := 0
 	var probe any
 	if err := json.Unmarshal([]byte(trimmed), &probe); err != nil {
-		if syn, ok := err.(*json.SyntaxError); ok {
-			offset = int(syn.Offset)
+		var syn *jsontext.SyntacticError
+		if errors.As(err, &syn) {
+			offset = int(syn.ByteOffset)
 		}
 	}
 	echo, more := trimmed, ""
@@ -255,7 +264,7 @@ func findWordIndex(line, word string) int {
 }
 
 // formatLSPResponse formats a raw LSP JSON response into a human-readable string.
-func formatLSPResponse(response json.RawMessage, method string, worktreePath string) string {
+func formatLSPResponse(response jsontext.Value, method string, worktreePath string) string {
 	var envelope lspEnvelope
 	if err := json.Unmarshal(response, &envelope); err != nil {
 		return string(response)
@@ -279,7 +288,7 @@ func formatLSPResponse(response json.RawMessage, method string, worktreePath str
 	case "textDocument/hover":
 		return formatHoverResult(result)
 	default:
-		data, _ := json.MarshalIndent(result, "", "  ")
+		data, _ := json.Marshal(result, jsontext.WithIndent("  "))
 		return string(data)
 	}
 }
@@ -288,7 +297,7 @@ func formatLSPResponse(response json.RawMessage, method string, worktreePath str
 func formatLocationArray(result any, worktreePath string, label string) string {
 	locs, ok := result.([]any)
 	if !ok {
-		data, _ := json.MarshalIndent(result, "", "  ")
+		data, _ := json.Marshal(result, jsontext.WithIndent("  "))
 		return string(data)
 	}
 	if len(locs) == 0 {
@@ -333,7 +342,7 @@ func formatDefinitionResult(result any, worktreePath string) string {
 		}
 		return buf.String()
 	default:
-		data, _ := json.MarshalIndent(result, "", "  ")
+		data, _ := json.Marshal(result, jsontext.WithIndent("  "))
 		return string(data)
 	}
 }
@@ -359,7 +368,7 @@ func locationOf(loc map[string]any, worktreePath string) (rel string, line, char
 func formatHoverResult(result any) string {
 	hover, ok := result.(map[string]any)
 	if !ok {
-		data, _ := json.MarshalIndent(result, "", "  ")
+		data, _ := json.Marshal(result, jsontext.WithIndent("  "))
 		return string(data)
 	}
 
@@ -380,7 +389,7 @@ func formatHoverResult(result any) string {
 	}
 
 	// Fallback: marshal the whole thing
-	data, _ := json.MarshalIndent(contents, "", "  ")
+	data, _ := json.Marshal(contents, jsontext.WithIndent("  "))
 	return string(data)
 }
 

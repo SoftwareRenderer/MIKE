@@ -2,7 +2,7 @@ package extensions
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -37,7 +37,7 @@ func TestHandleUpdate_SanitizesManifestURLs(t *testing.T) {
 	}
 
 	var resp ExtensionResponse
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+	if err := json.UnmarshalRead(w.Body, &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 

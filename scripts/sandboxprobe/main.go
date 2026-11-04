@@ -10,7 +10,7 @@ package main
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"flag"
 	"fmt"
 	"os"
@@ -68,7 +68,8 @@ func main() {
 	}
 
 	if *jsonOut {
-		_ = json.NewEncoder(os.Stdout).Encode(v)
+		_ = json.MarshalWrite(os.Stdout, v)
+		fmt.Println()
 	} else if v.Usable {
 		fmt.Printf("sandbox: usable (probed %s)\n", v.Image)
 	} else {
@@ -110,7 +111,8 @@ func runBuildProbe(ctx context.Context, builder string, jsonOut bool) int {
 	}
 
 	if jsonOut {
-		_ = json.NewEncoder(os.Stdout).Encode(v)
+		_ = json.MarshalWrite(os.Stdout, v)
+		fmt.Println()
 		return buildExitCode(v)
 	}
 

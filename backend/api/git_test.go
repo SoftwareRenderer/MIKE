@@ -1,7 +1,7 @@
 package api
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -935,8 +935,11 @@ func TestHandleBranchesNamesTheWorktreeHoldingEachRef(t *testing.T) {
 		t.Fatalf("expected 200 listing branches, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	var refs []struct{ Name, Worktree string }
-	if err := json.NewDecoder(rec.Body).Decode(&refs); err != nil {
+	var refs []struct {
+		Name     string `json:"name"`
+		Worktree string `json:"worktree"`
+	}
+	if err := json.UnmarshalRead(rec.Body, &refs); err != nil {
 		t.Fatalf("decode branch rows: %v: %s", err, rec.Body.String())
 	}
 	holder := map[string]string{}
@@ -1022,8 +1025,10 @@ func addBareRemote(t *testing.T, projPath string) string {
 // decodeGitError parses a JSON error response body and returns the message.
 func decodeGitError(t *testing.T, rec *httptest.ResponseRecorder) string {
 	t.Helper()
-	var body struct{ Error string }
-	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.UnmarshalRead(rec.Body, &body); err != nil {
 		t.Fatalf("decode error response: %v: %s", err, rec.Body.String())
 	}
 	return body.Error

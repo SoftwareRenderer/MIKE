@@ -4,8 +4,8 @@
 package httputil
 
 import (
-	"encoding/json"
-	"errors"
+	"bytes"
+	"encoding/json/v2"
 	"io"
 	"net/http"
 
@@ -18,14 +18,22 @@ import (
 func JSONResponse(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	marshalToResponse(w, v)
 }
 
 // JSONError sends a JSON error response.
 func JSONError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]string{"error": message})
+	marshalToResponse(w, map[string]string{"error": message})
+}
+
+// marshalToResponse writes the body and has nowhere to report a failure: the status is already on the
+// wire, so a value that cannot be encoded leaves a short body and this log line as the only sign.
+func marshalToResponse(w http.ResponseWriter, v any) {
+	if err := json.MarshalWrite(w, v); err != nil {
+		logging.For(logging.HTTP).Errorf("response body could not be encoded: %v", err)
+	}
 }
 
 // MethodNotAllowed answers 405 with a plain-text body. It stays live even though every route declares
@@ -65,17 +73,28 @@ func DecodeJSONOrEmpty(w http.ResponseWriter, r *http.Request, v any) bool {
 
 // decodeJSON is DecodeJSON with the limit injected, so the 413 path is testable
 // without building a 32 MB body.
+//
+// The body is read before it is decoded because the reader cannot tell the two failures apart: a body
+// that never arrived and one that stopped half way through a value both arrive as io.ErrUnexpectedEOF.
+// `emptyOK` means "no body", not "unreadable body", so the bytes decide.
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any, limit int64, emptyOK bool) bool {
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
-	if err := dec.Decode(v); err != nil {
-		if emptyOK && errors.Is(err, io.EOF) {
+	raw, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
+	if err != nil {
+		JSONError(w, http.StatusBadRequest, "invalid request body")
+		return false
+	}
+	if int64(len(raw)) > limit {
+		JSONError(w, http.StatusRequestEntityTooLarge, "request body too large")
+		return false
+	}
+	if len(bytes.TrimSpace(raw)) == 0 {
+		if emptyOK {
 			return true
 		}
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			JSONError(w, http.StatusRequestEntityTooLarge, "request body too large")
-			return false
-		}
+		JSONError(w, http.StatusBadRequest, "invalid request body")
+		return false
+	}
+	if err := json.Unmarshal(raw, v); err != nil {
 		JSONError(w, http.StatusBadRequest, "invalid request body")
 		return false
 	}

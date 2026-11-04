@@ -3,7 +3,8 @@ package exec
 import (
 	"cmp"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"mike/backend/config"
@@ -116,6 +117,12 @@ const (
 	commandCutNotice   = "\n\n... (output truncated at 50KB) ..."
 	readCutNotice      = "\n\n... (file truncated at 50KB, use offset/limit parameters to read remaining lines) ..."
 )
+
+// toolResultText repairs the foreign bytes a tool produced, once, before anything marshals them: the
+// task frame, the stored tool_call row and the conversation. v2 answers an encode error beside partial
+// bytes where v1 wrote U+FFFD, so one stray byte would end the turn and store a half-written row. The
+// cap above cuts on a byte index and can split a rune, which is the everyday source of such a string.
+func toolResultText(s string) string { return strings.ToValidUTF8(s, "\ufffd") }
 
 // orFail answers with a handler's own result, or with its error in the failed shape.
 func orFail(result string, err error) (string, bool) {
@@ -309,7 +316,7 @@ type textEdit struct {
 
 func (r *toolRunner) runEditFile(ctx context.Context, args map[string]any, env *toolEnv) (string, bool) {
 	path, _ := args["path"].(string)
-	editsRaw, ok := args["edits"].(json.RawMessage)
+	editsRaw, ok := args["edits"].(jsontext.Value)
 	if !ok {
 		// Try to marshal from the interface{}
 		editsRaw, _ = json.Marshal(args["edits"])

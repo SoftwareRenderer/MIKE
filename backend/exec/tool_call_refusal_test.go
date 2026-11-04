@@ -2,7 +2,8 @@ package exec
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"os"
@@ -90,7 +91,7 @@ func TestToolCallWithTruncatedArgumentsIsRefusedWithoutRunning(t *testing.T) {
 	if row == nil {
 		t.Fatal("no executed tool call row")
 	}
-	if !json.Valid([]byte(row.ToolResult)) {
+	if !jsontext.Value(row.ToolResult).IsValid() {
 		t.Fatalf("tool_result is not the stored JSON shape: %q", row.ToolResult)
 	}
 	var stored map[string]any

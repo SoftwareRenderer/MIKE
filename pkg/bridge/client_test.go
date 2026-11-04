@@ -2,7 +2,8 @@ package bridge
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -415,7 +416,7 @@ func TestLSPNotifyAbandonsWedgedWrite(t *testing.T) {
 	withShortLSPRoundTrip(t, 50*time.Millisecond)
 	client := wedgedBridge(t)
 
-	raw := json.RawMessage(`{"jsonrpc":"2.0","method":"textDocument/didOpen"}`)
+	raw := jsontext.Value(`{"jsonrpc":"2.0","method":"textDocument/didOpen"}`)
 	call := make(chan error, 1)
 	go func() { call <- client.LSPNotify(context.Background(), raw) }()
 
@@ -447,7 +448,7 @@ func TestLSPNotifyCancellationKeepsClientUsable(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	call := make(chan error, 1)
-	go func() { call <- client.LSPNotify(ctx, json.RawMessage(`{"jsonrpc":"2.0","method":"x"}`)) }()
+	go func() { call <- client.LSPNotify(ctx, jsontext.Value(`{"jsonrpc":"2.0","method":"x"}`)) }()
 
 	time.Sleep(50 * time.Millisecond) // let the write get stuck
 	cancel()
