@@ -10,6 +10,7 @@
     import { formatBytes } from '$lib/utils/format';
     import { t } from '$lib/i18n';
     import Spinner from './Spinner.svelte';
+    import StageSign from './StageSign.svelte';
     import ImageDiffModal from './ImageDiffModal.svelte';
     import ArchiveModal from './ArchiveModal.svelte';
     import { loadCollapsedDiffFiles, saveCollapsedDiffFiles } from '$lib/storage';
@@ -537,7 +538,7 @@ import { slide } from 'svelte/transition';
                     {#if pending}
                         <Spinner size={12} decorative />
                     {:else}
-                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d={isStaged ? "M4 8h8" : "M8 4v8M4 8h8"} stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                        <StageSign stage={!isStaged} size={12} />
                     {/if}
                 </button>
             {/if}
@@ -626,7 +627,7 @@ import { slide } from 'svelte/transition';
                     {#if pending}
                         <Spinner size={12} decorative />
                     {:else}
-                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d={isStaged ? "M4 8h8" : "M8 4v8M4 8h8"} stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                        <StageSign stage={!isStaged} size={12} />
                     {/if}
                 </button>
             {/if}
@@ -750,7 +751,7 @@ import { slide } from 'svelte/transition';
                     {#if busySection === 'staged'}
                         <Spinner size={12} decorative />
                     {:else}
-                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                        <StageSign stage={false} size={12} />
                     {/if}
                 </span>
                 {/if}
@@ -782,7 +783,7 @@ import { slide } from 'svelte/transition';
                     {#if busySection === 'unstaged'}
                         <Spinner size={12} decorative />
                     {:else}
-                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                        <StageSign stage size={12} />
                     {/if}
                 </span>
                 {/if}

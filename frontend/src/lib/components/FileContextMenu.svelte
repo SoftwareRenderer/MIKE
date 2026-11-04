@@ -16,8 +16,7 @@
     import { onMount } from 'svelte';
     import { useClickOutside } from '$lib/composables/use-click-outside.svelte';
     import Icon from './Icon.svelte';
-    import stageIcon from '$lib/assets/icons/stage.svg?raw';
-    import unstageIcon from '$lib/assets/icons/unstage.svg?raw';
+    import StageSign from './StageSign.svelte';
     import discardIcon from '$lib/assets/icons/discard.svg?raw';
 
     let {
@@ -182,10 +181,8 @@
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                         <path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>
                     </svg>
-                {:else if item.icon === 'stage'}
-                    <Icon src={stageIcon} width={14} height={14} />
-                {:else if item.icon === 'unstage'}
-                    <Icon src={unstageIcon} width={14} height={14} />
+                {:else if item.icon === 'stage' || item.icon === 'unstage'}
+                    <StageSign stage={item.icon === 'stage'} size={14} />
                 {:else if item.icon === 'discard'}
                     <Icon src={discardIcon} width={14} height={14} />
                 {/if}

@@ -43,6 +43,7 @@ vi.mock('$lib/storage', () => ({
 
 import {
     openPanel, seedPanel, rowEl, rowEls, selectedPaths, bar, list, menu, STAGED, UNSTAGED,
+    holdUnstaged, sectionAction, signPath, stageBtn,
 } from './git-panel-harness';
 
 beforeEach(() => {
@@ -80,6 +81,19 @@ describe('the changes list selection', () => {
         expect(bar(container)?.querySelector('.selection-count')?.textContent).toBe('2 selected');
         expect([...bar(container)!.querySelectorAll('button')].map(b => b.getAttribute('aria-label')))
             .toEqual(['Stage', 'Unstage', 'Discard', 'Clear selection']);
+    });
+
+    it('draws on the bar the sign each row already draws for that action', async () => {
+        const { container } = await openPanel();
+        await holdUnstaged(container);
+
+        const signs = Object.fromEntries([...bar(container)!.querySelectorAll('button')]
+            .map(b => [b.getAttribute('aria-label'), signPath(b)]));
+
+        expect(signs.Stage).toBe(signPath(stageBtn(container, 'modified.ts')));
+        expect(signs.Unstage).toBe(signPath(stageBtn(container, 'staged-a.ts')));
+        expect(signs.Stage).toBe(signPath(sectionAction(container, 'Stage all')));
+        expect(signs.Unstage).toBe(signPath(sectionAction(container, 'Unstage all')));
     });
 
     it('takes the range between the anchor and the row a shift-click lands on', async () => {

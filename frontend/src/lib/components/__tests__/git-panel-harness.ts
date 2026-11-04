@@ -70,6 +70,9 @@ export const discardRowBtn = (container: HTMLElement, path: string) =>
 /** A group header's whole-section action, named by what it does. */
 export const sectionAction = (container: HTMLElement, label: string) =>
     container.querySelector<HTMLElement>(`.changes-section-action[aria-label="${label}"]`);
+/** The sign a stage control draws — the plus that puts a path on the index, the bare rule that takes it
+ *  off. Two controls offering the same action draw the same one. */
+export const signPath = (el: Element | null) => el?.querySelector('svg path')?.getAttribute('d') ?? null;
 /** Every spinner a running write leaves behind, wherever it sits. */
 export const rings = (container: HTMLElement) => [...container.querySelectorAll('.spinner')];
 export const menu = (container: HTMLElement) => container.querySelector<HTMLElement>('.file-context-menu');

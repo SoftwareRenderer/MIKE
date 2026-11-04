@@ -43,7 +43,7 @@ vi.mock('$lib/storage', () => ({
 
 import {
     api, openPanel, openMenuOn, holdUnstaged, seedPanel, rowEl, selectedPaths, menu, menuLabels,
-    menuItem, list,
+    menuItem, list, sectionAction, signPath, stageBtn,
 } from './git-panel-harness';
 
 beforeEach(() => {
@@ -115,6 +115,25 @@ describe('the changes list context menu', () => {
 
         fireEvent.click(menuItem(container, 'Stage all'));
         await waitFor(() => expect(api.stageProjectPaths).toHaveBeenCalledWith('p1', ['modified.ts', 'scratch.ts'], true));
+    });
+
+    it('marks the stage items with the sign the rows draw', async () => {
+        const { container } = await openPanel();
+
+        await openMenuOn(container, 'modified.ts');
+
+        expect(signPath(menuItem(container, 'Stage'))).toBe(signPath(stageBtn(container, 'modified.ts')));
+        expect(signPath(menuItem(container, 'Unstage'))).toBe(signPath(stageBtn(container, 'staged-a.ts')));
+    });
+
+    it('marks the section-wide items with the sign the section header draws', async () => {
+        const { container } = await openPanel();
+
+        await fireEvent.contextMenu(list(container), { clientX: 40, clientY: 200 });
+        await waitFor(() => expect(menu(container)).not.toBeNull());
+
+        expect(signPath(menuItem(container, 'Stage all'))).toBe(signPath(sectionAction(container, 'Stage all')));
+        expect(signPath(menuItem(container, 'Unstage all'))).toBe(signPath(sectionAction(container, 'Unstage all')));
     });
 });
 

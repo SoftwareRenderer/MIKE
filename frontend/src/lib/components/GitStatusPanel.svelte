@@ -15,11 +15,10 @@
     import FileContextMenu, { type FileMenuItem } from './FileContextMenu.svelte';
     import SelectionActionBar from './SelectionActionBar.svelte';
     import Icon from './Icon.svelte';
+    import StageSign from './StageSign.svelte';
     import EmptyState from './EmptyState.svelte';
     import Spinner from './Spinner.svelte';
-    import stageIcon from '$lib/assets/icons/stage.svg?raw';
     import closeIcon from '$lib/assets/icons/close.svg?raw';
-    import unstageIcon from '$lib/assets/icons/unstage.svg?raw';
     import discardIcon from '$lib/assets/icons/discard.svg?raw';
     import fileTextIcon from '$lib/assets/icons/file-text.svg?raw';
     import ResizeHandle from './ResizeHandle.svelte';
@@ -1168,10 +1167,8 @@
                                 <span class="changes-section-action" role="button" tabindex="0" aria-busy={sectionRings(group.id) || undefined} aria-describedby={writeBusy ? writeBusyId : undefined} onclick={(e) => { e.stopPropagation(); if (!writeBusy) group.run(); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); if (!writeBusy) group.run(); } }} title={group.allLabel} aria-label={group.allLabel}>
                                     {#if sectionRings(group.id)}
                                         <Spinner size={12} decorative />
-                                    {:else if group.id === 'staged'}
-                                        <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                                     {:else}
-                                        <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                                        <StageSign stage={group.id !== 'staged'} size={10} />
                                     {/if}
                                 </span>
                             </button>
@@ -1214,13 +1211,7 @@
                                             {#if rowRings(row.path, 'stage')}
                                                 <Spinner size={12} decorative />
                                             {:else}
-                                                <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
-                                                    {#if indexed}
-                                                        <path d="M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                                                    {:else}
-                                                        <path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                                                    {/if}
-                                                </svg>
+                                                <StageSign stage={!indexed} size={10} />
                                             {/if}
                                         </button>
                                         <button
@@ -1264,7 +1255,7 @@
                                 {#if barRings('stage')}
                                     <Spinner size={14} decorative />
                                 {:else}
-                                    <Icon src={stageIcon} width={14} height={14} />
+                                    <StageSign stage size={14} />
                                 {/if}
                             </button>
                             <button
@@ -1280,7 +1271,7 @@
                                 {#if barRings('unstage')}
                                     <Spinner size={14} decorative />
                                 {:else}
-                                    <Icon src={unstageIcon} width={14} height={14} />
+                                    <StageSign stage={false} size={14} />
                                 {/if}
                             </button>
                             <button
