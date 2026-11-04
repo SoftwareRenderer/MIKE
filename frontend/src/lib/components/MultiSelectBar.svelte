@@ -10,6 +10,7 @@
     import Icon from './Icon.svelte';
     import closeIcon from '$lib/assets/icons/close.svg?raw';
     import { useClickOutside } from '$lib/composables/use-click-outside.svelte';
+    import discardIcon from '$lib/assets/icons/discard.svg?raw';
 
     let { multiSelect, tasks, onClear }: {
         multiSelect: MultiSelect;
@@ -94,7 +95,7 @@
             message: t(status === 'in_progress' ? 'board.multiSelect.moveStartsMessage' : 'board.multiSelect.moveMessage', params),
             items: titlesFor(plan.movable),
             confirmText: t('board.confirm.move'),
-            cancelText: t('board.confirm.cancel'),
+            cancelText: t('app.cancel'),
             variant: 'default',
         });
         if (!confirmed) return;
@@ -113,7 +114,7 @@
             message: t('board.multiSelect.startMessage', { count: multiSelect.count }),
             items: titles,
             confirmText: t('board.confirm.start'),
-            cancelText: t('board.confirm.cancel'),
+            cancelText: t('app.cancel'),
             variant: 'default',
         });
         if (!confirmed) return;
@@ -159,7 +160,7 @@
                     <line x1="2" y1="5" x2="8" y2="8" stroke="currentColor" stroke-width="1.5"/>
                     <line x1="14" y1="5" x2="8" y2="8" stroke="currentColor" stroke-width="1.5"/>
                 </svg>
-                {t('board.multiSelect.model')}
+                {t('app.model')}
             </button>
             <button
                 type="button"
@@ -212,10 +213,7 @@
             onclick={handleDelete}
             aria-label={t('board.multiSelect.deleteCount', { count: multiSelect.count })}
         >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
+            <Icon src={discardIcon} width={14} height={14} />
             {t('board.multiSelect.deleteCount', { count: multiSelect.count })}
         </button>
 

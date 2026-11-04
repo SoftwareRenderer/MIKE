@@ -118,7 +118,7 @@ describe('CompressContextDialog dismissal', () => {
 
         expect(footerButton(container, 'Compress')).toBeTruthy();
 
-        i18n.setCatalog('fr', { 'chat.compress.confirm': 'Compresser', 'chat.common.cancel': 'Annuler' });
+        i18n.setCatalog('fr', { 'chat.compress.confirm': 'Compresser', 'app.cancel': 'Annuler' });
         await flush();
 
         expect(footerButton(container, 'Compresser')).toBeTruthy();

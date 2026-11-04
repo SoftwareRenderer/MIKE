@@ -15,6 +15,9 @@
     import { appStore } from '$lib/stores';
     import { fullscreenToggleTitle } from '$lib/utils/keyboard';
     import { t } from '$lib/i18n';
+    import Icon from '../Icon.svelte';
+    import fsExitIcon from '$lib/assets/icons/fullscreen-exit.svg?raw';
+    import fsEnterIcon from '$lib/assets/icons/fullscreen-enter.svg?raw';
 
     let {
         entries,
@@ -415,9 +418,9 @@
             {#if onToggleFullscreen}
                 <button type="button" class="chat-sticky-fullscreen" onclick={onToggleFullscreen} title={fullscreenTitle} aria-label={t('chat.entries.toggleFullscreen')}>
                     {#if isChatFullscreen}
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2V6H14M6 14V10H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        <Icon src={fsExitIcon} width={14} height={14} />
                     {:else}
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2h4v4M6 14H2v-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        <Icon src={fsEnterIcon} width={14} height={14} />
                     {/if}
                 </button>
             {/if}

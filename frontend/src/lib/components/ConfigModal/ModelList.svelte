@@ -120,7 +120,7 @@
     <div class="models-list">
         {#if models.length > 0}
             <div class="models-col-headers">
-                <span class="col-model">{t('settings.models.colModel')}</span>
+                <span class="col-model">{t('app.model')}</span>
                 <span class="col-ctx">{t('settings.models.colContext')}</span>
                 <span class="col-reasoning">{t('settings.models.colEffort')}</span>
                 <span class="col-expand" aria-hidden="true"></span>

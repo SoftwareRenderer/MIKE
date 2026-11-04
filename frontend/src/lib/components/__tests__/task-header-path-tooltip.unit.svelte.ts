@@ -109,7 +109,7 @@ describe('TaskHeader path tooltip (mobile)', () => {
         await tap(label);
         const copyBtn = container.querySelector('.path-tooltip-copy') as HTMLButtonElement;
         expect(copyBtn).toBeTruthy();
-        expect(copyBtn.textContent).toContain(t('task.header.copy'));
+        expect(copyBtn.textContent).toContain(t('app.copy'));
 
         await fireEvent.click(copyBtn);
         await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith(FULL_PATH));
@@ -164,7 +164,7 @@ describe('TaskHeader path tooltip (mobile)', () => {
         await fireEvent.click(copyBtn);
         // Let the rejected promise settle.
         await new Promise((r) => setTimeout(r, 0));
-        expect(copyBtn.textContent).toContain(t('task.header.copy'));
+        expect(copyBtn.textContent).toContain(t('app.copy'));
         expect(container.querySelector('.path-tooltip')).toBeTruthy();
     });
 

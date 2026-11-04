@@ -38,6 +38,8 @@
     import closeIcon from '$lib/assets/icons/close.svg?raw';
     import { checkNow, type UpdateOutcome } from '$lib/services/app-update';
     import { updateCheck } from '$lib/services/update-check.svelte';
+    import fsExitIcon from '$lib/assets/icons/fullscreen-exit.svg?raw';
+    import fsEnterIcon from '$lib/assets/icons/fullscreen-enter.svg?raw';
 
     let { config, onClose, onSaved, onSignOut }: { config: Config | null; onClose: () => void; onSaved: () => void; onSignOut?: () => void | Promise<void> } = $props();
 
@@ -838,9 +840,9 @@
             {#if !isMobileCtx.isMobile}
                 <button type="button" class="icon-btn" onclick={toggleModalFullscreen} title={t('settings.toggleFullscreen')} aria-label={t('settings.toggleFullscreen')}>
                     {#if modalFullscreen}
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2V6H14M6 14V10H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        <Icon src={fsExitIcon} width={14} height={14} />
                     {:else}
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2h4v4M6 14H2v-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        <Icon src={fsEnterIcon} width={14} height={14} />
                     {/if}
                 </button>
             {/if}
@@ -1125,9 +1127,9 @@
     {/if}
     <div class="modal-footer-right">
         {#if activeTab !== 'extensions'}
-            <button type="button" class="btn" onclick={handleClose} title={t('settings.cancelHint')}>{t('settings.cancel')}</button>
+            <button type="button" class="btn" onclick={handleClose} title={t('settings.cancelHint')}>{t('app.cancel')}</button>
             <button type="button" class="btn btn-primary" disabled={loading} onclick={handleSave} title={t('settings.saveHint')}>
-                {loading ? t('settings.saving') : t('settings.save')}
+                {loading ? t('settings.saving') : t('app.save')}
             </button>
         {/if}
     </div>

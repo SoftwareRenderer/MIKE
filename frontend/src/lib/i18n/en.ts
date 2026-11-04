@@ -8,6 +8,11 @@
  *  - Core holds no translated strings and no language names; `npm run check:i18n`
  *    enforces that. Never key text the app does not own (extension names, changelogs,
  *    log lines, anything a manifest or API response gives).
+ *  - A word several areas ask for lives in `app.*` once (`app.save`, `app.remove`, `app.copy`,
+ *    `app.model`, `app.operatingMode`); a per-area twin makes a pack translate one word twice.
+ *  - Keys that share an English value but mean different things stay apart: `app.key.delete` is a
+ *    keycap and `chat.common.delete` a verb, and every pack translates them apart.
+ *    `docs/i18n.md → One English value, many keys`.
  */
 
 /** The categories `Intl.PluralRules` can answer with. */
@@ -31,7 +36,6 @@ const catalog = {
 
     // Shared by more than one explorer component
     'explorer.shared.loading': 'Loading...',
-    'explorer.shared.cancel': 'Cancel',
     'explorer.shared.discard': 'Discard',
     'explorer.shared.unsavedChanges': 'Unsaved changes',
     'explorer.shared.openTerminal': 'Open terminal',
@@ -301,9 +305,7 @@ const catalog = {
     'settings.signOut': 'Sign out',
     'settings.signOutConfirm': 'Are you sure you want to sign out?',
     'settings.signOutHint': 'Sign out',
-    'settings.cancel': 'Cancel',
     'settings.cancelHint': 'Cancel and discard changes',
-    'settings.save': 'Save',
     'settings.saving': 'Saving...',
     'settings.saveHint': 'Save settings',
     'settings.aboutTitle': 'MIKE: Integrated Kanban Environment',
@@ -380,7 +382,6 @@ const catalog = {
     // ── ConfigModal/TaskDefaults.svelte ──
     // autoMergeDesc is split around the inline branch badge; the halves keep their spaces.
     'settings.defaults.description': 'These settings apply to newly created tasks',
-    'settings.defaults.operatingMode': 'Operating mode',
     'settings.defaults.autoMerge': 'Auto-merge',
     'settings.defaults.autoMergeAria': 'Auto-merge into main',
     'settings.defaults.autoMergeDesc.before': 'Merge changes into',
@@ -437,7 +438,6 @@ const catalog = {
     'settings.mcp.headerValuePlaceholder': 'Value',
     'settings.mcp.headerNameAria': 'Header name',
     'settings.mcp.headerValueAria': 'Header value',
-    'settings.mcp.remove': 'Remove',
     'settings.mcp.removeHint': 'Remove this server',
     'settings.mcp.removeTitle': 'Remove MCP server?',
     'settings.mcp.removeMessage': 'Remove {name} from the registry?',
@@ -477,7 +477,6 @@ const catalog = {
     'settings.models.title': 'MODELS',
     'settings.models.addModelHint': 'Add a model manually',
     'settings.models.addModel': 'Add Model',
-    'settings.models.colModel': 'Model',
     'settings.models.colContext': 'Context Window',
     'settings.models.colEffort': 'Reasoning Effort',
     'settings.models.nameField': 'Model name',
@@ -585,7 +584,6 @@ const catalog = {
     'settings.tokens.create': 'Create token',
     'settings.tokens.creating': 'Creating...',
     'settings.tokens.createdTitle': 'Copy it now — this is the only time it is shown.',
-    'settings.tokens.copy': 'Copy',
     'settings.tokens.copied': 'Copied',
     'settings.tokens.revoke': 'Revoke',
     'settings.tokens.revoking': 'Revoking...',
@@ -645,7 +643,6 @@ const catalog = {
     // fetchError and testResult.message are server answers: not translated.
     'settings.provider.removeTitle': 'Remove Provider',
     'settings.provider.removeMessage': 'Remove this provider? This cannot be undone.',
-    'settings.provider.remove': 'Remove',
     'settings.provider.toggleAria': 'Toggle {name} settings',
     'settings.provider.newProvider': 'New Provider',
     'settings.provider.dragHint': 'Drag to reorder',
@@ -689,7 +686,6 @@ const catalog = {
     'settings.stats.power': 'Power',
     'settings.stats.estCost': 'Est. Total Cost',
     'settings.stats.costHint': 'Includes API pricing and electricity cost (when configured)',
-    'settings.stats.model': 'Model',
     'settings.stats.resetHint': 'Reset stats for this model',
     'settings.stats.resetAria': 'Reset stats for {model}',
     'settings.stats.resetTitle': 'Reset token stats',
@@ -860,7 +856,6 @@ const catalog = {
     'settings.extensions.agentCardUnmountHint': 'Take the folder back out of the agent’s container',
     'settings.extensions.agentGrantFailed': 'The folder could not be granted: {reason}',
     'settings.extensions.configuration': 'Configuration',
-    'settings.extensions.remove': 'Remove',
     'settings.extensions.addMount': 'Add mount',
     'settings.extensions.addVariable': 'Add variable',
     'settings.extensions.noLimit': 'No limit',
@@ -970,6 +965,13 @@ const catalog = {
 
     // ── shared button / dialog copy ──
     'app.cancel': 'Cancel',
+    'app.save': 'Save',
+    'app.remove': 'Remove',
+    'app.copy': 'Copy',
+
+    // ── shared field labels ──
+    'app.model': 'Model',
+    'app.operatingMode': 'Operating mode',
     'app.ok': 'OK',
     'app.close': 'Close',
     // Shared by the top bar and the task header: the control's name, never the path it shows.
@@ -1088,8 +1090,6 @@ const catalog = {
     'app.task.subtaskOf': 'Subtask of:',
     'app.task.parentFallback': 'Parent task',
     'app.task.description': 'Description',
-    'app.task.model': 'Model',
-    'app.task.operatingMode': 'Operating mode',
     'app.task.repository': 'Repository',
     'app.task.branch': 'Branch',
     'app.task.branchDesc': "Base branch for this task's changes",
@@ -1116,7 +1116,6 @@ const catalog = {
     },
     'app.project.removeTitle': 'Remove Project',
     'app.project.removeMessage': "Remove \"{name}\" from the board?\n\nThis will delete all tasks, messages, and their worktree directories.\nThe project folder itself will NOT be deleted.",
-    'app.project.remove': 'Remove',
     'app.offline.title': 'Server unreachable',
     'app.offline.button': 'Offline Mode',
     'app.alt.loading': 'Loading',
@@ -1290,10 +1289,7 @@ const catalog = {
     'sandbox.readOnly': 'Read-only',
     'sandbox.mountReadWrite': 'Mount Read/Write',
     'sandbox.mountReadOnly': 'Mount Read-only',
-    'sandbox.remove': 'Remove',
     'sandbox.cancelEdit': 'Cancel edit',
-    'sandbox.cancel': 'Cancel',
-    'sandbox.save': 'Save',
     'sandbox.saving': 'Saving...',
     'sandbox.ports': 'Forward Ports',
     'sandbox.portsAria': 'Toggle port forwarding settings',
@@ -1439,7 +1435,6 @@ const catalog = {
     // The hint translates; the aria-label and the on-screen key names do not.
     'terminal.closeWithShortcut': 'Close terminal ({shortcut})',
     'terminal.activePortMappings': 'Active port mappings (Host : Container)',
-    'terminal.copy': 'Copy',
     'terminal.paste': 'Paste',
     'terminal.noProject': 'No project selected',
     'boardDnd.cannotMoveToBacklog': 'Cannot move to Backlog: parent task is In Progress',
@@ -1503,12 +1498,9 @@ const catalog = {
     'chat.stream.summarized': 'Context was summarized to free space',
 
     // ── shared across the chat surface ──
-    'chat.common.cancel': 'Cancel',
-    'chat.common.save': 'Save',
     'chat.common.send': 'Send',
     'chat.common.delete': 'Delete',
     'chat.common.close': 'Close',
-    'chat.common.remove': 'Remove',
     'chat.common.attachImage': 'Attach image',
     'chat.common.attachFile': 'Attach file',
     'chat.common.attachment': 'Attachment',
@@ -1594,7 +1586,6 @@ const catalog = {
     'chat.mode.act': 'Act',
     'chat.mode.plan': 'Plan',
     'chat.mode.explore': 'Explore',
-    'chat.mode.aria': 'Operating mode',
     'chat.mode.toggleAria': 'Toggle operating mode',
     'chat.mode.actTip': 'Act mode: AI is required to provide structured responses during review, and has read/write access. Click to switch.',
     'chat.mode.planTip': 'Plan mode: AI decomposes work into subtasks on the board, and only has read access to its worktree. Click to switch.',
@@ -1604,7 +1595,6 @@ const catalog = {
     'chat.changeModel.title': { one: 'Change Model for {count} task', other: 'Change Model for {count} tasks' },
     'chat.changeModel.confirm': 'Change Model',
     'chat.changeModel.confirmTip': 'Change the model',
-    'chat.changeModel.model': 'Model',
     'chat.changeModel.noProviders': 'No providers configured',
 
     // ── Chat/StartPanel.svelte ──
@@ -1761,7 +1751,6 @@ const catalog = {
 
     // ── shared by the board and the task view (the same strings ship in both) ──
     'board.confirm.delete': 'Delete',
-    'board.confirm.cancel': 'Cancel',
     'board.confirm.start': 'Start',
     'board.confirm.move': 'Move',
     'board.untitled': '(untitled)',
@@ -1811,7 +1800,6 @@ const catalog = {
     'board.clearDone.failed': 'Failed to clear done tasks: {error}',
 
     // ── MultiSelectBar.svelte — the floating bar and its start dialog ──
-    'board.multiSelect.model': 'Model',
     'board.multiSelect.toolbarAria': 'Multi-select actions',
     'board.multiSelect.modelAria': { one: 'Change model for {count} task', other: 'Change model for {count} tasks' },
     'board.multiSelect.moveAria': { one: 'Move {count} task', other: 'Move {count} tasks' },
@@ -1870,11 +1858,8 @@ const catalog = {
     // ── Card/EditTaskModal.svelte — the edit dialog ──
     // Mode descriptions come from constants/modes.ts, not from here.
     'board.editTask.title': 'Edit Task',
-    'board.editTask.save': 'Save',
     'board.editTask.fieldTitle': 'Title',
     'board.editTask.titlePlaceholder': 'Task title',
-    'board.editTask.fieldModel': 'Model',
-    'board.editTask.operatingMode': 'Operating mode',
     'board.editTask.repository': 'Repository',
     'board.editTask.branch': 'Branch',
     'board.editTask.branchDesc': "Base branch for this task's changes",
@@ -1919,7 +1904,6 @@ const catalog = {
     'task.header.sandboxEnabled': 'Sandbox enabled',
     'task.header.copyPathAria': 'Copy path',
     'task.header.pathCopiedAria': 'Path copied',
-    'task.header.copy': 'Copy',
     'task.graph.history': 'History',
     'task.graph.historyAria': 'Commit history',
     'task.graph.pushedToOrigin': 'Pushed to origin',
@@ -2049,7 +2033,6 @@ const catalog = {
     'git.refreshAndCommit': 'Refresh and commit',
     'git.commitAnyway': 'Commit anyway',
     'git.commit': 'Commit',
-    'git.cancel': 'Cancel',
     'git.commitFailed': 'Commit failed',
     'git.discardTitle': 'Discard changes?',
     'git.discardTrackedMessage': 'The file goes back to its last commit. Uncommitted changes in it are lost.',
@@ -2102,7 +2085,6 @@ const catalog = {
     // ═══ editor.* / lsp.* — editor, search and terminal ═══
     // The on-screen keyboard (esc, pgup, ctrl) is not here: those are key names, like
     // the "/" and "-" keys beside them.
-    'editor.save': 'Save',
     'editor.saving': 'Saving...',
     // Icon-only, and no key combination claimed: these exist because the narrow layout has no keyboard.
     'editor.undo': 'Undo',
@@ -2118,7 +2100,6 @@ const catalog = {
     'editor.color.swatch': 'Color picker',
     'editor.color.hex': 'Hex value',
     'editor.color.apply': 'Apply',
-    'editor.color.cancel': 'Cancel',
     'editor.unsavedTitle': 'Unsaved Changes',
     'editor.unsavedMessage': 'You have unsaved changes. Discard them?',
     'editor.keepEditing': 'Keep Editing',

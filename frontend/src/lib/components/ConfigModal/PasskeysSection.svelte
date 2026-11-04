@@ -108,7 +108,7 @@
             title: t('settings.passkeys.revokeTitle'),
             message: t('settings.passkeys.revokeMessage'),
             confirmText: t('settings.passkeys.revoke'),
-            cancelText: t('settings.cancel'),
+            cancelText: t('app.cancel'),
             variant: 'destructive',
         });
         if (!confirmed) return;
@@ -148,7 +148,7 @@
             title: t('settings.passkeys.revokeCodesTitle'),
             message: t('settings.passkeys.revokeCodesMessage'),
             confirmText: t('settings.passkeys.revokeCodes'),
-            cancelText: t('settings.cancel'),
+            cancelText: t('app.cancel'),
             variant: 'destructive',
         });
         if (!confirmed) return;

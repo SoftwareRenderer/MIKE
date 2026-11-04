@@ -257,7 +257,7 @@
                             aria-label={t('explorer.shared.newFolderNameAria')}
                         />
                         <button class="btn-mini" onclick={handleCreateFolder} disabled={mkdirLoading || !newFolderName.trim()} title={t('explorer.fileBrowser.create')}>{mkdirLoading ? '...' : t('explorer.fileBrowser.create')}</button>
-                        <button class="btn-mini btn-mini-cancel" onclick={() => { showNewFolder = false; newFolderName = ''; }} title={t('explorer.shared.cancel')}><Icon src={closeIcon} width={14} height={14} /></button>
+                        <button class="btn-mini btn-mini-cancel" onclick={() => { showNewFolder = false; newFolderName = ''; }} title={t('app.cancel')}><Icon src={closeIcon} width={14} height={14} /></button>
                     </div>
                 {/if}
                 </div>
@@ -356,7 +356,7 @@
                         <span>{t('explorer.fileBrowser.showHidden')}</span>
                     </label>
                 {/if}
-                <button type="button" class="btn" onclick={handleClose} title={t('explorer.shared.cancel')}>{t('explorer.shared.cancel')}</button>
+                <button type="button" class="btn" onclick={handleClose} title={t('app.cancel')}>{t('app.cancel')}</button>
                 {#if activeTab === 'browse'}
                     {#if isGitRepo}
                         <button type="button" class="btn btn-primary" onclick={handleSelect} title={t('explorer.fileBrowser.selectTitle')}>

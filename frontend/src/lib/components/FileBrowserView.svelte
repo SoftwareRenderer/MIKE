@@ -566,7 +566,7 @@
             message: t('explorer.shared.deleteMessage', { count: paths.length, name: names[0] }),
             items: confirmList(names, count => t('explorer.shared.deleteMore', { count })),
             confirmText: t('explorer.shared.menuDelete'),
-            cancelText: t('explorer.shared.cancel'),
+            cancelText: t('app.cancel'),
             variant: 'destructive',
         });
         if (!confirmed) return;
@@ -737,8 +737,8 @@
                     class="name-row-btn"
                     onclick={cancelNewFile}
                     onmousedown={keepFieldFocused}
-                    title={t('explorer.shared.cancel')}
-                    aria-label={t('explorer.shared.cancel')}
+                    title={t('app.cancel')}
+                    aria-label={t('app.cancel')}
                 ><Icon src={closeIcon} width={14} height={14} /></button>
             </div>
         {:else}
@@ -771,8 +771,8 @@
                     class="name-row-btn"
                     onclick={cancelNewFolder}
                     onmousedown={keepFieldFocused}
-                    title={t('explorer.shared.cancel')}
-                    aria-label={t('explorer.shared.cancel')}
+                    title={t('app.cancel')}
+                    aria-label={t('app.cancel')}
                 ><Icon src={closeIcon} width={14} height={14} /></button>
             </div>
         {/if}
@@ -877,8 +877,8 @@
                         class="name-row-btn"
                         onclick={() => renaming = null}
                         onmousedown={keepFieldFocused}
-                        title={t('explorer.shared.cancel')}
-                        aria-label={t('explorer.shared.cancel')}
+                        title={t('app.cancel')}
+                        aria-label={t('app.cancel')}
                     ><Icon src={closeIcon} width={14} height={14} /></button>
                 </div>
             {:else}

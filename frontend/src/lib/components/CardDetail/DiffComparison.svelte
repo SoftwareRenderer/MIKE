@@ -5,6 +5,9 @@
     import { fullscreenToggleTitle } from '$lib/utils/keyboard';
     import DiffSelect from '../DiffSelect.svelte';
     import { t } from '$lib/i18n';
+    import Icon from '../Icon.svelte';
+    import fsExitIcon from '$lib/assets/icons/fullscreen-exit.svg?raw';
+    import fsEnterIcon from '$lib/assets/icons/fullscreen-enter.svg?raw';
 
     let { commits, baseCommit, diffFrom, diffTo, onFromChange, onToChange, onToggleFullscreen, isFullscreen, isDone, branchTip, branchName }: {
         commits: TaskCommit[];
@@ -88,9 +91,9 @@
     <DiffSelect options={toOptions} value={diffTo} onChange={onToChange} ariaLabel="To" />
     <button type="button" class="diff-fullscreen-btn" onclick={onToggleFullscreen} title={fullscreenTitle}>
         {#if isFullscreen}
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2V6H14M6 14V10H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <Icon src={fsExitIcon} width={14} height={14} />
         {:else}
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2h4v4M6 14H2v-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <Icon src={fsEnterIcon} width={14} height={14} />
         {/if}
     </button>
 </div>

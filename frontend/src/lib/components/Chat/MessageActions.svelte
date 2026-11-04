@@ -1,5 +1,8 @@
 <script lang="ts">
     import { t } from '$lib/i18n';
+    import Icon from '$lib/components/Icon.svelte';
+    import discardIcon from '$lib/assets/icons/discard.svg?raw';
+    import refreshIcon from '$lib/assets/icons/refresh.svg?raw';
 
     interface Props {
         variant: 'user' | 'assistant';
@@ -43,10 +46,7 @@
         {/if}
         {#if onDelete}
             <button class="action-btn" onclick={onDelete} aria-label={t('chat.actions.delete')} title={t('chat.actions.delete')}>
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                    <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
+                <Icon src={discardIcon} width={16} height={16} />
             </button>
         {/if}
     {:else}
@@ -61,12 +61,7 @@
         {/if}
         {#if onRegenerate && !isStreaming && !isOptimistic}
             <button class="action-btn" onclick={onRegenerate} aria-label={t('chat.actions.regenerate')} title={t('chat.actions.regenerate')}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M21 2v6h-6"/>
-                    <path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
-                    <path d="M3 22v-6h6"/>
-                    <path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
-                </svg>
+                <Icon src={refreshIcon} width={14} height={14} />
             </button>
         {/if}
         {#if onEdit}
@@ -79,10 +74,7 @@
         {/if}
         {#if onDelete && !isStreaming && !isOptimistic}
             <button class="action-btn" onclick={onDelete} aria-label={t('chat.actions.delete')} title={t('chat.actions.delete')}>
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                    <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
+                <Icon src={discardIcon} width={16} height={16} />
             </button>
         {/if}
     {/if}

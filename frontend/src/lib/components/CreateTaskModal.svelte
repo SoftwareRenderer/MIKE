@@ -374,7 +374,7 @@
                 {#each attachments as att, i}
                     <div class="task-attachment-chip">
                         <img src={imageSrc(att)} alt={t('chat.common.attachment')} />
-                        <button class="remove-attachment" onclick={() => removeAttachment(i)} aria-label={t('chat.common.remove')} title={t('chat.common.remove')}>&times;</button>
+                        <button class="remove-attachment" onclick={() => removeAttachment(i)} aria-label={t('app.remove')} title={t('app.remove')}>&times;</button>
                     </div>
                 {/each}
             </div>
@@ -386,7 +386,7 @@
     <input type="file" accept={ATTACHABLE_IMAGE_ACCEPT} multiple bind:this={fileInput} onchange={intake.handlePicked} style="display:none" />
     {#if hasProviders}
         <div class="model-select-row">
-            <span id="model-label" class="model-label" style="margin:0">{t('app.task.model')}</span>
+            <span id="model-label" class="model-label" style="margin:0">{t('app.model')}</span>
             <ModelSelector
                 providers={providers}
                 currentModel={selectedModel}
@@ -401,7 +401,7 @@
         <div class="config-row">
             <div class="config-info">
                 <div class="config-text">
-                    <span class="config-label">{t('app.task.operatingMode')}</span>
+                    <span class="config-label">{t('app.operatingMode')}</span>
                     <span class="config-desc">{MODE_DESCRIPTIONS[operatingMode] || ''}</span>
                 </div>
             </div>

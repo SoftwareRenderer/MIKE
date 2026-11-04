@@ -243,7 +243,7 @@
             title: t('settings.extensions.deleteTitle', { name }),
             message: t('settings.extensions.deleteMessage'),
             confirmText: t('settings.extensions.delete'),
-            cancelText: t('settings.cancel'),
+            cancelText: t('app.cancel'),
         });
         if (!confirmed) return;
 

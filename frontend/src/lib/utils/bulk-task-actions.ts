@@ -78,7 +78,7 @@ export function createBulkTaskActions(deps: BulkTaskActionDeps): BulkTaskActions
             message: t('board.deleteTasks.message', { count: taskIds.length }),
             items: titles,
             confirmText: t('board.confirm.delete'),
-            cancelText: t('board.confirm.cancel'),
+            cancelText: t('app.cancel'),
         });
         if (!confirmed) return;
         // Only send DELETE for top-level tasks — the server recursively deletes descendants

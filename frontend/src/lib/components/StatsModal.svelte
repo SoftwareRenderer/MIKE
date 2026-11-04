@@ -9,6 +9,8 @@
     import { t } from '$lib/i18n';
     import { activeLocale } from '$lib/i18n/runtime.svelte';
     import BaseModal from './BaseModal.svelte';
+    import Icon from './Icon.svelte';
+    import refreshIcon from '$lib/assets/icons/refresh.svg?raw';
 
     let { projectId, onClose }: { projectId: string; onClose: () => void } = $props();
 
@@ -162,7 +164,7 @@
                 <table class="model-table">
                     <thead>
                         <tr>
-                            <th class="col-model">{t('settings.stats.model')}</th>
+                            <th class="col-model">{t('app.model')}</th>
                             <th class="col-num">{t('settings.stats.tasks')}</th>
                             <th class="col-num">{t('settings.stats.cached')}</th>
                             <th class="col-num">{t('settings.stats.prompt')}</th>
@@ -193,12 +195,7 @@
                                 {#if !resetLocked}
                                     <td class="col-action">
                                         <button class="btn-reset" onclick={() => resetModel(model)} title={t('settings.stats.resetHint')} aria-label={t('settings.stats.resetAria', { model: getTokenLabel(model) })}>
-                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                                <path d="M21 2v6h-6"/>
-                                                <path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
-                                                <path d="M3 22v-6h6"/>
-                                                <path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
-                                            </svg>
+                                            <Icon src={refreshIcon} width={14} height={14} />
                                             {t('settings.stats.reset')}
                                         </button>
                                     </td>

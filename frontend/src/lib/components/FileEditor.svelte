@@ -4,9 +4,8 @@
     import { baseName, sandboxMountFromPath } from '$lib/utils/path';
     import { readFsFile, writeFsFile, FsReadRefused, isTransientError } from '$lib/api';
     import { getEditorDraft, setEditorDraft, clearEditorDraft, loadEditorHistory, saveEditorHistory, loadAppSetting, saveAppSetting } from '$lib/storage';
-    import { EditorView } from 'codemirror';
     import { EditorState, Transaction, Compartment, StateField, StateEffect, RangeSet, Range, type Extension } from '@codemirror/state';
-    import { keymap } from '@codemirror/view';
+    import { EditorView, keymap } from '@codemirror/view';
     import { defaultKeymap, history, historyKeymap, indentWithTab, redo, undo } from '@codemirror/commands';
     import { bracketMatching, foldGutter, indentOnInput, foldKeymap, defaultHighlightStyle, syntaxHighlighting, indentUnit } from '@codemirror/language';
     import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
@@ -57,6 +56,9 @@
     import { historyDepths, replayDeltas, type EditorHistory } from '$lib/utils/editor-history';
     import { colorPicker, type ColorTarget } from '$lib/utils/editor-color-picker';
     import ColorPicker from './FileEditor/ColorPicker.svelte';
+    import Icon from './Icon.svelte';
+    import fsExitIcon from '$lib/assets/icons/fullscreen-exit.svg?raw';
+    import fsEnterIcon from '$lib/assets/icons/fullscreen-enter.svg?raw';
 
     let {
         projectId,
@@ -1737,9 +1739,9 @@
                 {#if onToggleFullscreen}
                     <button type="button" class="editor-icon-btn editor-fullscreen-toggle" onclick={onToggleFullscreen} title={fullscreenTitle}>
                         {#if mobileFullscreen}
-                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2V6H14M6 14V10H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            <Icon src={fsExitIcon} width={14} height={14} />
                         {:else}
-                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2h4v4M6 14H2v-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            <Icon src={fsEnterIcon} width={14} height={14} />
                         {/if}
                     </button>
                 {/if}
@@ -1754,7 +1756,7 @@
                     <Spinner size={14} decorative />
                     {t('editor.saving')}
                 {:else}
-                    {t('editor.save')}
+                    {t('app.save')}
                 {/if}
                 </button>
             </div>

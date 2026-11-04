@@ -1,6 +1,5 @@
-/* One Settings panel (the ruled box and its uppercase title) shared by ConfigModal and its tabs,
- * named `settings-` so it cannot restyle the scoped `.section` rules other components carry with
- * different bodies; `.section-header` stays per-component because the four of them differ. */
+/* One Settings panel box and its title, shared by ConfigModal and its tabs. Named `settings-` so it
+ * cannot restyle the scoped `.section` rules other components carry. */
 
 :global(.settings-section) {
     border: 1px solid var(--color-border);
@@ -183,4 +182,35 @@
     color: var(--color-text-primary);
     font-size: var(--text-sm);
     font-family: inherit;
+}
+
+/* One setting: its label and explanation on the left, the control that answers it on the right.
+ * Every name here is prefixed or nested under `.settings-section`, so it cannot restyle a component
+ * that carries the same class with another body. */
+:global(.settings-section .section-description) {
+    font-size: var(--text-sm);
+    color: var(--color-text-tertiary);
+    margin: 0 0 12px;
+}
+
+:global(.settings-section .toggle-field) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0;
+    gap: 12px;
+}
+
+:global(.settings-section .toggle-label-group) {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+}
+
+:global(.settings-section .toggle-desc) {
+    font-size: var(--text-xs);
+    color: var(--color-text-tertiary);
+    line-height: 1.4;
 }

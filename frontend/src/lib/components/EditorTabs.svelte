@@ -11,6 +11,9 @@
     import EditorHistoryButtons from './EditorHistoryButtons.svelte';
     import { untrack } from 'svelte';
     import { isArchiveViewPath } from '$lib/utils/archive-file';
+    import Icon from './Icon.svelte';
+    import fsExitIcon from '$lib/assets/icons/fullscreen-exit.svg?raw';
+    import fsEnterIcon from '$lib/assets/icons/fullscreen-enter.svg?raw';
 
     let { projectId, projectPath, taskId, openFiles, activeFilePath, unsavedFiles, pinnedFiles, onFocused, onSymbolsUpdate, onHasChanges,
         onSelectTab, onCloseTab, onPinTab, onSave, saving, onToggleFullscreen, mobileFullscreen, pendingFsEvent = null,
@@ -199,9 +202,9 @@
                 {#if onToggleFullscreen}
                     <button type="button" class="editor-icon-btn" onclick={onToggleFullscreen} title={fullscreenTitle} aria-label={t('app.shortcut.toggleFullscreen')}>
                         {#if mobileFullscreen}
-                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2V6H14M6 14V10H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            <Icon src={fsExitIcon} width={14} height={14} />
                         {:else}
-                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2h4v4M6 14H2v-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            <Icon src={fsEnterIcon} width={14} height={14} />
                         {/if}
                     </button>
                 {/if}
@@ -213,7 +216,7 @@
                         onclick={onSave}
                         title={t('editor.saveTitle')}
                     >
-                        {saving ? t('editor.saving') : t('editor.save')}
+                        {saving ? t('editor.saving') : t('app.save')}
                     </button>
                 {/if}
             </div>

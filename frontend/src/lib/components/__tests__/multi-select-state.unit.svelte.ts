@@ -153,7 +153,7 @@ describe('MultiSelectBar', () => {
 
         const modelBtn = container.querySelector('.bar-btn-model');
         expect(modelBtn).toBeTruthy();
-        expect(modelBtn?.textContent).toContain(t('board.multiSelect.model'));
+        expect(modelBtn?.textContent).toContain(t('app.model'));
     });
 
     it('should not show Model button when selected tasks are not all in Backlog', () => {

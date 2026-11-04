@@ -37,7 +37,7 @@
 
     <div class="toggle-field">
         <div class="toggle-label-group">
-            <span id="toggle-mode-label" class="toggle-label">{t('settings.defaults.operatingMode')}</span>
+            <span id="toggle-mode-label" class="toggle-label">{t('app.operatingMode')}</span>
             <span id="toggle-mode-desc" class="toggle-desc">{modeDescription}</span>
         </div>
         <ModeSelect value={defaultOperatingMode} onChange={(m: string) => { defaultOperatingMode = m; onDirty?.(); }} />
@@ -116,34 +116,10 @@
         margin: 0 0 4px;
         color: var(--color-text-primary);
     }
-    .section-description {
-        font-size: var(--text-sm);
-        color: var(--color-text-tertiary);
-        margin: 0 0 12px;
-    }
-    .toggle-field {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 8px 0;
-        gap: 12px;
-    }
-    .toggle-label-group {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-        min-width: 0;
-        flex: 1;
-    }
     .toggle-label {
         font-size: var(--text-sm);
         font-weight: 500;
         color: var(--color-text-primary);
-    }
-    .toggle-desc {
-        font-size: var(--text-xs);
-        color: var(--color-text-tertiary);
-        line-height: 1.4;
     }
     .branch-badge {
         display: inline-flex;

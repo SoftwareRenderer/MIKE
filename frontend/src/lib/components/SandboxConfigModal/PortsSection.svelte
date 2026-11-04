@@ -10,7 +10,10 @@
     import { editInPlace, onActivate, LITERAL_TEXT_FIELD } from '$lib/utils/row-form';
     import CancelEditButton from './CancelEditButton.svelte';
     import ExpandableSection from './ExpandableSection.svelte';
+    import Icon from '$lib/components/Icon.svelte';
+    import closeIcon from '$lib/assets/icons/close.svg?raw';
     import type { SandboxDraftOwner } from './draft.svelte';
+    import AddRowIcon from './AddRowIcon.svelte';
 
     let { draft, locked }: { draft: SandboxDraftOwner; locked: boolean } = $props();
 
@@ -46,8 +49,8 @@
                         {/if}
                         <span class="port-container" title={t('sandbox.containerPort')}>{containerHalf(port)}</span>
                     </span>
-                    <button type="button" class="btn-remove-port" onclick={(e) => { e.stopPropagation(); draft.removePortForward(i); }} disabled={locked} title={t('sandbox.remove')}>
-                        {@render closeIcon()}
+                    <button type="button" class="btn-remove-port" onclick={(e) => { e.stopPropagation(); draft.removePortForward(i); }} disabled={locked} title={t('app.remove')}>
+                        <Icon src={closeIcon} width={12} height={12} />
                     </button>
                 </div>
             {/each}
@@ -70,7 +73,7 @@
                 <CancelEditButton onclick={() => draft.cancelPortEdit()} />
             {/if}
             <button type="button" class="btn-add-port" class:pending={draft.hasPendingPort} onclick={() => draft.addPortForward()} disabled={locked} title={draft.editingPortIndex !== null ? t('sandbox.savePort') : t('sandbox.addPort')}>
-                {@render addIcon(draft.editingPortIndex !== null)}
+                <AddRowIcon editing={draft.editingPortIndex !== null} />
             </button>
         </div>
     </div>
@@ -90,23 +93,6 @@
     </svg>
 {/snippet}
 
-{#snippet closeIcon()}
-    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-        <path d="M3 3L9 9M9 3L3 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-    </svg>
-{/snippet}
-
-{#snippet addIcon(editing: boolean)}
-    {#if editing}
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-            <path d="M3 8L6 11L11 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-    {:else}
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-            <path d="M7 2V12M2 7H12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-        </svg>
-    {/if}
-{/snippet}
 
 <style>
     @import '$lib/styles/sandbox-settings.css';

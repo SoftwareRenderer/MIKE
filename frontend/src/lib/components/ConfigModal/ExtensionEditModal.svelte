@@ -115,9 +115,9 @@
 </script>
 
 {#snippet editFooter()}
-    <button type="button" class="btn" onclick={() => onclose()}>{t('settings.cancel')}</button>
+    <button type="button" class="btn" onclick={() => onclose()}>{t('app.cancel')}</button>
     <button type="button" class="btn btn-primary" onclick={() => save()} disabled={draft.saving}>
-        {draft.saving ? t('settings.saving') : t('settings.save')}
+        {draft.saving ? t('settings.saving') : t('app.save')}
     </button>
 {/snippet}
 

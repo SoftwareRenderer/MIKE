@@ -14,6 +14,8 @@
     import { openTerminalTitle, handleLinkClick, handleLinkKeydown } from '$lib/utils/keyboard';
     import { t } from '$lib/i18n';
     import { useClickOutside } from '$lib/composables/use-click-outside.svelte';
+    import discardIcon from '$lib/assets/icons/discard.svg?raw';
+    import terminalIcon from '$lib/assets/icons/terminal.svg?raw';
 
     let {
         workspaceDir,
@@ -255,17 +257,11 @@
                 onkeydown={(e) => handleLinkKeydown(e, () => onOpenTerminal?.())}
                 aria-label={t('app.shortcut.openTerminal')} title={terminalButtonTitle}
             >
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                    <rect x="1" y="2" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
-                    <path d="M4 6l2 2-2 2M7 10h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
+                <Icon src={terminalIcon} width={14} height={14} />
             </a>
         {/if}
         <button class="icon-btn" onclick={onDelete} aria-label={t('board.deleteTask.aria')} title={t('board.deleteTask.aria')}>
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
+            <Icon src={discardIcon} width={14} height={14} />
         </button>
         {#if floating}
             <button class="icon-btn" onclick={onOpenTask} aria-label={t('chat.tool.openTask')} title={t('chat.tool.openTask')}>
@@ -302,7 +298,7 @@
                     <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
                     <path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" stroke="currentColor" stroke-width="1.3"/>
                 </svg>
-                <span>{t('task.header.copy')}</span>
+                <span>{t('app.copy')}</span>
             {/if}
         </button>
     </div>

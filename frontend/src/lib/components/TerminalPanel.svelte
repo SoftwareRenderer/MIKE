@@ -17,6 +17,8 @@
     import closeIcon from '$lib/assets/icons/close.svg?raw';
     import { t } from '$lib/i18n';
     import '@xterm/xterm/css/xterm.css';
+    import fsExitIcon from '$lib/assets/icons/fullscreen-exit.svg?raw';
+    import fsEnterIcon from '$lib/assets/icons/fullscreen-enter.svg?raw';
 
     const HEIGHT_KEY = 'kanban:terminal:height';
     const DEFAULT_HEIGHT = 360;
@@ -557,7 +559,7 @@
             btnBarEl.style.cssText = `position:fixed;z-index:${Z.max};display:flex;align-items:center;background:var(--color-accent);border-radius:var(--radius-pill);box-shadow:var(--shadow-popover);overflow:hidden;`;
 
             copyBtnEl = document.createElement('button');
-            copyBtnEl.textContent = t('terminal.copy');
+            copyBtnEl.textContent = t('app.copy');
             copyBtnEl.style.cssText = 'padding:7px 16px;border:none;background:transparent;color:var(--color-btn-text);font-size:var(--text-base);font-weight:600;font-family:system-ui,sans-serif;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;';
 
             const divider = document.createElement('div');
@@ -855,9 +857,9 @@
             {#if !isMobileCtx.isMobile}
             <button type="button" class="icon-btn terminal-fullscreen-toggle" onclick={toggleFullscreen} title={fullscreenTitle}>
                 {#if fullscreen}
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2V6H14M6 14V10H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <Icon src={fsExitIcon} width={14} height={14} />
                 {:else}
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2h4v4M6 14H2v-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <Icon src={fsEnterIcon} width={14} height={14} />
                 {/if}
             </button>
             {/if}

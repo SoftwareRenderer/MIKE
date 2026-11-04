@@ -1013,7 +1013,7 @@
             limit: () => stream.state.contextState.limit,
             sessionCost: () => stream.state.sessionCost,
             confirmText: t('chat.compress.confirm'),
-            cancelText: t('chat.common.cancel'),
+            cancelText: t('app.cancel'),
         });
         if (!confirmed) return;
         try {
@@ -1192,7 +1192,7 @@
                 streaming: true,
                 message: '',
                 confirmText: t('chat.review.commitAndDone'),
-                cancelText: t('chat.common.cancel'),
+                cancelText: t('app.cancel'),
                 projectId: thisProjectId,
                 taskId: thisTaskId,
             });
@@ -1256,7 +1256,7 @@
             title: t('chat.task.deleteTitle'),
             message,
             confirmText: t('chat.common.delete'),
-            cancelText: t('chat.common.cancel'),
+            cancelText: t('app.cancel'),
         });
         if (!confirmed) return;
 

@@ -10,6 +10,7 @@
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { appStore } from '$lib/stores';
     import { openTerminalTitle, handleLinkClick, handleLinkKeydown } from '$lib/utils/keyboard';
+    import terminalIcon from '$lib/assets/icons/terminal.svg?raw';
 
     let {
         currentProject,
@@ -112,10 +113,7 @@
             onkeydown={(e) => handleLinkKeydown(e, onOpenTerminal)}
             aria-label={t('app.shortcut.openTerminal')} title={terminalButtonTitle}
         >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <rect x="1" y="2" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
-                <path d="M4 6l2 2-2 2M7 10h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
+            <Icon src={terminalIcon} width={14} height={14} />
         </a>
         <!-- Desktop-only buttons (hidden on mobile via CSS) -->
         <button class="icon-btn btn desktop-only-btn" onclick={onShowStats} aria-label={t('app.sidebar.tokenUsageAria')} title={t('app.sidebar.tokenUsageAria')}>

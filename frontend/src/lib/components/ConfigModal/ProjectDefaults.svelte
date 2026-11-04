@@ -69,34 +69,10 @@
         margin: 0 0 4px;
         color: var(--color-text-primary);
     }
-    .section-description {
-        font-size: var(--text-sm);
-        color: var(--color-text-tertiary);
-        margin: 0 0 12px;
-    }
-    .toggle-field {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 8px 0;
-        gap: 12px;
-    }
-    .toggle-label-group {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-        min-width: 0;
-        flex: 1;
-    }
     .toggle-label {
         font-size: var(--text-sm);
         font-weight: 500;
         color: var(--color-text-primary);
-    }
-    .toggle-desc {
-        font-size: var(--text-xs);
-        color: var(--color-text-tertiary);
-        line-height: 1.4;
     }
     .mcp-block {
         display: flex;

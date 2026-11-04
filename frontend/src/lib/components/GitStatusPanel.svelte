@@ -796,7 +796,7 @@
             message,
             items: confirmList(paths, count => t('explorer.shared.deleteMore', { count })),
             confirmText: t('explorer.shared.discard'),
-            cancelText: t('git.cancel'),
+            cancelText: t('app.cancel'),
             variant: 'destructive',
         });
         if (!proceed) return;
@@ -897,7 +897,7 @@
         const message = await dialogStore.showCommitDialog({
             message: '',
             confirmText: t('git.commit'),
-            cancelText: t('git.cancel'),
+            cancelText: t('app.cancel'),
             authorName: authorName,
             authorEmail: authorEmail,
         });
@@ -1820,16 +1820,6 @@
         display: flex;
         flex-direction: column;
         overflow: hidden;
-    }
-
-    .diff-viewer-loading {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 48px 24px;
-        color: var(--color-text-tertiary);
-        font-size: var(--text-sm);
-        flex: 1;
     }
 
     /* Mobile: hide sidebar, show only diff */

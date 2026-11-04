@@ -23,6 +23,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
     import { t, type MessageKey } from '$lib/i18n';
+    import discardIcon from '$lib/assets/icons/discard.svg?raw';
 
     // UI extension injection point — re-render when extensions change
     $effect(() => {
@@ -726,7 +727,7 @@
                     streaming: true,
                     message: '',
                     confirmText: t('board.card.commitAndDone'),
-                    cancelText: t('board.confirm.cancel'),
+                    cancelText: t('app.cancel'),
                     projectId: thisProjectId,
                     taskId: thisTask.id,
                 });
@@ -753,7 +754,7 @@
             title: t('board.deleteTask.title'),
             message: t('board.deleteTask.message'),
             confirmText: t('board.confirm.delete'),
-            cancelText: t('board.confirm.cancel'),
+            cancelText: t('app.cancel'),
         });
         if (!confirmed) return;
         try {
@@ -935,10 +936,7 @@
                             aria-label={t('board.deleteTask.aria')}
                             title={t('board.deleteTask.aria')}
                         >
-                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                                <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                                <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
+                            <Icon src={discardIcon} width={14} height={14} />
                         </button>
                     {:else if thirdAction === 'move'}
                         <button
@@ -1333,7 +1331,10 @@
             touch-action: manipulation;
             -webkit-tap-highlight-color: transparent;
         }
-        .action-icon svg {
+        .action-icon svg,
+        /* The delete action draws through `Icon`, so its `<svg>` sits in another component's scope and a
+         * plain scoped selector cannot reach it. The 44px target above is a touch rule. */
+        :global(.action-icon .icon svg) {
             width: 18px;
             height: 18px;
         }

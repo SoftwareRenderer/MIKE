@@ -18,7 +18,7 @@
     // The commit click asks for commit + merge + Done and a merge conflict only interrupts it
     // (docs/commit-and-done.md) — this label must keep saying "and move to Done", never "cancel".
     let confirmText = $derived(confirmOverride ?? t('chat.review.commitAndDone'));
-    let cancelText = $derived(cancelOverride ?? t('chat.common.cancel'));
+    let cancelText = $derived(cancelOverride ?? t('app.cancel'));
     let authorName = $state('');
     let authorEmail = $state('');
     let mergeTarget = $state('');

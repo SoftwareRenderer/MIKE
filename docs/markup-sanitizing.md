@@ -63,9 +63,15 @@ The auditor also checks every `href`, `src`, and `style` binding.
 
 `Icon.svelte` accepts a single sanitized `<svg>` root. It uses `singleSvgMarkup` to verify the shape and `safeCSSValue` to ensure that the `color` prop does not introduce invalid CSS or external references.
 
+Its `src` is a `?raw` import of a file in `frontend/src/lib/assets/icons/`. A glyph two components draw is
+one file there, never markup repeated in each — an icon that is not a single `<svg>` root renders nothing
+at all.
+
 ## Verification
 
 - `npm run check:sinks`: Audits all sinks, URLs, and style bindings.
 - `npm run check:sinks-test`: Verifies that the audit tool itself can detect violations.
+- `npx vitest run src/lib/components/__tests__/icon-assets-render.unit.ts`: every shipped icon asset passes
+  `singleSvgMarkup`, so a glyph edit cannot silently erase the buttons that name it.
 - `npm test`: Runs the sanitizer suite (`__tests__/sanitize.unit.ts`) and diagram tests.
 - `npm run build`: Ensures the Mermaid library chunks are correctly excluded from the precache to minimize bundle size.

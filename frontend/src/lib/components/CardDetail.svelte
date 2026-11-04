@@ -95,7 +95,7 @@
             title: t('board.clearDone.title'),
             message: t('board.clearDone.message', { count }),
             confirmText: t('board.confirm.delete'),
-            cancelText: t('board.confirm.cancel'),
+            cancelText: t('app.cancel'),
         });
         if (!confirmed) return;
         try {
@@ -787,7 +787,7 @@
             title: t('board.deleteTask.title'),
             message: t('board.deleteTask.message'),
             confirmText: t('board.confirm.delete'),
-            cancelText: t('board.confirm.cancel'),
+            cancelText: t('app.cancel'),
         });
         if (!confirmed) return;
         const projectId = task.project_id;
@@ -1308,15 +1308,6 @@
         position: absolute;
         inset: 0;
         z-index: var(--z-content);
-    }
-    .diff-viewer-loading {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 48px 24px;
-        color: var(--color-text-tertiary);
-        font-size: var(--text-sm);
-        flex: 1;
     }
     .column.hidden {
         display: none;

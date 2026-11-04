@@ -77,7 +77,7 @@
         editSubmitAction({ isFirstUserMessage, isLastUserMessage, taskStatus, forcedSave: submitMode === 'save' }),
     );
     const submitLabel = $derived(
-        submitAction === 'save' ? t('chat.common.save')
+        submitAction === 'save' ? t('app.save')
             : submitAction === 'send' ? t('chat.common.send')
                 : t('chat.common.newThread'),
     );
@@ -106,7 +106,7 @@
             {#each editAttachments as att, i}
                 <div class="edit-attachment-chip">
                     <img src={imageSrc(att)} alt={t('chat.common.attachment')} />
-                    <button class="remove-attachment" onclick={() => removeEditAttachment(i)} title={t('chat.common.remove')}>&times;</button>
+                    <button class="remove-attachment" onclick={() => removeEditAttachment(i)} title={t('app.remove')}>&times;</button>
                 </div>
             {/each}
         </div>
@@ -129,7 +129,7 @@
                 <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
             </svg>
         </button>
-        <button class="btn-edit-cancel" onclick={onCancel} title={t('chat.edit.cancelEditing')}>{t('chat.common.cancel')}</button>
+        <button class="btn-edit-cancel" onclick={onCancel} title={t('chat.edit.cancelEditing')}>{t('app.cancel')}</button>
         <button class="btn-edit-submit" onclick={() => { if (canSubmit) onSubmit?.(editContent.trim(), editAttachments); }} disabled={isSubmitting || !canSubmit} title={submitLabel}>
             {#if isSubmitting}
                 <!-- The ring replaces the button's own words, so it carries them. -->
@@ -138,7 +138,7 @@
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <polyline points="20 6 9 17 4 12"/>
                 </svg>
-                {t('chat.common.save')}
+                {t('app.save')}
             {:else if submitIcon === 'send'}
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <line x1="22" y1="2" x2="11" y2="13"/>

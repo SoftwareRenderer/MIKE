@@ -73,18 +73,20 @@ Keys are grouped by area, one flat dotted namespace per area, declared in a `═
 `diff.*` / `git.*` · `time.*` · `host.*` · `memory.*` · `storage.*` · `swUpdate.*` ·
 `tool.*` · `effort.*` · `i18n.offer.*`
 
-`common.*` (shared verbs) stayed reserved: each area kept its own copy of Cancel / Save /
-Close, and renaming landed keys to share them costs more than the duplication — see the
-stability rule above.
+Shared verbs and field labels live in `app.*`: `app.cancel`, `app.save`, `app.remove`,
+`app.copy`, `app.model`, `app.operatingMode`. Those six words carried thirty-one per-area twins
+across ten namespaces until 2026-11, when the twins left with their call sites; every pack had
+been translating one word once per area.
 
 - A new string goes in **its area's** namespace, named for what it says, not for the component
   that renders it (`chat.args.lspRenameTo`, not `chat.message.line12`).
-- **A new shared verb goes in `common.*`** rather than being duplicated a third time. The
-  duplicates that already landed (`explorer.shared.cancel`, `board.editTask.save`,
-  `settings.…`) keep their names — renaming is far more expensive than duplication, see the
-  stability rule above.
-- Two components with byte-identical copy in one *area* share one key (`explorer.shared.*`);
-  across areas they do not, because a shared key is a promise that the copy can never diverge.
+- **A word several areas ask for goes in `app.*` once**, and only when every pack renders it
+  identically. Two keys sharing an English value is not duplication: `app.key.delete` and
+  `chat.common.delete` are a keycap and a verb, and all twelve packs translate them apart.
+  `docs/i18n.md → One English value, many keys`.
+- Two components with byte-identical copy in one *area* share one key (`explorer.shared.*`).
+  Across areas they share one only under that `app.*` rule — a shared key is a promise that the
+  copy can never diverge.
 
 ## The fallback ladder, and what it warns about
 

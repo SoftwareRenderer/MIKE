@@ -15,6 +15,9 @@
     import { capabilityDescriptions, capabilityKeys, formatBuiltAt, packLocale, typeBadge } from '$lib/utils/extension-manifest';
     import { identityKey } from '$lib/utils/extension-identity';
     import { safeUrl } from '$lib/utils/safe-url';
+    import Icon from '$lib/components/Icon.svelte';
+    import discardIcon from '$lib/assets/icons/discard.svg?raw';
+    import refreshIcon from '$lib/assets/icons/refresh.svg?raw';
 
     /**
      * One installed extension: what it is, whether it is switched on, what it may reach, and the two
@@ -121,22 +124,14 @@
         </div>
         <div class="card-actions">
             <button class="btn btn-icon btn-delete" title={t('settings.extensions.delete')} onclick={() => ondelete(ext.id, ext.name)}>
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                    <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
+                <Icon src={discardIcon} width={16} height={16} />
             </button>
             {#if ext.type === 'lsp'}
             <button class="btn btn-icon" title={t('settings.extensions.updateImageTitle')} onclick={() => onupdateimage(ext.id, ext.name)} disabled={updating}>
                 {#if updating}
                     <Spinner size={12} label={t('settings.extensions.updating')} />
                 {:else}
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <path d="M21 2v6h-6"/>
-                        <path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
-                        <path d="M3 22v-6h6"/>
-                        <path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
-                    </svg>
+                    <Icon src={refreshIcon} width={14} height={14} />
                 {/if}
             </button>
             {/if}

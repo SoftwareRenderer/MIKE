@@ -160,7 +160,7 @@
             title: t('board.clearDone.title'),
             message: t('board.clearDone.message', { count: doneTasks.length }),
             confirmText: t('board.confirm.delete'),
-            cancelText: t('board.confirm.cancel'),
+            cancelText: t('app.cancel'),
         });
         if (!confirmed) return;
         try {

@@ -9,6 +9,7 @@
     import Icon from './Icon.svelte';
     import commitPushIcon from '$lib/assets/icons/commit-push.svg?raw';
     import closeIcon from '$lib/assets/icons/close.svg?raw';
+    import terminalIcon from '$lib/assets/icons/terminal.svg?raw';
 
     /**
      * The explorer header both screens draw: close, path, the branch, and the terminal.
@@ -263,10 +264,7 @@
         onkeydown={(e) => handleLinkKeydown(e, onOpenTerminal)}
         aria-label={t('explorer.shared.openTerminal')} title={terminalButtonTitle}
     >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <rect x="1" y="2" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
-            <path d="M4 6l2 2-2 2M7 10h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
+        <Icon src={terminalIcon} width={14} height={14} />
     </a>
 </div>
 

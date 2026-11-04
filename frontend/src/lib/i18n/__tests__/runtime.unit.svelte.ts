@@ -189,8 +189,8 @@ describe('the app-wide runtime', () => {
         // render English forever and still pass every instance test above.
         // (A core key, because `t()` is `MessageKey`-typed: that strictness is the
         // point, and it is what makes this assertion check the real call path.)
-        i18n.setCatalog(TWO_FORMS, { 'explorer.shared.cancel': 'Abbrechen' });
-        expect(t('explorer.shared.cancel')).toBe('Abbrechen');
+        i18n.setCatalog(TWO_FORMS, { 'app.cancel': 'Abbrechen' });
+        expect(t('app.cancel')).toBe('Abbrechen');
         expect(activeLocale()).toBe(TWO_FORMS);
         i18n.setCatalog(TWO_FORMS, null);
         // No pack is not "English as a chosen locale": `undefined` is what every

@@ -35,8 +35,8 @@
         const confirmed = await dialogStore.showConfirm({
             title: t('settings.mcp.removeTitle'),
             message: t('settings.mcp.removeMessage', { name: server.name || server.url }),
-            confirmText: t('settings.mcp.remove'),
-            cancelText: t('settings.cancel'),
+            confirmText: t('app.remove'),
+            cancelText: t('app.cancel'),
             variant: 'destructive',
         });
         if (!confirmed) return;
@@ -76,7 +76,7 @@
             />
             {#if !locked}
                 <button type="button" class="btn btn-secondary mcp-action" onclick={handleRemove} title={t('settings.mcp.removeHint')}>
-                    {t('settings.mcp.remove')}
+                    {t('app.remove')}
                 </button>
             {/if}
         </div>

@@ -150,8 +150,8 @@
 </script>
 
 {#snippet footer()}
-            <button type="button" class="btn" onclick={handleClose}>{t('board.confirm.cancel')}</button>
-            <button type="button" class="btn btn-primary" onclick={handleSave} disabled={!titleDraft.trim()}>{t('board.editTask.save')}</button>
+            <button type="button" class="btn" onclick={handleClose}>{t('app.cancel')}</button>
+            <button type="button" class="btn btn-primary" onclick={handleSave} disabled={!titleDraft.trim()}>{t('app.save')}</button>
         {/snippet}
 
         <BaseModal title={t('board.editTask.title')} width="440px" modalClass="edit-task-modal" footer={footer} onClose={handleClose} closeOnOverlayClick={false}>
@@ -168,7 +168,7 @@
             </label>
             {#if editProviders.length > 0}
                 <div class="model-select-row">
-                    <span class="field-label">{t('board.editTask.fieldModel')}</span>
+                    <span class="field-label">{t('app.model')}</span>
                     <ModelSelector
                         providers={editProviders}
                         currentModel={modelDraft}
@@ -182,7 +182,7 @@
             <div class="options">
                 <div class="config-row">
                     <div class="config-info">
-                        <span class="config-label">{t('board.editTask.operatingMode')}</span>
+                        <span class="config-label">{t('app.operatingMode')}</span>
                         <span class="config-desc">{modeDescription}</span>
                     </div>
                     <ModeSelect value={operatingModeDraft} onChange={(m: string) => operatingModeDraft = m} />

@@ -9,6 +9,8 @@
     import Spinner from '../Spinner.svelte';
     import ModelList from './ModelList.svelte';
     import PricingSection from './PricingSection.svelte';
+    import Icon from '../Icon.svelte';
+    import discardIcon from '$lib/assets/icons/discard.svg?raw';
 
     let { providers, provider, index, currencySymbol, onDragStart, onRemove, onFetchModels, onTestConnection, onAddModel, onRemoveModel, isDragging, onDirty }: {
         providers: ProviderDraft[];
@@ -37,8 +39,8 @@
         const confirmed = await dialogStore.showConfirm({
             title: t('settings.provider.removeTitle'),
             message: t('settings.provider.removeMessage'),
-            confirmText: t('settings.provider.remove'),
-            cancelText: t('settings.cancel'),
+            confirmText: t('app.remove'),
+            cancelText: t('app.cancel'),
         });
         if (!confirmed) return;
         onRemove();
@@ -80,10 +82,7 @@
                 <!-- Agent providers are derived from enabled agent extensions and can't be
                      removed here — disabling/uninstalling the extension removes the provider. -->
                 <button type="button" class="btn-remove-provider" onclick={handleRemove} title={t('settings.provider.removeHint')} aria-label={t('settings.provider.removeHint')}>
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                        <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                        <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
+                    <Icon src={discardIcon} width={16} height={16} />
                 </button>
             {/if}
             <button type="button" class="btn-expand" onclick={(e) => { e.stopPropagation(); handleToggle(); }} aria-expanded={provider.expanded} aria-label={provider.expanded ? t('settings.provider.collapseAria') : t('settings.provider.expandAria')} title={provider.expanded ? t('settings.provider.collapse') : t('settings.provider.expand')}>

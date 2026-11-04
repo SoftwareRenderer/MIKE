@@ -1144,7 +1144,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         const confirmed = await dialogStore.showConfirm({
             title: t('app.project.removeTitle'),
             message: t('app.project.removeMessage', { name: p.name }),
-            confirmText: t('app.project.remove'),
+            confirmText: t('app.remove'),
             cancelText: t('app.cancel'),
         });
         if (!confirmed) return;

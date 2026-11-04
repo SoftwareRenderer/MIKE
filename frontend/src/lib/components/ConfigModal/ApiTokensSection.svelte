@@ -81,7 +81,7 @@
             copied = true;
         } catch {
             // A denied or unavailable clipboard leaves the value on screen to select by hand.
-            dialogStore.showToast(t('settings.tokens.copy'), 'error');
+            dialogStore.showToast(t('app.copy'), 'error');
         }
     }
 
@@ -90,7 +90,7 @@
             title: t('settings.tokens.revokeTitle'),
             message: t('settings.tokens.revokeMessage'),
             confirmText: t('settings.tokens.revoke'),
-            cancelText: t('settings.cancel'),
+            cancelText: t('app.cancel'),
             variant: 'destructive',
         });
         if (!confirmed) return;
@@ -158,7 +158,7 @@
             <div class="settings-revealed-note">{t('settings.tokens.createdTitle')}</div>
             <div class="settings-revealed-row">
                 <code class="settings-row-value tokens-secret" title={issued.token}>{issued.token}</code>
-                <button type="button" class="settings-btn-small" onclick={handleCopy}>{copied ? t('settings.tokens.copied') : t('settings.tokens.copy')}</button>
+                <button type="button" class="settings-btn-small" onclick={handleCopy}>{copied ? t('settings.tokens.copied') : t('app.copy')}</button>
             </div>
         </div>
     {/if}

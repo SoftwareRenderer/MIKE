@@ -63,7 +63,7 @@
                 ? t('settings.sessions.revokeThisDeviceMessage')
                 : t('settings.sessions.revokeOtherMessage'),
             confirmText: isCurrent ? t('settings.signOut') : t('settings.sessions.revoke'),
-            cancelText: t('settings.cancel'),
+            cancelText: t('app.cancel'),
             variant: 'destructive',
         });
         if (!confirmed) return;
@@ -93,7 +93,7 @@
             title: t('settings.sessions.revokeAllTitle'),
             message: t('settings.sessions.revokeAllMessage', { count }),
             confirmText: t('settings.sessions.revokeAll'),
-            cancelText: t('settings.cancel'),
+            cancelText: t('app.cancel'),
             variant: 'destructive',
         });
         if (!confirmed) return;

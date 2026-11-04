@@ -228,7 +228,7 @@
             {#each attachments as att, i}
                 <div class="attachment-thumb">
                     <img src={imageSrc(att)} alt="" />
-                    <button type="button" class="attachment-remove" onclick={() => removeAttachment(i)} aria-label={t('chat.form.removeImage')} title={t('chat.common.remove')}>
+                    <button type="button" class="attachment-remove" onclick={() => removeAttachment(i)} aria-label={t('chat.form.removeImage')} title={t('app.remove')}>
                         <Icon src={closeIcon} width={12} height={12} />
                     </button>
                 </div>

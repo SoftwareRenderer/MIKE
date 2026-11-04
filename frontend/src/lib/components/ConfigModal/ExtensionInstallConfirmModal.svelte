@@ -32,7 +32,7 @@
 </script>
 
 {#snippet installConfirmFooter()}
-    <button type="button" class="btn" onclick={onclose}>{t('settings.cancel')}</button>
+    <button type="button" class="btn" onclick={onclose}>{t('app.cancel')}</button>
     {#if agentMounts.length > 0}
         <button type="button" class="btn" onclick={() => onconfirm(false)}>{t('settings.extensions.agentMountDecline')}</button>
         <button type="button" class="btn btn-primary" onclick={() => onconfirm(true)}>{t('settings.extensions.agentMountGrant')}</button>

@@ -67,7 +67,7 @@ describe('createBulkTaskActions — delete', () => {
             message: t('board.deleteTasks.message', { count: 2 }),
             items: ['Task root', 'Task solo'],
             confirmText: t('board.confirm.delete'),
-            cancelText: t('board.confirm.cancel'),
+            cancelText: t('app.cancel'),
         });
     });
 

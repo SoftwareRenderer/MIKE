@@ -195,7 +195,7 @@ export function useFileDropUpload(options: FileDropUploadOptions) {
                 message: t('explorer.shared.dropOverwriteMessage', { count: conflicts.length }),
                 items: conflicts.slice(0, 8).map((slot) => slot.entry.relPath),
                 confirmText: t('explorer.shared.dropOverwriteConfirm'),
-                cancelText: t('explorer.shared.cancel'),
+                cancelText: t('app.cancel'),
                 variant: 'destructive',
             });
             if (!confirmed) {

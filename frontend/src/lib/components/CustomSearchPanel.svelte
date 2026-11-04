@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { t } from '$lib/i18n';
-    import type { EditorView } from 'codemirror';
+    import type { EditorView } from '@codemirror/view';
     import { SelectionRange } from '@codemirror/state';
 
     interface Props {

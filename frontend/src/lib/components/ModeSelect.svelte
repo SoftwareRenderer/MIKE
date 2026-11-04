@@ -30,7 +30,7 @@
 </script>
 
 <div class="mode-select" bind:this={dropdownRef}>
-    <button type="button" class="mode-btn" class:open={open} onclick={toggle} onkeydown={(e) => { if (e.key === 'Escape') open = false; }} aria-label={t('chat.mode.aria')} aria-expanded={open}>
+    <button type="button" class="mode-btn" class:open={open} onclick={toggle} onkeydown={(e) => { if (e.key === 'Escape') open = false; }} aria-label={t('app.operatingMode')} aria-expanded={open}>
         <span class="mode-icon active" class:act={value === 'act'} class:plan={value === 'plan'} class:explore={value === 'explore'}><ModeIcon mode={value} /></span>
         <span class="mode-label">{t(selected.labelKey)}</span>
         <svg class="chevron" width="10" height="10" viewBox="0 0 10 10" fill="none">

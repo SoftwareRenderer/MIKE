@@ -63,7 +63,7 @@
 </script>
 
 {#snippet footer()}
-    <button type="button" class="btn" onclick={handleClose} title={t('chat.common.cancel')}>{t('chat.common.cancel')}</button>
+    <button type="button" class="btn" onclick={handleClose} title={t('app.cancel')}>{t('app.cancel')}</button>
     <button type="button" class="btn btn-primary" disabled={!selectedModel} onclick={handleChange} title={t('chat.changeModel.confirmTip')}>
         {t('chat.changeModel.confirm')}
     </button>
@@ -71,7 +71,7 @@
 
 <BaseModal title={modalTitle} width="420px" footer={footer} onClose={handleClose} closeOnOverlayClick={true}>
     <div class="model-select-row">
-        <span id="model-label" class="model-label">{t('chat.changeModel.model')}</span>
+        <span id="model-label" class="model-label">{t('app.model')}</span>
         {#if hasProviders}
             <ModelSelector
                 providers={providers}

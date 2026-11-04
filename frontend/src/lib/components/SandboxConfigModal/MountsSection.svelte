@@ -8,7 +8,10 @@
     import { editInPlace, onActivate, LITERAL_TEXT_FIELD } from '$lib/utils/row-form';
     import CancelEditButton from './CancelEditButton.svelte';
     import ExpandableSection from './ExpandableSection.svelte';
+    import Icon from '$lib/components/Icon.svelte';
+    import closeIcon from '$lib/assets/icons/close.svg?raw';
     import type { SandboxDraftOwner } from './draft.svelte';
+    import AddRowIcon from './AddRowIcon.svelte';
 
     let { draft, locked, onBrowse }: {
         draft: SandboxDraftOwner;
@@ -39,8 +42,8 @@
                     </div>
                     <div class="mount-actions">
                         <span class="sandbox-mode" class:sandbox-mode-rw={mount.mode === 'rw'} class:sandbox-mode-ro={mount.mode === 'ro'} title={mount.mode === 'rw' ? t('sandbox.mountReadWrite') : t('sandbox.mountReadOnly')}>{mount.mode}</span>
-                        <button type="button" class="btn-remove-mount" onclick={(e) => { e.stopPropagation(); draft.removeMount(i); }} disabled={locked} title={t('sandbox.remove')}>
-                            {@render closeIcon()}
+                        <button type="button" class="btn-remove-mount" onclick={(e) => { e.stopPropagation(); draft.removeMount(i); }} disabled={locked} title={t('app.remove')}>
+                            <Icon src={closeIcon} width={12} height={12} />
                         </button>
                     </div>
                 </div>
@@ -79,7 +82,7 @@
                 </label>
             </div>
             <button type="button" class="btn-add-mount" class:pending={draft.hasPendingMount} onclick={() => draft.addMount()} disabled={locked} title={draft.editingMountIndex !== null ? t('sandbox.saveMount') : t('sandbox.addMount')}>
-                {@render addIcon(draft.editingMountIndex !== null)}
+                <AddRowIcon editing={draft.editingMountIndex !== null} />
             </button>
         </div>
     </div>
@@ -96,23 +99,6 @@
     </svg>
 {/snippet}
 
-{#snippet closeIcon()}
-    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-        <path d="M3 3L9 9M9 3L3 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-    </svg>
-{/snippet}
-
-{#snippet addIcon(editing: boolean)}
-    {#if editing}
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-            <path d="M3 8L6 11L11 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-    {:else}
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-            <path d="M7 2V12M2 7H12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-        </svg>
-    {/if}
-{/snippet}
 
 <style>
     @import '$lib/styles/sandbox-settings.css';

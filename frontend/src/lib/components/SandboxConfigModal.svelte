@@ -88,7 +88,7 @@
                 title: t('sandbox.disableTitle'),
                 message: t('sandbox.disableConfirm', { name: project.name }),
                 confirmText: t('sandbox.disableConfirmButton'),
-                cancelText: t('sandbox.cancel'),
+                cancelText: t('app.cancel'),
             });
             if (!confirmed) {
                 draft.restoreSandboxEnabled(project);
@@ -147,9 +147,9 @@
 
 {#snippet footer()}
     <div class="footer-wrapper">
-        <button type="button" class="btn" onclick={onClose} disabled={saving}>{t('sandbox.cancel')}</button>
+        <button type="button" class="btn" onclick={onClose} disabled={saving}>{t('app.cancel')}</button>
         <button type="button" class="btn btn-primary" onclick={handleSave} disabled={saving || isLocked}>
-            {saving ? t('sandbox.saving') : t('sandbox.save')}
+            {saving ? t('sandbox.saving') : t('app.save')}
         </button>
     </div>
 {/snippet}

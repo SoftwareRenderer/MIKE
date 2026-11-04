@@ -118,3 +118,15 @@
     padding: 0.25rem 0.5rem;
     font-size: var(--text-xs);
 }
+
+/* Here rather than in `diff-viewer.css`: the task view and the git panel paint this while `DiffViewer`
+   is still being fetched, so that sheet is not on the page yet. */
+.diff-viewer-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 48px 24px;
+    color: var(--color-text-tertiary);
+    font-size: var(--text-sm);
+    flex: 1;
+}

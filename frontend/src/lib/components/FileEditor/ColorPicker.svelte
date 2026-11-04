@@ -105,7 +105,7 @@
         <button type="button" class="btn btn-primary btn-small" disabled={!picked} onclick={apply}>
             {t('editor.color.apply')}
         </button>
-        <button type="button" class="btn btn-ghost btn-small" onclick={onClose}>{t('editor.color.cancel')}</button>
+        <button type="button" class="btn btn-ghost btn-small" onclick={onClose}>{t('app.cancel')}</button>
     </div>
 </div>
 

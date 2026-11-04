@@ -11,7 +11,7 @@
     let confirmOverride = $state<string | null>(null);
     let cancelOverride = $state<string | null>(null);
     let confirmText = $derived(confirmOverride ?? t('chat.compress.confirm'));
-    let cancelText = $derived(cancelOverride ?? t('chat.common.cancel'));
+    let cancelText = $derived(cancelOverride ?? t('app.cancel'));
 
     /** Resolve a stat that may be a snapshot number or a live getter. */
     function resolveStat(value: number | (() => number) | undefined): number {

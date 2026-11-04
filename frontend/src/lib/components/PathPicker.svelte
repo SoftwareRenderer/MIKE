@@ -101,7 +101,7 @@
 {#snippet footer()}
     <span class="current-path">{formatPath(selected ?? currentPath)}</span>
     <div class="footer-actions">
-        <button type="button" class="btn" onclick={onClose} title={t('explorer.shared.cancel')}>{t('explorer.shared.cancel')}</button>
+        <button type="button" class="btn" onclick={onClose} title={t('app.cancel')}>{t('app.cancel')}</button>
         <button type="button" class="btn btn-primary" onclick={handleSelect} disabled={!selected} title={selectTitle}>
             {t('explorer.pathPicker.select')}
         </button>
