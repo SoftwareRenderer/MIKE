@@ -41,8 +41,7 @@
     flex-shrink: 0;
 }
 
-/* Fullscreen mode: hide header and tab bar, expand to cover sidebar */
-:global(.explorer-view.fullscreen) {
+.explorer-view.fullscreen {
     position: fixed;
     top: 0;
     left: 0;

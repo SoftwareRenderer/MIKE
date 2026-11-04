@@ -167,6 +167,9 @@ make test-gen-registry                                   # the generator's own t
 - **Everything the app did not write goes through `$lib/utils/sanitize`** — including LSP hover, completion
   and signature documentation. `html-sinks.py` lists every sink and fails if its own list misses one;
   `docs/markup-sanitizing.md`.
+- **A `class` is a stylesheet rule, not a label** — untrusted markup keeps only the classes a renderer this
+  app feeds emits, and `css-surface.py` fails when a rule a fragment could name pins an element to the
+  viewport. `docs/markup-sanitizing.md → Class Adoption and the Stylesheet`.
 - **Formatting follows the active locale; sorting never does.** Never cache a locale-derived value at module
   scope. Phrases are catalog keys in `$lib/i18n/en.ts`, never literals. `docs/i18n.md`.
 - **All client-side storage goes through `frontend/src/lib/storage.ts`.** Never touch IndexedDB from a
