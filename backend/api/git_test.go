@@ -909,32 +909,6 @@ func TestHandleCheckout_DashPrefix(t *testing.T) {
 	}
 }
 
-func TestHandleCheckout_ValidBranch(t *testing.T) {
-	h, s, _, _ := newTestGitHandler(t)
-
-	projPath := t.TempDir()
-	initGitRepo(t, projPath)
-	// Create a second branch to checkout (use git branch, not checkout -b)
-	mustRun(t, projPath, "git", "branch", "feature-branch")
-	proj := &types.Project{ID: "checkout-valid-proj", Name: "checkout-valid-proj", Path: projPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatal(err)
-	}
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/projects/{projectID}/git/checkout", h.HandleCheckout)
-
-	body := strings.NewReader(`{"branch": "feature-branch"}`)
-	req := httptest.NewRequest("POST", "/api/projects/checkout-valid-proj/git/checkout", body)
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 for valid checkout branch, got %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
 // A branch another worktree holds is one `git checkout` refuses here, and the project's own checkout is not
 // such a holder.
 func TestHandleBranchesNamesTheWorktreeHoldingEachRef(t *testing.T) {

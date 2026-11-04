@@ -38,24 +38,24 @@ func formatToolAction(name, arguments string) string {
 
 	switch name {
 	case types.ToolReadFile:
-		if path, ok := args["path"].(string); ok && path != "" {
+		if path := argStr(args, "path"); path != "" {
 			return "read `" + path + "`"
 		}
 	case types.ToolWriteFile:
-		if path, ok := args["path"].(string); ok && path != "" {
+		if path := argStr(args, "path"); path != "" {
 			return "write `" + path + "`"
 		}
 	case types.ToolEditFile:
-		if path, ok := args["path"].(string); ok && path != "" {
+		if path := argStr(args, "path"); path != "" {
 			return "edit `" + path + "`"
 		}
 	case types.ToolBash:
-		if cmd, ok := args["command"].(string); ok && cmd != "" {
+		if cmd := argStr(args, "command"); cmd != "" {
 			cmd = types.ClipMark(strings.TrimSpace(cmd), 74, "...")
 			return "execute `" + cmd + "`"
 		}
 	case types.ToolRequestReview:
-		if summary := reviewSummary(arguments); summary != "" {
+		if summary := strings.TrimSpace(argStr(args, "summary")); summary != "" {
 			return "request a review: " + summary
 		}
 		return "request a review"
@@ -64,30 +64,30 @@ func formatToolAction(name, arguments string) string {
 	case types.ToolEditTask:
 		return "edit"
 	case types.ToolLSPReferences:
-		if path, ok := args["path"].(string); ok && path != "" {
-			if sym, ok2 := args["symbol"].(string); ok2 && sym != "" {
+		if path := argStr(args, "path"); path != "" {
+			if sym := argStr(args, "symbol"); sym != "" {
 				return "find references for `" + sym + "` in `" + path + "`"
 			}
 			return "find references in `" + path + "`"
 		}
 	case types.ToolLSPDefinition:
-		if path, ok := args["path"].(string); ok && path != "" {
-			if sym, ok2 := args["symbol"].(string); ok2 && sym != "" {
+		if path := argStr(args, "path"); path != "" {
+			if sym := argStr(args, "symbol"); sym != "" {
 				return "find definition of `" + sym + "` in `" + path + "`"
 			}
 			return "find definition in `" + path + "`"
 		}
 	case types.ToolLSPHover:
-		if path, ok := args["path"].(string); ok && path != "" {
-			if sym, ok2 := args["symbol"].(string); ok2 && sym != "" {
+		if path := argStr(args, "path"); path != "" {
+			if sym := argStr(args, "symbol"); sym != "" {
 				return "hover over `" + sym + "` in `" + path + "`"
 			}
 			return "get hover info in `" + path + "`"
 		}
 	case types.ToolLSPRename:
-		if path, ok := args["path"].(string); ok && path != "" {
-			if sym, ok2 := args["symbol"].(string); ok2 && sym != "" {
-				if nn, ok3 := args["new_name"].(string); ok3 && nn != "" {
+		if path := argStr(args, "path"); path != "" {
+			if sym := argStr(args, "symbol"); sym != "" {
+				if nn := argStr(args, "new_name"); nn != "" {
 					return "rename `" + sym + "` to `" + nn + "` in `" + path + "`"
 				}
 				return "rename `" + sym + "` in `" + path + "`"
@@ -98,14 +98,20 @@ func formatToolAction(name, arguments string) string {
 	return "perform an action"
 }
 
+// argStr reads one tool argument. A missing key and a non-string both read as empty, so a caller needs
+// only test the result.
+func argStr(args map[string]any, key string) string {
+	s, _ := args[key].(string)
+	return s
+}
+
 // reviewSummary extracts the summary from a request_review call.
 func reviewSummary(arguments string) string {
 	var args map[string]any
 	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
 		return ""
 	}
-	summary, _ := args["summary"].(string)
-	return strings.TrimSpace(summary)
+	return strings.TrimSpace(argStr(args, "summary"))
 }
 
 // formatToolStatus determines success or failure from a tool result.

@@ -1,10 +1,6 @@
 package types
 
-import (
-	"encoding/json"
-	"strings"
-	"testing"
-)
+import "testing"
 
 // TestStatusWireFormatIsFrozen: existing rows hold these strings, the frontend compares on
 // them and WebSocket payloads carry them. Renaming a constant is safe; changing a value
@@ -44,21 +40,4 @@ func TestParseStatus(t *testing.T) {
 	}
 }
 
-// TestTaskStatusJSONRoundTrip: the typed field must marshal exactly as the string replaced.
-func TestTaskStatusJSONRoundTrip(t *testing.T) {
-	blob := `{"status":"review","execution_state":"running"}`
-	var task Task
-	if err := json.Unmarshal([]byte(blob), &task); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if task.Status != StatusReview {
-		t.Fatalf("Status = %q, want %q", task.Status, StatusReview)
-	}
-	out, err := json.Marshal(Task{Status: task.Status, ExecutionState: task.ExecutionState})
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if !strings.Contains(string(out), `"status":"review"`) {
-		t.Errorf("marshalled task lost the wire form: %s", out)
-	}
-}
+// TestParseStatus

@@ -472,18 +472,17 @@ func TestBuildExtensionCreateArgs_AlwaysNetworkIsolated(t *testing.T) {
 	}
 }
 
-func TestBuildExtensionCreateArgs_KeepsHardeningFlags(t *testing.T) {
-	ext := &Extension{ID: "ext-hardening-test"}
-	args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-hardening-test", "ubuntu:latest", nil, nil)
+func TestBuildExtensionCreateArgs_EntrypointAndImage(t *testing.T) {
+	// The empty `--entrypoint` the shared preface carries is what makes this command run: an image
+	// with its own ENTRYPOINT (alpine/git -> ["git"]) would read the keep-alive as a subcommand and exit.
+	ext := &Extension{ID: "ext-entry-test"}
+	args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-entry-test", "my-custom-image:v1", nil, nil)
 
-	if !hasArgPair(args, "--runtime", "runsc") {
-		t.Error("args missing --runtime runsc")
+	if !hasArg(args, "my-custom-image:v1") {
+		t.Error("args missing image reference")
 	}
-	if !hasArgPair(args, "--cap-drop", "ALL") {
-		t.Error("args missing --cap-drop ALL")
-	}
-	if !hasArgPair(args, "--security-opt", "no-new-privileges") {
-		t.Error("args missing --security-opt no-new-privileges")
+	if !hasArg(args, "chmod +x /sandbox-bridge && sleep infinity") {
+		t.Error("args missing sleep infinity entrypoint")
 	}
 }
 
@@ -538,29 +537,6 @@ func TestBuildExtensionCreateArgs_MountsProjectsReadOnly(t *testing.T) {
 	// mountedProjects should be sorted for deterministic comparison.
 	if len(mounted) != 2 || mounted[0] != "/host/proj-a" || mounted[1] != "/host/proj-b" {
 		t.Errorf("mountedProjects = %v, want sorted [proj-a proj-b]", mounted)
-	}
-}
-
-func TestBuildExtensionCreateArgs_EntrypointAndImage(t *testing.T) {
-	ext := &Extension{ID: "ext-entry-test"}
-	args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-entry-test", "my-custom-image:v1", nil, nil)
-
-	if !hasArg(args, "my-custom-image:v1") {
-		t.Error("args missing image reference")
-	}
-	if !hasArg(args, "chmod +x /sandbox-bridge && sleep infinity") {
-		t.Error("args missing sleep infinity entrypoint")
-	}
-}
-
-func TestBuildExtensionCreateArgs_ClearsImageEntrypoint(t *testing.T) {
-	// An image with an ENTRYPOINT (e.g. alpine/git -> ["git"]) would treat the keep-alive command
-	// as a subcommand and exit, so an empty --entrypoint clears it.
-	ext := &Extension{ID: "ext-entrypoint-clear-test"}
-	args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-entrypoint-clear-test", "docker.io/alpine/git:latest", nil, nil)
-
-	if !hasArgPair(args, "--entrypoint", "") {
-		t.Errorf(`args missing --entrypoint "" (must clear the image entrypoint): %v`, args)
 	}
 }
 

@@ -272,7 +272,7 @@ func (s *session) call(ctx context.Context, name string, args map[string]any) (s
 	}
 	text := renderContent(res)
 	if res != nil && res.IsError {
-		return "", &Error{Server: s.server.Name, Kind: FailureToolError, Cause: errors.New(firstLine(text))}
+		return "", &Error{Server: s.server.Name, Kind: FailureToolError, Cause: errors.New(types.FirstLine(text))}
 	}
 	return toolresult.CapText(text), nil
 }
@@ -381,11 +381,4 @@ func containsAny(err error, wants ...string) bool {
 		}
 	}
 	return false
-}
-
-func firstLine(text string) string {
-	if i := strings.IndexByte(text, '\n'); i >= 0 {
-		return text[:i]
-	}
-	return text
 }

@@ -706,8 +706,8 @@ func createChildWithoutModelConfig(t *testing.T, s *store.Store, projectID, id, 
 	}
 }
 
-// requireStartedOnParentsConfig is the same claim for every start route: a child that arrived with no
-// model config runs on its parent's instead of being refused for want of a server URL.
+// requireStartedOnParentsConfig: a click that starts a child reaches the scheduler, and a child with no
+// model config runs on its parent's. exec's TestStartSubtask_InheritsModelConfig pins the inheritance.
 func requireStartedOnParentsConfig(t *testing.T, route string, rr *httptest.ResponseRecorder, s *store.Store, id string) {
 	t.Helper()
 	if rr.Code != http.StatusOK {
@@ -724,30 +724,6 @@ func requireStartedOnParentsConfig(t *testing.T, route string, rr *httptest.Resp
 	if child.Status != types.StatusReview {
 		t.Errorf("started child with nothing left to run should wait in review: status=%q", child.Status)
 	}
-}
-
-func TestHandleStartSubtask_ChildWithoutModelConfigRunsOnTheParents(t *testing.T) {
-	h, s, projID := newTaskHandlerWithExecutor(t)
-	createChainTask(t, s, projID, "root-cfg-ss", "Root", "backlog", "idle", "", "", false)
-	createChildWithoutModelConfig(t, s, projID, "child-cfg-ss", "root-cfg-ss")
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/start-subtask", h.HandleStartSubtask)
-	rr := postToMux(t, mux, "/api/projects/"+projID+"/tasks/child-cfg-ss/start-subtask", nil)
-
-	requireStartedOnParentsConfig(t, "HandleStartSubtask", rr, s, "child-cfg-ss")
-}
-
-func TestHandleStart_ChildWithoutModelConfigRunsOnTheParents(t *testing.T) {
-	h, s, projID := newTaskHandlerWithExecutor(t)
-	createChainTask(t, s, projID, "root-cfg-st", "Root", "backlog", "idle", "", "", false)
-	createChildWithoutModelConfig(t, s, projID, "child-cfg-st", "root-cfg-st")
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/start", h.HandleStart)
-	rr := postToMux(t, mux, "/api/projects/"+projID+"/tasks/child-cfg-st/start", nil)
-
-	requireStartedOnParentsConfig(t, "HandleStart", rr, s, "child-cfg-st")
 }
 
 func TestHandleMove_ChildWithoutModelConfigRunsOnTheParents(t *testing.T) {

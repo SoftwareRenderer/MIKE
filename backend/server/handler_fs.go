@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -24,9 +23,11 @@ import (
 	"mike/backend/errs"
 	"mike/backend/fsutil"
 	"mike/backend/git"
+	"mike/backend/httputil"
 	"mike/backend/sandbox"
 	"mike/backend/types"
 	"mike/pkg/logging"
+	"mike/pkg/sandboxruntime"
 )
 
 func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
@@ -280,7 +281,12 @@ func (s *Server) handleFSWrite(w http.ResponseWriter, r *http.Request) {
 		Path    string `json:"path"`
 		Content string `json:"content"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Path == "" {
+	if !httputil.DecodeJSON(w, r, &req) {
+		return
+	}
+	// The trim is a test, not a rewrite: a name of only whitespace names no file, while one that ends
+	// in a space is legal and must be written as typed.
+	if strings.TrimSpace(req.Path) == "" {
 		JSONError(w, http.StatusBadRequest, "path is required")
 		return
 	}
@@ -389,9 +395,9 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 		var err error
 		if taskID != "" {
 			// ExecTask creates the task's container on demand.
-			output, err = s.sandboxMgr.ExecTask(taskID, worktreePath, project, "ls -pA "+shellQuote(sandboxPath), opts)
+			output, err = s.sandboxMgr.ExecTask(taskID, worktreePath, project, "ls -pA "+sandboxruntime.ShellQuote(sandboxPath), opts)
 		} else {
-			output, err = s.sandboxMgr.ExecProject(project, "ls -pA "+shellQuote(sandboxPath), opts)
+			output, err = s.sandboxMgr.ExecProject(project, "ls -pA "+sandboxruntime.ShellQuote(sandboxPath), opts)
 		}
 		if err != nil {
 			// A failing `ls` is a directory that is not there, so the answer matches the host branch
@@ -1167,11 +1173,14 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Path string `json:"path"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Path == "" {
-		JSONError(w, http.StatusBadRequest, "path is required")
+	if !httputil.DecodeJSON(w, r, &req) {
 		return
 	}
 	req.Path = strings.TrimSpace(req.Path)
+	if req.Path == "" {
+		JSONError(w, http.StatusBadRequest, "path is required")
+		return
+	}
 
 	project, err := s.optionalProject(r)
 	if err != nil {
@@ -1208,7 +1217,7 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		_, gitErr := s.sandboxMgr.ExecProject(project, "git -C "+shellQuote(sandboxPath)+" rev-parse --git-dir 2>/dev/null", opts)
+		_, gitErr := s.sandboxMgr.ExecProject(project, "git -C "+sandboxruntime.ShellQuote(sandboxPath)+" rev-parse --git-dir 2>/dev/null", opts)
 		if gitErr == nil {
 			JSONError(w, http.StatusBadRequest, "path is already a git repository")
 			return
@@ -1228,10 +1237,10 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 		// git init + create README + add + commit in single command
 		flagCmd := gitAuthorFlagCmd()
 		_, err := s.sandboxMgr.ExecProjectWithInput(project,
-			"git -C "+shellQuote(sandboxPath)+" init && "+
-				"base64 -d > "+shellQuote(filepath.Join(sandboxPath, "README.md"))+" && "+
-				"git -C "+shellQuote(sandboxPath)+" add README.md && "+
-				"git -C "+shellQuote(sandboxPath)+" "+flagCmd+" commit -m 'Initial commit'",
+			"git -C "+sandboxruntime.ShellQuote(sandboxPath)+" init && "+
+				"base64 -d > "+sandboxruntime.ShellQuote(filepath.Join(sandboxPath, "README.md"))+" && "+
+				"git -C "+sandboxruntime.ShellQuote(sandboxPath)+" add README.md && "+
+				"git -C "+sandboxruntime.ShellQuote(sandboxPath)+" "+flagCmd+" commit -m 'Initial commit'",
 			[]byte(encoded+"\n"), opts)
 		if err != nil {
 			Fault(w, "git commit", err)
@@ -1301,11 +1310,14 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Path string `json:"path"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Path == "" {
-		JSONError(w, http.StatusBadRequest, "path is required")
+	if !httputil.DecodeJSON(w, r, &req) {
 		return
 	}
 	req.Path = strings.TrimSpace(req.Path)
+	if req.Path == "" {
+		JSONError(w, http.StatusBadRequest, "path is required")
+		return
+	}
 
 	project, err := s.optionalProject(r)
 	if err != nil {
@@ -1345,9 +1357,9 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 			JSONError(w, http.StatusBadGateway, optsErr.Error())
 			return
 		}
-		cmd := "if [ ! -d " + shellQuote(sandboxParent) + "; then echo 'PARENT_MISSING'; " +
-			"elif [ -e " + shellQuote(sandboxPath) + "; then echo 'ALREADY_EXISTS'; " +
-			"else mkdir " + shellQuote(sandboxPath) + " && echo 'OK'; fi"
+		cmd := "if [ ! -d " + sandboxruntime.ShellQuote(sandboxParent) + "; then echo 'PARENT_MISSING'; " +
+			"elif [ -e " + sandboxruntime.ShellQuote(sandboxPath) + "; then echo 'ALREADY_EXISTS'; " +
+			"else mkdir " + sandboxruntime.ShellQuote(sandboxPath) + " && echo 'OK'; fi"
 		var output string
 		var execErr error
 		if taskID != "" {
@@ -1374,7 +1386,7 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 			// Odd output (e.g. a shell banner) can still mean success — verify first.
 			var checkOut string
 			var checkErr error
-			checkCmd := "test -d " + shellQuote(sandboxPath) + " && echo EXISTS"
+			checkCmd := "test -d " + sandboxruntime.ShellQuote(sandboxPath) + " && echo EXISTS"
 			if taskID != "" {
 				checkOut, checkErr = s.sandboxMgr.ExecTask(taskID, worktreePath, project, checkCmd, opts)
 			} else {
@@ -1474,7 +1486,7 @@ func gitAuthorFlagCmd() string {
 	flags := git.GitAuthorFlags()
 	var parts []string
 	for i := 0; i+1 < len(flags); i += 2 {
-		parts = append(parts, shellQuote(flags[i]), shellQuote(flags[i+1]))
+		parts = append(parts, sandboxruntime.ShellQuote(flags[i]), sandboxruntime.ShellQuote(flags[i+1]))
 	}
 	return strings.Join(parts, " ")
 }

@@ -1,6 +1,9 @@
 package types
 
-import "unicode/utf8"
+import (
+	"strings"
+	"unicode/utf8"
+)
 
 // Clip returns the first max runes of s. It counts runes because a byte cut splits a multi-byte
 // character, and the leftover tail reaches a person as the replacement character — in the title their
@@ -21,4 +24,11 @@ func ClipMark(s string, max int, mark string) string {
 		return s
 	}
 	return clipped + mark
+}
+
+// FirstLine is the text before the first newline, with the whitespace around it dropped. Titles and
+// one-line errors both come from here, and neither wants the padding a pasted message carries.
+func FirstLine(s string) string {
+	line, _, _ := strings.Cut(s, "\n")
+	return strings.TrimSpace(line)
 }

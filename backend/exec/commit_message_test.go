@@ -111,64 +111,8 @@ func TestUtilityTarget_AgentProvider(t *testing.T) {
 	}
 }
 
-// --- ResolveUtilityTarget Tests ---
-
-func TestResolveUtilityTarget_UsesConfiguredUtilityProvider(t *testing.T) {
-	t.Parallel()
-	e := newTestExecutor(t)
-
-	providers := []types.Provider{
-		{Name: "worker", URL: "http://worker:8010/v1", Models: []types.ModelConfig{{Name: "chat-model"}}},
-		{Name: "utility", URL: "http://utility:8010/v1", Models: []types.ModelConfig{{Name: "cheap-model"}}},
-	}
-	if err := e.configStore.UpdateConfig(&types.Config{
-		Providers:       providers,
-		WorkerProvider:  "worker",
-		WorkerModel:     "chat-model",
-		UtilityProvider: "utility",
-		UtilityModel:    "cheap-model",
-	}); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-
-	task := &types.Task{
-		ID:             "task-1",
-		LlamaServerURL: "http://worker:8010/v1",
-		ModelName:      "chat-model",
-	}
-
-	url, model := e.ResolveUtilityTarget(task)
-	if url != "http://utility:8010/v1" {
-		t.Errorf("url = %q, want utility provider URL", url)
-	}
-	if model != "cheap-model" {
-		t.Errorf("model = %q, want utility model", model)
-	}
-}
-
-func TestResolveUtilityTarget_FallsBackToTaskWhenUnset(t *testing.T) {
-	t.Parallel()
-	e := newTestExecutor(t)
-
-	if err := e.configStore.UpdateConfig(&types.Config{
-		Providers: []types.Provider{{Name: "worker", URL: "http://worker:8010/v1"}},
-	}); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-
-	task := &types.Task{
-		LlamaServerURL: "http://task-url:8010/v1",
-		ModelName:      "task-model",
-	}
-
-	url, model := e.ResolveUtilityTarget(task)
-	if url != "http://task-url:8010/v1" {
-		t.Errorf("url = %q, want task URL fallback", url)
-	}
-	if model != "task-model" {
-		t.Errorf("model = %q, want task model fallback", model)
-	}
-}
+// ResolveUtilityTarget is utilityTarget with the `ok` dropped, so the cases above are its behaviour.
+// Its callers are the commit-message route in backend/api and automatedAnswers here.
 
 // --- collectUniqueModels Tests ---
 
@@ -263,9 +207,6 @@ func TestBuildAssistedBy_StripsOrgPrefix(t *testing.T) {
 	mixed := buildAssistedBy([]string{"org/model", "model"})
 	if !strings.Contains(mixed, "Assisted-by: MIKE:model") {
 		t.Errorf("expected org prefix stripped + MIKE prefix, got %q", mixed)
-	}
-	if !strings.Contains(mixed, "Assisted-by: MIKE:model") {
-		t.Errorf("expected non-namespaced model with MIKE prefix, got %q", mixed)
 	}
 	if strings.Contains(mixed, "org/") {
 		t.Errorf("expected no 'org/' in trailer, got %q", mixed)

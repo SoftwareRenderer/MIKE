@@ -2,7 +2,6 @@ package fsutil
 
 import (
 	"errors"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -420,9 +419,5 @@ func TestHostRootErrShape(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), AllowRootFSEnv) {
 		t.Errorf("Err() must name %s, got %q", AllowRootFSEnv, err.Error())
-	}
-	var pathErr *fs.PathError
-	if errors.As(err, &pathErr) {
-		t.Skip("Err() is not a PathError; that is fine")
 	}
 }
