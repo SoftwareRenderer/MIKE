@@ -696,80 +696,86 @@ func TestMessageGetByIDFull(t *testing.T) {
 	}
 }
 
-func TestMessageListBashResultTruncated(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Test task")
+// The list redacts a tool result too long to ship whole, for the two tools that return bulk output. The
+// tool name is part of that decision, so it is a case here.
+func TestMessageListToolResultTruncation(t *testing.T) {
+	long := strings.Repeat("line of output text\n", 20)
+	short := "total 100\ndrwxr-xr-x  5 user user  4096 Jan 1 .\n"
 
-	// Create a bash tool_call message with long output (>10 lines)
-	longOutput := strings.Repeat("line of output text\n", 20)
-	toolCallsJSON, _ := json.Marshal(map[string]any{
-		"tool_id":   "call_bash",
-		"tool_name": "bash",
-		"args":      map[string]any{"command": "cat large_file.txt"},
-	})
-	toolResultJSON, _ := json.Marshal(map[string]any{
-		"output":   longOutput,
-		"success":  true,
-		"duration": 50,
-	})
-	_ = s.store.CreateTaskMessage(&types.TaskMessage{
-		ID:         "test-bash-long",
-		TaskID:     taskID,
-		ThreadID:   (func() string { task, _ := s.store.GetTask(projID, taskID); return task.CurrentThreadID })(),
-		Role:       "tool_call",
-		Content:    "executed",
-		ToolCalls:  string(toolCallsJSON),
-		ToolResult: string(toolResultJSON),
-		CreatedAt:  time.Now().UTC(),
-	})
-
-	// GET without full=1 — output should be truncated
-	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil)
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	cases := []struct {
+		name     string
+		toolName string
+		output   string
+		wantCut  bool
+	}{
+		{"bash output over the ceiling", "bash", long, true},
+		{"read_file output over the ceiling", "read_file", long, true},
+		{"bash output within the ceiling", "bash", short, false},
 	}
 
-	msgs := mustJSON[[]map[string]any](t, rr.Body)
-	var bashMsg map[string]any
-	for _, m := range msgs {
-		if m["role"] == "tool_call" {
-			bashMsg = m
-			break
-		}
-	}
-	if bashMsg == nil {
-		t.Fatal("tool_call message not found")
-	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testServer(t)
+			projID := createTestProject(t, s)
+			taskID := createTestTask(t, s, projID, "Test task")
 
-	// result_truncated should be true
-	if bashMsg["result_truncated"] != true {
-		t.Fatalf("expected result_truncated=true, got %v", bashMsg["result_truncated"])
-	}
+			toolCalls, _ := json.Marshal(map[string]any{
+				"tool_id":   "call-1",
+				"tool_name": tc.toolName,
+				"args":      map[string]any{"command": "cat large_file.txt"},
+			})
+			toolResult, _ := json.Marshal(map[string]any{
+				"output": tc.output, "success": true, "duration": 50,
+			})
+			seedMessage(t, s, projID, taskID, &types.TaskMessage{
+				Role: "tool_call", Content: "executed",
+				ToolCalls: string(toolCalls), ToolResult: string(toolResult),
+			})
 
-	// Parse tool_result and check output is truncated
-	var result map[string]any
-	if err := json.Unmarshal([]byte(bashMsg["tool_result"].(string)), &result); err != nil {
-		t.Fatalf("parse tool_result: %v", err)
-	}
-	output := result["output"].(string)
-	if !strings.Contains(output, "truncated") {
-		t.Fatalf("expected truncated output, got: %s", output)
-	}
-	// Should have fewer lines than original
-	outputLines := strings.Count(output, "\n")
-	if outputLines >= 20 {
-		t.Fatalf("expected fewer than 20 lines, got %d", outputLines)
-	}
-	// original_lines and original_bytes should be set
-	// strings.Split on "line\n" * 20 produces 21 elements (trailing empty)
-	originalLines := len(strings.Split(longOutput, "\n"))
-	if result["original_lines"] != float64(originalLines) {
-		t.Fatalf("expected original_lines=%d, got %v", originalLines, result["original_lines"])
-	}
-	if result["original_bytes"] != float64(len(longOutput)) {
-		t.Fatalf("expected original_bytes=%d, got %v", len(longOutput), result["original_bytes"])
+			rr := testResponseAuth(t, s,
+				testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil))
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d: %s", rr.Code, rr.Body.String())
+			}
+
+			var msg map[string]any
+			for _, m := range mustJSON[[]map[string]any](t, rr.Body) {
+				if m["role"] == "tool_call" {
+					msg = m
+				}
+			}
+			if msg == nil {
+				t.Fatal("tool_call message not found")
+			}
+			if got := msg["result_truncated"] == true; got != tc.wantCut {
+				t.Fatalf("result_truncated = %v, want %v", got, tc.wantCut)
+			}
+
+			var result map[string]any
+			if err := json.Unmarshal([]byte(msg["tool_result"].(string)), &result); err != nil {
+				t.Fatalf("parse tool_result: %v", err)
+			}
+			output := result["output"].(string)
+			if !tc.wantCut {
+				if output != tc.output {
+					t.Errorf("an ordinary result was rewritten: %q", output)
+				}
+				return
+			}
+			if !strings.Contains(output, "truncated") {
+				t.Fatalf("the cut was not said out loud: %q", output)
+			}
+			if lines := strings.Count(output, "\n"); lines >= 20 {
+				t.Fatalf("output still holds %d lines", lines)
+			}
+			// The counts are what the "show all" affordance reports.
+			if got := result["original_lines"]; got != float64(len(strings.Split(tc.output, "\n"))) {
+				t.Errorf("original_lines = %v", got)
+			}
+			if got := result["original_bytes"]; got != float64(len(tc.output)) {
+				t.Errorf("original_bytes = %v", got)
+			}
+		})
 	}
 }
 

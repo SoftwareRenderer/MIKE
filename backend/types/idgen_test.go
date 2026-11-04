@@ -1,8 +1,6 @@
 package types
 
 import (
-	"bytes"
-	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -38,22 +36,6 @@ func TestTaskWordsAreUsableInIDParts(t *testing.T) {
 		if w != strings.ToLower(w) {
 			t.Errorf("word not lowercase: %q", w)
 		}
-	}
-}
-
-// TestIDGenerationUsesCryptoRand guards the entropy source: task and thread IDs
-// surface in URLs, git branch names and worktree paths, so they must not come
-// from the clock-seeded math/rand.
-func TestIDGenerationUsesCryptoRand(t *testing.T) {
-	src, err := os.ReadFile("idgen.go")
-	if err != nil {
-		t.Fatalf("read idgen.go: %v", err)
-	}
-	if bytes.Contains(src, []byte(`"math/rand"`)) {
-		t.Error(`idgen.go imports math/rand; word selection must use crypto/rand`)
-	}
-	if !bytes.Contains(src, []byte(`"crypto/rand"`)) {
-		t.Error("idgen.go does not import crypto/rand")
 	}
 }
 

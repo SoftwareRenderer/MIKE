@@ -77,8 +77,3 @@ func TestSanitizeManifestURLs(t *testing.T) {
 		})
 	}
 }
-
-func TestSanitizeManifestURLs_Nil(t *testing.T) {
-	// Should not panic on nil
-	sanitizeManifestURLs(nil)
-}

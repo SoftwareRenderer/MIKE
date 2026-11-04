@@ -417,33 +417,22 @@ func TestCreateWorktree_BothPathsReturnBranchName(t *testing.T) {
 	t.Logf("fresh baseRef=%q, early return baseRef=%q (both branch names)", baseRefFresh, baseRefEarly)
 }
 
-func TestCreateWorktree_GeneratesBranchNameWhenEmpty(t *testing.T) {
-	_, taskID, _, _, wm := setupTestRepo(t)
+// A branch name that is empty or 40 hex reaches one guard in CreateWorktree, which names the worktree's
+// branch task/<taskID>. The hex shape is the one that hurts: git reads such a branch as the commit itself.
+func TestCreateWorktree_GeneratesBranchNameForAnUnusableRef(t *testing.T) {
+	for _, branchName := range []string{"", "abcdef1234567890abcdef1234567890abcdef12"} {
+		_, taskID, _, _, wm := setupTestRepo(t)
 
-	wtPath, _, err := wm.CreateWorktree("test-project", taskID, "", "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+		wtPath, _, err := wm.CreateWorktree("test-project", taskID, branchName, "")
+		if err != nil {
+			t.Fatalf("branchName %q: unexpected error: %v", branchName, err)
+		}
 
-	currentBranch, _ := Run(wtPath, "rev-parse", "--abbrev-ref", "HEAD")
-	currentBranch = strings.TrimSpace(currentBranch)
-	if currentBranch != "task/"+taskID {
-		t.Errorf("expected branch 'task/%s', got %q", taskID, currentBranch)
-	}
-}
-
-func TestCreateWorktree_GeneratesBranchNameWhen40Hex(t *testing.T) {
-	_, taskID, _, _, wm := setupTestRepo(t)
-
-	wtPath, _, err := wm.CreateWorktree("test-project", taskID, "abcdef1234567890abcdef1234567890abcdef12", "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	currentBranch, _ := Run(wtPath, "rev-parse", "--abbrev-ref", "HEAD")
-	currentBranch = strings.TrimSpace(currentBranch)
-	if currentBranch != "task/"+taskID {
-		t.Errorf("expected branch 'task/%s', got %q", taskID, currentBranch)
+		currentBranch, _ := Run(wtPath, "rev-parse", "--abbrev-ref", "HEAD")
+		currentBranch = strings.TrimSpace(currentBranch)
+		if currentBranch != "task/"+taskID {
+			t.Errorf("branchName %q: HEAD is on %q, want 'task/%s'", branchName, currentBranch, taskID)
+		}
 	}
 }
 

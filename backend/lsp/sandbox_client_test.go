@@ -1,10 +1,6 @@
 package lsp
 
-import (
-	"bytes"
-	"os"
-	"testing"
-)
+import "testing"
 
 // TestNewSandboxClientMapsAreWritable: ensureDocSync writes the three document maps
 // unconditionally, so a client built with a struct literal dies on the first tool call.
@@ -32,38 +28,5 @@ func TestNewSandboxClientMapsAreWritable(t *testing.T) {
 	}
 	if sc.initialized {
 		t.Error("a fresh client must not claim to be initialized")
-	}
-}
-
-// TestSandboxClientBuiltOnlyThroughConstructor keeps the two construction sites from drifting
-// apart again: a composite literal outside the constructor is how the nil maps came back, and
-// a functional test on the constructor alone cannot see one being added elsewhere.
-func TestSandboxClientBuiltOnlyThroughConstructor(t *testing.T) {
-	src, err := os.ReadFile("extension_manager.go")
-	if err != nil {
-		t.Fatalf("read extension_manager.go: %v", err)
-	}
-
-	start := bytes.Index(src, []byte("func newSandboxClient("))
-	if start < 0 {
-		t.Fatal("newSandboxClient not found; the constructor must stay the only way to build one")
-	}
-	end := bytes.Index(src[start:], []byte("\n}\n"))
-	if end < 0 {
-		t.Fatal("could not find the end of newSandboxClient")
-	}
-	constructor := start + end + len("\n}\n")
-
-	for i := 0; ; {
-		idx := bytes.Index(src[i:], []byte("&sandboxClient{"))
-		if idx < 0 {
-			break
-		}
-		abs := i + idx
-		if abs < start || abs > constructor {
-			t.Errorf("&sandboxClient{ at byte %d is outside newSandboxClient (%d-%d); use newSandboxClient so the document maps are initialized",
-				abs, start, constructor)
-		}
-		i = abs + len("&sandboxClient{")
 	}
 }

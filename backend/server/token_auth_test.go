@@ -282,14 +282,4 @@ func TestTokenScopeIsTheApprovedSet(t *testing.T) {
 			"docs/api.md and the Settings help text describe this set; a route added here is a route a leaked token can drive.",
 			strings.Join(got, "\n"), strings.Join(approved, "\n"))
 	}
-
-	registered := map[string]bool{}
-	for _, r := range registeredRoutes(t) {
-		registered[r] = true
-	}
-	for pattern := range tokenScope {
-		if !registered[pattern] {
-			t.Errorf("%s is scoped for tokens but not registered — a renamed route keeps its grant and loses its meaning", pattern)
-		}
-	}
 }

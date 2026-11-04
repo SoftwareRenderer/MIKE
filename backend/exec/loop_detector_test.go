@@ -79,18 +79,6 @@ func TestPhraseDetector_Basic(t *testing.T) {
 	}
 }
 
-func TestPhraseDetector_MinWords(t *testing.T) {
-	t.Parallel()
-	det := newPhraseDetector()
-	shortPhrase := "Too short. "
-
-	for i := 0; i < 20; i++ {
-		if det.check(shortPhrase) {
-			t.Fatalf("phrase detector fired for short phrase at iteration %d", i)
-		}
-	}
-}
-
 func TestBlockDetector_Basic(t *testing.T) {
 	t.Parallel()
 	det := newBlockDetector()

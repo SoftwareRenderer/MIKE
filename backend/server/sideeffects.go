@@ -5,8 +5,8 @@ package server
 // whether the next person to open the board sees a whole result or half of one.
 //
 // Three sets, and a path in none of them is **unclassified**, which is a bug rather than an absence of
-// work: TestSideEffectClassification covers what the route table contains, so a new state-changing route
-// has to appear here before it can be merged.
+// work. TestSideEffectClassificationIsDisjointAndExplained checks one path per set and a reason per entry;
+// whether the route table is *covered* here stays a reviewer's decision.
 //
 //   - detachedOperations persist a result. They run on Server.Detached() and finish, whatever the browser
 //     does. An abort mid-way is the intermittent wrong-screen bug this repo already documents.

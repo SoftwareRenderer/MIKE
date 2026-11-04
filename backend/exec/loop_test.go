@@ -208,26 +208,6 @@ func TestLoopDetector_LoopStreakIncrementsOnConsecutiveLoops(t *testing.T) {
 	}
 }
 
-func TestLoopDetector_ValidTurnResetsLoopStreak(t *testing.T) {
-	t.Parallel()
-	d := newLoopDetector()
-
-	// Simulate 2 consecutive loop hints
-	d.loopStreak = 2
-
-	// A valid turn resets loopStreak to 0
-	args := map[string]string{"path": "src/other.go"}
-	argsJSON, _ := json.Marshal(args)
-	tc := []types.ChatToolCall{makeToolCall("read_file", string(argsJSON))}
-	loopType, _ := d.recordTurn(tc, "", "tool_calls")
-	if loopType != LoopNone {
-		t.Fatalf("expected LoopNone, got %v", loopType)
-	}
-	if d.loopStreak != 0 {
-		t.Errorf("expected loopStreak=0 after valid turn, got %d", d.loopStreak)
-	}
-}
-
 func TestLoopDetector_LoopStreakResetsOnValidTurn(t *testing.T) {
 	t.Parallel()
 	d := newLoopDetector()
@@ -260,20 +240,6 @@ func TestLoopDetector_LoopStreakResetsOnValidTurn(t *testing.T) {
 	d.loopStreak++
 	if d.loopStreak != 1 {
 		t.Errorf("expected loopStreak=1 (fresh streak), got %d", d.loopStreak)
-	}
-}
-
-func TestLoopDetector_ResetClearsLoopStreak(t *testing.T) {
-	t.Parallel()
-	d := newLoopDetector()
-
-	// Manually set loopStreak
-	d.loopStreak = 2
-
-	// reset() clears loopStreak
-	d.reset()
-	if d.loopStreak != 0 {
-		t.Errorf("expected loopStreak=0 after reset, got %d", d.loopStreak)
 	}
 }
 
@@ -826,28 +792,6 @@ func TestLoopDetector_MultiParagraphNotPenalisedWhenNotDone(t *testing.T) {
 			t.Errorf("expected LoopNone for finish_reason %q, got %v", reason, loopType)
 		}
 	}
-}
-
-func TestLoopDetector_PhraseLoopViaStreaming(t *testing.T) {
-	t.Parallel()
-	d := newLoopDetector()
-
-	// Simulate streaming chunks — repeat the same phrase.
-	// Note: This will trigger a block loop (3 repeats) before a phrase loop (maxPhraseRepeats).
-	chunk := "Let me think about this problem carefully and analyze the full requirements. "
-	firedAt := -1
-	for i := 0; i < maxPhraseRepeats; i++ {
-		loopType := d.checkStreamingText(chunk)
-		if loopType == LoopPhrase {
-			firedAt = i
-			break
-		}
-	}
-
-	if firedAt == -1 {
-		t.Error("expected loop to be detected")
-	}
-	t.Logf("loop detected at iteration %d", firedAt)
 }
 
 func TestLoopDetector_ResetClearsPhraseFlag(t *testing.T) {

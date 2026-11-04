@@ -6,10 +6,10 @@ import (
 	"testing"
 )
 
-// TestModelConfigJSONRoundTrip verifies the per-model pricing/power and sampler override
-// fields serialize and deserialize correctly, and that nil (inherit) fields are
-// omitted from the JSON output.
-func TestModelConfigJSONRoundTrip(t *testing.T) {
+// TestModelConfigJSONTagsAreWhatTheStoreHolds pins the names a stored model row is written with; a rename
+// leaves every existing config's pricing and sampler quietly empty. TestModelConfigNilFieldsOmitted is the
+// other half.
+func TestModelConfigJSONTagsAreWhatTheStoreHolds(t *testing.T) {
 	inputP := 3.5
 	outputP := 7.25
 	cacheReadP := 1.0
@@ -75,62 +75,6 @@ func TestModelConfigJSONRoundTrip(t *testing.T) {
 		}
 	}
 
-	var out ModelConfig
-	if err := json.Unmarshal(data, &out); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if out.Name != m.Name || out.ReasoningEffort != m.ReasoningEffort {
-		t.Fatalf("scalar fields mismatch: %+v", out)
-	}
-	if out.ContextWindow == nil || *out.ContextWindow != ctx {
-		t.Fatalf("context_window mismatch: %v", out.ContextWindow)
-	}
-	if out.InputPrice == nil || *out.InputPrice != inputP {
-		t.Fatalf("input_price mismatch: %v", out.InputPrice)
-	}
-	if out.OutputPrice == nil || *out.OutputPrice != outputP {
-		t.Fatalf("output_price mismatch: %v", out.OutputPrice)
-	}
-	if out.CacheReadPrice == nil || *out.CacheReadPrice != cacheReadP {
-		t.Fatalf("cache_read_price mismatch: %v", out.CacheReadPrice)
-	}
-	if out.CacheWritePrice == nil || *out.CacheWritePrice != cacheWriteP {
-		t.Fatalf("cache_write_price mismatch: %v", out.CacheWritePrice)
-	}
-	if out.PowerConsumptionW == nil || *out.PowerConsumptionW != powerW {
-		t.Fatalf("power_consumption_w mismatch: %v", out.PowerConsumptionW)
-	}
-	if out.Sampling == nil {
-		t.Fatalf("sampling was dropped: %s", jsonStr)
-	}
-	for _, f := range []struct {
-		name string
-		got  *float64
-		want float64
-	}{
-		{"temperature", out.Sampling.Temperature, temp},
-		{"top_p", out.Sampling.TopP, topP},
-		{"min_p", out.Sampling.MinP, minP},
-		{"frequency_penalty", out.Sampling.FrequencyPenalty, freqPenalty},
-		{"presence_penalty", out.Sampling.PresencePenalty, presPenalty},
-		{"repetition_penalty", out.Sampling.RepetitionPenalty, repPenalty},
-	} {
-		if f.got == nil || *f.got != f.want {
-			t.Errorf("sampling.%s mismatch: %v", f.name, f.got)
-		}
-	}
-	for _, f := range []struct {
-		name string
-		got  *int
-		want int
-	}{
-		{"top_k", out.Sampling.TopK, topK},
-		{"seed", out.Sampling.Seed, seed},
-	} {
-		if f.got == nil || *f.got != f.want {
-			t.Errorf("sampling.%s mismatch: %v", f.name, f.got)
-		}
-	}
 }
 
 // TestProviderUnmarshalNormalizesReasoningEffort: empty effort and legacy string
