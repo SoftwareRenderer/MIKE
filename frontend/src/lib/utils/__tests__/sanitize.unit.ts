@@ -136,9 +136,28 @@ describe('sanitizeHTML', () => {
         expect(hazards(html)).toEqual([]);
     });
 
-    it('keeps the class attribute the LSP grammar colors with', () => {
-        expect(sanitizeHTML('<pre><code class="language-go"><span class="tok-keyword">func</span></code></pre>'))
-            .toContain('class="tok-keyword"');
+    it('keeps the two class shapes the renderers actually emit', () => {
+        // `language-<tag>` is `marked`'s fence label; the `ͼ`-prefixed pair is the editor theme's
+        // generated class for a tag, which is what a colored hover card carries.
+        const html = sanitizeHTML('<pre><code class="language-go"><span class="ͼo ͼ2">func</span></code></pre>');
+        expect(html).toContain('class="language-go"');
+        expect(html).toContain('class="ͼo ͼ2"');
+    });
+
+    it('refuses a class that names a rule the application ships', () => {
+        // A class reaches the layout a `position: fixed` value was refused for, by selecting a
+        // rule this app wrote. `css-surface.py` keeps such a rule out of the stylesheet.
+        expect(sanitizeHTML('<div class="explorer-view fullscreen">Sign in again</div>'))
+            .toBe('<div>Sign in again</div>');
+        expect(sanitizeHTML('<div class="tok-keyword cm-line language-go">x</div>'))
+            .toBe('<div class="language-go">x</div>');
+    });
+
+    it('refuses the names and data attributes a fragment can point at the app', () => {
+        // A fragment that names an element is what `getElementById` and `aria-labelledby` find
+        // first, and `data-*` is what DOMPurify keeps unless told not to.
+        const out = sanitizeHTML('<div id="modal-title" name="session" data-ext="x">x</div>');
+        expect(out).toBe('<div>x</div>');
     });
 });
 
