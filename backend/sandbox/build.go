@@ -455,12 +455,6 @@ func (sm *SandboxManager) runBuildContainer(ctx context.Context, plan *buildPlan
 	return nil
 }
 
-// buildShellQuote wraps one argument for the container's `/bin/sh -c`. Nothing it quotes is trusted to be
-// quote-free.
-func buildShellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
-
 // buildContainerArgs is the whole podman argument list for one build: gVisor with the build's fixed grant,
 // the project's inherited mounts read-only, a network, no published ports.
 func (sm *SandboxManager) buildContainerArgs(plan *buildPlan) ([]string, error) {
@@ -522,7 +516,7 @@ func buildContainerScript(plan *buildPlan) string {
 		// store, "the first one" names nothing.
 		fmt.Fprintf(&b, "id=$(%s pull docker-archive:%s/%s | tail -1)\n", store, buildBaseMount, filepath.Base(archive))
 		for _, name := range plan.baseNames[i] {
-			fmt.Fprintf(&b, "%s tag \"$id\" %s > /dev/null\n", store, buildShellQuote(name))
+			fmt.Fprintf(&b, "%s tag \"$id\" %s > /dev/null\n", store, sandboxruntime.ShellQuote(name))
 		}
 	}
 	pairs := [][2]string{
@@ -534,13 +528,13 @@ func buildContainerScript(plan *buildPlan) string {
 	}
 	labels := ""
 	for _, l := range pairs {
-		labels += " --label " + buildShellQuote(l[0]+"="+l[1])
+		labels += " --label " + sandboxruntime.ShellQuote(l[0]+"="+l[1])
 	}
 	// The flags precede the context: `bud <context> -f <dockerfile>` is rejected with "accepts at most 1
 	// arg", which reads like a malformed Dockerfile and is a flag-ordering rule.
 	fmt.Fprintf(&b, "%s bud --isolation chroot --pull=never --format oci%s -t %s -f %s %s\n",
 		store, labels, buildImageTag,
-		buildShellQuote(path.Join(buildContextMount, plan.dockerfileInContext())), buildContextMount)
+		sandboxruntime.ShellQuote(path.Join(buildContextMount, plan.dockerfileInContext())), buildContextMount)
 	fmt.Fprintf(&b, "%s push %s docker-archive:%s/image.tar\n", store, buildImageTag, buildOutputMount)
 	return b.String()
 }

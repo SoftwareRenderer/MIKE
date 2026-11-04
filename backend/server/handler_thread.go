@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"mike/backend/httputil"
@@ -76,7 +75,10 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request, proj
 	var req struct {
 		ThreadID string `json:"thread_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ThreadID == "" {
+	if !httputil.DecodeJSON(w, r, &req) {
+		return
+	}
+	if req.ThreadID == "" {
 		JSONError(w, http.StatusBadRequest, "thread_id required")
 		return
 	}
@@ -153,7 +155,10 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ThreadID string `json:"thread_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ThreadID == "" {
+	if !httputil.DecodeJSON(w, r, &req) {
+		return
+	}
+	if req.ThreadID == "" {
 		JSONError(w, http.StatusBadRequest, "thread_id required")
 		return
 	}
@@ -261,7 +266,10 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 		NewContent    string `json:"new_content"`
 		ClientToken   string `json:"client_token"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.FromThreadID == "" || req.FromMessageID == "" {
+	if !httputil.DecodeJSON(w, r, &req) {
+		return
+	}
+	if req.FromThreadID == "" || req.FromMessageID == "" {
 		JSONError(w, http.StatusBadRequest, "from_thread_id and from_message_id required")
 		return
 	}

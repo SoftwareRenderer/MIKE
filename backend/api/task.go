@@ -431,8 +431,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
 	var req types.MoveTaskRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.JSONError(w, http.StatusBadRequest, "invalid JSON")
+	if !httputil.DecodeJSON(w, r, &req) {
 		return
 	}
 	task, ok := resolveTask(w, r, h.store)
@@ -1412,17 +1411,12 @@ func (h *TaskHandler) respondWithTask(w http.ResponseWriter, projectID, taskID s
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
-// firstLine is the line a title is taken from: what a person typed before any newline.
-func firstLine(text string) string {
-	return strings.TrimSpace(strings.Split(text, "\n")[0])
-}
-
 func autoGenerateTitle(prompt string) string {
-	return types.ClipMark(firstLine(prompt), 77, "...")
+	return types.ClipMark(types.FirstLine(prompt), 77, "...")
 }
 
 func isShortTitle(prompt string) bool {
-	line := firstLine(prompt)
+	line := types.FirstLine(prompt)
 	if line == "" {
 		return false
 	}

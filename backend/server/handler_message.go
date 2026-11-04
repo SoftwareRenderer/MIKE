@@ -90,7 +90,10 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 			DeleteSingle bool   `json:"delete_single"`
 			Regenerate   bool   `json:"regenerate"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MessageID == "" {
+		if !httputil.DecodeJSON(w, r, &req) {
+			return
+		}
+		if req.MessageID == "" {
 			JSONError(w, http.StatusBadRequest, "message_id required")
 			return
 		}
@@ -135,8 +138,7 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodPost {
 		var msg types.TaskMessage
-		if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
-			JSONError(w, http.StatusBadRequest, "invalid request body")
+		if !httputil.DecodeJSON(w, r, &msg) {
 			return
 		}
 		if msg.Role == "" || msg.Content == "" {
@@ -350,8 +352,7 @@ func (s *Server) handleTaskMessageByID(w http.ResponseWriter, r *http.Request) {
 			Content    *json.RawMessage `json:"content"`
 			CommitHash string           `json:"git_commit_hash"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			JSONError(w, http.StatusBadRequest, "invalid request")
+		if !httputil.DecodeJSON(w, r, &req) {
 			return
 		}
 		// Absent leaves the row alone. A present value is written as given, but never a blank one: a

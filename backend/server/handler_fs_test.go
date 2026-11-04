@@ -17,6 +17,7 @@ import (
 	"mike/backend/git"
 	"mike/backend/testutil/testgit"
 	"mike/backend/types"
+	"mike/pkg/sandboxruntime"
 )
 
 // canaryPath is used to detect command injection. If any malicious payload
@@ -35,7 +36,7 @@ func canaryCreated() bool {
 
 // shellEchoArgs runs `printf '%s\n' <args...>` via a POSIX shell so that each
 // shell-quoted token in command is printed on its own line. This validates that
-// shellQuote groups each token into exactly one shell argument.
+// ShellQuote() groups each token into exactly one shell argument.
 func shellEchoArgs(command string) (string, error) {
 	out, err := exec.Command("sh", "-c", "printf '%s\n' "+command).Output()
 	return string(out), err
@@ -96,7 +97,7 @@ func TestGitAuthorFlagCmd_ShellSafety(t *testing.T) {
 		t.Run(payload, func(t *testing.T) {
 			cleanCanary()
 			// Inject the payload into both name and email so every component
-			// produced by GitAuthorFlags() / shellQuote is exercised.
+			// produced by GitAuthorFlags() / ShellQuote() is exercised.
 			git.SetAuthorIdentity(payload, payload+"@x.com")
 
 			flagCmd := gitAuthorFlagCmd()
@@ -106,7 +107,7 @@ func TestGitAuthorFlagCmd_ShellSafety(t *testing.T) {
 			// (no repo / no staged changes), which is harmless — we only care
 			// whether the injected `touch` executes during shell parsing.
 			sandboxPath := t.TempDir()
-			shellCmd := "git -C " + shellQuote(sandboxPath) + " " + flagCmd + " commit -m 'Initial commit' || true"
+			shellCmd := "git -C " + sandboxruntime.ShellQuote(sandboxPath) + " " + flagCmd + " commit -m 'Initial commit' || true"
 
 			cmd := exec.Command("sh", "-c", shellCmd)
 			if err := cmd.Run(); err != nil {

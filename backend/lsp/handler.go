@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 	"sync/atomic"
 
@@ -1077,7 +1078,7 @@ func (h *LSPHandler) messageBound() int {
 // the writer, and the caller unwinds whatever waited on it.
 func (h *LSPHandler) forwardRequest(ctx context.Context, session *ClientSession, msg json.RawMessage, method, clientReqID string, channelID int64, workspaceKey string) error {
 	backendID := h.nextBackendID.Add(1)
-	backendIDStr := itoa(backendID)
+	backendIDStr := strconv.FormatInt(backendID, 10)
 
 	// Record the mapping, and answer whatever this push put over the session's bound.
 	bound := h.pendingBound()
@@ -1422,27 +1423,4 @@ func (h *LSPHandler) BroadcastLSPReset() {
 	for _, s := range clients {
 		s.deliver(msg)
 	}
-}
-
-// itoa converts an int64 to a string without fmt.
-func itoa(n int64) string {
-	if n == 0 {
-		return "0"
-	}
-	neg := n < 0
-	if neg {
-		n = -n
-	}
-	buf := make([]byte, 0, 20)
-	for n > 0 {
-		buf = append(buf, byte('0'+n%10))
-		n /= 10
-	}
-	if neg {
-		buf = append(buf, '-')
-	}
-	for i, j := 0, len(buf)-1; i < j; i, j = i+1, j-1 {
-		buf[i], buf[j] = buf[j], buf[i]
-	}
-	return string(buf)
 }

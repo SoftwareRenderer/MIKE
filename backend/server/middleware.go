@@ -330,9 +330,9 @@ func (s *Server) SessionMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// MaxBodyMiddleware bounds the body of every request that may carry one. Handlers
-// that decode r.Body directly (git, fs, task, thread) are not covered by
-// httputil.DecodeJSON's own limit, so the bound goes on the reader here.
+// MaxBodyMiddleware bounds the body of every request that may carry one. It is what covers a body no
+// handler decodes as JSON — an upload, a raw send, a proxied request — since httputil.DecodeJSON bounds
+// what it reads itself, and a JSON route therefore carries the bound twice.
 //
 // A declared Content-Length over the cap is refused before a byte is read; a chunked
 // body has no length to trust, so the wrapped reader refuses it once past the cap.

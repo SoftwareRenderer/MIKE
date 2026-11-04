@@ -19,6 +19,7 @@ import (
 	"mike/backend/store"
 	"mike/backend/stream"
 	"mike/backend/types"
+	"mike/pkg/keylock"
 	"mike/pkg/logging"
 	"mike/pkg/subproc"
 )
@@ -32,6 +33,34 @@ type GitHandler struct {
 	getWorktreeMutex func(taskID string) func()
 	// per-project git locks.
 	getProjectMutex func(projectID string) func()
+
+	fallbackProjects  fallbackProjectLocks
+	fallbackWorktrees fallbackWorktreeLocks
+}
+
+// fallbackProjectLocks and fallbackWorktreeLocks are used when the server has not injected its lock
+// domains. They are two tables because task IDs and project IDs come from the same alphabet.
+type (
+	fallbackProjectLocks  struct{ keylock.Table }
+	fallbackWorktreeLocks struct{ keylock.Table }
+)
+
+// lockProject takes the project's git lock and returns its release. The server injects its own lock
+// domain at construction; without one the handler falls back to its own table, so a missing injection
+// narrows the lock instead of dropping it.
+func (h *GitHandler) lockProject(projectID string) func() {
+	if h.getProjectMutex == nil {
+		return h.fallbackProjects.Lock(projectID)
+	}
+	return h.getProjectMutex(projectID)
+}
+
+// lockWorktree takes the task's worktree lock, with the same fallback as lockProject.
+func (h *GitHandler) lockWorktree(taskID string) func() {
+	if h.getWorktreeMutex == nil {
+		return h.fallbackWorktrees.Lock(taskID)
+	}
+	return h.getWorktreeMutex(taskID)
 }
 
 // taskDiffCache caches task worktree diffs against HEAD.
@@ -529,9 +558,7 @@ func (h *GitHandler) HandleCheckout(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if h.getProjectMutex != nil {
-		defer h.getProjectMutex(projectID)()
-	}
+	defer h.lockProject(projectID)()
 	if !runCheckout(w, project.Path, branch) {
 		return
 	}
@@ -575,8 +602,7 @@ func refParam(w http.ResponseWriter, r *http.Request, queryKey, def string) (str
 // checkoutBranchFrom reads and validates branch from request body.
 func checkoutBranchFrom(w http.ResponseWriter, r *http.Request) (string, bool) {
 	var req types.GitCheckoutRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.JSONError(w, http.StatusBadRequest, "branch is required")
+	if !httputil.DecodeJSON(w, r, &req) {
 		return "", false
 	}
 	if err := types.ValidateBranchName(req.Branch); err != nil {
@@ -604,9 +630,7 @@ func (h *GitHandler) handleGitRemote(w http.ResponseWriter, r *http.Request, op 
 	if !ok {
 		return
 	}
-	if h.getProjectMutex != nil {
-		defer h.getProjectMutex(projectID)()
-	}
+	defer h.lockProject(projectID)()
 	// bound to request to avoid lock-holding timeouts.
 	c := git.CommandContext(r.Context(), "", "-C", project.Path, op)
 	// do not override git.Command environment.
@@ -1183,9 +1207,7 @@ func (h *GitHandler) HandleStagePaths(w http.ResponseWriter, r *http.Request) {
 		httputil.JSONError(w, http.StatusBadRequest, "task must be in_progress or review")
 		return
 	}
-	if h.getWorktreeMutex != nil {
-		defer h.getWorktreeMutex(taskID)()
-	}
+	defer h.lockWorktree(taskID)()
 	worktreePath, ok := resolveWorktree(w, r, h.worktreeMgr)
 	if !ok {
 		return
@@ -1206,9 +1228,7 @@ func (h *GitHandler) HandleProjectStagePaths(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	if h.getProjectMutex != nil {
-		defer h.getProjectMutex(projectID)()
-	}
+	defer h.lockProject(projectID)()
 	answerStage(w, project.Path, paths, stage)
 }
 
@@ -1349,9 +1369,7 @@ func (h *GitHandler) HandleProjectDiscardPaths(w http.ResponseWriter, r *http.Re
 		}
 	}
 	// A discard writes the index and worktree that stage and commit use, so it shares their lock.
-	if h.getProjectMutex != nil {
-		defer h.getProjectMutex(projectID)()
-	}
+	defer h.lockProject(projectID)()
 	applied, failed := discardPaths(project.Path, paths)
 	answerBatch(w, "discarded", applied, failed)
 }
@@ -1368,13 +1386,14 @@ func (h *GitHandler) HandleProjectCommit(w http.ResponseWriter, r *http.Request)
 	var req struct {
 		Message string `json:"message"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Message == "" {
+	if !httputil.DecodeJSON(w, r, &req) {
+		return
+	}
+	if req.Message == "" {
 		httputil.JSONError(w, http.StatusBadRequest, "message required")
 		return
 	}
-	if h.getProjectMutex != nil {
-		defer h.getProjectMutex(projectID)()
-	}
+	defer h.lockProject(projectID)()
 	cmd := git.Command("", "-C", project.Path, "diff", "--cached", "--quiet")
 	if err := cmd.Run(); err == nil {
 		// Exit 0 is the refusal: nothing is staged.

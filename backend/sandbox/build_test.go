@@ -237,10 +237,10 @@ func TestBuildContainerScriptPinsTheGuestContract(t *testing.T) {
 		"tag \"$id\" 'docker.io/library/golang:1.23'", "tag \"$id\" 'golang:1.23'",
 		"bud ", "-t " + buildImageTag,
 		"push " + buildImageTag + " docker-archive:" + buildOutputMount + "/image.tar",
-		"--label " + buildShellQuote(buildCacheKeyLabel+"=deadbeef"),
+		"--label " + sandboxruntime.ShellQuote(buildCacheKeyLabel+"=deadbeef"),
 		// The base image's id is the answer to "which bytes was this built on", which a floating tag leaves
 		// the ref unable to give.
-		"--label " + buildShellQuote(buildBaseLabel+"=sha256:"+strings.Repeat("c", 64)),
+		"--label " + sandboxruntime.ShellQuote(buildBaseLabel+"=sha256:"+strings.Repeat("c", 64)),
 		"--storage-driver vfs", "--root " + buildStoreRoot + "/s",
 	} {
 		if !strings.Contains(script, want) {

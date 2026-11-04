@@ -282,7 +282,7 @@ func buildProbeCreateArgs(name, image string, st BuildProbeStage) ([]string, err
 func buildProbeStageCommands(dockerfile string) []string {
 	lines := []string{}
 	for _, line := range strings.Split(strings.TrimRight(dockerfile, "\n"), "\n") {
-		lines = append(lines, shellQuote(line))
+		lines = append(lines, ShellQuote(line))
 	}
 	writeDockerfile := "printf '%s\n' " + strings.Join(lines, " ") + " > " + buildProbeContextPath + "/Dockerfile"
 	writePayload := "printf 'probe\n' > " + buildProbeContextPath + "/" + buildProbePayloadName
@@ -291,12 +291,6 @@ func buildProbeStageCommands(dockerfile string) []string {
 		writeDockerfile,
 		writePayload,
 	}
-}
-
-// shellQuote wraps one argument for `/bin/sh -c`, escaping an embedded single quote the way a shell
-// reader expects. The probe's own Dockerfiles carry none, and a caller that adds one still works.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // buildProbeBuildArgs is the build itself. The store roots are inside the container, so a stage cannot
