@@ -34,11 +34,11 @@ describe('storageUsageSentence', () => {
 
     it('counts a filesystem in the units it is sized in', () => {
         expect(storageUsageSentence(reading(400 * GiB, 494 * GiB)))
-            .toBe('Nearly out of storage: 400 GB of 494 GB used (81%)');
+            .toBe('Storage: 400 GB of 494 GB used (81%)');
     });
 
-    it('says the disk is nearly full on the reading the warning is for', () => {
-        expect(storageUsageSentence(reading(900, 1024))).toBe('Nearly out of storage: 900 B of 1 KB used (88%)');
+    it('keeps the Storage prefix on the reading the warning is for', () => {
+        expect(storageUsageSentence(reading(900, 1024))).toBe('Storage: 900 B of 1 KB used (88%)');
     });
 
     it('has nothing to say without a reading', () => {

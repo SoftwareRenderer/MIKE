@@ -54,8 +54,10 @@
     let isPaused = $derived(isTaskPaused(taskExecutionState) && !startingTurn);
 </script>
 
+<!-- The four bars below share one stylesheet rule and are told apart by `data-bar`, which is what a reader
+     that means one of them asks for: the class names all four. -->
 {#if isPaused}
-    <div class="chat-review-bar">
+    <div class="chat-review-bar" data-bar="paused">
         {#if onMoveTask}
             <div class="move-buttons">
                 <button class="btn-move" onclick={() => onMoveTask('backlog')} title={t('chat.review.moveToBacklogTip')}>
@@ -74,7 +76,7 @@
     </div>
 {/if}
 {#if taskStatus === 'done' && onMoveTask}
-    <div class="chat-review-bar">
+    <div class="chat-review-bar" data-bar="done">
         <button class="btn-move" onclick={() => onMoveTask('review')} title={t('chat.review.moveToReviewTip')}>
             {t('chat.review.moveToReview')}
         </button>
@@ -84,7 +86,7 @@
     </div>
 {/if}
 {#if taskStatus === 'review'}
-    <div class="chat-review-bar">
+    <div class="chat-review-bar" data-bar="review">
         {#if onMoveTask}
             <div class="move-buttons">
                 <button class="btn-move" onclick={() => onMoveTask('done')} title={t('chat.review.moveToDoneTip')}>
@@ -128,7 +130,7 @@
     </div>
 {/if}
 {#if showRestartButton}
-    <div class="chat-review-bar">
+    <div class="chat-review-bar" data-bar="restart">
         {#if providers.length > 0}
             <div class="restart-model-row">
                 <ModelSelector

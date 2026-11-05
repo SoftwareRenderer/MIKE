@@ -74,6 +74,19 @@ async function comeBackUntil(page: Page, why: () => Promise<string>): Promise<vo
   }, { timeout: 20_000 }).toBe('ok');
 }
 
+/** The return gesture with the stream still muted — focus returns, frames keep falling. Only what this window
+ *  reads can reach it, which is the whole claim of the test below: a live frame would answer the same screen
+ *  and say nothing about the read. */
+async function comeBackReadingOnly(page: Page, why: () => Promise<string>): Promise<void> {
+  await expect.poll(async () => {
+    await page.evaluate(() => {
+      (window as any).__unfocused = false;
+      window.dispatchEvent(new Event('focus'));
+    });
+    return why();
+  }, { timeout: 20_000 }).toBe('ok');
+}
+
 /** The screen's own recording: how many digests it asked, and when each newest-window read went out. */
 async function recording(page: Page) {
   return page.evaluate(() => ({
@@ -163,24 +176,28 @@ test.describe('the window that comes back', () => {
     await expect(page.locator('.chat-message', { hasText: content })).toBeVisible({ timeout: 20_000 });
   });
 
-  // The detail view shows its own copy of the row. It missed the updates while the window was away, and the
-  // board request is blocked here, so only the read on return can move it.
+  // The detail view shows its own copy of the row. It missed the updates while the window was away, the board
+  // request is blocked, and the stream stays muted through the check, so only a read on return can move it.
   test('lands the row it read when the board would not answer', async ({ page }) => {
     await watchTheReturn(page);
     const projectId = ownProjectId();
     const unique = Date.now();
     const taskId = await createTaskViaApi(page, projectId, `sync-row-${unique}`);
-    await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/move`, {
-      method: 'POST', body: { status: 'in_progress' },
-    });
+    // The task stays in Backlog and nothing moves it by hand. A move to In Progress auto-starts a turn
+    // (`HandleMove`), and that turn ending lands the task in Review — the bar would then arrive from a run
+    // this test never asked for, on whatever schedule the run keeps.
     await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/messages`, {
       method: 'POST', body: { role: 'user', content: `asked while away ${unique}` },
     });
 
     await navigateToTask(page, taskId, projectId);
-    await expect(page.locator('.chat-form')).toBeVisible({ timeout: 20_000 });
-    // The bar over the input appears for `taskStatus === 'review'` and nothing else, so there is none yet.
-    const reviewBar = page.locator('.chat-review-bar');
+    // The row this window is about, on screen: the readiness gate. Not the chat input — a Backlog task shows
+    // its Start Task affordance in place of `.chat-form`.
+    await expect(page.locator('.chat-message', { hasText: `asked while away ${unique}` }))
+        .toBeVisible({ timeout: 20_000 });
+    // The bar the review status renders. The shared `.chat-review-bar` class also names the paused, done and
+    // restart bars, so a count of it is not a statement about this task's status.
+    const reviewBar = page.locator('[data-bar="review"]');
     await expect(reviewBar).toHaveCount(0);
 
     stopReading(page);
@@ -191,7 +208,7 @@ test.describe('the window that comes back', () => {
     await expect.poll(async () => (await getTaskData(page, projectId, taskId)).status, { timeout: 20_000 })
       .toBe('review');
 
-    await comeBackUntil(page, async () => (await reviewBar.count()) > 0
+    await comeBackReadingOnly(page, async () => (await reviewBar.count()) > 0
       ? 'ok' : 'the row the screen read never reached the view');
     await page.unroute('**/board');
 

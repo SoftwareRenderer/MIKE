@@ -32,7 +32,8 @@ function formatStorageBytes(bytes: number): string {
     return `${grouped.format(value)} ${units[unit]}`;
 }
 
-/** What the disclosure says, or null when there is no reading. The warning is in the words too. */
+/** What the disclosure says, or null when there is no reading. Past the ratio the catalogue prefixes
+ *  the same figures with "Storage: "; the icon and the aria label are where the warning is. */
 export function storageUsageSentence(usage: StorageUsage | null | undefined): string | null {
     const reading = storageReading(usage);
     if (reading === null) return null;
