@@ -3,7 +3,6 @@ package server
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -27,7 +26,6 @@ import (
 	"mike/backend/sandbox"
 	"mike/backend/types"
 	"mike/pkg/logging"
-	"mike/pkg/sandboxruntime"
 )
 
 func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
@@ -318,6 +316,64 @@ type fsEntry struct {
 	Ignored bool `json:"ignored"`
 }
 
+// fsContainerScope gives a sandboxed project's path the spelling its browser navigates by, and refuses
+// one with no spelling inside the container. An empty worktreeRoot means the checkout, as in
+// validateFSPath; ok is false after writing the response.
+func (s *Server) fsContainerScope(w http.ResponseWriter, project *types.Project, worktreeRoot, path string) (string, bool) {
+	if project == nil || !project.SandboxEnabled {
+		return "", true
+	}
+	if worktreeRoot == "" {
+		worktreeRoot = project.Path
+	}
+	spelling, ok := fsSandboxPath(worktreeRoot, project, path)
+	if !ok {
+		refuseNoContainerPath(w, path)
+		return "", false
+	}
+	return spelling, true
+}
+
+// listingParent answers the `..` row: a sandboxed project stops at its container's mount root, every
+// other request at the host jail's root (and at no root at all when the jail is widened). The sandboxed
+// row carries no git verdict, because that parent is not a tree this request may open.
+func (s *Server) listingParent(project *types.Project, sandboxPath, hostPath string) (fsEntry, bool) {
+	if sandboxPath != "" {
+		if sandboxPath == sandbox.MountPath(project.Name) {
+			return fsEntry{}, false
+		}
+		return fsEntry{Name: "..", IsDir: true, Path: filepath.Dir(sandboxPath)}, true
+	}
+	if hostPath == string(os.PathSeparator) || s.hostRoot.IsRoot(hostPath) {
+		return fsEntry{}, false
+	}
+	parent := filepath.Dir(hostPath)
+	return fsEntry{Name: "..", IsDir: true, Path: parent, IsGitRepo: git.IsGitRepo(parent)}, true
+}
+
+// listingIsDir answers whether a row opens as a directory. A symlink is followed only while the jail
+// resolves it inside the tree, so no row offers a browse the next request refuses.
+func (s *Server) listingIsDir(project *types.Project, worktreeRoot, fullPath string, e fs.DirEntry) bool {
+	if e.IsDir() {
+		return true
+	}
+	if e.Type()&fs.ModeSymlink == 0 {
+		return false
+	}
+	target := fullPath
+	if project != nil {
+		resolved, err := s.validateFSPath(project, worktreeRoot, fullPath)
+		if err != nil {
+			return false
+		}
+		target = resolved
+	} else if _, err := s.hostRoot.Stat(fullPath); err != nil {
+		return false
+	}
+	info, err := os.Stat(target)
+	return err == nil && info.IsDir()
+}
+
 // listingSkipsName reports whether a listing offers no row for this name. `.git` is the repository's own
 // state, and a row is a click target: the add-project picker would otherwise take it as a project path.
 func listingSkipsName(name string) bool {
@@ -347,7 +403,6 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 	}
 	includeFiles := r.URL.Query().Get("files") == "1"
 	project, _ := s.optionalProject(r)
-	taskID := r.URL.Query().Get("task")
 	var err error
 
 	worktreePath, rootOK := s.fsWorktreeRoot(w, r, project)
@@ -373,76 +428,19 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 	result.Path = path
 	result.Entries = []fsEntry{}
 
-	// Enforce sandbox if enabled — no fallback to host
+	// A browse must not start a container, so this reads the host directory; the sandbox is still
+	// required to exist.
 	if !s.requireSandboxAvailable(w, project) {
 		return
 	}
-	if project != nil && project.SandboxEnabled {
-		// Accepts both host and container paths.
-		mountPath := sandbox.MountPath(project.Name)
-		sandboxPath, spOK := fsSandboxPath(worktreePath, project, path)
-		if !spOK {
-			refuseNoContainerPath(w, path)
-			return
-		}
-		// Single command: ls -pA marks dirs with trailing /, one entry per line
-		opts, optsErr := s.fsSandboxOpts(project, taskID)
-		if optsErr != nil {
-			JSONError(w, http.StatusBadGateway, optsErr.Error())
-			return
-		}
-		var output string
-		var err error
-		if taskID != "" {
-			// ExecTask creates the task's container on demand.
-			output, err = s.sandboxMgr.ExecTask(taskID, worktreePath, project, "ls -pA "+sandboxruntime.ShellQuote(sandboxPath), opts)
-		} else {
-			output, err = s.sandboxMgr.ExecProject(project, "ls -pA "+sandboxruntime.ShellQuote(sandboxPath), opts)
-		}
-		if err != nil {
-			// A failing `ls` is a directory that is not there, so the answer matches the host branch
-			// below. The text here is podman's, which describes this server rather than the path.
-			logging.For(logging.HTTP).Warnf("fs sandbox listing failed: %v", err)
-			JSONError(w, http.StatusNotFound, "directory not found")
-			return
-		}
-		result.Path = sandboxPath
-		if sandboxPath != mountPath {
-			parent := filepath.Dir(sandboxPath)
-			result.Entries = append(result.Entries, fsEntry{Name: "..", IsDir: true, Path: parent})
-		}
-
-		for _, line := range strings.Split(output, "\n") {
-			entry := strings.TrimSpace(line)
-			if entry == "" || entry == "." || entry == ".." {
-				continue
-			}
-			// ls -p appends '/' to directory names
-			isDir := strings.HasSuffix(entry, "/")
-			name := strings.TrimSuffix(entry, "/")
-			if !includeFiles && !isDir {
-				continue
-			}
-			if listingSkipsName(name) {
-				continue
-			}
-			sandboxFullPath := filepath.Join(sandboxPath, name)
-			// IsGitRepo stays false: the in-sandbox browser has no use for it.
-			result.Entries = append(result.Entries, fsEntry{Name: name, IsDir: isDir, Path: sandboxFullPath})
-		}
-		// The container lists the directory the host holds, so git judges the host form of it.
-		if git.IsGitRepo(path) {
-			markIgnored(result.Entries, path)
-		}
-		sort.SliceStable(result.Entries, func(i, j int) bool {
-			return strings.ToLower(result.Entries[i].Name) < strings.ToLower(result.Entries[j].Name)
-		})
-		JSONResponse(w, http.StatusOK, result)
+	sandboxPath, scoped := s.fsContainerScope(w, project, worktreePath, path)
+	if !scoped {
 		return
 	}
-	// Host filesystem (no project or sandbox disabled). A project's path was already contained
-	// to its checkout plus the named task worktree, and a registered project may live outside
-	// home; with no project the path came from the query string, so HostRoot contains it.
+	if sandboxPath != "" {
+		result.Path = sandboxPath
+	}
+
 	var entries []fs.DirEntry
 	if project == nil {
 		entries, err = s.hostRoot.ReadDir(path)
@@ -467,26 +465,27 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 	isGit := git.IsGitRepo(path)
 	result.IsGitRepo = isGit
 
-	// A jail boundary has no parent to offer. IsRoot is false when the jail is widened, so the
-	// picker keeps its old behaviour then.
-	if path != string(os.PathSeparator) && !s.hostRoot.IsRoot(path) {
-		if parent := filepath.Dir(path); parent != path {
-			result.Entries = append(result.Entries, fsEntry{Name: "..", IsDir: true, Path: parent, IsGitRepo: git.IsGitRepo(parent)})
-		}
+	if parent, ok := s.listingParent(project, sandboxPath, path); ok {
+		result.Entries = append(result.Entries, parent)
 	}
 
 	for _, e := range entries {
-		if !includeFiles && !e.IsDir() {
-			continue
-		}
 		if listingSkipsName(e.Name()) {
 			continue
 		}
 		fullPath := filepath.Join(path, e.Name())
+		isDir := s.listingIsDir(project, worktreePath, fullPath, e)
+		if !includeFiles && !isDir {
+			continue
+		}
+		shown := fullPath
+		if sandboxPath != "" {
+			shown = filepath.Join(sandboxPath, e.Name())
+		}
 		result.Entries = append(result.Entries, fsEntry{
 			Name:      e.Name(),
-			IsDir:     e.IsDir(),
-			Path:      fullPath,
+			IsDir:     isDir,
+			Path:      shown,
 			IsGitRepo: isGit || git.HasGitDir(fullPath),
 		})
 	}
@@ -921,10 +920,10 @@ func (s *Server) requireTaskOwnership(project *types.Project, taskID string) err
 	return nil
 }
 
-// requireSandboxAvailable refuses a request whose project wants a sandbox the server
-// cannot run. There is no fallback to the host: a sandboxed project's files are only ever
-// read and written inside its container, so serving one from the host would be the escape,
-// not a degraded mode. ok is false after writing the response.
+// requireSandboxAvailable refuses a request whose project wants a sandbox the server cannot run — it
+// gates availability, not the jail. The file routes answer from the host directory the container
+// bind-mounts (docs/api-contract.md → The Explorer's file routes act on the host bytes); ok is false
+// after writing the response.
 func (s *Server) requireSandboxAvailable(w http.ResponseWriter, project *types.Project) bool {
 	if project == nil || !project.SandboxEnabled {
 		return true
@@ -1161,8 +1160,9 @@ func (s *Server) hostStat(project *types.Project) func(string) (fs.FileInfo, err
 }
 
 // hostRefused writes the 403 for a host jail refusal and returns true when the caller must return.
-func (s *Server) hostRefused(w http.ResponseWriter, project *types.Project, err error) bool {
-	if err != nil && project == nil && fsutil.IsHostRootRefusal(err) {
+// A jailed fsutil helper says the same thing for a project's own roots, so no project check gates it.
+func (s *Server) hostRefused(w http.ResponseWriter, err error) bool {
+	if err != nil && fsutil.IsHostRootRefusal(err) {
 		JSONError(w, http.StatusForbidden, err.Error())
 		return true
 	}
@@ -1202,56 +1202,11 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSandboxAvailable(w, project) {
 		return
 	}
-	// A sandboxed project has no host checkout to write into — no fallback to host.
-	if project != nil && project.SandboxEnabled {
-		sandboxPath, spOK := fsSandboxPath(project.Path, project, req.Path)
-		if !spOK {
-			refuseNoContainerPath(w, req.Path)
-			return
-		}
-
-		// This is the project's own container rather than a task's, so no agent's approved folders apply.
-		opts, optsErr := s.fsSandboxOpts(project, "")
-		if optsErr != nil {
-			JSONError(w, http.StatusBadGateway, optsErr.Error())
-			return
-		}
-
-		_, gitErr := s.sandboxMgr.ExecProject(project, "git -C "+sandboxruntime.ShellQuote(sandboxPath)+" rev-parse --git-dir 2>/dev/null", opts)
-		if gitErr == nil {
-			JSONError(w, http.StatusBadRequest, "path is already a git repository")
-			return
-		}
-
-		readmeContent := "# " + filepath.Base(req.Path) + "\n"
-		encoded := base64.StdEncoding.EncodeToString([]byte(readmeContent))
-
-		name, email := resolveGitIdentity()
-		if name == "" || email == "" {
-			JSONError(w, http.StatusBadRequest, "git user.name and user.email are not set — set GIT_AUTHOR_NAME/GIT_AUTHOR_EMAIL, or run: git config --global user.name '<value>'")
-			return
-		}
-		// Propagate resolved identity to git package so gitAuthorFlagCmd() includes -c flags
-		git.SetAuthorIdentity(name, email)
-
-		// git init + create README + add + commit in single command
-		flagCmd := gitAuthorFlagCmd()
-		_, err := s.sandboxMgr.ExecProjectWithInput(project,
-			"git -C "+sandboxruntime.ShellQuote(sandboxPath)+" init && "+
-				"base64 -d > "+sandboxruntime.ShellQuote(filepath.Join(sandboxPath, "README.md"))+" && "+
-				"git -C "+sandboxruntime.ShellQuote(sandboxPath)+" add README.md && "+
-				"git -C "+sandboxruntime.ShellQuote(sandboxPath)+" "+flagCmd+" commit -m 'Initial commit'",
-			[]byte(encoded+"\n"), opts)
-		if err != nil {
-			Fault(w, "git commit", err)
-			return
-		}
-		JSONResponse(w, http.StatusOK, map[string]string{"status": "ok", "path": req.Path})
+	if _, ok := s.fsContainerScope(w, project, "", req.Path); !ok {
 		return
 	}
-	// Host filesystem (no project or sandbox disabled)
 	info, err := stat(req.Path)
-	if s.hostRefused(w, project, err) {
+	if s.hostRefused(w, err) {
 		return
 	}
 	if err != nil {
@@ -1324,89 +1279,19 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	taskID := r.URL.Query().Get("task")
 
 	worktreePath, rootOK := s.fsWorktreeRoot(w, r, project)
 	if !rootOK {
 		return
 	}
 
-	// Enforce sandbox if enabled — no fallback to host
 	if !s.requireSandboxAvailable(w, project) {
 		return
 	}
-	if project != nil && project.SandboxEnabled {
-		// The path is jailed first, so nothing below reaches the mount from outside the tree the
-		// request named.
-		resolved, err := s.validateFSPath(project, worktreePath, req.Path)
-		if err != nil {
-			JSONError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		req.Path = resolved
-		sandboxPath, spOK := fsSandboxPath(worktreePath, project, req.Path)
-		if !spOK {
-			refuseNoContainerPath(w, req.Path)
-			return
-		}
-		sandboxParent := filepath.Dir(sandboxPath)
-
-		// Combined check + mkdir in single command
-		opts, optsErr := s.fsSandboxOpts(project, taskID)
-		if optsErr != nil {
-			JSONError(w, http.StatusBadGateway, optsErr.Error())
-			return
-		}
-		cmd := "if [ ! -d " + sandboxruntime.ShellQuote(sandboxParent) + "; then echo 'PARENT_MISSING'; " +
-			"elif [ -e " + sandboxruntime.ShellQuote(sandboxPath) + "; then echo 'ALREADY_EXISTS'; " +
-			"else mkdir " + sandboxruntime.ShellQuote(sandboxPath) + " && echo 'OK'; fi"
-		var output string
-		var execErr error
-		if taskID != "" {
-			// Use task sandbox (creates container on demand)
-			output, execErr = s.sandboxMgr.ExecTask(taskID, worktreePath, project, cmd, opts)
-		} else {
-			output, execErr = s.sandboxMgr.ExecProject(project, cmd, opts)
-		}
-		if execErr != nil {
-			Fault(w, "create directory", execErr)
-			return
-		}
-		trimmed := strings.TrimSpace(output)
-		switch trimmed {
-		case "PARENT_MISSING":
-			JSONError(w, http.StatusBadRequest, "parent directory does not exist")
-			return
-		case "ALREADY_EXISTS":
-			JSONError(w, http.StatusBadRequest, "path already exists")
-			return
-		case "OK":
-			// success
-		default:
-			// Odd output (e.g. a shell banner) can still mean success — verify first.
-			var checkOut string
-			var checkErr error
-			checkCmd := "test -d " + sandboxruntime.ShellQuote(sandboxPath) + " && echo EXISTS"
-			if taskID != "" {
-				checkOut, checkErr = s.sandboxMgr.ExecTask(taskID, worktreePath, project, checkCmd, opts)
-			} else {
-				checkOut, checkErr = s.sandboxMgr.ExecProject(project, checkCmd, opts)
-			}
-			if checkErr == nil && strings.TrimSpace(checkOut) == "EXISTS" {
-				// Directory exists despite weird output — treat as success
-				break
-			}
-			logging.For(logging.HTTP).Infof("mkdir unexpected output for %s: %q (check: %q)", sandboxPath, output, checkOut)
-			JSONError(w, http.StatusInternalServerError, "unexpected response from mkdir")
-			return
-		}
-		JSONResponse(w, http.StatusOK, map[string]string{"status": "ok", "path": req.Path})
-		return
-	}
-	// Host filesystem (no project or sandbox disabled): the picker's path, so everything below
-	// goes through fsutil.HostRoot instead of os.
+	// A path with no project behind it is the picker's, which fsutil.HostRoot contains; a project's path
+	// is contained to the roots the request named.
 	stat := s.hostStat(project)
-	mkdir := func(p string) error { return os.MkdirAll(p, 0755) }
+	var mkdir func(string) error
 	if project != nil {
 		resolved, err := s.validateFSPath(project, worktreePath, req.Path)
 		if err != nil {
@@ -1414,16 +1299,27 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		req.Path = resolved
+		if _, ok := s.fsContainerScope(w, project, worktreePath, req.Path); !ok {
+			return
+		}
+		if err := gitSegmentRefusal(req.Path); err != nil {
+			JSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		// MkdirAll resolves the path it is given, so the walk goes through the jail rather than the
+		// host: a link planted after the check above cannot carry the new directory out of the tree.
+		jailed := fsutil.NewContainedRoots(projectFSRoots(project, worktreePath)...)
+		mkdir = func(p string) error { return jailed.MkdirAll(p, 0755) }
 	} else {
 		mkdir = func(p string) error { return s.hostRoot.MkdirAll(p, 0755) }
 		// Stat the requested path before its parent so a jail refusal is not blamed on the parent.
-		if _, err := stat(req.Path); s.hostRefused(w, project, err) {
+		if _, err := stat(req.Path); s.hostRefused(w, err) {
 			return
 		}
 	}
 	parent := filepath.Dir(req.Path)
 	info, err := stat(parent)
-	if s.hostRefused(w, project, err) {
+	if s.hostRefused(w, err) {
 		return
 	}
 	if err != nil || !info.IsDir() {
@@ -1437,7 +1333,7 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := mkdir(req.Path); err != nil {
-		if s.hostRefused(w, project, err) {
+		if s.hostRefused(w, err) {
 			return
 		}
 		Fault(w, "create directory", err)
@@ -1445,50 +1341,6 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 	}
 
 	JSONResponse(w, http.StatusOK, map[string]string{"status": "ok", "path": req.Path})
-}
-
-// fsSandboxOpts returns the sandbox config for FS operations, having made sure the project's image
-// exists — opening an explorer is often the first thing to touch it, and the build output goes out
-// over the project's WebSocket so the explorer can show progress while this request blocks.
-func (s *Server) fsSandboxOpts(project *types.Project, taskID string) (sandbox.SandboxOpts, error) {
-	image, err := s.sandboxMgr.EnsureImageForProject(project, func(status types.SandboxImageStatus) {
-		if s.appStreamMgr != nil {
-			s.appStreamMgr.SendProjectEvent(project.ID, types.StreamEvent{
-				Type: types.WSTypeSandboxImageStatus,
-				Data: status,
-			})
-		}
-	})
-	if err != nil {
-		return sandbox.SandboxOpts{}, err
-	}
-	opts := sandbox.ProjectOpts(project)
-	opts.BaseImage = image
-	opts.AgentSandbox = s.agentGrantForTask(project.ID, taskID)
-	return opts, nil
-}
-
-// agentGrantForTask returns nothing for an empty taskID: a project container or a plain file browse has no
-// agent of its own.
-func (s *Server) agentGrantForTask(projectID, taskID string) *types.AgentSandbox {
-	if taskID == "" {
-		return nil
-	}
-	task, err := s.store.GetTask(projectID, taskID)
-	if err != nil {
-		return nil
-	}
-	return s.executor.AgentRegistry().AgentSandboxForURL(task.LlamaServerURL)
-}
-
-// gitAuthorFlagCmd quotes git.GitAuthorFlags() into a fragment for a sandbox shell command.
-func gitAuthorFlagCmd() string {
-	flags := git.GitAuthorFlags()
-	var parts []string
-	for i := 0; i+1 < len(flags); i += 2 {
-		parts = append(parts, sandboxruntime.ShellQuote(flags[i]), sandboxruntime.ShellQuote(flags[i+1]))
-	}
-	return strings.Join(parts, " ")
 }
 
 // searchResult is one matching file, or one matching line of one file when the search reads contents.

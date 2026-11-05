@@ -652,7 +652,7 @@ func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *bridge.Clie
 	}
 
 	// Make the project's sandbox image exist, building it from its Dockerfile or pulling it. This
-	// is the one place a task's image is decided; the terminal and the explorer share the same build.
+	// is the one place a task's image is decided; the terminal shares the same build.
 	imageToUse, imgErr := te.sandboxMgr.EnsureImageForProject(setup.project, func(status types.SandboxImageStatus) {
 		switch status.Phase {
 		case types.SandboxImagePhaseBuilding, types.SandboxImagePhasePulling:

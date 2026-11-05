@@ -1412,13 +1412,6 @@ const catalog = {
     'sandbox.oomKilled': { one: 'process OOM-killed — memory limit reached', other: 'processes OOM-killed — memory limit reached' },
     'sandbox.loadingSettings': 'Loading settings...',
     'sandbox.portsIdle': 'Container has not started due to idle task or terminal',
-    'sandbox.dismiss': 'Dismiss',
-    'sandbox.dismissImageError': 'Dismiss sandbox image error',
-    'sandbox.imageBuildOutput': 'Image build output',
-    'sandbox.imageBuilding': 'Building sandbox image {image}…',
-    'sandbox.imagePulling': 'Pulling {image}…',
-    'sandbox.imageFailed': 'Sandbox image {image} could not be prepared',
-    'sandbox.imagePrepareFailed': 'Sandbox image preparation failed',
 
     // ═══ terminal.* + boardDnd.* + attachments.* ═══
 

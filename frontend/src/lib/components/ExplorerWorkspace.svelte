@@ -9,7 +9,6 @@
     import FileSearchPanel from './FileSearchPanel.svelte';
     import GitStatusPanel from './GitStatusPanel.svelte';
     import ResizeHandle from './ResizeHandle.svelte';
-    import SandboxImageStatusBanner from './SandboxImageStatusBanner.svelte';
     import { useLazyComponent } from '$lib/composables/use-lazy-component.svelte';
     import { t } from '$lib/i18n';
     import { baseName, folderName } from '$lib/utils/path';
@@ -91,9 +90,6 @@
     {:else}
         <!-- Column 1: File browser + Git graph (or Find panel) -->
         <div class="explorer-left-column" class:hidden={isMobile && core.activeTab !== 'files'} style="width: {layout.leftWidth}px">
-            <!-- The listing request is blocked until the project's sandbox image exists, so its
-                 build/pull progress belongs here. -->
-            <SandboxImageStatusBanner />
             {#if core.showFind}
                 <FileSearchPanel
                     projectId={projectId}

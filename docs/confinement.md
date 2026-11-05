@@ -52,14 +52,19 @@ projects too because the server process enforces them.
   the untracked content of a diff, `GET /projects/…/git/diff/file`, the LSP document sync's read, and
   the public `/extensions/` file server (`noEscapeFS`), which answers with no session at all.
   A write to an accepted name takes the same care for the same reason: `WriteFileAtomic` refuses a
-  link standing at the name, where `os.WriteFile` would follow it out of every jail.
+  link standing at the name, where `os.WriteFile` would follow it out of every jail. A new directory is
+  the same race one level up: `os.MkdirAll` resolves the path it is handed, so `POST /api/fs/mkdir`
+  creates through the contained `Lstat`+`Mkdir` walk over the request's own roots (`projectFSRoots`),
+  which is what the no-project jail already does — `TestFSMkdirProjectScoped`.
   `openJailedFile` is the same rule with the response mapping on top, which `/api/fs/raw`,
   `/api/fs/download` and the archive listing already used. A tree walked a name at a time is the same race at every entry: the
   folder download's archive (`writeTarOne`, whose header comes from the walk's own lstat) and the host
   paste (`copyFile`), both in `backend/fsutil/`. A swapped name there is how a file outside the project
-  reaches the browser, or lands inside it where the task can read it. Neither route has a container branch:
-  a sandboxed project's worktree is a host directory the container bind-mounts, so these are host reads of
-  a tree the task writes — `TestFSRoutesOfASandboxedProjectActOnTheHostBytes` pins that.
+  reaches the browser, or lands inside it where the task can read it. No `/api/fs` route has a container
+  branch. A sandboxed project's worktree is a host directory the container bind-mounts, so the listing,
+  `mkdir`, `git init`, the download and the paste are all host reads or writes of a tree the task
+  writes. `TestFSRoutesOfASandboxedProjectActOnTheHostBytes` pins that, and
+  `docs/api-contract.md → The Explorer's file routes act on the host bytes` holds the rule.
   Tests: `TestOpenVerifiedRefusesANameThatChangedUnderTheCheck`, `TestUntrackedReadTargetHandsBackTheFileItChecked`,
   `TestFSReadRefusesANameThatIsNotARegularFile`, `TestReadDocForSyncRefusesANameThatIsNotAFile`,
   `TestOpenCheckedCallsALinkAtTheNameASwapNotAnIrregularFile`,
@@ -130,11 +135,13 @@ projects too because the server process enforces them.
   copy itself, so a folder that happens to hold a repository does not drag it along.
 - **A save cannot change the repository's own state.** `gitSegmentRefusal` holds the `.git` refusal for
   every route that changes a file: `requireNoGitSegment` answers it for `POST /api/fs/write` and
-  `POST /api/fs/upload`, and the batch routes report it per row. A read still opens `.git`, so the
+  `POST /api/fs/upload`, `POST /api/fs/mkdir` asks it of the resolved target, and the batch routes report
+  it per row. A read still opens `.git`, so the
   execution fence, not this refusal, is what outranks a `.git/config` that was already rewritten
   (`docs/git-operations.md`). Because the listing hides the name, this is what stops a hand-typed URL:
   `docs/api-contract.md → The directory listing's ignored rows`.
-  `go test ./backend/server/ -run TestFSWriteRefusesAGitPath` holds both routes.
+  `go test ./backend/server/ -run 'TestFSWriteRefusesAGitPath|TestFSMkdirRejectsAPathInsideTheRepository'`
+  holds those routes.
 - **Every bound runs before the bytes** (`backend/fsutil/ops.go`): a copy walks its tree and refuses past
   `CopyMaxBytes` (64 MiB), `CopyMaxEntries` (5000) or `CopyMaxDepth` (32), the copy loop re-counts as it writes
   (the walk is the refusal, the running total is the bound against a tree a task is still writing into), and a

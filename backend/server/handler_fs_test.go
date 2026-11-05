@@ -17,110 +17,7 @@ import (
 	"mike/backend/git"
 	"mike/backend/testutil/testgit"
 	"mike/backend/types"
-	"mike/pkg/sandboxruntime"
 )
-
-// canaryPath is used to detect command injection. If any malicious payload
-// breaks out of shell quoting in gitAuthorFlagCmd, this file is created.
-const canaryPath = "/tmp/gitauthorflagcmd_pwned_canary"
-
-func cleanCanary() {
-	_ = exec.Command("rm", "-f", canaryPath).Run()
-}
-
-// canaryCreated reports whether the injection canary file exists (i.e. an
-// injection succeeded).
-func canaryCreated() bool {
-	return exec.Command("test", "-f", canaryPath).Run() == nil
-}
-
-// shellEchoArgs runs `printf '%s\n' <args...>` via a POSIX shell so that each
-// shell-quoted token in command is printed on its own line. This validates that
-// ShellQuote() groups each token into exactly one shell argument.
-func shellEchoArgs(command string) (string, error) {
-	out, err := exec.Command("sh", "-c", "printf '%s\n' "+command).Output()
-	return string(out), err
-}
-
-// TestGitAuthorFlagCmd covers the display form of the commit-identity flags used in status
-// output. It is a pure formatter over the two globals, and the rows that matter are the
-// partial ones: an identity with only a name or only an email must render just the flag it
-// has (git would otherwise be told about an empty identity), and no identity at all must
-// render nothing rather than a dangling "-c".
-func TestGitAuthorFlagCmd(t *testing.T) {
-	cases := []struct {
-		name  string
-		who   string
-		email string
-		want  string
-	}{
-		{name: "full identity", who: "Test Author", email: "test@example.com",
-			want: "'-c' 'user.name=Test Author' '-c' 'user.email=test@example.com'"},
-		{name: "name only", who: "Only Name", email: "", want: "'-c' 'user.name=Only Name'"},
-		{name: "email only", who: "", email: "only@x.com", want: "'-c' 'user.email=only@x.com'"},
-		{name: "identity unset", who: "", email: "", want: ""},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			origName, origEmail := git.AuthorIdentity()
-			t.Cleanup(func() { git.SetAuthorIdentity(origName, origEmail) })
-			git.SetAuthorIdentity(tc.who, tc.email)
-
-			if got := gitAuthorFlagCmd(); got != tc.want {
-				t.Fatalf("gitAuthorFlagCmd() = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
-// TestGitAuthorFlagCmd_ShellSafety verifies that malicious author identity values cannot break
-// out of shell quoting when the flagCmd is interpolated into handleFSInitGit's command string.
-func TestGitAuthorFlagCmd_ShellSafety(t *testing.T) {
-	payloads := []string{
-		"'; touch " + canaryPath + "; '",
-		"';touch " + canaryPath + ";'",
-		"$(touch " + canaryPath + ")",
-		"`touch " + canaryPath + "`",
-		"'; touch " + canaryPath + "; ' &&",
-		"'; touch " + canaryPath + " #",
-		"; touch " + canaryPath,
-		"| touch " + canaryPath,
-		"'; touch " + canaryPath + "; echo '",
-		"'; touch " + canaryPath + " ; ' -c user.name=evil",
-	}
-
-	origName, origEmail := git.AuthorIdentity()
-	defer func() { git.SetAuthorIdentity(origName, origEmail) }()
-
-	for _, payload := range payloads {
-		t.Run(payload, func(t *testing.T) {
-			cleanCanary()
-			// Inject the payload into both name and email so every component
-			// produced by GitAuthorFlags() / ShellQuote() is exercised.
-			git.SetAuthorIdentity(payload, payload+"@x.com")
-
-			flagCmd := gitAuthorFlagCmd()
-
-			// Reproduce the exact command-string pattern from handleFSInitGit's
-			// sandbox branch. `git -C <path> <flags> commit` will exit non-zero
-			// (no repo / no staged changes), which is harmless — we only care
-			// whether the injected `touch` executes during shell parsing.
-			sandboxPath := t.TempDir()
-			shellCmd := "git -C " + sandboxruntime.ShellQuote(sandboxPath) + " " + flagCmd + " commit -m 'Initial commit' || true"
-
-			cmd := exec.Command("sh", "-c", shellCmd)
-			if err := cmd.Run(); err != nil {
-				t.Fatalf("sh -c failed unexpectedly: %v", err)
-			}
-
-			if canaryCreated() {
-				t.Errorf("command injection detected! payload %q created canary. flagCmd was: %q", payload, flagCmd)
-			}
-			cleanCanary()
-		})
-	}
-}
 
 // TestFSMkdirNoProject verifies mkdir without a "project" param (project-picker
 // FileBrowser) creates the dir on the host fs instead of panicking on nil project.
@@ -139,54 +36,6 @@ func TestFSMkdirNoProject(t *testing.T) {
 	}
 	if info, err := os.Stat(target); err != nil || !info.IsDir() {
 		t.Fatalf("expected directory %s to exist, err=%v", target, err)
-	}
-}
-
-// TestGitAuthorFlagCmd_RoundTrip verifies that each shell-quoted token, when
-// parsed back by a POSIX shell, reconstructs the original author identity value
-// as a single argument.
-func TestGitAuthorFlagCmd_RoundTrip(t *testing.T) {
-	origName, origEmail := git.AuthorIdentity()
-	defer func() { git.SetAuthorIdentity(origName, origEmail) }()
-
-	cases := []struct {
-		name  string
-		email string
-	}{
-		{"simple", "a@b.com"},
-		{"name with spaces", "a b@x.com"},
-		{"quote in name", "o'brien@x.com"},
-		{"semicolon in name", "a;ls;@x.com"},
-		{"dollar in name", "a$(whoami)@x.com"},
-		{"backtick in name", "a`whoami`@x.com"},
-	}
-
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			git.SetAuthorIdentity(c.name, c.email)
-
-			flagCmd := gitAuthorFlagCmd()
-
-			// `printf '%s\n' <flagCmd>` prints each shell-quoted token on its
-			// own line, proving each token survived as a single argument.
-			out, err := shellEchoArgs(flagCmd)
-			if err != nil {
-				t.Fatalf("printf failed: %v", err)
-			}
-			lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
-
-			// flagCmd is a series of ("-c", "user.name=<name>", "email parts")
-			// pairs: ["-c", "user.name=NAME", "-c", "user.email=EMAIL"].
-			wantArgs := []string{"-c", "user.name=" + c.name, "-c", "user.email=" + c.email}
-			if len(lines) != len(wantArgs) {
-				t.Fatalf("expected %d args, got %d: %v", len(wantArgs), len(lines), lines)
-			}
-			for i, want := range wantArgs {
-				if lines[i] != want {
-					t.Errorf("arg %d: expected %q, got %q", i, want, lines[i])
-				}
-			}
-		})
 	}
 }
 
@@ -238,10 +87,9 @@ type fsRow struct {
 	ignored   bool
 }
 
-// fsListing lists one directory through `GET /api/fs` and answers whether that directory is a
-// repository, with its entries keyed by name. An empty projectID leaves `project` off the request, the
-// way the add-project picker's request does.
-func fsListing(t *testing.T, s *Server, projectID, dir string) (bool, map[string]fsRow) {
+// fsListingBody asks for a listing and hands back the whole answer, so a test can read the path each row
+// carries rather than only its name.
+func fsListingBody(t *testing.T, s *Server, projectID, dir string) (string, bool, []fsEntry) {
 	t.Helper()
 	cookie, csrf := loginTestCSRF(t, s)
 	q := url.Values{"path": {dir}, "files": {"1"}}
@@ -255,17 +103,27 @@ func fsListing(t *testing.T, s *Server, projectID, dir string) (bool, map[string
 		t.Fatalf("GET /api/fs %s: %d %s", dir, rr.Code, rr.Body.String())
 	}
 	var body struct {
+		Path      string    `json:"path"`
 		IsGitRepo bool      `json:"isGitRepo"`
 		Entries   []fsEntry `json:"entries"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	rows := make(map[string]fsRow, len(body.Entries))
-	for _, e := range body.Entries {
+	return body.Path, body.IsGitRepo, body.Entries
+}
+
+// fsListing lists one directory through `GET /api/fs` and answers whether that directory is a
+// repository, with its entries keyed by name. An empty projectID leaves `project` off the request, the
+// way the add-project picker's request does.
+func fsListing(t *testing.T, s *Server, projectID, dir string) (bool, map[string]fsRow) {
+	t.Helper()
+	_, isGitRepo, entries := fsListingBody(t, s, projectID, dir)
+	rows := make(map[string]fsRow, len(entries))
+	for _, e := range entries {
 		rows[e.Name] = fsRow{isDir: e.IsDir, isGitRepo: e.IsGitRepo, ignored: e.Ignored}
 	}
-	return body.IsGitRepo, rows
+	return isGitRepo, rows
 }
 
 // TestFSReadRefRejectsGitOptions: a `?ref=` shaped like a git option is refused with 400, and the
@@ -580,6 +438,31 @@ func TestFSMkdirRejectsSymlinkEscape(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(outside, "newdir")); err == nil {
 		t.Error("escaped the project root: directory created outside")
+	}
+}
+
+// TestFSMkdirRejectsAPathInsideTheRepository: a repository's own files are not a folder target —
+// `.git/hooks` is where the next thing an agent runs would live.
+func TestFSMkdirRejectsAPathInsideTheRepository(t *testing.T) {
+	s := testServer(t)
+	cookie, csrf := loginTestCSRF(t, s)
+	repo := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.CreateProject(&types.Project{ID: "fs-mkdir-gitdir", Name: "FS Mkdir GitDir", Path: repo}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := testRequest(http.MethodPost, "/api/fs/mkdir?project=fs-mkdir-gitdir", map[string]string{
+		"path": filepath.Join(repo, ".git", "hooks"),
+	})
+	withAuthCSRF(req, cookie, csrf)
+	if rr := testResponse(t, s, req); rr.Code != http.StatusBadRequest {
+		t.Fatalf("mkdir inside .git: expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(repo, ".git", "hooks")); err == nil {
+		t.Error("directory created inside .git")
 	}
 }
 

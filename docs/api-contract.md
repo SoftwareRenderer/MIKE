@@ -585,6 +585,34 @@ request failed. Tests:
 `backend/api/git_diff_identity_test.go`, `backend/stream/worktree_watcher_baseline_test.go`,
 `backend/api/checkpoint_diff_test.go`.
 
+## The Explorer's file routes act on the host bytes
+
+Every route under `/api/fs` reads and writes the host directory. For a sandboxed project that is not a
+fallback: the container's tree is a bind mount of that directory, so the guest and this server hold one
+copy of every byte. A file route never runs a command inside a container.
+
+- **The container spelling is a name, not a venue.** A sandboxed project's browser navigates by the path
+  its own environment opens (`sandbox.MountPath`), so `GET /api/fs` answers that spelling in `path`, in
+  every row, and in the `..` row. A path that names no file inside that container — the checkout of a
+  request that also named a task, whose container mounts only the worktree — is refused before anything
+  is read (`fsContainerScope`, the one place a file route asks that question).
+- **A browse starts nothing.** No file route creates or recreates a container, so a paused task stays
+  paused while someone reads its files, and listing cannot block on a project image build. The image is
+  made by the three things that need a running container: a task run, a terminal, and
+  `POST /api/projects/{projectID}/sandbox/build`.
+- **Image-build progress belongs to whoever triggered the build** — the task card, the terminal's own
+  text, and that route's SSE stream. No frame carries it on the project channel.
+- **`requireSandboxAvailable` is an availability gate, not the jail.** It refuses a sandboxed project
+  whose runtime is down rather than answering a degraded read. `fsutil.Contained` is the boundary
+  (`docs/confinement.md → File endpoints: the project plus the task the request names`).
+- **A symlinked directory is a row only while the jail resolves it inside the tree** (`listingIsDir`).
+  One that leaves the tree is listed as a file, because the row would promise a browse the next request
+  refuses.
+
+Tests: `go test ./backend/server/ -run TestFSListingOfASandboxedProject` — a sandboxed listing that
+started a container, answered a host path, or offered an escaping link as a folder fails there — and
+`TestFSRoutesOfASandboxedProjectActOnTheHostBytes` for the paste and download halves.
+
 ## The directory listing's ignored rows
 
 `GET /api/fs?project=&task=&path=&files=1` answers one directory. Every `entry` carries `name`,
@@ -600,8 +628,8 @@ request failed. Tests:
   out at the source. `file-browser.css` gives an `ignored` row the muted text colour, and a selection
   still reads as one.
 - **No listing offers a row for `.git`.** `listingSkipsName` (`backend/server/handler_fs.go`)
-  drops the name from both listing branches — the host `os.ReadDir` walk and a sandboxed project's
-  `ls -pA` — so a sandboxed project cannot show what a host one hides. Both shapes of it go: the
+  drops the name from the one `os.ReadDir` walk every project is listed by, so a sandboxed project cannot
+  show what a host one hides. Both shapes of it go: the
   directory of a full checkout, and the one-line gitfile of a linked worktree. The reason is that a row
   is a click target. The add-project picker's Select answers with the directory it has loaded, so a
   `.git` row could become a project's path, and Settings → Sandbox offers every row as a mount source.

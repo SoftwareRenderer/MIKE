@@ -32,7 +32,6 @@ export type AppStreamEventType =
     | 'hint'
     | 'advisory'
     | 'extension_change'
-    | 'sandbox_image_status'
     | 'task_event'
     | 'board_refresh'
     | 'project_counts'

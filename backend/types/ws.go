@@ -29,7 +29,6 @@ const (
 	WSTypeHint               WSMessageType = "hint"
 	WSTypeAdvisory           WSMessageType = "advisory"
 	WSTypeExtensionChange    WSMessageType = "extension_change"
-	WSTypeSandboxImageStatus WSMessageType = "sandbox_image_status"
 
 	// Frame-level names: what changed on the board. The constants above are per-turn events that ride
 	// inside a task_event envelope.
@@ -48,8 +47,8 @@ const (
 	WSTypeFsEvent       WSMessageType = "fs_event"
 )
 
-// Phases of WSTypeSandboxImageStatus: preparing a project's sandbox image (building it from its
-// Dockerfile, or pulling the configured one) while the request that needs it waits.
+// Phases of preparing a project's sandbox image: building it from its Dockerfile, or pulling the
+// configured one, while the request that needs it waits.
 //
 // The two working phases double as task states, which is what the card badges show, so keep them in
 // step with the frontend's task-state vocabulary (Card.svelte, CardDetail.svelte).
@@ -60,8 +59,8 @@ const (
 	SandboxImagePhaseFailed   = "failed"
 )
 
-// SandboxImageStatus is the payload of WSTypeSandboxImageStatus: the phase, the image, and podman's
-// latest output line.
+// SandboxImageStatus is what an image build reports to whoever triggered it: the phase, the image, and
+// podman's latest output line.
 type SandboxImageStatus struct {
 	Phase string `json:"phase"`
 	Image string `json:"image"`

@@ -797,9 +797,9 @@ func (sm *SandboxManager) ensureProjectContainer(taskID string, project *types.P
 
 	// A running container may be stale: its worktree bind mount may point at an
 	// old directory (e.g. the project was moved and its path updated). Reuse the
-	// container only when the mounted host path still matches the current
-	// project path; otherwise stop and recreate it so the file browser and other
-	// FS operations reflect the project's current location.
+	// container only when the mounted host path still matches the current project
+	// path; otherwise stop and recreate it so the terminal and the agent see the
+	// project where it now lives.
 	absWorktree, err := filepath.Abs(project.Path)
 	if err != nil {
 		return fmt.Errorf("resolve project path: %w", err)

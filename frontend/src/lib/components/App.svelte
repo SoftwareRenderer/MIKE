@@ -33,7 +33,6 @@
     import CardDetail from './CardDetail.svelte';
     import { setAppStreamRef } from '$lib/stream-ref';
     import { extensionManager } from '$lib/services/extension-manager.svelte';
-    import { sandboxImageStatus } from '$lib/services/sandbox-image-status.svelte';
     import { storageStatus } from '$lib/services/storage-usage.svelte';
     import { updateCheck } from '$lib/services/update-check.svelte';
     import { useLazyComponent } from '$lib/composables/use-lazy-component.svelte';
@@ -515,9 +514,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             onProjectPorts: (ports) => {
                 appStore.projectTerminalPorts = ports;
             },
-            onSandboxImageStatus: (status) => {
-                sandboxImageStatus.update(status);
-            },
             onExtensionChange: handleExtensionChange,
         }, {
             // Declare which done-task stats we already have, so the server
@@ -942,8 +938,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         const previous = appStore.selectedProject;
         const wasProjectSwitch = !!previous;
         const wasDifferentProject = !!previous && previous.id !== p.id;
-        // Image progress belongs to the project it was sent for.
-        if (wasDifferentProject) sandboxImageStatus.clear();
         currentBranch = '';
         appStore.selectedProject = p;
         // A clone's placeholder has no row on the server: no board, mirror, subscription or setting to

@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -401,5 +402,138 @@ func TestFSRoutesOfASandboxedProjectActOnTheHostBytes(t *testing.T) {
 	}
 	if got := unpackArchive(t, rr.Body)["src/notes.txt"]; got != "notes\n" {
 		t.Errorf("the archive's src/notes.txt = %q, want the host file's bytes", got)
+	}
+}
+
+// TestFSListingOfASandboxedProjectReadsHostBytesWithNoContainer: a sandboxed listing reads the host
+// directory the container bind-mounts and answers in the container spelling, and starts no container —
+// a paused task must stay paused when someone opens its files.
+func TestFSListingOfASandboxedProjectReadsHostBytesWithNoContainer(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available, so there is no repository to mark rows ignored from")
+	}
+	s := testServer(t)
+	if !s.sandboxMgr.IsAvailable() {
+		t.Skip("gVisor is not installed here, so a sandboxed project's file request is refused before it reaches any filesystem")
+	}
+	repo := t.TempDir()
+	for _, d := range []string{"src/sub", "build"} {
+		if err := os.MkdirAll(filepath.Join(repo, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, body := range map[string]string{
+		"src/notes.txt":     "notes\n",
+		"src/sub/deep.txt":  "deep\n",
+		"plain.txt":         "plain\n",
+		".gitignore":        "build/\n",
+		"build/generated.c": "generated\n",
+	} {
+		if err := os.WriteFile(filepath.Join(repo, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if out, err := exec.Command("git", "init", "-q", repo).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	// A linked directory inside the tree is browsable; one outside it is not.
+	outside := t.TempDir()
+	if err := os.Symlink(filepath.Join(repo, "src", "sub"), filepath.Join(repo, "link-in")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(repo, "link-out")); err != nil {
+		t.Fatal(err)
+	}
+
+	sandboxFSProject(t, s, "sb-listing", "sblisting", repo, true)
+	mount := sandbox.MountPath("sblisting")
+
+	path, isRepo, entries := fsListingBody(t, s, "sb-listing", mount)
+	if path != mount {
+		t.Errorf("the listing answered %q, want the container spelling %q", path, mount)
+	}
+	if !isRepo {
+		t.Error("a sandboxed project's own repository did not answer isGitRepo")
+	}
+	rows := map[string]fsEntry{}
+	for _, e := range entries {
+		rows[e.Name] = e
+	}
+	if _, ok := rows[".git"]; ok {
+		t.Error("the listing offered a .git row")
+	}
+	if _, ok := rows[".."]; ok {
+		t.Error("the mount root offered a parent row")
+	}
+	for name, want := range map[string]bool{"src": true, "link-in": true, "link-out": false, "plain.txt": false} {
+		row, ok := rows[name]
+		if !ok {
+			t.Errorf("no row for %q", name)
+			continue
+		}
+		if row.IsDir != want {
+			t.Errorf("%q isDir = %v, want %v", name, row.IsDir, want)
+		}
+		if wantPath := filepath.Join(mount, name); row.Path != wantPath {
+			t.Errorf("%q path = %q, want the container spelling %q", name, row.Path, wantPath)
+		}
+	}
+	if !rows["build"].Ignored {
+		t.Error("build/ is in .gitignore and was not marked ignored")
+	}
+	if s.sandboxMgr.ContainerIsRunning(sandbox.ProjectKey("sb-listing")) {
+		t.Error("listing a sandboxed project's folder started its container")
+	}
+
+	// A row below the root offers the parent the browser came from, in the same spelling.
+	_, _, sub := fsListingBody(t, s, "sb-listing", filepath.Join(mount, "src"))
+	var parent *fsEntry
+	for i, e := range sub {
+		if e.Name == ".." {
+			parent = &sub[i]
+		}
+	}
+	if parent == nil {
+		t.Fatal("a folder below the mount offered no parent row")
+	}
+	if parent.Path != mount {
+		t.Errorf("the parent row is %q, want %q", parent.Path, mount)
+	}
+}
+
+// TestFSMkdirOfASandboxedProjectMakesTheHostDirectory: a sandboxed mkdir writes the host directory the
+// container spelling names, and the jail still refuses one outside the tree.
+func TestFSMkdirOfASandboxedProjectMakesTheHostDirectory(t *testing.T) {
+	s := testServer(t)
+	if !s.sandboxMgr.IsAvailable() {
+		t.Skip("gVisor is not installed here, so a sandboxed project's file request is refused before it reaches any filesystem")
+	}
+	repo := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repo, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sandboxFSProject(t, s, "sb-mkdir", "sbmk", repo, true)
+	mount := sandbox.MountPath("sbmk")
+
+	cookie, csrf := loginTestCSRF(t, s)
+	post := func(path string) int {
+		req := testRequest(http.MethodPost, "/api/fs/mkdir?project=sb-mkdir", map[string]string{"path": path})
+		withAuthCSRF(req, cookie, csrf)
+		return testResponse(t, s, req).Code
+	}
+	if code := post(filepath.Join(mount, "src", "newdir")); code != http.StatusOK {
+		t.Fatalf("mkdir in a sandboxed project: got %d, want 200", code)
+	}
+	if info, err := os.Stat(filepath.Join(repo, "src", "newdir")); err != nil || !info.IsDir() {
+		t.Errorf("the host directory the container spelling names is missing: %v", err)
+	}
+	if code := post(filepath.Join(filepath.Dir(repo), "elsewhere")); code != http.StatusBadRequest {
+		t.Errorf("mkdir outside the project: got %d, want 400", code)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(repo), "elsewhere")); err == nil {
+		t.Error("a refused mkdir still made the directory")
+	}
+	if s.sandboxMgr.ContainerIsRunning(sandbox.ProjectKey("sb-mkdir")) {
+		t.Error("creating a folder started the container")
 	}
 }
