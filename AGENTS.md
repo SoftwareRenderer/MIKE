@@ -272,6 +272,9 @@ podman. Without it, sandboxed projects refuse to start tasks — hard error, no 
   working tree**, and it always has a build network — `sandbox_network_isolation` governs the agent, not the
   build. The subtree defaults to the directory holding the Dockerfile.
   `docs/sandbox-runtime.md → A project image builds inside a sandbox container`.
+- **One image is prepared at a time, and a task start or a terminal open mid-build waits for that build** —
+  waited for before the host is asked whether the image exists, because a rebuild leaves the bytes it replaces.
+  `docs/sandbox-runtime.md → A project image builds inside a sandbox container`.
 - **Never `podman commit`, never an assembled capability grant** — guest writes are invisible to host storage,
   and `sandboxruntime.BuilderGrant` is one constant because a grant with a hole in it breaks every step.
 - **The nested builder image is fetched by the host, the way a base is**: the build container is created with

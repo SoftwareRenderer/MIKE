@@ -130,6 +130,7 @@ export {
     discardProjectPaths,
     pullProject,
     pushProject,
+    fetchProjectRemote,
     getTaskGitLog,
     getTaskCommitDiffFiles,
 } from './git';

@@ -222,6 +222,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("POST /api/projects/{projectID}/git/commit", s.gitHandler.HandleProjectCommit)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/git/discard", s.gitHandler.HandleProjectDiscardPaths)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/git/checkout", s.gitHandler.HandleCheckout)
+	s.mux.HandleFunc("POST /api/projects/{projectID}/git/fetch", s.gitHandler.HandleFetch)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/git/pull", s.gitHandler.HandlePull)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/git/push", s.gitHandler.HandlePush)
 

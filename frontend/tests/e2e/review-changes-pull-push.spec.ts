@@ -42,8 +42,8 @@ async function openChangesPanel(page: Page) {
     await expect(page.locator('.panel-title:has-text("Changes")')).toBeVisible({ timeout: 10000 });
 }
 
-// The panel's Pull/Push buttons. Their accessible names carry the ahead/behind counts, so each is matched
-// by the words it starts with.
+// The panel's Pull/Push buttons. Their accessible names carry a count only once the panel has fetched,
+// so each is matched by the words it starts with.
 const pullButton = (page: Page) => page.locator('button[aria-label^="Pull from remote"]');
 const pushButton = (page: Page) => page.locator('button[aria-label^="Push to remote"]');
 

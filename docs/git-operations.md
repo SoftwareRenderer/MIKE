@@ -328,21 +328,36 @@ to the completion of the TCP timeout, not of MIKE's patience.
 A cancelled context therefore exists only where a caller has something worth cancelling: `git clone`
 (`CloneContext`, on the request context, so closing the tab stops it), pull/push (`handleGitRemote`, which
 used to hold the per-project mutex for the full ssh timeout), and the extension install's
-`clone`/`checkout`/`rev-parse`. The other ~60 local git call sites behind the three helpers (`Run`,
+`clone`/`checkout`/`rev-parse`. `HandleFetch` joins that list with a deadline of its own (`gitFetchTimeout`):
+nothing in front of it waits on a click. The other ~60 local git call sites behind the three helpers (`Run`,
 `gitRun`, `gitRunInGitDir`) are deliberately context-less: they run against a local repository, and
 threading a context through them buys nothing at the sites that never block on a network.
 
-## Ahead/behind counts never touch the remote
+## Ahead/behind: the status snapshot reads the last fetch, `git/fetch` is the one connection
 
 `remoteAheadBehind` (`backend/api/git.go`) answers the Pull/Push numbers on
 `GET /api/projects/{projectID}/git/status` with `git rev-list --left-right --count HEAD...@{upstream}`:
-ahead then behind, read off `refs/remotes/…`, so the count is what the last fetch saw and the status
-path never opens a connection to a remote. A repository with no upstream, a detached HEAD and an unborn
-branch all fail that rev-list, and each answers `0`/`0` rather than an error — the status snapshot must
-still answer. The pair is exact only for the moment the panel last spoke to the remote, so
-`GitStatusPanel` prints each number behind a `~` until it has pulled or pushed once.
+ahead then behind, read off `refs/remotes/…`. The status path therefore never opens a connection, and it
+must not start one — the panel re-reads status on every silent reload of the changes list. A repository
+with no upstream, a detached HEAD and an unborn branch all fail that rev-list, and each answers `0`/`0`
+rather than an error: the status snapshot must still answer.
 
-Tests: `backend/api/git_test.go` — ahead, behind, and no-upstream.
+`POST /api/projects/{projectID}/git/fetch` is the only network read of the pair. It answers with the pair
+and an `ok` saying whether the pair means anything now: `git fetch` under the project lock, on a context
+bounded by `gitFetchTimeout`, then `remoteAheadBehind` while still holding that lock, so the pair it
+returns is the one the fetch bought. A checkout whose HEAD tracks nothing is refused before a process
+starts — there is nothing to count against. `GIT_TERMINAL_PROMPT=0` (`git.Env()`) is what turns a
+credential prompt into an answer instead of a wedged request; the timeout is what bounds a remote that
+never answers at all.
+
+`GitStatusPanel` asks once, when it opens, and puts `—` beside Pull until an `ok:true` backs the number —
+a pull or a push fetched too, so their numbers count as fresh. The Push number is shown whatever happened:
+nothing the remote does moves `ahead` except a force-push.
+
+Tests: `backend/api/git_test.go` — ahead, behind, and no-upstream on status, and `git fetch` moving the
+behind count / declining without an upstream (`go test ./backend/api/ -run TestHandleFetch`).
+`frontend/src/lib/components/__tests__/git-status-panel.unit.svelte.ts` owns the dash and the label.
+
 ## Checking this
 
 `go test ./backend/git/` covers the command constructor, the execution fence, the stash bracket, the clone

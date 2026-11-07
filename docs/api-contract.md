@@ -832,6 +832,11 @@ Tests: `backend/server/handler_fs_ops_test.go`; client side `frontend/src/lib/ap
 - **The last frame of a successful build is `buildResultFrame`, flattened beside a `status` string.** The
   reader picks the result out by that key. A result it cannot tell from a progress line is a build that finished
   and reads as one that never answered. Test: `TestSandboxBuildStreamEndsInAFrameTheReaderCanIdentify`.
+- **A build asked for while one runs streams the build that is running.** The request waits for the build in
+  flight for that image and prints its lines behind a first line saying it is waiting. It ends with that
+  build's result frame, and it never starts a second build of one image
+  (`docs/sandbox-runtime.md → A project image builds inside a sandbox container`). Its own context is not the
+  running build's: closing this tab does not stop a build this request did not start.
 - A build refusal keeps its own sentence on the way out, for the reason the Errors section gives: the
   Dockerfile being built is the caller's own file.
 

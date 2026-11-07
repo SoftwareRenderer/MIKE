@@ -1182,6 +1182,7 @@ const catalog = {
     'api.discardFile': 'Failed to discard changes',
     'api.commit': 'Failed to commit',
     'api.pull': 'Failed to pull',
+    'api.fetchFromRemote': 'Failed to check the remote',
     'api.push': 'Failed to push',
     'api.fetchDiff': 'Failed to fetch diff',
     'api.fetchCommits': 'Failed to fetch commits',
@@ -2019,7 +2020,7 @@ const catalog = {
     'git.discardBusy': 'Discarding in progress',
     'git.commitsBehind': { one: '{count} commit behind', other: '{count} commits behind' },
     'git.commitsAhead': { one: '{count} commit ahead', other: '{count} commits ahead' },
-    'git.countsAsOfLastSync': 'as of the last pull or push',
+    'git.commitsUnknown': 'count not checked',
     'git.repoChangedTitle': 'Repository has changed',
     'git.repoChangedMessage':
         'The repository has been modified since you opened this panel (e.g., a merge or checkout). Refresh before committing?',
