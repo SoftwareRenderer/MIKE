@@ -21,6 +21,7 @@ vi.mock('$lib/api/git', () => ({
     commitProject: vi.fn(),
     pullProject: vi.fn(),
     pushProject: vi.fn(),
+    fetchProjectRemote: vi.fn(),
     getGitLogFull: vi.fn(),
     getCommitDiffFiles: vi.fn(),
 }));

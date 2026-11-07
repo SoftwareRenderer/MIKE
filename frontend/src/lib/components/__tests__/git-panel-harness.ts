@@ -19,6 +19,7 @@ export const api = {
     discardProjectPaths: mock(gitApi.discardProjectPaths),
     getGitLogFull: mock(gitApi.getGitLogFull),
     getCommitDiffFiles: mock(gitApi.getCommitDiffFiles),
+    fetchProjectRemote: mock(gitApi.fetchProjectRemote),
     showConfirm: mock(dialogStore.showConfirm),
     showToast: mock(dialogStore.showToast),
 };
@@ -44,6 +45,7 @@ export function seedPanel(status = STATUS): void {
     api.getProjectDiffFile.mockRejectedValue(new Error('no untracked files'));
     api.getGitLogFull.mockResolvedValue({ commits: [COMMIT], current_branch: 'main' });
     api.getCommitDiffFiles.mockResolvedValue([]);
+    api.fetchProjectRemote.mockResolvedValue({ ok: true });
     // The endpoints answer with the paths they landed on; every seeded path is answered as applied.
     api.stageProjectPaths.mockImplementation(async (_p: string, paths: string[], stage: boolean) =>
         ({ status: 'ok', action: stage ? 'staged' : 'unstaged', applied: [...paths], failed: [] }));
