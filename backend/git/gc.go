@@ -110,6 +110,9 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 		// while add writes into it. It is released after the prune, not held across the sweep.
 		if unlockWorktree, locked := wm.tryLockProjectWorktree(p.ID, worktreeLockTimeout); locked {
 			wm.gitRun(p.Path, "worktree", "prune")
+			// The same sweep for every submodule store's own registry, under the same lock for the same
+			// reason.
+			PruneSubmoduleWorktrees(p.Path)
 			unlockWorktree()
 		} else {
 			// Branch GC is skipped with it: this project is busy, and the next GC round covers it.
@@ -319,13 +322,9 @@ func EnsureExcluded(projectRoot, pattern, header string) error {
 
 // repoExcludeFile locates the repository's local exclude file in the common git directory.
 func repoExcludeFile(projectRoot string) (string, error) {
-	out, err := Run(projectRoot, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	common, err := CommonGitDir(projectRoot)
 	if err != nil {
-		return "", fmt.Errorf("find the git dir of %s: %w (%s)", projectRoot, err, strings.TrimSpace(out))
-	}
-	common := strings.TrimSpace(out)
-	if !filepath.IsAbs(common) {
-		return "", fmt.Errorf("find the git dir of %s: git answered %q", projectRoot, common)
+		return "", err
 	}
 	return filepath.Join(common, "info", "exclude"), nil
 }

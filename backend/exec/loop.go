@@ -617,10 +617,15 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 				newOperatingMode := updatedTask.OperatingMode
 				if newOperatingMode != currentOperatingMode {
 					logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Infof("operating mode changed (%s → %s), recreating sandbox", currentOperatingMode, newOperatingMode)
+					opts, optsErr := te.sandboxCreateOpts(setup, imageToUse, updatedTask.IsPlanMode())
+					if optsErr != nil {
+						logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Warnf("keeping the running sandbox through the mode change: %v", optsErr)
+						return
+					}
 					if err := te.recreateTaskSandbox(setup, state, sandboxRecreate{
 						reason:      "mode change",
 						connErrCode: "agent_connection_failed",
-						opts:        te.sandboxCreateOpts(setup, imageToUse, updatedTask.IsPlanMode()),
+						opts:        opts,
 						underLock:   func(sb *sandboxState) { sb.operatingMode = newOperatingMode },
 					}); err != nil {
 						return
@@ -639,10 +644,15 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 			newHash := te.agentGrantHash(setup.providerURL())
 			if newHash != currentHash {
 				logging.For(logging.Sandbox).With(logging.TaskID, setup.task.ID).Infof("agent sandbox config changed, recreating sandbox")
+				opts, optsErr := te.sandboxCreateOpts(setup, imageToUse, setup.task.IsPlanMode())
+				if optsErr != nil {
+					logging.For(logging.Sandbox).With(logging.TaskID, setup.task.ID).Warnf("keeping the running sandbox through the extension config change: %v", optsErr)
+					return
+				}
 				if err := te.recreateTaskSandbox(setup, state, sandboxRecreate{
 					reason:      "config change",
 					connErrCode: "agent_config_failed",
-					opts:        te.sandboxCreateOpts(setup, imageToUse, setup.task.IsPlanMode()),
+					opts:        opts,
 					underLock:   func(sb *sandboxState) { sb.agentConfigHash = newHash },
 				}); err != nil {
 					return

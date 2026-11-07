@@ -63,7 +63,12 @@ func (te *TaskExecutor) recoverBridgeForTask(mgr bridgeSandboxManager, setup *ta
 	} else {
 		logging.For(logging.Bridge).With(logging.TaskID, setup.task.ID).Infof("container not running, creating sandbox from scratch")
 	}
-	if _, createErr := mgr.Create(setup.task.ID, setup.worktreePath, setup.project, te.sandboxCreateOpts(setup, imageToUse, setup.task.IsPlanMode())); createErr != nil {
+	opts, optsErr := te.sandboxCreateOpts(setup, imageToUse, setup.task.IsPlanMode())
+	if optsErr != nil {
+		logging.For(logging.Bridge).With(logging.TaskID, setup.task.ID).Warnf("not recreating the sandbox: %v", optsErr)
+		return false
+	}
+	if _, createErr := mgr.Create(setup.task.ID, setup.worktreePath, setup.project, opts); createErr != nil {
 		logging.For(logging.Bridge).With(logging.TaskID, setup.task.ID).Warnf("failed to recreate sandbox: %v", createErr)
 		return false
 	}

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"mike/backend/sandbox"
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 
 	"mike/pkg/bridge"
@@ -154,11 +155,17 @@ func (f *fakeSandboxMgr) cleanup() {
 	}
 }
 
-func recoveryTestSetup(taskID string) (*taskExecSetup, *executionState) {
+// recoveryTestSetup gives the worktree a real one-commit repository, because reading its submodule set off a
+// path that is not a repository is a refusal.
+func recoveryTestSetup(t *testing.T, taskID string) (*taskExecSetup, *executionState) {
+	t.Helper()
+	worktree := t.TempDir()
+	testgit.Git(t, worktree, "init", "-q")
+	testgit.Git(t, worktree, "commit", "-q", "--allow-empty", "-m", "one")
 	setup := &taskExecSetup{
 		task:         &types.Task{ID: taskID, OperatingMode: "full_access"},
 		project:      &types.Project{Name: "test-proj"},
-		worktreePath: "/tmp/worktree",
+		worktreePath: worktree,
 		ctx:          context.Background(),
 	}
 	return setup, &executionState{}
@@ -182,7 +189,7 @@ func TestRecoverBridgeForTask_Tier1ClientReconnect(t *testing.T) {
 	t.Parallel()
 	f := newFakeSandboxMgr("task-tier1")
 	defer f.cleanup()
-	setup, state := recoveryTestSetup("task-tier1")
+	setup, state := recoveryTestSetup(t, "task-tier1")
 
 	// Initial sandbox (like setupSandbox): Create then GetClient.
 	if _, err := f.Create(setup.task.ID, setup.worktreePath, setup.project, sandbox.SandboxOpts{}); err != nil {
@@ -236,7 +243,7 @@ func TestRecoverBridgeForTask_Tier2RecreateRunningContainer(t *testing.T) {
 	t.Parallel()
 	f := newFakeSandboxMgr("task-tier2")
 	defer f.cleanup()
-	setup, state := recoveryTestSetup("task-tier2")
+	setup, state := recoveryTestSetup(t, "task-tier2")
 
 	// Initial sandbox (like setupSandbox): Create then GetClient.
 	if _, err := f.Create(setup.task.ID, setup.worktreePath, setup.project, sandbox.SandboxOpts{}); err != nil {
@@ -287,7 +294,7 @@ func TestRecoverBridgeForTask_CreatesSandboxFromScratchWhenStopped(t *testing.T)
 	t.Parallel()
 	f := newFakeSandboxMgr("task-stopped")
 	defer f.cleanup()
-	setup, state := recoveryTestSetup("task-stopped")
+	setup, state := recoveryTestSetup(t, "task-stopped")
 
 	// Initial sandbox (like setupSandbox): Create then GetClient.
 	if _, err := f.Create(setup.task.ID, setup.worktreePath, setup.project, sandbox.SandboxOpts{}); err != nil {
@@ -342,7 +349,7 @@ func TestRecoverBridgeForTask_MaxAttemptsLatch(t *testing.T) {
 	t.Parallel()
 	f := newFakeSandboxMgr("task-max")
 	defer f.cleanup()
-	setup, state := recoveryTestSetup("task-max")
+	setup, state := recoveryTestSetup(t, "task-max")
 
 	// Everything fails: no agent, no container, Create errors.
 	f.mu.Lock()

@@ -134,6 +134,10 @@ type SandboxOpts struct {
 	// WorktreeReadOnly mounts the task's worktree read-only in the container. Plan mode is the
 	// only operating mode that asks for it; explore writes, like act.
 	WorktreeReadOnly bool
+	// Submodules are the workspace-relative submodule paths the task's commit names, as the worktree was
+	// populated for them. Each costs a read-only pin on its git pointer and a pin on every directory above
+	// it; see sandboxruntime.SubmoduleMounts.
+	Submodules []string
 }
 
 // ProjectOpts is the container configuration a project's own row asks for. What a caller decides
@@ -359,12 +363,12 @@ func createContainerArgs(containerName, mountPath string) []string {
 	return append(sandboxruntime.GVisorCreateArgs(containerName), "--workdir", mountPath)
 }
 
-// gitPointerMountArgs pins a task worktree's git pointer read-only, and refuses the container when
-// the pin cannot be established or the pointer already names a gitdir outside this project.
+// gitPointerMountArgs pins a task worktree's git pointer and that of every submodule the task was given, and
+// refuses the container when a pin cannot be established or a pointer names a gitdir outside this project.
 //
 // A project container gets no pin: its worktree is the checkout itself, and the shell around it is a
 // person's own.
-func gitPointerMountArgs(taskID, worktreePath, mountPath, projectPath string) ([]string, error) {
+func gitPointerMountArgs(taskID, worktreePath, mountPath, projectPath, worktreeMode string, submodules []string) ([]string, error) {
 	if IsProjectKey(taskID) {
 		return nil, nil
 	}
@@ -376,9 +380,24 @@ func gitPointerMountArgs(taskID, worktreePath, mountPath, projectPath string) ([
 			if err := sandboxruntime.VerifyWorktreeGitPointer(worktreePath, gitDir); err != nil {
 				return nil, err
 			}
+			for _, sub := range submodules {
+				if err := sandboxruntime.VerifySubmoduleGitPointer(worktreePath, sub, gitDir); err != nil {
+					return nil, err
+				}
+			}
 		}
 	}
-	return sandboxruntime.WorktreeGitPointerMount(worktreePath, mountPath)
+	args, err := sandboxruntime.WorktreeGitPointerMount(worktreePath, mountPath)
+	if err != nil {
+		return nil, err
+	}
+	// The submodule pins follow the worktree pointer's, each destination inside the mount the layer above
+	// it names.
+	subArgs, err := sandboxruntime.SubmoduleMounts(worktreePath, mountPath, submodules, worktreeMode)
+	if err != nil {
+		return nil, err
+	}
+	return append(args, subArgs...), nil
 }
 
 // mountMode answers the mode to mount with. A blank or unknown mode means fallback.
@@ -542,7 +561,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 	)
 	// The pin is appended after the worktree mount its destination sits inside, and a task container
 	// is never created without it.
-	gitPointerArgs, err := gitPointerMountArgs(taskID, absWorktree, mountPath, projectPath)
+	gitPointerArgs, err := gitPointerMountArgs(taskID, absWorktree, mountPath, projectPath, worktreeMode, opts.Submodules)
 	if err != nil {
 		return nil, fmt.Errorf("cannot pin the git pointer for %s: %w", taskID, err)
 	}

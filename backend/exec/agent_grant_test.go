@@ -5,6 +5,7 @@ import (
 
 	"mike/backend/agent"
 	ext "mike/backend/extensions"
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
 
@@ -73,21 +74,34 @@ func TestSandboxCreateOpts_GrantsOnlyTheTasksAgent(t *testing.T) {
 	t.Parallel()
 	te := grantExecutor(t, true)
 
-	grantedRun := &taskExecSetup{serverURL: agentURL}
-	if opts := te.sandboxCreateOpts(grantedRun, "ubuntu:latest", false); opts.AgentSandbox == nil ||
+	// sandboxCreateOpts reads the submodule set off the worktree, so the fixture is a real repository.
+	worktree := t.TempDir()
+	testgit.Git(t, worktree, "init", "-q")
+	testgit.Git(t, worktree, "commit", "-q", "--allow-empty", "-m", "one")
+
+	grantedRun := &taskExecSetup{serverURL: agentURL, worktreePath: worktree}
+	opts, err := te.sandboxCreateOpts(grantedRun, "ubuntu:latest", false)
+	if err != nil {
+		t.Fatalf("sandboxCreateOpts: %v", err)
+	}
+	if opts.AgentSandbox == nil ||
 		len(opts.AgentSandbox.Mounts) != 1 {
 		t.Errorf("task on agent://pi got %+v, want its one granted mount", opts.AgentSandbox)
 	}
 
-	llmRun := &taskExecSetup{serverURL: llmURL}
-	if opts := te.sandboxCreateOpts(llmRun, "ubuntu:latest", false); opts.AgentSandbox != nil {
+	llmRun := &taskExecSetup{serverURL: llmURL, worktreePath: worktree}
+	if opts, err := te.sandboxCreateOpts(llmRun, "ubuntu:latest", false); err != nil {
+		t.Fatalf("sandboxCreateOpts: %v", err)
+	} else if opts.AgentSandbox != nil {
 		t.Errorf("task on a plain provider got %+v, want no agent mount while an agent extension is enabled",
 			opts.AgentSandbox)
 	}
 
 	// Switching provider during a run changes the loop's modelConfig, and the approved folders follow it.
-	switched := &taskExecSetup{serverURL: agentURL, provider: &modelConfig{serverURL: llmURL}}
-	if opts := te.sandboxCreateOpts(switched, "ubuntu:latest", false); opts.AgentSandbox != nil {
+	switched := &taskExecSetup{serverURL: agentURL, provider: &modelConfig{serverURL: llmURL}, worktreePath: worktree}
+	if opts, err := te.sandboxCreateOpts(switched, "ubuntu:latest", false); err != nil {
+		t.Fatalf("sandboxCreateOpts: %v", err)
+	} else if opts.AgentSandbox != nil {
 		t.Error("after switching to a plain provider the container would still be built with the agent's mount")
 	}
 }

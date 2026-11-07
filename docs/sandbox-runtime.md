@@ -122,9 +122,24 @@ create and `PUT` (400 naming the field).
   The check is omitted if `<projectPath>/.git` is not a directory — a project that is itself a
   worktree or submodule names its gitdir in a file, so the expectation does not exist for it — and the
   pin still applies there.
+- **A populated submodule adds a second pointer of the same kind**, at `<submodule>/.git`, also inside the
+  read-write mount. `sandboxruntime.SubmoduleMounts` pins each one read-only, and the container is refused
+  when a pointer is missing, is not a regular file, or names a gitdir outside `<projectGitDir>/modules/`
+  (`VerifySubmoduleGitPointer`, the twin of the check above).
+- **Each ancestor directory of a submodule is bound too, in the worktree's own mode.** A bound path survives
+  only because it is a mount point: write gives `EROFS`, unlink and rename `EBUSY` at any capability. That
+  protection does not reach the directories above it. Pin the pointer alone and a guest renames
+  `vendor`, then lays its own pointer down at `vendor/lib/.git`, where the next git command reads it. A
+  submodule at the worktree root needs no ancestor bind: its parent is the container's worktree mount point.
+- **The submodule's content keeps the worktree's mode.** `contentMode` is the mode the worktree was given, so
+  a read-write worktree keeps writable submodule files and plan mode keeps them read-only. Only a `.git` is
+  read-only regardless: it is never content. A mount that lies about its mode is worse than a writable one.
+- **The set is derived, never remembered.** `git.SubmodulePaths` reads the task's own commit, so a container
+  rebuilt for an operating-mode change, an extension-config change or a dead agent carries the same pins.
+  A create path that cannot read the set declines the rebuild and leaves the running container alone.
 - Tests: `backend/sandbox/git_pointer_test.go`, and `TestWorktreeGitPointerMountIsReadOnly`,
   `TestWorktreeGitPointerMountRefusesWithoutAPointer`, `TestVerifyWorktreeGitPointer` in
-  `pkg/sandboxruntime/podman_args_test.go`.
+  `pkg/sandboxruntime/podman_args_test.go`, plus `pkg/sandboxruntime/submodule_mounts_test.go`.
 
 ### Capabilities are judged by shape, not name
 

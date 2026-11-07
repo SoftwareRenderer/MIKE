@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"mike/backend/git"
 	"mike/backend/llama"
 	"mike/backend/prompts"
 	"mike/backend/sandbox"
@@ -631,14 +632,23 @@ func handleLoopDetected(te *TaskExecutor, task *types.Task, projectID, taskID st
 }
 
 // sandboxCreateOpts returns the sandbox configuration for a task container.
-func (te *TaskExecutor) sandboxCreateOpts(setup *taskExecSetup, image string, readOnly bool) sandbox.SandboxOpts {
+//
+// The submodule set is read from the worktree rather than passed in, so a rebuilt container carries the pins
+// the first create had; a caller that gets an error keeps the running container, because a rebuild that could
+// not read the set would carry none.
+func (te *TaskExecutor) sandboxCreateOpts(setup *taskExecSetup, image string, readOnly bool) (sandbox.SandboxOpts, error) {
 	// The host folders this container may see are the ones the project configured, plus the ones the
 	// user approved for the agent this task runs. No other installed extension contributes a folder.
 	opts := setup.sandboxOpts
 	opts.BaseImage = image
 	opts.AgentSandbox = te.agentRegistry.AgentSandboxForURL(setup.providerURL())
 	opts.WorktreeReadOnly = readOnly
-	return opts
+	submodules, err := git.SubmodulePaths(setup.worktreePath)
+	if err != nil {
+		return opts, err
+	}
+	opts.Submodules = submodules
+	return opts, nil
 }
 
 // setupSandbox ensures the sandbox image exists, starts the container, and connects the agent.
@@ -676,8 +686,21 @@ func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *bridge.Clie
 	// Reuse existing container (lazy-start). Create only if none exists or if stopped/crashed.
 	var assignedPorts []types.AssignedPort
 	if !te.sandboxMgr.ContainerIsRunning(task.ID) {
+		// The worktree is given its submodules before the container is built around it, because the mounts
+		// that pin each submodule's git pointer are decided once, at create.
+		submodules, err := git.PopulateSubmodules(setup.ctx, worktreePath)
+		if err != nil {
+			return "", nil, fmt.Errorf("failed to prepare submodules: %w", err)
+		}
+		if len(submodules) > 0 {
+			logging.For(logging.Sandbox).With(logging.TaskID, task.ID).Infof("gave the task worktree %d submodule(s): %s", len(submodules), strings.Join(submodules, ", "))
+		}
+		opts, optsErr := te.sandboxCreateOpts(setup, imageToUse, task.IsPlanMode())
+		if optsErr != nil {
+			return "", nil, fmt.Errorf("failed to read the task's submodules: %w", optsErr)
+		}
 		var createErr error
-		assignedPorts, createErr = te.sandboxMgr.Create(task.ID, worktreePath, setup.project, te.sandboxCreateOpts(setup, imageToUse, task.IsPlanMode()))
+		assignedPorts, createErr = te.sandboxMgr.Create(task.ID, worktreePath, setup.project, opts)
 		if createErr != nil {
 			return "", nil, fmt.Errorf("failed to create sandbox: %w", createErr)
 		}

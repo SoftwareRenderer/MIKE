@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"mike/backend/sandbox"
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
 
@@ -17,9 +18,15 @@ import (
 // Configuration, where the mount and the toolchain variable are both visible per project.
 func TestSandboxCreateOpts_CarriesEveryConfiguredField(t *testing.T) {
 	t.Parallel()
+	// The builder reads the submodule set off the worktree, so the fixture is a real repository.
+	worktree := t.TempDir()
+	testgit.Git(t, worktree, "init", "-q")
+	testgit.Git(t, worktree, "commit", "-q", "--allow-empty", "-m", "one")
+
 	setup := &taskExecSetup{
-		task:    &types.Task{ID: "brave-amber-quartz"},
-		project: &types.Project{ID: "proj-1", Name: "example.com"},
+		task:         &types.Task{ID: "brave-amber-quartz"},
+		project:      &types.Project{ID: "proj-1", Name: "example.com"},
+		worktreePath: worktree,
 		sandboxOpts: sandbox.SandboxOpts{
 			NetworkIsolation: true,
 			MemoryLimit:      2048,
@@ -30,7 +37,10 @@ func TestSandboxCreateOpts_CarriesEveryConfiguredField(t *testing.T) {
 		},
 	}
 
-	opts := newBareTestExecutor(t).sandboxCreateOpts(setup, "localhost/sandbox-example.com", true)
+	opts, err := newBareTestExecutor(t).sandboxCreateOpts(setup, "localhost/sandbox-example.com", true)
+	if err != nil {
+		t.Fatalf("sandboxCreateOpts: %v", err)
+	}
 
 	if opts.BaseImage != "localhost/sandbox-example.com" {
 		t.Errorf("BaseImage = %q, want the image the caller passed in", opts.BaseImage)
@@ -58,7 +68,15 @@ func TestSandboxCreateOpts_CarriesEveryConfiguredField(t *testing.T) {
 	}
 	// An executor with no agent registry mounts no agent sandbox — nil, not a panic. Every create path
 	// goes through this builder, so "nil" here is what an install without agent extensions gets.
-	if got := newBareTestExecutor(t).sandboxCreateOpts(setup, "img", false).AgentSandbox; got != nil {
-		t.Errorf("AgentSandbox = %+v, want nil without an agent registry", got)
+	bare, err := newBareTestExecutor(t).sandboxCreateOpts(setup, "img", false)
+	if err != nil {
+		t.Fatalf("sandboxCreateOpts: %v", err)
+	}
+	if bare.AgentSandbox != nil {
+		t.Errorf("AgentSandbox = %+v, want nil without an agent registry", bare.AgentSandbox)
+	}
+	// A worktree with no submodules asks for no pins, and that is not an error: it is the ordinary case.
+	if len(opts.Submodules) != 0 {
+		t.Errorf("Submodules = %v, want none for a worktree with no gitlinks", opts.Submodules)
 	}
 }

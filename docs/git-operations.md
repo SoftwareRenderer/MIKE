@@ -108,6 +108,47 @@ title a model wrote.
 live branches kept), `backend/git/branch_listing_test.go` (both markers, slug prefix, one segment),
 `backend/server/task_delete_branches_test.go` (single delete, Clear-all, fork thread branch).
 
+## Submodules: share the person's copy, never re-fetch
+
+Nothing a task does fetches a submodule. The worktree is given its submodules from the repository the
+person already populated, and a task never causes a clone.
+
+- **Neither clone nor `worktree add` populates a submodule.** `git worktree add` leaves the path an empty
+  directory, and `CloneArgs` is not `--recursive`. `git status` stays clean over an empty gitlink, which is
+  why the loss is silent rather than noisy.
+- **A linked worktree has a submodule gitdir of its own**, at `<gitDir>/worktrees/<admin>/modules/<name>`.
+  So `git submodule update --init` inside one clones the `.gitmodules` URL again, per task. `--reference`
+  does not avoid it: the clone of the URL has to complete before the reference is consulted.
+- **What costs nothing is a linked worktree of the submodule's own shared store:**
+  `git -C <gitDir>/modules/<path> worktree add --detach <worktree>/<path> <sha>`. No clone, no duplicate
+  objects, no network. `PopulateSubmodules` (`backend/git/submodules.go`) does exactly this, walking nested
+  stores at `<gitDir>/modules/<outer>/modules/<inner>`, parents first.
+- **The listing comes from the commit**, `git ls-tree -r -z` on the task's own commit, never from a working
+  tree. What an agent later writes cannot then choose which paths a container mounts. `SubmodulePaths`
+  walks the same tree without creating anything, and every container — first start, mode change, recovery —
+  derives its pins from it (`docs/sandbox-runtime.md → A task worktree's git pointer is pinned read-only`).
+- **MIKE never reads a URL out of `.gitmodules`.** `ensureCommit` answers a pointer whose commit the shared
+  store lacks with one `git fetch` *in that store*, using the store's own remote, bounded by the turn's
+  context. `.gitmodules` is text from a repository, and this runs in the server process, where
+  `credential.helper` and `core.sshCommand` are left unfenced on purpose — see *One command constructor*.
+  A store the person never populated stops the task and names the submodule; the empty directory is never
+  handed to the agent as if it were the code.
+- **That fetch is a tail, not the common path.** `fetch.recurseSubmodules` is `on-demand` by default, so a
+  person's own `git pull` already brings a submodule commit the new superproject history names. The tail is
+  a bump committed locally, or a fetch that ran with recursion turned off.
+- **Removal mirrors the project's own.** The store keeps a registration per task ever given that submodule,
+  so `RemoveWorktree` and `GarbageCollect` prune each store through `PruneSubmoduleWorktrees`. The admin
+  directory's name is never used: git derives it from the checkout's basename and disambiguates a repeat as
+  `lib`, `lib1`, `lib2`.
+- **What a sandboxed task cannot do is record a new submodule commit.** The store sits under the project's
+  read-only `.git` mount, so `git commit` inside a submodule fails there. The submodule's *content* keeps
+  the worktree's own mode, so an attempt shows up as dirty status instead of vanishing quietly.
+- A project image build still omits submodule sources: `git archive` emits a gitlink path as an empty
+  directory. Nothing about this section changes that.
+
+Tests: `backend/git/submodules_test.go` — populated with the upstream deleted, nested stores, an
+unpopulated store, the stale-commit fetch, idempotence, and the prune.
+
 ## Stash: the bracket and the identity
 
 - Work that must run against a temporarily clean tree goes through `WithStash`
@@ -305,4 +346,5 @@ Tests: `backend/api/git_test.go` — ahead, behind, and no-upstream.
 ## Checking this
 
 `go test ./backend/git/` covers the command constructor, the execution fence, the stash bracket, the clone
-transports and the diff baseline. `make check-race` runs it again with the worktree locks watched.
+transports, the diff baseline and the submodule share (`-run 'Submodule|Populate|Prune'`).
+`make check-race` runs it again with the worktree locks watched.

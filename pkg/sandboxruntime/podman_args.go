@@ -110,31 +110,52 @@ func WorktreeGitPointerMount(worktreePath, mountPath string) ([]string, error) {
 //
 // The mount holds the pointer's bytes; this says whether they were already wrong.
 func VerifyWorktreeGitPointer(worktreePath, projectGitDir string) error {
-	raw, err := os.ReadFile(filepath.Join(worktreePath, GitPointerFile))
+	target, err := gitPointerTarget(worktreePath, "")
 	if err != nil {
-		return fmt.Errorf("read the git pointer of %s: %w", worktreePath, err)
+		return err
 	}
-	// git writes one line.
-	line := strings.TrimSpace(string(raw))
-	if strings.Contains(line, "\n") {
-		return fmt.Errorf("the git pointer of %s is not a single %q line", worktreePath, gitDirPrefix)
-	}
-	if !strings.HasPrefix(line, gitDirPrefix) {
-		return fmt.Errorf("the git pointer of %s is not a %q line", worktreePath, gitDirPrefix)
-	}
-	target := strings.TrimSpace(strings.TrimPrefix(line, gitDirPrefix))
-	if !filepath.IsAbs(target) {
-		target = filepath.Join(worktreePath, target)
-	} else {
-		target = filepath.Clean(target)
-	}
-
 	adminRoot := filepath.Join(projectGitDir, "worktrees")
-	if !strings.HasPrefix(target, adminRoot+string(filepath.Separator)) {
+	if !withinDir(adminRoot, target) {
 		return fmt.Errorf("the git pointer of %s names %q, which is outside %s: the task's git metadata must belong to this project",
 			worktreePath, target, adminRoot)
 	}
 	return nil
+}
+
+// gitPointerTarget reads the git pointer of a linked worktree — the worktree itself when rel is empty,
+// otherwise one of its submodule directories — and returns the directory its `gitdir:` line names. A
+// relative one is resolved against the directory holding the pointer, and the result is cleaned because git
+// reaches a target after its own cleaning of `..`.
+func gitPointerTarget(worktreePath, rel string) (string, error) {
+	dir := worktreePath
+	if rel != "" {
+		dir = filepath.Join(worktreePath, filepath.FromSlash(rel))
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, GitPointerFile))
+	if err != nil {
+		return "", fmt.Errorf("read the git pointer of %s: %w", dir, err)
+	}
+	// git writes one line.
+	line := strings.TrimSpace(string(raw))
+	if strings.Contains(line, "\n") {
+		return "", fmt.Errorf("the git pointer of %s is not a single %q line", dir, gitDirPrefix)
+	}
+	if !strings.HasPrefix(line, gitDirPrefix) {
+		return "", fmt.Errorf("the git pointer of %s is not a %q line", dir, gitDirPrefix)
+	}
+	target := strings.TrimSpace(strings.TrimPrefix(line, gitDirPrefix))
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(dir, target)
+	} else {
+		target = filepath.Clean(target)
+	}
+	return target, nil
+}
+
+// withinDir reports whether target is inside root, not merely prefixed by its name: "worktrees" would
+// otherwise be satisfied by "worktreesEvil" sitting beside it.
+func withinDir(root, target string) bool {
+	return target != root && strings.HasPrefix(target, root+string(filepath.Separator))
 }
 
 // ValidateCapability rejects a capability string that is not a plain capability name.

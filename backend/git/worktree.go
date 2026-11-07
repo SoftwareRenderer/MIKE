@@ -463,6 +463,9 @@ func (wm *WorktreeManager) RemoveWorktree(projectID, taskID, branchName string) 
 		errs = append(errs, fmt.Errorf("remove worktree dir: %w", err))
 	}
 	_ = wm.gitRun(project.Path, "worktree", "prune")
+	// A populated submodule registered a worktree of its own under the project's shared store, and that
+	// registration outlives this directory as the project's own would.
+	PruneSubmoduleWorktrees(project.Path)
 	if branchName != "" {
 		if err := wm.deleteBranch(project.Path, branchName); err != nil {
 			errs = append(errs, err)
@@ -1140,4 +1143,19 @@ func IsGitRepo(path string) bool {
 func HasGitDir(path string) bool {
 	_, err := os.Lstat(filepath.Join(path, ".git"))
 	return err == nil
+}
+
+// CommonGitDir is the directory a repository's shared git data lives in, which a linked worktree or a
+// submodule names from its `.git` file. What is shared rather than per-checkout lives here: the local exclude
+// file, and the `modules` tree of submodule stores.
+func CommonGitDir(path string) (string, error) {
+	out, err := Run(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	gitDir := strings.TrimSpace(out)
+	if err != nil || gitDir == "" {
+		return "", fmt.Errorf("find the git directory of %s: %s", path, gitMessage(out, err))
+	}
+	if !filepath.IsAbs(gitDir) {
+		return "", fmt.Errorf("find the git directory of %s: git answered %q", path, gitDir)
+	}
+	return gitDir, nil
 }
