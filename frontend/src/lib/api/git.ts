@@ -165,7 +165,7 @@ export async function checkoutBranch(projectId: string, branch: string): Promise
  * Returns { clean: boolean, status: string, head: string, authorName: string, authorEmail: string,
  * ahead: number, behind: number }. Status is the raw `git status --porcelain` output. Author fields
  * are from project git config. `ahead`/`behind` are counted against the upstream's remote-tracking
- * ref, so a fetch moves them, not the remote moving. */
+ * ref, so `fetchProjectRemote` moves them, not the remote moving. */
 export async function getGitStatus(projectId: string): Promise<{ clean: boolean; status: string; head: string; authorName: string; authorEmail: string; ahead: number; behind: number }> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/status`);
     if (!res.ok) throw await apiError(res, t('api.fetchGitStatus'));
@@ -227,6 +227,15 @@ export async function commitProject(projectId: string, message: string): Promise
         body: JSON.stringify({ message }),
     });
     if (!res.ok) throw await apiError(res, t('api.commit'));
+    return res.json();
+}
+
+/** Move the project's remote-tracking refs to what the remote holds now and answer with the ahead/behind
+ * pair counted after it; `ok: false` means that pair is worth nothing. Never queued — a replay reports a
+ * remote that has moved on. */
+export async function fetchProjectRemote(projectId: string): Promise<{ ok: boolean; ahead: number; behind: number }> {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/fetch`, { method: 'POST' });
+    if (!res.ok) throw await apiError(res, t('api.fetchFromRemote'));
     return res.json();
 }
 

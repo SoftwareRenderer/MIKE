@@ -5,7 +5,7 @@
     import { confirmList } from '$lib/utils/file-selection';
     import { sortPathsRootLast } from '$lib/utils/sort-paths';
     import { t } from '$lib/i18n';
-    import { getGitStatus, getProjectDiffFiles, getCommitDiffFiles, getProjectDiffFile, stageProjectPaths, commitProject, discardProjectPaths, pullProject, pushProject, getGitLogFull } from '$lib/api';
+    import { getGitStatus, getProjectDiffFiles, getCommitDiffFiles, getProjectDiffFile, stageProjectPaths, commitProject, discardProjectPaths, pullProject, pushProject, fetchProjectRemote, getGitLogFull } from '$lib/api';
     import type { GitBatchResult } from '$lib/api';
     import type { GitCommit } from '$lib/types';
     import { dialogStore } from '$lib/stores';
@@ -829,11 +829,30 @@
 
     let aheadCommits = $state(0);
     let behindCommits = $state(0);
-    let remoteFresh = $state(false);
+    // Counted off the remote-tracking ref, so the pair means "now" only once something has spoken to the
+    // remote. Until then, and after a fetch that could not run, the badge is a dash.
+    let remoteCountKnown = $state(false);
 
-    const syncNote = $derived(remoteFresh ? '' : ` — ${t('git.countsAsOfLastSync')}`);
-    const pullLabel = $derived(`${t('git.pullFromRemote')} (${t('git.commitsBehind', { count: behindCommits })})${syncNote}`);
-    const pushLabel = $derived(`${t('git.pushToRemote')} (${t('git.commitsAhead', { count: aheadCommits })})${syncNote}`);
+    const pullLabel = $derived(
+        `${t('git.pullFromRemote')} (${remoteCountKnown ? t('git.commitsBehind', { count: behindCommits }) : t('git.commitsUnknown')})`,
+    );
+    const pushLabel = $derived(`${t('git.pushToRemote')} (${t('git.commitsAhead', { count: aheadCommits })})`);
+
+    /** Ask the server what the remote holds now and take the pair it answers with. It runs after the
+     *  opening status read, so the fetched pair is always the one that wrote last, and no silent reload
+     *  asks again. */
+    async function refreshRemoteCount(): Promise<void> {
+        try {
+            const { ok, ahead, behind } = await fetchProjectRemote(projectId);
+            remoteCountKnown = ok;
+            if (ok) {
+                aheadCommits = ahead;
+                behindCommits = behind;
+            }
+        } catch {
+            remoteCountKnown = false;
+        }
+    }
 
     /** Pull from the remote, then refresh the panel in place. */
     async function handlePull() {
@@ -841,7 +860,7 @@
         pulling = true;
         try {
             await pullProject(projectId);
-            remoteFresh = true;
+            remoteCountKnown = true;
             dialogStore.showToast(t('git.pulledFromRemote'), 'success');
             const hasChanges = await loadData(true);
             await updateCompareMode(hasChanges);
@@ -860,7 +879,7 @@
         try {
             await pushProject(projectId);
             // A push that was not rejected proves the branch is not behind and leaves nothing ahead.
-            remoteFresh = true;
+            remoteCountKnown = true;
             dialogStore.showToast(t('git.pushedToRemote'), 'success');
             const hasChanges = await loadData(true);
             await updateCompareMode(hasChanges);
@@ -926,7 +945,10 @@
     }
 
     onMount(() => {
-        loadData().then((hasChanges) => updateCompareMode(hasChanges));
+        loadData().then(async (hasChanges) => {
+            await updateCompareMode(hasChanges);
+            await refreshRemoteCount();
+        });
         window.addEventListener('keydown', handleKeydown);
     });
 
@@ -1103,7 +1125,7 @@
                         <path d="M3 13h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                     </svg>
                 {/if}
-                <span class="panel-count" aria-hidden="true">{behindCommits}</span>
+                <span class="panel-count" aria-hidden="true">{remoteCountKnown ? behindCommits : '—'}</span>
             </button>
             <button class="panel-icon-btn" onclick={handlePush} disabled={pulling || pushing} title={pushing ? t('git.pushBusy') : pushLabel} aria-label={pushLabel} aria-describedby={pulling || pushing ? 'git-sync-busy' : undefined}>
                 {#if pushing}

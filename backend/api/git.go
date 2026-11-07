@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"mike/backend/fsutil"
 	"mike/backend/git"
@@ -650,6 +652,50 @@ func (h *GitHandler) HandlePull(w http.ResponseWriter, r *http.Request) {
 // HandlePush pushes to remote.
 func (h *GitHandler) HandlePush(w http.ResponseWriter, r *http.Request) {
 	h.handleGitRemote(w, r, "push")
+}
+
+// gitFetchTimeout bounds a fetch's round trip to the remote. The context is what kills the child;
+// git.GitWaitDelay only closes its output pipes.
+const gitFetchTimeout = 20 * time.Second
+
+// upstreamResolved reports whether HEAD's branch tracks a remote branch, which is what `@{upstream}`
+// names and what the ahead/behind count is read against.
+func upstreamResolved(dir string) bool {
+	cmd := git.Command("", "-C", dir, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
+	_, err := cmd.Output()
+	return err == nil
+}
+
+// HandleFetch moves refs/remotes/… to what the remote holds now, and counts the pair under the same
+// lock. A checkout whose HEAD tracks nothing is refused before a process starts.
+func (h *GitHandler) HandleFetch(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	project, ok := resolveProject(w, r, h.store)
+	if !ok {
+		return
+	}
+	log := logging.For(logging.Git).With(logging.ProjectID, projectID)
+	if !upstreamResolved(project.Path) {
+		log.Infof("git fetch declined: %s has no upstream for HEAD", project.Path)
+		writeFetchAnswer(w, false, 0, 0)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), gitFetchTimeout)
+	defer cancel()
+	defer h.lockProject(projectID)()
+	cmd := git.CommandContext(ctx, "", "-C", project.Path, "fetch")
+	out, err := cmd.Output()
+	if err != nil {
+		// The cause goes to the log, never to the panel.
+		log.Warnf("git fetch in %s failed: %v: %s", project.Path, err, subproc.Summarize(out, subproc.AnswerMax))
+	}
+	ahead, behind := remoteAheadBehind(project.Path)
+	writeFetchAnswer(w, err == nil, ahead, behind)
+}
+
+// writeFetchAnswer replies to git/fetch: whether the pair means anything now, and the pair.
+func writeFetchAnswer(w http.ResponseWriter, ok bool, ahead, behind int) {
+	httputil.JSONResponse(w, http.StatusOK, map[string]any{"ok": ok, "ahead": ahead, "behind": behind})
 }
 
 // HandleTaskCommits returns task commits past divergence point; falls back to project repo if worktree is gone.

@@ -1166,14 +1166,10 @@ func TestHandlePush_NotAGitRepo_ErrorIncludesGitOutput(t *testing.T) {
 
 // --- git/status ahead/behind ---
 
-// statusAheadBehind stores a project and reads GET git/status over the route the server registers.
-// The status code and the body shape are checked here so a handler that stopped answering cannot
-// pass on two zero values.
-func statusAheadBehind(t *testing.T, s *store.Store, h *GitHandler, id, projPath string) (ahead, behind int) {
+// statusAheadBehind reads GET git/status over the route the server registers. The status code and the
+// body shape are checked here so a handler that stopped answering cannot pass on two zero values.
+func statusAheadBehind(t *testing.T, h *GitHandler, id string) (ahead, behind int) {
 	t.Helper()
-	if err := s.CreateProject(&types.Project{ID: id, Name: id, Path: projPath}); err != nil {
-		t.Fatal(err)
-	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/projects/{projectID}/git/status", h.HandleStatus)
 	rec := httptest.NewRecorder()
@@ -1195,6 +1191,40 @@ func statusAheadBehind(t *testing.T, s *store.Store, h *GitHandler, id, projPath
 	return *body.Ahead, *body.Behind
 }
 
+// storeGitProject stores the project row the route helpers above resolve.
+func storeGitProject(t *testing.T, s *store.Store, id, projPath string) {
+	t.Helper()
+	if err := s.CreateProject(&types.Project{ID: id, Name: id, Path: projPath}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// postGitFetch runs git/fetch over the route the server registers and returns its answer: whether the
+// pair means anything now, and the pair.
+func postGitFetch(t *testing.T, h *GitHandler, id string) (ok bool, ahead, behind int) {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/projects/{projectID}/git/fetch", h.HandleFetch)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest("POST", "/api/projects/"+id+"/git/fetch", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from git/fetch, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		OK     *bool `json:"ok"`
+		Ahead  *int  `json:"ahead"`
+		Behind *int  `json:"behind"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode git/fetch body: %v: %s", err, rec.Body.String())
+	}
+	if body.OK == nil || body.Ahead == nil || body.Behind == nil {
+		t.Fatalf("git/fetch body carries no ok/ahead/behind: %s", rec.Body.String())
+	}
+	return *body.OK, *body.Ahead, *body.Behind
+}
+
 func TestHandleStatus_CountsCommitsAheadOfUpstream(t *testing.T) {
 	h, s, _, _ := newTestGitHandler(t)
 	projPath := t.TempDir()
@@ -1205,7 +1235,8 @@ func TestHandleStatus_CountsCommitsAheadOfUpstream(t *testing.T) {
 	testgit.Git(t, projPath, "add", "local.txt")
 	testgit.Git(t, projPath, "commit", "-m", "local commit")
 
-	if ahead, behind := statusAheadBehind(t, s, h, "status-ahead-proj", projPath); ahead != 1 || behind != 0 {
+	storeGitProject(t, s, "status-ahead-proj", projPath)
+	if ahead, behind := statusAheadBehind(t, h, "status-ahead-proj"); ahead != 1 || behind != 0 {
 		t.Fatalf("one unpushed commit: got ahead=%d behind=%d, want ahead=1 behind=0", ahead, behind)
 	}
 }
@@ -1225,7 +1256,8 @@ func TestHandleStatus_CountsCommitsBehindUpstream(t *testing.T) {
 	testgit.Git(t, clone, "push")
 	testgit.Git(t, projPath, "fetch", "origin")
 
-	if ahead, behind := statusAheadBehind(t, s, h, "status-behind-proj", projPath); ahead != 0 || behind != 1 {
+	storeGitProject(t, s, "status-behind-proj", projPath)
+	if ahead, behind := statusAheadBehind(t, h, "status-behind-proj"); ahead != 0 || behind != 1 {
 		t.Fatalf("one fetched remote commit: got ahead=%d behind=%d, want ahead=0 behind=1", ahead, behind)
 	}
 }
@@ -1237,8 +1269,52 @@ func TestHandleStatus_WithoutUpstreamAnswersZeroCounts(t *testing.T) {
 
 	// A local-only repository has nothing to be ahead or behind, and the snapshot answers 0/0 rather
 	// than an unresolvable-ref error.
-	if ahead, behind := statusAheadBehind(t, s, h, "status-noupstream-proj", projPath); ahead != 0 || behind != 0 {
+	storeGitProject(t, s, "status-noupstream-proj", projPath)
+	if ahead, behind := statusAheadBehind(t, h, "status-noupstream-proj"); ahead != 0 || behind != 0 {
 		t.Fatalf("no upstream: got ahead=%d behind=%d, want 0/0", ahead, behind)
+	}
+}
+
+// A remote that moved since the last fetch reads 0 until git/fetch runs.
+func TestHandleFetch_MovesTheBehindCountToWhatTheRemoteHolds(t *testing.T) {
+	h, s, _, _ := newTestGitHandler(t)
+	projPath := t.TempDir()
+	initGitRepo(t, projPath)
+	bare := addBareRemote(t, projPath)
+
+	clone := t.TempDir()
+	testgit.Git(t, "", "clone", bare, clone)
+	createFile(t, clone, "remote-file.txt", "from remote\n")
+	testgit.Git(t, clone, "add", "remote-file.txt")
+	testgit.Git(t, clone, "commit", "-m", "remote commit")
+	testgit.Git(t, clone, "push")
+
+	storeGitProject(t, s, "fetch-proj", projPath)
+	if ahead, behind := statusAheadBehind(t, h, "fetch-proj"); ahead != 0 || behind != 0 {
+		t.Fatalf("before any fetch: got ahead=%d behind=%d, want 0/0", ahead, behind)
+	}
+	ok, ahead, behind := postGitFetch(t, h, "fetch-proj")
+	if !ok || ahead != 0 || behind != 1 {
+		t.Fatalf("git/fetch answered ok=%v ahead=%d behind=%d, want ok=true ahead=0 behind=1", ok, ahead, behind)
+	}
+	if a, b := statusAheadBehind(t, h, "fetch-proj"); a != ahead || b != behind {
+		t.Fatalf("git/status says ahead=%d behind=%d after the fetch answered %d/%d", a, b, ahead, behind)
+	}
+}
+
+func TestHandleFetch_WithoutUpstreamDeclinesWithoutAFetch(t *testing.T) {
+	h, s, _, _ := newTestGitHandler(t)
+	projPath := t.TempDir()
+	initGitRepo(t, projPath)
+	storeGitProject(t, s, "fetch-noupstream-proj", projPath)
+
+	// Nothing to count against, so the answer comes before any remote is contacted: FETCH_HEAD is what a
+	// fetch leaves behind.
+	if ok, _, _ := postGitFetch(t, h, "fetch-noupstream-proj"); ok {
+		t.Fatal("git/fetch reported a fresh count for a local-only repository")
+	}
+	if _, err := os.Stat(filepath.Join(projPath, ".git", "FETCH_HEAD")); !os.IsNotExist(err) {
+		t.Fatalf("git/fetch contacted a remote that does not exist (FETCH_HEAD err=%v)", err)
 	}
 }
 
