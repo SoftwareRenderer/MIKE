@@ -252,12 +252,48 @@ func (sm *SandboxManager) projectBuildKey(ctx context.Context, project *types.Pr
 	return buildCacheKey(commit, treeOID, string(content), file.Bases), nil
 }
 
-// BuildProjectImage builds the project's sandbox image and returns what it did. onProgress receives the
-// builder's own lines, one at a time, from this goroutine.
+// BuildProjectImage builds the project's sandbox image, waiting for a build or pull of that image already
+// running and reporting its result instead of starting a second one. onProgress receives the lines of
+// whichever build ends up running, so a request that joined late still reads the build it waited on.
+func (sm *SandboxManager) BuildProjectImage(ctx context.Context, project *types.Project, onProgress func(line string)) (*BuildResult, error) {
+	image := sm.rt.ResolveImageRef(ResolveProjectImage(project).Image)
+	report := func(status types.SandboxImageStatus) {
+		if onProgress != nil && status.Line != "" {
+			onProgress(status.Line)
+		}
+	}
+
+	for {
+		if op, joined := sm.joinImageOp(image, report); joined {
+			if onProgress != nil {
+				onProgress("waiting for the sandbox image build already running…")
+			}
+			result, err := op.await()
+			if err != nil || result != nil {
+				return result, err
+			}
+			// What finished was a pull, and a build was asked for: run it now that the key is free.
+			continue
+		}
+		op, claimed := sm.claimImageOp(image, report)
+		if !claimed {
+			continue
+		}
+		return sm.runImageOp(image, op, func() (*BuildResult, error) {
+			op.announce(types.SandboxImageStatus{Phase: types.SandboxImagePhaseBuilding})
+			return sm.buildProjectImageDirect(ctx, project, func(line string) {
+				op.progress(types.SandboxImageStatus{Phase: types.SandboxImagePhaseBuilding, Line: line})
+			})
+		})
+	}
+}
+
+// buildProjectImageDirect runs one build of the project's image. It neither waits for a build in flight nor
+// publishes its own, so only the caller holding that image's key may call it.
 //
 // A failure is logged as well as returned: the stream's last line is all the panel keeps, so without the log
 // entry a failed build leaves nothing to grep by.
-func (sm *SandboxManager) BuildProjectImage(ctx context.Context, project *types.Project, onProgress func(line string)) (result *BuildResult, err error) {
+func (sm *SandboxManager) buildProjectImageDirect(ctx context.Context, project *types.Project, onProgress func(line string)) (result *BuildResult, err error) {
 	emit := func(line string) {
 		if onProgress != nil {
 			onProgress(line)

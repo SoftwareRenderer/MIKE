@@ -274,6 +274,18 @@ This section is the mechanism.
   with, and a project with no limit books nothing — one rule, not a second ladder. It is taken before
   anything is staged and released when the build ends. The route in is an injected `MemoryAdmission`, because
   a build belongs to no task and the supervisor that charges a live container to the budget never sees it.
+- **One preparation per image runs at a time, and whoever arrives mid-build waits for it.** The in-flight
+  table in `backend/sandbox/image.go` is keyed by the resolved image ref. All three ways an image gets made
+  reach it: a task's `EnsureImageForProject`, a terminal's, and the Build button's `BuildProjectImage`.
+  Two builds of one image would book the memory twice and retag the same name over each other. Joining is
+  decided **before the host is asked whether the image exists**: a rebuild leaves the bytes it is replacing in
+  place, and a container started off those is what the wait exists to prevent. A waiter hears what the
+  preparation announced and the lines after it, and takes its answer: a failed build is reported to it, not
+  retried by it, and nothing is cached, so a later caller tries again. `buildProjectImageDirect` is the only
+  builder, and only the holder of a key may call it — a builder that consulted the table would wait on itself.
+  `TestEnsureImageForProjectWaitsForTheImagePreparationAlreadyRunning`,
+  `TestMakeProjectImageAnnouncesThePhaseItWorksOn`,
+  `TestBuildProjectImageJoinsTheBuildAlreadyRunning` and `TestImageOpJoinersShareTheInFlightResult` hold it.
 - **The builder is nested buildah, and MIKE models no instruction.** Inside the guest: storage `vfs`, root
   and runroot under `/var/tmp/mike-build` (**not** `/tmp`, which is guest tmpfs — a `vfs` layer there fails
   its xattr reads), `bud --isolation chroot --pull=never`, flags before the context.
