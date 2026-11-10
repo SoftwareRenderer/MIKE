@@ -132,40 +132,44 @@ describe('takeTransfer', () => {
         expect(takeTransfer(event)).toBeNull();
     });
 
-    it('owns an image-only clipboard, which would otherwise leave a filename behind', () => {
+    it('cancels an image-only paste, which would otherwise leave a filename behind', () => {
         const event = pasteOf([image('shot.png')]);
         const got = takeTransfer(event);
         expect(got?.images.map(f => f.name)).toEqual(['shot.png']);
-        expect(got?.owns).toBe(true);
         expect(event.defaultPrevented).toBe(true);
     });
-    it('never owns a clipboard that carries text as well: both arrive', () => {
+    it('leaves a clipboard that carries text as well uncancelled: both arrive', () => {
         const event = pasteOf([image('diagram.png')], 'the error text');
         const got = takeTransfer(event);
         expect(got?.images).toHaveLength(1);
-        expect(got?.owns).toBe(false);
         expect(event.defaultPrevented).toBe(false);
     });
 
-    it('owns a paste whose only text is the copied file\'s own name', () => {
+    it('cancels a paste whose only text is the copied file\'s own name', () => {
         const file = new File(['x'], 'run.log', { type: 'text/plain' });
         const event = pasteOf([file], 'run.log');
-        expect(takeTransfer(event)?.owns).toBe(true);
+        expect(takeTransfer(event)?.texts.map(f => f.name)).toEqual(['run.log']);
         expect(event.defaultPrevented).toBe(true);
     });
 
-    it('owns a paste whose text is the copied file\'s path', () => {
+    it('cancels a paste whose text is the copied file\'s path', () => {
         const file = image('screenshot.png');
-        expect(takeTransfer(pasteOf([file], '/home/me/screenshot.png'))?.owns).toBe(true);
+        const event = pasteOf([file], '/home/me/screenshot.png');
+        expect(takeTransfer(event)?.images).toHaveLength(1);
+        expect(event.defaultPrevented).toBe(true);
     });
 
-    it('owns a paste whose text is nothing but blanks', () => {
-        expect(takeTransfer(pasteOf([image()], '   '))?.owns).toBe(true);
+    it('cancels a paste whose text is nothing but blanks', () => {
+        const event = pasteOf([image()], '   ');
+        expect(takeTransfer(event)?.images).toHaveLength(1);
+        expect(event.defaultPrevented).toBe(true);
     });
 
-    it('never owns a paste that carries a file name and real text together', () => {
+    it('leaves a paste that carries a file name and real text together to the browser', () => {
         const file = image('screenshot.png');
-        expect(takeTransfer(pasteOf([file], 'screenshot.png\nthe error text'))?.owns).toBe(false);
+        const event = pasteOf([file], 'screenshot.png\nthe error text');
+        expect(takeTransfer(event)?.images).toHaveLength(1);
+        expect(event.defaultPrevented).toBe(false);
     });
 
     it('cancels synchronously, before the caller can await anything', () => {

@@ -9,7 +9,7 @@
     import type { SessionInfo } from '$lib/types';
     import { listSessions, revokeSession, revokeOtherSessions } from '$lib/api';
     import { dialogStore } from '$lib/stores';
-    import { formatDateTime, formatRelativeTime } from '$lib/utils/format-time';
+    import { formatAgeAndTooltip } from '$lib/utils/format-time';
     import { t } from '$lib/i18n';
 
     /** Sign-out path owned by the modal (App's logout handler). */
@@ -30,17 +30,6 @@
         return sorted.sort((a, b) => Number(b.current) - Number(a.current));
     });
     const otherCount = $derived(sessions.filter(s => !s.current).length);
-
-    /** Absolute timestamp for a row's `title` tooltip. */
-    function absolute(iso: string): string {
-        return iso ? formatDateTime(iso) : t('settings.sessions.unknownTime');
-    }
-
-    /** Relative display text; empty timestamps render as an em dash. */
-    function relative(iso: string): string {
-        if (!iso) return '\u2014';
-        return formatRelativeTime(iso) || absolute(iso);
-    }
 
     async function loadSessions() {
         loading = true;
@@ -150,6 +139,8 @@
         <div class="settings-list-status" role="status">{t('settings.sessions.none')}</div>
     {:else}
         {#each rows as session (session.id)}
+            {@const created = formatAgeAndTooltip(session.created_at, '\u2014', t('settings.sessions.unknownTime'))}
+            {@const seen = formatAgeAndTooltip(session.last_seen, '\u2014', t('settings.sessions.unknownTime'))}
             <div class="settings-row" class:session-current={session.current} data-session-id={session.id}>
                 <div class="settings-row-info">
                     <div class="session-headline">
@@ -161,11 +152,11 @@
                         {/if}
                     </div>
                     <div class="settings-row-meta">
-                        <span class="session-meta-item" title={t('settings.sessions.signedInAt', { time: absolute(session.created_at) })}>
-                            <span class="settings-row-meta-key">{t('settings.sessions.created')}</span> {relative(session.created_at)}
+                        <span class="session-meta-item" title={t('settings.sessions.signedInAt', { time: created.tooltip })}>
+                            <span class="settings-row-meta-key">{t('settings.sessions.created')}</span> {created.display}
                         </span>
-                        <span class="session-meta-item" title={t('settings.sessions.lastSeenAt', { time: absolute(session.last_seen) })}>
-                            <span class="settings-row-meta-key">{t('settings.sessions.lastSeen')}</span> {relative(session.last_seen)}
+                        <span class="session-meta-item" title={t('settings.sessions.lastSeenAt', { time: seen.tooltip })}>
+                            <span class="settings-row-meta-key">{t('settings.sessions.lastSeen')}</span> {seen.display}
                         </span>
                         <span class="session-meta-item">
                             <span class="settings-row-meta-key">{t('settings.sessions.ip')}</span> {session.ip || '\u2014'}

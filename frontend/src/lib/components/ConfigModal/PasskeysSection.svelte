@@ -14,7 +14,7 @@
     import { listPasskeys, mintPairingCode, renamePasskey, revokePairingCodes, revokePasskey } from '$lib/api';
     import { dialogStore } from '$lib/stores';
     import { newlyPairedPasskey } from '$lib/utils/passkeys';
-    import { formatDateTime, formatElapsed, formatRelativeTime } from '$lib/utils/format-time';
+    import { formatAgeAndTooltip, formatElapsed } from '$lib/utils/format-time';
     import { DEVICE_NAME_LIMIT } from '$lib/utils/login-flow';
     import { t } from '$lib/i18n';
 
@@ -49,17 +49,6 @@
      *  fact that nothing is waiting any more. */
     const secondsLeft = $derived(Math.max(0, Math.floor((Date.parse(pairing?.expires_at ?? '') - now) / 1000)));
     const expired = $derived(!!pairing && secondsLeft <= 0);
-
-    /** Absolute timestamp for a row's `title` tooltip. */
-    function absolute(iso: string): string {
-        return iso ? formatDateTime(iso) : t('settings.passkeys.unknownTime');
-    }
-
-    /** Relative display text; a device that has never signed in says so rather than showing a date. */
-    function relative(iso: string): string {
-        if (!iso) return t('settings.passkeys.neverUsed');
-        return formatRelativeTime(iso) || absolute(iso);
-    }
 
     async function loadPasskeys() {
         loading = true;
@@ -317,6 +306,8 @@
         <div class="settings-list-status" role="status">{t('settings.passkeys.none')}</div>
     {:else}
         {#each rows as row (row.id)}
+            {@const created = formatAgeAndTooltip(row.created_at, t('settings.passkeys.neverUsed'), t('settings.passkeys.unknownTime'))}
+            {@const used = formatAgeAndTooltip(row.last_used, t('settings.passkeys.neverUsed'), t('settings.passkeys.unknownTime'))}
             <div class="settings-row" data-passkey-id={row.id}>
                 <div class="settings-row-info">
                     {#if editingId === row.id}
@@ -342,11 +333,11 @@
                         >{row.name}</button>
                     {/if}
                     <div class="settings-row-meta">
-                        <span class="passkeys-meta-item" title={absolute(row.created_at)}>
-                            <span class="settings-row-meta-key">{t('settings.passkeys.created')}</span> {relative(row.created_at)}
+                        <span class="passkeys-meta-item" title={created.tooltip}>
+                            <span class="settings-row-meta-key">{t('settings.passkeys.created')}</span> {created.display}
                         </span>
-                        <span class="passkeys-meta-item" title={row.last_used ? absolute(row.last_used) : ''}>
-                            <span class="settings-row-meta-key">{t('settings.passkeys.lastUsed')}</span> {relative(row.last_used)}
+                        <span class="passkeys-meta-item" title={row.last_used ? used.tooltip : ''}>
+                            <span class="settings-row-meta-key">{t('settings.passkeys.lastUsed')}</span> {used.display}
                         </span>
                     </div>
                 </div>

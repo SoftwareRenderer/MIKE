@@ -1,4 +1,5 @@
 import type { ApiDiffRow, DiffFile, DiffRow } from '$lib/types/diff';
+import type { DiffStatsEntry } from '$lib/types';
 import { toDiffFiles, type GitBatchResult, type TaskDiff, type TaskDiffOptions } from '$lib/api';
 import { isVimSwapFile } from '$lib/utils/file-suffix';
 import type { DiffFileResponse } from '$lib/types/diff';
@@ -11,18 +12,6 @@ export interface UntrackedMeta {
     truncated?: boolean;
     origAdded?: number;
     loading?: boolean;
-}
-
-/** Diff stats from WebSocket push. */
-export interface DiffStats {
-    hash: string;
-    files: number;
-    additions: number;
-    deletions: number;
-    untracked_n?: number;
-    file_hashes?: Record<string, string>;
-    removed_files?: string[];
-    staged_paths?: string[];
 }
 
 /** API callbacks the `DiffCache` constructor takes, typed with the endpoint's own response types. */
@@ -160,7 +149,7 @@ export class DiffCache {
     }
 
     /** Process a diff stats update from WebSocket. Called by component's $effect. */
-    processStats(stat: DiffStats | undefined, diffLoading: boolean) {
+    processStats(stat: DiffStatsEntry | undefined, diffLoading: boolean) {
         // A ref comparison is immutable, so the only thing a working-tree stat could reconcile here is the
         // wrong diff: the hash tracker holds path stand-ins for these files, every path would read as
         // changed, and each `/diff/file` answer is the worktree against the baseline rather than the pair

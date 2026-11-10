@@ -10,7 +10,7 @@
     import type { APITokenInfo } from '$lib/types';
     import { listAPITokens, createAPIToken, revokeAPIToken } from '$lib/api';
     import { dialogStore } from '$lib/stores';
-    import { formatDateTime, formatRelativeTime } from '$lib/utils/format-time';
+    import { formatAgeAndTooltip } from '$lib/utils/format-time';
     import { t } from '$lib/i18n';
 
     let tokens = $state<APITokenInfo[]>([]);
@@ -28,17 +28,6 @@
     const rows = $derived.by(() =>
         [...tokens].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
     );
-
-    /** Absolute timestamp for a row's `title` tooltip. */
-    function absolute(iso: string): string {
-        return iso ? formatDateTime(iso) : t('settings.tokens.neverUsed');
-    }
-
-    /** Relative display text; a token that has never been used says so rather than showing a date. */
-    function relative(iso: string): string {
-        if (!iso) return t('settings.tokens.neverUsed');
-        return formatRelativeTime(iso) || absolute(iso);
-    }
 
     async function loadTokens() {
         loading = true;
@@ -173,15 +162,17 @@
         <div class="settings-list-status" role="status">{t('settings.tokens.none')}</div>
     {:else}
         {#each rows as token (token.id)}
+            {@const created = formatAgeAndTooltip(token.created_at, t('settings.tokens.neverUsed'))}
+            {@const used = formatAgeAndTooltip(token.last_used_at, t('settings.tokens.neverUsed'))}
             <div class="settings-row" data-token-id={token.id}>
                 <div class="settings-row-info">
                     <div class="settings-row-label" title={token.label}>{token.label}</div>
                     <div class="settings-row-meta">
-                        <span class="token-meta-item" title={absolute(token.created_at)}>
-                            <span class="settings-row-meta-key">{t('settings.tokens.created')}</span> {relative(token.created_at)}
+                        <span class="token-meta-item" title={created.tooltip}>
+                            <span class="settings-row-meta-key">{t('settings.tokens.created')}</span> {created.display}
                         </span>
-                        <span class="token-meta-item" title={token.last_used_at ? absolute(token.last_used_at) : ''}>
-                            <span class="settings-row-meta-key">{t('settings.tokens.lastUsed')}</span> {relative(token.last_used_at)}
+                        <span class="token-meta-item" title={token.last_used_at ? used.tooltip : ''}>
+                            <span class="settings-row-meta-key">{t('settings.tokens.lastUsed')}</span> {used.display}
                         </span>
                     </div>
                 </div>

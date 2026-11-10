@@ -12,6 +12,7 @@
     // straight in .diff-line-content (no .diff-text wrapper), so it reads the shared table rather than
     // carrying a copy of its own — the copy it did carry was already missing a token.
     import '$lib/styles/token-colors.css';
+    import '$lib/styles/diff-viewer.css';
     import { escapeHtml } from '$lib/utils/format';
     import { formatDateTime, formatDate } from '$lib/utils/format-time';
     import { t } from '$lib/i18n';
@@ -554,6 +555,9 @@
 {/if}
 
 <style>
+    /* This block holds only what the commit overlay draws differently from `DiffViewer`. The rules
+       the two share come from `styles/diff-viewer.css`, imported above, and a rule kept in both files
+       drifts, because the scoped copy out-specifies the shared one. */
 
     .commit-diff-overlay {
         display: flex;
@@ -816,14 +820,6 @@
         outline: 2px solid var(--color-accent);
         outline-offset: -2px;
     }
-    .diff-chevron {
-        flex-shrink: 0;
-        color: var(--color-text-tertiary);
-        transition: transform var(--dur-base) ease;
-    }
-    .diff-chevron.expanded {
-        transform: rotate(90deg);
-    }
     .diff-file-path {
         flex: 1;
         overflow: hidden;
@@ -1072,39 +1068,6 @@
         white-space: pre;
         tab-size: 4;
         flex: 1;
-    }
-    .diff-row-added {
-        background: rgb(from var(--color-git-added) r g b / 0.15);
-    }
-    .diff-row-added .diff-line-num {
-        background: rgb(from var(--color-git-added) r g b / 0.08);
-    }
-    .diff-row-added .diff-prefix {
-        color: var(--color-git-added);
-    }
-    .diff-row-removed {
-        background: rgb(from var(--color-git-deleted) r g b / 0.15);
-    }
-    .diff-row-removed .diff-line-num {
-        background: rgb(from var(--color-git-deleted) r g b / 0.08);
-    }
-    .diff-row-removed .diff-prefix {
-        color: var(--color-git-deleted);
-    }
-    .diff-row-context .diff-prefix {
-        color: var(--color-text-tertiary);
-    }
-    /* Inline diff segments in unified view */
-    .diff-segment {
-        font-family: inherit;
-        font-size: inherit;
-        white-space: inherit;
-    }
-    .diff-segment-added {
-        background: rgb(from var(--color-git-added) r g b / 0.4);
-    }
-    .diff-segment-removed {
-        background: rgb(from var(--color-git-deleted) r g b / 0.4);
     }
     /* Token and bracket-pair colors: styles/token-colors.css, imported above — the same table the
        diff viewer paints from. */

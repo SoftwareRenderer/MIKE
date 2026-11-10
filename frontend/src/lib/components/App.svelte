@@ -1445,19 +1445,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     {/if}
     {#if appStore.showEditTask && appStore.editTaskData}
         <EditTaskModal
-            taskId={appStore.editTaskData.taskId}
-            projectId={appStore.editTaskData.projectId}
-            taskTitle={appStore.editTaskData.taskTitle}
-            editProviders={appStore.editTaskData.editProviders}
-            editModel={appStore.editTaskData.editModel}
-            editUrl={appStore.editTaskData.editUrl}
-            editReasoningEffort={appStore.editTaskData.editReasoningEffort}
-            editOperatingMode={appStore.editTaskData.editOperatingMode}
-            editAutoMerge={appStore.editTaskData.editAutoMerge}
-            editSubtasksAutoMerge={appStore.editTaskData.editSubtasksAutoMerge}
-            taskHasParent={appStore.editTaskData.taskHasParent}
-            targetBranch={appStore.editTaskData.targetBranch}
-            baseRef={appStore.editTaskData.baseRef}
+            edit={appStore.editTaskData}
             onSave={saveTaskEdit}
             onCancel={() => {
                 appStore.showEditTask = false;

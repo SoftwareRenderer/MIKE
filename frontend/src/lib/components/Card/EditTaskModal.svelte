@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import type { Provider } from '$lib/types';
+    import type { EditTaskData } from '$lib/stores/app.svelte';
     import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
     import { appStore } from '$lib/stores';
     import { getLocalBranches } from '$lib/api';
@@ -12,6 +12,18 @@
     import BaseModal from '../BaseModal.svelte';
     import { t } from '$lib/i18n';
 
+    let {
+        edit,
+        onSave,
+        onCancel,
+    }: {
+        edit: EditTaskData;
+        /** onSave carries every field a save writes, because the row is edited as a whole. */
+        onSave: (title: string, model: string, url: string, reasoningEffort: string, operatingMode: string, autoMerge: boolean, subtasksAutoMerge: boolean, baseRef: string) => void;
+        onCancel: () => void;
+    } = $props();
+
+    // The store owns this shape, and these names are what the markup reads.
     let {
         taskId,
         projectId,
@@ -26,25 +38,7 @@
         taskHasParent,
         targetBranch,
         baseRef,
-        onSave,
-        onCancel,
-    }: {
-        taskId: string;
-        projectId: string;
-        taskTitle: string;
-        editProviders: Provider[];
-        editModel: string;
-        editUrl: string;
-        editReasoningEffort: string;
-        editOperatingMode: string;
-        editAutoMerge: boolean;
-        editSubtasksAutoMerge: boolean;
-        taskHasParent: boolean;
-        targetBranch: string;
-        baseRef: string;
-        onSave: (title: string, model: string, url: string, reasoningEffort: string, operatingMode: string, autoMerge: boolean, subtasksAutoMerge: boolean, baseRef: string) => void;
-        onCancel: () => void;
-    } = $props();
+    } = $derived(edit);
 
     let titleDraft = $state('');
     let modelDraft = $state('');
