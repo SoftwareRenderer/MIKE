@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import {
     formatDate, formatDateTime, formatDuration, formatElapsed, formatRelativeTime,
-    formatTimestamp, timeAgo, dataAgeText,
+    formatAgeAndTooltip, formatTimestamp, timeAgo, dataAgeText,
 } from '$lib/utils/format-time';
 import { registerCatalog, setLocale } from '$lib/i18n/runtime.svelte';
 
@@ -91,6 +91,30 @@ describe('formatRelativeTime', () => {
         const result = formatRelativeTime(tenDaysAgo);
         expect(result).not.toBe('');
         expect(result).not.toContain('ago');
+    });
+});
+
+describe('formatAgeAndTooltip', () => {
+    it('says what the table calls a row with no timestamp, in label and tooltip alike', () => {
+        expect(formatAgeAndTooltip('', 'never used'))
+            .toEqual({ display: 'never used', tooltip: 'never used' });
+    });
+
+    it('words the label and the tooltip apart when the table does', () => {
+        expect(formatAgeAndTooltip('', 'never used', 'unknown time'))
+            .toEqual({ display: 'never used', tooltip: 'unknown time' });
+    });
+
+    it('counts age in the label and carries the moment in the tooltip', () => {
+        const when = ago(3 * HOUR).toISOString();
+        const { display, tooltip } = formatAgeAndTooltip(when, 'never used');
+        expect(display).toBe('3h ago');
+        expect(tooltip).toBe(formatDateTime(when));
+    });
+
+    it('answers an input that is no moment with itself, both places', () => {
+        expect(formatAgeAndTooltip('not-a-date', 'never used'))
+            .toEqual({ display: 'not-a-date', tooltip: 'not-a-date' });
     });
 });
 

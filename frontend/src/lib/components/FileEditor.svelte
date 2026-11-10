@@ -1529,23 +1529,21 @@
     // Initialize LSP after the file and editor are ready
     // Track extension manager state so this effect re-runs when extensions are loaded
     $effect(() => {
-        const _editorReady = editorReady;
-        const _wsRoot = lspWorkspaceRoot;
-        const _projId = projectId;
-        const _lspConnecting = lspConnecting;
         // Read extension state to track it as a dependency
         const _extCount = extensionManager.state.extensions.length;
-        // Check LSP availability here (outside async) so effect re-runs when extensions load
-        const _lspAvail = isLSPAvailable(filePath);
+        // These are captured so the async work below uses this run's values.
+        const wsRoot = lspWorkspaceRoot;
+        // Check availability here, outside the async work, so the effect re-runs when extensions load.
+        const availableForFile = isLSPAvailable(filePath);
 
-        if (!_editorReady || !view || !_projId || !_wsRoot) return;
+        if (!editorReady || !view || !projectId || !wsRoot) return;
         // Re-initialize if workspace changed (e.g., project switch with same file path)
-        if (lspClient && lspWorkspace === _wsRoot) return;
-        if (_lspConnecting) return;
+        if (lspClient && lspWorkspace === wsRoot) return;
+        if (lspConnecting) return;
 
         async function initLSP() {
             // Check if LSP extension is available for this file
-            lspAvailable = _lspAvail;
+            lspAvailable = availableForFile;
             if (!lspAvailable) return; // fall back to built-in autocompletion
 
             lspConnecting = true;
@@ -1558,10 +1556,10 @@
 
                 // Request a virtual transport from the shared connection manager.
                 // All editors in the same workspace share one WebSocket.
-                const virtTransport = await requestLSPChannel(lspChannelOptions(_wsRoot!, lspFilePath, () => resolveReady()));
+                const virtTransport = await requestLSPChannel(lspChannelOptions(wsRoot!, lspFilePath, () => resolveReady()));
                 lspTransport = virtTransport;
 
-                lspClient = new LSPClient(lspClientConfigFor(_wsRoot!));
+                lspClient = new LSPClient(lspClientConfigFor(wsRoot!));
 
                 await lspClient.connect(virtTransport).initializing;
 
@@ -1574,7 +1572,7 @@
                 if (!lspReady) {
                     lspReady = true; // fallback for old backend
                 }
-                lspWorkspace = _wsRoot!; // track which workspace we're connected to
+                lspWorkspace = wsRoot!; // track which workspace we're connected to
                 // Stale-document guard: the sandboxed LSP server persists
                 // across sessions. A previous client may have left this URI
                 // open with different content (its didClose was lost when its
@@ -1621,15 +1619,12 @@
     // Attempt LSP reconnection when the client is disconnected and the editor is visible.
     // With shared connections, reconnection creates a new virtual transport from the manager.
     $effect(() => {
-        const _lspReady = lspReady;
-        const _lspConnecting = lspConnecting;
-        const _lspClient = lspClient;
-        const _view = view;
-        const _wsRoot = lspWorkspaceRoot;
-        const _lspAvailable = lspAvailable;
+        const client = lspClient;
+        const wsRoot = lspWorkspaceRoot;
+        const editorView = view;
 
-        if (!_lspClient || !_view || !_wsRoot || !_lspAvailable) return;
-        if (_lspReady || _lspClient.connected || _lspConnecting) return;
+        if (!client || !editorView || !wsRoot || !lspAvailable) return;
+        if (lspReady || client.connected || lspConnecting) return;
 
         async function reconnectLSP() {
             lspConnecting = true;
@@ -1642,12 +1637,12 @@
                 // Release old transport and get a new one from the shared manager
                 lspTransport?.release();
                 lspTransport = null;
-                _lspClient?.disconnect();
+                client?.disconnect();
 
-                const virtTransport = await requestLSPChannel(lspChannelOptions(_wsRoot!, lspFilePath, () => resolveReady()));
+                const virtTransport = await requestLSPChannel(lspChannelOptions(wsRoot!, lspFilePath, () => resolveReady()));
                 lspTransport = virtTransport;
 
-                const newClient = new LSPClient(lspClientConfigFor(_wsRoot!));
+                const newClient = new LSPClient(lspClientConfigFor(wsRoot!));
                 lspClient = newClient;
 
                 await newClient.connect(virtTransport).initializing;
@@ -1660,7 +1655,7 @@
                 if (!lspReady) {
                     lspReady = true; // fallback for old backend
                 }
-                lspWorkspace = _wsRoot!;
+                lspWorkspace = wsRoot!;
 
                 // Same stale-document guard as the initial connect.
                 try {
@@ -1670,8 +1665,8 @@
                 }
 
                 // Re-attach plugin
-                if (_view && newClient) {
-                    _view.dispatch({
+                if (editorView && newClient) {
+                    editorView.dispatch({
                         effects: lspCompartment.reconfigure(newClient.plugin(fileUri, resolveFile(filePath).languageId)),
                     });
                 }

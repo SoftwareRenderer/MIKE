@@ -125,27 +125,18 @@ function transferCarriesText(transfer: ImageTransfer | null | undefined, files: 
     return text.split('\n').some(line => !isFileLabel(line));
 }
 
-/** A gesture's files and the decision about the browser's own insertion. */
-export interface TransferIntake extends TransferBuckets {
-    /** True when the caller must cancel the browser's own insertion. */
-    owns: boolean;
-}
-
 /**
- * Take what a paste or a drop carried, or null when it carried no file — the caller must then
- * leave the browser's own text insertion alone. `preventDefault` happens here, synchronously:
+ * takeTransfer returns the files a paste or a drop carried, or null when they carried none, so the
+ * caller leaves the browser's own text alone. It cancels the event here, synchronously, because
  * after one `await` the browser has already pasted.
  */
-export function takeTransfer(event: ImageTransferEvent): TransferIntake | null {
+export function takeTransfer(event: ImageTransferEvent): TransferBuckets | null {
     const transfer = event.dataTransfer ?? event.clipboardData ?? null;
     const all = transfer ? Array.from(transfer.files ?? []) : [];
     if (all.length === 0) return null;
     const buckets = sortTransferFiles(all);
-    if (!transferCarriesText(transfer, all)) {
-        event.preventDefault();
-        return { ...buckets, owns: true };
-    }
-    return { ...buckets, owns: false };
+    if (!transferCarriesText(transfer, all)) event.preventDefault();
+    return buckets;
 }
 
 /** The cap is applied to the blob before anything is read, so a big file never becomes memory. */

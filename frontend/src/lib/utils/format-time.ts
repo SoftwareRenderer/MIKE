@@ -135,6 +135,24 @@ export function formatRelativeTime(isoStr: string): string {
 }
 
 /**
+ * formatAgeAndTooltip answers both questions a row asks about one timestamp: how old it is, which
+ * goes in `display`, and when it was, which goes in `tooltip`. A table words a missing timestamp in
+ * its own phrases, so the caller supplies them; `display` falls back to the moment when the age has
+ * no words of its own.
+ */
+export function formatAgeAndTooltip(
+    isoStr: string,
+    missingLabel: string,
+    missingTooltip?: string,
+): { display: string; tooltip: string } {
+    if (!isoStr) {
+        return { display: missingLabel, tooltip: missingTooltip ?? missingLabel };
+    }
+    const tooltip = formatDateTime(isoStr);
+    return { display: formatRelativeTime(isoStr) || tooltip, tooltip };
+}
+
+/**
  * Format a timestamp for chat message display (e.g. "3:45 PM", "Yesterday at 3:45 PM").
  * Returns `{ display, tooltip }` for inline display + hover tooltip.
  * Used by ChatMessage.
