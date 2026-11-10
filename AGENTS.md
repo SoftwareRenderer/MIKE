@@ -280,6 +280,10 @@ podman. Without it, sandboxed projects refuse to start tasks — hard error, no 
 - **The nested builder image is fetched by the host, the way a base is**: the build container is created with
   `--pull never` and pulls nothing.
   `docs/sandbox-runtime.md → A project image builds inside a sandbox container`.
+- **The builder's temp directory is the writable bind, never the container's root** — gVisor takes only a tmpfs
+  or a gofer filesystem as an overlay upper, and buildah mounts an overlay over the build context on every
+  build. A `$TMPDIR` on the container's root fails the build before step 1.
+  docs/sandbox-runtime.md → A project image builds inside a sandbox container.
 - **The Dockerfile is read for its image refs and judged for nothing else**: no instruction whitelist, no
   approval of its commands, no version rule on a base. Its short image refs never resolve against the host's
   store, and a `RUN` step never sees MIKE's mounts — the venue jails the instruction shapes. A local base is

@@ -108,13 +108,40 @@ venue declines rather than a grant the list grows to cover; `buildFailureHint` s
 of handing over the builder's line, and `TestARunStepNeedingMoreThanTheBuildGrantSaysSo` holds the refusal
 through the product's own argument path.
 
-**The layer store is `vfs` on the container's rootfs, under `/var/tmp/mike-build`.** The guest's `/tmp` is
-tmpfs, and a `vfs` layer there fails its own extended-attribute read ("no such file or directory"); `overlay`
-inside the guest fails at its first mount ("transport endpoint is not connected"); `fuse-overlayfs` would need
-`/dev/fuse`, which this package has no grant shape for. `--tmpfs …:size=` is honoured under runsc and is
-simply unusable for a store, so the disk bound is taken from the other side: the output directory is the one
-artifact visible from the host, `buildScratch.Watch` samples it while the build runs, and past the cap the
-build is stopped.
+**The layer store is `vfs` on the container's rootfs, under `/var/tmp/mike-build`.** A `vfs` layer written
+under the guest's tmpfs fails its own extended-attribute read ("no such file or directory") — that is how the
+`/tmp` variant was ruled out, on a builder image whose `/tmp` was a tmpfs; the image of 2026-11-10 has `/tmp`
+on the container's root filesystem too. `overlay` inside the guest fails at its first mount ("transport
+endpoint is not connected"); `fuse-overlayfs` would need `/dev/fuse`, which this package has no grant shape
+for. `--tmpfs …:size=` is honoured under runsc and is simply unusable for a store, so the disk bound is taken
+from the other side: the output directory is the one artifact visible from the host, `buildScratch.Watch`
+samples it while the build runs, and past the cap the build is stopped.
+
+**The builder's temp directory is on the bind, never on the container's root.** Since buildah v1.44 every build
+begins by mounting an overlay **over the build context** (`platformSetupContextDirectoryOverlay`,
+`ForceMount: true`): there is no fallback to a bind mount and no flag that declines the mount, so a guest that
+cannot make it cannot build at all. That mount's upper and work directories go under `$TMPDIR`, whose fallback
+is `/var/tmp`. gVisor takes only a tmpfs or a gofer (9p) filesystem as an overlay upper for a mount made
+through `mount(2)` (`pkg/sentry/fsimpl/overlay/overlay.go`), and the build container's root is the overlay
+GVisor itself mounted (`overlay2=root:self`) — with `--image-volume ignore`, the builder image's own
+`VOLUME /var/tmp` stays a plain directory on it. So the default temp path dies before step 1:
+`mount overlay:…,userxattr: invalid argument`. The build container therefore exports `TMPDIR` into its one
+writable bind (`sandboxruntime.BuildTempDir`), which the host makes inside the watched output tree and the
+guest never creates. `userxattr` is not the refusal and never was: gVisor implements it, and forces it for a 9p
+upper. A tmpfs answers the mount too and is declined anyway, because `$TMPDIR` also carries a base image being
+copied into the guest's store — a tmpfs prices those bytes in guest RAM against the project's memory limit,
+where the bind puts them under the cap `buildScratch.Watch` already enforces. Measured 2026-11-10 with buildah
+1.45.1 under runsc release-20260721.0 through the product's own arguments, both the failure and the fix; the
+same build on the host kernel (crun) never sees the rule, which is why this is a venue constraint and not a
+buildah bug.
+
+**The builder ref floats, so a green build is a statement about one image.** `BuilderImageDefault` is
+`quay.io/buildah/stable:latest`, fetched by the host only when it is absent, which means the nested builder
+changes between builds without any change here — the context overlay above arrived exactly that way, on hosts
+that pulled and not on hosts that did not. The ref stays floating: a pinned builder is a known-bad path that
+rots quietly, and this package cannot rebuild a pinned image when a base needs an OS fix. What makes the drift
+visible instead is that the builder's own `io.buildah.version` is logged with every build, and that
+`make build-probe` runs the shipped grant through a real build and reports the stage's own reason.
 
 **One host path is written: the build's own scratch directory.** A directory a person chose is never writable
 by a build. The host channel is the mount list, not the context — `types.ValidateSandboxMount` checks shape

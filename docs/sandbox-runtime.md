@@ -302,8 +302,20 @@ This section is the mechanism.
   `TestMakeProjectImageAnnouncesThePhaseItWorksOn`,
   `TestBuildProjectImageJoinsTheBuildAlreadyRunning` and `TestImageOpJoinersShareTheInFlightResult` hold it.
 - **The builder is nested buildah, and MIKE models no instruction.** Inside the guest: storage `vfs`, root
-  and runroot under `/var/tmp/mike-build` (**not** `/tmp`, which is guest tmpfs — a `vfs` layer there fails
-  its xattr reads), `bud --isolation chroot --pull=never`, flags before the context.
+  and runroot under `/var/tmp/mike-build` (a `vfs` layer written under a guest tmpfs fails its own xattr
+  reads), `bud --isolation chroot --pull=never`, flags before the context.
+- **The builder's temp directory is the writable bind.** Every build since buildah v1.44 begins by mounting an
+  overlay over the build context, and `$TMPDIR` is where that mount's upper lives. The guest takes only a tmpfs
+  or a gofer filesystem as an overlay upper, and its root is the overlay gVisor mounted itself, so a `mount`
+  there is refused with `invalid argument` before step 1. The guest command exports
+  `TMPDIR=/mike-out/buildtmp` (`sandboxruntime.BuildTempDir`), the host makes that directory inside the watched
+  output tree, and the guest never creates one, so a missing bind fails naming the path it could not find.
+  `TestBuildsTempDirIsTheBindAndNotTheGuestsOwnRoot` holds the argv, `make build-probe` is the tripwire when a
+  host's builder image moves, and docs/adr/0002 holds the measurement.
+- **The builder ref floats, so the version that built is recorded with the build.**
+  `BuilderImageDefault` is a `:latest` tag, fetched by the host only when it is absent, and the nested builder
+  changes with it. `io.buildah.version` rides on the build's opening log line, so a build that stopped working
+  is searchable by the image it ran on.
 - **The file is read for its image refs and judged for nothing else.** `backend/sandbox/dockerfile.go`
   answers one question: which images must the host fetch. Every stage's base, and every `COPY --from` naming
   an image, deduped in file order — the guest never pulls, so a ref missed is a build that dies pulling it.
@@ -375,7 +387,9 @@ This section is the mechanism.
   `TestBuildRemovesItsContainerAndScratchOnEveryExit` checks. A cleanup failure is a `Warn` naming the
   leftover, never a fatal.
 - **The output is watched, not trusted.** `watchDir` samples `/mike-out` and stops the build past the cap;
-  the in-guest store is uncapped by design (tmpfs rejected it), so the archive is the number supervised.
+  the in-guest store is uncapped by design (tmpfs rejected it), so the archive is the number supervised. The
+  builder's temp directory is a subdirectory of that same tree, which is why it is a bind rather than a tmpfs:
+  its bytes fall under the cap beside the artifact's.
 - Tests: `backend/sandbox/build_e2e_test.go` runs a real build and checks three things — committed bytes
   reach the image, a `RUN` step's output survives the load, nothing is left behind. The gate-side tests are
   `backend/sandbox/dockerfile_test.go`, `backend/sandbox/buildcontext_test.go` and

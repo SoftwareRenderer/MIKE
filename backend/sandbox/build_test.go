@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"mike/backend/fsutil"
 	"mike/backend/types"
 	"mike/pkg/sandboxruntime"
 )
@@ -242,6 +243,8 @@ func TestBuildContainerScriptPinsTheGuestContract(t *testing.T) {
 		// the ref unable to give.
 		"--label " + sandboxruntime.ShellQuote(buildBaseLabel+"=sha256:"+strings.Repeat("c", 64)),
 		"--storage-driver vfs", "--root " + buildStoreRoot + "/s",
+		// Where the builder keeps its own temp files, which is a property of the guest rather than a choice.
+		"export TMPDIR=" + sandboxruntime.BuildTempDir,
 	} {
 		if !strings.Contains(script, want) {
 			t.Errorf("the guest command is missing %q:\n%s", want, script)
@@ -266,6 +269,35 @@ func TestBuildContainerScriptPinsTheGuestContract(t *testing.T) {
 	}
 	if strings.Contains(buildContainerScript(scratchPlan), buildBaseLabel) {
 		t.Error("a scratch build claims a base image it does not have")
+	}
+}
+
+// The nested builder mounts an overlay over the build context, and gVisor takes only a tmpfs or a gofer
+// filesystem as that mount's upper, never the container's own root (docs/adr/0002). So the temp directory is one
+// name, told to the guest and made on the host inside the watched output tree, and the guest never creates it.
+func TestBuildsTempDirIsTheBindAndNotTheGuestsOwnRoot(t *testing.T) {
+	project := buildTestProject(t.TempDir())
+	plan := testPlan(t, project)
+
+	if info, err := os.Stat(plan.scratch.Temp()); err != nil || !info.IsDir() {
+		t.Errorf("the scratch has no builder temp directory: %v", err)
+	}
+	// The disk bound is the walk `buildScratch.Watch` samples, so the temp bytes are inside it only if that
+	// walk reaches them. Asked of the sampler itself, because the cap's own firing is already held elsewhere.
+	if err := os.WriteFile(filepath.Join(plan.scratch.Temp(), "upper"), make([]byte, 4096), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if usage, err := fsutil.TreeUsageFor(plan.scratch.Output, fsutil.WalkBudget{}); err != nil || usage.Bytes < 4096 {
+		t.Errorf("the watched walk does not count the builder's temp bytes: %d bytes, err %v", usage.Bytes, err)
+	}
+	script := buildContainerScript(plan)
+	if n := strings.Count(script, "TMPDIR="); n != 1 {
+		t.Errorf("the guest command names TMPDIR %d times, so which one wins is a reading exercise:\n%s", n, script)
+	}
+	for _, line := range strings.Split(script, "\n") {
+		if strings.Contains(line, "mkdir") && strings.Contains(line, sandboxruntime.BuildTempDir) {
+			t.Errorf("the guest creates its own temp directory, so a missing bind reads as a working build:\n%s", script)
+		}
 	}
 }
 

@@ -1,6 +1,7 @@
 package sandboxruntime
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -10,7 +11,8 @@ import (
 
 func TestBuildProbeStageAsksForTheProductPrefaceAndNothingElse(t *testing.T) {
 	st := BuildProbeStage{Name: "offline-sys-chroot", Caps: []string{"SYS_CHROOT"}}
-	args, err := buildProbeCreateArgs("mike-build-probe-1-offline", "quay.io/buildah/stable:latest", st)
+	hostTmp := t.TempDir()
+	args, err := buildProbeCreateArgs("mike-build-probe-1-offline", "quay.io/buildah/stable:latest", st, hostTmp)
 	if err != nil {
 		t.Fatalf("buildProbeCreateArgs: %v", err)
 	}
@@ -22,9 +24,13 @@ func TestBuildProbeStageAsksForTheProductPrefaceAndNothingElse(t *testing.T) {
 			t.Errorf("create args lost %q: %s", want, joined)
 		}
 	}
-	// And nothing the product does not grant a build: one mount of the host tree, one published port,
-	// one inherited variable would each measure a container MIKE cannot make.
-	for _, forbidden := range []string{"-v", "-p", "-e", "--device", "--privileged", "--network host"} {
+	// The one mount a build container always has, writable because the builder's temp directory lives there.
+	if want := hostTmp + ":" + BuildOutputMount + ":rprivate,rw"; !strings.Contains(joined, want) {
+		t.Errorf("create args lost the builder temp bind %q: %s", want, joined)
+	}
+	// And nothing else the product does not grant a build: a published port, an inherited variable, a device
+	// would each measure a container MIKE cannot make.
+	for _, forbidden := range []string{"-p", "-e", "--device", "--privileged", "--network host"} {
 		for _, a := range args {
 			if a == forbidden {
 				t.Errorf("create args carry %q, which no build container of this product has: %s", forbidden, joined)
@@ -37,11 +43,25 @@ func TestBuildProbeStageAsksForTheProductPrefaceAndNothingElse(t *testing.T) {
 	}
 }
 
+func TestBuildProbeTempHostIsWhatTheGuestIsToldToExpect(t *testing.T) {
+	// Two spellings of one directory: the host path mounted at BuildOutputMount, and the subdirectory the build
+	// command names as TMPDIR under it. A stage whose temp path does not exist fails in `buildah pull`, which
+	// reads as a storage fault and is a missing directory.
+	dir, err := buildProbeTempHost()
+	if err != nil {
+		t.Fatalf("buildProbeTempHost: %v", err)
+	}
+	defer os.RemoveAll(dir)
+	if info, statErr := os.Stat(BuildTempHostDir(dir)); statErr != nil || !info.IsDir() {
+		t.Fatalf("the host temp directory holds no %q: %v", BuildTempDir, statErr)
+	}
+}
+
 func TestBuildProbeCapabilityGrantRefusesACapabilityThatIsNotAName(t *testing.T) {
 	// The one path to a grant checks the shape, so a stage cannot inject arguments through its own
 	// capability list: the refusal comes with the argument list unchanged.
 	st := BuildProbeStage{Name: "offline", Caps: []string{"SYS_ADMIN ALL"}}
-	args, err := buildProbeCreateArgs("mike-build-probe-1", "img:1", st)
+	args, err := buildProbeCreateArgs("mike-build-probe-1", "img:1", st, t.TempDir())
 	if err == nil {
 		t.Fatalf("a capability list carrying a space was accepted: %v", args)
 	}
@@ -78,17 +98,31 @@ func TestBuildProbeStoreRootsAreInsideTheContainer(t *testing.T) {
 	if !strings.Contains(joined, "--isolation chroot") {
 		t.Errorf("the stage is not measuring a chroot build: %s", joined)
 	}
-	// The probe declares one in-guest root. Anything absolute outside it is a host path reaching a
-	// command that has no business naming one, and a push or a commit to the host store would put the
+	// The builder keeps its temp directory where the product keeps it, because that is a property of gVisor
+	// rather than of a caller: the container's own root filesystem cannot carry an overlay upper.
+	if !strings.Contains(joined, "TMPDIR="+BuildTempDir) {
+		t.Errorf("the stage builds with no temp directory of its own: %s", joined)
+	}
+	// The probe declares the in-guest roots it uses. Anything absolute outside them is a host path reaching
+	// a command that has no business naming one, and a push or a commit to the host store would put the
 	// result where a later task could boot it.
-	for i, a := range args {
-		if strings.HasPrefix(a, "/") && !strings.HasPrefix(a, buildProbeStoreDir) {
-			t.Errorf("arg %d is absolute and outside the declared in-guest root %s: %s", i, buildProbeStoreDir, a)
+	for _, a := range args {
+		for _, ref := range strings.Fields(a) {
+			if !strings.HasPrefix(ref, "/") {
+				continue
+			}
+			switch {
+			case strings.HasPrefix(ref, buildProbeStoreDir),
+				strings.HasPrefix(ref, BuildTempDir),
+				ref == buildProbeContainerCommand:
+			default:
+				t.Errorf("%q is absolute and outside the declared in-guest roots: %s", ref, joined)
+			}
 		}
 	}
 	for _, forbidden := range []string{"push", "commit", "--privileged"} {
 		for _, a := range args {
-			if a == forbidden {
+			if strings.Contains(a, forbidden) {
 				t.Errorf("the stage runs %q, which writes outside the container: %s", forbidden, joined)
 			}
 		}
@@ -333,6 +367,26 @@ func TestBuildProbeReasonNamesTheFailedOperation(t *testing.T) {
 	first := buildProbeReason([]byte("STEP 2/6: RUN /bin/true\n(Unable to determine exit status)\n"))
 	if first == "" || strings.Contains(first, "Unable to determine exit status") {
 		t.Errorf("a stage with no cause line reported %q", first)
+	}
+}
+
+// A mount the guest refuses names the operation it failed at, and the reason picker must choose that line over
+// the progress lines above it: reported as "Copying config …", the stage reads as a broken Dockerfile. The
+// report's cap cuts a line this long before its errno, so these assertions name its start.
+func TestBuildProbeReasonNamesARefusedMount(t *testing.T) {
+	captured := "Getting image source signatures\nCopying config sha256:a1f37cb73224\nWriting manifest to image destination\n" +
+		"Error: mounting an overlay over build context directory: creating overlay scaffolding for build context directory: " +
+		"mount overlay:/var/tmp/buildah-context-1108352982/overlay/1386350551/merge, data: lowerdir=/mike-ctx,upperdir=/var/tmp/buildah-context-1108352982/overlay/1386350551/upper,workdir=/var/tmp/buildah-context-1108352982/overlay/1386350551/work,userxattr: invalid argument\n"
+	got := buildProbeReason([]byte(captured))
+	for _, want := range []string{"mounting an overlay over build context directory", "upperdir="} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the reason does not name %q: %q", want, got)
+		}
+	}
+	for _, not := range []string{"Copying config", "Writing manifest"} {
+		if strings.Contains(got, not) {
+			t.Errorf("the reason is a progress line, not the failed mount (%q): %q", not, got)
+		}
 	}
 }
 

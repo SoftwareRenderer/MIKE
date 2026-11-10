@@ -23,10 +23,11 @@ import (
 // project's own mount list can collide with them.
 const (
 	buildContextMount = "/mike-ctx"
-	buildOutputMount  = "/mike-out"
+	buildOutputMount  = sandboxruntime.BuildOutputMount
 	buildBaseMount    = "/mike-base"
-	// buildStoreRoot holds buildah's own store, and must be on the container's root filesystem: the guest's /tmp is a
-	// tmpfs, which cannot answer an extended-attribute read.
+	// buildStoreRoot holds buildah's own store, and must sit on the container's root filesystem: a `vfs` layer
+	// written to a guest tmpfs fails its own extended-attribute read. The builder's temp directory is the other
+	// case, and sandboxruntime.BuildTempDir says why.
 	buildStoreRoot = "/var/tmp/mike-build"
 	// buildImageTag is the name the finished image carries inside the guest and in the archive.
 	buildImageTag = "mike-build:latest"
@@ -335,6 +336,7 @@ func (sm *SandboxManager) buildProjectImageDirect(ctx context.Context, project *
 	if err := sm.ensureBuilderImage(ctx, emit); err != nil {
 		return nil, err
 	}
+	builderVersion := sm.builderVersion(sandboxruntime.BuilderImageDefault)
 
 	result = &BuildResult{
 		Image:    ProjectImageName(project.Name),
@@ -346,9 +348,9 @@ func (sm *SandboxManager) buildProjectImageDirect(ctx context.Context, project *
 	}
 
 	logging.For(logging.Sandbox).With(logging.ProjectID, project.ID).With(logging.BuildID, plan.scratch.ID).Infof(
-		"building %s from commit %s: context=%s files=%d bytes=%d from=%s bases=%d network=open mounts=%d",
+		"building %s from commit %s: context=%s files=%d bytes=%d from=%s bases=%d network=open mounts=%d builder=%s buildah=%s",
 		result.Image, shortCommit(plan.commit), plan.contextRoot, plan.stagedFiles, plan.stagedBytes,
-		plan.fromRef, len(plan.file.Bases), len(project.SandboxMounts))
+		plan.fromRef, len(plan.file.Bases), len(project.SandboxMounts), sandboxruntime.BuilderImageDefault, builderVersion)
 
 	if err := sm.stageBaseImageArchives(ctx, plan, emit); err != nil {
 		return nil, err
@@ -546,6 +548,10 @@ func buildContainerScript(plan *buildPlan) string {
 	store := fmt.Sprintf("buildah --root %s/s --runroot %s/r --storage-driver vfs", buildStoreRoot, buildStoreRoot)
 	var b strings.Builder
 	fmt.Fprintf(&b, "set -e\n")
+	// The host makes this directory and the guest never creates one, so a missing bind fails naming the path it
+	// could not find instead of building on the root filesystem. The export follows the project's own
+	// environment, which `--env` has already applied (sandboxruntime.BuildTempDir).
+	fmt.Fprintf(&b, "export TMPDIR=%s\n", sandboxruntime.BuildTempDir)
 	fmt.Fprintf(&b, "mkdir -p %s/s %s/r\n", buildStoreRoot, buildStoreRoot)
 	for i, archive := range plan.baseArchives {
 		// The guest is told only the archive's name and takes the id from the pull: with several images in the
@@ -672,6 +678,17 @@ func (sm *SandboxManager) imageIDOf(image string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// builderVersion is the nested builder's own version as its image records it. The builder ref floats, so a
+// build's own log line says which builder ran; an image with no such label reads as unknown rather than costing
+// the build.
+func (sm *SandboxManager) builderVersion(image string) string {
+	version, err := sm.imageLabel(image, "io.buildah.version")
+	if err != nil || version == "" {
+		return "unknown"
+	}
+	return version
 }
 
 // loadedImageName reads the name out of `podman load`'s own report rather than guessing at one the archive chose.

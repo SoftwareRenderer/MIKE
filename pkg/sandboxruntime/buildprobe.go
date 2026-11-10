@@ -27,9 +27,9 @@ const (
 	// neither a mount nor a capability in this package.
 	buildProbeStorageDriver = "vfs"
 
-	// buildProbeStoreDir is on the container's rootfs, not in /tmp, and that is a measured difference
-	// rather than a preference: /tmp in the guest is tmpfs, and committing a vfs store that lives there
-	// fails when the copier reads a layer's xattrs. The rootfs is the overlay gVisor itself mounted.
+	// buildProbeStoreDir is on the container's rootfs, which is measured rather than preferred: a `vfs` store
+	// written to a guest tmpfs fails when the copier reads a layer's xattrs. The rootfs suits a store and not a
+	// temp directory, which BuildTempDir explains.
 	buildProbeStoreDir = "/var/tmp/mike-build-probe"
 
 	// buildProbeContainerPrefix keeps these containers outside the name families the boot sweep and
@@ -258,11 +258,27 @@ var buildProbeWideSupersetWithoutCHOWN = func() []string {
 	return out
 }()
 
+// buildProbeTempHost makes the host directory to mount at BuildOutputMount for one stage, holding the temp
+// subdirectory the build command names; a stage needs that bind for the same reason the product does. The caller
+// removes it with the stage.
+func buildProbeTempHost() (string, error) {
+	dir, err := os.MkdirTemp("", buildProbeContainerPrefix+"-")
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(BuildTempHostDir(dir), 0o700); err != nil {
+		os.RemoveAll(dir)
+		return "", err
+	}
+	return dir, nil
+}
+
 // buildProbeCreateArgs is one stage's `podman create` line: the shared gVisor posture, the stage's
-// grant set through the only function that appends a capability, and nothing else. No mount, no port,
-// no environment — a stage that needed one of those would be measuring a container the product cannot
-// make, since a build container is created by the same preface with the project's own configuration.
-func buildProbeCreateArgs(name, image string, st BuildProbeStage) ([]string, error) {
+// grant set through the only function that appends a capability, and the one mount every build container has.
+// No port, no inherited environment, no device — a stage that needed one of those would be measuring a
+// container the product cannot make, since a build container is created by the same preface with the project's
+// own configuration.
+func buildProbeCreateArgs(name, image string, st BuildProbeStage, tempHost string) ([]string, error) {
 	args := GVisorCreateArgs(name)
 	var err error
 	if len(st.Caps) > 0 {
@@ -273,6 +289,7 @@ func buildProbeCreateArgs(name, image string, st BuildProbeStage) ([]string, err
 	if !st.Network {
 		args = append(args, "--network", "none")
 	}
+	args = append(args, "-v", BindMountSpec(tempHost, BuildOutputMount, "rw"))
 	return append(args, image, buildProbeContainerCommand, "-c", "sleep 3600"), nil
 }
 
@@ -293,18 +310,17 @@ func buildProbeStageCommands(dockerfile string) []string {
 	}
 }
 
-// buildProbeBuildArgs is the build itself. The store roots are inside the container, so a stage cannot
-// write the host's image store even in principle, and the tag is a probe-local name no product path
-// resolves.
+// buildProbeBuildArgs is the build itself: the store roots are inside the container, so a stage cannot write the
+// host's image store even in principle, and the tag is a probe-local name no product path resolves. The shell
+// line exists to say where the builder keeps its temp directory (BuildTempDir), and nothing in it is quoted
+// because every word is a constant of this package.
 func buildProbeBuildArgs(container string) []string {
-	return []string{"exec", container, "buildah",
-		"--root", buildProbeStoreRoot,
-		"--runroot", buildProbeRunRoot,
-		"--storage-driver", buildProbeStorageDriver,
-		"bud", "--isolation", "chroot",
-		"-t", "mike-build-probe:latest",
-		buildProbeContextPath,
-	}
+	build := "TMPDIR=" + BuildTempDir + " buildah" +
+		" --root " + buildProbeStoreRoot +
+		" --runroot " + buildProbeRunRoot +
+		" --storage-driver " + buildProbeStorageDriver +
+		" bud --isolation chroot -t mike-build-probe:latest " + buildProbeContextPath
+	return []string{"exec", container, buildProbeContainerCommand, "-c", build}
 }
 
 // buildProbeReason picks the line that names a build failure. It looks for the failed operation first
@@ -314,10 +330,10 @@ func buildProbeBuildArgs(container string) []string {
 // status)" and opens with a step number.
 func buildProbeReason(out []byte) string {
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	// The operation that failed, not how far the build got. buildah opens with its progress
-	// ("STEP 1/6: FROM …"), and a stage reported by a step number teaches nothing about the grant or the
-	// storage it was measuring.
-	for _, signal := range []string{"operation not permitted", "permission denied", "not connected", "no space left", "no such file"} {
+	// The operation that failed, not how far the build got: buildah opens with its progress ("STEP 1/6: FROM …"),
+	// and a stage reported by a step number teaches nothing about the grant or the storage it was measuring. A
+	// mount the guest refuses ends with `invalid argument`, which is the whole answer about its filesystem.
+	for _, signal := range []string{"operation not permitted", "permission denied", "not connected", "no space left", "no such file", "invalid argument"} {
 		for _, line := range lines {
 			if !strings.Contains(strings.ToLower(line), signal) {
 				continue
@@ -417,7 +433,14 @@ func (r *Runtime) probeBuildStage(ctx context.Context, image string, st BuildPro
 	res := BuildProbeResult{Stage: st.Name, Caps: st.Caps, Network: st.Network, MeasuresRun: st.MeasuresRun, Informational: st.Informational}
 	name := buildProbeContainerName(st.Name)
 
-	createArgs, err := buildProbeCreateArgs(name, image, st)
+	tempHost, err := buildProbeTempHost()
+	if err != nil {
+		res.Reason = fmt.Sprintf("make the stage's builder temp directory: %v", err)
+		return res
+	}
+	defer os.RemoveAll(tempHost)
+
+	createArgs, err := buildProbeCreateArgs(name, image, st, tempHost)
 	if err != nil {
 		res.Reason = err.Error()
 		return res

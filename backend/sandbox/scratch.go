@@ -75,16 +75,19 @@ func newBuildScratch(projectID, projectName string) (*buildScratch, error) {
 		return nil, fmt.Errorf("create the scratch root: %w", err)
 	}
 	dir := filepath.Join(root, id)
-	if err := os.MkdirAll(filepath.Join(dir, "context"), 0o700); err != nil {
+	scratch := &buildScratch{Dir: dir, ID: id, Output: filepath.Join(dir, "out")}
+	if err := os.MkdirAll(scratch.ContextDir(), 0o700); err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Join(dir, "out"), 0o700); err != nil {
+	// One mkdir lands the output tree and the builder's temp directory inside it (scratch.Temp), which the
+	// guest is told to expect and never creates for itself.
+	if err := os.MkdirAll(scratch.Temp(), 0o700); err != nil {
 		return nil, err
 	}
 	if err := os.MkdirAll(filepath.Join(dir, "base"), 0o755); err != nil {
 		return nil, err
 	}
-	return &buildScratch{Dir: dir, ID: id, Output: filepath.Join(dir, "out")}, nil
+	return scratch, nil
 }
 
 // BaseArchiveAt is where base image i is written, one per directory: a read-only mount takes a directory, and the
@@ -97,8 +100,13 @@ func (s *buildScratch) BaseArchiveAt(i int) string {
 // ContextDir is the staged tree, mounted read-only.
 func (s *buildScratch) ContextDir() string { return filepath.Join(s.Dir, "context") }
 
-// Archive is the one file the build container writes: the finished image as a docker-archive. One file is what
-// makes its size watchable while the build runs, and the host reads it once, when loading the image.
+// Temp is the host directory behind the guest's builder temp path. It stays inside the output directory so the
+// sampler's disk bound covers what the builder copies there.
+func (s *buildScratch) Temp() string { return sandboxruntime.BuildTempHostDir(s.Output) }
+
+// Archive is the one file the build container writes that the host reads: the finished image as a
+// docker-archive. One file is what makes its size watchable while the build runs, and the host reads it once,
+// when loading the image.
 func (s *buildScratch) Archive() string { return filepath.Join(s.Output, "image.tar") }
 
 // Remove deletes the whole directory, reporting rather than failing: a leftover is a Warn naming the path,
