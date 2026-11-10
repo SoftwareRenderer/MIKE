@@ -283,6 +283,10 @@ type WorktreeManager struct {
 	worktree worktreeLocks // worktree creation
 	stash    stashLocks    // the one stash stack, shared by every worktree and by the user's own entries
 	merge    mergeLocks    // the main checkout, which has a single HEAD and index
+
+	// taskSpaceWarn keeps the reason MeasureTaskSpace could not measure the root to one line: the
+	// measurement is retried on every refresh.
+	taskSpaceWarn sync.Once
 }
 
 // Embedded by value, not by pointer: a domain built this way is usable at its zero value the way the

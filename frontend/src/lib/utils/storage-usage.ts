@@ -46,3 +46,12 @@ export function storageUsageSentence(usage: StorageUsage | null | undefined): st
         ? t('board.column.storageLow', parts)
         : t('board.column.storageUsed', parts);
 }
+
+/** The disclosure's second line: what the task worktrees hold, or null until the server has measured
+ *  them. A walk that could not price a checkout sends no figure, so the line is absent, not zero. */
+export function storageTasksSentence(usage: StorageUsage | null | undefined): string | null {
+    if (!usage) return null;
+    const { tasks_bytes: bytes, tasks_count: count } = usage;
+    if (typeof bytes !== 'number' || typeof count !== 'number') return null;
+    return t('board.column.storageTasks', { size: formatStorageBytes(bytes), count });
+}

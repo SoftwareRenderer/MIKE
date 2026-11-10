@@ -1767,6 +1767,7 @@ const catalog = {
     'board.column.clearAllAria': { one: 'Clear all {count} done task', other: 'Clear all {count} done tasks' },
     'board.column.storageUsed': '{used} of {total} used ({percent})',
     'board.column.storageLow': 'Storage: {used} of {total} used ({percent})',
+    'board.column.storageTasks': { one: 'Tasks: {size} in {count} worktree', other: 'Tasks: {size} in {count} worktrees' },
     'board.column.storageAria': 'Show storage usage',
     'board.column.storageLowAria': 'Storage low. Show storage usage',
 

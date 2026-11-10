@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"mike/backend/fsutil"
 	"mike/pkg/logging"
 	"mike/pkg/sandboxruntime"
 )
@@ -132,7 +133,10 @@ func (s *buildScratch) Watch(maxBytes int64, onCancel func()) {
 			case <-s.stop:
 				return
 			case <-tick.C:
-				size, err := dirSize(s.Output)
+				// Counted from the start every sample rather than kept as a running total: the directory
+				// is small next to the walk's cost, and a running total is one more thing to get wrong.
+				usage, err := fsutil.TreeUsageFor(s.Output, fsutil.WalkBudget{})
+				size := usage.Bytes
 				if err != nil {
 					continue
 				}
@@ -171,22 +175,6 @@ const (
 	buildOutputMaxBytes    = int64(4) << 30
 )
 
-// dirSize sums the regular files under dir. It runs over a small directory every two seconds, so counting from
-// the start each time is cheaper than keeping a running total.
-func dirSize(dir string) (int64, error) {
-	var total int64
-	err := filepath.Walk(dir, func(_ string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() {
-			total += info.Size()
-		}
-		return nil
-	})
-	return total, err
-}
-
 // SweepScratch removes every entry left under the scratch root. Nothing is running at boot, so every entry was
 // left by a build that was killed, and a leftover build directory is the largest thing MIKE ever writes.
 func SweepScratch() {
@@ -208,12 +196,12 @@ func SweepScratch() {
 	sort.Strings(names)
 	for _, name := range names {
 		path := filepath.Join(root, name)
-		size, _ := dirSize(path)
+		usage, _ := fsutil.TreeUsageFor(path, fsutil.WalkBudget{})
 		if err := os.RemoveAll(path); err != nil {
-			logging.For(logging.Sandbox).Warnf("leftover build scratch %s (%s) could not be removed: %v", path, humanBytes(size), err)
+			logging.For(logging.Sandbox).Warnf("leftover build scratch %s (%s) could not be removed: %v", path, humanBytes(usage.Bytes), err)
 			continue
 		}
-		logging.For(logging.Sandbox).Infof("removed leftover build scratch %s (%s)", path, humanBytes(size))
+		logging.For(logging.Sandbox).Infof("removed leftover build scratch %s (%s)", path, humanBytes(usage.Bytes))
 	}
 }
 

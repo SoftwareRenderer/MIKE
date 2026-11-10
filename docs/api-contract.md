@@ -122,10 +122,25 @@ and `apiroutes` would refuse one, because a route nobody calls is the failure th
   after the last task landed is not left showing nothing.
 - The frame is `null`-suppressed: with no probe wired, or a probe that cannot read the root, no frame is
   sent at all. A frame of zeroes would be a divide-by-zero the client cannot tell from an empty disk.
+- `tasks_bytes` and `tasks_count` join the frame once the task worktrees have been walked: the apparent
+  bytes under every `<worktrees root>/<projectID>/<taskID>` directory, and how many of them there are. A
+  task's git objects are not in that figure — a worktree's `.git` is a pointer file, and the objects live
+  in the project's `.git`.
+- A checkout is not a `statfs`, so the walk never runs where a frame is built. `SetTaskSpaceProbe` hands
+  the stream a measurement it caches for `defaultTaskSpaceTTL` and refreshes on its own goroutine: the
+  reading that started the refresh carries the older figure, and another reading follows with the new
+  one. A walk starts only when a reading is about to be sent, so a quiet server walks nothing.
+- Part of a total is refused rather than shown. `backend/git`'s `MeasureTaskSpace` prices each checkout
+  under an entry cap inside one shared deadline, and one checkout it cannot price is no figure at all.
+  With no figure ever taken neither key is sent, so the client draws no line instead of "0 B in 0
+  worktrees"; a figure once taken survives a later failure, because a reading that lags did not lie.
+- Only a directory named after a project row that still exists is priced — the guard `GarbageCollect`
+  sweeps by, and the reason MIKE's build scratch tree, which shares the root, is never counted as a task.
 
 Test: `backend/stream/app_stream_storage_test.go` drives all three over a real socket. The name is in
 both vocabularies (`backend/types/ws.go`, `api/events.ts`) and `make archgate RULE=wsevents` fails if
-one side drops it.
+one side drops it. The task figure is `-run Figure` in that file, and `go test ./backend/git/ -run
+TaskWorktreeUsage` is the walk's own accounting.
 
 ### The task row a browser holds has no result text
 

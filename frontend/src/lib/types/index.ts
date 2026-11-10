@@ -485,6 +485,10 @@ export interface ProjectCounts {
 export interface StorageUsage {
     total_bytes: number;
     avail_bytes: number;
+    /** What the task worktrees hold, absent until the server has walked them; it lags the reading
+     *  above by the server's measurement budget. */
+    tasks_bytes?: number;
+    tasks_count?: number;
 }
 
 export interface ModelStats {

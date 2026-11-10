@@ -1,10 +1,12 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { setLocale } from '$lib/i18n/runtime.svelte';
-import { isStoragePressured, storageUsageSentence } from '../storage-usage';
+import { isStoragePressured, storageTasksSentence, storageUsageSentence } from '../storage-usage';
 import type { StorageUsage } from '$lib/types';
 
 /** A `storage_usage` reading of `used` of `total` bytes. */
 const reading = (used: number, total = 1000): StorageUsage => ({ total_bytes: total, avail_bytes: total - used });
+/** The same reading once the server has walked the worktrees. */
+const walked = (bytes: number, count: number): StorageUsage => ({ ...reading(430, 1024), tasks_bytes: bytes, tasks_count: count });
 const GiB = 1024 ** 3;
 
 afterEach(() => {
@@ -52,5 +54,31 @@ describe('storageUsageSentence', () => {
         const sentence = storageUsageSentence(reading(1.5 * GiB, 4 * GiB));
         expect(sentence).toContain('1,5 GB');
         expect(sentence).toContain(percent);
+    });
+});
+
+describe('storageTasksSentence', () => {
+    it('names the bytes and the checkouts they are spread over', () => {
+        expect(storageTasksSentence(walked(12 * GiB, 8))).toBe('Tasks: 12 GB in 8 worktrees');
+    });
+
+    it('is one worktree when it is one worktree', () => {
+        expect(storageTasksSentence(walked(512, 1))).toBe('Tasks: 512 B in 1 worktree');
+    });
+
+    it('says so in words when no task has a worktree', () => {
+        expect(storageTasksSentence(walked(0, 0))).toBe('Tasks: 0 B in 0 worktrees');
+    });
+
+    it('has nothing to say before the worktrees have been walked', () => {
+        // Absent, not zero: a server that could not price a checkout sends no figure.
+        expect(storageTasksSentence(reading(430, 1024))).toBeNull();
+        expect(storageTasksSentence(null)).toBeNull();
+        expect(storageTasksSentence({ ...reading(430, 1024), tasks_count: 3 })).toBeNull();
+    });
+
+    it('prices the size in the active locale', () => {
+        setLocale('de');
+        expect(storageTasksSentence(walked(1.5 * GiB, 3))).toContain('1,5 GB');
     });
 });

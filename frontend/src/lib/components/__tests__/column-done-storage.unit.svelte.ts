@@ -38,6 +38,13 @@ function withoutReading(): void {
     withReading(0, 0);
 }
 
+/** The reading after the server walked the worktrees: `bytes` across `count` of them. */
+function withTaskFigure(bytes: number, count: number): void {
+    storageStatus.update({ total_bytes: 1024, avail_bytes: 1024 - 430, tasks_bytes: bytes, tasks_count: count });
+}
+
+const tooltip = (container: HTMLElement) => container.querySelector('[role="tooltip"]');
+
 const count = (container: HTMLElement) => container.querySelector('.header-right .count');
 
 beforeEach(() => {
@@ -116,5 +123,39 @@ describe('the Done column count as the filesystem reading', () => {
         const calmBadge = count(calm.container) as HTMLElement;
         expect(calmBadge.className).not.toContain('is-low');
         expect(calmBadge.querySelector('svg')).toBeNull();
+    });
+});
+
+describe('the worktree figure inside the disclosure', () => {
+    it('is a second line under the reading, once the server has measured one', async () => {
+        withTaskFigure(12 * 1024 ** 3, 8);
+        const { container } = renderColumn('done');
+        await fireEvent.click(count(container) as HTMLElement);
+
+        const tip = tooltip(container);
+        expect(tip?.textContent).toContain('42%');
+        expect(tip?.textContent).toContain('Tasks: 12 GB in 8 worktrees');
+        expect(tip?.querySelectorAll('div').length).toBe(2);
+    });
+
+    // The walk lags the filesystem reading by the server's budget, and a refused walk never fills it
+    // in: the line is absent, never 0 B in 0 worktrees.
+    it('is absent while the worktrees are unmeasured', async () => {
+        withReading(430, 1024);
+        const { container } = renderColumn('done');
+        await fireEvent.click(count(container) as HTMLElement);
+
+        const tip = tooltip(container);
+        expect(tip?.textContent).toContain('42%');
+        expect(tip?.textContent).not.toContain('Tasks:');
+        expect(tip?.querySelectorAll('div').length).toBe(1);
+    });
+
+    it('says one worktree when the figure holds one', async () => {
+        withTaskFigure(512, 1);
+        const { container } = renderColumn('done');
+        await fireEvent.click(count(container) as HTMLElement);
+
+        expect(tooltip(container)?.textContent).toContain('Tasks: 512 B in 1 worktree');
     });
 });

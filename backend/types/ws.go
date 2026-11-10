@@ -36,7 +36,7 @@ const (
 	WSTypeBoardRefresh  WSMessageType = "board_refresh"
 	WSTypeProjectCounts WSMessageType = "project_counts"
 	// WSTypeStorageUsage carries the server's own filesystem — total_bytes and avail_bytes, flat on
-	// the frame.
+	// the frame — plus tasks_bytes and tasks_count whenever the task worktrees have been measured.
 	WSTypeStorageUsage  WSMessageType = "storage_usage"
 	WSTypeProjectBranch WSMessageType = "project_branch"
 	WSTypeProjectPorts  WSMessageType = "project_ports"

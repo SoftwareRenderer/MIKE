@@ -7,7 +7,7 @@
     import { fade } from 'svelte/transition';
     import { countWithDescendants } from '$lib/utils/task-utils';
     import { storageStatus } from '$lib/services/storage-usage.svelte';
-    import { isStoragePressured, storageUsageSentence } from '$lib/utils/storage-usage';
+    import { isStoragePressured, storageTasksSentence, storageUsageSentence } from '$lib/utils/storage-usage';
     import { t } from '$lib/i18n';
     import Icon from './Icon.svelte';
     import discardIcon from '$lib/assets/icons/discard.svg?raw';
@@ -49,6 +49,7 @@
     // Only the Done column, and only with a reading.
     let storageUsage = $derived(columnId === 'done' ? storageStatus.usage : null);
     let storageTip = $derived(storageUsageSentence(storageUsage));
+    let storageTasksTip = $derived(storageTasksSentence(storageUsage));
     let storageLow = $derived(isStoragePressured(storageUsage));
     // A tap pins: a touch screen has no pointer leave to close it.
     let storageHovered = $state(false);
@@ -146,7 +147,12 @@
                     <span>{taskCount}</span>
                 </button>
                 {#if storageOpen}
-                    <div id={storageTipId} class="storage-tip" role="tooltip">{storageTip}</div>
+                    <div id={storageTipId} class="storage-tip" role="tooltip">
+                        <div>{storageTip}</div>
+                        {#if storageTasksTip}
+                            <div class="storage-tip-tasks">{storageTasksTip}</div>
+                        {/if}
+                    </div>
                 {/if}
             {:else}
                 <span class="count">{taskCount}</span>
@@ -276,6 +282,11 @@
         color: var(--color-text-secondary);
         font-size: var(--text-xs);
         white-space: nowrap;
+    }
+    /* Secondary to the reading above, so dimmer. */
+    .storage-tip-tasks {
+        margin-top: 2px;
+        color: var(--color-text-tertiary);
     }
     .header-right {
         display: flex;
