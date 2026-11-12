@@ -13,6 +13,7 @@ What the click does, how merge conflicts are handled, and which files are exclud
 - **Successful merges mark the task Done.** If the merge succeeds, the task is marked Done even if restoring the project's uncommitted work later causes conflicts. In this case, the system issues a warning, but the task remains Done.
 - **Interruptions defer the commit.** If a turn is interrupted (e.g., by `request_review`), the commit and merge are deferred until the turn that finishes the work.
 - **Assisted-by trailer.** The `Assisted-by` line in commit messages is added only if `AssistedByEnabled` (`backend/types/domain.go`) is true and the project has a configured answer in its settings.
+- **The commit message is written from the thread's review summaries.** `ExtractCommitContext` (`backend/exec/context.go`) hands the generator the first user message plus every `request_review` turn. The working turns between them are not sent. A thread with no review has no summary, so its whole text is sent instead: every user and assistant message, and no tool call.
 
 **Tests:** `task_test.go`, `backend/exec/merge_restore_test.go`, `merge_conflict_resolution_test.go`, `commit_and_done_test.go`, `backend/git/worktree_test.go`, and e2e `commit-and-done-unstaged.spec.ts`.
 
@@ -27,6 +28,6 @@ What the click does, how merge conflicts are handled, and which files are exclud
 
 ## Checking this
 
-- `go test ./backend/exec/` verifies the arming rule and Done conditions.
+- `go test ./backend/exec/` verifies the arming rule, the Done conditions, and which turns the commit message is written from.
 - `go test ./backend/types/ ./backend/api/` verifies base branch ownership.
 - `cd frontend && npx playwright test commit-and-done-unstaged` tests the UI interaction.

@@ -189,11 +189,10 @@ func TestExtractCommitContext_FullConversation(t *testing.T) {
 	}
 }
 
-func TestExtractCommitContext_SingleTurn_NoRequestReview(t *testing.T) {
+func TestExtractCommitContext_NoRequestReview_FallsBackToProse(t *testing.T) {
 	t.Parallel()
-	// Minimal conversation with no request_review turn: the task prompt is the only
-	// thing the commit generator gets — an assistant message that never requested a
-	// review says nothing the diff does not already say.
+	// A thread with no review has no summary, so the assistant's own words are read with the task
+	// prompt.
 	messages := []types.ChatMessage{
 		{Role: "system", Content: "system prompt"},
 		{Role: "user", Content: "Fix the bug"},
@@ -202,11 +201,70 @@ func TestExtractCommitContext_SingleTurn_NoRequestReview(t *testing.T) {
 
 	result := ExtractCommitContext(messages)
 
-	if len(result) != 1 {
-		t.Fatalf("expected 1 message, got %d: %v", len(result), contentOf(result))
+	if len(result) != 2 {
+		t.Fatalf("expected 2 messages, got %d: %v", len(result), contentOf(result))
 	}
-	if result[0].Content != "Fix the bug" {
-		t.Errorf("first = %q, want %q", result[0].Content, "Fix the bug")
+	if result[0].Content != "Fix the bug" || result[1].Content != "Fixed it" {
+		t.Errorf("prose = %v, want the task prompt then the assistant's answer", contentOf(result))
+	}
+}
+
+func TestExtractCommitContext_NoRequestReview_KeepsEveryTurn(t *testing.T) {
+	t.Parallel()
+	// The review path keeps only the first user message, because a summary stands for the rest. The
+	// fallback has no summary, so it keeps every turn, in order.
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "system prompt"},
+		{Role: "user", Content: "Add rate limiting"},
+		{Role: "assistant", Content: "I'll start", ToolCalls: []types.ToolCallMsg{toolCallMsg("c1", "edit_file")}},
+		{Role: "tool", Content: "edited a.go", ToolCallID: "c1"},
+		{Role: "user", Content: "Also add a config option"},
+		// An assistant message with no text of its own contributes no row.
+		{Role: "assistant", ToolCalls: []types.ToolCallMsg{toolCallMsg("c2", "bash")}},
+		{Role: "tool", Content: "ok", ToolCallID: "c2"},
+		{Role: "assistant", Content: "Both are in"},
+		{Role: "advisory", Content: "an advisory"},
+		{Role: "summarization", Content: "a summary of older turns"},
+	}
+
+	result := ExtractCommitContext(messages)
+
+	want := []string{"Add rate limiting", "I'll start", "Also add a config option", "Both are in"}
+	if len(result) != len(want) {
+		t.Fatalf("prose = %v, want %v", contentOf(result), want)
+	}
+	for i, w := range want {
+		if result[i].Content != w {
+			t.Errorf("message %d = %q, want %q", i, result[i].Content, w)
+		}
+	}
+}
+
+func TestExtractCommitContext_OneReviewDisablesTheProseFallback(t *testing.T) {
+	t.Parallel()
+	// One review anywhere selects the review path, and the working turns around it stay out.
+	messages := []types.ChatMessage{
+		{Role: "user", Content: "Build feature"},
+		{Role: "assistant", Content: "Working", ToolCalls: []types.ToolCallMsg{toolCallMsg("c1", "edit_file")}},
+		{Role: "tool", Content: "edited a.go", ToolCallID: "c1"},
+		{Role: "assistant", Content: "Feature built.", ToolCalls: []types.ToolCallMsg{reviewCallWithSummary("c2", "Built the feature")}},
+		{Role: "tool", Content: "review requested", ToolCallID: "c2"},
+		{Role: "assistant", Content: "Anything else?"},
+	}
+
+	result := ExtractCommitContext(messages)
+
+	if len(result) != 3 {
+		t.Fatalf("expected 3 messages, got %d: %v", len(result), contentOf(result))
+	}
+	if result[1].Content != "Feature built." {
+		t.Errorf("second = %q, want the request_review assistant", result[1].Content)
+	}
+	for _, m := range result {
+		switch m.Content {
+		case "Working", "Anything else?", "edited a.go":
+			t.Errorf("a working turn rode along with a review present: %q", m.Content)
+		}
 	}
 }
 
@@ -407,10 +465,10 @@ func TestExtractCommitContext_LaterEditsAfterRequestReview_AreNotIncluded(t *tes
 	}
 }
 
-func TestExtractCommitContext_NonReviewToolResultsAreDropped(t *testing.T) {
+func TestExtractCommitContext_NoRequestReview_KeepsNoToolRow(t *testing.T) {
 	t.Parallel()
-	// No request_review at all: not even a successful write_file result is kept.
-	// Tool results only ride along with an included assistant message.
+	// The fallback reads text, not the tool log. The write_file result stays out even though its
+	// assistant message is kept.
 	messages := []types.ChatMessage{
 		{Role: "user", Content: "Build feature"},
 		{Role: "assistant", Content: "Building...", ToolCalls: []types.ToolCallMsg{toolCallMsg("call_1", "write_file")}},
@@ -420,11 +478,21 @@ func TestExtractCommitContext_NonReviewToolResultsAreDropped(t *testing.T) {
 
 	result := ExtractCommitContext(messages)
 
-	if len(result) != 1 {
-		t.Fatalf("expected 1 message, got %d: %v", len(result), contentOf(result))
+	if len(result) != 3 {
+		t.Fatalf("expected 3 messages, got %d: %v", len(result), contentOf(result))
 	}
-	if result[0].Content != "Build feature" {
-		t.Errorf("first = %q, want %q", result[0].Content, "Build feature")
+	if result[0].Content != "Build feature" || result[1].Content != "Building..." || result[2].Content != "Still working on it" {
+		t.Errorf("prose = %v, want both assistant rows after the prompt", contentOf(result))
+	}
+	for _, m := range result {
+		if m.Role == "tool" || m.Content == "wrote 100 bytes" {
+			t.Errorf("tool result reached commit context: %q", m.Content)
+		}
+	}
+	for _, m := range result {
+		if len(m.ToolCalls) > 0 {
+			t.Errorf("assistant row %q still carries %d tool calls", m.Content, len(m.ToolCalls))
+		}
 	}
 }
 
@@ -589,6 +657,28 @@ func TestCommitContextText_OtherToolCallKeepsItsOwnLabel(t *testing.T) {
 		"Assistant: (I used the edit_file tool to edit `a.go` which was successful)\n\n"
 	if got := commitContextText(conversation); got != want {
 		t.Errorf("commit context =\n%q\nwant\n%q", got, want)
+	}
+}
+
+func TestCommitContextText_NoRequestReview_NarratesNoToolCall(t *testing.T) {
+	t.Parallel()
+	// The prose-only rule shows in the rendered text, because formatTurns narrates any tool call left
+	// on a message.
+	edit := toolCallMsg("c1", "edit_file")
+	edit.Function.Arguments = `{"path":"a.go"}`
+	conversation := []types.ChatMessage{
+		{Role: "user", Content: "Build feature"},
+		{Role: "assistant", Content: "Ran it down.", ToolCalls: []types.ToolCallMsg{edit}},
+		{Role: "tool", Content: "edited a.go", ToolCallID: "c1"},
+	}
+
+	want := "User: Build feature\n\nAssistant: Ran it down.\n\n"
+	got := commitContextText(conversation)
+	if got != want {
+		t.Errorf("commit context =\n%q\nwant\n%q", got, want)
+	}
+	if strings.Contains(got, "I used the") {
+		t.Errorf("fallback narrates a tool call:\n%s", got)
 	}
 }
 
