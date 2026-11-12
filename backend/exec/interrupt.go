@@ -6,6 +6,10 @@ import "context"
 // answered too: the assistant row already asked for it, so the provider and the card are both waiting.
 const interruptedToolResult = "Interrupted"
 
+// stoppedToolResult is stored as the result of every tool call left unanswered when a task is stopped.
+// Each call needs a result because its card is showing it as running and the conversation records it.
+const stoppedToolResult = "Stopped"
+
 // toolCallContext returns the context one turn's tool calls run on, cancelled as soon as the user
 // sends a message, so a message is not queued behind a command that runs for minutes. What the turn
 // settles afterwards (commit, merge, checkpoint) runs on setup.ctx and is never interrupted.

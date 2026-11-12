@@ -470,10 +470,19 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 	}
 
 	// Create sandbox if enabled
-	// Get state reference to store sandbox callbacks
-	te.taskMu.Lock()
-	state := te.tasks[setup.task.ID]
-	te.taskMu.Unlock()
+	// Reads, writes and edits inside the container go through the task's execution state, which this run
+	// created when it started. If the task has been stopped or started again since then, this run ends
+	// here without creating a container.
+	state := te.ownExecutionState(setup.task.ID, setup.ctx)
+	if state == nil {
+		// A run released before it started is cancelled and removed without the task being marked
+		// stopped, so mark the task stopped here. When a new run took the task over, that run sets the
+		// task's status itself.
+		if setup.ctx.Err() != nil {
+			te.handleCancelledTask(setup.task.ID, setup.projectID)
+		}
+		return
+	}
 
 	// Resolve image and agent config dir early — needed for both initial creation and mid-execution recreation.
 	imageToUse := ""
@@ -1169,18 +1178,24 @@ func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, acti
 			// skipped: nothing ran, so nothing was committed, touched or put up for review.
 			skipped := false
 			wasInterrupted := false
+			// A tool call takes its read, write and edit functions from the task's execution state, so look
+			// that up again for each call. If the task was stopped or started again since this turn began,
+			// the lookup finds nothing and the rest of this batch must not run.
+			state := te.ownExecutionState(setup.task.ID, setup.ctx)
 			switch {
 			case interrupted():
 				result, success, skipped, wasInterrupted = interruptedToolResult, false, true, true
 			case refusal != "":
 				result, success, skipped = refusal, false, true
 				logging.For(logging.Tools).With(logging.TaskID, setup.task.ID).Warnf("refused %s: arguments that did not decode", tc.Function.Name)
+			case state == nil:
+				// The task was stopped or started again, so this call does not run. Storing Stopped as its
+				// result gives the card and the conversation an answer for it.
+				result, success, skipped = stoppedToolResult, false, true
+				logging.For(logging.Tools).With(logging.TaskID, setup.task.ID).Infof("answered %s as stopped: the task was stopped or started again", tc.Function.Name)
 			default:
 				// tool_call event already sent during streaming, just execute and send result
 				logging.For(logging.Tools).Infof("executing %s for setup.task=%s", tc.Function.Name, setup.task.ID)
-				te.taskMu.Lock()
-				state := te.tasks[setup.task.ID]
-				te.taskMu.Unlock()
 				// runToolProtected holds the worktree lock for this block and turns a panic
 				// into a failed result, so the tool_result below is always sent and stored.
 				result, success = te.runToolProtected(setup.task.ID, tc.Function.Name, func() (string, bool) {
