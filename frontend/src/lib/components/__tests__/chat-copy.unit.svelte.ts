@@ -103,6 +103,11 @@ describe('QueueIndicator — awaiting line', () => {
         expect(line(container)).toBe('Awaiting LLM provider — position 3 in queue, ~45s');
     });
 
+    it('says a wait over a minute in minutes', () => {
+        const { container } = render(QueueIndicator, { props: { ...props, queuePosition: 4, queueEstimatedWait: 180 } });
+        expect(line(container)).toBe('Awaiting LLM provider — position 4 in queue, ~3 minutes');
+    });
+
     it('names the agent as the target and the bare awaiting form', () => {
         const { container } = render(QueueIndicator, { props: { ...props, queuePosition: 0, isAgentSelected: () => true } });
         expect(line(container)).toBe('Awaiting agent...');

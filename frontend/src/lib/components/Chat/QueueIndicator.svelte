@@ -2,6 +2,7 @@
     import { t, type MessageKey } from '$lib/i18n';
     import type { LockWait } from '$lib/types';
     import { prioritizeTask } from '$lib/api';
+    import { formatQueueWait } from '$lib/utils/queue-wait';
     import Spinner from '$lib/components/Spinner.svelte';
 
     interface Props {
@@ -48,7 +49,7 @@
         }
         const target = isAgentSelected() ? t('chat.queue.targetAgent') : t('chat.queue.targetLlm');
         if (queuePosition > 0) {
-            return t('chat.queue.position', { target, position: queuePosition, wait: queueEstimatedWait });
+            return t('chat.queue.position', { target, position: queuePosition, wait: formatQueueWait(queueEstimatedWait) });
         }
         if (retryCount > 0) {
             const errPart = retryError ? t('chat.queue.errorParen', { error: retryError }) : '';

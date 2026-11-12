@@ -1534,7 +1534,9 @@ const catalog = {
     // ── Chat/QueueIndicator.svelte ──
     'chat.queue.targetAgent': 'agent',
     'chat.queue.targetLlm': 'LLM provider',
-    'chat.queue.position': 'Awaiting {target} — position {position} in queue, ~{wait}s',
+    'chat.queue.position': 'Awaiting {target} — position {position} in queue, {wait}',
+    'chat.queue.waitSeconds': '~{count}s',
+    'chat.queue.waitMinutes': { one: '~{count} minute', other: '~{count} minutes' },
     'chat.queue.prioritize': 'Prioritize this task',
     'chat.queue.prioritized': 'Moved to the front of the queue',
     'chat.queue.errorParen': ' ({error})',
