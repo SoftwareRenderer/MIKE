@@ -43,6 +43,13 @@ RUN echo 'export PATH="/usr/local/go/bin:/go/bin:$PATH"' > /etc/profile.d/go.sh
 ENV BASH_ENV=/etc/profile.d/go.sh
 ENV ENV=/etc/profile.d/go.sh
 
+# ── Go linters (make lint, and therefore make check) ─────────
+# `make check` stops when either linter is missing. They are installed with `go install` and not as `tool`
+# directives in go.mod, so build-only tools stay out of the dependency notices (AGENTS.md → Licensing).
+RUN go install honnef.co/go/tools/cmd/staticcheck@latest \
+    && go install golang.org/x/tools/cmd/deadcode@latest \
+    && staticcheck --version
+
 # ── Node.js 22 (Robust NodeSource setup) ─────────────────────
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs \
@@ -73,9 +80,17 @@ RUN ARCH="$(uname -m)" && \
     runsc --version
 
 # ── Playwright browsers (e2e tests) ──────────────────────────
-# Setting the environment variable to allow system dependencies installation cleanly
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=0
-RUN npx playwright install --with-deps chromium
+# Every Playwright release expects one Chromium build, so the browsers must be installed by the version the
+# lockfile pins. A bare `npx playwright install` downloads the newest release instead, and then
+# `make test-e2e` starts no browser. The two manifests are the only repo content needed here; the checkout
+# mounts at /app later with its own node_modules. npm's own install script is skipped, so Chromium is
+# downloaded once, by the command below.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+COPY frontend/package.json frontend/package-lock.json /opt/playwright-pin/
+RUN cd /opt/playwright-pin \
+    && npm ci --no-audit --no-fund --ignore-scripts \
+    && npx playwright install --with-deps chromium \
+    && rm -rf /opt/playwright-pin /root/.npm
 
 # ── Pi coding agent ──────────────────────────────────────────
 RUN curl -fsSL https://pi.dev/install.sh | bash
