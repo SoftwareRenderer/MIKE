@@ -115,16 +115,21 @@ COPY --from=go  /out/sandbox-bridge   /mike/sandbox-bridge
 # Copy prompt templates and skill packages.
 COPY prompts/ /mike/prompts/
 COPY scripts/docker-entrypoint.sh /usr/local/bin/mike-entrypoint.sh
+COPY scripts/docker-podman-state.sh /usr/local/bin/mike-podman-state.sh
 COPY scripts/mike-healthcheck.sh  /usr/local/bin/mike-healthcheck
-RUN chmod 0755 /mike/mike /mike/sandbox-bridge /usr/local/bin/mike-entrypoint.sh /usr/local/bin/mike-healthcheck && \
+RUN chmod 0755 /mike/mike /mike/sandbox-bridge /usr/local/bin/mike-entrypoint.sh /usr/local/bin/mike-podman-state.sh /usr/local/bin/mike-healthcheck && \
     mkdir -p /mike/data /mike/worktrees /mike/extensions && \
     chmod 0700 /mike/data
 
-# Verify podman flags and gVisor installation during build to prevent runtime failures.
+# Verify podman flags and gVisor installation during build to prevent runtime failures, and that the
+# entrypoint parses with its sweeper installed: a missing helper only shows up as a container that
+# will not start.
 RUN podman --runtime-flag ignore-cgroups=true --version && \
     runsc --version && \
     [ "$(command -v runsc)" = /usr/local/bin/runsc ] && \
-    [ -x /usr/local/bin/gvisor-bin/gvisor_sentry ]
+    [ -x /usr/local/bin/gvisor-bin/gvisor_sentry ] && \
+    [ -x /usr/local/bin/mike-podman-state.sh ] && \
+    sh -n /usr/local/bin/mike-entrypoint.sh
 
 # Agent adapters may require host CLI tools (e.g. `pi`). Install them here if needed.
 # Everything an agent edits, builds and tests still runs inside the gVisor sandbox.

@@ -17,9 +17,10 @@ stops is `docs/lifecycle.md`.
 - **The server binary is a release build and is CGO-free.** A `-tags release` build serves its own embedded frontend and refuses `--frontend-dist`. `CGO_ENABLED=0` ensures the bridge is statically linked, allowing it to run on guests with different C libraries.
 - **gVisor is installed as a release bundle with its sidecar tree.** The bundle's sha512 is verified before execution. `runsc` uses binaries in `gvisor-bin/` and expects that directory to be adjacent; the extraction must be complete. Installing a single binary from the bundle is insufficient.
 - **Each stage defines its own `ARG` defaults.** Whether a global `ARG` default reaches a stage that re-declares the name depends on the builder; we use podman/buildah 5.8. A `:=` default in the stage costs nothing, and `--build-arg` still takes precedence. `VERSION` takes its default in the build stage's shell instead, because the string stamped there is `docker-<tag>` rather than the argument itself.
-- **Stages verify tool availability without root privileges.** `podman --runtime-flag ignore-cgroups=true --version`, `runsc --version`, the `runsc` PATH name, and the sidecar tree are all checked at build. `podman info` is not checked because it requires privileges available only at runtime; the entrypoint probes it instead.
+- **Stages verify tool availability without root privileges.** `podman --runtime-flag ignore-cgroups=true --version`, `runsc --version`, the `runsc` PATH name, and the sidecar tree are all checked at build. `podman info` is not checked because it requires privileges available only at runtime; the entrypoint probes it instead. The same step parses the entrypoint and requires its sweeper to be installed, since a missing helper only shows up as a container that will not start.
 - **`privileged` and `seccomp=unconfined` enable the nested runtime.** `compose.yaml` binds to `127.0.0.1` for this reason; TLS is mandatory, and the Host allowlist defaults to `localhost` to prevent unauthorized access. Task work runs with `--cap-drop ALL` inside gVisor.
 - **Storage is kept separate from the engine's overlayfs.** Podman refuses `overlay` on `overlayfs`, so `compose.yaml` provides a volume for `/var/lib/containers`. The entrypoint falls back to `fuse-overlayfs` or `vfs` if needed.
+- **Podman's transient state is cleared at every start, by the image.** `/run` is a tmpfs on a host and part of the container's writable layer here, so `/run/libpod` and `/run/containers/storage` arrive at every start from the previous one. After a host reboot the boot ID cached in them names a boot the kernel has left behind. Podman calls that an unhandled reboot and refuses every command, the entrypoint's own storage probe included. `scripts/docker-podman-state.sh` names the directories it clears, the mount point it leaves alone, and why the graph root is not in the list: clearing transient state rebuilds no image. `compose.yaml` sets no `/run` tmpfs, because this belongs to the image rather than to the flags an operator types.
 - **The checkouts mount is the container's `$HOME`.** The endpoints that carry no project see only `$HOME` plus the worktrees and extensions dirs, so `compose.yaml` mounts the projects at `/projects` and sets `HOME` there: those two lines are one decision.
 - **`MIKE_ENCRYPTION_KEY` is required and has no default.** `compose.yaml` fails if it is missing, and the entrypoint exits with an error naming the variable. The image does not include an agent CLI; adapters requiring a host binary must use a derived image.
 - **`safe.directory` is granted at runtime, by the image, and never by the binary.** A mounted checkout keeps its host uid while this server runs as root, so git would refuse every project the person adds. The build cannot make the grant: `git config --global` writes `$HOME/.gitconfig`, which the documented mount covers with the checkouts. `GIT_CONFIG_GLOBAL` is the other wrong file — it replaces the one `resolveGitIdentity()` reads the author from.
@@ -37,13 +38,23 @@ executable (`GetAgentBinaryPath`), `prompts/` beside it (`resolvePromptDir`), an
 relative to the working directory. `/mike/data` is `0700`: `kanban.db`, the local CA and its key.
 
 `scripts/docker-entrypoint.sh` is the part that cannot be a build-time check. It refuses a missing
-`MIKE_ENCRYPTION_KEY`, defaults `MIKE_LISTEN` to `0.0.0.0` and `MIKE_ALLOWED_HOSTS` to `localhost`,
-probes `podman info` for the graph driver, writes `/etc/containers/storage.conf` when the kernel
-refuses `overlay`, then `exec`s the server so SIGTERM reaches the bounded shutdown path. The
+`MIKE_ENCRYPTION_KEY`, defaults `MIKE_LISTEN` to `0.0.0.0` and `MIKE_ALLOWED_HOSTS` to `localhost`, and
+clears podman's transient state through `scripts/docker-podman-state.sh`. It then probes `podman info`
+for the graph driver, writes `/etc/containers/storage.conf` when the kernel refuses `overlay`, and
+`exec`s the server so SIGTERM reaches the bounded shutdown path. The
 `MIKE_LISTEN` default is why no example below sets it: the server's own default is loopback, and a
 published port cannot reach it.
 `MIKE_PREPULL_IMAGE=1` pulls the default sandbox image in the background instead of during the first
 task.
+
+`scripts/docker-podman-state.sh` clears `/run/libpod` and `/run/containers/storage`, the two
+directories podman names as belonging to a boot. The first is its tmp dir, whose `alive` file holds
+the boot ID read from `/proc`; the second is the storage run root, whose mount files name mounts that
+are already gone. The image store and libpod's database live under the graph root instead, which
+`compose.yaml` gives a volume, so the sweep costs no rebuilt image. A directory that is itself a mount
+point is skipped rather than emptied, since its contents belong to whoever mounted it.
+The sweeper prints `mike-podman-state:` for every directory it clears, and stays silent on a tree that
+holds nothing.
 
 The entrypoint also grants git every repository uid by appending `[safe] directory = *` to
 `/etc/gitconfig`, the image's own file, so no mount can cover it and no rebuilt container loses it.
@@ -195,18 +206,26 @@ Either way the bundle's published sha512 is verified before anything is executed
   container to skip that wait.
 - **An agent adapter that shells out to a CLI fails until that CLI is installed** in a derived image;
   the base image ships no node or python.
+- **A container restarted after its host rebooted starts anyway.** Podman's "current system boot ID
+  differs from cached boot ID" refusal is what the sweeper clears before the first probe. If that
+  message still ends the boot log, podman keeps its transient state somewhere this build does not
+  name, and the directories in the message are the ones to delete by hand.
 
 ## Checking this
 
 No gate builds this image: `make image` builds it only when invoked, and `make check` never reads
-`Dockerfile`. So two commands, and be clear about what each one catches.
+`Dockerfile` — the one step it adds here tests the sweeper, which needs no image. So three commands,
+and be clear about what each one catches.
 
 ```bash
 make docs-check          # a path or pointer in these lines that has stopped resolving
+make test-podman-state   # the sweep that keeps a past start's /run out of this one
 docker build -t mike-image-check -f Dockerfile .
 ```
 
-That check build names no `VERSION`, so the image it produces reports only docker.
+That check build names no `VERSION`, so the image it produces reports only docker. The sweeper's own
+test needs no image: it re-runs inside a user namespace for the cases that mount `/run`, and names the
+ones that skip when the kernel declines one.
 
 The build is the only thing that catches a wrong gVisor object, a missing package in the apt list or
 a stage that lost its `ARG` default — it fails on the step, with the step printed. After a run, the

@@ -123,6 +123,7 @@ cd frontend && npm run check:dead-surface                # untagged test-only ex
 cd frontend && npm run check:e2e-ownership               # a spec that starts a turn owns its project
 python3 scripts/gen-registry.py --check                  # registry.json matches the manifests and pins
 make test-gen-registry                                   # the generator's own tests, both directions
+make test-podman-state                                   # the image entrypoint's sweep of podman's transient state
 ```
 
 - **A spec exists only if it needs a browser or the real backend.** Component state belongs in vitest;
@@ -258,6 +259,8 @@ podman. Without it, sandboxed projects refuse to start tasks — hard error, no 
   `DANGER_ZONE=1` permits *disabling* sandboxing; it never gates execution.
 - **Boot decisions are one injected value** whose zero value **declines** the host-wide stale-container
   sweep, so a test binary cannot delete a live server's containers.
+- **Podman's transient `/run` state is cleared by the image, never by the binary** — on a host, that
+  state belongs to a live podman. `docs/docker.md`.
 - **The container environment is only what was configured**, from one builder. Invent no defaults.
 - **Container arguments come from one package** — `pkg/sandboxruntime` owns validation and the only way to
   add a capability.

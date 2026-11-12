@@ -46,6 +46,11 @@ if ! grep -qs 'directory = \*' /etc/gitconfig; then
 fi
 
 # ── podman storage ───────────────────────────────────────────────────────────
+# Podman's transient state may not outlive a boot, but this container's writable layer keeps it
+# through one: clear it before the first probe, or podman refuses every command below.
+# scripts/docker-podman-state.sh holds what it clears and what it leaves alone.
+/usr/local/bin/mike-podman-state.sh clear || die "could not clear podman's transient state (see the line above)."
+
 # `podman info` exercises the real store to resolve the graph driver and mount storage.
 # This ensures that drivers refused by the kernel cause a failure here instead of later
 # during sandbox execution.
@@ -71,6 +76,14 @@ case "$out" in
             printf '%s\n' '[storage]' 'driver = "vfs"' >/etc/containers/storage.conf
         fi
         out="$(storage_probe || true)"
+        ;;
+esac
+
+# The sweep cleared the two directories this image knows about. The same error again means podman
+# keeps its transient state somewhere else, and only that message can say where.
+case "$out" in
+    *'boot ID differs from cached boot ID'*)
+        die "podman still reports an unhandled reboot after this entrypoint cleared /run/libpod and /run/containers/storage, so delete the directories its message names: $(printf '%s' "$out" | head -n3 | tr '\n' ' ')"
         ;;
 esac
 

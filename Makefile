@@ -231,6 +231,14 @@ test-docs-check: ## Test the documentation gate itself, both directions (~0.2s)
 test-gen-registry: ## Test that a registry pin cannot go stale, both directions (~0.5s)
 	@python3 scripts/gen-registry_test.py
 
+# No gate builds the application image, and the entrypoint's one destructive step is plain shell:
+# podman refuses every command while /run holds an older boot's cached boot ID, so the sweep has to
+# run before the storage probe and stop at the right bounds. The cases that mount /run skip with a
+# reason where no user namespace is available.
+.PHONY: test-podman-state
+test-podman-state: ## Test the entrypoint's sweep of podman's transient state (~0.1s)
+	@bash scripts/docker-podman-state_test.sh
+
 # ---------------------------------------------------------------------------
 # Quality gate
 # ---------------------------------------------------------------------------
@@ -281,6 +289,8 @@ check: ## THE GATE: lint + archgate + docs-check + bridge-check + build + sandbo
 	@$(MAKE) --no-print-directory test-docs-check
 	@echo "==> test-gen-registry (a stale pin installs bytes nobody vetted)"
 	@$(MAKE) --no-print-directory test-gen-registry
+	@echo "==> test-podman-state (a /run from an older boot makes podman refuse everything)"
+	@$(MAKE) --no-print-directory test-podman-state
 	@echo "==> bridge-check (a stale sandbox-bridge is an edit that never runs)"
 	@$(MAKE) --no-print-directory bridge-check
 	@echo "==> build"
