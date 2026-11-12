@@ -134,6 +134,12 @@ same fault: it repeats an hour of wall-clock time at a fall-back. `task_messages
 caller. `rowid` breaks an exact tie, as `GetLastMessageInThread` already did; the listing queries do the
 same. Tests: `backend/store/messages_time_test.go`.
 
+The two sides of a comparison must also carry the same precision. `tasks.updated_at` is stored at whole
+seconds, so an instant read back from it is up to a second early — and a second holds a batch of message rows.
+A range over `task_messages.created_at` therefore never takes its floor from that column. A caller that needs
+a floor captures the instant at the moment it decides, and
+`TestSummarizationRedatesNothingThatPredatesIt` is what catches a floor read back instead.
+
 ## A conversation is read in the order it was written
 
 `idx_task_messages_thread_time(thread_id, created_at)` and `idx_task_messages_task_time(task_id, created_at)`

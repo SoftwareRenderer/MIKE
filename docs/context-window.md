@@ -74,6 +74,15 @@ its newest summarization row: rows sitting before that marker would be sent whil
 resume. The advisory is written after the marker, so `GetTaskMessagesFromSummary` hands both reads the same
 conversation, and an advisory is the role that says *the model had to see this and the person never said it*.
 
+Marker and note are one event, and the transcript reads them that way. The note carries the marker row's own
+instant, so `ORDER BY created_at, rowid` puts it directly under the divider. Nothing can come between them —
+even a message that arrived while the summary was being answered lands after both, because
+`FixPostSummaryTimestamps` moves it past the pair. The instant that bounds that move is captured in
+`applySummarization`, at full precision. Do not take it from `task.UpdatedAt`: that column stores whole
+seconds while a message row stores nanoseconds, so the value read back sits before the summarization began and
+moves the interrupted turn below its own marker. That is how a cut note came to read far below the divider it
+explains.
+
 `renderRecentContext` bounds it: a reasoning block keeps its end, where the conclusion names the next move,
 and everything else keeps its start, where a call's file and a result's first lines live. A call left
 unanswered when the cut came says so — that is where the work stopped. `trimToFit` never touches the note, so
@@ -97,5 +106,8 @@ leaving no room at all. `TestFitRequestPricesAResumedConversationFromTheStoredCo
 which has no live usage to price by. `TestFitRequestTrimsADenseResultThatOnlyItsBytesPrice` runs one where the
 oversized result is base64, which only the byte count prices. A gate that stopped being wired, or stopped
 believing the provider, fails there rather than quietly. `TestContextCutNoteIsStoredAfterTheSummaryItExplains`
-fails if the reproduction of the cut point goes missing from the read a resumed run makes, and
-`TestRenderRecentContextDropsTheOldestTurnFirst` fails if the reproduction stops fitting the room it is given.
+fails if the reproduction of the cut point goes missing from the read a resumed run makes,
+`TestContextCutNoteIsReadBesideItsMarker` if a compaction and its note stop being read together, and
+`TestSummarizationRedatesNothingThatPredatesIt` if the rows a summarization interrupted get pulled below its
+marker. `TestRenderRecentContextDropsTheOldestTurnFirst` fails if the reproduction stops fitting the room it is
+given.

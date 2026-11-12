@@ -512,14 +512,14 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                     isStreaming: false,
                     createdAt: data.created_at || new Date().toISOString(),
                 };
-                // Before a message the server has not accepted yet (queued): its row is
-                // written after the note's, so it stays last. Same rule as summarization.
+                // Insert before a queued message, because the server writes that row after the note's
+                // row and the queued send must stay last. A summarization lands by the same rule. A cut
+                // note is the exception: the stored read gives it the divider's own instant, so it
+                // belongs directly after that divider even when something arrived between the frames.
+                const dividerIdx = data.kind === 'context_cut' ? s.entries.findLastIndex(e => e.role === 'summarization') : -1;
                 const firstQueuedIdx = s.entries.findIndex(e => e.queued);
-                if (firstQueuedIdx >= 0) {
-                    s.entries = [...s.entries.slice(0, firstQueuedIdx), entry, ...s.entries.slice(firstQueuedIdx)];
-                } else {
-                    s.entries = [...s.entries, entry];
-                }
+                const insertAt = dividerIdx >= 0 ? dividerIdx + 1 : firstQueuedIdx >= 0 ? firstQueuedIdx : s.entries.length;
+                s.entries = [...s.entries.slice(0, insertAt), entry, ...s.entries.slice(insertAt)];
                 break;
             }
             case 'summarization': {
