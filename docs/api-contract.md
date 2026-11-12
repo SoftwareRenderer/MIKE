@@ -140,7 +140,9 @@ and `apiroutes` would refuse one, because a route nobody calls is the failure th
 Test: `backend/stream/app_stream_storage_test.go` drives all three over a real socket. The name is in
 both vocabularies (`backend/types/ws.go`, `api/events.ts`) and `make archgate RULE=wsevents` fails if
 one side drops it. The task figure is `-run Figure` in that file, and `go test ./backend/git/ -run
-TaskWorktreeUsage` is the walk's own accounting.
+TaskWorktreeUsage` is the walk's own accounting. The client's half is
+`frontend/src/lib/api/__tests__/stream-storage-figure.unit.ts`, which sends a real frame, because the
+dispatcher in between decides whether the figure reaches the tooltip.
 
 ### The task row a browser holds has no result text
 

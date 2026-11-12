@@ -1,6 +1,6 @@
 import type { ProjectCounts, Task, StreamEvent, StorageUsage } from '$lib/types';
 import type { AppStreamFrame } from './events';
-import { isKeepaliveFrame } from './events';
+import { isKeepaliveFrame, storageUsageFromFrame } from './events';
 import { API_BASE, parseStreamFrame } from './helpers';
 import { STALE_THRESHOLD_MS, HEARTBEAT_INTERVAL_MS, RECONNECT_BASE_DELAY_MS, RECONNECT_MAX_DELAY_MS, SUSPENDED_GAP_MS } from '$lib/constants';
 import { WAKE_FRAME_GAP_MS } from '$lib/utils/tab-return';
@@ -291,7 +291,7 @@ export function createAppStream(callbacks: AppStreamCallbacks, options: AppStrea
                 callbacks.onProjectCounts(msg.data);
             }
             if (msg.type === 'storage_usage' && callbacks.onStorageUsage) {
-                callbacks.onStorageUsage({ total_bytes: msg.total_bytes, avail_bytes: msg.avail_bytes });
+                callbacks.onStorageUsage(storageUsageFromFrame(msg));
             }
             if (msg.type === 'task_diff_stats' && callbacks.onDiffStats) {
                 callbacks.onDiffStats(msg.task_id, msg.hash, msg.short_stat, msg.files_n || 0, msg.untracked_n, msg.untracked_lines, msg.tracked_add || 0, msg.tracked_del || 0, msg.file_hashes, msg.removed_files, msg.staged_paths, msg.has_committed_changes, msg.already_merged);

@@ -1,3 +1,5 @@
+import type { StorageUsage } from '$lib/types';
+
 /**
  * The app-stream frame names, as one declared list. `backend/types/ws.go` owns them; the archgate
  * `wsevents` rule reads the declaration text below and compares the two lists in both directions, so a
@@ -52,6 +54,20 @@ export type AppStreamEventType =
 export interface AppStreamFrame {
     type: AppStreamEventType;
     [key: string]: any;
+}
+
+/**
+ * Reads a `storage_usage` frame into the numbers the Done column shows. The server leaves the task figures
+ * off a frame until it has measured the worktrees, and this function leaves them off too, because a zero
+ * would say the disk is empty when nothing was measured.
+ */
+export function storageUsageFromFrame(frame: AppStreamFrame): StorageUsage {
+    const usage: StorageUsage = { total_bytes: frame.total_bytes, avail_bytes: frame.avail_bytes };
+    if (typeof frame.tasks_bytes === 'number' && typeof frame.tasks_count === 'number') {
+        usage.tasks_bytes = frame.tasks_bytes;
+        usage.tasks_count = frame.tasks_count;
+    }
+    return usage;
 }
 
 /**
