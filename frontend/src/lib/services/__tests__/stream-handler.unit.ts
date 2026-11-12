@@ -1303,6 +1303,19 @@ describe('advisory events', () => {
 
         expect(stream.state.entries.map(e => e.id)).toEqual(['adv-1', 'u1']);
     });
+
+    it('a cut note lands beside the divider it explains, not below what arrived in between', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'summarization', data: { id: 'sum-1', summary: 'the summary', created_at: '2026-01-01T00:00:00Z' } }, false);
+        // This browser wrote the send while the summary was being answered. It carries no `queued` flag
+        // to insert before, so the note's frame would otherwise land below it.
+        stream.state.entries = [...stream.state.entries, { id: 'queued:act-1', role: 'user', content: 'and then?', isStreaming: false, createdAt: new Date().toISOString() }];
+        // The stored read gives the two rows one instant, so a reload draws them together. The live view
+        // has to agree, otherwise the note jumps on the next read.
+        handleEvent({ type: 'advisory', data: { id: 'adv-1', kind: 'context_cut', text: 'Your conversation was compacted into the summary', created_at: '2026-01-01T00:00:00Z' } }, false);
+
+        expect(stream.state.entries.map(e => e.id)).toEqual(['sum-1', 'adv-1', 'queued:act-1']);
+    });
 });
 
 describe('lock_wait — a click queued behind work it cannot see', () => {

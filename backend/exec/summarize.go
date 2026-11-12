@@ -330,8 +330,9 @@ func (s *summarizeOrchestrator) injectProceedMessage(setup *taskExecSetup, lc *l
 }
 
 // recordSummary persists a finished summary, moves the rows written while it ran after it, and publishes
-// it. The row and the frame share one id and one instant, so they cannot disagree about one summary.
-func (s *summarizeOrchestrator) recordSummary(projectID, taskID, threadID, model string, res summarizeResult, anchor time.Time, contextUsed int) {
+// it. The row and the frame share one id and one instant, so they cannot disagree about one summary. It
+// answers with that instant, and the cut note is stamped with it.
+func (s *summarizeOrchestrator) recordSummary(projectID, taskID, threadID, model string, res summarizeResult, anchor time.Time, contextUsed int) time.Time {
 	msgID := uuid.New().String()
 	createdAt := time.Now().UTC()
 	_ = s.store.CreateTaskMessage(&types.TaskMessage{
@@ -360,22 +361,29 @@ func (s *summarizeOrchestrator) recordSummary(projectID, taskID, threadID, model
 		"model_name":       model,
 		"context_used":     contextUsed,
 	}})
+
+	return createdAt
 }
 
 // applySummarization summarizes, persists the summary, installs it in the system prompt and
-// broadcasts the event. It returns the conversation for the next call and the installed
-// summary, which is "" if summarization failed and the messages came back untouched.
+// broadcasts the event. It returns the conversation for the next call, the installed summary and the
+// instant of its marker row. A failed summarization leaves the messages untouched and answers with an
+// empty summary and the zero time.
 //
 // The summary row is persisted before anything is published, so a restart at any point resumes
 // with it. The prompt is rewritten in place rather than rebuilt from the DB, because the
 // in-memory conversation is a superset of the persisted one.
-func (s *summarizeOrchestrator) applySummarization(setup *taskExecSetup, ctx context.Context, messages []types.ChatMessage, serverURL, modelName string, resultCh chan error, interrupted bool) ([]types.ChatMessage, string) {
+func (s *summarizeOrchestrator) applySummarization(setup *taskExecSetup, ctx context.Context, messages []types.ChatMessage, serverURL, modelName string, resultCh chan error, interrupted bool) ([]types.ChatMessage, string, time.Time) {
 	task := setup.task
 	taskID := setup.task.ID
 	projectID := setup.projectID
 
 	origTask := task
 	task.Summarizing = true
+	// This bounds the rows a compaction moves after its marker. Do not read it back from
+	// `task.UpdatedAt`: that column stores whole seconds while a message row stores nanoseconds, so the
+	// value lands before the turn being cut and moves that turn below the marker.
+	started := time.Now().UTC()
 	_ = s.store.SetTaskSummarizing(taskID, true)
 	s.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 
@@ -400,15 +408,16 @@ func (s *summarizeOrchestrator) applySummarization(setup *taskExecSetup, ctx con
 		if resultCh != nil {
 			resultCh <- err
 		}
-		return messages, ""
+		return messages, "", time.Time{}
 	}
 
-	// The anchor is the row's UpdatedAt, stamped when the Summarizing flag was set.
+	// Read the task again, because a field the prompt needs may have moved. `started` still bounds the
+	// rows the compaction moves.
 	if updated, err := s.store.GetTaskByID(taskID); err == nil && updated != nil {
 		task = updated
 	}
 	messages, compressedUsed := installSummary(messages, task, setup.worktreePath, setup.promptScope(), sumResult.summary)
-	s.recordSummary(projectID, taskID, task.CurrentThreadID, modelName, sumResult, task.UpdatedAt, compressedUsed)
+	summaryAt := s.recordSummary(projectID, taskID, task.CurrentThreadID, modelName, sumResult, started, compressedUsed)
 
 	logging.For(logging.Summarize).With(logging.TaskID, taskID).Infof("summarized context (messages preserved, LLM context compressed)")
 
@@ -417,7 +426,7 @@ func (s *summarizeOrchestrator) applySummarization(setup *taskExecSetup, ctx con
 	if resultCh != nil {
 		resultCh <- nil
 	}
-	return messages, sumResult.summary
+	return messages, sumResult.summary, summaryAt
 }
 
 // maybeAutoSummarize summarizes when usage crosses the threshold. It runs right after an assistant
@@ -444,10 +453,12 @@ func (s *summarizeOrchestrator) summarizeNow(setup *taskExecSetup, lc *loopConte
 	// Summarization goes to the task's CURRENT provider — lc.mc follows mid-run switches, setup.serverURL
 	// does not.
 	serverURL, _ := lc.mc.get()
-	messages, summary := s.applySummarization(setup, setup.ctx, lc.messages, serverURL, activeModel, nil, true)
+	messages, summary, markerAt := s.applySummarization(setup, setup.ctx, lc.messages, serverURL, activeModel, nil, true)
 	if summary != "" {
 		lc.messages = messages
-		s.injectAdvisory(setup, lc, advisory{kind: advisoryContextCut, text: cutNote})
+		// The note belongs to the compaction, so it carries the marker's instant. Anything that arrived
+		// while the summary was being answered lands after both, and never between them.
+		s.injectAdvisory(setup, lc, advisory{kind: advisoryContextCut, text: cutNote, at: markerAt})
 		if injectProceed {
 			s.injectProceedMessage(setup, lc)
 		}

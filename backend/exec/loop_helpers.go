@@ -426,9 +426,10 @@ const (
 // advisory is a note the model must see and the person never sent, about the workspace or about the run.
 // Buffered during tool execution and delivered at the turn boundary, or at a summarization.
 type advisory struct {
-	kind     string // advisoryDiagnostics | advisoryMergeConflict | advisoryAutoAnswer | advisoryContextCut — how the UI titles the note
-	severity string // mirrors TaskMessage.Severity: "" (default), "info", "error" — drives emphasis
-	text     string // what the model reads and the UI shows
+	kind     string    // advisoryDiagnostics | advisoryMergeConflict | advisoryAutoAnswer | advisoryContextCut — how the UI titles the note
+	severity string    // mirrors TaskMessage.Severity: "" (default), "info", "error" — drives emphasis
+	text     string    // what the model reads and the UI shows
+	at       time.Time // The row is stamped with this instant, or with the current time when it is zero.
 }
 
 // queueAdvisory buffers a note for delivery at the turn boundary, and declines one with nothing to say.
@@ -447,10 +448,13 @@ func (te *TaskExecutor) flushAdvisories(setup *taskExecSetup, lc *loopContext) {
 	}
 	for _, a := range lc.pendingAdvisories {
 		msgID := uuid.New().String()
-		now := time.Now().UTC()
+		at := a.at
+		if at.IsZero() {
+			at = time.Now().UTC()
+		}
 		_ = te.store.CreateTaskMessage(&types.TaskMessage{
 			ID: msgID, TaskID: setup.task.ID, ThreadID: setup.task.CurrentThreadID,
-			Role: "advisory", Severity: a.severity, Content: a.text, Kind: a.kind, CreatedAt: now,
+			Role: "advisory", Severity: a.severity, Content: a.text, Kind: a.kind, CreatedAt: at,
 		})
 		lc.messages = append(lc.messages, types.ChatMessage{Role: "advisory", Content: a.text})
 		te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{
@@ -460,7 +464,7 @@ func (te *TaskExecutor) flushAdvisories(setup *taskExecSetup, lc *loopContext) {
 				"kind":       a.kind,
 				"severity":   a.severity,
 				"text":       a.text,
-				"created_at": now.Format(time.RFC3339Nano),
+				"created_at": at.Format(time.RFC3339Nano),
 			},
 		})
 	}

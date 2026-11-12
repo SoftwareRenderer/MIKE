@@ -1784,11 +1784,11 @@ idleWait:
 			sumURL, _ := lc.mc.get()
 			// Nothing else writes to the thread while the summary is being made, so its newest user
 			// row is compared across the summarization: a different row is input that arrived
-			// meanwhile. A length cannot answer this, because FixPostSummaryTimestamps re-dates the
-			// run's own rows to after the summary row.
+			// meanwhile. A length cannot answer this, because the summarization writes a row of its own
+			// and re-dates anything that arrived while it ran.
 			queuedThread := setup.task.CurrentThreadID
 			queuedBefore, _ := te.store.GetLastUserMessageInThread(queuedThread)
-			lc.messages, _ = te.summarize.applySummarization(setup, req.ctx, lc.messages, sumURL, activeModel, req.resultCh, false)
+			lc.messages, _, _ = te.summarize.applySummarization(setup, req.ctx, lc.messages, sumURL, activeModel, req.resultCh, false)
 			lc.detector.reset() // context changed, clear stale text window
 			lc.detector.clearHints()
 			// Re-sync from DB to pick up any messages queued during summarization, and any deleted ones.

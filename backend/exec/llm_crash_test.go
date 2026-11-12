@@ -193,18 +193,19 @@ func crashTask(t *testing.T, te *TaskExecutor, projectID, initialSHA, taskID, se
 	return wt
 }
 
-// rolesInOrder lists the thread's stored roles, oldest first.
-func rolesInOrder(t *testing.T, te *TaskExecutor, taskID, threadID string) []string {
-	t.Helper()
-	msgs, err := te.store.GetTaskMessages(taskID, threadID)
-	if err != nil {
-		t.Fatalf("get messages: %v", err)
-	}
-	roles := make([]string, 0, len(msgs))
-	for _, m := range msgs {
+// rolesOf lists the roles of rows already in hand.
+func rolesOf(rows []types.TaskMessage) []string {
+	roles := make([]string, 0, len(rows))
+	for _, m := range rows {
 		roles = append(roles, m.Role)
 	}
 	return roles
+}
+
+// rolesInOrder lists the thread's stored roles, oldest first.
+func rolesInOrder(t *testing.T, te *TaskExecutor, taskID, threadID string) []string {
+	t.Helper()
+	return rolesOf(mustMessages(t, te, taskID, threadID))
 }
 
 // TestLLMCrashMidTurnWithToolCallLeavesNoPartialTurn pins the stored conversation when the provider
