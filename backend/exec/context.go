@@ -531,7 +531,7 @@ func collectToolIDs(msgs []*types.ChatMessage) map[string]bool {
 	return ids
 }
 
-// ExtractCommitContext extracts first user message and request_review turns for commit context.
+// ExtractCommitContext chooses which turns the commit message generator reads.
 func ExtractCommitContext(messages []types.ChatMessage) []types.ChatMessage {
 	var firstUser *types.ChatMessage
 	var requestReviews []*types.ChatMessage // all request_review assistant messages, chronological
@@ -551,25 +551,17 @@ func ExtractCommitContext(messages []types.ChatMessage) []types.ChatMessage {
 		}
 	}
 
-	// Collect assistant messages to include (deduped, chronological).
-	// requestReviews is already chronological and every entry precedes lastAssistant,
-	// so appending lastAssistant last preserves order.
-	var assistants []*types.ChatMessage
-	seen := make(map[*types.ChatMessage]bool)
-	for _, m := range requestReviews {
-		if !seen[m] {
-			seen[m] = true
-			assistants = append(assistants, m)
-		}
+	if len(requestReviews) == 0 {
+		return commitProse(messages)
 	}
 
-	toolIDSet := collectToolIDs(assistants)
+	toolIDSet := collectToolIDs(requestReviews)
 
 	var result []types.ChatMessage
 	if firstUser != nil {
 		result = append(result, *firstUser)
 	}
-	for _, m := range assistants {
+	for _, m := range requestReviews {
 		result = append(result, *m)
 	}
 	// Include tool result messages for the included assistants' tool calls.
@@ -577,6 +569,28 @@ func ExtractCommitContext(messages []types.ChatMessage) []types.ChatMessage {
 		m := &messages[i]
 		if m.Role == "tool" && toolIDSet[m.ToolCallID] {
 			result = append(result, *m)
+		}
+	}
+	return result
+}
+
+// commitProse returns a thread that has no review as plain text: every user and assistant message, in
+// order, and no tool result. An assistant message with no text of its own contributes no row. Tool calls
+// are dropped because formatTurns narrates any call it finds on a message.
+func commitProse(messages []types.ChatMessage) []types.ChatMessage {
+	var result []types.ChatMessage
+	for i := range messages {
+		m := &messages[i]
+		switch m.Role {
+		case "user":
+			result = append(result, *m)
+		case "assistant":
+			if m.Content == "" {
+				continue
+			}
+			prose := *m
+			prose.ToolCalls = nil
+			result = append(result, prose)
 		}
 	}
 	return result
