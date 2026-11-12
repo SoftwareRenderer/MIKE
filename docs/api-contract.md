@@ -198,9 +198,15 @@ alike, and the card colours them differently (green, red, yellow). The same key 
 counted, no question awaited, no commit, merge or Done (`docs/commit-and-done.md`). The message that
 stopped it is the next call's input.
 
-A task stop is not a message. It cancels the wider context, so the call reports the command failing and
-the run ends instead of looping. Tests: `TestUserMessageInterruptsRunningToolCall` and
+A task stop is not a message. It cancels the wider context, so the running call reports its command
+failing and the run ends with no further provider call. The calls after the running one do not run: they
+answer `Stopped` (`stoppedToolResult`). A stop removes the task's execution state, and a tool call reads
+the container's read, write and edit functions from it. A turn reaches that state only through
+`ownExecutionState` (`backend/exec/executor.go`), which returns it only while it is the state this run
+created. A turn whose task was started again therefore stops, rather than working in the newer run's
+container and worktree. Tests: `TestUserMessageInterruptsRunningToolCall` and
 `TestStoppingATaskIsNotAnInterrupt` (`backend/exec/interrupt_tool_call_test.go`),
+`TestStoppedTurnDoesNotDispatchItsRemainingToolCalls` (`backend/exec/tool_call_ownership_test.go`),
 `TestBuildToolResultEvent_Interrupted`, `stream-handler.unit.ts`, `chat-entries.unit.ts`.
 
 ### What an interrupting message may delete

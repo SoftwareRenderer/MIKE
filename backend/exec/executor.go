@@ -411,6 +411,18 @@ func (te *TaskExecutor) LockWorktreeWatched(taskID string, every time.Duration, 
 	return te.worktreeMu.LockWatched(taskID, every, notice)
 }
 
+// ownExecutionState looks up the task's execution state and returns it only when it is the one this run
+// created, so a tool call never reads or writes through another run's container. The state it returns
+// stays usable after a stop removes it from the tasks map.
+func (te *TaskExecutor) ownExecutionState(taskID string, ctx context.Context) *executionState {
+	te.taskMu.Lock()
+	defer te.taskMu.Unlock()
+	if state, ok := te.tasks[taskID]; ok && state.ctx == ctx {
+		return state
+	}
+	return nil
+}
+
 // runToolProtected runs a tool call under the task's worktree lock (which
 // serializes tool writes against subtask merges) and turns a panic into a failed
 // result. The caller must always be able to emit and persist a tool_result — a tool
