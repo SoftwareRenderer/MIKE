@@ -147,21 +147,22 @@
         role="toolbar"
         aria-label={t('board.multiSelect.toolbarAria')}
     >
+        <button
+            type="button"
+            class="bar-btn bar-btn-model"
+            onclick={openModelModal}
+            aria-label={t('board.multiSelect.modelAria', { count: multiSelect.count })}
+        >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M2 5l6-3 6 3v6l-6 3-6-3V5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                <line x1="8" y1="8" x2="8" y2="14" stroke="currentColor" stroke-width="1.5"/>
+                <line x1="2" y1="5" x2="8" y2="8" stroke="currentColor" stroke-width="1.5"/>
+                <line x1="14" y1="5" x2="8" y2="8" stroke="currentColor" stroke-width="1.5"/>
+            </svg>
+            {t('app.model')}
+        </button>
+
         {#if allInBacklog}
-            <button
-                type="button"
-                class="bar-btn bar-btn-model"
-                onclick={openModelModal}
-                aria-label={t('board.multiSelect.modelAria', { count: multiSelect.count })}
-            >
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                    <path d="M2 5l6-3 6 3v6l-6 3-6-3V5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-                    <line x1="8" y1="8" x2="8" y2="14" stroke="currentColor" stroke-width="1.5"/>
-                    <line x1="2" y1="5" x2="8" y2="8" stroke="currentColor" stroke-width="1.5"/>
-                    <line x1="14" y1="5" x2="8" y2="8" stroke="currentColor" stroke-width="1.5"/>
-                </svg>
-                {t('app.model')}
-            </button>
             <button
                 type="button"
                 class="bar-btn bar-btn-start"

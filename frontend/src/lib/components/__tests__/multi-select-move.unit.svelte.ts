@@ -79,13 +79,13 @@ afterEach(() => {
 });
 
 describe('MultiSelectBar — Move to…', () => {
-    it('offers the move for a selection that spans columns, where Start and Model are absent', async () => {
+    it('offers the move for a selection that spans columns, where Start is absent', async () => {
         const { container } = renderBar([makeTask('a', 'backlog'), makeTask('b', 'in_progress')]);
         multiSelect.selectAll(['a', 'b']);
 
         await waitFor(() => expect(container.querySelector('.bar-btn-move')).toBeTruthy());
         expect(container.querySelector('.bar-btn-start')).toBeNull();
-        expect(container.querySelector('.bar-btn-model')).toBeNull();
+        expect(container.querySelector('.bar-btn-model')).toBeTruthy();
     });
 
     it('lists the four board columns', async () => {
