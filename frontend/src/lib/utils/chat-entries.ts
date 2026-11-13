@@ -492,7 +492,6 @@ export function mergeLoadedHistory(
 
         if (isRowCopy(e, dbEntries, e === lastLive)) continue;
 
-        // A box still writing is the newest thing on screen; only a finished one has a place to go back to.
         if (e.buildLog?.done) placeFinishedBuildBox(merged, e);
         else merged.push(e);
     }
@@ -505,14 +504,13 @@ export function mergeLoadedHistory(
     });
 }
 
-/** Where a finished build/pull box belongs among the rows the read brought: at the instant the browser opened
- * it, because the box ran ahead of the turn whose rows this same read just brought back. No row holds a box
- * and none ever will, so only that instant orders it — and only for this entry: everything else the merge
- * keeps without a row is newer than every row the read proved to exist, which is why those append.
+/** Puts a finished build/pull box where it happened in the conversation, by the time the browser opened it.
  *
- * A row's instant is second-precision text and the box's is the browser's millisecond clock, and a build
- * usually opens in the same second as the send that started the run — so compare instants, never the strings,
- * the trap `getCheckpointThreads` documents. */
+ * A box never gets a row, so the read cannot say where it goes. Appending it would drop it below the turn that
+ * started after the build. A box that is still writing is the newest thing on screen, so that one appends.
+ *
+ * Row times are whole seconds and the box's time is the browser's clock in milliseconds, so compare them as
+ * dates and not as strings (`getCheckpointThreads` explains why). */
 function placeFinishedBuildBox(merged: ChatEntry[], box: ChatEntry): void {
     const opened = box.createdAt ? new Date(box.createdAt).getTime() : NaN;
     const newer = Number.isNaN(opened)

@@ -310,8 +310,8 @@ describe('mergeLoadedHistory — identity', () => {
 });
 
 describe('mergeLoadedHistory — a sandbox build box keeps the place it ran from', () => {
-    /** A box's instant is the browser's clock when the frame landed, so the frames that open and close one
-     * run under a clock the rows can be ordered against. Every frame names the instant it arrived. */
+    /** The browser's clock gives a box its time, so the frames that open and close one run under a fixed time
+     * the rows can be placed against. Every frame names the time it arrived. */
     function buildFrames(frames: Array<{ at: string; type: string; data?: unknown }>): ChatEntry[] {
         vi.useFakeTimers();
         try {
@@ -327,7 +327,7 @@ describe('mergeLoadedHistory — a sandbox build box keeps the place it ran from
         }
     }
 
-    /** The frames of one image build: opened, a line, then the container that ends it. */
+    /** The frames of one image build: the box opens, a line arrives, the container ends it. */
     const buildTypeFrames = (state: 'building_image' | 'pulling_image', opened: string) => [
         { at: opened, type: 'status', data: { state } },
         { at: '2026-09-10T10:00:20Z', type: 'build_progress', data: { line: 'STEP 1/2 : FROM node:20' } },
@@ -337,8 +337,8 @@ describe('mergeLoadedHistory — a sandbox build box keeps the place it ran from
     const userRowAt = (id: string, content: string, created_at: string) => ({ ...userRow(id, content), created_at });
 
     it('draws a finished build box above the turn it ran ahead of', () => {
-        // The send and the box share a second: the row is stored at second precision, the box's instant is
-        // the browser's millisecond clock, and the box came after the send.
+        // The send's row and the box fall in the same second: the row is stored at whole seconds, the box at
+        // milliseconds, and the box came after the send.
         const messages = [
             userRowAt('u1', 'build it', '2026-09-10T10:00:00Z'),
             assistantRow('a1', { created_at: '2026-09-10T10:01:00Z', content: 'Reading it now.' }),
@@ -370,7 +370,7 @@ describe('mergeLoadedHistory — a sandbox build box keeps the place it ran from
             userRowAt('u1', 'build it', '2026-09-10T09:59:00Z'),
             assistantRow('a1', { created_at: '2026-09-10T10:01:00Z', content: 'Reading it now.' }),
         ];
-        // No `running` frame: the build is still going, so the box is the live edge of the transcript.
+        // No `running` frame, so the build is still going.
         const live = buildFrames([
             { at: '2026-09-10T10:00:00Z', type: 'status', data: { state: 'building_image' } },
             { at: '2026-09-10T10:00:20Z', type: 'build_progress', data: { line: 'STEP 1/2 : FROM node:20' } },
@@ -389,7 +389,7 @@ describe('mergeLoadedHistory — a sandbox build box keeps the place it ran from
         const live: ChatEntry[] = [
             { id: 'box-1', role: 'system', content: 'Building', isStreaming: false, createdAt: '2026-09-10T10:00:00Z', buildLog: { title: 'Building', lines: [], done: true } },
             { id: 'box-2', role: 'system', content: 'Building', isStreaming: false, createdAt: '2026-09-10T10:02:00Z', buildLog: { title: 'Building', lines: [], done: true } },
-            // A send the server has not answered keeps the bottom of the transcript, older instant and all.
+            // The server has not answered this send, so it stays last even though its time is older.
             { id: 'pend-1', role: 'user', content: 'and then commit it', isStreaming: false, queued: true, createdAt: '2026-09-10T09:58:00Z' },
         ];
 
