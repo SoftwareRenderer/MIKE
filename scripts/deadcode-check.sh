@@ -10,10 +10,9 @@
 # Those are listed as an explicit allowlist below rather than matched by a name pattern, so a NEW
 # function reported here always fails the gate and must be deleted or justified here.
 #
-# What is reported is not everything unreachable. RTA counts a method live once its type satisfies
-# any used interface, so a method no call site selects can still look reachable. Such a function
-# escapes this gate in both directions: it is never reported, and an ALLOWLIST entry naming it is
-# refused as stale. Only a stricter analysis, or a reader, sees that class.
+# Two passes. Pass 1 walks deadcode's call graph. Pass 2 reads the text instead, because the graph
+# cannot see every dead method: deadcode counts a method live as soon as its type satisfies a used
+# interface, so a method nothing calls still looks reachable. Pass 2's header says what it checks.
 #
 # Usage: scripts/deadcode-check.sh
 set -euo pipefail
@@ -127,6 +126,8 @@ for entry in $ALLOWLIST; do
 	stale=$((stale + 1))
 done
 
+rc=0
+
 echo "deadcode: $hits unreachable reported, $violations unexplained, $stale stale allowlist entries"
 
 if (( stale > 0 )); then
@@ -134,7 +135,7 @@ if (( stale > 0 )); then
 	$stale allowlist entries match no unreachable function. deadcode no longer reports them, so
 	delete them from ALLOWLIST in scripts/deadcode-check.sh (and their reason comment).
 	EOF
-	exit 1
+	rc=1
 fi
 
 if (( violations > 0 )); then
@@ -143,5 +144,109 @@ if (( violations > 0 )); then
 	Either delete them, or — if a test is the only caller — add "<file>:<name>" to ALLOWLIST in
 	scripts/deadcode-check.sh with a sentence saying what the accessor observes.
 	EOF
-	exit 1
+	rc=1
 fi
+
+# ---------------------------------------------------------------------------
+# Pass 2: a method nothing calls.
+#
+# Calling a method needs a selector - `x.Name` - so if no file in scope ever writes `x.Name`, nothing
+# can call that method. Scope: backend, pkg, scripts and the root package, which covers every main
+# listed in ROOTS.
+#
+# Only production files are scanned for declarations; staticcheck reports methods on test types
+# (U1000).
+#
+# Two gaps, and both make the pass report fewer methods rather than more. Whole-line comments are
+# dropped before the scan, because one naming a method hid a real hit; comments after code, and block
+# comments, are not dropped. And a method named like a struct field counts as used.
+
+# Methods a dependency calls, so no file in this tree ever names one:
+#   UnmarshalJSON   encoding/json calls it through json.Unmarshaler on any type declaring it.
+#   WebAuthn*       go-webauthn reads a credential's user through the webauthn.User interface, which
+#                   backend/auth's operator implements.
+DEPENDENCY_ALLOWLIST="
+UnmarshalJSON
+WebAuthnID
+WebAuthnName
+WebAuthnDisplayName
+WebAuthnCredentials
+"
+
+is_dependency_allowed() {
+	local name="$1" entry
+	for entry in $DEPENDENCY_ALLOWLIST; do
+		[[ "$entry" == "$name" ]] && return 0
+	done
+	return 1
+}
+
+go_files=()
+while IFS= read -r -d '' f; do
+	go_files+=("$f")
+done < <(find backend pkg scripts -name '*.go' -print0 2>/dev/null)
+for f in *.go; do
+	if [[ -f "$f" ]]; then go_files+=("$f"); fi
+done
+
+declare -A selected=()
+while IFS= read -r n; do
+	if [[ -n "$n" ]]; then selected["$n"]=1; fi
+done < <(cat "${go_files[@]}" 2>/dev/null | grep -v '^[[:space:]]*//' |
+	grep -ohE '\.[A-Za-z_][A-Za-z0-9_]*' | sed 's/^\.//' | sort -u || true)
+
+never_called=0
+call_violations=0
+call_stale=0
+methods=0
+declare -A dependency_used=()
+
+while IFS=: read -r file line rest; do
+	case "$file" in *_test.go) continue ;; esac
+	case "$rest" in 'func ('*) ;; *) continue ;; esac
+	name="${rest#*) }"
+	name="${name%%(*}"
+	if [[ ! "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then continue; fi
+	methods=$((methods + 1))
+	if [[ -n "${selected[$name]:-}" ]]; then continue; fi
+	never_called=$((never_called + 1))
+
+	if is_dependency_allowed "$name"; then
+		dependency_used["$name"]=1
+		printf '  ok   %-52s (a dependency calls it)\n' "$file: $name"
+		continue
+	fi
+
+	printf '  DEAD %-52s %s\n' "$file" "$name"
+	call_violations=$((call_violations + 1))
+done < <(grep -n '^func (' "${go_files[@]}" 2>/dev/null || true)
+
+# An entry goes stale once this tree calls the name itself, the same way pass 1's entries go stale.
+for entry in $DEPENDENCY_ALLOWLIST; do
+	if [[ -z "${dependency_used[$entry]:-}" ]] && [[ -n "${selected[$entry]:-}" ]]; then
+		printf '  STALE %-52s this tree calls it now; delete it from DEPENDENCY_ALLOWLIST\n' "$entry"
+		call_stale=$((call_stale + 1))
+	fi
+done
+
+printf 'selector pass: %d methods, %d never called, %d unexplained, %d stale allowlist entries\n' \
+	"$methods" "$never_called" "$call_violations" "$call_stale"
+
+if (( call_stale > 0 )); then
+	cat >&2 <<-EOF
+	$call_stale DEPENDENCY_ALLOWLIST entries name a method this tree now calls, so pass 2 no longer
+	reports them. Delete them from DEPENDENCY_ALLOWLIST in scripts/deadcode-check.sh.
+	EOF
+	rc=1
+fi
+
+if (( call_violations > 0 )); then
+	cat >&2 <<-EOF
+	Pass 2 found methods no file calls. Pass 1 cannot see these, because the method's type satisfies a
+	used interface. Delete the method, or - if a dependency calls it by name - add it to
+	DEPENDENCY_ALLOWLIST with the dependency's name.
+	EOF
+	rc=1
+fi
+
+exit $rc

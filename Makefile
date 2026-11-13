@@ -250,7 +250,7 @@ test-podman-state: ## Test the entrypoint's sweep of podman's transient state (~
 # into an error carrying its install command, because a gate that passes an unrun check is the same
 # false "done" with better formatting.
 .PHONY: lint
-lint: ## gofmt + scoped vet + staticcheck (all checks) + deadcode (every root)
+lint: ## gofmt + scoped vet + staticcheck (all checks) + deadcode and the selector pass
 	@echo "==> gofmt"
 	@# stderr is folded in on purpose: gofmt reports an unreadable path on stderr and exits non-zero,
 	@# while the list on stdout stays empty — so a deleted or renamed entry used to leave this step

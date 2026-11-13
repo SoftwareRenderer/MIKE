@@ -803,13 +803,6 @@ func (asm *AppStreamManager) BroadcastTaskDeleted(projectID, taskID string) {
 	asm.BroadcastProjectCounts()
 }
 
-// SendProjectEvent sends a project-level event (e.g. sandbox build progress).
-func (asm *AppStreamManager) SendProjectEvent(projectID string, event types.StreamEvent) {
-	asm.sendBoardPayload(projectID, appFrame(event.Type, map[string]any{
-		"data": event.Data,
-	}))
-}
-
 // BroadcastProjectPorts sends a project_ports event to all clients of a project.
 func (asm *AppStreamManager) BroadcastProjectPorts(projectID string, ports []types.AssignedPort) {
 	asm.sendBoardPayload(projectID, appFrame(types.WSTypeProjectPorts, map[string]any{

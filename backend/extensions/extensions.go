@@ -226,13 +226,15 @@ type LSPConfig struct {
 	Sandbox *SandboxConfig `json:"sandbox,omitzero"`
 }
 
-// IsToolCallsEnabled returns true if LSP tool calls are enabled.
-// Defaults to true when not explicitly set (nil).
+// toolCallsOffered reports whether a manifest's tool_calls_enabled flag lets the tools run. The flag
+// is optional, and a manifest that leaves it out gets the default, which is to run them.
+func toolCallsOffered(flag *bool) bool {
+	return flag == nil || *flag
+}
+
+// IsToolCallsEnabled reports whether the agent may use this extension's LSP tools.
 func (c *LSPConfig) IsToolCallsEnabled() bool {
-	if c == nil || c.ToolCallsEnabled == nil {
-		return true
-	}
-	return *c.ToolCallsEnabled
+	return c == nil || toolCallsOffered(c.ToolCallsEnabled)
 }
 
 // IsChatDiagnosticsEnabled returns true when the post-edit diagnostics pass may use this
@@ -385,12 +387,9 @@ type ToolConfig struct {
 	ToolCallsEnabled *bool `json:"tool_calls_enabled,omitzero"`
 }
 
-// IsToolCallsEnabled reports whether the tool is offered. Nil means offered.
+// IsToolCallsEnabled reports whether the agent may call this tool.
 func (t *ToolConfig) IsToolCallsEnabled() bool {
-	if t == nil || t.ToolCallsEnabled == nil {
-		return true
-	}
-	return *t.ToolCallsEnabled
+	return t == nil || toolCallsOffered(t.ToolCallsEnabled)
 }
 
 // ToolRequest asks the upstream something. Its origin comes only from the configuration (see
