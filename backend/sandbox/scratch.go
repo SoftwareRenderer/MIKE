@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"mike/backend/fsutil"
+	"mike/backend/startup"
 	"mike/pkg/logging"
 	"mike/pkg/sandboxruntime"
 )
@@ -178,10 +179,25 @@ func (s *buildScratch) StopWatch() {
 	s.stop = nil
 }
 
-const (
-	buildOutputSampleEvery = 2 * time.Second
-	buildOutputMaxBytes    = int64(4) << 30
-)
+const buildOutputSampleEvery = 2 * time.Second
+
+// buildOutputLimitMB is the resolved startup decision, held as megabytes so the default can stay the
+// ladder's own number. It is set once at boot, beside the scratch root.
+var buildOutputLimitMB atomic.Int64
+
+// SetBuildOutputLimitMB decides how much disk one build's output directory may hold. A value that
+// decides nothing is left to `buildOutputLimitBytes()`, which is the one place the default lives.
+func SetBuildOutputLimitMB(mb int64) { buildOutputLimitMB.Store(mb) }
+
+// buildOutputLimitBytes is the cap in force. Nothing injected leaves the default standing: a build with
+// no cap is a Dockerfile deciding how much disk this machine has.
+func buildOutputLimitBytes() int64 {
+	mb := buildOutputLimitMB.Load()
+	if mb <= 0 {
+		mb = startup.DefaultBuildOutputLimitMB
+	}
+	return mb << 20
+}
 
 // SweepScratch removes every entry left under the scratch root. Nothing is running at boot, so every entry was
 // left by a build that was killed, and a leftover build directory is the largest thing MIKE ever writes.

@@ -44,6 +44,8 @@ const (
 	EnvGCDryRun          = "MIKE_GC_DRY_RUN"
 	EnvPProf             = "MIKE_PPROF"
 	EnvMemoryBudgetPct   = "MIKE_MEMORY_BUDGET_PCT"
+	// EnvBuildOutputLimitMB caps the disk one image build may write into its output directory.
+	EnvBuildOutputLimitMB = "MIKE_BUILD_OUTPUT_LIMIT_MB"
 )
 
 // DefaultPort and DefaultListenAddr are the built-in defaults of the ladder. Loopback by default
@@ -70,6 +72,11 @@ const (
 	// numerator is what MIKE's own containers and processes cost, so the percentage is MIKE's share
 	// of the machine rather than a margin kept over everyone else's usage.
 	DefaultMemoryBudgetPct = 90
+
+	// DefaultBuildOutputLimitMB is the disk cap of one image build, in megabytes. The directory it
+	// caps holds the finished image as an archive beside the builder's own temp tree, so a build costs
+	// about twice the size of the image it produces.
+	DefaultBuildOutputLimitMB = int64(8192)
 )
 
 // Flags carries what the command line provided. The zero value means "not given", which is what makes
@@ -162,6 +169,9 @@ type Config struct {
 	// MemoryBudgetPct is the percentage of installed RAM the memory budget may be spent out of.
 	// Always 1-100; the gate multiplies it by MemTotal once, at startup.
 	MemoryBudgetPct int
+
+	// BuildOutputLimitMB is the disk cap of one image build's output directory. Always > 0.
+	BuildOutputLimitMB int64
 
 	// DangerZone is the operator's permission to turn sandboxing off. It is not a permission to
 	// execute anywhere: a project's sandbox_enabled column answers that.
@@ -257,6 +267,13 @@ func Resolve(f Flags) (Config, error) {
 	// A budget percentage that does not parse would silently decide how much of the machine MIKE
 	// takes, so it is refused outright rather than warned into the default.
 	c.MemoryBudgetPct, err = resolvePercent(os.Getenv(EnvMemoryBudgetPct))
+	if err != nil {
+		return Config{}, err
+	}
+
+	// The same reason as the budget percentage: this number decides how much disk a Dockerfile may
+	// fill, so a typo refuses the boot rather than deciding it quietly.
+	c.BuildOutputLimitMB, err = resolveBuildOutputLimitMB(os.Getenv(EnvBuildOutputLimitMB))
 	if err != nil {
 		return Config{}, err
 	}
@@ -362,6 +379,23 @@ func resolvePercent(raw string) (int, error) {
 	}
 	if n < 1 || n > 100 {
 		return 0, fmt.Errorf("%s: %d is outside 1-100", EnvMemoryBudgetPct, n)
+	}
+	return n, nil
+}
+
+// resolveBuildOutputLimitMB resolves the disk cap of one image build in megabytes. An unset or empty
+// variable is the default; anything else that does not parse, or is not positive, refuses the boot — a
+// cap of zero would be no cap at all, which is the thing the cap exists to prevent.
+func resolveBuildOutputLimitMB(raw string) (int64, error) {
+	if raw == "" {
+		return DefaultBuildOutputLimitMB, nil
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s=%q is not a number of megabytes", EnvBuildOutputLimitMB, raw)
+	}
+	if n <= 0 {
+		return 0, fmt.Errorf("%s: %d is not a positive number of megabytes", EnvBuildOutputLimitMB, n)
 	}
 	return n, nil
 }

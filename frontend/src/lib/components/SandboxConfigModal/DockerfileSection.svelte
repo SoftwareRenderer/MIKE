@@ -7,7 +7,7 @@
     import { t } from '$lib/i18n';
     import Spinner from '../Spinner.svelte';
     import type { Project } from '$lib/types';
-    import { imageTagFor } from './drafts';
+    import { defaultBuildContext, imageTagFor } from './drafts';
     import BuildProgress from './BuildProgress.svelte';
     import type { SandboxDraftOwner } from './draft.svelte';
 
@@ -21,6 +21,7 @@
 
     const imageTag = $derived(imageTagFor(project.name));
     const dockerfileChanged = $derived(draft.dockerfileChanged(project));
+    const contextDefault = $derived(defaultBuildContext(project.path, draft.dockerfilePath));
     const busy = $derived(locked || draft.building);
 </script>
 
@@ -84,7 +85,7 @@
     <div class="build-context-row">
         <label class="build-context-label" for="sandbox-build-context">{t('sandbox.buildContext')}</label>
         <input id="sandbox-build-context" class="build-context-input" type="text" spellcheck="false"
-               autocomplete="off" placeholder="." bind:value={draft.buildContext} disabled={locked}
+               autocomplete="off" placeholder={contextDefault} bind:value={draft.buildContext} disabled={locked}
                title={t('sandbox.buildContextDesc')} />
     </div>
 

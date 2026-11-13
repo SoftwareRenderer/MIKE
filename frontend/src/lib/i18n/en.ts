@@ -1340,7 +1340,7 @@ const catalog = {
     'sandbox.dockerfile': 'Dockerfile',
     'sandbox.dockerfileDesc': 'Select a Dockerfile on the server',
     'sandbox.buildContext': 'Build context',
-    'sandbox.buildContextDesc': 'The folder that the build process can access, relative to the repository root',
+    'sandbox.buildContextDesc': 'The folder a build can read, relative to the repository root. Empty means the folder holding the Dockerfile.',
     'sandbox.buildVenue': 'Builds are run in a temporary sandbox with network access, read-only access to declared mounts, and default capabilities.',
     'sandbox.buildImage': 'Build image',
     'sandbox.build': 'Build',

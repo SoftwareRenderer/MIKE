@@ -88,6 +88,31 @@ function capabilitiesChanged(stored: string[], draft: string[]): boolean {
 }
 
 /**
+ * The two fields the Dockerfile image source owns. A build reads both off the stored row, so
+ * `draft.rebuild()` writes them before starting one.
+ */
+export function dockerfileSourceChanges(project: Project, draft: SandboxDraft): ProjectUpdates {
+    const changes: ProjectUpdates = {};
+    if (draft.dockerfilePath !== (project.sandbox_dockerfile_path ?? '')) {
+        changes.sandbox_dockerfile_path = draft.dockerfilePath;
+    }
+    if (draft.buildContext !== (project.sandbox_build_context ?? '')) {
+        changes.sandbox_build_context = draft.buildContext;
+    }
+    return changes;
+}
+
+/**
+ * The subtree an empty Build context stages: the Dockerfile's own directory, relative to the repository
+ * root, which is what `sandbox.BuildContextRoot()` defaults to. Anywhere else leaves the repository itself.
+ */
+export function defaultBuildContext(repoPath: string, dockerfilePath: string): string {
+    const root = repoPath.replace(/\/+$/, '');
+    const dir = dockerfilePath.slice(0, dockerfilePath.lastIndexOf('/'));
+    return dir.startsWith(`${root}/`) ? dir.slice(root.length + 1) : '.';
+}
+
+/**
  * The whole configuration is one write: every field that differs from the row is collected here and
  * nothing else issues a request. An unset field is absent, so a section nobody touched is never
  * rewritten — and a limit cleared to blank is sent as an explicit 0, because null tells the server
@@ -123,12 +148,7 @@ export function projectChanges(project: Project, draft: SandboxDraft): SandboxCh
             changes.sandbox_build_context = '';
         }
     } else {
-        if (draft.dockerfilePath !== (project.sandbox_dockerfile_path ?? '')) {
-            changes.sandbox_dockerfile_path = draft.dockerfilePath;
-        }
-        if (draft.buildContext !== (project.sandbox_build_context ?? '')) {
-            changes.sandbox_build_context = draft.buildContext;
-        }
+        Object.assign(changes, dockerfileSourceChanges(project, draft));
         if (project.sandbox_image) {
             changes.sandbox_image = '';
         }

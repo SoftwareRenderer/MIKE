@@ -402,14 +402,20 @@ This section is the mechanism.
   empty scratch root a success does, which
   `TestBuildRemovesItsContainerAndScratchOnEveryExit` checks. A cleanup failure is a `Warn` naming the
   leftover, never a fatal.
-- **The output is watched, not trusted.** `watchDir` samples `/mike-out` and stops the build past the cap;
-  the in-guest store is uncapped by design (tmpfs rejected it), so the archive is the number supervised. The
-  builder's temp directory is a subdirectory of that same tree, which is why it is a bind rather than a tmpfs:
-  its bytes fall under the cap beside the artifact's.
+- **The output is watched, not trusted.** `Watch` samples the build's output directory every 2 s and stops
+  the build past the cap; the in-guest store is uncapped by design (tmpfs rejected it), so the archive is
+  the number supervised. The builder's temp directory is a subdirectory of that same tree, which is why it
+  is a bind rather than a tmpfs: its bytes fall under the cap beside the artifact's. The cap is
+  `MIKE_BUILD_OUTPUT_LIMIT_MB`, resolved once at boot and injected beside the scratch root; its default is
+  8 GiB because that directory holds the image twice over — the archive first, then what the host's store
+  grows by when it loads the archive. The build names the number on its own stream when it starts and again
+  when the build trips it, because the log line is not on the reader's screen.
 - Tests: `backend/sandbox/build_e2e_test.go` runs a real build and checks three things — committed bytes
   reach the image, a `RUN` step's output survives the load, nothing is left behind. The gate-side tests are
   `backend/sandbox/dockerfile_test.go`, `backend/sandbox/buildcontext_test.go` and
-  `backend/sandbox/build_test.go`. `make build-probe` (`scripts/sandboxprobe --build`) re-measures the grant
+  `backend/sandbox/build_test.go`. The cap is `TestScratchWatchStopsTheBuildPastTheCap` and
+  `TestSetBuildOutputLimitMBDecidesTheCap`; its resolution is
+  `TestBuildOutputLimitMBRefusesAnythingButWholeMegabytes`. `make build-probe` (`scripts/sandboxprobe --build`) re-measures the grant
   and sweeps its own `mike-build-probe-*` family, since it deliberately lives outside the product's sweep.
 
 ## A container's memory record, and what the user is told

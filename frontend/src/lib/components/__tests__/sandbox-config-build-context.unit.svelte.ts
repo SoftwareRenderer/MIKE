@@ -100,6 +100,16 @@ describe('Sandbox Configuration build context', () => {
         expect(one<HTMLInputElement>(container, CONTEXT_FIELD).value).toBe('services/api');
     });
 
+    // An empty field is not the repository root, and a person who believes it is gets a COPY that finds
+    // nothing. The field names the subtree an empty value stages.
+    it('names the Dockerfile\'s own folder as the subtree an empty field stages', () => {
+        const { container } = renderModal(projectWith({
+            path: '/srv/repo',
+            sandbox_dockerfile_path: '/srv/repo/examples/kanban.Dockerfile',
+        }));
+        expect(one<HTMLInputElement>(container, CONTEXT_FIELD).placeholder).toBe('examples');
+    });
+
     it('writes nothing when the field was left as the row has it', async () => {
         const { container } = renderModal(projectWith({ sandbox_build_context: 'services/api' }));
         await fireEvent.click(one<HTMLButtonElement>(container, '.btn-primary'));

@@ -3,7 +3,7 @@ import { t } from '$lib/i18n';
 import type { AssignedPort, PortForward, Project, SandboxEnv, SandboxMount, Task } from '$lib/types';
 import { bindForInput, normalizeBind, portRowError } from '$lib/utils/sandbox-ports';
 import { capSuggestionsFor, capabilitiesToAdd, normalizeCapability } from './capabilities';
-import { draftFromProject, type ImageSource, type SandboxDraft } from './drafts';
+import { dockerfileSourceChanges, draftFromProject, type ImageSource, type SandboxDraft } from './drafts';
 
 /**
  * The add row commits either onto the row it opened from or onto a new last row. A new array either
@@ -522,8 +522,10 @@ export class SandboxDraftOwner {
         this.buildLog = [];
 
         try {
-            if (this.dockerfileChanged(project)) {
-                await updateProject(project.id, { sandbox_dockerfile_path: this.dockerfilePath });
+            // The build reads the row, so the Dockerfile section's unsaved fields go first.
+            const pending = dockerfileSourceChanges(project, this.snapshot());
+            if (Object.keys(pending).length > 0) {
+                await updateProject(project.id, pending);
             }
             await buildSandboxImageStream(project.id, (line: string) => {
                 if (line.startsWith('error: ')) {

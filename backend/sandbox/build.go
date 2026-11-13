@@ -10,7 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 
+	"mike/backend/startup"
 	"mike/backend/types"
 	"mike/pkg/logging"
 	"mike/pkg/sandboxruntime"
@@ -470,10 +472,17 @@ func (sm *SandboxManager) runBuildContainer(ctx context.Context, plan *buildPlan
 		}
 	}()
 
-	plan.scratch.Watch(buildOutputMaxBytes, func() { sm.stopBuildContainer(name) })
+	// The cap in force, so the stream can name the number a person has to widen. The stop runs on the
+	// sampler's goroutine; only the flag crosses back.
+	outputLimit := buildOutputLimitBytes()
+	var outputCapped atomic.Bool
+	plan.scratch.Watch(outputLimit, func() {
+		outputCapped.Store(true)
+		sm.stopBuildContainer(name)
+	})
 	defer plan.scratch.StopWatch()
 
-	emit("building in a gVisor container (read-only inputs, network for the build's own steps)…")
+	emit(fmt.Sprintf("building in a gVisor container (read-only inputs, network for the build's own steps), output capped at %s", humanBytes(outputLimit)))
 	// The guest's own lines, kept to a bound, because the only evidence about why a nested build failed is
 	// what it printed (buildFailureHint reads it for a permission refusal).
 	var tail []string
@@ -487,6 +496,13 @@ func (sm *SandboxManager) runBuildContainer(ctx context.Context, plan *buildPlan
 		podmanCommandContext(ctx, append(sandboxruntime.RuntimeFlagsForExistingContainer(), "start", "-a", name)...),
 		"build", plan.fromRef, "build", capture)
 	if err != nil {
+		if outputCapped.Load() {
+			hint := fmt.Sprintf("the build's output directory passed %s, the limit for one build. That directory holds the "+
+				"image archive beside the builder's temp, so an image near the limit needs %s raised.",
+				humanBytes(outputLimit), startup.EnvBuildOutputLimitMB)
+			emit(hint)
+			return fmt.Errorf("build %s: %w — %s", plan.fromRef, err, hint)
+		}
 		if hint := buildFailureHint(tail); hint != "" {
 			emit(hint)
 			return fmt.Errorf("build %s: %w — %s", plan.fromRef, err, hint)

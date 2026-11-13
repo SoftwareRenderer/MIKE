@@ -482,6 +482,9 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 	// A build's scratch root sits under the workspace root, outside every checkout and never the data directory.
 	// Sweeping before anything starts means every entry here belongs to the previous process.
 	sandbox.SetScratchRoot(worktreesDir)
+	sandbox.SetBuildOutputLimitMB(settings.BuildOutputLimitMB)
+	logging.For(logging.Sandbox).Infof("one image build may write %d MB into its scratch directory (%s)",
+		settings.BuildOutputLimitMB, startup.EnvBuildOutputLimitMB)
 	sandbox.SweepScratch()
 	defer s.reg(stageImageBuilds, "image builds", sandbox.CancelBuilds)()
 	defer s.reg(stageSandboxContainers, "sandbox containers", s.sandboxMgr.Cleanup)()

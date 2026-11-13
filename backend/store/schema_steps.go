@@ -14,7 +14,7 @@ type schemaStep struct {
 	// Key names the step and the marker row it leaves behind. Keys are dated and registered oldest first.
 	Key string
 	// OneWay marks a step that destroys data an older build reads, so an older build refuses the file.
-	// Nothing sets it yet, and the check has to ship before the step that sets it.
+	// `checkSchemaStepsAhead()` reads the marker back to make that refusal.
 	OneWay bool
 	// Apply does the work. It runs at most once per file, after the shape pass, and it owns its
 	// transaction, so a failure leaves no marker row and the next boot tries again.
@@ -33,10 +33,18 @@ var schemaSteps = []schemaStep{
 		OneWay: true,
 		Apply:  dropProjectRunSetHash,
 	},
+	{
+		Key:    dropStorageLimitColumnKey,
+		OneWay: true,
+		Apply:  dropProjectSandboxStorageLimit,
+	},
 }
 
 // dropRunSetHashColumnKey is the step's key, named so the test asserts on the same string the file records.
 const dropRunSetHashColumnKey = "2026-11-02-drop-project-run-set-hash"
+
+// dropStorageLimitColumnKey is the second dropped column's key, named for the same reason.
+const dropStorageLimitColumnKey = "2026-11-12-drop-project-sandbox-storage-limit"
 
 // runSchemaSteps runs the steps this file has not recorded. A step that fails stops the boot and names
 // itself, so no board is served over partly moved data.
@@ -165,6 +173,30 @@ func dropProjectRunSetHash(s *Store) error {
 			return s.tx(func(tx *sql.Tx) error {
 				if _, err := tx.Exec(`ALTER TABLE projects DROP COLUMN sandbox_run_set_hash`); err != nil {
 					return fmt.Errorf("drop projects.sandbox_run_set_hash: %w", err)
+				}
+				return nil
+			})
+		}
+	}
+	return nil
+}
+
+// dropProjectSandboxStorageLimit removes the column that was to hold a project's disk cap. This build never
+// reads it: the column is out of the DDL, out of the list every project read selects, and out of the
+// settings the API accepts, so it can hold only what a file from its own era wrote there.
+//
+// One-way on the same reading as the step above: a build from the era that wrote the column may select
+// it by name.
+func dropProjectSandboxStorageLimit(s *Store) error {
+	columns, _, err := s.liveColumns("projects")
+	if err != nil {
+		return err
+	}
+	for _, c := range columns {
+		if c == "sandbox_storage_limit" {
+			return s.tx(func(tx *sql.Tx) error {
+				if _, err := tx.Exec(`ALTER TABLE projects DROP COLUMN sandbox_storage_limit`); err != nil {
+					return fmt.Errorf("drop projects.sandbox_storage_limit: %w", err)
 				}
 				return nil
 			})

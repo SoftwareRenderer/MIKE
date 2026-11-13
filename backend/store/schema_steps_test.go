@@ -175,6 +175,63 @@ func TestAFreshFileBootsOverTheDropStepWithNothingToDrop(t *testing.T) {
 	}
 }
 
+// The disk-cap column left the DDL without a step, so a file written while it existed still carries a value
+// nothing reads. Its row has to survive its column.
+func TestAnOlderFileLosesTheStorageLimitColumnAndKeepsItsRow(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "stolimit.db")
+	db := openRaw(t, path)
+	for _, stmt := range splitStatements(baselineDDL(t)) {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("build the older schema: %v", err)
+		}
+	}
+	if _, err := db.Exec(`ALTER TABLE projects ADD COLUMN sandbox_storage_limit INTEGER NOT NULL DEFAULT 0`); err != nil {
+		t.Fatalf("add the column the way the release that had it did: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO projects (id, name, path, sandbox_storage_limit, created_at, updated_at)
+		VALUES ('sl', 'stolimit', '/tmp/stolimit', 4096, '2026-10-20T00:00:00Z', '2026-10-20T00:00:00Z')`); err != nil {
+		t.Fatalf("seed the project: %v", err)
+	}
+	closeRaw(t, db)
+
+	s := openStore(t, path)
+
+	if _, err := s.db.Exec(`SELECT sandbox_storage_limit FROM projects`); err == nil {
+		t.Error("the column survived the boot that dropped it")
+	}
+	p, err := s.GetProject("sl")
+	if err != nil {
+		t.Fatalf("the project row did not survive its column: %v", err)
+	}
+	if p.Name != "stolimit" || p.Path != "/tmp/stolimit" {
+		t.Errorf("the row reads (%q, %q), want the values it was seeded with", p.Name, p.Path)
+	}
+	if done, err := s.stepDone(dropStorageLimitColumnKey); err != nil || !done {
+		t.Errorf("the step that dropped the column is not recorded (done=%v err=%v)", done, err)
+	}
+	// A build from the era that wrote the column selects it by name, so the file has to refuse it.
+	if _, found, err := s.metaValue(oneWayRowPrefix + dropStorageLimitColumnKey); err != nil || !found {
+		t.Errorf("a step that destroyed a column is not marked one-way (found=%v err=%v)", found, err)
+	}
+}
+
+// The same decline on a fresh file: this build's DDL never had the column, so the step finds nothing to drop.
+func TestAFreshFileBootsOverTheStorageLimitDrop(t *testing.T) {
+	s, _ := newStoreAt(t)
+	columns, _, err := s.liveColumns("projects")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range columns {
+		if c == "sandbox_storage_limit" {
+			t.Fatal("a file this build created has the column this build does not have")
+		}
+	}
+	if err := s.runSchemaSteps([]schemaStep{{Key: "2026-11-12-probe", Apply: dropProjectSandboxStorageLimit}}); err != nil {
+		t.Errorf("the drop was refused where there was nothing to drop: %v", err)
+	}
+}
+
 // markFutureRow writes a marker row for a step this build does not have. It writes the table directly, so the
 // test does not use the code under test.
 func markFutureRow(t *testing.T, s *Store, key string, oneWay bool) {

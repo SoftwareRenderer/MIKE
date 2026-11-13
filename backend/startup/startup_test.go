@@ -187,7 +187,7 @@ var resolverEnv = []string{
 	EnvLogLevel, EnvEncryptionKey, EnvRegistryURL, EnvExtMountRoots,
 	EnvAgentPath, EnvSkipSandboxSweep, EnvTrustProxy, EnvLoginRateLimit, EnvAllowRootFS,
 	EnvDangerZone, EnvGCDryRun, EnvPProf, EnvMemoryBudgetPct, EnvUpdateURL, EnvDisableUpdates,
-	EnvRestrictMCP, EnvRestrictStatReset, EnvTLSCert, EnvTLSKey,
+	EnvRestrictMCP, EnvRestrictStatReset, EnvTLSCert, EnvTLSKey, EnvBuildOutputLimitMB,
 }
 
 func clearResolverEnv(t testing.TB) {
@@ -315,6 +315,41 @@ func TestMemoryBudgetPctRefusesAnythingButAPercentage(t *testing.T) {
 		t.Run("refuses "+raw, func(t *testing.T) {
 			if msg := mustFailResolve(t, raw); !strings.Contains(msg, EnvMemoryBudgetPct) {
 				t.Errorf("error %q must name %s", msg, EnvMemoryBudgetPct)
+			}
+		})
+	}
+}
+
+// The build output cap decides how much disk one Dockerfile may fill, so a value that does not count out
+// in whole megabytes refuses the boot naming the variable; an empty value is the default.
+func TestBuildOutputLimitMBRefusesAnythingButWholeMegabytes(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want int64
+	}{
+		{"", DefaultBuildOutputLimitMB},
+		{"8192", 8192},
+		{"1", 1},
+		{"262144", 262144},
+	} {
+		t.Run("MIKE_BUILD_OUTPUT_LIMIT_MB="+tc.raw, func(t *testing.T) {
+			t.Setenv(EnvBuildOutputLimitMB, tc.raw)
+			if got := mustResolve(t, Flags{}).BuildOutputLimitMB; got != tc.want {
+				t.Errorf("limit = %d, want %d", got, tc.want)
+			}
+		})
+	}
+	// A cap of 0 or less would be no cap, which is the thing the cap exists to prevent.
+	for _, raw := range []string{"0", "-1", "8G", "8192.5", "eight"} {
+		t.Run("refuses "+raw, func(t *testing.T) {
+			t.Setenv(EnvEncryptionKey, "a-long-enough-test-key")
+			t.Setenv(EnvBuildOutputLimitMB, raw)
+			_, err := Resolve(Flags{})
+			if err == nil {
+				t.Fatalf("Resolve accepted %s=%q", EnvBuildOutputLimitMB, raw)
+			}
+			if !strings.Contains(err.Error(), EnvBuildOutputLimitMB) {
+				t.Errorf("error %q must name %s", err.Error(), EnvBuildOutputLimitMB)
 			}
 		})
 	}

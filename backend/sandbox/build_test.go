@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"mike/backend/fsutil"
+	"mike/backend/startup"
 	"mike/backend/types"
 	"mike/pkg/sandboxruntime"
 )
@@ -420,6 +421,24 @@ func TestScratchSweepRemovesOrphansAndKeepsNothingElse(t *testing.T) {
 		t.Error("the sweep removed a directory that is not build scratch")
 	}
 	SweepScratch() // an absent root sweeps nothing and reports nothing
+}
+
+// The cap an operator sets is the cap enforced: the ladder's default stands until something injects a
+// value, and a value that decides nothing returns to the default rather than to no cap.
+func TestSetBuildOutputLimitMBDecidesTheCap(t *testing.T) {
+	t.Cleanup(func() { buildOutputLimitMB.Store(0) })
+
+	if got, want := buildOutputLimitBytes(), startup.DefaultBuildOutputLimitMB<<20; got != want {
+		t.Errorf("uninjected cap = %d, want the default %d", got, want)
+	}
+	SetBuildOutputLimitMB(2048)
+	if got := buildOutputLimitBytes(); got != 2048<<20 {
+		t.Errorf("cap = %d, want %d", got, int64(2048)<<20)
+	}
+	SetBuildOutputLimitMB(0)
+	if got, want := buildOutputLimitBytes(), startup.DefaultBuildOutputLimitMB<<20; got != want {
+		t.Errorf("a value that decides nothing left the cap at %d, want the default %d", got, want)
+	}
 }
 
 func TestScratchWatchStopsTheBuildPastTheCap(t *testing.T) {

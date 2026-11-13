@@ -93,4 +93,22 @@ describe('SandboxConfigModal rebuild button', () => {
         expect(container.querySelector('.btn-rebuild')).toBeNull();
         expect(container.querySelector('.btn-build')).toBeNull();
     });
+
+    // The build stages the row, not the screen: a field typed and then built from without pressing Save
+    // still has to reach the server before the container starts.
+    it('stores an unsaved build context before the build that stages it', async () => {
+        const order: string[] = [];
+        updateProject.mockImplementation(async () => { order.push('write'); return {}; });
+        buildSandboxImageStream.mockImplementation(async () => { order.push('build'); return { status: 'built' }; });
+
+        const { container } = renderModal(projectWith());
+        const field = container.querySelector('#sandbox-build-context');
+        if (!field) throw new Error('build context field not found');
+        await fireEvent.input(field, { target: { value: 'services/api' } });
+        await fireEvent.click(rebuildButton(container));
+
+        await waitFor(() => expect(buildSandboxImageStream).toHaveBeenCalled());
+        expect(order).toStrictEqual(['write', 'build']);
+        expect(updateProject).toHaveBeenCalledWith('p1', { sandbox_build_context: 'services/api' });
+    });
 });
