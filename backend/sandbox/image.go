@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"mike/backend/types"
@@ -56,19 +57,58 @@ func ResolveProjectImage(project *types.Project) ProjectImage {
 	return ProjectImage{Image: BaseImage, Source: ImageSourceDefault}
 }
 
+// imageKey is the key of the in-flight table for one project image. It is the image reference the host
+// actually uses, because a reference stored on a project may still be a short name. Every caller that starts,
+// joins, watches or stops a preparation works out the key this way, or two of them end up naming different
+// builds.
+func (sm *SandboxManager) imageKey(pi ProjectImage) string {
+	return sm.rt.ResolveImageRef(pi.Image)
+}
+
 // imageOp is one in-flight image build or pull. Everyone watching it hears its progress and takes its answer.
 type imageOp struct {
-	wg sync.WaitGroup
-	// err and result are the preparation's answer: written before wg.Done, read only after wg.Wait.
-	err    error
+	// done is closed when the preparation answers. err and result are written before that close and read only
+	// after it. It is a channel rather than a WaitGroup because a waiter may stop listening without taking the
+	// answer, and the answer still has to be there for the others.
+	done chan struct{}
+	err  error
+
 	result *BuildResult
 
-	// waitersMu guards waiters and announced. A listener runs with no lock held, so it may write a socket or
-	// broadcast while the build keeps emitting.
+	// waitersMu guards waiters, announced and cancel. A listener runs with no lock held, so it may write a
+	// socket or broadcast while the build keeps emitting.
 	waitersMu sync.Mutex
 	waiters   []func(types.SandboxImageStatus)
 	// announced is the phase this preparation said it was doing, replayed to whoever joins later.
 	announced *types.SandboxImageStatus
+	// cancel stops the work this key stands for. The build is a subprocess and only a cancelled context ends
+	// one, so this is the only way out of it. It is nil between claiming the key and starting the work, which
+	// is the only moment in which a cancel has nothing to stop.
+	cancel context.CancelFunc
+	// stopped says a person asked for this preparation to end. Its error cannot say that, because a cancelled
+	// context leaves podman's exit status behind rather than a context error, and without this flag the failure
+	// of a build somebody stopped reads as a fault.
+	stopped atomic.Bool
+}
+
+// setCancel records the function that stops the work this key stands for.
+func (op *imageOp) setCancel(cancel context.CancelFunc) {
+	op.waitersMu.Lock()
+	op.cancel = cancel
+	op.waitersMu.Unlock()
+}
+
+// stopWork asks the preparation to end, and reports whether there was a context to cancel.
+func (op *imageOp) stopWork() bool {
+	op.waitersMu.Lock()
+	cancel := op.cancel
+	op.waitersMu.Unlock()
+	if cancel == nil {
+		return false
+	}
+	cancel()
+	op.stopped.Store(true)
+	return true
 }
 
 // announce says what this preparation is doing and remembers it, so a caller that joins later still learns
@@ -109,8 +149,58 @@ func (op *imageOp) progress(status types.SandboxImageStatus) {
 
 // await is what the preparation this caller joined produced.
 func (op *imageOp) await() (*BuildResult, error) {
-	op.wg.Wait()
+	<-op.done
 	return op.result, op.err
+}
+
+// answered waits for the preparation to end and reports how it ended. It returns false when ctx ends first;
+// leaving early says nothing about the preparation, which goes on running for everyone else. What the
+// preparation produced is `await`'s question.
+func (op *imageOp) answered(ctx context.Context) (error, bool) {
+	select {
+	case <-op.done:
+		return op.err, true
+	case <-ctx.Done():
+		return nil, false
+	}
+}
+
+// imageWatch is one viewer's queue. It holds the statuses a preparation sends, so that how fast the viewer
+// reads never decides how fast the build runs.
+//
+// A full queue drops instead of blocking. The producer is the goroutine printing the build's own lines, so a
+// viewer that stopped reading must not be able to stall a build.
+type imageWatch struct {
+	statuses chan types.SandboxImageStatus
+	// The preparation keeps sending to every listener it was handed, even after the viewer has gone, so the
+	// flag and the close are guarded: a send on a closed channel panics in the sender.
+	mu     sync.Mutex
+	closed bool
+}
+
+// push hands one status to the watcher, dropping it when the watcher cannot take it.
+func (w *imageWatch) push(status types.SandboxImageStatus) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed {
+		return
+	}
+	select {
+	case w.statuses <- status:
+	default:
+	}
+}
+
+// finish ends the watcher's queue, once. The preparation answering and the viewer leaving both arrive here,
+// and either one means no more reading. The lock covers the flag and the close and nothing else, so a build
+// that is still sending never waits on a viewer.
+func (w *imageWatch) finish() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.closed {
+		w.closed = true
+		close(w.statuses)
+	}
 }
 
 // joinImageOp finds the preparation of image already running and starts sending this caller its progress; it
@@ -136,8 +226,7 @@ func (sm *SandboxManager) claimImageOp(image string, report func(types.SandboxIm
 	if _, busy := sm.imageOps[image]; busy {
 		return nil, false
 	}
-	op := &imageOp{}
-	op.wg.Add(1)
+	op := &imageOp{done: make(chan struct{})}
 	op.watch(report)
 	if sm.imageOps == nil {
 		sm.imageOps = make(map[string]*imageOp)
@@ -154,7 +243,7 @@ func (sm *SandboxManager) finishImageOp(image string, op *imageOp, result *Build
 	}
 	sm.imageOpsMu.Unlock()
 	op.result, op.err = result, err
-	op.wg.Done()
+	close(op.done)
 }
 
 // runImageOp runs the work the claimed key stands for and publishes its answer, on the panic path too. A key
@@ -186,8 +275,7 @@ func (sm *SandboxManager) EnsureImageForProject(project *types.Project, onProgre
 		}
 	}
 
-	// Qualified for every source, because a stored ref may still be a short name.
-	image := sm.rt.ResolveImageRef(pi.Image)
+	image := sm.imageKey(pi)
 	phase := types.SandboxImagePhasePulling
 	if pi.NeedsBuild() {
 		phase = types.SandboxImagePhaseBuilding
@@ -248,17 +336,79 @@ func (sm *SandboxManager) makeProjectImage(op *imageOp, image string, pi Project
 	}
 	op.announce(types.SandboxImageStatus{Phase: phase})
 	report := func(line string) { op.progress(types.SandboxImageStatus{Phase: phase, Line: line}) }
+	// The preparation is bounded by its own time limit and by the Cancel button, and not by the request that
+	// needed the image. A task turn or an opening terminal waits behind the build but does not own it.
+	ctx, cancel := context.WithTimeout(context.Background(), buildCeiling)
+	defer cancel()
+	op.setCancel(cancel)
 	if pi.NeedsBuild() {
-		ctx, cancel := context.WithTimeout(context.Background(), buildCeiling)
-		defer cancel()
 		result, err := sm.buildProjectImageDirect(ctx, project, report)
 		if err != nil {
 			return nil, fmt.Errorf("build sandbox image %s: %w", image, err)
 		}
 		return result, nil
 	}
-	if err := sm.PullImageWithProgress(image, report); err != nil {
+	if err := sm.PullImageWithProgress(ctx, image, report); err != nil {
 		return nil, fmt.Errorf("pull sandbox image %s: %w", image, err)
 	}
 	return nil, nil
+}
+
+// watchQueueLines is how far behind one viewer may fall before its own lines start being dropped. A viewer
+// this far behind has stopped reading, and the build must not wait for one.
+const watchQueueLines = 256
+
+// WatchImagePreparation attaches one viewer to the build or pull of this project's image that is already
+// running. It never starts work, and the second result is false when nothing is running.
+//
+// The channel carries the phase the preparation announced before this caller arrived, every line after that,
+// and finally how it ended. What it printed before the call is not replayed. The channel closes when the
+// preparation answers or when ctx ends. A ctx ending says nothing about the preparation, which goes on running
+// for everyone else.
+func (sm *SandboxManager) WatchImagePreparation(ctx context.Context, project *types.Project) (<-chan types.SandboxImageStatus, bool) {
+	if project == nil {
+		return nil, false
+	}
+	image := sm.imageKey(ResolveProjectImage(project))
+	watch := &imageWatch{statuses: make(chan types.SandboxImageStatus, watchQueueLines)}
+	op, joined := sm.joinImageOp(image, watch.push)
+	if !joined {
+		return nil, false
+	}
+	go func() {
+		defer watch.finish()
+		err, answered := op.answered(ctx)
+		if !answered {
+			return
+		}
+		// The ending frame goes through the same queue as the lines, so a viewer that is dropping lines loses
+		// this one too. Its reader still sees the channel close.
+		switch {
+		case err == nil:
+			watch.push(types.SandboxImageStatus{Phase: types.SandboxImagePhaseDone, Image: image})
+		case op.stopped.Load():
+			watch.push(types.SandboxImageStatus{Phase: types.SandboxImagePhaseCancelled, Image: image})
+		default:
+			watch.push(types.SandboxImageStatus{Phase: types.SandboxImagePhaseFailed, Image: image, Error: err.Error()})
+		}
+	}()
+	return watch.statuses, true
+}
+
+// CancelImagePreparation stops the build or pull of this project's image that is in flight, which kills its
+// container. The caller that started it takes the failure the way it takes any other failed preparation, and
+// nothing starts the build again without being asked. That caller may be this dialog, a task waiting for its
+// image, or a terminal being opened.
+//
+// It returns false when nothing is running. A Cancel pressed a moment after the build ended asked for
+// something that is already true.
+func (sm *SandboxManager) CancelImagePreparation(project *types.Project) bool {
+	if project == nil {
+		return false
+	}
+	image := sm.imageKey(ResolveProjectImage(project))
+	sm.imageOpsMu.Lock()
+	op := sm.imageOps[image]
+	sm.imageOpsMu.Unlock()
+	return op != nil && op.stopWork()
 }

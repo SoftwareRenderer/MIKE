@@ -422,3 +422,158 @@ func TestEnsureImageForProjectBuildsProjectImage(t *testing.T) {
 		t.Errorf("an already-ready image reported %v, want no progress events", phases)
 	}
 }
+
+// TestWatchImagePreparationAnswersNothingWhenNothingRuns: the sandbox dialog asks this when it opens, and a
+// project with no build running has to be answered as idle rather than with a log that never fills.
+func TestWatchImagePreparationAnswersNothingWhenNothingRuns(t *testing.T) {
+	sm := &SandboxManager{rt: sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{}), imageOps: make(map[string]*imageOp)}
+	project := &types.Project{Name: "getmike.dev", SandboxDockerfilePath: dockerfileIn(t)}
+
+	statuses, watching := sm.WatchImagePreparation(context.Background(), project)
+	if watching {
+		t.Fatal("a manager with nothing in flight claimed a viewer was watching a build")
+	}
+	if statuses != nil {
+		t.Error("a viewer that joined nothing was handed a queue")
+	}
+}
+
+// TestWatchImagePreparationCarriesTheRunningBuildToALateViewer: the phase the preparation announced before the
+// viewer arrived comes first, then every line after it, then how it ended, and the queue closes.
+func TestWatchImagePreparationCarriesTheRunningBuildToALateViewer(t *testing.T) {
+	sm := &SandboxManager{rt: sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{}), imageOps: make(map[string]*imageOp)}
+	project := &types.Project{Name: "getmike.dev", SandboxDockerfilePath: dockerfileIn(t)}
+	image := ProjectImageName(project.Name)
+
+	op, _ := sm.claimImageOp(image, nil)
+	op.announce(types.SandboxImageStatus{Phase: types.SandboxImagePhaseBuilding})
+
+	statuses, watching := sm.WatchImagePreparation(context.Background(), project)
+	if !watching {
+		t.Fatal("a running preparation was not watchable")
+	}
+	op.progress(types.SandboxImageStatus{Phase: types.SandboxImagePhaseBuilding, Line: "step 1/3"})
+	sm.finishImageOp(image, op, &BuildResult{Image: image}, nil)
+
+	var got []types.SandboxImageStatus
+	for status := range statuses {
+		got = append(got, status)
+	}
+	if len(got) != 3 {
+		t.Fatalf("frames = %+v, want the phase, the line and the ending", got)
+	}
+	if got[0].Phase != types.SandboxImagePhaseBuilding || got[0].Line != "" {
+		t.Errorf("first frame = %+v, want the announced phase with no line", got[0])
+	}
+	if got[1].Line != "step 1/3" {
+		t.Errorf("second frame = %+v, want the build's own line", got[1])
+	}
+	if got[2].Phase != types.SandboxImagePhaseDone || got[2].Image != image {
+		t.Errorf("last frame = %+v, want %q for %s", got[2], types.SandboxImagePhaseDone, image)
+	}
+}
+
+// TestWatchImagePreparationLeavesTheBuildAloneWhenItsViewerGoes: closing a dialog stops the watching and not the
+// build. The preparation keeps its key and its starter, and still answers the callers waiting on it.
+func TestWatchImagePreparationLeavesTheBuildAloneWhenItsViewerGoes(t *testing.T) {
+	sm := &SandboxManager{rt: sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{}), imageOps: make(map[string]*imageOp)}
+	project := &types.Project{Name: "getmike.dev", SandboxDockerfilePath: dockerfileIn(t)}
+	image := ProjectImageName(project.Name)
+
+	op, _ := sm.claimImageOp(image, nil)
+	op.announce(types.SandboxImageStatus{Phase: types.SandboxImagePhaseBuilding})
+
+	ctx, leave := context.WithCancel(context.Background())
+	statuses, watching := sm.WatchImagePreparation(ctx, project)
+	if !watching {
+		t.Fatal("a running preparation was not watchable")
+	}
+	leave()
+	for closed := false; !closed; {
+		select {
+		case _, open := <-statuses:
+			closed = !open
+		case <-time.After(2 * time.Second):
+			t.Fatal("the watcher's queue stayed open after its caller left")
+		}
+	}
+
+	waiter, joined := sm.joinImageOp(image, nil)
+	if !joined {
+		t.Fatal("closing the watcher retired the in-flight preparation")
+	}
+	sm.finishImageOp(image, op, nil, fmt.Errorf("boom"))
+	if _, err := waiter.await(); err == nil {
+		t.Error("the preparation's own starter was released with no answer")
+	}
+}
+
+// TestCancelImagePreparationStopsTheBuildAndReportsItCancelled: a person's Cancel button reaches the caller that
+// started the build, and a watcher reads a cancellation instead of a fault.
+func TestCancelImagePreparationStopsTheBuildAndReportsItCancelled(t *testing.T) {
+	sm := &SandboxManager{rt: sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{}), imageOps: make(map[string]*imageOp)}
+	project := &types.Project{Name: "getmike.dev", SandboxDockerfilePath: dockerfileIn(t)}
+	image := ProjectImageName(project.Name)
+
+	// The caller that holds the key. The test bounds it the way buildProjectImageDirect bounds a build: one
+	// context recorded on the preparation, and ending that context ends the work.
+	work, stopWork := context.WithCancel(context.Background())
+	op, _ := sm.claimImageOp(image, nil)
+	op.setCancel(stopWork)
+	starter := make(chan error, 1)
+	go func() {
+		<-work.Done()
+		sm.finishImageOp(image, op, nil, work.Err())
+		starter <- work.Err()
+	}()
+
+	statuses, watching := sm.WatchImagePreparation(context.Background(), project)
+	if !watching {
+		t.Fatal("a running preparation was not watchable")
+	}
+	if !sm.CancelImagePreparation(project) {
+		t.Fatal("the cancel did not reach the running preparation")
+	}
+	if err := <-starter; err == nil {
+		t.Error("the caller that started the build was never told it stopped")
+	}
+
+	var last types.SandboxImageStatus
+	for status := range statuses {
+		last = status
+	}
+	if last.Phase != types.SandboxImagePhaseCancelled {
+		t.Errorf("the watcher's last frame = %+v, want %q", last, types.SandboxImagePhaseCancelled)
+	}
+	if _, joined := sm.joinImageOp(image, nil); joined {
+		t.Error("the cancelled preparation left its key claimed, so no later build could run")
+	}
+	if sm.CancelImagePreparation(project) {
+		t.Error("a cancel with nothing in flight reported stopping something")
+	}
+}
+
+// A viewer that cannot keep up loses lines. It must not be the reason a build stops printing.
+func TestWatchImagePreparationDropsRatherThanStallingTheBuild(t *testing.T) {
+	sm := &SandboxManager{rt: sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{}), imageOps: make(map[string]*imageOp)}
+	project := &types.Project{Name: "getmike.dev", SandboxDockerfilePath: dockerfileIn(t)}
+	image := ProjectImageName(project.Name)
+
+	op, _ := sm.claimImageOp(image, nil)
+	if _, watching := sm.WatchImagePreparation(context.Background(), project); !watching {
+		t.Fatal("a running preparation was not watchable")
+	}
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < watchQueueLines*3; i++ {
+			op.progress(types.SandboxImageStatus{Phase: types.SandboxImagePhaseBuilding, Line: fmt.Sprintf("line %d", i)})
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("an unread watcher stalled the build emitting into it")
+	}
+	sm.finishImageOp(image, op, nil, nil)
+}

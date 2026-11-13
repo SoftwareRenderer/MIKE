@@ -57,6 +57,9 @@ const (
 	SandboxImagePhasePulling  = "pulling_image"
 	SandboxImagePhaseDone     = "done"
 	SandboxImagePhaseFailed   = "failed"
+	// SandboxImagePhaseCancelled ends a preparation that a person stopped. It appears on the watch stream only:
+	// the caller that started the build takes a failure, because for that caller the preparation did fail.
+	SandboxImagePhaseCancelled = "cancelled"
 )
 
 // SandboxImageStatus is what an image build reports to whoever triggered it: the phase, the image, and

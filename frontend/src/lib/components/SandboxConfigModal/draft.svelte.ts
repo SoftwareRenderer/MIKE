@@ -1,4 +1,4 @@
-import { getBoard, getProject, updateProject, buildSandboxImageStream } from '$lib/api';
+import { getBoard, getProject, updateProject, buildSandboxImageStream, watchSandboxImageBuild, cancelSandboxImageBuild, type SandboxImageStatus } from '$lib/api';
 import { t } from '$lib/i18n';
 import type { AssignedPort, PortForward, Project, SandboxEnv, SandboxMount, Task } from '$lib/types';
 import { bindForInput, normalizeBind, portRowError } from '$lib/utils/sandbox-ports';
@@ -73,10 +73,22 @@ export class SandboxDraftOwner {
     terminalPorts = $state<AssignedPort[]>([]);
     hasActivePorts = $derived(this.activeHostPorts.size > 0);
 
-    // ── The image build this screen can start ────────────────────────────────
+    // ── The image build this screen reads and can start ──────────────────────
+    /** A build or pull of this project's image is running. It may have been started here, or by a task, a
+     *  terminal, or this dialog a minute ago. */
     building = $state(false);
     buildError = $state('');
     buildLog = $state<string[]>([]);
+    /** A Cancel click is waiting for its answer. */
+    cancelling = $state(false);
+    /** This screen stopped the build, so its stream ending is the expected answer and not a fault. */
+    buildCancelled = $state(false);
+
+    /** True while this screen reads the build it started. Watching that build as well would print every line
+     *  twice. */
+    private ownBuild = false;
+    /** The watch this screen opened on a build it did not start. */
+    private watch: AbortController | null = null;
 
     /** The toggle's previous answer, so only a real off→on flip auto-answers isolation. */
     private prevSandboxEnabled = false;
@@ -425,10 +437,88 @@ export class SandboxDraftOwner {
 
     // ── The image build ──────────────────────────────────────────────────────
 
+    /** Read the build or pull this project's image is already running, if there is one.
+     *
+     *  A screen that started the build reads its own stream, and a second reader would print every line twice.
+     *  A screen already watching does not start a second watch. */
+    async watchBuild(projectId: string): Promise<void> {
+        if (this.ownBuild || this.watch) return;
+        const watching = new AbortController();
+        this.watch = watching;
+        try {
+            await watchSandboxImageBuild(projectId, (status) => this.onBuildStatus(status), watching.signal);
+        } catch (e) {
+            if (!watching.signal.aborted) this.buildError = String(e);
+        } finally {
+            if (this.watch === watching) this.watch = null;
+            // The stream ended, either with the preparation or with this screen's reading of it. Nothing more
+            // arrives, so nothing stays shown as running. A build this screen started is ended by `rebuild`,
+            // which has its own answer.
+            if (!this.ownBuild) this.building = false;
+        }
+    }
+
+    /** The screen is closing. Stop reading, and leave the build to whoever started it. */
+    stopWatching(): void {
+        this.watch?.abort();
+        this.watch = null;
+    }
+
+    /** One status from the build this screen is reading: either a line for the log, or a phase the build moved
+     *  to. */
+    private onBuildStatus(status: SandboxImageStatus): void {
+        if (status.line) {
+            this.buildLog.push(status.line);
+            return;
+        }
+        switch (status.phase) {
+            case 'building_image':
+            case 'pulling_image':
+                this.building = true;
+                break;
+            case 'cancelled':
+                this.building = false;
+                this.buildCancelled = true;
+                break;
+            case 'failed':
+                this.building = false;
+                this.buildError = status.error || t('sandbox.buildFailed');
+                break;
+            default:
+                this.building = false;
+        }
+    }
+
+    /** Stop the build this project's image is running. It may have been started by a task or a terminal, which
+     *  is why the button is offered for a build this screen only watches. */
+    async cancelBuild(project: Project): Promise<void> {
+        if (this.cancelling) return;
+        this.cancelling = true;
+        try {
+            if (await cancelSandboxImageBuild(project.id)) {
+                // A build this screen started ends with one line of its own stream, and that line is the error
+                // this button caused. Say it was cancelled instead.
+                if (this.ownBuild) this.buildCancelled = true;
+            }
+        } catch (e) {
+            this.buildError = String(e);
+        } finally {
+            this.cancelling = false;
+        }
+    }
+
+    /** Record a fault from the build this screen started. A build that its own Cancel button stopped is not a
+     *  fault: the screen says it was cancelled instead. */
+    private noteBuildFault(fault: string): void {
+        if (!this.buildCancelled) this.buildError = fault;
+    }
+
     async rebuild(project: Project): Promise<void> {
         if (!this.dockerfilePath || this.building) return;
         this.building = true;
+        this.ownBuild = true;
         this.buildError = '';
+        this.buildCancelled = false;
         this.buildLog = [];
 
         try {
@@ -437,15 +527,16 @@ export class SandboxDraftOwner {
             }
             await buildSandboxImageStream(project.id, (line: string) => {
                 if (line.startsWith('error: ')) {
-                    this.buildError = line.slice(7);
+                    this.noteBuildFault(line.slice(7));
                 } else {
                     this.buildLog.push(line);
                 }
             });
         } catch (e) {
-            this.buildError = String(e);
+            this.noteBuildFault(String(e));
         } finally {
             this.building = false;
+            this.ownBuild = false;
         }
     }
 }

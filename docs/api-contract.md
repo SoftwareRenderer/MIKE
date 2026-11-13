@@ -860,6 +860,20 @@ Tests: `backend/server/handler_fs_ops_test.go`; client side `frontend/src/lib/ap
   build's result frame, and it never starts a second build of one image
   (`docs/sandbox-runtime.md → A project image builds inside a sandbox container`). Its own context is not the
   running build's: closing this tab does not stop a build this request did not start.
+- **`GET /api/projects/{projectID}/sandbox/build` is that build read by someone who did not start it** — the
+  sandbox configuration opened while a task turn waits for its image. Its frames are
+  `types.SandboxImageStatus` JSON (phase, image, line), not the raw lines above, because its reader shows a
+  state as well as a log; the last frame is how the preparation ended, `cancelled` among the phases. It starts
+  nothing and replays nothing: what the build printed before the request arrived is kept nowhere. A project
+  with no build running answers 404 with its own message, which answers "is it building?" and is not a fault. Tests:
+  `TestHandleSandboxBuildWatchAnswersAnIdleProject`,
+  `TestHandleSandboxBuildWatchStreamsTheRunningBuild`.
+- **`POST /api/projects/{projectID}/sandbox/build/cancel` stops the preparation** and answers
+  `{"cancelled":bool}`; `false` beside a 200 means nothing was running, since a click a moment after the build
+  ended asked for something that was already true. The client never queues it: a cancel replayed when the
+  connection returns would stop whatever build was running by then
+  (`frontend/src/lib/api/raw/projects.ts`).
+  Test: `TestHandleSandboxBuildCancelAnswersWhetherItStoppedSomething`.
 - A build refusal keeps its own sentence on the way out, for the reason the Errors section gives: the
   Dockerfile being built is the caller's own file.
 

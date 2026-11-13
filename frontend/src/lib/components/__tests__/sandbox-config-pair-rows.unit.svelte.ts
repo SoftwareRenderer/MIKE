@@ -7,7 +7,7 @@ import MountsSection from '$lib/components/SandboxConfigModal/MountsSection.svel
 import PortsSection from '$lib/components/SandboxConfigModal/PortsSection.svelte';
 import SandboxSettingLists from '$lib/components/SandboxSettingLists.svelte';
 import { SandboxDraftOwner } from '$lib/components/SandboxConfigModal/draft.svelte';
-import type { PortForward } from '$lib/types';
+import type { PortForward, Project } from '$lib/types';
 
 /**
  * A saved row is two halves and nothing between them: the accented half names itself, so any glyph added
@@ -127,7 +127,10 @@ describe('a port mapping, which is short enough to be one token', () => {
 
     it('reads the same way while the screen is locked to a running task', () => {
         const { container } = render(LockedView, {
-            props: { draft: portDraft([{ container_port: 3000 }], new Map([[3000, 32789]])) },
+            props: {
+                draft: portDraft([{ container_port: 3000 }], new Map([[3000, 32789]])),
+                project: { id: 'p1', name: 'p1' } as Project,
+            },
         });
         expect(visible(one(container, '.sandbox-item-pair'))).toBe('32789:3000');
     });

@@ -121,6 +121,12 @@ var detachedOperations = []sideEffectEntry{
 		"ends this process to apply a staged release. There is no half of a restart to be left holding",
 	},
 	{
+		"POST /api/projects/{projectID}/sandbox/build/cancel",
+		"the stop is the result, as with a task's stop: a build still running after a person pressed Cancel is " +
+			"the opposite of what they asked for, whatever the tab does next. The decision is one call over a " +
+			"context the preparation owns, so there is no half of it to leave",
+	},
+	{
 		"DELETE /api/tokens/{id}",
 		"revocation is the row's absence: a cancel that left it standing leaves a credential live that the user " +
 			"believes is gone",
@@ -189,6 +195,11 @@ var requestScopedReads = []sideEffectEntry{
 		"one probe of an address a person is about to save. It sends a request and writes nothing: the " +
 			"result belongs to the dialog that asked, and a cancel mid-flight leaves no answer behind, which is " +
 			"the same as no answer",
+	},
+	{
+		"GET /api/projects/{projectID}/sandbox/build",
+		"the lines of a build some other caller owns. A cancel ends the watching and leaves that build running " +
+			"for whoever started it, which is the whole point of reading it from a second window",
 	},
 }
 

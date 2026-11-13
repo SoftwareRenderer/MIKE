@@ -9,6 +9,7 @@ package sandbox
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -1269,9 +1270,10 @@ func (sm *SandboxManager) ImageReady(image string) bool {
 	return sm.rt.ImageExists(image)
 }
 
-// PullImageWithProgress downloads a container image, streaming progress lines via onProgress.
-// onProgress is called for each line of output (nil means no callback).
-func (sm *SandboxManager) PullImageWithProgress(image string, onProgress func(line string)) error {
+// PullImageWithProgress downloads a container image, streaming progress lines via onProgress. A pull is a
+// podman subprocess and only a cancelled context ends one, so a caller whose work a person can stop passes the
+// context that stops it.
+func (sm *SandboxManager) PullImageWithProgress(ctx context.Context, image string, onProgress func(line string)) error {
 	if image == "" {
 		image = BaseImage
 	}
@@ -1282,7 +1284,7 @@ func (sm *SandboxManager) PullImageWithProgress(image string, onProgress func(li
 	image = sm.rt.ResolveImageRef(image)
 	logging.For(logging.Sandbox).Infof("pulling image %s", image)
 
-	if err := sm.streamPodman(podmanCommand("pull", image), "pull", image, "pull", onProgress); err != nil {
+	if err := sm.streamPodman(podmanCommandContext(ctx, "pull", image), "pull", image, "pull", onProgress); err != nil {
 		return err
 	}
 	logging.For(logging.Sandbox).Infof("image %s pulled", image)
@@ -1294,6 +1296,13 @@ func (sm *SandboxManager) PullImageWithProgress(image string, onProgress func(li
 // the process, and a wedged container holds them open.
 func podmanCommand(args ...string) *exec.Cmd {
 	return sandboxruntime.PodmanCommand(args...)
+}
+
+// podmanCommandContext is podmanCommand bounded to a context. WaitDelay bounds only a subprocess's output
+// pipes, so a long-running one — an attached `start`, a pull — outlives every other kind of cancellation. Only
+// a cancelled context ends the subprocess itself.
+func podmanCommandContext(ctx context.Context, args ...string) *exec.Cmd {
+	return sandboxruntime.PodmanCommandContext(ctx, args...)
 }
 
 // streamPodman runs a podman command whose output is worth watching - a pull or a build takes minutes.

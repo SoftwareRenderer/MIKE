@@ -2,14 +2,19 @@
     /**
      * What the project's sandbox record says, shown instead of the form while tasks are in progress.
      * The lists of saved values are the same rows SandboxPanel shows — see SandboxSettingLists.
+     *
+     * The image build is shown here too. A task waiting for its image is a task in progress, so this is the
+     * screen a person is looking at when they want to read that build.
      */
     import { t } from '$lib/i18n';
     import { formatMemoryLimitMB } from '$lib/utils/memory-stats';
     import { formatAssignedHost, formatForwardPorts } from '$lib/utils/sandbox-ports';
     import SandboxSettingLists from '../SandboxSettingLists.svelte';
+    import BuildProgress from './BuildProgress.svelte';
+    import type { Project } from '$lib/types';
     import type { SandboxDraftOwner } from './draft.svelte';
 
-    let { draft }: { draft: SandboxDraftOwner } = $props();
+    let { draft, project }: { draft: SandboxDraftOwner; project: Project } = $props();
 </script>
 
 <div class="locked-view">
@@ -20,6 +25,8 @@
         </svg>
         <p>{t('sandbox.lockedNotice')}</p>
     </div>
+
+    <BuildProgress {draft} {project} />
 
     <div class="sandbox-settings">
         <div class="sandbox-row">

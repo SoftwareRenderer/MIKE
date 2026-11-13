@@ -45,6 +45,10 @@ type ProjectHandler struct {
 // projectSandboxOps is the sandbox operations owned by the project.
 type projectSandboxOps interface {
 	BuildProjectImage(ctx context.Context, project *types.Project, onProgress func(line string)) (*sandbox.BuildResult, error)
+	// WatchImagePreparation joins the build or pull of the project's image that is already running, and returns
+	// false when nothing is running.
+	WatchImagePreparation(ctx context.Context, project *types.Project) (<-chan types.SandboxImageStatus, bool)
+	CancelImagePreparation(project *types.Project) bool
 	StopProjectContainers(projectID string, taskIDs []string)
 }
 
@@ -516,6 +520,59 @@ func rejectBuildQuery(r *http.Request) error {
 		return fmt.Errorf("no_cache: a build always rebuilds, so there is no build cache to skip")
 	}
 	return nil
+}
+
+// HandleSandboxBuildWatch streams the build or pull this project's image is already running, in the statuses
+// `WatchImagePreparation` returns. It starts nothing, and closing the request ends the stream and not the build.
+//
+// A frame is a JSON status rather than a raw line like the ones the build route sends, because this reader
+// shows a state as well as a log. A project with no build running gets a 404 and its own message before any
+// stream is opened, which is how the screen knows to show the plain form instead of an empty log.
+func (h *ProjectHandler) HandleSandboxBuildWatch(w http.ResponseWriter, r *http.Request) {
+	project, ok := resolveProject(w, r, h.store)
+	if !ok {
+		return
+	}
+	if h.sandboxMgr == nil {
+		httputil.JSONError(w, http.StatusNotFound, noBuildRunningMessage)
+		return
+	}
+	statuses, watching := h.sandboxMgr.WatchImagePreparation(r.Context(), project)
+	if !watching {
+		httputil.JSONError(w, http.StatusNotFound, noBuildRunningMessage)
+		return
+	}
+	sse, ok := httputil.NewSSE(w)
+	if !ok {
+		httputil.JSONError(w, http.StatusInternalServerError, "streaming not supported")
+		return
+	}
+	// The build's own goroutine only put statuses into the channel, so this loop stays the one writer of this
+	// socket.
+	for status := range statuses {
+		sse.JSON(status)
+	}
+}
+
+// noBuildRunningMessage is what both the watch and the cancel answer when no image is being prepared. A project
+// with nothing running is an answer and not a fault, so nothing is logged for it.
+const noBuildRunningMessage = "no sandbox image build is running for this project"
+
+// buildCancelFrame is the cancel route's whole answer: whether the click stopped something.
+type buildCancelFrame struct {
+	Cancelled bool `json:"cancelled"`
+}
+
+// HandleSandboxBuildCancel answers `{"cancelled":bool}`: whether the click stopped anything. A `false` beside a
+// 200 means no build was running, which is not a fault. `CancelImagePreparation` holds the rule about which
+// caller the stop reaches and what happens to it.
+func (h *ProjectHandler) HandleSandboxBuildCancel(w http.ResponseWriter, r *http.Request) {
+	project, ok := resolveProject(w, r, h.store)
+	if !ok {
+		return
+	}
+	cancelled := h.sandboxMgr != nil && h.sandboxMgr.CancelImagePreparation(project)
+	httputil.JSONResponse(w, http.StatusOK, buildCancelFrame{Cancelled: cancelled})
 }
 
 // HandleByID handles GET, PUT, DELETE for a single project.

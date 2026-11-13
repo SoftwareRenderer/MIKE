@@ -90,6 +90,54 @@ export async function buildSandboxImageStream(
     return result;
 }
 
+/** One frame of the watch stream, which is the server's `types.SandboxImageStatus`: what the preparation is
+ *  doing, the image it is for, and the line it printed. The last frame says how it ended. */
+export interface SandboxImageStatus {
+    phase: string;
+    image?: string;
+    line?: string;
+    error?: string;
+}
+
+/**
+ * Watch the build or pull this project's image is running, and read every status it announces from now on.
+ * The result is false when nothing is preparing the image.
+ *
+ * This is plain streaming rather than a queued write, for the reason `buildSandboxImageStream` states. The
+ * signal stops the reading and nothing else.
+ */
+export async function watchSandboxImageBuild(
+    id: string,
+    onStatus: (status: SandboxImageStatus) => void,
+    signal?: AbortSignal,
+): Promise<boolean> {
+    const res = await apiFetch(`${API_BASE}/projects/${id}/sandbox/build`, { credentials: 'include', signal });
+    if (res.status === 404) return false;
+    if (!res.ok) throw await apiError(res, t('api.watchSandboxImage'));
+
+    for await (const frame of readEventStream(res)) {
+        if (!frame.data.startsWith('{')) continue;
+        try {
+            const status = JSON.parse(frame.data) as SandboxImageStatus;
+            if (typeof status.phase === 'string') onStatus(status);
+        } catch { /* a frame that is not a status carries nothing this screen can draw */ }
+    }
+    return true;
+}
+
+/**
+ * Stop the build or pull this project's image is running, and report whether the click stopped anything.
+ *
+ * This is not `writeOrQueue`: a cancel replayed when the connection comes back would stop whatever build is
+ * running by then, which is not the one the person pressed the button about.
+ */
+export async function cancelSandboxImageBuild(id: string): Promise<boolean> {
+    const res = await apiFetch(`${API_BASE}/projects/${id}/sandbox/build/cancel`, { method: 'POST' });
+    if (!res.ok) throw await apiError(res, t('api.cancelSandboxImage'));
+    const body = await res.json().catch(() => ({ cancelled: false }));
+    return body?.cancelled === true;
+}
+
 export async function deleteProjectRaw(id: string): Promise<void> {
     const res = await apiFetch(`${API_BASE}/projects/${id}`, { method: 'DELETE' });
     if (!res.ok) throw await apiError(res, t('api.deleteProject'));

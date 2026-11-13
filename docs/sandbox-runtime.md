@@ -301,6 +301,22 @@ This section is the mechanism.
   `TestEnsureImageForProjectWaitsForTheImagePreparationAlreadyRunning`,
   `TestMakeProjectImageAnnouncesThePhaseItWorksOn`,
   `TestBuildProjectImageJoinsTheBuildAlreadyRunning` and `TestImageOpJoinersShareTheInFlightResult` hold it.
+- **A preparation is bounded by its own context, and the Cancel button cancels that context.** A task and an
+  opening terminal wait behind a build, and closing a dialog has never stopped one.
+- **The caller that holds the key records the context its work runs under, and `CancelImagePreparation` cancels
+  that one.** Whoever started the build takes the failure, the way it takes any other failed build. Nothing
+  starts the build again without being asked.
+- **Both long podman subprocesses carry that context: the attached `start` and the pull.** `WaitDelay` bounds a
+  subprocess's output pipes, and only a cancelled context bounds the child.
+- **A build in flight is watched through the in-flight table, not through a log kept for the purpose.**
+  `WatchImagePreparation` joins that preparation, hands over the phase it announced and every line after it,
+  and reports how it ended. It starts nothing, and what a viewer missed before it arrived is kept nowhere.
+- **A viewer that is too slow to keep up loses lines, and never stalls the build.** The queue is bounded and
+  drops instead of blocking. A viewer that leaves stops its own reading and leaves the preparation running.
+  Tests: `TestWatchImagePreparationCarriesTheRunningBuildToALateViewer`,
+  `TestWatchImagePreparationLeavesTheBuildAloneWhenItsViewerGoes`,
+  `TestWatchImagePreparationDropsRatherThanStallingTheBuild`,
+  `TestCancelImagePreparationStopsTheBuildAndReportsItCancelled`.
 - **The builder is nested buildah, and MIKE models no instruction.** Inside the guest: storage `vfs`, root
   and runroot under `/var/tmp/mike-build` (a `vfs` layer written under a guest tmpfs fails its own xattr
   reads), `bud --isolation chroot --pull=never`, flags before the context.

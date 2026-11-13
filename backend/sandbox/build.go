@@ -257,7 +257,7 @@ func (sm *SandboxManager) projectBuildKey(ctx context.Context, project *types.Pr
 // running and reporting its result instead of starting a second one. onProgress receives the lines of
 // whichever build ends up running, so a request that joined late still reads the build it waited on.
 func (sm *SandboxManager) BuildProjectImage(ctx context.Context, project *types.Project, onProgress func(line string)) (*BuildResult, error) {
-	image := sm.rt.ResolveImageRef(ResolveProjectImage(project).Image)
+	image := sm.imageKey(ResolveProjectImage(project))
 	report := func(status types.SandboxImageStatus) {
 		if onProgress != nil && status.Line != "" {
 			onProgress(status.Line)
@@ -280,9 +280,15 @@ func (sm *SandboxManager) BuildProjectImage(ctx context.Context, project *types.
 		if !claimed {
 			continue
 		}
+		// The build runs under a context of its own, derived from the caller's, so the Cancel route can stop it
+		// through the in-flight key. Cancelling the caller's request instead would end that stream along with the
+		// build, and the person who pressed Cancel would get no answer.
+		runCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		op.setCancel(cancel)
 		return sm.runImageOp(image, op, func() (*BuildResult, error) {
 			op.announce(types.SandboxImageStatus{Phase: types.SandboxImagePhaseBuilding})
-			return sm.buildProjectImageDirect(ctx, project, func(line string) {
+			return sm.buildProjectImageDirect(runCtx, project, func(line string) {
 				op.progress(types.SandboxImageStatus{Phase: types.SandboxImagePhaseBuilding, Line: line})
 			})
 		})
@@ -374,7 +380,7 @@ func (sm *SandboxManager) ensureBuilderImage(ctx context.Context, emit func(stri
 		return nil
 	}
 	emit(fmt.Sprintf("pulling the nested builder image %s (once per host)…", ref))
-	if err := sm.PullImageWithProgress(ref, emit); err != nil {
+	if err := sm.PullImageWithProgress(ctx, ref, emit); err != nil {
 		return fmt.Errorf("pull the nested builder image %s: %w", ref, err)
 	}
 	return nil
@@ -415,7 +421,7 @@ func (sm *SandboxManager) stageBaseImageArchives(ctx context.Context, plan *buil
 		ref := sandboxruntime.QualifyDockerImageRef(raw)
 		if !sm.ImageReady(ref) {
 			emit(fmt.Sprintf("pulling %s for the build to be handed…", ref))
-			if err := sm.PullImageWithProgress(ref, emit); err != nil {
+			if err := sm.PullImageWithProgress(ctx, ref, emit); err != nil {
 				return fmt.Errorf("pull the Dockerfile's image %s: %w", ref, err)
 			}
 		}
@@ -478,7 +484,7 @@ func (sm *SandboxManager) runBuildContainer(ctx context.Context, plan *buildPlan
 		emit(line)
 	}
 	err = sm.streamPodman(
-		podmanCommand(append(sandboxruntime.RuntimeFlagsForExistingContainer(), "start", "-a", name)...),
+		podmanCommandContext(ctx, append(sandboxruntime.RuntimeFlagsForExistingContainer(), "start", "-a", name)...),
 		"build", plan.fromRef, "build", capture)
 	if err != nil {
 		if hint := buildFailureHint(tail); hint != "" {

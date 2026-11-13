@@ -1,12 +1,14 @@
 <script lang="ts">
     /**
-     * The image built here from a Dockerfile that lives on the server. The build is streamed into the
-     * log below and outlives this dialog.
+     * The image built here comes from a Dockerfile that lives on the server. The build's output is streamed
+     * into the progress below, and the build outlives this dialog, so that progress and the button which stops
+     * it live in `BuildProgress` and are shared with the locked view.
      */
     import { t } from '$lib/i18n';
     import Spinner from '../Spinner.svelte';
     import type { Project } from '$lib/types';
     import { imageTagFor } from './drafts';
+    import BuildProgress from './BuildProgress.svelte';
     import type { SandboxDraftOwner } from './draft.svelte';
 
     let { draft, locked, project, onBrowse }: {
@@ -20,32 +22,6 @@
     const imageTag = $derived(imageTagFor(project.name));
     const dockerfileChanged = $derived(draft.dockerfileChanged(project));
     const busy = $derived(locked || draft.building);
-
-    let buildLogEl = $state<HTMLDivElement | null>(null);
-    let buildLogAtBottom = $state(true);
-
-    // A new line follows the bottom only if the reader had not scrolled away from it.
-    $effect(() => {
-        if (draft.buildLog.length === 0) return;
-        scrollBuildLog();
-    });
-
-    function scrollBuildLog() {
-        if (!buildLogEl || !buildLogAtBottom) return;
-        requestAnimationFrame(() => {
-            if (!buildLogEl) return;
-            buildLogEl.scrollTop = buildLogEl.scrollHeight;
-            requestAnimationFrame(() => {
-                if (buildLogEl) buildLogEl.scrollTop = buildLogEl.scrollHeight;
-            });
-        });
-    }
-
-    function onBuildLogScroll() {
-        if (!buildLogEl) return;
-        const gap = buildLogEl.scrollHeight - buildLogEl.scrollTop - buildLogEl.clientHeight;
-        buildLogAtBottom = gap < 50;
-    }
 </script>
 
 <div class="dockerfile-section config-nested">
@@ -112,24 +88,7 @@
                title={t('sandbox.buildContextDesc')} />
     </div>
 
-    {#if draft.building}
-        <div class="build-notice">{t('sandbox.buildNotice')}</div>
-    {/if}
-
-    {#if draft.building || draft.buildLog.length > 0}
-        <div class="build-log" bind:this={buildLogEl} role="log" aria-label={t('sandbox.buildOutput')} onscroll={onBuildLogScroll}>
-            {#each draft.buildLog as line}
-                <div class="build-log-line">{line}</div>
-            {/each}
-            {#if draft.buildLog.length === 0}
-                <div class="build-log-line build-log-pending">{t('sandbox.building')}</div>
-            {/if}
-        </div>
-    {/if}
-
-    {#if draft.buildError}
-        <div class="build-error">{draft.buildError}</div>
-    {/if}
+    <BuildProgress {draft} {project} />
 
     <p class="build-venue-note">{t('sandbox.buildVenue')}</p>
 
@@ -299,46 +258,4 @@
         border-radius: var(--radius-sm);
         font-size: var(--text-2xs);
     }
-
-    .build-error {
-        padding: 6px 10px;
-        background: rgb(from var(--color-status-red) r g b / 0.1);
-        border: 1px solid rgb(from var(--color-status-red) r g b / 0.3);
-        border-radius: var(--radius-sm);
-        color: var(--color-status-red);
-        font-size: var(--text-xs);
-    }
-
-    .build-log {
-        max-height: 180px;
-        overflow-y: auto;
-        padding: 8px 10px;
-        background: var(--color-bg-elevated);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-sm);
-        font-family: var(--font-mono);
-        font-size: var(--text-xs);
-        line-height: 1.5;
-        color: var(--color-text-secondary);
-    }
-
-    .build-log-line {
-        white-space: pre-wrap;
-        word-break: break-all;
-    }
-
-    .build-log-pending {
-        color: var(--color-text-tertiary);
-        font-style: italic;
-    }
-
-    .build-notice {
-        padding: 6px 10px;
-        background: rgb(from var(--color-status-blue) r g b / 0.08);
-        border: 1px solid rgb(from var(--color-status-blue) r g b / 0.2);
-        border-radius: var(--radius-sm);
-        color: var(--color-text-secondary);
-        font-size: var(--text-xs);
-    }
-
 </style>

@@ -401,10 +401,28 @@ type recordingSandbox struct {
 	stoppedProjects []string
 	result          *sandbox.BuildResult
 	err             error
+	// watching says whether a preparation is in flight. watch is the queue a viewer is handed.
+	watching bool
+	watch    chan types.SandboxImageStatus
+	// cancelled is what a cancel click is answered with, and cancelCalls counts the clicks.
+	cancelled   bool
+	cancelCalls int
 }
 
 func (r *recordingSandbox) BuildProjectImage(context.Context, *types.Project, func(string)) (*sandbox.BuildResult, error) {
 	return r.result, r.err
+}
+
+func (r *recordingSandbox) WatchImagePreparation(context.Context, *types.Project) (<-chan types.SandboxImageStatus, bool) {
+	if !r.watching {
+		return nil, false
+	}
+	return r.watch, true
+}
+
+func (r *recordingSandbox) CancelImagePreparation(*types.Project) bool {
+	r.cancelCalls++
+	return r.cancelled
 }
 
 func (r *recordingSandbox) StopProjectContainers(projectID string, _ []string) {
@@ -1220,5 +1238,101 @@ func TestUpdateProjectCommitTrailer(t *testing.T) {
 	}
 	if got := stored(); got == nil || !*got {
 		t.Errorf("an update that never mentioned the trailer changed it to %v", got)
+	}
+}
+
+// doSandboxWatchRequest asks for the build this project already has running.
+func doSandboxWatchRequest(t *testing.T, mux *http.ServeMux, projectID string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID+"/sandbox/build", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	return rr
+}
+
+func sandboxWatchMux(h *ProjectHandler) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/projects/{projectID}/sandbox/build", h.HandleSandboxBuildWatch)
+	mux.HandleFunc("/api/projects/{projectID}/sandbox/build/cancel", h.HandleSandboxBuildCancel)
+	return mux
+}
+
+// TestHandleSandboxBuildWatchAnswersAnIdleProject: the sandbox dialog asks this before it draws anything, so a
+// project with no build running gets its own message rather than an error the screen would show as a fault.
+func TestHandleSandboxBuildWatchAnswersAnIdleProject(t *testing.T) {
+	h, projID := testProjectHandler(t)
+	h.sandboxMgr = &recordingSandbox{}
+
+	rr := doSandboxWatchRequest(t, sandboxWatchMux(h), projID)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusNotFound)
+	}
+	if !strings.Contains(rr.Body.String(), "no sandbox image build is running") {
+		t.Fatalf("body = %q, want the idle answer", rr.Body.String())
+	}
+}
+
+// TestHandleSandboxBuildWatchStreamsTheRunningBuild: the frames are the statuses in the order the preparation
+// produced them, ending with how it ended. The screen reads its state from the phase and its log from the lines.
+func TestHandleSandboxBuildWatchStreamsTheRunningBuild(t *testing.T) {
+	h, projID := testProjectHandler(t)
+	statuses := make(chan types.SandboxImageStatus, 3)
+	statuses <- types.SandboxImageStatus{Phase: types.SandboxImagePhaseBuilding, Image: "localhost/sandbox-p1"}
+	statuses <- types.SandboxImageStatus{Phase: types.SandboxImagePhaseBuilding, Line: "step 1/3"}
+	statuses <- types.SandboxImageStatus{Phase: types.SandboxImagePhaseDone, Image: "localhost/sandbox-p1"}
+	close(statuses)
+	h.sandboxMgr = &recordingSandbox{watching: true, watch: statuses}
+
+	rr := doSandboxWatchRequest(t, sandboxWatchMux(h), projID)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	events := readSSEEvents(t, rr.Body)
+	if len(events) != 3 {
+		t.Fatalf("frames = %v, want the phase, the line and the ending", events)
+	}
+	if events[0]["phase"] != types.SandboxImagePhaseBuilding || events[0]["image"] != "localhost/sandbox-p1" {
+		t.Errorf("first frame = %v, want the phase and the image it is for", events[0])
+	}
+	if events[1]["line"] != "step 1/3" {
+		t.Errorf("second frame = %v, want the build's own line", events[1])
+	}
+	if events[2]["phase"] != types.SandboxImagePhaseDone {
+		t.Errorf("last frame = %v, want %q", events[2], types.SandboxImagePhaseDone)
+	}
+}
+
+// TestHandleSandboxBuildCancelAnswersWhetherItStoppedSomething: a cancel that found no build running asked for
+// something that was already true, so it answers instead of failing, and a cancel that stopped a build says so
+// once per click.
+func TestHandleSandboxBuildCancelAnswersWhetherItStoppedSomething(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		stops bool
+		want  bool
+	}{{"a build in flight", true, true}, {"an idle project", false, false}} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, projID := testProjectHandler(t)
+			fake := &recordingSandbox{cancelled: tt.stops}
+			h.sandboxMgr = fake
+
+			req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projID+"/sandbox/build/cancel", nil)
+			rr := httptest.NewRecorder()
+			sandboxWatchMux(h).ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+			}
+			var frame buildCancelFrame
+			if err := json.Unmarshal(rr.Body.Bytes(), &frame); err != nil {
+				t.Fatalf("body = %q, want the cancelled frame: %v", rr.Body.String(), err)
+			}
+			if frame.Cancelled != tt.want {
+				t.Errorf("cancelled = %v, want %v", frame.Cancelled, tt.want)
+			}
+			if fake.cancelCalls != 1 {
+				t.Errorf("the sandbox was asked to cancel %d times, want 1", fake.cancelCalls)
+			}
+		})
 	}
 }

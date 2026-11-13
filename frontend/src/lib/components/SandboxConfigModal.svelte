@@ -49,6 +49,17 @@
         inProgressCount = initialInProgressCount;
     });
 
+    // A build may already be running when this screen opens, started by a task, a terminal or another window,
+    // so the screen asks the server instead of assuming. It reads only the project's id and whether it
+    // sandboxes, so a board refresh does not start the reading again.
+    $effect(() => {
+        const id = project.id;
+        if (!project.sandbox_enabled) return;
+        draft.watchBuild(id);
+        // Closing the screen, or moving it to another project, stops the reading.
+        return () => draft.stopWatching();
+    });
+
     onMount(async () => {
         const tasks = await draft.loadActivePorts(project.id);
         if (tasks) {
@@ -115,7 +126,7 @@
 
 <BaseModal title={t('sandbox.title')} width={isLocked ? '480px' : '560px'} modalClass="sandbox-config-modal" footer={isLocked ? undefined : footer} onClose={onClose}>
     {#if isLocked}
-        <LockedView {draft} />
+        <LockedView {draft} {project} />
     {:else}
         <div class="config-options sandbox-config">
             <IsolationRow {draft} locked={isLocked} />

@@ -171,6 +171,8 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/projects/{projectID}/stats", s.projectHandler.HandleStats)
 	s.mux.HandleFunc("DELETE /api/projects/{projectID}/stats", s.projectHandler.HandleStats)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/sandbox/build", s.projectHandler.HandleSandboxBuild)
+	s.mux.HandleFunc("GET /api/projects/{projectID}/sandbox/build", s.projectHandler.HandleSandboxBuildWatch)
+	s.mux.HandleFunc("POST /api/projects/{projectID}/sandbox/build/cancel", s.projectHandler.HandleSandboxBuildCancel)
 	s.mux.HandleFunc("GET /api/projects/{projectID}/terminal", s.terminalMgr.HandleProjectTerminal)
 
 	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks", s.taskHandler.HandleList)
