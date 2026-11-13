@@ -40,6 +40,21 @@ Each view determines if it is "behind" by asking the server for a sync digest (`
   rows: the window route answers for whichever thread is current.
 - **Diff**: Refreshes the manifest and re-evaluates if the base commit has moved.
 
+### Where a merged transcript puts what no row holds
+
+`mergeLoadedHistory` (`frontend/src/lib/utils/chat-entries.ts`) rebuilds the transcript from the rows, then puts
+back what the browser holds that no row describes. All of that is newer than every row the read proved to
+exist, so it goes at the bottom.
+
+One thing is not: the sandbox **build/pull box** ran *ahead* of the turn whose rows the same read brought back.
+A finished box therefore returns to the instant the browser opened it, which lands it among the rows rather than
+after them. Compare those instants as times, never as strings. A row is second-precision and the box is the
+browser's millisecond clock, and a build usually opens in the same second as the send that started the run.
+
+The box stays browser-only either way: no row is written for it. A page refresh loses it, and so does a read
+that replaces the conversation instead of extending it (`entriesWithoutRows`). `chat-history-merge.unit.ts` is
+what fails when a finished box moves.
+
 ## The Editor Buffer Across a Browser Being Away
 
 An unsaved buffer belongs to the browser, not the server: the editor writes it to the `editor-drafts`

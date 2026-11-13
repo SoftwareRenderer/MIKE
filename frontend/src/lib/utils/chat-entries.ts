@@ -492,7 +492,8 @@ export function mergeLoadedHistory(
 
         if (isRowCopy(e, dbEntries, e === lastLive)) continue;
 
-        merged.push(e);
+        if (e.buildLog?.done) placeFinishedBuildBox(merged, e);
+        else merged.push(e);
     }
 
     const seenIds = new Set<string>();
@@ -501,6 +502,22 @@ export function mergeLoadedHistory(
         seenIds.add(e.id);
         return true;
     });
+}
+
+/** Puts a finished build/pull box where it happened in the conversation, by the time the browser opened it.
+ *
+ * A box never gets a row, so the read cannot say where it goes. Appending it would drop it below the turn that
+ * started after the build. A box that is still writing is the newest thing on screen, so that one appends.
+ *
+ * Row times are whole seconds and the box's time is the browser's clock in milliseconds, so compare them as
+ * dates and not as strings (`getCheckpointThreads` explains why). */
+function placeFinishedBuildBox(merged: ChatEntry[], box: ChatEntry): void {
+    const opened = box.createdAt ? new Date(box.createdAt).getTime() : NaN;
+    const newer = Number.isNaN(opened)
+        ? -1
+        : merged.findIndex(e => !!e.createdAt && new Date(e.createdAt).getTime() > opened);
+    if (newer === -1) merged.push(box);
+    else merged.splice(newer, 0, box);
 }
 
 /** True when no stored row holds this entry, yet or ever: the turn streaming now, an unanswered call, a

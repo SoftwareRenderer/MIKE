@@ -309,6 +309,96 @@ describe('mergeLoadedHistory — identity', () => {
     });
 });
 
+describe('mergeLoadedHistory — a sandbox build box keeps the place it ran from', () => {
+    /** The browser's clock gives a box its time, so the frames that open and close one run under a fixed time
+     * the rows can be placed against. Every frame names the time it arrived. */
+    function buildFrames(frames: Array<{ at: string; type: string; data?: unknown }>): ChatEntry[] {
+        vi.useFakeTimers();
+        try {
+            const stream = new StreamState();
+            const handle = createStreamHandler(stream, makeCallbacks());
+            for (const f of frames) {
+                vi.setSystemTime(new Date(f.at));
+                handle({ type: f.type as never, data: f.data ?? {} } as never, false);
+            }
+            return stream.state.entries;
+        } finally {
+            vi.useRealTimers();
+        }
+    }
+
+    /** The frames of one image build: the box opens, a line arrives, the container ends it. */
+    const buildTypeFrames = (state: 'building_image' | 'pulling_image', opened: string) => [
+        { at: opened, type: 'status', data: { state } },
+        { at: '2026-09-10T10:00:20Z', type: 'build_progress', data: { line: 'STEP 1/2 : FROM node:20' } },
+        { at: '2026-09-10T10:00:40Z', type: 'status', data: { state: 'running' } },
+    ];
+
+    const userRowAt = (id: string, content: string, created_at: string) => ({ ...userRow(id, content), created_at });
+
+    it('draws a finished build box above the turn it ran ahead of', () => {
+        // The send's row and the box fall in the same second: the row is stored at whole seconds, the box at
+        // milliseconds, and the box came after the send.
+        const messages = [
+            userRowAt('u1', 'build it', '2026-09-10T10:00:00Z'),
+            assistantRow('a1', { created_at: '2026-09-10T10:01:00Z', content: 'Reading it now.' }),
+        ];
+        const live = buildFrames(buildTypeFrames('building_image', '2026-09-10T10:00:00.400Z'));
+
+        const merged = mergeLoadedHistory(buildEntriesFromMessages(messages).entries, messages.map(m => m.id), live, true);
+
+        expect(merged.map(e => e.id)).toEqual(['u1', 'live-0', 'a1']);
+        expect(merged[1]!.buildLog?.done).toBe(true);
+        expect(merged[1]!.buildLog?.title).toBe('Building sandbox image from Dockerfile...');
+    });
+
+    it('draws a finished pull box above the turn it ran ahead of', () => {
+        const messages = [
+            userRowAt('u1', 'build it', '2026-09-10T09:59:00Z'),
+            assistantRow('a1', { created_at: '2026-09-10T10:01:00Z', content: 'Reading it now.' }),
+        ];
+        const live = buildFrames(buildTypeFrames('pulling_image', '2026-09-10T10:00:00Z'));
+
+        const merged = mergeLoadedHistory(buildEntriesFromMessages(messages).entries, messages.map(m => m.id), live, true);
+
+        expect(merged.map(e => e.id)).toEqual(['u1', 'live-0', 'a1']);
+        expect(merged[1]!.buildLog?.title).toBe('Pulling sandbox image...');
+    });
+
+    it('keeps a box that is still writing as the newest thing on screen', () => {
+        const messages = [
+            userRowAt('u1', 'build it', '2026-09-10T09:59:00Z'),
+            assistantRow('a1', { created_at: '2026-09-10T10:01:00Z', content: 'Reading it now.' }),
+        ];
+        // No `running` frame, so the build is still going.
+        const live = buildFrames([
+            { at: '2026-09-10T10:00:00Z', type: 'status', data: { state: 'building_image' } },
+            { at: '2026-09-10T10:00:20Z', type: 'build_progress', data: { line: 'STEP 1/2 : FROM node:20' } },
+        ]);
+
+        const merged = mergeLoadedHistory(buildEntriesFromMessages(messages).entries, messages.map(m => m.id), live, true);
+
+        expect(merged.map(e => e.id)).toEqual(['u1', 'a1', 'live-0']);
+    });
+
+    it('puts a second run\'s box by its own instant, and leaves a queued send last', () => {
+        const messages = [
+            userRowAt('u1', 'build it', '2026-09-10T09:50:00Z'),
+            assistantRow('a1', { created_at: '2026-09-10T10:01:00Z', content: 'Reading it now.' }),
+        ];
+        const live: ChatEntry[] = [
+            { id: 'box-1', role: 'system', content: 'Building', isStreaming: false, createdAt: '2026-09-10T10:00:00Z', buildLog: { title: 'Building', lines: [], done: true } },
+            { id: 'box-2', role: 'system', content: 'Building', isStreaming: false, createdAt: '2026-09-10T10:02:00Z', buildLog: { title: 'Building', lines: [], done: true } },
+            // The server has not answered this send, so it stays last even though its time is older.
+            { id: 'pend-1', role: 'user', content: 'and then commit it', isStreaming: false, queued: true, createdAt: '2026-09-10T09:58:00Z' },
+        ];
+
+        const merged = mergeLoadedHistory(buildEntriesFromMessages(messages).entries, messages.map(m => m.id), live, true);
+
+        expect(merged.map(e => e.id)).toEqual(['u1', 'box-1', 'a1', 'box-2', 'pend-1']);
+    });
+});
+
 describe('entriesWithoutRows — what a replaced conversation leaves on screen', () => {
     const settled = (id: string, content: string): ChatEntry => ({
         id, role: 'assistant', content, isStreaming: false,
