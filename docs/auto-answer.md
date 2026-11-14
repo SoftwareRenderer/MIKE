@@ -1,6 +1,6 @@
 # Auto-Answer
 
-Use this guide before modifying `automatedAnswers` (`backend/exec/executor.go`), `ask_question` handling, the text-only stop in `finalizeTurn` (`backend/exec/loop.go`), or `autoAnswerTextStop` (`backend/exec/loop_helpers.go`).
+Use this guide before modifying `automatedAnswers` (`backend/exec/executor.go`), `ask_question` handling, the text-only stop in `finalizeTextTurn` (`backend/exec/loop_turn.go`), or `autoAnswerTextStop` (`backend/exec/loop_helpers.go`).
 
 Subtasks run on behalf of their parent. When a subtask calls `ask_question`, the system uses the parent's context to generate an answer and continue the run. Only two specific stop conditions are auto-answered.
 
@@ -36,7 +36,7 @@ The answer replaces the original `ask_question` tool result: the `toolResult` ou
 
 ## Shape 2: a turn that ends with only a message
 
-`finalizeTurn` first settles the turn (marking it as review, releasing the slot, and sending a `complete` frame), runs auto-summarization, and processes any queued user messages. `autoAnswerTextStop` runs last, ensuring that a real user message always takes precedence over an automated answer. On success, it:
+`finalizeTextTurn` first settles the turn (marking it as review, releasing the slot, and sending a `complete` frame), runs auto-summarization, and processes any queued user messages. `autoAnswerTextStop` runs last, ensuring that a real user message always takes precedence over an automated answer. On success, it:
 
 - writes the answer as an **advisory** row (`kind: "auto_answer"`, `flushAdvisories`). This prevents the summarizer from mistaking the automated answer for a user message. `toAPIMessage` treats advisories as user messages for the model's context, and the row is persisted. The UI uses `advisoryLabel` for the card title.
 - reclaims the running-task slot (`syncTaskSlot`), re-establishes the run claim (`persistTaskClaiming`), broadcasts `status/running`, and triggers the next LLM call (`turnNextLLMCall`).

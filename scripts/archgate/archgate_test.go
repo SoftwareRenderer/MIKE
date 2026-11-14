@@ -1841,31 +1841,47 @@ func TestRuleFuncLen_RefusesATreeWithNoFunctions(t *testing.T) {
 }
 
 // The independent measurement: brace depth at column zero, counted by a different mechanism than the
-// AST walk, must agree about which functions in the executor's loop file are over the ceiling.
+// AST walk, must agree about which functions are over the ceiling. The agreement is measured across
+// the whole tree at a lowered ceiling, because what is being checked is that the two mechanisms
+// measure the same thing. Held to the shipped ceiling, the claim would quietly stop being a check the
+// moment the tree stopped carrying a function that long — which is what a fixed baseline does.
 func TestFuncLen_RealTreeAgreesWithAnIndependentCount(t *testing.T) {
 	root := repoRoot(t)
-	rel := "backend/exec/loop.go"
+	const measure = 100
+	saved := funcLineCeiling
+	funcLineCeiling = measure
+	t.Cleanup(func() { funcLineCeiling = saved })
+
 	findings, _, err := scanFunctionLength(root)
 	if err != nil {
 		t.Fatalf("scanFunctionLength: %v", err)
 	}
+	files, err := goFiles(root)
+	if err != nil {
+		t.Fatalf("goFiles: %v", err)
+	}
 	scanned := map[string]bool{}
 	for _, f := range findings {
-		if f.File == rel {
-			scanned[f.Detail] = true
+		scanned[f.File+"|"+f.Detail] = true
+	}
+	counted := map[string]bool{}
+	for _, rel := range files {
+		for _, name := range longFuncsInFile(t, root, rel, measure) {
+			counted[rel+"|"+name] = true
 		}
 	}
-	counted := longFuncsInFile(t, root, rel, funcLineCeiling)
 	if len(counted) == 0 {
-		t.Fatalf("%s holds no function over %d lines by the independent count — the fixture and the tree have drifted", rel, funcLineCeiling)
+		t.Fatalf("no function in the tree is over %d lines by the independent count — the comparison measures nothing", measure)
 	}
-	for _, name := range counted {
-		if !scanned[name] {
-			t.Errorf("the independent count says %s is over the ceiling; the rule did not report it (%v)", name, scanned)
+	for key := range counted {
+		if !scanned[key] {
+			t.Errorf("the independent count says %s is over the ceiling; the rule did not report it", key)
 		}
 	}
-	if len(counted) != len(scanned) {
-		t.Errorf("independent count found %d long functions, the rule found %d: %v vs %v", len(counted), len(scanned), counted, scanned)
+	for key := range scanned {
+		if !counted[key] {
+			t.Errorf("the rule says %s is over the ceiling; the independent count did not", key)
+		}
 	}
 }
 

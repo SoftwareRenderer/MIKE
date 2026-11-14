@@ -218,9 +218,9 @@ container and worktree. Tests: `TestUserMessageInterruptsRunningToolCall` and
 
 ### What an interrupting message may delete
 
-The rows decide, and the screen is told which they are. `finalizeTurn` (`backend/exec/loop.go`) persists
-the assistant row and one `tool_call` row per call before running any of them, and as each row lands a
-`tool_progress` frame names it: `{"tool_id": …, "message_id": …}`. So a card carrying `messageId` is a
+The rows decide, and the screen is told which they are. `finalizeToolTurn` (`backend/exec/loop_turn.go`) persists
+the assistant row, and `runTurnToolCalls` writes one `tool_call` row per call before running any of them.
+As each row lands a `tool_progress` frame names it: `{"tool_id": …, "message_id": …}`. So a card carrying `messageId` is a
 row while its command is still running — no answer need have arrived.
 
 `StreamState.abandonInterruptedTurn` (`frontend/src/lib/services/stream-state.svelte.ts`) is the one place

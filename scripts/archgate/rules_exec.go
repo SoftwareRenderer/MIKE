@@ -37,10 +37,10 @@ package main
 // handleLoopDetected's te parameter (the loop's termination path). Clearing one means handing that
 // helper the func value in its place.
 //
-// funclen — the size one function may reach. The baseline names the functions over the ceiling —
-// TaskExecutor.finalizeTurn and TaskExecutor.executeTask, every other function in backend/, pkg/ and
-// main.go sits under it — and it only shrinks: crossing the ceiling is a new violation, so a concern
-// being split out cannot grow a new giant on the way.
+// funclen — the size one function may reach. The baseline names the functions over the ceiling, and
+// the baseline is empty: every function in backend/, pkg/ and main.go sits under it. It only shrinks:
+// crossing the ceiling is a new violation, so a concern being split out cannot grow a new giant on
+// the way.
 
 import (
 	"fmt"

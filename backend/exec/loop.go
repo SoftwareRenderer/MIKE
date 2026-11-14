@@ -2,13 +2,11 @@ package exec
 
 import (
 	"context"
-	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"maps"
 	"math/rand/v2"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -18,8 +16,6 @@ import (
 	"mike/backend/stream"
 	"mike/backend/toolresult"
 	"mike/backend/types"
-
-	"mike/pkg/bridge"
 
 	"github.com/google/uuid"
 	"mike/pkg/logging"
@@ -336,8 +332,11 @@ type loopContext struct {
 	providerName   string
 	contextWindow  *int
 	sandboxEnabled bool
-	callStartTime  time.Time // start of current LLM call (for per-call Duration)
-	usage          *types.ChatUsage
+	// tools is the set this run offers: the operating mode picks the acting set, so a mode change
+	// that recreates the container re-reads it.
+	tools         []types.ChatTool
+	callStartTime time.Time // start of current LLM call (for per-call Duration)
+	usage         *types.ChatUsage
 	// reportedPrompt is the token count the provider gave for the stored turn this conversation was rebuilt
 	// from. A run starting from stored rows has made no call yet, and this is the only measurement of what
 	// that conversation costs that was not estimated.
@@ -366,6 +365,16 @@ func (lc *loopContext) clearToolCalls() {
 	lc.toolCallStream.Reset()
 	lc.toolPaths = nil
 	lc.pendingToolCalls = nil
+}
+
+// resetTurnOutput drops what the last LLM call streamed. The four hold nothing the next call reads
+// back, so a turn that is over leaves no partial answer behind in the conversation the next call is
+// built from.
+func (lc *loopContext) resetTurnOutput() {
+	lc.assistantContent.Reset()
+	lc.reasoningContent.Reset()
+	lc.clearToolCalls()
+	lc.finishReason = ""
 }
 
 // toolPath names the file a streaming tool call is working on, for the browser's live label. The
@@ -453,23 +462,11 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 		te.releaseAssignedPorts(setup)
 	}()
 
-	// Acquire the per-provider running-task slot BEFORE sandbox setup so a
-	// queued task doesn't hold a sandbox container while waiting. Agent
-	// providers manage their own concurrency and are excluded.
-	if !te.configStore.IsAgentProvider(setup.serverURL) {
-		if !te.acquireTaskSlot(setup, setup.serverURL) {
-			te.handleCancelledTask(setup.task.ID, setup.projectID)
-			return
-		}
-	}
-
-	// Acquire after the task slot and before sandbox setup so a queued task holds no container.
-	if !te.acquireMemSlot(setup) {
-		te.handleCancelledTask(setup.task.ID, setup.projectID)
+	// Both admission gates are taken before the container exists; acquireRunSlots says why.
+	if !te.acquireRunSlots(setup) {
 		return
 	}
 
-	// Create sandbox if enabled
 	// Reads, writes and edits inside the container go through the task's execution state, which this run
 	// created when it started. If the task has been stopped or started again since then, this run ends
 	// here without creating a container.
@@ -484,29 +481,9 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 		return
 	}
 
-	// Resolve image and agent config dir early — needed for both initial creation and mid-execution recreation.
-	imageToUse := ""
-	if setup.sandboxEnabled {
-		var agentClient *bridge.Client
-		var err error
-		imageToUse, agentClient, err = te.setupSandbox(setup)
-		if err != nil {
-			te.failTask(setup.task, setup.projectID, err.Error(), "sandbox_setup_failed")
-			return
-		}
-		sb := sandboxState{operatingMode: setup.task.OperatingMode, agentConfigHash: te.agentGrantHash(setup.providerURL())}
-		sb.exec, sb.execStream, sb.read, sb.write, sb.edit = makeSandboxCallbacks(setup.task.ID, agentClient)
-		// Wire up bridge recovery — reconnects client or (re)creates sandbox.
-		sb.recoverBridge = func() bool {
-			return te.recoverBridgeForTask(te.sandboxMgr, setup, state, imageToUse, func() {
-				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID,
-					types.TurnStatusEvent("running", "Sandbox bridge recovered"))
-			})
-		}
-		state.setSandbox(func(dst *sandboxState) { *dst = sb })
-		// The container exists now, so the budget counts it directly and the reservation made before
-		// the create is no longer needed.
-		te.confirmMemReservation(setup)
+	imageToUse, ok := te.openTaskSandbox(setup, state)
+	if !ok {
+		return
 	}
 
 	if te.configStore.IsAgentProvider(setup.serverURL) {
@@ -516,65 +493,12 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 		return
 	}
 
-	mc := &modelConfig{serverURL: setup.serverURL, modelName: setup.modelName}
-	// A provider switch during the run changes mc, and container creation reads mc.
-	setup.provider = mc
-	providerName := te.configStore.GetProviderIDByURL(setup.serverURL)
-	reasoningEffort := setup.task.ReasoningEffort
-	if reasoningEffort == "" {
-		reasoningEffort = te.configStore.GetModelReasoningEffort(setup.modelName)
-	}
-	apiKey := te.configStore.GetProviderAPIKey(setup.serverURL)
-	// One watcher for the whole run, so a provider switch mid-run keeps announcing instead of
-	// leaving the last notice standing.
-	silence := te.newStreamSilenceWatcher(setup.projectID, setup.task.ID)
-	client := te.newLlamaClient(setup.serverURL, setup.modelName, reasoningEffort, apiKey, silence)
-	tools := te.toolDefinitionsFor(setup.ctx, setup.task)
-
-	// Context tracking: load context window from provider config, discover if unknown. Discovery is
-	// a network round trip, so it runs before the conversation is read — reading first would leave
-	// the rows stale by however long it took.
-	var contextWindow *int
-	if cw := te.configStore.GetModelContextWindow(setup.modelName, setup.serverURL); cw != nil {
-		contextWindow = cw
-	} else if discovered := te.configStore.DiscoverContextWindow(setup.modelName, setup.serverURL); discovered != nil {
-		contextWindow = discovered
-		te.configStore.SaveModelContextWindow(setup.modelName, setup.serverURL, *discovered)
-		logging.For(logging.Exec).Infof("discovered context window for %s: %d", setup.modelName, *discovered)
-	}
-
-	// Read last, so the conversation is current when the first call is made.
-	messages, updatedTask, storedPrompt := te.conversationFromDB(setup.task, setup.worktreePath, setup.promptScope())
-	setup.task = updatedTask
-
-	// Remove duplicate user messages that may occur during regeneration due to
-	// race conditions between DELETE and POST handlers.
-	if setup.regenerate {
-		messages = removeDuplicateUserMessage(messages)
-	}
+	lc = te.newLoopContext(setup)
 
 	maxFailures := setup.task.MaxConsecutiveFailedTurns
 	if maxFailures == 0 {
 		maxFailures = 3
 	}
-
-	// Consolidate all mutable loop state into a single struct.
-	lc = &loopContext{
-		messages:       messages,
-		prevArgLens:    make(map[string]int),
-		detector:       newLoopDetector(),
-		silence:        silence,
-		mc:             mc,
-		client:         client,
-		providerName:   providerName,
-		contextWindow:  contextWindow,
-		sandboxEnabled: setup.sandboxEnabled,
-		reportedPrompt: storedPrompt,
-	}
-
-	// Carry over the accumulated session cost from prior runs/executors so the badge
-	// reflects the full session cost across provider/model switches and executor restarts.
-	lc.sessionCost = setup.task.SessionCost
 
 	for {
 		select {
@@ -584,90 +508,10 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 		default:
 		}
 
-		// Check for model/provider changes before each LLM call.
-		if updatedTask, err := te.store.GetTaskByID(setup.task.ID); err == nil {
-			newURL := updatedTask.LlamaServerURL
-			newModel := updatedTask.ModelName
-			curURL, curModel := lc.mc.get()
-			if newURL != "" && newURL != curURL || newModel != "" && newModel != curModel {
-				// Skip model switch if target is agent — requires different executor
-				if te.configStore.IsAgentProvider(newURL) {
-					logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Infof("skipping switch to agent (requires executor restart)")
-				} else {
-					if newURL == "" {
-						newURL = curURL
-					}
-					if newModel == "" {
-						newModel = curModel
-					}
-					switched := te.applyModelSwitch(lc.mc, setup.task, setup.projectID, newURL, newModel, false, true, silence)
-					lc.client = switched.client
-					lc.providerName = switched.providerName
-					if switched.contextWindow != nil {
-						lc.contextWindow = switched.contextWindow
-					}
-					lc.detector.reset() // model changed, clear stale text window
-					lc.detector.clearHints()
-					logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Infof("url=%s model=%s context_window=%v", newURL, newModel, lc.contextWindow)
-					// Provider (not just model) changed - move the running-task
-					// slot to the new provider (may queue while it's saturated).
-					if strings.TrimRight(newURL, "/") != strings.TrimRight(curURL, "/") {
-						if !te.syncTaskSlot(setup, newURL) {
-							te.handleCancelledTask(setup.task.ID, setup.projectID)
-							return
-						}
-					}
-				}
-			}
-
-			// Check for operating mode change — recreate sandbox with correct mount mode
-			if setup.sandboxEnabled && te.sandboxMgr != nil && te.sandboxMgr.ContainerIsRunning(setup.task.ID) {
-				currentOperatingMode := state.sandbox().operatingMode
-				newOperatingMode := updatedTask.OperatingMode
-				if newOperatingMode != currentOperatingMode {
-					logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Infof("operating mode changed (%s → %s), recreating sandbox", currentOperatingMode, newOperatingMode)
-					opts, optsErr := te.sandboxCreateOpts(setup, imageToUse, updatedTask.IsPlanMode())
-					if optsErr != nil {
-						logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Warnf("keeping the running sandbox through the mode change: %v", optsErr)
-						return
-					}
-					if err := te.recreateTaskSandbox(setup, state, sandboxRecreate{
-						reason:      "mode change",
-						connErrCode: "agent_connection_failed",
-						opts:        opts,
-						underLock:   func(sb *sandboxState) { sb.operatingMode = newOperatingMode },
-					}); err != nil {
-						return
-					}
-					// Update setup.task reference with latest mode
-					setup.task.OperatingMode = updatedTask.OperatingMode
-					tools = te.toolDefinitionsFor(setup.ctx, updatedTask)
-					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.TurnStatusEvent("running", fmt.Sprintf("Sandbox recreated for mode change (%s)", newOperatingMode)))
-				}
-			}
-		}
-
-		// A folder the user just removed counts as a change.
-		if setup.sandboxEnabled && te.sandboxMgr != nil && te.sandboxMgr.ContainerIsRunning(setup.task.ID) {
-			currentHash := state.sandbox().agentConfigHash
-			newHash := te.agentGrantHash(setup.providerURL())
-			if newHash != currentHash {
-				logging.For(logging.Sandbox).With(logging.TaskID, setup.task.ID).Infof("agent sandbox config changed, recreating sandbox")
-				opts, optsErr := te.sandboxCreateOpts(setup, imageToUse, setup.task.IsPlanMode())
-				if optsErr != nil {
-					logging.For(logging.Sandbox).With(logging.TaskID, setup.task.ID).Warnf("keeping the running sandbox through the extension config change: %v", optsErr)
-					return
-				}
-				if err := te.recreateTaskSandbox(setup, state, sandboxRecreate{
-					reason:      "config change",
-					connErrCode: "agent_config_failed",
-					opts:        opts,
-					underLock:   func(sb *sandboxState) { sb.agentConfigHash = newHash },
-				}); err != nil {
-					return
-				}
-				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.TurnStatusEvent("running", "Sandbox recreated for extension config change"))
-			}
+		// A model switch, an operating-mode change or a changed agent grant, each answered as it
+		// arrives rather than at the next LLM call.
+		if te.refreshRunConfig(setup, lc, state, imageToUse) {
+			return
 		}
 
 		// Check for user messages that arrived during tool execution.
@@ -677,328 +521,19 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 
 		// Clear turn-specific state before each LLM call.
 		lc.prevArgLens = make(map[string]int)
-		lc.finishReason = ""
-		lc.clearToolCalls()
-		lc.assistantContent.Reset()
-		lc.reasoningContent.Reset()
+		lc.resetTurnOutput()
 
-		// Acquire concurrency gate slot before LLM call. Keyed by the CURRENT
-		// provider — lc.mc follows mid-run model/provider switches, while
+		// Keyed by the CURRENT provider — lc.mc follows mid-run model/provider switches, while
 		// setup.serverURL is only the start-time URL.
 		gateURL, activeModel := lc.mc.get()
-		concurrency := te.configStore.GetProviderConcurrency(gateURL)
-		maxRPS := te.configStore.GetProviderMaxRequestsPerSecond(gateURL)
 
-		// Queue status polling — runs while waiting for a gate slot, reporting
-		// the call's own position (its queue entry is handed to the poller via
-		// the onEnqueued callback as soon as it is enqueued).
-		onEnqueued, queueDone := te.startGateQueuePoller(te.gate, gateURL, setup.projectID, setup.task.ID, setup.ctx)
-		if _, err := te.gate.Acquire(setup.ctx, gateURL, concurrency, maxRPS, onEnqueued); err != nil {
-			close(queueDone) // cleanup polling goroutine
-			te.handleCancelledTask(setup.task.ID, setup.projectID)
+		// One LLM call: the gate slot, the stream, and the wait for its end.
+		switch te.streamTurn(setup, lc, gateURL, activeModel) {
+		case streamStopped:
 			return
-		}
-		close(queueDone)
-
-		// Per-call context — can be cancelled independently to abort the LLM stream.
-		callCtx, callCancel := context.WithCancel(setup.ctx)
-
-		streamDone := make(chan struct{})
-		// releaseAfterStreamEnd waits for the streaming goroutine to stop writing, then returns the
-		// provider slot. The two seconds bounds this wait, not the goroutine: a slow abort is logged
-		// and the turn moves on.
-		releaseAfterStreamEnd := func() {
-			select {
-			case <-streamDone:
-			case <-time.After(2 * time.Second):
-				logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Warnf("streamDone timeout, forcing continue")
-			}
-			te.gate.Release(gateURL)
-		}
-		var streamErr error
-		var lastProgressSend time.Time // throttle progress updates to ~1/2s
-		var lastPredictedN int         // track predicted tokens for real-time stats events
-
-		// Assemble LLM context, made to fit the window this model accepts.
-		llmMessages := te.fitRequestToWindow(setup, lc, activeModel)
-
-		// Set status before the LLM call so the frontend picks up streaming tokens.
-		setup.task.Status = types.StatusInProgress
-		setup.task.ExecutionState = types.ExecStateRunning
-		te.persistTaskClaiming(setup)
-		te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
-
-		// streamFlusher batches streaming events to reduce WebSocket write overhead.
-		flusher := newStreamFlusher(setup.projectID, setup.task.ID,
-			te.appStreamMgr.SendTaskEvent, lc.detector)
-		flushDone := make(chan struct{})
-		go func() {
-			tick := time.NewTicker(streamThrottleInterval)
-			defer tick.Stop()
-			defer close(flushDone)
-			for {
-				select {
-				case <-callCtx.Done():
-					return
-				case <-tick.C:
-					flusher.flush()
-				}
-			}
-		}()
-
-		// Shared callbacks for ChatStream — used by both the initial call and retries.
-		tokenCb := func(choice types.ChatChoice) {
-			// A token is the end of the wait, whatever the provider was holding back.
-			if (choice.Delta.Content != nil && *choice.Delta.Content != "") ||
-				(choice.Delta.ReasoningContent != nil && *choice.Delta.ReasoningContent != "") ||
-				len(choice.Delta.ToolCalls) > 0 {
-				silence.clear()
-			}
-			// Capture finish_reason for loop detection (last non-empty value wins).
-			if choice.FinishReason != "" {
-				lc.finishReason = choice.FinishReason
-			}
-			if choice.Delta.ReasoningContent != nil && *choice.Delta.ReasoningContent != "" {
-				lc.reasoningContent.WriteString(*choice.Delta.ReasoningContent)
-				flusher.appendReasoning(*choice.Delta.ReasoningContent)
-			}
-			if choice.Delta.Content != nil && *choice.Delta.Content != "" {
-				lc.assistantContent.WriteString(*choice.Delta.Content)
-				flusher.appendToken(*choice.Delta.Content)
-				// Real-time phrase repetition detection (not throttled — detection runs per-token)
-				if loopType := lc.detector.checkStreamingText(*choice.Delta.Content); loopType == LoopPhrase {
-					logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Infof("phrase repetition detected during streaming")
-					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.TurnStatusEvent("running", "Repetitive response detected"))
-				}
-			}
-			if len(choice.Delta.ToolCalls) > 0 {
-				priorLen := len(lc.pendingToolCalls)
-				lc.foldToolCalls(choice.Delta.ToolCalls)
-				for i := range len(lc.pendingToolCalls) {
-					tc := lc.pendingToolCalls[i]
-					if tc.ID == "" || tc.Function.Name == "" {
-						continue
-					}
-					argLen := len(tc.Function.Arguments)
-					prevLen := lc.prevArgLens[tc.ID]
-					isNew := i >= priorLen
-					isUpdated := !isNew && argLen != prevLen
-					if !isNew && !isUpdated {
-						continue
-					}
-					lc.prevArgLens[tc.ID] = argLen
-					path := lc.toolPath(tc.ID, tc.Function.Arguments)
-					actualPrevLen := prevLen
-					if isNew {
-						actualPrevLen = 0
-					}
-					flusher.appendToolCall(tc.ID, tc.Function.Name, te.toolDisplayName(tc.Function.Name), path, tc.Function.Arguments, argLen, actualPrevLen, (lc.sandboxEnabled && isSandboxableTool(tc.Function.Name)) || isLSPTool(tc.Function.Name))
-				}
-			}
-			// Throttled progress updates for write_file (1 per 2 seconds)
-			if time.Since(lastProgressSend) > 2*time.Second {
-				for _, tc := range lc.pendingToolCalls {
-					if tc.Function.Name == types.ToolWriteFile && tc.Function.Arguments != "" {
-						te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolProgress, Data: map[string]any{"tool_id": tc.ID, "bytes_written": len(tc.Function.Arguments), "path": lc.toolPath(tc.ID, tc.Function.Arguments)}})
-						lastProgressSend = time.Now()
-					}
-				}
-			}
-		}
-		// usageCb publishes live token stats. It reads the snapshot, never
-		// lc.usage: that field is only set once ChatStream returns, so mid-stream
-		// it holds nil (first turn) or the previous turn's numbers (later turns).
-		usageCb := func(u *types.ChatUsage) {
-			if u == nil {
-				return
-			}
-			if u.CompletionTokens != lastPredictedN {
-				lastPredictedN = u.CompletionTokens
-				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStats, Data: map[string]any{
-					"model_name":       activeModel,
-					"prompt_tokens":    u.PromptTokens,
-					"predicted_tokens": u.CompletionTokens,
-					"predicted_ms":     u.PredictedMs,
-				}})
-			}
-		}
-		progressCb := func(progress types.PromptProgressData) {
-			// Forward prompt processing progress to the frontend.
-			// Throttle to ~2 updates/sec to avoid flooding the WebSocket.
-			if time.Since(lastProgressSend) > 500*time.Millisecond {
-				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypePromptProgress, Data: map[string]any{
-					"total":     progress.Total,
-					"cache":     progress.Cache,
-					"processed": progress.Processed,
-					"time_ms":   progress.TimeMs,
-				}})
-				lastProgressSend = time.Now()
-			}
-		}
-
-		lc.callStartTime = time.Now()
-		go func() {
-			defer silence.clear() // every exit ends the notice, including a cancellation
-
-			lc.usage, streamErr = lc.client.ChatStream(callCtx, llmMessages, tools, tokenCb, progressCb, usageCb)
-
-			// Retry on transient errors, unless the call was cancelled by a user message or refused by
-			// the provider: a refusal is deterministic, so the loop would only repeat it.
-			if streamErr != nil && callCtx.Err() == nil && !llmIsRequestRejected(streamErr) {
-				retryStarted := time.Now()
-				for i := range llmRetryAttempts {
-					select {
-					case <-callCtx.Done():
-						flusher.flush()
-						close(streamDone)
-						return
-					case <-time.After(te.llmBackoff(i, streamErr)):
-					}
-					if time.Since(retryStarted) > llmRetryWindow {
-						break // the provider is ill and four requests in a row will not cure it
-					}
-					if i == 0 {
-						te.sendRetryHint(setup.projectID, setup.task.ID, setup.task, streamErr)
-					}
-					logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Warnf("LLM call retry %d/%d after: %v", i+1, llmRetryAttempts, streamErr)
-					// Flush any remaining buffered events before retry.
-					flusher.flush()
-					// Reset builders so retry doesn't concatenate partial content.
-					lc.assistantContent.Reset()
-					lc.reasoningContent.Reset()
-					lc.clearToolCalls()
-					lc.finishReason = ""
-					flusher.reset()
-					lc.callStartTime = time.Now()
-					lc.usage, streamErr = lc.client.ChatStream(callCtx, llmMessages, tools, tokenCb, progressCb, usageCb)
-					if streamErr == nil {
-						break
-					}
-				}
-			}
-
-			// Emit accumulated session cost (LLM providers only; agents report their own).
-			if streamErr == nil && lc.usage != nil {
-				curURL, _ := lc.mc.get()
-				if cost := te.configStore.EstimateCallCost(curURL, activeModel, lc.usage); cost > 0 {
-					lc.sessionCost += cost
-					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStats, Data: map[string]any{
-						"model_name":       activeModel,
-						"prompt_tokens":    lc.usage.PromptTokens,
-						"predicted_tokens": lc.usage.CompletionTokens,
-						"predicted_ms":     lc.usage.PredictedMs,
-						"cost":             lc.sessionCost,
-					}})
-				}
-			}
-
-			// Flush any remaining buffered events before signalling completion.
-			flusher.flush()
-			close(streamDone)
-		}()
-
-		// Wait for: stream complete, new user message, or setup.task stop.
-		select {
-		case <-setup.ctx.Done():
-			callCancel()
-			te.gate.Release(gateURL) // Release gate immediately so other tasks can proceed
-			<-streamDone             // Then wait for goroutine to finish
-			te.handleCancelledTask(setup.task.ID, setup.projectID)
-			return
-		case <-streamDone:
-			// Stream completed normally (or all retries exhausted)
-		case um := <-setup.userMsgChan:
-			if um.ContextChanged {
-				logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Infof("conversation context changed during streaming, cancelling")
-				lc.detector.reset()
-				lc.detector.clearHints()
-				callCancel()
-				releaseAfterStreamEnd()
-				lc.assistantContent.Reset()
-				lc.reasoningContent.Reset()
-				lc.clearToolCalls()
-				lc.finishReason = ""
-				lc.messages, setup.task, _ = te.conversationFromDB(setup.task, setup.worktreePath, setup.promptScope())
-				continue
-			}
-			// New user message — cancel current LLM call.
-			logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Infof("user message received during streaming, cancelling (setup.regenerate=%v)", um.Regenerate)
-			lc.detector.reset() // user input breaks any loop pattern
-			lc.detector.clearHints()
-			callCancel()
-			releaseAfterStreamEnd()
-
-			// Drain all queued messages from channel (non-blocking).
-			var queuedMsgs []stream.UserMessage
-			queuedMsgs = append(queuedMsgs, um)
-			for range 16 {
-				select {
-				case q := <-setup.userMsgChan:
-					queuedMsgs = append(queuedMsgs, q)
-				default:
-					goto drainDone
-				}
-			}
-		drainDone:
-
-			// Clear partial assistant state.
-			lc.assistantContent.Reset()
-			lc.reasoningContent.Reset()
-			lc.clearToolCalls()
-			lc.finishReason = ""
-
-			// If any queued message is a setup.regenerate, truncate stale assistant messages.
-			// Otherwise, re-sync with DB to pick up any deleted messages.
-			hadRegenerate := false
-			for _, qm := range queuedMsgs {
-				if qm.Regenerate {
-					lc.messages = truncateForRegenerate(lc.messages)
-					hadRegenerate = true
-					break
-				}
-			}
-			if !hadRegenerate {
-				// Re-sync with DB to pick up user messages (already created by HandleSend)
-				// and any deleted messages. Do NOT append — conversationFromDB already includes them.
-				lc.messages, setup.task, _ = te.conversationFromDB(setup.task, setup.worktreePath, setup.promptScope())
-			}
-
-			// Apply model overrides from queued messages.
-			for _, qm := range queuedMsgs {
-				if qm.Regenerate {
-					lc.messages = append(lc.messages, userMessageToChatMessage(qm))
-				}
-				if qm.ModelName != "" {
-					switched := te.applyModelSwitch(lc.mc, setup.task, setup.projectID, qm.ServerURL, qm.ModelName, true, false, silence)
-					lc.client = switched.client
-					lc.providerName = switched.providerName
-				}
-			}
-			// If the queued messages moved the task to another provider, move
-			// the running-task slot with it (no-op when the URL is unchanged).
-			if curURL, _ := lc.mc.get(); curURL != "" && !te.syncTaskSlot(setup, curURL) {
-				te.handleCancelledTask(setup.task.ID, setup.projectID)
-				return
-			}
-
-			// Notify frontend that response was cancelled.
-			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.TurnStatusEvent("cancelled", "Response cancelled, processing new message"))
-
+		case streamContinue:
 			continue
 		}
-		callCancel()
-
-		if streamErr != nil {
-			// Release gate slot (was acquired before the LLM call above).
-			te.gate.Release(gateURL)
-			failure := classifyLLMFailure(streamErr)
-			logging.For(logging.LLM).With(logging.TaskID, setup.task.ID).Errorf("LLM call failed (code=%s): %v", failure.code, streamErr)
-			te.failTask(setup.task, setup.projectID, failure.sentence, failure.code)
-			return
-		}
-
-		// Release gate slot after LLM call (before tool execution).
-		te.gate.Release(gateURL)
 
 		// Everything that follows an LLM call: persist the assistant turn and run its tool
 		// calls, settle for the text answer, or record a reasoning-only turn.
@@ -1084,611 +619,29 @@ func (te *TaskExecutor) rowsDurable(projectID, taskID string) {
 	te.appStreamMgr.DurableThrough(projectID, taskID)
 }
 
-// finalizeTurn handles what follows one LLM call: persist the assistant message and run its tool calls,
-// settle on a text answer, or record a reasoning-only turn.
+// finalizeTurn handles what follows one LLM call: persist the assistant message and run its tool
+// calls, settle on a text answer, or record a reasoning-only turn. Which shape it is, it decides
+// here; each shape settles in its own stage.
 func (te *TaskExecutor) finalizeTurn(setup *taskExecSetup, lc *loopContext, activeModel string, maxFailures int) turnOutcome {
 	assistantText := lc.assistantContent.String()
 
-	var toolResults []toolResult
-	var turnFailures []turnResult
-
 	if len(lc.pendingToolCalls) > 0 {
-		// Persist assistant message BEFORE tool calls so DB ordering matches LLM output order
-		promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(lc.usage)
-		logStatsSpeed(setup.task.ID, activeModel, promptTokens-cacheTokens, predictedTokens, promptMs, predictedMs)
-		assistantCreatedAt := time.Now().UTC()
-		assistantMsgID := uuid.New().String()
-		if err := te.store.CreateTaskMessage(&types.TaskMessage{
-			ID: assistantMsgID, TaskID: setup.task.ID, ThreadID: setup.task.CurrentThreadID, Role: "assistant",
-			Content: assistantText, ReasoningContent: lc.reasoningContent.String(),
-			ModelName: activeModel, ProviderName: lc.providerName,
-			PromptTokens: promptTokens, PredictedTokens: predictedTokens, CacheTokens: cacheTokens,
-			PromptMs: promptMs, PredictedMs: predictedMs,
-			Duration: time.Since(lc.callStartTime).Milliseconds(), CreatedAt: assistantCreatedAt,
-		}); err == nil {
-			te.rowsDurable(setup.projectID, setup.task.ID)
-		}
-
-		// Track if any tool call was a git command — needed because fsnotify
-		// can't detect diff state changes from git commit/checkout/merge
-		// (branch pointer moves without working tree file changes).
-		hadGitCmd := false
-		hadRequestReview := false // request_review detected in this turn
-
-		// What cancelling this kills, and what it must never reach, is in toolCallContext.
-		toolCtx, cancelTools := toolCallContext(setup)
-		defer cancelTools()
-		// A task stop is a stop, and its own path reports it; only a message is an interrupt.
-		interrupted := func() bool { return toolCtx.Err() != nil && setup.ctx.Err() == nil }
-
-		for _, tc := range lc.pendingToolCalls {
-			if tc.ID == "" || tc.Function.Name == "" {
-				logging.For(logging.Tools).Infof("skipping incomplete tool call (id=%q, name=%q)", tc.ID, tc.Function.Name)
-				continue
-			}
-			args := parseToolArgs(tc.Function.Arguments)
-			// Send final path update before execution (full args now available)
-			if tc.Function.Name == types.ToolWriteFile {
-				path := extractPathFromArgs(tc.Function.Arguments)
-				if path == "" {
-					if p, ok := args["path"].(string); ok && p != "" {
-						path = p
-					}
-				}
-				if path != "" {
-					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolProgress, Data: map[string]any{"tool_id": tc.ID, "bytes_written": len(tc.Function.Arguments), "path": path}})
-				}
-			}
-			// Persist tool_call message BEFORE execution so it survives page refresh.
-			// ToolResult is empty until execution completes.
-			tcJSON, _ := json.Marshal(map[string]any{
-				"tool_id":           tc.ID,
-				"tool_name":         tc.Function.Name,
-				"tool_display_name": te.toolDisplayName(tc.Function.Name),
-				"args":              args,
-				"raw_args":          tc.Function.Arguments,
-				"sandbox":           (lc.sandboxEnabled && isSandboxableTool(tc.Function.Name)) || isLSPTool(tc.Function.Name),
-			})
-			toolCallMsgID := uuid.New().String()
-			if err := te.store.CreateTaskMessage(&types.TaskMessage{
-				ID:        toolCallMsgID,
-				TaskID:    setup.task.ID,
-				ThreadID:  setup.task.CurrentThreadID,
-				Role:      "tool_call",
-				Content:   "",
-				ToolCalls: string(tcJSON),
-				// The assistant row is persisted before tools run, so its id is known
-				// here: recording it is what lets the conversation be rebuilt without
-				// relying on the tool_call rows being contiguous.
-				AssistantMsgID: assistantMsgID,
-				CreatedAt:      time.Now().UTC(),
-			}); err != nil {
-				logging.For(logging.Tools).Warnf("FAILED to persist tool_call message for setup.task=%s tool=%s: %v", setup.task.ID, tc.Function.Name, err)
-			} else {
-				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolProgress, Data: map[string]any{"tool_id": tc.ID, "message_id": toolCallMsgID}})
-			}
-
-			// A call the model could not state its arguments for is refused rather than run with an
-			// empty argument map: see unparseableToolArgs.
-			refusal := unparseableToolArgs(tc.Function.Arguments, args)
-			var result string
-			var success bool
-			toolStart := time.Now()
-			streamed := false
-			// skipped: nothing ran, so nothing was committed, touched or put up for review.
-			skipped := false
-			wasInterrupted := false
-			// A tool call takes its read, write and edit functions from the task's execution state, so look
-			// that up again for each call. If the task was stopped or started again since this turn began,
-			// the lookup finds nothing and the rest of this batch must not run.
-			state := te.ownExecutionState(setup.task.ID, setup.ctx)
-			switch {
-			case interrupted():
-				result, success, skipped, wasInterrupted = interruptedToolResult, false, true, true
-			case refusal != "":
-				result, success, skipped = refusal, false, true
-				logging.For(logging.Tools).With(logging.TaskID, setup.task.ID).Warnf("refused %s: arguments that did not decode", tc.Function.Name)
-			case state == nil:
-				// The task was stopped or started again, so this call does not run. Storing Stopped as its
-				// result gives the card and the conversation an answer for it.
-				result, success, skipped = stoppedToolResult, false, true
-				logging.For(logging.Tools).With(logging.TaskID, setup.task.ID).Infof("answered %s as stopped: the task was stopped or started again", tc.Function.Name)
-			default:
-				// tool_call event already sent during streaming, just execute and send result
-				logging.For(logging.Tools).Infof("executing %s for setup.task=%s", tc.Function.Name, setup.task.ID)
-				// runToolProtected holds the worktree lock for this block and turns a panic
-				// into a failed result, so the tool_result below is always sent and stored.
-				result, success = te.runToolProtected(setup.task.ID, tc.Function.Name, func() (string, bool) {
-					result, success := te.executeTool(toolCtx, tc.Function.Name, args, setup.worktreePath, setup.task, state, func(toolID string, text string) {
-						streamed = true
-						te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolOutput, Data: map[string]any{"tool_id": tc.ID, "text": text}})
-					})
-
-					// Remember what this tool touched. Diagnostics run at the turn boundary
-					// (collectTurnDiagnostics), not here: this callback holds the worktree
-					// mutex, where a language server round trip would serialise the rest of
-					// the turn and report a state the turn's later edits may already fix.
-					switch tc.Function.Name {
-					case types.ToolWriteFile, types.ToolEditFile:
-						if path, ok := args["path"].(string); ok && path != "" {
-							lc.noteTouchedFile(path)
-						}
-					case types.ToolBash:
-						lc.noteShellMayHaveChangedFiles()
-					}
-					return result, success
-				})
-				if interrupted() {
-					// A killed call answers what a skipped one does, and its partial output goes with
-					// the stop.
-					result, success, wasInterrupted = interruptedToolResult, false, true
-				}
-			}
-			toolDuration := time.Since(toolStart).Milliseconds()
-			result = toolResultText(result)
-			isSandboxed := (lc.sandboxEnabled && isSandboxableTool(tc.Function.Name)) || isLSPTool(tc.Function.Name)
-			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: buildToolResultEvent(tc.ID, tc.Function.Name, result, success, wasInterrupted, toolDuration, args, tc.Function.Arguments, extractPathFromArgs(tc.Function.Arguments), isSandboxed, streamed, toolCallMsgID)})
-			toolResults = append(toolResults, toolResult{toolCallID: tc.ID, output: result, messageID: toolCallMsgID, args: args, rawArgs: tc.Function.Arguments, success: success, duration: toolDuration})
-
-			// Update tool_call message with result after execution completes.
-			resultJSON, _ := json.Marshal(map[string]any{
-				"output":      result,
-				"success":     success,
-				"interrupted": wasInterrupted,
-				"duration":    toolDuration,
-			})
-			if err := te.store.UpdateTaskMessageToolResult(toolCallMsgID, string(resultJSON)); err != nil {
-				// The row keeps an empty result, which the chat renders as still running.
-				logging.For(logging.Tools).Warnf("FAILED to persist tool_result for msg=%s tool=%s: %v", toolCallMsgID, tc.Function.Name, err)
-			} else {
-				te.rowsDurable(setup.projectID, setup.task.ID)
-			}
-
-			turnFailures = append(turnFailures, callResult(tc.Function.Name, tc.Function.Arguments, success))
-
-			if skipped {
-				continue
-			}
-
-			// Detect git commands in bash tool calls
-			if tc.Function.Name == types.ToolBash {
-				if cmd, ok := args["command"].(string); ok && strings.Contains(cmd, "git ") {
-					hadGitCmd = true
-				}
-			}
-
-			if tc.Function.Name == types.ToolRequestReview {
-				hadRequestReview = true
-			}
-		}
-		// Post-tool git check: broadcast diff if a git command changed the state
-		if hadGitCmd {
-			te.broadcastDiffIfGitCmd(setup.projectID, setup.task.ID, setup.task)
-		}
-
-		if interrupted() {
-			// Nothing this turn started gets settled: no failure counted, no question awaited, no
-			// commit, merge or Done, and the armed commit-and-done click stays armed. The message that
-			// stopped it is still queued, so the next iteration folds it in before the provider runs.
-			logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Infof("user message interrupted the turn's tool calls")
-			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.TurnStatusEvent("cancelled", "Response cancelled, processing new message"))
-			return turnNextLLMCall
-		}
-
-		// ask_question: auto-started tasks auto-answer from parent context and
-		// continue; otherwise stop and wait for the user.
-		askResults := askQuestionResults(lc.pendingToolCalls, toolResults)
-		autoAnswered := false
-		if len(askResults) > 0 {
-			// Collect question indexes in call order (map iteration is unordered).
-			questionIdxs := make([]int, 0, len(askResults))
-			for i := range askResults {
-				questionIdxs = append(questionIdxs, i)
-			}
-			slices.Sort(questionIdxs)
-			if setup.task.Autostarted {
-				questions := make([]string, 0, len(questionIdxs))
-				for _, i := range questionIdxs {
-					questions = append(questions, toolResults[askResults[i]].output)
-				}
-				answers, aerr := te.automatedAnswers(setup.ctx, setup.task, questions)
-				if aerr != nil || len(answers) != len(questionIdxs) {
-					if aerr != nil {
-						logging.For(logging.Tools).With(logging.TaskID, setup.task.ID).Warnf("auto-answer failed: %v, falling back to user", aerr)
-					} else {
-						logging.For(logging.Tools).With(logging.TaskID, setup.task.ID).Infof("auto-answer count mismatch (%d answers, %d questions), falling back to user", len(answers), len(questionIdxs))
-					}
-				} else {
-					for k, idx := range questionIdxs {
-						ri := askResults[idx]
-						tr := toolResults[ri]
-						tr.output = answers[k]
-						toolResults[ri] = tr
-						// Persist the answer as this tool call's result.
-						resultJSON, _ := json.Marshal(map[string]any{"output": tr.output, "success": tr.success, "duration": tr.duration})
-						if err := te.store.UpdateTaskMessageToolResult(tr.messageID, string(resultJSON)); err == nil {
-							te.rowsDurable(setup.projectID, setup.task.ID)
-						}
-						// Re-broadcast so the UI shows the answer in place.
-						te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: buildToolResultEvent(tr.toolCallID, types.ToolAskQuestion, tr.output, tr.success, false, tr.duration, tr.args, tr.rawArgs, "", false, false, tr.messageID)})
-					}
-					autoAnswered = true
-					logging.For(logging.Tools).With(logging.TaskID, setup.task.ID).Infof("auto-answered %d question(s) from parent context", len(answers))
-				}
-			}
-
-			// Not auto-answered and no request_review: stop and wait for the user.
-			if !hadRequestReview && !autoAnswered {
-				// A question hands the task back to the user, so it replaces any pending
-				// commit-and-done click - the merge-conflict prompt invites exactly that question.
-				te.merge.clearCommitAndDone(setup.task.ID)
-				tr := toolResults[askResults[questionIdxs[0]]]
-				setup.task.ExecutionState = types.ExecStateIdle
-				setup.task.Status = types.StatusReview
-				te.persistTask(setup)
-				te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
-				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
-					"state":    "idle",
-					"question": tr.output,
-					"summary":  "Agent has a question",
-				}})
-				logging.For(logging.Tools).With(logging.TaskID, setup.task.ID).Infof("stopping executor, awaiting user answer")
-				// Deliver anything the environment said this turn before idling: the answer
-				// arrives on a later run, which rebuilds its context from the DB.
-				te.flushAdvisories(setup, lc)
-				// Remove from setup.task registry so next user message triggers handleLazyStart
-				te.taskMu.Lock()
-				delete(te.tasks, setup.task.ID)
-				te.taskMu.Unlock()
-				return turnStop
-			}
-		}
-
-		// request_review: handle task completion (commit/merge)
-		// This runs AFTER auto-answer so that ask_question in the same turn
-		// is answered before the task completes.
-		if hadRequestReview {
-			if setup.task.AutoCommit {
-				if setup.task.HasMergeConflict {
-					res := te.merge.commitConflictResolution(setup.projectID, setup.task.ID, setup.worktreePath, setup.task)
-					setup.task = res.task
-					if setup.task.HasMergeConflict {
-						// Still conflicted — hand the model the instructions and continue
-						te.prepareMergeConflictTurn(setup, lc, GetConflictedFiles(setup.worktreePath))
-						return turnNextLLMCall
-					}
-					if res.finishesTask() {
-						setup.task.ExecutionState = types.ExecStateCompleted
-						setup.task.Status = types.StatusDone
-					} else {
-						// No merge, or a failed one: the work is not in the target branch.
-						if res.mergeErr != nil {
-							setup.task.Output = "Merge failed: " + res.mergeErr.Error()
-						}
-						setup.task.ExecutionState = types.ExecStateIdle
-						setup.task.Status = types.StatusReview
-					}
-					if te.sandboxMgr != nil {
-						_ = te.sandboxMgr.Stop(setup.task.ID)
-					}
-					te.persistTask(setup)
-					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: turnStatsFrame(
-						setup.task.ExecutionState, assistantMsgID, promptTokens, predictedTokens, cacheTokens,
-						promptMs, predictedMs, activeModel, time.Since(lc.callStartTime).Milliseconds(), nil)})
-					te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
-					if setup.task.ParentTaskID != "" {
-						_ = te.AutoStartNextSibling(setup.projectID, setup.task.ID, setup.task.ParentTaskID)
-					}
-					return turnStop
-				}
-
-				// No merge conflict — normal auto-commit path
-				commitMsg := te.merge.GenerateCommitMessage(setup.ctx, setup.task)
-				mergeErr := te.merge.CommitAndMerge(setup.projectID, setup.task.ID, setup.worktreePath, commitMsg, setup.task.AutoMerge)
-				setup.task, _ = te.store.GetTaskByID(setup.task.ID)
-				if setup.task.HasMergeConflict {
-					te.prepareMergeConflictTurn(setup, lc, GetResolvedConflictedFiles(setup.worktreePath))
-					return turnNextLLMCall
-				}
-				if !MergedDelivered(mergeErr) {
-					logging.For(logging.Merge).With(logging.TaskID, setup.task.ID).Warnf("merge failed, moving to review: %v", mergeErr)
-					setup.task.ExecutionState = types.ExecStateIdle
-					setup.task.Status = types.StatusReview
-					setup.task.Output = "Merge failed: " + mergeErr.Error()
-					if te.sandboxMgr != nil {
-						_ = te.sandboxMgr.Stop(setup.task.ID)
-					}
-				} else if !setup.task.AutoMerge {
-					setup.task.ExecutionState = types.ExecStateIdle
-					setup.task.Status = types.StatusReview
-					if te.sandboxMgr != nil {
-						_ = te.sandboxMgr.Stop(setup.task.ID)
-					}
-				} else {
-					setup.task.ExecutionState = types.ExecStateCompleted
-					setup.task.Status = types.StatusDone
-					if te.sandboxMgr != nil {
-						_ = te.sandboxMgr.Stop(setup.task.ID)
-					}
-				}
-			} else if setup.task.HasMergeConflict {
-				res := te.merge.commitConflictResolution(setup.projectID, setup.task.ID, setup.worktreePath, setup.task)
-				setup.task = res.task
-				if setup.task.HasMergeConflict {
-					logging.For(logging.Merge).With(logging.TaskID, setup.task.ID).Infof("merge still conflicted after request_review")
-					setup.task.ExecutionState = types.ExecStateFailed
-					setup.task.Status = types.StatusReview
-					if te.sandboxMgr != nil {
-						_ = te.sandboxMgr.Stop(setup.task.ID)
-					}
-				} else if res.finishesTask() {
-					setup.task.ExecutionState = types.ExecStateCompleted
-					setup.task.Status = types.StatusDone
-					if te.sandboxMgr != nil {
-						_ = te.sandboxMgr.Stop(setup.task.ID)
-					}
-				} else {
-					if res.mergeErr != nil {
-						setup.task.Output = "Merge failed: " + res.mergeErr.Error()
-					}
-					setup.task.ExecutionState = types.ExecStateIdle
-					setup.task.Status = types.StatusReview
-					if te.sandboxMgr != nil {
-						_ = te.sandboxMgr.Stop(setup.task.ID)
-					}
-				}
-			} else {
-				setup.task.ExecutionState = types.ExecStateIdle
-				setup.task.Status = types.StatusReview
-			}
-			te.persistTask(setup)
-			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: turnStatsFrame(
-				setup.task.ExecutionState, assistantMsgID, promptTokens, predictedTokens, cacheTokens,
-				promptMs, predictedMs, activeModel, time.Since(lc.callStartTime).Milliseconds(), nil)})
-			te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
-			if hadGitCmd {
-				te.broadcastDiffIfGitCmd(setup.projectID, setup.task.ID, setup.task)
-			}
-			if setup.task.ParentTaskID != "" {
-				_ = te.AutoStartNextSibling(setup.projectID, setup.task.ID, setup.task.ParentTaskID)
-			}
-			return turnStop
-		}
-
-		// Check consecutive identical tool call failures (turn-level).
-		if count := lc.tracker.recordTurn(turnFailures); count >= maxFailures {
-			// The breaker cuts the failed call and the turns after it out of the conversation and asks
-			// the model to proceed; declining leaves the ordinary failure path.
-			if te.breakFailureLoop(setup, lc) {
-				return turnNextLLMCall
-			}
-			setup.task.ExecutionState = types.ExecStateFailed
-			setup.task.Status = types.StatusReview
-			setup.task.Output = fmt.Sprintf("Max consecutive failed turns (%d) reached", maxFailures)
-			te.persistTask(setup)
-			te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
-			te.sendAndPersistError(setup.task.ID, fmt.Sprintf("Max consecutive failed turns (%d) reached", maxFailures), "max_failures")
-			return turnStop
-		}
-
-		// Build assistant message with reasoning, content, and tool calls.
-		// Including tool_calls in the message history is critical for models like gemma
-		// to understand what tool was called and match it to the result.
-		// Keep reasoning in ReasoningContent so toAPIMessage sends it as reasoning_content.
-		var assistantToolCalls []types.ToolCallMsg
-		for _, tc := range lc.pendingToolCalls {
-			if tc.ID != "" && tc.Function.Name != "" {
-				assistantToolCalls = append(assistantToolCalls, types.ToolCallMsg{
-					ID:   tc.ID,
-					Type: "function",
-				})
-				assistantToolCalls[len(assistantToolCalls)-1].Function.Name = tc.Function.Name
-				assistantToolCalls[len(assistantToolCalls)-1].Function.Arguments = tc.Function.Arguments
-			}
-		}
-		assistantMsg := types.ChatMessage{
-			Role:      "assistant",
-			Content:   assistantText,
-			ToolCalls: assistantToolCalls,
-		}
-		if lc.reasoningContent.Len() > 0 {
-			assistantMsg.ReasoningContent = lc.reasoningContent.String()
-		}
-		lc.messages = append(lc.messages, assistantMsg)
-		for _, tr := range toolResults {
-			lc.messages = append(lc.messages, types.ChatMessage{Role: "tool", Content: tr.output, ToolCallID: tr.toolCallID})
-		}
-
-		// One diagnostics pass for everything this turn changed, then deliver the
-		// buffered environment notes. Both must happen after the tool messages above
-		// (so the notes comment on work the model can already see) and before
-		// summarization (so the notes survive compaction).
-		te.collectTurnDiagnostics(setup, lc)
-		te.flushAdvisories(setup, lc)
-
-		// Loop detection: record this turn and check for repetition
-		loopType, toolArgs := lc.detector.recordTurn(lc.pendingToolCalls, assistantText, lc.finishReason)
-		if loopType != LoopNone {
-			target := ""
-			if loopType == LoopTool {
-				target = extractPathFromArgs(toolArgs)
-			}
-			if handleLoopDetected(te, setup.task, setup.projectID, setup.task.ID, lc.detector, loopType, target, &lc.messages, setup.task.IsExploreMode()) {
-				return turnStop
-			}
-		} else {
-			lc.messages = lc.detector.removeHints(lc.messages)
-		}
-
-		lc.clearToolCalls()
-		lc.assistantContent.Reset()
-		lc.reasoningContent.Reset()
-		lc.finishReason = ""
-
-		// Auto-commit file changes as a checkpoint.
-		te.createCheckpoint(setup.ctx, setup.projectID, setup.task.ID, assistantMsgID)
-
-		// Auto-summarize if context is approaching the limit
-		te.summarize.maybeAutoSummarize(setup, lc, activeModel, true)
-
-		// Continue to call LLM again with tool results — don't fall through to blocking select
-		return turnNextLLMCall
-	} else if assistantText != "" {
-		// Text-only response resets the failure tracker
-		lc.tracker.reset()
-
-		// Keep reasoning in ReasoningContent so toAPIMessage sends it as reasoning_content.
-		assistantMsg := types.ChatMessage{Role: "assistant", Content: assistantText}
-		if lc.reasoningContent.Len() > 0 {
-			assistantMsg.ReasoningContent = lc.reasoningContent.String()
-		}
-		lc.messages = append(lc.messages, assistantMsg)
-		promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(lc.usage)
-		logStatsSpeed(setup.task.ID, activeModel, promptTokens-cacheTokens, predictedTokens, promptMs, predictedMs)
-		duration := time.Since(lc.callStartTime).Milliseconds()
-		assistantMsgID := uuid.New().String()
-		te.store.CreateTaskMessage(&types.TaskMessage{
-			ID: assistantMsgID, TaskID: setup.task.ID, ThreadID: setup.task.CurrentThreadID, Role: "assistant",
-			Content: assistantText, ReasoningContent: lc.reasoningContent.String(),
-			ModelName: activeModel, ProviderName: lc.providerName,
-			PromptTokens: promptTokens, PredictedTokens: predictedTokens, CacheTokens: cacheTokens,
-			PromptMs: promptMs, PredictedMs: predictedMs,
-			Duration: duration, CreatedAt: time.Now().UTC(),
-		})
-		lc.assistantContent.Reset()
-		lc.reasoningContent.Reset()
-
-		// Loop detection for text-only responses
-		loopType, _ := lc.detector.recordTurn(nil, assistantText, lc.finishReason)
-		lc.finishReason = ""
-		// Also check for phrase repetition detected during streaming.
-		// Skip if the response contains a question (natural question, not a loop).
-		if loopType == LoopNone && lc.detector.phraseDetected() && !strings.Contains(assistantText, "?") {
-			loopType = LoopPhrase
-		}
-		if loopType != LoopNone {
-			if handleLoopDetected(te, setup.task, setup.projectID, setup.task.ID, lc.detector, loopType, "", &lc.messages, setup.task.IsExploreMode()) {
-				return turnStop
-			}
-			if !setup.task.IsExploreMode() && !setup.task.IsPlanMode() {
-				// In act mode: loop detected, inject hint, continue
-				setup.task.ExecutionState = types.ExecStateRunning
-				te.persistTaskClaiming(setup)
-				return turnNextLLMCall
-			}
-			// In exploration/plan mode: text-only responses are valid (brainstorming / planning).
-			// Fall through to end the turn.
-		}
-		// Valid text-only response: remove previously injected hints from context
-		lc.messages = lc.detector.removeHints(lc.messages)
-
-		// Mark the response complete and the task idle FIRST so the assistant
-		// message renders as finished (streaming cursor stops) before any
-		// auto-summarization runs. This prevents the message from looking like it
-		// is still generating while the summary is produced. Release the
-		// running-task slot too - an idle task no longer blocks other tasks.
-		te.releaseTaskSlot(setup)
-		setup.task.Status = types.StatusReview
-		setup.task.ExecutionState = types.ExecStateIdle
-		te.persistTask(setup)
-		te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
-		te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: turnStatsFrame(
-			"idle", assistantMsgID, promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs,
-			activeModel, duration, map[string]any{"summary": "Agent finished responding"})})
-
-		// Auto-summarize if context is approaching the window limit. Runs right
-		// after the message completes, without waiting for the task transition.
-		// The task goes idle here (context is NOT fed back to the LLM), so no
-		// "Proceed" is injected — a queued real user message supersedes it.
-		te.summarize.maybeAutoSummarize(setup, lc, activeModel, false)
-
-		// Check for queued user messages.
-		select {
-		case um := <-setup.userMsgChan:
-			if um.ContextChanged {
-				logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Infof("conversation context changed after response, re-syncing")
-				te.foldQueuedUserMessage(setup, lc, um)
-				// A fresh LLM call follows - re-acquire the running-task slot.
-				if te.claimProviderSlot(setup, lc) {
-					return turnStop
-				}
-				return turnNextLLMCall
-			}
-			logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Infof("received message after response, continuing (setup.regenerate=%v)", um.Regenerate)
-			te.foldQueuedUserMessage(setup, lc, um)
-			if um.ModelName != "" {
-				te.adoptMessageModel(setup, lc, um)
-			}
-			// The task went idle after the response - re-acquire the
-			// running-task slot (a provider switch rides along via lc.mc).
-			if te.claimProviderSlot(setup, lc) {
-				return turnStop
-			}
-			setup.task.ExecutionState = types.ExecStateRunning
-			te.persistTaskClaiming(setup)
-			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.TurnStatusEvent("running", "Processing new message"))
-			return turnNextLLMCall
-		default:
-		}
-
-		// Answer from the parent's context
-		if out := te.autoAnswerTextStop(setup, lc, assistantText); out != turnWaitIdle {
-			return out
-		}
-
-		// If this is a subtask, auto-start the next sibling
-		if setup.task.ParentTaskID != "" {
-			_ = te.AutoStartNextSibling(setup.projectID, setup.task.ID, setup.task.ParentTaskID)
-		}
-	} else if lc.reasoningContent.Len() > 0 {
-		// Reasoning-only response: no visible content, no tool calls.
-		// Persist the reasoning, inject a hint, and retry.
-		reasoningText := lc.reasoningContent.String()
-
-		// Persist the reasoning-only assistant message
-		promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(lc.usage)
-		logStatsSpeed(setup.task.ID, activeModel, promptTokens-cacheTokens, predictedTokens, promptMs, predictedMs)
-		te.store.CreateTaskMessage(&types.TaskMessage{
-			ID: uuid.New().String(), TaskID: setup.task.ID, ThreadID: setup.task.CurrentThreadID, Role: "assistant",
-			Content: "", ReasoningContent: reasoningText,
-			ModelName: activeModel, ProviderName: lc.providerName,
-			PromptTokens: promptTokens, PredictedTokens: predictedTokens, CacheTokens: cacheTokens,
-			PromptMs: promptMs, PredictedMs: predictedMs,
-			Duration: time.Since(lc.callStartTime).Milliseconds(), CreatedAt: time.Now().UTC(),
-		})
-
-		// Append reasoning to conversation history so the LLM sees its own thinking.
-		// Put in ReasoningContent so toAPIMessage sends it as reasoning_content.
-		lc.messages = append(lc.messages, types.ChatMessage{Role: "assistant", Content: "", ReasoningContent: reasoningText})
-
-		// Advance loop detector and check max hints (injects hint into messages + DB + WebSocket)
-		lc.detector.recordTurn(nil, "", lc.finishReason)
-		if handleLoopDetected(te, setup.task, setup.projectID, setup.task.ID, lc.detector, LoopReasoningOnly, "", &lc.messages, setup.task.IsExploreMode()) {
-			return turnStop
-		}
-
-		lc.assistantContent.Reset()
-		lc.reasoningContent.Reset()
-		lc.finishReason = ""
-		te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.TurnStatusEvent("running", "Reasoning-only response, requesting action"))
-
-		// Auto-summarize if context is approaching the window limit
-		te.summarize.maybeAutoSummarize(setup, lc, activeModel, true)
-
-		return turnNextLLMCall
-	} else {
-		// The provider finished the call and said nothing. An assistant row is what marks its prompt
-		// as answered, so none is written, and the run cannot settle quietly here: the task would
-		// stay running with no answer and no event to send.
-		logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Warnf("LLM call produced no response (finish_reason=%q)", lc.finishReason)
-		te.releaseTaskSlot(setup)
-		te.failTask(setup.task, setup.projectID, "LLM provider returned no response", "llm_empty_response")
-		return turnStop
+		return te.finalizeToolTurn(setup, lc, assistantText, activeModel, maxFailures)
+	}
+	if assistantText != "" {
+		return te.finalizeTextTurn(setup, lc, assistantText, activeModel)
+	}
+	if lc.reasoningContent.Len() > 0 {
+		return te.finalizeReasoningTurn(setup, lc, activeModel)
 	}
 
-	// Unreachable in practice: every branch above either returns or continues the loop. Kept so
-	// the outcome is total rather than relying on the compiler accepting a missing return.
-	return turnWaitIdle
+	// The provider finished the call and said nothing. An assistant row is what marks its prompt
+	// as answered, so none is written, and the run cannot settle quietly here: the task would
+	// stay running with no answer and no event to send.
+	logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Warnf("LLM call produced no response (finish_reason=%q)", lc.finishReason)
+	te.releaseTaskSlot(setup)
+	te.failTask(setup.task, setup.projectID, "LLM provider returned no response", "llm_empty_response")
+	return turnStop
 }
 
 // foldQueuedUserMessage rebuilds the loop context around a message taken off setup.userMsgChan. The
