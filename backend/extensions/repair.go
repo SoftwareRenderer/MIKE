@@ -10,11 +10,9 @@ package extensions
 
 import (
 	"context"
-	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -125,16 +123,17 @@ func installFilesMissing(dir string) string {
 	return ""
 }
 
-// readInstalledManifest reads the manifest that makes a directory an install. One derivation, so the
-// walk that finds a missing install and the repair that checks what it restored ask the same question.
+// readInstalledManifest is readManifest worded for a row already believed to be installed: either the
+// file is not there or it is not JSON, and either way the row is a broken install. The walk that finds a
+// missing install and the repair that checks what it restored ask through here, so they cannot disagree
+// about what an install is.
 func readInstalledManifest(dir string) (*ExtensionManifest, error) {
-	data, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
+	manifest, err := readManifest(dir)
 	if err != nil {
+		if isManifestDecode(err) {
+			return nil, fmt.Errorf("manifest.json is not valid JSON: %w", err)
+		}
 		return nil, fmt.Errorf("manifest.json could not be read: %w", err)
-	}
-	var manifest ExtensionManifest
-	if err := json.Unmarshal(data, &manifest); err != nil {
-		return nil, fmt.Errorf("manifest.json is not valid JSON: %w", err)
 	}
 	return &manifest, nil
 }

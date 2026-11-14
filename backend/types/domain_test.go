@@ -2,6 +2,7 @@ package types
 
 import (
 	"encoding/json/v2"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -132,5 +133,36 @@ func TestModelConfigNilFieldsOmitted(t *testing.T) {
 		out.CacheWritePrice != nil || out.PowerConsumptionW != nil || out.ContextWindow != nil ||
 		out.Sampling != nil {
 		t.Fatalf("expected all override fields nil, got: %+v", out)
+	}
+}
+
+// TestKeyboardShortcutsEmptyCoversEveryField walks KeyboardShortcuts instead of naming its bindings:
+// a binding that joins the struct and stays out of Empty() makes an all-default set answer
+// "keyboard_shortcuts": {} instead of omitting the key. Each field is set on its own and must make
+// the struct non-empty.
+func TestKeyboardShortcutsEmptyCoversEveryField(t *testing.T) {
+	if !(*KeyboardShortcuts)(nil).Empty() {
+		t.Error("a nil receiver reports non-empty, want empty")
+	}
+	if !(&KeyboardShortcuts{}).Empty() {
+		t.Error("an all-nil struct reports non-empty, want empty")
+	}
+
+	fields := reflect.VisibleFields(reflect.TypeOf(KeyboardShortcuts{}))
+	if len(fields) == 0 {
+		t.Fatal("KeyboardShortcuts has no fields, so this test would prove nothing")
+	}
+	for _, f := range fields {
+		t.Run(f.Name, func(t *testing.T) {
+			if !f.IsExported() || f.Type.Kind() != reflect.Pointer {
+				t.Fatalf("field %s is %s: Empty() reads a binding as set only by a non-nil pointer field, "+
+					"so a field of another shape needs its own rule in Empty() and here", f.Name, f.Type)
+			}
+			ks := &KeyboardShortcuts{}
+			reflect.ValueOf(ks).Elem().FieldByName(f.Name).Set(reflect.New(f.Type.Elem()))
+			if ks.Empty() {
+				t.Errorf("Empty() = true with only %s set, want false: that binding would never reach the API", f.Name)
+			}
+		})
 	}
 }

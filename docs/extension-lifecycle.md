@@ -127,10 +127,13 @@ Nothing watches the extensions tree, so a change lands the next time a reader op
 | `manifest.json`, and everything derived from it | never — see below |
 | An LSP server's own code, or its `Dockerfile` | only once the image ref is absent — see below |
 
-`manifest.json` is read at install and stored on the row; only the install path and the registry update
-path read it again. `PUT /api/extensions/{id}` patches display text, config and sandbox additions, and never
-opens the folder. A version bump therefore changes nothing, and neither does a capability, a
-`config_schema` entry, an egress domain, a `file_types` list, a `css_url` or a contributed tool's definition.
+`manifest.json` is read at install and stored on the row; only the install path, the registry update path
+and the startup repair read it again, all of them through `readManifest` (`manifest_read.go`). That reader
+reads and decodes and nothing else — each caller words its own failure, because which situation failed is
+the actionable half of the message. `PUT /api/extensions/{id}` patches display text, config and sandbox
+additions, and never opens the folder. A version bump therefore changes nothing, and neither does a
+capability, a `config_schema` entry, an egress domain, a `file_types` list, a `css_url` or a contributed
+tool's definition.
 
 The service worker holds the `/extensions/` tree `NetworkFirst` (`frontend/scripts/sw-routes.ts`), so an
 online browser asks the server; the stored body is only the offline fallback.
