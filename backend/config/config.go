@@ -219,15 +219,6 @@ func NewConfigStore(s configDB, dbPath, version string, box *crypto.Box, mcpLock
 	return &ConfigStore{db: s, dbPath: abs, version: version, box: box, mcpLocked: mcpLocked, statResetLocked: statResetLocked}
 }
 
-// configRowKeys are the rows a full config read wants, in one query.
-var configRowKeys = []string{
-	"worker_provider", "worker_model", "utility_provider", "utility_model",
-	"default_auto_commit", "default_auto_merge", "default_subtasks_auto_merge",
-	"default_operating_mode", "default_max_failed_turns", "default_auto_summarize_threshold",
-	"hide_model_badge", "update_check_enabled", "run_siblings_parallel", "sort_oldest_first",
-	"auto_maximize_chat_mobile", "reclaim_idle_sandbox", "loop_breaker", "keyboard_shortcuts",
-}
-
 func (cs *ConfigStore) snapshot() (*configSnapshot, error) {
 	generation := cs.db.ConfigGeneration()
 	cs.snapMu.Lock()
@@ -297,89 +288,15 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	maskMCPServerSecrets(mcpServers, snap.mcpServers)
 	rows := snap.rows
 
-	workerProvider := rows["worker_provider"]
-	workerModel := rows["worker_model"]
-	utilityProvider := rows["utility_provider"]
-	utilityModel := rows["utility_model"]
-	registryURL := cs.RegistryURL()
-	defaultAutoCommitRaw := rows["default_auto_commit"]
-	defaultAutoMergeRaw := rows["default_auto_merge"]
-	defaultSubtasksAutoMergeRaw := rows["default_subtasks_auto_merge"]
-	defaultOperatingModeRaw := rows["default_operating_mode"]
-	defaultMaxFailedTurnsRaw := rows["default_max_failed_turns"]
-	defaultAutoSummarizeThresholdRaw := rows["default_auto_summarize_threshold"]
-	hideModelBadgeRaw := rows["hide_model_badge"]
-	updateCheckEnabledRaw := rows["update_check_enabled"]
-	runSiblingsParallelRaw := rows["run_siblings_parallel"]
-	sortOldestFirstRaw := rows["sort_oldest_first"]
-	autoMaximizeChatMobileRaw := rows["auto_maximize_chat_mobile"]
-	reclaimIdleSandboxRaw := rows["reclaim_idle_sandbox"]
-	loopBreakerRaw := rows["loop_breaker"]
-	keyboardShortcutsRaw := rows["keyboard_shortcuts"]
-
 	cfg := &types.Config{
-		WorkspaceDir:    workspaceDir,
-		DatabasePath:    cs.dbPath,
-		RegistryURL:     registryURL,
-		Providers:       providers,
-		MCPServers:      mcpServers,
-		WorkerProvider:  workerProvider,
-		WorkerModel:     workerModel,
-		UtilityProvider: utilityProvider,
-		UtilityModel:    utilityModel,
+		WorkspaceDir: workspaceDir,
+		DatabasePath: cs.dbPath,
+		RegistryURL:  cs.RegistryURL(),
+		Providers:    providers,
+		MCPServers:   mcpServers,
 	}
-	if v, err := parseBoolPtr(defaultAutoCommitRaw); err == nil && v != nil {
-		cfg.DefaultAutoCommit = v
-	}
-	if v, err := parseBoolPtr(defaultAutoMergeRaw); err == nil && v != nil {
-		cfg.DefaultAutoMerge = v
-	}
-	if v, err := parseBoolPtr(defaultSubtasksAutoMergeRaw); err == nil && v != nil {
-		cfg.DefaultSubtasksAutoMerge = v
-	}
-	if defaultOperatingModeRaw != "" {
-		// A stored value is coerced rather than rejected: reading a row written by an older
-		// build must not fail the read, and the only thing that can be done with a mode nothing
-		// dispatches on is fall back. Writing one is a different story - see HandleConfig.
-		if mode, valid := types.ParseOperatingMode(defaultOperatingModeRaw); valid {
-			cfg.DefaultOperatingMode = &mode
-		} else {
-			act := types.ModeAct
-			cfg.DefaultOperatingMode = &act
-		}
-	}
-	if v, err := parseIntPtr(defaultMaxFailedTurnsRaw); err == nil && v != nil {
-		cfg.DefaultMaxFailedTurns = v
-	}
-	if v, err := parseIntPtr(defaultAutoSummarizeThresholdRaw); err == nil && v != nil {
-		cfg.DefaultAutoSummarizeThreshold = v
-	}
-	if keyboardShortcutsRaw != "" {
-		ks := &types.KeyboardShortcuts{}
-		if err := json.Unmarshal([]byte(keyboardShortcutsRaw), ks); err == nil {
-			cfg.KeyboardShortcuts = ks
-		}
-	}
-	if v, err := parseBoolPtr(hideModelBadgeRaw); err == nil && v != nil {
-		cfg.HideModelBadge = v
-	}
-	if v, err := parseBoolPtr(updateCheckEnabledRaw); err == nil && v != nil {
-		cfg.UpdateCheckEnabled = v
-	}
-	if v, err := parseBoolPtr(runSiblingsParallelRaw); err == nil && v != nil {
-		cfg.RunSiblingsParallel = v
-	}
-	if v, err := parseBoolPtr(sortOldestFirstRaw); err == nil && v != nil {
-		cfg.SortOldestFirst = v
-	}
-	if v, err := parseBoolPtr(autoMaximizeChatMobileRaw); err == nil && v != nil {
-		cfg.AutoMaximizeChatMobile = v
-	}
-	if v, err := parseBoolPtr(reclaimIdleSandboxRaw); err == nil && v != nil {
-		cfg.ReclaimIdleSandbox = v
-	}
-	if v, err := parseBoolPtr(loopBreakerRaw); err == nil && v != nil {
-		cfg.LoopBreaker = v
+	for _, p := range configPrefs {
+		p.decode(rows[p.rowKey()], cfg)
 	}
 	cfg.KeyboardShortcuts = normalizeKeyboardShortcuts(cfg.KeyboardShortcuts)
 	return cfg, nil
@@ -467,89 +384,17 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 	if err := cs.db.SetConfigValue(mcpServersRow, string(mcpJSON)); err != nil {
 		return err
 	}
-	if err := cs.db.SetConfigValue("worker_provider", c.WorkerProvider); err != nil {
-		return err
-	}
-	if err := cs.db.SetConfigValue("worker_model", c.WorkerModel); err != nil {
-		return err
-	}
-	if err := cs.db.SetConfigValue("utility_provider", c.UtilityProvider); err != nil {
-		return err
-	}
-	if err := cs.db.SetConfigValue("utility_model", c.UtilityModel); err != nil {
-		return err
-	}
-	if c.DefaultAutoCommit != nil {
-		if err := cs.db.SetConfigValue("default_auto_commit", fmt.Sprintf("%t", *c.DefaultAutoCommit)); err != nil {
-			return err
-		}
-	}
-	if c.DefaultAutoMerge != nil {
-		if err := cs.db.SetConfigValue("default_auto_merge", fmt.Sprintf("%t", *c.DefaultAutoMerge)); err != nil {
-			return err
-		}
-	}
-	if c.DefaultSubtasksAutoMerge != nil {
-		if err := cs.db.SetConfigValue("default_subtasks_auto_merge", fmt.Sprintf("%t", *c.DefaultSubtasksAutoMerge)); err != nil {
-			return err
-		}
-	}
-	if c.DefaultOperatingMode != nil {
-		if err := cs.db.SetConfigValue("default_operating_mode", string(*c.DefaultOperatingMode)); err != nil {
-			return err
-		}
-	}
-	if c.DefaultMaxFailedTurns != nil {
-		if err := cs.db.SetConfigValue("default_max_failed_turns", fmt.Sprintf("%d", *c.DefaultMaxFailedTurns)); err != nil {
-			return err
-		}
-	}
-	if c.DefaultAutoSummarizeThreshold != nil {
-		if err := cs.db.SetConfigValue("default_auto_summarize_threshold", fmt.Sprintf("%d", *c.DefaultAutoSummarizeThreshold)); err != nil {
-			return err
-		}
-	}
-	if c.HideModelBadge != nil {
-		if err := cs.db.SetConfigValue("hide_model_badge", fmt.Sprintf("%t", *c.HideModelBadge)); err != nil {
-			return err
-		}
-	}
-	if c.UpdateCheckEnabled != nil {
-		if err := cs.db.SetConfigValue("update_check_enabled", fmt.Sprintf("%t", *c.UpdateCheckEnabled)); err != nil {
-			return err
-		}
-	}
-	if c.RunSiblingsParallel != nil {
-		if err := cs.db.SetConfigValue("run_siblings_parallel", fmt.Sprintf("%t", *c.RunSiblingsParallel)); err != nil {
-			return err
-		}
-	}
-	if c.AutoMaximizeChatMobile != nil {
-		if err := cs.db.SetConfigValue("auto_maximize_chat_mobile", fmt.Sprintf("%t", *c.AutoMaximizeChatMobile)); err != nil {
-			return err
-		}
-	}
-	if c.SortOldestFirst != nil {
-		if err := cs.db.SetConfigValue("sort_oldest_first", fmt.Sprintf("%t", *c.SortOldestFirst)); err != nil {
-			return err
-		}
-	}
-	if c.ReclaimIdleSandbox != nil {
-		if err := cs.db.SetConfigValue("reclaim_idle_sandbox", fmt.Sprintf("%t", *c.ReclaimIdleSandbox)); err != nil {
-			return err
-		}
-	}
-	if c.LoopBreaker != nil {
-		if err := cs.db.SetConfigValue("loop_breaker", fmt.Sprintf("%t", *c.LoopBreaker)); err != nil {
-			return err
-		}
-	}
-	if c.KeyboardShortcuts != nil {
-		ksJSON, err := json.Marshal(c.KeyboardShortcuts)
+	// Every preference row the config answered. A field that held nothing is no row to write, which
+	// leaves an earlier answer in place rather than erasing it.
+	for _, p := range configPrefs {
+		text, ok, err := p.encode(c)
 		if err != nil {
 			return err
 		}
-		if err := cs.db.SetConfigValue("keyboard_shortcuts", string(ksJSON)); err != nil {
+		if !ok {
+			continue
+		}
+		if err := cs.db.SetConfigValue(p.rowKey(), text); err != nil {
 			return err
 		}
 	}
@@ -750,8 +595,9 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 			httputil.JSONError(w, http.StatusInternalServerError, "failed to get current config")
 			return
 		}
-		// Providers and keyboard shortcuts carry their own shape, so they decode straight into
-		// their types; every other field is one of the three scalars this endpoint accepts.
+		// Providers and the MCP registry are lists this endpoint replaces wholesale, each with a shape of
+		// its own, so they decode straight into their types here. Every preference row merges below, out
+		// of the table.
 		var incoming []types.Provider
 		if updates.field("providers", &incoming) {
 			// agent:// rows in the payload are dropped by UpdateConfig (agent providers
@@ -764,31 +610,13 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 			// was deleted. A header carrying the masked placeholder is a token the form never saw.
 			current.MCPServers = incomingServers
 		}
-		current.WorkerProvider = updates.strOr("worker_provider", current.WorkerProvider)
-		current.WorkerModel = updates.strOr("worker_model", current.WorkerModel)
-		current.UtilityProvider = updates.strOr("utility_provider", current.UtilityProvider)
-		current.UtilityModel = updates.strOr("utility_model", current.UtilityModel)
-		current.DefaultAutoCommit = updates.boolPtrOr("default_auto_commit", current.DefaultAutoCommit)
-		current.DefaultAutoMerge = updates.boolPtrOr("default_auto_merge", current.DefaultAutoMerge)
-		current.DefaultSubtasksAutoMerge = updates.boolPtrOr("default_subtasks_auto_merge", current.DefaultSubtasksAutoMerge)
-		current.HideModelBadge = updates.boolPtrOr("hide_model_badge", current.HideModelBadge)
-		current.UpdateCheckEnabled = updates.boolPtrOr("update_check_enabled", current.UpdateCheckEnabled)
-		current.RunSiblingsParallel = updates.boolPtrOr("run_siblings_parallel", current.RunSiblingsParallel)
-		current.SortOldestFirst = updates.boolPtrOr("sort_oldest_first", current.SortOldestFirst)
-		current.AutoMaximizeChatMobile = updates.boolPtrOr("auto_maximize_chat_mobile", current.AutoMaximizeChatMobile)
-		current.ReclaimIdleSandbox = updates.boolPtrOr("reclaim_idle_sandbox", current.ReclaimIdleSandbox)
-		current.LoopBreaker = updates.boolPtrOr("loop_breaker", current.LoopBreaker)
-		current.DefaultMaxFailedTurns = updates.intPtrOr("default_max_failed_turns", current.DefaultMaxFailedTurns)
-		current.DefaultAutoSummarizeThreshold = updates.intPtrOr("default_auto_summarize_threshold", current.DefaultAutoSummarizeThreshold)
+		for _, p := range configPrefs {
+			p.merge(updates, current)
+		}
 		if threshold := current.DefaultAutoSummarizeThreshold; threshold != nil {
 			// The reader treats a value outside 1..100 as unset, so clamping keeps the UI showing what is stored.
 			clamped := min(max(*threshold, 1), 100)
 			current.DefaultAutoSummarizeThreshold = &clamped
-		}
-		current.DefaultOperatingMode = updates.modeOr("default_operating_mode", current.DefaultOperatingMode)
-		var ks types.KeyboardShortcuts
-		if updates.field("keyboard_shortcuts", &ks) {
-			current.KeyboardShortcuts = &ks
 		}
 		if updates.err != nil {
 			httputil.JSONError(w, http.StatusBadRequest, updates.err.Error())
@@ -816,29 +644,6 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// parsePtr parses a string to a *T using parse. Returns a nil pointer if the
-// string is empty (field absent from the request).
-func parsePtr[T any](s string, parse func(string) (T, error)) (*T, error) {
-	if s == "" {
-		return nil, nil
-	}
-	v, err := parse(s)
-	if err != nil {
-		return nil, err
-	}
-	return &v, nil
-}
-
-// parseBoolPtr parses a string to a *bool. Returns nil pointer if the string is empty.
-func parseBoolPtr(s string) (*bool, error) {
-	return parsePtr(s, strconv.ParseBool)
-}
-
-// parseIntPtr parses a string to a *int. Returns nil pointer if the string is empty.
-func parseIntPtr(s string) (*int, error) {
-	return parsePtr(s, strconv.Atoi)
-}
-
 // DefaultAutoSummarizeThreshold is the auto-summarization threshold (percent of the context window)
 const DefaultAutoSummarizeThreshold = 90
 
@@ -846,46 +651,29 @@ const DefaultAutoSummarizeThreshold = 90
 // percent of the context window (1-100). Falls back to DefaultAutoSummarizeThreshold
 // when unset or invalid.
 func (cs *ConfigStore) AutoSummarizeThreshold() int {
-	raw, err := cs.db.GetConfigValue("default_auto_summarize_threshold")
-	if err != nil {
-		return DefaultAutoSummarizeThreshold
-	}
-	v, err := strconv.Atoi(raw)
-	if err != nil || v < 1 || v > 100 {
+	v, ok := cs.storedInt(prefDefaultAutoSummarizeThreshold)
+	if !ok || v < 1 || v > 100 {
 		return DefaultAutoSummarizeThreshold
 	}
 	return v
 }
 
 // GetRunSiblingsParallel returns whether a parent's startable subtasks should run in
-// parallel (all at once) rather than one at a time. Returns false (sequential)
-// when the value is unset or invalid.
+// parallel (all at once) rather than one at a time, which is what an unset row answers.
 func (cs *ConfigStore) GetRunSiblingsParallel() bool {
-	raw, _ := cs.db.GetConfigValue("run_siblings_parallel")
-	if v, err := parseBoolPtr(raw); err == nil && v != nil {
-		return *v
-	}
-	return false
+	return cs.storedFlag(prefRunSiblingsParallel)
 }
 
 // GetReclaimIdleSandbox reports whether the memory supervisor may release the container of a task idle
-// past the reclaim grace. Unset or unparseable means off.
+// past the reclaim grace.
 func (cs *ConfigStore) GetReclaimIdleSandbox() bool {
-	raw, _ := cs.db.GetConfigValue("reclaim_idle_sandbox")
-	if v, err := parseBoolPtr(raw); err == nil && v != nil {
-		return *v
-	}
-	return false
+	return cs.storedFlag(prefReclaimIdleSandbox)
 }
 
 // GetLoopBreaker reports whether a run that reaches its consecutive-failed-turn limit is recovered from
-// instead of handed back. Unset or unparseable means off.
+// instead of handed back.
 func (cs *ConfigStore) GetLoopBreaker() bool {
-	raw, _ := cs.db.GetConfigValue("loop_breaker")
-	if v, err := parseBoolPtr(raw); err == nil && v != nil {
-		return *v
-	}
-	return false
+	return cs.storedFlag(prefLoopBreaker)
 }
 
 // GetProviderAPIKey is the key stored for a provider URL, or "" when no provider matches or none is

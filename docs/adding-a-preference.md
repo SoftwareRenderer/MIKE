@@ -36,8 +36,16 @@ Example: `hide_model_badge` gates `.model-badge` in `Card.svelte` (`appStore.con
 
 1. **Backend Setup**: 
    - Add `*bool` to `types.Config`.
-   - In `backend/config/config.go`, update: `GetConfig` (`parseBoolPtr`), `UpdateConfig`, `configResponse` (`omitempty`), `HandleConfig` (PUT merge), and **`configRowKeys`**.
-   - Add a `ConfigStore` accessor returning a plain `bool` for Go consumers (e.g., `GetReclaimIdleSandbox`).
+   - Add one `flagPref` entry to `configPrefs` (`backend/config/preferences.go`): the key, and the two
+     closures that read and write the field. `configRowKeys`, `GetConfig`, `UpdateConfig` and the PUT
+     merge in `HandleConfig` all come out of that entry, so the read, the save and the merge follow the
+     table. `TestPreferenceTableCoversEveryPreference` (`backend/config/preferences_test.go`) walks
+     `types.Config` by reflection and fails when a preference there has no entry here.
+   - Add the field to `configResponse` (`omitzero`) and to `buildConfigResponse`. That pair stays
+     hand-written on purpose: the response is not the row set — it carries what the process knows and
+     leaves `registry_url` out.
+   - Add a `ConfigStore` accessor returning a plain `bool` for Go consumers, reading the row through
+     `storedFlag` so its key comes from the table (e.g., `GetReclaimIdleSandbox`).
 2. **Frontend Type**: Add a field to `Config` (`$lib/types`).
 3. **UI Integration**: Add state/hydration/save logic in `ConfigModal.svelte`.
 4. **UI Row**: Add a toggle to `ConfigModal/PreferencesTab.svelte` (UI) or `ConfigModal/TaskDefaults.svelte` (behaviour defaults like `run_siblings_parallel`).
@@ -48,7 +56,7 @@ Example: `hide_model_badge` gates `.model-badge` in `Card.svelte` (`appStore.con
 
 **Defaults**: For flags that are "on" by default (e.g., `auto_maximize_chat_mobile`), treat `nil` as `true`. The client should consume `!== false`.
 
-**Tests**: `backend/config/config_test.go`, `preferences-tab.unit.svelte.ts`, a component test for the gated widget, and e2e `preferences-hide-model-badge.spec.ts`.
+**Tests**: `backend/config/config_test.go`, `backend/config/preferences_test.go` (the table walk), `preferences-tab.unit.svelte.ts`, a component test for the gated widget, and e2e `preferences-hide-model-badge.spec.ts`.
 
 ## When the preference belongs to a browser
 
@@ -61,5 +69,6 @@ Choices that only the current browser can act on (e.g., notification permissions
 ## Verification
 
 - **Stored shape**: `go test ./backend/config/`
+- **A preference the table forgot**: `go test ./backend/config/ -run TestPreferenceTableCoversEveryPreference`
 - **All-default omission**: `go test ./backend/types/ ./backend/config/ -run KeyboardShortcuts`
 - **Round trip**: `cd frontend && npx playwright test preferences-keyboard`
