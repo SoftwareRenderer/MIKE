@@ -1016,15 +1016,12 @@ func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry
 			))
 			return
 		}
-		manifestData, err := os.ReadFile(filepath.Join(targetDir, "manifest.json"))
+		m, err := readManifest(targetDir)
 		if err != nil {
-			fail(fmt.Errorf("local extension has no manifest.json: %w", err))
+			fail(manifestError(err, "local extension"))
 			return
 		}
-		if err := json.Unmarshal(manifestData, &manifest); err != nil {
-			fail(fmt.Errorf("invalid manifest.json in local extension: %w", err))
-			return
-		}
+		manifest = m
 	} else if gitPinned {
 		emit(10, "Fetching extension...")
 		if err := h.registry.CheckoutExtension(entry.Repo, entry.Commit, entry.Subdir, targetDir); err != nil {
@@ -1032,15 +1029,12 @@ func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry
 			return
 		}
 		materialized = true
-		manifestData, err := os.ReadFile(filepath.Join(targetDir, "manifest.json"))
+		m, err := readManifest(targetDir)
 		if err != nil {
-			fail(fmt.Errorf("checked-out extension has no manifest.json: %w", err))
+			fail(manifestError(err, "checked-out extension"))
 			return
 		}
-		if err := json.Unmarshal(manifestData, &manifest); err != nil {
-			fail(fmt.Errorf("invalid manifest.json in checked-out extension: %w", err))
-			return
-		}
+		manifest = m
 	} else {
 		manifest = ExtensionManifest{
 			DisplayName: entry.DisplayName,
@@ -1460,47 +1454,45 @@ func (h *ExtensionHandler) updateImageInBackground(id, name, url string, ackNewD
 			fail(fmt.Errorf("failed to fetch extension (commit %s): %w", entry.Commit, err))
 			return
 		}
-		if data, err := os.ReadFile(filepath.Join(targetDir, "manifest.json")); err == nil {
-			var m ExtensionManifest
-			if err := json.Unmarshal(data, &m); err == nil {
-				ext.Manifest = m
-				// The sandbox declaration is part of what this commit delivers, so re-read it: an
-				// update that moves the cache must not keep running on install-time paths. A
-				// manifest that self-grants beyond the policy fails as it does at install.
-				before := ext.SandboxConfig
-				merged := mergeManifestSandboxAdditions(ext.SandboxConfig, lspSandboxFromManifest(&m))
-				if err := h.mountPolicy().ValidateSandboxAdditions(merged.Mounts, merged.Capabilities); err != nil {
-					fail(fmt.Errorf("extension %s declares an unusable sandbox configuration: %w", entry.Name, err))
-					return
-				}
-				// Check the new commit's language declarations before they replace the stored manifest.
-				if err := m.Capabilities.GetLSP().Validate(); err != nil {
-					fail(fmt.Errorf("extension %s declares an unusable language configuration: %w", entry.Name, err))
-					return
-				}
-				// Same rule for a translation pack: the new commit's declaration is vetted and its
-				// catalog and templates are read from the checkout already on disk, before the stored
-				// manifest is replaced.
-				if err := validateI18N(m.Capabilities, targetDir); err != nil {
-					fail(fmt.Errorf("extension %s declares an unusable translation pack: %w", entry.Name, err))
-					return
-				}
-				// And the same for the new commit's stylesheet: an update that moves or escapes
-				// css_url is refused before the stored manifest is replaced.
-				if err := m.Capabilities.GetCSS().Validate(); err != nil {
-					fail(fmt.Errorf("extension %s declares an unusable stylesheet: %w", entry.Name, err))
-					return
-				}
-				if err := validateTools(m.Capabilities, m.ConfigSchema); err != nil {
-					fail(fmt.Errorf("extension %s declares an unusable tool: %w", entry.Name, err))
-					return
-				}
-				if len(merged.Envs) > len(before.Envs) || len(merged.Mounts) > len(before.Mounts) ||
-					len(merged.Capabilities) > len(before.Capabilities) {
-					logging.For(logging.Extensions).Infof("ext=%s update added %d env, %d mount, %d capability declaration(s) from the manifest", id, len(merged.Envs)-len(before.Envs), len(merged.Mounts)-len(before.Mounts), len(merged.Capabilities)-len(before.Capabilities))
-				}
-				ext.SandboxConfig = merged
+		// Best-effort: a checkout that ships no readable manifest.json leaves the stored manifest in place.
+		if m, err := readManifest(targetDir); err == nil {
+			ext.Manifest = m
+			// The sandbox declaration is part of what this commit delivers, so re-read it: an
+			// update that moves the cache must not keep running on install-time paths. A
+			// manifest that self-grants beyond the policy fails as it does at install.
+			before := ext.SandboxConfig
+			merged := mergeManifestSandboxAdditions(ext.SandboxConfig, lspSandboxFromManifest(&m))
+			if err := h.mountPolicy().ValidateSandboxAdditions(merged.Mounts, merged.Capabilities); err != nil {
+				fail(fmt.Errorf("extension %s declares an unusable sandbox configuration: %w", entry.Name, err))
+				return
 			}
+			// Check the new commit's language declarations before they replace the stored manifest.
+			if err := m.Capabilities.GetLSP().Validate(); err != nil {
+				fail(fmt.Errorf("extension %s declares an unusable language configuration: %w", entry.Name, err))
+				return
+			}
+			// Same rule for a translation pack: the new commit's declaration is vetted and its
+			// catalog and templates are read from the checkout already on disk, before the stored
+			// manifest is replaced.
+			if err := validateI18N(m.Capabilities, targetDir); err != nil {
+				fail(fmt.Errorf("extension %s declares an unusable translation pack: %w", entry.Name, err))
+				return
+			}
+			// And the same for the new commit's stylesheet: an update that moves or escapes
+			// css_url is refused before the stored manifest is replaced.
+			if err := m.Capabilities.GetCSS().Validate(); err != nil {
+				fail(fmt.Errorf("extension %s declares an unusable stylesheet: %w", entry.Name, err))
+				return
+			}
+			if err := validateTools(m.Capabilities, m.ConfigSchema); err != nil {
+				fail(fmt.Errorf("extension %s declares an unusable tool: %w", entry.Name, err))
+				return
+			}
+			if len(merged.Envs) > len(before.Envs) || len(merged.Mounts) > len(before.Mounts) ||
+				len(merged.Capabilities) > len(before.Capabilities) {
+				logging.For(logging.Extensions).Infof("ext=%s update added %d env, %d mount, %d capability declaration(s) from the manifest", id, len(merged.Envs)-len(before.Envs), len(merged.Mounts)-len(before.Mounts), len(merged.Capabilities)-len(before.Capabilities))
+			}
+			ext.SandboxConfig = merged
 		}
 		ext.Repo = entry.Repo
 		ext.Commit = entry.Commit
