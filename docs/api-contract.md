@@ -60,6 +60,13 @@ Three of them are load-bearing for whoever reads a response:
 Key order in a marshaled map is unspecified, so nothing may compare two marshaled maps byte for byte. A
 check that writes one to a golden file passes `json.Deterministic(true)` and says why.
 
+A body another machine hashes is that rule with a cost attached. A provider matches the bytes of a
+request against what it cached, to reuse the blocks it already computed. So the chat body is marshaled
+`json.Deterministic(true)` at `llama.postChat`: any other key order misses that cache on every turn of
+every run. It is the only outbound LLM body — streaming and non-streaming both post through that one
+function. `go test ./backend/llama/ -run
+TestChatStreamSendsIdenticalBytesForTheSameConversation` fails when the order varies again.
+
 The grammar is enforced in both directions, and a foreign payload meets it first. A duplicate member name,
 bytes after the value, and invalid UTF-8 inside a string are each an error — where v1 takes the last
 duplicate and writes U+FFFD. Only v1's `Decoder` tolerates bytes after the value.

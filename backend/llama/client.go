@@ -206,7 +206,8 @@ func (c *LlamaClient) SetAdapter(a *llmadapter.Adapter) {
 func (c *LlamaClient) postChat(ctx context.Context, reqBody map[string]any) (*http.Response, error) {
 	adapterHeaders := c.applyAdapter(reqBody)
 
-	data, err := json.Marshal(reqBody)
+	// json must be deterministic to avoid invalidating inference provider's KV cache
+	data, err := json.Marshal(reqBody, json.Deterministic(true))
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
