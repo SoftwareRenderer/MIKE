@@ -156,6 +156,18 @@ type KeyboardShortcuts struct {
 	HideHints *bool `json:"hide_hints,omitzero"`
 }
 
+// Empty reports whether no binding is set at all, which is how "all defaults" reaches the API: a
+// caller drops the whole object rather than answering an empty one. A binding counts by presence, not
+// by value — HideHints=false is a preference someone chose. TestKeyboardShortcutsEmptyCoversEveryField
+// fails when a field joins the struct and is left out here. A nil receiver is empty.
+func (k *KeyboardShortcuts) Empty() bool {
+	if k == nil {
+		return true
+	}
+	return k.CreateTask == nil && k.CreateTaskSubmit == nil && k.OpenTerminal == nil &&
+		k.StartTask == nil && k.ToggleFullscreen == nil && k.MultiSelectClick == nil && k.HideHints == nil
+}
+
 // ModelSampling holds a model's sampler overrides. A nil field is left out of the request body, so
 // the provider samples its own way; the bounds on a typed value are judged where the row is saved.
 type ModelSampling struct {

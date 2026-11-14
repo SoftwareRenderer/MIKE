@@ -9,7 +9,12 @@ Preferences specific to a single browser (not the user account) should not use t
 ## Adding a keyboard shortcut
 
 1. **Backend Type**: Add a `*string` field to `types.KeyboardShortcuts` (`backend/types/domain.go`).
-2. **Backend Normalization**: Add an all-nil check in `normalizeKeyboardShortcuts` (`backend/config/config.go`).
+2. **Backend Normalization**: One line, in `Empty()` (`backend/types/domain.go`): `&& k.NewField == nil`. That
+   is what decides whether `keyboard_shortcuts` reaches the response at all, because
+   `normalizeKeyboardShortcuts` (`backend/config/config.go`) asks it rather than naming the bindings.
+   `Empty()` is hand-written, so forgetting it is possible —
+   `TestKeyboardShortcutsEmptyCoversEveryField` (`backend/types/domain_test.go`) walks the struct by
+   reflection and fails when a binding set on its own still reads as all-default.
 3. **Frontend Type**: Add a field to `KeyboardShortcuts` (`$lib/types`).
 4. **Default**: Set a default in `DEFAULT_SHORTCUTS`. If the default varies by platform, use a `defaultXxx()` helper in `$lib/utils/keyboard.ts`.
 5. **UI Row**: Add a row to `ConfigModal/PreferencesTab.svelte`.
@@ -23,7 +28,7 @@ Preferences specific to a single browser (not the user account) should not use t
 
 **Hints**: Text buttons show a `<kbd class="key-hint">` and a `title` tooltip. These are hidden by `hide_hints` or on screens below 768px.
 
-**Tests**: `backend/config/config_test.go`, `utils/__tests__/keyboard.unit.ts`, `preferences-tab.unit.svelte.ts`, and e2e `preferences-keyboard.spec.ts`.
+**Tests**: `backend/types/domain_test.go` (the `Empty()` walk over every binding), `backend/config/config_test.go`, `utils/__tests__/keyboard.unit.ts`, `preferences-tab.unit.svelte.ts`, and e2e `preferences-keyboard.spec.ts`.
 
 ## Adding a UI preference (`*bool`)
 
@@ -56,4 +61,5 @@ Choices that only the current browser can act on (e.g., notification permissions
 ## Verification
 
 - **Stored shape**: `go test ./backend/config/`
+- **All-default omission**: `go test ./backend/types/ ./backend/config/ -run KeyboardShortcuts`
 - **Round trip**: `cd frontend && npx playwright test preferences-keyboard`

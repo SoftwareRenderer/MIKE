@@ -385,10 +385,10 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	return cfg, nil
 }
 
-// normalizeKeyboardShortcuts returns nil when no binding is set, so the
-// field is omitted from API responses.
+// normalizeKeyboardShortcuts returns nil when no binding is set, so the field is omitted from API
+// responses. Empty() holds which fields decide that.
 func normalizeKeyboardShortcuts(ks *types.KeyboardShortcuts) *types.KeyboardShortcuts {
-	if ks == nil || (ks.CreateTask == nil && ks.CreateTaskSubmit == nil && ks.OpenTerminal == nil && ks.StartTask == nil && ks.ToggleFullscreen == nil && ks.MultiSelectClick == nil && ks.HideHints == nil) {
+	if ks.Empty() {
 		return nil
 	}
 	return ks
