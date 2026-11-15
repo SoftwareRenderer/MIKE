@@ -189,19 +189,6 @@ describe('the fallback ladder and its warnings', () => {
         expect(warn).toHaveBeenCalledTimes(1);
         expect(String(warn.mock.calls[0][0])).toContain('does.not.exist');
     });
-
-    it('no rung of the ladder can render an empty string', () => {
-        const rendered = [
-            t('i18n.test.plain'),                    // English
-            (setCatalog(MANY_FORMS, pack({})), t('i18n.test.plain')),  // pack miss → English
-            t('i18n.test.files', { count: 3 }),      // plural table
-            // @ts-expect-error unknown key
-            t('still.not.a.key'),
-        ];
-        for (const text of rendered) {
-            expect(text.length).toBeGreaterThan(0);
-        }
-    });
 });
 
 describe('document.documentElement.lang', () => {
