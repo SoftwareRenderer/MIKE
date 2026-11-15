@@ -2,7 +2,6 @@ package git
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,7 +15,6 @@ import (
 // one row of this table to the other.
 
 func TestGitRunModesResolveIdenticallyAtRepositoryRoots(t *testing.T) {
-	skipWithoutGit(t)
 	wm := &WorktreeManager{}
 	repo := initRepo(t)
 	worktree := filepath.Join(filepath.Dir(repo), "wt")
@@ -72,7 +70,6 @@ func mustRun(t *testing.T, wm *WorktreeManager, dir string) string {
 // did not name. Pinned mode refuses instead. Every current call site passes a repository root; this is what
 // keeps it that way.
 func TestGitRunPinnedModeRefusesASubdirectoryThatPlainModeWouldWalkUp(t *testing.T) {
-	skipWithoutGit(t)
 	wm := &WorktreeManager{}
 	repo := initRepo(t)
 	sub := filepath.Join(repo, "sub")
@@ -89,12 +86,5 @@ func TestGitRunPinnedModeRefusesASubdirectoryThatPlainModeWouldWalkUp(t *testing
 	}
 	if _, err := wm.gitRunInGitDir(sub, "rev-parse", "--show-toplevel"); err == nil {
 		t.Error("pinned mode resolved a subdirectory — the guard that makes every GitRun* call site a repository root is gone")
-	}
-}
-
-func skipWithoutGit(t *testing.T) {
-	t.Helper()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not available")
 	}
 }
