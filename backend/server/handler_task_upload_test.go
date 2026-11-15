@@ -162,18 +162,8 @@ func TestUploadRefusesNotAFormAs400AndKeeps413ForSize(t *testing.T) {
 	oversize := bytes.Repeat([]byte("x"), exec.MaxUploadBytes+1)
 	if rr := postTaskUpload(t, s, "up-shape", "t1", "big.bin", oversize); rr.Code != http.StatusRequestEntityTooLarge {
 		t.Errorf("task upload over the cap: status = %d, want 413: %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestTaskUploadRefusesAFileOverTheLimit(t *testing.T) {
-	s, _ := taskUploadProject(t, "up-size")
-
-	oversize := bytes.Repeat([]byte("x"), exec.MaxUploadBytes+1)
-	rr := postTaskUpload(t, s, "up-size", "t1", "big.bin", oversize)
-	if rr.Code != http.StatusRequestEntityTooLarge {
-		t.Fatalf("status = %d, want 413: %s", rr.Code, rr.Body.String())
-	}
-	if !strings.Contains(rr.Body.String(), "MB") {
+	} else if !strings.Contains(rr.Body.String(), "MB") {
+		// A refusal that leaves the size out is a size problem the user cannot act on.
 		t.Errorf("refusal %q does not name the limit the user is over", rr.Body.String())
 	}
 }

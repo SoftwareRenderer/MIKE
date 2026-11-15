@@ -15,12 +15,7 @@ import (
 // diverged from the main branch — so changes merged into the branch are visible.
 func TestTaskDiffFallbackDivergenceBaseline(t *testing.T) {
 	s := testServer(t)
-	projID, dir := createTestProjectWithPath(t, s)
-
-	mainBranch := testgit.GitOutput(t, dir, "rev-parse", "--abbrev-ref", "HEAD")
-	if mainBranch == "" || mainBranch == "HEAD" {
-		t.Skipf("cannot determine main branch: %q", mainBranch)
-	}
+	projID, _ := createTestProjectWithPath(t, s)
 
 	taskID := createTestTask(t, s, projID, "parent task")
 
@@ -123,12 +118,7 @@ func TestTaskDiffUnusableBaselineFallsBack(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			s := testServer(t)
-			projID, dir := createTestProjectWithPath(t, s)
-
-			mainBranch := testgit.GitOutput(t, dir, "rev-parse", "--abbrev-ref", "HEAD")
-			if mainBranch == "" || mainBranch == "HEAD" {
-				t.Skipf("cannot determine main branch: %q", mainBranch)
-			}
+			projID, _ := createTestProjectWithPath(t, s)
 
 			taskID := createTestTask(t, s, projID, "unusable base task")
 			wm := s.executor.WorktreeMgr()

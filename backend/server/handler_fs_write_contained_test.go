@@ -42,26 +42,6 @@ func TestFSWriteRefusesSymlinkedParent(t *testing.T) {
 	}
 }
 
-// TestFSWriteCreatesNewDirectoriesInsideProject is the control: the walk refuses a link, not a
-// save.
-func TestFSWriteCreatesNewDirectoriesInsideProject(t *testing.T) {
-	s := testServer(t)
-	projectDir := t.TempDir()
-
-	rr := httptest.NewRecorder()
-	target := fsTarget{
-		path:  filepath.Join(projectDir, "a", "b", "new.txt"),
-		roots: []string{projectDir},
-	}
-	if !s.writeContainedFile(rr, target, []byte("saved")) {
-		t.Fatalf("an ordinary nested save was refused: %d", rr.Code)
-	}
-	got, err := os.ReadFile(filepath.Join(projectDir, "a", "b", "new.txt"))
-	if err != nil || string(got) != "saved" {
-		t.Fatalf("the file is not there: %q %v", got, err)
-	}
-}
-
 // TestFSWriteIsNotWidenedByAllowRootFS: the widening that reaches the picker never reaches a
 // project-scoped write — the server below was built widened, and the write is still jailed to the
 // roots the request resolution named.

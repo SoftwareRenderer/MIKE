@@ -412,14 +412,18 @@ func TestFSWriteRejectsSymlinkEscape(t *testing.T) {
 		t.Error("escaped the project root: dangling-symlink write created its target")
 	}
 
-	// Ordinary in-project writes (including new files in new subdirs) still work.
+	// Ordinary in-project writes (including new files two levels below the root) still work.
 	req = testRequest(http.MethodPost, "/api/fs/write?"+q.Encode(), map[string]string{
-		"path":    filepath.Join(repo, "sub", "new.txt"),
+		"path":    filepath.Join(repo, "sub", "deeper", "new.txt"),
 		"content": "fine",
 	})
 	withAuthCSRF(req, cookie, csrf)
 	if rr := testResponse(t, s, req); rr.Code != http.StatusOK {
 		t.Fatalf("ordinary in-project write broken: %d %s", rr.Code, rr.Body.String())
+	}
+	// The walk creates the parents and the save lands its bytes, not just its status.
+	if got, err := os.ReadFile(filepath.Join(repo, "sub", "deeper", "new.txt")); err != nil || string(got) != "fine" {
+		t.Errorf("the nested save holds %q (%v), want \"fine\"", got, err)
 	}
 }
 

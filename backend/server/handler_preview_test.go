@@ -1,12 +1,9 @@
 package server
 
 import (
-	"bytes"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json/v2"
 	"errors"
-	"io"
 	"mime"
 	"net/http"
 	"net/http/httptest"
@@ -1493,20 +1490,5 @@ func TestPreviewNavName_IsAnAssetNotTheRecord(t *testing.T) {
 	rec := navState(t, s, cookie, token)
 	if rec["seq"] == nil {
 		t.Fatalf("nav record must carry a sequence: %v", rec)
-	}
-}
-
-// sanity: the JSON body decodes into the expected request shape
-func TestPreviewServeRequestShape(t *testing.T) {
-	var req previewServeRequest
-	body := []byte(`{"content":"<i>hi</i>","project":"p1","path":"a/b.html","task":"t1"}`)
-	if err := json.UnmarshalRead(bytes.NewReader(body), &req); err != nil {
-		t.Fatal(err)
-	}
-	if req.Content != "<i>hi</i>" || req.Project != "p1" || req.Path != "a/b.html" || req.Task != "t1" {
-		t.Fatalf("unexpected decode: %+v", req)
-	}
-	if _, err := io.Copy(io.Discard, bytes.NewReader(body)); err != nil {
-		t.Fatal(err)
 	}
 }

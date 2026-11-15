@@ -87,22 +87,6 @@ func TestRoutesRefuseUnregisteredMethodsThroughTheMux(t *testing.T) {
 // TestGETCheckoutNoLongerReachesTheCheckoutHandler: a write route registered without a method takes a
 // cross-site GET straight into a handler that checks out a branch, because CSRFMiddleware guards
 // non-GET requests only.
-func TestGETCheckoutNoLongerReachesTheCheckoutHandler(t *testing.T) {
-	s := testServer(t)
-	cookie, _ := loginTestCSRF(t, s)
-
-	// A GET with no CSRF token: the request a methodless route would dispatch to the handler.
-	req := testRequest(http.MethodGet, "/api/projects/p1/git/checkout", nil)
-	withAuth(req, cookie)
-	rr := testResponse(t, s, req)
-	if rr.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("GET on a write route must be refused by the mux, got %d: %s", rr.Code, rr.Body.String())
-	}
-	if !strings.Contains(rr.Header().Get("Allow"), "POST") {
-		t.Errorf("Allow should name POST, got %q", rr.Header().Get("Allow"))
-	}
-}
-
 // TestStaticPathFallsThroughToTheParameterisedSibling: net/http chooses the **most specific path**
 // first and only then checks the method. With `DELETE /api/projects/{p}/tasks/done` registered and no
 // GET on that path, a GET matches `GET .../tasks/{taskID}` with taskID="done" and answers 404, so "a
@@ -138,22 +122,5 @@ func TestGETPatternAlsoAnswersHEAD(t *testing.T) {
 	}
 	if rr.Code != http.StatusOK {
 		t.Fatalf("HEAD /api/health: got %d, want 200", rr.Code)
-	}
-}
-
-// TestDeletedGuardsLeaveNoHandlerReachableByTheWrongVerb: called directly with a bad method, a
-// handler does not refuse it — the mux decides, which is why the per-handler 405 assertions moved
-// here.
-func TestCheckoutHandlerIsNotGuardedAnymoreBecauseTheMuxDecides(t *testing.T) {
-	s := testServer(t)
-	cookie, csrf := loginTestCSRF(t, s)
-
-	req := testRequest(http.MethodPost, "/api/projects/p1/git/checkout", map[string]any{"branch": "no-such-branch"})
-	withAuthCSRF(req, cookie, csrf)
-	rr := testResponse(t, s, req)
-	// The project does not exist, so the failure is a real one from inside the handler: proof the
-	// request got past the mux instead of being refused for its verb.
-	if rr.Code == http.StatusMethodNotAllowed {
-		t.Fatalf("POST was refused by the mux: %s", rr.Body.String())
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"mike/backend/sandbox"
+	"mike/backend/testutil/sandboxcheck"
 	"mike/backend/types"
 )
 
@@ -97,9 +98,6 @@ func TestValidateFSPathWorktreeRoot(t *testing.T) {
 	cfg, err := s.configStore.GetConfig()
 	if err != nil {
 		t.Fatal(err)
-	}
-	if cfg.WorkspaceDir == "" {
-		t.Skip("workspace dir not set")
 	}
 	dir := t.TempDir()
 	plain := sandboxFSProject(t, s, "plain", "plainproj", filepath.Join(dir, "repo-plain"), false)
@@ -371,9 +369,7 @@ func TestFSSandboxPathRoundTripsThroughSymlinkedProjectPath(t *testing.T) {
 // privileges, from a tree the task controls.
 func TestFSRoutesOfASandboxedProjectActOnTheHostBytes(t *testing.T) {
 	s := testServer(t)
-	if !s.sandboxMgr.IsAvailable() {
-		t.Skip("gVisor is not installed here, so a sandboxed project's file request is refused before it reaches any filesystem")
-	}
+	sandboxcheck.RequireAvailable(t, s.sandboxMgr)
 	repo := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(repo, "src"), 0o755); err != nil {
 		t.Fatal(err)
@@ -413,9 +409,7 @@ func TestFSListingOfASandboxedProjectReadsHostBytesWithNoContainer(t *testing.T)
 		t.Skip("git not available, so there is no repository to mark rows ignored from")
 	}
 	s := testServer(t)
-	if !s.sandboxMgr.IsAvailable() {
-		t.Skip("gVisor is not installed here, so a sandboxed project's file request is refused before it reaches any filesystem")
-	}
+	sandboxcheck.RequireAvailable(t, s.sandboxMgr)
 	repo := t.TempDir()
 	for _, d := range []string{"src/sub", "build"} {
 		if err := os.MkdirAll(filepath.Join(repo, d), 0o755); err != nil {
@@ -505,9 +499,7 @@ func TestFSListingOfASandboxedProjectReadsHostBytesWithNoContainer(t *testing.T)
 // container spelling names, and the jail still refuses one outside the tree.
 func TestFSMkdirOfASandboxedProjectMakesTheHostDirectory(t *testing.T) {
 	s := testServer(t)
-	if !s.sandboxMgr.IsAvailable() {
-		t.Skip("gVisor is not installed here, so a sandboxed project's file request is refused before it reaches any filesystem")
-	}
+	sandboxcheck.RequireAvailable(t, s.sandboxMgr)
 	repo := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(repo, "src"), 0o755); err != nil {
 		t.Fatal(err)

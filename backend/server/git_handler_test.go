@@ -78,23 +78,21 @@ func TestGitLog(t *testing.T) {
 	if first["date"] == "" || first["date"] == nil {
 		t.Fatal("expected date field in full log")
 	}
-	// Parents - the first commit (most recent) has one parent
-	parents := first["parents"]
-	if parents != nil {
-		parentSlice := parents.([]any)
-		if len(parentSlice) != 1 {
-			t.Fatalf("expected 1 parent, got %d", len(parentSlice))
-		}
+	// Parents — the first commit (most recent) has one parent, and it is the commit below
+	// it. Read out of the answer, not behind a nil check: an absent field satisfies every
+	// assertion that only runs when the field is there.
+	parents, ok := first["parents"].([]any)
+	if !ok || len(parents) != 1 {
+		t.Fatalf("expected 1 parent, got %v", first["parents"])
+	}
+	if parents[0] != commits[1]["hash"] {
+		t.Fatalf("parent hash mismatch: %v != %v", parents[0], commits[1]["hash"])
 	}
 
-	// Check last commit (oldest) has no parents
+	// The root commit names no parent at all.
 	last := commits[len(commits)-1]
-	parents = last["parents"]
-	if parents != nil {
-		parentSlice := parents.([]any)
-		if len(parentSlice) != 0 {
-			t.Fatalf("expected 0 parents for root commit, got %d", len(parentSlice))
-		}
+	if parents, ok := last["parents"].([]any); ok && len(parents) != 0 {
+		t.Fatalf("expected 0 parents for root commit, got %v", parents)
 	}
 }
 
@@ -168,46 +166,6 @@ func TestGitCheckout(t *testing.T) {
 	branch := strings.TrimSpace(string(out))
 	if branch != "master" {
 		t.Fatalf("expected branch 'master', got '%s'", branch)
-	}
-}
-
-func TestGitLogFullDecodesParents(t *testing.T) {
-	s := testServer(t)
-	projID, dir := createTestProjectWithPath(t, s)
-	testgit.Git(t, dir, "commit", "--allow-empty", "-m", "Commit A")
-	testgit.Git(t, dir, "commit", "--allow-empty", "-m", "Commit B")
-
-	cookie, csrfToken := loginTestCSRF(t, s)
-	req := testRequest("GET", "/api/projects/"+projID+"/git/log?full=1", nil)
-	withAuthCSRF(req, cookie, csrfToken)
-	rr := testResponse(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-
-	// Decode as wrapper response
-	resp := mustJSON[map[string]any](t, rr.Body)
-	commitsAny := resp["commits"].([]any)
-	commits := make([]map[string]any, len(commitsAny))
-	for i, c := range commitsAny {
-		commits[i] = c.(map[string]any)
-	}
-
-	// Most recent commit should have 1 parent
-	if len(commits) < 2 {
-		t.Fatalf("expected at least 2 commits, got %d", len(commits))
-	}
-	parents := commits[0]["parents"]
-	if parents == nil {
-		t.Fatal("expected parents field on non-root commit")
-	}
-	parentSlice := parents.([]any)
-	if len(parentSlice) != 1 {
-		t.Fatalf("expected 1 parent, got %d", len(parentSlice))
-	}
-	// Parent hash should match the second commit's hash
-	if parentSlice[0] != commits[1]["hash"] {
-		t.Fatalf("parent hash mismatch: %s != %s", parentSlice[0], commits[1]["hash"])
 	}
 }
 

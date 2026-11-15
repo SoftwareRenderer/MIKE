@@ -26,3 +26,26 @@ func TestProbeAnswersOncePerProcess(t *testing.T) {
 		t.Error("the second call probed again; the verdict belongs to the process, not the test")
 	}
 }
+
+// stubSetting stands in for the server's sandbox manager.
+type stubSetting struct{ available bool }
+
+func (s stubSetting) IsAvailable() bool { return s.available }
+
+// The setting gate skips on the answer the product itself gets, and on nothing else: a host that
+// honours a sandboxed project must still run the test, and one that does not must not reach it.
+func TestRequireAvailableSkipsOnlyOnTheSetting(t *testing.T) {
+	ran := false
+	t.Run("the host honours the sandbox", func(t *testing.T) {
+		RequireAvailable(t, stubSetting{available: true})
+		ran = true
+	})
+	if !ran {
+		t.Error("a host with the runtime installed skipped a test that needs only the setting")
+	}
+
+	t.Run("the host has no runtime", func(t *testing.T) {
+		RequireAvailable(t, stubSetting{available: false})
+		t.Error("a host without the runtime ran a test whose premise the server refuses")
+	})
+}

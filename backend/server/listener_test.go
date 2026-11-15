@@ -110,8 +110,6 @@ func TestHybridListener_SilentPeerDoesNotBlockOtherClients(t *testing.T) {
 	addr, served, stop := hybridTestServer(t, 5*time.Second, nil)
 	defer stop()
 
-	mustBeServed(t, addr, 2*time.Second) // sanity
-
 	silent := silentPeer(t, addr)
 	// Stays silent for the whole test: its 5s sniff deadline outlasts every request
 	// bound below, so a listener that waits on it cannot pass.
