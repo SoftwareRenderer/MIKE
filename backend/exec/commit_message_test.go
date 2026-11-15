@@ -196,20 +196,19 @@ func TestBuildAssistedBy_SingleModel(t *testing.T) {
 	}
 }
 
-func TestBuildAssistedBy_StripsOrgPrefix(t *testing.T) {
+// A namespaced model id is one name: the prefix tells apart two models the provider would otherwise
+// report identically.
+func TestBuildAssistedBy_KeepsModelPrefix(t *testing.T) {
 	t.Parallel()
 	result := buildAssistedBy([]string{"org/model"})
-	expected := "\n\nAssisted-by: MIKE:model"
+	expected := "\n\nAssisted-by: MIKE:org/model"
 	if result != expected {
 		t.Errorf("buildAssistedBy(%q) = %q, want %q", "org/model", result, expected)
 	}
 
 	mixed := buildAssistedBy([]string{"org/model", "model"})
-	if !strings.Contains(mixed, "Assisted-by: MIKE:model") {
-		t.Errorf("expected org prefix stripped + MIKE prefix, got %q", mixed)
-	}
-	if strings.Contains(mixed, "org/") {
-		t.Errorf("expected no 'org/' in trailer, got %q", mixed)
+	if want := "\n\nAssisted-by: MIKE:org/model\nAssisted-by: MIKE:model"; mixed != want {
+		t.Errorf("buildAssistedBy(both names) = %q, want %q", mixed, want)
 	}
 }
 

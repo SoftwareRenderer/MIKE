@@ -33,8 +33,8 @@ own machine against real repositories.
 - **Never leave the server running** after a crash or panic — stop it first.
 - **`make check` is the gate**, and there is no CI file, so it is the only thing that catches a regression.
   Run it before claiming done.
-- **`make check-race` on whatever you touched** — a package's own green tests prove nothing about code that
-  only runs when a task runs.
+- **`make check-race` over the Go packages you touched**, never over a change with no Go files in it — a
+  package's own green tests prove nothing about code that only runs when a task runs.
 - **Scope every Go command**: `./backend/... ./pkg/... .` — never `./...`.
 - Run the dev server in **background** (`&`), and restart it after an E2E run.
 

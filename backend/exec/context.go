@@ -474,17 +474,10 @@ func collectUniqueModels(taskMsgs []types.TaskMessage) []string {
 	return models
 }
 
-// displayModelName shortens namespaced model name for commit trailers.
-func displayModelName(name string) string {
-	if i := strings.Index(name, "/"); i > 0 {
-		return name[i+1:]
-	}
-	return name
-}
-
-// assistedByModel formats model name for Assisted-by trailer.
+// assistedByModel formats model name for Assisted-by trailer. The name is the configured one, so a
+// namespaced id keeps the prefix that distinguishes it.
 func assistedByModel(name string) string {
-	return "MIKE:" + displayModelName(name)
+	return "MIKE:" + name
 }
 
 // buildAssistedBy formats Assisted-by trailer lines.
