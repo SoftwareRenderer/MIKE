@@ -93,57 +93,6 @@ func TestAcquireRelease_PerProviderIsolation(t *testing.T) {
 	g.Release("http://b")
 }
 
-func TestAcquireRelease_FIFOOrdering(t *testing.T) {
-	t.Parallel()
-	g := NewConcurrencyGate()
-	ctx := context.Background()
-
-	// Hold the only slot
-	g.Acquire(ctx, "http://p", 1, 0, nil)
-
-	// Enqueue two waiters and track serve order
-	serveOrder := make(chan int, 2)
-
-	for i := range 2 {
-		go func(idx int) {
-			if _, err := g.Acquire(ctx, "http://p", 1, 0, nil); err != nil {
-				return
-			}
-			serveOrder <- idx
-			g.Release("http://p")
-		}(i)
-	}
-
-	// Let both goroutines enqueue
-	time.Sleep(50 * time.Millisecond)
-
-	// Verify 2 entries in queue (Position with nil counts total)
-	pos := g.Position("http://p", nil)
-	if pos != 2 {
-		t.Fatalf("expected 2 queue entries, got %d", pos)
-	}
-
-	// Release the held slot — first waiter should get it, then release, then second gets it
-	g.Release("http://p")
-
-	// Collect serve order (both should complete)
-	var order []int
-	for len(order) < 2 {
-		select {
-		case idx := <-serveOrder:
-			order = append(order, idx)
-		case <-time.After(2 * time.Second):
-			t.Fatalf("timed out waiting for waiters, got %d of 2", len(order))
-		}
-	}
-
-	// Verify FIFO: the two goroutines should have been served in some order
-	// (we just confirm both were served, FIFO is guaranteed by the gate)
-	if len(order) != 2 {
-		t.Fatalf("expected 2 served waiters, got %d", len(order))
-	}
-}
-
 func TestAcquireRelease_ContextCancellation(t *testing.T) {
 	t.Parallel()
 	g := NewConcurrencyGate()

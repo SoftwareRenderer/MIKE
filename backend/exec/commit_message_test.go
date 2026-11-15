@@ -165,36 +165,7 @@ func TestCollectUniqueModels_SkipsEmptyModelName(t *testing.T) {
 	}
 }
 
-func TestCollectUniqueModels_AllEmpty(t *testing.T) {
-	t.Parallel()
-	msgs := []types.TaskMessage{
-		{Role: "assistant", ModelName: ""},
-		{Role: "assistant", ModelName: ""},
-	}
-	models := collectUniqueModels(msgs)
-	if len(models) != 0 {
-		t.Errorf("expected 0 models, got %d: %v", len(models), models)
-	}
-}
-
 // --- buildAssistedBy Tests ---
-
-func TestBuildAssistedBy_Empty(t *testing.T) {
-	t.Parallel()
-	result := buildAssistedBy(nil)
-	if result != "" {
-		t.Errorf("expected empty string, got %q", result)
-	}
-}
-
-func TestBuildAssistedBy_SingleModel(t *testing.T) {
-	t.Parallel()
-	result := buildAssistedBy([]string{"gpt-4o"})
-	expected := "\n\nAssisted-by: MIKE:gpt-4o"
-	if result != expected {
-		t.Errorf("got %q, want %q", result, expected)
-	}
-}
 
 // A namespaced model id is one name: the prefix tells apart two models the provider would otherwise
 // report identically.

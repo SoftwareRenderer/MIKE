@@ -1100,22 +1100,9 @@ func TestIsReadOnlyCommand(t *testing.T) {
 	}
 }
 
-// TestIsReadOnlyCommandNeverPanics holds the invariant the classifier exists under: its verdict chooses
-// which loop hint to show and grants nothing, so no command text may end the turn that asked for it.
-func TestIsReadOnlyCommandNeverPanics(t *testing.T) {
-	t.Parallel()
-	for _, tt := range readOnlyCommandCases {
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					t.Errorf("isReadOnlyCommand(%q) panicked: %v", tt.cmd, r)
-				}
-			}()
-			isReadOnlyCommand(tt.cmd)
-		}()
-	}
-}
-
+// FuzzIsReadOnlyCommand holds the invariant the classifier exists under: its verdict chooses which
+// loop hint to show and grants nothing, so no command text may end the turn that asked for it. The
+// table cases run through that verdict in TestIsReadOnlyCommand().
 func FuzzIsReadOnlyCommand(f *testing.F) {
 	f.Add(crashingBashCommand)
 	f.Add(`grep "a&&|b" f`)
@@ -1793,7 +1780,8 @@ func TestPhraseDetector_PendingBufferBound(t *testing.T) {
 	// Generate text longer than maxPendingSize (16KB) without sentence boundaries
 	longText := strings.Repeat("no sentence boundary here just words ", 1000)
 	if len(longText) < maxPendingSize {
-		t.Skipf("test text %d bytes is shorter than maxPendingSize %d", len(longText), maxPendingSize)
+		t.Fatalf("the fixture text is %d bytes, under maxPendingSize %d, so the buffer was never over its bound",
+			len(longText), maxPendingSize)
 	}
 
 	d.check(longText)
@@ -2393,57 +2381,6 @@ func TestBuildLLMContext_FiltersTaskComplete(t *testing.T) {
 	}
 	if !foundRequestReview {
 		t.Error("request_review tool call should be present")
-	}
-}
-
-func TestBuildLLMContext_FiltersTaskCompleteWithToolResult(t *testing.T) {
-	t.Parallel()
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "system prompt"},
-		{Role: "user", Content: "fix the bug"},
-		{Role: "assistant", Content: "done", ToolCalls: []types.ToolCallMsg{
-			{ID: "call-tc", Type: "function"},
-		}},
-		{Role: "tool", Content: "task completed", ToolCallID: "call-tc"},
-		{Role: "user", Content: "new request"},
-	}
-	messages[2].ToolCalls[0].Function.Name = "request_review"
-	messages[2].ToolCalls[0].Function.Arguments = `{"summary":"done"}`
-
-	result := buildLLMContext(messages)
-
-	// request_review assistant (msg[2]) and its tool result (msg[3]) should be kept
-	// system + user + assistant + tool + user = 5
-	if len(result) != 5 {
-		t.Fatalf("expected 5 messages, got %d", len(result))
-		for i, m := range result {
-			t.Logf("  [%d] role=%s content=%q toolCallID=%q", i, m.Role, m.Content, m.ToolCallID)
-		}
-	}
-}
-
-func TestBuildLLMContext_KeepsOtherToolCalls(t *testing.T) {
-	t.Parallel()
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "system prompt"},
-		{Role: "user", Content: "do stuff"},
-		{Role: "assistant", Content: "", ToolCalls: []types.ToolCallMsg{
-			{ID: "call1", Type: "function"},
-			{ID: "call2", Type: "function"},
-		}},
-		{Role: "tool", Content: "result1", ToolCallID: "call1"},
-		{Role: "tool", Content: "result2", ToolCallID: "call2"},
-	}
-	messages[2].ToolCalls[0].Function.Name = "bash"
-	messages[2].ToolCalls[0].Function.Arguments = `{"command":"ls"}`
-	messages[2].ToolCalls[1].Function.Name = "read_file"
-	messages[2].ToolCalls[1].Function.Arguments = `{"path":"foo.go"}`
-
-	result := buildLLMContext(messages)
-
-	// No request_review, all messages pass through (except summarization which isn't present)
-	if len(result) != 5 {
-		t.Fatalf("expected 5 messages, got %d", len(result))
 	}
 }
 

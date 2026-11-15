@@ -288,11 +288,11 @@ func TestMergeBranch_CreatesMissingBaseBranch(t *testing.T) {
 	cmd := exec.Command("git", "-C", repoDir, "rev-parse", "--abbrev-ref", "HEAD")
 	out, err := cmd.Output()
 	if err != nil {
-		t.Skipf("cannot determine main branch: %v", err)
+		t.Fatalf("cannot determine main branch: %v", err)
 	}
 	mainBranch := strings.TrimSpace(string(out))
 	if mainBranch == "" || mainBranch == "HEAD" {
-		t.Skipf("cannot determine main branch: %q", mainBranch)
+		t.Fatalf("cannot determine main branch: %q", mainBranch)
 	}
 
 	taskID := "root-custom-base"
@@ -364,11 +364,11 @@ func TestMergeInto_RestoresProjectCheckout(t *testing.T) {
 	cmd := exec.Command("git", "-C", repoDir, "rev-parse", "--abbrev-ref", "HEAD")
 	out, err := cmd.Output()
 	if err != nil {
-		t.Skipf("cannot determine main branch: %v", err)
+		t.Fatalf("cannot determine main branch: %v", err)
 	}
 	mainBranch := strings.TrimSpace(string(out))
 	if mainBranch == "" || mainBranch == "HEAD" {
-		t.Skipf("cannot determine main branch: %q", mainBranch)
+		t.Fatalf("cannot determine main branch: %q", mainBranch)
 	}
 
 	// The user is working on their own branch with uncommitted changes.
@@ -452,11 +452,11 @@ func TestMergeBranch_ConcurrentProjectMerges(t *testing.T) {
 	cmd := exec.Command("git", "-C", repoDir, "rev-parse", "--abbrev-ref", "HEAD")
 	out, err := cmd.Output()
 	if err != nil {
-		t.Skipf("cannot determine main branch: %v", err)
+		t.Fatalf("cannot determine main branch: %v", err)
 	}
 	mainBranch := strings.TrimSpace(string(out))
 	if mainBranch == "" || mainBranch == "HEAD" {
-		t.Skipf("cannot determine main branch: %q", mainBranch)
+		t.Fatalf("cannot determine main branch: %q", mainBranch)
 	}
 
 	// Two tasks that merge into the SAME not-yet-existing custom base — the
@@ -540,11 +540,11 @@ func TestMergeBranch_ConcurrentDifferentTargets(t *testing.T) {
 	cmd := exec.Command("git", "-C", repoDir, "rev-parse", "--abbrev-ref", "HEAD")
 	out, err := cmd.Output()
 	if err != nil {
-		t.Skipf("cannot determine main branch: %v", err)
+		t.Fatalf("cannot determine main branch: %v", err)
 	}
 	mainBranch := strings.TrimSpace(string(out))
 	if mainBranch == "" || mainBranch == "HEAD" {
-		t.Skipf("cannot determine main branch: %q", mainBranch)
+		t.Fatalf("cannot determine main branch: %q", mainBranch)
 	}
 
 	// Uncommitted work in the main checkout — must survive both merges and
