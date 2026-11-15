@@ -168,6 +168,8 @@ import { slide } from 'svelte/transition';
     let stagedDeletions = $derived(sortedStagedFiles.reduce((s: number, f: DiffFile) => s + (f.origRemoved ?? f.removed ?? 0), 0));
     let unstagedAdditions = $derived(sortedUnstagedFiles.reduce((s: number, f: DiffFile) => s + (f.origAdded ?? f.added ?? 0), 0) + sortedUnstagedUntracked.reduce((s: number, e: UntrackedEntry) => s + (e.file.origAdded ?? e.file.added ?? 0), 0));
     let unstagedDeletions = $derived(sortedUnstagedFiles.reduce((s: number, f: DiffFile) => s + (f.origRemoved ?? f.removed ?? 0), 0));
+    let committedAdditions = $derived(sortedCommittedFiles.reduce((s: number, f: DiffFile) => s + mergedHalf(f).added, 0));
+    let committedDeletions = $derived(sortedCommittedFiles.reduce((s: number, f: DiffFile) => s + mergedHalf(f).removed, 0));
 
     // Read this view's collapsed files back. The scope is a literal at every call site, but reading it in an
     // effect is what keeps the record and the view that owns it in step.
@@ -233,10 +235,20 @@ import { slide } from 'svelte/transition';
         return highlightCache.get(filePath)?.get(text);
     }
 
-    /** The rows one section draws for a file. A file can be listed in the committed and working sections
-     *  at once, comparing different commits. */
-    function drawnRows(file: DiffFile, committed: boolean): DiffRow[] {
-        return committed && file.committedRows?.length ? file.committedRows : file.rows;
+    /** This returns the file as the "Merged from Subtasks" section draws it: its committed half, counted
+     *  by the rows it holds. `added`/`removed` and the pre-truncation pair are counted from the worktree
+     *  comparison, so they are dropped here — beside committed rows they would report lines the section
+     *  is not showing. */
+    function mergedHalf(file: DiffFile): DiffFile {
+        const rows = file.committedRows;
+        if (!rows?.length) return file;
+        let added = 0;
+        let removed = 0;
+        for (const row of rows) {
+            if (row.variant === 'added') added++;
+            else if (row.variant === 'removed') removed++;
+        }
+        return { ...file, rows, added, removed, origAdded: undefined, origRemoved: undefined };
     }
 
     /** Row lists already sent to the highlighter, by array identity: a refresh hands over a new array. */
@@ -259,10 +271,10 @@ import { slide } from 'svelte/transition';
     $effect(() => {
         const open: Array<{ path: string; rows: DiffRow[] }> = [];
         for (const f of sortedCommittedFiles) {
-            if (f.fileSize === undefined && isFileOpen(f.path)) open.push({ path: f.path, rows: drawnRows(f, true) });
+            if (f.fileSize === undefined && isFileOpen(f.path)) open.push({ path: f.path, rows: mergedHalf(f).rows });
         }
         for (const f of [...sortedStagedFiles, ...sortedUnstagedFiles]) {
-            if (f.fileSize === undefined && isFileOpen(f.path)) open.push({ path: f.path, rows: drawnRows(f, false) });
+            if (f.fileSize === undefined && isFileOpen(f.path)) open.push({ path: f.path, rows: f.rows });
         }
         for (const u of [...sortedStagedUntracked, ...sortedUnstagedUntracked]) {
             if (u.fileSize === undefined && isFileOpen(u.path)) open.push({ path: u.path, rows: u.file.rows });
@@ -811,14 +823,14 @@ import { slide } from 'svelte/transition';
                 </svg>
                 <span class="diff-section-title">{mergedLabel}</span>
                 <span class="diff-section-stats">
-                    <span class="diff-added">+{sortedCommittedFiles.reduce((s, f) => s + (f.origAdded ?? f.added ?? 0), 0)}</span>
-                    <span class="diff-removed">-{sortedCommittedFiles.reduce((s, f) => s + (f.origRemoved ?? f.removed ?? 0), 0)}</span>
+                    <span class="diff-added">+{committedAdditions}</span>
+                    <span class="diff-removed">-{committedDeletions}</span>
                 </span>
                 <span class="diff-section-count">{t('diff.shared.file', { count: sortedCommittedFiles.length })}</span>
             </button>
             <div class="diff-section-body">
                 {#each sortedCommittedFiles as file (file.path)}
-                    {@render diffFileEntry({ ...file, rows: drawnRows(file, true) }, false, false, 'committed')}
+                    {@render diffFileEntry(mergedHalf(file), false, false, 'committed')}
                 {/each}
             </div>
         </div>

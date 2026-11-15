@@ -599,6 +599,14 @@ than truthiness. An empty array is a truthy "there is a committed half", which i
 paint "Empty file" over the rows the file holds. Tests:
 `frontend/src/lib/components/__tests__/diff-merged-committed-half.unit.svelte.ts`.
 
+**The half a section draws is the half it counts.** A file carries two comparisons at once — `Rows` against
+HEAD and `CommittedRows` against the baseline — and `Added`/`Removed` are counted from the worktree half
+alone. `DiffViewer.mergedHalf` prices the "Merged from Subtasks" section by counting the rows it draws there,
+so work merged in from a subtask says how many lines it changed even though it took no part in the worktree
+comparison. The committed patch is never truncated, so counting it is git's own count. `/diff/file` answers a
+file with no worktree half with `rows: []`, so an empty array there is the absence of that half, not a half of
+its own. Tests: `frontend/src/lib/components/__tests__/diff-merged-committed-half.unit.svelte.ts`.
+
 **A ref comparison never reads the file cache.** `GET /api/projects/{id}/tasks/{taskID}/diff/file` answers one
 of two questions, and which one the request says. Without refs it answers the task's worktree against HEAD at
 the baseline `git.WorktreeManager.TaskDiffBaseline` names for that task, which is all `api.taskDiffCache`
