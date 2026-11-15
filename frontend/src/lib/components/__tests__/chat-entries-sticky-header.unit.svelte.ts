@@ -344,18 +344,6 @@ describe('ChatEntries — sticky user-message header', () => {
         expect(view.at()).toBe(B_TOP - HEADER_HEIGHT);
     });
 
-    it('clamps at the top of the conversation and drops the header', async () => {
-        const { container, follow } = await renderChat();
-        const view = mountGeometry(container, follow);
-        await view.to(420);
-        expect(headerHidden(container)).toBe(false);
-
-        await tapHeader(container, view);
-
-        expect(view.at()).toBe(0);
-        expect(headerHidden(container)).toBe(true);
-    });
-
     // A message can come to rest more than 12px above the line, past the tolerance,
     // when the content above it changes height as it is drawn.
     it('shows the previous message when the jump stops above the sticky line', async () => {

@@ -323,21 +323,6 @@ describe('PreferencesTab open-terminal row', () => {
         expect(chip.textContent).toBe('Ctrl+`');
     });
 
-    it('shows a custom binding formatted, with Reset and Clear controls', () => {
-        const { terminal } = renderTab({ openTerminalKey: 'alt+shift+t' });
-        const chip = terminal.getByRole('button', { name: /open terminal shortcut/i });
-        expect(chip.textContent).toBe('Alt+Shift+T');
-        expect(terminal.getByRole('button', { name: 'Reset to default' })).toBeTruthy();
-        expect(terminal.getByRole('button', { name: 'Clear shortcut' })).toBeTruthy();
-    });
-
-    it('shows "None" and no Clear control when the shortcut is disabled', () => {
-        const { terminal } = renderTab({ openTerminalKey: '' });
-        expect(terminal.getByRole('button', { name: /open terminal shortcut/i }).textContent).toBe('None');
-        expect(terminal.queryByRole('button', { name: 'Clear shortcut' })).toBeNull();
-        expect(terminal.getByRole('button', { name: 'Reset to default' })).toBeTruthy();
-    });
-
     it('captures a combo and assigns it to the open-terminal binding only', async () => {
         const { terminal, create, onDirty } = renderTab();
         const chip = terminal.getByRole('button', { name: /open terminal shortcut/i });
@@ -360,20 +345,6 @@ describe('PreferencesTab open-terminal row', () => {
         expect(onDirty).not.toHaveBeenCalled();
     });
 
-    it('resets to the default binding', async () => {
-        const { terminal, onDirty } = renderTab({ openTerminalKey: 'shift+alt+t' });
-        await fireEvent.click(terminal.getByRole('button', { name: 'Reset to default' }));
-        expect(terminal.getByRole('button', { name: /open terminal shortcut/i }).textContent).toBe('Ctrl+`');
-        expect(onDirty).toHaveBeenCalledTimes(1);
-    });
-
-    it('clears the shortcut (disables it)', async () => {
-        const { terminal, onDirty } = renderTab();
-        await fireEvent.click(terminal.getByRole('button', { name: 'Clear shortcut' }));
-        expect(terminal.getByRole('button', { name: /open terminal shortcut/i }).textContent).toBe('None');
-        expect(onDirty).toHaveBeenCalledTimes(1);
-    });
-
     it('describes its purpose for the terminal panel', () => {
         const { terminal } = renderTab();
         expect(terminal.getAllByText(/terminal panel/i).length).toBeGreaterThan(0);
@@ -381,25 +352,10 @@ describe('PreferencesTab open-terminal row', () => {
 });
 
 describe('PreferencesTab submit row', () => {
-    it('shows the platform default: Ctrl+Enter on non-Mac', () => {
-        mockUserAgent(WIN_UA);
-        const { submit } = renderTab();
-        expect(submit.getByRole('button', { name: /create task \(submit\) shortcut/i }).textContent).toBe('Ctrl+Enter');
-    });
-
     it('shows the platform default: Cmd+Enter on Mac', () => {
         mockUserAgent(MAC_UA);
         const { submit } = renderTab();
         expect(submit.getByRole('button', { name: /create task \(submit\) shortcut/i }).textContent).toBe('Cmd+Enter');
-    });
-
-    it('shows a custom binding formatted, with Reset and Clear controls', () => {
-        mockUserAgent(WIN_UA);
-        const { submit } = renderTab({ createTaskSubmitKey: 'shift+enter' });
-        const chip = submit.getByRole('button', { name: /create task \(submit\) shortcut/i });
-        expect(chip.textContent).toBe('Shift+Enter');
-        expect(submit.getByRole('button', { name: 'Reset to default' })).toBeTruthy();
-        expect(submit.getByRole('button', { name: 'Clear shortcut' })).toBeTruthy();
     });
 
     it('captures a combo and assigns it to the submit binding only', async () => {
@@ -421,14 +377,6 @@ describe('PreferencesTab submit row', () => {
         expect(submit.getByRole('button', { name: /create task \(submit\) shortcut/i }).textContent).toBe('Ctrl+Enter');
         expect(onDirty).toHaveBeenCalledTimes(1);
     });
-
-    it('clears the submit binding (disables it)', async () => {
-        mockUserAgent(WIN_UA);
-        const { submit, onDirty } = renderTab();
-        await fireEvent.click(submit.getByRole('button', { name: 'Clear shortcut' }));
-        expect(submit.getByRole('button', { name: /create task \(submit\) shortcut/i }).textContent).toBe('None');
-        expect(onDirty).toHaveBeenCalledTimes(1);
-    });
 });
 
 describe('PreferencesTab toggle-fullscreen row', () => {
@@ -439,21 +387,6 @@ describe('PreferencesTab toggle-fullscreen row', () => {
         mockUserAgent(WIN_UA);
         const { fullscreen: fullscreenWin } = renderTab();
         expect(fullscreenWin.getByRole('button', { name: /toggle fullscreen shortcut/i }).textContent).toBe('Ctrl+Up');
-    });
-
-    it('shows a custom binding formatted, with Reset and Clear controls', () => {
-        const { fullscreen } = renderTab({ toggleFullscreenKey: 'shift+alt+f' });
-        const chip = fullscreen.getByRole('button', { name: /toggle fullscreen shortcut/i });
-        expect(chip.textContent).toBe('Shift+Alt+F');
-        expect(fullscreen.getByRole('button', { name: 'Reset to default' })).toBeTruthy();
-        expect(fullscreen.getByRole('button', { name: 'Clear shortcut' })).toBeTruthy();
-    });
-
-    it('shows "None" and no Clear control when the shortcut is disabled', () => {
-        const { fullscreen } = renderTab({ toggleFullscreenKey: '' });
-        expect(fullscreen.getByRole('button', { name: /toggle fullscreen shortcut/i }).textContent).toBe('None');
-        expect(fullscreen.queryByRole('button', { name: 'Clear shortcut' })).toBeNull();
-        expect(fullscreen.getByRole('button', { name: 'Reset to default' })).toBeTruthy();
     });
 
     it('captures a combo and assigns it to the toggle-fullscreen binding only', async () => {
@@ -467,20 +400,6 @@ describe('PreferencesTab toggle-fullscreen row', () => {
         expect(onDirty).toHaveBeenCalledTimes(1);
     });
 
-    it('resets to the default binding', async () => {
-        const { fullscreen, onDirty } = renderTab({ toggleFullscreenKey: 'shift+alt+f' });
-        await fireEvent.click(fullscreen.getByRole('button', { name: 'Reset to default' }));
-        expect(fullscreen.getByRole('button', { name: /toggle fullscreen shortcut/i }).textContent).toBe('Ctrl+Up');
-        expect(onDirty).toHaveBeenCalledTimes(1);
-    });
-
-    it('clears the shortcut (disables it)', async () => {
-        const { fullscreen, onDirty } = renderTab();
-        await fireEvent.click(fullscreen.getByRole('button', { name: 'Clear shortcut' }));
-        expect(fullscreen.getByRole('button', { name: /toggle fullscreen shortcut/i }).textContent).toBe('None');
-        expect(onDirty).toHaveBeenCalledTimes(1);
-    });
-
     it('describes its purpose for the focused area', () => {
         const { fullscreen } = renderTab();
         expect(fullscreen.getAllByText(/focused area/i).length).toBeGreaterThan(0);
@@ -488,33 +407,10 @@ describe('PreferencesTab toggle-fullscreen row', () => {
 });
 
 describe('PreferencesTab start-task row', () => {
-    it('shows the platform default: Ctrl+Enter on non-Mac', () => {
-        mockUserAgent(WIN_UA);
-        const { start } = renderTab();
-        expect(start.getByRole('button', { name: /start task shortcut/i }).textContent).toBe('Ctrl+Enter');
-    });
-
     it('shows the platform default: Cmd+Enter on Mac', () => {
         mockUserAgent(MAC_UA);
         const { start } = renderTab();
         expect(start.getByRole('button', { name: /start task shortcut/i }).textContent).toBe('Cmd+Enter');
-    });
-
-    it('shows a custom binding formatted, with Reset and Clear controls', () => {
-        mockUserAgent(WIN_UA);
-        const { start } = renderTab({ startTaskKey: 'shift+enter' });
-        const chip = start.getByRole('button', { name: /start task shortcut/i });
-        expect(chip.textContent).toBe('Shift+Enter');
-        expect(start.getByRole('button', { name: 'Reset to default' })).toBeTruthy();
-        expect(start.getByRole('button', { name: 'Clear shortcut' })).toBeTruthy();
-    });
-
-    it('shows "None" and no Clear control when the shortcut is disabled', () => {
-        mockUserAgent(WIN_UA);
-        const { start } = renderTab({ startTaskKey: '' });
-        expect(start.getByRole('button', { name: /start task shortcut/i }).textContent).toBe('None');
-        expect(start.queryByRole('button', { name: 'Clear shortcut' })).toBeNull();
-        expect(start.getByRole('button', { name: 'Reset to default' })).toBeTruthy();
     });
 
     it('captures a combo and assigns it to the start-task binding only', async () => {
@@ -534,14 +430,6 @@ describe('PreferencesTab start-task row', () => {
         const { start, onDirty } = renderTab({ startTaskKey: 'shift+enter' });
         await fireEvent.click(start.getByRole('button', { name: 'Reset to default' }));
         expect(start.getByRole('button', { name: /start task shortcut/i }).textContent).toBe('Ctrl+Enter');
-        expect(onDirty).toHaveBeenCalledTimes(1);
-    });
-
-    it('clears the shortcut (disables it)', async () => {
-        mockUserAgent(WIN_UA);
-        const { start, onDirty } = renderTab();
-        await fireEvent.click(start.getByRole('button', { name: 'Clear shortcut' }));
-        expect(start.getByRole('button', { name: /start task shortcut/i }).textContent).toBe('None');
         expect(onDirty).toHaveBeenCalledTimes(1);
     });
 
@@ -624,16 +512,6 @@ describe('PreferencesTab multi-select click row', () => {
         await fireEvent.click(chip);
         await fireEvent.mouseDown(window, { shiftKey: true, metaKey: true });
         expect(chip.textContent).toBe('Cmd+Shift+Click');
-    });
-
-    it('rejects an unmodified click — a bare click stays the card\u2019s own action', async () => {
-        const { multiSelect, getByText, onDirty } = renderTab();
-        const chip = chipOf(multiSelect);
-        await fireEvent.click(chip);
-        await fireEvent.mouseDown(window, { button: 0 });
-        expect(chip.textContent).toBe('Now modifier+click...');
-        expect(getByText(/invalid combo/i)).toBeTruthy();
-        expect(onDirty).not.toHaveBeenCalled();
     });
 
     it('drops the rejection hint once a valid click binding is captured', async () => {

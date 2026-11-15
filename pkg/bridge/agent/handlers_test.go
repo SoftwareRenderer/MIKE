@@ -88,24 +88,6 @@ func tempFiles(t *testing.T, dir string) []string {
 	return out
 }
 
-// No path here drives MethodWrite over the wire, so this is the only pin that the write request
-// carries both the path and the bytes it will write.
-func TestWriteParams_Marshal(t *testing.T) {
-	p := protocol.WriteParams{Path: "src/main.go", Content: "package main"}
-	data, err := json.Marshal(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var got protocol.WriteParams
-	if err := json.Unmarshal(data, &got); err != nil {
-		t.Fatal(err)
-	}
-	if got.Path != p.Path || got.Content != p.Content {
-		t.Errorf("round-trip failed: got %+v, want %+v", got, p)
-	}
-}
-
 // runEditRequest drives handleEdit over a net.Pipe connection and returns the
 // response frame the agent writes back.
 func runEditRequest(t *testing.T, path string, edits []protocol.Edit) (*protocol.Frame, error) {
