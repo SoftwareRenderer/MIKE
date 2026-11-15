@@ -578,39 +578,49 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// projectRoot is the project directory as a search root. validateFSPath decides whether this server may
+	// read that directory, the same check every file request makes of the path it was handed.
+	projectRoot := func() (string, error) {
+		return s.validateFSPath(project, "", project.Path)
+	}
+
 	var searchRoot string
 
 	if taskID != "" {
 		// The task must exist and belong to this project.
-		task, taskErr := s.store.GetTask(projectID, taskID)
-		if taskErr != nil {
+		if _, taskErr := s.store.GetTask(projectID, taskID); taskErr != nil {
 			Fail(w, taskErr, "get task", "task not found")
 			return
 		}
-		_ = task // task exists and belongs to project
-		searchRoot, err := s.executor.WorktreeMgr().WorktreePath(taskID)
+		wtPath, err := s.executor.WorktreeMgr().WorktreePath(taskID)
 		if err != nil {
 			logging.For(logging.HTTP).Warnf("fs resolve worktree failed: %v", err)
 			Fail(w, err, "resolve worktree", "failed to resolve worktree path")
 			return
 		}
-		// The path is server-derived; only check it stays under the workspace dir.
-		searchRoot = filepath.Clean(searchRoot)
+		// The path comes from the server rather than from the request, so the one thing left to check is that
+		// it stays under the workspace dir.
+		searchRoot = filepath.Clean(wtPath)
 		if cleanWT := s.configStore.WorkspaceDir(); cleanWT != "" {
 			if !strings.HasPrefix(searchRoot, cleanWT+string(filepath.Separator)) && searchRoot != cleanWT {
 				JSONError(w, http.StatusForbidden, "worktree path outside allowed workspace")
 				return
 			}
 		}
+		// The executor creates the worktree when the task first runs, so a task that has not run has no
+		// directory of its own yet. The files its chat input can name are the ones in the project directory.
+		if info, statErr := os.Stat(searchRoot); statErr != nil || !info.IsDir() {
+			if searchRoot, err = projectRoot(); err != nil {
+				JSONError(w, http.StatusForbidden, err.Error())
+				return
+			}
+		}
 	} else {
-		searchRoot = project.Path
-		searchRoot = filepath.Clean(searchRoot)
-		resolved, err := s.validateFSPath(project, "", searchRoot)
-		if err != nil {
+		var err error
+		if searchRoot, err = projectRoot(); err != nil {
 			JSONError(w, http.StatusForbidden, err.Error())
 			return
 		}
-		searchRoot = resolved
 	}
 	if !s.requireSandboxAvailable(w, project) {
 		return

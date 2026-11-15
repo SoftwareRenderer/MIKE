@@ -38,6 +38,10 @@ projects too because the server process enforces them.
   (`store.GetTask(project.ID, taskID)`) before either is honoured. `resolveWorktreeForFile` calls it too,
   because the preview asset root is derived from the same resolution and a preview token is read without
   a session.
+- **`GET /api/fs/search` chooses its own search directory.** When the request names a task it walks that
+  task's worktree, after checking the path stays under the workspace dir. A task that has never run has no
+  worktree directory, so it walks the project directory instead, because that is where the task's files are
+  until it starts. `go test ./backend/server/ -run TestFSSearch` is the check.
 - Both jails go through `fsutil.Contained`, which needs the lexical path *and* the symlink-resolved path
   inside a root: a task with an rw bind mount can plant `link -> /etc` in its own worktree and a lexical
   check reads through it. The preview asset root calls it too.

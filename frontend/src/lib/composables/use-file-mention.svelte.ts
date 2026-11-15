@@ -7,7 +7,7 @@
  * ArrowUp/ArrowDown/Enter/Escape navigation block the three forms used to
  * each carry a private copy of.
  */
-import { detectMentionAtCursor, insertMention, getInputRect } from '$lib/utils/file-mention';
+import { detectMentionAtCursor, insertMention, getInputRect, type MentionTrigger } from '$lib/utils/file-mention';
 import { searchFsPaths } from '$lib/api';
 
 const MENTION_DEBOUNCE_MS = 150;
@@ -28,7 +28,7 @@ export interface FileMentionOptions {
 }
 
 class FileMention {
-    trigger = $state<{ atIndex: number; query: string } | null>(null);
+    trigger = $state<MentionTrigger | null>(null);
     results = $state<Array<{ path: string }>>([]);
     position = $state<{ top: number; bottom: number; left: number; width: number } | null>(null);
     activeIndex = $state(0);
