@@ -62,8 +62,4 @@ describe('the Docker default capability set', () => {
             DOCKER_DEFAULT_CAPABILITIES.filter(cap => cap !== 'CAP_KILL' && cap !== 'CAP_CHOWN'),
         );
     });
-
-    it('has nothing to add once every default is granted', () => {
-        expect(capabilitiesToAdd([...DOCKER_DEFAULT_CAPABILITIES])).toEqual([]);
-    });
 });

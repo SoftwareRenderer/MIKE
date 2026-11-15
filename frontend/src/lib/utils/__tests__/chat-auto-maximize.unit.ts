@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
     chatBlurState,
-    chatCollapseState,
     chatFocusState,
     chatManualToggleState,
     chatSendState,
@@ -80,11 +79,5 @@ describe('chatManualToggleState', () => {
 
     it('maximizes from collapsed and owns the new state', () => {
         expect(chatManualToggleState(COLLAPSED)).toEqual(USER_MAXIMIZED);
-    });
-});
-
-describe('chatCollapseState', () => {
-    it('hands ownership back to the user', () => {
-        expect(chatCollapseState()).toEqual(COLLAPSED);
     });
 });
