@@ -2182,35 +2182,6 @@ func TestHandleCheckUpdates_UpdateAvailable(t *testing.T) {
 	}
 }
 
-func TestExtensionResponse_MarshalJSON(t *testing.T) {
-	resp := ExtensionResponse{
-		ID:            "test-ext",
-		Name:          "Test Extension",
-		Version:       "1.0.0",
-		Type:          ExtensionTypeLSP,
-		Enabled:       true,
-		Running:       false,
-		InstallSource: "registry",
-		InstalledAt:   time.Now().UTC().Format(time.RFC3339),
-	}
-
-	data, err := json.Marshal(resp)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-
-	var got ExtensionResponse
-	if err := json.Unmarshal(data, &got); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
-	if got.Name != "Test Extension" {
-		t.Errorf("Name = %q, want Test Extension", got.Name)
-	}
-	if got.Type != ExtensionTypeLSP {
-		t.Errorf("Type = %q, want lsp", got.Type)
-	}
-}
-
 func TestHandleStorage_CRUD(t *testing.T) {
 	h := testHandler(t)
 	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeUI)

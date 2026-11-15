@@ -1,9 +1,13 @@
 import { test, expect, type Page } from '@playwright/test';
 import {
   getProjectId, createTaskViaApi, ensureTaskStarted, navigateToTask, isolatedProject, gotoProject,
+  clearTasksAfterEach,
 } from './helpers';
 // Each test file gets its own project, because it starts a turn: see isolatedProject() in helpers.ts.
 isolatedProject();
+// Two of the five tests start a turn, and a live task holds its container against the executor's
+// admission gate until it is deleted.
+clearTasksAfterEach();
 
 
 // Open/close-terminal keyboard shortcut (default Ctrl+backtick, Settings →
@@ -55,8 +59,10 @@ test.describe.serial('Open-terminal keyboard shortcut', () => {
         await page.waitForSelector('.card', { timeout: 10000 });
         const projectId = await getProjectId(page);
         const taskId = await createTaskViaApi(page, projectId, `terminal-shortcut-${Date.now()}`);
-        const started = await ensureTaskStarted(page, projectId, taskId);
-        test.skip(!started, 'Could not start task');
+        // A task that will not start is the regression this harness exists to catch, not a prerequisite
+        // to skip around: the terminal button needs the branch a started task has.
+        expect(await ensureTaskStarted(page, projectId, taskId),
+          'the task never reached In Progress, so it has no branch and no terminal button').toBe(true);
 
         await navigateToTask(page, taskId, projectId);
         await expect(page.locator('.task-detail-page')).toBeVisible();
@@ -89,8 +95,8 @@ test.describe.serial('Open-terminal keyboard shortcut', () => {
         await page.waitForSelector('.card', { timeout: 10000 });
         const projectId = await getProjectId(page);
         const taskId = await createTaskViaApi(page, projectId, `terminal-shortcut-explorer-${Date.now()}`);
-        const started = await ensureTaskStarted(page, projectId, taskId);
-        test.skip(!started, 'Could not start task');
+        expect(await ensureTaskStarted(page, projectId, taskId),
+          'the task never reached In Progress, so it has no branch and no terminal button').toBe(true);
 
         await navigateToTask(page, taskId, projectId);
         await expect(page.locator('.task-detail-page')).toBeVisible();

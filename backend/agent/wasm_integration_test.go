@@ -14,25 +14,33 @@ import (
 	"mike/pkg/agent"
 )
 
-// withProjectRoot changes the working directory to the project root so
-// that resolveWasmPath can find extensions/agent/pi/pi.wasm. It restores
-// the original directory on test cleanup.
+// withProjectRoot changes the working directory to a scratch directory holding the built module under
+// its bare name, which is the last candidate resolveWasmPath tries. It restores the original directory
+// on test cleanup.
 func withProjectRoot(t *testing.T) {
 	t.Helper()
 	oldWd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
-	projectRoot := filepath.Join("..", "..")
-	if err := os.Chdir(projectRoot); err != nil {
+	module := filepath.Join(oldWd, "..", "..", "..", "MIKE-extensions", "agent", "pi", "pi.wasm")
+	if _, err := os.Stat(module); err != nil {
+		t.Skipf("no pi.wasm at %s — build it with ../MIKE-extensions/agent/pi/build.sh", module)
+	}
+	dir := t.TempDir()
+	if err := os.Symlink(module, filepath.Join(dir, "pi.wasm")); err != nil {
+		t.Fatalf("link the built module into the scratch root: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
 		t.Fatalf("chdir: %v", err)
 	}
 	t.Cleanup(func() { os.Chdir(oldWd) })
 }
 
 // loadPiWasm loads the pi.wasm module for integration tests. It changes
-// to the project root directory so resolveWasmPath can find the wasm file.
-// The adapter is automatically closed on test cleanup.
+// to a scratch root holding the module the sibling checkout built, so the
+// production loader resolves it by its bare name. The adapter is
+// automatically closed on test cleanup.
 func loadPiWasm(t *testing.T) agent.AgentAdapter {
 	t.Helper()
 	withProjectRoot(t)
@@ -51,10 +59,6 @@ func loadPiWasm(t *testing.T) agent.AgentAdapter {
 	}
 	// A module nobody built is a missing prerequisite: skip, and say how to build it. A module that is
 	// on disk but will not load is a broken build, which must fail.
-	path := resolveWasmPath(ext)
-	if _, err := os.Stat(path); err != nil {
-		t.Skipf("no pi.wasm at %s — build it with ../MIKE-extensions/agent/pi/build.sh", path)
-	}
 	adapter, err := loadWasmAdapter(ext)
 	if err != nil {
 		t.Fatalf("loadWasmAdapter with a module on disk: %v", err)
