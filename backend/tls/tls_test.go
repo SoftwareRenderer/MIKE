@@ -905,7 +905,7 @@ func TestCollectLeafNames(t *testing.T) {
 
 	hostname, err := os.Hostname()
 	if err != nil {
-		t.Skipf("hostname unavailable: %v", err)
+		t.Fatalf("read the host name the leaf is expected to carry: %v", err)
 	}
 
 	for _, want := range []string{"localhost", hostname, hostname + ".local"} {

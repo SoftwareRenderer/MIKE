@@ -33,7 +33,7 @@ func TestHasGitDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(filepath.Join(base, "nowhere"), filepath.Join(dangling, ".git")); err != nil {
-		t.Skipf("symlinks unavailable: %v", err)
+		t.Fatalf("make the dangling .git symlink: %v", err)
 	}
 
 	tests := []struct {
@@ -58,9 +58,6 @@ func TestHasGitDir(t *testing.T) {
 // not. A caller that needs the walk-up answer asks IsGitRepo once for the
 // directory it is listing, and then knows every entry inside is in that repo.
 func TestHasGitDirNarrowerThanIsGitRepo(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not available")
-	}
 	base := t.TempDir()
 	repo := filepath.Join(base, "repo")
 	if err := os.MkdirAll(filepath.Join(repo, "internal"), 0o755); err != nil {

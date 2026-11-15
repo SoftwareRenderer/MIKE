@@ -147,7 +147,7 @@ func TestHandleDelete_NeverDeletesOutsideTheExtensionsRoot(t *testing.T) {
 			t.Fatal(err)
 		}
 		if err := os.Symlink(outside, filepath.Join(root, "linked")); err != nil {
-			t.Skipf("symlinks unavailable: %v", err)
+			t.Fatalf("symlinks unavailable: %v", err)
 		}
 		writeExtensionFiles(t, filepath.Join(outside, "srv"))
 

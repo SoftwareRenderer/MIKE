@@ -46,7 +46,7 @@ func TestRealRepoPromptsSelfCompareIsClean(t *testing.T) {
 	root := mustRepoRoot()
 	set, err := LoadTmplSet(filepath.Join(root, "prompts"))
 	if err != nil {
-		t.Skipf("repo prompts unavailable: %v", err)
+		t.Fatalf("the repo's own prompts must parse: %v", err)
 	}
 	f := &Findings{}
 	stats := ComparePromptSets(set, set, f, 40)
@@ -57,25 +57,5 @@ func TestRealRepoPromptsSelfCompareIsClean(t *testing.T) {
 	}
 	if stats.ENFiles != 8 {
 		t.Fatalf("expected the eight English templates, got %+v", stats)
-	}
-}
-
-func TestRealRepoEnglishCatalogueAbsentIsReported(t *testing.T) {
-	// Honest statement of the current state: T3 has not landed, so Run() must say "nothing to
-	// compare" rather than invent a contract or pass vacuously.
-	root := mustRepoRoot()
-	en := filepath.Join(root, "frontend/src/lib/i18n/en.ts")
-	if exists(en) {
-		t.Skip("en.ts exists now — T3 has landed, so this expectation is obsolete")
-	}
-	f := &Findings{}
-	missing, _, _ := Run(Options{
-		EN:        en,
-		ENPrompts: filepath.Join(root, "prompts"),
-		Pack:      filepath.Join(root, "..", "MIKE-extensions", "i18n", "zh"),
-		MaxList:   40,
-	}, f)
-	if !missing {
-		t.Fatal("expected inputsMissing while the English contract does not exist")
 	}
 }

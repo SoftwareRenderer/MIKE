@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"mike/backend/testutil/sandboxcheck"
 	"mike/pkg/sandboxruntime"
 )
 
@@ -134,12 +135,10 @@ func TestBuildExtensionImage_IgnoresADockerignoreInTheWorkingDirectory(t *testin
 	}
 }
 
-// The same claim against real buildah. Gated on a local base image — it never reaches the network.
+// The same claim against real buildah. Gated on this host being able to run a container at all.
 func TestBuildExtensionImage_RealBuildSurvivesADockerignoreBelow(t *testing.T) {
+	sandboxcheck.Require(t, "docker.io/library/alpine:latest")
 	rt := sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{})
-	if testing.Short() || !rt.ImageExists("docker.io/library/alpine:latest") {
-		t.Skip("needs a local alpine and a working podman/buildah")
-	}
 	cwd := t.TempDir()
 	if err := os.WriteFile(filepath.Join(cwd, ".dockerignore"), []byte("sandbox/sandbox-bridge\n"), 0o644); err != nil {
 		t.Fatalf("write .dockerignore: %v", err)
@@ -160,11 +159,8 @@ func TestBuildExtensionImage_RealBuildSurvivesADockerignoreBelow(t *testing.T) {
 
 func TestBuildExtensionImage_RefusesWithoutABridge(t *testing.T) {
 	fake := fakePodmanOK(t)
-	// The wired path names a missing file, with no bridge beside the test binary or in the CWD.
+	// The wired path names a missing file, and no bridge sits under the test's working directory.
 	rc := NewRegistryClientWithBoot(sandboxruntime.Boot{AgentPath: filepath.Join(t.TempDir(), "not-a-bridge")})
-	if _, err := os.Stat("sandbox/sandbox-bridge"); err == nil {
-		t.Skip("a sandbox-bridge sits under the working directory; nothing to refuse")
-	}
 
 	err := rc.BuildExtensionImage("FROM docker.io/library/alpine:latest\n", "localhost/kanban-ext-gopls:0.7.0")
 	if err == nil {

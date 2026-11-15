@@ -147,7 +147,7 @@ func TestPromptOverlayFor(t *testing.T) {
 		}
 		pack := packAt(t, dir, "someone", "pack-xx", "xx", 0, "prompts", func(root string) {
 			if err := os.Symlink(outside, filepath.Join(root, "prompts")); err != nil {
-				t.Skipf("symlinks unavailable: %v", err)
+				t.Fatalf("symlinks unavailable: %v", err)
 			}
 		})
 		got := PromptOverlayFor([]Extension{pack}, dir)
@@ -195,7 +195,7 @@ func TestPromptDirInPackSymlinkedPackDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(realRoot, link); err != nil {
-		t.Skipf("symlinks unavailable: %v", err)
+		t.Fatalf("symlinks unavailable: %v", err)
 	}
 	// Both the link target and the pack root resolve inside… so containment holds
 	// against the *resolved* pack directory, which is the honest answer here.

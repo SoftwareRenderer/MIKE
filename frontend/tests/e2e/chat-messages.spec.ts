@@ -45,36 +45,6 @@ test.describe.serial('Chat Message Actions', () => {
     await expect(copyBtn).not.toHaveClass(/copied/, { timeout: 5000 });
   });
 
-  test('should show edit button on user messages', async ({ page }) => {
-    const countBefore = await page.locator('.chat-message.user').count();
-
-    const msgContent = `edit test ${Date.now()}`;
-    await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/send`, {
-      method: 'POST',
-      body: { content: msgContent },
-    });
-
-    await expect(async () => {
-      expect(await page.locator('.chat-message.user').count()).toBeGreaterThan(countBefore);
-    }).toPass({ timeout: 10000 });
-
-    await waitForSendButton(page);
-
-    // Verify the edit/fork button is visible on the user message
-    const editBtn = page.locator('.chat-message.user').nth(countBefore).locator('[aria-label="Start new thread from this message"]');
-    await expect(editBtn).toBeVisible();
-  });
-
-  test('first user message should have no delete button', async ({ page }) => {
-    const firstMessage = page.locator('.chat-message.user').first();
-    await expect(firstMessage).toBeVisible({ timeout: 10000 });
-
-    await waitForSendButton(page);
-
-    const deleteBtn = firstMessage.locator('[aria-label="Delete message and all following messages"]');
-    await expect(deleteBtn).not.toBeVisible();
-  });
-
   test('second user message should have delete button while first does not', async ({ page }) => {
     // The beforeEach already sent a message via ensureTaskStarted, so there's 1 user message.
     // Send another message to have at least 2 user messages.

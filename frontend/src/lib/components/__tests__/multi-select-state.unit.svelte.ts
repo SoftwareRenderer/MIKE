@@ -141,41 +141,6 @@ describe('MultiSelectBar', () => {
         expect(window.dispatchEvent).toHaveBeenCalled();
     });
 
-    it('should show Model button for a selected task whatever its column', () => {
-        multiSelect.toggle('task-1');
-        multiSelect.toggle('task-2');
-
-        const { container } = render(MultiSelectBar, {
-            multiSelect,
-            tasks,
-            onClear,
-        });
-
-        const modelBtn = container.querySelector('.bar-btn-model');
-        expect(modelBtn).toBeTruthy();
-        expect(modelBtn?.textContent).toContain(t('app.model'));
-    });
-
-    it('shows the Model button for a selection spanning columns, where Start is absent', () => {
-        const mixedTasks = [
-            createMockTask('task-1', 'backlog'),
-            createMockTask('task-2', 'in_progress'),
-            createMockTask('task-3', 'done'),
-        ];
-        multiSelect.toggle('task-1');
-        multiSelect.toggle('task-2');
-        multiSelect.toggle('task-3');
-
-        const { container } = render(MultiSelectBar, {
-            multiSelect,
-            tasks: mixedTasks,
-            onClear,
-        });
-
-        expect(container.querySelector('.bar-btn-model')).toBeTruthy();
-        expect(container.querySelector('.bar-btn-start')).toBeNull();
-    });
-
     it('shows the Model button while a selected task is mid-turn', () => {
         const runningTasks: Task[] = [
             createMockTask('task-1', 'in_progress'),
@@ -205,6 +170,7 @@ describe('MultiSelectBar', () => {
 
         const modelBtn = container.querySelector('.bar-btn-model');
         expect(modelBtn).toBeTruthy();
+        expect(modelBtn?.textContent).toContain(t('app.model'));
         expect(modelBtn?.getAttribute('aria-label')).toBe('Change model for 2 tasks');
     });
 

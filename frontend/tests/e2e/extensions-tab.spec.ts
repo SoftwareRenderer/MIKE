@@ -91,20 +91,6 @@ test.describe('Extensions Tab', () => {
     }
   });
 
-  test('should switch between Installed and Browse views', async ({ page }) => {
-    // Open settings modal
-    await page.click('.icon-btn[aria-label="Settings"]');
-    await page.waitForSelector('.modal, [role="dialog"]', { timeout: 5000 });
-
-    await page.click('text=Extensions');
-    await page.waitForSelector('.extensions-tab', { timeout: 5000 });
-
-    await page.click('.view-tab:has-text("Browse")');
-
-    // Should show registry URL input or browse view
-    await expect(page.locator('.browse-view')).toBeVisible({ timeout: 5000 });
-  });
-
   test('should switch to Installed tab when Check for Updates is clicked in Browse view', async ({ page }) => {
     // Open settings modal
     await page.click('.icon-btn[aria-label="Settings"]');

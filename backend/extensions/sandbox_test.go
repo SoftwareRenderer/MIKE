@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"mike/backend/testutil/sandboxcheck"
 	"mike/backend/types"
 	"mike/pkg/sandboxruntime"
 )
@@ -71,9 +72,7 @@ func TestApplyMemoryLimit_NotRunningIsNoOp(t *testing.T) {
 // TestApplyMemoryLimit_RunningSandbox verifies against a real gVisor container that the limit
 // written at Create can be raised and cleared in place, with no container restart.
 func TestApplyMemoryLimit_RunningSandbox(t *testing.T) {
-	if !checkExtensionSandboxAvailable() {
-		t.Skip("gVisor (runsc) or podman not available")
-	}
+	sandboxcheck.Require(t, "docker.io/library/ubuntu:latest")
 	reg := NewRegistryClient()
 	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
 	sm.available = true
@@ -94,7 +93,7 @@ func TestApplyMemoryLimit_RunningSandbox(t *testing.T) {
 		SandboxConfig:   SandboxConfig{MemoryLimit: 256},
 	}
 	if _, err := sm.Create(ext, nil); err != nil {
-		t.Skipf("cannot create sandbox container: %v", err)
+		t.Fatalf("create sandbox container: %v", err)
 	}
 
 	readMax := func() string {
@@ -857,7 +856,7 @@ func TestBuildExtensionCreateArgs_RejectedMountsNeverReachPodman(t *testing.T) {
 	}
 	link := filepath.Join(allowed, "escape")
 	if err := os.Symlink(outside, link); err != nil {
-		t.Skipf("symlinks unavailable: %v", err)
+		t.Fatalf("symlinks unavailable: %v", err)
 	}
 	policy := newMountPolicy([]string{allowed})
 

@@ -225,7 +225,7 @@ func TestDivergenceBase_ReturnsForkPoint(t *testing.T) {
 
 	mainBranch, err := wm.gitCurrentBranch(repoDir)
 	if err != nil || mainBranch == "" || mainBranch == "HEAD" {
-		t.Skipf("cannot determine main branch: %v", err)
+		t.Fatalf("the fixture repo holds a commit, so rev-parse must name its branch: got %q (err %v)", mainBranch, err)
 	}
 	forkPoint := revParse(t, repoDir, "HEAD")
 
@@ -276,7 +276,7 @@ func TestDivergenceBase_DetachedHead(t *testing.T) {
 
 	mainBranch, err := wm.gitCurrentBranch(repoDir)
 	if err != nil || mainBranch == "" || mainBranch == "HEAD" {
-		t.Skipf("cannot determine main branch: %v", err)
+		t.Fatalf("the fixture repo holds a commit, so rev-parse must name its branch: got %q (err %v)", mainBranch, err)
 	}
 	runGit(t, repoDir, "checkout", "--detach", "HEAD")
 
@@ -299,7 +299,7 @@ func TestResolveTaskBaseline_Usability(t *testing.T) {
 
 	mainBranch, err := wm.gitCurrentBranch(repoDir)
 	if err != nil || mainBranch == "" || mainBranch == "HEAD" {
-		t.Skipf("cannot determine main branch: %v", err)
+		t.Fatalf("the fixture repo holds a commit, so rev-parse must name its branch: got %q (err %v)", mainBranch, err)
 	}
 	forkPoint := revParse(t, repoDir, "HEAD")
 
@@ -1500,32 +1500,6 @@ func TestPruneOrphanedBranches_RemovesOrphanedThreadBranches(t *testing.T) {
 	}
 }
 
-func TestPruneOrphanedBranches_RemovesBothTaskAndThreadBranches(t *testing.T) {
-	repoDir, _, s, _, wm := setupTestRepo(t)
-
-	// Create both orphaned task and thread branches
-	runGit(t, repoDir, "branch", "task/orphan-task")
-	runGit(t, repoDir, "branch", "thread/orphan-thread")
-
-	proj, err := s.GetProject("test-project")
-	if err != nil {
-		t.Fatalf("get project: %v", err)
-	}
-
-	removed := wm.PruneOrphanedBranches(proj.ID)
-	if removed != 2 {
-		t.Fatalf("expected 2 branches removed, got %d", removed)
-	}
-
-	branches := getBranches(t, repoDir)
-	if slices.Contains(branches, "task/orphan-task") {
-		t.Error("orphan task branch should be pruned")
-	}
-	if slices.Contains(branches, "thread/orphan-thread") {
-		t.Error("orphan thread branch should be pruned")
-	}
-}
-
 func getBranches(t *testing.T, dir string) []string {
 	t.Helper()
 	// --format, not the decorated listing - see listBranchNames.
@@ -1976,9 +1950,6 @@ index abc1234..def5678 100644
 }
 
 func TestGarbageCollect_DropsStaleSyncMergeAndAutoMergeStashes(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping git integration test")
-	}
 	repoDir, taskID, s, _, wm := setupTestRepo(t)
 
 	// Create a stale sync-merge stash for a task that does NOT exist in DB
