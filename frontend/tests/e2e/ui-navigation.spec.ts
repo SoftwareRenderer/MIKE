@@ -1,9 +1,13 @@
 import { test, expect } from '@playwright/test';
 import {
   getProjectId, createTaskViaApi, navigateToTask, ensureTaskStarted, apiGetJson, isolatedProject, gotoProject,
+  clearTasksAfterEach,
 } from './helpers';
 // Each test file gets its own project, because it starts a turn: see isolatedProject() in helpers.ts.
 isolatedProject();
+// Every test here creates a task, and a task that still exists holds its container against the
+// executor's admission gate: released per test, not at the end of the file.
+clearTasksAfterEach();
 
 // ─── Browser Navigation (serial — navigation state is shared) ───
 
@@ -359,8 +363,10 @@ test.describe.parallel('Terminal', () => {
       // 2. Create a task and start it (needs a branch for terminal button to be enabled)
       const projectId = await getProjectId(page);
       const taskId = await createTaskViaApi(page, projectId, `terminal-test-${Date.now()}`);
-      const started = await ensureTaskStarted(page, projectId, taskId);
-      test.skip(!started, 'Could not start task');
+      // A task that will not start is a product regression, not an environment prerequisite: the terminal
+      // button is enabled by the branch a started task has, so this is the test's own precondition.
+      expect(await ensureTaskStarted(page, projectId, taskId),
+        'the task never reached In Progress, so it has no branch and no terminal button').toBe(true);
 
       // 3. Navigate to the task detail page
       await navigateToTask(page, taskId, projectId);
