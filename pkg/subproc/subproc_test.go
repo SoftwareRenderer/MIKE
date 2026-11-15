@@ -100,7 +100,7 @@ func TestWatchReportsASubprocessThatOutlastsTheThreshold(t *testing.T) {
 	cmd := exec.Command("sleep", "0.3")
 	stop := Watch("sleep-under-test", 30*time.Millisecond, record)
 	if err := cmd.Start(); err != nil {
-		t.Skipf("cannot start sleep: %v", err)
+		t.Fatalf("start sleep: %v", err)
 	}
 	err := cmd.Wait()
 	stop()
@@ -141,7 +141,7 @@ func TestWatchStopsReportingOnceTheSubprocessFinished(t *testing.T) {
 	cmd := exec.Command("true")
 	stop := Watch("true-under-test", 20*time.Millisecond, record)
 	if err := cmd.Start(); err != nil {
-		t.Skipf("cannot start true: %v", err)
+		t.Fatalf("start true: %v", err)
 	}
 	if err := cmd.Wait(); err != nil {
 		t.Fatalf("true failed: %v", err)

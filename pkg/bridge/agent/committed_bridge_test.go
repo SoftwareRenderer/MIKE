@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -20,13 +19,6 @@ var committedBridge = filepath.Join("..", "..", "..", "sandbox", "sandbox-bridge
 // What ships is not what is in this directory: bridge-check compares the sources an artifact was
 // built from, not what they do, so an unbuilt bridge passes it while containers run the old rule.
 func TestCommittedBridgeBinaryEnforcesTheReadLimit(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skipf("the committed bridge is built for linux, running on %s", runtime.GOOS)
-	}
-	if _, err := os.Stat(committedBridge); err != nil {
-		t.Skipf("no committed sandbox-bridge to run (%v) — run `make bridge`", err)
-	}
-
 	t.Run("oversized read is refused before anything streams", func(t *testing.T) {
 		huge := filepath.Join(t.TempDir(), "huge.bin")
 		f, err := os.OpenFile(huge, os.O_CREATE|os.O_WRONLY, 0o644)
