@@ -20,11 +20,11 @@ func bundledManifests(t *testing.T) map[string]*ExtensionManifest {
 	// checkout of the extension registry is one more ".." than people first write.
 	dir, err := filepath.Abs(filepath.Join("..", "..", "..", "MIKE-extensions", "lsp"))
 	if err != nil {
-		t.Skipf("cannot resolve the MIKE-extensions path: %v", err)
+		t.Fatalf("cannot resolve the MIKE-extensions path: %v", err)
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		t.Skipf("MIKE-extensions is not checked out beside this repo (%s): %v", dir, err)
+		t.Fatalf("MIKE-extensions is not checked out beside this repo (%s): %v", dir, err)
 	}
 
 	found := map[string]*ExtensionManifest{}
@@ -45,7 +45,7 @@ func bundledManifests(t *testing.T) map[string]*ExtensionManifest {
 		found[e.Name()] = &m
 	}
 	if len(found) == 0 {
-		t.Skipf("no extension manifests under %s", dir)
+		t.Fatalf("no extension manifests under %s", dir)
 	}
 	return found
 }

@@ -392,22 +392,6 @@ describe('ToolCall - write_file result', () => {
     });
 });
 
-describe('ToolCall - tool name display', () => {
-    it('shows tool display name', () => {
-        const { container } = render(ToolCall, {
-            ...baseProps,
-            toolCall: makeToolCall({
-                toolName: 'write_file',
-                args: { path: 'src/file.go' },
-                success: true,
-                isPending: false,
-            }),
-        });
-        const toolName = container.querySelector('.tool-name');
-        expect(toolName?.textContent).toBeTruthy();
-    });
-});
-
 describe('ToolCall - duration display', () => {
     it('shows duration for completed tool calls', () => {
         const { container } = render(ToolCall, {

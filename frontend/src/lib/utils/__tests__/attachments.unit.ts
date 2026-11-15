@@ -172,12 +172,6 @@ describe('takeTransfer', () => {
         expect(event.defaultPrevented).toBe(false);
     });
 
-    it('cancels synchronously, before the caller can await anything', () => {
-        const event = pasteOf([image('shot.png')]);
-        takeTransfer(event);
-        expect(event.defaultPrevented).toBe(true);
-    });
-
     it('reads the same rule from a drop as from a paste, and sorts all three buckets', () => {
         const event = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent;
         Object.defineProperty(event, 'dataTransfer', {

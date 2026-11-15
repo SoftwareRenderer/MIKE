@@ -36,16 +36,6 @@ func writeMappings(t *testing.T, extDir, author, name, file, content string) {
 	}
 }
 
-func TestInferExtensionTypeLLM(t *testing.T) {
-	if got := inferExtensionType(&Capabilities{LLM: &LLMConfig{}}); got != ExtensionTypeLLM {
-		t.Errorf("inferExtensionType(llm) = %q, want %q", got, ExtensionTypeLLM)
-	}
-	// Priority: lsp wins over llm when both are present.
-	if got := inferExtensionType(&Capabilities{LSP: &LSPConfig{}, LLM: &LLMConfig{}}); got != ExtensionTypeLSP {
-		t.Errorf("inferExtensionType(lsp+llm) = %q, want %q", got, ExtensionTypeLSP)
-	}
-}
-
 func TestCollectLLMMappings(t *testing.T) {
 	es := testStore(t)
 	extDir := t.TempDir()

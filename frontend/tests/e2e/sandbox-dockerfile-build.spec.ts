@@ -1,128 +1,113 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
-import { getProjectId, csrfFetch, isolatedProject, gotoProject, requireSandbox } from './helpers';
+import { apiGetJson, clearBoardExcept, clearTasksAfterEach, csrfFetch, gotoProject, isolatedProject, ownProjectId, ownProjectPath, requireSandbox } from './helpers';
 
-// Own project: enabling sandboxing on a project is refused (409) while tasks are running
-// on it, so on the shared project this test skipped itself whenever another spec happened
-// to be mid-turn. Its own project has only its own tasks.
+// Own project: enabling sandboxing on a project is refused (409) while tasks are running on it, so on the
+// shared project this test had no state it could trust. Its own project has only its own tasks.
 isolatedProject();
+// The tasks this file's project holds are released between tests: a live task owns a container charged
+// against the executor's one memory budget, which every worker on this lane shares.
+// `docs/sandbox-runtime.md → The memory budget`.
+clearTasksAfterEach();
+
+/** The Sandbox Configuration dialog and the path picker it opens. `[role="dialog"]` is not a unique locator. */
+const form = (page: Page) => page.locator('.sandbox-config-modal');
+const picker = (page: Page) => page.locator('.path-browser');
+
+function projectDir(): string {
+  const dir = ownProjectPath();
+  if (!dir) throw new Error('this spec needs the project isolatedProject() gives its worker');
+  return dir;
+}
+
+/**
+ * Opens the Sandbox Configuration form for this file's own project with sandboxing on, and leaves a Dockerfile
+ * in the project directory for the picker to find.
+ *
+ * A sandbox setting cannot be written while a task of the project runs, and the form is read-only then too, so
+ * the project is emptied first: the two tasks `isolatedProject()` seeds each auto-start a turn, and a task of
+ * this project is the only thing that can refuse the write. Emptying is also what releases their containers.
+ */
+async function prepareSandboxProject(page: Page): Promise<void> {
+  await gotoProject(page);
+  const projectId = ownProjectId();
+  fs.writeFileSync(path.join(projectDir(), 'Dockerfile'), 'FROM alpine:latest\n');
+  await clearBoardExcept(page, projectId, []);
+  const written = await csrfFetch(page, `/api/projects/${projectId}`, {
+    method: 'PUT',
+    body: { sandbox_enabled: true, sandbox_network_isolation: false },
+  });
+  if (!written.ok) {
+    throw new Error(
+      `sandbox settings refused on the project this file owns (${written.status} ${JSON.stringify(written.data)}); ` +
+      'nothing but this file starts a task here, so a refusal is the behaviour under test, not the lane',
+    );
+  }
+  await page.reload();
+  await expect(page.locator('.sandbox-config-btn')).toBeVisible({ timeout: 10000 });
+}
 
 test.describe.serial('Sandbox Dockerfile Build', () => {
-  let projectId: string;
-
   test.beforeEach(async ({ page }) => {
     // Build asks this host to build an image, so this spec rests on a working container store.
     requireSandbox();
-
-    await page.goto('/');
-    await page.waitForSelector('.project-item', { timeout: 10000 });
-    projectId = await getProjectId(page);
-
-    const project = await page.evaluate(async (pid) => {
-      const res = await fetch(`/api/projects/${pid}`);
-      return res.ok ? res.json() : null;
-    }, projectId);
-    const worktreePath = project?.path;
-    if (worktreePath) {
-      fs.writeFileSync(path.join(worktreePath, 'Dockerfile'), 'FROM alpine:latest\n');
-    }
-
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const tasks = await page.evaluate(async (pid) => {
-        const res = await fetch(`/api/projects/${pid}/tasks`);
-        return res.ok ? res.json() : [];
-      }, projectId);
-      let changed = false;
-      for (const task of tasks) {
-        if (task.status === 'in_progress') {
-          await csrfFetch(page, `/api/projects/${projectId}/tasks/${task.id}/stop`, {
-            method: 'POST',
-          }).catch(() => {});
-          await csrfFetch(page, `/api/projects/${projectId}/tasks/${task.id}/move`, {
-            method: 'POST',
-            body: { status: 'backlog' },
-          }).catch(() => {});
-          changed = true;
-        }
-      }
-      if (!changed) break;
-      await page.waitForFunction(() => false, {}, { timeout: 1000, polling: 1000 }).catch(() => {});
-    }
-
-    const putResult = await csrfFetch(page, `/api/projects/${projectId}`, {
-      method: 'PUT',
-      body: { sandbox_enabled: true, sandbox_network_isolation: false },
-    });
-    if (!putResult.ok && putResult.status === 409) {
-      test.skip('Cannot enable sandbox: tasks are running from parallel tests');
-    } else if (!putResult.ok) {
-      throw new Error(`Failed to enable sandbox: ${putResult.status}`);
-    }
-
-    await expect(async () => {
-      const project = await page.evaluate(async (pid) => {
-        const res = await fetch(`/api/projects/${pid}`);
-        return res.ok ? res.json() : null;
-      }, projectId);
-      expect(project?.sandbox_enabled).toBe(true);
-    }).toPass({ timeout: 5000 });
-
-    await gotoProject(page);
-    await page.waitForSelector('.sandbox-config-btn', { timeout: 10000 });
+    await prepareSandboxProject(page);
   });
 
   test.afterEach(async ({ page }) => {
-    const project = await page.evaluate(async (pid) => {
-      const res = await fetch(`/api/projects/${pid}`);
-      return res.ok ? res.json() : null;
-    }, projectId);
-    if (project?.path) {
-      fs.rmSync(path.join(project.path, 'Dockerfile'), { force: true });
-    }
-    await csrfFetch(page, `/api/projects/${projectId}`, {
+    fs.rmSync(path.join(projectDir(), 'Dockerfile'), { force: true });
+    // Returns the project the way it was found: no tasks, sandboxing off, no Dockerfile remembered. The
+    // per-worker project outlives the file, and the explorer reads `sandbox_enabled` to choose which root
+    // `/api/fs` answers, so a project left sandboxed is another file's `path outside allowed project directory`.
+    const projectId = ownProjectId();
+    await clearBoardExcept(page, projectId, []);
+    const left = await csrfFetch(page, `/api/projects/${projectId}`, {
       method: 'PUT',
-      body: { sandbox_dockerfile_path: '' },
-    }).catch(() => {});
+      body: { sandbox_enabled: false, sandbox_dockerfile_path: '' },
+    });
+    if (!left.ok) {
+      throw new Error(
+        `could not return this file's project to unsandboxed (${left.status} ${JSON.stringify(left.data)}); ` +
+        'disabling sandboxing needs the lane to start the server with DANGER_ZONE=1',
+      );
+    }
   });
 
-  test('should persist the Dockerfile path when Build is clicked on an unsaved selection', async ({ page }) => {
+  test('stores the Dockerfile the Build button was clicked with, though it was never saved', async ({ page }) => {
     await page.click('.sandbox-config-btn');
-    await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
-
-    const isLocked = await page.locator('.locked-view').isVisible().catch(() => false);
-    if (isLocked) {
-      test.skip('Sandbox config modal is locked');
-    }
-
+    await expect(form(page)).toBeVisible({ timeout: 5000 });
+    // The editable form and the tasks-in-progress read-out are the two branches of this dialog, so the
+    // controls below only exist when this one is on screen.
     await expect(page.locator('.config-options')).toBeVisible({ timeout: 5000 });
 
     await page.locator('.radio-label').filter({ hasText: 'Dockerfile' }).click();
 
-    await page.locator('.btn-browse').click();
-    await expect(page.locator('[role="dialog"]')).toHaveCount(2, { timeout: 5000 });
+    // The placeholder and the path are two different nodes of this row, so an assertion naming only the
+    // path could not fail: before a choice is made the path node is not built at all.
+    await expect(page.locator('.dockerfile-path-placeholder')).toHaveText('No Dockerfile selected');
 
-    const dockerfileEntry = page.locator('.file-entry').filter({ hasText: 'Dockerfile' });
+    await page.locator('.btn-browse').click();
+    await expect(picker(page)).toBeVisible({ timeout: 5000 });
+
+    const dockerfileEntry = picker(page).locator('.file-entry').filter({ hasText: 'Dockerfile' });
     // The picker lists a real directory; under a full-suite run the server is answering
     // several of these at once and 5s was regularly too tight.
     await expect(dockerfileEntry).toBeVisible({ timeout: 20000 });
     await dockerfileEntry.click();
 
-    await page.locator('.btn-primary', { hasText: 'Select' }).click();
+    await picker(page).locator('.btn-primary', { hasText: 'Select' }).click();
+    await expect(picker(page)).toBeHidden();
 
-    await expect(page.locator('.dockerfile-path-text')).not.toHaveText('No Dockerfile selected');
+    await expect(page.locator('.dockerfile-path-text')).toHaveText(/Dockerfile$/);
     const buildBtn = page.locator('.btn-build');
     await expect(buildBtn).toBeVisible({ timeout: 5000 });
 
     await buildBtn.click();
 
-    await expect(async () => {
-      const project = await page.evaluate(async (pid) => {
-        const res = await fetch(`/api/projects/${pid}`);
-        return res.ok ? res.json() : null;
-      }, projectId);
-      expect(project?.sandbox_dockerfile_path).toBeTruthy();
-      expect(project?.sandbox_dockerfile_path).toMatch(/Dockerfile$/);
-    }).toPass({ timeout: 5000 });
+    await expect.poll(async () => {
+      const row = await apiGetJson<any>(page, `/api/projects/${ownProjectId()}`);
+      return row?.sandbox_dockerfile_path;
+    }, { timeout: 5000 }).toMatch(/Dockerfile$/);
   });
 });

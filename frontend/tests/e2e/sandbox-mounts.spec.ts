@@ -1,135 +1,119 @@
-import { test, expect } from '@playwright/test';
-import { getProjectId, csrfFetch, isolatedProject, gotoProject } from './helpers';
+import { test, expect, type Page } from '@playwright/test';
+import { clearBoardExcept, clearTasksAfterEach, csrfFetch, gotoProject, isolatedProject, ownProjectId } from './helpers';
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
 isolatedProject();
+// The tasks this file's project holds are released between tests: a live task owns a container charged
+// against the executor's one memory budget, which every worker on this lane shares.
+// `docs/sandbox-runtime.md → The memory budget`.
+clearTasksAfterEach();
 
-/** Sandbox Configuration will not open while a task runs, so this sets the state over the API. */
-async function prepareSandboxProject(page: import('@playwright/test').Page) {
+/** The Sandbox Configuration dialog. `[role="dialog"]` is not a unique locator here; this class is its own. */
+const form = (page: Page) => page.locator('.sandbox-config-modal');
+
+/**
+ * Opens the Sandbox Configuration form for this file's own project with sandboxing on and no saved mounts.
+ *
+ * A sandbox setting cannot be written while a task of the project runs, and the form is read-only then too, so
+ * the project is emptied first: the two tasks `isolatedProject()` seeds each auto-start a turn, and a task of
+ * this project is the only thing that can refuse the write. Emptying is also what releases their containers.
+ */
+async function prepareSandboxProject(page: Page): Promise<void> {
   await gotoProject(page);
-  await page.waitForSelector('.project-item', { timeout: 10000 });
-  const projectId = await getProjectId(page);
-
-  // Check current project state first
-  const currentProject = await page.evaluate(async (pid) => {
-    const res = await fetch(`/api/projects/${pid}`);
-    return res.ok ? res.json() : null;
-  }, projectId);
-
-  // Only update sandbox settings if they don't already match
-  const needsUpdate = !currentProject?.sandbox_enabled;
-  if (needsUpdate) {
-    // Stop all in_progress tasks first (blocks sandbox config changes)
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const tasks = await page.evaluate(async (pid) => {
-        const res = await fetch(`/api/projects/${pid}/tasks`);
-        return res.ok ? res.json() : [];
-      }, projectId);
-      let changed = false;
-      for (const task of tasks) {
-        if (task.status === 'in_progress') {
-          await csrfFetch(page, `/api/projects/${projectId}/tasks/${task.id}/stop`, {
-            method: 'POST',
-          }).catch(() => {}); // Ignore if task not running
-          await csrfFetch(page, `/api/projects/${projectId}/tasks/${task.id}/move`, {
-            method: 'POST',
-            body: { status: 'backlog' },
-          }).catch(() => {}); // Ignore if already moved
-          changed = true;
-        }
-      }
-      if (!changed) break;
-      await page.waitForFunction(() => false, {}, { timeout: 1000, polling: 1000 }).catch(() => {});
-    }
-
-    const putResult = await csrfFetch(page, `/api/projects/${projectId}`, {
-      method: 'PUT',
-      body: { sandbox_enabled: true, sandbox_network_isolation: false },
-    });
-    if (!putResult.ok && putResult.status === 409) {
-      test.skip('Cannot enable sandbox: tasks are running from parallel tests');
-    } else if (!putResult.ok) {
-      throw new Error(`Failed to enable sandbox: ${putResult.status}`);
-    }
+  const projectId = ownProjectId();
+  await clearBoardExcept(page, projectId, []);
+  const written = await csrfFetch(page, `/api/projects/${projectId}`, {
+    method: 'PUT',
+    body: { sandbox_enabled: true, sandbox_network_isolation: false, sandbox_mounts: [] },
+  });
+  if (!written.ok) {
+    throw new Error(
+      `sandbox settings refused on the project this file owns (${written.status} ${JSON.stringify(written.data)}); ` +
+      'nothing but this file starts a task here, so a refusal is the behaviour under test, not the lane',
+    );
   }
-
-  // Verify final state
-  await expect(async () => {
-    const project = await page.evaluate(async (pid) => {
-      const res = await fetch(`/api/projects/${pid}`);
-      return res.ok ? res.json() : null;
-    }, projectId);
-    expect(project?.sandbox_enabled).toBe(true);
-  }).toPass({ timeout: 5000 });
-
-  // Reload to reset component state
   await page.reload();
-  await page.waitForSelector('.project-item', { timeout: 10000 });
+  await expect(page.locator('.sandbox-config-btn')).toBeVisible({ timeout: 10000 });
+}
 
-  // Re-verify after reload: ensure no tasks are in_progress (parallel tests may have started new ones)
-  const tasksAfterReload = await page.evaluate(async (pid) => {
-    const res = await fetch(`/api/projects/${pid}/tasks`);
-    return res.ok ? res.json() : [];
-  }, projectId);
-  const inProgressTasks = tasksAfterReload.filter((t: any) => t.status === 'in_progress');
-  if (inProgressTasks.length > 0) {
-    // Move any newly in-progress tasks to backlog
-    for (const task of inProgressTasks) {
-      await csrfFetch(page, `/api/projects/${projectId}/tasks/${task.id}/stop`, {
-        method: 'POST',
-      }).catch(() => {});
-      await csrfFetch(page, `/api/projects/${projectId}/tasks/${task.id}/move`, {
-        method: 'POST',
-        body: { status: 'backlog' },
-      }).catch(() => {});
-    }
-    await page.waitForFunction(() => false, {}, { timeout: 500, polling: 500 }).catch(() => {});
+/**
+ * Returns this file's own project the way it found it: no tasks, sandboxing off, no mounts saved. The
+ * per-worker project outlives the file, and the explorer reads `sandbox_enabled` to choose which root `/api/fs`
+ * answers, so a project left sandboxed is another file's `path outside allowed project directory`.
+ */
+async function leaveProjectAsFound(page: Page): Promise<void> {
+  const projectId = ownProjectId();
+  // Emptied here rather than left to `clearTasksAfterEach`: the write below is refused while a task runs, and
+  // this says so instead of trusting the order the two hooks run in.
+  await clearBoardExcept(page, projectId, []);
+  const left = await csrfFetch(page, `/api/projects/${projectId}`, {
+    method: 'PUT',
+    body: { sandbox_enabled: false, sandbox_mounts: [] },
+  });
+  if (!left.ok) {
+    throw new Error(
+      `could not return this file's project to unsandboxed (${left.status} ${JSON.stringify(left.data)}); ` +
+      'disabling sandboxing needs the lane to start the server with DANGER_ZONE=1',
+    );
   }
+}
+
+/** Opens the collapsible subsection whose heading is `heading` and waits for its add row. */
+async function openSection(page: Page, heading: string, addRow: string): Promise<void> {
+  await page.locator('.config-row-expandable').filter({ hasText: heading }).click();
+  await expect(page.locator(addRow)).toBeVisible({ timeout: 5000 });
+}
+
+/** The host and container path fields of the mount form. */
+const hostInput = (page: Page) => page.locator('.mount-input[aria-label="Host path"]');
+const containerInput = (page: Page) => page.locator('.mount-input[aria-label="Container path"]');
+
+/** Opens the dialog, waits for the editable form, and opens the Custom Mounts section. */
+async function openMounts(page: Page): Promise<void> {
+  await page.click('.sandbox-config-btn');
+  await expect(form(page)).toBeVisible({ timeout: 5000 });
+  // The editable form and the tasks-in-progress read-out are the two branches of this dialog, so the
+  // controls below only exist when this one is on screen.
+  await expect(page.locator('.config-options')).toBeVisible({ timeout: 5000 });
+  await openSection(page, 'Custom Mounts', '.mount-add-row');
 }
 
 test.describe.serial('Sandbox Mounts', () => {
   test.beforeEach(async ({ page }) => prepareSandboxProject(page));
+  test.afterEach(async ({ page }) => leaveProjectAsFound(page));
 
-  test('should toggle rw/ro mode', async ({ page }) => {
-    // Open sandbox config modal
-    await page.click('.sandbox-config-btn');
-    await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
-
-    // Check for locked view (tasks in progress)
-    const isLocked = await page.locator('.locked-view').isVisible().catch(() => false);
-    if (isLocked) {
-      console.warn('Sandbox config modal is locked (tasks in progress) — skipping test');
-      await page.click('.overlay', { position: { x: 10, y: 10 } });
-      await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
-      test.skip('Sandbox config modal is locked');
-    }
-
-    // Expand Custom Mounts subsection
-    const mountsHeader = page.locator('.config-row-expandable .config-label').filter({ hasText: 'Custom Mounts' });
-    await expect(mountsHeader).toBeVisible({ timeout: 10000 });
-    await mountsHeader.click();
-    await expect(page.locator('.mount-add-row')).toBeVisible({ timeout: 5000 });
-
-    const hostInput = page.locator('.mount-input[aria-label="Host path"]');
-    const containerInput = page.locator('.mount-input[aria-label="Container path"]');
-    const addButton = page.locator('.btn-add-mount');
-
-    // Add a read-only mount
-    await hostInput.fill('/etc/config');
-    await containerInput.fill('/etc/config');
-    // Switch to ro mode
+  test('keeps the mode chosen for a new mount', async ({ page }) => {
+    await openMounts(page);
+    await hostInput(page).fill('/etc/config');
+    await containerInput(page).fill('/etc/config');
     await page.locator('.radio-group-small .radio-label').filter({ hasText: 'ro' }).click();
-    await addButton.click();
+    await page.locator('.btn-add-mount').click();
 
-    // Verify mount has ro mode
     await expect(page.locator('.mount-item')).toHaveCount(1);
-    await expect(page.locator('.sandbox-mode-ro')).toContainText('ro');
-
-    // Close modal
-    await page.click('.overlay', { position: { x: 10, y: 10 } });
-    await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.mount-item .sandbox-mode-ro')).toHaveText('ro');
   });
 
+  test('lists the mounts the server holds, with the mode they were saved with', async ({ page }) => {
+    await openMounts(page);
+    await hostInput(page).fill('/etc/config');
+    await containerInput(page).fill('/var/lib/config');
+    await page.locator('.radio-group-small .radio-label').filter({ hasText: 'ro' }).click();
+    await page.locator('.btn-add-mount').click();
+    await expect(page.locator('.mount-item')).toHaveCount(1);
+
+    await form(page).locator('.modal-footer .btn-primary').click();
+    await expect(form(page)).toBeHidden();
+
+    // The row the server holds is what the next container mounts, so both paths and the mode have to come
+    // back from it rather than from what was typed.
+    await page.reload();
+    await expect(page.locator('.sandbox-config-btn')).toBeVisible({ timeout: 10000 });
+    await openMounts(page);
+    await expect(page.locator('.mount-item')).toHaveCount(1);
+    await expect(page.locator('.mount-item .mount-path')).toHaveText('/etc/config');
+    await expect(page.locator('.mount-item .mount-container')).toHaveText('/var/lib/config');
+    await expect(page.locator('.mount-item .sandbox-mode-ro')).toHaveText('ro');
+  });
 });
 
 // The add row needs 434px on one line and a portrait screen has less; below that the form stacks,
@@ -138,6 +122,7 @@ test.describe('Sandbox Mounts on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
   test.beforeEach(async ({ page }) => prepareSandboxProject(page));
+  test.afterEach(async ({ page }) => leaveProjectAsFound(page));
 
   /** Anything of the mount form that sits outside the screen, by name. */
   const outside = (page: import('@playwright/test').Page) =>

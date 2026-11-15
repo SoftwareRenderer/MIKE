@@ -21,11 +21,6 @@ import (
 
 func requireBuilder(t *testing.T) {
 	t.Helper()
-	out, err := exec.Command("podman", "image", "exists", sandboxruntime.BuilderImageDefault).CombinedOutput()
-	if err != nil {
-		t.Skipf("the nested builder image %s is not on this host (pull it, or run `make build-probe`): %s",
-			sandboxruntime.BuilderImageDefault, strings.TrimSpace(string(out)))
-	}
 	sandboxcheck.Require(t, sandboxruntime.BuilderImageDefault)
 }
 
@@ -36,9 +31,6 @@ func buildE2E(t *testing.T, files map[string]string, contextRoot string) (*Sandb
 	repo := testRepo(t, files)
 	useScratchRoot(t)
 	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.available {
-		t.Skip("gVisor is not available on this host")
-	}
 	project := &types.Project{
 		ID:                    "builde2e",
 		Name:                  "builde2e",
@@ -159,9 +151,6 @@ func TestBuildRemovesItsContainerAndScratchOnEveryExit(t *testing.T) {
 
 			repo := testRepo(t, tc.files)
 			sm := NewSandboxManager(bootWithBridge(t))
-			if !sm.available {
-				t.Skip("gVisor is not available on this host")
-			}
 			project := &types.Project{
 				ID: "buildexit", Name: "buildexit", Path: repo, SandboxEnabled: true,
 				SandboxDockerfilePath: filepath.Join(repo, "Dockerfile"),
@@ -247,9 +236,7 @@ func TestBuildContextSelectsASubtreeOfThePinnedCommitForARealBuild(t *testing.T)
 // The silent regression: a host-side commit would load fine and simply miss what the RUN steps wrote. The base
 // arrives over the archive mount, so this covers the no-pull path too.
 func TestLoadedImageCarriesWhatTheRunStepWrote(t *testing.T) {
-	if out, err := exec.Command("podman", "image", "exists", "docker.io/library/alpine:3.20").CombinedOutput(); err != nil {
-		t.Skipf("docker.io/library/alpine:3.20 is not on this host, and a RUN step needs a base with a shell in it: %s", strings.TrimSpace(string(out)))
-	}
+	requireHostImage(t, "docker.io/library/alpine:3.20")
 	sm, project, _ := buildE2E(t, map[string]string{
 		"Dockerfile": "FROM alpine:3.20\nCOPY hello /hello\nRUN cat /hello > /greet\n",
 		"hello":      "written-by-a-run-step\n",
@@ -403,12 +390,11 @@ func TestLoadRetiresThePreviousImageOnlyAfterTheNewOneIsAccepted(t *testing.T) {
 	}
 }
 
-// requireHostImage skips with the reason the archive paths need a real image to hand around.
+// requireHostImage gates a test on this host being able to run a container from ref: the archive and
+// build paths hand that image around for real.
 func requireHostImage(t *testing.T, ref string) {
 	t.Helper()
-	if out, err := exec.Command("podman", "image", "exists", ref).CombinedOutput(); err != nil {
-		t.Skipf("%s is not on this host, which the load path needs as an archive: %s", ref, strings.TrimSpace(string(out)))
-	}
+	sandboxcheck.Require(t, ref)
 }
 
 func imageID(t *testing.T, image string) string {

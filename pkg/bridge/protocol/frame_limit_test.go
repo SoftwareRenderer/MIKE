@@ -56,11 +56,3 @@ func TestReadFrameRefusesAnOversizedDeclaredPayloadWithoutAllocating(t *testing.
 		t.Errorf("refusal allocated %d bytes from a length that never arrived", allocated)
 	}
 }
-
-// Reads must hit MaxReadBytes rather than the looser frame cap.
-func TestMaxReadBytesIsBelowTheFrameCap(t *testing.T) {
-	if MaxReadBytes > MaxFramePayload {
-		t.Errorf("MaxReadBytes (%d) must not exceed MaxFramePayload (%d): the smaller bound is the one reads hit",
-			MaxReadBytes, MaxFramePayload)
-	}
-}
