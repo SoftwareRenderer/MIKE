@@ -17,9 +17,6 @@ import (
 // commit. A path beginning with "@" makes a symlink to the rest.
 func testRepo(t *testing.T, files map[string]string) string {
 	t.Helper()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not available")
-	}
 	repo := filepath.Join(t.TempDir(), "repo")
 	if out, err := exec.Command("git", "init", "-q", repo).CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)

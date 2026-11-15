@@ -13,15 +13,10 @@ import (
 func TestBuildProbeOfflineBuildsUnderRunsc(t *testing.T) {
 	sandboxcheck.Require(t, sandboxruntime.BuilderImageDefault)
 
-	rt := sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{})
-	if !rt.ImageExists(sandboxruntime.BuilderImageDefault) {
-		t.Skipf("builder image %s is not in this host's store; `podman pull %s` to run this test",
-			sandboxruntime.BuilderImageDefault, sandboxruntime.BuilderImageDefault)
-	}
-
 	ctx, cancel := context.WithTimeout(t.Context(), sandboxruntime.BuildProbeStageTimeout)
 	defer cancel()
 
+	rt := sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{})
 	rep, err := rt.ProbeBuildOffline(ctx, sandboxruntime.BuilderImageDefault)
 	for _, res := range rep.Results {
 		t.Logf("stage %s: ok=%v %s", res.Stage, res.OK, res.Reason)

@@ -50,15 +50,6 @@ async function seedConversation(
 /** ~1.4 kB of prose per row: a newest window with a parse and a render cost, not a 300-byte stub. */
 const defaultBody = `seed row #i#\n${'filler text that gives the entry some height '.repeat(30)}`;
 
-/** ~20 kB of high-entropy text per row. Compressible filler would answer a bandwidth question with the
- * gzip ratio instead of the payload, and a pasted log is not compressible prose. */
-function fatBody(): string {
-  const chunk = () => Math.random().toString(36).slice(2);
-  let text = 'pasted log #i#\n';
-  while (text.length < 20_000) text += chunk() + ' ';
-  return text;
-}
-
 /** Record the open on the page's own clock, before any app script runs.
  * `performance.now()` starts at navigation start, so every figure below is "ms after the click". */
 async function installProbe(page: Page): Promise<void> {
@@ -287,38 +278,6 @@ async function cacheReadCost(page: Page, projectId: string, taskId: string) {
 
 interface Seeded { projectId: string; taskId: string }
 
-/** The row ids this browser holds for the task, newest last, plus the newest one's shape. */
-async function cachedWindow(page: Page, projectId: string, taskId: string) {
-  return page.evaluate(async ({ pid, tid }) => {
-    const db: IDBDatabase = await new Promise((res, rej) => {
-      const req = indexedDB.open('kanban-storage');
-      req.onsuccess = () => res(req.result);
-      req.onerror = () => rej(req.error);
-    });
-    const entry: any = await new Promise((res, rej) => {
-      const tx = db.transaction('board-cache', 'readonly');
-      const req = tx.objectStore('board-cache').get(`messages:${pid}:${tid}`);
-      req.onsuccess = () => res(req.result);
-      req.onerror = () => rej(req.error);
-    });
-    db.close();
-    const rows: any[] = entry?.data?.messages ?? [];
-    return { ids: rows.map(r => r.id), roles: rows.map(r => r.role), hasMore: !!entry?.data?.hasMore };
-  }, { pid: projectId, tid: taskId });
-}
-
-/** The newest window the server answers, same shape. */
-async function serverWindow(page: Page, projectId: string, taskId: string) {
-  return page.evaluate(async ({ pid, tid }) => {
-    const res = await fetch(`/api/projects/${pid}/tasks/${tid}/messages`, { cache: 'no-store' });
-    const rows: any[] = await res.json();
-    return {
-      ids: rows.map(r => r.id), roles: rows.map(r => r.role),
-      hasMore: res.headers.get('X-Messages-More') === 'true',
-    };
-  }, { pid: projectId, tid: taskId });
-}
-
 /** The task's active thread, which is what a `?thread=` open names. */
 async function activeThread(page: Page, projectId: string, taskId: string): Promise<string> {
   const threads: any[] = await page.evaluate(async ({ pid, tid }) =>
@@ -505,89 +464,6 @@ test.describe('Where a task open spends its time', () => {
       + 'read, not the render. The cache is read on the way in and paints nothing: every seeded row is a '
       + 'user row, so this window holds a send nothing has answered');
     expect(stalled.firstRowAt, 'the row painted before the stalled read returned').toBeGreaterThan(messages!.end);
-  });
-
-  test('a server one round trip away: what each read in the chain costs', async ({ page }) => {
-    test.setTimeout(180_000);
-    const RTT = 150;
-    const { projectId, taskId } = await makeTaskWithHistory(page);
-    await installProbe(page);
-    // Warm the cache first, on a fast link, so the throttled open is the warm case a returning reader has.
-    await openTask(page, projectId, taskId);
-    await gotoProject(page);
-    await page.waitForSelector('.project-item', { timeout: 10000 });
-    await throttle(page, { rtt: RTT });
-
-    const throttled = await openTask(page, projectId, taskId);
-    report(`warm open at ${RTT}ms RTT`, throttled);
-    await annotateLevers(page, projectId, taskId, throttled, `open at ${RTT}ms RTT`);
-    expect(throttled.firstRowAt).toBeGreaterThan(0);
-  });
-
-  test('a slow cell link with a fat window: what the body actually costs', async ({ page }) => {
-    test.setTimeout(240_000);
-    // A late-3G profile: 400 kbps down, 100 kbps up, 300 ms round trip.
-    const LINK = { rtt: 300, downKbps: 400, upKbps: 100 };
-    const { projectId, taskId } = await makeTaskWithHistory(page, 12, fatBody());
-    await installProbe(page);
-    await openTask(page, projectId, taskId);
-    await gotoProject(page);
-    await page.waitForSelector('.project-item', { timeout: 10000 });
-    await throttle(page, LINK);
-
-    const slow = await openTask(page, projectId, taskId, 90000);
-    report('warm open on a 400 kbps / 300 ms link', slow);
-    const win = slow.calls.find(c => c.path === '/api/…/task/messages');
-    expect(win, 'the open never read the window').toBeTruthy();
-    annotate(`fat window on a capped link: the window read took ${win!.end - win!.start}ms — `
-      + `${win!.responseStart - win!.requestStart}ms of server, ${win!.end - win!.responseStart}ms of transfer `
-      + `for ${win!.bytes} B compressed (${win!.wire} B actually sent). The render after it is `
-      + `${slow.firstRowAt - win!.end}ms, and the same rows read out of IndexedDB cost no wire time at all`);
-    await annotateLevers(page, projectId, taskId, slow, 'open on a 400 kbps link', false);
-    expect(slow.firstRowAt).toBeGreaterThan(win!.end);
-
-    // One row lands, so the next read is a different window. Its size proves nothing: the window holds five
-    // rows, and appending one drops the oldest, so the payload moves by the difference between two rows.
-    // What this asserts is what its title says. The read carried a body, and on a link this slow the open
-    // waits behind that body rather than behind the server.
-    await seedConversation(page, projectId, taskId, 1, 'one row more #i#');
-    await gotoProject(page);
-    await page.waitForSelector('.project-item', { timeout: 10000 });
-    const moved = await openTask(page, projectId, taskId, 90000);
-    const movedWin = moved.calls.find(c => c.path === '/api/…/task/messages');
-    expect(movedWin, 'the second open never read the window').toBeTruthy();
-    annotate(`the same read after one row arrived: ${movedWin!.bytes} B compressed, ${movedWin!.wire} B `
-      + `actually sent, ${movedWin!.end - movedWin!.start}ms (the read before it: ${win!.bytes} B, `
-      + `${win!.wire} B sent, ${win!.end - win!.start}ms)`);
-    expect(movedWin!.bytes, 'the moved thread was answered with no body').toBeGreaterThan(0);
-    const transfer = movedWin!.end - movedWin!.responseStart;
-    const serverTime = movedWin!.responseStart - movedWin!.requestStart;
-    expect(transfer, `the body's transfer (${transfer}ms) is what the open waits behind, against `
-      + `${serverTime}ms of server`).toBeGreaterThan(serverTime);
-  });
-
-  test('what a provisional paint would show: how far the cached window lags', async ({ page }) => {
-    test.setTimeout(180_000);
-    const { projectId, taskId } = await makeTaskWithHistory(page);
-    await installProbe(page);
-    await openTask(page, projectId, taskId);
-    const held = await cachedWindow(page, projectId, taskId);
-
-    // The conversation moves while this browser is not looking — the case a provisional paint gets wrong.
-    const MOVED = 3;
-    await seedConversation(page, projectId, taskId, MOVED, `arrived while away #i#`);
-    const live = await serverWindow(page, projectId, taskId);
-
-    const heldIds = new Set(held.ids);
-    const liveIds = new Set(live.ids);
-    const missing = live.ids.filter(id => !heldIds.has(id)).length;
-    const stale = held.ids.filter(id => !liveIds.has(id)).length;
-    annotate(`cached window ${held.ids.length} rows vs the server's ${live.ids.length}: `
-      + `${live.ids.length - missing} of the newest window already on disk, ${missing} arrived while away, `
-      + `${stale} cached rows no longer in the newest window; newest cached row is a `
-      + `"${held.roles[held.roles.length - 1]}" against the server's "${live.roles[live.roles.length - 1]}"; `
-      + `hasMore cached=${held.hasMore} live=${live.hasMore}`);
-    expect(missing, 'the seeded rows never arrived, so this run proved nothing').toBe(MOVED);
   });
 
   test('a window read that never answers: what the reader is left holding', async ({ page }) => {

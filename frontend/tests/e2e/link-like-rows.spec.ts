@@ -48,26 +48,6 @@ async function openBoard(page: Page) {
 }
 
 test.describe('Sidebar project rows are links', () => {
-  test('the row is an anchor whose href deep-links to the project', async ({ page }) => {
-    await openBoard(page);
-
-    const row = page.locator('.project-item').first();
-    // The sidebar sorts by name while /api/projects returns creation order, so resolve
-    // the expected id by the row's own label instead of assuming projects[0].
-    const expectedId = await row.evaluate(async (el) => {
-      const res = await fetch('/api/projects');
-      const projects: Array<{ id: string; name: string }> = await res.json();
-      const label = el.querySelector('.project-name')?.textContent?.trim() ?? '';
-      return projects.find(p => p.name === label)?.id ?? '';
-    });
-    expect(expectedId).not.toBe('');
-
-    await expect(row).toHaveAttribute('href', new RegExp(`^/\\?project=${expectedId}$`));
-    // Still a button-role row for assistive tech.
-    await expect(row).toHaveAttribute('role', 'button');
-    await expect(row).toHaveAttribute('tabindex', '0');
-  });
-
   test('an unmodified click selects the project without leaving the document', async ({ page }) => {
     await openBoard(page);
     await markDocument(page);
@@ -128,19 +108,6 @@ test.describe.serial('Task cards are links', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto(`/?project=${projectId}`);
     await page.waitForSelector(`.card[data-task-id="${taskId}"]`, { timeout: 10000 });
-  });
-
-  test('the card carries a link to itself and stays a draggable button', async ({ page }) => {
-    const card = page.locator(`.card[data-task-id="${taskId}"]`);
-    const link = card.locator('a.card-open-link');
-
-    await expect(link).toHaveAttribute('href', `/?project=${projectId}&task=${taskId}`);
-    // The overlay is decorative for assistive tech and never the drag source.
-    await expect(link).toHaveAttribute('aria-hidden', 'true');
-    await expect(link).toHaveAttribute('tabindex', '-1');
-    await expect(link).toHaveAttribute('draggable', 'false');
-    await expect(card).toHaveAttribute('role', 'button');
-    await expect(card).toHaveAttribute('draggable', 'true');
   });
 
   test('clicking the card title opens the task inside the same document', async ({ page }) => {

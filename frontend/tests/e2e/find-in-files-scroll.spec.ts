@@ -16,11 +16,10 @@ const TOTAL_LINES = 220;
 test.describe('Find in files — revealing a result', () => {
     test('every result click scrolls the open file to its line, including a repeat of one', async ({ page }) => {
         test.setTimeout(60000);
+        // The repo this worker's `isolatedProject()` claimed. A null here is the harness having
+        // claimed nothing, and the test says so instead of walking away green behind a board check.
         const projectDir = ownProjectPath();
-        if (!projectDir) {
-            await expect(page.locator('.board')).toBeVisible();
-            return;
-        }
+        if (!projectDir) throw new Error('this spec claims no project of its own — isolatedProject() did not run');
 
         // Unique per run: the search walks the whole project directory, which other
         // specs on this worker's project have written fixtures into too.

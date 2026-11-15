@@ -363,9 +363,6 @@ func TestEnsureImageForProjectUnreadableDockerfile(t *testing.T) {
 func TestEnsureImageForProjectBuildsProjectImage(t *testing.T) {
 	requireBuilder(t)
 	sm := NewSandboxManager(bootWithBridge(t))
-	if !sm.available {
-		t.Skip("gVisor is not available on this host")
-	}
 	useScratchRoot(t)
 
 	repo := testRepo(t, map[string]string{

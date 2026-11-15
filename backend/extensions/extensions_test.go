@@ -85,6 +85,13 @@ func TestInferExtensionType(t *testing.T) {
 	if ExtensionTypeI18N != "i18n" {
 		t.Errorf("ExtensionTypeI18N = %q, want \"i18n\" — the registry's folder name", ExtensionTypeI18N)
 	}
+
+	// A refused manifest is still a declaration: the install is refused, but the pack half of it
+	// has to stay readable, because refusing an install is not the same as losing the text.
+	mixed := &Capabilities{LSP: &LSPConfig{}, I18N: &I18NConfig{Locale: "fr", MessagesURL: "fr.json"}}
+	if mixed.GetI18N() == nil {
+		t.Error("an i18n declaration beside another capability must still be readable as a pack")
+	}
 }
 
 func TestExtension_InstallSourceChecks(t *testing.T) {
@@ -103,40 +110,6 @@ func TestExtension_InstallSourceChecks(t *testing.T) {
 				t.Errorf("IsLocalInstalled() = %v, want %v", got, tt.wantLocal)
 			}
 		})
-	}
-}
-
-func TestLSPConfig_FullConfig(t *testing.T) {
-	cfg := &LSPConfig{
-		Command:   "gopls",
-		Args:      []string{"serve"},
-		FileTypes: []LSPFileType{{Extension: "go", LanguageID: "go"}},
-		Language:  "go",
-		InitParamsOverride: map[string]any{
-			"hover": map[string]any{
-				"actions": map[string]any{
-					"enabled": true,
-				},
-			},
-			"usePlaceholders": true,
-			"staticcheck":     true,
-		},
-	}
-
-	if cfg.Command != "gopls" {
-		t.Errorf("Command = %v, want gopls", cfg.Command)
-	}
-	if len(cfg.Args) != 1 || cfg.Args[0] != "serve" {
-		t.Errorf("Args = %v, want [serve]", cfg.Args)
-	}
-	if len(cfg.FileTypes) != 1 || cfg.FileTypes[0].Extension != "go" {
-		t.Errorf("FileTypes = %v, want one entry for \"go\"", cfg.FileTypes)
-	}
-	if cfg.Language != "go" {
-		t.Errorf("Language = %v, want go", cfg.Language)
-	}
-	if cfg.InitParamsOverride["staticcheck"] != true {
-		t.Error("InitParamsOverride.staticcheck = false, want true")
 	}
 }
 
@@ -194,81 +167,6 @@ func TestLSPConfig_ChatDiagnosticsEnabled(t *testing.T) {
 	}
 }
 
-func TestRegistryEntry_Fields(t *testing.T) {
-	entry := RegistryEntry{
-		Name:          "gopls",
-		Version:       "1.0.0",
-		Type:          ExtensionTypeLSP,
-		DisplayName:   "Go Language Server",
-		Description:   "Go language server",
-		Author:        "Go Team",
-		Image:         "ghcr.io/kanban/gopls:1.0.0",
-		DockerfileURL: "https://registry.kanban.dev/extensions/gopls/1.0.0/Dockerfile",
-	}
-
-	if entry.Name != "gopls" {
-		t.Errorf("Name = %v, want gopls", entry.Name)
-	}
-	if entry.Type != ExtensionTypeLSP {
-		t.Errorf("Type = %v, want lsp", entry.Type)
-	}
-	if entry.Image == "" {
-		t.Error("Image is empty, want non-empty")
-	}
-	if entry.DockerfileURL == "" {
-		t.Error("DockerfileURL is empty, want non-empty")
-	}
-}
-
-func TestConfigSchema_Properties(t *testing.T) {
-	minVal := 64.0
-	maxVal := 2048.0
-	schema := &ConfigSchema{
-		Properties: []SchemaProp{
-			{
-				Key:         "memoryLimit",
-				Type:        "number",
-				Title:       "Memory Limit",
-				Description: "Memory limit in MB",
-				Default:     256,
-				Minimum:     &minVal,
-				Maximum:     &maxVal,
-			},
-			{
-				Key:         "networkIsolation",
-				Type:        "boolean",
-				Title:       "Network Isolation",
-				Description: "Enable network isolation",
-				Default:     true,
-			},
-		},
-	}
-
-	if len(schema.Properties) != 2 {
-		t.Errorf("Properties count = %v, want 2", len(schema.Properties))
-	}
-	memProp := schema.GetProperty("memoryLimit")
-	if memProp == nil {
-		t.Fatal("GetProperty(memoryLimit) returned nil")
-	}
-	if memProp.Type != "number" {
-		t.Errorf("memoryLimit.Type = %v, want number", memProp.Type)
-	}
-	if *memProp.Minimum != 64.0 {
-		t.Errorf("memoryLimit.Minimum = %v, want 64", *memProp.Minimum)
-	}
-	if *memProp.Maximum != 2048.0 {
-		t.Errorf("memoryLimit.Maximum = %v, want 2048", *memProp.Maximum)
-	}
-	netProp := schema.GetProperty("networkIsolation")
-	if netProp == nil {
-		t.Fatal("GetProperty(networkIsolation) returned nil")
-	}
-	if netProp.Type != "boolean" {
-		t.Errorf("networkIsolation.Type = %v, want boolean", netProp.Type)
-	}
-}
-
 func TestConfigSchema_JSON_PreservesPropertyOrder(t *testing.T) {
 	jsonData := `{
 		"properties": [
@@ -304,54 +202,15 @@ func TestConfigSchema_JSON_PreservesPropertyOrder(t *testing.T) {
 	}
 }
 
-func TestSandboxConfig_Defaults(t *testing.T) {
-	cfg := SandboxConfig{
-		NetworkIsolation: true,
-		MemoryLimit:      256,
+// `css_url` is the manifest key the browser reads to load a theme's stylesheet, so the spelling is
+// the contract. A decode of the manifest text, not a round-trip through the same tags.
+func TestCSSConfig_DecodesTheManifestKey(t *testing.T) {
+	var m ExtensionManifest
+	if err := json.Unmarshal([]byte(`{"display_name":"light","capabilities":{"css":{"css_url":"/extensions/mike-light/styles.css"}}}`), &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
 	}
-
-	if !cfg.NetworkIsolation {
-		t.Error("NetworkIsolation = false, want true")
-	}
-	if cfg.MemoryLimit != 256 {
-		t.Errorf("MemoryLimit = %v, want 256", cfg.MemoryLimit)
-	}
-	if len(cfg.ForwardPorts) != 0 {
-		t.Errorf("ForwardPorts = %v, want empty", cfg.ForwardPorts)
-	}
-	if len(cfg.Capabilities) != 0 {
-		t.Errorf("Capabilities = %v, want empty", cfg.Capabilities)
-	}
-}
-
-func TestCSSConfig_CSSURL(t *testing.T) {
-	cfg := &CSSConfig{
-		CSSURL: "/extensions/mike-light/styles.css",
-	}
-
-	if cfg.CSSURL != "/extensions/mike-light/styles.css" {
-		t.Errorf("CSSURL = %v, want /extensions/mike-light/styles.css", cfg.CSSURL)
-	}
-}
-
-func TestCSSConfig_JSONRoundTrip(t *testing.T) {
-	// Verify that css_url is correctly serialized/deserialized via JSON
-	original := &CSSConfig{
-		CSSURL: "/extensions/mike-light/styles.css",
-	}
-
-	jsonBytes, err := json.Marshal(original)
-	if err != nil {
-		t.Fatalf("Marshal failed: %v", err)
-	}
-
-	var decoded CSSConfig
-	if err := json.Unmarshal(jsonBytes, &decoded); err != nil {
-		t.Fatalf("Unmarshal failed: %v", err)
-	}
-
-	if decoded.CSSURL != original.CSSURL {
-		t.Errorf("CSSURL after JSON round-trip = %v, want %v", decoded.CSSURL, original.CSSURL)
+	if got := m.Capabilities.GetCSS(); got == nil || got.CSSURL != "/extensions/mike-light/styles.css" {
+		t.Errorf("capabilities.css.css_url did not decode: %+v", m.Capabilities.GetCSS())
 	}
 }
 
@@ -475,74 +334,23 @@ func TestAgentConfig_ResolveSandboxTemplates(t *testing.T) {
 	}
 }
 
-func TestManifest_Priority_Default(t *testing.T) {
-	m := ExtensionManifest{DisplayName: "Test"}
-	if m.Priority != 0 {
-		t.Errorf("Priority = %d, want 0 (default)", m.Priority)
-	}
-}
-
-func TestManifest_Priority_Set(t *testing.T) {
-	m := ExtensionManifest{DisplayName: "Test", Priority: 10}
-	if m.Priority != 10 {
-		t.Errorf("Priority = %d, want 10", m.Priority)
-	}
-}
-
-func TestManifest_Priority_Negative(t *testing.T) {
-	m := ExtensionManifest{DisplayName: "Test", Priority: -5}
-	if m.Priority != -5 {
-		t.Errorf("Priority = %d, want -5", m.Priority)
-	}
-}
-
-func TestManifest_Priority_JSONRoundTrip(t *testing.T) {
-	m := ExtensionManifest{
-		DisplayName: "Test",
-		Description: "Desc",
-		Author:      "Author",
-		Version:     "1.0.0",
-		Priority:    42,
-	}
-
-	jsonBytes, err := json.Marshal(m)
-	if err != nil {
-		t.Fatalf("Marshal failed: %v", err)
-	}
-
-	var decoded ExtensionManifest
-	if err := json.Unmarshal(jsonBytes, &decoded); err != nil {
-		t.Fatalf("Unmarshal failed: %v", err)
-	}
-
-	if decoded.Priority != 42 {
-		t.Errorf("Priority after JSON round-trip = %d, want 42", decoded.Priority)
-	}
-}
-
-func TestManifest_Priority_JSONDefault(t *testing.T) {
-	// When priority is omitted in JSON, it should default to 0
-	jsonStr := `{"display_name":"Test","description":"","author":"","version":"1.0.0"}`
+// `priority` is the manifest key that orders the installed list and the i18n pack choice, so the
+// spelling is the contract: a pack the author ranked decodes to that rank or it loads beside them.
+func TestManifest_Priority_DecodesFromTheManifestKey(t *testing.T) {
 	var m ExtensionManifest
-	if err := json.Unmarshal([]byte(jsonStr), &m); err != nil {
-		t.Fatalf("Unmarshal failed: %v", err)
+	if err := json.Unmarshal([]byte(`{"display_name":"Ranked","priority":42}`), &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
 	}
-	if m.Priority != 0 {
-		t.Errorf("Priority = %d, want 0 (default from missing field)", m.Priority)
+	if m.Priority != 42 {
+		t.Errorf("Priority = %d, want 42 — the extension list and the pack choice sort on this field", m.Priority)
 	}
 }
 
-// TestPiManifestTemplateResolution loads the actual Pi agent manifest and verifies
-// that {{property}} template references in sandbox are resolved using
-// config_schema defaults end-to-end.
 func TestPiManifestTemplateResolution(t *testing.T) {
-	manifestPath := filepath.Join("..", "..", "extensions", "agent", "pi", "manifest.json")
+	manifestPath := filepath.Join("..", "..", "..", "MIKE-extensions", "agent", "pi", "manifest.json")
 	raw, err := os.ReadFile(manifestPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			t.Skipf("manifest not found at %s", manifestPath)
-		}
-		t.Fatalf("read manifest: %v", err)
+		t.Fatalf("read the shipped agent manifest: %v", err)
 	}
 
 	var manifest ExtensionManifest

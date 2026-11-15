@@ -23,11 +23,11 @@ func grantCandidate(t *testing.T) string {
 	t.Helper()
 	home, err := os.UserHomeDir()
 	if err != nil {
-		t.Skipf("no home directory to act as a path outside the app's roots: %v", err)
+		t.Fatalf("no home directory to act as a path outside the app's roots: %v", err)
 	}
 	info, err := os.Stat(home)
 	if err != nil || !info.IsDir() {
-		t.Skipf("%s is not a usable directory: %v", home, err)
+		t.Fatalf("%s is not a usable directory: %v", home, err)
 	}
 	return filepath.Clean(home)
 }

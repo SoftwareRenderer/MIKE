@@ -1,8 +1,8 @@
 import { test, expect, Page } from '@playwright/test';
 import { execSync } from 'child_process';
-import { existsSync, writeFileSync, unlinkSync, rmSync } from 'fs';
+import { writeFileSync, unlinkSync, rmSync } from 'fs';
 import { join } from 'path';
-import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch, ensureTaskStarted, getWorktreePath, worktreeExists,
+import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch, ensureTaskStarted, getWorktreePath,
   waitForWorktree, isolatedProject, gotoProject, apiGetJson, sendTurn, messageRows } from './helpers';
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
@@ -50,14 +50,6 @@ async function seedAutoMaximizeCodeViewer(page: Page, enabled: boolean): Promise
 
 // The test servers require a session — these helpers used unauthenticated
 // `curl`, which 401s, so they now go through the page's session.
-
-/** Worktree directory for a task — must be derived from the SAME task the
- *  panel shows, so files written here are visible in that task's diff. */
-function worktreeDirFor(taskInfo: { projectId: string; taskId: string } | null): string | null {
-    if (!taskInfo) return null;
-    const dir = getWorktreePath(taskInfo.projectId, taskInfo.taskId);
-    return existsSync(dir) ? dir : null;
-}
 
 async function getDiffViaApi(page: Page, projectId: string, taskId: string): Promise<any> {
     return page.evaluate(async ([pid, tid]: [string, string]) => {
@@ -524,56 +516,19 @@ test.describe.serial('Diff panel user interactions', () => {
         await navigateToTask(page, taskId);
         await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
-        let taskData = null;
-        for (let i = 0; i < 30; i++) {
-            taskData = await page.evaluate(async ({ pid, tid }: { pid: string; tid: string }) => {
-                const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
-                return res.ok ? res.json() : null;
-            }, { pid: projectId, tid: taskId });
-            if (taskData?.branch && worktreeExists(projectId, taskId)) break;
-            await page.waitForFunction(() => false, {}, { timeout: 500, polling: 500 }).catch(() => {});
-        }
-
-        if (!worktreeExists(projectId, taskId)) {
-            const projects = await page.evaluate(async (pid: string) => {
-                const res = await fetch(`/api/projects`);
-                const all = await res.json();
-                return all.find((p: any) => p.id === pid);
-            }, projectId);
-            const projectPath = projects?.path;
-            if (projectPath) {
-                const branchName = taskData?.branch || `task/${taskId}`;
-                const worktreePath = getWorktreePath(projectId, taskId);
-                execSync(`cd ${projectPath} && git worktree add --detach ${worktreePath} HEAD 2>&1 || true`);
-                execSync(`cd ${worktreePath} && git checkout -B ${branchName} 2>&1 || true`);
-                await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}`, {
-                    method: 'PUT',
-                    body: { branch: branchName, base_ref: 'master' },
-                });
-                // Verify worktree was created
-                if (!worktreeExists(projectId, taskId)) {
-                    test.skip('Worktree could not be created for diff test');
-                }
-            } else {
-                test.skip(`Worktree not available for diff test (projectPath=${projectPath})`);
-            }
-        }
+        // A worktree that never appeared is the regression this file exists to catch, so it is waited
+        // for and reported rather than skipped (waitForWorktree throws, naming the path).
+        await waitForWorktree(projectId, taskId);
 
         const threadsResult = await page.evaluate(async ({ pid, tid }: { pid: string; tid: string }) => {
             const res = await fetch(`/api/projects/${pid}/tasks/${tid}/threads`);
             return res.json();
         }, { pid: projectId, tid: taskId });
         const mainThreadId = threadsResult[0]?.id;
-        if (!mainThreadId) {
-            test.skip('No main thread available for diff test');
-        }
+        expect(mainThreadId, `the task has no main thread: ${JSON.stringify(threadsResult)}`).toBeTruthy();
 
         writeFileInWorktree(projectId, taskId, 'file-a.txt', 'hello friend');
-        try {
-            await waitForDiffFile(page, projectId, taskId, 'file-a.txt');
-        } catch {
-            test.skip('file-a.txt did not appear in diff panel');
-        }
+        await waitForDiffFile(page, projectId, taskId, 'file-a.txt');
 
         const msgResult = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/messages`, {
             method: 'POST',
@@ -581,9 +536,7 @@ test.describe.serial('Diff panel user interactions', () => {
         });
         expect(msgResult.ok).toBe(true);
         const msgId = msgResult.data?.id;
-        if (!msgId) {
-            test.skip('No message ID returned from API');
-        }
+        expect(msgId, 'the messages route accepted the row and stored no id').toBeTruthy();
 
         const forkResult = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/threads/fork`, {
             method: 'POST',
@@ -591,16 +544,10 @@ test.describe.serial('Diff panel user interactions', () => {
         });
         expect(forkResult.ok).toBe(true);
         const forkThreadId = forkResult.data?.id;
-        if (!forkThreadId) {
-            test.skip('No fork thread ID returned from API');
-        }
+        expect(forkThreadId, 'the fork route accepted the fork and returned no thread id').toBeTruthy();
 
         writeFileInWorktree(projectId, taskId, 'file-b.txt', 'hello choom');
-        try {
-            await waitForDiffFile(page, projectId, taskId, 'file-b.txt');
-        } catch {
-            test.skip('file-b.txt did not appear in diff panel');
-        }
+        await waitForDiffFile(page, projectId, taskId, 'file-b.txt');
 
         // Round-trip switches (matches backend TestThreadSwitchWorktreeContent)
         await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/threads/switch`, {

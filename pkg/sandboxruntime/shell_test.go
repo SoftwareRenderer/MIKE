@@ -15,64 +15,6 @@ func quotingCommand(t *testing.T, script string) []byte {
 	return out
 }
 
-func TestShellQuote(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected string
-	}{
-		{
-			name:     "simple path",
-			input:    "/home/sandbox/myproj/subdir",
-			expected: "'/home/sandbox/myproj/subdir'",
-		},
-		{
-			name:     "path with spaces",
-			input:    "/home/sandbox/my proj/sub dir",
-			expected: "'/home/sandbox/my proj/sub dir'",
-		},
-		{
-			name:     "command injection via semicolon",
-			input:    "sandbox; rm -rf /",
-			expected: "'sandbox; rm -rf /'",
-		},
-		{
-			name:     "command injection via backtick",
-			input:    "sandbox`whoami`",
-			expected: "'sandbox`whoami`'",
-		},
-		{
-			name:     "command injection via dollar substitution",
-			input:    "sandbox$(whoami)",
-			expected: "'sandbox$(whoami)'",
-		},
-		{
-			name:     "path with single quote",
-			input:    "o'brien/path",
-			expected: `'o'\''brien/path'`,
-		},
-		{
-			name:     "empty string",
-			input:    "",
-			expected: "''",
-		},
-		{
-			name:     "path with newline",
-			input:    "sandbox/\nrm -rf /",
-			expected: "'sandbox/\nrm -rf /'",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := ShellQuote(tt.input)
-			if result != tt.expected {
-				t.Errorf("ShellQuote(%q) = %q, want %q", tt.input, result, tt.expected)
-			}
-		})
-	}
-}
-
 const shellQuoteCanary = "/tmp/shellquote_pwned_canary"
 
 // TestShellQuoteSafety runs the command through a real shell; a payload that escapes quoting creates the

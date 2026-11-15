@@ -61,7 +61,7 @@ func TestValidateDependencyGrant_StoresTheSymlinkTarget(t *testing.T) {
 	root := t.TempDir()
 	link := filepath.Join(root, "cache")
 	if err := os.Symlink(outside, link); err != nil {
-		t.Skipf("cannot create a symlink here: %v", err)
+		t.Fatalf("cannot create a symlink here: %v", err)
 	}
 
 	got, err := ValidateDependencyGrant(link)
@@ -332,7 +332,7 @@ func TestCheckGrantShape(t *testing.T) {
 func TestValidateDependencyGrant_RefusesWholeDirectories(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil || filepath.Clean(home) == "/" {
-		t.Skipf("no usable home directory: %v", err)
+		t.Fatalf("no usable home directory: %v", err)
 	}
 	for _, path := range []string{"/", "/etc", "/etc/ssh", "/usr", filepath.Clean(home)} {
 		if got, err := ValidateDependencyGrant(path); err == nil {

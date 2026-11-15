@@ -49,19 +49,25 @@ function mockError(message: string, status = 400) {
 }
 
 describe('extensions API', () => {
-    it('listExtensions returns array of extensions', async () => {
-        const extensions = [
-            { id: 'gopls-1', name: 'gopls', type: 'lsp', enabled: true, running: false },
-            { id: 'ts-1', name: 'typescript', type: 'lsp', enabled: true, running: true },
+    // What only these three decide is which route each asks: the answer they hand back is the server's
+    // JSON, which `fetch-failure.unit.ts` reads, and the refusal each raises is `apiFetch`'s.
+    it('asks each read its own route', async () => {
+        mockSuccess([]);
+        const api = await import('$lib/api/extensions');
+        const reads: [string, () => Promise<unknown>, string][] = [
+            ['listExtensions', () => api.listExtensions(), '/api/extensions'],
+            ['getRegistryIndex', () => api.getRegistryIndex(), '/api/extensions/registry'],
+            ['checkUpdates', () => api.checkUpdates(), '/api/extensions/check-updates'],
         ];
-        mockSuccess(extensions);
 
-        const { listExtensions } = await import('$lib/api/extensions');
-        const result = await listExtensions();
+        for (const [name, read, route] of reads) {
+            mockFetch.mockClear();
+            await read();
 
-        expect(result).toEqual(extensions);
-        const calls = apiCalls(mockFetch.mock.calls);
-        expect(calls[0][0]).toContain('/api/extensions');
+            const calls = apiCalls(mockFetch.mock.calls);
+            expect(calls.map((c) => c[0]), name).toEqual([route]);
+            expect(calls[0][1]?.method ?? 'GET', name).toBe('GET');
+        }
     });
 
     it('updateExtension sends PUT with correct body', async () => {
@@ -102,20 +108,6 @@ describe('extensions API', () => {
         expect(calls[0][0]).toContain('/api/extensions/gopls-1/enabled');
         expect(calls[0][1].method).toBe('PATCH');
         expect(JSON.parse(calls[0][1].body)).toEqual({ enabled: false });
-    });
-
-    it('getRegistryIndex returns registry entries', async () => {
-        const entries = [
-            { name: 'gopls', version: '1.0.0', type: 'lsp', display_name: 'Go LSP', description: 'Go', author: 'Go Team' },
-        ];
-        mockSuccess(entries);
-
-        const { getRegistryIndex } = await import('$lib/api/extensions');
-        const result = await getRegistryIndex();
-
-        expect(result).toEqual(entries);
-        const calls = apiCalls(mockFetch.mock.calls);
-        expect(calls[0][0]).toContain('/api/extensions/registry');
     });
 
     it('installExtension streams SSE progress then final result', async () => {
@@ -232,20 +224,6 @@ describe('extensions API', () => {
         for await (const ev of installExtension('gopls')) events.push(ev);
 
         expect(events.map((e) => e.progress)).toEqual([10, 100]);
-    });
-
-    it('checkUpdates returns available updates', async () => {
-        const updates = [
-            { id: 'gopls-1', name: 'gopls', current_version: '1.0.0', available_version: '2.0.0' },
-        ];
-        mockSuccess(updates);
-
-        const { checkUpdates } = await import('$lib/api/extensions');
-        const result = await checkUpdates();
-
-        expect(result).toEqual(updates);
-        const calls = apiCalls(mockFetch.mock.calls);
-        expect(calls[0][0]).toContain('/api/extensions/check-updates');
     });
 
     it('throws error on API failure', async () => {

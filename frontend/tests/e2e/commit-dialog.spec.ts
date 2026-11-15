@@ -87,9 +87,12 @@ test.describe.serial('Commit Dialog', () => {
       expect(task?.status).toBe('done');
     }).toPass({ timeout: 60000 });
 
-    // Commit dialog should NOT be visible (no changes)
-    const commitDialog = page.locator('.commit-dialog, [role="dialog"]');
-    await expect(commitDialog).not.toBeVisible({ timeout: 3000 }).catch(() => {});
+    // No changes means there is no commit dialog to confirm. The dialog is the node this flow must
+    // never create, so it is counted — a `not.toBeVisible().catch(() => {})` is an assertion that
+    // cannot fail, which is how this one stopped reporting anything.
+    await expect(
+      page.locator('[role="dialog"]').filter({ has: page.locator('.commit-textarea') }),
+    ).toHaveCount(0);
   });
 
   test('should show commit dialog with changes and allow editing', async ({ page }) => {
