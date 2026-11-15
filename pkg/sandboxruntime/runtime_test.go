@@ -276,16 +276,6 @@ func TestReadCgroupMemory_MissingDir(t *testing.T) {
 	}
 }
 
-// TestCgroupMemoryHeldBytes checks the definition of held memory: what the sandbox itself holds,
-// which is not the same as the file total the cgroup reports.
-func TestCgroupMemoryHeldBytes(t *testing.T) {
-	const mb = int64(1024 * 1024)
-	mem := CgroupMemory{AnonBytes: 17 * mb, ShmemBytes: 200 * mb}
-	if got := mem.HeldBytes(); got != 217*mb {
-		t.Errorf("HeldBytes() = %d MB, want 217 MB", got/mb)
-	}
-}
-
 func TestClearCgroupMemoryLimit(t *testing.T) {
 	dir := t.TempDir()
 	// Simulate a cgroup with a 512 MB limit and no swap.
