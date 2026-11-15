@@ -557,6 +557,28 @@ describe('DiffCache', () => {
         await vi.waitFor(() => expect(cache.state.files['a.ts'].committedRows).toBeUndefined());
     });
 
+    // A merged-in file has no worktree half, and `/diff/file` says so with `rows: []` — an array, not an
+    // absent key. Its committed rows are the only rows that file has, and they are what the Changes panel
+    // draws and counts under "Merged from Subtasks".
+    it('holds the committed rows a delta delivered for a file with no worktree half', async () => {
+        const getDiffFile = vi.fn(async () => ({
+            rows: [],
+            truncated: false,
+            committedRows: [{ lineNumber: 1, variant: 'added', text: 'subtask work' }],
+        }));
+        const cache = new DiffCache(makeApis({
+            getTaskDiff: vi.fn(async () => ({ files: { 'a.ts': { hash: 'h-old', type: 'tracked', added: 1 } } })),
+            getDiffFile,
+        }), () => 'proj-1', () => 'task-1');
+        await cache.loadDiff(() => {});
+        cache.processStats({ hash: 'new-hash', files: 1, additions: 1, deletions: 0, file_hashes: { 'a.ts': 'h-new' } }, false);
+        await vi.waitFor(() => expect(getDiffFile).toHaveBeenCalledTimes(2));
+
+        const file = cache.state.files['a.ts'];
+        expect(file.rows).toEqual([]);
+        expect(file.committedRows?.map(r => r.text)).toEqual(['subtask work']);
+    });
+
     it('expandFile is a no-op for an uncached path or a rowless response', async () => {
         const getDiffFile = vi.fn(async () => ({ rows: undefined, lines: ['a'] }));
         const cache = new DiffCache(makeApis({ getDiffFile }), () => 'proj-1', () => 'task-1');
