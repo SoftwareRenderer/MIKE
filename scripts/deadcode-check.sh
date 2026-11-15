@@ -40,6 +40,7 @@ pkg/logging/logging.go:Reset
 pkg/logging/logging.go:Lines
 backend/auth/pairing.go:Live
 backend/sandbox/build.go:ActiveBuildCount
+backend/sandbox/sandbox.go:SetMountRoot
 "
 
 # pkg/logging, one reason each. deadcode walks a call graph, so it cannot see three legitimate shapes:
@@ -64,6 +65,10 @@ backend/sandbox/build.go:ActiveBuildCount
 # backend/prompts: ActiveOverlay is the read side of SetOverlay. Which (dir, locale) pair the server
 # installed is the wiring a backend/server test owns, and dir has no other read-back - ActiveLocale
 # answers the locale alone.
+#
+# backend/sandbox: SetMountRoot aims the container mount at a test's own tree, which is the only way to
+# stage a checkout at the path its own container mounts at (docs/confinement.md). main never calls it, so
+# production runs on the value MountRootPath() answers by itself.
 
 is_allowed() {
 	local file="$1" name="$2" entry

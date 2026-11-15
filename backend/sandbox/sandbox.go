@@ -45,10 +45,11 @@ const (
 	// A project's .agents/skills/. Its directory is not mounted otherwise, so this bind is what
 	// makes the prompt's skill paths readable in the container.
 	ProjectSkillsMount = "/mnt/project-skills"
-	// MountRoot is where a project's worktree is bind-mounted inside its
-	// container. Build paths with MountPath(), never by hand — the fs API's
-	// containment check compares against this same value.
-	MountRoot = "/home/sandbox"
+	// defaultMountRoot is where a project's worktree is bind-mounted inside its
+	// container. Ask with MountRootPath(); nothing else reads this one, because the bind that creates
+	// the mount and the fs API's containment check that judges a request against it must be given one
+	// answer.
+	defaultMountRoot = "/home/sandbox"
 	// livenessTTL is how long to cache the result of a container liveness check.
 	// Avoids expensive podman inspect calls on every FS operation.
 	livenessTTL = 5 * time.Minute
@@ -65,11 +66,34 @@ func ProjectKey(projectID string) string { return projectKeyPrefix + projectID }
 // IsProjectKey reports whether a key names a project's own container or terminal rather than a task's.
 func IsProjectKey(key string) bool { return strings.HasPrefix(key, projectKeyPrefix) }
 
+// mountRoot holds an injected mount root, empty in every build but a test's. main never sets it, so the
+// root a person's file request is judged against is the one createContainerArgs mounted.
+var mountRoot string
+
+// MountRootPath is the root a project's worktree is mounted at inside its container. MountPath() builds
+// a path under it; this is what a caller comparing a request's spelling against the mount asks.
+func MountRootPath() string {
+	if mountRoot != "" {
+		return mountRoot
+	}
+	return defaultMountRoot
+}
+
+// SetMountRoot aims the mount at root for this process and answers the function that puts it back.
+// Test-only, and the only thing that can be: a test that needs a checkout sitting at the very path its
+// own container mounts at — the collision docs/confinement.md names — cannot stage one under a directory
+// a test user does not own. Production takes no such value from anywhere.
+func SetMountRoot(root string) func() {
+	previous := mountRoot
+	mountRoot = strings.TrimSpace(root)
+	return func() { mountRoot = previous }
+}
+
 // MountPath is the in-container path of projectName's worktree. The result is
 // cleaned, so a project name stored before ValidateProjectName rejected ".."
-// segments cannot move the mount outside MountRoot.
+// segments cannot move the mount outside MountRootPath().
 func MountPath(projectName string) string {
-	return filepath.Join(MountRoot, projectName)
+	return filepath.Join(MountRootPath(), projectName)
 }
 
 // TrimMountPrefix maps a container path under the project's mount to the same

@@ -26,8 +26,10 @@ import (
 // switch the same safety depended on this file remembering to set a variable.
 func TestMain(m *testing.M) {
 	cleanupStaleTestContainers()
+	cleanupFixtureImages()
 	code := m.Run()
 	cleanupStaleTestContainers()
+	cleanupFixtureImages()
 	os.Exit(code)
 }
 
@@ -45,6 +47,49 @@ func cleanupStaleTestContainers() {
 		_ = rt.RemoveContainer(name)
 	}
 }
+
+// cleanupFixtureImages removes any fixture image an interrupted run left staged. The name is this file's
+// own, so removing it asks nothing of the images the product builds and owns.
+func cleanupFixtureImages() {
+	rt := sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{})
+	out, err := rt.PodmanExec("images", "--format", "{{.Repository}}:{{.Tag}}", fixtureImageRef("*"))
+	if err != nil {
+		return
+	}
+	for _, ref := range strings.Fields(strings.TrimSpace(string(out))) {
+		_, _ = rt.PodmanExec("rmi", "-f", ref)
+	}
+}
+
+// stageFixtureImage builds an image declaring one hostile shape GVisorCreateArgs exists to neutralise,
+// so the claim about that shape needs no pull and the property under test is this file's declaration
+// rather than whatever a registry image happened to ship. The base is MIKE's own default, which every
+// container test in this package starts from, and the build is told to pull nothing.
+func stageFixtureImage(t *testing.T, name, instruction string) string {
+	t.Helper()
+	sandboxcheck.RequireBuild(t)
+	sm := NewSandboxManager(bootWithBridge(t))
+	if !sm.ImageReady(BaseImage) {
+		t.Skipf("%s is not in this host's image store, and every container test in this package starts from it", BaseImage)
+	}
+
+	ref := fixtureImageRef(name)
+	dir := t.TempDir()
+	dockerfile := filepath.Join(dir, "Dockerfile")
+	if err := os.WriteFile(dockerfile, []byte("FROM "+BaseImage+"\n"+instruction+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := sandboxruntime.PodmanCommandContext(t.Context(), "build", "--pull=false", "-t", ref, "-f", dockerfile, dir).CombinedOutput()
+	if err != nil {
+		t.Fatalf("stage the fixture image %s: %s", ref, strings.TrimSpace(string(out)))
+	}
+	t.Cleanup(func() { _, _ = sm.podmanExec("rmi", "-f", ref) })
+	return ref
+}
+
+// fixtureImageRef names a staged fixture outside the families the product names and sweeps. It takes "*"
+// to answer the glob a sweep filters by.
+func fixtureImageRef(name string) string { return "localhost/mike-sandbox-fixture-" + name + ":1" }
 
 // findAgentBinary locates the sandbox-bridge binary for tests.
 // bootWithBridge is the boot a sandbox test runs under: the bridge override pointed at the committed
@@ -267,16 +312,19 @@ func TestCleanupStaleContainers(t *testing.T) {
 func TestCreate_OverridesImageEntrypoint(t *testing.T) {
 
 	sm := NewSandboxManager(bootWithBridge(t))
-	sandboxcheck.Require(t, "docker.io/alpine/git")
+	sandboxcheck.Require(t, BaseImage)
 
-	// alpine/git ships ENTRYPOINT ["git"]; without clearing it in the create
-	// args, PID 1 would be `git /bin/sh -c ...` and exit within milliseconds
-	// ("git: '/bin/sh' is not a git command"), taking any exec'd shell with it.
+	// GVisorCreateArgs answers `--entrypoint ""`, and only an image that ships one can tell it is
+	// there: without it PID 1 is the image's own program with MIKE's keep-alive as its arguments, which
+	// exits in milliseconds and takes every exec'd shell with it. The image is staged rather than pulled
+	// so the hostile property is this file's declaration, not a registry's.
+	image := stageFixtureImage(t, "entrypoint", `ENTRYPOINT ["/bin/false"]`)
+
 	dir := taskWorktreeDir(t)
 	taskID := "test-entrypoint-task"
 
 	_, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{
-		BaseImage: "docker.io/alpine/git",
+		BaseImage: image,
 	})
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
@@ -293,7 +341,7 @@ func TestCreate_OverridesImageEntrypoint(t *testing.T) {
 		t.Fatalf("inspect container state: %v", err)
 	}
 	if !running {
-		t.Error("container is not running after Create with alpine/git image — image entrypoint not cleared")
+		t.Error("container is not running after Create from an image that declares an ENTRYPOINT — GVisorCreateArgs stopped clearing it")
 	}
 }
 
@@ -301,12 +349,15 @@ func TestCreate_OverridesImageEntrypoint(t *testing.T) {
 // leftovers consume podman's fixed table of 2048 volume locks, and once they are gone the host refuses every create.
 func TestATaskContainerFromAnImageThatDeclaresAVolumeLeaksNone(t *testing.T) {
 	sm := NewSandboxManager(bootWithBridge(t))
-	sandboxcheck.Require(t, "docker.io/alpine/git") // the image here is the one that declares a volume
+	sandboxcheck.Require(t, BaseImage)
+	// `VOLUME` is the shape that leaks, and it is the shape GVisorCreateArgs' `--image-volume ignore`
+	// exists for, so the image declares one here instead of borrowing a registry image that happens to.
+	image := stageFixtureImage(t, "volume", `VOLUME ["/mike-fixture-volume"]`)
 
 	before := volumeCount(t, sm)
 	taskID := "test-volume-leak-task"
 	if _, err := sm.Create(taskID, taskWorktreeDir(t), &types.Project{Name: "test-proj"}, SandboxOpts{
-		BaseImage: "docker.io/alpine/git",
+		BaseImage: image,
 	}); err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}

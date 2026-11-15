@@ -987,7 +987,7 @@ func (s *Server) validateFSPath(project *types.Project, worktreeRoot, path strin
 
 	// A container spelling becomes the host file it stands for before the jail looks at it: a checkout
 	// can sit at /home/sandbox/<its own name>, where the two spellings are one string.
-	if strings.HasPrefix(cleanPath, sandbox.MountRoot+string(filepath.Separator)) {
+	if strings.HasPrefix(cleanPath, sandbox.MountRootPath()+string(filepath.Separator)) {
 		host, ok := "", false
 		if project.SandboxEnabled {
 			// The tree the request names — the task's worktree when it named one. ContainerToHost()

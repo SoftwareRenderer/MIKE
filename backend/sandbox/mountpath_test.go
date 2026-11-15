@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// TestMountPathIsCleaned: the mount comes from filepath.Join(MountRoot, name), so
+// TestMountPathIsCleaned: the mount comes from filepath.Join(MountRootPath(), name), so
 // a name stored before ValidateProjectName rejected ".." cannot move it.
 func TestMountPathIsCleaned(t *testing.T) {
 	tests := []struct {
@@ -17,12 +17,38 @@ func TestMountPathIsCleaned(t *testing.T) {
 		{"a/../../b", "/home/b"},
 		{"../escape", "/home/escape"},
 		{"sub/dir", "/home/sandbox/sub/dir"},
-		{"", MountRoot},
+		{"", MountRootPath()},
 	}
 	for _, tt := range tests {
 		if got := MountPath(tt.name); got != tt.want {
 			t.Errorf("MountPath(%q) = %q, want %q", tt.name, got, tt.want)
 		}
+	}
+}
+
+// TestSetMountRootAimsAndRestores: the injected root is what MountPath builds under and what a caller
+// comparing a request's spelling asks, and the function SetMountRoot answers puts both back. A test that
+// left the mount aimed at its own temp directory would jail every later request in the process to it.
+func TestSetMountRootAimsAndRestores(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "mount")
+
+	restore := SetMountRoot(root)
+	if got := MountRootPath(); got != root {
+		t.Errorf("MountRootPath() = %q, want the injected %q", got, root)
+	}
+	if got, want := MountPath("proj"), filepath.Join(root, "proj"); got != want {
+		t.Errorf("MountPath(\"proj\") = %q, want %q", got, want)
+	}
+	if _, ok := TrimMountPrefix("proj", filepath.Join(root, "proj", "a.go")); !ok {
+		t.Error("TrimMountPrefix did not recognise a path under the injected mount")
+	}
+	restore()
+
+	if got := MountRootPath(); got != defaultMountRoot {
+		t.Errorf("after the restore MountRootPath() = %q, want %q", got, defaultMountRoot)
+	}
+	if _, ok := TrimMountPrefix("proj", filepath.Join(root, "proj", "a.go")); ok {
+		t.Error("the injected mount was still recognised as a project mount after the restore")
 	}
 }
 

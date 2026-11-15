@@ -76,6 +76,10 @@ projects too because the server process enforces them.
   path, and a checkout can sit at `/home/sandbox/<its own name>`, where the two spellings are one string
   and an answer returned unresolved never had its links read. A project with no container, another
   project's mount and a lookalike mount name take the same refusal: none of them names a file here.
+  The mount root is one value asked through `sandbox.MountRootPath()`, so the bind that makes the mount and
+  the check that judges a request against it cannot be given two answers. `sandbox.SetMountRoot` aims it
+  for one process and nothing else — no flag and no variable reaches it — which is how a test stages a
+  checkout at the mount's own path instead of creating `/home/sandbox` on the machine running it.
 - **The host→container half refuses instead of guessing.** `fsSandboxPath` converts against the root with
   its symlinks resolved — the root `fsutil.Contained` accepted the path under — and
   `sandbox.HostToContainer` answers `(string, bool)`. A `Rel` between two different trees does not fail, it

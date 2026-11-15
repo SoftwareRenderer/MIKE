@@ -251,7 +251,7 @@ func TestValidateFSPathContainerSpellingNamesTheHostFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the project's own container path was refused: %v", err)
 	}
-	if strings.HasPrefix(got, sandbox.MountRoot+string(filepath.Separator)) {
+	if strings.HasPrefix(got, sandbox.MountRootPath()+string(filepath.Separator)) {
 		t.Errorf("validateFSPath returned the container spelling %q; a caller that opens it resolves no symlink", got)
 	}
 	if want := filepath.Join(wantBase, "sub", "f.go"); got != want {
@@ -277,17 +277,19 @@ func TestValidateFSPathContainerSpellingNamesTheHostFile(t *testing.T) {
 }
 
 // TestValidateFSPathMountShapedHostPathStillResolvesLinks is the escape: a project whose host path is
-// shaped exactly like its own mount (/home/sandbox/<name>) made the container spelling and the host path
-// one string, so the accepted answer was unresolved and the caller read through a committed link.
+// shaped exactly like its own mount made the container spelling and the host path one string, so the
+// accepted answer was unresolved and the caller read through a committed link.
 func TestValidateFSPathMountShapedHostPathStillResolvesLinks(t *testing.T) {
 	s := testServer(t)
 	name := "mikeshapelink"
+	// The collision is a host path equal to the container mount, so the test aims the mount at its own
+	// tree: the product's root sits under a directory this user does not own, and a test must not create
+	// it there.
+	t.Cleanup(sandbox.SetMountRoot(filepath.Join(t.TempDir(), "mount")))
 	root := sandbox.MountPath(name)
-	// os.Mkdir, not MkdirAll: a test must not create /home/sandbox on a machine that lacks it.
-	if err := os.Mkdir(root, 0o755); err != nil {
+	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("build the host path shaped like the mount at %s: %v", root, err)
 	}
-	t.Cleanup(func() { _ = os.RemoveAll(root) })
 
 	outside := t.TempDir()
 	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("host secret\n"), 0o600); err != nil {
@@ -309,7 +311,8 @@ func TestValidateFSPathMountShapedHostPathStillResolvesLinks(t *testing.T) {
 	if got, err := s.validateFSPath(proj, "", filepath.Join(root, "link", "secret.txt")); err == nil {
 		t.Errorf("read through a committed symlink was accepted as %q; its bytes are outside the project", got)
 	}
-	// The same path spelled the container way is the request the browser actually sends.
+	// The same path spelled the container way is the request the browser actually sends. It is the same
+	// string here — which is the collision — so a fix that answers only one spelling shows up here.
 	if got, err := s.validateFSPath(proj, "", filepath.Join(sandbox.MountPath(name), "link", "secret.txt")); err == nil {
 		t.Errorf("the container spelling read through a committed symlink and was accepted as %q", got)
 	}
