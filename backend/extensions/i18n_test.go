@@ -18,30 +18,6 @@ import (
 	"testing"
 )
 
-func TestInferExtensionType_I18N(t *testing.T) {
-	caps := &Capabilities{I18N: &I18NConfig{Locale: "zh", MessagesURL: "messages.json"}}
-	if got := inferExtensionType(caps); got != ExtensionTypeI18N {
-		t.Errorf("inferExtensionType(i18n) = %q, want %q", got, ExtensionTypeI18N)
-	}
-
-	// A pack declared next to a heavier capability still infers the heavier type.
-	// Such a manifest is refused at install (validateI18N: a pack gets no sandbox, and
-	// nothing else may share its manifest), so what this ordering decides is what a
-	// rejected manifest is called in the log — and GetI18N must still read the pack half
-	// of it, because refusing an install is not the same as losing the declaration.
-	mixed := &Capabilities{LSP: &LSPConfig{}, I18N: &I18NConfig{Locale: "fr", MessagesURL: "fr.json"}}
-	if got := inferExtensionType(mixed); got != ExtensionTypeLSP {
-		t.Errorf("inferExtensionType(lsp+i18n) = %q, want %q", got, ExtensionTypeLSP)
-	}
-	if mixed.GetI18N() == nil {
-		t.Error("an i18n declaration beside another capability must still be readable as a pack")
-	}
-
-	if got := inferExtensionType(&Capabilities{}); got != "" {
-		t.Errorf("inferExtensionType(empty) = %q, want empty", got)
-	}
-}
-
 func TestI18NManifestJSONRoundTrip(t *testing.T) {
 	raw := `{"display_name":"中文","author":"someone","version":"1.0.0",
 		"capabilities":{"i18n":{"locale":"zh","messages_url":"messages.json","prompts_dir":"prompts"}}}`

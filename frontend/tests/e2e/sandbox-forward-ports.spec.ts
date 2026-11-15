@@ -1,210 +1,116 @@
-import { test, expect } from '@playwright/test';
-import { getProjectId, csrfFetch, isolatedProject, gotoProject } from './helpers';
+import { test, expect, type Page } from '@playwright/test';
+import { clearBoardExcept, clearTasksAfterEach, csrfFetch, gotoProject, isolatedProject, ownProjectId } from './helpers';
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
 isolatedProject();
+// The tasks this file's project holds are released between tests: a live task owns a container charged
+// against the executor's one memory budget, which every worker on this lane shares.
+// `docs/sandbox-runtime.md → The memory budget`.
+clearTasksAfterEach();
+
+/** The Sandbox Configuration dialog. `[role="dialog"]` is not a unique locator here; this class is its own. */
+const form = (page: Page) => page.locator('.sandbox-config-modal');
+
+/** The row Forward Ports owns — a node the dialog only builds while the container can be reached at all. */
+const portsRow = (page: Page) => page.locator('.config-row-subsection');
+
+/**
+ * Opens the Sandbox Configuration form for this file's own project with sandboxing on, network isolation off
+ * and no saved ports.
+ *
+ * A sandbox setting cannot be written while a task of the project runs, and the form is read-only then too, so
+ * the project is emptied first: the two tasks `isolatedProject()` seeds each auto-start a turn, and a task of
+ * this project is the only thing that can refuse the write. Emptying is also what releases their containers.
+ */
+async function prepareSandboxProject(page: Page): Promise<void> {
+  await gotoProject(page);
+  const projectId = ownProjectId();
+  await clearBoardExcept(page, projectId, []);
+  const written = await csrfFetch(page, `/api/projects/${projectId}`, {
+    method: 'PUT',
+    body: { sandbox_enabled: true, sandbox_network_isolation: false, sandbox_forward_ports: [] },
+  });
+  if (!written.ok) {
+    throw new Error(
+      `sandbox settings refused on the project this file owns (${written.status} ${JSON.stringify(written.data)}); ` +
+      'nothing but this file starts a task here, so a refusal is the behaviour under test, not the lane',
+    );
+  }
+  await page.reload();
+  await expect(page.locator('.sandbox-config-btn')).toBeVisible({ timeout: 10000 });
+}
+
+/**
+ * Returns this file's own project the way it found it: no tasks, sandboxing off, no ports saved. The per-worker
+ * project outlives the file, and the explorer reads `sandbox_enabled` to choose which root `/api/fs` answers,
+ * so a project left sandboxed is another file's `path outside allowed project directory`.
+ */
+async function leaveProjectAsFound(page: Page): Promise<void> {
+  const projectId = ownProjectId();
+  // Emptied here rather than left to `clearTasksAfterEach`: the write below is refused while a task runs, and
+  // this says so instead of trusting the order the two hooks run in.
+  await clearBoardExcept(page, projectId, []);
+  const left = await csrfFetch(page, `/api/projects/${projectId}`, {
+    method: 'PUT',
+    body: { sandbox_enabled: false, sandbox_forward_ports: [] },
+  });
+  if (!left.ok) {
+    throw new Error(
+      `could not return this file's project to unsandboxed (${left.status} ${JSON.stringify(left.data)}); ` +
+      'disabling sandboxing needs the lane to start the server with DANGER_ZONE=1',
+    );
+  }
+}
+
+/** Writes the sandbox fields and brings the dialog's own view of them back up. */
+async function writeAndReload(page: Page, fields: Record<string, unknown>): Promise<void> {
+  const written = await csrfFetch(page, `/api/projects/${ownProjectId()}`, { method: 'PUT', body: fields });
+  if (!written.ok) {
+    throw new Error(`sandbox settings refused (${written.status} ${JSON.stringify(written.data)})`);
+  }
+  await page.reload();
+  await expect(page.locator('.sandbox-config-btn')).toBeVisible({ timeout: 10000 });
+}
 
 test.describe.serial('Sandbox Forward Ports', () => {
-  test.beforeEach(async ({ page }) => {
-    await gotoProject(page);
-    await page.waitForSelector('.project-item', { timeout: 10000 });
-    const projectId = await getProjectId(page);
+  test.beforeEach(async ({ page }) => prepareSandboxProject(page));
+  test.afterEach(async ({ page }) => leaveProjectAsFound(page));
 
-    // Check current project state first
-    const currentProject = await page.evaluate(async (pid) => {
-      const res = await fetch(`/api/projects/${pid}`);
-      return res.ok ? res.json() : null;
-    }, projectId);
-
-    // Only update sandbox settings if they don't already match
-    const needsUpdate = !currentProject?.sandbox_enabled || currentProject?.sandbox_network_isolation;
-    if (needsUpdate) {
-      // Stop all in_progress tasks first (blocks sandbox config changes)
-      for (let attempt = 0; attempt < 5; attempt++) {
-        const tasks = await page.evaluate(async (pid) => {
-          const res = await fetch(`/api/projects/${pid}/tasks`);
-          return res.ok ? res.json() : [];
-        }, projectId);
-        let changed = false;
-        for (const task of tasks) {
-          if (task.status === 'in_progress') {
-            await csrfFetch(page, `/api/projects/${projectId}/tasks/${task.id}/stop`, {
-              method: 'POST',
-            }).catch(() => {}); // Ignore if task not running
-            await csrfFetch(page, `/api/projects/${projectId}/tasks/${task.id}/move`, {
-              method: 'POST',
-              body: { status: 'backlog' },
-            }).catch(() => {}); // Ignore if already moved
-            changed = true;
-          }
-        }
-        if (!changed) break;
-        await page.waitForFunction(() => false, {}, { timeout: 1000, polling: 1000 }).catch(() => {});
-      }
-
-      const putResult = await csrfFetch(page, `/api/projects/${projectId}`, {
-        method: 'PUT',
-        body: { sandbox_enabled: true, sandbox_network_isolation: false },
-      });
-      if (!putResult.ok && putResult.status === 409) {
-        // Sandbox can't be enabled due to running tasks from parallel tests
-        // Mark test as skipped - will be retried on next run
-        test.skip('Cannot enable sandbox: tasks are running from parallel tests');
-      } else if (!putResult.ok) {
-        throw new Error(`Failed to enable sandbox: ${putResult.status}`);
-      }
-    }
-
-    // Verify final state
-    await expect(async () => {
-      const project = await page.evaluate(async (pid) => {
-        const res = await fetch(`/api/projects/${pid}`);
-        return res.ok ? res.json() : null;
-      }, projectId);
-      expect(project?.sandbox_enabled).toBe(true);
-      expect(project?.sandbox_network_isolation).toBe(false);
-    }).toPass({ timeout: 5000 });
-
-    // Reload to reset component state
-    await page.reload();
-    await page.waitForSelector('.project-item', { timeout: 10000 });
-    // Double-check no tasks are in progress
-    const tasks = await page.evaluate(async (pid) => {
-      const res = await fetch(`/api/projects/${pid}/tasks`);
-      return res.ok ? res.json() : [];
-    }, projectId);
-    const stillRunning = tasks.filter(t => t.status === 'in_progress');
-    if (stillRunning.length > 0) {
-      console.warn(`WARNING: ${stillRunning.length} tasks still in_progress. Sandbox config modal will be locked.`);
-    }
-  });
-
-  test('should show port forwarding section when sandbox is enabled and network isolation is off', async ({ page }) => {
-    // Verify network isolation is actually off via API (auto-enable may have changed it)
-    const project = await page.evaluate(async (pid) => {
-      const res = await fetch(`/api/projects/${pid}`);
-      return res.ok ? res.json() : null;
-    }, await getProjectId(page));
-
-    // If network isolation is on (auto-enabled), turn it off first
-    if (project?.sandbox_network_isolation) {
-      await csrfFetch(page, `/api/projects/${await getProjectId(page)}`, {
-        method: 'PUT',
-        body: { sandbox_network_isolation: false },
-      });
-      await page.reload();
-      await page.waitForSelector('.project-item', { timeout: 10000 });
-    }
-
-    // Open sandbox config modal
+  test('offers port forwarding while the container can be reached', async ({ page }) => {
     await page.click('.sandbox-config-btn');
-    await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
-
-    // Check if modal is locked (tasks in progress)
-    const isLocked = await page.locator('.locked-view').isVisible().catch(() => false);
-    if (isLocked) {
-      console.warn('Sandbox config modal is locked (tasks in progress) — skipping test');
-      await page.click('.overlay', { position: { x: 10, y: 10 } });
-      await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
-      test.skip('Sandbox config modal is locked');
-    }
-
-    // Wait for config options to render
+    await expect(form(page)).toBeVisible({ timeout: 5000 });
+    // The editable form and the tasks-in-progress read-out are the two branches of this dialog, so the
+    // controls below only exist when this one is on screen.
     await expect(page.locator('.config-options')).toBeVisible({ timeout: 5000 });
 
-    // Forward Ports subsection header should be visible (nested under Network Isolation)
-    const portSection = page.locator('.config-row-subsection');
-    if (await portSection.isVisible().catch(() => false)) {
-      await expect(portSection.locator('.config-label')).toContainText('Forward Ports');
-      // Section starts collapsed when no ports are set — click to expand
-      await portSection.click();
-      await expect(page.locator('.port-add-row')).toBeVisible({ timeout: 5000 });
-      // Description explains auto-assignment
-      await expect(page.locator('.config-row-subsection .config-desc')).toContainText('auto-assigned');
-    } else {
-      // Port forwarding section not visible (network isolation may be on)
-      // Verify the modal is functional instead
-      await expect(page.locator('.config-row')).toBeVisible();
-    }
+    // Nested under Network Isolation, which this file's own project has switched off.
+    await expect(portsRow(page)).toBeVisible({ timeout: 5000 });
+    await expect(portsRow(page).locator('.config-label')).toHaveText('Forward Ports');
 
-    // Close modal
-    await page.click('.overlay', { position: { x: 10, y: 10 } });
-    await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
+    // The section starts collapsed when no port is set; its add row is only built once it is open.
+    await portsRow(page).click();
+    await expect(page.locator('.port-add-row')).toBeVisible({ timeout: 5000 });
+    await expect(portsRow(page).locator('.config-desc')).toContainText('auto-assigned');
+
+    await form(page).locator('.close-btn').click();
+    await expect(form(page)).toBeHidden();
   });
 
-  test('should hide port forwarding section when network isolation is enabled', async ({ page }) => {
-    const projectId = await getProjectId(page);
+  test('hides port forwarding while the network is isolated', async ({ page }) => {
+    await writeAndReload(page, { sandbox_network_isolation: true });
 
-    // Enable network isolation (sandbox already on, isolation off)
-    await csrfFetch(page, `/api/projects/${projectId}`, {
-      method: 'PUT',
-      body: { sandbox_network_isolation: true },
-    });
-    await page.reload();
-    await page.waitForSelector('.project-item', { timeout: 10000 });
-
-    // Open sandbox config modal
     await page.click('.sandbox-config-btn');
-    await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
-
-    // Check if modal is locked (tasks in progress)
-    const isLocked = await page.locator('.locked-view').isVisible().catch(() => false);
-    if (isLocked) {
-      console.warn('Sandbox config modal is locked (tasks in progress) — skipping test');
-      await page.click('.overlay', { position: { x: 10, y: 10 } });
-      await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
-      test.skip('Sandbox config modal is locked');
-    }
-
-    // Forward Ports subsection should NOT be visible (network isolation blocks it)
-    await expect(page.locator('.config-row-subsection')).not.toBeVisible({ timeout: 2000 });
-
-    // Close modal and reset
-    await page.click('.overlay', { position: { x: 10, y: 10 } });
-    await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
-
-    // Reset network isolation to off
-    await csrfFetch(page, `/api/projects/${projectId}`, {
-      method: 'PUT',
-      body: { sandbox_network_isolation: false },
-    });
+    await expect(form(page)).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.config-options')).toBeVisible({ timeout: 5000 });
+    await expect(portsRow(page)).toHaveCount(0);
   });
 
-  test('should hide port forwarding section when sandbox is disabled', async ({ page }) => {
-    const projectId = await getProjectId(page);
+  test('hides port forwarding when sandboxing is off', async ({ page }) => {
+    await writeAndReload(page, { sandbox_enabled: false });
 
-    // Disable sandbox
-    await csrfFetch(page, `/api/projects/${projectId}`, {
-      method: 'PUT',
-      body: { sandbox_enabled: false },
-    });
-    await page.reload();
-    await page.waitForSelector('.project-item', { timeout: 10000 });
-
-    // Open sandbox config modal
     await page.click('.sandbox-config-btn');
-    await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
-
-    // Check if modal is locked (tasks in progress)
-    const isLocked = await page.locator('.locked-view').isVisible().catch(() => false);
-    if (isLocked) {
-      console.warn('Sandbox config modal is locked (tasks in progress) — skipping test');
-      await page.click('.overlay', { position: { x: 10, y: 10 } });
-      await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
-      test.skip('Sandbox config modal is locked');
-    }
-
-    // Forward Ports subsection should NOT be visible (no sandbox = no ports to forward)
-    await expect(page.locator('.config-row-subsection')).not.toBeVisible({ timeout: 2000 });
-
-    // Close modal and reset
-    await page.click('.overlay', { position: { x: 10, y: 10 } });
-    await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
-
-    // Reset sandbox to enabled
-    await csrfFetch(page, `/api/projects/${projectId}`, {
-      method: 'PUT',
-      body: { sandbox_enabled: true, sandbox_network_isolation: false },
-    });
+    await expect(form(page)).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.config-options')).toBeVisible({ timeout: 5000 });
+    await expect(portsRow(page)).toHaveCount(0);
   });
 });

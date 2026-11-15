@@ -189,7 +189,7 @@ func TestDesiredDependencyMountNeedsTheManager(t *testing.T) {
 
 	home, err := os.UserHomeDir()
 	if err != nil || filepath.Clean(home) == "/" {
-		t.Skipf("no home directory outside the app's roots: %v", err)
+		t.Fatalf("no home directory outside the app's roots: %v", err)
 	}
 	home = filepath.Clean(home)
 	got := sm.DesiredDependencyMount(grantedExtension(home))

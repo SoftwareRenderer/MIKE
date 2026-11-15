@@ -139,7 +139,7 @@ func TestMountPolicyValidateHostPath(t *testing.T) {
 		}
 		link := filepath.Join(root, "link")
 		if err := os.Symlink(outside, link); err != nil {
-			t.Skipf("symlinks unavailable: %v", err)
+			t.Fatalf("symlinks unavailable: %v", err)
 		}
 		// The literal path looks like it is inside the allowlist...
 		target := filepath.Join(link, "secret")
@@ -183,7 +183,7 @@ func TestMountPolicySymlinkedRootIsFollowed(t *testing.T) {
 	base := t.TempDir()
 	linkRoot := filepath.Join(base, "link-root")
 	if err := os.Symlink(inner, linkRoot); err != nil {
-		t.Skipf("symlinks unavailable: %v", err)
+		t.Fatalf("symlinks unavailable: %v", err)
 	}
 
 	policy := policyWith(linkRoot)
@@ -445,7 +445,7 @@ func TestValidateHostPath_RejectsDanglingSymlink(t *testing.T) {
 	}
 	link := filepath.Join(root, "link")
 	if err := os.Symlink(filepath.Join(base, "not-created-yet", "payload"), link); err != nil {
-		t.Skipf("symlinks unavailable: %v", err)
+		t.Fatalf("symlinks unavailable: %v", err)
 	}
 
 	p := policyWith(root)

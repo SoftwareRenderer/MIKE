@@ -1003,7 +1003,7 @@ func repoRoot(t *testing.T) string {
 		t.Fatalf("resolve repo root: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "backend", "server", "routes.go")); err != nil {
-		t.Skip("not running from the repository")
+		t.Fatalf("the real-tree rules read the repository, and %s holds no routes.go: %v", root, err)
 	}
 	return root
 }

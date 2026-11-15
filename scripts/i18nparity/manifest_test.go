@@ -260,7 +260,7 @@ func TestCheckSelfContainedRefusesSymlinkEscape(t *testing.T) {
 	}
 	outside := t.TempDir()
 	if err := os.Symlink(outside, filepath.Join(dir, "escape")); err != nil {
-		t.Skipf("symlinks unavailable: %v", err)
+		t.Fatalf("stage the escaping symlink: %v", err)
 	}
 	f := &Findings{}
 	CheckSelfContained(dir, f)
@@ -275,7 +275,7 @@ func TestCheckSelfContainedAllowsInternalSymlink(t *testing.T) {
 	}
 	write(t, inner, "base.tmpl", "x")
 	if err := os.Symlink(filepath.Join(inner, "base.tmpl"), filepath.Join(dir, "link.tmpl")); err != nil {
-		t.Skipf("symlinks unavailable: %v", err)
+		t.Fatalf("stage the internal symlink: %v", err)
 	}
 	f := &Findings{}
 	CheckSelfContained(dir, f)

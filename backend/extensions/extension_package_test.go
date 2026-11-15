@@ -26,7 +26,7 @@ func findExtensionsDir(t *testing.T) string {
 			}
 		}
 	}
-	t.Skip("MIKE-extensions directory not found (skip if running outside repo root)")
+	t.Fatalf("MIKE-extensions directory not found (looked for %s)", strings.Join(candidates, ", "))
 	return ""
 }
 
