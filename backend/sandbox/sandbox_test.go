@@ -74,17 +74,14 @@ func findAgentBinary(t *testing.T) string {
 			}
 		}
 	}
-	t.Skip("sandbox-bridge binary not found (run: CGO_ENABLED=0 GOOS=linux go build -o sandbox/sandbox-bridge ./pkg/sandbox/agent)")
+	t.Fatalf("no sandbox-bridge binary beside this checkout (looked for %s); the committed one is restored by `make bridge`", strings.Join(candidates, ", "))
 	return ""
 }
 
 func TestIsAvailable(t *testing.T) {
+	sandboxcheck.Require(t, BaseImage)
 	sm := NewSandboxManager(bootWithBridge(t))
 
-	// runsc should be available (installed by install-gvisor.sh)
-	if _, err := exec.LookPath("runsc"); err != nil {
-		t.Skip("runsc not installed, skipping availability test")
-	}
 	if !sm.IsAvailable() {
 		t.Error("expected gVisor to be available")
 	}
@@ -244,7 +241,7 @@ func TestCleanupStaleContainers(t *testing.T) {
 		})
 	}
 	if _, err := sm.podmanExec("--runtime-flag", "ignore-cgroups=true", "start", running); err != nil {
-		t.Skipf("cannot start a container for the sweep to leave alone: %v", err)
+		t.Fatalf("cannot start a container for the sweep to leave alone: %v", err)
 	}
 
 	// Verify both containers exist
@@ -270,10 +267,7 @@ func TestCleanupStaleContainers(t *testing.T) {
 func TestCreate_OverridesImageEntrypoint(t *testing.T) {
 
 	sm := NewSandboxManager(bootWithBridge(t))
-	sandboxcheck.Require(t, BaseImage)
-	if !sm.ImageReady("docker.io/alpine/git") {
-		t.Skip("docker.io/alpine/git image not available locally")
-	}
+	sandboxcheck.Require(t, "docker.io/alpine/git")
 
 	// alpine/git ships ENTRYPOINT ["git"]; without clearing it in the create
 	// args, PID 1 would be `git /bin/sh -c ...` and exit within milliseconds
@@ -307,10 +301,7 @@ func TestCreate_OverridesImageEntrypoint(t *testing.T) {
 // leftovers consume podman's fixed table of 2048 volume locks, and once they are gone the host refuses every create.
 func TestATaskContainerFromAnImageThatDeclaresAVolumeLeaksNone(t *testing.T) {
 	sm := NewSandboxManager(bootWithBridge(t))
-	sandboxcheck.Require(t, BaseImage)
-	if !sm.ImageReady("docker.io/alpine/git") {
-		t.Skip("docker.io/alpine/git image not available locally — it is the image here that declares a volume")
-	}
+	sandboxcheck.Require(t, "docker.io/alpine/git") // the image here is the one that declares a volume
 
 	before := volumeCount(t, sm)
 	taskID := "test-volume-leak-task"
@@ -450,9 +441,6 @@ func TestCreate_MissingImageIsActionable(t *testing.T) {
 
 	taskID := "test-missing-image-task"
 	missing := "localhost/kanban-does-not-exist-image:1"
-	if sm.ImageReady(missing) {
-		t.Skipf("%s unexpectedly exists locally", missing)
-	}
 
 	started := time.Now()
 	_, err := sm.Create(taskID, taskWorktreeDir(t), &types.Project{Name: "test-proj"}, SandboxOpts{BaseImage: missing})

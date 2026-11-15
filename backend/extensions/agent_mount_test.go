@@ -140,7 +140,7 @@ func TestValidateAgentMountGrant(t *testing.T) {
 func TestValidateAgentMountGrant_ExpandsHomeAndStoresTheTarget(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		t.Skip("no home directory to expand against")
+		t.Fatalf("no home directory to expand against: %v", err)
 	}
 	// The value saved must be a real host path, because podman does not expand a ~.
 	got, err := ValidateAgentMountGrant(types.SandboxMount{HostPath: "~/.pi/agent", ContainerPath: "/root/.pi/agent", Mode: "rw"})
@@ -160,7 +160,7 @@ func TestValidateAgentMountGrant_ExpandsHomeAndStoresTheTarget(t *testing.T) {
 	}
 	link := filepath.Join(dir, "link")
 	if err := os.Symlink(target, link); err != nil {
-		t.Skipf("cannot create a symlink here: %v", err)
+		t.Fatalf("cannot create a symlink here: %v", err)
 	}
 	got, err = ValidateAgentMountGrant(types.SandboxMount{HostPath: link, ContainerPath: "/root/.pi/agent", Mode: "ro"})
 	if err != nil {

@@ -251,7 +251,7 @@ func TestRegistry_GetAgentSandboxRefusesUnshapelyGrant(t *testing.T) {
 func TestRegistry_GetAgentSandboxRefusesADangerousHostPath(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		t.Skip("no home directory to point a grant at")
+		t.Fatalf("no home directory to point a grant at: %v", err)
 	}
 	newStore := func(hostPath string) *mockExtensionStore {
 		return &mockExtensionStore{extensions: []ext.Extension{{

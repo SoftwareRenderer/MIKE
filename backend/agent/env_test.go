@@ -167,7 +167,7 @@ func TestSafeAgentEnv_NoEnvAtAllForUnknownNames(t *testing.T) {
 func TestSafeAgentEnv_ChildSeesOnlyAllowlist(t *testing.T) {
 	envPath, err := exec.LookPath("env")
 	if err != nil {
-		t.Skipf("env binary not available: %v", err)
+		t.Fatalf("env binary not available: %v", err)
 	}
 	t.Setenv("MIKE_ENCRYPTION_KEY", "super-secret-key")
 	t.Setenv("HOME", "/host/home")

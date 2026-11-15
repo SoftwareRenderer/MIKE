@@ -12,9 +12,6 @@ import (
 func TestSweepInterruptedTempRemovesTheInstallFamiliesAndNothingElse(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("TMPDIR", tmp)
-	if os.TempDir() != tmp {
-		t.Skipf("this platform's temp directory is not TMPDIR (%s), so the sweep cannot be aimed here", os.TempDir())
-	}
 
 	orphan := func(name string) string {
 		t.Helper()
