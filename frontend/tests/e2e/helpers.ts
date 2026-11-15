@@ -575,15 +575,6 @@ export async function sendTurn(
 export async function waitForSendButton(page: Page, timeout = 45_000): Promise<void> {
   await expect(page.locator('.btn-send')).toBeVisible({ timeout });
 }
-/**
- * Like waitForSendButton, but resolves false instead of throwing. It must actually wait:
- * callers test.skip() on false, so a check that returns immediately skips runnable tests.
- */
-export async function waitForSendButtonGraceful(page: Page, timeout = 45_000): Promise<boolean> {
-  return page.locator('.btn-send').waitFor({ state: 'visible', timeout })
-      .then(() => true)
-      .catch(() => false);
-}
 /** Wait until the chat form answers: send (idle) or stop (running) button visible. */
 export async function waitForChatFormReady(page: Page): Promise<void> {
   await expect(page.locator('.chat-form')).toBeVisible();

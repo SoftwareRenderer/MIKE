@@ -626,7 +626,7 @@ func TestPreviewAsset_SymlinkEscapeRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(outsideFile, filepath.Join(dir, "link.css")); err != nil {
-		t.Skipf("symlinks unsupported: %v", err)
+		t.Fatalf("plant the link this refusal is about: %v", err)
 	}
 
 	token, _ := servePreview(t, s, cookie, csrfToken, map[string]any{

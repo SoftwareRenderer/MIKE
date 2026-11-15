@@ -347,7 +347,7 @@ This section is the mechanism.
   `--mount=type=secret` no secret store and `--network=host` no interface, and builds `ARG`, `SHELL`, `VOLUME`,
   `HEALTHCHECK`, `RUN --mount=type=cache` and multi-stage files. So the whitelist bought refusals
   and a false story about where the safety lives.
-  `TestBuildPassesThroughWhatTheVenueAlreadyJails` and
+  `TestBuildAcceptsInstructionsTheSandboxAlreadyLimits` and
   `TestBuildRunsAMultiStageDockerfileOverTwoImages` hold the two halves.
 - **A Dockerfile names images by registry spelling, so it cannot name one off this machine's store.** A short
   ref is qualified the way Docker qualifies it: `docker.io/library/…`. The local-store lookup

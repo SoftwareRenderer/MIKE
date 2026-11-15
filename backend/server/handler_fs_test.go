@@ -563,9 +563,6 @@ func TestFSInitGitRejectsPathOutsideProject(t *testing.T) {
 // repository (rev-parse walks up, so that covers every entry) or carries a .git
 // of its own — a nested repository or a linked worktree.
 func TestFSListGitBadge(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not available")
-	}
 	s := testServer(t)
 	base := t.TempDir()
 

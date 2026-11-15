@@ -285,7 +285,7 @@ func TestValidateFSPathMountShapedHostPathStillResolvesLinks(t *testing.T) {
 	root := sandbox.MountPath(name)
 	// os.Mkdir, not MkdirAll: a test must not create /home/sandbox on a machine that lacks it.
 	if err := os.Mkdir(root, 0o755); err != nil {
-		t.Skipf("%s does not exist and is not creatable here, so a host path shaped like the mount cannot be built: %v", root, err)
+		t.Fatalf("build the host path shaped like the mount at %s: %v", root, err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 
@@ -405,9 +405,6 @@ func TestFSRoutesOfASandboxedProjectActOnTheHostBytes(t *testing.T) {
 // directory the container bind-mounts and answers in the container spelling, and starts no container —
 // a paused task must stay paused when someone opens its files.
 func TestFSListingOfASandboxedProjectReadsHostBytesWithNoContainer(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not available, so there is no repository to mark rows ignored from")
-	}
 	s := testServer(t)
 	sandboxcheck.RequireAvailable(t, s.sandboxMgr)
 	repo := t.TempDir()

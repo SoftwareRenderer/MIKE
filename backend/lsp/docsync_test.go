@@ -191,7 +191,7 @@ func TestReadDocForSyncRefusesANameThatIsNotAFile(t *testing.T) {
 	}
 
 	if err := syscall.Mkfifo(filepath.Join(worktree, "src", "pipe.go"), 0o644); err != nil {
-		t.Skipf("this filesystem cannot hold a FIFO, so an irregular name cannot be planted: %v", err)
+		t.Fatalf("plant the irregular name this read must refuse: %v", err)
 	}
 	done := make(chan error, 1)
 	go func() {

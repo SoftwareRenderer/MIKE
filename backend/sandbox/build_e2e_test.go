@@ -451,8 +451,8 @@ func TestARunStepNeedingMoreThanTheBuildGrantSaysSo(t *testing.T) {
 	var lines []string
 	_, err := sm.BuildProjectImage(context.Background(), project, func(line string) { lines = append(lines, line) })
 	if err == nil {
-		t.Skip("this host let a RUN step take a mount namespace inside the build container, so the grant's " +
-			"ceiling is not where docs/adr/0002 says it is and the refusal sentence needs re-measuring")
+		t.Fatalf("the build let a RUN step take a mount namespace, so the grant's ceiling is not where " +
+			"docs/adr/0002 says it is and the refusal sentence needs re-measuring")
 	}
 	joined := strings.Join(lines, "\n")
 	if !strings.Contains(joined, "capability grants") {
@@ -473,7 +473,7 @@ func TestBuildRunsAMultiStageDockerfileOverTwoImages(t *testing.T) {
 	// Dockerfile whose base floats on `latest` and a test must not need the network to get one.
 	const runtimeRef = "localhost/mike-e2e-runtime:1"
 	if out, err := exec.Command("podman", "tag", "docker.io/library/alpine:3.20", runtimeRef).CombinedOutput(); err != nil {
-		t.Skipf("this host cannot make a second pinned base for the test: %s", strings.TrimSpace(string(out)))
+		t.Fatalf("tag a second pinned base for the test: %s", strings.TrimSpace(string(out)))
 	}
 	t.Cleanup(func() {
 		_, _ = exec.Command("podman", "rmi", runtimeRef).CombinedOutput()
@@ -529,8 +529,9 @@ func TestBuildCannotNameAHostLocalImageByShortName(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM scratch\nCOPY marker /marker\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	sandboxcheck.RequireBuild(t)
 	if out, err := exec.Command("podman", "build", "-t", localRef, "-f", filepath.Join(dir, "Dockerfile"), dir).CombinedOutput(); err != nil {
-		t.Skipf("this host cannot build the local base the test needs: %s", strings.TrimSpace(string(out)))
+		t.Fatalf("build the local base the test needs: %s", strings.TrimSpace(string(out)))
 	}
 	t.Cleanup(func() { _ = exec.Command("podman", "rmi", localRef).Run() })
 

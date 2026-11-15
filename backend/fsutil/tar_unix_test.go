@@ -16,7 +16,7 @@ func TestWriteTarGzSkipsAnIrregularFile(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "proj", "keep.txt"), "kept")
 	if err := syscall.Mkfifo(filepath.Join(dir, "proj", "pipe"), 0o644); err != nil {
-		t.Skipf("no fifo here: %v", err)
+		t.Fatalf("plant the named pipe this archive must leave out: %v", err)
 	}
 
 	var buf bytes.Buffer

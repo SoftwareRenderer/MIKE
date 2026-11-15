@@ -25,11 +25,11 @@ func answeredIn(t *testing.T, within time.Duration, what string, run func() *htt
 	}
 }
 
-// mkFifo plants a FIFO — the one file whose open waits. Skips where the filesystem refuses one.
+// mkFifo plants a FIFO — the one file whose open waits.
 func mkFifo(t *testing.T, path string) {
 	t.Helper()
 	if err := syscall.Mkfifo(path, 0o644); err != nil {
-		t.Skipf("this filesystem cannot hold a FIFO, so an irregular name cannot be planted: %v", err)
+		t.Fatalf("plant the irregular name this read must refuse: %v", err)
 	}
 }
 

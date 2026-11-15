@@ -73,9 +73,8 @@ Because of this, `@codemirror/lang-*` packages for languages covered by extensio
 
 ## Tests
 
-- `backend/extensions/manifest_validate_test.go`: Validator refusals.
+- `backend/extensions/manifest_validate_test.go`: Validator refusals. `TestFileTypeResolution` keeps one extension's two suffixes on two IDs, which is what a `.jsx` collapsed into `typescript` would break.
 - `backend/lsp/docsync_test.go`: Wire IDs per file.
-- `backend/lsp/tsserver_integration_test.go`: Verifies `tsserver` refuses `.jsx` if the ID is collapsed to `typescript`.
 - `frontend/src/lib/syntax/__tests__/spec-language.unit.ts`: Tokens, folds, and indentation.
 - `frontend/src/lib/syntax/__tests__/bracket-pairs.unit.ts`: Nesting levels and CSS classes.
 - `frontend/src/lib/syntax/__tests__/bundled-profiles.unit.ts`: Shipped manifests validation.

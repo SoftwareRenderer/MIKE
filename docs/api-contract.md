@@ -892,7 +892,7 @@ Tests: `backend/server/handler_fs_ops_test.go`; client side `frontend/src/lib/ap
 - A build refusal keeps its own sentence on the way out, for the reason the Errors section gives: the
   Dockerfile being built is the caller's own file.
 
-Tests: `backend/api/project_build_context_test.go`, `TestBuildOptionsFromRequest`,
+Tests: `backend/api/project_build_context_test.go`, `TestRejectBuildQuery`,
 `backend/sandbox/build_e2e_test.go`.
 
 ## Errors

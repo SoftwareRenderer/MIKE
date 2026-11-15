@@ -84,9 +84,6 @@ func TestRoutesRefuseUnregisteredMethodsThroughTheMux(t *testing.T) {
 	}
 }
 
-// TestGETCheckoutNoLongerReachesTheCheckoutHandler: a write route registered without a method takes a
-// cross-site GET straight into a handler that checks out a branch, because CSRFMiddleware guards
-// non-GET requests only.
 // TestStaticPathFallsThroughToTheParameterisedSibling: net/http chooses the **most specific path**
 // first and only then checks the method. With `DELETE /api/projects/{p}/tasks/done` registered and no
 // GET on that path, a GET matches `GET .../tasks/{taskID}` with taskID="done" and answers 404, so "a

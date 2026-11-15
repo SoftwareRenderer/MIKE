@@ -177,7 +177,7 @@ and the nested builder allow: the builder resolves a path reference under the st
 that tries to escape it, gives a secret mount no secret store and a host-network request no interface, and
 builds a multi-stage input over two images (measured in the nested builder). MIKE judges no build input at
 this layer, so the one reading that has to be *complete* rather than conservative is the list of images the
-host must fetch — a ref missed is a build that dies fetching it. `TestBuildPassesThroughWhatTheVenueAlreadyJails`
+host must fetch — a ref missed is a build that dies fetching it. `TestBuildAcceptsInstructionsTheSandboxAlreadyLimits`
 and `TestBuildRunsAMultiStageDockerfileOverTwoImages` hold both halves.
 
 **What would reopen this.** *Per-layer caching:* nesting the builder was adopted because it measured green on

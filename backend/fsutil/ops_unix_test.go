@@ -14,7 +14,7 @@ func TestCopyTreeSkipsAnIrregularFile(t *testing.T) {
 	src := filepath.Join(t.TempDir(), "proj")
 	writeTestFile(t, filepath.Join(src, "keep.txt"), "kept")
 	if err := syscall.Mkfifo(filepath.Join(src, "pipe"), 0o644); err != nil {
-		t.Skipf("no fifo here: %v", err)
+		t.Fatalf("plant the named pipe this walk must leave out: %v", err)
 	}
 	dst := filepath.Join(t.TempDir(), "copy")
 

@@ -97,7 +97,7 @@ func TestOpenVerifiedRefusesANameThatIsNotARegularFile(t *testing.T) {
 	dir := t.TempDir()
 	name := filepath.Join(dir, "pipe")
 	if err := syscall.Mkfifo(name, 0o644); err != nil {
-		t.Skipf("this filesystem cannot hold a FIFO, so an irregular name cannot be planted: %v", err)
+		t.Fatalf("plant the irregular name this refusal is about: %v", err)
 	}
 	before, err := os.Lstat(name)
 	if err != nil {

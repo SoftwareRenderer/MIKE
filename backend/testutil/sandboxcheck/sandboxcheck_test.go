@@ -49,3 +49,15 @@ func TestRequireAvailableSkipsOnlyOnTheSetting(t *testing.T) {
 		t.Error("a host without the runtime ran a test whose premise the server refuses")
 	})
 }
+
+// The build question is asked once per process too, and it is asked of podman: with no podman in PATH
+// the answer is "cannot build", and a podman that appears later does not reopen the verdict.
+func TestBuildProbeAnswersOncePerProcess(t *testing.T) {
+	t.Setenv("PATH", t.TempDir()) // no podman at all
+	if probeBuild(t) == "" {
+		t.Fatal("probeBuild answered buildable with no podman in PATH")
+	}
+	if cached, ok := buildVerdict.Load("build"); !ok || cached.(string) == "" {
+		t.Fatal("the build verdict was not cached")
+	}
+}
