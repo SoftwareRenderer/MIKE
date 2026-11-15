@@ -23,16 +23,18 @@ test.describe.serial('Chat input Escape removes focus', () => {
   test('Escape while streaming blurs the input and never stops generation', async ({ page }) => {
     test.setTimeout(60000);
     const projectId = await getProjectId(page);
-    const taskId = await createTaskViaApi(page, projectId, `chat-esc-streaming-${Date.now()}`);
+    // The turn Escape must land on is the task's own, so it is held open long enough to be caught:
+    // `slow-start` waits 3s before the first chunk and `text_slow` then streams at 100ms a frame
+    // (docs/testing.md → Mock LLM). A turn that never streamed is the regression this spec reports,
+    // so the wait below throws instead of skipping.
+    const taskId = await createTaskViaApi(page, projectId, `chat-esc-streaming-${Date.now()} slow-start llm-fixture:text_slow`);
     await navigateToTask(page, taskId);
     expect(await ensureTaskStarted(page, projectId, taskId)).toBe(true);
 
+    // Waited for first, before anything else costs the page a round trip.
+    await page.locator('.btn-stop').waitFor({ state: 'visible', timeout: 30000 });
     const chatInput = page.locator('#chat-message-input');
     await expect(chatInput).toBeVisible({ timeout: 10000 });
-
-    // Escape must land on an in-flight turn, so wait for streaming (Stop button) first.
-    const streaming = await page.locator('.btn-stop').waitFor({ state: 'visible', timeout: 15000 }).then(() => true).catch(() => false);
-    test.skip(!streaming, 'initial turn was not streaming');
 
     await chatInput.click();
     await expect(chatInput).toBeFocused();

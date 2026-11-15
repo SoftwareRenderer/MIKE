@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch, isolatedProject, gotoProject } from './helpers';
+import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch, isolatedProject, gotoProject, clearBoardExcept } from './helpers';
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
 isolatedProject();
@@ -274,24 +274,15 @@ test.describe('Clear Done Tasks', () => {
   });
 
   test('should not show Clear all button when no done tasks exist', async ({ page }) => {
-    await gotoProject(page);
-    await page.waitForSelector('.card', { timeout: 10000 });
-
     const projectId = await getProjectId(page);
-    const doneCount = await page.evaluate(async ({ pid }) => {
-      const res = await fetch(`/api/projects/${pid}/board`);
-      const board = await res.json();
-      return board.tasks.filter((t: any) => t.status === 'done').length;
-    }, { pid: projectId });
+    // The board this test owns, emptied: choosing the expectation from a count read off the server
+    // let the run decide what it had proven, and its else branch re-asserted the test above.
+    await clearBoardExcept(page, projectId);
+    await gotoProject(page);
+    await expect(page.locator('.board')).toBeVisible({ timeout: 10000 });
 
-    const clearBtn = page.locator('.clear-btn');
-    if (doneCount === 0) {
-      await expect(clearBtn).not.toBeVisible();
-    } else {
-      await expect(async () => {
-        await expect(clearBtn).toBeVisible();
-      }).toPass({ timeout: 5000 });
-    }
+    // The button is a node the column never builds for an empty column, so it is counted.
+    await expect(page.locator('.clear-btn')).toHaveCount(0);
   });
 
   test('should confirm before clearing done tasks', async ({ page }) => {
