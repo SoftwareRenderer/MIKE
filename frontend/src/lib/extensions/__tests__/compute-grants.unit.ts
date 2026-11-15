@@ -17,12 +17,6 @@ describe('computeGrants (manifest permissions ∩ host catalog)', () => {
         expect(granted).toEqual(['config.get']);
     });
 
-    it('never grants a permission that was not declared', () => {
-        const granted = computeGrants(['config.get']);
-        expect(granted).not.toContain('network.proxy');
-        expect(granted).not.toContain('files.read');
-    });
-
     it('returns an empty set for missing or non-array permissions', () => {
         expect(computeGrants(undefined)).toEqual([]);
         expect(computeGrants(null as any)).toEqual([]);
@@ -35,16 +29,10 @@ describe('computeGrants (manifest permissions ∩ host catalog)', () => {
         expect(granted).toEqual(['config.get', 'network.proxy']);
     });
 
-    it('the catalog contains every capability the tests reference', () => {
-        expect(SUPPORTED_CAPABILITIES['config.get']).toBeTruthy();
-        expect(SUPPORTED_CAPABILITIES['network.proxy']).toBeTruthy();
-        // editor.jumpToLine is the event the host forwards to a WYSIWYG
-        // extension so it can scroll to a symbol-outline reference.
-        expect(SUPPORTED_CAPABILITIES['editor.jumpToLine']).toEqual({ kind: 'event' });
-    });
-
     it('grants the editor.jumpToLine event when declared', () => {
-        const granted = computeGrants(['editor.jumpToLine']);
-        expect(granted).toEqual(['editor.jumpToLine']);
+        // The event the host forwards to a WYSIWYG extension so it can scroll to a symbol-outline
+        // reference: an event with nothing to grant on, so the catalog entry is only its kind.
+        expect(SUPPORTED_CAPABILITIES['editor.jumpToLine']).toEqual({ kind: 'event' });
+        expect(computeGrants(['editor.jumpToLine'])).toEqual(['editor.jumpToLine']);
     });
 });

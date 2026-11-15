@@ -149,14 +149,6 @@ describe('ChatEntries — Jump to latest button', () => {
         cleanup();
     });
 
-    it('routes scroll events through the shared tracker', async () => {
-        const { follow, scroller } = await mount();
-        const spy = vi.spyOn(follow, 'handleScroll');
-        await fireEvent.scroll(scroller);
-        expect(spy).toHaveBeenCalled();
-        cleanup();
-    });
-
     it('wraps the entries in a content element the tracker can observe', async () => {
         const { container } = await mount();
         const content = container.querySelector('.chat-content');

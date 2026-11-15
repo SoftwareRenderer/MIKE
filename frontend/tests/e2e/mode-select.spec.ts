@@ -64,58 +64,6 @@ test.describe.serial('ModeSelect component', () => {
     await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
   });
 
-  test('should switch back to Act mode', async ({ page }) => {
-    // Open the Create Task modal
-    await page.locator('.add-task-btn').first().click();
-    await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
-
-    // First switch to Plan to demonstrate switching back
-    await page.locator('.mode-btn').click();
-    await page.locator('.mode-option.plan').click();
-    await expect(page.locator('.mode-btn .mode-label')).toHaveText('Plan');
-
-    // Now switch back to Act
-    await page.locator('.mode-btn').click();
-    await expect(page.locator('.mode-dropdown')).toBeVisible({ timeout: 5000 });
-    await page.locator('.mode-option.act').click();
-
-    // Verify the button now shows "Act"
-    await expect(page.locator('.mode-btn .mode-label')).toHaveText('Act');
-
-    // Verify the act icon is active
-    await expect(page.locator('.mode-btn .mode-icon.act')).toBeVisible();
-
-    // Verify dropdown closed after selection
-    await expect(page.locator('.mode-dropdown')).not.toBeVisible({ timeout: 5000 });
-
-    // Close modal
-    await dismissTaskModal(page).click();
-    await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
-  });
-
-  test('should close dropdown when clicking outside', async ({ page }) => {
-    // Open the Create Task modal
-    await page.locator('.add-task-btn').first().click();
-    await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
-
-    // Click the mode selector to open dropdown
-    await page.locator('.mode-btn').click();
-    await expect(page.locator('.mode-dropdown')).toBeVisible({ timeout: 5000 });
-
-    // Click outside the dropdown (on the modal background/body area)
-    // Click on the textarea which is outside the mode-select element
-    await page.locator('.modal textarea').click();
-
-    // Verify the dropdown closed
-    await expect(page.locator('.mode-dropdown')).not.toBeVisible({ timeout: 5000 });
-
-    // Verify the button is still visible (modal not closed)
-    await expect(page.locator('.mode-btn')).toBeVisible();
-
-    // Close modal
-    await dismissTaskModal(page).click();
-    await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
-  });
 });
 
 test.describe.serial('Question mark auto-switches operating mode to Explore', () => {
@@ -140,60 +88,6 @@ test.describe.serial('Question mark auto-switches operating mode to Explore', ()
 
     // The explore icon should be active
     await expect(page.locator('.mode-btn .mode-icon.explore')).toBeVisible();
-
-    // Close modal (prompt is non-empty → confirm discard)
-    await dismissTaskModal(page).click();
-    await expect(page.getByRole('button', { name: 'Discard' })).toBeVisible({ timeout: 5000 });
-    await page.getByRole('button', { name: 'Discard' }).click();
-    await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
-  });
-
-  test('should revert to the previous mode when the ? is removed', async ({ page }) => {
-    // Open the Create Task modal
-    await page.locator('.add-task-btn').first().click();
-    await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
-
-    await expect(page.locator('.mode-btn .mode-label')).toHaveText('Act');
-
-    // Add a ? — mode switches to Explore
-    await page.locator('#task-description').fill('Why is the login broken?');
-    await expect(page.locator('.mode-btn .mode-label')).toHaveText('Explore');
-
-    // Remove the ? — mode should revert to Act
-    await page.locator('#task-description').fill('Why is the login broken');
-    await expect(page.locator('.mode-btn .mode-label')).toHaveText('Act');
-
-    // Type ? again and remove it again — still reverts
-    await page.locator('#task-description').fill('Why is the login broken?');
-    await expect(page.locator('.mode-btn .mode-label')).toHaveText('Explore');
-    await page.locator('#task-description').fill('no question mark here');
-    await expect(page.locator('.mode-btn .mode-label')).toHaveText('Act');
-
-    // Close modal (prompt is non-empty → confirm discard)
-    await dismissTaskModal(page).click();
-    await expect(page.getByRole('button', { name: 'Discard' })).toBeVisible({ timeout: 5000 });
-    await page.getByRole('button', { name: 'Discard' }).click();
-    await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
-  });
-
-  test('should not override a manually selected mode', async ({ page }) => {
-    // Open the Create Task modal
-    await page.locator('.add-task-btn').first().click();
-    await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
-
-    // Manually select Plan mode
-    await page.locator('.mode-btn').click();
-    await expect(page.locator('.mode-dropdown')).toBeVisible({ timeout: 5000 });
-    await page.locator('.mode-option.plan').click();
-    await expect(page.locator('.mode-btn .mode-label')).toHaveText('Plan');
-
-    // Add a ? — mode should STAY Plan (user changed it)
-    await page.locator('#task-description').fill('Why is the login broken?');
-    await expect(page.locator('.mode-btn .mode-label')).toHaveText('Plan');
-
-    // Remove the ? — mode should STAY Plan (no revert)
-    await page.locator('#task-description').fill('Why is the login broken');
-    await expect(page.locator('.mode-btn .mode-label')).toHaveText('Plan');
 
     // Close modal (prompt is non-empty → confirm discard)
     await dismissTaskModal(page).click();

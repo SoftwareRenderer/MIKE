@@ -91,22 +91,10 @@ test.describe.serial('Model switcher in task view', () => {
         // The model might be model-a1 or model-a depending on config state from parallel tests
         expect(taskData.model_name).toMatch(/^model-a/);
 
-        // Wait for streaming to complete (send button visible means idle)
-        // If the executor is running, wait for it to finish (or stop it if possible)
-        // First ensure the chat form is loaded
+        // The selector is only usable once the task is idle, and creating the task started a turn:
+        // this is a turn-bound wait, so it carries the turn budget rather than the expect default.
         await expect(page.locator('.chat-form')).toBeVisible({ timeout: 15000 });
-        await expect(async () => {
-            const hasSend = await page.locator('.btn-send').isVisible();
-            if (hasSend) return;
-            // If stop button is visible, click it to cancel
-            const hasStop = await page.locator('.btn-stop').isVisible();
-            if (hasStop) {
-                await page.locator('.btn-stop').click().catch(() => {});
-            }
-            // If neither, the form might still be loading
-            throw new Error('Neither send nor stop button visible');
-        }).toPass({ timeout: 15000 });
-        await expect(page.locator('.btn-send')).toBeVisible({ timeout: 30000 });
+        await waitForSendButton(page);
 
         // Open the provider dropdown
         await page.click('.provider-trigger');
@@ -142,16 +130,9 @@ test.describe.serial('Model switcher in task view', () => {
         let taskData = await getTaskData(page, projectId, taskId);
         expect(taskData.model_name).toBe('model-a1');
 
-        // Wait for streaming to complete (send button visible means idle)
+        // Idle before the selector is touched, with the turn budget — creating the task started a turn.
         await expect(page.locator('.chat-form')).toBeVisible({ timeout: 15000 });
-        await expect(async () => {
-            const hasSend = await page.locator('.btn-send').isVisible();
-            if (hasSend) return;
-            const hasStop = await page.locator('.btn-stop').isVisible();
-            if (hasStop) await page.locator('.btn-stop').click().catch(() => {});
-            throw new Error('Neither send nor stop button visible');
-        }).toPass({ timeout: 15000 });
-        await expect(page.locator('.btn-send')).toBeVisible({ timeout: 30000 });
+        await waitForSendButton(page);
 
         // Open the model dropdown
         await page.click('.model-trigger');
@@ -383,53 +364,54 @@ test.describe.serial('Reasoning effort setting', () => {
         await expect(page.locator('.provider-details')).toBeVisible({ timeout: 3000 });
 
         const reasoningInputs = page.locator('.reasoning-effort-input');
-        const count = await reasoningInputs.count();
+        // The seeded provider has two models, so an input per model is this test's precondition and
+        // not a branch to pass without: a run with no input on screen has persisted nothing.
+        await expect(reasoningInputs.first(),
+          'the seeded provider renders no reasoning-effort input to change').toBeVisible({ timeout: 5000 });
 
-        if (count > 0) {
-            // Change first model's reasoning effort to 'high' via the suggestion list
-            const effortInput = reasoningInputs.first();
-            await effortInput.focus();
-            await page.locator('.reasoning-effort-list .reasoning-effort-option', { hasText: 'High' }).click();
-            await expect(effortInput).toHaveValue('high');
+        // Change first model's reasoning effort to 'high' via the suggestion list
+        const effortInput = reasoningInputs.first();
+        await effortInput.focus();
+        await page.locator('.reasoning-effort-list .reasoning-effort-option', { hasText: 'High' }).click();
+        await expect(effortInput).toHaveValue('high');
 
-            await page.click('button:has-text("Save")');
-            // Wait for modal to close (replaces waitForTimeout(1000))
-            await expect(page.locator('.modal')).not.toBeVisible({ timeout: 10000 });
+        await page.click('button:has-text("Save")');
+        // Wait for modal to close (replaces waitForTimeout(1000))
+        await expect(page.locator('.modal')).not.toBeVisible({ timeout: 10000 });
 
-            // Reopen settings
-            await openProviders(page);
+        // Reopen settings
+        await openProviders(page);
 
-            // Expand first provider again
-            await providerHeader.click();
-            // Wait for details to appear (replaces waitForTimeout(300))
-            await expect(page.locator('.provider-details')).toBeVisible({ timeout: 3000 });
+        // Expand first provider again
+        await providerHeader.click();
+        // Wait for details to appear (replaces waitForTimeout(300))
+        await expect(page.locator('.provider-details')).toBeVisible({ timeout: 3000 });
 
-            // Check that the value persisted
-            const savedInput = page.locator('.reasoning-effort-input').first();
-            const savedValue = await savedInput.inputValue();
-            expect(savedValue).toBe('high');
+        // Check that the value persisted
+        const savedInput = page.locator('.reasoning-effort-input').first();
+        const savedValue = await savedInput.inputValue();
+        expect(savedValue).toBe('high');
 
-            // Change to 'default' and save to verify it also round-trips
-            await savedInput.fill('default');
-            await page.click('button:has-text("Save")');
-            // Wait for modal to close (replaces waitForTimeout(500))
-            await expect(page.locator('.modal')).not.toBeVisible({ timeout: 10000 });
+        // Change to 'default' and save to verify it also round-trips
+        await savedInput.fill('default');
+        await page.click('button:has-text("Save")');
+        // Wait for modal to close (replaces waitForTimeout(500))
+        await expect(page.locator('.modal')).not.toBeVisible({ timeout: 10000 });
 
-            // Reopen settings and verify 'default' persisted
-            await openProviders(page);
-            await providerHeader.click();
-            await expect(page.locator('.provider-details')).toBeVisible({ timeout: 3000 });
-            const finalValue = await page.locator('.reasoning-effort-input').first().inputValue();
-            expect(finalValue).toBe('default');
+        // Reopen settings and verify 'default' persisted
+        await openProviders(page);
+        await providerHeader.click();
+        await expect(page.locator('.provider-details')).toBeVisible({ timeout: 3000 });
+        const finalValue = await page.locator('.reasoning-effort-input').first().inputValue();
+        expect(finalValue).toBe('default');
 
-            // Close settings
-            await page.click('button:has-text("Cancel")');
-            const discardBtn = page.getByRole('button', { name: 'Discard' });
-            if (await discardBtn.isVisible().catch(() => false)) {
-                await discardBtn.click();
-            }
-            await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
+        // Close settings
+        await page.click('button:has-text("Cancel")');
+        const discardBtn = page.getByRole('button', { name: 'Discard' });
+        if (await discardBtn.isVisible().catch(() => false)) {
+            await discardBtn.click();
         }
+        await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
     });
 
     test('should persist a custom reasoning effort after save', async ({ page }) => {
@@ -442,7 +424,10 @@ test.describe.serial('Reasoning effort setting', () => {
         await expect(page.locator('.provider-details')).toBeVisible({ timeout: 5000 });
 
         const reasoningInputs = page.locator('.reasoning-effort-input');
-        if (await reasoningInputs.count() === 0) return;
+        // The seeded provider has one model, so the input is the precondition of this test and not a
+        // branch to return out of: a run with no input on screen proves nothing about persistence.
+        await expect(reasoningInputs.first(),
+          'the seeded provider renders no reasoning-effort input to type into').toBeVisible({ timeout: 5000 });
 
         // Type a value that is not one of the known levels (no suggestion matches)
         await reasoningInputs.first().fill('xhigh');
