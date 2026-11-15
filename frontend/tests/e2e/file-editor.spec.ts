@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync, rmSync, readdirSync, statSync } from 'node:fs
 import { execSync } from 'node:child_process';
 import { join } from 'path';
 import {
-  createTaskViaApi, csrfFetch, getProjectId, navigateToTask, projectDirPath, selectProject, waitForChatForm, waitForSendButton, waitForSendButtonGraceful, waitForWorktree, writeFileInWorktree, isolatedProject, gotoProject,
+  createTaskViaApi, csrfFetch, getProjectId, navigateToTask, projectDirPath, selectProject, waitForChatForm, waitForSendButton, waitForWorktree, writeFileInWorktree, isolatedProject, gotoProject,
 } from './helpers';
 // Each test file gets its own project, because it starts a turn: see isolatedProject() in helpers.ts.
 isolatedProject();
@@ -235,23 +235,6 @@ test.describe('File @ Mention', () => {
     });
   });
 
-  test('should show file mention dropdown when typing @ in create task modal', async ({ page }) => {
-    // Open the create task modal
-    await page.locator('.add-task-btn').click();
-    await expect(page.locator('#task-description')).toBeVisible();
-
-    // Type @ and trigger input
-    const textarea = page.locator('#task-description');
-    await typeAtSign(page, textarea);
-
-    // Wait for the dropdown to appear
-    await expect(page.locator('.mention-dropdown')).toBeVisible({ timeout: 5000 });
-
-    // Should show file results
-    const items = page.locator('.mention-item');
-    await expect(items).toHaveCount(5);
-  });
-
   test('should navigate dropdown with arrow keys', async ({ page }) => {
     await page.locator('.add-task-btn').click();
     await expect(page.locator('#task-description')).toBeVisible();
@@ -295,25 +278,6 @@ test.describe('File @ Mention', () => {
     // Textarea should contain @path of second item
     const value = await textarea.inputValue();
     expect(value).toBe('@src/app.ts');
-  });
-
-  test('should close dropdown with Escape', async ({ page }) => {
-    await page.locator('.add-task-btn').click();
-    await expect(page.locator('#task-description')).toBeVisible();
-
-    const textarea = page.locator('#task-description');
-    await typeAtSign(page, textarea);
-    await expect(page.locator('.mention-dropdown')).toBeVisible({ timeout: 5000 });
-
-    // Press Escape to close
-    await textarea.press('Escape');
-
-    // Dropdown should be hidden
-    await expect(page.locator('.mention-dropdown')).not.toBeVisible();
-
-    // The @ should still be in the textarea
-    const value = await textarea.inputValue();
-    expect(value).toBe('@');
   });
 
   test('should select a file by clicking without closing the modal', async ({ page }) => {

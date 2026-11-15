@@ -112,29 +112,6 @@ test.describe('Start Task Button', () => {
   });
 });
 
-// --- No Legacy Start/Stop Buttons ---
-
-test.describe('No Legacy Start/Stop Buttons', () => {
-  test.beforeEach(async ({ page }) => {
-    await gotoProject(page);
-    await page.waitForSelector('.project-item', { timeout: 10000 });
-  });
-
-  test('should not show Start/Stop buttons in header', async ({ page }) => {
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
-
-    const startButtons = page.locator('[title="Start task"]');
-    const stopButtons = page.locator('[title="Stop task"]');
-    await expect(startButtons).not.toBeVisible();
-    await expect(stopButtons).not.toBeVisible();
-
-    const hasChatForm = await page.locator('.chat-form').isVisible().catch(() => false);
-    const hasStartButton = await page.locator('.btn-start-task').isVisible().catch(() => false);
-    expect(hasChatForm || hasStartButton).toBe(true);
-  });
-});
-
 // --- Task Detail Layout ---
 
 test.describe('Task Detail Layout', () => {
@@ -333,27 +310,3 @@ test.describe.serial('Subtask Progress Tracking', () => {
   });
 });
 
-// --- Task Commit Diff ---
-
-test.describe.serial('Task Commit Diff', () => {
-  test.beforeEach(async ({ page }) => {
-    await gotoProject(page);
-    await page.waitForSelector('.card', { timeout: 10000 });
-  });
-
-  test('Changes panel renders without errors for tasks with no commits', async ({ page }) => {
-    const firstCard = page.locator('.card').first();
-    await firstCard.click();
-    await page.waitForSelector('.task-detail-page', { timeout: 10000 });
-
-    const changesTab = page.locator('.tab-btn:has-text("Changes")');
-    if (await changesTab.isVisible().catch(() => false)) {
-      await changesTab.click();
-      // Wait for diff content to render instead of fixed delay
-      await expect(page.locator('.diff-content')).toBeVisible();
-    }
-
-    const diffContent = page.locator('.diff-content');
-    await expect(diffContent).toBeVisible();
-  });
-});

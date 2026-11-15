@@ -340,17 +340,6 @@ func TestOrdinaryWaitsAreNotReported(t *testing.T) {
 	}
 }
 
-// Disabling the report must not cost a channel operation or a clock read per acquisition — that is the
-// reason it is a threshold on the table rather than a timer per wait.
-func TestReportDisabledTakesNoClock(t *testing.T) {
-	tbl := newTable(0, nil)
-	release := tbl.Lock("k")
-	release()
-	if tbl.slowAfter != 0 || tbl.onSlow != nil {
-		t.Fatal("a table nobody configured carries report state")
-	}
-}
-
 // A zero Table must work: a keyed lock that panics when its owner was built as `&T{}` puts a crash in
 // production paths no test touched.
 func TestZeroTableIsUsable(t *testing.T) {

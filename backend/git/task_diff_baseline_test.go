@@ -52,7 +52,7 @@ func newDiffBaselineEnv(t *testing.T) *diffBaselineEnv {
 	repoDir, taskID, s, _, wm := setupTestRepo(t)
 	mainBranch, err := wm.gitCurrentBranch(repoDir)
 	if err != nil || mainBranch == "" || mainBranch == "HEAD" {
-		t.Skipf("cannot determine main branch: %v", err)
+		t.Fatalf("the fixture repo holds a commit, so rev-parse must name its branch: got %q (err %v)", mainBranch, err)
 	}
 	taskBranch := "task/" + taskID
 	if _, _, err := wm.CreateWorktree("test-project", taskID, taskBranch, ""); err != nil {

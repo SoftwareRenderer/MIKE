@@ -183,43 +183,6 @@ func TestGetProjectStatsExcludesUserMessages(t *testing.T) {
 	}
 }
 
-func TestGetProjectStatsThroughput(t *testing.T) {
-	s := testStore(t)
-	proj := newProject("proj-1", "test", "/tmp/test")
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	task := newTask("task-1", "proj-1")
-	if err := s.CreateTask(task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	msg := newMessage("m1", "task-1", "assistant", "response")
-	msg.PromptTokens = 1000
-	msg.PredictedTokens = 500
-	msg.CacheTokens = 0
-	msg.PromptMs = 1000    // 1s
-	msg.PredictedMs = 2000 // 2s
-
-	if err := s.CreateTaskMessage(msg); err != nil {
-		t.Fatalf("create message: %v", err)
-	}
-
-	stats, err := s.GetProjectStats("proj-1")
-	if err != nil {
-		t.Fatalf("get stats: %v", err)
-	}
-
-	// Prompt throughput: 1000 tokens / 1s = 1000 tok/s
-	if !floatEquals(stats.AvgPromptTps, 1000.0, 1.0) {
-		t.Fatalf("expected ~1000 prompt tok/s, got %.2f", stats.AvgPromptTps)
-	}
-	// Generation throughput: 500 tokens / 2s = 250 tok/s
-	if !floatEquals(stats.AvgGenerationTps, 250.0, 1.0) {
-		t.Fatalf("expected ~250 generation tok/s, got %.2f", stats.AvgGenerationTps)
-	}
-}
-
 func TestGetProjectStatsThroughputExcludesNoTimingData(t *testing.T) {
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
@@ -264,6 +227,10 @@ func TestGetProjectStatsThroughputExcludesNoTimingData(t *testing.T) {
 		t.Fatalf("expected 2500 total generated tokens, got %d", stats.TotalGeneratedTokens)
 	}
 
+	// Prompt throughput: the 1000 tokens over the 1s the one provider with timing data reported.
+	if !floatEquals(stats.AvgPromptTps, 1000.0, 1.0) {
+		t.Fatalf("expected ~1000 prompt tok/s, got %.2f", stats.AvgPromptTps)
+	}
 	// Overall gen TPS counts only the 500 tokens the provider with timing data reported, over its 2s.
 	// Including the timing-less provider would answer (500+2000)/2s = 1250.
 	if !floatEquals(stats.AvgGenerationTps, 250.0, 1.0) {
@@ -286,6 +253,9 @@ func TestGetProjectStatsThroughputExcludesNoTimingData(t *testing.T) {
 		t.Fatal("missing model group")
 	}
 	// gpt-4 has timing data, so its TPS should be correct
+	if !floatEquals(gpt4.AvgPromptTps, 1000.0, 1.0) {
+		t.Fatalf("expected gpt-4 ~1000 prompt tok/s, got %.2f", gpt4.AvgPromptTps)
+	}
 	if !floatEquals(gpt4.AvgGenerationTps, 250.0, 1.0) {
 		t.Fatalf("expected gpt-4 ~250 gen tok/s, got %.2f", gpt4.AvgGenerationTps)
 	}

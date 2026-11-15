@@ -798,50 +798,6 @@ func TestApplyPricingWithPower(t *testing.T) {
 	floatApprox(t, stats.TotalCost, expectedTotalCost, 0.0001)
 }
 
-func TestApplyPricingPowerOnlyNoElectricity(t *testing.T) {
-	h, projID := testProjectHandler(t)
-
-	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "1",
-		1000, 500, 100, 1000, 5000)
-
-	// Set up provider with power but NO electricity cost
-	cfg, _ := h.configStore.GetConfig()
-	cfg.Providers = []types.Provider{
-		{
-			ID:                1,
-			Name:              "prov-x",
-			DisplayName:       "Provider X",
-			URL:               "http://localhost:8080/v1",
-			InputPrice:        3.0,
-			OutputPrice:       5.0,
-			CacheReadPrice:    1.0,
-			PowerConsumptionW: 500.0,
-			// ElectricityCostPerKwh not set (0)
-		},
-	}
-	h.configStore.UpdateConfig(cfg)
-
-	stats, err := h.store.GetProjectStats(projID)
-	if err != nil {
-		t.Fatalf("get stats: %v", err)
-	}
-	h.applyPricing(stats)
-
-	if len(stats.ByModel) != 1 {
-		t.Fatalf("expected 1 model, got %d", len(stats.ByModel))
-	}
-	m := stats.ByModel[0]
-
-	// Power should be computed
-	expectedKwh := 500.0 * 5000.0 / 3_600_000_000
-	floatApprox(t, m.PowerKwh, expectedKwh, 0.000001)
-	floatApprox(t, stats.TotalPowerKwh, expectedKwh, 0.000001)
-
-	// Cost should be API only (no electricity added)
-	floatApprox(t, m.Cost, 0.0053, 0.0001)
-	floatApprox(t, stats.TotalCost, 0.0053, 0.0001)
-}
-
 func TestApplyPricingAgentProviderSkipped(t *testing.T) {
 	h, projID := testProjectHandler(t)
 
@@ -882,6 +838,10 @@ func TestApplyPricingAgentProviderSkipped(t *testing.T) {
 	floatApprox(t, m.Cost, 0, 0.0001)
 }
 
+// One provider priced by the token and one by the token alone, so per-model and project totals
+// are read against a second provider that is not in the first's shadow. prov-x is also the only
+// row pinning a provider with power but no electricity price: kWh is recorded, and nothing is
+// added to the cost.
 func TestApplyPricingMultipleProviders(t *testing.T) {
 	h, projID := testProjectHandler(t)
 

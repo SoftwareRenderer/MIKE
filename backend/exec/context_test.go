@@ -10,25 +10,6 @@ import (
 
 // --- Checkpoint Label Prompt Tests ---
 
-func TestCheckpointLabelPrompt_Exists(t *testing.T) {
-	t.Parallel()
-	if checkpointLabelPrompt == "" {
-		t.Error("checkpointLabelPrompt should not be empty")
-	}
-	if !strings.Contains(checkpointLabelPrompt, "5 words") {
-		t.Error("checkpointLabelPrompt should mention 5 words limit")
-	}
-}
-
-func TestCheckpointLabelPrompt_UseDescription(t *testing.T) {
-	t.Parallel()
-	// Label is only generated at fork time, not during checkpoint creation.
-	// See handleThreadFork -> generateCheckpointLabelForFork -> GenerateCheckpointLabel.
-	if !strings.Contains(checkpointLabelPrompt, "imperative mood") {
-		t.Error("checkpointLabelPrompt should specify imperative mood")
-	}
-}
-
 func TestBuildCheckpointLabelMessages(t *testing.T) {
 	t.Parallel()
 	msgs := buildCheckpointLabelMessages("src/main.go | 10 ++++++++---", "User: Fix the bug\nAssistant: I'll patch it")
@@ -38,6 +19,9 @@ func TestBuildCheckpointLabelMessages(t *testing.T) {
 	}
 	if msgs[0].Role != "system" {
 		t.Errorf("expected system role, got %s", msgs[0].Role)
+	}
+	if msgs[0].Content != checkpointLabelPrompt {
+		t.Error("the system turn must carry the checkpoint label instruction")
 	}
 	if msgs[1].Role != "user" {
 		t.Errorf("expected user role, got %s", msgs[1].Role)

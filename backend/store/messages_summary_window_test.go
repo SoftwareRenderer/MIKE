@@ -81,32 +81,13 @@ func TestGetTaskMessagesFromSummaryStartsAtTheNewestSummary(t *testing.T) {
 	}
 }
 
-// Without a summary there is nothing to cut at, and the read must be the thread.
-func TestGetTaskMessagesFromSummaryWithoutASummaryReadsTheThread(t *testing.T) {
-	s := testStore(t)
-	threadAndProject(t, s, "task-1")
-	ids := seedMessages(t, s, "task-1", "thr-1", 0, 9)
-
-	got, err := s.GetTaskMessagesFromSummary("task-1", "thr-1")
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	if len(got) != len(ids) {
-		t.Fatalf("%d rows, want all %d", len(got), len(ids))
-	}
-	for i := range ids {
-		if got[i].ID != ids[i] {
-			t.Fatalf("row %d is %s, want %s", i, got[i].ID, ids[i])
-		}
-	}
-}
-
 // A thread's summary bounds only that thread: a fork inherits the summarization rows and switches
-// to a thread of its own, which has said nothing yet.
+// to a thread of its own, which has said nothing yet. With nothing of its own to cut at, the read
+// is the whole thread, in the order it was written.
 func TestGetTaskMessagesFromSummaryIgnoresAnotherThreadsSummary(t *testing.T) {
 	s := testStore(t)
 	threadAndProject(t, s, "task-1")
-	ids := seedMessages(t, s, "task-1", "thr-1", 0, 6)
+	ids := seedMessages(t, s, "task-1", "thr-1", 0, 9)
 	seedSummary(t, s, "task-1", "thr-2", "sum-other", summarySeedBase.Add(3*time.Second))
 
 	got, err := s.GetTaskMessagesFromSummary("task-1", "thr-1")
@@ -115,6 +96,11 @@ func TestGetTaskMessagesFromSummaryIgnoresAnotherThreadsSummary(t *testing.T) {
 	}
 	if len(got) != len(ids) {
 		t.Fatalf("%d rows, want this thread's %d", len(got), len(ids))
+	}
+	for i := range ids {
+		if got[i].ID != ids[i] {
+			t.Fatalf("row %d is %s, want %s", i, got[i].ID, ids[i])
+		}
 	}
 }
 
