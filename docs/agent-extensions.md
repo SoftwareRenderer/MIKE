@@ -25,7 +25,7 @@ Event types: `token`, `reasoning`, `tool_call`, `tool_result`, `status`, `stats`
 
 - **Persistence:** `EventTypePersist` uses `[]PersistEntry` to save assistant text, reasoning, and tool calls to the database. This is the only way to persist data, allowing the backend to remain protocol-agnostic.
 
-**Stats:** `EventTypeStats` provides `SessionStatsData` (context, input/output tokens, and cost) for the task card via `sendAgentStats` in `backend/exec/loop_agent.go`. Cache figures (`TotalCacheRead`/`TotalCacheWrite`) are currently unused and report 0; enabling them requires a coordinated frontend update.
+**Stats:** `EventTypeStats` provides `SessionStatsData` (context, input/output tokens, and cost) for the task card via `sendAgentStats` in `backend/exec/loop_agent.go`. Cache figures (`TotalCacheRead`/`TotalCacheWrite`) arrive from the adapters and are read by nothing. The task card's stats frame carries no cache key, and `PersistEntry` has no cache field, so the stored row the stats panel reads holds 0. Enabling them needs two changes: a per-message cache figure on `PersistEntry` from the adapter, and a reader for it in the task card and the stats panel.
 
 ## WASM Memory Model
 

@@ -139,10 +139,9 @@ func TestListPasskeysIsOldestFirst(t *testing.T) {
 
 func TestDeletePasskeyRefusesTheLastOne(t *testing.T) {
 	s := testStore(t)
-	ctx := context.Background()
 	addPasskey(t, s, "only", "localhost", time.Now())
 
-	deleted, err := s.DeletePasskey(ctx, "only")
+	deleted, err := s.DeletePasskey("only")
 	if !errors.Is(err, ErrLastPasskey) || deleted {
 		t.Fatalf("delete of the last passkey = %v, %v; want false, ErrLastPasskey", deleted, err)
 	}
@@ -151,15 +150,15 @@ func TestDeletePasskeyRefusesTheLastOne(t *testing.T) {
 	}
 
 	addPasskey(t, s, "second", "localhost", time.Now())
-	deleted, err = s.DeletePasskey(ctx, "only")
+	deleted, err = s.DeletePasskey("only")
 	if err != nil || !deleted {
 		t.Fatalf("delete with two rows = %v, %v; want true, nil", deleted, err)
 	}
-	if deleted, err := s.DeletePasskey(ctx, "never-existed"); err != nil || deleted {
+	if deleted, err := s.DeletePasskey("never-existed"); err != nil || deleted {
 		t.Errorf("delete of an unknown id = %v, %v; want false, nil", deleted, err)
 	}
 	// One row is left, and the refusal holds again.
-	if _, err := s.DeletePasskey(ctx, "second"); !errors.Is(err, ErrLastPasskey) {
+	if _, err := s.DeletePasskey("second"); !errors.Is(err, ErrLastPasskey) {
 		t.Errorf("delete that would leave nothing = %v; want ErrLastPasskey", err)
 	}
 }

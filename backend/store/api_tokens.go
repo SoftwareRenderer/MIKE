@@ -25,9 +25,7 @@ CREATE TABLE IF NOT EXISTS api_tokens (
 // initAPITokens creates the api_tokens table if it does not exist. The UNIQUE token_hash is the
 // lookup index; a second index on it would be a second copy of the same b-tree.
 func (s *Store) initAPITokens() ([]string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.applySchema(apiTokenTable)
+	return s.applyDDL(apiTokenTable)
 }
 
 // NewAPIToken carries the fields of an api_tokens row.

@@ -332,9 +332,7 @@ func (s *Server) handlePasskeyRevoke(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireSession(w, r); !ok {
 		return
 	}
-	ctx, cancel := s.Detached()
-	defer cancel()
-	revoked, err := s.store.DeletePasskey(ctx, r.PathValue("id"))
+	revoked, err := s.store.DeletePasskey(r.PathValue("id"))
 	switch {
 	case errors.Is(err, store.ErrLastPasskey):
 		JSONError(w, http.StatusConflict, "this is the last passkey; pair another device first, or run mike --reset-passkeys")

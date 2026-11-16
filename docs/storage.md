@@ -13,7 +13,10 @@ serialisation point. Tests: `backend/store/` (`store_test.go`, `schema_test.go`,
 `DeleteThreadWithMessages`, `CopyMessagesToThread`, `DeleteTaskMessagesAfter`, `DeleteProjectStats`,
 `ResetPasskeys` — with `execer` (same file, satisfied by both `*sql.DB` and `*sql.Tx`) so a helper's query
 text exists once. `ResetPasskeys` belongs on that list because a reset that left a session alive would not
-have revoked the device it claims to.
+have revoked the device it claims to. It runs through `txContext`, which is `tx` with a deadline from the
+caller. The `--reset-passkeys` command needs one: nothing above it can cancel, and a database held by
+another process would otherwise hang the command forever. No other section takes a context. A revocation
+or a commit that a navigated-away browser rolled back would undo the thing the request was for.
 
 Because the pool is one connection and `s.mu` is held across the section, a transaction buys **failure
 atomicity, not isolation** — without it a `SetActiveThread` whose second statement failed leaves a task

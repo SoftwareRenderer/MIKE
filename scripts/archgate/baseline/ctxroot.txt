@@ -18,6 +18,7 @@ backend/lsp/handler.go|ClientSession.serve|root|x1
 backend/sandbox/image.go|SandboxManager.makeProjectImage|legacy|x2
 backend/server/server.go|NewServer|root|x1
 backend/server/shutdown.go|runShutdownWithDeadline|root|x1
+backend/store/store.go|Store.tx|detached|x1
 backend/stream/app_stream.go|AppStreamManager.HandleStream|root|x1
 backend/term/terminal.go|TerminalManager.handleTerminalWSWithSetup|root|x2
 backend/term/terminal.go|taskTerminal.readLoop|root|x2

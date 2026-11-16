@@ -52,7 +52,7 @@ func RuntimeFlagsForExistingContainer() []string {
 
 // BuildContainerName names one build. The scratch id carries the project, the time and a sequence, so a
 // container left by a killed server says which build left it and two builds of one project never collide.
-func BuildContainerName(projectID, scratchID string) string {
+func BuildContainerName(scratchID string) string {
 	safe := strings.NewReplacer("/", "-", "\\", "-", " ", "-", ":", "-").Replace(scratchID)
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s-", BuildContainerPrefix)

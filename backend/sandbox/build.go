@@ -163,7 +163,7 @@ func (sm *SandboxManager) planProjectBuild(ctx context.Context, project *types.P
 	}
 
 	plan.cacheKey = buildCacheKey(staged.Commit, plan.treeOID, string(content), file.Bases)
-	plan.containerName = sandboxruntime.BuildContainerName(project.ID, scratch.ID)
+	plan.containerName = sandboxruntime.BuildContainerName(scratch.ID)
 	return plan, nil
 }
 

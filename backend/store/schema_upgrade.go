@@ -217,6 +217,14 @@ func checkIdentifier(name string) error {
 	return nil
 }
 
+// applyDDL runs one DDL constant and takes the serialisation lock first, which is what applySchema asks
+// its caller to hold.
+func (s *Store) applyDDL(ddl string) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.applySchema(ddl)
+}
+
 // applySchema runs one DDL string, adding what the file lacks, and the caller holds s.mu. Indexes run
 // last, because an index naming a column this pass adds fails before that column exists.
 func (s *Store) applySchema(ddl string) ([]string, error) {

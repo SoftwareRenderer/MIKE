@@ -199,9 +199,7 @@ func (s *Store) QueryRow(query string, args ...any) *sql.Row {
 // initSchema runs the DDL, which creates what is missing and adds columns to tables that predate this
 // release.
 func (s *Store) initSchema() ([]string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.applySchema(baseSchemaSQL)
+	return s.applyDDL(baseSchemaSQL)
 }
 
 func (s *Store) initConfigDefaults() error {
@@ -353,11 +351,20 @@ func scanTaskThread(s scanner, th *types.TaskThread) error {
 // is one connection and s.mu is held across the section, so this buys failure atomicity, not
 // isolation - a reader outside the section never sees a half-applied write, and never sees an
 // intermediate state either.
+//
+// tx takes no context; txContext is the only section that does. docs/storage.md → One transaction per
+// section that must land entirely says why.
 func (s *Store) tx(fn func(tx *sql.Tx) error) error {
+	return s.txContext(context.Background(), fn)
+}
+
+// txContext is tx with a deadline from ctx. If the deadline passes, the whole section is rolled back and
+// nothing is written.
+func (s *Store) txContext(ctx context.Context, fn func(tx *sql.Tx) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	tx, err := s.db.Begin()
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}

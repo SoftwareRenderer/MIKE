@@ -1011,22 +1011,20 @@ func initFailureMessage(cause error) string {
 	return fmt.Sprintf("language server unreachable: %v", cause)
 }
 
-// pendingBound is the outstanding-request bound of one session. The floor is one, so it cannot
-// evict the request being forwarded.
-func (h *LSPHandler) pendingBound() int {
-	if h.maxPendingReqs < 1 {
+// boundFloor is the floor every queue bound in this file carries. A limit below one would reject the
+// request that is arriving right now, so no bound is smaller than one.
+func boundFloor(n int) int {
+	if n < 1 {
 		return 1
 	}
-	return h.maxPendingReqs
+	return n
 }
 
+// pendingBound is the outstanding-request bound of one session.
+func (h *LSPHandler) pendingBound() int { return boundFloor(h.maxPendingReqs) }
+
 // queuedInitBound is the bound on initialize requests waiting behind the one in flight.
-func (h *LSPHandler) queuedInitBound() int {
-	if h.maxQueuedInit < 1 {
-		return 1
-	}
-	return h.maxQueuedInit
-}
+func (h *LSPHandler) queuedInitBound() int { return boundFloor(h.maxQueuedInit) }
 
 // pendingOverflowMessage answers a request that crossed the session's bound. The bound is named
 // because the editor shows the sentence to a person.
@@ -1048,23 +1046,11 @@ func notReadingMessage(bound int) string {
 	return fmt.Sprintf("the language server is not reading (%d messages waiting); this one was not sent", bound)
 }
 
-// framesBound is how many frames one browser may leave unread before its socket is ended; a bound
-// below one would refuse the frame being queued.
-func (h *LSPHandler) framesBound() int {
-	if h.maxQueuedFrames < 1 {
-		return 1
-	}
-	return h.maxQueuedFrames
-}
+// framesBound is how many frames one browser may leave unread before its socket is ended.
+func (h *LSPHandler) framesBound() int { return boundFloor(h.maxQueuedFrames) }
 
-// messageBound is how far one workspace may fall behind its server; a bound below one would
-// refuse the message being enqueued.
-func (h *LSPHandler) messageBound() int {
-	if h.maxQueuedMessages < 1 {
-		return 1
-	}
-	return h.maxQueuedMessages
-}
+// messageBound is how far one workspace may fall behind its server.
+func (h *LSPHandler) messageBound() int { return boundFloor(h.maxQueuedMessages) }
 
 // forwardRequest remaps the request ID and hands it to its workspace's writer; channelID routes
 // the answer back. ctx is the connection's. The error it returns means the request never reached

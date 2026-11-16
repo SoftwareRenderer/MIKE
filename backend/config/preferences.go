@@ -51,6 +51,24 @@ func parseIntPtr(s string) (*int, error) {
 	return parsePtr(s, strconv.Atoi)
 }
 
+// decodePtr stores one row of a preference whose field is a pointer. A row that will not parse leaves the
+// field unanswered, the same as a row that was never written.
+func decodePtr[T any](raw string, cfg *types.Config, parse func(string) (*T, error), set func(*types.Config, *T)) {
+	if v, err := parse(raw); err == nil && v != nil {
+		set(cfg, v)
+	}
+}
+
+// encodePtr renders one row of a preference whose field is a pointer. A nil field has no answer to store,
+// so ok is false: the key stays out of the response and the client uses its own default. format runs only
+// when the field is not nil.
+func encodePtr[T any](v *T, format func(T) string) (string, bool, error) {
+	if v == nil {
+		return "", false, nil
+	}
+	return format(*v), true, nil
+}
+
 // stringPref is a row that stores a plain string. An absent row reads as "", so the empty string is
 // both "never answered" and "cleared" — which is how the worker and utility provider/model pairs work.
 type stringPref struct {
@@ -82,23 +100,15 @@ type flagPref struct {
 func (p flagPref) rowKey() string { return p.key }
 
 func (p flagPref) decode(raw string, cfg *types.Config) {
-	// A row that is not a bool reads as unanswered and not as false: the client's own default is the
-	// answer to a row this build did not write.
-	if v, err := parseBoolPtr(raw); err == nil && v != nil {
-		p.set(cfg, v)
-	}
+	decodePtr(raw, cfg, parseBoolPtr, p.set)
 }
 
 func (p flagPref) encode(cfg *types.Config) (string, bool, error) {
-	v := p.get(cfg)
-	if v == nil {
-		return "", false, nil
-	}
-	return strconv.FormatBool(*v), true, nil
+	return encodePtr(p.get(cfg), strconv.FormatBool)
 }
 
 func (p flagPref) merge(u *configUpdates, cfg *types.Config) {
-	p.set(cfg, u.boolPtrOr(p.key, p.get(cfg)))
+	p.set(cfg, u.ptrOr(p.key, p.get(cfg)))
 }
 
 // intPref is a *int row, unanswered in the same way a flagPref is.
@@ -111,21 +121,15 @@ type intPref struct {
 func (p intPref) rowKey() string { return p.key }
 
 func (p intPref) decode(raw string, cfg *types.Config) {
-	if v, err := parseIntPtr(raw); err == nil && v != nil {
-		p.set(cfg, v)
-	}
+	decodePtr(raw, cfg, parseIntPtr, p.set)
 }
 
 func (p intPref) encode(cfg *types.Config) (string, bool, error) {
-	v := p.get(cfg)
-	if v == nil {
-		return "", false, nil
-	}
-	return strconv.Itoa(*v), true, nil
+	return encodePtr(p.get(cfg), strconv.Itoa)
 }
 
 func (p intPref) merge(u *configUpdates, cfg *types.Config) {
-	p.set(cfg, u.intPtrOr(p.key, p.get(cfg)))
+	p.set(cfg, u.ptrOr(p.key, p.get(cfg)))
 }
 
 // modePref is the default operating mode, which the wire and the row both carry as a string.
@@ -152,11 +156,7 @@ func (p modePref) decode(raw string, cfg *types.Config) {
 }
 
 func (p modePref) encode(cfg *types.Config) (string, bool, error) {
-	v := p.get(cfg)
-	if v == nil {
-		return "", false, nil
-	}
-	return string(*v), true, nil
+	return encodePtr(p.get(cfg), func(m types.OperatingMode) string { return string(m) })
 }
 
 func (p modePref) merge(u *configUpdates, cfg *types.Config) {

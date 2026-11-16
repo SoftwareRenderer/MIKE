@@ -47,7 +47,7 @@ func testPlan(t *testing.T, project *types.Project) *buildPlan {
 		scratch:       scratch,
 		contextRoot:   ".",
 		dockerfileRel: "Dockerfile",
-		containerName: sandboxruntime.BuildContainerName(project.ID, scratch.ID),
+		containerName: sandboxruntime.BuildContainerName(scratch.ID),
 	}
 }
 
@@ -316,7 +316,7 @@ func TestLoadedImageNameReadsPodmansOwnReport(t *testing.T) {
 }
 
 func TestBuildContainerNameIsSweptAndTraceable(t *testing.T) {
-	name := sandboxruntime.BuildContainerName("proj-MIKE", "proj-MIKE-1730000000-1")
+	name := sandboxruntime.BuildContainerName("proj-MIKE-1730000000-1")
 	if !strings.HasPrefix(name, sandboxruntime.StaleBuildFilter) {
 		t.Errorf("%s is outside the sweep filter %s", name, sandboxruntime.StaleBuildFilter)
 	}

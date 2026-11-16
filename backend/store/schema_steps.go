@@ -164,21 +164,7 @@ func fillBlankWhereNull(s *Store) error {
 //
 // One-way: an older build selects the column by name, so without it every project read fails.
 func dropProjectRunSetHash(s *Store) error {
-	columns, _, err := s.liveColumns("projects")
-	if err != nil {
-		return err
-	}
-	for _, c := range columns {
-		if c == "sandbox_run_set_hash" {
-			return s.tx(func(tx *sql.Tx) error {
-				if _, err := tx.Exec(`ALTER TABLE projects DROP COLUMN sandbox_run_set_hash`); err != nil {
-					return fmt.Errorf("drop projects.sandbox_run_set_hash: %w", err)
-				}
-				return nil
-			})
-		}
-	}
-	return nil
+	return dropProjectColumn(s, "sandbox_run_set_hash")
 }
 
 // dropProjectSandboxStorageLimit removes the column that was to hold a project's disk cap. This build never
@@ -188,15 +174,25 @@ func dropProjectRunSetHash(s *Store) error {
 // One-way on the same reading as the step above: a build from the era that wrote the column may select
 // it by name.
 func dropProjectSandboxStorageLimit(s *Store) error {
+	return dropProjectColumn(s, "sandbox_storage_limit")
+}
+
+// dropProjectColumn drops one column from projects when the file still has it, and does nothing when the
+// column is already gone, so running the step twice is harmless. The column name is written into the
+// statement, so it passes the same identifier check every other ALTER makes.
+func dropProjectColumn(s *Store, column string) error {
+	if err := checkIdentifier(column); err != nil {
+		return fmt.Errorf("drop projects column: %w", err)
+	}
 	columns, _, err := s.liveColumns("projects")
 	if err != nil {
 		return err
 	}
 	for _, c := range columns {
-		if c == "sandbox_storage_limit" {
+		if c == column {
 			return s.tx(func(tx *sql.Tx) error {
-				if _, err := tx.Exec(`ALTER TABLE projects DROP COLUMN sandbox_storage_limit`); err != nil {
-					return fmt.Errorf("drop projects.sandbox_storage_limit: %w", err)
+				if _, err := tx.Exec(fmt.Sprintf("ALTER TABLE projects DROP COLUMN %s", column)); err != nil {
+					return fmt.Errorf("drop projects.%s: %w", column, err)
 				}
 				return nil
 			})

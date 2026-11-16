@@ -35,9 +35,7 @@ CREATE TABLE IF NOT EXISTS passkeys (
 // initPasskeys creates the passkeys table. Like the other credential tables it is created by the package
 // that reads it, not by baseSchemaSQL.
 func (s *Store) initPasskeys() ([]string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.applySchema(passkeyTable)
+	return s.applyDDL(passkeyTable)
 }
 
 // NewPasskey carries the fields of a passkeys row. CredentialID is the authenticator's credential id in
@@ -202,7 +200,10 @@ var ErrLastPasskey = errors.New("passkey is the only one registered")
 // DeletePasskey revokes one credential and reports whether the row was there. Deleting the last remaining
 // one is refused with ErrLastPasskey; see its comment. The count and the delete share one transaction so
 // the refusal cannot be decided from a number the next writer has already changed.
-func (s *Store) DeletePasskey(ctx context.Context, credentialID string) (bool, error) {
+//
+// It takes no context, like every Store.tx section: a revocation that a shutdown rolled back would leave
+// the device the person just revoked able to sign in again.
+func (s *Store) DeletePasskey(credentialID string) (bool, error) {
 	if credentialID == "" {
 		return false, nil
 	}
@@ -241,10 +242,11 @@ func (s *Store) DeletePasskey(ctx context.Context, credentialID string) (bool, e
 
 // ResetPasskeys is what `mike --reset-passkeys` does: every credential and every session go together, in
 // one transaction. Sessions go because a live session can mint a pairing code, so a reset that left them
-// running would hand the lost device the means to register a new credential behind the reset.
+// running would hand the lost device the means to register a new credential behind the reset. The ctx is
+// the command's own timeout, which limits how long the wipe may wait for the database.
 func (s *Store) ResetPasskeys(ctx context.Context) (passkeys, sessions int, err error) {
-	err = s.tx(func(tx *sql.Tx) error {
-		p, err := tx.Exec(`DELETE FROM passkeys`)
+	err = s.txContext(ctx, func(tx *sql.Tx) error {
+		p, err := tx.ExecContext(ctx, `DELETE FROM passkeys`)
 		if err != nil {
 			return fmt.Errorf("delete passkeys: %w", err)
 		}
@@ -253,7 +255,7 @@ func (s *Store) ResetPasskeys(ctx context.Context) (passkeys, sessions int, err 
 			return fmt.Errorf("delete passkeys: %w", err)
 		}
 		passkeys = int(n)
-		ses, err := tx.Exec(`DELETE FROM sessions`)
+		ses, err := tx.ExecContext(ctx, `DELETE FROM sessions`)
 		if err != nil {
 			return fmt.Errorf("delete sessions: %w", err)
 		}

@@ -56,17 +56,10 @@ func (u *configUpdates) strOr(key, cur string) string {
 	return cur
 }
 
-// boolPtrOr stays a pointer so a stored "no opinion" survives a save that never mentions the field.
-func (u *configUpdates) boolPtrOr(key string, cur *bool) *bool {
-	var v bool
-	if u.field(key, &v) {
-		return &v
-	}
-	return cur
-}
-
-func (u *configUpdates) intPtrOr(key string, cur *int) *int {
-	var v int
+// ptrOr stays a pointer so a stored "no opinion" survives a save that never mentions the field: cur is
+// what comes back when the payload sent nothing for the key.
+func (u *configUpdates) ptrOr[T any](key string, cur *T) *T {
+	var v T
 	if u.field(key, &v) {
 		return &v
 	}
