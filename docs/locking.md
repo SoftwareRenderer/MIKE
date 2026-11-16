@@ -21,7 +21,25 @@ Returning a mutex would allow callers to store or copy it, potentially leading t
 
 ## Lock Order and Wait Rules
 
-- **Merge vs. Stash**: Always acquire merge locks before stash locks.
+- **The git-family order**: merge lock, then the task's worktree lock, then the project stash lock — never
+  after. `mergeInProject` is the pattern: it takes the merge lock, `mergeInWorktree` takes the task's worktree
+  lock inside it, and `WithStash` takes the stash lock inside that. The middle pair is the one that bites.
+  `syncTargetIntoTask` holds the worktree lock across its `WithStash`. A checkpoint that asks for the stash lock
+  first cycles with it, whenever the two land on two tasks of one project. Both waits are indefinite `Lock`
+  calls, so nothing recovers short of a restart. `TestCheckpointTakesTheWorktreeLockBeforeWaitingForTheStashLock`
+  holds the edge.
+- **One table, the executor's**: `exec.TaskExecutor.worktreeMu` guards a task's worktree, and the server asks for
+  it through `Server.lockWorktree` or `Server.lockWorktreeWatched`. The server kept its own table over the same
+  task IDs, so one name meant two tables. The two tables never met. A conversation rewind and a tool call then
+  rewrote one worktree together.
+- **A stop goes outside the worktree lock**: `StopTask` waits for the run, and the run's tool call holds that
+  lock. A turn that starts in the gap is stopped and asked for once more. Only a run still going on the second
+  look is refused, and a refusal modifies nothing. `TestThreadSwitchStopsTheRunOutsideTheWorktreeLock`,
+  `TestThreadSwitchRetriesOnceBeforeRefusing`.
+- **A diff reading is taken while the lock is free**: it asks `WorktreeHeld` rather than waiting, since a wait
+  would queue a panel behind a tool call of unknown length. A reading taken while the lock is held is dropped and
+  the throttle re-armed. `TestWorktreeWatcherDefersWhileTheWorktreeIsBeingRewritten`,
+  `TestHeldFollowsTheHolderAndGrowsNothing`.
 - **Deadlock Prevention**: Never hold a mutex across a `WaitGroup.Wait` for a goroutine that also requires that mutex. (e.g., `WorktreeWatcher.Close` must release its mutex before waiting for the pool).
 - **Git-Family Timeouts**: Avoid adding seconds-scale bounds to git-family locks (e.g., `mergeMu`, `stashMu`). These are often held across tool calls that can last up to 300s. Instead, use slow-wait reports (e.g., `gitSlowWait` at 2s) to identify wedged sections.
 - **Execution Ownership**: A prepared execution (`prepareTaskExecution`) is owned by the caller until its loop is launched or it is released via `releasePrepared`. Failing to release a prepared execution leaves the task in a "running" state and delays subsequent stop operations.

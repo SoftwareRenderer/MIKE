@@ -109,23 +109,16 @@ type Server struct {
 	// Built once and shared with the project handler so the two cannot disagree.
 	hostRoot *fsutil.HostRoot
 
-	// Two more git lock domains, for the git work this process starts from a browser tab rather than the
-	// exec loop. Separate tables behind named types: a task ID and a project ID come from the same
-	// alphabet, so only the type can tell the two domains apart.
+	// Project-level git work started from a browser tab: stash, checkout, pull and push. Every task in the
+	// project shares .git/refs/stash, so concurrent pushes clobber each other's hashes, and a named type keeps
+	// a task ID from locking a project's table.
 	//
-	// gitTask serializes stash/checkout/branch/reset on one task, which corrupts its worktree when they
-	// interleave (fork+switch, delete+switch).
-	gitTask gitTaskLocks
-
-	// gitProject serializes project-level git operations (stash, checkout, pull, push): every task in
-	// the project shares .git/refs/stash, so concurrent push/rev-parse/drop clobbers the hashes.
+	// A task's own worktree gets no table here: that lock is the executor's, and this package reaches it only
+	// through (*Server).lockWorktree and (*Server).lockWorktreeWatched.
 	gitProject gitProjectLocks
 }
 
-type (
-	gitTaskLocks    struct{ keylock.Table }
-	gitProjectLocks struct{ keylock.Table }
-)
+type gitProjectLocks struct{ keylock.Table }
 
 // requestLockSlowWait is the threshold for a wait a person is watching. It is not a deadline: a push to
 // a slow remote holds the project lock for as long as that push takes, and answering "busy" then would
@@ -402,7 +395,6 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 			logging.For(logging.HTTP).Infof("shutdown: closing database: %v", err)
 		}
 	})()
-	s.gitTask.Configure(requestLockSlowWait, requestWaitReporter("task", logging.TaskID))
 	s.gitProject.Configure(requestLockSlowWait, requestWaitReporter("project", logging.ProjectID))
 	s.previewStore = newPreviewStore()
 	s.previewStore.startSweeper()
@@ -676,6 +668,8 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 	s.gitHandler.SetProjectMutex(s.lockProject)
 	// On-demand file fetches read through the watcher's diff cache.
 	s.appStreamMgr.SetDiffCacheUpdate(s.gitHandler.UpdateDiffCache)
+	// A diff computed out of the middle of a worktree rewrite describes half of it.
+	s.appStreamMgr.SetWorktreeBusy(s.executor.WorktreeHeld)
 
 	dryRun := settings.GCDryRun
 	if removed, err := s.executor.WorktreeMgr().GarbageCollect(dryRun); err != nil {

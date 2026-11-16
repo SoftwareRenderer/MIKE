@@ -411,6 +411,12 @@ func (te *TaskExecutor) LockWorktreeWatched(taskID string, every time.Duration, 
 	return te.worktreeMu.LockWatched(taskID, every, notice)
 }
 
+// WorktreeHeld reports whether someone holds this task's worktree lock right now. Only the worktree watcher
+// reads it; see keylock.Table.Held for what a momentary answer is good for.
+func (te *TaskExecutor) WorktreeHeld(taskID string) bool {
+	return te.worktreeMu.Held(taskID)
+}
+
 // ownExecutionState looks up the task's execution state and returns it only when it is the one this run
 // created, so a tool call never reads or writes through another run's container. The state it returns
 // stays usable after a stop removes it from the tasks map.

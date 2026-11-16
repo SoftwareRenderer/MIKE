@@ -245,14 +245,19 @@ func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID,
 			return strings.TrimSpace(out), err
 		}
 
-		// Staging touches the shared index; projects are locked to prevent concurrent index modification.
-		if projectID != "" {
-			defer te.worktreeMgr.LockProjectStash(projectID)()
-		}
-		// Released explicitly to avoid holding the worktree lock during pinning, reducing contention with tool calls and subtask merges.
-		unlockWorktree := te.LockWorktree(taskID)
-		snapHash, snapErr := capture()
-		unlockWorktree()
+		// Both locks are taken in the order docs/locking.md gives — worktree, then stash — and dropped before the
+		// pin. syncTargetIntoTask() takes them the same way; the reverse is a deadlock between two tasks of one
+		// project, and both waits here are indefinite.
+		snapHash, snapErr := func() (string, error) {
+			unlockWorktree := te.LockWorktree(taskID)
+			defer unlockWorktree()
+			// Staging touches the shared index; projects are locked to prevent concurrent index modification.
+			if projectID != "" {
+				unlockStash := te.worktreeMgr.LockProjectStash(projectID)
+				defer unlockStash()
+			}
+			return capture()
+		}()
 
 		// A snapshot must be pinned to prevent git from pruning the object, ensuring the state exists during later restore.
 		if snapErr == nil && snapHash != "" {

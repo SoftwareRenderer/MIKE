@@ -62,6 +62,9 @@ type WorktreeWatcher struct {
 	diffCache   sync.Map
 	broadcast   diffBroadcastFn
 	updateCache diffCacheUpdateFn
+	// busy reports whether someone is rewriting a task's worktree right now. It is written under mu while
+	// computes run, so rewriting reads it under mu too; nil means nobody said how to ask.
+	busy        func(taskID string) bool
 	worktreeMgr *git.WorktreeManager
 
 	pathCache      map[string]string // dir path -> taskID for O(1) lookup
@@ -386,17 +389,42 @@ func (ww *WorktreeWatcher) handleEvent(event fsnotify.Event) {
 	}
 
 	// Throttle: at most one diff compute every 1s per task.
+	ww.armCompute(taskID, info.projectID)
+	ww.mu.Unlock()
+}
+
+// rewriting asks the predicate whether this task's worktree is being rewritten right now. With no predicate it
+// says no: a watcher that declined every question would publish nothing.
+func (ww *WorktreeWatcher) rewriting(taskID string) bool {
+	ww.mu.Lock()
+	probe := ww.busy
+	ww.mu.Unlock()
+	return probe != nil && probe(taskID)
+}
+
+// computeThrottle is the per-task gap between diff computes.
+const computeThrottle = time.Second
+
+// armCompute records that a compute is owed for this task, unless one already is. Called with mu held; the
+// timer is what asks again, since an fsnotify event is spent once.
+func (ww *WorktreeWatcher) armCompute(taskID, projectID string) {
 	if _, exists := ww.throttles[taskID]; exists {
-		ww.mu.Unlock()
 		return
 	}
-
-	projectID := info.projectID
-
-	ww.throttles[taskID] = time.AfterFunc(1000*time.Millisecond, func() {
+	ww.throttles[taskID] = time.AfterFunc(computeThrottle, func() {
 		ww.scheduleDiff(taskID, projectID)
 	})
-	ww.mu.Unlock()
+}
+
+// deferCompute records that a compute this watcher chose not to take is still owed.
+func (ww *WorktreeWatcher) deferCompute(taskID, projectID string) {
+	ww.mu.Lock()
+	defer ww.mu.Unlock()
+	if ww.isClosed() {
+		return
+	}
+	logging.For(logging.Watcher).With(logging.TaskID, taskID).Debugf("deferred a diff compute: the worktree is being rewritten")
+	ww.armCompute(taskID, projectID)
 }
 
 func (ww *WorktreeWatcher) worker() {
@@ -421,6 +449,13 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID string) {
 		ww.mu.Unlock()
 	}()
 
+	// A sample taken out of the middle of a rewrite (`clean -fd` → `read-tree`) holds nothing, and the client
+	// renders that as a task with no changes.
+	if ww.rewriting(taskID) {
+		ww.deferCompute(taskID, projectID)
+		return
+	}
+
 	// A job can outlive its task: deletion unwatches the worktree, but a job queued before that is
 	// already in the channel. A nil task then reads as "no baseline, no merge check".
 	task, err := ww.worktreeMgr.GetTaskByID(taskID)
@@ -437,6 +472,12 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID string) {
 	}
 	diffResult, err := ww.worktreeMgr.GetTaskDiff(taskID, baseRef, headRef)
 	if err != nil {
+		return
+	}
+
+	// The read was not under the lock, so a rewrite that began mid-compute cannot be told from a complete one.
+	if ww.rewriting(taskID) {
+		ww.deferCompute(taskID, projectID)
 		return
 	}
 

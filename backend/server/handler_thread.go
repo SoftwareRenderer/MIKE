@@ -96,7 +96,7 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request, proj
 	}
 
 	// Delete may checkout a replacement branch and reset the worktree.
-	defer s.lockWorktree(taskID)()
+	defer s.lockWorktreeWatched(projectID, taskID)()
 
 	task, ok = s.taskInPath(w, projectID, taskID)
 	if !ok {
@@ -172,9 +172,6 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Switch stashes the outgoing thread's work, then checks out the target's branch.
-	defer s.lockWorktree(taskID)()
-
 	task, ok := s.taskInPath(w, projectID, taskID)
 	if !ok {
 		return
@@ -182,7 +179,8 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 
 	// Switching to the already-active thread (page-load with thread URL): the worktree
 	// already holds this thread's content, so skip checkout/stash/restore to avoid
-	// wiping uncommitted work. Just refresh the diff.
+	// wiping uncommitted work. Just refresh the diff, and answer without stopping: opening a page must not be
+	// able to pause a run.
 	if task.CurrentThreadID == req.ThreadID {
 		s.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 		s.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeThreadSwitch, Data: map[string]string{"thread_id": req.ThreadID, "task_id": taskID}})
@@ -191,11 +189,17 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The agent must not be writing while its work is captured. Stopping is real, so a refusal that
-	// follows has to say so rather than leave the UI showing a running task.
-	wasRunning := task.ExecutionState == types.ExecStateRunning
+	// Switch stashes the outgoing thread's work, then checks out the target's branch. The run is stopped first,
+	// and the task comes back as the lock found it.
+	quieted, wasRunning, unlockWorktree := s.quietWorktree(w, projectID, taskID, "switched")
+	if quieted == nil {
+		return
+	}
+	task = quieted
+	defer unlockWorktree()
+
+	// Stopping is real, so a refusal that follows has to say so rather than leave the UI showing a running task.
 	if wasRunning {
-		_ = s.executor.StopTask(taskID)
 		task.ExecutionState = types.ExecStateIdle
 		task.Output = ""
 	}
@@ -312,7 +316,7 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 		_ = s.executor.StopTask(taskID)
 	}
 
-	defer s.lockWorktree(taskID)()
+	defer s.lockWorktreeWatched(projectID, taskID)()
 
 	task, ok := s.taskInPath(w, projectID, taskID)
 	if !ok {
@@ -526,6 +530,49 @@ func (s *Server) stashWorktreeState(projectID, taskID, threadID, label string) (
 	return stashHash, nil
 }
 
+// errTurnStartedInGap is the cause a refusal names when a turn began between the stop and the worktree lock.
+var errTurnStartedInGap = errors.New("a turn started for this task while this was waiting")
+
+// quietWorktree stops the run whose work is about to be captured, then holds that worktree still, returning the
+// task as the lock found it, whether a stop happened, and the release (a nil task means this answered already).
+// The stop goes outside the lock because StopTask waits for the run whose tool call holds it, and a turn that
+// starts in the gap is stopped and tried once more before the request is refused with nothing modified.
+func (s *Server) quietWorktree(w http.ResponseWriter, projectID, taskID, done string) (*types.Task, bool, func()) {
+	return s.quietWorktreeFrom(w, projectID, taskID, done, s.taskInPath)
+}
+
+// quietWorktreeFrom is quietWorktree with the read of the task handed in, so a test can say when a turn
+// started in the gap. Production reads it the way the route does, which also answers a task that went away.
+func (s *Server) quietWorktreeFrom(w http.ResponseWriter, projectID, taskID, done string,
+	read func(http.ResponseWriter, string, string) (*types.Task, bool)) (*types.Task, bool, func()) {
+	const attempts = 2
+	stopped := false
+	for attempt := 1; ; attempt++ {
+		task, ok := read(w, projectID, taskID)
+		if !ok {
+			return nil, stopped, nil
+		}
+		if task.ExecutionState == types.ExecStateRunning {
+			_ = s.executor.StopTask(taskID)
+			stopped = true
+		}
+		unlock := s.lockWorktreeWatched(projectID, taskID)
+		task, ok = read(w, projectID, taskID)
+		if !ok {
+			unlock()
+			return nil, stopped, nil
+		}
+		if task.ExecutionState != types.ExecStateRunning {
+			return task, stopped, unlock
+		}
+		unlock()
+		if attempt == attempts {
+			s.refuseUnsavedWork(w, projectID, task, done, errTurnStartedInGap, stopped)
+			return nil, stopped, nil
+		}
+	}
+}
+
 // refuseUnsavedWork answers a switch or fork that could not capture the worktree: no thread was changed and
 // nothing was discarded, so the reply names git's reason and says the operation did not happen — the user's
 // next move is to fix the complaint and click again, not to work out what a half-completed operation broke.
@@ -550,7 +597,9 @@ func (s *Server) refuseUnsavedWork(w http.ResponseWriter, projectID string, task
 	JSONError(w, http.StatusConflict, message)
 }
 
-// resetWorktreeToCommit resets the worktree to a commit or snapshot.
+// resetWorktreeToCommit resets the worktree to a commit or snapshot. The caller holds the task's worktree
+// lock: this is the four-step rewrite docs/threads-checkpoints.md calls atomic, and half of it is a state no
+// read describes honestly.
 func (s *Server) resetWorktreeToCommit(taskID, commitHash string) {
 	if commitHash == "" {
 		return
@@ -593,14 +642,24 @@ func (s *Server) broadcastTaskDiff(taskID string) {
 
 // lockWorktree locks the per-task worktree and returns the function that releases it.
 //
-// A task has one worktree, and delete, switch and fork each checkout, stash, branch or reset it, so a
-// handler holds this across the whole operation: interleaved halves leave a state neither read.
+// lockWorktree is the unwatched form of the same executor table, injected into api.GitHandler
+// (SetWorktreeMutex) so the routes it owns land in this domain rather than the handler's fallback table. It
+// returns a release function, not a mutex, because it crosses a package boundary.
+func (s *Server) lockWorktree(taskID string) func() {
+	return s.executor.LockWorktree(taskID)
+}
+
+// lockWorktreeWatched is how a request in this package reaches the task's worktree lock, which is the
+// executor's: a tool call holds it, so a table of the server's own would serialize against nothing that
+// writes. A handler holds it across the whole operation, and a wait behind a long tool call is announced the
+// way Commit & Done announces one.
 //
 // Release function rather than mutex: these are injected into api.GitHandler, and a mutex handed
 // across a package boundary is a value that can be stored, copied, and unlocked by whoever holds a
 // copy — see git.WorktreeManager.LockProjectStash for the same argument.
-func (s *Server) lockWorktree(taskID string) func() {
-	return s.gitTask.Lock(taskID)
+func (s *Server) lockWorktreeWatched(projectID, taskID string) func() {
+	return s.executor.LockWorktreeWatched(taskID, stream.LockWaitNoticeEvery,
+		s.appStreamMgr.LockWaitNotifier(projectID, taskID, "worktree"))
 }
 
 // lockProject locks the per-project git operations (stash, checkout, pull, push) that touch shared

@@ -331,8 +331,8 @@ Enforced by the server process, so it holds for non-sandboxed projects too.
 - **Keyed locks come from `pkg/keylock`, one named domain type per domain**, embedded by value: task IDs and
   project IDs share an alphabet, so a shared table merges two domains silently.
 - **Lock tables never leave their package** — accessors return a release function, never a mutex.
-- **Lock order: merge before stash, never after.** Never hold a mutex across a `Wait` for a goroutine that
-  takes it, and a goroutine that wins a lock after its caller timed out must release it.
+- **Never hold a mutex across a `Wait` for a goroutine that takes it**, and a goroutine that wins a lock after
+  its caller timed out must release it.
 - **Do not add a seconds-scale bound to a git-family lock** — the wait is usually legitimate; wedged sections
   announce themselves through a slow-wait report.
 - `executionState.sandboxMu` is a **leaf lock**: taken under `taskMu`, never the reverse.

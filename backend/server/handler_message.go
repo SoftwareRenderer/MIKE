@@ -44,6 +44,11 @@ func (s *Server) messageInTask(w http.ResponseWriter, projectID, taskID, message
 // if regenerate is true, the thread is about to be answered again, so the
 // executor re-syncs and fork cleanup is skipped.
 func (s *Server) truncateMessagesFrom(projectID, taskID string, msg *types.TaskMessage, regenerate bool) error {
+	// Deleting the conversation rewinds the files, which is the same rewrite a thread switch performs, so this
+	// holds the worktree lock for all of it. The diff broadcast at the end goes out under the same lock.
+	unlockWorktree := s.lockWorktreeWatched(projectID, taskID)
+	defer unlockWorktree()
+
 	msgCreatedAt, msgTimeErr := s.store.GetMessageCreatedAt(msg.ID)
 	// The message's own thread_id, in case the task's active thread has moved on since the row was written.
 	deletedCheckpoints, err := s.store.DeleteTaskMessagesAfter(taskID, msg.ID, msg.ThreadID)

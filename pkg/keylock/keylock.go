@@ -46,7 +46,34 @@ type entry struct {
 	table *Table
 	key   string
 	sem   chan struct{} // capacity 1; the token is the lock
+	taken bool          // the token is out; guarded by table.mu, and what Held answers from
 	refs  int           // guarded by table.mu
+}
+
+// setTaken records who moved the token. A reader cannot probe the channel instead: draining the token to look
+// at it would let a waiter take it in the gap.
+func (e *entry) setTaken(taken bool) {
+	t := e.table
+	t.mu.Lock()
+	e.taken = taken
+	t.mu.Unlock()
+}
+
+// take moves the token here and records that it is out. The two select clauses name the channel, so they record
+// the flag themselves; a token moved without the record is a lock that reads as free.
+func (e *entry) take() {
+	e.sem <- struct{}{}
+	e.setTaken(true)
+}
+
+// Held reports whether some goroutine holds the key's lock right now. It reads a moment, not a promise — the
+// holder may release as this returns — so it is for a reader that will look again, never for admission, and it
+// never creates an entry.
+func (t *Table) Held(key string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	e, ok := t.locks[key]
+	return ok && e.taken
 }
 
 // Configure sets the slow-wait report; pass 0 and nil for none. Call it once, while building the owner,
@@ -78,7 +105,8 @@ func (t *Table) TryLock(key string, timeout time.Duration) (func(), bool) {
 	defer timer.Stop()
 	start := time.Now()
 	select {
-	case e.sem <- struct{}{}:
+	case e.sem <- struct{}{}: // a select clause names the channel, so this site records the flag itself
+		e.setTaken(true)
 		t.report(e.key, time.Since(start))
 		return e.held, true
 	case <-timer.C:
@@ -92,11 +120,11 @@ func (t *Table) TryLock(key string, timeout time.Duration) (func(), bool) {
 // caller stood here, which is what a wedge looks like from the inside.
 func (t *Table) wait(e *entry) {
 	if t.slowAfter <= 0 || t.onSlow == nil {
-		e.sem <- struct{}{}
+		e.take()
 		return
 	}
 	start := time.Now()
-	e.sem <- struct{}{}
+	e.take()
 	t.report(e.key, time.Since(start))
 }
 
@@ -133,6 +161,7 @@ func (t *Table) acquire(key string) *entry {
 func (e *entry) held() {
 	select {
 	case <-e.sem:
+		e.setTaken(false)
 		e.drop()
 	default:
 		panic("keylock: release called for a lock this holder does not hold (key " + e.key + ")")
@@ -173,6 +202,7 @@ func (t *Table) LockWatched(key string, every time.Duration, notice WaitNotice) 
 			reported = true
 			notice(time.Since(start), false)
 		case e.sem <- struct{}{}:
+			e.setTaken(true)
 			waited := time.Since(start)
 			if reported {
 				notice(waited, true)

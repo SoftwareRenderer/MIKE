@@ -754,6 +754,17 @@ func (asm *AppStreamManager) SetDiffCacheUpdate(fn func(taskID string, taskDiff 
 	}
 }
 
+// SetWorktreeBusy tells the watcher how to ask whether a task's worktree is being rewritten. A watcher that
+// never hears that publishes whatever its read caught, which can render a task as having no changes.
+func (asm *AppStreamManager) SetWorktreeBusy(fn func(taskID string) bool) {
+	if asm.watcher == nil {
+		return
+	}
+	asm.watcher.mu.Lock()
+	asm.watcher.busy = fn
+	asm.watcher.mu.Unlock()
+}
+
 // BroadcastDiffStats broadcasts compact diff stats. Produces frames from live diffs,
 // initial loads, or stored snapshots.
 func (asm *AppStreamManager) BroadcastDiffStats(event DiffStatsEvent) {
