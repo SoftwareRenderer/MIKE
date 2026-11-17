@@ -2,7 +2,7 @@
     /** One answer the menu offers. */
     export interface FileMenuItem {
         label: string;
-        icon?: 'open' | 'window' | 'cut' | 'copy' | 'paste' | 'rename' | 'delete' | 'newfile' | 'newfolder' | 'stage' | 'unstage' | 'discard' | 'download';
+        icon?: 'open' | 'window' | 'cut' | 'copy' | 'paste' | 'rename' | 'delete' | 'newfile' | 'newfolder' | 'stage' | 'unstage' | 'discard' | 'download' | 'info';
         disabled?: boolean;
         /** Draws as a dangerous action; the caller has already asked for confirmation. */
         destructive?: boolean;
@@ -180,6 +180,10 @@
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                         <path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>
+                    </svg>
+                {:else if item.icon === 'info'}
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>
                     </svg>
                 {:else if item.icon === 'stage' || item.icon === 'unstage'}
                     <StageSign stage={item.icon === 'stage'} size={14} />

@@ -22,13 +22,8 @@ const archiveSuffix = ".tar.gz"
 // regular file is served directly; others are bundled into a .tar.gz archive named after
 // the common parent folder. Query: project (required), task (optional), path (repeatable).
 func (s *Server) handleFSDownload(w http.ResponseWriter, r *http.Request) {
-	asked := r.URL.Query()["path"]
-	if len(asked) == 0 {
-		JSONError(w, http.StatusBadRequest, "path is required")
-		return
-	}
-	if len(asked) > maxFSOpsBatch {
-		JSONError(w, http.StatusBadRequest, "too many paths (max "+strconv.Itoa(maxFSOpsBatch)+")")
+	asked, ok := fsBatchPaths(w, r)
+	if !ok {
 		return
 	}
 	project, ok := s.requiredProject(w, r)
