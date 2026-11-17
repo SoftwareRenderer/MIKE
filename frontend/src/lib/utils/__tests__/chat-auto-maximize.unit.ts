@@ -44,30 +44,21 @@ describe('chatFocusState', () => {
     });
 });
 
-describe('chatBlurState', () => {
-    it('reverses the maximize the focus rule applied', () => {
+// Blur and a send are two events CardDetail handles apart, but they make one promise about a
+// maximize they did not apply, so one case per starting state holds both to it.
+describe('chatBlurState and chatSendState', () => {
+    it('reverse the maximize the focus rule applied', () => {
         expect(chatBlurState(AUTO_MAXIMIZED)).toEqual(COLLAPSED);
-    });
-
-    it('leaves a manual maximize standing', () => {
-        expect(chatBlurState(USER_MAXIMIZED)).toEqual(USER_MAXIMIZED);
-    });
-
-    it('leaves a collapsed panel collapsed', () => {
-        expect(chatBlurState(COLLAPSED)).toEqual(COLLAPSED);
-    });
-});
-
-describe('chatSendState', () => {
-    it('reverses the maximize the focus rule applied', () => {
         expect(chatSendState(AUTO_MAXIMIZED)).toEqual(COLLAPSED);
     });
 
-    it('leaves a manual maximize standing', () => {
+    it('leave a manual maximize standing', () => {
+        expect(chatBlurState(USER_MAXIMIZED)).toEqual(USER_MAXIMIZED);
         expect(chatSendState(USER_MAXIMIZED)).toEqual(USER_MAXIMIZED);
     });
 
-    it('leaves a collapsed panel collapsed', () => {
+    it('leave a collapsed panel collapsed', () => {
+        expect(chatBlurState(COLLAPSED)).toEqual(COLLAPSED);
         expect(chatSendState(COLLAPSED)).toEqual(COLLAPSED);
     });
 });

@@ -172,21 +172,25 @@ describe('the checkpoint band', () => {
 });
 
 describe('mergeToolCallsIntoAssistant', () => {
-    it('merges tool_call entries into preceding assistant entry', () => {
-        const entries: ChatEntry[] = [
-            { id: 'a1', role: 'assistant', content: 'thinking...', isStreaming: false, createdAt: '2025-01-01T00:00:00Z' },
-            { id: 'tc1', role: 'assistant', content: '', isStreaming: false, createdAt: '2025-01-01T00:00:01Z', toolCalls: [{ toolId: 't1', toolName: 'read_file', args: {} }] },
-        ];
+    const assistant = (id: string, content: string, toolCalls?: ChatEntry['toolCalls']): ChatEntry =>
+        ({ id, role: 'assistant', content, isStreaming: false, createdAt: '2025-01-01T00:00:00Z', ...(toolCalls ? { toolCalls } : {}) });
+    const callRow = (id: string, toolId: string, toolName: string): ChatEntry =>
+        ({ id, role: 'assistant', content: '', isStreaming: false, createdAt: '2025-01-01T00:00:01Z', toolCalls: [{ toolId, toolName, args: {} } as never] });
+
+    // One decision: a tool_call entry folds into the assistant entry above it, keeping every call in
+    // the order they arrived — including calls the assistant entry carried already.
+    it.each([
+        ['one call after the answer', [assistant('a1', 'thinking...'), callRow('tc1', 't1', 'read_file')], ['t1']],
+        ['two calls after the answer', [assistant('a1', 'thinking...'), callRow('tc1', 't1', 'read_file'), callRow('tc2', 't2', 'write_file')], ['t1', 't2']],
+        ['a call the assistant entry already carried', [assistant('a1', 'thinking', [{ toolId: 't0', toolName: 'existing', args: {} } as never]), callRow('tc1', 't1', 'new')], ['t0', 't1']],
+    ])('folds %s', (_name, entries, toolIds) => {
         const merged = mergeToolCallsIntoAssistant(entries);
         expect(merged).toHaveLength(1);
-        expect(merged[0].toolCalls).toHaveLength(1);
-        expect(merged[0].toolCalls![0].toolId).toBe('t1');
+        expect(merged[0].toolCalls?.map(tc => tc.toolId)).toEqual(toolIds);
     });
 
     it('does not merge when there is no preceding assistant', () => {
-        const entries: ChatEntry[] = [
-            { id: 'tc1', role: 'assistant', content: '', isStreaming: false, createdAt: '2025-01-01T00:00:01Z', toolCalls: [{ toolId: 't1', toolName: 'read_file', args: {} }] },
-        ];
+        const entries: ChatEntry[] = [callRow('tc1', 't1', 'read_file')];
         const merged = mergeToolCallsIntoAssistant(entries);
         expect(merged).toHaveLength(1);
         expect(merged[0].id).toBe('tc1');
@@ -195,80 +199,33 @@ describe('mergeToolCallsIntoAssistant', () => {
     it('leaves non-tool-call entries unchanged', () => {
         const entries: ChatEntry[] = [
             { id: 'u1', role: 'user', content: 'hello', isStreaming: false, createdAt: '2025-01-01T00:00:00Z' },
-            { id: 'a1', role: 'assistant', content: 'hi', isStreaming: false, createdAt: '2025-01-01T00:00:01Z' },
+            assistant('a1', 'hi'),
         ];
         const merged = mergeToolCallsIntoAssistant(entries);
         expect(merged).toHaveLength(2);
         expect(merged[0].role).toBe('user');
         expect(merged[1].role).toBe('assistant');
     });
-
-    it('merges multiple tool_call entries into one assistant', () => {
-        const entries: ChatEntry[] = [
-            { id: 'a1', role: 'assistant', content: 'thinking...', isStreaming: false, createdAt: '2025-01-01T00:00:00Z' },
-            { id: 'tc1', role: 'assistant', content: '', isStreaming: false, createdAt: '2025-01-01T00:00:01Z', toolCalls: [{ toolId: 't1', toolName: 'read_file', args: {} }] },
-            { id: 'tc2', role: 'assistant', content: '', isStreaming: false, createdAt: '2025-01-01T00:00:02Z', toolCalls: [{ toolId: 't2', toolName: 'write_file', args: {} }] },
-        ];
-        const merged = mergeToolCallsIntoAssistant(entries);
-        expect(merged).toHaveLength(1);
-        expect(merged[0].toolCalls).toHaveLength(2);
-        expect(merged[0].toolCalls![0].toolId).toBe('t1');
-        expect(merged[0].toolCalls![1].toolId).toBe('t2');
-    });
-
-    it('appends to existing toolCalls on the assistant entry', () => {
-        const entries: ChatEntry[] = [
-            { id: 'a1', role: 'assistant', content: 'thinking', isStreaming: false, createdAt: '2025-01-01T00:00:00Z', toolCalls: [{ toolId: 't0', toolName: 'existing', args: {} }] },
-            { id: 'tc1', role: 'assistant', content: '', isStreaming: false, createdAt: '2025-01-01T00:00:01Z', toolCalls: [{ toolId: 't1', toolName: 'new', args: {} }] },
-        ];
-        const merged = mergeToolCallsIntoAssistant(entries);
-        expect(merged[0].toolCalls).toHaveLength(2);
-        expect(merged[0].toolCalls![0].toolId).toBe('t0');
-        expect(merged[0].toolCalls![1].toolId).toBe('t1');
-    });
 });
 
 describe('computeLastUserMessageIds', () => {
-    it('returns user IDs with no assistant/tool_call after them', () => {
-        const entries: ChatEntry[] = [
-            entry('user', 'first'),
-            entry('assistant', 'response'),
-            entry('user', 'last'),
-        ];
-        const ids = computeLastUserMessageIds(entries);
-        expect(ids).toContain('user-last');
-        expect(ids).not.toContain('user-first');
-    });
+    const user = (id: string, content: string): ChatEntry =>
+        ({ id, role: 'user', content, isStreaming: false, createdAt: new Date().toISOString() });
+    const answer = (id: string, content: string): ChatEntry =>
+        ({ id, role: 'assistant', content, isStreaming: false, createdAt: new Date().toISOString() });
+    const call = (id: string): ChatEntry =>
+        ({ id, role: 'assistant', content: '', isStreaming: false, createdAt: new Date().toISOString(), toolCalls: [{ toolId: 't1', toolName: 'read', args: {} } as never] });
 
-    it('returns empty set when all users have responses', () => {
-        const entries: ChatEntry[] = [
-            entry('user', 'first'),
-            entry('assistant', 'response'),
-            entry('user', 'second'),
-            entry('assistant', 'response 2'),
-        ];
-        const ids = computeLastUserMessageIds(entries);
-        expect(ids.size).toBe(0);
-    });
-
-    it('considers tool_calls as a response', () => {
-        const entries: ChatEntry[] = [
-            entry('user', 'first'),
-            { id: 'tc', role: 'assistant', content: '', isStreaming: false, createdAt: new Date().toISOString(), toolCalls: [{ toolId: 't1', toolName: 'read', args: {} }] },
-            entry('user', 'last'),
-        ];
-        const ids = computeLastUserMessageIds(entries);
-        expect(ids).toContain('user-last');
-        expect(ids).not.toContain('user-first');
-    });
-
-    it('returns empty set for empty entries', () => {
-        expect(computeLastUserMessageIds([]).size).toBe(0);
-    });
-
-    it('returns empty set when only assistant entries exist', () => {
-        const entries: ChatEntry[] = [entry('assistant', 'hi'), entry('assistant', 'bye')];
-        expect(computeLastUserMessageIds(entries).size).toBe(0);
+    // One decision: a prompt is "send that again" only when nothing has answered it, and a tool call
+    // counts as the answer.
+    it.each([
+        ['the prompt nothing has answered', [user('u1', 'first'), answer('a1', 'response'), user('u2', 'last')], ['u2']],
+        ['every prompt answered', [user('u1', 'first'), answer('a1', 'response'), user('u2', 'second'), answer('a2', 'response 2')], []],
+        ['a prompt answered by a tool call', [user('u1', 'first'), call('tc'), user('u2', 'last')], ['u2']],
+        ['no entries at all', [], []],
+        ['only answers', [answer('a1', 'hi'), answer('a2', 'bye')], []],
+    ])('marks %s', (_name, entries, expected) => {
+        expect([...computeLastUserMessageIds(entries)]).toEqual(expected);
     });
 });
 
