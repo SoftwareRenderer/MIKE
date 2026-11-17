@@ -146,7 +146,7 @@ func TestTheSPANeverSwallowsTheMuxsVerbRefusal(t *testing.T) {
 
 // The SPA is a construction requirement, not a route that may be missing.
 func TestServerRefusesNoAssetsAtAll(t *testing.T) {
-	if _, err := NewServer(startup.Config{}, nil, nil); err == nil {
+	if _, err := NewServer(startup.Config{}, nil, nil, nil); err == nil {
 		t.Fatal("NewServer with no assets: got a server, want an error")
 	}
 }

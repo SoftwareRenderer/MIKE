@@ -1,0 +1,11 @@
+{
+    "display_name": "Sepia Board",
+    "description": "A warm colour scheme for the board.",
+    "author": "operator",
+    "version": "0.1.0",
+    "capabilities": {
+        "css": {
+            "css_url": "styles.css"
+        }
+    }
+}

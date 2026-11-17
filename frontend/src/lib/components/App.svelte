@@ -1030,6 +1030,17 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         }
     }
 
+    /** A created extension arrives with its project and a task already running, and lands on the board
+     *  the same way an added project does. */
+    function handleOpenCreatedProject(project: Project) {
+        if (!appStore.projects.some(p => p.id === project.id)) {
+            appStore.projects = [...appStore.projects, project];
+        }
+        uiStore.showConfig = false;
+        clearTaskDetail();
+        selectProject(project, true, { board: true });
+    }
+
     async function handleCloneProject(gitUrl: string, targetDir: string, sandboxEnabled: boolean) {
         showFileBrowserVal = false;
         addProjectError = '';
@@ -1463,6 +1474,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             onClose={() => uiStore.showConfig = false}
             onSaved={() => uiStore.showConfig = false}
             onSignOut={() => sessionBoot.signOut()}
+            onOpenProject={handleOpenCreatedProject}
         />
     {/if}
     {#if uiStore.showTerminal && terminalPanel.component}

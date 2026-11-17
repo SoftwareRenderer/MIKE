@@ -1,0 +1,9 @@
+/* A css pack ships one stylesheet and MIKE applies it to the whole app. Name the
+   variables the host already defines — theme.get() lists them from inside a ui
+   extension — rather than painting over a rule the app owns. */
+:root {
+    --bg-primary: #fbf6ee;
+    --bg-secondary: #f3ead9;
+    --text-primary: #3a3226;
+    --text-secondary: #6d6252;
+}

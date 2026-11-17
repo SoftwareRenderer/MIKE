@@ -1,5 +1,6 @@
 <script lang="ts">
     import type { Provider } from '$lib/types';
+    import type { Extension } from '$lib/types';
     import Icon from '$lib/components/Icon.svelte';
     import Spinner from '$lib/components/Spinner.svelte';
     import commitPushIcon from '$lib/assets/icons/commit-push.svg?raw';
@@ -26,6 +27,11 @@
         onCommitAndDone,
         onMoveToDone,
         onModelSelect,
+        /** The development row this task's project owns, when it has one; nothing else shows Try Extension. */
+        devExtension,
+        onTryExtension,
+        isTryingExtension = false,
+        tryExtensionNotice = '',
     }: {
         taskStatus: string;
         taskExecutionState: string;
@@ -46,6 +52,12 @@
         onCommitAndDone: () => Promise<void>;
         onMoveToDone: () => Promise<void>;
         onModelSelect: (providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) => Promise<void>;
+        devExtension?: Extension | null;
+        /** Load this task's bytes and report what came back; the text is the person's to relay. */
+        onTryExtension?: () => Promise<void>;
+        isTryingExtension?: boolean;
+        /** The load's answer: the manifest's own failure, or the instruction to refresh. */
+        tryExtensionNotice?: string;
     } = $props();
 
     // Stopped mid-run: the task stays in the In Progress column, Resume continues the conversation from
@@ -56,6 +68,26 @@
 
 <!-- The four bars below share one stylesheet rule and are told apart by `data-bar`, which is what a reader
      that means one of them asks for: the class names all four. -->
+<!-- A task of an authoring project: the version under review is loaded here, and the load's answer is
+     the text the person carries back to the agent, so it is shown rather than flashed. -->
+{#if devExtension && onTryExtension}
+    <div class="chat-review-bar" data-bar="dev">
+        {#if tryExtensionNotice}
+            <span class="try-notice" role="status">{tryExtensionNotice}</span>
+        {/if}
+        <button class="btn-commit-done btn-try-extension" onclick={onTryExtension} disabled={isTryingExtension} title={t('chat.review.tryExtensionTip')}>
+            {#if isTryingExtension}
+                <Spinner decorative /> {t('chat.review.tryExtensionLoading')}
+            {:else}
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M2 8a6 6 0 0 1 10.47-4M14 8a6 6 0 0 1-10.47 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                    <path d="M12 1v3h-3M4 15v-3h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                {t('chat.review.tryExtension')}
+            {/if}
+        </button>
+    </div>
+{/if}
 {#if isPaused}
     <div class="chat-review-bar" data-bar="paused">
         {#if onMoveTask}
@@ -233,5 +265,16 @@
     }
     .btn-restart-task:hover:not(:disabled) {
         opacity: 0.85;
+    }
+    /* The load's answer sits beside the button that asked for it: it is often a manifest complaint
+       the person relays to the agent word for word. */
+    .try-notice {
+        margin-right: auto;
+        font-size: var(--text-xs);
+        color: var(--color-text-secondary);
+        overflow-wrap: anywhere;
+    }
+    .btn-try-extension {
+        border-color: var(--color-accent);
     }
 </style>

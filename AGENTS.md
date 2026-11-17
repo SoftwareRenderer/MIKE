@@ -413,6 +413,12 @@ Types: `lsp`, `ui`, `css`, `i18n`, `agent`, `llm`, `tool`.
 - **A contributed tool is data, and its address is a grant**: the only origin it may contact is the one
   stored in a `config_schema` property of type `"url"`. These tools run in the server process, so a project's
   network isolation does not cover them. `docs/extension-tools.md`.
+- **`/extensions/` serves no dot segment**, because the tree holds git repositories: a development
+  repository's `.git`, `.env` and `.agents/` are unreachable. `docs/extension-authoring.md`.
+- **The `_dev` namespace is the server's**: repositories live in `extensions/_dev/<slug>` and nothing under
+  it is installable.
+- **A development row loads from a directory derived from stored rows**, never from a path in a request, and
+  deleting the row never deletes the repository — the project's deletion does. `docs/extension-authoring.md`.
 - **Language knowledge lives in extensions** — the core holds no language names, keyword lists or bracket
   tables, in either language. `docs/languages.md`.
 - **The UI language is whichever `i18n` extension is enabled**; any load failure means whole-catalog English
@@ -526,6 +532,7 @@ deliberately omits.
 | `docs/lsp-transport.md` | the `/api/lsp` socket's bounds, one ordered writer per workspace, exactly-once answering, the browser's wait ceilings |
 | `docs/markup-sanitizing.md` | sanitizer deltas from DOMPurify's defaults, the sink audit, `Icon.svelte` |
 | `docs/extension-lifecycle.md` | install/build/delete/repair, SSE ordering, egress, capability gates, changelogs |
+| `docs/extension-authoring.md` | the `_dev` namespace, the loaded copy, the authoring bundle, the create path |
 | `docs/extension-tools.md` | contributed-tool grammar, the `url` grant and its loopback exception, the pre-save probe |
 | `docs/mcp.md` | the pinned era and who enforces it, the caps, the declined capabilities, the elicitation rule, the Test action |
 | `docs/extension-dependency-cache.md` | the `dependency_cache` grant, `ro` mounts, `environment` check |

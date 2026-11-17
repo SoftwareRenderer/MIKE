@@ -40,6 +40,9 @@
     import ChatForm from './ChatForm.svelte';
     import ChatEntries from './ChatEntries.svelte';
     import ReviewBar from './ReviewBar.svelte';
+    import { extensionManager } from '$lib/services/extension-manager.svelte';
+    import { devRowForProject } from '$lib/utils/dev-extension';
+    import { reloadExtensionVersion } from '$lib/api';
     import StartPanel from './StartPanel.svelte';
 
     let { projectId, taskId, taskPrompt = '', taskStatus = 'backlog', taskExecutionState = '', taskSummarizing = false, hasStagedChanges: hasStagedChangesProp, onRefreshDiff, onMoveTask, onViewChanges, onReloadDiff, openCheckpointHash = '', onToggleFullscreen, isChatFullscreen, onChatInputFocus, onChatInputBlur, onMessageSent, onTaskDone }: { projectId: string; taskId: string; taskPrompt?: string; taskStatus?: string; taskExecutionState?: string; taskSummarizing?: boolean; hasStagedChanges?: boolean; onRefreshDiff?: (data: DiffManifest) => void; onMoveTask?: (status: string) => void; /** The chat moved the files under the Changes panel — a thread switch, a rewind that followed a deletion, a fork an edit retired — so reload it, never just clear it. */ onReloadDiff?: () => void; onViewChanges?: (commitHash: string, commitLabel?: string) => void; /** Which checkpoint the Changes panel is showing, so its band reads as the open one. */ openCheckpointHash?: string; onToggleFullscreen?: () => void; isChatFullscreen?: boolean; /** Focus entered / left the chat input — the owner of the maximize decides what that means. */ onChatInputFocus?: () => void; onChatInputBlur?: () => void; /** A message was sent — the auto maximize ends with the send, whatever the request did next. */ onMessageSent?: () => void; /** A Done click in the review bar succeeded — the view that owns navigation decides what happens next. Fires on a commit deferred to a conflict-resolution turn too, where the task stays in progress: the click still meant "I'm finished with it". */ onTaskDone?: () => void } = $props();
@@ -278,6 +281,27 @@
         void reconcileAfterAbsence();
     });
     let queueStatus = $derived(commitQueueStore.statusOf(projectId, taskId));
+
+    // A task of an authoring project loads its own version from here; the row comes from the app-wide
+    // list, so a reload elsewhere shows up without this view asking again.
+    const devRow = $derived(devRowForProject(extensionManager.state.extensions, projectId));
+    let isTryingExtension = $state(false);
+    let tryExtensionNotice = $state('');
+
+    async function handleTryExtension() {
+        if (!devRow) return;
+        isTryingExtension = true;
+        tryExtensionNotice = '';
+        try {
+            await reloadExtensionVersion(devRow.id, taskId);
+            // The bytes are loaded; nothing here remounts an extension's frame, so the person refreshes.
+            tryExtensionNotice = t('chat.review.tryExtensionLoaded');
+        } catch (e) {
+            tryExtensionNotice = e instanceof Error ? e.message : String(e);
+        } finally {
+            isTryingExtension = false;
+        }
+    }
 
     let threads: Thread[] = $state([]);
     let activeThreadId = $state('');
@@ -1850,6 +1874,10 @@
             onCommitAndDone={handleCommitAndDone}
             onMoveToDone={handleMoveToDone}
             onModelSelect={handleModelSelect}
+            devExtension={devRow}
+            onTryExtension={devRow ? handleTryExtension : undefined}
+            {isTryingExtension}
+            {tryExtensionNotice}
         />
         {#if !showRestartButton}
         <ChatForm

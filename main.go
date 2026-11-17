@@ -142,7 +142,12 @@ func main() {
 		log.Fatalf("Failed to load TLS config: %v", err)
 	}
 
-	srv, err := server.NewServer(cfg, tlsCfg, assets)
+	authoring, err := ExtensionAuthoringTemplate()
+	if err != nil {
+		log.Fatalf("Failed to load the extension authoring bundle: %v", err)
+	}
+
+	srv, err := server.NewServer(cfg, tlsCfg, assets, authoring)
 	if err != nil {
 		log.Fatalf("Failed to create server: %v", err)
 	}

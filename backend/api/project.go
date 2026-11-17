@@ -40,6 +40,10 @@ type ProjectHandler struct {
 	hostRoot *fsutil.HostRoot
 	// resolved DANGER_ZONE grant.
 	dangerZone sandbox.DangerZone
+	// removes the repository directory of a project the server created under the development
+	// namespace, and reports what it could not remove. Declared here so a project's deletion stays one
+	// path; nil means this server has no extensions to develop.
+	devRepoCleanup func(projectPath string) string
 }
 
 // projectSandboxOps is the sandbox operations owned by the project.
@@ -62,19 +66,22 @@ type ProjectDeps struct {
 	Tasks       taskTreeDeleter
 	HostRoot    *fsutil.HostRoot
 	DangerZone  sandbox.DangerZone
+	// DevRepoCleanup owns the repository directory of a development project; see ProjectHandler.
+	DevRepoCleanup func(projectPath string) string
 }
 
 func NewProjectHandler(deps ProjectDeps) *ProjectHandler {
 	return &ProjectHandler{
-		store:       deps.Store,
-		configStore: deps.ConfigStore,
-		worktreeMgr: deps.WorktreeMgr,
-		terminalMgr: deps.TerminalMgr,
-		sandboxMgr:  deps.SandboxMgr,
-		executor:    deps.Executor,
-		hostRoot:    deps.HostRoot,
-		dangerZone:  deps.DangerZone,
-		tasks:       deps.Tasks,
+		store:          deps.Store,
+		configStore:    deps.ConfigStore,
+		worktreeMgr:    deps.WorktreeMgr,
+		terminalMgr:    deps.TerminalMgr,
+		sandboxMgr:     deps.SandboxMgr,
+		executor:       deps.Executor,
+		hostRoot:       deps.HostRoot,
+		dangerZone:     deps.DangerZone,
+		tasks:          deps.Tasks,
+		devRepoCleanup: deps.DevRepoCleanup,
 	}
 }
 
@@ -138,6 +145,12 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httputil.JSONResponse(w, code, p)
+}
+
+// SetDevRepoCleanup aims the project deletion path at the development namespace. The extensions handler
+// is built after this one, so the aim is declared beside the rest of that wiring rather than reordered.
+func (h *ProjectHandler) SetDevRepoCleanup(cleanup func(projectPath string) string) {
+	h.devRepoCleanup = cleanup
 }
 
 // checkHostPath checks if path is inside the host jail.
@@ -833,6 +846,16 @@ func (h *ProjectHandler) handleDeleteProject(w http.ResponseWriter, id string) {
 	if h.worktreeMgr != nil {
 		if err := h.worktreeMgr.RemoveProjectWorktrees(id); err != nil {
 			logging.For(logging.Managers).Warnf("project %s: worktree directory cleanup failed: %v", id, err)
+		}
+	}
+	// A project the server created under the development namespace has no home elsewhere: its
+	// directory *is* the extension repository, so it goes with the project. Anywhere else the
+	// directory is the person's own work and nothing here touches it.
+	if h.devRepoCleanup != nil {
+		if p, err := h.store.GetProject(id); err == nil {
+			if leftover := h.devRepoCleanup(p.Path); leftover != "" {
+				logging.For(logging.Managers).Warnf("project %s: development repository cleanup failed: %s", id, leftover)
+			}
 		}
 	}
 	if err := h.store.DeleteProject(id); err != nil {

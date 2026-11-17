@@ -52,7 +52,7 @@ type Extension struct {
 	Config          map[string]any    `json:"config"`
 	ContainerConfig ContainerConfig   `json:"container_config"`
 	SandboxConfig   SandboxConfig     `json:"sandbox_config"`
-	InstallSource   string            `json:"install_source"` // "registry", "local"
+	InstallSource   string            `json:"install_source"` // "registry", "local", "dev"
 	ImageRef        string            `json:"image_ref,omitempty"`
 	Enabled         bool              `json:"enabled"`
 	InstalledAt     string            `json:"installed_at"`
@@ -62,6 +62,13 @@ type Extension struct {
 	Repo   string `json:"repo,omitempty"`
 	Commit string `json:"commit,omitempty"`
 	Subdir string `json:"subdir,omitempty"`
+	// A development row stands beside an authoring repository (docs/extension-authoring.md). These three
+	// are its only route to bytes on disk - every directory it loads is derived from them and never from
+	// a request - and LoadedDir stays empty until a person loads a version, which is what makes the row
+	// inert rather than broken.
+	ProjectID string `json:"project_id,omitempty"`
+	TaskID    string `json:"task_id,omitempty"`
+	LoadedDir string `json:"loaded_dir,omitempty"`
 }
 
 // SensitiveProperty reports whether the manifest declares this config key to hold a secret.

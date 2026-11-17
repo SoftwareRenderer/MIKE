@@ -1,4 +1,4 @@
-import type { Extension, RegistryEntry, ExtensionUpdate } from '../types';
+import type { Extension, Project, RegistryEntry, ExtensionUpdate, Task } from '../types';
 import { API_BASE, apiFetch, apiError, csrfHeaders, readEventStream } from './helpers';
 import { t } from '$lib/i18n';
 
@@ -201,4 +201,35 @@ function streamOperation(path: string, body: Record<string, any>): AsyncIterable
     };
 
     return { [Symbol.asyncIterator]: iterator };
+}
+
+/**
+ * Create a custom extension: the server lays down the authoring repository, the project beside it and the
+ * first task, and answers with all three.
+ */
+export async function scaffoldExtension(
+    name: string,
+    description: string
+): Promise<{ project: Project; extension: Extension; task: Task; repository: string }> {
+    const res = await apiFetch(`${API_BASE}/extensions/scaffold`, {
+        method: 'POST',
+        headers: await csrfHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ name, description }),
+    });
+    if (!res.ok) throw await apiError(res, t('api.createExtension'));
+    return res.json();
+}
+
+/**
+ * Load one version of a development extension: a task id is that task's own bytes, no task id is the
+ * repository. The failure text is the answer, and the caller shows it verbatim.
+ */
+export async function reloadExtensionVersion(id: string, taskId?: string): Promise<Extension> {
+    const res = await apiFetch(`${API_BASE}/extensions/${encodeURIComponent(id)}/reload`, {
+        method: 'POST',
+        headers: await csrfHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(taskId ? { task_id: taskId } : {}),
+    });
+    if (!res.ok) throw await apiError(res, t('api.reloadExtension'));
+    return res.json();
 }

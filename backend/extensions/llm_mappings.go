@@ -42,7 +42,7 @@ func CollectLLMMappings(store *ExtensionStore, extensionsDir string) ([]llmadapt
 		if cap := e.Manifest.Capabilities.GetLLM(); cap != nil && cap.MappingsFile != "" {
 			file = cap.MappingsFile
 		}
-		path, ok := mappingsFilePath(extensionsDir, e.Author, e.Name, file)
+		path, ok := mappingsFilePathIn(devOrExtensionDir(extensionsDir, e), file)
 		if !ok {
 			logging.For(logging.Extensions).Warnf("llm extension %s/%s: invalid mappings_file %q, skipping", e.Author, e.Name, file)
 			continue
@@ -85,17 +85,15 @@ func InstalledDir(ext *Extension) string {
 	if ext == nil {
 		return ""
 	}
-	return extensionDir(DefaultExtensionsDir, ext.Author, ext.Name)
+	return devOrExtensionDir(DefaultExtensionsDir, ext)
 }
 
-// mappingsFilePath resolves an extension's mapping file to <extension dir>/<file>,
-// rejecting values that are absolute, empty, or escape the directory.
-func mappingsFilePath(extensionsDir, author, name, file string) (string, bool) {
+// mappingsFilePathIn resolves an extension's mapping file inside the directory its row points at.
+func mappingsFilePathIn(dir, file string) (string, bool) {
 	file = strings.TrimSpace(file)
 	if file == "" || filepath.IsAbs(file) || strings.Contains(file, "..") {
 		return "", false
 	}
-	dir := extensionDir(extensionsDir, author, name)
 	full := filepath.Join(dir, file)
 	// Re-containment check after Join (which collapses lexical .. segments).
 	rel, err := filepath.Rel(dir, filepath.Clean(full))

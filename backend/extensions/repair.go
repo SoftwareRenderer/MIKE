@@ -60,6 +60,12 @@ func (h *ExtensionHandler) classifyMissingInstalls() ([]missingInstall, error) {
 	var missing []missingInstall
 	for i := range exts {
 		ext := &exts[i]
+		if ext.IsDev() {
+			// A development repository has no commit to restore it from; its files are the person's
+			// work and its project's to delete. Reporting one as missing would call their repository
+			// a broken install.
+			continue
+		}
 		if reason := unsafeDirName(ext.Name); reason != "" {
 			missing = append(missing, missingInstall{ext: ext, why: reason})
 			continue

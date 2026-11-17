@@ -1,5 +1,5 @@
 <script lang="ts">
-    import type { Extension, RegistryEntry, ExtensionUpdate, ExtensionType } from '$lib/types';
+    import type { Extension, RegistryEntry, ExtensionUpdate, ExtensionType, Project } from '$lib/types';
     import {
         checkUpdates,
         deleteExtension,
@@ -18,6 +18,7 @@
     import ExtensionsHeader from './ExtensionsHeader.svelte';
     import ExtensionBrowseCard from './ExtensionBrowseCard.svelte';
     import ExtensionCapabilitiesModal from './ExtensionCapabilitiesModal.svelte';
+    import ExtensionCreateModal from './ExtensionCreateModal.svelte';
     import ExtensionCard from './ExtensionCard.svelte';
     import ExtensionEditModal from './ExtensionEditModal.svelte';
     import ExtensionInstallConfirmModal from './ExtensionInstallConfirmModal.svelte';
@@ -41,6 +42,12 @@
      * leaves the name claimed in the server's in-flight set with no row and no way for the screen to say
      * why. Progress comes from the operation's stream alone — there is no build-progress route to poll.
      */
+    let { onOpenProject }: {
+        /** The create path made a project beside its repository; the shell that owns the address bar
+         *  decides what "show it" means, because a screen this deep never navigates on its own. */
+        onOpenProject?: (project: Project) => void;
+    } = $props();
+
     let extensions = $state<Extension[]>([]);
     let registryEntries = $state<RegistryEntry[]>([]);
     let localExtensions = $state<RegistryEntry[]>([]);
@@ -66,6 +73,9 @@
     // Capabilities modal
     let showCapabilitiesModal = $state(false);
     let selectedExtension: Extension | null = $state(null);
+
+    // The form that makes a custom extension; closing it without creating anything is the common case.
+    let showCreateModal = $state(false);
 
     // Extension id whose local path is revealed (clicked its "Local" badge).
     let revealedLocalPath = $state<string | null>(null);
@@ -498,6 +508,7 @@
         {categoryCounts}
         {selectedCategories}
         onloadupdates={handleCheckUpdates}
+        oncreate={() => showCreateModal = true}
         onview={(view) => { if (view === 'browse') openBrowse(); else activeView = 'installed'; }}
         onsearch={(query) => searchQuery = query}
         ontogglecategory={toggleCategory}
@@ -564,6 +575,19 @@
     <!-- Capabilities Modal -->
     {#if showCapabilitiesModal && selectedExtension}
         <ExtensionCapabilitiesModal extension={selectedExtension} onclose={closeCapabilities} />
+    {/if}
+
+    {#if showCreateModal}
+        <ExtensionCreateModal
+            onclose={() => showCreateModal = false}
+            oncreated={(project) => {
+                showCreateModal = false;
+                // The row the create path made belongs to the list this tab owns, so it is re-read
+                // before the shell takes the person to the board the task is already running on.
+                void loadExtensions();
+                onOpenProject?.(project);
+            }}
+        />
     {/if}
 
     <!-- Shown before installing an extension that asks for network access, for permissions that escape

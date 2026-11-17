@@ -1,0 +1,23 @@
+{
+    "display_name": "Task Word Count",
+    "description": "Shows how many words a task's description holds, on the card.",
+    "author": "operator",
+    "version": "0.1.0",
+    "config_schema": {
+        "properties": [
+            {
+                "key": "suffix",
+                "type": "string",
+                "title": "Label after the number",
+                "description": "What follows the count. Leave as-is for English.",
+                "default": " words"
+            }
+        ]
+    },
+    "capabilities": {
+        "ui": {
+            "injection_points": ["taskCard"],
+            "permissions": ["ui.setSize"]
+        }
+    }
+}

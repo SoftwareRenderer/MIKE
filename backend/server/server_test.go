@@ -89,7 +89,7 @@ func testServerWithAssets(t *testing.T, assets fs.FS, mutate func(*startup.Confi
 		mutate(&cfg)
 	}
 
-	s, err := NewServer(cfg, testTLSConfig(t, dir), assets)
+	s, err := NewServer(cfg, testTLSConfig(t, dir), assets, nil)
 	if err != nil {
 		t.Fatalf("create test server: %v", err)
 	}

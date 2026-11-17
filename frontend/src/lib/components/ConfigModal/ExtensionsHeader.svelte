@@ -20,6 +20,7 @@
         categoryCounts,
         selectedCategories,
         onloadupdates,
+        oncreate,
         onview,
         onsearch,
         ontogglecategory,
@@ -33,6 +34,8 @@
         categoryCounts: Map<ExtensionType, number>;
         selectedCategories: Set<ExtensionType>;
         onloadupdates: () => void;
+        /** Opens the form that makes a custom extension; absent when the caller has no create path. */
+        oncreate?: () => void;
         onview: (view: 'installed' | 'browse') => void;
         onsearch: (query: string) => void;
         ontogglecategory: (category: ExtensionType) => void;
@@ -60,6 +63,9 @@
             </button>
         </div>
         <div class="view-tabs-right">
+            {#if oncreate}
+                <button class="btn btn-secondary" onclick={oncreate}>{t('settings.extensions.create')}</button>
+            {/if}
             <button class="btn btn-secondary" onclick={onloadupdates} disabled={loadingUpdates}>
                 {loadingUpdates ? t('settings.extensions.checking') : t('settings.extensions.checkUpdates')}
             </button>

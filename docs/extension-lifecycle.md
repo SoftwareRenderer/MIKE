@@ -113,6 +113,10 @@ Deletion follows the same derivation: `removeExtensionFiles` (`backend/extension
 directory for every row, local included. **Uninstalling an unpublished extension deletes the author's
 working copy.** Copy the folder out first, or keep the source elsewhere and install from a copy of it.
 
+A row under the development namespace is the case this path does not cover: it has no folder to
+materialize and no folder to lose, because its bytes come from a repository the server made and a
+project that outlives the row. `docs/extension-authoring.md` owns that loop.
+
 ### What an edit to the folder reaches
 
 Nothing watches the extensions tree, so a change lands the next time a reader opens the file.

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -66,6 +67,11 @@ type ExtensionHandler struct {
 	inFlightOps        *inFlight
 	onImageUpdated     func(extID string) // callback after successful image update
 	onExtensionChanged func()             // callback after any extension change (enable/disable/create/delete)
+	// where a development row's bytes live: the project table and the worktree layout.
+	devSources DevSources
+	// authoring is the bundle a new extension repository is scaffolded from, injected by the process
+	// that embeds it. Its zero value declines creation rather than reaching for a directory.
+	authoring fs.FS
 }
 
 // ExtensionConfig holds configuration for the extension handler.
@@ -506,6 +512,17 @@ func (h *ExtensionHandler) HandleSetEnabled(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// A development row exists before anything has been loaded into it, and enabling one would promise
+	// an extension whose files the server has never read.
+	current, ok := h.extensionOr404(w, id)
+	if !ok {
+		return
+	}
+	if req.Enabled && current.IsDev() && !current.IsLoaded() {
+		httputil.JSONError(w, http.StatusConflict, "nothing has been loaded yet - open the task and press Try Extension")
+		return
+	}
+
 	if err := h.store.SetEnabled(id, req.Enabled); err != nil {
 		httputil.JSONError(w, http.StatusNotFound, "extension not found")
 		return
@@ -782,6 +799,12 @@ func scanLocalExtensions(root string) ([]localExtension, error) {
 			return nil
 		}
 		dir := filepath.Dir(path)
+		// The development namespace holds a person's authoring repository, not an installed extension:
+		// offering it as installable would let a repository be read as an install, and its files are
+		// already served where they are.
+		if rel, err := filepath.Rel(root, dir); err == nil && isDevSegment(rel) {
+			return nil
+		}
 		name := filepath.Base(dir)
 		// The extension is expected to live at extensions/<author>/<name>/.
 		// The author is the on-disk namespace directory; if the manifest sits
@@ -944,6 +967,11 @@ func (h *ExtensionHandler) HandleInstallLocal(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	if strings.EqualFold(strings.TrimSpace(req.Author), DevNamespace) {
+		httputil.JSONError(w, http.StatusBadRequest, "the development directory is not installable: its repository belongs to its project")
+		return
+	}
+
 	local := findLocalExtension(h.config.ExtensionsDirOrDefault(), req.Author, req.Name)
 	if local == nil {
 		httputil.JSONError(w, http.StatusNotFound, "local extension not found: "+req.Author+"/"+req.Name)
@@ -1045,9 +1073,6 @@ func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry
 		}
 	}
 
-	// Sanitize manifest URLs to prevent javascript:/data: injection
-	sanitizeManifestURLs(&manifest)
-
 	installSource := "registry"
 	if entry.localDir != "" {
 		installSource = "local"
@@ -1056,34 +1081,9 @@ func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry
 	// Create extension record
 	author := authorDir(entry.Author)
 	id := fmt.Sprintf("%s-%s-%d", author, strings.ToLower(entry.Name), time.Now().Unix())
-	// A manifest may not grant itself mounts outside the app's own roots or
-	// capabilities that reach past the container. The install is rejected rather
-	// than stored and then silently skipped at every container start.
-	sandboxCfg := sandboxConfigFromManifest(lspSandboxFromManifest(&manifest))
-	if err := h.mountPolicy().ValidateSandboxAdditions(sandboxCfg.Mounts, sandboxCfg.Capabilities); err != nil {
-		fail(fmt.Errorf("extension %s declares an unusable sandbox configuration: %w", entry.Name, err))
-		return
-	}
-	if err := manifest.Capabilities.GetLSP().Validate(); err != nil {
-		fail(fmt.Errorf("extension %s declares an unusable language configuration: %w", entry.Name, err))
-		return
-	}
-	// Checked on the fetched manifest and against the files it shipped into targetDir, so a bad
-	// locale, a foreign-origin or unparsable catalog, or a prompt overlay that will not compile is
-	// refused now rather than discovered in the browser.
-	if err := validateI18N(manifest.Capabilities, targetDir); err != nil {
-		fail(fmt.Errorf("extension %s declares an unusable translation pack: %w", entry.Name, err))
-		return
-	}
-	// The stylesheet of a css pack gets the same containment the pack's files get, and for the
-	// same reason: the browser resolves it into a <link> before anything here can look again.
-	if err := manifest.Capabilities.GetCSS().Validate(); err != nil {
-		fail(fmt.Errorf("extension %s declares an unusable stylesheet: %w", entry.Name, err))
-		return
-	}
-	// The declaration comes from registry text, so it is vetted before it is stored.
-	if err := validateTools(manifest.Capabilities, manifest.ConfigSchema); err != nil {
-		fail(fmt.Errorf("extension %s declares an unusable tool: %w", entry.Name, err))
+	sandboxCfg, err2 := h.validateLoadedManifest(entry.Name, &manifest, targetDir)
+	if err2 != nil {
+		fail(err2)
 		return
 	}
 	// An image that names no registry cannot be pulled headless, so reject the entry here rather
@@ -1805,6 +1805,11 @@ type ExtensionResponse struct {
 	Repo            string               `json:"repo,omitempty"`
 	Commit          string               `json:"commit,omitempty"`
 	Author          string               `json:"author,omitempty"`
+	// Development rows only: the project whose repository this is, which task's bytes are loaded (empty
+	// for the repository itself), and whether anything has been loaded at all.
+	ProjectID string `json:"project_id,omitempty"`
+	TaskID    string `json:"task_id,omitempty"`
+	Loaded    bool   `json:"loaded"`
 }
 
 // ExtensionUpdate describes an available update.
@@ -1869,12 +1874,15 @@ func (h *ExtensionHandler) toResponse(ext *Extension, statuses map[string]Extens
 	// fetches assets from — see servedURLFromDir for why that has to be the server's
 	// answer and not something the client guesses from a manifest author.
 	root := h.config.ExtensionsDirOrDefault()
-	extDir := extensionDir(root, ext.Author, ext.Name)
+	extDir := devOrExtensionDir(root, ext)
 	resp.ServedURL = servedURLFromDir(root, extDir)
 	// Local (filesystem) extensions have a concrete on-disk path; files stay where
 	// a human put them, which is why the path comes from the same derivation.
-	if ext.InstallSource == "local" {
+	if ext.InstallSource == "local" || ext.IsDev() {
 		resp.LocalPath = extDir
 	}
+	resp.ProjectID = ext.ProjectID
+	resp.TaskID = ext.TaskID
+	resp.Loaded = ext.IsLoaded()
 	return resp
 }

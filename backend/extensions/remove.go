@@ -22,6 +22,12 @@ func (h *ExtensionHandler) removeExtensionFiles(ext *Extension) string {
 	if ext == nil {
 		return "the extension record is missing, so no files could be located"
 	}
+	if ext.IsDev() {
+		// A development row's files are a copy the server made when a person loaded a task's version.
+		// The repository itself is not this row's to delete - it belongs to the project, whose own
+		// deletion path removes it - so a row that is uninstalled keeps its author's work.
+		return h.removeDevStaging(ext)
+	}
 	return h.removeMaterializedDir(ext.ID, ext.Author, ext.Name)
 }
 

@@ -1,0 +1,12 @@
+{
+    "display_name": "Français",
+    "description": "French language pack.",
+    "author": "operator",
+    "version": "0.1.0",
+    "capabilities": {
+        "i18n": {
+            "locale": "fr",
+            "messages_url": "messages.json"
+        }
+    }
+}

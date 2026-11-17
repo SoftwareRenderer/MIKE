@@ -54,7 +54,7 @@ func PromptOverlayFor(exts []Extension, extensionsDir string) PromptOverlay {
 	if i18n.PromptsDir == "" {
 		return answer
 	}
-	dir, ok := PromptDirInPack(extensionDir(extensionsDir, pack.Author, pack.Name), i18n.PromptsDir)
+	dir, ok := PromptDirInPack(devOrExtensionDir(extensionsDir, pack), i18n.PromptsDir)
 	if !ok {
 		logging.For(logging.Prompts).Infof("%s/%s: capabilities.i18n.prompts_dir %q is not a directory inside the pack — prompts stay English", pack.Author, pack.Name, i18n.PromptsDir)
 		return answer

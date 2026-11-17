@@ -65,6 +65,7 @@ type Server struct {
 	sessionMgr          *auth.SessionManager
 	apiTokens           *auth.APITokenManager
 	projectHandler      *api.ProjectHandler
+	scaffoldHandler     *api.ExtensionScaffoldHandler
 	taskHandler         *api.TaskHandler
 	boardHandler        *api.BoardHandler
 	appStreamMgr        *stream.AppStreamManager
@@ -321,7 +322,10 @@ func (s *Server) reg(st stage, name string, run func()) func() error {
 
 // NewServer opens the database, wires every component, and registers a teardown step beside each
 // component that needs one.
-func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Server, error) {
+// authoring is the bundle a new custom extension is scaffolded from, embedded by the caller the way
+// the frontend is. Its zero value is a decline: a build that carries no bundle says so when someone
+// asks for an extension, rather than scaffolding an empty directory.
+func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS, authoring fs.FS) (*Server, error) {
 	if assets == nil {
 		return nil, fmt.Errorf("create server: no frontend assets")
 	}
@@ -663,6 +667,21 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 		s.refreshPromptLocale()
 		s.appStreamMgr.BroadcastExtensionChange()
 	})
+	// The load path reads a repository from the project table and a task's uncommitted bytes from the
+	// worktree layout; nothing about a development extension reaches the server through a path in a
+	// request.
+	s.extHandler.SetAuthoringBundle(authoring)
+	s.scaffoldHandler = api.NewExtensionScaffoldHandler(api.ExtensionScaffoldDeps{
+		Store:      store,
+		Projects:   s.projectHandler,
+		Tasks:      s.taskHandler,
+		Extensions: s.extHandler,
+	})
+	s.extHandler.SetDevSources(devSources{store: store, worktrees: worktreeMgr})
+	s.taskHandler.SetDevStagingPrune(s.extHandler.PruneDevStaging)
+	// A development project's repository lives in the extensions tree, so its deletion belongs to the
+	// project path and the extensions package owns the containment.
+	s.projectHandler.SetDevRepoCleanup(s.extHandler.RemoveDevRepo)
 	s.extHandler.SetOnImageUpdated(func(extID string) {
 		s.lspHandler.BroadcastLSPReset()
 	})
@@ -1170,3 +1189,21 @@ func newHybridListener(l net.Listener, stdCfg *stdtls.Config, sniffTimeout time.
 
 // Shutdown runs every teardown step. Each is best-effort and none can be interrupted, so the
 // order below is the dependency order, not a preference.
+
+// devSources answers where a development extension's bytes live: the repository is a project's stored
+// path, and a task's uncommitted work is its worktree. Both come from rows this server wrote.
+type devSources struct {
+	store     *store.Store
+	worktrees *git.WorktreeManager
+}
+
+func (d devSources) GetProject(id string) (*types.Project, error) { return d.store.GetProject(id) }
+func (d devSources) ListProjects() ([]types.Project, error)       { return d.store.ListProjects() }
+func (d devSources) GetTask(id string) (*types.Task, error)       { return d.store.GetTaskByID(id) }
+
+func (d devSources) WorktreePath(taskID string) (string, error) {
+	if d.worktrees == nil {
+		return "", fmt.Errorf("this server has no worktree layout")
+	}
+	return d.worktrees.WorktreePath(taskID)
+}

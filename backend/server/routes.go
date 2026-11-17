@@ -6,6 +6,7 @@ import (
 	"mike/backend/fsutil"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -117,6 +118,14 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("POST /api/extensions/install", s.extHandler.HandleInstall)
 	s.mux.HandleFunc("POST /api/extensions/install-local", s.extHandler.HandleInstallLocal)
 	s.mux.HandleFunc("GET /api/extensions/check-updates", s.extHandler.HandleCheckUpdates)
+	// Development extensions (docs/extension-authoring.md): what is loadable, the load itself, and the
+	// row for a repository whose row was uninstalled.
+	s.mux.HandleFunc("GET /api/extensions/dev", s.extHandler.HandleDevExtensions)
+	s.mux.HandleFunc("POST /api/extensions/dev-attach", s.extHandler.HandleDevAttach)
+	s.mux.HandleFunc("POST /api/extensions/scaffold", s.scaffoldHandler.HandleScaffold)
+	s.mux.HandleFunc("POST /api/extensions/{id}/reload", func(w http.ResponseWriter, r *http.Request) {
+		s.extHandler.HandleReloadDev(w, r, r.PathValue("id"))
+	})
 	s.mux.HandleFunc("POST /api/extensions/{id}/update", func(w http.ResponseWriter, r *http.Request) {
 		s.extHandler.HandleUpdateImage(w, r, r.PathValue("id"))
 	})
@@ -235,7 +244,8 @@ func (s *Server) setupRoutes() {
 	// send session cookies), so it stays minimal. A raw http.FileServer would
 	// render a directory index for /extensions/ and /extensions/<author>/,
 	// handing the installed-extension tree to any unauthenticated client;
-	// noListingFS returns 404 for those instead, and noEscapeFS refuses what http.Dir follows.
+	// noListingFS returns 404 for those instead, and noEscapeFS refuses what http.Dir follows
+	// and everything reached through a dot-prefixed directory.
 	s.mux.Handle("/extensions/", http.StripPrefix("/extensions/",
 		http.FileServer(noListingFS{noEscapeFS{dir: "extensions"}})))
 
@@ -297,12 +307,25 @@ func (n noListingFS) Open(name string) (http.File, error) {
 // noEscapeFS refuses any path whose symlink-resolved form leaves the served root. http.Dir
 // follows symlinks and this prefix is served with no session (isPublicPath), so one planted
 // link would make its target world-readable.
+//
+// It also refuses every name with a dot-prefixed segment, in the request or in what that name
+// resolves to. A git repository lives under this root — an extension author's checkout is created
+// there — and `.git` holds the remote URL, which can hold a credential. A committed symlink is
+// ordinary repository content, so judging only the request would let one link hand out `.git`
+// without a dot in the URL. Nothing an extension ships is reached through a dot path: every asset
+// a manifest names is a plain relative file, so the rule costs nothing.
 type noEscapeFS struct{ dir string }
 
 func (n noEscapeFS) Open(name string) (http.File, error) {
+	if hasDotSegment(path.Clean(name)) {
+		return nil, fs.ErrNotExist
+	}
 	abs := filepath.Join(n.dir, filepath.FromSlash("/"+name))
 	resolved, err := fsutil.Contained(abs, []string{n.dir})
 	if err != nil {
+		return nil, fs.ErrNotExist
+	}
+	if rel, under := n.relToRoot(resolved); !under || hasDotSegment(rel) {
 		return nil, fs.ErrNotExist
 	}
 	before, err := os.Lstat(resolved)
@@ -322,4 +345,40 @@ func (n noEscapeFS) Open(name string) (http.File, error) {
 		return nil, fs.ErrNotExist
 	}
 	return f, nil
+}
+
+// relToRoot is where a resolved path sits beneath the served root, so the dot rule judges only the
+// part of the path this server owns — a deployment whose data lives under ~/.local or ~/.config still
+// serves its extensions. Contained answers in the same relative-or-absolute form it was handed, so
+// both sides are absolutized before they are compared, and the root is tried with and without its
+// symlinks resolved because a link in an ancestor is the one thing both forms can disagree about.
+func (n noEscapeFS) relToRoot(resolved string) (string, bool) {
+	abs, err := filepath.Abs(resolved)
+	if err != nil {
+		return "", false
+	}
+	root, err := filepath.Abs(n.dir)
+	if err != nil {
+		return "", false
+	}
+	candidates := []string{root}
+	if r, err := filepath.EvalSymlinks(root); err == nil {
+		candidates = append(candidates, r)
+	}
+	for _, base := range candidates {
+		if rel, err := filepath.Rel(base, abs); err == nil && fsutil.RelBelowRoot(rel) {
+			return filepath.ToSlash(rel), true
+		}
+	}
+	return "", false
+}
+
+// hasDotSegment reports whether any segment of a slash path begins with '.'.
+func hasDotSegment(slashPath string) bool {
+	for _, seg := range strings.Split(slashPath, "/") {
+		if strings.HasPrefix(seg, ".") {
+			return true
+		}
+	}
+	return false
 }

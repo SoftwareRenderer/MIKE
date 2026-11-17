@@ -39,6 +39,14 @@ type TaskHandler struct {
 	worktreeMgr    *git.WorktreeManager
 	commitQueue    *exec.CommitQueue
 	sandboxMgr     taskSandboxOps
+	// removes the loaded development copy a deleted task left in the extensions tree. Declared with the
+	// task's teardown so the deletion stays one path; nil means no extensions to develop.
+	devStagingPrune func(taskID string)
+}
+
+// SetDevStagingPrune aims a deleted task's teardown at the development namespace.
+func (h *TaskHandler) SetDevStagingPrune(prune func(taskID string)) {
+	h.devStagingPrune = prune
 }
 
 // taskSandboxOps is the sandbox operations used for port refresh.
@@ -1004,6 +1012,11 @@ func (h *TaskHandler) cleanupTask(taskID string, descendants []types.Task) {
 
 // cleanupSingleTask cleans up a single task.
 func (h *TaskHandler) cleanupSingleTask(taskID string) {
+	// A development version loaded from this task is served from a copy under the extensions tree; the
+	// task's own teardown is what removes it, so no served bytes outlive the task they came from.
+	if h.devStagingPrune != nil {
+		h.devStagingPrune(taskID)
+	}
 	if h.executor != nil {
 		_ = h.executor.StopTask(taskID)
 		h.executor.StopSandbox(taskID)

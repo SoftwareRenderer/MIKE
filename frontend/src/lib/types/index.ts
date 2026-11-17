@@ -838,6 +838,14 @@ export interface Extension {
     served_url?: string;
     running: boolean;
     ports?: AssignedPort[];
+    /**
+     * Development rows only: the project whose repository this extension is, which task's bytes are
+     * the running ones (empty for the repository itself), and whether anything has been loaded at
+     * all. An unloaded row is inert — it carries no manifest to register and has nothing to serve.
+     */
+    project_id?: string;
+    task_id?: string;
+    loaded?: boolean;
     installed_at: string;
     built_at: string;
     repo?: string;

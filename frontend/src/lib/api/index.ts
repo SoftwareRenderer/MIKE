@@ -213,6 +213,8 @@ export {
     installLocalExtension,
     checkUpdates,
     testExtensionUrl,
+    scaffoldExtension,
+    reloadExtensionVersion,
 } from './extensions';
 
 export type { ExtensionUrlProbe } from './extensions';

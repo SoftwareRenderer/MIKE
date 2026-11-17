@@ -109,9 +109,9 @@ func TestMappingsFilePath(t *testing.T) {
 		{"local", "provider-adapters", "", "", false},
 	}
 	for _, c := range cases {
-		got, ok := mappingsFilePath(dir, c.author, c.name, c.file)
+		got, ok := mappingsFilePathIn(extensionDir(dir, c.author, c.name), c.file)
 		if ok != c.ok || got != c.want {
-			t.Errorf("mappingsFilePath(%q,%q,%q) = (%q,%v), want (%q,%v)", c.author, c.name, c.file, got, ok, c.want, c.ok)
+			t.Errorf("mappingsFilePathIn(%q,%q,%q) = (%q,%v), want (%q,%v)", c.author, c.name, c.file, got, ok, c.want, c.ok)
 		}
 	}
 }
@@ -125,7 +125,7 @@ func TestMappingsFilePathFlatLayout(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "myext"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	got, ok := mappingsFilePath(root, "local", "myext", "mappings.json")
+	got, ok := mappingsFilePathIn(extensionDir(root, "local", "myext"), "mappings.json")
 	if !ok || got != filepath.Join(root, "myext", "mappings.json") {
 		t.Errorf("flat: got (%q,%v)", got, ok)
 	}
@@ -133,12 +133,12 @@ func TestMappingsFilePathFlatLayout(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "local", "myext"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	got, ok = mappingsFilePath(root, "local", "myext", "mappings.json")
+	got, ok = mappingsFilePathIn(extensionDir(root, "local", "myext"), "mappings.json")
 	if !ok || got != filepath.Join(root, "local", "myext", "mappings.json") {
 		t.Errorf("namespaced: got (%q,%v)", got, ok)
 	}
 	// Neither exists → standard (namespaced) path reported.
-	got, ok = mappingsFilePath(root, "local", "ghost", "mappings.json")
+	got, ok = mappingsFilePathIn(extensionDir(root, "local", "ghost"), "mappings.json")
 	if !ok || got != filepath.Join(root, "local", "ghost", "mappings.json") {
 		t.Errorf("missing: got (%q,%v)", got, ok)
 	}
