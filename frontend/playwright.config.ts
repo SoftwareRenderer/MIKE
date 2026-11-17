@@ -18,8 +18,10 @@ const ISOLATED_SPECS = [
   // the lane server is answering six workers at once.
   'html-preview',
   'extensions-danger-permissions',
+  // Installs the local CSS fixture so the Installed list and the injected <link> have something real to
+  // read — an install is server state every other extension spec reads, so it cannot share the lane.
+  'extensions-tab',
   'mode-select',
-  'preferences-hide-model-badge',
   'preferences-keyboard',
   'provider-task-concurrency',
   'settings-extension-dependency-cache',

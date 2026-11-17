@@ -56,7 +56,7 @@ Example: `hide_model_badge` gates `.model-badge` in `Card.svelte` (`appStore.con
 
 **Defaults**: For flags that are "on" by default (e.g., `auto_maximize_chat_mobile`), treat `nil` as `true`. The client should consume `!== false`.
 
-**Tests**: `backend/config/config_test.go`, `backend/config/preferences_test.go` (the table walk), `preferences-tab.unit.svelte.ts`, a component test for the gated widget, and e2e `preferences-hide-model-badge.spec.ts`.
+**Tests**: `backend/config/config_test.go`, `backend/config/preferences_test.go` (the table walk), `preferences-tab.unit.svelte.ts`, a component test for the gated widget, and the e2e Save-flow suite `preferences-keyboard.spec.ts` (its last two tests move a UI toggle, not a binding).
 
 ## When the preference belongs to a browser
 
