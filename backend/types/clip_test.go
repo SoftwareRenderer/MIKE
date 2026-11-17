@@ -9,12 +9,15 @@ import (
 const cjkSentence = "修复容器镜像构建在嵌套 buildah 下因能力集缺失而失败的问题，并补充测量记录"
 
 // A clipped label ending mid-rune reaches the browser as the replacement character, so the end of a
-// clip is the part a person reads. The sentence has to cost more bytes than characters, or a
-// byte-boundary cut and a rune-boundary one are the same cut and nothing here can tell them apart.
-func TestClipNeverEndsHalfwayThroughACharacter(t *testing.T) {
+// clip is the part a person reads. A budget that needs no cut is not a cut either: a string that fits,
+// and a zero budget ("no limit"), both come back as they went in. The sentence has to cost more bytes
+// than characters, or a byte-boundary cut and a rune-boundary one are the same cut and nothing here can
+// tell them apart.
+func TestClipCutsOnRuneBoundariesAndLeavesWhatFits(t *testing.T) {
 	if utf8.RuneCountInString(cjkSentence) >= len(cjkSentence) {
 		t.Fatalf("the sample holds %d runes in %d bytes, want more bytes than runes", utf8.RuneCountInString(cjkSentence), len(cjkSentence))
 	}
+
 	for _, max := range []int{1, 12, 20, 40, utf8.RuneCountInString(cjkSentence) - 1} {
 		got := Clip(cjkSentence, max)
 		if !utf8.ValidString(got) {
@@ -27,16 +30,14 @@ func TestClipNeverEndsHalfwayThroughACharacter(t *testing.T) {
 			t.Errorf("Clip(_, %d) = %q, which is not a prefix of the input", max, got)
 		}
 	}
-}
 
-func TestClipLeavesAShortEnoughStringAlone(t *testing.T) {
-	for _, s := range []string{"", "one short line", cjkSentence} {
-		if got := Clip(s, utf8.RuneCountInString(s)); got != s {
-			t.Errorf("Clip(len, _) = %q, want the input %q", got, s)
+	for _, in := range []string{"", "one short line", cjkSentence} {
+		if got := Clip(in, utf8.RuneCountInString(in)); got != in {
+			t.Errorf("Clip(len, _) = %q, want the input %q", got, in)
 		}
-	}
-	if got := Clip(cjkSentence, 0); got != cjkSentence {
-		t.Errorf("Clip(_, 0) = %q, want the input untouched: no budget is not an empty budget", got)
+		if got := Clip(in, 0); got != in {
+			t.Errorf("Clip(%q, 0) = %q, want the input untouched: no budget is not an empty budget", in, got)
+		}
 	}
 }
 
