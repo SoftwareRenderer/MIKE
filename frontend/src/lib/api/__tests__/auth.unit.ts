@@ -360,26 +360,19 @@ describe('the device list', () => {
         expect(callTo('/auth/passkeys/cred-1')[1].method).toBe('DELETE');
     });
 
-    it('hands back the minted code with everything a second device needs', async () => {
-        const code = { code: 'ABCD-2345', url: 'https://mike.local:3000/#pair=ABCD-2345', qr_png: 'data:image/png;base64,AA', expires_at: '2026-10-03T10:05:00Z' };
-        mockFetch.mockResolvedValue(res(200, code));
+    it.each([['with no name typed', undefined, ''], ['with the device named', 'Kitchen tablet', 'Kitchen tablet']])(
+        'hands back the minted code with everything a second device needs, %s', async (_name, typed, sent) => {
+            const code = { code: 'ABCD-2345', url: 'https://mike.local:3000/#pair=ABCD-2345', qr_png: 'data:image/png;base64,AA', expires_at: '2026-10-03T10:05:00Z' };
+            mockFetch.mockResolvedValue(res(200, code));
 
-        const { mintPairingCode } = await import('$lib/api/auth');
+            const { mintPairingCode } = await import('$lib/api/auth');
 
-        await expect(mintPairingCode()).resolves.toEqual(code);
-        expect(callTo('/auth/pairing')[1].method).toBe('POST');
-        // A mint with nothing typed sends an empty name.
-        expect(bodyOf(callTo('/auth/pairing'))).toEqual({ name: '' });
-    });
-
-    it('sends the name for the device being paired, which rides the link it answers with', async () => {
-        mockFetch.mockResolvedValue(res(200, { code: 'ABCD-2345', url: 'https://mike.local:3000/#pair=ABCD2345&name=Kitchen+tablet' }));
-
-        const { mintPairingCode } = await import('$lib/api/auth');
-
-        await mintPairingCode('Kitchen tablet');
-        expect(bodyOf(callTo('/auth/pairing'))).toEqual({ name: 'Kitchen tablet' });
-    });
+            // The name rides the pairing link the code answers with, so the second device opens the form
+            // already holding what the person called this one.
+            await expect(mintPairingCode(typed)).resolves.toEqual(code);
+            expect(callTo('/auth/pairing')[1].method).toBe('POST');
+            expect(bodyOf(callTo('/auth/pairing'))).toEqual({ name: sent });
+        });
 
     it('cancels every outstanding code on the verb the route declares', async () => {
         mockFetch.mockResolvedValue(res(200, { revoked: true }));
@@ -436,27 +429,22 @@ describe('the CSRF token travels on unsafe methods only', () => {
     const probes = () => mockFetch.mock.calls
         .filter((c: any[]) => String(c[0]).includes('/api/auth/session')).length;
 
-    it('asks for no token on a GET, so the request is the only one made', async () => {
+    it.each([
+        ['the method left off', undefined],
+        ['the method spelled out', 'GET'],
+        ['the method lower-cased', 'get'],
+        ['a HEAD', 'HEAD'],
+    ])('asks for no token on %s, so the request is the only one made', async (_name, method) => {
         mockFetch.mockResolvedValue(res(200, []));
 
         const { apiFetch } = await import('$lib/api/helpers');
-        await apiFetch('/api/projects');
+        await apiFetch('/api/projects', method ? { method } : undefined);
 
+        // A safe method asks for nothing: the middleware skips GET, HEAD and OPTIONS, and the session
+        // check is the request that would have supplied the token.
         expect(mockFetch.mock.calls.length).toBe(1);
         expect(headerOf(mockFetch.mock.calls[0]!, 'X-CSRF-Token')).toBeNull();
         expect(probes()).toBe(0);
-    });
-
-    it('treats an explicit GET, a lowercase one and a HEAD as safe', async () => {
-        mockFetch.mockResolvedValue(res(200, []));
-
-        const { apiFetch } = await import('$lib/api/helpers');
-        await apiFetch('/api/projects', { method: 'GET' });
-        await apiFetch('/api/projects', { method: 'get' });
-        await apiFetch('/api/projects', { method: 'HEAD' });
-
-        expect(probes()).toBe(0);
-        for (const call of mockFetch.mock.calls) expect(headerOf(call, 'X-CSRF-Token')).toBeNull();
     });
 
     it('probes once for a POST with no token in hand, and not again for the next', async () => {

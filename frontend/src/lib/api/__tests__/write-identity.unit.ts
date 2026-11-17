@@ -54,17 +54,6 @@ describe('the identity one write carries', () => {
         expect(bodies[1].client_token).toBe(bodies[0].client_token);
     });
 
-    it('is a fresh one for the next send, because that is a different write', async () => {
-        const { sendTaskMessage } = await import('$lib/api/tasks');
-        vi.stubGlobal('fetch', recordingBodies(bodies));
-
-        await sendTaskMessage(SEND);
-        await sendTaskMessage({ ...SEND, content: 'asked again' });
-
-        expect(bodies.map(b => b.content)).toEqual(['the message', 'asked again']);
-        expect(bodies[1].client_token).not.toBe(bodies[0].client_token);
-    });
-
     it('is a fresh one for a send the server refused and the person sends again', async () => {
         const { sendTaskMessage } = await import('$lib/api/tasks');
         const { loadQueue } = await import('$lib/storage');

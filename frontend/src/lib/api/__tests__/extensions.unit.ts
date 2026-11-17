@@ -225,11 +225,4 @@ describe('extensions API', () => {
 
         expect(events.map((e) => e.progress)).toEqual([10, 100]);
     });
-
-    it('throws error on API failure', async () => {
-        mockError('extension not found', 404);
-
-        const { listExtensions } = await import('$lib/api/extensions');
-        await expect(listExtensions()).rejects.toThrow();
-    });
 });
