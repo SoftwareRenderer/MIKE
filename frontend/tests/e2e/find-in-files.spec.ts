@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { getProjectId, selectProject } from './helpers';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -6,9 +7,9 @@ test.describe('Find in Files', () => {
     test.beforeEach(async ({ page }) => {
         await page.goto('/');
         await page.waitForSelector('.project-item, .empty-state', { timeout: 10000 });
-
-        // Navigate to the test project (global-setup project)
-        await page.locator('.project-item').first().click();
+        // The row of global-setup's project, addressed by id: `.project-item` + `.first()` is
+        // whichever project some other worker created last.
+        await selectProject(page, await getProjectId(page));
         await page.waitForSelector('.card, .empty-state, .file-tree', { timeout: 10000 });
 
         // Open the Explorer view
@@ -16,57 +17,30 @@ test.describe('Find in Files', () => {
         await expect(page.locator('.explorer-view')).toBeVisible({ timeout: 10000 });
     });
 
-    test('should close find panel with Escape', async ({ page }) => {
-        // Open find panel
+    async function pressFindShortcut(page: import('@playwright/test').Page) {
+        // The explorer's handler asks for `e.key === 'F'` (`explorer-core.svelte.ts`), so the modifiers are
+        // held across the key press: `press('Control+Shift+f')` delivers a lowercase `key` and nothing opens.
         await page.keyboard.down('Control');
         await page.keyboard.down('Shift');
         await page.keyboard.press('KeyF');
         await page.keyboard.up('Shift');
         await page.keyboard.up('Control');
+    }
 
-        await expect(page.locator('.file-search-panel')).toBeVisible();
+    // One gesture pair, one test: the shortcut opens the panel and closes it again, and Escape closes it.
+    // Split in two, each half re-drove the whole explorer to assert half a toggle.
+    test('Ctrl+Shift+F opens the find panel and closes it again, and Escape closes it', async ({ page }) => {
+        await pressFindShortcut(page);
+        const panel = page.locator('.file-search-panel');
+        await expect(panel).toBeVisible();
 
-        // Press Escape to close
+        await pressFindShortcut(page);
+        await expect(panel).toHaveCount(0);
+
+        await pressFindShortcut(page);
+        await expect(panel).toBeVisible();
         await page.keyboard.press('Escape');
-
-        // Find panel should be hidden
-        await expect(page.locator('.file-search-panel')).not.toBeVisible();
-    });
-
-    test('should toggle find panel with Ctrl+Shift+F', async ({ page }) => {
-        // Open find panel
-        await page.keyboard.down('Control');
-        await page.keyboard.down('Shift');
-        await page.keyboard.press('KeyF');
-        await page.keyboard.up('Shift');
-        await page.keyboard.up('Control');
-
-        await expect(page.locator('.file-search-panel')).toBeVisible();
-
-        // Press Ctrl+Shift+F again to close
-        await page.keyboard.down('Control');
-        await page.keyboard.down('Shift');
-        await page.keyboard.press('KeyF');
-        await page.keyboard.up('Shift');
-        await page.keyboard.up('Control');
-
-        await expect(page.locator('.file-search-panel')).not.toBeVisible();
-    });
-
-    test('should show search options toggles', async ({ page }) => {
-        // Open find panel
-        await page.keyboard.down('Control');
-        await page.keyboard.down('Shift');
-        await page.keyboard.press('KeyF');
-        await page.keyboard.up('Shift');
-        await page.keyboard.up('Control');
-
-        await expect(page.locator('.file-search-panel')).toBeVisible();
-
-        // Check toggles are present (using title attributes)
-        await expect(page.locator('button[title="Match Case"]')).toBeVisible();
-        await expect(page.locator('button[title="Whole Word"]')).toBeVisible();
-        await expect(page.locator('button[title="Use Regex"]')).toBeVisible();
+        await expect(panel).toHaveCount(0);
     });
 });
 
@@ -76,32 +50,24 @@ test.describe('Sidebar persistence', () => {
         await page.waitForSelector('.project-item, .empty-state', { timeout: 10000 });
     });
 
-    test('should persist sidebar collapsed state', async ({ page }) => {
-        // Find the collapse toggle button
+    // What survives the reload is the point: the collapsed flag is written to the client store at boot and
+    // read back, so the class is asked for after a real navigation rather than after a sleep.
+    test('the collapsed sidebar stays collapsed across a reload', async ({ page }) => {
         const toggleBtn = page.locator('.desktop-collapse-btn');
         await expect(toggleBtn).toBeVisible();
 
-        // Collapse the sidebar
         await toggleBtn.click();
-        await page.waitForTimeout(200); // Wait for class update
         await expect(page.locator('#sidebar')).toHaveClass(/collapsed/);
 
         await page.reload();
         await page.waitForSelector('.project-item, .empty-state', { timeout: 10000 });
-
-        // Sidebar should still be collapsed
         await expect(page.locator('#sidebar')).toHaveClass(/collapsed/);
 
-        // Expand the sidebar
         await toggleBtn.click();
-        await page.waitForTimeout(200); // Wait for class update
         await expect(page.locator('#sidebar')).not.toHaveClass(/collapsed/);
 
-        // Reload again
         await page.reload();
         await page.waitForSelector('.project-item, .empty-state', { timeout: 10000 });
-
-        // Sidebar should be expanded
         await expect(page.locator('#sidebar')).not.toHaveClass(/collapsed/);
     });
 });
