@@ -4,6 +4,11 @@ import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch, isolatedProj
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
 isolatedProject();
 
+/** A BaseModal confirmation, picked out by the message only a confirmation draws — `[role="dialog"]`
+ *  alone is never a unique locator in this app. */
+const confirmDialog = (page: any) =>
+  page.locator('[role="dialog"]').filter({ has: page.locator('.confirm-message') });
+
 
 test.describe.configure({ mode: 'parallel' });
 
@@ -308,12 +313,13 @@ test.describe('Clear Done Tasks', () => {
     }).toPass({ timeout: 5000 });
 
     await page.click('.clear-btn');
-    await expect(page.locator('[role="dialog"]')).toBeVisible();
-    expect(await page.locator('[role="dialog"] .confirm-message').textContent()).toContain('Permanently delete');
+    const dialog = confirmDialog(page);
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('.confirm-message')).toContainText('Permanently delete');
 
     // Click Cancel to dismiss without deleting
-    await page.click('[role="dialog"] .btn-cancel');
-    await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
+    await dialog.locator('.btn-cancel').click();
+    await expect(dialog).not.toBeVisible({ timeout: 5000 });
 
     // Verify our specific task is still in done (not deleted)
     await expect(async () => {
@@ -358,8 +364,8 @@ test.describe('Clear Done Tasks', () => {
     expect(doneCountBefore).toBeGreaterThanOrEqual(doneCountBase + 2);
 
     await page.click('.clear-btn');
-    await expect(page.locator('[role="dialog"]')).toBeVisible();
-    await page.click('[role="dialog"] .btn-confirm');
+    await expect(confirmDialog(page)).toBeVisible();
+    await confirmDialog(page).locator('.btn-confirm').click();
 
     await gotoProject(page);
     await page.waitForSelector('.card');
@@ -399,8 +405,8 @@ test.describe('Clear Done Tasks', () => {
     }).toPass({ timeout: 10000 });
 
     await page.click('.clear-btn');
-    await expect(page.locator('[role="dialog"]')).toBeVisible();
-    await page.click('[role="dialog"] .btn-confirm');
+    await expect(confirmDialog(page)).toBeVisible();
+    await confirmDialog(page).locator('.btn-confirm').click();
 
     await expect(page.locator(`.card[data-task-id="${taskId}"]`)).not.toBeVisible({ timeout: 10000 });
 
@@ -461,8 +467,8 @@ test.describe('Mobile Delete Scroll Column', () => {
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     await page.click('.icon-btn[aria-label="Delete task"]');
-    await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
-    await page.click('[role="dialog"] .btn-confirm');
+    await expect(confirmDialog(page)).toBeVisible({ timeout: 5000 });
+    await confirmDialog(page).locator('.btn-confirm').click();
 
     await expect(page.locator('.board')).toBeVisible({ timeout: 10000 });
 

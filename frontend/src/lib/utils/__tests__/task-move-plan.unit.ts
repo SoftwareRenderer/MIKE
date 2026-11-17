@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ancestorInProgress, willConsolidateIntoParent, planBulkMove } from '$lib/utils/task-utils';
+import { willConsolidateIntoParent, planBulkMove } from '$lib/utils/task-utils';
 import type { Task } from '$lib/types';
 
 function makeTask(id: string, status: string, parentId?: string): Task {
@@ -34,27 +34,6 @@ function family(): Task[] {
         makeTask('other', 'backlog'),
     ];
 }
-
-describe('ancestorInProgress', () => {
-    it('finds an In Progress ancestor at any depth', () => {
-        expect(ancestorInProgress(family(), 'grandchild')).toBe(true);
-    });
-
-    it('is false for a top-level task and for a task with no parents in this list', () => {
-        expect(ancestorInProgress(family(), 'root')).toBe(false);
-        expect(ancestorInProgress(family(), 'unknown-id')).toBe(false);
-    });
-
-    it('ignores a chain that never reaches an In Progress task', () => {
-        const tasks = [makeTask('root', 'review'), makeTask('child', 'backlog', 'root')];
-        expect(ancestorInProgress(tasks, 'child')).toBe(false);
-    });
-
-    it('stops on a parent cycle instead of looping forever', () => {
-        const tasks = [makeTask('a', 'backlog', 'b'), makeTask('b', 'backlog', 'a')];
-        expect(ancestorInProgress(tasks, 'a')).toBe(false);
-    });
-});
 
 describe('willConsolidateIntoParent', () => {
     it('is true for a subtask moved into the column its parent already holds', () => {

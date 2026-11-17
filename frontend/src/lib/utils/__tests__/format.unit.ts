@@ -40,20 +40,18 @@ describe('formatMB', () => {
 });
 
 describe('formatTokens', () => {
-    it('formats millions with one decimal', () => {
-        expect(formatTokens(2_500_000)).toBe('2.5M');
-        expect(formatTokens(1_000_000)).toBe('1.0M');
-    });
-
-    it('formats thousands with one decimal', () => {
-        expect(formatTokens(1234)).toBe('1.2K');
-        expect(formatTokens(1_000)).toBe('1.0K');
-        expect(formatTokens(999_999)).toBe('1000.0K');
-    });
-
-    it('leaves values below 1000 alone', () => {
-        expect(formatTokens(0)).toBe('0');
-        expect(formatTokens(999)).toBe('999');
+    // One decision: where the compact scale starts, and what it prints above it.
+    it.each([
+        ['below the first threshold', 0, '0'],
+        ['below the first threshold', 999, '999'],
+        ['thousands, one decimal', 1_000, '1.0K'],
+        ['thousands, one decimal', 1234, '1.2K'],
+        // The rung below a million still carries the K, however large the mantissa gets.
+        ['thousands, one decimal', 999_999, '1000.0K'],
+        ['millions, one decimal', 1_000_000, '1.0M'],
+        ['millions, one decimal', 2_500_000, '2.5M'],
+    ])('formats %s', (_rung, value, expected) => {
+        expect(formatTokens(value)).toBe(expected);
     });
 });
 
@@ -122,26 +120,22 @@ describe('active locale', () => {
         expect(usdSymbol()).not.toBe('$');
     });
 
-    it('localizes the decimal separator in compact numbers without grouping them', () => {
+    it('localizes the separators of a compact number without grouping or moving a threshold', () => {
         // Compact notations carry a scale, not an amount: "1000,0K" is right in de and
-        // "1,000.0K" would be wrong in en. That is why useGrouping is off here.
-        setLocale('de');
-        expect(formatTokens(1234)).toBe('1,2K');
-        expect(formatTokens(2_500_000)).toBe('2,5M');
-        expect(formatTokens(999_999)).toBe('1000,0K');
-        expect(formatBytes(2048)).toBe('2,0 KB');
-        setLocale('en');
-        expect(formatTokens(1234)).toBe('1.2K');
-        expect(formatBytes(2048)).toBe('2.0 KB');
-    });
-
-    it('keeps thresholds and rounding identical across locales — only separators move', () => {
-        for (const locale of ['en', 'de'] as const) {
+        // "1,000.0K" would be wrong in en. That is why useGrouping is off here, and why the
+        // thresholds, units and rounding below are the ones pinned in `en` — only separators move.
+        for (const [locale, digits, compact, kb, bytes] of [
+            ['en', ['0', '999'], ['1.0K', '1.2K', '2.5M', '1000.0K'], '2.0 KB', '900 B'],
+            ['de', ['0', '999'], ['1,0K', '1,2K', '2,5M', '1000,0K'], '2,0 KB', '900 B'],
+        ] as const) {
             setLocale(locale);
-            expect(formatTokens(0)).toBe(new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(0));
-            expect(formatTokens(999)).toBe(new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(999));
-            expect(formatBytes(900)).toBe(new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(900) + ' B');
-            expect(formatTokens(1_000)).toBe(new Intl.NumberFormat(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(1) + 'K');
+            expect([formatTokens(0), formatTokens(999)]).toEqual(digits);
+            expect([
+                formatTokens(1_000), formatTokens(1234), formatTokens(2_500_000), formatTokens(999_999),
+            ]).toEqual(compact);
+            expect(formatBytes(2048)).toBe(kb);
+            expect(formatBytes(900)).toBe(bytes);
         }
+        setLocale('en');
     });
 });

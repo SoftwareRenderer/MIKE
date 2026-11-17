@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import {
-    formatDate, formatDateTime, formatDuration, formatElapsed, formatRelativeTime,
+    formatDate, formatDateTime, formatDuration, formatElapsed,
     formatAgeAndTooltip, formatTimestamp, timeAgo, dataAgeText,
 } from '$lib/utils/format-time';
 import { registerCatalog, setLocale } from '$lib/i18n/runtime.svelte';
@@ -51,18 +51,14 @@ describe('timeAgo', () => {
         expect(timeAgo(ago(5 * MIN), { template: 'time.built' })).toBe('Built 5m ago');
     });
 
-    it('answers "" for a bad moment even with a template, so `|| fallback` still works', () => {
-        // A caller renders `timeAgo(x, { template }) || t('time.built', { when: raw })`;
-        // a dangling "Built " with no date behind it would be non-falsy and win.
-        expect(timeAgo('not-a-date', { template: 'time.built' })).toBe('');
-        expect(timeAgo(NaN, { template: 'time.built' })).toBe('');
-    });
-
-    it('returns an empty string for something that is not a moment', () => {
-        // Callers use that as "fall back to whatever raw text I was given".
-        expect(timeAgo('not-a-date')).toBe('');
-        expect(timeAgo('')).toBe('');
-        expect(timeAgo(NaN)).toBe('');
+    it('answers an empty string for a moment it cannot read, template or none', () => {
+        // Callers use "" as "fall back to whatever raw text I was given", and one of them writes
+        // `timeAgo(x, { template }) || t(...)`: a dangling "Built " with no date behind it would be
+        // non-falsy and win.
+        for (const when of ['not-a-date', '', NaN]) {
+            expect(timeAgo(when)).toBe('');
+            expect(timeAgo(when, { template: 'time.built' })).toBe('');
+        }
     });
 });
 
@@ -78,19 +74,6 @@ describe('dataAgeText', () => {
         expect(dataAgeText(Date.now() - 30_000)).toBe('just now');
         expect(dataAgeText(Date.now() - 3 * HOUR)).toBe('3h ago');
         expect(dataAgeText(ago(2 * DAY).getTime())).toBe('2d ago');
-    });
-});
-
-describe('formatRelativeTime', () => {
-    it('returns empty string for empty input', () => {
-        expect(formatRelativeTime('')).toBe('');
-    });
-
-    it('returns date string for dates older than 7 days', () => {
-        const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
-        const result = formatRelativeTime(tenDaysAgo);
-        expect(result).not.toBe('');
-        expect(result).not.toContain('ago');
     });
 });
 
@@ -220,15 +203,6 @@ describe('formatElapsed', () => {
 // ---------------------------------------------------------------------------
 describe('active locale', () => {
     afterEach(() => setLocale(null));
-
-    it('keeps the pinned English shape when en is the active locale', () => {
-        setLocale('en');
-        expect(timeAgo(ago(5 * MIN))).toBe('5m ago');
-        expect(timeAgo(ago(3 * HOUR))).toBe('3h ago');
-        expect(timeAgo(ago(3 * WEEK), { scale: 'compact' })).toBe('3w ago');
-        expect(timeAgo(ago(3 * MONTH), { scale: 'compact' })).toBe('3mo ago');
-        expect(timeAgo(ago(2 * YEAR), { scale: 'compact' })).toBe('2y ago');
-    });
 
     it('counts in the active locale (narrow ICU phrases, not the English rungs)', () => {
         setLocale('ja');

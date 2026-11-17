@@ -1,29 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import { buildSandboxImageStream } from '../raw/projects';
-
-/** A `Response` whose body delivers the given text in the given chunks. */
-function streamInChunks(...text: string[]): Response {
-    const encoder = new TextEncoder();
-    let next = 0;
-    return {
-        ok: true,
-        body: {
-            getReader: () => ({
-                read: async () =>
-                    next < text.length
-                        ? { done: false, value: encoder.encode(text[next++]) }
-                        : { done: true, value: undefined },
-                releaseLock: () => { },
-            }),
-        },
-    } as unknown as Response;
-}
-
-/** Minimal SSE Response whose single chunk carries the given data frames. */
-function sseResponse(frames: string[]): Response {
-    return streamInChunks(frames.map(f => `data: ${f}\n\n`).join(''));
-}
+import { streamBody, streamFrames } from './fake-stream-body';
 
 // The frame `buildResultFrame` writes — `sandbox.BuildResult` flattened beside the `status` the reader picks the
 // result out by.
@@ -52,7 +30,7 @@ describe('buildSandboxImageStream starts the build', () => {
         fetchMock = vi.fn(async (url: any) =>
             String(url).includes('/api/auth/session')
                 ? ({ ok: true, json: async () => ({ authenticated: true, csrf_token: 'csrf-token' }) } as Response)
-                : sseResponse([BUILD_LINES[0], RESULT]));
+                : streamFrames([BUILD_LINES[0], RESULT]));
         vi.stubGlobal('fetch', fetchMock);
     });
 
@@ -83,7 +61,7 @@ describe('buildSandboxImageStream reads the server frame stream', () => {
         // One chunk ends inside the second frame's payload.
         const cut = body.indexOf('msg="') + 10;
         const withResult = body + `data: ${RESULT}\n\n`;
-        vi.stubGlobal('fetch', vi.fn(async () => streamInChunks(withResult.slice(0, cut), withResult.slice(cut))));
+        vi.stubGlobal('fetch', vi.fn(async () => streamBody([withResult.slice(0, cut), withResult.slice(cut)]).res));
 
         const lines: string[] = [];
         const result = await buildSandboxImageStream('p1', (l) => lines.push(l));
@@ -98,7 +76,7 @@ describe('buildSandboxImageStream reads the server frame stream', () => {
         // A `{`-shaped frame is not thereby the result: only a `status` string is. Reading any object as the
         // result would end the log at the first line that happens to look like JSON.
         vi.stubGlobal('fetch', vi.fn(async () =>
-            streamInChunks('data: {"note":"a line that looks like JSON"}\n\ndata: ' + RESULT + '\n\n')));
+            streamBody(['data: {"note":"a line that looks like JSON"}\n\ndata: ' + RESULT + '\n\n']).res));
 
         const lines: string[] = [];
         const result = await buildSandboxImageStream('p1', (l) => lines.push(l));
@@ -111,7 +89,7 @@ describe('buildSandboxImageStream reads the server frame stream', () => {
         // The server's own failure path: it writes `error: …` as a log line and returns. The thrown error
         // carries that line as its cause.
         vi.stubGlobal('fetch', vi.fn(async () =>
-            streamInChunks(BUILD_LINES.map((l) => `data: ${l}\n\n`).join(''))));
+            streamBody([BUILD_LINES.map((l) => `data: ${l}\n\n`).join('')]).res));
 
         const lines: string[] = [];
         await expect(buildSandboxImageStream('p1', (l) => lines.push(l)))
@@ -123,7 +101,7 @@ describe('buildSandboxImageStream reads the server frame stream', () => {
         // A build cut off mid-flight answers nothing, so the fallback says only that the wait ended — the same
         // words the extension-install stream uses when its terminal frame never arrives.
         vi.stubGlobal('fetch', vi.fn(async () =>
-            streamInChunks('data: Building the sandbox image…\n\n')));
+            streamBody(['data: Building the sandbox image…\n\n']).res));
 
         await expect(buildSandboxImageStream('p1', () => { }))
             .rejects.toThrow('Operation ended before reporting completion');

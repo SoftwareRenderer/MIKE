@@ -99,12 +99,8 @@ function refuseQueuedGitCredentials(gitUrl?: string): void {
     }
 }
 
-/**
- * Terminal events emitted by POST /api/projects/clone (one JSON object per SSE frame).
- *
- * @knipignore projects.unit names the shapes `parseCloneEvent` answers with.
- */
-export type CloneEvent =
+/** Terminal events emitted by POST /api/projects/clone (one JSON object per SSE frame). */
+type CloneEvent =
     | { type: 'status'; message: string }
     | { type: 'progress'; percent: number }
     | { type: 'done'; project: Project }
@@ -112,11 +108,9 @@ export type CloneEvent =
 
 /**
  * Parse a single SSE `data:` frame payload from the clone endpoint. Returns null for a frame that
- * is not one of these events.
- *
- * @knipignore projects.unit checks each frame shape; `cloneProject` drops what this returns null for.
+ * is not one of these events; `cloneProject` drops what comes back null.
  */
-export function parseCloneEvent(data: string): CloneEvent | null {
+function parseCloneEvent(data: string): CloneEvent | null {
     if (!data.startsWith('{')) return null;
     try {
         const obj = JSON.parse(data) as Record<string, unknown>;

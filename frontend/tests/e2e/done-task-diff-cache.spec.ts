@@ -149,8 +149,9 @@ test.describe.serial('Done-task diff stats caching', () => {
     await expect(commitAction).toBeVisible({ timeout: 20000 });
     // Hover-revealed action icon under the card title area — force the click.
     await commitAction.click({ force: true });
-    await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 10000 });
-    await page.locator('.commit-textarea').fill('Commit for diff cache test');
+    const commitDialog = page.locator('[role="dialog"]').filter({ has: page.locator('.commit-textarea') });
+    await expect(commitDialog).toBeVisible({ timeout: 10000 });
+    await commitDialog.locator('.commit-textarea').fill('Commit for diff cache test');
     const confirmBtn = page.locator('.modal-footer .btn-primary');
     await expect(confirmBtn).toBeEnabled({ timeout: 15000 });
     await confirmBtn.click();
