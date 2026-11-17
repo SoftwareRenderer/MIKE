@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -65,105 +66,147 @@ func makeTestLSPExt(name, lang string) *extensions.Extension {
 	}
 }
 
-func TestExtensionRegistry_Lookup(t *testing.T) {
-	store := testExtensionStore(t)
-	if err := store.InitSchema(); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
-
-	// Create test extensions
-	for _, lang := range []string{"go", "typescript", "python"} {
-		ext := makeTestLSPExt(lang, lang)
-		if err := store.Create(ext); err != nil {
-			t.Fatalf("Create(%s): %v", lang, err)
+// registryWith answers for exactly the extensions it is handed.
+func registryWith(t *testing.T, exts ...*extensions.Extension) *ExtensionRegistry {
+	t.Helper()
+	es := testExtensionStore(t)
+	for _, ext := range exts {
+		if err := es.Create(ext); err != nil {
+			t.Fatalf("Create(%s): %v", ext.ID, err)
 		}
 	}
+	return NewExtensionRegistry(es)
+}
 
-	reg := NewExtensionRegistry(store)
-
-	// Test lookup by file extension
-	cfg := reg.Lookup("main.go")
-	if cfg == nil {
-		t.Fatal("Lookup(main.go) = nil, want config")
-	}
-	if cfg.Language != "go" {
-		t.Errorf("Language = %q, want go", cfg.Language)
-	}
-	if cfg.Command != "gopls" {
-		t.Errorf("Command = %q, want gopls", cfg.Command)
-	}
-
-	// Test lookup by .ts extension
-	cfg = reg.Lookup("app.ts")
-	if cfg == nil {
-		t.Fatal("Lookup(app.ts) = nil, want config")
-	}
-	if cfg.Language != "typescript" {
-		t.Errorf("Language = %q, want typescript", cfg.Language)
-	}
-
-	// Test unknown extension
-	cfg = reg.Lookup("unknown.xyz")
-	if cfg != nil {
-		t.Errorf("Lookup(unknown.xyz) = %+v, want nil", cfg)
+func threeServers() []*extensions.Extension {
+	return []*extensions.Extension{
+		makeTestLSPExt("gopls", "go"),
+		makeTestLSPExt("typescript", "typescript"),
+		makeTestLSPExt("pyright", "python"),
 	}
 }
 
-func TestExtensionRegistry_Lookup_NoExtensions(t *testing.T) {
-	store := testExtensionStore(t)
-	if err := store.InitSchema(); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
+func withToolCalls(ext *extensions.Extension, on bool) *extensions.Extension {
+	v := on
+	ext.Manifest.Capabilities.LSP.ToolCallsEnabled = &v
+	return ext
+}
 
-	reg := NewExtensionRegistry(store)
-	cfg := reg.Lookup("main.go")
-	if cfg != nil {
-		t.Errorf("Lookup(main.go) = %+v, want nil (no extensions)", cfg)
+func withChatDiagnostics(ext *extensions.Extension, on bool) *extensions.Extension {
+	v := on
+	ext.Manifest.Capabilities.LSP.ChatDiagnosticsEnabled = &v
+	return ext
+}
+
+func withInitOverride(ext *extensions.Extension, override map[string]any) *extensions.Extension {
+	ext.Manifest.Capabilities.LSP.InitParamsOverride = override
+	return ext
+}
+
+func disabled(ext *extensions.Extension) *extensions.Extension {
+	ext.Enabled = false
+	return ext
+}
+
+func withoutLSPConfig(name string) *extensions.Extension {
+	ext := makeTestLSPExt(name, "go")
+	ext.Manifest.Capabilities.LSP = nil
+	return ext
+}
+
+// TestExtensionRegistryLookup is the one place a path's answer is pinned: which installed
+// extension becomes the ServerConfig for it, and which of that extension's declarations ride along.
+// The rest of the handler reads only this answer, so every way it can be wrong is a way the editor
+// loses its server: a suffix nobody declares answers nothing, a path with no suffix answers nothing
+// (a workspace directory, a Makefile), a disabled extension answers nothing, and an extension that
+// declares no server answers nothing — while a suffix still answers inside such a path, and a
+// workspace directory named after the language is the other way a server is found, matched without
+// regard to case.
+func TestExtensionRegistryLookup(t *testing.T) {
+	on, off := true, false
+	three := func() []*extensions.Extension {
+		return []*extensions.Extension{
+			withChatDiagnostics(makeTestLSPExt("gopls", "go"), true),
+			makeTestLSPExt("typescript", "typescript"),
+			makeTestLSPExt("pyright", "python"),
+		}
+	}
+	cases := []struct {
+		name string
+		exts []*extensions.Extension
+		path string
+		want string // "" means no server may answer at all
+		cmd  string
+		chat *bool
+		over map[string]any
+	}{
+		{"a declared suffix routes to its server", threeServers(), "main.go", "go", "gopls", nil, nil},
+		{"another extension's suffix routes elsewhere", threeServers(), "app.ts", "typescript", "typescriptpls", nil, nil},
+		{"a suffix nothing declares answers nothing", threeServers(), "unknown.xyz", "", "", nil, nil},
+		{"a directory with no suffix answers nothing", threeServers(), "/tmp/workspace", "", "", nil, nil},
+		{"a suffixless file answers nothing", threeServers(), "/tmp/workspace/Makefile", "", "", nil, nil},
+		{"a suffix still answers inside a directory", threeServers(), "/tmp/workspace/main.go", "go", "gopls", nil, nil},
+		{"a workspace named after the language", threeServers(), "/home/dev/go", "go", "gopls", nil, nil},
+		{"and that name is matched case-insensitively", threeServers(), "/home/dev/GO", "go", "gopls", nil, nil},
+		{"nothing installed answers nothing", nil, "main.go", "", "", nil, nil},
+		{"a disabled extension answers nothing", []*extensions.Extension{disabled(makeTestLSPExt("gopls", "go"))}, "main.go", "", "", nil, nil},
+		{"an extension declaring no server answers nothing", []*extensions.Extension{withoutLSPConfig("no-lsp")}, "main.go", "", "", nil, nil},
+		{"the manifest's initParamsOverride rides along",
+			[]*extensions.Extension{withInitOverride(makeTestLSPExt("gopls", "go"), map[string]any{"staticcheck": true})},
+			"main.go", "go", "gopls", nil, map[string]any{"staticcheck": true}},
+		{"chat diagnostics is its extension's own declaration", three(), "main.go", "go", "gopls", &on, nil},
+		{"an extension that never declared it is off", three(), "app.py", "python", "pythonpls", &off, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := registryWith(t, tc.exts...).Lookup(tc.path)
+			if tc.want == "" {
+				if cfg != nil {
+					t.Fatalf("Lookup(%q) = %+v, want no server", tc.path, cfg)
+				}
+				return
+			}
+			if cfg == nil {
+				t.Fatalf("Lookup(%q) = nil, want the %s server", tc.path, tc.want)
+			}
+			if cfg.Language != tc.want || cfg.Command != tc.cmd {
+				t.Errorf("Lookup(%q) = language %q command %q, want %q/%q", tc.path, cfg.Language, cfg.Command, tc.want, tc.cmd)
+			}
+			if tc.chat != nil && cfg.ChatDiagnostics != *tc.chat {
+				t.Errorf("Lookup(%q) ChatDiagnostics = %v, want %v", tc.path, cfg.ChatDiagnostics, *tc.chat)
+			}
+			if tc.over != nil && !reflect.DeepEqual(cfg.InitParamsOverride, tc.over) {
+				t.Errorf("Lookup(%q) InitParamsOverride = %v, want %v — the manifest is the only way an extension configures its server",
+					tc.path, cfg.InitParamsOverride, tc.over)
+			}
+		})
 	}
 }
 
-func TestExtensionRegistry_Lookup_ExtensionlessPath(t *testing.T) {
-	store := testExtensionStore(t)
-	if err := store.InitSchema(); err != nil {
-		t.Fatalf("InitSchema: %v", err)
+// TestExtensionRegistryHasAnyLSPToolCalls decides whether the agent gets LSP tools at all. One
+// enabled extension that leaves them on is enough; one extension's "off" never answers for another's
+// "on", and a store where every one is off is a store with no tools.
+func TestExtensionRegistryHasAnyLSPToolCalls(t *testing.T) {
+	cases := []struct {
+		name string
+		exts []*extensions.Extension
+		want bool
+	}{
+		{"nothing installed", nil, false},
+		{"one extension at the default", []*extensions.Extension{makeTestLSPExt("gopls", "go")}, true},
+		{"one explicitly on", []*extensions.Extension{withToolCalls(makeTestLSPExt("gopls", "go"), true)}, true},
+		{"the only extension off", []*extensions.Extension{withToolCalls(makeTestLSPExt("gopls", "go"), false)}, false},
+		{"one off, one at the default",
+			[]*extensions.Extension{withToolCalls(makeTestLSPExt("gopls", "go"), false), makeTestLSPExt("typescript", "typescript")}, true},
+		{"every extension off",
+			[]*extensions.Extension{withToolCalls(makeTestLSPExt("gopls", "go"), false), withToolCalls(makeTestLSPExt("typescript", "typescript"), false)}, false},
 	}
-	if err := store.Create(makeTestLSPExt("gopls", "go")); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	reg := NewExtensionRegistry(store)
-	// Extensionless paths (workspace directories, Makefile-style files) must not panic and
-	// must simply not match.
-	if cfg := reg.Lookup("/tmp/workspace"); cfg != nil {
-		t.Errorf("Lookup(\"/tmp/workspace\") = %+v, want nil", cfg)
-	}
-	if cfg := reg.Lookup("/tmp/workspace/Makefile"); cfg != nil {
-		t.Errorf("Lookup(\"/tmp/workspace/Makefile\") = %+v, want nil", cfg)
-	}
-	// Extension matching still works.
-	if cfg := reg.Lookup("/tmp/workspace/main.go"); cfg == nil || cfg.Language != "go" {
-		t.Errorf("Lookup(main.go) = %+v, want go config", cfg)
-	}
-}
-
-// A workspace directory named after the language is the other way a server is found when no file
-// suffix answers for it. The rule lives in extensions.LSPConfig.fileTypeFor; a Lookup that stops
-// answering it here loses the language server for a workspace opened by directory.
-func TestExtensionRegistry_Lookup_WorkspaceNamedAfterLanguage(t *testing.T) {
-	store := testExtensionStore(t)
-	if err := store.InitSchema(); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
-	if err := store.Create(makeTestLSPExt("gopls", "go")); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	reg := NewExtensionRegistry(store)
-	if cfg := reg.Lookup("/home/dev/go"); cfg == nil || cfg.Language != "go" {
-		t.Errorf("Lookup(\"/home/dev/go\") = %+v, want the go config", cfg)
-	}
-	if cfg := reg.Lookup("/home/dev/GO"); cfg == nil || cfg.Language != "go" {
-		t.Errorf("Lookup(\"/home/dev/GO\") = %+v, want the go config (the name is matched case-insensitively)", cfg)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := registryWith(t, tc.exts...).HasAnyLSPToolCallsExtension(); got != tc.want {
+				t.Errorf("HasAnyLSPToolCallsExtension() = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -182,87 +225,6 @@ func TestLookupExtensionByFile_Extensionless(t *testing.T) {
 	// Must return an error, not panic, for an extensionless file.
 	if _, err := mgr.lookupExtensionByFile("/tmp/workspace/Makefile"); err == nil {
 		t.Error("expected error for extensionless file")
-	}
-}
-
-func TestExtensionRegistry_Lookup_Disabled(t *testing.T) {
-	store := testExtensionStore(t)
-	if err := store.InitSchema(); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
-
-	ext := makeTestLSPExt("go", "go")
-	ext.Enabled = false
-	if err := store.Create(ext); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	reg := NewExtensionRegistry(store)
-	cfg := reg.Lookup("main.go")
-	if cfg != nil {
-		t.Errorf("Lookup(main.go) = %+v, want nil (disabled)", cfg)
-	}
-}
-
-func TestExtensionRegistry_NoLSPConfig(t *testing.T) {
-	store := testExtensionStore(t)
-	if err := store.InitSchema(); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
-
-	// Create extension without LSP config
-	ext := &extensions.Extension{
-		ID:      "no-lsp",
-		Name:    "no-lsp",
-		Version: "1.0.0",
-		Type:    extensions.ExtensionTypeLSP,
-		Manifest: extensions.ExtensionManifest{
-			DisplayName: "No LSP",
-			Version:     "1.0.0",
-			Capabilities: &extensions.Capabilities{
-				LSP: nil, // No LSP config
-			},
-		},
-		Enabled: true,
-	}
-	if err := store.Create(ext); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	reg := NewExtensionRegistry(store)
-	cfg := reg.Lookup("main.go")
-	if cfg != nil {
-		t.Errorf("Lookup(main.go) = %+v, want nil (no LSP config)", cfg)
-	}
-}
-
-func TestToServerConfig_NonTypescriptNoOverride(t *testing.T) {
-	store := testExtensionStore(t)
-	if err := store.InitSchema(); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
-
-	// Create a non-TypeScript extension
-	ext := makeTestLSPExt("gopls", "go")
-	ext.Manifest.Capabilities.GetLSP().InitParamsOverride = map[string]any{
-		"staticcheck": true,
-	}
-	if err := store.Create(ext); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	reg := NewExtensionRegistry(store)
-	cfg := reg.Lookup("main.go")
-	if cfg == nil {
-		t.Fatal("Lookup(main.go) = nil, want config")
-	}
-
-	// InitParamsOverride should pass through unchanged from the manifest.
-	if cfg.InitParamsOverride == nil {
-		t.Fatal("InitParamsOverride = nil")
-	}
-	if cfg.InitParamsOverride["staticcheck"] != true {
-		t.Error("original config not preserved")
 	}
 }
 
@@ -393,83 +355,6 @@ func TestExtensionLSPManager_SubscribeAndUnsubscribe(t *testing.T) {
 	mgr.Unsubscribe(sub2)
 }
 
-func TestHasAnyLSPToolCallsExtension(t *testing.T) {
-	store := testExtensionStore(t)
-	reg := NewExtensionRegistry(store)
-
-	// No extensions — should return false
-	if reg.HasAnyLSPToolCallsExtension() {
-		t.Error("HasAnyLSPToolCallsExtension() = true, want false (no extensions)")
-	}
-
-	// Add an enabled LSP extension (tool calls default to enabled)
-	ext := makeTestLSPExt("gopls", "go")
-	if err := store.Create(ext); err != nil {
-		t.Fatalf("create extension: %v", err)
-	}
-
-	if !reg.HasAnyLSPToolCallsExtension() {
-		t.Error("HasAnyLSPToolCallsExtension() = false, want true (gopls enabled, tool calls default true)")
-	}
-
-	// Disable tool calls
-	falseVal := false
-	ext.Manifest.Capabilities.LSP.ToolCallsEnabled = &falseVal
-	if err := store.Update(ext.ID, ext); err != nil {
-		t.Fatalf("update extension: %v", err)
-	}
-
-	if reg.HasAnyLSPToolCallsExtension() {
-		t.Error("HasAnyLSPToolCallsExtension() = true, want false (tool calls disabled)")
-	}
-
-	// Re-enable tool calls
-	trueVal := true
-	ext.Manifest.Capabilities.LSP.ToolCallsEnabled = &trueVal
-	if err := store.Update(ext.ID, ext); err != nil {
-		t.Fatalf("update extension: %v", err)
-	}
-
-	if !reg.HasAnyLSPToolCallsExtension() {
-		t.Error("HasAnyLSPToolCallsExtension() = false, want true (tool calls re-enabled)")
-	}
-}
-
-func TestHasAnyLSPToolCallsExtension_MultipleExtensions(t *testing.T) {
-	store := testExtensionStore(t)
-	reg := NewExtensionRegistry(store)
-
-	// Add two LSP extensions — one with tool calls disabled, one enabled
-	ext1 := makeTestLSPExt("gopls", "go")
-	falseVal := false
-	ext1.Manifest.Capabilities.LSP.ToolCallsEnabled = &falseVal
-	if err := store.Create(ext1); err != nil {
-		t.Fatalf("create extension: %v", err)
-	}
-
-	ext2 := makeTestLSPExt("typescript", "typescript")
-	// ToolCallsEnabled is nil (defaults to true)
-	if err := store.Create(ext2); err != nil {
-		t.Fatalf("create extension: %v", err)
-	}
-
-	// Should return true because ext2 has tool calls enabled (default)
-	if !reg.HasAnyLSPToolCallsExtension() {
-		t.Error("HasAnyLSPToolCallsExtension() = false, want true (ext2 has tool calls enabled)")
-	}
-
-	// Disable tool calls on ext2 as well
-	ext2.Manifest.Capabilities.LSP.ToolCallsEnabled = &falseVal
-	if err := store.Update(ext2.ID, ext2); err != nil {
-		t.Fatalf("update extension: %v", err)
-	}
-
-	// Now both have tool calls disabled — should return false
-	if reg.HasAnyLSPToolCallsExtension() {
-		t.Error("HasAnyLSPToolCallsExtension() = true, want false (all tool calls disabled)")
-	}
-}
-
 func TestIsToolCallsEnabledForFile(t *testing.T) {
 	store := testExtensionStore(t)
 	if err := store.InitSchema(); err != nil {
@@ -505,37 +390,6 @@ func TestIsToolCallsEnabledForFile(t *testing.T) {
 	// Unknown file type — no LSP extension
 	if mgr.IsToolCallsEnabledForFile("README.md") {
 		t.Error("IsToolCallsEnabledForFile(README.md) = true, want false (no LSP extension)")
-	}
-}
-
-func TestRegistryLookup_ChatDiagnosticsGate(t *testing.T) {
-	store := testExtensionStore(t)
-	if err := store.InitSchema(); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
-
-	// Routing stays per file: each extension's own declaration decides which server a file
-	// reaches, and the gate rides on that answer rather than choosing a server itself.
-	goExt := makeTestLSPExt("gopls", "go")
-	trueVal := true
-	goExt.Manifest.Capabilities.LSP.ChatDiagnosticsEnabled = &trueVal
-	if err := store.Create(goExt); err != nil {
-		t.Fatalf("create gopls: %v", err)
-	}
-	// python declares nothing, so it answers off.
-	if err := store.Create(makeTestLSPExt("pyright", "python")); err != nil {
-		t.Fatalf("create pyright: %v", err)
-	}
-
-	reg := NewExtensionRegistry(store)
-	if cfg := reg.Lookup("main.go"); cfg == nil || !cfg.ChatDiagnostics {
-		t.Error("Lookup(main.go) has ChatDiagnostics = false, want true (the extension opted in)")
-	}
-	if cfg := reg.Lookup("app.py"); cfg == nil || cfg.ChatDiagnostics {
-		t.Error("Lookup(app.py) has ChatDiagnostics = true, want false (never declared)")
-	}
-	if cfg := reg.Lookup("README.md"); cfg != nil {
-		t.Errorf("Lookup(README.md) = %+v, want nil (no extension claims it)", cfg)
 	}
 }
 
@@ -580,14 +434,30 @@ func TestResolveWorkspaceMounts(t *testing.T) {
 	}
 }
 
+// mountAt finds the borrowed mount landing on one container path, or nil.
+func mountAt(mounts []types.SandboxMount, containerPath string) *types.SandboxMount {
+	for i := range mounts {
+		if mounts[i].ContainerPath == containerPath {
+			return &mounts[i]
+		}
+	}
+	return nil
+}
+
+// TestAdaptProjectMounts: borrowing a project's mounts is how the language server reads the
+// dependency roots a person configured for the task, and the borrowing has three cuts. Everything
+// comes back read-only however the project configured it; a path under the task's container root
+// means the same place under the LSP workspace; and a mount the server needs to write, or that core
+// has already granted, is not borrowed at all — the server's cache is its own to write, and two -v
+// specs on one container path make podman refuse the create. A container path that merely *contains*
+// a granted one is a different mount point, and nested binds are legal, so the cut stays exact.
 func TestAdaptProjectMounts(t *testing.T) {
 	root := t.TempDir()
 	projPath := filepath.Join(root, "MIKE")
-	if err := os.MkdirAll(filepath.Join(projPath, "worktrees", "MIKE", "flint"), 0o755); err != nil {
+	wsPath := filepath.Join(projPath, "worktrees", "MIKE", "flint")
+	if err := os.MkdirAll(wsPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	wsPath := filepath.Join(projPath, "worktrees", "MIKE", "flint")
-
 	projStore, err := store.NewStore(filepath.Join(t.TempDir(), "proj.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -601,140 +471,117 @@ func TestAdaptProjectMounts(t *testing.T) {
 			{HostPath: "/tmp/kanban-mount/node_modules", ContainerPath: "/home/sandbox/MIKE/frontend/node_modules", Mode: "rw"},
 			{HostPath: "/tmp/kanban-mount/go", ContainerPath: "/go", Mode: "rw"},
 			{HostPath: "/tmp/kanban-mount/.cache", ContainerPath: "/root/.cache", Mode: "rw"},
+			{HostPath: "/tmp/kanban-mount/mod", ContainerPath: "/go/pkg/mod", Mode: "rw"},
 		},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
 	mgr := NewExtensionLSPManager(nil, nil, projStore)
-	wsContainer := "/mnt/flint"
+	const modPath = "/go/pkg/mod"
+	reserved := []types.SandboxMount{{HostPath: "/host/gomodcache", ContainerPath: modPath, Mode: "ro"}}
 
-	// Every project mount is adapted: project-relative paths remapped, global paths pass
-	// through, all forced to ro — except one, which is refused below.
-	mounts := mgr.adaptProjectMounts(wsPath, wsContainer, nil)
-	if len(mounts) != 2 {
-		t.Fatalf("adaptProjectMounts returned %d mounts, want 2: %v", len(mounts), mounts)
+	borrowed := mgr.adaptProjectMounts(wsPath, "/mnt/flint", nil)
+	if got := mountAt(borrowed, "/root/.cache"); got != nil {
+		t.Errorf("the server's own cache was borrowed at %q: a gopls with an unwritable cache publishes nothing",
+			got.HostPath)
 	}
-
-	// Project-relative mount: remapped from /home/sandbox/MIKE/ to /mnt/flint/.
-	nm := mounts[0]
-	if nm.HostPath != "/tmp/kanban-mount/node_modules" {
-		t.Errorf("node_modules HostPath = %q", nm.HostPath)
-	}
-	if nm.ContainerPath != "/mnt/flint/frontend/node_modules" {
-		t.Errorf("node_modules ContainerPath = %q, want /mnt/flint/frontend/node_modules", nm.ContainerPath)
-	}
-	if nm.Mode != "ro" {
-		t.Errorf("node_modules Mode = %q, want ro", nm.Mode)
+	// Without a grant nothing reserves the path, so the project's mount is just a mount.
+	if got := mountAt(borrowed, modPath); got == nil {
+		t.Errorf("without a grant the project's mount onto %q was dropped: %+v", modPath, borrowed)
 	}
 
-	// Global mount: passes through unchanged (except mode -> ro).
-	goMount := mounts[1]
-	if goMount.ContainerPath != "/go" {
-		t.Errorf("go ContainerPath = %q, want /go", goMount.ContainerPath)
+	withheld := mgr.adaptProjectMounts(wsPath, "/mnt/flint", reserved)
+	if got := mountAt(withheld, modPath); got != nil {
+		t.Errorf("the granted dependency directory was also borrowed from the project (%s)", got.HostPath)
 	}
-	if goMount.Mode != "ro" {
-		t.Errorf("go Mode = %q, want ro", goMount.Mode)
+	if len(withheld)+1 != len(borrowed) {
+		t.Errorf("the reservation dropped %d mounts, want exactly the one at %q: %v vs %v", len(borrowed)-len(withheld), modPath, borrowed, withheld)
 	}
 
-	// A global mount onto gopls's own cache is not borrowed: it looks like the project's build
-	// cache, but borrowed mounts are read-only and a gopls with an unwritable cache publishes
-	// nothing for a file that does not parse.
-	for _, mo := range mounts {
-		if mo.ContainerPath == "/root/.cache" {
-			t.Errorf("cache mount was borrowed at %q: the server inside this sandbox cannot report anything",
-				mo.ContainerPath)
-		}
+	// A container path that merely contains core's is a different mount point.
+	if got := mountAt(withheld, "/go"); got == nil {
+		t.Errorf("a mount that only contains the granted path was dropped: %v", withheld)
+	}
+
+	for _, mo := range borrowed {
 		if mo.Mode != "ro" {
-			t.Errorf("%s -> %s Mode = %q, want ro", mo.HostPath, mo.ContainerPath, mo.Mode)
+			t.Errorf("%s -> %s Mode = %q, want ro — a borrowed mount is never writable", mo.HostPath, mo.ContainerPath, mo.Mode)
 		}
 	}
+	// Project-relative mount: remapped from the task's container root to the LSP workspace's.
+	nodeModules := mountAt(withheld, "/mnt/flint/frontend/node_modules")
+	if nodeModules == nil {
+		t.Fatalf("the project-relative mount was not remapped under the workspace: %v", withheld)
+	}
+	if nodeModules.HostPath != "/tmp/kanban-mount/node_modules" {
+		t.Errorf("node_modules HostPath = %q, want the project's host path", nodeModules.HostPath)
+	}
 
-	// No project store -> nil.
-	nilMgr := NewExtensionLSPManager(nil, nil, nil)
-	if got := nilMgr.adaptProjectMounts(wsPath, wsContainer, nil); got != nil {
+	// A mount the project never declared stays a nil answer, and so does no project store at all.
+	if got := NewExtensionLSPManager(nil, nil, nil).adaptProjectMounts(wsPath, "/mnt/flint", nil); got != nil {
 		t.Errorf("adaptProjectMounts(nil projects) = %v, want nil", got)
 	}
-
-	// No SandboxMounts -> nil.
-	projStore2, err := store.NewStore(filepath.Join(t.TempDir(), "proj2.db"))
+	emptyStore, err := store.NewStore(filepath.Join(t.TempDir(), "empty.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { projStore2.Close() })
-	if err := projStore2.CreateProject(&types.Project{
-		ID:   "empty",
-		Name: "empty",
-		Path: filepath.Join(root, "empty"),
-	}); err != nil {
+	t.Cleanup(func() { emptyStore.Close() })
+	emptyPath := filepath.Join(root, "empty")
+	if err := os.MkdirAll(emptyPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(root, "empty"), 0o755); err != nil {
+	if err := emptyStore.CreateProject(&types.Project{ID: "empty", Name: "empty", Path: emptyPath}); err != nil {
 		t.Fatal(err)
 	}
-	emptyMgr := NewExtensionLSPManager(nil, nil, projStore2)
-	if got := emptyMgr.adaptProjectMounts(filepath.Join(root, "empty"), "/mnt/empty", nil); got != nil {
+	if got := NewExtensionLSPManager(nil, nil, emptyStore).adaptProjectMounts(emptyPath, "/mnt/empty", nil); got != nil {
 		t.Errorf("adaptProjectMounts(no mounts) = %v, want nil", got)
 	}
-}
 
-// ─── SandboxMemory ──────────────────────────────────────────────────────────
-
-func TestExtensionLSPManager_SandboxMemory_NoClient(t *testing.T) {
-	store := testExtensionStore(t)
-	if err := store.InitSchema(); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
-	if err := store.Create(makeTestLSPExt("gopls", "go")); err != nil {
-		t.Fatalf("Create(gopls): %v", err)
-	}
-	reg := extensions.NewRegistryClient()
-	sandbox := extensions.NewExtensionSandboxManager(reg, store, sandboxruntime.Boot{})
-	mgr := NewExtensionLSPManager(store, sandbox, nil)
-
-	stats := mgr.SandboxMemory("/tmp/workspace", "/tmp/workspace/main.go")
-	if stats == nil || stats.Running || stats.CurrentMB != 0 || stats.LimitMB != 0 {
-		t.Errorf("SandboxMemory() = %+v, want zero stats (no client)", stats)
+	// The cut is equality, never a prefix test.
+	if !isReservedContainerPath(modPath, reserved) || isReservedContainerPath("/go", reserved) {
+		t.Error("isReservedContainerPath must be exact equality, not a prefix test")
 	}
 }
 
-func TestExtensionLSPManager_SandboxMemory_NoExtensionForFile(t *testing.T) {
-	store := testExtensionStore(t)
-	if err := store.InitSchema(); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
-	if err := store.Create(makeTestLSPExt("gopls", "go")); err != nil {
+func sandboxMemoryManager(t *testing.T) *ExtensionLSPManager {
+	t.Helper()
+	es := testExtensionStore(t)
+	if err := es.Create(makeTestLSPExt("gopls", "go")); err != nil {
 		t.Fatalf("Create(gopls): %v", err)
 	}
-	reg := extensions.NewRegistryClient()
-	sandbox := extensions.NewExtensionSandboxManager(reg, store, sandboxruntime.Boot{})
-	mgr := NewExtensionLSPManager(store, sandbox, nil)
-
-	// Python file with only a Go extension installed → no lookup match.
-	stats := mgr.SandboxMemory("/tmp/workspace", "/tmp/workspace/script.py")
-	if stats == nil || stats.Running || stats.CurrentMB != 0 {
-		t.Errorf("SandboxMemory() = %+v, want zero stats (no extension for file)", stats)
-	}
+	return NewExtensionLSPManager(es, extensions.NewExtensionSandboxManager(extensions.NewRegistryClient(), es, sandboxruntime.Boot{}), nil)
 }
 
-func TestExtensionLSPManager_SandboxMemory_ClientWithoutSandbox(t *testing.T) {
-	store := testExtensionStore(t)
-	if err := store.InitSchema(); err != nil {
-		t.Fatalf("InitSchema: %v", err)
+// TestExtensionLSPManager_SandboxMemory: the memory panel reads through the manager for whatever file
+// the editor has open, and there is always an answer. It is the zero answer whenever there is no
+// container to ask — no extension owns the file, this workspace has no connection, or the connection
+// it has was never given a sandbox.
+func TestExtensionLSPManager_SandboxMemory(t *testing.T) {
+	const workspace = "/tmp/workspace"
+	cases := []struct {
+		name   string
+		file   string
+		attach bool
+	}{
+		{"no extension owns the file", "script.py", false},
+		{"no connection for this workspace", "main.go", false},
+		{"a connection whose sandbox was never created", "main.go", true},
 	}
-	if err := store.Create(makeTestLSPExt("gopls", "go")); err != nil {
-		t.Fatalf("Create(gopls): %v", err)
-	}
-	reg := extensions.NewRegistryClient()
-	sandbox := extensions.NewExtensionSandboxManager(reg, store, sandboxruntime.Boot{})
-	mgr := NewExtensionLSPManager(store, sandbox, nil)
-
-	// Inject a client whose extension sandbox was never created.
-	mgr.clients[processKey("/tmp/workspace", "go")] = newSandboxClient(nil, "/tmp/workspace", "go", "gopls", nil)
-
-	stats := mgr.SandboxMemory("/tmp/workspace", "/tmp/workspace/main.go")
-	if stats == nil || stats.Running {
-		t.Errorf("SandboxMemory() = %+v, want Running=false (sandbox not created)", stats)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr := sandboxMemoryManager(t)
+			if tc.attach {
+				mgr.clients[processKey(workspace, "go")] = newSandboxClient(nil, workspace, "go", "gopls", nil)
+			}
+			stats := mgr.SandboxMemory(workspace, filepath.Join(workspace, tc.file))
+			if stats == nil {
+				t.Fatal("SandboxMemory() = nil; the panel reads it unconditionally")
+			}
+			if stats.Running || stats.CurrentMB != 0 || stats.LimitMB != 0 {
+				t.Errorf("SandboxMemory() = %+v, want zero stats", stats)
+			}
+		})
 	}
 }
 

@@ -12,36 +12,40 @@ import (
 	"unicode/utf8"
 )
 
-// TestInheritKeepsOnlyWhatTheFilterAccepts is the whole reason a filter is passed in rather than an
-// allowlist being built here: the names belong to the package that decides them.
-func TestInheritKeepsOnlyWhatTheFilterAccepts(t *testing.T) {
+// TestInheritEmitsExactlyWhatTheFilterAccepts is the whole reason a filter is passed in rather than
+// an allowlist being built here: the names belong to the package that decides them. The two empty
+// policies are the one place the three families differ, so each is pinned rather than left to
+// whichever call site remembers — a set-but-empty SSH_AUTH_SOCK reads as a broken agent, not as an
+// unset one, and an adapter that distinguishes cleared from unset needs the name to arrive.
+func TestInheritEmitsExactlyWhatTheFilterAccepts(t *testing.T) {
 	t.Setenv("SUBPROC_TEST_KEPT", "value")
 	t.Setenv("SUBPROC_TEST_OTHER", "value")
-
-	got := Inherit(func(name string) bool { return name == "SUBPROC_TEST_KEPT" }, DropEmpty)
-
-	if !slices.Contains(got, "SUBPROC_TEST_KEPT=value") {
-		t.Errorf("an allowed variable was not inherited: %v", got)
-	}
-	for _, kv := range got {
-		if strings.HasPrefix(kv, "SUBPROC_TEST_OTHER") {
-			t.Errorf("a variable outside the allowlist was inherited: %q", kv)
-		}
-	}
-}
-
-// The two policies are the one place the three families differ, so each is pinned rather than left to
-// whichever call site remembers.
-func TestEmptyPolicyIsStatedNotDiscovered(t *testing.T) {
 	t.Setenv("SUBPROC_TEST_EMPTY", "")
-	allow := func(name string) bool { return name == "SUBPROC_TEST_EMPTY" }
 
-	if got := Inherit(allow, DropEmpty); len(got) != 0 {
-		t.Errorf("DropEmpty emitted %v; a set-but-empty SSH_AUTH_SOCK reads as a broken agent, not an unset one", got)
+	named := func(want ...string) func(string) bool {
+		return func(name string) bool { return slices.Contains(want, name) }
 	}
-	got := Inherit(allow, KeepEmpty)
-	if !slices.Contains(got, "SUBPROC_TEST_EMPTY=") {
-		t.Errorf("KeepEmpty emitted %v; an adapter that distinguishes cleared from unset needs the name", got)
+	cases := []struct {
+		name  string
+		keep  func(string) bool
+		empty EmptyPolicy
+		want  []string
+	}{
+		{"an allowed name arrives, a name outside the allowlist does not",
+			named("SUBPROC_TEST_KEPT"), DropEmpty, []string{"SUBPROC_TEST_KEPT=value"}},
+		{"every name a prefix accepts arrives",
+			named("SUBPROC_TEST_KEPT", "SUBPROC_TEST_OTHER", "SUBPROC_TEST_EMPTY"), DropEmpty,
+			[]string{"SUBPROC_TEST_KEPT=value", "SUBPROC_TEST_OTHER=value"}},
+		{"DropEmpty drops a set-but-empty value", named("SUBPROC_TEST_EMPTY"), DropEmpty, nil},
+		{"KeepEmpty keeps it as a name with no value", named("SUBPROC_TEST_EMPTY"), KeepEmpty, []string{"SUBPROC_TEST_EMPTY="}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Inherit(tc.keep, tc.empty)
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("Inherit() = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -88,71 +92,61 @@ func TestBoundCommandReturnsAfterACancelEvenThoughThePipeStaysOpen(t *testing.T)
 	}
 }
 
-func TestWatchReportsASubprocessThatOutlastsTheThreshold(t *testing.T) {
-	var mu sync.Mutex
-	var lines []string
-	record := func(format string, args ...any) {
-		mu.Lock()
-		defer mu.Unlock()
-		lines = append(lines, fmt.Sprintf(format, args...))
+// TestWatchBoundsASubprocessThatOutlastsItsThreshold: a subprocess still running when the threshold
+// passes becomes visible, once; a subprocess that finished must not be reported at all, or the line
+// means "something is slow" and stops meaning anything. Both halves need the stop function.
+func TestWatchBoundsASubprocessThatOutlastsItsThreshold(t *testing.T) {
+	cases := []struct {
+		name    string
+		what    string
+		argv    []string
+		after   time.Duration
+		reports int
+		settle  time.Duration
+	}{
+		{"a subprocess that outlasts the threshold is reported", "sleep-under-test", []string{"sleep", "0.3"}, 30 * time.Millisecond, 1, 500 * time.Millisecond},
+		{"a finished subprocess is never reported", "true-under-test", []string{"true"}, 20 * time.Millisecond, 0, 120 * time.Millisecond},
 	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var mu sync.Mutex
+			var lines []string
+			record := func(format string, args ...any) {
+				mu.Lock()
+				defer mu.Unlock()
+				lines = append(lines, fmt.Sprintf(format, args...))
+			}
 
-	cmd := exec.Command("sleep", "0.3")
-	stop := Watch("sleep-under-test", 30*time.Millisecond, record)
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start sleep: %v", err)
-	}
-	err := cmd.Wait()
-	stop()
-	if err != nil {
-		t.Fatalf("sleep failed: %v", err)
-	}
+			cmd := exec.Command(tc.argv[0], tc.argv[1:]...)
+			stop := Watch(tc.what, tc.after, record)
+			if err := cmd.Start(); err != nil {
+				t.Fatalf("start %v: %v", tc.argv, err)
+			}
+			if err := cmd.Wait(); err != nil {
+				t.Fatalf("%v failed: %v", tc.argv, err)
+			}
+			stop()
 
-	deadline := time.After(500 * time.Millisecond)
-	for {
-		mu.Lock()
-		n := len(lines)
-		mu.Unlock()
-		if n == 1 {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatalf("watch reported %d line(s), want exactly 1: %v", n, lines)
-		case <-time.After(5 * time.Millisecond):
-		}
-	}
-	if !strings.Contains(lines[0], "sleep-under-test") {
-		t.Errorf("the report must name the operation, got %q", lines[0])
-	}
-}
-
-// The half that a watchdog without a stop function gets wrong: a completed operation must not be
-// reported, or the log line means "something is slow" and stops meaning anything.
-func TestWatchStopsReportingOnceTheSubprocessFinished(t *testing.T) {
-	var mu sync.Mutex
-	var fired int
-	record := func(format string, args ...any) {
-		mu.Lock()
-		defer mu.Unlock()
-		fired++
-	}
-
-	cmd := exec.Command("true")
-	stop := Watch("true-under-test", 20*time.Millisecond, record)
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start true: %v", err)
-	}
-	if err := cmd.Wait(); err != nil {
-		t.Fatalf("true failed: %v", err)
-	}
-	stop()
-
-	time.Sleep(120 * time.Millisecond)
-	mu.Lock()
-	defer mu.Unlock()
-	if fired != 0 {
-		t.Errorf("a finished subprocess reported %d time(s), want 0", fired)
+			// The report fires on a timer, so absence has to be waited for rather than sampled.
+			deadline := time.Now().Add(tc.settle)
+			for time.Now().Before(deadline) {
+				mu.Lock()
+				n := len(lines)
+				mu.Unlock()
+				if n >= tc.reports {
+					break
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if len(lines) != tc.reports {
+				t.Fatalf("%s reported %d time(s), want %d: %v", tc.what, len(lines), tc.reports, lines)
+			}
+			if tc.reports > 0 && !strings.Contains(lines[0], tc.what) {
+				t.Errorf("the report must name the operation, got %q", lines[0])
+			}
+		})
 	}
 }
 

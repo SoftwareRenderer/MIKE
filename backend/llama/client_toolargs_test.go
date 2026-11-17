@@ -43,32 +43,35 @@ func sentArguments(t *testing.T, m types.ChatMessage) string {
 	return args
 }
 
-func TestToAPIMessage_TruncatedToolCallArgumentsCannotRideTheNextRequest(t *testing.T) {
-	raw := assistantCall(truncatedToolCallArgs)
-
-	got := sentArguments(t, raw)
-
-	if got != "{}" {
-		t.Errorf("arguments = %q, want {} so the provider can decode the message", got)
-	}
-	if raw.ToolCalls[0].Function.Arguments != truncatedToolCallArgs {
-		t.Error("the conversation was mutated: the model's own text must stay stored and displayed as sent")
-	}
-}
-
-func TestToAPIMessage_EmptyToolCallArgumentsMustStillDecodeAsAnObject(t *testing.T) {
-	for _, args := range []string{"", "   ", "not json", `{"unterminated": `, `"{}"`, `[1,2]`} {
-		if got := sentArguments(t, assistantCall(args)); got != "{}" {
-			t.Errorf("arguments %q became %q, want {}", args, got)
-		}
-	}
-}
-
-func TestToAPIMessage_ValidToolCallArgumentsPassThroughUnchanged(t *testing.T) {
-	const args = `{"command": "go test ./...", "timeout": 300}`
-
-	if got := sentArguments(t, assistantCall(args)); got != args {
-		t.Errorf("arguments = %q, want them sent verbatim", got)
+// TestToAPIMessage_ToolCallArgumentsAlwaysDecodeAsAnObject: `arguments` is parsed by the provider to
+// render the conversation, so anything that is not a JSON object goes out as {} — including the
+// truncated text a model really produced. The caller's own copy keeps the bytes, because the
+// transcript and the reviewer's card show what the model said.
+func TestToAPIMessage_ToolCallArgumentsAlwaysDecodeAsAnObject(t *testing.T) {
+	const valid = `{"command": "go test ./...", "timeout": 300}`
+	for _, tc := range []struct {
+		name string
+		args string
+		want string
+	}{
+		{"a valid object is sent verbatim", valid, valid},
+		{"empty", "", "{}"},
+		{"blank", "   ", "{}"},
+		{"prose", "not json", "{}"},
+		{"unterminated", `{"unterminated": `, "{}"},
+		{"an object inside a string", `"{}"`, "{}"},
+		{"an array, which is not an object", `[1,2]`, "{}"},
+		{"cut short by a stray escape", truncatedToolCallArgs, "{}"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := assistantCall(tc.args)
+			if got := sentArguments(t, raw); got != tc.want {
+				t.Errorf("arguments = %q, want %q", got, tc.want)
+			}
+			if raw.ToolCalls[0].Function.Arguments != tc.args {
+				t.Error("the conversation was mutated: the model's own text must stay stored and displayed as sent")
+			}
+		})
 	}
 }
 
@@ -81,37 +84,54 @@ func TestToAPIMessage_ToolCallWithoutIDOrNameIsNotSent(t *testing.T) {
 	}
 }
 
-func TestToAPIMessage_ContentPartThatIsNeitherTextNorImageIsNotSentAsNull(t *testing.T) {
-	m := types.ChatMessage{Role: "user", Content: "look", ContentParts: []types.ContentPart{
-		{Type: "text", Text: "look"},
-		{Type: "audio", Text: "stale shape"},
-		{Type: "image", ImageSource: &types.ImageSource{MediaType: "image/png", Data: ""}},
-		{Type: "image", ImageSource: &types.ImageSource{MediaType: "image/png", Data: "aGVsbG8="}},
-	}}
-
-	got := toAPIMessage(m)["content"]
-	parts, ok := got.([]any)
-	if !ok || len(parts) != 2 {
-		t.Fatalf("content = %#v, want the text part and the one image with data", got)
-	}
-	body, err := json.Marshal(got)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if hasNullEntry(t, body) {
-		t.Errorf("content serialized with a null entry: %s", body)
-	}
-}
-
-// TestToAPIMessage_MessageWithNoUsableContentPartsFallsBackToText: an empty content array is refused,
-// and dropping the message would lose the user's words, which Content still holds.
-func TestToAPIMessage_MessageWithNoUsableContentPartsFallsBackToText(t *testing.T) {
-	m := types.ChatMessage{Role: "user", Content: "the real text", ContentParts: []types.ContentPart{
-		{Type: "audio", Text: "stale shape"},
-	}}
-
-	if got := toAPIMessage(m)["content"]; got != "the real text" {
-		t.Errorf("content = %#v, want the plain-text content", got)
+// TestToAPIMessage_ContentPartsAreSentOrDropped: a content array the provider can read, or the plain
+// text — never an entry that decodes to null, and never the user's words lost behind a stale part.
+func TestToAPIMessage_ContentPartsAreSentOrDropped(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		content   string
+		parts     []types.ContentPart
+		wantParts int    // > 0: content goes out as an array of this many parts
+		wantText  string // otherwise: content goes out as this plain string
+	}{
+		{
+			name:    "the text and the one image with data go out, the rest are dropped",
+			content: "look",
+			parts: []types.ContentPart{
+				{Type: "text", Text: "look"},
+				{Type: "audio", Text: "stale shape"},
+				{Type: "image", ImageSource: &types.ImageSource{MediaType: "image/png", Data: ""}},
+				{Type: "image", ImageSource: &types.ImageSource{MediaType: "image/png", Data: "aGVsbG8="}},
+			},
+			wantParts: 2,
+		},
+		{
+			name:     "no usable part falls back to the plain text",
+			content:  "the real text",
+			parts:    []types.ContentPart{{Type: "audio", Text: "stale shape"}},
+			wantText: "the real text",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := toAPIMessage(types.ChatMessage{Role: "user", Content: tc.content, ContentParts: tc.parts})["content"]
+			if tc.wantText != "" {
+				if got != tc.wantText {
+					t.Errorf("content = %#v, want the plain-text content %q", got, tc.wantText)
+				}
+				return
+			}
+			parts, ok := got.([]any)
+			if !ok || len(parts) != tc.wantParts {
+				t.Fatalf("content = %#v, want %d parts", got, tc.wantParts)
+			}
+			body, err := json.Marshal(got)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			if hasNullEntry(t, body) {
+				t.Errorf("content serialized with a null entry: %s", body)
+			}
+		})
 	}
 }
 
@@ -128,6 +148,105 @@ func hasNullEntry(t *testing.T, body []byte) bool {
 		}
 	}
 	return false
+}
+
+// TestToAPIMessage_ReasoningContentRidesItsOwnField: the thinking goes out beside the answer and
+// never inside it, and only on an assistant message — the chat shape has no place for it anywhere
+// else, so a stray value on another role must not reach the provider.
+func TestToAPIMessage_ReasoningContentRidesItsOwnField(t *testing.T) {
+	call := func() []types.ToolCallMsg {
+		calls := []types.ToolCallMsg{{ID: "call_1", Type: "function"}}
+		calls[0].Function.Name = types.ToolReadFile
+		calls[0].Function.Arguments = `{"path":"foo.txt"}`
+		return calls
+	}
+	for _, tc := range []struct {
+		name        string
+		role        string
+		content     string
+		reasoning   string
+		calls       []types.ToolCallMsg
+		toolCallID  string
+		wantContent string
+		wantReason  string // "" = the key must be absent
+	}{
+		{
+			name: "an answer and its thinking go out as two fields", role: "assistant",
+			content: "Here is the answer", reasoning: "Let me think step by step...",
+			wantContent: "Here is the answer", wantReason: "Let me think step by step...",
+		},
+		{
+			name: "thinking with no answer", role: "assistant",
+			reasoning:  "I need to think about this",
+			wantReason: "I need to think about this",
+		},
+		{
+			name: "no thinking sends no key", role: "assistant",
+			content: "Simple response", wantContent: "Simple response",
+		},
+		{
+			name: "a tool call rides beside its thinking", role: "assistant",
+			content: "Let me check", reasoning: "I should read the file first", calls: call(),
+			wantContent: "Let me check", wantReason: "I should read the file first",
+		},
+		{
+			name: "a user message's thinking is dropped", role: "user",
+			content: "hello", reasoning: "should be ignored", wantContent: "hello",
+		},
+		{
+			name: "a tool answer's thinking is dropped", role: "tool",
+			content: "file contents", reasoning: "should be ignored", toolCallID: "call_1", wantContent: "file contents",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := types.ChatMessage{Role: tc.role, Content: tc.content, ReasoningContent: tc.reasoning,
+				ToolCalls: tc.calls, ToolCallID: tc.toolCallID}
+			got := toAPIMessage(m)
+
+			if got["role"] != tc.role {
+				t.Errorf("role = %v, want %q", got["role"], tc.role)
+			}
+			if got["content"] != tc.wantContent {
+				t.Errorf("content = %v, want %q", got["content"], tc.wantContent)
+			}
+			reason, present := got["reasoning_content"]
+			if tc.wantReason == "" {
+				if present {
+					t.Errorf("reasoning_content = %v, want the key absent", reason)
+				}
+				return
+			}
+			if reason != tc.wantReason {
+				t.Errorf("reasoning_content = %v, want %q", reason, tc.wantReason)
+			}
+			if tc.calls != nil && got["tool_calls"] == nil {
+				t.Error("the tool call was lost beside the reasoning")
+			}
+		})
+	}
+}
+
+// TestToAPIMessage_AdvisoryGoesOutAsUser: an advisory is an environment note (LSP diagnostics,
+// merge-conflict instructions). The chat API has no role for it, so it must leave as "user" while the
+// transcript and the summarizer keep calling it "advisory".
+func TestToAPIMessage_AdvisoryGoesOutAsUser(t *testing.T) {
+	msg := types.ChatMessage{
+		Role:    "advisory",
+		Content: "LSP diagnostics for this turn's changes (1 file with findings):",
+	}
+
+	result := toAPIMessage(msg)
+
+	if result["role"] != "user" {
+		t.Errorf("expected role='user' on the wire, got %v", result["role"])
+	}
+	if result["content"] != msg.Content {
+		t.Errorf("content changed on the way out: %v", result["content"])
+	}
+	// Other roles are untouched.
+	if toAPIMessage(types.ChatMessage{Role: "system", Content: "x"})["role"] != "system" {
+		t.Error("system role must pass through")
+	}
 }
 
 func TestRequestMessages_UnansweredToolCallIsAnsweredWhereTheProviderLooks(t *testing.T) {

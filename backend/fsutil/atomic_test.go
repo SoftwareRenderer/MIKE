@@ -3,60 +3,69 @@ package fsutil
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
-func TestWriteFileAtomicNewFile(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "new.go")
-
-	if err := WriteFileAtomic(path, []byte("package main\n")); err != nil {
-		t.Fatalf("WriteFileAtomic: %v", err)
+// TestWriteFileAtomicReplacesTheFileWholesale: the save is a rename of a temporary file, so the bytes
+// that land are the bytes asked for (never a prefix of what was there) and the mode is the file's own —
+// 0644 only when there was no file to ask. os.WriteFile never changed the mode of a file it overwrote,
+// so a save must not quietly strip the +x from a script.
+func TestWriteFileAtomicReplacesTheFileWholesale(t *testing.T) {
+	cases := []struct {
+		name     string
+		prepare  func(t *testing.T, path string)
+		content  string
+		wantMode os.FileMode
+	}{
+		{
+			name:     "a new file is 0644 whatever the umask would have made it",
+			content:  "package main\n",
+			wantMode: 0644,
+		},
+		{
+			name: "an existing file keeps its mode, executable bit included",
+			prepare: func(t *testing.T, path string) {
+				if err := os.WriteFile(path, []byte("#!/bin/sh\necho old\n"), 0755); err != nil {
+					t.Fatal(err)
+				}
+			},
+			content:  "#!/bin/sh\necho new\n",
+			wantMode: 0755,
+		},
+		{
+			name: "a shorter save leaves no tail of the old content",
+			prepare: func(t *testing.T, path string) {
+				if err := WriteFileAtomic(path, []byte("aaaaaaaaaaaaaaaaaaaa")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			content:  "bb",
+			wantMode: 0644,
+		},
 	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "f")
+			if tc.prepare != nil {
+				tc.prepare(t, path)
+			}
+			if err := WriteFileAtomic(path, []byte(tc.content)); err != nil {
+				t.Fatalf("WriteFileAtomic: %v", err)
+			}
+			if got := mustRead(t, path); got != tc.content {
+				t.Errorf("content = %q, want %q", got, tc.content)
+			}
+			fi, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if fi.Mode().Perm() != tc.wantMode {
+				t.Errorf("mode = %v, want %v", fi.Mode().Perm(), tc.wantMode)
+			}
+			assertNoTempLeft(t, dir)
+		})
 	}
-	if string(data) != "package main\n" {
-		t.Fatalf("content = %q", data)
-	}
-	// 0644 whatever the umask would have made it.
-	fi, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if fi.Mode().Perm() != 0644 {
-		t.Errorf("new file mode = %v, want -rw-r--r--", fi.Mode().Perm())
-	}
-	assertNoTempLeft(t, dir)
-}
-
-func TestWriteFileAtomicKeepsExistingMode(t *testing.T) {
-	// os.WriteFile never changed the mode of a file it overwrote, so a save must not
-	// quietly strip the +x from a script.
-	dir := t.TempDir()
-	path := filepath.Join(dir, "build.sh")
-	if err := os.WriteFile(path, []byte("#!/bin/sh\necho old\n"), 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := WriteFileAtomic(path, []byte("#!/bin/sh\necho new\n")); err != nil {
-		t.Fatalf("WriteFileAtomic: %v", err)
-	}
-
-	fi, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if fi.Mode().Perm() != 0755 {
-		t.Errorf("mode after save = %v, want -rwxr-xr-x", fi.Mode().Perm())
-	}
-	if !strings.Contains(mustRead(t, path), "new") {
-		t.Error("content was not replaced")
-	}
-	assertNoTempLeft(t, dir)
 }
 
 func TestWriteFileAtomicKeepsOriginalWhenRenameFails(t *testing.T) {
@@ -103,21 +112,6 @@ func TestWriteFileAtomicRefusesSymlinkTarget(t *testing.T) {
 		t.Errorf("the link's target was modified: %q", got)
 	}
 	assertNoTempLeft(t, dir)
-}
-
-func TestWriteFileAtomicOverwritesInPlace(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "grows.go")
-	// The old content must be gone, not left as a prefix of a longer file.
-	if err := WriteFileAtomic(path, []byte("aaaaaaaaaaaaaaaaaaaa")); err != nil {
-		t.Fatal(err)
-	}
-	if err := WriteFileAtomic(path, []byte("bb")); err != nil {
-		t.Fatal(err)
-	}
-	if got := mustRead(t, path); got != "bb" {
-		t.Errorf("content = %q, want %q", got, "bb")
-	}
 }
 
 func TestIsAtomicTemp(t *testing.T) {
