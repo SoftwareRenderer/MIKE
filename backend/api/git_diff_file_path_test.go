@@ -78,6 +78,8 @@ func TestProjectDiffFilePathContainment(t *testing.T) {
 		{name: "absolute path", path: secret},
 		{name: "tracked symlink out of the project", path: "link-tracked.txt"},
 		{name: "untracked symlink out of the project", path: "link-untracked.txt"},
+		// The same link, reached through a path that only escapes once it is cleaned.
+		{name: "symlink behind a .. segment", path: "sub/../link-tracked.txt"},
 		{name: "symlinked directory", path: "dirlink/key.pem"},
 	}
 	for _, tt := range tests {
@@ -111,35 +113,6 @@ func TestProjectDiffFilePathContainment(t *testing.T) {
 					t.Errorf("the in-project file changed shape: %.200s", body)
 				}
 			})
-		}
-	}
-}
-
-// TestRepoFilePathJailsSymlinks pins the helper directly: a link standing where the
-// file would be created, a link that resolves out, and a path that only escapes
-// after cleaning.
-func TestRepoFilePathJailsSymlinks(t *testing.T) {
-	dir := t.TempDir()
-	repo := filepath.Join(dir, "repo")
-	if err := os.MkdirAll(repo, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	secret := filepath.Join(dir, "secret.txt")
-	if err := os.WriteFile(secret, []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(secret, filepath.Join(repo, "link")); err != nil {
-		t.Fatal(err)
-	}
-
-	if got, err := repoFilePath(repo, "a/b.txt"); err != nil {
-		t.Errorf("a file inside the repo was refused: %v", err)
-	} else if want := filepath.Join(repo, "a/b.txt"); got != want {
-		t.Errorf("repoFilePath = %q, want %q", got, want)
-	}
-	for _, bad := range []string{"../secret.txt", "sub/../link", "/etc/passwd", "link", "sub/../../secret.txt"} {
-		if got, err := repoFilePath(repo, bad); err == nil {
-			t.Errorf("repoFilePath(%q) = %q, want an error", bad, got)
 		}
 	}
 }

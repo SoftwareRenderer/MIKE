@@ -11,7 +11,9 @@ import (
 // TestBuildProbeOfflineBuildsUnderRunsc holds ADR-0002's first measurement: whether an image build works at all
 // under runsc. Later stages download a base image, so only `make build-probe` answers them.
 func TestBuildProbeOfflineBuildsUnderRunsc(t *testing.T) {
+	// Two host questions, both prerequisites: a container that starts, and a build that produces an image.
 	sandboxcheck.Require(t, sandboxruntime.BuilderImageDefault)
+	sandboxcheck.RequireBuild(t)
 
 	ctx, cancel := context.WithTimeout(t.Context(), sandboxruntime.BuildProbeStageTimeout)
 	defer cancel()

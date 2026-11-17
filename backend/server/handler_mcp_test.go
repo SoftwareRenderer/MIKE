@@ -67,14 +67,14 @@ func TestMCPTestRouteRefusesAFormThatCannotBeDialled(t *testing.T) {
 	}
 }
 
-// A POST to a route registered with no verb would answer this handler to a GET and skip the CSRF
-// middleware, so the verb is the thing being asserted here.
+// A route registered with no verb would answer this handler to a GET and skip the CSRF middleware, so
+// the verb is the thing being asserted here: only the declared POST reaches it.
 func TestMCPTestRouteIsPostOnly(t *testing.T) {
 	s := testServer(t)
 	rec := httptest.NewRecorder()
 	s.mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/mcp/test", nil))
-	if rec.Code != http.StatusMethodNotAllowed && rec.Code != http.StatusNotFound {
-		t.Errorf("a GET reached the test handler: status %d", rec.Code)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("a GET reached the test handler: status %d, want the mux's 405", rec.Code)
 	}
 }
 
@@ -103,8 +103,11 @@ func TestMCPTestRefusesWhileTheRegistryIsRestricted(t *testing.T) {
 }
 
 // The lock freezes the registry; it does not hide it or stop it being offered, and the only config write
-// it refuses is one that changes the registry.
+// it refuses is one that changes the registry. The boot says which posture it took, in the log the
+// operator reads.
 func TestRestrictedRegistryIsListedAndWritableAroundTheFreeze(t *testing.T) {
+	logs, restoreLogs := logging.TestSink()
+	t.Cleanup(restoreLogs)
 	s := testServerWith(t, func(c *startup.Config) { c.RestrictMCP = true })
 	row, err := json.Marshal([]types.MCPServer{{ID: "srv1", Name: "Search", URL: "https://mcp.example.com/mcp", Enabled: true}})
 	if err != nil {
@@ -172,14 +175,8 @@ func TestRestrictedRegistryIsListedAndWritableAroundTheFreeze(t *testing.T) {
 	if len(project.MCPServerIDs) != 1 || project.MCPServerIDs[0] != "srv1" {
 		t.Errorf("the opt-in did not land: %v", project.MCPServerIDs)
 	}
-}
 
-// The boot says which posture it took, in the log the operator reads.
-func TestTheBootAnnouncesARestrictedRegistry(t *testing.T) {
-	buf, restore := logging.TestSink()
-	t.Cleanup(restore)
-	testServerWith(t, func(c *startup.Config) { c.RestrictMCP = true })
-	if !strings.Contains(buf.String(), "MIKE_RESTRICT_MCP") {
+	if !strings.Contains(logs.String(), "MIKE_RESTRICT_MCP") {
 		t.Error("the boot did not name the variable that froze the registry")
 	}
 }

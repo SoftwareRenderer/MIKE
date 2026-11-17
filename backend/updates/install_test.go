@@ -20,8 +20,8 @@ func releaseDir(t *testing.T) string {
 	return dir
 }
 
-// Only the packaged shape may replace its own files, and it is decided by two independent facts: the
-// layout beside the binary, and a version that names a release.
+// Only the packaged shape may replace its own files, and it is decided by three independent facts: the
+// layout beside the binary, a version that names a release, and whether the release is the image's.
 func TestClassifyInstall(t *testing.T) {
 	dir := releaseDir(t)
 	// The machine running this test may itself be a container, so the shape is decided from an empty
@@ -61,26 +61,24 @@ func TestClassifyInstall(t *testing.T) {
 			t.Errorf("classify = %+v, want unknown and unstageable", got)
 		}
 	})
-}
 
-// A container is refused even when it is shaped like a release: the swap survives `docker restart` and is
-// gone after `compose up`.
-func TestClassifyInstallRefusesAContainer(t *testing.T) {
-	dir := releaseDir(t)
-	marker := filepath.Join(t.TempDir(), ".dockerenv")
-	if err := os.WriteFile(marker, nil, 0o644); err != nil {
-		t.Fatalf("write marker: %v", err)
-	}
-
-	got := classifyInstall(dir, "1.4.2", []string{marker})
-	if got.Kind != KindContainer || got.CanStage {
-		t.Fatalf("classify = %+v, want container and unstageable", got)
-	}
-	for _, want := range []string{"container", "image"} {
-		if !strings.Contains(got.Reason, want) {
-			t.Errorf("refusal %q does not say %q", got.Reason, want)
+	// A swapped binary survives `docker restart` and is gone after `compose up`, so a container is
+	// refused even when it is shaped like a release.
+	t.Run("a container is refused whatever it is shaped like", func(t *testing.T) {
+		marker := filepath.Join(t.TempDir(), ".dockerenv")
+		if err := os.WriteFile(marker, nil, 0o644); err != nil {
+			t.Fatalf("write marker: %v", err)
 		}
-	}
+		got := classifyInstall(dir, "1.4.2", []string{marker})
+		if got.Kind != KindContainer || got.CanStage {
+			t.Fatalf("classify = %+v, want container and unstageable", got)
+		}
+		for _, want := range []string{"container", "image"} {
+			if !strings.Contains(got.Reason, want) {
+				t.Errorf("refusal %q does not say %q", got.Reason, want)
+			}
+		}
+	})
 }
 
 func TestIsReleaseLayout(t *testing.T) {

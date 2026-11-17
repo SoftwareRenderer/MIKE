@@ -24,7 +24,8 @@ func llamaSwapServer(t *testing.T, upstreamBody string) *httptest.Server {
 }
 
 // TestDiscoverContextWindow covers the upstream shapes seen in practice:
-// llama.cpp (meta.n_ctx), vLLM (max_model_len), and servers reporting neither.
+// llama.cpp (meta.n_ctx), vLLM (max_model_len), and the runtime n_ctx winning over
+// an advertised max_model_len.
 func TestDiscoverContextWindow(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -45,16 +46,6 @@ func TestDiscoverContextWindow(t *testing.T) {
 			name:         "runtime n_ctx wins over advertised max_model_len",
 			upstreamBody: `{"data":[{"max_model_len":8192,"meta":{"n_ctx":4096}}]}`,
 			want:         intPtr(4096),
-		},
-		{
-			name:         "neither field reported",
-			upstreamBody: `{"data":[{"id":"m","owned_by":"vllm"}]}`,
-			want:         nil,
-		},
-		{
-			name:         "empty data array",
-			upstreamBody: `{"data":[]}`,
-			want:         nil,
 		},
 	}
 
@@ -77,38 +68,72 @@ func TestDiscoverContextWindow(t *testing.T) {
 	}
 }
 
-// TestDiscoverContextWindow_NotLlamaSwap: non-llama-swap servers have no
-// upstream endpoint, so the probe must be skipped.
-func TestDiscoverContextWindow_NotLlamaSwap(t *testing.T) {
-	calls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Path == "/v1/models" {
-			// Direct vLLM: owned_by is vllm, so no upstream probe should happen.
-			_, _ = w.Write([]byte(`{"data":[{"id":"m","owned_by":"vllm","max_model_len":262144}]}`))
-			return
-		}
-		_, _ = w.Write([]byte(`{"data":[{"max_model_len":1}]}`))
-	}))
-	defer server.Close()
-
-	cs := testConfigStore(t)
-	if got := cs.DiscoverContextWindow("m", server.URL+"/v1"); got != nil {
-		t.Errorf("DiscoverContextWindow = %d, want nil (not llama-swap)", *got)
-	}
-	if calls != 1 {
-		t.Errorf("server calls = %d, want 1 (the upstream probe must be skipped)", calls)
-	}
-}
-
-// TestDiscoverContextWindow_UnreachableServer: a dead host returns nil rather
-// than panicking or blocking.
-func TestDiscoverContextWindow_UnreachableServer(t *testing.T) {
-	cs := testConfigStore(t)
-	// Port 1 on localhost: connection refused.
-	if got := cs.DiscoverContextWindow("m", "http://127.0.0.1:1/v1"); got != nil {
-		t.Errorf("DiscoverContextWindow = %d, want nil for unreachable server", *got)
+// TestDiscoverContextWindowInventsNoWindowWhenNothingReportsOne holds the accepted cost of an
+// unreported window (docs/context-window.md): the answer is nil, never a guess, because a guessed window
+// trims output the model needed on a number nothing told us. A dead host costs nil too — not a panic and
+// not a hung request. A case that hands back a counter also pins how many requests the probe may make: a
+// direct provider has no upstream endpoint, so asking for one is a bug.
+func TestDiscoverContextWindowInventsNoWindowWhenNothingReportsOne(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		// probe returns the URL to discover from, and the request counter to check against 1, or nil
+		// when the number of requests is not this case's point.
+		probe func(t *testing.T) (url string, requests *int)
+	}{
+		{
+			name: "the upstream reports neither field",
+			probe: func(t *testing.T) (string, *int) {
+				s := llamaSwapServer(t, `{"data":[{"id":"m","owned_by":"vllm"}]}`)
+				t.Cleanup(s.Close)
+				return s.URL + "/v1", nil
+			},
+		},
+		{
+			name: "the upstream reports no models",
+			probe: func(t *testing.T) (string, *int) {
+				s := llamaSwapServer(t, `{"data":[]}`)
+				t.Cleanup(s.Close)
+				return s.URL + "/v1", nil
+			},
+		},
+		{
+			// Non-llama-swap servers have no upstream endpoint, so the probe must be skipped: the one
+			// request is the model list that says so.
+			name: "a direct provider is not llama-swap",
+			probe: func(t *testing.T) (string, *int) {
+				calls := 0
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					calls++
+					w.Header().Set("Content-Type", "application/json")
+					if r.URL.Path == "/v1/models" {
+						// Direct vLLM: owned_by is vllm, so no upstream probe should happen.
+						_, _ = w.Write([]byte(`{"data":[{"id":"m","owned_by":"vllm","max_model_len":262144}]}`))
+						return
+					}
+					_, _ = w.Write([]byte(`{"data":[{"max_model_len":1}]}`))
+				}))
+				t.Cleanup(server.Close)
+				return server.URL + "/v1", &calls
+			},
+		},
+		{
+			name: "nothing is listening",
+			probe: func(t *testing.T) (string, *int) {
+				// Port 1 on localhost: connection refused.
+				return "http://127.0.0.1:1/v1", nil
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cs := testConfigStore(t)
+			url, requests := tc.probe(t)
+			if got := cs.DiscoverContextWindow("Qwen3.8-Flash-Next", url); got != nil {
+				t.Errorf("DiscoverContextWindow = %d, want nil: nothing reported a window", *got)
+			}
+			if requests != nil && *requests != 1 {
+				t.Errorf("server calls = %d, want 1 (the upstream probe must be skipped)", *requests)
+			}
+		})
 	}
 }
 

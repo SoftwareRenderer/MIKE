@@ -11,7 +11,9 @@ import (
 // TestShutdownOrderIsWhatWeDeclared: the declared sequence is [stageCount] names, and Shutdown must run
 // the registered steps in exactly that order whatever order they were registered in. Construction order
 // cannot express this sequence (the LSP handler is built after the sandbox manager but must close before
-// it), so the order is a declaration and this test is what keeps it one.
+// it), so the order is a declaration and this test is what keeps it one. The names are part of the
+// declaration: when the shutdown deadline fires, the last line in the log is the only thing that names
+// what wedged, so a stage with no name is a wedge with no owner.
 func TestShutdownOrderIsWhatWeDeclared(t *testing.T) {
 	var ran []string
 	record := func(name string) func() { return func() { ran = append(ran, name) } }
@@ -21,6 +23,10 @@ func TestShutdownOrderIsWhatWeDeclared(t *testing.T) {
 	s := &Server{}
 	// Registered back to front, so an implementation that walked registration order fails here.
 	for st := stageCount - 1; st >= 0; st-- {
+		if stageNames[st] == "" {
+			t.Errorf("stage %d has no name; add it to stageNames", int(st))
+			continue
+		}
 		if err := s.reg(st, stageNames[st], record(stageNames[st]))(); err != nil {
 			t.Fatalf("register %s: %v", stageNames[st], err)
 		}
@@ -35,11 +41,13 @@ func TestShutdownOrderIsWhatWeDeclared(t *testing.T) {
 		t.Errorf("shutdown order =\n  %s\nwant (the declared order)\n  %s", got, want)
 	}
 
-	// Every step names itself before it runs. When the shutdown deadline fires, the last line in the log
-	// is the only thing that names what wedged, so a step that logs nothing is a wedge with no owner.
+	// Every step names itself before it runs, in the order it was run.
 	out := logged.String()
 	last := -1
 	for st := stage(0); st < stageCount; st++ {
+		if stageNames[st] == "" {
+			continue
+		}
 		at := strings.Index(out, "shutdown: "+stageNames[st])
 		if at < 0 {
 			t.Errorf("no log line for the %q step", stageNames[st])
@@ -52,23 +60,38 @@ func TestShutdownOrderIsWhatWeDeclared(t *testing.T) {
 	}
 }
 
-// The sequence is only declared if every stage has a name: an unlisted stage would render as the empty
-// string and a wedged shutdown would log "shutdown: " with nothing to name.
-func TestShutdownStagesAreDeclaredEntirely(t *testing.T) {
-	for st := stage(0); st < stageCount; st++ {
-		if stageNames[st] == "" {
-			t.Errorf("stage %d has no name; add it to stageNames", int(st))
+// A second registration of one stage would silently drop a step, which is a leaked goroutine discovered
+// later as a shutdown that never returns; a step registered as nil — the method value of a component that
+// is not assigned yet — is a nil-func panic during an exit. Both are boot failures instead, and neither
+// may occupy the stage it was refused for.
+func TestRegistrationRefusesAStepItCannotRun(t *testing.T) {
+	t.Run("the same stage twice", func(t *testing.T) {
+		s := &Server{}
+		if err := s.reg(stageDatabase, "database", func() {})(); err != nil {
+			t.Fatalf("first registration: %v", err)
 		}
-	}
-	if stageNames[stageCount-1] != "database" {
-		t.Errorf("the last stage must be the database, got %q", stageNames[stageCount-1])
-	}
-	if stageNames[stageDetachedWork] != "detached work" {
-		t.Errorf("the first stage must be the detached-work cancellation, got %q", stageNames[stageDetachedWork])
-	}
-	if stageNames[stagePreviewSweeper] != "preview sweeper" {
-		t.Errorf("the second stage must be the preview sweeper, got %q", stageNames[stagePreviewSweeper])
-	}
+		err := s.reg(stageDatabase, "database", func() {})()
+		if err == nil {
+			t.Fatal("a second registration of the same stage was accepted")
+		}
+		if !strings.Contains(err.Error(), "registered twice") {
+			t.Errorf("error = %v, want it to name the double registration", err)
+		}
+	})
+
+	t.Run("a nil step", func(t *testing.T) {
+		s := &Server{}
+		err := s.reg(stageTerminalSessions, "terminal sessions", nil)()
+		if err == nil {
+			t.Fatal("a nil step was accepted")
+		}
+		if !strings.Contains(err.Error(), "no step") {
+			t.Errorf("error = %v, want it to name the missing step", err)
+		}
+		if s.shutdown[stageTerminalSessions] != nil {
+			t.Error("a refused registration still occupied its stage")
+		}
+	})
 }
 
 // A component a test never built has no step, so the sequence must skip it rather than fail — this is the
@@ -84,22 +107,6 @@ func TestShutdownRunsOnlyWhatWasRegistered(t *testing.T) {
 	}
 	if len(ran) != 1 || ran[0] != "terminal sessions" {
 		t.Errorf("ran %v, want only the one registered step", ran)
-	}
-}
-
-// A second registration of one stage would silently drop a step, which is a leaked goroutine discovered
-// later as a shutdown that never returns.
-func TestRegistrationRefusesToOverwriteAStage(t *testing.T) {
-	s := &Server{}
-	if err := s.reg(stageDatabase, "database", func() {})(); err != nil {
-		t.Fatalf("first registration: %v", err)
-	}
-	err := s.reg(stageDatabase, "database", func() {})()
-	if err == nil {
-		t.Fatal("a second registration of the same stage was accepted")
-	}
-	if !strings.Contains(err.Error(), "registered twice") {
-		t.Errorf("error = %v, want it to name the double registration", err)
 	}
 }
 
@@ -161,21 +168,5 @@ func TestShutdownCancelsTheBaseForEverythingStillRunning(t *testing.T) {
 	}
 	if detached.Err() == nil {
 		t.Error("shutdown left a detached operation running — nothing will ever cancel it")
-	}
-}
-
-// A step registered as nil — the method value of a component that is not assigned yet — is a nil-func call
-// inside Shutdown, discovered as a panic during an exit. It is a boot failure instead.
-func TestRegistrationRefusesANilStep(t *testing.T) {
-	s := &Server{}
-	err := s.reg(stageTerminalSessions, "terminal sessions", nil)()
-	if err == nil {
-		t.Fatal("a nil step was accepted")
-	}
-	if !strings.Contains(err.Error(), "no step") {
-		t.Errorf("error = %v, want it to name the missing step", err)
-	}
-	if s.shutdown[stageTerminalSessions] != nil {
-		t.Error("a refused registration still occupied its stage")
 	}
 }

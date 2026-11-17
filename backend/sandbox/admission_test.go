@@ -74,7 +74,9 @@ func TestBuildWaitsForTheBudgetBeforeItStartsAnything(t *testing.T) {
 			return nil, ctx.Err()
 		}
 	})
-	sm, project, _ := buildE2E(t, map[string]string{
+	// The refusal is the whole assertion, and it comes before any podman call: this test runs on a host
+	// whose storage cannot start anything.
+	sm, project, _ := stageBuildProject(t, map[string]string{
 		"Dockerfile": "FROM scratch\nCOPY a /a\n",
 		"a":          "a",
 	}, "")

@@ -8,26 +8,13 @@ import (
 	"mike/backend/types"
 )
 
-// TestHandleLSPMemory_Unauthenticated verifies the LSP sandbox memory
-// endpoint requires a session (like the rest of /api).
-func TestHandleLSPMemory_Unauthenticated(t *testing.T) {
+// What only the server can prove about this route: that it is registered, that it is not one of the
+// public paths, and that the workspace jail is actually wired into it — a handler whose validator was
+// never installed answers 200 for any directory on the host, because the bind-mount source of the
+// language server's container comes out of this query string.
+func TestLSPMemoryRouteIsGatedAndJailed(t *testing.T) {
 	s := testServer(t)
 
-	req := testRequest(http.MethodGet, "/api/lsp/memory?workspace=/tmp/ws&file=/tmp/ws/main.go", nil)
-	w := testResponse(t, s, req)
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)
-	}
-}
-
-// TestHandleLSPMemory_Authenticated verifies the endpoint responds with a
-// valid SandboxMemoryStats payload for an allowed workspace. No LSP
-// extension is installed in the test environment, so the sandbox reports
-// not running.
-func TestHandleLSPMemory_Authenticated(t *testing.T) {
-	s := testServer(t)
-
-	// The workspace validator restricts to project roots — create a project.
 	dir := t.TempDir()
 	initGitRepo(t, dir)
 	cookie, csrfToken := loginTestCSRF(t, s)
@@ -36,44 +23,42 @@ func TestHandleLSPMemory_Authenticated(t *testing.T) {
 		"path": dir,
 	})
 	withAuthCSRF(projReq, cookie, csrfToken)
-	projRR := testResponse(t, s, projReq)
-	if projRR.Code != http.StatusCreated {
-		t.Fatalf("create project: %d %s", projRR.Code, projRR.Body.String())
+	if rr := testResponse(t, s, projReq); rr.Code != http.StatusCreated {
+		t.Fatalf("create project: %d %s", rr.Code, rr.Body.String())
 	}
 
-	q := url.Values{"workspace": {dir}, "file": {dir + "/main.go"}}
-	w := testResponseAuth(t, s, testRequest(http.MethodGet, "/api/lsp/memory?"+q.Encode(), nil))
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d (body: %s)", w.Code, http.StatusOK, w.Body.String())
+	withQuery := func(q url.Values) string { return "/api/lsp/memory?" + q.Encode() }
+	projectWS := url.Values{"workspace": {dir}, "file": {dir + "/main.go"}}
+
+	cases := []struct {
+		name string
+		path string
+		auth bool
+		want int
+	}{
+		{"no session", withQuery(projectWS), false, http.StatusUnauthorized},
+		{"a project's own checkout", withQuery(projectWS), true, http.StatusOK},
+		{"a directory no project holds", withQuery(url.Values{
+			"workspace": {"/tmp/not-a-project"}, "file": {"/tmp/not-a-project/main.go"},
+		}), true, http.StatusForbidden},
+		{"no workspace at all", "/api/lsp/memory", true, http.StatusBadRequest},
+		{"a workspace with no file", withQuery(url.Values{"workspace": {dir}}), true, http.StatusBadRequest},
 	}
-	stats := mustJSON[types.SandboxMemoryStats](t, w.Body)
-	if stats.Running {
-		t.Errorf("Running = true, want false (no LSP sandbox in test env)")
-	}
-}
 
-// TestHandleLSPMemory_WorkspaceNotAProject verifies the workspace validator
-// rejects non-project paths on the authenticated route.
-func TestHandleLSPMemory_WorkspaceNotAProject(t *testing.T) {
-	s := testServer(t)
-
-	q := url.Values{"workspace": {"/tmp/not-a-project"}, "file": {"/tmp/not-a-project/main.go"}}
-	w := testResponseAuth(t, s, testRequest(http.MethodGet, "/api/lsp/memory?"+q.Encode(), nil))
-	if w.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want %d (body: %s)", w.Code, http.StatusForbidden, w.Body.String())
-	}
-}
-
-// TestHandleLSPMemory_MissingParams verifies parameter validation on the
-// authenticated route.
-func TestHandleLSPMemory_MissingParams(t *testing.T) {
-	s := testServer(t)
-
-	cookie, csrfToken := loginTestCSRF(t, s)
-	req := testRequest(http.MethodGet, "/api/lsp/memory", nil)
-	withAuthCSRF(req, cookie, csrfToken)
-	w := testResponse(t, s, req)
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := testRequest(http.MethodGet, tc.path, nil)
+			if tc.auth {
+				withAuthCSRF(req, cookie, csrfToken)
+			}
+			rr := testResponse(t, s, req)
+			if rr.Code != tc.want {
+				t.Fatalf("GET %s: %d %s, want %d", tc.path, rr.Code, rr.Body.String(), tc.want)
+			}
+			// The accepted answer is the payload the panel reads, not a bare 200.
+			if tc.want == http.StatusOK {
+				mustJSON[types.SandboxMemoryStats](t, rr.Body)
+			}
+		})
 	}
 }

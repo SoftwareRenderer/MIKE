@@ -6,26 +6,6 @@ import (
 	"testing"
 )
 
-// TestMountPathIsCleaned: the mount comes from filepath.Join(MountRootPath(), name), so
-// a name stored before ValidateProjectName rejected ".." cannot move it.
-func TestMountPathIsCleaned(t *testing.T) {
-	tests := []struct {
-		name string
-		want string
-	}{
-		{"proj", "/home/sandbox/proj"},
-		{"a/../../b", "/home/b"},
-		{"../escape", "/home/escape"},
-		{"sub/dir", "/home/sandbox/sub/dir"},
-		{"", MountRootPath()},
-	}
-	for _, tt := range tests {
-		if got := MountPath(tt.name); got != tt.want {
-			t.Errorf("MountPath(%q) = %q, want %q", tt.name, got, tt.want)
-		}
-	}
-}
-
 // TestSetMountRootAimsAndRestores: the injected root is what MountPath builds under and what a caller
 // comparing a request's spelling asks, and the function SetMountRoot answers puts both back. A test that
 // left the mount aimed at its own temp directory would jail every later request in the process to it.

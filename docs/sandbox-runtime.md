@@ -224,8 +224,9 @@ Configuration.
   has a deadline.
 - Shutdown order follows from that rule — a session's shell dies while its container can still receive it
   — and the stage list itself is `docs/lifecycle.md → Shutdown Stage List`.
-- Tests: `backend/sandbox/podman_wait_test.go`, `TestTerminalManagerClose`, `pkg/subproc/subproc_test.go`,
-  `TestPodmanLabelNamesTheOperation`, `pkg/sandboxruntime/podmanenv_test.go`.
+- Tests: `TestTerminalManagerClose`, `pkg/subproc/subproc_test.go`,
+  `TestPodmanLabelNamesTheOperation`, `TestPodmanCommandSetsEnvAndWaitDelay` (the bound beside the
+  constant it bounds), `pkg/sandboxruntime/podmanenv_test.go`.
 
 ## A project image builds inside a sandbox container
 

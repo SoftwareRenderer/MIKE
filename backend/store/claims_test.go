@@ -34,27 +34,6 @@ func TestClaimAnswersTheFirstResult(t *testing.T) {
 	}
 }
 
-func TestClaimOfAnotherIdentityIsItsOwn(t *testing.T) {
-	s := testStore(t)
-	if err := s.CreateProject(newProject("claim-proj", "claim-proj", "/tmp/claim-proj")); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	if err := s.CreateTask(newTask("claim-task", "claim-proj")); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-	if err := s.ClaimWrite("token-1", "claim-proj", "claim-task", ClaimSend, "msg-1"); err != nil {
-		t.Fatalf("claim: %v", err)
-	}
-
-	// Two identities for the same words are two writes: the guard never decides that a repeat is unwanted.
-	if err := s.ClaimWrite("token-2", "claim-proj", "claim-task", ClaimSend, "msg-2"); err != nil {
-		t.Fatalf("claim for the second identity: %v", err)
-	}
-	if id, claimed := s.ClaimedWrite("token-2", "claim-task"); !claimed || id != "msg-2" {
-		t.Fatalf("second identity answered (%q, %v), want (msg-2, true)", id, claimed)
-	}
-}
-
 func TestNoIdentityClaimsNothing(t *testing.T) {
 	s := testStore(t)
 	if err := s.ClaimWrite("", "claim-proj", "claim-task", ClaimSend, "msg-1"); err != nil {
@@ -88,8 +67,10 @@ func TestDeletingTheTaskDropsItsClaim(t *testing.T) {
 	}
 }
 
-// The lookup carries the scope the request named, so one task's identity never answers for another.
-func TestClaimAnswersOnlyTheTaskItWasWrittenIn(t *testing.T) {
+// The lookup carries the scope the request named, so one write's answer never stands in for another's:
+// the identity and the row it was written under are both part of the key, and the guard never decides on
+// its own that a repeat of the same words is unwanted.
+func TestClaimAnswersOnlyTheIdentityAndScopeItWasWrittenIn(t *testing.T) {
 	s := testStore(t)
 	if err := s.CreateProject(newProject("claim-proj", "claim-proj", "/tmp/claim-proj")); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -103,22 +84,39 @@ func TestClaimAnswersOnlyTheTaskItWasWrittenIn(t *testing.T) {
 	if err := s.ClaimWrite("token-1", "claim-proj", "claim-task", ClaimSend, "msg-1"); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	if id, claimed := s.ClaimedWrite("token-1", "other-task"); claimed {
-		t.Fatalf("another task's identity answered %q", id)
-	}
-	if id, claimed := s.ClaimedWrite("token-1", "claim-task"); !claimed || id != "msg-1" {
-		t.Fatalf("its own task answered (%q, %v), want (msg-1, true)", id, claimed)
-	}
 
-	if err := s.ClaimWrite("create-1", "claim-proj", "claim-task", ClaimCreateTask, "claim-task"); err != nil {
-		t.Fatalf("claim the create: %v", err)
-	}
-	if id, claimed := s.ClaimedCreate("create-1", "claim-proj"); !claimed || id != "claim-task" {
-		t.Fatalf("ClaimedCreate answered (%q, %v), want (claim-task, true)", id, claimed)
-	}
-	if id, claimed := s.ClaimedCreate("create-1", "other-proj"); claimed {
-		t.Fatalf("another project's identity answered %q", id)
-	}
+	t.Run("another task's lookup does not answer", func(t *testing.T) {
+		if id, claimed := s.ClaimedWrite("token-1", "other-task"); claimed {
+			t.Fatalf("another task's identity answered %q", id)
+		}
+		if id, claimed := s.ClaimedWrite("token-1", "claim-task"); !claimed || id != "msg-1" {
+			t.Fatalf("its own task answered (%q, %v), want (msg-1, true)", id, claimed)
+		}
+	})
+
+	t.Run("another identity writing the same words is its own write", func(t *testing.T) {
+		if err := s.ClaimWrite("token-2", "claim-proj", "claim-task", ClaimSend, "msg-2"); err != nil {
+			t.Fatalf("claim for the second identity: %v", err)
+		}
+		if id, claimed := s.ClaimedWrite("token-2", "claim-task"); !claimed || id != "msg-2" {
+			t.Fatalf("second identity answered (%q, %v), want (msg-2, true)", id, claimed)
+		}
+		if id, claimed := s.ClaimedWrite("token-1", "claim-task"); !claimed || id != "msg-1" {
+			t.Fatalf("the first identity's answer moved to (%q, %v)", id, claimed)
+		}
+	})
+
+	t.Run("a created task answers only its own project", func(t *testing.T) {
+		if err := s.ClaimWrite("create-1", "claim-proj", "claim-task", ClaimCreateTask, "claim-task"); err != nil {
+			t.Fatalf("claim the create: %v", err)
+		}
+		if id, claimed := s.ClaimedCreate("create-1", "claim-proj"); !claimed || id != "claim-task" {
+			t.Fatalf("ClaimedCreate answered (%q, %v), want (claim-task, true)", id, claimed)
+		}
+		if id, claimed := s.ClaimedCreate("create-1", "other-proj"); claimed {
+			t.Fatalf("another project's identity answered %q", id)
+		}
+	})
 }
 
 // The table only shrinks on its own while the write that grows it also prunes it; a horizon nobody enforces

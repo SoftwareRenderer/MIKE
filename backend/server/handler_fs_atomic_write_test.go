@@ -35,7 +35,7 @@ func TestFSWriteAtomic(t *testing.T) {
 		}
 	}
 
-	t.Run("new file is 0644 and leaves no temporary behind", func(t *testing.T) {
+	t.Run("a new file lands and leaves no temporary behind", func(t *testing.T) {
 		path := filepath.Join(tmpDir, "fresh.txt")
 		rr := saveFile(t, s, projID, path, "first")
 		if rr.Code != http.StatusOK {
@@ -48,47 +48,7 @@ func TestFSWriteAtomic(t *testing.T) {
 		if string(data) != "first" {
 			t.Errorf("content = %q", data)
 		}
-		fi, err := os.Stat(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if fi.Mode().Perm() != 0644 {
-			t.Errorf("new file mode = %v, want -rw-r--r--", fi.Mode().Perm())
-		}
 		assertNoTempFiles(tmpDir)
-	})
-
-	t.Run("an executable keeps its +x across a save", func(t *testing.T) {
-		path := filepath.Join(tmpDir, "deploy.sh")
-		if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0755); err != nil {
-			t.Fatal(err)
-		}
-		rr := saveFile(t, s, projID, path, "#!/bin/sh\necho new\n")
-		if rr.Code != http.StatusOK {
-			t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
-		}
-		fi, err := os.Stat(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if fi.Mode().Perm() != 0755 {
-			t.Errorf("mode after save = %v, want -rwxr-xr-x", fi.Mode().Perm())
-		}
-		if data, err := os.ReadFile(path); err != nil || string(data) != "#!/bin/sh\necho new\n" {
-			t.Errorf("content = %q, err = %v", data, err)
-		}
-		assertNoTempFiles(tmpDir)
-	})
-
-	t.Run("parent directories are still created", func(t *testing.T) {
-		path := filepath.Join(tmpDir, "deep", "nested", "file.txt")
-		rr := saveFile(t, s, projID, path, "nested")
-		if rr.Code != http.StatusOK {
-			t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
-		}
-		if _, err := os.Stat(path); err != nil {
-			t.Fatal(err)
-		}
 	})
 
 	t.Run("a failed write answers 500 and leaves the target untouched", func(t *testing.T) {

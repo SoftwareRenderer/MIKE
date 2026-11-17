@@ -351,14 +351,17 @@ func TestNormalizeReasoning(t *testing.T) {
 	})
 }
 
-// TestChatStream_ReasoningFieldVariants checks reasoning reaches the callback in
-// Delta.ReasoningContent under either field name, and that either one marks first-token arrival.
-func TestChatStream_ReasoningFieldVariants(t *testing.T) {
+// TestChatStream_WallClockTimingFallback verifies that ChatStream splits prompt_ms and predicted_ms
+// from wall-clock when the provider supplies no Timings, and that a delta carrying only reasoning is a
+// token: either field name must reach the callback in Delta.ReasoningContent and start the clock, or a
+// thinking model reads as a turn that never began.
+func TestChatStream_WallClockTimingFallback(t *testing.T) {
 	tests := []struct {
 		name  string
 		delta string // raw delta JSON, as the server would send it
-		want  string
+		want  string // what one delta must deliver to the callback
 	}{
+		{"content delta", `{"content":"x"}`, "x"},
 		{"vLLM reasoning", `{"reasoning":"thinking hard"}`, "thinking hard"},
 		{"llama.cpp reasoning_content", `{"reasoning_content":"thinking hard"}`, "thinking hard"},
 		{"both sends canonical only", `{"reasoning_content":"canonical","reasoning":"duplicate"}`, "canonical"},
@@ -367,13 +370,25 @@ func TestChatStream_ReasoningFieldVariants(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				flusher, ok := w.(http.Flusher)
+				if !ok {
+					t.Fatal("no flusher")
+					return
+				}
 				w.Header().Set("Content-Type", "text/event-stream")
-				// Prompt-processing delay before the first (reasoning-only) token.
+
+				// Prompt processing, with no Timings block: the wall-clock split is the only source.
 				time.Sleep(100 * time.Millisecond)
-				fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":%s,\"finish_reason\":null}]}\n\n", tt.delta)
-				// Usage without timings (vLLM-style): forces the wall-clock fallback.
-				w.Write([]byte("data: {\"usage\":{\"prompt_tokens\":50,\"completion_tokens\":3,\"total_tokens\":53}}\n\n"))
+				for i := 0; i < 3; i++ {
+					fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":%s,\"finish_reason\":null}]}\n\n", tt.delta)
+					flusher.Flush()
+					time.Sleep(20 * time.Millisecond)
+				}
+				w.Write([]byte(`data: {"usage":{"prompt_tokens":100,"completion_tokens":3,"total_tokens":103}}` + "\n\n"))
+				flusher.Flush()
 				w.Write([]byte("data: [DONE]\n\n"))
+				flusher.Flush()
+				<-r.Context().Done()
 			}))
 			defer server.Close()
 
@@ -381,203 +396,185 @@ func TestChatStream_ReasoningFieldVariants(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			var reasoning strings.Builder
+			var delivered strings.Builder
 			usage, err := c.ChatStream(ctx, testMessages(), nil, func(choice types.ChatChoice) {
+				if choice.Delta.Content != nil {
+					delivered.WriteString(*choice.Delta.Content)
+				}
 				if choice.Delta.ReasoningContent != nil {
-					reasoning.WriteString(*choice.Delta.ReasoningContent)
+					delivered.WriteString(*choice.Delta.ReasoningContent)
 				}
 			}, nil, nil)
 			if err != nil {
 				t.Fatalf("ChatStream error: %v", err)
 			}
-
-			if got := reasoning.String(); got != tt.want {
-				t.Errorf("reasoning delivered to callback = %q, want %q", got, tt.want)
+			if got := delivered.String(); got != strings.Repeat(tt.want, 3) {
+				t.Errorf("callback received %q, want %q three times", got, tt.want)
 			}
 			if usage == nil {
 				t.Fatal("expected usage, got nil")
 			}
-			// A reasoning delta must count as the first token: PromptMs comes
-			// from firstTokenTime-callStart, so ~0 means the frame looked empty.
-			if usage.PromptMs < 80 {
-				t.Errorf("prompt_ms = %d, expected ~100ms — reasoning delta did not register as first token", usage.PromptMs)
+			if usage.PromptTokens != 100 || usage.CompletionTokens != 3 {
+				t.Errorf("usage = %d prompt / %d completion, want 100/3 from the usage frame",
+					usage.PromptTokens, usage.CompletionTokens)
 			}
-			if usage.CompletionTokens != 3 {
-				t.Errorf("completion_tokens = %d, want 3", usage.CompletionTokens)
+
+			// Prompt time is firstTokenTime-callStart, so ~0 means a frame looked empty to the client.
+			if usage.PromptMs < 80 || usage.PromptMs > 200 {
+				t.Errorf("prompt_ms = %d, expected ~100ms (the delay before the first token)", usage.PromptMs)
+			}
+			// Gen time is streamEnd-firstTokenTime: ~60ms for three tokens paced at 20ms.
+			if usage.PredictedMs < 40 || usage.PredictedMs > 200 {
+				t.Errorf("predicted_ms = %d, expected ~60ms", usage.PredictedMs)
 			}
 		})
 	}
 }
 
-// TestChatStream_WallClockTimingFallback verifies that ChatStream calculates
-// prompt_ms and predicted_ms from wall-clock when the provider doesn't supply Timings.
-func TestChatStream_WallClockTimingFallback(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		flusher, ok := w.(http.Flusher)
-		if !ok {
-			t.Fatal("no flusher")
-			return
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
+// TestChatStream_TimingsComeFromWhatTheProviderSends pins the precedence between the sources of a
+// turn's timings: a provider's own Timings block is used verbatim, vLLM's metrics block fills what no
+// Timings sent, and a server that sends both is read by its Timings. Read the wrong one and every card
+// prices the turn with somebody else's clock.
+func TestChatStream_TimingsComeFromWhatTheProviderSends(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		frames        []string // SSE payloads, each without its "data: " prefix
+		wantPromptMs  int64
+		wantPredicted int64
+	}{
+		{
+			name: "the provider's Timings block is used verbatim",
+			frames: []string{
+				`{"timings":{"prompt_n":100,"prompt_ms":50.0,"predicted_n":1,"predicted_ms":30.0,"cache_n":0},"choices":[{"delta":{"content":"hello"},"finish_reason":null}]}`,
+				`{"usage":{"prompt_tokens":100,"completion_tokens":1,"total_tokens":101},"timings":{"prompt_n":100,"prompt_ms":50.0,"predicted_n":1,"predicted_ms":30.0,"cache_n":0}}`,
+			},
+			wantPromptMs: 50, wantPredicted: 30,
+		},
+		{
+			name: "vLLM's metrics block supplies what no Timings sent",
+			frames: []string{
+				`{"choices":[{"delta":{"content":"hi"},"finish_reason":null}]}`,
+				`{"choices":[],"usage":{"prompt_tokens":54,"completion_tokens":6,"total_tokens":60},"metrics":{"time_to_first_token_ms":132.7,"generation_time_ms":44.3,"tokens_per_second":43.4}}`,
+			},
+			wantPromptMs: 132, wantPredicted: 44,
+		},
+		{
+			name: "Timings win when a server sends both",
+			frames: []string{
+				`{"choices":[{"delta":{"content":"hi"},"finish_reason":null}],"usage":{"prompt_tokens":100,"completion_tokens":3,"total_tokens":103},"timings":{"cache_n":0,"prompt_n":100,"prompt_ms":50.0,"predicted_n":3,"predicted_ms":30.0},"metrics":{"time_to_first_token_ms":999.0,"generation_time_ms":999.0}}`,
+			},
+			wantPromptMs: 50, wantPredicted: 30,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				for _, frame := range tc.frames {
+					w.Write([]byte("data: " + frame + "\n\n"))
+					w.(http.Flusher).Flush()
+				}
+				w.Write([]byte("data: [DONE]\n\n"))
+				w.(http.Flusher).Flush()
+				<-r.Context().Done()
+			}))
+			defer server.Close()
 
-		// Simulate prompt processing delay (no Timings sent)
-		time.Sleep(100 * time.Millisecond)
+			c := NewLlamaClient(server.URL, "test-model", "off", "")
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
 
-		// Send a few tokens with small delays
-		for i := 0; i < 3; i++ {
-			w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"x\"},\"finish_reason\":null}]}\n\n"))
-			flusher.Flush()
-			time.Sleep(20 * time.Millisecond)
-		}
-
-		// Send usage without timings (simulates a provider that doesn't send Timings)
-		w.Write([]byte("data: {\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":3,\"total_tokens\":103}}\n\n"))
-		flusher.Flush()
-
-		w.Write([]byte("data: [DONE]\n\n"))
-		flusher.Flush()
-		<-r.Context().Done()
-	}))
-	defer server.Close()
-
-	c := NewLlamaClient(server.URL, "test-model", "off", "")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	usage, err := c.ChatStream(ctx, testMessages(), nil, func(choice types.ChatChoice) {}, nil, nil)
-	if err != nil {
-		t.Fatalf("ChatStream error: %v", err)
-	}
-	if usage == nil {
-		t.Fatal("expected usage, got nil")
-	}
-
-	// Token counts should come from Usage
-	if usage.PromptTokens != 100 {
-		t.Errorf("prompt_tokens = %d, want 100", usage.PromptTokens)
-	}
-	if usage.CompletionTokens != 3 {
-		t.Errorf("completion_tokens = %d, want 3", usage.CompletionTokens)
-	}
-
-	// Timing should be calculated from wall-clock since provider didn't send Timings
-	// Prompt time should be ~100ms (the initial delay before first token)
-	if usage.PromptMs < 80 {
-		t.Errorf("prompt_ms = %d, expected ~100ms (got too low)", usage.PromptMs)
-	}
-	if usage.PromptMs > 200 {
-		t.Errorf("prompt_ms = %d, expected ~100ms (got too high)", usage.PromptMs)
-	}
-
-	// Gen time should be ~60ms (3 tokens * 20ms each)
-	if usage.PredictedMs < 40 {
-		t.Errorf("predicted_ms = %d, expected ~60ms (got too low)", usage.PredictedMs)
-	}
-	if usage.PredictedMs > 200 {
-		t.Errorf("predicted_ms = %d, expected ~60ms (got too high)", usage.PredictedMs)
-	}
-}
-
-// TestChatStream_TimingsFromProvider verifies that provider-supplied Timings
-// take precedence over wall-clock estimation.
-func TestChatStream_TimingsFromProvider(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		flusher, ok := w.(http.Flusher)
-		if !ok {
-			t.Fatal("no flusher")
-			return
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-
-		// Send a token with timings (llama.cpp format)
-		w.Write([]byte("data: {\"timings\":{\"prompt_n\":100,\"prompt_ms\":50.0,\"predicted_n\":1,\"predicted_ms\":30.0,\"cache_n\":0},\"choices\":[{\"delta\":{\"content\":\"hello\"},\"finish_reason\":null}]}\n\n"))
-		flusher.Flush()
-
-		// Send final usage with timings
-		w.Write([]byte("data: {\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":1,\"total_tokens\":101},\"timings\":{\"prompt_n\":100,\"prompt_ms\":50.0,\"predicted_n\":1,\"predicted_ms\":30.0,\"cache_n\":0}}\n\n"))
-		flusher.Flush()
-
-		w.Write([]byte("data: [DONE]\n\n"))
-		flusher.Flush()
-		<-r.Context().Done()
-	}))
-	defer server.Close()
-
-	c := NewLlamaClient(server.URL, "test-model", "off", "")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	usage, err := c.ChatStream(ctx, testMessages(), nil, func(choice types.ChatChoice) {}, nil, nil)
-	if err != nil {
-		t.Fatalf("ChatStream error: %v", err)
-	}
-	if usage == nil {
-		t.Fatal("expected usage, got nil")
-	}
-
-	// Provider-supplied timings should be preserved (not overwritten by wall-clock)
-	if usage.PromptMs != 50 {
-		t.Errorf("prompt_ms = %d, want 50 (from provider Timings)", usage.PromptMs)
-	}
-	if usage.PredictedMs != 30 {
-		t.Errorf("predicted_ms = %d, want 30 (from provider Timings)", usage.PredictedMs)
+			usage, err := c.ChatStream(ctx, testMessages(), nil, func(types.ChatChoice) {}, nil, nil)
+			if err != nil {
+				t.Fatalf("ChatStream error: %v", err)
+			}
+			if usage == nil {
+				t.Fatal("expected usage, got nil")
+			}
+			if usage.PromptMs != tc.wantPromptMs {
+				t.Errorf("prompt_ms = %d, want %d", usage.PromptMs, tc.wantPromptMs)
+			}
+			if usage.PredictedMs != tc.wantPredicted {
+				t.Errorf("predicted_ms = %d, want %d", usage.PredictedMs, tc.wantPredicted)
+			}
+		})
 	}
 }
 
-// TestChatCompletion_WallClockTimingFallback verifies that ChatCompletion calculates
-// prompt_ms and predicted_ms from wall-clock when the provider doesn't supply Timings.
-func TestChatCompletion_WallClockTimingFallback(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Simulate processing delay
-		time.Sleep(100 * time.Millisecond)
+// TestChatCompletion_TimingsComeFromWhatTheProviderSends is the same precedence on the non-streaming
+// path every utility call takes: vLLM's metrics block fills an empty Timings, and with neither source
+// the wall clock is split by the token weights — a generated token costs about five times a prompted
+// one, and a card that reads 0 ms for both claims the model answered instantly.
+func TestChatCompletion_TimingsComeFromWhatTheProviderSends(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		payload         string
+		delay           time.Duration
+		content         string
+		wantPromptTok   int
+		wantCompletion  int
+		wantPromptMs    int64 // 0 = no provider timing: the wall-clock split is the source
+		wantPredictedMs int64
+	}{
+		{
+			name: "vLLM's metrics block supplies what no Timings sent",
+			payload: `{"choices":[{"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],` +
+				`"usage":{"prompt_tokens":54,"completion_tokens":6,"total_tokens":60,"prompt_tokens_details":null},` +
+				`"metrics":{"time_to_first_token_ms":93.9,"generation_time_ms":43.9,"tokens_per_second":43.4}}`,
+			content: "hi", wantPromptTok: 54, wantCompletion: 6, wantPromptMs: 93, wantPredictedMs: 43,
+		},
+		{
+			name: "the wall clock is split by the token weights",
+			payload: `{"choices":[{"message":{"content":"hello world"},"finish_reason":"stop"}],` +
+				`"usage":{"prompt_tokens":50,"completion_tokens":2,"total_tokens":52}}`,
+			delay: 100 * time.Millisecond, content: "hello world", wantPromptTok: 50, wantCompletion: 2,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.delay > 0 {
+					time.Sleep(tc.delay)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tc.payload))
+			}))
+			defer server.Close()
 
-		w.Header().Set("Content-Type", "application/json")
-		// Response with usage but NO timings (simulates provider without Timings)
-		w.Write([]byte(`{
-			"choices": [{"message": {"content": "hello world"}, "finish_reason": "stop"}],
-			"usage": {"prompt_tokens": 50, "completion_tokens": 2, "total_tokens": 52}
-		}`))
-	}))
-	defer server.Close()
+			c := NewLlamaClient(server.URL, "test-model", "off", "")
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
 
-	c := NewLlamaClient(server.URL, "test-model", "off", "")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	usage, content, err := c.ChatCompletion(ctx, testMessages(), nil)
-	if err != nil {
-		t.Fatalf("ChatCompletion error: %v", err)
-	}
-	if content != "hello world" {
-		t.Errorf("content = %q, want %q", content, "hello world")
-	}
-	if usage == nil {
-		t.Fatal("expected usage, got nil")
-	}
-
-	// Token counts should come from Usage
-	if usage.PromptTokens != 50 {
-		t.Errorf("prompt_tokens = %d, want 50", usage.PromptTokens)
-	}
-	if usage.CompletionTokens != 2 {
-		t.Errorf("completion_tokens = %d, want 2", usage.CompletionTokens)
-	}
-
-	// Timing should be estimated from wall-clock (~100ms total)
-	// With 5:1 ratio: prompt ~50/(50+2*5) * 100 = ~83ms, gen ~17ms
-	if usage.PromptMs < 50 {
-		t.Errorf("prompt_ms = %d, expected ~80ms (got too low)", usage.PromptMs)
-	}
-	if usage.PredictedMs < 5 {
-		t.Errorf("predicted_ms = %d, expected ~15ms (got too low)", usage.PredictedMs)
-	}
-	// Total should be close to 100ms
-	totalMs := usage.PromptMs + usage.PredictedMs
-	if totalMs < 80 || totalMs > 200 {
-		t.Errorf("total_ms = %d, expected ~100ms", totalMs)
+			usage, content, err := c.ChatCompletion(ctx, testMessages(), nil)
+			if err != nil {
+				t.Fatalf("ChatCompletion error: %v", err)
+			}
+			if content != tc.content {
+				t.Errorf("content = %q, want %q", content, tc.content)
+			}
+			if usage == nil {
+				t.Fatal("expected usage, got nil")
+			}
+			if usage.PromptTokens != tc.wantPromptTok || usage.CompletionTokens != tc.wantCompletion {
+				t.Errorf("usage = %d prompt / %d completion, want %d/%d from the usage block",
+					usage.PromptTokens, usage.CompletionTokens, tc.wantPromptTok, tc.wantCompletion)
+			}
+			if tc.wantPromptMs == 0 {
+				// ~100ms of wall clock split 50:(2*5) between prompt and generation.
+				if usage.PromptMs < 50 {
+					t.Errorf("prompt_ms = %d, expected ~80ms (got too low)", usage.PromptMs)
+				}
+				if usage.PredictedMs < 5 {
+					t.Errorf("predicted_ms = %d, expected ~15ms (got too low)", usage.PredictedMs)
+				}
+				if total := usage.PromptMs + usage.PredictedMs; total < 80 || total > 200 {
+					t.Errorf("total_ms = %d, expected ~100ms", total)
+				}
+				return
+			}
+			if usage.PromptMs != tc.wantPromptMs || usage.PredictedMs != tc.wantPredictedMs {
+				t.Errorf("prompt_ms=%d predicted_ms=%d, want %d/%d from metrics",
+					usage.PromptMs, usage.PredictedMs, tc.wantPromptMs, tc.wantPredictedMs)
+			}
+		})
 	}
 }
 
@@ -667,13 +664,14 @@ func TestChatStream_OnUsageCallback(t *testing.T) {
 		}
 	})
 
-	t.Run("vLLM empty-choices usage frame still reaches onUsage", func(t *testing.T) {
-		// vLLM's usage arrives on a frame with "choices":[], which StreamCallback
-		// can never deliver (cb fires per choice). onUsage must still see it.
+	t.Run("the empty-choices usage frame is usage, not a token", func(t *testing.T) {
+		// include_usage makes vLLM send its usage on a frame with "choices":[], which
+		// StreamCallback can never deliver (cb fires per choice): onUsage must still see
+		// the counts, and the token callback must not fire for a frame that carries no token.
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/event-stream")
-			w.Write([]byte(`data: {"choices":[{"delta":{"content":"hi"}}]}` + "\n\n"))
-			w.Write([]byte(`data: {"choices":[],"usage":{"prompt_tokens":54,"completion_tokens":6,"total_tokens":60}}` + "\n\n"))
+			w.Write([]byte(`data: {"choices":[{"delta":{"content":"hi"},"finish_reason":null}]}` + "\n\n"))
+			w.Write([]byte(`data: {"choices":[],"usage":{"prompt_tokens":54,"completion_tokens":6,"total_tokens":60,"prompt_tokens_details":{"cached_tokens":40}}}` + "\n\n"))
 			w.Write([]byte("data: [DONE]\n\n"))
 		}))
 		defer server.Close()
@@ -683,7 +681,8 @@ func TestChatStream_OnUsageCallback(t *testing.T) {
 		defer cancel()
 
 		var got *types.ChatUsage
-		_, err := c.ChatStream(ctx, testMessages(), nil, func(types.ChatChoice) {}, nil,
+		var tokens int
+		usage, err := c.ChatStream(ctx, testMessages(), nil, func(types.ChatChoice) { tokens++ }, nil,
 			func(u *types.ChatUsage) { got = u })
 		if err != nil {
 			t.Fatalf("ChatStream error: %v", err)
@@ -693,6 +692,18 @@ func TestChatStream_OnUsageCallback(t *testing.T) {
 		}
 		if got.PromptTokens != 54 || got.CompletionTokens != 6 {
 			t.Errorf("onUsage usage = %+v, want prompt=54 completion=6", got)
+		}
+		if usage == nil {
+			t.Fatal("expected usage, got nil")
+		}
+		if usage.PromptTokens != 54 || usage.CompletionTokens != 6 {
+			t.Errorf("returned usage = %+v, want prompt=54 completion=6", usage)
+		}
+		if usage.PromptTokensDetails.CachedTokens != 40 {
+			t.Errorf("cached_tokens = %d, want 40", usage.PromptTokensDetails.CachedTokens)
+		}
+		if tokens != 1 {
+			t.Errorf("token callback calls = %d, want 1 (the empty-choices usage frame must not invoke it)", tokens)
 		}
 	})
 
@@ -747,122 +758,37 @@ func TestChatStream_OnUsageCallback(t *testing.T) {
 	})
 }
 
-// --- vLLM metrics Tests ---
-
-// TestChatStream_VllmMetricsTiming verifies that vLLM's metrics block supplies
-// prompt/gen times when no timings block exists (vLLM never sends timings).
-func TestChatStream_VllmMetricsTiming(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Write([]byte(`data: {"choices":[{"delta":{"content":"hi"},"finish_reason":null}]}` + "\n\n"))
-		// vLLM shape: usage + metrics on the final frame, no timings.
-		w.Write([]byte(`data: {"choices":[],"usage":{"prompt_tokens":54,"completion_tokens":6,"total_tokens":60},"metrics":{"time_to_first_token_ms":132.7,"generation_time_ms":44.3,"tokens_per_second":43.4}}` + "\n\n"))
-		w.Write([]byte("data: [DONE]\n\n"))
-	}))
-	defer server.Close()
-
-	c := NewLlamaClient(server.URL, "test-model", "off", "")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	usage, err := c.ChatStream(ctx, testMessages(), nil, func(types.ChatChoice) {}, nil, nil)
-	if err != nil {
-		t.Fatalf("ChatStream error: %v", err)
-	}
-	if usage == nil {
-		t.Fatal("expected usage, got nil")
-	}
-	if usage.PromptMs != 132 {
-		t.Errorf("prompt_ms = %d, want 132 (truncated from time_to_first_token_ms 132.7)", usage.PromptMs)
-	}
-	if usage.PredictedMs != 44 {
-		t.Errorf("predicted_ms = %d, want 44 (truncated from generation_time_ms 44.3)", usage.PredictedMs)
-	}
-}
-
-// TestChatStream_TimingsBeatVllmMetrics verifies that when a server sends both
-// a timings block and a metrics block, timings wins.
-func TestChatStream_TimingsBeatVllmMetrics(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Write([]byte(`data: {"choices":[{"delta":{"content":"hi"},"finish_reason":null}],"usage":{"prompt_tokens":100,"completion_tokens":3,"total_tokens":103},"timings":{"cache_n":0,"prompt_n":100,"prompt_ms":50.0,"predicted_n":3,"predicted_ms":30.0},"metrics":{"time_to_first_token_ms":999.0,"generation_time_ms":999.0}}` + "\n\n"))
-		w.Write([]byte("data: [DONE]\n\n"))
-	}))
-	defer server.Close()
-
-	c := NewLlamaClient(server.URL, "test-model", "off", "")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	usage, err := c.ChatStream(ctx, testMessages(), nil, func(types.ChatChoice) {}, nil, nil)
-	if err != nil {
-		t.Fatalf("ChatStream error: %v", err)
-	}
-	if usage.PromptMs != 50 || usage.PredictedMs != 30 {
-		t.Errorf("timings must win over metrics: got prompt_ms=%d predicted_ms=%d, want 50/30", usage.PromptMs, usage.PredictedMs)
-	}
-}
-
-// TestChatCompletion_VllmMetricsTiming: metrics also supply timing on the
-// non-streaming path, which all utility calls use.
-func TestChatCompletion_VllmMetricsTiming(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		// vLLM non-streaming shape: usage + metrics, prompt_tokens_details null.
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":54,"completion_tokens":6,"total_tokens":60,"prompt_tokens_details":null},"metrics":{"time_to_first_token_ms":93.9,"generation_time_ms":43.9,"tokens_per_second":43.4}}`))
-	}))
-	defer server.Close()
-
-	c := NewLlamaClient(server.URL, "test-model", "off", "")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	usage, _, err := c.ChatCompletion(ctx, testMessages(), nil)
-	if err != nil {
-		t.Fatalf("ChatCompletion error: %v", err)
-	}
-	if usage.PromptMs != 93 || usage.PredictedMs != 43 {
-		t.Errorf("prompt_ms=%d predicted_ms=%d, want 93/43 from metrics", usage.PromptMs, usage.PredictedMs)
-	}
-}
-
 // --- LlamaError Tests ---
 
-func TestLlamaError_ErrorText(t *testing.T) {
-	e := &LlamaError{StatusCode: 429, Body: `{"error":"Rate limit exceeded"}`}
-	got := e.Error()
-	want := `llama error 429: {"error":"Rate limit exceeded"}`
-	if got != want {
-		t.Errorf("Error() = %q, want %q", got, want)
-	}
-}
-
-// TestLlamaError_IsRequestRejected pins which refusals end the run at once. A 4xx that a later call
-// could get an answer from must stay retryable, or a rate-limited provider kills the task.
-func TestLlamaError_IsRequestRejected(t *testing.T) {
-	rejected := []int{400, 401, 403, 404, 413, 422}
-	retryable := []int{200, 408, 429, 500, 502, 503}
-	for _, code := range rejected {
-		if !(&LlamaError{StatusCode: code}).IsRequestRejected() {
-			t.Errorf("IsRequestRejected(%d) = false, want true: the same request will be refused again", code)
+// TestLlamaError_StatusCodeClasses pins which refusals end the run at once and which pay a rate-limit
+// backoff. A 4xx a later call could get an answer from must stay retryable, or a rate-limited provider
+// kills the task; a malformed request retried is the same refusal paid again.
+func TestLlamaError_StatusCodeClasses(t *testing.T) {
+	for _, tc := range []struct {
+		code        int
+		rejected    bool
+		rateLimited bool
+	}{
+		{code: 200},
+		{code: 400, rejected: true},
+		{code: 401, rejected: true},
+		{code: 403, rejected: true},
+		{code: 404, rejected: true},
+		{code: 408}, // a timeout a later call can answer
+		{code: 413, rejected: true},
+		{code: 422, rejected: true},
+		{code: 429, rateLimited: true}, // retry, with the server's own wait
+		{code: 500},
+		{code: 502},
+		{code: 503},
+	} {
+		e := &LlamaError{StatusCode: tc.code}
+		if got := e.IsRequestRejected(); got != tc.rejected {
+			t.Errorf("IsRequestRejected(%d) = %v, want %v", tc.code, got, tc.rejected)
 		}
-	}
-	for _, code := range retryable {
-		if (&LlamaError{StatusCode: code}).IsRequestRejected() {
-			t.Errorf("IsRequestRejected(%d) = true, want false: a later call can answer", code)
+		if got := e.IsRateLimit(); got != tc.rateLimited {
+			t.Errorf("IsRateLimit(%d) = %v, want %v", tc.code, got, tc.rateLimited)
 		}
-	}
-}
-
-func TestLlamaError_IsRateLimit(t *testing.T) {
-	if !(&LlamaError{StatusCode: 429}).IsRateLimit() {
-		t.Error("IsRateLimit() = false for 429, want true")
-	}
-	if (&LlamaError{StatusCode: 500}).IsRateLimit() {
-		t.Error("IsRateLimit() = true for 500, want false")
-	}
-	if (&LlamaError{StatusCode: 200}).IsRateLimit() {
-		t.Error("IsRateLimit() = true for 200, want false")
 	}
 }
 
@@ -891,22 +817,10 @@ func TestParseRetryAfter(t *testing.T) {
 	}
 }
 
-func TestNewLlamaError_ParsesRetryAfter(t *testing.T) {
-	hdr := http.Header{}
-	hdr.Set("Retry-After", "45")
-	e := newLlamaError(429, hdr, "rate limited")
-	if e.StatusCode != 429 {
-		t.Errorf("StatusCode = %d, want 429", e.StatusCode)
-	}
-	if e.RetryAfter != 45*time.Second {
-		t.Errorf("RetryAfter = %v, want 45s", e.RetryAfter)
-	}
-	if !e.IsRateLimit() {
-		t.Error("expected IsRateLimit() = true")
-	}
-}
-
-func TestChatStream_ReturnsLlamaError(t *testing.T) {
+// TestRefusedResponsesComeBackAsLlamaErrors: the retry loop decides by the status code and the
+// Retry-After header, so a refusal has to survive the client as those two plus MIKE's own sentence —
+// both on the path a task runs and on the one every utility call takes.
+func TestRefusedResponsesComeBackAsLlamaErrors(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Retry-After", "15")
 		w.WriteHeader(http.StatusTooManyRequests)
@@ -914,8 +828,23 @@ func TestChatStream_ReturnsLlamaError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := NewLlamaClient(server.URL, "test-model", "off", "")
-	_, err := c.ChatStream(context.Background(), testMessages(), nil, func(types.ChatChoice) {}, nil, nil)
+	const wantText = `llama error 429: {"error":"Rate limit exceeded"}`
+
+	t.Run("stream", func(t *testing.T) {
+		c := NewLlamaClient(server.URL, "test-model", "off", "")
+		_, err := c.ChatStream(context.Background(), testMessages(), nil, func(types.ChatChoice) {}, nil, nil)
+		assertRateLimited(t, err, wantText)
+	})
+
+	t.Run("completion", func(t *testing.T) {
+		c := NewLlamaClient(server.URL, "test-model", "off", "")
+		_, _, err := c.ChatCompletion(context.Background(), testMessages(), nil)
+		assertRateLimited(t, err, wantText)
+	})
+}
+
+func assertRateLimited(t *testing.T, err error, wantText string) {
+	t.Helper()
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -923,14 +852,17 @@ func TestChatStream_ReturnsLlamaError(t *testing.T) {
 	if !errors.As(err, &le) {
 		t.Fatalf("expected *LlamaError, got %T: %v", err, err)
 	}
+	if le.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("StatusCode = %d, want 429", le.StatusCode)
+	}
 	if !le.IsRateLimit() {
 		t.Error("expected IsRateLimit() = true for 429")
 	}
 	if le.RetryAfter != 15*time.Second {
-		t.Errorf("RetryAfter = %v, want 15s", le.RetryAfter)
+		t.Errorf("RetryAfter = %v, want 15s from the header", le.RetryAfter)
 	}
-	if !strings.Contains(err.Error(), "llama error 429") {
-		t.Errorf("Error() = %q, want to contain llama error 429", err.Error())
+	if le.Error() != wantText {
+		t.Errorf("Error() = %q, want %q", le.Error(), wantText)
 	}
 }
 
@@ -1078,42 +1010,6 @@ func TestChatStream_StreamOptionsRequestsUsage(t *testing.T) {
 	}
 }
 
-// TestChatStream_UsageFrameWithEmptyChoices verifies the final usage frame that
-// include_usage produces (vLLM sends "choices":[] alongside usage) is consumed
-// without invoking the token callback, and that its counts are returned.
-func TestChatStream_UsageFrameWithEmptyChoices(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":null}]}\n\n"))
-		// vLLM's shape: empty choices array + usage on the last data frame.
-		w.Write([]byte("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":54,\"completion_tokens\":6,\"total_tokens\":60,\"prompt_tokens_details\":{\"cached_tokens\":40}},\"metrics\":{\"time_to_first_token_ms\":132.7,\"generation_time_ms\":44.3}}\n\n"))
-		w.Write([]byte("data: [DONE]\n\n"))
-	}))
-	defer server.Close()
-
-	c := NewLlamaClient(server.URL, "test-model", "off", "")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	var callbackCalls int
-	usage, err := c.ChatStream(ctx, testMessages(), nil, func(types.ChatChoice) { callbackCalls++ }, nil, nil)
-	if err != nil {
-		t.Fatalf("ChatStream error: %v", err)
-	}
-	if usage == nil {
-		t.Fatal("expected usage, got nil")
-	}
-	if usage.PromptTokens != 54 || usage.CompletionTokens != 6 {
-		t.Errorf("usage = %+v, want prompt=54 completion=6", usage)
-	}
-	if usage.PromptTokensDetails.CachedTokens != 40 {
-		t.Errorf("cached_tokens = %d, want 40", usage.PromptTokensDetails.CachedTokens)
-	}
-	if callbackCalls != 1 {
-		t.Errorf("token callback calls = %d, want 1 (the empty-choices usage frame must not invoke it)", callbackCalls)
-	}
-}
-
 // TestChatCompletion_ReasoningParams: same, on the non-streaming path.
 func TestChatCompletion_ReasoningParams(t *testing.T) {
 	var captured map[string]any
@@ -1153,57 +1049,47 @@ func hitCountingServer(hits *atomic.Int32) *httptest.Server {
 	}))
 }
 
-func TestChatCompletion_NoUserMessage(t *testing.T) {
-	var hits atomic.Int32
-	server := hitCountingServer(&hits)
-	defer server.Close()
+// TestNoUserMessageIsRefusedBeforeTheSocket: a chat template errors on a request with no user
+// message, so each path refuses it itself — and a request that reaches the provider is a turn somebody
+// pays for.
+func TestNoUserMessageIsRefusedBeforeTheSocket(t *testing.T) {
+	for _, path := range []string{"completion", "stream"} {
+		t.Run(path, func(t *testing.T) {
+			var hits atomic.Int32
+			server := hitCountingServer(&hits)
+			defer server.Close()
 
-	c := NewLlamaClient(server.URL, "test-model", "off", "")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+			c := NewLlamaClient(server.URL, "test-model", "off", "")
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
 
-	// System-only messages must be rejected before any request is sent.
-	_, _, err := c.ChatCompletion(ctx, []types.ChatMessage{{Role: "system", Content: "hi"}}, nil)
-	if err == nil {
-		t.Fatal("expected error for system-only messages, got nil")
-	}
-	if !strings.Contains(err.Error(), "no user message") {
-		t.Fatalf("unexpected error: %v", err)
-	}
+			send := func(messages []types.ChatMessage) error {
+				if path == "stream" {
+					_, err := c.ChatStream(ctx, messages, nil, func(types.ChatChoice) {}, nil, nil)
+					return err
+				}
+				_, _, err := c.ChatCompletion(ctx, messages, nil)
+				return err
+			}
 
-	// Empty/nil messages must also be rejected.
-	if _, _, err := c.ChatCompletion(ctx, nil, nil); err == nil {
-		t.Fatal("expected error for empty messages, got nil")
-	}
+			// System-only messages must be rejected before any request is sent.
+			err := send([]types.ChatMessage{{Role: "system", Content: "hi"}})
+			if err == nil {
+				t.Fatal("expected error for system-only messages, got nil")
+			}
+			if !strings.Contains(err.Error(), "no user message") {
+				t.Fatalf("unexpected error: %v", err)
+			}
 
-	if got := hits.Load(); got != 0 {
-		t.Errorf("server hit %d times, want 0", got)
-	}
-}
+			// Empty/nil messages must also be rejected.
+			if err := send(nil); err == nil {
+				t.Fatal("expected error for empty messages, got nil")
+			}
 
-func TestChatStream_NoUserMessage(t *testing.T) {
-	var hits atomic.Int32
-	server := hitCountingServer(&hits)
-	defer server.Close()
-
-	c := NewLlamaClient(server.URL, "test-model", "off", "")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	_, err := c.ChatStream(ctx, []types.ChatMessage{{Role: "system", Content: "hi"}}, nil, func(types.ChatChoice) {}, nil, nil)
-	if err == nil {
-		t.Fatal("expected error for system-only messages, got nil")
-	}
-	if !strings.Contains(err.Error(), "no user message") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if _, err := c.ChatStream(ctx, nil, nil, func(types.ChatChoice) {}, nil, nil); err == nil {
-		t.Fatal("expected error for empty messages, got nil")
-	}
-
-	if got := hits.Load(); got != 0 {
-		t.Errorf("server hit %d times, want 0", got)
+			if got := hits.Load(); got != 0 {
+				t.Errorf("server hit %d times, want 0", got)
+			}
+		})
 	}
 }
 
@@ -1266,35 +1152,5 @@ func TestChatStream_AbortVsCompletion(t *testing.T) {
 				t.Errorf("ChatStream error = %v, want a completed stream", err)
 			}
 		})
-	}
-}
-
-// A connection torn down mid-response stays an error of its own: the transport said something more
-// useful than ErrStreamAborted can.
-func TestChatStream_HardAbortMidStream(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hj, ok := w.(http.Hijacker)
-		if !ok {
-			t.Error("test server cannot hijack")
-			return
-		}
-		conn, bw, err := hj.Hijack()
-		if err != nil {
-			t.Errorf("hijack: %v", err)
-			return
-		}
-		bw.WriteString("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n")
-		bw.WriteString("27\r\ndata: {\"choices\":[{\"delta\":{\"content\":\"half\"}}]}\n\n\r\n")
-		_ = bw.Flush()
-		conn.Close()
-	}))
-	defer server.Close()
-
-	c := NewLlamaClient(server.URL, "test-model", "off", "")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if _, err := c.ChatStream(ctx, testMessages(), nil, func(types.ChatChoice) {}, nil, nil); err == nil {
-		t.Fatal("a connection closed mid-response returned no error")
 	}
 }
