@@ -160,3 +160,38 @@ describe('downloadURL', () => {
         expect(url.searchParams.has('task')).toBe(false);
     });
 });
+
+describe('statFsPaths', () => {
+    it('sends one path key per selection, which is what the Info dialog is opened on', async () => {
+        const { statFsPaths } = await import('$lib/api/fs');
+        mockFetch.mockResolvedValue(res(200, { entries: [{ name: 'a.go', path: '/w/a.go', kind: 'file' }] }));
+
+        const rows = await statFsPaths({ project: 'p1', task: 't1', paths: ['/w/src', '/w/a note.txt'] });
+
+        expect(rows).toEqual([{ name: 'a.go', path: '/w/a.go', kind: 'file' }]);
+        const { url } = sent();
+        expect(url.pathname).toBe('/api/fs/stat');
+        expect(url.searchParams.getAll('path')).toEqual(['/w/src', '/w/a note.txt']);
+        expect([url.searchParams.get('project'), url.searchParams.get('task')]).toEqual(['p1', 't1']);
+    });
+
+    it('sends no task for a project\'s own checkout, and answers no rows for an answer with none', async () => {
+        const { statFsPaths } = await import('$lib/api/fs');
+        mockFetch.mockResolvedValue(res(200, {}));
+
+        const rows = await statFsPaths({ project: 'p1', paths: ['/w/a.go'] });
+
+        expect(rows).toEqual([]);
+        expect(sent().url.searchParams.has('task')).toBe(false);
+    });
+
+    it('answers the server\'s own sentence when it refuses the path', async () => {
+        const { statFsPaths } = await import('$lib/api/fs');
+        mockFetch.mockResolvedValue(res(400, { error: 'path is outside the allowed directory' }));
+
+        const failure = await statFsPaths({ project: 'p1', paths: ['/etc/passwd'] }).catch((e) => e);
+
+        expect(failure).toBeInstanceOf(Error);
+        expect(failure.message).toBe('path is outside the allowed directory');
+    });
+});

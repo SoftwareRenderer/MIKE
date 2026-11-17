@@ -264,6 +264,12 @@ Tests: `backend/api/git_diff_file_path_test.go`, `git_diff_file_full_test.go`,
   first and again by the bounded read. A working-tree archive is read through the open file and answers to
   no such ceiling, and a member is bounded by `maxFSReadBytes`, the number `/api/fs/read` uses. Tests:
   `backend/archive/archive_test.go` and `backend/server/handler_fs_archive_test.go`.
+- **A folder's size is walked under a budget.** `GET /api/fs/stat` prices a folder with
+  `fsutil.TreeUsageFor` under `fsStatWalkEntries` and `fsStatWalkTimeout`, so an enormous tree costs one
+  bounded walk inside the request rather than an unbounded one. A walk that runs out answers what it
+  counted with `partial`; a tree it cannot read answers nothing, because a floor and a lie are different.
+  Tests: `TestTreeUsageForReportsAPartialFigureAtTheEntryCap`,
+  `TestFSStatReportsAPartialFolderWhenTheWalkRunsOut`.
 - Tests: `backend/server/body_limit_test.go` (drives `middlewareChain`, because an unwired middleware
   protects nothing), `backend/httputil/decode_json_test.go`, `backend/extensions/proxy_limit_test.go`,
   `backend/toolresult/capture_test.go`, `backend/exec/bash_stream_cap_test.go`,

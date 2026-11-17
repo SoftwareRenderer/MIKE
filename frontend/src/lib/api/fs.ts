@@ -82,6 +82,43 @@ export function downloadURL(params: { project: string; task?: string; paths: str
     return `${API_BASE}/fs/download?${query.toString()}`;
 }
 
+/**
+ * One path of `GET /api/fs/stat`, in the order the request named them. `path` repeats the spelling the
+ * caller sent, never the host file it resolved to. A row the server measured nothing about leaves `bytes`
+ * and `items` absent — which is not zero — and the rest empty.
+ */
+export interface FsStatRow {
+    name: string;
+    path: string;
+    /** `missing` is a name gone since the listing was read, `unknown` one the server could not state. */
+    kind: 'file' | 'dir' | 'link' | 'other' | 'missing' | 'unknown';
+    /** A folder's total over the files below it. */
+    bytes?: number;
+    /** A folder's entries below it, the folder itself excluded. */
+    items?: number;
+    /** The folder's walk ran out of budget, so its figures are a floor. */
+    partial?: boolean;
+    /** Four octal digits. */
+    mode?: string;
+    /** Fixed-width UTC. */
+    modified?: string;
+    /** From the suffix, not from the bytes. */
+    mime?: string;
+}
+
+/**
+ * What a listing leaves out for each named path. One `path` key each; a refusal arrives as the server's
+ * own sentence.
+ */
+export async function statFsPaths(params: { project: string; task?: string; paths: string[] }): Promise<FsStatRow[]> {
+    const query = scopeQuery(params);
+    for (const path of params.paths) query.append('path', path);
+    const res = await apiFetch(`${API_BASE}/fs/stat?${query.toString()}`);
+    if (!res.ok) throw await apiError(res, t('explorer.fileInfo.failed'));
+    const answer = await res.json();
+    return Array.isArray(answer?.entries) ? answer.entries : [];
+}
+
 /** One file's bytes, as `GET /api/fs/read` answers them. */
 export interface FsFileRead {
     content: string;

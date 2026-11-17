@@ -32,8 +32,61 @@ func TestTreeUsageForCountsEveryRegularFileUnderTheTree(t *testing.T) {
 	if usage.Bytes != 147 {
 		t.Fatalf("bytes = %d, want 147", usage.Bytes)
 	}
+	if usage.Items != 5 {
+		t.Fatalf("items = %d, want the 5 entries below the directory itself", usage.Items)
+	}
 	if !usage.Complete {
 		t.Fatal("a walk under no budget is incomplete")
+	}
+}
+
+// Whether a .git counts is the caller's question: a figure read beside a listing leaves it out because no
+// listing offers a row for that name, and a figure of the bytes a tree holds keeps it — in either shape,
+// a checkout's directory and a linked worktree's one-line gitfile.
+func TestTreeUsageForCountsAGitDirectoryOnlyWhenTheCallerAsks(t *testing.T) {
+	checkout := func(t *testing.T) string {
+		t.Helper()
+		dir := t.TempDir()
+		file(t, filepath.Join(dir, "main.go"), 20)
+		if err := os.MkdirAll(filepath.Join(dir, ".git", "objects"), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		file(t, filepath.Join(dir, ".git", "objects", "pack"), 4096)
+		file(t, filepath.Join(dir, ".git", "HEAD"), 23)
+		return dir
+	}
+
+	usage, err := TreeUsageFor(checkout(t), WalkBudget{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.Bytes != 20+4096+23 || usage.Items != 5 || !usage.Complete {
+		t.Fatalf("priced whole = %+v, want every byte and entry the directory holds", usage)
+	}
+
+	usage, err = TreeUsageFor(checkout(t), WalkBudget{SkipGit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.Bytes != 20 || usage.Items != 1 || !usage.Complete {
+		t.Fatalf("read beside a listing = %+v, want the 20 bytes and 1 entry of the tree itself", usage)
+	}
+
+	worktree := t.TempDir()
+	file(t, filepath.Join(worktree, "main.go"), 20)
+	file(t, filepath.Join(worktree, ".git"), 60)
+
+	if usage, err = TreeUsageFor(worktree, WalkBudget{}); err != nil {
+		t.Fatal(err)
+	}
+	if usage.Bytes != 80 || usage.Items != 2 {
+		t.Fatalf("linked worktree priced whole = %+v, want the gitfile counted as content", usage)
+	}
+	if usage, err = TreeUsageFor(worktree, WalkBudget{SkipGit: true}); err != nil {
+		t.Fatal(err)
+	}
+	if usage.Bytes != 20 || usage.Items != 1 {
+		t.Fatalf("linked worktree read beside a listing = %+v, want the gitfile counted by neither", usage)
 	}
 }
 
@@ -56,6 +109,9 @@ func TestTreeUsageForNeverFollowsASymlinkOutOfTheTree(t *testing.T) {
 	}
 	if usage.Bytes != 5 {
 		t.Fatalf("bytes = %d, want only the 5 counted from the tree itself", usage.Bytes)
+	}
+	if usage.Items != 3 {
+		t.Fatalf("items = %d, want every entry the tree holds, links included", usage.Items)
 	}
 	if !usage.Complete {
 		t.Fatal("a link is an entry like any other, not a reason to stop")

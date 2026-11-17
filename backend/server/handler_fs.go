@@ -1058,6 +1058,22 @@ type fsScope struct {
 	roots        []string
 }
 
+// fsBatchPaths reads the `path` keys of a request that takes several paths — one per Explorer row — in
+// the order the caller named them. It answers the request when there are none, or more than
+// maxFSOpsBatch; ok is false after the response is written.
+func fsBatchPaths(w http.ResponseWriter, r *http.Request) ([]string, bool) {
+	asked := r.URL.Query()["path"]
+	if len(asked) == 0 {
+		JSONError(w, http.StatusBadRequest, "path is required")
+		return nil, false
+	}
+	if len(asked) > maxFSOpsBatch {
+		JSONError(w, http.StatusBadRequest, "too many paths (max "+strconv.Itoa(maxFSOpsBatch)+")")
+		return nil, false
+	}
+	return asked, true
+}
+
 // fsRequestScope answers the request-level questions every file request shares, read or write: which
 // tree it names (?task=
 // must belong to ?project=), and whether the host can run that tree's sandbox. The order matters,

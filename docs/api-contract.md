@@ -818,6 +818,44 @@ its own, not in place of the explorer.
 Tests: `backend/server/handler_fs_download_test.go`, `backend/fsutil/tar_test.go`,
 `frontend/src/lib/components/__tests__/file-browser-download.unit.svelte.ts`.
 
+## The file info row
+
+`GET /api/fs/stat?project=&task=&path=&path=…` (`backend/server/handler_fs_stat.go`) answers the Explorer's
+"Info" menu item: what a row *is*, rather than what a row is called. A listing answers
+`{name, isDir, path, isGitRepo, ignored}` and nothing about size or time, so this route is where a row's
+byte count, permissions, modified instant and MIME type come from.
+
+- **The row is a stat and nothing more.** `os.Lstat` on the jailed host path; no file is opened, so
+  `maxFSReadBytes` and the read routes' caps have no part here. The folder walk below is the only bound.
+- **One row per asked path, in the request's own order,** and `path` repeats the spelling the caller sent
+  rather than the host path it resolved to. A sandboxed project's rows are container paths, and
+  `docs/confinement.md → File endpoints: the project plus the task the request names` is why.
+- **A gone path is a row, not a refusal:** `kind: "missing"`, with no bytes, mode or time claimed. The menu
+  opens on a listing and a task can empty it before the request lands, so one vanished row must not hide the
+  others. A name the kernel will not describe answers `kind: "unknown"`, and the cause goes to the log.
+- **The kinds are tokens** — `file`, `dir`, `link`, `other`, `missing`, `unknown` — and the client is what
+  puts a word on one.
+- **A link answers nothing about its destination.** The jail resolves a name before handing it over, so a
+  name the stat finds to be a link is the swap that check exists for. A task can aim a link at anywhere on
+  the host. Neither the destination nor its size is answered, and `listingIsDir` keeps the same fact out of
+  the listing.
+- **A folder's figure is walked under a budget** — `fsStatWalkEntries` and `fsStatWalkTimeout` into
+  `fsutil.WalkBudget`. `bytes` sums the regular files below it and `items` counts its entries; the folder
+  itself and any `.git` are counted by neither. `partial: true` says the walk stopped early, which makes the
+  two a floor rather than a total. A tree that cannot be read answers neither field: an unmeasured folder is
+  not an empty one, and its own stat still stands.
+- **`mime` is `mime.TypeByExtension` on the name** — a suffix's reputation, not a reading of the bytes,
+  which is the opposite of how the archive listing decides its format.
+- **git answers nothing here.** The Explorer holds `ignored` from its listing, which runs one
+  `check-ignore` per directory, and hands it to the dialog beside the rows.
+- **The batch cap and the jail are the download route's:** `maxFSOpsBatch` paths, each through
+  `fsRequestScope`, `fsScopeTarget` and `requireNoGitSegment`, all of them refused before any row is taken.
+  A missing `path`, a missing `project` or an over-long batch is a 400.
+
+Tests: `go test ./backend/server/ -run TestFSStat`, `backend/fsutil/treesize_test.go`,
+`frontend/src/lib/components/__tests__/file-info-modal.unit.svelte.ts`, and
+`frontend/tests/e2e/explorer-file-info.spec.ts`.
+
 ## The Explorer's file batch
 
 `POST /api/fs/delete`, `/copy`, `/move` and `/rename` (`backend/server/handler_fs_ops.go`) are the four writes
