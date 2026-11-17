@@ -64,7 +64,7 @@ Choices that only the current browser can act on (e.g., notification permissions
 
 - **UI**: Row lives in `PreferencesTab.svelte`.
 - **Lifecycle**: `ConfigModal.svelte` hydrates it on open and writes to the local store on `save()`. `clearAll()` at sign-out removes it.
-- **Tests**: Store round-trip with `$lib/storage` mocked (`stores/__tests__/notify-on-review-persist.unit.ts`).
+- **Tests**: Store round-trip with `$lib/storage` mocked (`stores/__tests__/ui-preference-persist.unit.svelte.ts` — one data-driven suite over every browser preference, each row naming its key, its default and what a stored value that is not a boolean means).
 
 ## Verification
 

@@ -119,43 +119,45 @@ describe('downloading from the file list', () => {
         expect(downloadAttribute).toBeNull();
     });
 
-    it('promises an archive for a folder row', async () => {
-        const { container } = openBrowser();
-        await loadRoot(container);
+    // The item the menu offers and the paths it sends are one decision read off the rows the person holds:
+    // a folder anywhere in them makes the answer an archive of every one.
+    it.each([
+        {
+            name: 'a lone folder row',
+            select: [] as [string, Record<string, boolean>][],
+            menuOn: `${ROOT}/src`,
+            offers: 'Download as .tar.gz', refuses: 'Download', paths: null,
+        },
+        {
+            name: 'a selection of two files, opened inside it',
+            select: [[`${ROOT}/a.txt`, {}], [`${ROOT}/b.txt`, { ctrlKey: true }]] as [string, Record<string, boolean>][],
+            menuOn: `${ROOT}/a.txt`,
+            offers: 'Download as .tar.gz', refuses: null, paths: [`${ROOT}/a.txt`, `${ROOT}/b.txt`],
+        },
+        {
+            // A ctrl-click adds to the selection instead of opening, which is how a folder gets in.
+            name: 'a selection holding a folder',
+            select: [[`${ROOT}/a.txt`, { ctrlKey: true }], [`${ROOT}/src`, { ctrlKey: true }]] as [string, Record<string, boolean>][],
+            menuOn: `${ROOT}/src`,
+            offers: 'Download as .tar.gz', refuses: null, paths: [`${ROOT}/a.txt`, `${ROOT}/src`],
+        },
+    ])(
+        'the archive the menu offers for $name covers every row held',
+        async ({ select, menuOn, offers, refuses, paths }) => {
+            const { container } = openBrowser();
+            await loadRoot(container);
 
-        await openRowMenu(container, `${ROOT}/src`);
+            for (const [path, init] of select) await fireEvent.click(rowEl(container, path)!, init);
+            await openRowMenu(container, menuOn);
 
-        expect(menuItem('Download as .tar.gz')).toBeTruthy();
-        expect(menuItem('Download')).toBeFalsy();
-    });
+            expect(menuItem(offers)).toBeTruthy();
+            if (refuses) expect(menuItem(refuses)).toBeFalsy();
+            if (!paths) return;
 
-    it('sends the whole selection when the menu was opened inside one', async () => {
-        const { container } = openBrowser();
-        await loadRoot(container);
-
-        await fireEvent.click(rowEl(container, `${ROOT}/a.txt`)!);
-        await fireEvent.click(rowEl(container, `${ROOT}/b.txt`)!, { ctrlKey: true });
-        await openRowMenu(container, `${ROOT}/a.txt`);
-
-        menuItem('Download as .tar.gz')!.click();
-
-        const { url } = askedDownload();
-        expect(url.searchParams.getAll('path')).toEqual([`${ROOT}/a.txt`, `${ROOT}/b.txt`]);
-    });
-
-    it('names a selection holding a folder an archive, and sends both rows', async () => {
-        const { container } = openBrowser();
-        await loadRoot(container);
-
-        // A ctrl-click adds to the selection instead of opening, which is how a folder gets in.
-        await fireEvent.click(rowEl(container, `${ROOT}/a.txt`)!, { ctrlKey: true });
-        await fireEvent.click(rowEl(container, `${ROOT}/src`)!, { ctrlKey: true });
-        await openRowMenu(container, `${ROOT}/src`);
-
-        menuItem('Download as .tar.gz')!.click();
-
-        expect(askedDownload().url.searchParams.getAll('path')).toEqual([`${ROOT}/a.txt`, `${ROOT}/src`]);
-    });
+            menuItem(offers)!.click();
+            expect(askedDownload().url.searchParams.getAll('path')).toEqual(paths);
+        },
+    );
 
     // A refusal must not replace the listing the reader is in, so the download goes to a blank target.
     it('opens the download in a target of its own', async () => {

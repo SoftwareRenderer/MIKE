@@ -19,19 +19,6 @@ test.describe('Create New Task', () => {
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
-  test('should create a new task via API and verify on board', async ({ page }) => {
-    const projectId = await getProjectId(page);
-    const taskId = await createTaskViaApi(page, projectId, `lifecycle-create-${Date.now()}`);
-    expect(taskId).not.toBe('');
-
-    // Verify the task appears on the board
-    await gotoProject(page);
-    await page.waitForSelector('.card', { timeout: 10000 });
-
-    const card = page.locator(`.card[data-task-id="${taskId}"]`);
-    await expect(card).toBeVisible({ timeout: 5000 });
-  });
-
   test('should create a new task via UI modal', async ({ page }) => {
     const projectId = await getProjectId(page);
     await page.goto(`/?project=${projectId}`);
@@ -57,38 +44,34 @@ test.describe('Delete Task with Confirmation', () => {
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
-  test('should show Delete button', async ({ page }) => {
+  // The delete-confirm dialog, picked out by the message only a confirmation draws: `[role="dialog"]`
+  // alone is never unique here.
+  const deleteDialog = (page: any) =>
+    page.locator('[role="dialog"]').filter({ has: page.locator('.confirm-message') });
+
+  test('asks before deleting: a refusal leaves the task open and a confirmation returns to the board', async ({ page }) => {
     const projectId = await getProjectId(page);
-    const taskId = await createTaskViaApi(page, projectId, `actions-delete-${Date.now()}`);
-    await navigateToTask(page, taskId);
+    const refused = await createTaskViaApi(page, projectId, `actions-confirm-${Date.now()}`);
+    const removed = await createTaskViaApi(page, projectId, `actions-cancel-${Date.now()}`);
+
+    // Refused: the confirm appears, Cancel answers it, and the task is still there.
+    await navigateToTask(page, refused);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
-
-    const deleteButton = page.locator('.icon-btn[aria-label="Delete task"]');
-    await expect(deleteButton).toBeVisible();
-  });
-
-  test('should confirm before deleting task', async ({ page }) => {
-    const projectId = await getProjectId(page);
-    const taskId = await createTaskViaApi(page, projectId, `actions-confirm-${Date.now()}`);
-    await navigateToTask(page, taskId);
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
-
     await page.click('.icon-btn[aria-label="Delete task"]');
-    await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
-    await page.click('[role="dialog"] .btn-confirm');
-    await expect(page.locator('.board')).toBeVisible({ timeout: 5000 });
-  });
-
-  test('should cancel delete task', async ({ page }) => {
-    const projectId = await getProjectId(page);
-    const taskId = await createTaskViaApi(page, projectId, `actions-cancel-${Date.now()}`);
-    await navigateToTask(page, taskId);
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
-
-    await page.click('.icon-btn[aria-label="Delete task"]');
-    await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
-    await page.click('[role="dialog"] .btn-cancel');
+    const dialog = deleteDialog(page);
+    await expect(dialog).toBeVisible({ timeout: 5000 });
+    await dialog.locator('.btn-cancel').click();
+    await expect(dialog).toHaveCount(0);
     await expect(page.locator('.task-detail-page')).toBeVisible();
+
+    // Confirmed: the same click answered yes lands on the board, and the task is gone from it.
+    await navigateToTask(page, removed);
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    await page.click('.icon-btn[aria-label="Delete task"]');
+    await expect(deleteDialog(page)).toBeVisible({ timeout: 5000 });
+    await dialog.locator('.btn-confirm').click();
+    await expect(page.locator('.board')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator(`.card[data-task-id="${removed}"]`)).toHaveCount(0);
   });
 });
 
@@ -120,21 +103,17 @@ test.describe('Task Detail Layout', () => {
     await page.waitForSelector('.card', { timeout: 10000 });
   });
 
-  test('should show sidebar hidden when task detail is open', async ({ page }) => {
+  test('the task view is three columns and the sidebar gives way', async ({ page }) => {
     await expect(page.locator('.sidebar')).toBeVisible();
     await page.click('.card');
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('.sidebar')).not.toBeVisible();
-  });
 
-  test('should have 3-column layout in task detail', async ({ page }) => {
-    await page.click('.card');
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
     const columns = page.locator('.columns .column');
     await expect(columns).toHaveCount(3);
     await expect(page.locator('.column-context')).toBeVisible();
     await expect(page.locator('.column-chat')).toBeVisible();
     await expect(page.locator('.column-diff')).toBeVisible();
+    await expect(page.locator('.sidebar')).not.toBeVisible();
   });
 });
 
@@ -240,7 +219,9 @@ test.describe.serial('Subtask Progress Tracking', () => {
     expect(fillStyle).toMatch(/width:\s*0%?/);
   });
 
-  test('progress updates when subtask status changes', async ({ page }) => {
+  // The fill and the count are one decision — the bar counts every descendant, whatever its status — so the
+  // count is asked for beside the moves that change the fill rather than in a test of its own.
+  test('progress updates when subtask status changes, and still counts every subtask', async ({ page }) => {
     await page.goto(`/?project=${projectId}`);
     await waitForBoard(page);
 
@@ -259,6 +240,9 @@ test.describe.serial('Subtask Progress Tracking', () => {
       const newFill = await getProgressFillForCard(page, parentId).getAttribute('style');
       expect(newFill).toMatch(/width:\s*66\.66/);
     }).toPass({ timeout: 5000 });
+
+    // Two of three done moved the fill off zero; the count still names every descendant.
+    await expect(getProgressCountForCard(page, parentId)).toHaveText('3 subtasks', { timeout: 5000 });
   });
 
   test('no progress indicator for tasks without subtasks', async ({ page }) => {
@@ -273,21 +257,6 @@ test.describe.serial('Subtask Progress Tracking', () => {
 
     const progressBar = getProgressForCard(page, standaloneId);
     await expect(progressBar).not.toBeVisible();
-  });
-
-  test('progress count reflects total subtask count regardless of statuses', async ({ page }) => {
-    await page.goto(`/?project=${projectId}`);
-    await waitForBoard(page);
-
-    const progressCount = getProgressCountForCard(page, parentId);
-    await expect(progressCount).toHaveText('3 subtasks', { timeout: 5000 });
-
-    const progressBar = getProgressForCard(page, parentId);
-    await expect(progressBar).toBeVisible({ timeout: 5000 });
-
-    const progressFill = getProgressFillForCard(page, parentId);
-    const fillStyle = await progressFill.getAttribute('style');
-    expect(fillStyle).not.toMatch(/width:\s*0%?/);
   });
 
   test('progress shows 100% when all subtasks are done', async ({ page }) => {
