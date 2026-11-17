@@ -39,10 +39,9 @@ test.describe('Explorer Git History Refresh After Commit', () => {
       await page.locator('.explorer-btn').click();
       await expect(page.locator('.explorer-view')).toBeVisible({ timeout: 10000 });
 
-      // Wait for the git graph to load (History panel). `.git-graph` is the container and is
-      // on screen while the panel still reads "Loading commits…", so counting rows straight
-      // after it answers 0 for a repo that has commits.
-      await expect(page.locator('.git-graph')).toBeVisible({ timeout: 10000 });
+      // The history panel's own first row is the wait: `.git-graph` is the container and is on screen
+      // while the panel still reads "Loading commits…", so counting rows straight after it answers 0 for
+      // a repo that has commits.
       const commits = page.locator('.git-commit-row');
       await expect(commits.first(), 'the history panel renders its first commit').toBeVisible({ timeout: 10000 });
 
@@ -183,14 +182,17 @@ test.describe('Explorer Git History Refresh After Commit', () => {
       // Verify the explorer is still visible (panel closed, not the whole explorer)
       await expect(page.locator('.explorer-view')).toBeVisible();
 
-      // Verify the git graph has the new commit
-      await expect(async () => {
-        const rows = await page.locator('.git-commit-row').count();
-        expect(rows).toBeGreaterThanOrEqual(1);
-      }).toPass({ timeout: 10000 });
+      // The graph learned about the commit: name the one this test just made, because "at least one
+      // row" was true before the click and could never report a refresh that never happened.
+      const commitMessage = `Branch refresh test ${uniqueId}`;
+      const firstRow = page.locator('.git-commit-row').first();
+      await expect(firstRow.locator('.git-commit-subject')).toContainText(commitMessage, { timeout: 10000 });
 
-      // Verify the branch badge is still visible in the git graph
-      await expect(page.locator('.branch-badge').first()).toBeVisible({ timeout: 5000 });
+      // The branch badge still names the branch this checkout is on — read from git, so the assertion
+      // is not the fixture agreeing with itself.
+      const branch = execSync(`git -C ${JSON.stringify(projectDir)} rev-parse --abbrev-ref HEAD`,
+        { encoding: 'utf-8' }).trim();
+      await expect(page.locator('.branch-badge').first()).toContainText(branch, { timeout: 5000 });
       await expect(
         descenderProblems(page, '.git-badge-label'),
         'the git graph badge keeps its descenders'

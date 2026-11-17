@@ -144,11 +144,14 @@ describe('closeHoverOnScroll', () => {
         expect(view.dispatch).toHaveBeenCalledTimes(1);
     });
 
-    it('tolerates a pointer just outside the tooltip box', () => {
+    it('leaves the tooltip open when the scroll begins a hair outside its box', () => {
+        // 2px left of the box: the plugin must ask with the margin the hover card answers with, or the
+        // two disagree about what "still pointing at it" means and one dismisses the card being read.
+        // The margin's own arithmetic is `hit-box.unit.ts`'s claim.
         const view = makeView(TOOLTIP_BOX);
         const { scrollDOM } = createPlugin(view);
         hasHoverTooltipsMock.mockReturnValue(true);
-        view.dom.movePointer(98, 55); // 2px left of the box, inside the margin
+        view.dom.movePointer(98, 55);
 
         scrollDOM.fire('scroll');
 

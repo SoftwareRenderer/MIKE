@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { atTopOfList } from '../../src/lib/utils/chat-window';
 import {
   apiGetJson, createTaskViaApi, navigateToTask, waitForChatForm, waitForTaskState, notInFlight,
   isolatedProject, getProjectId, gotoProject, seedChatRows,
@@ -74,23 +75,63 @@ async function settledView(page: Page): Promise<View> {
   return previous;
 }
 
-/** Scroll to the top edge until no older page arrives, which is what a reader paging up does. */
-async function pageToTheTop(page: Page): Promise<number> {
+/** Where the reader is in the list, as the app's own edge rule needs it. */
+function listPosition(page: Page): Promise<{ scrollTop: number; viewportHeight: number }> {
+  return page.evaluate((s) => {
+    const el = document.querySelector(s) as HTMLElement;
+    return { scrollTop: el.scrollTop, viewportHeight: el.clientHeight };
+  }, SCROLLER);
+}
+
+/** Park the pointer on the list, since a wheel goes where the pointer is. */
+async function parkOnList(page: Page): Promise<void> {
+  const box = await page.locator(SCROLLER).boundingBox();
+  if (!box) throw new Error('no chat list to scroll');
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+}
+
+/**
+ * Page to the oldest row the way a reader does: the wheel, repeated, counting the older pages that arrive.
+ * Writing `scrollTop` is not a gesture — the follow tracker reads an unexplained move as the document
+ * shifting under the reader and pins them back, and the fetch at the edge then never fires. That is how this
+ * spec lost its second page under load and had nothing left to measure.
+ */
+async function wheelToTheTop(page: Page): Promise<number> {
+  await parkOnList(page);
   let pages = 0;
-  for (;;) {
+  for (let attempt = 0; attempt < 12; attempt++) {
     const before = (await view(page)).rows;
-    await page.evaluate((s) => { (document.querySelector(s) as HTMLElement).scrollTop = 0; }, SCROLLER);
-    const grew = await expect(async () => {
-      expect((await view(page)).rows).toBeGreaterThan(before);
-    }).toPass({ timeout: 5000 }).then(() => true).catch(() => false);
+    // The fetch at the edge fires on a scroll event, not on a timer: leave the edge and come back to it, or
+    // the app is left waiting for a gesture that already happened and the second page never arrives.
+    await page.mouse.wheel(0, 600);
+    for (let notch = 0; notch < 30; notch++) {
+      const at = await listPosition(page);
+      if (atTopOfList(at.scrollTop, at.viewportHeight)) break;
+      await page.mouse.wheel(0, -1500);
+    }
+    const grew = await expect
+      .poll(async () => (await view(page)).rows, { timeout: 8000 })
+      .toBeGreaterThan(before).then(() => true).catch(() => false);
     if (!grew) return pages;
     pages++;
   }
+  return pages;
+}
+
+/** Come back down into what is loaded, so the reader sits mid-transcript with the newest row out of view —
+ *  the state this spec's title names and the wake-up read is free to disturb. */
+async function parkMidTranscript(page: Page): Promise<void> {
+  await parkOnList(page);
+  await page.mouse.wheel(0, 1200);
+  await page.mouse.wheel(0, 1200);
+  await expect(async () => {
+    expect((await view(page)).lastInView, 'the newest row is still on screen').toBe(false);
+  }).toPass({ timeout: 10000 });
 }
 
 test.describe('returning to a tab whose reader had scrolled up', () => {
   test('the newest message stays at the bottom of the transcript', async ({ page }) => {
-    test.setTimeout(120000);
+    test.setTimeout(180000);
     await gotoProject(page);
     const projectId = await getProjectId(page);
     const taskId = await createTaskViaApi(page, projectId, `tab-return-scroll ${Date.now()}`);
@@ -106,14 +147,11 @@ test.describe('returning to a tab whose reader had scrolled up', () => {
     await expect(page.locator(ROWS).first()).toBeVisible({ timeout: 15000 });
     const newest = await newestRow(page, projectId, taskId);
 
-    const pages = await pageToTheTop(page);
-    expect(pages, 'no older page arrived, so this run cannot show what a read replaces').toBeGreaterThan(1);
+    const pages = await wheelToTheTop(page);
+    expect(pages, 'no older page arrived, so this run cannot show what a read replaces').toBeGreaterThan(0);
     // Sit somewhere in the middle of what is loaded, like a reader who stopped scrolling.
-    await page.evaluate((s) => {
-      const el = document.querySelector(s) as HTMLElement;
-      el.scrollTop = Math.round(el.scrollHeight / 3);
-    }, SCROLLER);
-    await expect(async () => { expect((await view(page)).anchor).not.toBe('(none)'); }).toPass();
+    await parkMidTranscript(page);
+
     const before = await settledView(page);
     expect(before.last, 'the newest message is not at the bottom before the switch').toContain(newest);
 

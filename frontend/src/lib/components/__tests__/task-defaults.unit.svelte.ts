@@ -2,14 +2,29 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, fireEvent, cleanup } from '@testing-library/svelte';
 import TaskDefaults from '$lib/components/ConfigModal/TaskDefaults.svelte';
 
-const TOGGLE = 'button[aria-label="Run subtasks in parallel"]';
+/**
+ * The behaviour defaults the Task tab holds. Each is a switch that starts off, reads back what the
+ * server stored, and makes the dialog dirty only when the person moves it; what one of them costs, and
+ * where it sits among the rows, is its own finding below.
+ */
 
-afterEach(() => {
-    cleanup();
-    vi.restoreAllMocks();
-});
+interface ToggleRow {
+    /** The switch, found by the name it is announced by. */
+    toggle: string;
+    /** The prop the modal hydrates the row from. */
+    prop: string;
+}
 
-function renderDefaults(props: { runSiblingsParallel?: boolean } = {}) {
+const TOGGLES: ToggleRow[] = [
+    { toggle: 'button[aria-label="Run subtasks in parallel"]', prop: 'runSiblingsParallel' },
+    { toggle: 'button[aria-label="Release a waiting task sandbox container"]', prop: 'reclaimIdleSandbox' },
+    { toggle: 'button[aria-label="Recover from failed turns automatically"]', prop: 'loopBreaker' },
+];
+
+const RECLAIM_TOGGLE = TOGGLES[1].toggle;
+const BREAKER_TOGGLE = TOGGLES[2].toggle;
+
+function renderDefaults(props: Record<string, unknown> = {}) {
     const onDirty = vi.fn();
     const utils = render(TaskDefaults, {
         props: { originBranch: 'main', onDirty, ...props },
@@ -17,30 +32,37 @@ function renderDefaults(props: { runSiblingsParallel?: boolean } = {}) {
     return {
         ...utils,
         onDirty,
-        toggle: () => utils.container.querySelector(TOGGLE) as HTMLButtonElement,
+        toggle: (selector: string) => utils.container.querySelector(selector) as HTMLButtonElement,
     };
 }
 
-describe('TaskDefaults run-siblings-in-parallel toggle', () => {
+afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+});
+
+describe.each(TOGGLES)('the $toggle switch', ({ toggle, prop }) => {
     it('renders the toggle, off by default', () => {
-        const { toggle } = renderDefaults();
-        expect(toggle()).toBeTruthy();
-        expect(toggle()?.getAttribute('aria-checked')).toBe('false');
+        const { toggle: el } = renderDefaults();
+        expect(el(toggle)).toBeTruthy();
+        expect(el(toggle)?.getAttribute('aria-checked')).toBe('false');
     });
 
     it('reflects a stored preference', () => {
-        const { toggle } = renderDefaults({ runSiblingsParallel: true });
-        expect(toggle()?.getAttribute('aria-checked')).toBe('true');
+        const { toggle: el } = renderDefaults({ [prop]: true });
+        expect(el(toggle)?.getAttribute('aria-checked')).toBe('true');
     });
 
     it('toggles and reports dirty', async () => {
-        const { toggle, onDirty } = renderDefaults();
-        await fireEvent.click(toggle()!);
-        expect(toggle()?.getAttribute('aria-checked')).toBe('true');
+        const { toggle: el, onDirty } = renderDefaults();
+        await fireEvent.click(el(toggle)!);
+        expect(el(toggle)?.getAttribute('aria-checked')).toBe('true');
         expect(onDirty).toHaveBeenCalledTimes(1);
     });
+});
 
-    it('is placed above the "Max failed turns" row', () => {
+describe('the row order and the sentences beside the switches', () => {
+    it('places "Run subtasks in parallel" above the "Max failed turns" row', () => {
         const { container } = renderDefaults();
         const fields = Array.from(container.querySelectorAll('.toggle-field'));
         const idxParallel = fields.findIndex((f) => f.textContent?.includes('Run subtasks in parallel'));
@@ -49,53 +71,18 @@ describe('TaskDefaults run-siblings-in-parallel toggle', () => {
         expect(idxMaxFailed).toBeGreaterThan(-1);
         expect(idxParallel).toBeLessThan(idxMaxFailed);
     });
-});
-
-const RECLAIM_TOGGLE = 'button[aria-label="Release a waiting task sandbox container"]';
-
-describe('TaskDefaults release-idle-sandboxes toggle', () => {
-    function renderWithReclaim(props: { reclaimIdleSandbox?: boolean } = {}) {
-        const onDirty = vi.fn();
-        const utils = render(TaskDefaults, {
-            props: { originBranch: 'main', onDirty, ...props },
-        });
-        return {
-            ...utils,
-            onDirty,
-            toggle: () => utils.container.querySelector(RECLAIM_TOGGLE) as HTMLButtonElement,
-        };
-    }
-
-    it('renders the toggle, off by default', () => {
-        const { toggle } = renderWithReclaim();
-        expect(toggle()).toBeTruthy();
-        expect(toggle()?.getAttribute('aria-checked')).toBe('false');
-    });
-
-    it('reflects a stored preference', () => {
-        const { toggle } = renderWithReclaim({ reclaimIdleSandbox: true });
-        expect(toggle()?.getAttribute('aria-checked')).toBe('true');
-    });
-
-    it('toggles and reports dirty', async () => {
-        const { toggle, onDirty } = renderWithReclaim();
-        await fireEvent.click(toggle()!);
-        expect(toggle()?.getAttribute('aria-checked')).toBe('true');
-        expect(onDirty).toHaveBeenCalledTimes(1);
-    });
 
     // The description is where the cost of this toggle is stated.
     it('says what the released container does not keep', () => {
-        const { container } = renderWithReclaim();
+        const { container, toggle } = renderDefaults();
         const desc = container.querySelector('#toggle-reclaim-sandbox-desc');
         expect(desc?.textContent).toContain('container stops after 5 idle minutes');
         expect(desc?.textContent).toMatch(/installed inside the container/);
-        expect((container.querySelector(RECLAIM_TOGGLE) as HTMLButtonElement).getAttribute('aria-describedby'))
-            .toBe('toggle-reclaim-sandbox-desc');
+        expect(toggle(RECLAIM_TOGGLE).getAttribute('aria-describedby')).toBe('toggle-reclaim-sandbox-desc');
     });
 
-    it('is placed below the "Run subtasks in parallel" row', () => {
-        const { container } = renderWithReclaim();
+    it('places "Release idle sandboxes" under "Run subtasks in parallel"', () => {
+        const { container } = renderDefaults();
         const fields = Array.from(container.querySelectorAll('.toggle-field'));
         const idxParallel = fields.findIndex((f) => f.textContent?.includes('Run subtasks in parallel'));
         const idxReclaim = fields.findIndex((f) => f.textContent?.includes('Release idle sandboxes'));
@@ -104,52 +91,17 @@ describe('TaskDefaults release-idle-sandboxes toggle', () => {
         expect(idxReclaim).toBeGreaterThan(idxParallel);
         expect(idxReclaim).toBeLessThan(idxMaxFailed);
     });
-});
 
-const BREAKER_TOGGLE = 'button[aria-label="Recover from failed turns automatically"]';
-
-describe('TaskDefaults loop-breaker toggle', () => {
-    function renderWithBreaker(props: { loopBreaker?: boolean } = {}) {
-        const onDirty = vi.fn();
-        const utils = render(TaskDefaults, {
-            props: { originBranch: 'main', onDirty, ...props },
-        });
-        return {
-            ...utils,
-            onDirty,
-            toggle: () => utils.container.querySelector(BREAKER_TOGGLE) as HTMLButtonElement,
-        };
-    }
-
-    it('renders the toggle, off by default', () => {
-        const { toggle } = renderWithBreaker();
-        expect(toggle()).toBeTruthy();
-        expect(toggle()?.getAttribute('aria-checked')).toBe('false');
-    });
-
-    it('reflects a stored preference', () => {
-        const { toggle } = renderWithBreaker({ loopBreaker: true });
-        expect(toggle()?.getAttribute('aria-checked')).toBe('true');
-    });
-
-    it('toggles and reports dirty', async () => {
-        const { toggle, onDirty } = renderWithBreaker();
-        await fireEvent.click(toggle()!);
-        expect(toggle()?.getAttribute('aria-checked')).toBe('true');
-        expect(onDirty).toHaveBeenCalledTimes(1);
-    });
-
-    it('says what turning it on buys', () => {
-        const { container } = renderWithBreaker();
+    it('says what the loop breaker buys', () => {
+        const { container, toggle } = renderDefaults();
         const desc = container.querySelector('#toggle-loop-breaker-desc');
         expect(desc?.textContent)
             .toBe('Attempts to automatically recover from failed turns. WARNING: This can cause unbounded token generation.');
-        expect((container.querySelector(BREAKER_TOGGLE) as HTMLButtonElement).getAttribute('aria-describedby'))
-            .toBe('toggle-loop-breaker-desc');
+        expect(toggle(BREAKER_TOGGLE).getAttribute('aria-describedby')).toBe('toggle-loop-breaker-desc');
     });
 
-    it('is the row directly under "Max failed turns"', () => {
-        const { container } = renderWithBreaker();
+    it('places "Loop breaker" directly under "Max failed turns"', () => {
+        const { container } = renderDefaults();
         const fields = Array.from(container.querySelectorAll('.toggle-field'));
         const idxMaxFailed = fields.findIndex((f) => f.textContent?.includes('Max failed turns'));
         const idxBreaker = fields.findIndex((f) => f.textContent?.includes('Loop breaker'));

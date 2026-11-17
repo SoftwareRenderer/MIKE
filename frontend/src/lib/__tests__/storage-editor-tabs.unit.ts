@@ -3,6 +3,12 @@ import { installFakeIndexedDB } from './fake-indexeddb';
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
+const TABS = {
+    openFiles: [{ path: '/repo/main.go', targetLine: 42 }],
+    activeFilePath: '/repo/main.go',
+    pinnedFiles: ['/repo/main.go'],
+};
+
 describe('editor-tabs storage', () => {
     let restoreIndexedDB: (() => void) | undefined;
 
@@ -13,35 +19,29 @@ describe('editor-tabs storage', () => {
 
     afterEach(() => restoreIndexedDB?.());
 
-    it('saveEditorTabs and loadEditorTabs round-trips correctly', async () => {
+    // The record is keyed by project: two boards must not read each other's open files, and a
+    // project with no record must read as "nothing to restore" rather than as an empty tab list.
+    it('comes back per project as it was saved, and nothing for a project never saved', async () => {
         const { saveEditorTabs, loadEditorTabs } = await import('$lib/storage');
 
-        const state = {
-            openFiles: [
-                { path: '/home/user/project/src/main.go', targetLine: 42 },
-                { path: '/home/user/project/README.md', targetLine: 0 },
-            ],
-            activeFilePath: '/home/user/project/src/main.go',
-            pinnedFiles: ['/home/user/project/src/main.go'],
-        };
+        await saveEditorTabs('proj-a', TABS);
+        await saveEditorTabs('proj-b', {
+            openFiles: [{ path: '/other/file', targetLine: 2 }],
+            activeFilePath: '/other/file',
+            pinnedFiles: ['/other/file'],
+        });
 
-        await saveEditorTabs('project-123', state);
-
-        const loaded = await loadEditorTabs('project-123');
-        expect(loaded).not.toBeNull();
-        expect(loaded!.openFiles).toEqual(state.openFiles);
-        expect(loaded!.activeFilePath).toEqual(state.activeFilePath);
-        expect(loaded!.pinnedFiles).toEqual(state.pinnedFiles);
+        expect(await loadEditorTabs('proj-a')).toEqual(TABS);
+        expect(await loadEditorTabs('proj-b')).toEqual({
+            openFiles: [{ path: '/other/file', targetLine: 2 }],
+            activeFilePath: '/other/file',
+            pinnedFiles: ['/other/file'],
+        });
+        expect(await loadEditorTabs('nonexistent-project')).toBeNull();
     });
 
-    it('loadEditorTabs returns null for unknown project', async () => {
-        const { loadEditorTabs } = await import('$lib/storage');
-
-        const loaded = await loadEditorTabs('nonexistent-project');
-        expect(loaded).toBeNull();
-    });
-
-    it('overwrites previous state on save', async () => {
+    // Closing a tab has to survive the next reload: the save replaces, it never merges.
+    it('replaces the previous state rather than merging into it', async () => {
         const { saveEditorTabs, loadEditorTabs } = await import('$lib/storage');
 
         await saveEditorTabs('project-789', {
@@ -49,39 +49,16 @@ describe('editor-tabs storage', () => {
             activeFilePath: '/old',
             pinnedFiles: [],
         });
-
         await saveEditorTabs('project-789', {
             openFiles: [{ path: '/new', targetLine: 10 }],
             activeFilePath: '/new',
             pinnedFiles: ['/new'],
         });
 
-        const loaded = await loadEditorTabs('project-789');
-        expect(loaded!.openFiles).toEqual([{ path: '/new', targetLine: 10 }]);
-        expect(loaded!.activeFilePath).toBe('/new');
-        expect(loaded!.pinnedFiles).toEqual(['/new']);
-    });
-
-    it('isolates state between different projects', async () => {
-        const { saveEditorTabs, loadEditorTabs } = await import('$lib/storage');
-
-        await saveEditorTabs('proj-a', {
-            openFiles: [{ path: '/a/file', targetLine: 1 }],
-            activeFilePath: '/a/file',
-            pinnedFiles: [],
+        expect(await loadEditorTabs('project-789')).toEqual({
+            openFiles: [{ path: '/new', targetLine: 10 }],
+            activeFilePath: '/new',
+            pinnedFiles: ['/new'],
         });
-
-        await saveEditorTabs('proj-b', {
-            openFiles: [{ path: '/b/file', targetLine: 2 }],
-            activeFilePath: '/b/file',
-            pinnedFiles: ['/b/file'],
-        });
-
-        const a = await loadEditorTabs('proj-a');
-        const b = await loadEditorTabs('proj-b');
-
-        expect(a!.openFiles[0].path).toBe('/a/file');
-        expect(b!.openFiles[0].path).toBe('/b/file');
-        expect(b!.pinnedFiles).toEqual(['/b/file']);
     });
 });

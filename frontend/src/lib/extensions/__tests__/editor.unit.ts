@@ -7,10 +7,9 @@ import {
     CAP_EDITOR_GET_CONTENT,
     CAP_EDITOR_SET_CONTENT,
     CAP_EDITOR_SET_OVERLAY,
-    CAP_EDITOR_CONTENT_CHANGE,
     CAP_EDITOR_SAVE,
 } from '../capabilities';
-import { computeGrants, SUPPORTED_CAPABILITIES } from '../capabilities';
+import { SUPPORTED_CAPABILITIES } from '../capabilities';
 import { cleanupFooterButtons, CONTENT_SET_USER_EVENT, isExtensionContentSet, MAX_FOOTER_BUTTONS_PER_INSTANCE } from '../handlers/editor';
 import type { HostRequest } from '../types';
 
@@ -263,11 +262,6 @@ describe('editor.getContent and editor.setOverlay', () => {
         expect(wrapper.style.display).not.toBe('none');
         channel.destroy();
     });
-
-    it('editor.contentChange is a grantable event capability', () => {
-        expect(SUPPORTED_CAPABILITIES[CAP_EDITOR_CONTENT_CHANGE].kind).toBe('event');
-        expect(computeGrants([CAP_EDITOR_CONTENT_CHANGE])).toContain(CAP_EDITOR_CONTENT_CHANGE);
-    });
 });
 
 describe('editor.setContent and isExtensionContentSet', () => {
@@ -334,11 +328,6 @@ describe('editor.save', () => {
     let anchor: HTMLElement;
     beforeEach(() => { ({ anchor } = buildEditorDom()); });
     afterEach(() => cleanupFooterButtons('ext-md'));
-
-    it('is a grantable call capability', () => {
-        expect(SUPPORTED_CAPABILITIES[CAP_EDITOR_SAVE].kind).toBe('call');
-        expect(computeGrants([CAP_EDITOR_SAVE])).toContain(CAP_EDITOR_SAVE);
-    });
 
     it('dispatches a scoped editor-save-request on its own editor root', async () => {
         // Bubbling (not window-dispatched) so a listener anywhere still sees

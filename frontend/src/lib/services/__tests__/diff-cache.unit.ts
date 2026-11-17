@@ -105,14 +105,17 @@ describe('DiffCache', () => {
         expect(cache.state.files['a.ts']).toBeDefined();
     });
 
-    it('processStats removes deleted files', () => {
+    it('processStats drops a removed file from the files, hashes and untracked records, and hands Svelte new ones', () => {
         const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
         cache.state.files = {
             'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0 },
             'b.ts': { path: 'b.ts', rows: [], added: 0, removed: 0 },
         };
+        cache.state.untracked = { 'b.ts': { fileSize: 100 } };
         cache.fileHashes = { 'a.ts': 'h1', 'b.ts': 'h2' };
         cache.tracker.hash = 'old-hash';
+        const before = cache.state.files;
+
         cache.processStats({
             hash: 'new-hash',
             files: 1,
@@ -120,9 +123,14 @@ describe('DiffCache', () => {
             deletions: 0,
             removed_files: ['b.ts'],
         }, false);
+
         expect(cache.state.files['a.ts']).toBeDefined();
         expect(cache.state.files['b.ts']).toBeUndefined();
+        expect(cache.state.untracked['b.ts']).toBeUndefined();
         expect(cache.fileHashes['b.ts']).toBeUndefined();
+        // A `$derived` over the panel's files re-runs only when the object it reads is a
+        // different object, so pruning in place would leave the removed row on screen.
+        expect(cache.state.files).not.toBe(before);
     });
 
     it('reset clears all state', () => {
@@ -192,22 +200,24 @@ describe('DiffCache', () => {
         expect(DiffCache.stagedPathsKey([])).toBe('');
     });
 
-    it('setFile replaces files record via spread for Svelte reactivity', () => {
+    // One rule over the two record setters: a write replaces the record and the entry
+    // inside it, because a `$derived` reader only wakes when the object it reads is new.
+    it('a single-file write is visible to Svelte: the record and the entry are both new objects', () => {
         const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
-        cache.state.files = {
-            'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0 },
-        };
-        cache.setFile('a.ts', { path: 'a.ts', rows: [{ lineNumber: 1, variant: 'added', text: 'x' }], added: 1, removed: 0 });
-        expect(cache.state.files['a.ts'].rows.length).toBe(1);
-    });
+        cache.state.files = { 'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0 } };
+        cache.state.untracked = { 'a.ts': { fileSize: 100, loading: false } };
+        const files = cache.state.files;
+        const untracked = cache.state.untracked;
+        const entry = files['a.ts'];
 
-    it('setUntrackedMeta replaces untracked record via spread for Svelte reactivity', () => {
-        const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
-        cache.state.untracked = {
-            'a.ts': { fileSize: 100, loading: false },
-        };
+        cache.setFile('a.ts', { path: 'a.ts', rows: [{ lineNumber: 1, variant: 'added', text: 'x' }], added: 1, removed: 0 });
         cache.setUntrackedMeta('a.ts', { fileSize: 200, loading: true });
+
+        expect(cache.state.files['a.ts'].rows.length).toBe(1);
         expect(cache.state.untracked['a.ts'].fileSize).toBe(200);
+        expect(cache.state.files).not.toBe(files);
+        expect(cache.state.files['a.ts']).not.toBe(entry);
+        expect(cache.state.untracked).not.toBe(untracked);
     });
 
     it('processStats reconciles full manifest when hash changes with no file_hashes', async () => {
@@ -292,29 +302,6 @@ describe('DiffCache', () => {
         // The untracked entry must be gone so the panel moves the file to Staged.
         expect(cache.state.untracked['new.txt']).toBeUndefined();
         expect(cache.state.files['new.txt'].staged).toBe(true);
-    });
-
-    it('processStats removes files via spread for Svelte reactivity', () => {
-        const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
-        cache.state.files = {
-            'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0 },
-            'b.ts': { path: 'b.ts', rows: [], added: 0, removed: 0 },
-        };
-        cache.state.untracked = {
-            'b.ts': { fileSize: 100 },
-        };
-        cache.fileHashes = { 'a.ts': 'h1', 'b.ts': 'h2' };
-        cache.tracker.hash = 'old-hash';
-        cache.processStats({
-            hash: 'new-hash',
-            files: 1,
-            additions: 0,
-            deletions: 0,
-            removed_files: ['b.ts'],
-        }, false);
-        expect(cache.state.files['a.ts']).toBeDefined();
-        expect(cache.state.files['b.ts']).toBeUndefined();
-        expect(cache.state.untracked['b.ts']).toBeUndefined();
     });
 
     it('loadDiff includes blank untracked files (line_count=0)', async () => {

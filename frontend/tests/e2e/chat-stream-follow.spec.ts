@@ -132,7 +132,7 @@ async function scrollerCentre(page: Page): Promise<{ x: number; y: number }> {
 
 test.describe('Following a streamed answer', () => {
   test('scrolling up during a response is not undone when that response completes', async ({ page }) => {
-    test.setTimeout(120000);
+    test.setTimeout(180000);
     // The ordering this locks out is a race across one frame, and a fast machine wins it every time.
     // Throttled, the settle loop's frames stretch out and the race is reachable.
     const cdp = await page.context().newCDPSession(page);
@@ -160,7 +160,7 @@ test.describe('Following a streamed answer', () => {
     // pin lands, or the pin lands over it and reads as the answer re-pinning a reader who left. The indicator
     // is "request sent, nothing back yet", and `slow-start` holds the first chunk for 3s, so this is a
     // window in seconds rather than the milliseconds a 1ms fixture would leave.
-    await expect(page.locator('.awaiting-llm'), 'the turn is in flight').toBeVisible({ timeout: 20000 });
+    await expect(page.locator('.awaiting-llm'), 'the turn is in flight').toBeVisible({ timeout: 60000 });
 
     // The reader leaves the bottom while tokens are arriving. The wheel follows the pointer, not the
     // selector, so the pointer goes where the recorder measured the scroller; three strokes of -300 clear the
@@ -169,8 +169,9 @@ test.describe('Following a streamed answer', () => {
     for (let i = 0; i < 3; i++) await page.mouse.wheel(0, -300);
     const left = await position(page);
 
-    // The answer finishes, with the last layout passes it draws (the stats line, the review bar).
-    await waitForSendButton(page, 30000);
+    // The answer finishes, with the last layout passes it draws (the stats line, the review bar). Four
+    // workers queue turns on one server, so this is a turn budget, not a DOM budget.
+    await waitForSendButton(page, 90000);
     await page.waitForTimeout(1500);
     const end = await position(page);
     const rec = await page.evaluate(() => JSON.parse(JSON.stringify((window as any).__rec))) as Rec;
@@ -189,17 +190,24 @@ test.describe('Following a streamed answer', () => {
       `the answer was no longer arriving when the reader left the bottom (${samples.length} samples, `
       + `${away.length} after the wheel, ${away.filter(s => s.stop).length} of them with the stop button up)`,
     ).toBe(true);
+    const leftHeight = away.reduce((m, s) => Math.min(m, s.height), Number.MAX_SAFE_INTEGER);
     const tallest = away.reduce((m, s) => Math.max(m, s.height), 0);
     expect(
       tallest,
       `the transcript stayed ${tallest}px tall after the wheel, so the answer arrived before the reader `
-      + `left the bottom of a ${left.scrollHeight}px window`,
-    ).toBeGreaterThan(left.scrollHeight);
+      + `left the bottom of a ${leftHeight}px window`,
+    ).toBeGreaterThan(leftHeight);
 
     // A write at the very bottom is the follow tracker pinning the reader; a page of older rows is
     // answered with a write partway down the document.
+    //
+    // Only a pin carrying a taller document than the one the reader left is the rule this measures. The
+    // send's own pin (`pin(true)`, `use-chat-follow.svelte.ts`) re-engages following and writes across
+    // several settle frames, so a wheel landing inside that sequence is answered by a write of the height
+    // the reader left with — the answer had grown nothing yet. A pin made by content arriving is made
+    // after that content, and its height cannot hide.
     const snaps = rec.writes
-      .filter(w => w.t >= rec.firstWheelUp)
+      .filter(w => w.t >= rec.firstWheelUp && w.height > leftHeight + 40)
       .map(w => ({ ...w, fromBottom: Math.round(w.height - w.view - w.to) }))
       .filter(w => w.fromBottom <= 0);
 

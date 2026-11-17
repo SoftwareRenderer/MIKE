@@ -56,7 +56,7 @@ Example: `hide_model_badge` gates `.model-badge` in `Card.svelte` (`appStore.con
 
 **Defaults**: For flags that are "on" by default (e.g., `auto_maximize_chat_mobile`), treat `nil` as `true`. The client should consume `!== false`.
 
-**Tests**: `backend/config/config_test.go`, `backend/config/preferences_test.go` (the table walk), `preferences-tab.unit.svelte.ts`, a component test for the gated widget, and e2e `preferences-hide-model-badge.spec.ts`.
+**Tests**: `backend/config/config_test.go`, `backend/config/preferences_test.go` (the table walk), `preferences-tab.unit.svelte.ts`, a component test for the gated widget, and the e2e Save-flow suite `preferences-keyboard.spec.ts` (its last two tests move a UI toggle, not a binding).
 
 ## When the preference belongs to a browser
 
@@ -64,7 +64,7 @@ Choices that only the current browser can act on (e.g., notification permissions
 
 - **UI**: Row lives in `PreferencesTab.svelte`.
 - **Lifecycle**: `ConfigModal.svelte` hydrates it on open and writes to the local store on `save()`. `clearAll()` at sign-out removes it.
-- **Tests**: Store round-trip with `$lib/storage` mocked (`stores/__tests__/notify-on-review-persist.unit.ts`).
+- **Tests**: Store round-trip with `$lib/storage` mocked (`stores/__tests__/ui-preference-persist.unit.svelte.ts` — one data-driven suite over every browser preference, each row naming its key, its default and what a stored value that is not a boolean means).
 
 ## Verification
 

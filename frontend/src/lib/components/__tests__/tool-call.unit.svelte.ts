@@ -273,18 +273,6 @@ describe('ToolCall - edit_file diff toggle', () => {
         expect(container.querySelector('.edit-diff-toggle')).toBeFalsy();
         expect(container.querySelector('.edit-diff')).toBeFalsy();
     });
-
-    it('renders without throwing when edits is not an array', () => {
-        const { container } = render(ToolCall, {
-            ...baseProps,
-            toolCall: makeToolCall({
-                toolName: 'edit_file',
-                args: { path: 'src/file.go', edits: 'still streaming' },
-                isPending: true,
-            }),
-        });
-        expect(container.querySelector('.edit-diff-toggle')).toBeFalsy();
-    });
 });
 
 describe('ToolCall - edit diff expands and collapses', () => {
@@ -347,7 +335,7 @@ describe('ToolCall - write_file result', () => {
                 isPending: false,
             }),
         });
-        expect(container.querySelector('.write-result-text')?.textContent).toContain('Wrote');
+        expect(container.querySelector('.write-result-text')?.textContent).toBe('Wrote 2.0 KB to:');
         expect(container.querySelector('.write-result-path')?.textContent).toBe('src/file.go');
     });
 

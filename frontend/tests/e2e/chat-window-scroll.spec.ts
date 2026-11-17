@@ -82,6 +82,23 @@ async function wheelToTopEdge(page: Page): Promise<void> {
     + `${at.viewportHeight}-pixel view)`).toBe(true);
 }
 
+/** The reader has stopped travelling: three reads a beat apart see the same row under the same offset.
+ *  The anchoring loop holds a row in place only while nobody is still driving (`readerScrolledUp`,
+ *  `src/lib/utils/chat-window.ts`), so a page released while the last notch is still coasting is answered
+ *  with the reader left at the edge — the app's own rule, not a slide this spec is about. */
+async function settledAnchor(page: Page): Promise<{ id: string; top: number } | null> {
+  let previous = await viewportAnchor(page);
+  let repeats = 0;
+  await expect.poll(async () => {
+    const now = await viewportAnchor(page);
+    const still = !!now && !!previous && now.id === previous.id && now.top === previous.top;
+    repeats = still ? repeats + 1 : 0;
+    previous = now;
+    return repeats;
+  }, { timeout: 10000, intervals: [250] }).toBeGreaterThanOrEqual(2);
+  return previous;
+}
+
 /**
  * Hold the first older window in flight until the test releases it, and every page after it for the rest of
  * the test. The reader's position has to be read while the first page is still out — a timed stall is a
@@ -169,8 +186,14 @@ test.describe('Chat history window', () => {
     await gate.arm(page);
 
     await wheelToTopEdge(page);
-    // The first page is in the gate's hands: this is the row the reader will still want when it lands.
-    const before = await viewportAnchor(page);
+    // Come back down inside the rows the reader has reached. The edge is where the fetch is asked for, not
+    // where a reader reads: parked at `scrollTop` 0 the anchor competes with the browser clamping the
+    // viewport there, and the state this measures — a reader on a row of their own — is the one below it.
+    await parkOnList(page);
+    await page.mouse.wheel(0, 400);
+    // The first page is in the gate's hands: this is the row the reader will still want when it lands, read
+    // only once the reader has come to rest.
+    const before = await settledAnchor(page);
     expect(before, 'no entry in the viewport to anchor on').not.toBeNull();
     const beforeIds = await renderedIds(page);
     gate.release();

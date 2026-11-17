@@ -30,15 +30,14 @@ describe('Spinner', () => {
         expect(ring(container).textContent?.trim()).toBe('');
     });
 
-    it('draws the ring at the diameter it was given, and at 14px by default', () => {
-        const { container } = render(Spinner, { props: { decorative: true } });
-        expect(ring(container).getAttribute('style')).toContain('--spinner-size: 14px');
-        const sized = render(Spinner, { props: { size: 20, decorative: true } });
-        expect(ring(sized.container).getAttribute('style')).toContain('--spinner-size: 20px');
-    });
-
-    it('falls back to the default diameter for a size that is not a number', () => {
-        const { container } = render(Spinner, { props: { size: 'large' as unknown as number, decorative: true } });
-        expect(ring(container).getAttribute('style')).toContain('--spinner-size: 14px');
+    // The diameter reaches the ring through a custom property, so a size that is not a number is a
+    // style-attribute injection waiting to happen; the default is what every unsized caller draws.
+    it.each([
+        { case: 'no size is given', size: undefined, width: '14px' },
+        { case: 'a size is given', size: 20, width: '20px' },
+        { case: 'a size that is not a number is given', size: 'large' as unknown as number, width: '14px' },
+    ])('the ring is $width wide when $case', ({ size, width }) => {
+        const { container } = render(Spinner, { props: { size, decorative: true } });
+        expect(ring(container).getAttribute('style')).toContain(`--spinner-size: ${width}`);
     });
 });

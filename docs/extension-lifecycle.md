@@ -217,8 +217,9 @@ An extension may ship `CHANGELOG.jsonl` next to its manifest (one JSON object pe
 `GET /api/extensions/check-updates` returns entries newer than the installed commit (anchored on the
 first hash match); no match / no file / fetch error → empty `changelog` (best-effort, never blocks update
 detection). UI: `.update-changelog` in the "Updates Available" section of `ExtensionUpdatesPanel.svelte`.
-Key files: `backend/extensions/changelog.go`, `FetchChangelog` (`registry.go`), `HandleCheckUpdates`, e2e
-`extension-changelog.spec.ts`.
+Key files: `backend/extensions/changelog.go`, `FetchChangelog` (`registry.go`), `HandleCheckUpdates`; the
+rendered entries, their order and their hash chips are `ConfigModal/__tests__/extension-updates-changelog.unit.svelte.ts`,
+and the row that must not wrap under a long name is e2e `extension-changelog.spec.ts`.
 
 ## UI injection scopes
 

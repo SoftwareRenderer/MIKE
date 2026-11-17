@@ -284,30 +284,22 @@ describe('the file list keyboard, wherever the panel holds focus', () => {
         expect(postedTo('/api/fs/move')[0]).toEqual({ paths: [`${ROOT}/a.txt`], dest: `${ROOT}/empty` });
     });
 
-    it('cuts the row the key arrived on when nothing is selected', async () => {
+    // With nothing selected, a key aimed at a row targets that row: the row the key arrived on is the
+    // row that is cut, copied, or opened for a rename.
+    it.each([
+        { key: 'x', ctrl: true, path: `${ROOT}/a.txt`, cut: true, paste: '/api/fs/move' },
+        { key: 'c', ctrl: true, path: `${ROOT}/b.txt`, cut: false, paste: '/api/fs/copy' },
+    ])('carries $key to the row it arrived on and pastes it as $paste', async ({ key, ctrl, path, cut, paste }) => {
         const { container } = openBrowser();
         await loadRoot(container);
 
-        rowEl(container, `${ROOT}/a.txt`)!.focus();
-        await pressKey('x', { ctrl: true });
-        expect(rowEl(container, `${ROOT}/a.txt`)?.className).toContain('is-cut');
+        rowEl(container, path)!.focus();
+        await pressKey(key, { ctrl });
+        expect(rowEl(container, path)?.className.includes('is-cut')).toBe(cut);
 
         await pressKey('v', { ctrl: true });
-        await waitFor(() => expect(postedTo('/api/fs/move').length).toBe(1));
-        expect(postedTo('/api/fs/move')[0]).toEqual({ paths: [`${ROOT}/a.txt`], dest: ROOT });
-    });
-
-    it('copies the row the key arrived on when nothing is selected', async () => {
-        const { container } = openBrowser();
-        await loadRoot(container);
-
-        rowEl(container, `${ROOT}/b.txt`)!.focus();
-        await pressKey('c', { ctrl: true });
-        expect(rowEl(container, `${ROOT}/b.txt`)?.className).not.toContain('is-cut');
-
-        await pressKey('v', { ctrl: true });
-        await waitFor(() => expect(postedTo('/api/fs/copy').length).toBe(1));
-        expect(postedTo('/api/fs/copy')[0]).toEqual({ paths: [`${ROOT}/b.txt`], dest: ROOT });
+        await waitFor(() => expect(postedTo(paste).length).toBe(1));
+        expect(postedTo(paste)[0]).toEqual({ paths: [path], dest: ROOT });
     });
 
     it('renames the row the key arrived on when nothing is selected', async () => {

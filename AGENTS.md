@@ -191,7 +191,7 @@ make test-podman-state                                   # the image entrypoint'
   stacks into one field per line, and every control below that width is 44px. The 768px `isMobile`
   breakpoint is for app chrome, not a row's arithmetic.
   `frontend/src/lib/styles/sandbox-config.css` holds the arithmetic, and the phone block of
-  `frontend/tests/e2e/sandbox-mounts.spec.ts` is what fails when it stops holding.
+  `frontend/tests/e2e/sandbox-config-form.spec.ts` is what fails when it stops holding.
 - Chat never disguises a system message as a user message, shows the streaming cursor only during an active
   response, and formats stats as `X tokens · Ys · Z tok/s`.
 - **Chat autoscroll is judged from the scroll event, never from a gesture listener**, and new content

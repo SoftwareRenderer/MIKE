@@ -1,12 +1,10 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, cleanup } from '@testing-library/svelte';
 
-// Sub-components of ChatEntries are stubbed exactly as chat-entries-loading does: this suite is
-// about the copy ChatEntries itself owns, not about what a message bubble renders.
+// This suite reads the copy ChatEntries itself owns, so its message-bubble sub-components are stubbed.
 vi.mock('$lib/components/Chat/ChatMessage.svelte', () => ({ default: () => '<div class="mock-chat-message"></div>' }));
 vi.mock('$lib/components/Chat/CheckpointDivider.svelte', () => ({ default: () => '<div class="mock-checkpoint-divider"></div>' }));
-// QueueIndicator is NOT stubbed (unlike chat-entries-loading): this file renders it directly.
-// ChatEntries only mounts it while awaiting, which none of the cases here do.
+// QueueIndicator is not stubbed: its own suite below renders it directly.
 vi.mock('$lib/constants', () => ({ SCROLL_BOTTOM_THRESHOLD: 100 }));
 
 // ToolCall's asset/icon imports are stubbed the way tool-call.unit.svelte.ts stubs them.
@@ -44,9 +42,10 @@ import { createChatFollow } from '$lib/composables/use-chat-follow.svelte';
  * different English string is a broken build, not a translation choice.
  *
  * These render the real components (no `readFileSync` string matching) and deliberately pin the
- * composites a naive conversion loses: the `{used} / {limit} tokens · {percent}%` tooltip, the
- * `Preparing: {path}` progress line, `Wrote {bytes} to:`, the plural pair behind
- * `1 backlog task` vs `3 backlog tasks`, and the `{count} model(s)` count.
+ * composites a naive conversion loses: the `{used} / {limit} tokens · {percent}%` tooltip, the plural
+ * pair behind `1 backlog task` vs `3 backlog tasks`, and the `{count} model(s)` count. The tool card's
+ * own composites — `Preparing: {path}`, `Wrote {bytes} to:` — are pinned in
+ * `tool-call.unit.svelte.ts`.
  */
 
 afterEach(cleanup);
@@ -145,17 +144,6 @@ describe('ChatEntries — list chrome', () => {
         onMsgDelete: vi.fn(), onMsgFork: vi.fn(), onMsgSend: vi.fn(), onRegenerate: vi.fn(), onNavigateTask: vi.fn(),
     };
 
-    it('labels the region and the loading / empty states', () => {
-        const { container } = render(ChatEntries, { props: { ...baseProps, historyLoading: true, follow: createChatFollow() } });
-        expect(container.querySelector('.chat-messages')?.getAttribute('aria-label')).toBe('Chat messages');
-        expect(container.querySelector('.chat-loading p')?.textContent).toBe('Loading conversation…');
-        cleanup();
-
-        const empty = render(ChatEntries, { props: { ...baseProps, follow: createChatFollow() } });
-        expect(empty.container.querySelector('.empty-state .title')?.textContent).toBe('No messages yet');
-        expect(empty.container.querySelector('.empty-state .hint')?.textContent).toBe('Send a message to start the conversation');
-    });
-
     it('labels the build box and falls back to the merge label', () => {
         const entries = [
             { id: 'b1', role: 'system', content: 't', isStreaming: false, buildLog: { title: 'Building sandbox image from Dockerfile...', lines: [], done: false } },
@@ -172,16 +160,6 @@ describe('ToolCall — status and result copy', () => {
     const baseProps = { expandedArgs: new Set<string>(), editDiffOverrides: {}, onToggleArgs: vi.fn(), onToggleEditDiff: vi.fn() };
     const renderTool = (toolCall: Record<string, unknown>) =>
         render(ToolCall, { props: { ...baseProps, toolCall: { toolId: 'x', toolName: 'bash', args: {}, ...toolCall } } });
-
-    it('interpolates the path into the read_file progress line', () => {
-        const { container } = renderTool({ toolName: 'read_file', isPending: true, path: 'src/file.go' });
-        expect(container.querySelector('.progress-text')?.textContent).toBe('Preparing: src/file.go');
-    });
-
-    it('says "Wrote {bytes} to:" for a finished write', () => {
-        const { container } = renderTool({ toolName: 'write_file', isPending: false, success: true, bytesWritten: 2048, path: 'src/a.ts' });
-        expect(container.querySelector('.write-result-text')?.textContent).toBe('Wrote 2.0 KB to:');
-    });
 
     it('declines the plural on one backlog task', () => {
         const one = renderTool({ toolName: 'view_tasks', success: true, result: JSON.stringify([{ id: 'a-b-c', title: 'T' }]) });
