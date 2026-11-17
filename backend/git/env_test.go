@@ -238,6 +238,15 @@ func TestNoServerEnvironmentReachesAGitSubprocess(t *testing.T) {
 			},
 			[]string{"core.hooksPath", "GIT_TERMINAL_PROMPT=0"},
 		},
+		{
+			// The identity-carrying entry point rebuilds cmd.Env, so it is the one place a later edit
+			// could hand os/exec os.Environ() while still passing the identity assertions.
+			"CommandWithIdentity",
+			func(*testing.T) []string {
+				return CommandWithIdentity("", ProjectIdentity("Ada Lovelace", "ada@example.com"), "commit", "-m", "x").Env
+			},
+			[]string{"core.hooksPath", "GIT_TERMINAL_PROMPT=0", "GIT_AUTHOR_NAME=Ada Lovelace"},
+		},
 	} {
 		env := entry.env(t)
 		if len(env) == 0 {
@@ -616,5 +625,82 @@ func TestIsGitSpawn(t *testing.T) {
 		if isGitSpawn(line) {
 			t.Errorf("isGitSpawn flagged a non-git line: %s", strings.TrimSpace(line))
 		}
+	}
+}
+
+// git reads GIT_AUTHOR_* and GIT_COMMITTER_* before it reads any config, so a value this process
+// inherited outranks the -c arguments a commit carries. A command built with an Identity carries the
+// pair it names and none of the ones it does not — an empty GIT_AUTHOR_NAME is not unset to git, it is
+// an ident it refuses — and the fence still rides along.
+func TestCommandWithIdentityReplacesTheInheritedIdentity(t *testing.T) {
+	for _, name := range identityEnvNames {
+		t.Setenv(name, "ambient-value")
+	}
+	origName, origEmail := AuthorIdentity()
+	t.Cleanup(func() { SetAuthorIdentity(origName, origEmail) })
+
+	for _, tc := range []struct {
+		name        string
+		serverName  string
+		serverEmail string
+		projectName string
+		wantFlags   []string
+		want        map[string]string
+		absent      []string
+	}{
+		{
+			name:        "a project naming only the name leaves the address to the repository",
+			projectName: "Ada Lovelace",
+			wantFlags:   []string{"-c", "user.name=Ada Lovelace"},
+			want:        map[string]string{"GIT_AUTHOR_NAME": "Ada Lovelace", "GIT_COMMITTER_NAME": "Ada Lovelace"},
+			absent:      []string{"GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"},
+		},
+		{
+			name:        "the server's stamp answers the half the project left",
+			serverEmail: "server@example.com",
+			projectName: "Ada Lovelace",
+			wantFlags:   []string{"-c", "user.name=Ada Lovelace", "-c", "user.email=server@example.com"},
+			want: map[string]string{
+				"GIT_AUTHOR_NAME": "Ada Lovelace", "GIT_COMMITTER_NAME": "Ada Lovelace",
+				"GIT_AUTHOR_EMAIL": "server@example.com", "GIT_COMMITTER_EMAIL": "server@example.com",
+			},
+		},
+		{
+			name:   "nobody names anything, so nothing is inherited",
+			absent: identityEnvNames,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			SetAuthorIdentity(tc.serverName, tc.serverEmail)
+			cmd := CommandWithIdentity("", ProjectIdentity(tc.projectName, ""), "commit", "-m", "x")
+
+			env := map[string]string{}
+			for _, kv := range cmd.Env {
+				key, value, ok := strings.Cut(kv, "=")
+				if ok {
+					// os/exec keeps the last occurrence of a duplicated name.
+					env[key] = value
+				}
+			}
+			for key, want := range tc.want {
+				if env[key] != want {
+					t.Errorf("%s = %q, want %q", key, env[key], want)
+				}
+			}
+			for _, key := range tc.absent {
+				if _, ok := env[key]; ok {
+					t.Errorf("%s reached the child as %q; a half nobody named belongs to the repository", key, env[key])
+				}
+			}
+			if !slices.Contains(cmd.Env, "GIT_CONFIG_COUNT=5") {
+				t.Errorf("the execution fence left with the identity: %v", cmd.Env)
+			}
+			if tail := cmd.Args[len(cmd.Args)-3:]; !slices.Equal(tail, []string{"commit", "-m", "x"}) {
+				t.Errorf("args = %v, want the subcommand last", cmd.Args)
+			}
+			if head := cmd.Args[1 : len(cmd.Args)-3]; !slices.Equal(head, tc.wantFlags) {
+				t.Errorf("the identity ahead of the subcommand is %v, want %v", head, tc.wantFlags)
+			}
+		})
 	}
 }

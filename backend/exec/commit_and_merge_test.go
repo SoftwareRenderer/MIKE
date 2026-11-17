@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"mike/backend/git"
 	"mike/backend/testutil/testgit"
@@ -115,5 +116,115 @@ func TestCommitAndMerge_LandsWhereAutoMergeSays(t *testing.T) {
 					autoMerge, masterHasIt, delivered, masterFile.output)
 			}
 		})
+	}
+}
+
+// TestCommitAndMerge_CarriesTheProjectsOwnIdentity: the pair a person set under Settings → project is
+// the pair the commit carries, committer included, and a half the row leaves blank stays the
+// repository's own answer.
+func TestCommitAndMerge_CarriesTheProjectsOwnIdentity(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name          string
+		rowName       string
+		rowEmail      string
+		wantAuthor    string
+		wantCommitter string
+	}{
+		{
+			"the pair the row names",
+			"Ada Lovelace", "ada@example.com",
+			"Ada Lovelace <ada@example.com>", "Ada Lovelace <ada@example.com>",
+		},
+		{
+			"a row naming only the name leaves the email to the repository",
+			"Ada Lovelace", "",
+			"Ada Lovelace <test@test.com>", "Ada Lovelace <test@test.com>",
+		},
+		{
+			"a row naming nothing leaves both to the repository",
+			"", "",
+			"Test <test@test.com>", "Test <test@test.com>",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			te, _, projectID, wtPath := setupCommitAndMergeTest(t)
+			if err := te.store.UpdateProjectGitAuthorName(projectID, tc.rowName); err != nil {
+				t.Fatalf("set the author name: %v", err)
+			}
+			if err := te.store.UpdateProjectGitAuthorEmail(projectID, tc.rowEmail); err != nil {
+				t.Fatalf("set the author email: %v", err)
+			}
+
+			if err := te.merge.CommitAndMerge(projectID, "test-task", wtPath, "Identified commit", false); err != nil {
+				t.Fatalf("CommitAndMerge failed: %v", err)
+			}
+
+			got := strings.TrimSpace(runGitCmd(wtPath, "log", "-1", "--format=%an <%ae>|%cn <%ce>").output)
+			want := tc.wantAuthor + "|" + tc.wantCommitter
+			if got != want {
+				t.Errorf("the commit reads %s, want %s", got, want)
+			}
+		})
+	}
+}
+
+// TestCommitAndMerge_TwoProjectsCommitAsThemselves: two projects over one repository, each naming a
+// different person, committing in one store. A process-wide identity that one commit left behind would
+// land on the other, which is exactly what the per-project row exists to prevent.
+func TestCommitAndMerge_TwoProjectsCommitAsThemselves(t *testing.T) {
+	t.Parallel()
+	te, _, projectID, wtPath := setupCommitAndMergeTest(t)
+	if err := te.store.UpdateProjectGitAuthorName(projectID, "Ada Lovelace"); err != nil {
+		t.Fatalf("set the first name: %v", err)
+	}
+	if err := te.store.UpdateProjectGitAuthorEmail(projectID, "ada@example.com"); err != nil {
+		t.Fatalf("set the first email: %v", err)
+	}
+
+	// The second project is a repository of its own — projects.path is UNIQUE — naming someone else,
+	// and its git config names a third person nobody should see in the log.
+	const otherID = "other-project"
+	otherDir := t.TempDir()
+	testgit.Git(t, otherDir, "init")
+	testgit.Git(t, otherDir, "config", "user.name", "Other Repo")
+	testgit.Git(t, otherDir, "config", "user.email", "repo@other.example")
+	os.WriteFile(filepath.Join(otherDir, "README.md"), []byte("# Other\n"), 0o644)
+	testgit.Git(t, otherDir, "add", "README.md")
+	testgit.Git(t, otherDir, "commit", "-m", "Initial")
+	// The branch is made without being checked out: the main worktree holding it would refuse the
+	// task worktree that wants it.
+	testgit.Git(t, otherDir, "branch", "task/other-task")
+	otherWT := filepath.Join(t.TempDir(), "other-task")
+	if err := os.MkdirAll(otherWT, 0o755); err != nil {
+		t.Fatalf("mkdir the second worktree: %v", err)
+	}
+	testgit.Git(t, otherDir, "worktree", "add", otherWT, "task/other-task")
+	os.WriteFile(filepath.Join(otherWT, "other.txt"), []byte("other work\n"), 0o644)
+	testgit.Git(t, otherWT, "add", "other.txt")
+	if err := te.store.CreateProject(&types.Project{
+		ID: otherID, Name: "other", Path: otherDir,
+		GitAuthorName: "Grace Hopper", GitAuthorEmail: "grace@example.com",
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("create the second project: %v", err)
+	}
+
+	if err := te.merge.CommitAndMerge(projectID, "test-task", wtPath, "first commit", false); err != nil {
+		t.Fatalf("commit for the first project: %v", err)
+	}
+	if err := te.merge.CommitAndMerge(otherID, "other-task", otherWT, "second commit", false); err != nil {
+		t.Fatalf("commit for the second project: %v", err)
+	}
+
+	for _, tc := range []struct {
+		where, subject, want string
+	}{
+		{wtPath, "first commit", "Ada Lovelace <ada@example.com>"},
+		{otherWT, "second commit", "Grace Hopper <grace@example.com>"},
+	} {
+		if got := strings.TrimSpace(runGitCmd(tc.where, "log", "-1", "--format=%an <%ae>").output); got != tc.want {
+			t.Errorf("%s: %q was authored by %q, want %q", tc.where, tc.subject, got, tc.want)
+		}
 	}
 }

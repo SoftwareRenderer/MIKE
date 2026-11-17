@@ -94,7 +94,7 @@ filter.
 
 - Heavy fixtures get a dedicated repo — specs that create large files or mutate the working tree must NOT write into the shared `/tmp/kanban-test-repo` (other specs' `git add -A && git commit` races with them). Init a dedicated repo (e.g. `/tmp/kanban-test-repo-<name>`), create its project in `beforeAll` (use `browser.newContext({ storageState })` — `page` is not available in `beforeAll`), delete both in `afterAll`, and wrap the describe in `.serial`. See `editor-wrap-highlight.spec.ts`.
 - global-setup sets a **local git identity** on the test repos — don't remove it: commit-and-done passes
-  `-c` author flags only when the server's own environment names `GIT_AUTHOR_*`, and with neither git
+  an identity only where the project's row or the server's environment names one, and with neither git
   refuses the commit ("Committer identity unknown") and those e2e tests fail.
 
 ## Tests that fail only under load

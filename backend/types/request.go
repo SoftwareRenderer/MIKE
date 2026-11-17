@@ -36,6 +36,11 @@ type UpdateProjectRequest struct {
 	SandboxEnvs             []SandboxEnv   `json:"sandbox_envs,omitempty"`
 	SandboxCapabilities     []string       `json:"sandbox_capabilities,omitempty"`
 	CommitAssistedBy        *bool          `json:"commit_assisted_by,omitzero"`
+	// GitAuthorName and GitAuthorEmail are this project's commit identity, half by half: a half that
+	// is set outranks this server's boot stamp, and a half that is not is left to it. Pointers because
+	// a partial update must tell "leave it alone" from "clear it" — the empty string clears.
+	GitAuthorName  *string `json:"git_author_name,omitzero"`
+	GitAuthorEmail *string `json:"git_author_email,omitzero"`
 	// MCPServerIDs is this project's MCP opt-in list. A pointer because a partial update must tell
 	// "leave it alone" from "enable nothing"; the list is written whole either way.
 	MCPServerIDs *[]string `json:"mcp_server_ids,omitzero"`

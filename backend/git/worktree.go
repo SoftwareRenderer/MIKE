@@ -51,14 +51,21 @@ func SetAuthorIdentity(name, email string) {
 // with whichever of the name and email it did not set looked up through fill. The caller supplies
 // fill because only it knows whether the repository in hand is the one about to be committed to.
 func ResolveAuthorIdentity(fill func(key string) string) (name, email string) {
-	name, email = AuthorIdentity()
-	if name == "" {
-		name = fill("user.name")
+	return ProjectAuthorIdentity("", "", fill)
+}
+
+// ProjectAuthorIdentity is ResolveAuthorIdentity for one project: the half the project's own row
+// names outranks the identity this server was stamped with, and a half neither names is answered by
+// fill. Screens that name a committer answer from here, so what they show is what the commit carries.
+func ProjectAuthorIdentity(name, email string, fill func(key string) string) (string, string) {
+	id := ProjectIdentity(name, email)
+	if id.Name == "" {
+		id.Name = fill("user.name")
 	}
-	if email == "" {
-		email = fill("user.email")
+	if id.Email == "" {
+		id.Email = fill("user.email")
 	}
-	return name, email
+	return id.Name, id.Email
 }
 
 // AuthorIdentityFromEnv reads the commit identity from GIT_COMMITTER_NAME, GIT_COMMITTER_EMAIL,
@@ -99,25 +106,72 @@ func configValue(args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// AuthorIdentity returns the configured overrides.
+// AuthorIdentity returns the identity configured for this whole server. A project's own row can
+// outrank either half of it; ProjectIdentity is where that layering happens.
 func AuthorIdentity() (name, email string) {
 	authorMu.RLock()
 	defer authorMu.RUnlock()
 	return authorName, authorEmail
 }
 
-// GitAuthorFlags returns -c flags to override the commit author identity.
-// When neither is set, returns nil so Git uses its configured defaults.
-func GitAuthorFlags() []string {
+// Identity is the pair a commit is authored and committed as. An empty half is the repository's own
+// user.name or user.email to answer.
+type Identity struct {
+	Name  string
+	Email string
+}
+
+// serverIdentity is the identity configured for this whole server. A project's own row can outrank
+// either half of it; ProjectIdentity is where that layering happens.
+func serverIdentity() Identity {
 	name, email := AuthorIdentity()
-	var flags []string
-	if name != "" {
-		flags = append(flags, "-c", "user.name="+name)
+	return Identity{Name: name, Email: email}
+}
+
+// ProjectIdentity is the identity a commit in one project carries: each half the project's row names,
+// and each half it does not this server's. A project that names nothing leaves both to the repository.
+func ProjectIdentity(name, email string) Identity {
+	server := serverIdentity()
+	if name == "" {
+		name = server.Name
 	}
-	if email != "" {
-		flags = append(flags, "-c", "user.email="+email)
+	if email == "" {
+		email = server.Email
+	}
+	return Identity{Name: name, Email: email}
+}
+
+// flags are the -c arguments naming this identity to git's config. An empty half sends nothing, so
+// git answers that half itself rather than from an empty value.
+func (id Identity) flags() []string {
+	var flags []string
+	if id.Name != "" {
+		flags = append(flags, "-c", "user.name="+id.Name)
+	}
+	if id.Email != "" {
+		flags = append(flags, "-c", "user.email="+id.Email)
 	}
 	return flags
+}
+
+// envEntries are the environment half of the identity: git's own names, carrying the halves it names.
+// A half it does not name sends no variable at all, which is what lets the repository's config answer
+// — an empty GIT_AUTHOR_NAME is not unset to git, it is an ident it refuses.
+func (id Identity) envEntries() []string {
+	var entries []string
+	if id.Name != "" {
+		entries = append(entries, "GIT_AUTHOR_NAME="+id.Name, "GIT_COMMITTER_NAME="+id.Name)
+	}
+	if id.Email != "" {
+		entries = append(entries, "GIT_AUTHOR_EMAIL="+id.Email, "GIT_COMMITTER_EMAIL="+id.Email)
+	}
+	return entries
+}
+
+// GitAuthorFlags returns the -c flags for the identity configured for this whole server.
+// When neither half is set, returns nil so Git uses its configured defaults.
+func GitAuthorFlags() []string {
+	return serverIdentity().flags()
 }
 
 // ignoredDirs is a set of well-known directory names that should never be
@@ -923,6 +977,16 @@ func (wm *WorktreeManager) GitRunInWorktreeOutput(taskID string, args ...string)
 		return "", err
 	}
 	return Run(worktreePath, args...)
+}
+
+// GitRunInWorktreeOutputAs is GitRunInWorktreeOutput for a command that creates a commit, which
+// carries the project's own identity rather than whatever this process inherited.
+func (wm *WorktreeManager) GitRunInWorktreeOutputAs(taskID string, id Identity, args ...string) (string, error) {
+	worktreePath, err := wm.taskWorktree(taskID)
+	if err != nil {
+		return "", err
+	}
+	return RunWithIdentity(worktreePath, id, args...)
 }
 
 // StageIndexedFiles refreshes the index of currently staged files from the

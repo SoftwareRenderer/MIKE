@@ -358,6 +358,16 @@ func (m *mergeOrchestrator) assistedByEnabled(projectID string) bool {
 	return project.AssistedByEnabled()
 }
 
+// authorIdentity returns the identity a commit in this project carries: its own pair over this
+// server's. A row that cannot be read names nothing, which leaves the server's pair.
+func (m *mergeOrchestrator) authorIdentity(projectID string) git.Identity {
+	var name, email string
+	if project, err := m.store.GetProject(projectID); err == nil {
+		name, email = project.GitAuthorName, project.GitAuthorEmail
+	}
+	return git.ProjectIdentity(name, email)
+}
+
 // generateCommitMessageLLM asks the model for the message, falling back to the task's title
 // (plus Assisted-by if enabled) on error.
 func (m *mergeOrchestrator) generateCommitMessageLLM(ctx context.Context, task *types.Task, turnText string, assistedBy bool) string {
@@ -469,7 +479,7 @@ func (m *mergeOrchestrator) CommitAndMerge(projectID, taskID, worktreePath, comm
 	release := m.commitQueue.Acquire(projectID)
 	defer release()
 
-	_, _ = git.Run(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", commitMsg, "--allow-empty")...)
+	_, _ = git.RunWithIdentity(worktreePath, m.authorIdentity(projectID), "commit", "-m", commitMsg, "--allow-empty")
 
 	if autoMerge {
 		task, _ := m.store.GetTaskByID(taskID)
@@ -919,7 +929,7 @@ func (m *mergeOrchestrator) tryResolveMergeConflicts(dir, taskID, targetBranch, 
 	// An empty conflict list means git resolved it itself; let it finish.
 	if len(conflictedFiles) == 0 {
 		logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("no conflicted files found, trying merge --continue")
-		_, continueErr := git.Run(dir, append(git.GitAuthorFlags(), "merge", "--continue")...)
+		_, continueErr := git.RunWithIdentity(dir, m.authorIdentity(task.ProjectID), "merge", "--continue")
 		if continueErr == nil {
 			logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("merge auto-resolved via --continue")
 			m.logMergeComplete(taskID, task.CurrentThreadID, taskBranch, targetBranch)
@@ -994,8 +1004,8 @@ func (m *mergeOrchestrator) stageResolvedConflicts(taskID, worktreePath string) 
 }
 
 // commitMergeConflictResolution records a resolution as a commit.
-func (m *mergeOrchestrator) commitMergeConflictResolution(taskID, worktreePath string) bool {
-	if _, err := git.Run(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...); err != nil {
+func (m *mergeOrchestrator) commitMergeConflictResolution(projectID, taskID, worktreePath string) bool {
+	if _, err := git.RunWithIdentity(worktreePath, m.authorIdentity(projectID), "commit", "-m", "Resolve merge conflicts"); err != nil {
 		logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("git commit failed: %v", err)
 		return false
 	}
@@ -1030,7 +1040,7 @@ func (m *mergeOrchestrator) commitConflictResolution(projectID, taskID, worktree
 	}
 
 	if commitOK {
-		commitOK = m.commitMergeConflictResolution(taskID, worktreePath)
+		commitOK = m.commitMergeConflictResolution(projectID, taskID, worktreePath)
 	}
 
 	if commitOK {

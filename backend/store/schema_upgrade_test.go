@@ -155,6 +155,8 @@ func TestEveryColumnCanBeGivenToAnOlderDatabase(t *testing.T) {
 		"projects.sandbox_mounts": true, "projects.sandbox_envs": true,
 		"projects.sandbox_capabilities": true, "projects.mcp_server_ids": true,
 		"projects.sandbox_build_context": true,
+		"projects.git_author_name":       true,
+		"projects.git_author_email":      true,
 		"tasks.base_ref":                 true, "tasks.base_commit": true, "tasks.branch_tip": true,
 		"tasks.reasoning_effort": true, "tasks.parent_task_id": true, "tasks.current_thread_id": true,
 		"tasks.assigned_ports":          true,

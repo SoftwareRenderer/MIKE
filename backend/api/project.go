@@ -689,6 +689,23 @@ func (h *ProjectHandler) handleUpdateProject(w http.ResponseWriter, r *http.Requ
 		}
 		mcpIDs = ids
 	}
+	// The commit identity is validated beside the rest. Each half is trimmed rather than refused: the
+	// whitespace around a typed name belongs to the form, not to the identity.
+	var gitAuthorName, gitAuthorEmail string
+	if req.GitAuthorName != nil {
+		gitAuthorName = strings.TrimSpace(*req.GitAuthorName)
+		if err := types.ValidateGitAuthorName(gitAuthorName); err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, "git_author_name: "+err.Error())
+			return
+		}
+	}
+	if req.GitAuthorEmail != nil {
+		gitAuthorEmail = strings.TrimSpace(*req.GitAuthorEmail)
+		if err := types.ValidateGitAuthorEmail(gitAuthorEmail); err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, "git_author_email: "+err.Error())
+			return
+		}
+	}
 	// Block sandbox setting changes while tasks are running in the project.
 	// Modifying sandbox settings during execution would kill bridge processes
 	// mid-tool-call, causing "broken pipe" errors.
@@ -733,6 +750,20 @@ func (h *ProjectHandler) handleUpdateProject(w http.ResponseWriter, r *http.Requ
 	if req.MCPServerIDs != nil {
 		if err := h.store.UpdateProjectMCPServerIDs(id, mcpIDs); err != nil {
 			httputil.Fail(w, errs.Operation("update MCP server list", err), "update project", "project not found")
+			return
+		}
+	}
+	// Nor the commit identity: it names the person the next commit carries and changes nothing about
+	// where that commit is made.
+	if req.GitAuthorName != nil {
+		if err := h.store.UpdateProjectGitAuthorName(id, gitAuthorName); err != nil {
+			httputil.Fail(w, errs.Operation("update git author name", err), "update project", "project not found")
+			return
+		}
+	}
+	if req.GitAuthorEmail != nil {
+		if err := h.store.UpdateProjectGitAuthorEmail(id, gitAuthorEmail); err != nil {
+			httputil.Fail(w, errs.Operation("update git author email", err), "update project", "project not found")
 			return
 		}
 	}

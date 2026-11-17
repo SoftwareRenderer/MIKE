@@ -990,6 +990,18 @@ func TestHandleCreateCloneRejectsHelperTransport(t *testing.T) {
 	}
 }
 
+// putProject sends a partial-update body to the project route and answers what the handler did. The
+// body is raw JSON so a test can name a field the request type has not been given yet.
+func putProject(t *testing.T, h *ProjectHandler, projID, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("PUT /api/projects/{projectID}", h.HandleByID)
+	req := httptest.NewRequest(http.MethodPut, "/api/projects/"+projID, strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	return rr
+}
+
 // TestUpdateProjectCommitTrailer: commit_assisted_by is written both ways, and a request that does not
 // mention it leaves the stored answer alone.
 func TestUpdateProjectCommitTrailer(t *testing.T) {

@@ -304,25 +304,50 @@ occurrence).
 
 `git.SetAuthorIdentity` / `git.AuthorIdentity` (`backend/git/worktree.go`) are process-wide and
 accessor-only: there are deliberately no exported `GitAuthorName`/`GitAuthorEmail` variables, because the
-boot and the add-project flow write the identity while tasks are committing. Making it per-`WorktreeManager`
-is still open.
+boot writes the identity while tasks are committing. A project answers ahead of it, one half at a time:
+`git.ProjectIdentity(row.GitAuthorName, row.GitAuthorEmail)` is the single place the two are layered, and
+`git.Identity` is what a commit path carries.
 
-- **The boot stamps it from the environment and from nothing else** — `stampCommitIdentity` (`main.go`)
-  through `git.AuthorIdentityFromEnv`, which takes `GIT_COMMITTER_*` before `GIT_AUTHOR_*`, each half on
-  its own. A container with no gitconfig has nothing for git to resolve by itself: unstamped,
+- **The boot stamps the server half from the environment and from nothing else** — `stampCommitIdentity`
+  (`main.go`) through `git.AuthorIdentityFromEnv`, which takes `GIT_COMMITTER_*` before `GIT_AUTHOR_*`,
+  each half on its own. A container with no gitconfig has nothing for git to resolve by itself: unstamped,
   `GIT_AUTHOR_*` reaches the author only and the commit is refused with `Committer identity unknown`, so
   the stamped pair is what answers the committer half.
-- **What the deployment does not name stays the repository's decision.** The stamp reads no git
-  configuration, so an unnamed deployment keeps the identity a repository configures for itself. The one
+- **What neither the project nor the deployment names stays the repository's decision.** The stamp reads no
+  git configuration, so an unnamed deployment keeps the identity a repository configures for itself. The one
   `git config --global` read is the check that refuses to initialize a repository when neither the stamp
   nor that config names a person (`resolveGitIdentity`, `backend/server/handler_fs.go`).
+- **A commit's identity reaches git in both places git reads one from.** git takes the author from
+  `GIT_AUTHOR_*` **before** it reads any config, so a value this server inherited outranks the
+  `-c user.name=` a command carries. Emptying one is not unsetting it: git refuses `empty ident name`.
+  So `git.CommandWithIdentity` / `git.RunWithIdentity` / `WorktreeManager.GitRunInWorktreeOutputAs` take
+  the four variables out of the child's environment and put back only the halves the identity names. A
+  half nobody named is **absent**, which lets the repository's config answer. Both sinks come from the
+  one `git.Identity`, so args and environment cannot disagree.
+- **A command with no identity of its own keeps inheriting the server pair**, which is how `git stash`
+  (a command that writes a commit object and has no person naming one) gets an ident at all. Only the
+  commit paths listed below pass an `Identity`; `git.Run` and `git.Command` stay as they were.
+- **The fields are a project row's, with the row's grammar.** `git_author_name` / `git_author_email` are
+  two nullable columns set half at a time by `PUT /api/projects/{id}`: pointer fields, so absent is
+  "leave it" and `""` is "clear it". `types.ValidateGitAuthorName` / `ValidateGitAuthorEmail` are where
+  the grammar lives: printable text under a stated cap, and an email `net/mail` parses as an addr-spec
+  with nothing around it. Both are validated before the first write and refused naming the field.
+  Settings → <project> is the only writer in the UI.
+- **Host-side only.** Every commit MIKE makes is made by the server process. A task container writes no
+  commit at all: the project's `.git` is mounted read-only into it, so `git commit` there dies at the
+  object write. A project container's terminal is a person's own shell, and its identity is their
+  gitconfig's — the container environment is only what was configured, so nothing is injected there.
 - **Every screen that names a committer answers from the same pair**, through
-  `git.ResolveAuthorIdentity`: the stamped pair first, then one config reader the caller scopes.
-  `resolveGitAuthor` (`backend/api/task.go`) feeds the commit preview's metadata and the project's git
-  status. It answers an empty pair rather than a name no commit would carry: an identity invented there is
-  a promise the commit does not keep.
+  `git.ProjectAuthorIdentity`: the project's half first, then the server's, then one config reader the
+  caller scopes. `resolveGitAuthor` (`backend/api/task.go`) feeds the commit preview's metadata and the
+  project's git status. It answers an empty pair rather than a name no commit would carry: an identity
+  invented there is a promise the commit does not keep.
 - Tests: `TestStampCommitIdentityPutsTheEnvironmentOnEveryCommit` (root), `TestResolveGitAuthor*`
-  (`backend/api/`), `TestAuthorIdentityFromEnv*` (`backend/git/`).
+  (`backend/api/`), `TestAuthorIdentityFromEnv*`, `TestProjectIdentityLayersEachHalfOnItsOwn` and
+  `TestCommandWithIdentityReplacesTheInheritedIdentity` (`backend/git/`),
+  `TestUpdateProjectGitAuthor*` (`backend/api/`), `TestProjectGitAuthorRoundTrip` (`backend/store/`), and
+  `TestCommitAndMerge_CarriesTheProjectsOwnIdentity` (`backend/exec/`), which is the one that commits for
+  real.
 
 ## The address a person typed is a network grant
 

@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS projects (
     sandbox_capabilities     TEXT DEFAULT NULL,
     commit_assisted_by       INTEGER NOT NULL DEFAULT 0,
     mcp_server_ids           TEXT DEFAULT NULL,
+    git_author_name          TEXT DEFAULT NULL,
+    git_author_email         TEXT DEFAULT NULL,
     created_at               TEXT NOT NULL,
     updated_at               TEXT NOT NULL
 );

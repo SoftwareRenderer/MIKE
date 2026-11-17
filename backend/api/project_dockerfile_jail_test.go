@@ -28,13 +28,7 @@ func jailedDockerfileProject(t *testing.T) (h *ProjectHandler, s *store.Store, i
 
 func putDockerfile(t *testing.T, h *ProjectHandler, id, path string) *httptest.ResponseRecorder {
 	t.Helper()
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/projects/{projectID}", h.HandleByID)
-	req := httptest.NewRequest(http.MethodPut, "/api/projects/"+id,
-		strings.NewReader(`{"sandbox_dockerfile_path":"`+path+`"}`))
-	rr := httptest.NewRecorder()
-	mux.ServeHTTP(rr, req)
-	return rr
+	return putProject(t, h, id, `{"sandbox_dockerfile_path":"`+path+`"}`)
 }
 
 func TestUpdateProjectJailsTheSandboxDockerfile(t *testing.T) {

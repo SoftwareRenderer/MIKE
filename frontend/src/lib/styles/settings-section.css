@@ -214,3 +214,16 @@
     color: var(--color-text-tertiary);
     line-height: 1.4;
 }
+
+/* A setting whose answer is typed rather than switched. One skin for every text answer in a settings
+ * section, so a component's own block holds layout only. */
+:global(.settings-section .settings-text-input) {
+    min-width: 0;
+    padding: 6px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface-2);
+    color: var(--color-text-primary);
+    font-size: var(--text-sm);
+    font-family: inherit;
+}
