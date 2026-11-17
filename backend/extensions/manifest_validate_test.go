@@ -253,6 +253,10 @@ func TestI18NConfigValidate(t *testing.T) {
 		},
 		{name: "a two-letter tag is valid", mutate: func(c *I18NConfig) { c.Locale = "fr" }, wantErr: ""},
 		{name: "an extended subtag is valid", mutate: func(c *I18NConfig) { c.Locale = "hsn" }, wantErr: ""},
+		{name: "a catalog in a subdirectory is still inside the pack", mutate: func(c *I18NConfig) {
+			c.Locale = "pt"
+			c.MessagesURL = "pt/messages.json"
+		}, wantErr: ""},
 		{
 			name:    "no locale declared",
 			mutate:  func(c *I18NConfig) { c.Locale = "" },
@@ -328,6 +332,19 @@ func TestI18NConfigValidate(t *testing.T) {
 			name:    "a windows separator is not a path here",
 			mutate:  func(c *I18NConfig) { c.MessagesURL = "lang\\messages.json" },
 			wantErr: "must use '/' separators",
+		},
+		{
+			// The two bounds validateAssetRelPath enforces that no other i18n row reaches: the path is
+			// concatenated into a URL by the loader, so an unbounded or unprintable one is refused here
+			// rather than fetched by the browser.
+			name:    "a control character in the catalog path",
+			mutate:  func(c *I18NConfig) { c.MessagesURL = "mess\nages.json" },
+			wantErr: "contains a control character",
+		},
+		{
+			name:    "a catalog path past the bound",
+			mutate:  func(c *I18NConfig) { c.MessagesURL = strings.Repeat("a", 300) + ".json" },
+			wantErr: "is longer than",
 		},
 		{
 			name:    "an optional prompts_dir may be empty, not blank-looking",
