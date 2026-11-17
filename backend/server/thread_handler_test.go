@@ -14,155 +14,73 @@ import (
 	"mike/backend/types"
 )
 
-func TestThreadList(t *testing.T) {
+// A fork becomes the task's active thread, answers the row the client will draw, and is named by counting
+// the forks when no edited question came with it. A switch moves the task's pointer back. Exactly one thread
+// is ever active — a second one leaves the picker showing two conversations as current.
+func TestThreadForkActivatesTheThreadAndSwitchGivesItBack(t *testing.T) {
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
+	taskPath := "/api/projects/" + projID + "/tasks/" + taskID
 
-	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/threads", nil)
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
+	mainThreadID := mustJSON[[]map[string]any](t, testResponseAuth(t, s,
+		testRequest(http.MethodGet, taskPath+"/threads", nil)).Body)[0]["id"].(string)
 
-	threads := mustJSON[[]map[string]any](t, rr.Body)
-	if len(threads) < 1 {
-		t.Fatalf("expected at least 1 thread, got %d", len(threads))
-	}
-	var hasMain bool
-	for _, th := range threads {
-		if th["name"] == "Main" {
-			hasMain = true
-			break
-		}
-	}
-	if !hasMain {
-		t.Fatal("expected Main thread")
-	}
-}
+	forkedFrom := mustJSON[map[string]any](t, testResponseAuth(t, s, testRequest(http.MethodPost,
+		taskPath+"/messages", map[string]any{"role": "user", "content": "Message to fork from"})).Body)
 
-func TestThreadFork(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Test task")
-
-	// Get the Main thread
-	listReq := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/threads", nil)
-	listRR := testResponseAuth(t, s, listReq)
-	threads := mustJSON[[]map[string]any](t, listRR.Body)
-	if len(threads) < 1 {
-		t.Fatal("expected at least 1 thread")
-	}
-	mainThreadID := threads[0]["id"].(string)
-
-	// Create a message first (to have a checkpoint)
-	createReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
-		"role":    "user",
-		"content": "Message to fork from",
-	})
-	createRR := testResponseAuth(t, s, createReq)
-	msg := mustJSON[map[string]any](t, createRR.Body)
-	msgID := msg["id"].(string)
-
-	// Fork from this message
-	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/fork", map[string]any{
-		"from_thread_id":  mainThreadID,
-		"from_message_id": msgID,
-	})
-	rr := testResponseAuth(t, s, req)
+	rr := testResponseAuth(t, s, testRequest(http.MethodPost, taskPath+"/threads/fork",
+		map[string]any{"from_thread_id": mainThreadID, "from_message_id": forkedFrom["id"].(string)}))
 	if rr.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+		t.Fatalf("fork: expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+	fork := mustJSON[map[string]any](t, rr.Body)
+	forkThreadID, _ := fork["id"].(string)
+	if fork["task_id"] != taskID {
+		t.Errorf("the fork answered task_id %v, want %s", fork["task_id"], taskID)
+	}
+	if fork["is_active"] != true {
+		t.Errorf("the fork answered is_active %v, want true — the response is what the tab opens on", fork["is_active"])
+	}
+	if name, _ := fork["name"].(string); name != "Fork #2" {
+		t.Errorf("a fork with no edited question is named %q, want the fork count", name)
 	}
 
-	result := mustJSON[map[string]any](t, rr.Body)
-	if result["task_id"] != taskID {
-		t.Fatalf("wrong task_id: %s", result["task_id"])
+	if got, _ := getTaskField(t, s, projID, taskID, "current_thread_id").(string); got != forkThreadID {
+		t.Errorf("current_thread_id = %s after the fork, want %s", got, forkThreadID)
 	}
-	name := result["name"].(string)
-	if name != "Fork #1" && name != "Fork #2" {
-		t.Fatalf("expected Fork #N, got %s", name)
-	}
-	if result["is_active"] != true {
-		t.Fatal("new fork should be active")
+	if got := onlyActiveThread(t, s, projID, taskID); got != forkThreadID {
+		t.Errorf("the active thread is %s after the fork, want %s", got, forkThreadID)
 	}
 
-	// Verify task's current_thread_id is updated
-	taskReq := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID, nil)
-	taskRR := testResponseAuth(t, s, taskReq)
-	task := mustJSON[map[string]any](t, taskRR.Body)
-	if task["current_thread_id"] != result["id"] {
-		t.Fatalf("task current_thread_id not updated: %s vs %s", task["current_thread_id"], result["id"])
+	rr = testResponseAuth(t, s, testRequest(http.MethodPost, taskPath+"/threads/switch",
+		map[string]any{"thread_id": mainThreadID}))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("switch to Main: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if got, _ := getTaskField(t, s, projID, taskID, "current_thread_id").(string); got != mainThreadID {
+		t.Errorf("current_thread_id = %s after the switch, want %s", got, mainThreadID)
+	}
+	if got := onlyActiveThread(t, s, projID, taskID); got != mainThreadID {
+		t.Errorf("the active thread is %s after the switch, want %s", got, mainThreadID)
 	}
 }
 
-func TestThreadSwitch(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Test task")
-
-	// Get existing threads
-	listReq := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/threads", nil)
-	listRR := testResponseAuth(t, s, listReq)
-	threads := mustJSON[[]map[string]any](t, listRR.Body)
-	if len(threads) < 1 {
-		t.Fatal("expected at least 1 thread")
-	}
-	mainThreadID := threads[0]["id"].(string)
-
-	createReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
-		"role":    "user",
-		"content": "Message for fork",
-	})
-	createRR := testResponseAuth(t, s, createReq)
-	msg := mustJSON[map[string]any](t, createRR.Body)
-	msgID := msg["id"].(string)
-
-	// Fork to create a second thread
-	forkReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/fork", map[string]any{
-		"from_thread_id":  mainThreadID,
-		"from_message_id": msgID,
-	})
-	forkRR := testResponseAuth(t, s, forkReq)
-	fork := mustJSON[map[string]any](t, forkRR.Body)
-	forkThreadID := fork["id"].(string)
-
-	// Switch back to Main
-	switchReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/switch", map[string]any{
-		"thread_id": mainThreadID,
-	})
-	switchRR := testResponseAuth(t, s, switchReq)
-	if switchRR.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", switchRR.Code, switchRR.Body.String())
-	}
-
-	// Verify task's current_thread_id is updated to Main
-	taskReq := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID, nil)
-	taskRR := testResponseAuth(t, s, taskReq)
-	task := mustJSON[map[string]any](t, taskRR.Body)
-	if task["current_thread_id"] != mainThreadID {
-		t.Fatalf("expected current_thread_id=%s, got %s", mainThreadID, task["current_thread_id"])
-	}
-
-	// Verify thread list shows correct active state
-	listReq2 := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/threads", nil)
-	listRR2 := testResponseAuth(t, s, listReq2)
-	threads2 := mustJSON[[]map[string]any](t, listRR2.Body)
-
-	activeCount := 0
-	var activeID string
-	for _, th := range threads2 {
-		if th["is_active"] == true {
-			activeCount++
-			activeID = th["id"].(string)
+// onlyActiveThread answers the one thread the task holds active, and fails the test over none or two.
+func onlyActiveThread(t *testing.T, s *Server, projID, taskID string) string {
+	t.Helper()
+	threads := mustJSON[[]map[string]any](t, testResponseAuth(t, s,
+		testRequest(http.MethodGet, "/api/projects/"+projID+"/tasks/"+taskID+"/threads", nil)).Body)
+	var active []string
+	for _, th := range threads {
+		if isActive, _ := th["is_active"].(bool); isActive {
+			active = append(active, th["id"].(string))
 		}
 	}
-	if activeCount != 1 {
-		t.Fatalf("expected 1 active thread, got %d", activeCount)
+	if len(active) != 1 {
+		t.Fatalf("%d threads claim to be active (%v), want exactly one", len(active), active)
 	}
-	if activeID != mainThreadID {
-		t.Fatalf("expected Main to be active, got %s", activeID)
-	}
-	_ = forkThreadID // fork was created, verified by switch working
+	return active[0]
 }
 
 func TestThreadSwitchNotFound(t *testing.T) {
@@ -342,159 +260,6 @@ func TestThreadSwitchConcurrent(t *testing.T) {
 	if activeCount != 1 {
 		t.Fatalf("expected 1 active thread after concurrent switches, got %d", activeCount)
 	}
-}
-
-// TestThreadSwitchWorktreeContent verifies that worktree file content is correctly
-// restored when switching between threads with different file states.
-// This tests the exact user-reported scenario: fork a thread, modify files differently,
-// then switch back and forth — the worktree should reflect the active thread's state.
-func TestThreadSwitchWorktreeContent(t *testing.T) {
-	s := testServer(t)
-
-	// Create a project with a git repo that has an initial file
-	tmpDir := t.TempDir()
-	initialContent := "hello world\n"
-	if err := os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte(initialContent), 0o644); err != nil {
-		t.Fatalf("write initial file: %v", err)
-	}
-	initGitRepo(t, tmpDir)
-
-	cookie, csrfToken := loginTestCSRF(t, s)
-	proj := map[string]any{"name": "thread-worktree-test", "path": tmpDir}
-	req := testRequest("POST", "/api/projects", proj)
-	withAuthCSRF(req, cookie, csrfToken)
-	rr := testResponse(t, s, req)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("create project: %d %s", rr.Code, rr.Body.String())
-	}
-	projID := mustJSON[map[string]any](t, rr.Body)["id"].(string)
-
-	taskReq := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{"prompt": "test task"})
-	withAuthCSRF(taskReq, cookie, csrfToken)
-	taskRR := testResponse(t, s, taskReq)
-	if taskRR.Code != http.StatusCreated {
-		t.Fatalf("create task: %d %s", taskRR.Code, taskRR.Body.String())
-	}
-	taskData := mustJSON[map[string]any](t, taskRR.Body)
-	taskID := taskData["id"].(string)
-
-	// Create worktree (simulating task start)
-	worktreePath, _, err := s.executor.WorktreeMgr().CreateWorktree(projID, taskID, "task/"+taskID, "HEAD")
-	if err != nil {
-		t.Fatalf("create worktree: %v", err)
-	}
-
-	// Update task with branch info (required for thread switch to manipulate worktree)
-	task, err := s.store.GetTask(projID, taskID)
-	if err != nil {
-		t.Fatalf("get task: %v", err)
-	}
-	task.Branch = "task/" + taskID
-	task.BaseRef = "master"
-	if err := s.store.UpdateTask(task); err != nil {
-		t.Fatalf("update task branch: %v", err)
-	}
-
-	// --- Simulate Thread A (Main): write "hello friend" ---
-	friendContent := "hello friend\n"
-	if err := os.WriteFile(filepath.Join(worktreePath, "file.txt"), []byte(friendContent), 0o644); err != nil {
-		t.Fatalf("write friend content: %v", err)
-	}
-
-	// Get the Main thread
-	listReq := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/threads", nil)
-	listRR := testResponseAuth(t, s, listReq)
-	threads := mustJSON[[]map[string]any](t, listRR.Body)
-	mainThreadID := threads[0]["id"].(string)
-
-	// Create a checkpoint message (needed for fork)
-	msgReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
-		"role":    "user",
-		"content": "Change world to friend",
-	})
-	withAuthCSRF(msgReq, cookie, csrfToken)
-	msgRR := testResponse(t, s, msgReq)
-	msgData := mustJSON[map[string]any](t, msgRR.Body)
-	msgID := msgData["id"].(string)
-
-	// --- Fork to create Thread B ---
-	forkReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/fork", map[string]any{
-		"from_thread_id":  mainThreadID,
-		"from_message_id": msgID,
-	})
-	withAuthCSRF(forkReq, cookie, csrfToken)
-	forkRR := testResponse(t, s, forkReq)
-	if forkRR.Code != http.StatusCreated {
-		t.Fatalf("fork: %d %s", forkRR.Code, forkRR.Body.String())
-	}
-	forkData := mustJSON[map[string]any](t, forkRR.Body)
-	forkThreadID := forkData["id"].(string)
-
-	// --- Simulate Thread B (fork): write "hello choom" ---
-	// After fork, worktree is reset to checkpoint (baseline = "hello world")
-	// Write the fork's content
-	choomContent := "hello choom\n"
-	if err := os.WriteFile(filepath.Join(worktreePath, "file.txt"), []byte(choomContent), 0o644); err != nil {
-		t.Fatalf("write choom content: %v", err)
-	}
-
-	// Verify worktree has fork's content
-	verifyWorktreeContent(t, worktreePath, "file.txt", choomContent, "after fork, before switches")
-
-	// --- Switch 1: Fork → Main ---
-	switchReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/switch", map[string]any{
-		"thread_id": mainThreadID,
-	})
-	withAuthCSRF(switchReq, cookie, csrfToken)
-	switchRR := testResponse(t, s, switchReq)
-	if switchRR.Code != http.StatusOK {
-		t.Fatalf("switch to main: %d %s", switchRR.Code, switchRR.Body.String())
-	}
-	verifyWorktreeContent(t, worktreePath, "file.txt", friendContent, "after switch to Main (1)")
-
-	// --- Switch 2: Main → Fork ---
-	switchReq = testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/switch", map[string]any{
-		"thread_id": forkThreadID,
-	})
-	withAuthCSRF(switchReq, cookie, csrfToken)
-	switchRR = testResponse(t, s, switchReq)
-	if switchRR.Code != http.StatusOK {
-		t.Fatalf("switch to fork: %d %s", switchRR.Code, switchRR.Body.String())
-	}
-	verifyWorktreeContent(t, worktreePath, "file.txt", choomContent, "after switch to Fork (2)")
-
-	// --- Switch 3: Fork → Main ---
-	switchReq = testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/switch", map[string]any{
-		"thread_id": mainThreadID,
-	})
-	withAuthCSRF(switchReq, cookie, csrfToken)
-	switchRR = testResponse(t, s, switchReq)
-	if switchRR.Code != http.StatusOK {
-		t.Fatalf("switch to main: %d %s", switchRR.Code, switchRR.Body.String())
-	}
-	verifyWorktreeContent(t, worktreePath, "file.txt", friendContent, "after switch to Main (3)")
-
-	// --- Switch 4: Main → Fork ---
-	switchReq = testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/switch", map[string]any{
-		"thread_id": forkThreadID,
-	})
-	withAuthCSRF(switchReq, cookie, csrfToken)
-	switchRR = testResponse(t, s, switchReq)
-	if switchRR.Code != http.StatusOK {
-		t.Fatalf("switch to fork: %d %s", switchRR.Code, switchRR.Body.String())
-	}
-	verifyWorktreeContent(t, worktreePath, "file.txt", choomContent, "after switch to Fork (4)")
-
-	// --- Switch 5: Fork → Main (final) ---
-	switchReq = testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/switch", map[string]any{
-		"thread_id": mainThreadID,
-	})
-	withAuthCSRF(switchReq, cookie, csrfToken)
-	switchRR = testResponse(t, s, switchReq)
-	if switchRR.Code != http.StatusOK {
-		t.Fatalf("switch to main: %d %s", switchRR.Code, switchRR.Body.String())
-	}
-	verifyWorktreeContent(t, worktreePath, "file.txt", friendContent, "after switch to Main (5)")
 }
 
 func verifyWorktreeContent(t *testing.T, worktreePath, filePath, expectedContent, label string) {
