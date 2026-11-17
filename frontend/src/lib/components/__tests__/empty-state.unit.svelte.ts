@@ -18,22 +18,20 @@ afterEach(cleanup);
 const pane = (container: HTMLElement) => container.querySelector('.empty-state') as HTMLElement;
 
 describe('EmptyState', () => {
-    it('renders the headline it was given, and nothing it was not', () => {
-        const { container } = render(EmptyState, { props: { title: 'No commits' } });
-        expect(pane(container).querySelector('.title')?.textContent).toBe('No commits');
-        expect(pane(container).querySelector('.hint')).toBeNull();
+    it.each([
+        { given: { title: 'No commits' }, title: 'No commits', hint: null, glyph: false },
+        {
+            given: { title: 'No extensions installed', hint: 'Install one from the registry.', icon: folderIcon },
+            title: 'No extensions installed', hint: 'Install one from the registry.', glyph: true,
+        },
+    ])('paints only the parts it was given', ({ given, title, hint, glyph }) => {
+        const { container } = render(EmptyState, { props: given });
+        expect(pane(container).querySelector('.title')?.textContent).toBe(title);
+        expect(pane(container).querySelector('.hint')?.textContent ?? null).toBe(hint);
         expect(pane(container).querySelector('.action')).toBeNull();
-        expect(pane(container).querySelector('svg')).toBeNull();
-    });
-
-    it('adds the hint and the glyph it was given', () => {
-        const { container } = render(EmptyState, {
-            props: { title: 'No extensions installed', hint: 'Install one from the registry.', icon: folderIcon },
-        });
-        expect(pane(container).querySelector('.hint')?.textContent).toBe('Install one from the registry.');
-        expect(pane(container).querySelector('.icon svg')).toBeTruthy();
+        expect(pane(container).querySelector('svg') !== null).toBe(glyph);
         // The glyph stands in for the headline, so only the words are read.
-        expect(pane(container).querySelector('.icon')?.getAttribute('aria-hidden')).toBe('true');
+        expect(pane(container).querySelector('.icon')?.getAttribute('aria-hidden') ?? null).toBe(glyph ? 'true' : null);
     });
 
     it('renders the call to action through the action snippet', () => {

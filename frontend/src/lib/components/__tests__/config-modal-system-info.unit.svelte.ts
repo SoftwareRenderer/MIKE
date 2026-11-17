@@ -3,9 +3,12 @@ import { render, fireEvent, cleanup, waitFor } from '@testing-library/svelte';
 import ConfigModal from '$lib/components/ConfigModal.svelte';
 import type { Config } from '$lib/types';
 
-// The CA row is a pure function of config.tls_ca_available, which the server
-// reports only while it runs its own CA-signed certificate — and a cached config
-// written by a server that had no such field reads the same as `false`.
+/**
+ * Settings → About → System Info: the rows that report what the process knows about the machine it
+ * started on. Each is a pure function of the config the server answered with, and a cached config
+ * written by a server that predates the field reads as the field's absence: the row goes, the section
+ * stays.
+ */
 
 vi.mock('$lib/api', async (importOriginal) => {
     const actual = await importOriginal<typeof import('$lib/api')>();
@@ -21,8 +24,9 @@ vi.mock('$lib/api', async (importOriginal) => {
     };
 });
 
-const CA_LINK = 'a[href="/api/tls/ca"]';
 const SYSTEM_INFO_ROW = '.readonly-value';
+const ROW_LABEL = '.field-label-inline';
+const CA_LINK = 'a[href="/api/tls/ca"]';
 
 beforeEach(() => {
     vi.stubGlobal('matchMedia', (query: string) => ({
@@ -68,7 +72,19 @@ async function openAbout(config: Config) {
     return utils;
 }
 
-describe('Settings → About → System Info CA download', () => {
+/** The System Info row labelled `label`, or null when no such row is rendered. */
+function row(container: HTMLElement, label: string): HTMLElement | null {
+    const labelEl = Array.from(container.querySelectorAll(ROW_LABEL))
+        .find((el) => el.textContent?.trim() === label);
+    return labelEl?.parentElement ?? null;
+}
+
+/** The value of the System Info row labelled `label`, or null when no such row is rendered. */
+function rowValue(container: HTMLElement, label: string): string | null {
+    return row(container, label)?.querySelector(SYSTEM_INFO_ROW)?.textContent?.trim() ?? null;
+}
+
+describe('the CA download row', () => {
     it('offers the CA as a downloadable file when the server uses its own CA', async () => {
         const { container } = await openAbout(makeConfig({ tls_ca_available: true }));
 
@@ -84,6 +100,37 @@ describe('Settings → About → System Info CA download', () => {
 
         expect(container.querySelector(CA_LINK)).toBeNull();
         // The rest of System Info is untouched — the row is absent, not the section.
+        expect(container.querySelector(SYSTEM_INFO_ROW)).toBeTruthy();
+    });
+});
+
+describe('the maximum sandbox memory row', () => {
+    // The ceiling is MIKE_MEMORY_BUDGET_PCT of installed RAM, worked out once at startup.
+    const BUDGET = { memory_budget_mb: 13624, memory_total_mb: 15138, memory_budget_pct: 90 };
+
+    it('states the ceiling the server started with', async () => {
+        const { container } = await openAbout(makeConfig(BUDGET));
+
+        // Grouped, not the bare figure: the figure is read against a machine's own memory figures.
+        expect(rowValue(container, 'Maximum Sandbox Memory')).toBe('13,624 MB');
+    });
+
+    it('points at the variable an administrator sets, and prints no figures of this machine', async () => {
+        const { container } = await openAbout(makeConfig(BUDGET));
+
+        const help = row(container, 'Maximum Sandbox Memory')?.querySelector('.field-help')?.textContent ?? '';
+        expect(help).toContain('MIKE_MEMORY_BUDGET_PCT');
+        expect(help).not.toContain('90%');
+        expect(help).not.toContain('15,138');
+    });
+
+    it('shows nothing when the gate is disabled', async () => {
+        const { container } = await openAbout(makeConfig({
+            memory_budget_mb: 0, memory_total_mb: 0, memory_budget_pct: 0,
+        }));
+
+        expect(rowValue(container, 'Maximum Sandbox Memory')).toBeNull();
+        // The row is absent, not the section.
         expect(container.querySelector(SYSTEM_INFO_ROW)).toBeTruthy();
     });
 });

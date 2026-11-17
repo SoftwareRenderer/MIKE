@@ -71,13 +71,17 @@ describe('SandboxConfigModal memory limit', () => {
         cleanup();
     });
 
-    it('saves a blank field as 0 = no limit (a null field would be ignored)', async () => {
-        const { container } = renderModal(projectWith({ sandbox_memory_limit: 1024 }));
-        expect(memoryInput(container).value).toBe('1024');
+    // A blank field is not an absent field: a null would be ignored by the server and leave the old
+    // limit in place, so the screen writes the 0 that means "no limit".
+    it.each([
+        { stored: 1024, typed: '', saved: 0, name: 'a blanked field' },
+        { stored: 1024, typed: '-512', saved: 0, name: 'a negative value' },
+        { stored: 1024, typed: '2048', saved: 2048, name: 'an explicit limit' },
+    ])('saves $name as the limit the server is told', async ({ stored, typed, saved }) => {
+        const { container } = renderModal(projectWith({ sandbox_memory_limit: stored }));
+        expect(memoryInput(container).value).toBe(String(stored));
 
-        const changes = await saveWith(container, '');
-
-        expect(changes).toEqual({ sandbox_memory_limit: 0 });
+        expect(await saveWith(container, typed)).toEqual({ sandbox_memory_limit: saved });
     });
 
     it('renders an unlimited project as a blank field with a "No limit" placeholder', () => {
@@ -99,35 +103,15 @@ describe('SandboxConfigModal memory limit', () => {
         expect(updateProject).not.toHaveBeenCalled();
     });
 
-    it('clamps a negative value to no limit', async () => {
-        const { container } = renderModal(projectWith({ sandbox_memory_limit: 1024 }));
-        const changes = await saveWith(container, '-512');
-
-        expect(changes).toEqual({ sandbox_memory_limit: 0 });
-    });
-
-    it('keeps saving an explicit limit', async () => {
-        const { container } = renderModal(projectWith({ sandbox_memory_limit: 1024 }));
-        const changes = await saveWith(container, '2048');
-
-        expect(changes).toEqual({ sandbox_memory_limit: 2048 });
-    });
-
-    it('reports "No limit" in the read-only locked view', () => {
-        const { container } = renderModal(projectWith({ sandbox_memory_limit: 0 }), 1);
+    it.each([
+        { limit: 0, shown: 'No limit' },
+        { limit: 2048, shown: '2048 MB' },
+    ])('reports $shown in the read-only locked view', ({ limit, shown }) => {
+        const { container } = renderModal(projectWith({ sandbox_memory_limit: limit }), 1);
         const rows = Array.from(container.querySelectorAll('.sandbox-row'));
         const memoryRow = rows.find((r) => r.querySelector('.sandbox-label')?.textContent?.includes('Memory Limit'));
 
         expect(container.querySelector('.locked-view')).not.toBeNull();
-        expect(memoryRow?.querySelector('.sandbox-value')?.textContent?.trim()).toBe('No limit');
-    });
-
-    it('shows the enforced limit in MB in the locked view', () => {
-        const { container } = renderModal(projectWith({ sandbox_memory_limit: 2048 }), 1);
-        const rows = Array.from(container.querySelectorAll('.sandbox-row'));
-        const memoryRow = rows.find((r) => r.querySelector('.sandbox-label')?.textContent?.includes('Memory Limit'));
-
-        expect(container.querySelector('.locked-view')).not.toBeNull();
-        expect(memoryRow?.querySelector('.sandbox-value')?.textContent?.trim()).toBe('2048 MB');
+        expect(memoryRow?.querySelector('.sandbox-value')?.textContent?.trim()).toBe(shown);
     });
 });
