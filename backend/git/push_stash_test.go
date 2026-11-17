@@ -72,6 +72,10 @@ func TestPushStashWithNothingToStashNamesNoEntry(t *testing.T) {
 
 // Why git refused has to survive into the error: it is what the user is shown when a switch or a fork is
 // refused. A lock held by another git process is the ordinary way this happens.
+//
+// Some git versions print nothing for a `git stash push` refused under a held index.lock, and then there
+// is no reason to carry — the red is an environment fact, recorded in
+// docs/testing.md → Go unit test environment, not a reason to drop the assertion.
 func TestPushStashCarriesGitReason(t *testing.T) {
 	repoDir, _, _, _, _, wm := setupStashTest(t)
 	writeFile(t, repoDir, "task.txt", "in-flight work\n")

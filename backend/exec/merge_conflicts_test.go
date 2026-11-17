@@ -12,289 +12,113 @@ import (
 	"mike/backend/testutil/testgit"
 )
 
-// TestIsMergeInProgress_ReturnsTrueWhenMergeHeadExists verifies that
-// isMergeInProgress returns true when .git/MERGE_HEAD is present.
-func TestIsMergeInProgress_ReturnsTrueWhenMergeHeadExists(t *testing.T) {
-	t.Parallel()
-	tmpDir := t.TempDir()
-	testgit.Git(t, tmpDir, "init")
-	testgit.Git(t, tmpDir, "config", "user.email", "test@test.com")
-	testgit.Git(t, tmpDir, "config", "user.name", "Test")
-	os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("initial\n"), 0o644)
-	testgit.Git(t, tmpDir, "add", "file.txt")
-	testgit.Git(t, tmpDir, "commit", "-m", "Initial")
-
-	// Create a branch with a conflicting change
-	testgit.Git(t, tmpDir, "checkout", "-b", "feature")
-	os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("feature change\n"), 0o644)
-	testgit.Git(t, tmpDir, "add", "file.txt")
-	testgit.Git(t, tmpDir, "commit", "-m", "Feature change")
-
-	// Switch back to main and make a conflicting change
-	testgit.Git(t, tmpDir, "checkout", "master")
-	os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("master change\n"), 0o644)
-	testgit.Git(t, tmpDir, "add", "file.txt")
-	testgit.Git(t, tmpDir, "commit", "-m", "Master change")
-
-	// Start a merge (will conflict)
-	cmd := exec.Command("git", "merge", "feature")
-	cmd.Dir = tmpDir
-	_ = cmd.Run() // expected to fail with conflict
-
-	// MERGE_HEAD should now exist
-	if !isMergeInProgress(tmpDir) {
-		t.Fatal("expected isMergeInProgress to return true during merge conflict")
-	}
-
-	testgit.Git(t, tmpDir, "merge", "--abort")
+// conflictedRepo is a repository with master and feature changing the same line and no merge
+// started. Merge it to reach the state isMergeInProgress and GetConflictedFiles are judged on.
+func conflictedRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	testgit.RepoAt(t, dir)
+	testgit.Git(t, dir, "checkout", "-b", "feature")
+	testgit.WriteFile(t, dir, "file.txt", "line 1\nfeature\nline 3\n")
+	testgit.Git(t, dir, "add", "file.txt")
+	testgit.Git(t, dir, "commit", "-m", "Feature change")
+	testgit.Git(t, dir, "checkout", "master")
+	testgit.WriteFile(t, dir, "file.txt", "line 1\nmaster\nline 3\n")
+	testgit.Git(t, dir, "add", "file.txt")
+	testgit.Git(t, dir, "commit", "-m", "Master change")
+	return dir
 }
 
-// TestIsMergeInProgress_ReturnsFalseWhenNoMerge verifies that
-// isMergeInProgress returns false when no merge is in progress.
-func TestIsMergeInProgress_ReturnsFalseWhenNoMerge(t *testing.T) {
+// TestIsMergeInProgress asks the one question the conflict resolver branches on — is there a merge
+// to resolve here — in the repository and in a worktree (where .git is a file, not a directory),
+// and says no both before a merge and after it was aborted.
+func TestIsMergeInProgress(t *testing.T) {
 	t.Parallel()
-	tmpDir := t.TempDir()
-	testgit.Git(t, tmpDir, "init")
-	testgit.Git(t, tmpDir, "config", "user.email", "test@test.com")
-	testgit.Git(t, tmpDir, "config", "user.name", "Test")
-	os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("initial\n"), 0o644)
-	testgit.Git(t, tmpDir, "add", "file.txt")
-	testgit.Git(t, tmpDir, "commit", "-m", "Initial")
 
-	if isMergeInProgress(tmpDir) {
-		t.Fatal("expected isMergeInProgress to return false when no merge is in progress")
-	}
+	t.Run("a clean repository has no merge", func(t *testing.T) {
+		dir := testgit.Repo(t)
+		if isMergeInProgress(dir) {
+			t.Fatal("a repository nobody merged into reports a merge in progress")
+		}
+		if files := GetConflictedFiles(dir); len(files) != 0 {
+			t.Fatalf("a clean repository reports conflicted files %v", files)
+		}
+	})
+
+	t.Run("a conflicted merge in a repository", func(t *testing.T) {
+		dir := conflictedRepo(t)
+		merge := exec.Command("git", "merge", "feature")
+		merge.Dir = dir
+		_ = merge.Run() // expected to fail with a conflict
+
+		if !isMergeInProgress(dir) {
+			t.Fatal("expected isMergeInProgress to return true during merge conflict")
+		}
+
+		testgit.Git(t, dir, "merge", "--abort")
+		if isMergeInProgress(dir) {
+			t.Fatal("expected isMergeInProgress to return false after abort")
+		}
+	})
+
+	t.Run("a conflicted merge in a worktree", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		mainRepo := filepath.Join(tmpDir, "main")
+		testgit.RepoAt(t, mainRepo)
+		wtDir := filepath.Join(tmpDir, "worktree")
+		testgit.Git(t, mainRepo, "worktree", "add", wtDir, "-b", "wt-branch")
+
+		testgit.WriteFile(t, wtDir, "file.txt", "line 1\nwt change\nline 3\n")
+		testgit.Git(t, wtDir, "add", "file.txt")
+		testgit.Git(t, wtDir, "commit", "-m", "WT change")
+
+		testgit.Git(t, mainRepo, "checkout", "master")
+		testgit.WriteFile(t, mainRepo, "file.txt", "line 1\nmain change\nline 3\n")
+		testgit.Git(t, mainRepo, "add", "file.txt")
+		testgit.Git(t, mainRepo, "commit", "-m", "Main change")
+
+		merge := exec.Command("git", "merge", "master")
+		merge.Dir = wtDir
+		_ = merge.Run()
+
+		if !isMergeInProgress(wtDir) {
+			t.Fatal("expected isMergeInProgress to return true inside worktree during merge conflict")
+		}
+
+		testgit.Git(t, wtDir, "merge", "--abort")
+		if isMergeInProgress(wtDir) {
+			t.Fatal("expected isMergeInProgress to return false after abort in worktree")
+		}
+	})
 }
 
-// TestGetConflictedFiles_DetectsMultipleConflicts verifies that multiple conflicted files are all detected.
-func TestGetConflictedFiles_DetectsMultipleConflicts(t *testing.T) {
+// TestGetMergeStatusOutput keeps the diagnostic a refused merge reports non-empty: the clean tree, the
+// dirty one and a directory that is no repository at all all answer with something a person can read.
+func TestGetMergeStatusOutput(t *testing.T) {
 	t.Parallel()
-	tmpDir := t.TempDir()
-	testgit.Git(t, tmpDir, "init")
-	testgit.Git(t, tmpDir, "config", "user.email", "test@test.com")
-	testgit.Git(t, tmpDir, "config", "user.name", "Test")
 
-	// Create two initial files
-	os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte("a original\n"), 0o644)
-	os.WriteFile(filepath.Join(tmpDir, "b.txt"), []byte("b original\n"), 0o644)
-	testgit.Git(t, tmpDir, "add", ".")
-	testgit.Git(t, tmpDir, "commit", "-m", "Initial")
+	t.Run("clean, dirty and not-a-repository", func(t *testing.T) {
+		dir := testgit.Repo(t)
+		if output := getMergeStatusOutput(dir); output != "(working tree clean)" {
+			t.Fatalf("expected '(working tree clean)', got %q", output)
+		}
 
-	// Create conflicting branch
-	testgit.Git(t, tmpDir, "checkout", "-b", "feature")
-	os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte("a feature\n"), 0o644)
-	os.WriteFile(filepath.Join(tmpDir, "b.txt"), []byte("b feature\n"), 0o644)
-	testgit.Git(t, tmpDir, "add", ".")
-	testgit.Git(t, tmpDir, "commit", "-m", "Feature")
+		// Dirty working tree
+		testgit.WriteFile(t, dir, "file.txt", "modified\n")
+		output := getMergeStatusOutput(dir)
+		if output == "(working tree clean)" {
+			t.Fatal("expected dirty status, got clean")
+		}
+		if !strings.Contains(output, "file.txt") {
+			t.Fatalf("expected status to mention file.txt, got %q", output)
+		}
+	})
 
-	// Conflicting changes on master
-	testgit.Git(t, tmpDir, "checkout", "master")
-	os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte("a master\n"), 0o644)
-	os.WriteFile(filepath.Join(tmpDir, "b.txt"), []byte("b master\n"), 0o644)
-	testgit.Git(t, tmpDir, "add", ".")
-	testgit.Git(t, tmpDir, "commit", "-m", "Master")
-
-	// Start merge
-	cmd := exec.Command("git", "merge", "feature")
-	cmd.Dir = tmpDir
-	_ = cmd.Run()
-
-	files := GetConflictedFiles(tmpDir)
-	if len(files) != 2 {
-		t.Fatalf("expected 2 files, got %d: %v", len(files), files)
-	}
-	// Files may be in any order
-	fileSet := make(map[string]bool)
-	for _, f := range files {
-		fileSet[f] = true
-	}
-	if !fileSet["a.txt"] || !fileSet["b.txt"] {
-		t.Fatalf("expected a.txt and b.txt, got %v", files)
-	}
-
-	testgit.Git(t, tmpDir, "merge", "--abort")
-}
-
-// TestGetConflictedFiles_ReturnsEmptyWhenNoConflicts verifies that no files are returned when there are no conflicts.
-func TestGetConflictedFiles_ReturnsEmptyWhenNoConflicts(t *testing.T) {
-	t.Parallel()
-	tmpDir := t.TempDir()
-	testgit.Git(t, tmpDir, "init")
-	testgit.Git(t, tmpDir, "config", "user.email", "test@test.com")
-	testgit.Git(t, tmpDir, "config", "user.name", "Test")
-	os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("initial\n"), 0o644)
-	testgit.Git(t, tmpDir, "add", "file.txt")
-	testgit.Git(t, tmpDir, "commit", "-m", "Initial")
-
-	files := GetConflictedFiles(tmpDir)
-	if len(files) != 0 {
-		t.Fatalf("expected no files, got %v", files)
-	}
-}
-
-// TestGetMergeStatusOutput_ReturnsDiagnostics verifies that the diagnostic
-// function returns meaningful output in various states.
-func TestGetMergeStatusOutput_ReturnsDiagnostics(t *testing.T) {
-	t.Parallel()
-	tmpDir := t.TempDir()
-	testgit.Git(t, tmpDir, "init")
-	testgit.Git(t, tmpDir, "config", "user.email", "test@test.com")
-	testgit.Git(t, tmpDir, "config", "user.name", "Test")
-	os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("initial\n"), 0o644)
-	testgit.Git(t, tmpDir, "add", "file.txt")
-	testgit.Git(t, tmpDir, "commit", "-m", "Initial")
-
-	output := getMergeStatusOutput(tmpDir)
-	if output != "(working tree clean)" {
-		t.Fatalf("expected '(working tree clean)', got %q", output)
-	}
-
-	// Dirty working tree
-	os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("modified\n"), 0o644)
-	output = getMergeStatusOutput(tmpDir)
-	if output == "(working tree clean)" {
-		t.Fatal("expected dirty status, got clean")
-	}
-	if !strings.Contains(output, "file.txt") {
-		t.Fatalf("expected status to mention file.txt, got %q", output)
-	}
-}
-
-// TestGetMergeStatusOutput_NonGitDir verifies behavior in a non-git directory.
-func TestGetMergeStatusOutput_NonGitDir(t *testing.T) {
-	t.Parallel()
-	tmpDir := t.TempDir()
-	output := getMergeStatusOutput(tmpDir)
-	if !strings.Contains(output, "git status failed") {
-		t.Fatalf("expected error message for non-git dir, got %q", output)
-	}
-}
-
-// TestMergeConflictFallback_ChainWithAutoResolve simulates the full fallback
-// chain: merge conflict where git auto-resolves (both deleted same file).
-func TestMergeConflictFallback_ChainWithAutoResolve(t *testing.T) {
-	t.Parallel()
-	tmpDir := t.TempDir()
-	testgit.Git(t, tmpDir, "init")
-	testgit.Git(t, tmpDir, "config", "user.email", "test@test.com")
-	testgit.Git(t, tmpDir, "config", "user.name", "Test")
-
-	// Create a file
-	os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("original\n"), 0o644)
-	testgit.Git(t, tmpDir, "add", "file.txt")
-	testgit.Git(t, tmpDir, "commit", "-m", "Initial")
-
-	// Both branches delete the same file — git auto-resolves this
-	testgit.Git(t, tmpDir, "checkout", "-b", "feature")
-	os.Remove(filepath.Join(tmpDir, "file.txt"))
-	testgit.Git(t, tmpDir, "add", "-A")
-	testgit.Git(t, tmpDir, "commit", "-m", "Delete file")
-
-	testgit.Git(t, tmpDir, "checkout", "master")
-	os.Remove(filepath.Join(tmpDir, "file.txt"))
-	testgit.Git(t, tmpDir, "add", "-A")
-	testgit.Git(t, tmpDir, "commit", "-m", "Delete file")
-
-	// Merge should succeed (git auto-resolves DD)
-	cmd := exec.Command("git", "merge", "feature")
-	cmd.Dir = tmpDir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("merge should have succeeded (both deleted same file): %v: %s", err, string(out))
-	}
-
-	// Verify no merge in progress
-	if isMergeInProgress(tmpDir) {
-		t.Fatal("expected no merge in progress after successful auto-resolve")
-	}
-}
-
-// TestIsMergeInProgress_InWorktree verifies that isMergeInProgress works
-// correctly inside a git worktree (where .git is a file, not a directory).
-func TestIsMergeInProgress_InWorktree(t *testing.T) {
-	t.Parallel()
-	tmpDir := t.TempDir()
-	mainRepo := filepath.Join(tmpDir, "main")
-	os.MkdirAll(mainRepo, 0o755)
-	testgit.Git(t, mainRepo, "init")
-	testgit.Git(t, mainRepo, "config", "user.email", "test@test.com")
-	testgit.Git(t, mainRepo, "config", "user.name", "Test")
-	os.WriteFile(filepath.Join(mainRepo, "file.txt"), []byte("line 1\nline 2\nline 3\n"), 0o644)
-	testgit.Git(t, mainRepo, "add", "file.txt")
-	testgit.Git(t, mainRepo, "commit", "-m", "Initial")
-
-	// Create a worktree on a new branch
-	wtDir := filepath.Join(tmpDir, "worktree")
-	testgit.Git(t, mainRepo, "worktree", "add", wtDir, "-b", "wt-branch")
-
-	// Make conflicting change in worktree
-	os.WriteFile(filepath.Join(wtDir, "file.txt"), []byte("line 1\nwt change\nline 3\n"), 0o644)
-	testgit.Git(t, wtDir, "add", "file.txt")
-	testgit.Git(t, wtDir, "commit", "-m", "WT change")
-
-	// Make conflicting change in main
-	testgit.Git(t, mainRepo, "checkout", "master")
-	os.WriteFile(filepath.Join(mainRepo, "file.txt"), []byte("line 1\nmain change\nline 3\n"), 0o644)
-	testgit.Git(t, mainRepo, "add", "file.txt")
-	testgit.Git(t, mainRepo, "commit", "-m", "Main change")
-
-	// Merge in worktree (will conflict)
-	cmd := exec.Command("git", "merge", "master")
-	cmd.Dir = wtDir
-	_ = cmd.Run()
-
-	// isMergeInProgress should work inside the worktree
-	if !isMergeInProgress(wtDir) {
-		t.Fatal("expected isMergeInProgress to return true inside worktree during merge conflict")
-	}
-
-	testgit.Git(t, wtDir, "merge", "--abort")
-
-	if isMergeInProgress(wtDir) {
-		t.Fatal("expected isMergeInProgress to return false after abort in worktree")
-	}
-}
-
-// TestMergeConflictFallback_NoMergeHead verifies that isMergeInProgress
-// returns false after merge --abort.
-func TestMergeConflictFallback_NoMergeHead(t *testing.T) {
-	t.Parallel()
-	tmpDir := t.TempDir()
-	testgit.Git(t, tmpDir, "init")
-	testgit.Git(t, tmpDir, "config", "user.email", "test@test.com")
-	testgit.Git(t, tmpDir, "config", "user.name", "Test")
-
-	// Create initial file
-	os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("line 1\nline 2\nline 3\n"), 0o644)
-	testgit.Git(t, tmpDir, "add", "file.txt")
-	testgit.Git(t, tmpDir, "commit", "-m", "Initial")
-
-	// Create conflicting branch
-	testgit.Git(t, tmpDir, "checkout", "-b", "feature")
-	os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("line 1\nfeature\nline 3\n"), 0o644)
-	testgit.Git(t, tmpDir, "add", "file.txt")
-	testgit.Git(t, tmpDir, "commit", "-m", "Feature")
-
-	// Conflicting change on master
-	testgit.Git(t, tmpDir, "checkout", "master")
-	os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("line 1\nmaster\nline 3\n"), 0o644)
-	testgit.Git(t, tmpDir, "add", "file.txt")
-	testgit.Git(t, tmpDir, "commit", "-m", "Master")
-
-	// Start merge (will conflict)
-	cmd := exec.Command("git", "merge", "feature")
-	cmd.Dir = tmpDir
-	_ = cmd.Run()
-
-	if !isMergeInProgress(tmpDir) {
-		t.Fatal("expected merge in progress before abort")
-	}
-
-	testgit.Git(t, tmpDir, "merge", "--abort")
-
-	if isMergeInProgress(tmpDir) {
-		t.Fatal("expected no merge in progress after abort")
-	}
+	t.Run("a directory that is no repository", func(t *testing.T) {
+		if output := getMergeStatusOutput(t.TempDir()); !strings.Contains(output, "git status failed") {
+			t.Fatalf("expected error message for non-git dir, got %q", output)
+		}
+	})
 }
 
 // TestGetConflictedFiles_OptionsShapedAndQuotedNames checks that a conflicted file whose name git

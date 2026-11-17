@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -51,32 +52,9 @@ func lastSeenOf(t *testing.T, db *store.Store, id string) int64 {
 	return v
 }
 
-func TestStartSessionIssuesCredentials(t *testing.T) {
-	m := testManager(t)
-
-	id, token, csrfToken, err := m.StartSession(t.Context(), testIP, testUA)
-	if err != nil {
-		t.Fatalf("start session: %v", err)
-	}
-	if id == "" {
-		t.Error("expected non-empty session id")
-	}
-	if token == "" {
-		t.Error("expected non-empty token")
-	}
-	if len(token) != 64 { // 32 bytes hex-encoded = 64 chars
-		t.Errorf("token length = %d; want 64", len(token))
-	}
-	if csrfToken == "" {
-		t.Error("expected non-empty csrf token")
-	}
-	if len(csrfToken) != 32 { // 16 bytes hex-encoded = 32 chars
-		t.Errorf("csrf token length = %d; want 32", len(csrfToken))
-	}
-}
-
-// The id is listed by GET /api/sessions, so it must not share bytes with the token.
-func TestSessionCredentialsShareNoBytes(t *testing.T) {
+// One crypto/rand draw pays for the three values a session hands out, so the id a listing shows must
+// never be a slice of either credential that authenticates.
+func TestStartSessionIssuesDistinctCredentials(t *testing.T) {
 	m := testManager(t)
 
 	seen := map[string]bool{}
@@ -85,9 +63,16 @@ func TestSessionCredentialsShareNoBytes(t *testing.T) {
 		if err != nil {
 			t.Fatalf("start session: %v", err)
 		}
+		if len(token) != 64 { // 32 bytes hex-encoded
+			t.Fatalf("token %q: want 64 characters", token)
+		}
+		if len(csrfToken) != 32 { // 16 bytes hex-encoded
+			t.Fatalf("csrf token %q: want 32 characters", csrfToken)
+		}
 		if len(id) != 16 { // 8 bytes of hex, the shape stored ids already have
 			t.Fatalf("session id %q: want 16 characters", id)
 		}
+		// The id is listed by GET /api/sessions, so it must not be derivable from what it names.
 		if strings.HasPrefix(token, id) {
 			t.Fatalf("the session id is the front of the token: id=%s token=%s", id, token)
 		}
@@ -121,21 +106,20 @@ func TestValidateValidToken(t *testing.T) {
 	}
 }
 
-func TestValidateInvalidToken(t *testing.T) {
+// A token that is not a live session is one answer, whether nobody typed it or it was never handed out:
+// telling the two apart would say which tokens exist.
+func TestValidateRefusesNoLiveSession(t *testing.T) {
 	m := testManager(t)
 
-	_, _, err := m.Validate(t.Context(), "nonexistent-token")
-	if err != ErrInvalidToken {
-		t.Fatalf("expected ErrInvalidToken, got: %v", err)
-	}
-}
-
-func TestValidateEmptyToken(t *testing.T) {
-	m := testManager(t)
-
-	_, _, err := m.Validate(t.Context(), "")
-	if err != ErrInvalidToken {
-		t.Fatalf("expected ErrInvalidToken for empty token, got: %v", err)
+	for _, tc := range []struct{ name, token string }{
+		{"nothing typed", ""},
+		{"never issued", "nonexistent-token"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, _, err := m.Validate(t.Context(), tc.token); !errors.Is(err, ErrInvalidToken) {
+				t.Errorf("Validate(%q) = %v, want ErrInvalidToken", tc.token, err)
+			}
+		})
 	}
 }
 

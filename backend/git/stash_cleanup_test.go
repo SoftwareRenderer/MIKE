@@ -110,287 +110,205 @@ func createStash(t *testing.T, repoDir, content, msg string) {
 	runGit(t, repoDir, "stash", "push", "-u", "-m", msg)
 }
 
-// TestDropStashEntriesForTask_ByHash verifies that DropStashEntriesForTask
-// uses hash-based drops. It creates kanban stashes interleaved with unrelated
-// stashes, then verifies only the kanban entries are dropped.
-func TestDropStashEntriesForTask_ByHash(t *testing.T) {
-	repoDir, projID, taskID, _, _, wm := setupStashTest(t)
+// The sweep a deleted task leaves behind. Entries are matched by label and dropped by hash, so neither
+// the stack's order nor another owner's entry may decide what disappears.
+func TestDropStashEntriesForTaskDropsOnlyItsOwnLabels(t *testing.T) {
+	t.Run("a manual stash of the same shape survives", func(t *testing.T) {
+		repoDir, projID, taskID, _, _, wm := setupStashTest(t)
 
-	// Create some kanban-labeled stashes for this task
-	for i, label := range []string{"mike-switch", "mike-fork", "mike-checkpoint"} {
-		msg := fmt.Sprintf("%s-%s", label, taskID)
-		createStash(t, repoDir, fmt.Sprintf("change for %s\n", label), msg)
-		_ = i
-	}
-
-	// Create unrelated stashes (non-kanban)
-	for i := 0; i < 2; i++ {
-		createStash(t, repoDir, fmt.Sprintf("unrelated change %d\n", i), fmt.Sprintf("manual stash %d", i))
-	}
-
-	// Verify we have 5 stash entries (3 kanban + 2 unrelated)
-	before := countStashEntries(t, repoDir)
-	if before != 5 {
-		t.Fatalf("expected 5 stash entries before cleanup, got %d", before)
-	}
-
-	// Drop kanban entries for this task
-	err := wm.DropStashEntriesForTask(projID, taskID)
-	if err != nil {
-		t.Fatalf("DropStashEntriesForTask: %v", err)
-	}
-
-	// Should have exactly 2 entries left (the unrelated ones)
-	after := countStashEntries(t, repoDir)
-	if after != 2 {
-		t.Fatalf("expected 2 stash entries after cleanup, got %d", after)
-	}
-
-	// Verify the remaining entries are the unrelated ones
-	subjects := stashSubjects(t, repoDir)
-	for _, s := range subjects {
-		if strings.Contains(s, "mike-switch-"+taskID) ||
-			strings.Contains(s, "mike-fork-"+taskID) ||
-			strings.Contains(s, "mike-checkpoint-"+taskID) {
-			t.Errorf("kanban stash entry should have been dropped, found: %s", s)
+		for _, label := range []string{"mike-switch", "mike-fork", "mike-checkpoint"} {
+			createStash(t, repoDir, fmt.Sprintf("change for %s\n", label), fmt.Sprintf("%s-%s", label, taskID))
 		}
-	}
-}
-
-// TestDropStashEntriesForTask_NoFalsePositives verifies that dropping stashes
-// for one task does not affect stashes for a different task, even if the task
-// IDs share a substring.
-func TestDropStashEntriesForTask_NoFalsePositives(t *testing.T) {
-	repoDir, projID, taskID, s, _, wm := setupStashTest(t)
-
-	// Create a second task in the DB
-	otherTaskID := "other-task-id"
-	otherTask := &types.Task{
-		ID:        otherTaskID,
-		ProjectID: projID,
-		Title:     "Other task",
-		Status:    types.StatusInProgress,
-		Branch:    "task/" + otherTaskID,
-	}
-	if err := s.CreateTask(otherTask); err != nil {
-		t.Fatalf("create other task: %v", err)
-	}
-
-	// Create kanban stashes for BOTH tasks
-	for _, tid := range []string{taskID, otherTaskID} {
-		msg := fmt.Sprintf("mike-switch-%s", tid)
-		createStash(t, repoDir, fmt.Sprintf("change for %s\n", tid), msg)
-	}
-
-	before := countStashEntries(t, repoDir)
-	if before != 2 {
-		t.Fatalf("expected 2 stash entries before cleanup, got %d", before)
-	}
-
-	// Drop only the first task's stashes
-	err := wm.DropStashEntriesForTask(projID, taskID)
-	if err != nil {
-		t.Fatalf("DropStashEntriesForTask: %v", err)
-	}
-
-	after := countStashEntries(t, repoDir)
-	if after != 1 {
-		t.Fatalf("expected 1 stash entry after cleanup, got %d", after)
-	}
-
-	// The remaining entry should be for the OTHER task
-	subjects := stashSubjects(t, repoDir)
-	if len(subjects) != 1 {
-		t.Fatalf("expected 1 subject, got %d", len(subjects))
-	}
-	if !strings.Contains(subjects[0], otherTaskID) {
-		t.Errorf("remaining stash should belong to other task, got: %s", subjects[0])
-	}
-}
-
-// TestDropStashEntriesForTask_InterleavedStashes verifies correct behavior
-// when kanban and non-kanban stashes are interleaved at various indices.
-func TestDropStashEntriesForTask_InterleavedStashes(t *testing.T) {
-	repoDir, projID, taskID, _, _, wm := setupStashTest(t)
-
-	// Create an interleaved pattern: unrelated, kanban, unrelated, kanban, unrelated
-	stashMessages := []string{
-		"manual stash 0",
-		fmt.Sprintf("mike-switch-%s", taskID),
-		"manual stash 1",
-		fmt.Sprintf("mike-fork-%s", taskID),
-		"manual stash 2",
-	}
-
-	for _, msg := range stashMessages {
-		createStash(t, repoDir, fmt.Sprintf("change for %s\n", msg), msg)
-	}
-
-	before := countStashEntries(t, repoDir)
-	if before != 5 {
-		t.Fatalf("expected 5 stash entries before cleanup, got %d", before)
-	}
-
-	err := wm.DropStashEntriesForTask(projID, taskID)
-	if err != nil {
-		t.Fatalf("DropStashEntriesForTask: %v", err)
-	}
-
-	after := countStashEntries(t, repoDir)
-	if after != 3 {
-		t.Fatalf("expected 3 stash entries after cleanup, got %d", after)
-	}
-
-	// Verify only manual stashes remain
-	subjects := stashSubjects(t, repoDir)
-	for _, s := range subjects {
-		if strings.Contains(s, "mike-") {
-			t.Errorf("kanban stash should have been dropped, found: %s", s)
+		for i := 0; i < 2; i++ {
+			createStash(t, repoDir, fmt.Sprintf("unrelated change %d\n", i), fmt.Sprintf("manual stash %d", i))
 		}
-	}
-}
-
-// TestDropStashEntriesForBranch_ByHash verifies that DropStashEntriesForBranch
-// uses hash-based drops. It creates stashes on a specific branch and verifies
-// only those are dropped.
-func TestDropStashEntriesForBranch_ByHash(t *testing.T) {
-	repoDir, projID, taskID, _, _, wm := setupStashTest(t)
-
-	branchName := "task/" + taskID
-
-	// Create a branch and stashes while on it (so git records the branch name)
-	runGit(t, repoDir, "branch", branchName)
-	runGit(t, repoDir, "checkout", branchName)
-	for i := 0; i < 3; i++ {
-		createStash(t, repoDir, fmt.Sprintf("change %d\n", i), fmt.Sprintf("mike-switch-%s entry %d", taskID, i))
-	}
-
-	// Switch to master and create stashes there (different branch in subject)
-	runGit(t, repoDir, "checkout", "master")
-	for i := 0; i < 2; i++ {
-		createStash(t, repoDir, fmt.Sprintf("other branch %d\n", i), fmt.Sprintf("other branch stash %d", i))
-	}
-
-	before := countStashEntries(t, repoDir)
-	if before != 5 {
-		t.Fatalf("expected 5 stash entries before cleanup, got %d", before)
-	}
-
-	// Drop stashes for the target branch
-	err := wm.DropStashEntriesForBranch(projID, branchName)
-	if err != nil {
-		t.Fatalf("DropStashEntriesForBranch: %v", err)
-	}
-
-	after := countStashEntries(t, repoDir)
-	if after != 2 {
-		t.Fatalf("expected 2 stash entries after cleanup, got %d", after)
-	}
-
-	// Verify remaining entries are from master
-	subjects := stashSubjects(t, repoDir)
-	for _, s := range subjects {
-		if strings.Contains(s, "On "+branchName+":") {
-			t.Errorf("stash on branch %s should have been dropped, found: %s", branchName, s)
+		if before := countStashEntries(t, repoDir); before != 5 {
+			t.Fatalf("expected 5 stash entries before cleanup, got %d", before)
 		}
-	}
+
+		if err := wm.DropStashEntriesForTask(projID, taskID); err != nil {
+			t.Fatalf("DropStashEntriesForTask: %v", err)
+		}
+
+		if after := countStashEntries(t, repoDir); after != 2 {
+			t.Fatalf("expected 2 stash entries after cleanup, got %d", after)
+		}
+		for _, s := range stashSubjects(t, repoDir) {
+			if strings.Contains(s, "mike-switch-"+taskID) ||
+				strings.Contains(s, "mike-fork-"+taskID) ||
+				strings.Contains(s, "mike-checkpoint-"+taskID) {
+				t.Errorf("kanban stash entry should have been dropped, found: %s", s)
+			}
+		}
+	})
+
+	t.Run("the position in the stack does not matter", func(t *testing.T) {
+		repoDir, projID, taskID, _, _, wm := setupStashTest(t)
+
+		for _, msg := range []string{
+			"manual stash 0",
+			fmt.Sprintf("mike-switch-%s", taskID),
+			"manual stash 1",
+			fmt.Sprintf("mike-fork-%s", taskID),
+			"manual stash 2",
+		} {
+			createStash(t, repoDir, fmt.Sprintf("change for %s\n", msg), msg)
+		}
+
+		if err := wm.DropStashEntriesForTask(projID, taskID); err != nil {
+			t.Fatalf("DropStashEntriesForTask: %v", err)
+		}
+		if after := countStashEntries(t, repoDir); after != 3 {
+			t.Fatalf("expected 3 stash entries after cleanup, got %d", after)
+		}
+		for _, s := range stashSubjects(t, repoDir) {
+			if strings.Contains(s, "mike-") {
+				t.Errorf("kanban stash should have been dropped, found: %s", s)
+			}
+		}
+	})
+
+	t.Run("a sibling task's labels survive", func(t *testing.T) {
+		repoDir, projID, taskID, s, _, wm := setupStashTest(t)
+
+		otherTaskID := "other-task-id"
+		if err := s.CreateTask(&types.Task{
+			ID: otherTaskID, ProjectID: projID, Title: "Other task",
+			Status: types.StatusInProgress, Branch: "task/" + otherTaskID,
+		}); err != nil {
+			t.Fatalf("create other task: %v", err)
+		}
+		for _, tid := range []string{taskID, otherTaskID} {
+			createStash(t, repoDir, fmt.Sprintf("change for %s\n", tid), fmt.Sprintf("mike-switch-%s", tid))
+		}
+
+		if err := wm.DropStashEntriesForTask(projID, taskID); err != nil {
+			t.Fatalf("DropStashEntriesForTask: %v", err)
+		}
+		subjects := stashSubjects(t, repoDir)
+		if len(subjects) != 1 {
+			t.Fatalf("expected 1 stash entry after cleanup, got %d: %v", len(subjects), subjects)
+		}
+		if !strings.Contains(subjects[0], otherTaskID) {
+			t.Errorf("remaining stash should belong to the other task, got: %s", subjects[0])
+		}
+	})
+
+	t.Run("every kanban label is dropped", func(t *testing.T) {
+		repoDir, projID, taskID, _, _, wm := setupStashTest(t)
+
+		for _, label := range []string{"mike-switch", "mike-fork", "mike-checkpoint", "mike-sync-merge", "mike-auto-merge"} {
+			msg := fmt.Sprintf("%s-%s", label, taskID)
+			createStash(t, repoDir, fmt.Sprintf("change for %s\n", label), msg)
+		}
+		if before := countStashEntries(t, repoDir); before != 5 {
+			t.Fatalf("expected 5 stash entries before cleanup, got %d", before)
+		}
+
+		if err := wm.DropStashEntriesForTask(projID, taskID); err != nil {
+			t.Fatalf("DropStashEntriesForTask: %v", err)
+		}
+		if after := countStashEntries(t, repoDir); after != 0 {
+			t.Fatalf("expected 0 stash entries after cleanup, got %d", after)
+		}
+	})
 }
 
-// TestDropStashEntriesForBranch_NoFalsePositives verifies that dropping stashes
-// for one branch does not affect stashes on a different branch with a similar name.
-func TestDropStashEntriesForBranch_NoFalsePositives(t *testing.T) {
-	repoDir, projID, _, _, _, wm := setupStashTest(t)
+// A branch's own entries are named in the reflog subject; the match is " <branch>:", so a branch whose
+// name is contained in another's is not swept with it.
+func TestDropStashEntriesForBranchDropsOnlyThatBranch(t *testing.T) {
+	t.Run("the other branch's entries survive", func(t *testing.T) {
+		repoDir, projID, taskID, _, _, wm := setupStashTest(t)
+		branchName := "task/" + taskID
 
-	// Create stashes on two different branches
-	branchA := "task/alpha-bravo-charlie"
-	branchB := "task/bravo-charlie-delta" // shares "bravo-charlie" substring
+		runGit(t, repoDir, "branch", branchName)
+		runGit(t, repoDir, "checkout", branchName)
+		for i := 0; i < 3; i++ {
+			createStash(t, repoDir, fmt.Sprintf("change %d\n", i), fmt.Sprintf("mike-switch-%s entry %d", taskID, i))
+		}
+		runGit(t, repoDir, "checkout", "master")
+		for i := 0; i < 2; i++ {
+			createStash(t, repoDir, fmt.Sprintf("other branch %d\n", i), fmt.Sprintf("other branch stash %d", i))
+		}
+		if before := countStashEntries(t, repoDir); before != 5 {
+			t.Fatalf("expected 5 stash entries before cleanup, got %d", before)
+		}
 
-	// Create stash on branchA
-	runGit(t, repoDir, "branch", branchA)
-	runGit(t, repoDir, "checkout", branchA)
-	createStash(t, repoDir, fmt.Sprintf("change for %s\n", branchA), fmt.Sprintf("work on %s", branchA))
+		if err := wm.DropStashEntriesForBranch(projID, branchName); err != nil {
+			t.Fatalf("DropStashEntriesForBranch: %v", err)
+		}
+		if after := countStashEntries(t, repoDir); after != 2 {
+			t.Fatalf("expected 2 stash entries after cleanup, got %d", after)
+		}
+		for _, s := range stashSubjects(t, repoDir) {
+			if strings.Contains(s, "On "+branchName+":") {
+				t.Errorf("stash on branch %s should have been dropped, found: %s", branchName, s)
+			}
+		}
+	})
 
-	// Create stash on branchB
-	runGit(t, repoDir, "branch", branchB)
-	runGit(t, repoDir, "checkout", branchB)
-	createStash(t, repoDir, fmt.Sprintf("change for %s\n", branchB), fmt.Sprintf("work on %s", branchB))
+	t.Run("a branch whose name contains the other's survives", func(t *testing.T) {
+		repoDir, projID, _, _, _, wm := setupStashTest(t)
 
-	before := countStashEntries(t, repoDir)
-	if before != 2 {
-		t.Fatalf("expected 2 stash entries before cleanup, got %d", before)
-	}
+		branchA := "task/alpha-bravo-charlie"
+		branchB := "task/bravo-charlie-delta" // shares "bravo-charlie" with branchA's tail
 
-	// Drop only branchA's stashes
-	err := wm.DropStashEntriesForBranch(projID, branchA)
-	if err != nil {
-		t.Fatalf("DropStashEntriesForBranch: %v", err)
-	}
+		runGit(t, repoDir, "branch", branchA)
+		runGit(t, repoDir, "checkout", branchA)
+		createStash(t, repoDir, fmt.Sprintf("change for %s\n", branchA), fmt.Sprintf("work on %s", branchA))
 
-	after := countStashEntries(t, repoDir)
-	if after != 1 {
-		t.Fatalf("expected 1 stash entry after cleanup, got %d", after)
-	}
+		runGit(t, repoDir, "branch", branchB)
+		runGit(t, repoDir, "checkout", branchB)
+		createStash(t, repoDir, fmt.Sprintf("change for %s\n", branchB), fmt.Sprintf("work on %s", branchB))
 
-	// The remaining entry should be for branchB
-	subjects := stashSubjects(t, repoDir)
-	if len(subjects) != 1 {
-		t.Fatalf("expected 1 subject, got %d", len(subjects))
-	}
-	if !strings.Contains(subjects[0], branchB) {
-		t.Errorf("remaining stash should belong to branchB, got: %s", subjects[0])
-	}
+		if err := wm.DropStashEntriesForBranch(projID, branchA); err != nil {
+			t.Fatalf("DropStashEntriesForBranch: %v", err)
+		}
+		subjects := stashSubjects(t, repoDir)
+		if len(subjects) != 1 {
+			t.Fatalf("expected 1 stash entry after cleanup, got %d: %v", len(subjects), subjects)
+		}
+		if !strings.Contains(subjects[0], branchB) {
+			t.Errorf("remaining stash should belong to %s, got: %s", branchB, subjects[0])
+		}
+	})
 }
 
-// TestDropStashEntriesForTask_EmptyStashList verifies no error when there are no stashes.
-func TestDropStashEntriesForTask_EmptyStashList(t *testing.T) {
-	_, projID, taskID, _, _, wm := setupStashTest(t)
-
-	err := wm.DropStashEntriesForTask(projID, taskID)
-	if err != nil {
-		t.Fatalf("DropStashEntriesForTask should not error on empty stash list: %v", err)
-	}
-}
-
-// TestDropStashEntriesForBranch_EmptyStashList verifies no error when there are no stashes.
-func TestDropStashEntriesForBranch_EmptyStashList(t *testing.T) {
-	_, projID, _, _, _, wm := setupStashTest(t)
-
-	err := wm.DropStashEntriesForBranch(projID, "task/some-task")
-	if err != nil {
-		t.Fatalf("DropStashEntriesForBranch should not error on empty stash list: %v", err)
-	}
-}
-
-// TestDropStashEntriesForTask_AllKanbanLabels verifies all kanban label types
-// are matched and dropped: switch, fork, checkpoint, sync-merge, auto-merge.
-func TestDropStashEntriesForTask_AllKanbanLabels(t *testing.T) {
+// An empty stack is the ordinary case, not an error.
+func TestDropStashEntriesForTaskAndBranchOnAnEmptyStack(t *testing.T) {
 	repoDir, projID, taskID, _, _, wm := setupStashTest(t)
 
-	labels := []string{
-		"mike-switch",
-		"mike-fork",
-		"mike-checkpoint",
-		"mike-sync-merge",
-		"mike-auto-merge",
+	if err := wm.DropStashEntriesForTask(projID, taskID); err != nil {
+		t.Fatalf("DropStashEntriesForTask should not error on an empty stash list: %v", err)
 	}
-
-	for _, label := range labels {
-		msg := fmt.Sprintf("%s-%s", label, taskID)
-		createStash(t, repoDir, fmt.Sprintf("change for %s\n", label), msg)
+	if err := wm.DropStashEntriesForBranch(projID, "task/some-task"); err != nil {
+		t.Fatalf("DropStashEntriesForBranch should not error on an empty stash list: %v", err)
 	}
-
-	before := countStashEntries(t, repoDir)
-	if before != 5 {
-		t.Fatalf("expected 5 stash entries before cleanup, got %d", before)
+	if n := countStashEntries(t, repoDir); n != 0 {
+		t.Errorf("the empty-stack sweep changed the stack: %d entries", n)
 	}
+}
 
-	err := wm.DropStashEntriesForTask(projID, taskID)
-	if err != nil {
-		t.Fatalf("DropStashEntriesForTask: %v", err)
-	}
-
-	after := countStashEntries(t, repoDir)
-	if after != 0 {
-		t.Fatalf("expected 0 stash entries after cleanup, got %d", after)
+// The label is the identity a deferred restore reads back, so its shape and its cap are part of the
+// hash-identity contract, not a formatting detail.
+func TestStashLabelsCarryTheirPrefixAndStayWithinTheCap(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		label  func(string) string
+		prefix string
+	}{
+		{"switch", StashMessageForSwitch, "mike-switch-"},
+		{"fork", StashMessageForFork, "mike-fork-"},
+		{"sync-merge", StashMessageForSyncMerge, "mike-sync-merge-"},
+		{"auto-merge", StashMessageForAutoMerge, "mike-auto-merge-"},
+	} {
+		const taskID = "test-task-id"
+		if got := tc.label(taskID); got != tc.prefix+taskID {
+			t.Errorf("StashMessageFor%s = %q, want %q", tc.name, got, tc.prefix+taskID)
+		}
+		long := "waterfall-lightning-thunder-waterfall-lightning-thunder-x"
+		if n := len(tc.label(long)); n > 50 {
+			t.Errorf("StashMessageFor%s len = %d, want ≤ 50", tc.name, n)
+		}
 	}
 }

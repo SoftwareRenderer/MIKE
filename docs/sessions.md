@@ -45,6 +45,6 @@ The **API tokens** section manages a separate, narrower credential used for spec
 
 - **Backend Tests**: `backend/store/sessions_test.go`, `backend/auth/session_test.go`, `backend/server/handler_sessions_test.go`, `backend/types/idgen_test.go`.
 - **Frontend Tests**: `frontend/src/lib/api/__tests__/sessions.unit.ts`, `frontend/src/lib/api/__tests__/auth.unit.ts`.
-- **E2E Tests**: `settings-sessions.spec.ts`.
+- **E2E Tests**: `frontend/tests/e2e/settings-passkeys.spec.ts` — the About tab's two credential sections are one file, because an "other" session is made by pairing a second device and only a ceremony can do that.
 
-`go test ./backend/auth/` verifies the hashed session and store logic. `npx playwright test settings-sessions` verifies the UI and revocation flow.
+`go test ./backend/auth/` verifies the hashed session and store logic. `npx playwright test settings-passkeys` verifies the UI and revocation flow.

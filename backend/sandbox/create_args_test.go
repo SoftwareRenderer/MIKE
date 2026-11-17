@@ -64,6 +64,27 @@ func TestCreateRefusesUnsafeSandboxAdditions(t *testing.T) {
 			}},
 			comment: "a relative source resolves against this process's working directory",
 		},
+		{
+			name: "agent mount whose host path walks up", want: "agent sandbox mount",
+			opts: SandboxOpts{AgentSandbox: &types.AgentSandbox{
+				Mounts: []types.SandboxMount{{HostPath: "/tmp/agent/../outside", ContainerPath: "/mnt/x", Mode: "ro"}},
+			}},
+			comment: "the grant is a text field in an extension's settings, and `..` is how it leaves its own directory",
+		},
+		{
+			name: "agent mount whose container path walks up", want: "agent sandbox mount",
+			opts: SandboxOpts{AgentSandbox: &types.AgentSandbox{
+				Mounts: []types.SandboxMount{{HostPath: "/tmp/agent", ContainerPath: "/mnt/../etc", Mode: "ro"}},
+			}},
+			comment: "the destination is where the guest reads it, so it is checked as strictly as the source",
+		},
+		{
+			name: "agent mount with a mode that is neither ro nor rw", want: "agent sandbox mount",
+			opts: SandboxOpts{AgentSandbox: &types.AgentSandbox{
+				Mounts: []types.SandboxMount{{HostPath: "/tmp/agent", ContainerPath: "/mnt/x", Mode: "write"}},
+			}},
+			comment: "an unrecognised mode would reach the mount spec as nothing, which is the writable reading",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -100,7 +121,10 @@ func sharedPrefaceDiff(args []string, containerName string) string {
 
 // TestTaskCreateArgsBeginWithTheSharedPreface: the task sandbox's isolation posture is the one in
 // pkg/sandboxruntime, not a copy of it — AppendCapabilities refuses a capability grant onto
-// anything else, and a drifted copy would turn every task with capabilities into a refusal.
+// anything else, and a drifted copy would turn every task with capabilities into a refusal. The order
+// of the preface's own arguments, `--pull never` and the podman-global `--runtime-flag` pair among
+// them, is pinned once at TestGVisorCreateArgsIsTheIsolatedShape; the comparison below is what carries
+// it into this command line. What is pinned here is what the task builder adds around it.
 func TestTaskCreateArgsBeginWithTheSharedPreface(t *testing.T) {
 	const name = "kanban-sandbox-task-preface"
 	args := createContainerArgs(name, "/home/sandbox/proj")
@@ -110,6 +134,21 @@ func TestTaskCreateArgsBeginWithTheSharedPreface(t *testing.T) {
 	if len(args) <= len(sandboxruntime.GVisorCreateArgs(name)) {
 		t.Errorf("a task sandbox adds no argument of its own (workdir): %v", args)
 	}
+
+	hasPair := func(flag, value string) bool {
+		for i := 0; i+1 < len(args); i++ {
+			if args[i] == flag && args[i+1] == value {
+				return true
+			}
+		}
+		return false
+	}
+
+	for _, pair := range [][2]string{{"--workdir", "/home/sandbox/proj"}} {
+		if !hasPair(pair[0], pair[1]) {
+			t.Errorf("args missing %s %s: %v", pair[0], pair[1], args)
+		}
+	}
 }
 
 // TestTaskSandboxIsolatesWhatACapabilityGrantAssumes pins what the removal of the
@@ -117,26 +156,11 @@ func TestTaskCreateArgsBeginWithTheSharedPreface(t *testing.T) {
 // from a full --cap-drop ALL, so a re-added capability is a privilege in the guest rather
 // than on the host kernel. Create appends through sandboxruntime.AppendCapabilities, the only path
 // to a --cap-add, so a change to createContainerArgs that drops either half turns into a refused
-// task instead of a wider sandbox.
+// task instead of a wider sandbox. The refusal of an option-shaped value itself, and the ordering
+// of that check against the availability probe, is TestCreateRefusesUnsafeSandboxAdditions's.
 func TestTaskSandboxIsolatesWhatACapabilityGrantAssumes(t *testing.T) {
 	args := createContainerArgs("kanban-sandbox-task-args", "/home/sandbox/args-proj")
 	if err := sandboxruntime.GVisorIsolationForCaps(args); err != nil {
 		t.Fatalf("a task sandbox no longer isolates what a capability grant assumes: %v\nargs = %v", err, args)
-	}
-
-	// The shape rule still refuses, and still refuses before the availability probe, so a
-	// host without runsc reports the configuration error instead of hiding it under
-	// "gVisor not available".
-	sm := NewSandboxManager(sandboxruntime.Boot{})
-	project := &types.Project{ID: "p-caps", Name: "caps-proj", Path: t.TempDir()}
-	_, err := sm.Create("task-caps", taskWorktreeDir(t), project, SandboxOpts{Capabilities: []string{"--privileged"}})
-	if err == nil {
-		t.Fatal("Create accepted an option-shaped capability")
-	}
-	if !strings.Contains(err.Error(), "capability") {
-		t.Errorf("error = %v, want it to name the capability", err)
-	}
-	if strings.Contains(err.Error(), "gVisor not available") {
-		t.Errorf("the shape check ran after the availability probe: %v", err)
 	}
 }

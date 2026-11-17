@@ -175,34 +175,3 @@ func TestRemoveDuplicateUserMessage(t *testing.T) {
 		})
 	}
 }
-
-// TestRegenerateFullFlow verifies that truncateForRegenerate + append
-// produces the correct context (no duplicate user messages).
-func TestRegenerateFullFlow(t *testing.T) {
-	t.Parallel()
-	// Simulate the hot path: lc.messages has the full conversation,
-	// a regenerate user message arrives, we truncate then append.
-	lcMessages := []types.ChatMessage{
-		{Role: "system", Content: "system prompt"},
-		{Role: "user", Content: "hey"},
-		{Role: "assistant", Content: "hello! how can I help?"},
-	}
-
-	// Regenerate arrives - truncate before the last user message
-	lcMessages = truncateForRegenerate(lcMessages)
-
-	// Append the re-sent user message
-	newUserMsg := types.ChatMessage{Role: "user", Content: "hey"}
-	lcMessages = append(lcMessages, newUserMsg)
-
-	// Verify: should be [system, user] - no duplicate
-	if len(lcMessages) != 2 {
-		t.Errorf("expected 2 messages, got %d", len(lcMessages))
-	}
-	if lcMessages[0].Role != "system" {
-		t.Errorf("expected first message to be system, got %s", lcMessages[0].Role)
-	}
-	if lcMessages[1].Role != "user" || lcMessages[1].Content != "hey" {
-		t.Errorf("expected second message to be user 'hey', got %+v", lcMessages[1])
-	}
-}

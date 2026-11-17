@@ -2,17 +2,18 @@ package exec
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"mike/backend/config"
 	"mike/backend/extensions"
 	"mike/backend/git"
 	"mike/backend/lsp"
 	"mike/backend/store"
+	"mike/backend/testutil/teststore"
 	"mike/backend/types"
 )
 
@@ -243,19 +244,6 @@ func TestPrepareMergeConflictTurn_CarriesWhatReviewWasTold(t *testing.T) {
 	}
 }
 
-func TestComposeDiagnosticsAdvisory_SilentWhenNothingSurvives(t *testing.T) {
-	t.Parallel()
-	// The whole point of suppressing: no findings left means no note at all, not
-	// "Fix issues in …" with nothing under it.
-	if _, ok := composeDiagnosticsAdvisory(0, nil); ok {
-		t.Error("an empty pass produced an advisory")
-	}
-	a, ok := composeDiagnosticsAdvisory(1, []string{"Fix issues in a.go:\n1. unused: x"})
-	if !ok || !strings.Contains(a.text, "a.go") {
-		t.Errorf("advisory = %+v", a)
-	}
-}
-
 // --- diagnostics discovery -------------------------------------------------------
 
 // boolRef writes one of the manifest's gates, which are pointers because absent means the
@@ -295,27 +283,50 @@ func lspRegistryWith(t *testing.T, exts ...*extensions.Extension) *lsp.Extension
 
 func TestFilterDiagnosticFiles(t *testing.T) {
 	t.Parallel()
-	registry := lspRegistryWith(t, lspGoExtension())
+	off := lspLanguageExtension("pyright", "python", "py")
+	falseVal := false
+	off.Manifest.Capabilities.LSP.ChatDiagnosticsEnabled = &falseVal
+	// gopls opted in, pyright was switched off, tsserver never declared the field at all.
+	noVerdict := lspLanguageExtension("tsserver", "typescript", "ts")
+	noVerdict.Manifest.Capabilities.LSP.ChatDiagnosticsEnabled = nil
+	registry := lspRegistryWith(t, lspGoExtension(), off, noVerdict)
 
-	got := filterDiagnosticFiles(registry, "proj", []string{
-		"main.go", "main.go", // duplicate
-		"/home/sandbox/proj/pkg/a.go", // sandbox absolute path
-		"README.md",                   // no LSP extension claims it
-		"", ".",                       // noise
-		"internal/tool/vendor/deep.go",
-	})
-	want := []string{"main.go", "pkg/a.go", "internal/tool/vendor/deep.go"}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("filterDiagnosticFiles = %v, want %v", got, want)
-	}
-
-	// The per-pass bound keeps one broad turn from paying one server round trip each.
-	var many []string
-	for i := 0; i < maxDiagnosticFilesPerPass+4; i++ {
-		many = append(many, "f"+string(rune('a'+i))+".go")
-	}
-	if got := filterDiagnosticFiles(registry, "proj", many); len(got) != maxDiagnosticFilesPerPass {
-		t.Fatalf("cap not applied: %d files returned", len(got))
+	for _, tc := range []struct {
+		name    string
+		files   []string
+		want    []string
+		wantLen int
+	}{
+		{
+			name:  "duplicates, sandbox-absolute paths and unclaimed files fall out",
+			files: []string{"main.go", "main.go", "/home/sandbox/proj/pkg/a.go", "README.md", "", ".", "internal/tool/vendor/deep.go"},
+			want:  []string{"main.go", "pkg/a.go", "internal/tool/vendor/deep.go"},
+		},
+		{
+			name:  "an extension that did not opt in contributes nothing",
+			files: []string{"main.go", "app.py", "app.ts"},
+			want:  []string{"main.go"},
+		},
+		{name: "a broad turn pays one server round trip, not one per file", wantLen: maxDiagnosticFilesPerPass},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			files := tc.files
+			if tc.wantLen > 0 {
+				for i := 0; i < tc.wantLen+4; i++ {
+					files = append(files, fmt.Sprintf("f%03d.go", i))
+				}
+			}
+			got := filterDiagnosticFiles(registry, "proj", files)
+			if tc.wantLen > 0 {
+				if len(got) != tc.wantLen {
+					t.Fatalf("cap not applied: %d files returned, want %d", len(got), tc.wantLen)
+				}
+				return
+			}
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Fatalf("filterDiagnosticFiles = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -386,22 +397,6 @@ func TestTurnDiagnosticFiles_AskGitWhatTheShellChanged(t *testing.T) {
 	}
 }
 
-func TestFilterDiagnosticFiles_OnlyOptedInExtensions(t *testing.T) {
-	t.Parallel()
-	off := lspLanguageExtension("pyright", "python", "py")
-	falseVal := false
-	off.Manifest.Capabilities.LSP.ChatDiagnosticsEnabled = &falseVal
-	// gopls opted in, pyright was switched off, tsserver never declared the field.
-	noVerdict := lspLanguageExtension("tsserver", "typescript", "ts")
-	noVerdict.Manifest.Capabilities.LSP.ChatDiagnosticsEnabled = nil
-	registry := lspRegistryWith(t, lspGoExtension(), off, noVerdict)
-
-	got := filterDiagnosticFiles(registry, "proj", []string{"main.go", "app.py", "app.ts"})
-	if strings.Join(got, ",") != "main.go" {
-		t.Fatalf("filterDiagnosticFiles = %v, want [main.go]: an extension that did not opt in must contribute nothing", got)
-	}
-}
-
 func TestCollectTurnDiagnostics_QueuesOneAdvisoryAndSuppressesRepeats(t *testing.T) {
 	t.Parallel()
 	// Without a reachable language server the pass has nothing to say; assert the shape of
@@ -417,6 +412,10 @@ func TestCollectTurnDiagnostics_QueuesOneAdvisoryAndSuppressesRepeats(t *testing
 	if !strings.HasPrefix(a.text, "LSP diagnostics for this turn's changes (2 files with findings):") {
 		t.Fatalf("advisory text = %q", a.text)
 	}
+	if !strings.Contains(a.text, "a.go") || !strings.Contains(a.text, "b.go") {
+		t.Errorf("advisory does not name the files with findings: %q", a.text)
+	}
+	// No findings left is no note at all, not a heading with nothing under it.
 	if _, ok := composeDiagnosticsAdvisory(0, nil); ok {
 		t.Fatal("empty findings produced an advisory")
 	}
@@ -549,7 +548,7 @@ func TestCollectTurnDiagnostics_BoundedAndCancellable(t *testing.T) {
 	reg := installTSLSPExtension(t, s)
 
 	// WorktreePath looks the task up in the store, so everything here shares s.
-	cs := config.NewConfigStore(s, "", "test", nil, false, false)
+	cs := teststore.ConfigStore(t, s, "")
 	cs.SetWorkspaceDirOverride(t.TempDir())
 	fake := &wedgedLSPManager{registry: reg, gotCtx: make(chan context.Context, 4)}
 	te := newTestExecutorWith(t, Deps{

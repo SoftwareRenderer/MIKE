@@ -104,30 +104,26 @@ describe('GitStatusPanel header actions', () => {
         expect(getProjectDiffFiles).toHaveBeenCalledWith('p1');
     });
 
-    it('always renders the Commit button, disabled when nothing is staged', async () => {
-        const { container } = render(GitStatusPanel, { props: baseProps() });
+    // The Commit button is never hidden — only its enablement and its reason move with the index.
+    it.each([
+        { staged: false, status: '', disabled: true, title: 'Nothing staged to commit' },
+        { staged: true, status: 'M  staged.txt', disabled: false, title: 'Commit staged changes' },
+    ])('keeps the Commit button on screen $staged, disabled $disabled', async ({ status, disabled, title }) => {
+        if (status) {
+            getGitStatus.mockResolvedValue({ clean: false, status, head: 'h1', authorName: 'Test', authorEmail: 'test@test.com', ahead: 0, behind: 0 });
+        }
 
-        // The button is present from the first render (not hidden).
+        const { container } = render(GitStatusPanel, { props: baseProps() });
         const btn = container.querySelector<HTMLButtonElement>('.panel-commit-btn');
         expect(btn).not.toBeNull();
-        expect(btn!.disabled).toBe(true);
-        expect(btn!.getAttribute('title')).toBe('Nothing staged to commit');
         expect(btn!.textContent).toContain('Commit');
 
-        // After the (clean) load completes, it stays disabled.
-        await waitFor(() => expect(container.querySelector('.empty-state')).not.toBeNull());
-        expect(btn!.disabled).toBe(true);
-    });
-
-    it('enables the Commit button when there are staged entries', async () => {
-        getGitStatus.mockResolvedValue({ clean: false, status: 'M  staged.txt', head: 'h1', authorName: 'Test', authorEmail: 'test@test.com', ahead: 0, behind: 0 });
-
-        const { container } = render(GitStatusPanel, { props: baseProps() });
-        const btn = container.querySelector<HTMLButtonElement>('.panel-commit-btn');
-        expect(btn).not.toBeNull();
-
-        await waitFor(() => expect(btn!.disabled).toBe(false));
-        expect(btn!.getAttribute('title')).toBe('Commit staged changes');
+        // Present from the first render (not hidden), and unchanged once the status read has landed.
+        await waitFor(() => expect(getGitStatus).toHaveBeenCalled());
+        await waitFor(() => expect(btn!.disabled).toBe(disabled));
+        expect(btn!.getAttribute('title')).toBe(title);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        expect(btn!.disabled).toBe(disabled);
     });
 
     it('renders Pull and Push buttons with tooltips', () => {
@@ -399,5 +395,53 @@ describe('GitStatusPanel pull/push commit counts', () => {
 
         expect(counts(container).push).toBe('3');
         expect(push.getAttribute('aria-label')).toBe('Push to remote (3 commits ahead)');
+    });
+});
+
+// Pull and Push disable each other, and a button's accessible name says only what it would do — so the
+// one thing a reader cannot infer, *which* sync is holding the other, is the reason it owes them. A
+// `title` cannot carry it: it needs a hover. The request is left unanswered, because the reason only
+// exists while the panel stays busy.
+describe('GitStatusPanel: a sync button waiting on the other one', () => {
+    beforeEach(() => {
+        pullProject.mockImplementation(() => new Promise(() => {}));
+        pushProject.mockImplementation(() => new Promise(() => {}));
+    });
+
+    const pullBtn = (container: HTMLElement) =>
+        container.querySelector('button[aria-label^="Pull from remote"]') as HTMLButtonElement;
+    const pushBtn = (container: HTMLElement) =>
+        container.querySelector('button[aria-label^="Push to remote"]') as HTMLButtonElement;
+
+    /** The text behind `aria-describedby`, or null when the control describes nothing. */
+    function describedBy(container: HTMLElement, el: Element): string | null {
+        const id = el.getAttribute('aria-describedby');
+        if (!id) return null;
+        return container.querySelector(`#${id}`)?.textContent?.trim() ?? '';
+    }
+
+    it.each([
+        { op: 'pull', reason: 'Pull in progress' },
+        { op: 'push', reason: 'Push in progress' },
+    ])('names the running $op to both buttons', async ({ op, reason }) => {
+        const { container } = render(GitStatusPanel, { props: baseProps() });
+        const running = op === 'pull' ? pullBtn(container) : pushBtn(container);
+        const waiting = op === 'pull' ? pushBtn(container) : pullBtn(container);
+
+        running.click();
+
+        await waitFor(() => expect(running.hasAttribute('disabled')).toBe(true));
+        expect(waiting.hasAttribute('disabled')).toBe(true);
+        expect(describedBy(container, running)).toBe(reason);
+        expect(describedBy(container, waiting)).toBe(reason);
+    });
+
+    it('describes nothing while neither is running', () => {
+        const { container } = render(GitStatusPanel, { props: baseProps() });
+
+        expect(pullBtn(container).hasAttribute('disabled')).toBe(false);
+        expect(pushBtn(container).hasAttribute('disabled')).toBe(false);
+        expect(describedBy(container, pullBtn(container))).toBeNull();
+        expect(describedBy(container, pushBtn(container))).toBeNull();
     });
 });

@@ -133,31 +133,48 @@ func TestMCPOfferIsPerProjectAndPerMode(t *testing.T) {
 	}
 }
 
-// A disabled server offers nothing, so its name is an unknown tool rather than a call that could still
-// have worked.
-func TestDisabledServerOffersNothing(t *testing.T) {
-	f := newMCPFixture(t, false)
-	task := mcpTask(f.enabled, types.ModeAct)
-
-	if names := offeredNames(f.exec.toolDefinitionsFor(context.Background(), task)); names[mcpName("echo")] {
-		t.Error("a disabled server still offered its tool")
+// A name the offer withheld is `Unknown tool` at dispatch, whichever half withheld it: a server the
+// row disabled, a server the project never opted into, or a server nobody registered at all. Dispatch
+// never dials on a hunch, so a name cannot reach an address through the prefix alone.
+func TestWithheldMCPToolIsUnknownAtDispatch(t *testing.T) {
+	cases := []struct {
+		name          string
+		serverEnabled bool
+		project       func(f *mcpFixture) string
+		tool          string
+	}{
+		{
+			name: "a server the row disabled", serverEnabled: false,
+			project: func(f *mcpFixture) string { return f.enabled }, tool: "echo",
+		},
+		{
+			name: "a server the project never enabled", serverEnabled: true,
+			project: func(f *mcpFixture) string { return f.disabled }, tool: "echo",
+		},
+		{
+			name: "a server nobody registered", serverEnabled: true,
+			project: func(f *mcpFixture) string { return f.enabled }, tool: "noserver_notatool",
+		},
 	}
-	answer, ok := f.exec.tools.run(context.Background(), mcpName("echo"),
-		map[string]any{"text": "hi"}, t.TempDir(), task, &executionState{}, nil)
-	if ok || !strings.Contains(answer, "Unknown tool") {
-		t.Errorf("a disabled server's tool answered %q ok=%v, want the unknown-tool refusal", answer, ok)
-	}
-}
 
-// A name belonging to a server nobody registered is the same refusal: dispatch never dials on a hunch.
-func TestUnknownMCPNameIsRefused(t *testing.T) {
-	f := newMCPFixture(t, true)
-	task := mcpTask(f.enabled, types.ModeAct)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newMCPFixture(t, tc.serverEnabled)
+			task := mcpTask(tc.project(f), types.ModeAct)
 
-	answer, ok := f.exec.tools.run(context.Background(), types.MCPToolNamePrefix+"noserver_notatool",
-		nil, t.TempDir(), task, &executionState{}, nil)
-	if ok || !strings.Contains(answer, "Unknown tool") {
-		t.Errorf("answer %q ok=%v, want the unknown-tool refusal", answer, ok)
+			if names := offeredNames(f.exec.toolDefinitionsFor(context.Background(), task)); names[mcpName(tc.tool)] {
+				t.Error("the withheld tool was still offered to the model")
+			}
+			name := mcpName(tc.tool)
+			if tc.tool == "noserver_notatool" {
+				name = types.MCPToolNamePrefix + tc.tool
+			}
+			answer, ok := f.exec.tools.run(context.Background(), name,
+				map[string]any{"text": "hi"}, t.TempDir(), task, &executionState{}, nil)
+			if ok || !strings.Contains(answer, "Unknown tool") {
+				t.Errorf("%s answered %q ok=%v, want the unknown-tool refusal", name, answer, ok)
+			}
+		})
 	}
 }
 

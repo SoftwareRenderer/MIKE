@@ -35,161 +35,171 @@ func newToolTestExecutorWithMgr(t *testing.T, worktreePath string, exts ...*exte
 	})
 }
 
-func TestLSPTools_NoLSPManager(t *testing.T) {
+// Every LSP tool asks the same questions before it asks a language server anything, so every one of
+// them must refuse alone: no manager, a missing argument, or a file type whose tool calls are off is
+// an answer, never a request and never a panic over a nil manager.
+func TestLSPTools_RefusedBeforeTheLanguageServer(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	te := newToolTestExecutor(t, dir)
-	task := makeTestTask(t, te.store, "proj-lsp-1", "task-lsp-1")
+	const notAvailable = "LSP manager not available"
 
-	for _, tc := range []struct {
-		name string
-		args map[string]any
-	}{
-		{"lsp_references", map[string]any{"path": "main.go", "symbol": "main"}},
-		{"lsp_definition", map[string]any{"path": "main.go", "symbol": "main"}},
-		{"lsp_hover", map[string]any{"path": "main.go", "symbol": "main"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			result, ok := te.executeTool(context.Background(), tc.name, tc.args, dir, task, &executionState{}, nil)
-
-			if ok {
-				t.Fatalf("expected error, got success: %s", result)
-			}
-			if result == "" {
-				t.Fatal("expected error message, got empty string")
-			}
-		})
+	readerCall := func() map[string]any { return map[string]any{"path": "main.go", "symbol": "main"} }
+	renameCall := func() map[string]any {
+		return map[string]any{"path": "main.go", "symbol": "main", "new_name": "other"}
 	}
-}
 
-func TestLSPTools_MissingPath(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	te := newToolTestExecutor(t, dir)
-	task := makeTestTask(t, te.store, "proj-lsp-2", "task-lsp-2")
+	t.Run("no manager", func(t *testing.T) {
+		dir := t.TempDir()
+		te := newToolTestExecutor(t, dir) // no LSP manager at all
+		task := makeTestTask(t, te.store, "proj-lsp-1", "task-lsp-1")
+		for _, tc := range []struct {
+			tool string
+			args map[string]any
+		}{
+			{"lsp_references", readerCall()},
+			{"lsp_definition", readerCall()},
+			{"lsp_hover", readerCall()},
+			{"lsp_rename", renameCall()},
+		} {
+			t.Run(tc.tool, func(t *testing.T) {
+				result, ok := te.executeTool(context.Background(), tc.tool, tc.args, dir, task, &executionState{}, nil)
+				if ok {
+					t.Fatalf("expected error, got success: %s", result)
+				}
+				if !strings.Contains(result, notAvailable) {
+					t.Errorf("result %q does not name the missing manager", result)
+				}
+			})
+		}
+	})
 
-	// lsp_references with no path
-	result, ok := te.executeTool(context.Background(), "lsp_references", map[string]any{
-		"symbol": "main",
-	}, dir, task, &executionState{}, nil)
+	t.Run("missing arguments", func(t *testing.T) {
+		dir := t.TempDir()
+		te := newToolTestExecutor(t, dir)
+		te.lspMgr = &fakeLSPManager{enabled: true}
+		task := makeTestTask(t, te.store, "proj-lsp-2", "task-lsp-2")
+		for _, tc := range []struct {
+			tool string
+			args map[string]any
+			want string // the argument the refusal must name
+		}{
+			{"lsp_references", map[string]any{"symbol": "main"}, "path"},
+			{"lsp_references", map[string]any{"path": "main.go"}, "symbol"},
+			{"lsp_rename", map[string]any{"path": "main.go", "symbol": "main"}, "new_name"},
+			{"lsp_rename", map[string]any{"symbol": "main", "new_name": "other"}, "path"},
+		} {
+			t.Run(tc.tool+" without "+tc.want, func(t *testing.T) {
+				result, ok := te.executeTool(context.Background(), tc.tool, tc.args, dir, task, &executionState{}, nil)
+				if ok {
+					t.Fatalf("expected error, got success: %s", result)
+				}
+				if !strings.Contains(result, tc.want) || !strings.Contains(result, "required") {
+					t.Errorf("result %q does not name the missing %q", result, tc.want)
+				}
+			})
+		}
+	})
 
-	if ok {
-		t.Fatalf("expected error, got success: %s", result)
-	}
-	if result == "" {
-		t.Fatal("expected error message, got empty string")
-	}
-}
-
-func TestLSPTools_ToolCallsDisabledForFile(t *testing.T) {
-	t.Parallel()
-	// Create Go extension with tool calls disabled
-	falseVal := false
-	goExt := &extensions.Extension{
-		ID:      "gopls",
-		Name:    "gopls",
-		Version: "1.0.0",
-		Type:    extensions.ExtensionTypeLSP,
-		Manifest: extensions.ExtensionManifest{
-			DisplayName: "Go Language Server",
-			Version:     "1.0.0",
-			Capabilities: &extensions.Capabilities{
-				LSP: &extensions.LSPConfig{
-					Command:          "gopls",
-					Args:             []string{"serve"},
-					FileTypes:        []extensions.LSPFileType{{Extension: "go", LanguageID: "go"}},
-					Language:         "go",
-					ToolCallsEnabled: &falseVal,
+	t.Run("tool calls disabled for the file type", func(t *testing.T) {
+		// The manifest's tool_calls_enabled is what decides, read off the file's own extension.
+		falseVal := false
+		goExt := &extensions.Extension{
+			ID:      "gopls",
+			Name:    "gopls",
+			Version: "1.0.0",
+			Type:    extensions.ExtensionTypeLSP,
+			Manifest: extensions.ExtensionManifest{
+				DisplayName: "Go Language Server",
+				Version:     "1.0.0",
+				Capabilities: &extensions.Capabilities{
+					LSP: &extensions.LSPConfig{
+						Command:          "gopls",
+						Args:             []string{"serve"},
+						FileTypes:        []extensions.LSPFileType{{Extension: "go", LanguageID: "go"}},
+						Language:         "go",
+						ToolCallsEnabled: &falseVal,
+					},
 				},
 			},
-		},
-		Enabled: true,
-	}
-
-	dir := t.TempDir()
-	te := newToolTestExecutorWithMgr(t, dir, goExt)
-	task := makeTestTask(t, te.store, "proj-lsp-3", "task-lsp-3")
-
-	// Create a Go file
-	goFile := filepath.Join(dir, "main.go")
-	writeFile(t, goFile, "package main\n\nfunc main() {}")
-
-	// Go file — tool calls should be rejected
-	result, ok := te.executeTool(context.Background(), "lsp_references", map[string]any{
-		"path":   "main.go",
-		"symbol": "main",
-	}, dir, task, &executionState{}, nil)
-
-	if ok {
-		t.Fatalf("expected error for Go file, got success: %s", result)
-	}
-	if result == "" {
-		t.Fatal("expected error message for Go file, got empty string")
-	}
-	if !containsString(result, "tool calls are disabled") {
-		t.Errorf("expected 'tool calls are disabled' error, got: %s", result)
-	}
-}
-
-func TestFormatLSPResponse_ErrorEnvelope(t *testing.T) {
-	t.Parallel()
-	resp := formatLSPResponse([]byte(`{"error":{"code":-32602,"message":"Invalid params"}}`), "textDocument/definition", "/tmp")
-	if resp != "LSP error -32602: Invalid params" {
-		t.Errorf("got %q", resp)
-	}
-}
-
-func TestFormatLSPResponse_EmptyResult(t *testing.T) {
-	t.Parallel()
-	resp := formatLSPResponse([]byte(`{"result":null}`), "textDocument/hover", "/tmp")
-	if resp != "(no result)" {
-		t.Errorf("got %q", resp)
-	}
-}
-
-func TestFormatLSPResponse_References(t *testing.T) {
-	t.Parallel()
-	resp := formatLSPResponse([]byte(`{
-		"result": [
-			{"uri": "file:///tmp/proj/main.go", "range": {"start": {"line": 5, "character": 10}}},
-			{"uri": "file:///tmp/proj/main.go", "range": {"start": {"line": 20, "character": 0}}}
-		]
-	}`), "textDocument/references", "/tmp/proj")
-
-	if resp != "Found 2 references:\n  1. main.go:6:11\n  2. main.go:21:1\n" {
-		t.Errorf("got %q", resp)
-	}
-}
-
-func TestFormatLSPResponse_ReferencesEmpty(t *testing.T) {
-	t.Parallel()
-	resp := formatLSPResponse([]byte(`{"result":[]}`), "textDocument/references", "/tmp/proj")
-	if resp != "No references found" {
-		t.Errorf("got %q", resp)
-	}
-}
-
-func TestFormatLSPResponse_DefinitionSingle(t *testing.T) {
-	t.Parallel()
-	resp := formatLSPResponse([]byte(`{
-		"result": {
-			"uri": "file:///tmp/proj/pkg/utils.go",
-			"range": {"start": {"line": 42, "character": 6}}
+			Enabled: true,
 		}
-	}`), "textDocument/definition", "/tmp/proj")
 
-	if resp != "Definition found at pkg/utils.go:43:7" {
-		t.Errorf("got %q", resp)
-	}
+		dir := t.TempDir()
+		te := newToolTestExecutorWithMgr(t, dir, goExt)
+		task := makeTestTask(t, te.store, "proj-lsp-3", "task-lsp-3")
+		writeFile(t, filepath.Join(dir, "main.go"), "package main\n\nfunc main() {}")
+
+		for _, tc := range []struct {
+			tool string
+			args map[string]any
+		}{
+			{"lsp_references", readerCall()},
+			{"lsp_definition", readerCall()},
+			{"lsp_hover", readerCall()},
+			{"lsp_rename", renameCall()},
+		} {
+			t.Run(tc.tool, func(t *testing.T) {
+				result, ok := te.executeTool(context.Background(), tc.tool, tc.args, dir, task, &executionState{}, nil)
+				if ok {
+					t.Fatalf("expected error for a Go file, got success: %s", result)
+				}
+				if !containsString(result, "tool calls are disabled") {
+					t.Errorf("expected 'tool calls are disabled' error, got: %s", result)
+				}
+			})
+		}
+	})
 }
 
-func TestFormatLSPResponse_Hover(t *testing.T) {
+// The answer the model gets for each wire shape a language server sends back: the file is named
+// relative to the workspace it was asked in, positions are 1-indexed for the reader, and an error
+// envelope keeps its code and its sentence.
+func TestFormatLSPResponse(t *testing.T) {
 	t.Parallel()
-	resp := formatLSPResponse([]byte(`{"result":{"contents":{"kind":"markdown","value":"func Foo() string\nReturns a foo."}}}`), "textDocument/hover", "/tmp/proj")
+	cases := []struct {
+		name   string
+		resp   string
+		method string
+		root   string
+		want   string
+	}{
+		{
+			name: "error envelope", method: "textDocument/definition", root: "/tmp",
+			resp: `{"error":{"code":-32602,"message":"Invalid params"}}`, want: "LSP error -32602: Invalid params",
+		},
+		{
+			name: "null result", method: "textDocument/hover", root: "/tmp",
+			resp: `{"result":null}`, want: "(no result)",
+		},
+		{
+			name: "references", method: "textDocument/references", root: "/tmp/proj",
+			resp: `{"result":[
+				{"uri": "file:///tmp/proj/main.go", "range": {"start": {"line": 5, "character": 10}}},
+				{"uri": "file:///tmp/proj/main.go", "range": {"start": {"line": 20, "character": 0}}}]}`,
+			want: "Found 2 references:\n  1. main.go:6:11\n  2. main.go:21:1\n",
+		},
+		{
+			name: "no references", method: "textDocument/references", root: "/tmp/proj",
+			resp: `{"result":[]}`, want: "No references found",
+		},
+		{
+			name: "single definition", method: "textDocument/definition", root: "/tmp/proj",
+			resp: `{"result":{"uri": "file:///tmp/proj/pkg/utils.go",
+				"range": {"start": {"line": 42, "character": 6}}}}`,
+			want: "Definition found at pkg/utils.go:43:7",
+		},
+		{
+			name: "hover", method: "textDocument/hover", root: "/tmp/proj",
+			resp: `{"result":{"contents":{"kind":"markdown","value":"func Foo() string\nReturns a foo."}}}`,
+			want: "[markdown]\nfunc Foo() string\nReturns a foo.",
+		},
+	}
 
-	expected := "[markdown]\nfunc Foo() string\nReturns a foo."
-	if resp != expected {
-		t.Errorf("got %q", resp)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := formatLSPResponse([]byte(tc.resp), tc.method, tc.root); got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

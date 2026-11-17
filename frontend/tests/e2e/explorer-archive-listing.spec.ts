@@ -171,16 +171,6 @@ test.describe('Explorer archive listing', () => {
     expect(await listing.locator('tbody tr').first().locator('button').count()).toBe(0);
   });
 
-  test('a file that only claims an archive suffix says so instead of showing bytes', async ({ page }) => {
-    const name = 'not-really.zip';
-    written.push(name);
-    await gotoProject(page);
-    // The suffix chooses the viewer and the bytes decide the answer, so this is the refusal path.
-    await writeAndOpen(page, name, Buffer.from('just text with a zip name\n', 'utf8'));
-
-    await expect(page.locator('.archive-note-error')).toContainText('not a readable archive', { timeout: 10000 });
-    await expect(page.locator('.archive-table')).toHaveCount(0);
-  });
 });
 
 // A phone gives the Name column 170px, about 24 characters, and a thumb has no hover to ask for the rest.

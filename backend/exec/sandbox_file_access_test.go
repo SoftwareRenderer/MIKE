@@ -96,24 +96,62 @@ func TestSandboxedTaskWithoutBridgeRefusesEveryHostTool(t *testing.T) {
 	}
 }
 
-// A project with sandboxing disabled is the operator's choice of the host, so its reads and writes
-// are not jailed to the worktree.
-func TestUnsandboxedTaskReadsOutsideWorktree(t *testing.T) {
+// A project with sandboxing disabled is the operator's choice of the host, so its reads are not
+// jailed to the worktree: a relative path joins it, and ".." or an absolute path go where they
+// name. The boundary for such a task is the project's sandbox_enabled column — the table above
+// holds the other side.
+func TestUnsandboxedTaskReadsWhereThePathNames(t *testing.T) {
 	t.Parallel()
-	worktree := t.TempDir()
-	te := newToolTestExecutor(t, worktree)
-	task := makeTestTask(t, te.store, "proj-hostguard-2", "task-hostguard-2")
-
-	outside := filepath.Join(t.TempDir(), "notes.txt")
-	if err := os.WriteFile(outside, []byte("outside content"), 0o600); err != nil {
-		t.Fatal(err)
+	cases := []struct {
+		name string
+		seed func(t *testing.T, worktree string) (args map[string]any, want string)
+	}{
+		{
+			name: "a relative path resolves against the worktree",
+			seed: func(t *testing.T, worktree string) (map[string]any, string) {
+				if err := os.WriteFile(filepath.Join(worktree, "host.txt"), []byte("hello from host"), 0o644); err != nil {
+					t.Fatalf("seed file: %v", err)
+				}
+				return map[string]any{"path": "host.txt"}, "hello from host"
+			},
+		},
+		{
+			name: "a path stepping out of the worktree is read anyway",
+			seed: func(t *testing.T, worktree string) (map[string]any, string) {
+				if err := os.WriteFile(filepath.Join(filepath.Dir(worktree), "notes.txt"), []byte("outside"), 0o644); err != nil {
+					t.Fatalf("seed file outside the worktree: %v", err)
+				}
+				return map[string]any{"path": "../notes.txt"}, "outside"
+			},
+		},
+		{
+			name: "an absolute path is read as it was written",
+			seed: func(t *testing.T, worktree string) (map[string]any, string) {
+				outside := filepath.Join(t.TempDir(), "notes.txt")
+				if err := os.WriteFile(outside, []byte("outside content"), 0o600); err != nil {
+					t.Fatalf("seed file: %v", err)
+				}
+				return map[string]any{"path": outside}, "outside content"
+			},
+		},
 	}
 
-	result, ok := te.executeTool(context.Background(), "read_file", map[string]any{"path": outside},
-		worktree, task, &executionState{}, nil)
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			base := t.TempDir()
+			worktree := filepath.Join(base, "worktree")
+			if err := os.Mkdir(worktree, 0o755); err != nil {
+				t.Fatalf("create worktree dir: %v", err)
+			}
+			te := newToolTestExecutor(t, worktree)
+			task := makeTestTask(t, te.store, fmt.Sprintf("proj-hostread-%d", i), fmt.Sprintf("task-hostread-%d", i))
+			args, want := tc.seed(t, worktree)
 
-	if !ok || result != "outside content" {
-		t.Errorf("unsandboxed task should read any host path, got ok=%v result=%q", ok, result)
+			result, ok := te.executeTool(context.Background(), "read_file", args, worktree, task, &executionState{}, nil)
+			if !ok || result != want {
+				t.Errorf("an unsandboxed task should read any host path, got ok=%v result=%q, want %q", ok, result, want)
+			}
+		})
 	}
 }
 

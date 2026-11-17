@@ -1,8 +1,8 @@
-import { test, expect, type Browser, type Page } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { writeFileSync, rmSync, mkdirSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'path';
-import { csrfFetch, createTaskViaApi, navigateToTask, selectProject } from './helpers';
+import { csrfFetch, createTaskViaApi, navigateToTask, selectProject, signedInPage } from './helpers';
 
 // Gutter line selection in the Explorer code editor: a click opens the Create
 // Task modal as an INTERACTIVE FLOATING WINDOW (no dim, app behind stays
@@ -53,15 +53,6 @@ function refFor(start: number, end = start): string {
   return '\n\n' + s;
 }
 
-/** page fixtures aren't available in beforeAll/afterAll — create a dedicated context. */
-async function setupPage(browser: Browser) {
-  const context = await browser.newContext({
-    storageState: '/tmp/kanban-test-storage-state.json',
-  });
-  const page = await context.newPage();
-  return { context, page };
-}
-
 /** Find a task by a unique substring of its prompt (server truth). */
 async function findTaskByPrompt(
   page: Page,
@@ -92,7 +83,7 @@ test.describe('Editor gutter line selection → Create Task', () => {
       stdio: 'ignore',
     });
 
-    const { context, page } = await setupPage(browser);
+    const { context, page } = await signedInPage(browser, { landing: null });
     try {
       const res = await csrfFetch(page, '/api/projects', {
         method: 'POST',
@@ -106,7 +97,7 @@ test.describe('Editor gutter line selection → Create Task', () => {
   });
 
   test.afterAll(async ({ browser }) => {
-    const { context, page } = await setupPage(browser);
+    const { context, page } = await signedInPage(browser, { landing: null });
     try {
       if (projectId) {
         await csrfFetch(page, `/api/projects/${projectId}`, { method: 'DELETE' });

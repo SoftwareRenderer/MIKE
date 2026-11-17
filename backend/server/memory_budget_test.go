@@ -32,28 +32,50 @@ func TestMeminfoMB(t *testing.T) {
 	}
 }
 
-// TestBudgetSumsBothManagers adds the two managers together, which is correct because a container
-// belongs to only one of them, and adds the server's own process beside them.
-func TestMemoryBudgetSumsEveryManager(t *testing.T) {
-	b := &memoryBudget{
-		accountants: []memoryAccountant{
-			fixedAccountant{held: 300, charge: 512},
-			fixedAccountant{held: 90, charge: 90},
-			fixedAccountant{held: 120, charge: 120},
+// Measure is the one figure the gate, the About tab and the supervisor tick all read: the accountants
+// summed (a container belongs to only one of them, so summing is correct), the server's own process
+// beside them, and the host's two readings passed through for the floor rule. An unreadable host is
+// reported as not measured, never as a host holding nothing.
+func TestMemoryBudgetMeasure(t *testing.T) {
+	cases := []struct {
+		name          string
+		accountants   []memoryAccountant
+		meminfo       func() (int64, int64, bool)
+		wantHeld      int64
+		wantMike      int64
+		wantAvailable int64
+		wantTotal     int64
+		wantOK        bool
+	}{
+		{
+			name: "every manager and the server's own process",
+			accountants: []memoryAccountant{
+				fixedAccountant{held: 300, charge: 512},
+				fixedAccountant{held: 90, charge: 90},
+				fixedAccountant{held: 120, charge: 120},
+			},
+			meminfo: func() (int64, int64, bool) { return 1000, 400, true },
+			// The floor rule needs free and total; it cannot derive them from the used figure.
+			wantHeld: 510, wantMike: 722, wantAvailable: 400, wantTotal: 1000, wantOK: true,
 		},
-		meminfo: func() (int64, int64, bool) { return 1000, 400, true },
+		{
+			name:        "an unreadable host is not measured",
+			accountants: []memoryAccountant{fixedAccountant{held: 300, charge: 512}},
+			meminfo:     func() (int64, int64, bool) { return 0, 0, false },
+			wantOK:      false,
+		},
 	}
-
-	mikeMB, held, available, total, ok := b.Measure()
-	if !ok {
-		t.Fatal("measure must succeed when the host reads")
-	}
-	if held != 510 || mikeMB != 722 {
-		t.Errorf("held=%d mike=%d, want 510/722", held, mikeMB)
-	}
-	// The floor rule needs free and total; it cannot derive them from the used figure.
-	if available != 400 || total != 1000 {
-		t.Errorf("available=%d total=%d, want 400/1000", available, total)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b := &memoryBudget{accountants: tc.accountants, meminfo: tc.meminfo}
+			mikeMB, held, available, total, ok := b.Measure()
+			if ok != tc.wantOK || held != tc.wantHeld || mikeMB != tc.wantMike ||
+				available != tc.wantAvailable || total != tc.wantTotal {
+				t.Errorf("Measure() = (%d, %d, %d, %d, %v), want (%d, %d, %d, %d, %v)",
+					mikeMB, held, available, total, ok,
+					tc.wantMike, tc.wantHeld, tc.wantAvailable, tc.wantTotal, tc.wantOK)
+			}
+		})
 	}
 }
 
@@ -100,17 +122,6 @@ func TestSelfProcessAccountantChargesTheServer(t *testing.T) {
 	out := buf.String()
 	if n := strings.Count(out, "VmRSS unavailable"); n != 1 {
 		t.Errorf("the missing reading was reported %d times, want 1; log:\n%s", n, out)
-	}
-}
-
-// An unreadable host is reported as not measured, never as a host holding nothing.
-func TestMemoryBudgetUnreadableHostIsNotMeasured(t *testing.T) {
-	b := &memoryBudget{
-		accountants: []memoryAccountant{fixedAccountant{held: 300, charge: 512}},
-		meminfo:     func() (int64, int64, bool) { return 0, 0, false },
-	}
-	if _, _, _, _, ok := b.Measure(); ok {
-		t.Error("ok must be false when /proc/meminfo cannot be read")
 	}
 }
 

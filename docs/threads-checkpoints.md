@@ -114,7 +114,7 @@ Deferred, not rejected: what it costs is disk (an agent's `node_modules` per thr
 - `backend/server/message_handler_test.go` — `TestMessageDeleteCheckReportsFileRewind`: the delete check says the worktree will be rewound, and answers false for a summarization row and for a task with no worktree.
 - `backend/server/thread_capture_test.go` — with git unable to write, a switch and a fork are refused and the work (tracked edit *and* new file) is still there, no thread changed, no stash entry appeared, no snapshot pinned — and once git can write again the same click works and the work comes back; a refusal reports and records the task stop.
 - `backend/exec/duplicate_send_test.go` — a plain repeated submit is still deduped and starts nothing; a regenerate of the thread's last user message starts it and does not store the message twice.
-- e2e: `thread-switch.spec.ts`, `thread-new-thread.spec.ts` (the fork becomes active, holds the edited question once, and gets an answer).
+- e2e: `frontend/tests/e2e/threads.spec.ts` — the fork becomes active, holds the edited question once, and gets an answer; and switching back to Main draws Main's rows, not the fork's.
 ## Checking this
 
 `go test ./backend/git/ ./backend/exec/ ./backend/store/ ./backend/server/ ./backend/api/` covers the pin and the restore, a turn's capture, the fork's copy and release, the switch/fork refusal and delete paths, and the diff that reads a checkpoint.

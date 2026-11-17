@@ -35,8 +35,20 @@ export function laneOrigin() {
  * the lane's storage state. Emptying it is the only way a spec reaches the login gate in a second
  * browser.
  */
-export function signedOutContext(browser) {
+function signedOutContext(browser) {
     return browser.newContext({ storageState: { cookies: [], origins: [] } });
+}
+
+/**
+ * A signed-out browser that can answer a passkey prompt: the empty context, the page in it, the virtual
+ * authenticator attached to that page. A spec that goes on to pair, or to assert what the gate shows,
+ * starts here — there is no order of the three that works differently.
+ */
+export async function signedOutDevice(browser) {
+    const context = await signedOutContext(browser);
+    const page = await context.newPage();
+    await attachVirtualAuthenticator(context, page);
+    return { context, page };
 }
 
 /**

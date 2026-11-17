@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -189,7 +190,14 @@ func TestPostCheckoutHookNeverRunsOnWorktreeAdd(t *testing.T) {
 	}
 }
 
-func TestEnvNeverCarriesServerSecrets(t *testing.T) {
+// One rule, three entry points: nothing the server was launched with reaches a git subprocess, and
+// every one of them was the leak once. Env() is the allowlist itself, CloneEnv() was
+// `append(os.Environ(), …)` for years — and a clone is the one git operation whose arguments come
+// straight from an HTTP request — and Command() is the only place this repo builds a git process, so
+// an empty cmd.Env there would hand os/exec the whole server environment. Each entry point is checked
+// against the same secret set and for the policy it exists to apply, so a future "simplification"
+// back to os.Environ() cannot keep the assertion by accident.
+func TestNoServerEnvironmentReachesAGitSubprocess(t *testing.T) {
 	secrets := map[string]string{
 		"MIKE_ENCRYPTION_KEY":          "the-key-that-decrypts-every-provider",
 		"DANGER_ZONE":                  "1",
@@ -206,80 +214,128 @@ func TestEnvNeverCarriesServerSecrets(t *testing.T) {
 	for k, v := range secrets {
 		t.Setenv(k, v)
 	}
+	dir := t.TempDir()
 
-	got := Env()
-	for _, kv := range got {
-		name, _, _ := strings.Cut(kv, "=")
-		if want, isSecret := secrets[name]; isSecret {
-			t.Errorf("Env() leaked %s=%q to a git subprocess", name, want)
+	for _, entry := range []struct {
+		name string
+		env  func(t *testing.T) []string
+		want []string
+	}{
+		{"Env", func(*testing.T) []string { return Env() }, []string{"core.hooksPath", "GIT_TERMINAL_PROMPT=0"}},
+		{
+			"CloneEnv",
+			func(*testing.T) []string { return CloneEnv() },
+			[]string{"core.hooksPath", "GIT_ALLOW_PROTOCOL=", "GIT_TERMINAL_PROMPT=0"},
+		},
+		{
+			"Command",
+			func(t *testing.T) []string {
+				cmd := Command(dir, "rev-parse", "--git-dir")
+				if cmd.Dir != dir {
+					t.Errorf("Command(dir).Dir = %q, want %q", cmd.Dir, dir)
+				}
+				return cmd.Env
+			},
+			[]string{"core.hooksPath", "GIT_TERMINAL_PROMPT=0"},
+		},
+	} {
+		env := entry.env(t)
+		if len(env) == 0 {
+			t.Fatalf("%s handed os/exec an empty environment: the subprocess inherits the whole server environment", entry.name)
 		}
-		if strings.HasPrefix(name, "MIKE_") {
-			t.Errorf("Env() leaked MIKE_* configuration variable %s", name)
+		for _, kv := range env {
+			name, _, _ := strings.Cut(kv, "=")
+			if value, isSecret := secrets[name]; isSecret {
+				t.Errorf("%s leaked %s=%q to a git subprocess", entry.name, name, value)
+			}
+			if strings.HasPrefix(name, "MIKE_") {
+				t.Errorf("%s leaked MIKE_* configuration variable %s", entry.name, name)
+			}
 		}
-	}
-}
-
-func TestEnvKeepsWhatGitNeedsForItsOwnCredentials(t *testing.T) {
-	// These are the reason backend/agent/env.go once sanctioned os.Environ() for this package
-	// ("its configuration and credentials"). Dropping them would break pushing to a private
-	// remote, which is a supported workflow, so they are pinned individually.
-	keep := map[string]string{
-		"HOME":            "/home/operator",
-		"USER":            "operator",
-		"PATH":            "/usr/bin",
-		"SSH_AUTH_SOCK":   "/run/user/1000/vscode-ssh-auth-sock",
-		"XDG_RUNTIME_DIR": "/run/user/1000",
-		"LANG":            "en_US.UTF-8",
-		"LC_ALL":          "C.UTF-8",
-		"HTTPS_PROXY":     "http://proxy.internal:3128",
-		"SSL_CERT_FILE":   "/etc/ssl/certs/internal-ca.pem",
-	}
-	for k, v := range keep {
-		t.Setenv(k, v)
-	}
-
-	got := strings.Join(Env(), "\n")
-	for k, v := range keep {
-		if !strings.Contains(got, k+"="+v) {
-			t.Errorf("Env() dropped %s, which git needs to reach the operator's own remotes", k)
-		}
-	}
-}
-
-func TestEnvOmitsAnAllowedNameTheServerLacks(t *testing.T) {
-	// `SSH_AUTH_SOCK=` (present but empty) is actively worse than unset: ssh-agent clients treat
-	// an empty socket path as a configured-but-broken agent instead of falling back.
-	t.Setenv("HOME", "/home/operator")
-	t.Setenv("SSH_AUTH_SOCK", "")
-
-	for _, kv := range Env() {
-		if kv == "SSH_AUTH_SOCK=" {
-			t.Error("Env() emitted an empty SSH_AUTH_SOCK= instead of omitting it")
+		joined := strings.Join(env, "\n")
+		for _, want := range entry.want {
+			if !strings.Contains(joined, want) {
+				t.Errorf("%s lost %q — the policy that entry point exists to apply", entry.name, want)
+			}
 		}
 	}
 }
 
-func TestEnv_PolicySurvivesAnExtra(t *testing.T) {
-	// os/exec keeps the LAST occurrence of a duplicated key, so policy after extras is what makes
-	// the execution fence unforgeable from a call site.
-	env := Env("GIT_CONFIG_KEY_0=core.editor", "core.hooksPath=/tmp/attacker")
-
-	lastHooksPath := ""
-	count := 0
-	for _, kv := range env {
-		if v, ok := strings.CutPrefix(kv, "GIT_CONFIG_VALUE_0="); ok {
-			lastHooksPath = v
-			count++
+// Env()'s allowlist has three failure shapes, all of them about which names the child sees: git's own
+// credentials going missing (pushing to a private remote is a supported workflow, and this is why
+// backend/agent/env.go once sanctioned os.Environ() for this package), an allowed name present but
+// empty (ssh-agent clients read `SSH_AUTH_SOCK=` as a configured-but-broken agent instead of falling
+// back), and a caller's extra outranking the policy (os/exec keeps the LAST occurrence, so policy
+// after extras is what makes the execution fence unforgeable from a call site).
+func TestEnvCarriesWhatGitNeedsAndNothingElse(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		setenv map[string]string
+		extras []string
+		want   []string
+		// last names a GIT_CONFIG key whose LAST occurrence must carry that value.
+		last map[string]string
+	}{
+		{
+			name: "git's own credentials survive",
+			setenv: map[string]string{
+				"HOME":            "/home/operator",
+				"USER":            "operator",
+				"PATH":            "/usr/bin",
+				"SSH_AUTH_SOCK":   "/run/user/1000/vscode-ssh-auth-sock",
+				"XDG_RUNTIME_DIR": "/run/user/1000",
+				"LANG":            "en_US.UTF-8",
+				"LC_ALL":          "C.UTF-8",
+				"HTTPS_PROXY":     "http://proxy.internal:3128",
+				"SSL_CERT_FILE":   "/etc/ssl/certs/internal-ca.pem",
+			},
+			want: []string{
+				"HOME=/home/operator", "USER=operator", "PATH=/usr/bin",
+				"SSH_AUTH_SOCK=/run/user/1000/vscode-ssh-auth-sock",
+				"XDG_RUNTIME_DIR=/run/user/1000", "LANG=en_US.UTF-8", "LC_ALL=C.UTF-8",
+				"HTTPS_PROXY=http://proxy.internal:3128", "SSL_CERT_FILE=/etc/ssl/certs/internal-ca.pem",
+			},
+		},
+		{
+			name:   "an allowed name the server lacks is omitted, not emitted empty",
+			setenv: map[string]string{"HOME": "/home/operator", "SSH_AUTH_SOCK": ""},
+			want:   []string{"HOME=/home/operator"},
+		},
+		{
+			name:   "the policy survives a caller's extra",
+			extras: []string{"GIT_CONFIG_KEY_0=core.editor", "core.hooksPath=/tmp/attacker"},
+			want:   []string{"GIT_TERMINAL_PROMPT=0"},
+			last:   map[string]string{"GIT_CONFIG_VALUE_0": "/dev/null"},
+		},
+	} {
+		for k, v := range tc.setenv {
+			t.Setenv(k, v)
 		}
-	}
-	if lastHooksPath != "/dev/null" {
-		t.Errorf("execution fence overridable: last GIT_CONFIG_VALUE_0 = %q, want /dev/null", lastHooksPath)
-	}
-	if count == 0 {
-		t.Error("execution fence absent from Env() entirely")
-	}
-	if !strings.Contains(strings.Join(env, "\n"), "GIT_TERMINAL_PROMPT=0") {
-		t.Error("GIT_TERMINAL_PROMPT=0 missing: an unattended commit would hang on a prompt")
+		env := Env(tc.extras...)
+
+		for _, want := range tc.want {
+			if !slices.Contains(env, want) {
+				t.Errorf("%s: %q missing from Env() — %v", tc.name, want, env)
+			}
+		}
+		for name, value := range tc.setenv {
+			if value == "" && slices.Contains(env, name+"=") {
+				t.Errorf("%s: Env() emitted an empty %s= instead of omitting it", tc.name, name)
+			}
+		}
+		for key, want := range tc.last {
+			got, seen := "", false
+			for _, kv := range env {
+				if v, ok := strings.CutPrefix(kv, key+"="); ok {
+					got, seen = v, true
+				}
+			}
+			if !seen {
+				t.Errorf("%s: %s absent from Env() entirely — the execution fence is not being applied", tc.name, key)
+			} else if got != want {
+				t.Errorf("%s: execution fence overridable, last %s = %q, want %q", tc.name, key, got, want)
+			}
+		}
 	}
 }
 
@@ -413,48 +469,6 @@ func TestMergeContinueSurvivesTheEditorFence(t *testing.T) {
 	// A merge commit has two parents; that it exists is the proof the flow completed.
 	if out, err := Command(repo, "rev-parse", "--verify", "HEAD^2").CombinedOutput(); err != nil {
 		t.Fatalf("merge --continue left no merge commit: %v\n%s", err, out)
-	}
-}
-
-func TestCloneEnvCarriesNoServerSecrets(t *testing.T) {
-	// CloneEnv was `append(os.Environ(), …)`, and a clone is the one git operation whose arguments
-	// come straight from an HTTP request (add-project with a git URL). The transport fence is what
-	// this function was written for; the leak is what it also had to stop carrying.
-	t.Setenv("MIKE_ENCRYPTION_KEY", "the-key")
-	t.Setenv("DANGER_ZONE", "1")
-
-	env := strings.Join(CloneEnv(), "\n")
-	for _, want := range []string{"MIKE_ENCRYPTION_KEY", "DANGER_ZONE"} {
-		if strings.Contains(env, want+"=") {
-			t.Errorf("CloneEnv() carries %s into the clone subprocess", want)
-		}
-	}
-	// …and the two policies the function exists to apply, so a future "simplification" back to
-	// os.Environ() cannot keep them by accident.
-	if !strings.Contains(env, "GIT_ALLOW_PROTOCOL=") {
-		t.Error("CloneEnv() lost the transport fence")
-	}
-	if !strings.Contains(env, "core.hooksPath") {
-		t.Error("CloneEnv() lost the execution fence: a cloned repo's post-checkout hook would run")
-	}
-}
-
-func TestCommandSetsDirAndEnv(t *testing.T) {
-	dir := t.TempDir()
-	cmd := Command(dir, "rev-parse", "--git-dir")
-	if cmd.Dir != dir {
-		t.Errorf("cmd.Dir = %q, want %q", cmd.Dir, dir)
-	}
-	if len(cmd.Env) == 0 {
-		t.Fatal("cmd.Env is nil: os/exec would hand the subprocess the whole server environment")
-	}
-	for _, kv := range cmd.Env {
-		if strings.HasPrefix(kv, "MIKE_ENCRYPTION_KEY=") {
-			t.Fatal("cmd.Env carries MIKE_ENCRYPTION_KEY")
-		}
-	}
-	if !strings.Contains(strings.Join(cmd.Env, "\n"), "core.hooksPath") {
-		t.Error("cmd.Env lacks the execution fence")
 	}
 }
 

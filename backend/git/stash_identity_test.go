@@ -10,6 +10,7 @@ package git
 // PushStash returns the hash of the entry it created and PopStashByHash restores exactly that entry.
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -97,78 +98,37 @@ func TestInterleavedMergeStashesRestoreTheirOwnWork(t *testing.T) {
 	}
 }
 
-// TestPopStashByHashDoesNotTakeTheUsersEntry: the stack holds the user's own entries too, and a
-// restore must never consume one of those. This is the same property from the other side — not
-// "another task" but "a human's work".
-func TestPopStashByHashDoesNotTakeTheUsersEntry(t *testing.T) {
-	repoDir, _, _, _, _, wm := setupStashTest(t)
-	userHash := seedUserStash(t, wm, repoDir)
-
-	writeFile(t, repoDir, "task.txt", "in-flight work\n")
-	ours, err := wm.PushStash(repoDir, StashMessageForSyncMerge("task-1"))
-	if err != nil {
-		t.Fatalf("PushStash: %v", err)
-	}
-
-	ok, err := wm.PopStashByHash(repoDir, ours)
-	if err != nil || !ok {
-		t.Fatalf("PopStashByHash = (%v, %v), want (true, nil)", ok, err)
-	}
-	if _, err := os.Stat(filepath.Join(repoDir, "task.txt")); err != nil {
-		t.Errorf("our work did not come back: %v", err)
-	}
-
-	entries, err := wm.listStashEntries(repoDir)
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	if len(entries) != 1 || entries[0].Hash != userHash {
-		t.Errorf("the user's stash entry was consumed by our restore: %v", entries)
-	}
-}
-
-// TestPopStashByHashLeavesAnEntryItCouldNotApply: a conflicted apply must not also delete the saved
-// state. Dropping what could not be applied turns a conflict the user can resolve into work that no
-// longer exists anywhere.
-func TestPopStashByHashLeavesAnEntryItCouldNotApply(t *testing.T) {
-	repoDir, projID, _, _, _, wm := setupStashTest(t)
-	wt := stashWorktree(t, wm, repoDir, projID, "conflict-one-opal")
-
-	writeFile(t, wt, "shared.txt", "stashed version\n")
-	hash, err := wm.PushStash(wt, StashMessageForAutoMerge("conflict-one-opal"))
-	if err != nil {
-		t.Fatalf("PushStash: %v", err)
-	}
-
-	// Make the same path unmergeable, the way a conflicted merge leaves it.
-	writeFile(t, wt, "shared.txt", "competing version\n")
-
-	ok, err := wm.PopStashByHash(wt, hash)
-	if err == nil {
-		t.Fatal("apply succeeded; the test no longer covers the conflict path")
-	}
-	if !ok {
-		t.Error("the entry was reported absent; it is present and merely unapplicable")
-	}
-	if n := countStashEntries(t, repoDir); n != 1 {
-		t.Errorf("the unapplied entry was dropped: %d entries left, want 1 — that is lost work", n)
-	}
-}
-
-// TestDropStashByHashNeverFallsBackToTheTopEntry pins the removal of a fallback that dropped
+// TestStashHashLookupsNeverFallBackToTheTopEntry pins the removal of a fallback that dropped
 // stash@{0} when the requested hash was not found. If ours is gone, the top entry is somebody
-// else's — the precise hazard the hash-identity API exists to remove.
-func TestDropStashByHashNeverFallsBackToTheTopEntry(t *testing.T) {
+// else's — the precise hazard the hash-identity API exists to remove — so neither lookup touches it,
+// and a missing entry is answered as absent rather than as success or as an error.
+func TestStashHashLookupsNeverFallBackToTheTopEntry(t *testing.T) {
 	repoDir, _, _, _, _, wm := setupStashTest(t)
 	userHash := seedUserStash(t, wm, repoDir)
+	const missing = "0123456789abcdef0123456789abcdef01234567"
 
-	// A hash that is not in the list (ours was already swept).
-	if err := wm.DropStashByHash(repoDir, "0123456789abcdef0123456789abcdef01234567"); err != nil {
-		t.Fatalf("DropStashByHash for a missing entry: %v", err)
-	}
-	entries, _ := wm.listStashEntries(repoDir)
-	if len(entries) != 1 || entries[0].Hash != userHash {
-		t.Errorf("dropping a missing entry consumed the user's: %v", entries)
+	t.Run("pop", func(t *testing.T) {
+		found, err := wm.PopStashByHash(repoDir, missing)
+		if err != nil {
+			t.Fatalf("a missing entry is not an error, it is absent: %v", err)
+		}
+		if found {
+			t.Error("PopStashByHash reported restoring an entry that does not exist")
+		}
+		// An empty hash is the "nothing was stashed" case every merge path hits, and must stay silent.
+		if found, err := wm.PopStashByHash(repoDir, ""); found || err != nil {
+			t.Errorf("PopStashByHash(\"\") = (%v, %v), want (false, nil)", found, err)
+		}
+	})
+
+	t.Run("drop", func(t *testing.T) {
+		if err := wm.DropStashByHash(repoDir, missing); err != nil {
+			t.Fatalf("DropStashByHash for a missing entry: %v", err)
+		}
+	})
+
+	if entries, _ := wm.listStashEntries(repoDir); len(entries) != 1 || entries[0].Hash != userHash {
+		t.Errorf("a lookup for a hash nobody holds consumed the user's entry: %v", entries)
 	}
 }
 
@@ -247,25 +207,6 @@ func TestRestoreStashForTaskFindsItsOwnLabelAcrossTasks(t *testing.T) {
 			t.Errorf("%s restored the other task's file %s", c.taskID, c.other)
 		}
 		_ = os.Remove(filepath.Join(wtA, c.file))
-	}
-}
-
-// TestPopStashByHashReportsAMissingEntryAsAbsent: silently continuing is how lost work stays lost, so
-// the caller gets a distinguishable "it was not there" rather than success.
-func TestPopStashByHashReportsAMissingEntryAsAbsent(t *testing.T) {
-	repoDir, _, _, _, _, wm := setupStashTest(t)
-
-	ok, err := wm.PopStashByHash(repoDir, "0123456789abcdef0123456789abcdef01234567")
-	if err != nil {
-		t.Fatalf("a missing entry is not an error, it is absent: %v", err)
-	}
-	if ok {
-		t.Error("PopStashByHash reported restoring an entry that does not exist")
-	}
-
-	// An empty hash is the "nothing was stashed" case every merge path hits, and must stay silent.
-	if ok, err := wm.PopStashByHash(repoDir, ""); ok || err != nil {
-		t.Errorf("PopStashByHash(\"\") = (%v, %v), want (false, nil)", ok, err)
 	}
 }
 
@@ -349,5 +290,87 @@ func TestPopStashByHashRestoresEvenWhenTheIndexCannotBeRebuilt(t *testing.T) {
 	}
 	if list := runGitOutput(t, wt, "stash", "list"); !strings.Contains(list, hash) && !strings.Contains(list, StashMessageForAutoMerge("staged-clash-one")) {
 		t.Errorf("an entry that could not be applied must stay on the stack, list=%q", list)
+	}
+}
+
+// A bracketed merge parks the checkout's own work, merges, then restores it. When the merge touched the
+// same lines the parked work did, the apply conflicts: the paths arrive in the working tree unmerged and
+// the entry stays on the stack. That is a different fact from "the merge failed" — the branch already
+// reached its target — so it has to be classifiable without reading git's wording.
+
+// TestPopStashByHashNamesThePathsItCouldNotRestore: the merge reworded the sentence the parked work
+// reworded. The error names the file and the entry, and the entry is still there to restore by hand.
+func TestPopStashByHashNamesThePathsItCouldNotRestore(t *testing.T) {
+	repoDir, _, _, _, _, wm := setupStashTest(t)
+	writeFile(t, repoDir, "shared.txt", "the original sentence\n")
+	runGit(t, repoDir, "add", "shared.txt")
+	runGit(t, repoDir, "commit", "-qm", "shared")
+
+	writeFile(t, repoDir, "shared.txt", "the parked wording\n")
+	hash, err := wm.PushStash(repoDir, StashMessageForAutoMerge("conflict-task"))
+	if err != nil {
+		t.Fatalf("stash push: %v", err)
+	}
+
+	// What the merge brings in: a competing change to the same line, now committed.
+	writeFile(t, repoDir, "shared.txt", "the merged wording\n")
+	runGit(t, repoDir, "commit", "-qam", "merged wording")
+
+	found, restoreErr := wm.PopStashByHash(repoDir, hash)
+	if restoreErr == nil {
+		t.Fatal("the restore reported success with conflict markers in the tree")
+	}
+	if !found {
+		t.Error("found=false: the entry is on the stack, and a caller reading this loses track of it")
+	}
+	var conflict *RestoreConflictError
+	if !errors.As(restoreErr, &conflict) {
+		t.Fatalf("want *RestoreConflictError, got %T: %v", restoreErr, restoreErr)
+	}
+	if strings.Join(conflict.Paths, ",") != "shared.txt" {
+		t.Errorf("Paths = %v, want the one conflicted file", conflict.Paths)
+	}
+	if conflict.Hash != hash {
+		t.Errorf("Hash = %q, want %q — the message tells the user where their words are", conflict.Hash, hash)
+	}
+	if n := countStashEntries(t, repoDir); n != 1 {
+		t.Errorf("%d entries left, want 1 — a conflicted apply must keep the saved state", n)
+	}
+}
+
+// TestPopStashByHashLeavesARefusalUnclassified: an apply git refused outright left the tree alone, so
+// there is nothing for a person to resolve. Only an unmerged index is a conflict — sniffing git's text
+// would call this one too — and a refusal still keeps the saved state, because dropping what could not
+// be applied turns a recoverable restore into work that no longer exists anywhere.
+func TestPopStashByHashLeavesARefusalUnclassified(t *testing.T) {
+	repoDir, _, _, _, _, wm := setupStashTest(t)
+
+	untracked := filepath.Join(repoDir, "new.txt")
+	writeFile(t, repoDir, "new.txt", "parked\n")
+	hash, err := wm.PushStash(repoDir, StashMessageForAutoMerge("refused-task"))
+	if err != nil {
+		t.Fatalf("stash push: %v", err)
+	}
+
+	// The path was parked untracked and has since been written again: git refuses rather than merging.
+	writeFile(t, repoDir, "new.txt", "written again since the push\n")
+
+	found, restoreErr := wm.PopStashByHash(repoDir, hash)
+	if restoreErr == nil {
+		t.Fatal("the restore reported success while the file was left unwritten")
+	}
+	if !found {
+		t.Error("the entry was reported absent; it is present and merely unapplicable")
+	}
+	var conflict *RestoreConflictError
+	if errors.As(restoreErr, &conflict) {
+		t.Errorf("a refusal that left no conflict is reported as one: %v", restoreErr)
+	}
+
+	if content, rerr := os.ReadFile(untracked); rerr != nil || string(content) != "written again since the push\n" {
+		t.Errorf("the tree was modified by a refused apply: %q (%v)", string(content), rerr)
+	}
+	if n := countStashEntries(t, repoDir); n != 1 {
+		t.Errorf("%d entries left, want 1", n)
 	}
 }

@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"mike/backend/config"
 	"mike/backend/exec"
 	"mike/backend/git"
 	"mike/backend/store"
 	"mike/backend/stream"
 	"mike/backend/testutil/testgit"
+	"mike/backend/testutil/teststore"
 	"mike/backend/types"
 )
 
@@ -32,11 +32,7 @@ func newTestTaskHandler(t *testing.T) (*TaskHandler, *store.Store, string) {
 		t.Fatal(err)
 	}
 
-	s, err := store.NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s := teststore.StoreIn(t, dbPath)
 
 	s.SetConfigValue("providers", "[]")
 	s.SetConfigValue("worker_provider", "")
@@ -44,7 +40,7 @@ func newTestTaskHandler(t *testing.T) (*TaskHandler, *store.Store, string) {
 	s.SetConfigValue("utility_provider", "")
 	s.SetConfigValue("utility_model", "")
 
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false, false)
+	cfgStore := teststore.ConfigStore(t, s, dbPath)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 	wm := git.NewWorktreeManager(s, cfgStore)
 	boardMgr := stream.NewAppStreamManager(s, wm)
@@ -158,8 +154,9 @@ func TestTaskHandler_POST_RefusesTheRetiredPlanMode(t *testing.T) {
 // git-facing fields of PUT /api/projects/{projectID}/tasks/{taskID}. All three reach a
 // git command line, so each must be rejected before it becomes an argument: dash-prefixed
 // values (option injection), range/ref operators and spaces, and — for branch — the empty
-// string. The accepted rows close the loop by reading the value back off the stored task,
-// which is what separates "validated" from "silently dropped".
+// string. The accepted rows close the loop twice: the value reads back off the stored task,
+// which is what separates "validated" from "silently dropped", and it comes back in the
+// response body under its wire name, which is what the panel re-renders.
 func TestTaskHandler_PUT_RefValidation(t *testing.T) {
 	// stored reads a field back off the task so an accepted row can prove it landed.
 	stored := map[string]func(task *types.Task) string{
@@ -185,18 +182,25 @@ func TestTaskHandler_PUT_RefValidation(t *testing.T) {
 		{"branch", "feature/my-branch", http.StatusOK},
 
 		// base_ref: a rev, so ValidateGitRef applies.
+		{"base_ref", "-f", http.StatusBadRequest},
 		{"base_ref", "-C/tmp/evil", http.StatusBadRequest},
+		{"base_ref", "--dry-run", http.StatusBadRequest},
 		{"base_ref", "feat~1", http.StatusBadRequest},
 		{"base_ref", "feat..branch", http.StatusBadRequest},
 		{"base_ref", "feat branch", http.StatusBadRequest},
 		{"base_ref", "main", http.StatusOK},
+		{"base_ref", "origin/feature-branch", http.StatusOK},
 
 		// branch_tip: a commit, still validated for the same reason.
+		{"branch_tip", "-f", http.StatusBadRequest},
+		{"branch_tip", "-C/tmp/evil", http.StatusBadRequest},
 		{"branch_tip", "--dry-run", http.StatusBadRequest},
 		{"branch_tip", "abc~1", http.StatusBadRequest},
 		{"branch_tip", "abc..def", http.StatusBadRequest},
 		{"branch_tip", "abc def", http.StatusBadRequest},
 		{"branch_tip", "abc123def456", http.StatusOK},
+		{"branch_tip", "feature-branch", http.StatusOK},
+		{"branch_tip", "task/frost-amber-quartz", http.StatusOK},
 	}
 
 	slug := strings.NewReplacer("/", "_", " ", "_", "~", "_", "^", "_", ":", "_", "-", "dash-")
@@ -225,96 +229,115 @@ func TestTaskHandler_PUT_RefValidation(t *testing.T) {
 			if got := stored[tc.field](task); got != tc.value {
 				t.Errorf("%s = %q after the accepted update, want %q", tc.field, got, tc.value)
 			}
+			// The body is what the panel re-renders, so the accepted value has to come back in it
+			// under the field's wire name, not only in the row.
+			var echoed map[string]any
+			if err := json.Unmarshal(rr.Body.Bytes(), &echoed); err != nil {
+				t.Fatalf("decode the answer: %v\n%s", err, rr.Body.String())
+			}
+			if echoed[tc.field] != tc.value {
+				t.Errorf("the response echoes %s = %v, want %q", tc.field, echoed[tc.field], tc.value)
+			}
 		})
 	}
 }
 
 // --- Combined validation: multiple fields at once ---
+// --- Every field of one body is validated before any of it is written ---
 
-func TestTaskHandler_PUT_MultipleFields_Valid(t *testing.T) {
-	h, s, _ := newTestTaskHandler(t)
-	setupTaskValidationProject(t, h, s)
-	mux := newTaskMux(h)
+// TestTaskHandler_PUT_EveryFieldIsValidatedBeforeAnyIsWritten covers the batch shape the panel sends:
+// the accepted rows prove three git-facing refs land together, and the refused row proves a body is
+// all-or-nothing — the two valid refs beside an invalid one reach neither the response nor the row,
+// so a card never ends up half-moved by a request that failed.
+func TestTaskHandler_PUT_EveryFieldIsValidatedBeforeAnyIsWritten(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		fields map[string]string
+		want   int
+		// stored is what each named field must hold afterwards.
+		stored map[string]string
+	}{
+		{
+			name:   "three valid refs land together",
+			fields: map[string]string{"branch": "feature/test", "base_ref": "main", "branch_tip": "abc123"},
+			want:   http.StatusOK,
+			stored: map[string]string{"branch": "feature/test", "base_ref": "main", "branch_tip": "abc123"},
+		},
+		{
+			name:   "one invalid ref costs the whole body",
+			fields: map[string]string{"branch": "feature/test", "base_ref": "main", "branch_tip": "-f"},
+			want:   http.StatusBadRequest,
+			// The task as setupTaskValidationProject wrote it: none of the body reached the row.
+			stored: map[string]string{"branch": "main", "base_ref": "", "branch_tip": ""},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, s, _ := newTestTaskHandler(t)
+			setupTaskValidationProject(t, h, s)
 
-	// All three git ref fields valid → 200
-	rr := doTaskRequest(t, mux, "PUT", "/api/projects/task-val-proj/tasks/task-val-task", map[string]string{
-		"branch":     "feature/test",
-		"base_ref":   "main",
-		"branch_tip": "abc123",
-	})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200 for all valid fields, got %d: %s", rr.Code, rr.Body.String())
-	}
+			rr := doTaskRequest(t, newTaskMux(h), "PUT",
+				"/api/projects/task-val-proj/tasks/task-val-task", tt.fields)
+			if rr.Code != tt.want {
+				t.Fatalf("body %v: status = %d, want %d; body: %s", tt.fields, rr.Code, tt.want, rr.Body.String())
+			}
 
-	task, err := s.GetTask("task-val-proj", "task-val-task")
-	if err != nil {
-		t.Fatalf("get task: %v", err)
-	}
-	if task.Branch != "feature/test" {
-		t.Fatalf("expected branch 'feature/test', got %q", task.Branch)
-	}
-	if task.BaseRef != "main" {
-		t.Fatalf("expected base_ref 'main', got %q", task.BaseRef)
-	}
-	if task.BranchTip != "abc123" {
-		t.Fatalf("expected branch_tip 'abc123', got %q", task.BranchTip)
-	}
-}
-
-func TestTaskHandler_PUT_MultipleFields_OneInvalid(t *testing.T) {
-	h, s, _ := newTestTaskHandler(t)
-	setupTaskValidationProject(t, h, s)
-	mux := newTaskMux(h)
-
-	// Valid branch + valid base_ref + INVALID branch_tip → 400
-	rr := doTaskRequest(t, mux, "PUT", "/api/projects/task-val-proj/tasks/task-val-task", map[string]string{
-		"branch":     "feature/test",
-		"base_ref":   "main",
-		"branch_tip": "-f",
-	})
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 when branch_tip is invalid, got %d: %s", rr.Code, rr.Body.String())
+			task, err := s.GetTask("task-val-proj", "task-val-task")
+			if err != nil {
+				t.Fatalf("get task: %v", err)
+			}
+			stored := map[string]string{
+				"branch": task.Branch, "base_ref": task.BaseRef, "branch_tip": task.BranchTip,
+			}
+			for field, want := range tt.stored {
+				if stored[field] != want {
+					t.Errorf("%s = %q, want %q", field, stored[field], want)
+				}
+			}
+		})
 	}
 }
 
 // --- Existing tests (preserved below) ---
+// TestWorktreeExistsReflectsTheWorktreeDirectory: the board's list and one task's own answer both
+// report whether the task's worktree directory is on disk, from the same path, through two entry
+// points. Both are asserted in both directions: a row that claims a worktree the editor cannot open
+// is as broken as one that hides a worktree that is there.
+func TestWorktreeExistsReflectsTheWorktreeDirectory(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		fill func(tasks []types.Task, workspaceDir string)
+	}{
+		{"the board's list", func(tasks []types.Task, workspaceDir string) {
+			EnrichWorktreeExists(tasks, workspaceDir)
+		}},
+		{"one task's answer", func(tasks []types.Task, workspaceDir string) {
+			for i := range tasks {
+				enrichTaskWorktree(&tasks[i], workspaceDir)
+			}
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			const projectID = "test-project"
+			workspace := t.TempDir()
+			// Only task-1 has a worktree: workspaceDir/projectID/taskID, the one layout
+			// backend/git owns.
+			if err := os.MkdirAll(filepath.Join(workspace, projectID, "task-1"), 0o755); err != nil {
+				t.Fatal(err)
+			}
 
-func TestEnrichWorktreeExists(t *testing.T) {
-	tmpDir := t.TempDir()
+			tasks := []types.Task{
+				{ID: "task-1", ProjectID: projectID},
+				{ID: "task-2", ProjectID: projectID},
+			}
+			tt.fill(tasks, workspace)
 
-	// Create worktree directories: workspaceDir/projectID/taskID
-	projectID := "test-project"
-	taskID1 := "task-1"
-	taskID2 := "task-2"
-
-	// task-1 has a worktree, task-2 does not
-	os.MkdirAll(filepath.Join(tmpDir, projectID, taskID1), 0o755)
-
-	tasks := []types.Task{
-		{ID: taskID1, ProjectID: projectID},
-		{ID: taskID2, ProjectID: projectID},
-	}
-
-	EnrichWorktreeExists(tasks, tmpDir)
-
-	if !tasks[0].WorktreeExists {
-		t.Error("task-1 should have worktree_exists=true")
-	}
-	if tasks[1].WorktreeExists {
-		t.Error("task-2 should have worktree_exists=false")
-	}
-}
-func TestEnrichTaskWorktree(t *testing.T) {
-	tmpDir := t.TempDir()
-	projectID := "proj"
-	taskID := "task"
-	os.MkdirAll(filepath.Join(tmpDir, projectID, taskID), 0o755)
-
-	task := &types.Task{ID: taskID, ProjectID: projectID}
-	enrichTaskWorktree(task, tmpDir)
-
-	if !task.WorktreeExists {
-		t.Error("task should have worktree_exists=true")
+			if !tasks[0].WorktreeExists {
+				t.Error("the task with a worktree directory reported worktree_exists=false")
+			}
+			if tasks[1].WorktreeExists {
+				t.Error("the task with no worktree directory reported worktree_exists=true")
+			}
+		})
 	}
 }
 
@@ -502,11 +525,7 @@ func newTaskHandlerWithExecutor(t *testing.T) (*TaskHandler, *store.Store, strin
 	testgit.Git(t, repoDir, "commit", "-m", "Initial")
 
 	dbPath := filepath.Join(tmpDir, "test.db")
-	s, err := store.NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s := teststore.StoreIn(t, dbPath)
 
 	s.SetConfigValue("providers", "[]")
 	s.SetConfigValue("worker_provider", "")
@@ -514,7 +533,7 @@ func newTaskHandlerWithExecutor(t *testing.T) (*TaskHandler, *store.Store, strin
 	s.SetConfigValue("utility_provider", "")
 	s.SetConfigValue("utility_model", "")
 
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false, false)
+	cfgStore := teststore.ConfigStore(t, s, dbPath)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 
 	projID := "proj-auto-start"
@@ -579,59 +598,127 @@ func postToMux(t *testing.T, mux *http.ServeMux, path string, body any) *httptes
 	return rr
 }
 
-// TestHandleStart_MovesParentToInProgress verifies that starting a
-// backlog parent via POST /start moves the parent itself to In Progress
-// (started-but-pending) while the deepest subtask starts running.
-func TestHandleStart_MovesParentToInProgress(t *testing.T) {
-	h, s, projID := newTaskHandlerWithExecutor(t)
-	createChainTask(t, s, projID, "par-mip", "Parent", "backlog", "idle", "", "thread-par-mip", false)
-	createChainTask(t, s, projID, "child-mip", "Child", "backlog", "idle", "par-mip", "thread-child-mip", true)
+// --- One schedule decision, whichever route the click arrived through ---
 
+// postClick sends the click that asks a row to run. `route` is the path suffix and the handler the
+// server registers for it; a drag to In Progress is a move with a status, the two start routes take
+// no body.
+func postClick(t *testing.T, h *TaskHandler, projID, route, taskID string) *httptest.ResponseRecorder {
+	t.Helper()
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/start", h.HandleStart)
-	rr := postToMux(t, mux, "/api/projects/"+projID+"/tasks/par-mip/start", nil)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("HandleStart status = %d, body=%s", rr.Code, rr.Body.String())
+	var body any
+	switch route {
+	case "start":
+		mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/start", h.HandleStart)
+	case "start-subtask":
+		mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/start-subtask", h.HandleStartSubtask)
+	case "move":
+		mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/move", h.HandleMove)
+		body = map[string]any{"status": "in_progress"}
+	default:
+		t.Fatalf("unknown click route %q", route)
 	}
+	return postToMux(t, mux, "/api/projects/"+projID+"/tasks/"+taskID+"/"+route, body)
+}
 
-	parent, _ := s.GetTaskByID("par-mip")
-	if parent.Status != types.StatusInProgress {
-		t.Errorf("parent should move to In Progress (started-but-pending), got %q", parent.Status)
+// TestClickStartsTheDeepestReadyDescendant: starting a row, starting a subtask and dragging a row to
+// In Progress all ask startUnderSchedule the same question, so the answer is asserted once per entry
+// point: the clicked row goes to In Progress and waits, and the deepest descendant with nothing left
+// to run below it is the one that runs. It is marked autostarted because nobody clicked it — that is
+// what makes the auto-answer system answer its questions from the parent's context.
+func TestClickStartsTheDeepestReadyDescendant(t *testing.T) {
+	type chainRow struct {
+		id     string
+		parent string
 	}
-	if parent.ExecutionState != types.ExecStateIdle {
-		t.Errorf("parent should stay pending (not running), got %q", parent.ExecutionState)
-	}
+	for _, tt := range []struct {
+		name  string
+		route string
+		chain []chainRow
+		click string
+	}{
+		{
+			name:  "start on a parent starts its child",
+			route: "start",
+			chain: []chainRow{{id: "par-drd", parent: ""}, {id: "child-drd", parent: "par-drd"}},
+			click: "par-drd",
+		},
+		{
+			name:  "start-subtask on a middle row starts the leaf",
+			route: "start-subtask",
+			chain: []chainRow{{id: "root-drd2", parent: ""}, {id: "mid-drd2", parent: "root-drd2"}, {id: "leaf-drd2", parent: "mid-drd2"}},
+			click: "mid-drd2",
+		},
+		{
+			name:  "dragging a middle row to In Progress starts the leaf",
+			route: "move",
+			chain: []chainRow{{id: "root-drd3", parent: ""}, {id: "mid-drd3", parent: "root-drd3"}, {id: "leaf-drd3", parent: "mid-drd3"}},
+			click: "mid-drd3",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, s, projID := newTaskHandlerWithExecutor(t)
+			deepest := tt.chain[len(tt.chain)-1].id
+			for _, row := range tt.chain {
+				// The deepest row is the one with a conversation, so its start gets as far as
+				// deciding there is nothing left to run and waits in review without an LLM.
+				createChainTask(t, s, projID, row.id, row.id, types.StatusBacklog, types.ExecStateIdle,
+					row.parent, "thread-"+row.id, row.id == deepest)
+			}
 
-	child, _ := s.GetTaskByID("child-mip")
-	if child.Status != types.StatusReview || child.ExecutionState != types.ExecStateIdle {
-		t.Errorf("deepest subtask with nothing to run should wait in review: status=%q state=%q", child.Status, child.ExecutionState)
-	}
-	if !child.Autostarted {
-		t.Error("subtask started via its parent should be marked autostarted")
+			rr := postClick(t, h, projID, tt.route, tt.click)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("%s status = %d, body=%s", tt.route, rr.Code, rr.Body.String())
+			}
+
+			clicked, err := s.GetTaskByID(tt.click)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if clicked.Status != types.StatusInProgress || clicked.ExecutionState != types.ExecStateIdle {
+				t.Errorf("the clicked row should be started-but-pending: status=%q state=%q", clicked.Status, clicked.ExecutionState)
+			}
+
+			leaf, err := s.GetTaskByID(deepest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if leaf.Status != types.StatusReview || leaf.ExecutionState != types.ExecStateIdle {
+				t.Errorf("the deepest descendant with nothing to run should wait in review: status=%q state=%q", leaf.Status, leaf.ExecutionState)
+			}
+			if !leaf.Autostarted {
+				t.Error("a row the scheduler started should be marked autostarted, whatever route the click came through")
+			}
+		})
 	}
 }
 
-// TestHandleStart_AllChildrenDoneStartsOwnExecution verifies that
-// starting a parent whose subtasks are all done starts the parent's own
-// execution.
-func TestHandleStart_AllChildrenDoneStartsOwnExecution(t *testing.T) {
-	h, s, projID := newTaskHandlerWithExecutor(t)
-	createChainTask(t, s, projID, "par-ad", "Parent", "backlog", "idle", "", "thread-par-ad", true)
-	createChainTask(t, s, projID, "child-ad", "Child", "done", "completed", "par-ad", "", false)
+// TestClickRunsItsOwnTurnWhenNothingUnderItIsLeft: once every descendant is Done the row has work of
+// its own to do, so its turn starts — and a row the person clicked is never marked autostarted,
+// because a human is present to answer what it asks.
+func TestClickRunsItsOwnTurnWhenNothingUnderItIsLeft(t *testing.T) {
+	for _, route := range []string{"start", "move"} {
+		t.Run(route, func(t *testing.T) {
+			h, s, projID := newTaskHandlerWithExecutor(t)
+			createChainTask(t, s, projID, "par-aod", "Parent", types.StatusBacklog, types.ExecStateIdle, "", "thread-par-aod", true)
+			createChainTask(t, s, projID, "child-aod", "Child", types.StatusDone, types.ExecStateCompleted, "par-aod", "", false)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/start", h.HandleStart)
-	rr := postToMux(t, mux, "/api/projects/"+projID+"/tasks/par-ad/start", nil)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("HandleStart status = %d, body=%s", rr.Code, rr.Body.String())
-	}
+			rr := postClick(t, h, projID, route, "par-aod")
+			if rr.Code != http.StatusOK {
+				t.Fatalf("%s status = %d, body=%s", route, rr.Code, rr.Body.String())
+			}
 
-	parent, _ := s.GetTaskByID("par-ad")
-	if parent.Status != types.StatusReview || parent.ExecutionState != types.ExecStateIdle {
-		t.Errorf("parent with nothing to run should wait in review once all children are done: status=%q state=%q", parent.Status, parent.ExecutionState)
-	}
-	if parent.Autostarted {
-		t.Error("user-initiated start should not mark the task autostarted")
+			parent, err := s.GetTaskByID("par-aod")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if parent.Status != types.StatusReview || parent.ExecutionState != types.ExecStateIdle {
+				t.Errorf("a parent with nothing left to run should wait in review: status=%q state=%q", parent.Status, parent.ExecutionState)
+			}
+			if parent.Autostarted {
+				t.Error("a row the person clicked is not one the scheduler started")
+			}
+		})
 	}
 }
 
@@ -657,35 +744,6 @@ func TestHandleStart_BlockedChildrenStayPending(t *testing.T) {
 	child, _ := s.GetTaskByID("child-blk")
 	if child.Status != types.StatusReview {
 		t.Errorf("child should stay in review, got %q", child.Status)
-	}
-}
-
-// TestHandleStartSubtask_WithChildren_StartsDeepestSubtask verifies that
-// starting a subtask that has children of its own starts the deepest
-// descendant — the subtask's own execution must wait for its children.
-func TestHandleStartSubtask_WithChildren_StartsDeepestSubtask(t *testing.T) {
-	h, s, projID := newTaskHandlerWithExecutor(t)
-	createChainTask(t, s, projID, "root-nsp", "Root", "backlog", "idle", "", "", false)
-	createChainTask(t, s, projID, "mid-nsp", "Mid", "backlog", "idle", "root-nsp", "thread-mid-nsp", false)
-	createChainTask(t, s, projID, "leaf-nsp", "Leaf", "backlog", "idle", "mid-nsp", "thread-leaf-nsp", true)
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/start-subtask", h.HandleStartSubtask)
-	rr := postToMux(t, mux, "/api/projects/"+projID+"/tasks/mid-nsp/start-subtask", nil)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("HandleStartSubtask status = %d, body=%s", rr.Code, rr.Body.String())
-	}
-
-	mid, _ := s.GetTaskByID("mid-nsp")
-	if mid.Status != types.StatusInProgress || mid.ExecutionState != types.ExecStateIdle {
-		t.Errorf("mid subtask should be started-but-pending: status=%q state=%q", mid.Status, mid.ExecutionState)
-	}
-	leaf, _ := s.GetTaskByID("leaf-nsp")
-	if leaf.Status != types.StatusReview || leaf.ExecutionState != types.ExecStateIdle {
-		t.Errorf("deepest descendant with nothing to run should wait in review: status=%q state=%q", leaf.Status, leaf.ExecutionState)
-	}
-	if !leaf.Autostarted {
-		t.Error("deepest descendant should be marked autostarted")
 	}
 }
 
@@ -736,56 +794,6 @@ func TestHandleMove_ChildWithoutModelConfigRunsOnTheParents(t *testing.T) {
 	rr := postToMux(t, mux, "/api/projects/"+projID+"/tasks/child-cfg-mv/move", map[string]any{"status": "in_progress"})
 
 	requireStartedOnParentsConfig(t, "HandleMove", rr, s, "child-cfg-mv")
-}
-
-// TestHandleMove_SubtaskWithChildren_StartsDeepestSubtask verifies that moving
-// a subtask with its own children to In Progress starts the deepest
-// descendant, not the subtask's own execution.
-func TestHandleMove_SubtaskWithChildren_StartsDeepestSubtask(t *testing.T) {
-	h, s, projID := newTaskHandlerWithExecutor(t)
-	createChainTask(t, s, projID, "root-msc", "Root", "backlog", "idle", "", "", false)
-	createChainTask(t, s, projID, "mid-msc", "Mid", "backlog", "idle", "root-msc", "thread-mid-msc", false)
-	createChainTask(t, s, projID, "leaf-msc", "Leaf", "backlog", "idle", "mid-msc", "thread-leaf-msc", true)
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/move", h.HandleMove)
-	rr := postToMux(t, mux, "/api/projects/"+projID+"/tasks/mid-msc/move", map[string]any{"status": "in_progress"})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("HandleMove status = %d, body=%s", rr.Code, rr.Body.String())
-	}
-
-	mid, _ := s.GetTaskByID("mid-msc")
-	if mid.Status != types.StatusInProgress || mid.ExecutionState != types.ExecStateIdle {
-		t.Errorf("mid subtask should be started-but-pending: status=%q state=%q", mid.Status, mid.ExecutionState)
-	}
-	leaf, _ := s.GetTaskByID("leaf-msc")
-	if leaf.Status != types.StatusReview || leaf.ExecutionState != types.ExecStateIdle {
-		t.Errorf("deepest descendant with nothing to run should wait in review: status=%q state=%q", leaf.Status, leaf.ExecutionState)
-	}
-	if !leaf.Autostarted {
-		t.Error("deepest descendant started via its parent should be marked autostarted")
-	}
-}
-
-// TestHandleMove_ParentAllChildrenDone_StartsOwnExecution verifies that moving
-// a parent with all-done subtasks to In Progress starts the parent's own
-// execution.
-func TestHandleMove_ParentAllChildrenDone_StartsOwnExecution(t *testing.T) {
-	h, s, projID := newTaskHandlerWithExecutor(t)
-	createChainTask(t, s, projID, "par-mad", "Parent", "backlog", "idle", "", "thread-par-mad", true)
-	createChainTask(t, s, projID, "child-mad", "Child", "done", "completed", "par-mad", "", false)
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/move", h.HandleMove)
-	rr := postToMux(t, mux, "/api/projects/"+projID+"/tasks/par-mad/move", map[string]any{"status": "in_progress"})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("HandleMove status = %d, body=%s", rr.Code, rr.Body.String())
-	}
-
-	parent, _ := s.GetTaskByID("par-mad")
-	if parent.Status != types.StatusReview || parent.ExecutionState != types.ExecStateIdle {
-		t.Errorf("parent with nothing to run should wait in review once all children are done: status=%q state=%q", parent.Status, parent.ExecutionState)
-	}
 }
 
 // TestHandleMove_AwaitingUserLeafReturnsToReview: a task sitting in review because the
@@ -956,11 +964,7 @@ func TestTitleGenerationDoesNotClobberTaskStatus(t *testing.T) {
 	if err := os.MkdirAll(worktreesDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	s, err := store.NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s := teststore.StoreIn(t, dbPath)
 
 	mock := newHeldTitleLLM()
 	server := mock.Server()
@@ -973,7 +977,7 @@ func TestTitleGenerationDoesNotClobberTaskStatus(t *testing.T) {
 	s.SetConfigValue("utility_provider", "held")
 	s.SetConfigValue("utility_model", "m1")
 
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false, false)
+	cfgStore := teststore.ConfigStore(t, s, dbPath)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 	wm := git.NewWorktreeManager(s, cfgStore)
 	boardMgr := stream.NewAppStreamManager(s, wm)
@@ -1058,57 +1062,61 @@ func TestTitleGenerationDoesNotClobberTaskStatus(t *testing.T) {
 	}
 }
 
-func TestTaskHandler_POST_CannotMarkATitleAsTheModels(t *testing.T) {
-	h, s, worktreesDir := newTestTaskHandler(t)
-	proj := &types.Project{ID: "claim-title-proj", Name: "claim-title", Path: filepath.Join(worktreesDir, "claim-title")}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatal(err)
-	}
+// --- A created row takes no field the product owns ---
 
-	rr := doTaskRequest(t, newTaskMux(h), http.MethodPost, "/api/projects/claim-title-proj/tasks",
-		map[string]any{"title": "typed by hand", "prompt": "typed by hand", "title_llm": true})
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("create task: %d %s", rr.Code, rr.Body.String())
-	}
-	var created types.Task
-	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
-		t.Fatalf("parse created task: %v", err)
-	}
+// TestTaskHandler_POST_CannotClaimAFieldTheProductOwns: the model's mark on a title is set by the
+// title generator, and the memory peak is a reading the sandbox layer takes from a container as it is
+// removed. Neither is a caller's to send, so a created row carries neither however the body spells
+// them — a body that could claim them could make a typed title read as the model's, or a task that
+// never ran read as one that filled its container.
+func TestTaskHandler_POST_CannotClaimAFieldTheProductOwns(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		body map[string]any
+		// check reads the stored row and fails on anything the body claimed.
+		check func(*testing.T, *types.Task)
+	}{
+		{
+			name: "the model's mark on a title",
+			body: map[string]any{"title": "typed by hand", "prompt": "typed by hand", "title_llm": true},
+			check: func(t *testing.T, stored *types.Task) {
+				if stored.TitleLLM {
+					t.Errorf("a created row took the model's mark from the body")
+				}
+			},
+		},
+		{
+			name: "a measured memory peak",
+			body: map[string]any{"title": "seeded peak", "sandbox_memory_peak_mb": 99999},
+			check: func(t *testing.T, stored *types.Task) {
+				if stored.SandboxMemoryPeakMB != 0 {
+					t.Errorf("created task carries peak %d MB, want 0", stored.SandboxMemoryPeakMB)
+				}
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, s, worktreesDir := newTestTaskHandler(t)
+			proj := &types.Project{ID: "claim-proj", Name: "claim", Path: filepath.Join(worktreesDir, "claim")}
+			if err := s.CreateProject(proj); err != nil {
+				t.Fatal(err)
+			}
 
-	stored, err := s.GetTask(proj.ID, created.ID)
-	if err != nil {
-		t.Fatalf("read back: %v", err)
-	}
-	if stored.TitleLLM {
-		t.Errorf("a created row took the model's mark from the body")
-	}
-}
+			rr := doTaskRequest(t, newTaskMux(h), http.MethodPost, "/api/projects/claim-proj/tasks", tt.body)
+			if rr.Code != http.StatusCreated {
+				t.Fatalf("create task: %d %s", rr.Code, rr.Body.String())
+			}
+			var created types.Task
+			if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+				t.Fatalf("parse created task: %v", err)
+			}
 
-// The peak is a reading the sandbox layer takes from a container as it is removed, so a created
-// task has none — whatever the body claimed.
-func TestTaskHandler_POST_DoesNotSeedAMeasuredPeak(t *testing.T) {
-	h, s, worktreesDir := newTestTaskHandler(t)
-	proj := &types.Project{ID: "peak-seed-proj", Name: "peak-seed", Path: filepath.Join(worktreesDir, "peak-seed")}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatal(err)
-	}
-
-	rr := doTaskRequest(t, newTaskMux(h), http.MethodPost, "/api/projects/peak-seed-proj/tasks",
-		map[string]any{"title": "seeded peak", "sandbox_memory_peak_mb": 99999})
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("create task: %d %s", rr.Code, rr.Body.String())
-	}
-	var created types.Task
-	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
-		t.Fatalf("parse created task: %v", err)
-	}
-
-	stored, err := s.GetTask(proj.ID, created.ID)
-	if err != nil {
-		t.Fatalf("read back: %v", err)
-	}
-	if stored.SandboxMemoryPeakMB != 0 {
-		t.Errorf("created task carries peak %d MB, want 0", stored.SandboxMemoryPeakMB)
+			stored, err := s.GetTask(proj.ID, created.ID)
+			if err != nil {
+				t.Fatalf("read back: %v", err)
+			}
+			tt.check(t, stored)
+		})
 	}
 }
 
@@ -1426,69 +1434,71 @@ func TestHandleCommitAndDone_DoneWhenOnlyTheProjectOwnsTheConflict(t *testing.T)
 }
 
 // --- base_ref is a root task's own: nesting a task drops it ---
+// --- base_ref is a root task's own: nesting a task drops it ---
 
-func TestTaskHandler_POST_DropsBaseBranchSentWithAParent(t *testing.T) {
-	h, s, _ := newTestTaskHandler(t)
-	if err := s.CreateProject(&types.Project{ID: "bb-proj", Name: "bb-proj", Path: t.TempDir()}); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.CreateTask(&types.Task{
-		ID: "bb-parent", ProjectID: "bb-proj", Title: "parent", Status: types.StatusBacklog,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	mux := newTaskMux(h)
+// TestNestingATaskDropsItsBaseBranch: a subtask's baseline is its parent's branch, decided when it
+// runs, so a base_ref on a nested task is a baseline that no longer exists. Both ways a task becomes
+// nested — created under a parent, and re-parented by an update — clear the field.
+func TestNestingATaskDropsItsBaseBranch(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		// nest makes the row a subtask and returns how it was nested, for the failure message.
+		nest func(t *testing.T, h *TaskHandler, s *store.Store, parentID string) string
+	}{
+		{
+			name: "created under a parent",
+			nest: func(t *testing.T, h *TaskHandler, s *store.Store, parentID string) string {
+				rr := doTaskRequest(t, newTaskMux(h), http.MethodPost, "/api/projects/task-val-proj/tasks",
+					map[string]any{"prompt": "Part of the plan", "parent_task_id": parentID, "base_ref": "test"})
+				if rr.Code != http.StatusCreated {
+					t.Fatalf("create: status = %d, want 201: %s", rr.Code, rr.Body.String())
+				}
+				var created types.Task
+				if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+					t.Fatal(err)
+				}
+				if created.ParentTaskID != parentID {
+					t.Fatalf("parent_task_id = %q, want %q", created.ParentTaskID, parentID)
+				}
+				return created.ID
+			},
+		},
+		{
+			name: "re-parented by an update",
+			nest: func(t *testing.T, h *TaskHandler, s *store.Store, parentID string) string {
+				mux := newTaskMux(h)
+				const path = "/api/projects/task-val-proj/tasks/task-val-task"
+				if rr := doTaskRequest(t, mux, http.MethodPut, path,
+					map[string]string{"base_ref": "test"}); rr.Code != http.StatusOK {
+					t.Fatalf("configure base branch: status = %d: %s", rr.Code, rr.Body.String())
+				}
+				if rr := doTaskRequest(t, mux, http.MethodPut, path,
+					map[string]string{"parent_task_id": parentID}); rr.Code != http.StatusOK {
+					t.Fatalf("nest task: status = %d: %s", rr.Code, rr.Body.String())
+				}
+				return "task-val-task"
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, s, _ := newTestTaskHandler(t)
+			setupTaskValidationProject(t, h, s)
+			if err := s.CreateTask(&types.Task{
+				ID: "nest-parent", ProjectID: "task-val-proj", Title: "parent", Status: types.StatusBacklog,
+			}); err != nil {
+				t.Fatalf("create parent: %v", err)
+			}
 
-	rr := doTaskRequest(t, mux, http.MethodPost, "/api/projects/bb-proj/tasks", map[string]any{
-		"prompt":         "Part of the plan",
-		"parent_task_id": "bb-parent",
-		"base_ref":       "test",
-	})
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201: %s", rr.Code, rr.Body.String())
-	}
-	var created types.Task
-	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
-		t.Fatal(err)
-	}
-	if created.ParentTaskID != "bb-parent" {
-		t.Fatalf("parent_task_id = %q, want bb-parent", created.ParentTaskID)
-	}
-	stored, err := s.GetTask("bb-proj", created.ID)
-	if err != nil {
-		t.Fatalf("get created task: %v", err)
-	}
-	if stored.BaseRef != "" {
-		t.Errorf("base_ref = %q on a subtask, want empty", stored.BaseRef)
-	}
-}
+			id := tt.nest(t, h, s, "nest-parent")
 
-func TestTaskHandler_PUT_NestingClearsBaseBranch(t *testing.T) {
-	h, s, _ := newTestTaskHandler(t)
-	setupTaskValidationProject(t, h, s)
-	if err := s.CreateTask(&types.Task{
-		ID: "bb-put-parent", ProjectID: "task-val-proj", Title: "parent", Status: types.StatusBacklog,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	mux := newTaskMux(h)
-
-	if rr := doTaskRequest(t, mux, http.MethodPut,
-		"/api/projects/task-val-proj/tasks/task-val-task", map[string]string{"base_ref": "test"}); rr.Code != http.StatusOK {
-		t.Fatalf("configure base branch: status = %d: %s", rr.Code, rr.Body.String())
-	}
-
-	if rr := doTaskRequest(t, mux, http.MethodPut,
-		"/api/projects/task-val-proj/tasks/task-val-task", map[string]string{"parent_task_id": "bb-put-parent"}); rr.Code != http.StatusOK {
-		t.Fatalf("nest task: status = %d: %s", rr.Code, rr.Body.String())
-	}
-
-	task, err := s.GetTask("task-val-proj", "task-val-task")
-	if err != nil {
-		t.Fatalf("get task: %v", err)
-	}
-	if task.BaseRef != "" {
-		t.Errorf("base_ref = %q after nesting, want empty", task.BaseRef)
+			stored, err := s.GetTask("task-val-proj", id)
+			if err != nil {
+				t.Fatalf("get task: %v", err)
+			}
+			if stored.BaseRef != "" {
+				t.Errorf("base_ref = %q on a nested task, want empty", stored.BaseRef)
+			}
+		})
 	}
 }
 

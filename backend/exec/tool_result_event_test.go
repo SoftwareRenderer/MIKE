@@ -1,11 +1,12 @@
 package exec
 
 import (
+	"reflect"
 	"strings"
 	"testing"
-)
 
-// --- buildToolResultEvent Tests ---
+	"mike/backend/types"
+)
 
 // The card has to tell a call the user stopped from one that failed, which is more than success
 // says, so the frame carries the distinction and always carries it.
@@ -32,322 +33,195 @@ func TestBuildToolResultEvent_Interrupted(t *testing.T) {
 	}
 }
 
-func TestBuildToolResultEvent_BashStreamed(t *testing.T) {
+// The frame a finished tool call broadcasts. bash and read_file are previewed and carry the counts
+// of what the preview left out; every other tool's answer is short by nature and is sent whole, with
+// no truncation keys at all — the card shows the cut UI from those keys, so a frame that carries them
+// for a write would offer a "show more" over nothing. The remaining keys are the card's identity and
+// labels, and they are carried whatever the tool was.
+func TestBuildToolResultEvent_Frame(t *testing.T) {
 	t.Parallel()
-	// Large bash output that will be truncated
-	largeOutput := strings.Repeat("line of output text\n", 20)
-	msgID := "test-msg-id-123"
-	toolID := "call_abc123"
+	const marker = "... (truncated)"
+	manyLines := strings.Repeat("line of output text\n", 20)
+	manyCode := strings.Repeat("const x = someValue;\n", 50)
 
-	data := buildToolResultEvent(toolID, "bash", largeOutput, true, false, 150,
-		map[string]any{"command": "ls -la"},
-		`{"command":"ls -la"}`,
-		"", false, true, msgID)
+	cases := []struct {
+		name      string
+		toolName  string
+		result    string
+		success   bool
+		duration  int64
+		args      map[string]any
+		rawArgs   string
+		path      string
+		sandbox   bool
+		streamed  bool
+		messageID string
+		// expectations
+		wantCut   bool // the preview was cut rather than sent whole
+		wantLines int  // the ORIGINAL line count, for a cut preview
+		wantBytes int  // the ORIGINAL byte count, for a cut preview
+	}{
+		{
+			name: "bash streamed", toolName: "bash", result: manyLines, success: true, duration: 150,
+			args: map[string]any{"command": "ls -la"}, rawArgs: `{"command":"ls -la"}`,
+			streamed: true, messageID: "test-msg-id-123",
+			wantCut: true, wantLines: 21, wantBytes: len(manyLines),
+		},
+		{
+			name: "bash not streamed", toolName: "bash", result: manyLines, success: true, duration: 200,
+			args: map[string]any{"command": "cat file.txt"}, rawArgs: `{"command":"cat file.txt"}`,
+			path: "/path/to/file", sandbox: true, messageID: "test-msg-id-456",
+			wantCut: true, wantLines: 21, wantBytes: len(manyLines),
+		},
+		{
+			name: "bash short", toolName: "bash", result: "hello world\n", success: true, duration: 50,
+			args: map[string]any{"command": "echo hello"}, rawArgs: `{"command":"echo hello"}`,
+			streamed: true, messageID: "test-msg-short",
+		},
+		{
+			name: "bash empty", toolName: "bash", result: "", success: true, duration: 10,
+			args: map[string]any{"command": "true"}, rawArgs: `{"command":"true"}`,
+			streamed: true, messageID: "empty-msg",
+		},
+		{
+			name: "bash single long line", toolName: "bash", result: strings.Repeat("x", 2000),
+			success: true, duration: 50,
+			args: map[string]any{"command": "echo long"}, rawArgs: `{"command":"echo long"}`,
+			messageID: "longline-msg",
+			wantCut:   true, wantLines: 1, wantBytes: 2000,
+		},
+		{
+			name: "bash arguments are carried", toolName: "bash", result: strings.Repeat("output line\n", 15),
+			success: true, duration: 100,
+			args:     map[string]any{"command": "ls -la /tmp", "timeout": float64(30)},
+			rawArgs:  `{"command":"ls -la /tmp","timeout":30}`,
+			streamed: true, messageID: "args-msg",
+			wantCut: true, wantLines: 16, wantBytes: len(strings.Repeat("output line\n", 15)),
+		},
+		{
+			name: "read_file streamed", toolName: "read_file", result: manyCode, success: true, duration: 10,
+			args: map[string]any{"path": "src/large.ts"}, rawArgs: `{"path":"src/large.ts"}`,
+			path: "src/large.ts", streamed: true, messageID: "readfile-msg",
+			wantCut: true, wantLines: 51, wantBytes: len(manyCode),
+		},
+		{
+			name: "read_file not streamed", toolName: "read_file", result: strings.Repeat("line of code\n", 20),
+			success: true, duration: 5,
+			args: map[string]any{"path": "src/file.ts"}, rawArgs: `{"path":"src/file.ts"}`,
+			path: "src/file.ts", messageID: "readfile-not-streamed",
+			wantCut: true, wantLines: 21, wantBytes: len(strings.Repeat("line of code\n", 20)),
+		},
+		{
+			name: "read_file short", toolName: "read_file", result: "package main\n", success: true, duration: 3,
+			args: map[string]any{"path": "main.go"}, rawArgs: `{"path":"main.go"}`,
+			path: "main.go", messageID: "read-short",
+		},
+		{
+			name: "write_file is sent whole", toolName: "write_file",
+			result: "Wrote 12345 bytes to src/large-file.ts", success: true, duration: 50,
+			args:      map[string]any{"path": "src/large-file.ts", "content": "long content..."},
+			rawArgs:   `{"path":"src/large-file.ts","content":"long content..."}`,
+			path:      "src/large-file.ts",
+			messageID: "writefile-msg",
+		},
+		{
+			name: "a tool with no answer is sent whole", toolName: "mystery_tool",
+			result: "Unknown tool: mystery", success: false,
+			args: map[string]any{}, rawArgs: `{}`, messageID: "unknown-msg",
+		},
+	}
 
-	// Should contain standard fields
-	if data["tool_id"] != toolID {
-		t.Errorf("tool_id = %v, want %v", data["tool_id"], toolID)
-	}
-	if data["success"] != true {
-		t.Errorf("success = %v, want true", data["success"])
-	}
-	if data["duration"] != int64(150) {
-		t.Errorf("duration = %v, want 150", data["duration"])
-	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			toolID := "call_" + strings.ReplaceAll(tc.name, " ", "_")
+			data := buildToolResultEvent(toolID, tc.toolName, tc.result, tc.success, false, tc.duration,
+				tc.args, tc.rawArgs, tc.path, tc.sandbox, tc.streamed, tc.messageID)
 
-	// Should have truncated output (not full)
-	output, ok := data["output"].(string)
-	if !ok {
-		t.Fatal("output should be a string")
-	}
-	if output == largeOutput {
-		t.Error("bash output should be truncated, not full")
-	}
-	if !strings.Contains(output, "... (truncated)") {
-		t.Error("output should contain truncation marker")
-	}
+			if data["tool_id"] != toolID {
+				t.Errorf("tool_id = %v, want %v", data["tool_id"], toolID)
+			}
+			if data["success"] != tc.success {
+				t.Errorf("success = %v, want %v", data["success"], tc.success)
+			}
+			if data["duration"] != tc.duration {
+				t.Errorf("duration = %v, want %v", data["duration"], tc.duration)
+			}
+			if data["raw_args"] != tc.rawArgs {
+				t.Errorf("raw_args = %v, want %v", data["raw_args"], tc.rawArgs)
+			}
+			if got := data["args"]; !reflect.DeepEqual(got, tc.args) {
+				t.Errorf("args = %v, want %v", got, tc.args)
+			}
+			if data["path"] != tc.path {
+				t.Errorf("path = %v, want %v", data["path"], tc.path)
+			}
+			if data["sandbox"] != tc.sandbox {
+				t.Errorf("sandbox = %v, want %v", data["sandbox"], tc.sandbox)
+			}
+			if data["interrupted"] != false {
+				t.Errorf("interrupted = %v, want the key present and false", data["interrupted"])
+			}
 
-	// Truncation metadata
-	if data["result_truncated"] != true {
-		t.Error("result_truncated should be true")
-	}
-	if data["original_lines"] != 21 {
-		t.Errorf("original_lines = %v, want 21", data["original_lines"])
-	}
-	if data["original_bytes"] != len(largeOutput) {
-		t.Errorf("original_bytes = %v, want %d", data["original_bytes"], len(largeOutput))
-	}
-	if data["streamed"] != true {
-		t.Error("streamed should be true")
-	}
-	if data["message_id"] != msgID {
-		t.Errorf("message_id = %v, want %v", data["message_id"], msgID)
+			previewed := tc.toolName == types.ToolBash || tc.toolName == types.ToolReadFile
+			output, isString := data["output"].(string)
+			if !isString {
+				t.Fatalf("output is %T, want a string", data["output"])
+			}
+			if !previewed {
+				if output != tc.result {
+					t.Errorf("output = %q, want the tool's answer whole", output)
+				}
+				for _, key := range []string{"result_truncated", "original_lines", "original_bytes"} {
+					if _, ok := data[key]; ok {
+						t.Errorf("%s must not be in a frame for a tool that is never previewed", key)
+					}
+				}
+				return
+			}
+
+			if data["streamed"] != tc.streamed {
+				t.Errorf("streamed = %v, want %v", data["streamed"], tc.streamed)
+			}
+			if data["message_id"] != tc.messageID {
+				t.Errorf("message_id = %v, want %v", data["message_id"], tc.messageID)
+			}
+			if !tc.wantCut {
+				if output != tc.result {
+					t.Errorf("a result under the preview limits was rewritten: %q", output)
+				}
+				if data["result_truncated"] != false {
+					t.Errorf("result_truncated = %v, want false", data["result_truncated"])
+				}
+				return
+			}
+			if output == tc.result {
+				t.Error("the preview is the whole result")
+			}
+			if !strings.Contains(output, marker) {
+				t.Errorf("a cut preview must carry %q, got tail %q", marker, lastChars(output, 60))
+			}
+			if data["result_truncated"] != true {
+				t.Errorf("result_truncated = %v, want true", data["result_truncated"])
+			}
+			if data["original_lines"] != tc.wantLines {
+				t.Errorf("original_lines = %v, want the %d lines the tool really produced", data["original_lines"], tc.wantLines)
+			}
+			if data["original_bytes"] != tc.wantBytes {
+				t.Errorf("original_bytes = %v, want the %d bytes the tool really produced", data["original_bytes"], tc.wantBytes)
+			}
+			// The counts are the whole reason the card can offer to show the rest, and they
+			// describe the result, never the preview.
+			if data["original_bytes"] != len(tc.result) {
+				t.Errorf("original_bytes counts the preview, not the result")
+			}
+		})
 	}
 }
 
-func TestBuildToolResultEvent_BashNotStreamed(t *testing.T) {
-	t.Parallel()
-	// Large bash output but not streamed
-	largeOutput := strings.Repeat("line of output text\n", 20)
-	msgID := "test-msg-id-456"
-	toolID := "call_def456"
-
-	data := buildToolResultEvent(toolID, "bash", largeOutput, true, false, 200,
-		map[string]any{"command": "cat file.txt"},
-		`{"command":"cat file.txt"}`,
-		"/path/to/file", true, false, msgID)
-
-	output, ok := data["output"].(string)
-	if !ok {
-		t.Fatal("output should be a string")
+// lastChars returns the tail of s, for a failure message that must show what survived.
+func lastChars(s string, n int) string {
+	if len(s) > n {
+		return s[len(s)-n:]
 	}
-	if output == largeOutput {
-		t.Error("bash output should be truncated")
-	}
-
-	if data["streamed"] != false {
-		t.Error("streamed should be false")
-	}
-	if data["sandbox"] != true {
-		t.Error("sandbox should be true")
-	}
-	if data["path"] != "/path/to/file" {
-		t.Errorf("path = %v, want /path/to/file", data["path"])
-	}
-}
-
-func TestBuildToolResultEvent_BashShortOutput(t *testing.T) {
-	t.Parallel()
-	// Short bash output should not be truncated
-	shortOutput := "hello world\n"
-	msgID := "test-msg-short"
-	toolID := "call_short"
-
-	data := buildToolResultEvent(toolID, "bash", shortOutput, true, false, 50,
-		map[string]any{"command": "echo hello"},
-		`{"command":"echo hello"}`,
-		"", false, true, msgID)
-
-	output, ok := data["output"].(string)
-	if !ok {
-		t.Fatal("output should be a string")
-	}
-	if output != shortOutput {
-		t.Errorf("short output should not be truncated: got %q, want %q", output, shortOutput)
-	}
-	if data["result_truncated"] != false {
-		t.Error("result_truncated should be false for short output")
-	}
-}
-
-func TestBuildToolResultEvent_ReadFileStreamed(t *testing.T) {
-	t.Parallel()
-	// Large read_file output that will be truncated
-	largeContent := strings.Repeat("const x = someValue;\n", 50)
-	msgID := "readfile-msg"
-	toolID := "call_read"
-
-	data := buildToolResultEvent(toolID, "read_file", largeContent, true, false, 10,
-		map[string]any{"path": "src/large.ts"},
-		`{"path":"src/large.ts"}`,
-		"src/large.ts", false, true, msgID)
-
-	output, ok := data["output"].(string)
-	if !ok {
-		t.Fatal("output should be a string")
-	}
-	if output == largeContent {
-		t.Error("read_file output should be truncated")
-	}
-	if !strings.Contains(output, "... (truncated)") {
-		t.Error("output should contain truncation marker")
-	}
-	if data["result_truncated"] != true {
-		t.Error("result_truncated should be true")
-	}
-	if data["streamed"] != true {
-		t.Error("streamed should be true")
-	}
-	if data["message_id"] != msgID {
-		t.Errorf("message_id = %v, want %v", data["message_id"], msgID)
-	}
-}
-
-func TestBuildToolResultEvent_ReadFileNotStreamed(t *testing.T) {
-	t.Parallel()
-	// Large read_file output, not streamed
-	largeContent := strings.Repeat("line of code\n", 20)
-	msgID := "readfile-not-streamed"
-	toolID := "call_read2"
-
-	data := buildToolResultEvent(toolID, "read_file", largeContent, true, false, 5,
-		map[string]any{"path": "src/file.ts"},
-		`{"path":"src/file.ts"}`,
-		"src/file.ts", false, false, msgID)
-
-	output, ok := data["output"].(string)
-	if !ok {
-		t.Fatal("output should be a string")
-	}
-	if output == largeContent {
-		t.Error("read_file output should be truncated")
-	}
-	if data["streamed"] != false {
-		t.Error("streamed should be false")
-	}
-}
-
-func TestBuildToolResultEvent_ReadFileShort(t *testing.T) {
-	t.Parallel()
-	// Short read_file output should not be truncated
-	shortContent := "package main\n"
-	msgID := "read-short"
-	toolID := "call_read_short"
-
-	data := buildToolResultEvent(toolID, "read_file", shortContent, true, false, 3,
-		map[string]any{"path": "main.go"},
-		`{"path":"main.go"}`,
-		"main.go", false, false, msgID)
-
-	output, ok := data["output"].(string)
-	if !ok {
-		t.Fatal("output should be a string")
-	}
-	if output != shortContent {
-		t.Errorf("short read_file should not be truncated: got %q, want %q", output, shortContent)
-	}
-	if data["result_truncated"] != false {
-		t.Error("result_truncated should be false for short output")
-	}
-}
-
-func TestBuildToolResultEvent_WriteFile(t *testing.T) {
-	t.Parallel()
-	// write_file is NOT bash/read_file — should have full output, no truncation fields
-	output := "Wrote 12345 bytes to src/large-file.ts"
-	msgID := "writefile-msg"
-	toolID := "call_write"
-
-	data := buildToolResultEvent(toolID, "write_file", output, true, false, 50,
-		map[string]any{"path": "src/large-file.ts", "content": "long content..."},
-		`{"path":"src/large-file.ts","content":"long content..."}`,
-		"src/large-file.ts", false, false, msgID)
-
-	if data["output"] != output {
-		t.Errorf("write_file output should be full: got %q, want %q", data["output"], output)
-	}
-	// No truncation fields for non-bash/read_file tools
-	if _, ok := data["result_truncated"]; ok {
-		t.Error("write_file should not have result_truncated field")
-	}
-	if _, ok := data["original_lines"]; ok {
-		t.Error("write_file should not have original_lines field")
-	}
-	if _, ok := data["original_bytes"]; ok {
-		t.Error("write_file should not have original_bytes field")
-	}
-}
-
-func TestBuildToolResultEvent_UnknownTool(t *testing.T) {
-	t.Parallel()
-	// Unknown tool — not bash/read_file
-	output := "Unknown tool: mystery"
-	msgID := "unknown-msg"
-	toolID := "call_unknown"
-
-	data := buildToolResultEvent(toolID, "mystery_tool", output, false, false, 0,
-		map[string]any{},
-		`{}`,
-		"", false, false, msgID)
-
-	if data["output"] != output {
-		t.Errorf("unknown tool output should be full: got %q, want %q", data["output"], output)
-	}
-	if data["success"] != false {
-		t.Error("success should be false")
-	}
-	if _, ok := data["result_truncated"]; ok {
-		t.Error("unknown tool should not have result_truncated field")
-	}
-}
-
-func TestBuildToolResultEvent_BashWithArgs(t *testing.T) {
-	t.Parallel()
-	// Verify args and raw_args are preserved
-	largeOutput := strings.Repeat("output line\n", 15)
-	msgID := "args-msg"
-	toolID := "call_args"
-	args := map[string]any{"command": "ls -la /tmp", "timeout": float64(30)}
-	rawArgs := `{"command":"ls -la /tmp","timeout":30}`
-
-	data := buildToolResultEvent(toolID, "bash", largeOutput, true, false, 100,
-		args, rawArgs, "", false, true, msgID)
-
-	argsData, ok := data["args"].(map[string]any)
-	if !ok {
-		t.Fatal("args should be a map")
-	}
-	if argsData["command"] != args["command"] {
-		t.Errorf("args.command = %v, want %v", argsData["command"], args["command"])
-	}
-	if data["raw_args"] != rawArgs {
-		t.Errorf("raw_args = %v, want %v", data["raw_args"], rawArgs)
-	}
-}
-
-func TestBuildToolResultEvent_BashSingleLongLine(t *testing.T) {
-	t.Parallel()
-	// Single very long line (>1024 bytes) — tests rune-slicing path
-	toolID := "call_longline"
-	msgID := "longline-msg"
-	longLine := strings.Repeat("x", 2000)
-
-	data := buildToolResultEvent(toolID, "bash", longLine, true, false, 50,
-		map[string]any{"command": "echo long"},
-		`{"command":"echo long"}`,
-		"", false, false, msgID)
-
-	output, ok := data["output"].(string)
-	if !ok {
-		t.Fatal("output should be a string")
-	}
-	if output == longLine {
-		t.Error("single long line should be truncated")
-	}
-	if !strings.Contains(output, "... (truncated)") {
-		t.Error("output should contain truncation marker")
-	}
-	if data["result_truncated"] != true {
-		t.Error("result_truncated should be true")
-	}
-	// Original metadata should reflect the full output
-	if data["original_lines"] != 1 {
-		t.Errorf("original_lines = %v, want 1", data["original_lines"])
-	}
-	if data["original_bytes"] != 2000 {
-		t.Errorf("original_bytes = %v, want 2000", data["original_bytes"])
-	}
-}
-
-func TestBuildToolResultEvent_BashEmptyOutput(t *testing.T) {
-	t.Parallel()
-	// Empty output — should not truncate
-	toolID := "call_empty"
-	msgID := "empty-msg"
-
-	data := buildToolResultEvent(toolID, "bash", "", true, false, 10,
-		map[string]any{"command": "true"},
-		`{"command":"true"}`,
-		"", false, true, msgID)
-
-	output, ok := data["output"].(string)
-	if !ok {
-		t.Fatal("output should be a string")
-	}
-	if output != "" {
-		t.Errorf("empty output should remain empty, got %q", output)
-	}
-	if data["result_truncated"] != false {
-		t.Error("result_truncated should be false for empty output")
-	}
+	return s
 }

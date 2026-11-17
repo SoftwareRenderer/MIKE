@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { getProjectId, createTaskViaApi, csrfFetch, navigateToTask, getTaskData, worktreeExists, writeFileInWorktree, isolatedProject, gotoProject, waitForTaskState, notInFlight, getWorktreePath } from './helpers';
+import { getProjectId, createTaskViaApi, csrfFetch, navigateToTask, getTaskData, worktreeExists, writeFileInWorktree, isolatedProject, gotoProject, waitForTaskState, notInFlight, getWorktreePath, hasStoredKeyStartingWith } from './helpers';
 import { execSync } from 'child_process';
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
@@ -15,24 +15,7 @@ isolatedProject();
 async function waitForDoneDiffPersisted(page: import('@playwright/test').Page, projectId: string, taskId: string): Promise<void> {
   await expect
     .poll(
-      () =>
-        page.evaluate(
-          ({ pid, tid }) =>
-            new Promise<boolean>((resolve) => {
-              const req = indexedDB.open('kanban-storage');
-              req.onsuccess = () => {
-                const db = req.result;
-                const keysReq = db.transaction('board-cache', 'readonly').objectStore('board-cache').getAllKeys();
-                keysReq.onsuccess = () => {
-                  db.close();
-                  resolve((keysReq.result as string[]).some(k => k.startsWith(`diff:${pid}:${tid}:`)));
-                };
-                keysReq.onerror = () => resolve(false);
-              };
-              req.onerror = () => resolve(false);
-            }),
-          { pid: projectId, tid: taskId },
-        ),
+      () => hasStoredKeyStartingWith(page, 'board-cache', `diff:${projectId}:${taskId}:`),
       { timeout: 15000 },
     ).toBe(true);
 }
@@ -149,8 +132,9 @@ test.describe.serial('Done-task diff stats caching', () => {
     await expect(commitAction).toBeVisible({ timeout: 20000 });
     // Hover-revealed action icon under the card title area — force the click.
     await commitAction.click({ force: true });
-    await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 10000 });
-    await page.locator('.commit-textarea').fill('Commit for diff cache test');
+    const commitDialog = page.locator('[role="dialog"]').filter({ has: page.locator('.commit-textarea') });
+    await expect(commitDialog).toBeVisible({ timeout: 10000 });
+    await commitDialog.locator('.commit-textarea').fill('Commit for diff cache test');
     const confirmBtn = page.locator('.modal-footer .btn-primary');
     await expect(confirmBtn).toBeEnabled({ timeout: 15000 });
     await confirmBtn.click();

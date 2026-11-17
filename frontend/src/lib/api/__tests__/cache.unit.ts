@@ -2,17 +2,16 @@ import { describe, it, expect } from 'vitest';
 import { isFromCache, markCached } from '$lib/api/cache';
 
 describe('cache markers', () => {
-    it('isFromCache returns false for unmarked objects', () => {
-        expect(isFromCache({})).toBe(false);
-        expect(isFromCache({ data: 'value' })).toBe(false);
-        expect(isFromCache([])).toBe(false);
-        expect(isFromCache(null)).toBe(false);
-        expect(isFromCache(undefined)).toBe(false);
-        expect(isFromCache('string')).toBe(false);
-        expect(isFromCache(42)).toBe(false);
+    // The banner that says "Viewing cached data" reads this one flag, so a live read answering true would
+    // be a lie — and a read of something with no properties at all (a bare `null` from an empty store) may
+    // not throw on the way to answering false.
+    it('answers false for anything never marked, whatever it holds', () => {
+        for (const value of [{}, { data: 'value' }, [], null, undefined, 'string', 42]) {
+            expect(isFromCache(value)).toBe(false);
+        }
     });
 
-    it('markCached marks and returns the same object', () => {
+    it('marks in place and hands the same object back, array or not', () => {
         const data = { projects: [], config: {} };
         const marked = markCached(data);
         expect(marked).toBe(data); // same reference
@@ -20,12 +19,10 @@ describe('cache markers', () => {
         // Original data preserved
         expect(marked.projects).toEqual([]);
         expect(marked.config).toEqual({});
-    });
 
-    it('markCached works with arrays', () => {
+        // A mirrored board is an array of tasks, and it is marked the same way.
         const arr = [1, 2, 3];
-        const marked = markCached(arr);
-        expect(marked).toBe(arr);
-        expect(isFromCache(marked)).toBe(true);
+        expect(markCached(arr)).toBe(arr);
+        expect(isFromCache(arr)).toBe(true);
     });
 });

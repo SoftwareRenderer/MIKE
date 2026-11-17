@@ -143,8 +143,9 @@ test.describe.serial('Commit Dialog', () => {
     await expect(commitBtn).toBeVisible({ timeout: 60000 });
     await commitBtn.click();
 
-    // Commit dialog should appear (modal with commit-textarea)
-    const commitDialog = page.locator('[role="dialog"]');
+    // Commit dialog should appear, identified by the field only it draws — `[role="dialog"]` alone is
+    // never a unique locator in this app.
+    const commitDialog = page.locator('[role="dialog"]').filter({ has: page.locator('.commit-textarea') });
     await expect(commitDialog).toBeVisible({ timeout: 60000 });
 
     // Should show "Generating commit message..." initially

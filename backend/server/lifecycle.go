@@ -40,7 +40,7 @@ const (
 	stageCount
 )
 
-// stageNames is indexed by stage; TestShutdownStagesAreDeclaredEntirely fails if the two disagree.
+// stageNames is indexed by stage; TestShutdownOrderIsWhatWeDeclared fails if the two disagree.
 var stageNames = [stageCount]string{
 	stageDetachedWork:            "detached work",
 	stagePreviewSweeper:          "preview sweeper",

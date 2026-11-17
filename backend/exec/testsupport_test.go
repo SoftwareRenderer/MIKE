@@ -6,13 +6,13 @@ package exec
 
 import (
 	"fmt"
-	"path/filepath"
 	"testing"
 
 	"mike/backend/config"
 	"mike/backend/git"
 	"mike/backend/store"
 	"mike/backend/stream"
+	"mike/backend/testutil/teststore"
 )
 
 // newTestExecutorWith builds an executor through the production constructor. A dependency a test has
@@ -50,7 +50,7 @@ func newTestStreamMgr(t testing.TB, s *store.Store, worktreeMgr *git.WorktreeMan
 // provider lookup resolves nowhere unless the test seeds one.
 func newTestConfigStore(t testing.TB, s *store.Store) *config.ConfigStore {
 	t.Helper()
-	cs := config.NewConfigStore(s, "", "test", nil, false, false)
+	cs := teststore.ConfigStore(t, s, "")
 	cs.SetWorkspaceDirOverride(t.TempDir())
 	if err := s.SetConfigValue("providers", "[]"); err != nil {
 		t.Fatalf("set config providers: %v", err)
@@ -66,14 +66,7 @@ func newTestConfigStore(t testing.TB, s *store.Store) *config.ConfigStore {
 // testStore creates a new Store with a temporary database for testing.
 func testStore(t testing.TB) *store.Store {
 	t.Helper()
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	s, err := store.NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("create test store: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
-	return s
+	return teststore.Store(t)
 }
 
 // newTestExecutor is the common fixture: a real store, a config store with no providers, and a

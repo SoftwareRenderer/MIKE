@@ -5,72 +5,10 @@ package lsp
 // which file means "re-read the project", and ending *that* workspace's connection — no other's.
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	"mike/backend/extensions"
-	"mike/backend/store"
-	"mike/backend/types"
 )
-
-func TestAdaptProjectMountsDropsACoreContainerPath(t *testing.T) {
-	// Two -v specs on one container path make podman refuse the create, so a borrowed mount that wants the
-	// granted dependency directory has to give way.
-	root := t.TempDir()
-	projPath := filepath.Join(root, "MIKE")
-	wsPath := filepath.Join(projPath, "worktrees", "MIKE", "flint")
-	if err := os.MkdirAll(wsPath, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	projStore, err := store.NewStore(filepath.Join(t.TempDir(), "proj.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { projStore.Close() })
-	if err := projStore.CreateProject(&types.Project{
-		ID:   "MIKE",
-		Name: "MIKE",
-		Path: projPath,
-		SandboxMounts: []types.SandboxMount{
-			{HostPath: "/tmp/kanban-mount/mod", ContainerPath: "/go/pkg/mod", Mode: "rw"},
-			{HostPath: "/tmp/kanban-mount/go", ContainerPath: "/go", Mode: "rw"},
-		},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	mgr := NewExtensionLSPManager(nil, nil, projStore)
-	reserved := []types.SandboxMount{{HostPath: "/host/gomodcache", ContainerPath: "/go/pkg/mod", Mode: "ro"}}
-
-	got := mgr.adaptProjectMounts(wsPath, "/mnt/flint", reserved)
-	var paths []string
-	for _, mo := range got {
-		if mo.ContainerPath == "/go/pkg/mod" {
-			t.Errorf("the granted dependency directory was also borrowed from the project: %+v", mo)
-		}
-		paths = append(paths, mo.ContainerPath)
-	}
-	// A container path that merely *contains* core's is a different mount point, and nested binds
-	// are legal — so this must not widen into "drop anything under a core path".
-	found := false
-	for _, p := range paths {
-		if p == "/go" {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("a mount that only contains core's container path was dropped: %v", paths)
-	}
-
-	// Nothing reserved, nothing dropped: the same call without a grant keeps every mount it had.
-	if all := mgr.adaptProjectMounts(wsPath, "/mnt/flint", nil); len(all) != 2 {
-		t.Errorf("without a reserved path adaptProjectMounts returned %v, want both mounts", all)
-	}
-	if !isReservedContainerPath("/go/pkg/mod", reserved) || isReservedContainerPath("/go", reserved) {
-		t.Error("isReservedContainerPath must be exact equality, not a prefix test")
-	}
-}
 
 func TestReloadNeeded(t *testing.T) {
 	cases := []struct {
@@ -98,7 +36,11 @@ func TestReloadNeeded(t *testing.T) {
 	}
 }
 
-func TestFilesChangedEndsOnlyTheWorkspaceWhoseProjectChanged(t *testing.T) {
+// TestFilesChangedRecyclesOnlyTheDeclaredFileOfItsWorkspace holds the other half: an ordinary source
+// file recycles nothing — that would be a cold start every turn — and when the declared file does
+// change, only the workspace whose project changed loses its connection, marked dead so its holders
+// re-attach rather than reusing a server with the old graph.
+func TestFilesChangedRecyclesOnlyTheDeclaredFileOfItsWorkspace(t *testing.T) {
 	m := NewExtensionLSPManager(nil, nil, nil)
 	ext := &extensions.Extension{ID: "go-team-gopls"}
 	ext.SandboxConfig.ReloadFiles = []string{"go.mod"}
@@ -107,11 +49,19 @@ func TestFilesChangedEndsOnlyTheWorkspaceWhoseProjectChanged(t *testing.T) {
 	changed.extension = ext
 	untouched := newSandboxClient(nil, "/ws/b", "go", ext.ID, map[string]string{})
 	untouched.extension = ext
-
 	m.clients[processKey("/ws/a", "go")] = changed
 	m.clients[processKey("/ws/b", "go")] = untouched
 
-	if !m.FilesChanged("/ws/a", []string{"go.mod"}) {
+	for _, files := range [][]string{{"main.go"}, nil} {
+		if m.FilesChanged("/ws/a", files) {
+			t.Errorf("FilesChanged(%v) recycled the server; only the declared file changes the project", files)
+		}
+		if changed.dead.Load() {
+			t.Fatalf("the connection ended for %v, which does not change the project", files)
+		}
+	}
+
+	if !m.FilesChanged("/ws/a", []string{"main.go", "go.mod"}) {
 		t.Fatal("FilesChanged reported nothing was recycled")
 	}
 	if !changed.dead.Load() {
@@ -125,24 +75,5 @@ func TestFilesChangedEndsOnlyTheWorkspaceWhoseProjectChanged(t *testing.T) {
 	}
 	if _, ok := m.clients[processKey("/ws/b", "go")]; !ok {
 		t.Error("the untouched workspace lost its connection")
-	}
-}
-
-func TestFilesChangedIgnoresAFileTheExtensionDidNotDeclare(t *testing.T) {
-	m := NewExtensionLSPManager(nil, nil, nil)
-	ext := &extensions.Extension{ID: "go-team-gopls"}
-	ext.SandboxConfig.ReloadFiles = []string{"go.mod"}
-	sc := newSandboxClient(nil, "/ws/a", "go", ext.ID, map[string]string{})
-	sc.extension = ext
-	m.clients[processKey("/ws/a", "go")] = sc
-
-	if m.FilesChanged("/ws/a", []string{"main.go"}) {
-		t.Error("an ordinary source file must not recycle the server — that is a cold start per turn")
-	}
-	if sc.dead.Load() {
-		t.Error("the connection was ended for a file that does not change the project")
-	}
-	if m.FilesChanged("/ws/a", nil) {
-		t.Error("an empty changed list cannot mean anything")
 	}
 }

@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"mike/backend/config"
 	"mike/backend/git"
 	"mike/backend/store"
 	"mike/backend/testutil/testgit"
+	"mike/backend/testutil/teststore"
 	"mike/backend/types"
 )
 
@@ -83,11 +83,7 @@ func gitTestStore(t *testing.T) *store.Store {
 	t.Helper()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
-	s, err := store.NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s := teststore.StoreIn(t, dbPath)
 	return s
 }
 
@@ -102,11 +98,7 @@ func newTestGitHandler(t *testing.T) (*GitHandler, *store.Store, *git.WorktreeMa
 		t.Fatal(err)
 	}
 
-	s, err := store.NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s := teststore.StoreIn(t, dbPath)
 
 	s.SetConfigValue("providers", "[]")
 	s.SetConfigValue("worker_provider", "")
@@ -114,7 +106,7 @@ func newTestGitHandler(t *testing.T) (*GitHandler, *store.Store, *git.WorktreeMa
 	s.SetConfigValue("utility_provider", "")
 	s.SetConfigValue("utility_model", "")
 
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false, false)
+	cfgStore := teststore.ConfigStore(t, s, dbPath)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 	wm := git.NewWorktreeManager(s, cfgStore)
 	h := NewGitHandler(s, wm)
@@ -170,62 +162,166 @@ func decodeBatchAnswer(t *testing.T, rec *httptest.ResponseRecorder) gitBatchAns
 	return answer
 }
 
-// setupHandleLogProject creates a project with a git repo and returns (handler, mux).
-func setupHandleLogProject(t *testing.T) (*GitHandler, *http.ServeMux) {
-	t.Helper()
-	h, s, _, _ := newTestGitHandler(t)
-	projPath := t.TempDir()
-	initGitRepo(t, projPath)
-	proj := &types.Project{ID: "log-char-proj", Name: "log-char-proj", Path: projPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatal(err)
-	}
-	return h, newTestGitMux(h)
-}
-
 // TestGitRefValidation is the ref-injection matrix for every git route that takes a ref:
 // project log/diff and task log/diff. A ref lands on a git command line, so two families
 // of value must be rejected before that happens — option-looking refs ("-foo",
 // "--format=json"), which git would parse as flags, and the rev-syntax characters git
 // itself would reinterpret ("~", "^", ":", ".."). Each target carries its own fixture
-// because the task routes resolve the ref inside a worktree that has to exist.
-//
-// The accepted side is covered separately (TestHandleLog_ValidBranch,
-// TestHandleDiff_ValidRefs, TestHandleTaskLog_ValidBranch, TestHandleTaskDiff_ValidRefs),
-// which also proves the 400s above come from validation and not from a broken route.
+// because the task routes resolve the ref inside a worktree that has to exist, and each carries the
+// spellings it must answer 200 for, which is what proves the 400s come from validation and not from a
+// broken route.
+
+// --- The ref-injection matrix, and the accepted side that proves it ---
+
+// acceptedRef is one ref spelling a route must answer 200 for, with what that answer must hold.
+// `query` is the route's whole query string, because each route names its refs differently.
+type acceptedRef struct {
+	query string
+	check func(*testing.T, *httptest.ResponseRecorder)
+}
+
+// decodedGitLog reads a ?full=1 log answer.
+func decodedGitLog(t *testing.T, rr *httptest.ResponseRecorder) types.GitLogResponse {
+	t.Helper()
+	var log types.GitLogResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &log); err != nil {
+		t.Fatalf("decode log answer: %v (%s)", err, rr.Body.String())
+	}
+	return log
+}
+
+// requireSubjects fails unless the log holds exactly these commit subjects, in order — which is what
+// a validated ref that was then silently dropped cannot produce.
+func requireSubjects(t *testing.T, commits []types.GitCommit, want ...string) {
+	t.Helper()
+	var got []string
+	for _, c := range commits {
+		got = append(got, c.Subject)
+	}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("log subjects = %q, want %q", strings.Join(got, "|"), strings.Join(want, "|"))
+	}
+}
+
+// requireParsedFilesIn reads a task diff answer's parsed_files and fails unless it holds exactly
+// these paths — the key the panel renders and never re-parses.
+func requireParsedFilesIn(t *testing.T, rr *httptest.ResponseRecorder, want ...string) {
+	t.Helper()
+	var body struct {
+		ParsedFiles []git.TrackedDiffFile `json:"parsed_files"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body is not a task diff answer: %v (%s)", err, rr.Body.String())
+	}
+	var got []string
+	for _, f := range body.ParsedFiles {
+		got = append(got, f.Path)
+	}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("parsed_files = %q, want %q (%s)", strings.Join(got, "|"), strings.Join(want, "|"), rr.Body.String())
+	}
+}
+
+// requireParsedDiffFiles reads /git/diff's answer and fails unless it holds exactly these paths.
+func requireParsedDiffFiles(t *testing.T, rr *httptest.ResponseRecorder, want ...string) {
+	t.Helper()
+	var files []git.TrackedDiffFile
+	if err := json.Unmarshal(rr.Body.Bytes(), &files); err != nil {
+		t.Fatalf("body is not []TrackedDiffFile: %v (%s)", err, rr.Body.String())
+	}
+	var got []string
+	for _, f := range files {
+		got = append(got, f.Path)
+	}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("diff files = %q, want %q", strings.Join(got, "|"), strings.Join(want, "|"))
+	}
+}
+
+// refMatrixRepo is the repository every target of the matrix reads: the one commit initGitRepo
+// writes, a second commit adding refdiff.txt on top of it, and base-branch pinned to the first
+// commit — so an accepted comparison names two trees that differ by a file nobody can mistake for
+// another, and an accepted log can tell its two histories apart by subject.
+func refMatrixRepo(t *testing.T) string {
+	t.Helper()
+	projPath := t.TempDir()
+	initGitRepo(t, projPath)
+	testgit.Git(t, projPath, "branch", "base-branch", "HEAD")
+	createFile(t, projPath, "refdiff.txt", "the second commit's line\n")
+	testgit.Git(t, projPath, "add", "refdiff.txt")
+	testgit.Git(t, projPath, "commit", "-m", "add refdiff")
+	return projPath
+}
+
 func TestGitRefValidation(t *testing.T) {
+	// A log that answers the matrix repository's full history: the second commit is on top, so a
+	// route that ignored the ref it was given and read HEAD would still answer this.
+	fullHistory := func(t *testing.T, rr *httptest.ResponseRecorder) {
+		requireSubjects(t, decodedGitLog(t, rr).Commits, "add refdiff", "Initial commit")
+	}
+	// The task-log fixture moves the task branch ahead of what its worktree has checked out, so
+	// these two subjects are what only the task's own branch can answer with.
+	taskBranchHistory := func(t *testing.T, rr *httptest.ResponseRecorder) {
+		requireSubjects(t, decodedGitLog(t, rr).Commits, "task branch work", "Initial commit")
+	}
+
 	targets := []struct {
 		name string
 		// setup builds the fixture and returns the mux plus a URL builder for one ref
-		// position (each route exposes its refs under different parameter names).
-		setup  func(t *testing.T) (mux *http.ServeMux, url func(param, value string) string)
+		// position (each route exposes its refs under different parameter names). The empty
+		// parameter name asks for an accepted row's raw query string.
+		setup func(t *testing.T) (mux *http.ServeMux, url func(param, value string) string)
+		// params are the ref positions the matrix poisons; each takes the others' defaults.
 		params []string
 		// ref builds the value under test from a bare invalid character. The diff routes
 		// take full revs, so the character is embedded in a rev-looking string there.
 		ref func(ch string) string
+		// accepted is the other half of the contract: the spellings the route must answer for,
+		// and what the answer must hold. A row naming no ref exercises the route's own default —
+		// HEAD for a project, the task's branch for a task.
+		accepted []acceptedRef
 	}{
 		{
 			name: "project log",
 			setup: func(t *testing.T) (*http.ServeMux, func(string, string) string) {
-				_, mux := setupHandleLogProject(t)
-				return mux, func(_, value string) string {
+				h, s, _, _ := newTestGitHandler(t)
+				projPath := refMatrixRepo(t)
+				if err := s.CreateProject(&types.Project{ID: "log-char-proj", Name: "log-char-proj", Path: projPath}); err != nil {
+					t.Fatal(err)
+				}
+				return newTestGitMux(h), func(param, value string) string {
+					if param == "" {
+						return "/api/projects/log-char-proj/git/log?" + value
+					}
 					return "/api/projects/log-char-proj/git/log?branch=" + value + "&full=1"
 				}
 			},
 			params: []string{"branch"},
 			ref:    func(ch string) string { return ch },
+			accepted: []acceptedRef{
+				{query: "branch=HEAD&full=1", check: fullHistory},
+				{query: "full=1", check: fullHistory}, // no branch at all: the default is HEAD
+				{query: "branch=base-branch&full=1", check: func(t *testing.T, rr *httptest.ResponseRecorder) {
+					log := decodedGitLog(t, rr)
+					requireSubjects(t, log.Commits, "Initial commit")
+					if log.CurrentBranch == "" {
+						t.Error("current_branch was not resolved for the project checkout")
+					}
+				}},
+			},
 		},
 		{
 			name: "project diff",
 			setup: func(t *testing.T) (*http.ServeMux, func(string, string) string) {
 				h, s, _, _ := newTestGitHandler(t)
-				projPath := t.TempDir()
-				initGitRepo(t, projPath)
-				proj := &types.Project{ID: "refval-diff-proj", Name: "refval-diff-proj", Path: projPath}
-				if err := s.CreateProject(proj); err != nil {
+				projPath := refMatrixRepo(t)
+				if err := s.CreateProject(&types.Project{ID: "refval-diff-proj", Name: "refval-diff-proj", Path: projPath}); err != nil {
 					t.Fatal(err)
 				}
 				return newTestGitMux(h), func(param, value string) string {
+					if param == "" {
+						return "/api/projects/refval-diff-proj/git/diff?" + value
+					}
 					if param == "base" {
 						return "/api/projects/refval-diff-proj/git/diff?base=" + value + "&head=HEAD"
 					}
@@ -234,6 +330,11 @@ func TestGitRefValidation(t *testing.T) {
 			},
 			params: []string{"base", "head"},
 			ref:    func(ch string) string { return "feat" + ch + "branch" },
+			accepted: []acceptedRef{
+				{query: "base=base-branch&head=HEAD", check: func(t *testing.T, rr *httptest.ResponseRecorder) {
+					requireParsedDiffFiles(t, rr, "refdiff.txt")
+				}},
+			},
 		},
 		{
 			name: "task log",
@@ -241,44 +342,68 @@ func TestGitRefValidation(t *testing.T) {
 				h, s, _, worktreesDir := newTestGitHandler(t)
 				projPath := t.TempDir()
 				initGitRepo(t, projPath)
-				proj := &types.Project{ID: "refval-tasklog-proj", Name: "refval-tasklog-proj", Path: projPath}
-				if err := s.CreateProject(proj); err != nil {
+				if err := s.CreateProject(&types.Project{ID: "refval-tasklog-proj", Name: "refval-tasklog-proj", Path: projPath}); err != nil {
 					t.Fatal(err)
 				}
-				task := &types.Task{ID: "refval-tasklog-task", ProjectID: proj.ID,
+				task := &types.Task{ID: "refval-tasklog-task", ProjectID: "refval-tasklog-proj",
 					Title: "log task", Status: types.StatusInProgress, Branch: "main"}
 				if err := s.CreateTask(task); err != nil {
 					t.Fatal(err)
 				}
-				createWorktreeAt(t, projPath, filepath.Join(worktreesDir, proj.ID, task.ID), "main")
-				return newTestGitMux(h), func(_, value string) string {
+				wtPath := filepath.Join(worktreesDir, "refval-tasklog-proj", task.ID)
+				createWorktreeAt(t, projPath, wtPath, "main")
+				// The task branch moves ahead of what the worktree has checked out, so the
+				// route's default rev is distinguishable from the worktree's HEAD.
+				createFile(t, wtPath, "on-task-branch.txt", "work on the task branch\n")
+				testgit.Git(t, wtPath, "add", "on-task-branch.txt")
+				testgit.Git(t, wtPath, "commit", "-m", "task branch work")
+				testgit.Git(t, wtPath, "checkout", "-q", "-B", "head-is-behind", "HEAD~1")
+				return newTestGitMux(h), func(param, value string) string {
+					if param == "" {
+						return "/api/projects/refval-tasklog-proj/tasks/refval-tasklog-task/git/log?" + value
+					}
 					return "/api/projects/refval-tasklog-proj/tasks/refval-tasklog-task/git/log?branch=" + value + "&full=1"
 				}
 			},
 			params: []string{"branch"},
 			ref:    func(ch string) string { return ch },
+			accepted: []acceptedRef{
+				{query: "branch=main&full=1", check: taskBranchHistory},
+				// The absent branch is the task's own, not the worktree's checked-out one.
+				{query: "full=1", check: taskBranchHistory},
+				{query: "branch=head-is-behind&full=1", check: func(t *testing.T, rr *httptest.ResponseRecorder) {
+					requireSubjects(t, decodedGitLog(t, rr).Commits, "Initial commit")
+				}},
+			},
 		},
 		{
 			name: "task diff",
 			setup: func(t *testing.T) (*http.ServeMux, func(string, string) string) {
-				h, s, _, _ := newTestGitHandler(t)
-				projPath := t.TempDir()
-				initGitRepo(t, projPath)
-				proj := &types.Project{ID: "refval-taskdiff-proj", Name: "refval-taskdiff-proj", Path: projPath}
-				if err := s.CreateProject(proj); err != nil {
+				h, s, _, worktreesDir := newTestGitHandler(t)
+				projPath := refMatrixRepo(t)
+				if err := s.CreateProject(&types.Project{ID: "refval-taskdiff-proj", Name: "refval-taskdiff-proj", Path: projPath}); err != nil {
 					t.Fatal(err)
 				}
-				task := &types.Task{ID: "refval-taskdiff-task", ProjectID: proj.ID,
+				task := &types.Task{ID: "refval-taskdiff-task", ProjectID: "refval-taskdiff-proj",
 					Title: "diff task", Status: types.StatusInProgress, Branch: "main"}
 				if err := s.CreateTask(task); err != nil {
 					t.Fatal(err)
 				}
+				createWorktreeAt(t, projPath, filepath.Join(worktreesDir, "refval-taskdiff-proj", task.ID), "main")
 				return newTestGitMux(h), func(param, value string) string {
+					if param == "" {
+						return "/api/projects/refval-taskdiff-proj/tasks/refval-taskdiff-task/diff?" + value
+					}
 					return "/api/projects/refval-taskdiff-proj/tasks/refval-taskdiff-task/diff?" + param + "=" + value
 				}
 			},
 			params: []string{"base", "head"},
 			ref:    func(ch string) string { return "feat" + ch + "branch" },
+			accepted: []acceptedRef{
+				{query: "base=base-branch&head=HEAD&parsed=1", check: func(t *testing.T, rr *httptest.ResponseRecorder) {
+					requireParsedFilesIn(t, rr, "refdiff.txt")
+				}},
+			},
 		},
 	}
 
@@ -316,315 +441,95 @@ func TestGitRefValidation(t *testing.T) {
 					})
 				}
 			}
+
+			for _, acc := range tgt.accepted {
+				t.Run("accepted/"+acc.query, func(t *testing.T) {
+					rr := doRequest(t, mux, "GET", url("", acc.query))
+					if rr.Code != http.StatusOK {
+						t.Fatalf("query %q: status = %d, want 200; body: %s", acc.query, rr.Code, rr.Body.String())
+					}
+					acc.check(t, rr)
+				})
+			}
 		})
 	}
 }
 
-func TestHandleLog_ValidBranch(t *testing.T) {
-	h, s, _, _ := newTestGitHandler(t)
+// --- HandleDiff: one grammar, with and without the flag ---
 
-	projPath := t.TempDir()
-	initGitRepo(t, projPath)
-	proj := &types.Project{ID: "log-proj-valid", Name: "log-proj-valid", Path: projPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatal(err)
-	}
+// TestHandleProjectDiffAnswersTheParsedGrammar is the wire contract for the single diff grammar on
+// GET /projects/{id}/git/diff. The panel renders parsed files and never re-parses patch text, so
+// this route answers git.ParseUnifiedDiff's shape unconditionally: `?parsed=1` is a contract every
+// diff path honours, and here there is no raw mode for it to switch on, which is why both spellings
+// must produce the same body. `git diff` exits 1 when there are changes, and that exit code must not
+// be read as a failure. An unchanged tree is [] and never null, because the client reads
+// files.length off it and an unchanged working tree is the ordinary case rather than an error.
+func TestHandleProjectDiffAnswersTheParsedGrammar(t *testing.T) {
+	for _, query := range []string{"", "parsed=1"} {
+		t.Run("working tree changes/"+strings.TrimSuffix(query, "=1"), func(t *testing.T) {
+			h, s, _, _ := newTestGitHandler(t)
 
-	mux := newTestGitMux(h)
+			projPath := t.TempDir()
+			initGitRepo(t, projPath)
+			createFile(t, projPath, "tracked.txt", "one\ntwo\nthree\n")
+			testgit.Git(t, projPath, "add", "tracked.txt")
+			testgit.Git(t, projPath, "commit", "-m", "base")
+			// Modify without committing: the default `git diff` (working tree vs index) now has content.
+			createFile(t, projPath, "tracked.txt", "one\nTWO\nthree\nfour\n")
 
-	rr := doRequest(t, mux, "GET", "/api/projects/log-proj-valid/git/log?branch=HEAD&full=1")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200 for valid branch HEAD, got %d: %s", rr.Code, rr.Body.String())
-	}
-}
+			if err := s.CreateProject(&types.Project{ID: "diff-parsed-proj", Name: "diff-parsed-proj", Path: projPath}); err != nil {
+				t.Fatal(err)
+			}
+			mux := newTestGitMux(h)
 
-func TestHandleLog_NoBranchDefaultsToHEAD(t *testing.T) {
-	h, s, _, _ := newTestGitHandler(t)
+			rr := doRequest(t, mux, "GET", "/api/projects/diff-parsed-proj/git/diff?"+query)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200 (git diff exits 1 when there are changes): %s", rr.Code, rr.Body.String())
+			}
+			if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+				t.Errorf("Content-Type = %q, want application/json", ct)
+			}
 
-	projPath := t.TempDir()
-	initGitRepo(t, projPath)
-	proj := &types.Project{ID: "log-proj-default", Name: "log-proj-default", Path: projPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatal(err)
-	}
-
-	mux := newTestGitMux(h)
-
-	// No branch param → defaults to HEAD → 200
-	rr := doRequest(t, mux, "GET", "/api/projects/log-proj-default/git/log?full=1")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200 when branch param is absent (defaults to HEAD), got %d: %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestHandleDiff_ValidRefs(t *testing.T) {
-	h, s, _, _ := newTestGitHandler(t)
-
-	projPath := t.TempDir()
-	initGitRepo(t, projPath)
-	proj := &types.Project{ID: "diff-proj-valid", Name: "diff-proj-valid", Path: projPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatal(err)
-	}
-
-	mux := newTestGitMux(h)
-
-	// Valid refs (HEAD..HEAD → empty diff) → 200
-	rr := doRequest(t, mux, "GET", "/api/projects/diff-proj-valid/git/diff?base=HEAD&head=HEAD")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200 for valid refs, got %d: %s", rr.Code, rr.Body.String())
-	}
-}
-
-// --- HandleProjectDiffFile tests ---
-
-// TestHandleDiffParsed is the wire contract for the single diff grammar: ?parsed=1 carries the
-// parser's structure so the browser stops re-parsing the same patch with a second implementation.
-func TestHandleDiffParsed(t *testing.T) {
-	h, s, _, _ := newTestGitHandler(t)
-
-	projPath := t.TempDir()
-	initGitRepo(t, projPath)
-	createFile(t, projPath, "tracked.txt", "one\ntwo\nthree\n")
-	testgit.Git(t, projPath, "add", "tracked.txt")
-	testgit.Git(t, projPath, "commit", "-m", "base")
-	// Modify without committing: the default `git diff` (working tree vs index) now has content.
-	createFile(t, projPath, "tracked.txt", "one\nTWO\nthree\nfour\n")
-
-	proj := &types.Project{ID: "diff-parsed-proj", Name: "diff-parsed-proj", Path: projPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatal(err)
-	}
-	mux := newTestGitMux(h)
-
-	rr := doRequest(t, mux, "GET", "/api/projects/diff-parsed-proj/git/diff?parsed=1")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
-	}
-	if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
-		t.Errorf("Content-Type = %q, want application/json", ct)
+			var files []git.TrackedDiffFile
+			if err := json.Unmarshal(rr.Body.Bytes(), &files); err != nil {
+				t.Fatalf("body is not []TrackedDiffFile: %v\n%s", err, rr.Body.String())
+			}
+			if len(files) != 1 {
+				t.Fatalf("got %d files, want 1: %s", len(files), rr.Body.String())
+			}
+			f := files[0]
+			if f.Path != "tracked.txt" {
+				t.Errorf("path = %q, want tracked.txt", f.Path)
+			}
+			if f.Added != 2 || f.Removed != 1 {
+				t.Errorf("added/removed = %d/%d, want 2/1", f.Added, f.Removed)
+			}
+			if len(f.Rows) == 0 {
+				t.Error("rows is empty; the client would render a file with no content")
+			}
+			// The JSON field names are the frontend's contract (frontend/src/lib/types/diff.ts DiffFile).
+			if !strings.Contains(rr.Body.String(), `"lineNumber"`) || !strings.Contains(rr.Body.String(), `"variant"`) {
+				t.Errorf("response does not use the DiffFile/DiffRow field names the client binds to: %s", rr.Body.String())
+			}
+		})
 	}
 
-	var files []git.TrackedDiffFile
-	if err := json.Unmarshal(rr.Body.Bytes(), &files); err != nil {
-		t.Fatalf("body is not []TrackedDiffFile: %v\n%s", err, rr.Body.String())
-	}
-	if len(files) != 1 {
-		t.Fatalf("got %d files, want 1: %s", len(files), rr.Body.String())
-	}
-	f := files[0]
-	if f.Path != "tracked.txt" {
-		t.Errorf("path = %q, want tracked.txt", f.Path)
-	}
-	if f.Added != 2 || f.Removed != 1 {
-		t.Errorf("added/removed = %d/%d, want 2/1", f.Added, f.Removed)
-	}
-	if len(f.Rows) == 0 {
-		t.Error("rows is empty; the client would render a file with no content")
-	}
-	// The JSON field names are the frontend's contract (frontend/src/lib/types/diff.ts DiffFile).
-	if !strings.Contains(rr.Body.String(), `"lineNumber"`) || !strings.Contains(rr.Body.String(), `"variant"`) {
-		t.Errorf("response does not use the DiffFile/DiffRow field names the client binds to: %s", rr.Body.String())
-	}
-}
+	t.Run("an unchanged tree is an empty array, not null", func(t *testing.T) {
+		h, s, _, _ := newTestGitHandler(t)
+		projPath := t.TempDir()
+		initGitRepo(t, projPath)
+		if err := s.CreateProject(&types.Project{ID: "diff-parsed-empty", Name: "diff-parsed-empty", Path: projPath}); err != nil {
+			t.Fatal(err)
+		}
 
-// TestHandleDiffParsedEmptyIsArrayNotNull: `null` would make `files.length` throw in the client, and
-// an unchanged working tree is the ordinary case rather than an error.
-func TestHandleDiffParsedEmptyIsArrayNotNull(t *testing.T) {
-	h, s, _, _ := newTestGitHandler(t)
-
-	projPath := t.TempDir()
-	initGitRepo(t, projPath)
-	proj := &types.Project{ID: "diff-parsed-empty", Name: "diff-parsed-empty", Path: projPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatal(err)
-	}
-	mux := newTestGitMux(h)
-
-	rr := doRequest(t, mux, "GET", "/api/projects/diff-parsed-empty/git/diff?parsed=1")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
-	}
-	if body := strings.TrimSpace(rr.Body.String()); body != "[]" {
-		t.Errorf("body = %q, want []", body)
-	}
-}
-
-// TestHandleDiffDefaultAnswersParsedDiff: `git diff` exits 1 when there are changes, and that exit code
-// must not be read as a failure; the answer is the parser's output, because the panel never re-parses
-// patch text.
-func TestHandleDiffDefaultAnswersParsedDiff(t *testing.T) {
-	h, s, _, _ := newTestGitHandler(t)
-
-	projPath := t.TempDir()
-	initGitRepo(t, projPath)
-	createFile(t, projPath, "t.txt", "a\n")
-	testgit.Git(t, projPath, "add", "t.txt")
-	testgit.Git(t, projPath, "commit", "-m", "base")
-	createFile(t, projPath, "t.txt", "b\n")
-
-	proj := &types.Project{ID: "diff-plain-proj", Name: "diff-plain-proj", Path: projPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatal(err)
-	}
-	mux := newTestGitMux(h)
-
-	rr := doRequest(t, mux, "GET", "/api/projects/diff-plain-proj/git/diff")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (git diff exits 1 when there are changes): %s", rr.Code, rr.Body.String())
-	}
-	if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
-		t.Errorf("Content-Type = %q, want application/json", ct)
-	}
-	var files []struct {
-		Path    string `json:"path"`
-		Added   int    `json:"added"`
-		Removed int    `json:"removed"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &files); err != nil {
-		t.Fatalf("body is not the parsed diff: %v (%q)", err, rr.Body.String())
-	}
-	if len(files) != 1 || files[0].Path != "t.txt" || files[0].Added != 1 || files[0].Removed != 1 {
-		t.Fatalf("parsed diff = %+v, want one changed t.txt with 1 added and 1 removed", files)
-	}
-}
-
-func TestHandleProjectDiffFile_Meta_Untracked(t *testing.T) {
-	h, s, _, _ := newTestGitHandler(t)
-	projPath := t.TempDir()
-	initGitRepo(t, projPath)
-	// Untracked file (created but not added/committed)
-	createFile(t, projPath, "untracked.txt", "line1\nline2\nline3\n")
-	proj := &types.Project{ID: "diff-file-meta-proj", Name: "diff-file-meta-proj", Path: projPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatal(err)
-	}
-
-	mux := newTestGitMux(h)
-
-	// meta mode returns lightweight metadata without diff/lines
-	rr := doRequest(t, mux, "GET", "/api/projects/diff-file-meta-proj/git/diff/file?path=untracked.txt&meta=1")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-	var resp struct {
-		LineCount int   `json:"line_count"`
-		FileSize  int64 `json:"file_size"`
-		IsBinary  bool  `json:"isBinary"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if resp.LineCount != 3 {
-		t.Fatalf("expected line_count 3, got %d", resp.LineCount)
-	}
-	// Small untracked files must NOT report file_size — a present file_size means
-	// "large/binary file" to the frontend (would render a "Large file" notice).
-	if resp.FileSize != 0 {
-		t.Fatalf("expected no file_size for small file, got %d", resp.FileSize)
-	}
-	if resp.IsBinary {
-		t.Fatal("expected not binary")
-	}
-}
-
-func TestHandleProjectDiffFile_Meta_LargeUntracked(t *testing.T) {
-	h, s, _, _ := newTestGitHandler(t)
-	projPath := t.TempDir()
-	initGitRepo(t, projPath)
-	// Untracked file larger than the 1MB diff threshold
-	largeContent := strings.Repeat("x", 1<<20+1) + "\n"
-	createFile(t, projPath, "large.txt", largeContent)
-	proj := &types.Project{ID: "diff-file-meta-large-proj", Name: "diff-file-meta-large-proj", Path: projPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatal(err)
-	}
-
-	mux := newTestGitMux(h)
-
-	rr := doRequest(t, mux, "GET", "/api/projects/diff-file-meta-large-proj/git/diff/file?path=large.txt&meta=1")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-	var resp struct {
-		LineCount int   `json:"line_count"`
-		FileSize  int64 `json:"file_size"`
-		IsBinary  bool  `json:"isBinary"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	// Large untracked files DO report file_size so the UI shows a "Large file" notice.
-	if want := int64(len(largeContent)); resp.FileSize != want {
-		t.Fatalf("expected file_size %d, got %d", want, resp.FileSize)
-	}
-	if resp.IsBinary {
-		t.Fatal("expected not binary")
-	}
-}
-
-func TestHandleProjectDiffFile_Content_Untracked(t *testing.T) {
-	h, s, _, _ := newTestGitHandler(t)
-	projPath := t.TempDir()
-	initGitRepo(t, projPath)
-	createFile(t, projPath, "untracked.txt", "hello\nworld\n")
-	proj := &types.Project{ID: "diff-file-content-proj", Name: "diff-file-content-proj", Path: projPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatal(err)
-	}
-
-	mux := newTestGitMux(h)
-
-	rr := doRequest(t, mux, "GET", "/api/projects/diff-file-content-proj/git/diff/file?path=untracked.txt")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-	var resp struct {
-		Lines     []string `json:"lines"`
-		LineCount int      `json:"line_count"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if resp.LineCount != 2 {
-		t.Fatalf("expected line_count 2, got %d", resp.LineCount)
-	}
-	if len(resp.Lines) != 2 || resp.Lines[0] != "hello" || resp.Lines[1] != "world" {
-		t.Fatalf("unexpected lines: %v", resp.Lines)
-	}
-}
-
-func TestHandleTaskLog_ValidBranch(t *testing.T) {
-	h, s, wm, worktreesDir := newTestGitHandler(t)
-
-	projPath := t.TempDir()
-	initGitRepo(t, projPath)
-	proj := &types.Project{ID: "tasklog-proj-v", Name: "tasklog-proj-v", Path: projPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatal(err)
-	}
-
-	task := &types.Task{
-		ID:        "tasklog-task-v",
-		ProjectID: proj.ID,
-		Title:     "log task valid",
-		Status:    types.StatusInProgress,
-		Branch:    "main",
-	}
-	if err := s.CreateTask(task); err != nil {
-		t.Fatal(err)
-	}
-
-	wtPath := filepath.Join(worktreesDir, proj.ID, task.ID)
-	createWorktreeAt(t, projPath, wtPath, "main")
-
-	mux := newTestGitMux(h)
-	_ = wm
-
-	rr := doRequest(t, mux, "GET", "/api/projects/tasklog-proj-v/tasks/tasklog-task-v/git/log?branch=HEAD&full=1")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200 for valid branch HEAD, got %d: %s", rr.Code, rr.Body.String())
-	}
+		rr := doRequest(t, newTestGitMux(h), "GET", "/api/projects/diff-parsed-empty/git/diff?parsed=1")
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+		}
+		if body := strings.TrimSpace(rr.Body.String()); body != "[]" {
+			t.Errorf("body = %q, want []", body)
+		}
+	})
 }
 
 // TestHandleTaskLog_FullSharesProjectResponse locks the ?full=1 shape that
@@ -709,176 +614,98 @@ func TestHandleTaskLog_FullSharesProjectResponse(t *testing.T) {
 	}
 }
 
-func TestHandleTaskDiff_ValidRefs(t *testing.T) {
-	h, s, wm, worktreesDir := newTestGitHandler(t)
-
-	projPath := t.TempDir()
-	initGitRepo(t, projPath)
-	proj := &types.Project{ID: "taskdiff-proj-v", Name: "taskdiff-proj-v", Path: projPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatal(err)
-	}
-
-	task := &types.Task{
-		ID:        "taskdiff-task-v",
-		ProjectID: proj.ID,
-		Title:     "diff task valid",
-		Status:    types.StatusInProgress,
-		Branch:    "main",
-	}
-	if err := s.CreateTask(task); err != nil {
-		t.Fatal(err)
-	}
-
-	wtPath := filepath.Join(worktreesDir, proj.ID, task.ID)
-	createWorktreeAt(t, projPath, wtPath, "main")
-
-	mux := newTestGitMux(h)
-	_ = wm
-
-	// Valid refs (HEAD..HEAD → empty diff) → 200
-	rr := doRequest(t, mux, "GET", "/api/projects/taskdiff-proj-v/tasks/taskdiff-task-v/diff?base=HEAD&head=HEAD")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200 for valid refs, got %d: %s", rr.Code, rr.Body.String())
-	}
-}
-
 // --- Character validation tests ---
 // These tests verify that characters not in the allowed set (letters, digits,
 // -, _, ., /, +) are rejected with 400 Bad Request.
 
 var invalidBranchChars = []string{"~", "^", ":", "?", "*", "[", "\\", " ", "feat..branch"}
 
-// --- Dash-prefixed path staging tests ---
-// These tests verify that file paths starting with '-' are safely staged
-// (treated as filenames, not git flags) thanks to the '--' separator
-// before the path argument in `git add`.
+// --- A path starting with '-' is a filename, not a switch ---
 
-// TestHandleProjectStagePaths_PathStartingWithDash stages a path that starts with '-'. Without the '--'
-// separator git reads "-dash-file.txt" as short options and the file stays unstaged.
-func TestHandleProjectStagePaths_PathStartingWithDash(t *testing.T) {
-	repoPath := initGitRepoTemp(t)
-	s := gitTestStore(t)
+// TestHandleProjectStagePaths_DashPrefixedPathIsAFileNotASwitch: every path rides behind `--`, so
+// git reads it as a name. Both directions are asserted — a dash-named file really reaches the
+// index, and a path spelled like a switch is refused as a missing file rather than obeyed as one.
+// The ignored file is the witness for the second half: only a force-add could have staged it.
+//
+// The task route stages through the same stagePaths and needs no copy of these two rows;
+// TestHandleStagePaths_StagesEveryPathInOneRequest (git_stage_test.go) is what pins the directory
+// that batch runs in.
+func TestHandleProjectStagePaths_DashPrefixedPathIsAFileNotASwitch(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		// plant writes what the repository holds before the request names it.
+		plant func(t *testing.T, repoPath string)
+		path  string
+		// wantApplied/wantFailed are the answer's two lists.
+		wantApplied []string
+		wantFailed  []string
+		// index asserts what the index holds afterwards.
+		index func(*testing.T, []string)
+	}{
+		{
+			name:        "a dash-named file is staged",
+			plant:       func(t *testing.T, repoPath string) { createFile(t, repoPath, "-dash-file.txt", "content\n") },
+			path:        "-dash-file.txt",
+			wantApplied: []string{"-dash-file.txt"},
+			index: func(t *testing.T, staged []string) {
+				t.Helper()
+				for _, f := range staged {
+					if f == "-dash-file.txt" {
+						return
+					}
+				}
+				t.Errorf("expected %q to be staged, got: %v", "-dash-file.txt", staged)
+			},
+		},
+		{
+			name: "a path spelled like a switch is refused as a path",
+			plant: func(t *testing.T, repoPath string) {
+				createFile(t, repoPath, ".gitignore", "ignored.txt\n")
+				createFile(t, repoPath, "ignored.txt", "only a force-add would stage this\n")
+			},
+			path:       "-f",
+			wantFailed: []string{"-f"},
+			index: func(t *testing.T, staged []string) {
+				t.Helper()
+				if len(staged) != 0 {
+					t.Errorf("-f reached git as a flag: the index holds %v", staged)
+				}
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			repoPath := initGitRepoTemp(t)
+			s := gitTestStore(t)
+			if err := s.CreateProject(&types.Project{ID: "test-proj", Name: "test", Path: repoPath}); err != nil {
+				t.Fatalf("create project: %v", err)
+			}
+			tt.plant(t, repoPath)
 
-	proj := &types.Project{ID: "test-proj", Name: "test", Path: repoPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
+			h := &GitHandler{store: s}
+			mux := http.NewServeMux()
+			mux.HandleFunc("POST /api/projects/{projectID}/git/stage", h.HandleProjectStagePaths)
 
-	h := &GitHandler{store: s}
+			req := newStageRequest(t, "/api/projects/test-proj/git/stage", true, tt.path)
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
 
-	filename := "-dash-file.txt"
-	createFile(t, repoPath, filename, "content\n")
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/projects/{projectID}/git/stage", h.HandleProjectStagePaths)
-
-	req := newStageRequest(t, "/api/projects/test-proj/git/stage", true, filename)
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 OK, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	// The file must actually be in the staged index.
-	files := stagedFiles(t, repoPath)
-	for _, f := range files {
-		if f == filename {
-			return
-		}
-	}
-	t.Fatalf("expected %q to be staged, got: %v", filename, files)
-}
-
-// The task handler fences its paths the same way, in the task's worktree.
-func TestHandleStagePaths_PathStartingWithDash(t *testing.T) {
-	worktreesDir := t.TempDir()
-
-	repoPath := initGitRepoTemp(t)
-	s := gitTestStore(t)
-
-	projID := "test-proj"
-	taskID := "test-task"
-	proj := &types.Project{ID: projID, Name: "test", Path: repoPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-
-	// Create the task. Status must not be "backlog" or "done".
-	task := &types.Task{ID: taskID, ProjectID: projID, Title: "test", Status: types.StatusInProgress}
-	if err := s.CreateTask(task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	cfgStore := config.NewConfigStore(s, filepath.Join(t.TempDir(), "test.db"), "test", nil, false, false)
-	cfgStore.SetWorkspaceDirOverride(worktreesDir)
-	wm := git.NewWorktreeManager(s, cfgStore)
-	h := &GitHandler{store: s, worktreeMgr: wm}
-
-	// Create the worktree directory (mirrors what WorktreePath computes).
-	worktreePath := filepath.Join(worktreesDir, projID, taskID)
-	if err := os.MkdirAll(worktreePath, 0o755); err != nil {
-		t.Fatalf("mkdir worktree: %v", err)
-	}
-	if out, err := exec.Command("git", "init", worktreePath).CombinedOutput(); err != nil {
-		t.Fatalf("git init worktree: %v: %s", err, out)
-	}
-
-	filename := "-dash-file.txt"
-	createFile(t, worktreePath, filename, "content\n")
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/diff/stage", h.HandleStagePaths)
-
-	req := newStageRequest(t, "/api/projects/test-proj/tasks/test-task/diff/stage", true, filename)
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 OK, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	files := stagedFiles(t, worktreePath)
-	for _, f := range files {
-		if f == filename {
-			return
-		}
-	}
-	t.Fatalf("expected %q to be staged, got: %v", filename, files)
-}
-
-func TestHandleTaskLog_BranchDefaultsToTaskBranch(t *testing.T) {
-	h, s, wm, worktreesDir := newTestGitHandler(t)
-
-	projPath := t.TempDir()
-	initGitRepo(t, projPath)
-	proj := &types.Project{ID: "tasklog-default-proj", Name: "tasklog-default-proj", Path: projPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatal(err)
-	}
-
-	task := &types.Task{
-		ID:        "tasklog-default-task",
-		ProjectID: proj.ID,
-		Title:     "default log task",
-		Status:    types.StatusInProgress,
-		Branch:    "main",
-	}
-	if err := s.CreateTask(task); err != nil {
-		t.Fatal(err)
-	}
-
-	wtPath := filepath.Join(worktreesDir, proj.ID, task.ID)
-	createWorktreeAt(t, projPath, wtPath, "main")
-
-	mux := newTestGitMux(h)
-	_ = wm
-
-	// No branch param → defaults to task.Branch ("main") → 200
-	rr := doRequest(t, mux, "GET", "/api/projects/tasklog-default-proj/tasks/tasklog-default-task/git/log?full=1")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200 when branch param is absent (defaults to task branch), got %d: %s", rr.Code, rr.Body.String())
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+			}
+			answer := decodeBatchAnswer(t, rec)
+			if strings.Join(answer.Applied, "|") != strings.Join(tt.wantApplied, "|") {
+				t.Errorf("applied = %v, want %v", answer.Applied, tt.wantApplied)
+			}
+			if len(answer.Failed) != len(tt.wantFailed) {
+				t.Fatalf("failed = %v, want %v", answer.Failed, tt.wantFailed)
+			}
+			for i, f := range answer.Failed {
+				if f.Path != tt.wantFailed[i] {
+					t.Errorf("failed[%d] = %q, want %q", i, f.Path, tt.wantFailed[i])
+				}
+			}
+			tt.index(t, stagedFiles(t, repoPath))
+		})
 	}
 }
 
@@ -909,43 +736,56 @@ func TestHandleCheckout_DashPrefix(t *testing.T) {
 	}
 }
 
-// A branch another worktree holds is one `git checkout` refuses here, and the project's own checkout is not
-// such a holder.
+// TestHandleBranchesNamesTheWorktreeHoldingEachRef is the branch listing's holder contract: the
+// screen decides what it can check out from the holder the route reports, never from the ref's name.
+// One checkout, one worktree per held ref, and the task rows behind some of them: a branch the
+// project itself has checked out is not a holder, a free branch names none, a branch another
+// worktree holds names that worktree, a held task branch names the task whose row owns it (a row
+// with nothing to open is a dead row), and a held branch no task row owns names no task.
 func TestHandleBranchesNamesTheWorktreeHoldingEachRef(t *testing.T) {
 	h, s, _, _ := newTestGitHandler(t)
 
 	projPath := t.TempDir()
 	initGitRepo(t, projPath)
-	mustRun(t, projPath, "git", "branch", "free-branch")
+	testgit.Git(t, projPath, "branch", "free-branch")
 	head := strings.TrimSpace(testgit.GitOutput(t, projPath, "rev-parse", "--abbrev-ref", "HEAD"))
-	heldDir := filepath.Join(t.TempDir(), "task-worktree")
-	mustRun(t, projPath, "git", "worktree", "add", "-b", "task/held-there", heldDir, "HEAD")
+	testgit.Git(t, projPath, "worktree", "add", "-q", "-b", "task/held-there", filepath.Join(t.TempDir(), "task-worktree"), "HEAD")
 
-	proj := &types.Project{ID: "branches-holder-proj", Name: "branches-holder-proj", Path: projPath}
-	if err := s.CreateProject(proj); err != nil {
+	if err := s.CreateProject(&types.Project{ID: "branches-holder-proj", Name: "branches-holder-proj", Path: projPath}); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.CreateTask(&types.Task{
+		ID: "branches-task-row", ProjectID: "branches-holder-proj", Title: "keep", Status: types.StatusBacklog,
+		Branch: "task/keep-this-one",
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	testgit.Git(t, projPath, "worktree", "add", "-q", "-b", "task/keep-this-one", filepath.Join(t.TempDir(), "held"), "HEAD")
+	// This ref is held by a worktree with no task row behind it.
+	testgit.Git(t, projPath, "worktree", "add", "-q", "-b", "unclaimed", filepath.Join(t.TempDir(), "mine"), "HEAD")
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/projects/{projectID}/git/branches", h.HandleBranches)
-	req := httptest.NewRequest("GET", "/api/projects/branches-holder-proj/git/branches", nil)
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 listing branches, got %d: %s", rec.Code, rec.Body.String())
+	rr := doRequest(t, mux, http.MethodGet, "/api/projects/branches-holder-proj/git/branches")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 listing branches, got %d: %s", rr.Code, rr.Body.String())
 	}
 
 	var refs []struct {
 		Name     string `json:"name"`
 		Worktree string `json:"worktree"`
+		TaskID   string `json:"task_id"`
 	}
-	if err := json.UnmarshalRead(rec.Body, &refs); err != nil {
-		t.Fatalf("decode branch rows: %v: %s", err, rec.Body.String())
+	if err := json.UnmarshalRead(rr.Body, &refs); err != nil {
+		t.Fatalf("decode branch rows: %v: %s", err, rr.Body.String())
 	}
 	holder := map[string]string{}
+	taskOf := map[string]string{}
 	for _, ref := range refs {
 		holder[ref.Name] = ref.Worktree
+		taskOf[ref.Name] = ref.TaskID
 	}
+
 	if _, ok := holder[head]; !ok {
 		t.Fatalf("the checked-out branch is missing from the listing: %+v", holder)
 	}
@@ -958,67 +798,22 @@ func TestHandleBranchesNamesTheWorktreeHoldingEachRef(t *testing.T) {
 	if holder["task/held-there"] == "" {
 		t.Errorf("a branch a second worktree holds reported no holder: %+v", holder)
 	}
-}
-
-// A held task branch names the task it belongs to; a held branch no task row owns names none.
-func TestHandleBranchesNamesTheTaskBehindAHeldBranch(t *testing.T) {
-	h, s, _, _ := newTestGitHandler(t)
-
-	projPath := t.TempDir()
-	initGitRepo(t, projPath)
-	proj := &types.Project{ID: "branches-task-proj", Name: "branches-task-proj", Path: projPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
+	if taskOf["task/keep-this-one"] != "branches-task-row" {
+		t.Errorf("a held task branch naming no task is a row with nothing to open; got %q", taskOf["task/keep-this-one"])
 	}
-	if err := s.CreateTask(&types.Task{
-		ID: "branches-task-row", ProjectID: proj.ID, Title: "keep", Status: types.StatusBacklog,
-		Branch: "task/keep-this-one",
-	}); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-	mustRun(t, projPath, "git", "worktree", "add", "-q", "-b", "task/keep-this-one",
-		filepath.Join(t.TempDir(), "held"), "HEAD")
-	// This ref is held by a worktree with no task row behind it.
-	mustRun(t, projPath, "git", "worktree", "add", "-q", "-b", "unclaimed",
-		filepath.Join(t.TempDir(), "mine"), "HEAD")
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/projects/{projectID}/git/branches", h.HandleBranches)
-	rr := doRequest(t, mux, http.MethodGet, "/api/projects/branches-task-proj/git/branches")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
-	}
-	var rows []struct {
-		Name     string `json:"name"`
-		Worktree string `json:"worktree"`
-		TaskID   string `json:"task_id"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &rows); err != nil {
-		t.Fatalf("decode branches: %v", err)
-	}
-	taskID := map[string]string{}
-	for _, row := range rows {
-		taskID[row.Name] = row.TaskID
-	}
-
-	if taskID["task/keep-this-one"] != "branches-task-row" {
-		t.Errorf("a held task branch naming no task is a row with nothing to open; got %q", taskID["task/keep-this-one"])
-	}
-	if taskID["unclaimed"] != "" {
-		t.Errorf("a branch no task row owns must not name a task, got %q", taskID["unclaimed"])
+	if taskOf["unclaimed"] != "" {
+		t.Errorf("a branch no task row owns must not name a task, got %q", taskOf["unclaimed"])
 	}
 }
 
-// --- HandlePull / HandlePush tests ---
+// --- HandlePull / HandlePush ---
 
-// addBareRemote creates a bare repo, registers it as "origin" in projPath,
-// and pushes the current branch with upstream tracking. Returns the bare path.
 func addBareRemote(t *testing.T, projPath string) string {
 	t.Helper()
 	bare := t.TempDir()
 	mustRun(t, "", "git", "init", "--bare", bare)
-	mustRun(t, projPath, "git", "remote", "add", "origin", bare)
-	mustRun(t, projPath, "git", "push", "-u", "origin", "HEAD")
+	testgit.Git(t, projPath, "remote", "add", "origin", bare)
+	testgit.Git(t, projPath, "push", "-u", "origin", "HEAD")
 	return bare
 }
 
@@ -1042,125 +837,91 @@ func newPullPushMux(h *GitHandler) *http.ServeMux {
 	return mux
 }
 
-func TestHandlePush_Success(t *testing.T) {
-	h, s, _, _ := newTestGitHandler(t)
-	projPath := t.TempDir()
-	initGitRepo(t, projPath)
-	addBareRemote(t, projPath)
-	proj := &types.Project{ID: "push-success-proj", Name: "push-success-proj", Path: projPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatal(err)
-	}
+// TestHandlePullPush_RoundTripsWithTheRemote: both verbs run through the one handleGitRemote path,
+// and the answer means the repository moved — a push leaves the bare remote at the local commit, a
+// pull leaves the remote's commit in the working tree.
+func TestHandlePullPush_RoundTripsWithTheRemote(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		op   string
+		// advance moves the side the operation pulls from before the click.
+		advance func(t *testing.T, projPath, bare string)
+		// verify reads the result back off disk.
+		verify func(t *testing.T, projPath string)
+	}{
+		{
+			name: "push carries the local commit to the remote",
+			op:   "push",
+			advance: func(t *testing.T, projPath, _ string) {
+				createFile(t, projPath, "pushed-file.txt", "pushed\n")
+				testgit.Git(t, projPath, "add", "pushed-file.txt")
+				testgit.Git(t, projPath, "commit", "-m", "commit to push")
+			},
+			verify: func(t *testing.T, projPath string) {
+				bare := strings.TrimSpace(testgit.GitOutput(t, projPath, "remote", "get-url", "origin"))
+				local := testgit.GitOutput(t, projPath, "rev-parse", "HEAD")
+				if remote := testgit.GitOutput(t, bare, "rev-parse", "HEAD"); remote != local {
+					t.Fatalf("remote HEAD %q != local HEAD %q", remote, local)
+				}
+			},
+		},
+		{
+			name: "pull brings the remote's commit into the working tree",
+			op:   "pull",
+			advance: func(t *testing.T, _, bare string) {
+				// Advance the remote via a second clone: the local repository must be behind.
+				advanceRemoteWith(t, bare)
+			},
+			verify: func(t *testing.T, projPath string) {
+				if _, err := os.Stat(filepath.Join(projPath, "remote-file.txt")); err != nil {
+					t.Fatalf("expected remote-file.txt after pull: %v", err)
+				}
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, s, _, _ := newTestGitHandler(t)
+			projPath := t.TempDir()
+			initGitRepo(t, projPath)
+			bare := addBareRemote(t, projPath)
+			if err := s.CreateProject(&types.Project{ID: "pullpush-proj", Name: "pullpush-proj", Path: projPath}); err != nil {
+				t.Fatal(err)
+			}
+			tt.advance(t, projPath, bare)
 
-	// Create a new local commit to push.
-	createFile(t, projPath, "pushed-file.txt", "pushed\n")
-	mustRun(t, projPath, "git", "add", "pushed-file.txt")
-	mustRun(t, projPath, "git", "commit", "-m", "commit to push")
-	localHead, err := exec.Command("git", "-C", projPath, "rev-parse", "HEAD").Output()
-	if err != nil {
-		t.Fatalf("rev-parse HEAD: %v", err)
-	}
+			req := httptest.NewRequest("POST", "/api/projects/pullpush-proj/git/"+tt.op, nil)
+			rec := httptest.NewRecorder()
+			newPullPushMux(h).ServeHTTP(rec, req)
 
-	mux := newPullPushMux(h)
-	req := httptest.NewRequest("POST", "/api/projects/push-success-proj/git/push", nil)
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 for push, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	// The bare remote must now contain the local commit.
-	bare, err := exec.Command("git", "-C", projPath, "remote", "get-url", "origin").Output()
-	if err != nil {
-		t.Fatalf("remote get-url: %v", err)
-	}
-	remoteHead, err := exec.Command("git", "-C", strings.TrimSpace(string(bare)), "rev-parse", "HEAD").Output()
-	if err != nil {
-		t.Fatalf("rev-parse remote HEAD: %v", err)
-	}
-	if strings.TrimSpace(string(remoteHead)) != strings.TrimSpace(string(localHead)) {
-		t.Fatalf("remote HEAD %q != local HEAD %q", remoteHead, localHead)
-	}
-}
-
-func TestHandlePull_Success(t *testing.T) {
-	h, s, _, _ := newTestGitHandler(t)
-	projPath := t.TempDir()
-	initGitRepo(t, projPath)
-	bare := addBareRemote(t, projPath)
-	proj := &types.Project{ID: "pull-success-proj", Name: "pull-success-proj", Path: projPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatal(err)
-	}
-
-	// Advance the remote via a second clone so the local repo is behind. testgit carries the commit
-	// identity: a fresh clone has no user.* of its own.
-	clone := t.TempDir()
-	testgit.Git(t, "", "clone", bare, clone)
-	createFile(t, clone, "remote-file.txt", "from remote\n")
-	testgit.Git(t, clone, "add", "remote-file.txt")
-	testgit.Git(t, clone, "commit", "-m", "remote commit")
-	testgit.Git(t, clone, "push")
-
-	mux := newPullPushMux(h)
-	req := httptest.NewRequest("POST", "/api/projects/pull-success-proj/git/pull", nil)
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 for pull, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	// The pulled commit must now be in the local repo.
-	if _, err := os.Stat(filepath.Join(projPath, "remote-file.txt")); err != nil {
-		t.Fatalf("expected remote-file.txt after pull: %v", err)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected 200 for %s, got %d: %s", tt.op, rec.Code, rec.Body.String())
+			}
+			tt.verify(t, projPath)
+		})
 	}
 }
 
-func TestHandlePull_NotAGitRepo_ErrorIncludesGitOutput(t *testing.T) {
-	h, s, _, _ := newTestGitHandler(t)
-	// A plain directory (not a git repo) gives a deterministic git error
-	// whose wording is stable across git versions.
-	projPath := t.TempDir()
-	proj := &types.Project{ID: "pull-err-proj", Name: "pull-err-proj", Path: projPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatal(err)
-	}
+// A plain directory (not a git repo) gives a deterministic git error whose wording is stable across
+// git versions, and both verbs reach it through the same call.
+func TestHandlePullPush_NonGitRepoAnswersWithTheGitOutput(t *testing.T) {
+	for _, op := range []string{"pull", "push"} {
+		t.Run(op, func(t *testing.T) {
+			h, s, _, _ := newTestGitHandler(t)
+			projPath := t.TempDir()
+			if err := s.CreateProject(&types.Project{ID: "git-error-proj", Name: "git-error-proj", Path: projPath}); err != nil {
+				t.Fatal(err)
+			}
 
-	mux := newPullPushMux(h)
-	req := httptest.NewRequest("POST", "/api/projects/pull-err-proj/git/pull", nil)
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
+			rec := httptest.NewRecorder()
+			newPullPushMux(h).ServeHTTP(rec, httptest.NewRequest("POST", "/api/projects/git-error-proj/git/"+op, nil))
 
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("expected 500 for pull on non-git dir, got %d: %s", rec.Code, rec.Body.String())
-	}
-	msg := decodeGitError(t, rec)
-	if !strings.Contains(msg, "not a git repository") {
-		t.Fatalf("error message should include git output, got %q", msg)
-	}
-}
-
-func TestHandlePush_NotAGitRepo_ErrorIncludesGitOutput(t *testing.T) {
-	h, s, _, _ := newTestGitHandler(t)
-	projPath := t.TempDir()
-	proj := &types.Project{ID: "push-err-proj", Name: "push-err-proj", Path: projPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatal(err)
-	}
-
-	mux := newPullPushMux(h)
-	req := httptest.NewRequest("POST", "/api/projects/push-err-proj/git/push", nil)
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("expected 500 for push on non-git dir, got %d: %s", rec.Code, rec.Body.String())
-	}
-	msg := decodeGitError(t, rec)
-	if !strings.Contains(msg, "not a git repository") {
-		t.Fatalf("error message should include git output, got %q", msg)
+			if rec.Code != http.StatusInternalServerError {
+				t.Fatalf("expected 500 for %s on non-git dir, got %d: %s", op, rec.Code, rec.Body.String())
+			}
+			if msg := decodeGitError(t, rec); !strings.Contains(msg, "not a git repository") {
+				t.Fatalf("error message should include git output, got %q", msg)
+			}
+		})
 	}
 }
 
@@ -1225,53 +986,70 @@ func postGitFetch(t *testing.T, h *GitHandler, id string) (ok bool, ahead, behin
 	return *body.OK, *body.Ahead, *body.Behind
 }
 
-func TestHandleStatus_CountsCommitsAheadOfUpstream(t *testing.T) {
-	h, s, _, _ := newTestGitHandler(t)
-	projPath := t.TempDir()
-	initGitRepo(t, projPath)
-	addBareRemote(t, projPath)
-
-	createFile(t, projPath, "local.txt", "local\n")
-	testgit.Git(t, projPath, "add", "local.txt")
-	testgit.Git(t, projPath, "commit", "-m", "local commit")
-
-	storeGitProject(t, s, "status-ahead-proj", projPath)
-	if ahead, behind := statusAheadBehind(t, h, "status-ahead-proj"); ahead != 1 || behind != 0 {
-		t.Fatalf("one unpushed commit: got ahead=%d behind=%d, want ahead=1 behind=0", ahead, behind)
-	}
-}
-
-func TestHandleStatus_CountsCommitsBehindUpstream(t *testing.T) {
-	h, s, _, _ := newTestGitHandler(t)
-	projPath := t.TempDir()
-	initGitRepo(t, projPath)
-	bare := addBareRemote(t, projPath)
-
-	// The fetch is what moves refs/remotes/…, which is where the count is read from.
+// advanceRemoteWith commits on a second clone and pushes, so the remote holds a commit this
+// repository has not fetched yet.
+func advanceRemoteWith(t *testing.T, bare string) {
+	t.Helper()
 	clone := t.TempDir()
 	testgit.Git(t, "", "clone", bare, clone)
 	createFile(t, clone, "remote-file.txt", "from remote\n")
 	testgit.Git(t, clone, "add", "remote-file.txt")
 	testgit.Git(t, clone, "commit", "-m", "remote commit")
 	testgit.Git(t, clone, "push")
-	testgit.Git(t, projPath, "fetch", "origin")
-
-	storeGitProject(t, s, "status-behind-proj", projPath)
-	if ahead, behind := statusAheadBehind(t, h, "status-behind-proj"); ahead != 0 || behind != 1 {
-		t.Fatalf("one fetched remote commit: got ahead=%d behind=%d, want ahead=0 behind=1", ahead, behind)
-	}
 }
 
-func TestHandleStatus_WithoutUpstreamAnswersZeroCounts(t *testing.T) {
-	h, s, _, _ := newTestGitHandler(t)
-	projPath := t.TempDir()
-	initGitRepo(t, projPath)
+// TestHandleStatus_CountsAgainstTheUpstream: the pair is counted against refs/remotes/…, which is
+// what the three shapes a person can have are read from — unpushed work, work fetched from the
+// remote, and no upstream at all, which answers 0/0 rather than an unresolvable-ref error.
+func TestHandleStatus_CountsAgainstTheUpstream(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		withRemote bool
+		advance    func(t *testing.T, projPath, bare string)
+		ahead      int
+		behind     int
+	}{
+		{
+			name:       "one unpushed commit",
+			withRemote: true,
+			advance: func(t *testing.T, projPath, _ string) {
+				createFile(t, projPath, "local.txt", "local\n")
+				testgit.Git(t, projPath, "add", "local.txt")
+				testgit.Git(t, projPath, "commit", "-m", "local commit")
+			},
+			ahead: 1,
+		},
+		{
+			name:       "one commit fetched from the remote",
+			withRemote: true,
+			advance: func(t *testing.T, projPath, bare string) {
+				// The fetch is what moves refs/remotes/…, which is where the count is read from.
+				advanceRemoteWith(t, bare)
+				testgit.Git(t, projPath, "fetch", "origin")
+			},
+			behind: 1,
+		},
+		{
+			name: "a local-only repository has nothing to be ahead or behind",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, s, _, _ := newTestGitHandler(t)
+			projPath := t.TempDir()
+			initGitRepo(t, projPath)
+			bare := ""
+			if tt.withRemote {
+				bare = addBareRemote(t, projPath)
+			}
+			if tt.advance != nil {
+				tt.advance(t, projPath, bare)
+			}
 
-	// A local-only repository has nothing to be ahead or behind, and the snapshot answers 0/0 rather
-	// than an unresolvable-ref error.
-	storeGitProject(t, s, "status-noupstream-proj", projPath)
-	if ahead, behind := statusAheadBehind(t, h, "status-noupstream-proj"); ahead != 0 || behind != 0 {
-		t.Fatalf("no upstream: got ahead=%d behind=%d, want 0/0", ahead, behind)
+			storeGitProject(t, s, "status-proj", projPath)
+			if ahead, behind := statusAheadBehind(t, h, "status-proj"); ahead != tt.ahead || behind != tt.behind {
+				t.Fatalf("got ahead=%d behind=%d, want ahead=%d behind=%d", ahead, behind, tt.ahead, tt.behind)
+			}
+		})
 	}
 }
 
@@ -1315,43 +1093,5 @@ func TestHandleFetch_WithoutUpstreamDeclinesWithoutAFetch(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(projPath, ".git", "FETCH_HEAD")); !os.IsNotExist(err) {
 		t.Fatalf("git/fetch contacted a remote that does not exist (FETCH_HEAD err=%v)", err)
-	}
-}
-
-// A path of exactly "-f" is a filename, not the --force flag, because every path rides behind `--`. The
-// proof is the ignored file: only a force-add would have staged it.
-func TestHandleProjectStagePaths_DashFPathNotForceAdd(t *testing.T) {
-	repoPath := initGitRepoTemp(t)
-	s := gitTestStore(t)
-
-	proj := &types.Project{ID: "test-proj", Name: "test", Path: repoPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-
-	createFile(t, repoPath, ".gitignore", "ignored.txt\n")
-	createFile(t, repoPath, "ignored.txt", "only a force-add would stage this\n")
-	h := &GitHandler{store: s}
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/projects/{projectID}/git/stage", h.HandleProjectStagePaths)
-
-	// No file named "-f" exists, so the path is refused — as a path, not as a switch.
-	req := newStageRequest(t, "/api/projects/test-proj/git/stage", true, "-f")
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 with the path refused, got %d: %s", rec.Code, rec.Body.String())
-	}
-	answer := decodeBatchAnswer(t, rec)
-	if len(answer.Applied) != 0 {
-		t.Errorf("applied = %v, want none", answer.Applied)
-	}
-	if len(answer.Failed) != 1 || answer.Failed[0].Path != "-f" {
-		t.Errorf("failed = %v, want just -f", answer.Failed)
-	}
-	if staged := stagedFiles(t, repoPath); len(staged) != 0 {
-		t.Errorf("-f reached git as a flag: the index holds %v", staged)
 	}
 }

@@ -112,59 +112,66 @@ func runEditRequest(t *testing.T, path string, edits []protocol.Edit) (*protocol
 	return frame, readErr
 }
 
-func TestHandleEdit_AppliesEdits(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "test.txt")
-	content := "alpha\nbeta\ngamma\n"
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		t.Fatal(err)
+// TestHandleEdit holds the one contract of the edit tool: the replacements the file does hold are
+// all applied and the bytes written are reported, and text it does not hold is refused with what the
+// file actually contains — the model rewrites from that sentence, so a refusal that says nothing
+// costs a retry.
+func TestHandleEdit(t *testing.T) {
+	write := func(t *testing.T, content string) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "test.txt")
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		return path
 	}
 
-	frame, err := runEditRequest(t, path, []protocol.Edit{
-		{OldText: "alpha", NewText: "ALPHA"},
-		{OldText: "gamma", NewText: "GAMMA"},
+	t.Run("applies every edit and reports the bytes", func(t *testing.T) {
+		path := write(t, "alpha\nbeta\ngamma\n")
+
+		frame, err := runEditRequest(t, path, []protocol.Edit{
+			{OldText: "alpha", NewText: "ALPHA"},
+			{OldText: "gamma", NewText: "GAMMA"},
+		})
+		if err != nil {
+			t.Fatalf("handleEdit: %v", err)
+		}
+		if frame.Type == protocol.TypeError {
+			t.Fatalf("unexpected error frame: %s", frame.ErrorMsg())
+		}
+		if frame.Type != protocol.TypeResult {
+			t.Fatalf("frame type = %d, want TypeResult", frame.Type)
+		}
+		// Result payload is the number of bytes written.
+		const want = "ALPHA\nbeta\nGAMMA\n"
+		if n, err := protocol.Uint64Result(frame.Payload); err != nil || n != uint64(len(want)) {
+			t.Errorf("bytes written = %d (err %v), want %d", n, err, len(want))
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read edited file: %v", err)
+		}
+		if string(data) != want {
+			t.Errorf("got %q, want %q", string(data), want)
+		}
 	})
-	if err != nil {
-		t.Fatalf("handleEdit: %v", err)
-	}
-	if frame.Type == protocol.TypeError {
-		t.Fatalf("unexpected error frame: %s", frame.ErrorMsg())
-	}
-	if frame.Type != protocol.TypeResult {
-		t.Fatalf("frame type = %d, want TypeResult", frame.Type)
-	}
-	// Result payload is the number of bytes written.
-	if n, err := protocol.Uint64Result(frame.Payload); err != nil || n != uint64(len("ALPHA\nbeta\nGAMMA\n")) {
-		t.Errorf("bytes written = %d (err %v), want %d", n, err, len("ALPHA\nbeta\nGAMMA\n"))
-	}
 
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read edited file: %v", err)
-	}
-	if want := "ALPHA\nbeta\nGAMMA\n"; string(data) != want {
-		t.Errorf("got %q, want %q", string(data), want)
-	}
-}
+	t.Run("refuses text the file does not hold", func(t *testing.T) {
+		path := write(t, "hello world")
 
-func TestHandleEdit_NotFoundError(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "test.txt")
-	if err := os.WriteFile(path, []byte("hello world"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	frame, err := runEditRequest(t, path, []protocol.Edit{{OldText: "nope", NewText: "x"}})
-	if err != nil {
-		t.Fatalf("handleEdit: %v", err)
-	}
-	if frame.Type != protocol.TypeError {
-		t.Fatalf("frame type = %d, want TypeError", frame.Type)
-	}
-	msg := frame.ErrorMsg()
-	if !strings.Contains(msg, "not found in file") || !strings.Contains(msg, "Got 1 lines in file") {
-		t.Errorf("unexpected error message: %q", msg)
-	}
+		frame, err := runEditRequest(t, path, []protocol.Edit{{OldText: "nope", NewText: "x"}})
+		if err != nil {
+			t.Fatalf("handleEdit: %v", err)
+		}
+		if frame.Type != protocol.TypeError {
+			t.Fatalf("frame type = %d, want TypeError", frame.Type)
+		}
+		msg := frame.ErrorMsg()
+		if !strings.Contains(msg, "not found in file") || !strings.Contains(msg, "Got 1 lines in file") {
+			t.Errorf("unexpected error message: %q", msg)
+		}
+	})
 }
 
 // TestBashCancel kills a long-running bash process via bash_cancel.

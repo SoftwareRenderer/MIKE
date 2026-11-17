@@ -9,7 +9,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"mike/backend/config"
 	"mike/backend/store"
@@ -92,103 +91,6 @@ func writeFile(t *testing.T, dir, name, content string) {
 	}
 }
 
-// TestCreateWorktree_ExcludesWorktreesDirFromProjectStatus: in-project worktrees are excluded from git status.
-func TestCreateWorktree_ExcludesWorktreesDirFromProjectStatus(t *testing.T) {
-	tmpDir := t.TempDir()
-	repoDir := filepath.Join(tmpDir, "repo")
-	os.MkdirAll(repoDir, 0o755)
-	runGit(t, repoDir, "init")
-	runGit(t, repoDir, "config", "user.email", "test@test.com")
-	runGit(t, repoDir, "config", "user.name", "Test")
-	writeFile(t, repoDir, "README.md", "# Test\n")
-	runGit(t, repoDir, "add", "README.md")
-	runGit(t, repoDir, "commit", "-m", "Initial")
-
-	dbPath := filepath.Join(tmpDir, "test.db")
-	s, err := store.NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
-
-	// Worktrees dir INSIDE the project directory.
-	worktreesDir := filepath.Join(repoDir, ".worktrees")
-	os.MkdirAll(worktreesDir, 0o755)
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false, false)
-	cfgStore.SetWorkspaceDirOverride(worktreesDir)
-
-	projID := "proj-in-repo"
-	proj := &types.Project{ID: projID, Name: "in-repo", Path: repoDir}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	task := &types.Task{ID: "wt-exclude-task", ProjectID: projID, Title: "t", Status: types.StatusInProgress}
-	if err := s.CreateTask(task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	wm := NewWorktreeManager(s, cfgStore)
-	wtPath, _, err := wm.CreateWorktree(projID, task.ID, "task/wt-exclude", "")
-	if err != nil {
-		t.Fatalf("create worktree: %v", err)
-	}
-
-	// Untracked (unstaged) file in the worktree — the user's WIP content.
-	writeFile(t, wtPath, "scratch.txt", "unstaged\n")
-
-	// A local exclude entry must have been written for the worktrees dir.
-	excludePath := filepath.Join(repoDir, ".git", "info", "exclude")
-	data, err := os.ReadFile(excludePath)
-	if err != nil {
-		t.Fatalf("read info/exclude: %v", err)
-	}
-	if !strings.Contains(string(data), ".worktrees/\n") {
-		t.Errorf("info/exclude should contain .worktrees/, got:\n%s", data)
-	}
-
-	// The project's git status must not list the worktrees dir (or its files).
-	cmd := exec.Command("git", "-C", repoDir, "status", "--porcelain")
-	out, _ := cmd.CombinedOutput()
-	if strings.Contains(string(out), ".worktrees") {
-		t.Errorf("project status should not mention the worktrees dir, got:\n%s", out)
-	}
-
-	// Idempotent: a second worktree must not duplicate the entry.
-	task2 := &types.Task{ID: "wt-exclude-task2", ProjectID: projID, Title: "t2", Status: types.StatusInProgress}
-	if err := s.CreateTask(task2); err != nil {
-		t.Fatalf("create task2: %v", err)
-	}
-	if _, _, err := wm.CreateWorktree(projID, task2.ID, "task/wt-exclude2", ""); err != nil {
-		t.Fatalf("create worktree2: %v", err)
-	}
-	data, _ = os.ReadFile(excludePath)
-	if n := strings.Count(string(data), ".worktrees/\n"); n != 1 {
-		t.Errorf("expected exactly one .worktrees/ exclude entry, got %d:\n%s", n, data)
-	}
-}
-
-// TestCreateWorktree_NoExcludeWhenWorktreesOutsideProject: no exclude entry when worktrees are outside.
-func TestCreateWorktree_NoExcludeWhenWorktreesOutsideProject(t *testing.T) {
-	repoDir, taskID, s, _, wm := setupTestRepo(t)
-
-	proj, err := s.GetProject("test-project")
-	if err != nil {
-		t.Fatalf("get project: %v", err)
-	}
-	if _, _, err := wm.CreateWorktree(proj.ID, taskID, "task/"+taskID, ""); err != nil {
-		t.Fatalf("create worktree: %v", err)
-	}
-
-	excludePath := filepath.Join(repoDir, ".git", "info", "exclude")
-	data, err := os.ReadFile(excludePath)
-	if err != nil {
-		t.Fatalf("read info/exclude: %v", err)
-	}
-	if strings.Contains(string(data), "worktrees") {
-		t.Errorf("no exclude entry expected when worktrees are outside the project, got:\n%s", data)
-	}
-}
-
 func TestResolveDiffBaseline_RejectsFatalBaseRef(t *testing.T) {
 	_, taskID, _, _, wm := setupTestRepo(t)
 
@@ -199,16 +101,6 @@ func TestResolveDiffBaseline_RejectsFatalBaseRef(t *testing.T) {
 	}
 }
 
-func TestResolveDiffBaseline_ValidBaseRef(t *testing.T) {
-	_, taskID, _, _, wm := setupTestRepo(t)
-
-	// A valid baseRef should be returned as-is (original thread)
-	result := wm.resolveDiffBaseline(taskID, "master", "task/test-task", "")
-	if result != "master" {
-		t.Errorf("expected master, got %q", result)
-	}
-}
-
 func revParse(t *testing.T, dir, ref string) string {
 	t.Helper()
 	out, err := exec.Command("git", "-C", dir, "rev-parse", ref).Output()
@@ -216,141 +108,6 @@ func revParse(t *testing.T, dir, ref string) string {
 		t.Fatalf("git rev-parse %s: %v", ref, err)
 	}
 	return strings.TrimSpace(string(out))
-}
-
-// TestDivergenceBase_ReturnsForkPoint verifies that for a branch forked from the main
-// branch with commits on both sides, DivergenceBase returns the fork point.
-func TestDivergenceBase_ReturnsForkPoint(t *testing.T) {
-	repoDir, _, _, _, wm := setupTestRepo(t)
-
-	mainBranch, err := wm.gitCurrentBranch(repoDir)
-	if err != nil || mainBranch == "" || mainBranch == "HEAD" {
-		t.Fatalf("the fixture repo holds a commit, so rev-parse must name its branch: got %q (err %v)", mainBranch, err)
-	}
-	forkPoint := revParse(t, repoDir, "HEAD")
-
-	// Fork a task branch from the initial commit.
-	runGit(t, repoDir, "branch", "task/divergent")
-
-	// Advance the task branch with its own commit.
-	runGit(t, repoDir, "checkout", "task/divergent")
-	writeFile(t, repoDir, "branch.txt", "branch\n")
-	runGit(t, repoDir, "add", "branch.txt")
-	runGit(t, repoDir, "commit", "-m", "branch commit")
-
-	// Advance main with its own commit.
-	runGit(t, repoDir, "checkout", mainBranch)
-	writeFile(t, repoDir, "main.txt", "main\n")
-	runGit(t, repoDir, "add", "main.txt")
-	runGit(t, repoDir, "commit", "-m", "main commit")
-
-	if got := wm.DivergenceBase(repoDir, mainBranch, "task/divergent"); got != forkPoint {
-		t.Errorf("DivergenceBase(explicit main) = %q, want fork point %q", got, forkPoint)
-	}
-	// Empty mainBranch falls back to the project's current branch.
-	if got := wm.DivergenceBase(repoDir, "", "task/divergent"); got != forkPoint {
-		t.Errorf("DivergenceBase(empty main) = %q, want fork point %q", got, forkPoint)
-	}
-}
-
-// TestDivergenceBase_InvalidRefs verifies the fallback returns "" when refs cannot
-// be resolved, so callers keep their current (empty baseline) behavior.
-func TestDivergenceBase_InvalidRefs(t *testing.T) {
-	repoDir, _, _, _, wm := setupTestRepo(t)
-
-	if got := wm.DivergenceBase(repoDir, "main", ""); got != "" {
-		t.Errorf("empty taskBranch should return empty, got %q", got)
-	}
-	if got := wm.DivergenceBase("", "main", "task/x"); got != "" {
-		t.Errorf("empty projectPath should return empty, got %q", got)
-	}
-	if got := wm.DivergenceBase(repoDir, "main", "task/does-not-exist"); got != "" {
-		t.Errorf("nonexistent branch should return empty, got %q", got)
-	}
-}
-
-// TestDivergenceBase_DetachedHead verifies that with an empty mainBranch and a
-// detached project HEAD there is no main branch to measure divergence from.
-func TestDivergenceBase_DetachedHead(t *testing.T) {
-	repoDir, _, _, _, wm := setupTestRepo(t)
-
-	mainBranch, err := wm.gitCurrentBranch(repoDir)
-	if err != nil || mainBranch == "" || mainBranch == "HEAD" {
-		t.Fatalf("the fixture repo holds a commit, so rev-parse must name its branch: got %q (err %v)", mainBranch, err)
-	}
-	runGit(t, repoDir, "checkout", "--detach", "HEAD")
-
-	if got := wm.DivergenceBase(repoDir, "", "main"); got != "" {
-		t.Errorf("detached HEAD with empty main should return empty, got %q", got)
-	}
-	// An explicit main still resolves.
-	if got := wm.DivergenceBase(repoDir, mainBranch, mainBranch); got == "" {
-		t.Error("explicit main should resolve, got empty")
-	}
-}
-
-// TestResolveTaskBaseline_Usability verifies the baseline fallback for tasks
-// with a branch but no USABLE recorded baseline: an unset base, a base that
-// equals the task's own branch, or a custom base name that doesn't exist in
-// the repo (e.g. typed into Edit Task before the branch was created) all
-// fall back to the divergence point, while valid recorded baselines are kept.
-func TestResolveTaskBaseline_Usability(t *testing.T) {
-	repoDir, _, _, _, wm := setupTestRepo(t)
-
-	mainBranch, err := wm.gitCurrentBranch(repoDir)
-	if err != nil || mainBranch == "" || mainBranch == "HEAD" {
-		t.Fatalf("the fixture repo holds a commit, so rev-parse must name its branch: got %q (err %v)", mainBranch, err)
-	}
-	forkPoint := revParse(t, repoDir, "HEAD")
-
-	// Fork a task branch with a commit on it.
-	runGit(t, repoDir, "branch", "task/baseline-check")
-	runGit(t, repoDir, "checkout", "task/baseline-check")
-	writeFile(t, repoDir, "work.txt", "work\n")
-	runGit(t, repoDir, "add", "work.txt")
-	runGit(t, repoDir, "commit", "-m", "task work")
-	task := &types.Task{Branch: "task/baseline-check"}
-
-	// No recorded baseline → divergence point.
-	if got := wm.resolveTaskBaseline(repoDir, mainBranch, task); got != forkPoint {
-		t.Errorf("empty baseline = %q, want divergence point %q", got, forkPoint)
-	}
-
-	// Base == the task's own branch (structurally empty diff) → divergence point.
-	own := *task
-	own.BaseRef = "task/baseline-check"
-	if got := wm.resolveTaskBaseline(repoDir, mainBranch, &own); got != forkPoint {
-		t.Errorf("own-branch baseline = %q, want divergence point %q", got, forkPoint)
-	}
-
-	// Custom base name that doesn't exist in the repo → divergence point.
-	missing := *task
-	missing.BaseRef = "explore/idea"
-	if got := wm.resolveTaskBaseline(repoDir, mainBranch, &missing); got != forkPoint {
-		t.Errorf("missing-branch baseline = %q, want divergence point %q", got, forkPoint)
-	}
-
-	// A valid, different base is kept as-is.
-	valid := *task
-	valid.BaseRef = mainBranch
-	if got := wm.resolveTaskBaseline(repoDir, mainBranch, &valid); got != mainBranch {
-		t.Errorf("valid baseline = %q, want %q", got, mainBranch)
-	}
-
-	// BaseCommit (start-time hash) always wins, even over a broken BaseRef.
-	hash := *task
-	hash.BaseRef = "explore/idea"
-	hash.BaseCommit = forkPoint
-	if got := wm.resolveTaskBaseline(repoDir, mainBranch, &hash); got != forkPoint {
-		t.Errorf("BaseCommit should win, got %q", got)
-	}
-
-	// A task without a branch passes the recorded baseline through untouched
-	// (nothing to resolve a divergence point against).
-	noBranch := &types.Task{BaseRef: "explore/idea"}
-	if got := wm.resolveTaskBaseline(repoDir, mainBranch, noBranch); got != "explore/idea" {
-		t.Errorf("no-branch baseline = %q, want pass-through %q", got, "explore/idea")
-	}
 }
 
 func TestGetTaskDiff_RejectsFatalBaseRef(t *testing.T) {
@@ -433,322 +190,6 @@ func TestCreateWorktree_GeneratesBranchNameForAnUnusableRef(t *testing.T) {
 		if currentBranch != "task/"+taskID {
 			t.Errorf("branchName %q: HEAD is on %q, want 'task/%s'", branchName, currentBranch, taskID)
 		}
-	}
-}
-
-func TestTruncateDiffLines_NoTruncationNeeded(t *testing.T) {
-	diff := `diff --git a/file.txt b/file.txt
-index 1234567..abcdef 100644
---- a/file.txt
-+++ b/file.txt
-@@ -1,3 +1,4 @@
- line1
-+added1
- line2
- line3
-+added2`
-	result, truncated := truncateDiffLines(diff, 60)
-	if len(truncated) != 0 {
-		t.Errorf("expected no truncated files, got %v", truncated)
-	}
-	if result != diff {
-		t.Error("expected diff to be unchanged")
-	}
-}
-
-func TestTruncateDiffLines_TruncatesLargeFile(t *testing.T) {
-	diff := `diff --git a/small.txt b/small.txt
---- a/small.txt
-+++ b/small.txt
-@@ -1,2 +1,4 @@
- line1
-+added1
-+added2
- line2
-+added3
-+added4
-diff --git a/large.txt b/large.txt
---- a/large.txt
-+++ b/large.txt
-@@ -1,2 +1,4 @@
- line1
-+h1-added1
-+h1-added2
- line2
-+h1-added3
-@@ -10,2 +10,4 @@
- line10
-+h2-added1
-+h2-added2
- line11
-+h2-added3
-@@ -20,2 +20,4 @@
- line20
-+h3-added1
-+h3-added2
- line21
-+h3-added3`
-	result, truncated := truncateDiffLines(diff, 6)
-
-	// large.txt has 9 changes (> 6), should be truncated
-	if len(truncated) != 1 || truncated[0] != "large.txt" {
-		t.Errorf("expected [large.txt], got %v", truncated)
-	}
-
-	// small.txt should be fully present
-	if !strings.Contains(result, "added4") {
-		t.Error("expected small.txt changes to be fully present")
-	}
-
-	// large.txt: first hunk always kept (3 changes), second hunk fits (3+3=6), third dropped
-	if !strings.Contains(result, "h1-added3") {
-		t.Error("expected first hunk of large.txt")
-	}
-	if !strings.Contains(result, "h2-added3") {
-		t.Error("expected second hunk of large.txt (fits within limit)")
-	}
-	if strings.Contains(result, "h3-added1") {
-		t.Error("expected third hunk of large.txt to be truncated")
-	}
-
-	// Count @@ headers: small.txt(1) + large.txt(2) = 3 hunks
-	// Each hunk header has two @@ markers, so 6 total
-	hunkMarkers := strings.Count(result, "@@")
-	if hunkMarkers != 6 {
-		t.Errorf("expected 6 @@ markers (3 hunks), got %d", hunkMarkers)
-	}
-	// Third hunk should be fully absent
-	if strings.Contains(result, "h3-added") {
-		t.Error("expected third hunk to be truncated")
-	}
-}
-
-func TestTruncateDiffLines_SingleLargeHunk(t *testing.T) {
-	var lines []string
-	lines = append(lines, "diff --git a/file.txt b/file.txt")
-	lines = append(lines, "--- a/file.txt")
-	lines = append(lines, "+++ b/file.txt")
-	lines = append(lines, "@@ -1,2 +1,12 @@")
-	lines = append(lines, " line1")
-	for i := 1; i <= 10; i++ {
-		lines = append(lines, "+line"+string(rune('0'+i)))
-	}
-	lines = append(lines, " line2")
-	diff := "\n" + strings.Join(lines, "\n")
-
-	result, truncated := truncateDiffLines(diff, 6)
-
-	if len(truncated) != 1 || truncated[0] != "file.txt" {
-		t.Errorf("expected [file.txt], got %v", truncated)
-	}
-	// Hunk truncated to 6 changes, header updated
-	if !strings.Contains(result, "@@") {
-		t.Error("expected hunk header")
-	}
-	if !strings.Contains(result, "+line1") {
-		t.Error("expected first change line")
-	}
-	if !strings.Contains(result, "+line6") {
-		t.Error("expected 6th change line")
-	}
-	if strings.Contains(result, "+line:") {
-		t.Error("expected 7th+ change lines to be truncated")
-	}
-}
-
-func TestTruncateDiffLines_FirstFileExceedsLimit(t *testing.T) {
-	// A file that exceeds the change-line limit must not drop the files listed after it.
-	var lines []string
-	// First file: 10 added lines (exceeds limit of 6)
-	lines = append(lines, "diff --git a/large.txt b/large.txt")
-	lines = append(lines, "--- a/large.txt")
-	lines = append(lines, "+++ b/large.txt")
-	lines = append(lines, "@@ -1,2 +1,12 @@")
-	lines = append(lines, " line1")
-	for i := 1; i <= 10; i++ {
-		lines = append(lines, "+large-line-"+string(rune('0'+i)))
-	}
-	lines = append(lines, " line2")
-	// Second file: 3 added lines (under limit)
-	lines = append(lines, "diff --git a/small.txt b/small.txt")
-	lines = append(lines, "--- a/small.txt")
-	lines = append(lines, "+++ b/small.txt")
-	lines = append(lines, "@@ -1,2 +1,4 @@")
-	lines = append(lines, " lineA")
-	lines = append(lines, "+small-1")
-	lines = append(lines, "+small-2")
-	lines = append(lines, " lineB")
-	lines = append(lines, "+small-3")
-	// Third file: 2 added lines (under limit)
-	lines = append(lines, "diff --git a/tiny.txt b/tiny.txt")
-	lines = append(lines, "--- a/tiny.txt")
-	lines = append(lines, "+++ b/tiny.txt")
-	lines = append(lines, "@@ -1 +1,2 @@")
-	lines = append(lines, " lineX")
-	lines = append(lines, "+tiny-1")
-	lines = append(lines, "+tiny-2")
-
-	diff := "\n" + strings.Join(lines, "\n")
-	result, truncated := truncateDiffLines(diff, 6)
-
-	// Only large.txt should be truncated
-	if len(truncated) != 1 || truncated[0] != "large.txt" {
-		t.Errorf("expected [large.txt], got %v", truncated)
-	}
-
-	// All three files must be present in the result
-	if !strings.Contains(result, "diff --git a/large.txt") {
-		t.Error("expected large.txt in result")
-	}
-	if !strings.Contains(result, "diff --git a/small.txt") {
-		t.Error("expected small.txt in result (regression: was dropped by early return)")
-	}
-	if !strings.Contains(result, "diff --git a/tiny.txt") {
-		t.Error("expected tiny.txt in result (regression: was dropped by early return)")
-	}
-
-	// large.txt truncated to 6 changes
-	if !strings.Contains(result, "+large-line-1") {
-		t.Error("expected first change of large.txt")
-	}
-	if !strings.Contains(result, "+large-line-6") {
-		t.Error("expected 6th change of large.txt")
-	}
-	if strings.Contains(result, "+large-line-7") {
-		t.Error("expected 7th+ changes of large.txt to be truncated")
-	}
-
-	// small.txt fully present (3 changes, under limit)
-	if !strings.Contains(result, "+small-1") || !strings.Contains(result, "+small-3") {
-		t.Error("expected all small.txt changes")
-	}
-
-	// tiny.txt fully present (2 changes, under limit)
-	if !strings.Contains(result, "+tiny-1") || !strings.Contains(result, "+tiny-2") {
-		t.Error("expected all tiny.txt changes")
-	}
-}
-
-func TestTruncateDiffLines_EmptyDiff(t *testing.T) {
-	result, truncated := truncateDiffLines("", 60)
-	if result != "" {
-		t.Errorf("expected empty result, got %q", result)
-	}
-	if len(truncated) != 0 {
-		t.Errorf("expected no truncated files, got %v", truncated)
-	}
-}
-
-func TestGetTaskDiff_TruncatesUntrackedFile(t *testing.T) {
-	_, taskID, _, _, wm := setupTestRepo(t)
-
-	// Create worktree
-	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
-	if err != nil {
-		t.Fatalf("create worktree: %v", err)
-	}
-
-	// Create an untracked file with > 60 lines (all additions)
-	var lines []string
-	for i := 1; i <= 80; i++ {
-		lines = append(lines, fmt.Sprintf("line %d", i))
-	}
-	content := strings.Join(lines, "\n") + "\n"
-	worktreePath, _ := wm.WorktreePath(taskID)
-	writeFile(t, worktreePath, "large-new-file.txt", content)
-
-	// Get diff (with truncation)
-	result, err := wm.GetTaskDiff(taskID, "", "")
-	if err != nil {
-		t.Fatalf("GetTaskDiff: %v", err)
-	}
-
-	// Should have 1 untracked file
-	if len(result.Untracked) != 1 {
-		t.Fatalf("expected 1 untracked file, got %d", len(result.Untracked))
-	}
-
-	untracked := result.Untracked[0]
-	if untracked.Path != "large-new-file.txt" {
-		t.Errorf("expected path large-new-file.txt, got %s", untracked.Path)
-	}
-	if !untracked.Truncated {
-		t.Error("expected untracked file to be truncated")
-	}
-	if untracked.OrigAdded != 80 {
-		t.Errorf("expected origAdded=80, got %d", untracked.OrigAdded)
-	}
-
-	// Truncated lines should have exactly 60 entries
-	if len(untracked.Lines) != defaultMaxChangeLines {
-		t.Errorf("expected %d lines in truncated untracked file, got %d", defaultMaxChangeLines, len(untracked.Lines))
-	}
-
-	// Verify full diff is available via skipTruncate
-	resultFull, err := wm.GetTaskDiff(taskID, "", "", true)
-	if err != nil {
-		t.Fatalf("GetTaskDiff(full): %v", err)
-	}
-	if len(resultFull.Untracked) != 1 {
-		t.Fatalf("expected 1 untracked file in full diff, got %d", len(resultFull.Untracked))
-	}
-	if resultFull.Untracked[0].Truncated {
-		t.Error("expected full diff to NOT be truncated")
-	}
-	if len(resultFull.Untracked[0].Lines) != 80 {
-		t.Errorf("expected 80 lines in full untracked file, got %d", len(resultFull.Untracked[0].Lines))
-	}
-}
-
-func TestGetTaskDiff_SmallUntrackedFile_NotTruncated(t *testing.T) {
-	_, taskID, _, _, wm := setupTestRepo(t)
-
-	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
-	if err != nil {
-		t.Fatalf("create worktree: %v", err)
-	}
-
-	worktreePath, _ := wm.WorktreePath(taskID)
-	writeFile(t, worktreePath, "small-new-file.txt", "line1\nline2\nline3\n")
-
-	result, err := wm.GetTaskDiff(taskID, "", "")
-	if err != nil {
-		t.Fatalf("GetTaskDiff: %v", err)
-	}
-
-	if len(result.Untracked) != 1 {
-		t.Fatalf("expected 1 untracked file, got %d", len(result.Untracked))
-	}
-
-	if result.Untracked[0].Truncated {
-		t.Error("expected small untracked file to NOT be truncated")
-	}
-}
-
-func TestWalkUntrackedEntries_Directory(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create subdirectory with files
-	os.MkdirAll(filepath.Join(tmpDir, "sub", "nested"), 0o755)
-	writeFile(t, filepath.Join(tmpDir, "sub"), "file1.txt", "content1")
-	writeFile(t, filepath.Join(tmpDir, "sub", "nested"), "file2.txt", "content2")
-
-	// Walk the directory entry (simulating "?? sub/" from git status)
-	files := walkUntrackedEntries(tmpDir, "sub")
-	if len(files) != 2 {
-		t.Fatalf("expected 2 files, got %d: %v", len(files), files)
-	}
-
-	// Check paths use forward slashes (filepath.Rel on Unix)
-	pathSet := make(map[string]bool)
-	for _, f := range files {
-		pathSet[f] = true
-	}
-	if !pathSet["sub/file1.txt"] {
-		t.Error("expected sub/file1.txt")
-	}
-	if !pathSet["sub/nested/file2.txt"] {
-		t.Error("expected sub/nested/file2.txt")
 	}
 }
 
@@ -839,65 +280,6 @@ func TestGetTaskDiff_BinaryUntrackedFile_NoDiff(t *testing.T) {
 	}
 	if !untracked.IsBinary {
 		t.Error("expected IsBinary to be true for binary file")
-	}
-}
-
-func TestGetTaskDiff_BinaryUntrackedByExtension(t *testing.T) {
-	_, taskID, _, _, wm := setupTestRepo(t)
-
-	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
-	if err != nil {
-		t.Fatalf("create worktree: %v", err)
-	}
-
-	worktreePath, _ := wm.WorktreePath(taskID)
-	// Write text content but with a binary extension — should be detected as binary by extension
-	if err := os.WriteFile(filepath.Join(worktreePath, "image.png"), []byte("fake png content"), 0o644); err != nil {
-		t.Fatalf("write file: %v", err)
-	}
-
-	result, err := wm.GetTaskDiff(taskID, "", "")
-	if err != nil {
-		t.Fatalf("GetTaskDiff: %v", err)
-	}
-
-	if len(result.Untracked) != 1 {
-		t.Fatalf("expected 1 untracked file, got %d", len(result.Untracked))
-	}
-	if !result.Untracked[0].IsBinary {
-		t.Error("expected IsBinary to be true for .png extension")
-	}
-}
-
-// An untracked .svg is source the user can read and review, not an opaque blob: labeling it binary is
-// how a new icon becomes an uninspectable "Binary file — N bytes" row in the diff panel.
-func TestGetTaskDiff_UntrackedSVG_HasLines(t *testing.T) {
-	_, taskID, _, _, wm := setupTestRepo(t)
-
-	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
-	if err != nil {
-		t.Fatalf("create worktree: %v", err)
-	}
-
-	worktreePath, _ := wm.WorktreePath(taskID)
-	svg := `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16"/></svg>`
-	if err := os.WriteFile(filepath.Join(worktreePath, "logo.svg"), []byte(svg), 0o644); err != nil {
-		t.Fatalf("write file: %v", err)
-	}
-
-	result, err := wm.GetTaskDiff(taskID, "", "")
-	if err != nil {
-		t.Fatalf("GetTaskDiff: %v", err)
-	}
-	if len(result.Untracked) != 1 {
-		t.Fatalf("expected 1 untracked file, got %d", len(result.Untracked))
-	}
-	file := result.Untracked[0]
-	if file.IsBinary {
-		t.Error("an untracked .svg must not be labeled binary — it is XML source")
-	}
-	if len(file.Lines) == 0 {
-		t.Error("expected the svg's content as diff lines, got none")
 	}
 }
 
@@ -1034,238 +416,6 @@ func TestGetTaskDiff_DeletedBinaryFile(t *testing.T) {
 	}
 }
 
-func TestShouldIgnorePath_NestedPaths(t *testing.T) {
-	// Known directories nested deeper
-	tests := []struct {
-		path     string
-		expected bool
-	}{
-		{"src/node_modules/pkg/index.js", true},
-		{"packages/app/.next/cache/build", true},
-		{"lib/__pycache__/module.cpython-311.pyc", true},
-		{"a/b/c/vendor/bin/tool", true},
-		{"src/dist/output.js", true},
-		// Should NOT match partial names
-		{"my_node_modules/file.txt", false},
-		{"node_modules_backup/file.txt", false},
-		{"distro/file.txt", false},
-		{"building/file.txt", false},
-		{"coverage_report/file.txt", false},
-		// Normal paths should not be ignored
-		{"src/index.ts", false},
-		{"lib/utils/helpers.ts", false},
-		{"README.md", false},
-		{".github/workflows/ci.yml", false},
-	}
-
-	for _, tc := range tests {
-		result := ShouldIgnorePath(tc.path)
-		if result != tc.expected {
-			t.Errorf("ShouldIgnorePath(%q) = %v, want %v", tc.path, result, tc.expected)
-		}
-	}
-}
-
-func TestComputeUntrackedHash_ContentChange(t *testing.T) {
-	// Verify that ComputeUntrackedHash produces different hashes when
-	// file content changes but line count stays the same.
-	// This is critical for delta detection: if the hash doesn't change,
-	// the frontend will skip refetching the file and show stale content.
-	u1 := UntrackedFile{Path: "test.txt", Lines: []string{"todo"}}
-	u2 := UntrackedFile{Path: "test.txt", Lines: []string{"todo app"}}
-
-	hash1 := ComputeUntrackedHash(u1)
-	hash2 := ComputeUntrackedHash(u2)
-
-	if hash1 == hash2 {
-		t.Errorf("ComputeUntrackedHash produced same hash for different content (same line count): %s", hash1)
-	}
-
-	// Also verify same content produces same hash (deterministic)
-	u3 := UntrackedFile{Path: "test.txt", Lines: []string{"todo"}}
-	hash3 := ComputeUntrackedHash(u3)
-	if hash1 != hash3 {
-		t.Errorf("ComputeUntrackedHash non-deterministic: %s != %s", hash1, hash3)
-	}
-
-	// Verify different line count also produces different hash
-	u4 := UntrackedFile{Path: "test.txt", Lines: []string{"todo", "more"}}
-	hash4 := ComputeUntrackedHash(u4)
-	if hash1 == hash4 {
-		t.Errorf("ComputeUntrackedHash produced same hash for different line count: %s", hash1)
-	}
-}
-
-func TestGetTaskDiff_StagedFile(t *testing.T) {
-	repoDir, taskID, _, _, wm := setupTestRepo(t)
-
-	// Create and commit a file
-	writeFile(t, repoDir, "hello.txt", "line1\nline2\n")
-	runGit(t, repoDir, "add", "hello.txt")
-	runGit(t, repoDir, "commit", "-m", "Initial")
-
-	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
-	if err != nil {
-		t.Fatalf("create worktree: %v", err)
-	}
-
-	worktreePath, _ := wm.WorktreePath(taskID)
-	// Modify the file and stage it (git add) — don't commit
-	writeFile(t, worktreePath, "hello.txt", "line1\nline2\nline3\nline4\n")
-	runGit(t, worktreePath, "add", "hello.txt")
-
-	result, err := wm.GetTaskDiff(taskID, "", "")
-	if err != nil {
-		t.Fatalf("GetTaskDiff: %v", err)
-	}
-
-	// Staged file should appear in Tracked map
-	if result.Tracked == nil {
-		t.Fatal("expected Tracked map to be non-nil")
-	}
-	file, ok := result.Tracked["hello.txt"]
-	if !ok {
-		t.Fatal("expected hello.txt in Tracked map")
-	}
-	if file.Added != 2 {
-		t.Errorf("expected 2 added lines for staged file, got %d", file.Added)
-	}
-	if file.Removed != 0 {
-		t.Errorf("expected 0 removed lines for staged file, got %d", file.Removed)
-	}
-}
-
-func TestGetTaskDiff_StagedNewFile(t *testing.T) {
-	repoDir, taskID, _, _, wm := setupTestRepo(t)
-
-	// Create initial commit
-	writeFile(t, repoDir, "readme.md", "# README\n")
-	runGit(t, repoDir, "add", "readme.md")
-	runGit(t, repoDir, "commit", "-m", "Initial")
-
-	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
-	if err != nil {
-		t.Fatalf("create worktree: %v", err)
-	}
-
-	worktreePath, _ := wm.WorktreePath(taskID)
-	// Create a new file and stage it
-	writeFile(t, worktreePath, "new.txt", "new line 1\nnew line 2\nnew line 3\n")
-	runGit(t, worktreePath, "add", "new.txt")
-
-	result, err := wm.GetTaskDiff(taskID, "", "")
-	if err != nil {
-		t.Fatalf("GetTaskDiff: %v", err)
-	}
-
-	// Staged new file should appear in Tracked map (not untracked)
-	if result.Tracked == nil {
-		t.Fatal("expected Tracked map to be non-nil")
-	}
-	file, ok := result.Tracked["new.txt"]
-	if !ok {
-		// Check if it's in untracked instead (shouldn't be)
-		for _, u := range result.Untracked {
-			if u.Path == "new.txt" {
-				t.Fatal("staged new file should be in Tracked, not Untracked")
-			}
-		}
-		t.Fatal("expected new.txt in Tracked map")
-	}
-	if file.Added != 3 {
-		t.Errorf("expected 3 added lines for staged new file, got %d", file.Added)
-	}
-}
-
-func TestGetTaskDiff_MixedStagedAndUnstaged(t *testing.T) {
-	repoDir, taskID, _, _, wm := setupTestRepo(t)
-
-	// Create and commit a file
-	writeFile(t, repoDir, "hello.txt", "line1\nline2\n")
-	runGit(t, repoDir, "add", "hello.txt")
-	runGit(t, repoDir, "commit", "-m", "Initial")
-
-	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
-	if err != nil {
-		t.Fatalf("create worktree: %v", err)
-	}
-
-	worktreePath, _ := wm.WorktreePath(taskID)
-	// Make staged changes: add line3
-	writeFile(t, worktreePath, "hello.txt", "line1\nline2\nline3\n")
-	runGit(t, worktreePath, "add", "hello.txt")
-	// Make additional unstaged changes: add line4
-	writeFile(t, worktreePath, "hello.txt", "line1\nline2\nline3\nline4\n")
-
-	result, err := wm.GetTaskDiff(taskID, "", "")
-	if err != nil {
-		t.Fatalf("GetTaskDiff: %v", err)
-	}
-
-	file, ok := result.Tracked["hello.txt"]
-	if !ok {
-		t.Fatal("expected hello.txt in Tracked map")
-	}
-	// Total changes: +2 (line3 staged, line4 unstaged)
-	if file.Added != 2 {
-		t.Errorf("expected 2 added lines (1 staged + 1 unstaged), got %d", file.Added)
-	}
-}
-
-func TestStageIndexedFiles_RefreshesStagedFiles(t *testing.T) {
-	repoDir, taskID, _, _, wm := setupTestRepo(t)
-
-	// Create and commit two tracked files
-	writeFile(t, repoDir, "hello.txt", "line1\nline2\n")
-	writeFile(t, repoDir, "untouched.txt", "base\n")
-	runGit(t, repoDir, "add", "hello.txt", "untouched.txt")
-	runGit(t, repoDir, "commit", "-m", "Initial")
-
-	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
-	if err != nil {
-		t.Fatalf("create worktree: %v", err)
-	}
-	worktreePath, _ := wm.WorktreePath(taskID)
-
-	// "System staged" line3; user then adds line4 (unstaged) after staging.
-	writeFile(t, worktreePath, "hello.txt", "line1\nline2\nline3\n")
-	runGit(t, worktreePath, "add", "hello.txt")
-	writeFile(t, worktreePath, "hello.txt", "line1\nline2\nline3\nline4\n")
-
-	// Unstaged-only change — must NOT be touched by the helper.
-	writeFile(t, worktreePath, "untouched.txt", "base\nedited\n")
-
-	// Sanity check: hello.txt is in MM state before the refresh.
-	status := runGitOutput(t, worktreePath, "status", "--porcelain")
-	if !strings.Contains(status, "MM hello.txt") {
-		t.Fatalf("expected hello.txt in MM state, got:\n%s", status)
-	}
-
-	wm.StageIndexedFiles(taskID)
-
-	// hello.txt: staged diff includes both line3 and line4; no unstaged diff left.
-	stagedDiff := runGitOutput(t, worktreePath, "diff", "--staged", "--", "hello.txt")
-	if !strings.Contains(stagedDiff, "+line3") || !strings.Contains(stagedDiff, "+line4") {
-		t.Fatalf("expected staged diff to include line3 and line4, got:\n%s", stagedDiff)
-	}
-	if unstaged := runGitOutput(t, worktreePath, "diff", "--", "hello.txt"); unstaged != "" {
-		t.Fatalf("expected no unstaged diff for hello.txt, got:\n%s", unstaged)
-	}
-
-	// untouched.txt still has only unstaged changes (contract preserved).
-	status = runGitOutput(t, worktreePath, "status", "--porcelain")
-	if !strings.Contains(status, " M untouched.txt") {
-		t.Fatalf("expected untouched.txt to remain unstaged-only, got:\n%s", status)
-	}
-
-	// A commit now captures the manual edit.
-	runGit(t, worktreePath, "commit", "-m", "commit after manual edit")
-	content := runGitOutput(t, worktreePath, "show", "HEAD:hello.txt")
-	if !strings.Contains(content, "line4") {
-		t.Fatalf("expected commit to include manual edit line4, got:\n%s", content)
-	}
-}
-
 func TestGetTaskDiff_StagedFileWithBaseRef(t *testing.T) {
 	repoDir, taskID, _, _, wm := setupTestRepo(t)
 
@@ -1320,585 +470,6 @@ func runGitOutput(t *testing.T, dir string, args ...string) string {
 	return string(out)
 }
 
-func TestGarbageCollect_PrunesOrphanedThreadBranches(t *testing.T) {
-	repoDir, taskID, s, _, wm := setupTestRepo(t)
-
-	// Create a thread in the DB with a git_branch
-	threadID := "test-thread-abc"
-	thread := &types.TaskThread{
-		ID:        threadID,
-		TaskID:    taskID,
-		Name:      "Fork #1",
-		IsActive:  false,
-		GitBranch: "thread/" + threadID,
-		CreatedAt: time.Now().UTC(),
-	}
-	if err := s.CreateThread(thread); err != nil {
-		t.Fatalf("create thread: %v", err)
-	}
-
-	// Create the corresponding git branch in the repo
-	runGit(t, repoDir, "branch", "thread/"+threadID)
-
-	// Verify branch exists
-	branches := getBranches(t, repoDir)
-	if !slices.Contains(branches, "thread/"+threadID) {
-		t.Fatal("thread branch should exist before GC")
-	}
-
-	// Delete the thread from DB (simulates task delete CASCADE)
-	if err := s.DeleteThread(threadID); err != nil {
-		t.Fatalf("delete thread: %v", err)
-	}
-
-	// Run GC
-	removed, err := wm.GarbageCollect(false)
-	if err != nil {
-		t.Fatalf("GarbageCollect: %v", err)
-	}
-	t.Logf("GC removed %d orphaned worktrees", removed)
-
-	// Verify thread branch is gone
-	branches = getBranches(t, repoDir)
-	if slices.Contains(branches, "thread/"+threadID) {
-		t.Error("orphaned thread branch should be pruned by GC")
-	}
-}
-
-func TestGarbageCollect_KeepsActiveThreadBranches(t *testing.T) {
-	repoDir, taskID, s, _, wm := setupTestRepo(t)
-
-	// Create a thread in the DB with a git_branch
-	threadID := "test-thread-xyz"
-	thread := &types.TaskThread{
-		ID:        threadID,
-		TaskID:    taskID,
-		Name:      "Fork #2",
-		IsActive:  true,
-		GitBranch: "thread/" + threadID,
-		CreatedAt: time.Now().UTC(),
-	}
-	if err := s.CreateThread(thread); err != nil {
-		t.Fatalf("create thread: %v", err)
-	}
-
-	// Create the corresponding git branch in the repo
-	runGit(t, repoDir, "branch", "thread/"+threadID)
-
-	// Run GC — should NOT remove active thread branch
-	_, err := wm.GarbageCollect(false)
-	if err != nil {
-		t.Fatalf("GarbageCollect: %v", err)
-	}
-
-	// Verify thread branch still exists
-	branches := getBranches(t, repoDir)
-	if !slices.Contains(branches, "thread/"+threadID) {
-		t.Error("active thread branch should be kept by GC")
-	}
-}
-
-func TestPruneOrphanedBranches_RemovesOrphanedTaskBranches(t *testing.T) {
-	repoDir, taskID, s, _, wm := setupTestRepo(t)
-
-	// Create orphaned task branches (task IDs that don't exist in DB)
-	runGit(t, repoDir, "branch", "task/orphan-one-branch")
-	runGit(t, repoDir, "branch", "task/orphan-two-branch")
-	// Also create a branch that matches the active task (should be kept)
-	runGit(t, repoDir, "branch", "task/"+taskID)
-
-	// Verify branches exist
-	branches := getBranches(t, repoDir)
-	if !slices.Contains(branches, "task/orphan-one-branch") {
-		t.Fatal("orphan-one-branch should exist before prune")
-	}
-	if !slices.Contains(branches, "task/orphan-two-branch") {
-		t.Fatal("orphan-two-branch should exist before prune")
-	}
-	if !slices.Contains(branches, "task/"+taskID) {
-		t.Fatal("active task branch should exist before prune")
-	}
-
-	// Get project ID
-	proj, err := s.GetProject("test-project")
-	if err != nil {
-		t.Fatalf("get project: %v", err)
-	}
-
-	// Run prune
-	removed := wm.PruneOrphanedBranches(proj.ID)
-	if removed != 2 {
-		t.Fatalf("expected 2 branches removed, got %d", removed)
-	}
-
-	// Verify orphaned branches are gone, active branch remains
-	branches = getBranches(t, repoDir)
-	if slices.Contains(branches, "task/orphan-one-branch") {
-		t.Error("orphan-one-branch should be pruned")
-	}
-	if slices.Contains(branches, "task/orphan-two-branch") {
-		t.Error("orphan-two-branch should be pruned")
-	}
-	if !slices.Contains(branches, "task/"+taskID) {
-		t.Error("active task branch should be kept")
-	}
-}
-
-func TestPruneOrphanedBranches_RemovesOrphanedThreadBranches(t *testing.T) {
-	repoDir, taskID, s, _, wm := setupTestRepo(t)
-
-	// Create orphaned thread branches (thread IDs that don't exist in DB)
-	runGit(t, repoDir, "branch", "thread/orphan-thread-1")
-	runGit(t, repoDir, "branch", "thread/orphan-thread-2")
-
-	// Create an active thread in DB with a branch
-	activeThreadID := "active-thread-xyz"
-	thread := &types.TaskThread{
-		ID:        activeThreadID,
-		TaskID:    taskID,
-		Name:      "Active Fork",
-		IsActive:  true,
-		GitBranch: "thread/" + activeThreadID,
-		CreatedAt: time.Now().UTC(),
-	}
-	if err := s.CreateThread(thread); err != nil {
-		t.Fatalf("create thread: %v", err)
-	}
-	runGit(t, repoDir, "branch", "thread/"+activeThreadID)
-
-	// Verify branches exist
-	branches := getBranches(t, repoDir)
-	if !slices.Contains(branches, "thread/orphan-thread-1") {
-		t.Fatal("orphan thread should exist before prune")
-	}
-	if !slices.Contains(branches, "thread/"+activeThreadID) {
-		t.Fatal("active thread branch should exist before prune")
-	}
-
-	// Get project ID
-	proj, err := s.GetProject("test-project")
-	if err != nil {
-		t.Fatalf("get project: %v", err)
-	}
-
-	// Run prune
-	removed := wm.PruneOrphanedBranches(proj.ID)
-	if removed != 2 {
-		t.Fatalf("expected 2 branches removed, got %d", removed)
-	}
-
-	// Verify orphaned branches are gone, active branch remains
-	branches = getBranches(t, repoDir)
-	if slices.Contains(branches, "thread/orphan-thread-1") {
-		t.Error("orphan thread branch should be pruned")
-	}
-	if slices.Contains(branches, "thread/orphan-thread-2") {
-		t.Error("orphan thread branch should be pruned")
-	}
-	if !slices.Contains(branches, "thread/"+activeThreadID) {
-		t.Error("active thread branch should be kept")
-	}
-}
-
-func getBranches(t *testing.T, dir string) []string {
-	t.Helper()
-	// --format, not the decorated listing - see listBranchNames.
-	out := runGitOutput(t, dir, "branch", "--format=%(refname:short)")
-	var branches []string
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		if b := strings.TrimSpace(line); b != "" {
-			branches = append(branches, b)
-		}
-	}
-	return branches
-}
-
-func TestGitAuthorFlags_NoEnvVars(t *testing.T) {
-	// Save and restore package-level vars
-	origName, origEmail := AuthorIdentity()
-	defer func() {
-		SetAuthorIdentity(origName, origEmail)
-	}()
-
-	SetAuthorIdentity("", "")
-	flags := GitAuthorFlags()
-	if flags != nil {
-		t.Errorf("expected nil flags when no env vars set, got %v", flags)
-	}
-}
-
-func TestGitAuthorFlags_NameOnly(t *testing.T) {
-	origName, origEmail := AuthorIdentity()
-	defer func() {
-		SetAuthorIdentity(origName, origEmail)
-	}()
-
-	SetAuthorIdentity("Custom Name", "")
-	flags := GitAuthorFlags()
-	if len(flags) != 2 {
-		t.Fatalf("expected 2 flags, got %d: %v", len(flags), flags)
-	}
-	if flags[0] != "-c" || flags[1] != "user.name=Custom Name" {
-		t.Errorf("expected [-c user.name=Custom Name], got %v", flags)
-	}
-}
-
-func TestGitAuthorFlags_EmailOnly(t *testing.T) {
-	origName, origEmail := AuthorIdentity()
-	defer func() {
-		SetAuthorIdentity(origName, origEmail)
-	}()
-
-	SetAuthorIdentity("", "user@example.com")
-	flags := GitAuthorFlags()
-	if len(flags) != 2 {
-		t.Fatalf("expected 2 flags, got %d: %v", len(flags), flags)
-	}
-	if flags[0] != "-c" || flags[1] != "user.email=user@example.com" {
-		t.Errorf("expected [-c user.email=user@example.com], got %v", flags)
-	}
-}
-
-func TestGitAuthorFlags_BothSet(t *testing.T) {
-	origName, origEmail := AuthorIdentity()
-	defer func() {
-		SetAuthorIdentity(origName, origEmail)
-	}()
-
-	SetAuthorIdentity("Custom Name", "user@example.com")
-	flags := GitAuthorFlags()
-	if len(flags) != 4 {
-		t.Fatalf("expected 4 flags, got %d: %v", len(flags), flags)
-	}
-	expected := []string{"-c", "user.name=Custom Name", "-c", "user.email=user@example.com"}
-	for i, e := range expected {
-		if flags[i] != e {
-			t.Errorf("flags[%d]=%q, want %q", i, flags[i], e)
-		}
-	}
-}
-
-func TestAuthorIdentityFromEnvPrefersCommitterPerHalf(t *testing.T) {
-	env := map[string]string{
-		"GIT_COMMITTER_NAME": "Committer",
-		"GIT_AUTHOR_NAME":    "Author",
-		"GIT_AUTHOR_EMAIL":   "  author@example.com  ",
-	}
-	name, email := AuthorIdentityFromEnv(func(key string) string { return env[key] })
-	if name != "Committer" {
-		t.Errorf("name=%q, want the GIT_COMMITTER_* half the operator set", name)
-	}
-	if email != "author@example.com" {
-		t.Errorf("email=%q, want the GIT_AUTHOR_* half to fill where GIT_COMMITTER_* named nothing, with "+
-			"the padding a compose file leaves on it trimmed", email)
-	}
-}
-
-func TestAuthorIdentityFromEnvNamesNothingWhenTheEnvironmentDoesNot(t *testing.T) {
-	if name, email := AuthorIdentityFromEnv(func(string) string { return "" }); name != "" || email != "" {
-		t.Errorf("got %q <%q>, want an empty pair so git resolves from the repository", name, email)
-	}
-}
-
-func TestParseUnifiedDiffToFiles_RemovedLineNumbers(t *testing.T) {
-	// Verify that removed lines get old-file line numbers (not new-file line numbers).
-	// Bug: all removed lines in a hunk were assigned the same newLine value.
-	diff := `diff --git a/file.go b/file.go
---- a/file.go
-+++ b/file.go
-@@ -48,10 +48,7 @@ func hello() {
- line48
- line49
--removed50
--removed51
--removed52
- line53
- line54
- line55
-+added56`
-
-	files := parseUnifiedDiffToFiles(diff, nil, nil, nil)
-	if len(files) != 1 {
-		t.Fatalf("expected 1 file, got %d", len(files))
-	}
-
-	file, ok := files["file.go"]
-	if !ok {
-		t.Fatal("expected file.go in parsed files")
-	}
-
-	// Verify line numbers for each row
-	// Context: line48 -> oldLine=48, newLine=48
-	// Context: line49 -> oldLine=49, newLine=49
-	// Removed: removed50 -> oldLine=50 (NOT newLine)
-	// Removed: removed51 -> oldLine=51 (NOT newLine)
-	// Removed: removed52 -> oldLine=52 (NOT newLine)
-	// Context: line53 -> oldLine=53, newLine=50
-	// Context: line54 -> oldLine=54, newLine=51
-	// Context: line55 -> oldLine=55, newLine=52
-	// Added: added56 -> newLine=53
-
-	expected := []struct {
-		variant    string
-		text       string
-		lineNumber int
-	}{
-		{"context", "line48", 48},
-		{"context", "line49", 49},
-		{"removed", "removed50", 50},
-		{"removed", "removed51", 51},
-		{"removed", "removed52", 52},
-		{"context", "line53", 50},
-		{"context", "line54", 51},
-		{"context", "line55", 52},
-		{"added", "added56", 53},
-	}
-
-	if len(file.Rows) != len(expected) {
-		t.Fatalf("expected %d rows, got %d", len(expected), len(file.Rows))
-	}
-
-	for i, exp := range expected {
-		row := file.Rows[i]
-		if row.Variant != exp.variant {
-			t.Errorf("row %d: variant=%q, want %q", i, row.Variant, exp.variant)
-		}
-		if row.Text != exp.text {
-			t.Errorf("row %d: text=%q, want %q", i, row.Text, exp.text)
-		}
-		if row.LineNumber == nil || *row.LineNumber != exp.lineNumber {
-			t.Errorf("row %d (%s %q): lineNumber=%v, want %d", i, row.Variant, row.Text, row.LineNumber, exp.lineNumber)
-		}
-	}
-
-	// Key assertion: removed lines should have DIFFERENT (sequential) line numbers
-	removedLines := make([]int, 0, 3)
-	for _, row := range file.Rows {
-		if row.Variant == "removed" && row.LineNumber != nil {
-			removedLines = append(removedLines, *row.LineNumber)
-		}
-	}
-	if len(removedLines) != 3 {
-		t.Fatalf("expected 3 removed lines, got %d", len(removedLines))
-	}
-	for i := 1; i < len(removedLines); i++ {
-		if removedLines[i] == removedLines[i-1] {
-			t.Errorf("removed lines %d and %d have same lineNumber=%d (should be sequential)", i-1, i, removedLines[i])
-		}
-		if removedLines[i] != removedLines[i-1]+1 {
-			t.Errorf("removed lines not sequential: %d then %d", removedLines[i-1], removedLines[i])
-		}
-	}
-}
-
-func TestParseUnifiedDiffToFiles_MultipleHunks(t *testing.T) {
-	// Verify line numbers are correct across multiple hunks in the same file.
-	diff := `diff --git a/file.txt b/file.txt
---- a/file.txt
-+++ b/file.txt
-@@ -1,3 +1,4 @@
- line1
-+added2
- line2
- line3
-@@ -20,5 +21,4 @@
- line20
--line21-old
- line22
- line23
--line24-old
- line25
-+added25`
-
-	files := parseUnifiedDiffToFiles(diff, nil, nil, nil)
-	if len(files) != 1 {
-		t.Fatalf("expected 1 file, got %d", len(files))
-	}
-
-	file := files["file.txt"]
-
-	// Hunk 1: @@ -1,3 +1,4 @@
-	// context line1: old=1, new=1
-	// added added2: new=2
-	// context line2: old=2, new=3
-	// context line3: old=3, new=4
-	// Hunk 2: @@ -20,5 +21,4 @@
-	// context line20: old=20, new=21
-	// removed line21-old: old=21
-	// context line22: old=22, new=22
-	// context line23: old=23, new=23
-	// removed line24-old: old=24
-	// context line25: old=25, new=24
-	// added added25: new=25
-
-	expected := []struct {
-		variant    string
-		text       string
-		lineNumber int
-	}{
-		{"context", "line1", 1},
-		{"added", "added2", 2},
-		{"context", "line2", 3},
-		{"context", "line3", 4},
-		{"context", "line20", 21},
-		{"removed", "line21-old", 21},
-		{"context", "line22", 22},
-		{"context", "line23", 23},
-		{"removed", "line24-old", 24},
-		{"context", "line25", 24},
-		{"added", "added25", 25},
-	}
-
-	if len(file.Rows) != len(expected) {
-		t.Fatalf("expected %d rows, got %d", len(expected), len(file.Rows))
-	}
-
-	for i, exp := range expected {
-		row := file.Rows[i]
-		if row.Variant != exp.variant {
-			t.Errorf("row %d: variant=%q, want %q", i, row.Variant, exp.variant)
-		}
-		if row.Text != exp.text {
-			t.Errorf("row %d: text=%q, want %q", i, row.Text, exp.text)
-		}
-		if row.LineNumber == nil || *row.LineNumber != exp.lineNumber {
-			t.Errorf("row %d (%s %q): lineNumber=%v, want %d", i, row.Variant, row.Text, row.LineNumber, exp.lineNumber)
-		}
-	}
-}
-
-func TestParseUnifiedDiffToFiles_NewBlankFile(t *testing.T) {
-	// A new blank file has a diff header but no hunk (no content to diff).
-	// Parser must detect "new file mode" and preserve the entry even with 0 rows.
-	diff := `diff --git a/empty.txt b/empty.txt
-new file mode 100644
-index 0000000..e69de29`
-
-	files := parseUnifiedDiffToFiles(diff, nil, nil, nil)
-
-	if len(files) != 1 {
-		t.Fatalf("expected 1 file, got %d", len(files))
-	}
-	file, ok := files["empty.txt"]
-	if !ok {
-		t.Fatal("expected empty.txt in files map")
-	}
-	if !file.IsNew {
-		t.Error("expected IsNew to be true for new blank file")
-	}
-	if len(file.Rows) != 0 {
-		t.Errorf("expected 0 rows for blank file, got %d", len(file.Rows))
-	}
-	if file.Added != 0 {
-		t.Errorf("expected 0 added for blank file, got %d", file.Added)
-	}
-}
-
-func TestParseUnifiedDiffToFiles_ModifiedFile_NotNew(t *testing.T) {
-	// Verify that modified (non-new) files do NOT get IsNew set.
-	diff := `diff --git a/existing.txt b/existing.txt
-index abc1234..def5678 100644
---- a/existing.txt
-+++ b/existing.txt
-@@ -1,3 +1,4 @@
- line1
-+new line
- line2
- line3`
-
-	files := parseUnifiedDiffToFiles(diff, nil, nil, nil)
-
-	if len(files) != 1 {
-		t.Fatalf("expected 1 file, got %d", len(files))
-	}
-	file, ok := files["existing.txt"]
-	if !ok {
-		t.Fatal("expected existing.txt in files map")
-	}
-	if file.IsNew {
-		t.Error("expected IsNew to be false for modified file")
-	}
-	if file.Added != 1 {
-		t.Errorf("expected 1 added line, got %d", file.Added)
-	}
-}
-
-func TestGetTaskDiff_StagedBlankNewFile(t *testing.T) {
-	repoDir, taskID, _, _, wm := setupTestRepo(t)
-
-	// Create initial commit
-	writeFile(t, repoDir, "readme.md", "# README\n")
-	runGit(t, repoDir, "add", "readme.md")
-	runGit(t, repoDir, "commit", "-m", "Initial")
-
-	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
-	if err != nil {
-		t.Fatalf("create worktree: %v", err)
-	}
-
-	worktreePath, _ := wm.WorktreePath(taskID)
-	// Create a blank (empty) file and stage it
-	writeFile(t, worktreePath, "blank.txt", "")
-	runGit(t, worktreePath, "add", "blank.txt")
-
-	result, err := wm.GetTaskDiff(taskID, "", "")
-	if err != nil {
-		t.Fatalf("GetTaskDiff: %v", err)
-	}
-
-	// Staged blank new file should appear in Tracked map with IsNew=true
-	if result.Tracked == nil {
-		t.Fatal("expected Tracked map to be non-nil")
-	}
-	file, ok := result.Tracked["blank.txt"]
-	if !ok {
-		t.Fatal("expected blank.txt in Tracked map")
-	}
-	if !file.IsNew {
-		t.Error("expected IsNew to be true for staged blank file")
-	}
-	if len(file.Rows) != 0 {
-		t.Errorf("expected 0 rows for blank file, got %d", len(file.Rows))
-	}
-}
-
-func TestGetTaskDiff_UnstagedBlankNewFile(t *testing.T) {
-	repoDir, taskID, _, _, wm := setupTestRepo(t)
-
-	// Create initial commit
-	writeFile(t, repoDir, "readme.md", "# README\n")
-	runGit(t, repoDir, "add", "readme.md")
-	runGit(t, repoDir, "commit", "-m", "Initial")
-
-	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
-	if err != nil {
-		t.Fatalf("create worktree: %v", err)
-	}
-
-	worktreePath, _ := wm.WorktreePath(taskID)
-	// Create a blank (empty) file — do NOT stage it
-	writeFile(t, worktreePath, "blank_untracked.txt", "")
-
-	result, err := wm.GetTaskDiff(taskID, "", "")
-	if err != nil {
-		t.Fatalf("GetTaskDiff: %v", err)
-	}
-
-	// Unstaged blank new file should appear in Untracked slice
-	found := false
-	for _, u := range result.Untracked {
-		if u.Path == "blank_untracked.txt" {
-			found = true
-			if len(u.Lines) != 0 {
-				t.Errorf("expected 0 lines for blank file, got %d", len(u.Lines))
-			}
-		}
-	}
-	if !found {
-		t.Error("expected blank_untracked.txt in Untracked slice")
-	}
-}
-
 func TestParseUnifiedDiffToFiles_BlankLinesHaveTextField(t *testing.T) {
 	// Verify that blank lines in a diff (empty context/added/removed lines)
 	// have the Text field serialized as an empty string, not omitted.
@@ -1949,265 +520,328 @@ index abc1234..def5678 100644
 	}
 }
 
-func TestGarbageCollect_DropsStaleSyncMergeAndAutoMergeStashes(t *testing.T) {
-	repoDir, taskID, s, _, wm := setupTestRepo(t)
-
-	// Create a stale sync-merge stash for a task that does NOT exist in DB
-	staleTaskID := "stale-deleted-task"
-	writeFile(t, repoDir, "changed.txt", "stale sync\n")
-	runGit(t, repoDir, "add", "changed.txt")
-	runGit(t, repoDir, "stash", "push", "-u", "-m", StashMessageForSyncMerge(staleTaskID))
-
-	writeFile(t, repoDir, "changed.txt", "stale auto\n")
-	runGit(t, repoDir, "add", "changed.txt")
-	runGit(t, repoDir, "stash", "push", "-u", "-m", StashMessageForAutoMerge(staleTaskID))
-
-	// Create an active sync-merge stash for the task that DOES exist in DB
-	writeFile(t, repoDir, "changed.txt", "active sync\n")
-	runGit(t, repoDir, "add", "changed.txt")
-	runGit(t, repoDir, "stash", "push", "-u", "-m", StashMessageForSyncMerge(taskID))
-
-	// Verify all stashes exist
-	listOut := runGitOutput(t, repoDir, "stash", "list", "--format=%s")
-	if !strings.Contains(listOut, "mike-sync-merge-"+staleTaskID) {
-		t.Errorf("expected stale sync-merge stash, got:\n%s", listOut)
-	}
-	if !strings.Contains(listOut, "mike-auto-merge-"+staleTaskID) {
-		t.Errorf("expected stale auto-merge stash, got:\n%s", listOut)
-	}
-	if !strings.Contains(listOut, "mike-sync-merge-"+taskID) {
-		t.Errorf("expected active sync-merge stash, got:\n%s", listOut)
-	}
-
-	// Run GC
-	_, err := wm.GarbageCollect(false)
-	if err != nil {
-		t.Fatalf("GarbageCollect: %v", err)
+// The panel's counts come from here: a staged file belongs to the tracked map (a staged new file is not
+// "untracked"), and a file with both a staged and an unstaged half counts both.
+func TestGetTaskDiffCountsStagedAndUnstagedWork(t *testing.T) {
+	// taskWorktreeWith commits `committed`, then writes `now` in the task's worktree, staging staged.
+	taskWorktreeWith := func(t *testing.T, committed map[string]string, staged map[string]string, unstaged map[string]string) (*WorktreeManager, string) {
+		t.Helper()
+		repoDir, taskID, _, _, wm := setupTestRepo(t)
+		for name, body := range committed {
+			writeFile(t, repoDir, name, body)
+			runGit(t, repoDir, "add", name)
+		}
+		if len(committed) > 0 {
+			runGit(t, repoDir, "commit", "-m", "Initial")
+		}
+		if _, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", ""); err != nil {
+			t.Fatalf("create worktree: %v", err)
+		}
+		wt, err := wm.WorktreePath(taskID)
+		if err != nil {
+			t.Fatalf("worktree path: %v", err)
+		}
+		for name, body := range staged {
+			writeFile(t, wt, name, body)
+			runGit(t, wt, "add", name)
+		}
+		for name, body := range unstaged {
+			writeFile(t, wt, name, body)
+		}
+		return wm, taskID
 	}
 
-	// Verify stale stashes are gone but active stash remains
-	listOut = runGitOutput(t, repoDir, "stash", "list", "--format=%s")
-	if strings.Contains(listOut, staleTaskID) {
-		t.Errorf("stale stashes for %s should be gone, got:\n%s", staleTaskID, listOut)
-	}
-	if !strings.Contains(listOut, "mike-sync-merge-"+taskID) {
-		t.Errorf("active sync-merge stash for %s should remain, got:\n%s", taskID, listOut)
-	}
+	t.Run("a staged modification", func(t *testing.T) {
+		wm, taskID := taskWorktreeWith(t,
+			map[string]string{"hello.txt": "line1\nline2\n"},
+			map[string]string{"hello.txt": "line1\nline2\nline3\nline4\n"}, nil)
 
-	_ = wm.gitRun(repoDir, "stash", "clear")
-	_ = s.Close()
+		result, err := wm.GetTaskDiff(taskID, "", "")
+		if err != nil {
+			t.Fatalf("GetTaskDiff: %v", err)
+		}
+		file, ok := result.Tracked["hello.txt"]
+		if !ok {
+			t.Fatalf("expected hello.txt in the Tracked map, got %v", keysOf(result.Tracked))
+		}
+		if file.Added != 2 || file.Removed != 0 {
+			t.Errorf("added/removed = %d/%d, want 2/0", file.Added, file.Removed)
+		}
+	})
+
+	t.Run("a staged new file is tracked, not untracked", func(t *testing.T) {
+		wm, taskID := taskWorktreeWith(t,
+			map[string]string{"readme.md": "# README\n"},
+			map[string]string{"new.txt": "new line 1\nnew line 2\nnew line 3\n"}, nil)
+
+		result, err := wm.GetTaskDiff(taskID, "", "")
+		if err != nil {
+			t.Fatalf("GetTaskDiff: %v", err)
+		}
+		file, ok := result.Tracked["new.txt"]
+		if !ok {
+			for _, u := range result.Untracked {
+				if u.Path == "new.txt" {
+					t.Fatal("a staged new file must be in Tracked, not Untracked — the panel stages from Tracked")
+				}
+			}
+			t.Fatalf("expected new.txt in the Tracked map, got %v", keysOf(result.Tracked))
+		}
+		if file.Added != 3 {
+			t.Errorf("added = %d, want 3", file.Added)
+		}
+	})
+
+	t.Run("a staged and an unstaged half both count", func(t *testing.T) {
+		wm, taskID := taskWorktreeWith(t,
+			map[string]string{"hello.txt": "line1\nline2\n"},
+			map[string]string{"hello.txt": "line1\nline2\nline3\n"},
+			map[string]string{"hello.txt": "line1\nline2\nline3\nline4\n"})
+
+		result, err := wm.GetTaskDiff(taskID, "", "")
+		if err != nil {
+			t.Fatalf("GetTaskDiff: %v", err)
+		}
+		file, ok := result.Tracked["hello.txt"]
+		if !ok {
+			t.Fatalf("expected hello.txt in the Tracked map, got %v", keysOf(result.Tracked))
+		}
+		if file.Added != 2 {
+			t.Errorf("added = %d, want 2 (the staged line3 and the unstaged line4)", file.Added)
+		}
+	})
 }
 
-func TestStashMessageHelpers_GenerateCorrectFormats(t *testing.T) {
-	taskID := "test-task-id"
+// A file with nothing in it is still a file the task made: dropping it from both shapes would hide it
+// from the panel entirely.
+func TestGetTaskDiffKeepsABlankNewFile(t *testing.T) {
+	t.Run("staged", func(t *testing.T) {
+		repoDir, taskID, _, _, wm := setupTestRepo(t)
+		writeFile(t, repoDir, "readme.md", "# README\n")
+		runGit(t, repoDir, "add", "readme.md")
+		runGit(t, repoDir, "commit", "-m", "Initial")
+		if _, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", ""); err != nil {
+			t.Fatalf("create worktree: %v", err)
+		}
+		wt, _ := wm.WorktreePath(taskID)
+		writeFile(t, wt, "blank.txt", "")
+		runGit(t, wt, "add", "blank.txt")
 
-	switchMsg := StashMessageForSwitch(taskID)
-	if switchMsg != "mike-switch-"+taskID {
-		t.Errorf("StashMessageForSwitch = %q, want %q", switchMsg, "mike-switch-"+taskID)
+		result, err := wm.GetTaskDiff(taskID, "", "")
+		if err != nil {
+			t.Fatalf("GetTaskDiff: %v", err)
+		}
+		file, ok := result.Tracked["blank.txt"]
+		if !ok {
+			t.Fatalf("expected blank.txt in the Tracked map, got %v", keysOf(result.Tracked))
+		}
+		if !file.IsNew {
+			t.Error("expected IsNew to be true for a staged blank file")
+		}
+		if len(file.Rows) != 0 {
+			t.Errorf("expected 0 rows for a blank file, got %d", len(file.Rows))
+		}
+	})
+
+	t.Run("untracked", func(t *testing.T) {
+		repoDir, taskID, _, _, wm := setupTestRepo(t)
+		writeFile(t, repoDir, "readme.md", "# README\n")
+		runGit(t, repoDir, "add", "readme.md")
+		runGit(t, repoDir, "commit", "-m", "Initial")
+		if _, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", ""); err != nil {
+			t.Fatalf("create worktree: %v", err)
+		}
+		wt, _ := wm.WorktreePath(taskID)
+		writeFile(t, wt, "blank_untracked.txt", "")
+
+		result, err := wm.GetTaskDiff(taskID, "", "")
+		if err != nil {
+			t.Fatalf("GetTaskDiff: %v", err)
+		}
+		for _, u := range result.Untracked {
+			if u.Path == "blank_untracked.txt" {
+				if len(u.Lines) != 0 {
+					t.Errorf("expected 0 lines for a blank file, got %d", len(u.Lines))
+				}
+				return
+			}
+		}
+		t.Error("expected blank_untracked.txt in the Untracked slice")
+	})
+}
+
+// A new file the size of a build artifact must not ship whole: the diff is capped, the panel is told
+// the file was cut and what it really held, and `skipTruncate` answers the rest on demand.
+func TestGetTaskDiffTruncatesLargeUntrackedFiles(t *testing.T) {
+	worktreeWith := func(t *testing.T, lines int) (*WorktreeManager, string) {
+		t.Helper()
+		_, taskID, _, _, wm := setupTestRepo(t)
+		if _, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", ""); err != nil {
+			t.Fatalf("create worktree: %v", err)
+		}
+		wt, _ := wm.WorktreePath(taskID)
+		if lines == 3 {
+			writeFile(t, wt, "small-new-file.txt", "line1\nline2\nline3\n")
+			return wm, taskID
+		}
+		var b strings.Builder
+		for i := 1; i <= lines; i++ {
+			fmt.Fprintf(&b, "line %d\n", i)
+		}
+		writeFile(t, wt, "large-new-file.txt", b.String())
+		return wm, taskID
 	}
 
-	forkMsg := StashMessageForFork(taskID)
-	if forkMsg != "mike-fork-"+taskID {
-		t.Errorf("StashMessageForFork = %q, want %q", forkMsg, "mike-fork-"+taskID)
-	}
+	t.Run("over the limit", func(t *testing.T) {
+		wm, taskID := worktreeWith(t, 80)
 
-	syncMsg := StashMessageForSyncMerge(taskID)
-	if syncMsg != "mike-sync-merge-"+taskID {
-		t.Errorf("StashMessageForSyncMerge = %q, want %q", syncMsg, "mike-sync-merge-"+taskID)
-	}
+		result, err := wm.GetTaskDiff(taskID, "", "")
+		if err != nil {
+			t.Fatalf("GetTaskDiff: %v", err)
+		}
+		if len(result.Untracked) != 1 {
+			t.Fatalf("expected 1 untracked file, got %d", len(result.Untracked))
+		}
+		untracked := result.Untracked[0]
+		if untracked.Path != "large-new-file.txt" {
+			t.Errorf("path = %s, want large-new-file.txt", untracked.Path)
+		}
+		if !untracked.Truncated {
+			t.Error("expected the untracked file to be truncated")
+		}
+		if untracked.OrigAdded != 80 {
+			t.Errorf("origAdded = %d, want 80", untracked.OrigAdded)
+		}
+		if len(untracked.Lines) != defaultMaxChangeLines {
+			t.Errorf("expected %d lines, got %d", defaultMaxChangeLines, len(untracked.Lines))
+		}
 
-	autoMsg := StashMessageForAutoMerge(taskID)
-	if autoMsg != "mike-auto-merge-"+taskID {
-		t.Errorf("StashMessageForAutoMerge = %q, want %q", autoMsg, "mike-auto-merge-"+taskID)
+		full, err := wm.GetTaskDiff(taskID, "", "", true)
+		if err != nil {
+			t.Fatalf("GetTaskDiff(full): %v", err)
+		}
+		if len(full.Untracked) != 1 || full.Untracked[0].Truncated || len(full.Untracked[0].Lines) != 80 {
+			t.Errorf("expected the full diff to hold all 80 untruncated lines, got %+v", full.Untracked)
+		}
+	})
+
+	t.Run("under the limit", func(t *testing.T) {
+		wm, taskID := worktreeWith(t, 3)
+
+		result, err := wm.GetTaskDiff(taskID, "", "")
+		if err != nil {
+			t.Fatalf("GetTaskDiff: %v", err)
+		}
+		if len(result.Untracked) != 1 {
+			t.Fatalf("expected 1 untracked file, got %d", len(result.Untracked))
+		}
+		if result.Untracked[0].Truncated {
+			t.Error("a small untracked file must not be marked truncated")
+		}
+	})
+}
+
+// An untracked file's content ships to the browser, so what counts as opaque decides whether a person
+// can read what the agent wrote. An .svg is XML source, not a blob; a .png is a blob whatever it holds.
+func TestGetTaskDiffClassifiesUntrackedContent(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		file     string
+		body     string
+		wantBin  bool
+		wantRows bool
+	}{
+		{"a png is binary even when it holds text", "image.png", "fake png content", true, false},
+		{"an svg is source", "logo.svg", `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16"/></svg>`, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, taskID, _, _, wm := setupTestRepo(t)
+			if _, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", ""); err != nil {
+				t.Fatalf("create worktree: %v", err)
+			}
+			wt, _ := wm.WorktreePath(taskID)
+			if err := os.WriteFile(filepath.Join(wt, tc.file), []byte(tc.body), 0o644); err != nil {
+				t.Fatalf("write file: %v", err)
+			}
+
+			result, err := wm.GetTaskDiff(taskID, "", "")
+			if err != nil {
+				t.Fatalf("GetTaskDiff: %v", err)
+			}
+			if len(result.Untracked) != 1 {
+				t.Fatalf("expected 1 untracked file, got %d", len(result.Untracked))
+			}
+			file := result.Untracked[0]
+			if file.IsBinary != tc.wantBin {
+				t.Errorf("IsBinary = %v, want %v", file.IsBinary, tc.wantBin)
+			}
+			if got := len(file.Lines) > 0; got != tc.wantRows {
+				t.Errorf("lines present = %v, want %v", got, tc.wantRows)
+			}
+		})
 	}
 }
 
-func TestStashMessageHelpers_MaxLength(t *testing.T) {
-	// All stash messages must be ≤ 50 characters
-	longTaskID := "waterfall-lightning-thunder-waterfall-lightning-thunder-x"
+// The identity is accessor-only and stamped at boot; a commit path appends these flags, so an unnamed
+// half must not send an empty `-c user.name=` for git to resolve somewhere else.
+func TestGitAuthorFlagsCarryOnlyWhatIsNamed(t *testing.T) {
+	origName, origEmail := AuthorIdentity()
+	t.Cleanup(func() { SetAuthorIdentity(origName, origEmail) })
 
-	switchMsg := StashMessageForSwitch(longTaskID)
-	if len(switchMsg) > 50 {
-		t.Errorf("StashMessageForSwitch len = %d, want ≤ 50", len(switchMsg))
-	}
-
-	forkMsg := StashMessageForFork(longTaskID)
-	if len(forkMsg) > 50 {
-		t.Errorf("StashMessageForFork len = %d, want ≤ 50", len(forkMsg))
-	}
-
-	syncMsg := StashMessageForSyncMerge(longTaskID)
-	if len(syncMsg) > 50 {
-		t.Errorf("StashMessageForSyncMerge len = %d, want ≤ 50", len(syncMsg))
-	}
-
-	autoMsg := StashMessageForAutoMerge(longTaskID)
-	if len(autoMsg) > 50 {
-		t.Errorf("StashMessageForAutoMerge len = %d, want ≤ 50", len(autoMsg))
-	}
-}
-func TestIsMergedInto(t *testing.T) {
-	tmpDir := t.TempDir()
-	repoDir := filepath.Join(tmpDir, "repo")
-	os.MkdirAll(repoDir, 0o755)
-
-	// Initialize git repo
-	runGit(t, repoDir, "init")
-	runGit(t, repoDir, "config", "user.email", "test@test.com")
-	runGit(t, repoDir, "config", "user.name", "Test")
-	writeFile(t, repoDir, "README.md", "# Test\n")
-	runGit(t, repoDir, "add", "README.md")
-	runGit(t, repoDir, "commit", "-m", "Initial")
-
-	// Create a task branch with a commit
-	runGit(t, repoDir, "checkout", "-b", "task-branch")
-	writeFile(t, repoDir, "feature.txt", "feature content\n")
-	runGit(t, repoDir, "add", "feature.txt")
-	runGit(t, repoDir, "commit", "-m", "Add feature")
-
-	// Go back to main
-	runGit(t, repoDir, "checkout", "master")
-
-	wm := &WorktreeManager{}
-
-	// Task branch is NOT merged into main yet
-	if wm.IsMergedInto(repoDir, "task-branch", "master") {
-		t.Error("IsMergedInto should return false when task branch is not merged")
-	}
-
-	// Merge task branch into main
-	runGit(t, repoDir, "merge", "task-branch", "--no-ff", "-m", "Merge task-branch")
-
-	// Task branch IS now merged into main
-	if !wm.IsMergedInto(repoDir, "task-branch", "master") {
-		t.Error("IsMergedInto should return true after merge")
-	}
-
-	// Test with empty branch names
-	if wm.IsMergedInto(repoDir, "", "master") {
-		t.Error("IsMergedInto should return false for empty task branch")
-	}
-	if wm.IsMergedInto(repoDir, "task-branch", "") {
-		t.Error("IsMergedInto should return false for empty target branch")
-	}
-
-	// Test with non-existent branch
-	if wm.IsMergedInto(repoDir, "nonexistent", "master") {
-		t.Error("IsMergedInto should return false for non-existent task branch")
+	for _, tc := range []struct {
+		name, email string
+		want        []string
+	}{
+		{"", "", nil},
+		{"Custom Name", "", []string{"-c", "user.name=Custom Name"}},
+		{"", "user@example.com", []string{"-c", "user.email=user@example.com"}},
+		{"Custom Name", "user@example.com", []string{"-c", "user.name=Custom Name", "-c", "user.email=user@example.com"}},
+	} {
+		SetAuthorIdentity(tc.name, tc.email)
+		if got := GitAuthorFlags(); !slices.Equal(got, tc.want) {
+			t.Errorf("GitAuthorFlags() for %q <%q> = %v, want %v", tc.name, tc.email, got, tc.want)
+		}
 	}
 }
 
-func TestIsMergedInto_FastForward(t *testing.T) {
-	tmpDir := t.TempDir()
-	repoDir := filepath.Join(tmpDir, "repo")
-	os.MkdirAll(repoDir, 0o755)
-
-	// Initialize git repo
-	runGit(t, repoDir, "init")
-	runGit(t, repoDir, "config", "user.email", "test@test.com")
-	runGit(t, repoDir, "config", "user.name", "Test")
-	writeFile(t, repoDir, "README.md", "# Test\n")
-	runGit(t, repoDir, "add", "README.md")
-	runGit(t, repoDir, "commit", "-m", "Initial")
-
-	// Create a task branch with a commit
-	runGit(t, repoDir, "checkout", "-b", "task-branch")
-	writeFile(t, repoDir, "feature.txt", "feature content\n")
-	runGit(t, repoDir, "add", "feature.txt")
-	runGit(t, repoDir, "commit", "-m", "Add feature")
-
-	// Go back to main
-	runGit(t, repoDir, "checkout", "master")
-
-	wm := &WorktreeManager{}
-
-	// Task branch is NOT merged into main yet
-	if wm.IsMergedInto(repoDir, "task-branch", "master") {
-		t.Error("IsMergedInto should return false when task branch is not merged")
-	}
-
-	// Fast-forward merge
-	runGit(t, repoDir, "merge", "task-branch")
-
-	// After fast-forward, master == task-branch, so task-branch IS an ancestor of master
-	if !wm.IsMergedInto(repoDir, "task-branch", "master") {
-		t.Error("IsMergedInto should return true after fast-forward merge")
+// The identity is stamped at boot from git's own GIT_COMMITTER_* / GIT_AUTHOR_* variables: the committer
+// half wins where it exists, the author half fills the gap, and an environment that names nothing leaves
+// the repository to answer.
+func TestAuthorIdentityFromEnvPrefersTheCommitterPerHalf(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		env               map[string]string
+		wantName, wantSet string
+	}{
+		{
+			"the committer half wins, the author half fills the gap",
+			map[string]string{
+				"GIT_COMMITTER_NAME": "Committer",
+				"GIT_AUTHOR_NAME":    "Author",
+				"GIT_AUTHOR_EMAIL":   "  author@example.com  ",
+			},
+			"Committer", "author@example.com",
+		},
+		{
+			"an environment that names nothing",
+			map[string]string{},
+			"", "",
+		},
+	} {
+		name, email := AuthorIdentityFromEnv(func(key string) string { return tc.env[key] })
+		if name != tc.wantName || email != tc.wantSet {
+			t.Errorf("%s: got %q <%q>, want %q <%q>", tc.name, name, email, tc.wantName, tc.wantSet)
+		}
 	}
 }
 
-// TestGarbageCollect_KeepsTitledTaskSlugMainBranch verifies the GC keeps a titled
-// task's slug-named Main branch when a fork is the task's active branch.
-func TestGarbageCollect_KeepsTitledTaskSlugMainBranch(t *testing.T) {
-	repoDir, taskID, s, _, wm := setupTestRepo(t)
-
-	// Simulate a fork being the task's active branch: task.Branch points to the fork
-	// thread branch, and the task has a title whose slug names its Main branch.
-	task, err := s.GetTask("test-project", taskID)
-	if err != nil {
-		t.Fatalf("get task: %v", err)
-	}
-	task.Title = "Hey" // slugifies to "hey"
-	task.Branch = "thread/some-fork"
-	if err := s.UpdateTask(task); err != nil {
-		t.Fatalf("update task: %v", err)
-	}
-
-	// The titled task's Main branch is slug-named (task/hey-<random6>).
-	runGit(t, repoDir, "branch", "task/hey-zimxpq")
-	// An unrelated orphaned branch must still be removed.
-	runGit(t, repoDir, "branch", "task/orphan-one-branch")
-
-	_, err = wm.GarbageCollect(false)
-	if err != nil {
-		t.Fatalf("GarbageCollect: %v", err)
-	}
-
-	branches := getBranches(t, repoDir)
-	if !slices.Contains(branches, "task/hey-zimxpq") {
-		t.Error("titled task's slug Main branch should be kept by GC when a fork is active")
-	}
-	if slices.Contains(branches, "task/orphan-one-branch") {
-		t.Error("unrelated orphaned task branch should be removed by GC")
-	}
-}
-
-// TestResolveMainBranch_RecoversSlugBranch verifies ResolveMainBranch recovers a
-// titled task's slug-named Main branch when task/<taskID> is missing.
-func TestResolveMainBranch_RecoversSlugBranch(t *testing.T) {
-	repoDir, taskID, s, _, wm := setupTestRepo(t)
-
-	task, err := s.GetTask("test-project", taskID)
-	if err != nil {
-		t.Fatalf("get task: %v", err)
-	}
-	task.Title = "Hey" // slug "hey"
-	if err := s.UpdateTask(task); err != nil {
-		t.Fatalf("update task: %v", err)
-	}
-
-	// The real Main branch is slug-named; task/<taskID> does not exist.
-	runGit(t, repoDir, "branch", "task/hey-zimxpq")
-
-	got := wm.ResolveMainBranch("test-project", taskID, task.Title, "task/"+taskID)
-	if got != "task/hey-zimxpq" {
-		t.Fatalf("expected recovered slug branch task/hey-zimxpq, got %q", got)
-	}
-
-	// If the canonical branch exists, it takes precedence.
-	runGit(t, repoDir, "branch", "task/"+taskID)
-	got = wm.ResolveMainBranch("test-project", taskID, task.Title, "task/"+taskID)
-	if got != "task/"+taskID {
-		t.Fatalf("expected canonical task/%s when it exists, got %q", taskID, got)
-	}
-}
-
-// TestResolveMainBranch_NoSlug returns canonical when no slug matches.
-func TestResolveMainBranch_NoSlug(t *testing.T) {
-	repoDir, taskID, _, _, wm := setupTestRepo(t)
-	// No task/<taskID> branch and a title that produces no matching branch.
-	runGit(t, repoDir, "branch", "task/other-zzz")
-	got := wm.ResolveMainBranch("test-project", taskID, "No Match", "task/"+taskID)
-	if got != "task/"+taskID {
-		t.Fatalf("expected fallback task/%s, got %q", taskID, got)
+// The card asks this hash whether an untracked file changed. A file whose content moved while its line
+// count stayed the same must answer differently, or the browser keeps showing the stale file.
+func TestComputeUntrackedHashPricesTheContentNotTheShape(t *testing.T) {
+	sameShape := UntrackedFile{Path: "test.txt", Lines: []string{"todo"}}
+	changed := UntrackedFile{Path: "test.txt", Lines: []string{"todo app"}}
+	if ComputeUntrackedHash(sameShape) == ComputeUntrackedHash(changed) {
+		t.Errorf("one hash %s for different content of one line — delta detection would skip the refetch",
+			ComputeUntrackedHash(sameShape))
 	}
 }

@@ -273,17 +273,52 @@ describe('ToolCall - edit_file diff toggle', () => {
         expect(container.querySelector('.edit-diff-toggle')).toBeFalsy();
         expect(container.querySelector('.edit-diff')).toBeFalsy();
     });
+});
 
-    it('renders without throwing when edits is not an array', () => {
+describe('ToolCall - edit diff expands and collapses', () => {
+    // The card is controlled: its expanded state is `editDiffOverrides[toolId]`, and a card nobody has
+    // clicked opens expanded only while the change is trivial (<= 2 changed lines). Both halves are what a
+    // reader calls "the diff never opened" and "the click did nothing", and `file-editor.spec.ts` drives
+    // the same two clicks through a live turn.
+    const trivialEdit = { path: 'src/file.go', edits: [{ oldText: 'a\nb', newText: 'a\nb\nnew line' }] };
+    const bigEdit = { path: 'src/file.go', edits: [{ oldText: 'a\nb\nc', newText: 'x\ny\nz' }] };
+
+    function renderCard(args: Record<string, unknown>, overrides: Record<string, boolean> = {}) {
+        const onToggleEditDiff = vi.fn();
         const { container } = render(ToolCall, {
             ...baseProps,
-            toolCall: makeToolCall({
-                toolName: 'edit_file',
-                args: { path: 'src/file.go', edits: 'still streaming' },
-                isPending: true,
-            }),
+            editDiffOverrides: overrides,
+            onToggleEditDiff,
+            toolCall: makeToolCall({ toolName: 'edit_file', args, success: true, isPending: false }),
         });
-        expect(container.querySelector('.edit-diff-toggle')).toBeFalsy();
+        return { container, toggle: container.querySelector('.edit-diff-toggle')!, onToggleEditDiff };
+    }
+
+    it('opens a trivial change expanded and asks the parent to collapse it', async () => {
+        const { toggle, onToggleEditDiff } = renderCard(trivialEdit);
+        expect(toggle.getAttribute('aria-expanded')).toBe('true');
+
+        await fireEvent.click(toggle);
+        expect(onToggleEditDiff).toHaveBeenCalledWith('tool-1', true);
+    });
+
+    it('hides the diff once the parent reports the card collapsed, and asks for it back', async () => {
+        const { container, onToggleEditDiff } = renderCard(trivialEdit, { 'tool-1': false });
+        const collapsed = container.querySelector('.edit-diff-toggle')!;
+        expect(collapsed.getAttribute('aria-expanded')).toBe('false');
+        expect(container.querySelector('.edit-diff')).toBeFalsy();
+
+        await fireEvent.click(collapsed);
+        expect(onToggleEditDiff).toHaveBeenCalledWith('tool-1', false);
+    });
+
+    it('leaves a change bigger than two lines collapsed until it is clicked', async () => {
+        const { container, toggle, onToggleEditDiff } = renderCard(bigEdit);
+        expect(toggle.getAttribute('aria-expanded')).toBe('false');
+        expect(container.querySelector('.edit-diff')).toBeFalsy();
+
+        await fireEvent.click(toggle);
+        expect(onToggleEditDiff).toHaveBeenCalledWith('tool-1', false);
     });
 });
 
@@ -300,7 +335,7 @@ describe('ToolCall - write_file result', () => {
                 isPending: false,
             }),
         });
-        expect(container.querySelector('.write-result-text')?.textContent).toContain('Wrote');
+        expect(container.querySelector('.write-result-text')?.textContent).toBe('Wrote 2.0 KB to:');
         expect(container.querySelector('.write-result-path')?.textContent).toBe('src/file.go');
     });
 

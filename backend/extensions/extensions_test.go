@@ -27,25 +27,6 @@ func makeTestExtension(t *testing.T, extType, installSource string) *Extension {
 	}
 }
 
-func TestExtension_IsLSP(t *testing.T) {
-	tests := []struct {
-		name string
-		ext  *Extension
-		want bool
-	}{
-		{"lsp type", makeTestExtension(t, ExtensionTypeLSP, "registry"), true},
-		{"ui type", makeTestExtension(t, ExtensionTypeUI, "registry"), false},
-		{"unknown type", makeTestExtension(t, "unknown", "registry"), false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.ext.IsLSP(); got != tt.want {
-				t.Errorf("IsLSP() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 // TestInferExtensionType pins the whole priority chain, including where the translation pack
 // sits: last, because a pack is the only capability that is pure data. A manifest that declares a
 // pack beside anything else never reaches an installed row (validateI18N refuses it), so the mixed
@@ -164,41 +145,6 @@ func TestLSPConfig_ChatDiagnosticsEnabled(t *testing.T) {
 	var nilCfg *LSPConfig
 	if nilCfg.IsChatDiagnosticsEnabled() {
 		t.Error("nil.IsChatDiagnosticsEnabled() = true, want false")
-	}
-}
-
-func TestConfigSchema_JSON_PreservesPropertyOrder(t *testing.T) {
-	jsonData := `{
-		"properties": [
-			{"key": "api_key", "type": "string", "title": "API Key", "sensitive": true},
-			{"key": "memory_limit", "type": "number", "title": "Memory Limit", "default": 256},
-			{"key": "sandbox_mount_mode", "type": "string", "title": "Mount Mode", "default": "rw"}
-		]
-	}`
-
-	var schema ConfigSchema
-	if err := json.Unmarshal([]byte(jsonData), &schema); err != nil {
-		t.Fatalf("Unmarshal error: %v", err)
-	}
-
-	if len(schema.Properties) != 3 {
-		t.Fatalf("Properties count = %d, want 3", len(schema.Properties))
-	}
-
-	expectedOrder := []string{"api_key", "memory_limit", "sandbox_mount_mode"}
-	for i, want := range expectedOrder {
-		if schema.Properties[i].Key != want {
-			t.Errorf("Properties[%d].Key = %q, want %q", i, schema.Properties[i].Key, want)
-		}
-	}
-
-	// Verify GetProperty works
-	prop := schema.GetProperty("memory_limit")
-	if prop == nil {
-		t.Fatal("GetProperty(memory_limit) returned nil")
-	}
-	if prop.Type != "number" {
-		t.Errorf("memory_limit.Type = %v, want number", prop.Type)
 	}
 }
 

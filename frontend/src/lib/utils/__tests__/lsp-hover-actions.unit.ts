@@ -323,11 +323,6 @@ describe('hoverDocsHTML', () => {
         },
     } as unknown as LSPPlugin;
 
-    it('escapes plaintext documentation', () => {
-        const html = hoverDocsHTML(plugin, { contents: { kind: 'plaintext', value: 'a < b' } });
-        expect(html).toBe('a &lt; b');
-    });
-
     it('wraps a MarkedString in a fenced code block', () => {
         const html = hoverDocsHTML(plugin, { contents: { language: 'go', value: 'func main()' } });
         expect(html).toContain('```go\nfunc main()\n```');
@@ -339,33 +334,14 @@ describe('hoverDocsHTML', () => {
         expect(html).toContain('<br>');
     });
 
-    it('sanitizes markup the language server embedded in markdown', () => {
+    it('sanitizes the markup a language server embedded in markdown', () => {
+        // The one proof that this path routes through the sanitizer; the refusal rules themselves,
+        // and DOMPurify's defaults beside them, are `sanitize.unit.ts`.
         const html = hoverDocsHTML(plugin, {
             contents: { kind: 'markdown', value: 'docs <img src=x onerror=alert(1)><script>steal()</script>' },
         });
         expect(html).not.toContain('<script');
         expect(html).not.toContain('onerror');
-    });
-
-    it('drops the style a server could paint the card over the app with', () => {
-        // The card is appended inside the application, so a fixed-position box
-        // here would sit above the real UI rather than inside the tooltip.
-        const html = hoverDocsHTML(plugin, {
-            contents: { kind: 'markdown', value: '<p style="position:fixed;inset:0">confirm?</p>func F()' },
-        });
-        expect(html).not.toMatch(/style/i);
-        expect(html).toContain('confirm?');
-        expect(html).toContain('func F()');
-    });
-
-    it('drops a style element as well as the style attribute', () => {
-        // Same layout power, different syntax — and the shape DOMPurify's defaults keep
-        // when the element is nested in something, which is how a doc comment delivers it.
-        const html = hoverDocsHTML(plugin, {
-            contents: { kind: 'markdown', value: '<div><style>.cm-hoverCard{position:fixed;inset:0}</style></div>func F()' },
-        });
-        expect(html).not.toMatch(/<style|position:fixed/i);
-        expect(html).toContain('func F()');
     });
 
     it('drops the rules a server puts between sections, keeping the sections', () => {

@@ -1305,88 +1305,61 @@ func TestDoneTaskDiffSnapshotBypassedForFullAndCustomRefs(t *testing.T) {
 	}
 }
 
-// TestSandboxDisableBlockedWithoutDangerZone verifies that disabling sandbox
-// returns 403 Forbidden when DANGER_ZONE is not set to "1".
-func TestSandboxDisableBlockedWithoutDangerZone(t *testing.T) {
-	// Without the grant, switching a project to unsandboxed is refused. The grant is the resolved
-	// DANGER_ZONE decision the server was built with, so this is the process being pinned.
-	s := testServerWith(t, func(c *startup.Config) { c.DangerZone = false })
+// TestSandboxDisableFollowsTheDangerZoneGrant: DANGER_ZONE=1 permits disabling sandboxing and never
+// gates execution, so the only thing standing between the update and an unsandboxed project is the
+// grant the process booted with. The grant is a resolved configuration value here, never this test
+// process's environment.
+func TestSandboxDisableFollowsTheDangerZoneGrant(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		grant      bool
+		wantStatus int
+		wantErr    string // what the refusal must name; empty means the update landed
+	}{
+		{"BlockedWithoutDangerZone", false, http.StatusForbidden, "DANGER_ZONE"},
+		{"AllowedWithDangerZone", true, http.StatusOK, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s := testServerWith(t, func(c *startup.Config) { c.DangerZone = tt.grant })
 
-	dir := t.TempDir()
-	initGitRepo(t, dir)
-	cookie, csrfToken := loginTestCSRF(t, s)
-	netIso := true
-	proj := map[string]any{
-		"name":                      "sandbox-test-proj",
-		"path":                      dir,
-		"sandbox_enabled":           true,
-		"sandbox_network_isolation": netIso,
-	}
-	req := testRequest("POST", "/api/projects", proj)
-	withAuthCSRF(req, cookie, csrfToken)
-	rr := testResponse(t, s, req)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("create project: %d %s", rr.Code, rr.Body.String())
-	}
-	result := mustJSON[map[string]any](t, rr.Body)
-	projectID := result["id"].(string)
+			dir := t.TempDir()
+			initGitRepo(t, dir)
+			cookie, csrfToken := loginTestCSRF(t, s)
+			netIso := true
+			proj := map[string]any{
+				"name":                      "sandbox-test-proj",
+				"path":                      dir,
+				"sandbox_enabled":           true,
+				"sandbox_network_isolation": netIso,
+			}
+			req := testRequest("POST", "/api/projects", proj)
+			withAuthCSRF(req, cookie, csrfToken)
+			rr := testResponse(t, s, req)
+			if rr.Code != http.StatusCreated {
+				t.Fatalf("create project: %d %s", rr.Code, rr.Body.String())
+			}
+			projectID := mustJSON[map[string]any](t, rr.Body)["id"].(string)
 
-	update := map[string]any{
-		"sandbox_enabled": false,
-	}
-	req = testRequest("PUT", "/api/projects/"+projectID, update)
-	withAuthCSRF(req, cookie, csrfToken)
-	rr = testResponse(t, s, req)
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 Forbidden, got %d: %s", rr.Code, rr.Body.String())
-	}
-	var errResp map[string]any
-	json.UnmarshalRead(rr.Body, &errResp)
-	errMsg, _ := errResp["error"].(string)
-	if !strings.Contains(errMsg, "DANGER_ZONE") {
-		t.Fatalf("expected error mentioning DANGER_ZONE, got: %s", errMsg)
-	}
-}
+			req = testRequest("PUT", "/api/projects/"+projectID, map[string]any{"sandbox_enabled": false})
+			withAuthCSRF(req, cookie, csrfToken)
+			rr = testResponse(t, s, req)
+			if rr.Code != tt.wantStatus {
+				t.Fatalf("grant=%v: got %d, want %d: %s", tt.grant, rr.Code, tt.wantStatus, rr.Body.String())
+			}
 
-// TestSandboxDisableAllowedWithDangerZone verifies that disabling sandbox
-// succeeds when DANGER_ZONE is set to "1".
-func TestSandboxDisableAllowedWithDangerZone(t *testing.T) {
-	// The grant, stated as the decision the server was built with rather than as a variable this
-	// process happens to carry.
-	s := testServerWith(t, func(c *startup.Config) { c.DangerZone = true })
-
-	dir := t.TempDir()
-	initGitRepo(t, dir)
-	cookie, csrfToken := loginTestCSRF(t, s)
-	netIso := true
-	proj := map[string]any{
-		"name":                      "sandbox-test-proj-2",
-		"path":                      dir,
-		"sandbox_enabled":           true,
-		"sandbox_network_isolation": netIso,
-	}
-	req := testRequest("POST", "/api/projects", proj)
-	withAuthCSRF(req, cookie, csrfToken)
-	rr := testResponse(t, s, req)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("create project: %d %s", rr.Code, rr.Body.String())
-	}
-	result := mustJSON[map[string]any](t, rr.Body)
-	projectID := result["id"].(string)
-
-	update := map[string]any{
-		"sandbox_enabled": false,
-	}
-	req = testRequest("PUT", "/api/projects/"+projectID, update)
-	withAuthCSRF(req, cookie, csrfToken)
-	rr = testResponse(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200 OK, got %d: %s", rr.Code, rr.Body.String())
-	}
-	result = mustJSON[map[string]any](t, rr.Body)
-	sandboxEnabled, _ := result["sandbox_enabled"].(bool)
-	if sandboxEnabled {
-		t.Fatal("expected sandbox_enabled to be false")
+			if tt.wantErr != "" {
+				var errResp map[string]any
+				json.UnmarshalRead(rr.Body, &errResp)
+				errMsg, _ := errResp["error"].(string)
+				if !strings.Contains(errMsg, tt.wantErr) {
+					t.Fatalf("refusal must name %q, got: %s", tt.wantErr, errMsg)
+				}
+				return
+			}
+			if enabled, _ := mustJSON[map[string]any](t, rr.Body)["sandbox_enabled"].(bool); enabled {
+				t.Fatal("expected sandbox_enabled to be false")
+			}
+		})
 	}
 }
 

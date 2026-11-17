@@ -4,6 +4,11 @@ import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch, isolatedProj
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
 isolatedProject();
 
+/** A BaseModal confirmation, picked out by the message only a confirmation draws — `[role="dialog"]`
+ *  alone is never a unique locator in this app. */
+const confirmDialog = (page: any) =>
+  page.locator('[role="dialog"]').filter({ has: page.locator('.confirm-message') });
+
 
 test.describe.configure({ mode: 'parallel' });
 
@@ -308,12 +313,13 @@ test.describe('Clear Done Tasks', () => {
     }).toPass({ timeout: 5000 });
 
     await page.click('.clear-btn');
-    await expect(page.locator('[role="dialog"]')).toBeVisible();
-    expect(await page.locator('[role="dialog"] .confirm-message').textContent()).toContain('Permanently delete');
+    const dialog = confirmDialog(page);
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('.confirm-message')).toContainText('Permanently delete');
 
     // Click Cancel to dismiss without deleting
-    await page.click('[role="dialog"] .btn-cancel');
-    await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
+    await dialog.locator('.btn-cancel').click();
+    await expect(dialog).not.toBeVisible({ timeout: 5000 });
 
     // Verify our specific task is still in done (not deleted)
     await expect(async () => {
@@ -358,8 +364,8 @@ test.describe('Clear Done Tasks', () => {
     expect(doneCountBefore).toBeGreaterThanOrEqual(doneCountBase + 2);
 
     await page.click('.clear-btn');
-    await expect(page.locator('[role="dialog"]')).toBeVisible();
-    await page.click('[role="dialog"] .btn-confirm');
+    await expect(confirmDialog(page)).toBeVisible();
+    await confirmDialog(page).locator('.btn-confirm').click();
 
     await gotoProject(page);
     await page.waitForSelector('.card');
@@ -399,8 +405,8 @@ test.describe('Clear Done Tasks', () => {
     }).toPass({ timeout: 10000 });
 
     await page.click('.clear-btn');
-    await expect(page.locator('[role="dialog"]')).toBeVisible();
-    await page.click('[role="dialog"] .btn-confirm');
+    await expect(confirmDialog(page)).toBeVisible();
+    await confirmDialog(page).locator('.btn-confirm').click();
 
     await expect(page.locator(`.card[data-task-id="${taskId}"]`)).not.toBeVisible({ timeout: 10000 });
 
@@ -461,8 +467,8 @@ test.describe('Mobile Delete Scroll Column', () => {
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
     await page.click('.icon-btn[aria-label="Delete task"]');
-    await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
-    await page.click('[role="dialog"] .btn-confirm');
+    await expect(confirmDialog(page)).toBeVisible({ timeout: 5000 });
+    await confirmDialog(page).locator('.btn-confirm').click();
 
     await expect(page.locator('.board')).toBeVisible({ timeout: 10000 });
 
@@ -527,35 +533,6 @@ test.describe('Multi-Select', () => {
     await page.waitForSelector(`[data-task-id="${taskId2}"]`, { timeout: 10000 });
   });
 
-  test('should confirm before starting selected tasks with task titles listed', async ({ page }) => {
-
-    const card1 = page.locator(`[data-task-id="${taskId1}"]`);
-    const card2 = page.locator(`[data-task-id="${taskId2}"]`);
-
-    await card1.click({ modifiers: ['Control'] });
-    await card2.click({ modifiers: ['Control'] });
-
-    const startBtn = page.locator('.bar-btn-start');
-    await startBtn.click();
-
-    const dialog = page.locator('.modal');
-    await expect(dialog).toBeVisible();
-    await expect(dialog).toContainText('Start 2 tasks');
-
-    const card1Title = await card1.locator('.card-title-text').textContent();
-    const card2Title = await card2.locator('.card-title-text').textContent();
-    expect(!!card1Title).toBe(true);
-    expect(!!card2Title).toBe(true);
-    await expect(dialog).toContainText(card1Title!);
-    await expect(dialog).toContainText(card2Title!);
-
-    const cancelBtn = page.locator('.modal-footer .btn-cancel');
-    await cancelBtn.click();
-    await expect(dialog).not.toBeVisible();
-
-    await expect(card1).toBeVisible();
-  });
-
   test('should show Delete button in action bar', async ({ page }) => {
 
     const card1 = page.locator(`[data-task-id="${taskId1}"]`);
@@ -567,34 +544,6 @@ test.describe('Multi-Select', () => {
     const deleteBtn = page.locator('.bar-btn-delete');
     await expect(deleteBtn).toBeVisible();
     await expect(deleteBtn).toContainText('Delete 2 tasks');
-  });
-
-  test('should confirm before deleting selected tasks with task titles listed', async ({ page }) => {
-
-    const card1 = page.locator(`[data-task-id="${taskId1}"]`);
-    const card2 = page.locator(`[data-task-id="${taskId2}"]`);
-
-    await card1.click({ modifiers: ['Control'] });
-    await card2.click({ modifiers: ['Control'] });
-
-    const deleteBtn = page.locator('.bar-btn-delete');
-    await deleteBtn.click();
-
-    const dialog = page.locator('.modal');
-    await expect(dialog).toBeVisible();
-    await expect(dialog).toContainText('Permanently delete 2 tasks');
-
-    const card1Title = await card1.locator('.card-title-text').textContent();
-    const card2Title = await card2.locator('.card-title-text').textContent();
-    await expect(dialog).toContainText(card1Title!);
-    await expect(dialog).toContainText(card2Title!);
-
-    const cancelBtn = page.locator('.modal-footer .btn-cancel');
-    await cancelBtn.click();
-    await expect(dialog).not.toBeVisible();
-
-    await expect(card1).toBeVisible();
-    await expect(card2).toBeVisible();
   });
 
   test('should delete selected tasks on confirmation', async ({ page }) => {

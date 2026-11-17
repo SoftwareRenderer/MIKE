@@ -356,7 +356,7 @@
     </button>
 {/snippet}
 
-<BaseModal title={parentId ? t('app.task.createSubtask') : t('app.task.create')} width="480px" modalClass="create-task-modal" footer={footer} onClose={closeModal} onBeforeClose={requestClose} closeOnOverlayClick={false} floating={lineTask}>
+<BaseModal title={parentId ? t('app.task.createSubtask') : t('app.task.create')} width="480px" modalClass="create-task-modal" footer={footer} onClose={closeModal} onBeforeClose={requestClose} floating={lineTask}>
     {#if parentId}
         <div class="parent-label">{t('app.task.subtaskOf')} <strong>{parentTitle || t('app.task.parentFallback')}</strong></div>
     {/if}

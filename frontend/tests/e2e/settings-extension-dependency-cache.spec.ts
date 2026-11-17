@@ -2,18 +2,25 @@ import { test, expect } from '@playwright/test';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { identityKey } from '../../src/lib/utils/extension-identity';
+import { openSettingsTab } from './helpers';
 
 /**
  * Granting a language server its dependency directory, end to end: what the field shows is what lands in the
- * database, a missing directory comes back as a sentence, an empty value revokes, and the running sandbox is
- * stopped so the next use recreates it. Component states are in vitest.
+ * database, and an empty value revokes. The component's own states — who is warned about a missing directory,
+ * what the dialog states about the declared location, and that a refusal keeps the dialog open with the
+ * server's sentence on the field — are in vitest
+ * (`ConfigModal/__tests__/extensions-dependency-cache.unit.svelte.ts`), and the refusal itself, with the JSON
+ * shape that sentence travels in, is `TestHandleSetDependencyCache_RejectsWhatIsNotAGrant`. What is here is
+ * the stored record: a grant the next sandbox builder will read, and its removal.
  *
  * The subject is the local fixture `tests/fixtures/local-extensions/testdev/dep-cache-lsp`, deleted at the end.
+ * Its card is addressed by `data-identity` — the author+name key the app compares on — because a display name
+ * is not unique in an Installed list that also holds whatever a developer's own `extensions/` directory carries.
  */
 
 const FIXTURE_AUTHOR = 'testdev';
 const FIXTURE_NAME = 'dep-cache-lsp';
-const DISPLAY = 'Dependency Cache Fixture';
 
 /**
  * A directory that exists, for the grant to point at: the server refuses one that does not, and refuses a bare
@@ -35,6 +42,8 @@ test.afterAll(() => {
 });
 
 let installedId: string | null = null;
+/** The author+name the installed record carries, read off the server by the install test. */
+let installedIdentity = '';
 
 /** Calls the API with the page's own session and CSRF token, as the UI does. */
 async function api(page: import('@playwright/test').Page, method: string, url: string, body?: unknown) {
@@ -61,14 +70,13 @@ async function api(page: import('@playwright/test').Page, method: string, url: s
 async function openExtensionsTab(page: import('@playwright/test').Page) {
     await page.goto('/');
     await page.waitForSelector('.project-item', { timeout: 15000 });
-    await page.click('.icon-btn[aria-label="Settings"]');
-    await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
-    await page.click('text=Extensions');
+    await openSettingsTab(page, 'Extensions');
     await page.waitForSelector('.extensions-tab', { timeout: 5000 });
 }
 
 function fixtureRow(page: import('@playwright/test').Page) {
-    return page.locator('.extension-card').filter({ hasText: DISPLAY });
+    expect(installedIdentity, 'the install test recorded no identity to find the card by').not.toBe('');
+    return page.locator(`.extension-card[data-identity="${installedIdentity}"]`);
 }
 
 /**
@@ -103,6 +111,7 @@ test.describe.serial('Extension dependency directory', () => {
         const installed = (list.json ?? []).find((e: any) => e.name === FIXTURE_NAME);
         expect(installed, 'the fixture did not appear in the installed list').toBeTruthy();
         installedId = installed.id;
+        installedIdentity = identityKey(installed.author, installed.name);
 
         // The declaration has to be on the stored record, or the UI has nothing to ask about and
         // the endpoint has no location to mount at.
@@ -110,36 +119,6 @@ test.describe.serial('Extension dependency directory', () => {
             container_path: '/fake/mod',
             env: 'FAKE_CACHE',
         });
-    });
-
-    test('says on the card that it needs a directory, and refuses a path that is not one', async ({ page }) => {
-        await openExtensionsTab(page);
-
-        const row = fixtureRow(page);
-        // Said twice, because a dot on an icon is easy to look straight past: the badge beside the name
-        // and the dot on the Edit icon are the same state.
-        const badge = row.getByRole('button', { name: 'Needs setup' });
-        await expect(badge, 'a declarer with no directory is not warned about').toBeVisible({ timeout: 5000 });
-        await expect(row.locator('.ext-needs-dot')).toBeVisible();
-
-        await badge.click();
-        const dialog = page.locator('[role="dialog"]').filter({ hasText: 'Dependencies directory' }).last();
-        // Where it looks inside the sandbox is stated, in the extension's own terms. (`.field-desc`
-        // is every field's description, so the assertion names the location element itself.)
-        await expect(dialog.locator('.ext-dep-env')).toHaveText('FAKE_CACHE=/fake/mod');
-        await expect(dialog.locator('.ext-dep-none')).toBeVisible();
-
-        const input = dialog.locator('#edit-dep-path');
-        await input.fill('/definitely/not/here-anywhere');
-        await dialog.getByRole('button', { name: 'Save' }).click();
-
-        // The server's sentence reaches the field it is about — "create it first" is the actionable
-        // half, and a wrapper message that swallowed it would be a worse error than none. The dialog
-        // stays open: the refusal is about one field, and the rest of the dialog is still unsaved.
-        await expect(dialog.locator('.ext-dep-error')).toContainText('cannot be read', { timeout: 5000 });
-        await expect(dialog.locator('.ext-dep-error')).toContainText('create it first');
-        await expect(dialog.locator('.ext-dep-path')).toHaveCount(0);
-        await expect(fixtureRow(page).getByRole('button', { name: 'Needs setup' })).toBeVisible();
     });
 
     test('grants the path in the dialog, and it survives a reload', async ({ page }) => {
@@ -197,8 +176,4 @@ test.describe.serial('Extension dependency directory', () => {
         const list = await api(page, 'GET', '/api/extensions');
         expect((list.json ?? []).some((e: any) => e.id === installedId)).toBe(false);
     });
-});
-
-test.afterAll(() => {
-    fs.rmSync(cacheDir, { recursive: true, force: true });
 });

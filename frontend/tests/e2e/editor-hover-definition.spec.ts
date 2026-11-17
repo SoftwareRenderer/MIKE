@@ -1,8 +1,8 @@
-import { test, expect, type Browser, type Page } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { writeFileSync, appendFileSync, existsSync, rmSync, mkdirSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'path';
-import { csrfFetch, apiGetConfig, createTaskViaApi } from './helpers';
+import { csrfFetch, apiGetConfig, createTaskViaApi, signedInPage } from './helpers';
 
 /**
  * The editor's go-to-definition UX.
@@ -312,13 +312,6 @@ const fakeExtensionBody = () => [
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-async function setupPage(browser: Browser) {
-    const context = await browser.newContext({ storageState: '/tmp/kanban-test-storage-state.json' });
-    const page = await context.newPage();
-    await page.goto('/');
-    return { context, page };
-}
-
 /** Stub the extension list and fake the LSP socket for this page. */
 async function armFakeLSP(page: Page) {
     await page.addInitScript(FAKE_LSP_INIT, join(HOVER_REPO, TARGET));
@@ -408,7 +401,7 @@ test.describe.serial('Editor go-to-definition hover + Ctrl/Cmd+Click', () => {
             stdio: 'ignore',
         });
 
-        const { context, page } = await setupPage(browser);
+        const { context, page } = await signedInPage(browser);
         try {
             const res = await csrfFetch(page, '/api/projects', { method: 'POST', body: { path: HOVER_REPO } });
             if (!res.ok) throw new Error(`create hover project: ${JSON.stringify(res.data)}`);
@@ -419,7 +412,7 @@ test.describe.serial('Editor go-to-definition hover + Ctrl/Cmd+Click', () => {
     });
 
     test.afterAll(async ({ browser }) => {
-        const { context, page } = await setupPage(browser);
+        const { context, page } = await signedInPage(browser);
         try {
             if (projectId) await csrfFetch(page, `/api/projects/${projectId}`, { method: 'DELETE' });
         } finally {

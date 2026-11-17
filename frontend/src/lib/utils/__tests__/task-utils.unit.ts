@@ -292,7 +292,14 @@ describe('ancestorInProgress', () => {
         ];
 
         expect(ancestorInProgress(tasks, 'grandchild')).toBe(true);
+    });
+
+    it('is false for a top-level task, for a task the board does not hold, and for a chain that never reaches an in-progress task', () => {
+        const tasks = [makeTask('root', undefined, 'review'), makeTask('child', 'root', 'backlog')];
+
         expect(ancestorInProgress(tasks, 'root')).toBe(false);
+        expect(ancestorInProgress(tasks, 'not-on-the-board')).toBe(false);
+        expect(ancestorInProgress(tasks, 'child')).toBe(false);
     });
 
     it('ends at a parent the board does not hold', () => {

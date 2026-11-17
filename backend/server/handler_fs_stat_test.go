@@ -264,22 +264,38 @@ func TestFSStatAnswersAMissingPathAsARow(t *testing.T) {
 }
 
 // TestFSStatRefusesAPathOutsideTheProject: a request aimed at the host beyond the checkout is refused
-// before anything is stated about it.
+// before anything is stated about it — by the lexical path, by a step above the root, and by the
+// symlink-resolved path a task planted inside the tree. The refusal is ErrOutside alone: the host path a
+// name resolves to is the server's to read, not the requester's.
 func TestFSStatRefusesAPathOutsideTheProject(t *testing.T) {
 	s := testServer(t)
 	repo := statProject(t, s, "fs-stat-jailed", map[string]string{"here.txt": "here"})
-	outside := filepath.Join(t.TempDir(), "outside-secret.txt")
-	if err := os.WriteFile(outside, []byte("not the project's"), 0o640); err != nil {
-		t.Fatal(err)
+	host := t.TempDir()
+	outside := filepath.Join(host, "outside-secret.txt")
+	target := filepath.Join(host, "host-secret.txt")
+	for _, name := range []string{outside, target} {
+		if err := os.WriteFile(name, []byte("not the project's"), 0o640); err != nil {
+			t.Fatal(err)
+		}
+	}
+	link := filepath.Join(repo, "points-away")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("symlink: %v", err)
 	}
 
-	for _, path := range []string{outside, filepath.Join(repo, "..", filepath.Base(t.TempDir()), "anything.txt")} {
-		status, _, body := statAsk(t, s, "fs-stat-jailed", "", path)
+	for _, tc := range []struct{ what, path string }{
+		{"a host file outside the checkout", outside},
+		{"a step above the root", filepath.Join(repo, "..", t.TempDir(), "anything.txt")},
+		{"a link the task planted that leaves the tree", link},
+	} {
+		status, _, body := statAsk(t, s, "fs-stat-jailed", "", tc.path)
 		if status != http.StatusBadRequest {
-			t.Fatalf("status %d for %s, want 400: %s", status, path, body)
+			t.Fatalf("status %d for %s, want 400: %s", status, tc.what, body)
 		}
-		if strings.Contains(body, "outside-secret") {
-			t.Fatalf("the refusal for %s repeats a path outside the project: %s", path, body)
+		for _, leak := range []string{host, "outside-secret", "host-secret", "points-away", "resolves to"} {
+			if strings.Contains(body, leak) {
+				t.Errorf("the refusal for %s repeats %q: %s", tc.what, leak, body)
+			}
 		}
 	}
 }
@@ -315,29 +331,6 @@ func TestFSStatNeedsAPathAProjectAndACappedBatch(t *testing.T) {
 	rr := testResponseAuth(t, s, testRequest(http.MethodGet, "/api/fs/stat?"+query.Encode(), nil))
 	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "max") {
 		t.Fatalf("status %d over the batch cap, want 400 naming it: %s", rr.Code, rr.Body.String())
-	}
-}
-
-// TestFSStatRefusesASymbolicLinkPlantingAHostPath: a task owns its worktree and can leave a link there
-// pointing beyond it; containment reads the resolved path, so that name is refused, not described.
-func TestFSStatRefusesASymbolicLinkPlantingAHostPath(t *testing.T) {
-	s := testServer(t)
-	repo := statProject(t, s, "fs-stat-link", map[string]string{"here.txt": "here"})
-	elsewhere := filepath.Join(t.TempDir(), "host-secret.txt")
-	if err := os.WriteFile(elsewhere, []byte("a host file"), 0o640); err != nil {
-		t.Fatal(err)
-	}
-	link := filepath.Join(repo, "points-away")
-	if err := os.Symlink(elsewhere, link); err != nil {
-		t.Fatalf("symlink: %v", err)
-	}
-
-	status, _, body := statAsk(t, s, "fs-stat-link", "", link)
-	if status != http.StatusBadRequest {
-		t.Fatalf("status %d, want 400 for a link that leaves the tree: %s", status, body)
-	}
-	if strings.Contains(body, "host-secret") || strings.Contains(body, elsewhere) {
-		t.Fatalf("the refusal names where the link points: %s", body)
 	}
 }
 

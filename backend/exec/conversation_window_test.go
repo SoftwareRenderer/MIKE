@@ -9,16 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"mike/backend/store"
+	"mike/backend/testutil/teststore"
 	"mike/backend/types"
 )
 
 func TestConversationWindowSendsWhatTheWholeThreadSends(t *testing.T) {
-	s, err := store.NewStore(filepath.Join(t.TempDir(), "window.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s := teststore.StoreIn(t, filepath.Join(t.TempDir(), "window.db"))
 
 	now := time.Now().UTC()
 	if err := s.CreateProject(&types.Project{ID: "p1", Name: "p1", Path: "/tmp/p1", CreatedAt: now, UpdatedAt: now}); err != nil {

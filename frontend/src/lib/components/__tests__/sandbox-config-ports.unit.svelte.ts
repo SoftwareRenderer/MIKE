@@ -20,6 +20,7 @@ vi.mock('$lib/api', async (importOriginal) => {
 });
 
 import SandboxConfigModal from '$lib/components/SandboxConfigModal.svelte';
+import { t } from '$lib/i18n';
 import type { PortForward, Project } from '$lib/types';
 
 function projectWith(ports: PortForward[]): Project {
@@ -70,16 +71,45 @@ async function save(container: HTMLElement): Promise<Record<string, unknown>> {
     return updateProject.mock.calls[0][1] as Record<string, unknown>;
 }
 
-describe('SandboxConfigModal forwarded ports', () => {
-    beforeAll(() => {
-        // jsdom has no Web Animations API, and the slide transition calls it when a block
-        // enters - which adding or removing a row does.
-        if (!Element.prototype.animate) {
-            Element.prototype.animate = () =>
-                ({ finished: Promise.resolve(), cancel() { }, play() { }, pause() { }, commit() { }, onfinish: null }) as unknown as Animation;
-        }
+// jsdom has no Web Animations API, and the slide transition calls it when a block enters — which
+// opening the Forward Ports section does, as does adding or removing a row.
+beforeAll(() => {
+    if (!Element.prototype.animate) {
+        Element.prototype.animate = () =>
+            ({ finished: Promise.resolve(), cancel() { }, play() { }, pause() { }, commit() { }, onfinish: null }) as unknown as Animation;
+    }
+});
+
+describe('SandboxConfigModal forwarded ports — who is offered the row', () => {
+    // Forwarding exists only while the container can be reached at all: the row is not the same
+    // section with a disabled control, it is not built, so nothing has to remember to hide it.
+    it('offers it under an unreachable-free sandbox, and opens its add row', async () => {
+        const { container } = renderModal(projectWith([]));
+
+        const row = one<HTMLElement>(container, '.config-row-subsection');
+        expect(row.querySelector('.config-label')?.textContent).toBe(t('sandbox.ports'));
+
+        await fireEvent.click(row);
+        await waitFor(() => expect(container.querySelector('.port-add-row')).toBeTruthy());
+        // The description is only stated once the section is open, and it says the host side is not
+        // the person's to choose.
+        expect(row.querySelector('.config-desc')?.textContent).toContain('auto-assigned');
     });
 
+    it('builds no row while the network is isolated', () => {
+        const { container } = renderModal({ ...projectWith([]), sandbox_network_isolation: true } as Project);
+
+        expect(container.querySelector('.config-row-subsection')).toBeNull();
+    });
+
+    it('builds no row when sandboxing is off', () => {
+        const { container } = renderModal({ ...projectWith([]), sandbox_enabled: false } as Project);
+
+        expect(container.querySelector('.config-row-subsection')).toBeNull();
+    });
+});
+
+describe('SandboxConfigModal forwarded ports', () => {
     beforeEach(() => {
         updateProject.mockReset().mockResolvedValue({});
         getProject.mockResolvedValue({ id: 'p1', active_terminal_ports: [] });
@@ -99,36 +129,21 @@ describe('SandboxConfigModal forwarded ports', () => {
         expect(rows[1]).toContain('192.168.1.100:80');
     });
 
-    it('saves a port bound to one interface', async () => {
+    // Every-interface is what an empty field and a written wildcard both mean; only a chosen address
+    // travels, and a `host_ip` the server did not earn would pin the forward to one interface.
+    it.each([
+        { name: 'one interface', typed: '192.168.1.100', saved: { container_port: 3000, host_ip: '192.168.1.100' } },
+        { name: 'no interface typed', typed: '', saved: { container_port: 3000 } },
+        { name: 'a written wildcard', typed: '0.0.0.0', saved: { container_port: 3000 } },
+    ])('saves a port typed with $name as the mapping it means', async ({ typed, saved }) => {
         const { container } = renderModal(projectWith([]));
         await expandPorts(container);
-        await addPort(container, '3000', '192.168.1.100');
+        await addPort(container, '3000', typed);
 
         expect(portItems(container)).toHaveLength(1);
-        expect(await save(container)).toMatchObject({
-            sandbox_forward_ports: [{ container_port: 3000, host_ip: '192.168.1.100' }],
-        });
-    });
-
-    it('leaves the interface out when every interface is meant', async () => {
-        const { container } = renderModal(projectWith([]));
-        await expandPorts(container);
-        await addPort(container, '3000', '');
-
-        const changes = await save(container);
-        const ports = changes.sandbox_forward_ports as PortForward[];
-        expect(ports).toHaveLength(1);
-        expect(ports[0].container_port).toBe(3000);
-        expect(ports[0]).not.toHaveProperty('host_ip');
-    });
-
-    it('normalizes an explicit wildcard to every interface', async () => {
-        const { container } = renderModal(projectWith([]));
-        await expandPorts(container);
-        await addPort(container, '3000', '0.0.0.0');
-
         const ports = (await save(container)).sandbox_forward_ports as PortForward[];
-        expect(ports[0]).not.toHaveProperty('host_ip');
+        expect(ports).toHaveLength(1);
+        expect(ports[0]).toStrictEqual(saved);
     });
 
     it('refuses an interface that is not an IP address and adds nothing', async () => {

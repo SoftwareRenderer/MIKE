@@ -127,11 +127,13 @@ make test-podman-state                                   # the image entrypoint'
 ```
 
 - **A spec exists only if it needs a browser or the real backend.** Component state belongs in vitest;
-  never write a `readFileSync` + `toContain` "test".
+  never write a `readFileSync` + `toContain` "test". A rule two lanes can stage stays in the cheaper one, and
+  the surviving test is named where the deleted one lived.
 - **A spec skips only for a prerequisite global setup cannot provide**, and says which in the skip reason.
 - **A test runs only where its container can start** — `sandboxcheck.Require(t, image)` in Go,
   `requireSandbox()` in e2e. A host whose podman storage cannot initialise skips with that reason; it does
-  not fail. `docs/testing.md → Go unit test environment`.
+  not fail. `RequireAvailable` is the gate for a claim about a *honoured* sandbox, and `RequireBuild` the one
+  for a test that stages an image of its own. `docs/testing.md → Go unit test environment`.
 - **Config-modifying specs run in the `isolated` project**, and **a spec that runs an executor turn owns its
   project and releases its tasks when the test ends** — an unreleased task closes the admission gate on the
   tests after it.
@@ -191,7 +193,7 @@ make test-podman-state                                   # the image entrypoint'
   stacks into one field per line, and every control below that width is 44px. The 768px `isMobile`
   breakpoint is for app chrome, not a row's arithmetic.
   `frontend/src/lib/styles/sandbox-config.css` holds the arithmetic, and the phone block of
-  `frontend/tests/e2e/sandbox-mounts.spec.ts` is what fails when it stops holding.
+  `frontend/tests/e2e/sandbox-config-form.spec.ts` is what fails when it stops holding.
 - Chat never disguises a system message as a user message, shows the streaming cursor only during an active
   response, and formats stats as `X tokens · Ys · Z tok/s`.
 - **Chat autoscroll is judged from the scroll event, never from a gesture listener**, and new content

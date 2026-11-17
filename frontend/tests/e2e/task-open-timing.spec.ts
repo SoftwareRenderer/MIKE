@@ -241,7 +241,8 @@ async function throttle(page: Page, opts: { rtt: number; downKbps?: number; upKb
   });
 }
 
-/** What reading this task's cached window out of IndexedDB costs, and what is in it. */
+/** What reading this task's cached window out of IndexedDB costs, and what is in it. It holds one handle
+ *  open across the seven reads — that reuse is the measurement — so it does not go through readStored(). */
 async function cacheReadCost(page: Page, projectId: string, taskId: string) {
   return page.evaluate(async ({ pid, tid }) => {
     const key = `messages:${pid}:${tid}`;

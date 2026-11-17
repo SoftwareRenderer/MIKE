@@ -71,100 +71,83 @@ describe('SandboxPanel memory section', () => {
         expect(container.querySelector('.memory-section')).toBeNull();
     });
 
-    it('shows live usage against the limit with a progress bar', async () => {
-        const { container } = renderPanel(stats({ memory_current_mb: 412, memory_limit_mb: 1024 }));
-        const value = await vi.waitFor(() => {
-            const el = container.querySelector('.memory-value');
-            if (!el) throw new Error('not found');
-            return el;
-        });
-        expect(value.textContent).toContain('412 / 1024 MB');
-        const fill = container.querySelector('.memory-bar-fill') as HTMLElement;
-        expect(fill).not.toBeNull();
-        expect(fill.style.width).toBe('40%');
-        expect(fill.classList.contains('warn')).toBe(false);
+    // The bar is the same figure read four ways: the words, the fill, how far it is filled, and whether
+    // the filling is worth a colour. No limit means no bar at all — there is nothing to fill against.
+    it.each([
+        {
+            name: 'live usage against a limit', given: { memory_current_mb: 412, memory_limit_mb: 1024 },
+            value: '412 / 1024 MB', bar: true, width: '40%', warn: false,
+        },
+        {
+            name: 'usage at the warning share of the limit', given: { memory_current_mb: 1000, memory_limit_mb: 1024 },
+            bar: true, warn: true,
+        },
+        {
+            name: 'usage with no limit set', given: { memory_current_mb: 412, memory_limit_mb: 0 },
+            value: '412 MB (no limit)', bar: false,
+        },
+        {
+            name: 'a container that is not running', given: { running: false, memory_current_mb: 0 },
+            value: 'Not running', bar: true, width: '0%', warn: false,
+        },
+    ])('reads $name as one bar', async ({ given, value, bar, width, warn }) => {
+        const { container } = renderPanel(stats(given));
+
+        if (value) {
+            const shown = await vi.waitFor(() => {
+                const el = container.querySelector('.memory-value');
+                if (!el) throw new Error('not found');
+                return el;
+            });
+            expect(shown.textContent).toContain(value);
+        }
+        const fill = container.querySelector('.memory-bar-fill');
+        expect(fill !== null).toBe(bar);
+        if (!bar) {
+            expect(container.querySelector('.memory-bar')).toBeNull();
+            return;
+        }
+        if (width) expect((fill as HTMLElement).style.width).toBe(width);
+        if (warn !== undefined) expect(fill!.classList.contains('warn')).toBe(warn);
     });
 
-    it('marks the bar as warning at ≥ 80% of the limit', () => {
-        const { container } = renderPanel(stats({ memory_current_mb: 1000, memory_limit_mb: 1024 }));
-        const fill = container.querySelector('.memory-bar-fill') as HTMLElement;
-        expect(fill).not.toBeNull();
-        expect(fill.classList.contains('warn')).toBe(true);
+    // The tick is MIKE's own high-water mark, not the kernel's: it is where the run got to, it survives
+    // the usage falling back down, and it cannot be pushed past the limit it is drawn against.
+    it.each([
+        { name: 'a peak under the limit', given: { memory_current_mb: 412, memory_peak_mb: 500, memory_limit_mb: 1024 }, left: '49%' },
+        { name: 'a peak while the container is gone', given: { running: false, memory_current_mb: 0, memory_peak_mb: 800 }, left: '78%' },
+        { name: 'a peak above the limit it was capped at', given: { memory_peak_mb: 2048, memory_limit_mb: 1024 }, left: '100%' },
+        { name: 'no peak reported yet', given: {}, left: null },
+    ])('draws the peak tick of $name at $left', ({ given, left }) => {
+        const { container } = renderPanel(stats(given));
+        const tick = container.querySelector('.memory-bar-peak') as HTMLElement | null;
+
+        expect(tick !== null).toBe(left !== null);
+        if (!tick) return;
+        expect(tick.style.left).toBe(left);
+        expect(tick.title).toBe(`Held ${given.memory_peak_mb} MB at peak`);
     });
 
-    it('shows "no limit" usage without a bar when the limit is unknown', () => {
-        const { container } = renderPanel(stats({ memory_current_mb: 412, memory_limit_mb: 0 }));
-        const value = container.querySelector('.memory-value');
-        expect(value?.textContent).toContain('412 MB (no limit)');
-        expect(container.querySelector('.memory-bar')).toBeNull();
-    });
-
-    it('shows the not-running state with an empty bar when the limit is known', () => {
-        const { container } = renderPanel(stats({ running: false, memory_current_mb: 0 }));
-        const value = container.querySelector('.memory-value');
-        expect(value?.textContent).toContain('Not running');
-        const fill = container.querySelector('.memory-bar-fill') as HTMLElement;
-        expect(fill).not.toBeNull();
-        expect(fill.style.width).toBe('0%');
-        expect(fill.classList.contains('warn')).toBe(false);
-        // No peak reported yet → no tick.
-        expect(container.querySelector('.memory-bar-peak')).toBeNull();
-    });
-
-    it('renders a peak tick at the peak position with a tooltip', () => {
-        const { container } = renderPanel(stats({ memory_current_mb: 412, memory_peak_mb: 500, memory_limit_mb: 1024 }));
-        const tick = container.querySelector('.memory-bar-peak') as HTMLElement;
-        expect(tick).not.toBeNull();
-        expect(tick.style.left).toBe('49%');
-        expect(tick.title).toBe('Held 500 MB at peak');
-    });
-
-    it('does not render a peak tick when the peak is unknown', () => {
-        const { container } = renderPanel(stats());
-        expect(container.querySelector('.memory-bar-peak')).toBeNull();
-    });
-
-    it('keeps the peak tick visible when not running', () => {
-        const { container } = renderPanel(stats({ running: false, memory_current_mb: 0, memory_peak_mb: 800 }));
-        const tick = container.querySelector('.memory-bar-peak') as HTMLElement;
-        expect(tick).not.toBeNull();
-        expect(tick.style.left).toBe('78%');
-    });
-
-    it('clamps the peak tick to 100% when the peak reaches the limit', () => {
-        const { container } = renderPanel(stats({ memory_peak_mb: 2048, memory_limit_mb: 1024 }));
-        const tick = container.querySelector('.memory-bar-peak') as HTMLElement;
-        expect(tick?.style.left).toBe('100%');
-    });
-
-    it('shows the peak when known', () => {
-        const { container } = renderPanel(stats({ memory_peak_mb: 500 }));
-        expect(container.querySelector('.memory-peak')?.textContent).toContain('Held 500 MB at peak');
-    });
-
-    it('marks the peak red when it reached the limit', () => {
-        const { container } = renderPanel(stats({ memory_current_mb: 412, memory_peak_mb: 1024, memory_limit_mb: 1024 }));
+    it.each([
+        { name: 'a peak under the limit', given: { memory_peak_mb: 500 }, reached: false },
+        { name: 'a peak that reached the limit', given: { memory_current_mb: 412, memory_peak_mb: 1024, memory_limit_mb: 1024 }, reached: true },
+        { name: 'a peak just under the limit', given: { memory_peak_mb: 1023, memory_limit_mb: 1024 }, reached: false },
+        {
+            // Nothing was ever hit: with no --memory set there is no limit to reach.
+            name: 'a peak with no limit enforced', given: { memory_current_mb: 999, memory_peak_mb: 999, memory_limit_mb: 0 }, reached: false,
+        },
+        {
+            // memory.peak is a high-water mark for the container's lifetime, so the signal outlives the
+            // usage that caused it.
+            name: 'a peak the run left behind when it went idle',
+            given: { running: false, memory_current_mb: 0, memory_peak_mb: 1024, memory_limit_mb: 1024 }, reached: true,
+        },
+    ])('$name is reported as $reached', ({ given, reached }) => {
+        const { container } = renderPanel(stats(given));
         const peak = container.querySelector('.memory-peak') as HTMLElement;
-        expect(peak.textContent).toContain('Held 1024 MB at peak');
-        expect(peak.classList.contains('reached')).toBe(true);
-    });
 
-    it('keeps the peak neutral just below the limit', () => {
-        const { container } = renderPanel(stats({ memory_peak_mb: 1023, memory_limit_mb: 1024 }));
-        expect(container.querySelector('.memory-peak')?.classList.contains('reached')).toBe(false);
-    });
-
-    it('keeps the peak neutral when no limit is enforced', () => {
-        // Nothing was ever hit: with no --memory set there is no limit to reach.
-        const { container } = renderPanel(stats({ memory_current_mb: 999, memory_peak_mb: 999, memory_limit_mb: 0 }));
-        expect(container.querySelector('.memory-peak')?.classList.contains('reached')).toBe(false);
-    });
-
-    it('keeps the peak red while idle after usage dropped', () => {
-        // memory.peak is a high-water mark for the container's lifetime, so the
-        // signal outlives the usage that caused it.
-        const { container } = renderPanel(stats({ running: false, memory_current_mb: 0, memory_peak_mb: 1024, memory_limit_mb: 1024 }));
-        expect(container.querySelector('.memory-peak')?.classList.contains('reached')).toBe(true);
+        expect(peak.textContent).toContain(`Held ${given.memory_peak_mb} MB at peak`);
+        expect(peak.classList.contains('reached')).toBe(reached);
     });
 
     // The alert is what the user acts on; the OOM line under it is the record, which stays.

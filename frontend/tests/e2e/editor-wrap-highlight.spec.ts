@@ -1,8 +1,8 @@
-import { test, expect, type Browser } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import { writeFileSync, rmSync, mkdirSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'path';
-import { csrfFetch } from './helpers';
+import { csrfFetch, signedInPage } from './helpers';
 
 // Repro for: word wrap interferes with syntax highlighting — while scrolling a
 // wrapped file, an unhighlighted (faded, low-contrast) line sits over the
@@ -178,15 +178,6 @@ async function wrapApplied(page: any, enabled: boolean): Promise<boolean> {
 
 // `page` fixtures aren't available in beforeAll/afterAll — create a dedicated
 // context (with the harness's logged-in storage state) for setup/teardown.
-async function setupPage(browser: Browser) {
-  const context = await browser.newContext({
-    storageState: '/tmp/kanban-test-storage-state.json',
-  });
-  const page = await context.newPage();
-  await page.goto('/');
-  return { context, page };
-}
-
 // serial: tests share the dedicated repo/project created in beforeAll —
 // fullyParallel would otherwise split them across workers (racing beforeAll).
 test.describe.serial('Editor word wrap + syntax highlighting', () => {
@@ -204,7 +195,7 @@ test.describe.serial('Editor word wrap + syntax highlighting', () => {
       stdio: 'ignore',
     });
 
-    const { context, page } = await setupPage(browser);
+    const { context, page } = await signedInPage(browser);
     try {
       const res = await csrfFetch(page, '/api/projects', {
         method: 'POST',
@@ -218,7 +209,7 @@ test.describe.serial('Editor word wrap + syntax highlighting', () => {
   });
 
   test.afterAll(async ({ browser }) => {
-    const { context, page } = await setupPage(browser);
+    const { context, page } = await signedInPage(browser);
     try {
       if (projectId) {
         await csrfFetch(page, `/api/projects/${projectId}`, { method: 'DELETE' });

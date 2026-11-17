@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"mike/backend/config"
 	"mike/backend/extensions"
 	"mike/backend/git"
 	"mike/backend/lsp"
 	"mike/backend/store"
+	"mike/backend/testutil/teststore"
 )
 
 // recordingLSPManager is a language server the pass can be watched talking to. It answers a
@@ -241,7 +241,7 @@ func passSetup(t *testing.T, s *store.Store, projectID, taskID string) *taskExec
 // task rows, a workspace dir for the worktree path, and the recording server.
 func passExecutor(t *testing.T, s *store.Store, mgr lspManager) *TaskExecutor {
 	t.Helper()
-	cs := config.NewConfigStore(s, "", "test", nil, false, false)
+	cs := teststore.ConfigStore(t, s, "")
 	cs.SetWorkspaceDirOverride(t.TempDir())
 	te := newTestExecutorWith(t, Deps{
 		Store:       s,
@@ -252,44 +252,73 @@ func passExecutor(t *testing.T, s *store.Store, mgr lspManager) *TaskExecutor {
 	return te
 }
 
-// TestCollectTurnDiagnostics_OneHandshakePerLanguage: a pass attaches, handshakes and releases
-// once per language, whatever number of files it reads. Attaching per file let each file's
-// Release be the last reference, so the next file cold-started a server that reported nothing.
-func TestCollectTurnDiagnostics_OneHandshakePerLanguage(t *testing.T) {
+// TestCollectTurnDiagnostics_OneSessionPerLanguage: a pass attaches, handshakes and releases each language
+// server exactly once, whatever number of files it reads and however many languages a turn touched.
+// Attaching per file let each file's Release be the last reference, so the next file cold-started a server
+// that reported nothing. The first row's manifest leaves the top-level `language` out, which a manifest is
+// allowed to do: the pass must still attach one server and handshake it once.
+func TestCollectTurnDiagnostics_OneSessionPerLanguage(t *testing.T) {
 	t.Parallel()
-	s := testStore(t)
-	setup := passSetup(t, s, "diag-proj", "diag-task")
-	// lspGoExtension leaves `language` out, which a manifest is allowed to do: the pass must
-	// still attach one server and handshake it once.
-	registry := lspRegistryWith(t, lspGoExtension())
-	fake := newRecordingLSPManager(registry)
-	fake.publish = func(file string) []LSPDiagnostic { return []LSPDiagnostic{errorDiagnostic("bad " + file)} }
-	te := passExecutor(t, s, fake)
+	for _, tc := range []struct {
+		name         string
+		extensions   []*extensions.Extension
+		files        []string
+		wantCreated  []string
+		wantServers  int
+		wantSync     int
+		wantAdvisory string
+	}{
+		{
+			name: "five files of one language", extensions: []*extensions.Extension{lspGoExtension()},
+			files:       []string{"a.go", "b.go", "c.go", "d.go", "e.go"},
+			wantServers: 1, wantSync: 5, wantAdvisory: "(5 files with findings)",
+		},
+		{
+			name: "a turn that touched two languages",
+			extensions: []*extensions.Extension{
+				lspLanguageExtension("gopls", "go", "go"),
+				lspLanguageExtension("typescript", "typescript", "ts"),
+			},
+			files: []string{"main.go", "app.ts", "util.ts"}, wantCreated: []string{"go", "typescript"},
+			wantServers: 2, wantSync: 3, wantAdvisory: "(3 files with findings)",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testStore(t)
+			setup := passSetup(t, s, "diag-proj", "diag-task")
+			fake := newRecordingLSPManager(lspRegistryWith(t, tc.extensions...))
+			fake.publish = func(file string) []LSPDiagnostic { return []LSPDiagnostic{errorDiagnostic("bad " + file)} }
+			te := passExecutor(t, s, fake)
 
-	lc := &loopContext{}
-	for _, f := range []string{"a.go", "b.go", "c.go", "d.go", "e.go"} {
-		lc.noteTouchedFile(f)
-	}
-	te.collectTurnDiagnostics(setup, lc)
+			lc := &loopContext{}
+			for _, f := range tc.files {
+				lc.noteTouchedFile(f)
+			}
+			te.collectTurnDiagnostics(setup, lc)
 
-	initCalls, syncCalls, created, released := fake.counts()
-	if len(initCalls) != 1 {
-		t.Errorf("initialize handshakes = %d (%v), want 1 for a five-file pass", len(initCalls), initCalls)
-	}
-	if len(created) != 1 {
-		t.Errorf("servers attached = %v, want exactly one for five files of one language", created)
-	}
-	if len(released) != 1 {
-		t.Errorf("releases = %d (%v), want 1 — the sandbox reference is taken once per server", len(released), released)
-	}
-	if len(syncCalls) != 5 {
-		t.Errorf("documents synced = %d (%v), want all five files", len(syncCalls), syncCalls)
-	}
-	if len(lc.pendingAdvisories) != 1 {
-		t.Fatalf("advisories = %d, want the pass's findings in one note", len(lc.pendingAdvisories))
-	}
-	if got := lc.pendingAdvisories[0].text; got == "" || !strings.Contains(got, "(5 files with findings)") {
-		t.Errorf("advisory = %q, want all five files reported", got)
+			initCalls, syncCalls, created, released := fake.counts()
+			if tc.wantCreated != nil && strings.Join(created, ",") != strings.Join(tc.wantCreated, ",") {
+				t.Errorf("servers attached = %v, want %v", created, tc.wantCreated)
+			}
+			if len(created) != tc.wantServers {
+				t.Errorf("servers attached = %v, want %d for %d files", created, tc.wantServers, len(tc.files))
+			}
+			if len(initCalls) != len(created) {
+				t.Errorf("initialize handshakes = %v, want one per attached server %v", initCalls, created)
+			}
+			if len(released) != len(created) {
+				t.Errorf("releases = %v, want one per attached server %v — the sandbox reference is taken once per server", released, created)
+			}
+			if len(syncCalls) != tc.wantSync {
+				t.Errorf("documents synced = %d (%v), want all %d files", len(syncCalls), syncCalls, tc.wantSync)
+			}
+			if len(lc.pendingAdvisories) != 1 {
+				t.Fatalf("advisories = %d, want the pass's findings in one note", len(lc.pendingAdvisories))
+			}
+			if got := lc.pendingAdvisories[0].text; !strings.Contains(got, tc.wantAdvisory) {
+				t.Errorf("advisory = %q, want every file reported (%s)", got, tc.wantAdvisory)
+			}
+		})
 	}
 }
 
@@ -326,41 +355,6 @@ func TestCollectTurnDiagnostics_UnchangedFilesProduceNoHint(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
 		t.Errorf("unchanged pass took %v: it waited for publishDiagnostics that was never going to arrive", elapsed)
-	}
-}
-
-// TestCollectTurnDiagnostics_OneSessionPerLanguage: a turn that touched Go and TypeScript must
-// attach, handshake and release each server once.
-func TestCollectTurnDiagnostics_OneSessionPerLanguage(t *testing.T) {
-	t.Parallel()
-	s := testStore(t)
-	setup := passSetup(t, s, "diag-proj", "diag-task")
-	registry := lspRegistryWith(t, lspLanguageExtension("gopls", "go", "go"), lspLanguageExtension("typescript", "typescript", "ts"))
-	fake := newRecordingLSPManager(registry)
-	fake.publish = func(file string) []LSPDiagnostic { return []LSPDiagnostic{errorDiagnostic("bad " + file)} }
-	te := passExecutor(t, s, fake)
-
-	lc := &loopContext{}
-	lc.noteTouchedFile("main.go")
-	lc.noteTouchedFile("app.ts")
-	lc.noteTouchedFile("util.ts")
-	te.collectTurnDiagnostics(setup, lc)
-
-	initCalls, _, created, released := fake.counts()
-	if len(created) != 2 || created[0] != "go" || created[1] != "typescript" {
-		t.Errorf("servers attached = %v, want [go typescript]", created)
-	}
-	if len(initCalls) != 2 {
-		t.Errorf("handshakes = %v, want one per language", initCalls)
-	}
-	if len(released) != 2 {
-		t.Errorf("releases = %v, want one per attached server", released)
-	}
-	if len(lc.pendingAdvisories) != 1 {
-		t.Fatalf("advisories = %d, want one note carrying both languages", len(lc.pendingAdvisories))
-	}
-	if got := lc.pendingAdvisories[0].text; !strings.Contains(got, "(3 files with findings)") {
-		t.Errorf("advisory = %q, want findings from both languages", got)
 	}
 }
 

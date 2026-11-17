@@ -138,9 +138,9 @@ fill. The box cannot, because its write is debounced and during the wait only th
 the box is judged against the belief instead.
 
 On a send, or when a task read answers 404, the tray and its record both go (`dropDraftAttachments`) — the
-images went with the message, or the task went. `chat-draft-deleted-stays-deleted.spec.ts` and
-`chat-draft-attachments-stay-deleted.spec.ts` hold each half, each with a case that deletes while a
-re-read is provably in flight.
+images went with the message, or the task went. `chat-draft-persistence.spec.ts` and
+`chat-draft-attachments-stay-deleted.spec.ts` hold each half, the text one also with a case that deletes
+while a re-read is provably in flight.
 
 ## Execution State Sync
 
@@ -163,7 +163,7 @@ So the disagreement is what asks the server. `TaskChat` runs the reconciliation 
 ### The Offline Mirror
 The app maintains a local mirror of the board (`board:<projectId>`) in browser storage.
 - **Usage**: When the socket is down, the app displays the mirrored board.
-- **Freshness**: The "Data from {age}" banner indicates the age of the mirrored data.
+- **Freshness**: The "Data from {age}" banner indicates the age of the mirrored data. The mirror is written from frames as well as from fetches, so a card a frame moved is in its new column on a mirror reload.
 - **Recovery**: Clicking "Connect" in the cache banner skips the WebSocket backoff and forces a `silentRefresh()`.
 - **The offline screen answers from the mirror, under the loading screen.** Booting past the offer
   ("Offline Mode") reads projects, the board and the config out of IndexedDB, with **no request in front of
@@ -192,8 +192,9 @@ The server does not time out slow clients. Instead:
 
 ## Verification
 
-`make test-frontend` runs the unit files below; `make test-e2e SPECS=reconnect-refresh` runs the specs.
+`make test-frontend` runs the unit files below; `make test-e2e SPECS=ws-stale-reconnect` runs the specs.
 
-- **E2E Tests**: `reconnect-refresh.spec.ts`, `away-and-back.spec.ts`, `sync-return-freshness.spec.ts`, `focus-return-review.spec.ts`, `offline-mode-cached-board.spec.ts`, `offline-send-queue.spec.ts`, `editor-external-change.spec.ts`, `chat-draft-persistence.spec.ts`, `chat-draft-deleted-stays-deleted.spec.ts`, `chat-draft-attachments-stay-deleted.spec.ts`.
+- **E2E Tests**: `ws-stale-reconnect.spec.ts` (the banner, the wake-up refresh, and the board and chat holding what the server wrote while the window was away), `away-and-back.spec.ts`, `away-window-chat.spec.ts`, `return-transcript-order.spec.ts`, `sync-return-freshness.spec.ts`, `focus-return-review.spec.ts`, `offline-mode-cached-board.spec.ts`, `offline-send-queue.spec.ts`, `editor-external-change.spec.ts`, `chat-draft-persistence.spec.ts` and `chat-draft-attachments-stay-deleted.spec.ts`.
 - **Unit Tests**: `connection-restored.unit.svelte.ts`, `task-events-delivery.unit.svelte.ts`, `stream-subscription.unit.ts`, `chat-history-merge.unit.ts`, `session-boot.unit.svelte.ts`, and for the editor buffer `editor-merge.unit.ts`, `editor-conflict.unit.ts`, `editor-draft-merge-on-open.unit.svelte.ts`, `editor-buffer-persistence.unit.svelte.ts`, `storage-editor-draft.unit.ts`, and for the chat draft `chat-draft.unit.ts`.
-- **Backend Tests**: `app_stream_test.go`, `app_stream_subscribe_race_test.go`, `handler_task_sync_test.go`.
+- **Backend Tests**: `app_stream_test.go`, `app_stream_subscribe_race_test.go`,
+  `handler_message_window_test.go` (whose revalidation table covers the sync digest too).

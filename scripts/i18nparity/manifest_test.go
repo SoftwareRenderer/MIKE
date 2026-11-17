@@ -104,14 +104,8 @@ func TestManifestRejectsPermissions(t *testing.T) {
 	requireErrorContaining(t, f, "permissions")
 }
 
-func TestManifestDescriptionMustBeEnglish(t *testing.T) {
-	f, _ := loadManifestOf(t, func(m map[string]any) {
-		m["description"] = "简体中文翻译包，用于 MIKE 界面与提示词。"
-	})
-	requireErrorContaining(t, f, "must be English")
-}
-
-// The rule is "written in English", not "written in ASCII". This exact false positive fired on
+// The rule is "written in English", not "written in ASCII": a description in another language is
+// refused, and a pack whose English is fluent but not ASCII must pass. This exact false positive fired on
 // the sibling ja pack's real description, which is fluent English containing an em dash.
 func TestManifestDescriptionAllowsEnglishTypography(t *testing.T) {
 	for _, ok := range []string{

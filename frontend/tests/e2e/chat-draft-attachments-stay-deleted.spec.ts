@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { getProjectId, createTaskViaApi, navigateToTask, ensureTaskStarted, isolatedProject, clearTasksAfterEach, gotoProject, sendMessage, waitForTurnAnswered, clickCard } from './helpers';
+import { getProjectId, createTaskViaApi, navigateToTask, ensureTaskStarted, isolatedProject, clearTasksAfterEach, gotoProject, sendMessage, waitForTurnAnswered, clickCard, readStored } from './helpers';
 
 // A turn runs in this file's tasks, and turns are queued per project: own the project.
 isolatedProject();
@@ -29,16 +29,7 @@ function openTaskId(page: Page): string {
 
 /** What the `attachments` store holds for this task, or null when it holds nothing. */
 function storedAttachments(page: Page, taskId: string): Promise<StoredAttachment[] | null> {
-    return page.evaluate(async (tid) => new Promise<StoredAttachment[] | null>((resolve) => {
-        const open = indexedDB.open('kanban-storage');
-        open.onsuccess = () => {
-            const db = open.result;
-            const request = db.transaction('attachments', 'readonly').objectStore('attachments').get(tid);
-            request.onsuccess = () => resolve(request.result === undefined ? null : request.result);
-            request.onerror = () => resolve(null);
-        };
-        open.onerror = () => resolve(null);
-    }), taskId);
+    return readStored<StoredAttachment[]>(page, 'attachments', taskId);
 }
 
 /** How many thumbnails the composer's tray holds, or `-1` while the form is not on screen. */
@@ -50,7 +41,8 @@ function trayThumbs(page: Page): Promise<number> {
 }
 
 async function openTask(page: Page, projectId: string): Promise<void> {
-    const taskId = await createTaskViaApi(page, projectId, `deleted-attachment-${Date.now()}`);
+    // Pinned to `text`: the task's own turn has to answer and end before the tray is worked on.
+    const taskId = await createTaskViaApi(page, projectId, `deleted-attachment-${Date.now()} llm-fixture:text`);
     await navigateToTask(page, taskId, projectId);
     await ensureTaskStarted(page, projectId, taskId);
     await expect(page.locator('.chat-form')).toBeVisible();
@@ -113,7 +105,7 @@ test.describe('Draft images the person removed', () => {
         const projectId = await getProjectId(page);
         await openTask(page, projectId);
         const taskId = openTaskId(page);
-        const awayId = await createTaskViaApi(page, projectId, `switch-away-${Date.now()}`);
+        const awayId = await createTaskViaApi(page, projectId, `switch-away-${Date.now()} llm-fixture:text`);
         await ensureTaskStarted(page, projectId, awayId);
 
         await attachImage(page);

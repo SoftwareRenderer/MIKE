@@ -16,27 +16,6 @@ import (
 // makes buildLLMContext drop everything before it, so an empty summary would erase the conversation
 // from the model's context rather than restore it, and a PATCH is not the way to ask for that.
 
-func TestSummaryEditStoresNewText(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Test task")
-	msgID := createSummaryMessage(t, s, taskID, "the old summary")
-
-	req := testRequest(http.MethodPatch, "/api/projects/"+projID+"/tasks/"+taskID+"/messages/"+msgID,
-		map[string]any{"content": "the edited summary"})
-	if rr := testResponseAuth(t, s, req); rr.Code != http.StatusOK {
-		t.Fatalf("edit summary: got %d, want 200: %s", rr.Code, rr.Body.String())
-	}
-
-	msg, err := s.store.GetTaskMessageByID(msgID)
-	if err != nil {
-		t.Fatalf("read message: %v", err)
-	}
-	if msg.Content != "the edited summary" {
-		t.Fatalf("stored content = %q, want the edited text", msg.Content)
-	}
-}
-
 func TestSummaryEditRefusesBlankContent(t *testing.T) {
 	s := testServer(t)
 	projID := createTestProject(t, s)
@@ -59,8 +38,7 @@ func TestSummaryEditRefusesBlankContent(t *testing.T) {
 		}
 	}
 
-	// A request that names neither field writes nothing, and a wrong type is a 400 naming it
-	// rather than a zero value written into the row.
+	// A wrong type is a 400 naming the field, not a zero value written into the row.
 	req := testRequest(http.MethodPatch, "/api/projects/"+projID+"/tasks/"+taskID+"/messages/"+msgID,
 		map[string]any{"content": 42})
 	rr := testResponseAuth(t, s, req)

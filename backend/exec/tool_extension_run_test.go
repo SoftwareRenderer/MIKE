@@ -120,68 +120,162 @@ func TestContributedToolRunsTheDeclaredRequest(t *testing.T) {
 	}
 }
 
-// The default is the manifest's; a parameter resolving to nothing is dropped, not sent empty.
-func TestContributedToolDefaultsAnOmittedArgument(t *testing.T) {
+// The declaration's own request is what goes out, for either verb: the manifest templates the URL and
+// the query, the model fills the arguments, and a parameter that resolves to nothing takes the
+// declared default. The grant — the host a person typed into the `url` property — travels with the
+// call, which is what widens the address rule for loopback and nothing else.
+func TestContributedToolSendsTheDeclaredRequest(t *testing.T) {
 	t.Parallel()
-	fake := &recordedEgress{result: jsonResult(searxResults(1, 1))}
-	if _, ok := runSearch(t, "https://searx.example", map[string]any{"query": "x"}, fake); !ok {
-		t.Fatal("the call failed")
-	}
-	u, _ := url.Parse(fake.url)
-	if got := u.Query().Get("categories"); got != "general" {
-		t.Errorf("categories = %q, want the declared default", got)
-	}
-}
-
-// max_results limits how much of an answer reaches the model, and the answer says how much was left out.
-func TestContributedToolCapsWhatItRenders(t *testing.T) {
-	t.Parallel()
-	fake := &recordedEgress{result: jsonResult(searxResults(12, 12))}
-	result, ok := runSearch(t, "https://searx.example", map[string]any{"query": "x"}, fake)
-	if !ok {
-		t.Fatalf("the call failed: %s", result)
-	}
-	if !strings.HasPrefix(result, "5 results of 12") {
-		t.Errorf("answer header = %q, want five rendered of twelve", firstLine(result))
-	}
-	if !strings.Contains(result, "7 more results") {
-		t.Errorf("the answer hides what was left out:\n%s", result)
-	}
-	if strings.Contains(result, "Result F") {
-		t.Error("the cap was not applied")
-	}
-}
-
-// A POST sends the declared parameters as a form: the model supplies arguments, never bytes.
-func TestContributedToolSendsAFormOnPost(t *testing.T) {
-	t.Parallel()
-	manifest := strings.Replace(searxngManifest, `"method": "GET"`, `"method": "POST"`, 1)
-	ext := searchToolExtension("http://127.0.0.1:8888")
-	var parsed extensions.ExtensionManifest
-	if err := json.Unmarshal([]byte(manifest), &parsed); err != nil {
+	postManifest := strings.Replace(searxngManifest, `"method": "GET"`, `"method": "POST"`, 1)
+	postExt := searchToolExtension("http://127.0.0.1:8888")
+	if err := json.Unmarshal([]byte(postManifest), &postExt.Manifest); err != nil {
 		t.Fatalf("manifest: %v", err)
 	}
-	ext.Manifest = parsed
 
-	te := newTestExecutorWith(t, Deps{ExtensionTools: toolRegistryWith(t, ext)})
-	fake := &recordedEgress{result: jsonResult(searxResults(1, 1))}
-	te.tools.egress = fake.func_
-	if _, ok := te.executeTool(context.Background(), "web_search", map[string]any{"query": "x"}, "/tmp/wt",
-		&types.Task{ID: "t"}, &executionState{}, nil); !ok {
-		t.Fatal("the POST call failed")
+	cases := []struct {
+		name    string
+		address string
+		ext     *extensions.Extension
+		args    map[string]any
+		method  string
+		url     string // scheme://host[:port] + path
+		query   map[string]string
+		form    map[string]string
+		granted string
+	}{
+		{
+			name: "GET fills the declared query", address: "https://searx.example",
+			args:   map[string]any{"query": "x", "category": "it"},
+			method: "GET", url: "https://searx.example:443/search",
+			query:   map[string]string{"q": "x", "categories": "it", "format": "json"},
+			granted: "searx.example",
+		},
+		{
+			name: "an omitted argument takes its declared default", address: "https://searx.example",
+			args:   map[string]any{"query": "x"},
+			method: "GET", url: "https://searx.example:443/search",
+			query:   map[string]string{"q": "x", "categories": "general", "format": "json"},
+			granted: "searx.example",
+		},
+		{
+			name: "POST sends the arguments as a form", ext: postExt,
+			args:   map[string]any{"query": "x"},
+			method: "POST", url: "http://127.0.0.1:8888/search",
+			form:    map[string]string{"q": "x", "categories": "general", "format": "json"},
+			granted: "127.0.0.1",
+		},
 	}
-	if fake.method != "POST" {
-		t.Errorf("method = %q, want POST", fake.method)
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &recordedEgress{result: jsonResult(searxResults(1, 1))}
+			var result string
+			var ok bool
+			if tc.ext != nil {
+				te := newTestExecutorWith(t, Deps{ExtensionTools: toolRegistryWith(t, tc.ext)})
+				te.tools.egress = fake.func_
+				result, ok = te.executeTool(context.Background(), "web_search", tc.args, "/tmp/wt",
+					&types.Task{ID: "t"}, &executionState{}, nil)
+			} else {
+				result, ok = runSearch(t, tc.address, tc.args, fake)
+			}
+			if !ok {
+				t.Fatalf("the call failed: %s", result)
+			}
+			if fake.calls != 1 {
+				t.Fatalf("egress calls = %d, want 1", fake.calls)
+			}
+			if fake.method != tc.method {
+				t.Errorf("method = %q, want %q", fake.method, tc.method)
+			}
+			u, err := url.Parse(fake.url)
+			if err != nil {
+				t.Fatalf("the request URL does not parse: %v", err)
+			}
+			if got := u.Scheme + "://" + u.Host + u.Path; got != tc.url {
+				t.Errorf("requested %q, want the configured origin plus its declared path", got)
+			}
+			for key, want := range tc.query {
+				if got := u.Query().Get(key); got != want {
+					t.Errorf("query %s = %q, want %q", key, got, want)
+				}
+			}
+			if tc.method == "POST" {
+				if strings.Contains(fake.url, "?") {
+					t.Errorf("a POST put its parameters in the URL: %s", fake.url)
+				}
+				for key, want := range tc.form {
+					if got := fake.form.Get(key); got != want {
+						t.Errorf("form %s = %q, want %q", key, got, want)
+					}
+				}
+			}
+			if len(fake.granted) != 1 || fake.granted[0] != tc.granted {
+				t.Errorf("granted hosts = %v, want the one host a person configured (%s)", fake.granted, tc.granted)
+			}
+			if !fake.hadDeadln {
+				t.Error("the upstream call has no deadline; a silent instance would hold the turn")
+			}
+		})
 	}
-	if strings.Contains(fake.url, "?") {
-		t.Errorf("a POST put its parameters in the URL: %s", fake.url)
+}
+
+// What an upstream answer becomes in the conversation: `max_results` bounds how much of it is
+// rendered and the answer says how much was left out, a declared snippet length clamps one field
+// rather than letting it pull the whole document in, and no results is an answer, not a failure.
+func TestContributedToolAnswerShape(t *testing.T) {
+	t.Parallel()
+	wide, err := json.Marshal(map[string]any{
+		"number_of_results": 1,
+		"results":           []any{map[string]any{"title": "T", "url": "u", "content": strings.Repeat("word ", 400)}},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := fake.form.Get("q"); got != "x" {
-		t.Errorf("form q = %q, want the argument", got)
+
+	cases := []struct {
+		name   string
+		result *extensions.EgressResult
+		wants  []string
+		bans   []string
+	}{
+		{
+			name:   "max_results caps the rendered items and says what was left out",
+			result: jsonResult(searxResults(12, 12)),
+			wants:  []string{"5 results of 12", "7 more results"},
+			bans:   []string{"Result F"},
+		},
+		{
+			name:   "a long field is clamped and says so",
+			result: jsonResult(wide),
+			wants:  []string{"…"},
+			bans:   []string{strings.Repeat("word ", 400)},
+		},
+		{
+			name:   "no results is an answer",
+			result: jsonResult([]byte(`{"number_of_results":0,"results":[]}`)),
+			wants:  []string{"No results"},
+		},
 	}
-	// The grant travels with the call.
-	if len(fake.granted) != 1 || fake.granted[0] != "127.0.0.1" {
-		t.Errorf("granted = %v, want the configured loopback host", fake.granted)
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &recordedEgress{result: tc.result}
+			result, ok := runSearch(t, "https://searx.example", map[string]any{"query": "x"}, fake)
+			if !ok {
+				t.Fatalf("the call failed: %s", result)
+			}
+			for _, want := range tc.wants {
+				if !strings.Contains(result, want) {
+					t.Errorf("the answer is missing %q:\n%s", want, firstLine(result))
+				}
+			}
+			for _, ban := range tc.bans {
+				if strings.Contains(result, ban) {
+					t.Errorf("the answer carries %q, which the declaration capped", firstChars(ban, 40))
+				}
+			}
+		})
 	}
 }
 
@@ -230,43 +324,6 @@ func TestContributedToolUnconfiguredRefusesTheCall(t *testing.T) {
 	}
 	if fake.calls != 0 {
 		t.Errorf("egress was called %d times for a tool that is not offered", fake.calls)
-	}
-}
-
-// One field must not pull the whole upstream document into the context.
-func TestContributedToolClampsASnippet(t *testing.T) {
-	t.Parallel()
-	body, err := json.Marshal(map[string]any{
-		"number_of_results": 1,
-		"results":           []any{map[string]any{"title": "T", "url": "u", "content": strings.Repeat("word ", 400)}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	fake := &recordedEgress{result: jsonResult(body)}
-	result, ok := runSearch(t, "https://searx.example", map[string]any{"query": "x"}, fake)
-	if !ok {
-		t.Fatalf("the call failed: %s", result)
-	}
-	if strings.Contains(result, strings.Repeat("word ", 400)) {
-		t.Errorf("the snippet was not clamped (%d bytes)", len(result))
-	}
-	if !strings.Contains(result, "…") {
-		t.Error("a clamped snippet does not say it was clamped")
-	}
-}
-
-// No results is an answer, not an error.
-func TestContributedToolEmptyAnswerIsNotAFailure(t *testing.T) {
-	t.Parallel()
-	body, _ := json.Marshal(map[string]any{"number_of_results": 0, "results": []any{}})
-	fake := &recordedEgress{result: jsonResult(body)}
-	result, ok := runSearch(t, "https://searx.example", map[string]any{"query": "x"}, fake)
-	if !ok {
-		t.Fatalf("an empty result set was reported as a failure: %s", result)
-	}
-	if !strings.Contains(result, "No results") {
-		t.Errorf("answer = %q", result)
 	}
 }
 

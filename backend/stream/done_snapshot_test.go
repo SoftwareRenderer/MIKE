@@ -10,6 +10,7 @@ import (
 	"mike/backend/git"
 	"mike/backend/store"
 	"mike/backend/testutil/testgit"
+	"mike/backend/testutil/teststore"
 	"mike/backend/types"
 )
 
@@ -24,19 +25,10 @@ func setupDoneSnapshotTest(t *testing.T) (string, *store.Store, *config.ConfigSt
 	os.MkdirAll(repoDir, 0o755)
 	os.MkdirAll(worktreesDir, 0o755)
 
-	testgit.Git(t, repoDir, "init")
-	testgit.Git(t, repoDir, "config", "user.email", "test@test.com")
-	testgit.Git(t, repoDir, "config", "user.name", "Test")
-	testgit.WriteFile(t, repoDir, "README.md", "# Base\n")
-	testgit.Git(t, repoDir, "add", "README.md")
-	testgit.Git(t, repoDir, "commit", "-m", "initial")
+	testgit.RepoAtMessage(t, repoDir, "initial")
 
-	s, err := store.NewStore(filepath.Join(tmpDir, "test.db"))
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
-	cfgStore := config.NewConfigStore(s, filepath.Join(tmpDir, "cfg.db"), "test", nil, false, false)
+	s := teststore.StoreIn(t, filepath.Join(tmpDir, "test.db"))
+	cfgStore := teststore.ConfigStore(t, s, filepath.Join(tmpDir, "cfg.db"))
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 	cfg, err := cfgStore.GetConfig()
 	if err != nil {

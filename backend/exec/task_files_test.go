@@ -7,12 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"mike/backend/config"
 	"mike/backend/errs"
 	"mike/backend/git"
 	"mike/backend/sandbox"
-	"mike/backend/store"
 	"mike/backend/testutil/testgit"
+	"mike/backend/testutil/teststore"
 	"mike/backend/types"
 )
 
@@ -35,13 +34,9 @@ func uploadFixture(t *testing.T, sandboxed bool) (*TaskExecutor, string, string)
 	testgit.Git(t, repoDir, "commit", "-m", "Initial")
 
 	dbPath := filepath.Join(tmpDir, "uploads.db")
-	s, err := store.NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s := teststore.StoreIn(t, dbPath)
 
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false, false)
+	cfgStore := teststore.ConfigStore(t, s, dbPath)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 
 	now := time.Now().UTC()

@@ -4,12 +4,9 @@ package stream
 // stats and the panel's diff computed against different commits.
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
-	"mike/backend/config"
 	"mike/backend/git"
 	"mike/backend/store"
 	"mike/backend/testutil/testgit"
@@ -27,44 +24,10 @@ type watcherBaselineEnv struct {
 func newWatcherBaselineEnv(t *testing.T) *watcherBaselineEnv {
 	t.Helper()
 
-	tmpDir := t.TempDir()
-	repoDir := filepath.Join(tmpDir, "repo")
-	worktreesDir := filepath.Join(tmpDir, "worktrees")
-	if err := os.MkdirAll(repoDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(worktreesDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	testgit.Git(t, repoDir, "init")
-	testgit.Git(t, repoDir, "config", "user.email", "test@test.com")
-	testgit.Git(t, repoDir, "config", "user.name", "Test")
-	testgit.WriteFile(t, repoDir, "README.md", "# Test\n")
-	testgit.Git(t, repoDir, "add", "README.md")
-	testgit.Git(t, repoDir, "commit", "-m", "Initial")
-	mainBranch := strings.TrimSpace(testgit.GitOutput(t, repoDir, "rev-parse", "--abbrev-ref", "HEAD"))
-
-	dbPath := filepath.Join(tmpDir, "test.db")
-	s, err := store.NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
-
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false, false)
-	cfgStore.SetWorkspaceDirOverride(worktreesDir)
-	cfg, err := cfgStore.GetConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := cfgStore.UpdateConfig(cfg); err != nil {
-		t.Fatal(err)
-	}
-
 	projectID := "baseline-project"
-	if err := s.CreateProject(&types.Project{ID: projectID, Name: "baseline", Path: repoDir}); err != nil {
-		t.Fatal(err)
-	}
+	f := newWatcherFixture(t, projectID, "baseline")
+	mainBranch, s := f.MainBranch, f.Store
+
 	taskID := "baseline-task"
 	taskBranch := "task/" + taskID
 	if err := s.CreateTask(&types.Task{
@@ -73,12 +36,12 @@ func newWatcherBaselineEnv(t *testing.T) *watcherBaselineEnv {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	wm := git.NewWorktreeManager(s, cfgStore)
+	wm := git.NewWorktreeManager(s, f.Config)
 	if _, _, err := wm.CreateWorktree(projectID, taskID, taskBranch, ""); err != nil {
 		t.Fatalf("create worktree: %v", err)
 	}
 
-	e := &watcherBaselineEnv{wm: wm, store: s, projectID: projectID, taskID: taskID, repoDir: repoDir}
+	e := &watcherBaselineEnv{wm: wm, store: s, projectID: projectID, taskID: taskID, repoDir: f.RepoDir}
 	e.commitOnTaskBranch(t, "before-fork.txt", "work before the fork\n", "commit before the fork")
 	return e
 }

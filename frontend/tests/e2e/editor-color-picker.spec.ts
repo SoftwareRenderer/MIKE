@@ -1,8 +1,8 @@
-import { test, expect, type Browser, type Page } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { readFileSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'path';
-import { csrfFetch } from './helpers';
+import { csrfFetch, signedInPage } from './helpers';
 
 // Clicking a hex value in a stylesheet opens the color card on that value, and Apply replaces it through
 // the editor's own edit path (dirty tab, draft, Save).
@@ -26,13 +26,6 @@ const FIXTURE = [
   '',
 ].join('\n');
 
-async function setupPage(browser: Browser) {
-  const context = await browser.newContext({ storageState: '/tmp/kanban-test-storage-state.json' });
-  const page = await context.newPage();
-  await page.goto('/');
-  return { context, page };
-}
-
 /** The card's own text field — `[role="dialog"]` is never a unique locator. */
 const card = (page: Page) => page.locator('.color-card');
 
@@ -50,7 +43,7 @@ test.describe.serial('A clicked color in a stylesheet', () => {
       stdio: 'ignore',
     });
 
-    const { context, page } = await setupPage(browser);
+    const { context, page } = await signedInPage(browser);
     try {
       const res = await csrfFetch(page, '/api/projects', { method: 'POST', body: { path: COLOR_REPO } });
       if (!res.ok) throw new Error(`create color project: ${JSON.stringify(res.data)}`);
@@ -61,7 +54,7 @@ test.describe.serial('A clicked color in a stylesheet', () => {
   });
 
   test.afterAll(async ({ browser }) => {
-    const { context, page } = await setupPage(browser);
+    const { context, page } = await signedInPage(browser);
     try {
       if (projectId) await csrfFetch(page, `/api/projects/${projectId}`, { method: 'DELETE' });
     } finally {
@@ -135,7 +128,8 @@ test.describe.serial('A clicked color in a stylesheet', () => {
   });
 
   test('a tap opens it too, and Escape leaves the file alone', async ({ browser }) => {
-    const context = await browser.newContext({ hasTouch: true, storageState: '/tmp/kanban-test-storage-state.json' });
+    // The project's storage state comes with a context of its own; only the touch emulation is added.
+    const context = await browser.newContext({ hasTouch: true });
     const page = await context.newPage();
     try {
       await page.goto('/');

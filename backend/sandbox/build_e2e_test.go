@@ -24,10 +24,17 @@ func requireBuilder(t *testing.T) {
 	sandboxcheck.Require(t, sandboxruntime.BuilderImageDefault)
 }
 
-// buildE2E is a project with a committed Dockerfile, in a scratch root of its own.
+// buildE2E is a project with a committed Dockerfile, in a scratch root of its own, on a host that can
+// run the build. A test that only needs the project row — because the build it asserts never reaches
+// podman — asks stageBuildProject instead, so it runs here rather than skipping.
 func buildE2E(t *testing.T, files map[string]string, contextRoot string) (*SandboxManager, *types.Project, string) {
 	t.Helper()
 	requireBuilder(t)
+	return stageBuildProject(t, files, contextRoot)
+}
+
+func stageBuildProject(t *testing.T, files map[string]string, contextRoot string) (*SandboxManager, *types.Project, string) {
+	t.Helper()
 	repo := testRepo(t, files)
 	useScratchRoot(t)
 	sm := NewSandboxManager(bootWithBridge(t))
@@ -390,11 +397,17 @@ func TestLoadRetiresThePreviousImageOnlyAfterTheNewOneIsAccepted(t *testing.T) {
 	}
 }
 
-// requireHostImage gates a test on this host being able to run a container from ref: the archive and
-// build paths hand that image around for real.
+// requireHostImage gates a test on this host holding ref: the archive and load paths hand that image
+// around for real, and a store that never fetched it answers "no such image" — a missing prerequisite,
+// which skips naming itself rather than going red (docs/testing.md → An image a test needs is staged,
+// never pulled). Nothing here pulls: `Require` asks no image-exists question, so the store is asked
+// directly.
 func requireHostImage(t *testing.T, ref string) {
 	t.Helper()
-	sandboxcheck.Require(t, ref)
+	sandboxcheck.RequireBuild(t)
+	if out, err := exec.Command("podman", "image", "exists", ref).CombinedOutput(); err != nil {
+		t.Skipf("this host's podman store does not hold %s to stage from: %s", ref, strings.TrimSpace(string(out)))
+	}
 }
 
 func imageID(t *testing.T, image string) string {
@@ -519,7 +532,9 @@ func shortImageID(id string) string {
 // what this machine happens to hold. The rule has to hold for an `ARG` default too, the other way a file names a
 // base.
 func TestBuildCannotNameAHostLocalImageByShortName(t *testing.T) {
-	requireHostImage(t, "docker.io/library/alpine:3.20")
+	// The test's own base is a `FROM scratch` build, so the question is the build one and no registry
+	// image is involved: a short FROM must never read the host's store.
+	sandboxcheck.RequireBuild(t)
 	const short = "mike-host-store-probe"
 	const localRef = "localhost/" + short + ":1"
 	dir := t.TempDir()
@@ -529,7 +544,6 @@ func TestBuildCannotNameAHostLocalImageByShortName(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM scratch\nCOPY marker /marker\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sandboxcheck.RequireBuild(t)
 	if out, err := exec.Command("podman", "build", "-t", localRef, "-f", filepath.Join(dir, "Dockerfile"), dir).CombinedOutput(); err != nil {
 		t.Fatalf("build the local base the test needs: %s", strings.TrimSpace(string(out)))
 	}

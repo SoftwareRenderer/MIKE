@@ -28,7 +28,8 @@ The `[Board][Chat][Diff]` columns are focusable. Handlers live in `CardDetail.sv
     - **Chat**: Answers all four from any focus inside the column; uses `chatScrollDelta` to scroll the transcript (which is not a tab stop).
 - **Editable fields**: Plain arrows in inputs keep native text behavior.
 
-Tests: `composables/__tests__/task-detail-column-nav.unit.ts`, e2e `task-view-column-nav.spec.ts`, and `chat-scroll-takeover.spec.ts`.
+Tests: `composables/__tests__/task-detail-column-nav.unit.ts`, e2e `task-view-column-nav.spec.ts`, and the
+keyboard half of `chat-scroll-follow.spec.ts`.
 
 ## File List (`FileBrowserView.svelte`)
 
