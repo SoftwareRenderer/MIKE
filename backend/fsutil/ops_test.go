@@ -223,68 +223,89 @@ func TestCopyTreeSkipsNestedGitDir(t *testing.T) {
 	}
 }
 
-func TestCopyTreeRefusesOversizedFile(t *testing.T) {
-	dir := t.TempDir()
-	src := filepath.Join(dir, "big.bin")
-	f, err := os.Create(src)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := f.Truncate(CopyMaxBytes + 1); err != nil {
-		t.Fatal(err)
-	}
-	f.Close()
-
-	dst := filepath.Join(dir, "dst.bin")
-	if err := CopyTree(src, dst); !errors.Is(err, ErrCopyTooLarge) {
-		t.Fatalf("CopyTree = %v, want ErrCopyTooLarge", err)
-	}
-	// The size check runs before anything is written.
-	if _, err := os.Lstat(dst); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("a refused copy must leave no destination")
-	}
-}
-
-func TestCopyTreeRefusesTooDeepTree(t *testing.T) {
-	dir := t.TempDir()
-	deep := filepath.Join(dir, "src")
-	tail := deep
-	for i := 0; i <= CopyMaxDepth; i++ {
-		tail = filepath.Join(tail, "level")
-	}
-	writeTestFile(t, filepath.Join(tail, "leaf.txt"), "leaf")
-
-	if err := CopyTree(deep, filepath.Join(dir, "dst")); !errors.Is(err, ErrCopyTooLarge) {
-		t.Fatalf("CopyTree = %v, want ErrCopyTooLarge", err)
-	}
-}
-
-func TestCopyTreeRefusesTooManyEntries(t *testing.T) {
-	dir := t.TempDir()
-	src := filepath.Join(dir, "src")
-	if err := os.MkdirAll(src, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for i := 0; i <= CopyMaxEntries; i++ {
-		f, err := os.Create(filepath.Join(src, "f"+strconv.Itoa(i)))
+// TestCopyTreeRefusesATreePastItsLimits: the three limits are measured by the walk before the first byte
+// is written, so a tree too big to copy costs a walk and leaves nothing behind.
+func TestCopyTreeRefusesATreePastItsLimits(t *testing.T) {
+	oversized := func(t *testing.T, src string) {
+		f, err := os.Create(src)
 		if err != nil {
+			t.Fatal(err)
+		}
+		if err := f.Truncate(CopyMaxBytes + 1); err != nil {
 			t.Fatal(err)
 		}
 		f.Close()
 	}
+	tooDeep := func(t *testing.T, src string) {
+		tail := src
+		for i := 0; i <= CopyMaxDepth; i++ {
+			tail = filepath.Join(tail, "level")
+		}
+		writeTestFile(t, filepath.Join(tail, "leaf.txt"), "leaf")
+	}
+	tooManyEntries := func(t *testing.T, src string) {
+		if err := os.MkdirAll(src, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i <= CopyMaxEntries; i++ {
+			f, err := os.Create(filepath.Join(src, "f"+strconv.Itoa(i)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.Close()
+		}
+	}
 
-	if err := CopyTree(src, filepath.Join(dir, "dst")); !errors.Is(err, ErrCopyTooLarge) {
-		t.Fatalf("CopyTree = %v, want ErrCopyTooLarge", err)
+	for _, tc := range []struct {
+		name  string
+		plant func(t *testing.T, src string)
+	}{
+		{"a file past CopyMaxBytes", oversized},
+		{"a tree deeper than CopyMaxDepth", tooDeep},
+		{"a tree with more than CopyMaxEntries", tooManyEntries},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			src := filepath.Join(dir, "src")
+			tc.plant(t, src)
+
+			dst := filepath.Join(dir, "dst")
+			if err := CopyTree(src, dst); !errors.Is(err, ErrCopyTooLarge) {
+				t.Fatalf("CopyTree = %v, want ErrCopyTooLarge", err)
+			}
+			// The size check runs before anything is written.
+			if _, err := os.Lstat(dst); !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("a refused copy must leave no destination")
+			}
+		})
 	}
 }
 
-func TestCopyTreeRefusesDestinationInsideSource(t *testing.T) {
-	dir := t.TempDir()
-	src := filepath.Join(dir, "src")
-	writeTestFile(t, filepath.Join(src, "a.txt"), "a")
+func TestCopyAndMoveRefuseADestinationInsideTheSource(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		run  func(src, dst string) error
+	}{
+		{"copy", CopyTree},
+		{"move", MovePath},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			src := filepath.Join(dir, "src")
+			writeTestFile(t, filepath.Join(src, "a.txt"), "a")
 
-	if err := CopyTree(src, filepath.Join(src, "inner", "dst")); !errors.Is(err, ErrCopyIntoItself) {
-		t.Fatalf("CopyTree = %v, want ErrCopyIntoItself", err)
+			dst := filepath.Join(src, "under", "dst")
+			if err := tc.run(src, dst); !errors.Is(err, ErrCopyIntoItself) {
+				t.Fatalf("%s = %v, want ErrCopyIntoItself", tc.name, err)
+			}
+			// A refusal touches nothing: the source is whole and no destination exists.
+			if _, err := os.Stat(filepath.Join(src, "a.txt")); err != nil {
+				t.Fatalf("a refused %s must touch nothing: %v", tc.name, err)
+			}
+			if _, err := os.Lstat(filepath.Join(src, "under")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("a refused %s created a destination", tc.name)
+			}
+		})
 	}
 }
 
@@ -302,19 +323,6 @@ func TestMovePathAcrossOneFilesystem(t *testing.T) {
 	}
 	if got, err := os.ReadFile(dst); err != nil || string(got) != "moved" {
 		t.Fatalf("moved content: %q, %v", got, err)
-	}
-}
-
-func TestMovePathRefusesDirectoryIntoItself(t *testing.T) {
-	dir := t.TempDir()
-	src := filepath.Join(dir, "src")
-	writeTestFile(t, filepath.Join(src, "a.txt"), "a")
-
-	if err := MovePath(src, filepath.Join(src, "under")); !errors.Is(err, ErrCopyIntoItself) {
-		t.Fatalf("MovePath = %v, want ErrCopyIntoItself", err)
-	}
-	if _, err := os.Stat(filepath.Join(src, "a.txt")); err != nil {
-		t.Fatalf("a refused move must touch nothing: %v", err)
 	}
 }
 
