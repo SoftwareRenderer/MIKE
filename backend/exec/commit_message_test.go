@@ -3,6 +3,7 @@ package exec
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -18,96 +19,77 @@ func (s stubAgentLister) ToProviders() []types.Provider { return s.providers }
 
 // --- utilityTarget Tests ---
 
-func TestUtilityTarget_UsesConfiguredUtilityProvider(t *testing.T) {
+// TestUtilityTarget is where a utility call (the commit-message route in backend/api, an
+// automated answer here) gets its provider: the configured utility pair when one is named, the
+// task's own endpoint when nobody is, and the agent registry when the name belongs to an extension.
+func TestUtilityTarget(t *testing.T) {
 	t.Parallel()
-	e := newTestExecutor(t)
+	const taskURL, taskModel = "http://task-url:8010/v1", "task-model"
+	tests := []struct {
+		name   string
+		config *types.Config
+		agents []types.Provider
+		url    string
+		model  string
+		wantOK bool
+	}{
+		{
+			name: "the configured utility pair answers",
+			config: &types.Config{
+				Providers: []types.Provider{
+					{Name: "worker", URL: "http://worker:8010/v1", Models: []types.ModelConfig{{Name: "chat-model"}}},
+					{Name: "utility", URL: "http://utility:8010/v1", Models: []types.ModelConfig{{Name: "cheap-model"}}},
+				},
+				WorkerProvider:  "worker",
+				WorkerModel:     "chat-model",
+				UtilityProvider: "utility",
+				UtilityModel:    "cheap-model",
+			},
+			url:    "http://utility:8010/v1",
+			model:  "cheap-model",
+			wantOK: true,
+		},
+		{
+			name: "with no utility named the task's own endpoint answers",
+			config: &types.Config{
+				Providers: []types.Provider{{Name: "worker", URL: "http://worker:8010/v1"}},
+			},
+			url:   taskURL,
+			model: taskModel,
+		},
+		{
+			name: "an agent provider comes from the registry, not the provider list",
+			config: &types.Config{
+				UtilityProvider: "pi",
+				UtilityModel:    "pi",
+			},
+			agents: []types.Provider{{Name: "pi", Kind: "agent", URL: "agent://pi"}},
+			url:    "agent://pi",
+			model:  "pi",
+			wantOK: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newTestExecutor(t)
+			if tc.agents != nil {
+				e.configStore.SetAgentRegistry(stubAgentLister{providers: tc.agents})
+			}
+			if err := e.configStore.UpdateConfig(tc.config); err != nil {
+				t.Fatalf("update config: %v", err)
+			}
 
-	// Configure two providers and set utility to the second one.
-	providers := []types.Provider{
-		{Name: "worker", URL: "http://worker:8010/v1", Models: []types.ModelConfig{{Name: "chat-model"}}},
-		{Name: "utility", URL: "http://utility:8010/v1", Models: []types.ModelConfig{{Name: "cheap-model"}}},
-	}
-	if err := e.configStore.UpdateConfig(&types.Config{
-		Providers:       providers,
-		WorkerProvider:  "worker",
-		WorkerModel:     "chat-model",
-		UtilityProvider: "utility",
-		UtilityModel:    "cheap-model",
-	}); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-
-	task := &types.Task{
-		ID:             "task-1",
-		LlamaServerURL: "http://worker:8010/v1",
-		ModelName:      "chat-model",
-	}
-
-	url, model, ok := e.utilityTarget(task)
-	if !ok {
-		t.Errorf("ok = false, want true (utility configured)")
-	}
-	if url != "http://utility:8010/v1" {
-		t.Errorf("url = %q, want utility provider URL", url)
-	}
-	if model != "cheap-model" {
-		t.Errorf("model = %q, want utility model", model)
-	}
-}
-
-func TestUtilityTarget_FallsBackToTaskWhenUnset(t *testing.T) {
-	t.Parallel()
-	e := newTestExecutor(t)
-
-	if err := e.configStore.UpdateConfig(&types.Config{
-		Providers: []types.Provider{{Name: "worker", URL: "http://worker:8010/v1"}},
-	}); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-
-	task := &types.Task{
-		LlamaServerURL: "http://task-url:8010/v1",
-		ModelName:      "task-model",
-	}
-
-	url, model, ok := e.utilityTarget(task)
-	if ok {
-		t.Errorf("ok = true, want false (utility unset)")
-	}
-	if url != "http://task-url:8010/v1" {
-		t.Errorf("url = %q, want task URL fallback", url)
-	}
-	if model != "task-model" {
-		t.Errorf("model = %q, want task model fallback", model)
-	}
-}
-
-func TestUtilityTarget_AgentProvider(t *testing.T) {
-	t.Parallel()
-	e := newTestExecutor(t)
-
-	// Agent providers are registry-derived (enabled agent extensions), not
-	// persisted config rows — wire the registry, not the provider list.
-	e.configStore.SetAgentRegistry(stubAgentLister{providers: []types.Provider{
-		{Name: "pi", Kind: "agent", URL: "agent://pi"},
-	}})
-	if err := e.configStore.UpdateConfig(&types.Config{
-		UtilityProvider: "pi",
-		UtilityModel:    "pi",
-	}); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-
-	task := &types.Task{ID: "task-1"}
-	url, model, ok := e.utilityTarget(task)
-	if !ok {
-		t.Errorf("ok = false, want true (agent utility configured)")
-	}
-	if url != "agent://pi" {
-		t.Errorf("url = %q, want agent URL", url)
-	}
-	if model != "pi" {
-		t.Errorf("model = %q, want agent model", model)
+			url, model, ok := e.utilityTarget(&types.Task{ID: "task-1", LlamaServerURL: taskURL, ModelName: taskModel})
+			if ok != tc.wantOK {
+				t.Errorf("ok = %v, want %v", ok, tc.wantOK)
+			}
+			if url != tc.url {
+				t.Errorf("url = %q, want %q", url, tc.url)
+			}
+			if model != tc.model {
+				t.Errorf("model = %q, want %q", model, tc.model)
+			}
+		})
 	}
 }
 
@@ -116,143 +98,97 @@ func TestUtilityTarget_AgentProvider(t *testing.T) {
 
 // --- collectUniqueModels Tests ---
 
-func TestCollectUniqueModels_Empty(t *testing.T) {
+// TestCollectUniqueModels names the models a thread ran with: one line each, in first-seen order,
+// and a row that reported no model contributes nothing.
+func TestCollectUniqueModels(t *testing.T) {
 	t.Parallel()
-	models := collectUniqueModels(nil)
-	if len(models) != 0 {
-		t.Errorf("expected 0 models, got %d: %v", len(models), models)
-	}
-}
-
-func TestCollectUniqueModels_MultipleModels(t *testing.T) {
-	t.Parallel()
-	msgs := []types.TaskMessage{
-		{Role: "assistant", ModelName: "gpt-4o"},
-		{Role: "assistant", ModelName: "gpt-4o"},
-		{Role: "assistant", ModelName: "claude-3.5"},
-		{Role: "assistant", ModelName: "gpt-4o"}, // duplicate, should not appear again
-		{Role: "assistant", ModelName: "llama-3"},
-	}
-	models := collectUniqueModels(msgs)
-	expected := []string{"gpt-4o", "claude-3.5", "llama-3"}
-	if len(models) != len(expected) {
-		t.Fatalf("expected %d models, got %d: %v", len(expected), len(models), models)
-	}
-	for i, m := range expected {
-		if models[i] != m {
-			t.Errorf("models[%d] = %q, want %q", i, models[i], m)
+	assistant := func(models ...string) []types.TaskMessage {
+		var msgs []types.TaskMessage
+		for _, m := range models {
+			msgs = append(msgs, types.TaskMessage{Role: "assistant", ModelName: m})
 		}
+		return msgs
 	}
-}
-
-func TestCollectUniqueModels_SkipsEmptyModelName(t *testing.T) {
-	t.Parallel()
-	msgs := []types.TaskMessage{
-		{Role: "assistant", ModelName: ""},
-		{Role: "assistant", ModelName: "gpt-4o"},
-		{Role: "assistant", ModelName: ""},
-		{Role: "assistant", ModelName: "claude-3.5"},
+	tests := []struct {
+		name string
+		msgs []types.TaskMessage
+		want []string
+	}{
+		{"no rows", nil, nil},
+		{"duplicates collapse to their first appearance", assistant("gpt-4o", "gpt-4o", "claude-3.5", "gpt-4o", "llama-3"), []string{"gpt-4o", "claude-3.5", "llama-3"}},
+		{"a row that reported no model is skipped", assistant("", "gpt-4o", "", "claude-3.5"), []string{"gpt-4o", "claude-3.5"}},
 	}
-	models := collectUniqueModels(msgs)
-	expected := []string{"gpt-4o", "claude-3.5"}
-	if len(models) != len(expected) {
-		t.Fatalf("expected %d models, got %d: %v", len(expected), len(models), models)
-	}
-	for i, m := range expected {
-		if models[i] != m {
-			t.Errorf("models[%d] = %q, want %q", i, models[i], m)
-		}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := collectUniqueModels(tc.msgs)
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("models = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
 // --- buildAssistedBy Tests ---
 
-// A namespaced model id is one name: the prefix tells apart two models the provider would otherwise
-// report identically.
-func TestBuildAssistedBy_KeepsModelPrefix(t *testing.T) {
+// TestBuildAssistedBy writes one trailer per contributing model. A namespaced model id is one
+// name: the prefix tells apart two models the provider would otherwise report identically.
+func TestBuildAssistedBy(t *testing.T) {
 	t.Parallel()
-	result := buildAssistedBy([]string{"org/model"})
-	expected := "\n\nAssisted-by: MIKE:org/model"
-	if result != expected {
-		t.Errorf("buildAssistedBy(%q) = %q, want %q", "org/model", result, expected)
+	tests := []struct {
+		name   string
+		models []string
+		want   string
+	}{
+		{
+			name:   "a namespaced model id keeps its prefix",
+			models: []string{"org/model"},
+			want:   "\n\nAssisted-by: MIKE:org/model",
+		},
+		{
+			name:   "a prefixed and a bare name are two models",
+			models: []string{"org/model", "model"},
+			want:   "\n\nAssisted-by: MIKE:org/model\nAssisted-by: MIKE:model",
+		},
+		{
+			name:   "every contributing model gets its own line",
+			models: []string{"gpt-4o", "claude-3.5", "llama-3"},
+			want:   "\n\nAssisted-by: MIKE:gpt-4o\nAssisted-by: MIKE:claude-3.5\nAssisted-by: MIKE:llama-3",
+		},
 	}
-
-	mixed := buildAssistedBy([]string{"org/model", "model"})
-	if want := "\n\nAssisted-by: MIKE:org/model\nAssisted-by: MIKE:model"; mixed != want {
-		t.Errorf("buildAssistedBy(both names) = %q, want %q", mixed, want)
-	}
-}
-
-func TestBuildAssistedBy_MultipleModels(t *testing.T) {
-	t.Parallel()
-	result := buildAssistedBy([]string{"gpt-4o", "claude-3.5", "llama-3"})
-	lines := strings.Split(result, "\n")
-	// "\n\n" splits into ["", "", "Assisted-by: gpt-4o", "Assisted-by: claude-3.5", "Assisted-by: llama-3"]
-	if len(lines) != 5 {
-		t.Fatalf("expected 5 lines (2 empty prefix + 3 co-authored), got %d: %q", len(lines), result)
-	}
-	if lines[0] != "" || lines[1] != "" {
-		t.Errorf("first two lines should be empty (from \n\n prefix)")
-	}
-	if lines[2] != "Assisted-by: MIKE:gpt-4o" {
-		t.Errorf("line 2 = %q", lines[2])
-	}
-	if lines[3] != "Assisted-by: MIKE:claude-3.5" {
-		t.Errorf("line 3 = %q", lines[3])
-	}
-	if lines[4] != "Assisted-by: MIKE:llama-3" {
-		t.Errorf("line 4 = %q", lines[4])
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := buildAssistedBy(tc.models); got != tc.want {
+				t.Errorf("buildAssistedBy(%q) = %q, want %q", tc.models, got, tc.want)
+			}
+		})
 	}
 }
 
 // --- buildCommitMessageWithAssistedBy Tests ---
 
-func TestBuildCommitMessageWithAssistedBy_SingleModel(t *testing.T) {
+// TestBuildCommitMessageWithAssistedBy keeps the generated body byte-for-byte and appends one
+// trailer per model; with no model to name the message is returned untouched.
+func TestBuildCommitMessageWithAssistedBy(t *testing.T) {
 	t.Parallel()
-	result := buildCommitMessageWithAssistedBy("Fix bug", []string{"gpt-4o"})
-	expected := "Fix bug\n\nAssisted-by: MIKE:gpt-4o"
-	if result != expected {
-		t.Errorf("got %q, want %q", result, expected)
+	tests := []struct {
+		name   string
+		body   string
+		models []string
+		want   string
+	}{
+		{"one model", "Fix bug", []string{"gpt-4o"}, "Fix bug\n\nAssisted-by: MIKE:gpt-4o"},
+		{"two models", "Add feature", []string{"gpt-4o", "claude-3.5"},
+			"Add feature\n\nAssisted-by: MIKE:gpt-4o\nAssisted-by: MIKE:claude-3.5"},
+		{"no model leaves the message alone", "Fix bug", nil, "Fix bug"},
+		{"a multi-paragraph body is preserved", "Fix bug\n\nDetailed explanation of the fix",
+			[]string{"gpt-4o"}, "Fix bug\n\nDetailed explanation of the fix\n\nAssisted-by: MIKE:gpt-4o"},
 	}
-}
-
-func TestBuildCommitMessageWithAssistedBy_MultipleModels(t *testing.T) {
-	t.Parallel()
-	result := buildCommitMessageWithAssistedBy("Add feature", []string{"gpt-4o", "claude-3.5"})
-	if !strings.HasPrefix(result, "Add feature\n\n") {
-		t.Errorf("should start with message body, got %q", result)
-	}
-	if !strings.Contains(result, "Assisted-by: MIKE:gpt-4o") {
-		t.Error("should contain MIKE:gpt-4o co-author")
-	}
-	if !strings.Contains(result, "Assisted-by: MIKE:claude-3.5") {
-		t.Error("should contain MIKE:claude-3.5 co-author")
-	}
-	// Count Assisted-by lines
-	count := strings.Count(result, "Assisted-by:")
-	if count != 2 {
-		t.Errorf("expected 2 Assisted-by lines, got %d", count)
-	}
-}
-
-func TestBuildCommitMessageWithAssistedBy_NoModels(t *testing.T) {
-	t.Parallel()
-	result := buildCommitMessageWithAssistedBy("Fix bug", nil)
-	if result != "Fix bug" {
-		t.Errorf("expected just the message, got %q", result)
-	}
-}
-
-func TestBuildCommitMessageWithAssistedBy_PreservesMessageBody(t *testing.T) {
-	t.Parallel()
-	// Message body with newlines should be preserved
-	body := "Fix bug\n\nDetailed explanation of the fix"
-	result := buildCommitMessageWithAssistedBy(body, []string{"gpt-4o"})
-	if !strings.HasPrefix(result, body) {
-		t.Errorf("message body should be preserved, got %q", result)
-	}
-	if !strings.Contains(result, "Assisted-by: MIKE:gpt-4o") {
-		t.Error("should contain co-author")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := buildCommitMessageWithAssistedBy(tc.body, tc.models); got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -279,45 +215,38 @@ func commitTrailerExecutor(t *testing.T, commitAssistedBy *bool, label string, c
 	return te, task
 }
 
-// TestGenerateCommitMessage_AssistedByFollowsTheProject: the line appears only where the project said yes —
-// an unset row and an explicit off both drop it.
+// TestGenerateCommitMessage_AssistedByFollowsTheProject: the line appears only where the project said
+// yes — an unset row and an explicit off both drop it — and it rides the title-only fallback the same
+// way the generated label does.
 func TestGenerateCommitMessage_AssistedByFollowsTheProject(t *testing.T) {
 	on, off := true, false
 	for _, tc := range []struct {
 		name        string
 		assistedBy  *bool
+		label       string
+		callErr     error
 		wantTrailer bool
+		wantPrefix  string
 	}{
-		{"unset drops the line", nil, false},
-		{"on keeps the line", &on, true},
-		{"off drops the line", &off, false},
+		{"generated, unset drops the line", nil, "Fix the parser flush", nil, false, "Fix the parser flush"},
+		{"generated, on keeps the line", &on, "Fix the parser flush", nil, true, "Fix the parser flush"},
+		{"generated, off drops the line", &off, "Fix the parser flush", nil, false, "Fix the parser flush"},
+		{"fallback, unset is the bare title", nil, "", errors.New("provider down"), false, "Fix the parser"},
+		{"fallback, off is the bare title", &off, "", errors.New("provider down"), false, "Fix the parser"},
+		{"fallback, on names the utility model", &on, "", errors.New("provider down"), true, "Fix the parser"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			te, task := commitTrailerExecutor(t, tc.assistedBy, "Fix the parser flush", nil)
+			te, task := commitTrailerExecutor(t, tc.assistedBy, tc.label, tc.callErr)
 			got := te.merge.GenerateCommitMessage(context.Background(), task)
+			if !strings.HasPrefix(got, tc.wantPrefix) {
+				t.Fatalf("commit message %q, want it to start with %q", got, tc.wantPrefix)
+			}
 			if strings.Contains(got, "Assisted-by") != tc.wantTrailer {
 				t.Fatalf("commit message %q, want trailer: %t", got, tc.wantTrailer)
 			}
-			if !strings.HasPrefix(got, "Fix the parser flush") {
-				t.Fatalf("the generated label was replaced: %q", got)
+			if tc.wantTrailer && tc.callErr != nil && !strings.Contains(got, "Assisted-by: MIKE:utility-model") {
+				t.Errorf("commit message %q, want the utility model named", got)
 			}
 		})
-	}
-}
-
-// TestGenerateCommitMessage_FallbackFollowsTheProject: the title-only fallback carries the trailer only
-// where the project said yes.
-func TestGenerateCommitMessage_FallbackFollowsTheProject(t *testing.T) {
-	on, off := true, false
-	for _, assistedBy := range []*bool{nil, &off} {
-		te, task := commitTrailerExecutor(t, assistedBy, "", errors.New("provider down"))
-		if got := te.merge.GenerateCommitMessage(context.Background(), task); got != "Fix the parser" {
-			t.Errorf("a project that never said yes got %q, want the bare title", got)
-		}
-	}
-
-	te, task := commitTrailerExecutor(t, &on, "", errors.New("provider down"))
-	if got := te.merge.GenerateCommitMessage(context.Background(), task); !strings.Contains(got, "Assisted-by: MIKE:utility-model") {
-		t.Errorf("a project that said yes = %q, want the utility model named", got)
 	}
 }

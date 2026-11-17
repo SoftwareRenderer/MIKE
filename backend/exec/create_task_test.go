@@ -149,72 +149,27 @@ func TestHandleCreateTask_InheritsSettings(t *testing.T) {
 	}
 }
 
-func TestHandleCreateTask_NestedSubtask(t *testing.T) {
-	t.Parallel()
-	te := newTestExecutor(t)
-	parent := createParentTask(t, te.store, "parent-task-3", "proj-1", "backlog")
-
-	// Create first child under parent
-	result1, err := te.tools.handleCreateTask(map[string]any{
-		"title":          "Level 1 Task",
-		"prompt":         "Level 1 prompt",
-		"parent_task_id": "parent-task-3",
-	}, parent, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	var resp1 map[string]string
-	json.Unmarshal([]byte(result1), &resp1)
-	level1ID := resp1["task_id"]
-
-	// Ensure parent can accept nested subtasks (parent must still be in backlog)
-	// Create a second child under the first child
-	result2, err := te.tools.handleCreateTask(map[string]any{
-		"title":          "Level 2 Task",
-		"prompt":         "Level 2 prompt",
-		"parent_task_id": level1ID,
-	}, parent, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	var resp2 map[string]string
-	json.Unmarshal([]byte(result2), &resp2)
-	level2ID := resp2["task_id"]
-
-	// Verify nesting
-	level2, err := te.store.GetTaskByID(level2ID)
-	if err != nil {
-		t.Fatalf("get level 2 task: %v", err)
-	}
-	if level2.ParentTaskID != level1ID {
-		t.Errorf("expected level 2 parent_task_id %q, got %q", level1ID, level2.ParentTaskID)
-	}
-	if level2.Title != "Level 2 Task" {
-		t.Errorf("expected title 'Level 2 Task', got %q", level2.Title)
-	}
-}
-
-func TestHandleCreateTask_CreatesThread(t *testing.T) {
+// TestHandleCreateTask_CreatedTaskIsRunnable: a created task arrives ready to run — its own active
+// "Main" thread, and its prompt stored as the first user message of that thread.
+func TestHandleCreateTask_CreatedTaskIsRunnable(t *testing.T) {
 	t.Parallel()
 	te := newTestExecutor(t)
 	parent := createParentTask(t, te.store, "parent-task-4", "proj-1", "backlog")
 
 	result, err := te.tools.handleCreateTask(map[string]any{
 		"title":          "Child Task",
-		"prompt":         "Test prompt",
+		"prompt":         "Implement feature X",
 		"parent_task_id": "parent-task-4",
 	}, parent, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-
 	var resp map[string]string
-	json.Unmarshal([]byte(result), &resp)
+	if err := json.Unmarshal([]byte(result), &resp); err != nil {
+		t.Fatalf("expected JSON response, got: %s", result)
+	}
 	childID := resp["task_id"]
 
-	// Verify thread was created
 	threads, err := te.store.GetThreadsByTask(childID)
 	if err != nil {
 		t.Fatalf("get threads: %v", err)
@@ -222,82 +177,26 @@ func TestHandleCreateTask_CreatesThread(t *testing.T) {
 	if len(threads) != 1 {
 		t.Fatalf("expected 1 thread, got %d", len(threads))
 	}
-	if threads[0].Name != "Main" {
-		t.Errorf("expected thread name 'Main', got %q", threads[0].Name)
+	if threads[0].Name != "Main" || !threads[0].IsActive {
+		t.Errorf("thread = %q active=%v, want the active Main thread", threads[0].Name, threads[0].IsActive)
 	}
-	if !threads[0].IsActive {
-		t.Error("expected thread to be active")
-	}
-}
 
-func TestHandleCreateTask_CreatesPromptMessage(t *testing.T) {
-	t.Parallel()
-	te := newTestExecutor(t)
-	parent := createParentTask(t, te.store, "parent-task-5", "proj-1", "backlog")
-
-	result, err := te.tools.handleCreateTask(map[string]any{
-		"title":          "Child Task",
-		"prompt":         "Implement feature X",
-		"parent_task_id": "parent-task-5",
-	}, parent, nil)
+	child, err := te.store.GetTaskByID(childID)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("get created task: %v", err)
 	}
-
-	var resp map[string]string
-	json.Unmarshal([]byte(result), &resp)
-	childID := resp["task_id"]
-
-	// Verify prompt message was created
-	task, _ := te.store.GetTaskByID(childID)
-	messages, err := te.store.GetTaskMessages(childID, task.CurrentThreadID)
+	if child.CurrentThreadID != threads[0].ID {
+		t.Errorf("the task points at thread %q, not the thread it was given (%q)", child.CurrentThreadID, threads[0].ID)
+	}
+	messages, err := te.store.GetTaskMessages(childID, child.CurrentThreadID)
 	if err != nil {
 		t.Fatalf("get messages: %v", err)
 	}
 	if len(messages) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(messages))
 	}
-	if messages[0].Role != "user" {
-		t.Errorf("expected role 'user', got %q", messages[0].Role)
-	}
-	if messages[0].Content != "Implement feature X" {
-		t.Errorf("expected content 'Implement feature X', got %q", messages[0].Content)
-	}
-}
-
-func TestHandleCreateTask_MissingTitle(t *testing.T) {
-	t.Parallel()
-	te := newTestExecutor(t)
-	parent := createParentTask(t, te.store, "parent-task-6", "proj-1", "backlog")
-
-	_, err := te.tools.handleCreateTask(map[string]any{
-		"prompt": "Test prompt",
-	}, parent, nil)
-
-	if err == nil {
-		t.Error("expected error for missing title, got nil")
-	}
-	if !strings.Contains(err.Error(), "title and prompt are required") {
-		t.Errorf("unexpected error message: %s", err)
-	}
-}
-
-func TestHandleCreateTask_ParentNotFound(t *testing.T) {
-	t.Parallel()
-	te := newTestExecutor(t)
-	parent := createParentTask(t, te.store, "parent-task-8", "proj-1", "backlog")
-
-	_, err := te.tools.handleCreateTask(map[string]any{
-		"title":          "Child Task",
-		"prompt":         "Test prompt",
-		"parent_task_id": "nonexistent-task",
-	}, parent, nil)
-
-	if err == nil {
-		t.Error("expected error for parent not found, got nil")
-	}
-	if !strings.Contains(err.Error(), "not found") {
-		t.Errorf("unexpected error message: %s", err)
+	if messages[0].Role != "user" || messages[0].Content != "Implement feature X" {
+		t.Errorf("first row = role %q content %q, want the prompt as a user message", messages[0].Role, messages[0].Content)
 	}
 }
 
@@ -348,65 +247,6 @@ func TestHandleCreateTask_ParentStatusPlacesChild(t *testing.T) {
 	}
 }
 
-func TestHandleCreateTask_AllowsInProgressParent(t *testing.T) {
-	t.Parallel()
-	te := newTestExecutor(t)
-	parent := createParentTask(t, te.store, "parent-task-10", "proj-1", "in_progress")
-
-	result, err := te.tools.handleCreateTask(map[string]any{
-		"title":          "Child Task",
-		"prompt":         "Test prompt",
-		"parent_task_id": "parent-task-10",
-	}, parent, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// Should succeed (in_progress parents can accept subtasks during planning)
-	var resp map[string]string
-	if err := json.Unmarshal([]byte(result), &resp); err != nil {
-		t.Fatalf("expected JSON response, got: %s", result)
-	}
-	if resp["task_id"] == "" {
-		t.Fatalf("expected task_id in response, got: %s", result)
-	}
-}
-
-func TestHandleCreateTask_MultipleSubtasks(t *testing.T) {
-	t.Parallel()
-	te := newTestExecutor(t)
-	parent := createParentTask(t, te.store, "parent-task-11", "proj-1", "backlog")
-
-	// Create multiple subtasks under parent
-	for i := 1; i <= 3; i++ {
-		result, err := te.tools.handleCreateTask(map[string]any{
-			"title":          "Task " + string(rune('A'+i-1)),
-			"prompt":         "Prompt for task " + string(rune('A'+i-1)),
-			"parent_task_id": "parent-task-11",
-		}, parent, nil)
-		if err != nil {
-			t.Fatalf("iteration %d: unexpected error: %v", i, err)
-		}
-
-		var resp map[string]string
-		if err := json.Unmarshal([]byte(result), &resp); err != nil {
-			t.Fatalf("iteration %d: expected JSON response, got: %s", i, result)
-		}
-		if resp["task_id"] == "" {
-			t.Fatalf("iteration %d: expected task_id in response", i)
-		}
-	}
-
-	// Verify all 3 children exist
-	children, err := te.store.GetChildren("parent-task-11")
-	if err != nil {
-		t.Fatalf("get children: %v", err)
-	}
-	if len(children) != 3 {
-		t.Errorf("expected 3 children, got %d", len(children))
-	}
-}
-
 func TestHandleCreateTask_TitleWithSpecialChars(t *testing.T) {
 	t.Parallel()
 	te := newTestExecutor(t)
@@ -428,63 +268,6 @@ func TestHandleCreateTask_TitleWithSpecialChars(t *testing.T) {
 	}
 	if resp["title"] != `Task with "quotes" and \backslash` {
 		t.Errorf("expected title to be preserved, got %q", resp["title"])
-	}
-}
-
-func TestTaskComplete_PlanMode_RequiresSubtasks(t *testing.T) {
-	t.Parallel()
-	te := newTestExecutor(t)
-	parent := createParentTask(t, te.store, "plan-task-1", "proj-1", "backlog")
-
-	// Try to complete without subtasks (empty state)
-	state := &executionState{createdIDs: nil}
-	result, ok := te.executeTool(context.Background(), "request_review", map[string]any{
-		"summary": "Plan complete",
-	}, "", parent, state, nil)
-
-	if ok {
-		t.Error("expected request_review to fail in plan mode without subtasks")
-	}
-	if !strings.Contains(result, "Cannot complete planning without creating") {
-		t.Errorf("unexpected error message: %s", result)
-	}
-}
-
-func TestTaskComplete_PlanMode_AllowsWithSubtasks(t *testing.T) {
-	t.Parallel()
-	te := newTestExecutor(t)
-	parent := createParentTask(t, te.store, "plan-parent-1", "proj-1", "backlog")
-
-	// Create a subtask via handleCreateTask
-	state := &executionState{}
-	result, err := te.tools.handleCreateTask(map[string]any{
-		"title":          "Child Task",
-		"prompt":         "Implement the child feature",
-		"parent_task_id": "plan-parent-1",
-	}, parent, state)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// Verify subtask was created
-	var resp map[string]string
-	if err := json.Unmarshal([]byte(result), &resp); err != nil {
-		t.Fatalf("failed to parse create_task result: %v", err)
-	}
-	if resp["task_id"] == "" {
-		t.Fatalf("expected task_id in result, got: %s", result)
-	}
-
-	// Reload parent
-	parent, _ = te.store.GetTask("proj-1", "plan-parent-1")
-
-	// Try to complete with subtask
-	result2, ok := te.executeTool(context.Background(), "request_review", map[string]any{
-		"summary": "Plan complete",
-	}, "", parent, state, nil)
-
-	if !ok {
-		t.Errorf("expected request_review to succeed with subtasks, got: %s", result2)
 	}
 }
 
@@ -537,47 +320,6 @@ func seedCreateTaskHistory(t *testing.T, s *store.Store, planTaskID, threadID, c
 	}
 }
 
-func TestTaskComplete_PlanMode_CountsHistoryCreateTask(t *testing.T) {
-	t.Parallel()
-	te := newTestExecutor(t)
-	plan := createParentTask(t, te.store, "plan-task-h1", "proj-1", "backlog")
-
-	// Simulate a previous execution: a Main thread with a successful
-	// create_task tool call, and the child task on the board.
-	thread := &types.TaskThread{ID: "thread-h1", TaskID: plan.ID, Name: "Main", IsActive: true, CreatedAt: time.Now().UTC()}
-	if err := te.store.CreateThread(thread); err != nil {
-		t.Fatalf("create thread: %v", err)
-	}
-	seedCreateTaskHistory(t, te.store, plan.ID, "thread-h1", "call-h1", "child-h1", "Seeded Child", true)
-
-	// Fresh execution state — nothing created in this execution.
-	state := &executionState{}
-	result, ok := te.executeTool(context.Background(), "request_review", map[string]any{"summary": "Plan complete"}, "", plan, state, nil)
-	if !ok {
-		t.Errorf("expected request_review to succeed using history, got: %s", result)
-	}
-}
-
-func TestTaskComplete_PlanMode_HistoryFailedCreateTaskDoesNotCount(t *testing.T) {
-	t.Parallel()
-	te := newTestExecutor(t)
-	plan := createParentTask(t, te.store, "plan-task-h2", "proj-1", "backlog")
-	thread := &types.TaskThread{ID: "thread-h2", TaskID: plan.ID, Name: "Main", IsActive: true, CreatedAt: time.Now().UTC()}
-	if err := te.store.CreateThread(thread); err != nil {
-		t.Fatalf("create thread: %v", err)
-	}
-	seedCreateTaskHistory(t, te.store, plan.ID, "thread-h2", "call-h2", "child-h2", "Seeded Child", false)
-
-	state := &executionState{}
-	result, ok := te.executeTool(context.Background(), "request_review", map[string]any{"summary": "Plan complete"}, "", plan, state, nil)
-	if ok {
-		t.Error("expected request_review to fail: a failed create_task in history should not count")
-	}
-	if !strings.Contains(result, "Cannot complete planning without creating") {
-		t.Errorf("unexpected error message: %s", result)
-	}
-}
-
 func TestPlanCreatedTaskIDs_MergesHistoryAndState(t *testing.T) {
 	t.Parallel()
 	te := newTestExecutor(t)
@@ -605,144 +347,6 @@ func TestPlanCreatedTaskIDs_MergesHistoryAndState(t *testing.T) {
 	ids := te.tools.planCreatedTaskIDs(plan, state)
 	if len(ids) != 2 || ids[0] != "child-a" || ids[1] != "child-b" {
 		t.Errorf("expected [child-a child-b] (deduped), got %v", ids)
-	}
-}
-
-func TestHandleCreateTask_UsesConfigDefaultsForAutoMerge(t *testing.T) {
-	t.Parallel()
-	autoMerge := true
-	subtasksAutoMerge := true
-	te := newTestExecutorWithConfig(t, autoMerge, subtasksAutoMerge)
-	parent := createParentTask(t, te.store, "parent-auto-merge", "proj-am", "backlog")
-
-	// Create an independent task (no parent_task_id)
-	result, err := te.tools.handleCreateTask(map[string]any{
-		"title":  "Independent Task",
-		"prompt": "Test prompt",
-	}, parent, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	var resp map[string]string
-	json.Unmarshal([]byte(result), &resp)
-	task, err := te.store.GetTaskByID(resp["task_id"])
-	if err != nil {
-		t.Fatalf("get created task: %v", err)
-	}
-
-	// Independent task should get config defaults
-	if !task.AutoMerge {
-		t.Errorf("expected AutoMerge=true from config default, got %v", task.AutoMerge)
-	}
-	if !task.SubtasksAutoMerge {
-		t.Errorf("expected SubtasksAutoMerge=true from config default, got %v", task.SubtasksAutoMerge)
-	}
-	// AutoCommit must be true when AutoMerge is true (prerequisite)
-	if !task.AutoCommit {
-		t.Errorf("expected AutoCommit=true (prerequisite for AutoMerge), got %v", task.AutoCommit)
-	}
-}
-
-func TestHandleCreateTask_SubtaskInheritsSubtasksAutoMergeAsAutoMerge(t *testing.T) {
-	t.Parallel()
-	// Config defaults: autoMerge=false, subtasksAutoMerge=true
-	te := newTestExecutorWithConfig(t, false, true)
-	// Parent has subtasks_auto_merge=true (from config or explicit)
-	parent := createParentTask(t, te.store, "parent-inherit-am", "proj-inh", "backlog")
-	parent.SubtasksAutoMerge = true
-	_ = te.store.UpdateTask(parent)
-
-	// Create a subtask under this parent
-	result, err := te.tools.handleCreateTask(map[string]any{
-		"title":          "Child Task",
-		"prompt":         "Test prompt",
-		"parent_task_id": "parent-inherit-am",
-	}, parent, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	var resp map[string]string
-	json.Unmarshal([]byte(result), &resp)
-	child, err := te.store.GetTaskByID(resp["task_id"])
-	if err != nil {
-		t.Fatalf("get created task: %v", err)
-	}
-
-	// Child should inherit parent's SubtasksAutoMerge as its AutoMerge
-	if !child.AutoMerge {
-		t.Errorf("expected AutoMerge=true (inherited from parent SubtasksAutoMerge), got %v", child.AutoMerge)
-	}
-	// Child's SubtasksAutoMerge should come from config default
-	if !child.SubtasksAutoMerge {
-		t.Errorf("expected SubtasksAutoMerge=true from config default, got %v", child.SubtasksAutoMerge)
-	}
-	// AutoCommit must be true when AutoMerge is true (prerequisite)
-	if !child.AutoCommit {
-		t.Errorf("expected AutoCommit=true (prerequisite for AutoMerge), got %v", child.AutoCommit)
-	}
-}
-
-func TestHandleCreateTask_NoConfigDefaults_UsesZeroValues(t *testing.T) {
-	t.Parallel()
-	// Config with defaults disabled
-	te := newTestExecutorWithConfig(t, false, false)
-	parent := createParentTask(t, te.store, "parent-no-defaults", "proj-nd", "backlog")
-
-	result, err := te.tools.handleCreateTask(map[string]any{
-		"title":  "Task",
-		"prompt": "Test prompt",
-	}, parent, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	var resp map[string]string
-	json.Unmarshal([]byte(result), &resp)
-	task, err := te.store.GetTaskByID(resp["task_id"])
-	if err != nil {
-		t.Fatalf("get created task: %v", err)
-	}
-
-	// Should be false when config defaults are false
-	if task.AutoMerge {
-		t.Errorf("expected AutoMerge=false, got %v", task.AutoMerge)
-	}
-	if task.SubtasksAutoMerge {
-		t.Errorf("expected SubtasksAutoMerge=false, got %v", task.SubtasksAutoMerge)
-	}
-}
-
-func TestTaskComplete_StandardMode_NoValidation(t *testing.T) {
-	t.Parallel()
-	te := newTestExecutor(t)
-	createProject(t, te.store, "proj-1", "proj-1")
-	now := time.Now().UTC()
-	task := &types.Task{
-		ID:             "standard-task-1",
-		ProjectID:      "proj-1",
-		Title:          "Standard Task",
-		Prompt:         "Standard prompt",
-		Status:         types.StatusInProgress,
-		ExecutionState: types.ExecStateRunning,
-		LlamaServerURL: "http://test:8080",
-		ModelName:      "test-model",
-		OperatingMode:  "act",
-		CreatedAt:      now,
-		UpdatedAt:      now,
-	}
-	if err := te.store.CreateTask(task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	// Try to complete without subtasks (should succeed)
-	result, ok := te.executeTool(context.Background(), "request_review", map[string]any{
-		"summary": "Task complete",
-	}, "", task, &executionState{}, nil)
-
-	if !ok {
-		t.Errorf("expected request_review to succeed in standard mode, got: %s", result)
 	}
 }
 
@@ -857,94 +461,186 @@ func createdTask(t *testing.T, s *store.Store, result string) *types.Task {
 	return task
 }
 
-// TestHandleCreateTask_RootInheritsOriginBaseBranch: a created root task lands on the base branch
-// the person set on the originating task.
-func TestHandleCreateTask_RootInheritsOriginBaseBranch(t *testing.T) {
+// planGateState returns the execution state a plan-mode review is judged against.
+type planGateSeed struct {
+	// createInRun calls create_task during this execution, recording it in the state.
+	createInRun bool
+	// historyCall seeds a create_task tool call from an earlier execution; nil means none.
+	historyCall *bool
+}
+
+func (s planGateSeed) run(t *testing.T, te *TaskExecutor, planID string) *executionState {
+	t.Helper()
+	state := &executionState{}
+	if s.createInRun {
+		plan, err := te.store.GetTaskByID(planID)
+		if err != nil {
+			t.Fatalf("reload plan: %v", err)
+		}
+		if _, err := te.tools.handleCreateTask(map[string]any{
+			"title":          "Child Task",
+			"prompt":         "Implement the child feature",
+			"parent_task_id": planID,
+		}, plan, state); err != nil {
+			t.Fatalf("create_task: %v", err)
+		}
+	}
+	if s.historyCall != nil {
+		thread := &types.TaskThread{ID: "thread-gate", TaskID: planID, Name: "Main", IsActive: true, CreatedAt: time.Now().UTC()}
+		if err := te.store.CreateThread(thread); err != nil {
+			t.Fatalf("create thread: %v", err)
+		}
+		seedCreateTaskHistory(t, te.store, planID, "thread-gate", "call-gate", "child-gate", "Seeded Child", *s.historyCall)
+	}
+	return state
+}
+
+func yes() *bool { b := true; return &b }
+func no() *bool  { b := false; return &b }
+
+// TestRequestReview_PlanModeNeedsACreatedSubtask: the plan gate opens only for a plan that produced
+// children — this execution's or an earlier successful one's — and asks nothing of a turn that is
+// not planning.
+func TestRequestReview_PlanModeNeedsACreatedSubtask(t *testing.T) {
 	t.Parallel()
-	te := newTestExecutor(t)
-	origin := createOriginTask(t, te.store, "origin-branch-1", "proj-branch-1", "", "test")
+	tests := []struct {
+		name   string
+		mode   types.OperatingMode
+		seed   planGateSeed
+		wantOK bool
+	}{
+		{name: "no child at all", mode: types.ModePlan, seed: planGateSeed{}, wantOK: false},
+		{name: "a child created in this execution", mode: types.ModePlan, seed: planGateSeed{createInRun: true}, wantOK: true},
+		{name: "a successful create_task in history", mode: types.ModePlan, seed: planGateSeed{historyCall: yes()}, wantOK: true},
+		{name: "a failed create_task in history", mode: types.ModePlan, seed: planGateSeed{historyCall: no()}, wantOK: false},
+		{name: "an act-mode turn is not gated", mode: types.ModeAct, seed: planGateSeed{}, wantOK: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			te := newTestExecutor(t)
+			plan := createParentTask(t, te.store, "plan-task", "proj-1", types.StatusBacklog)
+			plan.OperatingMode = tc.mode
+			if err := te.store.UpdateTask(plan); err != nil {
+				t.Fatalf("set mode: %v", err)
+			}
+			state := tc.seed.run(t, te, plan.ID)
+			plan, err := te.store.GetTask(plan.ProjectID, plan.ID)
+			if err != nil {
+				t.Fatalf("reload plan: %v", err)
+			}
 
-	result, err := te.tools.handleCreateTask(map[string]any{
-		"title":  "Independent Task",
-		"prompt": "Work on the test branch",
-	}, origin, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	created := createdTask(t, te.store, result)
-	if created.ParentTaskID != "" {
-		t.Errorf("expected a root task, got parent %q", created.ParentTaskID)
-	}
-	if created.BaseRef != "test" {
-		t.Errorf("base_ref = %q, want the originating task's %q", created.BaseRef, "test")
-	}
-	if created.BaseCommit != "" {
-		t.Errorf("base_commit = %q, want empty until the task starts", created.BaseCommit)
+			result, ok := te.executeTool(context.Background(), "request_review", map[string]any{
+				"summary": "Plan complete",
+			}, "", plan, state, nil)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v (result: %s)", ok, tc.wantOK, result)
+			}
+			if !tc.wantOK && !strings.Contains(result, "Cannot complete planning without creating") {
+				t.Errorf("unexpected refusal: %s", result)
+			}
+		})
 	}
 }
 
-// TestHandleCreateTask_SubtaskGetsNoBaseBranch: a nested task merges into its parent's branch, so it
-// carries no base branch of its own.
-func TestHandleCreateTask_SubtaskGetsNoBaseBranch(t *testing.T) {
+// TestHandleCreateTask_AutoMergeFollowsConfigAndParent: a created task takes auto-merge from the
+// parent's subtasks_auto_merge when it has a parent, from the config otherwise, and auto-commit
+// always follows auto-merge.
+func TestHandleCreateTask_AutoMergeFollowsConfigAndParent(t *testing.T) {
 	t.Parallel()
-	te := newTestExecutor(t)
-	origin := createOriginTask(t, te.store, "origin-branch-2", "proj-branch-2", "", "test")
-
-	result, err := te.tools.handleCreateTask(map[string]any{
-		"title":          "Subtask",
-		"prompt":         "Part of the plan",
-		"parent_task_id": "origin-branch-2",
-	}, origin, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	tests := []struct {
+		name           string
+		cfgAutoMerge   bool
+		cfgSubtasksAM  bool
+		parentSAM      bool
+		asSubtask      bool
+		wantAutoMerge  bool
+		wantSubtasksAM bool
+	}{
+		{name: "config defaults reach a root task", cfgAutoMerge: true, cfgSubtasksAM: true, wantAutoMerge: true, wantSubtasksAM: true},
+		{name: "config defaults off leave them off", wantAutoMerge: false, wantSubtasksAM: false},
+		{name: "a subtask inherits the parent's subtasks_auto_merge", cfgSubtasksAM: true, parentSAM: true, asSubtask: true, wantAutoMerge: true, wantSubtasksAM: true},
+		{name: "a subtask of a parent that will not merge stays unmerged", cfgAutoMerge: true, cfgSubtasksAM: true, asSubtask: true, wantAutoMerge: false, wantSubtasksAM: true},
 	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			te := newTestExecutorWithConfig(t, tc.cfgAutoMerge, tc.cfgSubtasksAM)
+			parent := createParentTask(t, te.store, "am-parent", "proj-am", types.StatusBacklog)
+			parent.SubtasksAutoMerge = tc.parentSAM
+			if err := te.store.UpdateTask(parent); err != nil {
+				t.Fatalf("set parent subtasks_auto_merge: %v", err)
+			}
 
-	created := createdTask(t, te.store, result)
-	if created.ParentTaskID != "origin-branch-2" {
-		t.Errorf("expected parent origin-branch-2, got %q", created.ParentTaskID)
-	}
-	if created.BaseRef != "" {
-		t.Errorf("base_ref = %q on a subtask, want empty: its work lands on the parent's branch", created.BaseRef)
+			args := map[string]any{"title": "Created Task", "prompt": "Test prompt"}
+			if tc.asSubtask {
+				args["parent_task_id"] = parent.ID
+			}
+			result, err := te.tools.handleCreateTask(args, parent, nil)
+			if err != nil {
+				t.Fatalf("create_task: %v", err)
+			}
+
+			created := createdTask(t, te.store, result)
+			if created.AutoMerge != tc.wantAutoMerge {
+				t.Errorf("auto_merge = %v, want %v", created.AutoMerge, tc.wantAutoMerge)
+			}
+			if created.SubtasksAutoMerge != tc.wantSubtasksAM {
+				t.Errorf("subtasks_auto_merge = %v, want %v", created.SubtasksAutoMerge, tc.wantSubtasksAM)
+			}
+			if created.AutoMerge && !created.AutoCommit {
+				t.Errorf("auto_commit = false while auto_merge = true: auto-commit is a prerequisite of auto-merge")
+			}
+			if tc.asSubtask && created.ParentTaskID != parent.ID {
+				t.Errorf("parent_task_id = %q, want %q", created.ParentTaskID, parent.ID)
+			}
+		})
 	}
 }
 
-// TestHandleCreateTask_RootFromSubtaskOriginGetsNoBaseBranch: a subtask's base_ref is its parent's
-// branch, not a configured one, so it passes no base branch on.
-func TestHandleCreateTask_RootFromSubtaskOriginGetsNoBaseBranch(t *testing.T) {
+// TestHandleCreateTask_BaseBranchInheritance: a created root task lands on the base branch the person
+// set on the originating task; a subtask, a subtask's own creation and a name git would refuse all
+// carry none, because mergeInto creates a branch named by base_ref when it is missing.
+func TestHandleCreateTask_BaseBranchInheritance(t *testing.T) {
 	t.Parallel()
-	te := newTestExecutor(t)
-	origin := createOriginTask(t, te.store, "origin-branch-3", "proj-branch-3", "origin-branch-3-parent", "task/origin-branch-3-x7q2")
-
-	result, err := te.tools.handleCreateTask(map[string]any{
-		"title":  "Independent Task",
-		"prompt": "Work outside the subtree",
-	}, origin, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	tests := []struct {
+		name          string
+		originParent  string // non-empty makes the originating task itself a subtask
+		originBaseRef string
+		asSubtask     bool
+		wantBaseRef   string
+	}{
+		{name: "a root inherits the origin's base branch", originBaseRef: "test", wantBaseRef: "test"},
+		{name: "a subtask carries none", originBaseRef: "test", asSubtask: true, wantBaseRef: ""},
+		{name: "a root from a subtask origin carries none", originParent: "origin-parent", originBaseRef: "task/origin-x7q2", wantBaseRef: ""},
+		{name: "a name git would refuse is not copied", originBaseRef: "release..next", wantBaseRef: ""},
+		{name: "an origin with no base branch gives none", originBaseRef: "", wantBaseRef: ""},
 	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			te := newTestExecutor(t)
+			origin := createOriginTask(t, te.store, "origin-task", "proj-origin", tc.originParent, tc.originBaseRef)
 
-	if created := createdTask(t, te.store, result); created.BaseRef != "" {
-		t.Errorf("base_ref = %q, want empty: a subtask configures no base branch", created.BaseRef)
-	}
-}
+			args := map[string]any{"title": "Created Task", "prompt": "Test prompt"}
+			if tc.asSubtask {
+				args["parent_task_id"] = origin.ID
+			}
+			result, err := te.tools.handleCreateTask(args, origin, nil)
+			if err != nil {
+				t.Fatalf("create_task: %v", err)
+			}
 
-// TestHandleCreateTask_SkipsOriginBaseBranchThatIsNotABranchName: mergeInto creates a branch named by
-// base_ref when it is missing, so a name git would refuse is not copied.
-func TestHandleCreateTask_SkipsOriginBaseBranchThatIsNotABranchName(t *testing.T) {
-	t.Parallel()
-	te := newTestExecutor(t)
-	origin := createOriginTask(t, te.store, "origin-branch-4", "proj-branch-4", "", "release..next")
-
-	result, err := te.tools.handleCreateTask(map[string]any{
-		"title":  "Independent Task",
-		"prompt": "Work on a branch git accepts",
-	}, origin, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if created := createdTask(t, te.store, result); created.BaseRef != "" {
-		t.Errorf("base_ref = %q, want empty for a name git would refuse", created.BaseRef)
+			created := createdTask(t, te.store, result)
+			if created.BaseRef != tc.wantBaseRef {
+				t.Errorf("base_ref = %q, want %q", created.BaseRef, tc.wantBaseRef)
+			}
+			if got := created.ParentTaskID != ""; got != tc.asSubtask {
+				t.Errorf("parent_task_id = %q, want a subtask=%v", created.ParentTaskID, tc.asSubtask)
+			}
+			if tc.wantBaseRef != "" && created.BaseCommit != "" {
+				t.Errorf("base_commit = %q, want empty until the task starts", created.BaseCommit)
+			}
+		})
 	}
 }

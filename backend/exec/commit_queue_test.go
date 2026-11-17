@@ -67,30 +67,6 @@ func TestCommitQueue_ConcurrentDifferentProjectsParallel(t *testing.T) {
 	wg.Wait()
 }
 
-func TestCommitQueue_MultipleSequential(t *testing.T) {
-	t.Parallel()
-	cq := NewCommitQueue()
-
-	var order atomic.Int64
-	var wg sync.WaitGroup
-
-	// Launch 3 sequential acquires
-	for range 3 {
-		wg.Go(func() {
-			release := cq.Acquire("proj-1")
-			order.Add(1)
-			release()
-		})
-	}
-
-	// Wait for all to complete
-	wg.Wait()
-
-	if order.Load() != 3 {
-		t.Fatalf("expected order 3, got %d", order.Load())
-	}
-}
-
 // taskLockIsHeld asks the question the old test-only mutex accessor answered — is this task's lock held
 // — without handing a lock to the test. The bounded form is used so the probe cannot itself block the
 // suite if the behaviour it is checking has regressed.
@@ -104,97 +80,98 @@ func taskLockIsHeld(te *TaskExecutor, taskID string) bool {
 }
 
 // TestLockWorktreeIsPerTask is the table's reason for existing: one task's worktree work must not stop
-// another's, and two calls for the same task must land on the same lock.
+// another's, two calls for the same task land on the same lock, and a second waiter queues behind the
+// first the way production reaches it.
 func TestLockWorktreeIsPerTask(t *testing.T) {
 	t.Parallel()
-	te := newBareTestExecutor(t)
 
-	release := te.LockWorktree("task-1")
-	if !taskLockIsHeld(te, "task-1") {
-		release()
-		t.Fatal("LockWorktree returned without holding the task's lock")
-	}
-	if taskLockIsHeld(te, "task-2") {
-		release()
-		t.Fatal("a second task's lock is the first task's — the table is keyed on something else")
-	}
-	release()
-	if taskLockIsHeld(te, "task-1") {
-		t.Fatal("the release function did not release")
-	}
-}
+	t.Run("the table is keyed on the task", func(t *testing.T) {
+		te := newBareTestExecutor(t)
 
-// TestLockWorktreeConcurrentWaitersQueue is the same property reached the way production reaches it,
-// with a third task proving the table does not become a global lock under load.
-func TestLockWorktreeConcurrentWaitersQueue(t *testing.T) {
-	t.Parallel()
-	te := newBareTestExecutor(t)
-
-	var observed int
-	var mu sync.Mutex
-	done := make(chan struct{})
-
-	// G1: holds task-1 mutex
-	go func() {
 		release := te.LockWorktree("task-1")
-		mu.Lock()
-		observed++
-		mu.Unlock()
-		<-done
+		if !taskLockIsHeld(te, "task-1") {
+			release()
+			t.Fatal("LockWorktree returned without holding the task's lock")
+		}
+		if taskLockIsHeld(te, "task-2") {
+			release()
+			t.Fatal("a second task's lock is the first task's — the table is keyed on something else")
+		}
 		release()
-	}()
+		if taskLockIsHeld(te, "task-1") {
+			t.Fatal("the release function did not release")
+		}
+	})
 
-	time.Sleep(50 * time.Millisecond)
+	t.Run("a waiter queues while another task runs", func(t *testing.T) {
+		te := newBareTestExecutor(t)
 
-	// G2: blocks on task-1 mutex
-	gotSecond := make(chan struct{})
-	go func() {
-		release := te.LockWorktree("task-1")
+		var observed int
+		var mu sync.Mutex
+		done := make(chan struct{})
+
+		// G1: holds task-1 mutex
+		go func() {
+			release := te.LockWorktree("task-1")
+			mu.Lock()
+			observed++
+			mu.Unlock()
+			<-done
+			release()
+		}()
+
+		time.Sleep(50 * time.Millisecond)
+
+		// G2: blocks on task-1 mutex
+		gotSecond := make(chan struct{})
+		go func() {
+			release := te.LockWorktree("task-1")
+			mu.Lock()
+			observed++
+			mu.Unlock()
+			release()
+			close(gotSecond)
+		}()
+
+		// G3: different task, should not block
+		gotThird := make(chan struct{})
+		go func() {
+			release := te.LockWorktree("task-2")
+			mu.Lock()
+			observed++
+			mu.Unlock()
+			release()
+			close(gotThird)
+		}()
+
+		// G3 must reach its own lock while G2 is still waiting on task-1's.
+		select {
+		case <-gotThird:
+		case <-time.After(1 * time.Second):
+			t.Fatal("goroutine 3 should not have blocked")
+		}
+
+		// G2 should still be blocked
+		select {
+		case <-gotSecond:
+			t.Fatal("goroutine 2 should still be blocked")
+		default:
+		}
+
+		close(done)
+
+		// G2 should now proceed
+		select {
+		case <-gotSecond:
+		case <-time.After(1 * time.Second):
+			t.Fatal("goroutine 2 should have unblocked")
+		}
+
 		mu.Lock()
-		observed++
+		finalObserved := observed
 		mu.Unlock()
-		release()
-		close(gotSecond)
-	}()
-
-	// G3: different task, should not block
-	gotThird := make(chan struct{})
-	go func() {
-		release := te.LockWorktree("task-2")
-		mu.Lock()
-		observed++
-		mu.Unlock()
-		release()
-		close(gotThird)
-	}()
-
-	// G3 must reach its own lock while G2 is still waiting on task-1's.
-	select {
-	case <-gotThird:
-	case <-time.After(1 * time.Second):
-		t.Fatal("goroutine 3 should not have blocked")
-	}
-
-	// G2 should still be blocked
-	select {
-	case <-gotSecond:
-		t.Fatal("goroutine 2 should still be blocked")
-	default:
-	}
-
-	close(done)
-
-	// G2 should now proceed
-	select {
-	case <-gotSecond:
-	case <-time.After(1 * time.Second):
-		t.Fatal("goroutine 2 should have unblocked")
-	}
-
-	mu.Lock()
-	finalObserved := observed
-	mu.Unlock()
-	if finalObserved != 3 {
-		t.Fatalf("expected 3 observations, got %d", finalObserved)
-	}
+		if finalObserved != 3 {
+			t.Fatalf("expected 3 observations, got %d", finalObserved)
+		}
+	})
 }

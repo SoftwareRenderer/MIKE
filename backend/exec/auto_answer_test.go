@@ -96,46 +96,47 @@ func setupAutoAnswerTasks(t *testing.T) (*TaskExecutor, *types.Task, *types.Task
 	return te, parent, subtask
 }
 
-func TestAutomatedAnswers_SingleQuestion(t *testing.T) {
-	server := mockAnswerLLM("1) Use OAuth flow.")
-	defer server.Close()
+// TestAutomatedAnswers_AnswersFromTheParentsContext is the answering call: the parent's endpoint and
+// model answer, and the reply is split into one answer per question by its numbering.
+func TestAutomatedAnswers_AnswersFromTheParentsContext(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		questions []string
+		reply     string
+		want      []string
+	}{
+		{
+			name:      "one question",
+			questions: []string{"Which auth flow?"},
+			reply:     "1) Use OAuth flow.",
+			want:      []string{"Use OAuth flow."},
+		},
+		{
+			name:      "two questions keep their order",
+			questions: []string{"Which auth flow?", "Token expiry?"},
+			reply:     "1) Use OAuth. 2) 30 minutes",
+			want:      []string{"Use OAuth.", "30 minutes"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := mockAnswerLLM(tc.reply)
+			defer server.Close()
 
-	te, parent, subtask := setupAutoAnswerTasks(t)
-	// Parent's endpoint is preferred; point it at the mock.
-	parent.LlamaServerURL = server.URL
-	if err := te.store.UpdateTask(parent); err != nil {
-		t.Fatalf("update parent: %v", err)
-	}
+			te, parent, subtask := setupAutoAnswerTasks(t)
+			// Parent's endpoint is preferred; point it at the mock.
+			parent.LlamaServerURL = server.URL
+			if err := te.store.UpdateTask(parent); err != nil {
+				t.Fatalf("update parent: %v", err)
+			}
 
-	answers, err := te.automatedAnswers(context.Background(), subtask, []string{"Which auth flow?"})
-	if err != nil {
-		t.Fatalf("automatedAnswers: %v", err)
-	}
-	if len(answers) != 1 {
-		t.Fatalf("expected 1 answer, got %d", len(answers))
-	}
-	if answers[0] != "Use OAuth flow." {
-		t.Errorf("unexpected answer: %q", answers[0])
-	}
-}
-
-func TestAutomatedAnswers_MultipleQuestions(t *testing.T) {
-	server := mockAnswerLLM("1) Use OAuth. 2) 30 minutes")
-	defer server.Close()
-
-	te, parent, subtask := setupAutoAnswerTasks(t)
-	parent.LlamaServerURL = server.URL
-	if err := te.store.UpdateTask(parent); err != nil {
-		t.Fatalf("update parent: %v", err)
-	}
-
-	answers, err := te.automatedAnswers(context.Background(), subtask, []string{"Which auth flow?", "Token expiry?"})
-	if err != nil {
-		t.Fatalf("automatedAnswers: %v", err)
-	}
-	want := []string{"Use OAuth.", "30 minutes"}
-	if !reflect.DeepEqual(answers, want) {
-		t.Errorf("unexpected answers: got %#v, want %#v", answers, want)
+			answers, err := te.automatedAnswers(context.Background(), subtask, tc.questions)
+			if err != nil {
+				t.Fatalf("automatedAnswers: %v", err)
+			}
+			if !reflect.DeepEqual(answers, tc.want) {
+				t.Errorf("answers = %#v, want %#v", answers, tc.want)
+			}
+		})
 	}
 }
 
@@ -156,64 +157,68 @@ func mkToolCall(id, name, args string) types.ChatToolCall {
 	return tc
 }
 
-func TestAskQuestionResults_AlignmentWithIncompleteCalls(t *testing.T) {
+// TestAskQuestionResults picks the calls that are a real question, and maps each to its answer by
+// position. A call that never got a result — an incomplete call, or a failed ask_question — is not a
+// question, so it must not reach the user as "the agent has a question" nor be answered from the
+// parent's context; a real question in the same turn still is. With none left the caller falls
+// through to the next LLM call instead of idling the task.
+func TestAskQuestionResults(t *testing.T) {
 	t.Parallel()
-	pending := []types.ChatToolCall{
-		mkToolCall("c0", "read_file", `{"path":"a"}`),
-		{ID: ""}, // incomplete — skipped, no result
-		mkToolCall("c1", "ask_question", `{"question":"q1"}`),
-		mkToolCall("c2", "bash", `{"command":"ls"}`),
-		mkToolCall("c3", "ask_question", `{"question":"q2"}`),
+	tests := []struct {
+		name    string
+		pending []types.ChatToolCall
+		results []toolResult
+		want    map[int]int
+	}{
+		{
+			name: "indexes survive an incomplete call between the questions",
+			pending: []types.ChatToolCall{
+				mkToolCall("c0", "read_file", `{"path":"a"}`),
+				{ID: ""}, // incomplete — skipped, no result
+				mkToolCall("c1", "ask_question", `{"question":"q1"}`),
+				mkToolCall("c2", "bash", `{"command":"ls"}`),
+				mkToolCall("c3", "ask_question", `{"question":"q2"}`),
+			},
+			results: []toolResult{
+				{toolCallID: "c0", output: "a-content", success: true},
+				{toolCallID: "c1", output: "q1", success: true},
+				{toolCallID: "c2", output: "ls-out", success: true},
+				{toolCallID: "c3", output: "q2", success: true},
+			},
+			want: map[int]int{2: 1, 4: 3},
+		},
+		{
+			name: "a failed ask_question is an error, not a question",
+			pending: []types.ChatToolCall{
+				mkToolCall("c0", "ask_question", `{}`),
+				mkToolCall("c1", "bash", `{"command":"ls"}`),
+				mkToolCall("c2", "ask_question", `{"question":"Which scope?"}`),
+			},
+			results: []toolResult{
+				{toolCallID: "c0", output: "Error: question is required", success: false},
+				{toolCallID: "c1", output: "ls-out", success: true},
+				{toolCallID: "c2", output: "Which scope?", success: true},
+			},
+			want: map[int]int{2: 2},
+		},
+		{
+			name: "no question left — neither a failed call nor a call with no result",
+			pending: []types.ChatToolCall{
+				mkToolCall("c0", "ask_question", `{"question":""}`),
+				mkToolCall("c1", "ask_question", `{"question":"never answered"}`),
+			},
+			results: []toolResult{
+				{toolCallID: "c0", output: "Error: question is required", success: false},
+			},
+			want: map[int]int{},
+		},
 	}
-	results := []toolResult{
-		{toolCallID: "c0", output: "a-content", success: true},
-		{toolCallID: "c1", output: "q1", success: true},
-		{toolCallID: "c2", output: "ls-out", success: true},
-		{toolCallID: "c3", output: "q2", success: true},
-	}
-	got := askQuestionResults(pending, results)
-	want := map[int]int{2: 1, 4: 3}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("askQuestionResults: got %#v, want %#v", got, want)
-	}
-}
-
-// A failed ask_question results in an error, not a question, so it must not reach the user
-// as "the agent has a question", and an auto-started subtask must not answer it from the
-// parent's context. A real question in the same turn still does.
-func TestAskQuestionResults_SkipsFailedQuestions(t *testing.T) {
-	t.Parallel()
-	pending := []types.ChatToolCall{
-		mkToolCall("c0", "ask_question", `{}`),
-		mkToolCall("c1", "bash", `{"command":"ls"}`),
-		mkToolCall("c2", "ask_question", `{"question":"Which scope?"}`),
-	}
-	results := []toolResult{
-		{toolCallID: "c0", output: "Error: question is required", success: false},
-		{toolCallID: "c1", output: "ls-out", success: true},
-		{toolCallID: "c2", output: "Which scope?", success: true},
-	}
-	got := askQuestionResults(pending, results)
-	want := map[int]int{2: 2}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("askQuestionResults: got %#v, want %#v", got, want)
-	}
-}
-
-// With no question left there is nothing to ask, so the caller falls through to the next
-// LLM call instead of idling the task. A call with no result row is no question either.
-func TestAskQuestionResults_AllQuestionsFailed(t *testing.T) {
-	t.Parallel()
-	pending := []types.ChatToolCall{
-		mkToolCall("c0", "ask_question", `{"question":""}`),
-		mkToolCall("c1", "ask_question", `{"question":"never answered"}`),
-	}
-	results := []toolResult{
-		{toolCallID: "c0", output: "Error: question is required", success: false},
-	}
-	got := askQuestionResults(pending, results)
-	if len(got) != 0 {
-		t.Errorf("askQuestionResults: got %#v, want no questions", got)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := askQuestionResults(tc.pending, tc.results); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("askQuestionResults = %#v, want %#v", got, tc.want)
+			}
+		})
 	}
 }
 

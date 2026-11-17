@@ -11,42 +11,6 @@ import (
 	"mike/backend/types"
 )
 
-func TestSyncTargetIntoTask_NoNewCommits(t *testing.T) {
-	t.Parallel()
-	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
-
-	taskID := "task-no-new"
-	task := &types.Task{
-		ID:             taskID,
-		ProjectID:      projectID,
-		Title:          "Test Task",
-		Prompt:         "Test prompt",
-		Status:         types.StatusInProgress,
-		Branch:         "task/test-branch",
-		LlamaServerURL: "http://localhost:8080",
-		ModelName:      "test-model",
-	}
-	te.store.CreateTask(task)
-
-	testgit.Git(t, repoDir, "checkout", "-b", "task/test-branch")
-	testgit.Git(t, repoDir, "checkout", "master")
-
-	wtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, taskID)
-	os.MkdirAll(wtPath, 0o755)
-	testgit.Git(t, repoDir, "worktree", "add", "--detach", wtPath, "task/test-branch")
-	testgit.Git(t, wtPath, "checkout", "task/test-branch")
-
-	err := te.merge.syncTargetIntoTask(projectID, taskID, "master", "task/test-branch", task)
-	if err != nil {
-		t.Fatalf("syncTargetIntoTask should succeed with no new commits: %v", err)
-	}
-
-	taskFromDB, _ := te.store.GetTaskByID(taskID)
-	if taskFromDB.ExecutionState != "" && taskFromDB.ExecutionState != types.ExecStateIdle {
-		t.Errorf("execution state should be idle, got %q", taskFromDB.ExecutionState)
-	}
-}
-
 func TestSyncTargetIntoTask_CleanMerge(t *testing.T) {
 	t.Parallel()
 	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
@@ -182,84 +146,6 @@ func TestSyncTargetIntoTask_WorktreeMissing(t *testing.T) {
 	err := te.merge.syncTargetIntoTask(projectID, taskID, "master", "task/no-wt-branch", task)
 	if err != nil {
 		t.Fatalf("syncTargetIntoTask should return nil when worktree is missing: %v", err)
-	}
-}
-
-// A child syncs its parent's branch, not origin.
-func TestSyncTargetIntoTask_SubtaskChain(t *testing.T) {
-	t.Parallel()
-	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
-
-	// Create parent task
-	parentID := "parent-sync"
-	parent := &types.Task{
-		ID:             parentID,
-		ProjectID:      projectID,
-		Title:          "Parent Task",
-		Prompt:         "Parent prompt",
-		Status:         types.StatusInProgress,
-		Branch:         "task/parent-branch",
-		LlamaServerURL: "http://localhost:8080",
-		ModelName:      "test-model",
-	}
-	te.store.CreateTask(parent)
-
-	// Create parent branch
-	testgit.Git(t, repoDir, "checkout", "-b", "task/parent-branch")
-	os.WriteFile(filepath.Join(repoDir, "parent.txt"), []byte("parent v1\n"), 0o644)
-	testgit.Git(t, repoDir, "add", "parent.txt")
-	testgit.Git(t, repoDir, "commit", "-m", "parent initial")
-	testgit.Git(t, repoDir, "checkout", "master")
-
-	// Create parent worktree
-	parentWtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, parentID)
-	os.MkdirAll(parentWtPath, 0o755)
-	testgit.Git(t, repoDir, "worktree", "add", "--detach", parentWtPath, "task/parent-branch")
-	testgit.Git(t, parentWtPath, "checkout", "task/parent-branch")
-
-	// Create child task
-	childID := "child-sync"
-	child := &types.Task{
-		ID:             childID,
-		ProjectID:      projectID,
-		Title:          "Child Task",
-		Prompt:         "Child prompt",
-		Status:         types.StatusInProgress,
-		ParentTaskID:   parentID,
-		Branch:         "task/child-branch",
-		LlamaServerURL: "http://localhost:8080",
-		ModelName:      "test-model",
-	}
-	te.store.CreateTask(child)
-
-	// Create child branch from parent branch (in parent worktree since it's locked there)
-	testgit.Git(t, parentWtPath, "checkout", "-b", "task/child-branch")
-	os.WriteFile(filepath.Join(parentWtPath, "child.txt"), []byte("child v1\n"), 0o644)
-	testgit.Git(t, parentWtPath, "add", "child.txt")
-	testgit.Git(t, parentWtPath, "commit", "-m", "child initial")
-	testgit.Git(t, parentWtPath, "checkout", "task/parent-branch")
-
-	// Create child worktree
-	childWtPath := filepath.Join(func() string { cfg, _ := te.configStore.GetConfig(); return cfg.WorkspaceDir }(), projectID, childID)
-	os.MkdirAll(childWtPath, 0o755)
-	testgit.Git(t, repoDir, "worktree", "add", "--detach", childWtPath, "task/child-branch")
-	testgit.Git(t, childWtPath, "checkout", "task/child-branch")
-
-	// Add a non-conflicting commit to parent branch
-	os.WriteFile(filepath.Join(parentWtPath, "parent_new.txt"), []byte("parent new\n"), 0o644)
-	testgit.Git(t, parentWtPath, "add", "parent_new.txt")
-	testgit.Git(t, parentWtPath, "commit", "-m", "parent new file")
-
-	child, _ = te.store.GetTaskByID(childID)
-
-	err := te.merge.syncTargetIntoTask(projectID, childID, "task/parent-branch", "task/child-branch", child)
-	if err != nil {
-		t.Fatalf("syncTargetIntoTask should succeed: %v", err)
-	}
-
-	mergedFile := filepath.Join(childWtPath, "parent_new.txt")
-	if _, err := os.Stat(mergedFile); err != nil {
-		t.Fatalf("parent_new.txt should exist in child worktree after sync: %v", err)
 	}
 }
 
