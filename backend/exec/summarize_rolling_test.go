@@ -163,7 +163,8 @@ func TestSummarizeContext_UsesCompressedHistoryOnly(t *testing.T) {
 
 // TestMaybeAutoSummarize_SecondPassFoldsSummaryPlusTail is the end-to-end version:
 // two auto-summarizations in one run. The second must summarize "previous summary +
-// messages since the previous summary", never the whole conversation.
+// messages since the previous summary", never the whole conversation, and the summary it
+// installs must be the only one either read still carries.
 func TestMaybeAutoSummarize_SecondPassFoldsSummaryPlusTail(t *testing.T) {
 	chdirRepoRoot(t)
 	llm := newSummaryLLM()
@@ -235,7 +236,15 @@ func TestMaybeAutoSummarize_SecondPassFoldsSummaryPlusTail(t *testing.T) {
 	mustNotContain(t, second, "second pass", "ROUND-ONE-REQUEST-UNIQUETOKEN", "ROUND-ONE-WORK-UNIQUETOKEN")
 
 	// The newest summary now replaces what it folded away, and the tail restarts: the continuation
-	// from the first pass, and the reproduction of the turns this pass dropped.
+	// from the first pass, and the reproduction of the turns this pass dropped. The superseded summary
+	// is gone from both reads — a model told about two summaries has no way to tell which one its
+	// conversation is.
+	if got := extractPrevSummary(lc.messages); got != "GENERATED-SUMMARY-2" {
+		t.Fatalf("the summary in effect = %q, want the one this pass installed", got)
+	}
+	if strings.Contains(lc.messages[0].Content, "GENERATED-SUMMARY-1") {
+		t.Errorf("the live system prompt still carries the superseded summary:\n%.300s", lc.messages[0].Content)
+	}
 	after := buildLLMContext(lc.messages)
 	if !strings.Contains(after[0].Content, "GENERATED-SUMMARY-2") {
 		t.Fatalf("system message must carry the newest summary: %.200s", after[0].Content)
@@ -243,6 +252,9 @@ func TestMaybeAutoSummarize_SecondPassFoldsSummaryPlusTail(t *testing.T) {
 	for _, m := range after {
 		if m.Role == "summarization" {
 			t.Error("summarization marker leaked into the LLM context")
+		}
+		if strings.Contains(m.Content, "GENERATED-SUMMARY-1") {
+			t.Errorf("the superseded summary leaked into the LLM context: %.80s", m.Content)
 		}
 		if strings.Contains(m.Content, "ROUND-") && m.Role != "advisory" {
 			t.Errorf("folded-away message survived into the LLM context: %.80s", m.Content)

@@ -146,22 +146,43 @@ func TestTrimToFitNeverDropsAToolMessage(t *testing.T) {
 	}
 }
 
+// A cut result keeps the floor whatever priced it: a word count for prose, the byte count for a dump no
+// whitespace prices.
 func TestTrimToFitKeepsTheFloor(t *testing.T) {
 	t.Parallel()
-	conv := convWith(trimRow{id: "c1", name: types.ToolBash, output: filler(4000, "aa")})
-
-	kept, reports := trimToFit(conv, 50)
-
-	body, _, found := strings.Cut(kept[3].Content, "… (trimmed")
-	if !found {
-		t.Fatal("no trim notice on the cut result")
+	cases := []struct {
+		name   string
+		output string
+		budget int
+	}{
+		{name: "a word-priced result", output: filler(4000, "aa"), budget: 50},
+		{name: "a result only its bytes price", output: denseBlob(1<<20, 0), budget: 600},
 	}
-	// The cut ends on a line boundary, which can cost the budget's last line.
-	if got := estimateTokensFromText(body); got < minKeptTokens*3/4 {
-		t.Errorf("result body is %d tokens, below the floor of %d", got, minKeptTokens)
-	}
-	if reports[0].keptTokens <= 0 || reports[0].droppedTokens <= 0 {
-		t.Errorf("a cut must report both halves of what it did: %+v", reports[0])
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			conv := convWith(trimRow{id: "c1", name: types.ToolBash, output: tc.output})
+
+			kept, reports := trimToFit(conv, tc.budget)
+
+			if len(reports) != 1 {
+				t.Fatalf("%d results trimmed, want the one oversized cut: %+v", len(reports), reports)
+			}
+			body, _, found := strings.Cut(kept[3].Content, "… (trimmed")
+			if !found {
+				t.Fatal("no trim notice on the cut result")
+			}
+			// A cut may land short of the room it was given — on the line before it, or inside a line too
+			// dense to stop anywhere — but it never goes under the floor.
+			if got := estimateTokensFromText(body); got < minKeptTokens*3/4 {
+				t.Errorf("result body is %d tokens, below the floor of %d", got, minKeptTokens)
+			}
+			if len(body) >= len(conv[3].Content) {
+				t.Errorf("the result came back whole: %d bytes", len(body))
+			}
+			if reports[0].keptTokens <= 0 || reports[0].droppedTokens <= 0 {
+				t.Errorf("a cut must report both halves of what it did: %+v", reports[0])
+			}
+		})
 	}
 }
 
@@ -197,28 +218,6 @@ func TestTrimMarkerNamesTheRoutePerTool(t *testing.T) {
 	}
 }
 
-// A dense result is priced by its bytes, so it reaches the floor a word-priced result does.
-func TestTrimToFitCutsADenseResultToTheFloor(t *testing.T) {
-	t.Parallel()
-	conv := convWith(trimRow{id: "c1", name: types.ToolBash, output: denseBlob(1<<20, 0)})
-
-	kept, reports := trimToFit(conv, 600)
-
-	if len(reports) != 1 {
-		t.Fatalf("%d results trimmed, want the megabyte cut: %+v", len(reports), reports)
-	}
-	body, _, found := strings.Cut(kept[3].Content, "… (trimmed")
-	if !found {
-		t.Fatal("no trim notice on the cut result")
-	}
-	if got := estimateTokensFromText(body); got < minKeptTokens*3/4 {
-		t.Errorf("a dense cut kept %d tokens, below the floor of %d", got, minKeptTokens)
-	}
-	if len(body) >= len(conv[3].Content) {
-		t.Errorf("the megabyte came back whole: %d bytes", len(body))
-	}
-}
-
 func TestTrimToFitDoesNotModifyTheConversation(t *testing.T) {
 	t.Parallel()
 	conv := convWith(trimRow{id: "c1", name: types.ToolReadFile, output: filler(3000, "aa")})
@@ -247,68 +246,76 @@ func TestCutToTokensStaysUnderItsBudget(t *testing.T) {
 	}
 }
 
+// A cut ends on a line break, whether the lines carry words or one dense run of base64.
 func TestCutToTokensStopsOnALineBoundary(t *testing.T) {
 	t.Parallel()
-	text := filler(2000, "aa")
-	cut := cutToTokens(text, 1000)
-	if strings.Count(text, "\n") == strings.Count(cut, "\n") {
-		t.Fatal("the cut took every line, so it cut nothing")
+	cases := []struct {
+		name   string
+		text   string
+		target int
+	}{{name: "ten words to a line", text: filler(2000, "aa"), target: 1000},
+		{name: "76 characters to a line", text: denseBlob(1<<20, 76), target: 4096},
 	}
-	if last := cut[strings.LastIndex(cut, "\n")+1:]; len(strings.Fields(last)) != 10 {
-		t.Errorf("cut ends mid-line: %q", last)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			original := strings.Split(tc.text, "\n")
+			cut := cutToTokens(tc.text, tc.target)
+
+			lines := strings.Split(cut, "\n")
+			if len(lines) >= len(original) {
+				t.Fatal("the cut took every line, so it cut nothing")
+			}
+			for i, line := range lines {
+				if line != original[i] {
+					t.Fatalf("line %d is half-written: %q, want the whole of %q", i, line, original[i])
+				}
+			}
+			if strings.HasSuffix(cut, "\n") {
+				t.Error("the cut kept a trailing newline")
+			}
+			if got := estimateTokensFromText(cut); got > tc.target {
+				t.Errorf("the cut estimates %d tokens, want at most %d", got, tc.target)
+			}
+		})
 	}
 }
 
-func TestCutToTokensCutsASingleLongLine(t *testing.T) {
+// A line too dense for the target to hold a whole break has to be cut inside the line — the words inside
+// that prefix are counted back, and a rune is never split.
+func TestCutToTokensCutsInsideALineWithoutABreak(t *testing.T) {
 	t.Parallel()
-	text := strings.Repeat("word ", 2000)
-	cut := cutToTokens(text, 100)
-	if cut == "" {
-		t.Fatal("a result with no line breaks lost everything")
+	cases := []struct {
+		name    string
+		text    string
+		target  int
+		wantCut bool
+	}{
+		{name: "a line of words", text: strings.Repeat("word ", 2000), target: 100, wantCut: true},
+		{name: "base64 on one line", text: denseBlob(1<<20, 0), target: 1},
+		{name: "base64 in a few bytes", text: denseBlob(1<<20, 0), target: 8},
+		{name: "base64 under the floor", text: denseBlob(1<<20, 0), target: 512, wantCut: true},
+		{name: "base64 at a kilobyte", text: denseBlob(1<<20, 0), target: 4096},
 	}
-	if got := estimateTokensFromText(cut); got > 100 {
-		t.Errorf("cut estimates %d tokens, want at most 100", got)
-	}
-}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cut := cutToTokens(tc.text, tc.target)
 
-// A megabyte of base64 has one word per line and no line break to stop on, so the cut has to land inside
-// the line.
-func TestCutToTokensCutsInsideADenseLine(t *testing.T) {
-	t.Parallel()
-	blob := denseBlob(1<<20, 0)
-	for _, target := range []int{1, 8, 512, 4096} {
-		cut := cutToTokens(blob, target)
-		if !strings.HasPrefix(blob, cut) {
-			t.Errorf("target %d: the cut is not a prefix of the result", target)
-		}
-		if len(cut) >= len(blob) {
-			t.Fatalf("target %d: the megabyte came back whole", target)
-		}
-		if got := estimateTokensFromText(cut); got > target {
-			t.Errorf("target %d: a dense cut estimates %d tokens", target, got)
-		}
-		if !utf8.ValidString(cut) {
-			t.Errorf("target %d: the cut split a rune", target)
-		}
-	}
-	if got := cutToTokens(denseBlob(1<<20, 0), 512); got == "" {
-		t.Error("a dense result lost everything")
-	}
-}
-
-// Whitespace-poor lines still end on a break, and the bytes decide where.
-func TestCutToTokensCutsDenseLinesOnABoundary(t *testing.T) {
-	t.Parallel()
-	blob := denseBlob(1<<20, 76)
-	cut := cutToTokens(blob, 4096)
-	if strings.Count(blob, "\n") == strings.Count(cut, "\n") {
-		t.Fatal("the cut took every line, so it cut nothing")
-	}
-	if strings.HasSuffix(cut, "\n") {
-		t.Error("the cut kept a trailing newline")
-	}
-	if got := estimateTokensFromText(cut); got > 4096 {
-		t.Errorf("a dense cut estimates %d tokens, want at most 4096", got)
+			if !strings.HasPrefix(tc.text, cut) {
+				t.Errorf("the cut is not a prefix of the result")
+			}
+			if len(cut) >= len(tc.text) {
+				t.Fatalf("the %d byte result came back whole", len(tc.text))
+			}
+			if tc.wantCut && cut == "" {
+				t.Fatal("the cut lost everything")
+			}
+			if got := estimateTokensFromText(cut); got > tc.target {
+				t.Errorf("the cut estimates %d tokens, want at most %d", got, tc.target)
+			}
+			if !utf8.ValidString(cut) {
+				t.Error("the cut split a rune")
+			}
+		})
 	}
 }
 

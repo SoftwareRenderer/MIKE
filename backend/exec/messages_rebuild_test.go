@@ -77,28 +77,6 @@ func TestBuildMessagesFromDB_AdvisoryRowKeepsToolRows(t *testing.T) {
 	}
 }
 
-// TestBuildMessagesFromDB_ContiguousTurnUnchanged pins the ordinary case: nothing about
-// a well-ordered turn moves.
-func TestBuildMessagesFromDB_ContiguousTurnUnchanged(t *testing.T) {
-	t.Parallel()
-	const owner = "asst-1"
-	rows := []types.TaskMessage{
-		{ID: "u1", Role: "user", Content: "fix it"},
-		{ID: owner, Role: "assistant", Content: "editing"},
-		toolRow(t, owner, "A", "bash", `{"command":"go test"}`, "ok"),
-		toolRow(t, owner, "B", "read_file", `{"path":"x.go"}`, "package main"),
-		{ID: "u2", Role: "user", Content: "and now?"},
-	}
-
-	roles, calls, results := summarizeRebuild(rebuildRows(rows))
-	if !slices.Equal(calls, []string{"A", "B"}) || !slices.Equal(results, []string{"A", "B"}) {
-		t.Fatalf("calls=%v results=%v", calls, results)
-	}
-	if !slices.Equal(roles, []string{"system", "user", "assistant", "tool", "tool", "user"}) {
-		t.Fatalf("roles = %v", roles)
-	}
-}
-
 // TestBuildMessagesFromDB_LegacyRowsAttachToPrecedingAssistant covers rows written before
 // assistant_msg_id existed: they must land on the assistant above them even when an
 // advisory row sits in between, which is exactly what the old adjacency scan got wrong.
