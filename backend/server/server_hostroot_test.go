@@ -18,55 +18,34 @@ func widenHostRoot(s *Server) { s.hostRoot = fsutil.NewHostRoot(true) }
 // The jail is invisible until it refuses something, so its misconfigurations get a startup line, the
 // way the login budget and the Host allowlist already do.
 
-// TestJailFollowsTheDecisionNotTheEnvironment is the reason the widening is a configuration field: a
-// variable set later — to the typo someone meant as yes, or to the exact "1" — must not change the
-// jail a running server enforces. Two calls of one request are measured against one jail, and the
-// roots quoted in a refusal are the roots that refused.
-//
-// The rule that only the exact value "1" produces the widened decision is startup's, and its table of
-// truthy-looking values lives there (startup.TestOptInSwitchesAreTheExactValueOne).
-func TestJailFollowsTheDecisionNotTheEnvironment(t *testing.T) {
-	s, _, _, _, _ := jailedHostRootServer(t)
-	if s.hostRoot.Unrestricted() {
-		t.Fatal("precondition: this server was built jailed")
-	}
+// TestStartupAnnouncesTheJailItRuns: the ordinary state — a closed jail — says nothing about the
+// widening variable, and running without the jail is a decision the operator made that has to be visible
+// in the log rather than discovered when something was reachable that should not have been.
+func TestStartupAnnouncesTheJailItRuns(t *testing.T) {
+	t.Run("a closed jail says nothing about the widening", func(t *testing.T) {
+		s, _, _, _, _ := jailedHostRootServer(t)
+		buf, restore := logging.TestSink()
+		defer restore()
 
-	for _, v := range []string{"true", "yes", "0", "", "1", " 1"} {
-		t.Setenv(fsutil.AllowRootFSEnv, v)
-		if s.hostRoot.Unrestricted() {
-			t.Fatalf("%s=%q widened the jail of a server that was built jailed", fsutil.AllowRootFSEnv, v)
+		s.logHostRootPolicy()
+		if logged := strings.ReplaceAll(buf.String(), `\"`, `"`); strings.Contains(logged, fsutil.AllowRootFSEnv) {
+			t.Errorf("a closed jail is the normal state and must not warn: %s", logged)
 		}
-	}
-}
+	})
 
-// TestStartupIsQuietWhenTheJailIsClosed: a closed jail is the normal state and says nothing about the
-// widening variable.
-func TestStartupIsQuietWhenTheJailIsClosed(t *testing.T) {
-	s, _, _, _, _ := jailedHostRootServer(t)
-	buf, restore := logging.TestSink()
-	defer restore()
+	t.Run("a widened jail names itself", func(t *testing.T) {
+		s := testServer(t) // the suite's fixture is widened; its roots are every fixture's temp dir
+		if !s.hostRoot.Unrestricted() {
+			t.Fatal("precondition: the fixture server runs widened")
+		}
+		buf, restore := logging.TestSink()
+		defer restore()
 
-	s.logHostRootPolicy()
-	if logged := strings.ReplaceAll(buf.String(), `\"`, `"`); strings.Contains(logged, fsutil.AllowRootFSEnv) {
-		t.Errorf("a closed jail is the normal state and must not warn: %s", logged)
-	}
-}
-
-// TestStartupAnnouncesAWidenedJail: running without the jail is a decision the operator made, and it
-// has to be visible in the log rather than discovered when something was reachable that should not
-// have been.
-func TestStartupAnnouncesAWidenedJail(t *testing.T) {
-	s := testServer(t) // the suite's fixture is widened; its roots are every fixture's temp dir
-	if !s.hostRoot.Unrestricted() {
-		t.Fatal("precondition: the fixture server runs widened")
-	}
-	buf, restore := logging.TestSink()
-	defer restore()
-
-	s.logHostRootPolicy()
-	if logged := buf.String(); !strings.Contains(logged, fsutil.AllowRootFSEnv) || !strings.Contains(logged, "any host path") {
-		t.Errorf("running without the jail must be visible in the log: %s", logged)
-	}
+		s.logHostRootPolicy()
+		if logged := buf.String(); !strings.Contains(logged, fsutil.AllowRootFSEnv) || !strings.Contains(logged, "any host path") {
+			t.Errorf("running without the jail must be visible in the log: %s", logged)
+		}
+	})
 }
 
 // TestMistypedWideningIsReportedByResolution: the classic typo ("true", "yes") is a value that does

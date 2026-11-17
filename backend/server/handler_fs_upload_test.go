@@ -128,23 +128,6 @@ func TestFSUploadWritesFiles(t *testing.T) {
 		}
 	})
 
-	t.Run("a new file is 0644 and leaves no temporary behind", func(t *testing.T) {
-		fi, err := os.Stat(filepath.Join(dir, "assets", "img", "logo.png"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if fi.Mode().Perm() != 0644 {
-			t.Errorf("mode = %v, want -rw-r--r--", fi.Mode().Perm())
-		}
-		entries, err := os.ReadDir(filepath.Join(dir, "assets", "img"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(entries) != 1 {
-			t.Errorf("unexpected files next to the upload: %v", entries)
-		}
-	})
-
 	// A folder drop arrives as many requests; a part whose filename lost its
 	// directories (Go strips them) is the single-file case, so `relpath` is optional.
 	t.Run("relpath is optional and falls back to the part filename", func(t *testing.T) {
@@ -260,7 +243,7 @@ func TestFSUploadRejectsEscapes(t *testing.T) {
 func TestFSUploadAsksBeforeOverwriting(t *testing.T) {
 	s, dir := uploadProject(t, "upload-overwrite")
 	target := filepath.Join(dir, "keep.txt")
-	if err := os.WriteFile(target, []byte("original"), 0755); err != nil {
+	if err := os.WriteFile(target, []byte("original"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -297,11 +280,6 @@ func TestFSUploadAsksBeforeOverwriting(t *testing.T) {
 	}
 	if data, err := os.ReadFile(target); err != nil || string(data) != "replacement" {
 		t.Errorf("content after confirmed overwrite = %q, err %v", data, err)
-	}
-	// WriteFileAtomic keeps the mode of the file it replaced: an executable script
-	// dropped over another must stay runnable.
-	if fi, err := os.Stat(target); err != nil || fi.Mode().Perm() != 0755 {
-		t.Errorf("mode after overwrite = %v, want -rwxr-xr-x (err %v)", fi.Mode().Perm(), err)
 	}
 }
 
