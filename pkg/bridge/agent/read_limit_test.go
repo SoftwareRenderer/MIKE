@@ -42,59 +42,62 @@ func runReadRequest(t *testing.T, path string) []*protocol.Frame {
 	}
 }
 
-// The guest holds the file; the host is what runs out of memory. handleRead answers with one
-// error frame, so the bytes never leave the container.
-func TestHandleReadRefusesAFilePastTheLimit(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "huge.bin")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Sparse: the bridge reads the declared size, not the disk blocks.
-	if err := f.Truncate(protocol.MaxReadBytes + 1); err != nil {
-		t.Fatal(err)
-	}
-	f.Close()
-
-	frames := runReadRequest(t, path)
-
-	if len(frames) != 1 {
-		t.Fatalf("want one error frame, got %d frames", len(frames))
-	}
-	if frames[0].Type != protocol.TypeError {
-		t.Fatalf("frame type = %s, want Error", protocol.MessageTypeName(frames[0].Type))
-	}
-	if !strings.Contains(frames[0].ErrorMsg(), "limit") {
-		t.Errorf("the refusal should name the limit, got: %s", frames[0].ErrorMsg())
-	}
-}
-
-// The refusal is a ceiling, not a disabled tool.
-func TestHandleReadStreamsAFileWithinTheLimit(t *testing.T) {
-	body := strings.Repeat("hello\n", 5000)
-	path := filepath.Join(t.TempDir(), "small.txt")
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	frames := runReadRequest(t, path)
-
-	var got strings.Builder
-	var sawResult bool
-	for _, f := range frames {
-		switch f.Type {
-		case protocol.TypeChunk:
-			got.Write(f.Payload)
-		case protocol.TypeResult:
-			sawResult = true
-		case protocol.TypeError:
-			t.Fatalf("unexpected error frame: %s", f.ErrorMsg())
+// TestHandleReadBoundsTheStream: the file is the guest's and the memory is the host's, so handleRead
+// refuses at the ceiling before the bytes leave the container — one error frame, naming the limit.
+// The refusal is a ceiling and not a disabled tool: a file within it still streams out whole, closed
+// by its Result.
+func TestHandleReadBoundsTheStream(t *testing.T) {
+	t.Run("past the limit is refused in the guest", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "huge.bin")
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	if !sawResult {
-		t.Fatalf("no result frame after %d frames", len(frames))
-	}
-	if got.String() != body {
-		t.Errorf("streamed %d bytes, want %d", got.Len(), len(body))
-	}
+		// Sparse: the bridge reads the declared size, not the disk blocks.
+		if err := f.Truncate(protocol.MaxReadBytes + 1); err != nil {
+			t.Fatal(err)
+		}
+		f.Close()
+
+		frames := runReadRequest(t, path)
+
+		if len(frames) != 1 {
+			t.Fatalf("want one error frame, got %d frames", len(frames))
+		}
+		if frames[0].Type != protocol.TypeError {
+			t.Fatalf("frame type = %s, want Error", protocol.MessageTypeName(frames[0].Type))
+		}
+		if !strings.Contains(frames[0].ErrorMsg(), "limit") {
+			t.Errorf("the refusal should name the limit, got: %s", frames[0].ErrorMsg())
+		}
+	})
+
+	t.Run("within the limit streams out whole", func(t *testing.T) {
+		body := strings.Repeat("hello\n", 5000)
+		path := filepath.Join(t.TempDir(), "small.txt")
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		frames := runReadRequest(t, path)
+
+		var got strings.Builder
+		var sawResult bool
+		for _, f := range frames {
+			switch f.Type {
+			case protocol.TypeChunk:
+				got.Write(f.Payload)
+			case protocol.TypeResult:
+				sawResult = true
+			case protocol.TypeError:
+				t.Fatalf("unexpected error frame: %s", f.ErrorMsg())
+			}
+		}
+		if !sawResult {
+			t.Fatalf("no result frame after %d frames", len(frames))
+		}
+		if got.String() != body {
+			t.Errorf("streamed %d bytes, want %d", got.Len(), len(body))
+		}
+	})
 }
