@@ -56,57 +56,58 @@ func TestConfigReadIsOneQueryAndCached(t *testing.T) {
 	}
 }
 
-// The cache is dropped by the write counter, not a clock: a save is visible to the next read.
-func TestSnapshotSeesAWriteImmediately(t *testing.T) {
-	cs, counter := newCountingStore(t)
-	if _, err := cs.GetConfig(); err != nil {
-		t.Fatalf("get config: %v", err)
-	}
+// The cache is dropped by the write counter, not a clock: a save is visible to the next read whoever
+// made it — this package's own UpdateConfig, or a row some other package wrote directly.
+func TestSnapshotSeesAWrite(t *testing.T) {
+	t.Run("saved through this package", func(t *testing.T) {
+		cs, counter := newCountingStore(t)
+		if _, err := cs.GetConfig(); err != nil {
+			t.Fatalf("get config: %v", err)
+		}
 
-	cfg, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	cfg.WorkerModel = "worker-two"
-	cfg.Providers = []types.Provider{{ID: 1, Kind: "llm", URL: "http://localhost:8080/v1", Concurrency: 1}}
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
+		cfg, err := cs.GetConfig()
+		if err != nil {
+			t.Fatalf("get config: %v", err)
+		}
+		cfg.WorkerModel = "worker-two"
+		cfg.Providers = []types.Provider{{ID: 1, Kind: "llm", URL: "http://localhost:8080/v1", Concurrency: 1}}
+		if err := cs.UpdateConfig(cfg); err != nil {
+			t.Fatalf("update config: %v", err)
+		}
 
-	read, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config after the save: %v", err)
-	}
-	if read.WorkerModel != "worker-two" {
-		t.Errorf("WorkerModel = %q after the save, want the saved value", read.WorkerModel)
-	}
-	if counter.batchReads < 2 {
-		t.Errorf("%d queries for a read-save-read, want the save to invalidate the snapshot", counter.batchReads)
-	}
-}
+		read, err := cs.GetConfig()
+		if err != nil {
+			t.Fatalf("get config after the save: %v", err)
+		}
+		if read.WorkerModel != "worker-two" {
+			t.Errorf("WorkerModel = %q after the save, want the saved value", read.WorkerModel)
+		}
+		if counter.batchReads < 2 {
+			t.Errorf("%d queries for a read-save-read, want the save to invalidate the snapshot", counter.batchReads)
+		}
+	})
 
-// A row written by anything outside this package still invalidates, because the counter lives with the
-// write.
-func TestSnapshotSeesAWriteFromElsewhere(t *testing.T) {
-	cs, counter := newCountingStore(t)
-	if _, err := cs.GetConfig(); err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	before := counter.batchReads
+	t.Run("written outside this package", func(t *testing.T) {
+		cs, counter := newCountingStore(t)
+		if _, err := cs.GetConfig(); err != nil {
+			t.Fatalf("get config: %v", err)
+		}
+		before := counter.batchReads
 
-	if err := counter.SetConfigValue("worker_model", "written-by-another-package"); err != nil {
-		t.Fatalf("set config value: %v", err)
-	}
-	read, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	if read.WorkerModel != "written-by-another-package" {
-		t.Errorf("WorkerModel = %q, want the value written outside this package", read.WorkerModel)
-	}
-	if counter.batchReads == before {
-		t.Error("the snapshot survived a write it never saw")
-	}
+		if err := counter.SetConfigValue("worker_model", "written-by-another-package"); err != nil {
+			t.Fatalf("set config value: %v", err)
+		}
+		read, err := cs.GetConfig()
+		if err != nil {
+			t.Fatalf("get config: %v", err)
+		}
+		if read.WorkerModel != "written-by-another-package" {
+			t.Errorf("WorkerModel = %q, want the value written outside this package", read.WorkerModel)
+		}
+		if counter.batchReads == before {
+			t.Error("the snapshot survived a write it never saw")
+		}
+	})
 }
 
 // A cached provider list is not writable through: a caller changes its own copy only.
