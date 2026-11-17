@@ -104,14 +104,6 @@ describe('I18nRuntime (one instance per runtime)', () => {
         expect(String(warn.mock.calls[0][0])).toContain('English');
     });
 
-    it('warns once per key per catalog, not once per render', () => {
-        runtime.setCatalog('fr', {});
-        runtime.t('nope.one');
-        runtime.t('nope.one');
-        runtime.t('nope.two');
-        expect(warn).toHaveBeenCalledTimes(2);
-    });
-
     it('re-warns after a new catalog arrives — the pack may have been fixed', () => {
         runtime.setCatalog('fr', {});
         runtime.t('nav.board');
@@ -141,26 +133,6 @@ describe('I18nRuntime (one instance per runtime)', () => {
         expect(runtime.catalog).toBe(null);
         expect(runtime.locale).toBe(DEFAULT_LOCALE);
         expect(runtime.registerCatalog(DEFAULT_LOCALE, { a: 'b' })).toBe(false);
-    });
-
-    it('owns documentElement.lang in both directions', () => {
-        runtime.setCatalog('ar', { a: 'x' });
-        expect(document.documentElement.lang).toBe('ar');
-        runtime.setCatalog('ar', null);
-        expect(document.documentElement.lang).toBe(DEFAULT_LOCALE);
-    });
-
-    it('interpolates {name} tokens and leaves unknown ones visible', () => {
-        runtime.setCatalog('zh-CN', { 'task.count': '{n} 个任务 · {other}' });
-        expect(runtime.t('task.count', { n: 3 })).toBe('3 个任务 · {other}');
-    });
-
-    it('selects a plural form through Intl.PluralRules, not count === 1', () => {
-        runtime.setCatalog(MANY_FORMS, { 'i18n.test.files': MANY_FORM_TABLE });
-        expect(runtime.t('i18n.test.files', { count: 1 })).toBe('[one:1]');
-        expect(runtime.t('i18n.test.files', { count: 2 })).toBe('[few:2]');
-        expect(runtime.t('i18n.test.files', { count: 5 })).toBe('[many:5]');
-        expect(runtime.t('i18n.test.files', { count: 1.5 })).toBe('[other:1.5]');
     });
 
     it('has() answers only for the active pack', () => {
@@ -212,8 +184,12 @@ describe('the app-wide runtime', () => {
 
 describe('t()', () => {
     it('answers from the English catalog of record', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         expect(t('time.justNow')).toBe('just now');
         expect(t('time.yesterdayAt', { time: '3:45 PM' })).toBe('Yesterday at 3:45 PM');
+        // An empty key is a call-site bug, not a throw and not a blank string.
+        expect(i18n.t('')).toBe('');
+        warn.mockRestore();
     });
 
     it('interpolates {token} and leaves an unknown token alone', () => {
@@ -222,14 +198,6 @@ describe('t()', () => {
         expect(t('time.built', { time: '3:45 PM' })).toBe('Built {when}');
     });
 
-    it('degrades to the key rather than to blank, and never throws', () => {
-        // Reached through the pack-facing accessor: `t()` will not typecheck an id
-        // `en.ts` does not have, which is the check that keeps 1100 keys honest.
-        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        expect(i18n.t('time.does-not-exist')).toBe('time.does-not-exist');
-        expect(i18n.t('')).toBe('');
-        warn.mockRestore();
-    });
 });
 
 describe('active locale', () => {

@@ -459,9 +459,10 @@ describe('entriesWithoutRows — what a replaced conversation leaves on screen',
             { type: 'tool_result', data: { tool_id: 'call-1', output: 'done', success: true } },
             { type: 'token', data: { text: 'The command' } },
         ]);
-        expect(live.length).toBeGreaterThan(1);
+        expect(live.map(e => e.id)).toEqual(['live-0', 'live-1']);
 
         // The call answered, so only the text streaming after it is still awaiting a row.
+        expect(entriesWithoutRows(live).map(e => e.id)).toEqual(['live-1']);
         expect(entriesWithoutRows(live).every(e => e.isStreaming)).toBe(true);
     });
 });

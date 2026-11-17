@@ -28,34 +28,23 @@ describe('Toast', () => {
         expect(container.querySelector('.toast')).toBeNull();
     });
 
-    it('should apply error styling for error toasts', async () => {
+    // One conditional render with two arms: the kind picks the class, and the other class must not be there.
+    it.each([
+        { kind: 'error', message: 'Something went wrong' },
+        { kind: 'success', message: 'Task started successfully' },
+    ])('a $kind toast carries its own class and not the other', async ({ kind, message }) => {
         const { container } = render(Toast);
-        dialogStore.showToast('Something went wrong', 'error');
+        dialogStore.showToast(message, kind as 'error' | 'success');
 
         const toast = await waitFor(() => {
             const el = container.querySelector('.toast');
             expect(el).toBeTruthy();
             return el;
         });
-        expect(toast?.classList.contains('error')).toBe(true);
-        expect(toast?.classList.contains('success')).toBe(false);
+        expect(toast?.classList.contains(kind)).toBe(true);
+        expect(toast?.classList.contains(kind === 'error' ? 'success' : 'error')).toBe(false);
         expect(toast?.getAttribute('role')).toBe('alert');
-        expect(toast?.textContent).toContain('Something went wrong');
-    });
-
-    it('should apply success styling for success toasts', async () => {
-        const { container } = render(Toast);
-        dialogStore.showToast('Task started successfully', 'success');
-
-        const toast = await waitFor(() => {
-            const el = container.querySelector('.toast');
-            expect(el).toBeTruthy();
-            return el;
-        });
-        expect(toast?.classList.contains('success')).toBe(true);
-        expect(toast?.classList.contains('error')).toBe(false);
-        expect(toast?.getAttribute('role')).toBe('alert');
-        expect(toast?.textContent).toContain('Task started successfully');
+        expect(toast?.textContent).toContain(message);
     });
 
     it('dismisses when the store releases the toast', async () => {

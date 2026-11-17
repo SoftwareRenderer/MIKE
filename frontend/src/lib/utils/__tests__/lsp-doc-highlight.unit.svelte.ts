@@ -137,20 +137,15 @@ afterEach(() => {
 });
 
 describe('a hover card signature is painted like the code it shows', () => {
-  it('colors the keyword the theme colors a keyword', () => {
+  it('colors the keyword the theme colors a keyword, and keeps it through the sanitizer', () => {
     const view = editorFor('/repo/x.go', 'go');
     const html = hoverDocsHTML(pluginFor(view), { contents: { kind: 'markdown', value: GOPLS_HOVER } });
     expect(classOn(html, 'func'), html).toBe(classOf(view, tags.keyword));
     expect(classOn(html, 'int'), html).toBe(classOf(view, tags.typeName));
-  });
-
-  it('keeps the classes through the sanitizer', () => {
-    // DOMPurify runs over the block: a stripped class attribute would reopen the bug silently.
-    const view = editorFor('/repo/x.go', 'go');
-    const html = hoverDocsHTML(pluginFor(view), { contents: { kind: 'markdown', value: GOPLS_HOVER } });
+    // DOMPurify runs over the block: a stripped class attribute would reopen the bug silently, and
+    // highlighting the block must not swallow the doc comment beside it.
     expect(html).toContain('<pre>');
     expect(html.match(/<span class="[^"]+">/g) ?? []).not.toHaveLength(0);
-    // Highlighting the block must not swallow the doc comment.
     expect(html).toContain('Println formats using the default formats.');
   });
 

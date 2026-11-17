@@ -34,126 +34,78 @@ function renderTab(props: { createTaskKey?: string; createTaskSubmitKey?: string
     };
 }
 
-describe('PreferencesTab hide-hints toggle', () => {
-    const TOGGLE = 'button[aria-label="Hide shortcut hints"]';
+interface ToggleRow {
+    /** The switch, found by the name it is announced by. */
+    toggle: string;
+    /** The prop the modal hydrates the row from, and what it holds when nothing is stored. */
+    prop: string;
+    storedUnset: boolean | undefined;
+    /** What the switch shows before the person has ever answered. */
+    whenUnset: boolean;
+    /** The row lives in its own settings section rather than under Keyboard Shortcuts. */
+    section?: string;
+    /** The browser is asked for permission by this row's own click. */
+    asksPermission?: boolean;
+}
 
-    function renderToggleTab(props: { hideHints?: boolean } = {}) {
-        const onDirty = vi.fn();
-        const utils = render(PreferencesTab, {
-            props: { createTaskKey: undefined, createTaskSubmitKey: undefined, hideHints: false, onDirty, ...props },
-        });
-        return { ...utils, onDirty, toggle: () => utils.container.querySelector(TOGGLE) as HTMLButtonElement };
-    }
+const TOGGLES: ToggleRow[] = [
+    { toggle: 'button[aria-label="Hide shortcut hints"]', prop: 'hideHints', storedUnset: false, whenUnset: false },
+    { toggle: 'button[aria-label="Hide model badge"]', prop: 'hideModelBadge', storedUnset: false, whenUnset: false, section: 'UI' },
+    { toggle: 'button[aria-label="Auto maximize chat visibility on mobile"]', prop: 'autoMaximizeChat', storedUnset: undefined, whenUnset: true },
+    { toggle: 'button[aria-label="Auto maximize code viewer"]', prop: 'autoMaximizeCodeViewer', storedUnset: undefined, whenUnset: true },
+    { toggle: 'button[aria-label="Notify when a task enters Review"]', prop: 'notifyOnReview', storedUnset: undefined, whenUnset: false, section: 'UI', asksPermission: true },
+    { toggle: 'button[aria-label="Oldest Task on top"]', prop: 'sortOldestFirst', storedUnset: false, whenUnset: false },
+];
 
-    it('renders the toggle, off by default', () => {
-        const { toggle } = renderToggleTab();
+function renderToggleRow(row: ToggleRow, stored?: boolean) {
+    if (row.asksPermission) stubNotification('granted');
+    const onDirty = vi.fn();
+    const utils = render(PreferencesTab, {
+        props: {
+            createTaskKey: undefined, createTaskSubmitKey: undefined, onDirty,
+            [row.prop]: stored ?? row.storedUnset,
+        },
+    });
+    return { ...utils, onDirty, toggle: () => utils.container.querySelector(row.toggle) as HTMLButtonElement };
+}
+
+/**
+ * Every persisted switch on this tab answers the same three questions: what it shows before anyone has
+ * answered, what it shows when the server stored an answer, and that moving it is the only thing that
+ * makes the dialog dirty. A preference that is on unless stored false (the chat and code viewers) has
+ * to keep that reading too, so a stored `false` is never "unset, therefore on".
+ */
+describe.each(TOGGLES)('PreferencesTab $toggle switch', (row) => {
+    it(`is ${row.whenUnset ? 'on' : 'off'} when nothing is stored for it`, () => {
+        const { toggle } = renderToggleRow(row);
+
         expect(toggle()).toBeTruthy();
-        expect(toggle()?.getAttribute('aria-checked')).toBe('false');
+        expect(toggle()?.getAttribute('aria-checked')).toBe(String(row.whenUnset));
     });
 
-    it('reflects a stored preference', () => {
-        const { toggle } = renderToggleTab({ hideHints: true });
-        expect(toggle()?.getAttribute('aria-checked')).toBe('true');
+    it('reflects the stored preference', () => {
+        const { toggle } = renderToggleRow(row, !row.whenUnset);
+
+        expect(toggle()?.getAttribute('aria-checked')).toBe(String(!row.whenUnset));
     });
 
     it('toggles and reports dirty', async () => {
-        const { toggle, onDirty } = renderToggleTab();
+        const { toggle, onDirty } = renderToggleRow(row);
+
         await fireEvent.click(toggle()!);
-        expect(toggle()?.getAttribute('aria-checked')).toBe('true');
+
+        expect(toggle()?.getAttribute('aria-checked')).toBe(String(!row.whenUnset));
         expect(onDirty).toHaveBeenCalledTimes(1);
     });
-});
 
-describe('PreferencesTab hide-model-badge toggle', () => {
-    const TOGGLE = 'button[aria-label="Hide model badge"]';
+    if (row.section) {
+        it(`lives in the ${row.section} section, not under Keyboard Shortcuts`, () => {
+            const { toggle } = renderToggleRow(row);
 
-    function renderModelBadgeTab(props: { hideModelBadge?: boolean } = {}) {
-        const onDirty = vi.fn();
-        const utils = render(PreferencesTab, {
-            props: { createTaskKey: undefined, createTaskSubmitKey: undefined, hideModelBadge: false, onDirty, ...props },
+            expect(toggle()!.closest('.settings-section')?.querySelector('.settings-section-title')?.textContent)
+                .toBe(row.section);
         });
-        return { ...utils, onDirty, toggle: () => utils.container.querySelector(TOGGLE) as HTMLButtonElement };
     }
-
-    it('renders the toggle in its own UI section, off by default', () => {
-        const { getByText, toggle } = renderModelBadgeTab();
-        expect(toggle()).toBeTruthy();
-        expect(toggle()?.getAttribute('aria-checked')).toBe('false');
-        // The toggle lives in a dedicated UI section, not under Keyboard Shortcuts.
-        const section = toggle()!.closest('.settings-section');
-        expect(section?.querySelector('.settings-section-title')?.textContent).toBe('UI');
-        expect(getByText('Hide model badge')).toBeTruthy();
-    });
-
-    it('reflects a stored preference', () => {
-        const { toggle } = renderModelBadgeTab({ hideModelBadge: true });
-        expect(toggle()?.getAttribute('aria-checked')).toBe('true');
-    });
-
-    it('toggles and reports dirty', async () => {
-        const { toggle, onDirty } = renderModelBadgeTab();
-        await fireEvent.click(toggle()!);
-        expect(toggle()?.getAttribute('aria-checked')).toBe('true');
-        expect(onDirty).toHaveBeenCalledTimes(1);
-    });
-});
-
-describe('PreferencesTab auto-maximize-chat toggle', () => {
-    const TOGGLE = 'button[aria-label="Auto maximize chat visibility on mobile"]';
-
-    function renderAutoMaximizeTab(props: { autoMaximizeChat?: boolean } = {}) {
-        const onDirty = vi.fn();
-        const utils = render(PreferencesTab, {
-            props: { createTaskKey: undefined, createTaskSubmitKey: undefined, onDirty, ...props },
-        });
-        return { ...utils, onDirty, toggle: () => utils.container.querySelector(TOGGLE) as HTMLButtonElement };
-    }
-
-    it('is on when nothing is stored for it', () => {
-        const { toggle } = renderAutoMaximizeTab();
-        expect(toggle()?.getAttribute('aria-checked')).toBe('true');
-    });
-
-    it('reflects a stored false', () => {
-        const { toggle } = renderAutoMaximizeTab({ autoMaximizeChat: false });
-        expect(toggle()?.getAttribute('aria-checked')).toBe('false');
-    });
-
-    it('toggles and reports dirty', async () => {
-        const { toggle, onDirty } = renderAutoMaximizeTab();
-        await fireEvent.click(toggle()!);
-        expect(toggle()?.getAttribute('aria-checked')).toBe('false');
-        expect(onDirty).toHaveBeenCalledTimes(1);
-    });
-});
-
-describe('PreferencesTab auto-maximize-code-viewer toggle', () => {
-    const TOGGLE = 'button[aria-label="Auto maximize code viewer"]';
-
-    function renderCodeViewerTab(props: { autoMaximizeCodeViewer?: boolean } = {}) {
-        const onDirty = vi.fn();
-        const utils = render(PreferencesTab, {
-            props: { createTaskKey: undefined, createTaskSubmitKey: undefined, onDirty, ...props },
-        });
-        return { ...utils, onDirty, toggle: () => utils.container.querySelector(TOGGLE) as HTMLButtonElement };
-    }
-
-    it('is on when nothing is stored for it', () => {
-        const { toggle } = renderCodeViewerTab();
-        expect(toggle()?.getAttribute('aria-checked')).toBe('true');
-    });
-
-    it('reflects a stored false', () => {
-        const { toggle } = renderCodeViewerTab({ autoMaximizeCodeViewer: false });
-        expect(toggle()?.getAttribute('aria-checked')).toBe('false');
-    });
-
-    it('toggles and reports dirty', async () => {
-        const { toggle, onDirty } = renderCodeViewerTab();
-        await fireEvent.click(toggle()!);
-        expect(toggle()?.getAttribute('aria-checked')).toBe('false');
-        expect(onDirty).toHaveBeenCalledTimes(1);
-    });
 });
 
 /** jsdom has no Notification, and the row reads the permission at render time, so the stub goes in first. */
@@ -183,26 +135,12 @@ describe('PreferencesTab notify-on-review toggle', () => {
         };
     }
 
-    it('is off when nothing is stored for it, and lives in the UI section', () => {
+    it('names the row and what it does', () => {
         stubNotification('granted');
-        const { getByText, toggle, desc } = renderNotifyTab();
-        expect(toggle()?.getAttribute('aria-checked')).toBe('false');
-        expect(toggle()!.closest('.settings-section')?.querySelector('.settings-section-title')?.textContent).toBe('UI');
+        const { getByText, desc } = renderNotifyTab();
+
         expect(getByText('Notify when a task enters Review')).toBeTruthy();
         expect(desc()).toBe('Send a browser notification when a task starts waiting for you while you are looking elsewhere');
-    });
-
-    it('reflects a stored preference', () => {
-        stubNotification('granted');
-        expect(renderNotifyTab({ notifyOnReview: true }).toggle()?.getAttribute('aria-checked')).toBe('true');
-    });
-
-    it('toggles and reports dirty', async () => {
-        stubNotification('granted');
-        const { toggle, onDirty } = renderNotifyTab();
-        await fireEvent.click(toggle()!);
-        expect(toggle()?.getAttribute('aria-checked')).toBe('true');
-        expect(onDirty).toHaveBeenCalledTimes(1);
     });
 
     it('asks the browser once, on the click that enables it', async () => {
@@ -450,24 +388,6 @@ describe('PreferencesTab board sort toggle', () => {
         });
         return { ...utils, onDirty, toggle: () => utils.container.querySelector(TOGGLE) as HTMLButtonElement };
     }
-
-    it('renders the toggle, off by default (newest move on top)', () => {
-        const { toggle } = renderSortTab();
-        expect(toggle()).toBeTruthy();
-        expect(toggle()?.getAttribute('aria-checked')).toBe('false');
-    });
-
-    it('reflects a stored preference', () => {
-        const { toggle } = renderSortTab({ sortOldestFirst: true });
-        expect(toggle()?.getAttribute('aria-checked')).toBe('true');
-    });
-
-    it('toggles and reports dirty', async () => {
-        const { toggle, onDirty } = renderSortTab();
-        await fireEvent.click(toggle()!);
-        expect(toggle()?.getAttribute('aria-checked')).toBe('true');
-        expect(onDirty).toHaveBeenCalledTimes(1);
-    });
 
     it('explains what turning it on does', () => {
         const { container } = renderSortTab();

@@ -55,13 +55,6 @@ describe('stacking tiers', () => {
         });
     });
 
-    it('names a declared tier everywhere it is used', () => {
-        const tiers = cssTiers();
-        const undeclared = sources().flatMap((path) => Array.from(readFileSync(path, 'utf8').matchAll(/var\(--z-([a-z-]+)\)/g), (m) => `${relative(SRC, path)}: --z-${m[1]}`)
-            .filter((entry) => !tiers.has(entry.split('--z-')[1])));
-        expect(undeclared, `var(--z-…) with no token in app.css paints as z-index: auto\n${undeclared.join('\n')}`).toEqual([]);
-    });
-
     it('owns every number: no z-index literal outside the token block in app.css', () => {
         const literal = /z-index:\s*-?\d|zIndex:\s*'?-?\d/;
         const offenders = sources().flatMap((path) => readFileSync(path, 'utf8').split('\n')

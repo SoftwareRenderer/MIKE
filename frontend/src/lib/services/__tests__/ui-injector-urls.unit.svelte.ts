@@ -1,11 +1,18 @@
 /**
- * Extension asset URLs — the same-origin path an extension's assets are loaded
- * from must stay inside /extensions/<author>/<name>/ no matter what the
- * installed record says, and external assets must be rejected outright.
+ * The asset path an extension is loaded from, and the one theme stylesheet the
+ * injector applies from it.
+ *
+ * `extBaseURL`/`resolveAssetURL` are the fence: the served directory the server
+ * reported wins, and an asset may never leave it. `registerFromExtensions` is
+ * where that fence is applied to a manifest's `css_url`, and what it decides is
+ * visible twice — the `<link>` in the document and the hint `index.html`
+ * pre-paints from — so a rejected URL must be refused by both.
  */
-import { describe, it, expect } from 'vitest';
-import { extBaseURL, resolveAssetURL, UIInjector } from '$lib/services/ui-injector.svelte';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { extBaseURL, resolveAssetURL, UIInjector, THEME_CSS_KEY } from '$lib/services/ui-injector.svelte';
 import type { Extension } from '$lib/types';
+
+const THEME_LINK_ID = 'kanban-theme-stylesheet';
 
 function makeExt(name: string, author: string): Extension {
     return {
@@ -36,6 +43,43 @@ function withServed(name: string, author: string, served: unknown): Extension {
     return { ...makeExt(name, author), served_url: served } as Extension;
 }
 
+function makeCSSExtension(cssUrl: string, enabled = true): Extension {
+    return {
+        ...makeExt('test-theme', 'Test'),
+        id: 'test-ext-1',
+        name: 'test-theme',
+        type: 'css',
+        enabled,
+        manifest: {
+            display_name: 'Test Theme',
+            description: 'Test',
+            author: 'Test',
+            version: '1.0.0',
+            capabilities: { css: { css_url: cssUrl } },
+        },
+    } as Extension;
+}
+
+function makeUIExtension(id: string, name: string, priority?: number): Extension {
+    return {
+        ...makeExt(name, 'Test'),
+        id,
+        name,
+        manifest: {
+            display_name: name,
+            description: '',
+            author: 'Test',
+            version: '1.0.0',
+            ...(priority === undefined ? {} : { priority }),
+            capabilities: { ui: { injection_points: ['taskCard'], permissions: [] } },
+        },
+    } as Extension;
+}
+
+function themeLink(): HTMLLinkElement | null {
+    return document.getElementById(THEME_LINK_ID) as HTMLLinkElement | null;
+}
+
 describe('extBaseURL', () => {
     it('builds /extensions/<author-slug>/<name>', () => {
         expect(extBaseURL(makeExt('html-preview', 'SoftwareRenderer')))
@@ -57,7 +101,6 @@ describe('extBaseURL', () => {
 });
 
 describe('extBaseURL — the served directory the server reported', () => {
-
     it('uses served_url for the author-namespaced layout', () => {
         expect(extBaseURL(withServed('zh', 'SoftwareRenderer', '/extensions/softwarerenderer/zh')))
             .toBe('/extensions/softwarerenderer/zh');
@@ -130,6 +173,23 @@ describe('the URL the extension iframe is mounted at', () => {
             .toBe('/extensions/test/html-preview/Preview.js');
     });
 
+    it('carries the manifest priority as the render order, defaulting to 0', () => {
+        // Two rules the mount order depends on: an absent `priority` is 0, and the sort
+        // is numeric — a negative priority loads before the default, the default before 10.
+        const injector = new UIInjector();
+        injector.registerFromExtensions([
+            makeUIExtension('ext-ten', 'ext-ten', 10),
+            makeUIExtension('ext-default', 'ext-default'),
+            makeUIExtension('ext-neg', 'ext-neg', -5),
+        ]);
+
+        const regs = injector.getRegistrations('taskCard' as any);
+        expect(regs.map((r) => [r.extensionName, r.order])).toEqual([
+            ['ext-neg', -5],
+            ['ext-default', 0],
+            ['ext-ten', 10],
+        ]);
+    });
 });
 
 describe('resolveAssetURL', () => {
@@ -185,5 +245,123 @@ describe('resolveAssetURL', () => {
         // inside, and answering '/extensions/theme.css' — the tree root's file — is an
         // answer that belongs to nobody.
         expect(resolveAssetURL(makeExt('..', 'acme'), 'theme.css')).toBe('');
+    });
+});
+
+describe('the theme stylesheet a CSS extension applies', () => {
+    let injector: UIInjector;
+
+    beforeEach(() => {
+        injector = new UIInjector();
+        themeLink()?.remove();
+        localStorage.removeItem(THEME_CSS_KEY);
+    });
+
+    afterEach(() => {
+        injector.clearCache();
+        themeLink()?.remove();
+        localStorage.removeItem(THEME_CSS_KEY);
+    });
+
+    it('injects a <link> and caches its URL for the pre-paint hint', () => {
+        injector.registerFromExtensions([makeCSSExtension('styles.css')]);
+
+        expect(themeLink()?.getAttribute('rel')).toBe('stylesheet');
+        expect(themeLink()?.getAttribute('href')).toBe('/extensions/test/test-theme/styles.css');
+        expect(localStorage.getItem(THEME_CSS_KEY)).toBe('/extensions/test/test-theme/styles.css');
+    });
+
+    it.each(['styles.css', './styles.css', '/styles.css'])(
+        'resolves a css_url against the extension base, never the server root: %s',
+        (cssUrl) => {
+            injector.registerFromExtensions([makeCSSExtension(cssUrl)]);
+            expect(themeLink()?.getAttribute('href')).toBe('/extensions/test/test-theme/styles.css');
+        },
+    );
+
+    it('refuses an external css_url — no stylesheet, and nothing handed to the pre-paint hint', () => {
+        injector.registerFromExtensions([makeCSSExtension('https://evil.example/theme.css')]);
+
+        expect(themeLink()).toBeFalsy();
+        expect(localStorage.getItem(THEME_CSS_KEY)).toBeNull();
+    });
+
+    it('a rejected css_url does not block a subsequent valid CSS extension', () => {
+        const bad = makeCSSExtension('https://evil.example/theme.css');
+        const good = makeCSSExtension('styles.css');
+        good.id = 'test-ext-2';
+        good.name = 'good-theme';
+
+        injector.registerFromExtensions([bad, good]);
+
+        expect(themeLink()?.getAttribute('href')).toBe('/extensions/test/good-theme/styles.css');
+    });
+
+    it('first enabled CSS extension with css_url wins', () => {
+        const ext1 = makeCSSExtension('theme/first.css');
+        const ext2 = makeCSSExtension('theme/second.css');
+        ext2.id = 'test-ext-2';
+        ext2.name = 'second-theme';
+
+        injector.registerFromExtensions([ext1, ext2]);
+
+        expect(themeLink()?.getAttribute('href')).toBe('/extensions/test/test-theme/theme/first.css');
+    });
+
+    it('swaps the stylesheet when css_url changes', () => {
+        injector.registerFromExtensions([makeCSSExtension('theme/dark.css')]);
+        expect(themeLink()?.getAttribute('href')).toBe('/extensions/test/test-theme/theme/dark.css');
+
+        const lightExt = makeCSSExtension('theme/light.css');
+        lightExt.id = 'test-ext-2';
+        lightExt.name = 'mike-light';
+        injector.registerFromExtensions([lightExt]);
+
+        expect(themeLink()?.getAttribute('href')).toBe('/extensions/test/mike-light/theme/light.css');
+    });
+
+    it('keeps the <link> element itself when nothing moved', () => {
+        injector.registerFromExtensions([makeCSSExtension('theme/same.css')]);
+        const first = themeLink();
+
+        injector.registerFromExtensions([makeCSSExtension('theme/same.css')]);
+
+        // A recreated element re-fetches the sheet on every extension list, which is
+        // every `extension_change` broadcast.
+        expect(themeLink()).toBe(first);
+    });
+
+    // The link and the hint are one decision: index.html trusts whatever is in storage,
+    // so a sheet this module would not load must not be painted from it either.
+    it.each([
+        ['no CSS extension at all', () => [] as Extension[]],
+        ['the CSS extension disabled', () => [makeCSSExtension('styles.css', false)]],
+    ])('takes the sheet and the hint back for %s', (_label, list) => {
+        injector.registerFromExtensions([makeCSSExtension('styles.css')]);
+        expect(themeLink()).toBeTruthy();
+        expect(localStorage.getItem(THEME_CSS_KEY)).toBeTruthy();
+
+        injector.registerFromExtensions(list());
+
+        expect(themeLink()).toBeFalsy();
+        expect(localStorage.getItem(THEME_CSS_KEY)).toBeNull();
+    });
+
+    it('clearCache removes the stylesheet', () => {
+        injector.registerFromExtensions([makeCSSExtension('styles.css')]);
+        expect(themeLink()).toBeTruthy();
+
+        injector.clearCache();
+
+        expect(themeLink()).toBeFalsy();
+    });
+
+    it('a css extension registers no injection point, and a ui extension injects no sheet', () => {
+        injector.registerFromExtensions([makeCSSExtension('theme/test.css')]);
+        expect(injector.registrations.length).toBe(0);
+
+        injector.registerFromExtensions([makeUIExtension('ui-ext', 'ui-ext')]);
+        expect(themeLink()).toBeFalsy();
+        expect(injector.registrations.length).toBe(1);
     });
 });

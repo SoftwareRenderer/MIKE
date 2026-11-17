@@ -1,9 +1,15 @@
 import { test, expect, type Page } from '@playwright/test';
 import { apiPutConfig, apiGetConfig, waitForConfig, getProjectId, createTaskViaApi } from './helpers';
 
-// Keyboard shortcut preferences (Settings → Preferences). The create-task
-// shortcut defaults to "C"; can be rebound, reset, or cleared. Bindings
-// persist server-side (keyboard_shortcuts in /api/config).
+// Settings → Preferences, and the one Save flow every row on it shares: a control is moved, the form is
+// saved, the server holds the new value, and the app changes without a reload. Keyboard shortcuts are the
+// bulk of that tab (the create-task shortcut defaults to "C"; it can be rebound, reset or cleared, and
+// `keyboard_shortcuts` persists in /api/config); the UI toggle at the bottom is the same flow over one
+// `*bool`, kept here so the second copy of the seed-and-save harness is not needed. `docs/adding-a-preference.md`
+// owns the recipe, and the card the toggle gates is `card-model-badge.unit.svelte.ts`.
+//
+// Which screen the open-terminal combo works on is `terminal-shortcut.spec.ts`, not this file; what is here
+// is the binding's own life (default, rebind, reset, clear) and the fullscreen toggle.
 //
 // Runs in the `isolated` project: mutates server config via the UI Save flow.
 
@@ -30,6 +36,8 @@ const BOARD_BTN = '.add-task-btn';
 const CREATE_MODAL = '#task-description';
 const TERMINAL_PANEL = '.terminal-panel';
 const TERMINAL_CLOSE = '.terminal-panel .close-btn';
+const HIDE_MODEL_BADGE_TOGGLE = 'button[aria-label="Hide model badge"]';
+const MODEL_BADGE = '.card .model-badge';
 
 /**
  * Self-consistent, saveable provider config (the Settings Save flow validates
@@ -58,6 +66,17 @@ async function ensureSaveableConfig(page: Page) {
 /** Reset the create-task binding to its default via the API. */
 async function resetShortcuts(page: Page) {
     await apiPutConfig(page, { keyboard_shortcuts: {} });
+}
+
+/** Navigate to the board and make sure at least one card shows a model badge. */
+async function ensureCardWithModelBadge(page: Page) {
+    await page.goto('/');
+    await page.waitForSelector('.add-task-btn', { timeout: 10000 });
+    if (await page.locator(MODEL_BADGE).first().isVisible().catch(() => false)) return;
+    const projectId = await getProjectId(page);
+    await createTaskViaApi(page, projectId, `model-badge-${Date.now()}`);
+    await page.reload();
+    await page.waitForSelector(MODEL_BADGE, { timeout: 10000 });
 }
 
 test.describe.serial('Keyboard shortcut preferences', () => {
@@ -257,30 +276,9 @@ test.describe.serial('Keyboard shortcut preferences', () => {
         await expect(page.locator(CREATE_MODAL)).not.toBeVisible({ timeout: 5000 });
     });
 
-    test('open_terminal defaults to Ctrl+` and opens the terminal panel', async ({ page }) => {
-        await resetShortcuts(page);
-        await page.reload();
-        await page.waitForSelector(BOARD_BTN, { timeout: 10000 });
-
-        // Terminal button tooltip shows the shortcut
-        await expect(page.locator('[aria-label="Open terminal"]')).toHaveAttribute('title', 'Open terminal (Ctrl+`)');
-
-        // Preferences row shows the default
-        await page.locator(SETTINGS_BTN).first().click();
-        await page.locator(PREFERENCES_TAB).click();
-        await expect(page.locator(TERMINAL_CHIP)).toHaveText('Ctrl+`');
-
-        // Close settings via Cancel (no changes)
-        await page.locator('button[title="Cancel and discard changes"]').click();
-        await expect(page.locator('.config-modal')).not.toBeVisible({ timeout: 5000 });
-
-        // Pressing the default opens the terminal panel
-        await page.keyboard.press('Control+`');
-        await expect(page.locator('.terminal-panel')).toBeVisible({ timeout: 10000 });
-        await page.locator('.terminal-panel .close-btn').click();
-        await expect(page.locator('.terminal-panel')).not.toBeVisible({ timeout: 5000 });
-    });
-
+    // The default binding, the button's tooltip and the panel opening on the board are
+    // `terminal-shortcut.spec.ts`'s board test; what this test adds is that the Preferences row shows the
+    // default and that a captured combo replaces it in the server's row.
     test('rebinding open_terminal persists and the new combo opens the terminal', async ({ page }) => {
         await page.locator(SETTINGS_BTN).first().click();
         await page.locator(PREFERENCES_TAB).click();
@@ -466,5 +464,47 @@ test.describe.serial('Keyboard shortcut preferences', () => {
 
         // Restore the default for other suites
         await resetShortcuts(page);
+    });
+
+    // ── The UI toggle at the bottom of the same tab: one `*bool`, the same Save button, the same
+    //    `/api/config` row. Its card half is `card-model-badge.unit.svelte.ts`; what is left for a browser is
+    //    that the switch and the saved preference agree.
+
+    test('toggling hides the model badge on task cards and persists', async ({ page }) => {
+        await ensureCardWithModelBadge(page);
+
+        await page.locator(SETTINGS_BTN).first().click();
+        await page.locator(PREFERENCES_TAB).click();
+        await expect(page.locator(HIDE_MODEL_BADGE_TOGGLE)).toBeVisible();
+        await expect(page.locator(HIDE_MODEL_BADGE_TOGGLE)).toHaveAttribute('aria-checked', 'false');
+
+        await page.locator(HIDE_MODEL_BADGE_TOGGLE).click();
+        await expect(page.locator(HIDE_MODEL_BADGE_TOGGLE)).toHaveAttribute('aria-checked', 'true');
+
+        await page.locator(SAVE_BTN).click();
+        await expect(page.locator('.config-modal')).not.toBeVisible({ timeout: 5000 });
+
+        await expect(page.locator(MODEL_BADGE)).toHaveCount(0);
+        await waitForConfig(page, c => c.hide_model_badge === true);
+    });
+
+    test('toggling off restores the model badge', async ({ page }) => {
+        // Carries over from the previous test: preference is on (badge hidden).
+        const projectId = await getProjectId(page);
+        await createTaskViaApi(page, projectId, `model-badge-restore-${Date.now()}`);
+        await page.goto('/');
+        await page.waitForSelector('.card', { timeout: 10000 });
+        await expect(page.locator(MODEL_BADGE)).toHaveCount(0);
+
+        await page.locator(SETTINGS_BTN).first().click();
+        await page.locator(PREFERENCES_TAB).click();
+        await expect(page.locator(HIDE_MODEL_BADGE_TOGGLE)).toHaveAttribute('aria-checked', 'true');
+
+        await page.locator(HIDE_MODEL_BADGE_TOGGLE).click();
+        await page.locator(SAVE_BTN).click();
+        await expect(page.locator('.config-modal')).not.toBeVisible({ timeout: 5000 });
+
+        await expect(page.locator(MODEL_BADGE).first()).toBeVisible({ timeout: 5000 });
+        await waitForConfig(page, c => c.hide_model_badge === false);
     });
 });

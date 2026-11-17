@@ -180,7 +180,7 @@ const HOVER_FORBID_TAGS = ['hr'] as const;
 /**
  * `Hover.contents` (string | MarkupContent | MarkedString[]) to sanitized HTML.
  *
- * @knipignore The escaping and the `hr` refusal are asserted on the returned markup.
+ * @knipignore The MarkedString shapes, the sanitizer call and the `hr` refusal are asserted on the returned markup.
  */
 export function hoverDocsHTML(plugin: LSPPlugin, hover: RawMarkup | null | undefined): string {
     if (!hover || hover.contents == null) return '';
