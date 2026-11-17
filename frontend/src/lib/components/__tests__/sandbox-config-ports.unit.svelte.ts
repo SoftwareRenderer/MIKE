@@ -99,36 +99,21 @@ describe('SandboxConfigModal forwarded ports', () => {
         expect(rows[1]).toContain('192.168.1.100:80');
     });
 
-    it('saves a port bound to one interface', async () => {
+    // Every-interface is what an empty field and a written wildcard both mean; only a chosen address
+    // travels, and a `host_ip` the server did not earn would pin the forward to one interface.
+    it.each([
+        { name: 'one interface', typed: '192.168.1.100', saved: { container_port: 3000, host_ip: '192.168.1.100' } },
+        { name: 'no interface typed', typed: '', saved: { container_port: 3000 } },
+        { name: 'a written wildcard', typed: '0.0.0.0', saved: { container_port: 3000 } },
+    ])('saves a port typed with $name as the mapping it means', async ({ typed, saved }) => {
         const { container } = renderModal(projectWith([]));
         await expandPorts(container);
-        await addPort(container, '3000', '192.168.1.100');
+        await addPort(container, '3000', typed);
 
         expect(portItems(container)).toHaveLength(1);
-        expect(await save(container)).toMatchObject({
-            sandbox_forward_ports: [{ container_port: 3000, host_ip: '192.168.1.100' }],
-        });
-    });
-
-    it('leaves the interface out when every interface is meant', async () => {
-        const { container } = renderModal(projectWith([]));
-        await expandPorts(container);
-        await addPort(container, '3000', '');
-
-        const changes = await save(container);
-        const ports = changes.sandbox_forward_ports as PortForward[];
-        expect(ports).toHaveLength(1);
-        expect(ports[0].container_port).toBe(3000);
-        expect(ports[0]).not.toHaveProperty('host_ip');
-    });
-
-    it('normalizes an explicit wildcard to every interface', async () => {
-        const { container } = renderModal(projectWith([]));
-        await expandPorts(container);
-        await addPort(container, '3000', '0.0.0.0');
-
         const ports = (await save(container)).sandbox_forward_ports as PortForward[];
-        expect(ports[0]).not.toHaveProperty('host_ip');
+        expect(ports).toHaveLength(1);
+        expect(ports[0]).toStrictEqual(saved);
     });
 
     it('refuses an interface that is not an IP address and adds nothing', async () => {
