@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import {
   isolatedProject, ownProjectId, createTaskViaApi, ensureTaskStarted, navigateToTask,
-  waitForTaskState,
+  waitForTaskState, notInFlight, runHasEnded, readStored,
 } from './helpers';
 
 isolatedProject();
@@ -22,7 +22,6 @@ const REVIEW = '.tool-call-card .tool-name:text-is("Done")';
 
 /** The turn that ends in Review: one `request_review` call and nothing after it. */
 const REVIEW_PROMPT = 'llm-fixture:tool_call_complete';
-const notInFlight = (t: any) => t?.execution_state !== 'running' && t?.execution_state !== 'pulling_image';
 
 /** Record what this page writes to its task socket, so a claim can be read off the wire. */
 async function watchSocketWrites(page: Page): Promise<void> {
@@ -94,24 +93,9 @@ async function firstVisibleRow(page: Page): Promise<{ id: string; top: number; h
 
 /** What this browser holds of the conversation, as its cache holds it, newest role last. */
 async function cachedRoles(page: Page, projectId: string, taskId: string): Promise<string[]> {
-  return page.evaluate(async ({ pid, tid }) => {
-    const db: IDBDatabase = await new Promise((resolve, reject) => {
-      const req = indexedDB.open('kanban-storage');
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
-    });
-    try {
-      const entry: any = await new Promise((resolve, reject) => {
-        const tx = db.transaction('board-cache', 'readonly');
-        const req = tx.objectStore('board-cache').get(`messages:${pid}:${tid}`);
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-      });
-      return (entry?.data?.messages ?? []).map((row: any) => row.role);
-    } finally {
-      db.close();
-    }
-  }, { pid: projectId, tid: taskId });
+  const entry = await readStored<{ data?: { messages?: { role: string }[] } }>(
+    page, 'board-cache', `messages:${projectId}:${taskId}`);
+  return (entry?.data?.messages ?? []).map(row => row.role);
 }
 
 function annotate(label: string): void {
@@ -130,7 +114,7 @@ test.describe('A Review result read out of the browser while the server is still
     const taskId = await createTaskViaApi(page, projectId, `provisional-review ${Date.now()} ${REVIEW_PROMPT}`);
     await watchSocketWrites(page);
     await ensureTaskStarted(page, projectId, taskId);
-    await waitForTaskState(page, projectId, taskId, t => t.status === 'review' && notInFlight(t), 90_000);
+    await waitForTaskState(page, projectId, taskId, runHasEnded, 90_000);
 
     // The open that fills this browser's cache: the turn is over, so its rows are the newest ones.
     await navigateToTask(page, taskId, projectId);
@@ -203,7 +187,7 @@ test.describe('A Review result read out of the browser while the server is still
     const projectId = ownProjectId();
     const taskId = await createTaskViaApi(page, projectId, `provisional-fault ${Date.now()} ${REVIEW_PROMPT}`);
     await ensureTaskStarted(page, projectId, taskId);
-    await waitForTaskState(page, projectId, taskId, t => t.status === 'review' && notInFlight(t), 90_000);
+    await waitForTaskState(page, projectId, taskId, runHasEnded, 90_000);
     await navigateToTask(page, taskId, projectId);
     await expect(page.locator(REVIEW).first()).toBeVisible({ timeout: 30_000 });
     // The open whose read fills this browser's cache. A row is painted long before the write that caches it

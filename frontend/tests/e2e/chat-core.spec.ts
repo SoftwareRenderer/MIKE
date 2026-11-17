@@ -1,5 +1,8 @@
 import { test, expect, type Page } from '@playwright/test';
-import { getProjectId, createTaskViaApi, navigateToTask, waitForChatForm, waitForSendButton, sendMessage, isolatedProject, clearTasksAfterEach, gotoProject, waitForWorktree, writeFileInWorktree, waitForTaskState, getTaskData, messageRows, notInFlight } from './helpers';
+import {
+  getProjectId, createTaskViaApi, navigateToTask, waitForChatForm, waitForSendButton, sendMessage,
+  isolatedProject, clearTasksAfterEach, gotoProject, waitForTaskState, getTaskData, messageRows, notInFlight,
+} from './helpers';
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
 isolatedProject();
@@ -11,6 +14,13 @@ clearTasksAfterEach();
 
 
 test.describe.configure({ mode: 'serial' });
+
+// What this file owns is the chat speaking to a real executor over a real socket: a turn sent, a turn
+// absorbed, and the rows a turn wrote reaching the transcript. A component's own state is not asked here —
+// the tool card, its diff toggle, the reasoning block, the form's caret and the copy button are vitest's,
+// and the specs beside this one hold what only a browser decides (docs/testing.md → E2E conventions).
+// Stop/Cancel and the idle Escape live in `pause-resume.spec.ts`, `stop-tool-status.spec.ts` and
+// `chat-input-esc.spec.ts`.
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -87,20 +97,23 @@ test.describe('Chat Core', () => {
     await expect(page.locator('.btn-send')).toBeVisible({ timeout: 15000 });
   });
 
-  // ─── Queue Indicator ──────────────────────────────────────────────────────
-  // Stop/Cancel and the idle Escape live in `pause-resume.spec.ts`,
-  // `stop-tool-status.spec.ts` and `chat-input-esc.spec.ts`.
+  // ─── The wait for a first chunk, and the send that lands during a turn ────
 
-  test('should update when a second message cancels the first', async ({ page }) => {
-    test.setTimeout(90000);
-    const taskId = await createTaskViaApi(page, projectId, `queue-cancel-${Date.now()}`);
+  // The full lifecycle of `.awaiting-llm` in one turn, and the absorbed send inside it: hidden while idle,
+  // shown while the request waits for its first chunk, absent while chunks arrive, and never re-entered by a
+  // send that interrupts a live stream.
+  test('the queue indicator marks the wait for a first chunk, and a send during a turn is absorbed', async ({ page }) => {
+    test.setTimeout(120000);
+    const taskId = await createTaskViaApi(page, projectId, `queue-indicator-${Date.now()}`);
     await navigateToTask(page, taskId);
     await waitForChatForm(page);
 
-    // Idle before sending, and wait for it rather than skipping without one: the task's own
+    // Idle before sending, and waited for rather than skipped without one: the task's own
     // initial turn is running when the view opens, and a message sent into that turn queues
     // behind it — every window this test measures then lands somewhere unschedulable.
     await expect(page.locator('.btn-send'), 'the task is idle before the first send').toBeVisible({ timeout: 60000 });
+    const queueIndicator = page.locator('.awaiting-llm');
+    expect(await queueIndicator.isVisible(), 'the indicator is up on an idle task').toBe(false);
 
     const chatTextarea = page.locator('textarea[placeholder*="message"]');
     const stamp = Date.now();
@@ -112,13 +125,18 @@ test.describe('Chat Core', () => {
     const firstMsg = `slow-start first ${stamp} llm-fixture:text_slow`;
     const secondMsg = `slow-start second ${stamp} llm-fixture:text_slow`;
 
-    // Send first message (slow response)
     await chatTextarea.fill(firstMsg);
     await chatTextarea.press('Enter');
     await expect(chatTextarea).toHaveValue('');
+    await expect(page.locator('.chat-message.user').first()).toBeVisible({ timeout: 10000 });
 
-    const queueIndicator = page.locator('.awaiting-llm');
-    await expect(queueIndicator).toBeVisible({ timeout: 10000 });
+    // isVisible() answers immediately and does not poll, so it cannot express "appears
+    // within 10s" — under load the turn starts a tick after Enter and this read false.
+    const indicatorAppeared = await queueIndicator
+      .waitFor({ state: 'visible', timeout: 10000 })
+      .then(() => true)
+      .catch(() => false);
+    expect(indicatorAppeared, 'the indicator does not appear while the turn waits for its first chunk').toBe(true);
 
     // Wait until the first turn is ACTUALLY STREAMING, not merely in flight. Measured
     // against the app, `.awaiting-llm` means "request sent, nothing back yet" and is ABSENT
@@ -129,7 +147,8 @@ test.describe('Chat Core', () => {
       expect(await page.locator('.awaiting-llm').isVisible(), 'chunks are arriving').toBe(false);
     }).toPass({ timeout: 15000 });
 
-    // Send second message — cancels first
+    // Send second message mid-turn: absorbed, not rejected, and it starts a turn of its own.
+    const before = await rowIds(page, projectId, taskId);
     await chatTextarea.fill(secondMsg);
     await chatTextarea.press('Enter');
     await expect(chatTextarea).toHaveValue('');
@@ -141,301 +160,72 @@ test.describe('Chat Core', () => {
     await expect(userMessages.nth(-1)).toContainText(secondMsg);
     await expect(userMessages.nth(-2)).toContainText(firstMsg);
 
-    // What "cancels the first" is observably made of: a replacement turn runs, the form returns
-    // to idle, both messages stay in order. Sending during a turn never re-enters the "request
-    // sent, nothing back yet" state, so the queue indicator stays hidden by design.
-    const assistantEntries = page.locator('.chat-message.assistant');
-    const assistantBefore = await assistantEntries.count();
+    // A replacement turn runs — a row of its own in the store, not a card count on screen — the
+    // form returns to idle, and the indicator stays hidden by design: sending during a turn never
+    // re-enters the "request sent, nothing back yet" state.
     await expect
-      .poll(() => assistantEntries.count(), { timeout: 30000, message: 'the second message starts a turn of its own' })
-      .toBeGreaterThan(assistantBefore);
-    await expect(page.locator('.btn-send')).toBeVisible({ timeout: 30000 });
-  });
-
-  // The full lifecycle in one pass: hidden while idle, shown while the request waits for its
-  // first chunk, hidden again once the turn is over.
-  test('should not appear when LLM is idle', async ({ page }) => {
-    test.setTimeout(90000);
-    const taskId = await createTaskViaApi(page, projectId, `queue-idle-${Date.now()}`);
-    await navigateToTask(page, taskId);
-    await waitForChatForm(page);
-
-    await expect(page.locator('.btn-send'), 'the task is idle before sending').toBeVisible({ timeout: 60000 });
-
-    const queueIndicator = page.locator('.awaiting-llm');
-    expect(await queueIndicator.isVisible()).toBe(false);
-
-    const chatTextarea = page.locator('textarea[placeholder*="message"]');
-    await chatTextarea.fill(`queue-idle ${Date.now()} slow-start llm-fixture:text_slow`);
-    await chatTextarea.press('Enter');
-    await expect(chatTextarea).toHaveValue('');
-
-    await expect(page.locator('.chat-message.user').first()).toBeVisible({ timeout: 10000 });
-
-    // isVisible() answers immediately and does not poll, so it cannot express "appears
-    // within 10s" — under load the turn starts a tick after Enter and this read false.
-    const indicatorAppeared = await queueIndicator
-      .waitFor({ state: 'visible', timeout: 10000 })
-      .then(() => true)
-      .catch(() => false);
-    expect(indicatorAppeared, 'queue indicator appears while the turn is waiting').toBe(true);
-
+      .poll(storeSinceSend(page, projectId, taskId, before), {
+        timeout: 60000,
+        message: 'the absorbed send started no turn of its own',
+      })
+      .toContain('assistant');
     await expect(page.locator('.btn-send')).toBeVisible({ timeout: 30000 });
     await expect(queueIndicator).toBeHidden({ timeout: 10000 });
-
-    // Verify it stays hidden when idle — wait for a short condition check
-    await expect(page.locator('.btn-send')).toBeVisible({ timeout: 2000 });
-    expect(await queueIndicator.isVisible()).toBe(false);
-  });
-
-  // ─── Streaming Features ───────────────────────────────────────────────────
-
-  test('should show Editing label and +X/-Y toggle for edit_file tool calls', async ({ page }) => {
-    test.setTimeout(120000);
-    // Pinned to text, not merely keyword-free: "edit-file" matches the mock's `\bedit\b` route, so the
-    // initial turn would answer with this very fixture — same tool-call id, and the second
-    // card then replaces the first instead of adding to it.
-    const taskId = await createTaskViaApi(page, projectId, `seed-turn-${Date.now()} llm-fixture:text`);
-    await navigateToTask(page, taskId);
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
-    await waitForChatForm(page);
-
-    // Idle by the store's answer, not by the send button: docs/testing.md → Reading a turn from the store.
-    await waitForTaskState(page, projectId, taskId, notInFlight);
-    await waitForSendButton(page);
-
-    // Seed the file the fixture edits. The e2e repo is a README only, so an unseeded
-    // edit_file fails with "no such file or directory" and the card never appears.
-    await waitForWorktree(projectId, taskId);
-    writeFileInWorktree(projectId, taskId, 'src/lib/utils/format.ts', 'func one\nfunc two\n');
-
-    const chatTextarea = page.locator('textarea[placeholder*="message"]');
-    // Pinned, not keyworded: this needs the edit_file fixture specifically (the edit label
-    // and the +X/-Y toggle only exist for it), and a bare "edit" prompt is answered by plan
-    // routing with create_task — see llm-fixture: in mock-llm.js.
-    const before = await rowIds(page, projectId, taskId);
-    await chatTextarea.fill(`test edit file llm-fixture:tool_call_edit_file ${Date.now()}`);
-    await chatTextarea.press('Enter');
-    await expect(chatTextarea).toHaveValue('');
-
-    await expect
-      .poll(storeSinceSend(page, projectId, taskId, before), {
-        timeout: 60000,
-        message: 'the send wrote no tool_call row of its own',
-      })
-      .toContain('tool_call');
-
-    // Named by its tool rather than by its position: the turn answers with a card of its own after this one,
-    // and a positional locator follows that. The initial turn is pinned to text, so this card is this send's.
-    const card = page.locator('.tool-call-card', { has: page.locator('.tool-name', { hasText: /edit/i }) }).last();
-
-    await expect(card.locator('.tool-name')).toContainText(/edit/i);
-
-    // Let the turn finish first: the card is re-rendered per streamed chunk, and a click that
-    // lands during one of those renders is silently lost (the toggle then never collapses).
-    await expect(card.locator('.tool-duration')).toBeVisible({ timeout: 20000 });
-
-    // The +X/-Y toggle is the whole subject here, so it is required, not optional.
-    const toggle = card.locator('.edit-diff-toggle');
-    await expect(toggle).toBeVisible({ timeout: 15000 });
-    await expect(toggle).toHaveText(/\+\d+/);
-    await expect(toggle).toHaveText(/-\d+/);
-
-    // Two clicks, each one flipping the panel. The starting state is NOT asserted as
-    // collapsed on purpose: ToolCall auto-expands a trivial change (<=2 lines), and this
-    // fixture's edit adds exactly two — so "expanded first" is the product's behaviour, and
-    // pinning it here is what tells us if that default ever changes.
-    for (let click = 0; click < 2; click++) {
-      const wasExpanded = (await toggle.getAttribute('aria-expanded')) === 'true';
-      if (wasExpanded) await expect(card.locator('.edit-diff')).toBeVisible();
-      else await expect(card.locator('.edit-diff')).toBeHidden();
-      await toggle.click();
-      await expect(toggle).toHaveAttribute('aria-expanded', String(!wasExpanded));
-      if (wasExpanded) await expect(card.locator('.edit-diff')).toBeHidden();
-      else await expect(card.locator('.edit-diff')).toBeVisible();
-    }
-  });
-
-  test('should accumulate raw_args_delta for streaming tool calls', async ({ page }) => {
-    test.setTimeout(120000);
-    // Pinned to text: unpinned, the auto-started turn takes the plan route and answers with create_task cards
-    // of its own, which is what made "a card appeared" answerable by counting with no new turn behind it.
-    const taskId = await createTaskViaApi(page, projectId, `raw-args-delta-${Date.now()} llm-fixture:text`);
-    await navigateToTask(page, taskId);
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
-    await waitForChatForm(page);
-
-    // Idle by the store's answer, not by the send button: docs/testing.md → Reading a turn from the store.
-    await waitForTaskState(page, projectId, taskId, notInFlight);
-    await waitForSendButton(page);
-
-    const chatTextarea = page.locator('textarea[placeholder*="message"]');
-    const before = await rowIds(page, projectId, taskId);
-    // Pinned: this fixture streams the tool NAME and the args across several deltas, which
-    // is the raw_args_delta path under test. A keyword prompt gets plan routing instead.
-    await chatTextarea.fill(`streaming tool call ${Date.now()} llm-fixture:tool_call_streaming`);
-    await chatTextarea.press('Enter');
-    await expect(chatTextarea).toHaveValue('');
-
-    await expect
-      .poll(storeSinceSend(page, projectId, taskId, before), {
-        timeout: 60000,
-        message: 'the send wrote no tool_call row of its own',
-      })
-      .toContain('tool_call');
-
-    // The args are only complete once every delta landed, so the card must still carry the command the fixture
-    // streamed in pieces — `{"command":"ls ` then ` -la"}`. Only the browser that streamed them can be asked,
-    // which is why this one assertion stays in the DOM.
-    const card = page.locator('.tool-call-card', { has: page.locator('.tool-args', { hasText: 'ls' }) }).last();
-    await expect(card.locator('.tool-args')).toContainText('ls -la', { timeout: 15000 });
-  });
-
-  // ─── Tab Visibility ───────────────────────────────────────────────────────
-
-  test('visibility change does not disrupt normal (idle) task state', async ({ page }) => {
-    test.setTimeout(90000);
-    const taskId = await createTaskViaApi(page, projectId, `visibility-idle-${Date.now()}`);
-    await navigateToTask(page, taskId);
-    await waitForChatForm(page);
-
-    // Not an early return: a skipped check is a green test that checks nothing. Wait for
-    // the task to be idle (its own initial turn may still be running) and fail if it never is.
-    await expect(page.locator('.btn-send'), 'the task is idle before sending').toBeVisible({ timeout: 60000 });
-
-    const initialEntries = await page.locator('.chat-message').count();
-
-    for (let i = 0; i < 3; i++) {
-      await page.evaluate(() => {
-        window.dispatchEvent(new Event('visibilitychange'));
-      });
-      // Wait for page to remain stable after each visibility change
-      await expect(page.locator('.btn-send')).toBeVisible({ timeout: 2000 });
-    }
-
-    await expect(page.locator('.btn-send')).toBeVisible();
-    const afterEntries = await page.locator('.chat-message').count();
-    expect(afterEntries).toBe(initialEntries);
-    expect(await page.locator('.cursor-blink').isVisible().catch(() => false)).toBe(false);
-    expect(await page.locator('.btn-stop').isVisible().catch(() => false)).toBe(false);
   });
 
   // ─── Reasoning Block ──────────────────────────────────────────────────────
 
-  test('should expand reasoning content when toggle is clicked', async ({ page }) => {
+  // One turn answers with reasoning and one without, so the whole toggle — expand, collapse, and the
+  // absence of a block on an answer that reasoned about nothing — is decided on one transcript.
+  test('the reasoning block expands, collapses, and is absent where there was no reasoning', async ({ page }) => {
     test.setTimeout(90000);
-    const taskId = await createTaskViaApi(page, projectId, `reasoning-expand-${Date.now()}`);
+    // Pinned: the task's own turn must be an answer with nothing to think about, so this transcript
+    // holds one reasoned answer and one plain one.
+    const taskId = await createTaskViaApi(page, projectId, `reasoning-${Date.now()} llm-fixture:text`);
     await navigateToTask(page, taskId);
     await waitForChatForm(page);
 
     // Not an early return: a skipped check is a green test that checks nothing. Wait for
     // the task to be idle (its own initial turn may still be running) and fail if it never is.
-    await expect(page.locator('.btn-send'), 'the task is idle before sending').toBeVisible({ timeout: 60000 });
+    await waitForTaskState(page, projectId, taskId, notInFlight, 60000);
+    await waitForSendButton(page);
+
+    // The plain answer the task wrote for its own prompt: without this the absence below would be the
+    // absence of an answer, which proves nothing.
+    await expect(page.locator('.chat-message.assistant').first()).toContainText('Hello', { timeout: 15000 });
 
     const chatTextarea = page.locator('textarea[placeholder*="message"]');
     await chatTextarea.fill(`reasoning test expand ${Date.now()} llm-fixture:text_response_reasoning`);
     await chatTextarea.press('Enter');
     await expect(chatTextarea).toHaveValue('');
-
     await expect(page.locator('.btn-send')).toBeVisible({ timeout: 30000 });
 
-    const reasoningToggle = page.locator('.reasoning-toggle');
+    // Scoped to the entry that reasoned, because a turn may answer more than once and every answer of
+    // this fixture reasons: a page-wide locator would be a strict-mode violation over answers that all
+    // behave the same.
+    const reasonedEntry = page.locator('.chat-entry', { hasText: 'my response after reasoning' }).first();
+    await expect(reasonedEntry, 'the send never answered with the reasoning fixture').toBeVisible({ timeout: 15000 });
+    const reasoningToggle = reasonedEntry.locator('.reasoning-toggle');
+    const reasoningContent = reasonedEntry.locator('.reasoning-content');
+
     await expect(reasoningToggle).toBeVisible({ timeout: 10000 });
     await reasoningToggle.click();
-
-    const reasoningContent = page.locator('.reasoning-content');
     await expect(reasoningContent).toBeVisible({ timeout: 5000 });
-
-    const contentText = await reasoningContent.textContent();
-    expect(contentText).toContain('think');
-    expect(contentText).toContain('step by step');
-
-    const expandedToggleText = await reasoningToggle.textContent();
-    expect(expandedToggleText).toContain('Hide');
-  });
-
-  test('should collapse reasoning content when toggle is clicked again', async ({ page }) => {
-    test.setTimeout(90000);
-    const taskId = await createTaskViaApi(page, projectId, `reasoning-collapse-${Date.now()}`);
-    await navigateToTask(page, taskId);
-    await waitForChatForm(page);
-
-    // Not an early return: a skipped check is a green test that checks nothing. Wait for
-    // the task to be idle (its own initial turn may still be running) and fail if it never is.
-    await expect(page.locator('.btn-send'), 'the task is idle before sending').toBeVisible({ timeout: 60000 });
-
-    const chatTextarea = page.locator('textarea[placeholder*="message"]');
-    await chatTextarea.fill(`reasoning test collapse ${Date.now()} llm-fixture:text_response_reasoning`);
-    await chatTextarea.press('Enter');
-    await expect(chatTextarea).toHaveValue('');
-
-    await expect(page.locator('.btn-send')).toBeVisible({ timeout: 30000 });
-
-    const reasoningToggle = page.locator('.reasoning-toggle');
-    await expect(reasoningToggle).toBeVisible({ timeout: 10000 });
-    await reasoningToggle.click();
-
-    const reasoningContent = page.locator('.reasoning-content');
-    await expect(reasoningContent).toBeVisible({ timeout: 5000 });
+    await expect(reasoningContent).toContainText('think');
+    await expect(reasoningContent).toContainText('step by step');
+    await expect(reasoningToggle).toContainText('Hide');
 
     await reasoningToggle.click();
-    await expect(reasoningContent).not.toBeVisible({ timeout: 5000 });
+    await expect(reasoningContent).toBeHidden({ timeout: 5000 });
+    await expect(reasoningToggle).toContainText('Show');
 
-    const collapsedToggleText = await reasoningToggle.textContent();
-    expect(collapsedToggleText).toContain('Show');
-  });
-
-  test('should not show reasoning toggle for messages without reasoning', async ({ page }) => {
-    test.setTimeout(90000);
-    const taskId = await createTaskViaApi(page, projectId, `reasoning-none-${Date.now()}`);
-    await navigateToTask(page, taskId);
-    await waitForChatForm(page);
-
-    // Not an early return: a skipped check is a green test that checks nothing. Wait for
-    // the task to be idle (its own initial turn may still be running) and fail if it never is.
-    await expect(page.locator('.btn-send'), 'the task is idle before sending').toBeVisible({ timeout: 60000 });
-
-    const chatTextarea = page.locator('textarea[placeholder*="message"]');
-    await chatTextarea.fill('simple greeting hello');
-    await chatTextarea.press('Enter');
-    await expect(chatTextarea).toHaveValue('');
-
-    await expect(page.locator('.btn-send')).toBeVisible({ timeout: 30000 });
-
-    const reasoningToggle = page.locator('.reasoning-toggle');
-    expect(await reasoningToggle.isVisible()).toBe(false);
-
-    const reasoningContent = page.locator('.reasoning-content');
-    expect(await reasoningContent.isVisible()).toBe(false);
-  });
-
-  // ─── Tool Call Task Board Update ──────────────────────────────────────────
-
-  test('tool call triggers task board update', async ({ page }) => {
-    test.setTimeout(90000);
-    const taskId = await createTaskViaApi(page, projectId, `board-update-${Date.now()}`);
-    await navigateToTask(page, taskId);
-    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
-    await waitForChatForm(page);
-
-    await expect(page.locator('.btn-send'), 'the task is idle before sending').toBeVisible({ timeout: 60000 });
-
-    await sendMessage(page, `board-update ${Date.now()} llm-fixture:tool_call_read_file`);
-
-    // Wait for tool call card to appear (confirms tool call was triggered)
-    await expect(page.locator('.tool-call-card').first()).toBeVisible({ timeout: 15000 });
-
-    // Wait for the full cycle to complete (send button reappears)
-    await expect(page.locator('.btn-send')).toBeVisible({ timeout: 30000 });
-
-    // The board's job is to show that work happened: the task left the backlog. Which column
-    // it ends in depends on what the conversation does after the tool result (a follow-up
-    // request_review moves it on), so assert the transition rather than the destination.
-    const taskData = await page.evaluate(async ({ pid, tid }) => {
-      const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
-      return res.ok ? res.json() : null;
-    }, { pid: projectId, tid: taskId });
-    expect(taskData).toBeTruthy();
-    expect(['in_progress', 'review']).toContain(taskData.status);
+    // The plain answer the task wrote for its own prompt carries no block at all: `ReasoningBlock`
+    // renders nothing where there was no reasoning, so the row that reasoned about nothing holds
+    // neither the toggle nor the content. Asked of that entry, because the reasoned turn may answer
+    // more than once and a page-wide count would be a count of the mock's calls.
+    const plainEntry = page.locator('.chat-entry', { hasText: 'Hello! How can I help you today?' }).first();
+    await expect(plainEntry).toBeVisible();
+    await expect(plainEntry.locator('.reasoning-toggle')).toHaveCount(0);
+    await expect(plainEntry.locator('.reasoning-content')).toHaveCount(0);
   });
 });

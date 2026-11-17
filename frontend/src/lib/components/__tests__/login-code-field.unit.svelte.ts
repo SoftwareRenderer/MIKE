@@ -90,11 +90,9 @@ describe('the name the pairing body opens with', () => {
     }
 
     it('starts with the name the server read off this browser', () => {
+        // The blank case is this binding with the empty string, which `utils/__tests__/login-flow.unit.ts`
+        // owns as what the form opens with.
         expect(nameField({ deviceName: 'Chrome 120 · Macintosh' }).value).toBe('Chrome 120 · Macintosh');
-    });
-
-    it('starts blank when the server read nothing', () => {
-        expect(nameField().value).toBe('');
     });
 
     it('is capped at the length a device label is', () => {

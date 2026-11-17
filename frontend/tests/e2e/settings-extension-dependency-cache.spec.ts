@@ -2,18 +2,23 @@ import { test, expect } from '@playwright/test';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { identityKey } from '../../src/lib/utils/extension-identity';
+import { openSettingsTab } from './helpers';
 
 /**
  * Granting a language server its dependency directory, end to end: what the field shows is what lands in the
  * database, a missing directory comes back as a sentence, an empty value revokes, and the running sandbox is
- * stopped so the next use recreates it. Component states are in vitest.
+ * stopped so the next use recreates it. Component states are in vitest
+ * (`ConfigModal/__tests__/extensions-dependency-cache.unit.svelte.ts`); what is here is the server's record and
+ * the server's own refusal sentence.
  *
  * The subject is the local fixture `tests/fixtures/local-extensions/testdev/dep-cache-lsp`, deleted at the end.
+ * Its card is addressed by `data-identity` — the author+name key the app compares on — because a display name
+ * is not unique in an Installed list that also holds whatever a developer's own `extensions/` directory carries.
  */
 
 const FIXTURE_AUTHOR = 'testdev';
 const FIXTURE_NAME = 'dep-cache-lsp';
-const DISPLAY = 'Dependency Cache Fixture';
 
 /**
  * A directory that exists, for the grant to point at: the server refuses one that does not, and refuses a bare
@@ -35,6 +40,8 @@ test.afterAll(() => {
 });
 
 let installedId: string | null = null;
+/** The author+name the installed record carries, read off the server by the install test. */
+let installedIdentity = '';
 
 /** Calls the API with the page's own session and CSRF token, as the UI does. */
 async function api(page: import('@playwright/test').Page, method: string, url: string, body?: unknown) {
@@ -61,14 +68,13 @@ async function api(page: import('@playwright/test').Page, method: string, url: s
 async function openExtensionsTab(page: import('@playwright/test').Page) {
     await page.goto('/');
     await page.waitForSelector('.project-item', { timeout: 15000 });
-    await page.click('.icon-btn[aria-label="Settings"]');
-    await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
-    await page.click('text=Extensions');
+    await openSettingsTab(page, 'Extensions');
     await page.waitForSelector('.extensions-tab', { timeout: 5000 });
 }
 
 function fixtureRow(page: import('@playwright/test').Page) {
-    return page.locator('.extension-card').filter({ hasText: DISPLAY });
+    expect(installedIdentity, 'the install test recorded no identity to find the card by').not.toBe('');
+    return page.locator(`.extension-card[data-identity="${installedIdentity}"]`);
 }
 
 /**
@@ -103,6 +109,7 @@ test.describe.serial('Extension dependency directory', () => {
         const installed = (list.json ?? []).find((e: any) => e.name === FIXTURE_NAME);
         expect(installed, 'the fixture did not appear in the installed list').toBeTruthy();
         installedId = installed.id;
+        installedIdentity = identityKey(installed.author, installed.name);
 
         // The declaration has to be on the stored record, or the UI has nothing to ask about and
         // the endpoint has no location to mount at.
@@ -197,8 +204,4 @@ test.describe.serial('Extension dependency directory', () => {
         const list = await api(page, 'GET', '/api/extensions');
         expect((list.json ?? []).some((e: any) => e.id === installedId)).toBe(false);
     });
-});
-
-test.afterAll(() => {
-    fs.rmSync(cacheDir, { recursive: true, force: true });
 });

@@ -2,13 +2,19 @@ import { test, expect, type Page } from '@playwright/test';
 import {
   isolatedProject, ownProjectId, createTaskViaApi, ensureTaskStarted, navigateToTask,
   waitForChatForm, waitForTaskState, notInFlight,
-  TOOL_CALL_CARD as CARD, SLOW_PROBE_OUTPUT as OUTPUT,
+  TOOL_CALL_CARD as CARD, SLOW_PROBE_OUTPUT as OUTPUT, PENDING_TOOL_STATUS as PENDING,
 } from './helpers';
 
 isolatedProject();
 
-// Three ways a window comes back having missed a whole turn: two arrive with a browser event, one is a page
-// that was stopped and is thawed in silence. `docs/reconnection.md → The tab that comes back`.
+// Three ways a window comes back having missed part of a turn, one per return signal the app declares:
+// an unfocused window that was never hidden (the window's own `focus`), a page whose renderer was stopped
+// (no event at all, only the clock jumping), and a hidden page returning on `visibilitychange`. The last one
+// arrives with the hardest miss of the three: the tool's result frame never reached the app, so the only
+// evidence the card is answered is the stored row. `docs/reconnection.md → The tab that comes back`.
+//
+// What the chat missed is proven to have been missed on every run: a counter of the frames this harness
+// took off the socket fails the test when nothing was dropped.
 
 /** Longer than the probe's turn, and longer than any tick the app could blame on a slow frame. */
 const FREEZE_MS = 25_000;
@@ -49,6 +55,32 @@ async function missTheTurnWhileAway(page: Page, taskId: string): Promise<void> {
       }
     };
   }, taskId);
+}
+
+/**
+ * Drops every `tool_result` task event before the app sees it: the socket stays up, the frames simply
+ * never arrive, so the card is left unanswered and the row is the only evidence the call was answered.
+ */
+async function swallowToolResults(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const w = window as any;
+    w.__swallowedToolResults = 0;
+    const RealWebSocket = window.WebSocket;
+    window.WebSocket = class extends RealWebSocket {
+      constructor(url: string | URL, protocols?: string | string[]) {
+        super(url, protocols);
+        if (!String(url).includes('/api/stream')) return;
+        this.addEventListener('message', (e: MessageEvent) => {
+          let frame: any;
+          try { frame = JSON.parse(String(e.data)); } catch { return; }
+          if (frame?.type === 'task_event' && frame?.event === 'tool_result') {
+            w.__swallowedToolResults++;
+            e.stopImmediatePropagation();
+          }
+        });
+      }
+    };
+  });
 }
 
 const goAway = (page: Page, unfocused: boolean) =>
@@ -187,27 +219,33 @@ test.describe('A window that came back having missed a turn', () => {
       + 'stayed where it was').toBe(true);
   });
 
-  test('control: the same missed turn, returned to with visibilitychange', async ({ page }) => {
+  test('a hidden page returning on visibilitychange: the result the socket never delivered', async ({ page }) => {
     test.setTimeout(180_000);
-    const prompt = `away-hidden slow-tool-probe ${Date.now()}`;
+    await swallowToolResults(page);
     const projectId = ownProjectId();
+    const prompt = `away-tool-result slow-tool-probe ${Date.now()}`;
     const taskId = await createTaskViaApi(page, projectId, prompt);
-    await missTheTurnWhileAway(page, taskId);
     await navigateToTask(page, taskId, projectId);
     await waitForChatForm(page);
+    await expect(page.locator(PENDING)).toBeVisible({ timeout: 90_000 });
 
-    await goAway(page, true);
-    await ensureTaskStarted(page, projectId, taskId);
-    await waitForToolRow(page, projectId, taskId);
+    // The unanswered call takes its entry with it, leaving no trace of work that is in the database.
     await waitForTaskState(page, projectId, taskId, notInFlight, 90_000);
-    await annotateAway(page, 'control: visibilitychange event');
-    await expect(page.locator(CARD)).toHaveCount(0);
+    await expect(page.locator(CARD), 'the unanswered call should have left the screen')
+      .toHaveCount(0, { timeout: 15000 });
+    const dropped = await page.evaluate(() => (window as any).__swallowedToolResults as number);
+    annotate(`visibilitychange / tool_result dropped=${dropped}`);
+    expect(dropped, 'no tool_result frame was swallowed, so this run proved nothing').toBeGreaterThan(0);
 
-    const reads = countReconcileReads(page, projectId, taskId);
     await comeBack(page, 'visible');
-    const returned = await cardReturned(page);
-    annotate(`control: visibilitychange event: ${reads()} card back=${returned}`);
 
-    expect(returned).toBe(true);
+    const card = page.locator(CARD).first();
+    await expect(card, 'the missed result never came back from the stored row')
+      .toContainText(OUTPUT, { timeout: 20000 });
+    await expect(page.locator(PENDING)).toHaveCount(0);
+
+    // The row the return read found is the server's, not a screen-local guess: a reload draws it too.
+    await page.reload();
+    await expect(page.locator(CARD).first()).toContainText(OUTPUT, { timeout: 25000 });
   });
 });

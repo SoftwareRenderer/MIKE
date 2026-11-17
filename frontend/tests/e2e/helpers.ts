@@ -1,4 +1,4 @@
-import { expect, test, Page, Locator, Browser, TestInfo } from '@playwright/test';
+import { expect, test, Page, Locator, Browser, BrowserContext, TestInfo } from '@playwright/test';
 import { execSync } from 'child_process';
 import { existsSync, writeFileSync, mkdirSync, readFileSync, cpSync } from 'fs';
 import { dirname, join } from 'path';
@@ -117,6 +117,28 @@ export function storageStatePath(projectName: string): string {
         : '/tmp/kanban-test-storage-state.json';
 }
 
+/**
+ * A page signed in with a lane session, for the `beforeAll`/`afterAll` a `page` fixture cannot reach (the
+ * fixture is not available there, so the spec opens its own context). `browser.newContext()` already
+ * inherits the project's `use` — `storageState` and `baseURL` included — so naming them here is not what
+ * signs the page in; it is what a caller off its own lane says (an isolated spec reaching 3001 from a
+ * chromium test, where the wrong file means every API call answers 401). Pass `landing: null` for a tab
+ * whose first navigation the test itself performs.
+ */
+export async function signedInPage(
+    browser: Browser,
+    { storageState, baseURL, landing = '/' }:
+        { storageState?: string; baseURL?: string; landing?: string | null } = {},
+): Promise<{ context: BrowserContext; page: Page }> {
+    const context = await browser.newContext({
+        ...(storageState ? { storageState } : {}),
+        ...(baseURL ? { baseURL } : {}),
+    });
+    const page = await context.newPage();
+    if (landing) await page.goto(landing);
+    return { context, page };
+}
+
 /** GET a JSON endpoint from the page (the page must be on the server origin). */
 export async function apiGetJson<T>(page: Page, path: string): Promise<T> {
   await getOrigin(page);
@@ -230,22 +252,128 @@ export async function editTaskTitle(page: Page, taskId: string, title: string): 
 }
 
 /**
- * How many writes the persisted queue holds. A value drawn on screen proves nothing about the queue, and a
- * request still running when the page went away never became an entry.
+ * Write rows straight into a task's thread: `POST …/messages` stores a row without running a turn, which is
+ * how a spec gets a transcript tall enough that "the top" and "the bottom" are hundreds of pixels apart.
+ * One row per request, oldest first, so a row's position is the order they were written.
+ *
+ * A fixture a spec builds, not one it measures inside: a conversation a spec *measures* comes from
+ * `chatFixture()`, because 200 sequential POSTs inside a test time out on a server every worker queues
+ * turns on (`docs/testing.md → Concurrency is part of the environment`). These specs seed a few dozen rows
+ * and measure the reader, not the rows.
  */
-export async function queuedActionCount(page: Page): Promise<number> {
-  return page.evaluate(async () => {
-    const db = await new Promise<any>((resolve, reject) => {
+export async function seedChatRows(
+  page: Page, projectId: string, taskId: string, rows: number, label: string,
+): Promise<void> {
+  await getOrigin(page);
+  const token = await getCsrfToken(page);
+  const seeded = await page.evaluate(async ({ url, count, token, label }) => {
+    let made = 0;
+    for (let i = 0; i < count; i++) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { 'X-CSRF-Token': token } : {}) },
+        credentials: 'include',
+        body: JSON.stringify({
+          role: 'user',
+          // The row opens with a token no other row carries, so the screen can be asked which row it is
+          // showing — a row identified by its position in a window is somebody else's row.
+          content: `${label}-${i}\n${'filler text that gives the entry some height '.repeat(3)}`,
+        }),
+      });
+      if (!res.ok) return { made, status: res.status, text: await res.text() };
+      made++;
+    }
+    return { made, status: 200, text: '' };
+  }, {
+    url: `/api/projects/${projectId}/tasks/${taskId}/messages`,
+    count: rows,
+    token,
+    label,
+  });
+  if (seeded.status !== 200) {
+    throw new Error(`seedChatRows: stopped at row ${seeded.made} with ${seeded.status}: ${seeded.text}`);
+  }
+}
+
+// --- The browser's own storage ---
+//
+// `storage.ts` owns this database, its stores and the shape of what it writes; these are the only reads a
+// spec needs from the other side of that boundary. The value comes back exactly as stored — a `board-cache`
+// entry is the `{ data }` wrapper the app wrote, a `drafts` entry is the text itself — so a spec asserting
+// the screen drew something and a spec asserting the browser kept it are two different claims.
+
+/** One transaction against `storage.ts`'s database. Every spec-side read goes through here. */
+async function storageOp<T>(
+  page: Page, op: 'get' | 'keys' | 'put' | 'delete', store: string, key = '', value?: unknown,
+): Promise<T | null> {
+  return page.evaluate(async ([op, storeName, k, v]) => {
+    const db: IDBDatabase = await new Promise((resolve, reject) => {
       const rq = indexedDB.open('kanban-storage');
       rq.onsuccess = () => resolve(rq.result);
       rq.onerror = () => reject(rq.error);
     });
-    return new Promise<number>(resolve => {
-      const req = db.transaction('offline-queue', 'readonly').objectStore('offline-queue').get('actions');
-      req.onsuccess = () => resolve(Array.isArray(req.result) ? req.result.length : 0);
-      req.onerror = () => resolve(0);
-    });
-  });
+    try {
+      const objectStore = db
+        .transaction(storeName, op === 'get' || op === 'keys' ? 'readonly' : 'readwrite')
+        .objectStore(storeName);
+      return await new Promise<any>((resolve, reject) => {
+        const req = op === 'get' ? objectStore.get(k)
+          : op === 'keys' ? objectStore.getAllKeys()
+            : op === 'put' ? objectStore.put(v, k)
+              : objectStore.delete(k);
+        const tx = req.transaction!;
+        tx.onerror = () => reject(tx.error);
+        if (op === 'get') req.onsuccess = () => resolve(req.result === undefined ? null : req.result);
+        else if (op === 'keys') req.onsuccess = () => resolve(req.result);
+        else tx.oncomplete = () => resolve(null);
+      });
+    } finally {
+      db.close();
+    }
+  }, [op, store, key, value] as [string, string, string, unknown]);
+}
+
+/** What this browser holds under `key`, or `null` when it holds nothing there. */
+export const readStored = <T,>(page: Page, store: string, key: string) =>
+  storageOp<T>(page, 'get', store, key);
+
+/** Whether the store holds any key under `prefix`, for a key whose tail the spec cannot name. */
+export async function hasStoredKeyStartingWith(page: Page, store: string, prefix: string): Promise<boolean> {
+  const keys = await storageOp<string[]>(page, 'keys', store);
+  return (keys ?? []).some(k => String(k).startsWith(prefix));
+}
+
+/** Write a value the app reads back at boot — a settings choice, mostly. */
+export const writeStored = (page: Page, store: string, key: string, value: unknown) =>
+  storageOp(page, 'put', store, key, value);
+
+/** Drop a key: the cleanup a spec owes the next one after it filled a draft store. */
+export const deleteStored = (page: Page, store: string, key: string) =>
+  storageOp(page, 'delete', store, key);
+
+// --- Settings ---
+
+/**
+ * Open Settings on one of its tabs and wait until that tab is the active one. The wait is on the tab button,
+ * never on `[role="dialog"]`: that role names the Edit dialogs opened over Settings as well, so it is
+ * answered while the panel the caller wants does not exist yet. `tab` is the button's label — the project
+ * tab's label is the project's name.
+ */
+export async function openSettingsTab(page: Page, tab: string): Promise<void> {
+  await page.waitForSelector('.add-task-btn, .icon-btn[aria-label="Settings"]', { timeout: 10000 });
+  await page.locator('.icon-btn[aria-label="Settings"]').first().click();
+  const button = page.locator(`button.tab-btn:has-text("${tab}")`);
+  await button.click();
+  await expect(button).toHaveClass(/\bactive\b/);
+}
+
+/**
+ * How many writes the persisted queue holds. A value drawn on screen proves nothing about the queue, and a
+ * request still running when the page went away never became an entry.
+ */
+export async function queuedActionCount(page: Page): Promise<number> {
+  const actions = await readStored<unknown[]>(page, 'offline-queue', 'actions');
+  return Array.isArray(actions) ? actions.length : 0;
 }
 
 /**
@@ -437,6 +565,28 @@ export async function selectProject(page: Page, projectId: string): Promise<void
   // `project=kanban-test-repo-2`, and a substring match there is a strict-mode violation.
   await page.locator(`a.project-item[href$="project=${projectId}"]`).click();
 }
+
+/** Run one git command in a directory the spec owns. The e2e lane's fixture repos live outside any
+ *  worktree, so this is the harness building its own scenery, not the product's git path. */
+export function gitIn(dir: string, args: string): void {
+  execSync(`git ${args}`, { cwd: dir, stdio: 'pipe' });
+}
+
+/**
+ * Open a project's Review Changes panel: board, project selected, explorer open, Changes view on screen.
+ * The wait is on the panel's title — a row there is `git status` rendered, and an empty status is a valid
+ * answer the panel still has to prove it drew.
+ */
+export async function openChangesPanel(page: Page, projectId: string): Promise<void> {
+  await page.goto('/');
+  await selectProject(page, projectId);
+  await page.waitForSelector('.top-bar', { timeout: 10000 });
+  await page.locator('.explorer-btn').click();
+  await expect(page.locator('.explorer-view')).toBeVisible({ timeout: 10000 });
+  await page.locator('.git-status-btn').click();
+  await expect(page.locator('.panel-title:has-text("Changes")')).toBeVisible({ timeout: 10000 });
+}
+
 /**
  * One task's card inside one column. Unscoped, `.card[data-task-id]` matches the same task twice for
  * the ~200ms a column move takes to draw: the node leaving the old column stays attached through its
@@ -508,6 +658,85 @@ export const PENDING_TOOL_STATUS = '.tool-status.pending';
 export const TOOL_CALL_CARD = '.tool-call-card';
 /** What the `slow-tool-probe` turn prints from inside its bash call. */
 export const SLOW_PROBE_OUTPUT = 'SLOW-TOOL-PROBE-DONE';
+
+/**
+ * The return harness, installed before the app boots. `stopReading`/`comeBack` flip the two flags; this is
+ * what makes a return measurable:
+ *
+ *   `__unfocused`  — `document.hasFocus()` answers false, which is how the app decides it was unread.
+ *   `__away`       — every `/api/stream` frame but the keepalive is dropped before the app sees it, so the
+ *                    turn really finishes behind the reader's back. `__swallowed` counts what was taken.
+ *   `__signals`    — how many of each return gesture reached the window: a `focus` count that did not move
+ *                    means the gesture never arrived, whatever the transcript then did.
+ *   `__sync`       — reads of `/sync`.
+ *   `__revisions`  — one entry per `/messages` read: the `If-None-Match` the APP passed (a browser
+ *                    revalidating its own HTTP cache sends that header too, so only the app's own read
+ *                    counts) and `afterSync`, how many digest reads had gone out when it did — which is how
+ *                    a spec says "this read followed that digest".
+ *   `__mutations`  — DOM changes inside `.chat-content` since `__watchTranscript()` was last called: a read
+ *                    that painted and a read that answered with nothing look identical from the wire.
+ *
+ * A spec that needs a different hook — holding a frame rather than dropping it, tagging who wrote
+ * `scrollTop` — installs its own script beside this one; the flags are the same two the flip moves.
+ */
+export async function watchTheReturn(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const w = window as any;
+    w.__away = false;
+    w.__unfocused = false;
+    w.__swallowed = 0;
+    w.__signals = { visibilitychange: 0, focus: 0, pageshow: 0 };
+    w.__revisions = [] as Array<{ baseline: string | null; afterSync: number }>;
+    w.__sync = 0;
+    w.__mutations = 0;
+    w.__observer = null as MutationObserver | null;
+    for (const type of Object.keys(w.__signals)) {
+      window.addEventListener(type, () => { w.__signals[type]++; });
+    }
+    Object.defineProperty(document, 'hasFocus', {
+      configurable: true,
+      get: () => () => !w.__unfocused,
+    });
+    const realFetch = window.fetch;
+    window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input
+        : input instanceof URL ? input.href : (input as Request).url;
+      if (url.includes('/sync')) w.__sync++;
+      if (url.includes('/messages')) {
+        w.__revisions.push({
+          baseline: new Headers(init?.headers).get('If-None-Match'),
+          afterSync: w.__sync,
+        });
+      }
+      return realFetch(input as any, init);
+    }) as typeof window.fetch;
+    /** Count DOM changes inside the transcript, from now until the next call. */
+    w.__watchTranscript = () => {
+      const target = document.querySelector('.chat-content');
+      if (!target) return false;
+      w.__observer?.disconnect();
+      w.__observer = new MutationObserver((records) => { w.__mutations += records.length; });
+      w.__observer.observe(target, { childList: true, subtree: true, characterData: true });
+      w.__mutations = 0;
+      return true;
+    };
+    const RealWebSocket = window.WebSocket;
+    window.WebSocket = class extends RealWebSocket {
+      constructor(url: string | URL, protocols?: string | string[]) {
+        super(url, protocols);
+        if (!String(url).includes('/api/stream')) return;
+        this.addEventListener('message', (e: MessageEvent) => {
+          if (!w.__away) return;
+          let frame: any;
+          try { frame = JSON.parse(String(e.data)); } catch { return; }
+          if (frame?.type === 'ping') return; // the keepalive is not content: the socket stays live
+          w.__swallowed++;
+          e.stopImmediatePropagation();
+        });
+      }
+    } as typeof WebSocket;
+  });
+}
 
 /** The window stops being read: it reports no focus, and no frame reaches JavaScript. The spec's own
  *  `addInitScript` installs the hooks this flips; the hooks differ per spec, the flip does not. */
@@ -589,6 +818,10 @@ export async function waitForChatFormReady(page: Page): Promise<void> {
  * Send a message through the chat UI and wait for its bubble. The baseline count is read
  * before Enter: reading it after races the optimistic add, and the poll can then never see
  * the count grow.
+ *
+ * The bubble is found by what it says. A row that was not the reader's can be drawn after it — a turn that
+ * loops gets its steering hint stored as a `user` row (`handleLoopDetected`, `backend/exec/loop_helpers.go`)
+ * — so the newest `.chat-message.user` is not necessarily the one this typed.
  */
 export async function sendMessage(page: Page, message: string): Promise<void> {
   await waitForSendButton(page);
@@ -602,7 +835,10 @@ export async function sendMessage(page: Page, message: string): Promise<void> {
   await expect
     .poll(() => userMessages.count(), { message: 'the sent message appears in the chat' })
     .toBeGreaterThan(countBefore);
-  await expect(userMessages.last(), 'the sent message is the one we typed').toContainText(message);
+  const typed = page.locator('.chat-message.user', { hasText: message });
+  await expect.poll(() => typed.count(), { message: 'the sent message is the one we typed' })
+    .toBeGreaterThan(0);
+  await expect(typed.last(), 'the sent message is on screen').toBeVisible();
 }
 
 // --- Task lifecycle helpers ---
@@ -760,13 +996,20 @@ export function worktreeExists(projectId: string, taskId: string): boolean {
   return existsSync(path) && existsSync(`${path}/.git`);
 }
 
-export function writeFileInWorktree(projectId: string, taskId: string, filePath: string, content: string): void {
+/**
+ * Put a file in a task's worktree. Staged by default, which is what a commit fixture wants; a spec that
+ * measures the panel's view of an UNSTAGED change passes `stage: false` and the write leaves it for git to
+ * report as modified.
+ */
+export function writeFileInWorktree(projectId: string, taskId: string, filePath: string, content: string,
+  { stage = true }: { stage?: boolean } = {}): void {
   const worktreePath = getWorktreePath(projectId, taskId);
   const target = join(worktreePath, filePath);
   // The file's own directories, not just the worktree root: a fixture that edits a nested
   // path (`src/lib/utils/format.ts`) would otherwise fail with ENOENT on the write.
   mkdirSync(dirname(target), { recursive: true });
   writeFileSync(target, content);
+  if (!stage) return;
   try {
     execSync(`cd ${worktreePath} && git add ${filePath}`);
   } catch {

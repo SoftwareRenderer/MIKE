@@ -18,8 +18,10 @@ const ISOLATED_SPECS = [
   // the lane server is answering six workers at once.
   'html-preview',
   'extensions-danger-permissions',
+  // Installs the local CSS fixture so the Installed list and the injected <link> have something real to
+  // read — an install is server state every other extension spec reads, so it cannot share the lane.
+  'extensions-tab',
   'mode-select',
-  'preferences-hide-model-badge',
   'preferences-keyboard',
   'provider-task-concurrency',
   'settings-extension-dependency-cache',
@@ -27,9 +29,8 @@ const ISOLATED_SPECS = [
   // Saves Settings, which is what reads the update status the dot is made of — a config write, so it
   // cannot share the lane every other chromium spec reads.
   'settings-update-dot',
-  'settings-sessions',
-  // Registers and revokes passkeys on the lane server — the credentials every other spec's
-  // session is made of, so it cannot share the lane that hands them out.
+  // Registers and revokes passkeys and the sessions they opened on the lane server — the credentials
+  // every other spec's session is made of, so it cannot share the lane that hands them out.
   'settings-passkeys',
   // Issues and revokes API tokens on the lane server, and asserts what a token can reach.
   'settings-api-tokens',

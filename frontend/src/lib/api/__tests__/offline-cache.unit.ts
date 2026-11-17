@@ -120,47 +120,29 @@ describe('offline message cache', () => {
         });
     });
 
-    it('sends the cursor of the window it is asking for', async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
-            ok: true, json: async () => [], headers: { get: () => null },
-        });
-        vi.stubGlobal('fetch', fetchMock);
-
-        const { getTaskMessages } = await import('$lib/api/tasks');
-        await getTaskMessages('p1', 't1', { before: 'a/b+c' });
-
-        // apiFetch resolves the CSRF session first, so the messages request is the call after it.
-        const url = fetchMock.mock.calls.map(c => String(c[0])).find(u => u.includes('/messages'));
-        expect(url).toContain('/projects/p1/tasks/t1/messages?before=a%2Fb%2Bc');
-    });
-
-    it('sends the floor and the page size a jump asks for', async () => {
+    // The three query parts a window read may name: where to start, how far back to go, and how many rows
+    // to bring. A read that named none of the last two must send neither, or the server answers for a jump
+    // nobody asked for.
+    it.each([
+        ['the cursor alone', { before: 'a/b+c' }, false,
+            ['/projects/p1/tasks/t1/messages?before=a%2Fb%2Bc'], ['from=', 'limit=']],
+        ['the floor and the page size a jump asks for',
+            { before: 'frontier', from: 'floor-1' }, true,
+            ['before=frontier', 'from=floor-1'], []],
+    ])('sends %s and nothing the other read would be read as', async (_name, named, jump, expected, absent) => {
         const fetchMock = vi.fn().mockResolvedValue({
             ok: true, json: async () => [], headers: { get: () => null },
         });
         vi.stubGlobal('fetch', fetchMock);
 
         const { getTaskMessages, MESSAGE_JUMP_LIMIT } = await import('$lib/api/tasks');
-        await getTaskMessages('p1', 't1', { before: 'frontier', from: 'floor-1', limit: MESSAGE_JUMP_LIMIT });
+        await getTaskMessages('p1', 't1', jump ? { ...named, limit: MESSAGE_JUMP_LIMIT } : named);
 
+        // apiFetch resolves the CSRF session first, so the messages request is the call after it.
         const url = fetchMock.mock.calls.map(c => String(c[0])).find(u => u.includes('/messages'));
-        expect(url).toContain('before=frontier');
-        expect(url).toContain('from=floor-1');
-        expect(url).toContain(`limit=${MESSAGE_JUMP_LIMIT}`);
-    });
-
-    it('sends no floor and no page size for a read that named neither', async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
-            ok: true, json: async () => [], headers: { get: () => null },
-        });
-        vi.stubGlobal('fetch', fetchMock);
-
-        const { getTaskMessages } = await import('$lib/api/tasks');
-        await getTaskMessages('p1', 't1', { before: 'cursor-1' });
-
-        const url = fetchMock.mock.calls.map(c => String(c[0])).find(u => u.includes('/messages'));
-        expect(url).not.toContain('from=');
-        expect(url).not.toContain('limit=');
+        for (const part of expected) expect(url).toContain(part);
+        if (jump) expect(url).toContain(`limit=${MESSAGE_JUMP_LIMIT}`);
+        for (const part of absent) expect(url).not.toContain(part);
     });
 
     it('rejects when network fails and no cache exists', async () => {
@@ -249,19 +231,6 @@ describe('offline message cache', () => {
 });
 
 describe('offline diff cache', () => {
-    it('returns the cached current diff (marked from cache) when network fails', async () => {
-        const storage = await import('$lib/storage');
-        const { isFromCache } = await import('$lib/api/cache');
-        mockRejectedFetch();
-        await storage.setBoardCache(storage.diffCacheKey('p1', 't1'), diff);
-
-        const { getTaskDiff } = await import('$lib/api/git');
-        const result = await getTaskDiff('p1', 't1');
-
-        expect(result).toMatchObject(diff);
-        expect(isFromCache(result)).toBe(true);
-    });
-
     it('caches the current diff on success', async () => {
         const storage = await import('$lib/storage');
         mockResolvedFetch(diff);
@@ -418,6 +387,8 @@ describe('a diff cache hit is for a disconnected read only', () => {
         await storage.setBoardCache(storage.diffCacheKey('p1', 't1'), diff);
         mockRejectedFetch();
 
+        // The panel asks for the parsed view on every load, and cacheability is the ref shape, never that
+        // flag — a worktree diff the server never answered is still the worktree diff.
         const { getTaskDiff } = await import('$lib/api/git');
         const result = await getTaskDiff('p1', 't1', { parsed: true });
         expect(result).toMatchObject(diff);

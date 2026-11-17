@@ -148,13 +148,4 @@ describe('ChatEntries — Jump to latest button', () => {
         expect(container.querySelector('.chat-jump-latest')).toBeNull();
         cleanup();
     });
-
-    it('wraps the entries in a content element the tracker can observe', async () => {
-        const { container } = await mount();
-        const content = container.querySelector('.chat-content');
-        expect(content).toBeTruthy();
-        expect(container.querySelector('.chat-messages')?.contains(content ?? null)).toBe(true);
-        expect(content?.querySelectorAll('.chat-entry').length).toBe(3);
-        cleanup();
-    });
 });

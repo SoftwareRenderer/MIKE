@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 // The highlight follows the text: tinting arrives with the marker lines and leaves when a person deletes
 // them, so it never remembers a conflict the buffer no longer holds.
 import { describe, it, expect } from 'vitest';

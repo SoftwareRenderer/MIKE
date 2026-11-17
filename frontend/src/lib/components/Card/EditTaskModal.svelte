@@ -148,7 +148,7 @@
             <button type="button" class="btn btn-primary" onclick={handleSave} disabled={!titleDraft.trim()}>{t('app.save')}</button>
         {/snippet}
 
-        <BaseModal title={t('board.editTask.title')} width="440px" modalClass="edit-task-modal" footer={footer} onClose={handleClose} closeOnOverlayClick={false}>
+        <BaseModal title={t('board.editTask.title')} width="440px" modalClass="edit-task-modal" footer={footer} onClose={handleClose}>
             <label for="edit-task-title-input">
                 <span class="field-label">{t('board.editTask.fieldTitle')}</span>
                 <input

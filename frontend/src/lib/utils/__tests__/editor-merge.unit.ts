@@ -152,50 +152,35 @@ describe('minimalReplace', () => {
   const apply = (before: string, { from, to, insert }: { from: number; to: number; insert: string }) =>
     before.slice(0, from) + insert + before.slice(to);
 
-  const cases: Array<[string, string, string]> = [
-    ['one line changed', 'a\nb\nc', 'a\nB\nc'],
-    ['line appended', 'a\nb\nc', 'a\nb\nc\nd'],
+  /** `[name, before, after, exact]` — `exact` is the change itself, asserted wherever a change that
+   * merely reproduces the file would not do: the untouched lines have to stay outside it. */
+  const cases: Array<[string, string, string, { from: number; to: number; insert: string }?]> = [
+    ['one line changed', 'a\nb\nc', 'a\nB\nc', { from: 2, to: 3, insert: 'B' }],
+    ['line appended', 'a\nb\nc', 'a\nb\nc\nd', { from: 5, to: 5, insert: '\nd' }],
     ['line prepended', 'a\nb\nc', 'z\na\nb\nc'],
     ['line deleted', 'a\nb\nc', 'a\nc'],
     ['two separate edits', '1\n2\n3\n4\n5', '1\nX\n3\nY\n5'],
     ['first line changed', 'a\nb\nc', 'X\nb\nc'],
     ['last line changed', 'a\nb\nc', 'a\nb\nX'],
     ['whole file replaced', 'a\nb\nc', 'nothing\nthe same'],
-    ['empty file filled', '', 'a\nb'],
+    ['empty file filled', '', 'a\nb', { from: 0, to: 0, insert: 'a\nb' }],
     ['file emptied', 'a\nb\nc', ''],
-    ['trailing newline added', 'a\nb', 'a\nb\n'],
+    ['trailing newline added', 'a\nb', 'a\nb\n', { from: 3, to: 3, insert: '\n' }],
     ['trailing newline removed', 'a\nb\n', 'a\nb'],
     ['adjacent lines rewritten', 'a\nb\nc\nd', 'a\nP\nQ\nd'],
     ['single line file', 'x', 'y'],
     ['appended to a single line', 'x', 'x\ny'],
+    ['unchanged content', 'a\nb\nc', 'a\nb\nc', { from: 5, to: 5, insert: '' }],
   ];
 
-  for (const [name, before, after] of cases) {
+  for (const [name, before, after, exact] of cases) {
     it(`${name}: the change reproduces the file`, () => {
-      expect(apply(before, minimalReplace(before, after))).toBe(after);
+      const change = minimalReplace(before, after);
+      expect(apply(before, change)).toBe(after);
+      // A change that rewrites the whole document reproduces it too, so where the answer is known
+      // the change is read against it: an edit card, a file save and the draft merge all pay for
+      // the bytes this span carries.
+      if (exact) expect(change).toEqual(exact);
     });
   }
-
-  it('replaces nothing for unchanged content', () => {
-    expect(minimalReplace('a\nb\nc', 'a\nb\nc')).toEqual({ from: 5, to: 5, insert: '' });
-  });
-
-  it('leaves the unchanged lines of a single-line edit outside the change', () => {
-    const change = minimalReplace('a\nb\nc', 'a\nB\nc');
-    expect('a\nb\nc'.slice(0, change.from)).toBe('a\n');
-    expect('a\nb\nc'.slice(change.to)).toBe('\nc');
-    expect(change.insert).toBe('B');
-  });
-
-  it('does not reach past the lines an append adds', () => {
-    expect(minimalReplace('a\nb\nc', 'a\nb\nc\nd')).toEqual({ from: 5, to: 5, insert: '\nd' });
-  });
-
-  it('does not rewrite the document when only its end differs by a newline', () => {
-    expect(minimalReplace('a\nb', 'a\nb\n')).toEqual({ from: 3, to: 3, insert: '\n' });
-  });
-
-  it('works from an empty document', () => {
-    expect(minimalReplace('', 'a\nb')).toEqual({ from: 0, to: 0, insert: 'a\nb' });
-  });
 });

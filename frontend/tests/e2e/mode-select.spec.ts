@@ -6,13 +6,19 @@ import { getProjectId } from './helpers';
 const dismissTaskModal = (page: Page) =>
   page.locator('.modal').getByRole('button', { name: 'Cancel', exact: true });
 
-test.describe.serial('ModeSelect component', () => {
+// The mode the picker shows is the mode the task is created with. The picker's own choices, the
+// auto-switch rule behind the "?" behaviour (`applyExploreModeRule`) and the "user chose it" override
+// are `utils/__tests__/explore-mode.unit.ts`; what needs the browser is that the modal wires that rule
+// to its button and that the choice reaches the board row — `operating_mode` is what later decides which
+// tools the turn is given.
+
+test.describe.serial('Create Task mode select', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('.card', { timeout: 10000 });
   });
 
-  test('should open mode dropdown showing Act/Plan/Explore options', async ({ page }) => {
+  test('offers Act, Plan and Explore, and the mode chosen from the dropdown is the one shown', async ({ page }) => {
     // Open the Create Task modal
     await page.locator('.add-task-btn').first().click();
     await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
@@ -33,30 +39,12 @@ test.describe.serial('ModeSelect component', () => {
     await expect(options.nth(1)).toContainText('Plan');
     await expect(options.nth(2)).toContainText('Explore');
 
-    // Close modal
-    await dismissTaskModal(page).click();
-    await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
-  });
-
-  test('should switch to Plan mode', async ({ page }) => {
-    // Open the Create Task modal
-    await page.locator('.add-task-btn').first().click();
-    await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
-
-    // Click the mode selector to open dropdown
-    await page.locator('.mode-btn').click();
-    await expect(page.locator('.mode-dropdown')).toBeVisible({ timeout: 5000 });
-
     // Select Plan mode
     await page.locator('.mode-option.plan').click();
 
-    // Verify the button now shows "Plan"
+    // Verify the button now shows "Plan", with its icon, and the dropdown closed after the choice
     await expect(page.locator('.mode-btn .mode-label')).toHaveText('Plan');
-
-    // Verify the plan icon is active
     await expect(page.locator('.mode-btn .mode-icon.plan')).toBeVisible();
-
-    // Verify dropdown closed after selection
     await expect(page.locator('.mode-dropdown')).not.toBeVisible({ timeout: 5000 });
 
     // Close modal
@@ -64,15 +52,10 @@ test.describe.serial('ModeSelect component', () => {
     await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
   });
 
-});
+  test('a ? in the prompt switches the picker to Explore, and the created task carries that mode', async ({ page }) => {
+    const projectId = await getProjectId(page);
+    const uniquePrompt = `explore-qs-${Date.now()}`;
 
-test.describe.serial('Question mark auto-switches operating mode to Explore', () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto('/');
-    await page.waitForSelector('.card', { timeout: 10000 });
-  });
-
-  test('should switch to Explore when the description contains a ?', async ({ page }) => {
     // Open the Create Task modal
     await page.locator('.add-task-btn').first().click();
     await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
@@ -81,31 +64,11 @@ test.describe.serial('Question mark auto-switches operating mode to Explore', ()
     await expect(page.locator('.mode-btn .mode-label')).toHaveText('Act');
 
     // Type a description containing a question mark
-    await page.locator('#task-description').fill('Why is the login broken?');
-
-    // The mode should auto-switch to Explore
-    await expect(page.locator('.mode-btn .mode-label')).toHaveText('Explore');
-
-    // The explore icon should be active
-    await expect(page.locator('.mode-btn .mode-icon.explore')).toBeVisible();
-
-    // Close modal (prompt is non-empty → confirm discard)
-    await dismissTaskModal(page).click();
-    await expect(page.getByRole('button', { name: 'Discard' })).toBeVisible({ timeout: 5000 });
-    await page.getByRole('button', { name: 'Discard' }).click();
-    await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
-  });
-
-  test('should create the task in Explore mode when the description contains a ?', async ({ page }) => {
-    const projectId = await getProjectId(page);
-    const uniquePrompt = `explore-qs-${Date.now()}`;
-
-    // Open the Create Task modal
-    await page.locator('.add-task-btn').first().click();
-    await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
-
     await page.locator('#task-description').fill(`${uniquePrompt}? What is going on?`);
+
+    // The mode should auto-switch to Explore, icon and all
     await expect(page.locator('.mode-btn .mode-label')).toHaveText('Explore');
+    await expect(page.locator('.mode-btn .mode-icon.explore')).toBeVisible();
 
     await page.locator('.modal .btn-primary').click();
     await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });

@@ -69,7 +69,7 @@
     </button>
 {/snippet}
 
-<BaseModal title={modalTitle} width="420px" footer={footer} onClose={handleClose} closeOnOverlayClick={true}>
+<BaseModal title={modalTitle} width="420px" footer={footer} onClose={handleClose}>
     <div class="model-select-row">
         <span id="model-label" class="model-label">{t('app.model')}</span>
         {#if hasProviders}

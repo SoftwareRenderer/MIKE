@@ -25,16 +25,20 @@ describe('enrichRowsWithInlineSegments', () => {
         expect(result[1].segments).toBeUndefined();
     });
 
-    it('adds inline segments for paired removed/added lines', () => {
+    /** What a row was handed: its own text rebuilt from the segments, and the tones that shaped it. */
+    function side(row: { segments?: { text: string; tone: string }[] }) {
+        return [(row.segments ?? []).map((s) => s.text).join(''), (row.segments ?? []).map((s) => s.tone)];
+    }
+
+    it('pairs a removed row with the added row under it', () => {
+        // Which rows get segments is this function's decision; what the segments say is
+        // `buildModifiedSegments`'s claim, proved there on this same pair. What belongs here is that
+        // each row is handed its OWN side — painting the new text over the removed row is the bug.
         const rows = [row('removed', 'hello world'), row('added', 'hello there')];
         const result = enrichRowsWithInlineSegments(rows);
-        expect(result[0].segments).toBeDefined();
-        expect(result[1].segments).toBeDefined();
-        // "hello " is context, "world" is removed, "there" is added
-        expect(result[0].segments![0].tone).toBe('context');
-        expect(result[0].segments![0].text).toBe('hello ');
-        expect(result[0].segments![1].tone).toBe('removed');
-        expect(result[0].segments![1].text).toBe('world');
+        expect(result).toHaveLength(2);
+        expect(side(result[0])).toEqual(['hello world', ['context', 'removed']]);
+        expect(side(result[1])).toEqual(['hello there', ['context', 'added']]);
     });
 
     it('passes through pure deletions without pairing', () => {
@@ -167,61 +171,44 @@ describe('buildDisplayItems', () => {
         expect(items[1].type).toBe('row');
     });
 
-    it('collapses long context blocks', () => {
+    // One decision: a run of context longer than the collapse minimum becomes one block, and what is
+    // drawn around it keeps its position in the file's own rows — the reader clicks a row by that
+    // number, and the reader cannot see a row the panel folded away.
+    it('collapses one long context run and indexes what it leaves drawn', () => {
         const rows = [
             row('removed', '-'),
-            ...Array.from({ length: 20 }, () => row('context')),
-            row('added', '+'),
-        ];
-        const items = buildDisplayItems(rows);
-        const collapsed = items.filter(i => i.type === 'collapsed');
-        expect(collapsed.length).toBe(1);
-        // Some context lines near changes should remain as rows (CONTEXT_RADIUS = 3)
-        const rowItems = items.filter(i => i.type === 'row');
-        expect(rowItems.length).toBeGreaterThan(2); // at least the changed lines
-    });
-
-    it('keeps context lines near changes visible', () => {
-        // CONTEXT_RADIUS = 3, so 3 lines before and after changes should be visible
-        const rows = [
-            ...Array.from({ length: 3 }, () => row('context')),
-            row('added', '+'),
-            ...Array.from({ length: 3 }, () => row('context')),
-        ];
-        const items = buildDisplayItems(rows);
-        const collapsed = items.filter(i => i.type === 'collapsed');
-        expect(collapsed.length).toBe(0); // all within radius
-    });
-
-    it('names each drawn row its position in the file’s rows', () => {
-        // One change at each end and 20 context lines between them: 4 rows, a 14-line block, 4 rows.
-        const rows = [
-            row('added', '+'),
-            ...Array.from({ length: 20 }, () => row('context')),
-            row('added', '+'),
-        ];
-        const items = buildDisplayItems(rows);
-        const drawn = items.filter(i => i.type === 'row');
-        expect(drawn.map(i => i.type === 'row' ? i.rowIndex : -1)).toEqual([0, 1, 2, 3, 18, 19, 20, 21]);
-    });
-
-    it('names every row of a run too short to collapse', () => {
-        const rows = [row('added', '+'), ...Array.from({ length: 5 }, () => row('context')), row('added', '+')];
-        const items = buildDisplayItems(rows);
-        expect(items.filter(i => i.type === 'collapsed')).toHaveLength(0);
-        expect(items.map(i => i.type === 'row' ? i.rowIndex : -1)).toEqual([0, 1, 2, 3, 4, 5, 6]);
-    });
-
-    it('numbers a collapsed block from the row it starts at', () => {
-        const rows = [
-            row('added', '+'),
             ...Array.from({ length: 20 }, (_, i) => row('context', `c${i}`)),
             row('added', '+'),
         ];
-        const item = buildDisplayItems(rows).find(i => i.type === 'collapsed');
-        const block = item?.type === 'collapsed' ? item.block : null;
+        const items = buildDisplayItems(rows);
+        const blocks = items.filter(i => i.type === 'collapsed');
+        expect(blocks).toHaveLength(1);
+        // CONTEXT_RADIUS = 3: the three rows beside each change stay, the 14 between them fold.
+        const block = blocks[0]!.type === 'collapsed' ? blocks[0]!.block : null;
         expect(block?.startIndex).toBe(4);
         expect(block?.rows.map(r => r.text)).toEqual(rows.slice(4, 18).map(r => r.text));
+        expect(items.filter(i => i.type === 'row').map(i => (i.type === 'row' ? i.rowIndex : -1)))
+            .toEqual([0, 1, 2, 3, 18, 19, 20, 21]);
+    });
+
+    // A run shorter than the minimum is drawn whole — whether it lies beside one change or is
+    // squeezed between two, where folding either side would leave nothing around the other.
+    it.each([
+        ['context on both sides of one change', [
+            ...Array.from({ length: 3 }, () => row('context')),
+            row('added', '+'),
+            ...Array.from({ length: 3 }, () => row('context')),
+        ]],
+        ['context between two changes', [
+            row('added', '+'),
+            ...Array.from({ length: 5 }, () => row('context')),
+            row('added', '+'),
+        ]],
+    ])('draws %s whole', (_name, rows) => {
+        const items = buildDisplayItems(rows);
+        expect(items.filter(i => i.type === 'collapsed')).toHaveLength(0);
+        expect(items.map(i => (i.type === 'row' ? i.rowIndex : -1)))
+            .toEqual(rows.map((_, index) => index));
     });
 });
 
@@ -364,62 +351,19 @@ describe('buildSideBySideRows', () => {
 });
 
 describe('getStatusBadge', () => {
-    it('shows R (Renamed) when origPath is set', () => {
-        const badge = getStatusBadge(makeDiffFile({ origPath: 'old.ts' }));
-        expect(badge.letter).toBe('R');
-        expect(badge.color).toBe('var(--color-git-renamed)');
-    });
-
-    it('shows D (Deleted) when isDeleted is true', () => {
-        const badge = getStatusBadge(makeDiffFile({ isDeleted: true, removed: 5, added: 0 }));
-        expect(badge.letter).toBe('D');
-        expect(badge.color).toBe('var(--color-git-deleted)');
-    });
-
-    it('shows A (Added) when isNewFile is true', () => {
-        const badge = getStatusBadge(makeDiffFile({ isNewFile: true, added: 10, removed: 0 }));
-        expect(badge.letter).toBe('A');
-        expect(badge.color).toBe('var(--color-git-added)');
-    });
-
-    it('shows M (Modified) for a file with only removals but NOT actually deleted', () => {
-        // This is the key bug fix: a file with removed > 0 && added === 0
-        // should NOT show "D" unless isDeleted is explicitly true
-        const badge = getStatusBadge(makeDiffFile({ removed: 5, added: 0 }));
-        expect(badge.letter).toBe('M');
-        expect(badge.color).toBe('var(--color-git-modified)');
-    });
-
-    it('shows M (Modified) for a normal modified file', () => {
-        const badge = getStatusBadge(makeDiffFile({ added: 3, removed: 2 }));
-        expect(badge.letter).toBe('M');
-        expect(badge.color).toBe('var(--color-git-modified)');
-    });
-
-    it('shows M (Modified) for files with only additions but not marked as new', () => {
-        const badge = getStatusBadge(makeDiffFile({ added: 10, removed: 0 }));
-        expect(badge.letter).toBe('M');
-        expect(badge.color).toBe('var(--color-git-modified)');
-    });
-
-    it('priority: origPath (R) takes precedence over isDeleted', () => {
-        // A renamed file that was deleted at old path and created at new path
-        const badge = getStatusBadge(makeDiffFile({
-            origPath: 'old.ts',
-            isDeleted: true,
-            added: 5,
-            removed: 5,
-        }));
-        expect(badge.letter).toBe('R');
-    });
-
-    it('priority: isDeleted (D) takes precedence over isNewFile', () => {
-        const badge = getStatusBadge(makeDiffFile({
-            isDeleted: true,
-            isNewFile: true,
-            added: 0,
-            removed: 5,
-        }));
-        expect(badge.letter).toBe('D');
+    // The badge is read off the parsed file, in one precedence: a rename, then a deletion, then a
+    // creation, then modified. The row the reader trusts is the one that says a file with only
+    // removals is still there — that is `M`, not `D`, and only `isDeleted` says otherwise.
+    it.each([
+        ['a rename, however else it reads', makeDiffFile({ origPath: 'old.ts' }), 'R', 'var(--color-git-renamed)'],
+        ['a rename that also deleted the old path', makeDiffFile({ origPath: 'old.ts', isDeleted: true, added: 5, removed: 5 }), 'R', 'var(--color-git-renamed)'],
+        ['a deletion', makeDiffFile({ isDeleted: true, removed: 5, added: 0 }), 'D', 'var(--color-git-deleted)'],
+        ['a deletion of a file that also reads new', makeDiffFile({ isDeleted: true, isNewFile: true, added: 0, removed: 5 }), 'D', 'var(--color-git-deleted)'],
+        ['a creation', makeDiffFile({ isNewFile: true, added: 10, removed: 0 }), 'A', 'var(--color-git-added)'],
+        ['a file with only additions and no new-file flag', makeDiffFile({ added: 10, removed: 0 }), 'M', 'var(--color-git-modified)'],
+        ['a file with only removals and no deleted flag', makeDiffFile({ removed: 5, added: 0 }), 'M', 'var(--color-git-modified)'],
+        ['an ordinary modification', makeDiffFile({ added: 3, removed: 2 }), 'M', 'var(--color-git-modified)'],
+    ])('badges %s', (_name, file, letter, color) => {
+        expect(getStatusBadge(file)).toEqual({ letter, color });
     });
 });

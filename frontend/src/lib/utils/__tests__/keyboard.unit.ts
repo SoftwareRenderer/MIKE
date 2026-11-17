@@ -168,39 +168,63 @@ describe('matchShortcut', () => {
     });
 });
 
-describe('effectiveCreateTaskKey', () => {
-    it('falls back to the default "c" when config is missing or unset', () => {
-        expect(DEFAULT_SHORTCUTS.create_task).toBe('c');
-        expect(effectiveCreateTaskKey(null)).toBe('c');
-        expect(effectiveCreateTaskKey(undefined)).toBe('c');
-        expect(effectiveCreateTaskKey({} as Config)).toBe('c');
-        expect(effectiveCreateTaskKey({ keyboard_shortcuts: {} } as Config)).toBe('c');
+/**
+ * Every binding is stored under one key of `keyboard_shortcuts` and read back by one accessor, and every
+ * accessor owes the same three answers: nothing stored is the default, something stored is that binding,
+ * and the empty string is a person's decision to disable it. A row here is one binding — an accessor that
+ * gets any of the three wrong is a shortcut that silently stops working, or one nobody can switch off.
+ */
+const BINDINGS: Array<{
+    name: string;
+    accessor: (config: Config | null | undefined) => string;
+    configKey: string;
+    /** What the accessor answers when nothing is stored, per platform. */
+    fallback: { mac: string; other: string };
+    /** The binding the shipped table carries, for the rows it carries one. */
+    shipped?: string;
+    custom: string;
+}> = [
+    { name: 'create_task', accessor: effectiveCreateTaskKey, configKey: 'create_task', fallback: { mac: 'c', other: 'c' }, shipped: 'c', custom: 'shift+k' },
+    { name: 'open_terminal', accessor: effectiveOpenTerminalKey, configKey: 'open_terminal', fallback: { mac: 'control+`', other: 'control+`' }, shipped: 'control+`', custom: 'alt+shift+t' },
+    { name: 'toggle_fullscreen', accessor: effectiveToggleFullscreenKey, configKey: 'toggle_fullscreen', fallback: { mac: 'control+arrowup', other: 'control+arrowup' }, shipped: 'control+arrowup', custom: 'shift+alt+f' },
+    { name: 'create_task_submit', accessor: effectiveCreateTaskSubmitKey, configKey: 'create_task_submit', fallback: { mac: 'meta+enter', other: 'control+enter' }, custom: 'shift+enter' },
+    { name: 'start_task', accessor: effectiveStartTaskKey, configKey: 'start_task', fallback: { mac: 'meta+enter', other: 'control+enter' }, custom: 'shift+enter' },
+    { name: 'multi_select_click', accessor: effectiveMultiSelectClick, configKey: 'multi_select_click', fallback: { mac: 'meta+click', other: 'control+click' }, custom: 'shift+click' },
+];
+
+/** A config carrying exactly one stored binding, under exactly one key named at runtime. */
+function storedBinding(key: string, value: string): Config {
+    return { keyboard_shortcuts: { [key]: value } } as unknown as Config;
+}
+
+/** The four shapes of "the config says nothing about this binding" — one decision, spelled four ways. */
+const NO_BINDING: Array<[string, Config | null | undefined]> = [
+    ['no config at all', null],
+    ['an undefined config', undefined],
+    ['a config without the shortcuts', {} as Config],
+    ['empty shortcuts', { keyboard_shortcuts: {} } as Config],
+];
+
+describe.each(BINDINGS)('$name', ({ name, accessor, configKey, fallback, shipped, custom }) => {
+    it('falls back to the platform default when nothing is stored', () => {
+        for (const [shape, config] of NO_BINDING) {
+            mockUserAgent(MAC_UA);
+            expect(accessor(config), `on a Mac, ${shape}`).toBe(fallback.mac);
+            mockUserAgent(WIN_UA);
+            expect(accessor(config), `elsewhere, ${shape}`).toBe(fallback.other);
+        }
     });
 
-    it('returns the custom binding when set', () => {
-        expect(effectiveCreateTaskKey({ keyboard_shortcuts: { create_task: 'shift+k' } } as Config)).toBe('shift+k');
+    it('returns the stored binding, and empty for the binding that is disabled', () => {
+        expect(accessor(storedBinding(configKey, custom))).toBe(custom);
+        expect(accessor(storedBinding(configKey, ''))).toBe('');
     });
 
-    it('returns empty string when explicitly disabled', () => {
-        expect(effectiveCreateTaskKey({ keyboard_shortcuts: { create_task: '' } } as Config)).toBe('');
-    });
-});
-
-describe('effectiveOpenTerminalKey', () => {
-    it('defaults to control+backtick when unset', () => {
-        expect(effectiveOpenTerminalKey(null)).toBe('control+`');
-        expect(effectiveOpenTerminalKey(undefined)).toBe('control+`');
-        expect(effectiveOpenTerminalKey({} as Config)).toBe('control+`');
-        expect(effectiveOpenTerminalKey({ keyboard_shortcuts: {} } as Config)).toBe('control+`');
-    });
-
-    it('returns the stored custom binding', () => {
-        expect(effectiveOpenTerminalKey({ keyboard_shortcuts: { open_terminal: 'alt+shift+t' } } as Config)).toBe('alt+shift+t');
-    });
-
-    it('returns empty string when disabled', () => {
-        expect(effectiveOpenTerminalKey({ keyboard_shortcuts: { open_terminal: '' } } as Config)).toBe('');
-    });
+    if (shipped) {
+        it('is the binding the shipped table carries', () => {
+            expect(DEFAULT_SHORTCUTS[name]).toBe(shipped);
+        });
+    }
 });
 
 describe('isMac', () => {
@@ -216,34 +240,6 @@ describe('isMac', () => {
         expect(isMac()).toBe(false);
         mockUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0');
         expect(isMac()).toBe(false);
-    });
-});
-
-describe('defaultCreateTaskSubmitKey', () => {
-    it('is Cmd+Enter on Mac, Ctrl+Enter elsewhere', () => {
-        mockUserAgent(MAC_UA);
-        expect(defaultCreateTaskSubmitKey()).toBe('meta+enter');
-        mockUserAgent(WIN_UA);
-        expect(defaultCreateTaskSubmitKey()).toBe('control+enter');
-    });
-});
-
-describe('effectiveCreateTaskSubmitKey', () => {
-    it('falls back to the platform default when unset', () => {
-        mockUserAgent(MAC_UA);
-        expect(effectiveCreateTaskSubmitKey(null)).toBe('meta+enter');
-        expect(effectiveCreateTaskSubmitKey({} as Config)).toBe('meta+enter');
-        expect(effectiveCreateTaskSubmitKey({ keyboard_shortcuts: {} } as Config)).toBe('meta+enter');
-        mockUserAgent(WIN_UA);
-        expect(effectiveCreateTaskSubmitKey({} as Config)).toBe('control+enter');
-    });
-
-    it('returns the custom binding when set', () => {
-        expect(effectiveCreateTaskSubmitKey({ keyboard_shortcuts: { create_task_submit: 'shift+enter' } } as Config)).toBe('shift+enter');
-    });
-
-    it('returns empty string when explicitly disabled', () => {
-        expect(effectiveCreateTaskSubmitKey({ keyboard_shortcuts: { create_task_submit: '' } } as Config)).toBe('');
     });
 });
 
@@ -275,35 +271,6 @@ describe('matchesCreateTaskSubmitKey', () => {
         const cfg = { keyboard_shortcuts: { create_task_submit: '' } } as Config;
         expect(matchesCreateTaskSubmitKey(cfg, keyEvent({ key: 'Enter', ctrlKey: true }))).toBe(false);
         expect(matchesCreateTaskSubmitKey(cfg, keyEvent({ key: 'Enter', metaKey: true }))).toBe(false);
-    });
-});
-
-describe('defaultStartTaskKey', () => {
-    it('is Cmd+Enter on Mac, Ctrl+Enter elsewhere', () => {
-        mockUserAgent(MAC_UA);
-        expect(defaultStartTaskKey()).toBe('meta+enter');
-        mockUserAgent(WIN_UA);
-        expect(defaultStartTaskKey()).toBe('control+enter');
-    });
-});
-
-describe('effectiveStartTaskKey', () => {
-    it('falls back to the platform default when unset', () => {
-        mockUserAgent(MAC_UA);
-        expect(effectiveStartTaskKey(null)).toBe('meta+enter');
-        expect(effectiveStartTaskKey(undefined)).toBe('meta+enter');
-        expect(effectiveStartTaskKey({} as Config)).toBe('meta+enter');
-        expect(effectiveStartTaskKey({ keyboard_shortcuts: {} } as Config)).toBe('meta+enter');
-        mockUserAgent(WIN_UA);
-        expect(effectiveStartTaskKey({} as Config)).toBe('control+enter');
-    });
-
-    it('returns the custom binding when set', () => {
-        expect(effectiveStartTaskKey({ keyboard_shortcuts: { start_task: 'shift+enter' } } as Config)).toBe('shift+enter');
-    });
-
-    it('returns empty string when explicitly disabled', () => {
-        expect(effectiveStartTaskKey({ keyboard_shortcuts: { start_task: '' } } as Config)).toBe('');
     });
 });
 
@@ -367,84 +334,30 @@ describe('isBrowserLinkClick', () => {
     });
 });
 
-describe('defaultMultiSelectClick', () => {
-    it('is Cmd+Click on Mac, Ctrl+Click elsewhere', () => {
+/** The default a binding carries when the person never touched it is the platform's own key. */
+describe.each([
+    { name: 'create_task_submit', defaultKey: defaultCreateTaskSubmitKey, mac: 'meta+enter', other: 'control+enter' },
+    { name: 'start_task', defaultKey: defaultStartTaskKey, mac: 'meta+enter', other: 'control+enter' },
+    { name: 'multi_select_click', defaultKey: defaultMultiSelectClick, mac: 'meta+click', other: 'control+click' },
+])('default $name', ({ defaultKey, mac, other }) => {
+    it('names the platform\u2019s own key', () => {
         mockUserAgent(MAC_UA);
-        expect(defaultMultiSelectClick()).toBe('meta+click');
+        expect(defaultKey()).toBe(mac);
         mockUserAgent(WIN_UA);
-        expect(defaultMultiSelectClick()).toBe('control+click');
+        expect(defaultKey()).toBe(other);
     });
 });
 
-describe('effectiveMultiSelectClick', () => {
-    it('falls back to the platform default when unset', () => {
-        mockUserAgent(MAC_UA);
-        expect(effectiveMultiSelectClick(null)).toBe('meta+click');
-        expect(effectiveMultiSelectClick(undefined)).toBe('meta+click');
-        expect(effectiveMultiSelectClick({} as Config)).toBe('meta+click');
-        expect(effectiveMultiSelectClick({ keyboard_shortcuts: {} } as Config)).toBe('meta+click');
+describe.each([
+    { title: fullscreenToggleTitle, configKey: 'toggle_fullscreen', label: 'Toggle fullscreen', defaultText: 'Toggle fullscreen (Ctrl+Up)', custom: 'shift+alt+f', customText: 'Toggle fullscreen (Shift+Alt+F)' },
+    { title: openTerminalTitle, configKey: 'open_terminal', label: 'Open terminal', defaultText: 'Open terminal (Ctrl+`)', custom: 'alt+shift+t', customText: 'Open terminal (Alt+Shift+T)' },
+])('the $label title', ({ title, configKey, defaultText, custom, customText }) => {
+    it('names the binding it was given, and names nothing when the binding is disabled', () => {
         mockUserAgent(WIN_UA);
-        expect(effectiveMultiSelectClick({} as Config)).toBe('control+click');
-    });
-
-    it('returns the custom binding when set', () => {
-        expect(effectiveMultiSelectClick({ keyboard_shortcuts: { multi_select_click: 'shift+click' } } as Config)).toBe('shift+click');
-    });
-
-    it('returns empty string when explicitly disabled', () => {
-        expect(effectiveMultiSelectClick({ keyboard_shortcuts: { multi_select_click: '' } } as Config)).toBe('');
-    });
-});
-
-describe('effectiveToggleFullscreenKey', () => {
-    it('defaults to Ctrl+Up when unset (any platform)', () => {
-        mockUserAgent(MAC_UA);
-        expect(effectiveToggleFullscreenKey(null)).toBe('control+arrowup');
-        expect(effectiveToggleFullscreenKey(undefined)).toBe('control+arrowup');
-        expect(effectiveToggleFullscreenKey({} as Config)).toBe('control+arrowup');
-        expect(effectiveToggleFullscreenKey({ keyboard_shortcuts: {} } as Config)).toBe('control+arrowup');
-        mockUserAgent(WIN_UA);
-        expect(effectiveToggleFullscreenKey({} as Config)).toBe('control+arrowup');
-    });
-
-    it('returns the custom binding when set', () => {
-        expect(effectiveToggleFullscreenKey({ keyboard_shortcuts: { toggle_fullscreen: 'shift+alt+f' } } as Config)).toBe('shift+alt+f');
-    });
-
-    it('returns empty string when explicitly disabled', () => {
-        expect(effectiveToggleFullscreenKey({ keyboard_shortcuts: { toggle_fullscreen: '' } } as Config)).toBe('');
-    });
-});
-
-describe('fullscreenToggleTitle', () => {
-    it('shows the default binding', () => {
-        expect(fullscreenToggleTitle(null)).toBe('Toggle fullscreen (Ctrl+Up)');
-        expect(fullscreenToggleTitle({} as Config)).toBe('Toggle fullscreen (Ctrl+Up)');
-    });
-
-    it('shows a custom binding formatted', () => {
-        expect(fullscreenToggleTitle({ keyboard_shortcuts: { toggle_fullscreen: 'shift+alt+f' } } as Config)).toBe('Toggle fullscreen (Shift+Alt+F)');
-    });
-
-    it('shows plain text when disabled', () => {
-        expect(fullscreenToggleTitle({ keyboard_shortcuts: { toggle_fullscreen: '' } } as Config)).toBe('Toggle fullscreen');
-    });
-});
-
-describe('openTerminalTitle', () => {
-    it('shows the default binding', () => {
-        expect(openTerminalTitle(null)).toBe('Open terminal (Ctrl+`)');
-        expect(openTerminalTitle({} as Config)).toBe('Open terminal (Ctrl+`)');
-    });
-
-    it('shows a custom binding formatted', () => {
-        expect(openTerminalTitle({ keyboard_shortcuts: { open_terminal: 'alt+shift+t' } } as Config))
-            .toBe('Open terminal (Alt+Shift+T)');
-    });
-
-    it('shows plain text when disabled', () => {
-        expect(openTerminalTitle({ keyboard_shortcuts: { open_terminal: '' } } as Config))
-            .toBe('Open terminal');
+        expect(title(null)).toBe(defaultText);
+        expect(title({} as Config)).toBe(defaultText);
+        expect(title(storedBinding(configKey, custom))).toBe(customText);
+        expect(title(storedBinding(configKey, ''))).toBe(defaultText.replace(/ \(.*\)$/, ''));
     });
 });
 

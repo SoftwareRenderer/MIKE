@@ -1,8 +1,8 @@
-import { test, expect, type Browser, type Page, type Frame } from '@playwright/test';
+import { test, expect, type Page, type Frame } from '@playwright/test';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { createServer, type Server as HttpServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { join } from 'path';
-import { apiGetConfig, createTaskViaApi, csrfFetch, ensureTaskStarted, getTaskData, navigateToTask, storageStatePath } from './helpers';
+import { apiGetConfig, createTaskViaApi, csrfFetch, deleteStored, ensureTaskStarted, getTaskData, navigateToTask, storageStatePath, signedInPage } from './helpers';
 
 // HTML preview extension — end-to-end. Installs the local extension via
 // install-local, then verifies the Preview button (HTML-family only), the
@@ -228,13 +228,6 @@ async function previewTitle(page: Page): Promise<string | null> {
 /** Set in beforeAll: the two lanes are different servers, so the session file is lane-specific. */
 let storageState = '/tmp/kanban-test-storage-state.json';
 
-async function setupPage(browser: Browser) {
-  const context = await browser.newContext({ storageState });
-  const page = await context.newPage();
-  await page.goto('/');
-  return { context, page };
-}
-
 async function installLocal(page: Page): Promise<void> {
   // Local author = on-disk namespace dir (slugified); resolve like the Settings UI.
   const res = await page.evaluate(async () => {
@@ -392,7 +385,7 @@ test.describe.serial('HTML Preview extension', () => {
     writeFileSync(join(FIXTURE_DIR, PAGE3_FILE), PAGE3_FIXTURE);
     writeFileSync(join(FIXTURE_DIR, REFRESH_IN_TREE_FILE), REFRESH_IN_TREE_FIXTURE);
 
-    const { context, page } = await setupPage(browser);
+    const { context, page } = await signedInPage(browser, { storageState });
     try {
       await installLocal(page);
       await expect.poll(() => getHtmlPreviewExtId(page), { timeout: 15000 }).not.toBe('');
@@ -413,7 +406,7 @@ test.describe.serial('HTML Preview extension', () => {
     if (egressServer) await new Promise<void>((resolve) => egressServer.close(() => resolve()));
     try {
       if (extId) {
-        const { context, page } = await setupPage(browser);
+        const { context, page } = await signedInPage(browser, { storageState });
         try {
           await page.evaluate(async (id) => {
             const session = await (await fetch('/api/auth/session')).json();
@@ -600,18 +593,7 @@ test.describe.serial('HTML Preview extension', () => {
     await btn.click();
     await expect(page.locator('.file-editor.active .editor-wrapper')).toBeVisible({ timeout: 10000 });
     const filePath = join(FIXTURE_DIR, PAGE_FILE);
-    await page.evaluate(async (path) => {
-      return new Promise<void>((resolve) => {
-        const req = indexedDB.open('kanban-storage', 3);
-        req.onsuccess = () => {
-          const tx = req.result.transaction('editor-drafts', 'readwrite');
-          tx.objectStore('editor-drafts').delete(path);
-          tx.oncomplete = () => resolve();
-          tx.onerror = () => resolve();
-        };
-        req.onerror = () => resolve();
-      });
-    }, filePath);
+    await deleteStored(page, 'editor-drafts', filePath);
   });
 
   test('external on-disk changes refresh the code view and the preview live', async ({ page }) => {
@@ -956,18 +938,7 @@ test.describe.serial('HTML Preview extension', () => {
     await btn.click();
     await expect(page.locator('.file-editor.active .editor-wrapper')).toBeVisible({ timeout: 10000 });
     const filePath = join(FIXTURE_DIR, PAGE_FILE);
-    await page.evaluate(async (path) => {
-      return new Promise<void>((resolve) => {
-        const req = indexedDB.open('kanban-storage', 3);
-        req.onsuccess = () => {
-          const tx = req.result.transaction('editor-drafts', 'readwrite');
-          tx.objectStore('editor-drafts').delete(path);
-          tx.oncomplete = () => resolve();
-          tx.onerror = () => resolve();
-        };
-        req.onerror = () => resolve();
-      });
-    }, filePath);
+    await deleteStored(page, 'editor-drafts', filePath);
   });
 
   test('task view: on-disk changes (e.g. agent writes) refresh the preview live', async ({ page }) => {

@@ -85,21 +85,16 @@ describe('ChatForm focus notification', () => {
         expect(onInputBlur).not.toHaveBeenCalled();
     });
 
-    it('reports a blur with no element on the other side', () => {
-        const { textarea, onInputBlur } = renderForm();
-
-        fireEvent.blur(textarea, { relatedTarget: null });
-
-        expect(onInputBlur).toHaveBeenCalledTimes(1);
-    });
-
-    it('reports focus that leaves the form', () => {
+    it('reports a leave, whether focus went to a control outside the form or nowhere', () => {
         const { textarea, onInputBlur } = renderForm();
         const outside = document.createElement('button');
         document.body.appendChild(outside);
 
         fireEvent.blur(textarea, { relatedTarget: outside });
+        expect(onInputBlur).toHaveBeenCalledTimes(1);
 
+        onInputBlur.mockClear();
+        fireEvent.blur(textarea, { relatedTarget: null });
         expect(onInputBlur).toHaveBeenCalledTimes(1);
     });
 

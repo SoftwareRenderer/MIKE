@@ -4,6 +4,7 @@ import { writeFileSync } from 'fs';
 import {
   isolatedProject, createTaskViaApi, navigateToTask, csrfFetch, waitForWorktree,
   getWorktreePath, ownProjectId, apiGetJson, stopReading, comeBack, sendTurn, getTaskData,
+  watchTheReturn,
 } from './helpers';
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
@@ -15,44 +16,6 @@ isolatedProject();
  * `docs/reconnection.md → The tab that comes back`.
  */
 
-/** One newest-window read, as the recording holds it: how many digests had been asked when it went out. */
-/** While `__away`, every frame but the keepalive is dropped before the app sees it. While `__unfocused`, the
- * page reports no focus — the window on another desktop, never hidden, so no `visibilitychange` fires. */
-async function watchTheReturn(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    const w = window as any;
-    w.__away = false;
-    w.__unfocused = false;
-    w.__syncCalls = 0;
-    w.__windowReads = [] as number[];
-    Object.defineProperty(document, 'hasFocus', {
-      configurable: true,
-      get: () => () => !w.__unfocused,
-    });
-    const realFetch = window.fetch;
-    window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === 'string' ? input
-        : input instanceof URL ? input.href : (input as Request).url;
-      if (url.includes('/sync')) w.__syncCalls++;
-      if (url.includes('/messages')) w.__windowReads.push(w.__syncCalls);
-      return realFetch(input as any, init);
-    }) as typeof window.fetch;
-    const RealWebSocket = window.WebSocket;
-    window.WebSocket = class extends RealWebSocket {
-      constructor(url: string | URL, protocols?: string | string[]) {
-        super(url, protocols);
-        if (!String(url).includes('/api/stream')) return;
-        this.addEventListener('message', (e: MessageEvent) => {
-          if (!w.__away) return;
-          let frame: any;
-          try { frame = JSON.parse(String(e.data)); } catch { return; }
-          if (frame?.type === 'ping') return;
-          e.stopImmediatePropagation();
-        });
-      }
-    } as typeof WebSocket;
-  });
-}
 
 /** The digest the server holds, read out of band so the test knows the server noticed before the return. */
 async function digest(page: Page, projectId: string, taskId: string) {
@@ -90,8 +53,8 @@ async function comeBackReadingOnly(page: Page, why: () => Promise<string>): Prom
 /** The screen's own recording: how many digests it asked, and when each newest-window read went out. */
 async function recording(page: Page) {
   return page.evaluate(() => ({
-    sync: (window as any).__syncCalls as number,
-    reads: (window as any).__windowReads as number[],
+    sync: (window as any).__sync as number,
+    reads: ((window as any).__revisions as Array<{ afterSync: number }>).map(r => r.afterSync),
   }));
 }
 
@@ -130,11 +93,11 @@ test.describe('the window that comes back', () => {
       .toBe(true);
     const hashWhileAway = (await digest(page, projectId, taskId)).diff.hash;
 
-    const syncBefore = await page.evaluate(() => (window as any).__syncCalls as number);
+    const syncBefore = await page.evaluate(() => (window as any).__sync as number);
     await comeBack(page);
 
     // The digest is what was asked, not the panel guessing from the state it holds.
-    await expect.poll(async () => (await page.evaluate(() => (window as any).__syncCalls as number)) > syncBefore)
+    await expect.poll(async () => (await page.evaluate(() => (window as any).__sync as number)) > syncBefore)
       .toBe(true);
     await expect(page.locator('.diff-file-section', { hasText: awayName }).first()).toBeVisible({ timeout: 20_000 });
     // The file the reader was in is still drawn where they left it.

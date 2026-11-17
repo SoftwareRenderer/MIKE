@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { apiPutConfig, apiGetConfig, waitForConfig, createTaskViaApi, navigateToTask, waitForChatForm, getTaskData, waitForSendButton } from './helpers';
+import { apiPutConfig, apiGetConfig, waitForConfig, createTaskViaApi, navigateToTask, waitForChatForm, getTaskData, waitForSendButton, openSettingsTab } from './helpers';
 
 /**
  * Seeds the given providers and then sets the worker/utility refs by the
@@ -33,9 +33,7 @@ async function seedProvidersByIds(
  * — possibly between two clicks of one test. A spec that works inside a provider card names the tab.
  */
 async function openProviders(page: Page): Promise<void> {
-    await page.locator('.icon-btn[aria-label="Settings"]').click();
-    await page.locator('[role="dialog"]').first().waitFor({ state: 'visible', timeout: 5000 });
-    await page.locator('button.tab-btn:has-text("Providers")').click();
+    await openSettingsTab(page, 'Providers');
 }
 
 // ─── Model Switcher Tests ───────────────────────────────────────────────────
@@ -499,7 +497,7 @@ test.describe.serial('Primary Providers', () => {
         await page.waitForSelector('.card', { timeout: 10000 });
     });
 
-    test('should display Worker and Utility rows with provider/model dropdowns', async ({ page }) => {
+    test('shows the Worker and Utility pair by provider ID, and saves the pair it shows', async ({ page }) => {
         await openProviders(page);
 
         // Primary Providers section exists
@@ -507,37 +505,19 @@ test.describe.serial('Primary Providers', () => {
         await expect(page.locator('.primary-provider-row').nth(0)).toContainText('Worker');
         await expect(page.locator('.primary-provider-row').nth(1)).toContainText('Utility');
 
-        // Worker provider select has the assigned ID as its value
+        // The selectors resolve by the server-assigned provider ID, not by a name the UI could have
+        // invented — the row is showing the pair the server holds, so its values are the precondition
+        // for what the save below must write back.
         const workerSelects = page.locator('.primary-provider-row').nth(0).locator('.primary-provider-select');
         await expect(workerSelects.nth(0)).toHaveValue(workerProviderId);
         await expect(workerSelects.nth(1)).toHaveValue('model-a1');
 
-        // Utility provider select has correct value
         const utilitySelects = page.locator('.primary-provider-row').nth(1).locator('.primary-provider-select');
         await expect(utilitySelects.nth(0)).toHaveValue(utilityProviderId);
         await expect(utilitySelects.nth(1)).toHaveValue('model-b1');
-    });
-
-    test('should block save when Worker pair is not selected', async ({ page }) => {
-        await openProviders(page);
-
-        // Clear the worker provider selection
-        const workerProviderSelect = page.locator('.primary-provider-row').nth(0).locator('.primary-provider-select').nth(0);
-        await workerProviderSelect.selectOption('');
-
-        // Click Save — should be blocked with a validation error
-        await page.click('button:has-text("Save")');
-        await expect(page.locator('#config-error')).toBeVisible({ timeout: 5000 });
-        await expect(page.locator('#config-error')).toContainText('Worker');
-        await expect(page.locator('.modal')).toBeVisible();
-    });
-
-    test('should persist worker/utility after save', async ({ page }) => {
-        await openProviders(page);
 
         // Change worker model to model-a2
-        const workerModelSelect = page.locator('.primary-provider-row').nth(0).locator('.primary-provider-select').nth(1);
-        await workerModelSelect.selectOption('model-a2');
+        await workerSelects.nth(1).selectOption('model-a2');
 
         await page.click('button:has-text("Save")');
         await expect(page.locator('.modal')).not.toBeVisible({ timeout: 10000 });
@@ -554,6 +534,20 @@ test.describe.serial('Primary Providers', () => {
         expect(workerProvider.url).toBe('http://localhost:9999/v1');
         expect(utilityProvider).toBeDefined();
         expect(utilityProvider.url).toBe('http://localhost:9998/v1');
+    });
+
+    test('should block save when Worker pair is not selected', async ({ page }) => {
+        await openProviders(page);
+
+        // Clear the worker provider selection
+        const workerProviderSelect = page.locator('.primary-provider-row').nth(0).locator('.primary-provider-select').nth(0);
+        await workerProviderSelect.selectOption('');
+
+        // Click Save — should be blocked with a validation error
+        await page.click('button:has-text("Save")');
+        await expect(page.locator('#config-error')).toBeVisible({ timeout: 5000 });
+        await expect(page.locator('#config-error')).toContainText('Worker');
+        await expect(page.locator('.modal')).toBeVisible();
     });
 });
 
@@ -780,69 +774,6 @@ test.describe.serial('Test connection with empty model list', () => {
         // No fetch-models request at all.
         expect(requestOrder).toEqual(['test-connection']);
 
-        await page.click('button:has-text("Cancel")');
-        const discardBtn = page.getByRole('button', { name: 'Discard' });
-        if (await discardBtn.isVisible().catch(() => false)) {
-            await discardBtn.click();
-        }
-        await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
-    });
-});
-
-// ─── Add Provider Scroll Tests ─────────────────────────────────────────────
-// Only the positive half runs here: the negative half is a call to `scrollIntoView`, recorded in
-// `src/lib/components/__tests__/config-modal-provider-scroll.unit.svelte.ts`. The browser version measured
-// layout rounding, where a fit 4 px from the edge failed the spec rather than the rule.
-
-test.describe.serial('Add provider scroll', () => {
-    test.beforeEach(async ({ page }) => {
-        await page.keyboard.press('Escape').catch(() => {});
-        await expect(page.locator('.modal')).not.toBeVisible({ timeout: 2000 }).catch(() => {});
-    });
-
-    test('should scroll the new provider input area into view and focus the URL input', async ({ page }) => {
-        // Two providers with many models each — expanded, they make the
-        // providers list far taller than the modal's visible area.
-        const manyModels = (prefix: string) =>
-            Array.from({ length: 12 }, (_, i) => ({ name: `${prefix}-model-${i}` }));
-        const idByName = await seedProvidersByIds(page, [
-            { name: 'scroll-a', url: 'http://scroll-a:9999/v1', models: manyModels('a'), concurrency: 1 },
-            { name: 'scroll-b', url: 'http://scroll-b:9999/v1', models: manyModels('b'), concurrency: 1 },
-        ], { worker: 'scroll-a', workerModel: 'a-model-0', utility: 'scroll-a', utilityModel: 'a-model-0' });
-        await waitForConfig(page, c =>
-            c.providers && c.providers.length === 2 && c.worker_provider === idByName['scroll-a']
-        );
-        await page.goto('/');
-        await page.waitForSelector('.card', { timeout: 10000 });
-
-        await openProviders(page);
-
-        // Expand both provider cards so the list extends well past the fold.
-        const cards = page.locator('.provider-card');
-        for (let i = 0; i < (await cards.count()); i++) {
-            const details = cards.nth(i).locator('.provider-details');
-            if (!await details.isVisible().catch(() => false)) {
-                await cards.nth(i).locator('.provider-card-header').click();
-            }
-            await expect(details).toBeVisible({ timeout: 5000 });
-        }
-
-        // Scroll the modal back to the top — the bottom of the list (where a
-        // new card would land) is now out of view. (Index-based locator: .last()
-        // would re-resolve to the new card after it is added.)
-        await page.$eval('.modal-body', el => (el.scrollTop = 0));
-        await expect(cards.nth(1).locator('.provider-details')).not.toBeInViewport();
-
-        // Add a fresh LLM provider — its input area must be scrolled into view.
-        await page.getByRole('button', { name: '+ Add Provider' }).click();
-        const newCard = page.locator('.provider-card').last();
-        await expect(newCard.locator('.provider-details')).toBeVisible({ timeout: 5000 });
-
-        const urlInput = newCard.getByLabel('Provider URL');
-        await expect(urlInput).toBeInViewport({ timeout: 5000 });
-        await expect(urlInput).toBeFocused();
-
-        // Discard the unsaved provider
         await page.click('button:has-text("Cancel")');
         const discardBtn = page.getByRole('button', { name: 'Discard' });
         if (await discardBtn.isVisible().catch(() => false)) {

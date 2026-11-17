@@ -1,10 +1,10 @@
-import { test, expect, type Browser, type BrowserContext, type Page, type Frame } from '@playwright/test';
+import { test, expect, type Page, type Frame } from '@playwright/test';
 import { mkdirSync, rmSync, rmdirSync, writeFileSync } from 'node:fs';
 import { createServer, type Server as HttpServer } from 'node:http';
 import { execSync } from 'node:child_process';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
-import { csrfFetch } from './helpers';
+import { csrfFetch, signedInPage } from './helpers';
 
 // Extension-frame channel security — end-to-end.
 //
@@ -197,13 +197,6 @@ function writeFixtureExtension(mode: 'stay' | 'sibling' | 'cross-origin' | 'nest
 const BASE_URL = 'https://localhost:3001';
 const STORAGE_STATE = '/tmp/kanban-test-storage-state.json.isolated';
 
-async function setupPage(browser: Browser): Promise<{ context: BrowserContext; page: Page }> {
-  const context = await browser.newContext({ storageState: STORAGE_STATE, baseURL: BASE_URL });
-  const page = await context.newPage();
-  await page.goto('/');
-  return { context, page };
-}
-
 /** install-local the fixture (SSE response — the fetch resolves when it ends). */
 async function installFixture(page: Page): Promise<void> {
   const res = await page.evaluate(async ({ author, name }) => {
@@ -319,7 +312,7 @@ test.describe.serial('Extension frame channel (document identity)', () => {
     await new Promise<void>((r) => payloadServer.listen(0, '127.0.0.1', r));
     payloadBase = `http://127.0.0.1:${(payloadServer.address() as { port: number }).port}`;
 
-    const { context, page } = await setupPage(browser);
+    const { context, page } = await signedInPage(browser, { storageState: STORAGE_STATE, baseURL: BASE_URL });
     try {
       const res = await csrfFetch(page, '/api/projects', { method: 'POST', body: { path: REPO } });
       if (!res.ok) throw new Error(`create project failed (${res.status})`);
@@ -329,7 +322,7 @@ test.describe.serial('Extension frame channel (document identity)', () => {
   });
 
   test.afterAll(async ({ browser }) => {
-    const { context, page } = await setupPage(browser);
+    const { context, page } = await signedInPage(browser, { storageState: STORAGE_STATE, baseURL: BASE_URL });
     try {
       if (!extId) extId = await getFixtureExtId(page);
       if (extId) await csrfFetch(page, `/api/extensions/${extId}`, { method: 'DELETE' });
@@ -350,7 +343,7 @@ test.describe.serial('Extension frame channel (document identity)', () => {
 
   test('the mounted document handshakes and receives init', async ({ page, browser }) => {
     writeFixtureExtension('stay');
-    const setup = await setupPage(browser);
+    const setup = await signedInPage(browser, { storageState: STORAGE_STATE, baseURL: BASE_URL });
     // Install + configure on a page of our own, then load the app fresh.
     await installFixture(setup.page);
     extId = await getFixtureExtId(setup.page);
@@ -474,7 +467,7 @@ test.describe.serial('Extension frame channel (document identity)', () => {
   test('an extension document visited outside the host\'s frame cannot reach the session', async ({ browser }) => {
     // An extension entry is also a plain URL on this origin, reachable outside the frame
     // the host mounts. docs/ui-extensions.md.
-    const { context, page } = await setupPage(browser);
+    const { context, page } = await signedInPage(browser, { storageState: STORAGE_STATE, baseURL: BASE_URL });
     try {
       // Rewrite the fixture so this test does not depend on the previous one's files.
       writeFixtureExtension('stay');

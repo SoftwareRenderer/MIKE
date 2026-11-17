@@ -1,8 +1,7 @@
-import { test, expect, type Browser, type Page } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
-import { execSync } from 'node:child_process';
 import { join } from 'path';
-import { csrfFetch, selectProject } from './helpers';
+import { csrfFetch, gitIn, openChangesPanel, signedInPage } from './helpers';
 
 // Uses a dedicated repo and project (/tmp/kanban-test-repo-discard) instead of the shared
 // kanban-test-repo: a discard rewrites the working tree, and other specs read that one.
@@ -10,34 +9,11 @@ import { csrfFetch, selectProject } from './helpers';
 const REPO = '/tmp/kanban-test-repo-discard';
 const COMMITTED = 'committed by the fixture\n';
 
-function git(dir: string, args: string) {
-    execSync(`git ${args}`, { cwd: dir, stdio: 'pipe' });
-}
-
 function resetWorktree() {
-    git(REPO, 'checkout -- .');
-    git(REPO, 'clean -fdq');
+    gitIn(REPO, 'checkout -- .');
+    gitIn(REPO, 'clean -fdq');
     writeFileSync(join(REPO, 'tracked.txt'), 'edited by the spec\n');
     writeFileSync(join(REPO, 'scratch.txt'), 'never committed\n');
-}
-
-async function setupPage(browser: Browser) {
-    const context = await browser.newContext({
-        storageState: '/tmp/kanban-test-storage-state.json',
-    });
-    const page = await context.newPage();
-    await page.goto('/');
-    return { context, page };
-}
-
-async function openChangesPanel(page: Page, projectId: string) {
-    await page.goto('/');
-    await selectProject(page, projectId);
-    await page.waitForSelector('.top-bar', { timeout: 10000 });
-    await page.locator('.explorer-btn').click();
-    await expect(page.locator('.explorer-view')).toBeVisible({ timeout: 10000 });
-    await page.locator('.git-status-btn').click();
-    await expect(page.locator('.panel-title:has-text("Changes")')).toBeVisible({ timeout: 10000 });
 }
 
 async function clickDiscard(page: Page, file: string) {
@@ -57,15 +33,15 @@ test.describe.serial('Review Changes: discard', () => {
     test.beforeAll(async ({ browser }) => {
         rmSync(REPO, { recursive: true, force: true });
         mkdirSync(REPO, { recursive: true });
-        git(REPO, 'init');
-        git(REPO, 'config user.email "test@kanban.local"');
-        git(REPO, 'config user.name "Test"');
+        gitIn(REPO, 'init');
+        gitIn(REPO, 'config user.email "test@kanban.local"');
+        gitIn(REPO, 'config user.name "Test"');
         writeFileSync(join(REPO, 'tracked.txt'), COMMITTED);
-        git(REPO, 'add tracked.txt');
-        git(REPO, 'commit -m "discard fixture"');
+        gitIn(REPO, 'add tracked.txt');
+        gitIn(REPO, 'commit -m "discard fixture"');
         resetWorktree();
 
-        const { context, page } = await setupPage(browser);
+        const { context, page } = await signedInPage(browser);
         try {
             const res = await csrfFetch(page, '/api/projects', { method: 'POST', body: { path: REPO } });
             if (!res.ok) throw new Error(`create discard project: ${JSON.stringify(res.data)}`);
@@ -76,7 +52,7 @@ test.describe.serial('Review Changes: discard', () => {
     });
 
     test.afterAll(async ({ browser }) => {
-        const { context, page } = await setupPage(browser);
+        const { context, page } = await signedInPage(browser);
         try {
             if (projectId) {
                 await csrfFetch(page, `/api/projects/${projectId}`, { method: 'DELETE' });

@@ -5,7 +5,7 @@ import FileBrowserView from '$lib/components/FileBrowserView.svelte';
 /**
  * The listing draws every row the server sent and dims the ones git excludes. `.git` never arrives to be
  * dropped — the server unlists it (`handler_fs_gitdir_test.go`); the add-project picker hides names by
- * design in `file-browser-hidden-files.unit.svelte.ts`.
+ * design in `file-browser-picker.unit.svelte.ts`.
  */
 
 const ROOT = '/home/sandbox/worktrees/fs-dots';

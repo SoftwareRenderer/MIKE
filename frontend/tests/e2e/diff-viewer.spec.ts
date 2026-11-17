@@ -3,7 +3,8 @@ import { execSync } from 'child_process';
 import { writeFileSync, unlinkSync, rmSync } from 'fs';
 import { join } from 'path';
 import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch, ensureTaskStarted, getWorktreePath,
-  waitForWorktree, isolatedProject, gotoProject, apiGetJson, sendTurn, messageRows } from './helpers';
+  waitForWorktree, isolatedProject, gotoProject, apiGetJson, sendTurn, messageRows,
+  projectDirPath, selectProject, writeFileInWorktree, writeStored } from './helpers';
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
 isolatedProject();
@@ -30,19 +31,7 @@ async function expectNarrowDiffColumn(page: Page): Promise<void> {
  * boot, so a spec that wants the other answer seeds it and reloads.
  */
 async function seedAutoMaximizeCodeViewer(page: Page, enabled: boolean): Promise<void> {
-    await page.evaluate(async ([key, value]: [string, boolean]) => {
-        const db = await new Promise<IDBDatabase>((resolve, reject) => {
-            const rq = indexedDB.open('kanban-storage');
-            rq.onsuccess = () => resolve(rq.result);
-            rq.onerror = () => reject(rq.error);
-        });
-        await new Promise<void>((resolve, reject) => {
-            const tx = db.transaction('app-settings', 'readwrite');
-            tx.objectStore('app-settings').put(value, key);
-            tx.oncomplete = () => resolve();
-            tx.onerror = () => reject(tx.error);
-        });
-    }, ['auto-maximize-code-viewer', enabled]);
+    await writeStored(page, 'app-settings', 'auto-maximize-code-viewer', enabled);
 }
 
 
@@ -139,10 +128,11 @@ async function deleteLastUserMessage(page: Page, projectId: string, taskId: stri
     const deleteBtn = userMessages.nth(await userMessages.count() - 1).locator('[aria-label="Delete message and all following messages"]');
     await expect(deleteBtn).toBeVisible({ timeout: 10000 });
     await deleteBtn.click();
-    // Global confirmation dialog (BaseModal) — not the editor's .confirm-dialog
-    const confirmDialog = page.locator('[role="dialog"]');
+    // Global confirmation dialog (BaseModal) — not the editor's .confirm-dialog. `[role="dialog"]`
+    // alone is never unique here, so the dialog is picked out by the message only a confirmation draws.
+    const confirmDialog = page.locator('[role="dialog"]').filter({ has: page.locator('.confirm-message') });
     await expect(confirmDialog).toBeVisible({ timeout: 5000 });
-    await page.click('[role="dialog"] .btn-confirm');
+    await confirmDialog.locator('.btn-confirm').click();
     await expect(confirmDialog).not.toBeVisible({ timeout: 5000 });
     await expect.poll(async () =>
         (await messageRows(page, projectId, taskId)).some(r => r.id === doomed), { timeout: 15000 }).toBe(false);
@@ -163,15 +153,9 @@ async function gitWithRetry(worktreePath: string, cmd: string, attempts = 6): Pr
 }
 
 // --- Thread-switch utilities ---
-// (getWorktreePath / worktreeExists come from ./helpers — the path is
+// (getWorktreePath / worktreeExists / writeFileInWorktree come from ./helpers — the path is
 //  /tmp/kanban-test-worktrees/<projectId>/<taskId>, matching the backend's
 //  worktreesDir/projectID/taskID layout.)
-
-function writeFileInWorktree(projectId: string, taskId: string, filePath: string, content: string) {
-    const worktreePath = getWorktreePath(projectId, taskId);
-    execSync(`mkdir -p ${worktreePath}`);
-    execSync(`echo "${content}" > ${worktreePath}/${filePath}`);
-}
 
 /**
  * Poll the diff API until the file appears, then re-navigate until the panel shows it. The panel
@@ -527,7 +511,7 @@ test.describe.serial('Diff panel user interactions', () => {
         const mainThreadId = threadsResult[0]?.id;
         expect(mainThreadId, `the task has no main thread: ${JSON.stringify(threadsResult)}`).toBeTruthy();
 
-        writeFileInWorktree(projectId, taskId, 'file-a.txt', 'hello friend');
+        writeFileInWorktree(projectId, taskId, 'file-a.txt', 'hello friend\n', { stage: false });
         await waitForDiffFile(page, projectId, taskId, 'file-a.txt');
 
         const msgResult = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/messages`, {
@@ -546,7 +530,7 @@ test.describe.serial('Diff panel user interactions', () => {
         const forkThreadId = forkResult.data?.id;
         expect(forkThreadId, 'the fork route accepted the fork and returned no thread id').toBeTruthy();
 
-        writeFileInWorktree(projectId, taskId, 'file-b.txt', 'hello choom');
+        writeFileInWorktree(projectId, taskId, 'file-b.txt', 'hello choom\n', { stage: false });
         await waitForDiffFile(page, projectId, taskId, 'file-b.txt');
 
         // Round-trip switches (matches backend TestThreadSwitchWorktreeContent)
@@ -889,6 +873,71 @@ test.describe.serial('Diff panel tab rendering', () => {
             expect(parseFloat(tabSize)).toBe(4);
         } finally {
             try { unlinkSync(filePath); } catch { /* ignore */ }
+        }
+    });
+});
+// --- The same rule on the other panel -------------------------------------------------------------
+//
+// A `.diff-row-clickable` opens the editor at the row's line whichever panel drew it: the task's diff
+// column asks it above, the project's Review Changes panel asks it here. One rule, one file
+// (`docs/api-contract.md → Diffs`); the row's identity and where a click lands are held by
+// `diff-row-text.unit.svelte.ts` and `diff-row-keyboard.unit.svelte.ts`.
+
+test.describe('The Review Changes panel opens the editor at the clicked row', () => {
+    test.beforeEach(async ({ page }) => {
+        test.setTimeout(60000);
+        await gotoProject(page);
+        await page.waitForSelector('.project-item', { timeout: 10000 });
+    });
+
+    test('a staged row opens its file with the caret below the top of the file', async ({ page }) => {
+        const projectId = await getProjectId(page);
+        // Review Changes reads the PROJECT directory, not a task worktree — see projectDirPath().
+        const projectDir = await projectDirPath(page, projectId);
+        const testFile = `diff-line-click-${Date.now()}.txt`;
+        const filePath = join(projectDir, testFile);
+        writeFileSync(filePath, Array.from({ length: 20 }, (_, i) => `Line ${i + 1}: content here`).join('\n') + '\n');
+        // An UNTRACKED file is listed with no line-by-line diff, so a clickable row needs a staged change.
+        execSync(`git -C ${JSON.stringify(projectDir)} add -- ${JSON.stringify(testFile)}`);
+
+        try {
+            // `.project-item` + `.first()` would select another worker's project, and this test reads the
+            // directory it clicked into.
+            await selectProject(page, projectId);
+            await page.waitForSelector('.top-bar', { timeout: 10000 });
+            await page.locator('.explorer-btn').click();
+            await expect(page.locator('.explorer-view')).toBeVisible({ timeout: 10000 });
+
+            await page.locator('.git-status-btn').click();
+            await expect(page.locator('.panel-title')).toHaveText('Changes', { timeout: 10000 });
+
+            // The Changes panel lists FILES; the diff and its clickable rows render only for the selected
+            // one — asserting on `.diff-row` before this point asserted nothing.
+            const fileRow = page.locator('.changes-file-row', { hasText: testFile });
+            await expect(fileRow).toBeVisible({ timeout: 10000 });
+            await fileRow.click();
+            const clickableRows = page.locator('.diff-row-clickable');
+            await expect(clickableRows.first()).toBeVisible({ timeout: 10000 });
+
+            const rowCount = await clickableRows.count();
+            await clickableRows.nth(Math.min(5, rowCount - 1)).click();
+
+            // The panel closes and the file opens, named by its own tab and loaded into CodeMirror.
+            await expect(page.locator('.branch-editor')).toBeVisible({ timeout: 10000 });
+            await expect(page.locator('.editor-tab-name')).toContainText(testFile);
+            await expect(page.locator('.cm-editor')).toBeVisible({ timeout: 5000 });
+
+            // The caret sits on the clicked row, not on line 1. Tabs keep their editor instances, so read
+            // the first active gutter rather than assuming one mounted editor.
+            const activeLineGutter = page.locator('.cm-activeLineGutter').first();
+            await expect(activeLineGutter).toBeVisible({ timeout: 5000 });
+            const lineNum = parseInt(((await activeLineGutter.textContent()) ?? '').trim(), 10);
+            expect(lineNum, 'the editor opened at the top of the file, not at the clicked row')
+                .toBeGreaterThan(1);
+        } finally {
+            rmSync(filePath, { force: true });
+            execSync(`git -C ${JSON.stringify(projectDir)} reset -q -- ${JSON.stringify(testFile)}`,
+                { stdio: 'ignore' });
         }
     });
 });

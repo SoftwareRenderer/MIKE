@@ -3,6 +3,7 @@ import {
   isolatedProject, createTaskViaApi, navigateToTask, waitForChatForm,
   waitForTaskState, getProjectId, gotoProject, runHasEnded, stopReading, comeBack,
   PENDING_TOOL_STATUS as PENDING, TOOL_CALL_CARD as CARD, SLOW_PROBE_OUTPUT as OUTPUT,
+  watchTheReturn,
 } from './helpers';
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
@@ -18,72 +19,10 @@ isolatedProject();
 const TRANSCRIPT = '.chat-content';
 const ANSWER = 'The command completed successfully';
 
-/**
- * While `window.__unfocused` the page reports no focus; while `window.__away` every frame but the keepalive
- * is dropped before the app sees it, because a listener added in the wrapped constructor runs before the app
- * assigns `onmessage`. The `If-None-Match` recorded here is the one the app itself passed — a browser
- * revalidating its own HTTP cache sends that header too.
- */
-async function watchTheReturn(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    const w = window as any;
-    w.__away = false;
-    w.__unfocused = false;
-    w.__swallowed = 0;
-    w.__signals = { visibilitychange: 0, focus: 0, pageshow: 0 };
-    w.__revisions = [] as Array<string | null>;
-    w.__sync = 0;
-    w.__mutations = 0;
-    w.__observer = null as MutationObserver | null;
-    for (const type of Object.keys(w.__signals)) {
-      window.addEventListener(type, () => { w.__signals[type]++; });
-    }
-    Object.defineProperty(document, 'hasFocus', {
-      configurable: true,
-      get: () => () => !w.__unfocused,
-    });
-    const realFetch = window.fetch;
-    window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === 'string' ? input
-        : input instanceof URL ? input.href : (input as Request).url;
-      if (url.includes('/sync')) w.__sync++;
-      if (url.includes('/messages')) {
-        w.__revisions.push(new Headers(init?.headers).get('If-None-Match'));
-      }
-      return realFetch(input as any, init);
-    }) as typeof window.fetch;
-    /** Count DOM changes inside the transcript. */
-    w.__watchTranscript = () => {
-      const target = document.querySelector('.chat-content');
-      if (!target) return false;
-      w.__observer?.disconnect();
-      w.__observer = new MutationObserver((records) => { w.__mutations += records.length; });
-      w.__observer.observe(target, { childList: true, subtree: true, characterData: true });
-      w.__mutations = 0;
-      return true;
-    };
-    const RealWebSocket = window.WebSocket;
-    window.WebSocket = class extends RealWebSocket {
-      constructor(url: string | URL, protocols?: string | string[]) {
-        super(url, protocols);
-        if (!String(url).includes('/api/stream')) return;
-        this.addEventListener('message', (e: MessageEvent) => {
-          if (!w.__away) return;
-          let frame: any;
-          try { frame = JSON.parse(String(e.data)); } catch { return; }
-          if (frame?.type === 'ping') return; // the keepalive is not content: the socket stays live
-          w.__swallowed++;
-          e.stopImmediatePropagation();
-        });
-      }
-    };
-  });
-}
-
 const seen = (page: Page) => page.evaluate(() => ({
   swallowed: (window as any).__swallowed as number,
   signals: (window as any).__signals as Record<string, number>,
-  revisions: (window as any).__revisions as Array<string | null>,
+  revisions: ((window as any).__revisions as Array<{ baseline: string | null }>).map(r => r.baseline),
   sync: (window as any).__sync as number,
   mutations: (window as any).__mutations as number,
 }));
