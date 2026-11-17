@@ -104,8 +104,8 @@ meant to catch them. The glob is one path segment wide, the shape this repo writ
 read as an orphan. Both task forms carry the same random tail, and the slug-named one appears only for a
 title a model wrote.
 
-**Tests:** `backend/git/worktree_removal_test.go` (the three-part removal, the decorated orphan,
-live branches kept), `backend/git/branch_listing_test.go` (both markers, slug prefix, one segment),
+**Tests:** `backend/git/worktree_layout_test.go` (the three-part removal, the decorated orphan,
+live branches kept), `backend/git/branches_test.go` (both markers, slug prefix, one segment),
 `backend/server/task_delete_branches_test.go` (single delete, Clear-all, fork thread branch).
 
 ## Submodules: share the person's copy, never re-fetch
@@ -189,11 +189,10 @@ unpopulated store, the stale-commit fetch, idempotence, and the prune.
   git's phrasing does not tell them apart. What a caller does with it is
   `docs/commit-and-done.md → Commit and Move to Done` — the merge paths finish the task on it, which is why the git layer states
   it separately instead of returning one error for the bracket.
-- Tests: `backend/git/stash_identity_test.go`, `push_stash_test.go`, `stash_bracket_test.go`,
-  `stash_restore_conflict_test.go`, `backend/exec/sync_merge_test.go`
-  (`…_KeepsUnstagedWorkWhenTheStashFails` — its stash-ref injection is
-  used instead of an index lock because a locked index blocks the forced checkout too, so the loss never
-  happens and the test passes vacuously).
+- Tests: `backend/git/stash_identity_test.go` (identity, the staged split, the conflicted restore),
+  `push_stash_test.go`, `stash_bracket_test.go`, `backend/exec/sync_merge_test.go`.
+  The last uses its stash-ref injection instead of an index lock: a locked index blocks the forced
+  checkout too, so the loss never happens and the test passes vacuously.
 
 ## A git write names every path it moved
 

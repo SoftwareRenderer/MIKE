@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -166,20 +167,22 @@ func TestUntrackedReadTargetHandsBackTheFileItChecked(t *testing.T) {
 	}
 }
 
-func TestWalkUntrackedEntriesDoesNotDescendLinks(t *testing.T) {
+// git status lists a directory entry (`?? sub/`) and a link the way it lists a file, so the expansion
+// below it decides what the diff reads: a real tree is listed down to its files, by worktree-relative
+// slash paths, and a link is listed as nothing at all — Lstat, not Stat, keeps a link out of both
+// branches, which is what stops the walk enumerating or reading a tree the worktree does not own.
+func TestWalkUntrackedEntriesExpandsRealTreesAndNeverLinks(t *testing.T) {
 	wm, taskID, worktreePath, _ := worktreeWithSecretLink(t)
 	_ = wm
 	_ = taskID
 
-	if got := walkUntrackedEntries(worktreePath, "key"); got != nil {
-		t.Errorf("a symlink to a file was expanded into %v", got)
+	if err := os.MkdirAll(filepath.Join(worktreePath, "sub", "nested"), 0o700); err != nil {
+		t.Fatal(err)
 	}
-	if got := walkUntrackedEntries(worktreePath, "notes.txt"); len(got) != 1 || got[0] != "notes.txt" {
-		t.Errorf("ordinary file expanded to %v, want [notes.txt]", got)
-	}
+	writeFile(t, filepath.Join(worktreePath, "sub"), "file1.txt", "content1")
+	writeFile(t, filepath.Join(worktreePath, "sub", "nested"), "file2.txt", "content2")
 
-	// A directory reachable only through a link is not walked either: that would enumerate a
-	// tree the worktree does not own.
+	// A directory reachable only through a link is not walked either.
 	outside := filepath.Join(filepath.Dir(worktreePath), "outside-dir")
 	if err := os.MkdirAll(outside, 0o700); err != nil {
 		t.Fatal(err)
@@ -190,7 +193,21 @@ func TestWalkUntrackedEntriesDoesNotDescendLinks(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(worktreePath, "link-dir")); err != nil {
 		t.Fatal(err)
 	}
-	if got := walkUntrackedEntries(worktreePath, "link-dir"); got != nil {
-		t.Errorf("a symlink to a directory was walked into: %v", got)
+
+	for _, tc := range []struct {
+		name string
+		want []string
+	}{
+		{"notes.txt", []string{"notes.txt"}},
+		{"sub", []string{"sub/file1.txt", "sub/nested/file2.txt"}},
+		{"key", nil},
+		{"inside-link.txt", nil},
+		{"link-dir", nil},
+	} {
+		got := walkUntrackedEntries(worktreePath, tc.name)
+		slices.Sort(got)
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("walkUntrackedEntries(%q) = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }

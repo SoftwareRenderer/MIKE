@@ -32,45 +32,6 @@ func makeCloneSource(t *testing.T, path string, commits int) {
 	}
 }
 
-func TestClone(t *testing.T) {
-	tmp := t.TempDir()
-	srcDir := filepath.Join(tmp, "source")
-	makeCloneSource(t, srcDir, 20)
-	// Use a file:// URL: cloning a plain local path uses git's hardlink
-	// optimization (no pack transfer, no progress output), while file://
-	// goes through the normal upload-pack protocol.
-	src := "file://" + srcDir
-	dst := filepath.Join(tmp, "workspace", "source")
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		t.Fatalf("mkdir workspace: %v", err)
-	}
-
-	var events []int
-	out, err := CloneContext(context.Background(), src, dst, func(pct int) {
-		events = append(events, pct)
-	})
-	if err != nil {
-		t.Fatalf("Clone: %v (output: %s)", err, out)
-	}
-	if !IsGitRepo(dst) {
-		t.Fatal("clone target is not a git repository")
-	}
-	if len(events) == 0 {
-		t.Fatalf("no progress events reported (output: %q)", out)
-	}
-	for i, pct := range events {
-		if pct < 0 || pct > 100 {
-			t.Fatalf("progress out of range: %d", pct)
-		}
-		if i > 0 && pct <= events[i-1] {
-			t.Fatalf("progress not strictly increasing: %v", events)
-		}
-	}
-	if events[len(events)-1] != 100 {
-		t.Fatalf("final progress = %d, want 100 (events: %v)", events[len(events)-1], events)
-	}
-}
-
 // TestCloneArgs verifies the argv used for every clone: the transport lockdown
 // (-c protocol.ext.allow=never) must come BEFORE the `clone` subcommand, so the
 // process that parses the client-supplied URL is the one that carries it.
@@ -108,6 +69,72 @@ func TestCloneArgs(t *testing.T) {
 	}
 }
 
+// A clone answers in two shapes, and each is a caller the other breaks: a watched clone streams
+// `Receiving objects` percentages that must arrive in order and end at 100, and an unwatched clone
+// (a local path, hardlinked, emitting no progress at all) must not be handed a callback that never
+// fires nor one that panics. Both must leave a repository behind.
+func TestCloneAnswersWatchedAndUnwatchedCallers(t *testing.T) {
+	tmp := t.TempDir()
+	// A file:// URL goes through the normal upload-pack protocol, so git emits progress lines;
+	// a plain local path uses git's hardlink optimization and emits none — the two shapes.
+	srcDir := filepath.Join(tmp, "source")
+	makeCloneSource(t, srcDir, 20)
+
+	for _, tc := range []struct {
+		name    string
+		src     func(t *testing.T) string
+		watched bool
+	}{
+		{"watched over file://", func(*testing.T) string { return "file://" + srcDir }, true},
+		{
+			"unwatched from a local path",
+			func(t *testing.T) string {
+				local := filepath.Join(t.TempDir(), "hardlinked-source")
+				makeCloneSource(t, local, 3)
+				return local
+			},
+			false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dst := filepath.Join(tmp, "workspace", tc.name)
+			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+				t.Fatalf("mkdir workspace: %v", err)
+			}
+
+			var events []int
+			progress := func(pct int) { events = append(events, pct) }
+			if !tc.watched {
+				progress = nil
+			}
+			out, err := CloneContext(context.Background(), tc.src(t), dst, progress)
+			if err != nil {
+				t.Fatalf("clone: %v (output: %s)", err, out)
+			}
+			if !IsGitRepo(dst) {
+				t.Fatal("clone target is not a git repository")
+			}
+			if !tc.watched {
+				return
+			}
+			if len(events) == 0 {
+				t.Fatalf("no progress events reported (output: %q)", out)
+			}
+			for i, pct := range events {
+				if pct < 0 || pct > 100 {
+					t.Fatalf("progress out of range: %d", pct)
+				}
+				if i > 0 && pct <= events[i-1] {
+					t.Fatalf("progress not strictly increasing: %v", events)
+				}
+			}
+			if events[len(events)-1] != 100 {
+				t.Fatalf("final progress = %d, want 100 (events: %v)", events[len(events)-1], events)
+			}
+		})
+	}
+}
+
 // TestCloneEnv verifies the clone environment: no interactive credential prompt,
 // plus an explicit transport allowlist so helper transports (ext:, fd:, …) are
 // refused even on a host whose git config enables them.
@@ -117,11 +144,10 @@ func TestCloneEnv(t *testing.T) {
 	if !slices.Contains(env, "GIT_TERMINAL_PROMPT=0") {
 		t.Errorf("GIT_TERMINAL_PROMPT=0 missing from clone env: %v", env)
 	}
-	want := "GIT_ALLOW_PROTOCOL=" + strings.Join(CloneAllowedProtocols, ":")
-	if !slices.Contains(env, want) {
-		t.Errorf("%s missing from clone env: %v", want, env)
-	}
 	if !slices.Contains(env, "GIT_ALLOW_PROTOCOL=http:https:git:ssh:file") {
+		// The list is written out, not rebuilt from CloneAllowedProtocols: the same constant
+		// proves nothing about itself, and a helper transport reaching this string is the
+		// failure this function exists to catch.
 		t.Errorf("GIT_ALLOW_PROTOCOL must be exactly http:https:git:ssh:file, got %v", env)
 	}
 	// The allowlist must not silently grow a helper transport.
@@ -154,23 +180,6 @@ func TestClone_HostileEnvironment(t *testing.T) {
 	}
 	if _, statErr := os.Stat(canary); statErr == nil {
 		t.Fatalf("ext:: transport executed a command despite the restrictions: %s", out)
-	}
-}
-
-func TestClone_NilCallback(t *testing.T) {
-	tmp := t.TempDir()
-	src := filepath.Join(tmp, "source")
-	makeCloneSource(t, src, 3)
-	dst := filepath.Join(tmp, "workspace", "source")
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		t.Fatalf("mkdir workspace: %v", err)
-	}
-
-	if _, err := CloneContext(context.Background(), src, dst, nil); err != nil {
-		t.Fatalf("Clone with nil callback: %v", err)
-	}
-	if !IsGitRepo(dst) {
-		t.Fatal("clone target is not a git repository")
 	}
 }
 

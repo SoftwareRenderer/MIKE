@@ -6,7 +6,9 @@ import (
 )
 
 // A ref comparison answers with its two trees: HEAD's commits are a third thing and never belong in the
-// result.
+// result. That a `?head=` request makes that comparison is the route's decision, proved by
+// backend/api/checkpoint_diff_test.go:TestTaskDiffAtCheckpointExcludesWorkCommittedLater; what is proved
+// here is the shape of the answer — a comparison of two named refs has no committed half and says so.
 func TestGetTaskDiff_RefComparisonExcludesWorkCommittedAfterItsHead(t *testing.T) {
 	repoDir, taskID, _, _, wm := setupTestRepo(t)
 	base := strings.TrimSpace(runGitOutput(t, repoDir, "rev-parse", "HEAD"))

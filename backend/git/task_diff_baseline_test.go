@@ -141,3 +141,49 @@ func TestTaskDiffBaselineUnknownTaskNamesNoBaseline(t *testing.T) {
 		t.Errorf("baseline for no task = %q, want empty", got)
 	}
 }
+
+// The links below TaskDiffBaseline: a recorded baseline is kept only when it is a meaningful diff
+// baseline for this task's branch. An unset one, one that equals the task's own branch (a structurally
+// empty diff), or one typed in before the branch existed all fall back to the divergence point, and a
+// task with no branch has nothing to resolve against, so its recorded name passes through.
+func TestResolveTaskBaselineKeepsOnlyAMeaningfulRecordedBase(t *testing.T) {
+	repoDir, _, _, _, wm := setupTestRepo(t)
+
+	mainBranch, err := wm.gitCurrentBranch(repoDir)
+	if err != nil || mainBranch == "" || mainBranch == "HEAD" {
+		t.Fatalf("the fixture repo holds a commit, so rev-parse must name its branch: got %q (err %v)", mainBranch, err)
+	}
+	forkPoint := revParse(t, repoDir, "HEAD")
+
+	// Fork a task branch with a commit on it.
+	runGit(t, repoDir, "branch", "task/baseline-check")
+	runGit(t, repoDir, "checkout", "task/baseline-check")
+	writeFile(t, repoDir, "work.txt", "work\n")
+	runGit(t, repoDir, "add", "work.txt")
+	runGit(t, repoDir, "commit", "-m", "task work")
+	task := &types.Task{Branch: "task/baseline-check"}
+
+	if got := wm.resolveTaskBaseline(repoDir, mainBranch, task); got != forkPoint {
+		t.Errorf("empty baseline = %q, want divergence point %q", got, forkPoint)
+	}
+
+	own := *task
+	own.BaseRef = "task/baseline-check"
+	if got := wm.resolveTaskBaseline(repoDir, mainBranch, &own); got != forkPoint {
+		t.Errorf("own-branch baseline = %q, want divergence point %q", got, forkPoint)
+	}
+
+	// A valid, different base is kept as-is.
+	valid := *task
+	valid.BaseRef = mainBranch
+	if got := wm.resolveTaskBaseline(repoDir, mainBranch, &valid); got != mainBranch {
+		t.Errorf("valid baseline = %q, want %q", got, mainBranch)
+	}
+
+	// A task without a branch passes the recorded baseline through untouched
+	// (nothing to resolve a divergence point against).
+	noBranch := &types.Task{BaseRef: "explore/idea"}
+	if got := wm.resolveTaskBaseline(repoDir, mainBranch, noBranch); got != "explore/idea" {
+		t.Errorf("no-branch baseline = %q, want pass-through %q", got, "explore/idea")
+	}
+}
