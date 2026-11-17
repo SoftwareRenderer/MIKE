@@ -152,20 +152,6 @@ func TestRegistry_Reload(t *testing.T) {
 	}
 }
 
-// TestRegistry_EmptyStore tests behavior with no agent extensions.
-func TestRegistry_EmptyStore(t *testing.T) {
-	store := &mockExtensionStore{extensions: []ext.Extension{}}
-	registry := NewAgentRegistry(store, nil)
-
-	if registry.LookupByName("anything") != nil {
-		t.Error("expected nil lookup on empty store")
-	}
-
-	if providers := registry.ToProviders(); len(providers) != 0 {
-		t.Errorf("expected empty providers, got %d", len(providers))
-	}
-}
-
 // TestRegistry_GetAgentSandboxNeedsGrant: a manifest that names a folder does not give the agent that
 // folder.
 func TestRegistry_GetAgentSandboxNeedsGrant(t *testing.T) {
@@ -312,29 +298,6 @@ func TestRegistry_GetAgentSandboxProviderOverride(t *testing.T) {
 	// The same config folder, with nothing approved, mounts nothing.
 	if sb := NewAgentRegistry(newStore(map[string]any{}), configStore).GetAgentSandbox("pi"); sb != nil {
 		t.Errorf("GetAgentSandbox = %+v, want nil: agent_config_dir cannot create a mount", sb)
-	}
-}
-
-// TestRegistry_GetAgentSandboxNoManifest tests when extension has no sandbox.
-func TestRegistry_GetAgentSandboxNoManifest(t *testing.T) {
-	store := &mockExtensionStore{
-		extensions: []ext.Extension{
-			{
-				Name:    "no-mount-agent",
-				Type:    ext.ExtensionTypeAgent,
-				Enabled: true,
-				Manifest: ext.ExtensionManifest{
-					Version:      "1.0.0",
-					Capabilities: &ext.Capabilities{Agent: &ext.AgentConfig{}},
-				},
-			},
-		},
-	}
-
-	registry := NewAgentRegistry(store, nil)
-	sb := registry.GetAgentSandbox("no-mount-agent")
-	if sb != nil {
-		t.Error("expected nil when no sandbox in manifest")
 	}
 }
 

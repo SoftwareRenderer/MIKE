@@ -281,64 +281,56 @@ func TestStateSurvivesARestart(t *testing.T) {
 	}
 }
 
-// The row is a cache, not a record: a value that no longer decodes is reported and dropped, and never
-// takes the boot down with it.
-func TestAGarbledStoredResultIsReportedAndDropped(t *testing.T) {
-	buf, restore := logging.TestSink()
-	defer restore()
+// The stored row is a cache, not a record: a value that no longer decodes, and a store that cannot be
+// read at all, are reported and answered as "nothing known yet" — never as a fault, and never as a boot
+// that stops.
+func TestABrokenStoredResultIsReportedAndDropped(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		store *fakeStore
+	}{
+		{"a row that does not decode", &fakeStore{values: map[string]string{stateKey: "not json at all"}}},
+		{"a store that cannot be read", &fakeStore{fail: errors.New("database is locked")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			buf, restore := logging.TestSink()
+			defer restore()
 
-	store := &fakeStore{values: map[string]string{stateKey: "not json at all"}}
-	s, err := New(Options{Version: "1.4.0", Store: store, Fetcher: &fakeFetcher{}, InstallDir: releaseDir(t)})
-	if err != nil {
-		t.Fatalf("New refused the boot over a cache entry: %v", err)
-	}
-	if got := s.Status(Settings{}).State.Latest; got != "" {
-		t.Errorf("Latest = %q, want the garbled row dropped", got)
-	}
-	if !strings.Contains(buf.String(), "component=updates") {
-		t.Errorf("the dropped row was not logged by its component: %q", buf.String())
+			s, err := New(Options{Version: "1.4.0", Store: tc.store, Fetcher: &fakeFetcher{}, InstallDir: releaseDir(t)})
+			if err != nil {
+				t.Fatalf("New refused the boot over a cache entry: %v", err)
+			}
+			if got := s.Status(Settings{}).State; got.Latest != "" || got.CheckedAt != "" {
+				t.Errorf("a service that read nothing answered as if it had checked: %+v", got)
+			}
+			if !strings.Contains(buf.String(), "component=updates") {
+				t.Errorf("the unreadable cache was not reported by its component: %q", buf.String())
+			}
+		})
 	}
 }
 
-// A store that cannot be read is the same story: the answer is "nothing known yet", not a fault.
-func TestAnUnreadableStoreIsNotFatal(t *testing.T) {
-	buf, restore := logging.TestSink()
-	defer restore()
-
-	s, err := New(Options{Version: "1.4.0", Store: &fakeStore{fail: errors.New("database is locked")}, Fetcher: &fakeFetcher{}, InstallDir: releaseDir(t)})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	if s.Status(Settings{}).State.CheckedAt != "" {
-		t.Errorf("a service that read nothing answered as if it had checked")
-	}
-	if buf.String() == "" {
-		t.Errorf("an unreadable store should be reported")
-	}
-}
-
-// The day belongs to the install, not to whichever browser asked first: the first automatic pass of the
-// day fetches and every later one is answered from what that fetch learned. docs/auto-update.md.
-func TestAutomaticCheckRunsOncePerInstallDay(t *testing.T) {
-	s, fetcher, _ := testService(t, Options{})
-
-	for _, who := range []string{"first browser of the day", "second browser of the day"} {
-		if _, err := s.CheckAutomatic(context.Background(), Settings{Enabled: true, Answered: true}); err != nil {
-			t.Fatalf("%s: %v", who, err)
-		}
-	}
-	if fetcher.getCalls != 1 {
-		t.Errorf("two automatic passes made %d manifest requests, want 1", fetcher.getCalls)
-	}
-	// A declined pass answers with what is known rather than nothing: its dot is the install's dot.
-	if s.Status(Settings{}).State.Latest == "" {
-		t.Errorf("the install knows no release after a check that ran")
-	}
-}
-
-// What spends the day, and what does not. The day is a bound on manifest requests, so only a pass that
-// made one — or a person's own check — may spend it.
+// What spends the install day, and what does not. The day is a bound on manifest requests, so only a pass
+// that made one — or a person's own check — may spend it. The day belongs to the install, not to whichever
+// browser asked first: docs/auto-update.md.
 func TestWhatSpendsTheInstallDay(t *testing.T) {
+	t.Run("the first automatic pass of the day fetches and the next does not", func(t *testing.T) {
+		s, fetcher, _ := testService(t, Options{})
+
+		for _, who := range []string{"first browser of the day", "second browser of the day"} {
+			if _, err := s.CheckAutomatic(context.Background(), Settings{Enabled: true, Answered: true}); err != nil {
+				t.Fatalf("%s: %v", who, err)
+			}
+		}
+		if fetcher.getCalls != 1 {
+			t.Errorf("two automatic passes made %d manifest requests, want 1", fetcher.getCalls)
+		}
+		// A declined pass answers with what is known rather than nothing: its dot is the install's dot.
+		if s.Status(Settings{}).State.Latest == "" {
+			t.Errorf("the install knows no release after a check that ran")
+		}
+	})
+
 	t.Run("a manual check spends it, because it fetched", func(t *testing.T) {
 		s, fetcher, _ := testService(t, Options{})
 		if _, err := s.Check(context.Background(), Settings{Enabled: true, Answered: true}); err != nil {

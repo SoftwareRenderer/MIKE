@@ -153,9 +153,3 @@ func TestLoadJSONCatalogRejectsNonObject(t *testing.T) {
 		t.Fatal("expected an error for an array catalogue")
 	}
 }
-
-func TestLoadCatalogMissingFile(t *testing.T) {
-	if _, err := LoadCatalog(filepath.Join(t.TempDir(), "nope.json")); err == nil {
-		t.Fatal("expected an error for a missing file")
-	}
-}

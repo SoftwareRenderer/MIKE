@@ -87,17 +87,33 @@ func TestNewDropsADownloadedReleaseTheAnswerDoesNotName(t *testing.T) {
 	}
 }
 
-// A download interrupted by a shutdown is a partial file; nothing may mistake it for a release.
-func TestNewReapsAHalfWrittenDownload(t *testing.T) {
+// A download interrupted by a shutdown is a partial file, and an unpack that died with its process
+// leaves a directory named with this package's prefix: nothing else will ever remove either, and nothing
+// the package does not own may go with them.
+func TestNewReapsWhatADeadProcessLeftBehind(t *testing.T) {
 	dir := releaseDir(t)
 	part := filepath.Join(dir, preparedDirName, preparedArchive+partSuffix)
 	write(t, part, "HALF AN ARCHIVE", 0o600)
+	stale := filepath.Join(dir, stagingPrefix+"123456")
+	if err := os.MkdirAll(filepath.Join(stale, "unpacked"), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	foreign := filepath.Join(dir, "someone-elses-temp")
+	if err := os.MkdirAll(foreign, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
 
 	if _, err := New(Options{Version: "1.4.0", Store: &fakeStore{}, Fetcher: &fakeFetcher{}, InstallDir: dir, ContainerMarkers: []string{}}); err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	if _, err := os.Stat(part); !os.IsNotExist(err) {
 		t.Errorf("the half-written archive is still on disk")
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("the stale staging directory is still there")
+	}
+	if _, err := os.Stat(foreign); err != nil {
+		t.Errorf("a directory this package does not own was removed: %v", err)
 	}
 }
 

@@ -8,8 +8,10 @@ import (
 	"mike/backend/extensions"
 )
 
-// resolveWasmPath is the only place the module's path is decided. A path that does not exist means an
-// installed agent extension cannot start a task, so each candidate is covered here.
+// resolveWasmPath is the only place the module's path is decided, and a path that does not exist means an
+// installed agent extension cannot start a task. One question per candidate folder that holds a module of
+// this name: which one does it answer? The order is the decision — the installed folder first, then the
+// adapter's source tree, then the bare module name, which is also what the caller's error names.
 
 func installedExt(author, name, module string) *extensions.Extension {
 	return &extensions.Extension{
@@ -35,62 +37,57 @@ func putModule(t *testing.T, path string) {
 	}
 }
 
-func TestResolveWasmPath_FindsTheInstalledFolder(t *testing.T) {
-	t.Chdir(t.TempDir())
-	// An install, registry or local, materializes <author>/<name>/.
-	putModule(t, filepath.Join("extensions", "getmike.dev", "claude-code", "claude-code.wasm"))
+func TestResolveWasmPathChoosesTheFolderThatHoldsTheModule(t *testing.T) {
+	const installed = "extensions/getmike.dev/claude-code/claude-code.wasm"
+	const flat = "extensions/claude-code/claude-code.wasm"
+	const sourceTree = "extensions/agent/pi/pi.wasm"
+	const installedPi = "extensions/getmike.dev/pi/pi.wasm"
 
-	got := resolveWasmPath(installedExt("getmike.dev", "claude-code", "claude-code.wasm"))
-	want := filepath.Join("extensions", "getmike.dev", "claude-code", "claude-code.wasm")
-	if got != want {
-		t.Errorf("resolveWasmPath = %q, want the installed folder %q", got, want)
-	}
-}
-
-func TestResolveWasmPath_FindsAFlatLocalFolder(t *testing.T) {
-	t.Chdir(t.TempDir())
-	// A folder with no author directory is a local extension, reached only by extensionDir's flat
-	// fallback.
-	putModule(t, filepath.Join("extensions", "claude-code", "claude-code.wasm"))
-
-	got := resolveWasmPath(installedExt("local", "claude-code", "claude-code.wasm"))
-	want := filepath.Join("extensions", "claude-code", "claude-code.wasm")
-	if got != want {
-		t.Errorf("resolveWasmPath = %q, want the local folder %q", got, want)
-	}
-}
-
-func TestResolveWasmPath_StillFindsTheAdapterSourceTree(t *testing.T) {
-	t.Chdir(t.TempDir())
-	// The source layout holds the build output before any install exists.
-	putModule(t, filepath.Join("extensions", "agent", "pi", "pi.wasm"))
-
-	got := resolveWasmPath(installedExt("getmike.dev", "pi", "pi.wasm"))
-	want := filepath.Join("extensions", "agent", "pi", "pi.wasm")
-	if got != want {
-		t.Errorf("resolveWasmPath = %q, want the source-tree copy %q", got, want)
-	}
-}
-
-// TestResolveWasmPath_InstalledFolderWins: when a stale source copy and the installed folder both hold
-// a module, the installed one is used.
-func TestResolveWasmPath_InstalledFolderWins(t *testing.T) {
-	t.Chdir(t.TempDir())
-	putModule(t, filepath.Join("extensions", "agent", "pi", "pi.wasm"))
-	installed := filepath.Join("extensions", "getmike.dev", "pi", "pi.wasm")
-	putModule(t, installed)
-
-	got := resolveWasmPath(installedExt("getmike.dev", "pi", "pi.wasm"))
-	if got != installed {
-		t.Errorf("resolveWasmPath = %q, want the installed %q", got, installed)
-	}
-}
-
-func TestResolveWasmPath_NothingOnDiskFallsThrough(t *testing.T) {
-	t.Chdir(t.TempDir())
-
-	got := resolveWasmPath(installedExt("getmike.dev", "pi", "pi.wasm"))
-	if got != "pi.wasm" {
-		t.Errorf("resolveWasmPath = %q, want the bare module name so the error names what was wanted", got)
+	for _, tc := range []struct {
+		name   string
+		author string
+		ext    string
+		module string
+		// holds are the module files that exist on disk, relative to the scratch root.
+		holds []string
+		// want is the path resolveWasmPath must answer.
+		want string
+	}{
+		{
+			name:   "an install, registry or local, materializes <author>/<name>/ and that folder answers",
+			author: "getmike.dev", ext: "claude-code", module: "claude-code.wasm",
+			holds: []string{installed}, want: installed,
+		},
+		{
+			name:   "a folder with no author directory is a local extension, reached only by the flat fallback",
+			author: "local", ext: "claude-code", module: "claude-code.wasm",
+			holds: []string{flat}, want: flat,
+		},
+		{
+			name:   "the source layout holds the build output before any install exists",
+			author: "getmike.dev", ext: "pi", module: "pi.wasm",
+			holds: []string{sourceTree}, want: sourceTree,
+		},
+		{
+			name:   "a stale source copy loses to the installed folder",
+			author: "getmike.dev", ext: "pi", module: "pi.wasm",
+			holds: []string{sourceTree, installedPi}, want: installedPi,
+		},
+		{
+			name:   "nothing on disk answers the bare name, so the error names what was wanted",
+			author: "getmike.dev", ext: "pi", module: "pi.wasm",
+			holds: nil, want: "pi.wasm",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			for _, module := range tc.holds {
+				putModule(t, filepath.FromSlash(module))
+			}
+			got := resolveWasmPath(installedExt(tc.author, tc.ext, tc.module))
+			if want := filepath.FromSlash(tc.want); got != want {
+				t.Errorf("resolveWasmPath = %q, want %q", got, want)
+			}
+		})
 	}
 }
