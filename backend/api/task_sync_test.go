@@ -69,66 +69,75 @@ func syncMux(h *TaskHandler) *http.ServeMux {
 	return mux
 }
 
-func TestSyncDigestNamesEveryPartAReturningScreenCompares(t *testing.T) {
-	h, s, _ := newTestTaskHandler(t)
-	projID, taskID := seedSyncProject(t, h, s)
-	seedSyncRows(t, s, taskID, 3)
-
-	got := readSyncDigest(t, h, "/api/projects/"+projID+"/tasks/"+taskID+"/sync")
-
-	if got.Status != types.StatusInProgress || got.ExecutionState != types.ExecStateRunning {
-		t.Errorf("digest carries %s/%s, want the task row's in_progress/running", got.Status, got.ExecutionState)
-	}
-	if got.Thread != "thread-1" {
-		t.Errorf("thread = %q, want the conversation the task is on", got.Thread)
-	}
-	if got.Conversation.Messages != 3 {
-		t.Errorf("conversation counts %d rows, want 3", got.Conversation.Messages)
-	}
-	if got.Conversation.Epoch == "" {
-		t.Error("no epoch: a client cannot tell a fresh server from an idle one")
-	}
-	// Nothing has been computed for this task's worktree, which is an unknown and never a "clean".
-	if got.Diff.Known {
-		t.Error("diff claims to be known with no watcher having computed one")
-	}
-}
-
-func TestSyncDigestConversationMovesWithWhatTheRowsHold(t *testing.T) {
+func TestSyncDigestTracksTheRowAndTheRowsUnderIt(t *testing.T) {
 	h, s, _ := newTestTaskHandler(t)
 	projID, taskID := seedSyncProject(t, h, s)
 	path := "/api/projects/" + projID + "/tasks/" + taskID + "/sync"
 
 	before := readSyncDigest(t, h, path)
+	if before.Status != types.StatusInProgress || before.ExecutionState != types.ExecStateRunning {
+		t.Errorf("digest carries %s/%s, want the task row's in_progress/running", before.Status, before.ExecutionState)
+	}
+	if before.Thread != "thread-1" {
+		t.Errorf("thread = %q, want the conversation the task is on", before.Thread)
+	}
+	if before.Conversation.Messages != 0 {
+		t.Errorf("conversation counts %d rows, want 0", before.Conversation.Messages)
+	}
 	if before.Conversation.Revision != 0 {
 		t.Errorf("a task no executor has written a row for is at revision %d, want 0", before.Conversation.Revision)
 	}
-	seedSyncRows(t, s, taskID, 1)
+	if before.Conversation.Epoch == "" {
+		t.Error("no epoch: a client cannot tell a fresh server from an idle one")
+	}
+	// Nothing has been computed for this task's worktree, which is an unknown and never a "clean".
+	if before.Diff.Known {
+		t.Error("diff claims to be known with no watcher having computed one")
+	}
+
+	seedSyncRows(t, s, taskID, 3)
 	after := readSyncDigest(t, h, path)
-	if after.Conversation.Messages != before.Conversation.Messages+1 {
-		t.Errorf("rows went from %d to %d across one write", before.Conversation.Messages, after.Conversation.Messages)
+	if after.Conversation.Messages != before.Conversation.Messages+3 {
+		t.Errorf("rows went from %d to %d across three writes", before.Conversation.Messages, after.Conversation.Messages)
 	}
 	if after.Conversation.Epoch != before.Conversation.Epoch {
 		t.Errorf("epoch moved within one process (%q then %q): a client would re-read on every answer", before.Conversation.Epoch, after.Conversation.Epoch)
 	}
-}
-
-func TestSyncDigestRefusesATaskIDGitCouldReadAsAnOption(t *testing.T) {
-	h, s, _ := newTestTaskHandler(t)
-	projID, _ := seedSyncProject(t, h, s)
-
-	rr := getSync(t, syncMux(h), "/api/projects/"+projID+"/tasks/--help/sync")
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("a malformed task id answered %d, want 400: %s", rr.Code, rr.Body.String())
+	// The rows were written behind the stream's back, so only the count moved — a revision that
+	// drifted here would make every returning window re-read a conversation it already holds.
+	if after.Conversation.Revision != 0 {
+		t.Errorf("revision moved to %d for rows no durable write produced", after.Conversation.Revision)
 	}
 }
 
-func TestSyncDigestAnswersNotFoundForAnotherProjectsTask(t *testing.T) {
+// TestSyncDigestRefusesARequestThatNamesNoTaskOfItsOwn covers the two ways the path can fail to name
+// this project's task: an id git could read as an option, and a task that belongs to somebody else.
+func TestSyncDigestRefusesARequestThatNamesNoTaskOfItsOwn(t *testing.T) {
 	h, s, _ := newTestTaskHandler(t)
-	_, taskID := seedSyncProject(t, h, s)
+	projID, taskID := seedSyncProject(t, h, s)
+	mux := syncMux(h)
 
-	rr := getSync(t, syncMux(h), "/api/projects/other-proj/tasks/"+taskID+"/sync")
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("a task of another project answered %d, want 404: %s", rr.Code, rr.Body.String())
+	for _, tt := range []struct {
+		name string
+		path string
+		want int
+	}{
+		{
+			name: "a task id git could read as an option",
+			path: "/api/projects/" + projID + "/tasks/--help/sync",
+			want: http.StatusBadRequest,
+		},
+		{
+			name: "a task of another project",
+			path: "/api/projects/other-proj/tasks/" + taskID + "/sync",
+			want: http.StatusNotFound,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			rr := getSync(t, mux, tt.path)
+			if rr.Code != tt.want {
+				t.Fatalf("GET %s answered %d, want %d: %s", tt.path, rr.Code, tt.want, rr.Body.String())
+			}
+		})
 	}
 }
