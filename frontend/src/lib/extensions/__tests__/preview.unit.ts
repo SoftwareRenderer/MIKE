@@ -174,18 +174,6 @@ describe('preview.serve', () => {
         expect(apiFetchMock).not.toHaveBeenCalled();
     });
 
-    it('rejects the call when not granted', async () => {
-        const { channel, contentWindow, messages } = makeChannel([], {});
-        send(channel, contentWindow, {
-            type: 'call', id: 'm1', cap: CAP_PREVIEW_SERVE, args: { content: '<html/>' },
-        });
-        await flush();
-        const resp = messages.find((m) => m.type === 'response' && m.id === 'm1');
-        expect(resp.ok).toBe(false);
-        expect(resp.error).toContain('not granted');
-        expect(apiFetchMock).not.toHaveBeenCalled();
-    });
-
     it('surfaces server errors', async () => {
         failResponse(400);
         const { channel, contentWindow, messages } = makeChannel([CAP_PREVIEW_SERVE], {

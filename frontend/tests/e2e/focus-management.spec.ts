@@ -1,6 +1,6 @@
 import { test, expect, Page, Locator } from '@playwright/test';
 import {
-  getProjectId, createTaskViaApi, navigateToTask, isolatedProject, gotoProject,
+  getProjectId, createTaskViaApi, navigateToTask, isolatedProject, gotoProject, selectProject,
 } from './helpers';
 // Each test file gets its own project, because it starts a turn: see isolatedProject() in helpers.ts.
 isolatedProject();
@@ -64,7 +64,8 @@ test.describe('Focus management for conditionally rendered inputs', () => {
 
     test('Add Project modal focuses new-folder input and clone URL', async ({ page }) => {
         await page.getByRole('button', { name: 'Add Project' }).click();
-        const dialog = page.locator('[role="dialog"]');
+        // `[role="dialog"]` alone is never unique, so the modal is named by its own title.
+        const dialog = page.locator('[role="dialog"]').filter({ hasText: 'Add Project' });
         const newFolderBtn = dialog.locator('button[aria-label="New folder"]');
         await newFolderBtn.waitFor({ timeout: 5000 });
 
@@ -82,7 +83,9 @@ test.describe('Focus management for conditionally rendered inputs', () => {
     });
 
     test('project explorer focuses new-file and new-folder inputs', async ({ page }) => {
-        await page.locator('a.project-item[href]').first().click();
+        // The row of the project this worker's file drives, by id: `.project-item` + `.first()` once
+        // per-worker projects exist is somebody else's project, and the rows this test opens belong to it.
+        await selectProject(page, await getProjectId(page));
         await page.waitForSelector('.top-bar', { timeout: 10000 });
         await page.getByRole('button', { name: 'Open explorer' }).click();
         const fb = page.locator('.explorer-view .file-browser');

@@ -235,7 +235,11 @@ test.describe('File @ Mention', () => {
     });
   });
 
-  test('should navigate dropdown with arrow keys', async ({ page }) => {
+  // The row's own activation is what this pair keeps: Enter selecting the ACTIVE row has no vitest owner
+  // (`file-mention.unit.svelte.ts` holds the ArrowDown/ArrowUp cycling, the wrap, and that `select` replaces
+  // the trigger with @path). The listing itself comes from a stub — the paths below are the fixture's, not
+  // the server's answer, which is why nothing here asserts on the search's payload.
+  test('the arrows choose a row and Enter takes it into the textarea', async ({ page }) => {
     await page.locator('.add-task-btn').click();
     await expect(page.locator('#task-description')).toBeVisible();
 
@@ -244,40 +248,18 @@ test.describe('File @ Mention', () => {
     await expect(page.locator('.mention-dropdown')).toBeVisible({ timeout: 5000 });
 
     const items = page.locator('.mention-item');
-
-    // First item should be active by default
+    // The list opens on its first row, and the arrows walk it.
     await expect(items.first()).toHaveClass(/active/);
-
-    // Press ArrowDown to highlight second item
     await textarea.press('ArrowDown');
     await expect(items.nth(1)).toHaveClass(/active/);
-
-    // Press ArrowUp to go back to first
     await textarea.press('ArrowUp');
     await expect(items.first()).toHaveClass(/active/);
-  });
-
-  test('should select with Enter key', async ({ page }) => {
-    await page.locator('.add-task-btn').click();
-    await expect(page.locator('#task-description')).toBeVisible();
-
-    const textarea = page.locator('#task-description');
-    await typeAtSign(page, textarea);
-    await expect(page.locator('.mention-dropdown')).toBeVisible({ timeout: 5000 });
-
-    // Press ArrowDown to select second item
     await textarea.press('ArrowDown');
-    await expect(page.locator('.mention-item').nth(1)).toHaveClass(/active/);
 
-    // Press Enter to select
+    // Enter belongs to the dropdown: it takes the highlighted row and closes.
     await textarea.press('Enter');
-
-    // Dropdown should disappear
     await expect(page.locator('.mention-dropdown')).not.toBeVisible();
-
-    // Textarea should contain @path of second item
-    const value = await textarea.inputValue();
-    expect(value).toBe('@src/app.ts');
+    expect(await textarea.inputValue()).toBe('@src/app.ts');
   });
 
   test('should select a file by clicking without closing the modal', async ({ page }) => {

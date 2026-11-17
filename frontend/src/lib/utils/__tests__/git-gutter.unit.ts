@@ -98,110 +98,83 @@ describe('gitGutter rows across a document change', () => {
     });
 });
 
-describe('scrollbarMarkerRect (fallback: 1 doc line = 1 visual row)', () => {
-    it('positions the first line at the top band center', () => {
-        const { y, h } = scrollbarMarkerRect(1, 10, 100);
-        expect(y).toBeCloseTo(5, 5); // (1 - 0.5) / 10 * 100
-        expect(h).toBeCloseTo(9.5, 5); // 100/10 - 0.5
-    });
+describe('scrollbarMarkerRect', () => {
+    /** One marker's band. `layout` is the measured block of its line, absent when the fallback
+     * (1 doc line = 1 visual row) has to place it. */
+    interface Placement {
+        name: string;
+        line: number;
+        total: number;
+        canvas: number;
+        layout?: { top: number; height: number; contentHeight: number };
+        boundary?: boolean;
+        y?: number;
+        h?: number;
+    }
 
-    it('positions a middle line at its band center', () => {
-        const { y } = scrollbarMarkerRect(5, 10, 100);
-        expect(y).toBeCloseTo(45, 5); // 4.5 / 10 * 100
-    });
+    // The one decision: a marker covers its line's block, scaled to the content the canvas draws,
+    // and a boundary mark sits at that block's bottom edge. Measured block or estimated row is the
+    // only thing that changes between the rows.
+    const placements: Placement[] = [
+        // Estimated row: the band center of (line - 0.5) / total, one band = canvas / total.
+        { name: 'the first line at the top band center', line: 1, total: 10, canvas: 100, y: (1 - 0.5) / 10 * 100, h: 100 / 10 - 0.5 },
+        { name: 'a middle line at its band center', line: 5, total: 10, canvas: 100, y: (5 - 0.5) / 10 * 100 },
+        { name: 'the last line at the bottom band center', line: 10, total: 10, canvas: 100, y: (10 - 0.5) / 10 * 100 },
+        { name: 'a single-line document', line: 1, total: 1, canvas: 100, y: (1 - 0.5) / 1 * 100, h: 100 / 1 - 0.5 },
+        // 600 / 10000 - 0.5 is under a pixel, and a marker nobody can see is a marker that lies about
+        // the file having changes in it.
+        { name: 'a band no thinner than 1px in a large document', line: 500, total: 10000, canvas: 600, h: 1 },
+        {
+            name: 'the measured block center when layout is provided',
+            line: 1, total: 10, canvas: 100, layout: { top: 20, height: 10, contentHeight: 200 },
+            y: (20 + 5) / 200 * 100, h: 10 / 200 * 100 - 0.5,
+        },
+        {
+            // A line wrapped over 3 visual rows: its block is 3x the default height.
+            name: 'a wrapped line (taller block) at its real position',
+            line: 5, total: 100, canvas: 100, layout: { top: 400, height: 30, contentHeight: 1000 },
+            y: (400 + 15) / 1000 * 100, h: 30 / 1000 * 100 - 0.5,
+        },
+        {
+            // A line after a fold: block.top already reflects the collapsed height.
+            name: 'a folded-away region accounted for by the collapsed block positions',
+            line: 900, total: 1000, canvas: 100, layout: { top: 500, height: 10, contentHeight: 600 }, y: (500 + 5) / 600 * 100,
+        },
+        {
+            name: 'a boundary mark at the block bottom edge',
+            line: 2, total: 10, canvas: 100, layout: { top: 20, height: 10, contentHeight: 200 }, boundary: true, y: (20 + 10) / 200 * 100,
+        },
+        {
+            name: 'a boundary mark at the gap edge',
+            line: 2, total: 10, canvas: 100, boundary: true, y: 2 / 10 * 100,
+        },
+    ];
 
-    it('positions the last line at the bottom band center', () => {
-        const { y } = scrollbarMarkerRect(10, 10, 100);
-        expect(y).toBeCloseTo(95, 5); // 9.5 / 10 * 100
-    });
-
-    it('handles a single-line document', () => {
-        const { y, h } = scrollbarMarkerRect(1, 1, 100);
-        expect(y).toBeCloseTo(50, 5);
-        expect(h).toBeCloseTo(99.5, 5);
-    });
-
-    it('keeps bands at least 1px tall for large documents', () => {
-        const { h } = scrollbarMarkerRect(500, 10000, 600);
-        expect(h).toBe(1); // 600/10000 - 0.5 < 1 → clamped
-    });
-
-    it('places boundary (removed) marks at the gap edge', () => {
-        const { y } = scrollbarMarkerRect(2, 10, 100, undefined, true);
-        expect(y).toBeCloseTo(20, 5); // 2 / 10 * 100
+    it.each(placements)('places $name', ({ line, total, canvas, layout, boundary, y, h }) => {
+        const band = scrollbarMarkerRect(line, total, canvas, layout, boundary);
+        if (y !== undefined) expect(band.y).toBeCloseTo(y, 5);
+        if (h !== undefined) expect(band.h).toBeCloseTo(h, 5);
     });
 
     it('clamps a boundary mark on the last line inside the canvas', () => {
-        const { y } = scrollbarMarkerRect(10, 10, 100, undefined, true);
-        expect(y).toBe(99); // 10/10*100 = 100 → clamped to height - 1
-    });
-});
-
-describe('scrollbarMarkerRect (layout-aware: wraps + folds)', () => {
-    const canvasHeight = 100;
-
-    it('uses the measured block center when layout is provided', () => {
-        const { y, h } = scrollbarMarkerRect(1, 10, canvasHeight, {
-            top: 20,
-            height: 10,
-            contentHeight: 200,
-        });
-        expect(y).toBeCloseTo(12.5, 5); // (20 + 5) / 200 * 100
-        expect(h).toBeCloseTo(4.5, 5); // 10/200*100 - 0.5
-    });
-
-    it('maps a wrapped line (taller block) to its real position', () => {
-        // A line wrapped over 3 visual rows: its block is 3x the default height.
-        const { y, h } = scrollbarMarkerRect(5, 100, canvasHeight, {
-            top: 400,
-            height: 30,
-            contentHeight: 1000,
-        });
-        expect(y).toBeCloseTo(41.5, 5); // (400 + 15) / 1000 * 100
-        expect(h).toBeCloseTo(2.5, 5); // 30/1000*100 - 0.5
-    });
-
-    it('accounts for folded regions by using collapsed block positions', () => {
-        // A line after a fold: its block.top already reflects the collapsed height.
-        const { y } = scrollbarMarkerRect(900, 1000, canvasHeight, {
-            top: 500,
-            height: 10,
-            contentHeight: 600,
-        });
-        expect(y).toBeCloseTo(84.1666, 3); // (500 + 5) / 600 * 100
-    });
-
-    it('places boundary (removed) marks at the block bottom edge', () => {
-        const { y } = scrollbarMarkerRect(2, 10, canvasHeight, {
-            top: 20,
-            height: 10,
-            contentHeight: 200,
-        }, true);
-        expect(y).toBeCloseTo(15, 5); // (20 + 10) / 200 * 100
-    });
-
-    it('clamps a boundary mark on the last block inside the canvas', () => {
-        const { y } = scrollbarMarkerRect(100, 100, canvasHeight, {
-            top: 990,
-            height: 10,
-            contentHeight: 1000,
-        }, true);
-        expect(y).toBe(99); // (990 + 10) / 1000 * 100 = 100 → clamped
+        // Estimated row: 10/10*100 = 100. Measured block: (990 + 10)/1000*100 = 100. Both must land
+        // at height - 1 rather than be drawn outside the canvas.
+        expect(scrollbarMarkerRect(10, 10, 100, undefined, true).y).toBe(99);
+        expect(
+            scrollbarMarkerRect(100, 100, 100, { top: 990, height: 10, contentHeight: 1000 }, true).y,
+        ).toBe(99);
     });
 });
 
 describe('hasVerticalScrollbar', () => {
-    it('returns true when content overflows the viewport', () => {
-        expect(hasVerticalScrollbar(1000, 500)).toBe(true);
-        expect(hasVerticalScrollbar(501, 500)).toBe(true);
-    });
-
-    it('returns false when content fits exactly', () => {
-        expect(hasVerticalScrollbar(500, 500)).toBe(false);
-    });
-
-    it('returns false when content is smaller than the viewport', () => {
-        expect(hasVerticalScrollbar(499, 500)).toBe(false);
-        expect(hasVerticalScrollbar(0, 0)).toBe(false);
+    // One decision: the scrollbar exists when the content is strictly taller than the viewport.
+    it.each([
+        ['content overflows', 1000, 500, true],
+        ['content overflows by a pixel', 501, 500, true],
+        ['content fits exactly', 500, 500, false],
+        ['content is smaller than the viewport', 499, 500, false],
+        ['an unmeasured pane', 0, 0, false],
+    ])('%s', (_name, scrollHeight, clientHeight, expected) => {
+        expect(hasVerticalScrollbar(scrollHeight, clientHeight)).toBe(expected);
     });
 });

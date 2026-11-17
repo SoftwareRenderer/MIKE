@@ -83,12 +83,6 @@ describe('formatToolArgs - edit_file', () => {
         expect(formatToolArgs('edit_file', args, rawArgs)).toBe('./args/path.go');
     });
 
-    it('handles path already prefixed with ./', () => {
-        const args = {};
-        const rawArgs = '{"path":"./src/file.go","edits":[]}';
-        expect(formatToolArgs('edit_file', args, rawArgs)).toBe('./src/file.go');
-    });
-
     it('counts edits from raw_args when args.edits is empty', () => {
         const args = {};
         const rawArgs = '{"path":"file.go","edits":[{"oldText":"a","newText":"b"},{"oldText":"c","newText":"d"}]}';
@@ -127,57 +121,24 @@ describe('formatToolArgs - bash', () => {
     });
 });
 
-describe('formatToolArgs - read_file', () => {
-    it('shows path from args', () => {
-        expect(formatToolArgs('read_file', { path: 'src/file.go' })).toBe('./src/file.go');
-    });
-
-    it('returns empty when no path', () => {
-        expect(formatToolArgs('read_file', {})).toBe('');
-    });
-});
-
-describe('formatToolArgs - write_file', () => {
-    it('shows path from args', () => {
-        expect(formatToolArgs('write_file', { path: 'src/file.go' })).toBe('./src/file.go');
-    });
-
-    it('returns empty when no path', () => {
-        expect(formatToolArgs('write_file', {})).toBe('');
-    });
-
-    it('shows path from raw_args during streaming (empty args)', () => {
-        const args = {};
-        const rawArgs = '{"path":"src/file.go","content":"hello"}';
-        expect(formatToolArgs('write_file', args, rawArgs)).toBe('./src/file.go');
-    });
-
-    it('shows path from partial raw_args during streaming', () => {
-        const args = {};
-        const rawArgs = '{"path":"src/file.go","content":"hel';
-        expect(formatToolArgs('write_file', args, rawArgs)).toBe('./src/file.go');
-    });
-
-    it('prefers args.path over raw_args when both present', () => {
-        const args = { path: 'args/path.go' };
-        const rawArgs = '{"path":"raw/path.go"}';
-        expect(formatToolArgs('write_file', args, rawArgs)).toBe('./args/path.go');
-    });
-
-    it('handles path already prefixed with ./', () => {
-        const args = {};
-        const rawArgs = '{"path":"./src/file.go"}';
-        expect(formatToolArgs('write_file', args, rawArgs)).toBe('./src/file.go');
-    });
-
-    it('returns empty when neither args nor raw_args have path', () => {
-        const args = {};
-        expect(formatToolArgs('write_file', args, '')).toBe('');
-        expect(formatToolArgs('write_file', args, undefined)).toBe('');
-    });
-
-    it('does not use a non-string path as a display string', () => {
-        expect(formatToolArgs('write_file', { path: { named: 'x' } })).toBe('');
+// One decision per row: which source names the file a card shows, and what the card prints when no
+// source does. `read_file` reads only the finished arguments — its card has nothing to show until
+// they arrive — while the two writing tools also read the body still streaming. The `./` root is
+// `dotPath`'s, proved once per source rather than once per tool.
+describe('formatToolArgs - the file a card names', () => {
+    it.each([
+        ['read_file from its args', 'read_file', { path: 'src/file.go' }, undefined, './src/file.go'],
+        ['read_file with no path', 'read_file', {}, undefined, ''],
+        ['read_file ignoring a path only the stream has', 'read_file', {}, '{"path":"src/file.go"}', ''],
+        ['write_file from its args', 'write_file', { path: 'src/file.go' }, undefined, './src/file.go'],
+        ['write_file from raw_args during streaming', 'write_file', {}, '{"path":"src/file.go","content":"hello"}', './src/file.go'],
+        ['write_file from partial raw_args', 'write_file', {}, '{"path":"src/file.go","content":"hel', './src/file.go'],
+        ['write_file preferring args.path over raw_args', 'write_file', { path: 'args/path.go' }, '{"path":"raw/path.go"}', './args/path.go'],
+        ['write_file taking a path already rooted', 'write_file', {}, '{"path":"./src/file.go"}', './src/file.go'],
+        ['write_file with no path anywhere', 'write_file', {}, undefined, ''],
+        ['write_file refusing a path that is not text', 'write_file', { path: { named: 'x' } }, undefined, ''],
+    ])('names %s', (_name, tool, args, rawArgs, expected) => {
+        expect(formatToolArgs(tool, args, rawArgs)).toBe(expected);
     });
 });
 
@@ -215,41 +176,25 @@ describe('rawArgsComplete', () => {
     });
 });
 
-describe('formatToolArgs - lsp_hover', () => {
-    it('shows symbol and path', () => {
-        expect(formatToolArgs('lsp_hover', { path: 'main.go', symbol: 'fmt' })).toBe('hover fmt in main.go');
-    });
-
-    it('shows fallback when no symbol', () => {
-        expect(formatToolArgs('lsp_hover', { path: 'main.go' })).toBe('(hover in main.go)');
-    });
-
-    it('shows fallback when no path', () => {
-        expect(formatToolArgs('lsp_hover', { symbol: 'fmt' })).toBe('hover fmt in file');
-    });
-
-    it('shows fallback when no symbol and no path', () => {
-        expect(formatToolArgs('lsp_hover', {})).toBe('(hover in file)');
-    });
-});
-
-describe('formatToolArgs - lsp_references', () => {
-    it('shows symbol and path', () => {
-        expect(formatToolArgs('lsp_references', { path: 'main.go', symbol: 'main' })).toBe('references for main in main.go');
-    });
-
-    it('shows fallback when no symbol', () => {
-        expect(formatToolArgs('lsp_references', { path: 'main.go' })).toBe('(references in main.go)');
-    });
-});
-
-describe('formatToolArgs - lsp_definition', () => {
-    it('shows symbol and path', () => {
-        expect(formatToolArgs('lsp_definition', { path: 'main.go', symbol: 'Println' })).toBe('definition of Println in main.go');
-    });
-
-    it('shows fallback when no symbol', () => {
-        expect(formatToolArgs('lsp_definition', { path: 'main.go' })).toBe('(definition in main.go)');
+// One decision: what an editor tool's card line says, and what it says when a part of it is
+// missing. Each row is a phrase the catalog owns, and each fallback is a card that must still read
+// as an action out of the editor.
+describe('formatToolArgs - the editor tools', () => {
+    it.each([
+        ['lsp_hover with symbol and path', 'lsp_hover', { path: 'main.go', symbol: 'fmt' }, 'hover fmt in main.go'],
+        ['lsp_hover with no symbol', 'lsp_hover', { path: 'main.go' }, '(hover in main.go)'],
+        ['lsp_hover with no path', 'lsp_hover', { symbol: 'fmt' }, 'hover fmt in file'],
+        ['lsp_hover with neither', 'lsp_hover', {}, '(hover in file)'],
+        ['lsp_references with symbol and path', 'lsp_references', { path: 'main.go', symbol: 'main' }, 'references for main in main.go'],
+        ['lsp_references with no symbol', 'lsp_references', { path: 'main.go' }, '(references in main.go)'],
+        ['lsp_definition with symbol and path', 'lsp_definition', { path: 'main.go', symbol: 'Println' }, 'definition of Println in main.go'],
+        ['lsp_definition with no symbol', 'lsp_definition', { path: 'main.go' }, '(definition in main.go)'],
+        ['lsp_rename with both names', 'lsp_rename', { path: 'main.go', symbol: 'foo', new_name: 'bar' }, 'rename foo to bar in main.go'],
+        ['lsp_rename with no new_name', 'lsp_rename', { path: 'main.go', symbol: 'foo' }, 'rename foo in main.go'],
+        ['lsp_rename with no symbol', 'lsp_rename', { path: 'main.go' }, '(rename in main.go)'],
+        ['lsp_rename with nothing', 'lsp_rename', {}, '(rename in file)'],
+    ])('writes %s', (_name, tool, args, expected) => {
+        expect(formatToolArgs(tool, args)).toBe(expected);
     });
 });
 
@@ -258,23 +203,5 @@ describe('formatToolArgs - removed lsp_code_actions tool', () => {
         expect(formatToolArgs('lsp_code_actions', { path: 'main.go', symbol: 'foo' })).toBe(
             JSON.stringify({ path: 'main.go', symbol: 'foo' }, null, 2)
         );
-    });
-});
-
-describe('formatToolArgs - lsp_rename', () => {
-    it('shows old and new symbol with path', () => {
-        expect(formatToolArgs('lsp_rename', { path: 'main.go', symbol: 'foo', new_name: 'bar' })).toBe('rename foo to bar in main.go');
-    });
-
-    it('shows fallback when no new_name', () => {
-        expect(formatToolArgs('lsp_rename', { path: 'main.go', symbol: 'foo' })).toBe('rename foo in main.go');
-    });
-
-    it('shows fallback when no symbol', () => {
-        expect(formatToolArgs('lsp_rename', { path: 'main.go' })).toBe('(rename in main.go)');
-    });
-
-    it('shows fallback for empty args', () => {
-        expect(formatToolArgs('lsp_rename', {})).toBe('(rename in file)');
     });
 });

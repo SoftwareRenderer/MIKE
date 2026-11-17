@@ -47,22 +47,33 @@ async function openBoard(page: Page) {
   await page.waitForSelector('.card', { timeout: 10000 });
 }
 
+/** The sidebar row of one project, by id. `.project-item` + `.first()` is whichever project another
+ *  worker created last, and this spec asserts what the row under the pointer does. */
+async function projectRow(page: Page, projectId: string): Promise<Locator> {
+  const row = page.locator(`a.project-item[href$="project=${projectId}"]`);
+  await expect(row).toBeVisible({ timeout: 10000 });
+  return row;
+}
+
 test.describe('Sidebar project rows are links', () => {
   test('an unmodified click selects the project without leaving the document', async ({ page }) => {
     await openBoard(page);
     await markDocument(page);
 
-    await page.locator('.project-item').first().click();
+    const row = await projectRow(page, await getProjectId(page));
+    const name = (await row.locator('.project-name').textContent())?.trim();
+    await row.click();
 
-    await expect(page.locator('.project-item-wrapper.active')).toBeVisible({ timeout: 5000 });
+    // The row the click was aimed at is the one that came up active — not merely "a row".
+    await expect(page.locator('.project-item-wrapper.active .project-name')).toHaveText(name!, { timeout: 5000 });
     expect(await sameDocument(page)).toBe(true);
   });
 
   test('opening the project link in another tab lands on that project', async ({ page, context }) => {
     await openBoard(page);
-    const firstRow = page.locator('.project-item').first();
-    const name = (await firstRow.locator('.project-name').textContent())?.trim();
-    const href = await firstRow.getAttribute('href');
+    const row = await projectRow(page, await getProjectId(page));
+    const name = (await row.locator('.project-name').textContent())?.trim();
+    const href = await row.getAttribute('href');
     expect(href).toBeTruthy();
 
     const other = await context.newPage();
