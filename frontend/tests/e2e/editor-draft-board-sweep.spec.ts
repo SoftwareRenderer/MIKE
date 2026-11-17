@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'path';
-import { apiGetJson, csrfFetch, getProjectId, gotoProject, isolatedProject, ownProjectPath } from './helpers';
+import { apiGetJson, csrfFetch, getProjectId, gotoProject, isolatedProject, ownProjectPath, requireSandbox } from './helpers';
 
 // ============================================================
 // The buffer a sandboxed project's editor left, read back after the board returns
@@ -31,6 +31,10 @@ async function seedSubtask(page: Page, projectId: string): Promise<void> {
 }
 
 test('an unsaved buffer in a sandboxed project survives the board returning', async ({ page }) => {
+  // The project is sandboxed for the whole test, so this rests on two host facts: the file routes answer
+  // a container spelling only while the server honours the sandbox, and the two tasks seeded below take a
+  // container each.
+  requireSandbox();
   await gotoProject(page);
   await page.waitForSelector('.project-item', { timeout: 10000 });
   const projectId = await getProjectId(page);

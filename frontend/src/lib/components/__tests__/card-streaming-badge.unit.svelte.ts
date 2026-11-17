@@ -121,4 +121,37 @@ describe('Card status badge tracks its reactive sources', () => {
             streamingTaskStore.delete('some-other-task');
         }
     });
+
+    // A stuck merge says so on the card. The row the board holds is the answer, not the prop the card
+    // was created with: a status frame rewrites that row, so a card reading only its own prop would
+    // still badge a task whose conflict cleared.
+    it('says a conflict is being resolved when the board row says so', () => {
+        appStore.current.board = { tasks: [{ id: 'card-1', has_merge_conflict: true }] };
+        try {
+            const container = renderCard(makeTask({ has_merge_conflict: false }));
+            expect(badgeText(container)).toBe(t('board.badge.resolvingConflict'));
+        } finally {
+            appStore.current.board = null;
+        }
+    });
+
+    it('clears the badge when the board row has moved on, though the card was built with the flag', () => {
+        appStore.current.board = { tasks: [{ id: 'card-1', has_merge_conflict: false }] };
+        try {
+            const container = renderCard(makeTask({ has_merge_conflict: true }));
+            expect(badgeText(container)).not.toBe(t('board.badge.resolvingConflict'));
+        } finally {
+            appStore.current.board = null;
+        }
+    });
+
+    it('says it from the task row when the board holds no copy of the task', () => {
+        appStore.current.board = { tasks: [] };
+        try {
+            const container = renderCard(makeTask({ has_merge_conflict: true }));
+            expect(badgeText(container)).toBe(t('board.badge.resolvingConflict'));
+        } finally {
+            appStore.current.board = null;
+        }
+    });
 });

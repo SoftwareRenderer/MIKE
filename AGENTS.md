@@ -127,11 +127,13 @@ make test-podman-state                                   # the image entrypoint'
 ```
 
 - **A spec exists only if it needs a browser or the real backend.** Component state belongs in vitest;
-  never write a `readFileSync` + `toContain` "test".
+  never write a `readFileSync` + `toContain` "test". A rule two lanes can stage stays in the cheaper one, and
+  the surviving test is named where the deleted one lived.
 - **A spec skips only for a prerequisite global setup cannot provide**, and says which in the skip reason.
 - **A test runs only where its container can start** — `sandboxcheck.Require(t, image)` in Go,
   `requireSandbox()` in e2e. A host whose podman storage cannot initialise skips with that reason; it does
-  not fail. `docs/testing.md → Go unit test environment`.
+  not fail. `RequireAvailable` is the gate for a claim about a *honoured* sandbox, and `RequireBuild` the one
+  for a test that stages an image of its own. `docs/testing.md → Go unit test environment`.
 - **Config-modifying specs run in the `isolated` project**, and **a spec that runs an executor turn owns its
   project and releases its tasks when the test ends** — an unreleased task closes the admission gate on the
   tests after it.
