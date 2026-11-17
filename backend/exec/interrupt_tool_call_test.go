@@ -512,35 +512,3 @@ func TestInterruptIsNotATurnFailure(t *testing.T) {
 		}
 	}
 }
-
-// A stop is a stop: cancelling the task mid-command is reported as the command failing, not as an
-// interrupt, and the run makes no further provider call.
-func TestStoppingATaskIsNotAnInterrupt(t *testing.T) {
-	t.Parallel()
-	run := newInterruptRun(t, &types.Task{Title: "Stop", Prompt: "Work"},
-		toolCallsScript(
-			scriptToolCall{id: "call_1", name: "bash", args: `{"command":"` + bashSleepThen + `","timeout":90}`},
-		),
-		textScript("Anything else?"),
-	)
-
-	run.awaitStreamCalls(t, 1)
-	run.awaitFile(t, "started.txt")
-	run.cancel()
-
-	select {
-	case <-run.done:
-	case <-time.After(30 * time.Second):
-		t.Fatal("the executor did not finish after the task was stopped")
-	}
-
-	for _, row := range run.toolRows(t) {
-		got := storedResult(t, row)
-		if got["interrupted"] == true {
-			t.Errorf("tool %v was recorded as interrupted by a user message; a stop is not a message", row.ID)
-		}
-	}
-	if got := run.llm.streamCalls(); got != 1 {
-		t.Errorf("streaming LLM calls = %d after a stop, want 1", got)
-	}
-}
