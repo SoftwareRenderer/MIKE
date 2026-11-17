@@ -125,6 +125,7 @@ const catalog = {
     'explorer.shared.menuDownloadArchive': 'Download as .tar.gz',
     'explorer.shared.menuRename': 'Rename',
     'explorer.shared.menuDelete': 'Delete',
+    'explorer.shared.menuInfo': 'Info',
     'explorer.shared.selectedCount': { one: '{count} selected', other: '{count} selected' },
     'explorer.shared.selectionAria': 'Actions for the selected files',
     'explorer.shared.selectionClear': 'Clear selection',
@@ -259,6 +260,28 @@ const catalog = {
     'explorer.archive.loadingEntry': 'Reading…',
     'explorer.archive.entryFailed': 'Could not read file from the archive.',
     'explorer.archive.failed': 'Could not read this archive.',
+
+    // ── FileInfoModal.svelte — the Explorer's Info dialog, one row per selected path ──
+    'explorer.fileInfo.title': 'File info',
+    'explorer.fileInfo.listingAria': 'File info for the selected paths',
+    'explorer.fileInfo.name': 'Name',
+    'explorer.fileInfo.kind': 'Kind',
+    'explorer.fileInfo.size': 'Size',
+    'explorer.fileInfo.modified': 'Modified',
+    'explorer.fileInfo.permissions': 'Permissions',
+    'explorer.fileInfo.type': 'Type',
+    'explorer.fileInfo.entries': { one: '{count} item', other: '{count} items' },
+    'explorer.fileInfo.folders': { one: '{count} folder', other: '{count} folders' },
+    'explorer.fileInfo.missing': { one: '{count} not found', other: '{count} not found' },
+    'explorer.fileInfo.atLeast': 'at least {size}',
+    'explorer.fileInfo.ignored': 'Git-ignored',
+    'explorer.fileInfo.kindFile': 'File',
+    'explorer.fileInfo.kindFolder': 'Folder',
+    'explorer.fileInfo.kindLink': 'Symbolic link',
+    'explorer.fileInfo.kindOther': 'Other',
+    'explorer.fileInfo.kindMissing': 'Not found',
+    'explorer.fileInfo.kindUnknown': 'Unknown',
+    'explorer.fileInfo.failed': 'Could not read the file info.',
 
     // ═══ settings.* — Settings, ConfigModal and Extensions ═══
     // ── ConfigModal.svelte — shell, tabs, provider pairs, About, footer ──

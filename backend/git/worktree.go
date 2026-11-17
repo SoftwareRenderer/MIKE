@@ -284,8 +284,8 @@ type WorktreeManager struct {
 	stash    stashLocks    // the one stash stack, shared by every worktree and by the user's own entries
 	merge    mergeLocks    // the main checkout, which has a single HEAD and index
 
-	// taskSpaceWarn keeps the reason MeasureTaskSpace could not measure the root to one line: the
-	// measurement is retried on every refresh.
+	// taskSpaceWarn keeps the reason MeasureProjectTaskSpace could not price one project's worktrees to
+	// one line: the measurement is retried on every refresh.
 	taskSpaceWarn sync.Once
 }
 

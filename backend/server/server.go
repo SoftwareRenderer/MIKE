@@ -420,9 +420,10 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS) (*Serv
 	worktreeMgr := git.NewWorktreeManager(store, cfgStore)
 	s.appStreamMgr = stream.NewAppStreamManager(store, worktreeMgr)
 	s.appStreamMgr.SetStorageProbe(workspaceStorageProbe(cfgStore.WorkspaceDir))
-	// The worktree walk the task figure is built from: the stream caches it and runs it on its own
-	// goroutine, so nothing here waits for a checkout.
-	s.appStreamMgr.SetTaskSpaceProbe(worktreeMgr.MeasureTaskSpace)
+	// The worktree walk a project's task figure is built from. The stream caches it per project and runs
+	// it on its own goroutine, so nothing here waits for a checkout, and a project no board has open is
+	// never walked at all.
+	s.appStreamMgr.SetTaskSpaceProbe(worktreeMgr.MeasureProjectTaskSpace)
 	// First to close: a watcher runs git and container work on its own goroutines, and everything it
 	// can reach is torn down below it.
 	defer s.reg(stageWebsocketWatchers, "websocket watchers", s.appStreamMgr.Close)()

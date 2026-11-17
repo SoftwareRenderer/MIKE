@@ -121,7 +121,7 @@ describe('the file list context menu', () => {
 
         await openRowMenu(container, `${ROOT}/a.txt`);
         expect(rowEl(container, `${ROOT}/a.txt`)?.getAttribute('aria-selected')).toBe('true');
-        expect(menuLabels()).toEqual(['Open', 'Open in new window', 'Download', 'Cut', 'Copy', 'Rename', 'Delete']);
+        expect(menuLabels()).toEqual(['Open', 'Open in new window', 'Download', 'Info', 'Cut', 'Copy', 'Rename', 'Delete']);
         expect(menuEl()?.getAttribute('aria-label')).toBe('File actions');
     });
 
@@ -134,7 +134,7 @@ describe('the file list context menu', () => {
         await openRowMenu(container, `${ROOT}/a.txt`);
         expect(rowEl(container, `${ROOT}/b.txt`)?.getAttribute('aria-selected')).toBe('true');
         // A batch of two has no single name to rename, and no single file to download.
-        expect(menuLabels()).toEqual(['Open', 'Open in new window', 'Download as .tar.gz', 'Cut', 'Copy', 'Delete']);
+        expect(menuLabels()).toEqual(['Open', 'Open in new window', 'Download as .tar.gz', 'Info', 'Cut', 'Copy', 'Delete']);
     });
 
     // fireEvent returns false once the handler has prevented the default, which is what keeps the
@@ -181,7 +181,7 @@ describe('the file list context menu', () => {
 
         await fireEvent.click(rowEl(container, `${ROOT}/a.txt`)!, { ctrlKey: true });
         await openRowMenu(container, `${ROOT}/a.txt`);
-        expect(menuLabels()).toEqual(['Open', 'Open in new window', 'Download', 'Cut', 'Copy', 'Rename', 'Delete']);
+        expect(menuLabels()).toEqual(['Open', 'Open in new window', 'Download', 'Info', 'Cut', 'Copy', 'Rename', 'Delete']);
 
         menuItem('Copy')!.click();
         await waitFor(() => expect(menuEl()).toBeNull());
@@ -411,6 +411,7 @@ describe('opening a row in a new window', () => {
         expect(menuLabels()).not.toContain('Open in new window');
         expect(menuLabels()).not.toContain('Download');
         expect(menuLabels()).not.toContain('Download as .tar.gz');
+        expect(menuLabels()).not.toContain('Info');
 
         const press = await middlePress(rowEl(container, ROOT)!);
 

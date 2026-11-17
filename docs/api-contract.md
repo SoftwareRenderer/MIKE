@@ -112,10 +112,12 @@ Tests: `backend/httputil/json_defaults_test.go`.
 
 ### The filesystem reading is pushed, never asked for
 
-`storage_usage` is a flat frame carrying `total_bytes` and `avail_bytes` — the server's own filesystem,
-measured with `statfs` on the worktrees root (`cfgStore.WorkspaceDir()`, wired in
-`backend/server/server.go`). It is the only way the browser learns this figure: there is no route for it,
-and `apiroutes` would refuse one, because a route nobody calls is the failure that rule exists for.
+`storage_usage` is a flat frame with two shapes under one name. The first carries `total_bytes` and
+`avail_bytes` — the server's own filesystem, measured with `statfs` on the worktrees root
+(`cfgStore.WorkspaceDir()`, wired in `backend/server/server.go`) — and goes to every connection. The
+second carries `project_id`, `tasks_bytes` and `tasks_count`, and goes only to the connections holding
+that project. Neither is asked for: there is no route for them, and `apiroutes` would refuse one,
+because a route nobody calls is the failure that rule exists for.
 
 - `avail_bytes` is what an unprivileged process can still write, so a filesystem's root-reserved blocks
   count as *used*. That is the space this server can fill, and the Done count warns on it: past 80%
@@ -126,23 +128,33 @@ and `apiroutes` would refuse one, because a route nobody calls is the failure th
   a structural change has settled — that is how clearing Done, or deleting a task or a project, stops
   the count from staying red over space just freed. That broadcast runs after the teardown steps, so the
   bytes are gone by then. `HandleStream` does it to a connection it has just accepted, so a board opened
-  after the last task landed is not left showing nothing.
+  after the last task landed is not left showing nothing. The two pushes that name a project push that
+  project's task figure with the filesystem reading, each to its own audience.
 - The frame is `null`-suppressed: with no probe wired, or a probe that cannot read the root, no frame is
   sent at all. A frame of zeroes would be a divide-by-zero the client cannot tell from an empty disk.
-- `tasks_bytes` and `tasks_count` join the frame once the task worktrees have been walked: the apparent
-  bytes under every `<worktrees root>/<projectID>/<taskID>` directory, and how many of them there are. A
-  task's git objects are not in that figure — a worktree's `.git` is a pointer file, and the objects live
-  in the project's `.git`.
+- The task figure is the apparent bytes under `<worktrees root>/<projectID>/<taskID>` and how many such
+  directories exist. A task's git objects are not in that figure — a worktree's `.git` is a pointer file,
+  and the objects live in the project's `.git`.
+- The figure belongs to the board that asked for it. A client reading one project is never sent what
+  another holds, and a board with no figure of its own draws no line rather than "0 B in 0 worktrees"
+  (`storageTasksSentence` in `utils/storage-usage.ts`).
 - A checkout is not a `statfs`, so the walk never runs where a frame is built. `SetTaskSpaceProbe` hands
-  the stream a measurement it caches for `defaultTaskSpaceTTL` and refreshes on its own goroutine: the
-  reading that started the refresh carries the older figure, and another reading follows with the new
-  one. A walk starts only when a reading is about to be sent, so a quiet server walks nothing.
-- Part of a total is refused rather than shown. `backend/git`'s `MeasureTaskSpace` prices each checkout
-  under an entry cap inside one shared deadline, and one checkout it cannot price is no figure at all.
-  With no figure ever taken neither key is sent, so the client draws no line instead of "0 B in 0
-  worktrees"; a figure once taken survives a later failure, because a reading that lags did not lie.
+  the stream a measurement of **one project**, which the stream caches per project for
+  `defaultTaskSpaceTTL` and refreshes on its own goroutine: the reading that started the refresh carries
+  the older figure, and another reading follows with the new one.
+- A walk starts only where a reading is owed — a project's first subscription, a task landing in Done, a
+  settled teardown — and only while a connection holds that project, so a project no board has open is
+  walked by nobody. Its cached figure goes with its last subscriber, which is what makes a reopened board
+  measure afresh rather than trust a figure of unknown age.
+- Part of a total is refused rather than shown. `backend/git`'s `MeasureProjectTaskSpace` prices each
+  checkout under an entry cap inside one deadline, which one project spends alone. One checkout it cannot
+  price is no figure for that project and leaves every other project's figure standing. With no figure
+  ever taken neither key is sent; a figure once taken survives a later failure, because a figure that is
+  out of date is not a figure that is wrong.
 - Only a directory named after a project row that still exists is priced — the guard `GarbageCollect`
   sweeps by, and the reason MIKE's build scratch tree, which shares the root, is never counted as a task.
+- Tests: `backend/stream/app_stream_storage_test.go` for who is told what, and
+  `backend/git/taskspace_test.go` for what one project's walk prices.
 
 Test: `backend/stream/app_stream_storage_test.go` drives all three over a real socket. The name is in
 both vocabularies (`backend/types/ws.go`, `api/events.ts`) and `make archgate RULE=wsevents` fails if
@@ -817,6 +829,44 @@ its own, not in place of the explorer.
 
 Tests: `backend/server/handler_fs_download_test.go`, `backend/fsutil/tar_test.go`,
 `frontend/src/lib/components/__tests__/file-browser-download.unit.svelte.ts`.
+
+## The file info row
+
+`GET /api/fs/stat?project=&task=&path=&path=…` (`backend/server/handler_fs_stat.go`) answers the Explorer's
+"Info" menu item: what a row *is*, rather than what a row is called. A listing answers
+`{name, isDir, path, isGitRepo, ignored}` and nothing about size or time, so this route is where a row's
+byte count, permissions, modified instant and MIME type come from.
+
+- **The row is a stat and nothing more.** `os.Lstat` on the jailed host path; no file is opened, so
+  `maxFSReadBytes` and the read routes' caps have no part here. The folder walk below is the only bound.
+- **One row per asked path, in the request's own order,** and `path` repeats the spelling the caller sent
+  rather than the host path it resolved to. A sandboxed project's rows are container paths, and
+  `docs/confinement.md → File endpoints: the project plus the task the request names` is why.
+- **A gone path is a row, not a refusal:** `kind: "missing"`, with no bytes, mode or time claimed. The menu
+  opens on a listing and a task can empty it before the request lands, so one vanished row must not hide the
+  others. A name the kernel will not describe answers `kind: "unknown"`, and the cause goes to the log.
+- **The kinds are tokens** — `file`, `dir`, `link`, `other`, `missing`, `unknown` — and the client is what
+  puts a word on one.
+- **A link answers nothing about its destination.** The jail resolves a name before handing it over, so a
+  name the stat finds to be a link is the swap that check exists for. A task can aim a link at anywhere on
+  the host. Neither the destination nor its size is answered, and `listingIsDir` keeps the same fact out of
+  the listing.
+- **A folder's figure is walked under a budget** — `fsStatWalkEntries` and `fsStatWalkTimeout` into
+  `fsutil.WalkBudget`. `bytes` sums the regular files below it and `items` counts its entries; the folder
+  itself and any `.git` are counted by neither. `partial: true` says the walk stopped early, which makes the
+  two a floor rather than a total. A tree that cannot be read answers neither field: an unmeasured folder is
+  not an empty one, and its own stat still stands.
+- **`mime` is `mime.TypeByExtension` on the name** — a suffix's reputation, not a reading of the bytes,
+  which is the opposite of how the archive listing decides its format.
+- **git answers nothing here.** The Explorer holds `ignored` from its listing, which runs one
+  `check-ignore` per directory, and hands it to the dialog beside the rows.
+- **The batch cap and the jail are the download route's:** `maxFSOpsBatch` paths, each through
+  `fsRequestScope`, `fsScopeTarget` and `requireNoGitSegment`, all of them refused before any row is taken.
+  A missing `path`, a missing `project` or an over-long batch is a 400.
+
+Tests: `go test ./backend/server/ -run TestFSStat`, `backend/fsutil/treesize_test.go`,
+`frontend/src/lib/components/__tests__/file-info-modal.unit.svelte.ts`, and
+`frontend/tests/e2e/explorer-file-info.spec.ts`.
 
 ## The Explorer's file batch
 

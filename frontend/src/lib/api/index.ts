@@ -159,10 +159,11 @@ export {
     initGitRepository,
     searchFsPaths,
     downloadURL,
+    statFsPaths,
     getHomeDirectory,
     resolveHomeDirectory,
 } from './fs';
-export type { FsEntry, FsFileRead, FsArchiveEntry, FsArchiveListing, FsSearchResult, FsSearchAnswer } from './fs';
+export type { FsEntry, FsFileRead, FsArchiveEntry, FsArchiveListing, FsStatRow, FsSearchResult, FsSearchAnswer } from './fs';
 export { deleteFsPaths, copyFsPaths, moveFsPaths, renameFsPath } from './fs-ops';
 export type { FsOpsResult } from './fs-ops';
 

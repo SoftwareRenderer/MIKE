@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"mike/backend/fsutil"
+	"mike/backend/store"
 	"mike/pkg/logging"
 )
 
@@ -17,13 +18,15 @@ import (
 // Nothing records that figure, so measuring it means walking the checkouts — which is bounded here.
 
 const (
-	// taskSpaceWalkTimeout bounds one whole measurement; taskSpaceMaxWalkEntries bounds one checkout
-	// inside it. Both keep a host of monorepos from a walk that runs for minutes.
+	// taskSpaceWalkTimeout bounds one project's measurement, and taskSpaceMaxWalkEntries bounds one
+	// checkout inside it. Both keep a host of monorepos from a walk that runs for minutes. The budget
+	// belongs to one project, so a project that cannot be priced does not spend the time the others
+	// need.
 	taskSpaceWalkTimeout    = 15 * time.Second
 	taskSpaceMaxWalkEntries = 200_000
 )
 
-// TaskWorktreeUsage is the disk the task worktrees hold.
+// TaskWorktreeUsage is the disk one project's task worktrees hold.
 type TaskWorktreeUsage struct {
 	// Bytes is the apparent size of every file inside every task worktree. A worktree's .git is a
 	// pointer file, so a task's git objects stay in the project's .git and are not in this.
@@ -32,11 +35,11 @@ type TaskWorktreeUsage struct {
 	Worktrees int
 }
 
-// MeasureTaskSpace answers what every task worktree under the worktrees root holds. ok=false means no
-// figure — an unreadable root, or a checkout left unpriced — while a root that does not exist yet is a
-// machine with no tasks, whose figure is zero.
-func (wm *WorktreeManager) MeasureTaskSpace() (TaskWorktreeUsage, bool) {
-	usage, err := wm.walkTaskSpace()
+// MeasureProjectTaskSpace answers what one project's task worktrees hold. ok=false means no figure —
+// an unreadable directory, or a checkout left unpriced — while a project with no worktree directory yet
+// is a project with no tasks, whose figure is zero.
+func (wm *WorktreeManager) MeasureProjectTaskSpace(projectID string) (TaskWorktreeUsage, bool) {
+	usage, err := wm.walkProjectTaskSpace(projectID)
 	if err != nil {
 		// The measurement is retried on every refresh, so the reason is said once.
 		wm.taskSpaceWarn.Do(func() {
@@ -47,66 +50,56 @@ func (wm *WorktreeManager) MeasureTaskSpace() (TaskWorktreeUsage, bool) {
 	return usage, true
 }
 
-// walkTaskSpace measures the root and answers why it could not, which an ok flag cannot carry.
+// walkProjectTaskSpace measures one project's directory and answers why it could not, which an ok flag
+// cannot carry.
 //
 // Only a <root>/<projectID>/<taskID> directory under a project row that still exists is priced — the
 // guard GarbageCollect sweeps by, and what keeps MIKE's build scratch tree out of a task's figure.
-func (wm *WorktreeManager) walkTaskSpace() (TaskWorktreeUsage, error) {
-	root := wm.worktreesRoot()
-	projects, err := wm.store.ListProjects()
-	if err != nil {
-		return TaskWorktreeUsage{}, fmt.Errorf("listing projects: %w", err)
+func (wm *WorktreeManager) walkProjectTaskSpace(projectID string) (TaskWorktreeUsage, error) {
+	_, err := wm.store.GetProject(projectID)
+	if errors.Is(err, store.ErrProjectNotFound) {
+		return TaskWorktreeUsage{}, nil
 	}
-	live := make(map[string]bool, len(projects))
-	for _, p := range projects {
-		live[p.ID] = true
+	if err != nil {
+		return TaskWorktreeUsage{}, fmt.Errorf("reading project %s: %w", projectID, err)
 	}
 
-	entries, err := os.ReadDir(root)
+	projectDir := wm.projectWorktreesDir(projectID)
+	taskEntries, err := os.ReadDir(projectDir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return TaskWorktreeUsage{}, nil
 	}
 	if err != nil {
-		return TaskWorktreeUsage{}, fmt.Errorf("reading %s: %w", root, err)
+		return TaskWorktreeUsage{}, fmt.Errorf("reading %s: %w", projectDir, err)
 	}
 
-	// One budget for the whole measurement, handed to each checkout as the time still left to it.
+	// One budget covers the project, and each checkout is handed the time still left to it.
 	deadline := time.Now().Add(taskSpaceWalkTimeout)
 	var total TaskWorktreeUsage
-	for _, projectEntry := range entries {
-		if !projectEntry.IsDir() || !live[projectEntry.Name()] {
+	for _, taskEntry := range taskEntries {
+		// A dot entry is not a task directory, the same reading GarbageCollect takes.
+		if !taskEntry.IsDir() || strings.HasPrefix(taskEntry.Name(), ".") {
 			continue
 		}
-		projectDir := filepath.Join(root, projectEntry.Name())
-		taskEntries, err := os.ReadDir(projectDir)
+		worktree := filepath.Join(projectDir, taskEntry.Name())
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return TaskWorktreeUsage{}, fmt.Errorf(
+				"pricing %s: the %s budget is spent", worktree, taskSpaceWalkTimeout)
+		}
+		tree, err := fsutil.TreeUsageFor(worktree, fsutil.WalkBudget{
+			MaxEntries: taskSpaceMaxWalkEntries,
+			Timeout:    remaining,
+		})
 		if err != nil {
-			return TaskWorktreeUsage{}, fmt.Errorf("reading %s: %w", projectDir, err)
+			return TaskWorktreeUsage{}, err
 		}
-		for _, taskEntry := range taskEntries {
-			// A dot entry is not a task directory, the same reading GarbageCollect takes.
-			if !taskEntry.IsDir() || strings.HasPrefix(taskEntry.Name(), ".") {
-				continue
-			}
-			worktree := filepath.Join(projectDir, taskEntry.Name())
-			remaining := time.Until(deadline)
-			if remaining <= 0 {
-				return TaskWorktreeUsage{}, fmt.Errorf(
-					"pricing %s: the %s budget is spent", worktree, taskSpaceWalkTimeout)
-			}
-			tree, err := fsutil.TreeUsageFor(worktree, fsutil.WalkBudget{
-				MaxEntries: taskSpaceMaxWalkEntries,
-				Timeout:    remaining,
-			})
-			if err != nil {
-				return TaskWorktreeUsage{}, err
-			}
-			if !tree.Complete {
-				return TaskWorktreeUsage{}, fmt.Errorf(
-					"pricing %s: the walk stopped before its end", worktree)
-			}
-			total.Bytes += tree.Bytes
-			total.Worktrees++
+		if !tree.Complete {
+			return TaskWorktreeUsage{}, fmt.Errorf(
+				"pricing %s: the walk stopped before its end", worktree)
 		}
+		total.Bytes += tree.Bytes
+		total.Worktrees++
 	}
 	return total, nil
 }

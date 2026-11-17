@@ -15,6 +15,10 @@ type WalkBudget struct {
 	// Timeout bounds the walk from the call; zero is no deadline. It is checked between entries, so a
 	// wedged stat is not interrupted.
 	Timeout time.Duration
+	// SkipGit leaves a .git out of both figures, in either shape: a checkout's directory or a linked
+	// worktree's gitfile. A caller pricing what a listing shows sets it, because no listing offers a
+	// row for that name; a caller pricing the bytes on disk does not.
+	SkipGit bool
 }
 
 // TreeUsage is what one directory tree holds.
@@ -22,7 +26,9 @@ type TreeUsage struct {
 	// Bytes is the sum of every regular file's apparent size, so a sparse file counts for less than
 	// the blocks it holds.
 	Bytes int64
-	// Complete says every entry was looked at; when it is false, Bytes is part of the tree.
+	// Items counts the entries below the directory, the directory itself excluded.
+	Items int
+	// Complete says every entry was looked at; when it is false, Bytes and Items are part of the tree.
 	Complete bool
 }
 
@@ -39,9 +45,16 @@ func TreeUsageFor(path string, budget WalkBudget) (TreeUsage, error) {
 	if budget.Timeout > 0 {
 		deadline = time.Now().Add(budget.Timeout)
 	}
-	err := filepath.WalkDir(path, func(_ string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return fmt.Errorf("tree %s: %w", path, err)
+		}
+		if budget.SkipGit && d.Name() == GitDirName {
+			// SkipDir on the gitfile of a linked worktree would drop the rest of its folder.
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		if budget.MaxEntries > 0 {
 			visited++
@@ -53,6 +66,9 @@ func TreeUsageFor(path string, budget WalkBudget) (TreeUsage, error) {
 		if !deadline.IsZero() && !time.Now().Before(deadline) {
 			stopped = true
 			return filepath.SkipAll
+		}
+		if p != path {
+			usage.Items++
 		}
 		if !d.Type().IsRegular() {
 			return nil

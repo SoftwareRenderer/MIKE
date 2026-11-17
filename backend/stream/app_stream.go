@@ -174,14 +174,18 @@ type AppStreamManager struct {
 
 	// storageProbe feeds storageUsageFrame; nil sends nothing.
 	storageProbe func() (fsutil.DiskUsage, bool)
-	// taskSpaceProbe measures what the task worktrees hold; nil sends no task figure. It is a tree
-	// walk, so it runs only through this cache, never on the path that builds a frame.
-	taskSpaceProbe func() (git.TaskWorktreeUsage, bool)
-	taskSpace      *git.TaskWorktreeUsage
-	taskSpaceAt    time.Time
-	// taskSpaceBusy is the single-flight latch: however many readings ask at once, one tree is walked
-	// at a time, and the readings in the meantime send the figure held.
-	taskSpaceBusy bool
+	// taskSpaceProbe measures what one project's task worktrees hold. A nil probe sends no task figure.
+	// The measurement is a tree walk, so it runs only through this cache and never while a frame is
+	// built.
+	taskSpaceProbe func(projectID string) (git.TaskWorktreeUsage, bool)
+	// taskSpace holds one figure per project a browser has open. An entry is made when the project is
+	// first asked for and dropped when its last subscriber leaves, so the walk never covers a project
+	// nobody is reading.
+	taskSpace   map[string]*git.TaskWorktreeUsage
+	taskSpaceAt map[string]time.Time
+	// taskSpaceBusy is the single-flight latch, one entry per project. However many readings ask at the
+	// same time, one walk of that project runs, and the readings in the meantime send the figure held.
+	taskSpaceBusy map[string]bool
 
 	// writeTimeout bounds a single frame's delivery (httputil.WriteTimeout).
 	writeTimeout time.Duration
@@ -204,6 +208,9 @@ func NewAppStreamManager(store *store.Store, worktreeMgr *git.WorktreeManager) *
 		worktreeMgr:    worktreeMgr,
 		taskBuffers:    make(map[string][]taskFrame),
 		taskBufLoad:    make(map[string]int),
+		taskSpace:      make(map[string]*git.TaskWorktreeUsage),
+		taskSpaceAt:    make(map[string]time.Time),
+		taskSpaceBusy:  make(map[string]bool),
 		taskBufSize:    DefaultBufferSize,
 		taskBufBound:   DefaultBufferBytes,
 		taskBufKeys:    DefaultTaskBufferKeys,
@@ -433,6 +440,7 @@ func (asm *AppStreamManager) releaseProjectWatchers(projectID string) {
 	if asm.hasProjectSubscribers(projectID) {
 		return
 	}
+	asm.forgetTaskSpace(projectID)
 	if asm.branchWatcher != nil {
 		asm.branchWatcher.Unwatch(projectID)
 	}
@@ -609,6 +617,7 @@ func (asm *AppStreamManager) Broadcast(projectID string) {
 	asm.BroadcastProjectCounts()
 	// Runs after every teardown step, so freed bytes are already counted.
 	asm.broadcastStorageUsage()
+	asm.broadcastProjectTaskSpace(projectID)
 }
 
 // SetStorageProbe registers the reading storageUsageFrame carries. An unwired probe and ok=false both
@@ -619,58 +628,80 @@ func (asm *AppStreamManager) SetStorageProbe(probe func() (fsutil.DiskUsage, boo
 	asm.mu.Unlock()
 }
 
-// defaultTaskSpaceTTL is how long a task figure stays worth sending before the walk runs again. A
-// figure changes only when a worktree is created or removed, which is when a reading is pushed too.
+// defaultTaskSpaceTTL is how long one project's task figure stays worth sending before its tree is
+// walked again. A figure changes only when one of that project's worktrees is created or removed, and
+// each of those moments pushes a reading of its own.
 const defaultTaskSpaceTTL = 60 * time.Second
 
-// SetTaskSpaceProbe registers the measurement the task figure is built from and clears what was
-// cached. Like SetStorageProbe it is wired before any connection exists; the walk is never called
-// while a frame is built, and no figure is sent before one has been measured.
-func (asm *AppStreamManager) SetTaskSpaceProbe(probe func() (git.TaskWorktreeUsage, bool)) {
+// SetTaskSpaceProbe registers the measurement a project's task figure is built from and clears what was
+// cached. Like SetStorageProbe it is wired before any connection exists.
+func (asm *AppStreamManager) SetTaskSpaceProbe(probe func(projectID string) (git.TaskWorktreeUsage, bool)) {
 	asm.mu.Lock()
 	asm.taskSpaceProbe = probe
-	asm.taskSpace = nil
-	asm.taskSpaceAt = time.Time{}
+	asm.taskSpace = make(map[string]*git.TaskWorktreeUsage)
+	asm.taskSpaceAt = make(map[string]time.Time)
+	asm.taskSpaceBusy = make(map[string]bool)
 	asm.mu.Unlock()
 }
 
-// taskSpaceFigure is the figure a frame is built with: the measurement last taken, with a fresh walk
-// started once the last attempt has aged past the budget. A failed walk keeps the figure it had — a
-// reading that lags did not lie.
-func (asm *AppStreamManager) taskSpaceFigure() *git.TaskWorktreeUsage {
+// taskSpaceFigure is the figure a project's frame is built with: the measurement last taken for that
+// project, with a fresh walk started once its last attempt has aged past the budget. A walk that fails
+// leaves the previous figure in place, because a figure that is out of date is not a figure that is
+// wrong.
+func (asm *AppStreamManager) taskSpaceFigure(projectID string) *git.TaskWorktreeUsage {
 	asm.mu.Lock()
 	defer asm.mu.Unlock()
-	if time.Since(asm.taskSpaceAt) > defaultTaskSpaceTTL && asm.taskSpaceProbe != nil && !asm.taskSpaceBusy {
-		asm.taskSpaceBusy = true
-		go asm.refreshTaskSpace(asm.taskSpaceProbe)
+	if asm.taskSpaceProbe != nil && !asm.taskSpaceBusy[projectID] &&
+		time.Since(asm.taskSpaceAt[projectID]) > defaultTaskSpaceTTL {
+		asm.taskSpaceBusy[projectID] = true
+		go asm.refreshTaskSpace(projectID, asm.taskSpaceProbe)
 	}
-	return asm.taskSpace
+	return asm.taskSpace[projectID]
 }
 
-// refreshTaskSpace takes one measurement and, when it succeeded, pushes the reading again: the frame
-// that started this walk carried the older figure.
-func (asm *AppStreamManager) refreshTaskSpace(probe func() (git.TaskWorktreeUsage, bool)) {
-	space, ok := probe()
+// refreshTaskSpace takes one project's measurement and, when it succeeded, pushes that project's
+// reading again: the frame that started this walk carried the older figure.
+func (asm *AppStreamManager) refreshTaskSpace(projectID string, probe func(string) (git.TaskWorktreeUsage, bool)) {
+	space, ok := probe(projectID)
 
 	asm.mu.Lock()
-	// The stamp moves even when the walk failed, so an unreadable root is asked once per budget rather
-	// than once per frame.
-	asm.taskSpaceAt = time.Now()
-	asm.taskSpaceBusy = false
-	if ok {
-		// A frame builds its numbers from this figure after releasing the lock, so a published figure
-		// is never written again.
-		asm.taskSpace = &space
+	delete(asm.taskSpaceBusy, projectID)
+	wanted := len(asm.subscribers(projectSubs, projectID)) > 0
+	if wanted {
+		// The stamp moves even when the walk failed, so a tree that cannot be priced is asked about
+		// once per budget rather than once per frame.
+		asm.taskSpaceAt[projectID] = time.Now()
+		if ok {
+			// A frame builds its numbers from this figure after the lock is released, so a published
+			// figure is never written again.
+			asm.taskSpace[projectID] = &space
+		}
+	} else {
+		// The board closed while this walk was running. A stamp left here with no figure would tell the
+		// next reader that its figure is fresh, and no walk would start again until the budget expired.
+		delete(asm.taskSpace, projectID)
+		delete(asm.taskSpaceAt, projectID)
 	}
 	asm.mu.Unlock()
 
-	if ok {
-		asm.broadcastStorageUsage()
+	if wanted && ok {
+		asm.broadcastProjectTaskSpace(projectID)
 	}
 }
 
-// storageUsageFrame builds the storage_usage frame from the cached readings, or nil when the
-// filesystem has none. The client divides by total_bytes, so a zero total sends nothing.
+// forgetTaskSpace drops a project's cached figure once no connection holds the project. That is what
+// keeps the walk to the projects a browser is reading, and what makes a reopened board measure again
+// from nothing. The walk's latch belongs to the goroutine that set it, so a board reopened during a walk
+// is served by the walk already running rather than by a second one.
+func (asm *AppStreamManager) forgetTaskSpace(projectID string) {
+	asm.mu.Lock()
+	defer asm.mu.Unlock()
+	delete(asm.taskSpace, projectID)
+	delete(asm.taskSpaceAt, projectID)
+}
+
+// storageUsageFrame builds the storage_usage frame from the filesystem reading, or nil when there is
+// none. The client divides by total_bytes, so a zero total sends nothing.
 func (asm *AppStreamManager) storageUsageFrame() *outboundFrame {
 	asm.mu.RLock()
 	probe := asm.storageProbe
@@ -686,17 +717,47 @@ func (asm *AppStreamManager) storageUsageFrame() *outboundFrame {
 		"total_bytes": usage.TotalBytes,
 		"avail_bytes": usage.AvailBytes,
 	}
-	// The task figure rides along when it has been measured, and is absent rather than zero when it
-	// has not.
-	if space := asm.taskSpaceFigure(); space != nil {
-		payload["tasks_bytes"] = space.Bytes
-		payload["tasks_count"] = space.Worktrees
-	}
 	msg, err := json.Marshal(appFrame(types.WSTypeStorageUsage, payload))
 	if err != nil {
 		return nil
 	}
 	return &outboundFrame{data: msg, bucket: string(types.WSTypeStorageUsage)}
+}
+
+// projectTaskSpaceFrame builds the frame carrying one project's task figure, or nil when that project
+// has never been measured. A frame of zeroes would reach the browser as "0 B in 0 worktrees", which it
+// cannot tell apart from a board with no tasks.
+func (asm *AppStreamManager) projectTaskSpaceFrame(projectID string) *outboundFrame {
+	space := asm.taskSpaceFigure(projectID)
+	if space == nil {
+		return nil
+	}
+	msg, err := json.Marshal(appFrame(types.WSTypeStorageUsage, map[string]any{
+		"project_id":  projectID,
+		"tasks_bytes": space.Bytes,
+		"tasks_count": space.Worktrees,
+	}))
+	if err != nil {
+		return nil
+	}
+	return &outboundFrame{data: msg, bucket: string(types.WSTypeStorageUsage)}
+}
+
+// broadcastProjectTaskSpace pushes one project's task figure to the connections holding that project.
+// A browser reading another project never receives it, and where no browser holds the project there is
+// nobody to ask the walk for anything.
+func (asm *AppStreamManager) broadcastProjectTaskSpace(projectID string) {
+	asm.mu.RLock()
+	targets := asm.subscribers(projectSubs, projectID)
+	asm.mu.RUnlock()
+	if len(targets) == 0 {
+		return
+	}
+	frame := asm.projectTaskSpaceFrame(projectID)
+	if frame == nil {
+		return
+	}
+	asm.deliver(targets, frame.data, frame.bucket)
 }
 
 // broadcastStorageUsage pushes the filesystem reading to every client. One missed is one kept.
@@ -799,6 +860,7 @@ func (asm *AppStreamManager) BroadcastTaskUpdated(projectID string, task *types.
 	// Done is the status the reading measures.
 	if task != nil && task.Status == types.StatusDone {
 		asm.broadcastStorageUsage()
+		asm.broadcastProjectTaskSpace(projectID)
 	}
 }
 
@@ -1314,6 +1376,13 @@ func (asm *AppStreamManager) initialProjectWorker(ctx context.Context, client *c
 
 func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client *clientState, sub AppStreamSubscription) {
 	projectID := sub.ProjectID
+	// The Done column's task line. This connection has missed every push for the board it just opened,
+	// and the figure it is given may be the one the previous reading held; the walk that replaces it
+	// pushes again. It is sent whether or not the diff burst below has anything to read.
+	if frame := asm.projectTaskSpaceFrame(projectID); frame != nil {
+		client.out.push(frame.data, frame.bucket)
+	}
+
 	if asm.store == nil || asm.worktreeMgr == nil {
 		return
 	}

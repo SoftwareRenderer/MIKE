@@ -13,13 +13,13 @@ import Column from '$lib/components/Column.svelte';
 import { storageStatus } from '$lib/services/storage-usage.svelte';
 
 /** One column, no tasks, and only the reading under test behind it. */
-function renderColumn(columnId: string) {
+function renderColumn(columnId: string, projectId: string | undefined) {
     return render(Column, {
         columnId,
         label: columnId,
         color: 'blue',
         tasks: [],
-        projectId: 'p1',
+        projectId,
         childrenMap: new Map(),
         expandedTasks: new Set<string>(),
         onToggleExpanded: vi.fn(),
@@ -38,9 +38,11 @@ function withoutReading(): void {
     withReading(0, 0);
 }
 
-/** The reading after the server walked the worktrees: `bytes` across `count` of them. */
-function withTaskFigure(bytes: number, count: number): void {
-    storageStatus.update({ total_bytes: 1024, avail_bytes: 1024 - 430, tasks_bytes: bytes, tasks_count: count });
+/** Sets both readings a Done column shows, with this board's project priced at `bytes` across `count`
+ *  worktrees. */
+function withTaskFigure(bytes: number, count: number, projectId = 'p1'): void {
+    withReading(430, 1024);
+    storageStatus.updateTasks(projectId, { tasks_bytes: bytes, tasks_count: count });
 }
 
 const tooltip = (container: HTMLElement) => container.querySelector('[role="tooltip"]');
@@ -49,6 +51,7 @@ const count = (container: HTMLElement) => container.querySelector('.header-right
 
 beforeEach(() => {
     withoutReading();
+    storageStatus.taskFigures = {};
 });
 
 afterEach(() => {
@@ -58,17 +61,17 @@ afterEach(() => {
 describe('the Done column count as the filesystem reading', () => {
     it('is a control only on Done, and only once the server has said something', () => {
         withReading(430, 1024);
-        const done = renderColumn('done');
+        const done = renderColumn('done', 'p1');
         expect(done.container.querySelector('button.storage-count')).toBeTruthy();
         cleanup();
 
-        const backlog = renderColumn('backlog');
+        const backlog = renderColumn('backlog', 'p1');
         expect(backlog.container.querySelector('button.storage-count')).toBeNull();
         expect(count(backlog.container)?.tagName).toBe('SPAN');
     });
 
     it('stays the plain count it was before any reading arrived', () => {
-        const { container } = renderColumn('done');
+        const { container } = renderColumn('done', 'p1');
         expect(container.querySelector('button.storage-count')).toBeNull();
         expect(count(container)?.tagName).toBe('SPAN');
     });
@@ -76,7 +79,7 @@ describe('the Done column count as the filesystem reading', () => {
     // jsdom has no hover — the case a tap has to cover.
     it('reveals the percentage to a tap, and hides it from the next one', async () => {
         withReading(430, 1024);
-        const { container } = renderColumn('done');
+        const { container } = renderColumn('done', 'p1');
         const badge = count(container) as HTMLElement;
 
         expect(container.querySelector('[role="tooltip"]')).toBeNull();
@@ -95,7 +98,7 @@ describe('the Done column count as the filesystem reading', () => {
 
     it('closes on Escape, the keyboard way out of a pinned reading', async () => {
         withReading(430, 1024);
-        const { container } = renderColumn('done');
+        const { container } = renderColumn('done', 'p1');
         const badge = count(container) as HTMLElement;
 
         await fireEvent.click(badge);
@@ -106,20 +109,20 @@ describe('the Done column count as the filesystem reading', () => {
 
     it('names itself differently once the disk is nearly full', () => {
         withReading(900, 1024);
-        const { container } = renderColumn('done');
+        const { container } = renderColumn('done', 'p1');
         expect(count(container)?.getAttribute('aria-label')).toBe(t('board.column.storageLowAria'));
     });
 
     it('warns with a symbol and the warning colour past four fifths, and with neither below', () => {
         withReading(900, 1024);
-        const low = renderColumn('done');
+        const low = renderColumn('done', 'p1');
         const lowBadge = count(low.container) as HTMLElement;
         expect(lowBadge.className).toContain('is-low');
         expect(lowBadge.querySelector('svg')).toBeTruthy();
         cleanup();
 
         withReading(430, 1024);
-        const calm = renderColumn('done');
+        const calm = renderColumn('done', 'p1');
         const calmBadge = count(calm.container) as HTMLElement;
         expect(calmBadge.className).not.toContain('is-low');
         expect(calmBadge.querySelector('svg')).toBeNull();
@@ -129,7 +132,7 @@ describe('the Done column count as the filesystem reading', () => {
 describe('the worktree figure inside the disclosure', () => {
     it('is a second line under the reading, once the server has measured one', async () => {
         withTaskFigure(12 * 1024 ** 3, 8);
-        const { container } = renderColumn('done');
+        const { container } = renderColumn('done', 'p1');
         await fireEvent.click(count(container) as HTMLElement);
 
         const tip = tooltip(container);
@@ -142,7 +145,7 @@ describe('the worktree figure inside the disclosure', () => {
     // in: the line is absent, never 0 B in 0 worktrees.
     it('is absent while the worktrees are unmeasured', async () => {
         withReading(430, 1024);
-        const { container } = renderColumn('done');
+        const { container } = renderColumn('done', 'p1');
         await fireEvent.click(count(container) as HTMLElement);
 
         const tip = tooltip(container);
@@ -153,9 +156,30 @@ describe('the worktree figure inside the disclosure', () => {
 
     it('says one worktree when the figure holds one', async () => {
         withTaskFigure(512, 1);
-        const { container } = renderColumn('done');
+        const { container } = renderColumn('done', 'p1');
         await fireEvent.click(count(container) as HTMLElement);
 
         expect(tooltip(container)?.textContent).toContain('Tasks: 512 B in 1 worktree');
+    });
+
+    // The figure belongs to a project, not to the server. What another board was told is nothing to
+    // draw here, and a column with no project has nothing to ask about.
+    it('is absent when the figure belongs to another project', async () => {
+        withTaskFigure(12 * 1024 ** 3, 8, 'other-project');
+        const { container } = renderColumn('done', 'p1');
+        await fireEvent.click(count(container) as HTMLElement);
+
+        const tip = tooltip(container);
+        expect(tip?.textContent).toContain('42%');
+        expect(tip?.textContent).not.toContain('Tasks:');
+        expect(tip?.querySelectorAll('div').length).toBe(1);
+    });
+
+    it('is absent on a column with no project', async () => {
+        withTaskFigure(12 * 1024 ** 3, 8);
+        const { container } = renderColumn('done', undefined);
+        await fireEvent.click(count(container) as HTMLElement);
+
+        expect(tooltip(container)?.textContent).not.toContain('Tasks:');
     });
 });

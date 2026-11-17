@@ -10,6 +10,7 @@
     import { useFileSelection } from '$lib/composables/use-file-selection.svelte';
     import FileContextMenu, { type FileMenuItem } from '$lib/components/FileContextMenu.svelte';
     import FileDropProgress from '$lib/components/FileDropProgress.svelte';
+    import FileInfoModal from '$lib/components/FileInfoModal.svelte';
     import EmptyState from '$lib/components/EmptyState.svelte';
     import Icon from '$lib/components/Icon.svelte';
     import SelectionActionBar from '$lib/components/SelectionActionBar.svelte';
@@ -390,6 +391,8 @@
     let renameInput = $state<HTMLInputElement | null>(null);
     // True while a delete, paste or rename is in flight; blocks a second one.
     let mutating = $state(false);
+    // The paths the Info dialog was opened on; null is no dialog.
+    let infoPaths = $state<string[] | null>(null);
 
     let rows = $derived(entries.map(e => ({ path: e.path, selectable: rowIsSelectable(e) })));
     const selection = useFileSelection({ rows: () => rows });
@@ -398,6 +401,13 @@
     function opsScope() {
         return { projectId, taskId: taskId || undefined };
     }
+
+    /** Held from the listing, which asks git once a directory, so the dialog asks git nothing. */
+    let ignoredByPath = $derived.by(() => {
+        const verdicts: Record<string, boolean> = {};
+        for (const entry of entries) if (entry.ignored) verdicts[entry.path] = true;
+        return verdicts;
+    });
 
     function isCut(path: string): boolean {
         return clipboard?.mode === 'cut' && clipboard.paths.includes(path);
@@ -455,6 +465,7 @@
                     disabled: mutating,
                     run: () => startDownload(targets),
                 });
+                items.push({ label: t('explorer.shared.menuInfo'), icon: 'info', run: () => showInfo(targets) });
             }
             if (paths.length > 0) {
                 items.push({ label: t('explorer.shared.menuCut'), icon: 'cut', disabled: mutating, run: () => setClipboard('cut', paths) });
@@ -476,6 +487,10 @@
         }
         return items;
     });
+
+    function showInfo(paths: string[]): void {
+        infoPaths = paths;
+    }
 
     function setClipboard(mode: 'copy' | 'cut', paths: string[]): void {
         if (paths.length === 0) return;
@@ -989,6 +1004,16 @@
                 </button>
             {/snippet}
         </SelectionActionBar>
+    {/if}
+
+    {#if infoPaths}
+        <FileInfoModal
+            project={projectId}
+            task={taskId}
+            paths={infoPaths}
+            ignored={ignoredByPath}
+            onClose={() => infoPaths = null}
+        />
     {/if}
 
     {#if menu}

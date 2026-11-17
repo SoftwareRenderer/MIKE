@@ -485,10 +485,15 @@ export interface ProjectCounts {
 export interface StorageUsage {
     total_bytes: number;
     avail_bytes: number;
-    /** What the task worktrees hold, absent until the server has walked them; it lags the reading
-     *  above by the server's measurement budget. */
-    tasks_bytes?: number;
-    tasks_count?: number;
+}
+
+/** What one project's task worktrees hold, from the `storage_usage` frame naming that project. The
+ *  server sends one only after its walk has priced every checkout, so a browser holds no figure for a
+ *  project it was never sent, and the figure lags the filesystem reading by the server's measurement
+ *  budget. */
+export interface TaskSpaceFigure {
+    tasks_bytes: number;
+    tasks_count: number;
 }
 
 export interface ModelStats {
