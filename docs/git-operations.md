@@ -106,7 +106,8 @@ title a model wrote.
 
 **Tests:** `backend/git/worktree_removal_test.go` (the three-part removal, the decorated orphan,
 live branches kept), `backend/git/branch_listing_test.go` (both markers, slug prefix, one segment),
-`backend/server/task_delete_branches_test.go` (single delete, Clear-all, fork thread branch).
+`backend/server/task_delete_branches_test.go` (single delete, Clear-all, fork thread branch, and the
+ sweep that keeps the branch a live task's row names).
 
 ## Submodules: share the person's copy, never re-fetch
 
