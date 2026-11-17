@@ -83,6 +83,9 @@ seconds while a message row stores nanoseconds, so the value read back sits befo
 moves the interrupted turn below its own marker. That is how a cut note came to read far below the divider it
 explains.
 
+Both halves reach a reopened chat from the read, not from the stream: the hub drops a frame once a row
+answers it (`docs/reconnection.md → The Replay Buffer`).
+
 `renderRecentContext` bounds it: a reasoning block keeps its end, where the conclusion names the next move,
 and everything else keeps its start, where a call's file and a result's first lines live. A call left
 unanswered when the cut came says so — that is where the work stopped. `trimToFit` never touches the note, so

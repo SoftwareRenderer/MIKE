@@ -841,6 +841,7 @@ var bufferContentFrames = map[string]bool{
 	string(types.WSTypeToolResult):    true,
 	string(types.WSTypeUserMessage):   true,
 	string(types.WSTypeSummarization): true,
+	string(types.WSTypeAdvisory):      true,
 	string(types.WSTypeError):         true,
 }
 

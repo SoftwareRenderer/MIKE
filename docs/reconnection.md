@@ -18,6 +18,14 @@ Since a reconnection is a new connection, the server doesn't know what the clien
 - **Purpose**: Replays the most recent frames of a task's turn to the client upon subscription.
 - **Limit**: Replays are capped at half the connection queue's budget to avoid blocking live frames.
 - **Consistency**: A task's frames are delivered exactly once through a locking mechanism (`asm.mu` and `taskBufMu`).
+- **Content vs state**: `bufferContentFrames` names the frames that form a conversation row — the token and tool
+  frames, `user_message`, `summarization`, `advisory` and `error`. `DurableThrough` drops every one of them,
+  because the client reads them back from the store. What no row answers stays: a tool call still running,
+  and the newest frame of each state bucket.
+- **A frame that writes a row belongs in that table**, not in the state buckets: a state frame replays to every
+  subscriber, so a note held that way surfaces below the newest row the client's own read proved exists. A
+  client that declared it holds no rows (`NoRows`) is owed the buffer whole, trim and all.
+  `go test ./backend/stream/ -run TestDurabilityTrim` fails when a row-writing frame is missing from the table.
 
 ## View Reconciliation (The Tab that Comes Back)
 

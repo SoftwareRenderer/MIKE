@@ -648,6 +648,26 @@ func TestDurabilityTrimKeepsWhatNoRowAnswers(t *testing.T) {
 	}
 }
 
+// The trim drops an advisory's frame once its row lands; held as a state value instead, the note replays to
+// every chat that opens the task, below the newest row that chat has already read.
+func TestDurabilityTrimDropsAnAdvisoryTheRowsAnswer(t *testing.T) {
+	asm := NewAppStreamManager(nil, nil)
+	asm.SendTaskEvent("proj-1", "task-1", types.StreamEvent{Type: types.WSTypeSummarization, Data: map[string]any{"id": "sum-1", "summary": "the summary"}})
+	asm.SendTaskEvent("proj-1", "task-1", types.StreamEvent{Type: types.WSTypeAdvisory, Data: map[string]any{"id": "adv-1", "kind": "context_cut", "text": "the cut point"}})
+	asm.SendTaskEvent("proj-1", "task-1", types.StreamEvent{Type: types.WSTypeStats, Data: map[string]any{"prompt_tokens": 7}})
+
+	// Before any row lands, a subscriber is owed the whole compaction.
+	if got := strings.Join(replayEvents(t, asm, "proj-1:task-1"), ","); got != "summarization,advisory,stats" {
+		t.Fatalf("a replay before the rows landed handed %q, want the compaction, its note and the state value", got)
+	}
+
+	asm.DurableThrough("proj-1", "task-1")
+
+	if got := strings.Join(replayEvents(t, asm, "proj-1:task-1"), ","); got != "stats" {
+		t.Fatalf("the trim left %q, want the state value alone: the rows answer for the compaction and its note", got)
+	}
+}
+
 // A buffer the trim empties gives up its slot, so an idle task holds none of the 64 buffers forever.
 func TestDurabilityTrimRetiresABufferWithNothingLeft(t *testing.T) {
 	asm := NewAppStreamManager(nil, nil)

@@ -22,10 +22,10 @@ const fillerWords = 3000
 
 func fillerMessage() string { return strings.Repeat("filler ", fillerWords) }
 
-// summarizationFrameOf replays the task's frame buffer and returns its summarization frame.
-func summarizationFrameOf(t *testing.T, te *TaskExecutor, projectID, taskID string) taskStreamFrame {
+// summarizationFrame picks the summarization frame out of what a task subscriber was handed.
+func summarizationFrame(t *testing.T, frames []taskStreamFrame) taskStreamFrame {
 	t.Helper()
-	frame, ok := findTaskStreamEvent(taskStreamFrames(t, te.appStreamMgr, projectID, taskID), string(types.WSTypeSummarization))
+	frame, ok := findTaskStreamEvent(frames, string(types.WSTypeSummarization))
 	if !ok {
 		t.Fatal("no summarization frame was published")
 	}
@@ -111,7 +111,7 @@ func TestManualSummarizePublishesCompressedContextUsed(t *testing.T) {
 		return false
 	})
 
-	frame := summarizationFrameOf(t, te, projectID, taskID)
+	frame := summarizationFrame(t, taskStreamFrames(t, te.appStreamMgr, projectID, taskID))
 	used := contextUsedOf(t, frame)
 	summary := lastSummaryRow(t, te, taskID, "thread-1")
 
@@ -138,9 +138,10 @@ func TestAutoSummarizePublishesCompressedContextUsed(t *testing.T) {
 	lc.messages = append(lc.messages, types.ChatMessage{Role: "user", Content: conversation})
 	before := contextTokensUsed(lc)
 
-	te.summarize.maybeAutoSummarize(setup, lc, "test-model", false)
-
-	frame := summarizationFrameOf(t, te, setup.projectID, setup.task.ID)
+	// Captured while it runs: the marker and its note are rows, so once they land the trim drops both frames.
+	frame := summarizationFrame(t, taskStreamFramesDuring(t, te.appStreamMgr, setup.projectID, setup.task.ID, func() {
+		te.summarize.maybeAutoSummarize(setup, lc, "test-model", false)
+	}))
 	used := contextUsedOf(t, frame)
 	summary := lastSummaryRow(t, te, setup.task.ID, setup.task.CurrentThreadID)
 

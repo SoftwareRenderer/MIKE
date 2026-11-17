@@ -116,6 +116,25 @@ func TestFlushAdvisories_PersistsAdvisoryRoleAndKeepsOrder(t *testing.T) {
 	}
 }
 
+// Storing a note moves the revision a returning tab compares against the read it applied. A flush that leaves
+// the count alone never tells the browser the note landed.
+func TestFlushAdvisoriesMovesTheConversationRevision(t *testing.T) {
+	t.Parallel()
+	s := testStore(t)
+	te := newTestExecutorWith(t, Deps{Store: s})
+	setup := diagTestSetup(t, s, "adv-rev-proj", "adv-rev-task")
+
+	lc := &loopContext{messages: []types.ChatMessage{{Role: "system", Content: "sys"}}}
+	before := te.appStreamMgr.ConversationRevision(setup.projectID, setup.task.ID)
+	queueAdvisory(lc, advisory{kind: advisoryDiagnostics, text: "LSP diagnostics: 1 file with findings"})
+	te.flushAdvisories(setup, lc)
+
+	if got := te.appStreamMgr.ConversationRevision(setup.projectID, setup.task.ID); got != before+1 {
+		t.Errorf("conversation revision went from %d to %d after storing a note, want %d: the count is how a "+
+			"returning client learns the row landed", before, got, before+1)
+	}
+}
+
 func TestFlushAdvisories_EmptyAndBlank(t *testing.T) {
 	t.Parallel()
 	s := testStore(t)

@@ -452,10 +452,14 @@ func (te *TaskExecutor) flushAdvisories(setup *taskExecSetup, lc *loopContext) {
 		if at.IsZero() {
 			at = time.Now().UTC()
 		}
-		_ = te.store.CreateTaskMessage(&types.TaskMessage{
+		if err := te.store.CreateTaskMessage(&types.TaskMessage{
 			ID: msgID, TaskID: setup.task.ID, ThreadID: setup.task.CurrentThreadID,
 			Role: "advisory", Severity: a.severity, Content: a.text, Kind: a.kind, CreatedAt: at,
-		})
+		}); err != nil {
+			logging.For(logging.Exec).With(logging.TaskID, setup.task.ID).Warnf("advisory not stored (kind=%q): %v", a.kind, err)
+		} else {
+			te.rowsDurable(setup.projectID, setup.task.ID)
+		}
 		lc.messages = append(lc.messages, types.ChatMessage{Role: "advisory", Content: a.text})
 		te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{
 			Type: types.WSTypeAdvisory,
