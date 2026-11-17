@@ -5,8 +5,6 @@ import (
 	"path"
 	"path/filepath"
 	"reflect"
-	"slices"
-	"strings"
 	"testing"
 )
 
@@ -134,77 +132,32 @@ func mountPair(host, container, mode string) string {
 }
 
 // TestGitPointerMountArgsPinsSubmoduleAncestorAndPointer: a guest that moves `vendor` can otherwise lay its
-// own pointer down at the path git reads next.
+// own pointer down at the path git reads next. The worktree mount's mode is what everything under it is
+// mounted with, so a plan-mode container pins the ancestors read-only too and only a pointer is read-only on
+// a writable worktree. The order and shape of the mounts it appends is pinned once, in
+// pkg/sandboxruntime/submodule_mounts_test.go.
 func TestGitPointerMountArgsPinsSubmoduleAncestorAndPointer(t *testing.T) {
-	project, worktree := t.TempDir(), t.TempDir()
-	gitDir := writeGitDir(t, project, "t1")
-	writePointer(t, worktree, "gitdir: "+filepath.Join(gitDir, "worktrees", "t1")+"\n")
-	writeSubmodule(t, worktree, gitDir, "vendor/lib")
-	mount := MountPath("proj")
+	for _, mode := range []string{"rw", "ro"} {
+		t.Run("worktree "+mode, func(t *testing.T) {
+			project, worktree := t.TempDir(), t.TempDir()
+			gitDir := writeGitDir(t, project, "t1")
+			writePointer(t, worktree, "gitdir: "+filepath.Join(gitDir, "worktrees", "t1")+"\n")
+			writeSubmodule(t, worktree, gitDir, "vendor/lib")
+			mount := MountPath("proj")
 
-	got, err := gitPointerMountArgs("t1", worktree, mount, project, "rw", []string{"vendor/lib"})
-	if err != nil {
-		t.Fatalf("gitPointerMountArgs: %v", err)
-	}
-	want := []string{
-		"-v", mountPair(filepath.Join(worktree, ".git"), mount+"/.git", "ro"),
-		"-v", mountPair(filepath.Join(worktree, "vendor"), path.Join(mount, "vendor"), "rw"),
-		"-v", mountPair(filepath.Join(worktree, "vendor", "lib", ".git"), path.Join(mount, "vendor/lib/.git"), "ro"),
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("gitPointerMountArgs() =\n%q\nwant\n%q", got, want)
-	}
-}
-
-// TestGitPointerMountArgsAncestorIsShallowestFirst: a destination must exist as a directory before another
-// is layered inside it.
-func TestGitPointerMountArgsAncestorIsShallowestFirst(t *testing.T) {
-	project, worktree := t.TempDir(), t.TempDir()
-	gitDir := writeGitDir(t, project, "t1")
-	writePointer(t, worktree, "gitdir: "+filepath.Join(gitDir, "worktrees", "t1")+"\n")
-	writeSubmodule(t, worktree, gitDir, "vendor/x/lib")
-	mount := MountPath("proj")
-
-	got, err := gitPointerMountArgs("t1", worktree, mount, project, "rw", []string{"vendor/x/lib"})
-	if err != nil {
-		t.Fatalf("gitPointerMountArgs: %v", err)
-	}
-	var modes []string
-	for _, a := range got {
-		if strings.Contains(a, "rprivate") {
-			modes = append(modes, a)
-		}
-	}
-	if len(modes) != 4 {
-		t.Fatalf("want the worktree pointer plus two ancestors plus the submodule pointer, got %q", modes)
-	}
-	if !strings.HasPrefix(modes[1], filepath.Join(worktree, "vendor")+":") {
-		t.Errorf("the first ancestor mount is %q, want `vendor` before `vendor/x`", modes[1])
-	}
-	if !strings.HasPrefix(modes[2], filepath.Join(worktree, "vendor", "x")+":") {
-		t.Errorf("the second ancestor mount is %q, want `vendor/x`", modes[2])
-	}
-}
-
-// TestGitPointerMountArgsSubmoduleAncestorFollowsWorktreeMode: what is under the worktree mount keeps its
-// mode, and only a pointer is read-only on a writable worktree.
-func TestGitPointerMountArgsSubmoduleAncestorFollowsWorktreeMode(t *testing.T) {
-	project, worktree := t.TempDir(), t.TempDir()
-	gitDir := writeGitDir(t, project, "t1")
-	writePointer(t, worktree, "gitdir: "+filepath.Join(gitDir, "worktrees", "t1")+"\n")
-	writeSubmodule(t, worktree, gitDir, "vendor/lib")
-	mount := MountPath("proj")
-
-	got, err := gitPointerMountArgs("t1", worktree, mount, project, "ro", []string{"vendor/lib"})
-	if err != nil {
-		t.Fatalf("gitPointerMountArgs: %v", err)
-	}
-	want := mountPair(filepath.Join(worktree, "vendor"), path.Join(mount, "vendor"), "ro")
-	if !slices.Contains(got, want) {
-		t.Errorf("plan mode must mount the submodule read-only, got %q", got)
-	}
-	if slices.Contains(got, mountPair(filepath.Join(worktree, "vendor"), path.Join(mount, "vendor"), "rw")) {
-		t.Errorf("a read-only worktree left %q writable", want)
+			got, err := gitPointerMountArgs("t1", worktree, mount, project, mode, []string{"vendor/lib"})
+			if err != nil {
+				t.Fatalf("gitPointerMountArgs: %v", err)
+			}
+			want := []string{
+				"-v", mountPair(filepath.Join(worktree, ".git"), mount+"/.git", "ro"),
+				"-v", mountPair(filepath.Join(worktree, "vendor"), path.Join(mount, "vendor"), mode),
+				"-v", mountPair(filepath.Join(worktree, "vendor", "lib", ".git"), path.Join(mount, "vendor/lib/.git"), "ro"),
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("gitPointerMountArgs() =\n%q\nwant\n%q", got, want)
+			}
+		})
 	}
 }
 

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"mike/backend/store"
 	"mike/backend/testutil/testgit"
+	"mike/backend/testutil/teststore"
 	"mike/backend/types"
 )
 
@@ -30,10 +30,7 @@ func watcherTestManager(t *testing.T, projectIDs ...string) *AppStreamManager {
 func newWatcherTestManager(t *testing.T, projectIDs ...string) *AppStreamManager {
 	t.Helper()
 
-	s, err := store.NewStore(filepath.Join(t.TempDir(), "subscriptions.db"))
-	if err != nil {
-		t.Fatalf("store: %v", err)
-	}
+	s := teststore.StoreIn(t, filepath.Join(t.TempDir(), "subscriptions.db"))
 	t.Cleanup(func() { _ = s.Close() })
 
 	for _, id := range projectIDs {

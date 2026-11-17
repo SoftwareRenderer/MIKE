@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"mike/backend/config"
 	"mike/backend/extensions"
 	"mike/backend/git"
 	"mike/backend/lsp"
 	"mike/backend/store"
+	"mike/backend/testutil/teststore"
 )
 
 // recordingLSPManager is a language server the pass can be watched talking to. It answers a
@@ -241,7 +241,7 @@ func passSetup(t *testing.T, s *store.Store, projectID, taskID string) *taskExec
 // task rows, a workspace dir for the worktree path, and the recording server.
 func passExecutor(t *testing.T, s *store.Store, mgr lspManager) *TaskExecutor {
 	t.Helper()
-	cs := config.NewConfigStore(s, "", "test", nil, false, false)
+	cs := teststore.ConfigStore(t, s, "")
 	cs.SetWorkspaceDirOverride(t.TempDir())
 	te := newTestExecutorWith(t, Deps{
 		Store:       s,

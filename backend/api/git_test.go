@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"mike/backend/config"
 	"mike/backend/git"
 	"mike/backend/store"
 	"mike/backend/testutil/testgit"
+	"mike/backend/testutil/teststore"
 	"mike/backend/types"
 )
 
@@ -83,11 +83,7 @@ func gitTestStore(t *testing.T) *store.Store {
 	t.Helper()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
-	s, err := store.NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s := teststore.StoreIn(t, dbPath)
 	return s
 }
 
@@ -102,11 +98,7 @@ func newTestGitHandler(t *testing.T) (*GitHandler, *store.Store, *git.WorktreeMa
 		t.Fatal(err)
 	}
 
-	s, err := store.NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s := teststore.StoreIn(t, dbPath)
 
 	s.SetConfigValue("providers", "[]")
 	s.SetConfigValue("worker_provider", "")
@@ -114,7 +106,7 @@ func newTestGitHandler(t *testing.T) (*GitHandler, *store.Store, *git.WorktreeMa
 	s.SetConfigValue("utility_provider", "")
 	s.SetConfigValue("utility_model", "")
 
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false, false)
+	cfgStore := teststore.ConfigStore(t, s, dbPath)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 	wm := git.NewWorktreeManager(s, cfgStore)
 	h := NewGitHandler(s, wm)

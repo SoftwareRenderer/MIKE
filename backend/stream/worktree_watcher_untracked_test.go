@@ -8,9 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mike/backend/config"
 	"mike/backend/git"
-	"mike/backend/store"
 	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
@@ -20,50 +18,16 @@ import (
 func newUntrackedWatcherEnv(t *testing.T) (*WorktreeWatcher, chan DiffStatsEvent, string, string, string) {
 	t.Helper()
 
-	tmpDir := t.TempDir()
-	repoDir := filepath.Join(tmpDir, "repo")
-	worktreesDir := filepath.Join(tmpDir, "worktrees")
-	if err := os.MkdirAll(repoDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(worktreesDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	testgit.Git(t, repoDir, "init")
-	testgit.Git(t, repoDir, "config", "user.email", "test@test.com")
-	testgit.Git(t, repoDir, "config", "user.name", "Test")
-	testgit.WriteFile(t, repoDir, "README.md", "# Test\n")
-	testgit.Git(t, repoDir, "add", "README.md")
-	testgit.Git(t, repoDir, "commit", "-m", "Initial")
-
-	dbPath := filepath.Join(tmpDir, "test.db")
-	s, err := store.NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
-
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false, false)
-	cfgStore.SetWorkspaceDirOverride(worktreesDir)
-	cfg, err := cfgStore.GetConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := cfgStore.UpdateConfig(cfg); err != nil {
-		t.Fatal(err)
-	}
-
 	const projectID, taskID = "untracked-project", "untracked-task"
-	if err := s.CreateProject(&types.Project{ID: projectID, Name: "untracked", Path: repoDir}); err != nil {
-		t.Fatal(err)
-	}
+	f := newWatcherFixture(t, projectID, "untracked")
+
 	taskBranch := "task/" + taskID
-	if err := s.CreateTask(&types.Task{
+	if err := f.Store.CreateTask(&types.Task{
 		ID: taskID, ProjectID: projectID, Title: "untracked", Status: types.StatusInProgress, Branch: taskBranch,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	wm := git.NewWorktreeManager(s, cfgStore)
+	wm := git.NewWorktreeManager(f.Store, f.Config)
 	worktreePath, _, err := wm.CreateWorktree(projectID, taskID, taskBranch, "")
 	if err != nil {
 		t.Fatalf("create worktree: %v", err)

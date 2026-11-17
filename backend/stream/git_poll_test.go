@@ -14,50 +14,15 @@ import (
 	"testing"
 	"time"
 
-	"mike/backend/config"
-	"mike/backend/store"
 	"mike/backend/testutil/testgit"
-	"mike/backend/types"
 )
 
 // TestBranchWatcherLifecycle verifies that the branch watcher starts, detects
 // a branch change via fsnotify, and stops cleanly. Uses channels for fast signaling.
 func TestBranchWatcherLifecycle(t *testing.T) {
-	tmpDir := t.TempDir()
-	repoDir := filepath.Join(tmpDir, "repo")
-	worktreesDir := filepath.Join(tmpDir, "worktrees")
-	os.MkdirAll(repoDir, 0o755)
-	os.MkdirAll(worktreesDir, 0o755)
-
-	testgit.Git(t, repoDir, "init")
-	testgit.Git(t, repoDir, "config", "user.email", "test@test.com")
-	testgit.Git(t, repoDir, "config", "user.name", "Test")
-	testgit.WriteFile(t, repoDir, "README.md", "# Test\n")
-	testgit.Git(t, repoDir, "add", "README.md")
-	testgit.Git(t, repoDir, "commit", "-m", "Initial")
-
-	dbPath := filepath.Join(tmpDir, "test.db")
-	s, err := store.NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	defer s.Close()
-
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false, false)
-	cfgStore.SetWorkspaceDirOverride(worktreesDir)
-	cfg, err := cfgStore.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	if err := cfgStore.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-
 	projID := "test-project"
-	proj := &types.Project{ID: projID, Name: "test", Path: repoDir}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
+	f := newWatcherFixture(t, projID, "test")
+	repoDir := f.RepoDir
 
 	// Set up branch change detection with a channel
 	var mu sync.Mutex
@@ -168,16 +133,8 @@ func TestBranchWatcherHandlesNonGitDir(t *testing.T) {
 // TestBranchWatcherDetectsDetachedHEAD verifies that the branch watcher
 // correctly detects detached HEAD state.
 func TestBranchWatcherDetectsDetachedHEAD(t *testing.T) {
-	tmpDir := t.TempDir()
-	repoDir := filepath.Join(tmpDir, "repo")
-	os.MkdirAll(repoDir, 0o755)
-
-	testgit.Git(t, repoDir, "init")
-	testgit.Git(t, repoDir, "config", "user.email", "test@test.com")
-	testgit.Git(t, repoDir, "config", "user.name", "Test")
-	testgit.WriteFile(t, repoDir, "README.md", "# Test\n")
-	testgit.Git(t, repoDir, "add", "README.md")
-	testgit.Git(t, repoDir, "commit", "-m", "Initial")
+	repoDir := t.TempDir()
+	testgit.RepoAtMessage(t, repoDir, "Initial")
 
 	// Get the current commit SHA
 	out, err := exec.Command("git", "-C", repoDir, "rev-parse", "HEAD").Output()
@@ -240,16 +197,8 @@ func TestBranchWatcherDetectsDetachedHEAD(t *testing.T) {
 // TestBranchWatcherDuplicateEvents verifies that writing the same branch
 // twice does not produce duplicate broadcasts.
 func TestBranchWatcherDuplicateEvents(t *testing.T) {
-	tmpDir := t.TempDir()
-	repoDir := filepath.Join(tmpDir, "repo")
-	os.MkdirAll(repoDir, 0o755)
-
-	testgit.Git(t, repoDir, "init")
-	testgit.Git(t, repoDir, "config", "user.email", "test@test.com")
-	testgit.Git(t, repoDir, "config", "user.name", "Test")
-	testgit.WriteFile(t, repoDir, "README.md", "# Test\n")
-	testgit.Git(t, repoDir, "add", "README.md")
-	testgit.Git(t, repoDir, "commit", "-m", "Initial")
+	repoDir := t.TempDir()
+	testgit.RepoAtMessage(t, repoDir, "Initial")
 
 	var mu sync.Mutex
 	var broadcastCount int

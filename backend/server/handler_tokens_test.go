@@ -106,6 +106,10 @@ func TestAPITokenManagementNeedsTheSession(t *testing.T) {
 	}
 }
 
+// TestAPITokenCreateValidatesTheLabel is the route's half of a token label: what the body must decode to
+// before a label reaches the issuer, and that a refusal issues nothing. What makes a label a valid one is
+// one rule, written once in backend/auth (TestAPITokenLabelRules); the one refused-label row here pins that
+// the issuer's refusal is answered with a 400 rather than a server fault.
 func TestAPITokenCreateValidatesTheLabel(t *testing.T) {
 	s := testServer(t)
 
@@ -116,8 +120,6 @@ func TestAPITokenCreateValidatesTheLabel(t *testing.T) {
 		{"no body", nil},
 		{"absent label", map[string]any{}},
 		{"empty label", map[string]any{"label": ""}},
-		{"whitespace label", map[string]any{"label": "   "}},
-		{"label too long", map[string]any{"label": strings.Repeat("x", 81)}},
 		{"label is not a string", map[string]any{"label": 42}},
 	}
 	for _, tc := range cases {

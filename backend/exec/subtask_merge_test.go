@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"mike/backend/config"
 	"mike/backend/git"
 	"mike/backend/store"
 	"mike/backend/testutil/testgit"
+	"mike/backend/testutil/teststore"
 	"mike/backend/types"
 )
 
@@ -679,13 +679,9 @@ func setupExecutorWithGitForSubtask(t *testing.T) (*TaskExecutor, string, string
 	testgit.Git(t, repoDir, "commit", "-m", "Initial")
 
 	dbPath := filepath.Join(tmpDir, "test.db")
-	s, err := store.NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s := teststore.StoreIn(t, dbPath)
 
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false, false)
+	cfgStore := teststore.ConfigStore(t, s, dbPath)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 
 	projectID := "test-project"

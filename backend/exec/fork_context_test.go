@@ -12,16 +12,13 @@ import (
 	"time"
 
 	"mike/backend/store"
+	"mike/backend/testutil/teststore"
 	"mike/backend/types"
 )
 
 func forkCtxStore(t *testing.T) *store.Store {
 	t.Helper()
-	s, err := store.NewStore(filepath.Join(t.TempDir(), "fork.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s := teststore.StoreIn(t, filepath.Join(t.TempDir(), "fork.db"))
 
 	now := time.Now().UTC()
 	if err := s.CreateProject(&types.Project{ID: "p1", Name: "p1", Path: "/tmp/p1", CreatedAt: now, UpdatedAt: now}); err != nil {

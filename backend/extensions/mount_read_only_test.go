@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"mike/backend/store"
+	"mike/backend/testutil/teststore"
 	"mike/backend/types"
 
 	"mike/pkg/sandboxruntime"
@@ -27,11 +27,7 @@ func jailManager(t *testing.T, workspace, projectPath, extDir string) *Extension
 // read and never write.
 func jailManagerWithProjectMounts(t *testing.T, workspace, projectPath, extDir string, projectMounts []types.SandboxMount) *ExtensionSandboxManager {
 	t.Helper()
-	db, err := store.NewStore(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
+	db := teststore.StoreIn(t, filepath.Join(t.TempDir(), "test.db"))
 	es := NewExtensionStore(db, nil)
 	if err := es.InitSchema(); err != nil {
 		t.Fatalf("init schema: %v", err)

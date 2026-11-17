@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"mike/backend/store"
+	"mike/backend/testutil/teststore"
 
 	"github.com/coder/websocket"
 )
@@ -24,10 +25,7 @@ import (
 // into a new client's replay buffer.
 func writeTestStore(t *testing.T) *store.Store {
 	t.Helper()
-	s, err := store.NewStore(filepath.Join(t.TempDir(), "delivery.db"))
-	if err != nil {
-		t.Fatalf("store: %v", err)
-	}
+	s := teststore.StoreIn(t, filepath.Join(t.TempDir(), "delivery.db"))
 	t.Cleanup(func() { _ = s.Close() })
 	return s
 }

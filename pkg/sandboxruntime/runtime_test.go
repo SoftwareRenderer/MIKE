@@ -360,53 +360,36 @@ func TestClearCgroupMemoryLimit_MissingDir(t *testing.T) {
 	}
 }
 
-// TestGVisorAvailable_FalseWithoutRunsc pins the fail-closed path: with a PATH
-// that has no runsc, the probe must report unavailable rather than assuming it.
-// Both sandbox managers now share this probe, so a false here means neither will
-// attempt a gVisor container.
-func TestGVisorAvailable_FalseWithoutRunsc(t *testing.T) {
-	empty := t.TempDir()
-	t.Setenv("PATH", empty)
+// TestGVisorAvailable pins the probe both sandbox managers read, so they cannot disagree about a
+// broken install. Every row is fail-closed except the last: a PATH with no runsc, a runsc that cannot
+// answer `--version`, and a healthy runsc with no podman each report unavailable rather than being
+// assumed available — and runsc alone is not enough.
+func TestGVisorAvailable(t *testing.T) {
+	const healthyRunsc = "#!/bin/sh\necho 'runsc version test'\n"
+	const workingPodman = "#!/bin/sh\nexit 0\n"
+	for _, tt := range []struct {
+		name  string
+		stubs map[string]string // the executables PATH holds, and the script each one runs
+		want  bool
+	}{
+		{name: "FalseWithoutRunsc", stubs: nil},
+		{name: "FalseWhenVersionCheckFails", stubs: map[string]string{"runsc": "#!/bin/sh\nexit 1\n"}},
+		{name: "FalseWithoutPodman", stubs: map[string]string{"runsc": healthyRunsc}},
+		{name: "TrueWithRunscAndPodman", stubs: map[string]string{"runsc": healthyRunsc, "podman": workingPodman}, want: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			bin := t.TempDir()
+			names := make([]string, 0, len(tt.stubs))
+			for name, script := range tt.stubs {
+				writeStub(t, filepath.Join(bin, name), script)
+				names = append(names, name)
+			}
+			t.Setenv("PATH", bin)
 
-	if GVisorAvailable("test") {
-		t.Error("GVisorAvailable = true with an empty PATH, want false")
-	}
-}
-
-// TestGVisorAvailable_FalseWhenVersionCheckFails covers the second gate: runsc present but unusable.
-// Both sandbox managers read this one probe, so they cannot disagree about a broken install.
-func TestGVisorAvailable_FalseWhenVersionCheckFails(t *testing.T) {
-	bin := t.TempDir()
-	// A runsc that exists but always fails its --version call.
-	writeStub(t, filepath.Join(bin, "runsc"), "#!/bin/sh\nexit 1\n")
-	t.Setenv("PATH", bin)
-
-	if GVisorAvailable("test") {
-		t.Error("GVisorAvailable = true when `runsc --version` fails, want false")
-	}
-}
-
-// TestGVisorAvailable_TrueWithRunscAndPodman pins the success path, including the
-// requirement that podman is present too — runsc alone is not enough.
-func TestGVisorAvailable_TrueWithRunscAndPodman(t *testing.T) {
-	bin := t.TempDir()
-	writeStub(t, filepath.Join(bin, "runsc"), "#!/bin/sh\necho 'runsc version test'\n")
-	writeStub(t, filepath.Join(bin, "podman"), "#!/bin/sh\nexit 0\n")
-	t.Setenv("PATH", bin)
-
-	if !GVisorAvailable("test") {
-		t.Error("GVisorAvailable = false with stub runsc+podman, want true")
-	}
-}
-
-// TestGVisorAvailable_FalseWithoutPodman: runsc healthy, podman missing.
-func TestGVisorAvailable_FalseWithoutPodman(t *testing.T) {
-	bin := t.TempDir()
-	writeStub(t, filepath.Join(bin, "runsc"), "#!/bin/sh\necho 'runsc version test'\n")
-	t.Setenv("PATH", bin)
-
-	if GVisorAvailable("test") {
-		t.Error("GVisorAvailable = true with no podman, want false")
+			if got := GVisorAvailable("test"); got != tt.want {
+				t.Errorf("GVisorAvailable = %v, want %v with PATH holding %v", got, tt.want, names)
+			}
+		})
 	}
 }
 

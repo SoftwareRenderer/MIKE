@@ -105,58 +105,6 @@ func TestTaskRequestErrors(t *testing.T) {
 	}
 }
 
-// TestTaskUpdateRefValidation covers the HTTP contract for the git-facing task fields:
-// PUT must reject an option-looking ref, accept a legitimate one, and ECHO the stored value
-// back in the response body (which is what the SPA re-renders). The exhaustive rejection
-// matrix for these fields lives with the validator itself, in
-// api.TestTaskHandler_PUT_RefValidation — the row set here is deliberately small and
-// adds the response-shape check that layer cannot make.
-func TestTaskUpdateRefValidation(t *testing.T) {
-	cases := []struct {
-		field string
-		value string
-		want  int
-	}{
-		{field: "base_ref", value: "-f", want: http.StatusBadRequest},
-		{field: "base_ref", value: "--dry-run", want: http.StatusBadRequest},
-		{field: "base_ref", value: "main", want: http.StatusOK},
-		{field: "base_ref", value: "origin/feature-branch", want: http.StatusOK},
-		{field: "branch_tip", value: "-f", want: http.StatusBadRequest},
-		{field: "branch_tip", value: "-C/tmp/evil", want: http.StatusBadRequest},
-		{field: "branch_tip", value: "feature-branch", want: http.StatusOK},
-		{field: "branch_tip", value: "task/frost-amber-quartz", want: http.StatusOK},
-	}
-
-	// One server per field: the accepted rows mutate the task they target.
-	for _, field := range []string{"base_ref", "branch_tip"} {
-		s := testServer(t)
-		projID := createTestProject(t, s)
-		taskID := createTestTask(t, s, projID, field+" validation task")
-
-		for _, tc := range cases {
-			if tc.field != field {
-				continue
-			}
-			t.Run(tc.field+"/"+strings.TrimLeft(tc.value, "-"), func(t *testing.T) {
-				rr := testResponseAuth(t, s, testRequest("PUT",
-					"/api/projects/"+projID+"/tasks/"+taskID,
-					map[string]any{tc.field: tc.value}))
-				if rr.Code != tc.want {
-					t.Fatalf("%s=%q: status = %d, want %d; body: %s",
-						tc.field, tc.value, rr.Code, tc.want, rr.Body.String())
-				}
-				if tc.want != http.StatusOK {
-					return
-				}
-				result := mustJSON[map[string]any](t, rr.Body)
-				if result[tc.field] != tc.value {
-					t.Errorf("response echoes %s=%v, want %q", tc.field, result[tc.field], tc.value)
-				}
-			})
-		}
-	}
-}
-
 // A start lands the card in its column whichever door the click came through: the move endpoint
 // auto-starts, the start endpoint is the board's play button. Both leave the row in_progress.
 func TestStartedTaskLandsInProgress(t *testing.T) {

@@ -13,7 +13,7 @@ import (
 
 	"mike/backend/crypto"
 	"mike/backend/errs"
-	"mike/backend/store"
+	"mike/backend/testutil/teststore"
 )
 
 func testStore(t *testing.T) *ExtensionStore {
@@ -40,11 +40,7 @@ var testBox = sync.OnceValue(func() *crypto.Box {
 func newTestStore(t *testing.T, box *crypto.Box) *ExtensionStore {
 	t.Helper()
 	dir := t.TempDir()
-	db, err := store.NewStore(filepath.Join(dir, "test.db"))
-	if err != nil {
-		t.Fatalf("create test store: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
+	db := teststore.StoreIn(t, filepath.Join(dir, "test.db"))
 
 	es := NewExtensionStore(db, box)
 	if err := es.InitSchema(); err != nil {

@@ -12,6 +12,7 @@ import (
 	"mike/backend/config"
 	"mike/backend/fsutil"
 	"mike/backend/store"
+	"mike/backend/testutil/teststore"
 	"mike/backend/types"
 )
 
@@ -30,11 +31,7 @@ func jailedProjectHandler(t *testing.T) (h *ProjectHandler, s *store.Store, home
 
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
-	st, err := store.NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	t.Cleanup(func() { st.Close() })
+	st := teststore.StoreIn(t, dbPath)
 
 	h = &ProjectHandler{
 		store:       st,

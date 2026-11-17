@@ -7,9 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"mike/backend/config"
 	"mike/backend/git"
-	"mike/backend/store"
 	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
@@ -19,41 +17,8 @@ import (
 // watcher must re-arm a retry timer instead of discarding the change, otherwise
 // the diff panel goes stale until the next fsnotify event or a page refresh.
 func TestWorktreeWatcherRetriesWhileInFlight(t *testing.T) {
-	tmpDir := t.TempDir()
-	repoDir := filepath.Join(tmpDir, "repo")
-	worktreesDir := filepath.Join(tmpDir, "worktrees")
-	os.MkdirAll(repoDir, 0o755)
-	os.MkdirAll(worktreesDir, 0o755)
-
-	testgit.Git(t, repoDir, "init")
-	testgit.Git(t, repoDir, "config", "user.email", "test@test.com")
-	testgit.Git(t, repoDir, "config", "user.name", "Test")
-	testgit.WriteFile(t, repoDir, "README.md", "# Test\n")
-	testgit.Git(t, repoDir, "add", "README.md")
-	testgit.Git(t, repoDir, "commit", "-m", "Initial")
-
-	dbPath := filepath.Join(tmpDir, "test.db")
-	s, err := store.NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	defer s.Close()
-
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false, false)
-	cfgStore.SetWorkspaceDirOverride(worktreesDir)
-	cfg, err := cfgStore.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	if err := cfgStore.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-
 	projID := "test-project"
-	proj := &types.Project{ID: projID, Name: "test", Path: repoDir}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
+	f := newWatcherFixture(t, projID, "test")
 
 	taskID := "test-task"
 	branchName := "kanban/" + taskID
@@ -66,13 +31,12 @@ func TestWorktreeWatcherRetriesWhileInFlight(t *testing.T) {
 		ExecutionState: types.ExecStateRunning,
 		Branch:         branchName,
 	}
-	if err := s.CreateTask(task); err != nil {
+	if err := f.Store.CreateTask(task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
 
-	wm := git.NewWorktreeManager(s, cfgStore)
-	_, _, err = wm.CreateWorktree(projID, taskID, branchName, "")
-	if err != nil {
+	wm := git.NewWorktreeManager(f.Store, f.Config)
+	if _, _, err := wm.CreateWorktree(projID, taskID, branchName, ""); err != nil {
 		t.Fatalf("create worktree: %v", err)
 	}
 
@@ -93,7 +57,7 @@ func TestWorktreeWatcherRetriesWhileInFlight(t *testing.T) {
 	ww.mu.Unlock()
 
 	// Trigger a filesystem change -> handleEvent arms the 1s throttle timer.
-	worktreePath := filepath.Join(worktreesDir, projID, taskID)
+	worktreePath := filepath.Join(f.WorktreesDir, projID, taskID)
 	testgit.WriteFile(t, worktreePath, "new.txt", "hello\n")
 
 	// Wait long enough for the 1s throttle to fire (while still in flight).
@@ -193,48 +157,13 @@ type watchedWorktreesEnv struct {
 func newWatchedTaskWorktrees(t *testing.T, n int) *watchedWorktreesEnv {
 	t.Helper()
 
-	tmpDir := t.TempDir()
-	repoDir := filepath.Join(tmpDir, "repo")
-	worktreesDir := filepath.Join(tmpDir, "worktrees")
-	if err := os.MkdirAll(repoDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(worktreesDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	testgit.Git(t, repoDir, "init")
-	testgit.Git(t, repoDir, "config", "user.email", "test@test.com")
-	testgit.Git(t, repoDir, "config", "user.name", "Test")
-	testgit.WriteFile(t, repoDir, "README.md", "# Test\n")
-	testgit.Git(t, repoDir, "add", "README.md")
-	testgit.Git(t, repoDir, "commit", "-m", "Initial")
-
-	dbPath := filepath.Join(tmpDir, "routing.db")
-	s, err := store.NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
-
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false, false)
-	cfgStore.SetWorkspaceDirOverride(worktreesDir)
-	cfg, err := cfgStore.GetConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := cfgStore.UpdateConfig(cfg); err != nil {
-		t.Fatal(err)
-	}
-
 	const projectID = "routing-project"
-	if err := s.CreateProject(&types.Project{ID: projectID, Name: "routing", Path: repoDir}); err != nil {
-		t.Fatal(err)
-	}
+	f := newWatcherFixture(t, projectID, "routing")
 
 	env := &watchedWorktreesEnv{projectID: projectID}
 	for i := range n {
 		taskID := fmt.Sprintf("routing-task-%d", i)
-		if err := s.CreateTask(&types.Task{
+		if err := f.Store.CreateTask(&types.Task{
 			ID: taskID, ProjectID: projectID, Title: taskID, Status: types.StatusInProgress,
 			Branch: "task/" + taskID,
 		}); err != nil {
@@ -243,7 +172,7 @@ func newWatchedTaskWorktrees(t *testing.T, n int) *watchedWorktreesEnv {
 		env.taskIDs = append(env.taskIDs, taskID)
 	}
 	// One manager for every task: the watcher asks it for each worktree's path and diff.
-	env.wm = git.NewWorktreeManager(s, cfgStore)
+	env.wm = git.NewWorktreeManager(f.Store, f.Config)
 	for _, taskID := range env.taskIDs {
 		if _, _, err := env.wm.CreateWorktree(projectID, taskID, "task/"+taskID, ""); err != nil {
 			t.Fatalf("create worktree %s: %v", taskID, err)

@@ -13,24 +13,62 @@ import (
 // never appear are the ones the podman mount spec is built out of: a container path of
 // "/workspace:rw" is not a weird name, it is a second option field, and it is how a
 // read-only mount quietly becomes writable.
+//
+// named is whether the refusal repeats the value, which is what the person who wrote the
+// mount is shown. A control character reaches the message through %q and so cannot be
+// matched byte for byte; those rows are marked unnamed and still have to be refused.
 func TestValidateContainerPathSharedRule(t *testing.T) {
-	for _, ok := range []string{"/workspace/node_modules", "/go", "/tmp/x.y-z_w", "/a/b/c"} {
+	for _, ok := range []string{
+		"/workspace/node_modules", "/go", "/tmp/x.y-z_w", "/a/b/c",
+		"/workspace", "/mnt/node_modules", "/a.b-c_d/e.f", "/go/pkg/mod",
+	} {
 		if err := ValidateContainerPath(ok); err != nil {
 			t.Errorf("ValidateContainerPath(%q) = %v, want nil", ok, err)
 		}
 	}
-	for _, bad := range []string{
-		"", "relative/path", "/", "//", "/.", "/workspace:rw", "/workspace,rw",
-		"/workspace/../etc", "..", "/etc/../", "/workspace/..", "/home/$(id)", "/a b",
-		"/work\tspace",
+	for _, bad := range []struct {
+		value string
+		named bool
+	}{
+		{"", false},
+		{"relative/path", true},
+		{"/", true},
+		{"//", true},
+		{"/.", true},
+		{"workspace", true},
+		{"./workspace", true},
+		{"..", true},
+		{"/etc/../", true},
+		{"/a b", true},
+		{"/work\tspace", false},
+		{"/workspace\x00", false},
+		{"/work\u00fcst", true},
+		{"/home/$(id)", true},
+		{"/workspace;rm -rf /", true},
+		{"-v/etc:/host", true},
+		// The spec-rewriting shapes: each would open a second option field in
+		// `<host>:<container>:rprivate,<mode>` and move the mode.
+		{"/workspace:rw", true},
+		{"/workspace,rw", true},
+		{"/workspace:/etc:rprivate,rw", true},
+		{"/x:ro,", true},
+		{"/x:,ro", true},
+		// The escapes, refused by the '..' segment rule rather than by the charset.
+		{"/workspace/../etc", true},
+		{"/mnt/../etc", true},
+		{"/mnt/node_modules/../../etc", true},
+		{"/workspace/..", true},
 	} {
-		err := ValidateContainerPath(bad)
+		err := ValidateContainerPath(bad.value)
 		if err == nil {
-			t.Errorf("ValidateContainerPath(%q) = nil, want error", bad)
+			t.Errorf("ValidateContainerPath(%q) = nil, want error", bad.value)
 			continue
 		}
-		if bad == "/workspace:rw" && !strings.Contains(err.Error(), "rewrite the podman mount spec") {
-			t.Errorf("ValidateContainerPath(%q) should say why: %v", bad, err)
+		if bad.value == "/workspace:rw" && !strings.Contains(err.Error(), "rewrite the podman mount spec") {
+			t.Errorf("ValidateContainerPath(%q) should say why: %v", bad.value, err)
+		}
+		if bad.named && !strings.Contains(err.Error(), bad.value) {
+			t.Errorf("error %q does not name the offending value %q", err, bad.value)
 		}
 	}
 }

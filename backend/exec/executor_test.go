@@ -11,12 +11,11 @@ import (
 	"time"
 
 	"errors"
-	"mike/backend/config"
 	"mike/backend/errs"
 	"mike/backend/git"
-	"mike/backend/store"
 	"mike/backend/stream"
 	"mike/backend/testutil/testgit"
+	"mike/backend/testutil/teststore"
 	"mike/backend/types"
 	pkgagent "mike/pkg/agent"
 )
@@ -34,13 +33,9 @@ func setupExecutorWithGit(t *testing.T) (*TaskExecutor, string, string, string) 
 
 	// Create store and config
 	dbPath := filepath.Join(tmpDir, "test.db")
-	s, err := store.NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s := teststore.StoreIn(t, dbPath)
 
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false, false)
+	cfgStore := teststore.ConfigStore(t, s, dbPath)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 
 	projectID := "test-project"

@@ -275,105 +275,91 @@ func reviewCallWithSummary(id, summary string) types.ToolCallMsg {
 	return tc
 }
 
-func TestCommitContextText_ConsecutiveReviewsShareOneAssistantBlock(t *testing.T) {
-	t.Parallel()
-	// Both summaries must reach the generator under one Assistant label: a second label reads
-	// as a second turn.
-	conversation := []types.ChatMessage{
-		{Role: "system", Content: "You are a coding assistant"},
-		{Role: "user", Content: "Add retry with backoff to the LLM client"},
-		{Role: "assistant", Content: "I'll start with the retry loop.", ToolCalls: []types.ToolCallMsg{toolCallMsg("c1", "edit_file")}},
-		{Role: "tool", Content: "edited client.go", ToolCallID: "c1"},
-		{Role: "assistant", Content: "Retry is in place.", ToolCalls: []types.ToolCallMsg{reviewCallWithSummary("c2", "Added bounded retry with exponential backoff")}},
-		{Role: "tool", Content: "review requested", ToolCallID: "c2"},
-		{Role: "user", Content: "Make the ceiling per-provider"},
-		{Role: "assistant", Content: "Now it comes from provider config.", ToolCalls: []types.ToolCallMsg{toolCallMsg("c3", "edit_file")}},
-		{Role: "tool", Content: "error: no such file", ToolCallID: "c3"},
-		{Role: "assistant", Content: "Per-provider ceiling is wired up.", ToolCalls: []types.ToolCallMsg{reviewCallWithSummary("c4", "Made the ceiling per-provider")}},
-		{Role: "tool", Content: "review requested", ToolCallID: "c4"},
-	}
-
-	want := "User: Add retry with backoff to the LLM client\n\n" +
-		"Assistant: Retry is in place.\nAdded bounded retry with exponential backoff\n\n" +
-		"Per-provider ceiling is wired up.\nMade the ceiling per-provider\n\n"
-
-	got := commitContextText(conversation)
-	if got != want {
-		t.Errorf("commit context =\n%q\nwant\n%q", got, want)
-	}
-	if strings.Contains(got, "request a review") {
-		t.Errorf("consolidated text still narrates the review call:\n%s", got)
-	}
+// editCall builds an edit_file call for a path, whose narration names the file.
+func editCall(id, path string) types.ToolCallMsg {
+	tc := toolCallMsg(id, "edit_file")
+	tc.Function.Arguments = `{"path":"` + path + `"}`
+	return tc
 }
 
-func TestCommitContextText_SummaryWithoutTextOpensTheBlock(t *testing.T) {
+// TestCommitContextText renders the turns the commit message is written from. The exact comparison is the
+// whole assertion: a review call narrated into the text, a working call swallowed by the review block, or
+// a second Assistant label for one turn all change a row this table pins.
+func TestCommitContextText(t *testing.T) {
 	t.Parallel()
-	conversation := []types.ChatMessage{
-		{Role: "user", Content: "Build feature"},
-		{Role: "assistant", ToolCalls: []types.ToolCallMsg{reviewCallWithSummary("c1", "Fixed the ceiling")}},
-		{Role: "tool", Content: "review requested", ToolCallID: "c1"},
-	}
-
-	want := "User: Build feature\n\nAssistant: Fixed the ceiling\n\n"
-	if got := commitContextText(conversation); got != want {
-		t.Errorf("commit context = %q, want %q", got, want)
-	}
-}
-
-func TestCommitContextText_ReviewWithoutSummaryAddsNothing(t *testing.T) {
-	t.Parallel()
-	conversation := []types.ChatMessage{
-		{Role: "user", Content: "Build feature"},
-		{Role: "assistant", ToolCalls: []types.ToolCallMsg{reviewCall("c1")}},
-		{Role: "tool", Content: "review requested", ToolCallID: "c1"},
-	}
-
-	want := "User: Build feature\n\n"
-	if got := commitContextText(conversation); got != want {
-		t.Errorf("commit context = %q, want %q", got, want)
-	}
-}
-
-func TestCommitContextText_OtherToolCallKeepsItsOwnLabel(t *testing.T) {
-	t.Parallel()
-	// A review call can share an assistant message with working calls, whose lines keep their
-	// own label.
-	edit := toolCallMsg("c2", "edit_file")
-	edit.Function.Arguments = `{"path":"a.go"}`
-	conversation := []types.ChatMessage{
-		{Role: "user", Content: "Build feature"},
-		{Role: "assistant", Content: "Ran it down.", ToolCalls: []types.ToolCallMsg{reviewCallWithSummary("c1", "Fixed the ceiling"), edit}},
-		{Role: "tool", Content: "review requested", ToolCallID: "c1"},
-		{Role: "tool", Content: "edited a.go", ToolCallID: "c2"},
-	}
-
-	want := "User: Build feature\n\n" +
-		"Assistant: Ran it down.\nFixed the ceiling\n" +
-		"Assistant: (I used the edit_file tool to edit `a.go` which was successful)\n\n"
-	if got := commitContextText(conversation); got != want {
-		t.Errorf("commit context =\n%q\nwant\n%q", got, want)
-	}
-}
-
-func TestCommitContextText_NoRequestReview_NarratesNoToolCall(t *testing.T) {
-	t.Parallel()
-	// The prose-only rule shows in the rendered text, because formatTurns narrates any tool call left
-	// on a message.
-	edit := toolCallMsg("c1", "edit_file")
-	edit.Function.Arguments = `{"path":"a.go"}`
-	conversation := []types.ChatMessage{
-		{Role: "user", Content: "Build feature"},
-		{Role: "assistant", Content: "Ran it down.", ToolCalls: []types.ToolCallMsg{edit}},
-		{Role: "tool", Content: "edited a.go", ToolCallID: "c1"},
-	}
-
-	want := "User: Build feature\n\nAssistant: Ran it down.\n\n"
-	got := commitContextText(conversation)
-	if got != want {
-		t.Errorf("commit context =\n%q\nwant\n%q", got, want)
-	}
-	if strings.Contains(got, "I used the") {
-		t.Errorf("fallback narrates a tool call:\n%s", got)
+	for _, tt := range []struct {
+		name         string
+		conversation []types.ChatMessage
+		want         string
+	}{
+		{
+			name: "ConsecutiveReviewsShareOneAssistantBlock",
+			conversation: []types.ChatMessage{
+				{Role: "system", Content: "You are a coding assistant"},
+				{Role: "user", Content: "Add retry with backoff to the LLM client"},
+				{Role: "assistant", Content: "I'll start with the retry loop.", ToolCalls: []types.ToolCallMsg{toolCallMsg("c1", "edit_file")}},
+				{Role: "tool", Content: "edited client.go", ToolCallID: "c1"},
+				{Role: "assistant", Content: "Retry is in place.", ToolCalls: []types.ToolCallMsg{reviewCallWithSummary("c2", "Added bounded retry with exponential backoff")}},
+				{Role: "tool", Content: "review requested", ToolCallID: "c2"},
+				{Role: "user", Content: "Make the ceiling per-provider"},
+				{Role: "assistant", Content: "Now it comes from provider config.", ToolCalls: []types.ToolCallMsg{toolCallMsg("c3", "edit_file")}},
+				{Role: "tool", Content: "error: no such file", ToolCallID: "c3"},
+				{Role: "assistant", Content: "Per-provider ceiling is wired up.", ToolCalls: []types.ToolCallMsg{reviewCallWithSummary("c4", "Made the ceiling per-provider")}},
+				{Role: "tool", Content: "review requested", ToolCallID: "c4"},
+			},
+			want: "User: Add retry with backoff to the LLM client\n\n" +
+				"Assistant: Retry is in place.\nAdded bounded retry with exponential backoff\n\n" +
+				"Per-provider ceiling is wired up.\nMade the ceiling per-provider\n\n",
+		},
+		{
+			name: "SummaryWithoutTextOpensTheBlock",
+			conversation: []types.ChatMessage{
+				{Role: "user", Content: "Build feature"},
+				{Role: "assistant", ToolCalls: []types.ToolCallMsg{reviewCallWithSummary("c1", "Fixed the ceiling")}},
+				{Role: "tool", Content: "review requested", ToolCallID: "c1"},
+			},
+			want: "User: Build feature\n\nAssistant: Fixed the ceiling\n\n",
+		},
+		{
+			name: "ReviewWithoutSummaryAddsNothing",
+			conversation: []types.ChatMessage{
+				{Role: "user", Content: "Build feature"},
+				{Role: "assistant", ToolCalls: []types.ToolCallMsg{reviewCall("c1")}},
+				{Role: "tool", Content: "review requested", ToolCallID: "c1"},
+			},
+			want: "User: Build feature\n\n",
+		},
+		{
+			// A review call can share an assistant message with working calls, whose lines keep their
+			// own label.
+			name: "OtherToolCallKeepsItsOwnLabel",
+			conversation: []types.ChatMessage{
+				{Role: "user", Content: "Build feature"},
+				{Role: "assistant", Content: "Ran it down.", ToolCalls: []types.ToolCallMsg{reviewCallWithSummary("c1", "Fixed the ceiling"), editCall("c2", "a.go")}},
+				{Role: "tool", Content: "review requested", ToolCallID: "c1"},
+				{Role: "tool", Content: "edited a.go", ToolCallID: "c2"},
+			},
+			want: "User: Build feature\n\n" +
+				"Assistant: Ran it down.\nFixed the ceiling\n" +
+				"Assistant: (I used the edit_file tool to edit `a.go` which was successful)\n\n",
+		},
+		{
+			// The prose-only rule: formatTurns narrates any tool call left on a message, so a turn
+			// with no review call must still render as the assistant's own words.
+			name: "NoRequestReview_NarratesNoToolCall",
+			conversation: []types.ChatMessage{
+				{Role: "user", Content: "Build feature"},
+				{Role: "assistant", Content: "Ran it down.", ToolCalls: []types.ToolCallMsg{editCall("c1", "a.go")}},
+				{Role: "tool", Content: "edited a.go", ToolCallID: "c1"},
+			},
+			want: "User: Build feature\n\nAssistant: Ran it down.\n\n",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := commitContextText(tt.conversation); got != tt.want {
+				t.Errorf("commit context =\n%q\nwant\n%q", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -491,59 +477,49 @@ func TestReviewSummaries_RepeatAppearsOnce(t *testing.T) {
 	}
 }
 
-// --- estimatePromptTokens Tests ---
-
-func TestEstimatePromptTokens_PlainContent(t *testing.T) {
+// TestEstimatePromptTokens prices the request about to be sent. A row's ceiling is the load-bearing
+// half: counting bytes the provider never receives (an attachment's base64, a Content the parts
+// replaced) is the error that makes a turn look too big to send.
+func TestEstimatePromptTokens(t *testing.T) {
 	t.Parallel()
-	messages := []types.ChatMessage{
-		{Role: "user", Content: "hello world this is a test"},
-	}
-	tokens := estimatePromptTokens(messages)
-	// "hello world this is a test" = 6 words * 1.3 = ~8
-	if tokens < 5 || tokens > 15 {
-		t.Errorf("expected ~8 tokens, got %d", tokens)
-	}
-}
-
-func TestEstimatePromptTokens_WithReasoning(t *testing.T) {
-	t.Parallel()
-	messages := []types.ChatMessage{
-		{Role: "assistant", Content: "answer", ReasoningContent: "let me think about this carefully step by step"},
-	}
-	tokens := estimatePromptTokens(messages)
-	// "answer" (1 word) + "let me think about this carefully step by step" (9 words) = 10 * 1.3 = ~13
-	if tokens < 10 || tokens > 20 {
-		t.Errorf("expected ~13 tokens, got %d", tokens)
-	}
-}
-
-func TestEstimatePromptTokens_ContentParts(t *testing.T) {
-	t.Parallel()
-	messages := []types.ChatMessage{
-		{Role: "user", ContentParts: []types.ContentPart{
-			{Type: "text", Text: "check this image for me please"},
-			{Type: "image", ImageSource: &types.ImageSource{Type: "base64", MediaType: "image/png", Data: "abc123"}},
-		}},
-	}
-	tokens := estimatePromptTokens(messages)
-	// "check this image for me please" = 6 words * 1.3 = ~8
-	// Content is empty, so only ContentParts text should be counted
-	if tokens < 5 || tokens > 15 {
-		t.Errorf("expected ~8 tokens from ContentParts text, got %d", tokens)
-	}
-}
-
-func TestEstimatePromptTokens_ContentPartsOverridesContent(t *testing.T) {
-	t.Parallel()
-	messages := []types.ChatMessage{
-		{Role: "user", Content: "this should be ignored", ContentParts: []types.ContentPart{
-			{Type: "text", Text: "this should be counted"},
-		}},
-	}
-	tokens := estimatePromptTokens(messages)
-	// ContentParts takes priority — "this should be counted" = 4 words * 1.3 = ~5
-	// NOT "this should be ignored" (4 words) + "this should be counted" (4 words)
-	if tokens > 10 {
-		t.Errorf("expected only ContentParts text (~5 tokens), got %d (Content was also counted?)", tokens)
+	for _, tt := range []struct {
+		name      string
+		messages  []types.ChatMessage
+		minTokens int
+		maxTokens int // 0 leaves that side open
+	}{
+		{
+			name:      "PlainContent",
+			messages:  []types.ChatMessage{{Role: "user", Content: "hello world this is a test"}},
+			minTokens: 5, maxTokens: 15, // 6 words * 1.3
+		},
+		{
+			name:      "WithReasoning",
+			messages:  []types.ChatMessage{{Role: "assistant", Content: "answer", ReasoningContent: "let me think about this carefully step by step"}},
+			minTokens: 10, maxTokens: 20, // 1 + 9 words * 1.3
+		},
+		{
+			name: "ContentParts",
+			messages: []types.ChatMessage{{Role: "user", ContentParts: []types.ContentPart{
+				{Type: "text", Text: "check this image for me please"},
+				{Type: "image", ImageSource: &types.ImageSource{Type: "base64", MediaType: "image/png", Data: "abc123"}},
+			}}},
+			minTokens: 5, maxTokens: 15, // 6 words * 1.3, and the base64 stays uncounted
+		},
+		{
+			name: "ContentPartsOverridesContent",
+			messages: []types.ChatMessage{{Role: "user", Content: "this should be ignored", ContentParts: []types.ContentPart{
+				{Type: "text", Text: "this should be counted"},
+			}}},
+			// Both texts are 4 words, so the ceiling is what proves Content was replaced, not appended.
+			maxTokens: 10,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			tokens := estimatePromptTokens(tt.messages)
+			if tokens < tt.minTokens || tokens > tt.maxTokens {
+				t.Errorf("estimatePromptTokens = %d, want %d..%d", tokens, tt.minTokens, tt.maxTokens)
+			}
+		})
 	}
 }

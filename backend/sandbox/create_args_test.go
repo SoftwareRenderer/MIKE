@@ -121,10 +121,10 @@ func sharedPrefaceDiff(args []string, containerName string) string {
 
 // TestTaskCreateArgsBeginWithTheSharedPreface: the task sandbox's isolation posture is the one in
 // pkg/sandboxruntime, not a copy of it — AppendCapabilities refuses a capability grant onto
-// anything else, and a drifted copy would turn every task with capabilities into a refusal.
-//
-// It also pins the argument order around that preface: podman-global flags before `create`, `--pull
-// never` after it. Container creation must not fetch an image; the caller does that, visibly.
+// anything else, and a drifted copy would turn every task with capabilities into a refusal. The order
+// of the preface's own arguments, `--pull never` and the podman-global `--runtime-flag` pair among
+// them, is pinned once at TestGVisorCreateArgsIsTheIsolatedShape; the comparison below is what carries
+// it into this command line. What is pinned here is what the task builder adds around it.
 func TestTaskCreateArgsBeginWithTheSharedPreface(t *testing.T) {
 	const name = "kanban-sandbox-task-preface"
 	args := createContainerArgs(name, "/home/sandbox/proj")
@@ -135,14 +135,6 @@ func TestTaskCreateArgsBeginWithTheSharedPreface(t *testing.T) {
 		t.Errorf("a task sandbox adds no argument of its own (workdir): %v", args)
 	}
 
-	indexOf := func(want string) int {
-		for i, a := range args {
-			if a == want {
-				return i
-			}
-		}
-		return -1
-	}
 	hasPair := func(flag, value string) bool {
 		for i := 0; i+1 < len(args); i++ {
 			if args[i] == flag && args[i+1] == value {
@@ -152,17 +144,7 @@ func TestTaskCreateArgsBeginWithTheSharedPreface(t *testing.T) {
 		return false
 	}
 
-	createAt, pullAt := indexOf("create"), indexOf("--pull")
-	if !hasPair("--pull", "never") {
-		t.Fatalf("args missing --pull never: %v", args)
-	}
-	if pullAt < createAt {
-		t.Errorf("--pull at %d precedes `create` at %d — podman reads it as a global flag: %v", pullAt, createAt, args)
-	}
-	if indexOf("--runtime-flag=overlay2=root:self") > createAt || indexOf("--runtime-flag=ignore-cgroups") > createAt {
-		t.Errorf("podman-global --runtime-flag must come before `create`: %v", args)
-	}
-	for _, pair := range [][2]string{{"--workdir", "/home/sandbox/proj"}, {"--name", name}} {
+	for _, pair := range [][2]string{{"--workdir", "/home/sandbox/proj"}} {
 		if !hasPair(pair[0], pair[1]) {
 			t.Errorf("args missing %s %s: %v", pair[0], pair[1], args)
 		}

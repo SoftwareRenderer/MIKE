@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"mike/backend/config"
 	"mike/backend/extensions"
 	"mike/backend/git"
 	"mike/backend/lsp"
 	"mike/backend/store"
+	"mike/backend/testutil/teststore"
 	"mike/backend/types"
 )
 
@@ -548,7 +548,7 @@ func TestCollectTurnDiagnostics_BoundedAndCancellable(t *testing.T) {
 	reg := installTSLSPExtension(t, s)
 
 	// WorktreePath looks the task up in the store, so everything here shares s.
-	cs := config.NewConfigStore(s, "", "test", nil, false, false)
+	cs := teststore.ConfigStore(t, s, "")
 	cs.SetWorkspaceDirOverride(t.TempDir())
 	fake := &wedgedLSPManager{registry: reg, gotCtx: make(chan context.Context, 4)}
 	te := newTestExecutorWith(t, Deps{

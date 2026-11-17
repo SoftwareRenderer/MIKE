@@ -108,12 +108,23 @@ func TestPhraseDetector_MultipleSentencesInOneChunk(t *testing.T) {
 	}
 }
 
-func TestPhraseDetector_NewlineBoundary(t *testing.T) {
+// TestPhraseDetector_SentenceBoundary: a repeated sentence is only caught once the splitter cuts it out,
+// so every terminator the model actually writes is a shape the detector can fire on.
+func TestPhraseDetector_SentenceBoundary(t *testing.T) {
 	t.Parallel()
-	d := newPhraseDetector()
-
-	if !repeatPhrase(d, testPhrase+"\n") {
-		t.Error("should detect repetition across newline boundary")
+	for _, tt := range []struct {
+		name  string
+		chunk string
+	}{
+		{"NewlineBoundary", testPhrase + "\n"},
+		{"ExclamationBoundary", "Wow this is really amazing and incredible stuff!"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			d := newPhraseDetector()
+			if !repeatPhrase(d, tt.chunk) {
+				t.Errorf("repeating %q never fired", tt.chunk)
+			}
+		})
 	}
 }
 
@@ -129,14 +140,6 @@ func TestPhraseDetector_CodeBlockNotTriggered(t *testing.T) {
 	}
 }
 
-func TestPhraseDetector_ExclamationBoundary(t *testing.T) {
-	t.Parallel()
-	d := newPhraseDetector()
-
-	if !repeatPhrase(d, "Wow this is really amazing and incredible stuff!") {
-		t.Error("should detect repetition with exclamation boundary")
-	}
-}
 func TestPhraseDetector_IncompleteSentenceAccumulates(t *testing.T) {
 	t.Parallel()
 	d := newPhraseDetector()

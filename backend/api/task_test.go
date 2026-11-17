@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"mike/backend/config"
 	"mike/backend/exec"
 	"mike/backend/git"
 	"mike/backend/store"
 	"mike/backend/stream"
 	"mike/backend/testutil/testgit"
+	"mike/backend/testutil/teststore"
 	"mike/backend/types"
 )
 
@@ -32,11 +32,7 @@ func newTestTaskHandler(t *testing.T) (*TaskHandler, *store.Store, string) {
 		t.Fatal(err)
 	}
 
-	s, err := store.NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s := teststore.StoreIn(t, dbPath)
 
 	s.SetConfigValue("providers", "[]")
 	s.SetConfigValue("worker_provider", "")
@@ -44,7 +40,7 @@ func newTestTaskHandler(t *testing.T) (*TaskHandler, *store.Store, string) {
 	s.SetConfigValue("utility_provider", "")
 	s.SetConfigValue("utility_model", "")
 
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false, false)
+	cfgStore := teststore.ConfigStore(t, s, dbPath)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 	wm := git.NewWorktreeManager(s, cfgStore)
 	boardMgr := stream.NewAppStreamManager(s, wm)
@@ -158,8 +154,9 @@ func TestTaskHandler_POST_RefusesTheRetiredPlanMode(t *testing.T) {
 // git-facing fields of PUT /api/projects/{projectID}/tasks/{taskID}. All three reach a
 // git command line, so each must be rejected before it becomes an argument: dash-prefixed
 // values (option injection), range/ref operators and spaces, and — for branch — the empty
-// string. The accepted rows close the loop by reading the value back off the stored task,
-// which is what separates "validated" from "silently dropped".
+// string. The accepted rows close the loop twice: the value reads back off the stored task,
+// which is what separates "validated" from "silently dropped", and it comes back in the
+// response body under its wire name, which is what the panel re-renders.
 func TestTaskHandler_PUT_RefValidation(t *testing.T) {
 	// stored reads a field back off the task so an accepted row can prove it landed.
 	stored := map[string]func(task *types.Task) string{
@@ -185,18 +182,25 @@ func TestTaskHandler_PUT_RefValidation(t *testing.T) {
 		{"branch", "feature/my-branch", http.StatusOK},
 
 		// base_ref: a rev, so ValidateGitRef applies.
+		{"base_ref", "-f", http.StatusBadRequest},
 		{"base_ref", "-C/tmp/evil", http.StatusBadRequest},
+		{"base_ref", "--dry-run", http.StatusBadRequest},
 		{"base_ref", "feat~1", http.StatusBadRequest},
 		{"base_ref", "feat..branch", http.StatusBadRequest},
 		{"base_ref", "feat branch", http.StatusBadRequest},
 		{"base_ref", "main", http.StatusOK},
+		{"base_ref", "origin/feature-branch", http.StatusOK},
 
 		// branch_tip: a commit, still validated for the same reason.
+		{"branch_tip", "-f", http.StatusBadRequest},
+		{"branch_tip", "-C/tmp/evil", http.StatusBadRequest},
 		{"branch_tip", "--dry-run", http.StatusBadRequest},
 		{"branch_tip", "abc~1", http.StatusBadRequest},
 		{"branch_tip", "abc..def", http.StatusBadRequest},
 		{"branch_tip", "abc def", http.StatusBadRequest},
 		{"branch_tip", "abc123def456", http.StatusOK},
+		{"branch_tip", "feature-branch", http.StatusOK},
+		{"branch_tip", "task/frost-amber-quartz", http.StatusOK},
 	}
 
 	slug := strings.NewReplacer("/", "_", " ", "_", "~", "_", "^", "_", ":", "_", "-", "dash-")
@@ -224,6 +228,15 @@ func TestTaskHandler_PUT_RefValidation(t *testing.T) {
 			}
 			if got := stored[tc.field](task); got != tc.value {
 				t.Errorf("%s = %q after the accepted update, want %q", tc.field, got, tc.value)
+			}
+			// The body is what the panel re-renders, so the accepted value has to come back in it
+			// under the field's wire name, not only in the row.
+			var echoed map[string]any
+			if err := json.Unmarshal(rr.Body.Bytes(), &echoed); err != nil {
+				t.Fatalf("decode the answer: %v\n%s", err, rr.Body.String())
+			}
+			if echoed[tc.field] != tc.value {
+				t.Errorf("the response echoes %s = %v, want %q", tc.field, echoed[tc.field], tc.value)
 			}
 		})
 	}
@@ -512,11 +525,7 @@ func newTaskHandlerWithExecutor(t *testing.T) (*TaskHandler, *store.Store, strin
 	testgit.Git(t, repoDir, "commit", "-m", "Initial")
 
 	dbPath := filepath.Join(tmpDir, "test.db")
-	s, err := store.NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s := teststore.StoreIn(t, dbPath)
 
 	s.SetConfigValue("providers", "[]")
 	s.SetConfigValue("worker_provider", "")
@@ -524,7 +533,7 @@ func newTaskHandlerWithExecutor(t *testing.T) (*TaskHandler, *store.Store, strin
 	s.SetConfigValue("utility_provider", "")
 	s.SetConfigValue("utility_model", "")
 
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false, false)
+	cfgStore := teststore.ConfigStore(t, s, dbPath)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 
 	projID := "proj-auto-start"
@@ -955,11 +964,7 @@ func TestTitleGenerationDoesNotClobberTaskStatus(t *testing.T) {
 	if err := os.MkdirAll(worktreesDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	s, err := store.NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s := teststore.StoreIn(t, dbPath)
 
 	mock := newHeldTitleLLM()
 	server := mock.Server()
@@ -972,7 +977,7 @@ func TestTitleGenerationDoesNotClobberTaskStatus(t *testing.T) {
 	s.SetConfigValue("utility_provider", "held")
 	s.SetConfigValue("utility_model", "m1")
 
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false, false)
+	cfgStore := teststore.ConfigStore(t, s, dbPath)
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 	wm := git.NewWorktreeManager(s, cfgStore)
 	boardMgr := stream.NewAppStreamManager(s, wm)

@@ -15,10 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"mike/backend/config"
 	"mike/backend/fsutil"
 	"mike/backend/git"
 	"mike/backend/store"
+	"mike/backend/testutil/teststore"
 	"mike/backend/types"
 
 	"mike/backend/sandbox"
@@ -311,13 +311,9 @@ func testProjectHandlerWithStore(t *testing.T) (*ProjectHandler, string, *store.
 	worktreesDir := filepath.Join(dir, "worktrees")
 	os.MkdirAll(worktreesDir, 0o755)
 
-	s, err := store.NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s := teststore.StoreIn(t, dbPath)
 
-	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false, false)
+	cfgStore := teststore.ConfigStore(t, s, dbPath)
 
 	h := &ProjectHandler{
 		store:       s,

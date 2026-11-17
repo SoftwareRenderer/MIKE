@@ -21,6 +21,7 @@ import (
 	"mike/backend/config"
 	"mike/backend/sandbox"
 	"mike/backend/store"
+	"mike/backend/testutil/teststore"
 	"mike/backend/types"
 
 	"github.com/coder/websocket"
@@ -155,11 +156,7 @@ func newTestStore(t *testing.T) *store.Store {
 	t.Helper()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
-	s, err := store.NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s := teststore.StoreIn(t, dbPath)
 	return s
 }
 
@@ -170,7 +167,7 @@ func newTestConfigStore(t *testing.T) (*store.Store, *config.ConfigStore) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "config.db")
 	s := newTestStore(t)
-	cs := config.NewConfigStore(s, dbPath, "test", nil, false, false)
+	cs := teststore.ConfigStore(t, s, dbPath)
 	cs.SetWorkspaceDirOverride(dir)
 	return s, cs
 }
