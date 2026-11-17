@@ -386,72 +386,76 @@ func TestTaskEventDelivery(t *testing.T) {
 	a.await(t, 5*time.Second, isTaskEventFor(taskID, "resubscribed"), 1, "delivery after re-subscribing")
 }
 
-// TestSandboxStatsTaskEventPayload verifies the sandbox_stats task event
-// serializes as flat JSON with the stats object under data.
-func TestSandboxStatsTaskEventPayload(t *testing.T) {
-	stats := &types.SandboxMemoryStats{
-		Running:   true,
-		CurrentMB: 412,
-		LimitMB:   1024,
-		PeakMB:    512,
-		OOMKills:  1,
-	}
-	payload := TaskEventPayload("test-task", types.StreamEvent{Type: types.WSTypeSandboxStats, Data: stats})
-	frame, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
+// TestSandboxStatsFrameIsFlatWithTheStatsUnderData: the frame a task's subscriber is owed when its
+// sandbox is sampled. The client reads msg.type / msg.task_id / msg.event beside msg.data, and the
+// numbers ride under data with the keys the memory panel reads. The on-subscribe seam builds the
+// same frame through the same payload builder, and has three answers of its own: nothing without a
+// provider, nothing when the provider reports the task unknown, and the frame otherwise — asked
+// with the task's own project and task.
+func TestSandboxStatsFrameIsFlatWithTheStatsUnderData(t *testing.T) {
+	t.Run("the whole stats object rides under data", func(t *testing.T) {
+		frame, err := json.Marshal(TaskEventPayload("test-task", types.StreamEvent{
+			Type: types.WSTypeSandboxStats,
+			Data: &types.SandboxMemoryStats{
+				Running: true, CurrentMB: 412, LimitMB: 1024, PeakMB: 512, OOMKills: 1,
+			},
+		}))
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
 
-	msg := decodeFrame(t, frame)
-	// What the client reads: msg.type / msg.task_id / msg.event beside msg.data.
-	if msg["type"] != "task_event" || msg["task_id"] != "test-task" || msg["event"] != "sandbox_stats" {
-		t.Fatalf("frame = %s, want a flat task_event for test-task", frame)
-	}
-	data := requireField(t, msg, "data")
-	if data["running"] != true || data["memory_current_mb"] != float64(412) ||
-		data["memory_limit_mb"] != float64(1024) || data["memory_peak_mb"] != float64(512) ||
-		data["oom_kills"] != float64(1) {
-		t.Fatalf("unexpected stats payload: %v", data)
-	}
-}
-
-// TestLatestSandboxStatsFrame verifies the on-subscribe latest-stats seam:
-// nil without a provider, nil when the provider reports unknown stats, and a
-// well-formed frame otherwise.
-func TestLatestSandboxStatsFrame(t *testing.T) {
-	asm := NewAppStreamManager(nil, nil)
-
-	if frame := asm.latestSandboxStatsFrame("p1", "t1"); frame != nil {
-		t.Fatalf("expected nil frame without provider, got %v", frame)
-	}
-
-	asm.SetSandboxStatsProvider(func(projectID, taskID string) *types.SandboxMemoryStats {
-		return nil
+		msg := decodeFrame(t, frame)
+		if msg["type"] != "task_event" || msg["task_id"] != "test-task" || msg["event"] != "sandbox_stats" {
+			t.Fatalf("frame = %s, want a flat task_event for test-task", frame)
+		}
+		data := requireField(t, msg, "data")
+		if data["running"] != true || data["memory_current_mb"] != float64(412) ||
+			data["memory_limit_mb"] != float64(1024) || data["memory_peak_mb"] != float64(512) ||
+			data["oom_kills"] != float64(1) {
+			t.Fatalf("unexpected stats payload: %v", data)
+		}
 	})
-	if frame := asm.latestSandboxStatsFrame("p1", "t1"); frame != nil {
-		t.Fatalf("expected nil frame when provider returns nil, got %v", frame)
-	}
 
-	gotProject, gotTask := "", ""
-	asm.SetSandboxStatsProvider(func(projectID, taskID string) *types.SandboxMemoryStats {
-		gotProject, gotTask = projectID, taskID
-		return &types.SandboxMemoryStats{Running: true, CurrentMB: 100, LimitMB: 512}
+	t.Run("no provider and an unknown task answer no frame", func(t *testing.T) {
+		asm := NewAppStreamManager(nil, nil)
+		t.Cleanup(asm.Close)
+		if frame := asm.latestSandboxStatsFrame("p1", "t1"); frame != nil {
+			t.Fatalf("expected nil frame without provider, got %v", frame)
+		}
+
+		asm.SetSandboxStatsProvider(func(projectID, taskID string) *types.SandboxMemoryStats {
+			return nil
+		})
+		if frame := asm.latestSandboxStatsFrame("p1", "t1"); frame != nil {
+			t.Fatalf("expected nil frame when the provider reports unknown stats, got %v", frame)
+		}
 	})
-	frame := asm.latestSandboxStatsFrame("proj-x", "task-y")
-	if frame == nil {
-		t.Fatal("expected frame from provider, got nil")
-	}
-	if gotProject != "proj-x" || gotTask != "task-y" {
-		t.Fatalf("provider called with (%q, %q), want (\"proj-x\", \"task-y\")", gotProject, gotTask)
-	}
-	msg := decodeFrame(t, frame.data)
-	if msg["event"] != "sandbox_stats" {
-		t.Fatalf("expected event=sandbox_stats, got %v", msg["event"])
-	}
-	data := requireField(t, msg, "data")
-	if data["running"] != true || data["memory_current_mb"] != float64(100) || data["memory_limit_mb"] != float64(512) {
-		t.Fatalf("unexpected stats payload: %v", data)
-	}
+
+	t.Run("the provider is asked with the task's own project and task", func(t *testing.T) {
+		asm := NewAppStreamManager(nil, nil)
+		t.Cleanup(asm.Close)
+		gotProject, gotTask := "", ""
+		asm.SetSandboxStatsProvider(func(projectID, taskID string) *types.SandboxMemoryStats {
+			gotProject, gotTask = projectID, taskID
+			return &types.SandboxMemoryStats{Running: true, CurrentMB: 100, LimitMB: 512}
+		})
+
+		frame := asm.latestSandboxStatsFrame("proj-x", "task-y")
+		if frame == nil {
+			t.Fatal("expected frame from provider, got nil")
+		}
+		if gotProject != "proj-x" || gotTask != "task-y" {
+			t.Fatalf("provider called with (%q, %q), want (\"proj-x\", \"task-y\")", gotProject, gotTask)
+		}
+		msg := decodeFrame(t, frame.data)
+		if msg["event"] != "sandbox_stats" {
+			t.Fatalf("expected event=sandbox_stats, got %v", msg["event"])
+		}
+		data := requireField(t, msg, "data")
+		if data["running"] != true || data["memory_current_mb"] != float64(100) || data["memory_limit_mb"] != float64(512) {
+			t.Fatalf("unexpected stats payload: %v", data)
+		}
+	})
 }
 
 // TestTaskBufferClearedOnTaskDeleted verifies that deleting a task drops its

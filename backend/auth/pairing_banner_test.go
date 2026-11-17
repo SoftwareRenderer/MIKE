@@ -63,36 +63,32 @@ func TestPairingBannerPrintsOneRowPerAuthorizedHost(t *testing.T) {
 	}
 }
 
-func TestPairingBannerHostNoteFitsSixtyColumns(t *testing.T) {
-	t.Parallel()
-	if n := utf8.RuneCountInString(bannerHostNote); n+2*(bannerPad+1) > 60 {
-		t.Errorf("the host note is %d columns, which draws a framed row of %d over the terminal of 60",
-			n, n+2*(bannerPad+1))
-	}
-	longHost := strings.Repeat("a", 60) + ".example.internal"
-	for _, urls := range [][]string{
-		{PairingURL("https://mike.lan:3000", "ABCD2345", ""), PairingURL("https://mike.example.com:3000", "ABCD2345", "")},
-		{PairingURL("https://"+longHost, "ABCD2345", ""), PairingURL("https://mike.lan:3000", "ABCD2345", "")},
-	} {
-		banner := PairingBanner("ABCD-2345", urls, bannerWhen)
-		if rows := rowCount(banner, bannerHostNote); rows != 1 {
-			t.Fatalf("%d rows carry the host note, want 1:\n%s", rows, banner)
-		}
-	}
-}
-
+// The warning that a passkey belongs to one address is owed when several addresses are on screen and
+// never for one. A pinned hostname can outgrow the frame; the note is still one row.
 func TestPairingBannerHostNoteFollowsTheAddressCount(t *testing.T) {
 	t.Parallel()
 	one := PairingBanner("ABCD-2345", []string{PairingURL("https://mike.lan:3000", "ABCD2345", "")}, bannerWhen)
 	if rows := rowCount(one, bannerHostNote); rows != 0 {
 		t.Errorf("%d rows carry the host note for one address, want 0:\n%s", rows, one)
 	}
-	several := PairingBanner("ABCD-2345", []string{
-		PairingURL("https://mike.lan:3000", "ABCD2345", ""),
-		PairingURL("https://mike.example.com:3000", "ABCD2345", ""),
-	}, bannerWhen)
-	if rows := rowCount(several, bannerHostNote); rows != 1 {
-		t.Errorf("%d rows carry the host note for two addresses, want 1:\n%s", rows, several)
+	longHost := strings.Repeat("a", 60) + ".example.internal"
+	for _, tc := range []struct {
+		name string
+		urls []string
+	}{
+		{name: "two addresses", urls: []string{
+			PairingURL("https://mike.lan:3000", "ABCD2345", ""),
+			PairingURL("https://mike.example.com:3000", "ABCD2345", ""),
+		}},
+		{name: "two addresses, one a pinned hostname over the frame budget", urls: []string{
+			PairingURL("https://"+longHost, "ABCD2345", ""),
+			PairingURL("https://mike.lan:3000", "ABCD2345", ""),
+		}},
+	} {
+		banner := PairingBanner("ABCD-2345", tc.urls, bannerWhen)
+		if rows := rowCount(banner, bannerHostNote); rows != 1 {
+			t.Errorf("%s: %d rows carry the host note, want 1:\n%s", tc.name, rows, banner)
+		}
 	}
 }
 

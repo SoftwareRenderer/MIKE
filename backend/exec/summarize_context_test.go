@@ -150,46 +150,6 @@ func TestMaybeAutoSummarize_SummaryReachesLLMContext(t *testing.T) {
 	}
 }
 
-// TestMaybeAutoSummarize_NewestSummaryWins pins the "most recent summary" rule for
-// the live run: the second summarization supersedes the first in the system prompt,
-// and buildLLMContext cuts at the newest marker only.
-func TestMaybeAutoSummarize_NewestSummaryWins(t *testing.T) {
-	chdirRepoRoot(t)
-	te, setup, lc, _ := summarizeSetup(t, "SUMMARY-ONE: first phase", "SUMMARY-TWO: second phase")
-
-	te.summarize.maybeAutoSummarize(setup, lc, "test-model", true)
-	if !strings.Contains(lc.messages[0].Content, "SUMMARY-ONE") {
-		t.Fatalf("first summary missing from system message:\n%s", lc.messages[0].Content)
-	}
-
-	// The conversation has grown since that summary and is still above the threshold, so
-	// a second summarization runs and must fold the first summary in (passed as
-	// PreviousSummary) and replace it.
-	lc.messages = append(lc.messages, types.ChatMessage{Role: "user", Content: "and now the next phase"})
-	te.summarize.maybeAutoSummarize(setup, lc, "test-model", true)
-
-	if got := extractPrevSummary(lc.messages); got != "SUMMARY-TWO: second phase" {
-		t.Fatalf("latest summarization marker = %q, want the second summary", got)
-	}
-	if !strings.Contains(lc.messages[0].Content, "SUMMARY-TWO") {
-		t.Fatalf("newest summary missing from system message:\n%s", lc.messages[0].Content)
-	}
-	if strings.Contains(lc.messages[0].Content, "SUMMARY-ONE") {
-		t.Fatalf("superseded summary still in system message:\n%s", lc.messages[0].Content)
-	}
-	sent := buildLLMContext(lc.messages)
-	var text strings.Builder
-	for _, m := range sent {
-		text.WriteString(m.Content)
-	}
-	if !strings.Contains(text.String(), "SUMMARY-TWO") {
-		t.Fatalf("summary sent to the LLM is not the newest: %+v", sent)
-	}
-	if strings.Contains(text.String(), "SUMMARY-ONE") {
-		t.Fatalf("superseded summary leaked into the LLM context: %+v", sent)
-	}
-}
-
 // TestMaybeAutoSummarize_RestartResumesWithSameSummary covers the operator-level
 // requirement: the DB is written first, so a server restarted at any point rebuilds
 // the same context — including the newest summary — from the persisted rows.

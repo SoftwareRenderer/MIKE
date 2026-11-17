@@ -22,12 +22,22 @@ func TestCreateAndGetTask(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
-	got, err := s.GetTask("proj-1", "task-1")
-	if err != nil {
-		t.Fatalf("get task: %v", err)
-	}
-	if got.ID != "task-1" || got.ProjectID != "proj-1" || got.Status != types.StatusBacklog {
-		t.Fatalf("unexpected task: %+v", got)
+	// The board reads a task by its project and its id; the card URL reads it by id alone, since the
+	// alphabet is unique across projects.
+	for _, get := range []struct {
+		name string
+		read func() (*types.Task, error)
+	}{
+		{"by project and id", func() (*types.Task, error) { return s.GetTask("proj-1", "task-1") }},
+		{"by id alone", func() (*types.Task, error) { return s.GetTaskByID("task-1") }},
+	} {
+		got, err := get.read()
+		if err != nil {
+			t.Fatalf("%s: %v", get.name, err)
+		}
+		if got.ID != "task-1" || got.ProjectID != "proj-1" || got.Status != types.StatusBacklog {
+			t.Fatalf("%s: unexpected task: %+v", get.name, got)
+		}
 	}
 }
 
@@ -76,27 +86,6 @@ func TestTaskAutostartedPersistence(t *testing.T) {
 	}
 	if !autoGot.Autostarted {
 		t.Errorf("Autostarted should be true for created task")
-	}
-}
-
-func TestGetTaskByID(t *testing.T) {
-	s := testStore(t)
-	proj := newProject("proj-1", "test", "/tmp/test")
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-
-	task := newTask("task-1", "proj-1")
-	if err := s.CreateTask(task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	got, err := s.GetTaskByID("task-1")
-	if err != nil {
-		t.Fatalf("get task by ID: %v", err)
-	}
-	if got.ID != "task-1" {
-		t.Fatalf("unexpected task: %+v", got)
 	}
 }
 
@@ -187,38 +176,23 @@ func TestUpdateTaskExecutionState(t *testing.T) {
 	}
 }
 
-func TestDeleteTask(t *testing.T) {
-	s := testStore(t)
-	proj := newProject("proj-1", "test", "/tmp/test")
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-
-	task := newTask("task-1", "proj-1")
-	if err := s.CreateTask(task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	if err := s.DeleteTask("proj-1", "task-1"); err != nil {
-		t.Fatalf("delete task: %v", err)
-	}
-
-	_, err := s.GetTask("proj-1", "task-1")
-	if err == nil {
-		t.Fatal("expected error for deleted task")
-	}
-}
-
+// The gc sweep asks for every task id there is, because a task it does not know is a worktree whose
+// objects it may collect out from under a live run.
 func TestGetAllTaskIDs(t *testing.T) {
 	s := testStore(t)
-	proj := newProject("proj-1", "test", "/tmp/test")
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
+	for _, id := range []string{"proj-1", "proj-2"} {
+		if err := s.CreateProject(newProject(id, id, "/tmp/"+id)); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
 	}
-
-	for _, id := range []string{"task-1", "task-2"} {
-		if err := s.CreateTask(newTask(id, "proj-1")); err != nil {
-			t.Fatalf("create task: %v", err)
+	want := []string{"task-1", "task-2", "other-proj-task"}
+	for _, id := range want {
+		project := "proj-1"
+		if id == "other-proj-task" {
+			project = "proj-2"
+		}
+		if err := s.CreateTask(newTask(id, project)); err != nil {
+			t.Fatalf("create %s: %v", id, err)
 		}
 	}
 
@@ -226,8 +200,20 @@ func TestGetAllTaskIDs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get all task IDs: %v", err)
 	}
-	if len(ids) != 2 {
-		t.Fatalf("expected 2 task IDs, got %d", len(ids))
+	got := map[string]bool{}
+	for _, id := range ids {
+		if got[id] {
+			t.Fatalf("task %s named twice", id)
+		}
+		got[id] = true
+	}
+	if len(got) != len(want) {
+		t.Fatalf("%d ids (%v), want %d", len(got), ids, len(want))
+	}
+	for _, id := range want {
+		if !got[id] {
+			t.Fatalf("%s is missing from %v — a task outside the first project would be gc's to collect", id, ids)
+		}
 	}
 }
 
@@ -339,9 +325,12 @@ func TestTaskCascadeDelete(t *testing.T) {
 		t.Fatalf("create message: %v", err)
 	}
 
-	// Delete task — messages should be CASCADE deleted
+	// Delete task — its own row goes, and its messages cascade with it.
 	if err := s.DeleteTask("proj-1", "task-1"); err != nil {
 		t.Fatalf("delete task: %v", err)
+	}
+	if _, err := s.GetTask("proj-1", "task-1"); err == nil {
+		t.Fatal("the task row is still readable after DeleteTask")
 	}
 
 	msgs, err := s.GetTaskMessages("task-1", "")
@@ -429,81 +418,96 @@ func TestClearStaleTitleGenerating(t *testing.T) {
 	}
 }
 
-func TestSetTaskBranchIfEmpty(t *testing.T) {
-	s := testStore(t)
-	proj := newProject("proj-1", "test", "/tmp/test")
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
+// The branch column names the worktree a task owns: it is written once, by whoever got there first, and
+// only by a request that names the task's own project — a task id is drawn from the same alphabet as a
+// project id, so the pair is the row's identity.
+func TestTaskBranchWrites(t *testing.T) {
+	seeded := func(t *testing.T) *Store {
+		t.Helper()
+		s := testStore(t)
+		if err := s.CreateProject(newProject("proj-1", "test", "/tmp/test")); err != nil {
+			t.Fatalf("create project: %v", err)
+		}
+		if err := s.CreateTask(newTask("task-1", "proj-1")); err != nil {
+			t.Fatalf("create task: %v", err)
+		}
+		return s
+	}
+	branch := func(t *testing.T, s *Store) string {
+		t.Helper()
+		got, err := s.GetTask("proj-1", "task-1")
+		if err != nil {
+			t.Fatalf("get task: %v", err)
+		}
+		return got.Branch
 	}
 
-	task := newTask("task-1", "proj-1")
-	if err := s.CreateTask(task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
+	t.Run("the first write wins and a second is refused", func(t *testing.T) {
+		s := seeded(t)
+		if got := branch(t, s); got != "" {
+			t.Fatalf("a new task carries branch %q, want none", got)
+		}
 
-	// Task starts with empty branch
-	got, _ := s.GetTask("proj-1", "task-1")
-	if got.Branch != "" {
-		t.Fatalf("expected empty branch, got %q", got.Branch)
-	}
+		set, err := s.SetTaskBranchIfEmpty("task-1", "proj-1", "task/branch-1")
+		if err != nil || !set {
+			t.Fatalf("first set = (%v, %v), want (true, nil)", set, err)
+		}
+		if got := branch(t, s); got != "task/branch-1" {
+			t.Fatalf("branch = %q, want task/branch-1", got)
+		}
 
-	// First call should succeed
-	set, err := s.SetTaskBranchIfEmpty("task-1", "proj-1", "task/branch-1")
-	if err != nil {
-		t.Fatalf("set branch: %v", err)
-	}
-	if !set {
-		t.Fatal("expected branch to be set")
-	}
+		set, err = s.SetTaskBranchIfEmpty("task-1", "proj-1", "task/branch-2")
+		if err != nil {
+			t.Fatalf("second set: %v", err)
+		}
+		if set {
+			t.Error("a second write took a branch that was already named — the task would own a worktree nobody made")
+		}
+		if got := branch(t, s); got != "task/branch-1" {
+			t.Fatalf("the refused write changed the branch to %q", got)
+		}
+	})
 
-	// Verify branch was set
-	got, _ = s.GetTask("proj-1", "task-1")
-	if got.Branch != "task/branch-1" {
-		t.Fatalf("expected branch 'task/branch-1', got %q", got.Branch)
-	}
+	t.Run("clearing empties the row and opens it to a new branch", func(t *testing.T) {
+		s := seeded(t)
+		if set, err := s.SetTaskBranchIfEmpty("task-1", "proj-1", "task/branch-1"); err != nil || !set {
+			t.Fatalf("set branch: set=%v err=%v", set, err)
+		}
 
-	// Second call should fail (branch already set)
-	set, err = s.SetTaskBranchIfEmpty("task-1", "proj-1", "task/branch-2")
-	if err != nil {
-		t.Fatalf("set branch again: %v", err)
-	}
-	if set {
-		t.Fatal("expected branch NOT to be set (already non-empty)")
-	}
+		if err := s.ClearTaskBranch("task-1", "proj-1"); err != nil {
+			t.Fatalf("clear branch: %v", err)
+		}
+		if got := branch(t, s); got != "" {
+			t.Fatalf("branch = %q after the clear, want empty", got)
+		}
 
-	// Branch should still be the original
-	got, _ = s.GetTask("proj-1", "task-1")
-	if got.Branch != "task/branch-1" {
-		t.Fatalf("expected branch unchanged 'task/branch-1', got %q", got.Branch)
-	}
-}
+		if set, err := s.SetTaskBranchIfEmpty("task-1", "proj-1", "task/branch-2"); err != nil || !set {
+			t.Fatalf("set after clear: set=%v err=%v", set, err)
+		}
+		if got := branch(t, s); got != "task/branch-2" {
+			t.Fatalf("branch = %q, want the new branch the cleared row accepted", got)
+		}
+	})
 
-func TestSetTaskBranchIfEmpty_WrongProject(t *testing.T) {
-	s := testStore(t)
-	proj := newProject("proj-1", "test", "/tmp/test")
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
+	t.Run("a write naming another project changes nothing", func(t *testing.T) {
+		s := seeded(t)
+		if set, err := s.SetTaskBranchIfEmpty("task-1", "wrong-proj", "task/branch-1"); err != nil || set {
+			t.Fatalf("set under another project = (set=%v, err=%v), want (false, nil)", set, err)
+		}
+		if got := branch(t, s); got != "" {
+			t.Fatalf("the wrong-project set stored branch %q", got)
+		}
 
-	task := newTask("task-1", "proj-1")
-	if err := s.CreateTask(task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	// Call with wrong project ID should not set branch
-	set, err := s.SetTaskBranchIfEmpty("task-1", "wrong-proj", "task/branch-1")
-	if err != nil {
-		t.Fatalf("set branch: %v", err)
-	}
-	if set {
-		t.Fatal("expected branch NOT to be set (wrong project)")
-	}
-
-	// Branch should still be empty
-	got, _ := s.GetTask("proj-1", "task-1")
-	if got.Branch != "" {
-		t.Fatalf("expected empty branch, got %q", got.Branch)
-	}
+		if set, err := s.SetTaskBranchIfEmpty("task-1", "proj-1", "task/branch-1"); err != nil || !set {
+			t.Fatalf("set branch: set=%v err=%v", set, err)
+		}
+		if err := s.ClearTaskBranch("task-1", "wrong-proj"); err != nil {
+			t.Fatalf("clear under another project: %v", err)
+		}
+		if got := branch(t, s); got != "task/branch-1" {
+			t.Fatalf("the wrong-project clear took the branch: %q", got)
+		}
+	})
 }
 
 func TestSetTaskBranchIfEmpty_Concurrent(t *testing.T) {
@@ -545,74 +549,6 @@ func TestSetTaskBranchIfEmpty_Concurrent(t *testing.T) {
 	}
 	if len(got.Branch) != len("task/branch-0") {
 		t.Fatalf("unexpected branch format: %q", got.Branch)
-	}
-}
-
-func TestClearTaskBranch(t *testing.T) {
-	s := testStore(t)
-	proj := newProject("proj-1", "test", "/tmp/test")
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-
-	task := newTask("task-1", "proj-1")
-	if err := s.CreateTask(task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	set, err := s.SetTaskBranchIfEmpty("task-1", "proj-1", "task/branch-1")
-	if err != nil || !set {
-		t.Fatalf("set branch: set=%v, err=%v", set, err)
-	}
-
-	// Clear it
-	err = s.ClearTaskBranch("task-1", "proj-1")
-	if err != nil {
-		t.Fatalf("clear branch: %v", err)
-	}
-
-	// Verify branch is empty
-	got, _ := s.GetTask("proj-1", "task-1")
-	if got.Branch != "" {
-		t.Fatalf("expected empty branch after clear, got %q", got.Branch)
-	}
-
-	// SetTaskBranchIfEmpty should work again (branch is empty)
-	set, err = s.SetTaskBranchIfEmpty("task-1", "proj-1", "task/branch-2")
-	if err != nil || !set {
-		t.Fatalf("set branch after clear: set=%v, err=%v", set, err)
-	}
-	got, _ = s.GetTask("proj-1", "task-1")
-	if got.Branch != "task/branch-2" {
-		t.Fatalf("expected branch 'task/branch-2', got %q", got.Branch)
-	}
-}
-
-func TestClearTaskBranch_WrongProject(t *testing.T) {
-	s := testStore(t)
-	proj := newProject("proj-1", "test", "/tmp/test")
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-
-	task := newTask("task-1", "proj-1")
-	if err := s.CreateTask(task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	set, err := s.SetTaskBranchIfEmpty("task-1", "proj-1", "task/branch-1")
-	if err != nil || !set {
-		t.Fatalf("set branch: set=%v, err=%v", set, err)
-	}
-
-	// Clear with wrong project — should not affect the branch
-	err = s.ClearTaskBranch("task-1", "wrong-proj")
-	if err != nil {
-		t.Fatalf("clear branch with wrong project: %v", err)
-	}
-	got, _ := s.GetTask("proj-1", "task-1")
-	if got.Branch != "task/branch-1" {
-		t.Fatalf("expected branch unchanged, got %q", got.Branch)
 	}
 }
 
@@ -1130,8 +1066,11 @@ func TestSandboxMemoryPeakSurvivesFullRowUpdate(t *testing.T) {
 	}
 }
 
-func TestSandboxMemoryPeakPersistsAcrossReopen(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "peak.db")
+// The two columns no full-row write owns are also the two that outlive the process that measured them:
+// a peak or a dismissal recorded before a restart is still there after it, or the card re-alerts a person
+// who already dismissed it.
+func TestSandboxMemoryColumnsPersistAcrossReopen(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "sandbox-memory.db")
 	s, err := NewStore(dbPath)
 	if err != nil {
 		t.Fatalf("create store: %v", err)
@@ -1145,6 +1084,9 @@ func TestSandboxMemoryPeakPersistsAcrossReopen(t *testing.T) {
 	if err := s.RecordTaskSandboxMemory("task-reopen", 900, 1); err != nil {
 		t.Fatalf("record peak: %v", err)
 	}
+	if err := s.DismissTaskMemoryAlert("task-reopen", 700, 0, 700); err != nil {
+		t.Fatalf("dismiss alert: %v", err)
+	}
 	s.Close()
 
 	s2, err := NewStore(dbPath)
@@ -1157,20 +1099,31 @@ func TestSandboxMemoryPeakPersistsAcrossReopen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get task after reopen: %v", err)
 	}
-	if got.SandboxMemoryPeakMB != 900 {
-		t.Errorf("peak after reopen = %d, want 900", got.SandboxMemoryPeakMB)
+	if got.SandboxMemoryPeakMB != 900 || got.SandboxOOMKills != 1 {
+		t.Errorf("peak = %d with %d OOM kills, want 900 and 1", got.SandboxMemoryPeakMB, got.SandboxOOMKills)
 	}
-	if got.SandboxOOMKills != 1 {
-		t.Errorf("OOM kills after reopen = %d, want 1", got.SandboxOOMKills)
+	if got.MemoryAlertAck == nil || *got.MemoryAlertAck != (types.MemoryAlertAck{PeakMB: 700, OOMKills: 0, LimitMB: 700}) {
+		t.Errorf("ack after reopen = %+v, want {700 0 700}", got.MemoryAlertAck)
 	}
 }
 
-// The teardown path also carries the project-level container's "proj:…" key and any task
-// deleted mid-run. Neither is a teardown failure.
-func TestRecordTaskSandboxMemoryIgnoresAnUnknownTask(t *testing.T) {
+// Both columns have one writer outside UpdateTask, and both are called on a teardown path that also
+// carries the project-level container's "proj:…" key and any task deleted mid-run. Neither is a
+// teardown failure.
+func TestSandboxMemoryWritesIgnoreAnUnknownTask(t *testing.T) {
 	s := testStore(t)
-	if err := s.RecordTaskSandboxMemory("proj:gone", 512, 4); err != nil {
-		t.Errorf("recording a peak for an unknown task: %v", err)
+	for _, tc := range []struct {
+		name  string
+		write func(*Store, string) error
+	}{
+		{"recording a peak", func(s *Store, id string) error { return s.RecordTaskSandboxMemory(id, 512, 4) }},
+		{"dismissing an alert", func(s *Store, id string) error { return s.DismissTaskMemoryAlert(id, 512, 1, 1024) }},
+	} {
+		t.Run(tc.name+" for a task with no row", func(t *testing.T) {
+			if err := tc.write(s, "proj:gone"); err != nil {
+				t.Errorf("%v", err)
+			}
+		})
 	}
 }
 
@@ -1266,45 +1219,6 @@ func TestDismissTaskMemoryAlertRecordsADismissalOfNothingButKills(t *testing.T) 
 	}
 	if *got.MemoryAlertAck != (types.MemoryAlertAck{PeakMB: 0, OOMKills: 2, LimitMB: 0}) {
 		t.Errorf("ack = %+v, want {0 2 0}", got.MemoryAlertAck)
-	}
-}
-
-func TestDismissTaskMemoryAlertIgnoresAnUnknownTask(t *testing.T) {
-	s := testStore(t)
-	if err := s.DismissTaskMemoryAlert("proj:gone", 512, 1, 1024); err != nil {
-		t.Errorf("dismissing an unknown task's alert: %v", err)
-	}
-}
-
-func TestMemoryAlertAckPersistsAcrossReopen(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "ack.db")
-	s, err := NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	if err := s.CreateProject(newProject("proj-ack-reopen", "ack reopen", "/tmp/ack-reopen")); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	if err := s.CreateTask(newTask("task-ack-reopen", "proj-ack-reopen")); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-	if err := s.DismissTaskMemoryAlert("task-ack-reopen", 700, 0, 700); err != nil {
-		t.Fatalf("dismiss alert: %v", err)
-	}
-	s.Close()
-
-	s2, err := NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("reopen: %v", err)
-	}
-	defer s2.Close()
-
-	got, err := s2.GetTask("proj-ack-reopen", "task-ack-reopen")
-	if err != nil {
-		t.Fatalf("get task after reopen: %v", err)
-	}
-	if got.MemoryAlertAck == nil || *got.MemoryAlertAck != (types.MemoryAlertAck{PeakMB: 700, OOMKills: 0, LimitMB: 700}) {
-		t.Fatalf("ack after reopen = %+v, want {700 0 700}", got.MemoryAlertAck)
 	}
 }
 

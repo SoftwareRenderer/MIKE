@@ -170,8 +170,9 @@ func TestStatusLogStaysQuietAboutAnswers(t *testing.T) {
 	}
 }
 
-// A preview path segment is a live bearer token and a pairing query carries a code, so a refusal names
-// the route and never the request.
+// A refusal names the route and never the request: a preview path segment is a live bearer token, a
+// pairing query carries a code, and the rest of an unrouted path is nobody's business. A request that
+// matched no route is named by its first path segment, which is all of a path that is safe to repeat.
 func TestStatusLogNamesTheRouteAndNotTheRequest(t *testing.T) {
 	logging.SetLevel("debug")
 	defer logging.SetLevel("info")
@@ -181,42 +182,46 @@ func TestStatusLogNamesTheRouteAndNotTheRequest(t *testing.T) {
 	defer restore()
 
 	const token = "0123456789abcdef0123456789abcdef"
-	chainDo(s, testRequest(http.MethodGet,
-		"/api/preview/"+token+"/secrets/.env?code=ABCDEFGH&path=/home/operator/.ssh/id_ed25519", nil))
+	cases := []struct {
+		name   string
+		path   string
+		want   string   // the route the line must name
+		absent []string // parts of the request the line must never repeat
+	}{
+		{
+			name:   "a routed refusal names the pattern",
+			path:   "/api/preview/" + token + "/secrets/.env?code=ABCDEFGH&path=/home/operator/.ssh/id_ed25519",
+			want:   `route="GET /api/preview/{token}/{path...}"`,
+			absent: []string{token, "ABCDEFGH", "id_ed25519", ".env", "/api/preview/0"},
+		},
+		{
+			name:   "an unrouted request names one segment",
+			path:   "/nothing-here/and-a-secret-part",
+			want:   `route="unrouted /nothing-here"`,
+			absent: []string{"and-a-secret-part"},
+		},
+	}
 
-	lines := refusalLines(buf)
-	if len(lines) != 1 {
-		t.Fatalf("want one refusal line, got %d:\n%s", len(lines), buf.String())
-	}
-	got := lines[0]
-	for _, absent := range []string{token, "ABCDEFGH", "id_ed25519", ".env", "/api/preview/0"} {
-		if strings.Contains(got, absent) {
-			t.Errorf("the line names part of the request (%q):\n%s", absent, got)
-		}
-	}
-	if !strings.Contains(got, `route="GET /api/preview/{token}/{path...}"`) {
-		t.Errorf("the route pattern is missing:\n%s", got)
-	}
-}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			before := len(refusalLines(buf))
+			chainDo(s, testRequest(http.MethodGet, tc.path, nil))
 
-// A request that matched no route is named by its first path segment, which is all of a path that is
-// safe to repeat.
-func TestStatusLogNamesAnUnroutedRequestByItsSegment(t *testing.T) {
-	s := testServer(t)
-	buf, restore := logging.TestSink()
-	defer restore()
-
-	chainDo(s, testRequest(http.MethodGet, "/nothing-here/and-a-secret-part", nil))
-
-	lines := refusalLines(buf)
-	if len(lines) != 1 {
-		t.Fatalf("want one refusal line, got %d:\n%s", len(lines), buf.String())
-	}
-	if !strings.Contains(lines[0], `route="unrouted /nothing-here"`) {
-		t.Errorf("an unrouted request should name one segment:\n%s", lines[0])
-	}
-	if strings.Contains(lines[0], "and-a-secret-part") {
-		t.Errorf("the rest of the path was logged: %s", lines[0])
+			lines := refusalLines(buf)
+			if len(lines) != before+1 {
+				t.Fatalf("want one new refusal line, got %d:\n%s", len(lines)-before,
+					strings.Join(lines[before:], "\n"))
+			}
+			got := lines[before]
+			for _, absent := range tc.absent {
+				if strings.Contains(got, absent) {
+					t.Errorf("the line names part of the request (%q):\n%s", absent, got)
+				}
+			}
+			if !strings.Contains(got, tc.want) {
+				t.Errorf("the route is missing from the line:\n%s", got)
+			}
+		})
 	}
 }
 

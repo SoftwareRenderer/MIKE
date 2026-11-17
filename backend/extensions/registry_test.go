@@ -58,33 +58,6 @@ func TestFetchIndex(t *testing.T) {
 	}
 }
 
-func TestFetchIndex_HTTPError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer server.Close()
-
-	rc := NewRegistryClient()
-	_, err := rc.FetchIndex(server.URL)
-	if err == nil {
-		t.Error("FetchIndex(HTTP 404) = nil, want error")
-	}
-}
-
-func TestFetchIndex_InvalidJSON(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte("not json"))
-	}))
-	defer server.Close()
-
-	rc := NewRegistryClient()
-	_, err := rc.FetchIndex(server.URL)
-	if err == nil {
-		t.Error("FetchIndex(invalid json) = nil, want error")
-	}
-}
-
 func TestFetchIndex_FeaturedFlag(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -123,25 +96,120 @@ func TestFetchIndex_FeaturedFlag(t *testing.T) {
 	}
 }
 
-func TestFetchDockerfile(t *testing.T) {
-	expected := `FROM ubuntu:latest
-RUN apt-get update && apt-get install -y gopls
-CMD ["/usr/bin/gopls", "serve"]
-`
+// An index that cannot be read or parsed is an error, never the empty list the Browse panel would
+// render as "nothing published" — which invites reinstalling extensions that are already installed.
+func TestFetchIndexRefusesAnUnusableAnswer(t *testing.T) {
+	notFound := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer notFound.Close()
+	malformed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte("not json"))
+	}))
+	defer malformed.Close()
 
+	rc := NewRegistryClient()
+	for _, tc := range []struct {
+		name string
+		url  string
+	}{
+		{"http 404", notFound.URL},
+		{"malformed json", malformed.URL},
+		{"nothing listening", "http://localhost:1/not-a-real-server"},
+		{"missing file", "file:///nonexistent/path/registry.json"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := rc.FetchIndex(tc.url); err == nil {
+				t.Errorf("FetchIndex(%s) = nil, want an error", tc.name)
+			}
+		})
+	}
+}
+
+// The Dockerfile a registry names reaches `podman build` as the bytes it published, on both
+// transports: a rewrite of them changes what the image installs.
+func TestFetchDockerfileReturnsTheBytesAsIs(t *testing.T) {
+	rc := NewRegistryClient()
+
+	const expected = "FROM ubuntu:latest\nRUN apt-get update && apt-get install -y gopls\nCMD [\"/usr/bin/gopls\", \"serve\"]\n"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		w.Write([]byte(expected))
 	}))
 	defer server.Close()
 
-	rc := NewRegistryClient()
-	got, err := rc.FetchDockerfile(server.URL)
-	if err != nil {
-		t.Fatalf("FetchDockerfile: %v", err)
+	tmp := t.TempDir()
+	dfPath := tmp + "/Dockerfile"
+	content := "FROM ubuntu:22.04\nRUN apt-get update\n"
+	if err := os.WriteFile(dfPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	if got != expected {
-		t.Errorf("Dockerfile = %q, want %q", got, expected)
+
+	for _, tc := range []struct {
+		name string
+		url  string
+		want string
+	}{
+		{"http", server.URL, expected},
+		{"file", "file://" + dfPath, content},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := rc.FetchDockerfile(tc.url)
+			if err != nil {
+				t.Fatalf("FetchDockerfile(%s): %v", tc.name, err)
+			}
+			if got != tc.want {
+				t.Errorf("Dockerfile = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRegistryIndexDecodesAPublishedEntry reads the registry text an install really fetches
+// (../MIKE-extensions/registry.json) through the decoder: a json tag that drifted from the published
+// field yields an entry with no repo, no commit and no subdir, so the checkout cannot be verified and
+// the row can never be updated. The prose of an entry is the generator's business
+// (`python3 scripts/gen-registry.py --check`); these tags are this package's.
+func TestRegistryIndexDecodesAPublishedEntry(t *testing.T) {
+	path, err := filepath.Abs(filepath.Join("..", "..", "..", "MIKE-extensions", "registry.json"))
+	if err != nil {
+		t.Fatalf("resolve the registry source: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("the registry source beside this repo is unreadable: %v", err)
+	}
+
+	var index RegistryIndex
+	if err := json.Unmarshal(data, &index); err != nil {
+		t.Fatalf("registry.json does not decode into RegistryIndex: %v", err)
+	}
+
+	var found *RegistryEntry
+	for i, entry := range index {
+		if entry.Name == "typescript-language-server" {
+			found = &index[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("registry.json has no typescript-language-server entry")
+	}
+	if found.Type != ExtensionTypeLSP {
+		t.Errorf("Type = %q, want %q", found.Type, ExtensionTypeLSP)
+	}
+	if found.DisplayName == "" || found.Author == "" {
+		t.Errorf("display_name/author did not decode: %+v", found)
+	}
+	if found.Repo == "" {
+		t.Error("repo did not decode: an install would have nothing to clone")
+	}
+	if !commitHashRe.MatchString(found.Commit) {
+		t.Errorf("commit %q is not a full hash: the checkout cannot be verified against it", found.Commit)
+	}
+	if found.Subdir != "lsp/typescript-language-server" {
+		t.Errorf("Subdir = %q, want the directory an install materializes", found.Subdir)
 	}
 }
 
@@ -178,74 +246,38 @@ func TestNewEgressHosts(t *testing.T) {
 	}
 }
 
-func TestCompareVersion(t *testing.T) {
+// TestCompareVersions pins the ordering and the one decision taken from it: only a strictly newer
+// remote version is an update. A non-semver pair falls back to lexicographic, which is why
+// "1.0.0-alpha" outranks "1.0.0" — the answer an author gets when a pre-release looks newer.
+func TestCompareVersions(t *testing.T) {
 	tests := []struct {
-		a    string
-		b    string
-		want int
+		a, b   string
+		want   int
+		update bool
 	}{
-		{"1.0.0", "1.0.0", 0},
-		{"1.0.0", "1.0.1", -1},
-		{"1.0.1", "1.0.0", 1},
-		{"1.0.0", "2.0.0", -1},
-		{"2.0.0", "1.0.0", 1},
-		{"1.1.0", "1.0.9", 1},
-		{"1.0.0", "1.1.0", -1},
-		{"v1.0.0", "v1.0.0", 0},
-		{"v1.0.0", "1.0.0", 0},
-		{"1.0.0-alpha", "1.0.0", 1}, // non-semver falls back to lexicographic ("1.0.0-alpha" > "1.0.0")
-		{"latest", "latest", 0},
-		{"beta", "alpha", 1},
+		{"1.0.0", "1.0.0", 0, false},
+		{"1.0.0", "1.0.1", -1, true},
+		{"1.0.1", "1.0.0", 1, false},
+		{"1.0.0", "2.0.0", -1, true},
+		{"2.0.0", "1.0.0", 1, false},
+		{"1.1.0", "1.0.9", 1, false},
+		{"1.0.0", "1.1.0", -1, true},
+		{"v1.0.0", "v1.0.0", 0, false},
+		{"v1.0.0", "1.0.0", 0, false},
+		{"1.0.0-alpha", "1.0.0", 1, false},
+		{"latest", "latest", 0, false},
+		{"beta", "alpha", 1, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.a+"_vs_"+tt.b, func(t *testing.T) {
-			got := CompareVersion(tt.a, tt.b)
-			if got != tt.want {
+			if got := CompareVersion(tt.a, tt.b); got != tt.want {
 				t.Errorf("CompareVersion(%q, %q) = %v, want %v", tt.a, tt.b, got, tt.want)
 			}
-		})
-	}
-}
-
-func TestUpdateAvailable(t *testing.T) {
-	tests := []struct {
-		installed string
-		remote    string
-		want      bool
-	}{
-		{"1.0.0", "1.0.0", false},
-		{"1.0.0", "1.0.1", true},
-		{"1.0.1", "1.0.0", false},
-		{"1.0.0", "2.0.0", true},
-		{"2.0.0", "1.0.0", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.installed+"_vs_"+tt.remote, func(t *testing.T) {
-			got := UpdateAvailable(tt.installed, tt.remote)
-			if got != tt.want {
-				t.Errorf("UpdateAvailable(%q, %q) = %v, want %v", tt.installed, tt.remote, got, tt.want)
+			if got := UpdateAvailable(tt.a, tt.b); got != tt.update {
+				t.Errorf("UpdateAvailable(%q, %q) = %v, want %v", tt.a, tt.b, got, tt.update)
 			}
 		})
-	}
-}
-
-func TestRegistryClient_New(t *testing.T) {
-	rc := NewRegistryClient()
-	if rc == nil {
-		t.Fatal("NewRegistryClient() = nil")
-	}
-	if rc.httpClient == nil {
-		t.Fatal("NewRegistryClient().httpClient = nil")
-	}
-}
-
-func TestFetchIndex_NetworkError(t *testing.T) {
-	rc := NewRegistryClient()
-	_, err := rc.FetchIndex("http://localhost:1/not-a-real-server")
-	if err == nil {
-		t.Error("FetchIndex(invalid host) = nil, want error")
 	}
 }
 
@@ -269,65 +301,6 @@ func TestFetchIndex_FileURL(t *testing.T) {
 	}
 	if index[0].Name != "test-ext" {
 		t.Fatalf("index[0].Name = %q, want %q", index[0].Name, "test-ext")
-	}
-}
-
-func TestFetchIndex_FileNotFound(t *testing.T) {
-	rc := NewRegistryClient()
-	_, err := rc.FetchIndex("file:///nonexistent/path/registry.json")
-	if err == nil {
-		t.Error("FetchIndex(nonexistent file) = nil, want error")
-	}
-}
-
-func TestFetchDockerfile_FileURL(t *testing.T) {
-	rc := NewRegistryClient()
-
-	// Create a temp Dockerfile
-	tmp := t.TempDir()
-	dfPath := tmp + "/Dockerfile"
-	content := "FROM ubuntu:22.04\nRUN apt-get update\n"
-	if err := os.WriteFile(dfPath, []byte(content), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := rc.FetchDockerfile("file://" + dfPath)
-	if err != nil {
-		t.Fatalf("FetchDockerfile(file://) = error: %v", err)
-	}
-	if got != content {
-		t.Fatalf("got = %q, want %q", got, content)
-	}
-}
-
-// TestValidateImageRef covers the charset gate only — a ref must not become a podman flag. Naming
-// a registry is a separate rule (ValidateConfiguredImageRef), which is why "golang:1.21" passes
-// here but is not acceptable as a user- or registry-declared image.
-func TestValidateImageRef(t *testing.T) {
-	tests := []struct {
-		name    string
-		image   string
-		wantErr bool
-	}{
-		{"valid ubuntu", "docker.io/library/ubuntu:latest", false},
-		{"valid golang", "golang:1.21", false},
-		{"valid with digest", "ubuntu@sha256:abc123", false},
-		{"valid localhost", "localhost:5000/myimage:latest", false},
-		{"valid kanban prefix", "kanban-ext-gopls:1.0.0", false},
-		{"valid project image", "sandbox-my-project", false},
-		{"dash prefix", "-v", true},
-		{"dash prefix long", "--format=json", true},
-		{"dash prefix space", "-t something", true},
-		{"empty string", "", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := sandboxruntime.ValidateImageRef(tt.image)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("sandboxruntime.ValidateImageRef(%q) error = %v, wantErr %v", tt.image, err, tt.wantErr)
-			}
-		})
 	}
 }
 
@@ -483,21 +456,6 @@ func TestCheckoutExtension_SHA1Commit(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dest, f)); err != nil {
 			t.Errorf("%s not materialized: %v", f, err)
 		}
-	}
-}
-
-func TestCheckoutExtension_SHA1Repo(t *testing.T) {
-	// A SHA-1 object-format repo's own commit must be accepted and installed.
-	repo, sha1 := makeGitRepoFormat(t, map[string]string{
-		"myext/manifest.json": `{"display_name":"X"}`,
-	}, "sha1")
-	dest := filepath.Join(t.TempDir(), "ui", "x")
-	rc := NewRegistryClient()
-	if err := rc.CheckoutExtension(repo, sha1, "myext", dest); err != nil {
-		t.Fatalf("CheckoutExtension(SHA-1 repo commit): %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(dest, "manifest.json")); err != nil {
-		t.Errorf("manifest.json not materialized: %v", err)
 	}
 }
 

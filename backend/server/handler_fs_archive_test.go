@@ -333,7 +333,8 @@ func TestFSArchiveEntryRefusesWhatTheEditorCannotShow(t *testing.T) {
 }
 
 // The refusals are the route's own vocabulary: a name that is not an archive, a name that is a directory,
-// a name that is not a file at all, and a name that is not in this project.
+// a name that is not a file at all, and a name that is not in this project — the same refusal whichever
+// of the two branches asked for it, the working tree or the committed object.
 func TestFSArchiveRefusals(t *testing.T) {
 	s := testServer(t)
 	cookie, _ := loginTestCSRF(t, s)
@@ -363,6 +364,7 @@ func TestFSArchiveRefusals(t *testing.T) {
 		{name: "a FIFO", path: "pipe", want: http.StatusBadRequest},
 		{name: "no such file", path: "gone.tar.gz", want: http.StatusNotFound},
 		{name: "outside the project", path: outside, want: http.StatusBadRequest, says: fsutil.ErrOutside.Error()},
+		{name: "outside the project, at a ref", path: filepath.Join(filepath.Dir(repo), "elsewhere", "bundle.tar.gz"), ref: "HEAD", want: http.StatusBadRequest, says: fsutil.ErrOutside.Error()},
 		{name: "inside .git", path: ".git/config.tar.gz", want: http.StatusBadRequest, says: fsutil.ErrGitPath.Error()},
 		{name: "an option-shaped ref", path: "real.tar.gz", ref: "--output=/tmp/pwn", want: http.StatusBadRequest},
 		{name: "a ref that names nothing", path: "real.tar.gz", ref: "no-such-branch", want: http.StatusNotFound},
@@ -391,28 +393,6 @@ func TestFSArchiveRefusals(t *testing.T) {
 	// The control: the same route, same project, real archive.
 	if rr := archiveGet(t, s, cookie, url.Values{"project": {projectID}, "path": {filepath.Join(repo, "real.tar.gz")}}); rr.Code != http.StatusOK {
 		t.Errorf("the real archive was refused: %d %s", rr.Code, rr.Body.String())
-	}
-}
-
-// A path a request supplies reaches git only inside a spec, and a spec is built from the tree the
-// request named: an absolute path that sits under it is the same object.
-func TestFSArchiveRefusesAPathOutsideTheProjectWithARef(t *testing.T) {
-	s := testServer(t)
-	cookie, _ := loginTestCSRF(t, s)
-	projectID, repo := archiveProject(t, s, "fs-archive-ref-jail", map[string][]byte{"bundle.tar.gz": buildArchiveTarGz(t)})
-
-	q := url.Values{
-		"project": {projectID},
-		"path":    {filepath.Join(filepath.Dir(repo), "elsewhere", "bundle.tar.gz")},
-		"ref":     {"HEAD"},
-	}
-	if rr := archiveGet(t, s, cookie, q); rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want the containment refusal (%s)", rr.Code, rr.Body.String())
-	}
-	// The control: the same ref over a path inside the project answers.
-	q.Set("path", filepath.Join(repo, "bundle.tar.gz"))
-	if rr := archiveGet(t, s, cookie, q); rr.Code != http.StatusOK {
-		t.Errorf("the committed archive was refused: %d %s", rr.Code, rr.Body.String())
 	}
 }
 

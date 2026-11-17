@@ -106,7 +106,8 @@ title a model wrote.
 
 **Tests:** `backend/git/worktree_removal_test.go` (the three-part removal, the decorated orphan,
 live branches kept), `backend/git/branch_listing_test.go` (both markers, slug prefix, one segment),
-`backend/server/task_delete_branches_test.go` (single delete, Clear-all, fork thread branch).
+`backend/server/task_delete_branches_test.go` (single delete, Clear-all, fork thread branch, and the
+ sweep that keeps the branch a live task's row names).
 
 ## Submodules: share the person's copy, never re-fetch
 
@@ -355,7 +356,7 @@ a pull or a push fetched too, so their numbers count as fresh. The Push number i
 nothing the remote does moves `ahead` except a force-push.
 
 Tests: `backend/api/git_test.go` — ahead, behind, and no-upstream on status, and `git fetch` moving the
-behind count / declining without an upstream (`go test ./backend/api/ -run TestHandleFetch`).
+behind count / declining without an upstream (`go test ./backend/api/ -run 'TestHandleStatus|TestHandleFetch'`).
 `frontend/src/lib/components/__tests__/git-status-panel.unit.svelte.ts` owns the dash and the label.
 
 ## Checking this

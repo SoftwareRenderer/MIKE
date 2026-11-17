@@ -14,37 +14,23 @@ import (
 // These pin what the build path must control - the context it creates and what is staged in it - not
 // whether buildah can build, which the gated test below covers against a real daemon.
 
-func TestBuildExtensionImageArgs(t *testing.T) {
-	got := buildExtensionImageArgs("localhost/kanban-ext-gopls:0.7.0", "/tmp/ctx")
-	want := []string{"build", "-t", "localhost/kanban-ext-gopls:0.7.0", "-f", filepath.Join("/tmp/ctx", "Dockerfile"), "/tmp/ctx"}
-	if len(got) != len(want) {
-		t.Fatalf("args = %v, want %v", got, want)
+// One build must hand podman a named context and nothing else, with the bridge inside it.
+//
+// The argv is asserted as the bytes the fake podman was exec'd with, so it pins what reached the
+// subprocess rather than what a helper recorded: exactly `build -t <ref> -f <ctx>/Dockerfile <ctx>`.
+// A bare "-" would take the Dockerfile from stdin and a "." the context from the working directory;
+// neither can appear in it. A .dockerignore is planted below the working directory because an ignore
+// file written for another build decides what a context it governs holds — the context is created by
+// this package under the temp root, where that file has nothing to say about anything.
+func TestBuildExtensionImageNamesItsOwnContextAndStagesTheBridge(t *testing.T) {
+	cwd := t.TempDir()
+	// No bridge anywhere near the ignore file, so the context can only hold
+	// sandbox/sandbox-bridge by being staged.
+	if err := os.WriteFile(filepath.Join(cwd, ".dockerignore"), []byte("sandbox/\nsandbox/sandbox-bridge\n*"), 0o644); err != nil {
+		t.Fatalf("write .dockerignore: %v", err)
 	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("args[%d] = %q, want %q (full: %v)", i, got[i], want[i], got)
-		}
-	}
-}
+	t.Chdir(cwd)
 
-// Reading the Dockerfile from stdin with the CWD as context is what let a .dockerignore written for
-// another build decide what an extension build could see.
-func TestBuildExtensionImageArgs_NeverReadsStdinOrTheWorkingDirectory(t *testing.T) {
-	args := buildExtensionImageArgs("localhost/kanban-ext-x:1.0.0", "/tmp/ctx")
-	for i, a := range args {
-		if a == "-" {
-			t.Errorf("args[%d] is a bare \"-\": the Dockerfile must come from the context, not stdin (args: %v)", i, args)
-		}
-		if a == "." {
-			t.Errorf("args[%d] is \".\": the context must be named, never inherited from the CWD (args: %v)", i, args)
-		}
-		if i > 0 && args[i-1] == "-f" && a == "-" {
-			t.Errorf("-f takes stdin: %v", args)
-		}
-	}
-}
-
-func TestBuildExtensionImage_StagesTheBridgeIntoTheContext(t *testing.T) {
 	fake := fakePodmanOK(t)
 	rc := NewRegistryClientWithBoot(bridgeBoot(t))
 
@@ -59,9 +45,25 @@ func TestBuildExtensionImage_StagesTheBridgeIntoTheContext(t *testing.T) {
 		t.Fatalf("podman called %d times, want 1: %v", len(calls), calls)
 	}
 	ctx := fake.context(t, 0)
+	if ctx.Dir == "" {
+		t.Fatal("no context directory was recorded")
+	}
 	want := []string{"build", "-t", ref, "-f", filepath.Join(ctx.Dir, "Dockerfile"), ctx.Dir}
 	if fmt.Sprint(calls[0]) != fmt.Sprint(want) {
 		t.Errorf("argv = %v, want %v", calls[0], want)
+	}
+	for _, call := range calls {
+		for _, a := range call {
+			if a == "." || a == "-" || strings.HasPrefix(a, cwd) {
+				t.Errorf("argv %v reaches the working directory (%q)", call, a)
+			}
+		}
+	}
+	if sameDir(t, ctx.Dir, workingDir(t)) {
+		t.Errorf("the context is the working directory (%s)", ctx.Dir)
+	}
+	if strings.HasPrefix(ctx.Dir, cwd) {
+		t.Errorf("the build context %s lives under the working directory %s, so its .dockerignore governs it", ctx.Dir, cwd)
 	}
 
 	found := map[string]bool{}
@@ -81,62 +83,17 @@ func TestBuildExtensionImage_StagesTheBridgeIntoTheContext(t *testing.T) {
 	if ctx.HasDockerignore {
 		t.Error("the build context carries a .dockerignore: it is what filtered the bridge out last time")
 	}
-	if ctx.Dir == "" {
-		t.Fatal("no context directory was recorded")
-	}
-	if sameDir(t, ctx.Dir, workingDir(t)) {
-		t.Errorf("the context is the working directory (%s)", ctx.Dir)
-	}
 	// Two files, no more: what the build needs, not what the tree holds.
 	if len(ctx.Files) != 2 {
 		t.Errorf("context holds %v, want exactly the Dockerfile and the bridge", ctx.Files)
 	}
 }
 
-// A .dockerignore in the working directory must not be able to starve an extension build.
-func TestBuildExtensionImage_IgnoresADockerignoreInTheWorkingDirectory(t *testing.T) {
-	cwd := t.TempDir()
-	// No bridge anywhere near the ignore file, so the context can only hold
-	// sandbox/sandbox-bridge by being staged.
-	if err := os.WriteFile(filepath.Join(cwd, ".dockerignore"), []byte("sandbox/\nsandbox/sandbox-bridge\n*"), 0o644); err != nil {
-		t.Fatalf("write .dockerignore: %v", err)
-	}
-	t.Chdir(cwd)
-
-	fake := fakePodmanOK(t)
-	rc := NewRegistryClientWithBoot(bridgeBoot(t))
-	if err := rc.BuildExtensionImage("FROM docker.io/library/alpine:latest\nCOPY sandbox/sandbox-bridge /usr/local/bin/sandbox-bridge\n", "localhost/kanban-ext-gopls:0.7.0"); err != nil {
-		t.Fatalf("BuildExtensionImage: %v", err)
-	}
-
-	ctx := fake.context(t, 0)
-	if ctx.Dir == "" {
-		t.Fatal("no context directory was recorded")
-	}
-	if strings.HasPrefix(ctx.Dir, cwd) {
-		t.Errorf("the build context %s lives under the working directory %s, so its .dockerignore governs it", ctx.Dir, cwd)
-	}
-	for _, call := range fake.calls(t) {
-		for _, a := range call {
-			if a == "." || a == "-" || strings.HasPrefix(a, cwd) {
-				t.Errorf("argv %v reaches the working directory (%q)", call, a)
-			}
-		}
-	}
-	var staged bool
-	for _, f := range ctx.Files {
-		if filepath.ToSlash(f) == extensionBuildContextBridge {
-			staged = true
-		}
-	}
-	if !staged {
-		t.Errorf("context %v does not hold %s: %v — the build would fail with the file filtered out of the context",
-			ctx.Dir, extensionBuildContextBridge, ctx.Files)
-	}
-}
-
-// The same claim against real buildah. Gated on this host being able to run a container at all.
+// The same claim against real buildah. Gated on this host being able to build an image at all (the
+// graph driver and its mount program, which a container-start probe does not exercise) and on the
+// base it fetches.
 func TestBuildExtensionImage_RealBuildSurvivesADockerignoreBelow(t *testing.T) {
+	sandboxcheck.RequireBuild(t)
 	sandboxcheck.Require(t, "docker.io/library/alpine:latest")
 	rt := sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{})
 	cwd := t.TempDir()

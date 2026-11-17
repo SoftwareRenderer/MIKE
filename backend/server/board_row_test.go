@@ -65,6 +65,34 @@ func TestBoardRowDropsResultTextAndOneTaskReadKeepsIt(t *testing.T) {
 	}
 }
 
+// TestBoardListsEveryTaskOfTheProject is the board's completeness rule: one row per task of the
+// project, whatever the column and whatever the depth. A board that lists roots alone renders a
+// column with its subtasks missing, and the counts beside the column header come from the same rows.
+func TestBoardListsEveryTaskOfTheProject(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	parentID := createTestTask(t, s, projID, "board-parent")
+	rootID := createTestTask(t, s, projID, "board-root")
+	subID := createTestSubtask(t, s, projID, parentID, "board-subtask")
+	moveTask(t, s, projID, subID, "review")
+
+	board := mustJSON[map[string]any](t, bytes.NewReader(getAuth(t, s, "/api/projects/"+projID+"/board")))
+	rows := map[string]map[string]any{}
+	for _, raw := range board["tasks"].([]any) {
+		row := raw.(map[string]any)
+		rows[row["id"].(string)] = row
+	}
+	for id, wantStatus := range map[string]string{parentID: "backlog", rootID: "backlog", subID: "review"} {
+		row, held := rows[id]
+		if !held {
+			t.Fatalf("the board left out %s; it holds %d rows", id, len(rows))
+		}
+		if row["status"] != wantStatus {
+			t.Errorf("%s is on the board as %v, want %q", id, row["status"], wantStatus)
+		}
+	}
+}
+
 func sortedKeys(row map[string]any) []string {
 	keys := make([]string, 0, len(row))
 	for key := range row {

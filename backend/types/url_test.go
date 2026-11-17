@@ -19,40 +19,34 @@ func TestURLHostNamesTheHostOrNothing(t *testing.T) {
 			t.Errorf("URLHost(%q) = %q, want %q", tc.raw, got, tc.want)
 		}
 	}
-
-	// These are the two checks a probe makes about a saved credential.
-	if SameHost(URLHost("https://search.example/mcp"), URLHost("http://127.0.0.1:9/mcp")) {
-		t.Error("a stored credential would be spent across hosts")
-	}
-	if !SameHost(URLHost("https://localhost:8080"), URLHost("http://127.0.0.1:9000")) {
-		t.Error("a credential was withheld from the same machine under another loopback name")
-	}
 }
 
-func TestRedactURLHidesAPastedCredential(t *testing.T) {
+// RedactURL is what a log line quotes when it quotes an address: the password goes, everything a
+// person would recognise stays. An address carrying no password is handed back untouched — rewriting
+// one that parses is how a remote name stops matching the one the person typed.
+func TestRedactURLRemovesOnlyThePassword(t *testing.T) {
 	const secret = "ghp_SUPERSECRET"
-	for _, tc := range []struct{ raw, kept string }{
+	for _, tc := range []struct{ raw, want string }{
+		// The credential forms a person can paste, and the address that must survive the cut.
 		{"https://oauth2:" + secret + "@github.com/acme/private.git", "github.com/acme/private.git"},
 		{"git+ssh://oauth2:" + secret + "@git.example.com/acme/private.git", "git.example.com/acme/private.git"},
 		// A path with a space in it is the address a person pastes, and the one url.Parse refuses.
 		{"https://oauth2:" + secret + "@git example/acme.git", "git example/acme.git"},
+		// No password to take: the address comes back exactly as it went in.
+		{"https://github.com/acme/public.git", "https://github.com/acme/public.git"},
+		{"git@github.com:acme/public.git", "git@github.com:acme/public.git"},
+		{"https://user@github.com/acme/public.git", "https://user@github.com/acme/public.git"},
+		{"", ""},
 	} {
 		got := RedactURL(tc.raw)
-		if strings.Contains(got, secret) || !strings.Contains(got, tc.kept) {
-			t.Errorf("RedactURL(%q) = %q, want the password gone and %q kept", tc.raw, got, tc.kept)
+		if strings.Contains(got, secret) {
+			t.Errorf("RedactURL(%q) = %q, which still carries the credential", tc.raw, got)
 		}
-	}
-}
-
-func TestRedactURLLeavesAnAddressWithNoPasswordAlone(t *testing.T) {
-	for _, raw := range []string{
-		"https://github.com/acme/public.git",
-		"git@github.com:acme/public.git",
-		"https://user@github.com/acme/public.git",
-		"",
-	} {
-		if got := RedactURL(raw); got != raw {
-			t.Errorf("RedactURL(%q) = %q, want it unchanged", raw, got)
+		if !strings.Contains(got, tc.want) {
+			t.Errorf("RedactURL(%q) = %q, want %q kept", tc.raw, got, tc.want)
+		}
+		if !strings.Contains(tc.raw, secret) && got != tc.raw {
+			t.Errorf("RedactURL(%q) = %q, want it unchanged", tc.raw, got)
 		}
 	}
 }

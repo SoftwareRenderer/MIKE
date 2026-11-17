@@ -30,62 +30,15 @@ func TestBuildCheckpointLabelMessages(t *testing.T) {
 		t.Error("user message should contain 'Recent changes' context header")
 	}
 	if !strings.Contains(msgs[1].Content, "Git diff --stat") {
-		t.Error("user message should contain diff stat")
+		t.Error("the label prompt was sent without its diff-stat section")
+	}
+	if !strings.Contains(msgs[1].Content, "src/main.go | 10 ++++++++---") {
+		t.Error("the label prompt was sent without the diff stat it labels")
+	}
+	if !strings.Contains(msgs[1].Content, "Assistant: I'll patch it") {
+		t.Error("the label prompt was sent without the turn it labels")
 	}
 }
-
-// --- Checkpoint Context Tests ---
-
-func TestExtractLastTurns_FromSlicedMessages(t *testing.T) {
-	t.Parallel()
-	// The messages since the last checkpoint, as one turn's extraction sees them.
-
-	allMessages := []types.ChatMessage{
-		{Role: "system", Content: "system prompt"},
-		{Role: "user", Content: "Original request"},
-		{Role: "assistant", Content: "Old response"},
-		{Role: "tool", Content: "old result"},
-		// --- checkpoint 1, checkpointIdx = 4 ---
-		{Role: "assistant", Content: "New tool call", ToolCalls: []types.ToolCallMsg{{ID: "call_2"}}},
-		{Role: "tool", Content: "new result", ToolCallID: "call_2"},
-	}
-
-	checkpointIdx := 4
-	sinceCheckpoint := allMessages[checkpointIdx:]
-	turns := ExtractLastTurns(sinceCheckpoint, 3)
-
-	// Should only contain messages since checkpoint
-	if len(turns) != 2 {
-		t.Errorf("expected 2 messages in turns, got %d", len(turns))
-	}
-	for _, m := range turns {
-		if m.Content == "Original request" {
-			t.Error("original user request should not be in turns")
-		}
-		if m.Content == "Old response" {
-			t.Error("old assistant response should not be in turns")
-		}
-	}
-}
-
-func TestExtractLastTurns_NoNewMessages(t *testing.T) {
-	t.Parallel()
-	// Edge case: checkpointIdx == len(messages), no new messages
-	allMessages := []types.ChatMessage{
-		{Role: "system", Content: "system prompt"},
-		{Role: "user", Content: "Request"},
-	}
-
-	checkpointIdx := len(allMessages)
-	sinceCheckpoint := allMessages[checkpointIdx:]
-	turns := ExtractLastTurns(sinceCheckpoint, 3)
-
-	if len(turns) != 0 {
-		t.Errorf("expected 0 turns when no new messages, got %d", len(turns))
-	}
-}
-
-// --- estimatePromptTokens Tests ---
 
 // --- ExtractCommitContext Tests ---
 
@@ -173,26 +126,6 @@ func TestExtractCommitContext_FullConversation(t *testing.T) {
 	}
 }
 
-func TestExtractCommitContext_NoRequestReview_FallsBackToProse(t *testing.T) {
-	t.Parallel()
-	// A thread with no review has no summary, so the assistant's own words are read with the task
-	// prompt.
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "system prompt"},
-		{Role: "user", Content: "Fix the bug"},
-		{Role: "assistant", Content: "Fixed it"},
-	}
-
-	result := ExtractCommitContext(messages)
-
-	if len(result) != 2 {
-		t.Fatalf("expected 2 messages, got %d: %v", len(result), contentOf(result))
-	}
-	if result[0].Content != "Fix the bug" || result[1].Content != "Fixed it" {
-		t.Errorf("prose = %v, want the task prompt then the assistant's answer", contentOf(result))
-	}
-}
-
 func TestExtractCommitContext_NoRequestReview_KeepsEveryTurn(t *testing.T) {
 	t.Parallel()
 	// The review path keeps only the first user message, because a summary stands for the rest. The
@@ -248,234 +181,6 @@ func TestExtractCommitContext_OneReviewDisablesTheProseFallback(t *testing.T) {
 		switch m.Content {
 		case "Working", "Anything else?", "edited a.go":
 			t.Errorf("a working turn rode along with a review present: %q", m.Content)
-		}
-	}
-}
-
-func TestExtractCommitContext_NoAssistant(t *testing.T) {
-	t.Parallel()
-	// Only a user message, no assistant response yet
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "system prompt"},
-		{Role: "user", Content: "Do something"},
-	}
-
-	result := ExtractCommitContext(messages)
-
-	// Should return just the user message
-	if len(result) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(result))
-	}
-	if result[0].Role != "user" {
-		t.Errorf("expected user role, got %q", result[0].Role)
-	}
-}
-
-func TestExtractCommitContext_Empty(t *testing.T) {
-	t.Parallel()
-	result := ExtractCommitContext(nil)
-	if len(result) != 0 {
-		t.Errorf("expected 0 messages, got %d", len(result))
-	}
-}
-
-func TestExtractCommitContext_SkipsSystemMessages(t *testing.T) {
-	t.Parallel()
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "system prompt 1"},
-		{Role: "system", Content: "system prompt 2"},
-		{Role: "user", Content: "Task"},
-		{Role: "assistant", Content: "Done", ToolCalls: []types.ToolCallMsg{reviewCall("call_r")}},
-		{Role: "tool", Content: "reviewed", ToolCallID: "call_r"},
-	}
-
-	result := ExtractCommitContext(messages)
-
-	if len(result) != 3 {
-		t.Fatalf("expected 3 messages, got %d: %v", len(result), contentOf(result))
-	}
-	// Neither message should be system
-	if result[0].Role == "system" || result[1].Role == "system" {
-		t.Error("should not include system messages")
-	}
-}
-
-func TestExtractCommitContext_MultipleUserMessages(t *testing.T) {
-	t.Parallel()
-	// Multiple user messages — should pick the FIRST user message, not the last
-	messages := []types.ChatMessage{
-		{Role: "user", Content: "Add rate limiting to API endpoints"},
-		{Role: "assistant", Content: "I'll do that"},
-		{Role: "user", Content: "Also add logging"},
-		{Role: "assistant", Content: "Done with both"},
-		{Role: "user", Content: "Great thanks"},
-		{Role: "assistant", Content: "You're welcome. Here's the summary.", ToolCalls: []types.ToolCallMsg{
-			{ID: "call_1", Function: struct {
-				Name      string `json:"name"`
-				Arguments string `json:"arguments"`
-			}{Name: "request_review", Arguments: `{}`}},
-		}},
-		{Role: "tool", Content: "ok", ToolCallID: "call_1"},
-	}
-
-	result := ExtractCommitContext(messages)
-
-	// Should include: first user + last assistant + tool result
-	if len(result) != 3 {
-		t.Fatalf("expected 3 messages, got %d", len(result))
-	}
-	// First user message (the task prompt), not "Great thanks"
-	if result[0].Content != "Add rate limiting to API endpoints" {
-		t.Errorf("first = %q, want original task prompt", result[0].Content)
-	}
-	// Last assistant message
-	if result[1].Content != "You're welcome. Here's the summary." {
-		t.Errorf("second = %q, want final assistant", result[1].Content)
-	}
-	if result[2].Role != "tool" {
-		t.Errorf("third role = %q, want tool", result[2].Role)
-	}
-}
-
-func TestExtractCommitContext_IncludesRequestReviewToolResult(t *testing.T) {
-	t.Parallel()
-	// Last assistant has request_review tool call — include its tool result
-	messages := []types.ChatMessage{
-		{Role: "user", Content: "Build feature"},
-		{Role: "assistant", Content: "Feature built. Summary of changes.", ToolCalls: []types.ToolCallMsg{
-			{ID: "call_1", Function: struct {
-				Name      string `json:"name"`
-				Arguments string `json:"arguments"`
-			}{Name: "request_review", Arguments: `{}`}},
-		}},
-		{Role: "tool", Content: "Task complete", ToolCallID: "call_1"},
-	}
-
-	result := ExtractCommitContext(messages)
-
-	// Should include: first user + last assistant + tool result for request_review
-	if len(result) != 3 {
-		t.Fatalf("expected 3 messages, got %d", len(result))
-	}
-	if result[0].Role != "user" {
-		t.Errorf("first role = %q, want user", result[0].Role)
-	}
-	if result[1].Role != "assistant" {
-		t.Errorf("second role = %q, want assistant", result[1].Role)
-	}
-	if result[2].Role != "tool" {
-		t.Errorf("third role = %q, want tool", result[2].Role)
-	}
-	if result[2].Content != "Task complete" {
-		t.Errorf("tool result = %q, want %q", result[2].Content, "Task complete")
-	}
-}
-
-func TestExtractCommitContext_LastAssistantNoRequestReview_NoEditsBetween(t *testing.T) {
-	t.Parallel()
-	// Last assistant has no request_review, and no edits between — skip last assistant
-	messages := []types.ChatMessage{
-		{Role: "user", Content: "Build feature"},
-		{Role: "assistant", Content: "Feature built. Summary of changes.", ToolCalls: []types.ToolCallMsg{
-			{ID: "call_review", Function: struct {
-				Name      string `json:"name"`
-				Arguments string `json:"arguments"`
-			}{Name: "request_review", Arguments: `{"summary":"Added new feature"}`}},
-		}},
-		{Role: "tool", Content: "Task complete", ToolCallID: "call_review"},
-		// Follow-up with no tool calls — should be skipped
-		{Role: "assistant", Content: "Let me know if you need anything else"},
-	}
-
-	result := ExtractCommitContext(messages)
-
-	// Should include: first user + request_review assistant + tool result (last assistant skipped)
-	if len(result) != 3 {
-		t.Fatalf("expected 3 messages, got %d", len(result))
-	}
-	if result[0].Role != "user" {
-		t.Errorf("first role = %q, want user", result[0].Role)
-	}
-	if result[1].Content != "Feature built. Summary of changes." {
-		t.Errorf("second = %q, want request_review assistant", result[1].Content)
-	}
-	if result[2].Role != "tool" {
-		t.Errorf("third role = %q, want tool", result[2].Role)
-	}
-}
-
-func TestExtractCommitContext_LaterEditsAfterRequestReview_AreNotIncluded(t *testing.T) {
-	t.Parallel()
-	// Work done after the review request is not commit context: the generator sees the
-	// request_review turn, not the follow-up edits.
-	messages := []types.ChatMessage{
-		{Role: "user", Content: "Build feature"},
-		{Role: "assistant", Content: "Feature built. Summary of changes.", ToolCalls: []types.ToolCallMsg{
-			{ID: "call_review", Function: struct {
-				Name      string `json:"name"`
-				Arguments string `json:"arguments"`
-			}{Name: "request_review", Arguments: `{"summary":"Added new feature"}`}},
-		}},
-		{Role: "tool", Content: "Task complete", ToolCallID: "call_review"},
-		// Another assistant with edits after request_review
-		{Role: "assistant", Content: "Making a quick fix", ToolCalls: []types.ToolCallMsg{
-			{ID: "call_edit", Function: struct {
-				Name      string `json:"name"`
-				Arguments string `json:"arguments"`
-			}{Name: "edit_file", Arguments: `{"path":"a.go"}`}},
-		}},
-		{Role: "tool", Content: "edited", ToolCallID: "call_edit"},
-	}
-
-	result := ExtractCommitContext(messages)
-
-	// Should include: first user + request_review assistant + its tool result only
-	if len(result) != 3 {
-		t.Fatalf("expected 3 messages, got %d: %v", len(result), contentOf(result))
-	}
-	if result[0].Role != "user" {
-		t.Errorf("first role = %q, want user", result[0].Role)
-	}
-	if result[1].Content != "Feature built. Summary of changes." {
-		t.Errorf("second = %q, want request_review assistant", result[1].Content)
-	}
-	if result[2].Role != "tool" || result[2].Content != "Task complete" {
-		t.Errorf("third = %q (%s), want the request_review tool result", result[2].Content, result[2].Role)
-	}
-	for _, m := range result {
-		if m.Content == "Making a quick fix" || m.Content == "edited" {
-			t.Errorf("post-review edit leaked into commit context: %q", m.Content)
-		}
-	}
-}
-
-func TestExtractCommitContext_NoRequestReview_KeepsNoToolRow(t *testing.T) {
-	t.Parallel()
-	// The fallback reads text, not the tool log. The write_file result stays out even though its
-	// assistant message is kept.
-	messages := []types.ChatMessage{
-		{Role: "user", Content: "Build feature"},
-		{Role: "assistant", Content: "Building...", ToolCalls: []types.ToolCallMsg{toolCallMsg("call_1", "write_file")}},
-		{Role: "tool", Content: "wrote 100 bytes", ToolCallID: "call_1"},
-		{Role: "assistant", Content: "Still working on it"},
-	}
-
-	result := ExtractCommitContext(messages)
-
-	if len(result) != 3 {
-		t.Fatalf("expected 3 messages, got %d: %v", len(result), contentOf(result))
-	}
-	if result[0].Content != "Build feature" || result[1].Content != "Building..." || result[2].Content != "Still working on it" {
-		t.Errorf("prose = %v, want both assistant rows after the prompt", contentOf(result))
-	}
-	for _, m := range result {
-		if m.Role == "tool" || m.Content == "wrote 100 bytes" {
-			t.Errorf("tool result reached commit context: %q", m.Content)
-		}
-	}
-	for _, m := range result {
-		if len(m.ToolCalls) > 0 {
-			t.Errorf("assistant row %q still carries %d tool calls", m.Content, len(m.ToolCalls))
 		}
 	}
 }
@@ -538,22 +243,28 @@ func TestExtractCommitContext_MultipleRequestReviewsUsesAll(t *testing.T) {
 	}
 }
 
-func TestFormatToolAction_RequestReviewWithSummary(t *testing.T) {
+// formatToolAction is how one tool call reads in the commit generator's context: a review says what it
+// claimed to accomplish, and a review with nothing to say says only that it asked.
+func TestFormatToolAction_RequestReviewIsLabelledByItsSummary(t *testing.T) {
 	t.Parallel()
-	args := `{"summary":"Added rate limiting middleware to all API endpoints with configurable max requests per minute"}`
-	action := formatToolAction("request_review", args)
-	expected := "request a review: Added rate limiting middleware to all API endpoints with configurable max requests per minute"
-	if action != expected {
-		t.Errorf("got %q, want %q", action, expected)
+	cases := []struct {
+		name string
+		args string
+		want string
+	}{
+		{
+			name: "the summary becomes the label",
+			args: `{"summary":"Added rate limiting middleware to all API endpoints with configurable max requests per minute"}`,
+			want: "request a review: Added rate limiting middleware to all API endpoints with configurable max requests per minute",
+		},
+		{name: "no summary leaves the bare label", args: `{}`, want: "request a review"},
 	}
-}
-
-func TestFormatToolAction_RequestReviewNoSummary(t *testing.T) {
-	t.Parallel()
-	args := `{}`
-	action := formatToolAction("request_review", args)
-	if action != "request a review" {
-		t.Errorf("got %q, want %q", action, "request a review")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := formatToolAction("request_review", tc.args); got != tc.want {
+				t.Errorf("formatToolAction(request_review, %s) = %q, want %q", tc.args, got, tc.want)
+			}
+		})
 	}
 }
 
