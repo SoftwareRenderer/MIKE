@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -178,5 +179,152 @@ func mkdirGit(t *testing.T, dir string) {
 	t.Helper()
 	if err := os.Mkdir(filepath.Join(dir, ".git"), 0o755); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// watchedWorktreesEnv is one project with n tasks, each holding its own worktree: the shape the
+// watcher has to route between.
+type watchedWorktreesEnv struct {
+	wm        *git.WorktreeManager
+	projectID string
+	taskIDs   []string
+}
+
+func newWatchedTaskWorktrees(t *testing.T, n int) *watchedWorktreesEnv {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+	repoDir := filepath.Join(tmpDir, "repo")
+	worktreesDir := filepath.Join(tmpDir, "worktrees")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(worktreesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testgit.Git(t, repoDir, "init")
+	testgit.Git(t, repoDir, "config", "user.email", "test@test.com")
+	testgit.Git(t, repoDir, "config", "user.name", "Test")
+	testgit.WriteFile(t, repoDir, "README.md", "# Test\n")
+	testgit.Git(t, repoDir, "add", "README.md")
+	testgit.Git(t, repoDir, "commit", "-m", "Initial")
+
+	dbPath := filepath.Join(tmpDir, "routing.db")
+	s, err := store.NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+
+	cfgStore := config.NewConfigStore(s, dbPath, "test", nil, false, false)
+	cfgStore.SetWorkspaceDirOverride(worktreesDir)
+	cfg, err := cfgStore.GetConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfgStore.UpdateConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	const projectID = "routing-project"
+	if err := s.CreateProject(&types.Project{ID: projectID, Name: "routing", Path: repoDir}); err != nil {
+		t.Fatal(err)
+	}
+
+	env := &watchedWorktreesEnv{projectID: projectID}
+	for i := range n {
+		taskID := fmt.Sprintf("routing-task-%d", i)
+		if err := s.CreateTask(&types.Task{
+			ID: taskID, ProjectID: projectID, Title: taskID, Status: types.StatusInProgress,
+			Branch: "task/" + taskID,
+		}); err != nil {
+			t.Fatalf("create task %s: %v", taskID, err)
+		}
+		env.taskIDs = append(env.taskIDs, taskID)
+	}
+	// One manager for every task: the watcher asks it for each worktree's path and diff.
+	env.wm = git.NewWorktreeManager(s, cfgStore)
+	for _, taskID := range env.taskIDs {
+		if _, _, err := env.wm.CreateWorktree(projectID, taskID, "task/"+taskID, ""); err != nil {
+			t.Fatalf("create worktree %s: %v", taskID, err)
+		}
+	}
+	return env
+}
+
+func (e *watchedWorktreesEnv) worktreePath(t *testing.T, taskID string) string {
+	t.Helper()
+	path, err := e.wm.WorktreePath(taskID)
+	if err != nil {
+		t.Fatalf("worktree path for %s: %v", taskID, err)
+	}
+	return path
+}
+
+// TestWorktreeWatcherRoutesEachWorktreeToItsOwnTask: every watched worktree shares one fsnotify
+// watcher, one path cache and one index-dir map, so a change inside one is computed and broadcast
+// for that task alone — and Unwatch leaves nothing that could answer for a task this watcher no
+// longer holds.
+func TestWorktreeWatcherRoutesEachWorktreeToItsOwnTask(t *testing.T) {
+	env := newWatchedTaskWorktrees(t, 3)
+
+	broadcasts := make(chan DiffStatsEvent, 32)
+	ww, err := NewWorktreeWatcher(env.wm, func(ev DiffStatsEvent) { broadcasts <- ev }, nil, nil)
+	if err != nil {
+		t.Skipf("skip (inotify limit): %v", err)
+	}
+	go ww.StartEventLoop()
+	t.Cleanup(ww.Close)
+	for _, taskID := range env.taskIDs {
+		if err := ww.Watch(taskID, env.projectID); err != nil {
+			t.Fatalf("watch task %s: %v", taskID, err)
+		}
+	}
+	drainBroadcasts(broadcasts)
+
+	watched := map[string]bool{}
+	for _, taskID := range env.taskIDs {
+		watched[taskID] = true
+		testgit.WriteFile(t, env.worktreePath(t, taskID), "change.txt", "written by the test\n")
+	}
+
+	// One write per task, and each task is throttled on a timer of its own, so exactly one compute
+	// is owed to each of them — and the frame it publishes names the worktree that changed.
+	seen := map[string]int{}
+	for len(seen) < len(env.taskIDs) {
+		select {
+		case ev := <-broadcasts:
+			if !watched[ev.TaskID] {
+				t.Fatalf("broadcast named task %q, which this watcher was never asked to watch (%v)", ev.TaskID, env.taskIDs)
+			}
+			seen[ev.TaskID]++
+		case <-time.After(10 * time.Second):
+			t.Fatalf("only %v of the %d watched tasks were broadcast after 10s, and each of them holds a written file",
+				seen, len(env.taskIDs))
+		}
+	}
+	for _, taskID := range env.taskIDs {
+		if seen[taskID] != 1 {
+			t.Errorf("task %s was broadcast %d times for one change, want once", taskID, seen[taskID])
+		}
+	}
+
+	for _, taskID := range env.taskIDs {
+		ww.Unwatch(taskID)
+	}
+	ww.mu.Lock()
+	paths, indexDirs := len(ww.pathCache), len(ww.indexDirToTask)
+	ww.mu.Unlock()
+	if paths != 0 || indexDirs != 0 {
+		t.Fatalf("Unwatch left %d path and %d index-dir entries for %d tasks", paths, indexDirs, len(env.taskIDs))
+	}
+
+	// Nothing is watched, so a change in a former worktree is nobody's diff.
+	drainBroadcasts(broadcasts)
+	testgit.WriteFile(t, env.worktreePath(t, env.taskIDs[0]), "after-unwatch.txt", "nobody is watching\n")
+	select {
+	case ev := <-broadcasts:
+		t.Fatalf("an unwatched worktree still broadcast task %s's stats", ev.TaskID)
+	case <-time.After(3 * time.Second):
 	}
 }
