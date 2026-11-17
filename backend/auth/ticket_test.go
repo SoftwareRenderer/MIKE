@@ -53,16 +53,45 @@ func TestTicketRoundTrip(t *testing.T) {
 	}
 }
 
-// The two ceremonies are not interchangeable: the purpose is inside the seal, not inside the payload, so
-// an unfinished registration cannot be presented to the sign-in endpoint (or the other way round).
-func TestTicketIsBoundToItsCeremony(t *testing.T) {
+// The purpose and the caller's own state are inside the seal, not beside it: an unfinished registration
+// cannot be presented to the sign-in endpoint (nor the other way round), and a ticket cannot be pointed
+// at another code's pairing claim.
+func TestTicketIsBoundToItsCeremonyAndToItsSealedState(t *testing.T) {
 	tickets := newTestTickets(t)
-	ticket, err := tickets.Seal(ticketPurposeRegister, testSession(time.Minute), "")
+
+	signIn, err := tickets.Seal(ticketPurposeAssert, testSession(time.Minute), "")
 	if err != nil {
 		t.Fatalf("seal: %v", err)
 	}
-	if _, _, err := tickets.Open(ticketPurposeAssert, ticket); !errors.Is(err, ErrTicket) {
+	if _, _, err := tickets.Open(ticketPurposeAssert, signIn); err != nil {
+		t.Fatalf("a sign-in ticket would not open its own endpoint: %v", err)
+	}
+	if _, _, err := tickets.Open(ticketPurposeRegister, signIn); !errors.Is(err, ErrTicket) {
+		t.Errorf("a sign-in ticket opened the registration endpoint: %v", err)
+	}
+
+	mine, err := tickets.Seal(ticketPurposeRegister, testSession(time.Minute), "spend-key-mine")
+	if err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	theirs, err := tickets.Seal(ticketPurposeRegister, testSession(time.Minute), "spend-key-theirs")
+	if err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	if _, _, err := tickets.Open(ticketPurposeAssert, mine); !errors.Is(err, ErrTicket) {
 		t.Errorf("a registration ticket opened the sign-in endpoint: %v", err)
+	}
+
+	_, extra, err := tickets.Open(ticketPurposeRegister, mine)
+	if err != nil || extra != "spend-key-mine" {
+		t.Fatalf("the sealed state came back as %q (%v)", extra, err)
+	}
+
+	// Their body under my seal: the MAC covers the claim, so it cannot be swapped between tickets.
+	mineMacAt, theirsMacAt := strings.LastIndex(mine, "."), strings.LastIndex(theirs, ".")
+	swapped := theirs[:theirsMacAt] + mine[mineMacAt:]
+	if _, _, err := tickets.Open(ticketPurposeRegister, swapped); !errors.Is(err, ErrTicket) {
+		t.Errorf("another ceremony's claim opened under this ticket's seal: %v", err)
 	}
 }
 
@@ -103,35 +132,6 @@ func TestTicketRefuses(t *testing.T) {
 		if _, _, err := tickets.Open(ticketPurposeAssert, tc.ticket); !errors.Is(err, ErrTicket) {
 			t.Errorf("%s: got %v; want ErrTicket", tc.name, err)
 		}
-	}
-}
-
-// The pairing claim a registration is paid with rides inside the seal, so a ticket cannot be pointed at
-// another code's claim.
-func TestTicketCarriesTheStateSealedWithIt(t *testing.T) {
-	tickets := newTestTickets(t)
-	mine, err := tickets.Seal(ticketPurposeRegister, testSession(time.Minute), "spend-key-mine")
-	if err != nil {
-		t.Fatalf("seal: %v", err)
-	}
-	theirs, err := tickets.Seal(ticketPurposeRegister, testSession(time.Minute), "spend-key-theirs")
-	if err != nil {
-		t.Fatalf("seal: %v", err)
-	}
-
-	_, extra, err := tickets.Open(ticketPurposeRegister, mine)
-	if err != nil || extra != "spend-key-mine" {
-		t.Fatalf("the sealed state came back as %q (%v)", extra, err)
-	}
-
-	// Their body under my seal: the MAC covers the claim, so it cannot be swapped between tickets.
-	mineMacAt, theirsMacAt := strings.LastIndex(mine, "."), strings.LastIndex(theirs, ".")
-	swapped := theirs[:theirsMacAt] + mine[mineMacAt:]
-	if _, _, err := tickets.Open(ticketPurposeRegister, swapped); !errors.Is(err, ErrTicket) {
-		t.Errorf("another ceremony's claim opened under this ticket's seal: %v", err)
-	}
-	if _, _, err := tickets.Open(ticketPurposeAssert, mine); !errors.Is(err, ErrTicket) {
-		t.Errorf("a sealed claim opened the sign-in endpoint: %v", err)
 	}
 }
 

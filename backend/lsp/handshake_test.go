@@ -57,6 +57,24 @@ func goCfg() *ServerConfig {
 		FileTypes: []extensions.LSPFileType{{Extension: "go", LanguageID: "go"}}}
 }
 
+// managerWithConnection is a manager holding one live bridge connection, with the counter of
+// requests that stand-in bridge was asked to answer.
+func managerWithConnection(t *testing.T) (*ExtensionLSPManager, *atomic.Int32) {
+	t.Helper()
+	extStore := testExtensionStore(t)
+	if err := extStore.Create(makeTestLSPExt("gopls", "go")); err != nil {
+		t.Fatalf("Create(gopls): %v", err)
+	}
+	cl, requests, _ := bridgePair(t)
+	m := &ExtensionLSPManager{
+		extStore: extStore,
+		clients:  map[string]*sandboxClient{},
+		serverCh: make(chan jsontext.Value, 8),
+	}
+	m.clients[processKey("/work/tree", "go")] = newSandboxClient(cl, "/work/tree", "go", "gopls", nil)
+	return m, requests
+}
+
 func waitForCount(t *testing.T, counter *atomic.Int32, want int32) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -70,67 +88,49 @@ func waitForCount(t *testing.T, counter *atomic.Int32, want int32) {
 }
 
 // TestEnsureInitializedHandshakesOnce pins that the handshake belongs to the connection. Every
-// caller — an agent tool, an editor channel, the diagnostics pass — goes through
-// EnsureInitialized, and everyone after the first must be answered from the flag: an initialize
-// is a second of server work (gopls answers it 1.06s after a cold start) that teaches the
-// server nothing it does not already know.
+// caller — an agent tool, an editor channel, the diagnostics pass — goes through EnsureInitialized,
+// and everyone after the first must be answered from the flag: an initialize is a second of server
+// work (gopls answers it 1.06s after a cold start) that teaches the server nothing it does not
+// already know. Callers arriving in the same instant are the case the flag alone cannot hold; initMu
+// is what makes the check and the handshake one decision.
 func TestEnsureInitializedHandshakesOnce(t *testing.T) {
-	extStore := testExtensionStore(t)
-	if err := extStore.Create(makeTestLSPExt("gopls", "go")); err != nil {
-		t.Fatalf("Create(gopls): %v", err)
-	}
-	cl, requests, _ := bridgePair(t)
+	t.Run("three callers in turn", func(t *testing.T) {
+		m, requests := managerWithConnection(t)
 
-	m := &ExtensionLSPManager{
-		extStore: extStore,
-		clients:  map[string]*sandboxClient{},
-		serverCh: make(chan jsontext.Value, 8),
-	}
-	m.clients[processKey("/work/tree", "go")] = newSandboxClient(cl, "/work/tree", "go", "gopls", nil)
-
-	for i := 1; i <= 3; i++ {
-		if err := m.EnsureInitialized(context.Background(), "/work/tree", goCfg()); err != nil {
-			t.Fatalf("EnsureInitialized call %d: %v", i, err)
-		}
-	}
-
-	if got := requests.Load(); got != 1 {
-		t.Errorf("initialize requests = %d, want 1 for three callers on one connection", got)
-	}
-}
-
-// TestEnsureInitializedConcurrentAsksOneHandshake: two turns finishing in the same instant
-// must not both send initialize. initMu is what makes the flag check and the handshake one
-// decision.
-func TestEnsureInitializedConcurrentAsksOneHandshake(t *testing.T) {
-	extStore := testExtensionStore(t)
-	if err := extStore.Create(makeTestLSPExt("gopls", "go")); err != nil {
-		t.Fatalf("Create(gopls): %v", err)
-	}
-	cl, requests, _ := bridgePair(t)
-	m := &ExtensionLSPManager{extStore: extStore, clients: map[string]*sandboxClient{}, serverCh: make(chan jsontext.Value, 8)}
-	m.clients[processKey("/work/tree", "go")] = newSandboxClient(cl, "/work/tree", "go", "gopls", nil)
-
-	var failed atomic.Int32
-	done := make(chan struct{})
-	for i := 0; i < 6; i++ {
-		go func() {
-			defer func() { done <- struct{}{} }()
+		for i := 1; i <= 3; i++ {
 			if err := m.EnsureInitialized(context.Background(), "/work/tree", goCfg()); err != nil {
-				failed.Add(1)
+				t.Fatalf("EnsureInitialized call %d: %v", i, err)
 			}
-		}()
-	}
-	for i := 0; i < 6; i++ {
-		<-done
-	}
+		}
+		if got := requests.Load(); got != 1 {
+			t.Errorf("initialize requests = %d, want 1 for three callers on one connection", got)
+		}
+	})
 
-	if failed.Load() != 0 {
-		t.Errorf("%d concurrent EnsureInitialized calls failed", failed.Load())
-	}
-	if got := requests.Load(); got != 1 {
-		t.Errorf("initialize requests = %d, want 1 under concurrent callers", got)
-	}
+	t.Run("six callers at once", func(t *testing.T) {
+		m, requests := managerWithConnection(t)
+
+		var failed atomic.Int32
+		done := make(chan struct{})
+		for i := 0; i < 6; i++ {
+			go func() {
+				defer func() { done <- struct{}{} }()
+				if err := m.EnsureInitialized(context.Background(), "/work/tree", goCfg()); err != nil {
+					failed.Add(1)
+				}
+			}()
+		}
+		for i := 0; i < 6; i++ {
+			<-done
+		}
+
+		if failed.Load() != 0 {
+			t.Errorf("%d concurrent EnsureInitialized calls failed", failed.Load())
+		}
+		if got := requests.Load(); got != 1 {
+			t.Errorf("initialize requests = %d, want 1 under concurrent callers", got)
+		}
+	})
 }
 
 func TestEnsureInitializedRequiresLiveConnection(t *testing.T) {

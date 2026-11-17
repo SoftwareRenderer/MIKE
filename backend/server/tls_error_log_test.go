@@ -10,7 +10,7 @@ import (
 )
 
 // captureLog redirects the logging package for the duration of the test and returns a buffer of
-// everything written to it. It replaced log.SetOutput, which no longer sees these lines.
+// everything written to it.
 func captureLog(t *testing.T) *logging.SafeBuffer {
 	t.Helper()
 	buf, restore := logging.TestSink()
@@ -98,40 +98,67 @@ func TestClassifyTrustFailure(t *testing.T) {
 	}
 }
 
-// A device without the CA retries every request; only the first failure per
-// host may be logged, and it must carry the hint (the CA path).
+// A device without the CA retries every request. Each host is reported once, with the hint (the CA path)
+// and the promise that further errors are suppressed; the remembered-host set is bounded, so a scan
+// cannot grow it without end.
 func TestTLSTrustNoiseFilterReportsOncePerHost(t *testing.T) {
-	buf := captureLog(t)
-	f := &tlsTrustNoiseFilter{caFile: "/data/tls/mike-ca.crt", seen: map[string]bool{}}
+	t.Run("a retrying device", func(t *testing.T) {
+		buf := captureLog(t)
+		f := &tlsTrustNoiseFilter{caFile: "/data/tls/mike-ca.crt", seen: map[string]bool{}}
 
-	noise := func(port int) string {
-		return fmt.Sprintf("http: TLS handshake error from 192.168.1.190:%d: remote error: tls: unknown certificate authority", port)
-	}
-	for _, p := range []int{61946, 61947, 61948} {
-		if _, err := f.Write([]byte(noise(p) + "\n")); err != nil {
+		noise := func(port int) string {
+			return fmt.Sprintf("http: TLS handshake error from 192.168.1.190:%d: remote error: tls: unknown certificate authority", port)
+		}
+		for _, p := range []int{61946, 61947, 61948} {
+			if _, err := f.Write([]byte(noise(p) + "\n")); err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+		}
+		// A second host gets its own single report.
+		if _, err := f.Write([]byte("http: TLS handshake error from 192.168.1.7:40000: remote error: tls: unknown certificate authority\n")); err != nil {
 			t.Fatalf("Write: %v", err)
 		}
-	}
-	// A second host gets its own single report.
-	if _, err := f.Write([]byte("http: TLS handshake error from 192.168.1.7:40000: remote error: tls: unknown certificate authority\n")); err != nil {
-		t.Fatalf("Write: %v", err)
-	}
 
-	lines := strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("got %d log lines, want 2:\n%s", len(lines), buf.String())
-	}
-	for i, want := range []string{"192.168.1.190", "192.168.1.7"} {
-		if !strings.Contains(lines[i], want) {
-			t.Errorf("line %d = %q, want it to mention %s", i, lines[i], want)
+		lines := strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n")
+		if len(lines) != 2 {
+			t.Fatalf("got %d log lines, want 2:\n%s", len(lines), buf.String())
 		}
-		if !strings.Contains(lines[i], "/data/tls/mike-ca.crt") {
-			t.Errorf("line %d = %q, want it to name the CA file to import", i, lines[i])
+		for i, want := range []string{"192.168.1.190", "192.168.1.7"} {
+			if !strings.Contains(lines[i], want) {
+				t.Errorf("line %d = %q, want it to mention %s", i, lines[i], want)
+			}
+			if !strings.Contains(lines[i], "/data/tls/mike-ca.crt") {
+				t.Errorf("line %d = %q, want it to name the CA file to import", i, lines[i])
+			}
+			if !strings.Contains(lines[i], "suppressed") {
+				t.Errorf("line %d = %q, want it to say further errors are suppressed", i, lines[i])
+			}
 		}
-		if !strings.Contains(lines[i], "suppressed") {
-			t.Errorf("line %d = %q, want it to say further errors are suppressed", i, lines[i])
+	})
+
+	t.Run("the remembered set is bounded", func(t *testing.T) {
+		buf := captureLog(t)
+		f := &tlsTrustNoiseFilter{seen: map[string]bool{}}
+
+		for i := 0; i <= maxTrustReports; i++ {
+			msg := fmt.Sprintf("http: TLS handshake error from 10.0.%d.%d:1234: remote error: tls: unknown certificate authority", i/256, i%256)
+			if _, err := f.Write([]byte(msg + "\n")); err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+			logging.For(logging.HTTP).Errorf("a foreign line from some other goroutine")
 		}
-	}
+		// Count only the lines this filter wrote. captureLog swaps the process-wide writer, so a late
+		// goroutine from an earlier test lands in the same buffer, and counting every line made this
+		// assertion depend on which test ran before it. The filter rewrites the line, so the marker is
+		// what it emits, not the input it was handed.
+		const marker = "TLS: unknown certificate authority from 10.0."
+		if got := strings.Count(buf.String(), marker); got != maxTrustReports {
+			t.Fatalf("logged %d lines, want %d (buffer was:\n%s)", got, maxTrustReports, buf.String())
+		}
+		if len(f.seen) != maxTrustReports {
+			t.Errorf("remembered %d hosts, want %d", len(f.seen), maxTrustReports)
+		}
+	})
 }
 
 // Everything that is not client-side certificate noise must reach the log, and its message must
@@ -162,31 +189,5 @@ func TestTLSTrustNoiseFilterPassesThrough(t *testing.T) {
 			t.Errorf("after %q: no component on the line, so it bypassed the logger: %s", msg, got)
 		}
 		buf.Reset()
-	}
-}
-
-// The remembered-host set is bounded; past the cap noise is still suppressed,
-// it just stops producing hints for new hosts.
-func TestTLSTrustNoiseFilterCapsReports(t *testing.T) {
-	buf := captureLog(t)
-	f := &tlsTrustNoiseFilter{seen: map[string]bool{}}
-
-	for i := 0; i <= maxTrustReports; i++ {
-		msg := fmt.Sprintf("http: TLS handshake error from 10.0.%d.%d:1234: remote error: tls: unknown certificate authority", i/256, i%256)
-		if _, err := f.Write([]byte(msg + "\n")); err != nil {
-			t.Fatalf("Write: %v", err)
-		}
-		logging.For(logging.HTTP).Errorf("a foreign line from some other goroutine")
-	}
-	// Count only the lines this filter wrote. captureLog swaps the process-wide writer, so a late
-	// goroutine from an earlier test — a task loop finishing, a shutdown step — lands in the same
-	// buffer, and counting every line made this assertion depend on which test ran before it.
-	// The filter rewrites the line, so the marker is what it emits, not the input it was handed.
-	const marker = "TLS: unknown certificate authority from 10.0."
-	if got := strings.Count(buf.String(), marker); got != maxTrustReports {
-		t.Fatalf("logged %d lines, want %d (buffer was:\n%s)", got, maxTrustReports, buf.String())
-	}
-	if len(f.seen) != maxTrustReports {
-		t.Errorf("remembered %d hosts, want %d", len(f.seen), maxTrustReports)
 	}
 }

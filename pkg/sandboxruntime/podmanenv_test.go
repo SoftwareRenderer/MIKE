@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPodmanEnvNeverCarriesServerSecrets(t *testing.T) {
@@ -95,11 +96,18 @@ func TestPodmanEnvExtrasWin(t *testing.T) {
 
 func TestPodmanCommandSetsEnvAndWaitDelay(t *testing.T) {
 	cmd := PodmanCommand("ps")
+	if cmd.Args[0] != "podman" {
+		t.Errorf("argv[0] = %q, want the pinned podman binary", cmd.Args[0])
+	}
 	if cmd.Env == nil {
 		t.Fatal("cmd.Env is nil: os/exec hands the podman CLI the whole server environment")
 	}
 	if cmd.WaitDelay != PodmanWaitDelay {
 		t.Errorf("WaitDelay = %v, want %v", cmd.WaitDelay, PodmanWaitDelay)
+	}
+	// The bound has to fit the shutdown budget, or a wedged container holds shutdown past it.
+	if cmd.WaitDelay <= 0 || cmd.WaitDelay >= 15*time.Second {
+		t.Errorf("WaitDelay = %v, want a positive bound inside the 15s shutdown budget", cmd.WaitDelay)
 	}
 	for _, kv := range cmd.Env {
 		if strings.HasPrefix(kv, "MIKE_ENCRYPTION_KEY=") {

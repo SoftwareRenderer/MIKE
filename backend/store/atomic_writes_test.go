@@ -72,9 +72,12 @@ func countForProject(t *testing.T, s *Store, projectID string) map[string]int {
 	return out
 }
 
+// One DELETE FROM projects is the whole deletion: every child table declares ON DELETE CASCADE, and the
+// rows of a project nobody asked to delete stay where they are.
 func TestDeleteProjectRemovesEveryDependentRow(t *testing.T) {
 	s := testStore(t)
 	seededProject(t, s, "proj-cascade")
+	seededProject(t, s, "proj-keep")
 
 	if err := s.DeleteProject("proj-cascade"); err != nil {
 		t.Fatalf("delete project: %v", err)
@@ -82,6 +85,11 @@ func TestDeleteProjectRemovesEveryDependentRow(t *testing.T) {
 	for name, n := range countForProject(t, s, "proj-cascade") {
 		if n != 0 {
 			t.Errorf("%s: %d rows left after deleting the project", name, n)
+		}
+	}
+	for name, n := range countForProject(t, s, "proj-keep") {
+		if n != 1 {
+			t.Errorf("%s: %d rows left of the project that was not deleted, want its seeded 1", name, n)
 		}
 	}
 }

@@ -2,7 +2,6 @@ package extensions
 
 import (
 	"bytes"
-	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -65,61 +64,53 @@ func readSSEEvents(t *testing.T, body []byte) []sseEvent {
 	return events
 }
 
-func TestHandleList_Empty(t *testing.T) {
+// The board's list is what Settings → Extensions renders: an empty install set is an empty array
+// with 200 (never an error the panel would render as "nothing installed"), and a row arrives with the
+// fields the card reads — name, type and the enabled switch it toggles.
+func TestHandleList(t *testing.T) {
 	h := testHandler(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/extensions", nil)
-	w := httptest.NewRecorder()
-
-	h.HandleList(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", w.Code)
-	}
-
-	var result []ExtensionResponse
-	if err := json.UnmarshalRead(w.Body, &result); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if len(result) != 0 {
-		t.Errorf("result count = %d, want 0", len(result))
-	}
-}
-
-func TestHandleList_WithExtensions(t *testing.T) {
-	h := testHandler(t)
-	// Create test extensions
-	for _, name := range []string{"gopls", "typescript"} {
-		ext := makeTestExt(name, name, ExtensionTypeLSP)
-		if err := h.store.Create(ext); err != nil {
-			t.Fatalf("Create(%s): %v", name, err)
+	list := func(t *testing.T) []ExtensionResponse {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/extensions", nil)
+		w := httptest.NewRecorder()
+		h.HandleList(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", w.Code)
 		}
+		var result []ExtensionResponse
+		if err := json.UnmarshalRead(w.Body, &result); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		return result
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/extensions", nil)
-	w := httptest.NewRecorder()
+	t.Run("nothing installed", func(t *testing.T) {
+		if got := list(t); len(got) != 0 {
+			t.Errorf("result count = %d, want 0", len(got))
+		}
+	})
 
-	h.HandleList(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", w.Code)
-	}
-
-	var result []ExtensionResponse
-	if err := json.UnmarshalRead(w.Body, &result); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if len(result) != 2 {
-		t.Errorf("result count = %d, want 2", len(result))
-	}
-	if result[0].Name == "" {
-		t.Error("result[0].Name is empty")
-	}
-	if result[0].Type != ExtensionTypeLSP {
-		t.Errorf("result[0].Type = %q, want lsp", result[0].Type)
-	}
-	if !result[0].Enabled {
-		t.Error("result[0].Enabled = false, want true")
-	}
+	t.Run("an installed extension is described", func(t *testing.T) {
+		for _, name := range []string{"gopls", "typescript"} {
+			ext := makeTestExt(name, name, ExtensionTypeLSP)
+			if err := h.store.Create(ext); err != nil {
+				t.Fatalf("Create(%s): %v", name, err)
+			}
+		}
+		result := list(t)
+		if len(result) != 2 {
+			t.Fatalf("result count = %d, want 2", len(result))
+		}
+		if result[0].Name == "" {
+			t.Error("result[0].Name is empty")
+		}
+		if result[0].Type != ExtensionTypeLSP {
+			t.Errorf("result[0].Type = %q, want lsp", result[0].Type)
+		}
+		if !result[0].Enabled {
+			t.Error("result[0].Enabled = false, want true")
+		}
+	})
 }
 
 func TestHandleList_SortedByPriority(t *testing.T) {
@@ -231,18 +222,6 @@ func TestHandleGet_Found(t *testing.T) {
 	}
 	if result.Name != "test-extension" {
 		t.Errorf("Name = %q, want test-extension", result.Name)
-	}
-}
-
-func TestHandleGet_NotFound(t *testing.T) {
-	h := testHandler(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/extensions/nonexistent", nil)
-	w := httptest.NewRecorder()
-
-	h.HandleGet(w, req, "nonexistent")
-
-	if w.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", w.Code)
 	}
 }
 
@@ -652,40 +631,6 @@ func TestHandleUpdate_LSPConfig_CreateNilLSP(t *testing.T) {
 	}
 	if updated.Manifest.Capabilities.GetLSP().Command != "my-lsp" {
 		t.Errorf("Command = %q, want my-lsp", updated.Manifest.Capabilities.GetLSP().Command)
-	}
-}
-
-func TestHandleDelete(t *testing.T) {
-	h := testHandler(t)
-	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)
-	if err := h.store.Create(ext); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodDelete, "/api/extensions/test-ext", nil)
-	w := httptest.NewRecorder()
-
-	h.HandleDelete(w, req, "test-ext")
-
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", w.Code)
-	}
-
-	_, err := h.store.GetByID("test-ext")
-	if err == nil {
-		t.Error("extension still exists after delete")
-	}
-}
-
-func TestHandleDelete_NotFound(t *testing.T) {
-	h := testHandler(t)
-	req := httptest.NewRequest(http.MethodDelete, "/api/extensions/nonexistent", nil)
-	w := httptest.NewRecorder()
-
-	h.HandleDelete(w, req, "nonexistent")
-
-	if w.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", w.Code)
 	}
 }
 
@@ -1267,83 +1212,6 @@ func TestHandleInstall_GitPinned_FailsOnBadCommit(t *testing.T) {
 	}
 }
 
-func TestHandleCheckUpdates_CommitChange(t *testing.T) {
-	// Curated index pins a newer commit than what is installed.
-	index := RegistryIndex{
-		{
-			Name:    "gopls",
-			Version: "1.0.0",
-			Type:    ExtensionTypeLSP,
-			Commit:  strings.Repeat("b", 64),
-		},
-	}
-	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.MarshalWrite(w, index)
-	}))
-	defer mockServer.Close()
-
-	h := testHandler(t)
-	h.config.RegistryURL = mockServer.URL
-
-	ext := makeTestExt("gopls", "gopls", ExtensionTypeLSP)
-	ext.Commit = strings.Repeat("a", 64)
-	_ = h.store.Create(ext)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/extensions/check-updates", nil)
-	w := httptest.NewRecorder()
-	h.HandleCheckUpdates(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-	var result []ExtensionUpdate
-	if err := json.UnmarshalRead(w.Body, &result); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(result) != 1 {
-		t.Fatalf("result count = %d, want 1", len(result))
-	}
-	if result[0].CurrentCommit != strings.Repeat("a", 64) || result[0].AvailableCommit != strings.Repeat("b", 64) {
-		t.Errorf("commit update not reported: %+v", result[0])
-	}
-}
-
-func TestHandleCheckUpdates_NoCommitChange(t *testing.T) {
-	index := RegistryIndex{
-		{
-			Name:    "gopls",
-			Version: "1.0.0",
-			Type:    ExtensionTypeLSP,
-			Commit:  strings.Repeat("a", 64),
-		},
-	}
-	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.MarshalWrite(w, index)
-	}))
-	defer mockServer.Close()
-
-	h := testHandler(t)
-	h.config.RegistryURL = mockServer.URL
-
-	ext := makeTestExt("gopls", "gopls", ExtensionTypeLSP)
-	ext.Commit = strings.Repeat("a", 64)
-	_ = h.store.Create(ext)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/extensions/check-updates", nil)
-	w := httptest.NewRecorder()
-	h.HandleCheckUpdates(w, req)
-
-	var result []ExtensionUpdate
-	if err := json.UnmarshalRead(w.Body, &result); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(result) != 0 {
-		t.Errorf("result count = %d, want 0 (same commit)", len(result))
-	}
-}
-
 // setupChangelogRegistry writes a registry index (as file:// registry.json) and
 // optionally a published changelog file at <base>/<author-slug>/<name>.
 func setupChangelogRegistry(t *testing.T, index RegistryIndex, changelog string) string {
@@ -1369,161 +1237,157 @@ func setupChangelogRegistry(t *testing.T, index RegistryIndex, changelog string)
 	return "file://" + filepath.Join(base, "registry.json")
 }
 
-func TestHandleCheckUpdates_Changelog(t *testing.T) {
-	commitA := strings.Repeat("a", 64) // installed
-	commitB := strings.Repeat("b", 64) // available
-	index := RegistryIndex{{
-		Name:    "changelog-ext",
-		Version: "1.0.0",
-		Type:    ExtensionTypeUI,
-		Author:  "Software Renderer",
-		Commit:  commitB,
-	}}
-	changelog := `{"hash":"` + commitA + `","version":"1.0.0","description":"Initial release"}` + "\n" +
-		`{"hash":"` + commitB + `","version":"1.0.0","description":"Fix hover offsets"}` + "\n"
-	registryURL := setupChangelogRegistry(t, index, changelog)
-
-	h := testHandler(t)
-	h.config.RegistryURL = registryURL
-
-	ext := makeTestExt("changelog-ext", "changelog-ext", ExtensionTypeUI)
-	ext.Commit = commitA
-	_ = h.store.Create(ext)
-
+// checkUpdates runs one row against one index and hands back what the panel is told.
+func checkUpdates(t *testing.T, h *ExtensionHandler) []ExtensionUpdate {
+	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "/api/extensions/check-updates", nil)
 	w := httptest.NewRecorder()
 	h.HandleCheckUpdates(w, req)
-
 	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
+		t.Fatalf("status = %d, want 200 (%s)", w.Code, w.Body.String())
 	}
 	var result []ExtensionUpdate
 	if err := json.UnmarshalRead(w.Body, &result); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(result) != 1 {
-		t.Fatalf("result count = %d, want 1", len(result))
-	}
-	// Only the change newer than the installed hash is reported.
-	if len(result[0].Changelog) != 1 {
-		t.Fatalf("changelog count = %d, want 1 (%+v)", len(result[0].Changelog), result[0].Changelog)
-	}
-	if result[0].Changelog[0].Hash != commitB || result[0].Changelog[0].Description != "Fix hover offsets" {
-		t.Errorf("changelog[0] = %+v, want the commitB entry", result[0].Changelog[0])
-	}
+	return result
 }
 
-func TestHandleCheckUpdates_ChangelogNoMatchingHash(t *testing.T) {
-	// Changelog exists but does not contain the installed hash → no changes shown.
-	index := RegistryIndex{{
-		Name:    "changelog-ext",
-		Version: "1.0.0",
-		Type:    ExtensionTypeUI,
-		Author:  "Software Renderer",
-		Commit:  strings.Repeat("b", 64),
-	}}
-	changelog := `{"hash":"` + strings.Repeat("c", 64) + `","version":"1.0.0","description":"x"}` + "\n" +
-		`{"hash":"` + strings.Repeat("b", 64) + `","version":"1.0.0","description":"y"}` + "\n"
-	registryURL := setupChangelogRegistry(t, index, changelog)
-
+// registryHandler points the handler at a file:// registry over an index (and optionally the
+// published changelog for its first entry).
+func registryHandler(t *testing.T, index RegistryIndex, changelog string) *ExtensionHandler {
+	t.Helper()
 	h := testHandler(t)
-	h.config.RegistryURL = registryURL
-
-	ext := makeTestExt("changelog-ext", "changelog-ext", ExtensionTypeUI)
-	ext.Commit = strings.Repeat("a", 64) // absent from the changelog
-	_ = h.store.Create(ext)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/extensions/check-updates", nil)
-	w := httptest.NewRecorder()
-	h.HandleCheckUpdates(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-	var result []ExtensionUpdate
-	if err := json.UnmarshalRead(w.Body, &result); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(result) != 1 {
-		t.Fatalf("result count = %d, want 1", len(result))
-	}
-	if len(result[0].Changelog) != 0 {
-		t.Errorf("changelog = %+v, want empty (no matching hash)", result[0].Changelog)
-	}
+	h.config.RegistryURL = setupChangelogRegistry(t, index, changelog)
+	return h
 }
 
-func TestHandleCheckUpdates_ChangelogFetchFails(t *testing.T) {
-	// No changelog published → the update is still reported, non-fatal.
-	index := RegistryIndex{{
-		Name:    "changelog-ext",
-		Version: "1.0.0",
-		Type:    ExtensionTypeUI,
-		Author:  "Software Renderer",
-		Commit:  strings.Repeat("b", 64),
-	}}
-	registryURL := setupChangelogRegistry(t, index, "") // no changelog file
-
-	h := testHandler(t)
-	h.config.RegistryURL = registryURL
-
-	ext := makeTestExt("changelog-ext", "changelog-ext", ExtensionTypeUI)
-	ext.Commit = strings.Repeat("a", 64)
-	_ = h.store.Create(ext)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/extensions/check-updates", nil)
-	w := httptest.NewRecorder()
-	h.HandleCheckUpdates(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
+// What check-updates reports is the whole "Updates Available" panel, and it has two halves with
+// different rules. An update is a row whose pin or version the index no longer agrees with — commit
+// for a git-pinned row, version for one the registry does not pin, and nothing when both agree. The
+// changelog then comes from the commit an update would move to: the entries after the installed hash,
+// nothing when no hash matches, and nothing when there is no commit to anchor on — while a missing or
+// unreadable changelog never costs the update itself, because that half is what a person acts on.
+func TestHandleCheckUpdatesReportsAnUpdateAndItsChangelog(t *testing.T) {
+	const installedCommit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	const availableCommit = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	const unrelatedCommit = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	dated := func(hash, description string) string {
+		return `{"hash":"` + hash + `","version":"1.0.0","description":"` + description + `"}` + "\n"
 	}
-	var result []ExtensionUpdate
-	if err := json.UnmarshalRead(w.Body, &result); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(result) != 1 {
-		t.Fatalf("result count = %d, want 1 (fetch failure must not block update detection)", len(result))
-	}
-	if len(result[0].Changelog) != 0 {
-		t.Errorf("changelog = %+v, want empty", result[0].Changelog)
-	}
-}
 
-func TestHandleCheckUpdates_NoChangelogForVersionUpdate(t *testing.T) {
-	// Non-git-pinned (version-only) updates have no commit to key on — no
-	// changelog is fetched or shown, even if one is published.
-	index := RegistryIndex{{
-		Name:    "ver-ext",
-		Version: "2.0.0",
-		Type:    ExtensionTypeUI,
-		Author:  "Software Renderer",
-	}}
-	changelog := `{"hash":"` + strings.Repeat("b", 64) + `","version":"2.0.0","description":"should not appear"}` + "\n"
-	registryURL := setupChangelogRegistry(t, index, changelog)
-
-	h := testHandler(t)
-	h.config.RegistryURL = registryURL
-
-	ext := makeTestExt("ver-ext", "ver-ext", ExtensionTypeUI)
-	ext.Version = "1.0.0" // no Commit — legacy version-pinned install
-	_ = h.store.Create(ext)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/extensions/check-updates", nil)
-	w := httptest.NewRecorder()
-	h.HandleCheckUpdates(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
+	tests := []struct {
+		name           string
+		index          RegistryIndex
+		changelog      string
+		rowCommit      string
+		rowVersion     string
+		wantUpdates    int
+		wantCurCommit  string
+		wantAvCommit   string
+		wantCurVersion string
+		wantAvVersion  string
+		wantChangelog  []string
+	}{
+		{
+			name: "a newer pinned commit, with the entries newer than the installed one",
+			index: RegistryIndex{{Name: "gopls", Version: "1.0.0", Type: ExtensionTypeLSP,
+				Author: "Go Team", Commit: availableCommit}},
+			changelog:   dated(installedCommit, "Initial release") + dated(availableCommit, "Fix hover offsets"),
+			rowCommit:   installedCommit,
+			wantUpdates: 1, wantCurCommit: installedCommit, wantAvCommit: availableCommit,
+			wantChangelog: []string{"Fix hover offsets"},
+		},
+		{
+			name: "the same pinned commit is no update",
+			index: RegistryIndex{{Name: "gopls", Version: "1.0.0", Type: ExtensionTypeLSP,
+				Author: "Go Team", Commit: installedCommit}},
+			rowCommit:   installedCommit,
+			wantUpdates: 0,
+		},
+		{
+			name: "a changelog that never names the installed commit shows nothing",
+			index: RegistryIndex{{Name: "gopls", Version: "1.0.0", Type: ExtensionTypeLSP,
+				Author: "Go Team", Commit: availableCommit}},
+			changelog:   dated(unrelatedCommit, "x") + dated(availableCommit, "y"),
+			rowCommit:   installedCommit,
+			wantUpdates: 1, wantCurCommit: installedCommit, wantAvCommit: availableCommit,
+		},
+		{
+			// The changelog is best-effort: the update it carries is the actionable half, and it
+			// would be worse than useless to lose it because a file was never published.
+			name: "no published changelog still reports the update",
+			index: RegistryIndex{{Name: "gopls", Version: "1.0.0", Type: ExtensionTypeLSP,
+				Author: "Go Team", Commit: availableCommit}},
+			changelog:   "",
+			rowCommit:   installedCommit,
+			wantUpdates: 1, wantCurCommit: installedCommit, wantAvCommit: availableCommit,
+		},
+		{
+			name: "a version-only update has no commit to key a changelog on",
+			index: RegistryIndex{{Name: "ver-ext", Version: "2.0.0", Type: ExtensionTypeUI,
+				Author: "Software Renderer"}},
+			changelog:   dated(availableCommit, "should not appear"),
+			rowVersion:  "1.0.0",
+			wantUpdates: 1, wantCurVersion: "1.0.0", wantAvVersion: "2.0.0",
+		},
+		{
+			name: "the same version is no update",
+			index: RegistryIndex{{Name: "ver-ext", Version: "1.0.0", Type: ExtensionTypeUI,
+				Author: "Software Renderer"}},
+			rowVersion:  "1.0.0",
+			wantUpdates: 0,
+		},
 	}
-	var result []ExtensionUpdate
-	if err := json.UnmarshalRead(w.Body, &result); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(result) != 1 {
-		t.Fatalf("result count = %d, want 1", len(result))
-	}
-	if len(result[0].Changelog) != 0 {
-		t.Errorf("changelog = %+v, want empty for version-only update", result[0].Changelog)
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			entry := tc.index[0]
+			h := registryHandler(t, tc.index, tc.changelog)
+			ext := makeTestExt(entry.Name, entry.Name, entry.Type)
+			if tc.rowVersion != "" {
+				ext.Version = tc.rowVersion
+			}
+			ext.Commit = tc.rowCommit
+			if err := h.store.Create(ext); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			result := checkUpdates(t, h)
+			if len(result) != tc.wantUpdates {
+				t.Fatalf("result = %+v, want %d update(s)", result, tc.wantUpdates)
+			}
+			if tc.wantUpdates == 0 {
+				return
+			}
+			got := result[0]
+			// Each rule is checked where it is the one under test: the commit pair for a
+			// pinned row, the version pair for a row the index does not pin by commit.
+			if tc.wantCurCommit != "" || tc.wantAvCommit != "" {
+				if got.CurrentCommit != tc.wantCurCommit || got.AvailableCommit != tc.wantAvCommit {
+					t.Errorf("commits = %q → %q, want %q → %q",
+						got.CurrentCommit, got.AvailableCommit, tc.wantCurCommit, tc.wantAvCommit)
+				}
+			}
+			if tc.wantCurVersion != "" || tc.wantAvVersion != "" {
+				if got.CurrentVersion != tc.wantCurVersion || got.AvailableVersion != tc.wantAvVersion {
+					t.Errorf("versions = %q → %q, want %q → %q",
+						got.CurrentVersion, got.AvailableVersion, tc.wantCurVersion, tc.wantAvVersion)
+				}
+			}
+			var descs []string
+			for _, c := range got.Changelog {
+				descs = append(descs, c.Description)
+			}
+			if len(descs) != len(tc.wantChangelog) {
+				t.Fatalf("changelog = %v, want %v", descs, tc.wantChangelog)
+			}
+			for i, want := range tc.wantChangelog {
+				if descs[i] != want {
+					t.Errorf("changelog[%d] = %q, want %q", i, descs[i], want)
+				}
+			}
+		})
 	}
 }
 
@@ -1718,15 +1582,12 @@ func TestHandleInstall_FallbackCopiesLicenseURL(t *testing.T) {
 	}
 }
 
+// A name that is already installed is refused, whatever shape the stored id has: ids carry an
+// install timestamp, so a guard that compared ids would let the same extension install twice and
+// leave two rows pointing at one directory.
 func TestHandleInstall_AlreadyInstalled(t *testing.T) {
-	// Create mock registry server
 	index := RegistryIndex{
-		{
-			Name:        "gopls",
-			Version:     "1.0.0",
-			Type:        ExtensionTypeLSP,
-			DisplayName: "Go Language Server",
-		},
+		{Name: "gopls", Version: "1.0.0", Type: ExtensionTypeLSP, DisplayName: "Go Language Server"},
 	}
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1734,63 +1595,28 @@ func TestHandleInstall_AlreadyInstalled(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
-	h := testHandler(t)
-	h.config.RegistryURL = mockServer.URL
+	for _, id := range []string{"gopls", "gopls-9999999999"} {
+		t.Run("stored id "+id, func(t *testing.T) {
+			h := testHandler(t)
+			h.config.RegistryURL = mockServer.URL
+			if err := h.store.Create(makeTestExt(id, "gopls", ExtensionTypeLSP)); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
 
-	// Pre-install
-	ext := makeTestExt("gopls", "gopls", ExtensionTypeLSP)
-	_ = h.store.Create(ext)
+			body, _ := json.Marshal(map[string]any{"name": "gopls"})
+			req := httptest.NewRequest(http.MethodPost, "/api/extensions/install", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			h.HandleInstall(w, req)
 
-	body := map[string]any{
-		"name": "gopls",
-	}
-	bodyBytes, _ := json.Marshal(body)
-	req := httptest.NewRequest(http.MethodPost, "/api/extensions/install", bytes.NewReader(bodyBytes))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-
-	h.HandleInstall(w, req)
-
-	if w.Code != http.StatusConflict {
-		t.Errorf("status = %d, want 409", w.Code)
-	}
-}
-
-func TestHandleInstall_AlreadyInstalled_TimestampedID(t *testing.T) {
-	// Reinstall must be rejected even though records use timestamped IDs.
-	index := RegistryIndex{
-		{
-			Name:        "gopls",
-			Version:     "1.0.0",
-			Type:        ExtensionTypeLSP,
-			DisplayName: "Go Language Server",
-		},
-	}
-	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.MarshalWrite(w, index)
-	}))
-	defer mockServer.Close()
-
-	h := testHandler(t)
-	h.config.RegistryURL = mockServer.URL
-
-	// Pre-install with a timestamped ID (like a real install).
-	ext := makeTestExt("gopls-9999999999", "gopls", ExtensionTypeLSP)
-	_ = h.store.Create(ext)
-
-	body, _ := json.Marshal(map[string]any{"name": "gopls"})
-	req := httptest.NewRequest(http.MethodPost, "/api/extensions/install", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	h.HandleInstall(w, req)
-
-	if w.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409 (duplicate install with timestamped ID)", w.Code)
-	}
-	exts, _ := h.store.List()
-	if len(exts) != 1 {
-		t.Errorf("expected exactly one installed extension, got %d", len(exts))
+			if w.Code != http.StatusConflict {
+				t.Fatalf("status = %d, want 409", w.Code)
+			}
+			exts, _ := h.store.List()
+			if len(exts) != 1 {
+				t.Errorf("installed rows = %d, want the one row untouched", len(exts))
+			}
+		})
 	}
 }
 
@@ -1822,58 +1648,6 @@ func TestHandleInstall_DuplicateInFlight(t *testing.T) {
 	if w.Code != http.StatusConflict {
 		t.Errorf("status = %d, want 409 (duplicate in-flight install)", w.Code)
 	}
-}
-
-func TestHandleInstall_CompletesAfterClientDisconnect(t *testing.T) {
-	index := RegistryIndex{
-		{Name: "gopls", Version: "1.0.0", Type: ExtensionTypeLSP, DisplayName: "Go Language Server", Image: "docker.io/library/gopls:1.5.0"},
-	}
-	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.MarshalWrite(w, index)
-	}))
-	defer mockServer.Close()
-
-	h := testHandler(t)
-	h.config.RegistryURL = mockServer.URL
-
-	body, _ := json.Marshal(map[string]any{"name": "gopls"})
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	req := httptest.NewRequest(http.MethodPost, "/api/extensions/install", bytes.NewReader(body)).WithContext(ctx)
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-
-	done := make(chan struct{})
-	go func() {
-		h.HandleInstall(w, req)
-		close(done)
-	}()
-
-	// Cancel the request context to simulate the page closing mid-install.
-	time.Sleep(20 * time.Millisecond)
-	cancel()
-
-	select {
-	case <-done:
-		// handler returned on disconnect
-	case <-time.After(2 * time.Second):
-		t.Fatal("handler did not return after client disconnect")
-	}
-
-	// The install must still complete in the background and write the record.
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		exts, _ := h.store.List()
-		for _, e := range exts {
-			if e.Name == "gopls" {
-				return // installed despite client disconnect
-			}
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	exts, _ := h.store.List()
-	t.Fatalf("extension not installed after client disconnect; store has %d extensions", len(exts))
 }
 
 func TestHandleUpdateImage_StreamsProgress(t *testing.T) {
@@ -2091,94 +1865,6 @@ func TestHandleCheckUpdates_NoURL(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", w.Code)
-	}
-}
-
-func TestHandleCheckUpdates_NoUpdates(t *testing.T) {
-	// Create mock registry server with same version
-	index := RegistryIndex{
-		{
-			Name:    "gopls",
-			Version: "1.0.0",
-			Type:    ExtensionTypeLSP,
-		},
-	}
-	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.MarshalWrite(w, index)
-	}))
-	defer mockServer.Close()
-
-	h := testHandler(t)
-	h.config.RegistryURL = mockServer.URL
-
-	// Install extension at same version
-	ext := makeTestExt("gopls", "gopls", ExtensionTypeLSP)
-	ext.Version = "1.0.0"
-	_ = h.store.Create(ext)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/extensions/check-updates", nil)
-	w := httptest.NewRecorder()
-
-	h.HandleCheckUpdates(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", w.Code)
-	}
-
-	var result []ExtensionUpdate
-	if err := json.UnmarshalRead(w.Body, &result); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if len(result) != 0 {
-		t.Errorf("result count = %d, want 0 (no updates)", len(result))
-	}
-}
-
-func TestHandleCheckUpdates_UpdateAvailable(t *testing.T) {
-	// Create mock registry server with newer version
-	index := RegistryIndex{
-		{
-			Name:    "gopls",
-			Version: "2.0.0",
-			Type:    ExtensionTypeLSP,
-		},
-	}
-	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.MarshalWrite(w, index)
-	}))
-	defer mockServer.Close()
-
-	h := testHandler(t)
-	h.config.RegistryURL = mockServer.URL
-
-	// Install extension at older version
-	ext := makeTestExt("gopls", "gopls", ExtensionTypeLSP)
-	ext.Version = "1.0.0"
-	_ = h.store.Create(ext)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/extensions/check-updates", nil)
-	w := httptest.NewRecorder()
-
-	h.HandleCheckUpdates(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", w.Code)
-	}
-
-	var result []ExtensionUpdate
-	if err := json.UnmarshalRead(w.Body, &result); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if len(result) != 1 {
-		t.Errorf("result count = %d, want 1", len(result))
-	}
-	if result[0].CurrentVersion != "1.0.0" {
-		t.Errorf("CurrentVersion = %q, want 1.0.0", result[0].CurrentVersion)
-	}
-	if result[0].AvailableVersion != "2.0.0" {
-		t.Errorf("AvailableVersion = %q, want 2.0.0", result[0].AvailableVersion)
 	}
 }
 

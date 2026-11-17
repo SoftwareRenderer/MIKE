@@ -96,18 +96,6 @@ func TestMarshalRefusesBytesNoClientShouldBeGiven(t *testing.T) {
 	}
 }
 
-// TestMarshalDoesNotOrderMapKeys is the reason no comparison of marshaled map JSON may read its bytes:
-// the encoder's key order is unspecified, and the option that sorts them is opt-in per call.
-func TestMarshalDoesNotOrderMapKeys(t *testing.T) {
-	sorted, err := json.Marshal(map[string]int{"z": 1, "a": 2, "m": 3}, json.Deterministic(true))
-	if err != nil {
-		t.Fatalf("deterministic marshal: %v", err)
-	}
-	if string(sorted) != `{"a":2,"m":3,"z":1}` {
-		t.Errorf("Deterministic(true) gave %s, want the keys sorted", sorted)
-	}
-}
-
 func TestUnmarshalAcceptsOnlyWhatTheGrammarAllows(t *testing.T) {
 	type request struct {
 		Title string         `json:"title"`

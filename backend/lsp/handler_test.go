@@ -50,6 +50,9 @@ type mockProcessManager struct {
 	// sendErr, when set, is what every send to the server answers with.
 	sendErr   error
 	messageCh chan jsontext.Value
+	// memoryQuery records the last (workspace, file) the memory endpoint asked about, so a
+	// refusal can be proved to have asked the manager nothing.
+	memoryQuery [2]string
 }
 
 // mockProcess wraps LSPProcess with a test-only reference count.
@@ -109,14 +112,17 @@ func (m *mockProcessManager) ServerMessageCh() <-chan jsontext.Value {
 }
 
 func (m *mockProcessManager) SandboxMemory(workspacePath, filePath string) *types.SandboxMemoryStats {
+	m.mu.Lock()
+	m.memoryQuery = [2]string{workspacePath, filePath}
+	m.mu.Unlock()
 	return &types.SandboxMemoryStats{Running: true, CurrentMB: 42, LimitMB: 256, PeakMB: 64, OOMKills: 1}
 }
 
-func (m *mockProcessManager) Subscribe(process *LSPProcess, clientID uint64) chan []byte {
-	return make(chan []byte, 64)
+func (m *mockProcessManager) memoryAsked() (string, string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.memoryQuery[0], m.memoryQuery[1]
 }
-
-func (m *mockProcessManager) Unsubscribe(process *LSPProcess, clientID uint64) {}
 
 func (m *mockProcessManager) Deliver(msg jsontext.Value) {
 	select {
@@ -131,12 +137,6 @@ func (m *mockProcessManager) SentMessages() []jsontext.Value {
 	copied := make([]jsontext.Value, len(m.sentMessages))
 	copy(copied, m.sentMessages)
 	return copied
-}
-
-func (m *mockProcessManager) ResetSent() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.sentMessages = nil
 }
 
 func (m *mockProcessManager) ProcessCount() int {
@@ -299,153 +299,161 @@ func TestRequestIsAnsweredWhenItsServerIsGone(t *testing.T) {
 	}
 }
 
-func TestIDRemapping(t *testing.T) {
-	mgr := newMockProcessManager()
-	reg := newTestRegistry()
-	handler := NewLSPHandler(reg, mgr)
-	defer handler.Close()
-
-	url := startTestServer(t, handler)
-
-	client := subscribeClientDefault(t, url, "/tmp/test-project", "main.go")
-
-	client.sendLSP(t, map[string]any{
-		"jsonrpc": "2.0",
-		"id":      5,
-		"method":  "textDocument/completion",
-		"params":  map[string]any{"textDocument": map[string]any{"uri": "file:///main.go"}},
-	})
-
-	time.Sleep(50 * time.Millisecond)
-
-	sent := mgr.SentMessages()
-	if len(sent) != 1 {
-		t.Fatalf("expected 1 sent message, got %d", len(sent))
-	}
-
-	var serverMsg map[string]any
-	if err := json.Unmarshal(sent[0], &serverMsg); err != nil {
-		t.Fatalf("unmarshal sent message: %v", err)
-	}
-
-	serverID := serverMsg["id"]
-	if serverID == 5 || serverID == "5" {
-		t.Errorf("expected remapped backend ID, got original id %v", serverID)
-	}
-
-	serverResponse := map[string]any{
-		"jsonrpc": "2.0",
-		"id":      serverID,
-		"result":  map[string]any{"isIncomplete": false, "items": []any{}},
-	}
-	respData, _ := json.Marshal(serverResponse)
-	mgr.Deliver(respData)
-
-	resp := client.receiveJSON(t)
-	if resp.ID == nil {
-		t.Fatal("expected response with id")
-	}
-	if resp.ID.String() != "5" {
-		t.Errorf("expected client id 5, got %s", resp.ID.String())
-	}
-	if resp.Result == nil {
-		t.Error("expected result in response")
+// awaitSentMethod waits until n messages with the method have reached the language server.
+func awaitSentMethod(t *testing.T, mgr *mockProcessManager, method string, n int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		got := countSentMethods(mgr.SentMessages(), method)
+		if got >= n {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d %q messages reached the language server, want %d", got, method, n)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 
-func TestInitializeCaching(t *testing.T) {
+// TestRequestIDsAreRemappedAndAnswersRouteBack: the browser and this handler number requests
+// independently, so a request never leaves with the id it arrived with, and its answer comes back
+// under the browser's own id. Sent several at once, which is what an editor with open tabs does:
+// the numbering has to be unique, because a repeated backend id routes one answer to the wrong
+// waiter.
+func TestRequestIDsAreRemappedAndAnswersRouteBack(t *testing.T) {
+	browserIDs := []int{5, 20, 30}
 	mgr := newMockProcessManager()
-	reg := newTestRegistry()
-	handler := NewLSPHandler(reg, mgr)
+	handler := NewLSPHandler(newTestRegistry(), mgr)
 	defer handler.Close()
 
 	url := startTestServer(t, handler)
+	client := subscribeClientDefault(t, url, "/tmp/test-project", "main.go")
 
-	client1 := subscribeClientDefault(t, url, "/tmp/test-project", "main.go")
+	for _, id := range browserIDs {
+		client.sendLSP(t, map[string]any{
+			"jsonrpc": "2.0",
+			"id":      id,
+			"method":  "textDocument/definition",
+			"params":  map[string]any{"textDocument": map[string]any{"uri": "file:///main.go"}},
+		})
+	}
 
-	client1.sendLSP(t, map[string]any{
+	sent := waitForSentMessages(t, mgr, len(browserIDs))
+	if len(sent) != len(browserIDs) {
+		t.Fatalf("%d requests reached the language server, want %d", len(sent), len(browserIDs))
+	}
+	backendIDs := map[string]bool{}
+	for _, msg := range sent {
+		var m map[string]any
+		if err := json.Unmarshal(msg, &m); err != nil {
+			t.Fatalf("a forwarded request is not JSON: %v", err)
+		}
+		backendID := fmt.Sprint(m["id"])
+		if backendIDs[backendID] {
+			t.Errorf("two requests were forwarded under backend id %s", backendID)
+		}
+		for _, want := range browserIDs {
+			if backendID == fmt.Sprint(want) {
+				t.Errorf("request %s reached the language server under the browser's own id", backendID)
+			}
+		}
+		backendIDs[backendID] = true
+	}
+
+	for _, msg := range sent {
+		var m map[string]any
+		if err := json.Unmarshal(msg, &m); err != nil {
+			t.Fatalf("a forwarded request is not JSON: %v", err)
+		}
+		resp, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": m["id"], "result": []any{}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		mgr.Deliver(resp)
+	}
+
+	answered := map[string]bool{}
+	for range browserIDs {
+		resp := client.receiveJSON(t)
+		if resp.ID == nil {
+			t.Fatal("an answer arrived with no id")
+		}
+		if resp.Result == nil {
+			t.Errorf("the answer for id=%s carried no result", resp.ID)
+		}
+		answered[resp.ID.String()] = true
+	}
+	for _, want := range browserIDs {
+		if !answered[fmt.Sprint(want)] {
+			t.Errorf("the browser never got an answer under its own id %d; got %v", want, answered)
+		}
+	}
+}
+
+// TestInitializeIsForwardedOnceAndReplayedToEveryClient: one language server per workspace, so one
+// initialize ever reaches it. The first client is answered when the server answers; every client
+// after that is answered from the cached reply, under its own id and on its own channel, and each
+// client is told $/lspReady — the signal the editor waits for before asking about a document.
+func TestInitializeIsForwardedOnceAndReplayedToEveryClient(t *testing.T) {
+	const workspace = "/tmp/test-project"
+	mgr := newMockProcessManager()
+	handler := NewLSPHandler(newTestRegistry(), mgr)
+	defer handler.Close()
+
+	url := startTestServer(t, handler)
+	first := subscribeClientDefault(t, url, workspace, "main.go")
+
+	first.sendLSP(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "initialize",
+		"params":  map[string]any{"rootUri": "file://" + workspace, "capabilities": map[string]any{}},
 	})
-
-	time.Sleep(50 * time.Millisecond)
-
-	sent := mgr.SentMessages()
-	if len(sent) != 1 {
-		t.Fatalf("expected 1 sent message (initialize), got %d", len(sent))
+	backendID := awaitSentMethodID(t, mgr, "initialize")
+	if got := countSentMethods(mgr.SentMessages(), "initialize"); got != 1 {
+		t.Fatalf("%d initialize requests reached the language server, want 1", got)
 	}
 
-	var initReq map[string]any
-	if err := json.Unmarshal(sent[0], &initReq); err != nil {
-		t.Fatalf("unmarshal error: %v", err)
-	}
-	if initReq["method"] != "initialize" {
-		t.Errorf("expected initialize method, got %v", initReq["method"])
-	}
-
-	backendID := initReq["id"]
-
-	initResponse := map[string]any{
+	mgr.Deliver(mustMarshal(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      backendID,
 		"result": map[string]any{
 			"capabilities": map[string]any{
-				"textDocumentSync": 1,
-				"completionProvider": map[string]any{
-					"resolveProvider": true,
-				},
+				"textDocumentSync":   1,
+				"completionProvider": map[string]any{"resolveProvider": true},
 			},
-			"serverInfo": map[string]any{
-				"name":    "gopls",
-				"version": "v1.0",
-			},
+			"serverInfo": map[string]any{"name": "gopls", "version": "v1.0"},
 		},
-	}
-	respData, _ := json.Marshal(initResponse)
-	mgr.Deliver(respData)
+	}))
+	receiveResponseFor(t, first, "1", 1)
 
-	resp1 := client1.receiveJSON(t)
-	if resp1.ID == nil || resp1.ID.String() != "1" {
-		t.Errorf("client1: expected id 1, got %v", resp1.ID)
-	}
-	if resp1.Result == nil {
-		t.Error("client1: expected result in initialize response")
+	// The client's own `initialized` reaches the server, and the handler signals readiness back.
+	first.sendLSP(t, map[string]any{"jsonrpc": "2.0", "method": "initialized", "params": map[string]any{}})
+	awaitSentMethod(t, mgr, "initialized", 1)
+	if ready := first.receiveJSON(t); ready.Method != "$/lspReady" {
+		t.Fatalf("after initialized the client got method=%s, want $/lspReady", ready.Method)
 	}
 
-	client2 := subscribeClient(t, url, 2, "/tmp/test-project", "main.go", "go")
-
-	client2.sendLSP(t, map[string]any{
+	second := subscribeClient(t, url, 2, workspace, "main.go", "go")
+	second.sendLSP(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      2,
 		"method":  "initialize",
+		"params":  map[string]any{"rootUri": "file://" + workspace, "capabilities": map[string]any{}},
 	})
-
-	time.Sleep(50 * time.Millisecond)
-
-	sentAfter := mgr.SentMessages()
-	if len(sentAfter) != 1 {
-		t.Errorf("expected 1 sent message total (initialize cached), got %d", len(sentAfter))
-	}
-
-	resp2 := client2.receiveJSON(t)
-	if resp2.ID == nil || resp2.ID.String() != "2" {
-		t.Errorf("client2: expected id 2, got %v", resp2.ID)
-	}
-	if resp2.Result == nil {
-		t.Error("client2: expected result in cached initialize response")
-	}
-
+	cached := receiveResponseFor(t, second, "2", 2)
 	var result map[string]any
-	if err := json.Unmarshal(resp2.Result, &result); err != nil {
-		t.Fatalf("unmarshal result: %v", err)
+	if err := json.Unmarshal(cached.Result, &result); err != nil {
+		t.Fatalf("the cached answer is not JSON: %v", err)
 	}
-	caps, ok := result["capabilities"].(map[string]any)
-	if !ok {
-		t.Fatal("expected capabilities in result")
+	if caps, ok := result["capabilities"].(map[string]any); !ok || caps["textDocumentSync"].(float64) != 1 {
+		t.Errorf("the cached answer lost the server's capabilities: %s", cached.Result)
 	}
-	if caps["textDocumentSync"].(float64) != 1 {
-		t.Errorf("expected textDocumentSync=1, got %v", caps["textDocumentSync"])
+	if ready := second.receiveJSON(t); ready.Method != "$/lspReady" {
+		t.Fatalf("the second client got method=%s, want $/lspReady", ready.Method)
+	}
+	if got := countSentMethods(mgr.SentMessages(), "initialize"); got != 1 {
+		t.Errorf("%d initialize requests reached the language server, want 1 — this workspace has its server already", got)
 	}
 }
 
@@ -662,100 +670,6 @@ func TestDisconnectCleanup(t *testing.T) {
 	}
 }
 
-func TestMultipleRequestRemapping(t *testing.T) {
-	mgr := newMockProcessManager()
-	reg := newTestRegistry()
-	handler := NewLSPHandler(reg, mgr)
-	defer handler.Close()
-
-	url := startTestServer(t, handler)
-
-	client := subscribeClientDefault(t, url, "/tmp/test-project", "main.go")
-
-	requests := []int64{10, 20, 30}
-	for _, id := range requests {
-		client.sendLSP(t, map[string]any{
-			"jsonrpc": "2.0",
-			"id":      id,
-			"method":  "textDocument/definition",
-			"params":  map[string]any{"textDocument": map[string]any{"uri": "file:///main.go"}},
-		})
-	}
-
-	time.Sleep(50 * time.Millisecond)
-
-	sent := mgr.SentMessages()
-	if len(sent) != 3 {
-		t.Fatalf("expected 3 sent messages, got %d", len(sent))
-	}
-
-	backendIDs := make(map[int64]bool)
-	for _, msg := range sent {
-		var m map[string]any
-		json.Unmarshal(msg, &m)
-		id := int64(m["id"].(float64))
-		if backendIDs[id] {
-			t.Errorf("duplicate backend ID: %d", id)
-		}
-		backendIDs[id] = true
-	}
-
-	for _, msg := range sent {
-		var m map[string]any
-		json.Unmarshal(msg, &m)
-		backendID := m["id"]
-
-		response := map[string]any{
-			"jsonrpc": "2.0",
-			"id":      backendID,
-			"result":  []any{},
-		}
-		respData, _ := json.Marshal(response)
-		mgr.Deliver(respData)
-	}
-
-	for i := 0; i < 3; i++ {
-		resp := client.receiveJSON(t)
-		if resp.ID == nil {
-			t.Errorf("response %d: expected id, got nil", i)
-		}
-		if resp.Result == nil {
-			t.Errorf("response %d: expected result", i)
-		}
-	}
-}
-
-func TestInitializedNotificationForwarded(t *testing.T) {
-	mgr := newMockProcessManager()
-	reg := newTestRegistry()
-	handler := NewLSPHandler(reg, mgr)
-	defer handler.Close()
-
-	url := startTestServer(t, handler)
-
-	client := subscribeClientDefault(t, url, "/tmp/test-project", "main.go")
-	mgr.ResetSent()
-
-	client.sendLSP(t, map[string]any{
-		"jsonrpc": "2.0",
-		"method":  "initialized",
-		"params":  map[string]any{},
-	})
-
-	time.Sleep(50 * time.Millisecond)
-
-	sent := mgr.SentMessages()
-	if len(sent) != 1 {
-		t.Fatalf("expected 1 sent message (initialized notification), got %d", len(sent))
-	}
-
-	var m map[string]any
-	json.Unmarshal(sent[0], &m)
-	if m["method"] != "initialized" {
-		t.Errorf("expected initialized notification, got %v", m["method"])
-	}
-}
-
 func TestTwoClientsSameWorkspace(t *testing.T) {
 	mgr := newMockProcessManager()
 	reg := newTestRegistry()
@@ -967,145 +881,81 @@ func TestUnknownExtensionRejected(t *testing.T) {
 	}
 }
 
-func TestLSPReadyNotification(t *testing.T) {
-	mgr := newMockProcessManager()
-	reg := newTestRegistry()
-	handler := NewLSPHandler(reg, mgr)
-	defer handler.Close()
+// TestSubscriptionHonoursTheWorkspaceValidator: the workspace a browser names is the client's, and a
+// subscribed workspace is bind-mounted into the extension sandbox — so a refused workspace spawns
+// nothing and ends the connection, and an accepted one spawns exactly the one server it asked for.
+func TestSubscriptionHonoursTheWorkspaceValidator(t *testing.T) {
+	allowed := "/tmp/test-project"
+	validator := func(ws string) bool { return ws == allowed }
 
-	url := startTestServer(t, handler)
+	t.Run("refused spawns nothing", func(t *testing.T) {
+		mgr := newMockProcessManager()
+		handler := NewLSPHandler(newTestRegistry(), mgr)
+		handler.SetWorkspaceValidator(validator)
+		defer handler.Close()
 
-	client := subscribeClientDefault(t, url, "/tmp/test-project", "main.go")
+		client := connectClient(t, startTestServer(t, handler))
+		client.channelID = 1
+		client.workspace = "/etc"
+		client.language = "go"
+		client.send(t, map[string]any{
+			"_ch":    1,
+			"method": "workspace/subscribe",
+			"params": map[string]any{"workspace": "/etc", "file": "main.go"},
+		})
 
-	client.sendLSP(t, map[string]any{
-		"jsonrpc": "2.0",
-		"id":      1,
-		"method":  "initialize",
-		"params": map[string]any{
-			"rootUri":      "file:///tmp/test-project",
-			"capabilities": map[string]any{},
-		},
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if _, _, err := client.conn.Read(ctx); err == nil {
+			t.Fatal("a disallowed workspace was subscribed anyway")
+		}
+		if got := mgr.ProcessCount(); got != 0 {
+			t.Fatalf("a refused workspace spawned %d server(s)", got)
+		}
 	})
 
-	time.Sleep(50 * time.Millisecond)
+	t.Run("accepted spawns one", func(t *testing.T) {
+		mgr := newMockProcessManager()
+		handler := NewLSPHandler(newTestRegistry(), mgr)
+		handler.SetWorkspaceValidator(validator)
+		defer handler.Close()
 
-	sent := mgr.SentMessages()
-	if len(sent) != 1 {
-		t.Fatalf("expected 1 sent message (initialize), got %d", len(sent))
-	}
-
-	var initReq map[string]any
-	json.Unmarshal(sent[0], &initReq)
-	backendID := initReq["id"]
-
-	initResponse := map[string]any{
-		"jsonrpc": "2.0",
-		"id":      backendID,
-		"result": map[string]any{
-			"capabilities": map[string]any{
-				"completionProvider": map[string]any{"resolveProvider": true},
-			},
-			"serverInfo": map[string]any{"name": "gopls"},
-		},
-	}
-	respData, _ := json.Marshal(initResponse)
-	mgr.Deliver(respData)
-
-	resp := client.receiveJSON(t)
-	if resp.ID == nil || resp.ID.String() != "1" {
-		t.Fatalf("expected initialize response with id=1, got id=%v", resp.ID)
-	}
-	if resp.Result == nil {
-		t.Fatal("expected result in initialize response")
-	}
-
-	client.sendLSP(t, map[string]any{
-		"jsonrpc": "2.0",
-		"method":  "initialized",
-		"params":  map[string]any{},
+		subscribeClientDefault(t, startTestServer(t, handler), allowed, "main.go")
+		if got := mgr.ProcessCount(); got != 1 {
+			t.Fatalf("an allowed workspace spawned %d servers, want 1", got)
+		}
 	})
-
-	readyMsg := client.receiveJSON(t)
-	if readyMsg.Method != "$/lspReady" {
-		t.Fatalf("expected $server/lspReady notification, got method=%s", readyMsg.Method)
-	}
 }
 
-func TestLSPReadyNotificationCachedResponse(t *testing.T) {
+// TestWebSocketOriginIsPinnedToTheHost: the socket serves this install's own page and nobody else's.
+func TestWebSocketOriginIsPinnedToTheHost(t *testing.T) {
 	mgr := newMockProcessManager()
-	reg := newTestRegistry()
-	handler := NewLSPHandler(reg, mgr)
+	handler := NewLSPHandler(newTestRegistry(), mgr)
 	defer handler.Close()
-
 	url := startTestServer(t, handler)
 
-	client1 := subscribeClientDefault(t, url, "/tmp/test-project", "main.go")
-
-	client1.sendLSP(t, map[string]any{
-		"jsonrpc": "2.0",
-		"id":      1,
-		"method":  "initialize",
-		"params": map[string]any{
-			"rootUri":      "file:///tmp/test-project",
-			"capabilities": map[string]any{},
-		},
-	})
-	time.Sleep(50 * time.Millisecond)
-
-	sent := mgr.SentMessages()
-	var initReq map[string]any
-	json.Unmarshal(sent[0], &initReq)
-	backendID := initReq["id"]
-
-	initResponse := map[string]any{
-		"jsonrpc": "2.0",
-		"id":      backendID,
-		"result": map[string]any{
-			"capabilities": map[string]any{},
-			"serverInfo":   map[string]any{"name": "gopls"},
-		},
-	}
-	mgr.Deliver(jsontext.Value(mustMarshal(t, initResponse)))
-
-	resp1 := client1.receiveJSON(t)
-	if resp1.ID == nil || resp1.ID.String() != "1" {
-		t.Fatalf("client1: expected id=1, got %v", resp1.ID)
-	}
-
-	client1.sendLSP(t, map[string]any{
-		"jsonrpc": "2.0",
-		"method":  "initialized",
-		"params":  map[string]any{},
-	})
-	ready1 := client1.receiveJSON(t)
-	if ready1.Method != "$/lspReady" {
-		t.Fatalf("client1: expected $server/lspReady, got %s", ready1.Method)
-	}
-
-	client2 := subscribeClient(t, url, 2, "/tmp/test-project", "main.go", "go")
-
-	client2.sendLSP(t, map[string]any{
-		"jsonrpc": "2.0",
-		"id":      2,
-		"method":  "initialize",
-		"params": map[string]any{
-			"rootUri":      "file:///tmp/test-project",
-			"capabilities": map[string]any{},
-		},
+	t.Run("another origin is refused", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_, _, err := websocket.Dial(ctx, url+"/api/lsp", &websocket.DialOptions{
+			HTTPHeader: http.Header{"Origin": []string{"https://evil.example.com"}},
+		})
+		if err == nil {
+			t.Fatal("a cross-origin WebSocket handshake was accepted")
+		}
 	})
 
-	resp2 := client2.receiveJSON(t)
-	if resp2.ID == nil || resp2.ID.String() != "2" {
-		t.Fatalf("client2: expected id=2, got %v", resp2.ID)
-	}
-	if resp2.Result == nil {
-		t.Fatal("client2: expected cached result")
-	}
-
-	ready2 := client2.receiveJSON(t)
-	if ready2.Method != "$/lspReady" {
-		t.Fatalf("client2: expected $server/lspReady, got %s", ready2.Method)
-	}
+	t.Run("the page's own origin is accepted", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		conn, _, err := websocket.Dial(ctx, url+"/api/lsp", &websocket.DialOptions{
+			HTTPHeader: http.Header{"Origin": []string{url}},
+		})
+		if err != nil {
+			t.Fatalf("the same-origin handshake failed: %v", err)
+		}
+		defer conn.CloseNow()
+	})
 }
 
 func mustMarshal(t *testing.T, v any) []byte {
@@ -1115,49 +965,6 @@ func mustMarshal(t *testing.T, v any) []byte {
 		t.Fatalf("marshal error: %v", err)
 	}
 	return data
-}
-
-func TestSubscriptionRejectsDisallowedWorkspace(t *testing.T) {
-	mgr := newMockProcessManager()
-	reg := newTestRegistry()
-	handler := NewLSPHandler(reg, mgr)
-	handler.SetWorkspaceValidator(func(ws string) bool { return ws != "/etc" })
-	defer handler.Close()
-
-	url := startTestServer(t, handler)
-
-	client := connectClient(t, url)
-	client.channelID = 1
-	client.workspace = "/etc"
-	client.language = "go"
-	client.send(t, map[string]any{
-		"_ch":    1,
-		"method": "workspace/subscribe",
-		"params": map[string]any{"workspace": "/etc", "file": "main.go"},
-	})
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	if _, _, err := client.conn.Read(ctx); err == nil {
-		t.Fatal("expected connection to be closed for a disallowed workspace")
-	}
-	if got := mgr.ProcessCount(); got != 0 {
-		t.Fatalf("expected no LSP process spawned, got %d", got)
-	}
-}
-
-func TestSubscriptionAllowsAllowedWorkspace(t *testing.T) {
-	mgr := newMockProcessManager()
-	reg := newTestRegistry()
-	handler := NewLSPHandler(reg, mgr)
-	handler.SetWorkspaceValidator(func(ws string) bool { return ws == "/tmp/test-project" })
-	defer handler.Close()
-
-	url := startTestServer(t, handler)
-	subscribeClientDefault(t, url, "/tmp/test-project", "main.go")
-	if got := mgr.ProcessCount(); got != 1 {
-		t.Fatalf("expected 1 LSP process, got %d", got)
-	}
 }
 
 // waitForSentMessages waits until n messages have reached the language server.
@@ -1299,92 +1106,64 @@ func TestLazyInitializeAnswersWhenNoServerOwnsTheFile(t *testing.T) {
 	}
 }
 
-func TestWebSocketOrigin_RejectsCrossOrigin(t *testing.T) {
-	mgr := newMockProcessManager()
-	reg := newTestRegistry()
-	handler := NewLSPHandler(reg, mgr)
-	defer handler.Close()
-
-	url := startTestServer(t, handler)
-
-	// A cross-origin handshake must be rejected (Origin != Host).
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	_, _, err := websocket.Dial(ctx, url+"/api/lsp", &websocket.DialOptions{
-		HTTPHeader: http.Header{"Origin": []string{"https://evil.example.com"}},
-	})
-	if err == nil {
-		t.Fatal("expected cross-origin WebSocket handshake to be rejected")
-	}
-}
-
-func TestWebSocketOrigin_AcceptsSameOrigin(t *testing.T) {
-	mgr := newMockProcessManager()
-	reg := newTestRegistry()
-	handler := NewLSPHandler(reg, mgr)
-	defer handler.Close()
-
-	url := startTestServer(t, handler)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	conn, _, err := websocket.Dial(ctx, url+"/api/lsp", &websocket.DialOptions{
-		HTTPHeader: http.Header{"Origin": []string{url}},
-	})
-	if err != nil {
-		t.Fatalf("expected same-origin WebSocket handshake to succeed: %v", err)
-	}
-	defer conn.CloseNow()
-}
-
 // ─── HandleSandboxMemory (GET /api/lsp/memory) ──────────────────────────────
 
 // The POST-is-refused case is asserted at backend/server/routes_method_test.go: the route pattern
 // "GET /api/lsp/memory" carries the verb, so a handler-level call cannot reach that decision.
 
-func TestHandleSandboxMemory_MissingParams(t *testing.T) {
-	handler := NewLSPHandler(newTestRegistry(), newMockProcessManager())
-	defer handler.Close()
-
-	for _, path := range []string{
-		"/api/lsp/memory",
-		"/api/lsp/memory?workspace=/tmp/ws",
-		"/api/lsp/memory?file=/tmp/ws/main.go",
-	} {
-		w := httptest.NewRecorder()
-		handler.HandleSandboxMemory(w, httptest.NewRequest(http.MethodGet, path, nil))
-		if w.Code != http.StatusBadRequest {
-			t.Errorf("%s: status = %d, want %d", path, w.Code, http.StatusBadRequest)
-		}
+// TestHandleSandboxMemoryAnswersTheQuery: the memory panel asks by query pair, and the two checks
+// that guard it happen before anything is asked of the manager that owns the container — a missing
+// half of the pair is a 400, a workspace the validator refuses is a 403, and only an allowed pair
+// reaches the manager and comes back as the stats object the panel decodes.
+func TestHandleSandboxMemoryAnswersTheQuery(t *testing.T) {
+	const workspace, file = "/tmp/ws", "/tmp/ws/main.go"
+	cases := []struct {
+		name      string
+		target    string
+		validator func(string) bool
+		want      int
+		asked     bool
+	}{
+		{"no query at all", "/api/lsp/memory", nil, http.StatusBadRequest, false},
+		{"no file", "/api/lsp/memory?workspace=" + workspace, nil, http.StatusBadRequest, false},
+		{"no workspace", "/api/lsp/memory?file=" + file, nil, http.StatusBadRequest, false},
+		{"a workspace the validator refuses", "/api/lsp/memory?workspace=/etc&file=/etc/passwd",
+			func(ws string) bool { return ws == workspace }, http.StatusForbidden, false},
+		{"the allowed pair is served", "/api/lsp/memory?workspace=" + workspace + "&file=" + file,
+			nil, http.StatusOK, true},
 	}
-}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr := newMockProcessManager()
+			handler := NewLSPHandler(newTestRegistry(), mgr)
+			if tc.validator != nil {
+				handler.SetWorkspaceValidator(tc.validator)
+			}
+			defer handler.Close()
 
-func TestHandleSandboxMemory_WorkspaceRejected(t *testing.T) {
-	handler := NewLSPHandler(newTestRegistry(), newMockProcessManager())
-	defer handler.Close()
-	handler.SetWorkspaceValidator(func(ws string) bool { return ws == "/tmp/allowed" })
+			w := httptest.NewRecorder()
+			handler.HandleSandboxMemory(w, httptest.NewRequest(http.MethodGet, tc.target, nil))
 
-	w := httptest.NewRecorder()
-	handler.HandleSandboxMemory(w, httptest.NewRequest(http.MethodGet, "/api/lsp/memory?workspace=/etc&file=/etc/passwd", nil))
-	if w.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusForbidden)
-	}
-}
-
-func TestHandleSandboxMemory_OK(t *testing.T) {
-	handler := NewLSPHandler(newTestRegistry(), newMockProcessManager())
-	defer handler.Close()
-
-	w := httptest.NewRecorder()
-	handler.HandleSandboxMemory(w, httptest.NewRequest(http.MethodGet, "/api/lsp/memory?workspace=/tmp/ws&file=/tmp/ws/main.go", nil))
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
-	}
-	var stats types.SandboxMemoryStats
-	if err := json.Unmarshal(w.Body.Bytes(), &stats); err != nil {
-		t.Fatalf("unmarshal: %v (body: %s)", err, w.Body.String())
-	}
-	if !stats.Running || stats.CurrentMB != 42 || stats.LimitMB != 256 || stats.PeakMB != 64 || stats.OOMKills != 1 {
-		t.Errorf("stats = %+v, want mock values", stats)
+			if w.Code != tc.want {
+				t.Fatalf("status = %d, want %d (body %s)", w.Code, tc.want, w.Body.String())
+			}
+			askedWorkspace, askedFile := mgr.memoryAsked()
+			if !tc.asked {
+				if askedWorkspace != "" || askedFile != "" {
+					t.Errorf("a refused request asked the manager about %q/%q", askedWorkspace, askedFile)
+				}
+				return
+			}
+			if askedWorkspace != workspace || askedFile != file {
+				t.Errorf("the manager was asked about %q/%q, want %q/%q", askedWorkspace, askedFile, workspace, file)
+			}
+			var stats types.SandboxMemoryStats
+			if err := json.Unmarshal(w.Body.Bytes(), &stats); err != nil {
+				t.Fatalf("the body is not the stats object the panel reads: %v (body %s)", err, w.Body.String())
+			}
+			if !stats.Running || stats.CurrentMB != 42 || stats.LimitMB != 256 || stats.PeakMB != 64 || stats.OOMKills != 1 {
+				t.Errorf("stats = %+v, want the manager's answer delivered intact", stats)
+			}
+		})
 	}
 }

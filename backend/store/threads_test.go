@@ -18,7 +18,13 @@ func TestCreateAndGetThread(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
-	th := newThread("thread-1", "task-1", "Main")
+	// A fork's own columns ride the same positional scan as its name, so one row carries them all.
+	if err := s.CreateThread(newThread("parent-th", "task-1", "Main")); err != nil {
+		t.Fatalf("create parent thread: %v", err)
+	}
+	th := newThread("thread-1", "task-1", "Fork #1")
+	th.ParentThreadID = "parent-th"
+	th.GitBranch = "kanban/fork-branch"
 	if err := s.CreateThread(th); err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
@@ -27,8 +33,14 @@ func TestCreateAndGetThread(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get thread: %v", err)
 	}
-	if got.ID != "thread-1" || got.TaskID != "task-1" || got.Name != "Main" {
+	if got.ID != "thread-1" || got.TaskID != "task-1" || got.Name != "Fork #1" {
 		t.Fatalf("unexpected thread: %+v", got)
+	}
+	if got.ParentThreadID != "parent-th" {
+		t.Errorf("parent_thread_id = %q, want parent-th", got.ParentThreadID)
+	}
+	if got.GitBranch != "kanban/fork-branch" {
+		t.Errorf("git_branch = %q, want kanban/fork-branch", got.GitBranch)
 	}
 }
 
@@ -200,15 +212,19 @@ func TestGetThreadsByCheckpointMessageTime(t *testing.T) {
 	}
 
 	checkpointTime := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
-	th1 := newThread("th-1", "task-1", "Fork #1")
-	th1.CheckpointMessageTime = &checkpointTime
-	th2 := newThread("th-2", "task-1", "Fork #2")
-	th2.CheckpointMessageTime = &checkpointTime
-
-	for _, th := range []*types.TaskThread{th1, th2} {
+	for _, id := range []string{"th-1", "th-2"} {
+		th := newThread(id, "task-1", "Fork "+id)
+		th.CheckpointMessageTime = &checkpointTime
 		if err := s.CreateThread(th); err != nil {
-			t.Fatalf("create thread: %v", err)
+			t.Fatalf("create %s: %v", id, err)
 		}
+	}
+	// A fork taken one second later is a different instant, and the comparison is over the stored text.
+	later := newThread("th-3", "task-1", "Fork #3")
+	laterTime := checkpointTime.Add(time.Second)
+	later.CheckpointMessageTime = &laterTime
+	if err := s.CreateThread(later); err != nil {
+		t.Fatalf("create th-3: %v", err)
 	}
 
 	got, err := s.GetThreadsByCheckpointMessageTime(checkpointTime.Format(time.RFC3339))
@@ -216,78 +232,12 @@ func TestGetThreadsByCheckpointMessageTime(t *testing.T) {
 		t.Fatalf("get threads by checkpoint time: %v", err)
 	}
 	if len(got) != 2 {
-		t.Fatalf("expected 2 threads, got %d", len(got))
+		t.Fatalf("%d threads answer that instant, want the two forked at it: %+v", len(got), got)
 	}
-}
-
-func TestCopyMessagesToThread(t *testing.T) {
-	s := testStore(t)
-	proj := newProject("proj-1", "test", "/tmp/test")
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	task := newTask("task-1", "proj-1")
-	if err := s.CreateTask(task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	// Create source and target threads
-	src := newThread("src-thread", "task-1", "Main")
-	tgt := newThread("tgt-thread", "task-1", "Fork #1")
-	if err := s.CreateThread(src); err != nil {
-		t.Fatalf("create source thread: %v", err)
-	}
-	if err := s.CreateThread(tgt); err != nil {
-		t.Fatalf("create target thread: %v", err)
-	}
-
-	// Create messages in source thread with distinct timestamps
-	baseTime := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
-	msgs := []*types.TaskMessage{
-		func() *types.TaskMessage {
-			m := newMessage("m1", "task-1", "user", "first")
-			m.ThreadID = "src-thread"
-			m.CreatedAt = baseTime
-			return m
-		}(),
-		func() *types.TaskMessage {
-			m := newMessage("m2", "task-1", "assistant", "reply")
-			m.ThreadID = "src-thread"
-			m.CreatedAt = baseTime.Add(1 * time.Second)
-			return m
-		}(),
-		func() *types.TaskMessage {
-			m := newMessage("m3", "task-1", "user", "second")
-			m.ThreadID = "src-thread"
-			m.CreatedAt = baseTime.Add(2 * time.Second)
-			return m
-		}(),
-	}
-	for _, m := range msgs {
-		if err := s.CreateTaskMessage(m); err != nil {
-			t.Fatalf("create message: %v", err)
+	for _, th := range got {
+		if th.ID == "th-3" {
+			t.Errorf("the comparison matched a checkpoint one second away")
 		}
-	}
-
-	// Copy messages up to and including m2
-	if _, err := s.CopyMessagesToThread("src-thread", "tgt-thread", "m2"); err != nil {
-		t.Fatalf("copy messages: %v", err)
-	}
-
-	// Target should have 2 messages (m1 and m2 content, new IDs)
-	tgtMsgs, err := s.GetTaskMessages("task-1", "tgt-thread")
-	if err != nil {
-		t.Fatalf("get target messages: %v", err)
-	}
-	if len(tgtMsgs) != 2 {
-		t.Fatalf("expected 2 copied messages, got %d", len(tgtMsgs))
-	}
-	if tgtMsgs[0].Content != "first" || tgtMsgs[1].Content != "reply" {
-		t.Fatalf("unexpected copied content: %s, %s", tgtMsgs[0].Content, tgtMsgs[1].Content)
-	}
-	// IDs should be different (new UUIDs)
-	if tgtMsgs[0].ID == "m1" || tgtMsgs[1].ID == "m2" {
-		t.Fatal("copied messages should have new IDs")
 	}
 }
 
@@ -431,6 +381,14 @@ func TestCopyMessagesToThread_PayloadFidelity(t *testing.T) {
 		byID[m.Content] = m
 	}
 
+	// A fork's rows are copies, not the parent's rows: the parent keeps its history, and one row cannot
+	// belong to two threads.
+	for _, m := range got {
+		if m.ID == m.Content {
+			t.Errorf("copied row kept its source id %q", m.ID)
+		}
+	}
+
 	if u := byID["u1"]; u.Attachments != atts {
 		t.Errorf("attachments lost: %q", u.Attachments)
 	}
@@ -474,63 +432,6 @@ func roleSeq(msgs []types.TaskMessage) string {
 		roles = append(roles, m.Role)
 	}
 	return strings.Join(roles, ",")
-}
-
-func TestThreadWithParentThreadID(t *testing.T) {
-	s := testStore(t)
-	proj := newProject("proj-1", "test", "/tmp/test")
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	task := newTask("task-1", "proj-1")
-	if err := s.CreateTask(task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	parent := newThread("parent-th", "task-1", "Main")
-	if err := s.CreateThread(parent); err != nil {
-		t.Fatalf("create parent thread: %v", err)
-	}
-
-	child := newThread("child-th", "task-1", "Fork #1")
-	child.ParentThreadID = "parent-th"
-	if err := s.CreateThread(child); err != nil {
-		t.Fatalf("create child thread: %v", err)
-	}
-
-	got, err := s.GetThread("child-th")
-	if err != nil {
-		t.Fatalf("get child thread: %v", err)
-	}
-	if got.ParentThreadID != "parent-th" {
-		t.Fatalf("unexpected parent_thread_id: %s", got.ParentThreadID)
-	}
-}
-
-func TestThreadWithGitBranch(t *testing.T) {
-	s := testStore(t)
-	proj := newProject("proj-1", "test", "/tmp/test")
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	task := newTask("task-1", "proj-1")
-	if err := s.CreateTask(task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	th := newThread("th-1", "task-1", "Fork #1")
-	th.GitBranch = "kanban/fork-branch"
-	if err := s.CreateThread(th); err != nil {
-		t.Fatalf("create thread: %v", err)
-	}
-
-	got, err := s.GetThread("th-1")
-	if err != nil {
-		t.Fatalf("get thread: %v", err)
-	}
-	if got.GitBranch != "kanban/fork-branch" {
-		t.Fatalf("unexpected git_branch: %s", got.GitBranch)
-	}
 }
 
 // TestCopyMessagesToThread_CutRowNotInSourceThread: the cutoff fallback reads through the handle the copy

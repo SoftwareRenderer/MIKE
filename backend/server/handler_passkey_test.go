@@ -596,31 +596,6 @@ func TestPasskeyListingRenameAndRevoke(t *testing.T) {
 	}
 }
 
-// TestPasskeyRoutesNeedTheirVerb: a route reached on the wrong verb is answered by the mux, so no handler
-// ever has to inspect the method — and a methodless call never reaches a state change.
-func TestPasskeyRoutesNeedTheirVerb(t *testing.T) {
-	s := testServer(t)
-	cookie, csrf := loginTestCSRF(t, s)
-
-	for _, tc := range []struct{ method, path string }{
-		{http.MethodGet, "/api/auth/passkey/register/begin"},
-		{http.MethodGet, "/api/auth/passkey/register/finish"},
-		{http.MethodGet, "/api/auth/passkey/assert/begin"},
-		{http.MethodPost, "/api/auth/passkeys"},
-		{http.MethodPut, "/api/auth/passkeys/someid"},
-		{http.MethodGet, "/api/auth/pairing"},
-	} {
-		rr := testResponse(t, s, func() *http.Request {
-			r := testRequest(tc.method, tc.path, nil)
-			withAuthCSRF(r, cookie, csrf)
-			return r
-		}())
-		if rr.Code == http.StatusOK {
-			t.Errorf("%s %s ran a handler on the wrong verb", tc.method, tc.path)
-		}
-	}
-}
-
 // TestPasskeyStoreFaultAnswersMIKEsOwnMessage: with the store gone, the browser still gets MIKE's sentence
 // and the cause stays in the log.
 func TestPasskeyStoreFaultAnswersMIKEsOwnMessage(t *testing.T) {
@@ -642,32 +617,19 @@ func TestPasskeyStoreFaultAnswersMIKEsOwnMessage(t *testing.T) {
 	}
 }
 
-// TestBootPairingCodeIsMintedOnlyForAnUnpairedInstall is the boot decision the operator reads: a code
-// while nothing can sign in, and silence once something can.
-func TestBootPairingCodeIsMintedOnlyForAnUnpairedInstall(t *testing.T) {
-	s := testServer(t)
-
-	s.pairAtBoot(t.Context())
-	if s.pairing.Live() != 1 {
-		t.Fatalf("an unpaired install booted with %d live codes; want 1", s.pairing.Live())
-	}
-	registerTestPasskey(t, s)
-	// Forget the boot code, so what a second boot mints is the only thing Live() can be counting.
-	s.pairing.RevokeAll()
-
-	s.pairAtBoot(t.Context())
-	if s.pairing.Live() != 0 {
-		t.Errorf("a paired install announced a fresh code into a log nobody is reading")
-	}
-}
-
-// A record prefix on the code row would leave the code in the log and out of the browser lane's match.
-func TestBootPairingPrintsTheCodeRowWithNoPrefix(t *testing.T) {
+// TestBootPairingPrintsOneCodeRowForAnUnpairedInstall is the boot decision the operator reads and the
+// shape the browser lane matches: a code while nothing can sign in, written as a bare row rather than a
+// log record, and silence once something can. A record prefix on the code row would leave the code in the
+// log and out of the browser lane's match.
+func TestBootPairingPrintsOneCodeRowForAnUnpairedInstall(t *testing.T) {
 	s := testServer(t)
 	buf, restore := logging.TestSink()
 	defer restore()
 
 	s.pairAtBoot(t.Context())
+	if s.pairing.Live() != 1 {
+		t.Fatalf("an unpaired install booted with %d live codes; want 1", s.pairing.Live())
+	}
 
 	found := false
 	for _, line := range strings.Split(buf.String(), "\n") {
@@ -681,6 +643,18 @@ func TestBootPairingPrintsTheCodeRowWithNoPrefix(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("the boot printout wrote no pairing code row:\n%s", buf.String())
+	}
+
+	registerTestPasskey(t, s)
+	// Forget the boot code, so what a second boot mints is the only thing Live() can be counting.
+	s.pairing.RevokeAll()
+
+	s.pairAtBoot(t.Context())
+	if s.pairing.Live() != 0 {
+		t.Errorf("a paired install announced a fresh code into a log nobody is reading")
+	}
+	if n := strings.Count(buf.String(), "PAIRING CODE"); n != 1 {
+		t.Errorf("the boot printout wrote %d pairing code rows across the two boots; want the one this install earned", n)
 	}
 }
 

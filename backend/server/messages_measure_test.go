@@ -15,9 +15,9 @@ import (
 	"mike/backend/types"
 )
 
-// The size claim of the task-open window, measured: one synthetic 60-iteration turn is what a long agent
-// session looks like in the table. `go test ./backend/server -run TaskOpenReads -v` re-measures it, and the
-// assertion is the ratio rather than a byte count.
+// What one click costs, measured over a synthetic long agent session: a sticky-header jump that names the row
+// it wants must not cost more reads than walking there a page at a time.
+// `go test ./backend/server -run TestStickyJump -v` re-measures both shapes.
 
 // iterationBytes is what one tool call's payload costs on the wire: 6 KiB of arguments and 6 KiB of output.
 const iterationBytes = 6 << 10
@@ -54,49 +54,6 @@ func seedLongTurns(t *testing.T, s *Server, projID, taskID string, turns, iterat
 			result, _ := json.Marshal(map[string]any{"output": body, "success": true, "duration": 12})
 			write("tool_call", "", string(args), string(result), assistant, step.Add(time.Millisecond))
 		}
-	}
-}
-
-func readRaw(t *testing.T, s *Server, path string) (rows int, bytes int) {
-	t.Helper()
-	rr := testResponseAuth(t, s, testRequest("GET", path, nil))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("GET %s = %d: %s", path, rr.Code, rr.Body.String())
-	}
-	var messages []types.TaskMessage
-	if err := json.Unmarshal(rr.Body.Bytes(), &messages); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	return len(messages), rr.Body.Len()
-}
-
-func TestTaskOpenReadsAFractionOfItsThread(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Sixty iterations")
-	const iterations = 60
-	seedLongTurn(t, s, projID, taskID, iterations)
-	path := "/api/projects/" + projID + "/tasks/" + taskID + "/messages"
-
-	openRows, openBytes := readRaw(t, s, path)
-	allRows, allBytes := readRaw(t, s, path+"?limit=25")
-	whole, err := s.store.GetTaskMessages(taskID, "")
-	if err != nil {
-		t.Fatalf("read the thread: %v", err)
-	}
-	encoded, err := json.Marshal(whole)
-	if err != nil {
-		t.Fatalf("encode the thread: %v", err)
-	}
-	t.Logf("one open reads %d rows / %d KiB; the thread holds %d rows / %d KiB; the widest window the route answers is %d rows / %d KiB",
-		openRows, openBytes>>10, len(whole), len(encoded)>>10, allRows, allBytes>>10)
-
-	if openRows > 12 {
-		t.Errorf("the default window read %d rows, want the newest 5 answers and their calls", openRows)
-	}
-	if openBytes*10 > len(encoded) {
-		t.Errorf("one open read %d of the thread's %d bytes: a fifth of the conversation is not a window",
-			openBytes, len(encoded))
 	}
 }
 

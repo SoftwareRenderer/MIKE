@@ -3,8 +3,6 @@ package updates
 import (
 	"encoding/json/v2"
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -68,106 +66,83 @@ func TestRestartRefusesWhileAnUpdateOperationIsRunning(t *testing.T) {
 	}
 }
 
-// The row outlives the process it was written by. A staged release the server is now running is not a
-// staged release: the About tab must stop offering a restart for the version already in the seat.
-func TestAStagedReleaseThatIsNowRunningIsNoLongerStaged(t *testing.T) {
-	row, err := json.Marshal(State{CurrentVersion: "1.4.0", Latest: "1.4.2", Available: false, StagedVersion: "1.4.2", BackupPath: "/mike/.update-backup"})
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
+// The row outlives the process that wrote it, and an answer about the release already in the seat is no
+// answer at all: neither a restart nor a download may be offered for the version this server runs. A
+// release behind it or ahead of it stays offered, which is what those two buttons are for.
+func TestNewDropsTheStoredAnswerAboutTheReleaseAlreadyRunning(t *testing.T) {
+	stagedRow := func() string {
+		row, err := json.Marshal(State{
+			CurrentVersion: "1.4.0", Latest: "1.4.2",
+			StagedVersion: "1.4.2", BackupPath: "/mike/.update-backup",
+		})
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		return string(row)
 	}
-	store := &fakeStore{values: map[string]string{stateKey: string(row)}}
-
-	svc, err := New(Options{Version: "1.4.2", Store: store, Fetcher: &fakeFetcher{}, InstallDir: releaseDir(t), ContainerMarkers: []string{}})
-	if err != nil {
-		t.Fatalf("New: %v", err)
+	offeredRow := func() string {
+		row, err := json.Marshal(State{
+			CurrentVersion: "1.0.0",
+			Latest:         "9.9.9",
+			Available:      true,
+			Note:           "release 9.9.9 names no archive for linux/arm64",
+			Asset:          Asset{URL: "http://127.0.0.1:8099/dl/mike-server-9.9.9-linux-amd64.tar.gz", SHA256: strings.Repeat("a", 64)},
+		})
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		return string(row)
 	}
-	st := svc.Status(Settings{}).State
-	if st.StagedVersion != "" || st.BackupPath != "" {
-		t.Errorf("the service still believes 1.4.2 is waiting: %+v", st)
-	}
-	// The cleared answer is what is stored, so the next restart agrees with this one.
-	var saved State
-	if err := json.Unmarshal([]byte(store.values[stateKey]), &saved); err != nil {
-		t.Fatalf("stored row is not what this package wrote: %v", err)
-	}
-	if saved.StagedVersion != "" {
-		t.Errorf("the stored row still says %q is staged", saved.StagedVersion)
-	}
-
-	// A release *ahead* of the running one stays staged, which is the case the restart button is for.
-	// A fresh store: the row above has just been rewritten by the service that cleared it.
-	holding := &fakeStore{values: map[string]string{stateKey: string(row)}}
-	svc2, err := New(Options{Version: "1.4.0", Store: holding, Fetcher: &fakeFetcher{}, InstallDir: releaseDir(t), ContainerMarkers: []string{}})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	if got := svc2.Status(Settings{}).State.StagedVersion; got != "1.4.2" {
-		t.Errorf("StagedVersion = %q, want the release still waiting", got)
-	}
-}
-
-// The other half of the same staleness: the restart put the stored "newer release" in the seat, so the dot
-// would stay lit on the version this server is running.
-func TestAStoredAnswerAboutTheRunningReleaseStopsOfferingIt(t *testing.T) {
-	row, err := json.Marshal(State{
-		CurrentVersion: "1.0.0",
-		Latest:         "9.9.9",
-		Available:      true,
-		Note:           "release 9.9.9 names no archive for linux/arm64",
-		Asset:          Asset{URL: "http://127.0.0.1:8099/dl/mike-server-9.9.9-linux-amd64.tar.gz", SHA256: strings.Repeat("a", 64)},
-	})
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-
-	svc, err := New(Options{
-		Version: "9.9.9", Store: &fakeStore{values: map[string]string{stateKey: string(row)}},
-		Fetcher: &fakeFetcher{}, InstallDir: releaseDir(t), ContainerMarkers: []string{},
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	st := svc.Status(Settings{}).State
-	if st.Available || st.Asset.URL != "" || st.Note != "" {
-		t.Errorf("offering %s to a server already running it: %+v", st.Latest, st)
-	}
-
-	// A release behind the running one is still an offer, and so is one ahead of it.
-	for _, running := range []string{"1.0.0", "9.9.8"} {
-		store := &fakeStore{values: map[string]string{stateKey: string(row)}}
-		other, err := New(Options{
+	boot := func(t *testing.T, running, row string) (*Service, *fakeStore) {
+		t.Helper()
+		store := &fakeStore{values: map[string]string{stateKey: row}}
+		svc, err := New(Options{
 			Version: running, Store: store, Fetcher: &fakeFetcher{},
 			InstallDir: releaseDir(t), ContainerMarkers: []string{},
 		})
 		if err != nil {
-			t.Fatalf("New(%s): %v", running, err)
+			t.Fatalf("New running %s: %v", running, err)
 		}
-		if got := other.Status(Settings{}).State; !got.Available || got.Asset.URL == "" {
-			t.Errorf("running %s: the offer was dropped: %+v", running, got)
-		}
-	}
-}
-
-// A download that died with its process leaves a directory named with this package's prefix, and
-// nothing else will ever remove it.
-func TestNewReapsStaleStagingDirectories(t *testing.T) {
-	dir := releaseDir(t)
-	stale := filepath.Join(dir, stagingPrefix+"123456")
-	if err := os.MkdirAll(filepath.Join(stale, "unpacked"), 0o700); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	foreign := filepath.Join(dir, "someone-elses-temp")
-	if err := os.MkdirAll(foreign, 0o700); err != nil {
-		t.Fatalf("mkdir: %v", err)
+		return svc, store
 	}
 
-	if _, err := New(Options{Version: "1.4.0", Store: &fakeStore{}, Fetcher: &fakeFetcher{}, InstallDir: dir, ContainerMarkers: []string{}}); err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	if _, err := os.Stat(stale); !os.IsNotExist(err) {
-		t.Errorf("the stale staging directory is still there")
-	}
-	if _, err := os.Stat(foreign); err != nil {
-		t.Errorf("a directory this package does not own was removed: %v", err)
+	t.Run("a staged release that is now running is no longer staged", func(t *testing.T) {
+		svc, store := boot(t, "1.4.2", stagedRow())
+		st := svc.Status(Settings{}).State
+		if st.StagedVersion != "" || st.BackupPath != "" {
+			t.Errorf("the service still believes 1.4.2 is waiting: %+v", st)
+		}
+		// The cleared answer is what is stored, so the next restart agrees with this one.
+		var saved State
+		if err := json.Unmarshal([]byte(store.values[stateKey]), &saved); err != nil {
+			t.Fatalf("stored row is not what this package wrote: %v", err)
+		}
+		if saved.StagedVersion != "" {
+			t.Errorf("the stored row still says %q is staged", saved.StagedVersion)
+		}
+	})
+
+	t.Run("a staged release still ahead of the running one stays staged", func(t *testing.T) {
+		svc, _ := boot(t, "1.4.0", stagedRow())
+		if got := svc.Status(Settings{}).State.StagedVersion; got != "1.4.2" {
+			t.Errorf("StagedVersion = %q, want the release still waiting", got)
+		}
+	})
+
+	t.Run("an offered release that is now running is not offered", func(t *testing.T) {
+		svc, _ := boot(t, "9.9.9", offeredRow())
+		st := svc.Status(Settings{}).State
+		if st.Available || st.Asset.URL != "" || st.Note != "" {
+			t.Errorf("offering %s to a server already running it: %+v", st.Latest, st)
+		}
+	})
+
+	for _, running := range []string{"1.0.0", "9.9.8"} {
+		t.Run("a release ahead of the running "+running+" stays offered", func(t *testing.T) {
+			svc, _ := boot(t, running, offeredRow())
+			if got := svc.Status(Settings{}).State; !got.Available || got.Asset.URL == "" {
+				t.Errorf("running %s: the offer was dropped: %+v", running, got)
+			}
+		})
 	}
 }

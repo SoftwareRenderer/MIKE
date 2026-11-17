@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -104,7 +105,8 @@ func TestClearDoneRemovesEveryBranchAndRegistration(t *testing.T) {
 }
 
 // A fork leaves the worktree on thread/<id> and stores that branch in task.branch, so the delete hits
-// a branch the registration still holds.
+// a branch the registration still holds. The inactive thread is the other half: the sweep walks every
+// thread row the task owns, not just the one on screen, or a fork nobody is looking at keeps its branch.
 func TestTaskDeleteRemovesForkThreadBranch(t *testing.T) {
 	s := testServer(t)
 	projID, projDir := createTestProjectWithPath(t, s)
@@ -116,6 +118,10 @@ func TestTaskDeleteRemovesForkThreadBranch(t *testing.T) {
 	wt := taskWorktreeDir(t, projDir, taskID)
 	testgit.Git(t, wt, "checkout", "-b", threadBranch)
 
+	const dormantID = "1f0thread1"
+	dormantBranch := "thread/" + dormantID
+	testgit.Git(t, projDir, "branch", dormantBranch)
+
 	task, err := s.store.GetTaskByID(taskID)
 	if err != nil {
 		t.Fatalf("get task: %v", err)
@@ -124,11 +130,13 @@ func TestTaskDeleteRemovesForkThreadBranch(t *testing.T) {
 	if err := s.store.UpdateTask(task); err != nil {
 		t.Fatalf("record the fork branch on the task: %v", err)
 	}
-	if err := s.store.CreateThread(&types.TaskThread{
-		ID: threadID, TaskID: taskID, Name: "fork", IsActive: true,
-		GitBranch: threadBranch, CreatedAt: time.Now().UTC(),
-	}); err != nil {
-		t.Fatalf("create thread row: %v", err)
+	for _, th := range []*types.TaskThread{
+		{ID: threadID, TaskID: taskID, Name: "fork", IsActive: true, GitBranch: threadBranch, CreatedAt: time.Now().UTC()},
+		{ID: dormantID, TaskID: taskID, Name: "fork nobody opened", IsActive: false, GitBranch: dormantBranch, CreatedAt: time.Now().UTC()},
+	} {
+		if err := s.store.CreateThread(th); err != nil {
+			t.Fatalf("create thread row: %v", err)
+		}
 	}
 
 	req := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+taskID, nil)
@@ -141,6 +149,34 @@ func TestTaskDeleteRemovesForkThreadBranch(t *testing.T) {
 	}
 	if left := repoBranchNames(t, projDir, "task/"); len(left) != 0 {
 		t.Errorf("task branches left after deleting the task: %v", left)
+	}
+	if regs := repoWorktreeRegistrations(t, projDir); regs != 0 {
+		t.Errorf("%d worktree registration(s) left after deleting the task", regs)
+	}
+}
+
+// The branch sweep that runs with a delete names exactly the refs no remaining row holds. The deleted
+// task's own branch and a task/* left by a run that died both go; a branch a live task's row still
+// names stays, which is the half a sweep keyed on the prefix alone would get wrong. The registration
+// goes with the directory, or git would refuse the branch as "used by worktree at …".
+func TestTaskDeletePrunesTheBranchesNoRowHolds(t *testing.T) {
+	s := testServer(t)
+	projID, projDir := createTestProjectWithPath(t, s)
+	deleting := createTestTask(t, s, projID, "sweep-deleted")
+	keeping := createTestTask(t, s, projID, "sweep-kept")
+	giveTaskWorktree(t, s, projID, deleting)
+
+	testgit.Git(t, projDir, "branch", "task/orphan-abc-def-ghi") // no row names it
+	testgit.Git(t, projDir, "branch", "task/"+keeping)           // this row does
+
+	req := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+deleting, nil)
+	if rr := testResponseAuth(t, s, req); rr.Code != http.StatusNoContent {
+		t.Fatalf("delete task: %d %s", rr.Code, rr.Body.String())
+	}
+
+	if left := repoBranchNames(t, projDir, "task/"); !slices.Equal(left, []string{"task/" + keeping}) {
+		t.Errorf("task branches left = %v, want only task/%s: the deleted task's own branch and the "+
+			"orphan should both be gone, and a live task's branch should stay", left, keeping)
 	}
 	if regs := repoWorktreeRegistrations(t, projDir); regs != 0 {
 		t.Errorf("%d worktree registration(s) left after deleting the task", regs)

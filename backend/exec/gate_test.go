@@ -194,79 +194,73 @@ func TestAcquireRelease_CancelledEntrySkipped(t *testing.T) {
 	g.Release("http://p")
 }
 
-func TestEstimateWait_NoHistory(t *testing.T) {
+// TestEstimateWait covers the queue-time figure the browser shows. With no history it falls back to the
+// 30s-per-position default; once the gate has watched requests hold slots it prices from what it saw, which
+// is how a fast provider stops being advertised as a half-minute wait.
+func TestEstimateWait(t *testing.T) {
 	t.Parallel()
-	g := NewConcurrencyGate()
-	ctx := context.Background()
 
-	// Hold the slot
-	g.Acquire(ctx, "http://p", 1, 0, nil)
+	t.Run("no history uses the default", func(t *testing.T) {
+		g := NewConcurrencyGate()
+		ctx := context.Background()
 
-	// Start a waiter (so position > 0); the callback exposes its entry.
-	done := make(chan struct{})
-	enqueued := make(chan *queueEntry, 1)
-	go func() {
-		g.Acquire(ctx, "http://p", 1, 0, func(e *queueEntry) { enqueued <- e })
-		close(done)
-	}()
-	var waiterEntry *queueEntry
-	select {
-	case waiterEntry = <-enqueued:
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for waiter to enqueue")
-	}
+		g.Acquire(ctx, "http://p", 1, 0, nil)
+		enqueued, done := queueWaiterAt(g, "http://p")
+		waiterEntry := waitEntry(t, enqueued)
 
-	// With no completion history, should use default estimate (30s per position)
-	est := g.EstimateWait("http://p", waiterEntry)
-	if est != 30 {
-		t.Fatalf("expected default estimate 30, got %d", est)
-	}
+		est := g.EstimateWait("http://p", waiterEntry)
+		if est != 30 {
+			t.Fatalf("expected default estimate 30, got %d", est)
+		}
 
-	g.Release("http://p")
-	<-done
-	g.Release("http://p")
+		g.Release("http://p")
+		<-done
+		g.Release("http://p")
+	})
+
+	t.Run("observed slot times replace the default", func(t *testing.T) {
+		g := NewConcurrencyGate()
+		ctx := context.Background()
+
+		// Build some history: acquire, hold for 100ms, release (repeat 3x)
+		for range 3 {
+			g.Acquire(ctx, "http://p", 5, 0, nil)
+			time.Sleep(100 * time.Millisecond)
+			g.Release("http://p")
+		}
+		for range 2 {
+			g.Acquire(ctx, "http://p", 2, 0, nil)
+		}
+
+		enqueued, done := queueWaiterAt(g, "http://p")
+		waiterEntry := waitEntry(t, enqueued)
+
+		// Position is 1 and an observed slot lasted ~100ms, so the estimate is nowhere near
+		// the 30s a provider with no history is priced at.
+		est := g.EstimateWait("http://p", waiterEntry)
+		if est < 0 || est >= 30 {
+			t.Fatalf("estimate = %d, want a non-negative figure under the 30s default", est)
+		}
+
+		g.Release("http://p")
+		g.Release("http://p")
+		<-done
+		g.Release("http://p")
+	})
 }
 
-func TestEstimateWait_WithHistory(t *testing.T) {
-	t.Parallel()
-	g := NewConcurrencyGate()
-	ctx := context.Background()
-
-	// Build some history: acquire, hold for 100ms, release (repeat 3x)
-	for range 3 {
-		g.Acquire(ctx, "http://p", 5, 0, nil)
-		time.Sleep(100 * time.Millisecond)
-		g.Release("http://p")
-	}
-
-	// Now hold all slots and enqueue a waiter
-	for range 2 {
-		g.Acquire(ctx, "http://p", 2, 0, nil)
-	}
-
-	done := make(chan struct{})
+// queueWaiterAt starts one blocked waiter on a provider whose slots are all held and hands back the
+// channel its queue entry arrives on plus the channel it announces itself on once served.
+func queueWaiterAt(g *ConcurrencyGate, url string) (chan *queueEntry, chan struct{}) {
 	enqueued := make(chan *queueEntry, 1)
+	done := make(chan struct{})
 	go func() {
-		g.Acquire(ctx, "http://p", 2, 0, func(e *queueEntry) { enqueued <- e })
+		if _, err := g.Acquire(context.Background(), url, 1, 0, func(e *queueEntry) { enqueued <- e }); err != nil {
+			return
+		}
 		close(done)
 	}()
-	var waiterEntry *queueEntry
-	select {
-	case waiterEntry = <-enqueued:
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for waiter to enqueue")
-	}
-
-	// Position is 1, avg slot time ~100ms → estimate ~0s (rounds down)
-	est := g.EstimateWait("http://p", waiterEntry)
-	if est < 0 {
-		t.Fatalf("expected non-negative estimate, got %d", est)
-	}
-
-	g.Release("http://p")
-	g.Release("http://p")
-	<-done
-	g.Release("http://p")
+	return enqueued, done
 }
 
 func TestAcquireRelease_MultipleWaitersPositions(t *testing.T) {
@@ -741,68 +735,25 @@ func TestAcquireRelease_CancelledAfterServeReturnsSlot(t *testing.T) {
 	}
 }
 
-// TestAcquireRelease_CancelDuringHandoffDoesNotWedge hammers the window where a
-// queued waiter is cancelled exactly as Release hands it a slot. Neither side
-// may block: a blocked handoff wedges the releasing executor goroutine (that
-// task never finishes and never frees its slot) and the cancelled one.
-//
-// Which of the two ready select cases the runtime picks is not controllable, so
-// this is a race hammer rather than a deterministic repro (the deterministic one
-// is TestAcquireRelease_CancelledAfterServeReturnsSlot above). Pre-fix it wedged
-// about once in every hundred cycles, with both goroutines stuck for good.
-func TestAcquireRelease_CancelDuringHandoffDoesNotWedge(t *testing.T) {
-	t.Parallel()
-	const url = "http://handoff-race:8080/v1"
-	for i := 0; i < 60; i++ {
-		g := NewConcurrencyGate()
-		ctx, cancel := context.WithCancel(context.Background())
-		if _, err := g.Acquire(ctx, url, 1, 0, nil); err != nil {
-			t.Fatalf("iter %d: holder acquire: %v", i, err)
-		}
-
-		enqueued := make(chan struct{}, 1)
-		waiterCtx, waitCancel := context.WithCancel(context.Background())
-		result := make(chan error, 1)
-		go func() {
-			_, err := g.Acquire(waiterCtx, url, 1, 0, func(*queueEntry) { enqueued <- struct{}{} })
-			result <- err
-		}()
-		<-enqueued
-
-		releaseDone := make(chan struct{})
-		go func() { g.Release(url); close(releaseDone) }()
-		time.Sleep(time.Duration(i%5) * time.Millisecond) // land the cancel in the handoff
-		waitCancel()
-
-		select {
-		case <-result:
-		case <-time.After(5 * time.Second):
-			t.Fatalf("iter %d: cancelled waiter wedged in the handoff", i)
-		}
-		select {
-		case <-releaseDone:
-		case <-time.After(5 * time.Second):
-			t.Fatalf("iter %d: Release wedged handing off to a cancelled waiter", i)
-		}
-		cancel()
-	}
-}
-
-// TestConcurrencyGate_CapacitySurvivesCancelChurn is the reported symptom
-// written down: after many queued tasks are cancelled (stopped or re-pointed)
-// while a provider is saturated, a provider configured for concurrency 3 must
-// still be able to run 3 requests at once. Cancelling a waiter may never
-// shrink a provider's capacity.
-func TestConcurrencyGate_CapacitySurvivesCancelChurn(t *testing.T) {
+// TestConcurrencyGate_CancellationNeverWedgesOrShrinksCapacity hammers the window where a queued waiter is
+// cancelled in the same instant Release hands it a slot. Two permanent faults live there. The handoff may
+// block — which wedges both the releasing executor goroutine (that task never finishes and never frees its
+// slot) and the cancelled waiter — and the slot Release pre-counted for the waiter may never come back, so
+// the provider loses capacity one cancellation at a time until the server restarts: after enough cancelled
+// waits a provider configured for 3 runs one request at a time. Which of the two ready select cases the
+// runtime picks is not controllable, so this is a race hammer rather than a deterministic repro (the
+// deterministic one is TestAcquireRelease_CancelledAfterServeReturnsSlot above); pre-fix the wedge happened
+// about once in every hundred cycles.
+func TestConcurrencyGate_CancellationNeverWedgesOrShrinksCapacity(t *testing.T) {
 	t.Parallel()
 	const url = "http://churn:8080/v1"
 	g := NewConcurrencyGate()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Churn: one slot held, one waiter queued, the slot handed over and the
-	// waiter cancelled in the same instant. Every cycle must end with the
-	// provider holding no slots.
+	// One slot held, one waiter queued, the slot handed over and the waiter
+	// cancelled in the same instant. Every cycle must end with no goroutine
+	// waiting and the provider holding no slots.
 	for cycle := 0; cycle < 60; cycle++ {
 		if _, err := g.Acquire(ctx, url, 1, 0, nil); err != nil {
 			t.Fatalf("cycle %d: holder acquire: %v", cycle, err)

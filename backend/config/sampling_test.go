@@ -28,8 +28,10 @@ func samplingStore(t *testing.T, sampling *types.ModelSampling) (*ConfigStore, e
 	return cs, cs.UpdateConfig(cfg)
 }
 
-// TestSamplerBounds_EdgeAcceptedJustOutsideRefused: the edge of a range is saved, and a value one
-// step outside it is refused naming the field.
+// TestSamplerBounds_EdgeAcceptedJustOutsideRefused: the edge of a range is saved, a value one step
+// outside it is refused naming the provider, the model and the field, and a field nobody typed is never
+// a refusal — an absent object and an all-nil one both mean "send nothing", which is every model row's
+// default.
 func TestSamplerBounds_EdgeAcceptedJustOutsideRefused(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -37,6 +39,7 @@ func TestSamplerBounds_EdgeAcceptedJustOutsideRefused(t *testing.T) {
 		ok       []*types.ModelSampling
 		rejected []*types.ModelSampling
 	}{
+		{"(nothing typed)", []*types.ModelSampling{nil, {}}, nil},
 		{"temperature",
 			[]*types.ModelSampling{{Temperature: floatPtr(0)}, {Temperature: floatPtr(2)}},
 			[]*types.ModelSampling{{Temperature: floatPtr(-0.01)}, {Temperature: floatPtr(2.01)}, {Temperature: floatPtr(900)}}},
@@ -89,6 +92,9 @@ func TestSamplerBounds_EdgeAcceptedJustOutsideRefused(t *testing.T) {
 
 // samplingValues renders the overrides for a failure message.
 func samplingValues(s *types.ModelSampling) string {
+	if s == nil {
+		return "(no sampling object)"
+	}
 	var parts []string
 	for _, b := range samplerFloatBounds {
 		if v := b.pick(s); v != nil {
@@ -101,18 +107,6 @@ func samplingValues(s *types.ModelSampling) string {
 		}
 	}
 	return strings.Join(parts, ",")
-}
-
-// TestSamplerFieldNeverTypedIsNeverRefused: an absent object and an all-nil one both mean "send
-// nothing", which is every model row's default, so neither may be a refusal.
-func TestSamplerFieldNeverTypedIsNeverRefused(t *testing.T) {
-	t.Parallel()
-	if _, err := samplingStore(t, nil); err != nil {
-		t.Errorf("no sampling object refused: %v", err)
-	}
-	if _, err := samplingStore(t, &types.ModelSampling{}); err != nil {
-		t.Errorf("an all-nil sampling object refused: %v", err)
-	}
 }
 
 // TestRefusedSamplerWritesNothing: a refusal refuses the whole save — the stored row keeps its

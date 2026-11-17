@@ -41,20 +41,13 @@ func TestAPreReleaseFileSaysWhatItIsAndIsStamped(t *testing.T) {
 	}
 }
 
-// A fresh database reads 0 in PRAGMA user_version, which is outside the pre-release range, so the same code
-// that names a pre-release file says nothing here.
-func TestAFreshFileIsNotReportedAsOlderThanItIs(t *testing.T) {
+// A database this build created is stamped, and it is nothing to warn about: it reads 0 in
+// PRAGMA user_version, which is outside the pre-release range, so the same code that names a pre-release
+// file says nothing here.
+func TestFreshDatabaseCarriesTheSchemaMarker(t *testing.T) {
 	logs, restore := logging.TestSink()
 	defer restore()
-	openStore(t, filepath.Join(t.TempDir(), "fresh.db"))
-
-	if out := logs.String(); strings.Contains(out, "predates") {
-		t.Errorf("a database this build created was reported as predating the baseline:\n%s", out)
-	}
-}
-
-func TestFreshDatabaseCarriesTheSchemaMarker(t *testing.T) {
-	s := testStore(t)
+	s := openStore(t, filepath.Join(t.TempDir(), "fresh.db"))
 
 	value, found, err := s.metaValue(schemaVersionKey)
 	if err != nil {
@@ -68,12 +61,11 @@ func TestFreshDatabaseCarriesTheSchemaMarker(t *testing.T) {
 	}
 
 	// A fresh file must still read 0 here, so it cannot be confused with a pre-release file.
-	var userVersion int
-	if err := s.db.QueryRow(`PRAGMA user_version`).Scan(&userVersion); err != nil {
-		t.Fatalf("read user_version: %v", err)
+	if stamp, err := s.userVersion(); err != nil || stamp != 0 {
+		t.Errorf("user_version = %d on a fresh database; this build writes no stamp there (err %v)", stamp, err)
 	}
-	if userVersion != 0 {
-		t.Errorf("user_version = %d on a fresh database; this build writes no stamp there", userVersion)
+	if out := logs.String(); strings.Contains(out, "predates") {
+		t.Errorf("a database this build created was reported as older than it is:\n%s", out)
 	}
 }
 

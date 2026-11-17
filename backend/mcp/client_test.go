@@ -173,9 +173,11 @@ func asError(err error, target **Error) bool {
 	return ok
 }
 
-// TestConnectSpeaksThePinnedEra is the whole of D2 on the client side: the session must come back
-// having negotiated Era, and a server that answers a different version must be refused.
-func TestConnectNegotiatesThePinnedEra(t *testing.T) {
+// TestSessionListsAndCallsOverEitherResponseShape is the happy path over both shapes a conforming
+// Streamable-HTTP server may answer with: the listing arrives with the server's own label and schema
+// (the schema is what the provider is handed), and a call comes back as text. The era pin itself is
+// era_test.go's, and the offer's naming is registry_test.go's.
+func TestSessionListsAndCallsOverEitherResponseShape(t *testing.T) {
 	for _, name := range []string{"event-stream", "json"} {
 		t.Run(name, func(t *testing.T) {
 			fake := fakeMCPServer(t, fakeOptions{
@@ -325,24 +327,41 @@ func TestNotAnMCPServer(t *testing.T) {
 	}
 }
 
-// A server answering with some other request's id leaves the client waiting for a response that will never
-// arrive. Only the deadline ends it: an http.Client timeout stops a request, not a wait.
-func TestServerThatAnswersTheWrongIdIsWaitedOut(t *testing.T) {
+// TestTheWaitIsBoundedOnlyByAContext: a server answering with some other request's id leaves the client
+// waiting for a response that will never arrive, and only a context ends that wait — an http.Client
+// timeout stops a request, not a wait. The row's own timeout is one such context; with none, the caller
+// is the only bound, which is what a long-running remote tool needs.
+func TestTheWaitIsBoundedOnlyByAContext(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(wrongIDHandler))
-	t.Cleanup(ts.Close)
+	defer ts.Close()
 
-	start := time.Now()
-	_, err := connect(context.Background(), registered(ts.URL, 1), testID)
-	took := time.Since(start)
-	if err == nil {
-		t.Fatal("a server that answers nothing we asked connected")
-	}
-	if kind := kindOf(t, err); kind != FailureTimeout {
-		t.Errorf("kind = %q, want %q (%v)", kind, FailureTimeout, err)
-	}
-	if took > 4*time.Second {
-		t.Errorf("waited %v past a 1s deadline — the deadline is the only bound on this wait", took)
-	}
+	t.Run("the row's timeout ends it", func(t *testing.T) {
+		start := time.Now()
+		_, err := connect(context.Background(), registered(ts.URL, 1), testID)
+		took := time.Since(start)
+		if err == nil {
+			t.Fatal("a server that answers nothing we asked connected")
+		}
+		if kind := kindOf(t, err); kind != FailureTimeout {
+			t.Errorf("kind = %q, want %q (%v)", kind, FailureTimeout, err)
+		}
+		if took > 4*time.Second {
+			t.Errorf("waited %v past a 1s deadline — the deadline is the only bound on this wait", took)
+		}
+	})
+
+	t.Run("with no timeout the caller ends it", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go func() {
+			time.Sleep(300 * time.Millisecond)
+			cancel()
+		}()
+		_, err := connect(ctx, registered(ts.URL, 0), testID)
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("err = %v, want the caller's cancellation", err)
+		}
+	})
 }
 
 // wrongIDHandler answers every request with a response to no request MIKE sent, which leaves the client
@@ -350,25 +369,6 @@ func TestServerThatAnswersTheWrongIdIsWaitedOut(t *testing.T) {
 func wrongIDHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"Method not found"}}`)
-}
-
-// A timeout of 0 is no deadline of MIKE's: the wait ends when the caller gives up, and a caller that never
-// gives up is what a long-running remote tool needs. A deadline of our own would have reported a timeout
-// here instead of the caller's cancellation.
-func TestNoDeadlineWaitsForTheCaller(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(wrongIDHandler))
-	t.Cleanup(ts.Close)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() {
-		time.Sleep(300 * time.Millisecond)
-		cancel()
-	}()
-	_, err := connect(ctx, registered(ts.URL, 0), testID)
-	if !errors.Is(err, context.Canceled) {
-		t.Errorf("err = %v, want the caller's cancellation", err)
-	}
 }
 
 func pageHandler(body string) func(http.ResponseWriter, *http.Request) {

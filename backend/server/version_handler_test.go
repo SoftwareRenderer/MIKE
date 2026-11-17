@@ -37,12 +37,18 @@ func getVersion(t *testing.T, s *Server) (versionResponse, *httptest.ResponseRec
 	return got, rr
 }
 
-// The id the client compares against is the one the build wrote into the document it serves.
+// The id the client compares against is the one the build wrote into the document it serves, and the
+// comparison is worth no more than its cacheability: a cached answer is a browser that never notices a
+// new build. The route is not public, so an anonymous caller gets the middleware's answer.
 func TestVersionAnswersTheBuildIdentityStampedIntoDist(t *testing.T) {
 	assets := docAssets(`<head><meta name="app-build" content="0a1b2c3d4e5f"><title>Board</title></head>`)
+	s := versionAtStart(t, assets)
 
-	got, rr := getVersion(t, versionAtStart(t, assets))
+	if rr := testResponse(t, s, testRequest(http.MethodGet, "/api/version", nil)); rr.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous GET /api/version: got %d, want 401", rr.Code)
+	}
 
+	got, rr := getVersion(t, s)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("GET /api/version: got %d, want 200", rr.Code)
 	}
@@ -88,13 +94,4 @@ func TestVersionAnswersUnknownForEveryAssetTreeThatCannotBeNamed(t *testing.T) {
 			t.Errorf("assets: got %q, want nothing read past the limit", got.Assets)
 		}
 	})
-}
-
-func TestVersionIsSessionAuthed(t *testing.T) {
-	s := versionAtStart(t, docAssets(`<head><meta name="app-build" content="0a1b2c3d4e5f"></head>`))
-
-	rr := testResponse(t, s, testRequest(http.MethodGet, "/api/version", nil))
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("anonymous GET /api/version: got %d, want 401", rr.Code)
-	}
 }

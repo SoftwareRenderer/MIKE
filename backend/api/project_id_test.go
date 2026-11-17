@@ -35,9 +35,10 @@ func TestCreateProjectFromAnEscapedPathKeepsWorktreesInsideTheWorktreesDir(t *te
 	}
 
 	worktrees := filepath.Join(home, "worktrees")
-	wt := filepath.Join(worktrees, p.ID, "frost-amber-quartz")
-	if !strings.HasPrefix(wt, worktrees+string(filepath.Separator)) {
-		t.Errorf("a task's worktree would be %s, outside the worktrees dir %s (project id %q)", wt, worktrees, p.ID)
+	// The id is a path segment: every task's worktree is built under the worktrees dir from it, so an
+	// id carrying a separator or a ".." would put a task's checkout outside that dir.
+	if p.ID == "" || p.ID != filepath.Base(p.ID) || p.ID == ".." {
+		t.Errorf("project id %q is not one usable as a path segment under %s", p.ID, worktrees)
 	}
 	if p.Path != repo {
 		t.Errorf("stored path = %q, want the cleaned checkout %q", p.Path, repo)
