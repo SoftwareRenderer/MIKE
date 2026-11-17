@@ -158,12 +158,51 @@ describe('MultiSelectBar — the controls a selection earns', () => {
         click(container.querySelector('.bar-btn-clear')!);
         expect(onClear).toHaveBeenCalled();
 
-        click(container.querySelector('.bar-btn-delete')!);
+        const deleteBtn = container.querySelector('.bar-btn-delete')!;
+        expect(deleteBtn.textContent).toContain(t('board.multiSelect.deleteCount', { count: 2 }));
+        click(deleteBtn);
         expect(deletes.frames).toEqual([{
             taskIds: ['task-1', 'task-2'],
             titles: ['Task task-1', 'Task task-2'],
         }]);
         deletes.stop();
+    });
+});
+
+describe('MultiSelectBar — Start', () => {
+    it('asks first, naming the count and the selected titles, and starts nothing until the answer is yes', async () => {
+        const started = recorder('multi-select-start');
+        vi.mocked(dialogStore.showConfirm).mockResolvedValue(false);
+        const { container } = renderBar([makeTask('a', 'backlog'), makeTask('b', 'backlog')]);
+        multiSelect.selectAll(['a', 'b']);
+        await waitFor(() => expect(container.querySelector('.bar-btn-start')).toBeTruthy());
+
+        click(container.querySelector('.bar-btn-start')!);
+
+        await waitFor(() => expect(dialogStore.showConfirm).toHaveBeenCalled());
+        expect(vi.mocked(dialogStore.showConfirm).mock.calls[0][0]).toEqual({
+            title: t('board.multiSelect.startTitle'),
+            message: t('board.multiSelect.startMessage', { count: 2 }),
+            items: ['Task a', 'Task b'],
+            confirmText: t('board.confirm.start'),
+            cancelText: t('app.cancel'),
+            variant: 'default',
+        });
+        expect(started.frames).toEqual([]);
+        started.stop();
+    });
+
+    it('dispatches the confirmed start with the selection', async () => {
+        const started = recorder('multi-select-start');
+        const { container } = renderBar([makeTask('a', 'backlog'), makeTask('b', 'backlog')]);
+        multiSelect.selectAll(['a', 'b']);
+        await waitFor(() => expect(container.querySelector('.bar-btn-start')).toBeTruthy());
+
+        click(container.querySelector('.bar-btn-start')!);
+
+        await waitFor(() => expect(started.frames).toHaveLength(1));
+        expect(started.frames[0]).toEqual({ taskIds: ['a', 'b'] });
+        started.stop();
     });
 });
 

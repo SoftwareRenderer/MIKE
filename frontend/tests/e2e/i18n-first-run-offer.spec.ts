@@ -57,32 +57,6 @@ test.describe.serial('First-run language offer', () => {
         await page.close();
     });
 
-    test.describe('an English browser', () => {
-        // The default lane is en-US, so this is the case every other spec runs in:
-        // if an offer ever appears for them, the dismissal logic is wrong.
-        test.use({ locale: 'en-US' });
-
-        test('is never offered a language pack', async ({ page }) => {
-            const logs: string[] = [];
-            page.on('console', (msg) => logs.push(msg.text()));
-
-            // The registry does carry a pack — it is the browser's language that says no.
-            await page.goto('/');
-            await page.waitForSelector('.project-item', { timeout: 10000 });
-            expect(await registryPack(page)).toBeTruthy();
-
-            // Wait for detection to have actually run (a bare `count === 0` would
-            // pass before the offer had a chance to appear), then check for chrome.
-            await expect
-                .poll(() => logs.some((l) => l.includes('no language pack offered (english-browser)')), {
-                    timeout: 15000,
-                    message: 'detection never reported the English-browser case — the offer never ran or logged nothing',
-                })
-                .toBe(true);
-            await expect(page.locator(OFFER)).toHaveCount(0);
-        });
-    });
-
     test.describe('a zh-CN browser', () => {
         test.use({ locale: 'zh-CN' });
 

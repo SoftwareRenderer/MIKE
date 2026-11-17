@@ -20,6 +20,7 @@ vi.mock('$lib/api', async (importOriginal) => {
 });
 
 import SandboxConfigModal from '$lib/components/SandboxConfigModal.svelte';
+import { t } from '$lib/i18n';
 import type { PortForward, Project } from '$lib/types';
 
 function projectWith(ports: PortForward[]): Project {
@@ -70,16 +71,45 @@ async function save(container: HTMLElement): Promise<Record<string, unknown>> {
     return updateProject.mock.calls[0][1] as Record<string, unknown>;
 }
 
-describe('SandboxConfigModal forwarded ports', () => {
-    beforeAll(() => {
-        // jsdom has no Web Animations API, and the slide transition calls it when a block
-        // enters - which adding or removing a row does.
-        if (!Element.prototype.animate) {
-            Element.prototype.animate = () =>
-                ({ finished: Promise.resolve(), cancel() { }, play() { }, pause() { }, commit() { }, onfinish: null }) as unknown as Animation;
-        }
+// jsdom has no Web Animations API, and the slide transition calls it when a block enters — which
+// opening the Forward Ports section does, as does adding or removing a row.
+beforeAll(() => {
+    if (!Element.prototype.animate) {
+        Element.prototype.animate = () =>
+            ({ finished: Promise.resolve(), cancel() { }, play() { }, pause() { }, commit() { }, onfinish: null }) as unknown as Animation;
+    }
+});
+
+describe('SandboxConfigModal forwarded ports — who is offered the row', () => {
+    // Forwarding exists only while the container can be reached at all: the row is not the same
+    // section with a disabled control, it is not built, so nothing has to remember to hide it.
+    it('offers it under an unreachable-free sandbox, and opens its add row', async () => {
+        const { container } = renderModal(projectWith([]));
+
+        const row = one<HTMLElement>(container, '.config-row-subsection');
+        expect(row.querySelector('.config-label')?.textContent).toBe(t('sandbox.ports'));
+
+        await fireEvent.click(row);
+        await waitFor(() => expect(container.querySelector('.port-add-row')).toBeTruthy());
+        // The description is only stated once the section is open, and it says the host side is not
+        // the person's to choose.
+        expect(row.querySelector('.config-desc')?.textContent).toContain('auto-assigned');
     });
 
+    it('builds no row while the network is isolated', () => {
+        const { container } = renderModal({ ...projectWith([]), sandbox_network_isolation: true } as Project);
+
+        expect(container.querySelector('.config-row-subsection')).toBeNull();
+    });
+
+    it('builds no row when sandboxing is off', () => {
+        const { container } = renderModal({ ...projectWith([]), sandbox_enabled: false } as Project);
+
+        expect(container.querySelector('.config-row-subsection')).toBeNull();
+    });
+});
+
+describe('SandboxConfigModal forwarded ports', () => {
     beforeEach(() => {
         updateProject.mockReset().mockResolvedValue({});
         getProject.mockResolvedValue({ id: 'p1', active_terminal_ports: [] });

@@ -1,13 +1,14 @@
 import { test, expect, type Page } from '@playwright/test';
 import { openSettingsTab } from './helpers';
 
-// API tokens manager in Settings → About (GET/POST /api/tokens, DELETE /api/tokens/{id}) and the
-// bearer credential those routes hand out.
+// API tokens manager in Settings → About (GET/POST /api/tokens, DELETE /api/tokens/{id}).
 //
 // The section issues a token whose plaintext is shown exactly once, lists the rows by label, and
-// revokes on click. The spec also proves the point of the whole feature from the browser's side:
-// the issued token answers the task and project routes it is scoped to with no cookie at all, and
-// answers 403 on one that is not on its list.
+// revokes on click. What the issued credential may and may not do — the scope, the refusal outside it,
+// the stamping of a use and the immediacy of a revocation — is the server's answer, and it is proven
+// through the real middleware chain in `backend/server/token_auth_test.go` and
+// `backend/store/api_tokens_test.go`; a second copy from the browser would assert the same table against
+// the same route, so nothing here carries an `Authorization` header.
 //
 // Runs in the `isolated` project (settings UI + it changes server token state), and revokes every
 // token it creates so the lane server is left with none.
@@ -16,9 +17,7 @@ const TOKENS_SECTION = '.tokens-section';
 const TOKEN_ROW = '.tokens-section .settings-row';
 const TOKEN_LABEL_INPUT = '.tokens-section input[type="text"]';
 const CREATE_BTN = '.tokens-section button.btn-primary';
-const REFRESH_BTN = '.tokens-section button[aria-label="Reload the token list"]';
 const SECRET = '.tokens-secret';
-const ROW_REVOKE = 'button[aria-label^="Revoke token "]';
 const CONFIRM_BTN = '.btn-confirm';
 
 /** Open Settings, switch to the About tab and scroll the API tokens section into view. */
@@ -39,18 +38,6 @@ async function createToken(page: Page, label: string): Promise<string> {
   return secret.trim();
 }
 
-/** Present a token with no cookie: what a headless client does. */
-async function callWithToken(page: Page, method: string, path: string, token: string): Promise<number> {
-  return await page.evaluate(async ({ method, path, token }) => {
-    const res = await fetch(path, {
-      method,
-      headers: { Authorization: `Bearer ${token}` },
-      credentials: 'omit',
-    });
-    return res.status;
-  }, { method, path, token });
-}
-
 /** Revoke through the UI and wait for the row to go. */
 async function revokeToken(page: Page, id: string) {
   await page.locator(TOKENS_SECTION).scrollIntoViewIfNeeded();
@@ -60,7 +47,7 @@ async function revokeToken(page: Page, id: string) {
 }
 
 /** The server's own list — the row ids are what the UI's revoke labels must carry. */
-async function apiTokens(page: Page): Promise<Array<{ id: string; label: string; last_used_at: string }>> {
+async function apiTokens(page: Page): Promise<Array<{ id: string; label: string }>> {
   return await page.evaluate(async () => {
     const res = await fetch('/api/tokens', { credentials: 'include' });
     return res.json();
@@ -91,28 +78,6 @@ test.describe.serial('Settings → About API tokens', () => {
 
     await revokeToken(page, row!.id);
     expect((await apiTokens(page)).find(r => r.id === row!.id)).toBeUndefined();
-  });
-
-  test('the token authenticates its own routes and nothing else', async ({ page }) => {
-    await openTokensSection(page);
-    const secret = await createToken(page, 'playwright scope probe');
-    const id = (await apiTokens(page)).find(r => r.label === 'playwright scope probe')!.id;
-
-    await expect.poll(() => callWithToken(page, 'GET', '/api/projects', secret)).toBe(200);
-    await expect.poll(() => callWithToken(page, 'GET', '/api/config', secret)).toBe(403);
-    await expect.poll(() => callWithToken(page, 'GET', '/api/tokens', secret)).toBe(403);
-
-    // Using it is what the row reports as "last used".
-    await expect.poll(async () => (await apiTokens(page)).find(r => r.id === id)?.last_used_at, {
-      message: 'a request authenticated by the token stamps last_used_at',
-    }).not.toBe('');
-
-    await revokeToken(page, id);
-    await page.locator(REFRESH_BTN).click();
-    await expect(page.locator(`${TOKEN_ROW}[data-token-id="${id}"]`)).toHaveCount(0);
-
-    // Revocation is immediate: the next request presenting it authenticates as nothing.
-    await expect.poll(() => callWithToken(page, 'GET', '/api/projects', secret)).toBe(401);
   });
 
   test('a label is required', async ({ page }) => {

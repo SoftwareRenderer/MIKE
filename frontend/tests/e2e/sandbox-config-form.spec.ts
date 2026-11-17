@@ -1,18 +1,17 @@
 import { test, expect, type Page } from '@playwright/test';
-import { apiGetJson, clearBoardExcept, clearTasksAfterEach, csrfFetch, gotoProject, isolatedProject, ownProjectId } from './helpers';
+import { clearBoardExcept, clearTasksAfterEach, csrfFetch, gotoProject, isolatedProject, ownProjectId } from './helpers';
 
-// One screen, one decision: what the Sandbox Configuration dialog offers, what it saves, and what it reads
-// back — all of it hanging off the one column that says where a task runs, `project.sandbox_enabled`.
-// Environment variables, bind mounts and forwarded ports are three sections of that one dialog, so they are
-// one file: each pays the same setup (empty the project this file owns, switch sandboxing on, open the dialog)
-// and each leaves the project as it found it.
-//
-// What the saved row then means to a container is `docs/sandbox-runtime.md → The container environment` and
-// its Go tests (`backend/sandbox/containerenv_test.go`, `hostenv_test.go`); nothing here measures it, because
-// nothing here starts a task — and a task, a terminal or a build is the only thing that starts a container.
-// The draft's own rules (what may be added, what one Save sends, when the form is read-only) live in
-// `src/lib/components/__tests__/sandbox-config-{draft,payload,ports,pair-rows}.unit.svelte.ts`. What is left
-// for a browser is the row that only the server can fill, and the phone block at the bottom.
+// The Sandbox Configuration dialog on a phone: the add row needs 434px on one line and a portrait screen has
+// less, so below that width the mount form stacks — and this measures the stacked form, its thumb-sized
+// targets and its un-clippable paths. Everything else about this dialog is decided where it can be staged
+// more cheaply: the draft's own rules (what may be added, what one Save sends, which sections exist at all,
+// when the form is read-only) in
+// `src/lib/components/__tests__/sandbox-config-{draft,payload,ports,pair-rows}.unit.svelte.ts`; the request
+// that Save makes in `src/lib/api/__tests__/projects.unit.ts`; and every `sandbox_*` list's trip into the row
+// and back, a mount's mode included, by `TestProjectSandboxListSettingsRoundTrip`. What the saved row then
+// means to a container is `docs/sandbox-runtime.md → The container environment` and its Go tests
+// (`backend/sandbox/containerenv_test.go`, `hostenv_test.go`) — nothing here starts a task, and a task, a
+// terminal or a build is the only thing that starts a container.
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
 isolatedProject();
@@ -20,16 +19,6 @@ isolatedProject();
 // against the executor's one memory budget, which every worker on this lane shares.
 // `docs/sandbox-runtime.md → The memory budget`.
 clearTasksAfterEach();
-
-/** The Sandbox Configuration dialog. `[role="dialog"]` is not a unique locator here; this class is its own. */
-const form = (page: Page) => page.locator('.sandbox-config-modal');
-
-/** The row Forward Ports owns — a node the dialog only builds while the container can be reached at all. */
-const portsRow = (page: Page) => page.locator('.config-row-subsection');
-
-/** The host and container path fields of the mount form. */
-const hostInput = (page: Page) => page.locator('.mount-input[aria-label="Host path"]');
-const containerInput = (page: Page) => page.locator('.mount-input[aria-label="Container path"]');
 
 /**
  * Opens the Sandbox Configuration form for this file's own project with sandboxing on, writing `fields` with
@@ -83,135 +72,6 @@ async function leaveProjectAsFound(page: Page): Promise<void> {
     );
   }
 }
-
-/** Writes the sandbox fields and brings the dialog's own view of them back up. */
-async function writeAndReload(page: Page, fields: Record<string, unknown>): Promise<void> {
-  const written = await csrfFetch(page, `/api/projects/${ownProjectId()}`, { method: 'PUT', body: fields });
-  if (!written.ok) {
-    throw new Error(`sandbox settings refused (${written.status} ${JSON.stringify(written.data)})`);
-  }
-  await page.reload();
-  await expect(page.locator('.sandbox-config-btn')).toBeVisible({ timeout: 10000 });
-}
-
-/** Opens the collapsible subsection whose heading is `heading`, and waits for its add row to be built. */
-async function openSection(page: Page, heading: string, addRow: string): Promise<void> {
-  await page.locator('.config-row-expandable').filter({ hasText: heading }).click();
-  await expect(page.locator(addRow)).toBeVisible({ timeout: 5000 });
-}
-
-/** Opens the dialog and waits for the editable form — the read-only tasks-in-progress read-out is the other
- *  branch of this dialog, so the controls below only exist when this one is on screen. */
-async function openForm(page: Page): Promise<void> {
-  await page.click('.sandbox-config-btn');
-  await expect(form(page)).toBeVisible({ timeout: 5000 });
-  await expect(page.locator('.config-options')).toBeVisible({ timeout: 5000 });
-}
-
-test.describe.serial('Sandbox Configuration form', () => {
-  test.beforeEach(async ({ page }) => {
-    await prepareSandboxProject(page, {
-      sandbox_envs: [],
-      sandbox_mounts: [],
-      sandbox_forward_ports: [],
-    });
-  });
-
-  test.afterEach(async ({ page }) => leaveProjectAsFound(page));
-
-  test('saves an added variable to the server', async ({ page }) => {
-    await openForm(page);
-    await openSection(page, 'Environment Variables', '.env-add-row');
-    await page.locator('.env-input-key').fill('DB_HOST');
-    await page.locator('.env-input-value').fill('localhost');
-    await page.locator('.btn-add-env').click();
-    await expect(page.locator('.env-item')).toHaveCount(1);
-
-    await form(page).locator('.modal-footer .btn-primary').click();
-    await expect(form(page)).toBeHidden();
-
-    const saved = await apiGetJson<any>(page, `/api/projects/${ownProjectId()}`);
-    expect(saved?.sandbox_envs).toHaveLength(1);
-    expect(saved.sandbox_envs[0]).toMatchObject({ key: 'DB_HOST', value: 'localhost' });
-  });
-
-  test('lists the variables the server holds', async ({ page }) => {
-    await writeAndReload(page, {
-      sandbox_envs: [
-        { key: 'UI_TEST_KEY', value: 'ui_test_value' },
-        { key: 'SECOND_KEY', value: 'second_value' },
-      ],
-    });
-
-    await openForm(page);
-    await openSection(page, 'Environment Variables', '.env-add-row');
-
-    await expect(page.locator('.env-item')).toHaveCount(2);
-    await expect(page.locator('.env-key').first()).toHaveText('UI_TEST_KEY');
-    await expect(page.locator('.env-value').first()).toHaveText('ui_test_value');
-
-    await form(page).locator('.close-btn').click();
-    await expect(form(page)).toBeHidden();
-  });
-
-  test('offers port forwarding while the container can be reached', async ({ page }) => {
-    await openForm(page);
-
-    // Nested under Network Isolation, which this file's own project has switched off.
-    await expect(portsRow(page)).toBeVisible({ timeout: 5000 });
-    await expect(portsRow(page).locator('.config-label')).toHaveText('Forward Ports');
-
-    // The section starts collapsed when no port is set; its add row is only built once it is open.
-    await portsRow(page).click();
-    await expect(page.locator('.port-add-row')).toBeVisible({ timeout: 5000 });
-    await expect(portsRow(page).locator('.config-desc')).toContainText('auto-assigned');
-
-    await form(page).locator('.close-btn').click();
-    await expect(form(page)).toBeHidden();
-  });
-
-  test('hides port forwarding while the network is isolated', async ({ page }) => {
-    await writeAndReload(page, { sandbox_network_isolation: true });
-
-    await openForm(page);
-    await expect(portsRow(page)).toHaveCount(0);
-  });
-
-  test('hides port forwarding when sandboxing is off', async ({ page }) => {
-    await writeAndReload(page, { sandbox_enabled: false });
-
-    await openForm(page);
-    await expect(portsRow(page)).toHaveCount(0);
-  });
-
-  test('saves a mount with the mode it was chosen with, and lists what the server holds', async ({ page }) => {
-    await openForm(page);
-    await openSection(page, 'Custom Mounts', '.mount-add-row');
-    await hostInput(page).fill('/etc/config');
-    await containerInput(page).fill('/var/lib/config');
-    await page.locator('.radio-group-small .radio-label').filter({ hasText: 'ro' }).click();
-    await page.locator('.btn-add-mount').click();
-
-    // The mode chosen for the row survives the add: a row that fell back to `rw` on the way into the list
-    // would hand the container a write nobody asked for.
-    await expect(page.locator('.mount-item')).toHaveCount(1);
-    await expect(page.locator('.mount-item .sandbox-mode-ro')).toHaveText('ro');
-
-    await form(page).locator('.modal-footer .btn-primary').click();
-    await expect(form(page)).toBeHidden();
-
-    // The row the server holds is what the next container mounts, so both paths and the mode have to come
-    // back from it rather than from what was typed.
-    await page.reload();
-    await expect(page.locator('.sandbox-config-btn')).toBeVisible({ timeout: 10000 });
-    await openForm(page);
-    await openSection(page, 'Custom Mounts', '.mount-add-row');
-    await expect(page.locator('.mount-item')).toHaveCount(1);
-    await expect(page.locator('.mount-item .mount-path')).toHaveText('/etc/config');
-    await expect(page.locator('.mount-item .mount-container')).toHaveText('/var/lib/config');
-    await expect(page.locator('.mount-item .sandbox-mode-ro')).toHaveText('ro');
-  });
-});
 
 // The add row needs 434px on one line and a portrait screen has less; below that the form stacks,
 // and this checks the stacked form.
