@@ -8,47 +8,60 @@ import (
 	"mike/backend/types"
 )
 
-func TestMemoryGateZeroCapacityDisablesGate(t *testing.T) {
+// TestMemoryGateAdmission holds the admission rule itself — MIKE's charge plus the reservations plus the
+// candidate must stay inside the ceiling — at its edges: exact capacity fits, one megabyte more waits, a
+// request that books nothing is never refused, releasing more than the ledger holds cannot drive it
+// negative, and a zero capacity means there is no budget to enforce.
+func TestMemoryGateAdmission(t *testing.T) {
 	t.Parallel()
-	g := &MemoryGate{}
-	if err := g.Acquire(context.Background(), 999999, nil); err != nil {
-		t.Fatalf("disabled gate must succeed immediately, got %v", err)
-	}
-}
+	for _, tc := range []struct {
+		name      string
+		capacity  int64
+		held      []int64
+		request   int64
+		wantErr   error
+		wantUsed  int64
+		checkUsed bool
+	}{
+		{name: "a zero capacity disables the gate", capacity: 0, request: 999999},
+		{name: "a request that fits is booked", capacity: 1000, request: 500, wantUsed: 500, checkUsed: true},
+		{name: "exactly the capacity fits", capacity: 1000, request: 1000, wantUsed: 1000, checkUsed: true},
+		{name: "one megabyte over the capacity waits", capacity: 1000, held: []int64{1000}, request: 1, wantErr: context.DeadlineExceeded, wantUsed: 1000, checkUsed: true},
+		{name: "a request that books nothing is admitted", capacity: 100, request: 0, wantUsed: 0, checkUsed: true},
+		{name: "a negative request is admitted", capacity: 100, request: -1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := &MemoryGate{}
+			g.SetCapacity(tc.capacity)
+			for _, amount := range tc.held {
+				if err := g.Acquire(context.Background(), amount, nil); err != nil {
+					t.Fatalf("acquire %d: %v", amount, err)
+				}
+			}
 
-func TestMemoryGateAcquireFitsImmediately(t *testing.T) {
-	t.Parallel()
-	g := &MemoryGate{}
-	g.SetCapacity(1000)
-	if err := g.Acquire(context.Background(), 500, nil); err != nil {
-		t.Fatal(err)
+			ctx := context.Background()
+			if tc.wantErr != nil {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, 100*time.Millisecond)
+				defer cancel()
+			}
+			if err := g.Acquire(ctx, tc.request, nil); err != tc.wantErr {
+				t.Errorf("Acquire(%d) = %v, want %v", tc.request, err, tc.wantErr)
+			}
+			if tc.checkUsed && g.Budget().ReservationsMB != tc.wantUsed {
+				t.Errorf("reservations = %d, want %d", g.Budget().ReservationsMB, tc.wantUsed)
+			}
+		})
 	}
-	if g.Budget().ReservationsMB != 500 {
-		t.Errorf("expected used=500, got %d", g.Budget().ReservationsMB)
-	}
-}
 
-func TestMemoryGateAcquireExactCapacity(t *testing.T) {
-	t.Parallel()
-	g := &MemoryGate{}
-	g.SetCapacity(1000)
-	if err := g.Acquire(context.Background(), 1000, nil); err != nil {
-		t.Fatalf("acquire at exact capacity must succeed, got %v", err)
-	}
-}
-
-func TestMemoryGateAcquireExceedsCapacity(t *testing.T) {
-	t.Parallel()
-	g := &MemoryGate{}
-	g.SetCapacity(1000)
-	if err := g.Acquire(context.Background(), 1000, nil); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	if err := g.Acquire(ctx, 1, nil); err != context.DeadlineExceeded {
-		t.Errorf("expected DeadlineExceeded, got %v", err)
-	}
+	t.Run("releasing more than the ledger holds clamps it to zero", func(t *testing.T) {
+		g := &MemoryGate{}
+		g.SetCapacity(100)
+		g.Release(200)
+		if g.Budget().ReservationsMB != 0 {
+			t.Errorf("used must clamp to 0, got %d", g.Budget().ReservationsMB)
+		}
+	})
 }
 
 func TestMemoryGateReleaseUnblocksWaiter(t *testing.T) {
@@ -138,28 +151,6 @@ func TestMemoryGateFIFONoJumping(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("A not served after release")
-	}
-}
-
-func TestMemoryGateNegativeAmountSucceeds(t *testing.T) {
-	t.Parallel()
-	g := &MemoryGate{}
-	g.SetCapacity(100)
-	if err := g.Acquire(context.Background(), 0, nil); err != nil {
-		t.Errorf("zero amount must succeed, got %v", err)
-	}
-	if err := g.Acquire(context.Background(), -1, nil); err != nil {
-		t.Errorf("negative amount must succeed, got %v", err)
-	}
-}
-
-func TestMemoryGateReleaseClampsZero(t *testing.T) {
-	t.Parallel()
-	g := &MemoryGate{}
-	g.SetCapacity(100)
-	g.Release(200) // release more than held
-	if g.Budget().ReservationsMB != 0 {
-		t.Errorf("used must clamp to 0, got %d", g.Budget().ReservationsMB)
 	}
 }
 

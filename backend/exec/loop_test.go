@@ -7,9 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -168,45 +165,36 @@ func TestLoopDetector_ToolLoop(t *testing.T) {
 	t.Parallel()
 	d := newLoopDetector()
 
-	// First read of file
 	args1 := map[string]string{"path": "src/main.go"}
 	args1JSON, _ := json.Marshal(args1)
-	tc1 := []types.ChatToolCall{makeToolCall("read_file", string(args1JSON))}
-	if loopType, _ := d.recordTurn(tc1, "", "tool_calls"); loopType != LoopNone {
-		t.Error("first read should not trigger loop")
+	tc := []types.ChatToolCall{makeToolCall("read_file", string(args1JSON))}
+
+	// First read of the file: nothing to repeat yet.
+	if loopType, _ := d.recordTurn(tc, "", "tool_calls"); loopType != LoopNone {
+		t.Errorf("first read should not trigger loop, got %v", loopType)
 	}
 
-	// Second read of same file
-	tc2 := []types.ChatToolCall{makeToolCall("read_file", string(args1JSON))}
-	if loopType, _ := d.recordTurn(tc2, "", "tool_calls"); loopType != LoopTool {
-		t.Error("second read of same file should trigger LoopTool")
+	// Second read of the same target: the loop, and the args the hint is built from.
+	loopType, returnedArgs := d.recordTurn(tc, "", "tool_calls")
+	if loopType != LoopTool {
+		t.Fatalf("second read of same file should trigger LoopTool, got %v", loopType)
+	}
+	if returnedArgs != string(args1JSON) {
+		t.Errorf("returned args = %q, want %q", returnedArgs, string(args1JSON))
+	}
+
+	// A state-changing call clears the read tracker, so reading that file again after
+	// writing it is progress, not a loop.
+	write := []types.ChatToolCall{makeToolCall("write_file", `{"path":"src/main.go","content":"x"}`)}
+	if loopType, _ := d.recordTurn(write, "", "tool_calls"); loopType != LoopNone {
+		t.Errorf("a write should never be a loop, got %v", loopType)
+	}
+	if loopType, _ := d.recordTurn(tc, "", "tool_calls"); loopType != LoopNone {
+		t.Errorf("re-reading after a write should not be a loop, got %v", loopType)
 	}
 }
 
 // --- Rolling Window Tests ---
-
-func TestLoopDetector_LoopStreakIncrementsOnConsecutiveLoops(t *testing.T) {
-	t.Parallel()
-	d := newLoopDetector()
-
-	// Simulate handleLoopDetected: increments loopStreak, reset preserves it
-	simulateHint := func() {
-		d.loopStreak++
-		streak := d.loopStreak
-		d.reset()
-		d.loopStreak = streak
-	}
-
-	// 3 consecutive loops (no valid turns in between)
-	for i := 0; i < 3; i++ {
-		simulateHint()
-	}
-
-	// loopStreak should be 3
-	if d.loopStreak != 3 {
-		t.Errorf("expected loopStreak=3, got %d", d.loopStreak)
-	}
-}
 
 func TestLoopDetector_LoopStreakResetsOnValidTurn(t *testing.T) {
 	t.Parallel()
@@ -240,33 +228,6 @@ func TestLoopDetector_LoopStreakResetsOnValidTurn(t *testing.T) {
 	d.loopStreak++
 	if d.loopStreak != 1 {
 		t.Errorf("expected loopStreak=1 (fresh streak), got %d", d.loopStreak)
-	}
-}
-
-func TestLoopDetector_LoopStreakWindowTextOnly(t *testing.T) {
-	t.Parallel()
-	d := newLoopDetector()
-
-	// Simulate 2 consecutive loop hints
-	d.loopStreak = 2
-
-	// Text-only responses now trigger LoopStatement (not LoopNone)
-	// This means the streak is NOT reset by text-only responses
-	texts := []string{
-		"The database migration completed successfully and all tables are now created with the correct schema definitions",
-		"I wrote comprehensive unit tests covering edge cases and boundary conditions for the authentication module",
-		"The deployment pipeline is configured with proper error handling and notification hooks for the staging environment",
-	}
-	for _, text := range texts {
-		loopType, _ := d.recordTurn(nil, text, "stop")
-		if loopType != LoopStatement {
-			t.Fatalf("expected LoopStatement, got %v", loopType)
-		}
-	}
-	// loopStreak is preserved (not reset) because LoopStatement is a loop detection
-	// The streak counter is managed by handleLoopDetected (increment + preserve across reset)
-	if d.loopStreak != 2 {
-		t.Errorf("expected loopStreak=2 (preserved across LoopStatement), got %d", d.loopStreak)
 	}
 }
 
@@ -609,54 +570,6 @@ func TestSendRetryHint_SystemRole(t *testing.T) {
 	}
 }
 
-func TestLoopDetector_ToolLoopReturnsRepeatedArgs(t *testing.T) {
-	t.Parallel()
-	d := newLoopDetector()
-
-	// First read
-	args1 := map[string]string{"path": "src/main.go"}
-	args1JSON, _ := json.Marshal(args1)
-	tc1 := []types.ChatToolCall{makeToolCall("read_file", string(args1JSON))}
-	d.recordTurn(tc1, "", "tool_calls")
-
-	// Second read of same file — returned args should match
-	tc2 := []types.ChatToolCall{makeToolCall("read_file", string(args1JSON))}
-	loopType, returnedArgs := d.recordTurn(tc2, "", "tool_calls")
-	if loopType != LoopTool {
-		t.Fatal("expected LoopTool")
-	}
-	if returnedArgs != string(args1JSON) {
-		t.Errorf("returned args = %q, want %q", returnedArgs, string(args1JSON))
-	}
-}
-
-func TestLoopDetector_ToolLoopMultiCall(t *testing.T) {
-	t.Parallel()
-	d := newLoopDetector()
-
-	// First turn: read_file then request_review (state-changing clears tracker)
-	// So we need: first turn read_file, second turn request_review + read_file
-	// The read_file on turn 2 should NOT trigger loop because request_review cleared it
-	args1 := map[string]string{"path": "src/main.go"}
-	args1JSON, _ := json.Marshal(args1)
-
-	tc1 := []types.ChatToolCall{makeToolCall("read_file", string(args1JSON))}
-	loopType, _ := d.recordTurn(tc1, "", "tool_calls")
-	if loopType != LoopNone {
-		t.Error("first read should not trigger loop")
-	}
-
-	// Second turn: same read_file — should trigger loop
-	tc2 := []types.ChatToolCall{makeToolCall("read_file", string(args1JSON))}
-	loopType, returnedArgs := d.recordTurn(tc2, "", "tool_calls")
-	if loopType != LoopTool {
-		t.Fatal("expected LoopTool on repeated read")
-	}
-	if returnedArgs != string(args1JSON) {
-		t.Errorf("returned args = %q, want %q", returnedArgs, string(args1JSON))
-	}
-}
-
 func TestLoopDetector_ToolLoopDifferentTargets(t *testing.T) {
 	t.Parallel()
 	d := newLoopDetector()
@@ -677,47 +590,66 @@ func TestLoopDetector_ToolLoopDifferentTargets(t *testing.T) {
 	}
 }
 
-func TestLoopDetector_TextLoop(t *testing.T) {
+// TestLoopDetector_TextOnlyTurn: a text-only turn that ends in a statement is LoopStatement, and being a
+// loop it leaves the streak alone — only a turn that asks resets it.
+func TestLoopDetector_TextOnlyTurn(t *testing.T) {
 	t.Parallel()
-	d := newLoopDetector()
-
-	// Statements (no question mark) trigger LoopStatement
-	text1 := "I need to carefully analyze the requirements and implement the solution step by step to make sure everything works correctly."
-	text2 := "I must carefully analyze the requirements and implement the solution step by step to make sure everything works correctly."
-
-	if loopType, _ := d.recordTurn(nil, text1, "stop"); loopType != LoopStatement {
-		t.Errorf("expected LoopStatement for first text, got %v", loopType)
+	statements := []string{
+		"I need to carefully analyze the requirements and implement the solution step by step to make sure everything works correctly.",
+		"I must carefully analyze the requirements and implement the solution step by step to make sure everything works correctly.",
+		"The database migration completed successfully and all tables are now created with the correct schema definitions",
+		"I wrote comprehensive unit tests covering edge cases and boundary conditions for the authentication module",
+		"The deployment pipeline is configured with proper error handling and notification hooks for the staging environment",
 	}
-	if loopType, _ := d.recordTurn(nil, text2, "stop"); loopType != LoopStatement {
-		t.Errorf("expected LoopStatement for second text, got %v", loopType)
+	for _, text := range statements {
+		d := newLoopDetector()
+		if loopType, _ := d.recordTurn(nil, text, "stop"); loopType != LoopStatement {
+			t.Errorf("expected LoopStatement for %q, got %v", text, loopType)
+		}
+	}
+
+	d := newLoopDetector()
+	d.loopStreak = 2
+	for _, text := range statements {
+		if loopType, _ := d.recordTurn(nil, text, "stop"); loopType != LoopStatement {
+			t.Fatalf("expected LoopStatement, got %v", loopType)
+		}
+	}
+	if d.loopStreak != 2 {
+		t.Errorf("expected loopStreak=2 (preserved across LoopStatement), got %d", d.loopStreak)
 	}
 }
 
+// TestLoopDetector_StatementOnlyWhenLLMDone holds the finish-reason gate that precedes the paragraph
+// rule: a response that did not end by choice is not penalised however it ends, and the paragraph is only
+// read once the model said it was done.
 func TestLoopDetector_StatementOnlyWhenLLMDone(t *testing.T) {
 	t.Parallel()
-	d := newLoopDetector()
-
-	// Text-only response with finish_reason="stop" (LLM chose to end) -> LoopStatement
-	loopType, _ := d.recordTurn(nil, "I have analyzed the code.", "stop")
-	if loopType != LoopStatement {
-		t.Errorf("expected LoopStatement with finish_reason=stop, got %v", loopType)
-	}
-
-	d = newLoopDetector()
-
-	// Text-only response with finish_reason="tool_calls" but no actual tool calls
-	// -> LLM signaled it wanted tools but none were produced; don't penalize
-	loopType, _ = d.recordTurn(nil, "I have analyzed the code.", "tool_calls")
-	if loopType != LoopNone {
-		t.Errorf("expected LoopNone with finish_reason=tool_calls, got %v", loopType)
-	}
-
-	d = newLoopDetector()
-
-	// Text-only response with empty finish_reason (streaming not complete) -> don't penalize
-	loopType, _ = d.recordTurn(nil, "I have analyzed the code.", "")
-	if loopType != LoopNone {
-		t.Errorf("expected LoopNone with empty finish_reason, got %v", loopType)
+	const (
+		oneParagraph  = "I have analyzed the code."
+		twoParagraphs = "Analyzing the module.\n\nNext I'll rewrite it."
+	)
+	for _, tc := range []struct {
+		name   string
+		text   string
+		reason string
+		want   LoopType
+	}{
+		{"done, ending in a statement", oneParagraph, "stop", LoopStatement},
+		{"done, two paragraphs, still a statement", twoParagraphs, "stop", LoopStatement},
+		{"asked for tools and produced none", oneParagraph, "tool_calls", LoopNone},
+		{"cut off by length", oneParagraph, "length", LoopNone},
+		{"the stream has not ended", oneParagraph, "", LoopNone},
+		{"two paragraphs, tools asked for and absent", twoParagraphs, "tool_calls", LoopNone},
+		{"two paragraphs, cut off by length", twoParagraphs, "length", LoopNone},
+		{"two paragraphs, stream not ended", twoParagraphs, "", LoopNone},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := newLoopDetector()
+			if loopType, _ := d.recordTurn(nil, tc.text, tc.reason); loopType != tc.want {
+				t.Errorf("recordTurn(finish_reason=%q) = %v, want %v", tc.reason, loopType, tc.want)
+			}
+		})
 	}
 }
 
@@ -725,7 +657,9 @@ func TestLoopDetector_QuestionDoesNotTriggerStatement(t *testing.T) {
 	t.Parallel()
 	d := newLoopDetector()
 
-	// Text whose final paragraph asks a question should NOT trigger LoopStatement
+	// Text whose final paragraph asks should NOT trigger LoopStatement. Every code point
+	// isQuestionMark recognises is here: a turn that asks in another script waits for the
+	// reader just the same, and an ASCII-only list would pass with that table cut back to '?'.
 	questions := []string{
 		"Should I use React or Vue for this project?",
 		"What framework would you recommend? Let me know your preference.",
@@ -735,6 +669,13 @@ func TestLoopDetector_QuestionDoesNotTriggerStatement(t *testing.T) {
 		loopType, _ := d.recordTurn(nil, q, "stop")
 		if loopType != LoopNone {
 			t.Errorf("expected LoopNone for question %q, got %v", q, loopType)
+		}
+	}
+	for _, mark := range []rune{'\u00BF', '\u037E', '\u055E', '\u061F', '\u109E',
+		'\u2047', '\u2048', '\u2049', '\uFE16', '\uFE56', '\uFF1F'} {
+		asks := "Should I merge this now" + string(mark)
+		if loopType, _ := d.recordTurn(nil, asks, "stop"); loopType != LoopNone {
+			t.Errorf("expected LoopNone for %q, got %v", asks, loopType)
 		}
 	}
 	// loopStreak should be reset to 0
@@ -764,33 +705,6 @@ func TestLoopDetector_QuestionInEarlierParagraphStillStatement(t *testing.T) {
 	}
 	if d.loopStreak != 0 {
 		t.Errorf("expected loopStreak=0 after a closing question, got %d", d.loopStreak)
-	}
-}
-
-func TestLoopDetector_NonASCIIQuestionMarkDoesNotTriggerStatement(t *testing.T) {
-	t.Parallel()
-	asks := []string{
-		"Should I merge this now\uff1f", // fullwidth
-		"Should I merge this now\u061f", // Arabic
-		"Should I merge this now\uFE56", // small presentation form
-	}
-	for _, text := range asks {
-		d := newLoopDetector()
-		if loopType, _ := d.recordTurn(nil, text, "stop"); loopType != LoopNone {
-			t.Errorf("expected LoopNone for %q, got %v", text, loopType)
-		}
-	}
-}
-
-// finish_reason is examined before the paragraph: a response that did not end by choice is
-// not penalised however it ends.
-func TestLoopDetector_MultiParagraphNotPenalisedWhenNotDone(t *testing.T) {
-	t.Parallel()
-	d := newLoopDetector()
-	for _, reason := range []string{"tool_calls", "length", ""} {
-		if loopType, _ := d.recordTurn(nil, "Analyzing the module.\n\nNext I'll rewrite it.", reason); loopType != LoopNone {
-			t.Errorf("expected LoopNone for finish_reason %q, got %v", reason, loopType)
-		}
 	}
 }
 
@@ -1118,201 +1032,274 @@ func FuzzIsReadOnlyCommand(f *testing.F) {
 
 // --- Sandbox Prompt Path Tests ---
 
-// --- ExtractLastTurns Tests ---
+// --- Turn Rendering Tests ---
 
-func TestExtractLastTurns_Empty(t *testing.T) {
-	t.Parallel()
-	result := ExtractLastTurns(nil, 3)
-	if len(result) != 0 {
-		t.Errorf("expected 0 messages, got %d", len(result))
-	}
+// chatMsg is one message of a conversation fixture.
+func chatMsg(role, content string) types.ChatMessage {
+	return types.ChatMessage{Role: role, Content: content}
 }
 
-func TestExtractLastTurns_SystemOnly(t *testing.T) {
-	t.Parallel()
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "You are a helpful assistant"},
-	}
-	result := ExtractLastTurns(messages, 3)
-	if len(result) != 0 {
-		t.Errorf("expected 0 messages (system skipped), got %d", len(result))
-	}
-}
-
-func TestExtractLastTurns_SingleTurn(t *testing.T) {
-	t.Parallel()
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "system prompt"},
-		{Role: "user", Content: "Hello"},
-		{Role: "assistant", Content: "Hi there"},
-	}
-	result := ExtractLastTurns(messages, 3)
-	if len(result) != 2 {
-		t.Errorf("expected 2 messages, got %d", len(result))
-	}
-	if result[0].Role != "user" || result[1].Role != "assistant" {
-		t.Errorf("expected user+assistant, got %s+%s", result[0].Role, result[1].Role)
-	}
-}
-
-func TestExtractLastTurns_ThreeTurns(t *testing.T) {
-	t.Parallel()
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "system prompt"},
-		{Role: "user", Content: "Turn 1 user"},
-		{Role: "assistant", Content: "Turn 1 assistant"},
-		{Role: "user", Content: "Turn 2 user"},
-		{Role: "assistant", Content: "Turn 2 assistant"},
-		{Role: "user", Content: "Turn 3 user"},
-		{Role: "assistant", Content: "Turn 3 assistant"},
-	}
-	result := ExtractLastTurns(messages, 3)
-	if len(result) != 6 {
-		t.Errorf("expected 6 messages (3 turns), got %d", len(result))
-	}
-	// All 3 turns fit, so should start with turn 1
-	if result[0].Content != "Turn 1 user" {
-		t.Errorf("expected first msg to be 'Turn 1 user', got %q", result[0].Content)
-	}
-}
-
-func TestExtractLastTurns_MoreThanThreeTurns(t *testing.T) {
-	t.Parallel()
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "system prompt"},
-		{Role: "user", Content: "Turn 1"},
-		{Role: "assistant", Content: "A1"},
-		{Role: "user", Content: "Turn 2"},
-		{Role: "assistant", Content: "A2"},
-		{Role: "user", Content: "Turn 3"},
-		{Role: "assistant", Content: "A3"},
-		{Role: "user", Content: "Turn 4"},
-		{Role: "assistant", Content: "A4"},
-		{Role: "user", Content: "Turn 5"},
-		{Role: "assistant", Content: "A5"},
-	}
-	result := ExtractLastTurns(messages, 3)
-	if len(result) != 6 {
-		t.Errorf("expected 6 messages (last 3 turns), got %d", len(result))
-	}
-	// Should be turns 3, 4, 5
-	if result[0].Content != "Turn 3" {
-		t.Errorf("expected first msg to be 'Turn 3', got %q", result[0].Content)
-	}
-	if result[5].Content != "A5" {
-		t.Errorf("expected last msg to be 'A5', got %q", result[5].Content)
-	}
-}
-
-func TestExtractLastTurns_WithToolCalls(t *testing.T) {
-	t.Parallel()
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "system prompt"},
-		{Role: "user", Content: "Read a file"},
-		{Role: "assistant", Content: "", ToolCalls: []types.ToolCallMsg{{ID: "call_1", Function: struct {
+// asstWithCall is the assistant row a tool call belongs to; toolAnswer is the tool row that answers it.
+// The renderers see a call only through that pair, so every fixture below needs both.
+func asstWithCall(id, name, args string) types.ChatMessage {
+	return types.ChatMessage{Role: "assistant", ToolCalls: []types.ToolCallMsg{{
+		ID: id, Type: "function",
+		Function: struct {
 			Name      string `json:"name"`
 			Arguments string `json:"arguments"`
-		}{Name: "read_file", Arguments: `{"path":"foo.txt"}`}}}},
-		{Role: "tool", Content: "file contents", ToolCallID: "call_1"},
-		{Role: "assistant", Content: "Here is the content"},
-		{Role: "user", Content: "Thanks"},
-		{Role: "assistant", Content: "You're welcome"},
+		}{Name: name, Arguments: args},
+	}}}
+}
+
+func toolAnswer(callID, content string) types.ChatMessage {
+	return types.ChatMessage{Role: "tool", Content: content, ToolCallID: callID}
+}
+
+// TestExtractLastTurns covers what a commit-message prompt is built from: turns, not messages — the
+// system prompt never appears, at most n turns are kept and they are the last n, and a turn the model
+// never answered still counts as a turn, or the question it asks disappears.
+func TestExtractLastTurns(t *testing.T) {
+	t.Parallel()
+	threeTurns := []types.ChatMessage{
+		chatMsg("system", "system prompt"),
+		chatMsg("user", "Turn 1 user"), chatMsg("assistant", "Turn 1 assistant"),
+		chatMsg("user", "Turn 2 user"), chatMsg("assistant", "Turn 2 assistant"),
+		chatMsg("user", "Turn 3 user"), chatMsg("assistant", "Turn 3 assistant"),
 	}
-	result := ExtractLastTurns(messages, 3)
-	// Should have 2 turns (turn 1 with tool calls, turn 2)
-	if len(result) < 4 {
-		t.Errorf("expected at least 4 messages, got %d", len(result))
+	fiveTurns := []types.ChatMessage{chatMsg("system", "system prompt")}
+	for i := 1; i <= 5; i++ {
+		fiveTurns = append(fiveTurns, chatMsg("user", fmt.Sprintf("Turn %d", i)), chatMsg("assistant", fmt.Sprintf("A%d", i)))
+	}
+
+	for _, tc := range []struct {
+		name     string
+		messages []types.ChatMessage
+		want     []types.ChatMessage
+		min      int
+	}{
+		{name: "nothing to take", messages: nil},
+		{name: "a system prompt is not a turn", messages: []types.ChatMessage{chatMsg("system", "You are a helpful assistant")}},
+		{
+			name:     "one turn",
+			messages: []types.ChatMessage{chatMsg("system", "system prompt"), chatMsg("user", "Hello"), chatMsg("assistant", "Hi there")},
+			want:     []types.ChatMessage{chatMsg("user", "Hello"), chatMsg("assistant", "Hi there")},
+		},
+		{
+			name:     "three turns all fit",
+			messages: threeTurns,
+			want:     threeTurns[1:],
+		},
+		{
+			name:     "only the last three turns",
+			messages: fiveTurns,
+			want:     []types.ChatMessage{chatMsg("user", "Turn 3"), chatMsg("assistant", "A3"), chatMsg("user", "Turn 4"), chatMsg("assistant", "A4"), chatMsg("user", "Turn 5"), chatMsg("assistant", "A5")},
+		},
+		{
+			name: "a turn keeps the rows its tool calls made",
+			messages: []types.ChatMessage{
+				chatMsg("system", "system prompt"),
+				chatMsg("user", "Read a file"),
+				asstWithCall("call_1", "read_file", `{"path":"foo.txt"}`),
+				toolAnswer("call_1", "file contents"),
+				chatMsg("assistant", "Here is the content"),
+				chatMsg("user", "Thanks"),
+				chatMsg("assistant", "You're welcome"),
+			},
+			min: 4,
+		},
+		{
+			name:     "an unanswered turn is still a turn",
+			messages: []types.ChatMessage{chatMsg("system", "system prompt"), chatMsg("user", "Turn 1"), chatMsg("assistant", "A1"), chatMsg("user", "Turn 2 (no response yet)")},
+			want:     []types.ChatMessage{chatMsg("user", "Turn 1"), chatMsg("assistant", "A1"), chatMsg("user", "Turn 2 (no response yet)")},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ExtractLastTurns(tc.messages, 3)
+			if tc.min > 0 {
+				if len(got) < tc.min {
+					t.Fatalf("expected at least %d messages, got %d", tc.min, len(got))
+				}
+				return
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("got %d messages, want %d: %+v", len(got), len(tc.want), got)
+			}
+			for i, want := range tc.want {
+				if got[i].Role != want.Role || got[i].Content != want.Content {
+					t.Errorf("message[%d] = %s:%q, want %s:%q", i, got[i].Role, got[i].Content, want.Role, want.Content)
+				}
+			}
+		})
 	}
 }
 
-func TestExtractLastTurns_IncompleteTurn(t *testing.T) {
+// TestFormatConversationTurns covers the prompt text a commit label or a summary reads: a tool call is
+// described in its assistant line and its result row never stands alone, a create_task/edit_task line
+// names what the call produced (and its failure quotes the error), and no call with no recorded result
+// may read as a success.
+func TestFormatConversationTurns(t *testing.T) {
 	t.Parallel()
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "system prompt"},
-		{Role: "user", Content: "Turn 1"},
-		{Role: "assistant", Content: "A1"},
-		{Role: "user", Content: "Turn 2 (no response yet)"},
-	}
-	result := ExtractLastTurns(messages, 3)
-	// Should include the incomplete turn
-	if len(result) != 3 {
-		t.Errorf("expected 3 messages (1 full turn + 1 incomplete), got %d", len(result))
+	const createdJSON = `{"task_id":"frost-amber-quartz","title":"New task"}`
+	const editedJSON = `{"task_id":"frost-amber-quartz","title":"New title","status":"updated"}`
+
+	for _, tc := range []struct {
+		name       string
+		messages   []types.ChatMessage
+		want       string
+		wantSuffix string
+		contains   []string
+		absent     []string
+	}{
+		{
+			name:     "a plain exchange",
+			messages: []types.ChatMessage{chatMsg("user", "Hello"), chatMsg("assistant", "Hi there")},
+			want:     "User: Hello\n\nAssistant: Hi there\n\n",
+		},
+		{
+			name: "a tool call is described, its result row is not echoed",
+			messages: []types.ChatMessage{
+				asstWithCall("call_1", "read_file", `{"path":"foo.txt"}`),
+				toolAnswer("call_1", "file contents"),
+			},
+			contains: []string{"I used the read_file tool to", "foo.txt"},
+			absent:   []string{"[Tool result]"},
+		},
+		{
+			name:     "a standalone tool row is skipped",
+			messages: []types.ChatMessage{{Role: "tool", Content: strings.Repeat("x", 600)}},
+			want:     "",
+		},
+		{
+			name: "blank lines never stack, and every block ends with one",
+			messages: []types.ChatMessage{
+				chatMsg("user", "Fix the bug\n\n"),
+				asstWithCall("call_1", "read_file", `{"path":"foo.go"}`),
+				toolAnswer("call_1", "file contents"),
+				chatMsg("assistant", "Done!\n"),
+			},
+			absent:     []string{"\n\n\n"},
+			wantSuffix: "\n\n",
+		},
+		{
+			name: "a created task is named by id and title",
+			messages: []types.ChatMessage{
+				asstWithCall("call_1", "create_task", `{"title":"New task"}`),
+				toolAnswer("call_1", createdJSON),
+			},
+			contains: []string{"I used the create_task tool to create task ID: frost-amber-quartz, title: New task"},
+			absent:   []string{"which was"},
+		},
+		{
+			name: "a failed create quotes the error",
+			messages: []types.ChatMessage{
+				asstWithCall("call_1", "create_task", `{"title":"New task"}`),
+				toolAnswer("call_1", "error: project not found"),
+			},
+			contains: []string{"but was unsuccessful. Error: error: project not found"},
+		},
+		{
+			name: "an edited task is named by id and title",
+			messages: []types.ChatMessage{
+				asstWithCall("call_1", "edit_task", `{"task_id":"frost-amber-quartz","title":"New title"}`),
+				toolAnswer("call_1", editedJSON),
+			},
+			contains: []string{"I used the edit_task tool to edit task ID: frost-amber-quartz, title: New title"},
+		},
+		{
+			name: "a failed edit quotes the error",
+			messages: []types.ChatMessage{
+				asstWithCall("call_1", "edit_task", `{"task_id":"frost-amber-quartz","title":"New title"}`),
+				toolAnswer("call_1", "tool edit_task failed: task frost-amber-quartz not found"),
+			},
+			contains: []string{
+				"I used the edit_task tool to edit but was unsuccessful. Error:",
+				"task frost-amber-quartz not found",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := FormatConversationTurns(tc.messages)
+			if tc.want != "" || len(tc.contains) == 0 && len(tc.absent) == 0 {
+				if got != tc.want {
+					t.Errorf("output = %q, want %q", got, tc.want)
+				}
+			}
+			if tc.wantSuffix != "" && !strings.HasSuffix(got, tc.wantSuffix) {
+				t.Errorf("expected trailing %q, got: %q", tc.wantSuffix, got[len(got)-5:])
+			}
+			for _, want := range tc.contains {
+				if !strings.Contains(got, want) {
+					t.Errorf("output missing %q, got:\n%s", want, got)
+				}
+			}
+			for _, notWant := range tc.absent {
+				if strings.Contains(got, notWant) {
+					t.Errorf("output contains %q, got:\n%s", notWant, got)
+				}
+			}
+		})
 	}
 }
 
-// --- FormatConversationTurns Tests ---
-
-func TestFormatConversationTurns_Basic(t *testing.T) {
+// TestFormatChatHistory_ToolCallLines covers the history a summarizer is handed, which renders a tool
+// call through the same wording but its own prefixes: the line names what the call produced, and a
+// failure carries the provider's error rather than a bare "unsuccessful".
+func TestFormatChatHistory_ToolCallLines(t *testing.T) {
 	t.Parallel()
-	messages := []types.ChatMessage{
-		{Role: "user", Content: "Hello"},
-		{Role: "assistant", Content: "Hi there"},
-	}
-	result := FormatConversationTurns(messages)
-	if result != "User: Hello\n\nAssistant: Hi there\n\n" {
-		t.Errorf("unexpected output: %q", result)
-	}
-}
+	const taskArgs = `{"task_id":"frost-amber-quartz","title":"New title"}`
 
-func TestFormatConversationTurns_WithToolResult(t *testing.T) {
-	t.Parallel()
-	messages := []types.ChatMessage{
-		{Role: "assistant", Content: "", ToolCalls: []types.ToolCallMsg{{ID: "call_1", Function: struct {
-			Name      string `json:"name"`
-			Arguments string `json:"arguments"`
-		}{Name: "read_file", Arguments: `{"path":"foo.txt"}`}}}},
-		{Role: "tool", Content: "file contents", ToolCallID: "call_1"},
-	}
-	result := FormatConversationTurns(messages)
-	if result == "" {
-		t.Error("expected non-empty output")
-	}
-	if !strings.Contains(result, "I used the read_file tool to") {
-		t.Errorf("expected descriptive tool call in output, got: %s", result)
-	}
-	if !strings.Contains(result, "foo.txt") {
-		t.Errorf("expected file path in output, got: %s", result)
-	}
-	// Tool result is incorporated into assistant line, not shown separately
-	if strings.Contains(result, "[Tool result]") {
-		t.Error("tool result should be incorporated into assistant line, not shown separately")
-	}
-}
-
-func TestFormatConversationTurns_ToolResultSkipped(t *testing.T) {
-	t.Parallel()
-	// Standalone tool messages (without preceding assistant with matching ToolCalls)
-	// are skipped — they're already incorporated into the assistant line.
-	longContent := strings.Repeat("x", 600)
-	messages := []types.ChatMessage{
-		{Role: "tool", Content: longContent},
-	}
-	result := FormatConversationTurns(messages)
-	// Tool messages are skipped, so output should be empty
-	if result != "" {
-		t.Errorf("expected empty output for standalone tool message, got %d chars", len(result))
-	}
-}
-
-func TestFormatConversationTurns_TrimsTrailingNewlines(t *testing.T) {
-	t.Parallel()
-	messages := []types.ChatMessage{
-		{Role: "user", Content: "Fix the bug\n\n"},
-		{Role: "assistant", Content: "Let me check\n\n\n", ToolCalls: []types.ToolCallMsg{{ID: "call_1", Function: struct {
-			Name      string `json:"name"`
-			Arguments string `json:"arguments"`
-		}{Name: "read_file", Arguments: `{"path":"foo.go"}`}}}},
-		{Role: "tool", Content: "file contents", ToolCallID: "call_1"},
-		{Role: "assistant", Content: "Done!\n"},
-	}
-	result := FormatConversationTurns(messages)
-	// Should not have stacked blank lines (more than 2 consecutive newlines)
-	if strings.Contains(result, "\n\n\n") {
-		t.Errorf("expected no stacked blank lines, got:\n%q", result)
-	}
-	// Each message block should end with exactly \n\n
-	if !strings.HasSuffix(result, "\n\n") {
-		t.Errorf("expected trailing double newline, got: %q", result[len(result)-5:])
+	for _, tc := range []struct {
+		name     string
+		tool     string
+		args     string
+		result   string
+		contains []string
+		absent   []string
+	}{
+		{
+			name: "a created task is named by id and title", tool: "create_task", args: `{"title":"New task"}`,
+			result:   `{"task_id":"frost-amber-quartz","title":"New task"}`,
+			contains: []string{"I used the create_task tool to create task ID: frost-amber-quartz, title: New task"},
+			absent:   []string{"which was"},
+		},
+		{
+			name: "a failed create quotes the error", tool: "create_task", args: `{"title":"Bad task"}`,
+			result:   "error: invalid project",
+			contains: []string{"but was unsuccessful. Error: error: invalid project"},
+		},
+		{
+			name: "an edited task is named by id and title", tool: "edit_task", args: taskArgs,
+			result:   `{"task_id":"frost-amber-quartz","title":"New title","status":"updated"}`,
+			contains: []string{"I used the edit_task tool to edit task ID: frost-amber-quartz, title: New title"},
+		},
+		{
+			name: "a failed edit quotes the error", tool: "edit_task", args: taskArgs,
+			result: "tool edit_task failed: task frost-amber-quartz not found",
+			contains: []string{
+				"I used the edit_task tool to edit but was unsuccessful. Error:",
+				"task frost-amber-quartz not found",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			messages := []types.ChatMessage{
+				chatMsg("system", "system prompt"),
+				chatMsg("user", "do the thing"),
+				asstWithCall("call_1", tc.tool, tc.args),
+				toolAnswer("call_1", tc.result),
+			}
+			history := formatChatHistory(messages, false)
+			for _, want := range tc.contains {
+				if !strings.Contains(history, want) {
+					t.Errorf("chat history missing %q. Got:\n%s", want, history)
+				}
+			}
+			for _, notWant := range tc.absent {
+				if strings.Contains(history, notWant) {
+					t.Errorf("chat history contains %q. Got:\n%s", notWant, history)
+				}
+			}
+		})
 	}
 }
 
@@ -1449,164 +1436,6 @@ func TestFormatToolResult(t *testing.T) {
 				t.Errorf("formatToolResult(%q, %s) = %q, want %q", tc.tool, tc.status, got, tc.want)
 			}
 		})
-	}
-}
-
-// --- FormatConversationTurns with create_task ---
-
-func TestFormatConversationTurns_CreateTask_Success(t *testing.T) {
-	t.Parallel()
-	messages := []types.ChatMessage{
-		{Role: "assistant", Content: "", ToolCalls: []types.ToolCallMsg{{ID: "call_1", Function: struct {
-			Name      string `json:"name"`
-			Arguments string `json:"arguments"`
-		}{Name: "create_task", Arguments: `{"title":"New task"}`}}}},
-		{Role: "tool", Content: `{"task_id":"frost-amber-quartz","title":"New task"}`, ToolCallID: "call_1"},
-	}
-	result := FormatConversationTurns(messages)
-	if !strings.Contains(result, "I used the create_task tool to create task ID: frost-amber-quartz, title: New task") {
-		t.Errorf("expected 'create task ID: frost-amber-quartz, title: New task' in output, got: %s", result)
-	}
-	// Should NOT contain the generic "which was successful"
-	if strings.Contains(result, "which was") {
-		t.Errorf("should not contain 'which was' for create_task success, got: %s", result)
-	}
-}
-
-func TestFormatConversationTurns_CreateTask_Failure(t *testing.T) {
-	t.Parallel()
-	messages := []types.ChatMessage{
-		{Role: "assistant", Content: "", ToolCalls: []types.ToolCallMsg{{ID: "call_1", Function: struct {
-			Name      string `json:"name"`
-			Arguments string `json:"arguments"`
-		}{Name: "create_task", Arguments: `{"title":"New task"}`}}}},
-		{Role: "tool", Content: "error: project not found", ToolCallID: "call_1"},
-	}
-	result := FormatConversationTurns(messages)
-	if !strings.Contains(result, "but was unsuccessful. Error: error: project not found") {
-		t.Errorf("expected error message in output, got: %s", result)
-	}
-}
-
-func TestFormatConversationTurns_EditTask_Success(t *testing.T) {
-	t.Parallel()
-	messages := []types.ChatMessage{
-		{Role: "assistant", Content: "", ToolCalls: []types.ToolCallMsg{{ID: "call_1", Function: struct {
-			Name      string `json:"name"`
-			Arguments string `json:"arguments"`
-		}{Name: "edit_task", Arguments: `{"task_id":"frost-amber-quartz","title":"New title"}`}}}},
-		{Role: "tool", Content: `{"task_id":"frost-amber-quartz","title":"New title","status":"updated"}`, ToolCallID: "call_1"},
-	}
-	result := FormatConversationTurns(messages)
-	if !strings.Contains(result, "I used the edit_task tool to edit task ID: frost-amber-quartz, title: New title") {
-		t.Errorf("expected 'edit task ID: frost-amber-quartz, title: New title' in output, got: %s", result)
-	}
-}
-
-func TestFormatConversationTurns_EditTask_Failure(t *testing.T) {
-	t.Parallel()
-	messages := []types.ChatMessage{
-		{Role: "assistant", Content: "", ToolCalls: []types.ToolCallMsg{{ID: "call_1", Function: struct {
-			Name      string `json:"name"`
-			Arguments string `json:"arguments"`
-		}{Name: "edit_task", Arguments: `{"task_id":"frost-amber-quartz","title":"New title"}`}}}},
-		{Role: "tool", Content: "tool edit_task failed: task frost-amber-quartz not found", ToolCallID: "call_1"},
-	}
-	result := FormatConversationTurns(messages)
-	if !strings.Contains(result, "I used the edit_task tool to edit but was unsuccessful. Error:") {
-		t.Errorf("expected error message in output, got: %s", result)
-	}
-	if !strings.Contains(result, "task frost-amber-quartz not found") {
-		t.Errorf("expected underlying error in output, got: %s", result)
-	}
-}
-
-// --- formatChatHistory with create_task ---
-
-func TestFormatChatHistory_CreateTask_Success(t *testing.T) {
-	t.Parallel()
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "system prompt"},
-		{Role: "user", Content: "Create a new task"},
-		{Role: "assistant", Content: "", ToolCalls: []types.ToolCallMsg{
-			{ID: "call_1", Type: "function"},
-		}},
-		{Role: "tool", Content: `{"task_id":"frost-amber-quartz","title":"New task"}`, ToolCallID: "call_1"},
-	}
-	messages[2].ToolCalls[0].Function.Name = "create_task"
-	messages[2].ToolCalls[0].Function.Arguments = `{"title":"New task"}`
-
-	history := formatChatHistory(messages, false)
-
-	if !strings.Contains(history, "I used the create_task tool to create task ID: frost-amber-quartz, title: New task") {
-		t.Errorf("chat history missing task ID and title. Got:\n%s", history)
-	}
-	// Should NOT contain generic "which was successful"
-	if strings.Contains(history, "which was") {
-		t.Errorf("should not contain 'which was' for create_task success, got:\n%s", history)
-	}
-}
-
-func TestFormatChatHistory_CreateTask_Failure(t *testing.T) {
-	t.Parallel()
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "system prompt"},
-		{Role: "user", Content: "Create a task"},
-		{Role: "assistant", Content: "", ToolCalls: []types.ToolCallMsg{
-			{ID: "call_1", Type: "function"},
-		}},
-		{Role: "tool", Content: "error: invalid project", ToolCallID: "call_1"},
-	}
-	messages[2].ToolCalls[0].Function.Name = "create_task"
-	messages[2].ToolCalls[0].Function.Arguments = `{"title":"Bad task"}`
-
-	history := formatChatHistory(messages, false)
-
-	if !strings.Contains(history, "but was unsuccessful. Error: error: invalid project") {
-		t.Errorf("chat history missing error message. Got:\n%s", history)
-	}
-}
-
-func TestFormatChatHistory_EditTask_Success(t *testing.T) {
-	t.Parallel()
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "system prompt"},
-		{Role: "user", Content: "Edit a task"},
-		{Role: "assistant", Content: "", ToolCalls: []types.ToolCallMsg{
-			{ID: "call_1", Type: "function"},
-		}},
-		{Role: "tool", Content: `{"task_id":"frost-amber-quartz","title":"New title","status":"updated"}`, ToolCallID: "call_1"},
-	}
-	messages[2].ToolCalls[0].Function.Name = "edit_task"
-	messages[2].ToolCalls[0].Function.Arguments = `{"task_id":"frost-amber-quartz","title":"New title"}`
-
-	history := formatChatHistory(messages, false)
-
-	if !strings.Contains(history, "I used the edit_task tool to edit task ID: frost-amber-quartz, title: New title") {
-		t.Errorf("chat history missing task ID and title. Got:\n%s", history)
-	}
-}
-
-func TestFormatChatHistory_EditTask_Failure(t *testing.T) {
-	t.Parallel()
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "system prompt"},
-		{Role: "user", Content: "Edit a task"},
-		{Role: "assistant", Content: "", ToolCalls: []types.ToolCallMsg{
-			{ID: "call_1", Type: "function"},
-		}},
-		{Role: "tool", Content: "tool edit_task failed: task frost-amber-quartz not found", ToolCallID: "call_1"},
-	}
-	messages[2].ToolCalls[0].Function.Name = "edit_task"
-	messages[2].ToolCalls[0].Function.Arguments = `{"task_id":"frost-amber-quartz","title":"New title"}`
-
-	history := formatChatHistory(messages, false)
-
-	if !strings.Contains(history, "I used the edit_task tool to edit but was unsuccessful. Error:") {
-		t.Errorf("chat history missing error message. Got:\n%s", history)
-	}
-	if !strings.Contains(history, "task frost-amber-quartz not found") {
-		t.Errorf("chat history missing underlying error. Got:\n%s", history)
 	}
 }
 
@@ -1861,23 +1690,6 @@ func TestStopProjectTasks(t *testing.T) {
 	}
 }
 
-func TestStopProjectTasks_NoRunningTasks(t *testing.T) {
-	t.Parallel()
-	te := newTestExecutor(t)
-	now := time.Now().UTC()
-	proj := &types.Project{ID: "proj-empty", Name: "Empty Project", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
-	if err := te.store.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	createTaskInProject(t, te.store, proj.ID, "idle-task")
-
-	// No running executors
-	stopped := te.StopProjectTasks(proj.ID)
-	if stopped != 0 {
-		t.Fatalf("expected 0 tasks stopped, got %d", stopped)
-	}
-}
-
 func TestStopProjectTasks_DoesNotAffectNonRunningTasks(t *testing.T) {
 	t.Parallel()
 	te := newTestExecutor(t)
@@ -2061,102 +1873,95 @@ func TestIsImageFile(t *testing.T) {
 
 // --- Helper Function Tests ---
 
-func TestUserMessageToChatMessage_PlainText(t *testing.T) {
+// TestUserMessageToChatMessage covers the frame a browser send becomes: plain text stays plain, attachments
+// become a text part plus an image part, a data: prefix is stripped from the bytes, and an attachment string
+// that is not JSON is dropped rather than sent as a half-formed part.
+func TestUserMessageToChatMessage(t *testing.T) {
 	t.Parallel()
-	um := stream.UserMessage{Content: "hello world"}
-	msg := userMessageToChatMessage(um)
+	attach := func(t *testing.T, atts ...types.Attachment) string {
+		t.Helper()
+		b, err := json.Marshal(atts)
+		if err != nil {
+			t.Fatalf("marshal attachments: %v", err)
+		}
+		return string(b)
+	}
 
-	if msg.Role != "user" {
-		t.Errorf("expected role 'user', got %q", msg.Role)
-	}
-	if msg.Content != "hello world" {
-		t.Errorf("expected content 'hello world', got %q", msg.Content)
-	}
-	if len(msg.ContentParts) > 0 {
-		t.Error("expected no ContentParts for plain text message")
-	}
-}
-
-func TestUserMessageToChatMessage_WithAttachments(t *testing.T) {
-	t.Parallel()
-	atts, _ := json.Marshal([]struct {
-		MimeType string `json:"mimeType"`
-		Data     string `json:"data"`
+	for _, tc := range []struct {
+		name        string
+		content     string
+		attachments string
+		wantContent string
+		wantParts   []types.ContentPart
 	}{
-		{MimeType: "image/png", Data: "iVBORw0KGgo="},
-	})
-	um := stream.UserMessage{Content: "check this image", Attachments: string(atts)}
-	msg := userMessageToChatMessage(um)
-
-	if msg.Role != "user" {
-		t.Errorf("expected role 'user', got %q", msg.Role)
-	}
-	if len(msg.ContentParts) != 2 {
-		t.Fatalf("expected 2 ContentParts (text + image), got %d", len(msg.ContentParts))
-	}
-	if msg.ContentParts[0].Type != "text" {
-		t.Errorf("expected first part to be text, got %q", msg.ContentParts[0].Type)
-	}
-	if msg.ContentParts[0].Text != "check this image" {
-		t.Errorf("expected text 'check this image', got %q", msg.ContentParts[0].Text)
-	}
-	if msg.ContentParts[1].Type != "image" {
-		t.Errorf("expected second part to be image, got %q", msg.ContentParts[1].Type)
-	}
-}
-
-func TestUserMessageToChatMessage_StripsDataPrefix(t *testing.T) {
-	t.Parallel()
-	atts, _ := json.Marshal([]struct {
-		MimeType string `json:"mimeType"`
-		Data     string `json:"data"`
-	}{
-		{MimeType: "image/png", Data: "data:image/png;base64,abc123"},
-	})
-	um := stream.UserMessage{Content: "test", Attachments: string(atts)}
-	msg := userMessageToChatMessage(um)
-
-	if msg.ContentParts[1].ImageSource == nil {
-		t.Fatal("expected ImageSource to be set")
-	}
-	if msg.ContentParts[1].ImageSource.Data != "abc123" {
-		t.Errorf("expected data prefix stripped, got %q", msg.ContentParts[1].ImageSource.Data)
-	}
-}
-
-func TestUserMessageToChatMessage_DefaultMimeType(t *testing.T) {
-	t.Parallel()
-	atts, _ := json.Marshal([]struct {
-		MimeType string `json:"mimeType"`
-		Data     string `json:"data"`
-	}{
-		{MimeType: "", Data: "base64data"},
-	})
-	um := stream.UserMessage{Content: "test", Attachments: string(atts)}
-	msg := userMessageToChatMessage(um)
-
-	if msg.ContentParts[1].ImageSource.MediaType != "image/png" {
-		t.Errorf("expected default mimeType 'image/png', got %q", msg.ContentParts[1].ImageSource.MediaType)
-	}
-}
-
-func TestUserMessageToChatMessage_InvalidJSON(t *testing.T) {
-	t.Parallel()
-	um := stream.UserMessage{Content: "test", Attachments: "not-json"}
-	msg := userMessageToChatMessage(um)
-
-	// Should fall back to plain text message
-	if msg.Content != "test" {
-		t.Errorf("expected fallback to plain text, got %q", msg.Content)
-	}
-	if len(msg.ContentParts) > 0 {
-		t.Error("expected no ContentParts for invalid JSON attachments")
+		{
+			name: "plain text", content: "hello world",
+			wantContent: "hello world",
+		},
+		{
+			name: "an attachment becomes a second part", content: "check this image",
+			attachments: attach(t, types.Attachment{MimeType: "image/png", Data: "iVBORw0KGgo="}),
+			// A message with parts carries no plain content of its own: the text is its first part.
+			wantParts: []types.ContentPart{
+				{Type: "text", Text: "check this image"},
+				{Type: "image", ImageSource: &types.ImageSource{MediaType: "image/png", Data: "iVBORw0KGgo="}},
+			},
+		},
+		{
+			name: "a data: prefix is stripped from the bytes", content: "test",
+			attachments: attach(t, types.Attachment{MimeType: "image/png", Data: "data:image/png;base64,abc123"}),
+			wantParts: []types.ContentPart{
+				{Type: "text", Text: "test"},
+				{Type: "image", ImageSource: &types.ImageSource{MediaType: "image/png", Data: "abc123"}},
+			},
+		},
+		{
+			name: "an unlabelled attachment is a png", content: "test",
+			attachments: attach(t, types.Attachment{MimeType: "", Data: "base64data"}),
+			wantParts: []types.ContentPart{
+				{Type: "text", Text: "test"},
+				{Type: "image", ImageSource: &types.ImageSource{MediaType: "image/png", Data: "base64data"}},
+			},
+		},
+		{
+			name: "attachments that are not JSON are dropped", content: "test",
+			attachments: "not-json", wantContent: "test",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			msg := userMessageToChatMessage(stream.UserMessage{Content: tc.content, Attachments: tc.attachments})
+			if msg.Role != "user" {
+				t.Errorf("role = %q, want user", msg.Role)
+			}
+			if msg.Content != tc.wantContent {
+				t.Errorf("content = %q, want %q", msg.Content, tc.wantContent)
+			}
+			if len(msg.ContentParts) != len(tc.wantParts) {
+				t.Fatalf("got %d content parts, want %d: %+v", len(msg.ContentParts), len(tc.wantParts), msg.ContentParts)
+			}
+			for i, want := range tc.wantParts {
+				got := msg.ContentParts[i]
+				if got.Type != want.Type || got.Text != want.Text {
+					t.Errorf("part[%d] = %s:%q, want %s:%q", i, got.Type, got.Text, want.Type, want.Text)
+				}
+				if want.ImageSource == nil {
+					if got.ImageSource != nil {
+						t.Errorf("part[%d] carries an image source %+v, want none", i, got.ImageSource)
+					}
+					continue
+				}
+				if got.ImageSource == nil {
+					t.Fatalf("part[%d] has no image source, want %+v", i, want.ImageSource)
+				}
+				if got.ImageSource.MediaType != want.ImageSource.MediaType || got.ImageSource.Data != want.ImageSource.Data {
+					t.Errorf("part[%d] image source = %+v, want media type %q and data %q",
+						i, *got.ImageSource, want.ImageSource.MediaType, want.ImageSource.Data)
+				}
+			}
+		})
 	}
 }
 
-// TestExtractPrevSummary covers picking up the earlier summary to continue from. Two rules
-// matter: only the summarization role counts (an assistant message is not a summary), and
-// the LAST one wins — resuming from a stale summary would re-summarize from the wrong point.
 func TestExtractPrevSummary(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -2211,221 +2016,135 @@ func TestExtractPrevSummary(t *testing.T) {
 
 // --- buildLLMContext Tests ---
 
-func TestBuildLLMContext_NoSummary(t *testing.T) {
-	t.Parallel()
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "system prompt"},
-		{Role: "user", Content: "hello"},
-		{Role: "assistant", Content: "hi"},
-	}
-	result := buildLLMContext(messages)
-	// No summary: passthrough.
-	if len(result) != len(messages) {
-		t.Fatalf("expected %d messages, got %d", len(messages), len(result))
-	}
-	for i := range messages {
-		if result[i].Role != messages[i].Role || result[i].Content != messages[i].Content {
-			t.Errorf("message[%d] mismatch: got %v, want %v", i, result[i], messages[i])
-		}
+// callMsg is the tool call an assistant row carries.
+func callMsg(id, name, args string) types.ToolCallMsg {
+	return types.ToolCallMsg{
+		ID: id, Type: "function",
+		Function: struct {
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+		}{Name: name, Arguments: args},
 	}
 }
 
-func TestBuildLLMContext_WithSummary(t *testing.T) {
+// TestBuildLLMContext covers what a summarization request is priced from. The summary row is the cut:
+// everything at or before it is dropped, because the summary replaces it in the system prompt, so a stale
+// or an early boundary would either resend the history or drop the answer the model still needs. Nothing
+// that never came from a summarization row counts as one, and a request_review turn stays whole — dropping
+// it is what makes a run ask to be reviewed again.
+func TestBuildLLMContext(t *testing.T) {
 	t.Parallel()
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "system prompt"},
-		{Role: "user", Content: "old message 1"},
-		{Role: "assistant", Content: "old response 1"},
-		{Role: "user", Content: "old message 2"},
-		{Role: "assistant", Content: "old response 2"},
-		{Role: "summarization", Content: "summary of conversation"},
-		{Role: "user", Content: "new message"},
-		{Role: "assistant", Content: "new response"},
-	}
-	result := buildLLMContext(messages)
-
-	// Summary is in system prompt; summarization message and all pre-summary
-	// messages are dropped. System prompt + post-summary messages remain: 3
-	if len(result) != 3 {
-		t.Fatalf("expected 3 messages, got %d", len(result))
-	}
-	// No summarization role in output
-	for _, m := range result {
-		if m.Role == "summarization" {
-			t.Error("summarization messages should be filtered out")
-		}
-	}
-	// System prompt + only post-summary messages preserved
-	expected := []types.ChatMessage{
-		{Role: "system", Content: "system prompt"},
-		{Role: "user", Content: "new message"},
-		{Role: "assistant", Content: "new response"},
-	}
-	for i, exp := range expected {
-		if result[i].Role != exp.Role || result[i].Content != exp.Content {
-			t.Errorf("message[%d] mismatch: got %s:%q, want %s:%q", i, result[i].Role, result[i].Content, exp.Role, exp.Content)
-		}
-	}
-}
-
-func TestBuildLLMContext_MultipleSummaries(t *testing.T) {
-	t.Parallel()
-	// With re-summarization, only messages after the LAST summary are kept.
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "system prompt"},
-		{Role: "user", Content: "very old message"},
-		{Role: "assistant", Content: "very old response"},
-		{Role: "summarization", Content: "first summary"},
-		{Role: "user", Content: "mid message"},
-		{Role: "assistant", Content: "mid response"},
-		{Role: "summarization", Content: "second summary (includes first)"},
-		{Role: "user", Content: "latest message"},
-	}
-	result := buildLLMContext(messages)
-
-	// System + only post-last-summary messages: 2
-	if len(result) != 2 {
-		t.Fatalf("expected 2 messages, got %d", len(result))
-	}
-	if result[0].Role != "system" {
-		t.Errorf("expected system, got %s", result[0].Role)
-	}
-	if result[1].Content != "latest message" {
-		t.Errorf("expected 'latest message', got %q", result[1].Content)
-	}
-	// Mid messages (between summaries) should also be dropped
-	for _, m := range result {
-		if m.Content == "mid message" || m.Content == "mid response" {
-			t.Error("messages between summaries should be dropped")
-		}
-	}
-}
-
-func TestBuildLLMContext_WithToolCalls(t *testing.T) {
-	t.Parallel()
-	assistantWithTool := types.ChatMessage{
-		Role:    "assistant",
-		Content: "ok",
-		ToolCalls: []types.ToolCallMsg{
-			{ID: "call1", Type: "function"},
+	for _, tc := range []struct {
+		name      string
+		messages  []types.ChatMessage
+		want      []types.ChatMessage
+		wantTools []string
+	}{
+		{
+			name:     "no summary sends the conversation as it stands",
+			messages: []types.ChatMessage{chatMsg("system", "system prompt"), chatMsg("user", "hello"), chatMsg("assistant", "hi")},
+			want:     []types.ChatMessage{chatMsg("system", "system prompt"), chatMsg("user", "hello"), chatMsg("assistant", "hi")},
 		},
-	}
-	assistantWithTool.ToolCalls[0].Function.Name = "bash"
-	assistantWithTool.ToolCalls[0].Function.Arguments = "{}"
-
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "system prompt"},
-		{Role: "user", Content: "do something"},
-		assistantWithTool,
-		{Role: "tool", Content: "output", ToolCallID: "call1"},
-		{Role: "summarization", Content: "summary"},
-		{Role: "user", Content: "done"},
-	}
-	result := buildLLMContext(messages)
-
-	// Pre-summary tool calls are dropped (captured by summary in system prompt).
-	// Expected: system + user = 2
-	if len(result) != 2 {
-		t.Fatalf("expected 2 messages, got %d", len(result))
-	}
-	if result[0].Role != "system" {
-		t.Errorf("expected system, got %s", result[0].Role)
-	}
-	if result[1].Content != "done" {
-		t.Errorf("expected 'done', got %q", result[1].Content)
-	}
-}
-
-// --- buildLLMContext request_review filter Tests ---
-
-func TestBuildLLMContext_FiltersTaskComplete(t *testing.T) {
-	t.Parallel()
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "system prompt"},
-		{Role: "user", Content: "fix the bug"},
-		{Role: "assistant", Content: "I'll fix it", ToolCalls: []types.ToolCallMsg{
-			{ID: "call1", Type: "function"},
-		}},
-		{Role: "tool", Content: "file contents", ToolCallID: "call1"},
-		{Role: "assistant", Content: "Task done!", ToolCalls: []types.ToolCallMsg{
-			{ID: "call2", Type: "function"},
-		}},
-		{Role: "user", Content: "now do something else"},
-		{Role: "assistant", Content: "working on it"},
-	}
-	// Set tool names
-	messages[2].ToolCalls[0].Function.Name = "read_file"
-	messages[2].ToolCalls[0].Function.Arguments = `{"path":"foo.go"}`
-	messages[4].ToolCalls[0].Function.Name = "request_review"
-	messages[4].ToolCalls[0].Function.Arguments = `{"summary":"fixed"}`
-
-	result := buildLLMContext(messages)
-
-	// request_review assistant (msg[4]) should be kept
-	// system + user + assistant(read_file) + tool + assistant(request_review) + user + assistant = 7
-	if len(result) != 7 {
-		t.Fatalf("expected 7 messages, got %d", len(result))
-		for i, m := range result {
-			t.Logf("  [%d] role=%s content=%q toolCalls=%v", i, m.Role, m.Content, m.ToolCalls)
-		}
-	}
-
-	// Verify request_review tool call is present in result
-	foundRequestReview := false
-	for _, m := range result {
-		for _, tc := range m.ToolCalls {
-			if tc.Function.Name == "request_review" {
-				foundRequestReview = true
+		{
+			name: "the summary and everything before it are dropped",
+			messages: []types.ChatMessage{
+				chatMsg("system", "system prompt"),
+				chatMsg("user", "old message 1"), chatMsg("assistant", "old response 1"),
+				chatMsg("user", "old message 2"), chatMsg("assistant", "old response 2"),
+				chatMsg("summarization", "summary of conversation"),
+				chatMsg("user", "new message"), chatMsg("assistant", "new response"),
+			},
+			want: []types.ChatMessage{chatMsg("system", "system prompt"), chatMsg("user", "new message"), chatMsg("assistant", "new response")},
+		},
+		{
+			name: "only the newest summary cuts",
+			messages: []types.ChatMessage{
+				chatMsg("system", "system prompt"),
+				chatMsg("user", "very old message"), chatMsg("assistant", "very old response"),
+				chatMsg("summarization", "first summary"),
+				chatMsg("user", "mid message"), chatMsg("assistant", "mid response"),
+				chatMsg("summarization", "second summary (includes first)"),
+				chatMsg("user", "latest message"),
+			},
+			want: []types.ChatMessage{chatMsg("system", "system prompt"), chatMsg("user", "latest message")},
+		},
+		{
+			name: "a pre-summary tool call goes with the conversation the summary replaced",
+			messages: []types.ChatMessage{
+				chatMsg("system", "system prompt"),
+				chatMsg("user", "do something"),
+				{Role: "assistant", Content: "ok", ToolCalls: []types.ToolCallMsg{callMsg("call1", "bash", "{}")}},
+				toolAnswer("call1", "output"),
+				chatMsg("summarization", "summary"),
+				chatMsg("user", "done"),
+			},
+			want: []types.ChatMessage{chatMsg("system", "system prompt"), chatMsg("user", "done")},
+		},
+		{
+			name: "a request_review turn stays",
+			messages: []types.ChatMessage{
+				chatMsg("system", "system prompt"),
+				chatMsg("user", "fix the bug"),
+				{Role: "assistant", Content: "I'll fix it", ToolCalls: []types.ToolCallMsg{callMsg("call1", "read_file", `{"path":"foo.go"}`)}},
+				toolAnswer("call1", "file contents"),
+				{Role: "assistant", Content: "Task done!", ToolCalls: []types.ToolCallMsg{callMsg("call2", "request_review", `{"summary":"fixed"}`)}},
+				chatMsg("user", "now do something else"),
+				chatMsg("assistant", "working on it"),
+			},
+			want: []types.ChatMessage{
+				chatMsg("system", "system prompt"), chatMsg("user", "fix the bug"),
+				{Role: "assistant", Content: "I'll fix it"}, {Role: "tool", Content: "file contents"},
+				{Role: "assistant", Content: "Task done!"}, chatMsg("user", "now do something else"),
+				chatMsg("assistant", "working on it"),
+			},
+			wantTools: []string{"request_review"},
+		},
+		{
+			name: "an assistant row mixing a command with request_review stays whole",
+			messages: []types.ChatMessage{
+				chatMsg("system", "system prompt"),
+				chatMsg("user", "fix and complete"),
+				{Role: "assistant", ToolCalls: []types.ToolCallMsg{
+					callMsg("call1", "bash", `{"command":"git status"}`),
+					callMsg("call2", "request_review", `{"summary":"done"}`),
+				}},
+				toolAnswer("call1", "result"),
+				toolAnswer("call2", "completed"),
+				chatMsg("user", "next"),
+			},
+			want: []types.ChatMessage{
+				chatMsg("system", "system prompt"), chatMsg("user", "fix and complete"),
+				{Role: "assistant", Content: ""}, {Role: "tool", Content: "result"},
+				{Role: "tool", Content: "completed"}, chatMsg("user", "next"),
+			},
+			wantTools: []string{"bash", "request_review"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := buildLLMContext(tc.messages)
+			if len(got) != len(tc.want) {
+				t.Fatalf("got %d messages, want %d: %+v", len(got), len(tc.want), got)
 			}
-		}
-	}
-	if !foundRequestReview {
-		t.Error("request_review tool call should be present")
-	}
-}
-
-func TestBuildLLMContext_FiltersOnlyTaskCompleteToolCall(t *testing.T) {
-	t.Parallel()
-	// Assistant message with mixed tool calls: bash + request_review
-	// The entire assistant message should be filtered since it contains request_review
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "system prompt"},
-		{Role: "user", Content: "fix and complete"},
-		{Role: "assistant", Content: "", ToolCalls: []types.ToolCallMsg{
-			{ID: "call1", Type: "function"},
-			{ID: "call2", Type: "function"},
-		}},
-		{Role: "tool", Content: "result", ToolCallID: "call1"},
-		{Role: "tool", Content: "completed", ToolCallID: "call2"},
-		{Role: "user", Content: "next"},
-	}
-	messages[2].ToolCalls[0].Function.Name = "bash"
-	messages[2].ToolCalls[0].Function.Arguments = `{"command":"git status"}`
-	messages[2].ToolCalls[1].Function.Name = "request_review"
-	messages[2].ToolCalls[1].Function.Arguments = `{"summary":"done"}`
-
-	result := buildLLMContext(messages)
-
-	// Assistant with request_review + both tool results should be kept
-	// system + user + assistant + tool + tool + user = 6
-	if len(result) != 6 {
-		t.Fatalf("expected 6 messages, got %d", len(result))
-		for i, m := range result {
-			t.Logf("  [%d] role=%s content=%q", i, m.Role, m.Content)
-		}
-	}
-
-	// Verify request_review is present
-	foundRequestReview := false
-	for _, m := range result {
-		for _, tc := range m.ToolCalls {
-			if tc.Function.Name == "request_review" {
-				foundRequestReview = true
+			for i, want := range tc.want {
+				if got[i].Role != want.Role || got[i].Content != want.Content {
+					t.Errorf("message[%d] = %s:%q, want %s:%q", i, got[i].Role, got[i].Content, want.Role, want.Content)
+				}
 			}
-		}
-	}
-	if !foundRequestReview {
-		t.Error("request_review tool call should be present")
+			present := map[string]bool{}
+			for _, m := range got {
+				if m.Role == "summarization" {
+					t.Errorf("a summarization row reached the conversation: %q", m.Content)
+				}
+				for _, call := range m.ToolCalls {
+					present[call.Function.Name] = true
+				}
+			}
+			for _, name := range tc.wantTools {
+				if !present[name] {
+					t.Errorf("the %s tool call was dropped", name)
+				}
+			}
+		})
 	}
 }
 
@@ -2500,234 +2219,112 @@ func mockSummarizeLLM() *httptest.Server {
 	}))
 }
 
-func TestMaybeAutoSummarize_TriggersAboveThreshold(t *testing.T) {
+// TestMaybeAutoSummarize covers the usage trigger end to end against a summarizing provider: a
+// conversation past the threshold of its reported window is compacted, the "Proceed" that feeds the
+// compressed context back to the model is appended and stored only when the loop is about to ask again,
+// and a conversation under the threshold is left exactly as it was.
+func TestMaybeAutoSummarize(t *testing.T) {
 	// Summarization renders prompts/summarize.tmpl from the CWD — chdir to the
 	// repo root so the template is found (mirrors how the running server resolves it).
-	_, thisFile, _, _ := runtime.Caller(0)
-	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
-	oldwd, _ := os.Getwd()
-	if err := os.Chdir(repoRoot); err != nil {
-		t.Fatalf("chdir to repo root: %v", err)
-	}
-	defer func() { _ = os.Chdir(oldwd) }()
+	chdirToRepoRoot(t)
 
-	te := newTestExecutor(t)
-	te.gate = NewConcurrencyGate()
-	s := te.store
-	proj := createProject(t, s, "proj-sum-trigger", "Sum Trigger")
+	for _, tc := range []struct {
+		name          string
+		promptTokens  int
+		injectProceed bool
+		wantSummary   bool
+		wantProceed   bool
+	}{
+		{"below the threshold nothing happens", 5000, false, false, false},
+		{"above the threshold, not fed back", 9200, false, true, false},
+		{"above the threshold, fed back to the loop", 9200, true, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			te := newTestExecutor(t)
+			te.gate = NewConcurrencyGate()
+			s := te.store
+			proj := createProject(t, s, "proj-sum-"+strings.ReplaceAll(tc.name, " ", "-"), "Sum")
 
-	server := mockSummarizeLLM()
-	defer server.Close()
+			server := mockSummarizeLLM()
+			defer server.Close()
 
-	now := time.Now().UTC()
-	task := &types.Task{
-		ID:              "sum-trigger-task",
-		ProjectID:       proj.ID,
-		Title:           "Sum task",
-		Status:          types.StatusReview,
-		ExecutionState:  types.ExecStateIdle,
-		LlamaServerURL:  server.URL,
-		ModelName:       "test-model",
-		CurrentThreadID: "thread-1",
-		CreatedAt:       now,
-		UpdatedAt:       now,
-	}
-	if err := s.CreateTask(task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
+			now := time.Now().UTC()
+			taskID := "sum-" + fmt.Sprint(tc.promptTokens) + "-" + fmt.Sprint(tc.injectProceed)
+			task := &types.Task{
+				ID:              taskID,
+				ProjectID:       proj.ID,
+				Title:           "Sum task",
+				Status:          types.StatusReview,
+				ExecutionState:  types.ExecStateIdle,
+				LlamaServerURL:  server.URL,
+				ModelName:       "test-model",
+				CurrentThreadID: "thread-1",
+				CreatedAt:       now,
+				UpdatedAt:       now,
+			}
+			if err := s.CreateTask(task); err != nil {
+				t.Fatalf("create task: %v", err)
+			}
 
-	// Context usage at 92% of a 10000-token window (> 90%) should trigger.
-	cw := 10000
-	lc := &loopContext{
-		messages:      []types.ChatMessage{{Role: "user", Content: "hello"}},
-		contextWindow: &cw,
-		usage:         &types.ChatUsage{PromptTokens: 9200, CompletionTokens: 0},
-		detector:      newLoopDetector(),
-		mc:            &modelConfig{serverURL: server.URL, modelName: "test-model"},
-	}
-	setup := &taskExecSetup{
-		task:      task,
-		projectID: proj.ID,
-		ctx:       context.Background(),
-		serverURL: server.URL,
-		modelName: "test-model",
-	}
+			// The provider's own count of the conversation, against a 10000-token window.
+			cw := 10000
+			lc := &loopContext{
+				messages:      []types.ChatMessage{{Role: "user", Content: "hello"}},
+				contextWindow: &cw,
+				usage:         &types.ChatUsage{PromptTokens: tc.promptTokens, CompletionTokens: 0},
+				detector:      newLoopDetector(),
+				mc:            &modelConfig{serverURL: server.URL, modelName: "test-model"},
+			}
+			setup := &taskExecSetup{
+				task:      task,
+				projectID: proj.ID,
+				ctx:       context.Background(),
+				serverURL: server.URL,
+				modelName: "test-model",
+			}
 
-	te.summarize.maybeAutoSummarize(setup, lc, "test-model", false)
+			te.summarize.maybeAutoSummarize(setup, lc, "test-model", tc.injectProceed)
 
-	var hasSummary bool
-	for _, m := range lc.messages {
-		if m.Role == "summarization" {
-			hasSummary = true
-		}
-	}
-	if !hasSummary {
-		t.Fatal("expected a summarization message to be appended when context exceeds 90%")
-	}
-	if task.Summarizing {
-		t.Fatal("Summarizing flag should be cleared on the caller's task after summarization")
-	}
-	// injectProceed=false must NOT append or persist a "Proceed" user message.
-	for _, m := range lc.messages {
-		if m.Role == "user" && m.Content == "Proceed" {
-			t.Fatal("injectProceed=false must not append a 'Proceed' user message")
-		}
-	}
-	msgs, _ := s.GetTaskMessages(task.ID, "thread-1")
-	for _, m := range msgs {
-		if m.Role == "user" && m.Content == "Proceed" {
-			t.Fatal("injectProceed=false must not persist a 'Proceed' user message")
-		}
-	}
-}
+			summaryIdx, proceedIdx, proceedStored := -1, -1, false
+			for i, m := range lc.messages {
+				if m.Role == "summarization" {
+					summaryIdx = i
+				}
+				if m.Role == "user" && m.Content == "Proceed" {
+					proceedIdx = i
+				}
+			}
+			msgs, err := s.GetTaskMessages(task.ID, "thread-1")
+			if err != nil {
+				t.Fatalf("get messages: %v", err)
+			}
+			for _, m := range msgs {
+				if m.Role == "user" && m.Content == "Proceed" {
+					proceedStored = true
+				}
+			}
 
-// TestMaybeAutoSummarize_InjectProceedWhenFeedingBack verifies that when auto-
-// summarization succeeds with injectProceed=true (the loop is about to feed the
-// compressed context back to the LLM), a "Proceed" user message is appended to
-// the in-memory context AND persisted in the store (visible in the chat UI).
-func TestMaybeAutoSummarize_InjectProceedWhenFeedingBack(t *testing.T) {
-	_, thisFile, _, _ := runtime.Caller(0)
-	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
-	oldwd, _ := os.Getwd()
-	if err := os.Chdir(repoRoot); err != nil {
-		t.Fatalf("chdir to repo root: %v", err)
-	}
-	defer func() { _ = os.Chdir(oldwd) }()
-
-	te := newTestExecutor(t)
-	te.gate = NewConcurrencyGate()
-	s := te.store
-	proj := createProject(t, s, "proj-sum-proceed", "Sum Proceed")
-
-	server := mockSummarizeLLM()
-	defer server.Close()
-
-	now := time.Now().UTC()
-	task := &types.Task{
-		ID:              "sum-proceed-task",
-		ProjectID:       proj.ID,
-		Title:           "Sum task",
-		Status:          types.StatusReview,
-		ExecutionState:  types.ExecStateIdle,
-		LlamaServerURL:  server.URL,
-		ModelName:       "test-model",
-		CurrentThreadID: "thread-1",
-		CreatedAt:       now,
-		UpdatedAt:       now,
-	}
-	if err := s.CreateTask(task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	// Context usage at 92% of a 10000-token window (> 90%) should trigger.
-	cw := 10000
-	lc := &loopContext{
-		messages:      []types.ChatMessage{{Role: "user", Content: "hello"}},
-		contextWindow: &cw,
-		usage:         &types.ChatUsage{PromptTokens: 9200, CompletionTokens: 0},
-		detector:      newLoopDetector(),
-		mc:            &modelConfig{serverURL: server.URL, modelName: "test-model"},
-	}
-	setup := &taskExecSetup{
-		task:      task,
-		projectID: proj.ID,
-		ctx:       context.Background(),
-		serverURL: server.URL,
-		modelName: "test-model",
-	}
-
-	te.summarize.maybeAutoSummarize(setup, lc, "test-model", true)
-
-	// A summarization message must be appended first.
-	summaryIdx := -1
-	for i, m := range lc.messages {
-		if m.Role == "summarization" {
-			summaryIdx = i
-		}
-	}
-	if summaryIdx < 0 {
-		t.Fatal("expected a summarization message to be appended when context exceeds 90%")
-	}
-
-	// ...and the injected user "Proceed" message comes last, after the reproduction of what the
-	// summarization dropped.
-	if summaryIdx > len(lc.messages)-2 {
-		t.Fatalf("expected rows after the summary, got %d messages with summary at index %d", len(lc.messages), summaryIdx)
-	}
-	last := lc.messages[len(lc.messages)-1]
-	if last.Role != "user" || last.Content != "Proceed" {
-		t.Fatalf("expected injected user 'Proceed' message after summary, got role=%q content=%q", last.Role, last.Content)
-	}
-
-	// The "Proceed" message must be persisted in the store (visible in chat UI).
-	msgs, err := s.GetTaskMessages(task.ID, "thread-1")
-	if err != nil {
-		t.Fatalf("get messages: %v", err)
-	}
-	var persistedProceed bool
-	for _, m := range msgs {
-		if m.Role == "user" && m.Content == "Proceed" {
-			persistedProceed = true
-		}
-	}
-	if !persistedProceed {
-		t.Fatal("expected a persisted user 'Proceed' message in the store")
-	}
-
-	if task.Summarizing {
-		t.Fatal("Summarizing flag should be cleared on the caller's task after summarization")
-	}
-}
-
-func TestMaybeAutoSummarize_NoTriggerBelowThreshold(t *testing.T) {
-	t.Parallel()
-	te := newTestExecutor(t)
-	te.gate = NewConcurrencyGate()
-	s := te.store
-	proj := createProject(t, s, "proj-sum-notrigger", "Sum NoTrigger")
-
-	server := mockSummarizeLLM()
-	defer server.Close()
-
-	now := time.Now().UTC()
-	task := &types.Task{
-		ID:              "sum-notrigger-task",
-		ProjectID:       proj.ID,
-		Status:          types.StatusReview,
-		ExecutionState:  types.ExecStateIdle,
-		LlamaServerURL:  server.URL,
-		ModelName:       "test-model",
-		CurrentThreadID: "thread-1",
-		CreatedAt:       now,
-		UpdatedAt:       now,
-	}
-	if err := s.CreateTask(task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	// Context usage at 50% — well below threshold — must NOT trigger.
-	cw := 10000
-	lc := &loopContext{
-		messages:      []types.ChatMessage{{Role: "user", Content: "hello"}},
-		contextWindow: &cw,
-		usage:         &types.ChatUsage{PromptTokens: 5000, CompletionTokens: 0},
-		detector:      newLoopDetector(),
-		mc:            &modelConfig{serverURL: server.URL, modelName: "test-model"},
-	}
-	setup := &taskExecSetup{
-		task:      task,
-		projectID: proj.ID,
-		ctx:       context.Background(),
-		serverURL: server.URL,
-		modelName: "test-model",
-	}
-
-	te.summarize.maybeAutoSummarize(setup, lc, "test-model", false)
-
-	for _, m := range lc.messages {
-		if m.Role == "summarization" {
-			t.Fatal("summarization should NOT trigger below 90% threshold")
-		}
+			if tc.wantSummary != (summaryIdx >= 0) {
+				t.Fatalf("summarization row = %t, want %t (prompt_tokens %d of %d)",
+					summaryIdx >= 0, tc.wantSummary, tc.promptTokens, cw)
+			}
+			if !tc.wantSummary {
+				return
+			}
+			// The Proceed, when there is one, is last: it follows the summary and the reproduction
+			// of what the summary dropped.
+			if tc.wantProceed != (proceedIdx >= 0) || tc.wantProceed != proceedStored {
+				t.Errorf("the Proceed message: in memory = %t, stored = %t, want both = %t",
+					proceedIdx >= 0, proceedStored, tc.wantProceed)
+			}
+			if tc.wantProceed && summaryIdx > len(lc.messages)-2 {
+				t.Errorf("expected rows after the summary, got %d messages with summary at index %d",
+					len(lc.messages), summaryIdx)
+			}
+			if task.Summarizing {
+				t.Error("Summarizing flag should be cleared on the caller's task after summarization")
+			}
+		})
 	}
 }
 
@@ -2840,58 +2437,45 @@ func TestNotifyContextChanged_NoOpWhenNoTask(t *testing.T) {
 
 // --- streamFlusher Tests ---
 
-func TestStreamFlusher_TokenBatching(t *testing.T) {
+// TestStreamFlusher_BatchesEachBufferIntoOneEvent: appended tokens and appended reasoning each reach the
+// wire once per flush, joined in the order they arrived — batching per token would put a frame on the
+// socket for every chunk the provider sent.
+func TestStreamFlusher_BatchesEachBufferIntoOneEvent(t *testing.T) {
 	t.Parallel()
-	var events []types.StreamEvent
-	flusher := newStreamFlusher("proj", "task", func(_, _ string, e types.StreamEvent) {
-		events = append(events, e)
-	}, newLoopDetector())
+	for _, tc := range []struct {
+		name     string
+		wantType types.WSMessageType
+		append   func(*streamFlusher, string)
+		chunks   []string
+		want     string
+	}{
+		{"tokens", types.WSTypeToken, (*streamFlusher).appendToken, []string{"Hello", " ", "world"}, "Hello world"},
+		{"reasoning", types.WSTypeReasoning, (*streamFlusher).appendReasoning, []string{"Thinking", " about", " the problem"}, "Thinking about the problem"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var events []types.StreamEvent
+			flusher := newStreamFlusher("proj", "task", func(_, _ string, e types.StreamEvent) {
+				events = append(events, e)
+			}, newLoopDetector())
 
-	// Append multiple tokens
-	flusher.appendToken("Hello")
-	flusher.appendToken(" ")
-	flusher.appendToken("world")
+			for _, chunk := range tc.chunks {
+				tc.append(flusher, chunk)
+			}
+			if len(events) != 0 {
+				t.Fatalf("expected 0 events before flush, got %d", len(events))
+			}
 
-	// No events sent yet (not flushed)
-	if len(events) != 0 {
-		t.Fatalf("expected 0 events before flush, got %d", len(events))
-	}
-
-	// Flush — should send a single batched token event
-	flusher.flush()
-	if len(events) != 1 {
-		t.Fatalf("expected 1 event after flush, got %d", len(events))
-	}
-	if events[0].Type != types.WSTypeToken {
-		t.Fatalf("expected WSTypeToken, got %v", events[0].Type)
-	}
-	text := events[0].Data.(map[string]string)["text"]
-	if text != "Hello world" {
-		t.Errorf("expected 'Hello world', got %q", text)
-	}
-}
-
-func TestStreamFlusher_ReasoningBatching(t *testing.T) {
-	t.Parallel()
-	var events []types.StreamEvent
-	flusher := newStreamFlusher("proj", "task", func(_, _ string, e types.StreamEvent) {
-		events = append(events, e)
-	}, newLoopDetector())
-
-	flusher.appendReasoning("Thinking")
-	flusher.appendReasoning(" about")
-	flusher.appendReasoning(" the problem")
-
-	flusher.flush()
-	if len(events) != 1 {
-		t.Fatalf("expected 1 event, got %d", len(events))
-	}
-	if events[0].Type != types.WSTypeReasoning {
-		t.Fatalf("expected WSTypeReasoning, got %v", events[0].Type)
-	}
-	text := events[0].Data.(map[string]string)["text"]
-	if text != "Thinking about the problem" {
-		t.Errorf("expected 'Thinking about the problem', got %q", text)
+			flusher.flush()
+			if len(events) != 1 {
+				t.Fatalf("expected 1 event after flush, got %d", len(events))
+			}
+			if events[0].Type != tc.wantType {
+				t.Fatalf("expected %v, got %v", tc.wantType, events[0].Type)
+			}
+			if text := events[0].Data.(map[string]string)["text"]; text != tc.want {
+				t.Errorf("expected %q, got %q", tc.want, text)
+			}
+		})
 	}
 }
 
@@ -3282,85 +2866,63 @@ func TestFormatChatHistory_ReasoningOnlyWithToolCalls(t *testing.T) {
 
 // --- removeDuplicateUserMessage Tests ---
 
-func TestBuildContextReplay_Empty(t *testing.T) {
+// TestBuildContextReplay covers the transcript a context-change notice replays to the model: every role
+// has its own label, reasoning is quoted as the model's thinking rather than its answer, a tool call is
+// shown with what it was asked to do and what came back, and a summarization is marked as one so the model
+// knows the conversation it is reading was compressed.
+func TestBuildContextReplay(t *testing.T) {
 	t.Parallel()
-	result := buildContextReplay(nil)
-	if !strings.Contains(result, "<conversation_history>") {
-		t.Error("expected conversation_history tags")
-	}
-	if !strings.Contains(result, "</conversation_history>") {
-		t.Error("expected closing conversation_history tag")
-	}
-}
-
-func TestBuildContextReplay_UserAndAssistant(t *testing.T) {
-	t.Parallel()
-	msgs := []types.TaskMessage{
-		{Role: "user", Content: "Build a todo app"},
-		{Role: "assistant", Content: "Sure, let me create the files."},
-		{Role: "user", Content: "Also add tests"},
-	}
-	result := buildContextReplay(msgs)
-	if !strings.Contains(result, "**User**: Build a todo app") {
-		t.Error("expected first user message")
-	}
-	if !strings.Contains(result, "**Assistant**: Sure, let me create the files.") {
-		t.Error("expected assistant message")
-	}
-	if !strings.Contains(result, "**User**: Also add tests") {
-		t.Error("expected second user message")
-	}
-}
-
-func TestBuildContextReplay_WithReasoning(t *testing.T) {
-	t.Parallel()
-	msgs := []types.TaskMessage{
-		{Role: "assistant", ReasoningContent: "Let me think about this...", Content: "Here's the answer."},
-	}
-	result := buildContextReplay(msgs)
-	if !strings.Contains(result, "**Assistant (thinking)**: Let me think about this...") {
-		t.Error("expected reasoning content")
-	}
-	if !strings.Contains(result, "**Assistant**: Here's the answer.") {
-		t.Error("expected assistant content")
-	}
-}
-
-func TestBuildContextReplay_WithToolCalls(t *testing.T) {
-	t.Parallel()
-	toolCalls := `[{"id":"call_1","name":"write_file","display_name":"Write File","args":{"path":"test.js","content":"hello"}}]`
-	toolResult := `[{"id":"call_1","output":"File written","success":true}]`
-	msgs := []types.TaskMessage{
-		{Role: "tool_call", ToolCalls: toolCalls, ToolResult: toolResult},
-	}
-	result := buildContextReplay(msgs)
-	if !strings.Contains(result, "**Tool calls**:") {
-		t.Error("expected tool calls section")
-	}
-	if !strings.Contains(result, "Write File") {
-		t.Error("expected tool display name")
-	}
-	if !strings.Contains(result, "**Tool results**:") {
-		t.Error("expected tool results section")
-	}
-	if !strings.Contains(result, "File written") {
-		t.Error("expected tool result output")
-	}
-}
-
-func TestBuildContextReplay_WithSummarization(t *testing.T) {
-	t.Parallel()
-	msgs := []types.TaskMessage{
-		{Role: "user", Content: "First message"},
-		{Role: "summarization", Content: "Summary of earlier conversation"},
-		{Role: "user", Content: "After summary"},
-	}
-	result := buildContextReplay(msgs)
-	if !strings.Contains(result, "**[Context was summarized]**") {
-		t.Error("expected summarization marker")
-	}
-	if !strings.Contains(result, "Summary of earlier conversation") {
-		t.Error("expected summary content")
+	for _, tc := range []struct {
+		name     string
+		msgs     []types.TaskMessage
+		contains []string
+	}{
+		{
+			name:     "an empty thread still frames itself",
+			msgs:     nil,
+			contains: []string{"<conversation_history>", "</conversation_history>"},
+		},
+		{
+			name: "user and assistant turns are labelled",
+			msgs: []types.TaskMessage{
+				{Role: "user", Content: "Build a todo app"},
+				{Role: "assistant", Content: "Sure, let me create the files."},
+				{Role: "user", Content: "Also add tests"},
+			},
+			contains: []string{"**User**: Build a todo app", "**Assistant**: Sure, let me create the files.", "**User**: Also add tests"},
+		},
+		{
+			name:     "reasoning is replayed as thinking",
+			msgs:     []types.TaskMessage{{Role: "assistant", ReasoningContent: "Let me think about this...", Content: "Here's the answer."}},
+			contains: []string{"**Assistant (thinking)**: Let me think about this...", "**Assistant**: Here's the answer."},
+		},
+		{
+			name: "a tool call is shown with its result",
+			msgs: []types.TaskMessage{{
+				Role:       "tool_call",
+				ToolCalls:  `[{"id":"call_1","name":"write_file","display_name":"Write File","args":{"path":"test.js","content":"hello"}}]`,
+				ToolResult: `[{"id":"call_1","output":"File written","success":true}]`,
+			}},
+			contains: []string{"**Tool calls**:", "Write File", "**Tool results**:", "File written"},
+		},
+		{
+			name: "a summarization is marked as one",
+			msgs: []types.TaskMessage{
+				{Role: "user", Content: "First message"},
+				{Role: "summarization", Content: "Summary of earlier conversation"},
+				{Role: "user", Content: "After summary"},
+			},
+			contains: []string{"**[Context was summarized]**", "Summary of earlier conversation"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := buildContextReplay(tc.msgs)
+			for _, want := range tc.contains {
+				if !strings.Contains(got, want) {
+					t.Errorf("replay missing %q, got:\n%s", want, got)
+				}
+			}
+		})
 	}
 }
 
@@ -3374,55 +2936,35 @@ func assertBackoffWithin(t *testing.T, name string, got, min, max time.Duration)
 	}
 }
 
-func TestBackoffFor_RateLimitedWithRetryAfter(t *testing.T) {
+// TestBackoffFor covers the retry ladder. A Retry-After is honoured exactly, uncapped, on every attempt —
+// a provider that says ten hours means ten hours — and only for a 429: a server error keeps the short
+// exponential ladder however its body is worded, because nothing told us to wait.
+func TestBackoffFor(t *testing.T) {
 	t.Parallel()
-	// Retry-After is honored: delay + 1s + 250-500ms jitter, on every attempt.
-	err := &llama.LlamaError{StatusCode: 429, RetryAfter: 20 * time.Second}
-	min := 20*time.Second + time.Second + 250*time.Millisecond
-	max := 20*time.Second + time.Second + 500*time.Millisecond
-	for attempt := 0; attempt < 3; attempt++ {
-		assertBackoffWithin(t, fmt.Sprintf("attempt %d", attempt), backoffFor(attempt, err), min, max)
-	}
-}
-
-func TestBackoffFor_RateLimitedRetryAfterUncapped(t *testing.T) {
-	t.Parallel()
-	// A huge Retry-After is honored uncapped: 10h + 1s + 250-500ms jitter.
-	err := &llama.LlamaError{StatusCode: 429, RetryAfter: 10 * time.Hour}
-	min := 10*time.Hour + time.Second + 250*time.Millisecond
-	max := 10*time.Hour + time.Second + 500*time.Millisecond
-	assertBackoffWithin(t, "attempt 0", backoffFor(0, err), min, max)
-}
-
-func TestBackoffFor_RateLimitedExponential(t *testing.T) {
-	t.Parallel()
-	// No Retry-After -> exponential 2s, 4s, 8s.
-	err := &llama.LlamaError{StatusCode: 429}
-	wants := []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
-	for attempt, want := range wants {
-		if got := backoffFor(attempt, err); got != want {
-			t.Errorf("attempt %d: backoff = %v, want %v", attempt, got, want)
-		}
-	}
-}
-
-func TestBackoffFor_GenericExponential(t *testing.T) {
-	t.Parallel()
-	// Non-rate-limit errors use the same exponential 2s, 4s, 8s schedule.
-	err := errors.New("connection reset")
-	wants := []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
-	for attempt, want := range wants {
-		if got := backoffFor(attempt, err); got != want {
-			t.Errorf("attempt %d: backoff = %v, want %v", attempt, got, want)
-		}
-	}
-}
-
-func TestBackoffFor_GenericLlamaErrorNotRateLimited(t *testing.T) {
-	t.Parallel()
-	// A LlamaError with a non-429 code uses the exponential schedule (Retry-After ignored).
-	err := &llama.LlamaError{StatusCode: 500, RetryAfter: 30 * time.Second}
-	if got := backoffFor(0, err); got != 2*time.Second {
-		t.Errorf("backoff = %v, want 2s", got)
+	const (
+		jitterMin = 250 * time.Millisecond
+		jitterMax = 500 * time.Millisecond
+	)
+	for _, tc := range []struct {
+		name    string
+		err     error
+		attempt int
+		min     time.Duration
+		max     time.Duration
+	}{
+		{"429 honours Retry-After on the first attempt", &llama.LlamaError{StatusCode: 429, RetryAfter: 20 * time.Second}, 0, 21*time.Second + jitterMin, 21*time.Second + jitterMax},
+		{"429 honours Retry-After again later", &llama.LlamaError{StatusCode: 429, RetryAfter: 20 * time.Second}, 2, 21*time.Second + jitterMin, 21*time.Second + jitterMax},
+		{"a huge Retry-After is not capped", &llama.LlamaError{StatusCode: 429, RetryAfter: 10 * time.Hour}, 0, 10*time.Hour + time.Second + jitterMin, 10*time.Hour + time.Second + jitterMax},
+		{"429 without Retry-After escalates", &llama.LlamaError{StatusCode: 429}, 0, 2 * time.Second, 2 * time.Second},
+		{"429 second attempt", &llama.LlamaError{StatusCode: 429}, 1, 4 * time.Second, 4 * time.Second},
+		{"429 third attempt", &llama.LlamaError{StatusCode: 429}, 2, 8 * time.Second, 8 * time.Second},
+		{"a transport fault escalates the same way", errors.New("connection reset"), 0, 2 * time.Second, 2 * time.Second},
+		{"a transport fault second attempt", errors.New("connection reset"), 1, 4 * time.Second, 4 * time.Second},
+		{"a transport fault third attempt", errors.New("connection reset"), 2, 8 * time.Second, 8 * time.Second},
+		{"a server error ignores Retry-After", &llama.LlamaError{StatusCode: 500, RetryAfter: 30 * time.Second}, 0, 2 * time.Second, 2 * time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assertBackoffWithin(t, "attempt "+fmt.Sprint(tc.attempt), backoffFor(tc.attempt, tc.err), tc.min, tc.max)
+		})
 	}
 }
