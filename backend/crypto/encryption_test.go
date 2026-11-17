@@ -96,12 +96,27 @@ func TestIdentityFieldsDoNotCollide(t *testing.T) {
 	}
 }
 
-func TestTamperedRecordRefuses(t *testing.T) {
+// Both shapes of a value that claims the format and does not authenticate answer the same way: bytes
+// somebody edited, and bytes that were never sealed at all but are long enough to look like a record.
+func TestDecryptRefusesBytesThatDoNotAuthenticate(t *testing.T) {
 	box := testBox(t)
-	sealed, _ := box.Encrypt(purpose, record, "sk-secret-value")
-	corrupted := sealed[:len(sealed)-2] + "AA"
-	if _, err := box.Decrypt(purpose, record, corrupted); !errors.Is(err, ErrNotAuthentic) {
-		t.Errorf("tampered ciphertext: err = %v, want ErrNotAuthentic", err)
+	sealed, err := box.Encrypt(purpose, record, "sk-secret-value")
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		value string
+	}{
+		{"a tampered seal", sealed[:len(sealed)-2] + "AA"},
+		{"a plain value long enough to look like a record", base64.StdEncoding.EncodeToString([]byte(strings.Repeat("k", 40)))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := box.Decrypt(purpose, record, tc.value); !errors.Is(err, ErrNotAuthentic) {
+				t.Errorf("Decrypt err = %v, want ErrNotAuthentic", err)
+			}
+		})
 	}
 }
 
@@ -122,16 +137,6 @@ func TestNotARecord(t *testing.T) {
 	sealed, _ := box.Encrypt(purpose, record, "sk-secret-value")
 	if box.Opens(purpose, "8", sealed) || box.Opens("extension-config", record, sealed) {
 		t.Error("Opens answered true for a record sealed under another identity")
-	}
-}
-
-// A plain secret long enough to look like a record is one that does not authenticate: it answers as an
-// unreadable secret, never as itself.
-func TestPlainValueThatLooksLikeARecordRefuses(t *testing.T) {
-	box := testBox(t)
-	looksLikeOne := base64.StdEncoding.EncodeToString([]byte(strings.Repeat("k", 40)))
-	if _, err := box.Decrypt(purpose, record, looksLikeOne); !errors.Is(err, ErrNotAuthentic) {
-		t.Errorf("Decrypt err = %v, want ErrNotAuthentic", err)
 	}
 }
 
