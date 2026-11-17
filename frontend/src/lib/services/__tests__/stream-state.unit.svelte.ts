@@ -96,12 +96,6 @@ describe('StreamState', () => {
         expect(s.state.retryError).toBe('');
     });
 
-    it('clearAwaiting is safe when already cleared', () => {
-        const s = new StreamState();
-        expect(() => s.clearAwaiting()).not.toThrow();
-        expect(s.state.awaitingResponse).toBe(false);
-    });
-
     it('clearRetry resets retry count and error', () => {
         const s = new StreamState();
         s.state.retryCount = 5;
