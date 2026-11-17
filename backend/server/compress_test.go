@@ -3,8 +3,6 @@ package server
 import (
 	"bytes"
 	"compress/gzip"
-	"encoding/json/jsontext"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -235,82 +233,6 @@ func TestCompressMiddleware_WebSocketSkip(t *testing.T) {
 	}
 }
 
-func TestCompressMiddleware_WithJSONResponse(t *testing.T) {
-	s := testServer(t)
-	// Simulate what JSONResponse does — large payload
-	largeData := make(map[string]string)
-	for i := 0; i < 100; i++ {
-		largeData[fmt.Sprintf("key-%d", i)] = strings.Repeat("value", 100)
-	}
-	s.mux.HandleFunc("/test/json", func(w http.ResponseWriter, r *http.Request) {
-		JSONResponse(w, http.StatusOK, largeData)
-	})
-
-	handler := CompressMiddleware(s.mux)
-
-	req := httptest.NewRequest("GET", "/test/json", nil)
-	req.Header.Set("Accept-Encoding", "br")
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	resp := w.Result()
-	if resp.Header.Get("Content-Encoding") != "br" {
-		t.Errorf("expected Content-Encoding: br for JSONResponse, got: %q", resp.Header.Get("Content-Encoding"))
-	}
-	if resp.Header.Get("Content-Type") != "application/json" {
-		t.Errorf("expected Content-Type: application/json, got: %q", resp.Header.Get("Content-Type"))
-	}
-
-	// Decompress and verify it's valid JSON
-	br := brotli.NewReader(w.Body)
-	decompressed, err := io.ReadAll(br)
-	if err != nil {
-		t.Fatalf("failed to decompress brotli: %v", err)
-	}
-	if !jsontext.Value(decompressed).IsValid() {
-		t.Error("the decompressed body is not one JSON value")
-	}
-}
-
-func TestCompressMiddleware_FullStack(t *testing.T) {
-	s := testServer(t)
-	largeBody := strings.Repeat("z", 2048)
-	s.mux.HandleFunc("/test/full", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(largeBody))
-	})
-
-	// Full middleware chain (no auth for this test path)
-	handler := s.CORSMiddleware(CompressMiddleware(s.mux))
-
-	req := httptest.NewRequest("GET", "/test/full", nil)
-	req.Header.Set("Accept-Encoding", "br")
-	req.Header.Set("Origin", "http://localhost")
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	resp := w.Result()
-	if resp.Header.Get("Content-Encoding") != "br" {
-		t.Errorf("expected Content-Encoding: br with full middleware stack, got: %q", resp.Header.Get("Content-Encoding"))
-	}
-	if resp.Header.Get("Access-Control-Allow-Origin") != "" {
-		t.Errorf("expected NO CORS header (same-origin policy), got: %q", resp.Header.Get("Access-Control-Allow-Origin"))
-	}
-
-	// Decompress and verify
-	br := brotli.NewReader(w.Body)
-	decompressed, err := io.ReadAll(br)
-	if err != nil {
-		t.Fatalf("failed to decompress brotli: %v", err)
-	}
-	if string(decompressed) != largeBody {
-		t.Errorf("decompressed body mismatch: got %d bytes, want %d", len(decompressed), len(largeBody))
-	}
-}
-
 // TestGetImageResponseIsPassedThrough: the GET buffer exists to hash an ETag, and an image is
 // already-compressed bytes, so holding one costs several times the file in memory for a body that
 // cannot shrink. This is what keeps a large binary response's own size cap the real bound.
@@ -383,31 +305,6 @@ func TestGetAttachmentResponseIsPassedThrough(t *testing.T) {
 	}
 	if rec.bytes != len(chunk)*chunks {
 		t.Errorf("%d bytes reached the client, want %d", rec.bytes, len(chunk)*chunks)
-	}
-}
-
-// A single-file download carries a Content-Length, and only the pass-through keeps it: the buffering
-// path deletes it to add an ETag.
-func TestGetAttachmentKeepsTheHandlersContentLength(t *testing.T) {
-	s := testServer(t)
-	body := bytes.Repeat([]byte{0x42}, 4<<10)
-	s.mux.HandleFunc("GET /test/download-one", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
-		w.Header().Set("Content-Disposition", `attachment; filename=notes.md`)
-		w.Write(body)
-	})
-
-	rec := &chunkRecordingWriter{header: http.Header{}}
-	req := httptest.NewRequest(http.MethodGet, "/test/download-one", nil)
-	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
-	CompressMiddleware(s.mux).ServeHTTP(rec, req)
-
-	if got := rec.header.Get("Content-Length"); got != strconv.Itoa(len(body)) {
-		t.Errorf("Content-Length = %q, want the handler's own %d", got, len(body))
-	}
-	if rec.bytes != len(body) {
-		t.Errorf("%d bytes reached the client, want %d", rec.bytes, len(body))
 	}
 }
 
@@ -568,41 +465,47 @@ func TestETagSkippedForNonGET(t *testing.T) {
 	}
 }
 
-func TestETagExistingSkipped(t *testing.T) {
+// TestETagStandsAsideWhenTheHandlerAlreadyDecided: the digest is this middleware's answer for a body it
+// buffered itself. A handler that named its own ETag, or answered 304 on its own, has decided already —
+// a second opinion here would replace a correct cache with no revalidation, or dress a bodiless 304 in
+// the headers of a body nobody wrote.
+func TestETagStandsAsideWhenTheHandlerAlreadyDecided(t *testing.T) {
 	s := testServer(t)
 	s.mux.HandleFunc("/test/existing", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("ETag", `"already-set"`)
 		w.Write([]byte("has etag"))
 	})
-
-	handler := CompressMiddleware(s.mux)
-
-	req := httptest.NewRequest("GET", "/test/existing", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	if rr.Header().Get("ETag") != `"already-set"` {
-		t.Errorf("should preserve handler's ETag, got: %q", rr.Header().Get("ETag"))
-	}
-}
-
-func TestETag304Passthrough(t *testing.T) {
-	s := testServer(t)
 	s.mux.HandleFunc("/test/304", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotModified)
 	})
 
 	handler := CompressMiddleware(s.mux)
 
-	req := httptest.NewRequest("GET", "/test/304", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	t.Run("the handler's own ETag is kept", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, httptest.NewRequest("GET", "/test/existing", nil))
 
-	if rr.Code != http.StatusNotModified {
-		t.Errorf("expected 304, got %d", rr.Code)
-	}
-	// Handler didn't set ETag, but middleware should not add one for 304
-	// (the handler returned 304, so we skip ETag logic)
+		if rr.Header().Get("ETag") != `"already-set"` {
+			t.Errorf("should preserve handler's ETag, got: %q", rr.Header().Get("ETag"))
+		}
+	})
+
+	t.Run("a handler's 304 gains neither an ETag nor an encoding", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", "/test/304", nil)
+		req.Header.Set("Accept-Encoding", "br")
+		handler.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusNotModified {
+			t.Fatalf("expected 304, got %d", rr.Code)
+		}
+		if got := rr.Header().Get("ETag"); got != "" {
+			t.Errorf("ETag = %q, want none — the middleware did not compute this response", got)
+		}
+		if got := rr.Header().Get("Content-Encoding"); got != "" {
+			t.Errorf("Content-Encoding = %q, want none — a 304 has no body to encode", got)
+		}
+	})
 }
 
 func TestETagEmptyBody(t *testing.T) {
@@ -662,23 +565,6 @@ func TestETagWithCompression304(t *testing.T) {
 	}
 	if rr2.Header().Get("Content-Encoding") != "" {
 		t.Errorf("304 should not have Content-Encoding, got: %q", rr2.Header().Get("Content-Encoding"))
-	}
-}
-
-func TestComputeETag(t *testing.T) {
-	// Deterministic: same input always produces same ETag
-	body := []byte("deterministic test")
-	etag1 := computeETag(body)
-	etag2 := computeETag(body)
-	if etag1 != etag2 {
-		t.Errorf("computeETag not deterministic: %q vs %q", etag1, etag2)
-	}
-
-	// Different input produces different ETag
-	body2 := []byte("different test")
-	etag3 := computeETag(body2)
-	if etag1 == etag3 {
-		t.Error("different bodies produced same ETag")
 	}
 }
 

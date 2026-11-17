@@ -112,15 +112,19 @@ func TestSpentCodeComesBackWhenTheRegistrationFails(t *testing.T) {
 	}
 }
 
-// Revoking is the operator's answer to "someone might be about to use that code", so it outranks a claim
-// still in flight: a code the slow spender failed to pay with stays gone.
-func TestRevokeOutranksAClaimStillInFlight(t *testing.T) {
+// RevokeAll is the operator's answer to "someone might be about to use that code": every outstanding
+// code goes, and a claim still in flight does not resurrect the one it was paid with.
+func TestRevokeAllDropsEveryCode(t *testing.T) {
 	codes := NewPairingCodes()
-	minted, err := codes.Mint(DevicePairingTTL)
+	unclaimed, err := codes.Mint(DevicePairingTTL)
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	key, err := codes.Claim(minted.Code)
+	second, err := codes.Mint(DevicePairingTTL)
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	key, err := codes.Claim(second.Code)
 	if err != nil {
 		t.Fatalf("claim: %v", err)
 	}
@@ -134,6 +138,11 @@ func TestRevokeOutranksAClaimStillInFlight(t *testing.T) {
 
 	if n := codes.Live(); n != 0 {
 		t.Fatalf("%d codes live after a revoke; a slow spender resurrected one", n)
+	}
+	for _, presented := range []string{unclaimed.Code, second.Code} {
+		if _, err := codes.Claim(presented); !errors.Is(err, ErrInvalidPairingCode) {
+			t.Errorf("a revoked code was accepted: %v", err)
+		}
 	}
 	if _, err := codes.spend(key); !errors.Is(err, ErrInvalidPairingCode) {
 		t.Errorf("a revoked code paid for a registration: %v", err)
@@ -181,35 +190,38 @@ func TestOneCodePaysOnceWhenRegistrationsRace(t *testing.T) {
 	}
 }
 
-// A code is read off one screen and typed into another, so the shape it is typed in is not the answer to
-// whether it is the right code.
-func TestClaimIgnoresHowTheCodeWasTyped(t *testing.T) {
+// A code is read off one screen and typed into another, so the shape it is typed in is not the answer
+// to whether it is the right code. Everything else is the one refusal, because telling a guesser which
+// way a code was wrong tells them how close they got.
+func TestClaimAcceptsTheMintedCodeInAnyShapeAndRefusesAnythingElse(t *testing.T) {
 	codes := NewPairingCodes()
 	minted, err := codes.Mint(DevicePairingTTL)
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
 	lowered := strings.ToLower(minted.Code)
-	if _, err := codes.Claim(" " + lowered[:4] + "-" + lowered[4:] + " "); err != nil {
-		t.Errorf("a lower-cased code with a dash and spaces was refused: %v", err)
-	}
-}
 
-func TestClaimRefuses(t *testing.T) {
-	codes := NewPairingCodes()
-	minted, err := codes.Mint(DevicePairingTTL)
-	if err != nil {
-		t.Fatalf("mint: %v", err)
-	}
-	for _, presented := range []string{
-		"",
-		"ZZZZZZZZ",
-		minted.Code[:7] + otherLetter(minted.Code[7:]),
-		minted.Code + "X",
+	for _, tc := range []struct {
+		name      string
+		presented string
+		accepted  bool
+	}{
+		{name: "as minted", presented: minted.Code, accepted: true},
+		{name: "lower case, dashed and padded", presented: " " + lowered[:4] + "-" + lowered[4:] + " ", accepted: true},
+		{name: "nothing typed", presented: ""},
+		{name: "never minted", presented: "ZZZZZZZZ"},
+		{name: "one character off", presented: minted.Code[:7] + otherLetter(minted.Code[7:])},
+		{name: "one character too many", presented: minted.Code + "X"},
 	} {
-		if _, err := codes.Claim(presented); !errors.Is(err, ErrInvalidPairingCode) {
-			t.Errorf("Claim(%q) = %v; want ErrInvalidPairingCode", presented, err)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := codes.Claim(tc.presented)
+			if tc.accepted && err != nil {
+				t.Errorf("Claim(%q) = %v; want the minted code accepted", tc.presented, err)
+			}
+			if !tc.accepted && !errors.Is(err, ErrInvalidPairingCode) {
+				t.Errorf("Claim(%q) = %v; want ErrInvalidPairingCode", tc.presented, err)
+			}
+		})
 	}
 }
 
@@ -263,21 +275,6 @@ func TestLiveCodesAreCapped(t *testing.T) {
 	}
 	if _, err := codes.Mint(DevicePairingTTL); err != nil {
 		t.Errorf("no code could be minted after one was spent: %v", err)
-	}
-}
-
-func TestRevokeAllDropsEveryCode(t *testing.T) {
-	codes := NewPairingCodes()
-	minted, err := codes.Mint(DevicePairingTTL)
-	if err != nil {
-		t.Fatalf("mint: %v", err)
-	}
-	codes.RevokeAll()
-	if n := codes.Live(); n != 0 {
-		t.Errorf("%d codes live after RevokeAll", n)
-	}
-	if _, err := codes.Claim(minted.Code); !errors.Is(err, ErrInvalidPairingCode) {
-		t.Errorf("a revoked code was accepted: %v", err)
 	}
 }
 

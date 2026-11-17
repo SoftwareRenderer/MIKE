@@ -29,6 +29,10 @@ func issueTokenThroughAPI(t *testing.T, s *Server, label string) map[string]any 
 	return body
 }
 
+// One token's life through the Settings surface, and the two shapes its two views must keep: the
+// plaintext appears in the create answer and nowhere else — a listing that carried it, or its digest,
+// would make Settings → About a credential dump for anyone who can open the tab — and a revoked row
+// leaves the listing rather than going stale in it.
 func TestAPITokenCreateListRevoke(t *testing.T) {
 	s := testServer(t)
 
@@ -38,7 +42,12 @@ func TestAPITokenCreateListRevoke(t *testing.T) {
 		t.Errorf("issued token %q does not carry the token prefix", secret)
 	}
 
-	list := mustJSON[[]map[string]any](t, authGET(t, s, "/api/tokens").Body)
+	listing := authGET(t, s, "/api/tokens")
+	body := listing.Body.String()
+	var list []map[string]any
+	if err := json.Unmarshal([]byte(body), &list); err != nil {
+		t.Fatalf("decode listing: %v", err)
+	}
 	if len(list) != 1 {
 		t.Fatalf("listed %d tokens: %v", len(list), list)
 	}
@@ -53,37 +62,26 @@ func TestAPITokenCreateListRevoke(t *testing.T) {
 	if row["last_used_at"] != "" {
 		t.Errorf("a never-used token reports last_used_at %v", row["last_used_at"])
 	}
+	for _, forbidden := range []string{"token", "token_hash", "secret", "hash"} {
+		if _, ok := row[forbidden]; ok {
+			t.Errorf("the listing carries %q", forbidden)
+		}
+	}
+	if strings.Contains(body, secret) {
+		t.Error("the listing contains the issued secret")
+	}
 
-	req := testRequest(http.MethodDelete, "/api/tokens/"+id, nil)
-	if rr := testResponseAuth(t, s, req); rr.Code != http.StatusNoContent {
+	if rr := testResponseAuth(t, s, testRequest(http.MethodDelete, "/api/tokens/"+id, nil)); rr.Code != http.StatusNoContent {
 		t.Fatalf("revoke: %d %s", rr.Code, rr.Body.String())
 	}
 	if again := mustJSON[[]map[string]any](t, authGET(t, s, "/api/tokens").Body); len(again) != 0 {
 		t.Errorf("a revoked token is still listed: %v", again)
 	}
-}
 
-// The plaintext appears once, in the create response. A listing that carried it — or its digest —
-// would make Settings → About a credential dump for anyone who can open the tab.
-func TestAPITokenListingCarriesNoCredential(t *testing.T) {
-	s := testServer(t)
-	secret := issueTokenThroughAPI(t, s, "runner")["token"].(string)
-
-	rr := authRequest(t, s, http.MethodGet, "/api/tokens", nil)
-	var rows []map[string]any
-	if err := json.Unmarshal(rr.Body.Bytes(), &rows); err != nil {
-		t.Fatalf("decode listing: %v", err)
-	}
-	if len(rows) != 1 {
-		t.Fatalf("listed %d rows: %v", len(rows), rows)
-	}
-	for _, forbidden := range []string{"token", "token_hash", "secret", "hash"} {
-		if _, ok := rows[0][forbidden]; ok {
-			t.Errorf("the listing carries %q", forbidden)
-		}
-	}
-	if strings.Contains(rr.Body.String(), secret) {
-		t.Error("the listing contains the issued secret")
+	// A second revoke names nothing it deleted: the id is gone, which is the same answer the row
+	// would give a caller guessing at it.
+	if rr := testResponseAuth(t, s, testRequest(http.MethodDelete, "/api/tokens/"+id, nil)); rr.Code != http.StatusNotFound {
+		t.Errorf("revoke of a gone id: %d %s, want 404", rr.Code, rr.Body.String())
 	}
 }
 
@@ -135,14 +133,6 @@ func TestAPITokenCreateValidatesTheLabel(t *testing.T) {
 	// A refusal issues nothing: an empty body is not a token named "42".
 	if rows := mustJSON[[]map[string]any](t, authGET(t, s, "/api/tokens").Body); len(rows) != 0 {
 		t.Errorf("refused requests created tokens: %v", rows)
-	}
-}
-
-func TestAPITokenRevokeReportsUnknownID(t *testing.T) {
-	s := testServer(t)
-	req := testRequest(http.MethodDelete, "/api/tokens/does-not-exist", nil)
-	if rr := testResponseAuth(t, s, req); rr.Code != http.StatusNotFound {
-		t.Fatalf("revoke of an unknown id: %d %s", rr.Code, rr.Body.String())
 	}
 }
 

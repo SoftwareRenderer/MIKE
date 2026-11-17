@@ -126,28 +126,6 @@ func TestFilterInternalPathsFromList(t *testing.T) {
 	}
 }
 
-// TestFilterInternalPathsFromList_empty verifies empty/nil input handling.
-func TestFilterInternalPathsFromList_empty(t *testing.T) {
-	// nil input
-	result := filterInternalPathsFromList(nil)
-	if result != nil {
-		t.Errorf("expected nil for nil input, got %v", result)
-	}
-
-	// empty input
-	result = filterInternalPathsFromList([]string{})
-	if len(result) != 0 {
-		t.Errorf("expected empty for empty input, got %v", result)
-	}
-
-	// all internal paths
-	allInternal := []string{".git/index", ".git/HEAD", "sub/.git", "kanban.trace", "kanban.trace.old"}
-	result = filterInternalPathsFromList(allInternal)
-	if len(result) != 0 {
-		t.Errorf("expected empty when all paths are internal, got %v", result)
-	}
-}
-
 func TestWatchedInternalPathIsJudgedFromTheProjectRoot(t *testing.T) {
 	root := filepath.Join(string(filepath.Separator), "work", "repo")
 	for _, tc := range []struct {

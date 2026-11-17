@@ -328,8 +328,9 @@ it. That is a route-verb rule rather than a styling preference: a catch-all patt
 `ServeMux` outranks that mux's own verb-mismatch answer. A `GET` on a POST-only `/api` route would
 be served the application document — a 200 that reads to a caller as a route which accepted the request. Behind the
 mux, an unmatched path outside `/api/` is the SPA's and everything under `/api/` keeps the mux's answer,
-405 and `Allow` included. `TestSPAServesNothingToAWrongVerbOnAnAPIPath` and
-`TestMuxRefusesAnUnregisteredVerbWhileTheSPAServes` pin the two directions.
+405 and `Allow` included. `TestTheSPANeverSwallowsTheMuxsVerbRefusal`
+(`backend/server/handler_static_test.go`) pins both directions: a wrong verb under the frontend chain, and
+a wrong verb through the chain the server actually runs.
 
 A handler that switches on `r.Method` is not a methodless route and is not stale either. Nine branches
 across six files (`api/task.go`, `api/project.go`, `config/config.go`, `extensions/handler.go`,
@@ -546,8 +547,7 @@ reason to refuse it.
   note says *type to find one* only when such a row exists — a count with nothing reachable must not promise
   one.
 
-Tests: `TestHandleBranchesNamesTheWorktreeHoldingEachRef` and
-`TestHandleBranchesNamesTheTaskBehindAHeldBranch` (`backend/api/git_test.go`),
+Tests: `TestHandleBranchesNamesTheWorktreeHoldingEachRef` (`backend/api/git_test.go`),
 `git-local-branches.unit.ts`, `explorer-header-branch-list.unit.svelte.ts`, e2e
 `explorer-branch-switcher.spec.ts`.
 
@@ -919,7 +919,7 @@ Tests: `backend/server/handler_fs_ops_test.go`; client side `frontend/src/lib/ap
   the field, before anything is written — the field is never a host path picker.
 - **The last frame of a successful build is `buildResultFrame`, flattened beside a `status` string.** The
   reader picks the result out by that key. A result it cannot tell from a progress line is a build that finished
-  and reads as one that never answered. Test: `TestSandboxBuildStreamEndsInAFrameTheReaderCanIdentify`.
+  and reads as one that never answered. Test: `TestSandboxBuildStreamEndsEitherWithAFrameOrWithAnErrorLine`.
 - **A build asked for while one runs streams the build that is running.** The request waits for the build in
   flight for that image and prints its lines behind a first line saying it is waiting. It ends with that
   build's result frame, and it never starts a second build of one image
@@ -930,9 +930,8 @@ Tests: `backend/server/handler_fs_ops_test.go`; client side `frontend/src/lib/ap
   `types.SandboxImageStatus` JSON (phase, image, line), not the raw lines above, because its reader shows a
   state as well as a log; the last frame is how the preparation ended, `cancelled` among the phases. It starts
   nothing and replays nothing: what the build printed before the request arrived is kept nowhere. A project
-  with no build running answers 404 with its own message, which answers "is it building?" and is not a fault. Tests:
-  `TestHandleSandboxBuildWatchAnswersAnIdleProject`,
-  `TestHandleSandboxBuildWatchStreamsTheRunningBuild`.
+  with no build running answers 404 with its own message, which answers "is it building?" and is not a fault. Test:
+  `TestHandleSandboxBuildWatchAnswersThePreparationTheProjectHolds`.
 - **`POST /api/projects/{projectID}/sandbox/build/cancel` stops the preparation** and answers
   `{"cancelled":bool}`; `false` beside a 200 means nothing was running, since a click a moment after the build
   ended asked for something that was already true. The client never queues it: a cancel replayed when the

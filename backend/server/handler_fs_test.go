@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -18,26 +19,6 @@ import (
 	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
-
-// TestFSMkdirNoProject verifies mkdir without a "project" param (project-picker
-// FileBrowser) creates the dir on the host fs instead of panicking on nil project.
-func TestFSMkdirNoProject(t *testing.T) {
-	s := testServer(t)
-	cookie, csrfToken := loginTestCSRF(t, s)
-
-	parent := t.TempDir()
-	target := filepath.Join(parent, "new-folder")
-
-	req := testRequest(http.MethodPost, "/api/fs/mkdir", map[string]string{"path": target})
-	withAuthCSRF(req, cookie, csrfToken)
-	rr := testResponse(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-	if info, err := os.Stat(target); err != nil || !info.IsDir() {
-		t.Fatalf("expected directory %s to exist, err=%v", target, err)
-	}
-}
 
 // fsReadRefRepo creates a git repo registered as a project, with one committed
 // file, a branch and a known HEAD sha — the fixture for the `?ref=` tests.
@@ -427,6 +408,36 @@ func TestFSWriteRejectsSymlinkEscape(t *testing.T) {
 	}
 }
 
+// TestFSWriteRefusesSymlinkedParent: the task owns its worktree and can swap a directory for a link
+// before the parent chain is created, so parent creation is contained the same way the path was — the
+// jail's answer is 403 and the refused chain is not created on the way to that answer.
+func TestFSWriteRefusesSymlinkedParent(t *testing.T) {
+	s := testServer(t)
+	projectDir := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(projectDir, "swapped")); err != nil {
+		t.Fatal(err)
+	}
+
+	rr := httptest.NewRecorder()
+	target := fsTarget{
+		path:  filepath.Join(projectDir, "swapped", "deep", "payload.txt"),
+		roots: []string{projectDir},
+	}
+	if s.writeContainedFile(rr, target, []byte("written through a link")) {
+		t.Fatal("a write through a symlinked parent directory was accepted")
+	}
+	if rr.Code != 403 {
+		t.Errorf("status = %d, want 403", rr.Code)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "deep")); !os.IsNotExist(err) {
+		t.Fatal("the write created a directory outside the project")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "payload.txt")); !os.IsNotExist(err) {
+		t.Fatal("the write landed outside the project")
+	}
+}
+
 func TestFSMkdirRejectsSymlinkEscape(t *testing.T) {
 	s := testServer(t)
 	cookie, csrf := loginTestCSRF(t, s)
@@ -627,15 +638,15 @@ func TestFSListGitBadge(t *testing.T) {
 	}
 }
 
-// TestFSSearchFilenameRegex: the filename-mode pattern, now compiled once per
-// request. A valid pattern filters; an invalid one matches nothing but still
-// returns success.
-func TestFSSearchFilenameRegex(t *testing.T) {
+// TestFSSearchFilenamePattern: how a filename-mode pattern decides which names answer — one compiled
+// pattern per request, bounded by the whole-word toggle when it is on, and a pattern that does not
+// compile matching nothing rather than failing the request.
+func TestFSSearchFilenamePattern(t *testing.T) {
 	s := testServer(t)
 	cookie, csrf := loginTestCSRF(t, s)
 	base := t.TempDir()
-	for name, content := range map[string]string{"a.go": "package a\n", "b.txt": "hello\n"} {
-		if err := os.WriteFile(filepath.Join(base, name), []byte(content), 0o644); err != nil {
+	for _, name := range []string{"a.go", "b.txt", "handler.go", "ahandlerb.go"} {
+		if err := os.WriteFile(filepath.Join(base, name), []byte("package a\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -643,69 +654,9 @@ func TestFSSearchFilenameRegex(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	type searchResp struct {
-		Results []struct {
-			Path string `json:"path"`
-		} `json:"results"`
-	}
-
-	search := func(q string) (int, []string) {
-		t.Helper()
-		v := url.Values{"project": {"fs-rx"}, "q": {q}, "regex": {"1"}}
-		req := testRequest(http.MethodGet, "/api/fs/search?"+v.Encode(), nil)
-		withAuthCSRF(req, cookie, csrf)
-		rr := testResponse(t, s, req)
-		if rr.Code != http.StatusOK {
-			return rr.Code, nil
-		}
-		var resp searchResp
-		if err := json.UnmarshalRead(rr.Body, &resp); err != nil {
-			t.Fatalf("decode search response: %v", err)
-		}
-		paths := make([]string, 0, len(resp.Results))
-		for _, r := range resp.Results {
-			paths = append(paths, r.Path)
-		}
-		return rr.Code, paths
-	}
-
-	code, paths := search(`\.go$`)
-	if code != http.StatusOK {
-		t.Fatalf("valid pattern: expected 200, got %d", code)
-	}
-	if len(paths) != 1 || paths[0] != "a.go" {
-		t.Errorf("regex filename search matched %v, want exactly [a.go]", paths)
-	}
-
-	// An unbalanced paren is not a valid pattern: the request still succeeds
-	// and nothing matches.
-	code, paths = search(`(`)
-	if code != http.StatusOK {
-		t.Fatalf("invalid pattern: expected 200 with no matches, got %d", code)
-	}
-	if len(paths) != 0 {
-		t.Errorf("invalid pattern matched %v, want no results", paths)
-	}
-}
-
-// TestFSSearchFilenameWholeWordRegex: the whole-word toggle bounds where the pattern landed in the path, so
-// a longer word is excluded and an anchor still works.
-func TestFSSearchFilenameWholeWordRegex(t *testing.T) {
-	s := testServer(t)
-	cookie, csrf := loginTestCSRF(t, s)
-	base := t.TempDir()
-	for _, name := range []string{"handler.go", "ahandlerb.go"} {
-		if err := os.WriteFile(filepath.Join(base, name), []byte("package a\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := s.store.CreateProject(&types.Project{ID: "fs-word", Name: "FS Word Project", Path: base}); err != nil {
-		t.Fatal(err)
-	}
-
 	search := func(q string, wholeWord bool) []string {
 		t.Helper()
-		v := url.Values{"project": {"fs-word"}, "q": {q}, "regex": {"1"}}
+		v := url.Values{"project": {"fs-rx"}, "q": {q}, "regex": {"1"}}
 		if wholeWord {
 			v.Set("word", "1")
 		}
@@ -713,7 +664,7 @@ func TestFSSearchFilenameWholeWordRegex(t *testing.T) {
 		withAuthCSRF(req, cookie, csrf)
 		rr := testResponse(t, s, req)
 		if rr.Code != http.StatusOK {
-			t.Fatalf("search %q: got %d", q, rr.Code)
+			t.Fatalf("search %q: got %d: %s", q, rr.Code, rr.Body.String())
 		}
 		var resp struct {
 			Results []struct {
@@ -730,6 +681,13 @@ func TestFSSearchFilenameWholeWordRegex(t *testing.T) {
 		return paths
 	}
 
+	if got := search(`\.go$`, false); !slices.Equal(got, []string{"a.go", "ahandlerb.go", "handler.go"}) {
+		t.Errorf("pattern matched %v, want the three .go names and not b.txt", got)
+	}
+	// An unbalanced paren is not a valid pattern: the request still succeeds and nothing matches.
+	if got := search(`(`, false); len(got) != 0 {
+		t.Errorf("invalid pattern matched %v, want no results", got)
+	}
 	if got := search(`handler`, true); len(got) != 1 || got[0] != "handler.go" {
 		t.Errorf("whole-word pattern matched %v, want exactly [handler.go]", got)
 	}

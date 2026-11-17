@@ -11,20 +11,6 @@ import (
 	"mike/pkg/logging"
 )
 
-// login returns the session cookie and CSRF token of a freshly paired device on s. Several
-// scenarios below are only interesting for an authenticated caller, so the ceremony that
-// opens a session is spelled out once here instead of at the top of every test in this file.
-func login(t *testing.T, s *Server) (cookie, csrf string) {
-	t.Helper()
-
-	_, finished := registerPasskeyOver(t, s, "test device", plainCeremony)
-	raw := finished.Header().Get("Set-Cookie")
-	if raw == "" {
-		t.Fatal("a finished ceremony set no session cookie")
-	}
-	return strings.TrimSpace(strings.Split(raw, ";")[0]), finished.Header().Get("X-CSRF-Token")
-}
-
 // TestMiddlewareAuthenticationGating is the auth gate as one matrix: which paths and
 // methods are public, and what a caller with no cookie, a bogus cookie, or a real
 // session is told. Anything outside publicPaths must answer 401. The extension-asset and
@@ -55,6 +41,10 @@ func TestMiddlewareAuthenticationGating(t *testing.T) {
 		},
 		{name: "protected path without a cookie", method: http.MethodGet, path: "/api/projects",
 			want: http.StatusUnauthorized},
+		// The device list names every signed-in machine, so it is never public beside the routes that
+		// sign devices out. docs/sessions.md.
+		{name: "the session list is not public", method: http.MethodGet, path: "/api/sessions",
+			want: http.StatusUnauthorized},
 		{name: "protected path with a bogus cookie", method: http.MethodGet, path: "/api/projects",
 			cookie: "invalid", want: http.StatusUnauthorized},
 		{name: "protected path with a valid session", method: http.MethodGet, path: "/api/projects",
@@ -70,7 +60,7 @@ func TestMiddlewareAuthenticationGating(t *testing.T) {
 			case "invalid":
 				req.Header.Set("Cookie", "PHPSESSID=invalid-token-value")
 			case "session":
-				cookie, _ := login(t, s)
+				cookie, _ := loginSession(t, s, "test harness")
 				req.Header.Set("Cookie", cookie)
 			}
 
@@ -112,41 +102,28 @@ func TestCleartextIsRedirectedToHTTPS(t *testing.T) {
 	}
 }
 
-// TestWorkerScriptNeedsNoSession: the generated worker imports the click handler for every notification
-// it shows, and a worker fetches its own scripts with no session to present, so that script is answered
-// like the worker itself.
-func TestWorkerScriptNeedsNoSession(t *testing.T) {
-	s := testServer(t)
-
-	req := secureRequest(httptest.NewRequest(http.MethodGet, "/sw-notifications.js", nil))
-	req.Host = "localhost"
-	rr := httptest.NewRecorder()
-	// The chain Serve installs over the router, which is what serves the frontend — the bare mux answers
-	// nothing outside the API.
-	s.middlewareChain(s.router).ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("GET /sw-notifications.js with no session: got %d %q, want 200", rr.Code, rr.Body.String())
-	}
-	if body := rr.Body.String(); !strings.Contains(body, "notificationclick") {
-		t.Errorf("body = %q, want the click handler the worker imports", body)
-	}
-}
-
-// TestPrecachedDocumentNeedsNoSession: the worker precaches `/index.html` by name and abandons its
-// install on a non-200, so the document answers with a nonce before anyone has signed in.
-func TestPrecachedDocumentNeedsNoSession(t *testing.T) {
+// TestTheWorkersOwnFilesAnswerWithNoSession: a service worker fetches its own scripts with no session to
+// present, and it precaches `/index.html` by name and abandons its install on a non-200. The companion
+// script it imports and the document it caches are therefore answered before anyone signs in.
+func TestTheWorkersOwnFilesAnswerWithNoSession(t *testing.T) {
 	s := testServer(t)
 
 	get := func(path string) string {
 		req := secureRequest(httptest.NewRequest(http.MethodGet, path, nil))
 		req.Host = "localhost"
 		rr := httptest.NewRecorder()
+		// The chain Serve installs over the router, which is what serves the frontend — the bare mux
+		// answers nothing outside the API.
 		s.middlewareChain(s.router).ServeHTTP(rr, req)
 		if rr.Code != http.StatusOK {
 			t.Fatalf("GET %s with no session: got %d %q, want 200", path, rr.Code, rr.Body.String())
 		}
 		return rr.Body.String()
+	}
+
+	// The companion script, which the worker imports for every notification it shows.
+	if body := get("/sw-notifications.js"); !strings.Contains(body, "notificationclick") {
+		t.Errorf("body = %q, want the click handler the worker imports", body)
 	}
 
 	// The nonce is per response, so it is what the two documents are allowed to differ in.
@@ -175,7 +152,7 @@ func TestPrecachedDocumentNeedsNoSession(t *testing.T) {
 // handler downstream identifies the caller.
 func TestMiddlewareSessionIDInContext(t *testing.T) {
 	s := testServer(t)
-	cookie, _ := login(t, s)
+	cookie, _ := loginSession(t, s, "test harness")
 
 	var gotSession string
 	probe := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -283,7 +260,7 @@ func TestCSRFMiddleware(t *testing.T) {
 			req := testRequest(tc.method, tc.path, body)
 
 			if tc.login {
-				cookie, csrf := login(t, s)
+				cookie, csrf := loginSession(t, s, "test harness")
 				req.Header.Set("Cookie", cookie)
 				if tc.token == "valid" {
 					req.Header.Set("X-CSRF-Token", csrf)
@@ -305,22 +282,50 @@ func staticBody(v any) func(t *testing.T) any {
 	return func(*testing.T) any { return v }
 }
 
-func TestPanicRecovery_DoesNotLeakPanicValue(t *testing.T) {
-	panicValue := "SENSITIVE-INTERNAL-DETAIL"
-	h := PanicRecoveryMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		panic(panicValue)
-	}))
+// TestPanicRecovery_ReportsTheRouteAndLeaksNothing: a recovered panic answers MIKE's own 500, and
+// neither end of the record repeats what it caught. The client never sees the panic value; the log names
+// the route and never the request, because a preview path segment is a live bearer token.
+func TestPanicRecovery_ReportsTheRouteAndLeaksNothing(t *testing.T) {
+	t.Run("the panic value does not reach the client", func(t *testing.T) {
+		panicValue := "SENSITIVE-INTERNAL-DETAIL"
+		h := PanicRecoveryMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			panic(panicValue)
+		}))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+		req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500", rr.Code)
-	}
-	if strings.Contains(rr.Body.String(), panicValue) {
-		t.Fatalf("panic value leaked to client: %q", rr.Body.String())
-	}
+		if rr.Code != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want 500", rr.Code)
+		}
+		if strings.Contains(rr.Body.String(), panicValue) {
+			t.Fatalf("panic value leaked to client: %q", rr.Body.String())
+		}
+	})
+
+	t.Run("the log names the route, not the preview token", func(t *testing.T) {
+		sink, restore := logging.TestSink()
+		defer restore()
+
+		const token = "0123456789abcdef0123456789abcdef"
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /api/preview/{token}/{path...}", func(http.ResponseWriter, *http.Request) {
+			panic("preview handler exploded")
+		})
+
+		rr := httptest.NewRecorder()
+		PanicRecoveryMiddleware(mux).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/preview/"+token+"/index.html", nil))
+
+		if rr.Code != http.StatusInternalServerError {
+			t.Errorf("a recovered panic answered %d, want 500", rr.Code)
+		}
+		if out := sink.String(); !strings.Contains(out, "/api/preview/{token}/{path...}") {
+			t.Errorf("the panic log names no route, so it cannot be triaged: %s", out)
+		} else if strings.Contains(out, token) {
+			t.Errorf("the panic log carries the preview token: %s", out)
+		}
+	})
 }
 
 // --- Host pinning (DNS-rebinding protection) --------------------------------
@@ -334,60 +339,79 @@ func okHostHandler() http.Handler {
 	})
 }
 
+// TestHostPinMiddleware is the allowlist as one matrix: the loopback names, the address the server
+// listens on (the container/reverse-proxy escape hatch, which accepts that address with or without its
+// port), and nothing else. A rebinding attack has to present its own origin as Host — exactly the value
+// that is not allowed — and a missing Host names no origin to check at all.
 func TestHostPinMiddleware(t *testing.T) {
-	s := testServer(t) // addr ":0" — no listen host contributes to the allowlist
-
 	tests := []struct {
 		name string
+		addr string // what the server listens on; ":0" contributes no host to the allowlist
 		host string
 		want int
 	}{
-		{name: "localhost with port", host: "localhost:3000", want: http.StatusOK},
-		{name: "localhost without port", host: "localhost", want: http.StatusOK},
-		{name: "IPv4 loopback", host: "127.0.0.1:3000", want: http.StatusOK},
-		{name: "IPv6 loopback bracketed", host: "[::1]:3000", want: http.StatusOK},
-		{name: "IPv6 loopback bare", host: "::1", want: http.StatusOK},
-		{name: "uppercase LOCALHOST", host: "LOCALHOST:3000", want: http.StatusOK},
+		{name: "localhost with port", addr: ":0", host: "localhost:3000", want: http.StatusOK},
+		{name: "localhost without port", addr: ":0", host: "localhost", want: http.StatusOK},
+		{name: "IPv4 loopback", addr: ":0", host: "127.0.0.1:3000", want: http.StatusOK},
+		{name: "IPv6 loopback bracketed", addr: ":0", host: "[::1]:3000", want: http.StatusOK},
+		{name: "IPv6 loopback bare", addr: ":0", host: "::1", want: http.StatusOK},
+		{name: "uppercase LOCALHOST", addr: ":0", host: "LOCALHOST:3000", want: http.StatusOK},
 		// A rebinding attack must present its own origin as Host — which is
 		// exactly the value that is not allowed.
-		{name: "attacker domain", host: "evil.test:3000", want: http.StatusMisdirectedRequest},
-		{name: "attacker domain pointing at loopback", host: "rebind.attacker.io", want: http.StatusMisdirectedRequest},
-		{name: "foreign LAN ip", host: "10.1.2.3:3000", want: http.StatusMisdirectedRequest},
-		{name: "empty host", host: "", want: http.StatusMisdirectedRequest},
+		{name: "attacker domain", addr: ":0", host: "evil.test:3000", want: http.StatusMisdirectedRequest},
+		{name: "attacker domain pointing at loopback", addr: ":0", host: "rebind.attacker.io", want: http.StatusMisdirectedRequest},
+		{name: "foreign LAN ip", addr: ":0", host: "10.1.2.3:3000", want: http.StatusMisdirectedRequest},
+		{name: "empty host", addr: ":0", host: "", want: http.StatusMisdirectedRequest},
+		// Listening on an explicit address pins that address as an accepted Host value too.
+		{name: "the listen address", addr: "192.168.1.50:3000", host: "192.168.1.50:3000", want: http.StatusOK},
+		{name: "the listen address without its port", addr: "192.168.1.50:3000", host: "192.168.1.50", want: http.StatusOK},
+		{name: "loopback reaches an explicit listen address", addr: "192.168.1.50:3000", host: "localhost:3000", want: http.StatusOK},
+		{name: "a neighbour of the listen address", addr: "192.168.1.50:3000", host: "192.168.1.51:3000", want: http.StatusMisdirectedRequest},
+		{name: "a domain in front of the listen address", addr: "192.168.1.50:3000", host: "evil.test", want: http.StatusMisdirectedRequest},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			s := &Server{addr: tt.addr}
 			req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
 			req.Host = tt.host
 			rr := httptest.NewRecorder()
 			s.HostPinMiddleware(okHostHandler()).ServeHTTP(rr, req)
 
 			if rr.Code != tt.want {
-				t.Fatalf("Host %q: status = %d, want %d (body %q)", tt.host, rr.Code, tt.want, rr.Body.String())
+				t.Errorf("Host %q: status = %d, want %d (body %q)", tt.host, rr.Code, tt.want, rr.Body.String())
 			}
 			if tt.want == http.StatusMisdirectedRequest && !strings.Contains(rr.Body.String(), "error") {
-				t.Fatalf("Host %q: 421 body is not a JSON error: %q", tt.host, rr.Body.String())
+				t.Errorf("Host %q: 421 body is not a JSON error: %q", tt.host, rr.Body.String())
 			}
 		})
 	}
 }
 
-func TestHostPinMiddlewareAllowedHostsEnv(t *testing.T) {
-	// The reverse-proxy opt-out: a proxy forwards the public domain in Host. The variable alone, with
-	// no flag, must reach the allowlist — and it reaches it through the one ladder that resolves it,
-	// so what is pinned here is the whole chain (variable -> startup.Config -> middleware) rather than
-	// a middleware that reads the environment on each request.
-	t.Setenv(startup.EnvAllowedHosts, "kanban.example.com, staging.lan")
+// TestHostPinMiddlewareAnswersFromTheResolvedList pins the --allowed-hosts / MIKE_ALLOWED_HOSTS plumbing
+// end to end. The variable reaches the allowlist only through the one ladder that resolves it
+// (variable → startup.Config → middleware), the wired list is the whole answer at request time, and an
+// entry is matched literally, case-insensitively and with the port stripped on both sides. The variable
+// stays set below precisely to prove the middle part: a middleware that re-read it would let a stale
+// environment widen the allowlist of a deployment that switched to the flag, which is why the ladder
+// resolves once and the flag replaces rather than extends.
+func TestHostPinMiddlewareAnswersFromTheResolvedList(t *testing.T) {
+	// env.example.com is in the environment and deliberately absent from the wired list below.
+	t.Setenv(startup.EnvAllowedHosts, "kanban.example.com, staging.lan, other.lan, env.example.com")
 	t.Setenv(startup.EnvEncryptionKey, "a-long-enough-test-key")
 	resolved, err := startup.Resolve(startup.Flags{})
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if len(resolved.AllowedHosts) != 2 {
-		t.Fatalf("resolved extras = %q, want the two entries split", resolved.AllowedHosts)
+	if len(resolved.AllowedHosts) != 4 {
+		t.Fatalf("resolved extras = %q, want the four entries split", resolved.AllowedHosts)
 	}
-	s := testServerWith(t, func(c *startup.Config) { c.AllowedHosts = resolved.AllowedHosts })
+	wired := []string{"kanban.example.com", "staging.lan", "other.lan"}
+	if strings.Join(resolved.AllowedHosts, ",") != strings.Join(wired, ",")+",env.example.com" {
+		t.Fatalf("resolved extras = %q, want the wired entries followed by the one left out below", resolved.AllowedHosts)
+	}
+
+	s := testServerWith(t, func(c *startup.Config) { c.AllowedHosts = resolved.AllowedHosts[:3] })
 
 	tests := []struct {
 		host string
@@ -397,11 +421,14 @@ func TestHostPinMiddlewareAllowedHostsEnv(t *testing.T) {
 		{host: "kanban.example.com:443", want: http.StatusOK},
 		{host: "KANBAN.EXAMPLE.COM", want: http.StatusOK},
 		{host: "staging.lan:8443", want: http.StatusOK},
+		{host: "OTHER.LAN", want: http.StatusOK},
 		{host: "localhost:3000", want: http.StatusOK},
 		{host: "evil.test:3000", want: http.StatusMisdirectedRequest},
 		// Prefix/suffix tricks must not match an allowlist entry.
 		{host: "kanban.example.com.evil.test", want: http.StatusMisdirectedRequest},
 		{host: "xkanban.example.com", want: http.StatusMisdirectedRequest},
+		// Set in the environment and wired out of the list: the request-time read is gone.
+		{host: "env.example.com", want: http.StatusMisdirectedRequest},
 	}
 
 	for _, tt := range tests {
@@ -411,95 +438,9 @@ func TestHostPinMiddlewareAllowedHostsEnv(t *testing.T) {
 			rr := httptest.NewRecorder()
 			s.HostPinMiddleware(okHostHandler()).ServeHTTP(rr, req)
 			if rr.Code != tt.want {
-				t.Fatalf("Host %q: status = %d, want %d", tt.host, rr.Code, tt.want)
+				t.Errorf("Host %q: status = %d, want %d", tt.host, rr.Code, tt.want)
 			}
 		})
-	}
-}
-
-// TestHostPinMiddlewareUsesTheWiredAllowedHosts pins the --allowed-hosts / MIKE_ALLOWED_HOSTS
-// plumbing end to end: the resolved list reaches the allowlist, and the environment is not consulted
-// again at request time. The variable stays set below precisely to prove that — a middleware that
-// re-read it would let a stale environment widen the allowlist of a deployment that switched to the
-// flag, which is the reason the ladder resolves once (startup.Resolve) and the flag replaces rather
-// than extends.
-func TestHostPinMiddlewareUsesTheWiredAllowedHosts(t *testing.T) {
-	t.Setenv("MIKE_ALLOWED_HOSTS", "env.example.com")
-
-	s := &Server{addr: ":0", settings: startup.Config{AllowedHosts: []string{"flag.example.com", "other.lan"}}}
-
-	tests := []struct {
-		host string
-		want int
-	}{
-		{host: "flag.example.com", want: http.StatusOK},
-		{host: "flag.example.com:443", want: http.StatusOK},
-		{host: "OTHER.LAN", want: http.StatusOK},
-		{host: "localhost:3000", want: http.StatusOK},
-		// Set in the environment and wired out of the list: the request-time read is gone.
-		{host: "env.example.com", want: http.StatusMisdirectedRequest},
-		{host: "evil.test", want: http.StatusMisdirectedRequest},
-	}
-
-	for _, tt := range tests {
-		req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
-		req.Host = tt.host
-		rr := httptest.NewRecorder()
-		s.HostPinMiddleware(okHostHandler()).ServeHTTP(rr, req)
-		if rr.Code != tt.want {
-			t.Errorf("Host %q: status = %d, want %d", tt.host, rr.Code, tt.want)
-		}
-	}
-}
-
-// TestEffectiveAllowedHosts pins that the middleware answers from the resolved list and from nothing
-// else: the joining of entries is the middleware's, the choosing between flag and variable is
-// startup's (startup.TestResolveAllowedHosts).
-func TestEffectiveAllowedHosts(t *testing.T) {
-	t.Setenv(startup.EnvAllowedHosts, "env.example.com")
-
-	tests := []struct {
-		name  string
-		hosts []string
-		want  string
-	}{
-		{name: "nothing wired means no extras", hosts: nil, want: ""},
-		{name: "entries are joined for the allowlist", hosts: []string{"a.example", "b.example"}, want: "a.example,b.example"},
-		{name: "the wired list is the whole answer", hosts: []string{"flag.example.com"}, want: "flag.example.com"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			s := &Server{settings: startup.Config{AllowedHosts: tt.hosts}}
-			if got := s.effectiveAllowedHosts(); got != tt.want {
-				t.Errorf("effectiveAllowedHosts() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestHostPinMiddlewareListenHostAllowed(t *testing.T) {
-	// Listening on an explicit address (the container/reverse-proxy escape hatch)
-	// pins that address as an accepted Host value too.
-	s := &Server{addr: "192.168.1.50:3000"}
-
-	for _, host := range []string{"192.168.1.50:3000", "192.168.1.50", "localhost:3000"} {
-		req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
-		req.Host = host
-		rr := httptest.NewRecorder()
-		s.HostPinMiddleware(okHostHandler()).ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Errorf("Host %q: status = %d, want 200", host, rr.Code)
-		}
-	}
-
-	for _, host := range []string{"192.168.1.51:3000", "evil.test"} {
-		req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
-		req.Host = host
-		rr := httptest.NewRecorder()
-		s.HostPinMiddleware(okHostHandler()).ServeHTTP(rr, req)
-		if rr.Code != http.StatusMisdirectedRequest {
-			t.Errorf("Host %q: status = %d, want 421", host, rr.Code)
-		}
 	}
 }
 
@@ -528,30 +469,5 @@ func TestHostPinMiddlewareCoversUpgradesAndPublicPaths(t *testing.T) {
 	s.HostPinMiddleware(s.mux).ServeHTTP(rr, req)
 	if rr.Code != http.StatusMisdirectedRequest {
 		t.Fatalf("websocket upgrade with foreign Host: status = %d, want 421", rr.Code)
-	}
-}
-
-// A panic on a preview URL must not write the bearer token into the log — the log is the one way a
-// preview token still leaves this process.
-func TestPanicRecovery_LogsTheRouteNotThePreviewToken(t *testing.T) {
-	sink, restore := logging.TestSink()
-	defer restore()
-
-	const token = "0123456789abcdef0123456789abcdef"
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/preview/{token}/{path...}", func(http.ResponseWriter, *http.Request) {
-		panic("preview handler exploded")
-	})
-
-	rr := httptest.NewRecorder()
-	PanicRecoveryMiddleware(mux).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/preview/"+token+"/index.html", nil))
-
-	if rr.Code != http.StatusInternalServerError {
-		t.Errorf("a recovered panic answered %d, want 500", rr.Code)
-	}
-	if out := sink.String(); !strings.Contains(out, "/api/preview/{token}/{path...}") {
-		t.Errorf("the panic log names no route, so it cannot be triaged: %s", out)
-	} else if strings.Contains(out, token) {
-		t.Errorf("the panic log carries the preview token: %s", out)
 	}
 }

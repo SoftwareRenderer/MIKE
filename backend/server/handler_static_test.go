@@ -91,19 +91,6 @@ func TestRootRefusesWhenTheDocumentIsAbsent(t *testing.T) {
 	}
 }
 
-// A wrong verb on an API path is the mux's refusal, not the application document.
-func TestSPAServesNothingToAWrongVerbOnAnAPIPath(t *testing.T) {
-	s := testServer(t)
-
-	rr := staticGet(t, s, "/api/projects/p1/tasks/t1/start")
-	if rr.Code == http.StatusOK {
-		t.Fatalf("GET on a POST-only API route: got 200 %q, want the mux's refusal", rr.Body.String())
-	}
-	if rr.Code != http.StatusMethodNotAllowed {
-		t.Errorf("GET on a POST-only API route: got %d, want 405", rr.Code)
-	}
-}
-
 // routerResponse is testResponse over s.router: the mux, then the SPA behind it.
 func routerResponse(t *testing.T, s *Server, req *http.Request) *httptest.ResponseRecorder {
 	t.Helper()
@@ -112,19 +99,48 @@ func routerResponse(t *testing.T, s *Server, req *http.Request) *httptest.Respon
 	return rr
 }
 
-// The 405 and its Allow header stay the mux's answer with the frontend behind it.
-func TestMuxRefusesAnUnregisteredVerbWhileTheSPAServes(t *testing.T) {
-	s := testServer(t)
-	cookie, csrf := loginTestCSRF(t, s)
-
-	req := testRequest(http.MethodDelete, "/api/projects", nil)
-	withAuthCSRF(req, cookie, csrf)
-	rr := routerResponse(t, s, req)
-	if rr.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("DELETE /api/projects: got %d, want 405 from the mux (body %q)", rr.Code, rr.Body.String())
+// The SPA sits behind the mux, so a request the mux refused must stay the mux's answer: a catch-all that
+// outranked it would hand the application document to a wrong verb on an API path, and the client would
+// read HTML where it asked for JSON.
+func TestTheSPANeverSwallowsTheMuxsVerbRefusal(t *testing.T) {
+	cases := []struct {
+		name  string
+		verb  string
+		path  string
+		auth  bool
+		allow string
+	}{
+		// A path registered for POST only, reached with a GET through the frontend chain.
+		{name: "a POST-only route under the frontend chain", verb: http.MethodGet,
+			path: "/api/projects/p1/tasks/t1/start"},
+		// A path registered for GET and POST, refused by the whole chain the server runs.
+		{name: "a route with no DELETE, through the whole chain", verb: http.MethodDelete,
+			path: "/api/projects", auth: true, allow: "GET"},
 	}
-	if allow := rr.Header().Get("Allow"); !strings.Contains(allow, "GET") {
-		t.Errorf("DELETE /api/projects: Allow=%q, want the registered methods", allow)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testServer(t)
+			req := testRequest(tc.verb, tc.path, nil)
+			var rr *httptest.ResponseRecorder
+			if tc.auth {
+				cookie, csrf := loginTestCSRF(t, s)
+				withAuthCSRF(req, cookie, csrf)
+				rr = routerResponse(t, s, req)
+			} else {
+				rr = staticGet(t, s, tc.path)
+			}
+			if rr.Code != http.StatusMethodNotAllowed {
+				t.Fatalf("%s %s: got %d, want 405 from the mux (body %q)", tc.verb, tc.path, rr.Code, rr.Body.String())
+			}
+			if strings.Contains(rr.Body.String(), "<body>board</body>") {
+				t.Errorf("%s %s: the SPA answered a verb the mux refused: %q", tc.verb, tc.path, rr.Body.String())
+			}
+			if tc.allow != "" {
+				if got := rr.Header().Get("Allow"); !strings.Contains(got, tc.allow) {
+					t.Errorf("%s %s: Allow=%q, want the registered methods", tc.verb, tc.path, got)
+				}
+			}
+		})
 	}
 }
 

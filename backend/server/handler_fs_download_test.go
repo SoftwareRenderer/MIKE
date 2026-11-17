@@ -226,32 +226,31 @@ func TestFSDownloadRefusesAPathOutsideTheProject(t *testing.T) {
 	}
 }
 
-// A `.git` path is inside the project, so containment alone does not refuse it.
+// A `.git` path is inside the project, so containment alone does not refuse it, and one such row refuses
+// the whole selection rather than dropping that row and streaming the rest.
 func TestFSDownloadRefusesAGitPath(t *testing.T) {
 	s := testServer(t)
 	id, repo := downloadProject(t, s, "dl-git", map[string]string{"a.txt": "first"})
 
-	rr := downloadAsk(t, s, id, "", filepath.Join(repo, ".git", "config"))
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400: %s", rr.Code, rr.Body.String())
-	}
-	if !strings.Contains(rr.Body.String(), fsutil.ErrGitPath.Error()) {
-		t.Errorf("body = %q, want the batch routes' sentence for a .git path", rr.Body.String())
-	}
-}
+	t.Run("the only path named", func(t *testing.T) {
+		rr := downloadAsk(t, s, id, "", filepath.Join(repo, ".git", "config"))
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400: %s", rr.Code, rr.Body.String())
+		}
+		if !strings.Contains(rr.Body.String(), fsutil.ErrGitPath.Error()) {
+			t.Errorf("body = %q, want the batch routes' sentence for a .git path", rr.Body.String())
+		}
+	})
 
-// One `.git` row refuses the whole selection, the way one outside path does.
-func TestFSDownloadRefusesASelectionOfGitAndGoodPaths(t *testing.T) {
-	s := testServer(t)
-	id, repo := downloadProject(t, s, "dl-git-mixed", map[string]string{"a.txt": "first"})
-
-	rr := downloadAsk(t, s, id, "", filepath.Join(repo, "a.txt"), filepath.Join(repo, ".git", "config"))
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 for the whole request: %s", rr.Code, rr.Body.String())
-	}
-	if rr.Body.Len() == 0 {
-		t.Error("a refused batch said nothing")
-	}
+	t.Run("one row of an otherwise good selection", func(t *testing.T) {
+		rr := downloadAsk(t, s, id, "", filepath.Join(repo, "a.txt"), filepath.Join(repo, ".git", "config"))
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400 for the whole request: %s", rr.Code, rr.Body.String())
+		}
+		if rr.Body.Len() == 0 {
+			t.Error("a refused batch said nothing")
+		}
+	})
 }
 
 func TestFSDownloadRefusesATaskOfAnotherProject(t *testing.T) {

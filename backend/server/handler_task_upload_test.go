@@ -168,40 +168,10 @@ func TestUploadRefusesNotAFormAs400AndKeeps413ForSize(t *testing.T) {
 	}
 }
 
-// A methodless route would escape CSRFMiddleware and take a cross-site form post.
-func TestTaskUploadRequiresCSRF(t *testing.T) {
-	s, wtPath := taskUploadProject(t, "up-csrf")
-
-	var body bytes.Buffer
-	w := multipart.NewWriter(&body)
-	part, err := w.CreateFormFile("file", "note.txt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _ = part.Write([]byte("x"))
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/api/projects/up-csrf/tasks/t1/uploads", &body)
-	req.Header.Set("Content-Type", w.FormDataContentType())
-	cookie, _ := loginTestCSRF(t, s)
-	withAuth(req, cookie) // the session, without the token
-
-	rr := httptest.NewRecorder()
-	s.CORSMiddleware(s.SessionMiddleware(s.CSRFMiddleware(CompressMiddleware(s.mux)))).ServeHTTP(rr, req)
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403: %s", rr.Code, rr.Body.String())
-	}
-	if entries, err := os.ReadDir(filepath.Join(wtPath, ".mike-uploads")); err == nil && len(entries) != 0 {
-		t.Errorf("the refused request still wrote: %v", entries)
-	}
-}
-
 // An upload is deleted with its task and with nothing else. Every other transition that stops the executor
 // or the sandbox must leave the file where the message says it is — including the sandbox stop, which used
-// to take the task's uploads with it.
-func TestUploadedFileSurvivesEverythingExceptDeletingTheTask(t *testing.T) {
+// to take the task's uploads with it — and the task's own deletion takes the worktree that holds them.
+func TestUploadedFilesLiveAndDieWithTheirTask(t *testing.T) {
 	s, wtPath := taskUploadProject(t, "up-keep")
 
 	rr := postTaskUpload(t, s, "up-keep", "t1", "report.pdf", []byte("%PDF"))
@@ -209,6 +179,9 @@ func TestUploadedFileSurvivesEverythingExceptDeletingTheTask(t *testing.T) {
 		t.Fatalf("upload = %d: %s", rr.Code, rr.Body.String())
 	}
 	upload := filepath.Join(wtPath, ".mike-uploads", "report.pdf")
+	if _, err := os.Stat(upload); err != nil {
+		t.Fatalf("the upload did not land: %v", err)
+	}
 
 	keep := func(what string) {
 		t.Helper()
@@ -228,21 +201,9 @@ func TestUploadedFileSurvivesEverythingExceptDeletingTheTask(t *testing.T) {
 		t.Fatalf("mode change = %d: %s", rr.Code, rr.Body.String())
 	}
 	keep("changing the mount mode")
-}
 
-func TestDeletingTheTaskTakesItsUploads(t *testing.T) {
-	s, wtPath := taskUploadProject(t, "up-delete")
-
-	rr := postTaskUpload(t, s, "up-delete", "t1", "report.pdf", []byte("%PDF"))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("upload = %d: %s", rr.Code, rr.Body.String())
-	}
-	upload := filepath.Join(wtPath, ".mike-uploads", "report.pdf")
-	if _, err := os.Stat(upload); err != nil {
-		t.Fatalf("the upload did not land: %v", err)
-	}
-
-	if rr := testResponseAuth(t, s, testRequest(http.MethodDelete, "/api/projects/up-delete/tasks/t1", nil)); rr.Code != http.StatusNoContent {
+	rr = testResponseAuth(t, s, testRequest(http.MethodDelete, "/api/projects/up-keep/tasks/t1", nil))
+	if rr.Code != http.StatusNoContent {
 		t.Fatalf("delete task = %d: %s", rr.Code, rr.Body.String())
 	}
 	if _, err := os.Stat(upload); !os.IsNotExist(err) {

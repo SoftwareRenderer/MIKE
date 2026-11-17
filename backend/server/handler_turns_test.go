@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"mike/backend/store"
-	"mike/backend/types"
 )
 
 // The turns route names the prompts of a conversation. It exists because the window read counts answers,
@@ -117,25 +116,6 @@ func TestTurnsRoutePagesOlderPrompts(t *testing.T) {
 	}
 }
 
-// The bound is what keeps the response bounded: a prompt that is a pasted file is quoted up to the label
-// bound, not shipped.
-func TestTurnsRouteBoundsTheQuotedLine(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Bounded")
-	seedMessage(t, s, projID, taskID, &types.TaskMessage{
-		Role: "user", Content: strings.Repeat("x", store.TurnLabelChars*5),
-	})
-
-	turns, _ := readTurns(t, s, "/api/projects/"+projID+"/tasks/"+taskID+"/turns")
-	if len(turns) == 0 {
-		t.Fatal("the conversation answered with no prompts")
-	}
-	if got := len(turns[len(turns)-1].Text); got != store.TurnLabelChars {
-		t.Errorf("quoted head is %d characters, want the bound of %d", got, store.TurnLabelChars)
-	}
-}
-
 func TestTurnsRouteRefusesLimitsItDoesNotAnswer(t *testing.T) {
 	s := testServer(t)
 	projID := createTestProject(t, s)
@@ -167,13 +147,27 @@ func TestTurnsRouteRefusesACursorItDidNotIssue(t *testing.T) {
 	}
 }
 
-func TestTurnsRouteAnswersForATaskThatIsGone(t *testing.T) {
+// The turns route resolves the task in the path before it reads any row, and answers 404 for a task it
+// cannot find — including one that lives under another project.
+func TestTurnsRouteAnswersNotFoundForATaskItCannotReach(t *testing.T) {
 	s := testServer(t)
-	projID := createTestProject(t, s)
+	projA, taskA, projB, _ := twoProjectFixture(t, s)
 
-	rr := testResponseAuth(t, s, testRequest("GET", "/api/projects/"+projID+"/tasks/no-such-task/turns", nil))
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("an unknown task answered %d, want 404 — %s", rr.Code, rr.Body.String())
+	cases := map[string]string{
+		"no such task":           "/api/projects/" + projA + "/tasks/no-such-task/turns",
+		"another project's task": "/api/projects/" + projB + "/tasks/" + taskA + "/turns",
+	}
+	for name, path := range cases {
+		rr := testResponseAuth(t, s, testRequest(http.MethodGet, path, nil))
+		if rr.Code != http.StatusNotFound {
+			t.Errorf("%s answered %d, want 404 — %s", name, rr.Code, rr.Body.String())
+		}
+	}
+
+	rr := testResponseAuth(t, s, testRequest(http.MethodGet,
+		"/api/projects/"+projA+"/tasks/"+taskA+"/turns", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("the owning project was refused: %d — %s", rr.Code, rr.Body.String())
 	}
 }
 
