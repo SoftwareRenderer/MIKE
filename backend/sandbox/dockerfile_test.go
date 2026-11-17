@@ -25,39 +25,58 @@ func refusedLine(t *testing.T, err error, wantLine int) *BuildFileError {
 	return bfErr
 }
 
-// The host must fetch every image the build needs, so this reading has to be complete: every stage's base and
-// every `--from` naming an image, in file order, once each.
+// The host must fetch every image the build needs, so this reading has to be complete: every stage's base
+// and every `--from` naming an image, in file order, once each. A duplicate ref, a stage named by its own
+// name and a stage index are not further images the host owes.
 func TestBuildReadsEveryImageTheFileNames(t *testing.T) {
-	file, err := ParseBuildFile(strings.Join([]string{
-		"FROM golang:1.23 AS build",
-		"COPY --from=docker.io/library/busybox:1.36 /bin/sh /bin/sh",
-		"COPY --from=build /app /app",
-		"FROM alpine:3.20",
-		"COPY --from=build /app /app",
-		"FROM scratch",
-		"COPY hello /hello",
-	}, "\n"))
-	if err != nil {
-		t.Fatalf("refused a file it must pass: %v", err)
-	}
-	want := []string{"golang:1.23", "docker.io/library/busybox:1.36", "alpine:3.20"}
-	if strings.Join(file.Bases, ",") != strings.Join(want, ",") {
-		t.Errorf("bases = %v, want %v", file.Bases, want)
-	}
-	if file.FirstFrom != "golang:1.23" {
-		t.Errorf("the headline base is %q, want the file's first FROM", file.FirstFrom)
+	for _, tc := range []struct {
+		name  string
+		file  string
+		want  []string
+		first string
+	}{
+		{
+			name: "every stage and every image-naming COPY, in file order",
+			file: strings.Join([]string{
+				"FROM golang:1.23 AS build",
+				"COPY --from=docker.io/library/busybox:1.36 /bin/sh /bin/sh",
+				"COPY --from=build /app /app",
+				"FROM alpine:3.20",
+				"COPY --from=build /app /app",
+				"FROM scratch",
+				"COPY hello /hello",
+			}, "\n"),
+			want: []string{"golang:1.23", "docker.io/library/busybox:1.36", "alpine:3.20"}, first: "golang:1.23",
+		},
+		{
+			name: "a repeated base and a stage named by its own name",
+			file: "FROM alpine:3.20 AS one\nFROM alpine:3.20\nFROM one\nCOPY --from=one /x /y\n",
+			want: []string{"alpine:3.20"}, first: "alpine:3.20",
+		},
+		{
+			name: "a COPY from an earlier stage by index",
+			file: "FROM golang:1.23\nRUN make\nFROM alpine:3.20\nCOPY --from=0 /app /app\n",
+			want: []string{"golang:1.23", "alpine:3.20"}, first: "golang:1.23",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file, err := ParseBuildFile(tc.file)
+			if err != nil {
+				t.Fatalf("refused a file it must pass: %v", err)
+			}
+			if strings.Join(file.Bases, ",") != strings.Join(tc.want, ",") {
+				t.Errorf("bases = %v, want %v", file.Bases, tc.want)
+			}
+			if file.FirstFrom != tc.first {
+				t.Errorf("the headline base is %q, want the file's first FROM %q", file.FirstFrom, tc.first)
+			}
+		})
 	}
 }
 
-// A duplicate ref, and a stage name used as a `FROM` source, are not two images the host owes.
-func TestBuildHandsInEachImageOnce(t *testing.T) {
-	file, err := ParseBuildFile("FROM alpine:3.20 AS one\nFROM alpine:3.20\nFROM one\nCOPY --from=one /x /y\n")
-	if err != nil {
-		t.Fatalf("refused a file it must pass: %v", err)
-	}
-	if len(file.Bases) != 1 || file.Bases[0] != "alpine:3.20" {
-		t.Errorf("bases = %v, want the one image once", file.Bases)
-	}
+// A stage index outside the stages is not a stage, and nobody knows what the builder would fetch for it.
+func TestBuildRefusesACopyFromAnUnknownStageIndex(t *testing.T) {
+	refusedLine(t, parseErrorOf("FROM alpine:3.20\nCOPY --from=3 /x /y\n"), 2)
 }
 
 // The sandbox and the nested builder already limit each line this test parses, so MIKE does not refuse it
@@ -87,18 +106,6 @@ func TestBuildAcceptsInstructionsTheSandboxAlreadyLimits(t *testing.T) {
 	if len(file.Bases) != 1 || file.Bases[0] != "alpine:3.20" {
 		t.Errorf("bases = %v, want only the file's own base", file.Bases)
 	}
-}
-
-// `--from=0` is a stage index, not a registry port and not an image name.
-func TestBuildReadsAStageIndexAsAStage(t *testing.T) {
-	file, err := ParseBuildFile("FROM golang:1.23\nRUN make\nFROM alpine:3.20\nCOPY --from=0 /app /app\n")
-	if err != nil {
-		t.Fatalf("refused a file it must pass: %v", err)
-	}
-	if strings.Join(file.Bases, ",") != "golang:1.23,alpine:3.20" {
-		t.Errorf("bases = %v", file.Bases)
-	}
-	refusedLine(t, parseErrorOf("FROM alpine:3.20\nCOPY --from=3 /x /y\n"), 2)
 }
 
 // The builder expands a `$NAME` in `FROM` from the `ARG` defaults the file itself declares, and MIKE hands over no

@@ -190,55 +190,56 @@ func TestFSDeleteRefusesWorktreeGitPointer(t *testing.T) {
 	}
 }
 
-func TestFSCopyAutoRenamesAndReportsIt(t *testing.T) {
+// TestFSCopyReportsWhereEachRowLanded: `to` is where the copy went and `renamed` is the server
+// admitting it chose a different name — a destination folder that already holds the name takes
+// `name copy`, `name copy2`, … rather than overwriting or failing.
+func TestFSCopyReportsWhereEachRowLanded(t *testing.T) {
 	s := testServer(t)
 	repo := fsOpsProject(t, s, "fs-ops-copy", map[string]string{
 		"report.txt":      "one",
 		"report copy.txt": "two",
+		"note.md":         "note",
+		"docs/x.md":       "x",
 	})
 
-	status, res := fsOpsPost(t, s, "copy", "fs-ops-copy", "", map[string]any{
-		"paths": []string{filepath.Join(repo, "report.txt")},
-		"dest":  repo,
-	})
-	if status != http.StatusOK {
-		t.Fatalf("status = %d", status)
-	}
-	if len(res.Done) != 1 || len(res.Failed) != 0 {
-		t.Fatalf("done/failed = %+v / %+v", res.Done, res.Failed)
-	}
-	want := filepath.Join(repo, "report copy2.txt")
-	if res.Done[0].To != want || !res.Done[0].Renamed {
-		t.Errorf("to = %q (renamed %v), want %q", res.Done[0].To, res.Done[0].Renamed, want)
-	}
-	if got, err := os.ReadFile(want); err != nil || string(got) != "one" {
-		t.Errorf("renamed copy content = %q, %v", got, err)
-	}
-	if _, err := os.Stat(filepath.Join(repo, "report.txt")); err != nil {
-		t.Errorf("a copy removed its source: %v", err)
-	}
-}
-
-func TestFSCopyIntoAnotherFolder(t *testing.T) {
-	s := testServer(t)
-	repo := fsOpsProject(t, s, "fs-ops-copy-dir", map[string]string{
-		"note.md":   "note",
-		"docs/x.md": "x",
+	t.Run("into the folder that already holds the name", func(t *testing.T) {
+		status, res := fsOpsPost(t, s, "copy", "fs-ops-copy", "", map[string]any{
+			"paths": []string{filepath.Join(repo, "report.txt")},
+			"dest":  repo,
+		})
+		if status != http.StatusOK {
+			t.Fatalf("status = %d", status)
+		}
+		if len(res.Done) != 1 || len(res.Failed) != 0 {
+			t.Fatalf("done/failed = %+v / %+v", res.Done, res.Failed)
+		}
+		want := filepath.Join(repo, "report copy2.txt")
+		if res.Done[0].To != want || !res.Done[0].Renamed {
+			t.Errorf("to = %q (renamed %v), want %q", res.Done[0].To, res.Done[0].Renamed, want)
+		}
+		if got, err := os.ReadFile(want); err != nil || string(got) != "one" {
+			t.Errorf("renamed copy content = %q, %v", got, err)
+		}
+		if _, err := os.Stat(filepath.Join(repo, "report.txt")); err != nil {
+			t.Errorf("a copy removed its source: %v", err)
+		}
 	})
 
-	status, res := fsOpsPost(t, s, "copy", "fs-ops-copy-dir", "", map[string]any{
-		"paths": []string{filepath.Join(repo, "note.md")},
-		"dest":  filepath.Join(repo, "docs"),
+	t.Run("into another folder, where the name is free", func(t *testing.T) {
+		status, res := fsOpsPost(t, s, "copy", "fs-ops-copy", "", map[string]any{
+			"paths": []string{filepath.Join(repo, "note.md")},
+			"dest":  filepath.Join(repo, "docs"),
+		})
+		if status != http.StatusOK || len(res.Done) != 1 || res.Done[0].Renamed {
+			t.Fatalf("status %d, done/failed = %+v / %+v", status, res.Done, res.Failed)
+		}
+		if res.Done[0].To != filepath.Join(repo, "docs", "note.md") {
+			t.Errorf("to = %q", res.Done[0].To)
+		}
+		if got, err := os.ReadFile(filepath.Join(repo, "docs", "note.md")); err != nil || string(got) != "note" {
+			t.Errorf("copied content = %q, %v", got, err)
+		}
 	})
-	if status != http.StatusOK || len(res.Done) != 1 || res.Done[0].Renamed {
-		t.Fatalf("status %d, done/failed = %+v / %+v", status, res.Done, res.Failed)
-	}
-	if res.Done[0].To != filepath.Join(repo, "docs", "note.md") {
-		t.Errorf("to = %q", res.Done[0].To)
-	}
-	if got, err := os.ReadFile(filepath.Join(repo, "docs", "note.md")); err != nil || string(got) != "note" {
-		t.Errorf("copied content = %q, %v", got, err)
-	}
 }
 
 func TestFSCopyRefusesAGitDestination(t *testing.T) {
@@ -256,49 +257,52 @@ func TestFSCopyRefusesAGitDestination(t *testing.T) {
 	}
 }
 
+// TestFSMoveStaysInsideTheProject: every path of the batch is resolved against the one tree the request
+// named before anything is removed or written, so a move never lands half-done — whichever row of the
+// request was the one that left the project.
 func TestFSMoveStaysInsideTheProject(t *testing.T) {
 	s := testServer(t)
-	repo := fsOpsProject(t, s, "fs-ops-move-escape", map[string]string{"a.txt": "a"})
+	repo := fsOpsProject(t, s, "fs-ops-move-escape", map[string]string{"a.txt": "a", "one.txt": "1", "two.txt": "2"})
 	outside := t.TempDir()
 	testgit.WriteFile(t, outside, "b.txt", "b")
+	testgit.WriteFile(t, outside, "ghost.txt", "ghost")
 
-	// The source outside the project, and a destination outside it.
-	for _, body := range []map[string]any{
-		{"paths": []string{filepath.Join(outside, "b.txt")}, "dest": repo},
-		{"paths": []string{filepath.Join(repo, "a.txt")}, "dest": outside},
-	} {
-		if status, _ := fsOpsPost(t, s, "move", "fs-ops-move-escape", "", body); status != http.StatusBadRequest {
-			t.Errorf("move %+v: status %d, want 400", body, status)
+	t.Run("a source outside the project", func(t *testing.T) {
+		if status, _ := fsOpsPost(t, s, "move", "fs-ops-move-escape", "", map[string]any{
+			"paths": []string{filepath.Join(outside, "b.txt")}, "dest": repo,
+		}); status != http.StatusBadRequest {
+			t.Errorf("status %d, want 400", status)
 		}
-	}
-	if _, err := os.Stat(filepath.Join(outside, "b.txt")); err != nil {
-		t.Errorf("a file outside the project was moved: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(repo, "a.txt")); err != nil {
-		t.Errorf("the refused request moved the in-project file: %v", err)
-	}
-}
-
-// TestFSMoveRefusesBeforeTouchingAnything: one path outside the project refuses the whole request,
-// so a move never lands half-done.
-func TestFSMoveRefusesBeforeTouchingAnything(t *testing.T) {
-	s := testServer(t)
-	repo := fsOpsProject(t, s, "fs-ops-atomic", map[string]string{"one.txt": "1", "two.txt": "2"})
-	other := t.TempDir()
-	testgit.WriteFile(t, other, "ghost.txt", "ghost")
-
-	status, _ := fsOpsPost(t, s, "move", "fs-ops-atomic", "", map[string]any{
-		"paths": []string{filepath.Join(repo, "one.txt"), filepath.Join(other, "ghost.txt"), filepath.Join(repo, "two.txt")},
-		"dest":  repo,
+		if _, err := os.Stat(filepath.Join(outside, "b.txt")); err != nil {
+			t.Errorf("a file outside the project was moved: %v", err)
+		}
 	})
-	if status != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", status)
-	}
-	for _, name := range []string{"one.txt", "two.txt"} {
-		if _, err := os.Stat(filepath.Join(repo, name)); err != nil {
-			t.Errorf("%s moved although the batch was refused: %v", name, err)
+
+	t.Run("a destination outside the project", func(t *testing.T) {
+		if status, _ := fsOpsPost(t, s, "move", "fs-ops-move-escape", "", map[string]any{
+			"paths": []string{filepath.Join(repo, "a.txt")}, "dest": outside,
+		}); status != http.StatusBadRequest {
+			t.Errorf("status %d, want 400", status)
 		}
-	}
+		if _, err := os.Stat(filepath.Join(repo, "a.txt")); err != nil {
+			t.Errorf("the refused request moved the in-project file: %v", err)
+		}
+	})
+
+	t.Run("one row of a batch outside the project moves nothing", func(t *testing.T) {
+		status, _ := fsOpsPost(t, s, "move", "fs-ops-move-escape", "", map[string]any{
+			"paths": []string{filepath.Join(repo, "one.txt"), filepath.Join(outside, "ghost.txt"), filepath.Join(repo, "two.txt")},
+			"dest":  repo,
+		})
+		if status != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400", status)
+		}
+		for _, name := range []string{"one.txt", "two.txt"} {
+			if _, err := os.Stat(filepath.Join(repo, name)); err != nil {
+				t.Errorf("%s moved although the batch was refused: %v", name, err)
+			}
+		}
+	})
 }
 
 func TestFSMoveIntoItsOwnFolderChangesNothing(t *testing.T) {

@@ -27,6 +27,9 @@ func TestFillRequestKeepsAnArgumentInsideOnePathSegment(t *testing.T) {
 	tool := searchTool(nil)
 	tool.Request.URL = "{{config.base}}/search/{{args.query}}"
 
+	// What the upstream must see for each argument the model can write. The '=' and '@' that a path
+	// segment may legally hold stay; the four that would open a new segment, a query, a fragment or
+	// an escape sequence do not.
 	for _, tc := range []struct{ arg, wantURI string }{
 		{"cats", "/search/cats"},
 		{"two cats", "/search/two%20cats"},
@@ -34,29 +37,24 @@ func TestFillRequestKeepsAnArgumentInsideOnePathSegment(t *testing.T) {
 		{"hi?admin=true", "/search/hi%3Fadmin=true"},
 		{"hi#frag", "/search/hi%23frag"},
 		{"100%safe", "/search/100%25safe"},
+		{"../../etc/passwd", "/search/..%2F..%2Fetc%2Fpasswd"},
+		{"?x=1", "/search/%3Fx=1"},
+		{"#x", "/search/%23x"},
+		{"@evil.test/", "/search/@evil.test%2F"},
+		{"//evil.test", "/search/%2F%2Fevil.test"},
 	} {
 		filled, err := tool.FillRequest(map[string]any{"query": tc.arg}, searchConfig)
 		if err != nil {
 			t.Fatalf("FillRequest(%q): %v", tc.arg, err)
 		}
-		uri := filled.URL[len("https://searx.example:443"):]
+		const origin = "https://searx.example:443"
+		uri := filled.URL[len(origin):]
 		if uri != tc.wantURI {
 			t.Errorf("argument %q was sent as %q, want %q", tc.arg, uri, tc.wantURI)
 		}
-	}
-}
-
-func TestFillRequestEscapeCannotLeaveTheConfiguredAddress(t *testing.T) {
-	tool := searchTool(nil)
-	tool.Request.URL = "{{config.base}}/search/{{args.query}}"
-
-	for _, arg := range []string{"../../etc/passwd", "?x=1", "#x", "@evil.test/", "//evil.test"} {
-		filled, err := tool.FillRequest(map[string]any{"query": arg}, searchConfig)
-		if err != nil {
-			t.Fatalf("FillRequest(%q): %v", arg, err)
-		}
+		// The consequence that matters: no argument reaches a host other than the one a person saved.
 		if host := hostOf(t, filled.URL); host != "searx.example" {
-			t.Errorf("argument %q reached host %q", arg, host)
+			t.Errorf("argument %q reached host %q", tc.arg, host)
 		}
 	}
 }

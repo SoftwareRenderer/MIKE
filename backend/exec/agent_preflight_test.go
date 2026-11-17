@@ -67,7 +67,10 @@ func registerAgentAdapter(t *testing.T, adapter *stubAdapter) (string, *stubAdap
 	return name, adapter
 }
 
-func TestPrepareAgentProbesTheAdaptersOwnBinary(t *testing.T) {
+// The container is asked about the binary the adapter named, not about the extension's name — the two
+// differ for any adapter whose CLI is not called what the registry calls it — and the refusal names
+// both, because the operator is the one who has to install it.
+func TestPrepareAgentProbesAndRefusesTheAdaptersOwnBinary(t *testing.T) {
 	t.Parallel()
 	extName, _ := registerStubAgent(t)
 	prober := &recordingProber{available: false}
@@ -87,22 +90,6 @@ func TestPrepareAgentProbesTheAdaptersOwnBinary(t *testing.T) {
 	if len(prober.probed) != 1 || prober.probed[0] != otherAgentBinary {
 		t.Errorf("container was asked about %v, want exactly [%s] - the binary the adapter named",
 			prober.probed, otherAgentBinary)
-	}
-}
-
-// TestPrepareAgentRefusalNamesTheBinaryItMissed: naming the extension but not the binary leaves the
-// operator guessing what the container lacked.
-func TestPrepareAgentRefusalNamesTheBinaryItMissed(t *testing.T) {
-	t.Parallel()
-	extName, _ := registerStubAgent(t)
-	te := newBareTestExecutor(t)
-	te.agentBinaries = &recordingProber{available: false}
-
-	_, err := te.prepareAgent(context.Background(), &extensions.Extension{Name: extName},
-		"task-1", t.TempDir(), "kanban-task-1", true)
-
-	if err == nil {
-		t.Fatal("expected a refusal")
 	}
 	for _, want := range []string{extName, otherAgentBinary} {
 		if !containsString(err.Error(), want) {

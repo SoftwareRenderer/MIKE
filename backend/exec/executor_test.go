@@ -62,96 +62,71 @@ func setupExecutorWithGit(t *testing.T) (*TaskExecutor, string, string, string) 
 	return te, repoDir, projectID, initialSHA
 }
 
-// TestPrepareTaskExecution_PreservesBaseRefOnRestart verifies that when a task
-// is restarted (worktree already exists), the stored BaseRef (commit SHA) is
-// preserved and not overwritten with the main repo's branch name.
-func TestPrepareTaskExecution_PreservesBaseRefOnRestart(t *testing.T) {
+// TestPrepareTaskExecution_BaseRefIsWrittenOnce checks both halves of one decision: the base ref is
+// recorded from the branch on the first run and never rewritten afterwards — a restart that replaced the
+// stored commit with the branch name loses the point the task diverged from.
+func TestPrepareTaskExecution_BaseRefIsWrittenOnce(t *testing.T) {
 	t.Parallel()
 	te, _, projectID, initialSHA := setupExecutorWithGit(t)
-	taskID := "test-baseref-task"
-	branchName := "task/" + taskID
 
-	// Create task with BaseRef already set (simulating first run completed)
-	task := &types.Task{
-		ID:             taskID,
-		ProjectID:      projectID,
-		Title:          "Test task",
-		Prompt:         "Test prompt",
-		Status:         types.StatusInProgress,
-		BaseRef:        initialSHA,
-		Branch:         branchName,
-		LlamaServerURL: "http://localhost:8080",
-		ModelName:      "test-model",
-	}
-	te.store.CreateTask(task)
+	t.Run("first run records the base", func(t *testing.T) {
+		taskID := "test-baseref-first-run"
+		if err := te.store.CreateTask(&types.Task{
+			ID: taskID, ProjectID: projectID, Title: "Test task", Prompt: "Test prompt",
+			Status: types.StatusInProgress, Branch: "task/" + taskID,
+			LlamaServerURL: "http://localhost:8080", ModelName: "test-model",
+		}); err != nil {
+			t.Fatalf("create task: %v", err)
+		}
 
-	// Create the worktree (simulating it already exists from first run)
-	_, _, err := te.worktreeMgr.CreateWorktree(projectID, taskID, branchName, "")
-	if err != nil {
-		t.Fatalf("create worktree: %v", err)
-	}
+		setup, err := te.prepareTaskExecution(projectID, taskID, "", "", true)
+		if err != nil {
+			t.Fatalf("prepare task execution: %v", err)
+		}
+		if setup == nil {
+			t.Fatal("prepare task execution returned nil")
+		}
+		defer te.releasePrepared(setup)
 
-	// Now simulate restart: prepareTaskExecution is called again
-	// Work the worktree exists, CreateWorktree returns early with branch name
-	setup, err := te.prepareTaskExecution(projectID, taskID, "", "", true)
-	if err != nil {
-		t.Fatalf("prepare task execution: %v", err)
-	}
-	if setup == nil {
-		t.Fatal("prepare task execution returned nil")
-	}
+		if setup.task.BaseRef == "" {
+			t.Error("BaseRef should be set on first run")
+		}
+		if len(setup.task.BaseRef) == 40 {
+			t.Errorf("BaseRef should be a branch name, not a 40-char SHA, got %q", setup.task.BaseRef)
+		}
+	})
 
-	// Verify BaseRef is still the SHA, not a branch name
-	if setup.task.BaseRef != initialSHA {
-		t.Errorf("BaseRef was overwritten on restart: expected %q (SHA), got %q", initialSHA, setup.task.BaseRef)
-	}
-	if len(setup.task.BaseRef) != 40 {
-		t.Errorf("BaseRef should be a 40-char SHA, got %q (len=%d)", setup.task.BaseRef, len(setup.task.BaseRef))
-	}
+	t.Run("restart keeps the stored commit", func(t *testing.T) {
+		taskID := "test-baseref-task"
+		branchName := "task/" + taskID
+		if err := te.store.CreateTask(&types.Task{
+			ID: taskID, ProjectID: projectID, Title: "Test task", Prompt: "Test prompt",
+			Status: types.StatusInProgress, BaseRef: initialSHA, Branch: branchName,
+			LlamaServerURL: "http://localhost:8080", ModelName: "test-model",
+		}); err != nil {
+			t.Fatalf("create task: %v", err)
+		}
+		// The worktree exists: this is the second start of a task that already ran.
+		if _, _, err := te.worktreeMgr.CreateWorktree(projectID, taskID, branchName, ""); err != nil {
+			t.Fatalf("create worktree: %v", err)
+		}
 
-	te.releasePrepared(setup)
-}
+		setup, err := te.prepareTaskExecution(projectID, taskID, "", "", true)
+		if err != nil {
+			t.Fatalf("prepare task execution: %v", err)
+		}
+		if setup == nil {
+			t.Fatal("prepare task execution returned nil")
+		}
+		defer te.releasePrepared(setup)
 
-// TestPrepareTaskExecution_SetsBaseRefOnFirstRun verifies that on first run
-// (no existing BaseRef), the BaseRef is correctly set from CreateWorktree
-// as a branch name (e.g. "master"), not a commit SHA.
-func TestPrepareTaskExecution_SetsBaseRefOnFirstRun(t *testing.T) {
-	t.Parallel()
-	te, _, projectID, _ := setupExecutorWithGit(t)
-	taskID := "test-baseref-first-run"
-	branchName := "task/" + taskID
-
-	// Create task WITHOUT BaseRef (first run)
-	task := &types.Task{
-		ID:             taskID,
-		ProjectID:      projectID,
-		Title:          "Test task",
-		Prompt:         "Test prompt",
-		Status:         types.StatusInProgress,
-		Branch:         branchName,
-		LlamaServerURL: "http://localhost:8080",
-		ModelName:      "test-model",
-	}
-	te.store.CreateTask(task)
-
-	// prepareTaskExecution on first run (no existing worktree)
-	setup, err := te.prepareTaskExecution(projectID, taskID, "", "", true)
-	if err != nil {
-		t.Fatalf("prepare task execution: %v", err)
-	}
-	if setup == nil {
-		t.Fatal("prepare task execution returned nil")
-	}
-
-	// Verify BaseRef is set to a branch name (not a 40-char SHA)
-	if setup.task.BaseRef == "" {
-		t.Error("BaseRef should be set on first run")
-	}
-	if len(setup.task.BaseRef) == 40 {
-		t.Errorf("BaseRef should be a branch name, not a 40-char SHA, got %q", setup.task.BaseRef)
-	}
-
-	te.releasePrepared(setup)
+		if setup.task.BaseRef != initialSHA {
+			t.Errorf("BaseRef was overwritten on restart: expected %q (SHA), got %q", initialSHA, setup.task.BaseRef)
+		}
+		if len(setup.task.BaseRef) != 40 {
+			t.Errorf("BaseRef should be a 40-char SHA, got %q (len=%d)", setup.task.BaseRef, len(setup.task.BaseRef))
+		}
+	})
 }
 
 // TestInitTask_CreatesWorktree verifies that InitTask creates the worktree
@@ -296,135 +271,69 @@ func TestInitTask_ThenPrepareTaskExecution(t *testing.T) {
 	te.releasePrepared(setup)
 }
 
-func TestHasRunningTasks_InProgress(t *testing.T) {
+// TestHasRunningTasks holds the one conjunction behind "is this project busy": a task counts only when
+// its stored status is in_progress AND this process holds an executor for it. Either half alone is not a
+// running task, and asking never cleans up — removing a stale entry is StopTask's job.
+func TestHasRunningTasks(t *testing.T) {
 	t.Parallel()
 	te, _, projectID, _ := setupExecutorWithGit(t)
-	taskID := "test-running-task"
-
-	task := &types.Task{
-		ID:        taskID,
-		ProjectID: projectID,
-		Title:     "Test task",
-		Status:    types.StatusInProgress,
+	now := time.Now().UTC()
+	if err := te.store.CreateProject(&types.Project{ID: "hr-empty", Name: "empty", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create empty project: %v", err)
 	}
-	te.store.CreateTask(task)
-
-	// Manually add an entry to the tasks map (simulating a running executor)
-	ctx, cancel := context.WithCancel(context.Background())
-	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, executorType: "llm"}
-	t.Cleanup(func() { cancel() })
-
-	if !te.HasRunningTasks(projectID) {
-		t.Error("HasRunningTasks should return true for in_progress task in map")
-	}
-}
-
-func TestHasRunningTasks_BacklogStaleCleanup(t *testing.T) {
-	t.Parallel()
-	te, _, projectID, _ := setupExecutorWithGit(t)
-	taskID := "test-backlog-task"
-
-	task := &types.Task{
-		ID:        taskID,
-		ProjectID: projectID,
-		Title:     "Test task",
-		Status:    types.StatusBacklog,
-	}
-	te.store.CreateTask(task)
-
-	// Manually add a stale entry to the tasks map (status != in_progress)
-	ctx, cancel := context.WithCancel(context.Background())
-	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, executorType: "llm"}
-	t.Cleanup(func() { cancel() })
-
-	if te.HasRunningTasks(projectID) {
-		t.Error("HasRunningTasks should return false for backlog task")
+	for _, spec := range []struct {
+		id     string
+		status types.Status
+	}{
+		{"hr-in-progress", types.StatusInProgress},
+		{"hr-backlog", types.StatusBacklog},
+		{"hr-review", types.StatusReview},
+	} {
+		if err := te.store.CreateTask(&types.Task{
+			ID: spec.id, ProjectID: projectID, Title: spec.id, Status: spec.status,
+			CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatalf("create %s: %v", spec.id, err)
+		}
 	}
 
-	// Entry remains in map — HasRunningTasks is read-only, cleanup is done by StopTask
-	te.taskMu.Lock()
-	_, stillExists := te.tasks[taskID]
-	te.taskMu.Unlock()
-	if !stillExists {
-		t.Error("backlog entry should still be in tasks map (not mutated)")
-	}
-}
-
-func TestHasRunningTasks_NotInMap(t *testing.T) {
-	t.Parallel()
-	te, _, projectID, _ := setupExecutorWithGit(t)
-	taskID := "test-not-running-task"
-
-	task := &types.Task{
-		ID:        taskID,
-		ProjectID: projectID,
-		Title:     "Test task",
-		Status:    types.StatusInProgress,
-	}
-	te.store.CreateTask(task)
-
-	// Task is in DB with in_progress status but NOT in the tasks map
-	if te.HasRunningTasks(projectID) {
-		t.Error("HasRunningTasks should return false when task is not in tasks map")
-	}
-}
-
-func TestHasRunningTasks_MixedTasks(t *testing.T) {
-	t.Parallel()
-	te, _, projectID, _ := setupExecutorWithGit(t)
-
-	// Task 1: in_progress + in map → considered running
-	task1 := &types.Task{ID: "task-a", ProjectID: projectID, Title: "A", Status: types.StatusInProgress}
-	te.store.CreateTask(task1)
-	ctx1, cancel1 := context.WithCancel(context.Background())
-	te.tasks["task-a"] = &executionState{ctx: ctx1, cancel: cancel1, executorType: "llm"}
-	t.Cleanup(func() { cancel1() })
-
-	// Task 2: backlog in the map → its stored status keeps it out of the count
-	task2 := &types.Task{ID: "task-b", ProjectID: projectID, Title: "B", Status: types.StatusBacklog}
-	te.store.CreateTask(task2)
-	ctx2, cancel2 := context.WithCancel(context.Background())
-	te.tasks["task-b"] = &executionState{ctx: ctx2, cancel: cancel2, executorType: "llm"}
-	t.Cleanup(func() { cancel2() })
-
-	// Task 3: review + not in map → nothing to clean
-	task3 := &types.Task{ID: "task-c", ProjectID: projectID, Title: "C", Status: types.StatusReview}
-	te.store.CreateTask(task3)
-
-	// Should return true because task-a is in_progress and has a map entry
-	if !te.HasRunningTasks(projectID) {
-		t.Error("HasRunningTasks should return true when at least one in_progress task is in map")
+	// hold puts exactly these tasks into the executor map, which is the half the store cannot answer.
+	hold := func(ids ...string) {
+		te.taskMu.Lock()
+		defer te.taskMu.Unlock()
+		te.tasks = map[string]*executionState{}
+		for _, id := range ids {
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			te.tasks[id] = &executionState{ctx: ctx, cancel: cancel, executorType: "llm"}
+		}
 	}
 
-	// Both entries remain in the map — HasRunningTasks is read-only
-	te.taskMu.Lock()
-	_, taskBExists := te.tasks["task-b"]
-	_, taskAExists := te.tasks["task-a"]
-	te.taskMu.Unlock()
-	if !taskBExists {
-		t.Error("backlog entry (task-b) should still be in tasks map (not mutated)")
-	}
-	if !taskAExists {
-		t.Error("in_progress entry (task-a) should still be in tasks map")
-	}
-}
-
-func TestHasRunningTasks_NoTasks(t *testing.T) {
-	t.Parallel()
-	te, _, projectID, _ := setupExecutorWithGit(t)
-
-	// Project exists but has no tasks
-	if te.HasRunningTasks(projectID) {
-		t.Error("HasRunningTasks should return false when project has no tasks")
-	}
-}
-
-func TestHasRunningTasks_InvalidProject(t *testing.T) {
-	t.Parallel()
-	te, _, _, _ := setupExecutorWithGit(t)
-
-	if te.HasRunningTasks("nonexistent-project") {
-		t.Error("HasRunningTasks should return false for non-existent project")
+	for _, tc := range []struct {
+		name    string
+		project string
+		held    []string
+		want    bool
+	}{
+		{"an in_progress task held by an executor", projectID, []string{"hr-in-progress"}, true},
+		{"an in_progress task with no executor", projectID, nil, false},
+		{"a backlog entry in the map is not a run", projectID, []string{"hr-backlog"}, false},
+		{"a review entry in the map is not a run", projectID, []string{"hr-review"}, false},
+		{"one run among idle tasks", projectID, []string{"hr-backlog", "hr-in-progress", "hr-review"}, true},
+		{"a project with no tasks", "hr-empty", nil, false},
+		{"a project that does not exist", "hr-nonexistent", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hold(tc.held...)
+			if got := te.HasRunningTasks(tc.project); got != tc.want {
+				t.Errorf("HasRunningTasks(%q) = %v, want %v", tc.project, got, tc.want)
+			}
+			te.taskMu.Lock()
+			defer te.taskMu.Unlock()
+			if len(te.tasks) != len(tc.held) {
+				t.Errorf("the answer mutated the executor map: %d entries, want %d", len(te.tasks), len(tc.held))
+			}
+		})
 	}
 }
 
@@ -523,72 +432,59 @@ func TestCommitAndMerge_SerializesPerProject(t *testing.T) {
 	}
 }
 
-func TestGenerateBranchName_ModelTitleNamesTheBranch(t *testing.T) {
+// TestGenerateBranchName pins the naming rule for a task branch: the model's title names it only when a
+// person did not ask for an auto-merge (which needs the task id back to find the branch again), an
+// unsluggable title falls back to the id, and whatever the pieces are the name stays within the cap.
+func TestGenerateBranchName(t *testing.T) {
 	t.Parallel()
-	te, _, projectID, _ := setupExecutorWithGit(t)
-	taskID := "frost-amber-quartz"
-	task := &types.Task{ID: taskID, ProjectID: projectID, Title: "Fix login", TitleLLM: true}
-	branchName := te.merge.generateBranchName(task, projectID)
-	expectedPrefix := "task/fix-login-"
-	if !strings.HasPrefix(branchName, expectedPrefix) {
-		t.Errorf("expected prefix %q, got %q", expectedPrefix, branchName)
-	}
-	if len(branchName) != len("task/fix-login")+1+randomSuffixLen {
-		t.Errorf("expected len %d, got %d (%q)", len("task/fix-login")+1+randomSuffixLen, len(branchName), branchName)
-	}
-}
-
-func TestGenerateBranchName_AutoMergeKeepsTheTaskID(t *testing.T) {
-	t.Parallel()
-	te, _, projectID, _ := setupExecutorWithGit(t)
-	taskID := "frost-amber-quartz"
-	task := &types.Task{ID: taskID, ProjectID: projectID, Title: "Fix login", TitleLLM: true, AutoMerge: true}
-	branchName := te.merge.generateBranchName(task, projectID)
-	if expectedPrefix := "task/" + taskID + "-"; !strings.HasPrefix(branchName, expectedPrefix) {
-		t.Errorf("expected prefix %q, got %q", expectedPrefix, branchName)
-	}
-}
-
-func TestGenerateBranchName_TitleWithoutTheMarkLeavesTheTaskID(t *testing.T) {
-	t.Parallel()
-	te, _, projectID, _ := setupExecutorWithGit(t)
-	taskID := "frost-amber-quartz"
-	task := &types.Task{ID: taskID, ProjectID: projectID, Title: "Fix login"}
-	branchName := te.merge.generateBranchName(task, projectID)
-	expectedPrefix := "task/" + taskID + "-"
-	if !strings.HasPrefix(branchName, expectedPrefix) {
-		t.Errorf("expected prefix %q, got %q", expectedPrefix, branchName)
-	}
-	if len(branchName) != len("task/"+taskID)+1+randomSuffixLen {
-		t.Errorf("expected len %d, got %d (%q)", len("task/"+taskID)+1+randomSuffixLen, len(branchName), branchName)
-	}
-}
-
-func TestGenerateBranchName_FallsBackToTaskIDWhenSlugIsEmpty(t *testing.T) {
-	t.Parallel()
-	te, _, projectID, _ := setupExecutorWithGit(t)
-	taskID := "frost-amber-quartz"
-	task := &types.Task{ID: taskID, ProjectID: projectID, Title: "###", TitleLLM: true}
-	branchName := te.merge.generateBranchName(task, projectID)
-	expectedPrefix := "task/" + taskID + "-"
-	if !strings.HasPrefix(branchName, expectedPrefix) {
-		t.Errorf("expected prefix %q, got %q", expectedPrefix, branchName)
-	}
-	if len(branchName) != len("task/"+taskID)+1+randomSuffixLen {
-		t.Errorf("expected len %d, got %d (%q)", len("task/"+taskID)+1+randomSuffixLen, len(branchName), branchName)
-	}
-}
-
-func TestGenerateBranchName_MaxLength(t *testing.T) {
-	t.Parallel()
-	te, _, projectID, _ := setupExecutorWithGit(t)
-	taskID := "frost-amber-quartz"
-	// Title that slugifies to more than 45 chars (types.BranchSlugMaxLen)
+	const taskID = "frost-amber-quartz"
+	// A title that slugifies to more than types.BranchSlugMaxLen characters.
 	longTitle := "Fix a very long bug description that exceeds the maximum allowed branch name length limit"
-	task := &types.Task{ID: taskID, ProjectID: projectID, Title: longTitle, TitleLLM: true}
-	branchName := te.merge.generateBranchName(task, projectID)
-	if len(branchName) > types.MaxBranchName {
-		t.Errorf("branch name len = %d (%q), want <= %d", len(branchName), branchName, types.MaxBranchName)
+
+	for _, tc := range []struct {
+		name       string
+		title      string
+		titleLLM   bool
+		autoMerge  bool
+		wantPrefix string
+		wantLen    int
+		maxLen     int
+	}{
+		{
+			name: "the model's title names the branch", title: "Fix login", titleLLM: true,
+			wantPrefix: "task/fix-login-", wantLen: len("task/fix-login") + 1 + randomSuffixLen,
+		},
+		{
+			name: "an auto-merge task keeps its id in the name", title: "Fix login", titleLLM: true, autoMerge: true,
+			wantPrefix: "task/" + taskID + "-",
+		},
+		{
+			name: "a title nobody asked the model for keeps the id", title: "Fix login",
+			wantPrefix: "task/" + taskID + "-", wantLen: len("task/"+taskID) + 1 + randomSuffixLen,
+		},
+		{
+			name: "a title that slugs to nothing keeps the id", title: "###", titleLLM: true,
+			wantPrefix: "task/" + taskID + "-", wantLen: len("task/"+taskID) + 1 + randomSuffixLen,
+		},
+		{
+			name: "a long title is cut to the cap", title: longTitle, titleLLM: true,
+			maxLen: types.MaxBranchName,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			te, _, projectID, _ := setupExecutorWithGit(t)
+			task := &types.Task{ID: taskID, ProjectID: projectID, Title: tc.title, TitleLLM: tc.titleLLM, AutoMerge: tc.autoMerge}
+			branchName := te.merge.generateBranchName(task, projectID)
+			if !strings.HasPrefix(branchName, tc.wantPrefix) {
+				t.Errorf("branch name = %q, want prefix %q", branchName, tc.wantPrefix)
+			}
+			if tc.wantLen != 0 && len(branchName) != tc.wantLen {
+				t.Errorf("branch name len = %d (%q), want %d", len(branchName), branchName, tc.wantLen)
+			}
+			if tc.maxLen != 0 && len(branchName) > tc.maxLen {
+				t.Errorf("branch name len = %d (%q), want <= %d", len(branchName), branchName, tc.maxLen)
+			}
+		})
 	}
 }
 

@@ -1,7 +1,10 @@
 package server
 
 import (
+	"bytes"
+	"maps"
 	"net/http"
+	"path/filepath"
 	"testing"
 )
 
@@ -28,14 +31,20 @@ func TestProjectCreate(t *testing.T) {
 	}
 }
 
-func TestProjectCreate_RejectsInvalidName(t *testing.T) {
+// The name a project is created or renamed with reaches an image ref, a container mount path and a
+// worktree directory, so neither door stores one its validator refuses. The character rule itself
+// belongs to sandboxruntime.ValidateProjectName (pkg/sandboxruntime/runtime_test.go); what is proven
+// here is that both doors call it before anything is written.
+func TestProjectNameIsRefusedAtBothDoors(t *testing.T) {
 	s := testServer(t)
 	dir := t.TempDir()
 	initGitRepo(t, dir)
+	projID := createTestProject(t, s)
 
 	invalidNames := []string{
 		"-my-project",      // leading dash
 		"--verbose",        // double dash
+		"-renamed",         // leading dash, the rename door
 		"my; rm -rf /",     // shell injection
 		"my$(rm /)project", // shell injection
 		"my`whoami`proj",   // backtick injection
@@ -61,27 +70,38 @@ func TestProjectCreate_RejectsInvalidName(t *testing.T) {
 	}
 
 	for _, name := range invalidNames {
-		t.Run(name, func(t *testing.T) {
+		t.Run("create/"+name, func(t *testing.T) {
 			req := testRequest("POST", "/api/projects", map[string]any{
 				"name": name,
 				"path": dir,
 			})
-			rr := testResponseAuth(t, s, req)
-			if rr.Code != http.StatusBadRequest {
+			if rr := testResponseAuth(t, s, req); rr.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400 for name %q, got %d: %s", name, rr.Code, rr.Body.String())
+			}
+		})
+		t.Run("update/"+name, func(t *testing.T) {
+			req := testRequest("PUT", "/api/projects/"+projID, map[string]any{
+				"name": name,
+			})
+			if rr := testResponseAuth(t, s, req); rr.Code != http.StatusBadRequest {
 				t.Fatalf("expected 400 for name %q, got %d: %s", name, rr.Code, rr.Body.String())
 			}
 		})
 	}
+
+	// A refused rename leaves the row alone; it is not a rename that failed silently.
+	if got := mustJSON[map[string]any](t, bytes.NewReader(getAuth(t, s, "/api/projects/"+projID)))["name"]; got != "test-project" {
+		t.Fatalf("the refused renames left the project named %v", got)
+	}
 }
 
-func TestProjectCreate_RejectsEmptyName(t *testing.T) {
+// An omitted name is derived from the checkout's directory, which is the one thing about the project
+// the person did not type — so it is the value a wrong fallback would get wrong.
+func TestProjectCreateDerivesTheNameFromThePath(t *testing.T) {
 	s := testServer(t)
 	dir := t.TempDir()
 	initGitRepo(t, dir)
 
-	// Empty name falls back to filepath.Base(path) which should be valid.
-	// But explicitly empty after fallback should not happen since path is validated.
-	// Test that a valid auto-derived name works.
 	req := testRequest("POST", "/api/projects", map[string]any{
 		"path": dir,
 	})
@@ -89,97 +109,72 @@ func TestProjectCreate_RejectsEmptyName(t *testing.T) {
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("expected 201 when name is omitted, got %d: %s", rr.Code, rr.Body.String())
 	}
+	if want := filepath.Base(dir); mustJSON[map[string]any](t, rr.Body)["name"] != want {
+		t.Fatalf("derived name = %v, want %q", mustJSON[map[string]any](t, rr.Body)["name"], want)
+	}
 }
 
-func TestProjectUpdate_RejectsInvalidName(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
+// sandbox_enabled is half a decision: the network-isolation half has to be spelled, because a task
+// either reaches the network or does not, and an omitted key would let the create answer for it.
+func TestProjectCreateSandboxEnabledNeedsTheIsolationDecision(t *testing.T) {
+	t.Run("with_the_isolation_spelled", func(t *testing.T) {
+		s := testServer(t)
+		dir := t.TempDir()
+		initGitRepo(t, dir)
 
-	invalidNames := []string{
-		"-renamed",         // leading dash
-		"my; rm -rf /",     // shell injection
-		"my$(rm /)project", // shell injection
-	}
-
-	for _, name := range invalidNames {
-		t.Run(name, func(t *testing.T) {
-			req := testRequest("PUT", "/api/projects/"+projID, map[string]any{
-				"name": name,
-			})
-			rr := testResponseAuth(t, s, req)
-			if rr.Code != http.StatusBadRequest {
-				t.Fatalf("expected 400 for name %q, got %d: %s", name, rr.Code, rr.Body.String())
-			}
+		req := testRequest("POST", "/api/projects", map[string]any{
+			"name":                      "Sandboxed Project",
+			"path":                      dir,
+			"sandbox_enabled":           true,
+			"sandbox_network_isolation": false,
 		})
-	}
-}
+		rr := testResponseAuth(t, s, req)
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+		}
 
-func TestProjectCreateSandboxEnabled(t *testing.T) {
-	s := testServer(t)
-	dir := t.TempDir()
-	initGitRepo(t, dir)
-
-	req := testRequest("POST", "/api/projects", map[string]any{
-		"name":                      "Sandboxed Project",
-		"path":                      dir,
-		"sandbox_enabled":           true,
-		"sandbox_network_isolation": false,
+		result := mustJSON[map[string]any](t, rr.Body)
+		if result["sandbox_enabled"] != true {
+			t.Fatalf("expected sandbox_enabled to be true, got %v", result["sandbox_enabled"])
+		}
+		if result["sandbox_network_isolation"] == true {
+			t.Fatal("expected sandbox_network_isolation to be false")
+		}
+		// The stored row, not just the create response: every later sandbox start reads this.
+		stored := mustJSON[map[string]any](t, bytes.NewReader(getAuth(t, s, "/api/projects/"+result["id"].(string))))
+		if stored["sandbox_enabled"] != true {
+			t.Fatalf("GET: expected sandbox_enabled to be true, got %v", stored["sandbox_enabled"])
+		}
 	})
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
-	}
 
-	result := mustJSON[map[string]any](t, rr.Body)
-	if result["sandbox_enabled"] != true {
-		t.Fatalf("expected sandbox_enabled to be true, got %v", result["sandbox_enabled"])
-	}
-	if result["sandbox_network_isolation"] == true {
-		t.Fatal("expected sandbox_network_isolation to be false")
-	}
+	t.Run("without_the_isolation", func(t *testing.T) {
+		s := testServer(t)
+		dir := t.TempDir()
+		initGitRepo(t, dir)
 
-	// Verify via GET
-	projID := result["id"].(string)
-	req = testRequest("GET", "/api/projects/"+projID, nil)
-	rr = testResponseAuth(t, s, req)
-	result = mustJSON[map[string]any](t, rr.Body)
-	if result["sandbox_enabled"] != true {
-		t.Fatalf("GET: expected sandbox_enabled to be true, got %v", result["sandbox_enabled"])
-	}
-}
+		req := testRequest("POST", "/api/projects", map[string]any{
+			"name":            "Sandboxed Project",
+			"path":            dir,
+			"sandbox_enabled": true,
+		})
+		rr := testResponseAuth(t, s, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+		}
+		if msg, ok := mustJSON[map[string]any](t, rr.Body)["error"].(string); !ok || msg == "" {
+			t.Fatal("expected error message in response")
+		}
 
-func TestProjectCreateSandboxEnabledMissingNetworkIsolation(t *testing.T) {
-	s := testServer(t)
-	dir := t.TempDir()
-	initGitRepo(t, dir)
-
-	// sandbox_enabled=true without sandbox_network_isolation should return 400
-	req := testRequest("POST", "/api/projects", map[string]any{
-		"name":            "Sandboxed Project",
-		"path":            dir,
-		"sandbox_enabled": true,
+		// The rule is about opting in, so a project that does not opt in needs no second answer.
+		req = testRequest("POST", "/api/projects", map[string]any{
+			"name":            "Non-Sandboxed Project",
+			"path":            dir,
+			"sandbox_enabled": false,
+		})
+		if rr := testResponseAuth(t, s, req); rr.Code != http.StatusCreated {
+			t.Fatalf("expected 201 for non-sandboxed project, got %d: %s", rr.Code, rr.Body.String())
+		}
 	})
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
-	}
-
-	result := mustJSON[map[string]any](t, rr.Body)
-	msg, ok := result["error"].(string)
-	if !ok || msg == "" {
-		t.Fatal("expected error message in response")
-	}
-
-	// sandbox_enabled=false without sandbox_network_isolation should succeed
-	req = testRequest("POST", "/api/projects", map[string]any{
-		"name":            "Non-Sandboxed Project",
-		"path":            dir,
-		"sandbox_enabled": false,
-	})
-	rr = testResponseAuth(t, s, req)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("expected 201 for non-sandboxed project, got %d: %s", rr.Code, rr.Body.String())
-	}
 }
 
 func TestProjectCreateDuplicatePath(t *testing.T) {
@@ -232,22 +227,6 @@ func TestProjectList(t *testing.T) {
 	// Should be sorted by name
 	if projects[0]["name"] != "Project A" || projects[1]["name"] != "Project B" {
 		t.Fatalf("unexpected order: %v, %v", projects[0]["name"], projects[1]["name"])
-	}
-}
-
-func TestProjectGetByID(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-
-	req := testRequest("GET", "/api/projects/"+projID, nil)
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-
-	result := mustJSON[map[string]any](t, rr.Body)
-	if result["id"] != projID {
-		t.Fatalf("wrong ID: %s", result["id"])
 	}
 }
 
@@ -328,101 +307,53 @@ func TestProjectUpdateSandboxNetworkIsolation(t *testing.T) {
 	}
 }
 
-func TestProjectToggleSandboxWithTasks(t *testing.T) {
-	// The fixture server carries the DANGER_ZONE grant, which is what lets a project be switched to
-	// unsandboxed here; the refusal is pinned by the api suite.
-	s := testServer(t)
-	projID := createTestProject(t, s)
+// What blocks a project's container settings from changing is the work that already owns a container,
+// not the rows on its board. DANGER_ZONE is what lets this fixture switch a project to unsandboxed at
+// all; the refusal without it is pinned in server_test.go, and the api suite pins the widening refusal.
+func TestProjectSandboxChangeBlockedOnlyByRunningWork(t *testing.T) {
+	t.Run("backlog_tasks_do_not_block", func(t *testing.T) {
+		s := testServer(t)
+		projID := createTestProject(t, s)
+		createTestTask(t, s, projID, "Task 1")
+		createTestTask(t, s, projID, "Task 2")
 
-	// Create tasks (backlog, not running)
-	createTestTask(t, s, projID, "Task 1")
-	createTestTask(t, s, projID, "Task 2")
-
-	// Enable sandbox
-	req := testRequest("PUT", "/api/projects/"+projID, map[string]any{
-		"sandbox_enabled":           true,
-		"sandbox_network_isolation": true,
+		for step, body := range []map[string]any{
+			{"sandbox_enabled": true, "sandbox_network_isolation": true},
+			{"sandbox_enabled": false},
+			{"sandbox_enabled": true, "sandbox_network_isolation": true},
+		} {
+			want := true
+			if body["sandbox_enabled"] == false {
+				want = false
+			}
+			rr := testResponseAuth(t, s, testRequest("PUT", "/api/projects/"+projID, body))
+			if rr.Code != http.StatusOK {
+				t.Fatalf("step %d: expected 200, got %d: %s", step, rr.Code, rr.Body.String())
+			}
+			if got := mustJSON[map[string]any](t, rr.Body)["sandbox_enabled"]; got != want {
+				t.Fatalf("step %d: sandbox_enabled = %v, want %v", step, got, want)
+			}
+		}
 	})
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("enable sandbox: expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-	result := mustJSON[map[string]any](t, rr.Body)
-	if result["sandbox_enabled"] != true {
-		t.Fatal("expected sandbox_enabled to be true")
-	}
 
-	// Disable sandbox (should succeed — no tasks running)
-	req = testRequest("PUT", "/api/projects/"+projID, map[string]any{
-		"sandbox_enabled": false,
+	t.Run("a_running_task_blocks", func(t *testing.T) {
+		s := testServer(t)
+		projID := createTestProject(t, s)
+		taskID := createTestTaskWithLLM(t, s, projID, "Running task")
+
+		rr := testResponseAuth(t, s, testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/move",
+			map[string]any{"status": "in_progress"}))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("move to in_progress: expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+
+		rr = testResponseAuth(t, s, testRequest("PUT", "/api/projects/"+projID, map[string]any{
+			"sandbox_enabled": true,
+		}))
+		if rr.Code != http.StatusConflict {
+			t.Fatalf("expected 409 Conflict when tasks running, got %d: %s", rr.Code, rr.Body.String())
+		}
 	})
-	rr = testResponseAuth(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("disable sandbox: expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-	result = mustJSON[map[string]any](t, rr.Body)
-	if result["sandbox_enabled"] != false {
-		t.Fatal("expected sandbox_enabled to be false")
-	}
-
-	// Re-enable sandbox (toggle back)
-	req = testRequest("PUT", "/api/projects/"+projID, map[string]any{
-		"sandbox_enabled":           true,
-		"sandbox_network_isolation": true,
-	})
-	rr = testResponseAuth(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("re-enable sandbox: expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-	result = mustJSON[map[string]any](t, rr.Body)
-	if result["sandbox_enabled"] != true {
-		t.Fatal("expected sandbox_enabled to be true after re-enable")
-	}
-}
-
-// Test: sandbox setting change is blocked when tasks are actively running
-func TestProjectSandboxChangeBlockedWhenTasksRunning(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-
-	// Create a task with LLM config so the executor can start
-	taskID := createTestTaskWithLLM(t, s, projID, "Running task")
-
-	// Start the task via the move endpoint (triggers executor)
-	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/move", map[string]any{
-		"status": "in_progress",
-	})
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("move to in_progress: expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-
-	// Try to change sandbox setting while task is running — should be blocked
-	req = testRequest("PUT", "/api/projects/"+projID, map[string]any{
-		"sandbox_enabled": true,
-	})
-	rr = testResponseAuth(t, s, req)
-	if rr.Code != http.StatusConflict {
-		t.Fatalf("expected 409 Conflict when tasks running, got %d: %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestProjectDelete(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-
-	req := testRequest("DELETE", "/api/projects/"+projID, nil)
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("expected 204, got %d: %s", rr.Code, rr.Body.String())
-	}
-
-	// Verify it's gone
-	req = testRequest("GET", "/api/projects/"+projID, nil)
-	rr = testResponseAuth(t, s, req)
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 after delete, got %d", rr.Code)
-	}
 }
 
 func TestProjectCounts(t *testing.T) {
@@ -482,338 +413,187 @@ func TestProjectCounts(t *testing.T) {
 	}
 }
 
-func TestBoardEndpoint(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-
-	// Create 2 tasks
-	createTestTask(t, s, projID, "Task A")
-	createTestTask(t, s, projID, "Task B")
-
-	req := testRequest("GET", "/api/projects/"+projID+"/board", nil)
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-
-	board := mustJSON[map[string]any](t, rr.Body)
-	tasks := board["tasks"].([]any)
-	if len(tasks) != 2 {
-		t.Fatalf("expected 2 tasks on board, got %d", len(tasks))
-	}
-}
-
 func TestClearDone(t *testing.T) {
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
-	// Create tasks in different statuses
+	// Two Done rows and one that never left the backlog.
+	cleared := []string{createTestTask(t, s, projID, "Done task 1"), createTestTask(t, s, projID, "Done task 2")}
 	backlogTask := createTestTask(t, s, projID, "Backlog task")
-	doneTask := createTestTask(t, s, projID, "Done task")
-
-	moveReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+doneTask+"/move", map[string]any{
-		"status": "done",
-	})
-	moveRR := testResponseAuth(t, s, moveReq)
-	if moveRR.Code != http.StatusOK {
-		t.Fatalf("move to done failed: %d %s", moveRR.Code, moveRR.Body.String())
+	for _, id := range cleared {
+		moveTask(t, s, projID, id, "done")
 	}
 
-	// Clear done tasks
+	// Clear Done takes the whole column and answers what it took.
 	req := testRequest("DELETE", "/api/projects/"+projID+"/tasks/done", nil)
 	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
-
-	// Verify done task is gone but backlog task remains
-	listReq := testRequest("GET", "/api/projects/"+projID+"/tasks", nil)
-	listRR := testResponseAuth(t, s, listReq)
-	tasks := mustJSON[[]map[string]any](t, listRR.Body)
-	if len(tasks) != 1 {
-		t.Fatalf("expected 1 task after clear done, got %d", len(tasks))
-	}
-	if tasks[0]["id"] != backlogTask {
-		t.Fatalf("wrong task remaining: %s", tasks[0]["id"])
-	}
-}
-
-func TestProjectCreateWithMemoryLimit(t *testing.T) {
-	s := testServer(t)
-	dir := t.TempDir()
-	initGitRepo(t, dir)
-
-	req := testRequest("POST", "/api/projects", map[string]any{
-		"name":                      "Memory Limit Project",
-		"path":                      dir,
-		"sandbox_enabled":           true,
-		"sandbox_network_isolation": false,
-		"sandbox_memory_limit":      2048,
-	})
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+	if got := mustJSON[map[string]any](t, rr.Body)["deleted"]; got != float64(len(cleared)) {
+		t.Fatalf("deleted = %v, want %d", got, len(cleared))
 	}
 
-	result := mustJSON[map[string]any](t, rr.Body)
-	if result["sandbox_memory_limit"].(float64) != 2048 {
-		t.Fatalf("expected sandbox_memory_limit 2048, got %v", result["sandbox_memory_limit"])
-	}
-
-	// Verify via GET
-	projID := result["id"].(string)
-	req = testRequest("GET", "/api/projects/"+projID, nil)
-	rr = testResponseAuth(t, s, req)
-	result = mustJSON[map[string]any](t, rr.Body)
-	if result["sandbox_memory_limit"].(float64) != 2048 {
-		t.Fatalf("GET: expected sandbox_memory_limit 2048, got %v", result["sandbox_memory_limit"])
+	// The backlog row is not part of the column, whatever the count said.
+	tasks := mustJSON[[]map[string]any](t, testResponseAuth(t, s,
+		testRequest("GET", "/api/projects/"+projID+"/tasks", nil)).Body)
+	if len(tasks) != 1 || tasks[0]["id"] != backlogTask {
+		t.Fatalf("expected only %s after clear done, got %v", backlogTask, tasks)
 	}
 }
 
-func TestProjectUpdateSandboxMemoryLimit(t *testing.T) {
-	s := testServer(t)
-	dir := t.TempDir()
-	initGitRepo(t, dir)
-
-	// Create project with default memory limit
-	req := testRequest("POST", "/api/projects", map[string]any{
-		"name":                      "Memory Update Project",
-		"path":                      dir,
-		"sandbox_enabled":           true,
-		"sandbox_network_isolation": false,
-	})
-	rr := testResponseAuth(t, s, req)
-	result := mustJSON[map[string]any](t, rr.Body)
-	projID := result["id"].(string)
-
-	// Default should be 1024
-	if result["sandbox_memory_limit"].(float64) != 1024 {
-		t.Fatalf("expected default sandbox_memory_limit 1024, got %v", result["sandbox_memory_limit"])
-	}
-
-	// Update memory limit
-	req = testRequest("PUT", "/api/projects/"+projID, map[string]any{
-		"sandbox_memory_limit": 4096,
-	})
-	rr = testResponseAuth(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-	result = mustJSON[map[string]any](t, rr.Body)
-	if result["sandbox_memory_limit"].(float64) != 4096 {
-		t.Fatalf("expected sandbox_memory_limit 4096, got %v", result["sandbox_memory_limit"])
-	}
-
-	// Update to 0 (no limit)
-	req = testRequest("PUT", "/api/projects/"+projID, map[string]any{
-		"sandbox_memory_limit": 0,
-	})
-	rr = testResponseAuth(t, s, req)
-	result = mustJSON[map[string]any](t, rr.Body)
-	if result["sandbox_memory_limit"].(float64) != 0 {
-		t.Fatalf("expected sandbox_memory_limit 0, got %v", result["sandbox_memory_limit"])
-	}
-
-	// A negative limit is clamped to 0 (no limit) — never persisted as negative.
-	req = testRequest("PUT", "/api/projects/"+projID, map[string]any{
-		"sandbox_memory_limit": 2048,
-	})
-	if rr = testResponseAuth(t, s, req); rr.Code != http.StatusOK {
-		t.Fatalf("expected 200 setting 2048, got %d: %s", rr.Code, rr.Body.String())
-	}
-	req = testRequest("PUT", "/api/projects/"+projID, map[string]any{
-		"sandbox_memory_limit": -512,
-	})
-	rr = testResponseAuth(t, s, req)
-	result = mustJSON[map[string]any](t, rr.Body)
-	if result["sandbox_memory_limit"].(float64) != 0 {
-		t.Fatalf("expected negative sandbox_memory_limit clamped to 0, got %v", result["sandbox_memory_limit"])
-	}
-}
-
-func TestProjectUpdateSandboxForwardPorts(t *testing.T) {
-	s := testServer(t)
-
-	projID := createTestProject(t, s)
-
-	// Update forward ports (container ports only, host ports are auto-assigned)
-	req := testRequest("PUT", "/api/projects/"+projID, map[string]any{
-		"sandbox_forward_ports": []map[string]any{
-			{"container_port": 80},
-			{"container_port": 3000},
-		},
-	})
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-	result := mustJSON[map[string]any](t, rr.Body)
-	ports, ok := result["forward_ports"].([]any)
-	if !ok {
-		t.Fatalf("expected forward_ports to be array, got %T", result["forward_ports"])
-	}
-	if len(ports) != 2 {
-		t.Fatalf("expected 2 forward ports, got %d", len(ports))
-	}
-
-	// Verify first port (only container_port)
-	p0 := ports[0].(map[string]any)
-	if p0["container_port"].(float64) != 80 {
-		t.Fatalf("expected container port 80, got %v", p0["container_port"])
-	}
-
-	// Update to single port
-	req = testRequest("PUT", "/api/projects/"+projID, map[string]any{
-		"sandbox_forward_ports": []map[string]any{
-			{"container_port": 8080},
-		},
-	})
-	rr = testResponseAuth(t, s, req)
-	result = mustJSON[map[string]any](t, rr.Body)
-	ports = result["forward_ports"].([]any)
-	if len(ports) != 1 {
-		t.Fatalf("expected 1 forward port, got %d", len(ports))
-	}
-
-	// Clear forward ports
-	req = testRequest("PUT", "/api/projects/"+projID, map[string]any{
-		"sandbox_forward_ports": []map[string]any{},
-	})
-	rr = testResponseAuth(t, s, req)
-	result = mustJSON[map[string]any](t, rr.Body)
-	// forward_ports is omitted when empty (omitempty)
-	if result["forward_ports"] != nil {
-		ports := result["forward_ports"].([]any)
-		if len(ports) != 0 {
-			t.Fatalf("expected 0 forward ports, got %d", len(ports))
+// The memory limit is what the admission gate charges a container for, so it is worth pinning at both
+// doors: the default a project gets when it says nothing, the value it asks for, and the two values
+// that mean "no limit" — zero and a negative one, which is never stored as a negative.
+func TestProjectSandboxMemoryLimit(t *testing.T) {
+	newProject := func(t *testing.T, body map[string]any) (*Server, string) {
+		t.Helper()
+		s := testServer(t)
+		dir := t.TempDir()
+		initGitRepo(t, dir)
+		body = maps.Clone(body)
+		body["path"] = dir
+		rr := testResponseAuth(t, s, testRequest("POST", "/api/projects", body))
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("create project: %d %s", rr.Code, rr.Body.String())
 		}
+		return s, mustJSON[map[string]any](t, rr.Body)["id"].(string)
 	}
+
+	t.Run("create_stores_the_limit", func(t *testing.T) {
+		s, projID := newProject(t, map[string]any{
+			"name":                      "Memory Limit Project",
+			"sandbox_enabled":           true,
+			"sandbox_network_isolation": false,
+			"sandbox_memory_limit":      2048,
+		})
+		stored := mustJSON[map[string]any](t, bytes.NewReader(getAuth(t, s, "/api/projects/"+projID)))
+		if stored["sandbox_memory_limit"].(float64) != 2048 {
+			t.Fatalf("sandbox_memory_limit = %v, want 2048", stored["sandbox_memory_limit"])
+		}
+	})
+
+	t.Run("update_moves_the_limit", func(t *testing.T) {
+		s, projID := newProject(t, map[string]any{
+			"name":                      "Memory Update Project",
+			"sandbox_enabled":           true,
+			"sandbox_network_isolation": false,
+		})
+		want := func(step string, sent, expected float64) {
+			t.Helper()
+			rr := testResponseAuth(t, s, testRequest("PUT", "/api/projects/"+projID, map[string]any{
+				"sandbox_memory_limit": sent,
+			}))
+			if rr.Code != http.StatusOK {
+				t.Fatalf("%s: expected 200, got %d: %s", step, rr.Code, rr.Body.String())
+			}
+			if got := mustJSON[map[string]any](t, rr.Body)["sandbox_memory_limit"].(float64); got != expected {
+				t.Fatalf("%s: sandbox_memory_limit = %v, want %v", step, got, expected)
+			}
+		}
+		// A project that said nothing gets the worker default.
+		if got := mustJSON[map[string]any](t, bytes.NewReader(getAuth(t, s, "/api/projects/"+projID)))["sandbox_memory_limit"].(float64); got != 1024 {
+			t.Fatalf("default sandbox_memory_limit = %v, want 1024", got)
+		}
+		want("raise", 4096, 4096)
+		want("no limit", 0, 0)
+		want("negative clamps to no limit", -512, 0)
+	})
 }
 
-func TestProjectUpdateSandboxMounts(t *testing.T) {
-	s := testServer(t)
-
-	projID := createTestProject(t, s)
-
-	// Update mounts
-	req := testRequest("PUT", "/api/projects/"+projID, map[string]any{
-		"sandbox_mounts": []map[string]any{
-			{"host_path": "/data/cache", "container_path": "/mnt/cache", "mode": "rw"},
-			{"host_path": "/data/config", "container_path": "/mnt/config", "mode": "ro"},
+// Each sandbox list is sent under its sandbox_* request key and read back under the name the row
+// stores; clearing one answers an empty list, which is what the settings screen reads as "nothing
+// configured". Three fields, one mapping — so one table.
+func TestProjectSandboxListSettingsRoundTrip(t *testing.T) {
+	rows := []struct {
+		name        string
+		requestKey  string
+		responseKey string
+		initial     []map[string]any
+		replacement []map[string]any
+		checkFirst  func(t *testing.T, first map[string]any)
+	}{
+		{
+			// Container ports only: the host side is auto-assigned.
+			name: "forward_ports", requestKey: "sandbox_forward_ports", responseKey: "forward_ports",
+			initial:     []map[string]any{{"container_port": 80}, {"container_port": 3000}},
+			replacement: []map[string]any{{"container_port": 8080}},
+			checkFirst: func(t *testing.T, first map[string]any) {
+				if first["container_port"].(float64) != 80 {
+					t.Errorf("container_port = %v, want 80", first["container_port"])
+				}
+			},
 		},
-	})
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-	result := mustJSON[map[string]any](t, rr.Body)
-	mounts, ok := result["sandbox_mounts"].([]any)
-	if !ok {
-		t.Fatalf("expected sandbox_mounts to be array, got %T", result["sandbox_mounts"])
-	}
-	if len(mounts) != 2 {
-		t.Fatalf("expected 2 mounts, got %d", len(mounts))
-	}
-
-	// Verify first mount
-	m0 := mounts[0].(map[string]any)
-	if m0["host_path"] != "/data/cache" {
-		t.Fatalf("expected host_path /data/cache, got %v", m0["host_path"])
-	}
-	if m0["container_path"] != "/mnt/cache" {
-		t.Fatalf("expected container_path /mnt/cache, got %v", m0["container_path"])
-	}
-	if m0["mode"] != "rw" {
-		t.Fatalf("expected mode rw, got %v", m0["mode"])
-	}
-
-	// Update to single mount
-	req = testRequest("PUT", "/api/projects/"+projID, map[string]any{
-		"sandbox_mounts": []map[string]any{
-			{"host_path": "/logs", "container_path": "/var/log/app", "mode": "rw"},
+		{
+			name: "sandbox_mounts", requestKey: "sandbox_mounts", responseKey: "sandbox_mounts",
+			initial: []map[string]any{
+				{"host_path": "/data/cache", "container_path": "/mnt/cache", "mode": "rw"},
+				{"host_path": "/data/config", "container_path": "/mnt/config", "mode": "ro"},
+			},
+			replacement: []map[string]any{
+				{"host_path": "/logs", "container_path": "/var/log/app", "mode": "rw"},
+			},
+			checkFirst: func(t *testing.T, first map[string]any) {
+				for key, want := range map[string]string{
+					"host_path": "/data/cache", "container_path": "/mnt/cache", "mode": "rw",
+				} {
+					if first[key] != want {
+						t.Errorf("%s = %v, want %q", key, first[key], want)
+					}
+				}
+			},
 		},
-	})
-	rr = testResponseAuth(t, s, req)
-	result = mustJSON[map[string]any](t, rr.Body)
-	mounts = result["sandbox_mounts"].([]any)
-	if len(mounts) != 1 {
-		t.Fatalf("expected 1 mount, got %d", len(mounts))
-	}
-
-	// Clear mounts
-	req = testRequest("PUT", "/api/projects/"+projID, map[string]any{
-		"sandbox_mounts": []map[string]any{},
-	})
-	rr = testResponseAuth(t, s, req)
-	result = mustJSON[map[string]any](t, rr.Body)
-	// sandbox_mounts is omitted when empty (omitempty)
-	if result["sandbox_mounts"] != nil {
-		mounts := result["sandbox_mounts"].([]any)
-		if len(mounts) != 0 {
-			t.Fatalf("expected 0 mounts, got %d", len(mounts))
-		}
-	}
-}
-
-func TestProjectUpdateSandboxEnvs(t *testing.T) {
-	s := testServer(t)
-
-	projID := createTestProject(t, s)
-
-	// Update envs
-	req := testRequest("PUT", "/api/projects/"+projID, map[string]any{
-		"sandbox_envs": []map[string]any{
-			{"key": "DATABASE_URL", "value": "postgres://localhost/db"},
-			{"key": "API_KEY", "value": "secret123"},
-			{"key": "EMPTY_VAR", "value": ""},
+		{
+			name: "sandbox_envs", requestKey: "sandbox_envs", responseKey: "sandbox_envs",
+			initial: []map[string]any{
+				{"key": "DATABASE_URL", "value": "postgres://localhost/db"},
+				{"key": "API_KEY", "value": "secret123"},
+				{"key": "EMPTY_VAR", "value": ""},
+			},
+			replacement: []map[string]any{{"key": "NEW_VAR", "value": "new_value"}},
+			checkFirst: func(t *testing.T, first map[string]any) {
+				if first["key"] != "DATABASE_URL" || first["value"] != "postgres://localhost/db" {
+					t.Errorf("first env = %v, want DATABASE_URL=postgres://localhost/db", first)
+				}
+			},
 		},
-	})
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-	result := mustJSON[map[string]any](t, rr.Body)
-	envs, ok := result["sandbox_envs"].([]any)
-	if !ok {
-		t.Fatalf("expected sandbox_envs to be array, got %T", result["sandbox_envs"])
-	}
-	if len(envs) != 3 {
-		t.Fatalf("expected 3 envs, got %d", len(envs))
 	}
 
-	// Verify first env
-	e0 := envs[0].(map[string]any)
-	if e0["key"] != "DATABASE_URL" {
-		t.Fatalf("expected key DATABASE_URL, got %v", e0["key"])
-	}
-	if e0["value"] != "postgres://localhost/db" {
-		t.Fatalf("expected value postgres://localhost/db, got %v", e0["value"])
-	}
+	for _, tc := range rows {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testServer(t)
+			projID := createTestProject(t, s)
 
-	// Update to single env
-	req = testRequest("PUT", "/api/projects/"+projID, map[string]any{
-		"sandbox_envs": []map[string]any{
-			{"key": "NEW_VAR", "value": "new_value"},
-		},
-	})
-	rr = testResponseAuth(t, s, req)
-	result = mustJSON[map[string]any](t, rr.Body)
-	envs = result["sandbox_envs"].([]any)
-	if len(envs) != 1 {
-		t.Fatalf("expected 1 env, got %d", len(envs))
-	}
+			put := func(list []map[string]any) map[string]any {
+				t.Helper()
+				rr := testResponseAuth(t, s, testRequest("PUT", "/api/projects/"+projID,
+					map[string]any{tc.requestKey: list}))
+				if rr.Code != http.StatusOK {
+					t.Fatalf("put %s: %d %s", tc.requestKey, rr.Code, rr.Body.String())
+				}
+				return mustJSON[map[string]any](t, rr.Body)
+			}
 
-	// Clear envs
-	req = testRequest("PUT", "/api/projects/"+projID, map[string]any{
-		"sandbox_envs": []map[string]any{},
-	})
-	rr = testResponseAuth(t, s, req)
-	result = mustJSON[map[string]any](t, rr.Body)
-	// sandbox_envs is omitted when empty (omitempty)
-	if result["sandbox_envs"] != nil {
-		envs := result["sandbox_envs"].([]any)
-		if len(envs) != 0 {
-			t.Fatalf("expected 0 envs, got %d", len(envs))
-		}
+			result := put(tc.initial)
+			list, ok := result[tc.responseKey].([]any)
+			if !ok {
+				t.Fatalf("%s is %T, want an array", tc.responseKey, result[tc.responseKey])
+			}
+			if len(list) != len(tc.initial) {
+				t.Fatalf("%s holds %d rows, want %d", tc.responseKey, len(list), len(tc.initial))
+			}
+			tc.checkFirst(t, list[0].(map[string]any))
+
+			if list := put(tc.replacement)[tc.responseKey].([]any); len(list) != 1 {
+				t.Fatalf("%s holds %d rows after a replacement, want 1", tc.responseKey, len(list))
+			}
+
+			// Cleared: the row answers with nothing configured, and the key carries no list of its own.
+			if got := put([]map[string]any{})[tc.responseKey]; got != nil {
+				if list, isList := got.([]any); !isList || len(list) != 0 {
+					t.Fatalf("%s after clearing = %v, want it empty or omitted", tc.responseKey, got)
+				}
+			}
+		})
 	}
 }

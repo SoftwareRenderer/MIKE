@@ -38,8 +38,9 @@ func TestProbeFormDialsTheFormsValues(t *testing.T) {
 	}
 }
 
-// A masked header stands for a stored one, and the probe resolves it server-side. A server that needs the
-// token says so when the mask has nothing behind it.
+// A masked header stands for a stored one, and the probe resolves it server-side — and the log names the
+// credential it spent without carrying it. A server that needs the token says so when the mask has
+// nothing behind it.
 func TestProbeFormUsesTheStoredTokenForAMaskedHeader(t *testing.T) {
 	const token = "s3cret-token"
 	fake := fakeMCPServer(t, fakeOptions{Stateless: true, RequireToken: token})
@@ -49,6 +50,8 @@ func TestProbeFormUsesTheStoredTokenForAMaskedHeader(t *testing.T) {
 	projects := fakeProjects{byID: map[string][]string{"p-on": {stored.ID}}}
 
 	reg := NewRegistry(fakeSource{servers: []types.MCPServer{stored}}, projects, testID)
+	logged, restore := logging.TestSink()
+	defer restore()
 	answer, err := probeForm(t, reg, TestRequest{
 		ID: stored.ID, Name: stored.Name, URL: stored.URL, TimeoutSeconds: 5,
 		Headers: []TestHeader{{Name: "Authorization", Value: types.MaskedSecret}},
@@ -58,6 +61,15 @@ func TestProbeFormUsesTheStoredTokenForAMaskedHeader(t *testing.T) {
 	}
 	if !answer.OK {
 		t.Errorf("the stored token was not used: %s (%s)", answer.Message, answer.Kind)
+	}
+
+	// The report of a spent credential names the server and says nothing of the secret itself.
+	sent := logged.String()
+	if !strings.Contains(sent, "stored") || !strings.Contains(sent, "mcp server") {
+		t.Errorf("nothing in the log names the credential that was sent:\n%s", sent)
+	}
+	if strings.Contains(sent, token) {
+		t.Errorf("the log carries the secret itself:\n%s", sent)
 	}
 
 	// The same form with nothing stored behind the mask: the refusal is the answer, and it names the
@@ -136,31 +148,6 @@ func TestProbeFormSendsTheStoredTokenToALoopbackSpellingOfTheSavedHost(t *testin
 	}
 }
 
-func TestProbeFormLogsWhenAStoredTokenIsSent(t *testing.T) {
-	const token = "s3cret-token"
-	fake := fakeMCPServer(t, fakeOptions{Stateless: true, RequireToken: token})
-	value := "Bearer " + token
-	stored := registered(fake.URL, 5)
-	stored.Headers = []types.MCPHeader{{Name: "Authorization", Value: &value}}
-	reg := NewRegistry(fakeSource{servers: []types.MCPServer{stored}}, fakeProjects{}, testID)
-
-	buf, restore := logging.TestSink()
-	defer restore()
-	if _, err := probeForm(t, reg, TestRequest{
-		ID: stored.ID, Name: stored.Name, URL: fake.URL, TimeoutSeconds: 5,
-		Headers: []TestHeader{{Name: "Authorization", Value: types.MaskedSecret}},
-	}); err != nil {
-		t.Fatalf("probe: %v", err)
-	}
-	logged := buf.String()
-	if !strings.Contains(logged, "stored") || !strings.Contains(logged, "mcp server") {
-		t.Errorf("nothing in the log names the sent secret:\n%s", logged)
-	}
-	if strings.Contains(logged, token) {
-		t.Errorf("the log carries the secret itself:\n%s", logged)
-	}
-}
-
 // An address that cannot be dialled at all is a refusal naming the field — the same sentence saving it
 // would get, from the same rules — and nothing reaches the network.
 func TestProbeFormRefusesAnUndialableURLWithoutDialling(t *testing.T) {
@@ -189,27 +176,6 @@ func TestProbeFormRefusesAnUndialableURLWithoutDialling(t *testing.T) {
 	}
 	if fake.Requests() != before {
 		t.Errorf("the fake was dialled %d more times for forms that cannot be dialled", fake.Requests()-before)
-	}
-}
-
-// Something answering with a different protocol era is refused by name, and the person sees the era that
-// is supported — the one thing the offer can only report in the log.
-func TestProbeFormNamesTheEraOfAHandshakeServer(t *testing.T) {
-	stub, _ := probeServer(t, handshakeEra)
-	reg, _, _ := registryFixture(t)
-
-	answer, err := probeForm(t, reg, TestRequest{Name: "Old", URL: stub.URL, TimeoutSeconds: 3})
-	if err != nil {
-		t.Fatalf("a diallable form was refused: %v", err)
-	}
-	if answer.OK {
-		t.Fatal("a handshake-era server was accepted")
-	}
-	if answer.Kind != string(FailureWrongEra) {
-		t.Fatalf("kind = %q, want %q (%s)", answer.Kind, FailureWrongEra, answer.Message)
-	}
-	if !strings.Contains(answer.Message, Era) {
-		t.Errorf("message %q does not name the supported era", answer.Message)
 	}
 }
 

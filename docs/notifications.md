@@ -54,7 +54,7 @@ Dismissal is handled by tag (`mike-task-<id>` or `mike-review-batch`). `$lib/uti
 ## Verification
 
 - **Unit Tests**: `review-notify.unit.ts`, `notifications.unit.ts`, `review-notifications.unit.svelte.ts`, `preferences-tab.unit.svelte.ts`, `notify-on-review-persist.unit.ts`.
-- **Backend Test**: `TestWorkerScriptNeedsNoSession` verifies the worker script is accessible without a session.
+- **Backend Test**: `TestTheWorkersOwnFilesAnswerWithNoSession` verifies the worker script and the document it precaches are accessible without a session.
 - **Command**: `cd frontend && npm test` covers the arrival rules and ledger.
 
 Note: No Playwright specs exist because notification permissions cannot be driven headless.

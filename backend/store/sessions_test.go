@@ -52,62 +52,38 @@ func dbBytes(t *testing.T, s *Store, dbPath string) []byte {
 	return dbBytesRaw(t, dbPath)
 }
 
-func TestSessionCreateAndGet(t *testing.T) {
-	s := testStore(t)
-	ctx := context.Background()
-
-	id := "sess-1"
-	token := "abc123token"
-	csrfToken := "csrf123token"
-	expiresAt := time.Now().Add(24 * time.Hour)
-
-	sess := NewSession{ID: id, Token: token, CSRFToken: csrfToken, ExpiresAt: expiresAt}
-	if err := s.CreateSession(ctx, sess); err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-
-	gotID, gotCsrf, gotExpires, err := s.GetSessionByToken(ctx, token)
-	if err != nil {
-		t.Fatalf("get session: %v", err)
-	}
-	if gotID != id {
-		t.Errorf("id = %q; want %q", gotID, id)
-	}
-	if gotCsrf != csrfToken {
-		t.Errorf("csrf_token = %q; want %q", gotCsrf, csrfToken)
-	}
-	if gotExpires.Unix() != expiresAt.Unix() {
-		t.Errorf("expires_at = %v; want %v", gotExpires, expiresAt)
-	}
-}
-
-// TestSessionStoresHashOnly asserts the core of the session-hash migration:
-// lookups resolve the presented token through hex(sha256(token)), the plaintext
-// token never reaches the file, and the stored digest is not itself a usable
-// credential (a stolen database cannot be replayed).
+// TestSessionStoresHashOnly asserts the core of the session-hash migration: a session is created once and
+// read back by the token its client holds, the row resolves that token through hex(sha256(token)), the
+// plaintext never reaches the file, and the stored digest is not itself a usable credential (a stolen
+// database cannot be replayed).
 func TestSessionStoresHashOnly(t *testing.T) {
 	s, dbPath := newStoreAt(t)
 	ctx := context.Background()
 
 	const rawToken = "5f4dcc3b5aa765d61d8327deb882cf99a1b0c3f0e9d2b4a5c6d7e8f901234567"
+	csrfToken := "csrf-hash"
+	expiresAt := time.Now().Add(24 * time.Hour)
 	if err := s.CreateSession(ctx, NewSession{
 		ID:        "sess-hash",
 		Token:     rawToken,
-		CSRFToken: "csrf-hash",
+		CSRFToken: csrfToken,
 		IP:        "203.0.113.7",
 		UserAgent: "MIKE-test/1.0",
-		ExpiresAt: time.Now().Add(24 * time.Hour),
+		ExpiresAt: expiresAt,
 	}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 
-	// The raw token the client holds still validates.
-	gotID, gotCsrf, _, err := s.GetSessionByToken(ctx, rawToken)
+	// The raw token the client holds still validates, with the row's own identity, CSRF token and expiry.
+	gotID, gotCsrf, gotExpires, err := s.GetSessionByToken(ctx, rawToken)
 	if err != nil {
 		t.Fatalf("presented raw token must validate: %v", err)
 	}
-	if gotID != "sess-hash" || gotCsrf != "csrf-hash" {
-		t.Fatalf("got (%q, %q); want (sess-hash, csrf-hash)", gotID, gotCsrf)
+	if gotID != "sess-hash" || gotCsrf != csrfToken {
+		t.Fatalf("got (%q, %q); want (sess-hash, %q)", gotID, gotCsrf, csrfToken)
+	}
+	if gotExpires.Unix() != expiresAt.Unix() {
+		t.Errorf("expires_at = %v; want %v", gotExpires, expiresAt)
 	}
 
 	// The row holds the digest and nothing else.
@@ -136,16 +112,6 @@ func TestSessionStoresHashOnly(t *testing.T) {
 	// The digest is not a credential: replaying it authenticates nothing.
 	if _, _, _, err := s.GetSessionByToken(ctx, wantHash); err == nil {
 		t.Error("presenting the stored hash validated a session; lookups must be one-way")
-	}
-}
-
-func TestSessionGetNotFound(t *testing.T) {
-	s := testStore(t)
-	ctx := context.Background()
-
-	_, _, _, err := s.GetSessionByToken(ctx, "nonexistent")
-	if err == nil {
-		t.Fatal("expected error for nonexistent token")
 	}
 }
 

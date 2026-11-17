@@ -51,6 +51,18 @@ func TestValidateDependencyGrant(t *testing.T) {
 			}
 		})
 	}
+
+	// The same rule over directories that really exist — the ones a person could actually type into
+	// the field. Only the refusal is promised here; which sentence fires is the table's business.
+	home, err := os.UserHomeDir()
+	if err != nil || filepath.Clean(home) == "/" {
+		t.Fatalf("no usable home directory: %v", err)
+	}
+	for _, path := range []string{"/etc", "/etc/ssh", "/usr", filepath.Clean(home)} {
+		if got, err := ValidateDependencyGrant(path); err == nil {
+			t.Errorf("ValidateDependencyGrant(%q) = %q, want refusal", path, got)
+		}
+	}
 }
 
 func TestValidateDependencyGrant_StoresTheSymlinkTarget(t *testing.T) {
@@ -292,6 +304,9 @@ func TestCheckGrantShape(t *testing.T) {
 		"/tmp/mike-cache/mod",
 		"/opt/homebrew/var/govanity", // no system configuration lives under /opt
 		"/srv/data/projects/mod",
+		"/tank/gomodcache", // the rule is about what a folder is, not how deep it sits
+		"/data/go/pkg/mod",
+		"/opt/cargo/registry",
 	}
 	for _, path := range allowed {
 		if err := checkGrantShape(path, homes, dependencyGrant); err != nil {
@@ -314,6 +329,8 @@ func TestCheckGrantShape(t *testing.T) {
 		"/home/dev/.config/gh":       "credentials",
 		"/root/.aws/credentials-dir": "credentials",
 		"/home/dev/.docker":          "credentials",
+		"/tank":                      "the whole top level, not a directory of the person's own",
+		"/data":                      "the whole top level, not a directory of the person's own",
 	}
 	for path, why := range refused {
 		err := checkGrantShape(path, homes, dependencyGrant)
@@ -323,20 +340,6 @@ func TestCheckGrantShape(t *testing.T) {
 		}
 		if strings.Contains(err.Error(), "not an absolute path") {
 			t.Errorf("%s: wrong rule fired: %v", path, err)
-		}
-	}
-}
-
-// TestValidateDependencyGrant_RefusesWholeDirectories: the same rule through the function the endpoint
-// calls, with real directories.
-func TestValidateDependencyGrant_RefusesWholeDirectories(t *testing.T) {
-	home, err := os.UserHomeDir()
-	if err != nil || filepath.Clean(home) == "/" {
-		t.Fatalf("no usable home directory: %v", err)
-	}
-	for _, path := range []string{"/", "/etc", "/etc/ssh", "/usr", filepath.Clean(home)} {
-		if got, err := ValidateDependencyGrant(path); err == nil {
-			t.Errorf("ValidateDependencyGrant(%q) = %q, want refusal", path, got)
 		}
 	}
 }

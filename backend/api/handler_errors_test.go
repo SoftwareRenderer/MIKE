@@ -8,8 +8,10 @@ import (
 	"testing"
 )
 
-// An absent row and a failing lookup are different outcomes and only the first is a 404:
-// a broken database must not reach the UI as an empty project.
+// An absent row and a failing lookup are different outcomes and only the first is a 404: a broken
+// database must not reach the UI as an empty project. Both halves are asserted on both lookups a git
+// log route makes — the project's and the task's — because a handler that folded one fault into
+// "not found" would still answer the other correctly.
 
 func errorBody(t *testing.T, rr *httptest.ResponseRecorder) string {
 	t.Helper()
@@ -20,64 +22,60 @@ func errorBody(t *testing.T, rr *httptest.ResponseRecorder) string {
 	return body["error"]
 }
 
-func TestHandleLog_UnknownProjectIs404(t *testing.T) {
-	h, _, _, _ := newTestGitHandler(t)
+func TestGitLogRoutesTellAnAbsentRowFromAFailingLookup(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		// drop removes the table the lookup reads: a failure that is not the row being absent.
+		drop string
+		url  string
+		// want is the status, and wantError the sentence the response must carry.
+		want       int
+		wantError  string
+		mustNotSay string
+	}{
+		{
+			name: "an unknown project is a 404",
+			url:  "/api/projects/ghost/git/log",
+			want: http.StatusNotFound, wantError: "project not found",
+		},
+		{
+			name: "a failing project lookup is a 500, not a phantom 404",
+			drop: "projects",
+			url:  "/api/projects/anything/git/log",
+			want: http.StatusInternalServerError, wantError: "internal error",
+			mustNotSay: "no such table",
+		},
+		{
+			name: "an unknown task is a 404",
+			url:  "/api/projects/proj-1/tasks/ghost/git/log",
+			want: http.StatusNotFound, wantError: "task not found",
+		},
+		{
+			name: "a failing task lookup is a 500",
+			drop: "tasks",
+			url:  "/api/projects/proj-1/tasks/any-task/git/log",
+			want: http.StatusInternalServerError, wantError: "internal error",
+			mustNotSay: "no such table",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, s, _, _ := newTestGitHandler(t)
+			if tt.drop != "" {
+				if _, err := s.Exec("DROP TABLE " + tt.drop); err != nil {
+					t.Fatalf("drop table: %v", err)
+				}
+			}
 
-	rr := doRequest(t, newTestGitMux(h), http.MethodGet, "/api/projects/ghost/git/log")
-
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 (body: %s)", rr.Code, rr.Body.String())
-	}
-	if got := errorBody(t, rr); got != "project not found" {
-		t.Errorf("error = %q, want %q", got, "project not found")
-	}
-}
-
-func TestHandleLog_ProjectLookupFaultIs500NotPhantom404(t *testing.T) {
-	h, s, _, _ := newTestGitHandler(t)
-
-	// Make the lookup fail for a reason that is not "absent": drop the table.
-	if _, err := s.Exec(`DROP TABLE projects`); err != nil {
-		t.Fatalf("drop table: %v", err)
-	}
-
-	rr := doRequest(t, newTestGitMux(h), http.MethodGet, "/api/projects/anything/git/log")
-
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("a database fault answered %d (body %q); want 500 — the bug this test exists for",
-			rr.Code, rr.Body.String())
-	}
-	if got := errorBody(t, rr); got != "internal error" {
-		t.Errorf("error = %q, want %q", got, "internal error")
-	}
-	if strings.Contains(rr.Body.String(), "no such table") {
-		t.Errorf("response leaked database internals: %s", rr.Body.String())
-	}
-}
-
-func TestHandleTaskLog_UnknownTaskIs404(t *testing.T) {
-	h, _, _, _ := newTestGitHandler(t)
-
-	rr := doRequest(t, newTestGitMux(h), http.MethodGet, "/api/projects/proj-1/tasks/ghost/git/log")
-
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 (body: %s)", rr.Code, rr.Body.String())
-	}
-	if got := errorBody(t, rr); got != "task not found" {
-		t.Errorf("error = %q, want %q", got, "task not found")
-	}
-}
-
-func TestHandleTaskLog_TaskLookupFaultIs500(t *testing.T) {
-	h, s, _, _ := newTestGitHandler(t)
-
-	if _, err := s.Exec(`DROP TABLE tasks`); err != nil {
-		t.Fatalf("drop table: %v", err)
-	}
-
-	rr := doRequest(t, newTestGitMux(h), http.MethodGet, "/api/projects/proj-1/tasks/any-task/git/log")
-
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500 (body: %s)", rr.Code, rr.Body.String())
+			rr := doRequest(t, newTestGitMux(h), http.MethodGet, tt.url)
+			if rr.Code != tt.want {
+				t.Fatalf("status = %d, want %d (body %q)", rr.Code, tt.want, rr.Body.String())
+			}
+			if got := errorBody(t, rr); got != tt.wantError {
+				t.Errorf("error = %q, want %q", got, tt.wantError)
+			}
+			if tt.mustNotSay != "" && strings.Contains(rr.Body.String(), tt.mustNotSay) {
+				t.Errorf("response leaked database internals: %s", rr.Body.String())
+			}
+		})
 	}
 }

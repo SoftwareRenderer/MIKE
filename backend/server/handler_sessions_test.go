@@ -14,7 +14,12 @@ import (
 func loginSession(t *testing.T, s *Server, userAgent string) (cookie, csrfToken string) {
 	t.Helper()
 	_, finished := registerPasskeyOver(t, s, "test device", ceremonyTransport{UserAgent: userAgent})
-	return finished.Header().Get("Set-Cookie"), finished.Header().Get("X-CSRF-Token")
+	raw := finished.Header().Get("Set-Cookie")
+	if raw == "" {
+		t.Fatal("a finished ceremony set no session cookie")
+	}
+	// The attributes belong to the response, not to the credential a later request presents.
+	return strings.TrimSpace(strings.Split(raw, ";")[0]), finished.Header().Get("X-CSRF-Token")
 }
 
 // getSessionList calls GET /api/sessions with the given session cookie and
@@ -57,10 +62,25 @@ func TestSessionsListShowsCurrentSessionAndNoSecrets(t *testing.T) {
 
 	cookieA, _ := loginSession(t, s, "Agent-A/1.0")
 	cookieB, _ := loginSession(t, s, "Agent-B/2.0")
+	// A third device, signed in from another machine: a session row describes the request that opened
+	// it, and nothing else is left saying which peer that was.
+	const workLaptopUA = "Mozilla/5.0 (X11; Linux x86_64) MIKE-Test"
+	_, finished := registerPasskeyOver(t, s, "work laptop", ceremonyTransport{
+		UserAgent:  workLaptopUA,
+		RemoteAddr: "198.51.100.23:41234",
+	})
+	cookieC := strings.TrimSpace(strings.Split(finished.Header().Get("Set-Cookie"), ";")[0])
+
+	// httptest.NewRequest's RemoteAddr answers for the two that named no peer.
+	wantIP := map[string]string{
+		"Agent-A/1.0": "192.0.2.1",
+		"Agent-B/2.0": "192.0.2.1",
+		workLaptopUA:  "198.51.100.23",
+	}
 
 	list, raw := getSessionList(t, s, cookieB)
-	if len(list) != 2 {
-		t.Fatalf("sessions = %d; want 2 (%+v)", len(list), list)
+	if len(list) != len(wantIP) {
+		t.Fatalf("sessions = %d; want %d (%+v)", len(list), len(wantIP), list)
 	}
 
 	// Only the caller's row is current — and it is the same row on a repeat call.
@@ -73,8 +93,11 @@ func TestSessionsListShowsCurrentSessionAndNoSecrets(t *testing.T) {
 	} else if curA.UserAgent != "Agent-A/1.0" {
 		t.Errorf("current row for cookie A is %q", curA.UserAgent)
 	}
+	if curC := currentSessionOf(t, s, cookieC); curC.UserAgent != workLaptopUA {
+		t.Errorf("the row current for the work laptop is %q; want %q", curC.UserAgent, workLaptopUA)
+	}
 
-	// Shapes T2 codes against: RFC3339 timestamps, login IP, User-Agent.
+	// Shapes T2 codes against: RFC3339 timestamps, and the login IP and User-Agent the ceremony saw.
 	for _, se := range list {
 		if se.ID == "" {
 			t.Error("empty id")
@@ -95,9 +118,10 @@ func TestSessionsListShowsCurrentSessionAndNoSecrets(t *testing.T) {
 		} else if _, err := time.Parse(time.RFC3339, se.LastSeen); err != nil {
 			t.Errorf("last_seen %q is not RFC3339: %v", se.LastSeen, err)
 		}
-		// httptest.NewRequest's RemoteAddr.
-		if se.IP != "192.0.2.1" {
-			t.Errorf("ip = %q; want 192.0.2.1", se.IP)
+		if want, listed := wantIP[se.UserAgent]; !listed {
+			t.Errorf("a row nobody signed in: %+v", se)
+		} else if se.IP != want {
+			t.Errorf("ip = %q for %q; want the address that signed in, %q", se.IP, se.UserAgent, want)
 		}
 	}
 
@@ -110,16 +134,6 @@ func TestSessionsListShowsCurrentSessionAndNoSecrets(t *testing.T) {
 	}
 	if bearer := strings.Split(strings.Split(cookieB, ";")[0], "=")[1]; strings.Contains(raw, bearer) {
 		t.Error("GET /api/sessions echoed the session token")
-	}
-}
-
-func TestSessionsListRequiresAuth(t *testing.T) {
-	s := testServer(t)
-
-	req := testRequest(http.MethodGet, "/api/sessions", nil)
-	rr := testResponse(t, s, req)
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d; want 401; body: %s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -159,17 +173,13 @@ func TestSessionRevokeDeletesOneSession(t *testing.T) {
 	if rr = testResponse(t, s, req); rr.Code != http.StatusNotFound {
 		t.Fatalf("second revoke: status = %d; want 404", rr.Code)
 	}
-}
 
-func TestSessionRevokeUnknownID(t *testing.T) {
-	s := testServer(t)
-	cookie, csrfToken := loginSession(t, s, "Agent-A/1.0")
-
-	req := testRequest(http.MethodDelete, "/api/sessions/does-not-exist", nil)
-	withAuthCSRF(req, cookie, csrfToken)
-	rr := testResponse(t, s, req)
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("status = %d; want 404; body: %s", rr.Code, rr.Body.String())
+	// An id this server never issued is the same answer: the listing says what exists, and a revocation
+	// cannot tell a lost row from one that was never minted.
+	req = testRequest(http.MethodDelete, "/api/sessions/does-not-exist", nil)
+	withAuthCSRF(req, cookieA, csrfA)
+	if rr = testResponse(t, s, req); rr.Code != http.StatusNotFound {
+		t.Fatalf("revoking an unknown id: status = %d; want 404", rr.Code)
 	}
 }
 
@@ -237,63 +247,33 @@ func TestSessionsRevokeOthers(t *testing.T) {
 	}
 }
 
-// TestSessionMutationsRequireCSRF: the CSRF middleware covers the new routes
-// automatically because they are not public paths.
-func TestSessionMutationsRequireCSRF(t *testing.T) {
+// TestSessionMutationsRequireAuthThenCSRF: the two gates in front of these routes answer in order — an
+// anonymous write is refused by SessionMiddleware before CSRF is consulted, and a session with no token
+// is refused by CSRFMiddleware. They are covered automatically because no /api/sessions path is ever
+// added to publicPaths.
+func TestSessionMutationsRequireAuthThenCSRF(t *testing.T) {
 	s := testServer(t)
 	cookie, _ := loginSession(t, s, "Agent-A/1.0")
 	id := currentSessionOf(t, s, cookie).ID
 
-	req := testRequest(http.MethodDelete, "/api/sessions/"+id, nil)
-	withAuth(req, cookie) // no X-CSRF-Token
-	rr := testResponse(t, s, req)
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("DELETE without CSRF: status = %d; want 403; body: %s", rr.Code, rr.Body.String())
+	for _, write := range []struct{ name, method, path string }{
+		{"revoke one", http.MethodDelete, "/api/sessions/" + id},
+		{"revoke others", http.MethodPost, "/api/sessions/revoke-others"},
+	} {
+		req := testRequest(write.method, write.path, nil)
+		if rr := testResponse(t, s, req); rr.Code != http.StatusUnauthorized {
+			t.Fatalf("%s unauthenticated: status = %d; want 401; body: %s", write.name, rr.Code, rr.Body.String())
+		}
+
+		req = testRequest(write.method, write.path, nil)
+		withAuth(req, cookie) // no X-CSRF-Token
+		if rr := testResponse(t, s, req); rr.Code != http.StatusForbidden {
+			t.Fatalf("%s without CSRF: status = %d; want 403; body: %s", write.name, rr.Code, rr.Body.String())
+		}
 	}
 
-	req = testRequest(http.MethodPost, "/api/sessions/revoke-others", nil)
-	withAuth(req, cookie)
-	if rr = testResponse(t, s, req); rr.Code != http.StatusForbidden {
-		t.Fatalf("POST without CSRF: status = %d; want 403; body: %s", rr.Code, rr.Body.String())
-	}
-
-	// The session survived both rejected calls.
+	// The session survived every rejected call.
 	if _, raw := getSessionList(t, s, cookie); raw == "" {
 		t.Fatal("listing failed after rejected mutations")
-	}
-}
-
-// TestSessionRoutesUnauthenticated: mutations without any session are rejected
-// by SessionMiddleware before CSRF handling.
-func TestSessionRoutesUnauthenticated(t *testing.T) {
-	s := testServer(t)
-
-	req := testRequest(http.MethodDelete, "/api/sessions/whatever", nil)
-	if rr := testResponse(t, s, req); rr.Code != http.StatusUnauthorized {
-		t.Fatalf("DELETE unauthenticated: status = %d; want 401", rr.Code)
-	}
-	req = testRequest(http.MethodPost, "/api/sessions/revoke-others", nil)
-	if rr := testResponse(t, s, req); rr.Code != http.StatusUnauthorized {
-		t.Fatalf("POST unauthenticated: status = %d; want 401", rr.Code)
-	}
-}
-
-// TestSessionsRecordSignInIPAndUserAgent: the metadata comes from the ceremony that opened the session,
-// so the Sessions UI can describe each device.
-func TestSessionsRecordSignInIPAndUserAgent(t *testing.T) {
-	s := testServer(t)
-
-	_, finished := registerPasskeyOver(t, s, "work laptop", ceremonyTransport{
-		UserAgent:  "Mozilla/5.0 (X11; Linux x86_64) MIKE-Test",
-		RemoteAddr: "198.51.100.23:41234",
-	})
-	cookie := finished.Header().Get("Set-Cookie")
-
-	cur := currentSessionOf(t, s, cookie)
-	if cur.UserAgent != "Mozilla/5.0 (X11; Linux x86_64) MIKE-Test" {
-		t.Errorf("user_agent = %q", cur.UserAgent)
-	}
-	if cur.IP != "198.51.100.23" {
-		t.Errorf("ip = %q; want 198.51.100.23", cur.IP)
 	}
 }

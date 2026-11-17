@@ -9,9 +9,10 @@ import (
 	"mike/backend/types"
 )
 
-// TestPUTTask_FieldWrongTypeIsRejectedWithoutPanicOrSilence: a wrong-typed field in a partial
-// task update is a 400 naming the field, and nothing is written.
-func TestPUTTask_FieldWrongTypeIsRejectedWithoutPanicOrSilence(t *testing.T) {
+// TestPUTTask_ABodyItCannotApplyIsRejectedWithoutPanicOrSilence: a partial task update the handler cannot
+// apply — a wrong-typed field, a value that is not a member of its enum, a body that is not an object at
+// all — is a 400, and nothing is written.
+func TestPUTTask_ABodyItCannotApplyIsRejectedWithoutPanicOrSilence(t *testing.T) {
 	h, s, _ := newTestTaskHandler(t)
 	setupTaskValidationProject(t, h, s)
 	mux := newTaskMux(h)
@@ -42,6 +43,12 @@ func TestPUTTask_FieldWrongTypeIsRejectedWithoutPanicOrSilence(t *testing.T) {
 		{"status unknown", `{"status":"parking_lot"}`, func(tk *types.Task) string { return string(tk.Status) }, string(types.StatusBacklog)},
 		{"execution_state unknown", `{"execution_state":"napping"}`, func(tk *types.Task) string { return string(tk.ExecutionState) }, ""},
 		{"operating_mode unknown", `{"operating_mode":"autocomplete"}`, func(tk *types.Task) string { return string(tk.OperatingMode) }, ""},
+		// A body the decoder cannot read at all is refused the same way, never answered with a 200 that
+		// applied no fields.
+		{"truncated object", `{"title":`, func(tk *types.Task) string { return tk.Title }, "validation task"},
+		{"array body", `[]`, func(tk *types.Task) string { return tk.Title }, "validation task"},
+		{"string body", `"just a string"`, func(tk *types.Task) string { return tk.Title }, "validation task"},
+		{"bare word body", `n`, func(tk *types.Task) string { return tk.Title }, "validation task"},
 	}
 
 	for _, tc := range cases {
@@ -212,31 +219,6 @@ func TestPUTTask_ModeChangeAndPrerequisiteRules(t *testing.T) {
 	}
 	if !task.AutoCommit || !task.AutoMerge {
 		t.Errorf("auto_commit=%v auto_merge=%v, want both true after asking for auto-merge", task.AutoCommit, task.AutoMerge)
-	}
-}
-
-// TestPUTTask_MalformedBodyIsRejectedNotIgnored: a truncated or non-object body is a 400, never a
-// 200 that applied no fields.
-func TestPUTTask_MalformedBodyIsRejectedNotIgnored(t *testing.T) {
-	h, s, _ := newTestTaskHandler(t)
-	setupTaskValidationProject(t, h, s)
-	mux := newTaskMux(h)
-	const path = "/api/projects/task-val-proj/tasks/task-val-task"
-
-	for _, body := range []string{`{"title":`, `[]`, `"just a string"`, `n`} {
-		t.Run(body, func(t *testing.T) {
-			rr := doTaskRequest(t, mux, http.MethodPut, path, jsontext.Value(body))
-			if rr.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d, want 400 for body %s", rr.Code, body)
-			}
-			task, err := s.GetTask("task-val-proj", "task-val-task")
-			if err != nil {
-				t.Fatalf("read stored task: %v", err)
-			}
-			if task.Title != "validation task" {
-				t.Errorf("title = %q after a rejected body; row moved", task.Title)
-			}
-		})
 	}
 }
 

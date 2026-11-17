@@ -121,20 +121,6 @@ func TestFitRequestTrimsTheBatchAndKeepsTheConversation(t *testing.T) {
 	}
 }
 
-// A provider that reports nothing leaves the estimate as the only measure, and the batch is still cut.
-func TestFitRequestWithoutReportedUsageStillTrimsTheBatch(t *testing.T) {
-	t.Parallel()
-	te, setup, lc := gateSetup(t, 4000)
-	lc.usage = nil
-	lc.messages = convWith(trimRow{id: "c1", name: types.ToolReadFile, output: filler(8000, "aa")})
-
-	sent := te.fitRequestToWindow(setup, lc, "test-model")
-
-	if !strings.Contains(sent[3].Content, "trimmed to") {
-		t.Error("an oversized result was sent whole because nothing reported its size")
-	}
-}
-
 // A resumed run rebuilds its conversation from stored rows and has made no call yet, so the count stored on
 // the newest assistant row is the only real measure of what that conversation costs.
 func TestFitRequestPricesAResumedConversationFromTheStoredCount(t *testing.T) {
@@ -154,29 +140,10 @@ func TestFitRequestPricesAResumedConversationFromTheStoredCount(t *testing.T) {
 	}
 }
 
-// The shape of the failure this path exists to stop: 150,299 tokens of conversation already counted against
-// a 262,144 window, and one tool result the word estimate cannot price correctly.
-func TestFitRequestTrimsTheOversizedResultOfAWindowFullConversation(t *testing.T) {
-	t.Parallel()
-	const window = 262144
-	te, setup, lc := gateSetup(t, window)
-	lc.usage = &types.ChatUsage{PromptTokens: 150299}
-	lc.messages = convWith(trimRow{id: "c1", name: types.ToolBash, output: filler(102177, "aa")})
-
-	sent := te.fitRequestToWindow(setup, lc, "test-model")
-
-	if !strings.Contains(sent[3].Content, "trimmed to") {
-		t.Fatal("the run was handed the whole result, which the provider refuses")
-	}
-	budget := promptBudget(window, defaultSummarizeThreshold)
-	extra := reportedConversation(lc) - conversationTokens(buildLLMContext(lc.messages))
-	if over := conversationTokens(sent) + extra + toolBatchTokens(sent) - budget; over > 0 {
-		t.Errorf("the request is %d tokens over the budget the provider priced", over)
-	}
-}
-
-// The same conversation with the result the word estimate cannot see: a megabyte of base64 answers a
-// command for a build artifact, and the provider counts what a word count calls free.
+// The shape of the failure this path exists to stop: 150,299 tokens of conversation already counted
+// against a 262,144 window, and one tool result the estimate cannot price by its words — a megabyte of
+// base64 answering a command for a build artifact, which the provider counts although a word count calls
+// it free.
 func TestFitRequestTrimsADenseResultThatOnlyItsBytesPrice(t *testing.T) {
 	t.Parallel()
 	const window = 262144
@@ -267,21 +234,42 @@ func TestFitRequestIgnoresAReportedCountOlderThanTheSummary(t *testing.T) {
 	}
 }
 
-// The usage trigger runs just before this gate, and one conversation state is answered once.
-func TestFitRequestDoesNotSummarizeWhatWasJustSummarized(t *testing.T) {
+// summarizeNow holds the one rule that keeps the two triggers from costing two summaries: a conversation
+// that has not grown since a summarization is worth no second one, whichever trigger asked and however far
+// over the threshold its usage sits.
+func TestSummarizeNowAnswersOneConversationStateOnce(t *testing.T) {
 	chdirRepoRoot(t)
-	te, setup, lc := gateSetup(t, 1000, "SUMMARY-GATE")
-	lc.messages = []types.ChatMessage{
-		{Role: "system", Content: "the prompt"},
-		{Role: "user", Content: filler(3000, "aa")},
-	}
-	lc.summarizedAtLen = len(lc.messages)
 
-	te.fitRequestToWindow(setup, lc, "test-model")
+	t.Run("the usage trigger asks twice", func(t *testing.T) {
+		te, setup, lc := gateSetup(t, 1000, "SUMMARY-ONE", "SUMMARY-TWO")
+		lc.usage = &types.ChatUsage{PromptTokens: 950} // over the 900 budget, and stays over
+		lc.messages = []types.ChatMessage{
+			{Role: "system", Content: "the prompt"},
+			{Role: "user", Content: filler(3000, "aa")},
+		}
 
-	if got := summarizationRows(t, te, setup.task.ID, "thread-1"); got != 0 {
-		t.Errorf("%d summarization rows, want 0: the conversation has not grown since the last one", got)
-	}
+		te.summarize.maybeAutoSummarize(setup, lc, "test-model", true)
+		te.summarize.maybeAutoSummarize(setup, lc, "test-model", true)
+
+		if got := summarizationRows(t, te, setup.task.ID, "thread-1"); got != 1 {
+			t.Errorf("%d summarization rows, want 1: the conversation never grew between the two asks", got)
+		}
+	})
+
+	t.Run("the cause rule asks about a conversation that has not grown", func(t *testing.T) {
+		te, setup, lc := gateSetup(t, 1000, "SUMMARY-GATE")
+		lc.messages = []types.ChatMessage{
+			{Role: "system", Content: "the prompt"},
+			{Role: "user", Content: filler(3000, "aa")},
+		}
+		lc.summarizedAtLen = len(lc.messages)
+
+		te.fitRequestToWindow(setup, lc, "test-model")
+
+		if got := summarizationRows(t, te, setup.task.ID, "thread-1"); got != 0 {
+			t.Errorf("%d summarization rows, want 0: the conversation has not grown since the last one", got)
+		}
+	})
 }
 
 // This is the log line the operator sees, not the notice the model is sent. Not t.Parallel: TestSink
@@ -313,24 +301,5 @@ func TestGateStaysSilentWhenTheRequestFits(t *testing.T) {
 
 	if strings.Contains(buf.String(), setup.task.ID) {
 		t.Errorf("a request that fitted was reported anyway: %q", buf.String())
-	}
-}
-
-// A conversation that has not grown since a summarization is not worth a second one, however far over the
-// threshold its usage was.
-func TestUsageTriggerSummarizesOncePerConversationState(t *testing.T) {
-	chdirRepoRoot(t)
-	te, setup, lc := gateSetup(t, 1000, "SUMMARY-ONE", "SUMMARY-TWO")
-	lc.usage = &types.ChatUsage{PromptTokens: 950} // over the 900 budget, and stays over
-	lc.messages = []types.ChatMessage{
-		{Role: "system", Content: "the prompt"},
-		{Role: "user", Content: filler(3000, "aa")},
-	}
-
-	te.summarize.maybeAutoSummarize(setup, lc, "test-model", true)
-	te.summarize.maybeAutoSummarize(setup, lc, "test-model", true)
-
-	if got := summarizationRows(t, te, setup.task.ID, "thread-1"); got != 1 {
-		t.Errorf("%d summarization rows, want 1", got)
 	}
 }

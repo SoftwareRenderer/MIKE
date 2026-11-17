@@ -2,6 +2,7 @@ package exec
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,316 +50,197 @@ func makeTestTask(t *testing.T, s *store.Store, projectID, taskID string) *types
 	return task
 }
 
-func TestReadFile_NoTruncation_SmallFile(t *testing.T) {
+// windowedLines is the file the window rows read: 100 identifiable lines with no trailing newline,
+// so strings.Split yields exactly one element per line.
+func windowedLines() string {
+	lines := make([]string, 100)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line_%03d", i+1)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// window returns lines from the windowed file, 1-indexed and inclusive.
+func window(from, to int) string {
+	return strings.Join(strings.Split(windowedLines(), "\n")[from-1:to], "\n")
+}
+
+// windowLines is one cut over the file the model asked for. An offset past the end is answered
+// rather than answered with nothing — a silent empty read sends the model to reread a file that is
+// already in front of it — and an oversized limit is clamped rather than refused.
+func TestReadFileWindowsTheFile(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	te := newToolTestExecutor(t, dir)
-	task := makeTestTask(t, te.store, "proj-read-1", "task-read-1")
-
-	// Write a small file
-	content := "line 1\nline 2\nline 3\n"
-	filePath := "test.txt"
-	if err := os.WriteFile(filepath.Join(dir, filePath), []byte(content), 0644); err != nil {
-		t.Fatalf("write test file: %v", err)
+	content := windowedLines()
+	cases := []struct {
+		name    string
+		args    map[string]any
+		want    string
+		wantErr string
+	}{
+		{name: "no offset or limit", args: map[string]any{"path": "f.txt"}, want: content},
+		{name: "offset 1 is the whole file", args: map[string]any{"path": "f.txt", "offset": float64(1)}, want: content},
+		{name: "offset starts at that line", args: map[string]any{"path": "f.txt", "offset": float64(96)}, want: window(96, 100)},
+		{name: "offset and limit", args: map[string]any{"path": "f.txt", "offset": float64(50), "limit": float64(6)}, want: window(50, 55)},
+		{name: "limit alone takes the first lines", args: map[string]any{"path": "f.txt", "limit": float64(10)}, want: window(1, 10)},
+		{name: "a limit larger than the file is clamped", args: map[string]any{"path": "f.txt", "limit": float64(1000)}, want: content},
+		{name: "a limit past the offset is clamped to what is left",
+			args: map[string]any{"path": "f.txt", "offset": float64(90), "limit": float64(500)}, want: window(90, 100)},
+		{name: "an offset past the end says so, with the line count",
+			args:    map[string]any{"path": "f.txt", "offset": float64(101)},
+			wantErr: "offset 101 is past the end of the file (file has 100 line(s))"},
 	}
 
-	result, ok := te.executeTool(context.Background(), "read_file", map[string]any{
-		"path": filePath,
-	}, dir, task, &executionState{}, nil)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			te := newToolTestExecutor(t, dir)
+			task := makeTestTask(t, te.store, "proj-win-"+strings.ReplaceAll(tc.name, " ", "-"), "task-win")
+			if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte(content), 0o644); err != nil {
+				t.Fatalf("seed file: %v", err)
+			}
 
-	if !ok {
-		t.Fatalf("expected success, got error: %s", result)
-	}
-	if result != content {
-		t.Errorf("expected full content, got:\n%s", result)
-	}
-	if strings.Contains(result, "truncated") {
-		t.Error("small file should not be truncated")
+			result, ok := te.executeTool(context.Background(), "read_file", tc.args, dir, task, &executionState{}, nil)
+			if tc.wantErr != "" {
+				if ok {
+					t.Fatalf("expected failure, got success: %s", result)
+				}
+				if !strings.Contains(result, tc.wantErr) {
+					t.Errorf("result %q does not say %q", result, tc.wantErr)
+				}
+				return
+			}
+			if !ok {
+				t.Fatalf("expected success, got failure: %s", result)
+			}
+			if result != tc.want {
+				t.Errorf("got %q, want %q", result, tc.want)
+			}
+			if strings.Contains(result, "truncated") {
+				t.Errorf("a window that fits must not carry the cut notice: %q", result[:min(120, len(result))])
+			}
+		})
 	}
 }
 
-func TestReadFile_Truncation_LargeFile(t *testing.T) {
+// The window is cut to the per-result cap only after the offset and limit have been applied, so the
+// model can reach any region of a huge file; the cut always says it happened, because a truncated
+// read that reads as the whole one sends the model off to conclude what isn't there.
+func TestReadFileCutsTheWindowNotTheFile(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	te := newToolTestExecutor(t, dir)
-	task := makeTestTask(t, te.store, "proj-read-2", "task-read-2")
+	cases := []struct {
+		name      string
+		lines     []string
+		args      map[string]any
+		want      string // the exact result, when the whole file fits
+		prefix    string // the first line the result must start with
+		wantSub   string // a substring the result must carry
+		wantErr   string // a substring the refusal must carry
+		wantLines int    // the exact number of lines the result must hold
+		maxLen    int    // bound on the result, 0 for none
+	}{
+		{
+			name:  "a file under the cap comes back whole",
+			lines: []string{"line 1", "line 2", "line 3", ""},
+			args:  map[string]any{"path": "f.txt"},
+			want:  "line 1\nline 2\nline 3\n",
+		},
+		{
+			name:    "a file past the cap is cut and says so",
+			lines:   paddedLines(6000),
+			args:    map[string]any{"path": "f.txt"},
+			prefix:  "xxxxxxxxxx",
+			wantSub: "truncated",
+			maxLen:  52 * 1024,
+		},
+		{
+			name:   "an offset past the cut reads the region it named",
+			lines:  numberedLines(8000),
+			args:   map[string]any{"path": "f.txt", "offset": float64(6001)},
+			prefix: "line_number_0_0",
+		},
+		{
+			name:      "an offset and limit past the cut are not cut themselves",
+			lines:     mixedLines(10000),
+			args:      map[string]any{"path": "f.txt", "offset": float64(7001), "limit": float64(10)},
+			wantLines: 10,
+		},
+	}
 
-	// Write a file larger than 50KB
-	lines := make([]string, 6000)
-	for i := 0; i < 6000; i++ {
-		lines[i] = strings.Repeat("x", 10) // ~10 chars per line = ~60KB total
-	}
-	content := strings.Join(lines, "\n")
-	filePath := "large.txt"
-	if err := os.WriteFile(filepath.Join(dir, filePath), []byte(content), 0644); err != nil {
-		t.Fatalf("write test file: %v", err)
-	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			te := newToolTestExecutor(t, dir)
+			task := makeTestTask(t, te.store, "proj-cap-"+strings.ReplaceAll(tc.name, " ", "-"), "task-cap")
+			content := strings.Join(tc.lines, "\n")
+			if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte(content), 0o644); err != nil {
+				t.Fatalf("seed file: %v", err)
+			}
 
-	result, ok := te.executeTool(context.Background(), "read_file", map[string]any{
-		"path": filePath,
-	}, dir, task, &executionState{}, nil)
-
-	if !ok {
-		t.Fatalf("expected success, got error: %s", result)
-	}
-	if !strings.Contains(result, "truncated") {
-		t.Error("large file should be truncated with notice")
-	}
-	// Result should be at most ~50KB + truncation notice
-	if len(result) > 52*1024 {
-		t.Errorf("expected result <= ~52KB, got %d bytes", len(result))
+			result, ok := te.executeTool(context.Background(), "read_file", tc.args, dir, task, &executionState{}, nil)
+			if tc.wantErr != "" {
+				if ok {
+					t.Fatalf("expected failure, got success: %s", result)
+				}
+				if !strings.Contains(result, tc.wantErr) {
+					t.Errorf("result %q does not say %q", result, tc.wantErr)
+				}
+				return
+			}
+			if !ok {
+				t.Fatalf("expected success, got failure: %s", result)
+			}
+			if tc.want != "" && result != tc.want {
+				t.Errorf("got %q, want %q", result, tc.want)
+			}
+			if tc.prefix != "" && !strings.HasPrefix(result, tc.prefix) {
+				t.Errorf("result starts %q, want %q", firstChars(result, 40), tc.prefix)
+			}
+			if tc.wantSub != "" && !strings.Contains(result, tc.wantSub) {
+				t.Errorf("the cut is silent: %q", firstChars(result, 80))
+			}
+			if tc.wantSub == "" && strings.Contains(result, "truncated") {
+				t.Errorf("a window that fits carries the cut notice: %q", firstChars(result, 80))
+			}
+			if tc.wantLines != 0 {
+				if got := strings.Split(result, "\n"); len(got) != tc.wantLines {
+					t.Errorf("result holds %d lines, want %d: %q", len(got), tc.wantLines, firstChars(result, 80))
+				}
+			}
+			if tc.maxLen != 0 && len(result) > tc.maxLen {
+				t.Errorf("result is %d bytes, want at most %d", len(result), tc.maxLen)
+			}
+		})
 	}
 }
 
-func TestReadFile_Offset_AppliedBeforeTruncation(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	te := newToolTestExecutor(t, dir)
-	task := makeTestTask(t, te.store, "proj-read-3", "task-read-3")
+func firstChars(s string, n int) string {
+	if len(s) > n {
+		return s[:n]
+	}
+	return s
+}
 
-	// Write a file larger than 50KB with identifiable line content
-	totalLines := 8000
-	lines := make([]string, totalLines)
-	for i := 0; i < totalLines; i++ {
+func paddedLines(n int) []string {
+	lines := make([]string, n)
+	for i := range lines {
+		lines[i] = strings.Repeat("x", 10)
+	}
+	return lines
+}
+
+// numberedLines makes line i identifiable by its own digits, so a test can tell which region came back.
+func numberedLines(n int) []string {
+	lines := make([]string, n)
+	for i := range lines {
 		lines[i] = "line_number_" + string(rune('0'+i%10)) + "_" + string(rune('0'+(i/10)%10))
 	}
-	content := strings.Join(lines, "\n")
-	filePath := "large-offset.txt"
-	if err := os.WriteFile(filepath.Join(dir, filePath), []byte(content), 0644); err != nil {
-		t.Fatalf("write test file: %v", err)
-	}
-
-	// Read from line 6001, past the 50KB truncation point: offset is applied before truncation.
-	result, ok := te.executeTool(context.Background(), "read_file", map[string]any{
-		"path":   filePath,
-		"offset": float64(6001),
-	}, dir, task, &executionState{}, nil)
-
-	if !ok {
-		t.Fatalf("expected success, got error: %s", result)
-	}
-	// Should contain content from line 6001 onward, not be empty
-	if strings.Contains(result, "empty") || strings.Contains(result, "offset past end") {
-		t.Errorf("expected content from line 6001, but got empty/offset-past-end. offset was likely applied after truncation. Result: %s", result[:200])
-	}
-	// First line should be line_number_1_0 (line 6001, 0-indexed: 6000)
-	// 6000 % 10 = 0, 6000 / 10 % 10 = 0 -> "line_number_0_0"
-	// Actually: lines[6000] = "line_number_" + string(rune('0'+6000%10)) + "_" + string(rune('0'+(6000/10)%10))
-	// = "line_number_0_0"
-	if !strings.HasPrefix(result, "line_number_0_0") {
-		t.Errorf("expected first line to be 'line_number_0_0', got: %s", result[:50])
-	}
+	return lines
 }
 
-func TestReadFile_OffsetAndLimit(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	te := newToolTestExecutor(t, dir)
-	task := makeTestTask(t, te.store, "proj-read-4", "task-read-4")
-
-	// Write a file with 100 lines
-	lines := make([]string, 100)
-	for i := 0; i < 100; i++ {
-		lines[i] = "line_" + string(rune('0'+i%10))
-	}
-	content := strings.Join(lines, "\n")
-	filePath := "test-offset-limit.txt"
-	if err := os.WriteFile(filepath.Join(dir, filePath), []byte(content), 0644); err != nil {
-		t.Fatalf("write test file: %v", err)
-	}
-
-	// Read lines 50-55 (1-indexed)
-	result, ok := te.executeTool(context.Background(), "read_file", map[string]any{
-		"path":   filePath,
-		"offset": float64(50),
-		"limit":  float64(6),
-	}, dir, task, &executionState{}, nil)
-
-	if !ok {
-		t.Fatalf("expected success, got error: %s", result)
-	}
-	resultLines := strings.Split(result, "\n")
-	if len(resultLines) != 6 {
-		t.Errorf("expected 6 lines, got %d: %v", len(resultLines), resultLines)
-	}
-	// Line 50 (1-indexed) is index 49 in 0-indexed
-	// lines[49] = "line_" + string(rune('0'+49%10)) = "line_9"
-	if resultLines[0] != "line_9" {
-		t.Errorf("expected first line 'line_9', got %q", resultLines[0])
-	}
-}
-
-func TestReadFile_LimitOnly(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	te := newToolTestExecutor(t, dir)
-	task := makeTestTask(t, te.store, "proj-read-5", "task-read-5")
-
-	// Write a file with 50 lines
-	lines := make([]string, 50)
-	for i := 0; i < 50; i++ {
-		lines[i] = "line_" + string(rune('0'+i%10))
-	}
-	content := strings.Join(lines, "\n")
-	filePath := "test-limit.txt"
-	if err := os.WriteFile(filepath.Join(dir, filePath), []byte(content), 0644); err != nil {
-		t.Fatalf("write test file: %v", err)
-	}
-
-	// Read first 10 lines
-	result, ok := te.executeTool(context.Background(), "read_file", map[string]any{
-		"path":  filePath,
-		"limit": float64(10),
-	}, dir, task, &executionState{}, nil)
-
-	if !ok {
-		t.Fatalf("expected success, got error: %s", result)
-	}
-	resultLines := strings.Split(result, "\n")
-	if len(resultLines) != 10 {
-		t.Errorf("expected 10 lines, got %d: %v", len(resultLines), resultLines)
-	}
-	if resultLines[0] != "line_0" {
-		t.Errorf("expected first line 'line_0', got %q", resultLines[0])
-	}
-}
-
-func TestReadFile_OffsetPastEnd(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	te := newToolTestExecutor(t, dir)
-	task := makeTestTask(t, te.store, "proj-read-6", "task-read-6")
-
-	// Write a file with 10 lines
-	content := "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\n"
-	filePath := "test-past-end.txt"
-	if err := os.WriteFile(filepath.Join(dir, filePath), []byte(content), 0644); err != nil {
-		t.Fatalf("write test file: %v", err)
-	}
-
-	// Read with offset past end: the LLM must be made aware of the invalid offset
-	// so it can correct its request. This is reported as a failed tool call with a
-	// descriptive message (not a silent empty result), and must not panic.
-	result, ok := te.executeTool(context.Background(), "read_file", map[string]any{
-		"path":   filePath,
-		"offset": float64(100),
-	}, dir, task, &executionState{}, nil)
-
-	if ok {
-		t.Fatalf("expected failure for offset past end, got success: %s", result)
-	}
-	if !strings.Contains(result, "Error") || !strings.Contains(result, "offset") {
-		t.Errorf("expected error message informing about the invalid offset, got: %s", result)
-	}
-	if !strings.Contains(result, "10") {
-		t.Errorf("expected error message to include the file line count, got: %s", result)
-	}
-}
-
-// TestReadFile_OffsetValid_LimitClamped verifies that a valid offset with an
-// oversized limit is silently clamped to the remaining lines (no error).
-func TestReadFile_OffsetValid_LimitClamped(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	te := newToolTestExecutor(t, dir)
-	task := makeTestTask(t, te.store, "proj-read-9", "task-read-9")
-
-	lines := make([]string, 100)
+func mixedLines(n int) []string {
+	lines := make([]string, n)
 	for i := range lines {
-		lines[i] = "line_" + string(rune('0'+i%10))
-	}
-	content := strings.Join(lines, "\n")
-	filePath := "clamp.txt"
-	if err := os.WriteFile(filepath.Join(dir, filePath), []byte(content), 0644); err != nil {
-		t.Fatalf("write test file: %v", err)
-	}
-
-	// offset=90, limit=500 (limit exceeds the 11 remaining lines) -> clamped to 11 lines.
-	result, ok := te.executeTool(context.Background(), "read_file", map[string]any{
-		"path":   filePath,
-		"offset": float64(90),
-		"limit":  float64(500),
-	}, dir, task, &executionState{}, nil)
-	if !ok {
-		t.Fatalf("expected success with clamped limit, got error: %s", result)
-	}
-	resultLines := strings.Split(result, "\n")
-	if len(resultLines) != 11 {
-		t.Errorf("expected 11 remaining lines (offset 90..100), got %d: %v", len(resultLines), resultLines)
-	}
-	if resultLines[0] != "line_9" {
-		t.Errorf("expected first line 'line_9', got %q", resultLines[0])
-	}
-}
-
-// TestReadFile_LimitOnly_Clamped verifies an oversized limit without an offset is
-// silently clamped to the total line count.
-func TestReadFile_LimitOnly_Clamped(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	te := newToolTestExecutor(t, dir)
-	task := makeTestTask(t, te.store, "proj-read-10", "task-read-10")
-
-	lines := make([]string, 50)
-	for i := range lines {
-		lines[i] = "line_" + string(rune('0'+i%10))
-	}
-	content := strings.Join(lines, "\n")
-	filePath := "clamp-limit.txt"
-	if err := os.WriteFile(filepath.Join(dir, filePath), []byte(content), 0644); err != nil {
-		t.Fatalf("write test file: %v", err)
-	}
-
-	result, ok := te.executeTool(context.Background(), "read_file", map[string]any{
-		"path":  filePath,
-		"limit": float64(1000),
-	}, dir, task, &executionState{}, nil)
-	if !ok {
-		t.Fatalf("expected success with clamped limit, got error: %s", result)
-	}
-	resultLines := strings.Split(result, "\n")
-	if len(resultLines) != 50 {
-		t.Errorf("expected all 50 lines (limit clamped), got %d", len(resultLines))
-	}
-}
-
-func TestReadFile_OffsetAndLimit_AfterTruncationBoundary(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	te := newToolTestExecutor(t, dir)
-	task := makeTestTask(t, te.store, "proj-read-7", "task-read-7")
-
-	// Write a file larger than 50KB
-	totalLines := 10000
-	lines := make([]string, totalLines)
-	for i := 0; i < totalLines; i++ {
 		lines[i] = "line_" + string(rune('0'+i%10)) + "_content_" + string(rune('A'+i%26))
 	}
-	content := strings.Join(lines, "\n")
-	filePath := "large-with-limit.txt"
-	if err := os.WriteFile(filepath.Join(dir, filePath), []byte(content), 0644); err != nil {
-		t.Fatalf("write test file: %v", err)
-	}
-
-	// Read lines 7001-7010 past the truncation point: offset, then limit, then truncation.
-	result, ok := te.executeTool(context.Background(), "read_file", map[string]any{
-		"path":   filePath,
-		"offset": float64(7001),
-		"limit":  float64(10),
-	}, dir, task, &executionState{}, nil)
-
-	if !ok {
-		t.Fatalf("expected success, got error: %s", result)
-	}
-	if strings.Contains(result, "empty") || strings.Contains(result, "offset past end") {
-		t.Errorf("expected 10 lines from offset 7001, but got empty. offset was applied after truncation. Result: %s", result)
-	}
-	if strings.Contains(result, "truncated") {
-		// With limit=10, result should be small enough to not trigger truncation
-		t.Errorf("expected no truncation with limit=10, but got truncation notice")
-	}
-	resultLines := strings.Split(result, "\n")
-	if len(resultLines) != 10 {
-		t.Errorf("expected 10 lines, got %d: %v", len(resultLines), resultLines)
-	}
+	return lines
 }

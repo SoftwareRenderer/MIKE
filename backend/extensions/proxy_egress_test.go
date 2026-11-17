@@ -23,7 +23,9 @@ func allowLoopbackProxy(t *testing.T) {
 }
 
 // TestExtensionProxyRefusesLoopbackTarget (security): a name on a manifest allowlist can
-// resolve to this host, and the proxy dials from the host.
+// resolve to this host, and the proxy dials from the host. The control that this is the dial
+// policy and not a broken proxy is TestHandleProxyPassesNormalResponse, which reaches an
+// upstream over the same route with the loopback rule lifted.
 func TestExtensionProxyRefusesLoopbackTarget(t *testing.T) {
 	var reached bool
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -46,29 +48,5 @@ func TestExtensionProxyRefusesLoopbackTarget(t *testing.T) {
 	}
 	if w.Code == http.StatusOK {
 		t.Fatalf("a loopback target was proxied: %s", w.Body.String())
-	}
-}
-
-// TestExtensionProxyAllowsLoopbackWhenPolicyIsLifted is the control: the refusal is the dial
-// policy, not a broken test.
-func TestExtensionProxyAllowsLoopbackWhenPolicyIsLifted(t *testing.T) {
-	allowLoopbackProxy(t)
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"ok":true}`))
-	}))
-	defer upstream.Close()
-
-	h := testHandler(t)
-	u, _ := url.Parse(upstream.URL)
-	makeProxyExt(t, h, []string{u.Hostname()})
-
-	body := `{"url":"` + upstream.URL + `","method":"GET"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/extensions/proxy-ext/proxy", strings.NewReader(body))
-	w := httptest.NewRecorder()
-	h.HandleProxy(w, req, "proxy-ext")
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("control case did not reach the upstream: %d %s", w.Code, w.Body.String())
 	}
 }
