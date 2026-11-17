@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -46,40 +47,37 @@ func testConfigStoreWithStore(t *testing.T) (*ConfigStore, *store.Store) {
 	return NewConfigStore(db, dir+"/test.db", "test", sharedSecretBox(), false, false), db
 }
 
-func TestGetConfigDefaultWorkspaceDir(t *testing.T) {
-	cs := testConfigStore(t)
-	// No override set — should use the compiled-in default
-	read, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	// Default is resolved to absolute path
-	expectedAbs, _ := filepath.Abs(DefaultWorkspaceDir)
-	if read.WorkspaceDir != expectedAbs {
-		t.Fatalf("expected default workspace dir %q, got %q", expectedAbs, read.WorkspaceDir)
-	}
-}
-
-func TestAutoSummarizeThreshold_Default(t *testing.T) {
-	cs := testConfigStore(t)
-	if got := cs.AutoSummarizeThreshold(); got != 90 {
-		t.Fatalf("expected default threshold 90, got %d", got)
-	}
-}
-
-func TestAutoSummarizeThreshold_Roundtrip(t *testing.T) {
-	cs := testConfigStore(t)
-	v := 60
-	cfg, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	cfg.DefaultAutoSummarizeThreshold = &v
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-	if got := cs.AutoSummarizeThreshold(); got != 60 {
-		t.Fatalf("expected threshold 60 after update, got %d", got)
+// TestAutoSummarizeThreshold reads the one Settings value both summarization triggers share: unset is
+// the compiled-in default, a stored value is sent as stored, and a stored value outside the range reads
+// as unset — which is why the PUT clamps rather than refusing, keeping what the UI displays equal to what
+// gets stored.
+func TestAutoSummarizeThreshold(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		store *int
+		want  int
+	}{
+		{name: "unset is the default", want: 90},
+		{name: "a stored value is sent as stored", store: intPtr(60), want: 60},
+		{name: "a stored value outside the range reads as unset", store: intPtr(0), want: 90},
+		{name: "a stored value above the range reads as unset", store: intPtr(101), want: 90},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cs := testConfigStore(t)
+			if tc.store != nil {
+				cfg, err := cs.GetConfig()
+				if err != nil {
+					t.Fatalf("get config: %v", err)
+				}
+				cfg.DefaultAutoSummarizeThreshold = tc.store
+				if err := cs.UpdateConfig(cfg); err != nil {
+					t.Fatalf("update config: %v", err)
+				}
+			}
+			if got := cs.AutoSummarizeThreshold(); got != tc.want {
+				t.Fatalf("AutoSummarizeThreshold() = %d, want %d", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -207,17 +205,61 @@ func TestUIFlagPreferences(t *testing.T) {
 	}
 }
 
-func TestGetConfigRespectsWorkspaceDirOverride(t *testing.T) {
-	cs := testConfigStore(t)
-	overrideDir := t.TempDir()
-	cs.SetWorkspaceDirOverride(overrideDir)
-
-	read, err := cs.GetConfig()
+// TestWorkspaceDirIsTheConfiguredDirectory is the jail base every fs path check compares against. It is
+// the configured directory, made absolute because callers compare it against absolute paths, and the same
+// answer on both read paths: GetConfig publishes it to the board and WorkspaceDir() is what the fs-path
+// checks ask for, so one drifting from the other jails paths to a directory the app neither shows nor
+// writes to.
+func TestWorkspaceDirIsTheConfiguredDirectory(t *testing.T) {
+	defaultAbs, err := filepath.Abs(DefaultWorkspaceDir)
 	if err != nil {
-		t.Fatalf("get config: %v", err)
+		t.Fatalf("abs %q: %v", DefaultWorkspaceDir, err)
 	}
-	if read.WorkspaceDir != overrideDir {
-		t.Fatalf("expected workspace dir %q, got %q", overrideDir, read.WorkspaceDir)
+	relative := ".relative-worktrees"
+	relativeAbs, err := filepath.Abs(relative)
+	if err != nil {
+		t.Fatalf("abs %q: %v", relative, err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		// override hands SetWorkspaceDirOverride the directory a deployment would point the server at,
+		// and the answer both readers must give. An empty set leaves the override unset, as startup does
+		// when no flag or variable names a directory.
+		override func(t *testing.T) (set, want string)
+	}{
+		{name: "unset is the compiled-in default", override: func(*testing.T) (string, string) {
+			return "", defaultAbs
+		}},
+		{name: "an absolute override is the directory", override: func(t *testing.T) (string, string) {
+			dir := t.TempDir()
+			return dir, dir
+		}},
+		{name: "a relative override is made absolute", override: func(*testing.T) (string, string) {
+			return relative, relativeAbs
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			set, want := tc.override(t)
+			cs := testConfigStore(t)
+			if set != "" {
+				cs.SetWorkspaceDirOverride(set)
+			}
+
+			read, err := cs.GetConfig()
+			if err != nil {
+				t.Fatalf("get config: %v", err)
+			}
+			if read.WorkspaceDir != want {
+				t.Errorf("GetConfig().WorkspaceDir = %q, want %q", read.WorkspaceDir, want)
+			}
+			if got := cs.WorkspaceDir(); got != want {
+				t.Errorf("WorkspaceDir() = %q, want %q — the two readers must agree", got, want)
+			}
+			if !filepath.IsAbs(cs.WorkspaceDir()) {
+				t.Errorf("WorkspaceDir() = %q, want absolute — callers compare it against absolute paths", cs.WorkspaceDir())
+			}
+		})
 	}
 }
 
@@ -312,74 +354,88 @@ func (m *mockAgentLister) ToProviders() []types.Provider {
 	return m.providers
 }
 
-func TestBuildConfigResponseMergesAgentProviders(t *testing.T) {
-	cs := testConfigStore(t)
+// TestBuildConfigResponseServesTheRegistryAgentSet: the provider list a browser sees is the stored LLM
+// rows plus exactly the agents the enabled extensions report — merged in with their display names, with
+// an orphan left behind by a disabled extension absent, and with every row carrying a models array rather
+// than null, which is what a database written before an empty list was stored as [] holds no list for.
+func TestBuildConfigResponseServesTheRegistryAgentSet(t *testing.T) {
+	llm := types.Provider{Name: "llm", Kind: types.ProviderKindLLM, URL: "http://localhost:8080/v1", Concurrency: 1}
+	pi := types.Provider{Name: "pi", Kind: types.ProviderKindAgent, DisplayName: "Pi Coding Agent", URL: "agent://pi", Concurrency: 1}
 
-	// Store an LLM provider
-	cfg := &types.Config{
-		Providers: []types.Provider{
-			{Name: "llm", Kind: "llm", URL: "http://localhost:8080/v1", Concurrency: 1},
+	for _, tc := range []struct {
+		name string
+		// stored saves the rows the normal path would; legacyRows writes raw JSON instead, standing
+		// in for a database written before agent rows stopped being persisted.
+		stored     []types.Provider
+		legacyRows []types.Provider
+		// registry is what the enabled agent extensions report; nil means none is wired at all.
+		registry []types.Provider
+		wantURLs []string
+	}{
+		{
+			name:     "the stored rows alone when no registry is wired",
+			stored:   []types.Provider{llm},
+			wantURLs: []string{"http://localhost:8080/v1"},
 		},
-	}
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-
-	// No agent registry wired — response should only have stored providers
-	readCfg, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	resp := cs.buildConfigResponse(readCfg)
-	if len(resp.Providers) != 1 {
-		t.Fatalf("expected 1 provider without agent registry, got %d", len(resp.Providers))
-	}
-
-	// Wire an agent registry that provides 'Pi Coding Agent'
-	cs.SetAgentRegistry(&mockAgentLister{
-		providers: []types.Provider{
-			{Name: "pi", Kind: "agent", DisplayName: "Pi Coding Agent", URL: "agent://pi", Concurrency: 1},
+		{
+			name:     "the registry agent is merged in beside them",
+			stored:   []types.Provider{llm},
+			registry: []types.Provider{pi},
+			wantURLs: []string{"http://localhost:8080/v1", "agent://pi"},
 		},
-	})
-
-	resp = cs.buildConfigResponse(readCfg)
-	if len(resp.Providers) != 2 {
-		t.Fatalf("expected 2 providers with agent registry, got %d", len(resp.Providers))
-	}
-
-	// The agent provider should have the correct display name
-	var found bool
-	for _, p := range resp.Providers {
-		if p.URL == "agent://pi" {
-			if p.DisplayName != "Pi Coding Agent" {
-				t.Errorf("expected display name 'Pi Coding Agent', got '%s'", p.DisplayName)
+		{
+			// The agent extension was disabled; its row is still in the database, and the registry
+			// decides the set rather than the row.
+			name:       "an orphan agent row never comes back",
+			legacyRows: []types.Provider{llm, {Name: "orphan", Kind: types.ProviderKindAgent, URL: "agent://orphan", Concurrency: 1}},
+			registry:   []types.Provider{pi},
+			wantURLs:   []string{"http://localhost:8080/v1", "agent://pi"},
+		},
+		{
+			name:       "a legacy row holding no models list is served as an array",
+			legacyRows: []types.Provider{{ID: 7, Name: "legacy", Kind: types.ProviderKindLLM, URL: "http://legacy:8080/v1", Concurrency: 1}},
+			wantURLs:   []string{"http://legacy:8080/v1"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cs := testConfigStore(t)
+			if tc.stored != nil {
+				if err := cs.UpdateConfig(&types.Config{Providers: tc.stored}); err != nil {
+					t.Fatalf("update config: %v", err)
+				}
 			}
-			found = true
-		}
-		// Every provider in the response must have a non-nil Models slice so
-		// the JSON is "models": [] (not null).
-		if p.Models == nil {
-			t.Errorf("provider %s: Models = nil, want non-nil empty slice", p.URL)
-		}
-	}
-	if !found {
-		t.Error("agent://pi provider not found in response")
-	}
+			if tc.legacyRows != nil {
+				seedLegacyProviderRows(t, cs, tc.legacyRows)
+			}
+			if tc.registry != nil {
+				cs.SetAgentRegistry(&mockAgentLister{providers: tc.registry})
+			}
 
-	// A persisted LLM provider with a nil models list (legacy row) must also
-	// come back non-nil.
-	seedLegacyProviderRows(t, cs, []types.Provider{
-		{ID: 7, Name: "legacy", Kind: "llm", URL: "http://legacy:8080/v1", Concurrency: 1},
-	})
-	readCfg, err = cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	resp = cs.buildConfigResponse(readCfg)
-	for _, p := range resp.Providers {
-		if p.URL == "http://legacy:8080/v1" && p.Models == nil {
-			t.Error("legacy provider: Models = nil, want non-nil empty slice")
-		}
+			cfg, err := cs.GetConfig()
+			if err != nil {
+				t.Fatalf("get config: %v", err)
+			}
+			resp := cs.buildConfigResponse(cfg)
+
+			urls := make([]string, 0, len(resp.Providers))
+			for _, p := range resp.Providers {
+				urls = append(urls, p.URL)
+				// Every provider in the response must have a non-nil Models slice so the JSON is
+				// "models": [] (not null).
+				if p.Models == nil {
+					t.Errorf("provider %s: Models = nil, want non-nil empty slice", p.URL)
+				}
+				if p.URL == "agent://pi" && p.DisplayName != "Pi Coding Agent" {
+					t.Errorf("registry agent display name = %q, want %q", p.DisplayName, "Pi Coding Agent")
+				}
+			}
+			slices.Sort(urls)
+			want := slices.Clone(tc.wantURLs)
+			slices.Sort(want)
+			if !slices.Equal(urls, want) {
+				t.Errorf("response providers = %v, want exactly %v", urls, want)
+			}
+		})
 	}
 }
 
@@ -421,115 +477,98 @@ func TestGetConfigPrunesOrphanAgentProviders(t *testing.T) {
 	}
 }
 
-func TestUpdateConfigNeverPersistsAgentProviders(t *testing.T) {
-	cs := testConfigStore(t)
-
-	cfg := &types.Config{
-		Providers: []types.Provider{
-			{Name: "llm", Kind: "llm", URL: "http://localhost:8080/v1", Concurrency: 1},
-			{Name: "pi", Kind: "agent", URL: "agent://pi", Concurrency: 1, DisplayName: "Pi Coding Agent"},
+// TestAgentProviderRowsNeverReachStorage: an agent provider is derived from the enabled extensions, so
+// whichever door it is offered at — UpdateConfig, or PUT /api/config from the browser — only the LLM row
+// is stored, the raw row holds no trace of the agent, and the caller is served only that row. An
+// agent:// row in the database is a provider that survives its extension being uninstalled.
+func TestAgentProviderRowsNeverReachStorage(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		// write saves the LLM row beside an agent row and returns the providers the caller was
+		// served: the PUT response for the route, the config response for the direct call.
+		write func(t *testing.T, cs *ConfigStore) []types.Provider
+	}{
+		{
+			name: "UpdateConfig",
+			write: func(t *testing.T, cs *ConfigStore) []types.Provider {
+				cfg := &types.Config{
+					Providers: []types.Provider{
+						{Name: "llm", Kind: types.ProviderKindLLM, URL: "http://localhost:8080/v1", Concurrency: 1},
+						{Name: "pi", Kind: types.ProviderKindAgent, URL: "agent://pi", Concurrency: 1, DisplayName: "Pi Coding Agent"},
+					},
+				}
+				if err := cs.UpdateConfig(cfg); err != nil {
+					t.Fatalf("update config: %v", err)
+				}
+				read, err := cs.GetConfig()
+				if err != nil {
+					t.Fatalf("get config: %v", err)
+				}
+				return cs.buildConfigResponse(read).Providers
+			},
 		},
-	}
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
+		{
+			name: "PUT /api/config",
+			write: func(t *testing.T, cs *ConfigStore) []types.Provider {
+				body, err := json.Marshal(map[string]any{
+					"providers": []map[string]any{
+						{"name": "llm", "kind": "llm", "url": "http://localhost:8080/v1", "models": []any{map[string]any{"name": "model-a"}}, "concurrency": 1},
+						// Agent rows carry no models; the client sends an empty list (Provider.UnmarshalJSON
+						// requires the field to be present).
+						{"name": "pi", "kind": "agent", "url": "agent://pi", "models": []any{}, "concurrency": 1, "display_name": "Pi Coding Agent"},
+					},
+					"worker_provider":  "llm",
+					"worker_model":     "model-a",
+					"utility_provider": "llm",
+					"utility_model":    "model-a",
+				})
+				if err != nil {
+					t.Fatalf("marshal the PUT body: %v", err)
+				}
+				w := httptest.NewRecorder()
+				cs.HandleConfig(w, httptest.NewRequest(http.MethodPut, "/api/config", strings.NewReader(string(body))))
+				if w.Code != http.StatusOK {
+					t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+				}
+				var resp struct {
+					Providers []types.Provider `json:"providers"`
+				}
+				if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+					t.Fatalf("unmarshal response: %v", err)
+				}
+				return resp.Providers
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cs := testConfigStore(t)
 
-	read, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	if len(read.Providers) != 1 || read.Providers[0].URL != "http://localhost:8080/v1" {
-		t.Fatalf("expected only the LLM provider to persist, got %v", read.Providers)
-	}
-
-	// The raw DB value must not contain the agent row either.
-	raw, err := cs.db.GetConfigValue("providers")
-	if err != nil {
-		t.Fatalf("get raw providers: %v", err)
-	}
-	if strings.Contains(raw, "agent://") {
-		t.Errorf("agent:// row persisted to database: %s", raw)
+			served := tc.write(t, cs)
+			if len(served) != 1 || served[0].URL != "http://localhost:8080/v1" {
+				t.Fatalf("the caller was served %v, want only the LLM provider", served)
+			}
+			read, err := cs.GetConfig()
+			if err != nil {
+				t.Fatalf("get config: %v", err)
+			}
+			if len(read.Providers) != 1 || read.Providers[0].URL != "http://localhost:8080/v1" {
+				t.Fatalf("expected only the LLM provider to persist, got %v", read.Providers)
+			}
+			raw, err := cs.db.GetConfigValue("providers")
+			if err != nil {
+				t.Fatalf("get raw providers: %v", err)
+			}
+			if strings.Contains(raw, "agent://") {
+				t.Errorf("an agent:// row reached the database: %s", raw)
+			}
+		})
 	}
 }
 
-func TestBuildConfigResponseExactAgentSet(t *testing.T) {
-	cs := testConfigStore(t)
-
-	// Legacy orphan agent row in the DB (agent extension no longer enabled).
-	seedLegacyProviderRows(t, cs, []types.Provider{
-		{Name: "llm", Kind: "llm", URL: "http://localhost:8080/v1", Concurrency: 1},
-		{Name: "orphan", Kind: "agent", URL: "agent://orphan", Concurrency: 1},
-	})
-
-	// Registry provides only 'pi'.
-	cs.SetAgentRegistry(&mockAgentLister{
-		providers: []types.Provider{
-			{Name: "pi", Kind: "agent", DisplayName: "Pi Coding Agent", URL: "agent://pi", Concurrency: 1},
-		},
-	})
-
-	cfg, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	resp := cs.buildConfigResponse(cfg)
-
-	urls := make([]string, 0, len(resp.Providers))
-	for _, p := range resp.Providers {
-		urls = append(urls, p.URL)
-	}
-	if len(resp.Providers) != 2 {
-		t.Fatalf("expected 2 providers (LLM + registry agent), got %d: %v", len(resp.Providers), urls)
-	}
-	for _, u := range urls {
-		if u == "agent://orphan" {
-			t.Error("orphaned agent provider present in response")
-		}
-	}
-}
-
-func TestHandleConfigPutDropsAgentProviders(t *testing.T) {
-	cs := testConfigStore(t)
-
-	body, _ := json.Marshal(map[string]any{
-		"providers": []map[string]any{
-			{"name": "llm", "kind": "llm", "url": "http://localhost:8080/v1", "models": []any{map[string]any{"name": "model-a"}}, "concurrency": 1},
-			// Agent rows carry no models; the client sends an empty list (Provider.UnmarshalJSON
-			// requires the field to be present).
-			{"name": "pi", "kind": "agent", "url": "agent://pi", "models": []any{}, "concurrency": 1, "display_name": "Pi Coding Agent"},
-		},
-		"worker_provider":  "llm",
-		"worker_model":     "model-a",
-		"utility_provider": "llm",
-		"utility_model":    "model-a",
-	})
-	req := httptest.NewRequest(http.MethodPut, "/api/config", strings.NewReader(string(body)))
-	w := httptest.NewRecorder()
-	cs.HandleConfig(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var resp struct {
-		Providers []types.Provider `json:"providers"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if len(resp.Providers) != 1 || resp.Providers[0].URL != "http://localhost:8080/v1" {
-		t.Fatalf("expected only the LLM provider in response, got %v", resp.Providers)
-	}
-
-	read, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	if len(read.Providers) != 1 {
-		t.Fatalf("expected only the LLM provider persisted, got %v", read.Providers)
-	}
-}
-
+// A stored LLM row carries no display name: the browser's label for an LLM provider is its own name, so
+// a name written into the row would be a second, staler label for the same provider. A registry agent's
+// label is served from the registry instead, and its row is never stored at all — see
+// TestBuildConfigResponseServesTheRegistryAgentSet.
 func TestDisplayNameNotPersistedForLLM(t *testing.T) {
 	cs := testConfigStore(t)
 
@@ -537,7 +576,6 @@ func TestDisplayNameNotPersistedForLLM(t *testing.T) {
 		Providers: []types.Provider{
 			// Even if a caller supplies a display name for an LLM provider, it must not be persisted.
 			{Name: "llm", Kind: "llm", DisplayName: "Stale Display", URL: "http://localhost:8080/v1", Concurrency: 1},
-			{Name: "pi", Kind: "agent", DisplayName: "Pi Coding Agent", URL: "agent://pi", Concurrency: 1},
 		},
 	}
 	if err := cs.UpdateConfig(cfg); err != nil {
@@ -548,17 +586,12 @@ func TestDisplayNameNotPersistedForLLM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get config: %v", err)
 	}
-
+	if len(read.Providers) != 1 {
+		t.Fatalf("stored %d providers, want the one LLM row: %+v", len(read.Providers), read.Providers)
+	}
 	for _, p := range read.Providers {
-		if p.Name == "llm" {
-			if p.DisplayName != "" {
-				t.Errorf("LLM provider display name should be cleared, got %q", p.DisplayName)
-			}
-		}
-		if p.Name == "pi" {
-			if p.DisplayName != "Pi Coding Agent" {
-				t.Errorf("agent provider display name should be preserved, got %q", p.DisplayName)
-			}
+		if p.DisplayName != "" {
+			t.Errorf("LLM provider %q kept display name %q, want it cleared", p.Name, p.DisplayName)
 		}
 	}
 }
@@ -785,14 +818,38 @@ func TestGetProviderStreamIdleIsNoCeilingUnlessConfigured(t *testing.T) {
 	}
 }
 
-func TestKeyboardShortcuts_UnsetDefault(t *testing.T) {
-	cs := testConfigStore(t)
-	cfg, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	if cfg.KeyboardShortcuts != nil {
-		t.Fatalf("expected nil KeyboardShortcuts when unset, got %+v", cfg.KeyboardShortcuts)
+// TestKeyboardShortcutsWithNoBindingReadsAsNil: the row holds the shortcuts object or nothing, and both
+// ways of having no bindings read the same way — a store nobody wrote, and an object with every field nil
+// saved into one. A stored all-default object would answer "keyboard_shortcuts": {} and hand the user an
+// empty binding where they asked for the defaults.
+func TestKeyboardShortcutsWithNoBindingReadsAsNil(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		save bool
+	}{
+		{name: "never written"},
+		{name: "an all-nil object saved", save: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cs := testConfigStore(t)
+			if tc.save {
+				cfg, err := cs.GetConfig()
+				if err != nil {
+					t.Fatalf("get config: %v", err)
+				}
+				cfg.KeyboardShortcuts = &types.KeyboardShortcuts{}
+				if err := cs.UpdateConfig(cfg); err != nil {
+					t.Fatalf("update config: %v", err)
+				}
+			}
+			read, err := cs.GetConfig()
+			if err != nil {
+				t.Fatalf("get config: %v", err)
+			}
+			if read.KeyboardShortcuts != nil {
+				t.Fatalf("expected nil KeyboardShortcuts with no binding set, got %+v", read.KeyboardShortcuts)
+			}
+		})
 	}
 }
 
@@ -801,7 +858,7 @@ func TestKeyboardShortcuts_UnsetDefault(t *testing.T) {
 // "" (disabled) must come back as "", not as nil — nil means "unset", which would hand
 // the user back the default binding they just switched off. hide_hints is a bool and is
 // covered next; the all-nil normalization is pinned by
-// TestKeyboardShortcuts_AllNilNormalizedToNil.
+// TestKeyboardShortcutsWithNoBindingReadsAsNil.
 func TestKeyboardShortcuts_RoundTrip(t *testing.T) {
 	bindings := []struct {
 		name string
@@ -898,26 +955,6 @@ func TestKeyboardShortcutsHideHints(t *testing.T) {
 		if *read.KeyboardShortcuts.HideHints != want {
 			t.Errorf("hide_hints = %t, want %t", *read.KeyboardShortcuts.HideHints, want)
 		}
-	}
-}
-
-func TestKeyboardShortcuts_AllNilNormalizedToNil(t *testing.T) {
-	cs := testConfigStore(t)
-	cfg, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	// A struct with no fields set should normalize back to nil (all defaults).
-	cfg.KeyboardShortcuts = &types.KeyboardShortcuts{}
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-	read, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	if read.KeyboardShortcuts != nil {
-		t.Fatalf("expected nil KeyboardShortcuts after saving all-nil struct, got %+v", read.KeyboardShortcuts)
 	}
 }
 
@@ -1153,41 +1190,6 @@ func TestGetModelReasoningEffort(t *testing.T) {
 
 func ptr(s string) *string { return &s }
 func ptrBool(b bool) *bool { return &b }
-
-// TestWorkspaceDirMatchesGetConfig: the cheap accessor fs-path checks use must
-// agree with the value GetConfig publishes, or the fs handlers would jail paths to
-// a different directory than the one the app shows and writes to.
-func TestWorkspaceDirMatchesGetConfig(t *testing.T) {
-	for _, override := range []string{"", t.TempDir()} {
-		cs := testConfigStore(t)
-		if override != "" {
-			cs.SetWorkspaceDirOverride(override)
-		}
-		read, err := cs.GetConfig()
-		if err != nil {
-			t.Fatalf("get config: %v", err)
-		}
-		got := cs.WorkspaceDir()
-		if got != read.WorkspaceDir {
-			t.Errorf("WorkspaceDir() = %q, GetConfig().WorkspaceDir = %q (override %q)", got, read.WorkspaceDir, override)
-		}
-		if !filepath.IsAbs(got) {
-			t.Errorf("WorkspaceDir() = %q, want absolute — callers compare it against absolute paths", got)
-		}
-	}
-}
-
-// TestWorkspaceDirRelativeOverrideIsAbsolute: a relative override is made
-// absolute, because callers compare it against absolute paths.
-func TestWorkspaceDirRelativeOverrideIsAbsolute(t *testing.T) {
-	cs := testConfigStore(t)
-	cs.SetWorkspaceDirOverride(".relative-worktrees")
-	got := cs.WorkspaceDir()
-	want, _ := filepath.Abs(".relative-worktrees")
-	if got != want {
-		t.Errorf("WorkspaceDir() = %q, want %q", got, want)
-	}
-}
 
 // About reads the ceiling the gate was started with, so the operator can see what every sandbox MIKE
 // started has to share. A store that was never told answers 0 rather than inventing a figure.

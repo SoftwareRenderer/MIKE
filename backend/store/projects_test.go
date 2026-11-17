@@ -8,7 +8,10 @@ import (
 
 func TestCreateAndGetProject(t *testing.T) {
 	s := testStore(t)
+	createdAt := time.Date(2026, 4, 5, 6, 7, 8, 0, time.UTC)
 	proj := newProject("proj-1", "My Project", "/tmp/repo")
+	proj.CreatedAt = createdAt
+	proj.UpdatedAt = createdAt
 	if err := s.CreateProject(proj); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
@@ -19,6 +22,10 @@ func TestCreateAndGetProject(t *testing.T) {
 	}
 	if got.ID != "proj-1" || got.Name != "My Project" || got.Path != "/tmp/repo" {
 		t.Fatalf("unexpected project: %+v", got)
+	}
+	// The instants are the row's order in ListProjects, so they travel as text and come back as instants.
+	if !got.CreatedAt.Equal(createdAt) || !got.UpdatedAt.Equal(createdAt) {
+		t.Fatalf("timestamps read back (%v, %v), want both %v", got.CreatedAt, got.UpdatedAt, createdAt)
 	}
 }
 
@@ -63,74 +70,50 @@ func TestUpdateProject(t *testing.T) {
 	}
 }
 
+// The board's badges come from one grouped read: counts per project and per column, with Done left out
+// because a card that reached Done is no one's badge.
 func TestGetAllProjectCounts(t *testing.T) {
 	s := testStore(t)
-	proj := newProject("proj-1", "test", "/tmp/repo")
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-
-	// Create tasks in different statuses
-	backlog1 := newTask("b1", "proj-1")
-	backlog1.Status = types.StatusBacklog
-	backlog2 := newTask("b2", "proj-1")
-	backlog2.Status = types.StatusBacklog
-	inProgress := newTask("ip1", "proj-1")
-	inProgress.Status = types.StatusInProgress
-	review := newTask("r1", "proj-1")
-	review.Status = types.StatusReview
-	done := newTask("d1", "proj-1")
-	done.Status = types.StatusDone
-
-	for _, task := range []*types.Task{backlog1, backlog2, inProgress, review, done} {
-		if err := s.CreateTask(task); err != nil {
-			t.Fatalf("create task: %v", err)
-		}
-	}
-
-	counts := s.GetAllProjectCounts()
-	c, ok := counts["proj-1"]
-	if !ok {
-		t.Fatal("expected counts for proj-1")
-	}
-	if c.Backlog != 2 {
-		t.Fatalf("expected 2 backlog, got %d", c.Backlog)
-	}
-	if c.InProgress != 1 {
-		t.Fatalf("expected 1 in_progress, got %d", c.InProgress)
-	}
-	if c.Review != 1 {
-		t.Fatalf("expected 1 review, got %d", c.Review)
-	}
-	// Done tasks should NOT be counted
-}
-
-func TestGetAllProjectCountsMultipleProjects(t *testing.T) {
-	s := testStore(t)
 	for _, id := range []string{"proj-1", "proj-2"} {
-		proj := newProject(id, id, "/tmp/"+id)
-		if err := s.CreateProject(proj); err != nil {
-			t.Fatalf("create project: %v", err)
+		if err := s.CreateProject(newProject(id, id, "/tmp/"+id)); err != nil {
+			t.Fatalf("create %s: %v", id, err)
 		}
 	}
 
-	// proj-1: 1 backlog
-	if err := s.CreateTask(newTask("t1", "proj-1")); err != nil {
-		t.Fatalf("create task: %v", err)
+	seed := []struct {
+		id, project string
+		status      types.Status
+	}{
+		{"b1", "proj-1", types.StatusBacklog},
+		{"b2", "proj-1", types.StatusBacklog},
+		{"ip1", "proj-1", types.StatusInProgress},
+		{"r1", "proj-1", types.StatusReview},
+		{"d1", "proj-1", types.StatusDone},
+		{"t2", "proj-2", types.StatusInProgress},
 	}
-	// proj-2: 1 in_progress
-	ip := newTask("t2", "proj-2")
-	ip.Status = types.StatusInProgress
-	if err := s.CreateTask(ip); err != nil {
-		t.Fatalf("create task: %v", err)
+	for _, task := range seed {
+		tk := newTask(task.id, task.project)
+		tk.Status = task.status
+		if err := s.CreateTask(tk); err != nil {
+			t.Fatalf("create %s: %v", task.id, err)
+		}
 	}
 
 	counts := s.GetAllProjectCounts()
-	if counts["proj-1"].Backlog != 1 {
-		t.Fatalf("proj-1 backlog: %d", counts["proj-1"].Backlog)
-	}
-	if counts["proj-2"].InProgress != 1 {
-		t.Fatalf("proj-2 in_progress: %d", counts["proj-2"].InProgress)
+	for _, want := range []struct {
+		project string
+		c       types.ProjectCounts
+	}{
+		{"proj-1", types.ProjectCounts{Backlog: 2, InProgress: 1, Review: 1}},
+		{"proj-2", types.ProjectCounts{InProgress: 1}},
+	} {
+		c, ok := counts[want.project]
+		if !ok {
+			t.Fatalf("no counts for %s: %v", want.project, counts)
+		}
+		if c != want.c {
+			t.Errorf("%s counts = %+v, want %+v (Done is never counted)", want.project, c, want.c)
+		}
 	}
 }
 
@@ -148,739 +131,422 @@ func TestProjectUniquePath(t *testing.T) {
 	}
 }
 
-func TestProjectCreatedAtUpdatedAt(t *testing.T) {
-	s := testStore(t)
-	proj := newProject("proj-1", "test", "/tmp/repo")
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-
-	got, err := s.GetProject("proj-1")
-	if err != nil {
-		t.Fatalf("get project: %v", err)
-	}
-	if got.CreatedAt.IsZero() || got.UpdatedAt.IsZero() {
-		t.Fatal("timestamps should be set")
-	}
-}
-
-func TestDeleteProject(t *testing.T) {
-	s := testStore(t)
-
-	// Create two projects
-	proj1 := newProject("proj-1", "Project One", "/tmp/repo1")
-	if err := s.CreateProject(proj1); err != nil {
-		t.Fatalf("create project 1: %v", err)
-	}
-	proj2 := newProject("proj-2", "Project Two", "/tmp/repo2")
-	if err := s.CreateProject(proj2); err != nil {
-		t.Fatalf("create project 2: %v", err)
-	}
-
-	// Create tasks for both projects
-	task1a := newTask("task-1a", "proj-1")
-	task1b := newTask("task-1b", "proj-1")
-	task2a := newTask("task-2a", "proj-2")
-	for _, task := range []*types.Task{task1a, task1b, task2a} {
-		if err := s.CreateTask(task); err != nil {
-			t.Fatalf("create task: %v", err)
+func TestProjectSandboxColumnsRoundTrip(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		bare   func(*testing.T, *types.Project)
+		seed   func(*types.Project)
+		want   func(*testing.T, *types.Project)
+		writes []struct {
+			apply func(*Store) error
+			want  func(*testing.T, *types.Project)
 		}
-	}
-
-	// Create messages for proj-1 tasks
-	for _, taskID := range []string{"task-1a", "task-1b"} {
-		msg := newMessage("msg-"+taskID, taskID, "assistant", "hello")
-		msg.ModelName = "test-model"
-		msg.ProviderName = "test-provider"
-		msg.PromptTokens = 10
-		msg.PredictedTokens = 5
-		if err := s.CreateTaskMessage(msg); err != nil {
-			t.Fatalf("create message: %v", err)
-		}
-	}
-	// Create a message for proj-2 task (should survive)
-	msg2 := newMessage("msg-task-2a", "task-2a", "assistant", "world")
-	msg2.ModelName = "test-model"
-	msg2.ProviderName = "test-provider"
-	msg2.PromptTokens = 20
-	if err := s.CreateTaskMessage(msg2); err != nil {
-		t.Fatalf("create message for proj-2: %v", err)
-	}
-
-	// Create threads for proj-1 tasks
-	for _, taskID := range []string{"task-1a", "task-1b"} {
-		th := newThread("thread-"+taskID, taskID, "Main")
-		if err := s.CreateThread(th); err != nil {
-			t.Fatalf("create thread: %v", err)
-		}
-	}
-
-	// --- Delete proj-1 ---
-	if err := s.DeleteProject("proj-1"); err != nil {
-		t.Fatalf("delete project with data: %v", err)
-	}
-
-	// Verify proj-1 is gone
-	_, err := s.GetProject("proj-1")
-	if err == nil {
-		t.Fatal("expected error for deleted project")
-	}
-
-	// Verify all proj-1 tasks are gone
-	tasks, err := s.GetTasksByProject("proj-1")
-	if err != nil {
-		t.Fatalf("get tasks: %v", err)
-	}
-	if len(tasks) != 0 {
-		t.Fatalf("expected 0 tasks for proj-1, got %d", len(tasks))
-	}
-
-	// Verify messages for proj-1 tasks are gone
-	messages1a, err := s.GetTaskMessages("task-1a", "")
-	if err != nil {
-		t.Fatalf("get messages: %v", err)
-	}
-	if len(messages1a) != 0 {
-		t.Fatalf("expected 0 messages for task-1a, got %d", len(messages1a))
-	}
-	messages1b, err := s.GetTaskMessages("task-1b", "")
-	if err != nil {
-		t.Fatalf("get messages: %v", err)
-	}
-	if len(messages1b) != 0 {
-		t.Fatalf("expected 0 messages for task-1b, got %d", len(messages1b))
-	}
-
-	// Verify threads for proj-1 tasks are gone
-	threads1a, err := s.GetThreadsByTask("task-1a")
-	if err != nil {
-		t.Fatalf("get threads: %v", err)
-	}
-	if len(threads1a) != 0 {
-		t.Fatalf("expected 0 threads for task-1a, got %d", len(threads1a))
-	}
-
-	// Verify token stats are gone
-	stats, err := s.GetProjectStats("proj-1")
-	if err != nil {
-		t.Fatalf("get stats: %v", err)
-	}
-	if stats.TotalPromptTokens != 0 || stats.TotalGeneratedTokens != 0 {
-		t.Fatalf("expected zero stats for proj-1, got prompt=%d generated=%d", stats.TotalPromptTokens, stats.TotalGeneratedTokens)
-	}
-
-	// --- Verify proj-2 is untouched ---
-	_, err = s.GetProject("proj-2")
-	if err != nil {
-		t.Fatalf("proj-2 should still exist: %v", err)
-	}
-	tasks2, err := s.GetTasksByProject("proj-2")
-	if err != nil {
-		t.Fatalf("get tasks for proj-2: %v", err)
-	}
-	if len(tasks2) != 1 {
-		t.Fatalf("expected 1 task for proj-2, got %d", len(tasks2))
-	}
-	messages2, err := s.GetTaskMessages("task-2a", "")
-	if err != nil {
-		t.Fatalf("get messages for proj-2: %v", err)
-	}
-	if len(messages2) != 1 {
-		t.Fatalf("expected 1 message for proj-2, got %d", len(messages2))
-	}
-}
-
-func TestProjectSandboxEnabled(t *testing.T) {
-	s := testStore(t)
-
-	// Create project with sandbox disabled (default)
-	proj := newProject("proj-1", "test", "/tmp/repo")
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	got, _ := s.GetProject("proj-1")
-	if got.SandboxEnabled {
-		t.Fatal("expected sandbox_enabled to be false by default")
-	}
-
-	// Enable sandbox
-	if err := s.UpdateProjectSandboxEnabled("proj-1", true); err != nil {
-		t.Fatalf("update sandbox: %v", err)
-	}
-	got, _ = s.GetProject("proj-1")
-	if !got.SandboxEnabled {
-		t.Fatal("expected sandbox_enabled to be true after update")
-	}
-
-	// Disable sandbox
-	if err := s.UpdateProjectSandboxEnabled("proj-1", false); err != nil {
-		t.Fatalf("update sandbox: %v", err)
-	}
-	got, _ = s.GetProject("proj-1")
-	if got.SandboxEnabled {
-		t.Fatal("expected sandbox_enabled to be false after disable")
-	}
-
-	// Create project with sandbox enabled
-	proj2 := newProject("proj-2", "sandboxed", "/tmp/repo2")
-	proj2.SandboxEnabled = true
-	if err := s.CreateProject(proj2); err != nil {
-		t.Fatalf("create sandboxed project: %v", err)
-	}
-	got2, _ := s.GetProject("proj-2")
-	if !got2.SandboxEnabled {
-		t.Fatal("expected sandbox_enabled to be true for newly created project")
-	}
-
-	// Verify ListProjects includes sandbox_enabled
-	projects, err := s.ListProjects()
-	if err != nil {
-		t.Fatalf("list projects: %v", err)
-	}
-	if len(projects) != 2 {
-		t.Fatalf("expected 2 projects, got %d", len(projects))
-	}
-}
-
-func TestProjectSandboxNetworkIsolation(t *testing.T) {
-	s := testStore(t)
-
-	// Create project with network isolation disabled (default)
-	proj := newProject("proj-1", "test", "/tmp/repo")
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	got, _ := s.GetProject("proj-1")
-	if got.SandboxNetworkIsolation {
-		t.Fatal("expected sandbox_network_isolation to be false by default")
-	}
-
-	// Enable network isolation
-	if err := s.UpdateProjectSandboxNetworkIsolation("proj-1", true); err != nil {
-		t.Fatalf("update network isolation: %v", err)
-	}
-	got, _ = s.GetProject("proj-1")
-	if !got.SandboxNetworkIsolation {
-		t.Fatal("expected sandbox_network_isolation to be true after update")
-	}
-
-	// Disable network isolation
-	if err := s.UpdateProjectSandboxNetworkIsolation("proj-1", false); err != nil {
-		t.Fatalf("update network isolation: %v", err)
-	}
-	got, _ = s.GetProject("proj-1")
-	if got.SandboxNetworkIsolation {
-		t.Fatal("expected sandbox_network_isolation to be false after disable")
-	}
-
-	// Create project with both sandbox and network isolation enabled
-	proj2 := newProject("proj-2", "isolated", "/tmp/repo2")
-	proj2.SandboxEnabled = true
-	proj2.SandboxNetworkIsolation = true
-	if err := s.CreateProject(proj2); err != nil {
-		t.Fatalf("create isolated project: %v", err)
-	}
-	got2, _ := s.GetProject("proj-2")
-	if !got2.SandboxEnabled {
-		t.Fatal("expected sandbox_enabled to be true")
-	}
-	if !got2.SandboxNetworkIsolation {
-		t.Fatal("expected sandbox_network_isolation to be true")
-	}
-
-	// Verify ListProjects includes sandbox_network_isolation
-	projects, err := s.ListProjects()
-	if err != nil {
-		t.Fatalf("list projects: %v", err)
-	}
-	if len(projects) != 2 {
-		t.Fatalf("expected 2 projects, got %d", len(projects))
-	}
-	for _, p := range projects {
-		if p.ID == "proj-2" && !p.SandboxNetworkIsolation {
-			t.Fatal("expected proj-2 to have network isolation in list")
-		}
-	}
-}
-
-func TestProjectSandboxImage(t *testing.T) {
-	s := testStore(t)
-
-	// Create project with custom sandbox image
-	proj := newProject("proj-image", "image-test", "/tmp/repo-image")
-	proj.SandboxEnabled = true
-	proj.SandboxImage = "docker.io/library/ubuntu:22.04"
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-
-	got, err := s.GetProject("proj-image")
-	if err != nil {
-		t.Fatalf("get project: %v", err)
-	}
-	if got.SandboxImage != "docker.io/library/ubuntu:22.04" {
-		t.Fatalf("expected ubuntu:22.04, got %q", got.SandboxImage)
-	}
-
-	if err := s.UpdateProjectSandboxImage("proj-image", "docker.io/library/alpine:3.19"); err != nil {
-		t.Fatalf("update sandbox image: %v", err)
-	}
-	got, _ = s.GetProject("proj-image")
-	if got.SandboxImage != "docker.io/library/alpine:3.19" {
-		t.Fatalf("expected alpine:3.19, got %q", got.SandboxImage)
-	}
-
-	if err := s.UpdateProjectSandboxImage("proj-image", ""); err != nil {
-		t.Fatalf("clear sandbox image: %v", err)
-	}
-	got, _ = s.GetProject("proj-image")
-	if got.SandboxImage != "" {
-		t.Fatalf("expected empty sandbox image, got %q", got.SandboxImage)
-	}
-
-	// Verify ListProjects includes sandbox_image
-	projects, err := s.ListProjects()
-	if err != nil {
-		t.Fatalf("list projects: %v", err)
-	}
-	found := false
-	for _, p := range projects {
-		if p.ID == "proj-image" {
-			found = true
-			if p.SandboxImage != "" {
-				t.Fatalf("expected empty sandbox image in list, got %q", p.SandboxImage)
+	}{
+		{
+			name: "sandbox_enabled",
+			bare: func(t *testing.T, p *types.Project) {
+				if p.SandboxEnabled {
+					t.Errorf("sandbox_enabled reads on for a project nobody enabled: %v", p.SandboxEnabled)
+				}
+			},
+			seed: func(p *types.Project) { p.SandboxEnabled = true },
+			want: func(t *testing.T, p *types.Project) {
+				if !p.SandboxEnabled {
+					t.Errorf("sandbox_enabled = false, want true — where a task runs is this one column")
+				}
+			},
+			writes: []struct {
+				apply func(*Store) error
+				want  func(*testing.T, *types.Project)
+			}{
+				{
+					apply: func(s *Store) error { return s.UpdateProjectSandboxEnabled("proj-col", false) },
+					want: func(t *testing.T, p *types.Project) {
+						if p.SandboxEnabled {
+							t.Errorf("sandbox_enabled stayed on through the write that turned it off")
+						}
+					},
+				},
+				{
+					apply: func(s *Store) error { return s.UpdateProjectSandboxEnabled("proj-col", true) },
+					want: func(t *testing.T, p *types.Project) {
+						if !p.SandboxEnabled {
+							t.Errorf("sandbox_enabled stayed off through the write that turned it on")
+						}
+					},
+				},
+			},
+		},
+		{
+			name: "sandbox_network_isolation",
+			bare: func(t *testing.T, p *types.Project) {
+				if p.SandboxNetworkIsolation {
+					t.Errorf("sandbox_network_isolation reads on for a project nobody enabled")
+				}
+			},
+			seed: func(p *types.Project) { p.SandboxNetworkIsolation = true },
+			want: func(t *testing.T, p *types.Project) {
+				if !p.SandboxNetworkIsolation {
+					t.Errorf("sandbox_network_isolation = false, want true")
+				}
+			},
+			writes: []struct {
+				apply func(*Store) error
+				want  func(*testing.T, *types.Project)
+			}{
+				{
+					apply: func(s *Store) error { return s.UpdateProjectSandboxNetworkIsolation("proj-col", false) },
+					want: func(t *testing.T, p *types.Project) {
+						if p.SandboxNetworkIsolation {
+							t.Errorf("sandbox_network_isolation stayed on through the write that turned it off")
+						}
+					},
+				},
+				{
+					apply: func(s *Store) error { return s.UpdateProjectSandboxNetworkIsolation("proj-col", true) },
+					want: func(t *testing.T, p *types.Project) {
+						if !p.SandboxNetworkIsolation {
+							t.Errorf("sandbox_network_isolation stayed off through the write that turned it on")
+						}
+					},
+				},
+			},
+		},
+		{
+			// The empty string is a reset: the column goes NULL, which means "no project image",
+			// not "the image this row held before".
+			name: "sandbox_image",
+			bare: func(t *testing.T, p *types.Project) {
+				wantText(t, "sandbox_image", p.SandboxImage, "")
+			},
+			seed: func(p *types.Project) { p.SandboxImage = "docker.io/library/ubuntu:22.04" },
+			want: func(t *testing.T, p *types.Project) {
+				wantText(t, "sandbox_image", p.SandboxImage, "docker.io/library/ubuntu:22.04")
+			},
+			writes: []struct {
+				apply func(*Store) error
+				want  func(*testing.T, *types.Project)
+			}{
+				{
+					apply: func(s *Store) error {
+						return s.UpdateProjectSandboxImage("proj-col", "docker.io/library/alpine:3.19")
+					},
+					want: func(t *testing.T, p *types.Project) {
+						wantText(t, "sandbox_image", p.SandboxImage, "docker.io/library/alpine:3.19")
+					},
+				},
+				{
+					apply: func(s *Store) error { return s.UpdateProjectSandboxImage("proj-col", "") },
+					want: func(t *testing.T, p *types.Project) {
+						wantText(t, "sandbox_image", p.SandboxImage, "")
+					},
+				},
+			},
+		},
+		{
+			name: "sandbox_dockerfile_path",
+			bare: func(t *testing.T, p *types.Project) {
+				wantText(t, "sandbox_dockerfile_path", p.SandboxDockerfilePath, "")
+			},
+			seed: func(p *types.Project) { p.SandboxDockerfilePath = "/tmp/repo/Dockerfile" },
+			want: func(t *testing.T, p *types.Project) {
+				wantText(t, "sandbox_dockerfile_path", p.SandboxDockerfilePath, "/tmp/repo/Dockerfile")
+			},
+			writes: []struct {
+				apply func(*Store) error
+				want  func(*testing.T, *types.Project)
+			}{
+				{
+					apply: func(s *Store) error {
+						return s.UpdateProjectSandboxDockerfilePath("proj-col", "/tmp/repo/Dockerfile.prod")
+					},
+					want: func(t *testing.T, p *types.Project) {
+						wantText(t, "sandbox_dockerfile_path", p.SandboxDockerfilePath, "/tmp/repo/Dockerfile.prod")
+					},
+				},
+				{
+					apply: func(s *Store) error { return s.UpdateProjectSandboxDockerfilePath("proj-col", "") },
+					want: func(t *testing.T, p *types.Project) {
+						wantText(t, "sandbox_dockerfile_path", p.SandboxDockerfilePath, "")
+					},
+				},
+			},
+		},
+		{
+			// 0 is a decision here, not an absence: it means no cap, so the accessor must not
+			// re-fill the default the insert fills.
+			name: "sandbox_memory_limit",
+			bare: func(t *testing.T, p *types.Project) {
+				if p.SandboxMemoryLimit != types.DefaultSandboxMemoryLimitMB {
+					t.Errorf("sandbox_memory_limit = %d on a project created without one, want the default %d",
+						p.SandboxMemoryLimit, types.DefaultSandboxMemoryLimitMB)
+				}
+			},
+			seed: func(p *types.Project) { p.SandboxMemoryLimit = 2048 },
+			want: func(t *testing.T, p *types.Project) {
+				if p.SandboxMemoryLimit != 2048 {
+					t.Errorf("sandbox_memory_limit = %d, want the 2048 it was created with", p.SandboxMemoryLimit)
+				}
+			},
+			writes: []struct {
+				apply func(*Store) error
+				want  func(*testing.T, *types.Project)
+			}{
+				{
+					apply: func(s *Store) error { return s.UpdateProjectSandboxMemoryLimit("proj-col", 0) },
+					want: func(t *testing.T, p *types.Project) {
+						if p.SandboxMemoryLimit != 0 {
+							t.Errorf("sandbox_memory_limit = %d after the write that lifted the cap, want 0", p.SandboxMemoryLimit)
+						}
+					},
+				},
+				{
+					apply: func(s *Store) error { return s.UpdateProjectSandboxMemoryLimit("proj-col", 512) },
+					want: func(t *testing.T, p *types.Project) {
+						if p.SandboxMemoryLimit != 512 {
+							t.Errorf("sandbox_memory_limit = %d, want 512", p.SandboxMemoryLimit)
+						}
+					},
+				},
+			},
+		},
+		{
+			name: "sandbox_forward_ports",
+			bare: func(t *testing.T, p *types.Project) {
+				if len(p.ForwardPorts) != 0 {
+					t.Errorf("ForwardPorts = %+v on a project created without any", p.ForwardPorts)
+				}
+			},
+			seed: func(p *types.Project) {
+				p.ForwardPorts = []types.PortForward{{ContainerPort: 80}, {ContainerPort: 3000}}
+			},
+			want: func(t *testing.T, p *types.Project) {
+				if len(p.ForwardPorts) != 2 || p.ForwardPorts[0].ContainerPort != 80 || p.ForwardPorts[1].ContainerPort != 3000 {
+					t.Errorf("ForwardPorts = %+v, want 80 and 3000", p.ForwardPorts)
+				}
+			},
+			writes: []struct {
+				apply func(*Store) error
+				want  func(*testing.T, *types.Project)
+			}{
+				{
+					apply: func(s *Store) error {
+						return s.UpdateProjectSandboxForwardPorts("proj-col", []types.PortForward{{ContainerPort: 8080}})
+					},
+					want: func(t *testing.T, p *types.Project) {
+						if len(p.ForwardPorts) != 1 || p.ForwardPorts[0].ContainerPort != 8080 {
+							t.Errorf("ForwardPorts = %+v, want the single 8080 the write stored", p.ForwardPorts)
+						}
+					},
+				},
+				{
+					apply: func(s *Store) error { return s.UpdateProjectSandboxForwardPorts("proj-col", nil) },
+					want: func(t *testing.T, p *types.Project) {
+						if len(p.ForwardPorts) != 0 {
+							t.Errorf("ForwardPorts = %+v after the clear, want none", p.ForwardPorts)
+						}
+					},
+				},
+			},
+		},
+		{
+			name: "sandbox_mounts",
+			bare: func(t *testing.T, p *types.Project) {
+				if len(p.SandboxMounts) != 0 {
+					t.Errorf("SandboxMounts = %+v on a project created without any", p.SandboxMounts)
+				}
+			},
+			seed: func(p *types.Project) {
+				p.SandboxMounts = []types.SandboxMount{
+					{HostPath: "/data/cache", ContainerPath: "/mnt/cache", Mode: "rw"},
+					{HostPath: "/etc/config", ContainerPath: "/etc/config", Mode: "ro"},
+				}
+			},
+			want: func(t *testing.T, p *types.Project) {
+				if len(p.SandboxMounts) != 2 {
+					t.Fatalf("SandboxMounts = %+v, want the two it was created with", p.SandboxMounts)
+				}
+				if p.SandboxMounts[0] != (types.SandboxMount{HostPath: "/data/cache", ContainerPath: "/mnt/cache", Mode: "rw"}) {
+					t.Errorf("mount 0 = %+v, want /data/cache to /mnt/cache rw", p.SandboxMounts[0])
+				}
+				if p.SandboxMounts[1] != (types.SandboxMount{HostPath: "/etc/config", ContainerPath: "/etc/config", Mode: "ro"}) {
+					t.Errorf("mount 1 = %+v, want the read-only one it was created with", p.SandboxMounts[1])
+				}
+			},
+			writes: []struct {
+				apply func(*Store) error
+				want  func(*testing.T, *types.Project)
+			}{
+				{
+					apply: func(s *Store) error {
+						return s.UpdateProjectSandboxMounts("proj-col", []types.SandboxMount{
+							{HostPath: "/logs", ContainerPath: "/var/log/app", Mode: "rw"},
+						})
+					},
+					want: func(t *testing.T, p *types.Project) {
+						if len(p.SandboxMounts) != 1 || p.SandboxMounts[0].HostPath != "/logs" {
+							t.Errorf("SandboxMounts = %+v, want the one /logs row the write stored", p.SandboxMounts)
+						}
+					},
+				},
+				{
+					apply: func(s *Store) error { return s.UpdateProjectSandboxMounts("proj-col", nil) },
+					want: func(t *testing.T, p *types.Project) {
+						if len(p.SandboxMounts) != 0 {
+							t.Errorf("SandboxMounts = %+v after the clear, want none", p.SandboxMounts)
+						}
+					},
+				},
+			},
+		},
+		{
+			name: "sandbox_envs",
+			bare: func(t *testing.T, p *types.Project) {
+				if len(p.SandboxEnvs) != 0 {
+					t.Errorf("SandboxEnvs = %+v on a project created without any", p.SandboxEnvs)
+				}
+			},
+			seed: func(p *types.Project) {
+				p.SandboxEnvs = []types.SandboxEnv{
+					{Key: "DATABASE_URL", Value: "postgres://localhost/db"},
+					{Key: "API_KEY", Value: "secret123"},
+					{Key: "EMPTY_VAR", Value: ""},
+				}
+			},
+			want: func(t *testing.T, p *types.Project) {
+				if len(p.SandboxEnvs) != 3 {
+					t.Fatalf("SandboxEnvs = %+v, want the three it was created with", p.SandboxEnvs)
+				}
+				if p.SandboxEnvs[0] != (types.SandboxEnv{Key: "DATABASE_URL", Value: "postgres://localhost/db"}) {
+					t.Errorf("env 0 = %+v, want DATABASE_URL with its value", p.SandboxEnvs[0])
+				}
+				// An empty value is what the container is told to unset, so it is not the same as no row.
+				if p.SandboxEnvs[2] != (types.SandboxEnv{Key: "EMPTY_VAR", Value: ""}) {
+					t.Errorf("env 2 = %+v, want EMPTY_VAR with its empty value", p.SandboxEnvs[2])
+				}
+			},
+			writes: []struct {
+				apply func(*Store) error
+				want  func(*testing.T, *types.Project)
+			}{
+				{
+					apply: func(s *Store) error {
+						return s.UpdateProjectSandboxEnvs("proj-col", []types.SandboxEnv{{Key: "NEW_VAR", Value: "new_value"}})
+					},
+					want: func(t *testing.T, p *types.Project) {
+						if len(p.SandboxEnvs) != 1 || p.SandboxEnvs[0].Key != "NEW_VAR" {
+							t.Errorf("SandboxEnvs = %+v, want the one NEW_VAR row the write stored", p.SandboxEnvs)
+						}
+					},
+				},
+				{
+					apply: func(s *Store) error { return s.UpdateProjectSandboxEnvs("proj-col", nil) },
+					want: func(t *testing.T, p *types.Project) {
+						if len(p.SandboxEnvs) != 0 {
+							t.Errorf("SandboxEnvs = %+v after the clear, want none", p.SandboxEnvs)
+						}
+					},
+				},
+			},
+		},
+		{
+			name: "sandbox_capabilities",
+			bare: func(t *testing.T, p *types.Project) {
+				if len(p.SandboxCapabilities) != 0 {
+					t.Errorf("SandboxCapabilities = %v on a project created without any", p.SandboxCapabilities)
+				}
+			},
+			seed: func(p *types.Project) {
+				p.SandboxCapabilities = []string{"CAP_CHOWN", "CAP_SETUID", "CAP_NET_RAW"}
+			},
+			want: func(t *testing.T, p *types.Project) {
+				if len(p.SandboxCapabilities) != 3 || p.SandboxCapabilities[0] != "CAP_CHOWN" || p.SandboxCapabilities[2] != "CAP_NET_RAW" {
+					t.Errorf("SandboxCapabilities = %v, want the three it was created with, in order", p.SandboxCapabilities)
+				}
+			},
+			writes: []struct {
+				apply func(*Store) error
+				want  func(*testing.T, *types.Project)
+			}{
+				{
+					apply: func(s *Store) error {
+						return s.UpdateProjectSandboxCapabilities("proj-col", []string{"CAP_SYS_PTRACE"})
+					},
+					want: func(t *testing.T, p *types.Project) {
+						if len(p.SandboxCapabilities) != 1 || p.SandboxCapabilities[0] != "CAP_SYS_PTRACE" {
+							t.Errorf("SandboxCapabilities = %v, want the one capability the write stored", p.SandboxCapabilities)
+						}
+					},
+				},
+				{
+					apply: func(s *Store) error { return s.UpdateProjectSandboxCapabilities("proj-col", nil) },
+					want: func(t *testing.T, p *types.Project) {
+						if len(p.SandboxCapabilities) != 0 {
+							t.Errorf("SandboxCapabilities = %v after the clear, want none", p.SandboxCapabilities)
+						}
+					},
+				},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testStore(t)
+			if err := s.CreateProject(newProject("proj-bare", "bare", "/tmp/bare")); err != nil {
+				t.Fatalf("create the bare project: %v", err)
 			}
-		}
-	}
-	if !found {
-		t.Fatal("expected to find proj-image in list")
+			if tc.bare != nil {
+				checkProjectReads(t, s, "proj-bare", tc.bare)
+			}
+
+			p := newProject("proj-col", "col", "/tmp/col")
+			if tc.seed != nil {
+				tc.seed(p)
+			}
+			if err := s.CreateProject(p); err != nil {
+				t.Fatalf("create the project: %v", err)
+			}
+			checkProjectReads(t, s, "proj-col", tc.want)
+
+			for i, w := range tc.writes {
+				if err := w.apply(s); err != nil {
+					t.Fatalf("write %d: %v", i, err)
+				}
+				checkProjectReads(t, s, "proj-col", w.want)
+			}
+		})
 	}
 }
 
-func TestProjectSandboxDockerfilePath(t *testing.T) {
-	s := testStore(t)
-
-	// Create project with Dockerfile path
-	proj := newProject("proj-df", "dockerfile-test", "/tmp/repo-df")
-	proj.SandboxEnabled = true
-	proj.SandboxDockerfilePath = "/tmp/repo-df/Dockerfile"
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-
-	got, err := s.GetProject("proj-df")
+// checkProjectReads holds both reads of one row to the same reading: GetProject for the settings dialog,
+// ListProjects for the sidebar, which builds its own rows from the same column list.
+func checkProjectReads(t *testing.T, s *Store, id string, want func(*testing.T, *types.Project)) {
+	t.Helper()
+	got, err := s.GetProject(id)
 	if err != nil {
-		t.Fatalf("get project: %v", err)
+		t.Fatalf("get %s: %v", id, err)
 	}
-	if got.SandboxDockerfilePath != "/tmp/repo-df/Dockerfile" {
-		t.Fatalf("expected /tmp/repo-df/Dockerfile, got %q", got.SandboxDockerfilePath)
-	}
+	want(t, got)
 
-	if err := s.UpdateProjectSandboxDockerfilePath("proj-df", "/tmp/repo-df/Dockerfile.prod"); err != nil {
-		t.Fatalf("update dockerfile path: %v", err)
-	}
-	got, _ = s.GetProject("proj-df")
-	if got.SandboxDockerfilePath != "/tmp/repo-df/Dockerfile.prod" {
-		t.Fatalf("expected Dockerfile.prod, got %q", got.SandboxDockerfilePath)
-	}
-
-	if err := s.UpdateProjectSandboxDockerfilePath("proj-df", ""); err != nil {
-		t.Fatalf("clear dockerfile path: %v", err)
-	}
-	got, _ = s.GetProject("proj-df")
-	if got.SandboxDockerfilePath != "" {
-		t.Fatalf("expected empty dockerfile path, got %q", got.SandboxDockerfilePath)
-	}
-
-	// Verify ListProjects includes sandbox_dockerfile_path
-	projects, err := s.ListProjects()
+	listed, err := s.ListProjects()
 	if err != nil {
 		t.Fatalf("list projects: %v", err)
 	}
-	found := false
-	for _, p := range projects {
-		if p.ID == "proj-df" {
-			found = true
-			if p.SandboxDockerfilePath != "" {
-				t.Fatalf("expected empty dockerfile path in list, got %q", p.SandboxDockerfilePath)
-			}
+	var row *types.Project
+	for i := range listed {
+		if listed[i].ID == id {
+			row = &listed[i]
 		}
 	}
-	if !found {
-		t.Fatal("expected to find proj-df in list")
+	if row == nil {
+		t.Fatalf("%s is not in ListProjects", id)
 	}
+	want(t, row)
 }
 
-func TestProjectSandboxMemoryLimit(t *testing.T) {
-	s := testStore(t)
-
-	// Create project with default memory limit
-	proj := &types.Project{
-		ID:        "proj-mem",
-		Name:      "Memory Limit Project",
-		Path:      "/tmp/test-mem-repo",
-		CreatedAt: time.Now().UTC(),
-		UpdatedAt: time.Now().UTC(),
-	}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-
-	got, err := s.GetProject("proj-mem")
-	if err != nil {
-		t.Fatalf("get project: %v", err)
-	}
-	if got.SandboxMemoryLimit != 1024 {
-		t.Fatalf("expected default memory limit 1024, got %d", got.SandboxMemoryLimit)
-	}
-
-	if err := s.UpdateProjectSandboxMemoryLimit("proj-mem", 2048); err != nil {
-		t.Fatalf("update memory limit: %v", err)
-	}
-	got, err = s.GetProject("proj-mem")
-	if err != nil {
-		t.Fatalf("get project after update: %v", err)
-	}
-	if got.SandboxMemoryLimit != 2048 {
-		t.Fatalf("expected memory limit 2048, got %d", got.SandboxMemoryLimit)
-	}
-
-	// Update to 0 (no limit)
-	if err := s.UpdateProjectSandboxMemoryLimit("proj-mem", 0); err != nil {
-		t.Fatalf("update memory limit to 0: %v", err)
-	}
-	got, err = s.GetProject("proj-mem")
-	if err != nil {
-		t.Fatalf("get project after zero update: %v", err)
-	}
-	if got.SandboxMemoryLimit != 0 {
-		t.Fatalf("expected memory limit 0, got %d", got.SandboxMemoryLimit)
-	}
-
-	// Verify in list
-	projects, err := s.ListProjects()
-	if err != nil {
-		t.Fatalf("list projects: %v", err)
-	}
-	found := false
-	for _, p := range projects {
-		if p.ID == "proj-mem" {
-			found = true
-			if p.SandboxMemoryLimit != 0 {
-				t.Fatalf("expected memory limit 0 in list, got %d", p.SandboxMemoryLimit)
-			}
-		}
-	}
-	if !found {
-		t.Fatal("expected to find proj-mem in list")
-	}
-}
-
-func TestProjectSandboxForwardPorts(t *testing.T) {
-	s := testStore(t)
-
-	// Create project with forward ports
-	proj := newProject("proj-ports", "port-test", "/tmp/repo-ports")
-	proj.ForwardPorts = []types.PortForward{
-		{ContainerPort: 80},
-		{ContainerPort: 3000},
-	}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-
-	got, err := s.GetProject("proj-ports")
-	if err != nil {
-		t.Fatalf("get project: %v", err)
-	}
-	if len(got.ForwardPorts) != 2 {
-		t.Fatalf("expected 2 forward ports, got %d", len(got.ForwardPorts))
-	}
-	if got.ForwardPorts[0].ContainerPort != 80 {
-		t.Fatalf("expected container port 80, got %d", got.ForwardPorts[0].ContainerPort)
-	}
-	if got.ForwardPorts[1].ContainerPort != 3000 {
-		t.Fatalf("expected container port 3000, got %d", got.ForwardPorts[1].ContainerPort)
-	}
-
-	// Update forward ports
-	newPorts := []types.PortForward{
-		{ContainerPort: 8080},
-	}
-	if err := s.UpdateProjectSandboxForwardPorts("proj-ports", newPorts); err != nil {
-		t.Fatalf("update forward ports: %v", err)
-	}
-	got, err = s.GetProject("proj-ports")
-	if err != nil {
-		t.Fatalf("get project after update: %v", err)
-	}
-	if len(got.ForwardPorts) != 1 {
-		t.Fatalf("expected 1 forward port, got %d", len(got.ForwardPorts))
-	}
-	if got.ForwardPorts[0].ContainerPort != 8080 {
-		t.Fatalf("expected container port 8080, got %d", got.ForwardPorts[0].ContainerPort)
-	}
-
-	if err := s.UpdateProjectSandboxForwardPorts("proj-ports", nil); err != nil {
-		t.Fatalf("clear forward ports: %v", err)
-	}
-	got, err = s.GetProject("proj-ports")
-	if err != nil {
-		t.Fatalf("get project after clear: %v", err)
-	}
-	if len(got.ForwardPorts) != 0 {
-		t.Fatalf("expected 0 forward ports, got %d", len(got.ForwardPorts))
-	}
-
-	// Verify in list
-	projects, err := s.ListProjects()
-	if err != nil {
-		t.Fatalf("list projects: %v", err)
-	}
-	found := false
-	for _, p := range projects {
-		if p.ID == "proj-ports" {
-			found = true
-			if len(p.ForwardPorts) != 0 {
-				t.Fatalf("expected 0 forward ports in list, got %d", len(p.ForwardPorts))
-			}
-		}
-	}
-	if !found {
-		t.Fatal("expected to find proj-ports in list")
-	}
-}
-
-func TestProjectSandboxMounts(t *testing.T) {
-	s := testStore(t)
-
-	// Create project with sandbox mounts
-	proj := newProject("proj-mounts", "mount-test", "/tmp/repo-mounts")
-	proj.SandboxMounts = []types.SandboxMount{
-		{HostPath: "/data/cache", ContainerPath: "/mnt/cache", Mode: "rw"},
-		{HostPath: "/etc/config", ContainerPath: "/etc/config", Mode: "ro"},
-	}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-
-	got, err := s.GetProject("proj-mounts")
-	if err != nil {
-		t.Fatalf("get project: %v", err)
-	}
-	if len(got.SandboxMounts) != 2 {
-		t.Fatalf("expected 2 mounts, got %d", len(got.SandboxMounts))
-	}
-	if got.SandboxMounts[0].HostPath != "/data/cache" {
-		t.Fatalf("expected host path /data/cache, got %s", got.SandboxMounts[0].HostPath)
-	}
-	if got.SandboxMounts[0].ContainerPath != "/mnt/cache" {
-		t.Fatalf("expected container path /mnt/cache, got %s", got.SandboxMounts[0].ContainerPath)
-	}
-	if got.SandboxMounts[0].Mode != "rw" {
-		t.Fatalf("expected mode rw, got %s", got.SandboxMounts[0].Mode)
-	}
-	if got.SandboxMounts[1].Mode != "ro" {
-		t.Fatalf("expected mode ro, got %s", got.SandboxMounts[1].Mode)
-	}
-
-	// Update mounts
-	newMounts := []types.SandboxMount{
-		{HostPath: "/logs", ContainerPath: "/var/log/app", Mode: "rw"},
-	}
-	if err := s.UpdateProjectSandboxMounts("proj-mounts", newMounts); err != nil {
-		t.Fatalf("update mounts: %v", err)
-	}
-	got, err = s.GetProject("proj-mounts")
-	if err != nil {
-		t.Fatalf("get project after update: %v", err)
-	}
-	if len(got.SandboxMounts) != 1 {
-		t.Fatalf("expected 1 mount, got %d", len(got.SandboxMounts))
-	}
-	if got.SandboxMounts[0].HostPath != "/logs" {
-		t.Fatalf("expected host path /logs, got %s", got.SandboxMounts[0].HostPath)
-	}
-
-	if err := s.UpdateProjectSandboxMounts("proj-mounts", nil); err != nil {
-		t.Fatalf("clear mounts: %v", err)
-	}
-	got, err = s.GetProject("proj-mounts")
-	if err != nil {
-		t.Fatalf("get project after clear: %v", err)
-	}
-	if len(got.SandboxMounts) != 0 {
-		t.Fatalf("expected 0 mounts, got %d", len(got.SandboxMounts))
-	}
-
-	// Verify in list
-	projects, err := s.ListProjects()
-	if err != nil {
-		t.Fatalf("list projects: %v", err)
-	}
-	found := false
-	for _, p := range projects {
-		if p.ID == "proj-mounts" {
-			found = true
-			if len(p.SandboxMounts) != 0 {
-				t.Fatalf("expected 0 mounts in list, got %d", len(p.SandboxMounts))
-			}
-		}
-	}
-	if !found {
-		t.Fatal("expected to find proj-mounts in list")
-	}
-}
-
-func TestProjectSandboxEnvs(t *testing.T) {
-	s := testStore(t)
-
-	// Create project with sandbox envs
-	proj := newProject("proj-envs", "env-test", "/tmp/repo-envs")
-	proj.SandboxEnvs = []types.SandboxEnv{
-		{Key: "DATABASE_URL", Value: "postgres://localhost/db"},
-		{Key: "API_KEY", Value: "secret123"},
-		{Key: "EMPTY_VAR", Value: ""},
-	}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-
-	got, err := s.GetProject("proj-envs")
-	if err != nil {
-		t.Fatalf("get project: %v", err)
-	}
-	if len(got.SandboxEnvs) != 3 {
-		t.Fatalf("expected 3 envs, got %d", len(got.SandboxEnvs))
-	}
-	if got.SandboxEnvs[0].Key != "DATABASE_URL" {
-		t.Fatalf("expected key DATABASE_URL, got %s", got.SandboxEnvs[0].Key)
-	}
-	if got.SandboxEnvs[0].Value != "postgres://localhost/db" {
-		t.Fatalf("expected value postgres://localhost/db, got %s", got.SandboxEnvs[0].Value)
-	}
-	if got.SandboxEnvs[2].Key != "EMPTY_VAR" {
-		t.Fatalf("expected key EMPTY_VAR, got %s", got.SandboxEnvs[2].Key)
-	}
-	if got.SandboxEnvs[2].Value != "" {
-		t.Fatalf("expected empty value, got %s", got.SandboxEnvs[2].Value)
-	}
-
-	// Update envs
-	newEnvs := []types.SandboxEnv{
-		{Key: "NEW_VAR", Value: "new_value"},
-	}
-	if err := s.UpdateProjectSandboxEnvs("proj-envs", newEnvs); err != nil {
-		t.Fatalf("update envs: %v", err)
-	}
-	got, err = s.GetProject("proj-envs")
-	if err != nil {
-		t.Fatalf("get project after update: %v", err)
-	}
-	if len(got.SandboxEnvs) != 1 {
-		t.Fatalf("expected 1 env, got %d", len(got.SandboxEnvs))
-	}
-	if got.SandboxEnvs[0].Key != "NEW_VAR" {
-		t.Fatalf("expected key NEW_VAR, got %s", got.SandboxEnvs[0].Key)
-	}
-
-	if err := s.UpdateProjectSandboxEnvs("proj-envs", nil); err != nil {
-		t.Fatalf("clear envs: %v", err)
-	}
-	got, err = s.GetProject("proj-envs")
-	if err != nil {
-		t.Fatalf("get project after clear: %v", err)
-	}
-	if len(got.SandboxEnvs) != 0 {
-		t.Fatalf("expected 0 envs, got %d", len(got.SandboxEnvs))
-	}
-
-	// Verify in list
-	projects, err := s.ListProjects()
-	if err != nil {
-		t.Fatalf("list projects: %v", err)
-	}
-	found := false
-	for _, p := range projects {
-		if p.ID == "proj-envs" {
-			found = true
-			if len(p.SandboxEnvs) != 0 {
-				t.Fatalf("expected 0 envs in list, got %d", len(p.SandboxEnvs))
-			}
-		}
-	}
-	if !found {
-		t.Fatal("expected to find proj-envs in list")
-	}
-}
-
-func TestProjectSandboxCapabilities(t *testing.T) {
-	s := testStore(t)
-
-	// Create project with sandbox capabilities
-	proj := newProject("proj-caps", "caps-test", "/tmp/repo-caps")
-	proj.SandboxCapabilities = []string{"CAP_CHOWN", "CAP_SETUID", "CAP_NET_RAW"}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-
-	got, err := s.GetProject("proj-caps")
-	if err != nil {
-		t.Fatalf("get project: %v", err)
-	}
-	if len(got.SandboxCapabilities) != 3 {
-		t.Fatalf("expected 3 capabilities, got %d", len(got.SandboxCapabilities))
-	}
-	if got.SandboxCapabilities[0] != "CAP_CHOWN" {
-		t.Fatalf("expected CAP_CHOWN, got %s", got.SandboxCapabilities[0])
-	}
-	if got.SandboxCapabilities[2] != "CAP_NET_RAW" {
-		t.Fatalf("expected CAP_NET_RAW, got %s", got.SandboxCapabilities[2])
-	}
-
-	// Update capabilities
-	newCaps := []string{"CAP_SYS_PTRACE"}
-	if err := s.UpdateProjectSandboxCapabilities("proj-caps", newCaps); err != nil {
-		t.Fatalf("update capabilities: %v", err)
-	}
-	got, err = s.GetProject("proj-caps")
-	if err != nil {
-		t.Fatalf("get project after update: %v", err)
-	}
-	if len(got.SandboxCapabilities) != 1 {
-		t.Fatalf("expected 1 capability, got %d", len(got.SandboxCapabilities))
-	}
-	if got.SandboxCapabilities[0] != "CAP_SYS_PTRACE" {
-		t.Fatalf("expected CAP_SYS_PTRACE, got %s", got.SandboxCapabilities[0])
-	}
-
-	if err := s.UpdateProjectSandboxCapabilities("proj-caps", nil); err != nil {
-		t.Fatalf("clear capabilities: %v", err)
-	}
-	got, err = s.GetProject("proj-caps")
-	if err != nil {
-		t.Fatalf("get project after clear: %v", err)
-	}
-	if len(got.SandboxCapabilities) != 0 {
-		t.Fatalf("expected 0 capabilities, got %d", len(got.SandboxCapabilities))
-	}
-
-	// Verify in list
-	projects, err := s.ListProjects()
-	if err != nil {
-		t.Fatalf("list projects: %v", err)
-	}
-	found := false
-	for _, p := range projects {
-		if p.ID == "proj-caps" {
-			found = true
-			if len(p.SandboxCapabilities) != 0 {
-				t.Fatalf("expected 0 capabilities in list, got %d", len(p.SandboxCapabilities))
-			}
-		}
-	}
-	if !found {
-		t.Fatal("expected to find proj-caps in list")
+func wantText(t *testing.T, column, got, want string) {
+	t.Helper()
+	if got != want {
+		t.Errorf("%s = %q, want %q", column, got, want)
 	}
 }
 

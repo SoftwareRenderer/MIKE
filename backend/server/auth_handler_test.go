@@ -41,13 +41,9 @@ func TestAuthRequestRejections(t *testing.T) {
 			want:   http.StatusBadRequest,
 		},
 		{
-			name:   "sign-in on an install with no passkey",
-			method: http.MethodPost,
-			path:   "/api/auth/passkey/assert/begin",
-			want:   http.StatusNotFound,
-		},
-		{
 			// Only POST is public on a ceremony route, so middleware gates GET before the handler runs.
+			// An unpaired install's sign-in answers 404, which TestMiddlewareAuthenticationGating holds: it
+			// posts the same route with the same expectation.
 			name:   "GET on a ceremony endpoint",
 			method: http.MethodGet,
 			path:   "/api/auth/passkey/assert/begin",
@@ -96,36 +92,66 @@ func TestAuthRequestRejections(t *testing.T) {
 	}
 }
 
-// TestAuthSessionAnswersWhetherTheInstallIsPaired is the login form's branch: a boolean, and no
-// credential detail of any kind.
-func TestAuthSessionAnswersWhetherTheInstallIsPaired(t *testing.T) {
+// TestAuthSessionAnswersTheLoginFormAndNothingElse is the login form's branch and its ceiling in one
+// pass: the unpaired install, the paired install with no session, and the signed-in browser. Two
+// booleans decide which form the browser shows; a CSRF token rides only on the answer for a session
+// that exists; no credential detail rides on any of them.
+func TestAuthSessionAnswersTheLoginFormAndNothingElse(t *testing.T) {
 	s := testServer(t)
 
-	body := mustJSON[map[string]any](t, testResponse(t, s,
-		testRequest(http.MethodGet, "/api/auth/session", nil)).Body)
-	if body["authenticated"] != false {
-		t.Errorf("authenticated = %v; want false", body["authenticated"])
+	ask := func(cookie string) map[string]any {
+		t.Helper()
+		req := testRequest(http.MethodGet, "/api/auth/session", nil)
+		if cookie != "" {
+			withAuth(req, cookie)
+		}
+		return mustJSON[map[string]any](t, testResponse(t, s, req).Body)
 	}
-	if body["has_passkey"] != false {
-		t.Errorf("has_passkey = %v; want false on an unpaired install", body["has_passkey"])
+
+	unpaired := ask("")
+	if unpaired["authenticated"] != false {
+		t.Errorf("authenticated = %v; want false", unpaired["authenticated"])
+	}
+	if unpaired["has_passkey"] != false {
+		t.Errorf("has_passkey = %v; want false on an unpaired install", unpaired["has_passkey"])
 	}
 	// The pairing notice offers the CA download only when this server would answer one, and this is the
 	// only answer an unauthenticated browser can get.
-	if body["tls_ca_available"] != true {
-		t.Errorf("tls_ca_available = %v; want true with the local CA this test server runs", body["tls_ca_available"])
+	if unpaired["tls_ca_available"] != true {
+		t.Errorf("tls_ca_available = %v; want true with the local CA this test server runs", unpaired["tls_ca_available"])
+	}
+	if _, found := unpaired["csrf_token"]; found {
+		t.Error("the anonymous answer carries a csrf_token; the token belongs to a session, and this route is public")
 	}
 
-	registerTestPasskey(t, s)
+	_, cookie := registerTestPasskey(t, s)
 
-	body = mustJSON[map[string]any](t, testResponse(t, s,
-		testRequest(http.MethodGet, "/api/auth/session", nil)).Body)
-	if body["has_passkey"] != true {
-		t.Errorf("has_passkey = %v; want true once a credential is registered", body["has_passkey"])
+	// The gate's other branch, still with no session: the install can sign in, so the form offers the
+	// passkey rather than the code field.
+	paired := ask("")
+	if paired["has_passkey"] != true {
+		t.Errorf("has_passkey = %v; want true once a credential is registered", paired["has_passkey"])
 	}
-	for _, leaked := range []string{"credential_id", "passkeys", "record"} {
-		if _, found := body[leaked]; found {
-			t.Errorf("the session answer carries %q; a sign-in check answers whether the browser is signed in and "+
-				"whether the install is paired, nothing else", leaked)
+	if paired["authenticated"] != false {
+		t.Errorf("authenticated = %v; want false with no session presented", paired["authenticated"])
+	}
+
+	signedIn := ask(cookie)
+	if signedIn["authenticated"] != true {
+		t.Error("expected authenticated = true")
+	}
+	if csrf, _ := signedIn["csrf_token"].(string); csrf == "" {
+		t.Error("expected csrf_token in session response")
+	}
+
+	for name, answer := range map[string]map[string]any{
+		"unpaired": unpaired, "paired": paired, "signed in": signedIn,
+	} {
+		for _, leaked := range []string{"credential_id", "passkeys", "record"} {
+			if _, found := answer[leaked]; found {
+				t.Errorf("the %s answer carries %q; a sign-in check answers whether the browser is signed in and "+
+					"whether the install is paired, nothing else", name, leaked)
+			}
 		}
 	}
 }
@@ -150,30 +176,12 @@ func TestAuthSessionNamesTheBrowserThatAsked(t *testing.T) {
 	}
 }
 
-func TestAuthSessionAuthenticated(t *testing.T) {
+// TestAuthLogoutEndsTheSessionAndClearsTheCookie: the browser drops only a cookie whose attributes
+// match the one it holds, so a clearing response that lost HttpOnly or SameSite=Lax leaves the session
+// live in the jar while the screen says signed out. Both halves are the same decision: the answer to
+// the click has to end the session for the browser as well as in the store.
+func TestAuthLogoutEndsTheSessionAndClearsTheCookie(t *testing.T) {
 	s := testServer(t)
-
-	sessionReq := testRequest(http.MethodGet, "/api/auth/session", nil)
-	sessionReq.Header.Set("Cookie", loginTest(t, s))
-
-	rr := testResponse(t, s, sessionReq)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d; want 200; body: %s", rr.Code, rr.Body.String())
-	}
-
-	body := mustJSON[map[string]any](t, rr.Body)
-	if body["authenticated"] != true {
-		t.Error("expected authenticated = true")
-	}
-	// CSRF token should be present in session response
-	if body["csrf_token"] == nil || body["csrf_token"] == "" {
-		t.Error("expected csrf_token in session response")
-	}
-}
-
-func TestAuthLogoutSuccess(t *testing.T) {
-	s := testServer(t)
-
 	cookie, csrfToken := loginTestCSRF(t, s)
 
 	logoutReq := testRequest(http.MethodPost, "/api/auth/logout", nil)
@@ -183,38 +191,29 @@ func TestAuthLogoutSuccess(t *testing.T) {
 		t.Fatalf("logout: status = %d; body: %s", rr.Code, rr.Body.String())
 	}
 
-	// Session should be unauthenticated now
+	var cleared bool
+	for _, line := range rr.Header().Values("Set-Cookie") {
+		if !strings.Contains(line, "Max-Age=0") {
+			continue
+		}
+		cleared = true
+		for _, flag := range []string{"HttpOnly", "SameSite=Lax"} {
+			if !strings.Contains(line, flag) {
+				t.Errorf("the clearing cookie lost an attribute the session cookie carried: %s", line)
+			}
+		}
+	}
+	if !cleared {
+		t.Fatalf("logout set no clearing cookie: %q", rr.Header().Values("Set-Cookie"))
+	}
+
 	sessionReq := testRequest(http.MethodGet, "/api/auth/session", nil)
 	withAuth(sessionReq, cookie)
 	rr = testResponse(t, s, sessionReq)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("session check: status = %d", rr.Code)
 	}
-
-	body := mustJSON[map[string]bool](t, rr.Body)
-	if body["authenticated"] {
+	if body := mustJSON[map[string]bool](t, rr.Body); body["authenticated"] {
 		t.Error("expected authenticated = false after logout")
-	}
-}
-
-// TestAuthLogoutClearsTheCookieWithTheFlagsItWasSetWith: the browser only drops a cookie whose
-// attributes match, so a logout that clears with a different Secure flag leaves the session live.
-func TestAuthLogoutClearsTheCookieWithTheFlagsItWasSetWith(t *testing.T) {
-	s := testServer(t)
-	cookie, csrfToken := loginTestCSRF(t, s)
-
-	req := testRequest(http.MethodPost, "/api/auth/logout", nil)
-	withAuthCSRF(req, cookie, csrfToken)
-	set := testResponse(t, s, req).Header().Values("Set-Cookie")
-	if len(set) == 0 {
-		t.Fatal("logout set no cookie")
-	}
-	for _, line := range set {
-		if !strings.Contains(line, "Max-Age=0") {
-			continue
-		}
-		if !strings.Contains(line, "HttpOnly") || !strings.Contains(line, "SameSite=Lax") {
-			t.Errorf("the clearing cookie lost an attribute the session cookie carried: %s", line)
-		}
 	}
 }

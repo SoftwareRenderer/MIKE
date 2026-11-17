@@ -11,40 +11,66 @@ import (
 	"mike/backend/types"
 )
 
+// The claim identity, not its words, decides whether a write happened: a later arrival of the identity
+// that already wrote is answered with what the first arrival produced, and the same words under a fresh
+// identity are a second write. docs/reconnection.md.
 func TestReplayedSendWritesNoSecondRow(t *testing.T) {
-	s := testServer(t)
-	projectID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projectID, "one identity, two arrivals")
-	threadID := seedThread(t, s, projectID, taskID)
-	t.Cleanup(func() { _ = s.executor.StopTask(taskID) })
+	t.Run("the same identity", func(t *testing.T) {
+		s := testServer(t)
+		projectID := createTestProject(t, s)
+		taskID := createTestTask(t, s, projectID, "one identity, two arrivals")
+		threadID := seedThread(t, s, projectID, taskID)
+		t.Cleanup(func() { _ = s.executor.StopTask(taskID) })
 
-	body := sendBody("start the work", map[string]any{"client_token": "token-1"})
-	path := "/api/projects/" + projectID + "/tasks/" + taskID + "/send"
+		body := sendBody("start the work", map[string]any{"client_token": "token-1"})
+		path := "/api/projects/" + projectID + "/tasks/" + taskID + "/send"
 
-	first := testResponseAuth(t, s, testRequest(http.MethodPost, path, body))
-	if first.Code != http.StatusCreated {
-		t.Fatalf("first send = %d: %s", first.Code, first.Body.String())
-	}
-	firstID, _ := mustJSON[map[string]any](t, first.Body)["id"].(string)
+		first := testResponseAuth(t, s, testRequest(http.MethodPost, path, body))
+		if first.Code != http.StatusCreated {
+			t.Fatalf("first send = %d: %s", first.Code, first.Body.String())
+		}
+		firstID, _ := mustJSON[map[string]any](t, first.Body)["id"].(string)
 
-	// Something answered, so the identity is the only thing left saying "this one already happened".
-	if err := s.store.CreateTaskMessage(&types.TaskMessage{
-		ID: "a-answered", TaskID: taskID, ThreadID: threadID, Role: "assistant",
-		Content: "here is what I found", CreatedAt: time.Now().UTC(),
-	}); err != nil {
-		t.Fatalf("seed the answer: %v", err)
-	}
+		// Something answered, so the identity is the only thing left saying "this one already happened".
+		if err := s.store.CreateTaskMessage(&types.TaskMessage{
+			ID: "a-answered", TaskID: taskID, ThreadID: threadID, Role: "assistant",
+			Content: "here is what I found", CreatedAt: time.Now().UTC(),
+		}); err != nil {
+			t.Fatalf("seed the answer: %v", err)
+		}
 
-	second := testResponseAuth(t, s, testRequest(http.MethodPost, path, body))
-	if second.Code != http.StatusCreated {
-		t.Fatalf("replayed send = %d: %s", second.Code, second.Body.String())
-	}
-	if secondID, _ := mustJSON[map[string]any](t, second.Body)["id"].(string); secondID != firstID {
-		t.Errorf("the replay answered a new row %q for the identity that wrote %q", secondID, firstID)
-	}
-	if got := len(threadRows(t, s, taskID, threadID, "user")); got != 1 {
-		t.Errorf("user rows = %d, want 1 — one identity is one message", got)
-	}
+		second := testResponseAuth(t, s, testRequest(http.MethodPost, path, body))
+		if second.Code != http.StatusCreated {
+			t.Fatalf("replayed send = %d: %s", second.Code, second.Body.String())
+		}
+		if secondID, _ := mustJSON[map[string]any](t, second.Body)["id"].(string); secondID != firstID {
+			t.Errorf("the replay answered a new row %q for the identity that wrote %q", secondID, firstID)
+		}
+		if got := len(threadRows(t, s, taskID, threadID, "user")); got != 1 {
+			t.Errorf("user rows = %d, want 1 — one identity is one message", got)
+		}
+	})
+
+	t.Run("another identity for the same words", func(t *testing.T) {
+		s := testServer(t)
+		projectID := createTestProject(t, s)
+		taskID := createTestTask(t, s, projectID, "the same words twice")
+		seedThread(t, s, projectID, taskID,
+			types.TaskMessage{ID: "u-asked", Role: "user", Content: "run the tests"},
+			types.TaskMessage{ID: "a-answered", Role: "assistant", Content: "they pass"},
+		)
+		t.Cleanup(func() { _ = s.executor.StopTask(taskID) })
+
+		path := "/api/projects/" + projectID + "/tasks/" + taskID + "/send"
+		body := sendBody("run the tests", map[string]any{"client_token": "token-asked-again"})
+		rr := testResponseAuth(t, s, testRequest(http.MethodPost, path, body))
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("send = %d: %s", rr.Code, rr.Body.String())
+		}
+		if id, _ := mustJSON[map[string]any](t, rr.Body)["id"].(string); id == "u-asked" {
+			t.Errorf("a fresh identity was answered with the older row %q", id)
+		}
+	})
 }
 
 // An edit-and-send names the row it takes the thread back to, and the first arrival made that row not-last. The
@@ -75,28 +101,6 @@ func TestReplayedEditAndSendIsNotRefusedByTheTruncateItCaused(t *testing.T) {
 	users := threadRows(t, s, taskID, threadID, "user")
 	if len(users) != 1 || users[0].Content != "the question, reworded" {
 		t.Errorf("the thread holds %+v, want the one edited row", users)
-	}
-}
-
-// The identity belongs to one write, not to its words.
-func TestAnotherIdentityForTheSameWordsIsStillItsOwnWrite(t *testing.T) {
-	s := testServer(t)
-	projectID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projectID, "the same words twice")
-	seedThread(t, s, projectID, taskID,
-		types.TaskMessage{ID: "u-asked", Role: "user", Content: "run the tests"},
-		types.TaskMessage{ID: "a-answered", Role: "assistant", Content: "they pass"},
-	)
-	t.Cleanup(func() { _ = s.executor.StopTask(taskID) })
-
-	path := "/api/projects/" + projectID + "/tasks/" + taskID + "/send"
-	body := sendBody("run the tests", map[string]any{"client_token": "token-asked-again"})
-	rr := testResponseAuth(t, s, testRequest(http.MethodPost, path, body))
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("send = %d: %s", rr.Code, rr.Body.String())
-	}
-	if id, _ := mustJSON[map[string]any](t, rr.Body)["id"].(string); id == "u-asked" {
-		t.Errorf("a fresh identity was answered with the older row %q", id)
 	}
 }
 

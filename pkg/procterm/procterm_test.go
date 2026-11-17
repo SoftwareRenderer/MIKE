@@ -50,73 +50,67 @@ func newReaders(pipes []pipePair, done chan<- struct{}) []<-chan struct{} {
 	return finished
 }
 
-// TestDrainReturnsWhenReadersFinish: the normal end — EOF arrives and the deadlines are
-// never reached.
-func TestDrainReturnsWhenReadersFinish(t *testing.T) {
-	pipes := []pipePair{newPipePair(t), newPipePair(t)}
-	done := make(chan struct{}, len(pipes))
-	finished := newReaders(pipes, done)
-	for _, p := range pipes {
-		p.write.Close() // real EOF
+// TestDrainEndsByEOFOrByDeadline: the flush has three ways to end and only one of them is the child
+// cooperating. Readers that reach EOF are counted and Drain returns; readers still blocked when the
+// grace deadline arrives are released by having their read ends closed; and a reader that never
+// signals at all cannot hold the wait past the hard stop.
+func TestDrainEndsByEOFOrByDeadline(t *testing.T) {
+	cases := []struct {
+		name       string
+		grace      time.Duration
+		hardStop   time.Duration
+		readers    bool // start one reader per pipe
+		eof        bool // close the write ends, which is what a real exit does
+		wantClosed bool // the read ends must have been closed on the way out
+		bound      time.Duration
+	}{
+		{"readers finishing is the normal end", time.Hour, time.Hour, true, true, false, 2 * time.Second},
+		{"the grace deadline releases the readers", 20 * time.Millisecond, time.Hour, true, false, true, time.Second},
+		{"the hard stop ends a wait nobody signals", time.Hour, 20 * time.Millisecond, false, false, true, time.Second},
 	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pipes := []pipePair{newPipePair(t), newPipePair(t)}
+			done := make(chan struct{}, len(pipes))
+			var finished []<-chan struct{}
+			if tc.readers {
+				finished = newReaders(pipes, done)
+			}
+			if tc.eof {
+				for _, p := range pipes {
+					p.write.Close() // real EOF
+				}
+			} else {
+				// The child stays alive holding the write ends — deliberately not closed here.
+				t.Cleanup(func() {
+					for _, p := range pipes {
+						p.write.Close()
+					}
+				})
+			}
 
-	start := time.Now()
-	drain(done, time.Hour, time.Hour, readEnds(pipes)...)
-	if elapsed := time.Since(start); elapsed > 2*time.Second {
-		t.Fatalf("drain blocked for %s after EOF", elapsed)
-	}
-	for i, f := range finished {
-		select {
-		case <-f:
-		case <-time.After(time.Second):
-			t.Fatalf("reader %d did not finish on EOF", i)
-		}
-	}
-}
+			start := time.Now()
+			drain(done, tc.grace, tc.hardStop, readEnds(pipes)...)
+			if elapsed := time.Since(start); elapsed > tc.bound {
+				t.Fatalf("drain took %v, past its %v bound: a deadline did not end the wait", elapsed, tc.bound)
+			}
 
-// TestDrainClosesReadersAtGrace: the write end stays open, so EOF never arrives and the
-// grace deadline must end the wait.
-func TestDrainClosesReadersAtGrace(t *testing.T) {
-	pipes := []pipePair{newPipePair(t), newPipePair(t)}
-	done := make(chan struct{}, len(pipes))
-	finished := newReaders(pipes, done)
-	// The child stays alive holding the write ends — deliberately not closed here.
-	t.Cleanup(func() {
-		for _, p := range pipes {
-			p.write.Close()
-		}
-	})
-
-	drain(done, 20*time.Millisecond, time.Hour, readEnds(pipes)...)
-
-	// Ending the wait closes the read ends, which is also what released the readers.
-	for i, f := range finished {
-		select {
-		case <-f:
-		case <-time.After(2 * time.Second):
-			t.Fatalf("reader %d never finished — its read end was not closed", i)
-		}
-	}
-	if _, err := pipes[0].read.Read(make([]byte, 1)); err == nil {
-		t.Fatal("read end still open after the grace deadline")
-	}
-}
-
-// TestDrainStopsAtHardStop: a reader that never signals must not hold the wait open, and
-// the read ends are closed on the way out rather than leaked.
-func TestDrainStopsAtHardStop(t *testing.T) {
-	pipes := []pipePair{newPipePair(t), newPipePair(t)}
-	done := make(chan struct{}, len(pipes)) // nobody ever signals
-
-	start := time.Now()
-	drain(done, time.Hour, 20*time.Millisecond, readEnds(pipes)...)
-	if elapsed := time.Since(start); elapsed > time.Second {
-		t.Fatalf("hard stop did not end the drain (took %s)", elapsed)
-	}
-	for i, p := range pipes {
-		if _, err := p.read.Read(make([]byte, 1)); err == nil {
-			t.Fatalf("read end %d still open at the hard stop", i)
-		}
+			for i, f := range finished {
+				select {
+				case <-f:
+				case <-time.After(2 * time.Second):
+					t.Fatalf("reader %d never finished — its read end was not closed", i)
+				}
+			}
+			if !tc.wantClosed {
+				return
+			}
+			for i, p := range pipes {
+				if _, err := p.read.Read(make([]byte, 1)); err == nil {
+					t.Fatalf("read end %d still open after the drain", i)
+				}
+			}
+		})
 	}
 }
 

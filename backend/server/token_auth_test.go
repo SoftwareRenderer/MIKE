@@ -15,12 +15,26 @@ import (
 // header) through the real middleware chain.
 func bearerCall(t *testing.T, s *Server, method, path, secret string, body any) *httptest.ResponseRecorder {
 	t.Helper()
+	auth := ""
+	if secret != "" {
+		auth = "Bearer " + secret
+	}
+	return rawAuthCall(t, s, method, path, auth, "", "", body)
+}
+
+// rawAuthCall runs a request with an exact Authorization header value ("" sends none) and, when a
+// cookie is given, that session cookie with its CSRF token.
+func rawAuthCall(t *testing.T, s *Server, method, path, auth, cookie, csrf string, body any) *httptest.ResponseRecorder {
+	t.Helper()
 	req := testRequest(method, path, body)
 	// The chain is Host-pinned before anything else, and httptest's default Host is not one
 	// this server accepts.
 	req.Host = "localhost"
-	if secret != "" {
-		req.Header.Set("Authorization", "Bearer "+secret)
+	if auth != "" {
+		req.Header.Set("Authorization", auth)
+	}
+	if cookie != "" {
+		withAuthCSRF(req, cookie, csrf)
 	}
 	rr := httptest.NewRecorder()
 	s.middlewareChain(s.mux).ServeHTTP(rr, req)
@@ -81,6 +95,13 @@ func TestBearerTokenReachesItsScopedRoutes(t *testing.T) {
 		}
 	})
 
+	// The scheme token is case-insensitive (RFC 7235); the secret is not.
+	t.Run("the scheme's case is not part of the credential", func(t *testing.T) {
+		if rr := rawAuthCall(t, s, http.MethodGet, "/api/projects", "bearer "+secret, "", "", nil); rr.Code != http.StatusOK {
+			t.Errorf("lowercase scheme: %d %s, want 200", rr.Code, rr.Body.String())
+		}
+	})
+
 	// The executor routes start real work, so they are proven authorized rather than exercised:
 	// 404 is the handler answering for a task that does not exist, which only happens past the
 	// scope check.
@@ -135,33 +156,31 @@ func TestBearerTokenRefusedOutsideItsScope(t *testing.T) {
 			}
 		})
 	}
+
+	// A path the mux has no route for is the mux's answer, not the scope check's: 404 says what is
+	// wrong, where 403 would claim the caller lacks a permission it was never asking about.
+	t.Run("an unregistered path is the mux's 404", func(t *testing.T) {
+		if rr := bearerCall(t, s, http.MethodGet, "/api/definitely-not-a-route", secret, nil); rr.Code != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", rr.Code)
+		}
+	})
 }
 
-// A token that is not live is answered 401, and a request that presents one is never served by the
-// session cookie it happens to travel with: a revoked credential must not degrade into "still
-// signed in as whoever's cookie this is".
+// A credential that is not live is answered 401 naming the scheme, and a request that presents one is
+// never served by the session cookie it happens to travel with: a dead credential must not degrade into
+// "still signed in as whoever's cookie this is". What decides that is whether the header presents a
+// bearer claim at all — a header naming another scheme presents none, and leaves the cookie to answer.
 func TestBearerTokenMustBeLive(t *testing.T) {
 	s := testServer(t)
 	cookie, csrf := loginTestCSRF(t, s)
 
-	t.Run("unknown token", func(t *testing.T) {
+	t.Run("a credential never issued", func(t *testing.T) {
 		rr := bearerCall(t, s, http.MethodGet, "/api/projects", "mike_never-issued", nil)
 		if rr.Code != http.StatusUnauthorized {
 			t.Fatalf("status = %d, want 401", rr.Code)
 		}
 		if got := rr.Header().Get("WWW-Authenticate"); !strings.Contains(got, "Bearer") {
 			t.Errorf("the refusal does not name the scheme: %q", got)
-		}
-	})
-
-	t.Run("empty bearer value", func(t *testing.T) {
-		req := testRequest(http.MethodGet, "/api/projects", nil)
-		req.Host = "localhost"
-		req.Header.Set("Authorization", "Bearer")
-		rr := httptest.NewRecorder()
-		s.middlewareChain(s.mux).ServeHTTP(rr, req)
-		if rr.Code != http.StatusUnauthorized {
-			t.Errorf("status = %d, want 401", rr.Code)
 		}
 	})
 
@@ -180,29 +199,29 @@ func TestBearerTokenMustBeLive(t *testing.T) {
 		}
 	})
 
-	t.Run("an invalid token does not fall back to the cookie", func(t *testing.T) {
-		req := testRequest(http.MethodGet, "/api/projects", nil)
-		req.Host = "localhost"
-		withAuthCSRF(req, cookie, csrf)
-		req.Header.Set("Authorization", "Bearer mike_not-a-real-token")
-		rr := httptest.NewRecorder()
-		s.middlewareChain(s.mux).ServeHTTP(rr, req)
-		if rr.Code != http.StatusUnauthorized {
-			t.Errorf("status = %d, want 401 rather than the cookie's answer: %s", rr.Code, rr.Body.String())
-		}
-	})
-
-	t.Run("a non-bearer scheme is not a token attempt", func(t *testing.T) {
-		req := testRequest(http.MethodGet, "/api/projects", nil)
-		req.Host = "localhost"
-		withAuthCSRF(req, cookie, csrf)
-		req.Header.Set("Authorization", "Basic dXNlcjpwYXNz")
-		rr := httptest.NewRecorder()
-		s.middlewareChain(s.mux).ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Errorf("status = %d, want the cookie path to answer: %s", rr.Code, rr.Body.String())
-		}
-	})
+	presentations := []struct {
+		name       string
+		auth       string
+		withCookie bool
+		want       int
+	}{
+		{"an empty bearer value", "Bearer", false, http.StatusUnauthorized},
+		// The cookie is the whole point of these two rows: a dead token must not be answered by it.
+		{"a dead token carrying a session", "Bearer mike_not-a-real-token", true, http.StatusUnauthorized},
+		{"another scheme carrying a session", "Basic dXNlcjpwYXNz", true, http.StatusOK},
+	}
+	for _, tc := range presentations {
+		t.Run(tc.name, func(t *testing.T) {
+			c, token := "", ""
+			if tc.withCookie {
+				c, token = cookie, csrf
+			}
+			rr := rawAuthCall(t, s, http.MethodGet, "/api/projects", tc.auth, c, token, nil)
+			if rr.Code != tc.want {
+				t.Errorf("Authorization %q: %d %s, want %d", tc.auth, rr.Code, rr.Body.String(), tc.want)
+			}
+		})
+	}
 }
 
 // A token authenticates a request without making it look signed in. Handlers ask
@@ -227,32 +246,6 @@ func TestBearerTokenRequestCarriesNoSessionID(t *testing.T) {
 	}
 	if token == "" {
 		t.Error("the token identity did not reach the handler")
-	}
-}
-
-// The scheme token is case-insensitive (RFC 7235); the secret is not.
-func TestBearerSchemeIsCaseInsensitive(t *testing.T) {
-	s := testServer(t)
-	secret := issueTokenThroughAPI(t, s, "ci")["token"].(string)
-
-	req := testRequest(http.MethodGet, "/api/projects", nil)
-	req.Host = "localhost"
-	req.Header.Set("Authorization", "bearer "+secret)
-	rr := httptest.NewRecorder()
-	s.middlewareChain(s.mux).ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200: %s", rr.Code, rr.Body.String())
-	}
-}
-
-// A token on a path the mux has no route for is the mux's answer, not the scope check's: 404 says
-// what is wrong, where 403 would claim the caller lacks a permission it was never asking about.
-func TestBearerTokenOnAnUnregisteredPath(t *testing.T) {
-	s := testServer(t)
-	secret := issueTokenThroughAPI(t, s, "ci")["token"].(string)
-
-	if rr := bearerCall(t, s, http.MethodGet, "/api/definitely-not-a-route", secret, nil); rr.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", rr.Code)
 	}
 }
 

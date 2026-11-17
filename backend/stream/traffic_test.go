@@ -14,6 +14,9 @@ import (
 	"mike/backend/types"
 )
 
+// TestFrameBucketNamesTheEventInsideTheEnvelope: a frame is counted under the event that produced
+// it, not under the envelope it travels in. The name comes from the map the sender built and never
+// from the encoded bytes — a tool payload carries command output, which can hold the text `"type":"`.
 func TestFrameBucketNamesTheEventInsideTheEnvelope(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -25,6 +28,10 @@ func TestFrameBucketNamesTheEventInsideTheEnvelope(t *testing.T) {
 			Type: types.WSTypeSandboxStats,
 			Data: types.SandboxMemoryStats{Running: true},
 		}), "sandbox_stats"},
+		{"tool output carrying typed text", TaskEventPayload("task-1", types.StreamEvent{
+			Type: types.WSTypeToolOutput,
+			Data: map[string]string{"text": `{"type":"task_updated","task":"someone else's bytes"}`},
+		}), "tool_output"},
 		{"board frame", appFrame(types.WSTypeTaskUpdated, map[string]any{"task": &types.Task{}}), "task_updated"},
 		{"counts", appFrame(types.WSTypeProjectCounts, map[string]any{"data": nil}), "project_counts"},
 		{"no type", map[string]any{"data": 1}, "untagged"},
@@ -33,18 +40,6 @@ func TestFrameBucketNamesTheEventInsideTheEnvelope(t *testing.T) {
 		if got := frameBucket(tc.frame); got != tc.want {
 			t.Errorf("%s: bucket %q, want %q", tc.name, got, tc.want)
 		}
-	}
-}
-
-// TestFrameBucketComesFromTheEnvelopeNotItsPayload: a tool payload can contain the text `"type":"`, because
-// it carries command output. The name comes from the map the sender built, so those frames stay counted
-// under the event that sent them.
-func TestFrameBucketComesFromTheEnvelopeNotItsPayload(t *testing.T) {
-	frame := TaskEventPayload("task-1", types.StreamEvent{Type: types.WSTypeToolOutput, Data: map[string]string{
-		"text": `{"type":"task_updated","task":"someone else's bytes"}`,
-	}})
-	if got := frameBucket(frame); got != "tool_output" {
-		t.Fatalf("bucket %q, want tool_output", got)
 	}
 }
 

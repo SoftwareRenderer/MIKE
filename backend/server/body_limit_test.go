@@ -54,7 +54,8 @@ func TestMaxBodyMiddlewareBoundsEveryReader(t *testing.T) {
 }
 
 // TestServerRefusesOversizedBody is the same rule through the middleware chain the
-// server actually runs, on a route that decodes its body itself, at the real limit.
+// server actually runs, on a route that decodes its body itself, at the real limit —
+// and the GET that must not be bounded, because the WebSocket upgrades are GETs.
 //
 // The body is one the handler would happily act on — a valid request with an extra
 // field padded past the cap, and an unknown JSON field is ignored — so the only thing
@@ -97,6 +98,17 @@ func TestServerRefusesOversizedBody(t *testing.T) {
 	if _, err := os.Stat(made); err == nil {
 		t.Errorf("the handler acted on an oversized chunked body: %s exists", made)
 	}
+
+	// A GET has no body to bound — and the WebSocket endpoints ARE GET upgrades, so bounding them
+	// would break the stream. This is the other half of why the middleware switches on the method.
+	get := secureRequest(httptest.NewRequest(http.MethodGet, "/api/fs", nil))
+	get.Host = "localhost"
+	get.Header.Set("Cookie", cookie)
+	gr := httptest.NewRecorder()
+	s.middlewareChain(s.mux).ServeHTTP(gr, get)
+	if gr.Code == http.StatusRequestEntityTooLarge {
+		t.Errorf("a GET was bounded: %d %s", gr.Code, gr.Body.String())
+	}
 }
 
 // postThroughChain posts to the middleware chain Serve installs — not to the bare mux,
@@ -113,24 +125,6 @@ func postThroughChain(t *testing.T, s *Server, target string, body io.Reader, co
 	rr := httptest.NewRecorder()
 	s.middlewareChain(s.mux).ServeHTTP(rr, req)
 	return rr
-}
-
-// TestGETBodyIsNotBounded is the other side of the same middleware, and the reason it
-// switches on method: the WebSocket endpoints are GET upgrades, and a bounded reader
-// on the upgrade path is a broken stream.
-func TestMiddlewareChainKeepsGetUpgrades(t *testing.T) {
-	s := testServer(t)
-	cookie, _ := loginTestCSRF(t, s)
-
-	req := secureRequest(httptest.NewRequest(http.MethodGet, "/api/fs", nil))
-	req.Host = "localhost"
-	req.Header.Set("Cookie", cookie)
-	rr := httptest.NewRecorder()
-	s.middlewareChain(s.mux).ServeHTTP(rr, req)
-
-	if rr.Code == http.StatusRequestEntityTooLarge {
-		t.Fatalf("a GET was bounded: %d %s", rr.Code, rr.Body.String())
-	}
 }
 
 // fillerReader yields exactly remaining bytes and then EOF, so a test can ask for a

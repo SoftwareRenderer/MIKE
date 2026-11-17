@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -71,104 +72,100 @@ func newPeakManager(usage sandboxruntime.MemoryUsageMB, sink func(taskID string,
 	return sm, fm
 }
 
-func TestStopReportsFinalPeakToSink(t *testing.T) {
-	seen, sink := peakRecorder()
-	sm, fm := newPeakManager(sandboxruntime.MemoryUsageMB{Known: true, Current: 120, Limit: 1024, Peak: 700}, sink)
-
-	_ = sm.Stop("task-1")
-
-	got := seen()
-	if len(got) != 1 {
-		t.Fatalf("Stop reported %d peaks, want 1: %+v", len(got), got)
-	}
-	if got[0] != (peakRecord{taskID: "task-1", peakMB: 700}) {
-		t.Errorf("reported %+v, want task-1 / 700 MB", got[0])
-	}
-	if _, forgot := fm.counts(); len(forgot) != 1 || forgot[0] != "kanban-sandbox-peak-test" {
-		t.Errorf("Forget calls = %v, want the removed container — a cached cgroup path outlives its container", forgot)
-	}
-}
-
-// A task that lost processes must still say how many once its container is gone.
-func TestStopReportsFinalOOMKillsWithThePeak(t *testing.T) {
-	seen, sink := peakRecorder()
-	sm, _ := newPeakManager(sandboxruntime.MemoryUsageMB{Known: true, Current: 1000, Limit: 1024, Peak: 1024, OOMKills: 3}, sink)
-
-	_ = sm.Stop("task-1")
-
-	got := seen()
-	if len(got) != 1 {
-		t.Fatalf("Stop reported %d peaks, want 1: %+v", len(got), got)
-	}
-	if got[0] != (peakRecord{taskID: "task-1", peakMB: 1024, oomKills: 3}) {
-		t.Errorf("reported %+v, want task-1 / 1024 MB / 3 kills", got[0])
-	}
-}
-
-// A host with no memory.peak has only the kill counter, so a zero peak must not silence it.
-func TestStopReportsOOMKillsWithoutAPeak(t *testing.T) {
-	seen, sink := peakRecorder()
-	sm, _ := newPeakManager(sandboxruntime.MemoryUsageMB{Known: true, Limit: 1024, OOMKills: 1}, sink)
-
-	_ = sm.Stop("task-1")
-
-	if got := seen(); len(got) != 1 || got[0].oomKills != 1 || got[0].peakMB != 0 {
-		t.Errorf("reported %+v, want one record with the kill count and no peak", got)
-	}
-}
-
-// No peak and no kill: neither may overwrite a previous run's numbers.
-func TestStopReportsNothingWithoutAPeakOrAKill(t *testing.T) {
+// TestStopReportsWhatTheCgroupSaid: one row per answer the tracker can give, and what Stop owes the
+// sink and the tracker for it. A peak is reported with its kill count — a task that lost processes must
+// still say how many once its container is gone — and a zero peak never silences the counter, because a
+// host with no memory.peak has only that. Nothing to report is reported as nothing, so no run overwrites
+// the previous one's numbers. Both no-report rows that still remove the container must Forget it: a
+// cached cgroup path outlives its container. And no reading is paid for when nobody is listening, or when
+// the task is not tracked — a reading costs a podman inspect.
+func TestStopReportsWhatTheCgroupSaid(t *testing.T) {
+	const tracked = "task-1"
 	for _, tc := range []struct {
-		name  string
-		usage sandboxruntime.MemoryUsageMB
+		name       string
+		task       string // "" is the tracked task
+		sink       bool
+		usage      sandboxruntime.MemoryUsageMB
+		wantReport []peakRecord
+		wantReads  int
+		wantForget int
 	}{
-		{"unreadable cgroup", sandboxruntime.MemoryUsageMB{}},
-		{"zero peak", sandboxruntime.MemoryUsageMB{Known: true, Current: 40, Limit: 1024}},
+		{
+			name:       "a peak",
+			sink:       true,
+			usage:      sandboxruntime.MemoryUsageMB{Known: true, Current: 120, Limit: 1024, Peak: 700},
+			wantReport: []peakRecord{{taskID: tracked, peakMB: 700}},
+			wantReads:  1, wantForget: 1,
+		},
+		{
+			name:       "a peak and the kills that came with it",
+			sink:       true,
+			usage:      sandboxruntime.MemoryUsageMB{Known: true, Current: 1000, Limit: 1024, Peak: 1024, OOMKills: 3},
+			wantReport: []peakRecord{{taskID: tracked, peakMB: 1024, oomKills: 3}},
+			wantReads:  1, wantForget: 1,
+		},
+		{
+			name:       "kills with no peak to carry them",
+			sink:       true,
+			usage:      sandboxruntime.MemoryUsageMB{Known: true, Limit: 1024, OOMKills: 1},
+			wantReport: []peakRecord{{taskID: tracked, oomKills: 1}},
+			wantReads:  1, wantForget: 1,
+		},
+		{
+			name:       "an unreadable cgroup",
+			sink:       true,
+			usage:      sandboxruntime.MemoryUsageMB{},
+			wantReport: nil,
+			wantReads:  1, wantForget: 1,
+		},
+		{
+			name:       "a reading that peaked at nothing",
+			sink:       true,
+			usage:      sandboxruntime.MemoryUsageMB{Known: true, Current: 40, Limit: 1024},
+			wantReport: nil,
+			wantReads:  1, wantForget: 1,
+		},
+		{
+			name:       "a task nothing tracks",
+			task:       "task-unknown",
+			sink:       true,
+			usage:      sandboxruntime.MemoryUsageMB{Known: true, Peak: 700},
+			wantReport: nil,
+			wantReads:  0, wantForget: 0,
+		},
+		{
+			name:       "nobody listening",
+			sink:       false,
+			usage:      sandboxruntime.MemoryUsageMB{Known: true, Peak: 700},
+			wantReport: nil,
+			wantReads:  0, wantForget: 1,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			seen, sink := peakRecorder()
-			sm, fm := newPeakManager(tc.usage, sink)
-
-			_ = sm.Stop("task-1")
-
-			if got := seen(); len(got) != 0 {
-				t.Errorf("reported %+v, want nothing", got)
+			var registered func(taskID string, peakMB int64, oomKills int64)
+			if tc.sink {
+				registered = sink
 			}
-			if _, forgot := fm.counts(); len(forgot) != 1 {
-				t.Errorf("Forget calls = %v, want 1 — the container is gone whatever the reading said", forgot)
+			sm, fm := newPeakManager(tc.usage, registered)
+
+			task := tc.task
+			if task == "" {
+				task = tracked
+			}
+			_ = sm.Stop(task)
+
+			if got := seen(); !reflect.DeepEqual(got, tc.wantReport) {
+				t.Errorf("reported %+v, want %+v", got, tc.wantReport)
+			}
+			reads, forgot := fm.counts()
+			if reads != tc.wantReads {
+				t.Errorf("tracker reads = %d, want %d", reads, tc.wantReads)
+			}
+			if len(forgot) != tc.wantForget {
+				t.Errorf("Forget calls = %v, want %d — the container is gone whatever the reading said", forgot, tc.wantForget)
 			}
 		})
-	}
-}
-
-// An untracked task has nothing to read: no report, and no cgroup lookup either.
-func TestStopOfUnknownTaskReportsNothing(t *testing.T) {
-	seen, sink := peakRecorder()
-	sm, fm := newPeakManager(sandboxruntime.MemoryUsageMB{Known: true, Peak: 700}, sink)
-
-	_ = sm.Stop("task-unknown")
-
-	if got := seen(); len(got) != 0 {
-		t.Errorf("reported %+v for an untracked task, want nothing", got)
-	}
-	if reads, _ := fm.counts(); reads != 0 {
-		t.Errorf("tracker reads = %d for an untracked task, want 0", reads)
-	}
-}
-
-// With nobody listening, tearing a container down must not pay for a reading.
-func TestStopWithoutSinkReadsNothing(t *testing.T) {
-	sm, fm := newPeakManager(sandboxruntime.MemoryUsageMB{Known: true, Peak: 700}, nil)
-
-	_ = sm.Stop("task-1")
-
-	reads, forgot := fm.counts()
-	if reads != 0 {
-		t.Errorf("tracker reads = %d with no sink registered, want 0 — a reading costs a podman inspect", reads)
-	}
-	if len(forgot) != 1 {
-		t.Errorf("Forget calls = %d, want 1", len(forgot))
 	}
 }
 

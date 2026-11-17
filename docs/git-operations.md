@@ -356,7 +356,7 @@ a pull or a push fetched too, so their numbers count as fresh. The Push number i
 nothing the remote does moves `ahead` except a force-push.
 
 Tests: `backend/api/git_test.go` — ahead, behind, and no-upstream on status, and `git fetch` moving the
-behind count / declining without an upstream (`go test ./backend/api/ -run TestHandleFetch`).
+behind count / declining without an upstream (`go test ./backend/api/ -run 'TestHandleStatus|TestHandleFetch'`).
 `frontend/src/lib/components/__tests__/git-status-panel.unit.svelte.ts` owns the dash and the label.
 
 ## Checking this
