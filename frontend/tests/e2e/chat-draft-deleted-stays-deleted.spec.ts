@@ -1,13 +1,13 @@
 import { test, expect, type Page, type Locator } from '@playwright/test';
-import { getProjectId, createTaskViaApi, navigateToTask, ensureTaskStarted, isolatedProject, gotoProject, sendMessage, waitForTurnAnswered } from './helpers';
+import { getProjectId, createTaskViaApi, navigateToTask, ensureTaskStarted, isolatedProject, gotoProject, sendMessage, waitForTurnAnswered, csrfFetch, clickCard } from './helpers';
 
 // A turn runs in this file's tasks, and turns are queued per project: own the project.
 isolatedProject();
 
 test.describe.configure({ mode: 'serial' });
 
-// The drafts store holds what the input box holds, empty included: text the person deleted has to leave
-// the store too, or the next read of the draft paints it back into the box.
+// The drafts store holds what the box holds, empty included, so a text the person deleted has to leave the
+// store too — or the next read paints it back.
 
 function openTaskId(page: Page): string {
   return new URL(page.url()).searchParams.get('task')!;
@@ -57,15 +57,71 @@ async function deleteAll(textarea: Locator): Promise<void> {
   await expect(textarea).toHaveValue('');
 }
 
-/**
- * Click a card once the board has stopped animating a move. A card that just changed column stays on screen
- * while the node it left fades out, so `[data-task-id]` matches two elements for a moment after the move.
- */
-async function clickCard(page: Page, taskId: string): Promise<void> {
-  const card = page.locator(`.card[data-task-id="${taskId}"]`);
-  await expect(card, 'the board holds one node for this task: the move it just made has finished fading')
-      .toHaveCount(1);
-  await card.click();
+/** The box's value, read `times` 200ms apart. Sampled rather than asserted once, because the rebuild that
+ * puts a deleted draft back can land between two assertions. Await it after starting it to sample across
+ * another wait. */
+function sampleBox(page: Page, times: number): Promise<string[]> {
+  return (async () => {
+    const seen: string[] = [];
+    for (let i = 0; i < times; i++) {
+      seen.push(await boxValue(page));
+      await page.waitForTimeout(200);
+    }
+    return seen;
+  })();
+}
+
+/** The readings that hold text — `absent` is what the task view shows in the box's place. */
+const filledSamples = (samples: string[]) => samples.filter(v => v !== '' && v !== 'absent');
+
+/** Delays every read of the `drafts` store, so a re-read is still in flight when the person deletes the
+ * text; without the delay that window is a millisecond wide. `stopDelayingDraftReads` puts the prototype
+ * back, so the assertions after the deletion read for real. */
+async function delayDraftReads(page: Page, ms: number): Promise<void> {
+    await page.evaluate((delay) => {
+        const w = window as unknown as {
+            __draftReads: number;
+            __origGet?: IDBObjectStore['get'];
+        };
+        w.__draftReads = 0;
+        const proto = IDBObjectStore.prototype;
+        const origGet = proto.get;
+        w.__origGet = origGet;
+        proto.get = function (this: IDBObjectStore, key: IDBValidKey) {
+            if (this.name !== 'drafts') return origGet.call(this, key);
+            w.__draftReads++;
+            const real = origGet.call(this, key);
+            const delayed: { result: unknown; onsuccess: (() => void) | null; onerror: (() => void) | null } =
+                { result: undefined, onsuccess: null, onerror: null };
+            real.onsuccess = () => {
+                delayed.result = real.result;
+                setTimeout(() => delayed.onsuccess?.(), delay);
+            };
+            real.onerror = () => setTimeout(() => delayed.onerror?.(), delay);
+            return delayed as unknown as IDBRequest;
+        };
+    }, ms);
+}
+
+async function stopDelayingDraftReads(page: Page): Promise<void> {
+    await page.evaluate(() => {
+        const w = window as unknown as { __origGet?: IDBObjectStore['get'] };
+        if (w.__origGet) IDBObjectStore.prototype.get = w.__origGet;
+    });
+}
+
+/** How many reads of the `drafts` store the app has started since `delayDraftReads`. */
+function draftReadCount(page: Page): Promise<number> {
+    return page.evaluate(() => (window as unknown as { __draftReads: number }).__draftReads);
+}
+
+/** A board frame is what makes this screen re-read the draft: it replaces the task row the chat's props come
+ * from. A title update is the cheapest one to send. */
+async function sendBoardFrame(page: Page, projectId: string, taskId: string): Promise<void> {
+    await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}`, {
+        method: 'PUT',
+        body: { title: `board-frame-${Date.now()}` },
+    });
 }
 
 test.describe('Chat draft text the person deleted', () => {
@@ -121,21 +177,35 @@ test.describe('Chat draft text the person deleted', () => {
     await deleteAll(textarea);
 
     await sendMessage(page, 'and another one');
-    // Sampled while the turn runs rather than asserted once after it, because the rebuilds a turn causes
-    // are what put the text back. The interval is a sampling cadence, not a wait for anything.
-    const sampling = (async () => {
-      const seen: string[] = [];
-      for (let i = 0; i < 40; i++) {
-        seen.push(await boxValue(page));
-        await page.waitForTimeout(200);
-      }
-      return seen;
-    })();
+    const sampling = sampleBox(page, 40);
     await waitForTurnAnswered(page, projectId, openTaskId(page));
     const samples = await sampling;
 
-    expect(samples.filter(v => v !== '' && v !== 'absent'), 'the agent answered and the box holds text again')
-        .toEqual([]);
+    expect(filledSamples(samples), 'the agent answered and the box holds text again').toEqual([]);
     await expect(page.locator('.chat-form textarea')).toHaveValue('');
+  });
+
+  test('stays deleted when a re-read was in flight while it was deleted', async ({ page }) => {
+    const projectId = await getProjectId(page);
+    const textarea = await openTask(page, projectId);
+    const taskId = openTaskId(page);
+
+    await typeAndLetItSave(page, textarea, 'thought deleted mid-read');
+    await delayDraftReads(page, 1500);
+
+    // The deletion lands while that re-read is still on its way.
+    const readsBefore = await draftReadCount(page);
+    await sendBoardFrame(page, projectId, taskId);
+    await expect
+        .poll(() => draftReadCount(page), { message: 'the board frame re-ran the draft read' })
+        .toBeGreaterThan(readsBefore);
+    await deleteAll(textarea);
+    await stopDelayingDraftReads(page);
+
+    expect(filledSamples(await sampleBox(page, 12)),
+        'the read that was in flight painted the deleted text back').toEqual([]);
+
+    await expect.poll(() => storedDraft(page, taskId),
+      { message: 'the deletion reaches the drafts store', timeout: 15000 }).toBeNull();
   });
 });

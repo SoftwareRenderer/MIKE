@@ -112,6 +112,36 @@ A body replayed from IndexedDB
 would overwrite whatever the file got since, so `offline-queue` never carries file content. The editor
 holding the buffer holds the wait (`saveRetryDelayMs`) until the write lands.
 
+## The Chat Draft Across a Browser Being Away
+
+The composer's text and its image tray belong to the browser: the `drafts` and `attachments` stores hold what
+the person left there, and the next open of the task reads them back. One rule covers both halves and
+`frontend/src/lib/utils/chat-draft.ts` is its only home: **the store holds exactly what the surface holds,
+empty included.**
+
+Two shortcuts break it, one per half. A save that skips an emptied tray leaves an image nobody kept, and the
+next read paints the thumbnail back. A save that runs before the opening read answers deletes the draft that
+read is carrying. So each surface keeps what it believes the store holds — `null` until the opening read
+answers — and:
+
+- writes whenever the surface and that belief disagree, an emptied surface being a deletion;
+- adopts a read's answer only while the surface still says what the belief said when that read began, and
+  never after this tab wrote the store itself, which is the newer word about what it holds;
+- forgets the belief only when the screen opens another task, never when a read merely re-runs: an empty
+  surface facing an unknown store is not a deletion.
+
+A task view re-reads both drafts whenever a board frame moves under it, and a streaming turn delivers those
+frames, so a deletion often races a read. The tray answers that by writing where the change was made —
+`writeDraftAttachments` (`frontend/src/lib/components/Chat/TaskChat.svelte`) is its only writer, reached
+through the form's binding rather than an effect — which leaves an untouched tray as the one thing a read may
+fill. The box cannot, because its write is debounced and during the wait only the box records the change, so
+the box is judged against the belief instead.
+
+On a send, or when a task read answers 404, the tray and its record both go (`dropDraftAttachments`) — the
+images went with the message, or the task went. `chat-draft-deleted-stays-deleted.spec.ts` and
+`chat-draft-attachments-stay-deleted.spec.ts` hold each half, each with a case that deletes while a
+re-read is provably in flight.
+
 ## Execution State Sync
 
 To ensure the UI correctly reflects whether a task is running, paused, or stopped, the app uses a hierarchy of truth:
@@ -164,6 +194,6 @@ The server does not time out slow clients. Instead:
 
 `make test-frontend` runs the unit files below; `make test-e2e SPECS=reconnect-refresh` runs the specs.
 
-- **E2E Tests**: `reconnect-refresh.spec.ts`, `away-and-back.spec.ts`, `sync-return-freshness.spec.ts`, `focus-return-review.spec.ts`, `offline-mode-cached-board.spec.ts`, `offline-send-queue.spec.ts`, `editor-external-change.spec.ts`.
-- **Unit Tests**: `connection-restored.unit.svelte.ts`, `task-events-delivery.unit.svelte.ts`, `stream-subscription.unit.ts`, `chat-history-merge.unit.ts`, `session-boot.unit.svelte.ts`, and for the editor buffer `editor-merge.unit.ts`, `editor-conflict.unit.ts`, `editor-draft-merge-on-open.unit.svelte.ts`, `editor-buffer-persistence.unit.svelte.ts`, `storage-editor-draft.unit.ts`.
+- **E2E Tests**: `reconnect-refresh.spec.ts`, `away-and-back.spec.ts`, `sync-return-freshness.spec.ts`, `focus-return-review.spec.ts`, `offline-mode-cached-board.spec.ts`, `offline-send-queue.spec.ts`, `editor-external-change.spec.ts`, `chat-draft-persistence.spec.ts`, `chat-draft-deleted-stays-deleted.spec.ts`, `chat-draft-attachments-stay-deleted.spec.ts`.
+- **Unit Tests**: `connection-restored.unit.svelte.ts`, `task-events-delivery.unit.svelte.ts`, `stream-subscription.unit.ts`, `chat-history-merge.unit.ts`, `session-boot.unit.svelte.ts`, and for the editor buffer `editor-merge.unit.ts`, `editor-conflict.unit.ts`, `editor-draft-merge-on-open.unit.svelte.ts`, `editor-buffer-persistence.unit.svelte.ts`, `storage-editor-draft.unit.ts`, and for the chat draft `chat-draft.unit.ts`.
 - **Backend Tests**: `app_stream_test.go`, `app_stream_subscribe_race_test.go`, `handler_task_sync_test.go`.

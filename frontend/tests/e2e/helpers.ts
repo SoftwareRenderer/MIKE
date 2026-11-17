@@ -446,6 +446,17 @@ export async function selectProject(page: Page, projectId: string): Promise<void
 export function cardInColumn(page: Page, taskId: string, columnTitle: string): Locator {
   return page.locator(`.column[aria-label="${columnTitle} column"] .card[data-task-id="${taskId}"]`);
 }
+
+/**
+ * Clicks a card once the board has stopped animating its move: a card that just changed column stays on
+ * screen while the node it left fades out, so `[data-task-id]` matches two elements for a moment.
+ */
+export async function clickCard(page: Page, taskId: string): Promise<void> {
+  const card = page.locator(`.card[data-task-id="${taskId}"]`);
+  await expect(card, 'the board holds one node for this task: the move it just made has finished fading')
+      .toHaveCount(1);
+  await card.click();
+}
 /**
  * The directory a project points at — what its file browser, Review-Changes panel and
  * project-level git commands read. Not a task worktree: that is `getWorktreePath`.

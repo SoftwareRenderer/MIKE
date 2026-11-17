@@ -18,7 +18,7 @@
         uiInjector.refreshSlot(INJECTION_POINTS.TASK_CHAT, { component: 'TaskChat', taskId, projectId });
     });
     import { DRAFT_SAVE_DEBOUNCE_MS } from '$lib/constants';
-    import { draftMayPaint, draftNeedsSave, type StoredDraft } from '$lib/utils/chat-draft';
+    import { draftMayPaint, draftNeedsSave, draftAttachmentsMayPaint, draftAttachmentsNeedSave, rememberedAttachments, type StoredDraft, type StoredDraftAttachments } from '$lib/utils/chat-draft';
     import { mergeQueuedUpdate, taskIsInFlight } from '$lib/utils/task-utils';
     import { effectiveStartTaskKey, matchShortcut } from '$lib/utils/keyboard';
     import { isAnyModalOpen } from '$lib/utils/modal-state';
@@ -75,60 +75,110 @@
     let chatTurns = $state<ChatTurn[]>([]);
     let turnsCursor = '';
     let turnsHasMore = $state(false);
-    // The draft chat text: `utils/chat-draft` owns the rule, and `storedDraftText` is this tab's belief
-    // about what the store holds. Only `writeDraftText` and the opening read move it.
+    // The composer's draft, text and images; `utils/chat-draft` owns the rule.
     let inputValue = $state('');
-    let storedDraftText: StoredDraft = null;
-    let writesSinceDraftRead = 0;
-    let draftReadSeq = 0;
     let draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
     let draftAttachments = $state<DraftAttachment[]>([]);
 
-    /** The only writer, so the belief stays true. `''` removes the draft. */
-    function writeDraftText(text: string) {
+    /** This tab's belief about one draft store: what it holds (`null` until the opening read answers) and
+     * how many writes of ours there were, so a read can tell whether one overtook it. */
+    interface DraftBelief<T> {
+        task: string | null;
+        stored: T;
+        writes: number;
+    }
+
+    const textDraft: DraftBelief<StoredDraft> = { task: null, stored: null, writes: 0 };
+    const trayDraft: DraftBelief<StoredDraftAttachments> = { task: null, stored: null, writes: 0 };
+    let draftReadSeq = 0;
+    let attachmentsReadSeq = 0;
+
+    /** Opens a draft read and returns the write count it must still find unchanged to be allowed to paint.
+     * The belief survives a re-run and resets only on another task: a board frame re-runs these reads, and a
+     * belief forgotten mid-flight turns the next deletion into one nobody sent. */
+    function openDraftRead<T>(draft: DraftBelief<T | null>, task: string): number {
+        if (task !== draft.task) {
+            draft.task = task;
+            draft.stored = null;
+            draft.writes = 0;
+        }
+        return draft.writes;
+    }
+
+    function cancelDraftSaveTimer() {
         if (draftSaveTimer) {
             clearTimeout(draftSaveTimer);
             draftSaveTimer = null;
         }
-        storedDraftText = text;
-        writesSinceDraftRead++;
+    }
+
+    /** The only writer, so the belief stays true. `''` removes the draft. */
+    function writeDraftText(text: string) {
+        cancelDraftSaveTimer();
+        textDraft.stored = text;
+        textDraft.writes++;
         setDraftText(taskId, text).catch(() => {});
     }
 
     $effect(() => {
         const task = taskId;
         const seq = ++draftReadSeq;
-        storedDraftText = null;
-        writesSinceDraftRead = 0;
+        const writesAtReadStart = openDraftRead(textDraft, task);
+        const believed = textDraft.stored;
         getDraftText(task).then(saved => {
             if (destroyed || seq !== draftReadSeq) return;
+            if (!draftMayPaint(inputValue, believed, textDraft.writes !== writesAtReadStart)) return;
             const stored = saved ?? '';
-            if (draftMayPaint(inputValue, writesSinceDraftRead > 0)) inputValue = stored;
-            // A write of ours after the read began is the newer word about the store.
-            if (writesSinceDraftRead === 0) storedDraftText = stored;
+            inputValue = stored;
+            textDraft.stored = stored;
         }).catch(() => {});
     });
 
-    // Load draft attachments from IndexedDB on init
     $effect(() => {
-        loadDraftAttachments(taskId).then(atts => {
-            if (atts.length > 0) {
-                draftAttachments = atts.filter(a => a && a.mimeType && a.data);
-            }
+        const task = taskId;
+        const seq = ++attachmentsReadSeq;
+        const writesAtReadStart = openDraftRead(trayDraft, task);
+        loadDraftAttachments(task).then(atts => {
+            if (destroyed || seq !== attachmentsReadSeq) return;
+            const kept = atts.filter(a => a && a.mimeType && a.data);
+            if (!draftAttachmentsMayPaint(draftAttachments, trayDraft.writes !== writesAtReadStart)) return;
+            draftAttachments = kept;
+            trayDraft.stored = rememberedAttachments(kept);
         }).catch(() => {});
     });
+
+    /** The tray as the form binds it, so no write can skip the path that keeps the store in step. */
+    const tray = {
+        get attachments() { return draftAttachments; },
+        set attachments(atts: DraftAttachment[]) { writeDraftAttachments(atts); },
+    };
+
+    /** The tray's only writer besides a read's answer. */
+    function writeDraftAttachments(atts: DraftAttachment[]) {
+        draftAttachments = atts;
+        if (!draftAttachmentsNeedSave(trayDraft.stored, atts)) return;
+        trayDraft.stored = rememberedAttachments(atts);
+        trayDraft.writes++;
+        saveDraftAttachments(taskId, atts).catch(() => {});
+    }
+
+    /** Empties the tray and deletes its draft whatever the belief says: the send took the images, or the
+     * task did. */
+    function dropDraftAttachments() {
+        draftAttachments = [];
+        trayDraft.stored = [];
+        trayDraft.writes++;
+        clearDraftAttachments(taskId).catch(() => {});
+    }
 
     function flushDraftText() {
-        if (draftNeedsSave(storedDraftText, inputValue)) writeDraftText(inputValue);
+        if (draftNeedsSave(textDraft.stored, inputValue)) writeDraftText(inputValue);
     }
 
     // Save draft text to IndexedDB (debounced to avoid writes on every keystroke)
     function handleInputSave(val: string) {
-        if (draftSaveTimer) {
-            clearTimeout(draftSaveTimer);
-            draftSaveTimer = null;
-        }
-        if (!draftNeedsSave(storedDraftText, val)) return;
+        cancelDraftSaveTimer();
+        if (!draftNeedsSave(textDraft.stored, val)) return;
         draftSaveTimer = setTimeout(() => {
             draftSaveTimer = null;
             writeDraftText(val);
@@ -138,17 +188,8 @@
     // Clear draft on send (called synchronously from ChatForm)
     function handleClearDraft() {
         writeDraftText('');
-        clearDraftAttachments(taskId).catch(() => {});
-        draftAttachments = [];
+        dropDraftAttachments();
     }
-
-    // Save draft attachments; skip empty to avoid racing with load effect on mount
-    $effect(() => {
-        const atts = draftAttachments;
-        if (atts.length > 0) {
-            saveDraftAttachments(taskId, atts);
-        }
-    });
 
     // Model selection state
     let providers: Provider[] = $state([]);
@@ -621,7 +662,7 @@
             // Task may have been deleted — the draft it holds goes with it
             if (e instanceof Error && (e.message.includes('Not found') || e.message.includes('404'))) {
                 writeDraftText('');
-                draftAttachments = [];
+                dropDraftAttachments();
                 return 'failed';
             }
             // Anything else: what is on screen may be the last thing read, so say so.
@@ -1814,7 +1855,7 @@
         <ChatForm
             bind:this={chatFormComp}
             bind:value={inputValue}
-            bind:attachments={draftAttachments}
+            bind:attachments={tray.attachments}
             isLoading={isLoading}
             placeholder={t('chat.form.taskPlaceholder')}
             providers={providers}
