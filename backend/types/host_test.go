@@ -52,3 +52,15 @@ func TestSameHostFoldsNothingButLoopback(t *testing.T) {
 		}
 	}
 }
+
+// What a probe actually compares: a stored credential is spent only on the host the row that stores it
+// names, so URLHost's extraction feeds this comparison without either side folding what the other
+// forgot. URLHost keeps the port and the case; CanonicalHost folds both, and loopback folds on top.
+func TestSameHostSpendsAStoredCredentialOnItsOwnHost(t *testing.T) {
+	if SameHost(URLHost("https://search.example/mcp"), URLHost("http://127.0.0.1:9/mcp")) {
+		t.Error("a stored credential would be spent across hosts")
+	}
+	if !SameHost(URLHost("https://localhost:8080"), URLHost("http://127.0.0.1:9000")) {
+		t.Error("a credential was withheld from the same machine under another loopback name")
+	}
+}
