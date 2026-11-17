@@ -142,7 +142,7 @@
 
 <!-- Mobile edit dialog -->
 {#if isMobileCtx.isMobile && isEditing}
-    <dialog class="edit-dialog" bind:this={mobileEditDialog} onclick={(e) => { if (e.target === mobileEditDialog) cancelEdit(); }}>
+    <dialog class="edit-dialog" bind:this={mobileEditDialog}>
         <div class="edit-modal">
             <div class="edit-modal-header">
                 <h3>{t('chat.message.editTitle')}</h3>

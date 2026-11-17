@@ -11,7 +11,6 @@
         title = '',
         width = '640px',
         zIndex = Z.modal,
-        closeOnOverlayClick = true,
         floating = false,
         onBeforeClose,
         onClose,
@@ -30,7 +29,6 @@
         title?: string;
         width?: string;
         zIndex?: number;
-        closeOnOverlayClick?: boolean;
         /* Non-modal floating window */
         floating?: boolean;
         onBeforeClose?: () => boolean | Promise<boolean>;
@@ -99,13 +97,9 @@
         onClose();
         queueMicrotask(() => triggerEl?.focus());
     }
-
-    function handleOverlayClick(e: MouseEvent) {
-        if (e.target === e.currentTarget && closeOnOverlayClick) handleClose();
-    }
 </script>
 
-<div class={overlayClasses} style="z-index: {zIndex}" onclick={handleOverlayClick} role="presentation">
+<div class={overlayClasses} style="z-index: {zIndex}" role="presentation">
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions — modal container stops click propagation, not an activation target -->
     <div
         class={modalClasses}
