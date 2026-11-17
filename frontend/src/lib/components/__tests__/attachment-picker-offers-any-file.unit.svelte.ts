@@ -78,6 +78,22 @@ describe('the chat input', () => {
             expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toContain(UPLOADED_PATH),
         );
     });
+
+    it('keeps the picker live while a turn is in flight', async () => {
+        const { container } = render(ChatForm, { props: { projectId: 'p1', taskId: 't1', isLoading: true } });
+
+        const button = await waitFor(() => {
+            const b = container.querySelector<HTMLButtonElement>('button.btn-attach');
+            if (b) return b;
+            throw new Error('the chat input renders no attach control');
+        });
+        expect(button.disabled).toBe(false);
+
+        const file = archive();
+        pickInto(fileInputIn(container), [file]);
+
+        await waitFor(() => expect(uploadTaskFile).toHaveBeenCalledWith('p1', 't1', file));
+    });
 });
 
 describe('the message edit form', () => {
