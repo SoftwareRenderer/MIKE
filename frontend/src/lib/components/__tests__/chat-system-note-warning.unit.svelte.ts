@@ -61,4 +61,36 @@ describe('system note — a memory pause is drawn as a warning, not an error', (
         expect(container.querySelector('.system-message')?.textContent).toContain('Merge conflict detected');
     });
 
+    // The retry note the executor writes when a streaming call dies mid-flight. Its row says `system`, and a
+    // row that says `system` must never reach the reader as something they themselves sent.
+    it('keeps a retry note a system row — labelled, never the reader’s own bubble', () => {
+        const { container } = render(ChatMessage, {
+            role: 'system', kind: 'retry', content: 'Connection interrupted, retrying the request.',
+        });
+        const row = container.querySelector('.chat-message') as Element;
+        expect(row.classList.contains('user')).toBe(false);
+        expect(row.classList.contains('system')).toBe(true);
+        const card = container.querySelector('.system-card') as Element;
+        expect(card.querySelector('.system-code')?.textContent).toBe('System');
+        expect(card.querySelector('.system-message')?.textContent)
+            .toBe('Connection interrupted, retrying the request.');
+    });
+
+    it('dismisses a system note through the row’s own control', () => {
+        const onDismiss = vi.fn();
+        const { container } = render(ChatMessage, {
+            role: 'system', content: 'Connection interrupted, retrying the request.', onDelete: onDismiss,
+        });
+        const card = container.querySelector('.system-card') as Element;
+        const dismiss = card.querySelector('button[aria-label="Dismiss message"]') as HTMLButtonElement;
+        expect(dismiss).toBeTruthy();
+        dismiss.click();
+        expect(onDismiss).toHaveBeenCalledTimes(1);
+    });
+
+    it('offers no dismissal to a note nothing can dismiss', () => {
+        const { container } = render(ChatMessage, { role: 'system', content: 'Retry notice' });
+        expect(container.querySelector('.system-card button[aria-label="Dismiss message"]')).toBeNull();
+    });
+
 });

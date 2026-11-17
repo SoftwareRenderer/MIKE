@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 
 // A chunk URL the open document asks for can be gone; the click that hits one reloads the page.
 
@@ -27,6 +27,13 @@ test.describe('A lazy part of the app the browser cannot fetch', () => {
         else document.addEventListener('DOMContentLoaded', watch);
     };
 
+    /**
+     * Read what the recorder wrote. The reload destroys the execution context mid-flight, and a reader
+     * that throws turns the wait for the second boot into a coin flip instead of a wait.
+     */
+    const readSession = (page: Page, key: string) =>
+        page.evaluate((k) => sessionStorage.getItem(k) ?? '', key).catch(() => '');
+
     test('reloads the page, and the click after the reload reaches the panel', async ({ page }) => {
         // Refused once: a stylesheet failure rejects the import without poisoning the module map.
         let refuse = true;
@@ -41,18 +48,18 @@ test.describe('A lazy part of the app the browser cannot fetch', () => {
 
         await page.goto('/');
         await expect(page.locator('.card').first()).toBeVisible({ timeout: 15000 });
-        expect(await page.evaluate(() => Number(sessionStorage.getItem('e2e-boots')))).toBe(1);
+        expect(Number(await readSession(page, 'e2e-boots'))).toBe(1);
 
         await page.locator(TERMINAL_BUTTON).click();
 
         // The page is gone: a new document booted in its place.
         await expect
-            .poll(() => page.evaluate(() => Number(sessionStorage.getItem('e2e-boots'))), { timeout: 15000 })
+            .poll(() => readSession(page, 'e2e-boots').then(Number), { timeout: 15000 })
             .toBeGreaterThanOrEqual(2);
         await expect(page.locator('.card').first()).toBeVisible({ timeout: 15000 });
 
         // It said what it was doing, and never asked the person to reload by hand.
-        const toasts = await page.evaluate(() => sessionStorage.getItem('e2e-toasts') ?? '');
+        const toasts = await readSession(page, 'e2e-toasts');
         expect(toasts).toContain('Updating the app ...');
         expect(toasts).not.toMatch(/\berror\b/);
 

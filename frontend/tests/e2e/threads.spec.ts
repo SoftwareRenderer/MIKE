@@ -1,19 +1,22 @@
 import { test, expect } from '@playwright/test';
 import {
-  getProjectId, createTaskViaApi, navigateToTask, ensureTaskStarted, waitForSendButton, csrfFetch, isolatedProject, gotoProject,
+  getProjectId, createTaskViaApi, navigateToTask, ensureTaskStarted, waitForSendButton, csrfFetch,
+  isolatedProject, gotoProject,
 } from './helpers';
 // Each test file gets its own project, because it starts a turn: see isolatedProject() in helpers.ts.
 isolatedProject();
 
+// Which conversation the task view draws: the thread the task is on, and no other. Both directions of that
+// one routing decision are driven here — a fork the click made becomes the conversation on screen and starts
+// answering, and a switch back to Main draws Main's rows and not the fork's.
+//
+// The handler's half is Go's: `TestThreadSwitchConcurrent` (one active thread),
+// `TestForkRefusesAForkPointFromAnotherThread`, `backend/store/threads_test.go` (the copied rows) and
+// `backend/exec/duplicate_send_test.go` (a regenerate is never a duplicate submit). What only a browser
+// reads is the transcript the screen draws and the button that becomes "New Thread".
 
 test.describe.configure({ mode: 'parallel' });
 
-// Own project: every step here is an executor turn, and turns queue per project — on the shared
-// project the fork's answer waited behind other workers' tasks.
-
-// "New Thread" is the submit action of an edited, non-last user message: it forks the conversation there,
-// replaces the forked user message with the edited text and sends it. The thread has to end up active AND
-// the agent has to answer — a fork that leaves the task idle is a dead end the user has to notice.
 test.describe('New Thread from an edited message', () => {
   test('forks, activates the thread and starts the agent', async ({ page }) => {
     // Four sequential executor turns; the default budget covers one.
@@ -85,5 +88,60 @@ test.describe('New Thread from an edited message', () => {
     const task = await page.evaluate(async ({ pid, tid }) =>
       (await (await fetch(`/api/projects/${pid}/tasks/${tid}`)).json()), { pid: projectId, tid: taskId }) as any;
     expect(task.execution_state).toBe('idle');
+  });
+});
+
+test.describe('Switching to another thread', () => {
+  test('draws the thread it landed on, and not the one it left', async ({ page }) => {
+    const projectId = await getProjectId(page);
+    const taskId = await createTaskViaApi(page, projectId, `thread-ui-switch-${Date.now()}`);
+    await ensureTaskStarted(page, projectId, taskId);
+    await navigateToTask(page, taskId);
+
+    // Wait for chat form to appear
+    await expect(page.locator('.chat-form')).toBeVisible({ timeout: 10000 });
+
+    // Create a message to fork from
+    const msgResult = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/messages`, {
+      method: 'POST',
+      body: { role: 'user', content: 'Fork point for UI test' },
+    });
+    expect(msgResult.ok).toBe(true);
+    const msgId = msgResult.data?.id;
+
+    // Get the main thread
+    const threadsResult = await page.evaluate(async ({ pid, tid }) => {
+      const res = await fetch(`/api/projects/${pid}/tasks/${tid}/threads`);
+      return res.json();
+    }, { pid: projectId, tid: taskId });
+    const mainThreadId = threadsResult[0]?.id;
+
+    // Fork to create a second thread
+    const forkResult = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/threads/fork`, {
+      method: 'POST',
+      body: { from_thread_id: mainThreadId, from_message_id: msgId },
+    });
+    expect(forkResult.ok).toBe(true);
+
+    // Add a unique message to the fork thread
+    const forkMsgResult = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/messages`, {
+      method: 'POST',
+      body: { role: 'user', content: 'Unique message in fork thread' },
+    });
+    expect(forkMsgResult.ok).toBe(true);
+
+    // Switch back to main thread via API
+    const switchResult = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/threads/switch`, {
+      method: 'POST',
+      body: { thread_id: mainThreadId },
+    });
+    expect(switchResult.ok).toBe(true);
+
+    // Reload the page to verify thread state persisted
+    await page.reload();
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+
+    // The fork thread's unique message should NOT appear in main thread's messages
+    await expect(page.locator('text=Unique message in fork thread')).not.toBeVisible();
   });
 });
