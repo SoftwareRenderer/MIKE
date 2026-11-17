@@ -6,83 +6,72 @@ import (
 	"mike/backend/types"
 )
 
+// TestResolveAPIKey is the one place a request's key is decided: what the caller typed wins, and the
+// placeholder or an empty field asks for the stored key instead. A provider the config does not hold, or
+// one holding no key, answers empty — the placeholder must never reach a provider as a credential.
 func TestResolveAPIKey(t *testing.T) {
-	cs := testConfigStore(t)
-
-	storedKey := "sk-real-secret-123"
-	cfg := &types.Config{
-		Providers: []types.Provider{
-			{Name: "llm-provider", Kind: "llm", URL: "http://localhost:8080/v1", Concurrency: 1},
-		},
-	}
-	cfg.Providers[0].APIKey = &storedKey
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-
-	tests := []struct {
+	for _, tc := range []struct {
 		name        string
+		stored      *string
 		serverURL   string
 		providedKey string
 		want        string
 	}{
 		{
-			name:        "real key passed through unchanged",
+			name:        "a key the caller typed goes out unchanged",
+			stored:      ptr("sk-real-secret-123"),
 			serverURL:   "http://localhost:8080/v1",
 			providedKey: "sk-typed-by-user",
 			want:        "sk-typed-by-user",
 		},
 		{
-			name:        "masked placeholder resolves stored key",
+			name:        "the masked placeholder resolves the stored key",
+			stored:      ptr("sk-real-secret-123"),
 			serverURL:   "http://localhost:8080/v1",
 			providedKey: maskedAPIKey,
-			want:        storedKey,
+			want:        "sk-real-secret-123",
 		},
 		{
-			name:        "empty key resolves stored key",
+			name:        "an empty key resolves the stored key",
+			stored:      ptr("sk-real-secret-123"),
 			serverURL:   "http://localhost:8080/v1",
 			providedKey: "",
-			want:        storedKey,
+			want:        "sk-real-secret-123",
 		},
 		{
-			name:        "trailing slash normalized when resolving",
+			name:        "a trailing slash is the same provider",
+			stored:      ptr("sk-real-secret-123"),
 			serverURL:   "http://localhost:8080/v1/",
 			providedKey: maskedAPIKey,
-			want:        storedKey,
+			want:        "sk-real-secret-123",
 		},
 		{
-			name:        "no matching provider returns empty",
+			name:        "the placeholder of a provider holding no key is no key",
+			serverURL:   "http://localhost:8080/v1",
+			providedKey: maskedAPIKey,
+			want:        "",
+		},
+		{
+			name:        "a provider the config does not hold has no key",
 			serverURL:   "http://other:9999/v1",
 			providedKey: maskedAPIKey,
 			want:        "",
 		},
-	}
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cs := testConfigStore(t)
+			if err := cs.UpdateConfig(&types.Config{
+				Providers: []types.Provider{{
+					Name: "llm-provider", Kind: types.ProviderKindLLM, URL: "http://localhost:8080/v1",
+					Concurrency: 1, APIKey: tc.stored,
+				}},
+			}); err != nil {
+				t.Fatalf("update config: %v", err)
+			}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := cs.ResolveAPIKey(tt.serverURL, tt.providedKey)
-			if got != tt.want {
-				t.Fatalf("ResolveAPIKey(%q, %q) = %q, want %q", tt.serverURL, tt.providedKey, got, tt.want)
+			if got := cs.ResolveAPIKey(tc.serverURL, tc.providedKey); got != tc.want {
+				t.Fatalf("ResolveAPIKey(%q, %q) = %q, want %q", tc.serverURL, tc.providedKey, got, tc.want)
 			}
 		})
-	}
-}
-
-func TestResolveAPIKeyNoStoredKey(t *testing.T) {
-	cs := testConfigStore(t)
-
-	// Provider exists but has no stored key.
-	cfg := &types.Config{
-		Providers: []types.Provider{
-			{Name: "llm-provider", Kind: "llm", URL: "http://localhost:8080/v1", Concurrency: 1},
-		},
-	}
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-
-	got := cs.ResolveAPIKey("http://localhost:8080/v1", maskedAPIKey)
-	if got != "" {
-		t.Fatalf("ResolveAPIKey with no stored key = %q, want empty", got)
 	}
 }

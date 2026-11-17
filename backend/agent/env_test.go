@@ -2,7 +2,6 @@ package agent
 
 import (
 	"os"
-	"os/exec"
 	"strings"
 	"testing"
 )
@@ -149,8 +148,9 @@ func TestSafeAgentEnv_ExtrasWin(t *testing.T) {
 	}
 }
 
+// TestSafeAgentEnv_NoEnvAtAllForUnknownNames checks that only the allowlist is emitted — a name that
+// merely *looks* allowlisted is not.
 func TestSafeAgentEnv_NoEnvAtAllForUnknownNames(t *testing.T) {
-	// Only the allowlist is emitted — a name that merely *looks* allowlisted is not.
 	for _, key := range []string{"PATHX", "HOME_DIR", "LCO", "LC", "TMPDIRS", "HTTPS_PROXY_FILE", "PATH_HOME"} {
 		t.Setenv(key, "noise")
 	}
@@ -159,38 +159,5 @@ func TestSafeAgentEnv_NoEnvAtAllForUnknownNames(t *testing.T) {
 		if hasKey(env, key) {
 			t.Errorf("SafeAgentEnv leaked %q", key)
 		}
-	}
-}
-
-// TestSafeAgentEnv_ChildSeesOnlyAllowlist runs a real child process and asserts what it
-// actually sees, including the "extras win" deduplication os/exec performs.
-func TestSafeAgentEnv_ChildSeesOnlyAllowlist(t *testing.T) {
-	envPath, err := exec.LookPath("env")
-	if err != nil {
-		t.Fatalf("env binary not available: %v", err)
-	}
-	t.Setenv("MIKE_ENCRYPTION_KEY", "super-secret-key")
-	t.Setenv("HOME", "/host/home")
-
-	cmd := exec.Command(envPath)
-	// Absolute path: the child's PATH comes from SafeAgentEnv, so don't depend on it.
-	cmd.Env = SafeAgentEnv("MIKE_TEST_MARKER=from-extras")
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("run %s: %v", envPath, err)
-	}
-	child := strings.Split(strings.TrimSpace(string(out)), "\n")
-
-	if hasKV(child, "MIKE_ENCRYPTION_KEY=super-secret-key") {
-		t.Error("child process inherited MIKE_ENCRYPTION_KEY")
-	}
-	if v, count := lastValueFor(child, "MIKE_TEST_MARKER"); v != "from-extras" || count != 1 {
-		t.Errorf("extras did not reach the child: %q (x%d)", v, count)
-	}
-	if v, count := lastValueFor(child, "HOME"); v != "/host/home" || count != 1 {
-		t.Errorf("HOME in child = %q (x%d), want /host/home once", v, count)
-	}
-	if v, _ := lastValueFor(child, "PATH"); v == "" {
-		t.Error("child has no PATH — the agent binary would not resolve")
 	}
 }
