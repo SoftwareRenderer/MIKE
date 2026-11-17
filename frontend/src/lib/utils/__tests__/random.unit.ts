@@ -64,17 +64,13 @@ describe('generateId', () => {
         expect(generateId()).toMatch(UUID_V4);
     });
 
-    it('is unpredictable without Math.random', () => {
+    it('asks the CSPRNG for every id, on an origin where randomUUID is absent', () => {
+        // The regression this holds shut: a slip back to the clock plus Math.random is invisible on a
+        // secure origin, where `randomUUID` answers first.
         const spy = vi.spyOn(Math, 'random');
-        const ids = new Set(Array.from({ length: 100 }, () => generateId()));
-        expect(spy).not.toHaveBeenCalled();
+        const ids = withoutRandomUUID(() => new Set(Array.from({ length: 100 }, () => generateId())));
         expect(ids.size).toBe(100);
-    });
-
-    it('is the same shape on a plain-HTTP origin, where randomUUID is absent', () => {
-        const spy = vi.spyOn(Math, 'random');
-        const id = withoutRandomUUID(() => generateId());
-        expect(id).toMatch(UUID_V4);
+        for (const id of ids) expect(id).toMatch(UUID_V4);
         expect(spy).not.toHaveBeenCalled();
     });
 });

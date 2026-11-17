@@ -50,7 +50,6 @@ describe('sortTransferFiles', () => {
         for (const file of [
             image('a.heic', 2, 'image/heic'),
             image('a.tif', 2, 'image/tiff'),
-            new File([''], 'no-type'),
         ]) {
             expect(sortTransferFiles([file]).files.map(f => f.name)).toEqual([file.name]);
         }

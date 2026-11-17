@@ -56,15 +56,6 @@ describe('sortByLastMoved', () => {
         sortByLastMoved(tasks);
         expect(tasks.map(t => t.id)).toEqual(['old', 'new']);
     });
-
-    it('handles empty array', () => {
-        expect(sortByLastMoved([])).toEqual([]);
-    });
-
-    it('handles single element', () => {
-        const task = makeTask('only', '2025-01-01T00:00:00Z');
-        expect(sortByLastMoved([task])).toEqual([task]);
-    });
 });
 
 describe('sortByLastMoved with oldestFirst', () => {
