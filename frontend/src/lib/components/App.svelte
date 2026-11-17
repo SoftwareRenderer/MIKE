@@ -387,6 +387,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             appStream = createAppStream({
                 onProjectCounts: (counts) => { applyProjectCounts(counts); },
                 onStorageUsage: (usage) => { storageStatus.update(usage); },
+                onTaskSpace: (projectId, figure) => { storageStatus.updateTasks(projectId, figure); },
                 onRefresh: () => refreshBoard(),
                 onDiffStats: () => {},
                 onBranch: (branch) => { currentBranch = branch; },
@@ -407,6 +408,9 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             },
             onStorageUsage: (usage) => {
                 storageStatus.update(usage);
+            },
+            onTaskSpace: (projectId, figure) => {
+                storageStatus.updateTasks(projectId, figure);
             },
             onRefresh: () => refreshBoard(),
             onDiffStats: (task_id, hash, _short_stat, files_n, untracked_n, untracked_lines, tracked_add, tracked_del, file_hashes, removed_files, staged_paths, has_committed_changes, already_merged) => {

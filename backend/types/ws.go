@@ -35,8 +35,10 @@ const (
 	WSTypeTaskEvent     WSMessageType = "task_event"
 	WSTypeBoardRefresh  WSMessageType = "board_refresh"
 	WSTypeProjectCounts WSMessageType = "project_counts"
-	// WSTypeStorageUsage carries the server's own filesystem — total_bytes and avail_bytes, flat on
-	// the frame — plus tasks_bytes and tasks_count whenever the task worktrees have been measured.
+	// WSTypeStorageUsage is one name for two flat frames. total_bytes and avail_bytes carry the server's
+	// own filesystem and go to every connection. project_id with tasks_bytes and tasks_count carry one
+	// project's worktrees, go only to the connections holding that project, and are absent until the walk
+	// has measured it.
 	WSTypeStorageUsage  WSMessageType = "storage_usage"
 	WSTypeProjectBranch WSMessageType = "project_branch"
 	WSTypeProjectPorts  WSMessageType = "project_ports"

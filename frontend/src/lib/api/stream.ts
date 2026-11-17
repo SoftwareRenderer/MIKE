@@ -1,6 +1,6 @@
-import type { ProjectCounts, Task, StreamEvent, StorageUsage } from '$lib/types';
+import type { ProjectCounts, Task, StreamEvent, StorageUsage, TaskSpaceFigure } from '$lib/types';
 import type { AppStreamFrame } from './events';
-import { isKeepaliveFrame, storageUsageFromFrame } from './events';
+import { isKeepaliveFrame, storageUsageFromFrame, taskSpaceFromFrame } from './events';
 import { API_BASE, parseStreamFrame } from './helpers';
 import { STALE_THRESHOLD_MS, HEARTBEAT_INTERVAL_MS, RECONNECT_BASE_DELAY_MS, RECONNECT_MAX_DELAY_MS, SUSPENDED_GAP_MS } from '$lib/constants';
 import { WAKE_FRAME_GAP_MS } from '$lib/utils/tab-return';
@@ -15,6 +15,9 @@ export interface AppStreamCallbacks {
     onProjectCounts?: (counts: Record<string, ProjectCounts>) => void;
     /** The server's filesystem, pushed rather than fetched. */
     onStorageUsage?: (usage: StorageUsage) => void;
+    /** Carries what one project's task worktrees hold. The server pushes it only to browsers holding
+     *  that project. */
+    onTaskSpace?: (projectId: string, figure: TaskSpaceFigure) => void;
     onRefresh?: () => void;
     onDiffStats?: (task_id: string, hash: string, short_stat: string, files_n: number, untracked_n: number, untracked_lines: number, tracked_add: number, tracked_del: number, file_hashes?: Record<string, string>, removed_files?: string[], staged_paths?: string[], has_committed_changes?: boolean, already_merged?: boolean) => void;
     onBranch?: (branch: string) => void;
@@ -290,8 +293,15 @@ export function createAppStream(callbacks: AppStreamCallbacks, options: AppStrea
             if (msg.type === 'project_counts' && callbacks.onProjectCounts) {
                 callbacks.onProjectCounts(msg.data);
             }
-            if (msg.type === 'storage_usage' && callbacks.onStorageUsage) {
-                callbacks.onStorageUsage(storageUsageFromFrame(msg));
+            if (msg.type === 'storage_usage') {
+                // One frame name carries two shapes. A frame that names a project carries that project's
+                // task figure and no filesystem reading, so it must not be read as one.
+                const taskSpace = taskSpaceFromFrame(msg);
+                if (taskSpace) {
+                    callbacks.onTaskSpace?.(taskSpace.projectId, taskSpace.figure);
+                } else if (callbacks.onStorageUsage) {
+                    callbacks.onStorageUsage(storageUsageFromFrame(msg));
+                }
             }
             if (msg.type === 'task_diff_stats' && callbacks.onDiffStats) {
                 callbacks.onDiffStats(msg.task_id, msg.hash, msg.short_stat, msg.files_n || 0, msg.untracked_n, msg.untracked_lines, msg.tracked_add || 0, msg.tracked_del || 0, msg.file_hashes, msg.removed_files, msg.staged_paths, msg.has_committed_changes, msg.already_merged);

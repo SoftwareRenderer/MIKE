@@ -46,10 +46,10 @@
 
     let taskCount = $derived(tasks.reduce((sum, t) => sum + countWithDescendants(t.id, columnId, childrenMap), 0));
 
-    // Only the Done column, and only with a reading.
-    let storageUsage = $derived(columnId === 'done' ? storageStatus.usage : null);
+    let showsStorage = $derived(columnId === 'done');
+    let storageUsage = $derived(showsStorage ? storageStatus.usage : null);
     let storageTip = $derived(storageUsageSentence(storageUsage));
-    let storageTasksTip = $derived(storageTasksSentence(storageUsage));
+    let storageTasksTip = $derived(showsStorage ? storageTasksSentence(storageStatus.tasksFor(projectId)) : null);
     let storageLow = $derived(isStoragePressured(storageUsage));
     // A tap pins: a touch screen has no pointer leave to close it.
     let storageHovered = $state(false);

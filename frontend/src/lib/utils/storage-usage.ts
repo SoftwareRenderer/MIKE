@@ -1,6 +1,6 @@
 import { t } from '$lib/i18n';
 import { activeLocale } from '$lib/i18n/runtime.svelte';
-import type { StorageUsage } from '$lib/types';
+import type { StorageUsage, TaskSpaceFigure } from '$lib/types';
 
 /** Past this share of the filesystem the Done count warns. 0.8 is what memory-stats uses too. */
 const STORAGE_PRESSURE_RATIO = 0.8;
@@ -47,11 +47,10 @@ export function storageUsageSentence(usage: StorageUsage | null | undefined): st
         : t('board.column.storageUsed', parts);
 }
 
-/** The disclosure's second line: what the task worktrees hold, or null until the server has measured
- *  them. A walk that could not price a checkout sends no figure, so the line is absent, not zero. */
-export function storageTasksSentence(usage: StorageUsage | null | undefined): string | null {
-    if (!usage) return null;
-    const { tasks_bytes: bytes, tasks_count: count } = usage;
-    if (typeof bytes !== 'number' || typeof count !== 'number') return null;
-    return t('board.column.storageTasks', { size: formatStorageBytes(bytes), count });
+/** The disclosure's second line: what this project's task worktrees hold, or null until the server has
+ *  measured them. A walk that could not price a checkout sends no figure, so the line is absent rather
+ *  than zero. */
+export function storageTasksSentence(figure: TaskSpaceFigure | null): string | null {
+    if (!figure) return null;
+    return t('board.column.storageTasks', { size: formatStorageBytes(figure.tasks_bytes), count: figure.tasks_count });
 }

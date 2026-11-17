@@ -112,10 +112,12 @@ Tests: `backend/httputil/json_defaults_test.go`.
 
 ### The filesystem reading is pushed, never asked for
 
-`storage_usage` is a flat frame carrying `total_bytes` and `avail_bytes` — the server's own filesystem,
-measured with `statfs` on the worktrees root (`cfgStore.WorkspaceDir()`, wired in
-`backend/server/server.go`). It is the only way the browser learns this figure: there is no route for it,
-and `apiroutes` would refuse one, because a route nobody calls is the failure that rule exists for.
+`storage_usage` is a flat frame with two shapes under one name. The first carries `total_bytes` and
+`avail_bytes` — the server's own filesystem, measured with `statfs` on the worktrees root
+(`cfgStore.WorkspaceDir()`, wired in `backend/server/server.go`) — and goes to every connection. The
+second carries `project_id`, `tasks_bytes` and `tasks_count`, and goes only to the connections holding
+that project. Neither is asked for: there is no route for them, and `apiroutes` would refuse one,
+because a route nobody calls is the failure that rule exists for.
 
 - `avail_bytes` is what an unprivileged process can still write, so a filesystem's root-reserved blocks
   count as *used*. That is the space this server can fill, and the Done count warns on it: past 80%
@@ -126,23 +128,33 @@ and `apiroutes` would refuse one, because a route nobody calls is the failure th
   a structural change has settled — that is how clearing Done, or deleting a task or a project, stops
   the count from staying red over space just freed. That broadcast runs after the teardown steps, so the
   bytes are gone by then. `HandleStream` does it to a connection it has just accepted, so a board opened
-  after the last task landed is not left showing nothing.
+  after the last task landed is not left showing nothing. The two pushes that name a project push that
+  project's task figure with the filesystem reading, each to its own audience.
 - The frame is `null`-suppressed: with no probe wired, or a probe that cannot read the root, no frame is
   sent at all. A frame of zeroes would be a divide-by-zero the client cannot tell from an empty disk.
-- `tasks_bytes` and `tasks_count` join the frame once the task worktrees have been walked: the apparent
-  bytes under every `<worktrees root>/<projectID>/<taskID>` directory, and how many of them there are. A
-  task's git objects are not in that figure — a worktree's `.git` is a pointer file, and the objects live
-  in the project's `.git`.
+- The task figure is the apparent bytes under `<worktrees root>/<projectID>/<taskID>` and how many such
+  directories exist. A task's git objects are not in that figure — a worktree's `.git` is a pointer file,
+  and the objects live in the project's `.git`.
+- The figure belongs to the board that asked for it. A client reading one project is never sent what
+  another holds, and a board with no figure of its own draws no line rather than "0 B in 0 worktrees"
+  (`storageTasksSentence` in `utils/storage-usage.ts`).
 - A checkout is not a `statfs`, so the walk never runs where a frame is built. `SetTaskSpaceProbe` hands
-  the stream a measurement it caches for `defaultTaskSpaceTTL` and refreshes on its own goroutine: the
-  reading that started the refresh carries the older figure, and another reading follows with the new
-  one. A walk starts only when a reading is about to be sent, so a quiet server walks nothing.
-- Part of a total is refused rather than shown. `backend/git`'s `MeasureTaskSpace` prices each checkout
-  under an entry cap inside one shared deadline, and one checkout it cannot price is no figure at all.
-  With no figure ever taken neither key is sent, so the client draws no line instead of "0 B in 0
-  worktrees"; a figure once taken survives a later failure, because a reading that lags did not lie.
+  the stream a measurement of **one project**, which the stream caches per project for
+  `defaultTaskSpaceTTL` and refreshes on its own goroutine: the reading that started the refresh carries
+  the older figure, and another reading follows with the new one.
+- A walk starts only where a reading is owed — a project's first subscription, a task landing in Done, a
+  settled teardown — and only while a connection holds that project, so a project no board has open is
+  walked by nobody. Its cached figure goes with its last subscriber, which is what makes a reopened board
+  measure afresh rather than trust a figure of unknown age.
+- Part of a total is refused rather than shown. `backend/git`'s `MeasureProjectTaskSpace` prices each
+  checkout under an entry cap inside one deadline, which one project spends alone. One checkout it cannot
+  price is no figure for that project and leaves every other project's figure standing. With no figure
+  ever taken neither key is sent; a figure once taken survives a later failure, because a figure that is
+  out of date is not a figure that is wrong.
 - Only a directory named after a project row that still exists is priced — the guard `GarbageCollect`
   sweeps by, and the reason MIKE's build scratch tree, which shares the root, is never counted as a task.
+- Tests: `backend/stream/app_stream_storage_test.go` for who is told what, and
+  `backend/git/taskspace_test.go` for what one project's walk prices.
 
 Test: `backend/stream/app_stream_storage_test.go` drives all three over a real socket. The name is in
 both vocabularies (`backend/types/ws.go`, `api/events.ts`) and `make archgate RULE=wsevents` fails if

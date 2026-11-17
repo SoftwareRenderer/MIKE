@@ -6,7 +6,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createAppStream, type AppStream } from '../stream';
 import { storageTasksSentence } from '$lib/utils/storage-usage';
-import type { StorageUsage } from '$lib/types';
+import type { StorageUsage, TaskSpaceFigure } from '$lib/types';
 
 class FakeSocket {
     static instances: FakeSocket[] = [];
@@ -30,13 +30,21 @@ class FakeSocket {
 let stream: AppStream | null = null;
 let realWS: any;
 
-/** Opens a stream and collects every reading it receives. */
-function openStream(): { socket: FakeSocket; received: StorageUsage[] } {
-    const received: StorageUsage[] = [];
-    stream = createAppStream({ onStorageUsage: (usage) => { received.push(usage); } });
+/** Opens a stream and collects both shapes carried under the one frame name. */
+function openStream(): {
+    socket: FakeSocket;
+    readings: StorageUsage[];
+    figures: { projectId: string; figure: TaskSpaceFigure }[];
+} {
+    const readings: StorageUsage[] = [];
+    const figures: { projectId: string; figure: TaskSpaceFigure }[] = [];
+    stream = createAppStream({
+        onStorageUsage: (usage) => { readings.push(usage); },
+        onTaskSpace: (projectId, figure) => { figures.push({ projectId, figure }); },
+    });
     const socket = FakeSocket.instances[FakeSocket.instances.length - 1];
     socket.open();
-    return { socket, received };
+    return { socket, readings, figures };
 }
 
 beforeEach(() => {
@@ -53,28 +61,47 @@ afterEach(() => {
 });
 
 describe('the task figure on the storage_usage frame', () => {
-    it('reaches the consumer that draws the tooltip line', () => {
-        const { socket, received } = openStream();
-        socket.receive({ type: 'storage_usage', total_bytes: 1024, avail_bytes: 594, tasks_bytes: 430, tasks_count: 3 });
+    it('reaches the consumer that draws the tooltip line, named for the project it measured', () => {
+        const { socket, figures } = openStream();
+        socket.receive({ type: 'storage_usage', project_id: 'p1', tasks_bytes: 430, tasks_count: 3 });
 
-        expect(received[0].tasks_bytes).toBe(430);
-        expect(received[0].tasks_count).toBe(3);
-        expect(storageTasksSentence(received[0])).toBeTruthy();
+        expect(figures).toHaveLength(1);
+        expect(figures[0].projectId).toBe('p1');
+        expect(figures[0].figure).toEqual({ tasks_bytes: 430, tasks_count: 3 });
+        expect(storageTasksSentence(figures[0].figure)).toBeTruthy();
     });
 
-    it('stays absent on a reading taken before the walk finished, so no line is drawn for it', () => {
-        const { socket, received } = openStream();
+    it('is one frame per project, so two boards keep two figures', () => {
+        const { socket, figures } = openStream();
+        socket.receive({ type: 'storage_usage', project_id: 'p1', tasks_bytes: 430, tasks_count: 3 });
+        socket.receive({ type: 'storage_usage', project_id: 'p2', tasks_bytes: 12, tasks_count: 1 });
+
+        expect(figures.map((f) => f.projectId)).toEqual(['p1', 'p2']);
+    });
+
+    it('is absent on a reading taken before the walk finished, so no line is drawn for it', () => {
+        const { socket, figures } = openStream();
+        socket.receive({ type: 'storage_usage', project_id: 'p1', tasks_bytes: 430 });
+        socket.receive({ type: 'storage_usage', project_id: 'p1', tasks_count: 3 });
+
+        expect(figures).toHaveLength(0);
+        expect(storageTasksSentence(null)).toBeNull();
+    });
+
+    it('never arrives as a filesystem reading, which the tooltip would divide by', () => {
+        const { socket, readings, figures } = openStream();
+        socket.receive({ type: 'storage_usage', project_id: 'p1', tasks_bytes: 430, tasks_count: 3 });
+
+        expect(figures).toHaveLength(1);
+        expect(readings).toHaveLength(0);
+    });
+
+    it('never arrives as a figure for the board on screen', () => {
+        const { socket, readings, figures } = openStream();
         socket.receive({ type: 'storage_usage', total_bytes: 1024, avail_bytes: 594 });
 
-        expect('tasks_bytes' in received[0]).toBe(false);
-        expect('tasks_count' in received[0]).toBe(false);
-        expect(storageTasksSentence(received[0])).toBeNull();
-    });
-
-    it('rides with the filesystem reading rather than replacing it', () => {
-        const { socket, received } = openStream();
-        socket.receive({ type: 'storage_usage', total_bytes: 1024, avail_bytes: 594, tasks_bytes: 430, tasks_count: 3 });
-
-        expect(received[0]).toMatchObject({ total_bytes: 1024, avail_bytes: 594 });
+        expect(readings).toHaveLength(1);
+        expect(readings[0]).toMatchObject({ total_bytes: 1024, avail_bytes: 594 });
+        expect(figures).toHaveLength(0);
     });
 });
