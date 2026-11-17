@@ -128,40 +128,37 @@ func TestComparePromptSetsClean(t *testing.T) {
 	}
 }
 
-func TestComparePromptSetsDroppedIf(t *testing.T) {
-	// The highest-consequence edit in a prompt overlay: plan mode's instructions quietly vanish.
-	mutated := map[string]string{}
-	for k, v := range zhTmpl {
-		mutated[k] = v
+// The highest-consequence edits a prompt overlay can make are the ones to the control structure: a
+// dropped `{{if}}` quietly deletes a mode's instructions, a dropped `{{template}}` leaves that mode
+// without its text, and a `{{range}}` become a `{{with}}` prints one item where the whole list was
+// asked for. Every shape is one case of the same skeleton comparison.
+func TestComparePromptSetsRefusesAChangedControlStructure(t *testing.T) {
+	const (
+		planCall   = `{{if .PlanMode}}{{template "plan-mode" .}}{{end}}`
+		exploreAdd = `{{if .ExploreMode}}{{template "explore-mode" .}}{{end}}`
+	)
+	for _, tc := range []struct {
+		name    string
+		replace string // the substring of the pack's base.tmpl to rewrite
+		with    string
+		want    string
+	}{
+		{"a dropped {{if}} around a mode's instructions", planCall, "", "base.tmpl: template logic differs"},
+		{"a mode that stays but loses its sub-template", planCall, `{{if .PlanMode}}Planning is recommended.{{end}}`, `plan-mode`},
+		{"a dropped explore-mode call", exploreAdd, "", `base.tmpl no longer invokes {{template "explore-mode" .}}`},
+		{"a list that becomes a single value", "{{range .Tools}}", "{{with .Tools}}", "template logic differs"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mutated := map[string]string{}
+			for k, v := range zhTmpl {
+				mutated[k] = v
+			}
+			mutated["base.tmpl"] = strings.Replace(mutated["base.tmpl"], tc.replace, tc.with, 1)
+
+			f := compareTmpl(t, enTmpl, mutated)
+			requireErrorContaining(t, f, tc.want)
+		})
 	}
-	mutated["base.tmpl"] = strings.Replace(mutated["base.tmpl"], "{{if .PlanMode}}{{template \"plan-mode\" .}}{{end}}", "", 1)
-
-	f := compareTmpl(t, enTmpl, mutated)
-	requireErrorContaining(t, f, "base.tmpl: template logic differs")
-}
-
-func TestComparePromptSetsDroppedTemplateCall(t *testing.T) {
-	mutated := map[string]string{}
-	for k, v := range zhTmpl {
-		mutated[k] = v
-	}
-	mutated["base.tmpl"] = strings.Replace(mutated["base.tmpl"], "{{if .PlanMode}}{{template \"plan-mode\" .}}{{end}}", "{{if .PlanMode}}Planning is recommended.{{end}}", 1)
-
-	f := compareTmpl(t, enTmpl, mutated)
-	requireErrorContaining(t, f, `plan-mode`)
-}
-
-// A pack base.tmpl that stops invoking the explore sub-template leaves that mode without its
-// instructions.
-func TestComparePromptSetsDroppedExploreCall(t *testing.T) {
-	mutated := map[string]string{}
-	for k, v := range zhTmpl {
-		mutated[k] = v
-	}
-	mutated["base.tmpl"] = strings.Replace(mutated["base.tmpl"], "{{if .ExploreMode}}{{template \"explore-mode\" .}}{{end}}", "", 1)
-
-	f := compareTmpl(t, enTmpl, mutated)
-	requireErrorContaining(t, f, `base.tmpl no longer invokes {{template "explore-mode" .}}`)
 }
 
 func TestComparePromptSetsRenamedField(t *testing.T) {
@@ -187,17 +184,6 @@ func TestComparePromptSetsRenamedDefine(t *testing.T) {
 	// A renamed define parses. It fails when base.tmpl renders, which is inside a task.
 	requireErrorContaining(t, f, `lost define "plan-mode"`)
 	requireErrorContaining(t, f, `calls {{template "plan-mode"}}`)
-}
-
-func TestComparePromptSetsRangeBecomesWith(t *testing.T) {
-	mutated := map[string]string{}
-	for k, v := range zhTmpl {
-		mutated[k] = v
-	}
-	mutated["base.tmpl"] = strings.Replace(mutated["base.tmpl"], "{{range .Tools}}", "{{with .Tools}}", 1)
-
-	f := compareTmpl(t, enTmpl, mutated)
-	requireErrorContaining(t, f, "template logic differs")
 }
 
 func TestComparePromptSetsMissingAndExtraFile(t *testing.T) {

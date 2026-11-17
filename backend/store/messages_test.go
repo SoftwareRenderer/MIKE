@@ -94,96 +94,93 @@ func TestGetTaskMessagesByThread(t *testing.T) {
 	}
 }
 
-func TestDeleteTaskMessagesAfter(t *testing.T) {
-	s := testStore(t)
-	proj := newProject("proj-1", "test", "/tmp/test")
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	if err := s.CreateTask(newTask("task-1", "proj-1")); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	// Create messages with explicit timestamps to ensure distinct created_at values
+// The cut runs from the named row onward, inside the scope the request names: the whole task when no
+// thread is given, and one thread of it when one is — a fork's rows are not the parent's to lose.
+func TestDeleteTaskMessagesAfterCutsItsScope(t *testing.T) {
 	baseTime := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
-	msgs := []string{"msg-1", "msg-2", "msg-3", "msg-4"}
-	for i, id := range msgs {
-		m := newMessage(id, "task-1", "user", "content "+id)
-		m.CreatedAt = baseTime.Add(time.Duration(i+1) * time.Second)
-		if err := s.CreateTaskMessage(m); err != nil {
-			t.Fatalf("create message: %v", err)
-		}
-	}
+	for _, tc := range []struct {
+		name   string
+		cut    string
+		thread string
+		seed   func(t *testing.T, s *Store)
+		want   map[string][]string // read scope -> the ids left
+		unread []string            // read scope -> the rows that must be gone
+	}{
+		{
+			name:   "of a whole task",
+			cut:    "msg-2",
+			thread: "",
+			seed: func(t *testing.T, s *Store) {
+				for i, id := range []string{"msg-1", "msg-2", "msg-3", "msg-4"} {
+					m := newMessage(id, "task-1", "user", "content "+id)
+					m.CreatedAt = baseTime.Add(time.Duration(i+1) * time.Second)
+					if err := s.CreateTaskMessage(m); err != nil {
+						t.Fatalf("create %s: %v", id, err)
+					}
+				}
+			},
+			want: map[string][]string{"": {"msg-1"}},
+		},
+		{
+			name:   "of one thread, leaving the other alone",
+			cut:    "m1",
+			thread: "thread-1",
+			seed: func(t *testing.T, s *Store) {
+				for _, th := range []*types.TaskThread{newThread("thread-1", "task-1", "Main"), newThread("thread-2", "task-1", "Fork")} {
+					if err := s.CreateThread(th); err != nil {
+						t.Fatalf("create %s: %v", th.ID, err)
+					}
+				}
+				rows := []struct {
+					id, thread, role string
+					offset           time.Duration
+				}{
+					{"m1", "thread-1", "user", 0},
+					{"m2", "thread-1", "assistant", time.Second},
+					{"m3", "thread-2", "user", 2 * time.Second},
+					{"m4", "thread-2", "assistant", 3 * time.Second},
+				}
+				for _, r := range rows {
+					m := newMessage(r.id, "task-1", r.role, r.id)
+					m.ThreadID = r.thread
+					m.CreatedAt = baseTime.Add(r.offset)
+					if err := s.CreateTaskMessage(m); err != nil {
+						t.Fatalf("create %s: %v", r.id, err)
+					}
+				}
+			},
+			want: map[string][]string{"thread-1": {}, "thread-2": {"m3", "m4"}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testStore(t)
+			if err := s.CreateProject(newProject("proj-1", "test", "/tmp/test")); err != nil {
+				t.Fatalf("create project: %v", err)
+			}
+			if err := s.CreateTask(newTask("task-1", "proj-1")); err != nil {
+				t.Fatalf("create task: %v", err)
+			}
+			tc.seed(t, s)
 
-	// Delete after msg-2 (should remove msg-2, msg-3, msg-4)
-	if _, err := s.DeleteTaskMessagesAfter("task-1", "msg-2", ""); err != nil {
-		t.Fatalf("delete messages after: %v", err)
-	}
+			if _, err := s.DeleteTaskMessagesAfter("task-1", tc.cut, tc.thread); err != nil {
+				t.Fatalf("delete messages after: %v", err)
+			}
 
-	remaining, err := s.GetTaskMessages("task-1", "")
-	if err != nil {
-		t.Fatalf("get messages: %v", err)
-	}
-	if len(remaining) != 1 || remaining[0].ID != "msg-1" {
-		t.Fatalf("expected only msg-1, got %d messages", len(remaining))
-	}
-}
-
-func TestDeleteTaskMessagesAfterByThread(t *testing.T) {
-	s := testStore(t)
-	proj := newProject("proj-1", "test", "/tmp/test")
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	if err := s.CreateTask(newTask("task-1", "proj-1")); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	th1 := newThread("thread-1", "task-1", "Main")
-	th2 := newThread("thread-2", "task-1", "Fork")
-	if err := s.CreateThread(th1); err != nil {
-		t.Fatalf("create thread: %v", err)
-	}
-	if err := s.CreateThread(th2); err != nil {
-		t.Fatalf("create thread: %v", err)
-	}
-
-	baseTime := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
-	// Messages in thread-1
-	m1 := newMessage("m1", "task-1", "user", "t1 msg 1")
-	m1.ThreadID = "thread-1"
-	m1.CreatedAt = baseTime
-	m2 := newMessage("m2", "task-1", "assistant", "t1 msg 2")
-	m2.ThreadID = "thread-1"
-	m2.CreatedAt = baseTime.Add(1 * time.Second)
-	// Messages in thread-2
-	m3 := newMessage("m3", "task-1", "user", "t2 msg 1")
-	m3.ThreadID = "thread-2"
-	m3.CreatedAt = baseTime.Add(2 * time.Second)
-	m4 := newMessage("m4", "task-1", "assistant", "t2 msg 2")
-	m4.ThreadID = "thread-2"
-	m4.CreatedAt = baseTime.Add(3 * time.Second)
-
-	for _, m := range []*types.TaskMessage{m1, m2, m3, m4} {
-		if err := s.CreateTaskMessage(m); err != nil {
-			t.Fatalf("create message: %v", err)
-		}
-	}
-
-	// Delete after m1 in thread-1 only
-	if _, err := s.DeleteTaskMessagesAfter("task-1", "m1", "thread-1"); err != nil {
-		t.Fatalf("delete messages after: %v", err)
-	}
-
-	// Thread-1 should be empty
-	t1Msgs, _ := s.GetTaskMessages("task-1", "thread-1")
-	if len(t1Msgs) != 0 {
-		t.Fatalf("expected 0 messages in thread-1, got %d", len(t1Msgs))
-	}
-	// Thread-2 should be untouched
-	t2Msgs, _ := s.GetTaskMessages("task-1", "thread-2")
-	if len(t2Msgs) != 2 {
-		t.Fatalf("expected 2 messages in thread-2, got %d", len(t2Msgs))
+			for scope, want := range tc.want {
+				got, err := s.GetTaskMessages("task-1", scope)
+				if err != nil {
+					t.Fatalf("read %q: %v", scope, err)
+				}
+				if len(got) != len(want) {
+					t.Fatalf("scope %q keeps %d rows, want %v", scope, len(got), want)
+				}
+				for i, id := range want {
+					if got[i].ID != id {
+						t.Fatalf("scope %q row %d is %s, want %s", scope, i, got[i].ID, id)
+					}
+				}
+			}
+		})
 	}
 }
 
@@ -314,148 +311,101 @@ func TestGetLastUserMessageInThread(t *testing.T) {
 	}
 }
 
-func TestGetMessageCreatedAt(t *testing.T) {
-	s := testStore(t)
-	proj := newProject("proj-1", "test", "/tmp/test")
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	if err := s.CreateTask(newTask("task-1", "proj-1")); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
+// One INSERT binds every column of task_messages positionally, so the claim these cases hold is that the
+// value written for a column is the value its scan reads — through the listing read and through the
+// single-row read a reviewer's card takes.
+func TestMessageColumnsRoundTrip(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		id    string
+		build func(*types.TaskMessage)
+		check func(*testing.T, types.TaskMessage)
+	}{
+		{
+			name: "the usage and timing columns",
+			id:   "msg-1",
+			build: func(m *types.TaskMessage) {
+				m.ModelName = "test-model"
+				m.ProviderName = "test-provider"
+				m.PromptTokens = 100
+				m.PredictedTokens = 50
+				m.CacheTokens = 20
+				m.PromptMs = 500
+				m.PredictedMs = 2000
+				m.Duration = 2500
+			},
+			check: func(t *testing.T, m types.TaskMessage) {
+				if m.ModelName != "test-model" || m.ProviderName != "test-provider" {
+					t.Errorf("model/provider = %s/%s, want test-model/test-provider", m.ModelName, m.ProviderName)
+				}
+				if m.PromptTokens != 100 || m.PredictedTokens != 50 || m.CacheTokens != 20 {
+					t.Errorf("token counts = prompt %d, predicted %d, cache %d; want 100, 50, 20", m.PromptTokens, m.PredictedTokens, m.CacheTokens)
+				}
+				if m.PromptMs != 500 || m.PredictedMs != 2000 || m.Duration != 2500 {
+					t.Errorf("timings = promptMs %d, predictedMs %d, duration %d; want 500, 2000, 2500", m.PromptMs, m.PredictedMs, m.Duration)
+				}
+			},
+		},
+		{
+			name:  "a loop hint keeps its mark",
+			id:    "hint-1",
+			build: func(m *types.TaskMessage) { m.IsLoopHint = true },
+			check: func(t *testing.T, m types.TaskMessage) {
+				if !m.IsLoopHint {
+					t.Errorf("is_loop_hint read back false; the hint would reach the model as real input")
+				}
+			},
+		},
+		{
+			name:  "a system row's severity, and one row with none",
+			id:    "info-1",
+			build: func(m *types.TaskMessage) { m.Severity = "info" },
+			check: func(t *testing.T, m types.TaskMessage) {
+				if m.Severity != "info" {
+					t.Errorf("severity = %q, want info", m.Severity)
+				}
+			},
+		},
+		{
+			name:  "a row nobody stamped a severity on",
+			id:    "warn-1",
+			build: func(*types.TaskMessage) {},
+			check: func(t *testing.T, m types.TaskMessage) {
+				if m.Severity != "" {
+					t.Errorf("severity = %q, want empty", m.Severity)
+				}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testStore(t)
+			if err := s.CreateProject(newProject("proj-1", "test", "/tmp/test")); err != nil {
+				t.Fatalf("create project: %v", err)
+			}
+			if err := s.CreateTask(newTask("task-1", "proj-1")); err != nil {
+				t.Fatalf("create task: %v", err)
+			}
+			msg := newMessage(tc.id, "task-1", "assistant", "content")
+			tc.build(msg)
+			if err := s.CreateTaskMessage(msg); err != nil {
+				t.Fatalf("create message: %v", err)
+			}
 
-	createdAt := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
-	msg := newMessage("msg-1", "task-1", "user", "hello")
-	msg.CreatedAt = createdAt
-	if err := s.CreateTaskMessage(msg); err != nil {
-		t.Fatalf("create message: %v", err)
-	}
+			got, err := s.GetTaskMessages("task-1", "")
+			if err != nil {
+				t.Fatalf("get messages: %v", err)
+			}
+			if len(got) != 1 {
+				t.Fatalf("the listing read answers %d rows, want 1", len(got))
+			}
+			tc.check(t, got[0])
 
-	got, err := s.GetMessageCreatedAt("msg-1")
-	if err != nil {
-		t.Fatalf("get message created_at: %v", err)
-	}
-	if got == nil || !got.Equal(createdAt) {
-		t.Fatalf("created_at mismatch: %v", got)
-	}
-}
-
-func TestMessageTokenFields(t *testing.T) {
-	s := testStore(t)
-	proj := newProject("proj-1", "test", "/tmp/test")
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	if err := s.CreateTask(newTask("task-1", "proj-1")); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	msg := newMessage("msg-1", "task-1", "assistant", "response")
-	msg.ModelName = "test-model"
-	msg.ProviderName = "test-provider"
-	msg.PromptTokens = 100
-	msg.PredictedTokens = 50
-	msg.CacheTokens = 20
-	msg.PromptMs = 500
-	msg.PredictedMs = 2000
-	msg.Duration = 2500
-	if err := s.CreateTaskMessage(msg); err != nil {
-		t.Fatalf("create message: %v", err)
-	}
-
-	got, err := s.GetTaskMessages("task-1", "")
-	if err != nil {
-		t.Fatalf("get messages: %v", err)
-	}
-	m := got[0]
-	if m.PromptTokens != 100 || m.PredictedTokens != 50 || m.CacheTokens != 20 {
-		t.Fatalf("token counts mismatch: prompt=%d, predicted=%d, cache=%d", m.PromptTokens, m.PredictedTokens, m.CacheTokens)
-	}
-	if m.PromptMs != 500 || m.PredictedMs != 2000 || m.Duration != 2500 {
-		t.Fatalf("timing mismatch: promptMs=%d, predictedMs=%d, duration=%d", m.PromptMs, m.PredictedMs, m.Duration)
-	}
-	if m.ModelName != "test-model" || m.ProviderName != "test-provider" {
-		t.Fatalf("model/provider mismatch: %s/%s", m.ModelName, m.ProviderName)
-	}
-}
-
-func TestMessageLoopHintRoundTrip(t *testing.T) {
-	s := testStore(t)
-	proj := newProject("proj-1", "test", "/tmp/test")
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	if err := s.CreateTask(newTask("task-1", "proj-1")); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	hint := newMessage("hint-1", "task-1", "user", "You repeated yourself in your last response.")
-	hint.IsLoopHint = true
-	if err := s.CreateTaskMessage(hint); err != nil {
-		t.Fatalf("create hint message: %v", err)
-	}
-
-	got, err := s.GetTaskMessages("task-1", "")
-	if err != nil {
-		t.Fatalf("get messages: %v", err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(got))
-	}
-	if !got[0].IsLoopHint {
-		t.Fatalf("expected IsLoopHint=true to round-trip, got false")
-	}
-
-	single, err := s.GetTaskMessageByID("hint-1")
-	if err != nil {
-		t.Fatalf("get message by id: %v", err)
-	}
-	if !single.IsLoopHint {
-		t.Fatalf("expected IsLoopHint=true via GetTaskMessageByID, got false")
-	}
-}
-
-func TestMessageSeverityRoundTrip(t *testing.T) {
-	s := testStore(t)
-	proj := newProject("proj-1", "test", "/tmp/test")
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	if err := s.CreateTask(newTask("task-1", "proj-1")); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	info := newMessage("info-1", "task-1", "system", "Synced main into task branch (no conflicts).")
-	info.Severity = "info"
-	if err := s.CreateTaskMessage(info); err != nil {
-		t.Fatalf("create info message: %v", err)
-	}
-	// Default (no severity) system message stays empty.
-	warn := newMessage("warn-1", "task-1", "system", "Merge conflict detected")
-	if err := s.CreateTaskMessage(warn); err != nil {
-		t.Fatalf("create warn message: %v", err)
-	}
-
-	got, err := s.GetTaskMessages("task-1", "")
-	if err != nil {
-		t.Fatalf("get messages: %v", err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("expected 2 messages, got %d", len(got))
-	}
-	if got[0].Severity != "info" {
-		t.Fatalf("expected severity=info, got %q", got[0].Severity)
-	}
-	if got[1].Severity != "" {
-		t.Fatalf("expected empty severity for default, got %q", got[1].Severity)
-	}
-
-	single, err := s.GetTaskMessageByID("info-1")
-	if err != nil {
-		t.Fatalf("get message by id: %v", err)
-	}
-	if single.Severity != "info" {
-		t.Fatalf("expected severity=info via GetTaskMessageByID, got %q", single.Severity)
+			single, err := s.GetTaskMessageByID(tc.id)
+			if err != nil {
+				t.Fatalf("get message by id: %v", err)
+			}
+			tc.check(t, *single)
+		})
 	}
 }
 
@@ -564,110 +514,84 @@ func TestGetLastMessageInThread(t *testing.T) {
 	}
 }
 
-// A summary row is not a turn of the conversation: it is what the turns before it are
-// remembered by, and it is the cut point the LLM context is built around, so a cascade that
-// deletes messages must leave it and the rows it replaced consistent.
-func TestDeleteTaskMessagesAfter_PreservesSummarization(t *testing.T) {
-	s := testStore(t)
-	proj := newProject("proj-1", "test", "/tmp/test")
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	if err := s.CreateTask(newTask("task-1", "proj-1")); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
+// A summarization row is not a turn of the conversation: it is what the turns before it are remembered
+// by, and it is the cut point the LLM context is built around. So it survives as collateral — and only
+// as collateral: naming one as the target removes it, while a later one still stands.
+func TestDeleteTaskMessagesAfterTreatsSummarizationRowsAsCollateral(t *testing.T) {
 	baseTime := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
-	seed := []struct {
-		id, role, content string
+	for _, tc := range []struct {
+		name string
+		seed []struct{ id, role string }
+		cut  string
+		want []string
 	}{
-		{"msg-1", "user", "first request"},
-		{"msg-2", "assistant", "first work"},
-		{"sum-1", "summarization", "SUMMARY OF msg-1 and msg-2"},
-		{"msg-3", "user", "later request"},
-		{"msg-4", "assistant", "later work"},
-	}
-	for i, m := range seed {
-		msg := newMessage(m.id, "task-1", m.role, m.content)
-		msg.CreatedAt = baseTime.Add(time.Duration(i+1) * time.Second)
-		if err := s.CreateTaskMessage(msg); err != nil {
-			t.Fatalf("create message: %v", err)
-		}
-	}
+		{
+			name: "a cut below a summary leaves the summary standing in for what it folded away",
+			seed: []struct{ id, role string }{
+				{"msg-1", "user"},
+				{"msg-2", "assistant"},
+				{"sum-1", "summarization"},
+				{"msg-3", "user"},
+				{"msg-4", "assistant"},
+			},
+			cut:  "msg-1",
+			want: []string{"sum-1"},
+		},
+		{
+			name: "naming the target removes that summary and every ordinary row after it",
+			seed: []struct{ id, role string }{
+				{"msg-1", "user"},
+				{"sum-1", "summarization"},
+				{"msg-2", "user"},
+				{"sum-2", "summarization"},
+				{"msg-3", "user"},
+			},
+			cut:  "sum-1",
+			want: []string{"msg-1", "sum-2"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testStore(t)
+			if err := s.CreateProject(newProject("proj-1", "test", "/tmp/test")); err != nil {
+				t.Fatalf("create project: %v", err)
+			}
+			if err := s.CreateTask(newTask("task-1", "proj-1")); err != nil {
+				t.Fatalf("create task: %v", err)
+			}
+			for i, m := range tc.seed {
+				msg := newMessage(m.id, "task-1", m.role, "content "+m.id)
+				msg.CreatedAt = baseTime.Add(time.Duration(i+1) * time.Second)
+				if err := s.CreateTaskMessage(msg); err != nil {
+					t.Fatalf("create %s: %v", m.id, err)
+				}
+			}
 
-	// Delete from the first user message onward: every conversation row goes, the
-	// summary survives standing in for what it summarized.
-	if _, err := s.DeleteTaskMessagesAfter("task-1", "msg-1", ""); err != nil {
-		t.Fatalf("delete messages after: %v", err)
-	}
+			if _, err := s.DeleteTaskMessagesAfter("task-1", tc.cut, ""); err != nil {
+				t.Fatalf("delete messages after: %v", err)
+			}
 
-	remaining, err := s.GetTaskMessages("task-1", "")
-	if err != nil {
-		t.Fatalf("get messages: %v", err)
-	}
-	if len(remaining) != 1 {
-		t.Fatalf("expected only the summary row, got %d: %+v", len(remaining), remaining)
-	}
-	if remaining[0].ID != "sum-1" || remaining[0].Role != "summarization" {
-		t.Fatalf("expected the summarization row to survive, got %+v", remaining[0])
+			remaining, err := s.GetTaskMessages("task-1", "")
+			if err != nil {
+				t.Fatalf("get messages: %v", err)
+			}
+			if len(remaining) != len(tc.want) {
+				t.Fatalf("survivors = %d rows %v, want %v", len(remaining), idsOf(remaining), tc.want)
+			}
+			for i, id := range tc.want {
+				if remaining[i].ID != id {
+					t.Fatalf("survivor %d is %s, want %s (all: %v)", i, remaining[i].ID, id, idsOf(remaining))
+				}
+			}
+		})
 	}
 }
 
-// Naming a summarization row as the target is supported and does remove it — the guard
-// above is only against collateral. A *later* summary is still collateral though, so it
-// survives while ordinary messages after the target go.
-func TestDeleteTaskMessagesAfter_TargetIsSummarization(t *testing.T) {
-	s := testStore(t)
-	proj := newProject("proj-1", "test", "/tmp/test")
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
+func idsOf(msgs []types.TaskMessage) []string {
+	ids := make([]string, 0, len(msgs))
+	for _, m := range msgs {
+		ids = append(ids, m.ID)
 	}
-	if err := s.CreateTask(newTask("task-1", "proj-1")); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	baseTime := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
-	seed := []struct {
-		id, role string
-	}{
-		{"msg-1", "user"},
-		{"sum-1", "summarization"},
-		{"msg-2", "user"},
-		{"sum-2", "summarization"},
-		{"msg-3", "user"},
-	}
-	for i, m := range seed {
-		msg := newMessage(m.id, "task-1", m.role, "content "+m.id)
-		msg.CreatedAt = baseTime.Add(time.Duration(i+1) * time.Second)
-		if err := s.CreateTaskMessage(msg); err != nil {
-			t.Fatalf("create message: %v", err)
-		}
-	}
-
-	if _, err := s.DeleteTaskMessagesAfter("task-1", "sum-1", ""); err != nil {
-		t.Fatalf("delete messages after: %v", err)
-	}
-
-	remaining, err := s.GetTaskMessages("task-1", "")
-	if err != nil {
-		t.Fatalf("get messages: %v", err)
-	}
-	got := map[string]bool{}
-	for _, m := range remaining {
-		got[m.ID] = true
-	}
-	if got["sum-1"] {
-		t.Error("the targeted summary row should have been deleted")
-	}
-	if got["msg-2"] || got["msg-3"] {
-		t.Error("messages after the target should have been deleted")
-	}
-	if !got["msg-1"] {
-		t.Error("messages before the target must survive")
-	}
-	if !got["sum-2"] {
-		t.Error("a later summary is collateral and must survive")
-	}
+	return ids
 }
 
 // The delete reports which of the rows it removed held a snapshot — only its own predicate knows what
