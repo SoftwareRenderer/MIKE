@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import {
-  apiGetJson, createTaskViaApi, csrfFetch, navigateToTask, waitForChatForm, waitForTaskState,
-  isolatedProject, getProjectId, gotoProject,
+  apiGetJson, createTaskViaApi, navigateToTask, waitForChatForm, waitForTaskState, notInFlight,
+  isolatedProject, getProjectId, gotoProject, seedChatRows,
 } from './helpers';
 
 isolatedProject();
@@ -14,19 +14,6 @@ isolatedProject();
 const SCROLLER = '.chat-messages';
 const ROWS = '.chat-entry[data-entry-id]';
 const ROWS_PER_PAGE = 5;
-const BODY = 'Standing in the doorway with the rain coming in. '.repeat(16);
-
-/** Seed rows straight into the task: `POST …/messages` writes a row without running a turn. Each row opens
- * with a token no other row carries, so the screen can be asked which row it is showing. */
-async function seed(page: Page, projectId: string, taskId: string, count: number): Promise<void> {
-  const stamp = Date.now();
-  for (let i = 0; i < count; i++) {
-    const res = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/messages`, {
-      method: 'POST', body: { role: 'user', content: `seed-${stamp}-${i} ${BODY}` },
-    });
-    if (!res.ok) throw new Error(`seed ${i} failed: ${res.status}`);
-  }
-}
 
 /** What the server calls the newest answer: the first word of its row. */
 async function newestRow(page: Page, projectId: string, taskId: string): Promise<string> {
@@ -69,6 +56,24 @@ async function view(page: Page): Promise<View> {
   }, [SCROLLER, ROWS]);
 }
 
+/** The transcript has stopped moving: four reads a beat apart see the same rows, the same anchor and the
+ *  same offset. The read a wake-up issues paints over several frames, and a measurement taken in the middle
+ *  of it samples nothing. */
+async function settledView(page: Page): Promise<View> {
+  let previous = await view(page);
+  let repeats = 0;
+  await expect.poll(async () => {
+    const now = await view(page);
+    const still = now.rows === previous.rows && now.scrollTop === previous.scrollTop
+      && now.anchor === previous.anchor && now.anchorTop === previous.anchorTop
+      && now.first === previous.first && now.last === previous.last;
+    repeats = still ? repeats + 1 : 0;
+    previous = now;
+    return repeats;
+  }, { timeout: 15000, intervals: [250] }).toBeGreaterThanOrEqual(3);
+  return previous;
+}
+
 /** Scroll to the top edge until no older page arrives, which is what a reader paging up does. */
 async function pageToTheTop(page: Page): Promise<number> {
   let pages = 0;
@@ -91,15 +96,14 @@ test.describe('returning to a tab whose reader had scrolled up', () => {
     const taskId = await createTaskViaApi(page, projectId, `tab-return-scroll ${Date.now()}`);
     await navigateToTask(page, taskId, projectId);
     await waitForChatForm(page);
-    await expect(page.locator(ROWS)).not.toHaveCount(0, { timeout: 15000 });
-    // Opening a new task can start a turn; let it finish, so what the server calls newest stays newest
+    await expect(page.locator(ROWS).first()).toBeVisible({ timeout: 15000 });
+    // A task starts a turn when it is created; let it finish, so what the server calls newest stays newest
     // while the rows below are written.
-    await waitForTaskState(page, projectId, taskId,
-      (t: any) => t?.execution_state !== 'running' && t?.execution_state !== 'pulling_image', 60000);
-    await seed(page, projectId, taskId, ROWS_PER_PAGE * 4);
+    await waitForTaskState(page, projectId, taskId, notInFlight, 60000);
+    await seedChatRows(page, projectId, taskId, ROWS_PER_PAGE * 4, 'tab-return');
     await page.reload();
     await waitForChatForm(page);
-    await expect(page.locator(ROWS)).not.toHaveCount(0, { timeout: 15000 });
+    await expect(page.locator(ROWS).first()).toBeVisible({ timeout: 15000 });
     const newest = await newestRow(page, projectId, taskId);
 
     const pages = await pageToTheTop(page);
@@ -110,16 +114,15 @@ test.describe('returning to a tab whose reader had scrolled up', () => {
       el.scrollTop = Math.round(el.scrollHeight / 3);
     }, SCROLLER);
     await expect(async () => { expect((await view(page)).anchor).not.toBe('(none)'); }).toPass();
-    const before = await view(page);
+    const before = await settledView(page);
     expect(before.last, 'the newest message is not at the bottom before the switch').toContain(newest);
 
     // The browser fires this at `document`, where it bubbles as far as `window`.
     const read = page.waitForResponse(r => r.url().includes('/messages') && !r.url().includes('before='));
     await page.evaluate(() => { document.dispatchEvent(new Event('visibilitychange', { bubbles: true })); });
     await read;
-    await page.waitForTimeout(1500);
 
-    const after = await view(page);
+    const after = await settledView(page);
     expect(after.last, 'the read took the newest message off the bottom of the transcript').toContain(newest);
     expect(after.first, 'the read reordered what the reader had paged into').toBe(before.first);
     expect(after.anchor, 'the reader lost the row they were reading').toBe(before.anchor);

@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import {
     isolatedProject, gotoProject, getProjectId, csrfFetch, navigateToTask, waitForChatFormReady,
-    waitForSendButton,
+    waitForSendButton, seedChatRows,
 } from './helpers';
 
 // A reader leaving the bottom is the follow tracker's whole job, and not every gesture that asks for what
@@ -140,24 +140,6 @@ function activeElement(page: Page): Promise<string> {
 }
 
 /** Seed a conversation long enough that one page up is hundreds of pixels from the bottom. */
-async function seedConversation(page: Page, projectId: string, taskId: string, rows: number): Promise<void> {
-    const csrf = await page.evaluate(async () => (await (await fetch('/api/auth/session')).json()).csrf_token || '');
-    const seeded = await page.evaluate(async ({ url, count, token }) => {
-        let made = 0;
-        for (let i = 0; i < count; i++) {
-            const res = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...(token ? { 'X-CSRF-Token': token } : {}) },
-                credentials: 'include',
-                body: JSON.stringify({ role: 'user', content: `seed row ${i}\n${'filler text that gives the entry some height '.repeat(3)}` }),
-            });
-            if (!res.ok) return { made, status: res.status, text: await res.text() };
-            made++;
-        }
-        return { made, status: 200, text: '' };
-    }, { url: `/api/projects/${projectId}/tasks/${taskId}/messages`, count: rows, token: csrf });
-    expect(seeded.status, `seeding stopped at row ${seeded.made}: ${seeded.text}`).toBe(200);
-}
 
 /**
  * Open a task with a tall transcript resting at the bottom, with nothing else moving under the measurement:
@@ -173,7 +155,7 @@ async function openConversation(page: Page): Promise<void> {
     });
     expect(created.ok, `create task: ${JSON.stringify(created.data)}`).toBe(true);
     const taskId: string = created.data.id;
-    await seedConversation(page, projectId, taskId, SEED_ROWS);
+    await seedChatRows(page, projectId, taskId, SEED_ROWS, 'takeover');
     await navigateToTask(page, taskId, projectId);
     await waitForChatFormReady(page);
     await expect(page.locator('.chat-messages [data-entry-id]').first()).toBeVisible({ timeout: 15000 });

@@ -230,6 +230,50 @@ export async function editTaskTitle(page: Page, taskId: string, title: string): 
 }
 
 /**
+ * Write rows straight into a task's thread: `POST …/messages` stores a row without running a turn, which is
+ * how a spec gets a transcript tall enough that "the top" and "the bottom" are hundreds of pixels apart.
+ * One row per request, oldest first, so a row's position is the order they were written.
+ *
+ * A fixture a spec builds, not one it measures inside: a conversation a spec *measures* comes from
+ * `chatFixture()`, because 200 sequential POSTs inside a test time out on a server every worker queues
+ * turns on (`docs/testing.md → Concurrency is part of the environment`). These specs seed a few dozen rows
+ * and measure the reader, not the rows.
+ */
+export async function seedChatRows(
+  page: Page, projectId: string, taskId: string, rows: number, label: string,
+): Promise<void> {
+  await getOrigin(page);
+  const token = await getCsrfToken(page);
+  const seeded = await page.evaluate(async ({ url, count, token, label }) => {
+    let made = 0;
+    for (let i = 0; i < count; i++) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { 'X-CSRF-Token': token } : {}) },
+        credentials: 'include',
+        body: JSON.stringify({
+          role: 'user',
+          // The row opens with a token no other row carries, so the screen can be asked which row it is
+          // showing — a row identified by its position in a window is somebody else's row.
+          content: `${label}-${i}\n${'filler text that gives the entry some height '.repeat(3)}`,
+        }),
+      });
+      if (!res.ok) return { made, status: res.status, text: await res.text() };
+      made++;
+    }
+    return { made, status: 200, text: '' };
+  }, {
+    url: `/api/projects/${projectId}/tasks/${taskId}/messages`,
+    count: rows,
+    token,
+    label,
+  });
+  if (seeded.status !== 200) {
+    throw new Error(`seedChatRows: stopped at row ${seeded.made} with ${seeded.status}: ${seeded.text}`);
+  }
+}
+
+/**
  * How many writes the persisted queue holds. A value drawn on screen proves nothing about the queue, and a
  * request still running when the page went away never became an entry.
  */
@@ -589,6 +633,10 @@ export async function waitForChatFormReady(page: Page): Promise<void> {
  * Send a message through the chat UI and wait for its bubble. The baseline count is read
  * before Enter: reading it after races the optimistic add, and the poll can then never see
  * the count grow.
+ *
+ * The bubble is found by what it says. A row that was not the reader's can be drawn after it — a turn that
+ * loops gets its steering hint stored as a `user` row (`handleLoopDetected`, `backend/exec/loop_helpers.go`)
+ * — so the newest `.chat-message.user` is not necessarily the one this typed.
  */
 export async function sendMessage(page: Page, message: string): Promise<void> {
   await waitForSendButton(page);
@@ -602,7 +650,10 @@ export async function sendMessage(page: Page, message: string): Promise<void> {
   await expect
     .poll(() => userMessages.count(), { message: 'the sent message appears in the chat' })
     .toBeGreaterThan(countBefore);
-  await expect(userMessages.last(), 'the sent message is the one we typed').toContainText(message);
+  const typed = page.locator('.chat-message.user', { hasText: message });
+  await expect.poll(() => typed.count(), { message: 'the sent message is the one we typed' })
+    .toBeGreaterThan(0);
+  await expect(typed.last(), 'the sent message is on screen').toBeVisible();
 }
 
 // --- Task lifecycle helpers ---

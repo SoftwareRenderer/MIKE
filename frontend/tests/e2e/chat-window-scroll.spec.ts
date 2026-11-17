@@ -1,7 +1,8 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { atTopOfList } from '../../src/lib/utils/chat-window';
 import {
   isolatedProject, gotoProject, getProjectId, csrfFetch, navigateToTask, waitForChatFormReady,
+  seedChatRows,
 } from './helpers';
 
 // A task opens on the newest window and older rows arrive a page at a time. Scrolling is the only
@@ -12,31 +13,8 @@ isolatedProject();
 
 const SEED_ROWS = 200;
 
-/** Seed a conversation one row at a time, oldest first, from inside the page. */
-async function seedConversation(page: any, projectId: string, taskId: string, rows: number): Promise<void> {
-  const csrf = await page.evaluate(async () => (await (await fetch('/api/auth/session')).json()).csrf_token || '');
-  const seeded = await page.evaluate(async ({ url, count, token }) => {
-    let made = 0;
-    for (let i = 0; i < count; i++) {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(token ? { 'X-CSRF-Token': token } : {}) },
-        credentials: 'include',
-        body: JSON.stringify({
-          role: 'user',
-          content: `seed row ${i}\n${'filler text that gives the entry some height '.repeat(3)}`,
-        }),
-      });
-      if (!res.ok) return { made, status: res.status, text: await res.text() };
-      made++;
-    }
-    return { made, status: 200, text: '' };
-  }, { url: `/api/projects/${projectId}/tasks/${taskId}/messages`, count: rows, token: csrf });
-  expect(seeded.status, `seeding stopped at row ${seeded.made}: ${seeded.text}`).toBe(200);
-}
-
 /** Where the reader is: the first entry with pixels below the top edge of the scroll viewport. */
-function viewportAnchor(page: any): Promise<{ id: string; top: number } | null> {
+function viewportAnchor(page: Page): Promise<{ id: string; top: number } | null> {
   return page.evaluate(() => {
     const list = document.querySelector('.chat-messages') as HTMLElement;
     const top = list.getBoundingClientRect().top;
@@ -49,7 +27,7 @@ function viewportAnchor(page: any): Promise<{ id: string; top: number } | null> 
 }
 
 /** A named entry's top, in offsets from the top edge of the scroll viewport; null once it is unrendered. */
-function entryTop(page: any, id: string): Promise<number | null> {
+function entryTop(page: Page, id: string): Promise<number | null> {
   return page.evaluate((entryId) => {
     const list = document.querySelector('.chat-messages') as HTMLElement;
     const node = list.querySelector<HTMLElement>(`.chat-entry[data-entry-id="${entryId}"]`);
@@ -58,7 +36,7 @@ function entryTop(page: any, id: string): Promise<number | null> {
 }
 
 /** The ids rendered, oldest first — a repeat is one row held by two pages. */
-function renderedIds(page: any): Promise<string[]> {
+function renderedIds(page: Page): Promise<string[]> {
   // `.chat-entry` is the row; a user row nests a `.sticky-user-message` carrying the SAME
   // data-entry-id, which is the pinned label, not a second copy of the row.
   return page.evaluate(() =>
@@ -72,14 +50,14 @@ function renderedIds(page: any): Promise<string[]> {
 const WHEEL_NOTCH = 1500;
 
 /** Park the pointer on the list, since a wheel goes where the pointer is. */
-async function parkOnList(page: any): Promise<void> {
+async function parkOnList(page: Page): Promise<void> {
   const box = await page.locator('.chat-messages').boundingBox();
   expect(box, 'no chat list to scroll').not.toBeNull();
   await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
 }
 
 /** Where the reader is in the list and how tall their view of it is, as the app's own edge rule needs. */
-function listPosition(page: any): Promise<{ scrollTop: number; viewportHeight: number }> {
+function listPosition(page: Page): Promise<{ scrollTop: number; viewportHeight: number }> {
   return page.evaluate(() => {
     const el = document.querySelector('.chat-messages') as HTMLElement;
     return { scrollTop: el.scrollTop, viewportHeight: el.clientHeight };
@@ -87,21 +65,11 @@ function listPosition(page: any): Promise<{ scrollTop: number; viewportHeight: n
 }
 
 /**
- * Scroll the way a reader does. Writing `scrollTop` is not a gesture: the follow tracker reads an
- * unexplained move as the document shifting under the reader and pins it back to the bottom, so the
- * reader never reaches the edge older rows are fetched from.
+ * The edge older rows are fetched from, however many notches the realized heights take. Scrolling is the way
+ * a reader does it: writing `scrollTop` is not a gesture, and the follow tracker reads an unexplained move as
+ * the document shifting under the reader and pins it back to the bottom, so the reader never reaches the edge.
  */
-async function wheelUp(page: any, notches: number): Promise<void> {
-  await parkOnList(page);
-  for (let i = 0; i < notches; i++) {
-    await page.mouse.wheel(0, -WHEEL_NOTCH);
-    await page.waitForTimeout(40);
-  }
-  await page.waitForTimeout(250);
-}
-
-/** The edge older rows are fetched from, however many notches the realized heights take. */
-async function wheelToTopEdge(page: any): Promise<void> {
+async function wheelToTopEdge(page: Page): Promise<void> {
   await parkOnList(page);
   let at = await listPosition(page);
   for (let i = 0; i < 60 && !atTopOfList(at.scrollTop, at.viewportHeight); i++) {
@@ -114,15 +82,43 @@ async function wheelToTopEdge(page: any): Promise<void> {
     + `${at.viewportHeight}-pixel view)`).toBe(true);
 }
 
-/** Hold the next-older window in flight, so the reader's position can be read before it lands. */
-async function stallOlderWindow(page: any, ms: number): Promise<void> {
-  await page.route(url => url.searchParams.has('before'), async route => {
-    await new Promise(resolve => setTimeout(resolve, ms));
-    await route.continue();
-  });
+/**
+ * Hold the first older window in flight until the test releases it, and every page after it for the rest of
+ * the test. The reader's position has to be read while the first page is still out — a timed stall is a
+ * guess at how long the round trip takes — and a second page landing mid-measurement is a whole page of
+ * slide that has nothing to do with the one this reads.
+ */
+function olderWindowGate(): { arm: (page: Page) => Promise<void>; release: () => void } {
+  let asked = false;
+  let releaseFirst = () => {};
+  return {
+    arm: async (page: Page) => {
+      await page.route(url => url.searchParams.has('before'), async route => {
+        if (asked) return new Promise<void>(() => { /* held for the rest of the test */ });
+        asked = true;
+        await new Promise<void>(resolve => { releaseFirst = resolve; });
+        await route.continue();
+      });
+    },
+    release: () => releaseFirst(),
+  };
 }
 
-async function openConversation(page: any): Promise<{ projectId: string; taskId: string }> {
+/** The reader's row has stopped moving: three reads a beat apart see the same offset. Entries realize their
+ *  heights over several frames, and an offset sampled in the middle of that is not where the reader is. */
+async function settledEntryTop(page: Page, id: string): Promise<number | null> {
+  let previous = await entryTop(page, id);
+  let repeats = 0;
+  await expect.poll(async () => {
+    const now = await entryTop(page, id);
+    repeats = now === previous ? repeats + 1 : 0;
+    previous = now;
+    return repeats;
+  }, { timeout: 10000, intervals: [250] }).toBeGreaterThanOrEqual(2);
+  return previous;
+}
+
+async function openConversation(page: Page): Promise<{ projectId: string; taskId: string }> {
   await gotoProject(page);
   await page.waitForSelector('.project-item', { timeout: 10000 });
   const projectId = await getProjectId(page);
@@ -132,7 +128,7 @@ async function openConversation(page: any): Promise<{ projectId: string; taskId:
   });
   expect(created.ok, `create task: ${JSON.stringify(created.data)}`).toBe(true);
   const taskId: string = created.data.id;
-  await seedConversation(page, projectId, taskId, SEED_ROWS);
+  await seedChatRows(page, projectId, taskId, SEED_ROWS, 'windowed');
   await navigateToTask(page, taskId, projectId);
   await waitForChatFormReady(page);
   await expect(page.locator('.chat-messages [data-entry-id]').first()).toBeVisible({ timeout: 15000 });
@@ -169,20 +165,21 @@ test.describe('Chat history window', () => {
   test('older rows arriving leave the reader on the row they were reading', async ({ page }) => {
     test.setTimeout(120000);
     await openConversation(page);
-    await stallOlderWindow(page, 800);
+    const gate = olderWindowGate();
+    await gate.arm(page);
 
     await wheelToTopEdge(page);
-    // The request is in flight: this is the row the reader will still want when the page lands.
+    // The first page is in the gate's hands: this is the row the reader will still want when it lands.
     const before = await viewportAnchor(page);
     expect(before, 'no entry in the viewport to anchor on').not.toBeNull();
     const beforeIds = await renderedIds(page);
+    gate.release();
 
     await expect(async () => {
       expect((await renderedIds(page)).length).toBeGreaterThan(beforeIds.length);
     }).toPass({ timeout: 15000 });
-    await page.waitForTimeout(600);
 
-    const after = await entryTop(page, before!.id);
+    const after = await settledEntryTop(page, before!.id);
     expect(after, 'the row the reader was reading is no longer rendered').not.toBeNull();
     expect(Math.abs(after! - before!.top), 'older rows slid the reader off their row').toBeLessThan(60);
 
