@@ -15,6 +15,9 @@ const TRAILER_TOGGLE = 'button[aria-label="Assisted-by line in commit messages"]
 // The project's tab is named after the open project, so this is both the fixture name and the
 // text the tab shows.
 const PROJECT_TAB = 'Atlas';
+// The two identity answers share one explanation, so the type is what tells them apart.
+const NAME_INPUT = 'input[type="text"][aria-describedby="project-git-author-desc"]';
+const EMAIL_INPUT = 'input[type="email"][aria-describedby="project-git-author-desc"]';
 
 beforeEach(() => {
     // Polyfill matchMedia (useIsMobile) for jsdom — desktop: never matches.
@@ -136,6 +139,59 @@ describe('Settings project tab', () => {
         const { container } = render(ConfigModal, { props: { config: makeConfig(), onClose: vi.fn(), onSaved: vi.fn() } });
         await openProjectTab(container);
 
+        fireEvent.click(container.querySelector('button[title="Save settings"]')!);
+        await waitFor(() => expect(updateConfig).toHaveBeenCalledTimes(1), { timeout: 1000 });
+
+        expect(updateProject).not.toHaveBeenCalled();
+    });
+
+    it('reads the commit identity the open row names', async () => {
+        vi.mocked(updateConfig).mockResolvedValue(makeConfig());
+        openProject({ git_author_name: 'Ada Lovelace', git_author_email: 'ada@example.com' });
+        const { container } = render(ConfigModal, { props: { config: makeConfig(), onClose: vi.fn(), onSaved: vi.fn() } });
+        await openProjectTab(container);
+
+        expect((container.querySelector(NAME_INPUT) as HTMLInputElement).value).toBe('Ada Lovelace');
+        expect((container.querySelector(EMAIL_INPUT) as HTMLInputElement).value).toBe('ada@example.com');
+    });
+
+    it('writes only the identity half that was typed', async () => {
+        vi.mocked(updateConfig).mockResolvedValue(makeConfig());
+        vi.mocked(updateProject).mockResolvedValue(openProject());
+        const { container } = render(ConfigModal, { props: { config: makeConfig(), onClose: vi.fn(), onSaved: vi.fn() } });
+        await openProjectTab(container);
+
+        fireEvent.input(container.querySelector(NAME_INPUT)!, { target: { value: 'Ada Lovelace' } });
+        fireEvent.click(container.querySelector('button[title="Save settings"]')!);
+        await waitFor(() => expect(updateProject).toHaveBeenCalledTimes(1), { timeout: 1000 });
+
+        expect(vi.mocked(updateProject).mock.calls[0]).toEqual(['proj-1', { git_author_name: 'Ada Lovelace' }]);
+        expect(appStore.selectedProject?.git_author_name).toBe('Ada Lovelace');
+        // The address was never typed, so the row keeps the answer it had — which here is none.
+        expect(appStore.selectedProject?.git_author_email).toBeUndefined();
+    });
+
+    it('writes the empty value a cleared address leaves behind', async () => {
+        vi.mocked(updateConfig).mockResolvedValue(makeConfig());
+        vi.mocked(updateProject).mockResolvedValue(openProject({ git_author_email: 'ada@example.com' }));
+        const { container } = render(ConfigModal, { props: { config: makeConfig(), onClose: vi.fn(), onSaved: vi.fn() } });
+        await openProjectTab(container);
+
+        fireEvent.input(container.querySelector(EMAIL_INPUT)!, { target: { value: '' } });
+        fireEvent.click(container.querySelector('button[title="Save settings"]')!);
+        await waitFor(() => expect(updateProject).toHaveBeenCalledTimes(1), { timeout: 1000 });
+
+        expect(vi.mocked(updateProject).mock.calls[0]).toEqual(['proj-1', { git_author_email: '' }]);
+        expect(appStore.selectedProject?.git_author_email).toBe('');
+    });
+
+    it('reads a name padded by the form as the name the row already holds', async () => {
+        vi.mocked(updateConfig).mockResolvedValue(makeConfig());
+        openProject({ git_author_name: 'Ada Lovelace' });
+        const { container } = render(ConfigModal, { props: { config: makeConfig(), onClose: vi.fn(), onSaved: vi.fn() } });
+        await openProjectTab(container);
+
+        fireEvent.input(container.querySelector(NAME_INPUT)!, { target: { value: '  Ada Lovelace  ' } });
         fireEvent.click(container.querySelector('button[title="Save settings"]')!);
         await waitFor(() => expect(updateConfig).toHaveBeenCalledTimes(1), { timeout: 1000 });
 

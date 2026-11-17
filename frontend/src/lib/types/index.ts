@@ -80,6 +80,10 @@ export interface Project {
     sandbox_capabilities?: string[];
     /** The project's answer to the "Assisted-by" commit trailer; default on. */
     commit_assisted_by?: boolean;
+    /** Half of the project's own commit identity. An empty value leaves that half to the server's
+     *  identity, and a server that names none leaves it to the repository's own git config. */
+    git_author_name?: string;
+    git_author_email?: string;
     /** The registered MCP servers this project may offer tools from. A whole list on write: an absent
      *  key leaves it alone, an empty one enables nothing. */
     mcp_server_ids?: string[];
@@ -103,6 +107,9 @@ export interface ProjectUpdates {
     sandbox_envs?: SandboxEnv[];
     sandbox_capabilities?: string[];
     commit_assisted_by?: boolean;
+    /** Each half is written on its own: an absent key leaves the stored one alone, an empty string clears it. */
+    git_author_name?: string;
+    git_author_email?: string;
     mcp_server_ids?: string[];
 }
 

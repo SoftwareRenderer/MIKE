@@ -63,7 +63,7 @@ environment.
 | `MIKE_FRONTEND_DIST` | **Dev only.** Serve SPA from this directory (default `./frontend/dist`) instead of the embedded copy. Refused in `-tags release` binaries. |
 | `DANGER_ZONE` | Exactly `1` allows disabling sandboxing for projects. Does not gate execution. |
 | `MIKE_ALLOW_ROOT_FS` | Exactly `1` allows no-project file endpoints (e.g., directory picker) to reach any host path. Otherwise jailed to `$HOME` and workspace/extensions dirs. |
-| `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` | Who commits are authored as. Stamped at boot onto every commit; unset leaves the repository's own `user.name`/`user.email` to decide. **`docs/confinement.md → The git author identity`**. |
+| `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` | Who commits are authored as, as this server's identity. A project's `git_author_name` / `git_author_email` answers ahead of it; an unset half leaves the repository's own `user.name`/`user.email` to decide. **`docs/confinement.md → The git author identity`**. |
 | `GIT_COMMITTER_NAME` / `GIT_COMMITTER_EMAIL` | The committer half of the same identity, taken before `GIT_AUTHOR_*` variable by variable. |
 
 ## Reachability is not the certificate

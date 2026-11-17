@@ -80,6 +80,10 @@
     let notifyOnReview = $state(false);
     // The open project's answer to the "Assisted-by" commit trailer; absent means off.
     let commitAssistedBy = $state(false);
+    // The open project's own commit identity, seeded from its row. The half nobody typed is the
+    // server's identity answering, so it is written only when it moved.
+    let gitAuthorName = $state('');
+    let gitAuthorEmail = $state('');
     // The MCP registry and this project's opt-in list. Both are edited here rather than in the tab: the
     // first rides the config payload, the second the project PUT.
     let mcpServers = $state<MCPServerDraft[]>([]);
@@ -233,6 +237,8 @@
             notifyOnReview = uiStore.notifyOnReview;
             autoMaximizeCodeViewer = uiStore.autoMaximizeCodeViewer;
             commitAssistedBy = appStore.selectedProject?.commit_assisted_by === true;
+            gitAuthorName = appStore.selectedProject?.git_author_name ?? '';
+            gitAuthorEmail = appStore.selectedProject?.git_author_email ?? '';
             mcpServers = buildMCPServers(config);
             projectMCPOpts = [...(appStore.selectedProject?.mcp_server_ids || [])];
             providers = buildProviders(config);
@@ -532,16 +538,26 @@
         const row = appStore.selectedProject;
         if (!row) return;
         const assistedBy = commitAssistedBy !== (row.commit_assisted_by === true);
+        // The typed value is compared trimmed, which is the value the server stores: a Save must not
+        // call a field unchanged because a space was typed and then read back as changed.
+        const authorName = gitAuthorName.trim();
+        const authorEmail = gitAuthorEmail.trim();
+        const nameChanged = authorName !== (row.git_author_name ?? '');
+        const emailChanged = authorEmail !== (row.git_author_email ?? '');
         const chosen = projectMCPServerIDs(config, projectMCPOpts);
         const mcpChanged = !sameIds(chosen, row.mcp_server_ids || []);
-        if (!assistedBy && !mcpChanged) return;
+        if (!assistedBy && !nameChanged && !emailChanged && !mcpChanged) return;
         const updates: ProjectUpdates = {};
         if (assistedBy) updates.commit_assisted_by = commitAssistedBy;
+        if (nameChanged) updates.git_author_name = authorName;
+        if (emailChanged) updates.git_author_email = authorEmail;
         if (mcpChanged) updates.mcp_server_ids = chosen;
         await updateProject(row.id, updates);
         // The offline queue answers with a partial row, so the stored row is patched rather than replaced.
         const patched = { ...row };
         if (assistedBy) patched.commit_assisted_by = commitAssistedBy;
+        if (nameChanged) patched.git_author_name = authorName;
+        if (emailChanged) patched.git_author_email = authorEmail;
         if (mcpChanged) patched.mcp_server_ids = chosen;
         appStore.projects = appStore.projects.map(p => (p.id === row.id ? patched : p));
         if (appStore.selectedProject?.id === row.id) appStore.selectedProject = patched;
@@ -988,6 +1004,8 @@
         {#if activeTab === 'project-defaults' && appStore.selectedProject}
             <ProjectDefaults
                 bind:commitAssistedBy
+                bind:gitAuthorName
+                bind:gitAuthorEmail
                 bind:mcpServerIDs={projectMCPOpts}
                 mcpOptions={selectableMCPServers(config)}
                 projectName={appStore.selectedProject.name}

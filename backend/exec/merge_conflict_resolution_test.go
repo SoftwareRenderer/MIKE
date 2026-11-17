@@ -98,7 +98,7 @@ func TestCommitMergeConflictResolution_RecordsOnlyTheResolution(t *testing.T) {
 	if !fx.te.merge.stageResolvedConflicts(fx.taskID, fx.wtPath) {
 		t.Fatal("stageResolvedConflicts failed")
 	}
-	if !fx.te.merge.commitMergeConflictResolution(fx.taskID, fx.wtPath) {
+	if !fx.te.merge.commitMergeConflictResolution(fx.projectID, fx.taskID, fx.wtPath) {
 		t.Fatal("commitMergeConflictResolution failed")
 	}
 

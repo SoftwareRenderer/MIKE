@@ -3,6 +3,7 @@ package types
 import (
 	"fmt"
 	"net"
+	"net/mail"
 	"path/filepath"
 	"strings"
 
@@ -117,6 +118,56 @@ func ValidateCommitHash(hash string) error {
 		default:
 			return fmt.Errorf("commit hash %q is not a git object id", hash)
 		}
+	}
+	return nil
+}
+
+// gitIdentityFieldMaxLen caps each half of a project's commit identity. The value reaches git as one
+// `-c user.name=…` argument on every commit in the project and lands in the log of every clone of it.
+const gitIdentityFieldMaxLen = 255
+
+// gitIdentityControl reports a rune no identity may carry. A newline inside `-c user.name=…` is a
+// value git reads as more than one line.
+func gitIdentityControl(r rune) bool {
+	return r < 0x20 || r == 0x7f
+}
+
+// ValidateGitAuthorName accepts what a project's commits may be authored as. Empty means the project
+// names no name and leaves that half to this server's boot stamp.
+func ValidateGitAuthorName(name string) error {
+	if name == "" {
+		return nil
+	}
+	if len(name) > gitIdentityFieldMaxLen {
+		return fmt.Errorf("git author name must be at most %d characters", gitIdentityFieldMaxLen)
+	}
+	if strings.IndexFunc(name, gitIdentityControl) >= 0 {
+		return fmt.Errorf("git author name %q contains a control character", name)
+	}
+	return nil
+}
+
+// ValidateGitAuthorEmail accepts the address half of a commit identity: one RFC 5322 addr-spec, and
+// nothing around it — a display name belongs to the name half, and a list of addresses is not an
+// identity. Empty means the project names no address.
+func ValidateGitAuthorEmail(email string) error {
+	if email == "" {
+		return nil
+	}
+	if len(email) > gitIdentityFieldMaxLen {
+		return fmt.Errorf("git author email must be at most %d characters", gitIdentityFieldMaxLen)
+	}
+	if strings.IndexFunc(email, gitIdentityControl) >= 0 {
+		return fmt.Errorf("git author email %q contains a control character", email)
+	}
+	// The parse alone would accept `<ada@example.com>` — an angle-addr whose display name is simply
+	// absent — so the bracket itself is refused rather than the pair of fields it hides.
+	if strings.ContainsAny(email, "<>") {
+		return fmt.Errorf("git author email %q is not an email address", email)
+	}
+	addr, err := mail.ParseAddress(email)
+	if err != nil || addr.Name != "" {
+		return fmt.Errorf("git author email %q is not an email address", email)
 	}
 	return nil
 }

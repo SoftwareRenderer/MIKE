@@ -1446,11 +1446,10 @@ func (h *GitHandler) HandleProjectCommit(w http.ResponseWriter, r *http.Request)
 		httputil.JSONError(w, http.StatusBadRequest, "no staged changes to commit")
 		return
 	}
-	// The identity configured for this server goes on the command line, because a checkout with no
-	// user.name of its own has nothing else to commit under and would be refused.
-	args := append([]string{"-C", project.Path}, git.GitAuthorFlags()...)
-	args = append(args, "commit", "-m", req.Message)
-	cmd = git.Command("", args...)
+	// The identity goes on the command line and into the child's environment, because a checkout with
+	// no user.name of its own has nothing else to commit under and would be refused.
+	cmd = git.CommandWithIdentity("", git.ProjectIdentity(project.GitAuthorName, project.GitAuthorEmail),
+		"-C", project.Path, "commit", "-m", req.Message)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		logging.For(logging.Managers).Errorf("git commit failed: %v: %s", err, out)
 		httputil.JSONError(w, http.StatusInternalServerError, "git commit failed")

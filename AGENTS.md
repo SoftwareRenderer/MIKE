@@ -321,8 +321,11 @@ Enforced by the server process, so it holds for non-sandboxed projects too.
 - **No subprocess inherits the server environment.** Exactly three allowlists, one per family (git, podman,
   agent). `os.Environ()` survives in one sanctioned place: the operator's own host terminal under
   `DANGER_ZONE=1`.
-- **The git author identity is accessor-only**, process-wide, and stamped at boot from git's own
-  `GIT_COMMITTER_*`/`GIT_AUTHOR_*` variables — a commit path appends `git.GitAuthorFlags()`.
+- **The git author identity is accessor-only and layered per project**, each half on its own: the pair
+  stamped at boot from git's own `GIT_COMMITTER_*`/`GIT_AUTHOR_*` variables, with the half a project's row
+  names ahead of it.
+- **A commit path carries `git.ProjectIdentity(...)`**, onto the command line *and* into the child's
+  environment, where git reads it first. `docs/confinement.md → The git author identity`.
 - **The release check is the only place something downloaded from the network becomes running code**, so it
   is opt-in, never self-applying, and it refuses an install that is not an unpacked release directory.
   **`docs/auto-update.md`**.

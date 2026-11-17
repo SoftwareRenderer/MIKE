@@ -458,7 +458,7 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, wor
 			// resolve conflicts and commit.
 			commitOK := te.merge.stageResolvedConflicts(task.ID, worktreePath)
 			if commitOK {
-				commitOK = te.merge.commitMergeConflictResolution(task.ID, worktreePath)
+				commitOK = te.merge.commitMergeConflictResolution(projectID, task.ID, worktreePath)
 			}
 			if commitOK {
 				logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("conflict resolution committed")

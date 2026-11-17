@@ -34,6 +34,6 @@ func binaryPathsFromStaged(numstatOutput string) []string {
 // unstagePaths resets paths from staging via WorktreeManager.
 func unstagePaths(wm *git.WorktreeManager, taskID string, paths []string) {
 	for _, path := range paths {
-		_ = wm.GitRunInWorktree(taskID, append([]string{"reset", "HEAD", "--", path}, git.GitAuthorFlags()...)...)
+		_ = wm.GitRunInWorktree(taskID, "reset", "HEAD", "--", path)
 	}
 }

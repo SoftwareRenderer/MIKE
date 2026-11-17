@@ -239,3 +239,58 @@ func TestValidateCommitHash(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateGitAuthorName(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		wantErr bool
+	}{
+		{"a plain name", "Ada Lovelace", false},
+		{"a name in another script", "曹雪芹", false},
+		{"a name that reads as an option", "--mirror", false},
+		{"unset is a decision", "", false},
+		{"a newline is more than one line", "Ada\nLovelace", true},
+		{"a tab", "Ada\tLovelace", true},
+		{"a NUL", "Ada\x00", true},
+		{"a delete", "Ada\x7f", true},
+		{"longer than an identity", strings.Repeat("a", 256), true},
+		{"the longest accepted name", strings.Repeat("a", 255), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateGitAuthorName(tt.value)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateGitAuthorName(%q) error = %v, wantErr %v", tt.value, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateGitAuthorEmail(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		wantErr bool
+	}{
+		{"an addr-spec", "ada@example.com", false},
+		{"a tagged local part", "ada+git@sub.example.co.uk", false},
+		{"no dot in the host is a local address", "ada@localhost", false},
+		{"unset is a decision", "", false},
+		{"a display name belongs to the name half", "Ada Lovelace <ada@example.com>", true},
+		{"an angle-addr with no display name", "<ada@example.com>", true},
+		{"no host", "ada", true},
+		{"no local part", "@example.com", true},
+		{"two addresses are not an identity", "a@b.c; d@e.f", true},
+		{"a newline is more than one line", "ada@exa\nmple.com", true},
+		{"longer than an address", strings.Repeat("a", 250) + "@example.com", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateGitAuthorEmail(tt.value)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateGitAuthorEmail(%q) error = %v, wantErr %v", tt.value, err, tt.wantErr)
+			}
+		})
+	}
+}

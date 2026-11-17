@@ -10,6 +10,8 @@ package git
 import (
 	"context"
 	"os/exec"
+	"slices"
+	"strings"
 	"time"
 
 	"mike/pkg/subproc"
@@ -50,8 +52,8 @@ var gitEnvNames = map[string]bool{
 	"GIT_REMOTE_HTTPS":    true,
 	"GIT_SSL_CAINFO":      true,
 	"GIT_SSL_NO_VERIFY":   true,
-	"GIT_AUTHOR_NAME":     true, // author identity is set explicitly (GitAuthorFlags); these
-	"GIT_AUTHOR_EMAIL":    true, // are the mirror for environments that read env not flags
+	"GIT_AUTHOR_NAME":     true, // how a command with no Identity of its own — a stash writes a commit
+	"GIT_AUTHOR_EMAIL":    true, // object and has no person naming one — gets an ident at all
 	"GIT_COMMITTER_NAME":  true,
 	"GIT_COMMITTER_EMAIL": true,
 }
@@ -106,6 +108,42 @@ func CommandContext(ctx context.Context, dir string, args ...string) *exec.Cmd {
 func Run(dir string, args ...string) (string, error) {
 	out, err := Command(dir, args...).CombinedOutput()
 	return string(out), err
+}
+
+// CommandWithIdentity is Command for a command that creates a commit in one project's name: the
+// identity goes on the command line as -c arguments, and into the environment in place of whatever
+// this process carries there, because git reads GIT_AUTHOR_* and GIT_COMMITTER_* before it reads any
+// config and an inherited one would outrank the pair the command was asked to commit as.
+func CommandWithIdentity(dir string, id Identity, args ...string) *exec.Cmd {
+	cmd := Command(dir, append(id.flags(), args...)...)
+	cmd.Env = withIdentity(Env(), id.envEntries())
+	return cmd
+}
+
+// RunWithIdentity is Run with a commit identity.
+func RunWithIdentity(dir string, id Identity, args ...string) (string, error) {
+	out, err := CommandWithIdentity(dir, id, args...).CombinedOutput()
+	return string(out), err
+}
+
+// identityEnvNames are the variables git reads for a commit identity before it reads any config, so
+// one this process inherited outranks the -c arguments a command carries. A command built with an
+// Identity has these taken out of its environment and that identity's own put back.
+var identityEnvNames = []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"}
+
+// withIdentity returns env with git's identity variables replaced by entries. They are dropped rather
+// than overwritten in place so a half the identity does not name reaches the repository's config
+// instead of the value this process happened to inherit.
+func withIdentity(env []string, entries []string) []string {
+	out := make([]string, 0, len(env)+len(entries))
+	for _, kv := range env {
+		name, _, _ := strings.Cut(kv, "=")
+		if slices.Contains(identityEnvNames, name) {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, entries...)
 }
 
 // GitWaitDelay bounds how long a git subprocess may keep output pipes open after exit or cancellation.

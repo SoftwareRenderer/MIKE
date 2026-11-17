@@ -699,17 +699,17 @@ func (h *TaskHandler) propagateSubtasksAutoMerge(projectID, taskID string, enabl
 	}
 }
 
-// resolveGitAuthor returns the name and email that a commit in this project would carry. An empty
-// result means nothing configures an identity anywhere, and the caller then shows none rather than
-// inventing one.
+// resolveGitAuthor returns the name and email that a commit in this project would carry: the half the
+// project's own row names, then this server's, then the repository's config. An empty result means
+// nothing configures an identity anywhere, and the caller then shows none rather than inventing one.
 func resolveGitAuthor(projectID string, s interface {
 	GetProject(id string) (*types.Project, error)
 }) (string, string) {
-	dir := ""
+	dir, projectName, projectEmail := "", "", ""
 	if proj, err := s.GetProject(projectID); err == nil {
-		dir = proj.Path
+		dir, projectName, projectEmail = proj.Path, proj.GitAuthorName, proj.GitAuthorEmail
 	}
-	return git.ResolveAuthorIdentity(func(key string) string {
+	return git.ProjectAuthorIdentity(projectName, projectEmail, func(key string) string {
 		if dir == "" {
 			return ""
 		}
@@ -856,6 +856,14 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	// the resolver like any other; committing it instead would mean `git add`, which marks it resolved.
 	var commitOut string
 	var commitErr error
+	// One project row read for this click: the commit below needs its identity, and the branch tip
+	// further down needs its path. The identity comes from the row rather than being remembered,
+	// because a person may have set it in Settings since this task started.
+	project, projectErr := h.store.GetProject(projectID)
+	var authorName, authorEmail string
+	if projectErr == nil {
+		authorName, authorEmail = project.GitAuthorName, project.GitAuthorEmail
+	}
 	if worktreeExists {
 		if unmerged := h.worktreeMgr.StageIndexedFiles(taskID); len(unmerged) > 0 {
 			unlockWorktree()
@@ -877,7 +885,8 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 			commitMsg = h.executor.GenerateCommitMessage(r.Context(), task)
 		}
 		// --allow-empty is what lets a task whose work is already committed still reach Done.
-		commitOut, commitErr = h.worktreeMgr.GitRunInWorktreeOutput(taskID, append(git.GitAuthorFlags(), "commit", "-m", commitMsg, "--allow-empty")...)
+		commitOut, commitErr = h.worktreeMgr.GitRunInWorktreeOutputAs(taskID,
+			git.ProjectIdentity(authorName, authorEmail), "commit", "-m", commitMsg, "--allow-empty")
 	}
 	unlockWorktree()
 
@@ -889,13 +898,10 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	}
 
 	// Capture branch tip before merge (for post-commit diff comparison)
-	if task.Branch != "" {
-		project, pErr := h.store.GetProject(projectID)
-		if pErr == nil {
-			c := git.Command("", "-C", project.Path, "rev-parse", task.Branch)
-			if out, err := c.CombinedOutput(); err == nil {
-				task.BranchTip = strings.TrimSpace(string(out))
-			}
+	if task.Branch != "" && projectErr == nil {
+		c := git.Command("", "-C", project.Path, "rev-parse", task.Branch)
+		if out, err := c.CombinedOutput(); err == nil {
+			task.BranchTip = strings.TrimSpace(string(out))
 		}
 	}
 

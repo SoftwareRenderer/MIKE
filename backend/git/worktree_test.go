@@ -845,3 +845,80 @@ func TestComputeUntrackedHashPricesTheContentNotTheShape(t *testing.T) {
 			ComputeUntrackedHash(sameShape))
 	}
 }
+
+// A project names the person its commits carry, and it does so one half at a time: the half it leaves
+// blank stays this server's answer, and a project that names nothing sends no flags at all, which is
+// how a repository's own user.name/user.email keeps deciding.
+func TestProjectIdentityLayersEachHalfOnItsOwn(t *testing.T) {
+	origName, origEmail := AuthorIdentity()
+	t.Cleanup(func() { SetAuthorIdentity(origName, origEmail) })
+
+	for _, tc := range []struct {
+		name         string
+		serverName   string
+		serverEmail  string
+		projectName  string
+		projectEmail string
+		want         []string
+	}{
+		{
+			"the project's name over the server's email",
+			"Server", "server@example.com", "Ada Lovelace", "",
+			[]string{"-c", "user.name=Ada Lovelace", "-c", "user.email=server@example.com"},
+		},
+		{
+			"the project's email over the server's name",
+			"Server", "server@example.com", "", "ada@example.com",
+			[]string{"-c", "user.name=Server", "-c", "user.email=ada@example.com"},
+		},
+		{
+			"a project that names both replaces both",
+			"Server", "server@example.com", "Ada Lovelace", "ada@example.com",
+			[]string{"-c", "user.name=Ada Lovelace", "-c", "user.email=ada@example.com"},
+		},
+		{
+			"a project that names nothing leaves the server's pair",
+			"Server", "server@example.com", "", "",
+			[]string{"-c", "user.name=Server", "-c", "user.email=server@example.com"},
+		},
+		{
+			"nobody names anything, so git answers",
+			"", "", "", "",
+			nil,
+		},
+	} {
+		SetAuthorIdentity(tc.serverName, tc.serverEmail)
+		if got := ProjectIdentity(tc.projectName, tc.projectEmail).flags(); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: ProjectIdentity(%q, %q).flags() = %v, want %v", tc.name, tc.projectName, tc.projectEmail, got, tc.want)
+		}
+	}
+}
+
+// The commit preview and the git status panel name a person; the flags a commit carries are the same
+// layering, with the repository's own config answering only where neither row nor server did.
+func TestProjectAuthorIdentityAnswersTheProjectFirst(t *testing.T) {
+	origName, origEmail := AuthorIdentity()
+	t.Cleanup(func() { SetAuthorIdentity(origName, origEmail) })
+	fill := func(key string) string {
+		if key == "user.name" {
+			return "Repo Person"
+		}
+		return "repo@example.com"
+	}
+
+	SetAuthorIdentity("Server", "")
+	if name, email := ProjectAuthorIdentity("", "ada@example.com", fill); name != "Server" || email != "ada@example.com" {
+		t.Errorf("project email over the server name: got %q <%q>", name, email)
+	}
+	if name, email := ProjectAuthorIdentity("Ada Lovelace", "", fill); name != "Ada Lovelace" || email != "repo@example.com" {
+		t.Errorf("an unnamed email falls to the repository: got %q <%q>", name, email)
+	}
+	if name, email := ProjectAuthorIdentity("", "", fill); name != "Server" || email != "repo@example.com" {
+		t.Errorf("nobody naming the email asked the repository: got %q <%q>", name, email)
+	}
+
+	SetAuthorIdentity("", "")
+	if name, email := ProjectAuthorIdentity("", "", fill); name != "Repo Person" || email != "repo@example.com" {
+		t.Errorf("an unstamped server asked the repository: got %q <%q>", name, email)
+	}
+}

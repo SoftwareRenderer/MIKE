@@ -336,9 +336,14 @@ type Project struct {
 	ActiveTerminalPorts []AssignedPort `json:"active_terminal_ports,omitempty"` // transient: assigned ports from project-level terminal
 	// CommitAssistedBy is this project's answer to the "Assisted-by" commit trailer, read through
 	// AssistedByEnabled.
-	CommitAssistedBy *bool     `json:"commit_assisted_by,omitzero"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	CommitAssistedBy *bool `json:"commit_assisted_by,omitzero"`
+	// GitAuthorName and GitAuthorEmail are this project's own commit identity. Each half that is set
+	// outranks the identity this server was stamped with at boot, and each half that is not is left to
+	// it; git.ProjectIdentity is where the two are layered.
+	GitAuthorName  string    `json:"git_author_name,omitempty"`
+	GitAuthorEmail string    `json:"git_author_email,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // AssistedByEnabled says whether this project's commit messages credit the models that contributed.

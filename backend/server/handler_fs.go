@@ -1277,9 +1277,10 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 		Fault(w, "git add", err)
 		return
 	}
-	commitArgs := []string{"-C", req.Path, "-c", "user.name=" + name, "-c", "user.email=" + email, "commit", "-m", "Initial commit"}
-	cmd = git.Command("", commitArgs...)
-	if _, err := cmd.CombinedOutput(); err != nil {
+	// The pair the check above insisted on goes on both places git reads an identity from, which is
+	// git.RunWithIdentity's job rather than this call site's.
+	if _, err := git.RunWithIdentity("", git.Identity{Name: name, Email: email},
+		"-C", req.Path, "commit", "-m", "Initial commit"); err != nil {
 		Fault(w, "git commit", err)
 		return
 	}
