@@ -221,34 +221,43 @@ func TestAssertionRefusesWithoutUserVerification(t *testing.T) {
 	}
 }
 
-// A counter that goes backwards on a credential that cannot be synchronized means the key was copied.
-func TestAssertionRefusesABackwardsCounterOnAHardwareCredential(t *testing.T) {
-	p, _, tickets := newTestPasskeys(t)
-	credential := register(t, p, tickets, localHost, "security key",
-		protocol.FlagUserPresent|protocol.FlagUserVerified|protocol.FlagAttestedCredentialData)
-	flags := protocol.FlagUserPresent | protocol.FlagUserVerified
+// A counter that goes backwards says the key was copied — unless the credential says it synchronizes,
+// where no counter means anything across its devices and refusing would lock a person out of their own
+// phone. The backup flag is the whole answer.
+func TestABackwardsCounterIsJudgedByWhetherTheCredentialSynchronizes(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		mint       protocol.AuthenticatorFlags
+		sign       protocol.AuthenticatorFlags
+		wantRefuse bool
+	}{
+		{
+			name:       "a security key",
+			mint:       protocol.FlagUserPresent | protocol.FlagUserVerified | protocol.FlagAttestedCredentialData,
+			sign:       protocol.FlagUserPresent | protocol.FlagUserVerified,
+			wantRefuse: true,
+		},
+		{
+			name: "a synchronized passkey",
+			mint: protocol.FlagUserPresent | protocol.FlagUserVerified | protocol.FlagBackupEligible | protocol.FlagAttestedCredentialData,
+			sign: protocol.FlagUserPresent | protocol.FlagUserVerified | protocol.FlagBackupEligible,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, _, tickets := newTestPasskeys(t)
+			credential := register(t, p, tickets, localHost, tc.name, tc.mint)
 
-	if err := assertCredential(t, p, tickets, localHost, credential, 9, flags); err != nil {
-		t.Fatalf("first sign-in: %v", err)
-	}
-	if err := assertCredential(t, p, tickets, localHost, credential, 4, flags); !errors.Is(err, ErrCeremonyRefused) {
-		t.Fatalf("a sign-in whose counter went backwards = %v; want ErrCeremonyRefused", err)
-	}
-}
-
-// A synchronized passkey has no counter that means anything across its devices, so the same signal is
-// reported and accepted rather than locking a person out of their own phone.
-func TestAssertionAcceptsABackwardsCounterOnASynchronizedCredential(t *testing.T) {
-	p, _, tickets := newTestPasskeys(t)
-	credential := register(t, p, tickets, localHost, "phone",
-		protocol.FlagUserPresent|protocol.FlagUserVerified|protocol.FlagBackupEligible|protocol.FlagAttestedCredentialData)
-	flags := protocol.FlagUserPresent | protocol.FlagUserVerified | protocol.FlagBackupEligible
-
-	if err := assertCredential(t, p, tickets, localHost, credential, 9, flags); err != nil {
-		t.Fatalf("first sign-in: %v", err)
-	}
-	if err := assertCredential(t, p, tickets, localHost, credential, 4, flags); err != nil {
-		t.Fatalf("a synchronized credential's stale counter was refused: %v", err)
+			if err := assertCredential(t, p, tickets, localHost, credential, 9, tc.sign); err != nil {
+				t.Fatalf("first sign-in: %v", err)
+			}
+			err := assertCredential(t, p, tickets, localHost, credential, 4, tc.sign)
+			if tc.wantRefuse && !errors.Is(err, ErrCeremonyRefused) {
+				t.Fatalf("a sign-in whose counter went backwards = %v; want ErrCeremonyRefused", err)
+			}
+			if !tc.wantRefuse && err != nil {
+				t.Fatalf("a synchronized credential's stale counter was refused: %v", err)
+			}
+		})
 	}
 }
 

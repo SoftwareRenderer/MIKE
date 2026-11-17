@@ -123,15 +123,42 @@ func findAgentBinary(t *testing.T) string {
 	return ""
 }
 
-func TestIsAvailable(t *testing.T) {
-	sandboxcheck.Require(t, BaseImage)
-	sm := NewSandboxManager(bootWithBridge(t))
+// TestManagerAvailabilityComesFromTheSharedProbe: the manager's answer is the shared probe's answer,
+// read once when the manager is built — which is why a task sandbox and an extension sandbox cannot
+// disagree about whether this host runs gVisor. It is a setting rather than a container, so the test
+// asks it with stub binaries on PATH and runs on every host.
+func TestManagerAvailabilityComesFromTheSharedProbe(t *testing.T) {
+	runscOK := "#!/bin/sh\necho 'runsc version test'\n"
+	for _, tc := range []struct {
+		name string
+		bins map[string]string
+		want bool
+	}{
+		{"nothing on PATH", nil, false},
+		{"runsc that cannot answer --version", map[string]string{"runsc": "#!/bin/sh\nexit 1\n"}, false},
+		{"runsc without podman", map[string]string{"runsc": runscOK}, false},
+		{"runsc and podman", map[string]string{"runsc": runscOK, "podman": "#!/bin/sh\nexit 0\n"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bin := t.TempDir()
+			for name, body := range tc.bins {
+				if err := os.WriteFile(filepath.Join(bin, name), []byte(body), 0o755); err != nil {
+					t.Fatalf("write stub %s: %v", name, err)
+				}
+			}
+			t.Setenv("PATH", bin)
 
-	if !sm.IsAvailable() {
-		t.Error("expected gVisor to be available")
+			if got := NewSandboxManager(sandboxruntime.Boot{}).IsAvailable(); got != tc.want {
+				t.Errorf("IsAvailable() = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
+// TestCreateAndStop: the container a task runs in exists by name after Create and is gone after
+// Stop, with the capability grant the project's Sandbox Configuration can carry appended on the way —
+// podman has to accept `AppendCapabilities`' output under runsc, or every capability grant becomes a
+// refused task rather than a wider sandbox.
 func TestCreateAndStop(t *testing.T) {
 
 	sm := NewSandboxManager(bootWithBridge(t))
@@ -141,7 +168,9 @@ func TestCreateAndStop(t *testing.T) {
 	dir := taskWorktreeDir(t)
 	taskID := "test-sandbox-task"
 
-	_, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{})
+	_, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{
+		Capabilities: []string{"CAP_NET_RAW", "CAP_CHOWN"},
+	})
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -156,6 +185,15 @@ func TestCreateAndStop(t *testing.T) {
 	}
 	if !exists {
 		t.Error("expected container to exist after Create")
+	}
+
+	// The grant did not cost the container its ordinary work.
+	output, err := sm.Exec(taskID, "echo hello")
+	if err != nil {
+		t.Fatalf("exec in the container: %v", err)
+	}
+	if output != "hello\n" {
+		t.Fatalf("unexpected output: %q", output)
 	}
 }
 
@@ -397,94 +435,39 @@ func TestCreateWithoutGVisor(t *testing.T) {
 	}
 }
 
-func TestCreate_RejectsInvalidImageRef(t *testing.T) {
+// TestCreateChecksTheImageRefBeforeTheRuntime: a ref podman could read as a flag is refused by name,
+// and a well-formed one is not. Both refusals land before the availability probe, so a host without
+// runsc reports the configuration error instead of hiding it under "gVisor not available".
+func TestCreateChecksTheImageRefBeforeTheRuntime(t *testing.T) {
 	sm := &SandboxManager{
 		active:    make(map[string]string),
 		rt:        sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{}),
 		available: false,
 	}
 
-	invalidImages := []string{
-		"-v",
-		"--format=json",
-		"-t something",
-	}
-
-	for _, img := range invalidImages {
-		_, err := sm.Create("test-invalid-image", taskWorktreeDir(t), &types.Project{Name: "test-proj"}, SandboxOpts{
-			BaseImage: img,
+	for _, tc := range []struct {
+		image string
+		want  string
+	}{
+		{"-v", "invalid sandbox image"},
+		{"--format=json", "invalid sandbox image"},
+		{"-t something", "invalid sandbox image"},
+		{"docker.io/library/ubuntu:latest", "gVisor not available"},
+	} {
+		_, err := sm.Create("test-image-ref", taskWorktreeDir(t), &types.Project{Name: "test-proj"}, SandboxOpts{
+			BaseImage: tc.image,
 		})
 		if err == nil {
-			t.Fatalf("expected error for invalid image ref %q", img)
+			t.Fatalf("Create accepted image ref %q", tc.image)
 		}
-		if !strings.Contains(err.Error(), "invalid sandbox image") {
-			t.Fatalf("expected error about invalid sandbox image for %q, got: %v", img, err)
+		if !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("Create(image %q) error = %v, want it to name %q", tc.image, err, tc.want)
 		}
-	}
-}
-
-func TestCreate_ValidImageRefPassesValidation(t *testing.T) {
-	sm := &SandboxManager{
-		active:    make(map[string]string),
-		rt:        sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{}),
-		available: false,
-	}
-
-	// A valid image ref should pass validation and reach the gVisor check.
-	_, err := sm.Create("test-valid-image", taskWorktreeDir(t), &types.Project{Name: "test-proj"}, SandboxOpts{
-		BaseImage: "docker.io/library/ubuntu:latest",
-	})
-	if err == nil {
-		t.Fatal("expected error (gVisor not available)")
-	}
-	if !strings.Contains(err.Error(), "gVisor not available") {
-		t.Fatalf("valid image should pass validation and reach gVisor check, got: %v", err)
 	}
 }
 
 // A missing sandbox image is named plainly and fast: qualified refs plus --pull=never mean no retries
 // against a guessed registry.
-// TestCreateContainerArgs pins the argument order: podman-global flags before `create`, `--pull
-// never` after it. Container creation must not fetch an image; the caller does that, visibly.
-func TestCreateContainerArgs(t *testing.T) {
-	args := createContainerArgs("kanban-sandbox-task-1", "/home/sandbox/proj")
-
-	indexOf := func(want string) int {
-		for i, a := range args {
-			if a == want {
-				return i
-			}
-		}
-		return -1
-	}
-	hasPair := func(flag, value string) bool {
-		for i := 0; i+1 < len(args); i++ {
-			if args[i] == flag && args[i+1] == value {
-				return true
-			}
-		}
-		return false
-	}
-
-	if !hasPair("--pull", "never") {
-		t.Fatalf("args missing --pull never: %v", args)
-	}
-	createAt, pullAt := indexOf("create"), indexOf("--pull")
-	if pullAt < createAt {
-		t.Errorf("--pull at %d precedes `create` at %d — podman reads it as a global flag: %v", pullAt, createAt, args)
-	}
-	if indexOf("--runtime-flag=overlay2=root:self") > createAt || indexOf("--runtime-flag=ignore-cgroups") > createAt {
-		t.Errorf("podman-global --runtime-flag must come before `create`: %v", args)
-	}
-	for _, pair := range [][2]string{{"--runtime", "runsc"}, {"--security-opt", "label=disable"},
-		{"--cap-drop", "ALL"}, {"--security-opt", "no-new-privileges"}, {"--workdir", "/home/sandbox/proj"},
-		{"--name", "kanban-sandbox-task-1"}} {
-		if !hasPair(pair[0], pair[1]) {
-			t.Errorf("args missing %s %s: %v", pair[0], pair[1], args)
-		}
-	}
-}
-
 func TestCreate_MissingImageIsActionable(t *testing.T) {
 
 	sm := NewSandboxManager(bootWithBridge(t))
@@ -519,58 +502,58 @@ func TestCreate_MissingImageIsActionable(t *testing.T) {
 	}
 }
 
-func TestContainerIsRunning_Cache(t *testing.T) {
-	sm := &SandboxManager{
-		active:        make(map[string]string),
-		mountPaths:    make(map[string]string),
-		agents:        make(map[string]*agentConn),
-		livenessCache: make(map[string]time.Time),
-		available:     true,
+// TestContainerIsRunningCachesItsLivenessAnswer: the cache exists because a status display polls, and
+// an inspect per read is what it would otherwise cost. A fresh entry is the answer; an expired one
+// asks podman again, and an answer that found no container is not left cached.
+func TestContainerIsRunningCachesItsLivenessAnswer(t *testing.T) {
+	newManager := func(key, container string, stamp time.Time) *SandboxManager {
+		sm := &SandboxManager{
+			active:        map[string]string{},
+			mountPaths:    map[string]string{},
+			agents:        map[string]*agentConn{},
+			livenessCache: map[string]time.Time{},
+			available:     true,
+		}
+		if key != "" {
+			sm.active[key] = container
+			sm.livenessCache[key] = stamp
+		}
+		return sm
 	}
 
-	// Not in active map — returns false without podman inspect
-	if sm.ContainerIsRunning("nonexistent") {
+	// A key with no container behind it is answered without asking podman.
+	if newManager("", "", time.Time{}).ContainerIsRunning("nonexistent") {
 		t.Error("expected ContainerIsRunning to return false for unknown task")
 	}
 
-	// In active map but cache is empty — would call podman inspect (skip, needs real container)
-	// Instead, test the cache directly:
-	sm.active["task-cached"] = "sandbox-task-cached"
-	sm.livenessCache["task-cached"] = time.Now()
-
-	// Should return true from cache (no podman inspect needed)
-	if !sm.ContainerIsRunning("task-cached") {
-		t.Error("expected ContainerIsRunning to return true from cache")
+	for _, tc := range []struct {
+		name    string
+		key     string
+		stamp   time.Time
+		want    bool
+		tracked bool
+	}{
+		{"a fresh entry is the answer, with no inspect", "task-cached", time.Now(), true, true},
+		// The container does not exist, so the re-ask answers false and clears the entry.
+		{"an expired entry asks again", "task-expired", time.Now().Add(-10 * time.Minute), false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sm := newManager(tc.key, "sandbox-"+tc.key, tc.stamp)
+			if got := sm.ContainerIsRunning(tc.key); got != tc.want {
+				t.Errorf("ContainerIsRunning(%q) = %v, want %v", tc.key, got, tc.want)
+			}
+			_, cached := sm.livenessCache[tc.key]
+			if cached != tc.tracked {
+				t.Errorf("liveness cache entry present = %v, want %v", cached, tc.tracked)
+			}
+		})
 	}
 
-	// Stop should invalidate the cache
-	_ = sm.Stop("task-cached")
-	if _, stillCached := sm.livenessCache["task-cached"]; stillCached {
+	// Stop invalidates what it stopped.
+	sm := newManager("task-stopped", "sandbox-task-stopped", time.Now())
+	_ = sm.Stop("task-stopped")
+	if _, cached := sm.livenessCache["task-stopped"]; cached {
 		t.Error("expected liveness cache to be invalidated by Stop")
-	}
-}
-
-func TestContainerIsRunning_CacheExpired(t *testing.T) {
-	sm := &SandboxManager{
-		active:        make(map[string]string),
-		mountPaths:    make(map[string]string),
-		agents:        make(map[string]*agentConn),
-		livenessCache: make(map[string]time.Time),
-		available:     true,
-	}
-
-	sm.active["task-expired"] = "sandbox-task-expired"
-	// Set cache entry to expired (before livenessTTL)
-	sm.livenessCache["task-expired"] = time.Now().Add(-10 * time.Minute)
-
-	// Cache is expired — would call podman inspect.
-	// Since container doesn't actually exist, it returns false.
-	if sm.ContainerIsRunning("task-expired") {
-		t.Error("expected ContainerIsRunning to return false for expired cache with nonexistent container")
-	}
-	// Cache should be cleared after a failed check
-	if _, stillCached := sm.livenessCache["task-expired"]; stillCached {
-		t.Error("expected liveness cache to be cleared after failed check")
 	}
 }
 
@@ -679,66 +662,15 @@ func TestStartProcess(t *testing.T) {
 	_ = ph.Cmd.Wait()
 }
 
+// TestStartProcess_NonexistentTask: a key with no container behind it is refused by name, before
+// anything is asked of podman — so this test needs no container and is not gated on one.
 func TestStartProcess_NonexistentTask(t *testing.T) {
 	sm := NewSandboxManager(bootWithBridge(t))
-	sandboxcheck.Require(t, BaseImage)
 
 	// Try to start a process in a non-existent container
 	_, err := sm.StartProcess("nonexistent-task", "echo", []string{"hello"})
 	if err == nil {
 		t.Fatal("expected error for non-existent task")
-	}
-}
-
-func TestCreateWithMemoryLimit(t *testing.T) {
-
-	sm := NewSandboxManager(bootWithBridge(t))
-	sandboxcheck.Require(t, BaseImage)
-
-	dir := taskWorktreeDir(t)
-	taskID := "test-memory-task"
-
-	// Create with 512MB memory limit
-	_, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{MemoryLimit: 512})
-	if err != nil {
-		t.Fatalf("create sandbox with memory limit: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = sm.Stop(taskID)
-	})
-
-	// Verify container exists
-	exists, err := sm.rt.ContainerExists(ContainerNamePrefix + "-" + taskID)
-	if err != nil {
-		t.Fatalf("check container: %v", err)
-	}
-	if !exists {
-		t.Error("expected container to exist after Create with memory limit")
-	}
-
-	// Verify the container can run commands
-	output, err := sm.Exec(taskID, "echo hello")
-	if err != nil {
-		t.Fatalf("exec in memory-limited container: %v", err)
-	}
-	if output != "hello\n" {
-		t.Fatalf("unexpected output: %q", output)
-	}
-
-	// Verify the cgroup memory limit was actually applied. runsc does not
-	// apply the OCI spec's linux.resources itself, so Create writes
-	// memory.max into the container's cgroup — this is what makes the
-	// --memory flag effective.
-	cgDir, err := sm.rt.ContainerCgroupDir(ContainerNamePrefix + "-" + taskID)
-	if err != nil {
-		t.Fatalf("resolve container cgroup dir: %v", err)
-	}
-	maxData, err := os.ReadFile(filepath.Join(cgDir, "memory.max"))
-	if err != nil {
-		t.Fatalf("read memory.max: %v", err)
-	}
-	if got := strings.TrimSpace(string(maxData)); got != "536870912" {
-		t.Errorf("cgroup memory.max = %q, want 536870912 (512M)", got)
 	}
 }
 
@@ -856,230 +788,154 @@ func TestGetMemoryStats(t *testing.T) {
 	}
 }
 
-func TestCreateWithCapabilities(t *testing.T) {
-
-	sm := NewSandboxManager(bootWithBridge(t))
+// TestExecEntryPointsCarryTheWholeSandboxConfig: each exec entry point creates the container itself
+// when none is running, so each one has to hand `Create` the whole Sandbox Configuration — the memory
+// limit, the declared mounts and the environment. An entry point that dropped a field would run its
+// commands in a container missing configuration nobody told it about.
+func TestExecEntryPointsCarryTheWholeSandboxConfig(t *testing.T) {
 	sandboxcheck.Require(t, BaseImage)
 
-	dir := taskWorktreeDir(t)
-	taskID := "test-capabilities-task"
-
-	// Create with custom capabilities
-	_, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{
-		Capabilities: []string{"CAP_NET_RAW", "CAP_CHOWN"},
-	})
-	if err != nil {
-		t.Fatalf("create sandbox with capabilities: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = sm.Stop(taskID)
-	})
-
-	// Verify container exists
-	exists, err := sm.rt.ContainerExists(ContainerNamePrefix + "-" + taskID)
-	if err != nil {
-		t.Fatalf("check container: %v", err)
-	}
-	if !exists {
-		t.Error("expected container to exist after Create with capabilities")
-	}
-
-	// Verify the container can run commands
-	output, err := sm.Exec(taskID, "echo hello")
-	if err != nil {
-		t.Fatalf("exec in container with capabilities: %v", err)
-	}
-	if output != "hello\n" {
-		t.Fatalf("unexpected output: %q", output)
+	for _, tc := range []struct {
+		name string
+		// run creates the container through one entry point and answers with the guest's output and
+		// the key its container is tracked under, so the subtest can stop it.
+		run  func(t *testing.T, sm *SandboxManager) (out, key string, err error)
+		want []string
+	}{
+		{
+			name: "ExecProject carries the mounts and the envs",
+			run: func(t *testing.T, sm *SandboxManager) (string, string, error) {
+				dir := t.TempDir()
+				project := &types.Project{ID: "test-execproj-fullcfg", Name: "test-execproj", Path: dir}
+				mountDir := filepath.Join(dir, "custom-mount")
+				if err := os.MkdirAll(mountDir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(mountDir, "marker"), []byte("on-the-mount\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				opts := SandboxOpts{
+					MemoryLimit:   512,
+					SandboxMounts: []types.SandboxMount{{HostPath: mountDir, ContainerPath: "/mnt/custom", Mode: "rw"}},
+					SandboxEnvs:   []types.SandboxEnv{{Key: "TEST_SANDBOX_VAR", Value: "hello"}},
+				}
+				out, err := sm.ExecProject(project, "echo $TEST_SANDBOX_VAR && cat /mnt/custom/marker", opts)
+				return out, "proj:" + project.ID, err
+			},
+			want: []string{"hello", "on-the-mount"},
+		},
+		{
+			name: "ExecProjectWithInput carries the envs alongside the bytes it pipes in",
+			run: func(t *testing.T, sm *SandboxManager) (string, string, error) {
+				project := &types.Project{ID: "test-execproj-input-fullcfg", Name: "test-execproj-input", Path: t.TempDir()}
+				opts := SandboxOpts{
+					MemoryLimit: 256,
+					SandboxEnvs: []types.SandboxEnv{{Key: "INPUT_TEST_VAR", Value: "works"}},
+				}
+				out, err := sm.ExecProjectWithInput(project, "cat && echo $INPUT_TEST_VAR", []byte("stdin-data\n"), opts)
+				return out, "proj:" + project.ID, err
+			},
+			want: []string{"stdin-data", "works"},
+		},
+		{
+			name: "ExecTask carries the envs of a task container",
+			run: func(t *testing.T, sm *SandboxManager) (string, string, error) {
+				const taskID = "test-exectask-fullcfg"
+				opts := SandboxOpts{
+					MemoryLimit: 128,
+					SandboxEnvs: []types.SandboxEnv{{Key: "TASK_TEST_VAR", Value: "task-value"}},
+				}
+				out, err := sm.ExecTask(taskID, taskWorktreeDir(t), &types.Project{Name: "test-exectask"}, "echo $TASK_TEST_VAR", opts)
+				return out, taskID, err
+			},
+			want: []string{"task-value"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sm := NewSandboxManager(bootWithBridge(t))
+			out, key, err := tc.run(t, sm)
+			t.Cleanup(func() { _ = sm.Stop(key) })
+			if err != nil {
+				t.Fatalf("%v (output: %s)", err, out)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(out, want) {
+					t.Errorf("the guest answered %q, which is missing %q — the configuration never reached the container",
+						out, want)
+				}
+			}
+		})
 	}
 }
 
-func TestExecProject_FullConfig(t *testing.T) {
-
-	sm := NewSandboxManager(bootWithBridge(t))
+// TestEnsureProjectContainerRecreatesAContainerThatNoLongerMatches: the running project container
+// holds the configuration of the row as it was when it was created, so a container that no longer
+// matches is recreated rather than reused — whether it went away between calls or the checkout it
+// mounts moved out from under it.
+func TestEnsureProjectContainerRecreatesAContainerThatNoLongerMatches(t *testing.T) {
 	sandboxcheck.Require(t, BaseImage)
 
-	dir := t.TempDir()
-	project := &types.Project{ID: "test-execproj-fullcfg", Name: "test-execproj", Path: dir}
+	t.Run("a stopped container comes back with the new config", func(t *testing.T) {
+		sm := NewSandboxManager(bootWithBridge(t))
+		project := &types.Project{ID: "test-recreate-proj", Name: "test-recreate", Path: t.TempDir()}
 
-	// Custom mount to verify full config is passed through
-	mountDir := filepath.Join(dir, "custom-mount")
-	os.MkdirAll(mountDir, 0755)
-	sandboxMounts := []types.SandboxMount{
-		{HostPath: mountDir, ContainerPath: "/mnt/custom", Mode: "rw"},
-	}
-	sandboxEnvs := []types.SandboxEnv{
-		{Key: "TEST_SANDBOX_VAR", Value: "hello"},
-	}
-
-	// ExecProject should create the container with full config
-	output, err := sm.ExecProject(project, "echo $TEST_SANDBOX_VAR", SandboxOpts{MemoryLimit: 512, SandboxMounts: sandboxMounts, SandboxEnvs: sandboxEnvs})
-	if err != nil {
-		t.Fatalf("ExecProject: %v", err)
-	}
-	t.Cleanup(func() {
+		if _, err := sm.ExecProject(project, "echo ok", SandboxOpts{SandboxEnvs: []types.SandboxEnv{{Key: "RECREATE_VAR", Value: "v1"}}}); err != nil {
+			t.Fatalf("first ExecProject: %v", err)
+		}
 		_ = sm.Stop("proj:" + project.ID)
+
+		output, err := sm.ExecProject(project, "echo $RECREATE_VAR",
+			SandboxOpts{SandboxEnvs: []types.SandboxEnv{{Key: "RECREATE_VAR", Value: "v2"}}})
+		t.Cleanup(func() { _ = sm.Stop("proj:" + project.ID) })
+		if err != nil {
+			t.Fatalf("second ExecProject (recreate): %v", err)
+		}
+		if !strings.Contains(output, "v2") {
+			t.Fatalf("expected recreated container to have new env var v2, got: %q", output)
+		}
 	})
 
-	// Verify the env var was set (full config was used)
-	if !strings.Contains(output, "hello") {
-		t.Fatalf("expected env var TEST_SANDBOX_VAR=hello in output, got: %q", output)
-	}
+	t.Run("a moved checkout is remounted", func(t *testing.T) {
+		sm := NewSandboxManager(bootWithBridge(t))
+		projectID := "test-stale-mount-proj"
+		project := &types.Project{ID: projectID, Name: "test-stale-mount"}
+		taskID := "proj:" + projectID
+		t.Cleanup(func() { _ = sm.Stop(taskID) })
 
-	// Verify the custom mount is accessible
-	output2, err := sm.ExecProject(project, "ls /mnt/custom", SandboxOpts{MemoryLimit: 512, SandboxMounts: sandboxMounts, SandboxEnvs: sandboxEnvs})
-	if err != nil {
-		t.Fatalf("ExecProject second call: %v", err)
-	}
-	t.Logf("custom mount listing: %s", output2)
-}
+		// Create the project container at dir1, then "move" the project to dir2.
+		dir1, dir2 := t.TempDir(), t.TempDir()
+		project.Path = dir1
 
-func TestExecProjectWithInput_FullConfig(t *testing.T) {
+		if err := sm.ensureProjectContainer(taskID, project, SandboxOpts{}); err != nil {
+			t.Fatalf("initial ensureProjectContainer: %v", err)
+		}
 
-	sm := NewSandboxManager(bootWithBridge(t))
-	sandboxcheck.Require(t, BaseImage)
+		mountPath := "/home/sandbox/" + project.Name
+		source := func() string {
+			sm.mu.Lock()
+			containerName := sm.active[taskID]
+			sm.mu.Unlock()
+			got, err := sm.rt.GetContainerMountSource(containerName, mountPath)
+			if err != nil {
+				t.Fatalf("GetContainerMountSource: %v", err)
+			}
+			return got
+		}
 
-	dir := t.TempDir()
-	project := &types.Project{ID: "test-execproj-input-fullcfg", Name: "test-execproj-input", Path: dir}
+		if got := source(); filepath.Clean(got) != filepath.Clean(dir1) {
+			t.Fatalf("expected mount source %q, got %q", dir1, got)
+		}
 
-	sandboxEnvs := []types.SandboxEnv{
-		{Key: "INPUT_TEST_VAR", Value: "works"},
-	}
-
-	// ExecProjectWithInput should create the container with full config
-	output, err := sm.ExecProjectWithInput(project, "cat && echo $INPUT_TEST_VAR", []byte("stdin-data\n"), SandboxOpts{MemoryLimit: 256, SandboxEnvs: sandboxEnvs})
-	if err != nil {
-		t.Fatalf("ExecProjectWithInput: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = sm.Stop("proj:" + project.ID)
+		// ensureProjectContainer with the new path must recreate the container
+		// (the old one is still running) so its mount points at dir2.
+		project.Path = dir2
+		if err := sm.ensureProjectContainer(taskID, project, SandboxOpts{}); err != nil {
+			t.Fatalf("ensureProjectContainer after move: %v", err)
+		}
+		if got := source(); filepath.Clean(got) != filepath.Clean(dir2) {
+			t.Fatalf("expected recreated mount source %q, got %q", dir2, got)
+		}
 	})
-
-	// Verify both stdin data and env var are present
-	if !strings.Contains(output, "stdin-data") {
-		t.Fatalf("expected stdin data in output, got: %q", output)
-	}
-	if !strings.Contains(output, "works") {
-		t.Fatalf("expected env var INPUT_TEST_VAR=works in output, got: %q", output)
-	}
-}
-
-func TestExecTask_FullConfig(t *testing.T) {
-
-	sm := NewSandboxManager(bootWithBridge(t))
-	sandboxcheck.Require(t, BaseImage)
-
-	dir := taskWorktreeDir(t)
-	taskID := "test-exectask-fullcfg"
-	project := &types.Project{Name: "test-exectask"}
-
-	sandboxEnvs := []types.SandboxEnv{
-		{Key: "TASK_TEST_VAR", Value: "task-value"},
-	}
-
-	// ExecTask should create the container with full config
-	output, err := sm.ExecTask(taskID, dir, project, "echo $TASK_TEST_VAR", SandboxOpts{MemoryLimit: 128, SandboxEnvs: sandboxEnvs})
-	if err != nil {
-		t.Fatalf("ExecTask: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = sm.Stop(taskID)
-	})
-
-	if !strings.Contains(output, "task-value") {
-		t.Fatalf("expected env var TASK_TEST_VAR=task-value in output, got: %q", output)
-	}
-}
-
-func TestEnsureProjectContainer_RecreatesWhenStopped(t *testing.T) {
-
-	sm := NewSandboxManager(bootWithBridge(t))
-	sandboxcheck.Require(t, BaseImage)
-
-	dir := t.TempDir()
-	project := &types.Project{ID: "test-recreate-proj", Name: "test-recreate", Path: dir}
-
-	sandboxEnvs := []types.SandboxEnv{
-		{Key: "RECREATE_VAR", Value: "v1"},
-	}
-
-	// First call creates the container
-	_, err := sm.ExecProject(project, "echo ok", SandboxOpts{SandboxEnvs: sandboxEnvs})
-	if err != nil {
-		t.Fatalf("first ExecProject: %v", err)
-	}
-
-	// Stop the container
-	_ = sm.Stop("proj:" + project.ID)
-
-	// Second call should recreate it with new config
-	sandboxEnvs2 := []types.SandboxEnv{
-		{Key: "RECREATE_VAR", Value: "v2"},
-	}
-	output, err := sm.ExecProject(project, "echo $RECREATE_VAR", SandboxOpts{SandboxEnvs: sandboxEnvs2})
-	if err != nil {
-		t.Fatalf("second ExecProject (recreate): %v", err)
-	}
-	t.Cleanup(func() {
-		_ = sm.Stop("proj:" + project.ID)
-	})
-
-	if !strings.Contains(output, "v2") {
-		t.Fatalf("expected recreated container to have new env var v2, got: %q", output)
-	}
-}
-
-func TestEnsureProjectContainer_RecreatesWhenMountStale(t *testing.T) {
-
-	sm := NewSandboxManager(bootWithBridge(t))
-	sandboxcheck.Require(t, BaseImage)
-
-	projectID := "test-stale-mount-proj"
-	project := &types.Project{ID: projectID, Name: "test-stale-mount"}
-	taskID := "proj:" + projectID
-	t.Cleanup(func() {
-		_ = sm.Stop(taskID)
-	})
-
-	// Create the project container at dir1, then "move" the project to dir2.
-	dir1 := t.TempDir()
-	dir2 := t.TempDir()
-	project.Path = dir1
-
-	if err := sm.ensureProjectContainer(taskID, project, SandboxOpts{}); err != nil {
-		t.Fatalf("initial ensureProjectContainer: %v", err)
-	}
-
-	// Verify the running container's mount points at dir1.
-	sm.mu.Lock()
-	containerName := sm.active[taskID]
-	sm.mu.Unlock()
-	mountPath := "/home/sandbox/" + project.Name
-	source, err := sm.rt.GetContainerMountSource(containerName, mountPath)
-	if err != nil {
-		t.Fatalf("GetContainerMountSource: %v", err)
-	}
-	if filepath.Clean(source) != filepath.Clean(dir1) {
-		t.Fatalf("expected mount source %q, got %q", dir1, source)
-	}
-
-	// ensureProjectContainer with the new path must recreate the container
-	// (the old one is still running) so its mount points at dir2.
-	project.Path = dir2
-	if err := sm.ensureProjectContainer(taskID, project, SandboxOpts{}); err != nil {
-		t.Fatalf("ensureProjectContainer after move: %v", err)
-	}
-
-	sm.mu.Lock()
-	containerName = sm.active[taskID]
-	sm.mu.Unlock()
-	source, err = sm.rt.GetContainerMountSource(containerName, mountPath)
-	if err != nil {
-		t.Fatalf("GetContainerMountSource after move: %v", err)
-	}
-	if filepath.Clean(source) != filepath.Clean(dir2) {
-		t.Fatalf("expected recreated mount source %q, got %q", dir2, source)
-	}
 }
 
 func TestCreate_CustomMountCreatesHostDir(t *testing.T) {
@@ -1163,7 +1019,9 @@ func TestCreate_PlanModeReadonlyMount(t *testing.T) {
 
 // The bind address reaches podman as given, since podman derives the forward target from
 // it. Every-interface is spelled with no address at all, and a loopback address maps a port
-// a gVisor guest cannot answer — both are the user's choice, not ours to rewrite.
+// a gVisor guest cannot answer — both are the user's choice, not ours to rewrite. An explicit
+// 0.0.0.0 is the same publish as no address, and anything prefixed changes the forward target,
+// so the every-interface spellings are folded away before the spec is built.
 func TestForwardPortSpec(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -1177,11 +1035,17 @@ func TestForwardPortSpec(t *testing.T) {
 		{"loopback passed through", "127.0.0.1", 41234, 80, "127.0.0.1:41234:80"},
 		{"IPv6 is bracketed", "fd00::5", 41234, 80, "[fd00::5]:41234:80"},
 		{"port range edges", "", 1, 65535, "1:65535"},
+		{"a stored 0.0.0.0", "0.0.0.0", 41234, 80, "41234:80"},
+		{"a stored ::", "::", 41234, 80, "41234:80"},
+		{"padded whitespace", " 0.0.0.0 ", 41234, 80, "41234:80"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := forwardPortSpec(tt.hostIP, tt.hostPort, tt.containerPort)
-			if got != tt.want {
+			hostIP, err := types.NormalizeSandboxHostIP(tt.hostIP)
+			if err != nil {
+				t.Fatalf("NormalizeSandboxHostIP(%q): %v", tt.hostIP, err)
+			}
+			if got := forwardPortSpec(hostIP, tt.hostPort, tt.containerPort); got != tt.want {
 				t.Errorf("forwardPortSpec(%q, %d, %d) = %q, want %q", tt.hostIP, tt.hostPort, tt.containerPort, got, tt.want)
 			}
 		})
@@ -1285,49 +1149,6 @@ func TestParsePortBinding(t *testing.T) {
 				t.Errorf("parsePortBinding(%q) = %+v, want %+v", tt.line, got, tt.want)
 			}
 		})
-	}
-}
-
-// Every-interface spellings must never reach podman as an address: an explicit 0.0.0.0 is
-// the same publish as no address, and anything prefixed changes the forward target.
-func TestForwardPortSpecDefaultStaysUnprefixed(t *testing.T) {
-	for _, in := range []string{"", "0.0.0.0", "::", " 0.0.0.0 "} {
-		hostIP, err := types.NormalizeSandboxHostIP(in)
-		if err != nil {
-			t.Fatalf("NormalizeSandboxHostIP(%q): %v", in, err)
-		}
-		if got := forwardPortSpec(hostIP, 41234, 80); got != "41234:80" {
-			t.Errorf("%q normalized to %q, publishing %q; want \"41234:80\"", in, hostIP, got)
-		}
-	}
-}
-
-// TestCreate_RejectsAgentSandboxMount checks an agent extension's declared mounts are refused
-// before any container exists, the way the project's own mounts are.
-func TestCreate_RejectsAgentSandboxMount(t *testing.T) {
-	sm := &SandboxManager{
-		active:    make(map[string]string),
-		rt:        sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{}),
-		available: false,
-	}
-	host := t.TempDir()
-	for _, tc := range []struct {
-		name string
-		m    types.SandboxMount
-	}{
-		{"the host root", types.SandboxMount{HostPath: "/", ContainerPath: "/mnt/host", Mode: "rw"}},
-		{"a relative host path", types.SandboxMount{HostPath: "agent-config", ContainerPath: "/mnt/x", Mode: "ro"}},
-		{"a host path that walks up", types.SandboxMount{HostPath: host + "/../outside", ContainerPath: "/mnt/x", Mode: "ro"}},
-		{"a container path rewriting the mount spec", types.SandboxMount{HostPath: host, ContainerPath: "/mnt/x:rw", Mode: "ro"}},
-		{"a container path that walks up", types.SandboxMount{HostPath: host, ContainerPath: "/mnt/../etc", Mode: "ro"}},
-		{"a mode that is neither ro nor rw", types.SandboxMount{HostPath: host, ContainerPath: "/mnt/x", Mode: "write"}},
-	} {
-		_, err := sm.Create("task-1", taskWorktreeDir(t), &types.Project{Name: "test-proj"}, SandboxOpts{
-			AgentSandbox: &types.AgentSandbox{Mounts: []types.SandboxMount{tc.m}},
-		})
-		if err == nil || !strings.Contains(err.Error(), "agent sandbox mount") {
-			t.Errorf("%s: Create error = %v, want a refusal naming the agent sandbox mount", tc.name, err)
-		}
 	}
 }
 

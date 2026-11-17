@@ -41,110 +41,135 @@ func TestFrameRoundTrip(t *testing.T) {
 			if !bytes.Equal(got.Payload, frame.Payload) {
 				t.Errorf("Payload mismatch: got %d bytes, want %d", len(got.Payload), len(frame.Payload))
 			}
+			// ErrorMsg reads the payload of an error frame and nothing else: a Result's bytes are a
+			// size or a body, never a message to show someone.
+			if got.Type == TypeError {
+				if got.ErrorMsg() != string(frame.Payload) {
+					t.Errorf("ErrorMsg = %q, want the frame's error payload", got.ErrorMsg())
+				}
+			} else if got.ErrorMsg() != "" {
+				t.Errorf("ErrorMsg on a %s frame = %q, want nothing", MessageTypeName(got.Type), got.ErrorMsg())
+			}
 		})
 	}
 }
 
-func TestFrameTruncatedHeader(t *testing.T) {
-	buf := bytes.NewBuffer([]byte{0, 0, 0}) // 3 bytes, need 9
-	_, err := ReadFrame(buf)
-	if err == nil {
-		t.Fatal("expected error for truncated header")
+// A frame that stops short of its declared length is never a short frame: a truncated header, or a
+// payload that quits early, is an error — so no caller assembles half a message.
+func TestReadFrameRefusesATruncatedFrame(t *testing.T) {
+	cases := []struct {
+		name     string
+		frame    *Frame
+		truncate int
+	}{
+		{"header", NewResult(1, []byte("payload")), 3},
+		{"payload", NewResult(1, make([]byte, 100)), HeaderSize + 10},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			if err := WriteFrame(&buf, tc.frame); err != nil {
+				t.Fatalf("WriteFrame: %v", err)
+			}
+			buf.Truncate(tc.truncate)
+			if _, err := ReadFrame(&buf); err == nil {
+				t.Fatal("a truncated frame was read as a frame")
+			}
+		})
 	}
 }
 
-func TestFrameTruncatedPayload(t *testing.T) {
-	// Header says 100 bytes payload, only 10 provided
-	frame := NewResult(1, make([]byte, 100))
-	var buf bytes.Buffer
-	_ = WriteFrame(&buf, frame)
-	buf.Truncate(HeaderSize + 10) // cut off 90 bytes of payload
-
-	_, err := ReadFrame(&buf)
-	if err == nil {
-		t.Fatal("expected error for truncated payload")
-	}
-}
-
+// A request's params are the tool's own JSON, and their absence is a request too: params that were
+// never sent come back as nothing, not as an error and not as "null".
 func TestRequestRoundTrip(t *testing.T) {
-	params, _ := json.Marshal(map[string]any{
-		"path": "src/main.go",
-	})
+	cases := []struct {
+		name   string
+		params []byte
+		path   string
+	}{
+		{"with params", mustMarshal(t, map[string]any{"path": "src/main.go"}), "src/main.go"},
+		{"without params", nil, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f, err := ReadFrame(frameBytes(t, NewRequest(123, MethodRead, tc.params)))
+			if err != nil {
+				t.Fatalf("ReadFrame: %v", err)
+			}
+			req, err := ParseRequest(f)
+			if err != nil {
+				t.Fatalf("ParseRequest: %v", err)
+			}
+			if req.MsgID != 123 {
+				t.Errorf("MsgID = %d, want 123", req.MsgID)
+			}
+			if req.Method != MethodRead {
+				t.Errorf("Method = %d, want %d", req.Method, MethodRead)
+			}
+			if !bytes.Equal(req.Params, tc.params) {
+				t.Errorf("Params = %x, want %x", req.Params, tc.params)
+			}
+			if tc.params == nil {
+				return
+			}
 
-	frame := NewRequest(123, MethodRead, params)
-	var buf bytes.Buffer
-	_ = WriteFrame(&buf, frame)
-
-	f, err := ReadFrame(&buf)
-	if err != nil {
-		t.Fatalf("ReadFrame: %v", err)
-	}
-	req, err := ParseRequest(f)
-	if err != nil {
-		t.Fatalf("ParseRequest: %v", err)
-	}
-	if req.MsgID != 123 {
-		t.Errorf("MsgID = %d, want 123", req.MsgID)
-	}
-	if req.Method != MethodRead {
-		t.Errorf("Method = %d, want %d", req.Method, MethodRead)
-	}
-
-	var p ReadParams
-	if err := json.Unmarshal(req.Params, &p); err != nil {
-		t.Fatalf("unmarshal params: %v", err)
-	}
-	if p.Path != "src/main.go" {
-		t.Errorf("Path = %q, want %q", p.Path, "src/main.go")
+			var p ReadParams
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				t.Fatalf("unmarshal params: %v", err)
+			}
+			if p.Path != tc.path {
+				t.Errorf("Path = %q, want %q", p.Path, tc.path)
+			}
+		})
 	}
 }
 
-func TestRequestEmptyJSON(t *testing.T) {
-	frame := NewRequest(1, MethodBash, nil)
-	var buf bytes.Buffer
-	_ = WriteFrame(&buf, frame)
-
-	f, err := ReadFrame(&buf)
-	if err != nil {
-		t.Fatalf("ReadFrame: %v", err)
-	}
-	req, err := ParseRequest(f)
-	if err != nil {
-		t.Fatalf("ParseRequest: %v", err)
-	}
-	if len(req.Params) != 0 {
-		t.Errorf("Params = %d bytes, want 0", len(req.Params))
-	}
-}
-
+// The bash result's meta is optional: what was not sent comes back as nothing rather than as "null"
+// or as a parse error, so the caller that reports a duration never has to guess.
 func TestBashResultRoundTrip(t *testing.T) {
 	meta, _ := json.Marshal(map[string]any{"duration_ms": 150})
-	payload := NewBashResult(0, meta)
-
-	result, err := ParseBashResult(payload)
-	if err != nil {
-		t.Fatalf("ParseBashResult: %v", err)
+	cases := []struct {
+		name     string
+		exitCode int32
+		meta     []byte
+	}{
+		{"with meta", 0, meta},
+		{"without meta", 1, nil},
 	}
-	if result.ExitCode != 0 {
-		t.Errorf("ExitCode = %d, want 0", result.ExitCode)
-	}
-	if !bytes.Equal(result.Meta, meta) {
-		t.Errorf("Meta mismatch")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := ParseBashResult(NewBashResult(tc.exitCode, tc.meta))
+			if err != nil {
+				t.Fatalf("ParseBashResult: %v", err)
+			}
+			if result.ExitCode != tc.exitCode {
+				t.Errorf("ExitCode = %d, want %d", result.ExitCode, tc.exitCode)
+			}
+			if !bytes.Equal(result.Meta, tc.meta) {
+				t.Errorf("Meta = %x, want %x", result.Meta, tc.meta)
+			}
+		})
 	}
 }
 
-func TestBashResultNoMeta(t *testing.T) {
-	payload := NewBashResult(1, nil)
-	result, err := ParseBashResult(payload)
+// frameBytes encodes a frame the way it goes on the wire.
+func frameBytes(t *testing.T, f *Frame) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := WriteFrame(&buf, f); err != nil {
+		t.Fatalf("WriteFrame: %v", err)
+	}
+	return &buf
+}
+
+// mustMarshal is the params a test declares, or nothing.
+func mustMarshal(t *testing.T, v any) []byte {
+	t.Helper()
+	data, err := json.Marshal(v)
 	if err != nil {
-		t.Fatalf("ParseBashResult: %v", err)
+		t.Fatalf("marshal: %v", err)
 	}
-	if result.ExitCode != 1 {
-		t.Errorf("ExitCode = %d, want 1", result.ExitCode)
-	}
-	if len(result.Meta) != 0 {
-		t.Errorf("Meta = %d bytes, want 0", len(result.Meta))
-	}
+	return data
 }
 
 func TestBashChunkRoundTrip(t *testing.T) {
@@ -227,17 +252,5 @@ func TestMethodString(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("methodString(%d) = %q, want %q", tc.method, got, tc.want)
 		}
-	}
-}
-
-func TestErrorMsg(t *testing.T) {
-	f := NewError(1, "file not found")
-	if got := f.ErrorMsg(); got != "file not found" {
-		t.Errorf("ErrorMsg = %q, want %q", got, "file not found")
-	}
-
-	f2 := NewResult(1, []byte("data"))
-	if got := f2.ErrorMsg(); got != "" {
-		t.Errorf("ErrorMsg on Result = %q, want empty", got)
 	}
 }

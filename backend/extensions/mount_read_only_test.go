@@ -19,6 +19,14 @@ import (
 // is the one a running install answers with.
 func jailManager(t *testing.T, workspace, projectPath, extDir string) *ExtensionSandboxManager {
 	t.Helper()
+	return jailManagerWithProjectMounts(t, workspace, projectPath, extDir, nil)
+}
+
+// jailManagerWithProjectMounts is jailManager with the Sandbox Configuration mounts that project
+// declares: the host paths it borrows into its own task container, which the shared LSP sandbox may
+// read and never write.
+func jailManagerWithProjectMounts(t *testing.T, workspace, projectPath, extDir string, projectMounts []types.SandboxMount) *ExtensionSandboxManager {
+	t.Helper()
 	db, err := store.NewStore(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("create store: %v", err)
@@ -30,6 +38,7 @@ func jailManager(t *testing.T, workspace, projectPath, extDir string) *Extension
 	}
 	if err := db.CreateProject(&types.Project{
 		ID: "proj-jail", Name: "proj-jail", Path: projectPath, SandboxEnabled: true,
+		SandboxMounts: projectMounts,
 	}); err != nil {
 		t.Fatalf("register project: %v", err)
 	}
@@ -91,19 +100,29 @@ func TestMountPolicy_WorkspaceAndProjectsAreReadOnly(t *testing.T) {
 	}
 }
 
+// TestBuildExtensionCreateArgs_SelfGrantedWorkspaceWriteIsRefused: a manifest is registry text, and
+// the workspace holds every task's worktree, so "rw" on it — or on another project's checkout, or on
+// the host path a project's own Sandbox Configuration declares for its task container — is a request
+// to read, never a grant to write. The pin lives in the policy, not in the manifest's mode, so a
+// stored row that predates the rule is mounted read-only too.
 func TestBuildExtensionCreateArgs_SelfGrantedWorkspaceWriteIsRefused(t *testing.T) {
 	workspace, projectPath, extDir := threeDirs(t)
-	sm := jailManager(t, workspace, projectPath, extDir)
-
-	manifestMounts := func(host string) SandboxConfig {
-		return SandboxConfig{Mounts: []types.SandboxMount{
-			{HostPath: host, ContainerPath: "/borrowed", Mode: "rw"},
-		}}
+	// A cache a project declares for its own task container, beside (not under) the borrowed roots,
+	// so the refusal below is the borrow rule and not the workspace rule seen twice.
+	projectCache := filepath.Join(filepath.Dir(workspace), "project-go-cache")
+	if err := os.MkdirAll(projectCache, 0o755); err != nil {
+		t.Fatal(err)
 	}
+	sm := jailManagerWithProjectMounts(t, workspace, projectPath, extDir, []types.SandboxMount{
+		{HostPath: projectCache, ContainerPath: "/go/pkg/mod", Mode: "rw"},
+	})
+
 	specFor := func(host string) string {
 		t.Helper()
 		ext := &Extension{ID: "ext-selfgrant", Name: "gopls", Type: "lsp",
-			SandboxConfig: manifestMounts(host)}
+			SandboxConfig: SandboxConfig{Mounts: []types.SandboxMount{
+				{HostPath: host, ContainerPath: "/borrowed", Mode: "rw"},
+			}}}
 		args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-selfgrant", "img:latest", nil,
 			sm.MountPolicyForExtension(ext))
 		mounts := mountSpecs(args)
@@ -113,13 +132,24 @@ func TestBuildExtensionCreateArgs_SelfGrantedWorkspaceWriteIsRefused(t *testing.
 		return mounts[0]
 	}
 
-	for _, borrowed := range []string{workspace, projectPath} {
+	for _, borrowed := range []string{workspace, projectPath, projectCache} {
 		if spec := specFor(borrowed); !strings.HasSuffix(spec, ",ro") {
-			t.Errorf("a manifest asking for rw on %s got %q", borrowed, spec)
+			t.Errorf("a manifest asking for rw on the borrowed %s got %q", borrowed, spec)
 		}
 	}
+	// The control: the extensions dir belongs to the extension, so the mode it asked for survives and
+	// the assertions above are a refusal rather than every mount being refused.
 	if spec := specFor(extDir); !strings.HasSuffix(spec, ",rw") {
 		t.Errorf("the extensions dir lost the mode it asked for: %q", spec)
+	}
+
+	// No policy at all is the strictest case, not the loosest: nothing is inside an empty allowlist.
+	ext := &Extension{ID: "ext-none", Name: "gopls", Type: "lsp",
+		SandboxConfig: SandboxConfig{Mounts: []types.SandboxMount{
+			{HostPath: projectCache, ContainerPath: "/borrowed", Mode: "rw"},
+		}}}
+	if args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-none", "img:latest", nil, nil); len(mountSpecs(args)) != 0 {
+		t.Errorf("a nil policy mounted %v", mountSpecs(args))
 	}
 }
 

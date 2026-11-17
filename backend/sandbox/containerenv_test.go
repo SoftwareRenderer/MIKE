@@ -31,83 +31,73 @@ func envFlags(t *testing.T, args []string) []string {
 	return got
 }
 
-// TestContainerEnvArgs_OnlyConfigured: a sandbox container gets the variables
-// configured for it and nothing else. The hardcoded TERM/PATH this replaces
-// overrode the image's own ENV.
-func TestContainerEnvArgs_OnlyConfigured(t *testing.T) {
-	opts := SandboxOpts{
-		SandboxEnvs: []types.SandboxEnv{
-			{Key: "API_TOKEN", Value: "secret"},
-			{Key: "NODE_ENV", Value: "development"},
+// TestContainerEnvArgs is the whole of "the container environment is only what was
+// configured": one row per configuration a project's Sandbox Configuration or an agent
+// extension's `sandbox_env` can arrive with, and the exact `-e` values the container is
+// created with. The hardcoded TERM/PATH this replaces overrode the image's own ENV, so an
+// invented variable is as much a failure as a lost one, and the agent extension's list is
+// ordered before the project's so podman's later-flag-wins rule makes the project's the one
+// that counts.
+func TestContainerEnvArgs(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		opts SandboxOpts
+		want []string
+	}{
+		{
+			name: "only what was configured",
+			opts: SandboxOpts{SandboxEnvs: []types.SandboxEnv{
+				{Key: "API_TOKEN", Value: "secret"},
+				{Key: "NODE_ENV", Value: "development"},
+			}},
+			want: []string{"API_TOKEN=secret", "NODE_ENV=development"},
 		},
-	}
-
-	got := envFlags(t, containerEnvArgsOK(t, "task-1", opts))
-	want := []string{"API_TOKEN=secret", "NODE_ENV=development"}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Errorf("containerEnvArgs() = %v, want %v", got, want)
-	}
-	joined := strings.Join(got, " ")
-	for _, unwanted := range []string{"TERM", "PATH", "HOME"} {
-		if strings.Contains(joined, unwanted+"=") {
-			t.Errorf("containerEnvArgs injected %s=%q — the image owns anything not configured", unwanted, joined)
-		}
-	}
-}
-
-func TestContainerEnvArgs_SourcesAndPrecedence(t *testing.T) {
-	opts := SandboxOpts{
-		AgentSandbox: &types.AgentSandbox{
-			Envs: []types.SandboxEnv{
-				{Key: "AGENT_KEY", Value: "from-extension"},
-				{Key: "SHARED", Value: "from-extension"},
+		{
+			name: "agent envs first, project config last",
+			opts: SandboxOpts{
+				AgentSandbox: &types.AgentSandbox{Envs: []types.SandboxEnv{
+					{Key: "AGENT_KEY", Value: "from-extension"},
+					{Key: "SHARED", Value: "from-extension"},
+				}},
+				SandboxEnvs: []types.SandboxEnv{{Key: "SHARED", Value: "from-project"}},
 			},
+			want: []string{"AGENT_KEY=from-extension", "SHARED=from-extension", "SHARED=from-project"},
 		},
-		// The project's own configuration comes last, so podman's
-		// later-flag-wins rule makes it the one that counts.
-		SandboxEnvs: []types.SandboxEnv{
-			{Key: "SHARED", Value: "from-project"},
+		{
+			// A blank key is not a variable; an empty VALUE is (FOO= clears/sets it).
+			name: "a blank key is skipped, an empty value is not",
+			opts: SandboxOpts{
+				AgentSandbox: &types.AgentSandbox{Envs: []types.SandboxEnv{{Key: "", Value: "x"}}},
+				SandboxEnvs:  []types.SandboxEnv{{Key: "", Value: "y"}, {Key: "KEEP", Value: ""}},
+			},
+			want: []string{"KEEP="},
 		},
-	}
-
-	got := envFlags(t, containerEnvArgsOK(t, "task-1", opts))
-	want := []string{"AGENT_KEY=from-extension", "SHARED=from-extension", "SHARED=from-project"}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Errorf("containerEnvArgs() = %v, want %v (agent envs first, project config last)", got, want)
-	}
-}
-
-func TestContainerEnvArgs_SkipsBlankKeys(t *testing.T) {
-	opts := SandboxOpts{
-		AgentSandbox: &types.AgentSandbox{Envs: []types.SandboxEnv{{Key: "", Value: "x"}}},
-		SandboxEnvs:  []types.SandboxEnv{{Key: "", Value: "y"}, {Key: "KEEP", Value: ""}},
-	}
-
-	got := envFlags(t, containerEnvArgsOK(t, "task-1", opts))
-	// A blank key is not a variable; an empty VALUE is (FOO= clears/sets it).
-	if len(got) != 1 || got[0] != "KEEP=" {
-		t.Errorf("containerEnvArgs() = %v, want [KEEP=]", got)
-	}
-}
-
-func TestContainerEnvArgs_ValueStaysOneArgument(t *testing.T) {
-	opts := SandboxOpts{SandboxEnvs: []types.SandboxEnv{
-		{Key: "FLAGS", Value: "-v /:/host"},
-		{Key: "PHRASE", Value: "a b c"},
-	}}
-
-	args := containerEnvArgsOK(t, "task-1", opts)
-	if len(args) != 4 {
-		t.Fatalf("want 2 -e pairs, got %v", args)
-	}
-	if args[1] != "FLAGS=-v /:/host" || args[3] != "PHRASE=a b c" {
-		t.Errorf("value split across arguments: %v", args)
-	}
-}
-
-func TestContainerEnvArgs_Empty(t *testing.T) {
-	if got := containerEnvArgsOK(t, "task-1", SandboxOpts{}); len(got) != 0 {
-		t.Errorf("no configuration must add no flags, got %v", got)
+		{
+			name: "a value stays one argument",
+			opts: SandboxOpts{SandboxEnvs: []types.SandboxEnv{
+				{Key: "FLAGS", Value: "-v /:/host"},
+				{Key: "PHRASE", Value: "a b c"},
+			}},
+			want: []string{"FLAGS=-v /:/host", "PHRASE=a b c"},
+		},
+		{
+			name: "no configuration adds no flag",
+			opts: SandboxOpts{},
+			want: nil,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := envFlags(t, containerEnvArgsOK(t, "task-1", tc.opts))
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Fatalf("containerEnvArgs() = %v, want %v", got, tc.want)
+			}
+			joined := strings.Join(got, " ")
+			for _, unwanted := range []string{"TERM", "PATH", "HOME"} {
+				if strings.Contains(joined, unwanted+"=") {
+					t.Errorf("containerEnvArgs injected %s=%q — the image owns anything not configured", unwanted, joined)
+				}
+			}
+		})
 	}
 }
 

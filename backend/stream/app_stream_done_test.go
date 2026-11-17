@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"mike/backend/store"
+
 	"github.com/coder/websocket"
 )
 
@@ -68,70 +70,72 @@ func diffStatsFrames(frames []map[string]any) []map[string]any {
 	return out
 }
 
-func TestDoneTaskInitialStats_SentWhenUnknown(t *testing.T) {
-	repoDir, s, _, wm, task := setupDoneSnapshotTest(t)
-	base := revParse(t, repoDir, "HEAD")
-	tip := commitInWorktree(t, wm, "task-1", "a.txt", "alpha\n")
-	markDone(t, s, task, base, tip)
-
-	asm := NewAppStreamManager(s, wm)
-	t.Cleanup(asm.Close)
-
-	frames := streamInitialFrames(t, asm, "proj-1", nil)
-	stats := diffStatsFrames(frames)
-	if len(stats) != 1 {
-		t.Fatalf("expected 1 task_diff_stats frame, got %d", len(stats))
-	}
-	if stats[0]["task_id"] != "task-1" {
-		t.Fatalf("expected task_id=task-1, got %v", stats[0]["task_id"])
-	}
-	if stats[0]["files_n"] != float64(1) {
-		t.Fatalf("expected files_n=1, got %v", stats[0]["files_n"])
-	}
-	if stats[0]["has_committed_changes"] != true {
-		t.Fatalf("expected has_committed_changes=true, got %v", stats[0]["has_committed_changes"])
-	}
-	// already_merged must be present (computed fresh, not snapshotted).
-	if _, ok := stats[0]["already_merged"]; !ok {
-		t.Fatal("expected already_merged field in frame")
-	}
-}
-
-func TestDoneTaskInitialStats_SkippedWhenKnown(t *testing.T) {
-	repoDir, s, _, wm, task := setupDoneSnapshotTest(t)
-	base := revParse(t, repoDir, "HEAD")
-	tip := commitInWorktree(t, wm, "task-1", "a.txt", "alpha\n")
-	markDone(t, s, task, base, tip)
-	fresh, err := s.GetTaskByID("task-1")
-	if err != nil {
-		t.Fatalf("reload task: %v", err)
+// TestDoneTaskInitialStatsFollowsWhatTheClientSays: a done task's stats ride the subscription's
+// initial-data burst, and the connection says which of them it already holds — by task id and the
+// updated_at of the row those stats describe. Unknown, or known against a row that has since moved,
+// the frame goes out carrying the numbers the card draws; known against the row it was read from,
+// nothing goes out.
+func TestDoneTaskInitialStatsFollowsWhatTheClientSays(t *testing.T) {
+	tests := []struct {
+		name       string
+		known      func(t *testing.T, s *store.Store) map[string]string
+		wantFrames int
+	}{
+		{
+			name:       "the connection holds no stats for the task",
+			known:      func(*testing.T, *store.Store) map[string]string { return nil },
+			wantFrames: 1,
+		},
+		{
+			name: "the connection holds the stats of the row it read",
+			known: func(t *testing.T, s *store.Store) map[string]string {
+				fresh, err := s.GetTaskByID("task-1")
+				if err != nil {
+					t.Fatalf("reload task: %v", err)
+				}
+				return map[string]string{"task-1": fresh.UpdatedAt.Format(time.RFC3339)}
+			},
+			wantFrames: 0,
+		},
+		{
+			name: "the connection's stats are older than the row",
+			known: func(*testing.T, *store.Store) map[string]string {
+				return map[string]string{"task-1": "2000-01-01T00:00:00Z"}
+			},
+			wantFrames: 1,
+		},
 	}
 
-	asm := NewAppStreamManager(s, wm)
-	t.Cleanup(asm.Close)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repoDir, s, _, wm, task := setupDoneSnapshotTest(t)
+			base := revParse(t, repoDir, "HEAD")
+			tip := commitInWorktree(t, wm, "task-1", "a.txt", "alpha\n")
+			markDone(t, s, task, base, tip)
 
-	// The client declares it already has stats for this exact task state.
-	known := map[string]string{"task-1": fresh.UpdatedAt.Format(time.RFC3339)}
-	frames := streamInitialFrames(t, asm, "proj-1", known)
-	if stats := diffStatsFrames(frames); len(stats) != 0 {
-		t.Fatalf("expected no task_diff_stats frame (known to client), got %d", len(stats))
-	}
-}
+			asm := NewAppStreamManager(s, wm)
+			t.Cleanup(asm.Close)
 
-func TestDoneTaskInitialStats_StaleKnownStillSends(t *testing.T) {
-	repoDir, s, _, wm, task := setupDoneSnapshotTest(t)
-	base := revParse(t, repoDir, "HEAD")
-	tip := commitInWorktree(t, wm, "task-1", "a.txt", "alpha\n")
-	markDone(t, s, task, base, tip)
-
-	asm := NewAppStreamManager(s, wm)
-	t.Cleanup(asm.Close)
-
-	// Stale updated_at (task changed since the client cached) → must send.
-	known := map[string]string{"task-1": "2000-01-01T00:00:00Z"}
-	frames := streamInitialFrames(t, asm, "proj-1", known)
-	if stats := diffStatsFrames(frames); len(stats) != 1 {
-		t.Fatalf("expected 1 task_diff_stats frame for stale known state, got %d", len(stats))
+			stats := diffStatsFrames(streamInitialFrames(t, asm, "proj-1", tc.known(t, s)))
+			if len(stats) != tc.wantFrames {
+				t.Fatalf("%d task_diff_stats frames, want %d", len(stats), tc.wantFrames)
+			}
+			for _, frame := range stats {
+				if frame["task_id"] != "task-1" {
+					t.Errorf("frame %v names %v, want task-1", frame, frame["task_id"])
+				}
+				if frame["files_n"] != float64(1) {
+					t.Errorf("files_n = %v, want 1", frame["files_n"])
+				}
+				if frame["has_committed_changes"] != true {
+					t.Errorf("has_committed_changes = %v, want true for committed unmerged work", frame["has_committed_changes"])
+				}
+				// already_merged is computed for the served row, never taken from the snapshot.
+				if _, ok := frame["already_merged"]; !ok {
+					t.Errorf("already_merged missing from %v", frame)
+				}
+			}
+		})
 	}
 }
 

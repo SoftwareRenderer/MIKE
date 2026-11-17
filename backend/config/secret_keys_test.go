@@ -93,11 +93,10 @@ func TestUnopenableKeyReadsAsNoKey(t *testing.T) {
 		t.Fatalf("seed providers: %v", err)
 	}
 
+	// One check, because there is one answer to give: the sealed text is not a key either, so anything
+	// this returns — including it — is wrong.
 	if got := cs.GetProviderAPIKey("http://localhost:8080/v1"); got != "" {
 		t.Errorf("an unopenable key resolved to %q, want empty", got)
-	}
-	if got := cs.GetProviderAPIKey("http://localhost:8080/v1"); got == sealed {
-		t.Error("the sealed text was handed out as a key")
 	}
 }
 

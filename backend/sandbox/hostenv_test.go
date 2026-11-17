@@ -19,7 +19,6 @@ import (
 //
 // Gated like every other integration test here. A skip prints why; it is never a pass.
 func TestSandboxContainerSeesNoHostEnv(t *testing.T) {
-
 	sm := NewSandboxManager(bootWithBridge(t))
 	sandboxcheck.Require(t, BaseImage)
 
@@ -75,7 +74,7 @@ func TestSandboxContainerSeesNoHostEnv(t *testing.T) {
 
 	lines := strings.SplitN(strings.TrimSpace(out), "\n", 3)
 	if len(lines) != 3 {
-		t.Fatalf("expected 4 lines from the guest, got %d from %q", len(lines), out)
+		t.Fatalf("expected 3 lines from the guest, got %d from %q", len(lines), out)
 	}
 
 	if lines[0] != declaredValue {
@@ -115,22 +114,6 @@ func TestExecCommandArgsPutsEveryFlagLeftOfTheContainerName(t *testing.T) {
 		got := execCommandArgs(tc.stdin, "/home/sandbox/proj", "kanban-sandbox-t1", "echo hi")
 		if strings.Join(got, "\x00") != strings.Join(tc.want, "\x00") {
 			t.Errorf("%s: execCommandArgs() = %v, want %v", tc.name, got, tc.want)
-		}
-	}
-}
-
-// TestContainerEnvArgsHasNoEnvHostFlag keeps the other podman pass-through out by name: --env-host
-// copies the entire client environment into the container, and it has exactly one legitimate use
-// here, which is none.
-func TestContainerEnvArgsHasNoEnvHostFlag(t *testing.T) {
-	for _, flag := range []string{"--env-host", "--env-host=true"} {
-		got := containerEnvArgsOK(t, "task-1", SandboxOpts{
-			SandboxEnvs: []types.SandboxEnv{{Key: "A", Value: "1"}},
-		})
-		for _, a := range got {
-			if a == flag {
-				t.Errorf("containerEnvArgs() emits %s, which copies the whole host environment into the container", flag)
-			}
 		}
 	}
 }
