@@ -15,6 +15,11 @@ func policyWith(roots ...string) *MountPolicy {
 	return newMountPolicy(roots)
 }
 
+// TestValidateContainerPath is the tape an extension's mount is measured with before it reaches
+// podman: ':' and ',' are the two characters that can rewrite a `-v` spec, so they are refused
+// anywhere in a container path — a user value can never change the mount mode. The rule itself
+// lives in pkg/sandboxruntime; what is pinned here is every shape a manifest or a settings form
+// can arrive with, including the one that opens an option field and leaves it dangling.
 func TestValidateContainerPath(t *testing.T) {
 	valid := []string{
 		"/workspace",
@@ -28,41 +33,39 @@ func TestValidateContainerPath(t *testing.T) {
 		}
 	}
 
-	invalid := []string{
-		"",
-		"/",                           // the container root itself
-		"//",                          // ... spelled another way
-		"workspace",                   // not absolute
-		"./workspace",                 // not absolute
-		"/work space",                 // space
-		"/workspace;rm -rf /",         // shell metacharacters
-		"/workspace,rw",               // ',' rewrites the mount options
-		"/workspace:rw",               // ':' rewrites the spec (and the mode)
-		"/workspace:/etc:rprivate,rw", // full spec injection
-		"/workspace\x00",              // control character
-		"/mnt/../etc",                 // '..' segment
-		"/mnt/node_modules/../../etc", // '..' segment
-		"/work\u00fcst",               // non-ASCII
-		"-v/etc:/host",                // leading dash = podman flag
+	// named is whether the refusal repeats the value; a control character reaches the message
+	// through %q, so it cannot be matched byte for byte.
+	invalid := []struct {
+		value string
+		named bool
+	}{
+		{"", false},
+		{"/", true},                           // the container root itself
+		{"//", true},                          // ... spelled another way
+		{"workspace", true},                   // not absolute
+		{"./workspace", true},                 // not absolute
+		{"/work space", true},                 // space
+		{"/workspace;rm -rf /", true},         // shell metacharacters
+		{"/workspace,rw", true},               // ',' rewrites the mount options
+		{"/workspace:rw", true},               // ':' rewrites the spec (and the mode)
+		{"/workspace:/etc:rprivate,rw", true}, // full spec injection
+		{"/x:ro,", true},                      // the option field opened and left dangling
+		{"/x:,ro", true},
+		{"/workspace\x00", false},             // control character
+		{"/mnt/../etc", true},                 // '..' segment
+		{"/mnt/node_modules/../../etc", true}, // '..' segment
+		{"/work\u00fcst", true},               // non-ASCII
+		{"-v/etc:/host", true},                // leading dash = podman flag
 	}
-	for _, p := range invalid {
-		if err := sandboxruntime.ValidateContainerPath(p); err == nil {
-			t.Errorf("sandboxruntime.ValidateContainerPath(%q) = nil, want error", p)
-		}
-	}
-}
-
-// TestValidateContainerPath_BlocksWithoutSpecChars: ':' and ',' are the two characters
-// that can rewrite a podman `-v` spec, so they are refused anywhere in a container
-// path — a user value can never change the mount mode.
-func TestValidateContainerPath_BlocksWithoutSpecChars(t *testing.T) {
-	for _, p := range []string{"/x:rw", "/x,rw", "/x:ro,", "/x:,ro"} {
-		err := sandboxruntime.ValidateContainerPath(p)
+	for _, tc := range invalid {
+		err := sandboxruntime.ValidateContainerPath(tc.value)
 		if err == nil {
-			t.Fatalf("sandboxruntime.ValidateContainerPath(%q) = nil, want error", p)
+			t.Errorf("sandboxruntime.ValidateContainerPath(%q) = nil, want error", tc.value)
+			continue
 		}
-		if !strings.Contains(err.Error(), p) {
-			t.Errorf("error %q does not name the offending value %q", err.Error(), p)
+		// The refusal is shown to the person who wrote the mount, so it repeats the value.
+		if tc.named && !strings.Contains(err.Error(), tc.value) {
+			t.Errorf("error %q does not name the offending value %q", err, tc.value)
 		}
 	}
 }
@@ -230,48 +233,13 @@ func TestValidateMount(t *testing.T) {
 	}
 }
 
-// TestValidateCapability pins the shape rule. Which capability is asked for is no longer
-// judged here — a grant lands in a gVisor guest that started from --cap-drop ALL, so
-// SYS_ADMIN is as acceptable a name as CHOWN, and the pairing that makes that true is
-// pinned by TestBuildExtensionCreateArgs_CapabilityPosture. What stays refused is a value
-// that would reach `--cap-add` as an argument rather than a name.
-func TestValidateCapability(t *testing.T) {
-	allowed := []string{
-		"NET_BIND_SERVICE", "CHOWN", "SETPCAP", "SYS_TIME", "fowner", "CAP_SYS_NICE",
-		"SYS_ADMIN", "SYS_PTRACE", "SYS_MODULE", "SYS_RAWIO", "DAC_OVERRIDE",
-		"DAC_READ_SEARCH", "NET_ADMIN", "MKNOD", "SETUID", "SETGID", "SYS_BOOT",
-		"LINUX_IMMUTABLE", "cap_sys_admin", "CAP_LINUX_IMMUTABLE",
-	}
-	for _, cap := range allowed {
-		if err := ValidateCapability(cap); err != nil {
-			t.Errorf("ValidateCapability(%q) = %v, want nil", cap, err)
-		}
-	}
-
-	malformed := []string{"", "   ", "-v", "--cap-add", "--privileged", "SYS ADMIN", "SYS;REBOOT", "SYS\nADMIN", "1SYS", "SYS-ADMIN", "SYS_ADMIN,ALL"}
-	for _, cap := range malformed {
-		if err := ValidateCapability(cap); err == nil {
-			t.Errorf("ValidateCapability(%q) = nil, want error", cap)
-		}
-	}
-}
-
-func TestValidateCapabilities(t *testing.T) {
-	if err := ValidateCapabilities(nil); err != nil {
-		t.Errorf("ValidateCapabilities(nil) = %v, want nil", err)
-	}
-	if err := ValidateCapabilities([]string{"CHOWN", "NET_BIND_SERVICE"}); err != nil {
-		t.Errorf("ValidateCapabilities(valid) = %v, want nil", err)
-	}
-	err := ValidateCapabilities([]string{"CHOWN", "--privileged"})
-	if err == nil {
-		t.Fatal("ValidateCapabilities with an option-shaped capability = nil, want error")
-	}
-	if !strings.Contains(err.Error(), "--privileged") {
-		t.Errorf("error %q must name the entry it refused", err.Error())
-	}
-}
-
+// TestValidateSandboxAdditions is the validator behind install, update and
+// PUT /api/extensions/{id}: a mount outside the allowlist and a capability that is not one plain
+// name are both refused before anything is stored. Which capability *names* are acceptable is not
+// judged here — the grant lands in a gVisor guest that started from --cap-drop ALL — and the shape
+// rule it reaches is the one every container shares (sandboxruntime.ValidateCapability, whose table
+// TestValidateCapabilityRule in pkg/sandboxruntime pins); the pairing that makes a name like
+// SYS_ADMIN safe is TestBuildExtensionCreateArgs_CapabilityPosture.
 func TestValidateSandboxAdditions(t *testing.T) {
 	root := t.TempDir()
 	policy := policyWith(root)

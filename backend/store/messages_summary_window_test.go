@@ -81,40 +81,51 @@ func TestGetTaskMessagesFromSummaryStartsAtTheNewestSummary(t *testing.T) {
 	}
 }
 
-// A thread's summary bounds only that thread: a fork inherits the summarization rows and switches
-// to a thread of its own, which has said nothing yet. With nothing of its own to cut at, the read
-// is the whole thread, in the order it was written.
-func TestGetTaskMessagesFromSummaryIgnoresAnotherThreadsSummary(t *testing.T) {
-	s := testStore(t)
-	threadAndProject(t, s, "task-1")
-	ids := seedMessages(t, s, "task-1", "thr-1", 0, 9)
-	seedSummary(t, s, "task-1", "thr-2", "sum-other", summarySeedBase.Add(3*time.Second))
+// The cut is scoped to the reader's own scope, and with nothing of its own to cut at the read is that
+// whole scope in the order it was written: a fork inherits the summarization rows and switches to a
+// thread of its own, which has said nothing yet, and a legacy conversation whose rows carry no thread is
+// read by task.
+func TestGetTaskMessagesFromSummaryCutsOnlyItsOwnScope(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		thread string
+		// seed writes the rows and names the ones this scope must answer with.
+		seed func(t *testing.T, s *Store) []string
+	}{
+		{
+			name:   "another thread's summary bounds nothing",
+			thread: "thr-1",
+			seed: func(t *testing.T, s *Store) []string {
+				ids := seedMessages(t, s, "task-1", "thr-1", 0, 9)
+				seedSummary(t, s, "task-1", "thr-2", "sum-other", summarySeedBase.Add(3*time.Second))
+				return ids
+			},
+		},
+		{
+			name:   "rows with no thread are read by task",
+			thread: "",
+			seed: func(t *testing.T, s *Store) []string {
+				return seedMessages(t, s, "task-1", "", 0, 4)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testStore(t)
+			threadAndProject(t, s, "task-1")
+			want := tc.seed(t, s)
 
-	got, err := s.GetTaskMessagesFromSummary("task-1", "thr-1")
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	if len(got) != len(ids) {
-		t.Fatalf("%d rows, want this thread's %d", len(got), len(ids))
-	}
-	for i := range ids {
-		if got[i].ID != ids[i] {
-			t.Fatalf("row %d is %s, want %s", i, got[i].ID, ids[i])
-		}
-	}
-}
-
-// A legacy conversation whose rows carry no thread is read by task.
-func TestGetTaskMessagesFromSummaryWithoutAThreadReadsTheTask(t *testing.T) {
-	s := testStore(t)
-	threadAndProject(t, s, "task-1")
-	ids := seedMessages(t, s, "task-1", "", 0, 4)
-
-	got, err := s.GetTaskMessagesFromSummary("task-1", "")
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	if len(got) != len(ids) {
-		t.Fatalf("%d rows, want the task's %d", len(got), len(ids))
+			got, err := s.GetTaskMessagesFromSummary("task-1", tc.thread)
+			if err != nil {
+				t.Fatalf("read: %v", err)
+			}
+			if len(got) != len(want) {
+				t.Fatalf("%d rows, want the scope's %d", len(got), len(want))
+			}
+			for i, id := range want {
+				if got[i].ID != id {
+					t.Fatalf("row %d is %s, want %s — the scope read back out of order", i, got[i].ID, id)
+				}
+			}
+		})
 	}
 }

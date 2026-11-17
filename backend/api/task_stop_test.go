@@ -8,60 +8,71 @@ import (
 	"mike/backend/types"
 )
 
-// TestHandleStop_PausesWholeBranch: pausing a branch through the route leaves the parent, the subtask
-// mid-turn and the subtasks waiting to run all reading paused, and answers the paused parent.
-func TestHandleStop_PausesWholeBranch(t *testing.T) {
-	h, s, projID := newTaskHandlerWithExecutor(t)
-	createChainTask(t, s, projID, "pause-par", "Parent", "in_progress", "idle", "", "thread-pause-par", false)
-	createChainTask(t, s, projID, "pause-child", "Running child", "in_progress", "running", "pause-par", "thread-pause-child", false)
-	createChainTask(t, s, projID, "pause-wait1", "Waiting one", "in_progress", "idle", "pause-par", "thread-pause-wait1", false)
-	createChainTask(t, s, projID, "pause-wait2", "Waiting two", "in_progress", "idle", "pause-par", "thread-pause-wait2", false)
+// TestHandleStop_PausesTheRowAndEverythingUnderIt: the stop route pauses through the executor, so a
+// branch stops as one unit — the parent the person clicked, the subtask mid-turn and the subtasks
+// waiting to run all read paused, and none of them leaves its column. A paused row is a stop, not a
+// schedule decision, and the answer the route gives is the paused parent. A row with no descendants
+// is the same call with nothing under it.
+func TestHandleStop_PausesTheRowAndEverythingUnderIt(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		// click is the row the person stops, and state the execution state it is in when they do.
+		click string
+		state types.ExecutionState
+		// under are the descendants the click must reach.
+		under []string
+	}{
+		{
+			name:  "a branch stops the parent, the running child and the rows waiting to run",
+			click: "pause-par",
+			state: types.ExecStateIdle,
+			under: []string{"pause-child", "pause-wait1", "pause-wait2"},
+		},
+		{
+			name:  "a leaf stops just itself",
+			click: "pause-leaf",
+			state: types.ExecStateRunning,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, s, projID := newTaskHandlerWithExecutor(t)
+			createChainTask(t, s, projID, tt.click, "Parent", types.StatusInProgress, tt.state, "", "thread-"+tt.click, false)
+			for _, id := range tt.under {
+				state := types.ExecStateIdle
+				if id == "pause-child" {
+					state = types.ExecStateRunning
+				}
+				createChainTask(t, s, projID, id, id, types.StatusInProgress, state, tt.click, "thread-"+id, false)
+			}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/stop", h.HandleStop)
-	rr := postToMux(t, mux, "/api/projects/"+projID+"/tasks/pause-par/stop", nil)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("stop status = %d, body=%s", rr.Code, rr.Body.String())
-	}
+			mux := http.NewServeMux()
+			mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/stop", h.HandleStop)
+			rr := postToMux(t, mux, "/api/projects/"+projID+"/tasks/"+tt.click+"/stop", nil)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("stop status = %d, body=%s", rr.Code, rr.Body.String())
+			}
 
-	var answered map[string]any
-	if err := json.Unmarshal(rr.Body.Bytes(), &answered); err != nil {
-		t.Fatalf("decode answer: %v (%s)", err, rr.Body.String())
-	}
-	if answered["execution_state"] != string(types.ExecStatePaused) {
-		t.Errorf("the route answers %v, want paused", answered["execution_state"])
-	}
+			var answered map[string]any
+			if err := json.Unmarshal(rr.Body.Bytes(), &answered); err != nil {
+				t.Fatalf("decode answer: %v (%s)", err, rr.Body.String())
+			}
+			if answered["execution_state"] != string(types.ExecStatePaused) {
+				t.Errorf("the route answers %v, want paused", answered["execution_state"])
+			}
 
-	for _, id := range []string{"pause-par", "pause-child", "pause-wait1", "pause-wait2"} {
-		task, err := s.GetTaskByID(id)
-		if err != nil {
-			t.Fatalf("get %s: %v", id, err)
-		}
-		if task.ExecutionState != types.ExecStatePaused {
-			t.Errorf("%s after the pause: execution_state = %s, want paused", id, task.ExecutionState)
-		}
-		if task.Status != types.StatusInProgress {
-			t.Errorf("%s stays in its column: status = %s", id, task.Status)
-		}
-	}
-}
-
-// TestHandleStop_LeafTask: the same route on a task with no descendants pauses that one row.
-func TestHandleStop_LeafTask(t *testing.T) {
-	h, s, projID := newTaskHandlerWithExecutor(t)
-	createChainTask(t, s, projID, "pause-leaf", "Leaf", "in_progress", "running", "", "thread-pause-leaf", false)
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/stop", h.HandleStop)
-	if rr := postToMux(t, mux, "/api/projects/"+projID+"/tasks/pause-leaf/stop", nil); rr.Code != http.StatusOK {
-		t.Fatalf("stop status = %d, body=%s", rr.Code, rr.Body.String())
-	}
-	task, err := s.GetTaskByID("pause-leaf")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if task.ExecutionState != types.ExecStatePaused {
-		t.Errorf("leaf after the stop: execution_state = %s, want paused", task.ExecutionState)
+			for _, id := range append([]string{tt.click}, tt.under...) {
+				task, err := s.GetTaskByID(id)
+				if err != nil {
+					t.Fatalf("get %s: %v", id, err)
+				}
+				if task.ExecutionState != types.ExecStatePaused {
+					t.Errorf("%s after the pause: execution_state = %s, want paused", id, task.ExecutionState)
+				}
+				if task.Status != types.StatusInProgress {
+					t.Errorf("%s stays in its column: status = %s", id, task.Status)
+				}
+			}
+		})
 	}
 }
 
