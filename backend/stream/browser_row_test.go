@@ -24,44 +24,50 @@ func taskWithResult() *types.Task {
 	}
 }
 
-func TestTaskForBrowserClearsTheResultAndKeepsEveryKey(t *testing.T) {
-	stored := taskWithResult()
-	row := TaskForBrowser(stored)
+// The projection is the only place a stored row loses its result text, so it must not also be the
+// place a stored row changes: the row handed in belongs to the store or to a running turn, and the
+// key set the card and the detail view read has to arrive whole.
+func TestTheBrowserRowProjectionClearsTheResultWithoutTouchingTheInput(t *testing.T) {
+	t.Run("TaskForBrowser", func(t *testing.T) {
+		stored := taskWithResult()
+		row := TaskForBrowser(stored)
 
-	if row.Output != "" {
-		t.Fatalf("the row still carries the result text: %q", row.Output)
-	}
-	// The caller's row belongs to the store or to a running turn. Writing through it would clear the
-	// stored text on the next full-row write.
-	if stored.Output != probeResultText {
-		t.Fatalf("the projection wrote through to the caller's row: %q", stored.Output)
-	}
-	if keysOf(t, stored) != keysOf(t, row) {
-		t.Fatalf("the projection changed the shape of the row:\n stored %s\n browser %s", keysOf(t, stored), keysOf(t, row))
-	}
-	if TaskForBrowser(nil) != nil {
-		t.Fatal("TaskForBrowser(nil) answered with a row")
-	}
-}
-
-func TestBrowserRowsClearsEveryRowAndLeavesTheInput(t *testing.T) {
-	stored := []types.Task{*taskWithResult(), *taskWithResult()}
-	stored[1].ID = "task-row-2"
-
-	rows := BrowserRows(stored)
-	if len(rows) != 2 {
-		t.Fatalf("%d rows returned for 2 tasks", len(rows))
-	}
-	for _, row := range rows {
 		if row.Output != "" {
-			t.Fatalf("row %s still carries the result text", row.ID)
+			t.Fatalf("the row still carries the result text: %q", row.Output)
 		}
-	}
-	for i := range stored {
-		if stored[i].Output != probeResultText {
-			t.Fatalf("BrowserRows wrote through to the caller's slice at %d", i)
+		if stored.Output != probeResultText {
+			t.Fatalf("the projection wrote through to the caller's row: %q", stored.Output)
 		}
-	}
+		if keysOf(t, stored) != keysOf(t, row) {
+			t.Fatalf("the projection changed the shape of the row:\n stored %s\n browser %s", keysOf(t, stored), keysOf(t, row))
+		}
+		if TaskForBrowser(nil) != nil {
+			t.Fatal("TaskForBrowser(nil) answered with a row")
+		}
+	})
+
+	t.Run("BrowserRows", func(t *testing.T) {
+		stored := []types.Task{*taskWithResult(), *taskWithResult()}
+		stored[1].ID = "task-row-2"
+
+		rows := BrowserRows(stored)
+		if len(rows) != 2 {
+			t.Fatalf("%d rows returned for 2 tasks", len(rows))
+		}
+		for i, row := range rows {
+			if row.Output != "" {
+				t.Fatalf("row %s still carries the result text", row.ID)
+			}
+			if keysOf(t, &stored[i]) != keysOf(t, &rows[i]) {
+				t.Fatalf("the projection changed the shape of row %s", row.ID)
+			}
+		}
+		for i := range stored {
+			if stored[i].Output != probeResultText {
+				t.Fatalf("BrowserRows wrote through to the caller's slice at %d", i)
+			}
+		}
+	})
 }
 
 // TestTaskUpdatedFrameCarriesNoResultText: this frame goes to every tab of the project on each status change.

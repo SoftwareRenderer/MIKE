@@ -59,7 +59,7 @@ func SweepInterruptedTemp() {
 	}
 }
 
-// buildExtensionImageArgs is pure, so tests can pin the argv shape.
+// buildExtensionImageArgs is the whole argv of one extension image build.
 func buildExtensionImageArgs(imageRef, contextDir string) []string {
 	return []string{"build", "-t", imageRef, "-f", filepath.Join(contextDir, "Dockerfile"), contextDir}
 }

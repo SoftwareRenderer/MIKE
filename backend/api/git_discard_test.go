@@ -13,7 +13,8 @@ import (
 )
 
 // A discard either reverts a path or deletes it, depending on its state in git, so every state is
-// asserted here against a real repository.
+// asserted here against a real repository. HEAD decides per path, and one request carries the whole
+// selection.
 
 // discardFixture serves the discard route over a repo holding one committed file, tracked.txt.
 func discardFixture(t *testing.T) (*http.ServeMux, string) {
@@ -52,102 +53,173 @@ func fileExists(repoPath, name string) bool {
 	return err == nil
 }
 
-func TestHandleProjectDiscardPaths_RevertsModifiedFile(t *testing.T) {
-	mux, repoPath := discardFixture(t)
-	testgit.WriteFile(t, repoPath, "tracked.txt", "edited on disk\n")
-
-	rec := postDiscard(t, mux, "tracked.txt")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if got := testgit.ReadFile(t, repoPath, "tracked.txt"); got != "committed\n" {
-		t.Errorf("worktree kept the edit: %q", got)
-	}
-	if out := testgit.GitOutput(t, repoPath, "status", "--porcelain"); out != "" {
-		t.Errorf("status is not clean after the discard: %q", out)
-	}
-}
-
-// Discard is one click, not "unstage, then revert".
-func TestHandleProjectDiscardPaths_RevertsStagedAndUnstagedEdit(t *testing.T) {
-	mux, repoPath := discardFixture(t)
-	testgit.WriteFile(t, repoPath, "tracked.txt", "staged half\n")
-	testgit.Git(t, repoPath, "add", "tracked.txt")
-	testgit.WriteFile(t, repoPath, "tracked.txt", "plus an unstaged half\n")
-
-	rec := postDiscard(t, mux, "tracked.txt")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if got := testgit.ReadFile(t, repoPath, "tracked.txt"); got != "committed\n" {
-		t.Errorf("worktree kept the edit: %q", got)
-	}
-	if out := testgit.GitOutput(t, repoPath, "status", "--porcelain"); out != "" {
-		t.Errorf("status is not clean after the discard: %q", out)
-	}
-}
-
-func TestHandleProjectDiscardPaths_RestoresDeletedFile(t *testing.T) {
-	for _, stage := range []bool{false, true} {
-		name := "unstaged delete"
-		if stage {
-			name = "staged delete"
-		}
-		t.Run(name, func(t *testing.T) {
-			mux, repoPath := discardFixture(t)
-			if stage {
+// TestHandleProjectDiscardPaths_HeadDecidesRevertFromDelete covers the state machine one path can be
+// in: an edit reverts, a delete comes back, an untracked file goes, and a staged entry has its index
+// half removed before the file. A discard is one click, not "unstage, then revert", and the last row
+// shows HEAD deciding per path inside one request rather than for the batch as a whole.
+func TestHandleProjectDiscardPaths_HeadDecidesRevertFromDelete(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		// plant puts the repository into the state the click reads.
+		plant func(t *testing.T, repoPath string)
+		paths []string
+		// check reads the repository after the discard.
+		check func(t *testing.T, repoPath string)
+		// wantApplied is the answer's applied list; empty means "not asserted".
+		wantApplied string
+	}{
+		{
+			name:  "a modified tracked file reverts",
+			plant: func(t *testing.T, repoPath string) { testgit.WriteFile(t, repoPath, "tracked.txt", "edited on disk\n") },
+			paths: []string{"tracked.txt"},
+			check: func(t *testing.T, repoPath string) {
+				requireRevertedToCommit(t, repoPath)
+			},
+		},
+		{
+			name: "a staged and an unstaged half both go",
+			plant: func(t *testing.T, repoPath string) {
+				testgit.WriteFile(t, repoPath, "tracked.txt", "staged half\n")
+				testgit.Git(t, repoPath, "add", "tracked.txt")
+				testgit.WriteFile(t, repoPath, "tracked.txt", "plus an unstaged half\n")
+			},
+			paths: []string{"tracked.txt"},
+			check: func(t *testing.T, repoPath string) {
+				requireRevertedToCommit(t, repoPath)
+			},
+		},
+		{
+			name:  "an unstaged delete is restored",
+			plant: func(t *testing.T, repoPath string) { removeFile(t, repoPath, "tracked.txt") },
+			paths: []string{"tracked.txt"},
+			check: func(t *testing.T, repoPath string) {
+				requireRestored(t, repoPath)
+			},
+		},
+		{
+			name: "a staged delete is restored",
+			plant: func(t *testing.T, repoPath string) {
 				testgit.Git(t, repoPath, "rm", "--cached", "tracked.txt")
-			}
-			if err := os.Remove(filepath.Join(repoPath, "tracked.txt")); err != nil {
-				t.Fatalf("remove: %v", err)
-			}
+				removeFile(t, repoPath, "tracked.txt")
+			},
+			paths: []string{"tracked.txt"},
+			check: func(t *testing.T, repoPath string) {
+				requireRestored(t, repoPath)
+			},
+		},
+		{
+			name: "an untracked file is deleted",
+			plant: func(t *testing.T, repoPath string) {
+				testgit.WriteFile(t, repoPath, "scratch.txt", "never committed\n")
+			},
+			paths: []string{"scratch.txt"},
+			check: func(t *testing.T, repoPath string) {
+				if fileExists(repoPath, "scratch.txt") {
+					t.Error("the untracked file is still on disk")
+				}
+				// A discard that reset the whole tree would show up here.
+				if got := testgit.ReadFile(t, repoPath, "tracked.txt"); got != "committed\n" {
+					t.Errorf("an untouched file changed: %q", got)
+				}
+			},
+		},
+		{
+			name: "a staged new file loses its index entry before the file",
+			plant: func(t *testing.T, repoPath string) {
+				testgit.WriteFile(t, repoPath, "brand-new.txt", "staged as new\n")
+				testgit.Git(t, repoPath, "add", "brand-new.txt")
+			},
+			paths: []string{"brand-new.txt"},
+			check: func(t *testing.T, repoPath string) {
+				if fileExists(repoPath, "brand-new.txt") {
+					t.Error("the file is still on disk")
+				}
+				if staged := stagedFiles(t, repoPath); len(staged) != 0 {
+					t.Errorf("the index still holds: %v", staged)
+				}
+			},
+		},
+		{
+			// The panel may act on a status line a concurrent commit already cleared; that is a
+			// no-op, not a fault.
+			name:  "an unmodified file is a no-op",
+			plant: func(t *testing.T, repoPath string) {},
+			paths: []string{"tracked.txt"},
+			check: func(t *testing.T, repoPath string) {
+				if got := testgit.ReadFile(t, repoPath, "tracked.txt"); got != "committed\n" {
+					t.Errorf("an unmodified file changed: %q", got)
+				}
+			},
+		},
+		{
+			name: "one request reverts one path and deletes another",
+			plant: func(t *testing.T, repoPath string) {
+				testgit.WriteFile(t, repoPath, "tracked.txt", "edited on disk\n")
+				testgit.WriteFile(t, repoPath, "scratch.txt", "never committed\n")
+			},
+			paths:       []string{"tracked.txt", "scratch.txt"},
+			wantApplied: "tracked.txt scratch.txt",
+			check: func(t *testing.T, repoPath string) {
+				if got := testgit.ReadFile(t, repoPath, "tracked.txt"); got != "committed\n" {
+					t.Errorf("worktree kept the edit: %q", got)
+				}
+				if fileExists(repoPath, "scratch.txt") {
+					t.Error("the untracked file is still on disk")
+				}
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			mux, repoPath := discardFixture(t)
+			tt.plant(t, repoPath)
 
-			rec := postDiscard(t, mux, "tracked.txt")
+			rec := postDiscard(t, mux, tt.paths...)
 			if rec.Code != http.StatusOK {
 				t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 			}
-			if !fileExists(repoPath, "tracked.txt") {
-				t.Fatal("the file is still gone")
+			if tt.wantApplied != "" {
+				answer := decodeBatchAnswer(t, rec)
+				if answer.Action != "discarded" {
+					t.Errorf("action = %q, want discarded", answer.Action)
+				}
+				if strings.Join(answer.Applied, " ") != tt.wantApplied {
+					t.Errorf("applied = %v, want %q", answer.Applied, tt.wantApplied)
+				}
+				if len(answer.Failed) != 0 {
+					t.Errorf("failed = %v, want none", answer.Failed)
+				}
 			}
-			if out := testgit.GitOutput(t, repoPath, "status", "--porcelain"); out != "" {
-				t.Errorf("status is not clean after the discard: %q", out)
-			}
+			tt.check(t, repoPath)
 		})
 	}
 }
 
-func TestHandleProjectDiscardPaths_DeletesUntrackedFile(t *testing.T) {
-	mux, repoPath := discardFixture(t)
-	testgit.WriteFile(t, repoPath, "scratch.txt", "never committed\n")
-
-	rec := postDiscard(t, mux, "scratch.txt")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if fileExists(repoPath, "scratch.txt") {
-		t.Error("the untracked file is still on disk")
-	}
-	// A discard that reset the whole tree would show up here.
+// requireRevertedToCommit asserts the tracked file is back to its committed content and the tree is
+// clean — the half of a discard that a "revert" which left the index dirty would miss.
+func requireRevertedToCommit(t *testing.T, repoPath string) {
+	t.Helper()
 	if got := testgit.ReadFile(t, repoPath, "tracked.txt"); got != "committed\n" {
-		t.Errorf("an untouched file changed: %q", got)
+		t.Errorf("worktree kept the edit: %q", got)
+	}
+	if out := testgit.GitOutput(t, repoPath, "status", "--porcelain"); out != "" {
+		t.Errorf("status is not clean after the discard: %q", out)
 	}
 }
 
-// The index entry has to go before the file, or the discard leaves a staged addition behind.
-func TestHandleProjectDiscardPaths_DeletesStagedNewFile(t *testing.T) {
-	mux, repoPath := discardFixture(t)
-	testgit.WriteFile(t, repoPath, "brand-new.txt", "staged as new\n")
-	testgit.Git(t, repoPath, "add", "brand-new.txt")
+func requireRestored(t *testing.T, repoPath string) {
+	t.Helper()
+	if !fileExists(repoPath, "tracked.txt") {
+		t.Fatal("the file is still gone")
+	}
+	if out := testgit.GitOutput(t, repoPath, "status", "--porcelain"); out != "" {
+		t.Errorf("status is not clean after the discard: %q", out)
+	}
+}
 
-	rec := postDiscard(t, mux, "brand-new.txt")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if fileExists(repoPath, "brand-new.txt") {
-		t.Error("the file is still on disk")
-	}
-	if staged := stagedFiles(t, repoPath); len(staged) != 0 {
-		t.Errorf("the index still holds: %v", staged)
+func removeFile(t *testing.T, repoPath, name string) {
+	t.Helper()
+	if err := os.Remove(filepath.Join(repoPath, name)); err != nil {
+		t.Fatalf("remove %s: %v", name, err)
 	}
 }
 
@@ -207,78 +279,43 @@ func TestHandleProjectDiscardPaths_DashPrefixedPathIsAFile(t *testing.T) {
 	}
 }
 
-func TestHandleProjectDiscardPaths_RejectsPathOutsideRepo(t *testing.T) {
-	mux, repoPath := discardFixture(t)
-	outside := filepath.Join(filepath.Dir(repoPath), "outside.txt")
-	if err := os.WriteFile(outside, []byte("not yours\n"), 0o644); err != nil {
-		t.Fatalf("write outside file: %v", err)
-	}
+// TestHandleProjectDiscardPaths_RefusesAPathOutsideTheRepo is the jail, and it is the whole batch's
+// answer: every path is validated before any is written, so a selection holding an escape writes
+// nothing at all — including the path in it that was legal.
+func TestHandleProjectDiscardPaths_RefusesAPathOutsideTheRepo(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		paths []string
+		// plant is the extra working-tree edit a legal path carries, which a refused batch must
+		// leave exactly as it was.
+		plant bool
+	}{
+		{name: "one escaping path", paths: []string{"../outside.txt"}},
+		{name: "one legal path beside an escaping one", paths: []string{"tracked.txt", "../outside.txt"}, plant: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			mux, repoPath := discardFixture(t)
+			outside := filepath.Join(filepath.Dir(repoPath), "outside.txt")
+			if err := os.WriteFile(outside, []byte("not yours\n"), 0o644); err != nil {
+				t.Fatalf("write outside file: %v", err)
+			}
+			if tt.plant {
+				testgit.WriteFile(t, repoPath, "tracked.txt", "edited on disk\n")
+			}
 
-	rec := postDiscard(t, mux, "../"+filepath.Base(outside))
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if !fileExists(filepath.Dir(repoPath), filepath.Base(outside)) {
-		t.Error("the file outside the repository was removed")
-	}
-}
-
-// The panel may act on a status line a concurrent commit already cleared; that is a no-op, not a fault.
-func TestHandleProjectDiscardPaths_CleanFileIsANoOp(t *testing.T) {
-	mux, repoPath := discardFixture(t)
-
-	rec := postDiscard(t, mux, "tracked.txt")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if got := testgit.ReadFile(t, repoPath, "tracked.txt"); got != "committed\n" {
-		t.Errorf("an unmodified file changed: %q", got)
-	}
-}
-
-// One request carries the whole selection, and HEAD still decides revert from delete per path.
-func TestHandleProjectDiscardPaths_RevertsAndDeletesTogether(t *testing.T) {
-	mux, repoPath := discardFixture(t)
-	testgit.WriteFile(t, repoPath, "tracked.txt", "edited on disk\n")
-	testgit.WriteFile(t, repoPath, "scratch.txt", "never committed\n")
-
-	rec := postDiscard(t, mux, "tracked.txt", "scratch.txt")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	answer := decodeBatchAnswer(t, rec)
-	if answer.Action != "discarded" {
-		t.Errorf("action = %q, want discarded", answer.Action)
-	}
-	if strings.Join(answer.Applied, " ") != "tracked.txt scratch.txt" {
-		t.Errorf("applied = %v", answer.Applied)
-	}
-	if len(answer.Failed) != 0 {
-		t.Errorf("failed = %v", answer.Failed)
-	}
-	if got := testgit.ReadFile(t, repoPath, "tracked.txt"); got != "committed\n" {
-		t.Errorf("worktree kept the edit: %q", got)
-	}
-	if fileExists(repoPath, "scratch.txt") {
-		t.Error("the untracked file is still on disk")
-	}
-}
-
-// Every path is validated before any is written, so a selection holding an escape writes nothing at all.
-func TestHandleProjectDiscardPaths_RejectsTheBatchWhenOnePathEscapes(t *testing.T) {
-	mux, repoPath := discardFixture(t)
-	outside := filepath.Join(filepath.Dir(repoPath), "outside.txt")
-	if err := os.WriteFile(outside, []byte("not yours\n"), 0o644); err != nil {
-		t.Fatalf("write outside file: %v", err)
-	}
-	testgit.WriteFile(t, repoPath, "tracked.txt", "edited on disk\n")
-
-	rec := postDiscard(t, mux, "tracked.txt", "../"+filepath.Base(outside))
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if got := testgit.ReadFile(t, repoPath, "tracked.txt"); got != "edited on disk\n" {
-		t.Errorf("a refused batch still wrote: %q", got)
+			rec := postDiscard(t, mux, tt.paths...)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+			}
+			if _, err := os.Stat(outside); err != nil {
+				t.Errorf("the file outside the repository was removed: %v", err)
+			}
+			if tt.plant {
+				if got := testgit.ReadFile(t, repoPath, "tracked.txt"); got != "edited on disk\n" {
+					t.Errorf("a refused batch still wrote: %q", got)
+				}
+			}
+		})
 	}
 }
 

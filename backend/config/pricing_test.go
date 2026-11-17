@@ -7,152 +7,120 @@ import (
 	"mike/backend/types"
 )
 
-func TestEstimateCallCost_NoPricingConfigured(t *testing.T) {
-	cs := testConfigStore(t)
-	cfg := &types.Config{
-		Providers: []types.Provider{
-			{Kind: "llm", URL: "http://llm:8010/v1", Concurrency: 1},
+// TestEstimateCallCost prices one call from the usage the provider reported: the provider's rates, a
+// model's own rates over them, and cache_write_price standing in for input_price on the uncached part.
+// Where there is no price to apply it answers zero and invents nothing — an unpriced provider, a
+// provider that is not an LLM (they report their own cost through session stats), a provider the config
+// does not hold, and a call that reported no usage all cost nothing to say so.
+func TestEstimateCallCost(t *testing.T) {
+	usage := func(prompt, completion, cached int) *types.ChatUsage {
+		u := &types.ChatUsage{PromptTokens: prompt, CompletionTokens: completion}
+		u.PromptTokensDetails.CachedTokens = cached
+		return u
+	}
+	oneProvider := func(p types.Provider) []types.Provider {
+		p.Kind = types.ProviderKindLLM
+		p.URL = "http://llm:8010/v1"
+		p.Concurrency = 1
+		if p.Models == nil {
+			p.Models = []types.ModelConfig{{Name: "model-a"}}
+		}
+		return []types.Provider{p}
+	}
+
+	for _, tc := range []struct {
+		name      string
+		providers []types.Provider
+		url       string
+		model     string
+		usage     *types.ChatUsage
+		want      float64
+	}{
+		{
+			name:      "no per-token pricing",
+			providers: oneProvider(types.Provider{}),
+			url:       "http://llm:8010/v1",
+			model:     "model-a",
+			usage:     usage(1000, 500, 0),
+			want:      0,
 		},
-	}
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-	usage := &types.ChatUsage{PromptTokens: 1000, CompletionTokens: 500}
-	if got := cs.EstimateCallCost("http://llm:8010/v1", "model-a", usage); got != 0 {
-		t.Errorf("EstimateCallCost = %v, want 0 (no per-token pricing)", got)
-	}
-}
-
-func TestEstimateCallCost_ProviderPricing(t *testing.T) {
-	cs := testConfigStore(t)
-	cfg := &types.Config{
-		Providers: []types.Provider{
-			{
-				Kind: "llm", URL: "http://llm:8010/v1", Concurrency: 1,
-				InputPrice: 1.0, CacheReadPrice: 0.1, OutputPrice: 2.0,
-			},
+		{
+			name:      "the provider's rates",
+			providers: oneProvider(types.Provider{InputPrice: 1.0, CacheReadPrice: 0.1, OutputPrice: 2.0}),
+			url:       "http://llm:8010/v1",
+			model:     "model-a",
+			// (800 non-cached * $1.0 + 200 cached * $0.1 + 500 output * $2.0) / 1M
+			usage: usage(1000, 500, 200),
+			want:  (800*1.0 + 200*0.1 + 500*2.0) / 1_000_000,
 		},
-	}
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-	usage := &types.ChatUsage{PromptTokens: 1000, CompletionTokens: 500}
-	usage.PromptTokensDetails.CachedTokens = 200
-
-	// cost = (800 non-cached * $1.0 + 200 cached * $0.1 + 500 output * $2.0) / 1M
-	want := (800*1.0 + 200*0.1 + 500*2.0) / 1_000_000
-	got := cs.EstimateCallCost("http://llm:8010/v1", "model-a", usage)
-	if math.Abs(got-want) > 1e-12 {
-		t.Errorf("EstimateCallCost = %v, want %v", got, want)
-	}
-}
-
-func TestEstimateCallCost_ModelOverrideWins(t *testing.T) {
-	cs := testConfigStore(t)
-	input := 5.0
-	output := 10.0
-	cfg := &types.Config{
-		Providers: []types.Provider{
-			{
-				Kind: "llm", URL: "http://llm:8010/v1", Concurrency: 1,
+		{
+			name: "the model's own rates win",
+			providers: oneProvider(types.Provider{
 				InputPrice: 1.0, OutputPrice: 2.0,
-				Models: []types.ModelConfig{
-					{Name: "pricey", InputPrice: &input, OutputPrice: &output},
-				},
-			},
+				Models: []types.ModelConfig{{Name: "pricey", InputPrice: floatPtr(5.0), OutputPrice: floatPtr(10.0)}},
+			}),
+			url:   "http://llm:8010/v1",
+			model: "pricey",
+			// (1000 * $5.0 + 300 * $10.0) / 1M
+			usage: usage(1000, 300, 0),
+			want:  (1000*5.0 + 300*10.0) / 1_000_000,
 		},
-	}
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-	usage := &types.ChatUsage{PromptTokens: 1000, CompletionTokens: 300}
-
-	// model override applies: (1000 * $5.0 + 300 * $10.0) / 1M
-	want := (1000*5.0 + 300*10.0) / 1_000_000
-	got := cs.EstimateCallCost("http://llm:8010/v1", "pricey", usage)
-	if math.Abs(got-want) > 1e-12 {
-		t.Errorf("EstimateCallCost = %v, want %v", got, want)
-	}
-
-	// A different model on the same provider falls back to provider pricing.
-	usage2 := &types.ChatUsage{PromptTokens: 1000, CompletionTokens: 300}
-	want2 := (1000*1.0 + 300*2.0) / 1_000_000
-	got2 := cs.EstimateCallCost("http://llm:8010/v1", "other-model", usage2)
-	if math.Abs(got2-want2) > 1e-12 {
-		t.Errorf("EstimateCallCost (fallback) = %v, want %v", got2, want2)
-	}
-}
-
-func TestEstimateCallCost_CacheWriteSubstitutesInput(t *testing.T) {
-	cs := testConfigStore(t)
-	cfg := &types.Config{
-		Providers: []types.Provider{
-			{
-				Kind: "llm", URL: "http://llm:8010/v1", Concurrency: 1,
-				InputPrice: 1.0, CacheWritePrice: 0.5,
-			},
-		},
-	}
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-	usage := &types.ChatUsage{PromptTokens: 1000, CompletionTokens: 0}
-
-	// cache_write_price (0.5) replaces input_price for non-cached input.
-	want := 1000 * 0.5 / 1_000_000
-	got := cs.EstimateCallCost("http://llm:8010/v1", "model-a", usage)
-	if math.Abs(got-want) > 1e-12 {
-		t.Errorf("EstimateCallCost = %v, want %v", got, want)
-	}
-}
-
-func TestEstimateCallCost_AgentProviderReturnsZero(t *testing.T) {
-	cs := testConfigStore(t)
-	cfg := &types.Config{
-		Providers: []types.Provider{
-			{
-				Name: "pi", Kind: "agent", URL: "agent://pi", Concurrency: 1,
+		{
+			name: "another model of that provider falls back to the provider's rates",
+			providers: oneProvider(types.Provider{
 				InputPrice: 1.0, OutputPrice: 2.0,
-			},
+				Models: []types.ModelConfig{{Name: "pricey", InputPrice: floatPtr(5.0), OutputPrice: floatPtr(10.0)}},
+			}),
+			url:   "http://llm:8010/v1",
+			model: "other-model",
+			usage: usage(1000, 300, 0),
+			want:  (1000*1.0 + 300*2.0) / 1_000_000,
 		},
-	}
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-	usage := &types.ChatUsage{PromptTokens: 1000, CompletionTokens: 500}
-	// Agent providers report their own cost via session stats — never estimate.
-	if got := cs.EstimateCallCost("agent://pi", "pi", usage); got != 0 {
-		t.Errorf("EstimateCallCost (agent) = %v, want 0", got)
-	}
-}
-
-func TestEstimateCallCost_UnknownProviderReturnsZero(t *testing.T) {
-	cs := testConfigStore(t)
-	cfg := &types.Config{
-		Providers: []types.Provider{
-			{Kind: "llm", URL: "http://llm:8010/v1", Concurrency: 1, InputPrice: 1.0},
+		{
+			name:      "cache_write_price replaces input_price for the uncached part",
+			providers: oneProvider(types.Provider{InputPrice: 1.0, CacheWritePrice: 0.5}),
+			url:       "http://llm:8010/v1",
+			model:     "model-a",
+			usage:     usage(1000, 0, 0),
+			want:      1000 * 0.5 / 1_000_000,
 		},
-	}
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-	usage := &types.ChatUsage{PromptTokens: 1000, CompletionTokens: 500}
-	if got := cs.EstimateCallCost("http://unknown:9999/v1", "model-a", usage); got != 0 {
-		t.Errorf("EstimateCallCost (unknown provider) = %v, want 0", got)
-	}
-}
-
-func TestEstimateCallCost_NilUsage(t *testing.T) {
-	cs := testConfigStore(t)
-	cfg := &types.Config{
-		Providers: []types.Provider{
-			{Kind: "llm", URL: "http://llm:8010/v1", Concurrency: 1, InputPrice: 1.0},
+		{
+			name: "an agent provider reports its own cost",
+			providers: func() []types.Provider {
+				p := types.Provider{Name: "pi", Kind: types.ProviderKindAgent, URL: "agent://pi", Concurrency: 1,
+					InputPrice: 1.0, OutputPrice: 2.0}
+				return []types.Provider{p}
+			}(),
+			url:   "agent://pi",
+			model: "pi",
+			usage: usage(1000, 500, 0),
+			want:  0,
 		},
-	}
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-	if got := cs.EstimateCallCost("http://llm:8010/v1", "model-a", nil); got != 0 {
-		t.Errorf("EstimateCallCost (nil usage) = %v, want 0", got)
+		{
+			name:      "a provider the config does not hold",
+			providers: oneProvider(types.Provider{InputPrice: 1.0}),
+			url:       "http://unknown:9999/v1",
+			model:     "model-a",
+			usage:     usage(1000, 500, 0),
+			want:      0,
+		},
+		{
+			name:      "no usage reported",
+			providers: oneProvider(types.Provider{InputPrice: 1.0}),
+			url:       "http://llm:8010/v1",
+			model:     "model-a",
+			usage:     nil,
+			want:      0,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cs := testConfigStore(t)
+			if err := cs.UpdateConfig(&types.Config{Providers: tc.providers}); err != nil {
+				t.Fatalf("update config: %v", err)
+			}
+			if got := cs.EstimateCallCost(tc.url, tc.model, tc.usage); math.Abs(got-tc.want) > 1e-12 {
+				t.Errorf("EstimateCallCost(%q, %q) = %v, want %v", tc.url, tc.model, got, tc.want)
+			}
+		})
 	}
 }

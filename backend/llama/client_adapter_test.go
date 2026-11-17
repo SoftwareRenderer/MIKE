@@ -12,6 +12,9 @@ import (
 	"mike/backend/types"
 )
 
+// openRouterStyleMapping is the shape a provider mapping ships: rename what its provider reads, delete
+// what llama.cpp invented, and attach the headers that provider asks for. The effort→reasoning.enabled
+// branch of a real mapping is proved in backend/llmadapter, whose own fixture carries it.
 func openRouterStyleMapping(serverURL string) llmadapter.Mapping {
 	return llmadapter.Mapping{
 		Match:   serverURL,
@@ -20,166 +23,139 @@ func openRouterStyleMapping(serverURL string) llmadapter.Mapping {
 			Remove:   []string{"thinking_budget_tokens", "reasoning_control", "reasoning_effort", "chat_template_kwargs", "return_progress"},
 			RemoveIf: map[string]string{"tool_choice": "tools"},
 			Set: map[string]llmadapter.SetRule{
-				"reasoning.effort":  {Value: "{{reasoning_effort}}", When: []string{"low", "medium", "high"}},
-				"reasoning.enabled": {From: "reasoning_effort", Value: true, When: []string{"", "default"}},
+				"reasoning.effort": {Value: "{{reasoning_effort}}", When: []string{"low", "medium", "high"}},
 			},
 		},
 	}
 }
 
-// TestChatCompletion_AdapterApplied verifies a matching mapping rewrites the
-// request body (OpenRouter-style) and adds headers, for non-streaming calls.
-func TestChatCompletion_AdapterApplied(t *testing.T) {
-	var gotBody map[string]any
-	var gotHeader http.Header
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotHeader = r.Header.Clone()
+// capturedRequest holds what the fake provider was sent.
+type capturedRequest struct {
+	body   map[string]any
+	header http.Header
+}
+
+// recordRequest answers one completion, streaming or not, and keeps its body and headers.
+func recordRequest(t *testing.T, stream bool) (*httptest.Server, *capturedRequest) {
+	t.Helper()
+	got := &capturedRequest{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got.header = r.Header.Clone()
 		data, _ := io.ReadAll(r.Body)
-		_ = json.Unmarshal(data, &gotBody)
+		if err := json.Unmarshal(data, &got.body); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		if stream {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hello\"},\"finish_reason\":null}]}\n\n"))
+			_, _ = w.Write([]byte("data: [DONE]\n\n"))
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"hi"}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
 	}))
-	defer server.Close()
+	t.Cleanup(srv.Close)
+	return srv, got
+}
 
-	a := llmadapter.NewAdapter()
-	a.SetMappings([]llmadapter.Mapping{openRouterStyleMapping(server.URL)})
-
-	c := NewLlamaClient(server.URL, "test-model", "high", "secret-key")
-	c.SetAdapter(a)
-
-	_, text, err := c.ChatCompletion(context.Background(), testMessages(), nil)
-	if err != nil {
-		t.Fatalf("ChatCompletion: %v", err)
-	}
-	if text != "hi" {
-		t.Errorf("text = %q, want %q", text, "hi")
-	}
-
-	reasoning, _ := gotBody["reasoning"].(map[string]any)
-	if reasoning == nil || reasoning["effort"] != "high" {
-		t.Errorf("reasoning = %v, want {effort: high}", gotBody["reasoning"])
-	}
-	if _, exists := reasoning["enabled"]; exists {
-		t.Errorf("reasoning.enabled should not be set for effort=high: %v", reasoning)
-	}
-	for _, k := range []string{"thinking_budget_tokens", "reasoning_control", "reasoning_effort", "chat_template_kwargs", "tool_choice"} {
-		if _, exists := gotBody[k]; exists {
-			t.Errorf("body still has %q", k)
+// send runs one completion of the requested kind against the recorded server.
+func send(t *testing.T, c *LlamaClient, stream bool) {
+	t.Helper()
+	ctx := context.Background()
+	if stream {
+		var content string
+		if _, err := c.ChatStream(ctx, testMessages(), nil, func(choice types.ChatChoice) {
+			if choice.Delta.Content != nil {
+				content += *choice.Delta.Content
+			}
+		}, nil, nil); err != nil {
+			t.Fatalf("ChatStream: %v", err)
 		}
-	}
-	if gotHeader.Get("X-Provider") != "test" || gotHeader.Get("X-Model") != "test-model" {
-		t.Errorf("headers = %v", gotHeader)
-	}
-	if gotHeader.Get("Authorization") != "Bearer secret-key" {
-		t.Errorf("Authorization = %q", gotHeader.Get("Authorization"))
-	}
-}
-
-// TestChatCompletion_DefaultEffortSendsEnabled verifies effort "default" maps
-// to reasoning.enabled=true (provider decides).
-func TestChatCompletion_DefaultEffortSendsEnabled(t *testing.T) {
-	var gotBody map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		data, _ := io.ReadAll(r.Body)
-		_ = json.Unmarshal(data, &gotBody)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"}}]}`))
-	}))
-	defer server.Close()
-
-	a := llmadapter.NewAdapter()
-	a.SetMappings([]llmadapter.Mapping{openRouterStyleMapping(server.URL)})
-	c := NewLlamaClient(server.URL, "m", "default", "")
-	c.SetAdapter(a)
-
-	if _, _, err := c.ChatCompletion(context.Background(), testMessages(), nil); err != nil {
-		t.Fatalf("ChatCompletion: %v", err)
-	}
-	reasoning, _ := gotBody["reasoning"].(map[string]any)
-	if reasoning == nil || reasoning["enabled"] != true {
-		t.Errorf("reasoning = %v, want {enabled: true}", gotBody["reasoning"])
-	}
-	if _, exists := reasoning["effort"]; exists {
-		t.Errorf("reasoning.effort should not be set for effort=default: %v", reasoning)
-	}
-}
-
-// TestChatCompletion_NoMappingPassthrough verifies the original
-// llama.cpp-flavored request goes out unchanged when nothing matches.
-func TestChatCompletion_NoMappingPassthrough(t *testing.T) {
-	var gotBody map[string]any
-	var gotHeader http.Header
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotHeader = r.Header.Clone()
-		data, _ := io.ReadAll(r.Body)
-		_ = json.Unmarshal(data, &gotBody)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"}}]}`))
-	}))
-	defer server.Close()
-
-	a := llmadapter.NewAdapter()
-	a.SetMappings([]llmadapter.Mapping{{Match: "https://other.example"}})
-	c := NewLlamaClient(server.URL, "m", "off", "")
-	c.SetAdapter(a)
-
-	if _, _, err := c.ChatCompletion(context.Background(), testMessages(), nil); err != nil {
-		t.Fatalf("ChatCompletion: %v", err)
-	}
-	if gotBody["tool_choice"] != "none" {
-		t.Errorf("tool_choice = %v, want none (unchanged)", gotBody["tool_choice"])
-	}
-	if _, exists := gotBody["chat_template_kwargs"]; !exists {
-		t.Error("chat_template_kwargs should be present (llama.cpp format, unchanged)")
-	}
-	if gotHeader.Get("X-Provider") != "" {
-		t.Errorf("adapter header leaked into unmatched request: %v", gotHeader)
-	}
-}
-
-// TestChatStream_AdapterApplied verifies the same adaptation on the streaming
-// path (which additionally sends return_progress).
-func TestChatStream_AdapterApplied(t *testing.T) {
-	var gotBody map[string]any
-	var gotHeader http.Header
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotHeader = r.Header.Clone()
-		data, _ := io.ReadAll(r.Body)
-		_ = json.Unmarshal(data, &gotBody)
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hello\"},\"finish_reason\":null}]}\n\n"))
-		_, _ = w.Write([]byte("data: [DONE]\n\n"))
-	}))
-	defer server.Close()
-
-	a := llmadapter.NewAdapter()
-	a.SetMappings([]llmadapter.Mapping{openRouterStyleMapping(server.URL)})
-	c := NewLlamaClient(server.URL, "m", "high", "")
-	c.SetAdapter(a)
-
-	var gotContent string
-	_, err := c.ChatStream(context.Background(), testMessages(), nil, func(choice types.ChatChoice) {
-		if choice.Delta.Content != nil {
-			gotContent += *choice.Delta.Content
+		if content != "hello" {
+			t.Errorf("content = %q, want hello", content)
 		}
-	}, nil, nil)
-	if err != nil {
-		t.Fatalf("ChatStream: %v", err)
+		return
 	}
-	if gotContent != "hello" {
-		t.Errorf("content = %q, want hello", gotContent)
+	if _, text, err := c.ChatCompletion(ctx, testMessages(), nil); err != nil {
+		t.Fatalf("ChatCompletion: %v", err)
+	} else if text != "hi" {
+		t.Errorf("text = %q, want hi", text)
 	}
-	if gotBody["stream"] != true {
-		t.Errorf("stream = %v, want true", gotBody["stream"])
-	}
-	if _, exists := gotBody["return_progress"]; exists {
-		t.Error("return_progress should be removed")
-	}
-	reasoning, _ := gotBody["reasoning"].(map[string]any)
-	if reasoning == nil || reasoning["effort"] != "high" {
-		t.Errorf("reasoning = %v, want {effort: high}", gotBody["reasoning"])
-	}
-	if gotHeader.Get("X-Model") != "m" {
-		t.Errorf("headers = %v", gotHeader)
-	}
+}
+
+// TestClientAppliesTheProviderMapping: the mapping runs on the body before it is marshalled, on both
+// paths, and only the mapping whose prefix matches the server's URL is the one applied.
+func TestClientAppliesTheProviderMapping(t *testing.T) {
+	t.Run("a matching mapping rewrites the completion body and its headers", func(t *testing.T) {
+		srv, got := recordRequest(t, false)
+		a := llmadapter.NewAdapter()
+		a.SetMappings([]llmadapter.Mapping{openRouterStyleMapping(srv.URL)})
+
+		c := NewLlamaClient(srv.URL, "test-model", "high", "secret-key")
+		c.SetAdapter(a)
+		send(t, c, false)
+
+		reasoning, _ := got.body["reasoning"].(map[string]any)
+		if reasoning == nil || reasoning["effort"] != "high" {
+			t.Errorf("reasoning = %v, want {effort: high}", got.body["reasoning"])
+		}
+		if _, exists := reasoning["enabled"]; exists {
+			t.Errorf("reasoning.enabled should not be set for effort=high: %v", reasoning)
+		}
+		for _, k := range []string{"thinking_budget_tokens", "reasoning_control", "reasoning_effort", "chat_template_kwargs", "tool_choice"} {
+			if _, exists := got.body[k]; exists {
+				t.Errorf("body still has %q", k)
+			}
+		}
+		if got.header.Get("X-Provider") != "test" || got.header.Get("X-Model") != "test-model" {
+			t.Errorf("headers = %v", got.header)
+		}
+		if got.header.Get("Authorization") != "Bearer secret-key" {
+			t.Errorf("Authorization = %q", got.header.Get("Authorization"))
+		}
+	})
+
+	t.Run("the streaming path is adapted too", func(t *testing.T) {
+		srv, got := recordRequest(t, true)
+		a := llmadapter.NewAdapter()
+		a.SetMappings([]llmadapter.Mapping{openRouterStyleMapping(srv.URL)})
+
+		c := NewLlamaClient(srv.URL, "m", "high", "")
+		c.SetAdapter(a)
+		send(t, c, true)
+
+		if got.body["stream"] != true {
+			t.Errorf("stream = %v, want true", got.body["stream"])
+		}
+		if _, exists := got.body["return_progress"]; exists {
+			t.Error("return_progress should be removed")
+		}
+		reasoning, _ := got.body["reasoning"].(map[string]any)
+		if reasoning == nil || reasoning["effort"] != "high" {
+			t.Errorf("reasoning = %v, want {effort: high}", got.body["reasoning"])
+		}
+		if got.header.Get("X-Model") != "m" {
+			t.Errorf("headers = %v", got.header)
+		}
+	})
+
+	t.Run("an unmatched mapping leaves the llama.cpp request alone", func(t *testing.T) {
+		srv, got := recordRequest(t, false)
+		a := llmadapter.NewAdapter()
+		a.SetMappings([]llmadapter.Mapping{{Match: "https://other.example"}})
+
+		c := NewLlamaClient(srv.URL, "m", "off", "")
+		c.SetAdapter(a)
+		send(t, c, false)
+
+		if got.body["tool_choice"] != "none" {
+			t.Errorf("tool_choice = %v, want none (unchanged)", got.body["tool_choice"])
+		}
+		if _, exists := got.body["chat_template_kwargs"]; !exists {
+			t.Error("chat_template_kwargs should be present (llama.cpp format, unchanged)")
+		}
+		if got.header.Get("X-Provider") != "" {
+			t.Errorf("adapter header leaked into an unmatched request: %v", got.header)
+		}
+	})
 }

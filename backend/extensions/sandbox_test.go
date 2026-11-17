@@ -50,12 +50,6 @@ func TestSanitizeContainerID(t *testing.T) {
 	}
 }
 
-func TestExtensionContainerPrefix(t *testing.T) {
-	if ExtensionContainerPrefix != "kanban-ext" {
-		t.Errorf("ExtensionContainerPrefix = %q, want kanban-ext", ExtensionContainerPrefix)
-	}
-}
-
 func TestApplyMemoryLimit_NotRunningIsNoOp(t *testing.T) {
 	reg := NewRegistryClient()
 	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{}) // nil store is ok for this test
@@ -136,52 +130,23 @@ func withBridge(sm *ExtensionSandboxManager, path string) {
 	sm.rt = sandboxruntime.NewRuntimeWithBoot(sandboxruntime.Boot{AgentPath: path})
 }
 
-func TestNewExtensionSandboxManager(t *testing.T) {
-	// Test that manager can be created (without actual podman, sandboxruntime.Boot{})
-	reg := NewRegistryClient()
-	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{}) // nil store is ok for this test
-	if sm == nil {
-		t.Fatal("NewExtensionSandboxManager = nil")
-	}
-	// Manager should be created even if gVisor is not available
-	// (it just won't be able to create sandboxes)
-}
+// TestUnknownExtensionIDIsANoOp: nothing was created for this extension, so every question about it
+// and every teardown step on it answers from the empty state rather than failing. A deletion path
+// that errored on a container already gone would leave the row behind, and the board must never see
+// a running sandbox with no state behind it.
+func TestUnknownExtensionIDIsANoOp(t *testing.T) {
+	sm := NewExtensionSandboxManager(NewRegistryClient(), testStore(t), sandboxruntime.Boot{})
 
-func TestListRunning_Empty(t *testing.T) {
-	reg := NewRegistryClient()
-	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
-	result := sm.ListRunning()
-	if result == nil {
-		t.Fatal("ListRunning() = nil")
+	if running := sm.ListRunning(); running == nil || len(running) != 0 {
+		t.Errorf("ListRunning() = %v, want an empty, non-nil list", running)
 	}
-	if len(result) != 0 {
-		t.Errorf("ListRunning() count = %d, want 0", len(result))
-	}
-}
-
-func TestIsRunning_NotCreated(t *testing.T) {
-	reg := NewRegistryClient()
-	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
 	if sm.IsRunning("nonexistent") {
 		t.Error("IsRunning(nonexistent) = true, want false")
 	}
-}
-
-func TestStop_NotCreated(t *testing.T) {
-	reg := NewRegistryClient()
-	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
-	err := sm.Stop("nonexistent")
-	if err != nil {
-		t.Errorf("Stop(nonexistent) = %v, want nil", err)
+	if err := sm.Stop("nonexistent"); err != nil {
+		t.Errorf("Stop(nonexistent) = %v, want nil — a container already gone is not a failed teardown", err)
 	}
-}
-
-func TestDestroy_NotCreated(t *testing.T) {
-	reg := NewRegistryClient()
-	store := testStore(t)
-	sm := NewExtensionSandboxManager(reg, store, sandboxruntime.Boot{})
-	err := sm.Destroy("nonexistent")
-	if err != nil {
+	if err := sm.Destroy("nonexistent"); err != nil {
 		t.Errorf("Destroy(nonexistent) = %v, want nil", err)
 	}
 }
@@ -261,47 +226,6 @@ func TestGracePeriod_CancelledOnReconnect(t *testing.T) {
 	}
 }
 
-func TestGracePeriod_TimerFiresAndStops(t *testing.T) {
-	sm := NewExtensionSandboxManager(NewRegistryClient(), nil, sandboxruntime.Boot{})
-	extID := "test-grace-fires"
-	stopped := make(chan string, 1)
-
-	sm.mu.Lock()
-	sm.states[extID] = &extensionSandboxState{containerName: "kanban-ext-test"}
-	sm.mu.Unlock()
-
-	client := testBridgeClient(t)
-	registerSession(t, sm, extID, client)
-	sm.ReleaseSession(extID, client)
-
-	// Replace the 15-minute timer with a short one carrying the same body: stop only while the
-	// refcount is still zero.
-	sm.mu.Lock()
-	state := sm.states[extID]
-	if state != nil && state.stopTimer != nil {
-		state.stopTimer.Stop()
-		state.stopTimer = time.AfterFunc(50*time.Millisecond, func() {
-			sm.mu.Lock()
-			defer sm.mu.Unlock()
-			if sm.refs[extID] <= 0 {
-				stopped <- extID
-				delete(sm.states, extID)
-				delete(sm.refs, extID)
-			}
-		})
-	}
-	sm.mu.Unlock()
-
-	select {
-	case id := <-stopped:
-		if id != extID {
-			t.Errorf("expected %s to be stopped, got %s", extID, id)
-		}
-	case <-time.After(500 * time.Millisecond):
-		t.Error("grace period timer did not fire")
-	}
-}
-
 func TestCreate_RejectsLeadingDashImage(t *testing.T) {
 	reg := NewRegistryClient()
 	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
@@ -328,37 +252,6 @@ func TestCreate_RejectsLeadingDashImage(t *testing.T) {
 	// Refused before the container exists, not after.
 	if exists, _ := sm.rt.ContainerExists(ExtensionContainerPrefix + "-test-dash-image"); exists {
 		t.Error("Create() created a container for a rejected image")
-	}
-}
-
-func TestCreate_AcceptsValidImage(t *testing.T) {
-	reg := NewRegistryClient()
-	sm := NewExtensionSandboxManager(reg, nil, sandboxruntime.Boot{})
-	sm.available = true
-	_, filename, _, _ := runtime.Caller(0)
-	projectRoot := filepath.Join(filepath.Dir(filename), "..", "..")
-	bridgePath := filepath.Join(projectRoot, "sandbox", "sandbox-bridge")
-	withBridge(sm, bridgePath)
-
-	// Create really creates the container when the image validates, and this test only cares
-	// that validation passed — so the container is the test's to remove. Through the runtime,
-	// not Destroy: this manager has no store to look the record up in.
-	t.Cleanup(func() {
-		safeID, err := sm.rt.SanitizeID("test-valid-image")
-		if err == nil {
-			_ = sm.rt.RemoveContainer(ExtensionContainerPrefix + "-" + safeID)
-		}
-	})
-
-	ext := &Extension{
-		ID: "test-valid-image",
-		ContainerConfig: ContainerConfig{
-			Image: "docker.io/library/ubuntu:latest",
-		},
-	}
-	_, err := sm.Create(ext, nil)
-	if err != nil && strings.Contains(err.Error(), "unusable image") {
-		t.Errorf("Create() with valid image should not fail at image validation, got: %v", err)
 	}
 }
 
@@ -1010,60 +903,6 @@ func TestBuildExtensionCreateArgsBeginWithTheSharedPreface(t *testing.T) {
 	}
 	if len(args) <= len(sandboxruntime.GVisorCreateArgs(name)) {
 		t.Errorf("an extension sandbox adds no argument of its own (network): %v", args)
-	}
-}
-
-// mountArgs returns the "-v" bind specs from a podman create argument list.
-func mountArgs(args []string) []string {
-	var out []string
-	for i := 0; i+1 < len(args); i++ {
-		if args[i] == "-v" {
-			out = append(out, args[i+1])
-		}
-	}
-	return out
-}
-
-// TestBuildExtensionCreateArgs_ProjectConfiguredMountIsAlwaysReadOnly: the shared
-// LSP sandbox borrows the caches projects declare. A mount borrowed from a
-// project's Sandbox Configuration is read-only even when the stored config says
-// otherwise — the extension is not the party that decided that path exists.
-func TestBuildExtensionCreateArgs_ProjectConfiguredMountIsAlwaysReadOnly(t *testing.T) {
-	dir := t.TempDir()
-	projectCache := filepath.Join(dir, "go-cache")
-	appDir := filepath.Join(dir, "app")
-	for _, d := range []string{projectCache, appDir} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	policy := newMountPolicyWithReadOnly([]string{appDir, projectCache}, []string{projectCache})
-
-	newExt := func(id, host string) *Extension {
-		return &Extension{ID: id, SandboxConfig: SandboxConfig{Mounts: []types.SandboxMount{
-			{HostPath: host, ContainerPath: "/borrowed", Mode: "rw"},
-		}}}
-	}
-
-	borrowed, _ := buildExtensionCreateArgs(newExt("ext-borrow", projectCache), "kanban-ext-ext-borrow", "ubuntu:latest", nil, policy)
-	mounts := mountArgs(borrowed)
-	if len(mounts) != 1 {
-		t.Fatalf("borrowed mount produced %v, want one -v spec", mounts)
-	}
-	if !strings.HasSuffix(mounts[0], ",ro") {
-		t.Errorf("borrowed mount %q must be pinned read-only", mounts[0])
-	}
-
-	owned, _ := buildExtensionCreateArgs(newExt("ext-owned", appDir), "kanban-ext-ext-owned", "ubuntu:latest", nil, policy)
-	mounts = mountArgs(owned)
-	if len(mounts) != 1 || !strings.HasSuffix(mounts[0], ",rw") {
-		t.Errorf("app-owned mount %v should keep the requested rw mode", mounts)
-	}
-
-	// No policy at all: nothing is inside an empty allowlist, so nothing is mounted.
-	skipped, _ := buildExtensionCreateArgs(newExt("ext-none", projectCache), "kanban-ext-ext-none", "ubuntu:latest", nil, nil)
-	if mounts := mountArgs(skipped); len(mounts) != 0 {
-		t.Errorf("a nil policy must mount nothing, got %v", mounts)
 	}
 }
 

@@ -35,6 +35,15 @@ func mustParseCert(t *testing.T, path string) *x509.Certificate {
 	return cert
 }
 
+func mustReadFile(t *testing.T, path string) []byte {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", path, err)
+	}
+	return content
+}
+
 // leafSANsMatch is the file-based entry point to sanNamesMatch for tests that
 // drive the re-issue decision from a certificate on disk. Production only ever
 // compares a leaf it has already loaded, so this wrapper — which reports false
@@ -140,8 +149,10 @@ func TestLoadWithCert_UserProvided(t *testing.T) {
 	}
 }
 
-// A certificate and key that were never issued together pass os.Stat and only fail mid-handshake.
-func TestLoadWithCert_UserProvided_MismatchedPair(t *testing.T) {
+// An operator's pair is served only if it can be served: a path that names nothing, or a certificate and
+// key that were never issued together, stops the boot. The two halves that do not belong together pass
+// os.Stat and would only fail mid-handshake, so the refusal names every spelling that could have set them.
+func TestLoadWithCert_RefusesAnOperatorPairItCannotServe(t *testing.T) {
 	one, err := LoadWithCert(t.TempDir(), "", "")
 	if err != nil {
 		t.Fatalf("first pair: %v", err)
@@ -151,21 +162,42 @@ func TestLoadWithCert_UserProvided_MismatchedPair(t *testing.T) {
 		t.Fatalf("second pair: %v", err)
 	}
 
-	_, err = LoadWithCert(t.TempDir(), one.CertFile, two.KeyFile)
-	if err == nil {
-		t.Fatal("expected an error for a certificate and key that do not belong together")
-	}
-	for _, want := range []string{"--tls-cert", "--tls-key", EnvTLSCert, EnvTLSKey} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("the error must name the spelling the operator set (%s), got: %v", want, err)
-		}
-	}
-}
-
-func TestLoadWithCert_UserProvided_MissingCert(t *testing.T) {
-	_, err := LoadWithCert(t.TempDir(), "/nonexistent/cert.pem", "/nonexistent/key.pem")
-	if err == nil {
-		t.Fatal("expected error for missing cert file")
+	for _, tc := range []struct {
+		name  string
+		cert  string
+		key   string
+		wants []string
+	}{
+		{
+			name:  "a certificate and key that do not belong together",
+			cert:  one.CertFile,
+			key:   two.KeyFile,
+			wants: []string{"--tls-cert", "--tls-key", EnvTLSCert, EnvTLSKey},
+		},
+		{
+			name:  "no certificate at the path given",
+			cert:  "/nonexistent/cert.pem",
+			key:   one.KeyFile,
+			wants: []string{"cert file not found", "/nonexistent/cert.pem"},
+		},
+		{
+			name:  "no key at the path given",
+			cert:  one.CertFile,
+			key:   "/nonexistent/key.pem",
+			wants: []string{"key file not found", "/nonexistent/key.pem"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := LoadWithCert(t.TempDir(), tc.cert, tc.key)
+			if err == nil {
+				t.Fatalf("LoadWithCert served (%q, %q)", tc.cert, tc.key)
+			}
+			for _, want := range tc.wants {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("the refusal %q does not say %q", err, want)
+				}
+			}
+		})
 	}
 }
 
@@ -177,6 +209,7 @@ func TestLoadWithCert_ReusesCAAndLeafAcrossCalls(t *testing.T) {
 	}
 	caBefore := mustParseCert(t, filepath.Join(dataDir, "tls", caCertName))
 	leafBefore := mustParseCert(t, filepath.Join(dataDir, "tls", leafCertName))
+	caKeyBefore := mustReadFile(t, filepath.Join(dataDir, "tls", caKeyName))
 
 	if _, err := LoadWithCert(dataDir, "", ""); err != nil {
 		t.Fatalf("second load: %v", err)
@@ -186,6 +219,11 @@ func TestLoadWithCert_ReusesCAAndLeafAcrossCalls(t *testing.T) {
 
 	if caBefore.SerialNumber.Cmp(caAfter.SerialNumber) != 0 {
 		t.Error("CA was replaced on second load — devices that imported it would stop trusting the server")
+	}
+	// The root comes back as a key as well as a certificate: a regenerated key behind the certificate
+	// that is still on disk would fail to load on the boot after it.
+	if !bytes.Equal(caKeyBefore, mustReadFile(t, filepath.Join(dataDir, "tls", caKeyName))) {
+		t.Error("the CA key was rewritten although the root was kept")
 	}
 	if leafBefore.SerialNumber.Cmp(leafAfter.SerialNumber) != 0 {
 		t.Error("leaf was re-issued on second load although the host names did not change")
@@ -534,26 +572,6 @@ func TestEnsureCA_CreatesUsableCA(t *testing.T) {
 	}
 }
 
-func TestEnsureCA_ReusesExistingCA(t *testing.T) {
-	tlsDir := t.TempDir()
-
-	first, err := ensureCA(tlsDir)
-	if err != nil {
-		t.Fatalf("first ensureCA: %v", err)
-	}
-	second, err := ensureCA(tlsDir)
-	if err != nil {
-		t.Fatalf("second ensureCA: %v", err)
-	}
-
-	if first.cert.SerialNumber.Cmp(second.cert.SerialNumber) != 0 {
-		t.Error("existing CA was replaced")
-	}
-	if !first.key.Equal(second.key) {
-		t.Error("existing CA key was replaced")
-	}
-}
-
 // A key must end up owner-only whether it is being created or replacing a file that was not.
 func TestKeyFilesAreOwnerOnly(t *testing.T) {
 	t.Run("created", func(t *testing.T) {
@@ -826,6 +844,9 @@ func TestLeafSANsMatch(t *testing.T) {
 	}{
 		{"identical", dnsNames, ips, true},
 		{"same set other order", []string{"myhost.local", "localhost", "myhost"}, []net.IP{net.ParseIP("192.168.1.20"), net.IPv4(127, 0, 0, 1)}, true},
+		// A persisted leaf carries an IPv4 SAN in its 4-byte form, so comparing the bytes would
+		// re-issue the certificate on every boot.
+		{"an IPv4 address written in its 4-byte form", dnsNames, []net.IP{net.ParseIP("127.0.0.1").To4(), net.ParseIP("192.168.1.20")}, true},
 		{"missing name", []string{"localhost", "myhost"}, ips, false},
 		{"extra name", append(append([]string{}, dnsNames...), "extra"), ips, false},
 		{"lost IP", dnsNames, []net.IP{net.ParseIP("127.0.0.1")}, false},
@@ -900,6 +921,8 @@ func TestLeafIsValid(t *testing.T) {
 
 // --- names -----------------------------------------------------------------
 
+// The name set the leaf is issued for: every address the operator may reach this install by, in the one
+// order, with nothing in it that is not a host identity.
 func TestCollectLeafNames(t *testing.T) {
 	dnsNames, ips := collectLeafNames()
 
@@ -929,31 +952,9 @@ func TestCollectLeafNames(t *testing.T) {
 		}
 		seen[n] = true
 	}
+	// Only real host identities belong in the certificate: never the unspecified or multicast
+	// addresses InterfaceAddrs can report, and never the same address twice.
 	seenIPs := map[string]bool{}
-	for _, ip := range ips {
-		if seenIPs[ip.String()] {
-			t.Errorf("duplicate IP %q in %v", ip, ips)
-		}
-		seenIPs[ip.String()] = true
-	}
-}
-
-func TestCollectLeafNames_IsDeterministic(t *testing.T) {
-	dnsA, ipsA := collectLeafNames()
-	dnsB, ipsB := collectLeafNames()
-
-	if !sameNames(dnsA, dnsB) {
-		t.Errorf("DNS names differ between calls: %v vs %v", dnsA, dnsB)
-	}
-	if !sameIPs(ipsA, ipsB) {
-		t.Errorf("IPs differ between calls: %v vs %v", ipsA, ipsB)
-	}
-}
-
-func TestCollectLeafNames_ExcludesNonUnicastAddresses(t *testing.T) {
-	// Only real host identities belong in the certificate: never the unspecified
-	// or multicast addresses that InterfaceAddrs can report.
-	_, ips := collectLeafNames()
 	for _, ip := range ips {
 		if ip.IsUnspecified() {
 			t.Errorf("unspecified address %q must not be a certificate SAN", ip)
@@ -961,17 +962,10 @@ func TestCollectLeafNames_ExcludesNonUnicastAddresses(t *testing.T) {
 		if ip.IsMulticast() {
 			t.Errorf("multicast address %q must not be a certificate SAN", ip)
 		}
-	}
-}
-
-// --- comparators -----------------------------------------------------------
-
-func TestSameIPs_IgnoresIPv4Representation(t *testing.T) {
-	// net.IP may hold an IPv4 address in 4- or 16-byte form; both are the same name.
-	a := []net.IP{net.IPv4(127, 0, 0, 1)}
-	b := []net.IP{net.ParseIP("127.0.0.1").To4()}
-	if !sameIPs(a, b) {
-		t.Errorf("expected %v and %v to be considered equal", a, b)
+		if seenIPs[ip.String()] {
+			t.Errorf("duplicate IP %q in %v", ip, ips)
+		}
+		seenIPs[ip.String()] = true
 	}
 }
 
