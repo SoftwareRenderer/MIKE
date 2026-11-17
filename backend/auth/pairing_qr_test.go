@@ -15,26 +15,27 @@ func TestPairingQRRefusesContentBeyondItsLimit(t *testing.T) {
 	}
 }
 
-// The code rides in the fragment because a query string reaches a proxy's access log and a Referer header.
+// The code rides in the fragment because a query string reaches a proxy's access log and a Referer
+// header, and a name given while minting rides the same fragment, escaped. Nothing a server logs may
+// carry the code, which is a credential until the ceremony spends it.
 func TestPairingURLCarriesTheCodeInTheFragment(t *testing.T) {
 	t.Parallel()
-	url := PairingURL("https://mike.lan:3000", "ABCD2345", "")
-	if want := "https://mike.lan:3000/#pair=ABCD2345"; url != want {
-		t.Fatalf("PairingURL = %q, want %q", url, want)
-	}
-	if strings.Contains(strings.SplitN(url, "#", 2)[0], "ABCD") {
-		t.Fatalf("the code reached the part of the URL a server logs: %s", url)
-	}
-}
-
-// A name given while minting rides the same fragment, escaped, and never moves the code out of it.
-func TestPairingURLCarriesTheLabelBesideTheCode(t *testing.T) {
-	t.Parallel()
-	url := PairingURL("https://mike.lan:3000", "ABCD2345", "Kitchen #2 & table")
-	if want := "https://mike.lan:3000/#pair=ABCD2345&name=Kitchen+%232+%26+table"; url != want {
-		t.Fatalf("PairingURL = %q, want %q", url, want)
-	}
-	if strings.Contains(strings.SplitN(url, "#", 2)[0], "ABCD") {
-		t.Fatalf("the named link leaked the code: %s", url)
+	for _, tc := range []struct {
+		name  string
+		label string
+		want  string
+	}{
+		{name: "unnamed", label: "", want: "https://mike.lan:3000/#pair=ABCD2345"},
+		{name: "named", label: "Kitchen #2 & table", want: "https://mike.lan:3000/#pair=ABCD2345&name=Kitchen+%232+%26+table"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			url := PairingURL("https://mike.lan:3000", "ABCD2345", tc.label)
+			if url != tc.want {
+				t.Fatalf("PairingURL = %q, want %q", url, tc.want)
+			}
+			if strings.Contains(strings.SplitN(url, "#", 2)[0], "ABCD") {
+				t.Fatalf("the code reached the part of the URL a server logs: %s", url)
+			}
+		})
 	}
 }

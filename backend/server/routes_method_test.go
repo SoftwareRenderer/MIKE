@@ -1,14 +1,9 @@
 package server
 
-// Every /api route declares its method in the pattern (routes.go), so the mux answers 405 before a
-// handler runs. That is only a simplification if the 405 is right, and it is only safe if nothing
-// that talks to this server was relying on a route accepting anything.
-//
-// What changed for a caller: the status code is the same 405 as the deleted handler guards produced,
-// the body is now "Method Not Allowed\n" instead of "method not allowed\n", and the response carries
-// an `Allow` header naming the registered methods — it never did before. No frontend call sends a
-// wrong method, and the container healthcheck reads /api/health and /api/config with plain GETs, which
-// two GET patterns still answer.
+// Every /api route declares its method in the pattern (routes.go), so the mux answers 405 with an Allow
+// header before a handler runs. That is only a simplification if the 405 is right, and only safe if
+// nothing that talks to this server relied on a route accepting anything: the container healthcheck reads
+// /api/health and /api/config with plain GETs, which two GET patterns still answer.
 
 import (
 	"net/http"
@@ -42,6 +37,16 @@ var methodContract = []struct {
 	{"/api/projects/p1/git/pull", []string{"POST"}, "GET", ""},
 	{"/api/projects/p1/tasks/t1/threads", []string{"GET", "DELETE"}, "POST", ""},
 	{"/api/config", []string{"GET", "PUT"}, "DELETE", ""},
+	// The credential surface: a ceremony route reached on the wrong verb must not run, and a route that
+	// mints or revokes a credential answers from the mux rather than from its handler.
+	{"/api/auth/passkey/register/begin", []string{"POST"}, "GET", ""},
+	{"/api/auth/passkey/assert/begin", []string{"POST"}, "GET", ""},
+	{"/api/auth/passkeys", []string{"GET"}, "POST", ""},
+	{"/api/auth/passkeys/someid", []string{"PATCH", "DELETE"}, "PUT", ""},
+	{"/api/auth/pairing", []string{"POST", "DELETE"}, "GET", ""},
+	{"/api/tokens", []string{"GET", "POST"}, "PUT", ""},
+	{"/api/tokens/someid", []string{"DELETE"}, "GET", ""},
+	{"/api/sessions/revoke-others", []string{"POST"}, "GET", ""},
 	{"/api/home", []string{"GET"}, "POST", ""},
 	{"/api/fs", []string{"GET"}, "POST", ""},
 	{"/api/fs/write", []string{"POST"}, "GET", ""},
@@ -69,8 +74,7 @@ func TestRoutesRefuseUnregisteredMethodsThroughTheMux(t *testing.T) {
 			if rr.Code != http.StatusMethodNotAllowed {
 				t.Fatalf("%s %s: got %d, want 405 (body %q)", tc.deny, tc.path, rr.Code, rr.Body.String())
 			}
-			// Allow must name the registered methods. Before the patterns existed there was no Allow
-			// header at all, because the handler — not the mux — produced the refusal.
+			// Allow must name the registered methods: it is the mux's own record of the pattern.
 			allow := rr.Header().Get("Allow")
 			if allow == "" {
 				t.Fatalf("%s %s: 405 without an Allow header; the mux did not make this decision", tc.deny, tc.path)
@@ -105,9 +109,8 @@ func TestStaticPathFallsThroughToTheParameterisedSibling(t *testing.T) {
 
 // TestGETPatternAlsoAnswersHEAD pins the mux half of HEAD: a GET pattern matches HEAD, so a handler
 // that suppresses a HEAD body — the two preview handlers, which check `r.Method != http.MethodHead`
-// and skip writing the content — still receives the request. It uses /api/health because handlers
-// that switch on r.Method decide HEAD for themselves: /api/config refuses it, exactly as it did
-// before method patterns existed.
+// and skip writing the content — still receives the request. /api/health is used because handlers that
+// switch on r.Method decide HEAD for themselves.
 func TestGETPatternAlsoAnswersHEAD(t *testing.T) {
 	s := testServer(t)
 	cookie, csrf := loginTestCSRF(t, s)

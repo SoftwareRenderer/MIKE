@@ -7,75 +7,106 @@ import (
 	"testing"
 )
 
-// TestModelConfigJSONTagsAreWhatTheStoreHolds pins the names a stored model row is written with; a rename
-// leaves every existing config's pricing and sampler quietly empty. TestModelConfigNilFieldsOmitted is the
-// other half.
-func TestModelConfigJSONTagsAreWhatTheStoreHolds(t *testing.T) {
-	inputP := 3.5
-	outputP := 7.25
-	cacheReadP := 1.0
-	cacheWriteP := 2.5
-	powerW := 420.0
-	ctx := 32768
-	temp := 0.7
-	topP := 0.9
-	topK := 40
-	minP := 0.05
-	freqPenalty := -1.5
-	presPenalty := 0.25
-	repPenalty := 1.1
-	seed := 1234
+// TestModelConfigWireNames is both halves of one contract: the names a stored model row is written
+// with, and the fact that a field nobody set is absent rather than null. A rename leaves every existing
+// config's pricing and sampler quietly empty; an unset field written as a value would read back as
+// "zero" where it means "inherit the provider default".
+func TestModelConfigWireNames(t *testing.T) {
+	t.Run("a set field carries its stored name", func(t *testing.T) {
+		inputP := 3.5
+		outputP := 7.25
+		cacheReadP := 1.0
+		cacheWriteP := 2.5
+		powerW := 420.0
+		ctx := 32768
+		temp := 0.7
+		topP := 0.9
+		topK := 40
+		minP := 0.05
+		freqPenalty := -1.5
+		presPenalty := 0.25
+		repPenalty := 1.1
+		seed := 1234
 
-	m := ModelConfig{
-		Name:              "model-a",
-		ReasoningEffort:   "high",
-		ContextWindow:     &ctx,
-		InputPrice:        &inputP,
-		OutputPrice:       &outputP,
-		CacheReadPrice:    &cacheReadP,
-		CacheWritePrice:   &cacheWriteP,
-		PowerConsumptionW: &powerW,
-		Sampling: &ModelSampling{
-			Temperature:       &temp,
-			TopP:              &topP,
-			TopK:              &topK,
-			MinP:              &minP,
-			FrequencyPenalty:  &freqPenalty,
-			PresencePenalty:   &presPenalty,
-			RepetitionPenalty: &repPenalty,
-			Seed:              &seed,
-		},
-	}
-
-	data, err := json.Marshal(m)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	jsonStr := string(data)
-
-	for _, key := range []string{
-		`"name":"model-a"`,
-		`"context_window":32768`,
-		`"input_price":3.5`,
-		`"output_price":7.25`,
-		`"cache_read_price":1`,
-		`"cache_write_price":2.5`,
-		`"power_consumption_w":420`,
-		`"sampling":{`,
-		`"temperature":0.7`,
-		`"top_p":0.9`,
-		`"top_k":40`,
-		`"min_p":0.05`,
-		`"frequency_penalty":-1.5`,
-		`"presence_penalty":0.25`,
-		`"repetition_penalty":1.1`,
-		`"seed":1234`,
-	} {
-		if !strings.Contains(jsonStr, key) {
-			t.Fatalf("expected %s in JSON, got: %s", key, jsonStr)
+		m := ModelConfig{
+			Name:              "model-a",
+			ReasoningEffort:   "high",
+			ContextWindow:     &ctx,
+			InputPrice:        &inputP,
+			OutputPrice:       &outputP,
+			CacheReadPrice:    &cacheReadP,
+			CacheWritePrice:   &cacheWriteP,
+			PowerConsumptionW: &powerW,
+			Sampling: &ModelSampling{
+				Temperature:       &temp,
+				TopP:              &topP,
+				TopK:              &topK,
+				MinP:              &minP,
+				FrequencyPenalty:  &freqPenalty,
+				PresencePenalty:   &presPenalty,
+				RepetitionPenalty: &repPenalty,
+				Seed:              &seed,
+			},
 		}
-	}
 
+		data, err := json.Marshal(m)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		jsonStr := string(data)
+
+		for _, key := range []string{
+			`"name":"model-a"`,
+			`"context_window":32768`,
+			`"input_price":3.5`,
+			`"output_price":7.25`,
+			`"cache_read_price":1`,
+			`"cache_write_price":2.5`,
+			`"power_consumption_w":420`,
+			`"sampling":{`,
+			`"temperature":0.7`,
+			`"top_p":0.9`,
+			`"top_k":40`,
+			`"min_p":0.05`,
+			`"frequency_penalty":-1.5`,
+			`"presence_penalty":0.25`,
+			`"repetition_penalty":1.1`,
+			`"seed":1234`,
+		} {
+			if !strings.Contains(jsonStr, key) {
+				t.Fatalf("expected %s in JSON, got: %s", key, jsonStr)
+			}
+		}
+	})
+
+	t.Run("an unset field is omitted and reads back nil", func(t *testing.T) {
+		m := ModelConfig{Name: "model-b", ReasoningEffort: "medium"}
+
+		data, err := json.Marshal(m)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		jsonStr := string(data)
+
+		for _, key := range []string{
+			"input_price", "output_price", "cache_read_price", "cache_write_price",
+			"power_consumption_w", "context_window", "sampling",
+		} {
+			if strings.Contains(jsonStr, key) {
+				t.Fatalf("expected %s to be omitted, got: %s", key, jsonStr)
+			}
+		}
+
+		var out ModelConfig
+		if err := json.Unmarshal(data, &out); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if out.InputPrice != nil || out.OutputPrice != nil || out.CacheReadPrice != nil ||
+			out.CacheWritePrice != nil || out.PowerConsumptionW != nil || out.ContextWindow != nil ||
+			out.Sampling != nil {
+			t.Fatalf("expected all override fields nil, got: %+v", out)
+		}
+	})
 }
 
 // TestProviderUnmarshalNormalizesReasoningEffort: empty effort and legacy string
@@ -102,37 +133,6 @@ func TestProviderUnmarshalNormalizesReasoningEffort(t *testing.T) {
 		if m.ReasoningEffort != "default" {
 			t.Errorf("legacy model %s: expected default effort \"default\", got %q", m.Name, m.ReasoningEffort)
 		}
-	}
-}
-
-// TestModelConfigNilFieldsOmitted verifies that unset (nil) override fields are
-// omitted from JSON so they round-trip as "inherit provider default".
-func TestModelConfigNilFieldsOmitted(t *testing.T) {
-	m := ModelConfig{Name: "model-b", ReasoningEffort: "medium"}
-
-	data, err := json.Marshal(m)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	jsonStr := string(data)
-
-	for _, key := range []string{
-		"input_price", "output_price", "cache_read_price", "cache_write_price",
-		"power_consumption_w", "context_window", "sampling",
-	} {
-		if strings.Contains(jsonStr, key) {
-			t.Fatalf("expected %s to be omitted, got: %s", key, jsonStr)
-		}
-	}
-
-	var out ModelConfig
-	if err := json.Unmarshal(data, &out); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if out.InputPrice != nil || out.OutputPrice != nil || out.CacheReadPrice != nil ||
-		out.CacheWritePrice != nil || out.PowerConsumptionW != nil || out.ContextWindow != nil ||
-		out.Sampling != nil {
-		t.Fatalf("expected all override fields nil, got: %+v", out)
 	}
 }
 

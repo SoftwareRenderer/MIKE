@@ -135,6 +135,25 @@ func TestValidateAgentMountGrant(t *testing.T) {
 			}
 		})
 	}
+
+	// checkGrantShape is the refusal underneath both tables, and it is shared with the
+	// dependency grant: a refusal about a folder to mount has to talk about mounting,
+	// never about a dependency folder, and a directory under a top level is the user's
+	// own to name. (The top level itself is refused by the table above.)
+	homes := []string{"/home/dev"}
+	err := checkGrantShape("/home/dev/.ssh", homes, agentMountKind)
+	if err == nil {
+		t.Fatal("a credential store was accepted as a mount")
+	}
+	if !strings.Contains(err.Error(), "holds credentials") {
+		t.Errorf("error %q does not name what the directory holds", err)
+	}
+	if strings.Contains(err.Error(), "depend") {
+		t.Errorf("mount refusal borrows the dependency wording: %q", err)
+	}
+	if err := checkGrantShape("/tank/pi/agent", homes, agentMountKind); err != nil {
+		t.Errorf("a named directory of the user's own was refused: %v", err)
+	}
 }
 
 func TestValidateAgentMountGrant_ExpandsHomeAndStoresTheTarget(t *testing.T) {
@@ -337,24 +356,5 @@ func TestResolvedSandboxManifest_ServesAReadableProposal(t *testing.T) {
 	}
 	if manifest.Capabilities.GetAgent().Sandbox.Mounts[0].HostPath != storedRef {
 		t.Errorf("the stored manifest was rewritten by the local listing: %q", manifest.Capabilities.GetAgent().Sandbox.Mounts[0].HostPath)
-	}
-}
-
-// TestGrantShapeWording: a refusal about a folder to mount talks about mounting, not about a dependency
-// folder.
-func TestGrantShapeWording(t *testing.T) {
-	homes := []string{"/home/dev"}
-	err := checkGrantShape("/home/dev/.ssh", homes, agentMountKind)
-	if err == nil {
-		t.Fatal("a credential store was accepted as a mount")
-	}
-	if !strings.Contains(err.Error(), "holds credentials") {
-		t.Errorf("error %q does not name what the directory holds", err)
-	}
-	if strings.Contains(err.Error(), "depend") {
-		t.Errorf("mount refusal borrows the dependency wording: %q", err)
-	}
-	if err := checkGrantShape("/tank/pi/agent", homes, agentMountKind); err != nil {
-		t.Errorf("a named directory of the user's own was refused: %v", err)
 	}
 }

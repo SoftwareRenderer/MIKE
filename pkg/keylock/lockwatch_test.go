@@ -134,33 +134,30 @@ func TestLockWatchedTwoWaitersBothProceedAndTheKeySurvives(t *testing.T) {
 }
 
 // The zero values must not crash: a nil notice means nobody wants to hear about the wait, and a
-// non-positive interval would panic inside NewTicker.
-func TestLockWatchedSurvivesANilNotice(t *testing.T) {
-	var tbl Table
-	holder := tbl.Lock("key")
-	done := make(chan struct{})
-	go func() { tbl.LockWatched("key", 0, nil)(); close(done) }()
-
-	time.Sleep(30 * time.Millisecond)
-	holder()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("a watched wait with a nil notice did not complete after the release")
+// non-positive interval would panic inside NewTicker — including for the waiter that does have a
+// notifier to hear from.
+func TestLockWatchedSurvivesItsZeroValues(t *testing.T) {
+	cases := []struct {
+		name   string
+		notice func(waited time.Duration, acquired bool)
+	}{
+		{"no notifier at all", nil},
+		{"a notifier and no interval", func(time.Duration, bool) {}},
 	}
-}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var tbl Table
+			holder := tbl.Lock("key")
+			done := make(chan struct{})
+			go func() { tbl.LockWatched("key", 0, tc.notice)(); close(done) }()
 
-func TestLockWatchedSurvivesAZeroInterval(t *testing.T) {
-	var tbl Table
-	holder := tbl.Lock("key")
-	done := make(chan struct{})
-	go func() { tbl.LockWatched("key", 0, func(time.Duration, bool) {})(); close(done) }()
-
-	time.Sleep(30 * time.Millisecond)
-	holder()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("a watched wait with a zero interval did not complete after the release")
+			time.Sleep(30 * time.Millisecond)
+			holder()
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("a watched wait on zero values did not complete after the release")
+			}
+		})
 	}
 }

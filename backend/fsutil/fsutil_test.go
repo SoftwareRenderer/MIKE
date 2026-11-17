@@ -29,31 +29,58 @@ func TestInsideLexicalOnly(t *testing.T) {
 	}
 }
 
-func TestResolveSymlinks_ExistingFile(t *testing.T) {
-	base := t.TempDir()
-	outside := filepath.Join(base, "outside")
-	if err := os.MkdirAll(outside, 0o700); err != nil {
-		t.Fatal(err)
+// TestResolveSymlinksResolvesEveryShapeOfPath is the one question Contained asks before it compares:
+// what would this path open? An existing link answers its target, and a name that is not there yet — the
+// shape of a write target — answers the nearest existing ancestor with the missing tail re-joined, so a
+// create is judged where it will land rather than refused for not existing.
+func TestResolveSymlinksResolvesEveryShapeOfPath(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T, base string) (path, want string)
+	}{
+		{
+			name: "an existing link resolves to its target",
+			setup: func(t *testing.T, base string) (string, string) {
+				secret := filepath.Join(base, "secret.txt")
+				if err := os.WriteFile(secret, []byte("x"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				link := filepath.Join(base, "link-to-secret")
+				if err := os.Symlink(secret, link); err != nil {
+					t.Fatal(err)
+				}
+				return link, secret
+			},
+		},
+		{
+			name: "a missing tail under a real directory is re-joined onto it",
+			setup: func(t *testing.T, base string) (string, string) {
+				return filepath.Join(base, "a", "b", "new.txt"), filepath.Join(base, "a", "b", "new.txt")
+			},
+		},
+		{
+			name: "a path whose every part is missing falls back to the lexical form",
+			setup: func(t *testing.T, base string) (string, string) {
+				deep := filepath.Join(base, "gone", "deeper", "file.txt")
+				return deep, filepath.Clean(deep)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base := t.TempDir()
+			path, want := tc.setup(t, base)
+			got, err := ResolveSymlinks(path)
+			if err != nil {
+				t.Fatalf("ResolveSymlinks(%q): %v", path, err)
+			}
+			if got != want {
+				t.Errorf("ResolveSymlinks(%q) = %q, want %q", path, got, want)
+			}
+			if !inside(got, []string{base}) {
+				t.Errorf("resolved target %q no longer inside %q", got, base)
+			}
+		})
 	}
-	secret := filepath.Join(outside, "secret.txt")
-	if err := os.WriteFile(secret, []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	link := filepath.Join(outside, "link-to-secret")
-	if err := os.Symlink(secret, link); err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := ResolveSymlinks(link)
-	if err != nil {
-		t.Fatalf("ResolveSymlinks(link): %v", err)
-	}
-	if got != secret {
-		t.Errorf("link resolved to %q, want %q", got, secret)
-	}
-	// A caller checking inside(root=outside, resolved) still sees it as inside,
-	// but a caller whose root is a sibling directory now has the resolved form
-	// needed to reject it.
 }
 
 func TestResolveSymlinks_IntermediateEscapeIsVisible(t *testing.T) {
@@ -81,17 +108,6 @@ func TestResolveSymlinks_IntermediateEscapeIsVisible(t *testing.T) {
 	}
 }
 
-func TestResolveSymlinks_MissingTailUnderRealDir(t *testing.T) {
-	base := t.TempDir()
-	got, err := ResolveSymlinks(filepath.Join(base, "a", "b", "new.txt"))
-	if err != nil {
-		t.Fatalf("a not-yet-existing write target must resolve, not fail: %v", err)
-	}
-	if !inside(got, []string{base}) {
-		t.Errorf("resolved target %q no longer inside %q", got, base)
-	}
-}
-
 func TestResolveSymlinks_RejectsDanglingTail(t *testing.T) {
 	base := t.TempDir()
 	proj := filepath.Join(base, "proj")
@@ -108,17 +124,5 @@ func TestResolveSymlinks_RejectsDanglingTail(t *testing.T) {
 		t.Fatalf("dangling symlink accepted, resolved to %q", got)
 	} else if !strings.Contains(err.Error(), "dangling symlink") {
 		t.Errorf("unexpected error: %v", err)
-	}
-}
-
-func TestResolveSymlinks_AllMissingFallsBackToLexical(t *testing.T) {
-	base := t.TempDir()
-	deep := filepath.Join(base, "gone", "deeper", "file.txt")
-	got, err := ResolveSymlinks(deep)
-	if err != nil {
-		t.Fatalf("everything-missing must still resolve against the nearest ancestor: %v", err)
-	}
-	if got != filepath.Clean(deep) {
-		t.Errorf("got %q, want %q", got, filepath.Clean(deep))
 	}
 }

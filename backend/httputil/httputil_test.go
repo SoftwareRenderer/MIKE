@@ -140,47 +140,61 @@ func TestFailTreatsCancellationAsNotAFault(t *testing.T) {
 // A git subprocess failure carries git's stderr: absolute paths, the remote's URL, driver text. An
 // operation-classified fault answers 500 with MIKE's own sentence and puts the cause in the log, which is
 // the reverse of the hand-written 500 it replaces — that one showed the panel the path and left the server
-// with no trace of the failure at all.
+// with no trace of the failure at all. The sentence survives the caller's own wrapping on the way out,
+// because a producer returns the operation from inside a helper.
 func TestFailAnswersAServerFaultWithMIKEsOwnSentenceAndLogsTheCause(t *testing.T) {
 	const cause = `exit status 128
 fatal: not a git repository: /home/operator/.worktrees/frost-amber-quartz/.git`
 
-	logged, restore := logging.TestSink()
-	defer restore()
+	for _, tc := range []struct {
+		name   string
+		err    error
+		op     string
+		want   string
+		logged []string
+	}{
+		{
+			name:   "the operation as its producer returned it",
+			err:    errs.Operation("git log", errors.New(cause)),
+			op:     "git log",
+			want:   "git log failed",
+			logged: []string{"git log", "/home/operator/.worktrees"},
+		},
+		{
+			name:   "the operation wrapped by the handler",
+			err:    fmt.Errorf("load branch: %w", errs.Operation("git branches", errors.New("boom"))),
+			op:     "git branches",
+			want:   "git branches failed",
+			logged: []string{"git branches", "boom"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Fragments, not the whole string: slog quotes the message, so a cause carrying a newline is
+			// escaped on the way to the buffer and never appears as one substring.
+			logged, restore := logging.TestSink()
+			defer restore()
 
-	rec := httptest.NewRecorder()
-	Fail(rec, errs.Operation("git log", errors.New(cause)), "git log", "project not found")
+			rec := httptest.NewRecorder()
+			Fail(rec, tc.err, tc.op, "project not found")
 
-	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
-	}
-	msg := decodeError(t, rec.Body.Bytes())
-	if msg != "git log failed" {
-		t.Errorf("error message = %q, want the operation's own sentence", msg)
-	}
-	if strings.Contains(msg, "/home/operator") {
-		t.Errorf("a host path reached the browser: %q", msg)
-	}
-	// Fragments, not the whole string: slog quotes the message, so a cause carrying a newline is
-	// escaped on the way to the buffer and never appears as one substring.
-	log := logged.String()
-	if !strings.Contains(log, "git log") || !strings.Contains(log, "/home/operator/.worktrees") {
-		t.Errorf("the cause must be logged, not answered; log was:\n%s", log)
-	}
-}
-
-// The sentence survives the caller's own wrapping, because a producer returns the operation from inside a
-// helper and the handler wraps it on the way out.
-func TestFailAnswersAWrappedServerFaultWithTheSameSentence(t *testing.T) {
-	rec := httptest.NewRecorder()
-	Fail(rec, fmt.Errorf("load branch: %w", errs.Operation("git branches", errors.New("boom"))),
-		"git branches", "project not found")
-
-	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
-	}
-	if msg := decodeError(t, rec.Body.Bytes()); msg != "git branches failed" {
-		t.Errorf("error message = %q, want %q", msg, "git branches failed")
+			if rec.Code != http.StatusInternalServerError {
+				t.Errorf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+			}
+			msg := decodeError(t, rec.Body.Bytes())
+			if msg != tc.want {
+				t.Errorf("error message = %q, want the operation's own sentence %q", msg, tc.want)
+			}
+			if strings.Contains(msg, "/home/operator") {
+				t.Errorf("a host path reached the browser: %q", msg)
+			}
+			log := logged.String()
+			for _, want := range tc.logged {
+				if !strings.Contains(log, want) {
+					t.Errorf("the cause must be logged, not answered; log was:\n%s", log)
+					break
+				}
+			}
+		})
 	}
 }
 

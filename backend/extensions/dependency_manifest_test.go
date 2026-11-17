@@ -169,6 +169,16 @@ func TestDependencyCache_IgnoresTheRemovedReadOnlyKey(t *testing.T) {
 		}
 	}
 
+	// The same key sitting in a **stored** record rather than a manifest: what DependencyGrant answers
+	// is a path, and the mode is the app's decision.
+	var stored SandboxConfig
+	if err := json.Unmarshal([]byte(`{"dependency_host_path":"/some/dir","dependency_cache":{"container_path":"/go/pkg/mod","env":"GOMODCACHE","read_only":false}}`), &stored); err != nil {
+		t.Fatal(err)
+	}
+	if host := stored.DependencyGrant(); host != "/some/dir" {
+		t.Errorf("a record carrying the removed field = %q, want the granted directory", host)
+	}
+
 	// And nothing in either type can express a write request any more: what reaches the container is
 	// the mount core builds (always ro), and a declaration only reaches it once a human has granted a
 	// host directory.

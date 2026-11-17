@@ -73,61 +73,64 @@ func TestHandleTaskDiffFileFullRefusesASymlinkOutOfTheWorktree(t *testing.T) {
 }
 
 // A file inside the worktree is still refused by size: past the cap the answer is the cached
-// lines with truncated=true.
-func TestHandleTaskDiffFileFullDoesNotReadAnOversizedFile(t *testing.T) {
-	h, mux, wtPath := taskDiffFileFixture(t, "difffull-cap-proj", "difffull-cap-task")
+// lines with truncated=true, and the cap that refuses them must not also stop an ordinary file.
+func TestHandleTaskDiffFileFullAppliesTheCapToTheReRead(t *testing.T) {
 	huge := strings.Repeat("y", 2<<20) // 2 MiB: over maxDiffFileBytes by definition
-	if err := os.WriteFile(filepath.Join(wtPath, "huge.txt"), []byte(huge), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cacheOneUntracked(h, "difffull-cap-task", "huge.txt")
-
-	rr := doRequest(t, mux, http.MethodGet, "/api/projects/difffull-cap-proj/tasks/difffull-cap-task/diff/file?path=huge.txt&full=1")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
-	}
-	if strings.Contains(rr.Body.String(), huge) {
-		t.Fatal("an oversized file was read into the response: the cap is not applied to this read")
-	}
-	var resp struct {
-		Lines     []string `json:"lines"`
-		Truncated bool     `json:"truncated"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatal(err)
-	}
-	if !resp.Truncated {
-		t.Error("truncated = false for a file that was NOT handed over in full")
-	}
-	if len(resp.Lines) != 1 {
-		t.Errorf("lines = %d, want the 1 cached line kept as the answer", len(resp.Lines))
-	}
-}
-
-// The control: an ordinary truncated file still comes back in full, and says so.
-func TestHandleTaskDiffFileFullStillReadsAFileWithinTheCap(t *testing.T) {
-	h, mux, wtPath := taskDiffFileFixture(t, "difffull-ok-proj", "difffull-ok-task")
 	body := strings.Repeat("line\n", 50)
-	if err := os.WriteFile(filepath.Join(wtPath, "small.txt"), []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cacheOneUntracked(h, "difffull-ok-task", "small.txt")
 
-	rr := doRequest(t, mux, http.MethodGet, "/api/projects/difffull-ok-proj/tasks/difffull-ok-task/diff/file?path=small.txt&full=1")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d: %s", rr.Code, rr.Body.String())
-	}
-	var resp struct {
-		Lines     []string `json:"lines"`
-		Truncated bool     `json:"truncated"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatal(err)
-	}
-	if len(resp.Lines) != 50 {
-		t.Errorf("lines = %d, want all 50 — a cap that also stops ordinary files is a regression", len(resp.Lines))
-	}
-	if resp.Truncated {
-		t.Error("truncated = true for a file that was handed over in full")
+	for _, tt := range []struct {
+		name  string
+		task  string
+		write string
+		// wantLines is the answer's line count; wantTruncated is what `truncated` must say.
+		wantLines     int
+		wantTruncated bool
+		// leak is the content that must not reach the response when the cap refuses the read.
+		leak string
+	}{
+		{
+			name:          "an oversized file is answered by the cached lines, and says so",
+			task:          "difffull-cap-task",
+			write:         huge,
+			wantLines:     1,
+			wantTruncated: true,
+			leak:          huge,
+		},
+		{
+			name:      "a file within the cap comes back whole",
+			task:      "difffull-ok-task",
+			write:     body,
+			wantLines: 50,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			projID := "difffull-" + strings.TrimPrefix(tt.task, "difffull-")
+			h, mux, wtPath := taskDiffFileFixture(t, projID, tt.task)
+			if err := os.WriteFile(filepath.Join(wtPath, "asked.txt"), []byte(tt.write), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			cacheOneUntracked(h, tt.task, "asked.txt")
+
+			rr := doRequest(t, mux, http.MethodGet, "/api/projects/"+projID+"/tasks/"+tt.task+"/diff/file?path=asked.txt&full=1")
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+			}
+			if tt.leak != "" && strings.Contains(rr.Body.String(), tt.leak) {
+				t.Fatal("an oversized file was read into the response: the cap is not applied to this read")
+			}
+			var resp struct {
+				Lines     []string `json:"lines"`
+				Truncated bool     `json:"truncated"`
+			}
+			if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+				t.Fatal(err)
+			}
+			if len(resp.Lines) != tt.wantLines {
+				t.Errorf("lines = %d, want %d", len(resp.Lines), tt.wantLines)
+			}
+			if resp.Truncated != tt.wantTruncated {
+				t.Errorf("truncated = %v, want %v", resp.Truncated, tt.wantTruncated)
+			}
+		})
 	}
 }

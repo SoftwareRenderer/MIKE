@@ -146,22 +146,47 @@ const (
 	testTimeout = time.Second
 )
 
-// TestKeepaliveFrameReachesTheClient: the frame the browser can actually see, on the endpoint
-// that asked for it.
-func TestKeepaliveFrameReachesTheClient(t *testing.T) {
-	server, frames := wsPair(t)
+// TestKeepaliveSendsTheAppFrameOnlyToTheSocketThatAskedForIt: the frame is there because a browser cannot
+// see a control ping, and it is opt-in because /api/lsp speaks JSON-RPC and the terminal speaks
+// TerminalMessage — a socket whose protocol is not the app stream's must be pinged without it. The
+// control ping still has to reach the peer, or the pinger would retire a healthy connection.
+func TestKeepaliveSendsTheAppFrameOnlyToTheSocketThatAskedForIt(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		opts      []KeepaliveOption
+		wantFrame bool
+	}{
+		{"the app stream asks for the frame", []KeepaliveOption{WithAppFrame()}, true},
+		{"every other socket gets the control ping alone", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server, frames := wsPair(t)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	keepalive(ctx, server, testTick, testTimeout, nil, nil, WithAppFrame())
+			dead := make(chan struct{})
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			keepalive(ctx, server, testTick, testTimeout, nil, func() { close(dead) }, tc.opts...)
 
-	if got := nextFrame(t, frames); got != KeepaliveFrame {
-		t.Errorf("keepalive frame = %q, want %q", got, KeepaliveFrame)
+			if tc.wantFrame {
+				if got := nextFrame(t, frames); got != KeepaliveFrame {
+					t.Errorf("keepalive frame = %q, want %q", got, KeepaliveFrame)
+				}
+				return
+			}
+			if !expectQuiet(t, frames, 200*time.Millisecond) {
+				return
+			}
+			if !notDead(t, dead) {
+				t.Fatal("a control ping that reached the peer declared it dead")
+			}
+		})
 	}
 }
 
-// TestKeepaliveIsSerialisedByWriteMu: while the lock is held, nothing may go out.
-func TestKeepaliveIsSerialisedByWriteMu(t *testing.T) {
+// TestKeepaliveSerialisesFramesBehindWriteMu has two halves, and a busy connection is dead unless both
+// hold: while the lock is held nothing may go out, and a skipped tick must not end the loop — the pinger
+// is what keeps a proxy's idle timeout off a connection that goes quiet again after the write.
+func TestKeepaliveSerialisesFramesBehindWriteMu(t *testing.T) {
 	server, frames := wsPair(t)
 
 	var mu sync.Mutex
@@ -170,13 +195,14 @@ func TestKeepaliveIsSerialisedByWriteMu(t *testing.T) {
 	keepalive(ctx, server, testTick, testTimeout, &mu, nil, WithAppFrame())
 
 	mu.Lock()
-	quiet := expectQuiet(t, frames, 200*time.Millisecond)
+	quiet := expectQuiet(t, frames, 200*time.Millisecond) // many ticks' worth, all skipped
 	mu.Unlock()
 	if !quiet {
 		return
 	}
 
-	// Released, the next tick gets through.
+	// Released, the pinger resumes: two frames, so a loop that emitted one last frame and stopped fails.
+	nextFrame(t, frames)
 	nextFrame(t, frames)
 }
 
@@ -231,40 +257,6 @@ func TestKeepaliveDoesNotQueueBehindAWriter(t *testing.T) {
 	}
 	if !notDead(t, dead) {
 		t.Error("a live peer was declared dead after its replay finished")
-	}
-}
-
-// TestKeepaliveResumesAfterAHeldLock: skipping a busy tick must not end the loop — the pinger is
-// what keeps a proxy's idle timeout off a connection that goes quiet again after the write.
-func TestKeepaliveResumesAfterAHeldLock(t *testing.T) {
-	server, frames := wsPair(t)
-
-	var mu sync.Mutex
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	keepalive(ctx, server, testTick, testTimeout, &mu, nil, WithAppFrame())
-
-	mu.Lock()
-	expectQuiet(t, frames, 150*time.Millisecond) // many ticks' worth, all skipped
-	mu.Unlock()
-
-	nextFrame(t, frames)
-	nextFrame(t, frames)
-}
-
-// TestKeepaliveAppFrameIsOptIn: the app-level frame is there because a browser cannot see a
-// control ping. A socket whose protocol is not the app stream's must be pinged without it.
-func TestKeepaliveAppFrameIsOptIn(t *testing.T) {
-	server, frames := wsPair(t)
-
-	dead := make(chan struct{})
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	keepalive(ctx, server, testTick, testTimeout, nil, func() { close(dead) })
-
-	expectQuiet(t, frames, 200*time.Millisecond)
-	if !notDead(t, dead) {
-		t.Fatal("a control ping that reached the peer declared it dead")
 	}
 }
 
@@ -346,47 +338,40 @@ func dialWriter(t *testing.T, url string) *websocket.Conn {
 	return client
 }
 
-// TestAcceptWSReadLimitCoversALargeClientFrame: a frame past the read limit closes the
-// connection, which the browser reads as a dropped link and reconnects into.
-func TestAcceptWSReadLimitCoversALargeClientFrame(t *testing.T) {
-	sizes, url := acceptReader(t)
-	client := dialWriter(t, url)
+// TestAcceptWSReadLimitBoundsWhatASocketMaySay: a frame at the limit must be read whole, and one past it
+// must be refused — the limit is a number, not absent. A frame past the read limit closes the connection,
+// which the browser reads as a dropped link and reconnects into.
+func TestAcceptWSReadLimitBoundsWhatASocketMaySay(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload int
+		want    int // the byte count the server must report, or -1 when the frame must be refused
+	}{
+		{"a frame past the library default is read whole", 64 * 1024, 64 * 1024},
+		{"a frame past ReadLimit is refused", ReadLimit + 1, -1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sizes, url := acceptReader(t)
+			client := dialWriter(t, url)
 
-	payload := bytes.Repeat([]byte("a"), 64*1024) // past the library default, inside ReadLimit
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := client.Write(ctx, websocket.MessageText, payload); err != nil {
-		t.Fatalf("write: %v", err)
-	}
+			payload := bytes.Repeat([]byte("a"), tc.payload)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := client.Write(ctx, websocket.MessageText, payload); err != nil && tc.want > 0 {
+				t.Fatalf("write: %v", err)
+			}
 
-	select {
-	case n := <-sizes:
-		if n != len(payload) {
-			t.Fatalf("server read %d bytes, want %d — the frame was not accepted", n, len(payload))
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("the server never read the frame")
-	}
-}
-
-// TestAcceptWSReadLimitIsABound says the limit is a number, not absent.
-func TestAcceptWSReadLimitIsABound(t *testing.T) {
-	sizes, url := acceptReader(t)
-	client := dialWriter(t, url)
-
-	payload := bytes.Repeat([]byte("a"), ReadLimit+1)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := client.Write(ctx, websocket.MessageText, payload); err != nil {
-		return // a write that refuses is the same bound, seen from this end
-	}
-
-	select {
-	case n := <-sizes:
-		if n > 0 {
-			t.Fatalf("a frame of %d bytes above ReadLimit was read (limit %d)", n, ReadLimit)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("the oversized frame was neither read nor refused")
+			select {
+			case n := <-sizes:
+				if tc.want > 0 && n != tc.want {
+					t.Fatalf("server read %d bytes, want %d — the frame was not accepted", n, tc.want)
+				}
+				if tc.want < 0 && n > 0 {
+					t.Fatalf("a frame of %d bytes above ReadLimit was read (limit %d)", n, ReadLimit)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("the frame was neither read nor refused")
+			}
+		})
 	}
 }

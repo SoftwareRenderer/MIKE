@@ -1,8 +1,10 @@
 package extensions
 
-// Tests for the i18n translation-pack type: the manifest that declares a pack,
-// the validation that refuses an unloadable one, and the single derivation of
-// which enabled pack *is* the active language.
+// Tests for the i18n translation-pack type: the manifest that declares a pack and
+// the single derivation of which enabled pack *is* the active language. The
+// declaration's refusals — the bare-subtag locale, the external or absolute or
+// dot-segment catalog, the path bounds — are held by TestI18NConfigValidate and
+// TestValidateI18NFiles, beside the validator they call.
 //
 // The ordering-rule test here (TestActiveI18N) and the "two enabled packs" case
 // in frontend/src/lib/i18n/__tests__/load-pack.unit.svelte.ts run over the SAME
@@ -14,7 +16,6 @@ package extensions
 
 import (
 	"encoding/json/v2"
-	"strings"
 	"testing"
 )
 
@@ -34,67 +35,6 @@ func TestI18NManifestJSONRoundTrip(t *testing.T) {
 	}
 	if err := got.Validate(); err != nil {
 		t.Errorf("the canonical shape must validate: %v", err)
-	}
-}
-
-func TestValidate_I18NConfig(t *testing.T) {
-	// Absent is the common case — every non-translation extension — and is not an error.
-	var none *I18NConfig
-	if err := none.Validate(); err != nil {
-		t.Errorf("nil config must validate (most extensions declare no pack): %v", err)
-	}
-
-	valid := []I18NConfig{
-		{Locale: "zh", MessagesURL: "messages.json"},
-		{Locale: "pt", MessagesURL: "pt/messages.json"},
-		{Locale: "sr", MessagesURL: "catalogs/sr.json", PromptsDir: "prompts"},
-		{Locale: "ko", MessagesURL: "messages.json"},
-	}
-	for _, c := range valid {
-		if err := c.Validate(); err != nil {
-			t.Errorf("valid shape %+v rejected: %v", c, err)
-		}
-	}
-
-	bad := []struct {
-		name    string
-		cfg     I18NConfig
-		wantSub string
-	}{
-		{"no locale", I18NConfig{MessagesURL: "messages.json"}, "locale is required"},
-		{"blank locale", I18NConfig{Locale: "   ", MessagesURL: "messages.json"}, "locale is required"},
-		{"locale is a path", I18NConfig{Locale: "../../etc", MessagesURL: "m.json"}, "language subtag"},
-		// One pack is one language: a region is refused rather than reduced, because
-		// "zh-CN" and "zh-TW" are different languages and a pack naming both would decide
-		// for the reader which one they meant. validateLocale says so in the error.
-		{"locale carries a region", I18NConfig{Locale: "zh-CN", MessagesURL: "m.json"}, "no region"},
-		{"locale is uppercase", I18NConfig{Locale: "FR", MessagesURL: "m.json"}, "must be lowercase"},
-		{"no catalog", I18NConfig{Locale: "zh"}, "messages_url is required"},
-		{"https catalog", I18NConfig{Locale: "zh", MessagesURL: "https://evil.test/m.json"}, "external reference"},
-		{"data catalog", I18NConfig{Locale: "zh", MessagesURL: "data:application/json,{}"}, "external reference"},
-		{"protocol-relative", I18NConfig{Locale: "zh", MessagesURL: "//evil.test/m.json"}, "external reference"},
-		// A leading "/" and a leading "./" were both accepted while the rule was looser;
-		// the value is projected into the registry index and resolved by the loader, so
-		// there is exactly one spelling of every pack path now.
-		{"absolute catalog", I18NConfig{Locale: "zh", MessagesURL: "/messages.json"}, "is absolute"},
-		{"dot-slash catalog", I18NConfig{Locale: "zh", MessagesURL: "./messages.json"}, "must not contain"},
-		{"traversal", I18NConfig{Locale: "zh", MessagesURL: "../../../etc/passwd"}, "must not contain"},
-		{"nested traversal", I18NConfig{Locale: "zh", MessagesURL: "a/../../b.json"}, "must not contain"},
-		{"backslash", I18NConfig{Locale: "zh", MessagesURL: `a\b.json`}, `separators`},
-		{"control char", I18NConfig{Locale: "zh", MessagesURL: "mess\nages.json"}, "control character"},
-		{"over-long catalog", I18NConfig{Locale: "zh", MessagesURL: strings.Repeat("a", 300) + ".json"}, "longer than"},
-		{"traversal in prompts_dir", I18NConfig{Locale: "zh", MessagesURL: "m.json", PromptsDir: "../prompts"}, "must not contain"},
-		{"external prompts_dir", I18NConfig{Locale: "zh", MessagesURL: "m.json", PromptsDir: "https://evil.test/p"}, "external reference"},
-	}
-	for _, tc := range bad {
-		err := tc.cfg.Validate()
-		if err == nil {
-			t.Errorf("%s: accepted, want an error naming %q", tc.name, tc.wantSub)
-			continue
-		}
-		if !strings.Contains(err.Error(), tc.wantSub) {
-			t.Errorf("%s: error %q does not name %q", tc.name, err.Error(), tc.wantSub)
-		}
 	}
 }
 

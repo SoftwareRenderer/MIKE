@@ -73,37 +73,45 @@ func TestInstallLocalLanguageServerDeclaresItsOwnImage(t *testing.T) {
 	}
 }
 
-// The declared image takes the same qualification rule as a registry entry's: an image naming no
-// registry cannot be pulled headless, so the folder is refused rather than installed broken.
-func TestInstallLocalRefusesAnUnqualifiedDeclaredImage(t *testing.T) {
-	h := testHandler(t)
-	writeLocalLSP(t, h, "fixturedev", "fixture-lsp",
-		strings.Replace(lspManifestFmt, "%s", `
-	"image": "fixture-lsp:1.0.0",`, 1))
-	fakePodmanOK(t)
-
-	last := installLocal(t, h, "fixturedev", "fixture-lsp")
-	if last.Error == "" {
-		t.Fatal("an unqualified image was accepted")
+// What cannot run is refused at install, with the sentence naming the defect: an unqualified image
+// names no registry and cannot be pulled headless, and a folder with neither image nor Dockerfile has
+// nothing to run in a sandbox. Both leave a row that reports healthy while serving nothing, which is
+// the failure to avoid.
+func TestInstallLocalRefusesALanguageServerThatCannotRun(t *testing.T) {
+	tests := []struct {
+		name    string
+		image   string
+		wantErr string
+	}{
+		{
+			name:    "an image that names no registry",
+			image:   "fixture-lsp:1.0.0",
+			wantErr: "fully qualified",
+		},
+		{
+			name:    "neither image nor Dockerfile",
+			image:   "",
+			wantErr: "nothing to run in a sandbox",
+		},
 	}
-	if !strings.Contains(last.Error, "fully qualified") {
-		t.Errorf("the refusal does not name the defect it refuses: %s", last.Error)
-	}
-}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h := testHandler(t)
+			declared := ""
+			if tc.image != "" {
+				declared = "\n\t\"image\": \"" + tc.image + "\","
+			}
+			writeLocalLSP(t, h, "fixturedev", "fixture-lsp", strings.Replace(lspManifestFmt, "%s", declared, 1))
+			fakePodmanOK(t)
 
-// Neither image nor Dockerfile leaves nothing to run in a sandbox, and a row that reports healthy
-// while serving nothing is the failure to avoid.
-func TestInstallLocalStillRefusesALanguageServerWithNoImageAndNoDockerfile(t *testing.T) {
-	h := testHandler(t)
-	writeLocalLSP(t, h, "fixturedev", "fixture-lsp", strings.Replace(lspManifestFmt, "%s", "", 1))
-	fakePodmanOK(t)
-
-	last := installLocal(t, h, "fixturedev", "fixture-lsp")
-	if last.Error == "" {
-		t.Fatal("an LSP folder with no image and no Dockerfile installed")
-	}
-	if !strings.Contains(last.Error, "nothing to run in a sandbox") {
-		t.Errorf("unexpected refusal: %s", last.Error)
+			last := installLocal(t, h, "fixturedev", "fixture-lsp")
+			if last.Error == "" {
+				t.Fatalf("the folder was accepted; want a refusal naming %q", tc.wantErr)
+			}
+			if !strings.Contains(last.Error, tc.wantErr) {
+				t.Errorf("the refusal does not name the defect it refuses: %s", last.Error)
+			}
+		})
 	}
 }
 
